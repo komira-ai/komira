@@ -5,7 +5,7 @@ from komira_json import parse_json_value
 from covcheck.analyze import FORMAT_LCOV, Analysis, Input, Options, Sources, analyze
 from covcheck.decls import KIND_ALWAYS_INLINE, KIND_COMPTIME_IF, KIND_PLAIN, FnDecl, declared_functions, unrecorded_functions
 from covcheck.paths import repo_files_of
-from covcheck.ratchet import Ratchet
+from covcheck.held import Held
 from covcheck.result import gate_json, report_json
 from covcheck.annotate import DiffCoverage
 
@@ -199,12 +199,12 @@ def test_analyze_lists_unrecorded_functions_and_changes_no_number() raises:
     s.texts[String("src/p/m.mojo")] = String(THREE + "@always_inline\ndef d():\n    w()  # cov: unreachable why\n")
     var r = List[Input]()
     r.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String("SF:src/p/m.mojo\nDA:1,1\nDA:2,1\nend_of_record\n")))
-    var a = analyze(r, List[Input](), repo_files_of(files), Ratchet(), s, Options())
+    var a = analyze(r, List[Input](), repo_files_of(files), Held(), s, Options())
     # The numbers and findings are those of the same report over a source
     # holding only the compiled function: the list changes none of them.
     var only_a = Sources(String(""))
     only_a.texts[String("src/p/m.mojo")] = String("def a():\n    pass\n")
-    var base = analyze(r, List[Input](), repo_files_of(files), Ratchet(), only_a, Options())
+    var base = analyze(r, List[Input](), repo_files_of(files), Held(), only_a, Options())
     assert_equal(len(base.unrecorded_functions), 0)
     assert_equal(a.packages[0].line_found, 2)
     assert_equal(a.packages[0].line_hit, 2)
@@ -251,7 +251,7 @@ def test_a_marker_without_a_reason_leaves_the_count() raises:
     s.texts[String("src/p/m.mojo")] = String("def a():\n    pass\n\ndef b():\n    x()  # cov: unreachable\n")
     var r = List[Input]()
     r.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String("SF:src/p/m.mojo\nDA:1,1\nend_of_record\n")))
-    var a = analyze(r, List[Input](), repo_files_of(files), Ratchet(), s, Options())
+    var a = analyze(r, List[Input](), repo_files_of(files), Held(), s, Options())
     assert_equal(len(a.unrecorded_functions), 1)
     assert_equal(a.unrecorded_functions[0].lines, 2)
 
@@ -266,7 +266,7 @@ def test_a_file_with_branch_records_only_lists_no_function() raises:
     s.texts[String("src/p/m.mojo")] = String(THREE)
     var r = List[Input]()
     r.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String("SF:src/p/m.mojo\nBRDA:5,0,0,1\nBRDA:5,0,1,0\nend_of_record\n")))
-    var a = analyze(r, List[Input](), repo_files_of(files), Ratchet(), s, Options())
+    var a = analyze(r, List[Input](), repo_files_of(files), Held(), s, Options())
     assert_equal(a.packages[0].branch_found, 2)
     assert_equal(len(a.unrecorded_functions), 0)
 
@@ -348,7 +348,7 @@ def test_a_file_no_test_compiled_lists_no_function() raises:
     s.texts[String("src/p/n.mojo")] = String(THREE)
     var r = List[Input]()
     r.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String("SF:src/p/m.mojo\nDA:1,1\nend_of_record\n")))
-    var a = analyze(r, List[Input](), repo_files_of(files), Ratchet(), s, Options())
+    var a = analyze(r, List[Input](), repo_files_of(files), Held(), s, Options())
     assert_equal(len(a.unrecorded_functions), 0)
     assert_true(a.packages[0].unmeasured_files == 1)
 

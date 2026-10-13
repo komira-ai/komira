@@ -7,6 +7,8 @@ line zig receives from the cc shim, and the output checks and refusals, each
 with the scratch directory gone afterwards.
 """
 
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
+
 def _impl(ctx):
     def exe(dep):
         return dep[DefaultInfo].default_outputs[0]
@@ -14,13 +16,14 @@ def _impl(ctx):
     report = ctx.actions.declare_output("watchdog_cases.txt")
     ctx.actions.run(
         cmd_args(exe(ctx.attrs.runner), exe(ctx.attrs.wrapper), exe(ctx.attrs.standin), report.as_output()),
+        env = rerun_env(ctx),
         category = "mojo_watchdog_cases",
     )
-    return [DefaultInfo(default_output = report)]
+    return [DefaultInfo(default_output = report), rerun_info(ctx)]
 
 mojo_watchdog_cases = rule(
     impl = _impl,
-    attrs = {
+    attrs = RERUN_ATTRS | {
         # The cases runner (cases.zig).
         "runner": attrs.exec_dep(),
         # The stand-in compiler and link driver (standin.zig).

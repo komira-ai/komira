@@ -34,6 +34,7 @@ it.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 load("@komira//tools/build/toolchains/kcov:identity.bzl", "KCOV_BIN_SHA256", "KCOV_USAGE_LINE")
 
 # The guard's identity arguments, one definition for the package rules and the
@@ -97,6 +98,7 @@ def _cases_impl(ctx):
     report = ctx.actions.declare_output("report", dir = True)
     ctx.actions.run(
         cmd_args(bb, "sh", _stage(ctx), "cases", bb, _IDENTITY_ARGS, report.as_output()),
+        env = rerun_env(ctx),
         category = "kcov_guard_cases",
     )
     # One output: buck2 refuses a validation result whose action produces
@@ -105,12 +107,13 @@ def _cases_impl(ctx):
     return [
         DefaultInfo(default_output = result),
         ValidationInfo(validations = [ValidationSpec(name = ctx.label.name, validation_result = result)]),
+        rerun_info(ctx),
     ]
 
 _kcov_guard_cases = rule(
     impl = _cases_impl,
     doc = "`kcov_guard.sh cases`: the guard on inputs whose answer is known, with a fixture file standing for bin/kcov (malformed constants, the fixture renamed, a file holding the usage line, symlinks to the fixture, near misses, and three through the guard's command line), as a validation. Needs no kcov.",
-    attrs = _ATTRS,
+    attrs = _ATTRS | RERUN_ATTRS,
 )
 
 kcov_guard_tool = declares_docs(_kcov_guard_tool)

@@ -7,8 +7,8 @@ from covcheck.cli import EXIT_GATE, EXIT_INPUT, EXIT_OK, EXIT_USAGE, max_annotat
 from covcheck.text import read_text, sort_strings, write_text
 
 # The command line end to end on the e2e fixtures: the summary byte for
-# byte, the check-run files, the result JSON, the proposed ratchet, the
-# gate's entry equal to the report's, and every exit code.
+# byte, the check-run files, the result JSON, a package's hold, the gate's
+# entry equal to the report's, and every exit code.
 
 comptime E2E = "tools/build/coverage/tests/fixtures/e2e/"
 comptime SHA = "0123456789abcdef0123456789abcdef01234567"
@@ -55,8 +55,8 @@ def _common(dir: String) raises -> List[String]:
     a.append(String("src/beta=") + String(E2E) + "cov_beta.xml")
     a.append("--mutants")
     a.append(String(E2E) + "mutants.tsv")
-    a.append("--ratchet")
-    a.append(String(E2E) + "ratchet.tsv")
+    a.append("--target-bp")
+    a.append("10000")
     a.append("--summary-out")
     a.append(dir + "/summary.md")
     a.append("--result-out")
@@ -74,8 +74,8 @@ def _report(dir: String) raises -> List[String]:
     a.append(String(SHA))
     a.append("--checkrun-dir")
     a.append(dir + "/checkrun")
-    a.append("--ratchet-out")
-    a.append(dir + "/ratchet.tsv")
+    a.append("--held")
+    a.append(String("src/beta=") + String(E2E) + "beta_held")
     return a^
 
 
@@ -142,8 +142,9 @@ def test_report_end_to_end() raises:
     assert_equal(Int(result.get(String("diff")).get(String("uncovered")).as_int64()), 2)
     assert_equal(result.get(String("touched_packages")).element_at(0).as_string(), "src/alpha")
     var findings = result.get(String("findings"))
-    # src/beta: every line covered, no branch record, so BranchNotMeasured.
-    assert_equal(findings.array_len(), 7)
+    # src/beta: every line covered, no branch record, so BranchNotMeasured
+    # (its branch is not held).
+    assert_equal(findings.array_len(), 5)
     var unmeasured = 0
     for i in range(findings.array_len()):
         var f = findings.element_at(i)
@@ -158,7 +159,10 @@ def test_report_end_to_end() raises:
     var alpha = result.get(String("packages")).element_at(0)
     assert_equal(Int(alpha.get(String("files")).as_int64()), 2)
     assert_equal(Int(alpha.get(String("unmeasured_files")).as_int64()), 1)
-    assert_equal(read_text(dir + "/ratchet.tsv"), "# floors for the end-to-end test\nsrc/alpha\t2500\t5000\nsrc/beta\t10000\t-\n")
+    assert_true(not alpha.get(String("held_line")).as_bool())
+    var beta = result.get(String("packages")).element_at(1)
+    assert_equal(beta.get(String("package")).as_string(), "src/beta")
+    assert_true(beta.get(String("held_line")).as_bool() and not beta.get(String("held_branch")).as_bool())
 
 
 def test_gate_entry_is_the_report_entry() raises:
@@ -177,15 +181,16 @@ def test_gate_entry_is_the_report_entry() raises:
             assert_equal(gate.get(String("package")).serialize(), p.serialize())
     assert_true(found)
     assert_equal(gate.get(String("conclusion")).as_string(), "failure")
-    assert_equal(gate.get(String("findings")).array_len(), 5)
+    assert_equal(gate.get(String("findings")).array_len(), 4)
     var ndir = _tmp(String("gate_neutral"))
     assert_equal(run(_gate(ndir, String("neutral"))), EXIT_OK)
     assert_true(read_text(ndir + "/summary.md").startswith("## Coverage of `src/alpha`: line 25.00% (2/8)"))
-    # Census: the same findings, labelled, never a failing exit.
+    # Census: the same findings, a BelowTarget labelled as not held, never a
+    # failing exit.
     var cdir = _tmp(String("gate_census"))
     assert_equal(run(_gate(cdir, String("census"))), EXIT_OK)
     var census = read_text(cdir + "/summary.md")
-    assert_true(census.find("- **BelowTarget** (census) `src/alpha`: line 25.00%") >= 0, census)
+    assert_true(census.find("- **BelowTarget** (not held) `src/alpha`: line 25.00%") >= 0, census)
     assert_equal(parse_json_value(read_text(cdir + "/result.json")).get(String("conclusion")).as_string(), "neutral")
 
 
@@ -282,7 +287,11 @@ def test_usage_errors_exit_2() raises:
     assert_equal(run(_with(_without(_report(dir), String("--head-sha")), String("--head-sha"), String("abc"))), EXIT_USAGE)
     assert_equal(run(_with(_report(dir), String("--mode"), String("strict"))), EXIT_USAGE)
     assert_equal(run(_with(_report(dir), String("--target-bp"), String("10001"))), EXIT_USAGE)
-    assert_equal(run(_with(_report(dir), String("--ratchet"), String("again"))), EXIT_USAGE)
+    assert_equal(run(_without(_report(dir), String("--target-bp"))), EXIT_USAGE)
+    # --held: a report names each marker's package; a gate takes one, its own.
+    assert_equal(run(_with(_report(dir), String("--held"), String(E2E) + "beta_held")), EXIT_USAGE)
+    assert_equal(run(_with(_with(_gate(dir, String("census")), String("--held"), String(E2E) + "beta_held"), String("--held"), String(E2E) + "beta_held")), EXIT_USAGE)
+    assert_equal(run(_with(_gate(dir, String("census")), String("--held"), String("src/beta=") + String(E2E) + "beta_held")), EXIT_USAGE)
     assert_equal(run(_without(_without(_report(dir), String("--cobertura")), String("--cobertura"))), EXIT_USAGE)
     assert_equal(run(_with(_gate(dir, String("enforce")), String("--diff"), String(E2E) + "diff.txt")), EXIT_USAGE)
     assert_equal(run(_without(_gate(dir, String("enforce")), String("--mode"))), EXIT_USAGE)
@@ -300,10 +309,12 @@ def test_usage_errors_exit_2() raises:
 
 def test_input_errors_exit_1() raises:
     var dir = _tmp(String("input"))
-    var bad = dir + "/bad_ratchet.tsv"
-    write_text(bad, String("src/b\t1\t-\nsrc/a\t1\t-\n"))
-    var a = _without(_report(_tmp(String("input_a"))), String("--ratchet"))
-    assert_equal(run(_with(a^, String("--ratchet"), bad)), EXIT_INPUT)
+    var bad = dir + "/bad_held"
+    write_text(bad, String("# c\nline 9900\n"))
+    var a = _without(_report(_tmp(String("input_a"))), String("--held"))
+    assert_equal(run(_with(a^, String("--held"), String("src/beta=") + bad)), EXIT_INPUT)
+    var twice = _report(_tmp(String("input_twice")))
+    assert_equal(run(_with(twice^, String("--held"), String("src/beta=") + String(E2E) + "beta_held")), EXIT_INPUT)
     var unmapped = dir + "/unmapped.xml"
     write_text(unmapped, String("<coverage><classes><class filename=\"src/alpha/gone.mojo\"><lines><line number=\"1\" hits=\"1\"/></lines></class></classes></coverage>\n"))
     assert_equal(run(_with(_report(_tmp(String("input_b"))), String("--cobertura"), unmapped)), EXIT_INPUT)
@@ -329,7 +340,7 @@ def test_gate_with_no_report() raises:
     var findings = result.get(String("findings"))
     for i in range(findings.array_len()):
         kinds += findings.element_at(i).get(String("kind")).as_string() + String(" ")
-    assert_equal(kinds, "BelowTarget MissingRow NotMeasured UnmeasuredFile UnmeasuredFile ")
+    assert_equal(kinds, "BelowTarget NotMeasured UnmeasuredFile UnmeasuredFile ")
     assert_true(read_text(dir + "/summary.md").find("- **NotMeasured** `src/alpha`: ") >= 0)
     var cdir = _tmp(String("gate_none_census"))
     var c = _without(_without(_without(_gate(cdir, String("census")), String("--cobertura")), String("--cobertura")), String("--mutants"))
@@ -351,7 +362,7 @@ def test_gate_test_sources() raises:
     var findings = result.get(String("findings"))
     for i in range(findings.array_len()):
         kinds += findings.element_at(i).get(String("kind")).as_string() + String(" ")
-    assert_equal(kinds, "BelowTarget MissingRow NotMeasured UnmeasuredFile ")
+    assert_equal(kinds, "BelowTarget NotMeasured UnmeasuredFile ")
     assert_equal(run(_with(base.copy(), String("--test-source"), String("src/alpha/gone.mojo"))), EXIT_INPUT)
     assert_equal(run(_with(base.copy(), String("--test-source"), String("src/beta/c.mojo"))), EXIT_INPUT)
     assert_equal(run(_with(_report(_tmp(String("report_test_source"))), String("--test-source"), String("src/alpha/z.mojo"))), EXIT_USAGE)
@@ -424,31 +435,28 @@ def test_branch_lcov_flag() raises:
     assert_equal(run(_with(_with(_gate(_tmp(String("branch_lcov_n")), String("census")), String("--branch-lcov"), one), String("--branch-lcov"), n2)), EXIT_INPUT)
 
 
-def test_gate_floor_fails_in_every_mode() raises:
-    # src/alpha measures line 25.00% (2/8). Under a floor of 25.01% the gate
-    # exits 3 (EXIT_GATE) in census and neutral mode, not only in enforce,
-    # and says why; at 25.00%, or under it, census exits 0. cov_gate.sh
+def test_gate_hold_fails_in_every_mode() raises:
+    # src/alpha measures line 25.00% (2/8). Held on line, the gate exits 3
+    # (EXIT_GATE) in census and neutral mode, not only in enforce, and says
+    # why; with a marker that holds nothing, census exits 0. cov_gate.sh
     # turns exit 3 into a failed gate in every mode.
-    var dir = _tmp(String("gate_floor"))
-    var above = dir + "/above.tsv"
-    var at = dir + "/at.tsv"
-    var under = dir + "/under.tsv"
-    write_text(above, String("src/alpha\t2501\t-\n"))
-    write_text(at, String("src/alpha\t2500\t-\n"))
-    write_text(under, String("src/alpha\t2499\t-\n"))
+    var dir = _tmp(String("gate_hold"))
+    var line = dir + "/line_held"
+    var nothing = dir + "/nothing_held"
+    write_text(line, String("# held\nline\n"))
+    write_text(nothing, String("# not held: the package has no coverage_held.\n"))
     for mode in [String("census"), String("neutral")]:
         var r = dir + "/" + mode + "_red"
         makedirs(r, exist_ok=True)
-        assert_equal(run(_with(_without(_gate(r, mode), String("--ratchet")), String("--ratchet"), above)), EXIT_GATE, mode)
+        assert_equal(run(_with(_gate(r, mode), String("--held"), line)), EXIT_GATE, mode)
         var result = parse_json_value(read_text(r + "/result.json"))
         assert_equal(result.get(String("conclusion")).as_string(), "failure", mode)
         var summary = read_text(r + "/summary.md")
-        assert_true(summary.find("**Regression**") >= 0 and summary.find("below its floor 25.01%") >= 0, summary)
-        for floor in [at, under]:
-            var g = dir + "/" + mode + "_green"
-            makedirs(g, exist_ok=True)
-            assert_equal(run(_with(_without(_gate(g, mode), String("--ratchet")), String("--ratchet"), floor)), EXIT_OK, mode + floor)
-            assert_equal(parse_json_value(read_text(g + "/result.json")).get(String("conclusion")).as_string(), "neutral", mode + floor)
+        assert_true(summary.find("- **Regression** `src/alpha`: line 25.00% is below the target 100.00%, which coverage_held holds it at") >= 0, summary)
+        var g = dir + "/" + mode + "_green"
+        makedirs(g, exist_ok=True)
+        assert_equal(run(_with(_gate(g, mode), String("--held"), nothing)), EXIT_OK, mode)
+        assert_equal(parse_json_value(read_text(g + "/result.json")).get(String("conclusion")).as_string(), "neutral", mode)
 
 
 def _levels(dir: String, prefix: String) raises -> String:
@@ -496,7 +504,7 @@ def test_info_package() raises:
     var a = _with(_with(_report(dir), String("--mode"), String("enforce")), String("--annotations-out"), dir + "/anns.json")
     assert_equal(run(_with(a^, String("--info-package"), String("src/alpha/"))), EXIT_OK)
     var r = parse_json_value(read_text(dir + "/result.json"))
-    # src/beta's BranchNotMeasured and src/gone's ExtraRow still count.
+    # src/beta's BranchNotMeasured still counts.
     assert_equal(r.get(String("conclusion")).as_string(), "failure")
     assert_equal(r.get(String("info_packages")).serialize(), String('["src/alpha"]'))
     var f = _package_kinds(r, String("findings"))
@@ -505,13 +513,14 @@ def test_info_package() raises:
     assert_true(i.find("src/alpha:BelowTarget") >= 0 and i.find("src/beta:") < 0, i)
     assert_equal(_levels(dir, String("src/alpha/")), "notice ")
     var summary = read_text(dir + "/summary.md")
-    assert_true(summary.find("### Info: test-only packages, declaration-only files (") >= 0, summary)
+    assert_true(summary.find("### Info: test-only packages, metrics to hold, declaration-only files (") >= 0, summary)
     assert_true(summary.find(" | info: BelowTarget") >= 0, summary)
     assert_true(summary.find("except a test-only package (`src/alpha` and under)") >= 0, summary)
     # Every package under `src`: nothing fails, no annotation is a failure,
     # and the last body concludes success.
     var all = _tmp(String("info_all"))
-    var b = _with(_with(_report(all), String("--mode"), String("enforce")), String("--annotations-out"), all + "/anns.json")
+    # (src/beta's hold goes: a test-only package has none.)
+    var b = _with(_with(_without(_report(all), String("--held")), String("--mode"), String("enforce")), String("--annotations-out"), all + "/anns.json")
     assert_equal(run(_with(b^, String("--info-package"), String("src"))), EXIT_OK)
     var ra = parse_json_value(read_text(all + "/result.json"))
     assert_equal(ra.get(String("conclusion")).as_string(), "success")
@@ -541,7 +550,7 @@ def main() raises:
     test_input_errors_exit_1()
     test_gate_with_no_report()
     test_gate_test_sources()
-    test_gate_floor_fails_in_every_mode()
+    test_gate_hold_fails_in_every_mode()
     test_report_file_names()
     test_branch_lcov_flag()
     test_info_package()

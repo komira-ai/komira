@@ -1,0 +1,29 @@
+# The labels `-c komira.rerun` names, checked (README.md):
+#
+#   ./buck2 bxl //tools/build/rerun/check.bxl:check -c komira.rerun='<label>#<n>'
+#
+# Fails unless every label names an existing target whose rule takes
+# KOMIRA_RERUN (it returns RerunInfo). One target's analysis cannot tell
+# that a label names nothing, and a build of other targets does not fail
+# then: it re-runs nothing. The bisect tool runs this before its builds.
+# BXL, not a rule: a rule would have to depend on the labels, and most test
+# targets are not visible to another package.
+
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_CONFIG", "RerunInfo", "parse_rerun")
+
+def _check_impl(ctx):
+    runs = parse_rerun(RERUN_CONFIG)
+    if not runs:
+        fail("[komira] rerun is not set: pass -c komira.rerun='<cell>//<package>:<name>#<n>'")
+    for label in sorted(runs.keys()):
+        # Fails, with buck2's "Unknown target" and the package's targets, when
+        # the label names nothing.
+        target = ctx.configured_targets(label)
+        if RerunInfo not in ctx.analysis(target).providers():
+            fail("[komira] rerun names {}, which runs no test action: its rule does not call rerun_env (tools/build/rerun/README.md lists the rules that do)".format(label))
+        ctx.output.print("rerun: {} runs its test actions again with KOMIRA_RERUN={}".format(label, runs[label]))
+
+check = bxl_main(
+    impl = _check_impl,
+    cli_args = {},
+)

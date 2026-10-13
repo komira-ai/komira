@@ -299,7 +299,7 @@ struct TableStoreHeadReader[Store: ConditionalWriteStore & AsyncCasStore](
             or msg.find("RETRYABLE") >= 0
         ):
             return READ_ERR_TORN
-        if msg.find("412") >= 0 or msg.find("precondition") >= 0:
+        if msg.find("status=412") >= 0 or msg.find("precondition") >= 0:
             return READ_ERR_CONFLICT
         return READ_ERR_FATAL
 
