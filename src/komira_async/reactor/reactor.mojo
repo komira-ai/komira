@@ -1078,11 +1078,19 @@ struct Reactor[S: WakerSink & Movable & Deinitable](
 
     def modify(
         mut self,
-        reg_handle: RegistrationHandle,
+        mut reg_handle: RegistrationHandle,
         new_interest_set: UInt8,
     ) raises:
         """Switch the interest set of a long-lived
-        registration.
+        registration and record it on `reg_handle`.
+
+        `reg_handle.interest_set()` is the one record of what is armed:
+        after a successful call it equals `new_interest_set` (on the mock
+        backend too, which has no multiplexer). If the syscall raises, the
+        handle keeps the previous mask. Callers keep the handle they
+        registered with and pass it here; a copy that does not see this
+        update would make a later switch back look unchanged and skip it
+        (komira-ai/komira#1406).
 
         On epoll: one EPOLL_CTL_MOD with the new EPOLLIN/EPOLLOUT bitmask.
         On kqueue: per-filter add/delete delta against the prior interest
@@ -1116,7 +1124,9 @@ struct Reactor[S: WakerSink & Movable & Deinitable](
         if reg_handle.interest_set() == new_interest_set:
             return  # No-op fast path: nothing changed.
         if self._epoll_fd < 0:
-            return  # Mock backend: no multiplexer.
+            # Mock backend: no multiplexer; the handle still records the mask.
+            reg_handle._interest_set = new_interest_set
+            return
 
         comptime if CompilationTarget.is_macos():
             var fd = reg_handle.fd()
@@ -1159,6 +1169,8 @@ struct Reactor[S: WakerSink & Movable & Deinitable](
                 self._epoll_fd, reg_handle.fd(), events,
                 UInt64(reg_handle.fd()),
             )
+        # Both backends reach here only after their syscalls succeeded.
+        reg_handle._interest_set = new_interest_set
 
     def _deregister_long_lived(mut self, fd: Int32):
         """Remove a long-lived registration from the multiplexer.

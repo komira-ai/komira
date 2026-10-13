@@ -252,13 +252,9 @@ def test_item6_modify_to_write_then_back_to_read() raises:
 
         # Switch to INTEREST_WRITE — should succeed.
         reactor.modify(reg, INTEREST_WRITE)
-        # Note: the RegistrationHandle returned to the caller is a POD
-        # value; modify does NOT mutate the caller's local view of
-        # _interest_set (the kernel state changes but the handle's field
-        # tracks what the LAST register call armed). Production callers
-        # track current interest in their per-conn state machine
-        # (ConnEntry._interest_set in the server). Here we just verify
-        # the syscall doesn't raise.
+        # modify records the armed mask on the handle it is given
+        # (test_reactor_modify_interest.mojo pins that); here we just
+        # verify the syscall doesn't raise.
 
         # Switch back to INTEREST_READ — also succeeds.
         reactor.modify(reg, INTEREST_READ)

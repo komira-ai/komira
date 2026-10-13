@@ -10,9 +10,10 @@
 # the unsent tail (CONN_STATE_WAITING_FOR_WRITABLE, write interest). The
 # client then reads while the test steps the server: each writable event
 # resumes the parked write, and once it drains the connection is READING
-# again and the server reads what is already queued. (That a request sent
-# after the drain is never read is komira-ai/komira#1406; nothing here
-# asserts it.) Both loops are driven: `serve_one_iteration_dispatch`
+# again and the server reads what is already queued, and a request sent
+# after the drain is read when it arrives (komira-ai/komira#1406: the switch
+# back to read interest was skipped). Both loops are driven:
+# `serve_one_iteration_dispatch`
 # (a dispatcher answering a 256 KiB body) and `serve_one_iteration` (canned and
 # chained answers to a pipelined burst).
 #
@@ -26,10 +27,12 @@
 #   D  dispatch loop: a parked tail lost, reordered or cut short; the
 #      connection not back to READING after the drain; a request read after
 #      a drain not parked in turn; an end of stream read after a drain not
-#      closing; a reset peer with a parked tail not dropped.
+#      closing; a reset peer with a parked tail not dropped; a request sent
+#      after the drain never read (read interest not re-armed, #1406).
 #   C  canned and chained loops: the same, with the chain's answers; a
 #      client's end of stream queued behind the burst not closing the
-#      connection once the last parked response drains.
+#      connection once the last parked response drains; a request sent
+#      after the last drain never read (#1406).
 # =============================================================================
 
 from std.ffi import external_call
@@ -37,6 +40,7 @@ from std.sys.info import CompilationTarget
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_async.ops.waker_sink import NoopSink
+from komira_async.reactor.completion_queue import INTEREST_READ
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.blocking_runtime import BlockingRuntime
 from komira_async.runtime.runtime_trait import Runtime
@@ -247,8 +251,7 @@ def test_dispatch_parks_a_large_response_and_resumes_it() raises:
     for i in range(_BIG):
         if got[head_end + 4 + i] != want[i]:
             raise Error("body byte " + String(i) + " differs")
-    # Drained: the connection is back to READING with nothing parked. (A
-    # further request on it is not read today: komira-ai/komira#1406.)
+    # Drained: the connection is back to READING with nothing parked.
     for _ in range(20):
         if l.server._conns[0]._state == CONN_STATE_READING:
             break
@@ -256,6 +259,48 @@ def test_dispatch_parks_a_large_response_and_resumes_it() raises:
     assert_equal(l.server._conns[0]._state, CONN_STATE_READING)
     assert_equal(l.server._conns[0]._pending_len, 0)
     assert_equal(l.server.live_conn_count(), 1)
+
+
+def test_dispatch_reads_a_request_sent_after_the_drain() raises:
+    """komira-ai/komira#1406: once a parked response drains, the connection
+    is armed for reads again, so a request the client sends only then (it
+    is not buffered when the drain's round reads) is read and answered."""
+    var l = _DLink()
+    _send_all_now(l.fd, "GET /1 HTTP/1.1\r\nHost: example.com\r\n\r\n")
+    l.step()
+    l.step()
+    _assert_parked(l.server)
+    var got = List[UInt8]()
+    var head_end = -1
+    for _ in range(5000):
+        _ = _recv_into(l.fd, got)
+        if head_end < 0:
+            head_end = _find(got, "\r\n\r\n", 0)
+        if head_end >= 0 and len(got) >= head_end + 4 + _BIG:
+            break
+        l.step()
+    var one = head_end + 4 + _BIG
+    assert_equal(len(got), one, "the first response is not whole")
+    for _ in range(20):
+        if l.server._conns[0]._state == CONN_STATE_READING:
+            break
+        l.step()
+    assert_equal(l.server._conns[0]._state, CONN_STATE_READING)
+    assert_equal(l.server._conns[0].interest_set(), INTEREST_READ)
+    assert_equal(l.server._conns[0].registration().interest_set(), INTEREST_READ)
+    # Only now does the second request leave the client.
+    _send_all_now(l.fd, "GET /2 HTTP/1.1\r\nHost: example.com\r\n\r\n")
+    for _ in range(5000):
+        _ = _recv_into(l.fd, got)
+        if len(got) >= 2 * one:
+            break
+        l.step()
+    assert_equal(l.d.calls, 2, "the request sent after the drain was not read")
+    assert_equal(len(got), 2 * one, "the second response is not whole")
+    var want = _pattern(_BIG)
+    for i in range(_BIG):
+        if got[one + head_end + 4 + i] != want[i]:
+            raise Error("second body byte " + String(i) + " differs")
 
 
 def test_dispatch_drops_a_reset_peer_with_a_parked_response() raises:
@@ -355,9 +400,14 @@ def _send_burst(fd: Int32) raises:
     assert_equal(Int(rc), len(req), "the kernel took part of the burst")
 
 
-def _run_burst(mut server: HttpServer[NoopGrpcDispatch], half_close: Bool = False) raises:
+def _run_burst(
+    mut server: HttpServer[NoopGrpcDispatch],
+    half_close: Bool = False,
+    then_one_more: Bool = False,
+) raises:
     """Send the burst, step until the server stops sending, and check every
-    handled request's response arrived whole."""
+    handled request's response arrived whole. With `then_one_more`, send one
+    more request after that and check it is answered (komira-ai/komira#1406)."""
     var fd = _connect_small(server.local_port())
     for _ in range(50):
         _ = server.serve_for_iterations(1, Int32(20_000))
@@ -405,6 +455,25 @@ def _run_burst(mut server: HttpServer[NoopGrpcDispatch], half_close: Bool = Fals
     else:
         assert_true(alive)
         assert_equal(server.live_conn_count(), 1)
+    if then_one_more:
+        assert_equal(server._conns[0]._state, CONN_STATE_READING)
+        var handled = stats.reqs_handled
+        var one = _bytes("GET /late HTTP/1.1\r\nHost: example.com\r\n\r\n")
+        var rc = external_call["send", Int64](
+            fd, one.unsafe_ptr(), UInt64(len(one)), Int32(0)
+        )
+        assert_equal(Int(rc), len(one))
+        var late = List[UInt8]()
+        for _ in range(200):
+            stats = server.serve_for_iterations(1, Int32(20_000))
+            _ = _recv_into(fd, late)
+            if _find(late, "\r\n\r\n", 0) >= 0:
+                break
+        assert_true(
+            stats.reqs_handled > handled,
+            "the request sent after the last drain was not read",
+        )
+        assert_true(_find(late, "HTTP/1.1 ", 0) == 0, "no answer to it")
     _ = external_call["close", Int32](fd)
 
 
@@ -420,6 +489,13 @@ def test_canned_loop_closes_after_the_last_drain_on_half_close() raises:
         HttpServer(config=HttpServerConfig.default_ephemeral(), router=Router())
     )
     _run_burst(server, half_close=True)
+
+
+def test_canned_loop_reads_a_request_sent_after_the_last_drain() raises:
+    var server = _small_server(
+        HttpServer(config=HttpServerConfig.default_ephemeral(), router=Router())
+    )
+    _run_burst(server, then_one_more=True)
 
 
 def test_chained_loop_parks_and_resumes() raises:

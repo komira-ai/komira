@@ -731,8 +731,9 @@ def drive_tls_handshake(
     this before invoking). If the conn is not TLS, this is a no-op
     that returns ERROR + 0 mask.
 
-    Updates the ConnEntry's interest_set; the caller is responsible
-    for `reactor.modify(reg, mask)` if `mask != entry.interest_set()`.
+    Does not touch the reactor: the caller calls
+    `reactor.modify(entry._reg, mask)` if `mask != entry.interest_set()`,
+    and modify records the mask on the registration.
     """
     # Borrow the Optional[TlsStream]; if it's None we treat as no-op.
     ref tls_opt = entry.tls_stream_ref()
