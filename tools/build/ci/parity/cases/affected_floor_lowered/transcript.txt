@@ -1,0 +1,9 @@
+call git "diff" "-z" "--name-only" "--no-renames" "parity-base...HEAD"
+exit 0
+stdout "src/a/coverage_floor.tsv\x00"
+call git "ls-tree" "--name-only" "parity-base" "--" "src/a/coverage_floor.tsv"
+exit 0
+stdout "src/a/coverage_floor.tsv\n"
+call git "cat-file" "blob" "parity-base:src/a/coverage_floor.tsv"
+exit 0
+stdout "# the floor\nsrc/a\t6000\t-\n"

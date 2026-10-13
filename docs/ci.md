@@ -866,7 +866,9 @@ stderr whole up to 8 KiB, else the first and last 4 KiB), and kci FAILS the
 check (`KCI-E-BUILD-FAILED`). The decision is the failure, not buck2's text:
 the target buck2 names, when it names one, only leads the message. So a
 change that plants a target buck2 cannot configure fails its own check,
-widened or not. A
+widened or not. **A coverage floor only rises:** `affected` reads each changed
+`coverage_floor.tsv` at the base and in the checkout, and answers `BROKEN` when
+a floor went down ([The ratchet](../tools/build/coverage/README.md#the-ratchet)). A
 non-empty change that reaches no unit answers `AFFECTED 0`, which kci refuses
 (`KCI-E-AFFECTED-VACUOUS`): never a pass. The job's checkout has the full
 history, so the base commit is there. In `pr.yml` the base is the first parent
@@ -1033,8 +1035,8 @@ change touches, and the branch coverage of those whose coverage gate reads
 branch records (`COVERAGE_BRANCH_GATE`), as covcheck's summary and
 annotations on the lines of the "Files changed" view. It is **informational**: not a required check, its
 conclusion is `neutral` in the policy's census mode, except that a touched
-package measured under its floor of `tools/build/coverage/ratchet.tsv` (a
-`Regression`, which fails in every mode) makes it `failure`; it cannot make
+package measured under its floor (its `coverage_floor.tsv`: a `Regression`,
+which fails in every mode) makes it `failure`; it cannot make
 `pr / check` red, so that failure shows on the pull request without
 blocking it. Job `measure` (the same farm connection and permissions as
 `pr / check`) builds the touched libraries' `[coverage][tests]`, and

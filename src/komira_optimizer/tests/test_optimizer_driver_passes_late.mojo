@@ -233,11 +233,13 @@ def test_eager_aggregation_runs_before_absorb() raises:
 
 def test_the_smaller_relation_is_the_build_side() raises:
     """`Filter(ax = bx)` over A (100 rows) CROSS JOIN B (1000 rows): the INNER
-    join puts B on the probe (left) side and A on the build side, with a
-    Project restoring the query's column order.
+    join keeps A on the left and B on the right, in the query's order, and
+    records `build=left`: A, the smaller relation, is built. No Project is
+    added.
 
-    Defect caught: `select_join_build_side` dropped (A stays on the left and
-    no Project is needed)."""
+    Defect caught: `select_join_build_side` dropped (the join renders with no
+    `build=`), and the old operand exchange restored (B on the left under a
+    Project restoring the column order)."""
     var an: List[String] = ["ax", "ay"]
     var bn: List[String] = ["bx", "by"]
     var cross = LogicalPlan.join(_scan("A", an, 100), _scan("B", bn, 1000), _no_keys(), _no_keys(), JOIN_CROSS)
@@ -316,7 +318,7 @@ def test_window_fusion_runs_before_partition_topn() raises:
 
 def _want_cross_semi() -> String:
     var l: List[String] = [
-        "Join(type=SEMI, on=[ax=cx])",
+        "Join(type=SEMI, on=[ax=cx], build=right)",
         "  Scan(path=\"A\", type=PARQUET, source_kind=COLUMNAR)",
         "  Aggregate(group_by=[ColRef(cx)], aggs=[SUM(ColRef(cy)).alias(\"s\")])",
         "    Scan(path=\"C\", type=PARQUET, source_kind=COLUMNAR)",
@@ -326,7 +328,7 @@ def _want_cross_semi() -> String:
 
 def _want_semi_unique() -> String:
     var l: List[String] = [
-        "Join(type=SEMI, on=[lk=rk])",
+        "Join(type=SEMI, on=[lk=rk], build=right)",
         "  Scan(path=\"l.parquet\", type=PARQUET, source_kind=COLUMNAR)",
         "  Aggregate(group_by=[ColRef(rk)], aggs=[SUM(ColRef(rv)).alias(\"s\")])",
         "    Scan(path=\"r.parquet\", type=PARQUET, source_kind=COLUMNAR)",
@@ -337,7 +339,7 @@ def _want_semi_unique() -> String:
 def _want_semi_distinct() -> String:
     var l: List[String] = [
         "Distinct(all)",
-        "  Join(type=SEMI, on=[lk=rk])",
+        "  Join(type=SEMI, on=[lk=rk], build=right)",
         "    Scan(path=\"l.parquet\", type=PARQUET, source_kind=COLUMNAR, projection=[lk])",
         "    Scan(path=\"r.parquet\", type=PARQUET, source_kind=COLUMNAR, projection=[rk])",
     ]
@@ -355,7 +357,7 @@ def _want_merge() -> String:
 def _want_projpush_join() -> String:
     var l: List[String] = [
         "Project(exprs=[ColRef(a), ColRef(u)])",
-        "  Join(type=INNER, on=[k=k2])",
+        "  Join(type=INNER, on=[k=k2], build=right)",
         "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR, projection=[a, k])",
         "    Scan(path=\"u.parquet\", type=PARQUET, source_kind=COLUMNAR, projection=[u, k2])",
     ]
@@ -366,7 +368,7 @@ def _want_matagg() -> String:
     var l: List[String] = [
         "Aggregate(group_by=[ColRef(g)], aggs=[SUM(ColRef(__agg_in_0)).alias(\"s\")])",
         "  Project(exprs=[ColRef(g), Alias(Alias(BinaryOp(MUL, ColRef(a), ColRef(b)), \"x\"), \"__agg_in_0\")])",
-        "    Join(type=INNER, on=[k=k2])",
+        "    Join(type=INNER, on=[k=k2], build=right)",
         "      Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)",
         "      Scan(path=\"u.parquet\", type=PARQUET, source_kind=COLUMNAR)",
     ]
@@ -377,7 +379,7 @@ def _want_eager_computed() -> String:
     var l: List[String] = [
         "Aggregate(group_by=[ColRef(dim_attr)], aggs=[SUM(ColRef(__agg_in_0)).alias(\"total\")])",
         "  Project(exprs=[ColRef(dim_attr), Alias(Alias(BinaryOp(MUL, ColRef(measure), Literal(ScalarValue(int64, 2))), \"x\"), \"__agg_in_0\")])",
-        "    Join(type=INNER, on=[fk_id=dim_id])",
+        "    Join(type=INNER, on=[fk_id=dim_id], build=right)",
         "      Scan(path=\"fact.parquet\", type=PARQUET, source_kind=COLUMNAR)",
         "      Scan(path=\"dim.parquet\", type=PARQUET, source_kind=COLUMNAR)",
     ]
@@ -430,10 +432,9 @@ def _want_win_topn_order() -> String:
 
 def _want_cross_2() -> String:
     var l: List[String] = [
-        "Project(exprs=[ColRef(ax), ColRef(ay), ColRef(bx), ColRef(by)])",
-        "  Join(type=INNER, on=[bx=ax])",
-        "    Scan(path=\"B\", type=PARQUET, source_kind=COLUMNAR)",
-        "    Scan(path=\"A\", type=PARQUET, source_kind=COLUMNAR)",
+        "Join(type=INNER, on=[ax=bx], build=left)",
+        "  Scan(path=\"A\", type=PARQUET, source_kind=COLUMNAR)",
+        "  Scan(path=\"B\", type=PARQUET, source_kind=COLUMNAR)",
     ]
     return _lines(l)
 

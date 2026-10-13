@@ -28,6 +28,9 @@ mojo_library(
         "tests/test_broker_coordinator_serve_coalesce.mojo",
         "tests/test_broker_coordinator_serve_stays_responsive.mojo",
         "tests/test_broker_coordinator_store_raise_survives.mojo",
+        "tests/test_cov_broker_coordinator_async.mojo",
+        "tests/test_cov_broker_coordinator_handler.mojo",
+        "tests/test_cov_broker_coordinator_sync_dispatch.mojo",
     ],
     visibility = ["PUBLIC"],
 )
