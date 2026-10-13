@@ -1,3 +1,3 @@
 # What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
 census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
-komira//src/kci_secret_writer:kci_secret_writer	src/kci_secret_writer	library	OK	61	65	13	16	yes	conda	-	-
+komira//src/kci_secret_writer:kci_secret_writer	src/kci_secret_writer	library	OK	72	72	20	20	yes	conda	-	-
