@@ -38,6 +38,7 @@ mojo_library(
         "tests/test_orc_bloom_golden_vector.mojo",
         "tests/test_orc_bloom_sext_combiner.mojo",
         "tests/test_orc_byte_boolean_rle.mojo",
+        "tests/test_orc_codec_chunk_refusals.mojo",
         "tests/test_orc_codec_edges.mojo",
         "tests/test_orc_codec_matrix.mojo",
         "tests/test_orc_codec_owner_equivalence.mojo",

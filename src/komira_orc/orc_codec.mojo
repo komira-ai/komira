@@ -59,6 +59,7 @@ from komira_compression.zlib import (
     ZLIB_LEVEL_DEFAULT,
     ZlibInflateOutcome,
     ZLIB_WINDOW_BITS_RAW,
+    Z_BUF_ERROR,
     Z_OK,
     Z_STREAM_END,
     zlib_compress_bound,
@@ -69,7 +70,9 @@ from komira_compression.zstd_frame import (
     ZSTD_DEFAULT_LEVEL,
     zstd_compress_bound,
     zstd_compress_into,
-    zstd_decompress_into,
+    ZSTD_ERROR_DST_SIZE_TOO_SMALL,
+    ZSTD_ERROR_SRC_SIZE_WRONG,
+    zstd_decompress_once,
     zstd_frame_content_size,
 )
 
@@ -100,11 +103,11 @@ def _output_buffer(cap: Int) -> List[UInt8]:
 # Public: decompress a whole ORC stream into a flat byte buffer.
 # =============================================================================
 #
-# The ceiling on any single decompressed-chunk allocation. Chosen to equal the
-# ceiling the retry-growth paths in `_zstd_decompress_chunk` /
-# `_zlib_decompress_chunk` / `_lz4_decompress_chunk` already enforce
-# (`new_cap > (1 << 30)` -> raise) so there is ONE number, not two. ORC's spec
-# default compressionBlockSize is 256 KiB; 1 GiB is four thousand times that.
+# The ceiling on any single decompressed-chunk allocation: the initial buffer
+# below, the growth paths in `_zstd_decompress_chunk` /
+# `_zlib_decompress_chunk`, and the declared size `_lz4_decompress_chunk`
+# allocates, so there is ONE number, not several. ORC's spec default
+# compressionBlockSize is 256 KiB; 1 GiB is four thousand times that.
 
 comptime ORC_MAX_COMPRESSION_BLOCK_SIZE: Int = 1 << 30
 
@@ -150,8 +153,8 @@ def decompress_stream(
         )
     # `block_size` is PostScript.compressionBlockSize: attacker-chosen metadata
     # that becomes each codec helper's INITIAL buffer size, once per chunk. The
-    # retry-growth path below already refuses to exceed 1 GiB
-    # (`new_cap > (1 << 30)`); without the same ceiling on the initial
+    # growth paths below already refuse to exceed 1 GiB
+    # (`ORC_MAX_COMPRESSION_BLOCK_SIZE`); without the same ceiling on the initial
     # allocation, ~10 bytes of PostScript would buy an arbitrarily large
     # allocation. One ceiling covers both. ORC's spec default is 256 KiB.
     if block_size < 0:
@@ -446,31 +449,41 @@ def _zstd_decompress_chunk(
     if initial_cap < len(chunk):
         initial_cap = len(chunk)
 
+    # Only libzstd's dstSize_tooSmall, on a frame whose size is unknown, grows
+    # the buffer. Every other code is the chunk's fault and a larger buffer
+    # would not change it: a frame cut short (srcSize_wrong) is refused as
+    # truncated, anything else with libzstd's code, both at once.
     var out_cap = initial_cap
     while True:
         var buf = _output_buffer(out_cap)
-        try:
-            var result = zstd_decompress_into(Span(buf), chunk)
-            out.extend(Span(buf)[0:result])
+        var res = zstd_decompress_once(Span(buf), chunk)
+        if res.error_code == 0:
+            out.extend(Span(buf)[0 : res.written])
             return
-        except e:
-            # If the frame size was known up front, this is a real error
-            # (not a buffer-too-small). Surface immediately.
-            if size_known:
-                raise Error(
-                    "OrcCodecError.ZSTD_FAILED: " + String(e)
-                    + " (known_size=" + String(frame_size) + ")"
-                )
-            # Unknown frame size — assume buffer-too-small and retry with a
-            # doubled output buffer. Cap retries at a generous absolute size
-            # (1 GiB) to avoid runaway growth on a malformed frame.
-            var new_cap = out_cap * 2
-            if new_cap > (1 << 30):
-                raise Error(
-                    "OrcCodecError.ZSTD_FAILED: " + String(e)
-                    + " (retry-cap-exceeded)"
-                )
-            out_cap = new_cap
+        var where = (
+            String(" (in_len=") + String(len(chunk))
+            + ", out_cap=" + String(out_cap)
+        )
+        if size_known:
+            where += ", known_size=" + String(frame_size)
+        where += ")"
+        if res.error_code == ZSTD_ERROR_SRC_SIZE_WRONG:
+            raise Error(
+                "OrcCodecError.ZSTD_TRUNCATED: the chunk's length does not"
+                " match its zstd frame (libzstd srcSize_wrong)" + where
+            )
+        if res.error_code != ZSTD_ERROR_DST_SIZE_TOO_SMALL or size_known:
+            raise Error(
+                "OrcCodecError.ZSTD_FAILED: libzstd error "
+                + String(res.error_code) + where
+            )
+        var new_cap = out_cap * 2
+        if new_cap > ORC_MAX_COMPRESSION_BLOCK_SIZE:
+            raise Error(
+                "OrcCodecError.ZSTD_FAILED: the frame decodes to more than "
+                + String(ORC_MAX_COMPRESSION_BLOCK_SIZE) + " bytes" + where
+            )
+        out_cap = new_cap
 
 
 # =============================================================================
@@ -492,10 +505,13 @@ def _zlib_decompress_chunk(
     Inflates with `windowBits = -15`, so a zlib-WRAPPED payload (0x78 header
     + ADLER32) is rejected — ORC zlib is raw RFC-1951 only.
 
-    Retries with a doubled output buffer when libz stops short (Z_OK with the
-    output full, or any other return code) — handles cross-tool files whose
-    chunks decompress to more than the writer-advertised
-    compressionBlockSize.
+    Retries with a doubled output buffer only when libz stopped short of the
+    stream's end having filled it (Z_OK or Z_BUF_ERROR with no output space
+    left) — cross-tool files whose chunks decompress to more than the
+    writer-advertised compressionBlockSize. A stop short of the end with
+    output space left means the input ran out: the chunk is truncated
+    (ZLIB_TRUNCATED), and a larger buffer would not change that. Any other
+    return code (Z_DATA_ERROR, Z_NEED_DICT, ...) is refused at once.
     """
     var initial_cap = cap if cap > 0 else (256 * 1024)
     if initial_cap < len(chunk):
@@ -508,31 +524,28 @@ def _zlib_decompress_chunk(
             res = zlib_inflate_once(Span(buf), chunk, ZLIB_WINDOW_BITS_RAW)
         except e:
             raise Error("OrcCodecError.ZLIB_FAILED: " + String(e))  # cov: unreachable zlib_inflate_once raises only if inflateInit2 fails or the input passes 4 GiB
-        if res.rc == Z_OK or res.rc == Z_STREAM_END:
-            # If Z_OK but no output space is left, we filled the buffer
-            # exactly but the stream may have more bytes — grow and retry.
-            if res.rc == Z_OK and res.unwritten == 0:
-                var new_cap = out_cap * 2
-                if new_cap > (1 << 30):
-                    raise Error(
-                        "OrcCodecError.ZLIB_FAILED: retry-cap-exceeded"
-                        + " (in_len=" + String(len(chunk))
-                        + ", out_cap=" + String(out_cap) + ")"
-                    )
-                out_cap = new_cap
-                continue
+        if res.rc == Z_STREAM_END:
             out.extend(Span(buf)[0 : res.written])
             return
-        # Any other return code (Z_BUF_ERROR: output buffer too small).
-        # Retry doubled.
-        var new_cap = out_cap * 2
-        if new_cap > (1 << 30):
+        var where = (
+            String(" (in_len=") + String(len(chunk))
+            + ", out_cap=" + String(out_cap) + ")"
+        )
+        if res.rc != Z_OK and res.rc != Z_BUF_ERROR:
             raise Error(
                 "OrcCodecError.ZLIB_FAILED: inflate rc="
-                + String(Int(res.rc))
-                + " (in_len=" + String(len(chunk))
-                + ", out_cap=" + String(out_cap)
-                + ", retry-cap-exceeded)"
+                + String(Int(res.rc)) + where
+            )
+        if res.unwritten > 0:
+            raise Error(
+                "OrcCodecError.ZLIB_TRUNCATED: the chunk ends before its"
+                " deflate stream's final block does" + where
+            )
+        var new_cap = out_cap * 2
+        if new_cap > ORC_MAX_COMPRESSION_BLOCK_SIZE:
+            raise Error(
+                "OrcCodecError.ZLIB_FAILED: the chunk decodes to more than "
+                + String(ORC_MAX_COMPRESSION_BLOCK_SIZE) + " bytes" + where
             )
         out_cap = new_cap
 
@@ -579,37 +592,107 @@ def _snappy_decompress_chunk(
 # =============================================================================
 #
 # ORC uses the LZ4 BLOCK format (not the LZ4 frame format):
-# `lz4_decompress_into` (`LZ4_decompress_safe`). The decompressed size is
-# bounded by `cap`; a failure does not say whether the block is corrupt or the
-# buffer too small.
+# `lz4_decompress_into` (`LZ4_decompress_safe`). The block does not record its
+# decompressed size, and liblz4's failure does not say whether the block is
+# corrupt or the buffer too small. Its sequence headers do say how many bytes
+# it decodes to, so after a failure `_lz4_block_decoded_size` reads them: a
+# block cut short inside a sequence is refused as truncated, a block that
+# fits the buffer it failed in is refused as corrupt, and only a block that
+# declares more bytes is decoded again, once, into exactly that many.
+#
+# A block cut exactly at the end of a sequence's literals reads as a whole,
+# shorter block: the format has no end marker, so neither this scan nor
+# liblz4 can tell it from a block that ends there.
+
+
+def _lz4_truncated(chunk_len: Int) -> Error:
+    return Error(
+        "OrcCodecError.LZ4_TRUNCATED: the chunk ends inside an LZ4 sequence"
+        " (in_len=" + String(chunk_len) + ")"
+    )
+
+
+def _lz4_block_decoded_size(block: Span[UInt8, _]) raises -> Int:
+    """The bytes the LZ4 raw block `block` decodes to, read from its sequence
+    headers alone (token, length-extension bytes, match offset; literals and
+    matches are skipped, not decoded). Raises LZ4_TRUNCATED when the block
+    ends inside a sequence, and BAD_BLOCK_SIZE past the 1 GiB ceiling. It does
+    not check match offsets: liblz4 does."""
+    var n = len(block)
+    var pos = 0
+    var size = 0
+    while True:
+        if pos >= n:
+            # Empty, or a match was the last thing: the last sequence of a
+            # block is literals only.
+            raise _lz4_truncated(n)
+        var token = Int(block[pos])
+        pos += 1
+        var literals = token >> 4
+        if literals == 15:
+            while True:
+                if pos >= n:
+                    raise _lz4_truncated(n)
+                var more = Int(block[pos])
+                pos += 1
+                literals += more
+                if more != 255:
+                    break
+        if literals > n - pos:
+            raise _lz4_truncated(n)
+        pos += literals
+        size += literals
+        if pos == n:
+            return size
+        if n - pos < 2:
+            raise _lz4_truncated(n)
+        pos += 2
+        var match_len = token & 15
+        if match_len == 15:
+            while True:
+                if pos >= n:
+                    raise _lz4_truncated(n)
+                var more = Int(block[pos])
+                pos += 1
+                match_len += more
+                if more != 255:
+                    break
+        size += match_len + 4
+        if size > ORC_MAX_COMPRESSION_BLOCK_SIZE:
+            raise Error(
+                String("OrcCodecError.BAD_BLOCK_SIZE: LZ4 block decodes to")
+                + " more than " + String(ORC_MAX_COMPRESSION_BLOCK_SIZE)
+                + " bytes"
+            )
 
 
 def _lz4_decompress_chunk(
     chunk: Span[UInt8, _], cap: Int, mut out: List[UInt8]
 ) raises:
-    """LZ4-block-decompress one ORC chunk into `out`.
-    Retries with a doubled output buffer on any failure (LZ4 returns a
-    negative result code without distinguishing the reason)."""
-    var initial_cap = cap if cap > 0 else (256 * 1024)
-    if initial_cap < len(chunk):
-        initial_cap = len(chunk)
-    var out_cap = initial_cap
-    while True:
-        var buf = _output_buffer(out_cap)
-        try:
-            var written = lz4_decompress_into(Span(buf), chunk)
-            out.extend(Span(buf)[0:written])
-            return
-        except e:
-            # Malformed input OR buffer-too-small. Retry with a doubled
-            # buffer up to a 1 GiB ceiling.
-            var new_cap = out_cap * 2
-            if new_cap > (1 << 30):
-                raise Error(
-                    "OrcCodecError.LZ4_FAILED: " + String(e)
-                    + " (retry-cap-exceeded)"
-                )
-            out_cap = new_cap
+    """LZ4-block-decompress one ORC chunk into `out` (see above: one attempt
+    at `cap`, and a second, at the block's declared size, only when the
+    block declares more than `cap` bytes)."""
+    var out_cap = cap if cap > 0 else (256 * 1024)
+    if out_cap < len(chunk):
+        out_cap = len(chunk)
+    var buf = _output_buffer(out_cap)
+    var first_error = String("")
+    try:
+        var written = lz4_decompress_into(Span(buf), chunk)
+        out.extend(Span(buf)[0:written])
+        return
+    except e:
+        first_error = String(e)
+    var declared = _lz4_block_decoded_size(chunk)
+    if declared <= out_cap:
+        raise Error("OrcCodecError.LZ4_FAILED: " + first_error)
+    var exact = _output_buffer(declared)
+    var written: Int
+    try:
+        written = lz4_decompress_into(Span(exact), chunk)
+    except e:
+        raise Error("OrcCodecError.LZ4_FAILED: " + String(e))
+    out.extend(Span(exact)[0:written])
 
 
 # =============================================================================
