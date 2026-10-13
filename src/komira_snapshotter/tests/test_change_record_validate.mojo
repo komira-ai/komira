@@ -48,11 +48,12 @@
 #       expected message is derived from the fixture's shape by
 #       `_expected_fault`, which states the invariants, not from the code,
 #       and is itself pinned by a literal table. A grid of every op (and an
-#       unknown tag below and above), key length 0, 1 and 2, and each image
-#       absent or present covers every check under every key length and
-#       every pair of faults one op can have, so a check skipped for one op,
-#       one tag or one key length, or two checks reported in the wrong order,
-#       goes red.
+#       unknown tag below and two above), and key, new_image and old_image
+#       lengths 0, 1 and 2 each (162 records) covers every check under every
+#       length of every list it could read and every pair of faults one op
+#       can have, so a check skipped for one op, one tag, one key length or
+#       one length of the other image, or two checks reported in the wrong
+#       order, goes red.
 # =============================================================================
 
 from std.testing import assert_true, assert_equal, assert_false
@@ -720,24 +721,27 @@ def test_validate_every_kind_exact_message() raises:
 
 
 def test_validate_shape_grid() raises:
-    """Every op, an unknown tag below INSERT and above REMOVE, key length 0, 1
-    and 2, and each image absent or present (one cell): 60 records, each
-    with the message `_expected_fault` derives. The per-outcome counts are
-    worked out by hand from the invariants, so a wrong `_expected_fault`
-    goes red here too."""
+    """Every op, an unknown tag below INSERT and two above REMOVE, and key,
+    new_image and old_image lengths 0, 1 and 2 each: 162 records, each with
+    the message `_expected_fault` derives. Every list a check could read
+    spans 0, 1 and 2 cells, so a check skipped when another list (the key or
+    the other image) holds a given length goes red, not only one skipped for
+    the list it checks. The per-outcome counts are worked out by hand from
+    the invariants, so a wrong `_expected_fault` goes red here too."""
     var ops = List[Int]()
+    ops.append(-1)
     ops.append(CDC_OP_INSERT)
     ops.append(CDC_OP_MODIFY)
     ops.append(CDC_OP_REMOVE)
-    ops.append(-1)
     ops.append(3)
+    ops.append(1000)
     var outcomes = List[String]()
     var counts = List[Int]()
     var n = 0
     for oi in range(len(ops)):
         for nk in range(3):
-            for nn in range(2):
-                for no in range(2):
+            for nn in range(3):
+                for no in range(3):
                     var rec = _fixture(
                         ops[oi], nk, nn, no, Int64(70 + n), String("s-g")
                     )
@@ -757,35 +761,44 @@ def test_validate_shape_grid() raises:
                     if not found:
                         outcomes.append(want)
                         counts.append(1)
-    assert_equal(n, 60)
-    # Hand count: any keyless record (5 ops x 4 image shapes) is the key
-    # fault; with a key (2 lengths), INSERT is valid only with new and no
-    # old, MODIFY only with both, REMOVE only with old and no new; INSERT and
-    # MODIFY report a missing new image for both old shapes, REMOVE a
-    # missing old image for both new shapes; an unknown tag (2 tags) is the
-    # tag fault for every image shape.
+    assert_equal(n, 162)
+    # Hand count, 9 image shapes per op and key length: any keyless record
+    # (6 tags x 9) is the key fault. With a key (2 lengths): INSERT reports
+    # a missing new image for the 3 old lengths, is valid with new 1 or 2 and
+    # no old (2 shapes), and has a stray old image otherwise (4 shapes);
+    # MODIFY reports a missing new image for the 3 old lengths, a missing old
+    # image for new 1 or 2 (2 shapes), and is valid otherwise (4 shapes);
+    # REMOVE reports a missing old image for the 3 new lengths, is valid with
+    # old 1 or 2 and no new (2 shapes), and has a stray new image otherwise
+    # (4 shapes); each unknown tag is the tag fault for all 9 shapes.
     var want_out = List[String]()
     var want_cnt = List[Int]()
     want_out.append(String(_KEY_EMPTY))
-    want_cnt.append(20)
+    want_cnt.append(54)
     want_out.append(String(""))
-    want_cnt.append(6)
+    want_cnt.append(16)
     want_out.append(String(_P) + "INSERT with empty new_image")
-    want_cnt.append(4)
+    want_cnt.append(6)
     want_out.append(String(_P) + "INSERT with non-empty old_image")
-    want_cnt.append(2)
+    want_cnt.append(8)
     want_out.append(String(_P) + "MODIFY with empty new_image")
-    want_cnt.append(4)
+    want_cnt.append(6)
     want_out.append(String(_P) + "MODIFY with empty old_image")
-    want_cnt.append(2)
-    want_out.append(String(_P) + "REMOVE with empty old_image")
     want_cnt.append(4)
+    want_out.append(String(_P) + "REMOVE with empty old_image")
+    want_cnt.append(6)
     want_out.append(String(_P) + "REMOVE with non-empty new_image")
-    want_cnt.append(2)
+    want_cnt.append(8)
     want_out.append(String(_P) + "unknown op tag -1")
-    want_cnt.append(8)
+    want_cnt.append(18)
     want_out.append(String(_P) + "unknown op tag 3")
-    want_cnt.append(8)
+    want_cnt.append(18)
+    want_out.append(String(_P) + "unknown op tag 1000")
+    want_cnt.append(18)
+    var total = 0
+    for i in range(len(want_cnt)):
+        total += want_cnt[i]
+    assert_equal(total, 162)
     assert_equal(len(outcomes), len(want_out))
     for i in range(len(want_out)):
         var got = 0
