@@ -2,11 +2,12 @@
 # komira_async.reactor.completion_queue — POD types for Reactor[S]'s NIC-style
 # completion-queue API
 # =============================================================================
-# The completion-queue surface exposes five public methods on Reactor[S]:
+# The completion-queue surface exposes six public methods on Reactor[S]:
 #
 #   submit(op_kind, fd, buf) -> OpHandle
 #   register_long_lived(fd, interest_set) -> RegistrationHandle
 #   modify(reg_handle, new_interest_set)
+#   interest_set(reg_handle) -> UInt8
 #   poll_completions(timeout_us) -> List[Completion]
 #   wake_self()
 #
@@ -165,49 +166,63 @@ struct Completion(
 
 
 # -----------------------------------------------------------------------------
-# RegistrationHandle — single ownership of one long-lived multiplexer
-# registration.
+# RegistrationHandle: names one long-lived multiplexer registration.
 # -----------------------------------------------------------------------------
-# Per: "Single ownership of one multiplexer registration. Movable
-# but NOT Copyable. Drop deregisters with the multiplexer."
-#
-# NOTE: like OpHandle, the NOT-Copyable invariant is relaxed because the
-# TcpStream wrapper is the enforcement layer; it may be tightened if the
-# type-system path is
-# clean. The drop-on-handle semantics fire correctly regardless of
-# Copyable conformance because the Reactor's deregister-by-fd path is
-# idempotent (epoll_ctl_del + ENOENT-swallow); a later step may add a
-# `_registered: Bool` field to gate the drop at most once.
+# A copyable value carrying only the fd. What the registration is armed for
+# lives in the Reactor that owns it (`ArmedInterest`), so a copy of a handle
+# carries no state that can go stale (komira-ai/komira#1406: a mask recorded
+# on one copy left another copy saying the old mask, and the switch back to it
+# was skipped as unchanged).
 
 @fieldwise_init
 struct RegistrationHandle(
     Copyable, ImplicitlyCopyable, Movable, Deinitable,
 ):
     """Long-lived multiplexer registration handle. Returned by
-    `Reactor.register_long_lived`.
-
-    Owns ONE multiplexer registration for the lifetime of the wrapping
-    TcpStream. The drop body calls
-    `Reactor._deregister_long_lived(self._fd)` to remove the registration
-    from the multiplexer.
+    `Reactor.register_long_lived`; `Reactor.modify` and
+    `Reactor.interest_set` take it to name the registration.
 
     Fields:
-      - _fd: the registered file descriptor (also serves as the kqueue
-        ident; on epoll, it's the fd we passed to EPOLL_CTL_ADD).
-      - _interest_set: current armed interests (INTEREST_READ |
-        INTEREST_WRITE bitmask). `Reactor.modify` updates this when the
-        caller switches between read / write / both.
+      - _fd: the registered file descriptor (the epoll fd key and cookie;
+        the kqueue ident).
+
+    Dropping a handle does not deregister: the owner of the fd deregisters
+    (`TcpStream` on drop; `Reactor._deregister_long_lived`) or closes the fd,
+    which removes it from the multiplexer.
     """
 
     var _fd: Int32
-    var _interest_set: UInt8
 
     @always_inline
     def fd(self) -> Int32:
         """Public accessor for the registered fd."""
         return self._fd
 
+
+struct ArmedInterest(Movable):
+    """The interest mask each long-lived registration is armed for, indexed
+    by fd. One per Reactor; the only record of it, so `Reactor.modify`
+    compares against and updates this, never a field of a handle.
+
+    0 means nothing recorded (never registered, deregistered, or a negative
+    fd). An entry left by an fd closed without deregistering is overwritten
+    when the fd number is registered again.
+    """
+
+    var _masks: List[UInt8]
+
+    def __init__(out self):
+        self._masks = List[UInt8]()
+
     @always_inline
-    def interest_set(self) -> UInt8:
-        """Public accessor for the current interest bitmask."""
-        return self._interest_set
+    def get(self, fd: Int32) -> UInt8:
+        if fd < 0 or Int(fd) >= len(self._masks):
+            return UInt8(0)
+        return self._masks[Int(fd)]
+
+    def set(mut self, fd: Int32, mask: UInt8):
+        if fd < 0:
+            return
+        if Int(fd) >= len(self._masks):
+            self._masks.resize(Int(fd) + 1, UInt8(0))
+        self._masks[Int(fd)] = mask

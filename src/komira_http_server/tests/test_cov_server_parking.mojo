@@ -12,10 +12,11 @@
 # resumes the parked write, and once it drains the connection is READING
 # again and the server reads what is already queued, and a request sent
 # after the drain is read when it arrives (komira-ai/komira#1406: the switch
-# back to read interest was skipped). Both loops are driven:
-# `serve_one_iteration_dispatch`
-# (a dispatcher answering a 256 KiB body) and `serve_one_iteration` (canned and
-# chained answers to a pipelined burst).
+# back to read interest was skipped). The loops driven:
+# `serve_one_iteration_dispatch` and `serve_one_iteration_dispatch_chained`
+# (a dispatcher answering a 256 KiB body, the second behind the middleware
+# chain) and `serve_one_iteration` (canned and chained answers to a pipelined
+# burst).
 #
 # What a pipelined burst asserts is chosen not to depend on
 # komira-ai/komira#1285 (requests pipelined behind a parked response are not
@@ -28,7 +29,8 @@
 #      connection not back to READING after the drain; a request read after
 #      a drain not parked in turn; an end of stream read after a drain not
 #      closing; a reset peer with a parked tail not dropped; a request sent
-#      after the drain never read (read interest not re-armed, #1406).
+#      after the drain never read (read interest not re-armed, #1406), in
+#      the plain and the middleware-chained dispatch loop.
 #   C  canned and chained loops: the same, with the chain's answers; a
 #      client's end of stream queued behind the burst not closing the
 #      connection once the last parked response drains; a request sent
@@ -40,7 +42,6 @@ from std.sys.info import CompilationTarget
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_async.ops.waker_sink import NoopSink
-from komira_async.reactor.completion_queue import INTEREST_READ
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.blocking_runtime import BlockingRuntime
 from komira_async.runtime.runtime_trait import Runtime
@@ -50,8 +51,10 @@ from komira_http_server.connection import (
     CONN_STATE_READING,
     CONN_STATE_WAITING_FOR_WRITABLE,
 )
-from komira_http_server.dispatch import RequestDispatcher
+from komira_http_server.dispatch import CtxRequestDispatcher, RequestDispatcher
 from komira_http_server.middleware import MiddlewareChain
+from komira_http_server.middleware.middleware import RequestContext
+from komira_http_server.middleware.passthrough import PassthroughMiddleware
 from komira_http_server.routing import Router
 from komira_http_server.server import HttpServer, HttpServerConfig
 
@@ -67,8 +70,9 @@ def _pattern(n: Int) -> List[UInt8]:
     return out^
 
 
-struct _Big(RequestDispatcher):
-    """Answers every request with a 256 KiB patterned body."""
+struct _Big(CtxRequestDispatcher):
+    """Answers every request with a 256 KiB patterned body (with or without
+    the middleware chain's context)."""
 
     var calls: Int
 
@@ -79,6 +83,19 @@ struct _Big(RequestDispatcher):
         RT: Runtime,
     ](
         mut self, mut reactor: Reactor[RT.Sink], var req: HttpRequest
+    ) raises -> HttpResponse:
+        self.calls += 1
+        var r = HttpResponse(status=Int32(200))
+        r.body = _pattern(_BIG)
+        return r^
+
+    def dispatch_with_ctx[
+        RT: Runtime,
+    ](
+        mut self,
+        mut reactor: Reactor[RT.Sink],
+        mut req: HttpRequest,
+        ctx: RequestContext,
     ) raises -> HttpResponse:
         self.calls += 1
         var r = HttpResponse(status=Int32(200))
@@ -204,14 +221,22 @@ struct _DLink(Movable):
     var server: HttpServer[NoopGrpcDispatch]
     var d: _Big
     var fd: Int32
+    # Step `serve_one_iteration_dispatch_chained` (default chain, inert
+    # innermost middleware) instead of `serve_one_iteration_dispatch`.
+    var chained: Bool
+    var chain: MiddlewareChain
+    var mw: PassthroughMiddleware
 
-    def __init__(out self) raises:
+    def __init__(out self, chained: Bool = False) raises:
         self.server = _small_server(
             HttpServer(
                 config=HttpServerConfig.default_ephemeral(), router=Router()
             )
         )
         self.d = _Big()
+        self.chained = chained
+        self.chain = MiddlewareChain.default()
+        self.mw = PassthroughMiddleware()
         self.fd = _connect_small(self.server.local_port())
         for _ in range(50):
             self.step()
@@ -224,9 +249,14 @@ struct _DLink(Movable):
             _ = external_call["close", Int32](self.fd)
 
     def step(mut self) raises:
-        _ = self.server.serve_one_iteration_dispatch[_Big, _Rt](
-            self.d, Int32(20_000)
-        )
+        if self.chained:
+            _ = self.server.serve_one_iteration_dispatch_chained[
+                _Big, PassthroughMiddleware, _Rt
+            ](self.chain, self.mw, self.d, Int32(20_000))
+        else:
+            _ = self.server.serve_one_iteration_dispatch[_Big, _Rt](
+                self.d, Int32(20_000)
+            )
 
 
 def test_dispatch_parks_a_large_response_and_resumes_it() raises:
@@ -261,11 +291,11 @@ def test_dispatch_parks_a_large_response_and_resumes_it() raises:
     assert_equal(l.server.live_conn_count(), 1)
 
 
-def test_dispatch_reads_a_request_sent_after_the_drain() raises:
+def _reads_a_request_sent_after_the_drain(chained: Bool) raises:
     """komira-ai/komira#1406: once a parked response drains, the connection
     is armed for reads again, so a request the client sends only then (it
     is not buffered when the drain's round reads) is read and answered."""
-    var l = _DLink()
+    var l = _DLink(chained)
     _send_all_now(l.fd, "GET /1 HTTP/1.1\r\nHost: example.com\r\n\r\n")
     l.step()
     l.step()
@@ -286,8 +316,6 @@ def test_dispatch_reads_a_request_sent_after_the_drain() raises:
             break
         l.step()
     assert_equal(l.server._conns[0]._state, CONN_STATE_READING)
-    assert_equal(l.server._conns[0].interest_set(), INTEREST_READ)
-    assert_equal(l.server._conns[0].registration().interest_set(), INTEREST_READ)
     # Only now does the second request leave the client.
     _send_all_now(l.fd, "GET /2 HTTP/1.1\r\nHost: example.com\r\n\r\n")
     for _ in range(5000):
@@ -301,6 +329,14 @@ def test_dispatch_reads_a_request_sent_after_the_drain() raises:
     for i in range(_BIG):
         if got[one + head_end + 4 + i] != want[i]:
             raise Error("second body byte " + String(i) + " differs")
+
+
+def test_dispatch_reads_a_request_sent_after_the_drain() raises:
+    _reads_a_request_sent_after_the_drain(chained=False)
+
+
+def test_chained_dispatch_reads_a_request_sent_after_the_drain() raises:
+    _reads_a_request_sent_after_the_drain(chained=True)
 
 
 def test_dispatch_drops_a_reset_peer_with_a_parked_response() raises:

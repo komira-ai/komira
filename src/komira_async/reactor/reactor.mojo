@@ -42,6 +42,7 @@ from std.time import sleep
 
 from komira_async.ops.waker_sink import WakerSink
 from komira_async.reactor.completion_queue import (
+    ArmedInterest,
     Completion,
     INTEREST_READ,
     INTEREST_WRITE,
@@ -257,6 +258,8 @@ struct Reactor[S: WakerSink & Movable & Deinitable](
     var _sink: Self.S
     var _next_op_id: OwnedPointer[AtomicI64]
     var _pending_completions: List[Completion]
+    # fd -> armed mask of each long-lived registration (see ArmedInterest).
+    var _armed: ArmedInterest
 
     def __init__(out self, var sink: Self.S, backend: UInt8) raises:
         """+ (eventfd). `sink` is consumed
@@ -274,6 +277,7 @@ struct Reactor[S: WakerSink & Movable & Deinitable](
         self._sink = sink^
         self._wakers = List[WakerSlot]()
         self._slot_index = OpIdIndexMap()
+        self._armed = ArmedInterest()
         # buffer for try_pop_any_completion non-matches.
         # Empty at construction; populated only when a try_pop call's
         # non-blocking poll returns completions that don't match the
@@ -1025,168 +1029,107 @@ struct Reactor[S: WakerSink & Movable & Deinitable](
         On kqueue: one or two `kevent_register` calls (one per filter),
         edge-triggered via EV_CLEAR (the kqueue analog of EPOLLET).
 
-        Returns a RegistrationHandle whose drop calls
-        `_deregister_long_lived(fd)`.
+        Records `interest_set` as the registration's armed mask (on the
+        mock backend too) and returns a handle naming the fd.
 
         Edge-triggered (EPOLLET / EV_CLEAR) is set because the
         long-lived path is paired with try_io's drain-to-EAGAIN
         discipline.
-
-        Mac branch added.
-        Pre-fix this hardcoded `epoll_ctl_add` and raised "Linux only"
-        on Mac BACKEND_KQUEUE workers; every per-core HTTP server worker
-        thread crashed at boot with a Linux-only error before serving
-        a single byte. Mirrors the per-IO `register_read` / `register_write`
-        pattern at / 378.
         """
-        if self._epoll_fd < 0:
-            # Mock backend or wrong-OS: no multiplexer to touch. Return
-            # a synthetic handle (drop is a no-op).
-            return RegistrationHandle(_fd=fd, _interest_set=interest_set)
-
-        comptime if CompilationTarget.is_macos():
-            # kqueue: per-filter EV_ADD with EV_CLEAR (edge-triggered).
-            # The cookie is the fd itself, mirroring the epoll branch.
-            if (interest_set & INTEREST_READ) != UInt8(0):
-                kevent_register(
-                    self._epoll_fd, fd, EVFILT_READ, UInt64(fd),
-                    edge_triggered=True,
-                )
-            if (interest_set & INTEREST_WRITE) != UInt8(0):
-                kevent_register(
-                    self._epoll_fd, fd, EVFILT_WRITE, UInt64(fd),
-                    edge_triggered=True,
-                )
-            return RegistrationHandle(_fd=fd, _interest_set=interest_set)
-        else:
-            # Build the epoll events bitmask from the interest set.
-            var events = UInt32(0)
-            if (interest_set & INTEREST_READ) != UInt8(0):
-                events = events | EPOLLIN
-            if (interest_set & INTEREST_WRITE) != UInt8(0):
-                events = events | EPOLLOUT
-            # EPOLLET: paired with try_io fast path drain-to-EAGAIN per
-            # Long-lived registrations always use edge-triggered.
-            events = events | EPOLLET
-
-            # Use the fd itself as the cookie — for long-lived registrations,
-            # the per-IO op_id mapping happens at submit time via
-            # _register_for_ready_cache. The cookie carried in the kernel
-            # event is the fd; a per-registration token is a possible refinement.
-            epoll_ctl_add(self._epoll_fd, fd, events, UInt64(fd))
-            return RegistrationHandle(_fd=fd, _interest_set=interest_set)
+        if self._epoll_fd >= 0:
+            comptime if CompilationTarget.is_macos():
+                # kqueue: per-filter EV_ADD with EV_CLEAR (edge-triggered).
+                # The cookie is the fd itself, mirroring the epoll branch.
+                if (interest_set & INTEREST_READ) != UInt8(0):
+                    kevent_register(
+                        self._epoll_fd, fd, EVFILT_READ, UInt64(fd),
+                        edge_triggered=True,
+                    )
+                if (interest_set & INTEREST_WRITE) != UInt8(0):
+                    kevent_register(
+                        self._epoll_fd, fd, EVFILT_WRITE, UInt64(fd),
+                        edge_triggered=True,
+                    )
+            else:
+                var events = EPOLLET
+                if (interest_set & INTEREST_READ) != UInt8(0):
+                    events = events | EPOLLIN
+                if (interest_set & INTEREST_WRITE) != UInt8(0):
+                    events = events | EPOLLOUT
+                # The cookie is the fd: the per-IO op_id mapping happens at
+                # submit time via _register_for_ready_cache.
+                epoll_ctl_add(self._epoll_fd, fd, events, UInt64(fd))
+        # Mock backend (no multiplexer) or the syscalls succeeded.
+        self._armed.set(fd, interest_set)
+        return RegistrationHandle(_fd=fd)
 
     def modify(
         mut self,
-        mut reg_handle: RegistrationHandle,
+        reg_handle: RegistrationHandle,
         new_interest_set: UInt8,
     ) raises:
-        """Switch the interest set of a long-lived
-        registration and record it on `reg_handle`.
+        """Switch the interest set of a long-lived registration.
 
-        `reg_handle.interest_set()` is the one record of what is armed:
-        after a successful call it equals `new_interest_set` (on the mock
-        backend too, which has no multiplexer). If the syscall raises, the
-        handle keeps the previous mask. Callers keep the handle they
-        registered with and pass it here; a copy that does not see this
-        update would make a later switch back look unchanged and skip it
-        (komira-ai/komira#1406).
+        The armed mask is this reactor's record for the fd (`interest_set`),
+        not anything on `reg_handle`, so any copy of the handle names the
+        same registration (komira-ai/komira#1406). If `new_interest_set`
+        equals the armed mask this is a no-op (no syscall). Otherwise the
+        record becomes `new_interest_set` after the syscalls succeed (at
+        once on the mock backend); if a syscall raises it is unchanged.
 
         On epoll: one EPOLL_CTL_MOD with the new EPOLLIN/EPOLLOUT bitmask.
-        On kqueue: per-filter add/delete delta against the prior interest
-        set. epoll's atomic interest-set swap doesn't have a one-shot
-        kqueue analog; the equivalent is the change-set of (filter,
-        op) pairs:
-          - filter present in BOTH old AND new: re-register with EV_ADD
-            (EV_ADD on an already-registered (fd, filter) updates flags,
-            the kqueue idiomatic in-place modify); cheaper than del+add.
-          - filter present ONLY in old: EV_DELETE (`kevent_deregister`).
-          - filter present ONLY in new: EV_ADD (`kevent_register`).
-
-        If `new_interest_set == reg_handle.interest_set()`, this is a
-        no-op (avoids the syscall when the caller's IO doesn't change
-        interest direction).
-
-        Mac branch added.
-        Pre-fix this hardcoded `epoll_ctl_mod` and raised "Linux only"
-        on Mac BACKEND_KQUEUE workers when an HTTP TcpStream's interest
-        set flipped between read-only and read+write. Mirrors the
-        per-IO `register_read` / `register_write` / `deregister`
-        pattern at / 378 / 405.
-
-        kqueue note: the kernel docs (`man kevent`) explicitly state
-        that EV_ADD is idempotent on (ident, filter) and updates the
-        existing registration in-place. We use that to avoid a
-        delete-then-add window where an event fired between the two
-        kevents would be lost. delete+add is only used for filters
-        being entirely dropped from the interest set.
+        On kqueue: per-filter delta against the armed mask. A filter in the
+        new set is (re-)added with EV_ADD, which `man kevent` documents as
+        an in-place update of an existing (ident, filter), so there is no
+        delete-then-add window where an event could be lost; a filter only
+        in the old set is deleted with EV_DELETE.
         """
-        if reg_handle.interest_set() == new_interest_set:
+        var fd = reg_handle.fd()
+        var old_set = self._armed.get(fd)
+        if old_set == new_interest_set:
             return  # No-op fast path: nothing changed.
-        if self._epoll_fd < 0:
-            # Mock backend: no multiplexer; the handle still records the mask.
-            reg_handle._interest_set = new_interest_set
-            return
+        if self._epoll_fd >= 0:
+            comptime if CompilationTarget.is_macos():
+                if (new_interest_set & INTEREST_READ) != UInt8(0):
+                    kevent_register(
+                        self._epoll_fd, fd, EVFILT_READ, UInt64(fd),
+                        edge_triggered=True,
+                    )
+                elif (old_set & INTEREST_READ) != UInt8(0):
+                    kevent_deregister(self._epoll_fd, fd, EVFILT_READ)
+                if (new_interest_set & INTEREST_WRITE) != UInt8(0):
+                    kevent_register(
+                        self._epoll_fd, fd, EVFILT_WRITE, UInt64(fd),
+                        edge_triggered=True,
+                    )
+                elif (old_set & INTEREST_WRITE) != UInt8(0):
+                    kevent_deregister(self._epoll_fd, fd, EVFILT_WRITE)
+            else:
+                var events = EPOLLET
+                if (new_interest_set & INTEREST_READ) != UInt8(0):
+                    events = events | EPOLLIN
+                if (new_interest_set & INTEREST_WRITE) != UInt8(0):
+                    events = events | EPOLLOUT
+                epoll_ctl_mod(self._epoll_fd, fd, events, UInt64(fd))
+        # Mock backend (no multiplexer) or the syscalls succeeded.
+        self._armed.set(fd, new_interest_set)
 
-        comptime if CompilationTarget.is_macos():
-            var fd = reg_handle.fd()
-            var old_set = reg_handle.interest_set()
-            var old_read = (old_set & INTEREST_READ) != UInt8(0)
-            var old_write = (old_set & INTEREST_WRITE) != UInt8(0)
-            var new_read = (new_interest_set & INTEREST_READ) != UInt8(0)
-            var new_write = (new_interest_set & INTEREST_WRITE) != UInt8(0)
-
-            # READ filter delta.
-            if new_read:
-                # Add OR re-arm. EV_ADD is idempotent for in-place modify
-                # on kqueue (man kevent: "Adding an event which is
-                # already attached to the kqueue replaces the existing
-                # event"). Edge-triggered for parity with epoll EPOLLET.
-                kevent_register(
-                    self._epoll_fd, fd, EVFILT_READ, UInt64(fd),
-                    edge_triggered=True,
-                )
-            elif old_read:
-                # READ was set, now dropped. Best-effort delete.
-                kevent_deregister(self._epoll_fd, fd, EVFILT_READ)
-
-            # WRITE filter delta.
-            if new_write:
-                kevent_register(
-                    self._epoll_fd, fd, EVFILT_WRITE, UInt64(fd),
-                    edge_triggered=True,
-                )
-            elif old_write:
-                kevent_deregister(self._epoll_fd, fd, EVFILT_WRITE)
-        else:
-            var events = UInt32(0)
-            if (new_interest_set & INTEREST_READ) != UInt8(0):
-                events = events | EPOLLIN
-            if (new_interest_set & INTEREST_WRITE) != UInt8(0):
-                events = events | EPOLLOUT
-            events = events | EPOLLET
-            epoll_ctl_mod(
-                self._epoll_fd, reg_handle.fd(), events,
-                UInt64(reg_handle.fd()),
-            )
-        # Both backends reach here only after their syscalls succeeded.
-        reg_handle._interest_set = new_interest_set
+    def interest_set(self, reg_handle: RegistrationHandle) -> UInt8:
+        """The mask `reg_handle`'s registration is armed for: what the last
+        successful `register_long_lived` or `modify` of its fd set on this
+        reactor; 0 if none, or after `_deregister_long_lived`."""
+        return self._armed.get(reg_handle.fd())
 
     def _deregister_long_lived(mut self, fd: Int32):
-        """Remove a long-lived registration from the multiplexer.
-        Called by the RegistrationHandle.__del__ body.
+        """Remove a long-lived registration from the multiplexer and clear
+        its armed mask (`interest_set` reads 0 after).
 
         Best-effort: ENOENT is benign. epoll_ctl_del swallows internally
-        per the existing waker-slot contract.
-
-        Mac branch added.
-        kqueue's `EV_DELETE` is per-(fd, filter); epoll's
-        `EPOLL_CTL_DEL` is per-fd. Without knowledge of which filters
-        were registered (the long-lived path doesn't track it on
-        Reactor), call `kevent_deregister` for both EVFILT_READ and
-        EVFILT_WRITE; both are best-effort (kevent_deregister already
-        swallows errors internally — no `try` needed).
+        per the existing waker-slot contract. kqueue's `EV_DELETE` is
+        per-(fd, filter), so both EVFILT_READ and EVFILT_WRITE are deleted;
+        `kevent_deregister` swallows errors for a filter not registered.
         """
+        self._armed.set(fd, UInt8(0))
         if self._epoll_fd < 0 or fd < 0:
             return
         comptime if CompilationTarget.is_macos():

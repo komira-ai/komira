@@ -101,7 +101,7 @@ def _parked_after(request: String, expect_continue: Bool) raises -> Tuple[String
     var fds = _socketpair()
     var entry = ConnEntry(
         stream=TcpStream(fds[0]),
-        reg=RegistrationHandle(_fd=fds[0], _interest_set=INTEREST_READ),
+        reg=RegistrationHandle(_fd=fds[0]),
     )
     var junk = List[UInt8](length=512, fill=UInt8(0x2E))
     var filled = False

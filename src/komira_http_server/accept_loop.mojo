@@ -732,8 +732,8 @@ def drive_tls_handshake(
     that returns ERROR + 0 mask.
 
     Does not touch the reactor: the caller calls
-    `reactor.modify(entry._reg, mask)` if `mask != entry.interest_set()`,
-    and modify records the mask on the registration.
+    `reactor.modify(entry._reg, mask)`, which is a no-op when the reactor
+    already has the registration armed for `mask`.
     """
     # Borrow the Optional[TlsStream]; if it's None we treat as no-op.
     ref tls_opt = entry.tls_stream_ref()

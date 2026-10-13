@@ -744,8 +744,8 @@ struct TcpStream(Movable):
 
         if self._registration.__bool__():
             # Already registered. Switch interest if needed: modify skips
-            # the syscall when the handle is already armed for this
-            # direction, and records a new mask on the stored handle.
+            # the syscall when the reactor's record for this fd already
+            # says this direction (the handle carries no mask).
             reactor.modify(self._registration.value(), desired_interest)
             return
 

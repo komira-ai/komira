@@ -12,10 +12,7 @@
 # (it owns an fd; copy would double-close).
 # =============================================================================
 
-from komira_async.reactor.completion_queue import (
-    INTEREST_READ,
-    RegistrationHandle,
-)
+from komira_async.reactor.completion_queue import RegistrationHandle
 from komira_async.runtime.tcp_stream import TcpStream
 
 from komira_http_core.codec.h2.connection_state import H2ConnectionState
@@ -87,9 +84,9 @@ struct ConnEntry(Movable, Deinitable):
 
     Fields:
       _stream         — owned TcpStream (RAII fd close on drop)
-      _reg            — reactor registration handle (one per conn); its
-                        interest_set() is the armed reactor interest mask,
-                        kept by `Reactor.modify` (the one record of it)
+      _reg            — reactor registration handle (one per conn); the
+                        mask it is armed for is the reactor's record
+                        (`Reactor.interest_set(_reg)`), not a field here
       _fd             — cached fd (== _stream.fd())
       _state          — CONN_STATE_*
       _pending_buf    — buffered tail bytes for EWOULDBLOCK→EPOLLOUT path.
@@ -204,10 +201,6 @@ struct ConnEntry(Movable, Deinitable):
     def state(self) -> UInt8:
         """Current connection state (CONN_STATE_*)."""
         return self._state
-
-    def interest_set(self) -> UInt8:
-        """Currently armed reactor interest mask (the registration's)."""
-        return self._reg.interest_set()
 
     def registration(ref self) -> ref [self._reg] RegistrationHandle:
         """Borrow the reactor registration handle for `reactor.modify` calls."""
