@@ -60,9 +60,13 @@ def _expected() -> List[String]:
         "fault_error_row_past_batch_propagate|released",
         "fault_out_set_on_error|released",
         "frame_cancelled_at_open|expected ERR_CANCELLED",
+        "nested_frame_input_error_caught|a call on a context that has a call in progress",
+        "nested_scalar_bisected|a call on a context that has a call in progress",
         "nested_scalar_in_pull|a call on a context that has a call in progress",
         "nested_scalar_raises_while_frame_waits|a call on a context that has a call in progress",
+        "nested_scalar_short_by_one|a call on a context that has a call in progress",
         "nested_two_levels|a call on a context that has a call in progress",
+        "nested_two_levels_scalar_raises|a call on a context that has a call in progress",
         "raise_on_row_3|released",
         "row_caught_violation|expected ERR_FIELD_NOT_DECLARED",
         "scalar_propagate_error_row|released",
@@ -76,7 +80,7 @@ def _expected() -> List[String]:
 
 def main() raises:
     var cases = load_cases(CASES)
-    assert_equal(len(cases), 159, "cases loaded from " + CASES)
+    assert_equal(len(cases), 164, "cases loaded from " + CASES)
     var report = run_suite("./echo_broken.so", cases)
     print(report)
     assert_equal(report.runtime_id, "komira-test/echo-broken")

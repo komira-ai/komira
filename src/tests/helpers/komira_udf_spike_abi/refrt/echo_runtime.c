@@ -181,6 +181,11 @@ enum fixture_id {
  * that returns OK (an output or the end): the host still releases it. */
 #define FILL_ERROR_ON_OK 2
 
+/* The variant of running_sum whose user code catches its input's failure
+ * (the language error a failed pull raises) and yields a one-row table [-1]
+ * instead, then ends. */
+#define CATCH_INPUT_ERROR 5
+
 /* The variant of sum_gids_kept that moves group_ids and never releases them. */
 #define GIDS_LEAKED 3
 
@@ -392,6 +397,7 @@ static const struct fixture FIXTURES[] = {
     {"error_on_ok", F_ERROR_ON_OK, MC, "l", "l", "", 0},
     /* running_sum, filling the error on every frame_next that returns OK. */
     {"running_sum_error_on_ok", F_RUNNING_SUM, MF, "l", "tl", "", FILL_ERROR_ON_OK},
+    {"running_sum_catches_input_error", F_RUNNING_SUM, MF, "l", "tl", "", CATCH_INPUT_ERROR},
     /* A batch function that raises naming no row (legal), then two runtime
      * bugs: a row one past the batch, and a row below -1. */
     {"raise_no_row", F_RAISE_ROW, MC, "l", "l", "", RR_NONE},

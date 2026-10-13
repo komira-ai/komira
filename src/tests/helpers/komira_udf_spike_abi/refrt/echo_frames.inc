@@ -616,7 +616,8 @@ static int32_t next_two_types(komira_udf_frame* fr, struct ArrowDeviceArray* out
   return KOMIRA_UDF_OK;
 }
 
-/* frame_next, then for running_sum_error_on_ok an error filled on OK. */
+/* frame_next, then for running_sum_error_on_ok an error filled on OK, and
+ * for running_sum_catches_input_error a failed input caught. */
 static int32_t echo_frame_next(komira_udf_frame* fr, const komira_udf_call* call, struct ArrowDeviceArray* out,
                                komira_udf_error* e) {
   out->array.release = NULL;
@@ -624,6 +625,20 @@ static int32_t echo_frame_next(komira_udf_frame* fr, const komira_udf_call* call
   if (rc != KOMIRA_UDF_OK) return rc;
   fr->call = call;
   rc = frame_next(fr, call, out, e);
+  if (rc != KOMIRA_UDF_OK && fr->in_failed && !fr->done && fr->inst->fx->variant == CATCH_INPUT_ERROR &&
+      fr->inst->fx->id == F_RUNNING_SUM) {
+    uint8_t* v;
+    void* d;
+    if (e->release != NULL) e->release(e);
+    fr->done = 1;
+    if (!one_column_table(host_of(fr->inst), out, 1, &v, &d)) {
+      rc = fail(host_of(fr->inst), e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "running_sum_catches_input_error: out of memory", -1);
+    } else {
+      ((int64_t*)d)[0] = -1;
+      set_cpu(out);
+      rc = KOMIRA_UDF_OK;
+    }
+  }
   leave(fr->inst->ctx);
   if (rc == KOMIRA_UDF_OK && fr->inst->fx->variant == FILL_ERROR_ON_OK && fr->inst->fx->id == F_RUNNING_SUM)
     fail(host_of(fr->inst), e, KOMIRA_UDF_ERR_RAISED, "running_sum_error_on_ok: filled, then OK returned", -1);

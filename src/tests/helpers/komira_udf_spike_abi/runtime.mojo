@@ -62,6 +62,7 @@ from ._table import (
     new_caps,
     new_spec,
     open_library,
+    pipe_call,
     read_caps,
     read_words,
     required_size,
@@ -168,6 +169,12 @@ struct UdfRuntime(Movable):
     var _lost_calls_allowed: Bool
     """Test-only (allow_calls_on_lost_contexts): a runtime's own test that
     checks what a lost context answers may call it."""
+    var _nest_pipe: Word
+    """Set by _nested.mojo while it makes a nested scalar call: every
+    call_batch until it is cleared runs as a call nested in the waiting call
+    `_nest_outer` (its call struct from the pipe: a call id of the pipe's,
+    the waiting call's deadline and cancel flag; no clock armed)."""
+    var _nest_outer: Word
 
     def __init__(out self, path: String, var arena: _Arena, lib: Word, table: Word, rt: Word, host: Word):
         self.path = path
@@ -182,6 +189,8 @@ struct UdfRuntime(Movable):
         self._owner_ctx = List[Int]()
         self._lost = List[Int]()
         self._lost_calls_allowed = False
+        self._nest_pipe = Word.null()
+        self._nest_outer = Word.null()
 
     @staticmethod
     def open(path: String, abi_major: UInt32 = ABI_MAJOR) raises -> UdfRuntime:
@@ -507,9 +516,15 @@ struct UdfRuntime(Movable):
         var d_args = device_struct(self._arena, args, hd, opts.plant_extra_child, opts.plant_struct_offset)
         var d_out = self._arena.word(128)
         var err = new_error(self._arena)
-        var c = self._begin(opts)
+        var nested = not self._nest_pipe.is_null()
+        var c: _Call
+        if nested:
+            c = _Call(pipe_call(self._arena, self._nest_pipe, self._nest_outer), False, False)
+        else:
+            c = self._begin(opts)
         var rc = t_call_batch(self._table, inst._w, c.call, d_args, d_out, err)
-        self._end(c)
+        if not nested:
+            self._end(c)
         var res = self._finish_column(rc, err, d_out, spec.result[0], args.length)
         self._stamp(res.outcome, spec, c)
         self._note(inst, res.outcome)

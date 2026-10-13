@@ -301,6 +301,17 @@ def new_call(mut arena: _Arena, deadline_ns: Int64, call_id: Int64, cancel: Bool
     return Word(c.bitcast[NoneType]())
 
 
+def pipe_call(mut arena: _Arena, pipe: Word, outer: Word) -> Word:
+    """A komira_udf_call for a nested call (native/producer.c,
+    komira_udf_spike_pipe_call): the pipe's next call id, and the waiting
+    call `outer`'s deadline and cancel flag."""
+    var c = arena.word(size_of[CUdfCall]())
+    # SAFETY: `pipe` is the live pipe of a nested run, `outer` the waiting
+    # call's block, `c` a fresh arena block of a komira_udf_call.
+    external_call["komira_udf_spike_pipe_call", NoneType](pipe.p, outer.p, c.p)
+    return c
+
+
 def word_array(mut arena: _Arena, words: List[Word]) -> Word:
     """An arena block holding the pointers of `words`, in order."""
     # SAFETY: a zeroed arena block of one pointer per word.

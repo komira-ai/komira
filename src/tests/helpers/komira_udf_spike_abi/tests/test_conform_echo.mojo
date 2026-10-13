@@ -31,13 +31,24 @@
 # single-point mutant of runtime.mojo, _host.mojo, conform.mojo and the
 # native C helpers supersedes that table as evidence: its scorecard and every
 # survivor, with the reason no test can kill it, are in the pull request.
+# Nesting (_nested.mojo, native/producer.c) and the error table: the
+# producer handing on a nested frame's output after the run failed goes red
+# on nested_frame_input_error_caught (1 EIO of 2); run_nested_frame keeping
+# the waiting frame's outputs after the failure, on the same case (2
+# batches of 1); the nested scalar made through _call_batch, so not
+# bisected, on nested_scalar_bisected (row -1); the nested scalar's host
+# fault ignored, on nested_scalar_short_by_one; the pipe's first-failure
+# latch removed, on nested_two_levels_scalar_raises (ERR_INTERNAL);
+# UdfRuntime._stamp setting shape 0, on step_deadline_passed
+# (UDF_DEADLINE_EXCEEDED); _call_bisected bisecting a raise that names its
+# row, on raise_on_row_3 (2 calls of at most 1).
 
 from std.testing import assert_equal
 
 from komira_udf_spike_abi.conform import load_cases, run_suite
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases"
-comptime CASE_COUNT = 159
+comptime CASE_COUNT = 164
 """The JSON files under cases/: an empty or partial staging cannot pass."""
 
 

@@ -119,6 +119,7 @@ comptime F_ROW_CONST = 51
 comptime F_FRAME_ROW_COUNTS = 52
 comptime F_YIELD_THREE_THEN_RAISE = 53
 comptime F_RAISE_IF_5_SMALL = 54
+comptime F_RUNNING_SUM_CATCH = 55
 
 comptime ROW_FIELDS_MAX = 8
 comptime SLOW_ROW_NS: Int64 = 100_000_000
@@ -163,6 +164,10 @@ def find_fixture(entry: String) -> Optional[Fixture]:
         return Fixture(F_SUM, SHAPE_AGG_MERGEABLE, "l", "l", "l")
     if entry == "running_sum":
         return Fixture(F_RUNNING_SUM, SHAPE_MAP_BATCHES_FRAME, "l", "tl", "")
+    # running_sum whose user code catches its input's failure and yields a
+    # one-row table [-1] instead, then ends.
+    if entry == "running_sum_catches_input_error":
+        return Fixture(F_RUNNING_SUM_CATCH, SHAPE_MAP_BATCHES_FRAME, "l", "tl", "")
     if entry == "group_max":
         return Fixture(F_GROUP_MAX, SHAPE_AGG_PLAIN, "l", "l", "")
     if entry == "empty_table":

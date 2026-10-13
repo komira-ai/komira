@@ -6,8 +6,9 @@
 # are `<bundle>#<export>`, so every entry becomes `fixtures.mjs#<name>`: the
 # esbuild bundle of udf/fixtures.ts.
 #
-# Sixty-six cases are left out (runtime_fault_cases): each one's fixture
-# is an act at the C ABI, which only a runtime library can commit. In this
+# Sixty-seven cases are left out (runtime_fault_cases). Sixty-six of them
+# because each one's fixture is an act at the C ABI, which only a runtime
+# library can commit. In this
 # runtime the proxy, not user code, builds every array the host sees, moves
 # and releases the inputs, and fills the error, so a TypeScript function cannot
 # leave an input unmoved, fill an error on OK, name a row outside its batch,
@@ -22,7 +23,10 @@
 # INSTANCE_LOST cases are the reference runtime's test setting (a context
 # lost with no user code run, design section 6.3); here a context is lost
 # only by its worker dying, which this runtime's own tests cover
-# (tests/test_node_worker.mojo).
+# (tests/test_node_worker.mojo). The sixty-seventh is a frame whose user
+# code catches its input's failure: when a pull fails, the proxy fails the
+# frame_next itself (proxy.c, next_input) and user code never sees the
+# failure, so it cannot catch it.
 
 from komira_udf_spike_abi.cases import Case
 from komira_udf_spike_abi.conform import load_cases
@@ -114,6 +118,9 @@ def runtime_fault_cases() -> List[String]:
         # a batch function's error naming a row: this runtime reports row -1
         # for any error a batch function throws (worker/calls.mjs, raised)
         "bisect_half_reports_row",
+        # user code catching its input's failure: the proxy fails the
+        # frame_next on a failed pull before user code sees it
+        "nested_frame_input_error_caught",
     ]
 
 

@@ -606,6 +606,19 @@ def pulls_of(rec: Word) -> Int:
     return rec.p.bitcast[_StreamRec]()[].pulls
 
 
+def move_array(src: Word, dst: Word):
+    """Move the root array of host device struct `src` into device struct
+    `dst` (its ten words; the source's release slot cleared), as a stream's
+    get_next hands a batch out."""
+    # SAFETY: both are ArrowDeviceArray blocks: `src` one of the host's,
+    # `dst` the slot a get_next caller passed.
+    var s = src.p.bitcast[Int64]()
+    var d = dst.p.bitcast[Int64]()
+    for w in range(10):
+        d[w] = s[w]
+    src.p.bitcast[CArrowArray]()[].release = null_void()
+
+
 def array_released(d: Word) -> Bool:
     """Whether the array of host device struct `d` has been moved out or
     released (its release slot is NULL)."""

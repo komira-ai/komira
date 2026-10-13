@@ -269,10 +269,16 @@ def _then_call(mut rt: UdfRuntime, c: Case, inst: Handle) raises -> String:
 
 def _run_call(mut rt: UdfRuntime, c: Case) raises -> String:
     var b = _bind(rt, c, 1)
+    var calls = rt.calls()
     var res = rt.call_batch(b.insts[0], c.spec, c.input, c.options)
+    calls = rt.calls() - calls
     var why = _check(res.outcome, c.expect)
     if why == "" and res.outcome.is_ok() and c.expect.column:
         why = same_column(res.column, c.expect.column.value())
+    # Bisection's halves count: a raise that names its row is not bisected
+    # (design 4.5), so its case bounds the calls at 1.
+    if why == "" and c.expect.max_calls >= 0 and calls > Int64(c.expect.max_calls):
+        why = String(calls) + " calls crossed into the runtime, at most " + String(c.expect.max_calls) + " expected"
     if why == "":
         why = _then_call(rt, c, b.insts[0])
     _unbind(rt, b)
@@ -497,7 +503,10 @@ def _run_nested(mut rt: UdfRuntime, c: Case) raises -> String:
     if not fi.outcome.is_ok() or not si.outcome.is_ok():
         why = "open_instance: " + String(fi.outcome) + ", " + String(si.outcome)
     else:
-        var res = run_nested_frame(rt, fi.handle, c.spec, si.handle, c.inputs, c.levels, c.pull_at, c.pull_do, c.options)
+        var s_spec = c.nested.value().copy() if has_scalar else c.spec.copy()
+        var res = run_nested_frame(
+            rt, fi.handle, c.spec, si.handle, s_spec, c.inputs, c.levels, c.pull_at, c.pull_do, c.options
+        )
         why = _check(res.outcome, c.expect)
         if why == "" and c.expect.batches:
             why = _same_batches(res.outputs, c.expect.batches.value())

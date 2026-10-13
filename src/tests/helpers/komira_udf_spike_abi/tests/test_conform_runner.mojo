@@ -5,14 +5,16 @@
 #
 # What it proves: each comparison the runner makes against a case's
 # expectation (status, message present, run error, an unexpected host fault,
-# the expected fault's text, error row exact and at least, column values, nulls, length and float
+# the expected fault's text, error row exact and at least, the calls a
+# call_batch crossed (bisection's halves counted), column values, nulls, length and float
 # tolerance, the split run, frame batch count, values, length and first
 # output, the aggregate's result and an expected fault that never came,
 # validate's status) and each release-ledger rule (an array released twice,
 # a borrowed schema released, an input stream not released, reserved bytes
 # still held) goes off; and a case of a shape the runtime does not report is
 # skipped, not run, and so is a case of another class, one needing a feature
-# bit the runtime does not report, and one about a shape the runtime lacks on
+# bit the runtime does not report (one bit, or two of which it reports one),
+# and one about a shape the runtime lacks on
 # a runtime that has it. The fixtures behind the ledger cases (release_args_twice,
 # release_schema, stream_kept, leak_reservation) and raise_no_message are
 # echo entries no case under cases/ uses.
@@ -20,14 +22,16 @@
 # Defect caught: a runner check deleted or weakened, so the suite passes a
 # runtime that breaks the rule it stands for (test_conform_echo cannot see
 # that: a weakened check passes every good runtime). Each mutant is listed
-# with this file in the pull request's sweep table.
+# with this file in the pull request's sweep table; the feature gate
+# reduced to any one needed bit goes red on skip_one_of_two_features, and
+# call_batch's max_calls check dropped on call_max_calls_exceeded.
 
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_udf_spike_abi.conform import load_cases, run_suite
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases_runner"
-comptime CASE_COUNT = 50
+comptime CASE_COUNT = 52
 """The JSON files under cases_runner/: an empty or partial staging cannot
 pass."""
 
@@ -54,6 +58,6 @@ def main() raises:
         # the case asks for one: otherwise the case failed for a second reason.
         if "; and " not in c.runner_fails_with:
             assert_false("; and " in r.reason, c.name + " also failed its ledger: " + r.reason)
-    assert_equal(report.count("FAIL"), CASE_COUNT - 4)
-    assert_equal(report.count("SKIP"), 4)
+    assert_equal(report.count("FAIL"), CASE_COUNT - 5)
+    assert_equal(report.count("SKIP"), 5)
     print("test_conform_runner: ok")

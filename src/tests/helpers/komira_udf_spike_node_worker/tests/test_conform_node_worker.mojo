@@ -3,8 +3,8 @@
 # runs each context in its own `node` process. Driven through the C ABI
 # only, by the same runner as the reference runtime.
 #
-# What it proves: every case user code can express (node_cases.mojo: 93 of
-# the corpus's 159) runs
+# What it proves: every case user code can express (node_cases.mojo: 97 of
+# the corpus's 164) runs
 # through the proxy and a worker: values; nulls under MANUAL and PROPAGATE;
 # a sliced input's offset (re-based by the proxy's IPC encoder); an error
 # with its row, message and trace; results the host must reject; the cancel
@@ -44,8 +44,8 @@ from komira_udf_spike_node_worker.node_cases import node_cases
 from komira_udf_spike_node_worker.watchdog import arm_watchdog
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases"
-comptime RUN = 93
-"""The corpus's 159 cases less the 66 left out (node_cases.mojo)."""
+comptime RUN = 97
+"""The corpus's 164 cases less the 67 left out (node_cases.mojo)."""
 
 
 def main() raises:

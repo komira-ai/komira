@@ -41,6 +41,7 @@ from komira_udf_spike_abi.contract import (
 
 from ._arrow import (
     PAD_VALUE,
+    _free_error,
     arr,
     child,
     fail,
@@ -62,6 +63,7 @@ from ._fixtures import (
     F_GROUP_MAX,
     F_RAISE_AGAIN,
     F_RUNNING_SUM,
+    F_RUNNING_SUM_CATCH,
     F_TABLE_NULL_COUNT_UNKNOWN,
     F_TABLE_SLICED,
     F_TWO_TYPES,
@@ -417,6 +419,17 @@ def _frame_next(fr: Void, call: Void, out_p: Void, e: Void) abi("C") -> Int32:
         return OK
     if f[].fx == F_RUNNING_SUM or f[].fx == F_YIELD_FIRST:
         return _next_running_sum(fr, out_p, e)
+    if f[].fx == F_RUNNING_SUM_CATCH:
+        var rc = _next_running_sum(fr, out_p, e)
+        if rc == OK or not f[].in_failed:
+            return rc
+        # User code caught the failed pull's error: it yields [-1] and ends.
+        _free_error(e)
+        f[].done = True
+        make_struct(out_p, 1, 1)
+        make_col(child(out_p, 0), 1).bitcast[Int64]()[0] = -1
+        set_cpu(out_p)
+        return OK
     if f[].fx == F_GROUP_MAX:
         return _next_group_max(fr, out_p, e)
     if f[].fx == F_YIELD_TWO_THEN_RAISE:

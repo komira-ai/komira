@@ -21,6 +21,7 @@ enum variant_id {
   V_ANY_MAJOR,              /* init accepts a host of any ABI major */
   V_DESCRIBE_FAILS,         /* describe returns ERR_INTERNAL */
   V_NO_CPU,                 /* devices lacks CPU */
+  V_GPU_ONLY,               /* devices has another device's bit, and lacks CPU */
   V_NATIVE,                 /* NATIVE (legal) */
   V_FEATURES_BIT_3,         /* a feature bit this ABI does not define */
   V_FEATURES_ALL_DEFINED,   /* every feature bit ABI 1.0 defines (legal) */
@@ -42,6 +43,7 @@ static const struct {
     {"any_major", V_ANY_MAJOR},
     {"describe_fails", V_DESCRIBE_FAILS},
     {"no_cpu", V_NO_CPU},
+    {"gpu_only", V_GPU_ONLY},
     {"native", V_NATIVE},
     {"features_bit_3", V_FEATURES_BIT_3},
     {"features_all_defined", V_FEATURES_ALL_DEFINED},
@@ -89,6 +91,9 @@ static int32_t describe_variant(const komira_udf_rt* rt, komira_udf_capabilities
       return KOMIRA_UDF_ERR_INTERNAL;
     case V_NO_CPU:
       c->devices = 0;
+      break;
+    case V_GPU_ONLY:
+      c->devices = 1u << 1;
       break;
     case V_NATIVE:
       c->udf_class = KOMIRA_UDF_CLASS_NATIVE;

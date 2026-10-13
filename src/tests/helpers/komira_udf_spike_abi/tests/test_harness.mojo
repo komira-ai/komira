@@ -33,6 +33,7 @@
 #     an error init filled on success (error_on_ok_init: the reserved bytes
 #     return to 0, a release skipped on success caught); and the capability
 #     check fails each describe answer that breaks one of its rules (no CPU,
+#     with no device or with another device's bit only,
 #     class 0 or 3, a feature bit this ABI does not define, the
 #     MEMORY_REPORT bit and entry disagreeing, a bad id), for that rule, and
 #     passes each legal edge (NATIVE, every defined feature bit, no
@@ -44,7 +45,8 @@
 # ERR_INSTANCE_LOST to UDF_INSTANCE_LOST: red. The capability check without
 # its unknown-feature arm: red on features_bit_3. UdfRuntime._live not
 # refusing: red on the lost-context arm. _bisect reusing the parent's call
-# id: red on the call id arm.
+# id: red on the call id arm. The capability check's CPU test reduced to
+# `devices == 0`: red on gpu_only.
 
 from std.os import setenv, unsetenv
 from std.testing import assert_equal, assert_false, assert_true
@@ -747,6 +749,7 @@ def _variants() raises:
         "features_all_defined|PASS",
         "bad_id|runtime id 'Komira-test/echo'",
         "no_cpu|devices lacks CPU",
+        "gpu_only|devices lacks CPU",
         "features_bit_3|a feature bit this ABI does not define: features 9",
         "class_0|udf_class 0 is neither",
         "class_3|udf_class 3 is neither",
