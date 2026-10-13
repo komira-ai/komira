@@ -31,7 +31,21 @@
 #       /usr/lib is red with its requirement missing and with it declared.
 #       Mutants: `is_native` deciding from the requirement (the
 #       missing-requirement case has no row), and `_alone_rows` returning
-#       for a pin with no `lib_files`.
+#       for a pin with no `lib_files`;
+#   (zlib) kci run 38397209148 refused komira_zlib alone, installed with
+#       libzlib: "libz.so.1 was loaded from /lib/x86_64-linux-gnu/libz.so.1".
+#       The `mojo run` record holds every process the run starts, and on
+#       the first run in a fresh environment one of them loads libz.so.1
+#       and libzstd.so.1 from /lib (kci run 38348429425 showed libz.so.1
+#       twice in komira_zlib's alone record, from <env>/bin/../lib and from
+#       /lib: two processes, as one process maps a soname once). FreshEnv
+#       plays such an environment by what each process loads, not by a
+#       script, so the rows may run the README either way. A README whose
+#       closure opens a codec runs built: the build without the record, the
+#       program under it, which then holds the program's own loads only.
+#       Red stays red: libzlib not installed, and the built program itself
+#       loading the system's libz. Mutant: `runs_built` without its codecs
+#       clause (the installed case turns into the exact refusal above).
 #
 # Hermetic: TEST_TMPDIR, kci_build's ScriptedRunner; no pixi, no network.
 # =============================================================================
@@ -42,6 +56,7 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from kci_api import VALIDATION_KIND_CONDA_INSTALL_ENV, ResultValidationCheck
 from kci_build import ScriptedRunner, ScriptedStep
+from kci_build.runner import ProcessRunner, RunResult, RunSpec
 from kci_publish.release_fixture import write_text_file
 from kci_release_machine import StageValidation
 from kci_validate import (
@@ -55,7 +70,6 @@ from kci_validate import (
     links_static,
     loaded_from_findings,
     run_native_rows,
-    run_program_argv,
 )
 
 comptime CHANNEL: String = "https://conda.example.invalid/example/gamma"
@@ -228,8 +242,13 @@ struct Alone(Movable):
     def aenv(self) -> String:
         return self.awork + String("/") + String(ENV)
 
-    def mojo_run(mut self, trace: String):
-        var readme = ScriptedStep(run_program_argv(self.awork, String("readme_komira_lz4.mojo"), List[String]()), stdout_text=String(COUNT))
+    def built_run(mut self, trace: String):
+        """Its README built (its closure opens a codec, so never `mojo
+        run`; no block, so no build words), then the program run, leaving
+        `trace` as its loader's record."""
+        var exe = self.aenv() + String("/bin/readme_komira_lz4")
+        self.runner.expect(ScriptedStep(build_program_argv(self.awork, String("readme_komira_lz4.mojo"), List[String](), exe)))
+        var readme = ScriptedStep(List[String](), stdout_text=String(COUNT))
         readme.writes(String("out/readme_komira_lz4.ld.103"), trace.copy())
         self.runner.expect(readme^)
 
@@ -266,7 +285,7 @@ def _depends(lz4c: Bool) -> List[String]:
 
 def _red_alone(sub: String, lz4c: Bool) raises:
     var a = Alone(sub, _depends(lz4c))
-    a.mojo_run(String(LZ4_TRACE))
+    a.built_run(String(LZ4_TRACE))
     var checks = a.run()
     assert_false(checks[1].ok)
     assert_equal(
@@ -290,7 +309,7 @@ def test_a_codec_only_package_loading_the_system_codec_is_red_alone() raises:
 def test_alone_the_codec_through_bin_dotdot_lib_and_the_toolchains_loads_pass() raises:
     # (1) and (2) together, as komira_lz4 alone met them in kci run 38348429425
     var a = Alone(String("alone-real"), _depends(True))
-    a.mojo_run(
+    a.built_run(
         String(TOOLCHAIN_TRACE) + _init(a.aenv() + String("/bin/../lib/liblz4.so.1"))
     )
     var checks = a.run()
@@ -327,6 +346,208 @@ def test_alone_a_static_holder_readme_is_built_then_run() raises:
         if env[i] == String("LD_DEBUG=libs"):
             traced = True
     assert_true(traced)
+
+
+# ---- (zlib) a codec README alone, judged on the built program ----------------------
+
+
+comptime ZLIB_COUNT: String = "readme_komira_zlib validation: 3 of 3 checks passed\n"
+comptime SYSTEM_LIBZ: String = "/lib/x86_64-linux-gnu/libz.so.1"
+comptime USR_LIBZ: String = "/usr/lib/x86_64-linux-gnu/libz.so.1"
+
+
+def _ld_output(spec: RunSpec) -> String:
+    """The `LD_DEBUG_OUTPUT=` value `spec` runs with, "" when none."""
+    if not spec.env:
+        return String("")
+    ref env = spec.env.value()
+    for i in range(len(env)):
+        if env[i].startswith(String("LD_DEBUG_OUTPUT=")):
+            return String(env[i][byte = 16 :])
+    return String("")
+
+
+def _put(path: String, text: String) raises:
+    makedirs(String(path[byte = 0 : path.rfind(String("/"))]), exist_ok=True)
+    write_text_file(path, text)
+
+
+struct FreshEnv(ProcessRunner):
+    """komira_zlib's fresh alone environment, played by what each process
+    loads (file header, (zlib)): `pixi install` writes the package's record
+    and, when `libzlib`, lib/libz.so.1. The first `mojo` command starts a
+    process loading libz.so.1 and libzstd.so.1 from /lib (TOOLCHAIN_TRACE,
+    pid 104); a `mojo run` program's own dlopen finds lib/'s codec through
+    the compiler's DT_RPATH `$ORIGIN/../lib` (pid 103); the built program
+    finds lib/'s (pid 105), or the system's when lib/ lacks it, or
+    /usr/lib's when `stray` (the program itself loading from outside). A
+    process writes `<LD_DEBUG_OUTPUT>.<pid>` only when it runs with one.
+
+    Layout: owned values only. No pointer field."""
+
+    var awork: String
+    var libzlib: Bool
+    var stray: Bool
+    var fresh: Bool
+    var calls: List[RunSpec]
+
+    def __init__(out self, awork: String, libzlib: Bool, stray: Bool):
+        self.awork = awork.copy()
+        self.libzlib = libzlib
+        self.stray = stray
+        self.fresh = True
+        self.calls = List[RunSpec]()
+
+    def env(self) -> String:
+        return self.awork + String("/") + String(ENV)
+
+    def run(mut self, spec: RunSpec) raises -> RunResult:
+        self.calls.append(spec.copy())
+        var record = _ld_output(spec)
+        var out = String("")
+        if len(spec.argv) > 0 and spec.argv[0] == String("install"):
+            _put(self.env() + String("/conda-meta/komira_zlib-1.0.0-h0_1.json"), String('{"name":"komira_zlib"}'))
+            _put(self.env() + String("/bin/mojo"), String("the compiler, played"))
+            if self.libzlib:
+                _put(self.env() + String("/lib/libz.so.1"), String("zlib, played"))
+        elif len(spec.argv) > 5 and spec.argv[4] == String("mojo"):
+            if self.fresh and record.byte_length() > 0:
+                _put(record + String(".104"), String(TOOLCHAIN_TRACE))
+            self.fresh = False
+            if spec.argv[5] == String("run"):
+                if record.byte_length() > 0:
+                    var lib = self.env() + String("/bin/../lib/libz.so.1") if self.libzlib else String(SYSTEM_LIBZ)
+                    _put(record + String(".103"), _init(lib))
+                out = String(ZLIB_COUNT)
+        elif spec.path == self.env() + String("/bin/readme_komira_zlib"):
+            if record.byte_length() > 0:
+                var lib = String(SYSTEM_LIBZ)
+                if self.stray:
+                    lib = String(USR_LIBZ)
+                elif self.libzlib:
+                    lib = self.env() + String("/lib/libz.so.1")
+                _put(record + String(".105"), _init(lib))
+            out = String(ZLIB_COUNT)
+        else:
+            raise Error(String("FreshEnv: unexpected run ") + spec.command_line())
+        write_text_file(spec.stdout_path, out)
+        write_text_file(spec.stderr_path, String(""))
+        return RunResult(Int32(0))
+
+
+def _zlib_dir(sub: String) raises -> String:
+    """The validation's directory, <scratch>/<validation>."""
+    var dir = _tmp(sub) + String("/install-set")
+    makedirs(dir + String("/work/out"), exist_ok=True)
+    return dir^
+
+
+def _zlib_runner(dir: String, libzlib: Bool, stray: Bool) -> FreshEnv:
+    return FreshEnv(dir + String("/alone/komira_zlib/work"), libzlib, stray)
+
+
+def _zlib_alone(dir: String, mut runner: FreshEnv) raises -> List[ResultValidationCheck]:
+    """`run_native_rows` for a set whose member komira_zlib (no native
+    file, a `dlopen` row for libz.so.1) runs alone in `runner`."""
+    var zlib = InstallPin(String("komira_zlib"))
+    zlib.version = String("1.0.0")
+    zlib.build = String("h0_1")
+    zlib.subdir = String("linux-64")
+    zlib.is_library = True
+    zlib.import_name = String("komira_zlib")
+    zlib.has_dlopen = True
+    zlib.depends = [String("__linux"), String("mojo-compiler ==1.0.0"), String("libzlib >=1.2.13,<2")]
+    var meta = InstallPin(String("komira"))
+    meta.version = String("1.0.0")
+    meta.build = String("h0_1")
+    meta.subdir = String("linux-64")
+    var named = List[InstallPin]()
+    named.append(meta.copy())
+    var pins = List[InstallPin]()
+    pins.append(meta^)
+    pins.append(zlib^)
+    var program = ReadmeProgram()
+    program.file = String("readme_komira_zlib.mojo")
+    program.text = String("the README runner, played\n")
+    program.package = String("komira_zlib")
+    program.display = String("src/komira_zlib/README.md")
+    program.codecs = [String("libz.so.1")]
+    var programs = List[ReadmeProgram]()
+    programs.append(program^)
+    var v = StageValidation(7)
+    v.name = String("install-set")
+    v.kind = String(VALIDATION_KIND_CONDA_INSTALL_ENV)
+    v.installs.append(String("komira"))
+    v.compiler_channel = String(COMPILER)
+    var checks = List[ResultValidationCheck]()
+    run_native_rows(runner, v, String(CHANNEL), String("1.0.0"), dir, named, pins, programs, checks)
+    var order = String("")
+    for i in range(len(checks)):
+        if i > 0:
+            order += String(" ")
+        order += checks[i].check
+    assert_equal(order, String("alone loaded_from"))
+    assert_true(checks[0].ok, checks[0].got)
+    return checks^
+
+
+def test_the_mojo_run_record_of_a_fresh_environment_is_the_refusal() raises:
+    # why a codec README is not judged under `mojo run`: its record, the
+    # program's libz from <env>/bin/../lib beside the toolchain's process,
+    # is exactly the refusal of kci run 38397209148
+    var env = _tmp(String("fresh_record"))
+    makedirs(env + String("/lib"), exist_ok=True)
+    var trace = String(TOOLCHAIN_TRACE) + _init(env + String("/bin/../lib/libz.so.1"))
+    var libz: List[String] = [String("libz.so.1")]
+    var f = loaded_from_findings(trace, env, libz)
+    assert_equal(len(f), 1, _joined(f))
+    assert_equal(f[0], String("libz.so.1 was loaded from /lib/x86_64-linux-gnu/libz.so.1, not from ") + env + String("/lib/"))
+
+
+def test_zlib_alone_with_libzlib_is_judged_on_its_built_program() raises:
+    # kci run 38397209148, "loaded_from: komira_zlib alone: libz.so.1 was
+    # loaded from /lib/x86_64-linux-gnu/libz.so.1": the install was right
+    var dir = _zlib_dir(String("zlib_ok"))
+    var runner = _zlib_runner(dir, True, False)
+    var checks = _zlib_alone(dir, runner)
+    assert_true(checks[1].ok, checks[1].got)
+    assert_equal(len(runner.calls), 3)
+    var exe = runner.env() + String("/bin/readme_komira_zlib")
+    assert_equal(
+        _joined(runner.calls[1].argv),
+        _joined(build_program_argv(runner.awork, String("readme_komira_zlib.mojo"), List[String](), exe)),
+    )
+    assert_equal(_ld_output(runner.calls[1]), String(""))
+    assert_equal(runner.calls[2].path, exe)
+    assert_equal(_ld_output(runner.calls[2]), runner.awork + String("/out/readme_komira_zlib.ld"))
+
+
+def test_zlib_alone_without_libzlib_is_red() raises:
+    # slice 4's defect for komira_zlib: its requirement missing, the built
+    # program's dlopen finds only the system's copy
+    var dir = _zlib_dir(String("zlib_missing"))
+    var runner = _zlib_runner(dir, False, False)
+    var checks = _zlib_alone(dir, runner)
+    assert_false(checks[1].ok)
+    assert_equal(
+        checks[1].got,
+        String("loaded_from: komira_zlib alone: libz.so.1 was loaded from /lib/x86_64-linux-gnu/libz.so.1, not from ")
+        + runner.env() + String("/lib/"),
+    )
+
+
+def test_zlib_alone_whose_built_program_loads_libz_from_outside_is_red() raises:
+    # libzlib installed, and the program's own process still maps another
+    # copy: a declared codec from outside the environment stays red
+    var dir = _zlib_dir(String("zlib_stray"))
+    var runner = _zlib_runner(dir, True, True)
+    var checks = _zlib_alone(dir, runner)
+    assert_false(checks[1].ok)
+    assert_equal(
+        checks[1].got,
+        String("loaded_from: komira_zlib alone: libz.so.1 was loaded from /usr/lib/x86_64-linux-gnu/libz.so.1, not from ")
+        + runner.env() + String("/lib/"),
+    )
 
 
 def test_links_static() raises:

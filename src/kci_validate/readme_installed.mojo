@@ -125,11 +125,18 @@ struct ReadmeProgram(Copyable, Movable):
         self.codecs = List[String]()
 
     def runs_built(self) -> Bool:
-        """Whether the README runs built rather than under `mojo run`: its
-        block's `mojo build` line links a static archive its `mojo run` line
-        does not (readme_link.mojo `links_static`; komira_log's holder,
-        which the JIT cannot load). native_rows.mojo `run_readme`."""
-        return links_static(self.block)
+        """Whether the README runs built rather than under `mojo run`
+        (native_rows.mojo `run_readme`): its block's `mojo build` line links
+        a static archive its `mojo run` line does not (readme_link.mojo
+        `links_static`; komira_log's holder, which the JIT cannot load), or
+        its library's closure opens a system codec (`codecs` not empty).
+        The loader's record of a `mojo run` holds every process the run
+        starts, the compiler's own among them: on the first run in a fresh
+        environment one of them loads libz.so.1 and libzstd.so.1 from the
+        system (kci run 38397209148, komira_zlib alone), which the record
+        cannot tell from the program's own `dlopen`. A built program run
+        directly is the program's process alone."""
+        return links_static(self.block) or len(self.codecs) > 0
 
 
 def package_dir_of(label: String) raises -> String:
