@@ -21,8 +21,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # margin), test_azure_token_clock (each provider's expiry and refresh margin
 # on a ManualClock: expiry is the clock's reading plus expires_in exactly,
 # not due one ms before the margin, due at it and past expiry, and the
-# providers' sources read no wall clock) and test_no_env_reads (the
-# package's sources read no environment).
+# providers' sources read no wall clock), test_azure_provider_grid (every
+# token-response fixture through the reader and both providers with its exact
+# result, the IMDS endpoint's schemes and ports, percent-encoding byte by
+# byte, the status boundaries, and each factory and with_clock as a whole
+# object) and test_no_env_reads (the package's sources read no environment).
 mojo_library(
     name = "komira_azure_core",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -45,6 +48,7 @@ mojo_library(
     },
     test_srcs = [
         "tests/test_azure_credentials.mojo",
+        "tests/test_azure_provider_grid.mojo",
         "tests/test_azure_token_clock.mojo",
         "tests/test_azure_token_providers.mojo",
         "tests/test_no_env_reads.mojo",
