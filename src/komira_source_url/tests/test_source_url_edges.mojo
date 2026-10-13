@@ -18,7 +18,8 @@
 #    first ':', lowercase; the refusal names that host and nothing else.
 #  * the Azure Blob host is one non-empty label before
 #    .blob.core.windows.net: an empty label, a one-letter label, two labels,
-#    a label glued to "blob", another top-level domain.
+#    a trailing label, a label glued to "blob", a suffix of the same length
+#    on another domain.
 from std.testing import assert_equal, assert_false
 
 from komira_plan_expr.fs_descriptor_pod import (
@@ -138,9 +139,9 @@ def test_every_refusal_whole_message() raises:
     _refused("", "source_url: an empty URL names no source")
     _refused("://lake/a", "source_url: a URL's scheme is empty")
     _refused(":///", "source_url: a URL's scheme is empty")
-    _refused("ftp://files.example/secret-path?sig=CANARY", _unserved("ftp"))
+    _refused("ftp://example.com/secret-path?sig=CANARY", _unserved("ftp"))
     _refused("http://example.com/secret-path?sig=CANARY", _HTTP)
-    _refused("Http://user:CANARY@myacct.blob.core.windows.net/a", _HTTP)
+    _refused("Http://myacct.blob.core.windows.net:443/a?sig=CANARY", _HTTP)
     _refused("http://", _HTTP)
     _refused("https://example.com/secret-path?sig=CANARY", _no_host("example.com"))
     _refused("https://u@myacct.blob.core.windows.net/a?sig=CANARY", _AUTHORITY)
@@ -195,7 +196,8 @@ def test_azure_blob_host_shape() raises:
     _maps("https://a.blob.core.windows.net/x", FS_SCHEME_AZURE)
     _maps("https://ab.blob.core.windows.net/x", FS_SCHEME_AZURE)
     _maps("https://MYACCT.BLOB.CORE.WINDOWS.NET", FS_SCHEME_AZURE)
-    # No account label, two labels, a label glued to "blob", another TLD.
+    # No account label, two labels, a trailing label, a label glued to
+    # "blob", a suffix of the same length on another domain.
     _refused(
         "https://.blob.core.windows.net/x", _no_host(".blob.core.windows.net")
     )
@@ -203,13 +205,13 @@ def test_azure_blob_host_shape() raises:
         "https://a.b.blob.core.windows.net/x", _no_host("a.b.blob.core.windows.net")
     )
     _refused(
-        "https://ab.blob.core.windows.net.x/x",
-        _no_host("ab.blob.core.windows.net.x"),
+        "https://ab.blob.core.windows.net.invalid/x",
+        _no_host("ab.blob.core.windows.net.invalid"),
     )
     _refused("https://myblob.core.windows.net/x", _no_host("myblob.core.windows.net"))
     _refused(
-        "https://myacct.blob.core.windows.org/x",
-        _no_host("myacct.blob.core.windows.org"),
+        "https://myacct.blob.core.example.com/x",
+        _no_host("myacct.blob.core.example.com"),
     )
     _refused(
         "https://myacctxblob.core.windows.net/x",
