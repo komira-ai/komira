@@ -593,7 +593,8 @@ def _with_header(json_name: String, json_value: String) -> String:
 def test_header_value_bytes_at_the_control_edges() raises:
     """Bytes 0x00 to 0x1F but the tab, and 0x7F, are control bytes and
     refused; the tab, a space (0x20) and `~` (0x7E) are kept as given.
-    Each edge from both sides, the message whole and the value unquoted."""
+    Each edge from both sides, each refused byte at the value's end and at
+    its start, the message whole and the value unquoted."""
     var kept: List[String] = ["a\\tb", "a b", "~", "\\u0020x\\u007e"]
     var want: List[String] = ["a\tb", "a b", "~", " x~"]
     for i in range(len(kept)):
@@ -602,22 +603,27 @@ def test_header_value_bytes_at_the_control_edges() raises:
     var control: List[String] = [
         "\\u0000", "\\u0008", "\\u000a", "\\u001f", "\\u007f"
     ]
+    # Each control byte last and first: every byte of the value is checked.
     for i in range(len(control)):
-        var msg = _refusal(_with_header(String("X-A"), String("SECRET-V") + control[i]))
-        assert_equal(
-            msg,
-            _P_TEXT + "names a credential_source header whose value holds a"
-            " control byte",
-            control[i],
-        )
-        assert_false("SECRET-V" in msg, msg)
+        var at: List[String] = [
+            String("SECRET-V") + control[i], control[i] + String("SECRET-V")
+        ]
+        for j in range(len(at)):
+            var msg = _refusal(_with_header(String("X-A"), at[j]))
+            assert_equal(
+                msg,
+                _P_TEXT + "names a credential_source header whose value holds a"
+                " control byte",
+                at[j],
+            )
+            assert_false("SECRET-V" in msg, msg)
 
 
 def test_header_names_are_exactly_http_tokens() raises:
     """RFC 9110 `tchar`: every one of its 15 punctuation bytes, and the ends
     of each letter and digit range, make a name that parses; each byte just
     outside a range, every separator, a space, DEL and a non-ASCII letter
-    is refused."""
+    is refused, at the name's end and at its start."""
     var tchar = String("!#$%&'*+-.^_`|~")
     var tb = tchar.as_bytes()
     for i in range(len(tb)):
@@ -630,13 +636,16 @@ def test_header_names_are_exactly_http_tokens() raises:
         '\\"', "(", ")", ",", "/", ":", ";", "<", "=", ">", "?", "@", "[",
         "\\\\", "]", "{", "}", " ", "\\u007f", "é",
     ]
+    # Each byte last and first: every byte of the name is checked.
     for i in range(len(not_token)):
-        assert_equal(
-            _refusal(_with_header(String("X") + not_token[i], String("v"))),
-            _P_TEXT + "names a credential_source header whose name is not an"
-            " HTTP token",
-            not_token[i],
-        )
+        var at: List[String] = [String("X") + not_token[i], not_token[i] + String("X")]
+        for j in range(len(at)):
+            assert_equal(
+                _refusal(_with_header(at[j], String("v"))),
+                _P_TEXT + "names a credential_source header whose name is not an"
+                " HTTP token",
+                at[j],
+            )
 
 
 def test_format_refusals_and_defaults() raises:
