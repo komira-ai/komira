@@ -18,14 +18,15 @@
 one function for both, so the gate's entry for a package and the report's
 are the same bytes when the numbers are the same.
 
-Percentages are basis points, `null` when n/a; a floor is `null` when the
-package has no row (or, for the branch floor, the row has `-`). A package's
+Percentages are basis points, `null` when n/a; a package's `held_line`
+and `held_branch` say whether it holds the metric (`--held`). A package's
 `files` counts every file in its numbers, `unmeasured_files` those that
 raised `UnmeasuredFile`; a finding's `line` is 0 when it is about a whole file, its `count`
 the lines an `UnmeasuredFile` counts uncovered or a `DeclarationOnlyFile`
 would have counted (`null` for other kinds).
 `info_packages` are the measured test-only packages (`--info-package`) and
-`info_findings` their findings, then any package's `DeclarationOnlyFile`
+`info_findings` their findings, then any package's `ReachedTarget` (a
+metric at the target that it does not hold) and `DeclarationOnlyFile`
 (a file no test compiled that counts no line, analyze.mojo step 4), which
 `findings` does not hold and the conclusion does not count (analyze.mojo,
 step 8).
@@ -67,8 +68,10 @@ def write_package(mut j: JsonOut, p: PackageStats):
     j.begin_object()
     j.field_str(String("package"), p.package)
     _numbers(j, p)
-    j.field_opt(String("line_floor_bp"), p.line_floor if p.has_row else -1)
-    j.field_opt(String("branch_floor_bp"), p.branch_floor if p.has_row else -1)
+    j.key(String("held_line"))
+    j.bool_value(p.held_line)
+    j.key(String("held_branch"))
+    j.bool_value(p.held_branch)
     j.end_object()
 
 

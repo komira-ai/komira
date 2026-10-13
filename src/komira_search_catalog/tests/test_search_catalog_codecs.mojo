@@ -27,8 +27,13 @@
 #      An ingest body with 1 to 7 bytes appended raises the same error.
 #   5. test_decode_refuses_bad_length_prefixes: a length prefix with its top
 #      bit set is negative and raises; one with a high byte set but no sign bit
-#      runs past the body and raises. A prefix near Int64.max is not tested
-#      here: it wraps the bounds check (komira-ai/komira#1370).
+#      runs past the body and raises.
+#   5a. test_decode_refuses_length_prefixes_that_wrap: in every slot, a length
+#      of Int64.max, the smallest length whose end overflows Int, the largest
+#      whose end does not, and one past the body raise the truncation error
+#      naming the true end offset; a _RETIRED_SHARDS id of length Int64.max
+#      raises the same (komira-ai/komira#1370: the end wrapped negative and
+#      the read ran past the body).
 #   6. test_decode_refuses_merge_inputs_not_a_multiple_of_16.
 #   7. test_generation_record_codecs_refuse_corrupt_bodies: the floor, bumps
 #      and retired-shards codecs refuse an empty body, an unknown version, a
@@ -481,6 +486,61 @@ def test_decode_refuses_bad_length_prefixes() raises:
                 msg.find("truncated length-prefixed field") >= 0,
                 "field " + String(f) + " value " + String(k) + ": " + msg,
             )
+
+
+def test_decode_refuses_length_prefixes_that_wrap() raises:
+    var base = encode_split_summary(_ingest())
+    var i = _ingest()
+    var sizes = List[Int]()
+    sizes.append(i.index_name.byte_length())
+    sizes.append(i.field_name.byte_length())
+    sizes.append(i.object_key.byte_length())
+    sizes.append(i.delete_gen_ref.byte_length())
+    sizes.append(len(i.bloom_sketch))
+    sizes.append(len(i.minmax_sketch))
+    var field = _FIXED
+    comptime MAX = 0x7FFFFFFFFFFFFFFF
+    for f in range(len(sizes)):
+        # The slot's bytes start after its 8-byte length field.
+        var data = field + 8
+        var lengths = List[Int]()
+        lengths.append(MAX)
+        lengths.append(MAX - data + 1)  # smallest whose end overflows Int
+        lengths.append(MAX - data)  # largest whose end is Int.max
+        lengths.append(len(base) - data + 1)  # one byte past the body
+        for k in range(len(lengths)):
+            var b = base.copy()
+            _put_le(b, field, UInt64(lengths[k]))
+            var msg = _raise_message(b)
+            var end = UInt64(data) + UInt64(lengths[k])
+            assert_true(
+                msg.find(
+                    "truncated length-prefixed field ("
+                    + String(end)
+                    + " > "
+                    + String(len(b))
+                    + "; corrupt)"
+                )
+                >= 0,
+                "field " + String(f) + " length " + String(lengths[k]) + ": "
+                + msg,
+            )
+        field = data + sizes[f]
+
+    # A retired-shards id: [version][count][id length @ 9][id][generation].
+    var r = RetiredShards()
+    _ = r.raise_to(String("w-1"), Int64(4))
+    var enc = encode_retired_shards(r)
+    _put_le(enc, 9, UInt64(MAX))
+    var msg = String("")
+    try:
+        _ = decode_retired_shards(enc)
+    except e:
+        msg = String(e)
+    assert_true(
+        msg.find("truncated length-prefixed field") >= 0,
+        "retired shard id of length Int64.max: " + msg,
+    )
 
 
 def test_decode_refuses_merge_inputs_not_a_multiple_of_16() raises:

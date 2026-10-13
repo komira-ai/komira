@@ -11,7 +11,7 @@ aws-lc-x86-64-linux	native-pr:8a	third_party/aws-lc/BUCK: the assembly lists are
 connect-conformance-linux-x86-64	native-pr:8b	src/tests/conformance/komira_connect_conformance/BUCK, third_party/connect-conformance/BUCK: runs the connectconformance release pinned for linux-x86_64 only; it reaches darwin when s2n-tls does (8b), which then pins the release's darwin and linux aarch64 archives per platform
 coverage-linux-x86-64	never	product: coverage is a property of the source, not of a platform: tools/build/toolchains/kcov/BUCK and the kcov_* pins of tools/build/platforms/table.bzl: line coverage of the sources is measured once, on linux-x86_64, by kcov (ptrace and ELF/DWARF); tools/build/toolchains/llvm_branch/BUCK and the llvm_branch_* pins: branch coverage's LLVM pieces exist on linux-x86_64 only; another platform's builds are not measured
 cxx-toolchain-x86-64	native-pr:4	tools/build/toolchains/defs.bzl: the C/C++ toolchain is the linux-x86_64 one; one per row
-darwin-gate-runner	native-pr:2b	tools/build/toolchains/darwin/BUCK: the macOS gate runner is unpacked by a linux x86_64 tool
+darwin-gate-runner	native-pr:2b	tools/build/run/BUCK: the macOS gate and its macOS unit test binaries are cross-built by the linux x86_64 zig, and those tests run only on macOS
 darwin-host-census-test	native-pr:12	tools/build/tests/functional/darwin/BUCK: tests host identity, which PR 12 deletes
 darwin-launcher	native-pr:2b	tools/build/toolchains/darwin/BUCK: the macOS launcher is built by the unpack tier
 darwin-mojo	native-pr:12	tools/build/toolchains/darwin/BUCK: the macOS toolchain is its own package until the toolchains are row-driven and the package is deleted
