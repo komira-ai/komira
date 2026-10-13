@@ -6,7 +6,9 @@
 # FS_SCHEME_FILE; S3, GCS and Azure descriptors give their own codes; the
 # bare-code form agrees with the descriptor form; an unknown code (9, and 4,
 # the first code past the four) raises "unknown file system scheme", naming
-# the bucket and node.
+# the bucket and node. Every code 0..255, over buckets of length 0..2 and
+# node ids 0, 1 and -1, in both forms: 0..3 come back unchanged and every
+# other code is refused by its whole message, naming that bucket and node.
 from std.testing import assert_equal, assert_raises
 
 from komira_plan_expr.fs_descriptor_pod import (
@@ -65,8 +67,52 @@ def test_unknown_scheme() raises:
         _ = check_source_scheme(UInt8(4), "gbucket", 5)
 
 
+def _refusal(desc: FsDescriptorPod) raises -> String:
+    try:
+        var code = check_source_descriptor(desc)
+        return "accepted as code " + String(Int(code))
+    except e:
+        return String(e)
+
+
+def _bare_refusal(scheme: UInt8, bucket: String, node_id: Int) raises -> String:
+    try:
+        var code = check_source_scheme(scheme, bucket, node_id)
+        return "accepted as code " + String(Int(code))
+    except e:
+        return String(e)
+
+
+def test_every_code_bucket_and_node() raises:
+    var buckets: List[String] = ["", "b", "bk"]
+    var nodes: List[Int] = [0, 1, -1]
+    var accepted = 0
+    for code in range(256):
+        for b in range(len(buckets)):
+            for n in range(len(nodes)):
+                var desc = FsDescriptorPod(UInt8(code), buckets[b], nodes[n])
+                var want: String
+                if code <= 3:
+                    want = "accepted as code " + String(code)
+                    accepted += 1
+                else:
+                    want = (
+                        "source_url: unknown file system scheme "
+                        + String(code)
+                        + " (bucket '"
+                        + buckets[b]
+                        + "', node "
+                        + String(nodes[n])
+                        + ")"
+                    )
+                assert_equal(_refusal(desc), want)
+                assert_equal(_bare_refusal(UInt8(code), buckets[b], nodes[n]), want)
+    assert_equal(accepted, 4 * 3 * 3)
+
+
 def main() raises:
     test_the_four_codes()
     test_the_bare_code_form()
     test_unknown_scheme()
+    test_every_code_bucket_and_node()
     print("OK")
