@@ -1,11 +1,13 @@
-//! The process table, read from /proc (Linux): one reading is every
+//! The process table, read from /proc on Linux: one reading is every
 //! process's pid, parent pid, state and resident memory, from
 //! /proc/<pid>/status. A process that exits while the table is read is
 //! skipped, as `cat /proc/[0-9]*/status` skips it. macOS has no /proc: there
-//! every reading fails, and the modes that need one say so (supervise.zig).
+//! the same reading comes from libproc (proctab_darwin.zig, which says what
+//! differs).
 
 const std = @import("std");
 const sys = @import("sys.zig");
+const darwin = if (sys.is_darwin) @import("proctab_darwin.zig") else struct {};
 
 pub const Proc = struct {
     pid: i32,
@@ -86,8 +88,10 @@ fn isPidName(name: []const u8) bool {
     return true;
 }
 
-/// One reading of /proc; null when /proc cannot be listed.
+/// One reading of the table; null when /proc (macOS: the pid list) cannot be
+/// listed.
 pub fn read(alloc: std.mem.Allocator) ?Table {
+    if (sys.is_darwin) return darwin.read(alloc);
     if (!sys.is_linux) return null;
     var dir = std.fs.openDirAbsolute("/proc", .{ .iterate = true }) catch return null;
     defer dir.close();
@@ -137,8 +141,9 @@ pub fn parseStat(text: []const u8) ?struct { pid: i32, comm: []const u8, state: 
 }
 
 /// The members of process group `pgid` that are neither zombies nor dead;
-/// null when /proc cannot be listed.
+/// null when /proc (macOS: the group's pid list) cannot be listed.
 pub fn groupMembers(alloc: std.mem.Allocator, pgid: i32) ?[]Member {
+    if (sys.is_darwin) return darwin.groupMembers(alloc, pgid);
     if (!sys.is_linux) return null;
     var dir = std.fs.openDirAbsolute("/proc", .{ .iterate = true }) catch return null;
     defer dir.close();
@@ -163,9 +168,11 @@ pub fn groupMembers(alloc: std.mem.Allocator, pgid: i32) ?[]Member {
 
 /// The first field of /proc/<own pid>/stat and of /proc/self/stat (0 where
 /// unreadable): both are this process's pid when /proc is this process's
-/// own (not another PID namespace's, not one hiding processes).
+/// own (not another PID namespace's, not one hiding processes). macOS: the
+/// pid libproc reports for this process, twice.
 pub fn selfSeen() [2]i64 {
     var out = [2]i64{ 0, 0 };
+    if (sys.is_darwin) return darwin.selfSeen(sys.getpid());
     if (!sys.is_linux) return out;
     var path_buf: [64]u8 = undefined;
     const own = std.fmt.bufPrint(&path_buf, "/proc/{d}/stat", .{sys.getpid()}) catch return out;

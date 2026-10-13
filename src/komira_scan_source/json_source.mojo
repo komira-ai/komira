@@ -48,7 +48,7 @@ from komira_scan_source.source_like import SourceLike
 # =============================================================================
 # FNV-1a hash helpers (local copies — source/ keeps its own hash helpers so
 # we do not pull collections/ as a dep). Identical to the helpers in
-# `parquet_source.mojo` and `column_stats.mojo`.
+# `parquet_source.mojo` and `column_stats_accum.mojo`.
 # =============================================================================
 
 

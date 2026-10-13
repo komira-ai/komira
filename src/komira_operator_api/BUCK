@@ -1,0 +1,46 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The operator interfaces of the engine's pipelines: the sink contract
+# (`MorselSink`, its phase timings and keep-alive handle), the breaker-state
+# trait that every blocking operator implements, the fused per-morsel operator
+# and the map and filter kernels it fuses, the map operator and the unary,
+# binary, hash and match function operators, the dynamic-filter application, the
+# batch fold that sinks share, and the join-build fold and wave-decomposition
+# counters. The concrete operators and sinks implement these traits in the
+# packages that depend on this one.
+mojo_library(
+    name = "komira_operator_api",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_batch_eval:komira_batch_eval",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_exec_types:komira_exec_types",
+        "//src/komira_expr:komira_expr",
+        "//src/komira_kernels:komira_kernels",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_morsel:komira_morsel",
+        "//src/komira_name_registry:komira_name_registry",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_scan_source:komira_scan_source",
+        "//src/komira_udf:komira_udf",
+    ],
+    test_srcs = [
+        "tests/test_binary_fn_kernel.mojo",
+        "tests/test_hash_fn_kernel.mojo",
+        "tests/test_map_op_total_eval_compact.mojo",
+        "tests/test_match_fn_kernel.mojo",
+        "tests/test_memory_reservation.mojo",
+        "tests/test_morsel_sink_trait.mojo",
+        "tests/test_sink_timings_keepalive.mojo",
+        "tests/test_udf_traits.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

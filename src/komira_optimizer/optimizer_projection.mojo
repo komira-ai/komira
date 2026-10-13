@@ -61,6 +61,7 @@ from komira_plan_ir.plan_helpers import (
 from .optimizer_project_merge_guard import (
     projects_merge_safely, substitute_project_refs,
 )
+from .optimizer_udf_carry import collect_udf_input_columns
 
 
 # =============================================================================
@@ -189,9 +190,11 @@ def _push_projections_impl(
         # inline batch. `SourceVariant.copy()` is a refcount-bump on the
         # ArcPointer payload (no buffer byte-copy).
         var src_copy = plan._scan.value()[].source.copy()
-        # Preserve the scan's `source_kind` across this rebuild: without it,
-        # `scan_from_source` would reset the kind to its default.
+        # Preserve the scan's `source_kind` and boundedness across this
+        # rebuild: without them, `scan_from_source` would reset each to its
+        # default (an UNBOUNDED source would come out BOUNDED).
         var src_kind = plan._scan.value()[].source_kind
+        var bounded = plan._scan.value()[].boundedness
         return LogicalPlan.scan_from_source(
             src_copy^,
             full_schema^,
@@ -200,6 +203,7 @@ def _push_projections_impl(
             rc_opt^,
             ts_opt^,
             src_kind,
+            boundedness=bounded,
         )
 
     # Non-SCAN cases mutate the parent's child OwnedPointer in
@@ -210,6 +214,7 @@ def _push_projections_impl(
     elif plan.tag == PLAN_FILTER:
         var pred_cols = Set[String]()
         _collect_expr_columns(plan._filter.value()[].predicate, pred_cols)
+        collect_udf_input_columns(plan, pred_cols)
         var combined = _union_sets(needed, pred_cols)
         var child_in = _copy_plan(plan._filter.value()[].child[])
         var new_child = _push_projections_impl(child_in^, combined^)
@@ -231,41 +236,48 @@ def _push_projections_impl(
         # `col(l_orderkey)` once the scan is narrowed to
         # {l_extendedprice, l_discount}.
         #
-        # Strategy: count how many output cols the parent needs. If all
-        # cols are needed, take the fast path and keep the in-place mutation
-        # idiom. If none are needed (degenerate corner-case from an empty
-        # `needed` set), also leave the project untouched. Otherwise, build
-        # a narrowed expr list + rebuild the Project node so its
-        # output_schema is re-derived to match the new expr list.
+        # Strategy: if every output column is needed, or the Project carries
+        # a UDF, keep every expr and mutate the child in place. A UDF fixes
+        # the node's output columns (its exprs are placeholders), so a UDF
+        # Project is never narrowed or rebuilt, and its child must supply
+        # the UDF's input columns as well as the placeholders' columns.
+        # Otherwise build the narrowed expr list and rebuild the Project so
+        # its output_schema is re-derived. An empty `needed` set narrows to
+        # zero exprs: a zero-column output whose rows still carry the row
+        # count (a consumer such as COUNT(*) reads no column).
 
         var num_exprs = len(plan._project.value()[].exprs)
+        var has_udf = plan._project.value()[].has_udf()
         var keep_count = 0
         for i in range(num_exprs):
             if plan.output_schema.field_name(i) in needed:
                 keep_count += 1
 
-        if keep_count == num_exprs or keep_count == 0:
-            # Fast path / degenerate path: keep all exprs.
+        if has_udf or keep_count == num_exprs:
+            # Keep every expr: in-place child mutation, the UDF stays.
             var proj_cols = Set[String]()
             for i in range(num_exprs):
                 _collect_expr_columns(plan._project.value()[].exprs[i], proj_cols)
+            collect_udf_input_columns(plan, proj_cols)
             var child_in = _copy_plan(plan._project.value()[].child[])
             var new_child = _push_projections_impl(child_in^, proj_cols^)
             plan._project.value()[].child = OwnedPointer(new_child^)
         else:
-            # Narrowing path: build a new ExprArray with only the surviving
-            # exprs (those at indices where output_schema.field_name(i) is
-            # in `needed`). Then rebuild the Project node entirely so the
-            # output schema is re-derived to match the new expr list.
+            # Narrowing path (no UDF): build a new ExprArray with only the
+            # surviving exprs (those at indices where
+            # output_schema.field_name(i) is in `needed`), then rebuild the
+            # Project node so the output schema is re-derived to match the
+            # new expr list. The rebuild keeps `is_cse_introduced`.
             var new_exprs = ExprArray()
             var new_proj_cols = Set[String]()
             for i in range(num_exprs):
                 if plan.output_schema.field_name(i) in needed:
                     new_exprs.append(plan._project.value()[].exprs[i].copy())
                     _collect_expr_columns(plan._project.value()[].exprs[i], new_proj_cols)
+            var cse_flag = plan._project.value()[].is_cse_introduced
             var child_in = _copy_plan(plan._project.value()[].child[])
             var new_child = _push_projections_impl(child_in^, new_proj_cols^)
-            return LogicalPlan.project(new_exprs^, new_child^)
+            return LogicalPlan.project(new_exprs^, new_child^, cse_flag)
 
     elif plan.tag == PLAN_AGGREGATE:
         var agg_cols = Set[String]()
@@ -284,6 +296,7 @@ def _push_projections_impl(
                 _collect_expr_columns(plan._aggregate.value()[].agg_exprs[i].child2.value(), agg_cols)
             if plan._aggregate.value()[].agg_exprs[i].child3:
                 _collect_expr_columns(plan._aggregate.value()[].agg_exprs[i].child3.value(), agg_cols)
+        collect_udf_input_columns(plan, agg_cols)
         var child_in = _copy_plan(plan._aggregate.value()[].child[])
         var new_child = _push_projections_impl(child_in^, agg_cols^)
         plan._aggregate.value()[].child = OwnedPointer(new_child^)
@@ -456,11 +469,13 @@ def _collect_referenced_columns(plan: LogicalPlan, mut cols: Set[String]):
 
     elif plan.tag == PLAN_FILTER:
         _collect_expr_columns(plan._filter.value()[].predicate, cols)
+        collect_udf_input_columns(plan, cols)
         _collect_referenced_columns(plan._filter.value()[].child[], cols)
 
     elif plan.tag == PLAN_PROJECT:
         for i in range(len(plan._project.value()[].exprs)):
             _collect_expr_columns(plan._project.value()[].exprs[i], cols)
+        collect_udf_input_columns(plan, cols)
         _collect_referenced_columns(plan._project.value()[].child[], cols)
 
     elif plan.tag == PLAN_AGGREGATE:
@@ -477,6 +492,7 @@ def _collect_referenced_columns(plan: LogicalPlan, mut cols: Set[String]):
                 _collect_expr_columns(plan._aggregate.value()[].agg_exprs[i].child2.value(), cols)
             if plan._aggregate.value()[].agg_exprs[i].child3:
                 _collect_expr_columns(plan._aggregate.value()[].agg_exprs[i].child3.value(), cols)
+        collect_udf_input_columns(plan, cols)
         _collect_referenced_columns(plan._aggregate.value()[].child[], cols)
 
     elif plan.tag == PLAN_JOIN:
@@ -557,6 +573,11 @@ def eliminate_identity_projects_inplace(mut plan: LogicalPlan) raises:
         # Recurse into the child first (bottom-up).
         eliminate_identity_projects_inplace(plan._project.value()[].child[])
 
+        # A UDF Project is never an identity: the UDF computes its output,
+        # and its exprs are placeholders that may match the child's names.
+        if plan._project.value()[].has_udf():
+            return
+
         # Check identity: same arity AND each expression is a ColRef whose
         # name matches the child's output column at the same position.
         ref pd_one = plan._project.value()[]
@@ -634,7 +655,14 @@ def merge_projects_inplace(mut plan: LogicalPlan) raises:
         # Recurse into the child first.
         merge_projects_inplace(plan._project.value()[].child[])
 
+        # A UDF Project is never merged: folded away it loses its UDF;
+        # folded onto its grandchild, the UDF's input columns name columns
+        # only the folded Project produced.
+        if plan._project.value()[].has_udf():
+            return
         if plan._project.value()[].child[].tag == PLAN_PROJECT:
+            if plan._project.value()[].child[].has_udf():
+                return
             # Pattern: Project(outer_exprs, Project(inner_exprs, gc))
             # Rebuild as: Project(substituted_exprs, gc)
             # One walk of the outer ProjectData, projected.
@@ -807,6 +835,7 @@ def late_materialize_inplace(mut plan: LogicalPlan):
            ):
             var filter_cols = Set[String]()
             _collect_expr_columns(pfd.predicate, filter_cols)
+            collect_udf_input_columns(plan, filter_cols)
 
             # Check if scan already has a restricted projection
             ref scan_data = pfd.child[]._scan.value()[]
