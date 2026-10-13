@@ -3,8 +3,13 @@
 # =============================================================================
 # native_init is what the library's one export, komira_udf_native_init_v1
 # (so/native_mojo_so.mojo), returns: a table whose entries are the abi("C")
-# functions below, over the fixtures of _fixtures.mojo and the frames and
-# aggregates here (docs/design/udf_runtime_interface.md section 4.3).
+# functions below and the frames of _frames.mojo, over the fixtures of
+# _fixtures.mojo (docs/design/udf_runtime_interface.md section 4.3).
+#
+# This is a native UDF library, loaded by the native runtime, which checks
+# the descriptor at validate and load (design section 3.1); this library's
+# load binds the spec's schemas to its fixture, so a spec its code was not
+# built for is refused there (the runtime reports ERR_LOAD).
 #
 # Who owns and frees each pointer:
 #   - the table and the runtime handle: one block each, made by native_init
@@ -12,7 +17,8 @@
 #     not static data: the host reads it only until shutdown, which this
 #     relies on).
 #   - udf, context, instance, groups and frame handles: one heap struct
-#     each, made by its open entry and freed by its close entry.
+#     each, made by its open entry and freed by its close entry
+#     (_handles.mojo).
 #   - every block above, and every scratch block, is reserved from the host
 #     (mem_reserve) while it lives and released when it is freed (_box,
 #     _unbox, _scratch, _free_scratch): the host's reserved bytes are how a
@@ -27,7 +33,6 @@
 #     every other status.
 # =============================================================================
 
-from std.memory import alloc
 from std.sys import size_of
 
 from komira_udf_spike_abi._cabi import (
@@ -50,14 +55,13 @@ from komira_udf_spike_abi.contract import (
     ABI_MINOR,
     ARROW_DEVICE_CPU,
     CLASS_NATIVE,
-    CONTEXT_PER_THREAD,
     DEVICE_CPU,
     ERR_ABI,
     ERR_CANCELLED,
+    ERR_HOST_CONTRACT,
     ERR_INTERNAL,
     ERR_RAISED,
     ERR_UNSUPPORTED,
-    HOSTING_NONE,
     OK,
     SHAPE_AGG_MERGEABLE,
     SHAPE_AGG_PLAIN,
@@ -66,7 +70,6 @@ from komira_udf_spike_abi.contract import (
     SHAPE_ROW,
     SHAPE_SCALAR,
     SHAPE_STEP,
-    TRANSPORT_IN_PROCESS,
 )
 
 from ._arrow import (
@@ -94,6 +97,22 @@ from ._arrow import (
     struct_validity,
     word_at,
 )
+from ._frames import _frame_close, _frame_next, _frame_open
+from ._handles import (
+    _DEVICE_ARRAY,
+    _Ctx,
+    _Groups,
+    _Inst,
+    _Rt,
+    _Udf,
+    _box,
+    _free_scratch,
+    _release,
+    _reserve,
+    _scratch,
+    _set_out_slot,
+    _unbox,
+)
 from ._fixtures import (
     F_ARGS_KEPT,
     F_DEVICE_NOT_CPU,
@@ -116,8 +135,11 @@ from ._fixtures import (
     F_CHILD_MOVED_OUT,
     F_FLAGS_PROBE,
     F_RAISE_AGAIN,
+    F_RAISE_IF_5,
+    F_RAISE_IF_5_SMALL,
     F_RAISE_ROW_UNSET,
     F_SUM_ONE_SET,
+    F_VOLATILE_COUNT,
     F_YIELD_FIRST,
     F_YIELD_TWO_THEN_RAISE,
     Fixture,
@@ -129,115 +151,9 @@ from ._fixtures import (
     cancelled,
 )
 
-comptime _DEVICE_ARRAY = 128
-"""Bytes of a struct ArrowDeviceArray."""
-comptime _STREAM = 48
-"""Bytes of a struct ArrowDeviceArrayStream."""
 comptime _SLICE_AT = 11
 """leaf_sliced: the column's offset (not a multiple of 8, so the bitmap's
 bits are shifted too)."""
-comptime _TABLE_AT = 2
-"""table_sliced: the struct's offset."""
-comptime _CHILD_AT = 3
-"""table_sliced: its child's own offset."""
-
-
-@fieldwise_init
-struct _Rt(Movable):
-    var host: Void
-    var table: Void
-    var id: Void
-    var abi: Void
-
-
-@fieldwise_init
-struct _Udf(Movable):
-    var host: Void
-    var fx: Fixture
-    var fields: List[String]
-    var flags: List[Int64]
-
-
-@fieldwise_init
-struct _Ctx(Movable):
-    var rt: Void
-    var slot: UInt32
-
-
-@fieldwise_init
-struct _Inst(Movable):
-    var host: Void
-    var fx: Fixture
-    var fields: List[String]
-    var flags: List[Int64]
-    var scratch: Void
-    var group_sets: Int
-
-
-@fieldwise_init
-struct _Groups(Movable):
-    var host: Void
-    var fx: Int
-    var st: List[Int64]
-    var scratch: Void
-
-
-@fieldwise_init
-struct _Frame(Movable):
-    var host: Void
-    var fx: Int
-    var stream: Void
-    var done: Bool
-    var running: Int64
-    var group: Int64
-    var max: Int64
-    var yielded: Bool
-
-
-def _reserve(host: Void, n: Int):
-    # SAFETY: `host` is the komira_udf_host native_init got, alive until
-    # shutdown returns.
-    var h = host.bitcast[CUdfHost]()
-    _ = h[].mem_reserve(h[].host_data, Int64(n))
-
-
-def _release(host: Void, n: Int):
-    # SAFETY: as _reserve.
-    var h = host.bitcast[CUdfHost]()
-    h[].mem_release(h[].host_data, Int64(n))
-
-
-def _box[T: Movable & ImplicitlyDestructible](host: Void, var v: T) -> Void:
-    # SAFETY: a heap slot of this library, untracked because the host holds
-    # it across calls; written before the pointer leaves, freed by _unbox.
-    _reserve(host, size_of[T]())
-    var p = alloc[T](1).unsafe_origin_cast[MutUntrackedOrigin]()
-    p.unsafe_write(v^)
-    return p.bitcast[NoneType]()
-
-
-def _unbox[T: Movable & ImplicitlyDestructible](host: Void, p: Void):
-    # SAFETY: `p` came from _box[T] and is freed once, by its close entry.
-    var q = p.bitcast[T]()
-    q.destroy_pointee()
-    q.free()
-    _release(host, size_of[T]())
-
-
-def _scratch(host: Void, n: Int) -> Void:
-    """`n` zeroed bytes, reserved from the host until _free_scratch."""
-    _reserve(host, n)
-    return zeroed(n)
-
-
-def _free_scratch(host: Void, p: Void, n: Int):
-    free_zeroed(p)
-    _release(host, n)
-
-
-def _set_out_slot(slot: Void, v: Void):
-    # SAFETY: `slot` is the host's `komira_udf_xxx** out`.
-    slot.bitcast[Void]()[] = v
 
 
 # --- describe, validate, load ---------------------------------------------------
@@ -250,19 +166,14 @@ def _describe(rt: Void, c: Void) abi("C") -> Int32:
     var r = rt.bitcast[_Rt]()
     p[].runtime_id = r[].id
     p[].runtime_abi = r[].abi
-    p[].max_descriptor_version = 0
+    p[].max_descriptor_version = 1
     p[].shapes = (
         SHAPE_SCALAR | SHAPE_ROW | SHAPE_MAP_BATCHES_COLUMN | SHAPE_MAP_BATCHES_FRAME | SHAPE_AGG_PLAIN
         | SHAPE_AGG_MERGEABLE | SHAPE_STEP
     )
-    p[].threading = CONTEXT_PER_THREAD
-    p[].thread_affine = 0
-    p[].transports = TRANSPORT_IN_PROCESS
-    p[].hosting = HOSTING_NONE
     p[].devices = DEVICE_CPU
     p[].features = 0
     p[].udf_class = CLASS_NATIVE
-    p[].global_lock = 0
     return OK
 
 
@@ -285,7 +196,8 @@ def _load(rt: Void, s: Void, out_p: Void, e: Void) abi("C") -> Int32:
     var first = schema_child(args_s, 0) if schema_children(args_s) > 0 else null_void()
     var flags: List[Int64] = [schema_flags(args_s), schema_flags(first), schema_flags(sp[].result)]
     var host = rt.bitcast[_Rt]()[].host
-    _set_out_slot(out_p, _box(host, _Udf(host, fx^, fields^, flags^)))
+    var n_args = schema_children(args_s)
+    _set_out_slot(out_p, _box(host, _Udf(host, fx^, fields^, flags^, n_args)))
     return OK
 
 
@@ -306,7 +218,10 @@ def _open_instance(c: Void, u: Void, out_p: Void, e: Void) abi("C") -> Int32:
     var udf = u.bitcast[_Udf]()
     var host = c.bitcast[_Ctx]()[].rt.bitcast[_Rt]()[].host
     var scratch = _scratch(host, _DEVICE_ARRAY)
-    _set_out_slot(out_p, _box(host, _Inst(host, udf[].fx.copy(), udf[].fields.copy(), udf[].flags.copy(), scratch, 0)))
+    _set_out_slot(
+        out_p,
+        _box(host, _Inst(host, udf[].fx.copy(), udf[].fields.copy(), udf[].flags.copy(), scratch, 0, udf[].n_args, 0)),
+    )
     return OK
 
 
@@ -332,10 +247,45 @@ def _call_batch(i: Void, call: Void, args: Void, out_p: Void, e: Void) abi("C") 
     var mine = inst[].scratch
     move_array(mine, args)  # moved in, whatever the status
     var rc = start_call(inst[].host, call, e)
-    if rc == OK and mine.bitcast[CArrowDeviceArray]()[].device_type != ARROW_DEVICE_CPU:
-        rc = fail(e, ERR_UNSUPPORTED, "only CPU arrays are read here")
+    # What the host owes this library (design 4.5, ERR_HOST_CONTRACT): CPU
+    # arrays, an argument struct at offset 0 without a bitmap, one child per
+    # argument bound at load.
+    var dev = mine.bitcast[CArrowDeviceArray]()
+    if rc == OK and (dev[].device_type != ARROW_DEVICE_CPU or dev[].device_id != -1 or not is_null(dev[].sync_event)):
+        rc = fail(e, ERR_HOST_CONTRACT, "an argument array on another device than the CPU (design 4.4)")
+    if rc == OK and (arr(mine)[].offset != 0 or not is_null(word_at(arr(mine)[].buffers, 0))):
+        rc = fail(e, ERR_HOST_CONTRACT, "the argument struct has an offset or a bitmap (design 3.4 rule 5)")
+    if rc == OK and n_children(mine) != inst[].n_args:
+        rc = fail(
+            e, ERR_HOST_CONTRACT,
+            "the argument struct has " + String(n_children(mine)) + " children, the schema bound at load "
+            + String(inst[].n_args),
+        )
     if rc == OK and shape & (SHAPE_SCALAR | SHAPE_ROW | SHAPE_MAP_BATCHES_COLUMN) == 0:
         rc = fail(e, ERR_UNSUPPORTED, "call_batch on a fixture of another shape")
+    if rc == OK and (fx == F_RAISE_IF_5 or fx == F_RAISE_IF_5_SMALL):
+        # Naming no row (raise_row_if_5_when_small: in a batch of 2 rows or
+        # fewer, naming it): the host bisects to find it.
+        var x = child(mine, 0)
+        for r in range(length(mine)):
+            if is_valid(x, r) and i64_at(x, r) == 5:
+                var row = r if fx == F_RAISE_IF_5_SMALL and length(mine) <= 2 else -1
+                rc = fail(e, ERR_RAISED, "raise_minus_one_if_row5: the batch holds the value 5", row)
+                break
+    if rc == OK and fx == F_VOLATILE_COUNT:
+        # Counts its runs; a batch whose row 0 is -1 asks the count instead.
+        var x = child(mine, 0)
+        var probe = length(mine) > 0 and is_valid(x, 0) and i64_at(x, 0) == -1
+        if not probe:
+            inst[].runs += 1
+            rc = fail(e, ERR_RAISED, "volatile_count_raise: raised after counting this run")
+        else:
+            var d = make_col(out_p, length(mine))
+            for r in range(length(mine)):
+                d.bitcast[Int64]()[r] = inst[].runs
+            set_cpu(out_p)
+            release_array(mine)
+            return OK
     if rc == OK and shape == SHAPE_ROW:
         rc = row_call(fx, inst[].fields, mine, out_p, e)
     elif rc == OK:
@@ -402,7 +352,7 @@ def _agg_open(i: Void, out_p: Void, e: Void) abi("C") -> Int32:
             return fail(e, ERR_INTERNAL, "this instance already opened its group set")
     var host = inst[].host
     var scratch = _scratch(host, 2 * _DEVICE_ARRAY)
-    _set_out_slot(out_p, _box(host, _Groups(host, inst[].fx.id, List[Int64](), scratch)))
+    _set_out_slot(out_p, _box(host, _Groups(host, inst[].fx.id, List[Int64](), scratch, inst[].n_args)))
     return OK
 
 
@@ -416,7 +366,13 @@ def _fold(g: Void, call: Void, values: Void, gids: Void, n_groups: UInt32, e: Vo
     move_array(ids, gids)
     var rc = OK
     var x = v if merge else (child(v, 0) if n_children(v) > 0 else null_void())
-    if cancelled(call):
+    if not merge and n_children(v) != gr[].n_args:
+        rc = fail(
+            e, ERR_HOST_CONTRACT,
+            "the argument struct has " + String(n_children(v)) + " children, the schema bound at load "
+            + String(gr[].n_args),
+        )
+    elif cancelled(call):
         rc = fail(e, ERR_CANCELLED, "cancelled before the batch")
     elif is_null(x) or length(ids) != length(v):
         rc = fail(e, ERR_INTERNAL, "group ids and values differ in length")
@@ -487,298 +443,6 @@ def _agg_close(g: Void) abi("C"):
     _free_scratch(host, g.bitcast[_Groups]()[].scratch, 2 * _DEVICE_ARRAY)
     _unbox[_Groups](host, g)
 
-
-# --- frames --------------------------------------------------------------------------
-
-
-def _stream_release(s: Void):
-    var st = s.bitcast[CArrowDeviceArrayStream]()
-    if not is_null(st[].release):
-        as_release(st[].release)(s)
-
-
-def _frame_open(i: Void, call: Void, in_p: Void, out_p: Void, e: Void) abi("C") -> Int32:
-    var inst = i.bitcast[_Inst]()
-    var host = inst[].host
-    var mine = _scratch(host, _STREAM)
-    # Moved in, whatever the status: copy the six words, NULL the source.
-    for w in range(6):
-        mine.bitcast[Int64]()[w] = in_p.bitcast[Int64]()[w]
-    in_p.bitcast[CArrowDeviceArrayStream]()[].release = null_void()
-    var shape = inst[].fx.shape
-    var rc = OK
-    if shape & (SHAPE_MAP_BATCHES_FRAME | SHAPE_AGG_PLAIN | SHAPE_STEP) == 0:
-        rc = fail(e, ERR_UNSUPPORTED, "frame_open on a fixture of another shape")
-    if rc == OK:
-        rc = start_call(inst[].host, call, e)
-    if rc != OK:
-        _stream_release(mine)
-        _free_scratch(host, mine, _STREAM)
-        return rc
-    _set_out_slot(out_p, _box(host, _Frame(host, inst[].fx.id, mine, False, 0, -1, 0, False)))
-    return OK
-
-
-def _pull(fr: Void, b: Void) -> Int32:
-    """The next input batch into `b`; 0 with b's release NULL at the end."""
-    for w in range(16):
-        b.bitcast[Int64]()[w] = 0
-    var s = fr.bitcast[_Frame]()[].stream
-    return as_get_next(s.bitcast[CArrowDeviceArrayStream]()[].get_next)(s, b)
-
-
-def _next_running_sum(fr: Void, out_p: Void, e: Void) -> Int32:
-    var f = fr.bitcast[_Frame]()
-    var b = _scratch(fr.bitcast[_Frame]()[].host, _DEVICE_ARRAY)
-    if _pull(fr, b) != 0:
-        _free_scratch(fr.bitcast[_Frame]()[].host, b, _DEVICE_ARRAY)
-        return fail(e, ERR_INTERNAL, "the input stream failed")
-    if is_null(arr(b)[].release):
-        f[].done = True
-        _free_scratch(fr.bitcast[_Frame]()[].host, b, _DEVICE_ARRAY)
-        return OK
-    var n = length(b)
-    if n_children(b) < 1:
-        release_array(b)
-        _free_scratch(fr.bitcast[_Frame]()[].host, b, _DEVICE_ARRAY)
-        return fail(e, ERR_INTERNAL, "running_sum: no input column")
-    var x = child(b, 0)
-    make_struct(out_p, n, 1)
-    var col = child(out_p, 0)
-    var d = make_col(col, n)
-    for r in range(n):
-        if not is_valid(x, r):
-            d.bitcast[Int64]()[r] = 0
-            set_null(col, r)
-            continue
-        f[].running += i64_at(x, r)
-        d.bitcast[Int64]()[r] = f[].running
-    release_array(b)
-    _free_scratch(fr.bitcast[_Frame]()[].host, b, _DEVICE_ARRAY)
-    set_cpu(out_p)
-    return OK
-
-
-def _next_group_max(fr: Void, out_p: Void, e: Void) -> Int32:
-    """Pulls until a group is complete (or the input ends), and returns the
-    completed groups' maxima, one row each, in ordinal order."""
-    var f = fr.bitcast[_Frame]()
-    var done = List[Int64]()
-    var b = _scratch(fr.bitcast[_Frame]()[].host, _DEVICE_ARRAY)
-    while len(done) == 0 and not f[].done:
-        if _pull(fr, b) != 0:
-            _free_scratch(fr.bitcast[_Frame]()[].host, b, _DEVICE_ARRAY)
-            return fail(e, ERR_INTERNAL, "the input stream failed")
-        var at_eos = is_null(arr(b)[].release)
-        var n = 0 if at_eos else length(b)
-        if at_eos:
-            f[].done = True
-        if n > 0 and n_children(b) < 2:
-            release_array(b)
-            _free_scratch(fr.bitcast[_Frame]()[].host, b, _DEVICE_ARRAY)
-            return fail(e, ERR_INTERNAL, "group_max: a batch without its group and value columns")
-        for r in range(n + 1):
-            var at_end = r == n
-            if at_end and not f[].done:
-                break
-            var gid = Int64(-1) if at_end else i64_at(child(b, 0), r)
-            if not at_end and gid == f[].group:
-                var val = i64_at(child(b, 1), r)
-                if val > f[].max:
-                    f[].max = val
-                continue
-            if f[].group >= 0:
-                done.append(f[].max)
-            f[].group = gid
-            if not at_end:
-                f[].max = i64_at(child(b, 1), r)
-        release_array(b)
-    _free_scratch(fr.bitcast[_Frame]()[].host, b, _DEVICE_ARRAY)
-    if len(done) == 0:
-        return OK  # the end
-    var d = make_col(out_p, len(done))
-    for i in range(len(done)):
-        d.bitcast[Int64]()[i] = done[i]
-    set_cpu(out_p)
-    return OK
-
-
-def _next_step(fr: Void, out_p: Void, e: Void) -> Int32:
-    """A step: one length-1 batch of literals in; a table with no columns
-    and as many rows as the first literal says, out."""
-    var b = _scratch(fr.bitcast[_Frame]()[].host, _DEVICE_ARRAY)
-    var rc = _pull(fr, b)
-    fr.bitcast[_Frame]()[].done = True
-    if rc != 0:
-        _free_scratch(fr.bitcast[_Frame]()[].host, b, _DEVICE_ARRAY)
-        return fail(e, ERR_INTERNAL, "the input stream failed")
-    if is_null(arr(b)[].release):
-        _free_scratch(fr.bitcast[_Frame]()[].host, b, _DEVICE_ARRAY)
-        return fail(e, ERR_INTERNAL, "a step got no literal batch")
-    var rows = i64_at(child(b, 0), 0) if length(b) == 1 and n_children(b) == 1 else Int64(-1)
-    release_array(b)
-    _free_scratch(fr.bitcast[_Frame]()[].host, b, _DEVICE_ARRAY)
-    if rows < 0:
-        return fail(e, ERR_INTERNAL, "a step's literal batch is not one int64 row")
-    make_struct(out_p, Int(rows), 0)
-    set_cpu(out_p)
-    return OK
-
-
-def _next_yield_two(fr: Void, out_p: Void, e: Void) -> Int32:
-    """The input batch is the output (a runtime may return its input
-    buffers), twice; then an error, with the rest unread."""
-    var f = fr.bitcast[_Frame]()
-    if f[].running == 2:
-        f[].done = True
-        return fail(e, ERR_RAISED, "yield_two_then_raise: raised after two outputs")
-    if _pull(fr, out_p) != 0:
-        return fail(e, ERR_INTERNAL, "the input stream failed")
-    if is_null(arr(out_p)[].release):
-        f[].done = True
-    f[].running += 1
-    set_cpu(out_p)
-    return OK
-
-
-def _next_table(fr: Void, out_p: Void, e: Void, sliced: Bool) -> Int32:
-    """Each input batch's first column as a one-column table, with a validity
-    bitmap. table_sliced (`sliced`) places the n rows at struct offset
-    _TABLE_AT over a child of _TABLE_AT + n rows at offset _CHILD_AT, the
-    rows before them PAD_VALUE with null bits, in the child and in the
-    struct's bitmap; table_null_count_unknown reports null_count -1. Both
-    legal (n <= 62 here)."""
-    var f = fr.bitcast[_Frame]()
-    var host = f[].host
-    var b = _scratch(host, _DEVICE_ARRAY)
-    if _pull(fr, b) != 0:
-        _free_scratch(host, b, _DEVICE_ARRAY)
-        return fail(e, ERR_INTERNAL, "the input stream failed")
-    if is_null(arr(b)[].release):
-        f[].done = True
-        _free_scratch(host, b, _DEVICE_ARRAY)
-        return OK
-    var n = length(b)
-    if n_children(b) < 1:
-        release_array(b)
-        _free_scratch(host, b, _DEVICE_ARRAY)
-        return fail(e, ERR_INTERNAL, "table: no input column")
-    var x = child(b, 0)
-    var pad = _CHILD_AT + _TABLE_AT if sliced else 0
-    make_struct(out_p, pad + n, 1)
-    var col = child(out_p, 0)
-    var d = make_col(col, pad + n)
-    for r in range(pad + n):
-        if r < pad or not is_valid(x, r - pad):
-            d.bitcast[Int64]()[r] = PAD_VALUE if r < pad else 0
-            set_null(col, r)
-        else:
-            d.bitcast[Int64]()[r] = i64_at(x, r - pad)
-    release_array(b)
-    _free_scratch(host, b, _DEVICE_ARRAY)
-    set_cpu(out_p)
-    var v = struct_validity(out_p)
-    if sliced:
-        arr(col)[].offset = Int64(_CHILD_AT)
-        arr(col)[].length = Int64(_TABLE_AT + n)
-        arr(col)[].null_count -= Int64(_CHILD_AT)  # the pad rows before the child's offset are not its rows
-        arr(out_p)[].offset = Int64(_TABLE_AT)
-        arr(out_p)[].length = Int64(n)
-        for r in range(_TABLE_AT):
-            # SAFETY: struct_validity's 8 bytes; r < 8.
-            v.bitcast[UInt8]()[0] = v.bitcast[UInt8]()[0] & ~(UInt8(1) << UInt8(r))
-    else:
-        arr(out_p)[].null_count = -1
-    return OK
-
-
-def _next_two_types(fr: Void, out_p: Void, e: Void) -> Int32:
-    """Each input batch's column x as a table (x int64, 10 * x int32), nulls
-    where x is null."""
-    var f = fr.bitcast[_Frame]()
-    var host = f[].host
-    var b = _scratch(host, _DEVICE_ARRAY)
-    if _pull(fr, b) != 0:
-        _free_scratch(host, b, _DEVICE_ARRAY)
-        return fail(e, ERR_INTERNAL, "the input stream failed")
-    if is_null(arr(b)[].release):
-        f[].done = True
-        _free_scratch(host, b, _DEVICE_ARRAY)
-        return OK
-    var n = length(b)
-    if n_children(b) < 1:
-        release_array(b)
-        _free_scratch(host, b, _DEVICE_ARRAY)
-        return fail(e, ERR_INTERNAL, "table_two_types: no input column")
-    var x = child(b, 0)
-    make_struct(out_p, n, 2)
-    var c0 = child(out_p, 0)
-    var c1 = child(out_p, 1)
-    var d0 = make_col(c0, n)
-    var d1 = make_col(c1, n)
-    for r in range(n):
-        # SAFETY: make_col's values blocks of n rows (8 bytes each, int32 in
-        # the first 4 * n of c1's).
-        if is_valid(x, r):
-            d0.bitcast[Int64]()[r] = i64_at(x, r)
-            d1.bitcast[Int32]()[r] = Int32(10 * i64_at(x, r))
-        else:
-            set_null(c0, r)
-            set_null(c1, r)
-    release_array(b)
-    _free_scratch(host, b, _DEVICE_ARRAY)
-    set_cpu(out_p)
-    return OK
-
-
-def _next_endless(out_p: Void) -> Int32:
-    make_struct(out_p, 1, 1)
-    var d = make_col(child(out_p, 0), 1)
-    d.bitcast[Int64]()[0] = 0
-    set_cpu(out_p)
-    return OK
-
-
-def _frame_next(fr: Void, call: Void, out_p: Void, e: Void) abi("C") -> Int32:
-    arr(out_p)[].release = null_void()
-    if cancelled(call):
-        return fail(e, ERR_CANCELLED, "cancelled between batches")
-    var f = fr.bitcast[_Frame]()
-    if f[].done:
-        return OK  # the end: out's release stays NULL
-    if f[].fx == F_RAISE_AGAIN:
-        f[].running += 1
-        if f[].running == 1:
-            return fail(e, ERR_RAISED, "raise_again: raised")
-        return fail(e, ERR_INTERNAL, "raise_again: frame_next called after an error")
-    if f[].fx == F_YIELD_FIRST and not f[].yielded:
-        # One output before any pull: a one-row table [0].
-        f[].yielded = True
-        make_struct(out_p, 1, 1)
-        make_col(child(out_p, 0), 1).bitcast[Int64]()[0] = 0
-        set_cpu(out_p)
-        return OK
-    if f[].fx == F_RUNNING_SUM or f[].fx == F_YIELD_FIRST:
-        return _next_running_sum(fr, out_p, e)
-    if f[].fx == F_GROUP_MAX:
-        return _next_group_max(fr, out_p, e)
-    if f[].fx == F_YIELD_TWO_THEN_RAISE:
-        return _next_yield_two(fr, out_p, e)
-    if f[].fx == F_ENDLESS:
-        return _next_endless(out_p)
-    if f[].fx == F_TABLE_SLICED or f[].fx == F_TABLE_NULL_COUNT_UNKNOWN:
-        return _next_table(fr, out_p, e, f[].fx == F_TABLE_SLICED)
-    if f[].fx == F_TWO_TYPES:
-        return _next_two_types(fr, out_p, e)
-    return _next_step(fr, out_p, e)
-
-
-def _frame_close(fr: Void) abi("C"):
-    var host = fr.bitcast[_Frame]()[].host
-    var s = fr.bitcast[_Frame]()[].stream
-    _stream_release(s)
-    _free_scratch(host, s, _STREAM)
-    _unbox[_Frame](host, fr)
 
 
 # --- init and shutdown -------------------------------------------------------------------

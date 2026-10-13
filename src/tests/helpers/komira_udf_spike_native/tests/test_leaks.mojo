@@ -114,8 +114,16 @@ def _round(mut rt: UdfRuntime, code: CodeSet, mismatch: UdfSpec, directory: UdfS
     rt.unload(ua.handle)
     rt.unload(uf.handle)
     rt.unload(ud.handle)
-    _ = rt.validate(mismatch)
-    _ = rt.validate(directory)
+    _load_drop(rt, mismatch)
+    _load_drop(rt, directory)
+
+
+def _load_drop(mut rt: UdfRuntime, s: UdfSpec) raises:
+    """Load `s` (which opens its code; validate opens none, design section
+    4.3) and unload it if it loaded."""
+    var u = rt.load(s)
+    if u.outcome.is_ok():
+        rt.unload(u.handle)
 
 
 def _handles(path: String, code: CodeSet, mismatch: UdfSpec, directory: UdfSpec) raises -> Int:
@@ -145,8 +153,8 @@ def _junk(n: Int, seed: Int) -> List[UInt8]:
 
 
 def _new_libraries(path: String, root: String) raises -> Int:
-    """The heap's growth over ROUNDS validates, each of a new code object
-    that fails dlopen."""
+    """The heap's growth over ROUNDS loads, each of a new code object that
+    fails dlopen."""
     var rt = UdfRuntime.open(path)
     var specs = List[UdfSpec]()
     for k in range(WARM + ROUNDS):
@@ -156,10 +164,10 @@ def _new_libraries(path: String, root: String) raises -> Int:
         s.code = [stage_data(data, root, host_role(), sha256_of(data))]
         specs.append(s^)
     for k in range(WARM):
-        _ = rt.validate(specs[k])
+        _load_drop(rt, specs[k])
     var before = heap_in_use()
     for k in range(WARM, WARM + ROUNDS):
-        _ = rt.validate(specs[k])
+        _load_drop(rt, specs[k])
     var grown = heap_in_use() - before
     rt.shutdown()
     return grown
@@ -170,12 +178,12 @@ def _runtimes(path: String, unloadable: UdfSpec) raises -> Int:
     that fails dlopen, and shut down."""
     for _ in range(WARM):
         var rt = UdfRuntime.open(path)
-        _ = rt.validate(unloadable)
+        _load_drop(rt, unloadable)
         rt.shutdown()
     var before = heap_in_use()
     for _ in range(ROUNDS):
         var rt = UdfRuntime.open(path)
-        _ = rt.validate(unloadable)
+        _load_drop(rt, unloadable)
         rt.shutdown()
     return heap_in_use() - before
 

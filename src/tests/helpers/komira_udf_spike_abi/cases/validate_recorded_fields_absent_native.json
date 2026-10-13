@@ -1,0 +1,12 @@
+{
+ "name": "validate_recorded_fields_absent_native",
+ "defect": "the native runtime accepts a descriptor with no field list (design 3.1: native code has no lazy view, ERR_DESCRIPTOR)",
+ "run": "validate",
+ "entry": "pick",
+ "shape": "ROW",
+ "args": [{"type": "int64", "nullable": true, "name": "flag"}, {"type": "int64", "nullable": true, "name": "a"}],
+ "result": [{"type": "int64", "nullable": true}],
+ "descriptor": {"recorded_fields": "absent"},
+ "classes": ["NATIVE"],
+ "expect": {"status": "ERR_DESCRIPTOR", "run_error": "OPTIMIZED_UDF_DESCRIPTOR_INVALID"}
+}

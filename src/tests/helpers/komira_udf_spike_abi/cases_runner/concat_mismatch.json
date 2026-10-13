@@ -1,0 +1,13 @@
+{
+ "name": "concat_mismatch",
+ "defect": "a deliberate mismatch: the outputs' first column, concatenated, is not the one named",
+ "run": "frame",
+ "entry": "running_sum",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "inputs": [{"length": 1, "columns": [{"type": "int64", "values": [1]}]}, {"length": 1, "columns": [{"type": "int64", "values": [2]}]}],
+ "expect": {"status": "OK", "concat_column": {"type": "int64", "values": [1, 2]}},
+ "runner_fails_with": "row 1"
+}

@@ -11,15 +11,17 @@
 #     null summed, a running total reset, a completed group written to the
 #     wrong row, an output lost or added before an error).
 #   - frame refusals: a step given no literal batch or a literal of two rows,
-#     a running_sum, table_sliced or table_two_types batch without its
-#     column, a group_max batch without its value column, each refused by
-#     name with every input array released (an error path that reads past
+#     refused by name; a running_sum, table_sliced or table_two_types batch
+#     without its column, and a group_max batch without its value column,
+#     each the host's breach (ERR_HOST_CONTRACT, design 4.5: a child count
+#     other than the schema bound at load); each with every input array
+#     released (an error path that reads past
 #     the batch, or leaks it); table_null_count_unknown over a null after a
 #     valid row, whole (a null row's value written over another row).
 #   - mergeable aggregate: sums over three groups emitted in two steps
 #     (emit_first_n), a group id equal to n_groups and one below zero,
 #     values and group ids of different lengths, an argument batch without
-#     columns, a cancelled update, emit_first_n above the group count, each
+#     columns (ERR_HOST_CONTRACT), a cancelled update, emit_first_n above the group count, each
 #     refused by name (a group id bound off by one; the groups after an
 #     early emit kept wrong); a second group set on one instance of
 #     sum_one_group_set_per_instance refused by name.
@@ -33,8 +35,9 @@
 #   - double_batch and fahrenheit_batch (the batch-loop fixtures) over a
 #     sliced input of 12 rows with nulls at rows 1 and 10, whole (the input
 #     read without its offset; a row's validity bit read from the wrong
-#     byte); each refusing a batch with no columns by name (a child read
-#     that is not there: the spec is checked at load, the batch is not).
+#     byte); each refusing a batch with no columns as the host's breach,
+#     ERR_HOST_CONTRACT (a child read that is not there: the spec is checked
+#     at load, the batch against the schema bound there).
 #   - load: an entry the library does not have is refused by the library's
 #     load, through the runtime, with no handle (a library's refusal turned
 #     into a handle).
@@ -219,8 +222,8 @@ def _frames(mut lib: _Lib) raises:
     var before = lib.rt.ledger()
     _status(
         lib.frame(i_rs, rs, [Batch(2)], CallOptions.plain()).outcome,
-        ERR_INTERNAL,
-        "running_sum: no input column",
+        ERR_HOST_CONTRACT,
+        "children, the schema bound at load",
         n + ": running_sum, a batch without columns",
     )
     for rows in [2, 1]:
@@ -229,20 +232,20 @@ def _frames(mut lib: _Lib) raises:
             ids.append(1)
         _status(
             lib.frame(i_gm, gm, [_batch([_col(ids)], rows)], CallOptions.plain()).outcome,
-            ERR_INTERNAL,
-            "without its group and value columns",
+            ERR_HOST_CONTRACT,
+            "children, the schema bound at load",
             n + ": group_max, a batch of " + String(rows) + " rows without its value column",
         )
     _status(
         lib.frame(i_ts, ts, [Batch(2)], CallOptions.plain()).outcome,
-        ERR_INTERNAL,
-        "table: no input column",
+        ERR_HOST_CONTRACT,
+        "children, the schema bound at load",
         n + ": table_sliced, a batch without columns",
     )
     _status(
         lib.frame(i_tt, tt, [Batch(2)], CallOptions.plain()).outcome,
-        ERR_INTERNAL,
-        "table_two_types: no input column",
+        ERR_HOST_CONTRACT,
+        "children, the schema bound at load",
         n + ": table_two_types, a batch without columns",
     )
     var after = lib.rt.ledger()
@@ -307,8 +310,8 @@ def _aggregate(mut lib: _Lib) raises:
     )
     _status(
         lib.update(g.handle, Batch(1), [0], 2, CallOptions.plain()),
-        ERR_INTERNAL,
-        "differ in length",
+        ERR_HOST_CONTRACT,
+        "children, the schema bound at load",
         n + ": an argument batch without columns",
     )
     _status(
@@ -350,7 +353,7 @@ def _shapes(mut lib: _Lib) raises:
     var k = lib.rt.call_batch(i_k, kept, b, CallOptions.plain())
     assert_true("args not moved" in k.outcome.fault, n + ": args_kept: " + String(k.outcome))
     var none = lib.rt.load(_spec(SHAPE_SCALAR, "no_such_entry", lib.code))
-    _status(none.outcome, ERR_DESCRIPTOR, "no fixture has this entry", n + ": load of an entry the library lacks")
+    _status(none.outcome, ERR_LOAD, "no code object holds the entry", n + ": load of an entry the library lacks")
 
 
 def _batch_loops(mut lib: _Lib) raises:
@@ -393,14 +396,14 @@ def _batch_loops(mut lib: _Lib) raises:
     # so each batch fixture refuses it instead of reading a child it lacks.
     _status(
         lib.rt.call_batch(inst, spec, Batch(3), CallOptions.plain()).outcome,
-        ERR_INTERNAL,
-        "a batch fixture got no argument",
+        ERR_HOST_CONTRACT,
+        "children, the schema bound at load",
         n + ": double_batch, a batch with no columns",
     )
     _status(
         lib.rt.call_batch(finst, fspec, Batch(3), CallOptions.plain()).outcome,
-        ERR_INTERNAL,
-        "a batch fixture got no argument",
+        ERR_HOST_CONTRACT,
+        "children, the schema bound at load",
         n + ": fahrenheit_batch, a batch with no columns",
     )
 
