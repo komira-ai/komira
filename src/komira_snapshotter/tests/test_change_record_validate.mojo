@@ -344,7 +344,8 @@ def test_batch_copy_owns_its_lists() raises:
 # =============================================================================
 def test_record_copy_keeps_unknown_op_tag() raises:
     """Tags below INSERT, just above REMOVE and far above it are copied
-    unchanged; the copy is still unknown to the predicates and to validate()."""
+    unchanged with the key, both images and the sequence number; the copy is
+    still unknown to the predicates and to validate()."""
     var tags = List[Int]()
     tags.append(-1)
     tags.append(3)
@@ -353,6 +354,13 @@ def test_record_copy_keeps_unknown_op_tag() raises:
     for i in range(len(tags)):
         var c = _rec(tags[i], _one(1), _one(2), _one(3)).copy()
         assert_equal(c.op, tags[i])
+        assert_equal(len(c.key), 1)
+        assert_equal(len(c.new_image), 1)
+        assert_equal(len(c.old_image), 1)
+        assert_equal(c.key[0].as_long(), 1)
+        assert_equal(c.new_image[0].as_long(), 2)
+        assert_equal(c.old_image[0].as_long(), 3)
+        assert_equal(c.sequence_number, String("seq-1"))
         assert_equal(c.op_name(), String("UNKNOWN"))
         assert_false(c.is_insert())
         assert_false(c.is_modify())
@@ -379,6 +387,9 @@ def test_record_copy_keeps_stray_images() raises:
     )
     var keyless = _rec(CDC_OP_INSERT, _none(), _one(2), _none()).copy()
     assert_equal(len(keyless.key), 0)
+    assert_equal(len(keyless.new_image), 1)
+    assert_equal(keyless.new_image[0].as_long(), 2)
+    assert_equal(len(keyless.old_image), 0)
     assert_equal(_validate_error(keyless), String(_KEY_EMPTY))
 
 
