@@ -270,7 +270,11 @@ Before the packer reads the file, the README examples tool's `link-check` must p
 arguments the packer wrote. kci's install validation reads the block with the same tool (`link`),
 refuses it unless it is, word for word, what kci computes from the release's `depends` and
 `lib_files`, and runs the README with the block's `mojo run` arguments (`src/kci_validate/readme_link.mojo`).
-The `mojo run` line names no holder: the JIT object of question 2's option (A) is not built yet.
+The `mojo run` line names no holder: the JIT object of question 2's option (A) is not built yet. So a
+README whose closure ships a static archive (its block's `mojo build` line links one the `mojo run`
+line does not: komira_log's holder, and so every library depending on komira_log) is run built: kci
+runs the block's `mojo build` command into `<env>/bin` and executes that program instead of `mojo run`
+(`run_readme` in `src/kci_validate/native_rows.mojo`, install checks 5 and 6 below).
 
 Welded tests and the welded README gate do not change: they link static archives (`_link_tail`), and
 #685 records why they must not also link a shared copy (a test hook set in one copy is unread by the
@@ -392,14 +396,23 @@ no exception:
      komira_objectstore reach their owner from Mojo, which only slice 7's `native_reach_calls` covers);
   5. **the loaded-from row:** each README program (row 6) runs with the loader's record on
      (`LD_DEBUG=libs`, the record `tests//functional/runtime_libs:loader_trace` already reads for
-     `runtime_libs`), and every komira `.so` and every dlopened codec it loaded must lie under
-     `<env>/lib`. Like row 4 it runs in the whole set and per package alone: in the whole set
+     `runtime_libs`), and every komira `.so` and every codec its library's closure declares (the
+     `metadata.json` `dlopen` sonames of the library and every library it depends on) it loaded must
+     lie under `<env>/lib`, both paths resolved as realpath does first (the compiler reaches the
+     environment's libraries through its own DT_RPATH `$ORIGIN/../lib`, so the loader names them
+     `<env>/bin/../lib/<so>`). A library no package declares is out of scope: the Mojo compiler and
+     its JIT load libz and libzstd themselves, from wherever the toolchain finds them, and that says
+     nothing about the package. A declared codec loaded from outside the environment stays red. Like row 4 it runs in the whole set and per package alone: in the whole set
      another package may install a codec this package forgot to require, so a missing requirement
      is red only where nothing else installed ships that codec, which only the per-package run
      ensures. This replaces reading `/proc/self/maps`, which would need code in the program under
      test;
   6. every installed README run under `mojo run` with the owners' flags (question 5: the README's
-     own `sh komira-link` block, which kci refuses unless it is what the closure needs; slice 10) and, new,
+     own `sh komira-link` block, which kci refuses unless it is what the closure needs; slice 10),
+     except a README whose closure ships a static archive (komira_log's holder; the block's `mojo build`
+     line links it and its `mojo run` line cannot, the JIT loading no archive): that one runs as the
+     block's `mojo build` into `<env>/bin` and the built program executed, in the whole set and alone,
+     until question 2's JIT object exists; and, new,
      when the library's closure links native files (its block is not empty), built with `mojo build` and
      the block's build words into `<env>/bin` and run. **Decision (slice 11): a README whose closure links
      no native file is not built.** Its block is empty, so there are no build words to check, and its
