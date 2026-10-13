@@ -346,6 +346,12 @@ fails the build in these cases:
   member listed after it; the message names both. The `release_order_*`
   targets in [`BUCK`](BUCK) run this check over the fixtures in
   `release_order/` and must pass first;
+- a member packages no README, or its README holds no example (a ```` ```mojo ````
+  or ```` ```mojo module ```` fence, as the README examples tool's `generate --links refuse`
+  reads it; the check is that tool's `release-check`). kci's install validation
+  refuses both, but only after the release is published; the message names the
+  member and quotes kci. The `release_readme_*` targets in [`BUCK`](BUCK) run this
+  check over the fixtures in `release_readme/` and must pass first;
 - `komira_pack conda-check --kind metapackage --require-stamped true` refuses the
   metapackage;
 - its `libs`, its metapackage name, or the `--license`, `--summary` and `--home`
