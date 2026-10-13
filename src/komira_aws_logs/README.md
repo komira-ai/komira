@@ -48,6 +48,7 @@ Decode a page of events, and read an error with komira_aws_core's
 `aws_json_error_info` (the code from `X-Amzn-Errortype` when present, else
 the body's `__type`, cut to the short name):
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from komira_aws_core import AwsResponse, aws_json_error_info
 from komira_aws_logs.komira_aws_logs import parse_get_log_events_response
@@ -84,6 +85,10 @@ assert_equal(info.message, "The specified log stream does not exist.")
 Resolve the endpoint and sign the request. The clock is fixed, so the
 signature is the same on every run:
 
+<!-- mojo-hidden
+from std.testing import assert_equal
+from komira_aws_logs.komira_aws_logs import CloudWatchLogsGetLogEventsRequest, build_get_log_events_request
+-->
 ```mojo
 from komira_aws_core import AwsCredential, FixedClock, Header
 from komira_aws_core import aws_signing_target, build_sigv4_signed_request

@@ -214,7 +214,7 @@ other run.
 | `tmpdir_outside_checkout` (reported): no directory from `TEST_TMPDIR` up to `/` holds `.git` or `.buckconfig` | outside: six levels walked to `/`, no marker | the install-path test, whose scratch must be outside any checkout |
 
 `tmpdir_outside_checkout` is reported, not required: the gate runner
-([`gate_runner.sh`](../tools/build/mojo/gate_runner.sh)) makes `TEST_TMPDIR`
+([`gate mojo`](../tools/build/run/README.md)) makes `TEST_TMPDIR`
 under the action's working directory, which for an action run on the client
 (no farm configured) is inside the checkout, so a required check would fail
 there for that reason rather than for a missing capability (derived from the
@@ -360,10 +360,25 @@ channel answers NOOP (exit 0).
   Those are lint rules a script could spell around. **The lock is kci**,
   which on a push is built from `main`: it refuses `--plan` on a push to
   `refs/heads/main` for every stage (exit 3, `KCI-E-PLAN-ON-RELEASE`), and
-  its result carries a `set_hash` only for a run that is not `--plan` and,
-  when it selects validations, whose every validation VALIDATED and
-  SUCCEEDED. `beta_validate`'s `validated_set_hash` comes from that field, so a
-  dry run hands `prod` nothing, and `prod` refuses an empty hash.
+  its result carries a `set_hash` only for a run that is not `--plan`, that
+  ended SUCCEEDED or NOOP, and, when it selects validations, whose every
+  validation VALIDATED and SUCCEEDED. `beta_validate`'s `validated_set_hash`
+  comes from that field, so a dry run, a failed run or a SUPERSEDED run
+  (exit 0) hands `prod` nothing, and `prod` refuses an empty hash.
+- **A failed DEPLOY step stops the run, and nothing rolls it back.** `kci
+  run` stops at the first step that does not end SUCCEEDED or NOOP. A DEPLOY
+  step that ends FAILED or PARTIAL leaves its cell exactly as the failed
+  apply left it: kci does not unwind what landed, and a later step of the
+  stage (a DEPLOY step into another cell included) has no row and never
+  runs. The job exits non-zero (4 or 6), so no job that `needs:` it starts,
+  and the run's result carries no `set_hash`, so the next stage, which
+  refuses an empty hash, could not start from it either. The recovery is a
+  fixed revision pushed to `main`: its apply completes what the failed one
+  left `pending`. `--rollback-on-failure`, which would re-apply the failed
+  cell at its last known-good revision, needs a per-cell deployed-revision
+  record that kci does not have yet, so kci refuses the flag on every stage,
+  with or without `--plan`, before it reads anything (exit 2,
+  `KCI-E-USAGE`, no RUNNING record).
 - **Queued runs: one release at a time, newest push wins.** A PUSH to `main`
   is in the concurrency group `kci-release-main` (rule R16 holds the group
   text byte for byte). A running release is never cancelled. GitHub keeps at
@@ -851,7 +866,9 @@ stderr whole up to 8 KiB, else the first and last 4 KiB), and kci FAILS the
 check (`KCI-E-BUILD-FAILED`). The decision is the failure, not buck2's text:
 the target buck2 names, when it names one, only leads the message. So a
 change that plants a target buck2 cannot configure fails its own check,
-widened or not. A
+widened or not. **A coverage hold is never dropped:** `affected` reads each changed
+`coverage_held` at the base and in the checkout, and answers `BROKEN` when a
+metric the base held is gone ([The 99% threshold and holds](../tools/build/coverage/README.md#the-99-threshold-and-holds)). A
 non-empty change that reaches no unit answers `AFFECTED 0`, which kci refuses
 (`KCI-E-AFFECTED-VACUOUS`): never a pass. The job's checkout has the full
 history, so the base commit is there. In `pr.yml` the base is the first parent
@@ -923,7 +940,9 @@ retries ran out of budget is not called interference. Without the flag,
 each run has its `--build-timeout-s` and there is no total.
 
 `pr.yml` passes the time its job has left: its first step writes the job's
-deadline, 115 of the job's 120 minutes (`timeout-minutes`), and the
+deadline, 325 of the job's 330 minutes (`timeout-minutes`, under the 360 a
+GitHub-hosted job may run, so that a change that rebuilds most of the tree
+on the farm finishes), and the
 `kci run` step stops with an error if that file is missing, then passes the
 seconds left until it. The time `build kci` took is therefore not taken from
 a wide change's build, and kci reports which units it did not build about 5
@@ -933,7 +952,9 @@ those 5 minutes). `build kci` itself takes from seconds (a cached kci) to most
 of an hour (a change to kci or to what it depends on), so a fixed per-batch
 number either wasted the job's time or overran it. The welded test
 `src/kci_workflow_check/tests/test_repo_kci_yml.mojo` holds `pr.yml` to these
-steps and numbers.
+steps and numbers: `timeout-minutes` within 300 to 360, and the deadline
+step's minutes exactly `timeout-minutes` less 5, so the two cannot drift
+apart. `coverage.yml`'s `measure` job has the same 330 minutes.
 
 Whatever the outcome, a `BUILT <unit>` line names exactly the units a
 successful run covered. The result document's `affected_by.units` is the set
@@ -1014,7 +1035,7 @@ change touches, and the branch coverage of those whose coverage gate reads
 branch records (`COVERAGE_BRANCH_GATE`), as covcheck's summary and
 annotations on the lines of the "Files changed" view. It is **informational**: not a required check, its
 conclusion is `neutral` in the policy's census mode, except that a touched
-package measured under its floor of `tools/build/coverage/ratchet.tsv` (a
+package under the 99.00% target on a metric it holds (its `coverage_held`: a
 `Regression`, which fails in every mode) makes it `failure`; it cannot make
 `pr / check` red, so that failure shows on the pull request without
 blocking it. Job `measure` (the same farm connection and permissions as

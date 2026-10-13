@@ -17,6 +17,7 @@ mojo_library(
     test_srcs = [
         "tests/test_jwk_key_ops.mojo",
         "tests/test_jwk_rfc_vectors.mojo",
+        "tests/test_jwk_set_document_shapes.mojo",
         "tests/test_jwk_set_strict.mojo",
         "tests/test_jwks.mojo",
         "tests/test_no_product_vocabulary.mojo",

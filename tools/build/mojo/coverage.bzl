@@ -41,8 +41,10 @@ What ships, the library's conda package (`<name>_conda`, its joins
 run and the gate (and through the gate, when it reads them, for every branch
 coverage action), through the library's MojoCoverageGateInfo: a test failing
 at -O0, under kcov or (branch records read) instrumented for branch
-coverage, a branch the classifier refuses, or a gate failing in enforce
-mode, leaves the conda package unbuilt. The library's own package
+coverage, a branch the classifier refuses, or a failing gate (any finding
+in enforce mode; in every mode, a metric the package holds, its
+coverage_held, below the target or not measured), leaves the conda package
+unbuilt. The library's own package
 (`mojo_gate_join`, what dependents compile against) does not wait for them:
 a library whose coverage is red still builds, and so do its dependents. A
 library with no test still has a gate (it has no report: NotMeasured), which
@@ -80,12 +82,11 @@ gate is in COVERAGE_SHARED_LIB_MODE and nothing waits for it).
 - A README's examples (the program `[tests][readme]` runs) have a coverage
   binary and run like a test, `[coverage][bin][readme]` and
   `[coverage][tests][readme]` (coverage_readme): they test the library's
-  public API, so they measure its lines. Whether the README holds an example
-  is known only when the build reads it, so the coverage build compiles the
-  program when it has one and otherwise a stub that runs nothing (category
-  `mojo_cov_readme_source` chooses). The program is no repository file: its
-  report names it under `buck-out/readme/`, which covcheck counts outside the
-  repository.
+  public API, so they measure its lines. The coverage build compiles the
+  generated runner, which runs every example's program in one process (with
+  no example it runs nothing). The programs are no repository files: the
+  report names them under `buck-out/readme/`, which covcheck counts outside
+  the repository.
 - A `mojo_test` covers the libraries that name it in `coverage_tests`, none
   or several. The library cannot depend on its test (the test depends on the
   library), so such a library's gate is the target `<name>_cov_gate`, as for
@@ -119,7 +120,7 @@ _COVERAGE_LINK = "komira//tools/build/coverage/kcov:cov_link"
 _COVERAGE_RUN = "komira//tools/build/coverage/kcov:cov_run"
 
 # The directory every coverage gate runs from (cov_gate_dir,
-# tools/build/coverage/defs.bzl): cov_gate.sh, covcheck and the ratchet.
+# tools/build/coverage/defs.bzl): cov_gate.sh and covcheck.
 _COVERAGE_GATE = "komira//tools/build/coverage:cov_gate"
 
 # The directory every branch coverage build links and runs from
@@ -134,7 +135,8 @@ _COVERAGE_BRANCH = "komira//tools/build/coverage/branch:cov_branch"
 # `reports`, its tests' Cobertura reports (its README's included);
 # `branch_infos`, its tests' branch records (coverage_branch.bzl's
 # `cov/branch/<test>.info`, each covcheck's `--branch-lcov`) when the gate
-# reads them (_branch_gated), else none. And `markers`: what its conda
+# reads them (_branch_gated), else none; `held`, its package's
+# coverage_held or None (coverage_held). And `markers`: what its conda
 # package (tools/build/package/conda.bzl) waits for, the marker of every
 # coverage run and of its gate (none of a gate for a library whose gate is
 # `<name>_cov_gate`, which the conda package names itself). `run` is what a
@@ -149,6 +151,7 @@ MojoCoverageGateInfo = provider(fields = {
     "branch_infos": provider_field(typing.Any),
     "external_gate": provider_field(bool),
     "files": provider_field(typing.Any),
+    "held": provider_field(typing.Any),
     "label": provider_field(typing.Any),
     "markers": provider_field(typing.Any),
     "package": provider_field(str),
@@ -197,6 +200,11 @@ COVERAGE_ATTRS = {
     # COVERAGE_BRANCH_GATE (policy.bzl); for a fixture of the tests cell,
     # True unless it passes False. False otherwise.
     "coverage_branch_gate": attrs.bool(default = False),
+    # The metrics its package holds (tools/build/coverage/README.md, "The 99%
+    # threshold and holds"): the package's coverage_held, set by the macro
+    # with coverage when the package has one (a fixture of the tests cell may
+    # name another file); None otherwise, and the gate holds nothing.
+    "coverage_held": attrs.option(attrs.source(), default = None),
     # The mojo_test targets this library names in `coverage_tests`, set by
     # the macro with coverage (their runs and the gate are the target
     # `<name>_cov_gate`, so the library has no coverage_gate); [] otherwise.
@@ -222,6 +230,17 @@ def _linux(v):
         "komira//tools/build/package:is_linux_x86_64": v,
         "DEFAULT": None,
     })
+
+def _held_kwargs(name, kwargs):
+    """Sets `coverage_held` in `kwargs` to the package's coverage_held when
+    it has one, unless a fixture of the tests cell passed one; refuses it
+    from any other BUCK file, so no library reads a hold but its
+    package's."""
+    if kwargs.get("coverage_held") != None:
+        if get_cell_name() != "tests":
+            fail("{}: `coverage_held` is the package's coverage_held, which mojo_library finds itself; do not pass it".format(name))
+    elif glob(["coverage_held"]):
+        kwargs["coverage_held"] = "coverage_held"
 
 def coverage_kwargs(kwargs):
     """Sets the coverage attributes in a mojo_library's `kwargs` when
@@ -281,6 +300,7 @@ def coverage_kwargs(kwargs):
             ledger = name + "_cov_gate"
     else:
         return None
+    _held_kwargs(name, kwargs)
     if tests and gate == None and ledger == None:
         fail("{}: `coverage_tests` needs `coverage_gate`: the runs of the tests it names are read by the gate alone".format(name))
     if tests or ledger:
@@ -305,7 +325,7 @@ def coverage_kwargs(kwargs):
 
 def coverage_link_dir(ctx):
     """The link directory of this library's coverage builds, what
-    mojo_wrapper.sh takes as <zig_dir>, or None when coverage is off."""
+    mojo_compile takes as --zig=<dir>, or None when coverage is off."""
     link = ctx.attrs.coverage_debug
     return link[DefaultInfo].default_outputs[0] if link != None else None
 
@@ -368,13 +388,15 @@ def _run_facts(ctx, src_dir, import_name, root):
         src_repo = src_repo,
     )
 
-def _cov_run(actions, tc, facts, label, where, t, name, stem, cov_bin, test_repo, data, env_args, solib = None):
+def _cov_run(actions, tc, facts, label, where, t, name, stem, cov_bin, test_repo, data, env_args, solib = None, stage = None):
     """Declares the `mojo_cov_run` action of the coverage binary `cov_bin`
     of test source `t` (staged at `name`, the path its line tables name it
     by, with its `data`), run under kcov by cov_run.sh of `facts.dir`
     against the library sources of `facts` (_run_facts), through the
     release gate's runner with `env_args`, as `label`. `test_repo` is the
-    path the report names `t` by; `solib` as coverage_run's. Returns
+    path the report names `t` by; `solib` as coverage_run's; `stage`, when
+    set, is staged in place of `t` ({path: artifact}: a directory holding
+    `name`). Returns
     (report, marker):
     `cov/tests/<stem>.xml`, the Cobertura report in repository paths, and
     `cov/tests/<stem>.passed`."""
@@ -383,7 +405,7 @@ def _cov_run(actions, tc, facts, label, where, t, name, stem, cov_bin, test_repo
             fail("{}: the test's data destination {} collides with its source, which a coverage run stages at {}".format(where, repr(dest), repr(name)))
         if dest == "buck-out" or dest.startswith("buck-out/"):
             fail("{}: the data destination {} is under buck-out/, where a coverage run stages the library's sources".format(where, repr(dest)))
-    share = actions.copied_dir("cov/tests/{}/share".format(stem), dict(data) | {name: t})
+    share = actions.copied_dir("cov/tests/{}/share".format(stem), dict(data) | (stage or {name: t}))
     gen = []
     for rel in facts.gen:
         gen += ["--gen", rel]
@@ -395,7 +417,7 @@ def _cov_run(actions, tc, facts, label, where, t, name, stem, cov_bin, test_repo
             "sh",
             facts.dir.project("cov_run.sh"),
             tc.busybox,
-            tc.gate_runner,
+            tc.gate,
             tc.compiler,
             label,
             cov_bin,
@@ -436,46 +458,28 @@ def coverage_run(ctx, tc, t, stem, cov_bin, src_dir, import_name, root, data, en
     label = "{}:{} [coverage]".format(ctx.label.raw_target(), t.short_path)
     return _cov_run(ctx.actions, tc, facts, label, where, t, t.short_path, stem, cov_bin, _dir_prefix(facts.pkg_dir) + t.short_path, data, env_args, solib)
 
-# The program a README with no example gives the coverage build: the
-# README's own program is then a comment (readme_examples), which does not
-# compile, and whether it is one is known only when the build reads it.
-_README_STUB = "def main():\n    print(\"NO EXAMPLE: this README holds no example\")\n"
-
 def coverage_readme(ctx, tc, build, readme, closure, link_tail, src_dir, import_name, root, env_args, bins, runs):
     """With coverage, the README's examples as a test (`readme`, the
-    (marker, program, count) of defs.bzl's _readme_gate): the program, or
-    _README_STUB when the README holds no example (a
-    `mojo_cov_readme_source` action reads the count), built at -O0 with
-    line tables against `closure` (the ungated package, as the README's
-    gated run is) through `build` (defs.bzl's _build_executable, its link
-    `link_tail` as the gated run's), and run under kcov with the library's
-    `env_args`. Adds them to `bins` and `runs` as `readme`. Its report names
-    the program `buck-out/readme/<package>/readme_<import>.mojo`: no
-    repository file, which covcheck counts outside the repository, so only
-    the library's lines it reached count."""
-    program, count = readme[1], readme[2]
-    src = ctx.actions.declare_output("cov/tests/readme/" + program.basename)
-    ctx.actions.run(
-        cmd_args(
-            tc.busybox,
-            "sh",
-            "-c",
-            'if [ "$("$1" cat "$2")" = 0 ]; then printf "%s" "$4" >"$5"; else "$1" cp "$3" "$5"; fi',
-            "cov_readme_source",
-            tc.busybox,
-            count,
-            program,
-            _README_STUB,
-            src.as_output(),
-        ),
-        category = "mojo_cov_readme_source",
-    )
-    stem = program.basename[:-len(".mojo")]
-    bins["readme"] = build(ctx, tc, "cov/tests/readme/" + stem, [src], src, [closure], "0", "mojo_build_cov_test", "readme", None, link_extra = link_tail, debug_link = coverage_link_dir(ctx))
+    (marker, generated directory, examples) of readme.bzl's readme_gate): the
+    directory's runner, `readme_<import>.mojo`, which imports each example's
+    program beside it and runs them all (with no example it prints that it
+    ran nothing), built at -O0 with line tables against `closure` (the
+    ungated package, as the README's gated runs are) through `build`
+    (defs.bzl's _build_executable, its link `link_tail` as the gated runs'),
+    and run under kcov with the library's `env_args`. Adds them to `bins`
+    and `runs` as `readme`. Its report names the programs
+    `buck-out/readme/<package>/readme_<import>[_<line>].mojo`: no repository
+    file, which covcheck counts outside the repository, so only the
+    library's lines they reached count."""
+    gen = readme[1]
+    runner = "readme_{}.mojo".format(import_name)
+    main = gen.project(runner)
+    bins["readme"] = build(ctx, tc, "cov/tests/readme/readme_" + import_name, [gen], main, [closure], "0", "mojo_build_cov_test", "readme", None, link_extra = link_tail, debug_link = coverage_link_dir(ctx))
     facts = _run_facts(ctx, src_dir, import_name, root)
     where = "{}: coverage run of README.md".format(ctx.label.raw_target())
     label = "{}:README.md [coverage]".format(ctx.label.raw_target())
-    runs["readme"] = _cov_run(ctx.actions, tc, facts, label, where, src, src.short_path, "readme", bins["readme"], "buck-out/readme/" + _dir_prefix(facts.pkg_dir) + program.basename, {}, env_args)
+    name = gen.short_path + "/" + runner
+    runs["readme"] = _cov_run(ctx.actions, tc, facts, label, where, main, name, "readme", bins["readme"], "buck-out/readme/" + _dir_prefix(facts.pkg_dir) + runner, {}, env_args, stage = {gen.short_path: gen})
 
 def coverage_test_kwargs(rule):
     """mojo_test's macro around `rule`: sets `coverage_debug` when coverage
@@ -579,6 +583,9 @@ def _gate_inputs(ctx, runs, branch, markers, run, srcs = None, tests_srcs = None
     `test_srcs` (a shared library's sources and drivers)."""
     where = "{}: coverage gate".format(ctx.label.raw_target())
     pkg = _pkg_dir(ctx.label)
+    held = ctx.attrs.coverage_held
+    if held != None and held.short_path != "coverage_held" and ctx.label.cell != "tests":
+        fail("{}: coverage_held is {}, not the package's coverage_held: only a fixture of the tests cell may name another".format(where, held.short_path))
     files = {}
     for s in ctx.attrs.srcs if srcs == None else srcs:
         if s.is_source:
@@ -605,6 +612,7 @@ def _gate_inputs(ctx, runs, branch, markers, run, srcs = None, tests_srcs = None
         branch_infos = [branch[k].info for k in sorted(branch)] if branch and _branch_gated(ctx) else [],
         external_gate = run != None and (bool(ctx.attrs.coverage_tests) or str(ctx.label.raw_target()) in COVERAGE_NO_GATE),
         files = files,
+        held = held,
         label = ctx.label.raw_target(),
         markers = markers,
         package = pkg or "(root)",
@@ -640,7 +648,8 @@ def _gate_action(actions, bb, gate_dir, mode, info, prefix):
     """Declares the `mojo_cov_gate` action of `info` (MojoCoverageGateInfo):
     cov_gate.sh of `gate_dir` (a cov_gate_dir dependency) in `mode` over
     `info.files` staged as `<prefix>root` and the list of its test sources
-    `<prefix>tests.txt`, writing `<prefix>result.json`, `<prefix>summary.md`
+    `<prefix>tests.txt`, and its hold (`info.held`, or a marker that holds
+    nothing, `<prefix>held`), writing `<prefix>result.json`, `<prefix>summary.md`
     and `<prefix>gate.passed`. The branch records follow the reports after
     the argument `--branch-lcov` (none, and no such argument, for a library
     with no test). For a test-only package (_info_only), `--info-package`
@@ -648,6 +657,7 @@ def _gate_action(actions, bb, gate_dir, mode, info, prefix):
     d = gate_dir[DefaultInfo].default_outputs[0]
     root = actions.copied_dir(prefix + "root", info.files)
     tests = actions.write(prefix + "tests.txt", "".join([t + "\n" for t in info.test_paths]))
+    held = info.held or actions.write(prefix + "held", "# Not held: the package has no coverage_held.\n")
     result = actions.declare_output(prefix + "result.json")
     summary = actions.declare_output(prefix + "summary.md")
     marker = actions.declare_output(prefix + "gate.passed")
@@ -663,6 +673,7 @@ def _gate_action(actions, bb, gate_dir, mode, info, prefix):
             str(COVERAGE_TARGET_BP),
             root,
             tests,
+            held,
             result.as_output(),
             summary.as_output(),
             marker.as_output(),
@@ -681,7 +692,7 @@ def _check_tools(ctx):
     gate unless the library is of the ledger COVERAGE_NO_GATE or names
     mojo_test targets in `coverage_tests` (its gate is then
     `<name>_cov_gate`). A BUCK file loading the rule itself cannot give a
-    library a lenient gate (its own ratchet, a script that passes a
+    library a lenient gate (its own hold, a script that passes a
     failure) or runs with no gate, unless it names `coverage_tests`: the
     rule cannot see whether `<name>_cov_gate` exists (the macro always
     declares it with them), so its MojoCoverageGateInfo says
@@ -732,6 +743,7 @@ def coverage_gate(ctx, tc, runs, branch, src_dir, import_name, root):
         branch_infos = pre.branch_infos,
         external_gate = pre.external_gate,
         files = pre.files,
+        held = pre.held,
         label = pre.label,
         markers = markers + [gate.marker],
         package = pre.package,
@@ -777,6 +789,7 @@ def _test_runs(ctx, tc, info):
         branch_infos = info.branch_infos,
         external_gate = info.external_gate,
         files = files,
+        held = info.held,
         label = info.label,
         markers = info.markers,
         package = info.package,
@@ -840,7 +853,7 @@ _mojo_cov_gate = rule(
 
 # The coverage attributes of mojo_shared_lib: a library's, but those of
 # branch coverage (a shared library's drivers have no branch coverage run).
-COVERAGE_SHARED_LIB_ATTRS = {k: COVERAGE_ATTRS[k] for k in ("coverage_debug", "coverage_run", "coverage_gate", "coverage_mode")}
+COVERAGE_SHARED_LIB_ATTRS = {k: COVERAGE_ATTRS[k] for k in ("coverage_debug", "coverage_run", "coverage_gate", "coverage_mode", "coverage_held")}
 
 def _not_enforced(where, mode):
     if mode == "enforce":
@@ -872,6 +885,7 @@ def _coverage_shared_lib_kwargs(kwargs):
         link, run, gate, mode = _COVERAGE_LINK, _COVERAGE_RUN, _COVERAGE_GATE, COVERAGE_SHARED_LIB_MODE
     else:
         return
+    _held_kwargs(name, kwargs)
     kwargs["coverage_debug"] = _linux(link)
     kwargs["coverage_run"] = _linux(run)
     if gate != None:

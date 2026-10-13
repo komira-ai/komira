@@ -1,0 +1,13 @@
+{
+ "name": "agg_no_keys_empty_input",
+ "defect": "an aggregate with no keys over empty input skips the call on zero rows, or loses the one group (off by one on empty input)",
+ "run": "agg_split",
+ "entry": "sum",
+ "shape": "AGG_MERGEABLE",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "state": [{"type": "int64", "nullable": true}],
+ "partials": [{"input": {"length": 0, "columns": [{"type": "int64", "values": []}]}, "group_ids": [], "n_groups": 1}],
+ "n_groups": 1,
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [0]}}
+}

@@ -134,8 +134,8 @@
 #      known-answer tests, a TLS handshake, the s2n-tls feature probes: see
 #      tools/build/tests/c_libs_tests.sh.
 #  28. (In the gate: tests//functional/watchdog:cases, the compile watchdog
-#      of mojo_wrapper.sh on stand-in compilers, whose action refuses a report
-#      with fewer ok cases than its floor.)
+#      of the compile wrapper (mojo_compile) on stand-in compilers, whose
+#      action refuses a report with fewer ok cases than its floor.)
 #  29. The test runtime contract (tests//functional/test_data): a gated test opens a
 #      declared fixture by its repository path from its staged share/, and a
 #      fixture it did not declare is absent (the gate goes red); TEST_TMPDIR
@@ -144,18 +144,16 @@
 #      komira//tools/build/mojo/mojo_test_testdata, in the gate); a mojo_test
 #      exiting 77 (SKIP to some harnesses) fails; a red test stays
 #      red with test_env {BIN: true} (library) and env {BIN: true} (mojo_test);
-#      (the runner's own cases, tests//functional/test_data:runner_cases, are
-#      in the gate, its action holding the report to a floor). A library's `test_deps`
+#      (the runner's own cases are the gate's unit tests, komira//tools/build/run,
+#      on linux and on macOS). A library's `test_deps`
 #      (tests//functional/test_deps) reach its welded tests: a test imports a
 #      test-support package the library does not depend on; and nothing else
 #      (tests//negative/test_deps): the library's source and a consumer of
 #      the library importing it fail to compile. (The data, env and test_deps
 #      refusals at analysis are //tools/build/selftest:analysis_refusals_mojo.)
-#  30. Optimization levels, read from each compile command (buck2 aquery,
-#      analysis only): mojo_test and a mojo_library's gated tests at -O1,
-#      mojo_binary and the shared libraries of a bundle at -O3, a per-target
-#      override honoured either way; a level mojo build does not accept is
-#      refused at analysis (tools/build/tests/functional/opt_level.sh).
+#  30. (Optimization levels are checked at analysis by the build of
+#      tests//functional/opt_level:levels, the refused level by
+#      //tools/build/selftest:analysis_refusals_mojo.)
 #  31. Lints are part of the build: a planted shellcheck warning in a script
 #      the rules run fails the build of a Mojo and a Rust example
 #      (tools/build/tests/negative/lint_weld.sh).
@@ -331,7 +329,8 @@
 #      target of tests//negative/mojo_doc_json fails naming its defect: a
 #      source that does not compile, a golden that differs, and three paths
 #      the JSON does not declare.
-#  44. The public boundary lint: see tools/build/tests/public_boundary_tests.sh.
+#  44. (In the gate: the public boundary tool's zig tests,
+#      //tools/build/lint/public_boundary, and tests//functional/public_boundary:ok.)
 #  45. The layout of src/ (tools/build/lint/defs.bzl, src_layout): //:src_layout
 #      (every package under src/, read from the build graph) and
 #      tests//functional/src_layout:ok (a planted list) build; each target of
@@ -366,12 +365,9 @@
 #      surface. (A row naming a target that does not exist, and one naming a
 #      test incompatible with the lint's platform under a package pattern,
 #      are //tools/build/selftest:analysis_refusals_lint, in a scratch tree.)
-#  54. The hermetic Node.js rules (tools/build/node/defs.bzl): each target of
-#      tests//negative/node and below fails with its planted defect: a failing
-#      script, a wrong expected error or an unexpected pass, an unresolved
-#      import, a pin that differs, a C warning, the test-only runtime named
-#      where it is not visible. See tools/build/tests/node_tests.sh. (The
-#      analysis refusals are //tools/build/selftest:analysis_refusals_node.)
+#  54. (The hermetic Node.js rules' planted defects are
+#      //tools/build/selftest:planted_red_builds_node and
+#      //tools/build/selftest:analysis_refusals_node.)
 set -uo pipefail
 
 umbrella=1
@@ -910,14 +906,6 @@ fi
 expect_red td_test_deps_src "unable to locate module 'tdhelper'" tests//negative/test_deps:src_imports_test_dep
 expect_red td_test_deps_consumer "unable to locate module 'tdhelper'" tests//negative/test_deps:consumer_of_test_dep
 
-# 30
-if BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/opt_level.sh" "$LOG" > "$LOG/opt_level.log" 2>&1; then
-    pass "$(grep -o 'PASS  optimization levels: .*' "$LOG/opt_level.log" | cut -c 7-)"
-else
-    fail "$(grep -o 'FAIL  optimization levels: .*' "$LOG/opt_level.log" | cut -c 7-) (see $LOG/opt_level.log)"
-fi
-expect_red opt_bad_level "optimization level \`fast\` is not one of 0, 1, 2, 3" tests//negative/opt_level:bad_level
-
 # 31
 if "$ROOT/tools/build/tests/negative/lint_weld.sh" > "$LOG/lint_weld.log" 2>&1; then
     pass "$(grep -m1 '^PASS' "$LOG/lint_weld.log" | cut -c 7-)"
@@ -1193,10 +1181,6 @@ done
 # shellcheck source=tools/build/tests/coverage_run_tests.sh
 . "$ROOT/tools/build/tests/coverage_run_tests.sh"
 
-# 44
-# shellcheck source=tools/build/tests/public_boundary_tests.sh
-. "$ROOT/tools/build/tests/public_boundary_tests.sh"
-
 # 45
 expect_green src_layout //:src_layout tests//functional/src_layout:ok
 N=tests//negative/src_layout
@@ -1267,10 +1251,6 @@ for t in outside_e2e ungrounded empty_field alias shared_target; do
     n=$(grep -o "surface_capability_matrix: [0-9]* finding line(s)" "$LOG/surface_capability_matrix_$t.log" | head -1)
     if [ "$n" = "surface_capability_matrix: 1 finding line(s)" ]; then pass "surface_capability_matrix_${t}_alone"; else fail "surface_capability_matrix_${t}_alone: '$n', want 1 finding (see $LOG/surface_capability_matrix_$t.log)"; fi
 done
-
-# 54
-# shellcheck source=tools/build/tests/node_tests.sh
-. "$ROOT/tools/build/tests/node_tests.sh"
 
 # 37
 pt_rc=0

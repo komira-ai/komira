@@ -424,7 +424,7 @@ def aws_service_endpoint(
         )
     var p = aws_partition_for_region(region)
     if use_fips and not p.supports_fips:
-        raise Error("the " + p.id + " partition has no FIPS endpoints")
+        raise Error("the " + p.id + " partition has no FIPS endpoints")  # cov: unreachable every partition _partition returns supports FIPS
     if use_dual_stack and not p.supports_dual_stack:
         raise Error("the " + p.id + " partition has no dual-stack endpoints")
     var host = endpoint_prefix

@@ -3,12 +3,46 @@
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "c_exe")
+load(":shared.bzl", "glibc_floor_test")
 
 # elfsyms: an archive's symbol table and its members' symbols (elfsyms.c).
 c_exe(
     name = "elfsyms",
     exec_compatible_with = LINUX_X86_64,
     src = "elfsyms.c",
+    visibility = ["PUBLIC"],
+)
+
+# native_so: a library's shared library, its export list and checks 1 to 7
+# (README.md, "Each library's shared library"; shared.bzl), in Zig.
+_NATIVE_SO = [
+    "native_callsites.zig",
+    "native_checks.zig",
+    "native_elf.zig",
+    "native_elf_test.zig",
+    "native_so_test.zig",
+]
+
+# The unit tests (native_so_test.zig: each check green, and red on its
+# planted defect), run as a build action.
+zig_test(
+    name = "native_so_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _NATIVE_SO,
+    src = "native_so.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# Built behind its unit tests: no shared library is checked unless they pass.
+zig_exe(
+    name = "native_so",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _NATIVE_SO,
+    src = "native_so.zig",
+    unit_tests = [":native_so_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
 )
 
@@ -37,4 +71,12 @@ zig_exe(
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
+)
+
+# The glibc floor is read from a platform row: a fixture row with a floor no
+# real row has (glibc 2.17) must give 2.17, so a constant floor is red here.
+glibc_floor_test(
+    name = "glibc_floor_fixture_row",
+    expect = "2.17",
+    os_floor = "glibc-2.17",
 )

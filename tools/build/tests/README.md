@@ -523,21 +523,32 @@ dynamic symbol.
 ## 28. Compile watchdog
 
 In the pull-request check, not `run_tests.sh`:
-[`watchdog/cases.sh`](functional/watchdog/cases.sh), a remote action
+[`watchdog/cases.zig`](functional/watchdog/cases.zig), a remote action
 (`tests//functional/watchdog:cases`) that refuses its own report when it holds
-fewer ok cases than its floor (a case dropped), runs [`mojo_wrapper.sh`](../mojo/mojo_wrapper.sh)
-on a stand-in toolchain whose `mojo` sleeps, spins, or spawns children. A
+fewer ok cases than its floor (a case dropped), runs the compile wrapper
+(`komira//tools/build/mojo:mojo_compile`, [`mojo_compile.zig`](../mojo/tools/mojo_compile.zig))
+on a stand-in toolchain ([`standin.zig`](functional/watchdog/standin.zig)) whose `mojo` sleeps, spins, or spawns children. A
 tree using no CPU is killed with exit 124 and the message, and so are its
 child and an orphaned grandchild (a child left in any state but zombie fails
-the case); a tree spinning itself or through a child, a short idle and a
+the case); a tree spinning itself or through a child (which the stand-in
+waits for as `wait(2)` does, for every child it has), a short idle and a
 disabled watchdog run to completion; a compiler error keeps its status;
-malformed knobs exit 2. Every case runs under `timeout 60`, so a watchdog
-that never fires is a failed case, not a hung action. Two more signal the
-wrapper while its compiler and the compiler's child hang: after TERM the
-wrapper must exit 143 with both gone, and after KILL, which it cannot catch,
+malformed knobs exit 2. Every case runs under a 60 s deadline of its own, so a watchdog
+that never fires is a failed case, not a hung action. Four more signal the
+wrapper while its compiler and the compiler's child hang: after TERM, HUP or
+INT the wrapper must exit 143, 129 or 130 with both gone and its scratch
+directory removed, and after KILL, which it cannot catch,
 both must be gone within 5 s (the tether in the compiler's session, a read
-of a FIFO only the wrapper holds open, returns when the wrapper dies and
-kills the session). The macOS wrapper has the same watchdog, sampling
+of a pipe only the wrapper holds open, returns when the wrapper dies and
+kills the session). The rest pin what the compiler is given: exactly the
+environment the wrapper's header lists (a variable of the action does not
+reach it), the link line zig receives from the `cc` shim for every row of
+its rewrite table, stdin `/dev/null`, SIGINT and SIGQUIT ignored and its pid
+the session id with the watchdog on (and the wrapper's own stdin and
+dispositions with it off); and the output checks and refusals: an empty
+output 3, one holding the working directory 4, no `-o` 2, a manifest member
+missing 2, no compiler 127. After every case but KILL the scratch directory
+is gone. The macOS wrapper has the same watchdog, sampling
 `ps` rather than `/proc`; test 24 ([`darwin/check.sh`](functional/darwin/check.sh)) runs it on this client
 against a stand-in compiler: a hang is killed (124), a spin is not, a killed
 wrapper takes its compiler with it, a malformed knob is refused.
@@ -566,34 +577,42 @@ from the test command, their absolute prefix, or the inputs behind the
 tests//negative/test_data:skip_77` must fail with `GATED TEST FAILED:
 <label> (exit 77)` and count as `Fail 1`: exit 77, "skipped" to automake
 and some harnesses, is a failure. On a pull request that rule is checked
-only by `runner_cases` (below), which runs the runner itself; mapping the
-runner's status to a verdict is Buck2's. The `bad_*` targets and the
-`test_deps` refusals at analysis are the scenario
+by the runner's own unit tests (below); mapping the runner's status to a
+verdict is Buck2's. The `bad_*` targets and the `test_deps` refusals at
+analysis are the scenario
 [`analysis_refusals_mojo`](../selftest/analysis_refusals_mojo.zig). The gate test
 of `komira//tools/build/mojo/runtime_paths:komira_runtime_paths` (built with
 the examples) covers the executable-relative helpers.
-`runner_cases` (in the pull-request check; its action refuses a report with
-fewer ok cases than its floor) also runs the runner on a stand-in that kills itself: with
-SIGKILL it must exit 137 and with SIGABRT 134, each with no marker; one that
-exits 77 must exit 77 with no marker; `--arg` values must reach the
-stand-in in order, unexported, with every `@KOMIRA_ACTION_DIR@` replaced by
-the action's directory; and an `--env` after an `--arg` is refused (exit 2).
+The runner's unit tests ([`tools/build/run/mojo_test.zig`](../run/mojo_test.zig),
+welded to the runner, so a pull request that builds any test runs them) run
+it on a test that kills itself: with SIGKILL it must exit 137 and with SIGABRT
+134, each with no marker; one that exits 77 must exit 77 with no marker;
+`--arg` values must reach the test in order, unexported, with every
+`@KOMIRA_ACTION_DIR@` replaced by the action's directory; and an `--env`
+after an `--arg` is refused (exit 2). The darwin-arm64 build of the runner
+(`run:gate_darwin`) is published behind the same unit tests run on the macOS
+workers (`mojo_test_darwin`, `supervise_test_darwin`).
 
 ## 30. Optimization levels
 
-[`opt_level.sh`](functional/opt_level.sh) reads the `mojo build` command of each target
-it names from `buck2 aquery` (analysis only) and requires its
-`--optimization-level`: `-O1` for `mojo_test`
-(`komira//tools/build/examples:test_hellopkg`), for a library's gated tests
-(`libgate_ok`) and for the aws-lc and s2n-tls test programs, which override
-the binary default; `-O3` for `mojo_binary` (`hello`, `hello_pkg_user`) and
-for every shared library the `hello_bundle` bundle builds; and each override
-in [`functional/opt_level`](functional/opt_level/BUCK) (a test and a library's gated test at
-`-O3`, a binary at `-O1`). `tests//negative/opt_level:bad_level` must fail analysis:
-`fast` is not a level.
+Each `mojo_opt_level_check` target (the rule in
+[`mojo/opt_level.bzl`](../mojo/opt_level.bzl)) reads, at analysis, the level
+each named target's compiles put on the `mojo build` command line
+(`MojoOptLevelInfo`), and fails analysis unless every row holds.
+`komira//tools/build/examples:opt_levels`: `-O1` for `mojo_test`
+(`test_hellopkg`) and for a library's gated tests (`libgate_ok`); `-O3` for
+`mojo_binary` (`hello`, `hello_pkg_user`) and for `hello`'s shared library,
+the one `hello_bundle` ships. `:opt_levels` in `examples/aws_lc` and
+`examples/s2n_tls`: their test programs override the binary default to `-O1`.
+[`tests//functional/opt_level:levels`](functional/opt_level/BUCK): each
+override in that package (a test and a library's gated test at `-O3`, a
+binary and its shared library at `-O1`). All four are in the pull-request
+check's universe, which builds them. `tests//negative/opt_level:bad_level`
+must fail analysis (`fast` is not a level):
+`//tools/build/selftest:analysis_refusals_mojo`.
 
 ```sh
-tools/build/tests/functional/opt_level.sh
+./buck2 build //tools/build/examples:opt_levels tests//functional/opt_level:levels
 ```
 
 ## 31. Lint weld
@@ -644,8 +663,9 @@ declares a package, and a NEW fixture library gets `<name>_conda` from the
 `mojo_library` macro with no declaration anywhere and builds; `conda = False`
 gets no target; `conda_name` publishes under another name and a dependent
 requires that name; a dependency is rendered at its own version; a library that
-cannot be packaged (no tests, native code, a run-time `dlopen`, a name that is
-not a conda name, a dependency with no package) keeps a target that builds as a
+cannot be packaged (no tests, native code, a run-time `dlopen` its declaration
+omits, a `dlopen` system_libs.bzl does not name, a name that is not a conda
+name, a dependency with no package) keeps a target that builds as a
 `REFUSED` directory holding the reason, its `[release]` fails naming it, and
 the library still builds; `komira_pack conda-check` refuses a different
 payload, name, subdir or dependency list, a corrupt zip, a manifest that is not
@@ -841,14 +861,13 @@ this client's own platform, and refuses `[komira_re] linux_arm64_properties`;
 platform's own `[komira_re]` key decides remote execution.
 [`check.sh`](functional/platform_table/check.sh) checks, on the client:
 
-- the limits ([`limits.tsv`](../platforms/limits.tsv),
-  [`limits_retired.sh`](functional/platform_table/limits_retired.sh)): the
-  real tree passes, five fixture trees are each refused (a limit with no
-  marker, a marker with no row, a row with no marker, a duplicate row, a
-  `never` with no product reason), a fixture whose retiring PR has merged is
-  refused while one naming a different PR (`44`, `4b` for `4`) is not, and
-  with every retiring PR named as merged the real tree is refused once per
-  retirable limit;
+- the limits ([`limits.tsv`](../platforms/limits.tsv)): no row's retiring
+  PR has merged, by `limits_check merged`
+  ([`limits.zig`](../platforms/limits/src/limits.zig)) over the commit
+  subjects of main. The tree checks are the validation `//:limits`, and every
+  case of both (each malformed row, a limit with no marker, a marker with no
+  row, a row with no marker, a merged PR, `44` and `4b` not being `4`) is a
+  unit test of the tool, one target per scenario;
 - each registered row's `golden_config_hash` is the hash buck2 gives its
   platform, and the macOS applets are those of `busybox.sh`;
 - on a Linux x86_64 client, the golden
@@ -860,7 +879,7 @@ Analysis only.
 
 ## 38. README examples
 
-A library's `README.md` examples are a welded test, `[tests][readme]` ([README examples](../mojo/README.md#readme-examples)), and a BUCK file of several libraries names the one its README is about; [`run_tests.sh`](run_tests.sh) runs [these checks](readme_examples.md).
+A library's `README.md` examples are a welded test, `[tests][readme]` ([README examples](../mojo/README.md#readme-examples)), and a BUCK file of several libraries names the one its README is about: [these checks](readme_examples.md). Case 38 of [`run_tests.sh`](run_tests.sh) still asserts the outputs from before each example became its own program, so it is stale until the komira-ai/komira#1281 self-test slice replaces it.
 
 ## 39. Test welding
 
@@ -883,8 +902,9 @@ a tree that enforces the pointer rules of
 no wildcard origin outside an FFI module, no `unsafe_from_address=`, no
 partial move through a pointer, no `parallelize[`, no second declaration of
 libc `read` or `open`, and no public function of a library file taking or
-returning a pointer. Its reader is [`pointer_lint.awk`](../lint/pointer_lint.awk),
-its action [`lint.sh`](../lint/lint.sh) (kind `pointer_lint`), which holds
+returning a pointer. Its action is the Zig tool
+[`pointer_lint.zig`](../lint/pointer_lint.zig), which reads Mojo through
+[`mojo_tokens.zig`](../lint/mojo_tokens.zig) and holds
 the sites against two ledgers: the FFI modules
 ([`tests/pointer_lint_ffi.tsv`](../../../tests/pointer_lint_ffi.tsv) for
 `//:pointer_lint`) and the holds, per rule and file at an exact count
@@ -905,9 +925,15 @@ package included), or one defect in a ledger (a
 malformed, repeated, unknown-rule, zero-count or reasonless row, a row for
 no file, a count above the sites, a row for an FFI module's origins, an FFI
 row with no `# FFI-BOUNDARY:` comment line or no wildcard origin), or empties
-the tree, and must fail naming it.
+the tree, and must fail naming it. The tool itself is built behind its
+unit tests, `zig test` run as build actions:
+[`pointer_lint_test.zig`](../lint/pointer_lint_test.zig) (one test per
+scenario: each rule's forms, the near misses, the library-file decision, each
+ledger defect and the result's text) and the lexer's own tests in
+`mojo_tokens.zig`; a failing one fails every build of `//:pointer_lint`.
 
 ```sh
+./buck2 build //tools/build/lint:pointer_lint_test //tools/build/lint:mojo_tokens_test
 ./buck2 build //:pointer_lint tests//functional/pointer_lint:ok
 ./buck2 build tests//negative/pointer_lint:partial_move_two   # must fail: plant.mojo:4: partial_move
 ```
@@ -931,43 +957,54 @@ such as `abfss://<container>@<account>.dfs.core.windows.net`; before any other
 host it is read), and a commit id in prose, in a file's contents or (dates,
 home directories, deny-list words) its path. Binary data is not read, but its
 path is; nothing committed is upstream bytes, so `third_party/` is read whole.
-Its reader is
-[`public_boundary.awk`](../lint/public_boundary.awk), which says what each rule
-matches and what it cannot see (vocabulary is no shape); its action is
-[`lint.sh`](../lint/lint.sh) (kind `public_boundary`). The findings a file must
-keep are held per rule and file at an exact count in
+It is checked by a Zig tool,
+[`lint/public_boundary`](../lint/public_boundary/BUCK), run with no shell:
+[`check.zig`](../lint/public_boundary/src/check.zig) says what is read and the
+ledger formats, and [`rules.zig`](../lint/public_boundary/src/rules.zig) what
+each rule matches and what it cannot see (vocabulary is no shape). The
+findings a file must keep are held per rule and file at an exact count in
 [`tests/public_boundary_holds.tsv`](../../../tests/public_boundary_holds.tsv),
 which only shrinks, and every row of the hosts list must be used. A
 repository that keeps words of its own out of this one passes them as a list
 kept outside it (`-c komira_lint.public_boundary_deny=<target or path>`,
 `.public_boundary_deny` being gitignored for it): a finding no row can hold.
 
-[`functional/public_boundary:ok`](functional/public_boundary/BUCK) builds a
-planted tree ([`fixture.bzl`](functional/public_boundary/fixture.bzl)) whose
-`held.mojo` and `shim.c` hold every rule in each spelling the reader knows,
-held at exact counts, so a spelling the reader missed would fail the build;
-whose near misses (dates outside the window, placeholders, loopback and
+The tool is built only behind its two `zig test` targets, so the
+pull-request check (which builds `//:public_boundary`) runs them:
+[`rules_test.zig`](../lint/public_boundary/src/rules_test.zig) has one row per
+spelling of each rule (a date in each of its forms, the three home directory
+forms, each private range and each way of writing an address, hosts and
+email addresses of each kind, commit ids in each kind of prose) and one per
+near miss (dates outside the window, placeholders, loopback and
 documentation addresses, reserved hosts, templates, digests, UUIDs, hex in
-code, a `//` in a C string) must find nothing; and whose binary file holds
-findings that must not be read. The planted tree's window is 2030 up to 2031-09-01,
-so none of its files holds a date the root target refuses. Each target of
-[`negative/public_boundary`](negative/public_boundary/BUCK) plants one finding
-(each spelling of each rule, a date in a `third_party/` BUCK file and C
-header, a date, home directory or deny-list word in a path, the path of
-binary data, a file given by `paths`, one over a hold, a deny-list word) or
-one ledger defect (malformed, repeated, unknown-rule, zero-count or
-reasonless rows, a row for a missing file or for binary data, a count above
-the findings, a row for no finding, a row holding a deny-list word, a hosts
-row that is reserved or unused), sets a window with month 13 or not ending
-on the first day of a month, or empties the tree, and must fail naming it.
-The root BUCK pins its own window (2025 up to 2026-09-01) at load, so
-narrowing it fails every build; `//:public_boundary` and
-`functional/public_boundary:ok` build in the pull-request check.
-[`public_boundary_tests.sh`](public_boundary_tests.sh) lists them.
+code, a `//` in a C string), and
+[`check_test.zig`](../lint/public_boundary/src/check_test.zig) runs the lint
+over a planted tree that must pass and one case per defect, each of which
+must be reported by its line: a finding of each rule with its file and line,
+a date in a `third_party/` BUCK file and C header, a date, home directory or
+deny-list word in a path, the path of binary data, one finding over a hold, a
+deny-list word, a file that cannot be read, each ledger defect (malformed,
+repeated, unknown-rule, zero-count or reasonless rows, a row for a missing
+file or for binary data, a count above the findings, a row for no finding, a
+row holding a deny-list word, a hosts row that is reserved or unused), a
+window with month 13 or not ending on the first day of a month, and a tree
+with nothing to read.
+
+[`functional/public_boundary:ok`](functional/public_boundary/BUCK) runs the
+rule end to end on a planted tree
+([`fixture.bzl`](functional/public_boundary/fixture.bzl)) whose `held.mojo`
+and `shim.c` hold every rule in each spelling, held at exact counts, so a
+spelling the tool missed would fail the build; whose near misses must find
+nothing; whose binary file holds findings that must not be read; and whose
+file given through `paths` holds a held date, so its row names no file
+unless the rule stages it. The planted tree's window is 2030 up to
+2031-09-01, so none of its files holds a date the root target refuses. The
+root BUCK pins its own window (2025 up to 2026-09-01) at load, so narrowing it
+fails every build. [`negative/public_boundary`](negative/public_boundary/BUCK)
+holds the rule's two analysis refusals (no tree, or both a tree and files).
 
 ```sh
 ./buck2 build //:public_boundary tests//functional/public_boundary:ok
-./buck2 build tests//negative/public_boundary:host_single   # must fail: docs/plant.md:1: host: builder
 ```
 
 ## 45. The layout of src/
@@ -981,7 +1018,7 @@ With coverage, a library's conda package (what ships), not the library, waits fo
 ## 51. [Python oracles](../python/README.md#test-51-python-oracles)
 ## 52. [API JSON: mojo_doc_json](../mojo/doc.md)
 ## 53. [Surface capability matrix](lint_tests.md#53-the-surface-capability-matrix)
-## 54. [Hermetic Node.js: planted defects](../node/README.md#test-54-planted-defects)
+## 54. [Hermetic Node.js: planted defects](../node/README.md#planted-defects) (self-test scenarios)
 
 ## 49. Assert level, defines and memory cap
 

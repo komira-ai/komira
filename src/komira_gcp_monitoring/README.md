@@ -57,6 +57,7 @@ with assert_raises(contains="is not a plain identifier"):
 The request for one hour of a metric, summed per series over 5-minute
 windows, and one the service would refuse:
 
+<!-- mojo-hidden from std.testing import assert_equal, assert_raises -->
 ```mojo
 from komira_gcp_monitoring import TimeSeriesListRequest, list_time_series_request
 
@@ -96,6 +97,7 @@ A response body, read. Points arrive newest first on the wire and come back
 oldest first, with their times in UNIX epoch nanoseconds; an `int64Value` is
 a JSON string and is read as a number:
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from komira_gcp_monitoring import parse_time_series_list_response
 

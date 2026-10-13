@@ -1,11 +1,20 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# JSON Web Signature and JSON Web Token verification (RFC 7515, 7519) with
-# one pinned algorithm per verifier: ES256, EdDSA (Ed25519) or RS256. The
-# header gate refuses `none`, `HS*`, any other algorithm, `jwk`, `jku`,
+# The RS256 signing tests read komira_http_core's 2048-bit RSA test key
+# (PKCS#8 PEM, exported there).
+_RSA_KEY = {
+    "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+}
+
+# JSON Web Signature and JSON Web Token signing and verification (RFC 7515,
+# 7519) with one algorithm per signer or verifier: ES256, EdDSA (Ed25519) or
+# RS256. The header gate refuses `none`, `HS*`, any other algorithm, `jwk`, `jku`,
 # `x5u`, `x5c` and `crit` before any key work; keys come from a
 # komira_jwks JWK Set and are selected by `kid`; `ClaimPolicy` pins one
-# issuer, one audience, one `typ`, the leeway and the longest lifetime.
+# issuer, one audience, one `typ`, the leeway and the longest lifetime. A
+# `JwsSigner` signs with one private key whose RFC 7638 thumbprint is the
+# `kid`; a `Keyring` publishes a key before it signs and retires a former key
+# only after the max token TTL; RFC 7523 assertions carry a random `jti`.
 #
 # The welded tests:
 # - test_rfc_vectors: RFC 7515 appendix A.2 (RS256) and A.3 (ES256), RFC 8037
@@ -16,11 +25,27 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   corpus (//third_party/wycheproof, pinned by sha256) against verifiers
 #   pinned to each of ES256, EdDSA and RS256: exactly the ten valid ES256 and
 #   RS256 vectors verify, and only under their own algorithm.
+# - test_rs256_third_party: an RS256 ID token and key set made by another
+#   implementation, and the JWK Set Google publishes (member order varies by
+#   entry): verify, tamper, wrong key under a kid, ES256 against RS256.
 # - test_header_gate: each header refusal, its order, and the compact form.
+# - test_rs256_verify_edges: an RS256 verifier with a real RSA-2048 key on
+#   malformed segments, header shapes, a one-byte-off signature, a shared or
+#   unknown kid and an undecodable payload.
 # - test_key_selection: kid selection and the key checks (type, alg, use,
 #   key_ops, length).
 # - test_claims: the policy's own checks and every claim refusal at its
 #   boundaries.
+# - test_signer: RFC 7638 and RFC 8037 thumbprint vectors, each key form's
+#   refusals, the exact header and token bytes, and every algorithm's tokens
+#   through the verify half with near-miss kid, alg, iss, aud and typ; the
+#   RSA modulus counted in bits; komira_crypto failures as JoseError.
+# - test_keyring: publish before sign, retire after the max token TTL plus
+#   the largest verifier leeway, the lifetime bound and the required iat on
+#   what it signs, and its refusals.
+# - test_assertion: RFC 7523 assertions minted and verified for each
+#   algorithm; the jti is random, required, never omitted, and taken by no
+#   public function; what verifies lives at most 300 s.
 # - test_no_product_vocabulary: the sources name no product concept and hold
 #   no early date (komira_test_vocabulary).
 mojo_library(
@@ -34,15 +59,31 @@ mojo_library(
         "//src/komira_secret_store:komira_secret_store",
     ],
     test_srcs = [
+        "tests/test_assertion.mojo",
         "tests/test_claims.mojo",
         "tests/test_header_gate.mojo",
         "tests/test_key_selection.mojo",
+        "tests/test_keyring.mojo",
         "tests/test_no_product_vocabulary.mojo",
         "tests/test_rfc_vectors.mojo",
+        "tests/test_rs256_third_party.mojo",
+        "tests/test_rs256_verify_edges.mojo",
+        "tests/test_signer.mojo",
         "tests/test_wycheproof_jws.mojo",
     ],
     test_deps = ["//src/tests/helpers/komira_test_vocabulary:komira_test_vocabulary"],
     test_data = {
+        # The public-surface test reads assertion.mojo and __init__.mojo,
+        # staged at their repository paths.
+        "tests/test_assertion.mojo": _RSA_KEY | {
+            "src/komira_jose/__init__.mojo": "__init__.mojo",
+            "src/komira_jose/assertion.mojo": "assertion.mojo",
+        },
+        # The constructor test reads signer.mojo, staged at its repository
+        # path.
+        "tests/test_signer.mojo": _RSA_KEY | {
+            "src/komira_jose/signer.mojo": "signer.mojo",
+        },
         # The vocabulary test reads the library's own sources, staged at their
         # repository paths.
         "tests/test_no_product_vocabulary.mojo": glob(

@@ -35,20 +35,40 @@
 #                must be <w>/.pixi/envs/default itself (not a link
 #                elsewhere), and every conda-meta record is read back
 #   -  readme    for each LIBRARY pin: its installed README, its sha256
-#                against metadata.json `doc_files`, made into
-#                <w>/readme_<import>.mojo; refused when there is none, when
-#                the bytes differ, or when it holds no example. No library
+#                against metadata.json `doc_files`, made by the README
+#                examples tool kci ships (`req.readme_tool`, under
+#                <scratch>/<validation>/readme/<import>) into the runner
+#                <w>/readme_<import>.mojo and one program per example beside
+#                it, <w>/readme_<import>_<line>.mojo; refused when there is none, when
+#                the bytes differ, or when it holds no example. Its link block
+#                must say, word for word, what kci computes for the
+#                library's closure (a missing `-l` is a failed row) No library
 #                among the pins is refused too (a README that runs nothing
 #                is not a pass)
 #   3  payload   kci hashes each library's installed payload itself and
 #                writes out/payload.<name>, the record the container script
 #                wrote; then readback.mojo's check
-#   4  program   `pixi run --as-is mojo run <w>/readme_<import>.mojo` (cwd
-#                <w>) for each README; its exit in out/readme_<import>.exit,
+#   4  program   `pixi run --as-is mojo run [<link args>] <w>/readme_<import>.mojo`
+#                (cwd <w>) for each README, the link args being its `sh
+#                komira-link` block's (readme_link.mojo); a README whose
+#                closure ships a static archive (komira_log's holder, which
+#                the JIT cannot load) is instead built with the block's
+#                `mojo build` words into <env>/bin/readme_<import> and that
+#                program run (native_rows.mojo `run_readme`); its exit in out/readme_<import>.exit,
 #                its stdout in .out and its stderr in .err, each with every
-#                `readme_<import>.mojo:<L>` naming a copied line rewritten to
-#                the README line (an assertion reports its place on stdout, a
-#                compile error on stderr); then readback.mojo's count check
+#                `readme_<import>_<line>.mojo:<n>` (an example's program,
+#                whose line n is README line n) rewritten to the README line
+#                by the tool's `map` (an assertion reports its place on
+#                stdout, a compile error on stderr; a report the tool cannot
+#                map fails the row); then readback.mojo's count check
+#   5  native    only when an installed library pin is native (it ships
+#                `lib_files` or requires a system codec): each README
+#                program of check 4 runs under the loader's record and is
+#                held to it (`loaded_from`), then native_rows.mojo's rows:
+#                docs/design/native_packaging.md's install checks 2 to 7,
+#                in this environment, per native package alone, and beside
+#                the system OpenSSL. Without a native pin none of this runs
+#                and the rows are the ones above
 #
 # FAIL CLOSED: every failure is VALIDATION_FAILED with a named row, apart
 # from no network (above). Under `--plan` nothing runs and the row says
@@ -79,7 +99,6 @@ from std.os import listdir, makedirs, symlink
 from std.os.path import exists, isdir, islink
 
 from komira_retry import Sleeper
-from readme_examples.program import map_report
 
 from kci_build.runner import ProcessRunner, RunResult, RunSpec
 from kci_api import (
@@ -102,20 +121,20 @@ from .env import (
     AUTH_FILE,
     AUTH_FILE_TEXT,
     ENV_INSTALL_TIMEOUT_S,
-    ENV_RUN_TIMEOUT_S,
     PIXI_LINK_DIR,
     PIXI_NAME,
     EnvHost,
     env_child_env,
     env_records_dir,
     install_env_argv,
-    run_program_argv,
     scratch_refusal,
     system_configs,
 )
+from .native_install import loader_env
+from .native_rows import LOADER_RECORD_SUFFIX, any_native, readme_loaded_from_row, run_native_rows, run_readme
 from .network import CHECK_NETWORK, answered_count, declared_hosts, describe_answers, probe_hosts
 from .readback import CHECK_INSTALL, check_installed, check_payloads, check_program, install_exited_zero, read_or_empty
-from .readme_installed import ReadmeProgram, installed_readme
+from .readme_installed import ReadmeProgram, installed_readme, map_report_file
 from .request import InstallPin, ValidateRequest, install_pins, load_validated_release, mojo_pin_of, with_members
 
 comptime CHECK_HOST: String = "host"
@@ -172,6 +191,38 @@ def _record_of(file: String) -> String:
     if file.endswith(String(".mojo")):
         return String(file[byte = 0 : file.byte_length() - 5])
     return file.copy()
+
+
+def check_readme_program(
+    tool: String, p: ReadmeProgram, out_dir: String, record: String, scratch: String, started: Bool,
+    mut checks: List[ResultValidationCheck],
+) raises:
+    """Check 4 for README program `p`: one row. Its run left in `out_dir`
+    `<record>.exit` and the raw `<record>.stdout` and `<record>.stderr`
+    (when `started`), naming program lines. An assertion reports
+    `At <w>/readme_<import>_<line>.mojo:L:C` on stdout, a compile error on
+    stderr: the README examples tool `tool` (its `map`, run under `scratch`)
+    rewrites both to README lines, into `<record>.out` and `<record>.err`.
+    A report it cannot map is kept as it was, and the row fails naming why."""
+    var unmapped = String("")
+    if started:
+        var raws = [join_path(out_dir, record + String(".stdout")), join_path(out_dir, record + String(".stderr"))]
+        var kinds = [String(".out"), String(".err")]
+        for k in range(2):
+            var dest = join_path(out_dir, record + kinds[k])
+            try:
+                map_report_file(tool, raws[k], p.package, p.display, dest, scratch)
+            except e:
+                _write(dest, read_or_empty(raws[k]))
+                unmapped = String(e)
+    if not check_program(out_dir, p.file, checks, record):
+        checks[len(checks) - 1].got += (
+            String(" (") + p.installed + String(" is the installed copy of ") + p.display
+            + String(": the same bytes, so the same lines)")
+        )
+    if unmapped.byte_length() > 0:
+        checks[len(checks) - 1].ok = False
+        checks[len(checks) - 1].got += String(" (its report names program lines, not README lines: ") + unmapped + String(")")
 
 
 def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollLog](
@@ -402,8 +453,10 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollL
             + String(" holding at least one ```mojo example")
         )
         try:
-            var p = installed_readme(pin, env_dir)
+            var p = installed_readme(pin, env_dir, req.readme_tool, join_path(dir, String("readme/") + pin.import_name))
             _write(join_path(work, p.file), p.text)
+            for m in range(len(p.modules)):
+                _write(join_path(work, p.modules[m].name), p.modules[m].text)
             checks.append(
                 _row(
                     String(CHECK_README), expected_readme^,
@@ -444,37 +497,29 @@ def run_install_env[R: ProcessRunner, T: PkgTransport, S: Sleeper, L: IndexPollL
     if not readme_ok:
         return _finish(row^, checks^)
 
-    # 4. each README program, from the installed package only
+    # 4. each README program, from the installed package only; with a
+    # native pin, under the loader's record (native_rows.mojo, row 5)
+    var native = any_native(pins)
     for i in range(len(programs)):
         ref p = programs[i]
         var record = _record_of(p.file)
         var raw_out = join_path(out_dir, record + String(".stdout"))
         var raw_err = join_path(out_dir, record + String(".stderr"))
-        var run = RunSpec(
-            pixi.copy(), run_program_argv(work, p.file), work.copy(), ENV_RUN_TIMEOUT_S, raw_out.copy(), raw_err.copy()
-        )
-        run.set_env(env.copy())
+        var ld_prefix = join_path(out_dir, record + String(LOADER_RECORD_SUFFIX))
+        var run_env = loader_env(env, ld_prefix) if native else env.copy()
         var started = True
         try:
-            var r = runner.run(run)
+            var r = run_readme(runner, pixi, work, env_dir, p, env, run_env, raw_out, raw_err)
             _write(join_path(out_dir, record + String(".exit")), _exit_record(r))
         except e:
             started = False
             _write(join_path(out_dir, record + String(".err")), String("not started: ") + String(e) + String("\n"))
-        if started:
-            # an assertion reports `At <w>/readme_<import>.mojo:L:C` on stdout,
-            # a compile error on stderr: both name the README line
-            _write(
-                join_path(out_dir, record + String(".out")),
-                map_report(read_or_empty(raw_out), p.text, p.package, p.display),
-            )
-            _write(
-                join_path(out_dir, record + String(".err")),
-                map_report(read_or_empty(raw_err), p.text, p.package, p.display),
-            )
-        if not check_program(out_dir, p.file, checks, record):
-            checks[len(checks) - 1].got += (
-                String(" (") + p.installed + String(" is the installed copy of ") + p.display
-                + String(": the same bytes, so the same lines)")
-            )
+        check_readme_program(
+            req.readme_tool, p, out_dir, record, join_path(dir, String("readme/") + p.package), started, checks
+        )
+        if native and started:
+            readme_loaded_from_row(ld_prefix, env_dir, record, p.codecs, checks)
+    # 5. the native install checks (native_rows.mojo): none without a native pin
+    if native:
+        run_native_rows(runner, v, channel_url, mojo_pin, dir, named, pins, programs, checks)
     return _finish(row^, checks^)

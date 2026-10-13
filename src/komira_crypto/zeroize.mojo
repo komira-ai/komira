@@ -13,8 +13,13 @@
 #
 # This module provides ONE canonical `zeroize_inline_array[N]` helper (plus
 # its UInt32 / UInt64 forms, and `zeroize_list` for a `List[UInt8]`).
-# Every Sha256 / Hmac / Aead / KeySchedule conformer in `komira_crypto`
-# calls into this helper from its `__del__(deinit self)`.
+# Secret bytes held in Mojo memory are wiped through these helpers (the
+# ECDH output in `internal/asm/p256_ecdh_ffi.mojo`, the DER key buffer in
+# `rsa_pem_key.mojo`, and key material in packages that depend on this
+# one). The hashes, HMAC and AEADs hold no Mojo-side secret state: their
+# state lives in an AWS-LC context, which the `__del__` of the FFI struct
+# holding it frees (and AWS-LC clears). No caller uses the UInt32 /
+# UInt64 forms today.
 #
 # # WHY external_call (not llvm.memset.inline.p0+has_side_effect=True)
 #
@@ -101,8 +106,9 @@ def zeroize_inline_array[N: Int](mut a: Array[UInt8, N]):
 def zeroize_inline_array_u32[N: Int](mut a: Array[UInt32, N]):
     """No-elide secure-zero for an `InlineArray[UInt32, N]`.
 
-    Sha256's `state` field is `InlineArray[UInt32, 8]`; the destructor
-    needs to clear it. We bitcast to byte-pointer and zero N*4 bytes.
+    For a buffer of 32-bit words (for example a SHA-256 state, 8 words).
+    We bitcast to byte-pointer and zero N*4 bytes. No caller in this
+    package today: `Sha256` keeps its state in an AWS-LC context.
 
     Same SAFETY discipline as `zeroize_inline_array[N]`.
     """
@@ -124,11 +130,11 @@ def zeroize_inline_array_u32[N: Int](mut a: Array[UInt32, N]):
 def zeroize_inline_array_u64[N: Int](mut a: Array[UInt64, N]):
     """No-elide secure-zero for an `InlineArray[UInt64, N]`.
 
-    Sha384/512's `_state` field is `InlineArray[UInt64, 8]` (FIPS 180-4
-    SHA-512 family uses 64-bit state words). The destructor needs to
-    clear it. We bitcast to byte-pointer and zero N*8 bytes.
+    For a buffer of 64-bit words (for example a SHA-384/512 state, 8
+    words; FIPS 180-4 uses 64-bit state words for that family). We
+    bitcast to byte-pointer and zero N*8 bytes. No caller in this package
+    today: `Sha384`/`Sha512` keep their state in an AWS-LC context.
 
-    For the UInt64 state words of SHA-384/512.
     Same SAFETY discipline as `zeroize_inline_array[N]`.
     """
     comptime if CompilationTarget.is_macos():

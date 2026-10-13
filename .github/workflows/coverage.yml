@@ -56,7 +56,9 @@ jobs:
   measure:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    # The 330 minutes of pr / check (pr.yml): the coverage builds of a wide
+    # change outlast 120 minutes the way its pr / check builds do.
+    timeout-minutes: 330
     permissions:
       contents: read
       # for farm-connect only: the token Tailscale trusts

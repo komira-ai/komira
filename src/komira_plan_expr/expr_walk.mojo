@@ -61,6 +61,7 @@ from komira_scalar_arithmetic.decimal_arith import (
     decimal_mul_result_ps_checked,
 )
 from komira_plan_expr.literal_domain import int_literal_fits
+from komira_plan_expr.udf_type_field import udf_type_to_field
 from komira_plan_expr.expr import (
     Expr,
     EXPR_COL_REF,
@@ -87,6 +88,7 @@ from komira_plan_expr.expr import (
     EXPR_STRING_FN,
     EXPR_STRING_FN_N,
     EXPR_UDF_CALL,
+    EXPR_UDF_APPLY,
     EXPR_EXTRACT,
     EXPR_JSON_EXTRACT,
     _is_trunc_unit,
@@ -463,6 +465,11 @@ def walk_expr_column_refs[S: ExprNameSink](expr: Expr, mut sink: S):
         ref sfnn_args = expr._string_fn_n.value().args
         for i in range(len(sfnn_args)):
             walk_expr_column_refs(sfnn_args[i], sink)
+    elif expr.tag == EXPR_UDF_APPLY:
+        # A call of a `UdfRef`: every argument is an ordinary expression and
+        # can carry a column ref; the index and the type are plan-literals.
+        for i in range(expr.udf_apply_num_args()):
+            walk_expr_column_refs(expr.udf_apply_arg_ref(i), sink)
     elif expr.tag == EXPR_EXTRACT:
         # `year(d)` / `date_trunc(u, d)`.
         # The `child` carries every column ref; the UNIT is a plan-literal.
@@ -1235,6 +1242,11 @@ def walk_expr_field[P: ColRefFieldPolicy](
         # Every scalar math fn is FLOAT64 whatever its op — the one family
         # whose type is per-TAG rather than per-op.
         return Field("math_fn", ArrowType.FLOAT64, True)
+
+    elif expr.tag == EXPR_UDF_APPLY:
+        # The type is the `UdfRef`'s `return_type`, which the node carries.
+        # The name is the type's own; an alias above it supplies the column's.
+        return udf_type_to_field(expr.udf_apply_return_type_ref())
 
     elif expr.tag == EXPR_UDF_CALL:
         # ★ THE TYPE IS READ OFF THE NODE, NOT

@@ -233,8 +233,9 @@ def test_corrupt_chunks_are_refused_with_exact_messages() raises:
     ]
     assert_equal(
         _refusal(ORC_COMPRESSION_ZSTD, zstd),
-        "OrcCodecError.ZSTD_FAILED: ZSTD_decompress failed (result=-72,"
-        " input_len=13, output_cap=13) (known_size=5)",
+        "OrcCodecError.ZSTD_TRUNCATED: the chunk's length does not match its"
+        " zstd frame (libzstd srcSize_wrong) (in_len=13, out_cap=13,"
+        " known_size=5)",
     )
 
 

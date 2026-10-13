@@ -24,7 +24,7 @@
 #       dispatched name (`plan_wire_name`) equals the space's own wrapper
 #       (`<space>_wire_name`), and equals protoc's name wherever the .proto
 #       declares the number. Anywhere it does not, the name is the fallback
-#       `<Space>#<n>`, except the four numbers of `_exempt` below.
+#       `<Space>#<n>`, except the five numbers of `_exempt` below.
 #       Catches: a renamed or swapped arm in any ladder, a dispatcher arm
 #       pointing at another space's ladder, a fallback that drops the number.
 #
@@ -63,11 +63,12 @@
 #       -1 and 32 against all five raising dispatchers, by message, and the
 #       name dispatcher's total fallback.
 #
-# `_exempt`: the .proto RESERVES ExprTag 11 and 12 (EXPR_BETWEEN,
-# EXPR_SORT_KEY) and SourceVariantTag 1 and 2 (SOURCE_VARIANT_PARQUET,
-# SOURCE_VARIANT_IN_MEMORY) as "declared by the engine, deliberately NOT on the
-# wire". The Mojo vocabulary declares and names all four, because the engine
-# does, and refuses them in both directions as reserved. The ledger keeps the
+# `_exempt`: the .proto RESERVES PlanTag 19 (PLAN_EXCHANGE), ExprTag 11 and 12
+# (EXPR_BETWEEN, EXPR_SORT_KEY) and SourceVariantTag 1 and 2
+# (SOURCE_VARIANT_PARQUET, SOURCE_VARIANT_IN_MEMORY) as "declared by the
+# engine, deliberately NOT on the wire". The Mojo vocabulary declares and
+# names all five, because the engine does, and refuses them in both directions
+# as reserved. The ledger keeps the
 # set from growing silently; a tag that leaves the engine, or gets a wire
 # number back, removes its row here.
 # =============================================================================
@@ -275,6 +276,7 @@ def _proto_types() -> List[String]:
 # "<Space> <wire> <Mojo name>". See the header.
 def _exempt() -> List[String]:
     return [
+        "PlanTag 19 PLAN_EXCHANGE",
         "ExprTag 11 EXPR_BETWEEN",
         "ExprTag 12 EXPR_SORT_KEY",
         "SourceVariantTag 1 SOURCE_VARIANT_PARQUET",

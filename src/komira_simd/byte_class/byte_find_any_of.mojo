@@ -15,9 +15,9 @@
 #      — fixed-arity comptime needle set; each call site monomorphizes
 #      to N `cmeq.16b` + (N-1) `orr.16b` chains.  ~2N cycles.
 #
-#   2. `byte_find_in_set_16` (nibble-LUT)
-#      — runtime needle set (up to 16 bytes, where each is from a
-#      bounded character class) classified via two 16-byte LUTs.  ~5
+#   2. `byte_find_in_set_u8x16 / _u8x32` (nibble-LUT)
+#      — runtime needle set (any set within 8 high-nibble rows or
+#      8 low-nibble columns) classified via two 16-byte LUTs.  ~5
 #      cycles regardless of N.  Used when needle-set is data-dependent
 #      or > 4 elements.
 #
@@ -190,18 +190,17 @@ def byte_find_eq_4_u8x64(
 
 
 # =============================================================================
-# Nibble-LUT find-in-set — runtime needle set (up to 16 bytes per nibble).
+# Nibble-LUT find-in-set — runtime needle set.
 # =============================================================================
 #
 # When the needle set is data-dependent OR > 4 bytes, the comptime-arity
 # functions above lose their edge — the OR-chain grows and so does the
 # per-chunk insn count.  The nibble-LUT shape (Highway / simdjson) does
-# the lookup in 2 `pshufb` + 1 `and`, irrespective of needle count
-# (up to 16 in each nibble class).
+# the lookup in 2 `pshufb` + 1 `and`, irrespective of needle count.
 #
 # Caller pre-computes the two 16-byte LUTs that encode needle membership
-# per low/high nibble.  See `byte_classify_lut_from_set` (below) for
-# the LUT construction.
+# per low/high nibble.  See `build_byte_set_nibble_luts` (below) for
+# the LUT construction and which sets it accepts.
 
 @always_inline
 def byte_find_in_set_u8x16(
@@ -237,50 +236,83 @@ def byte_find_in_set_u8x32(
 # Nibble-LUT construction helper.
 # =============================================================================
 #
-# Build the two 16-byte LUTs encoding membership for an arbitrary byte
-# set.  Each LUT entry at index `n` is a 1-bit class membership marker:
+# Build the two 16-byte LUTs encoding exact membership for a byte set.
+# The lookup is `lo_lut[low_nibble(b)] & hi_lut[high_nibble(b)]`, so a
+# needle is found only if its two entries share a bit, and a non-needle
+# is rejected only if its two entries share none.
 #
-#   lo_lut[n] has bit b set iff there is a needle byte `c` in the set
-#   where `(c & 0xF) == n` AND `((c >> 4) & 0xF) == b`.
+# The builder groups needles by one nibble side and gives each distinct
+# nibble on that side its own bit (at most 8, one per bit of a LUT byte).
+# Grouping by high nibble, with `rank(h)` the bit of high nibble `h`:
 #
-# Then `lo_lut[low_nibble(byte)] & hi_lut[high_nibble(byte)]` is
-# non-zero iff `byte` is in the set.  This works for needle sets where
-# each byte's nibble-pair is unique (the common case for ASCII-class
-# sets).
+#   hi_lut[h] = 1 << rank(h)                    (only that bit)
+#   lo_lut[l] has bit rank(h) iff (h << 4 | l) is a needle
+#
+# so `lo_lut[l] & hi_lut[h]` is non-zero iff `(h << 4 | l)` is a needle.
+# Grouping by low nibble is the mirror image. This builder does not
+# encode a set with more than 8 distinct high nibbles AND more than 8
+# distinct low nibbles, and raises. That is a limit of this builder, not
+# of the LUT format: some such sets have an exact encoding (all 256
+# bytes, or any 9x9 block of high by low nibbles), others do not (the
+# 9-byte diagonal 0x00, 0x11, ..., 0x88).
+
+
+def _nibble_ranks(
+    needles: List[UInt8], shift: UInt8
+) -> Tuple[SIMD[DType.uint8, 16], Int]:
+    """For the nibble `(c >> shift) & 0xF` of each needle: lane n holds
+    the bit index of nibble n (its rank among the distinct nibbles, in
+    ascending order), and the second value is the distinct count."""
+    var used = SIMD[DType.uint8, 16](0)
+    for i in range(len(needles)):
+        used[Int((needles[i] >> shift) & UInt8(0x0F))] = UInt8(1)
+    var ranks = SIMD[DType.uint8, 16](0)
+    var n = 0
+    for nib in range(16):
+        if used[nib] != 0:
+            ranks[nib] = UInt8(n)
+            n += 1
+    return Tuple[SIMD[DType.uint8, 16], Int](ranks, n)
+
 
 def build_byte_set_nibble_luts(
     needles: List[UInt8],
-) -> Tuple[SIMD[DType.uint8, 16], SIMD[DType.uint8, 16]]:
+) raises -> Tuple[SIMD[DType.uint8, 16], SIMD[DType.uint8, 16]]:
     """Build (lo_lut, hi_lut) for `byte_find_in_set_*` from a set of
     needle bytes.
 
-    Each needle byte `c` contributes a 1-bit at:
-      - `lo_lut[c & 0xF]` bit position `(c >> 4) & 0xF`
-      - `hi_lut[(c >> 4) & 0xF]` bit position `c & 0xF`
+    With these LUTs, `byte_find_in_set_*` gives a non-zero lane iff the
+    lane's byte is one of `needles`: no misses and no false positives.
+    Duplicate needles are allowed; an empty set matches nothing.
 
-    After lookup, the AND yields a non-zero byte iff some needle byte
-    matches in BOTH nibble positions — i.e. the input byte IS the
-    needle.
-
-    Caller is responsible for ensuring the needle-byte-set has no
-    nibble-pair COLLISIONS — for sets with collisions, the nibble-LUT
-    can produce false-positives (two needles sharing nibbles can
-    falsely match a third byte).  For CSV's 5-byte standard set
-    (`,` `\n` `\r` `"` `\\`) there are no collisions.
+    Raises if the needles span more than 8 distinct high nibbles and
+    more than 8 distinct low nibbles: this builder does not encode such
+    a set, although some of them (e.g. all 256 bytes) have an exact
+    encoding.
+    Any set of at most 8 bytes is accepted, as is any set confined to 8
+    high-nibble rows (e.g. ASCII 0x00-0x7F) or to 8 low-nibble columns.
     """
+    var hi_ranks = _nibble_ranks(needles, UInt8(4))
+    var lo_ranks = _nibble_ranks(needles, UInt8(0))
+    var by_high = hi_ranks[1] <= 8
+    if not by_high and lo_ranks[1] > 8:
+        raise Error(
+            "build_byte_set_nibble_luts: needles use more than 8 distinct"
+            " high nibbles and more than 8 distinct low nibbles"
+        )
     var lo = SIMD[DType.uint8, 16](0)
     var hi = SIMD[DType.uint8, 16](0)
     for i in range(len(needles)):
         var c = needles[i]
         var ln = Int(c & UInt8(0x0F))
         var hn = Int((c >> UInt8(4)) & UInt8(0x0F))
-        # Set bit `hn` in lo[ln] and bit `ln` in hi[hn]. Note that for
-        # the LUT scheme to work right with the AND, both LUTs must
-        # have the SAME bit set at the matching needle position; the
-        # AND then yields a non-zero result iff both nibbles match.
-        # Convention: use bit position equal to the OTHER nibble.
-        var lo_byte = lo[ln]
-        var hi_byte = hi[hn]
-        lo[ln] = lo_byte | (UInt8(1) << UInt8(hn))
-        hi[hn] = hi_byte | (UInt8(1) << UInt8(ln))
+        if by_high:
+            # Bit owned by the high nibble; rank < 8, so the shift is exact.
+            var bit = UInt8(1) << hi_ranks[0][hn]
+            hi[hn] = bit
+            lo[ln] = lo[ln] | bit
+        else:
+            var bit = UInt8(1) << lo_ranks[0][ln]
+            lo[ln] = bit
+            hi[hn] = hi[hn] | bit
     return Tuple[SIMD[DType.uint8, 16], SIMD[DType.uint8, 16]](lo, hi)
