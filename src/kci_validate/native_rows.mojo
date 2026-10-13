@@ -16,8 +16,20 @@
 #   loaded_from  row 5. Each README program (step 4 of run_install_env, and
 #                each built one below) runs with `loader_env`: LD_DEBUG=libs
 #                and LD_DEBUG_OUTPUT=<w>/out/<record>.ld; every komira
-#                object and system codec it loaded must lie under <env>/lib
-#                (native_install.mojo `loaded_from_findings`).
+#                object, and every system codec its library's closure
+#                declares (`ReadmeProgram.codecs`, the closure's `dlopen`
+#                sonames), it loaded must lie under <env>/lib, both paths
+#                resolved (native_install.mojo `loaded_from_findings`). A
+#                library the toolchain loads that no package declares
+#                (libz, libzstd: the compiler's own) is not judged.
+#   run_readme   how a README program runs, in step 4 and alone: `mojo run
+#                <run args>`, except when its closure ships a static archive
+#                (`ReadmeProgram.runs_built`: the block's build line links
+#                komira_log's holder, which the JIT cannot load): then `mojo
+#                build <build args> -o <env>/bin/readme_<import>` and the
+#                built program run directly, both reporting into the same
+#                stdout and stderr files (a compile error is mapped to README
+#                lines as a run's is).
 #   lib_files glibc needed symbolic
 #                rows 2 and 3 and build check 6 on the installed bytes
 #                (native_install.mojo `check_native_install`), per pin with
@@ -308,21 +320,58 @@ def _why(r: RunResult, stderr_path: String) -> String:
     return r.describe() + String(": ") + tail
 
 
-def readme_loaded_from_row(record_prefix: String, env_dir: String, who: String, mut checks: List[ResultValidationCheck]):
-    """Row 5 over the loader record a run left at `record_prefix`."""
+def readme_loaded_from_row(
+    record_prefix: String, env_dir: String, who: String, codecs: List[String], mut checks: List[ResultValidationCheck]
+):
+    """Row 5 over the loader record a run left at `record_prefix`, judging
+    the komira objects and the declared `codecs` (file header)."""
     var findings: List[String]
     try:
-        findings = loaded_from_findings(loader_record(record_prefix), env_dir)
+        findings = loaded_from_findings(loader_record(record_prefix), env_dir, codecs)
     except e:
         findings = List[String]()
         findings.append(String(e))
     checks.append(
         _finding_row(
             String(CHECK_LOADED_FROM),
-            String("every komira object and system codec ") + who + String(" loaded lies under ") + env_dir + String("/lib"),
-            findings, who, String("every komira object and system codec it loaded came from the environment's lib/"),
+            String("every komira object and declared system codec ") + who + String(" loaded lies under ") + env_dir + String("/lib"),
+            findings, who, String("every komira object and declared system codec it loaded came from the environment's lib/"),
         )
     )
+
+
+def run_readme[R: ProcessRunner](
+    mut runner: R, pixi: String, work: String, env_dir: String, p: ReadmeProgram, env: List[String],
+    run_env: List[String], stdout_path: String, stderr_path: String,
+) raises -> RunResult:
+    """README program `p` run in `work`'s environment `env_dir` (file header,
+    `run_readme`): under `mojo run` with the block's run words, or, when
+    `p.runs_built()`, built with the block's build words into
+    `<env_dir>/bin/` (the build with `env`) and the built program run.
+    The run gets `run_env`. Either way its stdout and stderr go to
+    `stdout_path` and `stderr_path`; a failed build is the result. RAISES
+    when a process cannot be started."""
+    if not p.runs_built():
+        var spec = RunSpec(
+            pixi.copy(), run_program_argv(work, p.file, run_link_args(p.block, env_dir)), work.copy(), ENV_RUN_TIMEOUT_S,
+            stdout_path.copy(), stderr_path.copy(),
+        )
+        spec.set_env(run_env.copy())
+        return runner.run(spec)
+    var bin = join_path(env_dir, String("bin"))
+    makedirs(bin, exist_ok=True)
+    var exe = join_path(bin, _record_of(p.file))
+    var build = RunSpec(
+        pixi.copy(), build_program_argv(work, p.file, build_link_args(p.block, env_dir), exe), work.copy(),
+        ENV_RUN_TIMEOUT_S, stdout_path.copy(), stderr_path.copy(),
+    )
+    build.set_env(env.copy())
+    var b = runner.run(build)
+    if not b.ok():
+        return b^
+    var run = RunSpec(exe.copy(), List[String](), work.copy(), ENV_RUN_TIMEOUT_S, stdout_path.copy(), stderr_path.copy())
+    run.set_env(run_env.copy())
+    return runner.run(run)
 
 
 def _env_sharing_cache(bin: String, work: String, dir: String) -> List[String]:
@@ -440,7 +489,7 @@ def _built_rows[R: ProcessRunner](
     last.check = String(CHECK_BUILT)
     last.expected = expected^
     last.got = String("built: ") + exe + String(": ") + last.got
-    readme_loaded_from_row(prefix, env_dir, String("the built ") + stem, checks)
+    readme_loaded_from_row(prefix, env_dir, String("the built ") + stem, p.codecs, checks)
 
 
 def _alone_rows[R: ProcessRunner](
@@ -490,16 +539,14 @@ def _alone_rows[R: ProcessRunner](
             wrote = String(e)
         var r = RunResult(Int32(127), stderr_tail=String("not started: ") + wrote)
         if wrote.byte_length() == 0:
-            r = _start(
-                runner,
-                RunSpec(
-                    pixi.copy(), run_program_argv(work, p.file, run_link_args(p.block, env_dir)), work.copy(), ENV_RUN_TIMEOUT_S,
-                    join_path(out_dir, record + String(".stdout")), err.copy(),
-                ),
-                loader_env(env, prefix),
-            )
+            try:
+                r = run_readme(
+                    runner, pixi, work, env_dir, p, env, loader_env(env, prefix), join_path(out_dir, record + String(".stdout")), err,
+                )
+            except e:
+                r = RunResult(Int32(127), stderr_tail=String("not started: ") + String(e))
         if r.ok():
-            readme_loaded_from_row(prefix, env_dir, who, checks)
+            readme_loaded_from_row(prefix, env_dir, who, p.codecs, checks)
         else:
             checks.append(
                 _row(

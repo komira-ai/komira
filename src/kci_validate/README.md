@@ -20,7 +20,10 @@ The validations a kci stage runs on its steps. Two kinds:
   environment in place of `$CONDA_PREFIX`), and refuses a block that is not,
   word for word, what it computes from the release's `depends` and
   `lib_files` (`closure_link_args`, `readme_link.mojo`): a README missing an
-  owner's `-l` fails the validation. No network at
+  owner's `-l` fails the validation. A README whose block's `mojo build`
+  line links a static archive its `mojo run` line does not (komira_log's
+  holder, which the JIT cannot load) is built with that line into the
+  environment's `bin/` and the built program run instead. No network at
   all is `INDETERMINATE` (exit 5) with a skip reason, never a pass.
 - **CONDA_INSTALL_SMOKE** (`run_install_smoke`), after a PUBLISH step, reads
   the step's channel anonymously until its index lists each pinned file with
@@ -43,7 +46,10 @@ archive 644), the `link` a symbolic link resolving to the `.so`, nothing
 extra under `lib/`; the one `__glibc >=2.34` requirement; each `.so`'s
 `NEEDED` resolving inside the environment with `LD_LIBRARY_PATH` unset, and
 `DF_SYMBOLIC`. `loaded_from_findings` reads the loader's `LD_DEBUG=libs`
-record. A CONDA_INSTALL_ENV validation that installs a native library (one
+record and refuses a komira object, or a codec the library's closure
+declares in its `dlopen` rows, loaded from outside the environment's `lib/`
+(both paths resolved first; a library only the toolchain loads is not
+judged). A CONDA_INSTALL_ENV validation that installs a native library (one
 with `lib_files`, or requiring a system codec) runs them, and the rest of
 the design's install checks (`native_rows.mojo`): each README program under
 the loader's record, the README built with `mojo build` and run, a
