@@ -4,7 +4,7 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load(":conda.bzl", "conda_manifest_kci")
 load(":defs.bzl", "launcher_level_test")
 load(":kcov_guard.bzl", "kcov_guard_cases", "kcov_guard_tool")
-load(":release_set.bzl", "conda_release_set_check", "release_order_test")
+load(":release_set.bzl", "conda_release_set_check", "release_order_test", "release_readme_test")
 load(":glibc_floor_record.bzl", "glibc_floor_record")
 load(":system_libs_record.bzl", "system_libs_record")
 
@@ -136,7 +136,9 @@ _OLD_NATIVE = "komira" + "_native"
 # Red if a member's [release_check] fails, if a member or the metapackage does
 # not carry the test stamp, if the metapackage does not require a member at
 # that version and build string, if a member requires a member listed after
-# it, if conda-check refuses it, or if `libs` and
+# it, if a member packages no README or one with no ```mojo example (kci's
+# install validation refuses both, after publish), if conda-check refuses it,
+# or if `libs` and
 # `metapackage` are not release_set.txt's (which kci_artifact's welded test
 # holds equal to release/artifacts.textproto's metapackage).
 conda_release_set_check(
@@ -272,6 +274,50 @@ conda_release_set_check(
         ":release_order_passes_a_longer_name",
         ":release_order_refuses_a_{}_requirement_listed_later".format(_OLD_NATIVE),
     ],
+    readme_tests = [
+        ":release_readme_refuses_no_example",
+        ":release_readme_refuses_no_readme",
+        ":release_readme_passes_one_example",
+        ":release_readme_passes_a_module_example",
+    ],
+)
+
+# The README check (release_set.bzl) over the fixtures in release_readme/.
+# release_set_check exists only after each of these passed (its
+# `readme_tests`).
+
+# b's README holds a ```text sketch and a ```python block, no example; a,
+# listed first, holds one. The refusal names b and quotes kci.
+release_readme_test(
+    name = "release_readme_refuses_no_example",
+    members = ["a", "b"],
+    readmes = {
+        "a": "release_readme/one_example.txt",
+        "b": "release_readme/no_example.txt",
+    },
+    refuses = "release member b: src/b/README.md holds no ```mojo or ```mojo module example, so kci's install validation would refuse it after publish: \"src/b/README.md holds no ```mojo example, so the validation would run nothing; add one\"",
+)
+
+# b packages no README.
+release_readme_test(
+    name = "release_readme_refuses_no_readme",
+    members = ["a", "b"],
+    readmes = {"a": "release_readme/one_example.txt"},
+    refuses = "release member b: no README is packaged, so kci's install validation would refuse it after publish: \"b ships no share/doc/b/README.md: a release needs a README; add src/b/README.md\"",
+)
+
+# One ```mojo example.
+release_readme_test(
+    name = "release_readme_passes_one_example",
+    members = ["a"],
+    readmes = {"a": "release_readme/one_example.txt"},
+)
+
+# One ```mojo module example, and nothing else: it counts.
+release_readme_test(
+    name = "release_readme_passes_a_module_example",
+    members = ["m"],
+    readmes = {"m": "release_readme/module_example.txt"},
 )
 
 # The release order check (release_set.bzl) over the fixtures in

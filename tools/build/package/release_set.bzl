@@ -56,13 +56,23 @@ not in `libs` is refused here. Then, as build actions:
     set's). The target's
     `order_tests` (release_order_test: this check over fixture
     metadata.json files) must pass first;
+  * a README check: the README examples tool's `release-check`
+    (tools/build/readme_examples, cli.zig) over each member's packaged
+    README (its package's `[readme]`), refusing a member that packages no
+    README or whose README holds no example (a ```mojo or ```mojo module
+    fence, read as `generate --links refuse` reads it). kci's install
+    validation (src/kci_validate, readme_installed.mojo) refuses both, but
+    only after the release is published; the refusal names the member and
+    quotes kci's words. The display of a member's README is
+    `<package dir>/README.md`, as kci names it. The target's `readme_tests`
+    (release_readme_test: this check over fixture READMEs) must pass first;
   * after the stamp check, `komira_pack conda-check --kind metapackage
     --require-stamped true` over the metapackage, with every member's manifest and the compiler pin: the
     `members` rows, the requirements, and that index, metadata and members
     agree.
 
 The default output is the metapackage's directory (its `.conda`, manifest.json
-and metadata.json), copied only after the three checks passed. Nothing is uploaded,
+and metadata.json), copied only after the four checks passed. Nothing is uploaded,
 and no action uses the network.
 
 A member's `[release]` exists only after its own `[release_check]` passed, so
@@ -280,6 +290,21 @@ def _impl(ctx):
         identifier = meta,
     )
 
+    readmes_ok = ctx.actions.declare_output(ctx.label.name + ".readmes")
+    readme_args = []
+    for lib, pkg, (name, _) in zip(ctx.attrs.libs, ctx.attrs.packages, members):
+        display = lib.label.package + "/README.md"
+        readme = pkg[DefaultInfo].sub_targets.get("readme")
+        if readme == None:
+            readme_args.append(cmd_args("--no-readme", name, display))
+        else:
+            readme_args.append(cmd_args("--member", name, display, readme[DefaultInfo].default_outputs[0]))
+    ctx.actions.run(
+        cmd_args(ctx.attrs._readme_tool[RunInfo], "release-check", "--out", readmes_ok.as_output(), readme_args),
+        category = "conda_release_readme_check",
+        identifier = meta,
+    )
+
     checked = ctx.actions.declare_output(ctx.label.name + ".checked")
     ctx.actions.run(
         cmd_args(
@@ -310,7 +335,7 @@ def _impl(ctx):
 
     out = ctx.actions.declare_output(meta, dir = True)
     ctx.actions.run(
-        cmd_args(bb, "sh", "-euc", _COPY_DIR, "sh", bb, raw, out.as_output(), hidden = [stamp_ok, in_order, checked] + [t[DefaultInfo].default_outputs[0] for t in ctx.attrs.order_tests]),
+        cmd_args(bb, "sh", "-euc", _COPY_DIR, "sh", bb, raw, out.as_output(), hidden = [stamp_ok, in_order, readmes_ok, checked] + [t[DefaultInfo].default_outputs[0] for t in ctx.attrs.order_tests + ctx.attrs.readme_tests]),
         category = "conda_release_set_join",
         identifier = meta,
     )
@@ -323,10 +348,12 @@ _conda_release_set_check = rule(
         "metapackage": attrs.string(),
         "order_tests": attrs.list(attrs.dep(), default = []),
         "packages": attrs.list(attrs.dep()),
+        "readme_tests": attrs.list(attrs.dep(), default = []),
         "release_set": attrs.source(),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
         "_license_file": attrs.source(default = "komira//:LICENSE"),
         "_pack": attrs.exec_dep(default = "komira//tools/build/package:komira_pack", providers = [RunInfo]),
+        "_readme_tool": attrs.exec_dep(default = "komira//tools/build/readme_examples:tool", providers = [RunInfo]),
     },
 )
 
@@ -421,3 +448,47 @@ def _release_order_test_macro(**kwargs):
     _release_order_test(exec_compatible_with = LINUX_X86_64, **kwargs)
 
 release_order_test = declares_docs(_release_order_test_macro)
+
+def _release_readme_test_impl(ctx):
+    if not ctx.attrs.members:
+        fail("{}: members is empty".format(ctx.label))
+    for name in ctx.attrs.readmes:
+        if name not in ctx.attrs.members:
+            fail("{}: readmes names {}, which is not in members".format(ctx.label, name))
+    args = []
+    for name in ctx.attrs.members:
+        display = "src/{}/README.md".format(name)
+        if name in ctx.attrs.readmes:
+            args.append(cmd_args("--member", name, display, ctx.attrs.readmes[name]))
+        else:
+            args.append(cmd_args("--no-readme", name, display))
+    out = ctx.actions.declare_output(ctx.label.name + ".ok")
+    ctx.actions.run(
+        cmd_args(
+            ctx.attrs._readme_tool[RunInfo],
+            "release-check",
+            "--out",
+            out.as_output(),
+            ["--expect-refusal", ctx.attrs.refuses] if ctx.attrs.refuses else [],
+            args,
+        ),
+        env = rerun_env(ctx),
+        category = "release_readme_test",
+    )
+    return [DefaultInfo(default_output = out), rerun_info(ctx)]
+
+_release_readme_test = rule(
+    impl = _release_readme_test_impl,
+    doc = "The README check of conda_release_set_check (the README examples tool's `release-check`) over fixture READMEs: each name in `members`, in order, with its README `readmes[name]`, or as a member that packages no README when `readmes` does not name it; its display is `src/<name>/README.md`. Red unless the check refuses with a refusal containing `refuses`, or, when `refuses` is empty, passes.",
+    attrs = {
+        "members": attrs.list(attrs.string()),
+        "readmes": attrs.dict(attrs.string(), attrs.source(), default = {}),
+        "refuses": attrs.string(default = ""),
+        "_readme_tool": attrs.exec_dep(default = "komira//tools/build/readme_examples:tool", providers = [RunInfo]),
+    } | RERUN_ATTRS,
+)
+
+def _release_readme_test_macro(**kwargs):
+    _release_readme_test(exec_compatible_with = LINUX_X86_64, **kwargs)
+
+release_readme_test = declares_docs(_release_readme_test_macro)
