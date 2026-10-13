@@ -23,13 +23,18 @@
 #                library the toolchain loads that no package declares
 #                (libz, libzstd: the compiler's own) is not judged.
 #   run_readme   how a README program runs, in step 4 and alone: `mojo run
-#                <run args>`, except when its closure ships a static archive
-#                (`ReadmeProgram.runs_built`: the block's build line links
-#                komira_log's holder, which the JIT cannot load): then `mojo
-#                build <build args> -o <env>/bin/readme_<import>` and the
-#                built program run directly, both reporting into the same
-#                stdout and stderr files (a compile error is mapped to README
-#                lines as a run's is).
+#                <run args>`, except when `ReadmeProgram.runs_built`: its
+#                closure ships a static archive (the block's build line
+#                links komira_log's holder, which the JIT cannot load) or
+#                opens a system codec (its `codecs`). Then `mojo build
+#                <build args> -o <env>/bin/readme_<import>`, with no loader
+#                record, and the built program run directly under it, both
+#                reporting into the same stdout and stderr files (a compile
+#                error is mapped to README lines as a run's is). A `mojo
+#                run` record also holds the processes the compiler starts:
+#                on a fresh environment's first run one loads libz.so.1 from
+#                the system, which a codec's row would take for the
+#                program's own `dlopen`.
 #   lib_files glibc needed symbolic
 #                rows 2 and 3 and build check 6 on the installed bytes
 #                (native_install.mojo `check_native_install`), per pin with

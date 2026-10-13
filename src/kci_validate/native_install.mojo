@@ -56,6 +56,9 @@
 # `<env>/bin/../lib/<so>`, and `<env>/lib/../../<x>` is not in lib/. A
 # library no package declares is not judged: the Mojo compiler and its JIT
 # load libz and libzstd themselves, from wherever the toolchain finds them.
+# The record holds every process the run started, each `calling init:`
+# line judged alike, so a program whose library declares a codec is run
+# built (native_rows.mojo `run_readme`), never under `mojo run`.
 # `run_loaded_from` runs a program through the injected `ProcessRunner` with
 # `LD_DEBUG=libs` and `LD_DEBUG_OUTPUT` added to its cleared environment and
 # any `LD_LIBRARY_PATH` entry of the caller's dropped from it, then reads the

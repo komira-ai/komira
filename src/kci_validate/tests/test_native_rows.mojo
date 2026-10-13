@@ -46,8 +46,9 @@
 #       native package by itself needs none;
 #   (codec) a library shipping no native file whose `dlopen` rows name
 #       liblz4.so.1 and whose depends lack lz4-c (slice 4's planted defect)
-#       is native: installed by itself, its README runs under the loader's
-#       record and the codec loaded from /usr/lib makes `loaded_from` red
+#       is native: installed by itself, its README is built (its closure
+#       opens a codec) and the program run under the loader's record, and
+#       the codec loaded from /usr/lib makes `loaded_from` red
 #       (as a member of a set, installed alone: test_native_rows_real.mojo);
 #   (load) `load_findings`: every path LOADED passes; a path not reported
 #       and a run that failed with no line are findings.
@@ -883,11 +884,18 @@ def test_a_codec_package_without_its_requirement_is_native() raises:
     install.writes(String(ENV) + String("/share/doc/komira_alpha/README.md"), String(README_CODEC))
     install.writes(String(ENV) + String("/lib/mojo/komira_alpha.mojoc"), String("komira_alpha"))
     p.inner.expect(install^)
-    var readme = ScriptedStep(run_program_argv(fx.work(), String(PROGRAM), List[String]()), stdout_text=String(COUNT))
+    # its closure opens a codec: built (no block, so no build words) and the
+    # program run, never `mojo run` (test_native_rows_real.mojo, (zlib))
+    var exe = fx.env() + String("/bin/readme_komira_alpha")
+    p.inner.expect(ScriptedStep(build_program_argv(fx.work(), String(PROGRAM), List[String](), exe)))
+    var readme = ScriptedStep(List[String](), stdout_text=String(COUNT))
     readme.writes(String("out/readme_komira_alpha.ld.103"), String(LZ4_TRACE))
     p.inner.expect(readme^)
     var row = _validate(fx, Script(fx), p)
     assert_equal(p.inner.remaining(), 0)
+    assert_false(_env_has(p.inner.calls[1], String("LD_DEBUG=libs")))
+    assert_equal(p.inner.calls[2].path, exe)
+    assert_true(_env_has(p.inner.calls[2], String("LD_DEBUG=libs")))
     assert_equal(
         _order(row), String("release network channel channel host scratch pixi install readme payload program loaded_from")
     )

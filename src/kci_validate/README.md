@@ -23,8 +23,11 @@ The validations a kci stage runs on its steps. Two kinds:
   owner's `-l` fails the validation. A README whose block's `mojo build`
   line links a static archive its `mojo run` line does not (komira_log's
   holder, which the JIT cannot load) is built with that line into the
-  environment's `bin/` and the built program run instead. No network at
-  all is `INDETERMINATE` (exit 5) with a skip reason, never a pass.
+  environment's `bin/` and the built program run instead, and so is a
+  README whose library's closure opens a system codec (`dlopen` rows): the
+  loader's record of a `mojo run` also holds the processes the compiler
+  starts, which load libz from the system. No network at all is
+  `INDETERMINATE` (exit 5) with a skip reason, never a pass.
 - **CONDA_INSTALL_SMOKE** (`run_install_smoke`), after a PUBLISH step, reads
   the step's channel anonymously until its index lists each pinned file with
   the build's sha256 and serves those bytes, then runs a digest-pinned

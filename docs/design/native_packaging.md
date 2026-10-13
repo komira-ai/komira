@@ -402,7 +402,16 @@ no exception:
      environment's libraries through its own DT_RPATH `$ORIGIN/../lib`, so the loader names them
      `<env>/bin/../lib/<so>`). A library no package declares is out of scope: the Mojo compiler and
      its JIT load libz and libzstd themselves, from wherever the toolchain finds them, and that says
-     nothing about the package. A declared codec loaded from outside the environment stays red. Like row 4 it runs in the whole set and per package alone: in the whole set
+     nothing about the package. A declared codec loaded from outside the environment stays red. The
+     record holds every process a run starts, and on the first `mojo run` in a fresh environment a
+     process the compiler starts loads libz and libzstd from the system (kci run 38397209148 refused
+     komira_zlib alone, installed with libzlib, on that load), so a README whose library's closure
+     declares a codec is not judged under `mojo run`: it is built with `mojo build` and the block's
+     build words (none when the block is empty) into `<env>/bin`, with no record, and the built program
+     run under the record, which then holds the program's own loads only. The compiler's
+     `share/max/modular.cfg` (`shared_libs`) gives every program it builds a run path to its own
+     `lib/`, which in an installed environment is `<env>/lib`, so that program finds a required codec
+     there. Like row 4 it runs in the whole set and per package alone: in the whole set
      another package may install a codec this package forgot to require, so a missing requirement
      is red only where nothing else installed ships that codec, which only the per-package run
      ensures. This replaces reading `/proc/self/maps`, which would need code in the program under
@@ -410,14 +419,15 @@ no exception:
   6. every installed README run under `mojo run` with the owners' flags (question 5: the README's
      own `sh komira-link` block, which kci refuses unless it is what the closure needs; slice 10),
      except a README whose closure ships a static archive (komira_log's holder; the block's `mojo build`
-     line links it and its `mojo run` line cannot, the JIT loading no archive): that one runs as the
+     line links it and its `mojo run` line cannot, the JIT loading no archive) or declares a codec
+     (row 5 above): that one runs as the
      block's `mojo build` into `<env>/bin` and the built program executed, in the whole set and alone,
      until question 2's JIT object exists; and, new,
      when the library's closure links native files (its block is not empty), built with `mojo build` and
      the block's build words into `<env>/bin` and run. **Decision (slice 11): a README whose closure links
-     no native file is not built.** Its block is empty, so there are no build words to check, and its
-     built program would load no komira `.so`; with no run path to `<env>/lib`, a codec it opens would
-     come from the system's search path, a red row 5 that says nothing about the package. Building
+     no native file gets no row 6.** Its block is empty, so there are no build words to check, and its
+     built program would load no komira `.so`; one whose closure declares a codec is already built for
+     row 5 (above). Building
      every README would add one `mojo build` per package of the set to `beta_validate` for that;
   7. one program per owner of komira_http_core's closure beside a system OpenSSL (probe 3's IR1),
      installed from conda-forge as an extra requirement of that validation only.
