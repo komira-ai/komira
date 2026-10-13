@@ -2,8 +2,9 @@
 # (the :echo target, refrt/echo_runtime.c), through the C ABI only.
 #
 # What it proves: every case under cases/ passes on a runtime that keeps the
-# contract, with no case skipped, and the describe answer passes the
-# capability checks. With test_conform_broken (the same suite failing on
+# contract, with no case skipped but the one gated to the NATIVE class
+# (validate_recorded_fields_absent_native: this runtime is MANAGED), and the
+# describe answer passes the capability checks. With test_conform_broken (the same suite failing on
 # exactly the planted defects of echo_broken.so) it shows the suite can pass
 # and can fail.
 #
@@ -36,7 +37,7 @@ from std.testing import assert_equal
 from komira_udf_spike_abi.conform import load_cases, run_suite
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases"
-comptime CASE_COUNT = 121
+comptime CASE_COUNT = 158
 """The JSON files under cases/: an empty or partial staging cannot pass."""
 
 
@@ -47,6 +48,9 @@ def main() raises:
     print(report)
     assert_equal(report.runtime_id, "komira-test/echo")
     assert_equal(report.count("FAIL"), 0, "cases failed on the reference runtime")
-    assert_equal(report.count("SKIP"), 0, "cases skipped on the reference runtime")
-    assert_equal(report.count("PASS"), CASE_COUNT + 1, "every case and the capabilities check pass")
+    assert_equal(report.count("SKIP"), 1, "cases skipped on the reference runtime")
+    assert_equal(
+        report.result("validate_recorded_fields_absent_native").verdict, "SKIP", "the NATIVE-only case"
+    )
+    assert_equal(report.count("PASS"), CASE_COUNT, "every case but the skipped one, and the capabilities check, pass")
     print("test_conform_echo: ok")

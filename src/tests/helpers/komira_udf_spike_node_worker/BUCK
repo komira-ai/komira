@@ -71,6 +71,7 @@ _WORKER = {"node_worker/worker/" + f: "worker/" + f for f in [
     "arrow_io.mjs",
     "calls.mjs",
     "corrupt.mjs",
+    "descriptor.mjs",
     "frames.mjs",
     "runtime.mjs",
     "wire.mjs",

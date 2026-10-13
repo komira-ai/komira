@@ -3,12 +3,14 @@
 #
 # What it proves: every case of the corpus, and its double and fahrenheit
 # cases again on double_batch and fahrenheit_batch (the batch-loop
-# fixtures), passes on a native C library
-# behind the native runtime, none skipped and none left out (the C library is
-# echo_runtime.c built as a native library, so it has every fixture, the
-# ABI-breaking ones included), and the native runtime's describe
-# passes the capability checks: the runtime verifies the library's digest,
-# loads it, and forwards every entry without changing what a case sees.
+# fixtures), passes on a native C library behind the native runtime, none
+# left out (the C library is echo_runtime.c built as a native library, so it
+# has every fixture, the ABI-breaking ones included) and two skipped: the
+# MANAGED-only case, and the one about a shape the runtime lacks (it has
+# every shape). The native runtime's describe passes the capability checks:
+# the runtime verifies the library's digest, loads it, and forwards every
+# entry without changing what a case sees, the nested calls of a frame's
+# pull included.
 #
 # Defects caught: a forwarding entry that drops or swaps an argument, a
 # handle of the library's handed back where the runtime's is expected, a
@@ -28,8 +30,8 @@ from komira_udf_spike_abi.conform import load_cases, run_suite
 from komira_udf_spike_native.code import code_set, with_batch_twins
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases"
-comptime CASE_COUNT = 121
-comptime BATCH_TWINS = 9
+comptime CASE_COUNT = 158
+comptime BATCH_TWINS = 6
 """The corpus cases on double or fahrenheit, each run again on its batch-loop
 fixture (code.with_batch_twins)."""
 
@@ -51,6 +53,8 @@ def main() raises:
     print(report)
     assert_equal(report.runtime_id, "komira/native")
     assert_equal(report.count("FAIL"), 0, "cases failed on the native C library")
-    assert_equal(report.count("SKIP"), 0, "cases skipped on the native C library")
-    assert_equal(report.count("PASS"), len(cases) + 1, "every case and the capabilities check pass")
+    assert_equal(report.count("SKIP"), 2, "cases skipped on the native C library")
+    assert_equal(report.result("validate_recorded_fields_absent_managed").verdict, "SKIP")
+    assert_equal(report.result("validate_unsupported_shape").verdict, "SKIP")
+    assert_equal(report.count("PASS"), len(cases) - 1, "every case but the two skipped, and the capabilities check, pass")
     print("test_conform_native_c: ok")

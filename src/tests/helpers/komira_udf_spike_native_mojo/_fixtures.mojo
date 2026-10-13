@@ -27,6 +27,7 @@ from komira_udf_spike_abi.contract import (
     ERR_DESCRIPTOR,
     ERR_FIELD_NOT_DECLARED,
     ERR_INTERNAL,
+    ERR_LOAD,
     ERR_RAISED,
     ERR_UNSUPPORTED,
     FORM_PACKAGE,
@@ -112,6 +113,11 @@ comptime F_SUM_ONE_SET = 45
 comptime F_RAISE_AGAIN = 46
 comptime F_DOUBLE_BATCH = 47
 comptime F_FAHRENHEIT_BATCH = 48
+comptime F_RAISE_IF_5 = 49
+comptime F_VOLATILE_COUNT = 50
+comptime F_ROW_CONST = 51
+comptime F_FRAME_ROW_COUNTS = 52
+comptime F_YIELD_THREE_THEN_RAISE = 53
 
 comptime ROW_FIELDS_MAX = 8
 comptime SLOW_ROW_NS: Int64 = 100_000_000
@@ -253,6 +259,25 @@ def find_fixture(entry: String) -> Optional[Fixture]:
     # later frame_next (the host must not pull after an error).
     if entry == "raise_again":
         return Fixture(F_RAISE_AGAIN, SHAPE_MAP_BATCHES_FRAME, "l", "tl", "")
+    # Raises naming no row on a batch holding the value 5 (the host bisects).
+    if entry == "raise_minus_one_if_row5":
+        return Fixture(F_RAISE_IF_5, SHAPE_MAP_BATCHES_COLUMN, "l", "l", "")
+    # Counts its runs per instance and raises naming no row; a batch whose
+    # row 0 is -1 returns the count instead.
+    if entry == "volatile_count_raise":
+        return Fixture(F_VOLATILE_COUNT, SHAPE_MAP_BATCHES_COLUMN, "l", "l", "")
+    # ROW over any read set, the empty one included: 7 per row.
+    if entry == "row_const":
+        return Fixture(F_ROW_CONST, SHAPE_ROW, "*", "l", "")
+    # A frame over no columns: a one-row table of each batch's length.
+    if entry == "frame_row_counts":
+        return Fixture(F_FRAME_ROW_COUNTS, SHAPE_MAP_BATCHES_FRAME, "", "tl", "")
+    # Yields its first three input batches, then raises at row 1.
+    if entry == "yield_three_then_raise":
+        return Fixture(F_YIELD_THREE_THEN_RAISE, SHAPE_MAP_BATCHES_FRAME, "l", "tl", "")
+    # yield_two_then_raise over two columns: its output fails import.
+    if entry == "yield_two_then_raise_wide":
+        return Fixture(F_YIELD_TWO_THEN_RAISE, SHAPE_MAP_BATCHES_FRAME, "ll", "tl", "")
     return None
 
 
@@ -273,12 +298,12 @@ def _struct_is(s: Void, fmts: String) -> Bool:
 
 
 def _row_args_ok(s: Void) -> Bool:
-    """A ROW read set: one to ROW_FIELDS_MAX int64 fields, each named, no
-    name twice."""
+    """A ROW read set: up to ROW_FIELDS_MAX int64 fields, each named, no
+    name twice; none is legal (an empty read set, design 3.4 rule 5)."""
     if is_null(s) or schema_format(s) != "+s":
         return False
     var n = schema_children(s)
-    if n < 1 or n > ROW_FIELDS_MAX:
+    if n < 0 or n > ROW_FIELDS_MAX:
         return False
     for i in range(n):
         var c = schema_child(s, i)
@@ -291,8 +316,10 @@ def _row_args_ok(s: Void) -> Bool:
 
 
 def check_spec(s: Void, e: Void, mut fx: Fixture) -> Int32:
-    """The spec names a fixture with its shape and signature, in a form and
-    descriptor this library reads; OK with `fx` set, or the refusal."""
+    """The spec names a fixture with its shape and signature, in a form this
+    library reads; OK with `fx` set, or the refusal. The descriptor is the
+    native runtime's to check (design section 3.1), before this library is
+    opened."""
     # SAFETY: `s` is the host's komira_udf_spec, lent for the call; its
     # struct_size is checked before any later field is read.
     var sp = s.bitcast[CUdfSpec]()
@@ -300,13 +327,9 @@ def check_spec(s: Void, e: Void, mut fx: Fixture) -> Int32:
         return fail(e, ERR_ABI, "spec struct_size is below this library's")
     var found = find_fixture(read_cstr(sp[].entry))
     if not found:
-        return fail(e, ERR_DESCRIPTOR, "no fixture has this entry")
+        return fail(e, ERR_LOAD, "no code object holds the entry '" + read_cstr(sp[].entry) + "'")
     if sp[].form < FORM_PACKAGE or sp[].form > FORM_VALUE:
         return fail(e, ERR_DESCRIPTOR, "code form is not PACKAGE, BUNDLE or VALUE")
-    if sp[].descriptor_version > 0:
-        return fail(e, ERR_DESCRIPTOR, "descriptor_version is newer than 0, the newest read here")
-    if sp[].descriptor_len != 0:
-        return fail(e, ERR_DESCRIPTOR, "descriptor version 0 is empty; these bytes are not canonical")
     var f = found.value().copy()
     if UInt32(sp[].shape) != f.shape:
         return fail(e, ERR_UNSUPPORTED, "the fixture does not have this shape")
@@ -552,6 +575,10 @@ def row_call(fx: Int, fields: List[String], a: Void, o: Void, e: Void) -> Int32:
     it and returns 0 for the row) over every row of `a`."""
     var n = length(a)
     var d = make_col(o, n)
+    if fx == F_ROW_CONST:  # reads no field: the row count is the struct's length
+        for r in range(n):
+            d.bitcast[Int64]()[r] = 7
+        return OK
     var v = RowView(fields.copy(), a)
     for r in range(n):
         v.row = r

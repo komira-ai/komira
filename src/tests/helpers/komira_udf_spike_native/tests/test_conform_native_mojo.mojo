@@ -5,9 +5,11 @@
 #
 # What it proves: every case of the corpus but _left_out(), and its double
 # and fahrenheit cases again on double_batch and fahrenheit_batch (the
-# batch-loop fixtures), passes on a
-# native UDF library written in Mojo, behind the native runtime, none
-# skipped. The left-out cases need fixtures user code cannot produce (an
+# batch-loop fixtures), passes on a native UDF library written in Mojo,
+# behind the native runtime, none skipped but the MANAGED-only case and the
+# one about a shape the runtime lacks. That includes the nested calls of a
+# frame's pull on one context (design section 4.3): the library's entries
+# are re-entrant across its instances and frames. The left-out cases need fixtures user code cannot produce (an
 # input not moved, an error filled on OK or naming a row outside the batch,
 # a malformed output array or table), which the reference runtime has and
 # this library does not. Every other case runs: the legal output layouts
@@ -37,8 +39,8 @@ from komira_udf_spike_abi.conform import load_cases, run_suite
 from komira_udf_spike_native.code import code_set, with_batch_twins
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases"
-comptime CASE_COUNT = 121
-comptime BATCH_TWINS = 9
+comptime CASE_COUNT = 158
+comptime BATCH_TWINS = 6
 """The corpus cases on double or fahrenheit, each run again on its batch-loop
 fixture (code.with_batch_twins)."""
 
@@ -97,6 +99,11 @@ def _left_out() -> List[String]:
         # a table output whose release leaves its slot set (the release
         # callback is the library's, not user code's)
         "fault_table_release_keeps_slot",
+        # a context lost with no user code run: the test setting of the
+        # reference runtime (design 6.3), an act of a runtime that runs user
+        # code elsewhere, which an in-process library cannot commit
+        "instance_lost_on_agg_open",
+        "instance_lost_on_call_batch",
     ]
 
 
@@ -126,6 +133,8 @@ def main() raises:
     print(report)
     assert_equal(report.runtime_id, "komira/native")
     assert_equal(report.count("FAIL"), 0, "cases failed on the native Mojo library")
-    assert_equal(report.count("SKIP"), 0, "cases skipped on the native Mojo library")
-    assert_equal(report.count("PASS"), len(cases) + 1, "every case run and the capabilities check pass")
+    assert_equal(report.count("SKIP"), 2, "cases skipped on the native Mojo library")
+    assert_equal(report.result("validate_recorded_fields_absent_managed").verdict, "SKIP")
+    assert_equal(report.result("validate_unsupported_shape").verdict, "SKIP")
+    assert_equal(report.count("PASS"), len(cases) - 1, "every case run but the two skipped, and the capabilities check, pass")
     print("test_conform_native_mojo: ok")

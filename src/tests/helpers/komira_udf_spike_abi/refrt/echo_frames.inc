@@ -7,22 +7,34 @@
 
 /* ---- mergeable aggregate: sum ------------------------------------------ */
 
-static int32_t echo_agg_open(komira_udf_instance* inst, komira_udf_groups** out, komira_udf_error* e) {
+static int32_t agg_open(komira_udf_instance* inst, komira_udf_groups** out, komira_udf_error* e) {
   komira_udf_rt* rt = inst->ctx->rt;
   int64_t nth = rt->agg_opens++;
   if (inst->fx->shape != KOMIRA_UDF_SHAPE_AGG_MERGEABLE)
     return fail(host_of(inst), e, KOMIRA_UDF_ERR_UNSUPPORTED, "agg_open on a fixture of another shape", -1);
+  if (inst->fx->id == F_LOST_ON_AGG_OPEN && rt->lost_agg_opens++ == 0) /* the runtime's first one only */
+    return lose(inst->ctx, e, "lost_on_agg_open");
   if ((rt->variant == RT_AGG_OPEN_REFUSED_FIRST && nth == 0) || (rt->variant == RT_AGG_OPEN_REFUSED_SECOND && nth == 1))
     return fail(host_of(inst), e, KOMIRA_UDF_ERR_INTERNAL, "agg_open_refused: agg_open refused", -1);
   if (inst->fx->variant == ONE_GROUP_SET_PER_INSTANCE && inst->group_sets++ > 0)
     return fail(host_of(inst), e, KOMIRA_UDF_ERR_INTERNAL, "this instance already opened its group set", -1);
   komira_udf_groups* g = calloc(1, sizeof(*g));
   if (g == NULL) return fail(host_of(inst), e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "agg_open: out of memory", -1);
+  g->ctx = inst->ctx;
   g->fx = inst->fx;
   g->host = host_of(inst);
+  g->n_args = inst->udf->n_args;
   hold(g->host, sizeof(*g));
   *out = g;
   return KOMIRA_UDF_OK;
+}
+
+static int32_t echo_agg_open(komira_udf_instance* inst, komira_udf_groups** out, komira_udf_error* e) {
+  int32_t rc = enter(inst->ctx, e);
+  if (rc != KOMIRA_UDF_OK) return rc;
+  rc = agg_open(inst, out, e);
+  leave(inst->ctx);
+  return rc;
 }
 
 static int grow(komira_udf_groups* g, uint32_t n) {
@@ -55,11 +67,19 @@ static int32_t fold(komira_udf_groups* g, const komira_udf_call* call, struct Ar
   values->array.release = NULL;
   struct ArrowDeviceArray ids = *gids;
   gids->array.release = NULL;
-  int32_t rc = KOMIRA_UDF_OK;
+  int32_t rc = enter(g->ctx, e);
+  if (rc != KOMIRA_UDF_OK) {
+    release_host(g->host, &v.array);
+    release_host(g->host, &ids.array);
+    return rc;
+  }
   const struct ArrowArray* x = merge ? &v.array : (v.array.n_children > 0 ? v.array.children[0] : NULL);
   int inputs_ok = on_cpu(&v) && on_cpu(&ids) && column_ok(&ids.array) && (merge ? column_ok(&v.array) : args_ok(&v.array));
   if (!inputs_ok)
-    rc = fail(g->host, e, KOMIRA_UDF_ERR_INTERNAL, "an aggregate input breaks the C Data rules", -1);
+    rc = fail(g->host, e, KOMIRA_UDF_ERR_HOST_CONTRACT,
+              "an aggregate input is off the CPU or breaks the C Data rules (design 4.4, 3.4 rule 5)", -1);
+  else if (!merge && v.array.n_children != g->n_args)
+    rc = check_args(g->host, &v.array, g->n_args, e);
   else if (cancelled(call))
     rc = fail(g->host, e, KOMIRA_UDF_ERR_CANCELLED, "cancelled before the batch", -1);
   else if (x == NULL || ids.array.length != v.array.length)
@@ -80,6 +100,7 @@ static int32_t fold(komira_udf_groups* g, const komira_udf_call* call, struct Ar
   }
   release_host(g->host, &v.array);
   if (!(g->fx->id == F_SUM_GIDS_KEPT && g->fx->variant == GIDS_LEAKED)) release_host(g->host, &ids.array); /* sum_gids_leaked */
+  leave(g->ctx);
   return rc;
 }
 
@@ -132,11 +153,21 @@ static int32_t emit(komira_udf_groups* g, uint32_t n, int64_t extra, struct Arro
 }
 
 static int32_t echo_agg_state(komira_udf_groups* g, uint32_t n, struct ArrowDeviceArray* out, komira_udf_error* e) {
-  return emit(g, n, g->fx->id == F_SUM_STATE_LONG ? 1 : 0, out, e);
+  out->array.release = NULL;
+  int32_t rc = enter(g->ctx, e);
+  if (rc != KOMIRA_UDF_OK) return rc;
+  rc = emit(g, n, g->fx->id == F_SUM_STATE_LONG ? 1 : 0, out, e);
+  leave(g->ctx);
+  return rc;
 }
 
 static int32_t echo_agg_finish(komira_udf_groups* g, uint32_t n, struct ArrowDeviceArray* out, komira_udf_error* e) {
-  return emit(g, n, g->fx->id == F_SUM_FINISH_SHORT ? -1 : 0, out, e);
+  out->array.release = NULL;
+  int32_t rc = enter(g->ctx, e);
+  if (rc != KOMIRA_UDF_OK) return rc;
+  rc = emit(g, n, g->fx->id == F_SUM_FINISH_SHORT ? -1 : 0, out, e);
+  leave(g->ctx);
+  return rc;
 }
 
 static void echo_agg_close(komira_udf_groups* g) {
@@ -154,11 +185,16 @@ static int32_t echo_frame_open(komira_udf_instance* inst, const komira_udf_call*
     mine.release = NULL; /* the bug: `in` read in place, never moved */
   else
     in->release = NULL;
-  int32_t rc = KOMIRA_UDF_OK;
+  int32_t rc = enter(inst->ctx, e);
+  if (rc != KOMIRA_UDF_OK) {
+    if (mine.release != NULL) mine.release(&mine);
+    return rc;
+  }
   if ((inst->fx->shape & (KOMIRA_UDF_SHAPE_MAP_BATCHES_FRAME | KOMIRA_UDF_SHAPE_AGG_PLAIN | KOMIRA_UDF_SHAPE_STEP)) == 0)
     rc = fail(host_of(inst), e, KOMIRA_UDF_ERR_UNSUPPORTED, "frame_open on a fixture of another shape", -1);
   if (rc == KOMIRA_UDF_OK && mine.device_type != ARROW_DEVICE_CPU)
-    rc = fail(host_of(inst), e, KOMIRA_UDF_ERR_UNSUPPORTED, "only CPU streams are read here", -1);
+    rc = fail(host_of(inst), e, KOMIRA_UDF_ERR_HOST_CONTRACT, "an input stream on another device than the CPU (design 4.4)",
+              -1);
   /* No schema travels per call (design 4.4): get_schema must fail, and
    * get_last_error must be callable. */
   struct ArrowSchema none;
@@ -174,13 +210,16 @@ static int32_t echo_frame_open(komira_udf_instance* inst, const komira_udf_call*
     rc = fail(host_of(inst), e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "frame_open: out of memory", -1);
   if (rc != KOMIRA_UDF_OK) {
     if (mine.release != NULL) mine.release(&mine);
+    leave(inst->ctx);
     return rc;
   }
   fr->inst = inst;
   fr->in = mine;
   fr->group = -1;
+  fr->want = inst->udf->n_args + (inst->fx->shape == KOMIRA_UDF_SHAPE_AGG_PLAIN ? 1 : 0);
   hold(host_of(inst), sizeof(*fr));
   *out = fr;
+  leave(inst->ctx);
   return KOMIRA_UDF_OK;
 }
 
@@ -188,26 +227,58 @@ static int32_t echo_frame_open(komira_udf_instance* inst, const komira_udf_call*
  * slot unwritten is seen. */
 static void unwritten(struct ArrowArray* a) { (void)a; }
 
-/* The next input batch into *b; 0 with b->array.release == NULL at the end;
- * nonzero when the stream fails, leaves `b` unwritten, or hands out a batch
- * that is not an argument struct on the CPU (args_ok, on_cpu), which is then
- * released. */
-static int pull(komira_udf_frame* fr, struct ArrowDeviceArray* b) {
+/* The next input batch into *b: OK with the batch, or OK with
+ * b->array.release == NULL at the end. Otherwise a failure with `e` filled:
+ *   - the input failed (get_next returned nonzero): its get_last_error text
+ *     is copied before anything else is called, and nothing but release is
+ *     called on the stream after it (design section 4.3); ERR_INTERNAL,
+ *     which the host ignores;
+ *   - the host broke a rule with the batch (left unwritten, off the CPU, a
+ *     bitmap or offset on the struct, another child count): ERR_HOST_CONTRACT;
+ *   - the pull returned with the call's cancel set or past its deadline:
+ *     ERR_CANCELLED or ERR_DEADLINE, the batch released unread, so user
+ *     code never sees it. */
+static int32_t pull(komira_udf_frame* fr, struct ArrowDeviceArray* b, komira_udf_error* e) {
+  const komira_udf_host* h = host_of(fr->inst);
   memset(b, 0, sizeof(*b));
+  if (fr->in_failed) return fail(h, e, KOMIRA_UDF_ERR_INTERNAL, "the input stream failed earlier", -1);
   b->array.release = unwritten;
   b->device_id = 77;
   b->sync_event = &b->device_id; /* not NULL: the host must write it */
   b->reserved[0] = b->reserved[1] = b->reserved[2] = 77; /* the host must zero them */
-  int rc = fr->in.get_next(&fr->in, b);
-  if (rc != 0 || b->array.release == unwritten) {
+  int got = fr->in.get_next(&fr->in, b);
+  if (got != 0) {
+    const char* why = fr->in.get_last_error(&fr->in);
+    char msg[640];
+    snprintf(msg, sizeof(msg), "the input stream failed (%d): %s", got, why != NULL ? why : "no message");
+    fr->in_failed = 1;
     b->array.release = NULL;
-    return -1;
+    return fail(h, e, KOMIRA_UDF_ERR_INTERNAL, msg, -1);
   }
-  if (b->array.release != NULL && (!on_cpu(b) || !args_ok(&b->array))) {
+  if (b->array.release == unwritten) {
+    b->array.release = NULL;
+    return fail(h, e, KOMIRA_UDF_ERR_HOST_CONTRACT, "get_next returned 0 and wrote no batch", -1);
+  }
+  if (b->array.release == NULL) return KOMIRA_UDF_OK; /* the end */
+  if (!on_cpu(b)) {
     release_array(&b->array);
-    return -1;
+    return fail(h, e, KOMIRA_UDF_ERR_HOST_CONTRACT, "an input batch on another device than the CPU (design 4.4)", -1);
   }
-  return 0;
+  int32_t rc = check_args(h, &b->array, fr->want, e);
+  if (rc != KOMIRA_UDF_OK) {
+    release_array(&b->array);
+    return rc;
+  }
+  if (cancelled(fr->call)) {
+    release_array(&b->array);
+    return fail(h, e, KOMIRA_UDF_ERR_CANCELLED, "cancelled while the frame waited on its input; the batch was not run", -1);
+  }
+  if (past_deadline(fr->inst->ctx->rt, fr->call)) {
+    release_array(&b->array);
+    return fail(h, e, KOMIRA_UDF_ERR_DEADLINE, "the deadline passed while the frame waited on its input; the batch was not run",
+                -1);
+  }
+  return KOMIRA_UDF_OK;
 }
 
 /* An n-row table with one int64 column, into `out`; the column's validity
@@ -224,7 +295,8 @@ static int one_column_table(const komira_udf_host* h, struct ArrowDeviceArray* o
 static int32_t next_running_sum(komira_udf_frame* fr, struct ArrowDeviceArray* out, komira_udf_error* e) {
   const komira_udf_host* h = host_of(fr->inst);
   struct ArrowDeviceArray b;
-  if (pull(fr, &b) != 0) return fail(h, e, KOMIRA_UDF_ERR_INTERNAL, "the input stream failed", -1);
+  int32_t got = pull(fr, &b, e);
+  if (got != KOMIRA_UDF_OK) return got;
   if (b.array.release == NULL) {
     fr->done = 1;
     return KOMIRA_UDF_OK;
@@ -259,9 +331,10 @@ static int32_t next_group_max(komira_udf_frame* fr, struct ArrowDeviceArray* out
   int64_t k = 0, cap = 0;
   while (k == 0 && !fr->done) {
     struct ArrowDeviceArray b;
-    if (pull(fr, &b) != 0) {
+    int32_t got = pull(fr, &b, e);
+    if (got != KOMIRA_UDF_OK) {
       free(done);
-      return fail(h, e, KOMIRA_UDF_ERR_INTERNAL, "the input stream failed", -1);
+      return got;
     }
     int64_t n = b.array.release == NULL ? 0 : b.array.length;
     if (b.array.release == NULL) fr->done = 1;
@@ -318,7 +391,8 @@ static int32_t next_group_max(komira_udf_frame* fr, struct ArrowDeviceArray* out
 static int32_t next_step(komira_udf_frame* fr, struct ArrowDeviceArray* out, komira_udf_error* e) {
   const komira_udf_host* h = host_of(fr->inst);
   struct ArrowDeviceArray b;
-  if (pull(fr, &b) != 0) return fail(h, e, KOMIRA_UDF_ERR_INTERNAL, "the input stream failed", -1);
+  int32_t got = pull(fr, &b, e);
+  if (got != KOMIRA_UDF_OK) return got;
   fr->done = 1;
   if (b.array.release == NULL) return fail(h, e, KOMIRA_UDF_ERR_INTERNAL, "a step got no literal batch", -1);
   int64_t rows = b.array.length == 1 && b.array.n_children == 1 ? i64_at(b.array.children[0], 0) : -1;
@@ -329,17 +403,42 @@ static int32_t next_step(komira_udf_frame* fr, struct ArrowDeviceArray* out, kom
   return KOMIRA_UDF_OK;
 }
 
-/* yield_two_then_raise: the input batch is the output (a runtime may return
- * its input buffers), twice; then an error, with the rest unread. */
-static int32_t next_yield_two(komira_udf_frame* fr, struct ArrowDeviceArray* out, komira_udf_error* e) {
+/* yield_two_then_raise and yield_three_then_raise: the input batch is the
+ * output (a runtime may return its input buffers), `n` times; then an error
+ * (with no row, or at row 1), with the rest unread. */
+static int32_t next_yield_n(komira_udf_frame* fr, int64_t n, struct ArrowDeviceArray* out, komira_udf_error* e) {
   const komira_udf_host* h = host_of(fr->inst);
-  if (fr->running == 2) {
+  if (fr->running == n) {
     fr->done = 1;
-    return fail(h, e, KOMIRA_UDF_ERR_RAISED, "yield_two_then_raise: raised after two outputs", -1);
+    if (n == 2) return fail(h, e, KOMIRA_UDF_ERR_RAISED, "yield_two_then_raise: raised after two outputs", -1);
+    return fail(h, e, KOMIRA_UDF_ERR_RAISED, "yield_three_then_raise: raised after three outputs", 1);
   }
-  if (pull(fr, out) != 0) return fail(h, e, KOMIRA_UDF_ERR_INTERNAL, "the input stream failed", -1);
+  int32_t got = pull(fr, out, e);
+  if (got != KOMIRA_UDF_OK) return got;
   if (out->array.release == NULL) fr->done = 1;
   fr->running++;
+  set_cpu(out);
+  return KOMIRA_UDF_OK;
+}
+
+/* frame_row_counts: each input batch, which has no columns, as a one-row
+ * table holding its row count (its length, design 3.4 rule 5). */
+static int32_t next_row_counts(komira_udf_frame* fr, struct ArrowDeviceArray* out, komira_udf_error* e) {
+  const komira_udf_host* h = host_of(fr->inst);
+  struct ArrowDeviceArray b;
+  int32_t got = pull(fr, &b, e);
+  if (got != KOMIRA_UDF_OK) return got;
+  if (b.array.release == NULL) {
+    fr->done = 1;
+    return KOMIRA_UDF_OK;
+  }
+  uint8_t* v;
+  void* d;
+  int64_t n = b.array.length;
+  release_array(&b.array);
+  if (!one_column_table(h, out, 1, &v, &d))
+    return fail(h, e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "frame_row_counts: out of memory", -1);
+  ((int64_t*)d)[0] = n;
   set_cpu(out);
   return KOMIRA_UDF_OK;
 }
@@ -366,7 +465,8 @@ static int32_t next_table(komira_udf_frame* fr, struct ArrowDeviceArray* out, ko
   const komira_udf_host* h = host_of(fr->inst);
   int shape = fr->inst->fx->variant;
   struct ArrowDeviceArray b;
-  if (pull(fr, &b) != 0) return fail(h, e, KOMIRA_UDF_ERR_INTERNAL, "the input stream failed", -1);
+  int32_t got = pull(fr, &b, e);
+  if (got != KOMIRA_UDF_OK) return got;
   if (b.array.release == NULL) {
     fr->done = 1;
     return KOMIRA_UDF_OK;
@@ -487,7 +587,8 @@ static int32_t frame_next(komira_udf_frame* fr, const komira_udf_call* call, str
 static int32_t next_two_types(komira_udf_frame* fr, struct ArrowDeviceArray* out, komira_udf_error* e) {
   const komira_udf_host* h = host_of(fr->inst);
   struct ArrowDeviceArray b;
-  if (pull(fr, &b) != 0) return fail(h, e, KOMIRA_UDF_ERR_INTERNAL, "the input stream failed", -1);
+  int32_t got = pull(fr, &b, e);
+  if (got != KOMIRA_UDF_OK) return got;
   if (b.array.release == NULL) {
     fr->done = 1;
     return KOMIRA_UDF_OK;
@@ -518,7 +619,12 @@ static int32_t next_two_types(komira_udf_frame* fr, struct ArrowDeviceArray* out
 /* frame_next, then for running_sum_error_on_ok an error filled on OK. */
 static int32_t echo_frame_next(komira_udf_frame* fr, const komira_udf_call* call, struct ArrowDeviceArray* out,
                                komira_udf_error* e) {
-  int32_t rc = frame_next(fr, call, out, e);
+  out->array.release = NULL;
+  int32_t rc = enter(fr->inst->ctx, e);
+  if (rc != KOMIRA_UDF_OK) return rc;
+  fr->call = call;
+  rc = frame_next(fr, call, out, e);
+  leave(fr->inst->ctx);
   if (rc == KOMIRA_UDF_OK && fr->inst->fx->variant == FILL_ERROR_ON_OK && fr->inst->fx->id == F_RUNNING_SUM)
     fail(host_of(fr->inst), e, KOMIRA_UDF_ERR_RAISED, "running_sum_error_on_ok: filled, then OK returned", -1);
   return rc;
@@ -549,7 +655,11 @@ static int32_t frame_next(komira_udf_frame* fr, const komira_udf_call* call, str
     case F_GROUP_MAX:
       return next_group_max(fr, out, e);
     case F_YIELD_TWO_THEN_RAISE:
-      return next_yield_two(fr, out, e);
+      return next_yield_n(fr, 2, out, e);
+    case F_YIELD_THREE_THEN_RAISE:
+      return next_yield_n(fr, 3, out, e);
+    case F_FRAME_ROW_COUNTS:
+      return next_row_counts(fr, out, e);
     case F_ENDLESS:
       return next_endless(host_of(fr->inst), out, e);
     case F_TABLE:

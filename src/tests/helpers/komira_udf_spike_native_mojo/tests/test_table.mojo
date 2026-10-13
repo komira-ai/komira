@@ -9,13 +9,14 @@
 #     memory_report entry, matching the features describe reports (a table
 #     entry left unset, or a feature bit and an entry that disagree);
 #   - describe reports what the native runtime requires of a library:
-#     runtime_id komira/native, NATIVE, hosting 0, CONTEXT_PER_THREAD, no
-#     thread_affine, global_lock 0, IN_PROCESS (a library the runtime would
-#     refuse to load), and exactly its descriptor version 0, its seven
-#     shapes and the CPU (a field reported wrong that no runtime checks);
-#   - validate accepts a fixture's own signature and refuses an unknown entry
-#     (ERR_DESCRIPTOR) and a wrong signature (ERR_UNSUPPORTED), each with a
-#     message (a validate that accepts anything);
+#     runtime_id komira/native and NATIVE (a library the runtime would refuse
+#     to load), and exactly its descriptor version 1, its seven shapes, the
+#     CPU and no feature (a field reported wrong that no runtime checks);
+#   - the library's own spec check (its validate, which the native runtime
+#     does not call: it checks the descriptor itself) accepts a fixture's own
+#     signature and refuses an entry no code holds (ERR_LOAD) and a wrong
+#     signature (ERR_UNSUPPORTED), each with a message (a check that accepts
+#     anything);
 #   - a ROW read set of two distinct names is accepted and one naming a field
 #     twice is refused with ERR_UNSUPPORTED (a read set whose names cannot
 #     bind one column each).
@@ -96,28 +97,21 @@ def main() raises:
     var caps = read_caps(c)
     assert_equal(caps.runtime_id, "komira/native")
     assert_equal(caps.runtime_abi, "abi1")
-    # max_descriptor_version, shapes, threading, thread_affine, transports,
-    # hosting, devices, features, udf_class, global_lock
-    assert_equal(caps.words[2], CONTEXT_PER_THREAD)
-    assert_equal(caps.words[3], 0)
-    assert_true(caps.words[4] & TRANSPORT_IN_PROCESS != 0)
-    assert_equal(caps.words[5], HOSTING_NONE)
-    assert_equal(caps.words[7], 0, "a feature bit without its entry")
-    assert_equal(caps.words[8], CLASS_NATIVE)
-    assert_equal(caps.words[9], 0)
+    # max_descriptor_version, shapes, devices, features, udf_class
+    assert_equal(caps.words[3], 0, "a feature bit without its entry")
+    assert_equal(caps.words[4], CLASS_NATIVE)
     assert_true(caps.words[1] & SHAPE_SCALAR != 0)
-    assert_equal(caps.words[0], 0, "max_descriptor_version")
+    assert_equal(caps.words[0], 1, "max_descriptor_version")
     assert_equal(
         caps.words[1],
         SHAPE_SCALAR | SHAPE_ROW | SHAPE_MAP_BATCHES_COLUMN | SHAPE_MAP_BATCHES_FRAME | SHAPE_AGG_PLAIN
         | SHAPE_AGG_MERGEABLE | SHAPE_STEP,
         "shapes",
     )
-    assert_equal(caps.words[4], TRANSPORT_IN_PROCESS, "transports")
-    assert_equal(caps.words[6], DEVICE_CPU, "devices")
+    assert_equal(caps.words[2], DEVICE_CPU, "devices")
 
     assert_equal(_validate(arena, t, rt, host, "double", TYPE_INT64), OK)
-    assert_equal(_validate(arena, t, rt, host, "no_such_function", TYPE_INT64), ERR_DESCRIPTOR)
+    assert_equal(_validate(arena, t, rt, host, "no_such_function", TYPE_INT64), ERR_LOAD)
     assert_equal(_validate(arena, t, rt, host, "double", TYPE_FLOAT64), ERR_UNSUPPORTED)
     var two: List[ColumnType] = [ColumnType(TYPE_INT64, True), ColumnType(TYPE_INT64, True)]
     assert_equal(_validate_args(arena, t, rt, host, SHAPE_ROW, "pick", two, ["a", "b"]), OK, "a read set of a and b")

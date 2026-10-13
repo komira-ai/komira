@@ -4,9 +4,10 @@
 # refused.
 #
 # What it proves and the defect each part catches:
-#   - digest: a library whose bytes do not match its sha256 is refused with
-#     ERR_CODE_DIGEST (OPTIMIZED_UDF_CODE_DIGEST_MISMATCH) by validate and by
-#     load, and the loader maps no object for it; so are the C library's own
+#   - validate opens no code (design section 4.3 item 3): a library whose
+#     bytes do not match its sha256 passes validate, which maps nothing; load
+#     refuses it with ERR_CODE_DIGEST (OPTIMIZED_UDF_CODE_DIGEST_MISMATCH),
+#     and the loader maps no object for it; so are the C library's own
 #     bytes under its digest with the last byte flipped, and its bytes with
 #     the last byte flipped under its true digest; a matching copy then loads
 #     and maps one, so the count can see a load; with that library open,
@@ -20,7 +21,7 @@
 #     runtime's own SHA-256 wrong at a padding boundary, where a refused
 #     good library would otherwise go unseen).
 #   - platform: a spec whose only library is for another platform is refused
-#     by validate with ERR_UNSUPPORTED (OPTIMIZED_UDF_KIND_UNSUPPORTED)
+#     by validate with ERR_UNSUPPORTED (OPTIMIZED_UDF_UNSUPPORTED)
 #     naming this host's platform, with no object mapped; with a library for
 #     each platform, the other platform's listed first and absent, load takes
 #     this host's (a wrong-platform library loaded, or the first one taken).
@@ -32,15 +33,12 @@
 #     holds host bytes); and one whose init fills the error and succeeds,
 #     loaded with that error released too (a loader that releases init's
 #     error only on a refusal).
-#   - capabilities: libraries that each differ from the C library in one
-#     describe field (native/variant_lib.c and native_c_affine) are refused
-#     with ERR_LOAD naming that field: thread_affine 1, threading
-#     SINGLE_THREAD, transports without IN_PROCESS, global_lock 1, udf_class
-#     MANAGED; and one of another runtime_id (a library bound to concurrency
-#     or a transport it cannot take; one arm of the check dropped); each
-#     variant refused after its init is shut down at once (the host bytes
-#     its init reserved come back); a library reporting THREAD_SAFE loads
-#     and runs (the threading check narrowed to CONTEXT_PER_THREAD).
+#   - capabilities: a library that differs from the C library in udf_class
+#     (MANAGED, native/variant_lib.c) and one of another runtime_id are
+#     refused with ERR_LOAD naming the field (one arm of the check dropped);
+#     the variant refused after its init is shut down at once (the host bytes
+#     its init reserved come back). How a library executes is not a
+#     capability (design section 4.2), so nothing else is read.
 #   - table: a library whose table reports ABI major 2, one whose table's
 #     struct_size ends before close_instance and one that ends one entry
 #     short (before shutdown) are refused with ERR_ABI naming which, and no
@@ -82,14 +80,15 @@
 # memory file dlopened before the digest compare ("a library was mapped
 # before its digest was checked"); the runtime-symbol check skipped (echo.so
 # refused for the wrong reason, both_symbols.so loaded); the library's
-# describe not checked (the thread-affine library loaded); the first code
+# describe not checked (the MANAGED library loaded); the first code
 # object taken whatever its platform (validate accepts another platform's
-# library); the memory file closed after dlopen, so the next library's
+# library); validate opening the library (the digest case: validate refuses
+# where it must answer OK); the memory file closed after dlopen, so the next library's
 # /proc/self/fd/<n> names the one already loaded and dlopen returns it (echo.so
 # "loads" as the C library loaded before it: the bug the first version of the
 # runtime had, which this test found). Mutants planted in review, each red
-# here: the threading, IN_PROCESS and udf_class arms and the table's ABI
-# major and struct_size checks each dropped; the shape check at load
+# here: the udf_class arm and the table's ABI major and struct_size checks
+# each dropped; the shape check at load
 # dropped; the digest compared on its first byte only; the padding test
 # `rest < 56` made `rest < 55`; the library context found without matching
 # the library; close_context not forwarded to the library contexts. Round
@@ -173,7 +172,9 @@ def _digest(tmp: String) raises:
     var want = digest_of("./native_c.so")
     var bad = _spec(tmp + "/bad", [stage_under("./native_mojo.so", tmp + "/bad", host_role(), want)])
     var before = loaded_objects()
-    _refused(rt.validate(bad), ERR_CODE_DIGEST, "do not match", "validate, mismatched bytes")
+    var v = rt.validate(bad)
+    assert_true(v.is_ok(), "validate opened the code: " + String(v))
+    assert_equal(loaded_objects(), before, "validate mapped an object")
     var l = rt.load(bad)
     _refused(l.outcome, ERR_CODE_DIGEST, "do not match", "load, mismatched bytes")
     assert_equal(l.outcome.run_error(False), "OPTIMIZED_UDF_CODE_DIGEST_MISMATCH")
@@ -220,7 +221,7 @@ def _sha256_lengths(tmp: String) raises:
         for i in range(n):
             data.append(UInt8((i * 7 + n) & 255))
         var spec = _spec(root, [stage_data(data, root, host_role(), sha256_of(data))])
-        _refused(rt.validate(spec), ERR_LOAD, "dlopen", "a file of " + String(n) + " bytes under its sha256")
+        _refused(rt.load(spec).outcome, ERR_LOAD, "dlopen", "a file of " + String(n) + " bytes under its sha256")
     rt.shutdown()
 
 
@@ -231,7 +232,7 @@ def _platform(tmp: String) raises:
     var before = loaded_objects()
     var v = rt.validate(other)
     _refused(v, ERR_UNSUPPORTED, host_role(), "validate, another platform's library only")
-    assert_equal(v.run_error(False), "OPTIMIZED_UDF_KIND_UNSUPPORTED")
+    assert_equal(v.run_error(False), "OPTIMIZED_UDF_UNSUPPORTED")
     _refused(rt.load(other).outcome, ERR_UNSUPPORTED, host_role(), "load, another platform's library only")
     assert_equal(loaded_objects(), before, "another platform's library was mapped")
     # The other platform's library first, and absent from the code root.
@@ -246,17 +247,17 @@ def _symbols(tmp: String) raises:
     var runtime_lib = _spec(root, [stage("./echo.so", root, host_role())])
     _refused(rt.load(runtime_lib).outcome, ERR_LOAD, "komira_udf_runtime_init_v1", "a runtime library")
     var both = _spec(root, [stage("./both_symbols.so", root, host_role())])
-    _refused(rt.validate(both), ERR_LOAD, "komira_udf_runtime_init_v1", "a library exporting both symbols")
     _refused(rt.load(both).outcome, ERR_LOAD, "komira_udf_runtime_init_v1", "a library exporting both symbols")
+    _refused(rt.load(both).outcome, ERR_LOAD, "komira_udf_runtime_init_v1", "a library exporting both symbols, again")
     var none = _spec(root, [stage("./no_symbol.so", root, host_role())])
-    var got = rt.validate(none)
+    var got = rt.load(none).outcome.copy()
     _refused(got, ERR_LOAD, "", "a library without the native library symbol")
     assert_equal(got.message, "the library does not export komira_udf_native_init_v1", "its message, whole")
     # A library whose init fails: refused with init's own message, and the
     # error init filled is released (its message holds host bytes).
     var reserved = rt.reserved_bytes()
     var fails = _spec(root, [stage("./variant_init_fails.so", root, host_role())])
-    var f = rt.validate(fails)
+    var f = rt.load(fails).outcome.copy()
     _refused(f, ERR_LOAD, "", "a library whose init fails")
     assert_equal(f.message, "the library's init failed: init_fails refuses every host", "its message, whole")
     assert_equal(rt.reserved_bytes(), reserved, "the error of a failed library init was not released")
@@ -283,22 +284,12 @@ def _symbols(tmp: String) raises:
 def _capabilities(tmp: String) raises:
     var rt = UdfRuntime.open("./native.so")
     var root = tmp + "/capabilities"
-    var affine = _spec(root, [stage("./native_c_affine.so", root, host_role())])
-    var l = rt.load(affine)
-    _refused(l.outcome, ERR_LOAD, "thread_affine", "a thread-affine library")
-    assert_equal(l.outcome.run_error(False), "OPTIMIZED_UDF_CODE_UNLOADABLE")
     var managed = _spec(root, [stage("./echo_as_library.so", root, host_role())])
-    _refused(rt.load(managed).outcome, ERR_LOAD, "runtime_id", "a library of another runtime id")
-    var libs: List[String] = [
-        "./variant_single_thread.so",
-        "./variant_worker_only.so",
-        "./variant_global_lock.so",
-        "./variant_managed.so",
-    ]
-    var fields: List[String] = ["threading", "IN_PROCESS", "global_lock", "udf_class"]
-    # A library reporting THREAD_SAFE, which the runtime takes as well as
-    # CONTEXT_PER_THREAD, loads and runs.
-    _double(rt, _spec(root, [stage("./variant_thread_safe.so", root, host_role())]))
+    var l = rt.load(managed)
+    _refused(l.outcome, ERR_LOAD, "runtime_id", "a library of another runtime id")
+    assert_equal(l.outcome.run_error(False), "OPTIMIZED_UDF_CODE_UNLOADABLE")
+    var libs: List[String] = ["./variant_managed.so"]
+    var fields: List[String] = ["udf_class"]
     for i in range(len(libs)):
         var spec = _spec(root, [stage(libs[i], root, host_role())])
         var reserved = rt.reserved_bytes()
@@ -322,7 +313,7 @@ def _table(tmp: String) raises:
     var held = rt.reserved_bytes() - reserved
     assert_true(held >= INIT_BYTES, "the shutdown of a table of ABI major 2 was called")
     var short = _spec(root, [stage("./variant_short_table.so", root, host_role())])
-    _refused(rt.validate(short), ERR_ABI, "struct_size", "a library table ending before a required entry")
+    _refused(rt.load(short).outcome, ERR_ABI, "struct_size", "a library table ending before a required entry")
     assert_equal(rt.reserved_bytes() - reserved, 2 * held, "the shutdown of a short table was called")
     # The bound itself: one entry short (no shutdown) is refused, and a table
     # ending exactly at shutdown (no optional memory_report) is accepted.

@@ -59,7 +59,7 @@ from ._cabi import (
     zeroed,
 )
 from .contract import ABI_MINOR, ARROW_DEVICE_CPU, ARROW_FLAG_NULLABLE, OK
-from .values import Batch, Column, ColumnType, TYPE_FLOAT64, TYPE_INT32, type_format, type_width
+from .values import Batch, Column, ColumnType, TYPE_FLOAT64, TYPE_INT32, TYPE_INT64, type_format, type_width
 
 comptime _PAD_VALUE: Int64 = 0x5EAD5EAD
 """Written into the rows before an array's offset: a reader that ignores the
@@ -151,12 +151,17 @@ def _hd(p: Void) -> UnsafePointer[_HostData, MutUntrackedOrigin]:
 
 
 def _host_mem_reserve(host_data: Void, bytes: Int64) abi("C") -> Int32:
-    _hd(host_data)[].reserved_bytes += Int(bytes)
+    # Every host callback is thread-safe (komira_udf_host): a runtime called
+    # on several threads at once reserves from all of them, so the count is
+    # an atomic add (native/cancel_flag.c).
+    # SAFETY: the field is a word of the _HostData block, alive with the arena.
+    external_call["komira_udf_spike_add", NoneType](UnsafePointer(to=_hd(host_data)[].reserved_bytes), bytes)
     return OK
 
 
 def _host_mem_release(host_data: Void, bytes: Int64) abi("C"):
-    _hd(host_data)[].reserved_bytes -= Int(bytes)
+    # SAFETY: as _host_mem_reserve.
+    external_call["komira_udf_spike_add", NoneType](UnsafePointer(to=_hd(host_data)[].reserved_bytes), -bytes)
 
 
 def arm_cancel_on_clock(hd: Word, flag: Word):
@@ -264,6 +269,11 @@ def make_host(mut arena: _Arena, abi_major: UInt32, hd_w: Word) -> Word:
     h[].now_ns = _host_now_ns
     h[].log = _host_log
     return Word(h.bitcast[NoneType]())
+
+
+def clock_of(hd: Word) -> Word:
+    """The host clock's three words (native/cancel_flag.c) of ledger `hd`."""
+    return Word(_hd(hd.p)[].clock)
 
 
 def host_data_of(host: Word) -> Word:
@@ -412,10 +422,41 @@ def _set_cpu(dst: Void):
         d[].reserved[i] = 0
 
 
-def device_struct(mut arena: _Arena, batch: Batch, hd: Word) -> Word:
-    """A host-owned ArrowDeviceArray holding `batch` as a struct array."""
+def device_struct(
+    mut arena: _Arena, batch: Batch, hd: Word, plant_extra_child: Bool = False, plant_struct_offset: Bool = False
+) -> Word:
+    """A host-owned ArrowDeviceArray holding `batch` as a struct array.
+    The two plants break a rule of the host (design section 3.4 rule 5) on
+    purpose, for the cases that hold a runtime to ERR_HOST_CONTRACT: one
+    child more than the batch's columns (a copy of the last, or an int64
+    column of `length` zeros when there is none), or the struct at offset 1
+    over children one row longer."""
     var d = arena.bytes(size_of[CArrowDeviceArray]())
-    _fill_struct(arena, d, batch, hd.p)
+    if plant_extra_child:
+        var b = batch.copy()
+        var extra = Column(TYPE_INT64)
+        if len(b.columns) > 0:
+            extra = b.columns[len(b.columns) - 1].copy()
+        else:
+            for _ in range(b.length):
+                extra.append_int(0)
+        b.columns.append(extra^)
+        _fill_struct(arena, d, b, hd.p)
+    elif plant_struct_offset:
+        var b = Batch(batch.length + 1)
+        for c in range(len(batch.columns)):
+            var col = Column(batch.columns[c].type_id)
+            col.append_int(0)
+            for r in range(len(batch.columns[c])):
+                col.bits.append(batch.columns[c].bits[r])
+                col.valid.append(batch.columns[c].valid[r])
+            b.columns.append(col^)
+        _fill_struct(arena, d, b, hd.p)
+        var a = d.bitcast[CArrowArray]()
+        a[].offset = 1
+        a[].length = Int64(batch.length)
+    else:
+        _fill_struct(arena, d, batch, hd.p)
     _set_cpu(d)
     return Word(d)
 

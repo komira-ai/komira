@@ -3,8 +3,8 @@
 # post-conditions (docs/design/udf_runtime_interface.md sections 4.3 to 4.6).
 # It knows no runtime by name: everything it learns comes through describe.
 #
-# Every call returns an Outcome: the runtime's status, message, trace, row
-# and group, and `fault`, a post-condition the host found broken (a layout
+# The values it takes and returns are spec.mojo's. Every call returns an
+# Outcome: the runtime's status, message, trace, row and group, and `fault`, a post-condition the host found broken (a layout
 # that fails import validation, a wrong length, a null in a non-nullable
 # result, an input not moved whatever the status (then released here,
 # once), `out` set on failure, an error row outside the batch, a frame that
@@ -14,6 +14,16 @@
 # Handles are opaque: a Handle holds the runtime's pointer as a Word, which
 # this file cannot read through, and its kind; it is passed back only to the
 # entry of its kind.
+#
+# Contexts lost (design section 4.5): a status that loses its context
+# (contract.loses_context: ERR_INSTANCE_LOST, ERR_WORKER_CRASHED, ERR_KILLED,
+# ERR_OUT_OF_MEMORY) marks the context of the instance or groups object it
+# came from. Any later call into an instance or groups object of that
+# context raises UDF_HARNESS_LOST_CONTEXT_REUSED: nothing is retried after a
+# loss. Closing them stays allowed, and is what the host does next.
+#
+# Bisection (design section 4.5, the ERR_RAISED row): call_batch bisects a
+# batch that is not VOLATILE and raised with row -1, on the same instance.
 
 from ._cabi import Word
 from ._host import (
@@ -45,6 +55,7 @@ from ._host import (
 )
 from ._table import (
     cancel_flag_of,
+    cancel_value,
     init_runtime,
     memory_report_present,
     new_call,
@@ -83,235 +94,39 @@ from ._table import (
 )
 from .contract import (
     ABI_MAJOR,
+    ERR_RAISED,
     FEATURE_MEMORY_REPORT,
-    FORM_BUNDLE,
-    IMMUTABLE,
-    NULL_MANUAL,
     NULL_PROPAGATE,
     OK,
-    THREAD_SAFE,
-    run_error,
+    VOLATILE,
+    loses_context,
     status_name,
 )
 from .values import Batch, Column, ColumnType, TYPE_INT32
 
-comptime KIND_UDF = 1
-comptime KIND_CONTEXT = 2
-comptime KIND_INSTANCE = 3
-comptime KIND_FRAME = 4
-comptime KIND_GROUPS = 5
-comptime _MAX_FRAME_OUTPUTS = 1_000
-"""run_frame's bound: a frame that has not ended after this many outputs is
-a runtime fault (no case's frame comes near it)."""
-
-
-@fieldwise_init
-struct Capabilities(Copyable, Movable, Writable):
-    """What describe returned (design section 4.2), plus whether the optional
-    memory_report entry is present."""
-
-    var runtime_id: String
-    var runtime_abi: String
-    var max_descriptor_version: UInt32
-    var shapes: UInt32
-    var threading: UInt32
-    var thread_affine: UInt32
-    var transports: UInt32
-    var hosting: UInt32
-    var devices: UInt32
-    var features: UInt32
-    var udf_class: UInt32
-    var global_lock: UInt32
-    var has_memory_report: Bool
-
-    def write_to(self, mut writer: Some[Writer]):
-        writer.write(
-            self.runtime_id, " abi=", self.runtime_abi, " class=", self.udf_class, " shapes=", self.shapes,
-            " threading=", self.threading, " transports=", self.transports, " hosting=", self.hosting,
-            " features=", self.features, " global_lock=", self.global_lock,
-        )
-
-
-@fieldwise_init
-struct CodeObject(Copyable, Movable):
-    """One code object of a UdfRef: its role (a runtime-defined label) and
-    the sha256 of its bytes, which the host stores under the code root
-    named by the hex digest."""
-
-    var role: String
-    var sha256: List[UInt8]
-
-
-@fieldwise_init
-struct CodeSet(Copyable, Movable):
-    """The code root and code objects a suite gives every case's spec. An
-    empty set leaves each spec as its case wrote it."""
-
-    var root: String
-    var objects: List[CodeObject]
-
-    @staticmethod
-    def none() -> CodeSet:
-        return CodeSet("", List[CodeObject]())
-
-
-struct UdfSpec(Copyable, Movable):
-    """A UdfRef as the host decoded it: what komira_udf_spec carries. `args`
-    is the argument struct's fields, named by `arg_names` (`c<i>` past its
-    end; for ROW, the read set); `result` the result type, one field for a
-    column, a struct's fields when `result_is_table`; `code` the code
-    objects under `code_root`."""
-
-    var shape: UInt32
-    var form: Int32
-    var entry: String
-    var descriptor_version: UInt32
-    var descriptor: List[UInt8]
-    var args: List[ColumnType]
-    var arg_names: List[String]
-    var result: List[ColumnType]
-    var result_is_table: Bool
-    var state: Optional[ColumnType]
-    var null_mode: Int32
-    var stability: Int32
-    var code_root: String
-    var code: List[CodeObject]
-
-    def __init__(out self, shape: UInt32, entry: String, var args: List[ColumnType], var result: List[ColumnType]):
-        self.shape = shape
-        self.form = FORM_BUNDLE
-        self.entry = entry
-        self.descriptor_version = 0
-        self.descriptor = List[UInt8]()
-        self.args = args^
-        self.arg_names = List[String]()
-        self.result = result^
-        self.result_is_table = False
-        self.state = None
-        self.null_mode = NULL_MANUAL
-        self.stability = IMMUTABLE
-        self.code_root = ""
-        self.code = List[CodeObject]()
-
-
-@fieldwise_init
-struct Outcome(Copyable, Movable, Writable):
-    var status: Int32
-    var message: String
-    var trace: String
-    var row: Int64
-    var group: Int64
-    var fault: String
-
-    @staticmethod
-    def of(status: Int32) -> Outcome:
-        return Outcome(status, "", "", -1, -1, "")
-
-    def is_ok(self) -> Bool:
-        return self.status == OK and self.fault == ""
-
-    def run_error(self, at_call: Bool = True) -> String:
-        """The fault's name when the host found one, else the status's
-        (`at_call` False: the status came from validate or load)."""
-        if self.fault != "":
-            return String(self.fault.split(":")[0])
-        return run_error(self.status, at_call)
-
-    def write_to(self, mut writer: Some[Writer]):
-        writer.write(status_name(self.status))
-        if self.message != "":
-            writer.write(" '", self.message, "'")
-        if self.row >= 0:
-            writer.write(" row=", self.row)
-        if self.fault != "":
-            writer.write(" fault=", self.fault)
-
-
-@fieldwise_init
-struct Handle(Copyable, Movable):
-    var _w: Word
-    var kind: Int
-
-
-@fieldwise_init
-struct Opened(Copyable, Movable):
-    var outcome: Outcome
-    var handle: Handle
-
-
-@fieldwise_init
-struct CallResult(Copyable, Movable):
-    var outcome: Outcome
-    var column: Column
-
-
-@fieldwise_init
-struct FrameResult(Copyable, Movable):
-    var outcome: Outcome
-    var outputs: List[Batch]
-    var pulls_before_first_output: Int
-    var pulls: Int
-
-
-@fieldwise_init
-struct CallTimes(Copyable, Movable):
-    """A timed loop on one thread: each call's ns, and the calls that
-    failed, the outputs that were not what the loop expected, and the input
-    arrays the runtime released (of len(samples_ns))."""
-
-    var samples_ns: List[Int64]
-    var failures: Int
-    var mismatches: Int
-    var released: Int
-
-
-@fieldwise_init
-struct ThreadTimes(Copyable, Movable):
-    """A timed loop on several threads at once: the wall time, the process's
-    CPU time (user and system) and the loop threads' own over the same span,
-    the counts of CallTimes over every thread, the process's involuntary
-    context switches, and the time inside the calls alone: summed over every
-    thread, and the largest one thread's sum."""
-
-    var wall_ns: Int64
-    var process_cpu_ns: Int64
-    var threads_cpu_ns: Int64
-    var failures: Int
-    var mismatches: Int
-    var released: Int
-    var involuntary_switches: Int64
-    var calls_ns: Int64
-    var calls_ns_max_thread: Int64
-
-
-struct CallOptions(Copyable, Movable):
-    """`cancel`: the cancel flag is set before the call. `cancel_during_call`:
-    the host's now_ns callback sets the flag (a release store,
-    native/cancel_flag.c) each time the runtime reads the host's clock during
-    the call, so the flag goes up inside the call at the runtime's first
-    clock read, never before the call starts, and no clock or thread decides
-    when. `deadline_passed`: the deadline is one nanosecond after the host
-    clock's zero, long past. `deadline_after_ns` (0: none): the deadline is
-    that far in the future, on a virtual clock the host's now_ns answers
-    during the call (1 ms per read, _host.arm_virtual_clock), so the runtime
-    reaches it after a fixed number of its own clock reads."""
-
-    var cancel: Bool
-    var cancel_during_call: Bool
-    var deadline_passed: Bool
-    var deadline_after_ns: Int64
-
-    def __init__(
-        out self, cancel: Bool, cancel_during_call: Bool, deadline_passed: Bool, deadline_after_ns: Int64 = 0
-    ):
-        self.cancel = cancel
-        self.cancel_during_call = cancel_during_call
-        self.deadline_passed = deadline_passed
-        self.deadline_after_ns = deadline_after_ns
-
-    @staticmethod
-    def plain() -> CallOptions:
-        return CallOptions(False, False, False)
+from .spec import (
+    CallOptions,
+    CallResult,
+    CallTimes,
+    Capabilities,
+    CodeObject,
+    CodeSet,
+    FrameResult,
+    Handle,
+    KIND_CONTEXT,
+    KIND_FRAME,
+    KIND_GROUPS,
+    KIND_INSTANCE,
+    KIND_UDF,
+    Opened,
+    Outcome,
+    ThreadTimes,
+    UdfSpec,
+    _MAX_FRAME_OUTPUTS,
+    _rows,
+    descriptor_bytes,
+    descriptor_for,
+)
 
 
 def _need(h: Handle, kind: Int) raises:
@@ -344,6 +159,15 @@ struct UdfRuntime(Movable):
     var _host: Word
     var _calls: Int64
     var _shut: Bool
+    var _owner: List[Int]
+    """Instances and groups objects by address, each beside its context's
+    address in `_owner_ctx`."""
+    var _owner_ctx: List[Int]
+    var _lost: List[Int]
+    """Contexts a status lost, by address, until they are closed."""
+    var _lost_calls_allowed: Bool
+    """Test-only (allow_calls_on_lost_contexts): a runtime's own test that
+    checks what a lost context answers may call it."""
 
     def __init__(out self, path: String, var arena: _Arena, lib: Word, table: Word, rt: Word, host: Word):
         self.path = path
@@ -354,6 +178,10 @@ struct UdfRuntime(Movable):
         self._host = host
         self._calls = 0
         self._shut = False
+        self._owner = List[Int]()
+        self._owner_ctx = List[Int]()
+        self._lost = List[Int]()
+        self._lost_calls_allowed = False
 
     @staticmethod
     def open(path: String, abi_major: UInt32 = ABI_MAJOR) raises -> UdfRuntime:
@@ -361,9 +189,9 @@ struct UdfRuntime(Movable):
         unless a test asks for another), and check the table covers every
         required entry. Raises UDF_RUNTIME_OPEN_FAILED,
         UDF_RUNTIME_MISSING_SYMBOL, UDF_RUNTIME_INIT or UDF_RUNTIME_ABI; and
-        UDF_RUNTIME_FAULT, after shutting it down, for a runtime that reports
-        threading THREAD_SAFE with global_lock 1 (design section 4.2: a
-        runtime with a global lock may not declare that mode)."""
+        UDF_RUNTIME_FAULT when describe fails, after shutting it down. How a
+        runtime executes is not a capability (design section 4.2), so
+        nothing about it is refused here."""
         var arena = _Arena()
         var lib = open_library(path)
         var host = make_host(arena, abi_major, new_host_data(arena))
@@ -382,13 +210,7 @@ struct UdfRuntime(Movable):
                 + " and " + String(required_size()) + " bytes"
             )
         var rt = UdfRuntime(path, arena^, lib, t, slot_value(slot), host)
-        var caps = rt.describe()
-        if caps.threading == THREAD_SAFE and caps.global_lock != 0:
-            rt.shutdown()
-            raise Error(
-                "UDF_RUNTIME_FAULT: " + path + ": runtime " + caps.runtime_id + " reports threading THREAD_SAFE"
-                + " with global_lock " + String(caps.global_lock) + "; THREAD_SAFE requires no global lock"
-            )
+        _ = rt.describe()
         return rt^
 
     def init_refusal(mut self, abi_major: UInt32) -> Outcome:
@@ -416,8 +238,7 @@ struct UdfRuntime(Movable):
             raise Error("UDF_RUNTIME_FAULT: describe returned " + status_name(rc))
         var t = read_caps(c)
         return Capabilities(
-            t.runtime_id, t.runtime_abi, t.words[0], t.words[1], t.words[2], t.words[3],
-            t.words[4], t.words[5], t.words[6], t.words[7], t.words[8], t.words[9],
+            t.runtime_id, t.runtime_abi, t.words[0], t.words[1], t.words[2], t.words[3], t.words[4],
             memory_report_present(self._table),
         )
 
@@ -439,7 +260,7 @@ struct UdfRuntime(Movable):
             roles.append(spec.code[i].role)
             digests.append(spec.code[i].sha256.copy())
         return new_spec(
-            self._arena, spec.shape, spec.form, spec.entry, spec.descriptor_version, spec.descriptor,
+            self._arena, spec.shape, spec.form, spec.entry, spec.descriptor_version, descriptor_bytes(spec),
             args, result, state, spec.null_mode, spec.stability, spec.code_root, roles, digests,
         )
 
@@ -479,6 +300,71 @@ struct UdfRuntime(Movable):
     def close_context(mut self, ctx: Handle) raises:
         _need(ctx, KIND_CONTEXT)
         t_close_context(self._table, ctx._w)
+        var a = ctx._w.addr()
+        var kept = List[Int]()
+        for i in range(len(self._lost)):
+            if self._lost[i] != a:
+                kept.append(self._lost[i])
+        self._lost = kept^
+
+    def _own(mut self, obj: Word, ctx: Int):
+        self._owner.append(obj.addr())
+        self._owner_ctx.append(ctx)
+
+    def _disown(mut self, obj: Word):
+        var a = obj.addr()
+        for i in range(len(self._owner)):
+            if self._owner[i] == a:
+                _ = self._owner.pop(i)
+                _ = self._owner_ctx.pop(i)
+                return
+
+    def _ctx_of(self, obj: Word) -> Int:
+        """The context address of an instance or groups object, or 0."""
+        var a = obj.addr()
+        for i in range(len(self._owner)):
+            if self._owner[i] == a:
+                return self._owner_ctx[i]
+        return 0
+
+    def context_lost(self, ctx: Handle) -> Bool:
+        """Whether a status lost `ctx` (design section 4.5)."""
+        var a = ctx._w.addr()
+        for i in range(len(self._lost)):
+            if self._lost[i] == a:
+                return True
+        return False
+
+    def lost_context_of(self, obj: Handle) -> Bool:
+        """Whether the context of instance or groups object `obj` is lost."""
+        var c = self._ctx_of(obj._w)
+        for i in range(len(self._lost)):
+            if self._lost[i] == c:
+                return True
+        return False
+
+    def allow_calls_on_lost_contexts(mut self):
+        """Test-only: stop refusing calls into a lost context, so a
+        runtime's own test can check that such a call returns
+        ERR_INSTANCE_LOST (design section 4.5) without running user code.
+        The host never does this."""
+        self._lost_calls_allowed = True
+
+    def _live(self, obj: Handle, entry: String) raises:
+        """Refuse a call into a lost context: nothing is retried after a
+        loss (design section 4.5)."""
+        if self.lost_context_of(obj) and not self._lost_calls_allowed:
+            raise Error(
+                "UDF_HARNESS_LOST_CONTEXT_REUSED: " + entry + " on an object of a context a status lost;"
+                + " the host only closes it now"
+            )
+
+    def _note(mut self, obj: Handle, got: Outcome):
+        """Mark the context of `obj` lost when `got` loses it."""
+        if loses_context(got.status):
+            var c = self._ctx_of(obj._w)
+            if c != 0 and not self.lost_context_of(obj):
+                self._lost.append(c)
 
     def open_instance(mut self, ctx: Handle, udf: Handle) raises -> Opened:
         _need(ctx, KIND_CONTEXT)
@@ -486,11 +372,15 @@ struct UdfRuntime(Movable):
         var err = new_error(self._arena)
         var slot = self._arena.word(8)
         var rc = t_open_instance(self._table, ctx._w, udf._w, slot, err)
-        return self._opened(rc, err, slot, KIND_INSTANCE)
+        var o = self._opened(rc, err, slot, KIND_INSTANCE)
+        if rc == OK:
+            self._own(o.handle._w, ctx._w.addr())
+        return o^
 
     def close_instance(mut self, inst: Handle) raises:
         _need(inst, KIND_INSTANCE)
         t_close_instance(self._table, inst._w)
+        self._disown(inst._w)
 
     def memory_report(mut self, ctx: Handle) raises -> Int64:
         """The entry's answer, or -2 when the runtime has no such entry."""
@@ -517,6 +407,11 @@ struct UdfRuntime(Movable):
         if c.virtual:
             disarm_virtual_clock(host_data_of(self._host))
 
+    def calls(self) -> Int64:
+        """The calls started so far (call_batch, frames, agg_update and
+        agg_merge, each one): the crossings a case can bound."""
+        return self._calls
+
     def call_batch(mut self, inst: Handle, spec: UdfSpec, args: Batch, opts: CallOptions) raises -> CallResult:
         """One call_batch. Under PROPAGATE the host drops every row with a null
         argument before the call and scatters nulls back after it (design
@@ -524,8 +419,9 @@ struct UdfRuntime(Movable):
         runtime saw, is mapped back to the caller's row. A row outside that
         batch is a fault (_call_batch) and is not mapped."""
         _need(inst, KIND_INSTANCE)
+        self._live(inst, "call_batch")
         if spec.null_mode != NULL_PROPAGATE:
-            return self._call_batch(inst, spec, args, opts)
+            return self._call_bisected(inst, spec, args, opts)
         var keep = List[Int]()
         for r in range(args.length):
             var all_valid = True
@@ -541,7 +437,7 @@ struct UdfRuntime(Movable):
                 col.bits.append(args.columns[c].bits[keep[k]])
                 col.valid.append(True)
             compact.columns.append(col^)
-        var res = self._call_batch(inst, spec, compact, opts)
+        var res = self._call_bisected(inst, spec, compact, opts)
         if not res.outcome.is_ok():
             if res.outcome.row >= 0 and Int(res.outcome.row) < len(keep):
                 res.outcome.row = Int64(keep[Int(res.outcome.row)])
@@ -557,15 +453,66 @@ struct UdfRuntime(Movable):
                 out.append_null()
         return CallResult(res.outcome.copy(), out^)
 
+    def _call_bisected(mut self, inst: Handle, spec: UdfSpec, args: Batch, opts: CallOptions) -> CallResult:
+        """_call_batch, then the bisection of design section 4.5: a batch
+        that is not VOLATILE and raised with row -1 is split in two on the
+        same instance, first half first, each half in turn, until a half
+        reports a row (mapped to the batch's row) or a one-row half raises
+        (that row). Any status other than OK or ERR_RAISED ends it with that
+        status, carrying the original message; when no half raises, the
+        original outcome stands."""
+        var res = self._call_batch(inst, spec, args, opts)
+        var o = res.outcome.copy()
+        if o.status != ERR_RAISED or o.fault != "" or o.row != -1 or spec.stability == VOLATILE or args.length < 2:
+            return res^
+        var found = self._bisect(inst, spec, args, 0, args.length, opts, o)
+        if found:
+            return CallResult(found.value().copy(), res.column.copy())
+        return res^
+
+    def _bisect(
+        mut self, inst: Handle, spec: UdfSpec, args: Batch, lo: Int, hi: Int, opts: CallOptions, first: Outcome
+    ) -> Optional[Outcome]:
+        """The outcome that ends bisection of rows [lo, hi), or None when no
+        half of it raises."""
+        var mid = (lo + hi) // 2
+        var bounds: List[Int] = [lo, mid, mid, hi]
+        for h in range(2):
+            var a = bounds[2 * h]
+            var b = bounds[2 * h + 1]
+            if b <= a:
+                continue
+            if self.lost_context_of(inst):
+                return None
+            var half = self._call_batch(inst, spec, _rows(args, a, b), opts)
+            var o = half.outcome.copy()
+            if o.is_ok():
+                continue
+            if o.status != ERR_RAISED or o.fault != "":
+                o.message = first.message
+                return o^
+            if o.row >= 0:
+                o.row += Int64(a)
+                return o^
+            if b - a == 1:
+                o.row = Int64(a)
+                return o^
+            var deeper = self._bisect(inst, spec, args, a, b, opts, first)
+            if deeper:
+                return deeper^
+        return None
+
     def _call_batch(mut self, inst: Handle, spec: UdfSpec, args: Batch, opts: CallOptions) -> CallResult:
         var hd = host_data_of(self._host)
-        var d_args = device_struct(self._arena, args, hd)
+        var d_args = device_struct(self._arena, args, hd, opts.plant_extra_child, opts.plant_struct_offset)
         var d_out = self._arena.word(128)
         var err = new_error(self._arena)
         var c = self._begin(opts)
         var rc = t_call_batch(self._table, inst._w, c.call, d_args, d_out, err)
         self._end(c)
         var res = self._finish_column(rc, err, d_out, spec.result[0], args.length)
+        self._stamp(res.outcome, spec, c)
+        self._note(inst, res.outcome)
         var row = res.outcome.row
         if row < -1 or row >= Int64(args.length):
             # The error's row is "row in the batch when known; -1 otherwise"
@@ -583,6 +530,11 @@ struct UdfRuntime(Movable):
             if res.outcome.fault == "":
                 res.outcome.fault = "UDF_RUNTIME_FAULT: args not moved by call_batch"
         return res^
+
+    def _stamp(self, mut o: Outcome, spec: UdfSpec, c: _Call):
+        """The call's shape and cancel state, for the error table."""
+        o.shape = spec.shape
+        o.cancel_was_set = cancel_value(c.call)
 
     def _finish_column(mut self, rc: Int32, err: Word, d_out: Word, want: ColumnType, rows: Int) -> CallResult:
         """Import a column a runtime returned, with the post-conditions: the
@@ -612,6 +564,7 @@ struct UdfRuntime(Movable):
         frame_close. Records how many input batches the runtime had pulled
         when it produced its first output (-1 when it produced none)."""
         _need(inst, KIND_INSTANCE)
+        self._live(inst, "frame_open")
         var hd = host_data_of(self._host)
         var s = device_stream(self._arena, inputs, hd)
         var rec = stream_record(s)
@@ -671,14 +624,21 @@ struct UdfRuntime(Movable):
             if out.fault == "":
                 out.fault = "UDF_RUNTIME_FAULT: the input stream was not moved by frame_open"
         self._end(c)
+        self._stamp(out, spec, c)
+        self._note(inst, out)
         return FrameResult(out^, outputs^, first, pulls_of(rec))
 
     def agg_open(mut self, inst: Handle) raises -> Opened:
         _need(inst, KIND_INSTANCE)
+        self._live(inst, "agg_open")
         var err = new_error(self._arena)
         var slot = self._arena.word(8)
         var rc = t_agg_open(self._table, inst._w, slot, err)
-        return self._opened(rc, err, slot, KIND_GROUPS)
+        var o = self._opened(rc, err, slot, KIND_GROUPS)
+        self._note(inst, o.outcome)
+        if rc == OK:
+            self._own(o.handle._w, self._ctx_of(inst._w))
+        return o^
 
     def _gids(mut self, gids: List[Int32]) -> Word:
         var col = Column(TYPE_INT32)
@@ -701,18 +661,24 @@ struct UdfRuntime(Movable):
 
     def agg_update(mut self, g: Handle, args: Batch, gids: List[Int32], n_groups: UInt32, opts: CallOptions) raises -> Outcome:
         _need(g, KIND_GROUPS)
-        var d_args = device_struct(self._arena, args, host_data_of(self._host))
+        self._live(g, "agg_update")
+        var d_args = device_struct(
+            self._arena, args, host_data_of(self._host), opts.plant_extra_child, opts.plant_struct_offset
+        )
         var d_gids = self._gids(gids)
         var err = new_error(self._arena)
         var c = self._begin(opts)
         var rc = t_agg_update(self._table, g._w, c.call, d_args, d_gids, n_groups, err)
         self._end(c)
         var out = self._outcome(rc, err)
+        out.cancel_was_set = cancel_value(c.call)
         self._moved_check(out, d_args, d_gids, "agg_update")
+        self._note(g, out)
         return out^
 
     def agg_merge(mut self, g: Handle, states: Column, gids: List[Int32], n_groups: UInt32, opts: CallOptions) raises -> Outcome:
         _need(g, KIND_GROUPS)
+        self._live(g, "agg_merge")
         var d_states = device_column(self._arena, states, host_data_of(self._host))
         var d_gids = self._gids(gids)
         var err = new_error(self._arena)
@@ -720,27 +686,36 @@ struct UdfRuntime(Movable):
         var rc = t_agg_merge(self._table, g._w, c.call, d_states, d_gids, n_groups, err)
         self._end(c)
         var out = self._outcome(rc, err)
+        out.cancel_was_set = cancel_value(c.call)
         self._moved_check(out, d_states, d_gids, "agg_merge")
+        self._note(g, out)
         return out^
 
     def agg_state(mut self, g: Handle, emit_first_n: UInt32, state_type: ColumnType) raises -> CallResult:
         """A PARTIAL step's states: `emit_first_n` rows of state_type."""
         _need(g, KIND_GROUPS)
+        self._live(g, "agg_state")
         var d_out = self._arena.word(128)
         var err = new_error(self._arena)
         var rc = t_agg_state(self._table, g._w, emit_first_n, d_out, err)
-        return self._finish_column(rc, err, d_out, state_type, Int(emit_first_n))
+        var res = self._finish_column(rc, err, d_out, state_type, Int(emit_first_n))
+        self._note(g, res.outcome)
+        return res^
 
     def agg_finish(mut self, g: Handle, emit_first_n: UInt32, result: ColumnType) raises -> CallResult:
         _need(g, KIND_GROUPS)
+        self._live(g, "agg_finish")
         var d_out = self._arena.word(128)
         var err = new_error(self._arena)
         var rc = t_agg_finish(self._table, g._w, emit_first_n, d_out, err)
-        return self._finish_column(rc, err, d_out, result, Int(emit_first_n))
+        var res = self._finish_column(rc, err, d_out, result, Int(emit_first_n))
+        self._note(g, res.outcome)
+        return res^
 
     def agg_close(mut self, g: Handle) raises:
         _need(g, KIND_GROUPS)
         t_agg_close(self._table, g._w)
+        self._disown(g._w)
 
     def time_call_batch(mut self, inst: Handle, rows: Int, is_float: Bool, a: Float64, b: Float64, iters: Int) raises -> CallTimes:
         """`iters` calls of call_batch on `inst`, each over a fresh struct

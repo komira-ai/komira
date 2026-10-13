@@ -11,7 +11,9 @@
 # validate's status) and each release-ledger rule (an array released twice,
 # a borrowed schema released, an input stream not released, reserved bytes
 # still held) goes off; and a case of a shape the runtime does not report is
-# skipped, not run. The fixtures behind the ledger cases (release_args_twice,
+# skipped, not run, and so is a case of another class, one needing a feature
+# bit the runtime does not report, and one about a shape the runtime lacks on
+# a runtime that has it. The fixtures behind the ledger cases (release_args_twice,
 # release_schema, stream_kept, leak_reservation) and raise_no_message are
 # echo entries no case under cases/ uses.
 #
@@ -25,7 +27,7 @@ from std.testing import assert_equal, assert_false, assert_true
 from komira_udf_spike_abi.conform import load_cases, run_suite
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases_runner"
-comptime CASE_COUNT = 36
+comptime CASE_COUNT = 50
 """The JSON files under cases_runner/: an empty or partial staging cannot
 pass."""
 
@@ -52,6 +54,6 @@ def main() raises:
         # the case asks for one: otherwise the case failed for a second reason.
         if "; and " not in c.runner_fails_with:
             assert_false("; and " in r.reason, c.name + " also failed its ledger: " + r.reason)
-    assert_equal(report.count("FAIL"), CASE_COUNT - 1)
-    assert_equal(report.count("SKIP"), 1)
+    assert_equal(report.count("FAIL"), CASE_COUNT - 4)
+    assert_equal(report.count("SKIP"), 4)
     print("test_conform_runner: ok")

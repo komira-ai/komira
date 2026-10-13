@@ -1,10 +1,11 @@
 {
- "name": "validate_missing_entry",
- "defect": "validate accepts an entry that names no function",
+ "name": "validate_descriptor_version_0",
+ "defect": "validate accepts descriptor_version 0, which carries no descriptor, so it cannot compare the signature (design 3.1)",
  "run": "validate",
- "entry": "no_such_function",
+ "entry": "double",
  "shape": "SCALAR",
  "args": [{"type": "int64", "nullable": true}],
  "result": [{"type": "int64", "nullable": true}],
+ "descriptor_version": 0,
  "expect": {"status": "ERR_DESCRIPTOR", "run_error": "OPTIMIZED_UDF_DESCRIPTOR_INVALID"}
 }

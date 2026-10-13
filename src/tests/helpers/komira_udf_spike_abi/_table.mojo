@@ -212,8 +212,8 @@ struct CapsText(Copyable, Movable):
     var runtime_id: String
     var runtime_abi: String
     var words: List[UInt32]
-    """max_descriptor_version, shapes, threading, thread_affine, transports,
-    hosting, devices, features, udf_class, global_lock, in that order."""
+    """max_descriptor_version, shapes, devices, features, udf_class, in that
+    order."""
 
 
 def new_caps(mut arena: _Arena, fill: UInt8 = 0) -> Word:
@@ -232,8 +232,7 @@ def new_caps(mut arena: _Arena, fill: UInt8 = 0) -> Word:
 def read_caps(c: Word) -> CapsText:
     var p = c.p.bitcast[CUdfCapabilities]()
     var w: List[UInt32] = [
-        p[].max_descriptor_version, p[].shapes, p[].threading, p[].thread_affine,
-        p[].transports, p[].hosting, p[].devices, p[].features, p[].udf_class, p[].global_lock,
+        p[].max_descriptor_version, p[].shapes, p[].devices, p[].features, p[].udf_class,
     ]
     return CapsText(read_cstr(p[].runtime_id), read_cstr(p[].runtime_abi), w^)
 
@@ -350,3 +349,11 @@ def cancel_flag_of(call: Word) -> Word:
     """The cancel flag of `call` (an arena block new_call allocated)."""
     # SAFETY: `call` is a CUdfCall block new_call filled.
     return Word(call.p.bitcast[CUdfCall]()[].cancel)
+
+
+def cancel_value(call: Word) -> Bool:
+    """Whether the cancel flag of `call` is set now (the host had set it by
+    the time the call returned)."""
+    # SAFETY: `call` is a CUdfCall block new_call filled; its flag an arena
+    # block of 8 bytes, written by the host's release store only.
+    return Word(call.p.bitcast[CUdfCall]()[].cancel).p.bitcast[Int32]()[] != 0
