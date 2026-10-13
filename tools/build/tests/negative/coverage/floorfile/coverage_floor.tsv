@@ -1,0 +1,3 @@
+# The floor of tests//negative/coverage/floorfile:covfile (test 46), which mojo_library finds itself:
+# its package at 100% line coverage, no branch floor.
+tools/build/tests/negative/coverage/floorfile	10000	-
