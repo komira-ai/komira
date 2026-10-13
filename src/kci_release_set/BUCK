@@ -32,14 +32,17 @@ mojo_library(
     test_srcs = [
         # every metadata.json refusal by its message; the real library and metapackage shapes
         "tests/test_conda_metadata.mojo",
-        # every verify_member refusal, one changed thing per case
+        # every verify_member refusal, one changed thing per case; each kind's
+        # release row field by field, member_platform's refusal, the set hash
+        # of every set of up to two kinds, file_sha256_hex
         "tests/test_verify_member.mojo",
         # an OCI member: hello_image[release] verifies and its digest is in the
         # set hash; hello_root_image[release] (a tree image) verifies with its
         # name, platform and [digest]; a flipped layer byte, a digest the
         # layout does not have and every OCI refusal by its message
         "tests/test_oci_member.mojo",
-        # release.json: byte-exact render, parse(render(x)) == x, every refusal
+        # release.json: byte-exact render, parse(render(x)) == x, every refusal,
+        # read_release_manifest of a good, a refused and an absent file
         "tests/test_release_manifest.mojo",
         # the set hash: a golden vector, order-free, every field counts
         "tests/test_set_hash.mojo",

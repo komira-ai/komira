@@ -18,7 +18,19 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 from komira_crypto import hex_lower_array_32, sha256_string
 from komira_json import JsonValue, parse_json_value
 
-from kci_release_set import member_platform, verify_member
+from kci_release_set import (
+    ReleaseEntry,
+    ReleaseIdentity,
+    ReleaseMember,
+    SetHashLine,
+    file_sha256_hex,
+    member_platform,
+    release_entry_of,
+    release_manifest_of,
+    release_set_hash,
+    set_hash_of_lines,
+    verify_member,
+)
 
 comptime _NAME = "komira_name_registry"
 comptime _FILE = "komira_name_registry-0.1.7-0.conda"
@@ -413,6 +425,201 @@ def test_a_members_platform_is_its_manifests() raises:
     # a CONDA member is its manifest's platform too
     var c = verify_member(String(_NAME), _good(String("conda_platform")))
     assert_equal(member_platform(c, String("linux-x86_64")), String("linux-x86_64"))
+
+
+def test_a_member_of_another_platform_is_refused() raises:
+    # member_platform: a linux-x86_64 member of a linux-arm64 release is
+    # neither the release's platform nor noarch; the refusal names the
+    # artifact, and release_entry_of (which asks member_platform) refuses it
+    # with the same message.
+    var c = verify_member(String(_NAME), _good(String("platform_other")))
+    var want = (
+        String("artifact '") + String(_NAME)
+        + String("': platform 'linux-x86_64' is neither the release's 'linux-arm64' nor 'noarch'")
+    )
+    var why = String("<accepted>")
+    try:
+        _ = member_platform(c, String("linux-arm64"))
+    except e:
+        why = String(e)
+    assert_equal(why, want)
+    why = String("<accepted>")
+    try:
+        _ = release_entry_of(c, String("linux-arm64"))
+    except e:
+        why = String(e)
+    assert_equal(why, want)
+
+
+def test_file_sha256_hex() raises:
+    var d = _good(String("file_sha"))
+    assert_equal(file_sha256_hex(d + String("/") + String(_FILE)), _hash(String(_CONTENT)))
+    # the sha256 of no bytes (FIPS 180-4's empty-message digest)
+    _write(d + String("/empty"), String(""))
+    assert_equal(
+        file_sha256_hex(d + String("/empty")),
+        String("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+    )
+    var raised = False
+    try:
+        _ = file_sha256_hex(d + String("/absent"))
+    except:
+        raised = True
+    assert_true(raised)
+
+
+# --- release rows of verified members: every field, every fixture ----------
+
+comptime _REV = "0123456789abcdef0123456789abcdef01234567"
+comptime _PLAT = "linux-x86_64"
+comptime _WHEEL_NAME = "komira_wheel"
+comptime _META_SHA = "2419f1b69621c0c607c4df2d6d0591e80e58d166841de2f32609868c2969c24f"
+
+
+def _entry_diff(got: ReleaseEntry, want: ReleaseEntry) -> String:
+    """The first field of a release row that differs (EVERY field read
+    here, not through ReleaseEntry.__eq__), or ""."""
+    if got.artifact_type != want.artifact_type:
+        return String("artifact_type ") + got.artifact_type + String(" != ") + want.artifact_type
+    if got.build != want.build:
+        return String("build ") + got.build + String(" != ") + want.build
+    if got.dir != want.dir:
+        return String("dir ") + got.dir + String(" != ") + want.dir
+    if got.kind != want.kind:
+        return String("kind ") + got.kind + String(" != ") + want.kind
+    if got.name != want.name:
+        return String("name ") + got.name + String(" != ") + want.name
+    if got.platform != want.platform:
+        return String("platform ") + got.platform + String(" != ") + want.platform
+    if got.sha256_hex != want.sha256_hex:
+        return String("sha256 ") + got.sha256_hex + String(" != ") + want.sha256_hex
+    if got.subdir != want.subdir:
+        return String("subdir ") + got.subdir + String(" != ") + want.subdir
+    if got.version != want.version:
+        return String("version ") + got.version + String(" != ") + want.version
+    return String("")
+
+
+def _want(
+    artifact_type: String, build: String, name: String, kind: String, platform: String, sha: String, subdir: String
+) -> ReleaseEntry:
+    var e = ReleaseEntry()
+    e.artifact_type = artifact_type.copy()
+    e.build = build.copy()
+    e.dir = name.copy()
+    e.kind = kind.copy()
+    e.name = name.copy()
+    e.platform = platform.copy()
+    e.sha256_hex = sha.copy()
+    e.subdir = subdir.copy()
+    e.version = String("0.1.7")
+    return e^
+
+
+def _wheel(tag: String) raises -> String:
+    """A PYTHON member directory `<root>/komira_wheel` (a noarch wheel)."""
+    var d = _root(tag) + String("/") + String(_WHEEL_NAME)
+    makedirs(d, exist_ok=True)
+    var wheel = String("komira_wheel-0.1.7-py3-none-any.whl")
+    _write(d + String("/") + wheel, String(_CONTENT))
+    _write(d + String("/METADATA"), String("Metadata-Version: 2.1\n"))
+    _write(
+        d + String("/manifest.json"),
+        _manifest(name=String(_WHEEL_NAME), file=wheel, artifact_type=String("PYTHON"), metadata=String("METADATA")),
+    )
+    return d^
+
+
+def _fixtures(tag: String) raises -> List[ReleaseMember]:
+    """Three verified members, one of each kind: a CONDA library, the real
+    CONDA metapackage, a PYTHON wheel."""
+    var out = List[ReleaseMember]()
+    out.append(verify_member(String(_NAME), _good(tag)))
+    out.append(verify_member(String("komira"), String(_REAL)))
+    out.append(verify_member(String(_WHEEL_NAME), _wheel(tag)))
+    return out^
+
+
+def _wants() -> List[ReleaseEntry]:
+    """The release row of each fixture, from the spec (release_manifest.mojo:
+    build, kind and subdir set only on CONDA; a member's platform is its
+    manifest's)."""
+    var out = List[ReleaseEntry]()
+    out.append(
+        _want(String("CONDA"), String("0"), String(_NAME), String("library"), String(_PLAT),
+              _hash(String(_CONTENT)), String("linux-64"))
+    )
+    out.append(
+        _want(String("CONDA"), String("0"), String("komira"), String("metapackage"), String(_PLAT),
+              String(_META_SHA), String("linux-64"))
+    )
+    out.append(
+        _want(String("PYTHON"), String(""), String(_WHEEL_NAME), String(""), String("noarch"),
+              _hash(String(_CONTENT)), String(""))
+    )
+    return out^
+
+
+def _line_of(e: ReleaseEntry) -> SetHashLine:
+    return SetHashLine(
+        e.name.copy(), e.platform.copy(), e.version.copy(), e.build.copy(), e.subdir.copy(),
+        e.artifact_type.copy(), e.sha256_hex.copy(),
+    )
+
+
+def test_every_fixture_gives_its_release_row() raises:
+    var ms = _fixtures(String("rows"))
+    var ws = _wants()
+    for i in range(len(ms)):
+        var got = release_entry_of(ms[i], String(_PLAT))
+        assert_equal(_entry_diff(got, ws[i]), String(""), String("fixture ") + String(i))
+        assert_equal(member_platform(ms[i], String(_PLAT)), ws[i].platform)
+        assert_equal(ms[i].build(), ws[i].build)
+        assert_equal(ms[i].kind(), ws[i].kind)
+
+
+def test_release_set_hash_over_every_set_of_up_to_two_kinds() raises:
+    # Grid: every set of 0, 1 or 2 of the three kinds, in both orders. The
+    # hash is the set hash of the rows the spec gives (set_hash_of_lines over
+    # the expected rows, not over release_entry_of's), the manifest's rows
+    # come sorted by name, and the order the members arrive in is irrelevant.
+    var ms = _fixtures(String("grid"))
+    var ws = _wants()
+    var identity = ReleaseIdentity(String(_REV), String(_PLAT), String("gh-1"), 1)
+    var why = String("<hashed>")
+    try:
+        _ = release_set_hash(List[ReleaseMember](), identity)
+    except e:
+        why = String(e)
+    assert_equal(why, String("release set hash: the set is EMPTY"))
+    for a in range(len(ms)):
+        for b in range(-1, len(ms)):
+            if b == a:
+                continue
+            var members = List[ReleaseMember]()
+            var lines = List[SetHashLine]()
+            members.append(ms[a].copy())
+            lines.append(_line_of(ws[a]))
+            if b >= 0:
+                members.append(ms[b].copy())
+                lines.append(_line_of(ws[b]))
+            var label = String("set ") + String(a) + String(",") + String(b)
+            var want = set_hash_of_lines(String(_REV), String(_PLAT), lines)
+            assert_equal(release_set_hash(members, identity), want, label)
+            var r = release_manifest_of(members, identity)
+            assert_equal(r.set_hash, want, label)
+            assert_equal(r.revision, String(_REV))
+            assert_equal(r.platform, String(_PLAT))
+            assert_equal(r.produced_by_run_id, String("gh-1"))
+            assert_equal(r.produced_by_attempt, 1)
+            assert_equal(len(r.entries), len(members), label)
+            var first = a
+            if b >= 0 and ws[b].name < ws[a].name:
+                first = b
+            assert_equal(_entry_diff(r.entries[0], ws[first]), String(""), label)
+            if b >= 0:
+                var second = b if first == a else a
+                assert_equal(_entry_diff(r.entries[1], ws[second]), String(""), label)
 
 
 def main() raises:

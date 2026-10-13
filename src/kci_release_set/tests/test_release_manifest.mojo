@@ -10,6 +10,8 @@
 # `<name>\t<platform>\t<version>\t<build>\t<subdir>\t<artifact_type>\t<sha256>\n`).
 # =============================================================================
 
+from std.ffi import external_call
+from std.os import getenv
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from kci_release_set import (
@@ -18,6 +20,7 @@ from kci_release_set import (
     ReleaseManifest,
     entries_set_hash,
     parse_release_manifest,
+    read_release_manifest,
     render_release_manifest,
 )
 
@@ -313,6 +316,80 @@ def test_refuses_a_set_hash_that_is_not_its_members() raises:
                        + String(" is not the hash of its revision, platform and members (")),
         why,
     )
+
+
+def test_refuses_an_empty_string_and_a_value_that_is_not_an_object() raises:
+    # a required string value that is EMPTY, at the top level and in a row
+    _expect(
+        _g().replace(String('"revision":"') + String(_REV) + String('"'), String('"revision":""')),
+        String("'revision' is EMPTY"),
+    )
+    _expect(
+        _g().replace(String('"dir":"komira","kind":"metapackage","name":"komira"'),
+                     String('"dir":"komira","kind":"metapackage","name":""')),
+        String("members[0]: 'name' is EMPTY"),
+    )
+    # a member row that is not an object, first and second
+    _expect(_doc(String("1")), String("members[0]: not an object"))
+    _expect(
+        _doc(_row(String("komira"), String("metapackage"), String(_C)) + String(",[]")),
+        String("members[1]: not an object"),
+    )
+    # produced_by that is not an object: an array, a string
+    _expect(
+        _g().replace(String('"produced_by":{"attempt":1,"run_id":"gh-1"}'), String('"produced_by":[]')),
+        String("'produced_by' is not an object"),
+    )
+    _expect(
+        _g().replace(String('"produced_by":{"attempt":1,"run_id":"gh-1"}'), String('"produced_by":"gh-1"')),
+        String("'produced_by' is not an object"),
+    )
+
+
+def _tmp(name: String) raises -> String:
+    var base = getenv("TEST_TMPDIR")
+    if base.byte_length() == 0:
+        base = getenv("TMPDIR")
+    if base.byte_length() == 0:
+        raise Error("neither TEST_TMPDIR nor TMPDIR is set")
+    return base + String("/rm_") + name + String("_") + String(Int(external_call["getpid", Int32]()))
+
+
+def _write(path: String, text: String) raises:
+    var f = open(path, "w")
+    f.write_bytes(text.as_bytes())
+    f.close()
+
+
+def test_read_release_manifest() raises:
+    # a good file reads to the value its text parses to
+    var good = _tmp(String("good"))
+    _write(good, _g())
+    var r = read_release_manifest(good)
+    assert_true(r.same_as(parse_release_manifest(_g(), String("r.json"))))
+    # same_as compares the rows in order: _manifest() holds the same rows unsorted
+    assert_false(r.same_as(_manifest()))
+    assert_equal(render_release_manifest(r), _g())
+    assert_equal(len(r.entries), 2)
+    assert_equal(r.entries[0].name, String("komira"))
+    assert_equal(r.entries[1].name, String("komira_hash"))
+    # a refusal names the file read
+    var bad = _tmp(String("bad"))
+    _write(bad, String("[]"))
+    var why = String("<read>")
+    try:
+        _ = read_release_manifest(bad)
+    except e:
+        why = String(e)
+    assert_equal(why, String("release manifest '") + bad + String("': not a JSON object"))
+    # a file that cannot be read
+    var absent = _tmp(String("absent"))
+    why = String("<read>")
+    try:
+        _ = read_release_manifest(absent)
+    except e:
+        why = String(e)
+    assert_true(why.startswith(String("release manifest '") + absent + String("' cannot be read: ")), why)
 
 
 def main() raises:
