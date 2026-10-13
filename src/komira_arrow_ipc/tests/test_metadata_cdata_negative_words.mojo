@@ -12,21 +12,23 @@
 # Each case pins the exact number the refusal reports, for -1 and for the
 # most negative i32, in each of the three positions.
 #
-# What the decode_metadata rows can and cannot prove: the old reader,
-# `Int32(Int(u))`, narrows an Int above Int32's range, and what that
-# produces depends on how the expression is compiled. In this build it
-# gives the right answer for -2^31 (and for -2, -256 and -2^30), and wrong
-# only for -1. So the -2^31 rows are not an independent guard: a reader that
-# special-cases FF FF FF FF and keeps `Int32(Int(u))` otherwise passes them.
-# No output-only test can pin compiler-dependent behaviour, and the direct
-# cases below do not either: that special-casing reader passes them too,
-# because in this build `Int32(Int(u))` is wrong only for FF FF FF FF.
 # The `_bytes_to_i32` cases call the reader directly over a sweep of
-# runtime words (top byte 0x80 to 0xFF under several low patterns, plus a
-# pseudo-random walk over all 32 bits) against a reference computed in
-# `Int`. They catch a reader that misreads any other word they reach (for
-# example one that returns -1 for every word near FF FF FF FF), which the
-# decode_metadata rows, testing three words, do not.
+# runtime words (top byte 0x80 to 0xFF under several low patterns, plus
+# fixed words and a pseudo-random walk over all 32 bits) and compare each
+# result with a reference computed in `Int`, so they cover far more words
+# than the decode_metadata rows, which use only -1 and -2^31.
+#
+# What neither group can promise: the old reader, `Int32(Int(u))`, narrows
+# an Int above Int32's range, and what that yields depends on how the
+# expression is compiled. The original old reader, compiled into this
+# package, is caught by both groups: the decode_metadata rows report
+# 4294967295 for -1, and the direct cases fail on their first top-bit-set
+# word (0x80FFFFFF in the sweep, 0x80000000 among the fixed words,
+# 3801556156 in the walk), each read back as its unsigned value. A
+# rewritten reader that keeps the narrowing (for example one that
+# special-cases FF FF FF FF) may compile to something that passes some or
+# all of these words; no output-only test can pin behaviour the compiler
+# does not define, so the defence is the bitcast in the reader itself.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal
