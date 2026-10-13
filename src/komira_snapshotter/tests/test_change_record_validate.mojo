@@ -32,11 +32,28 @@
 #       image survive the copy, so the copy still fails validate() with the
 #       original message. A copy that clamps or remaps the tag, or drops an
 #       image the op does not use, goes red.
+#   (7) Whole-record and whole-batch equality: `_assert_same_record`
+#       compares a copy with its original on every ChangeRecord field (op,
+#       sequence_number, and the length and every RowCell field of key,
+#       new_image and old_image), and `_assert_same_batch` adds the cursor and
+#       the exhausted flag. They run over one fixture per kind of record (valid
+#       INSERT / MODIFY / REMOVE, unknown tags, stray images, keyless records
+#       of every op, empty images, three-cell and mixed-type cells, an
+#       all-empty record), alone and inside batches, so a copy that drops or
+#       rewrites any field for any one kind of record goes red.
 # =============================================================================
 
 from std.testing import assert_true, assert_equal, assert_false
 
-from komira_rowcell import RowCell, make_long_cell, make_string_cell
+from komira_rowcell import (
+    RowCell,
+    make_boolean_cell,
+    make_double_cell,
+    make_long_cell,
+    make_null_cell,
+    make_string_cell,
+)
+from komira_rowcell.row_cell import CELL_T_LONG
 
 from komira_snapshotter.change_stream_trait import (
     CDC_OP_INSERT,
@@ -393,6 +410,188 @@ def test_record_copy_keeps_stray_images() raises:
     assert_equal(_validate_error(keyless), String(_KEY_EMPTY))
 
 
+# =============================================================================
+# (7) every field of every kind of record survives a copy.
+# =============================================================================
+def _assert_same_cells(
+    got: List[RowCell], want: List[RowCell], what: String
+) raises:
+    """Same length and, cell by cell, the same value in every RowCell field
+    (type tag, integral, floating, string and null flag), not only the arm
+    `equals` compares."""
+    assert_equal(len(got), len(want), msg=what + " length")
+    for i in range(len(want)):
+        var at = what + "[" + String(i) + "]"
+        assert_equal(got[i].type_tag, want[i].type_tag, msg=at + " type_tag")
+        assert_equal(got[i].i, want[i].i, msg=at + " i")
+        assert_equal(got[i].f, want[i].f, msg=at + " f")
+        assert_equal(got[i].s, want[i].s, msg=at + " s")
+        assert_equal(got[i].null, want[i].null, msg=at + " null")
+        assert_true(got[i].equals(want[i]), msg=at + " equals")
+
+
+def _assert_same_record(
+    got: ChangeRecord, want: ChangeRecord, what: String
+) raises:
+    """Every field of ChangeRecord: op, key, new_image, old_image and
+    sequence_number."""
+    assert_equal(got.op, want.op, msg=what + " op")
+    _assert_same_cells(got.key, want.key, what + " key")
+    _assert_same_cells(got.new_image, want.new_image, what + " new_image")
+    _assert_same_cells(got.old_image, want.old_image, what + " old_image")
+    assert_equal(
+        got.sequence_number, want.sequence_number, msg=what + " sequence"
+    )
+
+
+def _assert_same_batch(
+    got: ChangeBatch, want: ChangeBatch, what: String
+) raises:
+    """Every field of ChangeBatch: each record, next_cursor and exhausted."""
+    assert_equal(len(got.records), len(want.records), msg=what + " records")
+    for i in range(len(want.records)):
+        _assert_same_record(
+            got.records[i], want.records[i], what + " record " + String(i)
+        )
+    assert_equal(got.next_cursor, want.next_cursor, msg=what + " cursor")
+    assert_equal(got.exhausted, want.exhausted, msg=what + " exhausted")
+
+
+def _cells(seed: Int64, n: Int) -> List[RowCell]:
+    """`n` cells (at most 5) of different types, each value derived from
+    `seed`: long, string, double, boolean, null long. Distinct seeds give
+    every list of a record different values, so a copy that takes one list
+    from another goes red."""
+    var out = List[RowCell]()
+    if n > 0:
+        out.append(make_long_cell(seed))
+    if n > 1:
+        out.append(make_string_cell(String("c") + String(seed)))
+    if n > 2:
+        out.append(make_double_cell(Float64(seed) + 0.5))
+    if n > 3:
+        out.append(make_boolean_cell(seed % 2 == 1))
+    if n > 4:
+        out.append(make_null_cell(CELL_T_LONG))
+    return out^
+
+
+def _fixture(
+    op: Int, nk: Int, nn: Int, no: Int, base: Int64, var seq: String
+) -> ChangeRecord:
+    """A record with `nk` key cells, `nn` new-image cells and `no` old-image
+    cells; the three lists use seeds `base`, `base + 100` and `base + 200`."""
+    return ChangeRecord(
+        op, _cells(base, nk), _cells(base + 100, nn), _cells(base + 200, no),
+        seq^,
+    )
+
+
+def _fixtures(mut labels: List[String]) -> List[ChangeRecord]:
+    """One record per kind the copy could treat differently. Each has its own
+    sequence number, so a copy that takes it from another record goes red."""
+    var r = List[ChangeRecord]()
+    # valid records, one-cell and multi-cell
+    labels.append("valid INSERT")
+    r.append(_fixture(CDC_OP_INSERT, 1, 3, 0, 1, String("s-ins")))
+    labels.append("valid MODIFY")
+    r.append(_fixture(CDC_OP_MODIFY, 2, 5, 4, 2, String("s-mod")))
+    labels.append("valid REMOVE")
+    r.append(_fixture(CDC_OP_REMOVE, 1, 0, 5, 3, String("s-rem")))
+    labels.append("three-cell INSERT")
+    r.append(_fixture(CDC_OP_INSERT, 3, 3, 0, 4, String("s-ins3")))
+    labels.append("three-cell MODIFY")
+    r.append(_fixture(CDC_OP_MODIFY, 3, 3, 3, 5, String("s-mod3")))
+    labels.append("three-cell REMOVE")
+    r.append(_fixture(CDC_OP_REMOVE, 3, 0, 3, 6, String("s-rem3")))
+    # unknown op tags, every list present
+    var tags = List[Int]()
+    tags.append(-1)
+    tags.append(3)
+    tags.append(5)
+    tags.append(1000)
+    for i in range(len(tags)):
+        labels.append(String("unknown tag ") + String(tags[i]))
+        r.append(
+            _fixture(
+                tags[i], 2, 3, 3, Int64(10 + i), String("s-u") + String(tags[i])
+            )
+        )
+    # stray images
+    labels.append("INSERT with stray old_image")
+    r.append(_fixture(CDC_OP_INSERT, 1, 2, 3, 20, String("s-sins")))
+    labels.append("REMOVE with stray new_image")
+    r.append(_fixture(CDC_OP_REMOVE, 1, 3, 2, 21, String("s-srem")))
+    # keyless, every op and an unknown tag
+    labels.append("keyless INSERT")
+    r.append(_fixture(CDC_OP_INSERT, 0, 2, 0, 30, String("s-kins")))
+    labels.append("keyless MODIFY")
+    r.append(_fixture(CDC_OP_MODIFY, 0, 2, 3, 31, String("s-kmod")))
+    labels.append("keyless REMOVE")
+    r.append(_fixture(CDC_OP_REMOVE, 0, 0, 3, 32, String("s-krem")))
+    labels.append("keyless unknown tag 7")
+    r.append(_fixture(7, 0, 3, 2, 33, String("s-kunk")))
+    # empty images, every op and an unknown tag
+    labels.append("INSERT with no images")
+    r.append(_fixture(CDC_OP_INSERT, 2, 0, 0, 40, String("s-eins")))
+    labels.append("MODIFY with no images")
+    r.append(_fixture(CDC_OP_MODIFY, 2, 0, 0, 41, String("s-emod")))
+    labels.append("REMOVE with no images")
+    r.append(_fixture(CDC_OP_REMOVE, 2, 0, 0, 42, String("s-erem")))
+    labels.append("unknown tag 4 with no images")
+    r.append(_fixture(4, 2, 0, 0, 43, String("s-eunk")))
+    # nothing at all: no key, no images, empty sequence number
+    labels.append("all empty")
+    r.append(_fixture(CDC_OP_INSERT, 0, 0, 0, 50, String("")))
+    return r^
+
+
+def test_record_copy_equals_original_for_every_kind() raises:
+    var labels = List[String]()
+    var recs = _fixtures(labels)
+    assert_equal(len(recs), 21)
+    for i in range(len(recs)):
+        var c = recs[i].copy()
+        _assert_same_record(c, recs[i], labels[i])
+        # The copy owns its lists: growing the copy leaves the original as
+        # built, and the original still equals a fresh build of the fixture.
+        c.key.append(make_long_cell(-9))
+        c.new_image.append(make_long_cell(-9))
+        c.old_image.append(make_long_cell(-9))
+        c.sequence_number = String("changed")
+    var labels2 = List[String]()
+    var again = _fixtures(labels2)
+    for i in range(len(recs)):
+        _assert_same_record(recs[i], again[i], labels[i] + " (original)")
+
+
+def test_batch_copy_equals_original_for_every_kind() raises:
+    """A batch holding every fixture, under each flag/cursor combination, and
+    the two empty batches the constructors make."""
+    var cursors = List[String]()
+    cursors.append(String("iter-live"))
+    cursors.append(String(""))
+    for ci in range(len(cursors)):
+        for flag in range(2):
+            var labels = List[String]()
+            var b = ChangeBatch(
+                _fixtures(labels), String(cursors[ci]), flag == 1
+            )
+            var what = String("batch cursor '") + cursors[ci] + "' exhausted "
+            what += String(flag)
+            _assert_same_batch(b.copy(), b, what)
+    _assert_same_batch(
+        ChangeBatch.empty_live(String("tok")).copy(),
+        ChangeBatch.empty_live(String("tok")),
+        String("empty_live"),
+    )
+    _assert_same_batch(
+        ChangeBatch.end_of_segment().copy(),
+        ChangeBatch.end_of_segment(),
+        String("end_of_segment"),
+    )
+
+
 def main() raises:
     test_rejects_insert_without_new_image()
     test_rejects_insert_with_old_image_message()
@@ -416,4 +615,6 @@ def main() raises:
     test_batch_copy_owns_its_lists()
     test_record_copy_keeps_unknown_op_tag()
     test_record_copy_keeps_stray_images()
+    test_record_copy_equals_original_for_every_kind()
+    test_batch_copy_equals_original_for_every_kind()
     print("test_change_record_validate: ALL PASS")
