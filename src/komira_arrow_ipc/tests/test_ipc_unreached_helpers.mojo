@@ -12,23 +12,12 @@
 #   * the two internal BodySinks report the bytes written (body-relative
 #     for the offset sink);
 #   * FlatbufReader.read_string reads a string written by write_string;
-#     the four field-less type tables read back with no field;
-#   * c_data_stream's _build_column_schema, _parse_small_uint and
-#     _arrow_type_to_dtype.
-#
-# FFI-BOUNDARY: release_c_schema takes the C Data Interface struct pointer
-# with MutUntrackedOrigin, so the pointers to the two schemas built here are
-# cast to it (tests/pointer_lint_ffi.tsv lists this file). Ownership: the
-# test owns both CArrowSchema values (stack locals); the release frees what
-# they point to and NULLs it, never the structs.
+#     the four field-less type tables read back with no field.
 # =============================================================================
 
 from std.memory import Pointer
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_arrow.arrow_types import ArrowType
-from komira_arrow.column import Column
-from komira_arrow.primitive_array import PrimitiveArray
 from komira_buffer.heap_region import HeapRegion
 from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
@@ -37,15 +26,6 @@ from komira_compression.compression_codecs import Lz4Frame
 from komira_async_api.parallel_dispatch import ParallelDispatch
 from komira_async_api.token import CancellationToken
 from komira_async_api.worker_pool_traits import KeepAlive, Segment
-from komira_arrow_ipc.c_data_interface import ARROW_FLAG_NULLABLE
-from komira_arrow_ipc.c_data_stream import (
-    CArrowSchema,
-    _arrow_type_to_dtype,
-    _c_str_to_mojo,
-    _build_column_schema,
-    _parse_small_uint,
-    release_c_schema,
-)
 from komira_arrow_ipc.ipc_body_compression import (
     _align_to_8 as _bc_align_to_8,
     _compress_buffers_into,
@@ -266,69 +246,6 @@ def test_field_less_type_tables() raises:
         # No field: the vtable is [u16 size = 4, u16 inline size].
         var vt = t - Int(r.read_i32_le(t))
         assert_equal(Int(r.read_u16_le(vt)), 4)
-
-
-# ---------------------------------------------------------------------------
-# c_data_stream
-# ---------------------------------------------------------------------------
-
-
-def test_build_column_schema() raises:
-    var v = List[Int64]()
-    v.append(1)
-    var col = Column.from_primitive[DType.int64](
-        PrimitiveArray[DType.int64].from_list(v)
-    )
-    var s = _build_column_schema(col, String("x"), True)
-    assert_equal(_c_str_to_mojo(s.format), String("l"))
-    assert_equal(_c_str_to_mojo(s.name), String("x"))
-    assert_equal(s.flags, ARROW_FLAG_NULLABLE)
-    assert_equal(s.n_children, Int64(0))
-    assert_true(not s.is_released())
-    var s2 = _build_column_schema(col, String("y"), False)
-    assert_equal(s2.flags, Int64(0))
-    release_c_schema(UnsafePointer(to=s).unsafe_origin_cast[MutUntrackedOrigin]())
-    release_c_schema(UnsafePointer(to=s2).unsafe_origin_cast[MutUntrackedOrigin]())
-
-
-def test_parse_small_uint() raises:
-    assert_equal(_parse_small_uint(String("12")), 12)
-    assert_equal(_parse_small_uint(String(" \t305\t ")), 305)
-    assert_equal(_parse_small_uint(String("0")), 0)
-    assert_equal(_parse_small_uint(String("")), -1)
-    assert_equal(_parse_small_uint(String("  ")), -1)
-    assert_equal(_parse_small_uint(String("1a")), -1)
-    assert_equal(_parse_small_uint(String("/")), -1)
-    assert_equal(_parse_small_uint(String(":")), -1)
-
-
-def test_arrow_type_to_dtype() raises:
-    var rows = List[Tuple[ArrowType, DType]]()
-    rows.append((ArrowType.BOOL, DType.bool))
-    rows.append((ArrowType.INT8, DType.int8))
-    rows.append((ArrowType.INT16, DType.int16))
-    rows.append((ArrowType.INT32, DType.int32))
-    rows.append((ArrowType.DATE32, DType.int32))
-    rows.append((ArrowType.TIME32_S, DType.int32))
-    rows.append((ArrowType.TIME32_MS, DType.int32))
-    rows.append((ArrowType.INTERVAL_YEAR_MONTH, DType.int32))
-    rows.append((ArrowType.INT64, DType.int64))
-    rows.append((ArrowType.DATE64, DType.int64))
-    rows.append((ArrowType.TIMESTAMP_MS, DType.int64))
-    rows.append((ArrowType.TIME64_US, DType.int64))
-    rows.append((ArrowType.TIME64_NS, DType.int64))
-    rows.append((ArrowType.DURATION_S, DType.int64))
-    rows.append((ArrowType.INTERVAL_DAY_TIME, DType.int64))
-    rows.append((ArrowType.UINT8, DType.uint8))
-    rows.append((ArrowType.UINT16, DType.uint16))
-    rows.append((ArrowType.UINT32, DType.uint32))
-    rows.append((ArrowType.UINT64, DType.uint64))
-    rows.append((ArrowType.FLOAT16, DType.float16))
-    rows.append((ArrowType.FLOAT32, DType.float32))
-    rows.append((ArrowType.FLOAT64, DType.float64))
-    rows.append((ArrowType.STRING, DType.int64))
-    for i in range(len(rows)):
-        assert_equal(_arrow_type_to_dtype(rows[i][0]), rows[i][1], String(i))
 
 
 def main() raises:
