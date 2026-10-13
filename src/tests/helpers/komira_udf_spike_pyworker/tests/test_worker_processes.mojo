@@ -3,9 +3,9 @@
 # through native/drive.c.
 #
 # What it proves, and the defect each part catches:
-#   - describe through the library: SINGLE_THREAD, global_lock 1, transports
-#     WORKER, hosting EMBEDDED, MANAGED, thread_affine 0 (the library's
-#     handles serve any engine thread);
+#   - describe through the library: MANAGED, features CONTAINS_CRASHES and
+#     FORCED_STOP (and nothing else), descriptor version 1, CPU (a feature
+#     claimed or dropped);
 #   - one process per context: 4 engine threads see 4 distinct worker pids,
 #     none the engine's (a pool that shares a worker between threads);
 #   - who started them: every forked worker's parent is one zygote, which is
@@ -17,7 +17,7 @@
 #     accounting, logged at close_context, counts those calls, with the
 #     worker's time inside the wait and the wait inside the call;
 #   - the numpy batch function on 4 threads: every value right;
-#   - a crash: the worker aborts on row 3; the call returns ERR_INSTANCE_LOST
+#   - a crash: the worker aborts on row 3; the call returns ERR_WORKER_CRASHED
 #     with UDF_WORKER_CRASHED, and the next run, on new contexts, succeeds
 #     (a hang, or a crash taken as OK);
 #   - kept views: a numpy function keeps a view of each of its first 30
@@ -36,10 +36,9 @@ from std.testing import assert_equal, assert_true
 
 from komira_udf_spike_abi.contract import (
     CLASS_MANAGED,
-    ERR_INSTANCE_LOST,
-    HOSTING_EMBEDDED,
-    SINGLE_THREAD,
-    TRANSPORT_WORKER,
+    ERR_WORKER_CRASHED,
+    FEATURE_CONTAINS_CRASHES,
+    FEATURE_FORCED_STOP,
 )
 from komira_udf_spike_pyworker.drive import Driver, pid_alive, self_pid
 from komira_udf_spike_pyworker.report import call_split, check_ok, count_logs, num, per_thread, processes, text
@@ -55,12 +54,10 @@ def check_variant(v: String, mut seen: List[Int]) raises:
 
     var r = d.run(counter("udf_worker_fixtures:worker_pid", 4, 3))
     check_ok(r, v + " worker_pid")
-    assert_equal(num(r, "threading"), Int(SINGLE_THREAD))
-    assert_equal(num(r, "global_lock"), 1)
-    assert_equal(num(r, "transports"), Int(TRANSPORT_WORKER))
-    assert_equal(num(r, "hosting"), Int(HOSTING_EMBEDDED))
     assert_equal(num(r, "udf_class"), Int(CLASS_MANAGED))
-    assert_equal(num(r, "thread_affine"), 0)
+    assert_equal(num(r, "features"), Int(FEATURE_CONTAINS_CRASHES | FEATURE_FORCED_STOP))
+    assert_equal(num(r, "max_descriptor_version"), 1)
+    assert_equal(num(r, "devices"), 1)
     var pids = List[Int]()
     for t in per_thread(r):
         var p = num(t, "first_value")
@@ -100,7 +97,7 @@ def check_variant(v: String, mut seen: List[Int]) raises:
     check_ok(r, v + " fahrenheit_np")
 
     r = d.run(abort_on_3(8))
-    assert_equal(num(r, "status"), Int(ERR_INSTANCE_LOST), v + ": " + text(r, "message"))
+    assert_equal(num(r, "status"), Int(ERR_WORKER_CRASHED), v + ": " + text(r, "message"))
     assert_true("UDF_WORKER_CRASHED" in text(r, "message"), text(r, "message"))
     r = d.run(fahrenheit_rows(1, 64, 3, 1))
     check_ok(r, v + " after a crash")

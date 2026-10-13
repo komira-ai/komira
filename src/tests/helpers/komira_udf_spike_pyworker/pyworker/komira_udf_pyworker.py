@@ -47,7 +47,7 @@ import warnings
 
 HEADER = struct.Struct("<IIQIIQQ")
 MAGIC = 0x4644554B
-WIRE_VERSION = 1
+WIRE_VERSION = 2  # komira_udf_wire.h
 ABI_MAJOR, ABI_MINOR = 1, 0  # komira_udf_runtime.h
 INLINE = 1
 OP = dict(HELLO=1, DESCRIBE=2, VALIDATE=3, LOAD=4, UNLOAD=5, OPEN_CONTEXT=6, CLOSE_CONTEXT=7, OPEN_INSTANCE=8,
@@ -66,11 +66,13 @@ CTRL_BYTES = 4096
 W_HEAD = 64 // 4  # the cancel flag is bytes 32..36, read as cancel_view
 W_RING, RING_SLOTS = 256 // 4, 256
 
+# The node worker runtime's DESCRIBE wire: max_descriptor_version (the spike
+# descriptor, version 1), shapes, devices (CPU), features (CONTAINS_CRASHES,
+# FORCED_STOP: the runtime library contains a worker's crash and stops user
+# code by killing its worker) and udf_class (MANAGED); then the id and the ABI.
+FEATURE_CONTAINS_CRASHES, FEATURE_FORCED_STOP = 1 << 1, 1 << 2
 CAPS = ("komira-test/python-worker", "cp313",
-        # max_descriptor_version, shapes, threading (SINGLE_THREAD),
-        # thread_affine, transports (WORKER), hosting (EMBEDDED), devices
-        # (CPU), features, udf_class (MANAGED), global_lock
-        (0, SHAPE_SCALAR | SHAPE_MAP_BATCHES_COLUMN, 3, 1, 2, 1, 1, 0, 2, 1))
+        (1, SHAPE_SCALAR | SHAPE_MAP_BATCHES_COLUMN, 1, FEATURE_CONTAINS_CRASHES | FEATURE_FORCED_STOP, 2))
 
 
 class Refused(Exception):
@@ -262,7 +264,7 @@ class Worker:
         return struct.pack("<IIIi", WIRE_VERSION, ABI_MAJOR, ABI_MINOR, os.getpid())
 
     def describe(self):
-        return _s(CAPS[0]) + _s(CAPS[1]) + struct.pack("<10I", *CAPS[2])
+        return struct.pack("<5I", *CAPS[2]) + _s(CAPS[0]) + _s(CAPS[1])
 
     def read_spec(self, body):
         b = _Body(body)
@@ -299,9 +301,9 @@ class Worker:
         return out[0], out[1]
 
     def check_spec(self, s):
-        """The checks that need no user code: form, entry grammar,
-        descriptor, code objects (VALUE's), shape and the types the adapter
-        maps."""
+        """The checks that need no user code: form, entry grammar, code
+        objects (VALUE's), shape and the types the adapter maps. The
+        descriptor is checked by the runtime library before any message."""
         form = s["form"]
         if form not in (FORM_PACKAGE, FORM_BUNDLE, FORM_VALUE):
             raise Refused(ERR_DESCRIPTOR, "code form is not PACKAGE, BUNDLE or VALUE")
@@ -310,10 +312,6 @@ class Worker:
             mod, colon, fn = entry.partition(":")
             if not mod or not colon or not fn or ":" in fn:
                 raise Refused(ERR_DESCRIPTOR, "entry is not <module>:<function>")
-        if s["descriptor_version"] > 0:
-            raise Refused(ERR_DESCRIPTOR, "descriptor_version is newer than 0, the newest read here")
-        if s["descriptor"]:
-            raise Refused(ERR_DESCRIPTOR, "descriptor version 0 is empty; these bytes are not canonical")
         if form == FORM_VALUE:
             if len(s["code"]) != 1 or s["code"][0][0] != "payload":
                 raise Refused(ERR_DESCRIPTOR, "a VALUE needs exactly one code object, role payload")
@@ -344,11 +342,10 @@ class Worker:
         return data
 
     def validate(self, s):
+        """VALIDATE opens no code (design 4.3): the spec's own checks only;
+        the library has compared the spec with its descriptor. A missing
+        module or function, or hints that differ, fail at LOAD."""
         self.check_spec(s)
-        if s["form"] != FORM_VALUE:
-            code, msg = self.ad.validate(s["entry"], s["shape"], s["arg_fmts"], s["result_fmt"])
-            if code != OK:
-                raise Refused(code, msg)
 
     def load(self, body):
         s = self.read_spec(body)

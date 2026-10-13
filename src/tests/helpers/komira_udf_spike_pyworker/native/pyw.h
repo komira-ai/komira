@@ -133,6 +133,7 @@ struct pyw_chan {
   int memfd;
   uint64_t next_id;
   int dead; /* end of file, a protocol fault or a kill: no request is sent again */
+  int crashed; /* the worker ended or closed its channel by itself (not a fault, not a kill) */
   char why[256];
   struct pyw_slot slots[PYW_MAX_SLOTS];
   int heap_full; /* the last batch went inline because no slot fit */

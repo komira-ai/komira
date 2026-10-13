@@ -17,12 +17,9 @@
 # pyarrow build shows the engine's IPC messages are Arrow IPC pyarrow
 # reads, and that the engine reads what pyarrow writes.
 #
-# The capabilities check fails, and only it, on purpose: the worker reports
-# transports WORKER, and the runner requires IN_PROCESS ("the in-process
-# path is what this suite drives"). The design (udf_runtime_interface.md
-# section 4.2) removes the transport fields from the capabilities; the
-# contract's header still has them, so this case fails until the header
-# follows the design. The test pins that reason.
+# The capabilities check passes: the runtime id's grammar, CPU, class
+# MANAGED, and features CONTAINS_CRASHES and FORCED_STOP, both defined, with
+# no memory_report entry and no MEMORY_REPORT bit.
 #
 # Defects caught: the engine's IPC writer ignoring the offset of a
 # one-argument batch (sliced_input_offset; two arguments at different
@@ -39,9 +36,9 @@ from komira_udf_spike_abi.conform import run_suite
 from komira_udf_spike_pyworker.managed_cases import managed_cases
 
 comptime CASES = "src/tests/helpers/komira_udf_spike_abi/cases"
-comptime RUN = 57
-"""The corpus's 121 cases less managed_cases' 64 left out."""
-comptime SKIPPED = 16
+comptime RUN = 85
+"""The corpus's 164 cases less managed_cases' 79 left out."""
+comptime SKIPPED = 33
 """The cases of shapes this runtime does not declare."""
 
 
@@ -53,9 +50,8 @@ def main() raises:
         print(v, report)
         assert_equal(report.runtime_id, "komira-test/python-worker", v)
         var caps = report.result("capabilities")
-        assert_equal(caps.verdict, "FAIL", v)
-        assert_true(caps.reason.startswith("transports lacks IN_PROCESS"), v + ": " + caps.reason)
-        assert_equal(report.count("FAIL"), 1, v + ": cases failed besides capabilities")
+        assert_equal(caps.verdict, "PASS", v + ": " + caps.reason)
+        assert_equal(report.count("FAIL"), 0, v + ": cases failed")
         assert_equal(report.count("SKIP"), SKIPPED, v + ": cases skipped")
-        assert_equal(report.count("PASS"), RUN - SKIPPED, v + ": every case run passes")
+        assert_equal(report.count("PASS"), RUN - SKIPPED + 1, v + ": every case run passes, and capabilities")
     print("test_conform_worker: ok")

@@ -43,6 +43,7 @@
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,6 +52,7 @@
 #include <unistd.h>
 
 #include "komira_udf_runtime.h"
+#include "pyw_descriptor.h"
 #include "probe_json.h"
 
 static int64_t mono(void) {
@@ -127,6 +129,7 @@ struct specb {
   struct ArrowSchema* kids[65];
   struct ArrowSchema* rkids[2];
   komira_udf_spec spec;
+  uint8_t desc[PYW_DESCRIPTOR_MAX];
 };
 
 /* A BUNDLE SCALAR of `nargs` arguments of `fmt` to an int64 result. */
@@ -146,6 +149,9 @@ static void mk(struct specb* b, const char* entry, int nargs, const char* fmt) {
   b->spec.result = &b->result;
   b->spec.null_mode = KOMIRA_UDF_NULL_MANUAL;
   b->spec.stability = KOMIRA_UDF_IMMUTABLE;
+  b->spec.descriptor_version = 1;
+  b->spec.descriptor = b->desc;
+  b->spec.descriptor_len = pyw_descriptor_encode(b->desc, entry, (uint32_t)b->spec.shape, &b->args, &b->result);
 }
 
 static void spec_cases(struct eng* e, struct pj* j) {
@@ -229,10 +235,9 @@ static void entry_cases(struct eng* e, struct pj* j) {
   big.c.struct_size = sizeof(big);
   int32_t rc = e->t->describe(e->rt, &big.c);
   char m[256];
-  snprintf(m, sizeof(m), "%s %s %u %u %u %u %u %u %u %u %u %u", big.c.runtime_id ? big.c.runtime_id : "?",
-           big.c.runtime_abi ? big.c.runtime_abi : "?", big.c.max_descriptor_version, big.c.shapes, big.c.threading,
-           big.c.thread_affine, big.c.transports, big.c.hosting, big.c.devices, big.c.features, big.c.udf_class,
-           big.c.global_lock);
+  snprintf(m, sizeof(m), "%s %s %u %u %u %u %u", big.c.runtime_id ? big.c.runtime_id : "?",
+           big.c.runtime_abi ? big.c.runtime_abi : "?", big.c.max_descriptor_version, big.c.shapes, big.c.devices,
+           big.c.features, big.c.udf_class);
   pj_case(j, "describe", rc, m, (int64_t)big.c.struct_size);
 
   komira_udf_error err = ERR_INIT;
@@ -520,6 +525,30 @@ static void init_cases(struct eng* e, struct pj* j, const char* lib) {
   rec(j, "init_copy", t == NULL ? (int32_t)err.code : 0, &err, names_dir * 100);
 }
 
+/* A context worker killed while idle (SIGKILL from here, after a call told
+ * its pid): the next open_instance on the context runs no user code, so the
+ * loss is ERR_INSTANCE_LOST (section 4.5), and a call on the old instance
+ * is refused the same way. */
+static void lost_idle_cases(struct eng* e, struct pj* j) {
+  komira_udf_error err = ERR_INIT;
+  struct one o = {0};
+  int64_t pid = -1;
+  int32_t rc = setup(e, "udf_worker_fixtures:worker_pid", &o, &err);
+  if (rc == KOMIRA_UDF_OK) rc = call1(e, o.i, 1, 0, 1, 0, NULL, &err, &pid);
+  rec(j, "lost_idle_call", rc, &err, 0);
+  if (rc == KOMIRA_UDF_OK && pid > 0) {
+    kill((pid_t)pid, SIGKILL);
+    for (int k = 0; k < 2000 && kill((pid_t)pid, 0) == 0; k++) usleep(1000);
+    komira_udf_instance* again = NULL;
+    rc = e->t->open_instance(o.c, o.u, &again, &err);
+    rec(j, "lost_idle_open_instance", rc, &err, again != NULL);
+    int64_t v = 0;
+    rc = call1(e, o.i, 1, 0, 1, 0, NULL, &err, &v);
+    rec(j, "lost_idle_call_after", rc, &err, 0);
+  }
+  teardown(e, &o);
+}
+
 /* A normal shutdown, timed: a context opened, a call made and the context
  * closed, then shutdown. The zygote exits on SHUTDOWN and the engine, its
  * parent, reaps it at once; one that waits for a process it does not reap
@@ -549,6 +578,8 @@ static void zygote_exit_cases(struct eng* e, struct pj* j) {
   komira_udf_udf* u = NULL;
   int32_t rc = e->t->load(e->rt, &b.spec, &u, &err);
   rec(j, "zygote_exit_load", rc, &err, u != NULL);
+  rc = e->t->load(e->rt, &b.spec, &u, &err);
+  rec(j, "zygote_exit_load_again", rc, &err, u != NULL);
   mk(&b, "udf_worker_fixtures:worker_pid", 1, "l");
   rc = e->t->validate(e->rt, &b.spec, &err);
   rec(j, "zygote_exit_validate", rc, &err, 0);
@@ -576,6 +607,7 @@ char* kpw_probe_table(const char* lib, const char* group) {
     else if (strcmp(group, "deadline") == 0) deadline_cases(&e, &j);
     else if (strcmp(group, "many") == 0) many_cases(&e, &j);
     else if (strcmp(group, "init") == 0) init_cases(&e, &j, lib);
+    else if (strcmp(group, "lost_idle") == 0) lost_idle_cases(&e, &j);
     else pj_case(&j, "group", -1, "no such group", 0);
     e.t->shutdown(e.rt);
   }

@@ -14,8 +14,10 @@
 #   - a value whose __bool__ raises converts (the adapter never asks a
 #     returned value's truth);
 #   - a list result whose __len__ or __iter__ raises, or whose iterator
-#     raises after its first value: ERR_RAISED, row -1;
-#   - a numpy batch result whose __array__ raises: ERR_RAISED, row -1, the
+#     raises after its first value: ERR_RAISED naming no row, which the
+#     host bisects (design 4.5) to row 0;
+#   - a numpy batch result whose __array__ raises: ERR_RAISED (row 0 after
+#     the host's bisection), the
 #     trace naming the user's file;
 #   - a wrong value whose repr raises: ERR_RETURN_TYPE at its row, the
 #     message made without the repr;
@@ -123,11 +125,11 @@ def main() raises:
     var why = List[String]()
     why.append(user_error(rt, row, "udf_fixtures:bad_index", i64, "ERR_RAISED", 0, "RuntimeError: _BadInt: no int"))
     why.append(user_error(rt, row, "udf_fixtures:bad_float", f64, "ERR_RAISED", 0, "RuntimeError: _BadFloat: no float"))
-    why.append(user_error(rt, col, "udf_fixtures:bad_len", i64, "ERR_RAISED", -1, "RuntimeError: _BadLen"))
-    why.append(user_error(rt, col, "udf_fixtures:bad_iter", i64, "ERR_RAISED", -1, "RuntimeError: _BadIter"))
-    why.append(user_error(rt, col, "udf_fixtures:bad_next", i64, "ERR_RAISED", -1, "RuntimeError: _BadNext"))
+    why.append(user_error(rt, col, "udf_fixtures:bad_len", i64, "ERR_RAISED", 0, "RuntimeError: _BadLen"))
+    why.append(user_error(rt, col, "udf_fixtures:bad_iter", i64, "ERR_RAISED", 0, "RuntimeError: _BadIter"))
+    why.append(user_error(rt, col, "udf_fixtures:bad_next", i64, "ERR_RAISED", 0, "RuntimeError: _BadNext"))
     why.append(user_error(
-        rt, col, "udf_np:np_bad_array", f64, "ERR_RAISED", -1, "RuntimeError: _BadArray: no array", "udf_np.py"
+        rt, col, "udf_np:np_bad_array", f64, "ERR_RAISED", 0, "RuntimeError: _BadArray: no array", "udf_np.py"
     ))
     why.append(user_error(rt, row, "udf_fixtures:bad_repr_value", i64, "ERR_RETURN_TYPE", 0, "row 0: _BadRepr"))
     why.append(user_error(rt, row, "udf_fixtures:raise_unprintable", i64, "ERR_RAISED", 0, "_Unprintable"))

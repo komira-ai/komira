@@ -24,8 +24,10 @@
 #     to the clock (sleeping 20 s) is cancelled 300 ms in;
 #     the worker is killed 2 s after the cancel reached it (it has ended
 #     by the time call_batch returns, not only after close_context), and the
-#     call returns ERR_CANCELLED in 2 .. 12 s. In a new context the same call
-#     past a deadline 300 ms away is killed 2 s after it: ERR_DEADLINE in
+#     call returns ERR_KILLED naming the cancel in 2 .. 12 s. In a new
+#     context the same call
+#     past a deadline 300 ms away is killed 2 s after it: ERR_KILLED naming
+#     the deadline, in
 #     2 .. 12 s. After each the next call on that context is
 #     ERR_INSTANCE_LOST, its worker is gone after close_context, and a new
 #     context still serves (an engine that waits on a worker that ignores
@@ -63,9 +65,10 @@ from std.testing import assert_equal, assert_true
 from komira_json import JsonValue
 from komira_udf_spike_abi.contract import (
     ERR_ABI,
+    ERR_HOST_CONTRACT,
     ERR_CANCELLED,
-    ERR_DEADLINE,
     ERR_INSTANCE_LOST,
+    ERR_KILLED,
     ERR_INTERNAL,
     ERR_UNSUPPORTED,
 )
@@ -86,12 +89,13 @@ def refused(r: JsonValue, name: String, status: Int32, reason: String) raises:
     assert_equal(num(c, "value"), 1, name + ": args moved and released once")
 
 
-def killed(r: JsonValue, name: String, status: Int32, what: String) raises:
+def killed(r: JsonValue, name: String, cause: String, what: String) raises:
     var c = r.get(name)
     var ms = num(c, "value")
     var said = what + " " + name + ": status " + String(num(c, "status")) + " after " + String(ms) + " ms: "
     said += text(c, "message")
-    assert_equal(num(c, "status"), Int(status), said)
+    assert_equal(num(c, "status"), Int(ERR_KILLED), said)
+    assert_true(cause in text(c, "message"), said + ": the message names the cause")
     assert_true("killed" in text(c, "message"), said)
     assert_true(ms >= 2000 and ms <= 12000, said)
     var ended = r.get(name + "_ended_at_return")
@@ -176,20 +180,20 @@ def main() raises:
         ok(l, "after_unload", v)
 
     var r = probe_calls("./pyworker_zygote.so", "refusals")
-    refused(r, "short_child", ERR_INTERNAL, "an argument is shorter than the batch")
-    refused(r, "child_count", ERR_INTERNAL, "child count other than the bound signature's")
-    refused(r, "struct_offset", ERR_INTERNAL, "nonzero offset")
-    refused(r, "negative_length", ERR_INTERNAL, "negative length")
-    refused(r, "three_buffers", ERR_INTERNAL, "not a fixed-width primitive")
-    refused(r, "no_values", ERR_INTERNAL, "no values buffer")
-    refused(r, "negative_offset", ERR_INTERNAL, "an argument has a negative offset")
-    refused(r, "not_cpu", ERR_UNSUPPORTED, "not on the CPU")
+    refused(r, "short_child", ERR_HOST_CONTRACT, "an argument is shorter than the batch")
+    refused(r, "child_count", ERR_HOST_CONTRACT, "child count other than the bound signature's")
+    refused(r, "struct_offset", ERR_HOST_CONTRACT, "nonzero offset")
+    refused(r, "negative_length", ERR_HOST_CONTRACT, "negative length")
+    refused(r, "three_buffers", ERR_HOST_CONTRACT, "not a fixed-width primitive")
+    refused(r, "no_values", ERR_HOST_CONTRACT, "no values buffer")
+    refused(r, "negative_offset", ERR_HOST_CONTRACT, "an argument has a negative offset")
+    refused(r, "not_cpu", ERR_HOST_CONTRACT, "not on the CPU")
     refused(r, "call_struct_size", ERR_ABI, "call struct_size")
     ok(r, "after_refusals", "zygote")
 
     for v in ["zygote"]:
         r = probe_calls("./pyworker_" + v + ".so", "kills")
-        killed(r, "cancel_kill", ERR_CANCELLED, v)
-        killed(r, "deadline_kill", ERR_DEADLINE, v)
+        killed(r, "cancel_kill", "cancelled", v)
+        killed(r, "deadline_kill", "UDF_DEADLINE_EXCEEDED", v)
         ok(r, "two_args", v + " after the kills")
     print("test_worker_calls: ok")

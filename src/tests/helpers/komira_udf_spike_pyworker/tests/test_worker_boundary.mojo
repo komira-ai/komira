@@ -160,7 +160,7 @@ def main() raises:
         refused(r, k, "before HELLO", Int(ERR_ABI))
     for k in ["worker_wire", "worker_major", "worker_minor"]:
         refused(r, k, "any difference is refused", Int(ERR_ABI))
-    refused(r, "worker_same", "OK wire 1 ABI 1.0", 0)
+    refused(r, "worker_same", "OK wire 2 ABI 1.0", 0)
     refused(r, "worker_describe_after", "komira-test/python-worker", 0)
     assert_equal(num(r.get("worker_same"), "value"), 1, "the worker's pid in its HELLO")
 

@@ -4,11 +4,8 @@ runs user code, imported in each worker process
 copy). The worker hands it Arrow buffers as memoryviews and takes back
 statuses and results; it never sees a language object other than these.
 
-- validate(): the static check of a UDF reference: the module's source is
-  found on sys.path and parsed (ast), never run. The function's type hints
-  give its Arrow signature, which must equal the declared one.
 - open_instance(): imports the module in this interpreter and binds the
-  function, its hints checked again as live objects.
+  function, its hints checked as live objects against the declared types.
 - Instance.call(): one batch. SCALAR: the function is called once per row
   over a pure-Python columnar view (memoryviews of the Arrow buffers, no
   copy), and each result written into the output buffer the worker
@@ -24,7 +21,6 @@ allows None, which is a null; `list[X]` and `numpy.ndarray` (or
 Statuses are komira_udf_status values of komira_udf_runtime.h.
 """
 
-import ast
 import os
 import sys
 import traceback
@@ -68,36 +64,6 @@ def add_site_dirs(site):
 # column); fmt "l", "g", or None (a numpy array of any dtype).
 
 
-def _hint_of_source(node):
-    """The (kind, fmt) of an annotation's AST, or None if it maps to none."""
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        try:
-            node = ast.parse(node.value, mode="eval").body
-        except SyntaxError:
-            return None
-    if isinstance(node, ast.Name) and node.id in ("float", "int"):
-        return ("row", "g" if node.id == "float" else "l")
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-        sides = [node.left, node.right]
-        rest = [s for s in sides if not (isinstance(s, ast.Constant) and s.value is None)]
-        return _hint_of_source(rest[0]) if len(rest) == 1 else None
-    text = ast.unparse(node)
-    if isinstance(node, ast.Subscript):
-        head = ast.unparse(node.value)
-        if head in ("Optional", "typing.Optional"):
-            return _hint_of_source(node.slice)
-        if head in ("list", "List", "typing.List"):
-            inner = _hint_of_source(node.slice)
-            return ("list", inner[1]) if inner and inner[0] == "row" else None
-        if head.endswith("NDArray") or head.endswith("ndarray"):
-            fmt = "g" if "float64" in text else "l" if "int64" in text else None
-            return ("numpy", fmt)
-        return None
-    if text.endswith("ndarray") or text.endswith("NDArray"):
-        return ("numpy", None)
-    return None
-
-
 def _hint_of_object(ann):
     """The (kind, fmt) of a live annotation object, or None."""
     if ann is float:
@@ -138,46 +104,6 @@ def _check_signature(name, params, ret, shape, arg_fmts, result_fmt):
         if h[1] is not None and h[1] != fmt and not (h[1] == "l" and fmt == "i"):
             return "{}: {} is hinted {}, declared {}".format(name, what, TYPE[h[1]], TYPE[fmt])
     return ""
-
-
-def _find_source(module):
-    """The path of `module`'s source on sys.path, found without importing
-    anything (a dotted name's packages are not run)."""
-    parts = module.split(".")
-    for d in sys.path:
-        base = os.path.join(d, *parts)
-        for cand in (base + ".py", os.path.join(base, "__init__.py")):
-            if os.path.isfile(cand):
-                return cand
-    return None
-
-
-def validate(entry, shape, arg_fmts, result_fmt):
-    """(status, message) for a UDF reference, from the source alone."""
-    module, _, qual = entry.partition(":")
-    path = _find_source(module)
-    if path is None:
-        return (ERR_DESCRIPTOR, "module {} is not on the runtime's path".format(module))
-    with open(path, "rb") as f:
-        try:
-            tree = ast.parse(f.read(), filename=path)
-        except SyntaxError as e:
-            return (ERR_DESCRIPTOR, "module {} does not parse: {}".format(module, e))
-    fn = None
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == qual:
-            fn = node
-    if fn is None:
-        return (ERR_DESCRIPTOR, "module {} has no top-level function {}".format(module, qual))
-    if isinstance(fn, ast.AsyncFunctionDef):
-        return (ERR_UNSUPPORTED, "{} is async; this runtime calls plain functions".format(entry))
-    a = fn.args
-    if a.vararg or a.kwarg or a.kwonlyargs:
-        return (ERR_UNSUPPORTED, "{} takes *args, **kwargs or keyword-only arguments".format(entry))
-    params = [_hint_of_source(p.annotation) if p.annotation is not None else None for p in a.posonlyargs + a.args]
-    ret = _hint_of_source(fn.returns) if fn.returns is not None else None
-    why = _check_signature(entry, params, ret, shape, arg_fmts, result_fmt)
-    return (ERR_UNSUPPORTED, why) if why else (OK, "")
 
 
 def _text(s):

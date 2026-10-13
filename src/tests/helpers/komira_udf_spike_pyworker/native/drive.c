@@ -47,6 +47,7 @@
 #include <unistd.h>
 
 #include "komira_udf_runtime.h"
+#include "pyw_descriptor.h"
 
 #define MAX_THREADS 64
 #define MSG 512
@@ -711,7 +712,9 @@ char* kpw_run(struct engine* e, const char* config) {
   struct ArrowSchema result = {rf, "", NULL, ARROW_FLAG_NULLABLE, 0, NULL, NULL, no_release, NULL};
   const char* roles[1] = {"payload"};
   const uint8_t(*shas)[32] = (const uint8_t(*)[32])c->sha;
-  komira_udf_spec spec = {sizeof(spec), c->shape, c->form, c->entry, 0, NULL, 0, &args, &result, NULL,
+  uint8_t desc[PYW_DESCRIPTOR_MAX];
+  size_t desc_len = pyw_descriptor_encode(desc, c->entry, (uint32_t)c->shape, &args, &result);
+  komira_udf_spec spec = {sizeof(spec), c->shape, c->form, c->entry, 1, desc, desc_len, &args, &result, NULL,
                           KOMIRA_UDF_NULL_MANUAL, KOMIRA_UDF_IMMUTABLE, c->code_root, c->has_code ? 1u : 0u,
                           roles, shas};
   komira_udf_error err = {sizeof(err), 0, NULL, NULL, -1, -1, NULL, NULL};
@@ -721,10 +724,8 @@ char* kpw_run(struct engine* e, const char* config) {
   js_add(&j, ", \"load_ns\": %lld, \"open_ns\": %lld, \"runtime_id\": ", (long long)load_ns, (long long)e->open_ns);
   js_str(&j, e->caps.runtime_id ? e->caps.runtime_id : "");
   js_add(&j,
-         ", \"threading\": %u, \"global_lock\": %u, \"thread_affine\": %u, \"transports\": %u, \"hosting\": %u"
-         ", \"udf_class\": %u",
-         e->caps.threading, e->caps.global_lock, e->caps.thread_affine, e->caps.transports, e->caps.hosting,
-         e->caps.udf_class);
+         ", \"max_descriptor_version\": %u, \"shapes\": %u, \"devices\": %u, \"features\": %u, \"udf_class\": %u",
+         e->caps.max_descriptor_version, e->caps.shapes, e->caps.devices, e->caps.features, e->caps.udf_class);
   if (rc != KOMIRA_UDF_OK) {
     char m[MSG];
     take_error(&err, m);

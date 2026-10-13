@@ -378,3 +378,25 @@ def spin(ms: int) -> int:
     while time.thread_time_ns() < end:
         pass
     return ms
+
+
+def raise_minus_one_if_row5(x: list[int]) -> list[int]:
+    """Raises naming no row when its batch holds the value 5: the host
+    bisects the batch to find the row."""
+    if 5 in x:
+        raise ValueError("raise_minus_one_if_row5: the batch holds the value 5")
+    return x
+
+
+_volatile_runs = 0
+
+
+def volatile_count_raise(x: list[int]) -> list[int]:
+    """A VOLATILE batch function that counts the batches it ran (per worker,
+    so per context) and raises naming no row; a batch whose row 0 is -1
+    returns the count in every row instead."""
+    global _volatile_runs
+    if x and x[0] == -1:
+        return [_volatile_runs] * len(x)
+    _volatile_runs += 1
+    raise ValueError("volatile_count_raise: raised after counting this run")

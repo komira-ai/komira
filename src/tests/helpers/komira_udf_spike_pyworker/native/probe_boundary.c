@@ -111,7 +111,8 @@ static void hello_cases(struct pj* j, const char* arg) {
       pj_case(j, k[i].name, code, m ? m : "(malformed)", 0);
       free(m);
     } else if (k[i].op == KOMIRA_UDF_OP_DESCRIBE) {
-      /* OK: the runtime id first. */
+      /* OK: five words, then the runtime id. */
+      for (int w = 0; w < 5; w++) (void)pyw_rd_u32(&d);
       char* id = pyw_rd_str(&d);
       pj_case(j, k[i].name, d.bad ? -1 : 0, id ? id : "(malformed)", 0);
       free(id);

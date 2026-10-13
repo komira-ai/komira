@@ -11,7 +11,8 @@
 #     -1 (a check deleted or loosened, a bound moved by one, an error
 #     written past its struct);
 #   - describe refuses NULL and a short struct, keeps a longer struct's
-#     size, and gives every field (section 4.2), thread_affine 0 and no
+#     size, and gives every field (section 4.2: class MANAGED, features
+#     CONTAINS_CRASHES and FORCED_STOP, descriptor version 1) and no
 #     memory_report for the library; the frame and aggregate entries refuse,
 #     each releasing what it was given exactly once, with NULL inputs
 #     taken, and outputs left released (an entry that leaks or double
@@ -20,7 +21,8 @@
 #     thread pools limited to one thread (all but zygote_threads), one
 #     shared region mapped (a forked worker has dropped the zygote's),
 #     pyarrow imported (the pyarrow build only); a worker that exits with
-#     status 3 is a lost context; a lost context refuses open_instance with
+#     status 3 during a call is ERR_WORKER_CRASHED (user code ran); the lost
+#     context refuses open_instance with
 #     ERR_INSTANCE_LOST; the library's accounting is logged at level 3 at
 #     close_context only after calls; the zygote's fork is logged at level
 #     3; a call longer than 2^32 ns answers (a build that starts the wrong
@@ -41,14 +43,19 @@
 #   - init refuses a NULL, short or other-major host with ERR_ABI; a copy
 #     of the library loaded by absolute path from another directory looks
 #     for the zygote's interpreter in that directory;
+#   - a context worker killed while idle: the next open_instance, which runs
+#     no user code, is ERR_INSTANCE_LOST, and so is a call on the old
+#     instance (a library that calls every loss a crash);
 #   - a normal shutdown after a context and a call takes under a second (an
 #     engine that does not reap the zygote it started waits out its 2 s
 #     fallback kill);
 #   - the zygote ends during a LOAD (a module that exits the process that
-#     imports it): load is ERR_INSTANCE_LOST naming the exit status (the
-#     engine is the zygote's parent and reaps it), a later validate is
-#     refused the same way, and shutdown takes under a second (an engine
-#     that does not reap its own child, or names it wrongly).
+#     imports it): load is ERR_WORKER_CRASHED naming the exit status (the
+#     import is user code; the engine is the zygote's parent and reaps it),
+#     a second load and a validate are ERR_INSTANCE_LOST (refused at once:
+#     no user code ran for them), and
+#     shutdown takes under a second (an engine that does not reap its own
+#     child, or names it wrongly).
 #
 # Mutants planted: komira_udf_pyrt.py reading the clock after row 0 and then
 # every 1024 rows (as it did before): red on deadline_after_row_1 only (the
@@ -65,7 +72,9 @@ from komira_udf_spike_abi.contract import (
     ERR_ABI,
     ERR_CANCELLED,
     ERR_DEADLINE,
+    ERR_HOST_CONTRACT,
     ERR_INSTANCE_LOST,
+    ERR_WORKER_CRASHED,
     ERR_INTERNAL,
     ERR_LOAD,
     ERR_UNSUPPORTED,
@@ -104,7 +113,7 @@ def main() raises:
     r = probe_table("./pyworker_zygote.so", "entries")
     got(r, "describe_null", a, "")
     got(r, "describe_short", a, "")
-    got(r, "describe", 0, "komira-test/python-worker cp313 0 5 3 0 2 1 1 0 2 1", 80)
+    got(r, "describe", 0, "komira-test/python-worker cp313 1 5 1 6 2", 64)
     got(r, "frame_open", u, "frames are not in this runtime's shapes", 100)
     got(r, "frame_open_no_stream", u, "frames are not in this runtime's shapes")
     got(r, "frame_open_released_stream", u, "frames are not in this runtime's shapes")
@@ -124,7 +133,7 @@ def main() raises:
         got(r, "no_calls_no_stats", 0, "", 0)
         got(r, "calls_stats", 3, "", 1)
         got(r, "fork_log", 3, "", 1)
-        got(r, "exit_3", Int(ERR_INSTANCE_LOST), "closed its control channel")
+        got(r, "exit_3", Int(ERR_WORKER_CRASHED), "closed its control channel")
         got(r, "open_instance_lost", Int(ERR_INSTANCE_LOST), "UDF_WORKER_CRASHED")
         if v == "zygote":
             got(r, "call_over_2e32_ns", 0, "OK", 4400)
@@ -135,7 +144,7 @@ def main() raises:
     got(r, "deadline_in_worker", Int(ERR_DEADLINE), "the deadline passed at row 1", 1)
     got(r, "cancelled_before", Int(ERR_CANCELLED), "cancelled before the batch")
     got(r, "empty_no_values", 0, "OK")
-    got(r, "one_row_no_values", Int(ERR_INTERNAL), "an argument has no values buffer")
+    got(r, "one_row_no_values", Int(ERR_HOST_CONTRACT), "an argument has no values buffer")
     got(r, "deadline_after_row_1", Int(ERR_DEADLINE), "the deadline passed at row 2", 1)
     got(r, "deadline_in_last_row", 0, "OK")
 
@@ -148,6 +157,14 @@ def main() raises:
         got(r, k, a, "this runtime speaks ABI major 1")
     got(r, "init_copy", Int(ERR_LOAD), "init: the zygote: posix_spawn", 100)
 
+    # A context worker lost while idle: the next open_instance runs no user
+    # code, so it is ERR_INSTANCE_LOST, not ERR_WORKER_CRASHED; so is a call
+    # on the old instance.
+    r = probe_table("./pyworker_zygote.so", "lost_idle")
+    got(r, "lost_idle_call", 0, "OK", 0)
+    got(r, "lost_idle_open_instance", Int(ERR_INSTANCE_LOST), "UDF_WORKER_CRASHED", 0)
+    got(r, "lost_idle_call_after", Int(ERR_INSTANCE_LOST), "", 0)
+
     # A normal shutdown is prompt: the zygote exits on SHUTDOWN and is
     # reaped at once (the fallback kill comes only after 2 s).
     r = probe_table("./pyworker_zygote.so", "shutdown")
@@ -159,8 +176,9 @@ def main() raises:
     # its parent and reaps it), every later request refused at once, and
     # shutdown prompt.
     r = probe_table("./pyworker_zygote.so", "zygote_exit")
-    got(r, "zygote_exit_load", Int(ERR_INSTANCE_LOST), "UDF_WORKER_CRASHED: worker ", 0)
-    got(r, "zygote_exit_load", Int(ERR_INSTANCE_LOST), " exited with status 3", 0)
+    got(r, "zygote_exit_load", Int(ERR_WORKER_CRASHED), "UDF_WORKER_CRASHED: worker ", 0)
+    got(r, "zygote_exit_load", Int(ERR_WORKER_CRASHED), " exited with status 3", 0)
+    got(r, "zygote_exit_load_again", Int(ERR_INSTANCE_LOST), " exited with status 3", 0)
     got(r, "zygote_exit_validate", Int(ERR_INSTANCE_LOST), " exited with status 3", 0)
     var ms = num(r.get("zygote_exit_shutdown"), "value")
     assert_true(ms < 1000, "shutdown after the zygote ended took " + String(ms) + " ms")

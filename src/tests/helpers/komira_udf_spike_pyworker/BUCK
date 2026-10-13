@@ -162,6 +162,7 @@ staged_files(
         "native/probe_worker.c",
         "native/proxy_runtime.c",
         "native/pyw.h",
+        "native/pyw_descriptor.h",
     ],
 )
 
@@ -184,6 +185,8 @@ cxx_library(
 cxx_library(
     name = "komira_udf_pyworker_drive",
     srcs = [":c_files[native/drive.c]"],
+    headers = {"pyw_descriptor.h": ":c_files[native/pyw_descriptor.h]"},
+    header_namespace = "",
     compiler_flags = ["-O2"],
     deps = ["//src/tests/helpers/komira_udf_spike_abi:komira_udf_spike_c"],
     visibility = ["PUBLIC"],
@@ -205,6 +208,7 @@ cxx_library(
     headers = {
         "probe_json.h": ":c_files[native/probe_json.h]",
         "pyw.h": ":c_files[native/pyw.h]",
+        "pyw_descriptor.h": ":c_files[native/pyw_descriptor.h]",
     },
     header_namespace = "",
     compiler_flags = ["-O2"],

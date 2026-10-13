@@ -59,6 +59,7 @@
 #include <unistd.h>
 
 #include "komira_udf_runtime.h"
+#include "pyw_descriptor.h"
 #include "probe_json.h"
 
 static int64_t mono(void) {
@@ -109,6 +110,7 @@ struct spec_block {
   struct ArrowSchema kid[2], args, result;
   struct ArrowSchema* kids[2];
   komira_udf_spec spec;
+  uint8_t desc[PYW_DESCRIPTOR_MAX];
 };
 
 /* A BUNDLE of `shape` over `nargs` arguments of format `fmt` to a result
@@ -129,6 +131,9 @@ static void make_spec_as(struct spec_block* b, const char* entry, int nargs, int
   b->spec.result = &b->result;
   b->spec.null_mode = KOMIRA_UDF_NULL_MANUAL;
   b->spec.stability = KOMIRA_UDF_IMMUTABLE;
+  b->spec.descriptor_version = 1;
+  b->spec.descriptor = b->desc;
+  b->spec.descriptor_len = pyw_descriptor_encode(b->desc, entry, (uint32_t)b->spec.shape, &b->args, &b->result);
 }
 
 /* A BUNDLE SCALAR over `nargs` int64 arguments to an int64 result. */

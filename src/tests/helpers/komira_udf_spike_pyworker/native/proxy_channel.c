@@ -84,6 +84,7 @@ static void died_eof(struct pyw_chan* c) {
   else
     snprintf(m, sizeof(m), "UDF_WORKER_CRASHED: worker %d closed its control channel", (int)c->pid);
   if (r == c->pid) c->our_child = 0; /* reaped */
+  if (!c->dead) c->crashed = 1;
   die(c, m);
 }
 
@@ -149,6 +150,7 @@ static int send_header(struct pyw_chan* c, uint32_t op, uint64_t id, uint32_t fl
   komira_udf_wire_header h = {KOMIRA_UDF_WIRE_MAGIC, op, id, flags, slot, off, len};
   struct iovec iov[2] = {{&h, sizeof(h)}, {(void*)inline_body, inline_body ? (size_t)len : 0}};
   if (send_all(c, iov, inline_body && len ? 2 : 1, fds, nfds) != 0) {
+    if (!c->dead) c->crashed = 1;
     die(c, "UDF_WORKER_CRASHED: the control channel refused a write (the worker is gone)");
     return -1;
   }

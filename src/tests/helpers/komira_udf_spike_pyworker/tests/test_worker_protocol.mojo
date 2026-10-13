@@ -13,8 +13,8 @@
 #     refused with ERR_INTERNAL and its reason; every ERROR with row and
 #     group -1 (a dispatch arm that serves the wrong op, a check deleted);
 #   - LOAD and VALIDATE with one defect each: the form, each way the entry
-#     can break its grammar, a descriptor version over 0 or bytes in
-#     version 0, a VALUE without exactly one payload code object, code
+#     can break its grammar (the descriptor is the library's to check), a
+#     VALUE without exactly one payload code object, code
 #     objects for a BUNDLE, a shape outside SCALAR and MAP_BATCHES_COLUMN,
 #     65 arguments, no result or two, a body
 #     cut short, schemas that do not parse, a module that fails at import,
@@ -59,8 +59,8 @@ def got(r: JsonValue, name: String, status: Int, reason: String) raises:
 def main() raises:
     var r = probe_worker("control", ".")
     got(r, "hello", 0, "OK")
-    got(r, "describe", 0, "komira-test/python-worker cp313 0 5 3 1 2 1 1 0 2 1")
-    assert_equal(num(r.get("describe"), "value"), 0, "nothing after DESCRIBE's numbers")
+    got(r, "describe", 0, "komira-test/python-worker cp313 1 5 1 6 2")
+    assert_equal(num(r.get("describe"), "value"), 0, "nothing after DESCRIBE's runtime id and ABI tag")
     got(r, "unknown_op", Int(ERR_UNSUPPORTED), "op 99 is not served by this worker")
     got(r, "after_cancel", 0, "OK")
     for k in ["unload_unknown", "close_context_unknown", "close_instance_unknown", "open_context"]:
@@ -80,8 +80,6 @@ def main() raises:
     got(r, "form_9", d, "code form is not PACKAGE, BUNDLE or VALUE")
     for k in ["entry_no_colon", "entry_no_module", "entry_no_function", "entry_two_colons"]:
         got(r, k, d, "entry is not <module>:<function>")
-    got(r, "descriptor_version_1", d, "descriptor_version is newer than 0")
-    got(r, "descriptor_bytes", d, "descriptor version 0 is empty")
     for k in ["value_no_code", "value_role_other", "value_two_codes"]:
         got(r, k, d, "a VALUE needs exactly one code object, role payload")
     got(r, "bundle_with_code", u, "code objects are read only for VALUE")
@@ -94,7 +92,10 @@ def main() raises:
     got(r, "body_cut", Int(ERR_INTERNAL), "a truncated control body")
     got(r, "body_3_bytes", Int(ERR_INTERNAL), "komira_udf_pyworker: error: unpack_from")
     got(r, "schemas_garbled", Int(ERR_INTERNAL), "the spec's schemas:")
-    got(r, "module_missing", d, "module udf_no_such_module is not on the runtime's path")
+    # VALIDATE opens no code (design 4.3): a missing module passes it and
+    # fails at LOAD.
+    got(r, "module_missing", 0, "OK")
+    got(r, "module_missing_load", Int(ERR_LOAD), "import udf_no_such_module")
     got(r, "import_fails", Int(ERR_LOAD), "import udf_worker_badimport: RuntimeError")
     got(r, "value_not_function", Int(ERR_LOAD), "the VALUE is a int, not a function")
     got(r, "value_bad_pickle", Int(ERR_LOAD), "deserializing the VALUE:")

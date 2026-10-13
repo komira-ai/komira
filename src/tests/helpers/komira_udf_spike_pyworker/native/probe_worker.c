@@ -11,7 +11,7 @@
  *            worker that is not a zygote or without its socket; every
  *            ERROR with row and group -1.
  *   load     LOAD and VALIDATE bodies with one defect each (form, entry
- *            grammar, descriptor, code objects, shape, argument and result
+ *            grammar, code objects, shape, argument and result
  *            types, a body cut short, schemas that do not parse, a module
  *            that fails at import, VALUE payloads that are not functions or
  *            do not bind), each refused with its status and reason; 64
@@ -204,11 +204,13 @@ static void control_cases(struct pj* j, const char* dir) {
   uint8_t* p;
   if (raw_recv(&w, &h, &p) == 0 && h.op == KOMIRA_UDF_OP_OK) {
     struct pyw_rd d = {p, h.payload_len, 0, 0};
+    uint32_t v[5];
+    for (int i = 0; i < 5; i++) v[i] = pyw_rd_u32(&d);
     char* rid = pyw_rd_str(&d);
     char* abi = pyw_rd_str(&d);
     char m[200];
     int at = snprintf(m, sizeof(m), "%s %s", rid ? rid : "?", abi ? abi : "?");
-    for (int i = 0; i < 10; i++) at += snprintf(m + at, sizeof(m) - (size_t)at, " %u", pyw_rd_u32(&d));
+    for (int i = 0; i < 5; i++) at += snprintf(m + at, sizeof(m) - (size_t)at, " %u", v[i]);
     pj_case(j, "describe", d.bad ? -1 : 0, m, (int64_t)(h.payload_len - d.at));
     free(rid), free(abi);
   }
@@ -398,8 +400,6 @@ static void load_cases(struct pj* j, const char* dir) {
   CASE("entry_no_module", s.entry = ":pair");
   CASE("entry_no_function", s.entry = "udf_worker_fixtures:");
   CASE("entry_two_colons", s.entry = "udf_worker_fixtures:pair:x");
-  CASE("descriptor_version_1", s.dver = 1);
-  CASE("descriptor_bytes", s.desc = "x");
   CASE("value_no_code", (s.form = KOMIRA_UDF_FORM_VALUE, s.entry = NULL));
   CASE("value_role_other", (s.form = KOMIRA_UDF_FORM_VALUE, s.entry = NULL, s.ncode = 1, s.role[0] = "other"));
   CASE("value_two_codes",
@@ -422,6 +422,9 @@ static void load_cases(struct pj* j, const char* dir) {
   s.entry = "udf_worker_badimport:f";
   s.args = "l";
   load(j, "import_fails", &w, L, &s);
+  s = PAIR;
+  s.entry = "udf_no_such_module:f";
+  load(j, "module_missing_load", &w, L, &s);
   char root[400];
   const char* bad[4] = {"not_function", "bad_pickle", "unresolved_hints", "bad_signature"};
   for (int i = 0; i < 4; i++) {

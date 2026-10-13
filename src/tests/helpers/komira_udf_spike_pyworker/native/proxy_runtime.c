@@ -26,9 +26,13 @@
  *                                        not limited (the counterfactual:
  *                                        threads run at the fork)
  *
- * The worker answers describe; the library reports it with thread_affine 0:
- * its handles may be called from any engine thread, one at a time (the
- * worker's own thread runs the UDF).
+ * The worker answers describe: class MANAGED, features CONTAINS_CRASHES (a
+ * worker that ends while user code may have run is ERR_WORKER_CRASHED) and
+ * FORCED_STOP (user code deaf to a cancel or past its deadline is stopped by
+ * killing its worker: ERR_KILLED). A loss during a request that runs no user
+ * code is ERR_INSTANCE_LOST (section 4.5). validate and load check the spec
+ * against its descriptor (version 1, komira_udf_spike_descriptor.h) here,
+ * before any message.
  *
  * FFI-BOUNDARY. Owners: the rt, udf, context and instance structs are this
  * file's, freed by shutdown, unload, close_context and close_instance; each
@@ -45,6 +49,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "komira_udf_spike_descriptor.h"
 #include "pyw.h"
 
 #define MAX_ARGS 64 /* the worker's MAX_ARGS; the IPC writer takes 64 columns */
@@ -128,11 +133,24 @@ static int32_t fail_chan(komira_udf_error* e, const struct pyw_chan* c) {
   return fail(e, KOMIRA_UDF_ERR_INSTANCE_LOST, c->why, NULL, -1);
 }
 
+/* The status of a worker lost during request `op` (section 4.5):
+ * ERR_WORKER_CRASHED when the worker ended by itself while the request
+ * could run user code (LOAD imports or deserializes the UDF; CALL_BATCH
+ * calls it), else ERR_INSTANCE_LOST: no user code ran for this request (the
+ * channel was dead before it, the request runs none, or the loss was a
+ * protocol fault). */
+static int32_t fail_lost(komira_udf_error* e, const struct pyw_chan* c, uint32_t op, int was_dead) {
+  int user_code = op == KOMIRA_UDF_OP_LOAD || op == KOMIRA_UDF_OP_CALL_BATCH;
+  int32_t code = !was_dead && c->crashed && user_code ? KOMIRA_UDF_ERR_WORKER_CRASHED : KOMIRA_UDF_ERR_INSTANCE_LOST;
+  return fail(e, code, c->why, NULL, -1);
+}
+
 /* A request whose OK carries one u64 id. */
 static int32_t request_id(struct pyw_chan* c, uint32_t op, const struct pyw_buf* body, uint64_t* id,
                           komira_udf_error* e) {
   struct pyw_reply r;
-  if (pyw_chan_request(c, op, body, NULL, 0, &r) != 0) return fail_chan(e, c);
+  int was_dead = c->dead;
+  if (pyw_chan_request(c, op, body, NULL, 0, &r) != 0) return fail_lost(e, c, op, was_dead);
   int32_t rc = KOMIRA_UDF_OK;
   if (r.op == KOMIRA_UDF_OP_ERROR) {
     rc = fail_reply(e, &r);
@@ -218,9 +236,22 @@ static int32_t pw_describe(komira_udf_rt* rt, komira_udf_capabilities* c) {
   return KOMIRA_UDF_OK;
 }
 
+/* The spec against its descriptor (section 3.1: the descriptor records the
+ * signature, so validate stays pure): version 1, canonical, the entry, the
+ * shape, every argument and the result. A ROW or MAP_BATCHES_FRAME
+ * descriptor without recorded_fields is left unchecked (this runtime
+ * declares neither shape). Opens no code and sends no message. */
+static int32_t check_descriptor(const komira_udf_spec* s, komira_udf_error* e) {
+  komira_udf_spike_descriptor d;
+  char why[300];
+  int32_t rc = komira_udf_spike_descriptor_check(s, 0, &d, why, sizeof(why));
+  return rc == KOMIRA_UDF_OK ? rc : fail(e, rc, why, NULL, -1);
+}
+
 static int32_t pw_validate(komira_udf_rt* rt, const komira_udf_spec* s, komira_udf_error* e) {
   struct pyw_buf b = {0};
   int32_t rc = encode_spec(s, &b, NULL, e);
+  if (rc == KOMIRA_UDF_OK) rc = check_descriptor(s, e);
   if (rc == KOMIRA_UDF_OK) {
     pthread_mutex_lock(&rt->lock);
     rc = request_id(&rt->zygote, KOMIRA_UDF_OP_VALIDATE, &b, NULL, e);
@@ -235,6 +266,7 @@ static int32_t pw_load(komira_udf_rt* rt, const komira_udf_spec* s, komira_udf_u
   if (u == NULL) return fail(e, KOMIRA_UDF_ERR_OUT_OF_MEMORY, "load: out of memory", NULL, -1);
   u->rt = rt;
   int32_t rc = encode_spec(s, &u->body, u, e);
+  if (rc == KOMIRA_UDF_OK) rc = check_descriptor(s, e);
   if (rc == KOMIRA_UDF_OK) {
     pthread_mutex_lock(&rt->lock);
     rc = request_id(&rt->zygote, KOMIRA_UDF_OP_LOAD, &u->body, &u->remote, e);
@@ -417,6 +449,8 @@ static void pw_close_instance(komira_udf_instance* i) {
 
 /* ---- call_batch ---------------------------------------------------------- */
 
+/* The argument struct the host passed, against the bound signature: a
+ * breach is the host's (ERR_HOST_CONTRACT, design 4.5). */
 static const char* args_layout_error(const struct ArrowArray* in, const komira_udf_udf* u) {
   if (in->n_children != u->n_args) return "args has a child count other than the bound signature's";
   if (in->length < 0) return "args has a negative length";
@@ -449,10 +483,10 @@ static int32_t pw_call_batch(komira_udf_instance* inst, const komira_udf_call* c
     code = KOMIRA_UDF_ERR_INSTANCE_LOST;
     bad = c->ch.why[0] ? c->ch.why : "the context's worker is gone";
   } else if (!on_cpu) {
-    code = KOMIRA_UDF_ERR_UNSUPPORTED;
-    bad = "args are not on the CPU";
+    code = KOMIRA_UDF_ERR_HOST_CONTRACT;
+    bad = "args are not on the CPU (design 4.4)";
   } else if ((bad = args_layout_error(&in, u)) != NULL) {
-    code = KOMIRA_UDF_ERR_INTERNAL;
+    code = KOMIRA_UDF_ERR_HOST_CONTRACT;
   } else if (call->cancel != NULL && __atomic_load_n(call->cancel, __ATOMIC_ACQUIRE) != 0) {
     code = KOMIRA_UDF_ERR_CANCELLED;
     bad = "cancelled before the batch";
@@ -476,14 +510,15 @@ static int32_t pw_call_batch(komira_udf_instance* inst, const komira_udf_call* c
   int killed = 0;
   if (pyw_chan_call(&c->ch, head, sizeof(head), in.length, cols, u->arg_width, u->n_args, &in, call, host, &r,
                     &killed) != 0) {
-    /* A kill answers the call with its reason (a retry of a cancelled or
-     * late batch would be wrong); the context is lost, and every later call
-     * on it returns ERR_INSTANCE_LOST. */
+    /* The context is lost, and every later call on it returns
+     * ERR_INSTANCE_LOST. A worker this library stopped by force (user code
+     * ignored a cancel or a deadline) is ERR_KILLED, its message saying
+     * which (section 4.7); one that ended by itself while user code may
+     * have run is ERR_WORKER_CRASHED; a protocol fault is
+     * ERR_INSTANCE_LOST. */
     c->lost = 1;
-    int32_t code = killed == PYW_KILLED_DEADLINE ? KOMIRA_UDF_ERR_DEADLINE
-                   : killed == PYW_KILLED_CANCEL ? KOMIRA_UDF_ERR_CANCELLED
-                                                 : KOMIRA_UDF_ERR_INSTANCE_LOST;
-    return fail(e, code, c->ch.why, NULL, -1);
+    if (killed != 0) return fail(e, KOMIRA_UDF_ERR_KILLED, c->ch.why, NULL, -1);
+    return fail_lost(e, &c->ch, KOMIRA_UDF_OP_CALL_BATCH, 0);
   }
   if (r.op == KOMIRA_UDF_OP_ERROR) {
     int32_t rc = fail_reply(e, &r);
@@ -601,7 +636,9 @@ static int own_dir(char* out, size_t n) {
   return 1;
 }
 
-/* DESCRIBE's body: runtime id, ABI tag, then ten u32 in the struct's order. */
+/* DESCRIBE's body (the wire of the node worker runtime): five u32,
+ * max_descriptor_version, shapes, devices, features and udf_class, then the
+ * runtime id and the ABI tag. */
 static int32_t describe_remote(struct komira_udf_rt* rt, komira_udf_error* e) {
   struct pyw_reply r;
   if (pyw_chan_request(&rt->zygote, KOMIRA_UDF_OP_DESCRIBE, NULL, NULL, 0, &r) != 0)
@@ -612,10 +649,10 @@ static int32_t describe_remote(struct komira_udf_rt* rt, komira_udf_error* e) {
     return rc;
   }
   struct pyw_rd d = {r.payload, r.len, 0, 0};
+  uint32_t v[5];
+  for (int i = 0; i < 5; i++) v[i] = pyw_rd_u32(&d);
   char* id = pyw_rd_str(&d);
   char* abi = pyw_rd_str(&d);
-  uint32_t v[10];
-  for (int i = 0; i < 10; i++) v[i] = pyw_rd_u32(&d);
   pyw_reply_free(&r);
   int ok = !d.bad && id && abi && strlen(id) < sizeof(rt->runtime_id) && strlen(abi) < sizeof(rt->runtime_abi);
   if (ok) {
@@ -631,14 +668,9 @@ static int32_t describe_remote(struct komira_udf_rt* rt, komira_udf_error* e) {
   c->runtime_abi = rt->runtime_abi;
   c->max_descriptor_version = v[0];
   c->shapes = v[1];
-  c->threading = v[2];
-  c->thread_affine = 0; /* this library's handles: any engine thread, one at a time */
-  c->transports = v[4];
-  c->hosting = v[5];
-  c->devices = v[6];
-  c->features = 0; /* this library has no memory_report entry */
-  c->udf_class = v[8];
-  c->global_lock = v[9];
+  c->devices = v[2];
+  c->features = v[3]; /* CONTAINS_CRASHES and FORCED_STOP: this library's (section 4.2) */
+  c->udf_class = v[4];
   return KOMIRA_UDF_OK;
 }
 
