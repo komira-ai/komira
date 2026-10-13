@@ -50,8 +50,8 @@
 #   5  push_join_residual_to_side                 [join]   then re-scan Filter
 #   6  fold_constants, simplify_predicates                 (when there is work)
 #   7  factor_or_conjuncts                        [filter] BEFORE 8
-#   8  eliminate_common_subexpressions, rewrite_in_clauses
-#                                     [filter or project or aggregate]
+#   8  eliminate_common_subexpressions  [filter or project or aggregate],
+#      rewrite_in_clauses                                  (when there is a site)
 #   9  fuse_filters (consecutive filters only), decompose_symmetric_or,
 #      factor_or_conjuncts, decompose_filters [join], push_predicates_down,
 #      scalar_broadcast_rewrite(deps)             [filter]
@@ -137,8 +137,6 @@ from komira_plan_ir.plan_helpers import (
     _plan_has_tag,
     _plan_has_consecutive_filters,
     _plan_has_sort_above_limit,
-    _plan_has_foldable_exprs,
-    _plan_has_simplifiable_exprs,
 )
 
 from .optimizer_config import OptimizerConfig
@@ -163,6 +161,9 @@ from .optimizer_expr import (
     simplify_predicates,
     eliminate_common_subexpressions,
     rewrite_in_clauses,
+    _plan_has_foldable_exprs,
+    _plan_has_simplifiable_exprs,
+    _plan_has_in_sites,
 )
 from .optimizer_or_factoring import factor_or_conjuncts
 from .optimizer_symmetric_or import decompose_symmetric_or
@@ -262,14 +263,13 @@ def _run_pass_order(
 
     # 6. Expression simplification, each pass behind a precheck. Folding
     # first: it turns `NOT ((1 = 1) AND NOT x)` into `NOT NOT x`, which
-    # simplification then removes. The prechecks read Filter predicates,
-    # Project expressions and scan filters only, so a plan whose one foldable
-    # or simplifiable expression is an aggregate argument or a join residual
-    # skips the pass, although the pass rewrites those slots (komira#1306).
-    # Both run after step 5, so a residual step 5 moved into a Filter folds,
-    # and before steps 7-8, which read their output: a removed double
-    # negation exposes an OR to factoring, and a folded constant makes two
-    # expressions equal for CSE.
+    # simplification then removes. Each precheck walks the same sites as its
+    # pass (`optimizer_expr._walk_expr_sites`: scan filters, Filter
+    # predicates, Project expressions, aggregate-function arguments and join
+    # residuals), so a plan whose one foldable or simplifiable expression sits
+    # at any of them runs the pass. Both run before steps 7-8, which read
+    # their output: a removed double negation exposes an OR to factoring, and
+    # a folded constant makes two expressions equal for CSE.
     if _plan_has_foldable_exprs(plan):
         plan = fold_constants(plan^)
     if _plan_has_simplifiable_exprs(plan):
@@ -288,6 +288,7 @@ def _run_pass_order(
         plan = factor_or_conjuncts(plan^)
     if has_filter or has_project or has_aggregate:
         plan = eliminate_common_subexpressions(plan^)
+    if _plan_has_in_sites(plan):
         plan = rewrite_in_clauses(plan^)
 
     # 9. Filters. Symmetric-OR inference runs before pushdown so the
