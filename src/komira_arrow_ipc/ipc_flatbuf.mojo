@@ -1083,7 +1083,8 @@ def add_field_inline_struct(
     tb._field_widths[field_id] = UInt8(size if size <= 255 else 255)
     # `width=size` is fine for 16/24-byte structs; if a struct exceeds
     # 255 bytes (rare in Arrow.fbs), the width field is capped at 255
-    # but the struct_size field carries the true size for emission.
+    # but the struct_size field carries the true size, which end_table
+    # uses for both the layout and the emission.
     tb._field_present[field_id] = True
     if field_id + 1 > tb._field_count:
         tb._field_count = field_id + 1
@@ -1160,6 +1161,11 @@ def end_table(mut writer: FlatbufWriter, var tb: _TableBuilder) raises -> Int:
         if not tb._field_present[i]:
             continue
         var w = Int(tb._field_widths[i])
+        # An inline struct's width byte is capped at 255; its true size
+        # (what the emission loop below writes) is `_field_struct_size`.
+        var struct_sz = Int(tb._field_struct_size[i])
+        if struct_sz > 0:
+            w = struct_sz
         # Natural alignment: round inline_size_data up to multiple of w
         # for w ≤ 8; inline-struct fields (Buffer = 16) align to 8.
         var align: Int = w
