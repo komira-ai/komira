@@ -1,0 +1,12 @@
+{
+ "name": "split_across_contexts",
+ "defect": "a result depends on the instance, the context or where batches were split",
+ "run": "split",
+ "entry": "double",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 5, "columns": [{"type": "int64", "values": [1, 2, 3, 4, 5]}]},
+ "split_at": 2,
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [2, 4, 6, 8, 10]}}
+}

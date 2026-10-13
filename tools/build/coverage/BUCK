@@ -1,27 +1,21 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load(":defs.bzl", "cov_gate_dir")
+load(":defs.bzl", "branch_gate_rows", "cov_gate_dir")
+load(":policy.bzl", "COVERAGE_BRANCH_GATE")
 
 # covcheck: coverage reports (kcov's Cobertura, lcov, and the branch records
 # of tools/build/coverage/branch) to per-package numbers,
 # findings against the policy (target, ratchet floors, surviving mutants,
 # exemptions), a GitHub check run's request bodies, and the per-package build
-# gate. See README.md. The floors are DATA, `ratchet.tsv`; a test reads the
-# shipped file so it can never be left unparseable.
-export_file(
-    name = "ratchet.tsv",
-    visibility = ["PUBLIC"],
-)
-
-# The coverage census (census.md): census.sh renders
-# docs/coverage_census.md and the rows of ratchet.tsv from census.tsv, and
-# the root BUCK's :coverage_census holds the three to each other.
-export_file(
-    name = "census.tsv",
-    visibility = ["PUBLIC"],
-)
-
+# gate. See README.md. The floors are DATA, each package's own
+# `coverage_floor.tsv` (README.md, "The ratchet").
+#
+# The coverage census (census.md): census_files assembles every package's
+# coverage_floor.tsv and coverage_census.tsv, census.sh renders the census
+# doc from them; the root BUCK's :coverage_census builds the doc and holds
+# each floor to the census.
 export_file(
     name = "census.sh",
     visibility = ["PUBLIC"],
@@ -93,8 +87,8 @@ mojo_library(
         # a DeclarationOnlyFile note; the near-miss fixture (a default
         # method body with code) and a table of near misses still count
         "tests/test_declaration_only.mojo",
-        # the ratchet grammar, the shipped ratchet.tsv, every comparison
-        # outcome, and the proposed file
+        # the ratchet grammar, every comparison outcome, the proposed file,
+        # and what a change lowers of a base's floors (lowered)
         "tests/test_ratchet.mojo",
         # the shared computation: merged reports, test sources both ways,
         # exemptions, mutants, the target, conclusions per mode, rounding, and
@@ -121,9 +115,6 @@ mojo_library(
             "tests/fixtures/decl/declaration_only.mojo",
             "tests/fixtures/decl/near_miss.mojo",
         ],
-        "tests/test_ratchet.mojo": {
-            "tools/build/coverage/ratchet.tsv": ":ratchet.tsv",
-        },
         "tests/test_cli.mojo": [
             "tests/fixtures/e2e/cov_alpha.xml",
             "tests/fixtures/e2e/cov_beta.xml",
@@ -151,10 +142,11 @@ mojo_binary(
 )
 
 # The directory every mojo_library's coverage gate runs from
-# (tools/build/mojo/coverage.bzl; README.md, "The build gate"): cov_gate.sh,
-# covcheck_bin and ratchet.tsv. The Mojo libraries covcheck_bin depends on
-# cannot have it as a dependency (a gate of their own): they are the ledger
-# COVERAGE_NO_GATE of policy.bzl, held equal to that closure by no_gate.bxl.
+# (tools/build/mojo/coverage.bzl; README.md, "The build gate"): cov_gate.sh
+# and covcheck_bin; each gate reads its own package's coverage_floor.tsv. The
+# Mojo libraries covcheck_bin depends on cannot have it as a dependency (a
+# gate of their own): they are the ledger COVERAGE_NO_GATE of policy.bzl,
+# held equal to that closure by no_gate.bxl.
 cov_gate_dir(
     name = "cov_gate",
     exec_compatible_with = LINUX_X86_64,
@@ -167,10 +159,42 @@ export_file(
     visibility = ["PUBLIC"],
 )
 
+# census_files: the per-package coverage files assembled for the census and
+# split back into packages (census_files.zig). Its cases
+# (census_files_test.zig, which imports the tool) run as a build action,
+# `zig test`; the executable is built behind them, so it does not exist
+# unless they pass.
+zig_test(
+    name = "census_files_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["census_files.zig"],
+    src = "census_files_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "census_files",
+    exec_compatible_with = LINUX_X86_64,
+    src = "census_files.zig",
+    unit_tests = [":census_files_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
+
 shell_lint(
     name = "shell_lint",
     srcs = [
         "census.sh",
         "cov_gate.sh",
     ],
+)
+
+# Every row of COVERAGE_BRANCH_GATE (policy.bzl) names a Mojo library by the
+# exact label string mojo_library looks itself up by: a row naming none, or
+# spelled another way, fails this target, which the pull-request check builds.
+branch_gate_rows(
+    name = "branch_gate_rows",
+    libraries = {row: row for row in sorted(COVERAGE_BRANCH_GATE.keys())},
 )

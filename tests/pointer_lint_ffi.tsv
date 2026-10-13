@@ -23,6 +23,7 @@ src/komira_compression/xz_buffer.mojo	liblzma's single-call buffer encode and de
 src/komira_compression/zstd_frame.mojo	libzstd's one-shot frame calls
 src/komira_csv/csv_sink.mojo	pwrite into disjoint ranges of the output file
 src/komira_http_client/tests/test_L2_tls_starttls_upgrade.mojo	the socketpair and pthread FFI of the STARTTLS upgrade test: the server thread argument and the PEM buffers it carries
+src/komira_job_supervisor/tests/test_s3_transport_first_byte.mojo	the socket and pthread FFI of its one-shot 127.0.0.1 listener: the listener thread's heap argument and the C NULLs it passes
 src/komira_lz4/frame.mojo	liblz4, loaded once per process
 src/komira_morsel/tests/test_vtable_source_failure_paths.mojo	the scan vtable C ABI of a stand-in connector: the connector state and scratch buffers it hands the engine through abi("C") thunks
 src/komira_objectstore/local_fs_conditional_store.mojo	the filesystem C shim (komira_fs_enoent, komira_fs_errno_name)
@@ -31,3 +32,33 @@ src/komira_simd/tests/test_fast_copy_edges.mojo	_copy_small's raw-pointer signat
 src/tests/helpers/komira_plan_harness/door.mojo	the C ABI of a plan-door shared library it dlopens (the handle slot, the context, last_error, the ArrowArrayStream box, Door B's NULL probe buffer)
 src/tests/helpers/komira_plan_harness/tests/door_stub/plan_door_stub.mojo	the C ABI (session, ArrowArrayStream, Door B buffers) of the plan_door_stub shared library
 src/tests/helpers/komira_plan_harness/tests/door_stub/plan_door_tiny.mojo	the C ABI (NULL session, unread plan and out pointers) of the plan_door_null_ctx and plan_door_no_bytes shared libraries
+src/tests/helpers/komira_udf_spike_abi/_cabi.mojo	the Mojo mirror of the UDF runtime C ABI structs (komira_udf_runtime.h) and the layout probe
+src/tests/helpers/komira_udf_spike_abi/_host.mojo	the host side of the UDF runtime C ABI: the Arrow arrays, schemas and streams it exports to a runtime and the arrays it imports back
+src/tests/helpers/komira_udf_spike_abi/_table.mojo	the dlopened UDF runtime library, its komira_udf_runtime table, and the cancel flag of a call
+src/tests/helpers/komira_udf_spike_abi/refrt/echo_broken_so.mojo	the init export of the echo_broken UDF runtime library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_abi/refrt/echo_global_lock_so.mojo	the init export of the echo_global_lock UDF runtime library, forwarded to its second C init
+src/tests/helpers/komira_udf_spike_abi/refrt/echo_so.mojo	the init export of the echo UDF runtime library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_abi/refrt/echo_variant_so.mojo	the init export of the echo_variant UDF runtime library, forwarded to its variant C init
+src/tests/helpers/komira_udf_spike_native/refrt/both_symbols_so.mojo	the two init exports of the both_symbols native UDF library, forwarded to the C native library's init
+src/tests/helpers/komira_udf_spike_native/refrt/echo_as_library_so.mojo	the native library export of the echo_as_library shared library, forwarded to the echo runtime's C init
+src/tests/helpers/komira_udf_spike_native/refrt/native_c_affine_so.mojo	the init export of the native_c_affine UDF library, forwarded to its second C init
+src/tests/helpers/komira_udf_spike_native/refrt/native_c_so.mojo	the init export of the native_c UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/native_so.mojo	the init export of the native UDF runtime library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_abi2_so.mojo	the init export of the variant_abi2 native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_counted_so.mojo	the init export of the variant_counted native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_deferred_so.mojo	the init export of the variant_deferred native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_error_on_ok_so.mojo	the init export of the variant_error_on_ok native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_exact_table_so.mojo	the init export of the variant_exact_table native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_global_lock_so.mojo	the init export of the variant_global_lock native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_init_fails_so.mojo	the init export of the variant_init_fails native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_managed_so.mojo	the init export of the variant_managed native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_no_scalar_so.mojo	the init export of the variant_no_scalar native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_one_short_so.mojo	the init export of the variant_one_short native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_short_table_so.mojo	the init export of the variant_short_table native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_single_thread_so.mojo	the init export of the variant_single_thread native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_thread_safe_so.mojo	the init export of the variant_thread_safe native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native/refrt/variant_worker_only_so.mojo	the init export of the variant_worker_only native UDF library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_native_mojo/_arrow.mojo	the Arrow C Data arrays a native UDF library reads and builds, and the error strings it hands the host
+src/tests/helpers/komira_udf_spike_native_mojo/_table.mojo	the UDF runtime C ABI table of the Mojo native UDF library and its handles
+src/tests/helpers/komira_udf_spike_node_worker/refrt/node_worker_corrupt_so.mojo	the init export of the node_worker_corrupt UDF runtime library, forwarded to its C init
+src/tests/helpers/komira_udf_spike_node_worker/refrt/node_worker_so.mojo	the init export of the node_worker UDF runtime library, forwarded to its C init

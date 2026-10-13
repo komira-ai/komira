@@ -22,7 +22,8 @@
 # `CsvSink("/x.csv")`):
 #   - `delimiter: String = ","`   — column separator.
 #   - `header: Bool = True`       — write the column-name row.
-#   - `quote: String = "\""`      — the RFC-4180 quote character.
+#   - `quote: String = "\""`      — the RFC-4180 quote character. Empty means
+#     no quoting: a field holding the delimiter, LF or CR then raises.
 #
 # CSV value encoding (DuckDB-ish; matches `komira_arrow.csv_emit`'s
 # byte-format DECISIONS, with ONE deliberate divergence: `null` → an EMPTY
@@ -165,19 +166,29 @@ def _needs_quoting(s: String, delimiter: String, quote: String) -> Bool:
     return False
 
 
+def _refuse_unquotable() raises:
+    """Raise for a field that needs quoting when `quote` is empty: with no
+    quote character the field cannot be enclosed, and writing it bare would
+    split it into extra fields or records (komira-ai/komira#1130). Python's
+    `csv` refuses the same case ("need to escape")."""
+    raise Error(
+        "CsvSink: a field holds the delimiter, LF or CR but quote is empty,"
+        " so it cannot be enclosed; set a quote character"
+    )
+
+
 def _write_string_cell(
     mut sink: String, s: String, delimiter: String, quote: String
-):
+) raises:
     """Append `s` to `sink` with RFC-4180 quoting iff needed (embedded quote
-    char doubled)."""
+    char doubled). Raises if `s` needs quoting and `quote` is empty."""
     if not _needs_quoting(s, delimiter, quote):
         sink.write(s)
         return
+    if quote.byte_length() == 0:
+        _refuse_unquotable()
     sink.write(quote)
-    if quote.byte_length() > 0:
-        sink.write(s.replace(quote, quote + quote))
-    else:
-        sink.write(s)
+    sink.write(s.replace(quote, quote + quote))
     sink.write(quote)
 
 
@@ -473,18 +484,18 @@ def _needs_quoting_bytes(s: String, delimiter: String, quote: String) -> Bool:
 
 def _write_string_cell_to_bytes(
     mut out: List[UInt8], s: String, delimiter: String, quote: String
-):
+) raises:
     """RFC-4180 escape `s` directly into `out` (no intermediate String
-    cell allocation). Common path: NO trigger char → bulk-copy bytes."""
+    cell allocation). Common path: NO trigger char → bulk-copy bytes.
+    Raises if `s` needs quoting and `quote` is empty."""
     if not _needs_quoting_bytes(s, delimiter, quote):
         _append_string_to_bytes(out, s)
         return
+    if quote.byte_length() == 0:
+        _refuse_unquotable()
     # Quoted form.
     _append_string_to_bytes(out, quote)
-    if quote.byte_length() > 0:
-        _append_string_to_bytes(out, s.replace(quote, quote + quote))
-    else:
-        _append_string_to_bytes(out, s)
+    _append_string_to_bytes(out, s.replace(quote, quote + quote))
     _append_string_to_bytes(out, quote)
 
 
@@ -1560,7 +1571,9 @@ struct CsvSink(RowSink, Movable):
             path: Output file path. Consumed.
             delimiter: Column separator (kw-only; default `,`).
             header: Write the column-name row first (kw-only; default True).
-            quote: RFC-4180 quote character (kw-only; default `"`).
+            quote: RFC-4180 quote character (kw-only; default `"`). Empty
+                disables quoting; a field that would need quotes then
+                raises.
         """
         self.path = path^
         self.delimiter = delimiter

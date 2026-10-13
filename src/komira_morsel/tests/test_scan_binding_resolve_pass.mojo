@@ -84,7 +84,9 @@ from komira_plan_ir.logical_plan import (
     PLAN_SCAN,
     PLAN_TAG_COUNT,
     PLAN_VIEW_REF,
+    EXCHANGE_KIND_GATHER,
     plan_tag_name,
+    plan_tag_is_retired,
 )
 from komira_plan_expr.partition_expr import PartitionExpr
 from komira_plan_expr.scalar_value import ScalarValue
@@ -932,6 +934,9 @@ def test_every_plan_tag_has_an_arm_and_one_past_the_last_raises() raises:
     var registry = ScanRegistry()
     var snaps = List[ResolvedScanSnapshot]()
     for t in range(PLAN_TAG_COUNT):
+        # The retired ids 16 and 17 carry no node; one is refused below.
+        if plan_tag_is_retired(UInt8(t)):
+            continue
         # A node of tag `t` with no payload: every modelled arm answers 0.
         var p = _leaf(set, String("orders"))
         p._scan = None
@@ -951,6 +956,17 @@ def test_every_plan_tag_has_an_arm_and_one_past_the_last_raises() raises:
         raised = True
         assert_true(String(SCAN_RESOLVE_PASS_UNMODELLED_TAG) in String(e))
     assert_true(raised, "an unmodelled plan tag must raise, not return 0")
+    # A retired id lies below the count and is refused like any unmodelled one.
+    var r = _leaf(set, String("orders"))
+    r._scan = None
+    r.tag = UInt8(16)
+    var retired_raised = False
+    try:
+        _ = resolve_plan_binding_leaves(r, set, registry, snaps)
+    except e:
+        retired_raised = True
+        assert_true(String(SCAN_RESOLVE_PASS_UNMODELLED_TAG) in String(e))
+    assert_true(retired_raised, "retired plan tag 16 must raise, not return 0")
 
 
 def test_every_expr_tag_has_an_arm_and_one_past_the_last_raises() raises:
@@ -1777,6 +1793,12 @@ def test_every_child_bearing_plan_arm_descends_to_an_open_leaf() raises:
         "CAST_TO_VARCHAR.child",
         seen,
     )
+    _assert_plan_descends(
+        LogicalPlan.exchange(_leaf(set, String("t")), EXCHANGE_KIND_GATHER),
+        set,
+        "EXCHANGE.child",
+        seen,
+    )
 
     # ---- TWO OR MORE CHILDREN.
     _assert_plan_descends(
@@ -1854,6 +1876,8 @@ def test_every_child_bearing_plan_arm_descends_to_an_open_leaf() raises:
     # A new child-bearing tag reds this table, not only the unmodelled-tag test.
     for t in range(PLAN_TAG_COUNT):
         if t == Int(PLAN_VIEW_REF) or t == Int(PLAN_CSE_REF):
+            continue
+        if plan_tag_is_retired(UInt8(t)):
             continue
         assert_true(
             seen[t],

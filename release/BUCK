@@ -12,12 +12,11 @@
 # The machine file's validations run each installed library's README examples
 # (src/<library>/README.md, shipped as share/doc/<name>/README.md): the same
 # examples are a welded test of the library's own build, so they cannot rot.
-# release/ci holds the commands the per-change check runs (artifacts.textproto's
-# `build_targets` and `derive_checks`); its `affected` is the binary
-# //tools/build/ci:affected. It also holds main_red.py, the script of
-# .github/workflows/main_red.yml, tested by //release/ci/tests:test_main_red;
-# derive_checks.py's answer to a failed query is tested by
-# //release/ci/tests:test_derive_checks.
+# release/ci holds the `build_targets` command the per-change check runs
+# (artifacts.textproto); its `affected` and `derive_checks` are the binaries
+# //tools/build/ci:affected and //tools/build/ci:derive_checks. It also holds
+# main_red.py, the script of .github/workflows/main_red.yml, tested by
+# //release/ci/tests:test_main_red.
 # Changes need the release approver's review (.github/CODEOWNERS).
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 
@@ -41,12 +40,6 @@ export_file(
 export_file(
     name = "main_red.py",
     src = "ci/main_red.py",
-    visibility = ["//release/ci/tests:"],
-)
-
-export_file(
-    name = "derive_checks.py",
-    src = "ci/derive_checks.py",
     visibility = ["//release/ci/tests:"],
 )
 

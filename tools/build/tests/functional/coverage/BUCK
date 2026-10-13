@@ -1,4 +1,4 @@
-load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/lint:defs.bzl", "shell_lint", "target_suite")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "mojo_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "cov_branch_check", "cov_conda_gate_check", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_set_check")
@@ -542,7 +542,7 @@ mojo_library(
 )
 
 # Test 47: a library with a C library in its closure (the cshim example's,
-# a cxx_library): its tests' links end with the C library, as mojo_wrapper.sh
+# a cxx_library): its tests' links end with the C library, as mojo_compile
 # appends it (--link-tail), and its branch coverage links pass the same
 # arguments in the same order. Its test calls into C and takes two of the
 # three arms of add_clamped.
@@ -688,12 +688,12 @@ cov_report_check(
 )
 
 # Test 47: the branch coverage link of test_score_arms is the link of its
-# release build plus the profile runtime: mojo_wrapper.sh's `cc` shim gives
+# release build plus the profile runtime: mojo_compile's `cc` shim gives
 # zig what `mojo build` asks for (the compiler's runtime library,
 # --gc-sections, -lm, the shim's --strip-debug and run path), and
-# cov_branch_link.sh gives zig the same line for the instrumented object
-# (link_line.sh). A Mojo release linking with another library, or a link
-# script that drops one, fails here.
+# `cov_branch link` gives zig the same line for the instrumented object
+# (link_line.sh). A Mojo release linking with another library, or a branch
+# coverage link that drops one, fails here.
 cov_link_line_check(
     name = "link_line",
     bc = ":branchlib[coverage][bc][test_score_arms]",
@@ -737,6 +737,7 @@ export_file(
     name = "report.sh",
     visibility = [
         "//negative/coverage:",
+        "//negative/coverage/floorfile:",
         "//src/tests/coverage:",
     ],
 )
@@ -755,4 +756,26 @@ shell_lint(
         "report.sh",
     ],
     visibility = ["komira//:tests_lints"],
+)
+
+# The sub-targets of this package (and of covreadme and covreadme_none) that
+# must build: the pull-request check builds a package's targets, not their
+# sub-targets, so this target names them. Coverage runs under kcov (covenv:
+# test_env, data, PATH, HOME, TMPDIR and no LD_PRELOAD as the gate gives them;
+# branchlib: no LC_ALL, which cov_run.sh sets only for its own tools), README
+# examples under kcov, the mojo_test runs covmt names, and the branch
+# coverage runs of branchlib (no LC_ALL either), branchc (a C library in the
+# closure) and branchtd (a test_deps package with a C library).
+target_suite(
+    name = "greens",
+    targets = [
+        ":covenv[coverage]",
+        ":branchlib[coverage][tests][test_gate_env]",
+        "//functional/coverage/covreadme:covreadme[coverage][tests][readme]",
+        "//functional/coverage/covreadme_none:covreadme_none[coverage][tests][readme]",
+        ":covmt_cov_gate[tests]",
+        ":branchlib[coverage][branch][test_gate_env]",
+        ":branchc[coverage][branch]",
+        ":branchtd[coverage][branch]",
+    ],
 )

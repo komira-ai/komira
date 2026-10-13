@@ -13,7 +13,7 @@ it feeds is [The build gate](../coverage/README.md#the-build-gate).
   `[coverage][bin][<test>]` (`cov/tests/<test>/<test>`, action category
   `mojo_build_cov_test`);
 - one run of that binary under kcov, with the gated test's environment and
-  data (it goes through the same `gate_runner.sh`), whose Cobertura report
+  data (it goes through the same gate (`gate mojo`, [tools/build/run](../run/README.md))), whose Cobertura report
   in repository paths is `[coverage][tests][<test>]` (`cov/tests/<test>.xml`
   and the marker `cov/tests/<test>.passed`, action category `mojo_cov_run`;
   [cov_run](../coverage/kcov/README.md#cov_run)). What differs: the test is
@@ -30,10 +30,10 @@ it feeds is [The build gate](../coverage/README.md#the-build-gate).
   that does not pass `coverage_branch_gate = False`), and nothing waits
   for otherwise: the test emitted as
   LLVM bitcode at `-O0` with line tables (`[coverage][bc][<test>]`,
-  `mojo_emit_cov_bc`, through the same `mojo_wrapper.sh`), instrumented
+  `mojo_emit_cov_bc`, through the same `mojo_compile`), instrumented
   with IR profile counters by the Mojo package's lld and linked with the
   LLVM profile runtime (`[coverage][pgo_bin][<test>]`, `mojo_cov_pgo_link`),
-  and run through the same `gate_runner.sh` with `LLVM_PROFILE_FILE` set,
+  and run through the same gate (`gate mojo`, [tools/build/run](../run/README.md)) with `LLVM_PROFILE_FILE` set,
   whose merged profile is `[coverage][branch][<test>]` (`cov/branch/<test>.profdata`,
   `mojo_cov_branch_run`), that profile applied to the bitcode by the same
   lld as IR text (`[coverage][branch_ir][<test>]`, `mojo_cov_branch_annotate`),
@@ -57,10 +57,10 @@ and, per library, with tests or without:
 and, as its tests for coverage (line coverage only: no branch coverage action):
 
 - its README's examples (`[tests][readme]`), built and run as a test:
-  `[coverage][bin][readme]`, `[coverage][tests][readme]`. A README with no
-  example gives a program that runs nothing (`mojo_cov_readme_source`
-  chooses). The report names the program under `buck-out/readme/`, which
-  covcheck counts outside the repository;
+  `[coverage][bin][readme]`, `[coverage][tests][readme]`: the generated
+  runner, which runs every example's program in one process (with no
+  example it runs nothing). The report names the programs under
+  `buck-out/readme/`, which covcheck counts outside the repository;
 - the `mojo_test` targets it names in `coverage_tests` (none by default; one
   test may be named by several libraries), each depending on it, with a
   source main and no `args`. It cannot depend on them, so its gate is the
@@ -80,7 +80,7 @@ nothing else. A library with no test still has a gate (`NotMeasured`: it
 fails in enforce mode), which its conda package waits for, as does a
 library whose sources are all generated (a cloud SDK client). The libraries
 the gate's own tool depends on are the ledger `COVERAGE_NO_GATE` of
-`policy.bzl` (`covcheck`, `komira_json`, `readme_examples`): they have no
+`policy.bzl` (`covcheck`, `komira_json`): they have no
 gate of their own (the library would depend on the gate's tool, which
 depends on it), and their gate is `<name>_cov_gate`, which their conda
 package waits for too. `[coverage]` is the binaries, the reports and the
@@ -99,7 +99,8 @@ and does one thing: it sets the attributes `coverage_debug` to
 cov_normalize), `coverage_branch` to
 `komira//tools/build/coverage/branch:cov_branch` (the branch coverage
 scripts and the LLVM pieces), `coverage_gate` to `komira//tools/build/coverage:cov_gate`
-(cov_gate.sh, covcheck and the ratchet) and `coverage_mode` to the policy's
+(cov_gate.sh and covcheck), `coverage_floor` to the package's
+`coverage_floor.tsv` when it has one, and `coverage_mode` to the policy's
 (for a library of the ledger or naming `coverage_tests`: no gate; its
 `<name>_cov_gate` is declared), and a `mojo_test`'s `coverage_debug`; with it
 off, `coverage_tests` is dropped. A buckconfig
@@ -122,7 +123,7 @@ cell only: in a repository that mounts komira as the cell `komira`, setting it
 in the root cell's file leaves komira's libraries without `[coverage]`
 ("unknown subtarget").
 
-A coverage build runs the same `mojo_wrapper.sh` as every compile, byte for
+A coverage build runs the same `mojo_compile` as every compile, byte for
 byte, with one argument changed: its link directory (`<zig_dir>`) is
 `cov_link` instead of the toolchain's zig. That directory holds the
 toolchain's zig as `real/` and, as `zig`, `cov_zig`

@@ -23,7 +23,7 @@ gate").
 """
 
 # census: findings are listed, never fatal, except a Regression (a package
-# under its floor of ratchet.tsv), which fails the gate in every mode;
+# under its floor, its coverage_floor.tsv), which fails the gate in every mode;
 # neutral: the same; enforce: a package with any finding fails its build
 # (covcheck gate exits 3).
 COVERAGE_MODE = "census"
@@ -70,9 +70,9 @@ COVERAGE_INFO_ONLY_DIRS = ["src/tests"]
 # The ledger of libraries that cannot have a coverage gate of their own, by
 # label, each with why and where it is gated instead.
 # tools/build/coverage/no_gate.bxl holds this list equal to the Mojo
-# libraries the gate depends on (covcheck_bin's, and through komira_json's
-# README the README tool's), so a row whose library leaves that closure
-# fails the check until it is deleted, and a library that joins it fails
+# libraries the gate depends on (covcheck_bin's; the README tool that
+# komira_json's README runs through is Zig and adds none), so a row whose
+# library leaves that closure fails the check until it is deleted, and a library that joins it fails
 # until it has a row (without one, the library would depend on its own
 # gate's directory, which depends on the library: a cycle of configured
 # targets, whatever waits for the gate). It only shrinks: the check also holds it within the
@@ -87,7 +87,6 @@ _CLOSURE = "covcheck_bin, the gate's tool, depends on it"
 COVERAGE_NO_GATE = {
     "komira//src/komira_json:komira_json": _CLOSURE + " (covcheck reads and writes JSON with it)",
     "komira//tools/build/coverage:covcheck": _CLOSURE + " (the library covcheck_bin runs)",
-    "komira//tools/build/readme_examples:readme_examples": _CLOSURE + " (komira_json and covcheck have a README.md, whose examples its tool turns into a test)",
 }
 
 # The libraries whose coverage gate reads their tests' branch records
@@ -111,8 +110,10 @@ COVERAGE_NO_GATE = {
 # red in census mode. A fixture of the tests cell reads its branch records
 # unless it passes `coverage_branch_gate = False` (coverage.bzl). A library
 # not on the list keeps BranchNotMeasured. mojo_library looks itself up by
-# its label, so a row whose library moved would be read by nothing:
-# branch_gate.bxl fails unless every row names a mojo_library.
+# its label's exact string, so a row whose library moved, or a row spelled
+# another way (`//src/x:x`), would be read by nothing: :branch_gate_rows
+# (BUCK) fails unless every row names a Mojo library and is spelled as that
+# library's label.
 #
 # A raising call in a `try:` body of its function is a decision of two arms
 # (kind `try`: the call returned, it raised into the handler), so a
@@ -171,7 +172,7 @@ COVERAGE_BRANCH_GATE = {
     "komira//src/komira_secret_registry:komira_secret_registry": "its test's branches all classify (16 arms of 2 files)",
     "komira//src/komira_secret_store:komira_secret_store": "its test's branches all classify (10 arms of 2 files)",
     "komira//src/komira_snapshotter:komira_snapshotter": "its test's branches all classify (28 arms of 1 file)",
-    "komira//src/komira_spsc_ring:komira_spsc_ring": "its two tests' branches all classify (50 arms of 2 files, 2 of them `try` arms)",
+    "komira//src/komira_spsc_ring:komira_spsc_ring": "its four tests' branches all classify (50 arms of 2 files, 2 of them `try` arms)",
     "komira//src/komira_sync:komira_sync": "its test's branches all classify (4 arms of 1 file)",
     "komira//src/komira_test_run_id:komira_test_run_id": "its two tests' branches all classify (16 arms of 2 files, 4 of them `try` arms)",
     "komira//src/komira_trace:komira_trace": "its eight tests' branches all classify (102 arms of 2 files)",

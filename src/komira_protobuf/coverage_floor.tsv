@@ -1,0 +1,2 @@
+# This package's coverage floor (tools/build/coverage/README.md, "The ratchet"): its directory, the line and branch floors in basis points, and a pinned row's reason.
+src/komira_protobuf	10000	10000

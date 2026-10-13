@@ -34,7 +34,7 @@
 # THE NAMES A RELEASE PUBLISHES are the ones this file declares, and this file
 # is reviewed through CODEOWNERS; there is no per-run claim. A PUBLISH step
 # reads its channel first and reports every declared name the channel holds
-# no file of yet (NEW NAMES) in its result and the job summary; the gamma
+# no file of yet (NEW NAMES) in its result and the job summary; the beta
 # stage reports prod's before the prod approval.
 #
 # Which farm buck2 builds on is the build job's machine configuration, written
@@ -52,7 +52,7 @@
 # (and may declare explicit checks, `checks { name targets }`, to group
 # targets its own way). The rest of the units are DERIVED when the check
 # runs: the buck2 build system's `derive_checks` command
-# (release/ci/derive_checks.py) reads `//...` and `tests//functional/...`
+# (//tools/build/ci:derive_checks) reads `//...` and `tests//functional/...`
 # from the live graph (`buck2 cquery`) and answers one check per path group
 # for every target no declared unit names or matches: one per library
 # package `//src/<p>/...` (named `<p>`: a change to one library builds that
@@ -82,11 +82,12 @@
 # The tests cell's must-fail fixtures (`tests//negative`) are not units and
 # not in the graph the tool reads: the build system's self-tests
 # (tools/build/tests/run_tests.sh) build each one and assert its refusal.
-# `python3 release/ci/derive_checks.py --from release/artifacts.textproto`
+# `./buck2 run //tools/build/ci:derive_checks -- --from release/artifacts.textproto`
 # prints the answer for a reader; `kci run --stage pr --affected-by <base>
 # --plan` prints the units a change would build.
 #
-# THE COMMANDS. `derive_checks` (release/ci/derive_checks.py) answers the
+# THE COMMANDS. `derive_checks` runs //tools/build/ci:derive_checks
+# (tools/build/ci/change_map/derive.mojo), which answers the
 # derived checks, above. `build_targets` (release/ci/build_targets.sh) builds
 # a unit's targets (both build systems share it, so kci builds every affected
 # unit in ONE run over the union of their targets, and only when that run
@@ -136,8 +137,10 @@ build_systems {
     args: "release/ci/build_targets.sh"
   }
   derive_checks {
-    executable: "python3"
-    args: "release/ci/derive_checks.py"
+    executable: "buck2"
+    args: "run"
+    args: "//tools/build/ci:derive_checks"
+    args: "--"
     args: "{units_file}"
   }
 }
@@ -725,6 +728,132 @@ artifacts {
 }
 
 artifacts {
+  name: "komira_libc"
+  build_system: "buck2"
+  args: "//src/komira_libc:komira_libc_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_libc:komira_libc_conda"
+}
+
+artifacts {
+  name: "komira_lz4"
+  build_system: "buck2"
+  args: "//src/komira_lz4:komira_lz4_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_lz4:komira_lz4_conda"
+}
+
+artifacts {
+  name: "komira_zlib"
+  build_system: "buck2"
+  args: "//src/komira_zlib:komira_zlib_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_zlib:komira_zlib_conda"
+}
+
+artifacts {
+  name: "komira_async_api"
+  build_system: "buck2"
+  args: "//src/komira_async_api:komira_async_api_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_async_api:komira_async_api_conda"
+}
+
+artifacts {
+  name: "komira_buffer"
+  build_system: "buck2"
+  args: "//src/komira_buffer:komira_buffer_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_buffer:komira_buffer_conda"
+}
+
+artifacts {
+  name: "komira_compression"
+  build_system: "buck2"
+  args: "//src/komira_compression:komira_compression_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_compression:komira_compression_conda"
+}
+
+artifacts {
+  name: "komira_crypto"
+  build_system: "buck2"
+  args: "//src/komira_crypto:komira_crypto_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_crypto:komira_crypto_conda"
+}
+
+artifacts {
+  name: "komira_dynamic_filter"
+  build_system: "buck2"
+  args: "//src/komira_dynamic_filter:komira_dynamic_filter_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_dynamic_filter:komira_dynamic_filter_conda"
+}
+
+artifacts {
+  name: "komira_metrics"
+  build_system: "buck2"
+  args: "//src/komira_metrics:komira_metrics_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_metrics:komira_metrics_conda"
+}
+
+artifacts {
+  name: "komira_secret_store"
+  build_system: "buck2"
+  args: "//src/komira_secret_store:komira_secret_store_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_secret_store:komira_secret_store_conda"
+}
+
+artifacts {
+  name: "kci_secret_writer"
+  build_system: "buck2"
+  args: "//src/kci_secret_writer:kci_secret_writer_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/kci_secret_writer:kci_secret_writer_conda"
+}
+
+artifacts {
+  name: "komira_log"
+  build_system: "buck2"
+  args: "//src/komira_log:komira_log_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_log:komira_log_conda"
+}
+
+artifacts {
+  name: "kci_reconciler"
+  build_system: "buck2"
+  args: "//src/kci_reconciler:kci_reconciler_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/kci_reconciler:kci_reconciler_conda"
+}
+
+artifacts {
+  name: "kci_cloud"
+  build_system: "buck2"
+  args: "//src/kci_cloud:kci_cloud_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/kci_cloud:kci_cloud_conda"
+}
+
+artifacts {
   name: "komira_all"
   build_system: "komira_pack"
   args: "conda-meta"
@@ -854,6 +983,34 @@ artifacts {
   args: "{release_dir}/kci_manifest_proto/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/kci_artifact/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_libc/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_lz4/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_zlib/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_async_api/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_buffer/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_compression/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_crypto/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_dynamic_filter/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_metrics/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_secret_store/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/kci_secret_writer/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_log/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/kci_reconciler/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/kci_cloud/manifest.json"
   args: "--license"
   args: "Apache-2.0"
   args: "--summary"
@@ -867,4 +1024,18 @@ artifacts {
   args: "--out-dir"
   args: "{out_dir}"
   targets: "//tools/build/package:komira_pack"
+}
+
+# The build system's self-tests (docs/design/build_selftests.md): the
+# scenarios and graph checks of tools/build/selftest, one declared check.
+# Declared so that the package leaves the derived check `tools_build`,
+# which a change under src/ reaches through the reverse dependencies of
+# targets under tools/build. Nothing in the package depends on a library
+# under src/ (its graph check selftest_closure holds that), so only a
+# widened change (tools/build/ci/rules.txt: tools/build/** among them)
+# reaches this check.
+checks {
+  name: "build_selftests"
+  build_system: "buck2"
+  targets: "//tools/build/selftest/..."
 }

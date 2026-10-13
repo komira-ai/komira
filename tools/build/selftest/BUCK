@@ -1,0 +1,118 @@
+# The build system's self-test scenarios (docs/design/build_selftests.md):
+# each `selftest_scenario` is a `buck2 test` target that drives buck2 from
+# outside (README.md). The package is the declared check `build_selftests`
+# (release/artifacts.textproto), which only a widened pull request reaches.
+#
+# Nothing here depends on a target outside tools/build and the toolchains
+# cell: a scenario names every target its inner commands build or query as a
+# string (the graph check :selftest_closure in graph/ holds that).
+
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":defs.bzl", "LIB_SRCS", "selftest_scenario", "unzst")
+
+# ---- The recursion guard ----------------------------------------------------
+# Every inner command passes `-c komira_selftest.inner=true`; under it every
+# scenario is incompatible (`never` is a constraint no platform has) and is
+# given --nested, which the helper library refuses (defs.bzl).
+
+config_setting(
+    name = "inner",
+    values = {"komira_selftest.inner": "true"},
+    visibility = ["PUBLIC"],
+)
+
+constraint_setting(name = "selftest_inner")
+
+constraint_value(
+    name = "never",
+    constraint_setting = ":selftest_inner",
+)
+
+# ---- The pinned buck2 the scenarios drive -----------------------------------
+# The linux-x86_64 asset of tools/buck2 (its url, size and digest; the guard
+# refuses a run whose asset's sha256 is not tools/buck2's), unpacked by a Zig
+# tool on the farm.
+
+pinned_file(
+    name = "buck2.zst",
+    sha256 = "1268fce33fb61273091dd5dd8c60b65de1521a3caa36b88983813e882b7ffd89",
+    size_bytes = 39587698,
+    url = "https://github.com/facebook/buck2/releases/download/2026-09-15/buck2-x86_64-unknown-linux-gnu.zst",
+)
+
+zig_test(
+    name = "unzst_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "unzst.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "unzst",
+    exec_compatible_with = LINUX_X86_64,
+    src = "unzst.zig",
+    unit_tests = [":unzst_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+unzst(
+    name = "buck2",
+    exec_compatible_with = LINUX_X86_64,
+    src = ":buck2.zst",
+    out = "buck2",
+)
+
+# ---- The helper library ------------------------------------------------------
+# Its unit tests (lib/lib_test.zig, over captured buck2 output); every
+# scenario's binary is built behind them.
+
+zig_test(
+    name = "lib",
+    exec_compatible_with = LINUX_X86_64,
+    src = "lib/lib_test.zig",
+    imports = LIB_SRCS,
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# ---- Scenarios ---------------------------------------------------------------
+
+selftest_scenario(name = "exec_platforms")
+
+selftest_scenario(name = "uquery_select_branches")
+
+selftest_scenario(name = "analysis_refusals_platform_table")
+
+selftest_scenario(name = "analysis_refusals_mojo")
+
+selftest_scenario(name = "analysis_refusals_aws_client")
+
+selftest_scenario(name = "analysis_refusals_gcp_client")
+
+selftest_scenario(name = "analysis_refusals_proto")
+
+selftest_scenario(name = "analysis_refusals_readme")
+
+selftest_scenario(name = "analysis_refusals_lint")
+
+selftest_scenario(name = "analysis_refusals_python_oracle")
+
+selftest_scenario(name = "analysis_refusals_node")
+
+selftest_scenario(name = "planted_red_builds_node")
+
+selftest_scenario(name = "analysis_refusals_rust")
+
+selftest_scenario(name = "analysis_refusals_coverage")
+
+selftest_scenario(name = "config_refusals")
+
+selftest_scenario(name = "rerun")
+
+selftest_scenario(name = "graph_check_refusals")
+
+selftest_scenario(name = "sql_oracle")

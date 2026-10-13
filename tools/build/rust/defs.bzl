@@ -23,6 +23,8 @@ rustc as one `-Ldependency=<dir>` per crate, and direct dependencies as
 
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/mojo:run_check.bzl", "run_check_validation")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 RustToolchainInfo = provider(fields = {
@@ -36,8 +38,9 @@ RustToolchainInfo = provider(fields = {
     "cc_target": provider_field(str),
     "wrapper": provider_field(typing.Any),
     "run_check": provider_field(typing.Any),
-    # Runs one rust_test in a build action (test_runner.sh).
-    "test_runner": provider_field(typing.Any),
+    # The gate (tools/build/run): `gate rust` runs one rust_test in a build
+    # action.
+    "gate": provider_field(typing.Any),
 })
 
 RustCrateInfo = provider(fields = {
@@ -146,7 +149,7 @@ def _rust_toolchain_impl(ctx):
             cc_target = ctx.attrs.cc_target,
             wrapper = ctx.attrs._wrapper[DefaultInfo].default_outputs[0],
             run_check = ctx.attrs._run_check[DefaultInfo].default_outputs[0],
-            test_runner = ctx.attrs._test_runner[DefaultInfo].default_outputs[0],
+            gate = ctx.attrs._gate[DefaultInfo].default_outputs[0],
         ),
     ]
 
@@ -158,6 +161,7 @@ rust_toolchain = rule(
         "cc_target": attrs.string(),
         "sysroot": attrs.exec_dep(),
         "zig": attrs.exec_dep(),
+        "_gate": attrs.exec_dep(default = "komira//tools/build/run:gate"),
         "_run_check": attrs.dep(default = "komira//tools/build/mojo:run_check.sh"),
         # The lint of the scripts the Rust rules run: a validation (see
         # tools/build/lint/defs.bzl), not an input of any action.
@@ -166,7 +170,6 @@ rust_toolchain = rule(
             "komira//tools/build/mojo:shell_lint",
             "komira//tools/build/rust:shell_lint",
         ]),
-        "_test_runner": attrs.dep(default = "komira//tools/build/rust:test_runner.sh"),
         "_wrapper": attrs.dep(default = "komira//tools/build/rust:rustc_wrapper.sh"),
     },
 )
@@ -314,7 +317,7 @@ _COMMON_ATTRS = {
 _DEFAULT_TEST_TIMEOUT_S = 600
 
 def _runner(tc, label, exe, marker_arg, timeout_s):
-    return cmd_args(tc.busybox, "sh", tc.test_runner, tc.busybox, label, exe, marker_arg, str(timeout_s))
+    return cmd_args(tc.gate, "rust", "--busybox", tc.busybox, "--label", label, "--test", exe, "--marker", marker_arg, "--timeout-s", str(timeout_s))
 
 def _gate(ctx, tc, ungated, public, markers):
     """Publishes `ungated` as `public` once every marker in `markers` exists."""
@@ -338,7 +341,7 @@ def _test_impl(ctx):
     def runner(marker_arg):
         return _runner(tc, str(ctx.label.raw_target()), exe, marker_arg, ctx.attrs.test_timeout_s)
 
-    ctx.actions.run(runner(marker.as_output()), category = "rust_gated_test", identifier = ctx.label.name)
+    ctx.actions.run(runner(marker.as_output()), env = rerun_env(ctx), category = "rust_gated_test", identifier = ctx.label.name)
     return [
         # Building the target runs the tests. `[bin]` is the harness itself
         # (a test executable, not a shippable artifact).
@@ -348,12 +351,13 @@ def _test_impl(ctx):
         # harness, outside the build (it writes no marker). So `buck2 test` of
         # a rust_test, or of a rust_library/rust_binary naming it in `tests`,
         # runs its tests rather than reporting NO TESTS RAN.
-        ExternalRunnerTestInfo(type = "custom", command = [runner("/dev/null")], labels = ctx.attrs.labels),
+        ExternalRunnerTestInfo(type = "custom", command = [runner("/dev/null")], env = rerun_env(ctx), labels = ctx.attrs.labels),
+        rerun_info(ctx),
     ]
 
 rust_test_rule = rule(
     impl = _test_impl,
-    attrs = _COMMON_ATTRS | {
+    attrs = _COMMON_ATTRS | RERUN_ATTRS | {
         "labels": attrs.list(attrs.string(), default = []),
         # Each harness invocation (the list, then the run) is killed after
         # this many seconds, and the run is NO VERDICT (exit 142).
@@ -411,6 +415,7 @@ def _external_tests(ctx, tc, crate, ungated, deps_closure):
         marker = ctx.actions.declare_output("test_srcs/" + name + ".passed")
         ctx.actions.run(
             _runner(tc, label + " " + src.short_path, exe, marker.as_output(), _DEFAULT_TEST_TIMEOUT_S),
+            env = rerun_env(ctx),
             category = "rust_gated_test",
             identifier = ident,
         )
@@ -441,11 +446,12 @@ def _library_impl(ctx):
             lib = lib,
             closure = [lib] + deps_closure,
         ),
+        rerun_info(ctx),
     ]
 
 rust_library_rule = rule(
     impl = _library_impl,
-    attrs = _COMMON_ATTRS | _WELD_ATTRS | {
+    attrs = _COMMON_ATTRS | _WELD_ATTRS | RERUN_ATTRS | {
         "proc_macro": attrs.bool(default = False),
         # External tests: each `tests/<name>.rs` is a test crate compiled
         # against the ungated library and run; the library is published
@@ -465,25 +471,64 @@ def _binary_impl(ctx):
         sub_targets = _tests_sub_target(_gate(ctx, tc, ungated, exe, markers))
     else:
         _compile(ctx, "bin", exe)
+    validation = []
     if ctx.attrs.expected_stdout != None:
         # Runs the binary in a remote action and fails unless its stdout is
-        # exactly `expected_stdout`.
+        # exactly `expected_stdout`: `[run_check]`, and a validation of the
+        # binary (tools/build/mojo/run_check.bzl).
         out = ctx.actions.declare_output(ctx.label.name + ".stdout")
         expected = ctx.actions.write(ctx.label.name + ".expected", ctx.attrs.expected_stdout)
         ctx.actions.run(
             cmd_args(tc.busybox, "sh", tc.run_check, tc.busybox, exe, out.as_output(), expected),
+            env = rerun_env(ctx),
             category = "rust_run_check",
         )
         sub_targets["run_check"] = [DefaultInfo(default_output = out)]
+        validation = run_check_validation(ctx, out, ctx.attrs.expected_stdout)
     return [
         DefaultInfo(default_output = exe, sub_targets = sub_targets),
         RunInfo(args = cmd_args(exe)),
-    ]
+        rerun_info(ctx),
+    ] + validation
 
 rust_binary_rule = rule(
     impl = _binary_impl,
-    attrs = _COMMON_ATTRS | _WELD_ATTRS | {
+    attrs = _COMMON_ATTRS | _WELD_ATTRS | RERUN_ATTRS | {
         "expected_stdout": attrs.option(attrs.string(), default = None),
+    },
+)
+
+# ---- the weld's marker list -------------------------------------------------
+#
+# A library or binary with `tests` or `test_srcs` is published behind the
+# markers of its tests (`[tests]`). A weld that drops one still builds green,
+# its test simply not run, so building the target cannot show it. This check
+# reads the target's `[tests]` sub-target at analysis, the marker list _gate
+# returns, and fails unless it is exactly `markers` (each a marker's path in
+# its target's outputs: `<test>.passed` of a rust_test,
+# `test_srcs/<crate>.passed` of an external test). It reads that list, not
+# the publishing copy action's inputs: a _gate that kept a marker in the list
+# but dropped it from the action's hidden inputs passes here.
+
+def _rust_weld_check_impl(ctx):
+    tests = ctx.attrs.target[DefaultInfo].sub_targets.get("tests")
+    got = sorted([m.short_path for m in tests[DefaultInfo].default_outputs]) if tests else []
+    want = sorted(ctx.attrs.markers)
+    if got != want:
+        fail("rust_weld_check {}: the [tests] markers of {} are {}, not {}".format(
+            ctx.label.raw_target(),
+            ctx.attrs.target.label.raw_target(),
+            got,
+            want,
+        ))
+    return [DefaultInfo()]
+
+rust_weld_check_rule = rule(
+    impl = _rust_weld_check_impl,
+    doc = "Fails analysis unless the `[tests]` sub-target of `target` (a rust_library or rust_binary), the marker list its rule hands the publishing copy action, is exactly `markers`. It reads that list, not the action's inputs.",
+    attrs = {
+        "markers": attrs.list(attrs.string()),
+        "target": attrs.dep(),
     },
 )
 
@@ -577,3 +622,4 @@ rust_binary = declares_docs(_welded(rust_binary_rule))
 rust_library = declares_docs(_welded(rust_library_rule))
 rust_sysroot = declares_docs(rust_sysroot_rule)
 rust_test = declares_docs(rust_test_rule)
+rust_weld_check = declares_docs(rust_weld_check_rule)

@@ -23,12 +23,11 @@ runs included ([The coverage workflow](#the-coverage-workflow), step 4).
 |---|---|
 | `:covcheck` | the library (`covcheck/*.mojo`), its tests welded |
 | `:covcheck_bin` | the command line (`main.mojo`, dispatching to `covcheck/cli.mojo`) |
-| `:ratchet.tsv` | the floors (`ratchet.tsv`) |
-| `:cov_gate` | the directory every mojo_library's coverage gate runs from: `cov_gate.sh`, `covcheck_bin`, `ratchet.tsv` ([The build gate](#the-build-gate)) |
-| `:census.tsv`, `:census.sh`, `census.bzl` | the census: every library's numbers, the script that measures them and renders `docs/coverage_census.md` and the floors, and the rule of the root's `:coverage_census` check ([The census](#the-census)) |
+| `:cov_gate` | the directory every mojo_library's coverage gate runs from: `cov_gate.sh`, `covcheck_bin` ([The build gate](#the-build-gate)); the floor a gate reads is its package's own `coverage_floor.tsv` ([The ratchet](#the-ratchet)) |
+| `:census.sh`, `:census_files`, `census.bzl` | the census: the script that measures every library and renders the census doc and the floors, the Zig tool that assembles every package's `coverage_census.tsv` and `coverage_floor.tsv` for it and splits a census back into the packages, and the rule of the root's `:coverage_census`, which builds the doc and checks the floors ([The census](#the-census)) |
 | `policy.bzl` | the gate's mode and target, and the ledger of libraries that cannot have a gate of their own |
 | `no_gate.bxl` | the check that holds that ledger equal to the libraries the gate depends on |
-| `branch_gate.bxl` | the check that every row of `COVERAGE_BRANCH_GATE` (`policy.bzl`) names a library: a row naming none is read by nothing (test 46) |
+| `:branch_gate_rows` (`BUCK`, `defs.bzl`) | the check that every row of `COVERAGE_BRANCH_GATE` (`policy.bzl`) names a Mojo library and is spelled exactly as that library's label (`komira//src/<p>:<p>`, the string `mojo_library` looks itself up by): a row naming none, or spelled another way, is read by nothing, so it fails this target's build |
 | `mutate/` | the mutation tool: `:mutate` (the library, its tests welded), `:mutate_bin`, `:mut_dir` (what every library's `[mutation]` runs from) ([Mutation score](#mutation-score)) |
 
 ## What line coverage means here
@@ -491,14 +490,19 @@ action per library, `mojo_cov_gate` (`cov_gate.sh`, run from
    with no test is `NotMeasured`; the test sources are left out of the
    numbers.
 3. `covcheck gate --package <dir> --mode <M> --target-bp <N> --ratchet
-   ratchet.tsv --test-source <test>... --cobertura <report>...
+   <floor> --test-source <test>... --cobertura <report>...
    [--branch-lcov <records>...]`, one report per test (none for a library
    with no test), and for a library of `COVERAGE_BRANCH_GATE`
    (`policy.bzl`) or a fixture of the tests cell (unless it passes
    `coverage_branch_gate = False`) each test's branch records
    (`[coverage][branch_info][<test>]`, `branch/README.md`); they are in
    repository paths, so no `PKGDIR=` is given; and `--info-package
-   <dir>` for a test-only package (`COVERAGE_INFO_ONLY_DIRS` below). Its `result.json` and
+   <dir>` for a test-only package (`COVERAGE_INFO_ONLY_DIRS` below).
+   `<floor>` is the package's `coverage_floor.tsv`, which `mojo_library`
+   finds itself (its `coverage_floor`; a BUCK file outside the tests cell
+   may not set it), or a file with no row when the package has none: the
+   library is then measured with no floor, a `MissingRow` (information,
+   no failure), as test 46's covlow. Its `result.json` and
    `summary.md` are the library's `[coverage][gate]`
    (`[coverage][gate][result]`, `[coverage][gate][summary]`).
 
@@ -528,9 +532,9 @@ Exit 0 writes the gate's marker. Exit 3 (enforce mode and a finding, or a
 produced until its coverage meets the policy; the library and its
 dependents still build.` and the summary; exits 1 and 2 (an input
 covcheck refuses, bad usage) fail it in every mode with `COVERAGE GATE ERROR`
-and covcheck's message: a malformed ratchet fails a census gate too (test
+and covcheck's message: a malformed floor file fails a census gate too (test
 46). Census and neutral mode fail on no finding but a `Regression`: a
-package measured under its floor of `ratchet.tsv` (test 46's covfloor).
+package measured under its floor in `coverage_floor.tsv` (test 46's covfloor).
 
 **What the gate blocks: the shipped package, nothing else.** The library's
 conda package (`<name>_conda`, `tools/build/package/conda.bzl`: both its
@@ -603,12 +607,13 @@ is at a path-segment boundary). Test 46 builds a library of
 `tests//src/tests/coverage` (the tests cell's `src/tests`) below the target
 green in enforce mode, beside the same library red elsewhere. A fixture of the `tests` cell may name another mode
 (`coverage_mode`), and with it its own gate directory (`coverage_gate`, a
-`cov_gate_dir` with another ratchet or script); anywhere else both are
+`cov_gate_dir` with another script) and floor file (`coverage_floor`); anywhere else they are
 refused at load, and at analysis (a BUCK file calling the rule itself) a
 mode other than the policy's, a link, run, branch or gate directory other
 than komira's, a gate reading branch records (`coverage_branch_gate`) for a
-library not in `COVERAGE_BRANCH_GATE` or not reading them for one in it, or
-coverage runs with no gate for a library not in the ledger is refused.
+library not in `COVERAGE_BRANCH_GATE` or not reading them for one in it, a
+floor file not named `coverage_floor.tsv`, or coverage runs with no gate
+for a library not in the ledger is refused.
 These refusals are outside the
 tests cell, so test 46 cannot plant them there: test 7
 (`tests/functional/umbrella_cache.sh`) plants each in a consumer
@@ -640,8 +645,8 @@ is not a one-line change today:
 
 **The ledger** (`COVERAGE_NO_GATE` in `policy.bzl`): the gate
 runs `covcheck_bin`, so the Mojo libraries `covcheck_bin` depends on
-(`covcheck`, `komira_json`, and `readme_examples`, whose tool runs the
-examples of their README) cannot have the gate as an action of their own:
+(`covcheck` and `komira_json`; the tool that runs the examples of their
+README is Zig) cannot have the gate as an action of their own:
 the library would depend on the gate's directory, which depends on
 `covcheck_bin`, which depends on the library. That is a cycle of configured
 targets (a dependency of the rule, whatever waits for the gate's output),
@@ -697,25 +702,41 @@ failed to build: then it lists the library as branch not measured).
 
 ## The ratchet
 
-`ratchet.tsv`: comment lines start with `#`; a row is
-`<package>\t<line floor>\t<branch floor>`, floors in basis points, the branch
-floor `-` when there is none, or a pinned row with a fourth field, its
-reason (kept as written by `--ratchet-out` and by the census, [The
-census](#the-census)), rows sorted by package in byte order, each
-package once; anything else is refused naming the line. A floor holds in
-every mode: a package measured under it is a `Regression`, whose
-conclusion is `failure` in census and neutral mode too, so its gate fails
-and its conda package is not built (the library and its dependents still
-build). Coverage can only go up. The shipped rows are the census's ([The
-census](#the-census)); `--ratchet-out` proposes the same rule for the
-packages of one report: every floor raised to what was measured
-(`max(floor, measured)`), a row added for each measured package without one,
-the rows of directories without a BUCK file dropped, the comment lines kept
-first. A value above its floor is never a finding; copying the proposal in is
-how a floor rises. Every package in the reports and every row is compared,
-not only the packages a change touches: `report` expects the reports of
-every package, and a row whose package has no data is a `Regression`, so a
-floor cannot be escaped by dropping a package's tests or report.
+Each package's floor is its own file, `<package>/coverage_floor.tsv`, so a
+change to one package's coverage touches that package's directory alone and
+two such changes never conflict. Comment lines start with `#`; the one row
+is `<package>\t<line floor>\t<branch floor>`, the package being the file's
+own directory, floors in basis points, the branch floor `-` when there is
+none, or a pinned row with a fourth field, its reason (kept as written by
+`--ratchet-out` and by the census, [The census](#the-census)); anything
+else is refused naming the line (by covcheck, and for every package by the
+census check). A package with no file has no floor. A floor holds in every
+mode: a package measured under it is a `Regression`, whose conclusion is
+`failure` in census and neutral mode too, so its gate fails and its conda
+package is not built (the library and its dependents still build).
+
+**A floor only rises.** The per-change check refuses a change that lowers
+one: `affected --base` (tools/build/ci/affected.mojo, the command the pull
+request check runs) reads each changed `coverage_floor.tsv` at the change's
+base and at its head, and answers BROKEN, which fails the check, naming
+each floor that went down: a line or branch floor under the base's, a
+branch floor dropped to `-`, a pinned floor lowered (a reason never lowers
+a floor), or the file deleted while its package stays. A new file, a raised
+floor, and a file deleted with its package are no refusal. The census
+check also holds every floor to what the census measured ([The
+census](#the-census)).
+
+`covcheck` reads floors as one file of rows (`--ratchet`), sorted by package
+in byte order, each package once: the gate its package's file, the
+coverage workflow the rows of the packages it measured. `--ratchet-out`
+proposes, for the packages of one report, every floor raised to what was
+measured (`max(floor, measured)`), a row added for each measured package
+without one, the rows of directories without a BUCK file dropped, the
+comment lines kept first; copying a package's row into its
+`coverage_floor.tsv` is how its floor rises. A value above its floor is
+never a finding. In `report` every package in the reports and every row is
+compared, and a row whose package has no data is a `Regression`, so a floor
+cannot be escaped by dropping a package's tests or report.
 
 ## The census
 
@@ -885,8 +906,8 @@ runs `.github/ci/coverage_measure.sh` (its header has the details):
    directory; a test-only package's findings are information, so they
    neither fail the check run in enforce mode nor annotate above `notice`),
    `git ls-files -z` as `--repo-files`, the head
-   as `--head-sha`, and the ratchet's comment lines and the rows of the
-   measured libraries' packages only (`report` compares every row it is
+   as `--head-sha`, and the rows of the measured libraries' packages'
+   `coverage_floor.tsv` only (`report` compares every row it is
    given, and a row of a package not measured here would read as a
    `Regression`). With no report at all (no library touched, none
    measured, none has a test, or the query failed), the script writes the

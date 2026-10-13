@@ -7,7 +7,7 @@
 #   (there may be none) names buck2 target patterns only and no package is
 #   in two checks, and the per-change check is ready to run (both commands
 #   on every build system, and the buck2 build system derives the rest of
-#   the checks from the graph, release/ci/derive_checks.py, so every target
+#   the checks from the graph, //tools/build/ci:derive_checks, so every target
 #   of the graph is in some unit by construction), and the release set that
 #   //tools/build/package:release_set_check builds with the test stamp
 #   (tools/build/package/release_set.txt) is this file's metapackage.
@@ -131,6 +131,20 @@ def test_the_declared_names_in_release_order() raises:
     want.append(String("kci_deploy_model_proto"))
     want.append(String("kci_manifest_proto"))
     want.append(String("kci_artifact"))
+    want.append(String("komira_libc"))
+    want.append(String("komira_lz4"))
+    want.append(String("komira_zlib"))
+    want.append(String("komira_async_api"))
+    want.append(String("komira_buffer"))
+    want.append(String("komira_compression"))
+    want.append(String("komira_crypto"))
+    want.append(String("komira_dynamic_filter"))
+    want.append(String("komira_metrics"))
+    want.append(String("komira_secret_store"))
+    want.append(String("kci_secret_writer"))
+    want.append(String("komira_log"))
+    want.append(String("kci_reconciler"))
+    want.append(String("kci_cloud"))
     want.append(String("komira_all"))
     assert_equal(len(d.artifacts), len(want))
     for i in range(len(want)):
@@ -404,10 +418,12 @@ def test_the_buck2_build_system_derives_the_checks_from_the_graph() raises:
     assert_true(j >= 0)
     assert_true(Bool(d.build_systems[j].derive_checks))
     ref c = d.build_systems[j].derive_checks.value()
-    assert_equal(c.executable, String("python3"))
-    assert_equal(len(c.args), 2)
-    assert_equal(c.args[0], String("release/ci/derive_checks.py"))
-    assert_equal(c.args[1], String("{units_file}"))
+    assert_equal(c.executable, String("buck2"))
+    assert_equal(len(c.args), 4)
+    assert_equal(c.args[0], String("run"))
+    assert_equal(c.args[1], String("//tools/build/ci:derive_checks"))
+    assert_equal(c.args[2], String("--"))
+    assert_equal(c.args[3], String("{units_file}"))
 
 
 def _release_set_values(key: String) raises -> List[String]:
