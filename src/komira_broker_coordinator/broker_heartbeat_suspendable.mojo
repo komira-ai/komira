@@ -257,7 +257,7 @@ struct AsyncReassignOp[
         the op needs only the AsyncCasStore bound, not the ClusterAssignmentStore
         wrapper)."""
         return (
-            msg.find("412") >= 0
+            msg.find("status=412") >= 0
             or msg.find("precondition") >= 0
             or msg.find("If-Match") >= 0
             or msg.find("If-None-Match") >= 0
