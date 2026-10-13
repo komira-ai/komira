@@ -89,7 +89,8 @@ mojo_library(
         "tests/test_declaration_only.mojo",
         # the held marker's grammar and refusals, and the holds against the
         # target at its edges: held below fails, at it passes, not held is
-        # neutral or a notice, per metric, unmeasured, nothing to cover
+        # neutral or a notice, per metric, unmeasured, nothing to cover, every
+        # line exempted
         "tests/test_held.mojo",
         # the shared computation: merged reports, test sources both ways,
         # exemptions, mutants, the target, conclusions per mode, rounding, and

@@ -179,6 +179,10 @@ test "reached: the lowest library decides; not OK, no number, 0 0 branch keep it
 test "assemble refuses a malformed marker" {
     try refusedWith("t/src/b/coverage_held", "# c\nline 9900\n", "census_files: src/b/coverage_held:2: 'line 9900' is not a held metric");
     try refusedWith("t/src/b/coverage_held", "lines\n", "src/b/coverage_held:1: 'lines' is not a held metric");
+    // A metric name is matched whole: a prefix match (startsWith for eql)
+    // would take these as `branch` and `line`.
+    try refusedWith("t/src/b/coverage_held", "branchX\n", "src/b/coverage_held:1: 'branchX' is not a held metric");
+    try refusedWith("t/src/b/coverage_held", "linex\n", "src/b/coverage_held:1: 'linex' is not a held metric");
     try refusedWith("t/src/b/coverage_held", "line\nline\n", "src/b/coverage_held:2: line is held twice");
     try refusedWith("t/src/b/coverage_held", "line\r\n", "census_files: src/b/coverage_held:1: a carriage return");
     try refusedWith("t/src/b/coverage_held", "# c\n\nline\n", "census_files: src/b/coverage_held:2: an empty line");

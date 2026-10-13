@@ -245,6 +245,34 @@ def test_held_not_measured_fails_unless_nothing_to_cover() raises:
     assert_true(raised)
 
 
+def test_held_line_all_exempted_passes() raises:
+    # src/alpha's one recorded line is exempted (`# cov: unreachable` with a
+    # reason): no line record is left and one line is exempt. A held line
+    # with no line record and an exempted line was measured: no Regression,
+    # in a report and in the package's gate. Defect: `p.exempt_lines == 0`
+    # dropped from the held-line unmeasured check (Regression:line).
+    var s = Sources(String(""))
+    s.texts[String("src/alpha/a.mojo")] = String("a  # cov: unreachable only on a corrupt heap\nb\n")
+    var l = List[Input]()
+    l.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String("SF:src/alpha/a.mojo\nDA:1,0\nend_of_record\n")))
+    var a = analyze(l, List[Input](), _repo(), _held(String("src/alpha"), String("line\n")), s, _census())
+    assert_equal(a.packages[0].line_found, 0)
+    assert_equal(a.packages[0].exempt_lines, 1)
+    assert_equal(_kinds(a.findings), "BranchNotMeasured:branch")
+    assert_equal(a.conclusion, "neutral")
+    var o = _census()
+    o.only_package = String("src/alpha")
+    var g = analyze(l, List[Input](), _repo(), _held(String("src/alpha"), String("line\n")), s, o)
+    assert_equal(_kinds(g.findings), "BranchNotMeasured:branch")
+    assert_equal(g.conclusion, "neutral")
+    # Branch has no exemption: held branch with every line exempted and no
+    # branch record is still a Regression. Defect: the line exemption let
+    # into the held-branch check (`and p.exempt_lines == 0` added there).
+    var b = analyze(l, List[Input](), _repo(), _held(String("src/alpha"), String("line\nbranch\n")), s, _census())
+    assert_equal(_kinds(b.findings), "Regression:branch")
+    assert_equal(b.conclusion, "failure")
+
+
 def _held_column(text: String) raises -> String:
     """The held column of src/alpha's summary row, src/alpha holding `text`."""
     var a = analyze(_report(4, 4, 2, 2), List[Input](), _repo(), _held(String("src/alpha"), text), _sources(), _census())
@@ -275,5 +303,6 @@ def main() raises:
     test_a_hold_is_per_metric()
     test_held_branch_not_measured_fails()
     test_held_not_measured_fails_unless_nothing_to_cover()
+    test_held_line_all_exempted_passes()
     test_summary_held_column()
     print("test_held: PASS")
