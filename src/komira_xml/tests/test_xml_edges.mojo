@@ -20,9 +20,9 @@
 #   - the canonical walk's depth: the deepest document `parse_xml` accepts
 #     (512 levels) and a 513-node chain (depth 512) written in full, a
 #     514-node chain (depth 513) refused naming the bound, and a subtree
-#     closed before its next sibling opens. The walk keeps its own stack, so
-#     these rows hold in an -O0 build too, where a recursive walk overflowed
-#     the thread stack about 200 levels down;
+#     closed before its next sibling opens. The 512-level rows also check
+#     that the walk's thread-stack use does not grow with depth: a walk whose
+#     frames grow per level overflows before the bound in an -O0 build;
 #   - the writer: `end_element` with nothing open, `raw_text`, `depth`,
 #     `is_empty`; the reader's `local_name_of`, `attr_local_name` and
 #     `slice_text`.

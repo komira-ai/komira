@@ -369,10 +369,13 @@ def _canon_into(root: XmlNode, mut out: String) raises:
     every tree `parse_xml` builds is within that bound, so only a tree
     assembled by hand reaches the refusal.
     """
-    # SAFETY: every pointer in `open_nodes` addresses `root` or an element
-    # inside its `children` lists. `root` is borrowed immutably for the whole
-    # walk, so no list is resized or freed while a pointer into it is held,
-    # and a pointer is popped before the walk returns.
+    # SAFETY: every pointer in `open_nodes` is a non-owning borrow of `root`
+    # or of an element inside its `children` lists, and is dereferenced only
+    # inside the loop below. `root` is borrowed immutably for the whole call,
+    # so no list is resized or freed while the stack holds a pointer into it.
+    # On the refusal path the function raises with pointers still on the
+    # stack; dropping the list frees only its own buffer and dereferences
+    # none of them, and none is reachable after the call.
     var open_nodes = List[UnsafePointer[XmlNode, origin_of(root)]]()
     var next_child = List[Int]()
     _canon_open(root, out)
