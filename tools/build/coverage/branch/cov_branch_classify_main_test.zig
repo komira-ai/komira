@@ -33,6 +33,8 @@ const usages = [_]Usage{
     .{ .args = &(IO ++ MAP), .msg = "--stdlib is required" },
     .{ .args = &(IO ++ MAP ++ STD ++ STD), .msg = "--stdlib given twice" },
     .{ .args = &(IO ++ MAP ++ [_][]const u8{ "--stdlib", "oss" }), .msg = "--stdlib 'oss' must end with '/'" },
+    .{ .args = &(IO ++ MAP ++ [_][]const u8{ "--src", h.SRC ++ "/", "--src", h.SRC ++ "/" } ++ STD), .msg = "--src given twice" },
+    .{ .args = &(IO ++ MAP ++ [_][]const u8{ "--src", h.SRC } ++ STD), .msg = "--src '" ++ h.SRC ++ "' must end with '/'" },
 };
 
 test "10 bad usage: exit 2, the message and the usage line on stderr, nothing written" {

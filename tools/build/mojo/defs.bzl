@@ -110,6 +110,22 @@ def mojo_compile_cmd(tc, args, runpath = None, source_root = None, link_tail = N
         args,
     )
 
+def mojo_precompile_cmd(tc, include, src_dir, out):
+    """The command line of one `mojo precompile` of the staged package `src_dir`.
+
+    Every `.mojoc` that ships is built here (mojo_library, proto.bzl). The
+    compiler records each source of a package by the path it was given, so a
+    package compiled as `buck-out/<isolation dir>/.../src/<name>` would carry
+    that path and differ per isolation directory. `src_dir` is passed as
+    `--source-root`: the wrapper (tools/mojo_compile.zig, compile_args.runDir)
+    then runs the compiler from its parent and names the package by its
+    basename, so the `.mojoc` records `<name>/<file>.mojo` wherever the action
+    runs (`-strip-file-prefix` does not reach `precompile`). No
+    `--target-cpu`: `mojo precompile` rejects it; a `.mojoc` holds no machine
+    code. tools/build/tests/functional/mojoc_path checks it.
+    """
+    return mojo_compile_cmd(tc, ["precompile", include, src_dir, "-o", out], source_root = src_dir)
+
 # `deps` takes two kinds of target, told apart by provider:
 #   MojoInfo        a Mojo package (mojo_library): its closure goes on `-I`.
 #   MergedLinkInfo  a C/C++ library (the prelude's cxx_library, or anything
@@ -385,16 +401,7 @@ def _library_impl(ctx):
     dep_closure = ctx.actions.tset(MojoPkgTSet, children = deps)
     _check_closure_excludes(ctx, dep_closure)
     ctx.actions.run(
-        mojo_compile_cmd(tc, [
-            # No `--target-cpu`: `mojo precompile` rejects it ("unrecognized
-            # argument"). A `.mojoc` holds no machine code; the CPU is fixed
-            # where code is generated, in `mojo build`.
-            "precompile",
-            dep_closure.project_as_args("include"),
-            src_dir,
-            "-o",
-            ungated.as_output(),
-        ]),
+        mojo_precompile_cmd(tc, dep_closure.project_as_args("include"), src_dir, ungated.as_output()),
         category = "mojo_precompile",
     )
     ungated_tset = ctx.actions.tset(MojoPkgTSet, value = ungated, children = deps)

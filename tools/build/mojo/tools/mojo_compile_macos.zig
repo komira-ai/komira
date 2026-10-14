@@ -33,6 +33,12 @@
 //!     MODULAR_CRASH_REPORTING_ENABLED=false, KOMIRA_CC_SHIM, PWD, and
 //!     BUCK_SCRATCH_PATH when it is set. The compiler finds its lib/ through
 //!     its own run path; nothing is set for the loader;
+//!   * for `precompile` with --source-root, runs the compiler from the
+//!     root's parent (PWD is that directory), given the package by its
+//!     basename and `-o`, `-I` made absolute, as on Linux
+//!     (compile_args.runDir, compilerArgs), so the `.mojoc` records
+//!     `<name>/<file>.mojo` and not the staged buck-out path; the wrapper
+//!     itself stays in the action directory, where the output check runs;
 //!   * checks the output and removes the scratch directory.
 //!
 //! The compile watchdog is Linux's: the compiler leads a session of its own
@@ -300,7 +306,7 @@ fn wrapperMain(arena: std.mem.Allocator, args: []const []const u8) noreturn {
         .{ "KGEN_CompilerRT_AsyncRT_ParallelismLevel", "1" },
         .{ "MODULAR_CRASH_REPORTING_ENABLED", "false" },
         .{ "KOMIRA_CC_SHIM", shim_cfg },
-        .{ "PWD", pwd },
+        .{ "PWD", compile_args.runDir(o.common()) orelse pwd },
     };
     for (pairs) |kv| env.append(std.fmt.allocPrint(arena, "{s}={s}", .{ kv[0], kv[1] }) catch oom()) catch oom();
     if (bsp.len > 0) env.append(std.fmt.allocPrint(arena, "BUCK_SCRATCH_PATH={s}", .{bsp}) catch oom()) catch oom();
@@ -311,6 +317,7 @@ fn wrapperMain(arena: std.mem.Allocator, args: []const []const u8) noreturn {
     cmd.append(mojo) catch oom();
     cmd.appendSlice(compile_args.compilerArgs(arena, o.common()) catch oom()) catch oom();
     const argv = common.toArgv(arena, cmd.items) catch oom();
+    if (compile_args.runDir(o.common())) |d| child_dir = (arena.dupeZ(u8, d) catch oom()).ptr;
     const subcmd = if (o.mojo_args.len > 0) o.mojo_args[0] else "";
 
     const rc = if (o.idle_secs == 0)
@@ -326,19 +333,38 @@ fn pipeCloexec() [2]i32 {
     return posix.pipe2(.{ .CLOEXEC = true }) catch |e| refuse("cannot make a pipe: {s}", .{@errorName(e)});
 }
 
-/// In a forked child: exec, or report the errno on `report` and exit 127.
+/// The directory the compiler runs in, when not the wrapper's own
+/// (compile_args.runDir); the forked child enters it before exec.
+var child_dir: ?[*:0]const u8 = null;
+
+/// A report-pipe errno with this bit set came from the chdir, not the exec.
+const chdir_failed: u32 = 1 << 31;
+
+/// In a forked child: enter child_dir and exec, or report the errno on
+/// `report` and exit 127.
 fn execChild(path: [*:0]const u8, argv: Argv, envp: Envp, report: i32) noreturn {
+    if (child_dir) |d| {
+        if (c.chdir(d) != 0) {
+            const e: u32 = @as(u32, @intCast(c._errno().*)) | chdir_failed;
+            _ = c.write(report, std.mem.asBytes(&e), 4);
+            c._exit(127);
+        }
+    }
     _ = c.execve(path, argv, envp);
     const e: u32 = @intCast(c._errno().*);
     _ = c.write(report, std.mem.asBytes(&e), 4);
     c._exit(127);
 }
 
-fn execFailed(mojo: []const u8, e: u32) u8 {
+fn execFailed(mojo: []const u8, raw: u32) u8 {
+    const e = raw & ~chdir_failed;
+    const where: []const u8 = if (raw & chdir_failed != 0) "cannot enter " else "";
+    const dir: []const u8 = if (raw & chdir_failed != 0) std.mem.span(child_dir.?) else "";
+    const sep: []const u8 = if (raw & chdir_failed != 0) ": " else "";
     if (std.meta.intToEnum(posix.E, e)) |err| {
-        say("cannot run {s}: {s}", .{ mojo, @tagName(err) });
+        say("cannot run {s}: {s}{s}{s}{s}", .{ mojo, where, dir, sep, @tagName(err) });
     } else |_| {
-        say("cannot run {s}: errno {d}", .{ mojo, e });
+        say("cannot run {s}: {s}{s}{s}errno {d}", .{ mojo, where, dir, sep, e });
     }
     return if (e == @intFromEnum(posix.E.NOENT)) 127 else 126;
 }

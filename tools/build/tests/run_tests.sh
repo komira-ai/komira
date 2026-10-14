@@ -107,7 +107,7 @@
 #      (standalone-only) fails to load there.
 #  20. C/C++ dependencies of Mojo targets: see tools/build/tests/cxx_tests.sh.
 #  21. (In the gate: tests//functional/location_path:main, whose run check
-#      is a validation.)
+#      is a validation, and tests//functional/mojoc_path:same_bytes.)
 #  22. Rust rules, and rustc's host floor: see
 #      tools/build/tests/rust_tests.sh.
 #  23. mojo_proto_library and mojo_db_proto_library, mojo_gcp_client (REST

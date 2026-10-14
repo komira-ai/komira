@@ -312,7 +312,7 @@ goes with the last row that uses it.
 | 43 tracer, parent_fails, killed, banner, lostdir, refused, longarg, lingers, generated | cov_run decisions | 2 | cov_run (Zig port) unit tests with stand-ins | report the last child's status | 7 |
 | 43 proc | `lingerproc`: `/proc is not readable as this run's own` | 2 + 3 | cov_run unit test with an injected process-table root it cannot read; `coverage_gate_reds` keeps the real fixture, since only a real kernel proves the read | treat an unreadable `/proc` as no survivors | 7 |
 | 43 lost, shared_lib_skip | unmapped source; `--must-contain` | del + 3 | existing cov_normalize cases; `coverage_analysis` row for the `--map` prefixes | ignore `--must-contain` | 5 |
-| 43 data_clash, data_buckout | analysis refusals | 3 | `analysis_refusals_coverage` | delete the buck-out check | 3 |
+| 43 data_clash, data_import | analysis refusals | 3 | `analysis_refusals_coverage` | delete the import-name check | 3 |
 | 43 shared_lib_switch, 46 switch_*, published | builds under the switch | 3 | `coverage_switch` | no version script at `-O0` | 5 |
 | 46 enforce reds | enforce gates exit 3 with the banner; the conda package, not the library or a dependent, is blocked | 2 + 3 | gate step unit test; `coverage_gate_reds` (each enforce fixture red with the banner, `covlow_user` and the libraries green) | always census mode; the conda join skips the gate | 7 |
 | 46 shared_lib_run | a shared library's driver fails under kcov (`COVERAGE RUN FAILED`) while its published file builds | 3 | `coverage_gate_reds` (the published file green, then the driver's run red with the message) | cov_run exits 0 when the driver fails under kcov | 4 |

@@ -1,9 +1,10 @@
 //! cov_branch_classify's cases on fixtures/case.ll (README.md#tests), the
 //! numbers those of the shell cases they replace (1 to 9c): the golden
 //! output, the metadata order, a second test's counts, unknown tokens, file
-//! names, --gen, zero branches, another [src], and malformed or inconsistent
-//! IR. Each runs the shipped executable (cov_branch_classify_harness.zig)
-//! and says the defect (mutant) it kills.
+//! names, --gen, zero branches, another [src], the library's sources named
+//! by import name (--src), and malformed or inconsistent IR. Each runs the
+//! shipped executable (cov_branch_classify_harness.zig) and says the defect
+//! (mutant) it kills.
 
 const std = @import("std");
 const h = @import("cov_branch_classify_harness.zig");
@@ -249,7 +250,7 @@ test "8 other hash: the library's [src] under another hash is refused" {
     try c.write("v.ll", h.case_ll);
     const r = try c.exec(&(h.IO ++ [_][]const u8{ "--map", other ++ "/=src/pkg/" } ++ h.EXC));
     try r.exits(1);
-    try r.says("'" ++ SRC ++ "/a.mojo' is the library's source under another [src] than --map's ('" ++ other ++ "/')");
+    try r.says("'" ++ SRC ++ "/a.mojo' is the library's source under a [src], not under --map's PREFIX ('" ++ other ++ "/'");
     try r.silent("dep/d.mojo");
     try r.nothing_written();
 }
@@ -260,14 +261,15 @@ test "8 other hash: the library's [src] under another hash is refused" {
 test "8b other [src]: the library's sources under another directory are refused" {
     var c = try h.Case.init("");
     defer c.deinit();
-    _ = try c.refused("other [src]", "'buck-out/v2/art/cfg/other/__pkg2__/fedcba9876543210/src/pkg/d.mojo' is the library's source under another [src]", try variant(&c, "!6 = !DIFile(filename: \"buck-out/v2/art/cell/src/dep/__dep__/fedcba9876543210/src/dep/d.mojo\"", "!6 = !DIFile(filename: \"buck-out/v2/art/cfg/other/__pkg2__/fedcba9876543210/src/pkg/d.mojo\""));
+    _ = try c.refused("other [src]", "'buck-out/v2/art/cfg/other/__pkg2__/fedcba9876543210/src/pkg/d.mojo' is the library's source under a [src]", try variant(&c, "!6 = !DIFile(filename: \"buck-out/v2/art/cell/src/dep/__dep__/fedcba9876543210/src/dep/d.mojo\"", "!6 = !DIFile(filename: \"buck-out/v2/art/cfg/other/__pkg2__/fedcba9876543210/src/pkg/d.mojo\""));
 }
 
-// 8c. A --map PREFIX with no `/<16 hex>/` segment is refused: with no hash
-// to look for, a library source under another [src] (8, 8b) could not be
-// told and `--exclude buck-out/` would drop it unseen. Kills: the check of
-// 8 skipped silently when the prefix has no hash.
-test "8c no hash: a --map PREFIX with no hash segment is bad usage" {
+// 8c. A [src] (here --map's PREFIX, with no --src) with no `/<16 hex>/`
+// segment is refused: with no hash to look for, a library source under
+// another [src] (8, 8b) could not be told and `--exclude buck-out/` would
+// drop it unseen. Kills: the check of 8 skipped silently when the [src] has
+// no hash.
+test "8c no hash: a [src] with no hash segment is bad usage" {
     var c = try h.Case.init("no hash");
     defer c.deinit();
     for ([_][]const u8{ "a", "b", "c", "d", "gen", "t" }) |n| {
@@ -277,7 +279,89 @@ test "8c no hash: a --map PREFIX with no hash segment is bad usage" {
     try c.write("v.ll", h.case_ll);
     const r = try c.exec(&(h.IO ++ [_][]const u8{ "--map", "srcroot/pkg/=src/pkg/" } ++ h.EXC));
     try r.exits(2);
-    try r.says("the --map PREFIX 'srcroot/pkg/' holds no '/<16 hex>/' segment");
+    try r.says("the [src] 'srcroot/pkg/' (--src, or --map's PREFIX without it) holds no '/<16 hex>/' segment");
+    try r.nothing_written();
+}
+
+/// `--map pkg/=src/pkg/ --src <SRC>/`: the IR names the library's sources
+/// `pkg/<file>`, read under the [src].
+const SRCX = [_][]const u8{ "--map", "pkg/=src/pkg/", "--src", SRC ++ "/" };
+/// h.EXC with `--exclude dep/` for `--exclude buck-out/`: the dependency
+/// named by its import name.
+const EXCX = h.STD ++ [_][]const u8{ "--exclude", "oss/modular/", "--exclude", "dep/", "--exclude-file", "tests/test_a.mojo", "--exclude-file", "<unknown>", "--gen", "gen.mojo" };
+
+/// case.ll as a package compiled from the parent of its [src] names it:
+/// the library's files `pkg/<file>`, its dependency's `dep/<file>`.
+fn importNames(c: *h.Case) ![]const u8 {
+    var e = try h.Ir.of(c.a(), h.case_ll);
+    try e.sub("filename: \"" ++ SRC ++ "/", "filename: \"pkg/");
+    try e.sub("filename: \"buck-out/v2/art/cell/src/dep/__dep__/fedcba9876543210/src/dep/", "filename: \"dep/");
+    const ir = try e.text();
+    const n = h.count(ir, "filename: \"pkg/", .contains);
+    if (n != 4) {
+        std.debug.print("import names: {d} of case.ll's four library files were renamed\n", .{n});
+        return error.TestUnexpectedResult;
+    }
+    return ir;
+}
+
+// 8d. A package compiled from the parent of its [src] names its sources
+// `pkg/<file>` in the IR (and its dependency's `dep/<file>`): with
+// `--map pkg/=src/pkg/ --src <[src]>/` the output is case 1's, byte for
+// byte. Kills: a measured source read at the IR's name instead of under
+// --src (no pkg/ here: "cannot read the measured source").
+test "8d import names: --map pkg/ with --src gives case 1's output byte for byte" {
+    var c = try h.Case.init("import names");
+    defer c.deinit();
+    try c.write("v.ll", try importNames(&c));
+    if (c.tmp.dir.access("pkg", .{})) |_| {
+        std.debug.print("import names: pkg/ exists in the working directory, so reading at the IR's name would pass\n", .{});
+        return error.TestUnexpectedResult;
+    } else |e| if (e != error.FileNotFound) return e;
+    const r = try c.exec(&(h.IO ++ SRCX ++ EXCX));
+    try r.exits(0);
+    try r.golden(h.case_golden, "the output differs from fixtures/case.golden.info");
+}
+
+// 8e. Without --src, the PREFIX pkg/ is the [src], which has no hash: bad
+// usage. Kills: a --src defaulted to somewhere that happens to work.
+test "8e import names, no --src: the PREFIX pkg/ as the [src] is bad usage" {
+    var c = try h.Case.init("import names, no --src");
+    defer c.deinit();
+    try c.write("v.ll", try importNames(&c));
+    const r = try c.exec(&(h.IO ++ [_][]const u8{ "--map", "pkg/=src/pkg/" } ++ EXCX));
+    try r.exits(2);
+    try r.says("the [src] 'pkg/' (--src, or --map's PREFIX without it) holds no '/<16 hex>/' segment");
+    try r.nothing_written();
+}
+
+// 8f. With --src given, an IR naming the library's sources by that [src]
+// (case.ll itself: a package compiled from [src], not from its parent) is
+// refused, naming them, although `--exclude buck-out/` covers them. Kills:
+// the [src] check of 8 dropped when --src is given.
+test "8f named by [src]: with --src, the library's sources named by the [src] are refused" {
+    var c = try h.Case.init("named by [src]");
+    defer c.deinit();
+    try c.write("v.ll", h.case_ll);
+    const r = try c.exec(&(h.IO ++ SRCX ++ h.EXC));
+    try r.exits(1);
+    try r.says("'" ++ SRC ++ "/a.mojo' is the library's source under a [src], not under --map's PREFIX ('pkg/', read at '" ++ SRC ++ "/')");
+    try r.nothing_written();
+}
+
+// 8g. The dependency named `dep/d.mojo` with no `--exclude dep/` is
+// unmapped and refused: an exclusion of each dependency is what drops it.
+// Kills: a name outside PREFIX and every exclusion let through (as the
+// dependency of a package compiled from [src]'s parent is named by no
+// [src]).
+test "8g import names, dependency: dep/d.mojo with no --exclude dep/ is unmapped" {
+    var c = try h.Case.init("import names, dependency");
+    defer c.deinit();
+    try c.write("v.ll", try importNames(&c));
+    const excn = h.STD ++ [_][]const u8{ "--exclude", "oss/modular/", "--exclude-file", "tests/test_a.mojo", "--exclude-file", "<unknown>", "--gen", "gen.mojo" };
+    const r = try c.exec(&(h.IO ++ SRCX ++ excn));
+    try r.exits(1);
+    try r.says("unmapped file name 'dep/d.mojo'");
     try r.nothing_written();
 }
 

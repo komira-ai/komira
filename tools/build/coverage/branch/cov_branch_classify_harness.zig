@@ -8,11 +8,14 @@
 //! inherit COV_BRANCH_CLASSIFY), in a directory of its own:
 //! the library's sources (fixtures/{a,b,c,d,gen,t}.src) staged as
 //! `<SRC>/<name>.mojo`, the made-up [src] the fixtures' IR names, and the IR
-//! of the case in `v.ll`. It reads back the exit status, stdout, stderr and
-//! the output file, so a case checks what `main` adds (argv[1..], messages
-//! on stderr, the exit status, the output written or not) as well as the
-//! classification. The IR edits (`Ir`) are line edits, each failing the case
-//! when it changes nothing, so no case checks an unedited fixture.
+//! of the case in `v.ll`. The tool reads the sources under --src (by
+//! default --map's PREFIX, the names case.ll gives them), relative to its
+//! working directory, as the action runs it from the root holding [src].
+//! It reads back the exit status, stdout, stderr and the output file, so a
+//! case checks what `main` adds (argv[1..], messages on stderr, the exit
+//! status, the output written or not) as well as the classification. The
+//! IR edits (`Ir`) are line edits, each failing the case when it changes
+//! nothing, so no case checks an unedited fixture.
 //!
 //! fixtures/case.ll, rules.ll and try.ll are annotated IR made by hand in
 //! the form `cov_branch annotate` writes it (made-up paths and counts;

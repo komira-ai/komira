@@ -34,6 +34,9 @@ pub const Options = struct {
     /// and LD_DEBUG_OUTPUT=<this>, so the loader records what it maps
     /// (tests//functional/runtime_libs:loader_trace).
     ld_debug_output: ?[]const u8,
+    /// The wrapper's working directory, absolute ($PWD as the shell spells
+    /// it): what relative paths in `mojo_args` are relative to.
+    pwd: []const u8,
     /// Everything after `--`, unchanged.
     mojo_args: []const []const u8,
     /// The value after the last `-o` in `mojo_args`.
@@ -170,16 +173,54 @@ pub fn parse(alloc: std.mem.Allocator, platform: Platform, pwd: []const u8, args
         .idle_secs = idle,
         .sample_secs = sample,
         .ld_debug_output = ld_debug,
+        .pwd = pwd,
         .mojo_args = mojo_args,
         .output = output,
     };
 }
 
-/// The compiler's arguments: for `build` with a source root,
-/// `-strip-file-prefix=<root>/` right after the subcommand; otherwise
-/// `mojo_args` unchanged.
+/// Where the compiler runs, when not in the wrapper's own working directory:
+/// for `precompile` with a source root, the root's parent; else null.
+///
+/// A package compile records each source file by the path it names it with,
+/// and `-strip-file-prefix` does not reach `precompile`. Run from the parent
+/// of the staged package and given the package by its basename, the compiler
+/// records `<name>/<file>.mojo`: the same `.mojoc` bytes under every working
+/// directory, buck-out isolation directory and staging path
+/// (tests//functional/mojoc_path:same_bytes).
+pub fn runDir(o: Options) ?[]const u8 {
+    const root = o.source_root orelse return null;
+    if (o.mojo_args.len == 0 or !std.mem.eql(u8, o.mojo_args[0], "precompile")) return null;
+    return std.fs.path.dirname(root);
+}
+
+/// The compiler's arguments:
+///   * `build` with a source root: `-strip-file-prefix=<root>/` right after
+///     the subcommand;
+///   * `precompile` with a source root (runDir is not null, the compiler
+///     runs there): the value after `-o` and every relative `-I` directory
+///     (`-I<dir>` or `-I <dir>`) made absolute against `pwd`, and the
+///     argument naming the source root replaced by the root's basename;
+///   * otherwise `mojo_args` unchanged.
 pub fn compilerArgs(alloc: std.mem.Allocator, o: Options) ![]const []const u8 {
     const root = o.source_root orelse return o.mojo_args;
+    if (runDir(o) != null) {
+        var out = std.ArrayList([]const u8).init(alloc);
+        var prev: []const u8 = "";
+        for (o.mojo_args) |a| {
+            if (std.mem.eql(u8, prev, "-o") or std.mem.eql(u8, prev, "-I")) {
+                try out.append(try abspath(alloc, o.pwd, a));
+            } else if (std.mem.startsWith(u8, a, "-I") and a.len > 2) {
+                try out.append(try std.fmt.allocPrint(alloc, "-I{s}", .{try abspath(alloc, o.pwd, a[2..])}));
+            } else if (std.mem.eql(u8, try abspath(alloc, o.pwd, a), root)) {
+                try out.append(std.fs.path.basename(root));
+            } else {
+                try out.append(a);
+            }
+            prev = a;
+        }
+        return out.toOwnedSlice();
+    }
     if (o.mojo_args.len == 0 or !std.mem.eql(u8, o.mojo_args[0], "build")) return o.mojo_args;
     var out = std.ArrayList([]const u8).init(alloc);
     try out.append(o.mojo_args[0]);
@@ -209,10 +250,12 @@ pub const MacosOptions = struct {
     link_tail: []const []const u8,
     idle_secs: u32,
     sample_secs: u32,
+    /// As `Options.pwd`.
+    pwd: []const u8,
     mojo_args: []const []const u8,
     output: []const u8,
 
-    /// The fields `compilerArgs` reads, as an `Options`.
+    /// The fields `compilerArgs` and `runDir` read, as an `Options`.
     pub fn common(self: MacosOptions) Options {
         return .{
             .compiler = self.compiler,
@@ -224,6 +267,7 @@ pub const MacosOptions = struct {
             .idle_secs = self.idle_secs,
             .sample_secs = self.sample_secs,
             .ld_debug_output = null,
+            .pwd = self.pwd,
             .mojo_args = self.mojo_args,
             .output = self.output,
         };
@@ -308,6 +352,7 @@ pub fn parseMacos(alloc: std.mem.Allocator, pwd: []const u8, args: []const []con
         .link_tail = try tail.toOwnedSlice(),
         .idle_secs = idle,
         .sample_secs = sample,
+        .pwd = pwd,
         .mojo_args = mojo_args,
         .output = output,
     };
@@ -499,15 +544,64 @@ test "strip prefix: build inserts after the subcommand; precompile and doc do no
     try testing.expectEqualStrings("build", got[0]);
     try testing.expectEqualStrings("-strip-file-prefix=/wd/stage/src/", got[1]);
     try testing.expectEqualStrings("x.mojo", got[2]);
+    try testing.expect(runDir(b) == null);
     for ([_][]const u8{ "precompile", "doc" }) |sub| {
         const o = try parse(a, .linux, "/wd", &(base ++ [_][]const u8{ "--source-root=s", "--", sub, "x", "-o", "o" }), &d);
         const g = try compilerArgs(a, o);
         try testing.expectEqual(@as(usize, 4), g.len);
         try testing.expectEqualStrings(sub, g[0]);
         try testing.expectEqualStrings("x", g[1]);
+        for (g) |arg| try testing.expect(!std.mem.startsWith(u8, arg, "-strip-file-prefix"));
     }
     const none = try parse(a, .linux, "/wd", withBase(&.{}, &.{ "build", "x", "-o", "o" }), &d);
     try testing.expectEqual(@as(usize, 4), (try compilerArgs(a, none)).len);
+}
+
+// Catches: a precompile run in the action directory (the .mojoc records the
+// staged buck-out path), its output or a dependency directory left relative
+// to a directory the compiler no longer runs in, or the package named by its
+// staged path. Mutants planted, one per build: drop the -o abspath; drop the
+// basename rewrite (both red here; the second also red in
+// tests//functional/mojoc_path:same_bytes).
+test "precompile with a source root: runs in the root's parent, package by basename, -o and -I absolute" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var d = Diag{};
+    const o = try parse(a, .linux, "/wd", withBase(&.{"--source-root=stage/src/pkg"}, &.{ "precompile", "-Iinc/d", "-I/abs/e", "-I", "inc/f", "stage/src/pkg", "-o", "out/pkg.mojoc" }), &d);
+    try testing.expectEqualStrings("/wd/stage/src", runDir(o).?);
+    const g = try compilerArgs(a, o);
+    const want = [_][]const u8{ "precompile", "-I/wd/inc/d", "-I/abs/e", "-I", "/wd/inc/f", "pkg", "-o", "/wd/out/pkg.mojoc" };
+    try testing.expectEqual(want.len, g.len);
+    for (want, g) |w, x| try testing.expectEqualStrings(w, x);
+    // The root given absolute and the positional relative name one directory.
+    const p = try parse(a, .linux, "/wd", withBase(&.{"--source-root=/wd/s/q"}, &.{ "precompile", "s/q", "-o", "/o/q.mojoc" }), &d);
+    try testing.expectEqualStrings("/wd/s", runDir(p).?);
+    const h = try compilerArgs(a, p);
+    try testing.expectEqualStrings("q", h[1]);
+    try testing.expectEqualStrings("/o/q.mojoc", h[3]);
+}
+
+// Catches: the compiler moved for a compile that names no source root, or
+// for `build` and `doc` (their paths stay relative to the action directory).
+// Mutant planted: runDir ignores the subcommand.
+test "runDir: null without a source root, and for build and doc" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var d = Diag{};
+    const bare = try parse(a, .linux, "/wd", withBase(&.{}, &.{ "precompile", "-Ii", "s", "-o", "o" }), &d);
+    try testing.expect(runDir(bare) == null);
+    const g = try compilerArgs(a, bare);
+    try testing.expectEqualStrings("-Ii", g[1]);
+    try testing.expectEqualStrings("o", g[4]);
+    for ([_][]const u8{ "build", "doc" }) |sub| {
+        const o = try parse(a, .linux, "/wd", &(base ++ [_][]const u8{ "--source-root=s/p", "--", sub, "-Ii", "s/p", "-o", "o" }), &d);
+        try testing.expect(runDir(o) == null);
+        const h = try compilerArgs(a, o);
+        try testing.expectEqualStrings("o", h[h.len - 1]);
+        try testing.expectEqualStrings("s/p", h[h.len - 3]);
+    }
 }
 
 test "abspath: absolute kept, relative joined to PWD as spelled" {
@@ -582,6 +676,21 @@ test "macOS options: each flag; hosts accumulate in order; the run path in dyld'
     // -strip-file-prefix goes in as on Linux.
     const args = try compilerArgs(p.arena.allocator(), o.common());
     try testing.expectEqualStrings("-strip-file-prefix=/wd/src/", args[1]);
+}
+
+// Catches: a macOS precompile left in the action directory (its .mojoc
+// records the staged buck-out path), or its -o and -I made absolute against
+// something other than the action directory (MacosOptions.common dropping
+// pwd). Mutant planted: common() sets .pwd = "" (red: -o and -I lose /wd).
+test "macOS options: precompile with a source root runs in the root's parent, as on Linux" {
+    var p = tryParseMacos(macWithBase(&.{"--source-root=stage/src/pkg"}, &.{ "precompile", "-Iinc/d", "stage/src/pkg", "-o", "out/pkg.mojoc" }));
+    defer p.deinit();
+    const o = (try p.result).common();
+    try testing.expectEqualStrings("/wd/stage/src", runDir(o).?);
+    const g = try compilerArgs(p.arena.allocator(), o);
+    const want = [_][]const u8{ "precompile", "-I/wd/inc/d", "pkg", "-o", "/wd/out/pkg.mojoc" };
+    try testing.expectEqual(want.len, g.len);
+    for (want, g) |w, x| try testing.expectEqualStrings(w, x);
 }
 
 // Catches: a compile that may run on any host (an action key that names no
