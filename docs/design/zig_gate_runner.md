@@ -3,11 +3,11 @@
 This is the design for replacing five shell scripts that run and supervise welded tests with one Zig
 tool:
 
-- [tools/build/mojo/gate_runner.sh](../../tools/build/mojo/gate_runner.sh) runs one gated Mojo test.
+- `tools/build/mojo/gate_runner.sh` ran one gated Mojo test (deleted; `gate mojo` replaces it).
 - `tools/build/rust/test_runner.sh` ran one gated Rust test (deleted; `gate rust` replaces it).
-- [tools/build/mojo/mem_cap.sh](../../tools/build/mojo/mem_cap.sh) enforces a memory cap.
-- [tools/build/mojo/test_deadline.sh](../../tools/build/mojo/test_deadline.sh) enforces the time limit of a
-  `mojo_test`.
+- `tools/build/mojo/mem_cap.sh` enforced a memory cap (deleted; `gate mojo --mem-cap-mib`).
+- `tools/build/mojo/test_deadline.sh` enforced the time limit of a `mojo_test` (deleted; `gate mojo
+  --deadline-s`).
 - The time bound of [cov_run.sh](../../tools/build/coverage/kcov/cov_run.sh) (its step 2) and of
   `mut_step.sh` (deleted; `gate step` replaces it).
 
@@ -136,8 +136,8 @@ SIP-protected binary sits in between.
    C from being reused by a new process before the kill. The shell scripts have this race; the port
    closes it.
 5. **The loop.** On Linux, `pidfd_open(C)` is polled with a 100 ms timeout. An exit is seen at once
-   (D2), and the cap and the deadline are checked on each tick. On macOS, a `kqueue` `EVFILT_PROC` exit
-   event is used, with the same tick. Time is read from `CLOCK_MONOTONIC`.
+   (D2), and the cap and the deadline are checked on each tick. On macOS, SIGCHLD writes to the signal
+   self-pipe (step 6) and wakes the loop, with the same tick. Time is read from `CLOCK_MONOTONIC`.
 6. **Signals.** HUP, INT and TERM go through a self-pipe into the loop. The loop SIGKILLs group C and
    exits with the status the active mode had before (M5, D6, section 3).
 7. **The process table** (Linux) is read once per tick from `/proc/[0-9]*/status`. It parses `Pid`,
@@ -200,7 +200,7 @@ may read variables such as `BUCK_SCRATCH_PATH`.
 | File | Today | After |
 |---|---|---|
 | [toolchain.bzl](../../tools/build/mojo/toolchain.bzl) | `_gate_runner = gate_runner.sh`. `zig_exe` and `zig_test` hard-code `-target x86_64-linux-musl`. | `_gate = komira//tools/build/run:gate`, and `MojoToolchainInfo.gate_runner` becomes `gate` (a `RunInfo`). `zig_exe` gets a `target` attribute whose default is today's string, so the command and the action key of every existing `zig_exe` stay the same. |
-| [darwin.bzl](../../tools/build/mojo/darwin.bzl) and `tools/build/toolchains/darwin/BUCK` | `gate_runner = dyld_script(dyld_prelude.sh + gate_runner.sh)` | `gate_runner = …run:gate_darwin`, a `zig_exe` with `target = "aarch64-macos"`. The `gate_runner` `dyld_script` target is deleted. `dyld_prelude.sh` stays until `launch.sh` is ported. |
+| [darwin.bzl](../../tools/build/mojo/darwin.bzl) and `tools/build/toolchains/darwin/BUCK` | `gate_runner = dyld_script(dyld_prelude.sh + gate_runner.sh)` | `gate = …run:gate_darwin`, a `zig_exe` with `target = "aarch64-macos.11.0"`, behind its macOS unit test runs. The `gate_runner` `dyld_script` target is deleted. `dyld_prelude.sh` stays until `launch.sh` is ported. |
 | [defs.bzl](../../tools/build/mojo/defs.bzl): test_srcs, README examples, shared-lib gate drivers, `mojo_test` | `busybox sh gate_runner.sh …`, prefixed by the result of `capped_prefix` and `deadline_prefix`, which are defined in `defines.bzl` and `test_limit.bzl`; `defs.bzl` only calls them | One `cmd_args(tc.gate, "mojo", "--busybox", …)`. `capped_prefix` ([defines.bzl](../../tools/build/mojo/defines.bzl)) and `deadline_prefix` ([test_limit.bzl](../../tools/build/mojo/test_limit.bzl)), which `defs.bzl` calls, return flags (`["--mem-cap-mib", n]`, `["--deadline-s", l, "--runner-timeout-s", t]`), not a script prefix. |
 | [defines.bzl](../../tools/build/mojo/defines.bzl) and [test_limit.bzl](../../tools/build/mojo/test_limit.bzl) | `_mem_cap` and `_test_deadline` attributes, each holding a script | Both attributes are removed. The cap logic and the `TEST_LIMIT_MARGIN_S` arithmetic stay in Starlark, so the numbers are still decided at analysis time. |
 | [mutation.bzl](../../tools/build/mojo/mutation.bzl) and `coverage/mutate/defs.bzl` | `_step` emits `busybox sh mut_step.sh …`. The run step emits `mem_cap.sh` and `gate_runner.sh`. | `_step` emits `gate step --status … --limit-s …`. The run step's command becomes `gate mojo … --mem-cap-mib …`. `@MUT_SCRATCH@` and `_INFRA_EXITS` are unchanged. |
@@ -276,10 +276,12 @@ same text as before, and their expected strings (`MEMORY CAP: killed`, `TEST TIM
 30 s`, `GATED TEST FAILED: … (exit 137)`) do not change. The switch-over PR runs them on the farm and
 records the red result.
 
-**Darwin.** The `zig_test`s run on Linux only, because the farm has no macOS workers in the PR check. The
-macOS-only code is small: `kqueue`, setting `DYLD_LIBRARY_PATH`, and the "no /proc" branch. The last two
-are covered on Linux through the platform interface. `kqueue` is not covered by any test until macOS
-workers join CI. This is stated in the tool's README.
+**Darwin.** `mojo_test.zig` and `supervise_test.zig` are also built for macOS and run on the macOS
+workers (`mojo_test_darwin`, `supervise_test_darwin`), and `run:gate_darwin` is built behind them: the
+libproc process table (the cap, the tree kill, the group scan), the SIGCHLD wake-up and `waitpid`, and
+`DYLD_LIBRARY_PATH` run there against the real operating system. Two cases are skipped on macOS: `no pid
+reuse` (macOS has no `waitid(WNOWAIT)`) and the real-program case (no `printenv` applet). The macOS
+differences are listed in the tool's README.
 
 ## 7. Rollout
 
@@ -314,6 +316,10 @@ workers join CI. This is stated in the tool's README.
 | `tools/build/tests/functional/test_data/runner_cases.sh` (and `runner_cases.bzl`) | 168 | `mojo_test.zig` |
 | `tools/build/tests/functional/mem_cap/cases.sh` | 155 | `supervise_test.zig` |
 | `tools/build/tests/functional/test_deadline/cases.sh` | 157 | `supervise_test.zig` |
+
+The darwin-arm64 toolchain kept `gate_runner.sh` (behind `dyld_prelude.sh`), `mem_cap.sh` and
+`test_deadline.sh` until the macOS build of the gate (`run:gate_darwin`) was proven on the macOS
+workers; that pull request deleted them and their case scripts.
 | `tools/build/coverage/mutate/mut_step_cases.sh` | 130 | `step_test.zig` |
 
 That is 1,339 lines of shell. In `cov_run.sh`, the watcher, `group_left` and the log scan go (about 60

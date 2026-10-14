@@ -25,10 +25,28 @@
 //!   link        exec `cc` from PATH with every row of the cc shim's rewrite table
 //!   empty       write an empty output, exit 0
 //!   cwd         write the working directory into the output
+//!
+//! Built for macOS (tests//functional/watchdog:cases_darwin) it is the same
+//! program through libc; `link` is Linux only.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const linux = std.os.linux;
 const posix = std.posix;
+
+/// Built for macOS (tests//functional/watchdog:cases_darwin), else Linux.
+const macos = builtin.os.tag == .macos;
+
+extern "c" fn getpid() c_int;
+extern "c" fn getsid(pid: c_int) c_int;
+
+fn myPid() i32 {
+    return if (macos) getpid() else linux.getpid();
+}
+
+fn mySid() i32 {
+    return if (macos) getsid(0) else @bitCast(@as(u32, @truncate(linux.syscall1(.getsid, 0))));
+}
 
 fn die(comptime fmt: []const u8, args: anytype) noreturn {
     std.debug.print("standin: " ++ fmt ++ "\n", args);
@@ -62,6 +80,14 @@ fn fork() i32 {
 }
 
 fn waitAll() void {
+    if (macos) {
+        while (true) {
+            var st: c_int = 0;
+            if (std.c.waitpid(-1, &st, 0) >= 0) continue;
+            if (std.c._errno().* == @intFromEnum(posix.E.INTR)) continue;
+            return;
+        }
+    }
     while (true) {
         var st: u32 = 0;
         const r = linux.waitpid(-1, &st, 0);
@@ -97,6 +123,7 @@ pub const link_inputs = [_][]const u8{
 };
 
 fn execCc(arena: std.mem.Allocator, out: []const u8) noreturn {
+    if (macos) die("link: the macOS shim runs the host's cc, no stand-in", .{});
     const path = posix.getenv("PATH") orelse die("no PATH", .{});
     var dirs = std.mem.splitScalar(u8, path, ':');
     const cc = while (dirs.next()) |d| {
@@ -118,8 +145,12 @@ fn execCc(arena: std.mem.Allocator, out: []const u8) noreturn {
 }
 
 fn disposition(sig: u6) []const u8 {
-    var old: linux.Sigaction = undefined;
-    _ = linux.sigaction(sig, null, &old);
+    var old: posix.Sigaction = undefined;
+    if (macos) {
+        posix.sigaction(sig, null, &old) catch {};
+    } else {
+        _ = linux.sigaction(sig, null, &old);
+    }
     const h: usize = if (old.handler.handler) |p| @intFromPtr(p) else 0;
     return switch (h) {
         0 => "dfl", // SIG_DFL
@@ -132,13 +163,13 @@ fn sigstate() void {
     const in = posix.fstat(0) catch die("cannot stat stdin", .{});
     const nul = posix.fstatat(posix.AT.FDCWD, "/dev/null", 0) catch die("cannot stat /dev/null", .{});
     const devnull = in.rdev == nul.rdev and in.ino == nul.ino and in.dev == nul.dev;
-    const pid = linux.getpid();
-    const sid: i32 = @bitCast(@as(u32, @truncate(linux.syscall1(.getsid, 0))));
+    const pid = myPid();
+    const sid = mySid();
     var buf: [128]u8 = undefined;
     write("sigstate.txt", std.fmt.bufPrint(&buf, "stdin={s} int={s} quit={s} leader={s}\n", .{
         if (devnull) "devnull" else "other",
-        disposition(linux.SIG.INT),
-        disposition(linux.SIG.QUIT),
+        disposition(posix.SIG.INT),
+        disposition(posix.SIG.QUIT),
         if (pid == sid) "yes" else "no",
     }) catch unreachable);
 }
@@ -181,7 +212,7 @@ pub fn main() void {
     if (eql(mode, "hang")) {
         sleepSecs(600);
     } else if (eql(mode, "hangpid")) {
-        writePid("compiler.pid", linux.getpid());
+        writePid("compiler.pid", myPid());
         const c = fork();
         if (c == 0) {
             sleepSecs(600);
@@ -229,9 +260,15 @@ pub fn main() void {
     } else if (eql(mode, "selfkill")) {
         // SIGUSR1's default action terminates without a core file; the
         // wrapper neither catches nor forwards it.
-        const sa = linux.Sigaction{ .handler = .{ .handler = linux.SIG.DFL }, .mask = linux.empty_sigset, .flags = 0 };
-        _ = linux.sigaction(linux.SIG.USR1, &sa, null);
-        _ = linux.kill(linux.getpid(), linux.SIG.USR1);
+        if (macos) {
+            const sa = posix.Sigaction{ .handler = .{ .handler = posix.SIG.DFL }, .mask = 0, .flags = 0 };
+            posix.sigaction(posix.SIG.USR1, &sa, null) catch {};
+            _ = std.c.kill(getpid(), posix.SIG.USR1);
+        } else {
+            const sa = linux.Sigaction{ .handler = .{ .handler = linux.SIG.DFL }, .mask = linux.empty_sigset, .flags = 0 };
+            _ = linux.sigaction(linux.SIG.USR1, &sa, null);
+            _ = linux.kill(linux.getpid(), linux.SIG.USR1);
+        }
         die("selfkill: still alive after SIGUSR1", .{});
     } else if (eql(mode, "envdump")) {
         envdump(arena);

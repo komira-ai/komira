@@ -196,7 +196,7 @@ def publish_layout[T: OciTransport](
     try:
         want = oci_platform_of(platform)
     except e:
-        return _refused(String(ERROR_PLATFORM), String(e))
+        return _refused(String(ERROR_PLATFORM), String(e))  # cov: unreachable require_release_platform above passes only linux-x86_64, which oci_platform_of spells linux/amd64
     var layout: OciLayout
     try:
         layout = read_oci_layout(layout_dir)

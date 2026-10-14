@@ -24,7 +24,7 @@
 #include <stdint.h>
 
 #define KOMIRA_UDF_WIRE_MAGIC 0x4644554Bu /* "KUDF" read as a little-endian u32 */
-#define KOMIRA_UDF_WIRE_VERSION 1u
+#define KOMIRA_UDF_WIRE_VERSION 2u
 #define KOMIRA_UDF_WIRE_HEADER_BYTES 40u
 
 typedef struct komira_udf_wire_header {
