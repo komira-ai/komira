@@ -12,7 +12,8 @@
 #     but no library file's);
 #   - holds a whole string matching each <ere>: the directories of the line
 #     tables the pinned Mojo writes, which are relative (`tests`, and the
-#     library's staged sources under buck-out/). Mojo records no compilation
+#     library's import name: its package is compiled from the parent of its
+#     staged sources). Mojo records no compilation
 #     directory, so these names stay relative to wherever the binary is read;
 #   - holds a placeholder `/` + `_`...: the compilation directory of zig's C
 #     runtime units (the only units that record one), relocated;

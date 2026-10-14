@@ -6,7 +6,7 @@
 # <dir> holds .github/workflows/coverage.yml, .github/ci/coverage_measure.sh,
 # .github/ci/tests/build_report_gate_failed.json and
 # build_report_branch_failed.json, and the real
-# tools/build/coverage/policy.bzl, ratchet.tsv and
+# tools/build/coverage/policy.bzl and
 # tools/build/mojo/coverage_branch.bzl; <covcheck dir> the real covcheck
 # with its lib/.
 #
@@ -260,7 +260,6 @@ while [ "$i" -le 240 ]; do
     i=$((i + 1))
 done
 printf 'p/BUCK\0p/a.mojo\0' >"$R/files"
-printf '# no floors\n' >"$R/ratchet.tsv"
 printf 'diff --git a/p/a.mojo b/p/a.mojo\nindex 1111111..2222222 100644\n--- a/p/a.mojo\n+++ b/p/a.mojo\n@@ -1 +1 @@\n-    x = 0\n+    x = 1\n' >"$R/diff.txt"
 cobertura() { # <out> <hits of odd lines> <hits of even lines>
     {
@@ -280,7 +279,7 @@ cobertura "$R/all.xml" 1 1
 bodies() { # <name> <report> <max annotations> <annotations wanted> <bodies wanted>
     o="$W/b_$1"
     (cd "$R" && "$CC/covcheck" report --repo-files files --diff diff.txt --head-sha "$HEAD_SHA" \
-        --source-root . --ratchet ratchet.tsv --mode census --cobertura "$2" --max-annotations "$3" \
+        --source-root . --target-bp 9900 --mode census --cobertura "$2" --max-annotations "$3" \
         --summary-out "$o.md" --checkrun-dir "$o" --result-out "$o.json") >"$W/out" 2>"$W/err" ||
         red "P setup $1: covcheck report failed"
     got=$(cat "$o"/*.json | { grep -o '"annotation_level"' || true; } | wc -l)
@@ -553,7 +552,7 @@ printf 'def test_f():\n    f()\n' >"$M/src/alpha/tests/test_a.mojo"
 printf 'def g():\n    return 1\n' >"$M/src/beta/beta.mojo"
 printf 'notes\n' >"$M/docs/notes.md"
 printf 'x\n' >"$M/tools/build/tests/functional/x/x.mojo"
-cp "$D/tools/build/coverage/policy.bzl" "$D/tools/build/coverage/ratchet.tsv" "$M/tools/build/coverage/"
+cp "$D/tools/build/coverage/policy.bzl" "$M/tools/build/coverage/"
 (cd "$M" && find . -type f ! -name '.buckconfig' | sed 's|^\./||' | sort) >"$W/git_files"
 echo .buckconfig >>"$W/git_files"
 XA="buck-out/v2/art/komira/0123/src/alpha/__alpha__/cov/tests/test_a.xml"
@@ -716,23 +715,22 @@ rm "$W/build_report_copy"
 [ "$(grep -c -- '^--cobertura$' "$W/covcheck_argv")" -eq 2 ] || red "M10: covcheck did not read the 2 reports of buck2's report"
 pass
 
-# M11. The ratchet covcheck reads holds the rows of the measured packages
-# only (and every comment line): a row of a package this run did not
-# measure (beta, whose build failed; delta, not touched) would read as a
-# Regression in every check run.
+# M11. covcheck holds the measured packages to their coverage_held only: a
+# hold of a package this run did not measure (beta, whose build failed;
+# delta, not touched) would read as a Regression (nothing of it measured).
 printf 'src/alpha/alpha.mojo\nsrc/beta/beta.mojo\n' >"$W/git_names"
 printf 'komira//src/alpha:alpha\nkomira//src/beta:beta\n' >"$W/uquery_out"
 printf 'komira//src/alpha:alpha SUCCESS - %s\nkomira//src/beta:beta FAIL mojo_cov_run@self\n' "$XA" >"$W/build_table"
-printf '# floors\nsrc/alpha\t6000\t-\nsrc/beta\t5000\t-\nsrc/delta\t5000\t-\n' >"$M/rows.tsv"
+for p in alpha beta delta; do printf '# c\nline\n' >"$M/src/$p/coverage_held"; done
 O="$W/o_M11"
 : >"$W/buck2_calls"
 (cd "$M" && sh "$MEASURE" --base "$BASE_SHA" --head "$HEAD_SHA" --covcheck "$T/stub/covcheck" --out "$O" \
-    --buck2 "$T/stub/buck2" --git "$T/stub/git" --ratchet rows.tsv) >"$W/out" 2>"$W/err" && RC=0 || RC=$?
+    --buck2 "$T/stub/buck2" --git "$T/stub/git") >"$W/out" 2>"$W/err" && RC=0 || RC=$?
 [ "$RC" -eq 0 ] || red "M11: exited $RC"
-rt=$(grep -A1 -x -- --ratchet "$W/covcheck_argv" | tail -n 1)
-[ "$(cd "$M" && cat "$rt")" = "$(printf '# floors\nsrc/alpha\t6000\t-')" ] ||
-    red "M11: covcheck's ratchet is not the comment and alpha's row alone"
+[ "$(grep -A1 -x -- --held "$W/covcheck_argv" | grep -v -x -- --held)" = "src/alpha=src/alpha/coverage_held" ] ||
+    red "M11: covcheck's holds are not alpha's alone"
 ! grep -q '"package":"src/\(delta\|beta\)"' "$O/publish/result.json" || red "M11: the result has a finding for a package this run did not measure"
+rm "$M"/src/*/coverage_held
 pass
 
 # The branch records (B cases): a library whose gate reads its tests'

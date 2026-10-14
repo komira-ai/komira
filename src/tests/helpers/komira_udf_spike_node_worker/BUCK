@@ -35,8 +35,9 @@ load(":defs.bzl", "udf_bench")
 # red):
 #   test_conform_node_worker
 #                 the shared conformance cases user code can express,
-#                 through the same runner as echo; two results pinned as
-#                 misfits of the spec.
+#                 through the same runner as echo; every one passes, the
+#                 capability check included, and the NATIVE-only case is
+#                 skipped.
 #   test_node_worker
 #                 describe, validate's refusals, load and return-type
 #                 refusals, state per context, a worker that exits or is
@@ -71,6 +72,7 @@ _WORKER = {"node_worker/worker/" + f: "worker/" + f for f in [
     "arrow_io.mjs",
     "calls.mjs",
     "corrupt.mjs",
+    "descriptor.mjs",
     "frames.mjs",
     "runtime.mjs",
     "wire.mjs",
