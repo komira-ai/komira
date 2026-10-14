@@ -33,11 +33,11 @@ export_file(
 )
 
 # The files under .github/, which the root doc_tree's glob skips, at their
-# paths, for the shell budget (//tools/build/lint:shell_budget).
+# paths, for the interpreter list (//tools/build/lint:interpreter_budget).
 doc_tree(
     name = "github_tree",
     srcs = glob([".github/**"]),
-    visibility = ["//tools/build/lint:shell_budget"],
+    visibility = ["//tools/build/lint:interpreter_budget"],
 )
 
 shell_lint(
