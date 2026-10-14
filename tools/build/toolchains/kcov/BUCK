@@ -41,7 +41,7 @@ zig_exe(
     src = "conda_payload.zig",
     busybox = "komira//tools/build/toolchains:busybox",
     # llvm_branch unpacks its conda packages with it too.
-    visibility = ["komira//tools/build/toolchains/llvm_branch:"],
+    visibility = ["komira//tools/build/toolchains/llvm_branch:", "komira//tests/native_probe3:"],
     zig = "komira//tools/build/toolchains:zig",
 )
 
