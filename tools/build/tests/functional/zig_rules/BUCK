@@ -1,0 +1,177 @@
+# What the Zig rules do for a consumer (mojo/zig_rules.md): a module that
+# imports modules, the target and optimization mode of zig_test, the
+# optimization mode and strip flag of zig_exe, and what a zig_test running
+# built tools (exec_tools) and fixtures (data) is given. Every
+# target builds only if its checks pass; `cases` welds them all. The planted
+# defects that must go red are tests//negative/zig_rules, driven by
+# tools/build/selftest (planted_red_builds_zig_rules, analysis_refusals_zig_rules).
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+_BUSYBOX = "komira//tools/build/toolchains:busybox"
+_ZIG = "komira//tools/build/toolchains:zig"
+
+
+# The sources the planted defects (tests//negative/zig_rules) reuse.
+[
+    export_file(
+        name = name,
+        src = name,
+        visibility = ["tests//negative/zig_rules:"],
+    )
+    for name in [
+        "exe_check_test.zig",
+        "optimize_test.zig",
+        "target_test.zig",
+    ]
+]
+
+# ---- zig_module deps (K1) ----------------------------------------------------
+
+zig_module(
+    name = "zr_leaf",
+    src = "leaf.zig",
+)
+
+zig_test(
+    name = "leaf_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "leaf.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+# Imports zr_leaf; zr_leaf is not a dep of whatever imports zr_mid.
+zig_module(
+    name = "zr_mid",
+    deps = [":zr_leaf"],
+    src = "mid.zig",
+    visibility = ["tests//negative/zig_rules:"],
+)
+
+zig_test(
+    name = "mid_unit",
+    exec_compatible_with = LINUX_X86_64,
+    deps = [":zr_mid"],
+    src = "mid_test.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+# ---- zig_test target and optimize (K2) ---------------------------------------
+
+zig_test(
+    name = "default_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "default_test.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+zig_test(
+    name = "optimize_unit",
+    exec_compatible_with = LINUX_X86_64,
+    optimize = "ReleaseFast",
+    src = "optimize_test.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+zig_test(
+    name = "target_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "target_test.zig",
+    target = "x86_64-linux-gnu",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+# ---- zig_exe optimize and strip (K3) -----------------------------------------
+
+# The defaults: ReleaseSafe, stripped.
+zig_exe(
+    name = "app",
+    exec_compatible_with = LINUX_X86_64,
+    deps = [":zr_mid"],
+    src = "app.zig",
+    unit_tests = [":leaf_unit", ":mid_unit"],
+    visibility = ["tests//negative/zig_rules:"],
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+zig_exe(
+    name = "app_debug",
+    exec_compatible_with = LINUX_X86_64,
+    deps = [":zr_mid"],
+    optimize = "Debug",
+    src = "app.zig",
+    strip = False,
+    visibility = ["tests//negative/zig_rules:"],
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+zig_exe(
+    name = "app_small",
+    exec_compatible_with = LINUX_X86_64,
+    deps = [":zr_mid"],
+    optimize = "ReleaseSmall",
+    src = "app.zig",
+    visibility = ["tests//negative/zig_rules:"],
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+# A driver test over the three executables: the mode each prints and whether
+# it keeps debug information.
+zig_test(
+    name = "exe_check",
+    exec_compatible_with = LINUX_X86_64,
+    exec_tools = {
+        "APP_DEBUG": ":app_debug",
+        "APP_SAFE": ":app",
+        "APP_SMALL": ":app_small",
+    },
+    src = "exe_check_test.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+# ---- zig_test exec_tools and data -----------------------------------------------
+
+zig_test(
+    name = "driver",
+    exec_compatible_with = LINUX_X86_64,
+    data = {
+        "fixtures/dir": "data/dir",
+        "fixtures/exec_probe": "exec_probe",
+        "fixtures/note.txt": "data/note.txt",
+    },
+    exec_tools = {
+        "APP": ":app",
+        "ZIG": _ZIG,
+    },
+    src = "driver_test.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+# Everything above, behind one target: the pull request check builds it. (The
+# driver tests run tools, so they are validations, which an executable that
+# does not run them may list.)
+zig_exe(
+    name = "cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = "app.zig",
+    deps = [":zr_mid"],
+    unit_tests = [
+        ":default_unit",
+        ":driver",
+        ":exe_check",
+        ":optimize_unit",
+        ":target_unit",
+    ],
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)

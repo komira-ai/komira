@@ -50,6 +50,8 @@ given `--nested`, which the guard refuses.
 | [`analysis_refusals_python_oracle`](analysis_refusals_python_oracle.zig) | inputs built outside third_party/ | the owner check dropped |
 | [`analysis_refusals_node`](analysis_refusals_node.zig) | the Node.js rules' 8 analysis refusals | the staged-twice check deleted |
 | [`planted_red_builds_node`](planted_red_builds_node.zig) | the Node.js rules' 36 planted defects that fail in an action: node_test's verdict, esbuild, npm_package's and node_dist's pins, c_shared_lib's `-Werror` | expect_error matched case-insensitively; `-Werror` dropped |
+| [`analysis_refusals_zig_rules`](analysis_refusals_zig_rules.zig) | the Zig rules' module-closure name clash, unknown `optimize` and bad `target`, and zig_test's bad or runner-owned `exec_tools` names and file-and-directory `data`, each with its message | the name-clash `fail()` deleted |
+| [`planted_red_builds_zig_rules`](planted_red_builds_zig_rules.zig) | a module importing a module it does not declare, an importer reaching a dep's dep, and the red twins of `optimize`, `strip` and `target` | the root module given the whole closure; `optimize` or `strip` ignored |
 | [`analysis_refusals_rust`](analysis_refusals_rust.zig) | rust_library's test_srcs refusals | the `.rs` check deleted |
 | [`analysis_refusals_coverage`](analysis_refusals_coverage.zig) | the coverage rules' analysis refusals | the import-name, no-args and LLVM_PROFILE_FILE checks deleted |
 | [`config_refusals`](config_refusals.zig) | `komira.coverage`, `komira.mutation`, `komira.test_timeout_s` values refused at load | any value but true read as false; the margin's `<=` made `<` |
