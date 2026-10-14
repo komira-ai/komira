@@ -1,8 +1,7 @@
-load("@komira//tools/build/mojo:script_test.bzl", "script_test")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
-# Planted defects for the Zig rules (K1-K3) and script_test (K4); the cases
+# Planted defects for the Zig rules; the cases
 # that work are tests//functional/zig_rules. Every target here must fail, and
 # tools/build/selftest requires the text named in its row of
 # analysis_refusals_zig_rules (analysis) or planted_red_builds_zig_rules (an
@@ -10,7 +9,6 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
 _BUSYBOX = "komira//tools/build/toolchains:busybox"
 _ZIG = "komira//tools/build/toolchains:zig"
-_PKG = "negative/zig_rules/"
 
 # ---- zig_module deps ----------------------------------------------------------
 
@@ -116,106 +114,51 @@ zig_test(
     zig = _ZIG,
 )
 
-# RED "got '42 Debug', expected '42 ReleaseSafe'": the Debug build is not the
-# default one, so optimize reaches the compile.
-script_test(
-    name = "debug_is_not_release_safe",
-    args = [
-        "modes.check",
-        "$(location //functional/zig_rules:app_debug)",
-        "42 ReleaseSafe",
-    ],
-    cmd = "sh",
-    srcs = {"modes.check": "//functional/zig_rules:modes.check"},
-)
-
-# RED "is unstripped, expected stripped": strip = False keeps debug information.
-script_test(
-    name = "unstripped_is_not_stripped",
-    args = [
-        "stripped.check",
-        "$(location //functional/zig_rules:app_debug)",
-        "stripped",
-    ],
-    cmd = "sh",
-    srcs = {"stripped.check": "//functional/zig_rules:stripped.check"},
-)
-
-# ---- script_test ----------------------------------------------------------------
-
-# RED "script_test: sh exited with status 3" and the command's own output.
-script_test(
-    name = "fails",
-    args = [_PKG + "boom.check"],
-    cmd = "sh",
-    srcs = ["boom.check"],
-)
-
-# RED "script_test: no_such_command_anywhere exited with status 127".
-script_test(
-    name = "command_missing",
-    cmd = "no_such_command_anywhere",
-)
-
-# RED the same: a failed script_test keeps a zig_exe that lists it in
-# unit_tests from being built.
-zig_exe(
-    name = "welded_to_a_failure",
+# RED "got '42 Debug', expected '42 ReleaseSafe' and "app_debug is unstripped,
+# expected stripped": the driver test of the executables, given the Debug
+# build in place of the default one; optimize and strip reach the compile.
+zig_test(
+    name = "swapped_tools",
     exec_compatible_with = LINUX_X86_64,
-    src = "direct.zig",
-    unit_tests = [":fails"],
+    exec_tools = {
+        "APP_DEBUG": "//functional/zig_rules:app",
+        "APP_SAFE": "//functional/zig_rules:app_debug",
+        "APP_SMALL": "//functional/zig_rules:app_small",
+    },
+    src = "//functional/zig_rules:exe_check_test.zig",
     busybox = _BUSYBOX,
     zig = _ZIG,
 )
 
-# RED "a declared tool is not on PATH by another name": the command exits 127.
-script_test(
-    name = "tool_under_another_name",
-    args = ["--version"],
-    cmd = "zigg",
-    tools = {"zig": _ZIG},
+# REFUSED "exec_tools name 1BAD is not a shell variable name".
+zig_test(
+    name = "exec_tools_bad_name",
+    exec_compatible_with = LINUX_X86_64,
+    exec_tools = {"1BAD": _ZIG},
+    src = "direct.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
 )
 
-# REFUSED "cmd is empty".
-script_test(
-    name = "cmd_empty",
-    cmd = "",
+# REFUSED "exec_tools name HOME is set by the action or by env_tools".
+zig_test(
+    name = "exec_tools_sets_home",
+    exec_compatible_with = LINUX_X86_64,
+    exec_tools = {"HOME": _ZIG},
+    src = "direct.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
 )
 
-# REFUSED "env name 1BAD is not a shell variable name".
-script_test(
-    name = "env_bad_name",
-    cmd = "true",
-    env = {"1BAD": "x"},
-)
-
-# REFUSED "env sets HOME, which the action sets itself".
-script_test(
-    name = "env_sets_home",
-    cmd = "true",
-    env = {"HOME": "/elsewhere"},
-)
-
-# REFUSED "env sets ZIG_GLOBAL_CACHE_DIR, which the action sets itself".
-script_test(
-    name = "env_sets_zig_cache",
-    cmd = "true",
-    env = {"ZIG_GLOBAL_CACHE_DIR": "/elsewhere"},
-)
-
-# REFUSED "tool name a/b is not a file name".
-script_test(
-    name = "tool_name_with_slash",
-    cmd = "true",
-    tools = {"a/b": _ZIG},
-)
-
-# REFUSED "data destination ok.check is both a file and the directory of".
-script_test(
-    name = "src_file_and_directory",
-    cmd = "true",
-    srcs = {
-        "d": "ok.check",
-        "d/inner": "ok.check",
+# REFUSED "data destination d is both a file and the directory of".
+zig_test(
+    name = "data_file_and_directory",
+    exec_compatible_with = LINUX_X86_64,
+    data = {
+        "d": "direct.zig",
+        "d/inner": "direct.zig",
     },
+    src = "direct.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
 )

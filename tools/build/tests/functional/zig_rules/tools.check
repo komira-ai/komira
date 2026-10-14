@@ -1,5 +1,0 @@
-# The declared tools are on PATH by name: an executable file (app), and the
-# directory of the pinned zig (the executable it holds).
-test "$(command -v app)" != ""
-test "$(app)" = "42 ReleaseSafe"
-test "$(zig version)" = 0.12.0

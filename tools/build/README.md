@@ -167,9 +167,10 @@ an alias of the client's own row, so on a Linux x86_64 client it is
 a server whose message limit is below buck2's default batch size fails
 `BatchReadBlobs`.
 
-**Your own Zig programs and scripts** build and test with the same pinned zig
-and busybox: `zig_module` (with `deps` on other modules), `zig_exe`,
-`zig_test` and `script_test`, loaded from `@komira//tools/build/mojo:`; see
+**Your own Zig programs** build and test with the same pinned zig and
+busybox: `zig_module` (with `deps` on other modules), `zig_exe` and `zig_test`
+(which can drive built programs), loaded from
+`@komira//tools/build/mojo:toolchain.bzl`; see
 [mojo/zig_rules.md](mojo/zig_rules.md).
 
 What keeps the digests equal:

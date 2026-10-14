@@ -55,7 +55,6 @@ action that runs a test, and returns `rerun_info(ctx)` (the provider
 | `rust_library` | each `test_srcs` crate (`rust_gated_test`) |
 | `rust_binary` | the run check (`rust_run_check`) |
 | `zig_test` | `zig test` (`zig_test`) |
-| `script_test` | the command (`script_test`) |
 | `node_test` | the script (`node_test`) |
 | `py_test` | the script (`py_test`) |
 | `launcher_level_test` | the level test (`launcher_level_test`) |

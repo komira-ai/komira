@@ -1,12 +1,10 @@
-# Zig rules and script_test, for a repository that uses komira
+# Zig rules, for a repository that uses komira
 
 The Zig rules ([`toolchain.bzl`](toolchain.bzl)) build and test Zig programs
-as build actions with the pinned zig and busybox; `script_test`
-([`script_test.bzl`](script_test.bzl)) runs a command, a script or a built
-tool, as a build action. A repository that names komira as its `komira` cell
+as build actions with the pinned zig and busybox. A repository that names
+komira as its `komira` cell
 ([Using komira from another repository](../README.md#using-komira-from-another-repository))
-loads them as `@komira//tools/build/mojo:toolchain.bzl` and
-`@komira//tools/build/mojo:script_test.bzl`. The examples are
+loads them as `@komira//tools/build/mojo:toolchain.bzl`. The examples are
 [`tests/functional/zig_rules`](../tests/functional/zig_rules/BUCK); the
 defects that must go red are
 [`tests/negative/zig_rules`](../tests/negative/zig_rules/BUCK).
@@ -28,7 +26,7 @@ target's name (`root`, `std` and `builtin` are zig's own and refused).
   `zig build`'s `addImport` does: an importer sees the modules it lists, not
   the ones those import. Two different targets of one import name anywhere in
   a closure fail analysis (`two different modules are imported as "<name>"`).
-- `unit_tests`: `zig_test` or `script_test` targets of the module. Nothing
+- `unit_tests`: `zig_test` targets of the module. Nothing
   imports the module, or a module that depends on it, unless they passed.
 
 ## zig_exe, zig_test, zig_test_binary
@@ -42,60 +40,27 @@ target's name (`root`, `std` and `builtin` are zig's own and refused).
 With the defaults the commands, and so the action keys, of every existing
 target are what they were before these attributes existed.
 
-## script_test
+## Driver tests: exec_tools and data
 
-```python
-load("@komira//tools/build/mojo:script_test.bzl", "script_test")
+A `zig_test` that drives built programs, an integration test written in Zig,
+is given:
 
-script_test(
-    name = "golden",
-    cmd = "sh",
-    args = ["tests/run_golden.sh", "$(location :tool)"],
-    srcs = glob(["tests/**"]),
-    tools = {"tool": ":tool"},
-    env = {"TOOL": "$(location :tool)"},
-)
-```
+- `exec_tools = {NAME: target}`: each tool's **absolute** path in the
+  environment variable `NAME` (`env_tools` gives a path relative to the
+  action's directory). An executable's path is the file; a directory, such as
+  the pinned zig (`komira//tools/build/toolchains:zig`), is the directory.
+  A test with `exec_tools` or `env_tools` is also a validation, and cannot be
+  an input of a tool it runs.
+- `data`: a list of sources (files or directories, each at its path from the
+  cell root) or `{destination: source}`, copied into a writable directory whose
+  path is `KOMIRA_TEST_WORK`; executable bits are kept.
+- `HOME`, `TMPDIR`, `XDG_CACHE_HOME`, `ZIG_GLOBAL_CACHE_DIR` and
+  `ZIG_LOCAL_CACHE_DIR` are directories inside the action's scratch space
+  (`XDG_CACHE_HOME` and `KOMIRA_TEST_WORK` only with `exec_tools` or `data`,
+  so that the command of a test without them is unchanged).
+- Loopback networking: a server on `127.0.0.1` port 0 and a client in the same
+  test work. There is no other network.
 
-The action runs on linux-x86_64 (`exec_compatible_with` defaults to it; the
-shell and the file utilities are the pinned busybox) and its output,
-`<name>.passed`, is written only if the command exited 0. A target that names
-it in `unit_tests` is therefore built after it, as after a `zig_test`; a
-`script_test` that runs a built tool cannot be an input of that tool.
-
-- **Working directory.** A scratch directory in the action holding a copy of
-  `srcs`: a list of sources (files or directories), each at its path from the
-  cell root, or `{destination: source}`. The copy is writable and keeps
-  executable bits; the command may write anywhere under it. A source listed as
-  a file and as a directory of another is refused.
-- **Environment.** `HOME`, `TMPDIR`, `XDG_CACHE_HOME`, `ZIG_GLOBAL_CACHE_DIR`
-  and `ZIG_LOCAL_CACHE_DIR` are directories inside the action's scratch space.
-  `PATH` is the declared tools, then the busybox applets; nothing of the worker
-  is on it. `env` adds variables (not these, nor `PATH`); a value may hold
-  `$(location ...)` and `$(exe ...)`.
-- **Tools.** `tools` maps a name to a target. An executable file is on `PATH`
-  under its name. A directory, such as the pinned zig or an unpacked
-  interpreter distribution, puts its `bin/` (or itself, when it has none) on
-  `PATH`.
-- **Command.** `cmd` is a path of `srcs` (from the working directory) or a name
-  on `PATH`; `args` are strings in which `$(location ...)` and `$(exe ...)`
-  expand to absolute paths. A script runs by its `#!` line only if the worker
-  image has that interpreter: name the interpreter in `cmd` (`sh`, or a tool such
-  as `python3`) and the script in `args`. The macro syntax owns `$(`: shell
-  command substitution belongs in a source script.
-- **Failure.** `script_test: <cmd> exited with status N; the last 200 lines of
-  its output:` and the command's merged standard output and error.
-
-There is no network; a test that needs a server starts one on the loopback
-interface.
-
-## An interpreter as a tool
-
-`python_dist` ([`python/defs.bzl`](../python/defs.bzl)) unpacks a pinned
-python-build-standalone archive (`install_only`, stripped) with busybox `tar`
-into a directory holding `bin/python3`; as a `script_test` tool its `bin/` is on
-`PATH`. komira does not declare one for consumers (it has no Python surface:
-`//:python_closure`), so the repository that needs one pins the archive itself
-(`pinned_file`) and declares the dist. On macOS execution platforms, give it
-`busybox = "komira//tools/build/mojo/darwin:busybox.sh"` and `system_tar = True`
-(that busybox has no `tar` applet).
+The test runs in the action's directory, with the busybox applets as its
+`PATH`; it spawns programs with `std.process.Child`. No shell is needed in the
+test, and no script is run.

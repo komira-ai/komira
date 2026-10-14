@@ -32,7 +32,6 @@ const KINDS = [_]Kind{
     .{ .rule = "rust_library test_srcs", .target = "komira//tools/build/examples/rust/ext:ext" },
     .{ .rule = "rust_binary run check", .target = "komira//tools/build/examples/rust/ext:ext_consumer" },
     .{ .rule = "zig_test", .target = "komira//tools/build/markdown:markdown_unit" },
-    .{ .rule = "script_test", .target = "tests//functional/zig_rules:tools_on_path" },
     .{ .rule = "node_test", .target = "komira//src/tests/helpers/komira_test_node:isolation" },
     .{ .rule = "py_test", .target = "komira//release/ci/tests:test_main_red" },
     .{ .rule = "launcher_level_test", .target = "komira//tools/build/package:level_test" },

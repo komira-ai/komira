@@ -1,3 +1,0 @@
-# Fails with a line of output that script_test must show.
-echo "boom: the line script_test must show" >&2
-exit 3

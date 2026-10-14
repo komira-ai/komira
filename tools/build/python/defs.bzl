@@ -127,19 +127,15 @@ rm -rf "$T"
 """
 
 def _python_dist_impl(ctx):
-    bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
+    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     archive = ctx.attrs.archive[DefaultInfo].default_outputs[0]
     exe = _exe_name(ctx.attrs.version, ctx.attrs.freethreaded)
     want = ctx.attrs.version + ("t" if ctx.attrs.freethreaded else "")
     out = ctx.actions.declare_output("python", dir = True)
     if ctx.attrs.preload and not ctx.attrs.native_libs:
         fail("{}: preload names libraries but native_libs is not set".format(ctx.label))
-    # The macOS execution platform's busybox (mojo/darwin/busybox.sh) has no
-    # tar applet: its base system's tar unpacks. The linux script is as it
-    # was, so no existing action changes its key.
-    script = _DIST_SCRIPT.replace("\ntar -xzf ", "\n/usr/bin/tar -xzf ") if ctx.attrs.system_tar else _DIST_SCRIPT
     ctx.actions.run(
-        busybox_sh(bb, script, archive, out.as_output(), exe, want),
+        busybox_sh(bb, _DIST_SCRIPT, archive, out.as_output(), exe, want),
         category = "python_dist",
     )
     return [
@@ -160,20 +156,14 @@ _python_dist = rule(
     attrs = {
         # A pinned_file holding the `.tar.gz`.
         "archive": attrs.dep(),
-        # The shell and the file utilities of the action: the pinned linux
-        # busybox, or on a macOS execution platform
-        # `komira//tools/build/mojo/darwin:busybox.sh` with `system_tar`.
-        "busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
         # A free-threaded build (`Py_GIL_DISABLED`), whose interpreter is
         # `bin/python<major>.<minor>t`.
         "freethreaded": attrs.bool(default = False),
         # A directory holding the libraries `preload` names (paths in it).
         "native_libs": attrs.option(attrs.dep(), default = None),
         "preload": attrs.list(attrs.string(), default = []),
-        # Unpack with /usr/bin/tar (the base system's), for an execution
-        # platform whose busybox has no tar applet (macOS).
-        "system_tar": attrs.bool(default = False),
         "version": attrs.string(),
+        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
     },
 )
 

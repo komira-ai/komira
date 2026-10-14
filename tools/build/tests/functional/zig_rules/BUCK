@@ -1,22 +1,18 @@
-# What the Zig rules and script_test do for a consumer (tools/build/README.md,
-# "Zig rules and script_test"): a module that imports modules, the target and
-# optimization mode of zig_test, the optimization mode and strip flag of
-# zig_exe, and script_test's scratch directory, tools and verdict. Every
+# What the Zig rules do for a consumer (mojo/zig_rules.md): a module that
+# imports modules, the target and optimization mode of zig_test, the
+# optimization mode and strip flag of zig_exe, and what a zig_test running
+# built tools (exec_tools) and fixtures (data) is given. Every
 # target builds only if its checks pass; `cases` welds them all. The planted
 # defects that must go red are tests//negative/zig_rules, driven by
 # tools/build/selftest (planted_red_builds_zig_rules, analysis_refusals_zig_rules).
-load("@komira//tools/build/mojo:script_test.bzl", "script_test")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
 _BUSYBOX = "komira//tools/build/toolchains:busybox"
 _ZIG = "komira//tools/build/toolchains:zig"
 
-# Where script_test stages this package's sources: their path from the cell root.
-_PKG = "functional/zig_rules/"
 
-# The checks the planted defects (tests//negative/zig_rules) run on the
-# wrong executable.
+# The sources the planted defects (tests//negative/zig_rules) reuse.
 [
     export_file(
         name = name,
@@ -24,9 +20,8 @@ _PKG = "functional/zig_rules/"
         visibility = ["tests//negative/zig_rules:"],
     )
     for name in [
-        "modes.check",
+        "exe_check_test.zig",
         "optimize_test.zig",
-        "stripped.check",
         "target_test.zig",
     ]
 ]
@@ -100,6 +95,7 @@ zig_exe(
     deps = [":zr_mid"],
     src = "app.zig",
     unit_tests = [":leaf_unit", ":mid_unit"],
+    visibility = ["tests//negative/zig_rules:"],
     busybox = _BUSYBOX,
     zig = _ZIG,
 )
@@ -122,139 +118,59 @@ zig_exe(
     deps = [":zr_mid"],
     optimize = "ReleaseSmall",
     src = "app.zig",
+    visibility = ["tests//negative/zig_rules:"],
     busybox = _BUSYBOX,
     zig = _ZIG,
 )
 
-script_test(
-    name = "app_modes",
-    args = [
-        _PKG + "modes.check",
-        "$(location :app)",
-        "42 ReleaseSafe",
-    ],
-    cmd = "sh",
-    srcs = ["modes.check"],
-)
-
-script_test(
-    name = "app_debug_modes",
-    args = [
-        _PKG + "modes.check",
-        "$(location :app_debug)",
-        "42 Debug",
-    ],
-    cmd = "sh",
-    srcs = ["modes.check"],
-)
-
-script_test(
-    name = "app_small_modes",
-    args = [
-        _PKG + "modes.check",
-        "$(location :app_small)",
-        "42 ReleaseSmall",
-    ],
-    cmd = "sh",
-    srcs = ["modes.check"],
-)
-
-script_test(
-    name = "app_stripped",
-    args = [
-        _PKG + "stripped.check",
-        "$(location :app)",
-        "stripped",
-    ],
-    cmd = "sh",
-    srcs = ["stripped.check"],
-)
-
-script_test(
-    name = "app_debug_unstripped",
-    args = [
-        _PKG + "stripped.check",
-        "$(location :app_debug)",
-        "unstripped",
-    ],
-    cmd = "sh",
-    srcs = ["stripped.check"],
-)
-
-# ---- script_test (K4) ---------------------------------------------------------
-
-# The scratch directory, the environment and the sources: scratch.check.
-script_test(
-    name = "scratch",
-    args = [_PKG + "scratch.check"],
-    cmd = "sh",
-    env = {
-        "APP": "$(location :app)",
-        "KIND": "plain",
-    },
-    srcs = [
-        "data/dir/inner.txt",
-        "data/note.txt",
-        "exec_probe",
-        "scratch.check",
-    ],
-)
-
-# The declared tools are on PATH: an executable file under its name, and the
-# pinned zig, a directory holding `zig`, by what it holds.
-script_test(
-    name = "tools_on_path",
-    args = [_PKG + "tools.check"],
-    cmd = "sh",
-    srcs = ["tools.check"],
-    tools = {
-        "app": ":app",
-        "zig": _ZIG,
-    },
-)
-
-# A directory tool (an unpacked distribution, as python_dist's) puts its bin/
-# on PATH: the executable it holds is found by its own name.
-export_file(
-    name = "stand_in",
-    src = "stand_in",
-)
-
-script_test(
-    name = "dist_bin_on_path",
-    args = ["-c", "test \"`standin`\" = 'stand-in on PATH'"],
-    cmd = "sh",
-    tools = {"dist": ":stand_in"},
-)
-
-# A script_test welds into a zig_exe as a zig_test does: this executable is
-# built only after the script_test passed.
-zig_exe(
-    name = "welded",
+# A driver test over the three executables: the mode each prints and whether
+# it keeps debug information.
+zig_test(
+    name = "exe_check",
     exec_compatible_with = LINUX_X86_64,
-    src = "app.zig",
-    deps = [":zr_mid"],
-    unit_tests = [":dist_bin_on_path", ":scratch", ":tools_on_path"],
+    exec_tools = {
+        "APP_DEBUG": ":app_debug",
+        "APP_SAFE": ":app",
+        "APP_SMALL": ":app_small",
+    },
+    src = "exe_check_test.zig",
     busybox = _BUSYBOX,
     zig = _ZIG,
 )
 
-# Everything above, behind one target: the pull request check builds it.
+# ---- zig_test exec_tools and data -----------------------------------------------
+
+zig_test(
+    name = "driver",
+    exec_compatible_with = LINUX_X86_64,
+    data = {
+        "fixtures/dir": "data/dir",
+        "fixtures/exec_probe": "exec_probe",
+        "fixtures/note.txt": "data/note.txt",
+    },
+    exec_tools = {
+        "APP": ":app",
+        "ZIG": _ZIG,
+    },
+    src = "driver_test.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+# Everything above, behind one target: the pull request check builds it. (The
+# driver tests run tools, so they are validations, which an executable that
+# does not run them may list.)
 zig_exe(
     name = "cases",
     exec_compatible_with = LINUX_X86_64,
     src = "app.zig",
     deps = [":zr_mid"],
     unit_tests = [
-        ":app_debug_modes",
-        ":app_debug_unstripped",
-        ":app_modes",
-        ":app_small_modes",
-        ":app_stripped",
         ":default_unit",
+        ":driver",
+        ":exe_check",
         ":optimize_unit",
         ":target_unit",
-        ":welded",
     ],
     busybox = _BUSYBOX,
     zig = _ZIG,

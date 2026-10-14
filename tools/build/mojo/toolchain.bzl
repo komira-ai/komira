@@ -7,6 +7,7 @@ Actions never search the worker's PATH.
 """
 
 load(":providers.bzl", "MojoToolchainInfo")
+load(":test_runtime.bzl", "RUNNER_ENV", "data_map")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
@@ -228,6 +229,34 @@ zig_exe_rule = rule(
     },
 )
 
+# Variables a driver test's action sets itself.
+_ZIG_TEST_OWN_ENV = ["XDG_CACHE_HOME", "ZIG_GLOBAL_CACHE_DIR", "ZIG_LOCAL_CACHE_DIR", "KOMIRA_TEST_WORK", "KOMIRA_ZT_DATA", "KOMIRA_ZT_TOOLS"]
+
+# What a zig_test with `exec_tools` or `data` does before `zig test`: XDG_CACHE_HOME
+# in the scratch, KOMIRA_TEST_WORK a writable directory holding a copy of
+# `data` (executable bits kept), each `exec_tools` variable the absolute path
+# of its tool. (A manifest ends without a newline: the last line is read
+# while it holds something.)
+_ZIG_TEST_DRIVER = """R="$PWD"; TAB=$(printf '\\t')
+XDG_CACHE_HOME="$T/cache"; KOMIRA_TEST_WORK="$T/work"
+export XDG_CACHE_HOME KOMIRA_TEST_WORK
+mkdir -p "$XDG_CACHE_HOME" "$KOMIRA_TEST_WORK"
+while IFS="$TAB" read -r dest src || [ -n "$dest" ]; do
+    if [ -d "$src" ]; then
+        mkdir -p "$KOMIRA_TEST_WORK/$dest"
+        cp -R "$src/." "$KOMIRA_TEST_WORK/$dest/"
+    else
+        mkdir -p "$KOMIRA_TEST_WORK/$(dirname "$dest")"
+        cp "$src" "$KOMIRA_TEST_WORK/$dest"
+    fi
+done < "$KOMIRA_ZT_DATA"
+chmod -R u+w "$KOMIRA_TEST_WORK"
+while IFS="$TAB" read -r name path || [ -n "$name" ]; do
+    export "$name=$R/$path"
+done < "$KOMIRA_ZT_TOOLS"
+unset KOMIRA_ZT_DATA KOMIRA_ZT_TOOLS
+"""
+
 def _zig_test_impl(ctx):
     bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
     zig = ctx.attrs.zig[DefaultInfo].default_outputs[0]
@@ -236,7 +265,7 @@ def _zig_test_impl(ctx):
     # `cases`), as the test cannot be an input of the tool it runs. Its
     # result is then a validation result; a test without tools writes
     # `passed`, as it always did.
-    validation = bool(ctx.attrs.env_tools)
+    validation = bool(ctx.attrs.env_tools or ctx.attrs.exec_tools)
     out = ctx.actions.declare_output(ctx.label.name + (".json" if validation else ".passed"))
     passed = """printf '{"version": 1, "data": {"status": "success", "message": "zig test passed"}}\\n' > "$3"\n""" if validation else "echo passed > \"$3\"\n"
     # The tests run with the busybox applets as their PATH and a TMPDIR of
@@ -245,7 +274,7 @@ def _zig_test_impl(ctx):
 ZIG_GLOBAL_CACHE_DIR="$T/zig-global"; ZIG_LOCAL_CACHE_DIR="$T/zig-local"; HOME="$T/home"; TMPDIR="$T/tmp"
 export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME TMPDIR
 mkdir -p "$TMPDIR"
-"$1/zig" test -target TARGET "$2"
+__DRIVER__"$1/zig" test -target TARGET "$2"
 """ + passed + """rm -rf "$T"
 """
     # The target and the optimization mode are written into the script; with
@@ -259,8 +288,29 @@ mkdir -p "$TMPDIR"
     # paths.
     env = {name: dep[DefaultInfo].default_outputs[0] for name, dep in ctx.attrs.env_tools.items()}
     env.update(rerun_env(ctx))
+    hidden = list(ctx.attrs.imports)
+    if ctx.attrs.exec_tools or ctx.attrs.data:
+        # A driver test: built tools by absolute path, fixtures in a writable
+        # directory (KOMIRA_TEST_WORK). Both come from manifests, so a test
+        # without them keeps the command it always had.
+        where = str(ctx.label.raw_target())
+        for name in ctx.attrs.exec_tools:
+            if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", name):
+                fail("{}: exec_tools name {} is not a shell variable name".format(where, repr(name)))
+            if name in RUNNER_ENV or name in _ZIG_TEST_OWN_ENV or name in ctx.attrs.env_tools:
+                fail("{}: exec_tools name {} is set by the action or by env_tools".format(where, name))
+        srcs = data_map(ctx, where, ctx.attrs.data)
+        tools = {name: dep[DefaultInfo].default_outputs[0] for name, dep in ctx.attrs.exec_tools.items()}
+        data_manifest, _ = ctx.actions.write(ctx.label.name + ".data", [cmd_args(d, a, delimiter = "\t") for d, a in sorted(srcs.items())], allow_args = True)
+        tools_manifest, _ = ctx.actions.write(ctx.label.name + ".tools", [cmd_args(n, t, delimiter = "\t") for n, t in sorted(tools.items())], allow_args = True)
+        env["KOMIRA_ZT_DATA"] = data_manifest
+        env["KOMIRA_ZT_TOOLS"] = tools_manifest
+        hidden += srcs.values() + tools.values()
+        script = script.replace("__DRIVER__", _ZIG_TEST_DRIVER)
+    else:
+        script = script.replace("__DRIVER__", "")
     ctx.actions.run(
-        cmd_args(busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output()), hidden = ctx.attrs.imports),
+        cmd_args(busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output()), hidden = hidden),
         category = "zig_test",
         env = env,
     )
@@ -292,6 +342,14 @@ zig_test_rule = rule(
         # directory of executables: the pinned zig
         # (komira//tools/build/toolchains:zig) is the directory holding `zig`.
         "env_tools": attrs.dict(attrs.string(), attrs.exec_dep(), default = {}),
+        # Files a driver test reads and writes, copied into the writable
+        # directory KOMIRA_TEST_WORK: a list of sources (files or directories,
+        # each at its path from the cell root) or {destination: source}.
+        "data": attrs.one_of(attrs.list(attrs.source(allow_directory = True)), attrs.dict(attrs.string(), attrs.source(allow_directory = True)), default = []),
+        # name -> a built tool the tests run, in the environment as its
+        # ABSOLUTE path (env_tools' paths are relative to the action's
+        # directory). Like env_tools, it makes the test a validation.
+        "exec_tools": attrs.dict(attrs.string(), attrs.exec_dep(), default = {}),
         "imports": attrs.list(attrs.source(), default = []),
         # zig's -O: the optimization mode the tests are built with. `Debug`
         # is zig's own default (no flag is passed).
