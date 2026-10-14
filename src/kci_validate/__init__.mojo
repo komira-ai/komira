@@ -46,9 +46,9 @@
 #                             nothing extra), the `__glibc` floor, each
 #                             `.so`'s NEEDED inside the environment and
 #                             DF_SYMBOLIC; `loaded_from_findings` and
-#                             `run_loaded_from`, the loader's record. Not
-#                             called by run_install_env (beta's install job
-#                             runs them, slice 11)
+#                             `run_loaded_from`, the loader's record; run
+#                             by run_install_env when a pin is native
+#                             (native_rows.mojo, slice 11)
 #   elf_dynamic.mojo          an ELF shared object's dynamic section
 #
 # Which validations a step has is the machine file's (kci_release_machine); the
@@ -80,6 +80,7 @@ from kci_validate.env import (
     ENV_SYSTEM_PATH,
     PIXI_SYSTEM_CONFIG_DIR,
     EnvHost,
+    build_program_argv,
     env_child_env,
     install_env_argv,
     run_program_argv,
@@ -102,9 +103,12 @@ from kci_validate.readme_link import (
     CONDA_PREFIX_TEXT,
     LinkArgs,
     LinkNode,
+    build_link_args,
     closure_link_args,
+    closure_names,
     link_nodes,
     link_refusal,
+    links_static,
     parse_link_args,
     run_link_args,
 )
@@ -136,17 +140,38 @@ from kci_validate.native_install import (
     check_native_install,
     glibc_sonames,
     lib_files_findings,
+    lexical_path,
     lib_rows_findings,
     link_name_of,
     loaded_from_findings,
+    loader_env,
+    loader_record,
     needed_findings,
+    resolved_path,
     run_loaded_from,
     symbolic_findings,
+)
+from kci_validate.native_rows import (
+    CHECK_ALONE,
+    CHECK_BUILT,
+    CHECK_LOAD,
+    CHECK_OPENSSL,
+    LOAD_PROGRAM,
+    alone_pins,
+    any_native,
+    is_native,
+    load_findings,
+    load_program_text,
+    openssl_program_text,
+    run_native_rows,
+    run_readme,
+    shared_paths,
 )
 from kci_validate.request import (
     ContainerHost,
     InstallPin,
     ValidateRequest,
+    closure_codecs,
     install_pins,
     load_validated_release,
     metapackage_members,

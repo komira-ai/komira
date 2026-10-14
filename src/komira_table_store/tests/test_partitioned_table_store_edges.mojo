@@ -13,6 +13,8 @@
 #   * a txn begun on shard 0 whose write routes to shard 1 is refused with the
 #     cross-shard token and nothing is written; a read-only txn begun on shard
 #     0 commits as read-only.
+#   * a read-only txn begun on shard 1 (by begin_for_key or begin_on) commits
+#     as read-only instead of being refused as cross-shard (komira#1376).
 #   * reopening a table whose shard p3 holds committed rows with k = 3 is
 #     refused, naming p3 and the K it needs; reopening with k = 4 works and
 #     still reads the row.
@@ -122,6 +124,29 @@ def test_begin_shard_mismatch_and_read_only() raises:
     assert_equal(r.commit_lsn, Int64(-1), "read-only commit_lsn")
 
 
+def test_read_only_commit_on_nonzero_shard() raises:
+    print("[part-edges] a read-only txn begun on shard 1 commits as read-only")
+    var bounds = List[List[UInt8]]()
+    bounds.append(_b("m"))
+    var ps = _PS.open(
+        SharedInMemoryConditionalStore(), String("tro1"), PartitionSpec.range(bounds^)
+    )
+    var w = ps.begin_for_key(_b("z"))
+    w.insert(_b("z"), _b("v"))
+    _ = ps.commit(w^)
+
+    var t = ps.begin_for_key(_b("z"))
+    assert_true(Bool(ps.get(t, _b("z"))), "the point lookup on shard 1 sees the row")
+    var r = ps.commit(t^)
+    assert_false(r.did_append, "begin_for_key read-only appends nothing")
+    assert_equal(r.commit_lsn, Int64(-1), "begin_for_key read-only commit_lsn")
+
+    var t2 = ps.begin_on(1)
+    var r2 = ps.commit(t2^)
+    assert_false(r2.did_append, "begin_on(1) read-only appends nothing")
+    assert_equal(r2.commit_lsn, Int64(-1), "begin_on(1) read-only commit_lsn")
+
+
 def test_reopen_with_smaller_k_refused() raises:
     print("[part-edges] reopen with K below a live shard ordinal is refused")
     var backing = SharedInMemoryConditionalStore()
@@ -177,6 +202,7 @@ def main() raises:
     test_degenerate_shard_counts()
     test_route_range_hash_and_none_cover_all()
     test_begin_shard_mismatch_and_read_only()
+    test_read_only_commit_on_nonzero_shard()
     test_reopen_with_smaller_k_refused()
     test_partition_ordinal_of()
     print("ALL partitioned table store edge tests PASSED")

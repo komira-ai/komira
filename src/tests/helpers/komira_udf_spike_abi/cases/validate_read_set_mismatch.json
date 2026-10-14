@@ -1,0 +1,11 @@
+{
+ "name": "validate_read_set_mismatch",
+ "defect": "validate accepts arg_types names other than the fields the descriptor records (design 3.1, 4.5: ERR_READ_SET_MISMATCH naming both lists)",
+ "run": "validate",
+ "entry": "pick",
+ "shape": "ROW",
+ "args": [{"type": "int64", "nullable": true, "name": "a"}],
+ "result": [{"type": "int64", "nullable": true}],
+ "descriptor": {"recorded_fields": {"fields": [{"name": "a", "type": "int64"}, {"name": "b", "type": "int64"}]}},
+ "expect": {"status": "ERR_READ_SET_MISMATCH", "run_error": "OPTIMIZED_UDF_READ_SET_DESCRIPTOR_MISMATCH", "message_contains": "{a, b}"}
+}

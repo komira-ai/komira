@@ -485,6 +485,35 @@ def test_envelope_parses_like_a_refusal_envelope() raises:
     assert_equal(r.headers[String("content-length")], String(len(r.body)))
 
 
+def test_envelope_copies_non_ascii_bytes_unchanged() raises:
+    """Text already in UTF-8 reaches the envelope as the same bytes (RFC 8259
+    section 8.1). Each field carries a 2-, 3- and 4-byte sequence plus a quote
+    so the escapes and the multi-byte runs meet. RED when a byte at or above
+    0x80 is re-encoded as the code point of the same number: `é` (`C3 A9`)
+    would leave as `Ã©` (`C3 83 C2 A9`) and the body would grow by one byte
+    per such byte."""
+    var r = fault_envelope(
+        Int32(500),
+        String("internal.café"),
+        String("id-日本"),
+        String('naïve "x" → 😀'),
+    )
+    var want = String(
+        '{"error":{"code":"internal.café",'
+        + '"message":"naïve \\"x\\" → 😀",'
+        + '"incidentId":"id-日本"}}'
+    )
+    var w = want.as_bytes()
+    assert_equal(len(r.body), len(w), "envelope length (bytes)")
+    var i = 0
+    while i < len(w):
+        assert_equal(
+            Int(r.body[i]), Int(w[i]), String("envelope byte ") + String(i)
+        )
+        i = i + 1
+    assert_equal(r.headers[String("content-length")], String(len(w)))
+
+
 def test_report_fault_correlates_header_and_body() raises:
     """`report_fault` is the ONE composite entry point every boundary uses; its
     contract is that the id it logs is the id it returns."""
@@ -653,6 +682,7 @@ def main() raises:
     test_the_two_arms_are_distinguishable_in_the_log()
     test_incident_ids_are_opaque_and_nonempty()
     test_envelope_parses_like_a_refusal_envelope()
+    test_envelope_copies_non_ascii_bytes_unchanged()
     test_report_fault_correlates_header_and_body()
     test_trace_is_qualified_only_with_a_configured_project()
     test_error_mapper_reports_the_wiring_count()

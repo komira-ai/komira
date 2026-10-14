@@ -743,23 +743,10 @@ struct TcpStream(Movable):
             desired_interest = INTEREST_WRITE
 
         if self._registration.__bool__():
-            # Already registered. Switch interest if needed (no-op fast
-            # path inside reactor.modify avoids the syscall when
-            # already-armed for this direction).
-            var current_reg = self._registration.value()
-            if current_reg.interest_set() != desired_interest:
-                reactor.modify(current_reg, desired_interest)
-                # Update our stored handle's interest bitmask so future
-                # _ensure_registered calls hit the no-op fast path. The
-                # RegistrationHandle is POD (Copyable);
-                # we replace the Optional with a fresh handle carrying
-                # the new interest set.
-                self._registration = Optional[RegistrationHandle](
-                    RegistrationHandle(
-                        _fd=current_reg.fd(),
-                        _interest_set=desired_interest,
-                    ),
-                )
+            # Already registered. Switch interest if needed: modify skips
+            # the syscall when the reactor's record for this fd already
+            # says this direction (the handle carries no mask).
+            reactor.modify(self._registration.value(), desired_interest)
             return
 
         # First-EWOULDBLOCK path: register_long_lived + cache.

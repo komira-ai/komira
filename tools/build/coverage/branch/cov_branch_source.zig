@@ -41,8 +41,11 @@ pub const File = struct {
 };
 
 pub const Opts = struct {
+    // What the IR names the library's sources by (--map's PREFIX).
     prefix: []const u8,
-    // PREFIX after its content-hash segment (`src/<lib>/`), or null.
+    // Where they are read: the library's [src] (--src, or PREFIX).
+    src: []const u8,
+    // `src` after its content-hash segment (`src/<lib>/`), or null.
     hash_tail: ?[]const u8,
     repo: []const u8,
     gens: [][]const u8,
@@ -106,8 +109,9 @@ pub fn placeFile(alloc: Alloc, o: *const Opts, name: []const u8) File {
         if (!cleanRel(rel)) fail("the measured file name '{s}' is not a clean relative path under --map ('{s}'): an empty, '.' or '..' segment, a control byte, a '\\' or not UTF-8", .{ name, o.prefix });
         f.where = .measured;
         f.repo = std.mem.concat(alloc, u8, &.{ o.repo, rel }) catch oom();
-        const src = std.fs.cwd().readFileAlloc(alloc, name, max_src) catch |err|
-            fail("{s} ({s}): cannot read the measured source: {s}", .{ f.repo, name, @errorName(err) });
+        const path = std.mem.concat(alloc, u8, &.{ o.src, rel }) catch oom();
+        const src = std.fs.cwd().readFileAlloc(alloc, path, max_src) catch |err|
+            fail("{s} ({s}): cannot read the measured source: {s}", .{ f.repo, path, @errorName(err) });
         var lines = std.ArrayList([]const u8).init(alloc);
         var it = std.mem.splitScalar(u8, src, '\n');
         while (it.next()) |l| lines.append(l) catch oom();
@@ -133,14 +137,14 @@ pub fn placeFile(alloc: Alloc, o: *const Opts, name: []const u8) File {
 /// name -> `<repo path>:<line>` of the declaration.
 pub fn nodebugNames(alloc: Alloc, o: *const Opts) std.StringHashMap([]const u8) {
     var names = std.StringHashMap([]const u8).init(alloc);
-    var dir = std.fs.cwd().openDir(o.prefix, .{ .iterate = true }) catch |err|
-        fail("--map's [src] '{s}' cannot be opened: {s}", .{ o.prefix, @errorName(err) });
+    var dir = std.fs.cwd().openDir(o.src, .{ .iterate = true }) catch |err|
+        fail("the [src] '{s}' cannot be opened: {s}", .{ o.src, @errorName(err) });
     defer dir.close();
     var walker = dir.walk(alloc) catch oom();
-    while (walker.next() catch |err| fail("walking '{s}': {s}", .{ o.prefix, @errorName(err) })) |w| {
+    while (walker.next() catch |err| fail("walking '{s}': {s}", .{ o.src, @errorName(err) })) |w| {
         if (w.kind == .directory or !std.mem.endsWith(u8, w.basename, ".mojo")) continue;
         const rel = alloc.dupe(u8, w.path) catch oom();
-        const src = dir.readFileAlloc(alloc, rel, max_src) catch |err| fail("{s}{s}: {s}", .{ o.prefix, rel, @errorName(err) });
+        const src = dir.readFileAlloc(alloc, rel, max_src) catch |err| fail("{s}{s}: {s}", .{ o.src, rel, @errorName(err) });
         var lines = std.mem.splitScalar(u8, src, '\n');
         var armed = false;
         var ln: usize = 0;
