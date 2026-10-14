@@ -1,0 +1,6 @@
+# usage: modes.sh <executable> <expected stdout>
+got=$("$1")
+if [ "$got" != "$2" ]; then
+    echo "got '$got', expected '$2'" >&2
+    exit 1
+fi

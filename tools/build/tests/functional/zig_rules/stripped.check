@@ -1,0 +1,7 @@
+# usage: stripped.sh <executable> stripped|unstripped
+# A build that keeps debug information names a .debug_info section in the file.
+if grep -q '\.debug_info' "$1"; then have=unstripped; else have=stripped; fi
+if [ "$have" != "$2" ]; then
+    echo "$1 is $have, expected $2" >&2
+    exit 1
+fi

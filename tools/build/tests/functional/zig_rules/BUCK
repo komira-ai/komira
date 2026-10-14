@@ -1,0 +1,261 @@
+# What the Zig rules and script_test do for a consumer (tools/build/README.md,
+# "Zig rules and script_test"): a module that imports modules, the target and
+# optimization mode of zig_test, the optimization mode and strip flag of
+# zig_exe, and script_test's scratch directory, tools and verdict. Every
+# target builds only if its checks pass; `cases` welds them all. The planted
+# defects that must go red are tests//negative/zig_rules, driven by
+# tools/build/selftest (planted_red_builds_zig_rules, analysis_refusals_zig_rules).
+load("@komira//tools/build/mojo:script_test.bzl", "script_test")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+_BUSYBOX = "komira//tools/build/toolchains:busybox"
+_ZIG = "komira//tools/build/toolchains:zig"
+
+# Where script_test stages this package's sources: their path from the cell root.
+_PKG = "functional/zig_rules/"
+
+# The checks the planted defects (tests//negative/zig_rules) run on the
+# wrong executable.
+[
+    export_file(
+        name = name,
+        src = name,
+        visibility = ["tests//negative/zig_rules:"],
+    )
+    for name in [
+        "modes.check",
+        "optimize_test.zig",
+        "stripped.check",
+        "target_test.zig",
+    ]
+]
+
+# ---- zig_module deps (K1) ----------------------------------------------------
+
+zig_module(
+    name = "zr_leaf",
+    src = "leaf.zig",
+)
+
+zig_test(
+    name = "leaf_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "leaf.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+# Imports zr_leaf; zr_leaf is not a dep of whatever imports zr_mid.
+zig_module(
+    name = "zr_mid",
+    deps = [":zr_leaf"],
+    src = "mid.zig",
+    visibility = ["tests//negative/zig_rules:"],
+)
+
+zig_test(
+    name = "mid_unit",
+    exec_compatible_with = LINUX_X86_64,
+    deps = [":zr_mid"],
+    src = "mid_test.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+# ---- zig_test target and optimize (K2) ---------------------------------------
+
+zig_test(
+    name = "default_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "default_test.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+zig_test(
+    name = "optimize_unit",
+    exec_compatible_with = LINUX_X86_64,
+    optimize = "ReleaseFast",
+    src = "optimize_test.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+zig_test(
+    name = "target_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "target_test.zig",
+    target = "x86_64-linux-gnu",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+# ---- zig_exe optimize and strip (K3) -----------------------------------------
+
+# The defaults: ReleaseSafe, stripped.
+zig_exe(
+    name = "app",
+    exec_compatible_with = LINUX_X86_64,
+    deps = [":zr_mid"],
+    src = "app.zig",
+    unit_tests = [":leaf_unit", ":mid_unit"],
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+zig_exe(
+    name = "app_debug",
+    exec_compatible_with = LINUX_X86_64,
+    deps = [":zr_mid"],
+    optimize = "Debug",
+    src = "app.zig",
+    strip = False,
+    visibility = ["tests//negative/zig_rules:"],
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+zig_exe(
+    name = "app_small",
+    exec_compatible_with = LINUX_X86_64,
+    deps = [":zr_mid"],
+    optimize = "ReleaseSmall",
+    src = "app.zig",
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+script_test(
+    name = "app_modes",
+    args = [
+        _PKG + "modes.check",
+        "$(location :app)",
+        "42 ReleaseSafe",
+    ],
+    cmd = "sh",
+    srcs = ["modes.check"],
+)
+
+script_test(
+    name = "app_debug_modes",
+    args = [
+        _PKG + "modes.check",
+        "$(location :app_debug)",
+        "42 Debug",
+    ],
+    cmd = "sh",
+    srcs = ["modes.check"],
+)
+
+script_test(
+    name = "app_small_modes",
+    args = [
+        _PKG + "modes.check",
+        "$(location :app_small)",
+        "42 ReleaseSmall",
+    ],
+    cmd = "sh",
+    srcs = ["modes.check"],
+)
+
+script_test(
+    name = "app_stripped",
+    args = [
+        _PKG + "stripped.check",
+        "$(location :app)",
+        "stripped",
+    ],
+    cmd = "sh",
+    srcs = ["stripped.check"],
+)
+
+script_test(
+    name = "app_debug_unstripped",
+    args = [
+        _PKG + "stripped.check",
+        "$(location :app_debug)",
+        "unstripped",
+    ],
+    cmd = "sh",
+    srcs = ["stripped.check"],
+)
+
+# ---- script_test (K4) ---------------------------------------------------------
+
+# The scratch directory, the environment and the sources: scratch.check.
+script_test(
+    name = "scratch",
+    args = [_PKG + "scratch.check"],
+    cmd = "sh",
+    env = {
+        "APP": "$(location :app)",
+        "KIND": "plain",
+    },
+    srcs = [
+        "data/dir/inner.txt",
+        "data/note.txt",
+        "exec_probe",
+        "scratch.check",
+    ],
+)
+
+# The declared tools are on PATH: an executable file under its name, and the
+# pinned zig, a directory holding `zig`, by what it holds.
+script_test(
+    name = "tools_on_path",
+    args = [_PKG + "tools.check"],
+    cmd = "sh",
+    srcs = ["tools.check"],
+    tools = {
+        "app": ":app",
+        "zig": _ZIG,
+    },
+)
+
+# A directory tool (an unpacked distribution, as python_dist's) puts its bin/
+# on PATH: the executable it holds is found by its own name.
+export_file(
+    name = "stand_in",
+    src = "stand_in",
+)
+
+script_test(
+    name = "dist_bin_on_path",
+    args = ["-c", "test \"`standin`\" = 'stand-in on PATH'"],
+    cmd = "sh",
+    tools = {"dist": ":stand_in"},
+)
+
+# A script_test welds into a zig_exe as a zig_test does: this executable is
+# built only after the script_test passed.
+zig_exe(
+    name = "welded",
+    exec_compatible_with = LINUX_X86_64,
+    src = "app.zig",
+    deps = [":zr_mid"],
+    unit_tests = [":dist_bin_on_path", ":scratch", ":tools_on_path"],
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
+
+# Everything above, behind one target: the pull request check builds it.
+zig_exe(
+    name = "cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = "app.zig",
+    deps = [":zr_mid"],
+    unit_tests = [
+        ":app_debug_modes",
+        ":app_debug_unstripped",
+        ":app_modes",
+        ":app_small_modes",
+        ":app_stripped",
+        ":default_unit",
+        ":optimize_unit",
+        ":target_unit",
+        ":welded",
+    ],
+    busybox = _BUSYBOX,
+    zig = _ZIG,
+)
