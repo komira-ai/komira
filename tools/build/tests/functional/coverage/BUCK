@@ -120,11 +120,12 @@ cov_debug_check(
         ":covlib_forced[coverage][bin][test_describe]",
         ":covlib_forced[coverage][bin][test_value]",
     ],
-    # The directories of the tests and of the library's staged sources, as
-    # the pinned Mojo writes them: relative.
+    # The directories of the tests and of the library's sources, as the
+    # pinned Mojo writes them: relative, the library's its import name (its
+    # package is compiled from the parent of [src]).
     dirs = [
         "tests",
-        "buck-out/v2/art/tests/functional/coverage/__covlib_forced__/[0-9a-f]+/src/covlib",
+        "covlib",
     ],
     mode = "hermetic",
     # Both tests call covlib/value.mojo.
@@ -542,7 +543,7 @@ mojo_library(
 )
 
 # Test 47: a library with a C library in its closure (the cshim example's,
-# a cxx_library): its tests' links end with the C library, as mojo_wrapper.sh
+# a cxx_library): its tests' links end with the C library, as mojo_compile
 # appends it (--link-tail), and its branch coverage links pass the same
 # arguments in the same order. Its test calls into C and takes two of the
 # three arms of add_clamped.
@@ -574,6 +575,34 @@ mojo_library(
     coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
     test_deps = [":branchtdsup"],
     test_srcs = ["tests/test_with_support.mojo"],
+)
+
+# Test 47: a library whose test calls it from eight threads at once
+# (tests/test_threads.mojo), so every counter of `quarter` is incremented by
+# eight threads concurrently.
+mojo_library(
+    name = "branchmt",
+    srcs = ["branchmt/__init__.mojo"],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    test_srcs = ["tests/test_threads.mojo"],
+)
+
+# Test 47: the counters of `quarter` after test_threads's run are exact:
+# 8 threads x 1000000 calls, 2000000 returning 2 (i % 4 == 0), 2000000
+# returning 1, and 6000000 on the path where `r != 0`; 0 is a
+# counter Mojo's lowering of `%` adds for a negative `i`, which the test
+# never passes. The link asks for atomic counter updates
+# (tools/build/coverage/branch/README.md, "Atomic counters"); without them
+# the threads lose increments to each other, and the sorted counts read like
+# 0,268986,270087,801750 (tests//negative/coverage:branchnonatomic).
+cov_branch_check(
+    name = "branch_counts_threads",
+    counts = [0, 2000000, 2000000, 6000000],
+    exec_compatible_with = LINUX_X86_64,
+    function = "quarter",
+    profdata = ":branchmt[coverage][branch][test_threads]",
+    script = "branch_check.sh",
 )
 
 # The profile of test_score_arms's instrumented run holds one function named
@@ -688,12 +717,12 @@ cov_report_check(
 )
 
 # Test 47: the branch coverage link of test_score_arms is the link of its
-# release build plus the profile runtime: mojo_wrapper.sh's `cc` shim gives
+# release build plus the profile runtime: mojo_compile's `cc` shim gives
 # zig what `mojo build` asks for (the compiler's runtime library,
 # --gc-sections, -lm, the shim's --strip-debug and run path), and
-# cov_branch_link.sh gives zig the same line for the instrumented object
-# (link_line.sh). A Mojo release linking with another library, or a link
-# script that drops one, fails here.
+# `cov_branch link` gives zig the same line for the instrumented object
+# (link_line.sh). A Mojo release linking with another library, or a branch
+# coverage link that drops one, fails here.
 cov_link_line_check(
     name = "link_line",
     bc = ":branchlib[coverage][bc][test_score_arms]",
@@ -737,6 +766,7 @@ export_file(
     name = "report.sh",
     visibility = [
         "//negative/coverage:",
+        "//negative/coverage/heldfile:",
         "//src/tests/coverage:",
     ],
 )
@@ -745,6 +775,20 @@ export_file(
     name = "link_line.sh",
     visibility = ["//negative/coverage:"],
 )
+
+# The threaded fixture, for tests//negative/coverage:branchnonatomic (the same
+# test through a `cov_branch link` copy without atomic counter updates).
+[
+    export_file(
+        name = f,
+        visibility = ["//negative/coverage:"],
+    )
+    for f in [
+        "branch_check.sh",
+        "branchmt/__init__.mojo",
+        "tests/test_threads.mojo",
+    ]
+]
 
 shell_lint(
     name = "shell_lint",

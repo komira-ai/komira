@@ -4,7 +4,7 @@
 # gate's runner (its environment, with the differences below), and writes the
 # test's report in repository paths (README.md, "cov_run").
 #
-# usage: busybox sh <run_dir>/cov_run.sh <busybox> <gate_runner> <compiler_dir> <label>
+# usage: busybox sh <run_dir>/cov_run.sh <busybox> <gate> <compiler_dir> <label>
 #            <test_binary> <share> <src_dir> <xml_out> <marker_out>
 #            <src_repo> <test> <test_repo> <import> [--solib <file> [--solib-src <path>]...]
 #            [--gen <file>]... [--env NAME=VALUE]...
@@ -16,13 +16,15 @@
 #   <share>        the test's declared data at their destinations, and its
 #                  source at <test>, its path in the package (what the line
 #                  tables name it by: `tests/test_x.mojo`)
-#   <src_dir>      the library's staged sources ([src]); its path from the
-#                  action's directory is the directory the line tables name
-#                  them by (`buck-out/v2/art/<cell>/<package>/__<t>__/<hash>/src/<import>`)
+#   <src_dir>      the library's staged sources ([src]), a directory
+#                  ending in src/<import>: the package is compiled from its
+#                  parent, so the line tables name them `<import>/<file>`
 #   <src_repo>     the repository directory <src_dir> stages, with a trailing
 #                  `/` (empty for the repository's root)
 #   <test_repo>    the repository path of the test source
-#   <import>       the library's import name: <src_dir> ends in src/<import>
+#   <import>       the library's import name: <src_dir> ends in src/<import>,
+#                  and the run stages the sources at <import>/ (the directory
+#                  the line tables name them by; with --solib, at <src_dir>)
 #   --solib        the test is a shared library's driver (a mojo_shared_lib's
 #                  gate_srcs entry): <file> is the library's coverage build in
 #                  <share>, which the driver loads; kcov measures the
@@ -34,20 +36,26 @@
 #                  <test>); the report must hold the first. --solib with
 #                  none (every source generated) is refused
 #   --gen <file>   a generated source in <src_dir> (its path there): not measured
-#   --env          passed to gate_runner.sh as given
+#   <gate>         the gate (tools/build/run), which runs kcov as `gate mojo`
+#   --env          passed to the gate as given
 #
 # Steps:
-#   0. Every directory the binary names a source of the library by (a string
-#      holding `buck-out/` and, inside an artifact, the path component
-#      src/<import>) must be
-#      <src_dir>: the run stages the sources there, and kcov drops a file it
-#      cannot open without an error, so a binary that names them elsewhere
-#      (another [src], an absolute compilation directory) is refused here.
+#   0. The binary must name the library's sources by <import>/, where the
+#      run stages them: kcov drops a file it cannot open without an error,
+#      so a binary that names them elsewhere is refused here. It is refused
+#      when it names a [src] of the library (a string holding `buck-out/`
+#      and, inside an artifact, the path component src/<import>: the
+#      name a package compiled from [src] itself would have), and when it
+#      holds the library's code (a string with `<import>::`, the start of
+#      the name of a function or type of it) but no whole string `<import>`
+#      or `<import>/...` (the line tables' directory, or a file named with
+#      it). A test that calls none of the library holds neither, and has
+#      nothing of it to measure.
 #   1. A root is built from COPIES (never links: kcov resolves every source
 #      name with realpath, which would leave a linked tree): bin/kcov and
 #      lib/ (kcov's own libgcc_s, found through its DT_RPATH $ORIGIN/../lib),
 #      bin/<test>, and share/ holding the test's data, its source at <test>
-#      and the library's sources at <src_dir>. The pinned Mojo names every
+#      and the library's sources at <import>/. The pinned Mojo names every
 #      source by a relative path and records no compilation directory, so
 #      kcov, started in share/, resolves each name to the copy. A second
 #      copy of the sources, lost/, is where a name that does NOT resolve
@@ -55,7 +63,7 @@
 #      source (--gen) is moved to gen/, outside share/ and lost/, and linked
 #      from both, so its name resolves to gen/ and is outside every
 #      --include-path (not measured, with no argument naming it).
-#   2. gate_runner.sh (unchanged: the release gate's runner) runs bin/kcov as
+#   2. `gate mojo` (the release gate's runner) runs bin/kcov as
 #      the program of the test root: share/ is the working directory, PATH,
 #      LD_LIBRARY_PATH, TMPDIR, TEST_TMPDIR and HOME are the gate's, each
 #      --env is exported to kcov and so reaches the test. kcov's arguments:
@@ -63,31 +71,31 @@
 #      (no --skip-solibs with --solib: kcov then preloads its library,
 #      which reports each library the driver loads, and sets breakpoints in
 #      it as it is loaded);
-#      --include-path of exactly <src_dir> and this test, under share/ and
+#      --include-path of exactly <import>/ and this test, under share/ and
 #      under lost/ (no --exclude-path: kcov takes no argument of 2048
 #      bytes or more, and the run refuses one before kcov does);
 #      --replace-src-path='^(?!/):<lost>/'; the output directory and
 #      bin/<test>. komira's kcov exits with the test's status (128+N when a
 #      signal N killed it), not another traced process's (the toolchain's
 #      README.md, "Patches"), so a test that fails under kcov (at -O0, or
-#      traced) fails this action, with the test's output from gate_runner
+#      traced) fails this action, with the test's output from the gate
 #      but not its banner (which says the release gate's test failed: that
 #      one passed; this action's own message says what failed). With
 #      coverage on, the conda package (<name>_conda) waits for this action
 #      too, the library does not (tools/build/mojo/coverage.bzl). kcov refused by the executor
 #      (ptrace, personality) is reported as that.
-#      The run is bounded: gate_runner runs in a session of its own (setsid),
-#      and when it has not exited after <limit> seconds, every process of
-#      that session (gate_runner, kcov, the test and any child it left) is
-#      killed and the action fails, saying so; a process of the group still
-#      running (not a zombie) 10 s after the kill fails it with its own
-#      message (survived the kill), and so does a /proc that does not show
-#      this shell under its own pid (another PID namespace's, or one hiding
-#      processes), where that scan would see nothing. kcov waits for every process
+#      The run is bounded: `gate mojo --limit-s <limit> --limit-report
+#      coverage` runs kcov in a session of its own, and when it has not
+#      exited after <limit> seconds, the gate kills every process of that
+#      session (kcov, the test and any child it left), checks that none
+#      survived the kill (a /proc that does not show the gate as its own is
+#      refused, since that scan would see nothing), prints the run's output
+#      and fails the action with `COVERAGE RUN FAILED` (docs/design/zig_gate_runner.md,
+#      C1). kcov waits for every process
 #      the test started, so without the bound a test leaving a child running
 #      would hold the action open.
 #   3. kcov writes exactly one report (<out>/cov.xml); anything else fails.
-#   4. cov_normalize maps <share>/<src_dir>/ to <src_repo> and the test's
+#   4. cov_normalize maps <share>/<import>/ to <src_repo> and the test's
 #      directory under share/ to the repository's (and with --solib, share/
 #      itself to the package's), requires the test's own source in the report
 #      (and the first --solib-src, so a library kcov did not measure is
@@ -98,7 +106,7 @@
 # What differs from the release gate: the test is traced (TracerPid is
 # kcov's), runs without address randomization (kcov sets ADDR_NO_RANDOMIZE),
 # its working directory share/ also holds its own source at <test> and the
-# library's at <src_dir>, kcov shares its TMPDIR, its environment also holds
+# library's at <import>/, kcov shares its TMPDIR, its environment also holds
 # KCOV_SOLIB_PATH, which kcov always sets (with --skip-solibs, no
 # LD_PRELOAD), but nothing of this script's own (its LC_ALL=C, below), and
 # the run ends when every process the test started has exited (kcov follows
@@ -114,7 +122,7 @@
 # keeps it and the report names it under lost/. No --map covers lost/, so
 # cov_normalize refuses it as unmapped, naming the file. A name that did
 # resolve is absolute and the expression (a relative name) leaves it alone.
-# lost/ only catches a name under <src_dir> or <test>; a name elsewhere is
+# lost/ only catches a name under <import>/ or <test>; a name elsewhere is
 # step 0's.
 # The other names the binary holds (the Mojo standard library's
 # `oss/modular/...`, zig's C runtime's `/___.../buck-out/...`) are outside the
@@ -124,7 +132,7 @@
 # <share> and <lost> are canonical (realpath) before they are given to kcov
 # and used as a --map ABS: kcov reports realpath'd names (README.md, "Why").
 #
-# Exit status: the test's under kcov when it fails (gate_runner's); 1 when the
+# Exit status: the test's under kcov when it fails (the gate's); 1 when the
 # binary names the sources elsewhere, a kcov argument is too long, the run
 # passed its limit, or the report is missing or refused; 2
 # for a usage error, which includes a `,` or `:` in a path given to kcov (its
@@ -158,6 +166,8 @@ case "$SRC_REPO" in /* | ?*[!/]) echo "cov_run: <src_repo> $SRC_REPO must be emp
 case "$IMPORT" in "" | *[!A-Za-z0-9_]*) echo "cov_run: <import> $IMPORT is not an import name" >&2; exit 2 ;; esac
 case "$SRC_REL" in */src/"$IMPORT") ;; *) echo "cov_run: <src_dir> $SRC_REL does not end in src/$IMPORT" >&2; exit 2 ;; esac
 SRC=$(abs "$SRC_REL")
+# Where the run stages the library's sources, under share/ and lost/.
+STAGE=$IMPORT
 LIMIT=$(cat "$HERE/limit")
 case "$LIMIT" in "" | 0* | *[!0-9]*) echo "cov_run: $HERE/limit holds '$LIMIT', not a number of seconds" >&2; exit 2 ;; esac
 case "$TEST" in */*) TEST_DIR=${TEST%/*}/ ;; *) TEST_DIR="" ;; esac
@@ -183,6 +193,11 @@ if [ -n "$SOLIB" ] && [ "$PKG_REPO" = - ]; then
     echo "cov_run: with --solib, <test_repo> $TEST_REPO must be a directory then <test> $TEST" >&2
     exit 2
 fi
+# A shared library's driver names none of <src_dir> (the library's line
+# tables name its sources by their paths in the package, given as data and
+# --solib-src, which may well be under <import>/): <src_dir> is staged at its
+# own path then, out of their way, as nothing names it.
+[ -z "$SOLIB" ] || STAGE=$SRC_REL
 GEN=""
 while [ "$#" -gt 0 ] && [ "$1" = --gen ]; do
     [ "$#" -ge 2 ] || { echo "cov_run: --gen needs a file" >&2; exit 2; }
@@ -190,7 +205,7 @@ while [ "$#" -gt 0 ] && [ "$1" = --gen ]; do
     GEN="$GEN $2"
     shift 2
 done
-# What is left is gate_runner's (--env NAME=VALUE...); it checks them.
+# What is left is the gate's (--env NAME=VALUE...); it checks them.
 
 # Private scratch (as in tools/build/mojo/toolchain.bzl): a local action runs
 # in the checkout root, so it takes the directory buck2 names for it.
@@ -204,7 +219,7 @@ esac
 PATH="$K/bin"
 # LC_ALL=C is given to this script's own tools: per command before the test
 # runs, exported after it. The test gets the gate's environment, and the gate
-# sets no LC_ALL (gate_runner passes on what it does not set).
+# sets no LC_ALL (the gate passes on what it does not set).
 export PATH
 
 red() {
@@ -215,23 +230,6 @@ red() {
     exit 1
 }
 
-# The processes of process group $1 that are not zombies (or dead), one
-# "pid state comm" per line, read from /proc/<pid>/stat: the fields after the
-# last ')' (comm may hold one) are state, ppid and pgrp. A process that exits
-# while this reads is skipped.
-group_left() {
-    { find /proc -mindepth 1 -maxdepth 1 -name '[0-9]*' 2>/dev/null || :; } |
-        while read -r d; do cat "$d/stat" 2>/dev/null || :; done |
-        awk -v g="$1" '{
-            i = length($0)
-            while (i > 0 && substr($0, i, 1) != ")") i--
-            if (i == 0) next
-            split(substr($0, i + 2), f, " ")
-            if (f[3] == g && f[1] != "Z" && f[1] != "X")
-                print $1, f[1], substr($0, index($0, "(") + 1, i - index($0, "(") - 1)
-        }'
-}
-
 # A shared library's driver with no source of the library to require in the
 # report: every one generated (not measured), so a run in which kcov did not
 # measure the library could not be told from one in which it did.
@@ -239,17 +237,21 @@ if [ -n "$SOLIB" ] && [ -z "$SOLIB_SRCS" ]; then
     red "cov_run: --solib with no --solib-src: every source of the shared library $SOLIB is generated, so none is measured and whether kcov measured the library cannot be checked; its drivers have no coverage run."
 fi
 
-# 0. Where the binary names the library's sources. Each string is on a line
-# of its own (tr), so the expression sees one name at a time. Only a
-# src/<import> component inside an artifact (after buck2's __<target>__/
-# directory) counts, and a name is cut after the last one: a komira
-# library's package path is itself src/<import>
+# 0. Where the binary names the library's sources. Strings are cut at every
+# byte that is not printable (strings), so a line is one whole name.
+# A [src] of the library: only a src/<import> component inside an artifact
+# (after buck2's __<target>__/ directory) counts, and a name is cut after
+# the last one: a komira library's package path is itself src/<import>
 # (buck-out/v2/art/komira/src/<import>/__<import>__/<hash>/src/<import>).
-LC_ALL=C tr '\000' '\n' <"$BIN" | LC_ALL=C grep -a -o -E '[A-Za-z0-9_./+@=-]*buck-out/[A-Za-z0-9_./+@=-]*' >"$K/names" || true
-LC_ALL=C grep -E "/__[^/]+__/.*/src/$IMPORT(/|\$)" "$K/names" | LC_ALL=C sed -E "s|^(.*/src/$IMPORT)(/.*)?\$|\1|" | LC_ALL=C sort -u >"$K/dirs" || true
-LC_ALL=C grep -v -x -F -e "$SRC_REL" "$K/dirs" >"$K/elsewhere" || true
+LC_ALL=C strings -n 1 "$BIN" >"$K/strings"
+LC_ALL=C grep -o -E '[A-Za-z0-9_./+@=-]*buck-out/[A-Za-z0-9_./+@=-]*' "$K/strings" >"$K/names" || true
+LC_ALL=C grep -E "/__[^/]+__/.*/src/$IMPORT(/|\$)" "$K/names" | LC_ALL=C sed -E "s|^(.*/src/$IMPORT)(/.*)?\$|\1|" | LC_ALL=C sort -u >"$K/elsewhere" || true
 if [ -s "$K/elsewhere" ]; then
-    red "the test binary names the library's sources by $(tr '\n' ' ' <"$K/elsewhere")but this run stages them at $SRC_REL: kcov would drop them without an error (README.md, \"cov_run\")."
+    red "the test binary names the library's sources by $(tr '\n' ' ' <"$K/elsewhere")but this run stages them at $STAGE/: kcov would drop them without an error (README.md, \"cov_run\")."
+fi
+if LC_ALL=C grep -q -E "(^|[^A-Za-z0-9_])$IMPORT::" "$K/strings" &&
+    ! LC_ALL=C grep -q -x -E "$STAGE(/.*)?" "$K/strings"; then
+    red "the test binary holds code of the library ($(LC_ALL=C grep -o -E "$IMPORT::[A-Za-z0-9_:]*" "$K/strings" | head -n 1)) but names none of its sources by $STAGE/, where this run stages them: kcov would drop them without an error (README.md, \"cov_run\")."
 fi
 
 # 1. The root and lost/, all copies.
@@ -266,11 +268,11 @@ cp -RL "$SHARE/." "$R/share/"
 for p in $SOLIB_SRCS; do
     [ -f "$R/share/$p" ] || red "the shared library's source $p (--solib-src) is not in the test's share directory"
 done
-[ ! -e "$R/share/$SRC_REL" ] || red "the share directory already holds $SRC_REL (a data file under it?)"
-mkdir -p "$R/share/$SRC_REL"
-cp -RL "$SRC/." "$R/share/$SRC_REL/"
-mkdir -p "$L/$SRC_REL" "$L/$TEST_DIR"
-cp -RL "$SRC/." "$L/$SRC_REL/"
+[ ! -e "$R/share/$STAGE" ] || red "the share directory already holds $STAGE (a data file under it?)"
+mkdir -p "$R/share/$STAGE"
+cp -RL "$SRC/." "$R/share/$STAGE/"
+mkdir -p "$L/$STAGE" "$L/$TEST_DIR"
+cp -RL "$SRC/." "$L/$STAGE/"
 cp -L "$SHARE/$TEST" "$L/$TEST"
 for p in $SOLIB_SRCS; do
     case "$p" in */*) mkdir -p "$L/${p%/*}" ;; esac
@@ -279,7 +281,7 @@ done
 R=$(realpath "$R")
 L=$(realpath "$L")
 S="$R/share"
-for p in "$S" "$L" "$SRC_REL" "$TEST"; do
+for p in "$S" "$L" "$STAGE" "$TEST"; do
     case "$p" in *[,:]*) echo "cov_run: $p holds a , or :, which kcov's options split on" >&2; exit 2 ;; esac
 done
 OUT="$K/kout"
@@ -295,17 +297,17 @@ OUT="$K/kout"
 # so a list of them cannot be split over several.
 G="$K/gen"
 for g in $GEN; do
-    [ -f "$S/$SRC_REL/$g" ] && [ ! -L "$S/$SRC_REL/$g" ] || red "the generated source $g is not a file in $SRC_REL"
+    [ -f "$S/$STAGE/$g" ] && [ ! -L "$S/$STAGE/$g" ] || red "the generated source $g is not a file in $STAGE/"
     case "$g" in */*) mkdir -p "$G/${g%/*}" ;; *) mkdir -p "$G" ;; esac
-    mv "$S/$SRC_REL/$g" "$G/$g"
-    ln -s "$G/$g" "$S/$SRC_REL/$g"
-    rm "$L/$SRC_REL/$g"
-    ln -s "$G/$g" "$L/$SRC_REL/$g"
+    mv "$S/$STAGE/$g" "$G/$g"
+    ln -s "$G/$g" "$S/$STAGE/$g"
+    rm "$L/$STAGE/$g"
+    ln -s "$G/$g" "$L/$STAGE/$g"
 done
 
-# 2. kcov under the gate's runner. The --include-path list: <src_dir> and
+# 2. kcov under the gate's runner. The --include-path list: <import>/ and
 # the test, and each --solib-src, under share/ and under lost/.
-INC="$S/$SRC_REL,$S/$TEST,$L/$SRC_REL,$L/$TEST"
+INC="$S/$STAGE,$S/$TEST,$L/$STAGE,$L/$TEST"
 for p in $SOLIB_SRCS; do
     INC="$INC,$S/$p,$L/$p"
 done
@@ -333,70 +335,19 @@ for a in "$@"; do
     fi
     prev=$a
 done
-# gate_runner leads a new session and process group, which kcov, the test
-# and every child it starts join (setsid needs no fork: this shell has no job
-# control, so its background job leads no group, and $! is gate_runner's
-# pid). The watcher kills that whole group once the limit has passed; it
-# stops when gate_runner has exited (and been reaped by the wait below).
+# The gate runs kcov in a session of its own and bounds it (step 2); past
+# the limit it kills the session, prints the run's output and its own
+# COVERAGE RUN FAILED message, and exits 1.
 rc=0
-setsid "$BB" sh "$GATE" "$BB" "$TC" "$LABEL" "$R/bin/kcov" "$K/gate.passed" "$@" 2>"$K/gate.err" &
-gate=$!
-(
-    s=0
-    while kill -0 "$gate" 2>/dev/null; do
-        if [ "$s" -ge "$LIMIT" ]; then
-            : >"$K/timed_out"
-            kill -s KILL "-$gate" 2>/dev/null
-            exit 0
-        fi
-        sleep 1
-        s=$((s + 1))
-    done
-) &
-watch=$!
-wait "$gate" || rc=$?
-kill "$watch" 2>/dev/null || true
-wait "$watch" || true
+"$GATE" mojo --busybox "$BB" --runtime-lib "$TC/lib" --label "$LABEL" --test "$R/bin/kcov" \
+    --marker "$K/gate.passed" --limit-s "$LIMIT" --limit-report coverage "$@" 2>"$K/gate.err" || rc=$?
 export LC_ALL=C
-if [ -e "$K/timed_out" ]; then
-    # The kill must have reached every process of the group, not gate_runner
-    # alone: a process of it that is not a zombie after up to 10 s (SIGKILL
-    # is delivered when a process next runs) survived it. A zombie has
-    # exited (whoever reaps the orphans may not have yet), so it is not one.
-    # The scan reads /proc, so /proc must show this shell under its own pid:
-    # /proc/$$/stat's first field is $$, and so is that of /proc/self/stat,
-    # read by this shell itself (a builtin's redirection, no child). A /proc
-    # of another PID namespace (where /proc/$$ may be another process), or
-    # one hiding processes, would list none of the group, and the scan would
-    # pass without checking.
-    me=$$
-    seen=""
-    self=""
-    { read -r seen _ <"/proc/$me/stat"; } 2>/dev/null || :
-    { read -r self _ </proc/self/stat; } 2>/dev/null || :
-    if [ "$seen" != "$me" ] || [ "$self" != "$me" ]; then
-        red "cov_run: /proc is not readable as this run's own: /proc/$me/stat and /proc/self/stat must both start with this shell's pid $me, and start with '$seen' and '$self'. So whether the time limit's kill reached every process of the run cannot be checked."
-    fi
-    n=0
-    while left=$(group_left "$gate") && [ -n "$left" ] && [ "$n" -lt 10 ]; do
-        sleep 1
-        n=$((n + 1))
-    done
-    if [ -n "$left" ]; then
-        kill -s KILL "-$gate" 2>/dev/null || true
-        red "After the time limit ($LIMIT s), processes of the coverage run survived the kill of its process group $gate (pid state comm: $(printf '%s' "$left" | tr '\n' ';')). The limit must kill the whole group, gate_runner, kcov, the test and every child it left; they are killed now."
-    fi
-    # gate_runner was killed, so its directory (mktemp under this one) and
-    # the test's output in it are still there.
-    find . -maxdepth 2 -path './.komira_test.*/log' -type f >"$K/logs" 2>/dev/null || true
-    while read -r l; do
-        echo "------------------------------------------------------------------ output (last 200 lines)" >&2
-        tail -n 200 "$l" >&2
-    done <"$K/logs"
-    red "The test left processes running or did not finish within $LIMIT s under kcov, and every process of the run was killed: kcov waits for every process the test started, where the release gate waits for the test alone. A test must wait for (or kill) every child it starts."
+if [ "$rc" = 1 ] && grep -qxF "COVERAGE RUN FAILED: $LABEL" "$K/gate.err"; then
+    cat "$K/gate.err" >&2
+    exit 1
 fi
 if [ "$rc" != 0 ]; then
-    # gate_runner's banner says the release gate's test failed, which it did
+    # The gate's banner says the release gate's test failed, which it did
     # not (this is the coverage run). Its other lines, the test's output
     # among them, are kept.
     awk -v H="GATED TEST FAILED: $LABEL (exit $rc)" \
@@ -428,7 +379,7 @@ find "$OUT" -type f -name '*.xml' >"$K/xmls"
 IN=$(cat "$K/xmls")
 
 # 4. Repository paths.
-set -- --map "$S/$SRC_REL/=$SRC_REPO" --map "$S/$TEST_DIR=$TEST_REPO_DIR" \
+set -- --map "$S/$STAGE/=$SRC_REPO" --map "$S/$TEST_DIR=$TEST_REPO_DIR" \
     --must-contain "$TEST_REPO" --forbid "$PWD" --forbid "$R" --forbid "$L"
 if [ -n "$SOLIB" ]; then
     # A driver at the package's top has that map already (its directory's).
@@ -443,7 +394,7 @@ P=$(realpath "$PWD")
 "$HERE/cov_normalize" --in "$IN" --out "$XML" "$@" >"$K/norm.log" 2>&1 || {
     cat "$K/norm.log" >&2
     if grep -F "'$L/" "$K/norm.log" >/dev/null; then
-        red "cov_normalize refused kcov's report (above): kcov could not resolve these sources from its working directory $S, so they were not staged where the line tables name them ($SRC_REL/ and $TEST); their names fell through to $L/."
+        red "cov_normalize refused kcov's report (above): kcov could not resolve these sources from its working directory $S, so they were not staged where the line tables name them ($STAGE/ and $TEST); their names fell through to $L/."
     fi
     red "cov_normalize refused kcov's report (above)."
 }

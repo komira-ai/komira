@@ -1,15 +1,14 @@
 load("@komira//tools/build/coverage:census.bzl", "coverage_census")
-load("@komira//tools/build/coverage:defs.bzl", "cov_gate_dir")
 load("@komira//tools/build/coverage/branch:defs.bzl", "cov_branch_dir")
 load("@komira//tools/build/coverage/kcov:defs.bzl", "cov_link_dir", "cov_run_dir")
 load("@komira//tools/build/lint:defs.bzl", "target_suite")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "mojo_shared_lib_rule", "mojo_test")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load("//functional/coverage:defs.bzl", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_zig_tree", "kcov_stub_dir")
+load("//functional/coverage:defs.bzl", "cov_branch_check", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_zig_tree", "kcov_stub_dir")
 
 # A coverage link whose relocator rewrites nothing (test 41). Its [coverage]
-# must fail with mojo_wrapper.sh's exit 4, "contains this action's working
+# must fail with mojo_compile's exit 4, "contains this action's working
 # directory": the wrapper's check of every output stays on for coverage
 # builds, and a relocation that does not happen cannot pass it.
 zig_exe(
@@ -43,7 +42,7 @@ mojo_library(
 # thing, checked as :hermetic checks the real binaries.
 _DIRS = [
     "tests",
-    "buck-out/v2/art/tests/functional/coverage/__covlib_forced__/[0-9a-f]+/src/covlib",
+    "covlib",
 ]
 
 # RED: tests//negative/coverage:abs_relocated (a Mojo source named by an
@@ -84,7 +83,7 @@ mojo_library(
 # tests//negative/coverage:lost[coverage][tests][test_lost]
 cov_plant(
     name = "lost_run_sh",
-    expr = 's|^cp -RL "\\$SRC/\\." "\\$R/share/\\$SRC_REL/"$|cp -RL "$SRC/." "$R/share/"|',
+    expr = 's|^cp -RL "\\$SRC/\\." "\\$R/share/\\$STAGE/"$|cp -RL "$SRC/." "$R/share/"|',
     out = "cov_run.sh",
     src = "komira//tools/build/coverage/kcov:cov_run.sh",
 )
@@ -124,11 +123,11 @@ mojo_library(
     test_srcs = ["tests/test_lost.mojo"],
 )
 
-# Test 43. A test's data staged under buck-out/, where a coverage run stages
-# the library's sources: analysis fails, naming it. RED:
-# tests//negative/coverage:clash_buckout
+# Test 43. A test's data staged under the library's import name, where a
+# coverage run stages the library's sources: analysis fails, naming it. RED:
+# tests//negative/coverage:clash_import
 mojo_library(
-    name = "clash_buckout",
+    name = "clash_import",
     srcs = [
         "lostlib/__init__.mojo",
         "lostlib/value.mojo",
@@ -136,20 +135,21 @@ mojo_library(
     conda = False,
     coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
     import_name = "lostlib",
-    test_data = {"tests/test_lost.mojo": {"buck-out/data.txt": "lostlib/value.mojo"}},
+    test_data = {"tests/test_lost.mojo": {"lostlib/data.txt": "lostlib/value.mojo"}},
     test_srcs = ["tests/test_lost.mojo"],
 )
 
 # Test 43. The library's sources staged, and named to kcov and cov_normalize,
-# at a directory other than the one the line tables name them by (as if the
-# rule passed cov_run.sh another [src] than the one the binary was compiled
-# from): kcov would drop them without an error, and lost/ (a copy at the
-# same wrong directory) cannot catch it. cov_run.sh's check of the names in
-# the binary refuses it before kcov runs. RED:
+# at a directory other than the one the line tables name them by
+# (`lostlibx/` for `lostlib/`, as if the package were compiled from another
+# directory than the run assumes): kcov would drop them without an error,
+# and lost/ (a copy at the same wrong directory) cannot catch it.
+# cov_run.sh's check of the names in the binary refuses it before kcov
+# runs: the binary holds lostlib's code but no name under lostlibx/. RED:
 # tests//negative/coverage:lostdir[coverage][tests][test_lost]
 cov_plant(
     name = "lostdir_run_sh",
-    expr = 's|^SRC=\\$(abs "\\$SRC_REL")$|SRC=$(abs "$SRC_REL"); SRC_REL=${SRC_REL}x|',
+    expr = 's|^STAGE=\\$IMPORT$|STAGE=${IMPORT}x|',
     out = "cov_run.sh",
     src = "komira//tools/build/coverage/kcov:cov_run.sh",
 )
@@ -297,38 +297,6 @@ mojo_library(
     ],
 )
 
-# Test 43. After the limit's kill, cov_run.sh lists the group's processes
-# from /proc, so it first requires /proc to show its own shell under its own
-# pid. A cov_run.sh copy takes 1 for its own pid: /proc/1/stat exists and
-# starts with 1, as /proc/<pid> of another PID namespace names another
-# process with that pid, where the scan would list none of the group and
-# pass; only /proc/self/stat, which the shell reads itself, shows the other
-# pid. RED: tests//negative/coverage:lingerproc[coverage][tests][test_lingers]:
-# "/proc is not readable as this run's own".
-cov_plant(
-    name = "lingerproc_run_sh",
-    expr = "s|^    me=\\$\\$$|    me=1|",
-    out = "cov_run.sh",
-    src = "komira//tools/build/coverage/kcov:cov_run.sh",
-)
-
-cov_run_dir(
-    name = "lingerproc_run",
-    exec_compatible_with = LINUX_X86_64,
-    limit_s = 20,
-    script = ":lingerproc_run_sh",
-)
-
-mojo_library(
-    name = "lingerproc",
-    srcs = ["linger/__init__.mojo"],
-    conda = False,
-    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
-    coverage_run = ":lingerproc_run",
-    import_name = "linger",
-    test_srcs = ["tests/test_lingers.mojo"],
-)
-
 # ---- Test 46: the coverage gate -------------------------------------------
 #
 # Each library below has coverage builds and the gate whatever the switch
@@ -342,43 +310,37 @@ _LINK = "komira//tools/build/coverage/kcov:cov_link"
 
 _GATE = "komira//tools/build/coverage:cov_gate"
 
-# name: (sources, tests, gate directory)
+# name: (sources, tests, the package's held marker or None)
 _GATED = {
     # covlow/word.mojo: test_word calls word(0) only; three of its six lines
     # run, and one of the four arms of its two `if`s (BelowTarget on both).
-    "covlow": (["covlow/__init__.mojo", "covlow/word.mojo"], ["tests/test_word.mojo"], _GATE),
+    "covlow": (["covlow/__init__.mojo", "covlow/word.mojo"], ["tests/test_word.mojo"], None),
     # No test: no report, so the gate sees nothing measured (NotMeasured).
-    "covnotests": (["covnotests/__init__.mojo", "covnotests/inc.mojo"], [], _GATE),
+    "covnotests": (["covnotests/__init__.mojo", "covnotests/inc.mojo"], [], None),
     # covun/unused.mojo: in the package, compiled into no test binary
     # (UnmeasuredFile).
-    "covun": (["covun/__init__.mojo", "covun/unused.mojo", "covun/used.mojo"], ["tests/test_used.mojo"], _GATE),
-    # Every line covered, a ratchet row at 100% line, and no decision: its
+    "covun": (["covun/__init__.mojo", "covun/unused.mojo", "covun/used.mojo"], ["tests/test_used.mojo"], None),
+    # Every line covered, line held (held_line), and no decision: its
     # branch records name full.mojo with no arm (measured, none to take), so
     # it has no finding and its gate is GREEN in enforce mode too.
-    "covfull": (["covfull/__init__.mojo", "covfull/full.mojo"], ["tests/test_full.mojo"], ":covfull_gate"),
-    # Every line covered, a ratchet row at 100% line and branch floor 0, and
+    "covfull": (["covfull/__init__.mojo", "covfull/full.mojo"], ["tests/test_full.mojo"], "held_line"),
+    # Every line covered, line held and branch not, and
     # one `if` whose false arm test_clamp_high never takes: the one finding
     # is BelowTarget on branch (its branch records, not BranchNotMeasured).
-    "covbranch": (["covbranch/__init__.mojo", "covbranch/clamp.mojo"], ["tests/test_clamp_high.mojo"], ":covbranch_gate"),
+    "covbranch": (["covbranch/__init__.mojo", "covbranch/clamp.mojo"], ["tests/test_clamp_high.mojo"], "held_line"),
     # Every line covered, the `except` body included (the first raising call
     # in its `try:` body raises once), but the second call never raises: the
     # one finding is BelowTarget on branch, a `try` decision's raise arm
     # (tools/build/coverage/branch/README.md, "try"), which line coverage
     # cannot see.
-    "covtry": (["covtry/__init__.mojo", "covtry/total.mojo"], ["tests/test_total_first.mojo"], ":covbranch_gate"),
+    "covtry": (["covtry/__init__.mojo", "covtry/total.mojo"], ["tests/test_total_first.mojo"], "held_line"),
     # Every line covered, but `return a or b` is only ever decided by its
     # right operand: the one finding is BelowTarget on branch, the `or`'s
     # arm that skips its right operand (tools/build/coverage/branch/README.md,
     # "And, or": an and/or whose result no branch tests is a decision of
     # its own), which line coverage cannot see.
-    "covandor": (["covandor/__init__.mojo", "covandor/either.mojo"], ["tests/test_either_one.mojo"], ":covbranch_gate"),
+    "covandor": (["covandor/__init__.mojo", "covandor/either.mojo"], ["tests/test_either_one.mojo"], "held_line"),
 }
-
-cov_gate_dir(
-    name = "covbranch_gate",
-    exec_compatible_with = LINUX_X86_64,
-    ratchet = "covbranch_ratchet.tsv",
-)
 
 # GREEN in enforce mode: covbranch with a test taking both arms of its `if`,
 # every line covered: no finding, so its [coverage][gate] is green.
@@ -390,7 +352,8 @@ mojo_library(
     ],
     conda = False,
     coverage_debug = _LINK,
-    coverage_gate = ":covbranch_gate",
+    coverage_held = "held_line",
+    coverage_gate = _GATE,
     coverage_mode = "enforce",
     import_name = "covbranch",
     test_srcs = ["tests/test_clamp_both.mojo"],
@@ -406,7 +369,8 @@ mojo_library(
     ],
     conda = False,
     coverage_debug = _LINK,
-    coverage_gate = ":covbranch_gate",
+    coverage_held = "held_line",
+    coverage_gate = _GATE,
     coverage_mode = "enforce",
     import_name = "covtry",
     test_srcs = ["tests/test_total_both.mojo"],
@@ -422,16 +386,11 @@ mojo_library(
     ],
     conda = False,
     coverage_debug = _LINK,
-    coverage_gate = ":covbranch_gate",
+    coverage_held = "held_line",
+    coverage_gate = _GATE,
     coverage_mode = "enforce",
     import_name = "covandor",
     test_srcs = ["tests/test_either_both.mojo"],
-)
-
-cov_gate_dir(
-    name = "covfull_gate",
-    exec_compatible_with = LINUX_X86_64,
-    ratchet = "covfull_ratchet.tsv",
 )
 
 # covfull with `coverage_branch_gate = False`: its gate reads no branch
@@ -448,7 +407,8 @@ cov_gate_dir(
         conda = False,
         coverage_branch_gate = False,
         coverage_debug = _LINK,
-        coverage_gate = ":covfull_gate",
+        coverage_held = "held_line",
+        coverage_gate = _GATE,
         coverage_mode = mode,
         import_name = "covfull",
         test_srcs = ["tests/test_full.mojo"],
@@ -473,12 +433,13 @@ cov_gate_dir(
         srcs = srcs,
         conda = suffix == "" and name in ("covlow", "covnotests"),
         coverage_debug = _LINK,
-        coverage_gate = gate,
+        coverage_gate = _GATE,
+        coverage_held = held,
         coverage_mode = mode,
         import_name = name,
         test_srcs = tests,
     )
-    for name, (srcs, tests, gate) in _GATED.items()
+    for name, (srcs, tests, held) in _GATED.items()
     for suffix, mode in (("", "enforce"), ("_census", "census"))
 ]
 
@@ -490,9 +451,9 @@ _RESULTS = {
     # reaches `if x > 0` (both arms `-`): 1 of 4, and no BranchNotMeasured
     # (the whole findings list).
     "covlow": [
-        '"conclusion":"neutral","mode":"census","target_bp":10000,',
+        '"conclusion":"neutral","mode":"census","target_bp":9900,',
         _PKG + '"files":1,"unmeasured_files":0,"line_hit":3,"line_found":6,"line_bp":5000,"branch_hit":1,"branch_found":4,"branch_bp":2500,',
-        '"findings":[{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":2500,"bound_bp":10000,"path":"","line":0,"message":"branch 25.00% is below the target 100.00%","count":null},{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"line","measured_bp":5000,"bound_bp":10000,"path":"","line":0,"message":"line 50.00% is below the target 100.00%","count":null},{"kind":"MissingRow","package":"tools/build/tests/negative/coverage","metric":"line","measured_bp":5000,"bound_bp":null,"path":"","line":0,"message":"no ratchet row; measured line 50.00%","count":null}],"exemptions"',
+        '"findings":[{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":2500,"bound_bp":9900,"path":"","line":0,"message":"branch 25.00% is below the target 99.00%","count":null},{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"line","measured_bp":5000,"bound_bp":9900,"path":"","line":0,"message":"line 50.00% is below the target 99.00%","count":null}],"exemptions"',
         '"excluded_test_files":1,',
     ],
     "covnotests": [
@@ -511,23 +472,23 @@ _RESULTS = {
     "covfull": [
         '"conclusion":"neutral","mode":"census",',
         _PKG + '"files":1,"unmeasured_files":0,"line_hit":1,"line_found":1,"line_bp":10000,"branch_hit":0,"branch_found":0,"branch_bp":null,',
-        '"line_floor_bp":10000,"branch_floor_bp":null}',
+        '"held_line":true,"held_branch":false}',
         '"findings":[],"exemptions"',
     ],
     # The same, its gate reading no branch record: BranchNotMeasured alone.
     "covfull_unread": [
         '"conclusion":"neutral","mode":"census",',
         _PKG + '"files":1,"unmeasured_files":0,"line_hit":1,"line_found":1,"line_bp":10000,"branch_hit":0,"branch_found":0,"branch_bp":null,',
-        '"line_floor_bp":10000,"branch_floor_bp":null}',
-        '"findings":[{"kind":"BranchNotMeasured","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":null,"bound_bp":10000,"path":"","line":0,',
+        '"held_line":true,"held_branch":false}',
+        '"findings":[{"kind":"BranchNotMeasured","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":null,"bound_bp":9900,"path":"","line":0,',
     ],
     # Every line, one of the two arms: BelowTarget on branch is the only
     # finding (the whole findings list).
     "covbranch": [
         '"conclusion":"neutral","mode":"census",',
         _PKG + '"files":1,"unmeasured_files":0,"line_hit":3,"line_found":3,"line_bp":10000,"branch_hit":1,"branch_found":2,"branch_bp":5000,',
-        '"line_floor_bp":10000,"branch_floor_bp":0}',
-        '"findings":[{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":5000,"bound_bp":10000,"path":"","line":0,"message":"branch 50.00% is below the target 100.00%","count":null}],"exemptions"',
+        '"held_line":true,"held_branch":false}',
+        '"findings":[{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":5000,"bound_bp":9900,"path":"","line":0,"message":"branch 50.00% is below the target 99.00%","count":null}],"exemptions"',
     ],
     # Every line (9 of 9), 5 of 6 arms: check's `if` (2 of 2), the first
     # call's `try` decision (2 of 2), the second's (returned, never raised:
@@ -535,7 +496,7 @@ _RESULTS = {
     "covtry": [
         '"conclusion":"neutral","mode":"census",',
         _PKG + '"files":1,"unmeasured_files":0,"line_hit":9,"line_found":9,"line_bp":10000,"branch_hit":5,"branch_found":6,"branch_bp":8333,',
-        '"findings":[{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":8333,"bound_bp":10000,"path":"","line":0,"message":"branch 83.33% is below the target 100.00%","count":null}],"exemptions"',
+        '"findings":[{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":8333,"bound_bp":9900,"path":"","line":0,"message":"branch 83.33% is below the target 99.00%","count":null}],"exemptions"',
     ],
     # Every line (2 of 2), 1 of 2 arms: the `or` of `return a or b`, whose
     # left operand is never true (its right operand never skipped).
@@ -543,7 +504,7 @@ _RESULTS = {
     "covandor": [
         '"conclusion":"neutral","mode":"census",',
         _PKG + '"files":1,"unmeasured_files":0,"line_hit":2,"line_found":2,"line_bp":10000,"branch_hit":1,"branch_found":2,"branch_bp":5000,',
-        '"findings":[{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":5000,"bound_bp":10000,"path":"","line":0,"message":"branch 50.00% is below the target 100.00%","count":null}],"exemptions"',
+        '"findings":[{"kind":"BelowTarget","package":"tools/build/tests/negative/coverage","metric":"branch","measured_bp":5000,"bound_bp":9900,"path":"","line":0,"message":"branch 50.00% is below the target 99.00%","count":null}],"exemptions"',
     ],
 }
 
@@ -605,15 +566,10 @@ mojo_library(
     test_srcs = ["tests/test_covlow_user.mojo"],
 )
 
-# Test 46. A census gate over a malformed ratchet: covcheck exits 1, which
+# Test 46. A census gate over a malformed held marker (a number after its
+# metric, covbad_held): covcheck exits 1, which
 # fails the gate in every mode (census never fails on a finding, but does on
 # an input covcheck refuses). RED: tests//negative/coverage:covbad[coverage][gate]
-cov_gate_dir(
-    name = "covbad_gate",
-    exec_compatible_with = LINUX_X86_64,
-    ratchet = "covbad_ratchet.tsv",
-)
-
 mojo_library(
     name = "covbad",
     srcs = [
@@ -622,28 +578,20 @@ mojo_library(
     ],
     conda = False,
     coverage_debug = _LINK,
-    coverage_gate = ":covbad_gate",
+    coverage_gate = _GATE,
+    coverage_held = "covbad_held",
     coverage_mode = "census",
     import_name = "covfull",
     test_srcs = ["tests/test_full.mojo"],
 )
 
-# Test 46. A floor holds in census mode: covlow's sources and test (line
-# 50.00%, branch 25.00%) under a ratchet row one basis point above its line
-# (covfloor_ratchet.tsv) is a Regression, which fails the gate in every
-# mode, so its conda package is not produced; the library builds. At its
-# floors (covfloor_held_ratchet.tsv) the census gate is green.
-# RED: tests//negative/coverage:covfloor[coverage][gate], :covfloor_conda.
-# GREEN: :covfloor, :covfloor_held[coverage][gate].
-[
-    cov_gate_dir(
-        name = name + "_gate",
-        exec_compatible_with = LINUX_X86_64,
-        ratchet = name + "_ratchet.tsv",
-    )
-    for name in ("covfloor", "covfloor_held")
-]
-
+# Test 46. A hold fails in census mode: covlow's sources and test (line
+# 50.00%, branch 25.00%) held on line (held_line) are a Regression, which
+# fails the gate in every mode, so its conda package is not produced; the
+# library builds. Not held (no marker), the same numbers are BelowTarget,
+# which fails nothing in census mode: gate and conda package green.
+# RED: tests//negative/coverage:covheld[coverage][gate], :covheld_conda.
+# GREEN: :covheld, :covnotheld[coverage][gate], :covnotheld_conda.
 [
     mojo_library(
         name = name,
@@ -651,37 +599,61 @@ mojo_library(
             "covlow/__init__.mojo",
             "covlow/word.mojo",
         ],
-        conda = name == "covfloor",
+        conda = True,
         coverage_debug = _LINK,
-        coverage_gate = ":" + name + "_gate",
+        coverage_gate = _GATE,
+        coverage_held = held,
         coverage_mode = "census",
         import_name = "covlow",
         test_srcs = ["tests/test_word.mojo"],
     )
-    for name in ("covfloor", "covfloor_held")
+    for name, held in (("covheld", "held_line"), ("covnotheld", None))
 ]
 
-# Test 46. The census check (tools/build/coverage/census.bzl): a doc and
-# floors exactly as census.sh renders them from census/census.tsv are GREEN
-# (:census_ok: a package floor is its lowest library, an old floor above the
-# measurement survives, a 0/0 library sets nothing, a pinned row is kept as
-# written); a doc edited by hand (doc_edited.txt: one percentage changed), a
-# floor lowered under what the census measured (ratchet_lowered.tsv) and a
-# pinned row with no reason (ratchet_pin_no_reason.tsv) are RED
-# (:census_doc_edited, :census_floor_lowered, :census_pin_no_reason). The docs are .txt so
-# the Markdown checks of this cell do not read their links.
+# Test 46. The census (tools/build/coverage/census.bzl), over per-package
+# files at their repository paths (census/ok/src/<p>/coverage_census.tsv and
+# coverage_held; `files`). src/a: one library; src/b: one failed (it keeps
+# its 100% library from reaching the target); src/c: the lowest library
+# decides; src/d: line reached and held; src/e: one library without a branch
+# number; src/f: a library with no line (0/0) sets nothing; src/g: held on
+# line, measured below it (the gate's to fail: **below target**); src/h: both
+# reached and held, its 0/0 library aside; and a test package, held to
+# nothing. GREEN: :census_ok, and the doc it renders is census/doc.txt byte
+# for byte (:census_ok_doc). RED, each with one file replaced or left out: a
+# package at the target with no marker (:census_reached_not_held), a
+# malformed marker (:census_held_malformed), a library's row twice
+# (:census_dup_row) and a census row in another package's file
+# (:census_row_other_package); and so is the doc compared with doc_edited.txt
+# (one percentage changed: :census_doc_edited), so the golden comparison can
+# fail. The docs are .txt so the Markdown checks of this cell do not read
+# their links.
+_CENSUS_OK = {p.removeprefix("census/ok/"): p for p in glob(["census/ok/**/coverage_census.tsv", "census/ok/**/coverage_held"])}
+
 [
     coverage_census(
         name = name,
-        census = "census/census.tsv",
-        doc = "census/" + doc,
-        ratchet = "census/" + ratchet,
+        files = {k: v for k, v in (_CENSUS_OK | changed).items() if v},
     )
-    for name, doc, ratchet in (
-        ("census_ok", "doc.txt", "ratchet.tsv"),
-        ("census_doc_edited", "doc_edited.txt", "ratchet.tsv"),
-        ("census_floor_lowered", "doc.txt", "ratchet_lowered.tsv"),
-        ("census_pin_no_reason", "doc.txt", "ratchet_pin_no_reason.tsv"),
+    for name, changed in (
+        ("census_ok", {}),
+        ("census_reached_not_held", {"src/d/coverage_held": None}),
+        ("census_held_malformed", {"src/h/coverage_held": "census/held_malformed"}),
+        ("census_dup_row", {"src/c/coverage_census.tsv": "census/census_dup_row.tsv"}),
+        ("census_row_other_package", {"src/c/coverage_census.tsv": "census/census_row_other_package.tsv"}),
+    )
+]
+
+[
+    cov_report_check(
+        name = name,
+        goldens = ["census/" + golden],
+        mode = "golden",
+        reports = [":census_ok"],
+        script = "//functional/coverage:report.sh",
+    )
+    for name, golden in (
+        ("census_ok_doc", "doc.txt"),
+        ("census_doc_edited", "doc_edited.txt"),
     )
 ]
 
@@ -787,7 +759,7 @@ mojo_test(
 # A test that passes in the release gate and fails in its branch coverage
 # run (it asserts that LLVM_PROFILE_FILE is unset). RED:
 # tests//negative/coverage:branchfail[coverage][branch][test_profile_env],
-# with the run's message, not gate_runner's banner.
+# with the run's message, not the gate's banner.
 mojo_library(
     name = "branchfail",
     srcs = [
@@ -873,6 +845,8 @@ _TOOL_SRCS = [
     "cov_branch_annotate_fixture",
     "cov_branch_annotate_order_test",
     "cov_branch_annotate_test",
+    "cov_branch_link",
+    "cov_branch_link_test",
     "cov_branch_run",
     "cov_branch_run_test",
 ]
@@ -954,21 +928,39 @@ mojo_library(
     test_srcs = ["tests/test_one.mojo"],
 )
 
-# A cov_branch_link.sh copy whose zig line drops `-lm`: the branch coverage
-# link is no longer the release link plus the profile runtime. RED:
-# tests//negative/coverage:branchlinkline, "the branch coverage link is not
-# the release link".
+# A copy of cov_branch's `link` (cov_branch_link.zig) whose zig line drops
+# `-lm`, built as the tool plants above are (without its unit tests, which
+# the defect would fail): the branch coverage link is no longer the release
+# link plus the profile runtime. RED: tests//negative/coverage:branchlinkline,
+# "the branch coverage link is not the release link".
 cov_plant(
-    name = "branchlinkline_link_sh",
-    expr = "s|-Wl,--gc-sections -lm|-Wl,--gc-sections|",
-    out = "cov_branch_link.sh",
-    src = "komira//tools/build/coverage/branch:cov_branch_link.sh",
+    name = "branchlinkline_link_zig",
+    expr = "s|\"-Wl,--gc-sections\", \"-lm\",|\"-Wl,--gc-sections\",|",
+    out = "cov_branch_link.zig",
+    src = _BRANCH_SRC + "cov_branch_link.zig",
+)
+
+cov_zig_tree(
+    name = "branchlinkline_link_src",
+    files = {
+        f + ".zig": (":branchlinkline_link_zig" if f == "cov_branch_link" else _BRANCH_SRC + f + ".zig")
+        for f in ["cov_branch"] + _TOOL_SRCS
+    },
+)
+
+zig_exe(
+    name = "branchlinkline_cov_branch",
+    exec_compatible_with = LINUX_X86_64,
+    imports = [":branchlinkline_link_src[{}]".format(f) for f in _TOOL_SRCS],
+    src = ":branchlinkline_link_src[cov_branch]",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 cov_branch_dir(
     name = "branchlinkline_branch",
     exec_compatible_with = LINUX_X86_64,
-    link_script = ":branchlinkline_link_sh",
+    link_tool = ":branchlinkline_cov_branch",
 )
 
 cov_link_line_check(
@@ -979,6 +971,61 @@ cov_link_line_check(
     lib = ":branchnoprof",
     script = "//functional/coverage:link_line.sh",
     src = "tests/test_one.mojo",
+)
+
+# A copy of cov_branch's `link` (cov_branch_link.zig) without atomic counter
+# updates, built as branchlinkline's is: each counter increment is a plain
+# load, add and store, and the eight threads of test_threads (the fixture of
+# tests//functional/coverage:branch_counts_threads, the same sources) lose
+# increments to each other. RED: tests//negative/coverage:branchnonatomic,
+# "the counters of quarter are '...' (sorted), not '0,2000000,2000000,6000000'".
+cov_plant(
+    name = "branchnonatomic_link_zig",
+    expr = "s|try v.appendSlice(&.{ \"-mllvm\", \"-instrprof-atomic-counter-update-all\" });||",
+    out = "cov_branch_link.zig",
+    src = _BRANCH_SRC + "cov_branch_link.zig",
+)
+
+cov_zig_tree(
+    name = "branchnonatomic_link_src",
+    files = {
+        f + ".zig": (":branchnonatomic_link_zig" if f == "cov_branch_link" else _BRANCH_SRC + f + ".zig")
+        for f in ["cov_branch"] + _TOOL_SRCS
+    },
+)
+
+zig_exe(
+    name = "branchnonatomic_cov_branch",
+    exec_compatible_with = LINUX_X86_64,
+    imports = [":branchnonatomic_link_src[{}]".format(f) for f in _TOOL_SRCS],
+    src = ":branchnonatomic_link_src[cov_branch]",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+cov_branch_dir(
+    name = "branchnonatomic_branch",
+    exec_compatible_with = LINUX_X86_64,
+    link_tool = ":branchnonatomic_cov_branch",
+)
+
+mojo_library(
+    name = "branchnonatomic_lib",
+    srcs = ["//functional/coverage:branchmt/__init__.mojo"],
+    conda = False,
+    coverage_branch = ":branchnonatomic_branch",
+    coverage_debug = _LINK,
+    import_name = "branchmt",
+    test_srcs = ["//functional/coverage:tests/test_threads.mojo"],
+)
+
+cov_branch_check(
+    name = "branchnonatomic",
+    counts = [0, 2000000, 2000000, 6000000],
+    exec_compatible_with = LINUX_X86_64,
+    function = "quarter",
+    profdata = ":branchnonatomic_lib[coverage][branch][test_threads]",
+    script = "//functional/coverage:branch_check.sh",
 )
 
 # ---- Shared libraries (mojo_shared_lib) -----------------------------------------
@@ -1102,11 +1149,13 @@ target_suite(
         ":covbranch_census_result",
         ":covtry_census_result",
         ":covandor_census_result",
+        "//negative/coverage/heldfile:covfile_result",
         ":covbranch_both[coverage][gate]",
         ":covtry_both[coverage][gate]",
         ":covandor_both[coverage][gate]",
         ":covfull[coverage][gate]",
         ":census_ok",
+        ":census_ok_doc",
         ":tracer_mt",
         ":test_tracer_mt",
         ":branchfail",
@@ -1118,6 +1167,7 @@ target_suite(
         ":branchinternal",
         ":branchentry",
         ":branchnodebug",
+        ":branchnonatomic_lib",
     ],
     visibility = ["komira//:tests_greens"],
 )

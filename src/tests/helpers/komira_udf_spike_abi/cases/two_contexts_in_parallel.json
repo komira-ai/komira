@@ -1,0 +1,11 @@
+{
+ "name": "two_contexts_in_parallel",
+ "defect": "mutable state shared across contexts: four contexts called at once on four threads must each get exactly 2x of every row",
+ "run": "parallel",
+ "entry": "double",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "parallel": {"threads": 4, "rows": 64, "iters": 20, "a": 2, "b": 0},
+ "expect": {"status": "OK"}
+}

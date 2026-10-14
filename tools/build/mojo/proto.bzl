@@ -42,7 +42,7 @@ the plugin as `--mojo_opt` arguments, never from a file, so they are part of
 the action key.
 """
 
-load(":defs.bzl", "mojo_library")
+load(":defs.bzl", "mojo_library", "mojo_precompile_cmd")
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoToolchainInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
@@ -286,21 +286,7 @@ def _generate_package(ctx, plugin, plugin_name, opt, tree, trees, generate, name
     pkg = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
     dep_closure = ctx.actions.tset(MojoPkgTSet, children = deps)
     ctx.actions.run(
-        cmd_args(
-            tc.busybox,
-            "sh",
-            tc.wrapper,
-            tc.busybox,
-            tc.compiler,
-            tc.link,
-            tc.cc_target,
-            "--",
-            "precompile",
-            dep_closure.project_as_args("include"),
-            gen_dir,
-            "-o",
-            pkg.as_output(),
-        ),
+        mojo_precompile_cmd(tc, dep_closure.project_as_args("include"), gen_dir, pkg.as_output()),
         category = "mojo_precompile",
     )
 

@@ -112,7 +112,7 @@ count above 0.
 <dir>/zig <zig arguments...>
 ```
 
-`mojo_wrapper.sh` runs every link of `mojo build` as `<zig_dir>/zig cc
+`mojo_compile` runs every link of `mojo build` as `<zig_dir>/zig cc
 -target <t> -Wl,--strip-debug ...`. A coverage build passes `:cov_link` as
 `<zig_dir>`, so the wrapper is the same file for every compile; `cov_zig`
 finds its directory from `argv[0]` and runs `real/zig` and `debug_relocate`
@@ -170,7 +170,7 @@ step that runs kcov over it has to map. Read from the binaries of
 | units | directory | file names | maps to |
 |---|---|---|---|
 | the test (`producer: Mojo`) | none | `tests` + `test_<x>.mojo` | the package's `tests/` |
-| the library | none | `buck-out/v2/art/<cell>/<package>/__<target>__/<hash>/src/<import>` + the file, where `<hash>` names the staged source directory | the package's `<import>/` |
+| the library | none | `<import>` + the file: the package is compiled from the parent of its staged sources (`[src]`, which ends in `src/<import>`), by that name | the package's `<import>/` |
 | the Mojo standard library | none | `oss/modular/mojo/stdlib/std/...` | nothing in the repository: not measured |
 | zig's C runtime (`crt1`, `crti`, `crtn`) | the placeholder `/___...` | `buck-out/v2/art/komira/tools/build/coverage/kcov/__cov_link__/<hash>/cov_link/real/lib/libc/...`, where `<hash>` is the configuration of `:cov_link` | nothing in the repository: not measured |
 
@@ -244,7 +244,7 @@ Exit status, both tools: 0 done, 1 refused, 2 bad usage.
 ## cov_run
 
 ```
-busybox sh <cov_run dir>/cov_run.sh <busybox> <gate_runner> <compiler_dir> <label>
+busybox sh <cov_run dir>/cov_run.sh <busybox> <gate> <compiler_dir> <label>
     <test_binary> <share> <src_dir> <xml_out> <marker_out>
     <src_repo> <test> <test_repo> <import> [--solib <file> [--solib-src <path>]...]
     [--gen <file>]... [--env NAME=VALUE]...
@@ -260,33 +260,40 @@ file) and, from a library's `<name>_cov_gate`, each `mojo_test` it names in
 `coverage_tests` (`<test>` the test's main as its package names it). The
 header of [`cov_run.sh`](cov_run.sh) has every argument; in order:
 
-0. **Where the binary names the sources.** Every string in the test binary
-   holding `buck-out/` and, inside an artifact (after buck2's `__<target>__/`
-   directory), the path component `src/<import>` (a directory
-   of the library's sources in its line tables, relative or absolute) must
-   be the `[src]` directory the run stages, or the action fails before kcov
-   runs, naming both. kcov would drop sources named elsewhere without an
-   error, and `lost/` (below) only catches names under the staged path.
+0. **Where the binary names the sources.** The binary must name the
+   library's sources by `<import>/`, where the run stages them, or the
+   action fails before kcov runs. It fails when a string of the binary
+   holds `buck-out/` and, inside an artifact (after buck2's `__<target>__/`
+   directory), the path component `src/<import>` (the library's `[src]`:
+   the name a package compiled from `[src]` itself would give its sources),
+   and when the binary holds the library's code (a string with
+   `<import>::`, how a function or type of it is named) but no whole string
+   `<import>` or `<import>/...` (the line tables' directory, or a file
+   named with it). kcov would drop sources named elsewhere without an
+   error, and `lost/` (below) only catches names under the staged path. A
+   test that calls none of its library holds neither string and passes:
+   there is nothing of the library to measure.
 1. **A root of copies.** `bin/kcov` and kcov's `lib/` (its `DT_RPATH`
    `$ORIGIN/../lib` reaches them), `bin/<test>`, and `share/` holding the
    test's declared data, its source at its path in the package
    (`tests/test_x.mojo`, the name its line tables use) and the library's
-   staged sources at the path of `[src]` from the action's directory
-   (`buck-out/v2/art/...`, the name the line tables use for them). Copies,
-   never links: kcov resolves each name with `realpath`. A second copy of
+   staged sources at `<import>/` (the name the line tables use for them;
+   a shared library's driver names none of them, so with `--solib` they
+   sit at the `[src]` path, out of the way of its sources, which are data).
+   Copies, never links: kcov resolves each name with `realpath`. A second copy of
    the same sources, `lost/`, sits beside it. The one exception: each
    generated source (`--gen`) is moved to `gen/`, outside `share/` and
    `lost/`, and linked from both, so `realpath` takes its name out of every
    `--include-path` and it is not measured.
-2. **kcov as the gate's program.** `gate_runner.sh`, the release gate's
-   runner byte for byte, runs `bin/kcov` (staged where a test binary would
+2. **kcov as the gate's program.** The gate ([`gate mojo`](../../run/README.md)),
+   the release gate's runner, runs `bin/kcov` (staged where a test binary would
    be, so `share/` is the working directory) with the test binary and kcov's
    flags as its arguments. So the test runs with the gate's PATH,
    LD_LIBRARY_PATH, TMPDIR, TEST_TMPDIR, HOME, `test_env` and data, under
-   kcov, and gate_runner reports a failure as for a gated test (what
+   kcov, and the gate reports a failure as for a gated test (what
    differs is below). The flags:
    `--cobertura-only --skip-solibs --configure=cobertura-full-paths=1`;
-   `--include-path` of exactly the staged `[src]` directory and the test
+   `--include-path` of exactly the staged `<import>/` directory and the test
    source, under `share/` and under `lost/`;
    `--replace-src-path='^(?!/):<lost>/'`. No argument grows with the
    library's generated sources (`--include-path` grows only with a shared
@@ -299,7 +306,7 @@ header of [`cov_run.sh`](cov_run.sh) has every argument; in order:
    long (a deep action directory) fails the run, saying so, before kcov
    starts.
 3. **Exactly one report** (`--cobertura-only` writes `<out>/cov.xml`).
-4. **`cov_normalize`** maps `<share>/<[src] path>/` to the package's
+4. **`cov_normalize`** maps `<share>/<import>/` to the package's
    directory of those sources (with a repository prefix for a cell that is
    not its repository's root: `tools/build/tests/` for the tests cell) and
    the test's directory to the package's, requires the test's own source in
@@ -310,8 +317,8 @@ komira's kcov exits with the test's status, 128+N when signal N killed it,
 as a shell reports it; kcov v42 as released returns the status of the last
 traced process to exit, so a child the test left behind decided it
 ([Patches](../../toolchains/kcov/README.md#patches)). A test that fails under
-kcov fails the action (its output from `gate_runner.sh`, then `COVERAGE RUN
-FAILED`), although its release gate passed. gate_runner's banner is left
+kcov fails the action (its output from the gate, then `COVERAGE RUN
+FAILED`), although its release gate passed. The gate's banner is left
 out: it would say the release gate's test failed. With coverage on, the
 conda package (`<name>_conda`) waits for every coverage run; the library
 and its dependents do not
@@ -349,17 +356,19 @@ report byte for byte.
 
 **The run is bounded.** kcov waits for every process the test started
 before it writes the report, so a test that leaves a child running would
-hold the action open. `gate_runner.sh` runs in a session of its own
-(`setsid`), which kcov, the test and its children join, and a watcher kills
-that whole process group when the run has not ended after the limit, 450 s
+hold the action open. The gate (`gate mojo --limit-s <limit> --limit-report
+coverage`) runs kcov in a session of its own, which the test and its
+children join, and kills that whole process group when the run has not ended
+after the limit, 450 s
 (the file `limit` of the `cov_run_dir`, its `limit_s`): the action fails
 with `The test left processes running or did not finish within 450 s under
 kcov`, after the output the test wrote. A process of the group still
 running (not a zombie) 10 s after that kill fails the action instead with
 `processes of the coverage run survived the kill`, naming it. That scan reads /proc, so it first
-requires /proc to show the run's shell under its own pid (`/proc/$$/stat` and `/proc/self/stat`
-both start with `$$`): a /proc of another PID namespace, or one hiding processes, would list none
-of the group, and the action fails instead with `/proc is not readable as this run's own`. The slowest run measured took
+requires /proc to show the gate under its own pid (`/proc/<pid>/stat` and `/proc/self/stat`
+both start with it): a /proc of another PID namespace, or one hiding processes, would list none
+of the group, and the action fails instead with `/proc is not readable as this run's own`
+(both are the gate's unit tests, [`supervise_test.zig`](../../run/supervise_test.zig)). The slowest run measured took
 119.6 s of worker time; the limit is over three times that and under 600
 s, buck2's default timeout of a test action. Only a fixture of the tests
 cell may set another `limit_s` (test 43 uses 20 s). kcov refused by the executor (a line of
@@ -370,12 +379,12 @@ kcov's own error (`kcov: error: `) as kcov's, not the test's.
 **What differs from the release gate.** The test is traced (TracerPid is
 kcov's) and runs without address randomization (kcov sets
 `ADDR_NO_RANDOMIZE`); its working directory `share/` also holds its own
-source and the library's sources under `buck-out/` (the line tables name
+source and the library's sources under `<import>/` (the line tables name
 them relative to it); kcov shares its TMPDIR (kcov writes there only when it
 cannot make its FIFO); its environment also holds `KCOV_SOLIB_PATH`, which
 kcov always sets (with `--skip-solibs` it preloads nothing: no `LD_PRELOAD`),
 and nothing of `cov_run.sh`'s own (its tools get `LC_ALL=C` per command
-before the test and exported after it, since `gate_runner.sh` passes on what
+before the test and exported after it, since the gate passes on what
 it does not set);
 and the run ends when every process the test started has exited, since
 kcov follows each fork, where the gate waits for the test alone (so the run
@@ -395,10 +404,10 @@ slot instead, the same mistake gives a green run whose report has no
 library file (test 43 shows both). The other names a binary holds, the
 standard library's and the C runtime's, are outside `--include-path` and
 never reach the report; were one to, it would be unmapped too. `lost/` holds
-copies at the staged `[src]` path and the test's path only, so it catches a
+copies at `<import>/` and the test's path only, so it catches a
 mis-staged tree, not a binary naming the sources by another directory: that
-is step 0's check (test 43's `lostdir`). A future Mojo naming them outside
-`buck-out/` would need step 0 extended.
+is step 0's check (test 43's `lostdir`). A Mojo naming them by an absolute
+directory is the hermetic check's (test 41).
 
 ## Tests
 
@@ -413,36 +422,58 @@ sources refused, sources named by another directory refused before kcov
 runs, and kcov refused by the executor named as such.
 
 Each tool's cases run as a build action that fails on the first wrong
-result. `cov_normalize` has two sets, both `zig_test`s. Its unit tests
-([cov_normalize_test.zig](cov_normalize_test.zig), `:cov_normalize_unit`)
-import the tool and call `entry`, the program but for the process; its
-executable is built behind them (`unit_tests`), so it does not exist unless
-they pass. They build the tool from source in `zig test`'s own mode, so they
-are not the shipped bytes. The process cases
-([cov_normalize_exe_test.zig](cov_normalize_exe_test.zig),
-`:cov_normalize_exe_test`) take the shipped executable (`env_tools`: its path
-is in the test's environment as `COV_NORMALIZE`, and the test fails, never
-passes, without it) and run it as a child process with an empty environment:
-exit 0 with the golden output, exit 1 with a refusal, exit 1 with no output
-when a file size limit cuts the write short, and exit 2 with the usage line,
-each message on stderr and nothing on stdout. They are a validation of the
-public target `:cov_normalize`. The other tools'
-cases are scripts (`kcov_tool_cases` in [defs.bzl](defs.bzl)), and the public
-target (`:debug_relocate`, `:cov_zig`) depends on them. `:cov_link` and
+result. `debug_relocate`, `cov_normalize` and `cov_zig` each have two sets,
+all `zig_test`s. Their unit tests
+([debug_relocate_test.zig](debug_relocate_test.zig), `:debug_relocate_unit`;
+[cov_normalize_test.zig](cov_normalize_test.zig), `:cov_normalize_unit`;
+[cov_zig_test.zig](cov_zig_test.zig), `:cov_zig_unit`) import the tool and
+call `entry`, the program but for the process; the executable is built
+behind them (`unit_tests`), so it does not exist unless they pass. They build
+the tool from source in `zig test`'s own mode, so they are not the shipped
+bytes. `cov_zig`'s unit tests take a stand-in zig
+([cov_zig_stub.zig](cov_zig_stub.zig), `:cov_zig_stub`) and
+`:debug_relocate` through `env_tools` (`COV_ZIG_STUB`, `DEBUG_RELOCATE`),
+and run what `entry` says to exec as `main` would. The process cases
+([debug_relocate_exe_test.zig](debug_relocate_exe_test.zig),
+`:debug_relocate_exe_test`;
+[cov_normalize_exe_test.zig](cov_normalize_exe_test.zig),
+`:cov_normalize_exe_test`; [cov_zig_exe_test.zig](cov_zig_exe_test.zig),
+`:cov_zig_exe_test`) take the shipped executable (`env_tools`: its path is in
+the test's environment, and the test fails, never passes, without it) and run
+it as a child process with an environment the test builds.
+`debug_relocate`'s and `cov_normalize`'s (`DEBUG_RELOCATE`, `COV_NORMALIZE`,
+an empty environment): exit 0, exit 1 with a refusal and exit 2 with the
+usage line, each message on stderr and on stdout only what the tool prints
+there (`debug_relocate`'s counts; nothing for `cov_normalize`). Each also has
+a write that fails: for `cov_normalize`, a file size limit cuts the output
+short, which must be exit 1 with no output; for `debug_relocate`, a stdout
+whose writes fail, which must be exit 1 with the file unchanged (a `main`
+that buffers stdout and drops the flush error fails it). `cov_zig`'s run it
+(`COV_ZIG`) from a link directory holding it, `:debug_relocate`
+(`DEBUG_RELOCATE`) and the pinned zig (`PINNED_ZIG`, the toolchain's
+directory): a C program compiled and linked through it, a release level
+refused (exit 1) and a link directory with no `real/zig` (exit 2); and with
+the stand-in (`COV_ZIG_STUB`) as `real/zig`, the logical-directory cases
+again with `$PWD` and `$BUCK_SCRATCH_PATH` in the process's environment,
+which `main` reads (the ELF fixture both sets share:
+[cov_zig_elf.zig](cov_zig_elf.zig)). They are a validation of the public
+target (`:debug_relocate`, `:cov_normalize`, `:cov_zig`). `:cov_link` and
 `:cov_run` take the public targets, so a coverage build is gated by their
-cases. The cases of `cov_zig` also take `:debug_relocate` and the pinned zig
-(`helpers`). Buck2 runs a dependency's validations with any build that uses
-it, so the tool cannot be built, or used, unless its cases pass. The public
-target and its script or process cases take the executable as an `exec_dep`
-on the same execution platform, so those cases test the very binary the
-public target hands out; the unit tests do not.
+cases. Buck2 runs a dependency's validations with any build that uses it, so
+the tool cannot be built, or used, unless its cases pass. The public target
+and its process cases take the executable as an `exec_dep` on the same
+execution platform, so those cases test the very binary the public target
+hands out; the unit tests do not.
 
-The cases that need a write to fail set a file size limit (`ulimit -f` in a
-script, `setrlimit` in a unit test, with `SIGXFSZ` ignored), so the write
+The cases that need a write to fail set a file size limit (`setrlimit` in a
+unit test or in the forked child of a process case, with `SIGXFSZ` ignored),
+so the write
 fails with `EFBIG` part way; a probe first checks that the limit stops a
 plain write.
 
-`debug_relocate_cases.sh`:
+[debug_relocate_test.zig](debug_relocate_test.zig) runs `debug_relocate` as
+its `main` does (`entry`: the arguments, a working directory of the test's
+own, stdout, stderr) over small files and ELF files it writes byte by byte:
 
 | case | proves | a defect it catches |
 |---|---|---|
@@ -450,14 +481,14 @@ plain write.
 | followed by `/` | a path under the directory is rewritten | |
 | followed by `x` | exit 1 naming offset 39, and the file byte for byte unchanged although an earlier occurrence was rewritable | no check on the following byte |
 | at the end of the file | refused the same way | |
-| two directories, several occurrences | each counted and rewritten; permission bits 757 kept (other-write, which umask 022 clears) | stopping after the first occurrence; no `chmod` after the temporary file |
+| two directories, several occurrences | each counted (three and two, so a count printed against the wrong directory shows) and rewritten; permission bits 757 kept (other-write, which the umask 022 the test sets clears) | stopping after the first occurrence; the wrong directory's count printed; no `chmod` after the temporary file |
 | 7-byte, relative, trailing-`/` directory, none | exit 2 with usage, file unchanged | no length floor |
 | 8-byte directory | accepted and rewritten | a floor of 9 (`<=` for `<`) |
 | no occurrence | `0 <dir>`, exit 0, unchanged | |
 | second directory refused | exit 1 naming the second directory's offset, nothing printed, file unchanged although the first had been rewritten in memory | writing after each directory |
 | symbolic link | exit 1, the link still a link, its target unchanged | the link replaced by a regular file |
 | failed write | exit 1, file unchanged, no temporary file left | exiting without removing the temporary file |
-| failed stdout | exit 1 and the file unchanged | printing the counts after the rename |
+| failed stdout | a stdout whose every write fails: exit 1 and the file unchanged | printing the counts after the rename |
 | compressed section | an ELF64 file whose second section has `SHF_COMPRESSED` (0x800) is refused, exit 1 naming the section, nothing printed, untouched, although its directory is rewritable | no check (red-first: it failed before the check existed); a mask other than 0x800 |
 | uncompressed ELF | the same file with flags 0x2 is relocated as any file | refusing every ELF file |
 | idempotent | the relocated file again: `0 <dir>`, exit 0, same bytes, same inode | a placeholder that holds the directory; writing a file with no occurrence |
@@ -465,12 +496,17 @@ plain write.
 | compressed section, `e_shnum` 0 | an ELF64 file whose `e_shnum` is 0 and whose section 0 `sh_size` holds the count (3): the compressed section is found and refused; with flags 0x2 it is relocated | the count in section 0 not read (planted: red) |
 | compressed section, ELF32 | an ELF32 file (40-byte section headers, 32-bit flags) with a compressed section: refused, untouched; with flags 0x2 it is relocated | ELF32 files not looked at (planted: red) |
 | compressed section, ELF32, `e_shnum` 0 | an ELF32 file whose `e_shnum` is 0 and whose section 0 holds the count (3) in its 32-bit `sh_size` (offset 0x14 of its header): the compressed section is found and refused; with flags 0x2 it is relocated | the ELF32 count in section 0 not read (planted: red) |
+| `e_shnum` 0, a count past the end | an ELF64 file whose section 0 claims 4 section headers where it holds 3: refused, exit 1, untouched | no bounds check on the count read from section 0 |
 
-`cov_zig_cases.sh` runs `cov_zig` from a directory whose `real/zig` is a
-stand-in (a script that records its arguments and copies a given ELF file to
-the `-o` output) and, in the last two cases, the pinned zig itself. The
-fixtures put the working directory where a C runtime unit's
-`DW_AT_comp_dir` would be:
+[cov_zig_test.zig](cov_zig_test.zig) runs `cov_zig` as its `main` does
+(`entry`: argv[0] in a directory whose `real/zig` is the stand-in, which
+records its arguments and copies a given ELF file to the `-o` output; the
+arguments; a working directory of the test's own; `$PWD` and
+`$BUCK_SCRATCH_PATH`), and [cov_zig_exe_test.zig](cov_zig_exe_test.zig) runs
+the shipped executable: over the pinned zig itself in the two pinned zig
+cases, and over the stand-in in the `process` cases. The
+fixtures put the working directory where a C runtime unit's `DW_AT_comp_dir`
+would be:
 
 | case | proves | a defect it catches |
 |---|---|---|
@@ -487,9 +523,15 @@ fixtures put the working directory where a C runtime unit's
 | logical directory | reached through a symbolic link: `$PWD` and an absolute `$BUCK_SCRATCH_PATH` outside it are relocated too | `$PWD` ignored |
 | logical only | the output names only `$PWD`, not `getcwd`: relocated, exit 0 | a zero count of `getcwd` alone failing the link (red-first: it did) |
 | scratch only | the output names only an absolute `$BUCK_SCRATCH_PATH` outside the working directory, given: it is relocated, and the link fails with `has debug sections but holds the working directory`, exit 1 | the zero count summing every directory given, not only the working directory's spellings (planted: red) |
+| relative directories | a relative `$PWD` and `$BUCK_SCRATCH_PATH`: neither given to debug_relocate, exit 0, the relative strings in the output unchanged | a relative directory accepted (planted: red, debug_relocate refuses it) |
 | release level | `-O1` to `-O4`, `-Ofast`, `-Os`, `-Oz` on a link: exit 1 naming the level, `real/zig` not run; `-O0`, `-Og`, `-O` and a `-c -O2` compile pass | no refusal (red-first); refusing a Debug level (red-first: `-Og` was refused) |
 | pinned zig | a C file compiled with `-g` and linked through `cov_zig` with `-Wl,--strip-debug`: `.debug_line` kept, the placeholder present, the directory absent, no compressed section | the flags rejected by zig 0.12 |
 | pinned zig, release | the same link through zig directly has no `.debug_line`, so the previous case's line tables are `cov_zig`'s doing | |
+| process: logical | the shipped executable, its working directory reached through a symbolic link: `$PWD` (that path) and `$BUCK_SCRATCH_PATH` (outside it) from its environment, and the physical path, all gone from the output, exit 0 | `main` not reading `$PWD`, or not reading `$BUCK_SCRATCH_PATH` (planted: red) |
+| process: logical only | the output names only `$PWD`: exit 0, its placeholder present | `main` not reading `$PWD`; the two variables swapped (planted: red) |
+| process: scratch only | the output names only `$BUCK_SCRATCH_PATH`: relocated, exit 1 | `main` not reading `$BUCK_SCRATCH_PATH`; the two variables swapped (planted: red) |
+| process: refusal | the shipped executable linking at `-O2`: exit 1, the refusal on stderr, nothing on stdout, no output | `main` dropping `entry`'s status |
+| process: bad usage | a link directory with no `real/zig`: exit 2, `cannot run` on stderr | |
 
 [cov_normalize_test.zig](cov_normalize_test.zig) runs `cov_normalize` as its `main` does (`entry`:
 the arguments, a working directory of the test's own, stderr) over

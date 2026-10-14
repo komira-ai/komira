@@ -457,7 +457,7 @@ The rulings that settled each item once open or departing, the table of parity g
 
 - **Rule.** `MIN / -1` for a signed integer type is an error ("Out of Range"), since the quotient is not representable.
 - **DuckDB.** Measured on 1.5.3: `(-9223372036854775808) // (-1)` raises an Out of Range Error (`src/komira_column_kernels/arithmetic.mojo:74-80`).
-- **Current behaviour.** `src/komira_column_kernels/arithmetic.mojo:111-130` raises when both operands of such a pair are valid. So do the expression executor's Int64, Int32 and per-cell division arms (`_ee_div_overflows` in `src/komira_eval/expression_executor.mojo`). Its Float64 walker answers 2^63, and its Int64 walker raises for a pair in a CASE branch the row does not take ("Code that does not follow", item 1).
+- **Current behaviour.** `src/komira_column_kernels/arithmetic.mojo:111-130` raises when both operands of such a pair are valid. So do the expression executor's Int64, Int32, Float64 and per-cell division arms (`_ee_div_overflows` in `src/komira_eval/expression_executor.mojo`), on the rows whose answer uses the quotient: a CASE evaluates a branch only over the rows that take it, and an OR evaluates its right side only over the rows its left side leaves undecided. So does an AND, except that the top-level conjuncts of a WHERE run in an adaptive order.
 - **Mark.** MATCHES.
 
 ### 5.5 Integer overflow

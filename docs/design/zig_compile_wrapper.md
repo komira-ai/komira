@@ -25,8 +25,8 @@ and the order of the pull requests.
 
 **Scope, stated exactly.** `busybox.sh` and `dyld_prelude.sh` are not the compile wrapper's alone:
 
-- `dyld_prelude.sh` is prepended to `gate_runner.sh` and `launch.sh` (the `dyld_script` rule in
-  `darwin.bzl`); the compile never reads it. It goes when the Zig gate runner and launcher take a
+- `dyld_prelude.sh` is prepended to `launch.sh` (the `dyld_script` rule in `darwin.bzl`; it was
+  prepended to `gate_runner.sh` too until the macOS gate replaced that); the compile never reads it. It goes when the Zig gate runner and launcher take a
   loader-variable flag (`--library-path-var=DYLD_LIBRARY_PATH`), which is the gate-runner port, not this one.
 - `busybox.sh` is the darwin toolchain's `busybox` field, run by every darwin action that starts
   `tc.busybox`: the compile today, and also the gate runner, `run_check.sh`, the memory cap and deadline
@@ -51,7 +51,11 @@ Every item is something the shell does today, with the test (see "Tests") that p
 4. The output is the value after the last `-o` in the compiler's arguments; none is exit 2.
 5. `--source-root=<dir>`: only when the subcommand is `build`, `-strip-file-prefix=<abs dir>/` is inserted
    right after the subcommand. The absolute path is `$PWD/<dir>` for a relative dir, spelled exactly as
-   the shell spells it (not canonicalised), because the compiler matches the prefix as a string.
+   the shell spells it (not canonicalised), because the compiler matches the prefix as a string. When the
+   subcommand is `precompile` (which ignores `-strip-file-prefix`), the compiler instead runs from the
+   root's parent, the argument naming the root becomes its basename, and `-o` and relative `-I` are made
+   absolute: the `.mojoc` records `<name>/<file>.mojo` under any isolation directory
+   (`compile_args.runDir`; `tests//functional/mojoc_path:same_bytes`).
 6. Input paths (compiler dir, link dir) are made absolute the same way, `$PWD/<path>`.
 7. macOS only: an argument `shared-lib` without an argument `-install_name` is exit 2 (bundles are
    Linux only; a C-ABI library names itself for dyld).
@@ -279,8 +283,8 @@ Three things must hold, each already checked:
 
 - the exec line of item 16 stays byte for byte, and `argv[0]` stays absolute;
 - `PWD` and `BUCK_SCRATCH_PATH` reach the link (the exact-environment pass-through);
-- `cov_branch_link.sh` reproduces that line for the branch link, and test 47 (`link_line.sh`) compares
-  the two. `link_line.sh` takes the wrapper as an argument; its rule passes the new executable.
+- `cov_branch link` (`cov_branch_link.zig`) reproduces that line for the branch link, and test 47
+  (`link_line.sh`) compares the two. `link_line.sh` takes the wrapper as an argument; its rule passes the new executable.
 
 The negative coverage target (`tests//negative/coverage`, the no-op relocator) must still fail with exit 4:
 it proves item 30 through a real `cov_zig` link.
@@ -365,7 +369,7 @@ The `host-identity` value is checked on each macOS worker by the census target a
    and update every hit that means the Linux script. That is more than the docs (`mojo_rules_and_toolchain.md`,
    the Mojo, coverage and toolchain READMEs, `cov_zig.zig`'s header): comments in `defs.bzl`, `doc.bzl`,
    `coverage.bzl`, `coverage_branch.bzl`, `coverage/kcov/defs.bzl`, `mutation.bzl`, `providers.bzl`,
-   `toolchain.bzl`, `gate_runner.sh`, `tests/cxx_tests.sh`, `cov_branch_link.sh`, `functional/coverage/BUCK`,
+   `toolchain.bzl`, `gate_runner.sh`, `tests/cxx_tests.sh`, `cov_branch_link.zig`, `functional/coverage/BUCK`,
    `link_line.sh` and `tests/coverage_runs.md` name it too. The pull request lists the hits it leaves and why
    (each names the darwin script, which the macOS pull request removes).
    The darwin toolchain still names its own shell wrapper, so macOS is untouched. Proof: unit tests and

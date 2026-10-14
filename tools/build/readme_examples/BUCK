@@ -6,7 +6,11 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 # examples"): `generate` makes a README's ```mojo examples into programs, one
 # per example, `readme_<import name>_<line>.mojo`, line n of each being README
 # line n, plus the runner of them all; `map` rewrites a report's program
-# lines to README lines (cli.zig). mojo_library runs it on its package's
+# lines to README lines; `link` reads a packaged README's `sh komira-link`
+# block (the link commands the packer writes) and `link-check` compares it
+# with what the packer wrote (cli.zig, link.zig); `release-check` refuses a
+# release member that packages no README or one with no example
+# (tools/build/package/release_set.bzl). mojo_library runs it on its package's
 # README.md as an action, and so do the coverage build and the README API
 # census; kci ships it beside its executable and runs it on an installed
 # README (src/kci_validate). Zig, as every build tool under tools/build is;

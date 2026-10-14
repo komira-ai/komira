@@ -33,10 +33,10 @@ and they are built when asked for:
 
 | target | what |
 |---|---|
-| `:cov_branch` | the directories every library's branch coverage links, runs and annotates from, and the classifier (`cov_branch_dir`, [`defs.bzl`](defs.bzl)), from `komira//tools/build/toolchains/llvm_branch:llvm_branch` (so its checks gate every use): `[link]`, [`cov_branch_link.sh`](cov_branch_link.sh) with `lld/` and `llvm/runtime/` (the profile runtime); `[run]`, the `:cov_branch_tool` executable as `cov_branch`, with `llvm/` (`llvm-profdata`); the run passes it the raw profile version every run requires (`RAW_PROFILE_VERSION` of [`llvm_branch/defs.bzl`](../../toolchains/llvm_branch/defs.bzl)); `[annotate]`, the same executable as `cov_branch` with `lld/` and `llvm/` (`llvm-profdata`); `[classify]`, the `:cov_branch_classify` executable. One directory per action, as `cov_link` and `cov_run` are two: an edit of the link script re-keys no run or annotation, and one of the tool no link. (Projections of one directory would not do it: an action given `dir.project(path)` is keyed on the whole directory, as measured remotely.) |
-| `:cov_branch_classify` | [`cov_branch_classify.zig`](cov_branch_classify.zig) (importing [`cov_branch_andor.zig`](cov_branch_andor.zig), [`cov_branch_source.zig`](cov_branch_source.zig), [`cov_branch_ir.zig`](cov_branch_ir.zig) and [`cov_branch_records.zig`](cov_branch_records.zig): `zig_exe`'s `imports`), a static executable built with the pinned zig, gated by `:cov_branch_classify_cases` ([`cov_branch_classify_cases.sh`](cov_branch_classify_cases.sh) over [`fixtures/`](fixtures)), which run as a build action: no build hands out the classifier unless they pass. Zig, not Mojo: a Mojo tool would be in the closure of the libraries it measures, the cycle covcheck has (`COVERAGE_NO_GATE`) |
-| `:cov_branch_tool`, `:cov_branch_exe` | `cov_branch`, the branch coverage actions' tool, one subcommand each (`run`, [cov_branch_run](#cov_branch_run); `annotate`, [cov_branch_annotate](#cov_branch_annotate)): [`cov_branch.zig`](cov_branch.zig) importing [`cov_branch_run.zig`](cov_branch_run.zig), [`cov_branch_annotate.zig`](cov_branch_annotate.zig) and [`bounded_run.zig`](bounded_run.zig) (a command waited for with an optional time limit; with one, it is run as the leader of a session of its own, whose whole process group is killed at the limit, and the members that survived the kill listed from a `/proc` that must be this process's own: what `cov_run.sh` and `mut_step.sh` do in shell, kept free of any other import so that a tool of another package can take it as a module), a static executable built with the pinned zig. Welded: `:cov_branch_exe` is built only after `:cov_branch_unit` passed, `zig test` of those files, [`cov_branch_run_test.zig`](cov_branch_run_test.zig), [`cov_branch_annotate_test.zig`](cov_branch_annotate_test.zig) and [`cov_branch_annotate_order_test.zig`](cov_branch_annotate_order_test.zig) (the order of the refusals, two faults per input) run as a build action (each process step a stand-in that writes what the real program would; the annotation's binaries, listings and dumps made by hand, [`cov_branch_annotate_fixture.zig`](cov_branch_annotate_fixture.zig)). `:cov_branch_tool`, what every branch coverage directory takes, is that executable gated by `:cov_branch_exe_test` ([`cov_branch_exe_test.zig`](cov_branch_exe_test.zig)), `zig test` running the shipped executable as a process over a stand-in lld and llvm-profdata (`:cov_branch_annotate_stub`): its exit status, its messages on stderr and none on stdout, its scratch directory, the command lines and environment it gives lld and llvm-profdata, a program that cannot start, and a stderr whose writes fail; a validation, as it runs the executable it would otherwise be an input of |
-| `:cov_branch_link.sh`, `:cov_branch.zig`, `:cov_branch_run.zig`, `:cov_branch_annotate.zig`, `:bounded_run.zig`, and the tool's test sources | the link script and the tool's sources, exported so a fixture of the tests cell can plant a defect in a copy (test 47) |
+| `:cov_branch` | the directories every library's branch coverage links, runs and annotates from, and the classifier (`cov_branch_dir`, [`defs.bzl`](defs.bzl)), from `komira//tools/build/toolchains/llvm_branch:llvm_branch` (so its checks gate every use): `[link]`, the `:cov_branch_tool` executable as `cov_branch` (its `link`), with `lld/` and `llvm/runtime/` (the profile runtime); `[run]`, the same executable as `cov_branch` (its `run`), with `llvm/` (`llvm-profdata`); the run passes it the raw profile version every run requires (`RAW_PROFILE_VERSION` of [`llvm_branch/defs.bzl`](../../toolchains/llvm_branch/defs.bzl)); `[annotate]`, the same executable as `cov_branch` (its `annotate`) with `lld/` and `llvm/` (`llvm-profdata`); `[classify]`, the `:cov_branch_classify` executable. One directory per action, as `cov_link` and `cov_run` are two: an edit of the LLVM tools one action reads re-keys no other action (an edit of `cov_branch`, whose `link`, `run` and `annotate` are one executable, re-keys all three). (Projections of one directory would not do it: an action given `dir.project(path)` is keyed on the whole directory, as measured remotely.) |
+| `:cov_branch_classify` | [`cov_branch_classify.zig`](cov_branch_classify.zig) (importing [`cov_branch_andor.zig`](cov_branch_andor.zig), [`cov_branch_source.zig`](cov_branch_source.zig), [`cov_branch_ir.zig`](cov_branch_ir.zig) and [`cov_branch_records.zig`](cov_branch_records.zig): `zig_exe`'s `imports`), a static executable built with the pinned zig, gated by its cases ([Tests](#tests)): six `zig_test`s, `:cov_branch_classify_<group>_test` for `andor`, `case`, `files`, `main`, `rules` and `try`, each `zig test` of `cov_branch_classify_<group>_test.zig` with [`cov_branch_classify_harness.zig`](cov_branch_classify_harness.zig) over [`fixtures/`](fixtures), run as a build action. They run the shipped executable (`env_tools`: its path is in the test's environment as `COV_BRANCH_CLASSIFY`, and each test fails, never passes, without it), so they are validations of `:cov_branch_classify`: no build hands out the classifier unless they pass. Zig, not Mojo: a Mojo tool would be in the closure of the libraries it measures, the cycle covcheck has (`COVERAGE_NO_GATE`) |
+| `:cov_branch_tool`, `:cov_branch_exe` | `cov_branch`, the branch coverage actions' tool, one subcommand each (`link`, [cov_branch_link](#cov_branch_link); `run`, [cov_branch_run](#cov_branch_run); `annotate`, [cov_branch_annotate](#cov_branch_annotate)): [`cov_branch.zig`](cov_branch.zig) importing [`cov_branch_link.zig`](cov_branch_link.zig), [`cov_branch_run.zig`](cov_branch_run.zig), [`cov_branch_annotate.zig`](cov_branch_annotate.zig) and [`bounded_run.zig`](bounded_run.zig) (a command waited for with an optional time limit; with one, it is run as the leader of a session of its own, whose whole process group is killed at the limit, and the members that survived the kill listed from a `/proc` that must be this process's own: what `cov_run.sh` and `mut_step.sh` do in shell, kept free of any other import so that a tool of another package can take it as a module), a static executable built with the pinned zig. Welded: `:cov_branch_exe` is built only after `:cov_branch_unit` passed, `zig test` of those files, [`cov_branch_link_test.zig`](cov_branch_link_test.zig), [`cov_branch_run_test.zig`](cov_branch_run_test.zig), [`cov_branch_annotate_test.zig`](cov_branch_annotate_test.zig) and [`cov_branch_annotate_order_test.zig`](cov_branch_annotate_order_test.zig) (the order of the refusals, two faults per input) run as a build action (each process step a stand-in that writes what the real program would; the annotation's binaries, listings and dumps made by hand, [`cov_branch_annotate_fixture.zig`](cov_branch_annotate_fixture.zig)). `:cov_branch_tool`, what every branch coverage directory takes, is that executable gated by two process tests, each a validation since it runs the executable it would otherwise be an input of. `:cov_branch_link_exe_test` ([`cov_branch_link_exe_test.zig`](cov_branch_link_exe_test.zig)): the shipped executable's `link` run as a process over a stand-in busybox, lld and zig (`:cov_branch_link_stub`, [`cov_branch_link_stub.zig`](cov_branch_link_stub.zig), which records its arguments and environment). `:cov_branch_exe_test` ([`cov_branch_exe_test.zig`](cov_branch_exe_test.zig)): its `annotate` run as a process over a stand-in lld and llvm-profdata (`:cov_branch_annotate_stub`): its exit status, its messages on stderr and none on stdout, its scratch directory, the command lines and environment it gives lld and llvm-profdata, a program that cannot start, and a stderr whose writes fail |
+| `:cov_branch.zig`, `:cov_branch_link.zig`, `:cov_branch_run.zig`, `:cov_branch_annotate.zig`, `:bounded_run.zig`, and the tool's test sources | the tool's sources, exported so a fixture of the tests cell can plant a defect in a copy (test 47) |
 
 Per `test_srcs` entry that is a source file, five actions, each a
 sub-target of the library's `[coverage]` (and each `[bc]`, `[pgo_bin]`,
@@ -44,7 +44,7 @@ sub-target of the library's `[coverage]` (and each `[bc]`, `[pgo_bin]`,
 
 | sub-target | action category | output | what it does |
 |---|---|---|---|
-| `[coverage][bc][<test>]` | `mojo_emit_cov_bc` | `cov/branch/<test>.bc` | `mojo_wrapper.sh` (unchanged) runs `mojo build --emit llvm-bitcode --optimization-level 0 --debug-level line-tables`, with the same `-D` arguments (the library's `test_assert_level` and `test_defines`), against the same closure (the ungated package, its deps and the library's `test_deps`), with the same source root, as the test's `[coverage][bin]` and its release build |
+| `[coverage][bc][<test>]` | `mojo_emit_cov_bc` | `cov/branch/<test>.bc` | `mojo_compile` (unchanged) runs `mojo build --emit llvm-bitcode --optimization-level 0 --debug-level line-tables`, with the same `-D` arguments (the library's `test_assert_level` and `test_defines`), against the same closure (the ungated package, its deps and the library's `test_deps`), with the same source root, as the test's `[coverage][bin]` and its release build |
 | `[coverage][pgo_bin][<test>]` | `mojo_cov_pgo_link` | `cov/branch/<test>` | [cov_branch_link](#cov_branch_link) |
 | `[coverage][branch][<test>]` | `mojo_cov_branch_run` | `cov/branch/<test>.profdata` | [cov_branch_run](#cov_branch_run) |
 | `[coverage][branch_ir][<test>]` | `mojo_cov_branch_annotate` | `cov/branch/<test>.ll` | [cov_branch_annotate](#cov_branch_annotate) |
@@ -61,11 +61,25 @@ records).
 
 ## cov_branch_link
 
-1. `lld/bin/lld` reads the bitcode as an LTO link with `-r`, `--lto-O0` and
-   the pass pipeline `pgo-instr-gen,instrprof,default<O0>`: a relocatable
-   object whose code counts its edges. Only this LLVM 24 reads the bitcode
+`cov_branch link` ([`cov_branch_link.zig`](cov_branch_link.zig)), with flags
+for what the script it replaced took as positions or found beside itself:
+`--busybox`, `--compiler`, `--zig` (the Mojo toolchain's link directory),
+`--target`, `--lld` (`lld/bin/lld` of `[link]`), `--runtime`
+(`llvm/runtime/libclang_rt.profile-x86_64.a` of `[link]`), `--bitcode`,
+`--out`, and after `--` the C libraries of the test's closure.
+
+0. The scratch directory's `bin`, `home` and `tmp` are made and the busybox
+   applets installed in `bin` (exit 2 if not). Then lld, the runtime, the
+   compiler's `lib/libKGENCompilerRTShared.so`, zig and the bitcode, in
+   this order, must be files that are not empty (a usage error, exit 2),
+   and the bitcode must start with the bitcode magic `BC 0xC0DE`.
+1. `lld/bin/lld` reads the bitcode as an LTO link with `-r`, `--lto-O0`,
+   the pass pipeline `pgo-instr-gen,instrprof,default<O0>` and
+   `-mllvm -instrprof-atomic-counter-update-all`: a relocatable object
+   whose code counts its edges, each counter updated atomically
+   ([Atomic counters](#atomic-counters)). Only this LLVM 24 reads the bitcode
    ([toolchains/llvm_branch](../../toolchains/llvm_branch/README.md#why-llvm-23-tools-are-safe-next-to-llvm-24)).
-2. The Mojo toolchain's zig links it as `mojo_wrapper.sh`'s `cc` shim links
+2. The Mojo toolchain's zig links it as `mojo_compile`'s `cc` shim links
    a release test (the line `mojo build` gives it: the compiler's
    `libKGENCompilerRTShared.so`, `--gc-sections`, `-lm`; the shim's
    `--strip-debug` and the one run path `$ORIGIN/lib`; then the C libraries
@@ -75,7 +89,18 @@ records).
    profile runtime, so a Mojo release that links with another library, or
    another flag, is caught there.
 3. The binary must be an ELF file holding no path of the action (its
-   working directory or scratch directory).
+   working directory, then its scratch directory, `$BUCK_SCRATCH_PATH/cov_branch_link`).
+
+When an input has several faults, the first of these checks that refuses it
+is the one named, in the order the script it replaced checked them.
+
+lld and zig run with the tool's environment but for `PATH` (the busybox
+applets, installed in the scratch directory), `HOME`, `TMPDIR` and zig's
+cache directories (in the scratch directory) and `LC_ALL=C`; their output
+goes to a log whose last 40 lines a failure prints after `BRANCH COVERAGE
+LINK FAILED: <step>`. Exit status: 1 when a step fails; 2 for a usage
+error, a missing or empty input, or a scratch directory or program it
+cannot set up or start.
 
 **Why no debug info.** The binary's debug info is stripped, as in a release
 link. Nothing reads it: what each counter means in the source is read
@@ -87,24 +112,56 @@ kcov binaries' [`cov_zig`](../kcov/README.md#cov_zig)) is needed, and
 step 3 shows it: with `--strip-debug` left out, the link fails with `the
 binary holds this action's directory`.
 
+### Atomic counters
+
+The link asks LLVM's `instrprof` lowering for atomic counter updates
+(`-mllvm -instrprof-atomic-counter-update-all`; lld hands `-mllvm` options
+to its LTO code generation, as `annotate` hands it
+`-pgo-test-profile-file`). Each counter increment is then an `atomicrmw
+add`, which x86-64 emits as a `lock`-prefixed `add` or `inc` on the
+counter; without it, it is the same instruction with no `lock`, a read, an
+add and a write that two threads can interleave, so one thread's increment
+overwrites another's.
+
+A lost increment does more than lower a count. IR profile counters sit on
+the edges outside a spanning tree of each function's control flow, and
+`pgo-instr-use` derives the other edges' counts from them by sums and
+differences, saturating at 0: a counted edge that lost increments can make
+a derived arm that never ran read above 0 (covered), or one that ran read 0
+(not covered). Any test that runs the measured code on several threads at
+once (a `ParallelDispatch`, raw `pthread_create`) could flip an arm of the
+gate's records from one run to the next.
+
+What was measured remotely, on a test calling `quarter` (a function with an
+`if`/`elif`) from eight threads at once, 1000000 times each
+(`tests//functional/coverage:branchmt`, test 47): lld's assembly of that
+test's bitcode (`--lto-emit-asm`) holds 1425 instructions that update a
+`__profc_` counter, all 1425 `lock`-prefixed with the option and none
+without it; the counters of `quarter`, sorted, are exactly
+`0,2000000,2000000,6000000` with it (`:branch_counts_threads`), and without
+it 77% to 87% of the increments are lost (`0,268986,270087,801750` in one
+run; in six runs the largest counter read 0.80 to 1.36 million of 6 million;
+`tests//negative/coverage:branchnonatomic`, a copy of `cov_branch link`
+without the option, must fail). The cost is in [Cost](#cost).
+
 ## cov_branch_run
 
 `cov_branch run` ([`cov_branch_run.zig`](cov_branch_run.zig)), with flags
 for what the script it replaced took as positions: `--busybox`,
-`--gate-runner`, `--compiler`, `--label`, `--profdata`, `--raw-version`,
+`--gate`, `--compiler`, `--label`, `--profdata`, `--raw-version`,
 `--binary`, `--out` and the test's `--env NAME=VALUE`s.
 
-1. `gate_runner.sh` (unchanged; the mojo rules' runner, still a shell
-   script, run as the release gate runs it, `<busybox> sh gate_runner.sh
-   ...`) runs the test from the release gate's
+1. The gate ([`gate mojo`](../../run/README.md), the release gate's runner,
+   run as the release gate runs it but with no limit flag: no memory cap and
+   no time limit) runs the test from the release gate's
    staged tree (its data under `share/`), with the gate's environment (the
    tool sets nothing of its own for the test: PATH is an empty directory of
-   its scratch, which gate_runner replaces, and `LC_ALL=C` is set only for
+   its scratch, which the gate replaces, and `LC_ALL=C` is set only for
    `llvm-profdata`), the test's `test_env`, and one more variable, `LLVM_PROFILE_FILE` =
    `<scratch>/prof/%p.profraw` (`%p`, the pid: a child the test starts
    writes a profile of its own). The test must pass. When it fails, so does
    the action, with the test's output and `BRANCH COVERAGE RUN FAILED`, not
-   gate_runner's banner (which says the release gate's test failed: that
+   the gate's banner (which says the release gate's test failed: that
    one passed).
 2. At least one `.profraw` was written there; otherwise `The test passed but
    wrote no .profraw` (the runtime was not linked, the variable did not
@@ -123,9 +180,10 @@ by Mojo to bitcode and instrumented and code-generated by lld, not Mojo's
 own -O1 build; its environment also holds `LLVM_PROFILE_FILE`. Like the
 gate, the run waits for the test alone (`bounded_run.zig` with no limit): a
 child still running when it exits writes its profile after the merge, or
-never. Like the gate, it has no time limit of its own (the kcov run,
-`cov_run.sh`, has one, with a kill of the test's process group): a test
-that hangs instrumented holds its action until the executor's timeout.
+never. It has no time limit of its own and passes the gate none (the kcov
+run, `cov_run.sh`, passes the gate `--limit-s` and `--limit-report
+coverage`): a test that hangs instrumented holds its action until the
+executor's timeout.
 With no limit the test is not moved out of the action's process group (as
 the deleted script ran it), so a kill of that group at the executor's
 timeout reaches the test too.
@@ -168,7 +226,7 @@ the action's environment, `PATH` an empty directory of the tool's scratch,
    multiset. A record the profile lacks is a profile of
    another binary, or a merge that lost records (tests//negative/coverage:branchmissing
    plants one); one it holds besides, a profile of another binary.
-2. `lld/bin/lld` reads the test's bitcode as `cov_branch_link.sh` does (`-r`,
+2. `lld/bin/lld` reads the test's bitcode as `cov_branch link` does (`-r`,
    `--lto-O0`) with the one pass `pgo-instr-use`, given the merged profile
    (`-pgo-test-profile-file`), and prints the module after it
    (`-print-after=pgo-instr-use -print-module-scope`, on stderr): every
@@ -222,19 +280,23 @@ index and the instruction shapes, and
 
 **Files.** Each branch is attributed to its innermost `!dbg` location (an
 inlined instruction's own file, line and column, not its call site's). The
-library's sources are named in the IR by their path in its `[src]`
-(`buck-out/v2/art/.../__<lib>__/<content hash>/src/<lib>/...`: the package is
-compiled from it), given as `--map <[src]>/=<repository dir>/`, so a record
-names `src/<lib>/policy.mojo`; a generated source (`--gen`) is not measured.
-The standard library (`oss/modular/`), the closure's other libraries (under
-`buck-out/`), the test itself and `<unknown>` are left out by name; any
-other name fails the action, and so does any name holding `/<content
-hash>/src/<lib>/` that is not `--map`'s (the library's sources under another
-`[src]`: another hash, target or configuration directory), which `--exclude
-buck-out/` would otherwise drop. `--stdlib oss/modular/` says where the
-standard library's sources are named (a String's last-reference test, below,
-is its code). Every `.mojo` file of `[src]` is read for the functions it
-declares `@always_inline("nodebug")` (below).
+library's sources are named in the IR `<lib>/<file>` (the package is
+compiled from the parent of its `[src]`,
+`buck-out/v2/art/.../__<lib>__/<content hash>/src/<lib>`), given as
+`--map <lib>/=<repository dir>/`, and read in `[src]`, given as `--src`, so
+a record names `src/<lib>/policy.mojo`; a generated source (`--gen`) is not
+measured. The standard library (`oss/modular/`), the closure's other
+packages (`<their import>/`, an `--exclude` each, `test_deps` included),
+anything under `buck-out/`, the test itself and `<unknown>` are left out by
+name; any other name fails the action, and so does any name holding
+`/<content hash>/src/<lib>/` (the library's sources named by a `[src]`,
+this one or another: IR compiled otherwise than the package measured),
+which `--exclude buck-out/` would otherwise drop. A `--src` (or, without
+one, a `--map` PREFIX) with no content hash is bad usage. `--stdlib
+oss/modular/` says where the standard library's sources are named (a
+String's last-reference test, below, is its code). Every `.mojo` file of
+`[src]` is read for the functions it declares `@always_inline("nodebug")`
+(below).
 
 **String lifetime.** Mojo 1.0's `String` destructor and copy are
 `nodebug` inline code: their branches carry the location of whatever token
@@ -633,6 +695,14 @@ Remote worker time (`buck2 log show`,
 to 19 s (`buck2 log what-ran` durations, its IR text 9.8 to 12.4 MB). The
 LLVM pieces are unpacked and checked once, by `toolchains/llvm_branch`.
 
+Atomic counters cost run time where a test spends it in instrumented loops.
+`mojo_cov_branch_run` worker time for the 62 tests of `komira_plan_ir`,
+`komira_json`, `komira_row_format`, `komira_wkt` and `komira_fork_join`:
+24.1 s in all without them, 38.3 s with them. Nearly all of it is one test,
+`komira_row_format`'s `test_xxh3` (7.7 and 10.5 s without, 24.7 and 25.2 s
+with, two runs each); every other test stays under 2 s, and its changes are
+within what two runs of the same binary differ by.
+
 ## Tests
 
 [Test 47](../../tests/coverage_runs.md#test-47-branch-coverage-runs) of
@@ -646,9 +716,35 @@ test 46's `covtry`, whose gate is red on a `try` decision's raise arm alone
 (and `covtry_both`, green), and `covandor`, red on the arm of `return a or
 b` that skips its right operand (and `covandor_both`, green); the link line check; a test that the run gives no `LC_ALL`; a
 library with a C library in its closure; one whose test needs a `test_deps`
-package with a C library; and the planted defects that must go red, among
-them an annotation whose profile does not fit the bitcode or lacks a
-function, a bitcode holding branch weights before the profile, and a
-`nodebug` helper's decision at its call. The
-classifier's cases ([`cov_branch_classify_cases.sh`](cov_branch_classify_cases.sh))
-gate every build that uses it; each names the mutant it kills.
+package with a C library; one whose test calls it from eight threads at
+once, whose profile's counters must be exact; and the planted defects that
+must go red, among them an annotation whose profile does not fit the
+bitcode or lacks a function, a bitcode holding branch weights before the
+profile, a `nodebug` helper's decision at its call, and a link without
+atomic counter updates.
+
+The classifier's cases gate every build that uses it; each names the
+mutant it kills. Each runs the executable `:cov_branch_classify` hands out
+(its path in the test's environment as `COV_BRANCH_CLASSIFY`, the
+`zig_test`'s `env_tools`; a case fails, never passes, without it) as a
+child process with an empty environment, in a directory of its own
+holding the library's sources (`fixtures/*.src`, staged under the made-up
+`[src]` the fixtures' IR names) and the case's IR, a fixture or a line edit
+of one ([`cov_branch_classify_harness.zig`](cov_branch_classify_harness.zig);
+an edit that changes nothing fails the case). It checks the exit status,
+the output file byte for byte or by line, the messages on stderr and that
+nothing is written to stdout. By file, the numbers those of the cases'
+comments: [`case`](cov_branch_classify_case_test.zig), 1 to 9c on
+`fixtures/case.ll` (the golden output, the metadata order, a second test's
+counts, unknown tokens, file names, `--gen`, zero branches, another
+`[src]`, sources named by import name with `--src` (8d to 8g), malformed IR, copies, and/or shapes refused);
+[`andor`](cov_branch_classify_andor_test.zig), 9j and 9k (and/or results no
+test reads, error flags, three on one line);
+[`files`](cov_branch_classify_files_test.zig), 9d to 9i (nodebug callees,
+kinds, invokes, decision-free and twice-spelled files);
+[`rules`](cov_branch_classify_rules_test.zig), 11 to 11f on
+`fixtures/rules.ll` (the shape rules); [`try`](cov_branch_classify_try_test.zig),
+12 to 12c on `fixtures/try.ll`; and [`main`](cov_branch_classify_main_test.zig),
+bad usage (exit 2, the message and the usage line) and an output whose
+write fails (a file size limit in the child: exit 1, nothing written, no
+temporary file left). The executable reads no environment variable.
