@@ -39,7 +39,7 @@
 #      line tables do not name them are refused as unmapped, not dropped);
 #      lostdir[coverage] red (a binary naming the sources by another
 #      directory than the run stages is refused before kcov runs); clash and
-#      clash_buckout are refused at analysis (data where a run stages
+#      clash_import are refused at analysis (data where a run stages
 #      sources: //tools/build/selftest:analysis_refusals_coverage);
 #      refused[coverage] red (kcov refused by the executor is said so);
 #      covreadme[coverage][tests][readme] and covreadme_none's (a README's
@@ -73,7 +73,7 @@ elif grep -E "GATED TEST FAILED|package is not produced" "$LOG/coverage_run_pare
 else
     pass coverage_run_banner
 fi
-expect_red coverage_run_lostdir "this run stages them at buck-out/v2/art/tests/negative/coverage/__lostdir__/" 'tests//negative/coverage:lostdir[coverage][tests][test_lost]'
+expect_red coverage_run_lostdir "but names none of its sources by lostlibx/, where this run stages them" 'tests//negative/coverage:lostdir[coverage][tests][test_lost]'
 expect_red coverage_run_refused "kcov could not trace the test" 'tests//negative/coverage:refused[coverage][tests][test_one]'
 expect_red coverage_run_longarg "is longer than kcov takes (64)" 'tests//negative/coverage:longarg[coverage][tests][test_lost]'
 expect_red coverage_run_lingers "The test left processes running or did not finish within 20 s under kcov" 'tests//negative/coverage:linger[coverage][tests][test_lingers]'

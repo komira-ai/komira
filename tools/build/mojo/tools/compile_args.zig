@@ -6,6 +6,10 @@
 //!                [--watchdog-idle-secs=<n>] [--watchdog-sample-secs=<n>]
 //!                [--ld-debug-output=<file>] -- <mojo arguments...>
 //!
+//! On macOS (`parseMacos`, mojo_compile_macos.zig) `--deployment-target=<v>`
+//! and one or more `--macos-host=<id>` take the place of the three Linux
+//! flags.
+//!
 //! Options come in any order; a repeated `--link-tail` accumulates in order,
 //! any other repeated option keeps its last value. Every refusal is exit 2 of
 //! the wrapper, with the message in `Diag.msg`.
@@ -30,6 +34,9 @@ pub const Options = struct {
     /// and LD_DEBUG_OUTPUT=<this>, so the loader records what it maps
     /// (tests//functional/runtime_libs:loader_trace).
     ld_debug_output: ?[]const u8,
+    /// The wrapper's working directory, absolute ($PWD as the shell spells
+    /// it): what relative paths in `mojo_args` are relative to.
+    pwd: []const u8,
     /// Everything after `--`, unchanged.
     mojo_args: []const []const u8,
     /// The value after the last `-o` in `mojo_args`.
@@ -166,22 +173,189 @@ pub fn parse(alloc: std.mem.Allocator, platform: Platform, pwd: []const u8, args
         .idle_secs = idle,
         .sample_secs = sample,
         .ld_debug_output = ld_debug,
+        .pwd = pwd,
         .mojo_args = mojo_args,
         .output = output,
     };
 }
 
-/// The compiler's arguments: for `build` with a source root,
-/// `-strip-file-prefix=<root>/` right after the subcommand; otherwise
-/// `mojo_args` unchanged.
+/// Where the compiler runs, when not in the wrapper's own working directory:
+/// for `precompile` with a source root, the root's parent; else null.
+///
+/// A package compile records each source file by the path it names it with,
+/// and `-strip-file-prefix` does not reach `precompile`. Run from the parent
+/// of the staged package and given the package by its basename, the compiler
+/// records `<name>/<file>.mojo`: the same `.mojoc` bytes under every working
+/// directory, buck-out isolation directory and staging path
+/// (tests//functional/mojoc_path:same_bytes).
+pub fn runDir(o: Options) ?[]const u8 {
+    const root = o.source_root orelse return null;
+    if (o.mojo_args.len == 0 or !std.mem.eql(u8, o.mojo_args[0], "precompile")) return null;
+    return std.fs.path.dirname(root);
+}
+
+/// The compiler's arguments:
+///   * `build` with a source root: `-strip-file-prefix=<root>/` right after
+///     the subcommand;
+///   * `precompile` with a source root (runDir is not null, the compiler
+///     runs there): the value after `-o` and every relative `-I` directory
+///     (`-I<dir>` or `-I <dir>`) made absolute against `pwd`, and the
+///     argument naming the source root replaced by the root's basename;
+///   * otherwise `mojo_args` unchanged.
 pub fn compilerArgs(alloc: std.mem.Allocator, o: Options) ![]const []const u8 {
     const root = o.source_root orelse return o.mojo_args;
+    if (runDir(o) != null) {
+        var out = std.ArrayList([]const u8).init(alloc);
+        var prev: []const u8 = "";
+        for (o.mojo_args) |a| {
+            if (std.mem.eql(u8, prev, "-o") or std.mem.eql(u8, prev, "-I")) {
+                try out.append(try abspath(alloc, o.pwd, a));
+            } else if (std.mem.startsWith(u8, a, "-I") and a.len > 2) {
+                try out.append(try std.fmt.allocPrint(alloc, "-I{s}", .{try abspath(alloc, o.pwd, a[2..])}));
+            } else if (std.mem.eql(u8, try abspath(alloc, o.pwd, a), root)) {
+                try out.append(std.fs.path.basename(root));
+            } else {
+                try out.append(a);
+            }
+            prev = a;
+        }
+        return out.toOwnedSlice();
+    }
     if (o.mojo_args.len == 0 or !std.mem.eql(u8, o.mojo_args[0], "build")) return o.mojo_args;
     var out = std.ArrayList([]const u8).init(alloc);
     try out.append(o.mojo_args[0]);
     try out.append(try std.fmt.allocPrint(alloc, "-strip-file-prefix={s}/", .{root}));
     try out.appendSlice(o.mojo_args[1..]);
     return out.toOwnedSlice();
+}
+
+// ---- macOS -------------------------------------------------------------------
+
+/// The macOS command line (mojo_compile_macos.zig):
+///
+///   mojo_compile --compiler=<dir> --deployment-target=<v> --macos-host=<id>...
+///                [--runpath=<$ORIGIN*>] [--source-root=<dir>] [--link-tail=<arg>]...
+///                [--watchdog-idle-secs=<n>] [--watchdog-sample-secs=<n>] -- <mojo arguments...>
+pub const MacosOptions = struct {
+    /// Absolute, as `Options.compiler`.
+    compiler: []const u8,
+    /// MACOSX_DEPLOYMENT_TARGET of every link.
+    deployment_target: []const u8,
+    /// The host identities the compile may run on (`[komira_re]
+    /// darwin_macos_hosts`), in the order given; never empty.
+    macos_hosts: []const []const u8,
+    /// As dyld spells it: `@loader_path` for `$ORIGIN`.
+    runpath: []const u8,
+    source_root: ?[]const u8,
+    link_tail: []const []const u8,
+    idle_secs: u32,
+    sample_secs: u32,
+    /// As `Options.pwd`.
+    pwd: []const u8,
+    mojo_args: []const []const u8,
+    output: []const u8,
+
+    /// The fields `compilerArgs` and `runDir` read, as an `Options`.
+    pub fn common(self: MacosOptions) Options {
+        return .{
+            .compiler = self.compiler,
+            .zig = "",
+            .cc_target = self.deployment_target,
+            .runpath = self.runpath,
+            .source_root = self.source_root,
+            .link_tail = self.link_tail,
+            .idle_secs = self.idle_secs,
+            .sample_secs = self.sample_secs,
+            .ld_debug_output = null,
+            .pwd = self.pwd,
+            .mojo_args = self.mojo_args,
+            .output = self.output,
+        };
+    }
+};
+
+/// The options as `parse` reads them, with the macOS flags in place of the
+/// Linux ones (a Linux flag is refused), and two macOS refusals: no
+/// `--macos-host` (a compile that may run on no host), and `shared-lib`
+/// among the compiler's arguments without `-install_name` (bundles are Linux
+/// only; a C-ABI library names itself for dyld).
+pub fn parseMacos(alloc: std.mem.Allocator, pwd: []const u8, args: []const []const u8, d: *Diag) Error!MacosOptions {
+    var compiler: ?[]const u8 = null;
+    var deployment: ?[]const u8 = null;
+    var hosts = std.ArrayList([]const u8).init(alloc);
+    var runpath: []const u8 = default_runpath;
+    var source_root: ?[]const u8 = null;
+    var tail = std.ArrayList([]const u8).init(alloc);
+    var idle_raw: []const u8 = "300";
+    var sample_raw: []const u8 = "30";
+
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const a = args[i];
+        if (std.mem.eql(u8, a, "--")) break;
+        if (value(a, "--compiler=")) |v| {
+            compiler = try abspath(alloc, pwd, v);
+        } else if (value(a, "--deployment-target=")) |v| {
+            deployment = v;
+        } else if (value(a, "--macos-host=")) |v| {
+            if (v.len == 0) return refuse(d, alloc, "REFUSING: an empty --macos-host", .{});
+            try hosts.append(v);
+        } else if (value(a, "--runpath=")) |v| {
+            if (!runpathOk(v)) return refuse(d, alloc, "REFUSING: --runpath={s} is not $ORIGIN-relative", .{v});
+            runpath = v;
+        } else if (value(a, "--source-root=")) |v| {
+            source_root = try abspath(alloc, pwd, v);
+        } else if (value(a, "--link-tail=")) |v| {
+            if (std.mem.indexOfScalar(u8, v, '\n') != null) return refuse(d, alloc, "REFUSING: --link-tail value holds a newline", .{});
+            try tail.append(v);
+        } else if (value(a, "--watchdog-idle-secs=")) |v| {
+            idle_raw = v;
+        } else if (value(a, "--watchdog-sample-secs=")) |v| {
+            sample_raw = v;
+        } else if (std.mem.startsWith(u8, a, "--zig=") or std.mem.startsWith(u8, a, "--cc-target=") or std.mem.startsWith(u8, a, "--ld-debug-output=")) {
+            return refuse(d, alloc, "REFUSING: {s} is a Linux option; this mojo_compile is built for macOS", .{a});
+        } else {
+            return refuse(d, alloc, "expected -- before compiler arguments (got '{s}')", .{a});
+        }
+    }
+    if (!allDigits(idle_raw) or !allDigits(sample_raw)) {
+        return refuse(d, alloc, "REFUSING: watchdog seconds must be whole numbers (idle '{s}', sample '{s}')", .{ idle_raw, sample_raw });
+    }
+    const idle = parseSecs(idle_raw) orelse return refuse(d, alloc, "REFUSING: watchdog seconds must be at most {d} (idle '{s}', sample '{s}')", .{ std.math.maxInt(u32), idle_raw, sample_raw });
+    const sample = parseSecs(sample_raw) orelse return refuse(d, alloc, "REFUSING: watchdog seconds must be at most {d} (idle '{s}', sample '{s}')", .{ std.math.maxInt(u32), idle_raw, sample_raw });
+    if (sample < 1) return refuse(d, alloc, "REFUSING: --watchdog-sample-secs must be at least 1", .{});
+    if (i >= args.len) return refuse(d, alloc, "expected -- before compiler arguments", .{});
+    if (compiler == null or deployment == null or deployment.?.len == 0) {
+        return refuse(d, alloc, "usage: mojo_compile --compiler=<dir> --deployment-target=<v> --macos-host=<id>... [options] -- <mojo arguments...>", .{});
+    }
+    if (hosts.items.len == 0) {
+        return refuse(d, alloc, "REFUSING: no --macos-host: the compile names no macOS host it may run on ([komira_re] darwin_macos_hosts)", .{});
+    }
+    const mojo_args = args[i + 1 ..];
+    var shared = false;
+    var named = false;
+    for (mojo_args) |a| {
+        if (std.mem.eql(u8, a, "shared-lib")) shared = true;
+        if (std.mem.eql(u8, a, "-install_name")) named = true;
+    }
+    if (shared and !named) {
+        return refuse(d, alloc, "REFUSING: --emit shared-lib on macOS without -Xlinker -install_name; bundles are linux only (a C-ABI library, mojo_shared_lib, builds as a .dylib)", .{});
+    }
+    const output = findOutput(mojo_args) orelse "";
+    if (output.len == 0) return refuse(d, alloc, "no -o <output> in compiler arguments", .{});
+    return .{
+        .compiler = compiler.?,
+        .deployment_target = deployment.?,
+        .macos_hosts = try hosts.toOwnedSlice(),
+        .runpath = try platformRunpath(alloc, .macos, runpath),
+        .source_root = source_root,
+        .link_tail = try tail.toOwnedSlice(),
+        .idle_secs = idle,
+        .sample_secs = sample,
+        .pwd = pwd,
+        .mojo_args = mojo_args,
+        .output = output,
+    };
 }
 
 // ---- tests -------------------------------------------------------------------
@@ -370,15 +544,64 @@ test "strip prefix: build inserts after the subcommand; precompile and doc do no
     try testing.expectEqualStrings("build", got[0]);
     try testing.expectEqualStrings("-strip-file-prefix=/wd/stage/src/", got[1]);
     try testing.expectEqualStrings("x.mojo", got[2]);
+    try testing.expect(runDir(b) == null);
     for ([_][]const u8{ "precompile", "doc" }) |sub| {
         const o = try parse(a, .linux, "/wd", &(base ++ [_][]const u8{ "--source-root=s", "--", sub, "x", "-o", "o" }), &d);
         const g = try compilerArgs(a, o);
         try testing.expectEqual(@as(usize, 4), g.len);
         try testing.expectEqualStrings(sub, g[0]);
         try testing.expectEqualStrings("x", g[1]);
+        for (g) |arg| try testing.expect(!std.mem.startsWith(u8, arg, "-strip-file-prefix"));
     }
     const none = try parse(a, .linux, "/wd", withBase(&.{}, &.{ "build", "x", "-o", "o" }), &d);
     try testing.expectEqual(@as(usize, 4), (try compilerArgs(a, none)).len);
+}
+
+// Catches: a precompile run in the action directory (the .mojoc records the
+// staged buck-out path), its output or a dependency directory left relative
+// to a directory the compiler no longer runs in, or the package named by its
+// staged path. Mutants planted, one per build: drop the -o abspath; drop the
+// basename rewrite (both red here; the second also red in
+// tests//functional/mojoc_path:same_bytes).
+test "precompile with a source root: runs in the root's parent, package by basename, -o and -I absolute" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var d = Diag{};
+    const o = try parse(a, .linux, "/wd", withBase(&.{"--source-root=stage/src/pkg"}, &.{ "precompile", "-Iinc/d", "-I/abs/e", "-I", "inc/f", "stage/src/pkg", "-o", "out/pkg.mojoc" }), &d);
+    try testing.expectEqualStrings("/wd/stage/src", runDir(o).?);
+    const g = try compilerArgs(a, o);
+    const want = [_][]const u8{ "precompile", "-I/wd/inc/d", "-I/abs/e", "-I", "/wd/inc/f", "pkg", "-o", "/wd/out/pkg.mojoc" };
+    try testing.expectEqual(want.len, g.len);
+    for (want, g) |w, x| try testing.expectEqualStrings(w, x);
+    // The root given absolute and the positional relative name one directory.
+    const p = try parse(a, .linux, "/wd", withBase(&.{"--source-root=/wd/s/q"}, &.{ "precompile", "s/q", "-o", "/o/q.mojoc" }), &d);
+    try testing.expectEqualStrings("/wd/s", runDir(p).?);
+    const h = try compilerArgs(a, p);
+    try testing.expectEqualStrings("q", h[1]);
+    try testing.expectEqualStrings("/o/q.mojoc", h[3]);
+}
+
+// Catches: the compiler moved for a compile that names no source root, or
+// for `build` and `doc` (their paths stay relative to the action directory).
+// Mutant planted: runDir ignores the subcommand.
+test "runDir: null without a source root, and for build and doc" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var d = Diag{};
+    const bare = try parse(a, .linux, "/wd", withBase(&.{}, &.{ "precompile", "-Ii", "s", "-o", "o" }), &d);
+    try testing.expect(runDir(bare) == null);
+    const g = try compilerArgs(a, bare);
+    try testing.expectEqualStrings("-Ii", g[1]);
+    try testing.expectEqualStrings("o", g[4]);
+    for ([_][]const u8{ "build", "doc" }) |sub| {
+        const o = try parse(a, .linux, "/wd", &(base ++ [_][]const u8{ "--source-root=s/p", "--", sub, "-Ii", "s/p", "-o", "o" }), &d);
+        try testing.expect(runDir(o) == null);
+        const h = try compilerArgs(a, o);
+        try testing.expectEqualStrings("o", h[h.len - 1]);
+        try testing.expectEqualStrings("s/p", h[h.len - 3]);
+    }
 }
 
 test "abspath: absolute kept, relative joined to PWD as spelled" {
@@ -386,4 +609,119 @@ test "abspath: absolute kept, relative joined to PWD as spelled" {
     defer arena.deinit();
     try testing.expectEqualStrings("/x/y", try abspath(arena.allocator(), "/wd", "/x/y"));
     try testing.expectEqualStrings("/wd/./x/../y", try abspath(arena.allocator(), "/wd", "./x/../y"));
+}
+
+// ---- macOS options -------------------------------------------------------------
+
+const mac_base = [_][]const u8{ "--compiler=tc", "--deployment-target=11.0", "--macos-host=26.5-0123456789abcdef" };
+
+fn macWithBase(comptime extra: []const []const u8, comptime tail: []const []const u8) []const []const u8 {
+    return &(mac_base ++ extra[0..extra.len].* ++ [_][]const u8{"--"} ++ tail[0..tail.len].*);
+}
+
+const MacParsed = struct {
+    arena: std.heap.ArenaAllocator,
+    diag: Diag,
+    result: Error!MacosOptions,
+
+    fn deinit(self: *MacParsed) void {
+        self.arena.deinit();
+    }
+};
+
+fn tryParseMacos(args: []const []const u8) MacParsed {
+    var p = MacParsed{ .arena = std.heap.ArenaAllocator.init(testing.allocator), .diag = .{}, .result = undefined };
+    p.result = parseMacos(p.arena.allocator(), "/wd", args, &p.diag);
+    return p;
+}
+
+fn expectRefusedMacos(args: []const []const u8, want: []const u8) !void {
+    var p = tryParseMacos(args);
+    defer p.deinit();
+    if (p.result) |_| {
+        std.debug.print("accepted, want a refusal naming '{s}'\n", .{want});
+        return error.TestUnexpectedResult;
+    } else |e| {
+        try testing.expectEqual(error.Refused, e);
+        if (std.mem.indexOf(u8, p.diag.msg, want) == null) {
+            std.debug.print("refusal '{s}' does not name '{s}'\n", .{ p.diag.msg, want });
+            return error.TestUnexpectedResult;
+        }
+    }
+}
+
+// Catches: a macOS flag read from the wrong option, hosts not accumulated in
+// order, a relative compiler directory left relative, or the run path given
+// to dyld in its Linux spelling. Mutant planted: keep the last --macos-host only.
+test "macOS options: each flag; hosts accumulate in order; the run path in dyld's spelling" {
+    var p = tryParseMacos(macWithBase(&.{ "--macos-host=15.0-fedcba9876543210", "--runpath=$ORIGIN/../lib", "--source-root=src", "--link-tail=liba.a", "--link-tail=-lc++" }, &.{ "build", "a.mojo", "-o", "out" }));
+    defer p.deinit();
+    const o = try p.result;
+    try testing.expectEqualStrings("/wd/tc", o.compiler);
+    try testing.expectEqualStrings("11.0", o.deployment_target);
+    try testing.expectEqual(@as(usize, 2), o.macos_hosts.len);
+    try testing.expectEqualStrings("26.5-0123456789abcdef", o.macos_hosts[0]);
+    try testing.expectEqualStrings("15.0-fedcba9876543210", o.macos_hosts[1]);
+    try testing.expectEqualStrings("@loader_path/../lib", o.runpath);
+    try testing.expectEqualStrings("/wd/src", o.source_root.?);
+    try testing.expectEqualStrings("liba.a", o.link_tail[0]);
+    try testing.expectEqualStrings("-lc++", o.link_tail[1]);
+    try testing.expectEqual(@as(u32, 300), o.idle_secs);
+    try testing.expectEqual(@as(u32, 30), o.sample_secs);
+    try testing.expectEqualStrings("out", o.output);
+    // The default run path, in dyld's spelling.
+    var q = tryParseMacos(macWithBase(&.{}, &.{ "build", "-o", "o" }));
+    defer q.deinit();
+    try testing.expectEqualStrings("@loader_path/lib", (try q.result).runpath);
+    // -strip-file-prefix goes in as on Linux.
+    const args = try compilerArgs(p.arena.allocator(), o.common());
+    try testing.expectEqualStrings("-strip-file-prefix=/wd/src/", args[1]);
+}
+
+// Catches: a macOS precompile left in the action directory (its .mojoc
+// records the staged buck-out path), or its -o and -I made absolute against
+// something other than the action directory (MacosOptions.common dropping
+// pwd). Mutant planted: common() sets .pwd = "" (red: -o and -I lose /wd).
+test "macOS options: precompile with a source root runs in the root's parent, as on Linux" {
+    var p = tryParseMacos(macWithBase(&.{"--source-root=stage/src/pkg"}, &.{ "precompile", "-Iinc/d", "stage/src/pkg", "-o", "out/pkg.mojoc" }));
+    defer p.deinit();
+    const o = (try p.result).common();
+    try testing.expectEqualStrings("/wd/stage/src", runDir(o).?);
+    const g = try compilerArgs(p.arena.allocator(), o);
+    const want = [_][]const u8{ "precompile", "-I/wd/inc/d", "pkg", "-o", "/wd/out/pkg.mojoc" };
+    try testing.expectEqual(want.len, g.len);
+    for (want, g) |w, x| try testing.expectEqualStrings(w, x);
+}
+
+// Catches: a compile that may run on any host (an action key that names no
+// host toolchain). Mutant planted: accept an empty host list.
+test "macOS options: no --macos-host, or an empty one, is refused" {
+    try expectRefusedMacos(&.{ "--compiler=tc", "--deployment-target=11.0", "--", "build", "-o", "o" }, "no --macos-host");
+    try expectRefusedMacos(macWithBase(&.{"--macos-host="}, &.{ "build", "-o", "o" }), "an empty --macos-host");
+}
+
+// Catches: one source run under the other platform's contract.
+test "macOS options: Linux flags are refused; a missing required flag is a usage error" {
+    try expectRefusedMacos(macWithBase(&.{"--zig=/z"}, &.{ "build", "-o", "o" }), "Linux option");
+    try expectRefusedMacos(macWithBase(&.{"--cc-target=x86_64-linux-gnu"}, &.{ "build", "-o", "o" }), "Linux option");
+    try expectRefusedMacos(macWithBase(&.{"--ld-debug-output=t"}, &.{ "build", "-o", "o" }), "Linux option");
+    try expectRefusedMacos(&.{ "--compiler=tc", "--macos-host=h-1", "--", "build", "-o", "o" }, "usage");
+    try expectRefusedMacos(&.{ "--deployment-target=11.0", "--macos-host=h-1", "--", "build", "-o", "o" }, "usage");
+    try expectRefusedMacos(&.{ "--compiler=tc", "--deployment-target=", "--macos-host=h-1", "--", "build", "-o", "o" }, "usage");
+    try expectRefusedMacos(&(mac_base ++ [_][]const u8{ "build", "-o", "o" }), "expected -- before compiler arguments");
+    try expectRefusedMacos(macWithBase(&.{"--runpath=/abs"}, &.{ "build", "-o", "o" }), "is not $ORIGIN-relative");
+    try expectRefusedMacos(macWithBase(&.{"--watchdog-sample-secs=0"}, &.{ "build", "-o", "o" }), "at least 1");
+    try expectRefusedMacos(macWithBase(&.{"--watchdog-idle-secs=5m"}, &.{ "build", "-o", "o" }), "whole numbers");
+    try expectRefusedMacos(macWithBase(&.{}, &.{ "build", "a.mojo" }), "no -o <output>");
+}
+
+// Catches: a bundle (a Linux-only shape) built on macOS, or a C-ABI library
+// that names itself for dyld refused. Mutant planted: drop the
+// -install_name test (every shared-lib refused).
+test "macOS options: shared-lib without -install_name is refused; with it, accepted" {
+    try expectRefusedMacos(macWithBase(&.{}, &.{ "build", "--emit", "shared-lib", "x.mojo", "-o", "o" }), "bundles are linux only");
+    try expectRefusedMacos(macWithBase(&.{}, &.{ "build", "--emit", "shared-lib", "-Xlinker", "-soname", "-Xlinker", "x.so", "x.mojo", "-o", "o" }), "bundles are linux only");
+    var p = tryParseMacos(macWithBase(&.{}, &.{ "build", "--emit", "shared-lib", "-Xlinker", "-install_name", "-Xlinker", "@rpath/x.dylib", "x.mojo", "-o", "o" }));
+    defer p.deinit();
+    _ = try p.result;
 }

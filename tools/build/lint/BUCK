@@ -7,7 +7,7 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs")
 load(":defs.bzl", "shell_lint", "tar_member")
-load(":shell_budget.bzl", "shell_budget")
+load(":interpreter_budget.bzl", "interpreter_budget")
 
 export_file(name = "readme_api_coverage.sh", visibility = ["PUBLIC"])
 
@@ -72,16 +72,17 @@ shell_lint(
     visibility = ["PUBLIC"],
 )
 
-# The shell list (shell_budget.bzl): every shell script of the repository
-# (`.sh`, `.bash`, or a `#!` line naming a shell) has a row in
-# shell_allowlist.tsv (path, reason), and every row names one. Existence only:
-# a script's size is never checked. The tree is every file of the cell
-# (`//:doc_tree`), the files under .github/ (`//:github_tree`) and the tests
-# cell's tree. A row comes out when its script is written in Zig or deleted;
-# a row is added only with a reason review accepts.
-shell_budget(
-    name = "shell_budget",
-    allowlist = "tools/build/lint/shell_allowlist.tsv",
+# The interpreter list (interpreter_budget.bzl): every interpreter file of the
+# repository (shell, Python, Perl, awk, sed, Ruby: by its extension or by a
+# `#!` line naming one) has a row in interpreter_allowlist.tsv (path, reason),
+# and every row names one. Existence only: a file's size is never checked.
+# The tree is every file of the cell (`//:doc_tree`), the files under
+# .github/ (`//:github_tree`) and the tests cell's tree. A row comes out when
+# its file is written in Zig or deleted; a row is added only with a reason
+# review accepts.
+interpreter_budget(
+    name = "interpreter_budget",
+    allowlist = "tools/build/lint/interpreter_allowlist.tsv",
     cells = {"tools/build/tests": "tests//:doc_tree"},
     dotfiles = ["//:github_tree"],
     tree = "//:doc_tree",

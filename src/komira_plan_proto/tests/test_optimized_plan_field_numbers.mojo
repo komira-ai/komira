@@ -324,6 +324,18 @@ def _needs(mut L: _Ledger, scope: String) raises -> List[UInt8]:
     _u(L, b, "DeclaredNeeds.unbounded", 1)
     _m(L, b, "DeclaredNeeds.runtimes", _runtime(L, "komira/node", "node22"))
     _m(L, b, "DeclaredNeeds.runtimes", _runtime(L, "komira/python", "cp312"))
+    _m(L, b, "DeclaredNeeds.udfs", _udf_ref_value("komira/python"))
+    _m(L, b, "DeclaredNeeds.udfs", _udf_ref_value("komira/node"))
+    return b^
+
+
+def _udf_ref_value(runtime: String) -> List[UInt8]:
+    """UdfRef { 16 code { 1 runtime } }: a value, not a pin (the UdfRef
+    census is test_plan_field_numbers_udf.mojo)."""
+    var code = List[UInt8]()
+    _raw_s(code, 1, runtime)
+    var b = List[UInt8]()
+    _raw_m(b, 16, code)
     return b^
 
 
@@ -412,6 +424,9 @@ def test_needs(mut L: _Ledger) raises:
     assert_equal(len(m.runtimes), 2, "DeclaredNeeds: len(m.runtimes)")
     assert_equal(m.runtimes[0].runtime, "komira/node", "DeclaredNeeds: m.runtimes[0].runtime")
     assert_equal(m.runtimes[1].runtime_abi, "cp312", "DeclaredNeeds: m.runtimes[1].runtime_abi")
+    assert_equal(len(m.udfs), 2, "DeclaredNeeds: len(m.udfs)")
+    assert_equal(m.udfs[0].code.value().runtime, "komira/python", "DeclaredNeeds: m.udfs[0]")
+    assert_equal(m.udfs[1].code.value().runtime, "komira/node", "DeclaredNeeds: m.udfs[1]")
     _same(encode_proto(m), b, "DeclaredNeeds")
 
 
@@ -645,6 +660,7 @@ SharedSubplan.plan 2
 DeclaredNeeds.data_scopes 5
 DeclaredNeeds.unbounded 8
 DeclaredNeeds.runtimes 9
+DeclaredNeeds.udfs 2
 RuntimeNeed.runtime 1
 RuntimeNeed.runtime_abi 2
 ScanPin.binding_key 1
@@ -686,7 +702,6 @@ PlanAdvice 1 len held
 PlanAdvice 3 len held
 PlanAdvice 4 len held
 DeclaredNeeds 1 len held
-DeclaredNeeds 2 len held
 DeclaredNeeds 3 len reserved
 DeclaredNeeds 4 len held
 DeclaredNeeds 6 len reserved

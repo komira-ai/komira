@@ -1,0 +1,20 @@
+call git "diff" "-z" "--name-only" "--no-renames" "parity-base...HEAD"
+exit 0
+stdout "src/a/BUCK\x00src/a/coverage_held\x00"
+call git "ls-tree" "--name-only" "parity-base" "--" "src/a/coverage_held"
+exit 0
+stdout "src/a/coverage_held\n"
+call git "cat-file" "blob" "parity-base:src/a/coverage_held"
+exit 0
+stdout "# held\nline\n"
+call git "rev-parse" "--verify" "--quiet" "parity-base^{commit}"
+exit 0
+stdout "1111111111111111111111111111111111111111\n"
+call git "cat-file" "-e" "parity-base:src/a/BUCK"
+exit 0
+call buck2 "cquery" "//... + tests//..."
+exit 0
+stdout %universe_cquery
+call buck2 "targets" "//..." "tests//..."
+exit 0
+stdout %universe_targets
