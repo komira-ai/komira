@@ -24,6 +24,11 @@
 #                   in byte order of path; a link's sha256 is that of the
 #                   bytes it resolves to), as
 #                   tools/build/package/pack/conda_lib.zig writes them
+#                   and, for a library that opens a system codec at run time,
+#                   dlopen: a non-empty array of {requirement, soname}
+#                   objects (non-empty strings, each soname given once), as
+#                   tools/build/package/pack/conda_dlopen.zig `dlopenRows`
+#                   writes them
 #   a metapackage   members: an array of {name, version, sha256} objects,
 #                   each optionally with build
 #
@@ -130,6 +135,20 @@ struct LibFile(Copyable, Movable):
         self.sha256_hex = String("")
 
 
+struct DlopenRow(Copyable, Movable):
+    """One row of a library's `dlopen`: a system codec it opens at run time
+    by `soname`, and the `requirement` its package must carry for it.
+
+    Layout: owned values only. No pointer field."""
+
+    var requirement: String
+    var soname: String
+
+    def __init__(out self):
+        self.requirement = String("")
+        self.soname = String("")
+
+
 struct CondaMetadata(Copyable, Movable):
     """A parsed `metadata.json`. The library-only fields are "" on a
     metapackage and `members` is empty on a library. `source` names the file
@@ -165,6 +184,10 @@ struct CondaMetadata(Copyable, Movable):
     # absent (a package with no native file).
     var lib_files: List[LibFile]
     var has_lib_files: Bool
+    # The system codecs a library opens at run time; `has_dlopen` is False
+    # when the key is absent (a package that opens none).
+    var dlopen: List[DlopenRow]
+    var has_dlopen: Bool
     # Set by the parser only: keys of a known major it ignored (file header).
     var ignored_keys: List[String]
 
@@ -193,6 +216,8 @@ struct CondaMetadata(Copyable, Movable):
         self.has_doc_files = False
         self.lib_files = List[LibFile]()
         self.has_lib_files = False
+        self.dlopen = List[DlopenRow]()
+        self.has_dlopen = False
         self.ignored_keys = List[String]()
 
     def is_metapackage(self) -> Bool:
@@ -236,6 +261,7 @@ def _library_optional_keys() -> List[String]:
     var k = List[String]()
     k.append(String("doc_files"))
     k.append(String("lib_files"))
+    k.append(String("dlopen"))
     return k^
 
 
@@ -386,6 +412,23 @@ def _lib_row(row: JsonValue, index: Int, seen: List[LibFile], source: String, mu
     return f^
 
 
+def _dlopen_row(row: JsonValue, index: Int, seen: List[DlopenRow], source: String, mut ignored: List[String]) raises -> DlopenRow:
+    var what = String("dlopen[") + String(index) + String("]: ")
+    if row.kind_tag() != JSON_OBJECT:
+        _refuse(source, what + String("not an object"))
+    var known = List[String]()
+    known.append(String("requirement"))
+    known.append(String("soname"))
+    _no_twice_note_unknown(row, known, source, what, String("dlopen[") + String(index) + String("]."), ignored)
+    var d = DlopenRow()
+    d.requirement = _string(row, String("requirement"), source, what)
+    d.soname = _string(row, String("soname"), source, what)
+    for i in range(len(seen)):
+        if seen[i].soname == d.soname:
+            _refuse(source, what + String("'soname' ") + d.soname + String(" is given twice"))
+    return d^
+
+
 def parse_conda_metadata(text: String, source: String) raises -> CondaMetadata:
     """Parse one `metadata.json`'s text; `source` names it in refusals."""
     var doc: JsonValue
@@ -503,6 +546,16 @@ def parse_conda_metadata(text: String, source: String) raises -> CondaMetadata:
                         + md.lib_files[i - 1].path + String(": the rows are in path order"),
                     )
                 md.lib_files.append(f^)
+        if doc.has(String("dlopen")):
+            md.has_dlopen = True
+            var rows = doc.get(String("dlopen"))
+            if rows.kind_tag() != JSON_ARRAY:
+                _refuse(source, String("'dlopen' is not an array"))
+            if rows.array_len() == 0:
+                _refuse(source, String("'dlopen' is empty: a package that opens no codec has no dlopen key"))
+            for i in range(rows.array_len()):
+                var d = _dlopen_row(rows.element_at(i), i, md.dlopen, source, md.ignored_keys)
+                md.dlopen.append(d^)
     else:
         var rows = doc.get(String("members"))
         if rows.kind_tag() != JSON_ARRAY:

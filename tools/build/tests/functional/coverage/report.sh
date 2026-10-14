@@ -10,9 +10,9 @@
 # census: covcheck's build gate (`covcheck gate --mode census`) reads the
 #   reports over a source root holding each --file at its repository path and
 #   a BUCK file in <dir>, with every --file and that BUCK file as the
-#   repository's files and an empty ratchet. It must exit 0, and its result
-#   JSON must hold each --expect string (the package's numbers): the reports
-#   cov_run.sh writes are what covcheck reads, end to end.
+#   repository's files, no hold and the target 99%. It must exit 0, and its
+#   result JSON must hold each --expect string (the package's numbers): the
+#   reports cov_run.sh writes are what covcheck reads, end to end.
 # result (test 46): the result JSON of a library's coverage gate holds each
 #   --expect string.
 # Writes what it checked to <out>; exits 1 naming the first failure.
@@ -62,7 +62,6 @@ $(diff "$g" "$r" || true)"
         mkdir -p "$ROOT/$PKG"
         : >"$ROOT/$PKG/BUCK"
         printf '%s\0' "$PKG/BUCK" >"$T/repo_files"
-        printf '# no floors\n' >"$T/ratchet.tsv"
         EXPECT="$T/expect"
         : >"$EXPECT"
         set -- "$@" --end
@@ -88,7 +87,7 @@ $(diff "$g" "$r" || true)"
         shift
         # shellcheck disable=SC2086 # CC is the command, one word per argument
         $CC gate --package "$PKG" --repo-files "$T/repo_files" --source-root "$ROOT" "$@" \
-            --ratchet "$T/ratchet.tsv" --mode census --result-out "$T/result.json" --summary-out "$T/summary.md" >"$T/log" 2>&1 ||
+            --target-bp 9900 --mode census --result-out "$T/result.json" --summary-out "$T/summary.md" >"$T/log" 2>&1 ||
             red "covcheck gate exited $? over the reports: $(cat "$T/log")"
         while IFS= read -r e; do
             grep -F -- "$e" "$T/result.json" >/dev/null || red "the result JSON does not hold '$e': $(cat "$T/result.json")"

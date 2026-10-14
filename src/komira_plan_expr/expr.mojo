@@ -33,6 +33,8 @@ from komira_plan_expr.render_text import write_escaped, write_quoted
 # `from .partition_expr import PartitionFrame`: it compiles, and it silently
 # re-attaches every one of those modules to this translation unit.
 from komira_plan_expr.partition_frame import PartitionFrame
+# `UdfType` is a leaf too: it imports only `ArrowType` (see its header).
+from komira_plan_expr.udf_type import UdfType
 # Pretty-printers live in `expr_helpers.mojo` to keep this file smaller.
 from komira_plan_expr.expr_helpers import _write_binop, _write_unop, _write_strop
 # ⛔⛔ THIS FILE MUST NOT NAME `LogicalPlan`. THAT IS THE INVARIANT.
@@ -337,6 +339,20 @@ comptime EXPR_UDF_CALL: UInt8 = 25
 # precedent — never the numeric runtime-expr opcode path.
 comptime EXPR_STRING_FN_N: UInt8 = 26
 
+# A call of a user function by its `UdfRef` index (optimized_plan_udfs.md
+# §10.4): `{udf_index, return_type, args}`. The `UdfRef` list lives beside the
+# plan (an optimized plan's `needs.udfs`, a raw envelope's `udfs`), never in
+# it, so the node holds the index, and a copy of the `UdfRef`'s return type
+# so that its output field is known without the list (`walk_expr_field`).
+# The wire carries only the index and the arguments; the decoder fills the
+# type in from the list it decodes against.
+#
+# ⚠ NOT `EXPR_UDF_CALL`. That tag is a registered Mojo function keyed by a
+# name and a process-local handle; this one is any runtime's code, keyed by
+# content (`UdfRef`). Nothing in this tree evaluates it yet: lowering and the
+# UDF runtimes are later stages, and an evaluator that meets it refuses.
+comptime EXPR_UDF_APPLY: UInt8 = 27
+
 
 
 # =============================================================================
@@ -357,7 +373,7 @@ comptime EXPR_STRING_FN_N: UInt8 = 26
 # Adding an `EXPR_*` constant above means bumping the count and adding one arm
 # below.
 
-comptime EXPR_TAG_COUNT: Int = 27
+comptime EXPR_TAG_COUNT: Int = 28
 """One past the highest `EXPR_*` tag id.
 
 Every `EXPR_*` constant is declared in this file, so this covers the whole
@@ -453,6 +469,9 @@ def _write_expr_tag_name[W: Writer](mut writer: W, tag: UInt8):
         return
     if tag == EXPR_STRING_FN_N:
         writer.write(String("EXPR_STRING_FN_N"))
+        return
+    if tag == EXPR_UDF_APPLY:
+        writer.write(String("EXPR_UDF_APPLY"))
         return
     writer.write(String("tag#") + String(Int(tag)))
     return
@@ -2264,6 +2283,37 @@ struct StringFnNData(Movable):
         pass
 
 
+struct UdfApplyData(Movable):
+    """Payload for `EXPR_UDF_APPLY` (tag 27): a call of the `UdfRef` at
+    `udf_index`, with `args` in call order.
+
+    `return_type` is that `UdfRef`'s `return_type`, copied: the decoder fills
+    it in from the list it decodes against, and `walk_expr_field` reads it, so
+    the call's output field needs no list. The UDF admission check holds it
+    equal to the list entry (`OPTIMIZED_UDF_SCHEMA_DISAGREES`)."""
+
+    var udf_index: Int
+    var return_type: UdfType
+    var args: List[Expr]
+
+    def __init__(
+        out self, udf_index: Int, var return_type: UdfType, var args: List[Expr]
+    ):
+        self.udf_index = udf_index
+        self.return_type = return_type^
+        self.args = args^
+
+    def copy(self) -> Self:
+        var new_args = List[Expr](capacity=len(self.args))
+        for i in range(len(self.args)):
+            new_args.append(self.args[i].copy())
+        return Self(self.udf_index, self.return_type.copy(), new_args^)
+
+    # PORT(1.0.0): explicit destructor, as on `StringFnNData`.
+    def __deinit__(deinit self):
+        pass
+
+
 
 # THE STRING-SIMILARITY family. Three ops, three SQL
 # names, all Utf8 x Utf8 -> **FLOAT64**.
@@ -2795,6 +2845,8 @@ struct Expr(Movable, Writable):
     # The multi-argument / variadic scalar string
     # functions. Populated when tag == EXPR_STRING_FN_N.
     var _string_fn_n: Optional[StringFnNData]
+    # A call of a `UdfRef` by index. Populated when tag == EXPR_UDF_APPLY.
+    var _udf_apply: Optional[UdfApplyData]
 
     # --- Private constructor (all fields) ---
 
@@ -2826,6 +2878,7 @@ struct Expr(Movable, Writable):
         self._string_fn = None
         self._udf_call = None
         self._string_fn_n = None
+        self._udf_apply = None
 
     def copy(self) -> Self:
         """Deep copy of the expression tree.
@@ -2890,6 +2943,8 @@ struct Expr(Movable, Writable):
             e._udf_call = self._udf_call.value().copy()
         elif self.tag == EXPR_STRING_FN_N:
             e._string_fn_n = self._string_fn_n.value().copy()
+        elif self.tag == EXPR_UDF_APPLY:
+            e._udf_apply = self._udf_apply.value().copy()
         # else: unknown tag — return placeholder Expr(tag) as-is.
         return e^
 
@@ -4020,6 +4075,45 @@ struct Expr(Movable, Writable):
         """Ref to the UDF's argument. Requires tag == EXPR_UDF_CALL."""
         return self._udf_call.value().child[]
 
+    # -- calls by `UdfRef` index (EXPR_UDF_APPLY) ------------
+
+    @staticmethod
+    def udf_apply(
+        udf_index: Int, var return_type: UdfType, var args: List[Expr]
+    ) -> Expr:
+        """Create an `EXPR_UDF_APPLY` node: a call of the `UdfRef` at
+        `udf_index` of the list beside the plan, whose `return_type` is
+        `return_type`, with `args` in call order.
+
+        ⛔ NON-RAISING, like every factory here. The index and the type are
+        checked against the list where one is in hand: the plan-wire decoder
+        and its UDF admission check."""
+        var e = Expr(EXPR_UDF_APPLY)
+        e._udf_apply = UdfApplyData(udf_index, return_type^, args^)
+        return e^
+
+    @always_inline
+    def udf_apply_index(self) -> Int:
+        """The `UdfRef` index. Requires tag == EXPR_UDF_APPLY."""
+        return self._udf_apply.value().udf_index
+
+    @always_inline
+    def udf_apply_return_type_ref(
+        self,
+    ) -> ref [origin_of(self._udf_apply.value().return_type)] UdfType:
+        """The call's type. Requires tag == EXPR_UDF_APPLY."""
+        return self._udf_apply.value().return_type
+
+    @always_inline
+    def udf_apply_num_args(self) -> Int:
+        """How many arguments the call passes. Requires tag == EXPR_UDF_APPLY."""
+        return len(self._udf_apply.value().args)
+
+    @always_inline
+    def udf_apply_arg_ref(self, i: Int) -> ref [self._udf_apply.value().args[i]] Expr:
+        """The `i`-th argument. Requires tag == EXPR_UDF_APPLY."""
+        return self._udf_apply.value().args[i]
+
     @staticmethod
     @always_inline
     def math_fn2(op: UInt8, var left: Expr, var right: Expr) -> Expr:
@@ -5109,6 +5203,19 @@ struct Expr(Movable, Writable):
             for i in range(len(sfnn.args)):
                 writer.write(", ")
                 sfnn.args[i].write_to(writer)
+            writer.write(")")
+        elif self.tag == EXPR_UDF_APPLY:
+            # ⛔ PLAN IDENTITY: the index, the type and every argument, with
+            # the count (as `StringFnN` renders it), so that two calls of
+            # different `UdfRef`s, or a dropped argument, never share a
+            # compiled plan.
+            ref ua = self._udf_apply.value()
+            writer.write("UdfApply(i=", ua.udf_index, ", ret=")
+            ua.return_type.write_to(writer)
+            writer.write(", n=", len(ua.args))
+            for i in range(len(ua.args)):
+                writer.write(", ")
+                ua.args[i].write_to(writer)
             writer.write(")")
         elif self.tag == EXPR_MATH_FN2:
             ref mf2 = self._math_fn2.value()

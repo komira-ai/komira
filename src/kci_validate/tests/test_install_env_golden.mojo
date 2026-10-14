@@ -4,8 +4,9 @@
 #   link's directory then /usr/bin:/bin, HOME, PIXI_HOME, PIXI_CACHE_DIR and
 #   TMPDIR inside the scratch work dir, LANG; nothing of this process), the
 #   exact `pixi install` and `pixi run --as-is` argv, the manifest (every
-#   install pinned to version AND build on the step's channel), and the
-#   installed README's programs: byte-equal to the programs SOURCE mode
+#   install pinned to version AND build on the step's channel; the glibc
+#   floor declared on linux-64, nothing on osx-arm64), and the installed
+#   README's programs: byte-equal to the programs SOURCE mode
 #   generated for the welded `[tests][readme]` test of the same README,
 #   read from that gate itself (komira_encoding's `[tests][readme][file]`,
 #   its README.md, and `[tests][readme][generated]`, what
@@ -130,7 +131,22 @@ def test_manifest_pins_version_and_build() raises:
             "# Written by kci for validation 'install-env': installs the release from its channel only.\n"
             "[workspace]\nname = \"kci-install-env\"\n"
             "channels = [\"https://conda.example.invalid/example/gamma\", \"https://conda.example.invalid/max\","
-            " \"conda-forge\"]\nplatforms = [\"linux-64\"]\n\n[dependencies]\n"
+            " \"conda-forge\"]\nplatforms = [\"linux-64\"]\n\n[system-requirements]\n"
+            "libc = { family = \"glibc\", version = \"2.34\" }\n\n[dependencies]\n"
+            "komira_encoding = { version = \"==1.0.0\", build = \"h0a1b2c3d_7\","
+            " channel = \"https://conda.example.invalid/example/gamma\" }\n"
+            "mojo-compiler = { version = \"==1.0.0\", channel = \"https://conda.example.invalid/max\" }\n"
+        ),
+    )
+    # a subdir with no glibc floor (kci_release_set's glibc_floors names
+    # linux-64 only) declares no system requirement: pixi's own default holds
+    assert_equal(
+        install_manifest_text(v, String("https://conda.example.invalid/example/gamma"), String("osx-arm64"), pins, String("1.0.0")),
+        String(
+            "# Written by kci for validation 'install-env': installs the release from its channel only.\n"
+            "[workspace]\nname = \"kci-install-env\"\n"
+            "channels = [\"https://conda.example.invalid/example/gamma\", \"https://conda.example.invalid/max\","
+            " \"conda-forge\"]\nplatforms = [\"osx-arm64\"]\n\n[dependencies]\n"
             "komira_encoding = { version = \"==1.0.0\", build = \"h0a1b2c3d_7\","
             " channel = \"https://conda.example.invalid/example/gamma\" }\n"
             "mojo-compiler = { version = \"==1.0.0\", channel = \"https://conda.example.invalid/max\" }\n"

@@ -331,13 +331,9 @@ def _qualified(ns: StringSlice, local: StringSlice) -> String:
     return String("{") + String(ns) + String("}") + String(local)
 
 
-def _canon_into(node: XmlNode, mut out: String, depth: Int) raises:
-    # A DEPTH BOUND, not decoration. `parse_xml` is iterative and will
-    # happily build a 100k-deep tree from 100k bytes of `<a>`; a
-    # recursive walk over it would exhaust the stack. Refusing is the
-    # only safe answer for a codec fed untrusted network bodies.
-    if depth > XML_MAX_DEPTH:
-        raise Error("xml: element nesting deeper than " + String(XML_MAX_DEPTH))
+def _canon_open(node: XmlNode, mut out: String):
+    """The start tag of `node`, its attributes sorted by expanded name, and
+    its stripped direct text."""
     out += "<"
     out += _qualified(node.ns, node.local)
     # Attributes in a stable order: sorted by the pair (namespace name, local
@@ -367,17 +363,56 @@ def _canon_into(node: XmlNode, mut out: String, depth: Int) raises:
         out += '"'
     out += ">"
     out += xml_escape_text(_strip(node.text))
-    _canon_children(node, out, depth)
-    out += "</"
-    out += _qualified(node.ns, node.local)
-    out += ">"
 
 
-def _canon_children(node: XmlNode, mut out: String, depth: Int) raises:
-    """Split from `_canon_into` so the recursion is MUTUAL rather than direct
-    — a directly self-recursive `def` trips a compiler warning here."""
-    for c in range(len(node.children)):
-        _canon_into(node.children[c], out, depth + 1)
+def _canon_into(root: XmlNode, mut out: String) raises:
+    """`root` and its subtree in canonical form, appended to `out`.
+
+    The walk keeps its own stack (one entry per open element: the element
+    and the index of its next child to write), so its use of the thread
+    stack does not grow with the depth of the tree. An element more than
+    `XML_MAX_DEPTH` levels below `root` (the root is depth 0) is refused;
+    every tree `parse_xml` builds is within that bound, so only a tree
+    assembled by hand reaches the refusal.
+    """
+    # SAFETY: every pointer in `open_nodes` is a non-owning borrow of `root`
+    # or of an element inside its `children` lists, and is dereferenced only
+    # inside the loop below. `root` is borrowed immutably for the whole call,
+    # so no list is resized or freed while the stack holds a pointer into it.
+    # On the refusal path the function raises with pointers still on the
+    # stack; dropping the list frees only its own buffer and dereferences
+    # none of them, and none is reachable after the call.
+    var open_nodes = List[UnsafePointer[XmlNode, origin_of(root)]]()
+    var next_child = List[Int]()
+    _canon_open(root, out)
+    open_nodes.append(UnsafePointer(to=root))
+    next_child.append(0)
+    while len(open_nodes) > 0:
+        var top = len(open_nodes) - 1
+        var node = open_nodes[top]
+        var c = next_child[top]
+        if c < len(node[].children):
+            next_child[top] = c + 1
+            # The child is at depth len(open_nodes).
+            if len(open_nodes) > XML_MAX_DEPTH:
+                raise Error(
+                    "xml: element nesting deeper than " + String(XML_MAX_DEPTH)
+                )
+            _canon_open(node[].children[c], out)
+            # A child's origin is a part of `root`'s; the cast widens it to
+            # the whole of `root`, which is borrowed for the whole walk.
+            open_nodes.append(
+                UnsafePointer(to=node[].children[c]).unsafe_origin_cast[
+                    origin_of(root)
+                ]()
+            )
+            next_child.append(0)
+        else:
+            out += "</"
+            out += _qualified(node[].ns, node[].local)
+            out += ">"
+            _ = open_nodes.pop()
+            _ = next_child.pop()
 
 
 def canonical_xml(doc: StringSlice) raises -> String:
@@ -389,11 +424,11 @@ def canonical_xml(doc: StringSlice) raises -> String:
     """
     var root = parse_xml(doc)
     var out = String()
-    _canon_into(root, out, 0)
+    _canon_into(root, out)
     return out^
 
 
 def canonical_node(node: XmlNode) raises -> String:
     var out = String()
-    _canon_into(node, out, 0)
+    _canon_into(node, out)
     return out^
