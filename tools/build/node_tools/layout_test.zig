@@ -33,8 +33,8 @@ const Result = struct {
 fn lay(a: std.mem.Allocator, pkgs: []const Pkg) !Result {
     var tmp = std.testing.tmpDir(.{});
     const base = try tmp.dir.realpathAlloc(a, ".");
-    var lock = std.ArrayList(u8).init(a);
-    try lock.appendSlice("{\"lockfileVersion\":3,\"packages\":{\"\":{\"name\":\"root\"}");
+    var lock = std.ArrayList(u8).empty;
+    try lock.appendSlice(a, "{\"lockfileVersion\":3,\"packages\":{\"\":{\"name\":\"root\"}");
     var spec = layout.Spec{
         .lockfile = "",
         .tarballs = std.StringHashMap([]const u8).init(a),
@@ -45,27 +45,27 @@ fn lay(a: std.mem.Allocator, pkgs: []const Pkg) !Result {
         const integrity = try sri.of(a, good);
         const key = try std.fmt.allocPrint(a, "{s}@{s}", .{ p.name, p.version });
         const integ_json = if (p.no_lock_entry_integrity) "" else try std.fmt.allocPrint(a, ",\"integrity\":\"{s}\"", .{integrity});
-        try lock.writer().print(",\"{s}\":{{\"version\":\"{s}\"{s}{s}", .{ p.path, p.version, integ_json, p.extra });
-        try lock.appendSlice("}");
+        try lock.writer(a).print(",\"{s}\":{{\"version\":\"{s}\"{s}{s}", .{ p.path, p.version, integ_json, p.extra });
+        try lock.appendSlice(a, "}");
         if (std.mem.indexOf(u8, p.extra, "\"name\"") == null and !std.mem.endsWith(u8, p.path, p.name)) {
             // an alias or a path whose last segment is not the name needs "name"
             return error.TestFixture;
         }
         if (!p.no_tarball) {
             const file = try std.fmt.allocPrint(a, "t{d}.tgz", .{i});
-            try tmp.dir.writeFile(file, p.other_bytes orelse good);
+            try tmp.dir.writeFile(.{ .sub_path = file, .data = p.other_bytes orelse good });
             try spec.tarballs.put(key, try std.fs.path.join(a, &.{ base, file }));
         }
         try spec.sri512.put(key, p.pinned orelse integrity);
     }
-    try lock.appendSlice("}}");
+    try lock.appendSlice(a, "}}");
     spec.lockfile = lock.items;
     try tmp.dir.makePath("out");
     const out = try tmp.dir.openDir("out", .{ .iterate = true });
     const out_path = try std.fs.path.join(a, &.{ base, "out" });
-    var msg = std.ArrayList(u8).init(a);
+    var msg = std.ArrayList(u8).empty;
     var failed = false;
-    layout.assemble(a, spec, out, out_path, msg.writer()) catch |e| switch (e) {
+    layout.assemble(a, spec, out, out_path, msg.writer(a)) catch |e| switch (e) {
         error.Failed => failed = true,
         else => return e,
     };
@@ -117,7 +117,7 @@ test "bin: a relative link in the node_modules that holds the package, to an exe
     });
     defer r.deinit();
     try std.testing.expect(!r.failed);
-    var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
     try std.testing.expectEqualStrings("../tool/bin/tool.js", try r.out.readLink(".bin/tool", &buf));
     try std.testing.expectEqualStrings("../inner/cli.js", try r.out.readLink("tool/node_modules/.bin/inner", &buf));
     try std.testing.expectEqualStrings("../@s/scoped/cli.js", try r.out.readLink(".bin/scoped", &buf));
@@ -135,7 +135,7 @@ test "bin: a name two packages want goes to the shallowest, then the first by pa
     });
     defer r.deinit();
     try std.testing.expect(!r.failed);
-    var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
     try std.testing.expectEqualStrings("../a/x.js", try r.out.readLink(".bin/x", &buf));
 }
 
@@ -257,14 +257,14 @@ fn layWithBytes(a: std.mem.Allocator, path: []const u8, name: []const u8, versio
         .tarballs = std.StringHashMap([]const u8).init(a),
         .sri512 = std.StringHashMap([]const u8).init(a),
     };
-    try tmp.dir.writeFile("t.tgz", bytes);
+    try tmp.dir.writeFile(.{ .sub_path = "t.tgz", .data = bytes });
     try spec.tarballs.put(key, try std.fs.path.join(a, &.{ base, "t.tgz" }));
     try spec.sri512.put(key, integrity);
     try tmp.dir.makePath("out");
     const out = try tmp.dir.openDir("out", .{ .iterate = true });
-    var msg = std.ArrayList(u8).init(a);
+    var msg = std.ArrayList(u8).empty;
     var failed = false;
-    layout.assemble(a, spec, out, try std.fs.path.join(a, &.{ base, "out" }), msg.writer()) catch |e| switch (e) {
+    layout.assemble(a, spec, out, try std.fs.path.join(a, &.{ base, "out" }), msg.writer(a)) catch |e| switch (e) {
         error.Failed => failed = true,
         else => return e,
     };
@@ -289,9 +289,9 @@ test "a lockfile that is not version 3, and workspace entries" {
     defer tmp.cleanup();
     var out = try tmp.dir.makeOpenPath("out", .{});
     defer out.close();
-    var msg = std.ArrayList(u8).init(a);
+    var msg = std.ArrayList(u8).empty;
     const spec = layout.Spec{ .lockfile = "{\"lockfileVersion\":2,\"packages\":{}}", .tarballs = std.StringHashMap([]const u8).init(a), .sri512 = std.StringHashMap([]const u8).init(a) };
-    try std.testing.expectError(error.Failed, layout.assemble(a, spec, out, "/x", msg.writer()));
+    try std.testing.expectError(error.Failed, layout.assemble(a, spec, out, "/x", msg.writer(a)));
     try std.testing.expect(std.mem.indexOf(u8, msg.items, "not a lockfileVersion 3") != null);
 
     const ws = layout.Spec{
@@ -299,6 +299,6 @@ test "a lockfile that is not version 3, and workspace entries" {
         .tarballs = std.StringHashMap([]const u8).init(a),
         .sri512 = std.StringHashMap([]const u8).init(a),
     };
-    var msg2 = std.ArrayList(u8).init(a);
-    try layout.assemble(a, ws, out, "/x", msg2.writer());
+    var msg2 = std.ArrayList(u8).empty;
+    try layout.assemble(a, ws, out, "/x", msg2.writer(a));
 }
