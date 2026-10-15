@@ -19,6 +19,7 @@ Regenerating never makes it go away.
 |---|---|---|
 | `kpin lock` | no | Writes the lock from `pins.toml`, the `package-lock.json` files and the lock on disk. A file with no hash yet is an error ("run `kpin update`"), never a guess. |
 | `kpin check` | no | Exits 1 if the lock is not byte for byte what `lock` would write (stale, or hand-edited), 3 if a hash changed for a locked version. With `--previous FILE` (the lock of the merge base) also exits 3 if the lock's own hash for a (name, version, file) differs from the base's. |
+| `kpin cargo` | no | Cargo.lock, `cargo metadata` and an overrides table in, a `.bzl` of `crates_io_library` targets out (below). |
 | `kpin update` | **yes** | Moves versions (pins with a `latest_url`), fetches what the lock lacks, computes sha256 and size, rewrites `pins.toml` and the lock together. Writes nothing if anything is wrong. |
 
 Flags: `--pins FILE` (default `tools/build/pins/pins.toml`), `--lock FILE` (default `tools/build/pins/pins.lock.bzl`),
@@ -36,6 +37,63 @@ Run it from the repository root:
 
 The weekly job is [`kpin-update.yml`](../../../.github/workflows/kpin-update.yml) (below). The pull-request check
 runs `check`, with `--previous` on the lock of the base commit.
+
+## Cargo
+
+`kpin cargo` turns a Cargo workspace into Buck2 targets, so a crate from crates.io builds with the pinned rustc.
+As with the native lockfiles, Cargo resolves (with a network, on a developer box, outside the build) and `kpin` only
+reads. Inputs, all committed:
+
+| input | flag | what kpin takes from it |
+|---|---|---|
+| `Cargo.lock` (version 3 or 4) | `--cargo-lock` | the sha256 of every `.crate` |
+| `cargo metadata --format-version 1 --locked --filter-platform <triple>`, trimmed | `--metadata` | the packages linked into the workspace's members (normal edges only: build- and dev-dependencies are not), the features Cargo resolved for each, dependency names (a name that is not the dependency's library name becomes `renamed_deps`), library names and roots, proc-macros, and which crates have a build script |
+| `<name>-<version>.crate <bytes>` lines (`ls -l` of Cargo's registry cache) | `--sizes` | `size`, which `pinned_file` requires |
+| overrides | `--overrides` | what a build script decides for the pinned compiler |
+| the pinned compiler | `--rustc` | which compiler the overrides must have been derived for |
+
+`kpin cargo --metadata raw.json --trim out.json` writes the form that is committed: only what kpin reads, with the
+machine's paths replaced by constant ones (`cargo metadata` names the registry cache of whoever ran it). Trimming is
+idempotent, and generating from raw or trimmed metadata gives the same file.
+
+The output is a `def crates():` of `crates_io_library(...)` calls (sorted; a crate linked in two versions is
+`name-version`) with `features`, `cfgs`, `env = cargo_pkg_env(...)` (the `CARGO_PKG_*` variables), `deps`,
+`renamed_deps`, `proc_macro`/`proc_macro_extern`, `native_deps` and `patch`
+([the Rust rules](../rust/README.md#cargo-crates)). `--check` writes nothing and exits 1 unless `--cargo-out` is exactly
+that text, naming the first line that differs. [`cargo.bzl`](cargo.bzl)'s `kpin_cargo` runs both in a build: its output
+is the generated file, and a validation of the target runs `--check` against the committed one, so a hand edit, a stale
+file or a changed input is a red build. The compiler comes from the Rust toolchain, so a compiler bump is red until the
+overrides are re-derived.
+
+### Overrides
+
+A build script runs code to learn about the compiler and the target. Nothing here runs one, so its answer for the pinned
+compiler is written down, per crate and version:
+
+```json
+{
+ "rustc": "1.99.0",
+ "crates": {
+  "proc-macro2 1.0.106": {"class": "a", "why": "...", "cfgs": ["wrap_proc_macro"]},
+  "serde 1.0.229": {"class": "b", "why": "...", "env": {}, "patch": {"copy": ["src"], "sub": [], "add": []}},
+  "aws-lc-sys 0.23.1": {"class": "c", "why": "...", "native_deps": ["komira//third_party/aws-lc:crypto[static-pic]"], "patch": {}}
+ }
+}
+```
+
+| class | the script | entry |
+|---|---|---|
+| `a` | only emits cfgs or `cargo:` metadata | `cfgs`, `env` |
+| `b` | writes files the crate includes | `patch` (`sub` with a checked `count`, `add`) |
+| `c` | builds native code | `native_deps` (a komira target replaces it), usually a `patch` |
+| `m` | no script, but the source needs an env or an edit | any |
+
+`rustc` is the compiler the entries were derived for; the cfgs and files are per compiler, so another compiler is an
+error ("re-derive each entry"). Refused, naming the crate: a build script with no entry; an entry for a crate that is not
+linked, at another version, or has no script (class `m` excepted); a class the entry does not fit (`a` with a patch,
+`b` without one, `c` without `native_deps`); an unknown key (a typo is not ignored); no `why`; a patch path with `..`.
+Also refused: a crate from git, a path or another registry, a missing or malformed checksum, a missing size, a feature
+or name outside the character set, a Cargo.lock older than version 3, and metadata made with `--no-deps`.
 
 ## The weekly update
 
@@ -188,8 +246,7 @@ nothing else in `kpin` can open a socket. Policy, enforced on every request and 
 - Status 200 only; a body shorter than its `Content-Length` is an error, not a pin; downloads are capped
   (`--max-bytes`, default 1 GiB) and hashed as they stream, never held in memory.
 
-Not in v0: a minimum age for a new version (no registry date is read), per-request timeouts, and a Cargo.lock or
-`mopm.lock` reader. TLS is the Zig standard library's; the tests reach only loopback, so a real registry over TLS is
+Not in v0: a minimum age for a new version (no registry date is read), per-request timeouts, and a `mopm.lock` reader. TLS is the Zig standard library's; the tests reach only loopback, so a real registry over TLS is
 proven by the first scheduled run, not by this package's tests.
 
 ## Tests
@@ -204,6 +261,7 @@ Each is a welded `zig_test`; the `kpin` executable is built only when all pass. 
 | `npm_test.zig` | Names from the path or `name`; scoped names; dedupe and order independence; every refusal (sha1, non-https, version 2, quotes in names); two lockfiles that disagree. |
 | `resolve_test.zig` | Hashes carry over from the lock; a new version does not inherit the old hash; every alarm case; `compareToPrevious`. |
 | `update_test.zig` | `update` through the real HTTP client against a registry on loopback: sha256, size and sha512 of known bytes; a tarball that is not what `package-lock.json` says; nothing re-fetched without `--verify`; republished bytes are an alarm and nothing is written; a newer version moves `pins.toml`; 404, truncated and oversize downloads; redirect policy; `urlAllowed`. |
+| `cargo_test.zig` | `kpin cargo`: the golden output of a fixture workspace (renames, two versions of one crate, a proc-macro, a library named unlike its package, classes a, b and c, an escaped patch); build- and dev-dependencies not emitted; every refusal above; trimming; the command on real files (a hand-edited output caught by `--check` with its line, a refused input writing nothing, the stamp only on success). |
 | `main_test.zig` | The commands end to end on real files: usage errors, offline `lock`/`check`, a stale lock, a version bump without `update`, a hand-edited hash against `--previous` (3), a changed integrity (3), output independent of lockfile order, `update` leaving the files untouched on an alarm. |
 
 Planted mutants, each built red on the farm and then removed: `check` not comparing the lock to what the inputs

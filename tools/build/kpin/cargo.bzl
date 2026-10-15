@@ -6,7 +6,7 @@
     kpin_cargo(
         name = "crates_gen",
         cargo_lock = "workspace/Cargo.lock",
-        metadata = "workspace/metadata.json",
+        cargo_metadata = "workspace/metadata.json",
         overrides = "overrides.json",
         sizes = "workspace/sizes.txt",
         committed = "crates.bzl",
@@ -36,7 +36,7 @@ def _kpin_cargo_impl(ctx):
         "--cargo-lock",
         ctx.attrs.cargo_lock,
         "--metadata",
-        ctx.attrs.metadata,
+        ctx.attrs.cargo_metadata,
         "--overrides",
         ctx.attrs.overrides,
         "--sizes",
@@ -62,7 +62,7 @@ kpin_cargo_rule = rule(
         "cargo_lock": attrs.source(),
         # The file the build is checked against.
         "committed": attrs.source(),
-        "metadata": attrs.source(),
+        "cargo_metadata": attrs.source(),
         "overrides": attrs.source(),
         "sizes": attrs.source(),
         "toolchain": attrs.toolchain_dep(default = "toolchains//:rust", providers = [RustToolchainInfo]),
