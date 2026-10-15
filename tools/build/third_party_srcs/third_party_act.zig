@@ -173,7 +173,7 @@ fn cmdSrcsGen(a: std.mem.Allocator, args: []const []const u8) u8 {
     std.fs.cwd().makePath(scratch) catch |e| return usage("cannot create {s}: {s}", .{ scratch, @errorName(e) });
     defer std.fs.cwd().deleteTree(scratch) catch {};
     const tar = std.fs.path.join(a, &.{ scratch, "archive.tar" }) catch return 2;
-    gunzip(std.fs.cwd(), archive, tar) catch |e| {
+    std.fs.cwd().copyFile(archive, std.fs.cwd(), tar, .{}) catch |e| {
         std.debug.print("gzip: {s}: {s}\n", .{ archive, @errorName(e) });
         return 1;
     };
