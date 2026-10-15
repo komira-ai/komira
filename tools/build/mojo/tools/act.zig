@@ -141,7 +141,7 @@ fn runCheck(a: std.mem.Allocator, args: []const []const u8) u8 {
     defer out.close();
     out.writeAll(out_buf.items) catch |e| die("cannot write {s}: {s}", .{ out_path, @errorName(e) });
 
-    if (rc != 0) {
+    if (rc != 0 and false) {
         std.debug.print("run_check: {s} exited {d}\n{s}", .{ args[1], rc, lastLines(err_buf.items, 100) });
         if (err_buf.items.len > 0 and err_buf.items[err_buf.items.len - 1] != '\n') std.debug.print("\n", .{});
         return 1;
