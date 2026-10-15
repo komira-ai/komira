@@ -64,60 +64,17 @@ RustTestInfo = provider(fields = {
     "marker": provider_field(typing.Any),
 })
 
-_PRELUDE = """
-BB="$1"; shift
-case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
-# Private scratch. A remote action has its working directory to itself; a
-# local one runs in the checkout root next to every other local action, so
-# it takes the per-action scratch directory buck2 names in BUCK_SCRATCH_PATH.
-case "${BUCK_SCRATCH_PATH:-}" in
-    "") T="$PWD/.komira_action" ;;
-    /*) T="$BUCK_SCRATCH_PATH/komira" ;;
-    *) T="$PWD/$BUCK_SCRATCH_PATH/komira" ;;
-esac
-"$BB" mkdir -p "$T/bin"
-"$BB" --install -s "$T/bin"
-PATH="$T/bin"; export PATH
-"""
-
-def _busybox_sh(busybox, script, *args):
-    return cmd_args(busybox, "sh", "-euc", _PRELUDE + script, "sh", busybox, *args)
-
 # ---- toolchain ---------------------------------------------------------------
 
 def _rust_sysroot_impl(ctx):
-    bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
     out = ctx.actions.declare_output("sysroot", dir = True)
     # Keeps only what compiling needs: the rustc driver, the libraries it
     # loads (its own, and `libs`: the non-glibc libraries those need), and
-    # the standard library for the one target.
-    script = """
-RUSTC="$1"; STD="$2"; OUT="$3"; TRIPLE="$4"; VERSION="$5"; LIBS="$6"
-X="$OUT.x"
-mkdir -p "$X" "$OUT/bin" "$OUT/lib/rustlib/$TRIPLE"
-tar -xzf "$RUSTC" -C "$X"
-tar -xzf "$STD" -C "$X"
-R="$X/rustc-$VERSION-$TRIPLE/rustc"
-S="$X/rust-std-$VERSION-$TRIPLE/rust-std-$TRIPLE/lib/rustlib/$TRIPLE/lib"
-mv "$R/bin/rustc" "$OUT/bin/rustc"
-for f in $R/lib/*.so*; do mv "$f" "$OUT/lib/"; done
-for f in $LIBS/lib/*; do
-    if [ -e "$OUT/lib/${f##*/}" ]; then
-        echo "rust_sysroot: REFUSING: ${f##*/} is both a rustc library and in libs" >&2
-        exit 2
-    fi
-    cp "$f" "$OUT/lib/"
-done
-mv "$S" "$OUT/lib/rustlib/$TRIPLE/lib"
-rm -rf "$X"
-test -x "$OUT/bin/rustc"
-ls "$OUT/lib/rustlib/$TRIPLE/lib/" | grep -q '^libstd-'
-rm -rf "$T"
-"""
+    # the standard library for the one target. A Zig program does it
+    # (tools/build/rust/rust_sysroot.zig); no shell runs.
     ctx.actions.run(
-        _busybox_sh(
-            bb,
-            script,
+        cmd_args(
+            ctx.attrs._tool[RunInfo],
             ctx.attrs.rustc[DefaultInfo].default_outputs[0],
             ctx.attrs.rust_std[DefaultInfo].default_outputs[0],
             out.as_output(),
@@ -132,7 +89,6 @@ rm -rf "$T"
 rust_sysroot_rule = rule(
     impl = _rust_sysroot_impl,
     attrs = {
-        "busybox": attrs.dep(),
         # A directory whose lib/ holds shared libraries rustc's own need
         # beyond glibc (conda_libs); copied into the sysroot's lib/.
         "libs": attrs.dep(),
@@ -140,6 +96,7 @@ rust_sysroot_rule = rule(
         "rustc": attrs.dep(),
         "triple": attrs.string(),
         "version": attrs.string(),
+        "_tool": attrs.exec_dep(default = "komira//tools/build/rust:rust_sysroot"),
     },
 )
 
@@ -646,16 +603,14 @@ rust_weld_check_rule = rule(
 
 def _crate_source_impl(ctx):
     bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
+    if "/" in ctx.attrs.prefix:
+        fail("{}: prefix {} is not one directory name".format(ctx.label, repr(ctx.attrs.prefix)))
+    # The crate unpacks into a directory named `prefix`, so the output is
+    # declared with that name and the busybox tar applet (no shell) extracts
+    # into the output's parent; a wrong `prefix` leaves the output missing.
     out = ctx.actions.declare_output(ctx.attrs.prefix, dir = True)
-    script = """
-mkdir -p "$2.x"
-tar -xzf "$1" -C "$2.x"
-mv "$2.x/$3" "$2"
-rm -rf "$2.x" "$T"
-test -f "$2/Cargo.toml"
-"""
     ctx.actions.run(
-        _busybox_sh(bb, script, ctx.attrs.archive[DefaultInfo].default_outputs[0], out.as_output(), ctx.attrs.prefix),
+        cmd_args(bb, "tar", "-xzf", ctx.attrs.archive[DefaultInfo].default_outputs[0], "-C", cmd_args(out.as_output(), parent = 1)),
         category = "crate_unpack",
     )
     return [DefaultInfo(default_output = out)]

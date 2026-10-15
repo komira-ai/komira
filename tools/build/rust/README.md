@@ -109,8 +109,10 @@ The toolchain, `toolchains//:rust` (declared by `komira_rust_toolchains()`, see
 [toolchains](../toolchains/README.md)), is rustc 1.99.0
 and its standard library for `x86_64-unknown-linux-gnu`, both sha256-pinned
 release tarballs. They are the `.tar.gz` of the release, not the `.tar.xz`:
-the pinned busybox unpacks xz with a dictionary of at most 64 MiB, and the
-`.tar.xz` of 1.99.0 uses 128 MiB ("corrupted data"). The sysroot is refused
+[`rust_sysroot.zig`](rust_sysroot.zig), the Zig program that assembles the
+sysroot from them, reads gzip, and the pinned busybox could not unpack the
+`.tar.xz` of 1.99.0 in any case (its xz dictionary is at most 64 MiB, the
+file's is 128 MiB: "corrupted data"). The sysroot is refused
 unless its `bin/rustc --version` prints the pinned line
 ([`version_check.zig`](../toolchains/rust/version_check.zig), a validation of
 `toolchains/rust:sysroot` that every build holding the toolchain runs), so a pin

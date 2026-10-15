@@ -51,7 +51,7 @@ use	tools/build/mojo/proto.bzl	busybox_sh	3	shell action; to port to Zig (no-she
 use	tools/build/mojo/proto.bzl	sh_argv	3	shell action; to port to Zig (no-shell series)
 use	tools/build/mojo/proto_fixture.bzl	sh_argv	5	shell action; to port to Zig (no-shell series)
 use	tools/build/mojo/proto_fixture.bzl	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/mojo/toolchain.bzl	busybox_sh	4	shell action; to port to Zig (no-shell series)
+use	tools/build/mojo/toolchain.bzl	busybox_sh	3	shell action; to port to Zig (no-shell series)
 use	tools/build/mojo/toolchain.bzl	sh_argv	3	shell action; to port to Zig (no-shell series)
 use	tools/build/mojo/toolchain.bzl	sh_script	2	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/native/defs.bzl	sh_argv	3	shell action; to port to Zig (no-shell series)
@@ -68,8 +68,7 @@ use	tools/build/package/release_set.bzl	sh_argv	3	shell action; to port to Zig (
 use	tools/build/platforms/table.bzl	sh_argv	1	data: `sh` in the darwin row's applet list, not an invocation
 use	tools/build/python/defs.bzl	busybox_sh	2	shell action; to port to Zig (no-shell series)
 use	tools/build/run/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/rust/defs.bzl	busybox_sh	3	shell action; to port to Zig (no-shell series)
-use	tools/build/rust/defs.bzl	sh_argv	4	shell action; to port to Zig (no-shell series)
+use	tools/build/rust/defs.bzl	sh_argv	1	shell action; to port to Zig (no-shell series)
 use	tools/build/rust/defs.bzl	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/tests/BUCK	sh_script	6	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/tests/functional/aws_codegen/BUCK	sh_script	2	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
