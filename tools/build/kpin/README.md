@@ -148,8 +148,9 @@ passes the base's lock to `--previous`.
 All of it is [`fetch.zig`](fetch.zig), behind a `Fetcher` interface (`get(url, sink)`); `update` takes one, and
 nothing else in `kpin` can open a socket. Policy, enforced on every request and every redirect hop:
 
+- TLS 1.3 only (the Zig 0.12 standard library client implements nothing older): `update` fails with `TlsInitializationFailed` against a server or route that answers TLS 1.2. The weekly job runs on GitHub runners, which reach registries over TLS 1.3.
 - `https` only. `http` only to `127.0.0.1` or `localhost`, and only with `--allow-http-loopback` (the tests' registry).
-- A `user@` in the authority is refused (`http://127.0.0.1@evil/` names one host and connects to another).
+- A `user@` in the authority is refused (`http://127.0.0.1@evil.example/` names one host and connects to another).
 - Redirects are followed up to five, each re-checked; a relative `Location` is refused.
 - Status 200 only; a body shorter than its `Content-Length` is an error, not a pin; downloads are capped
   (`--max-bytes`, default 1 GiB) and hashed as they stream, never held in memory.

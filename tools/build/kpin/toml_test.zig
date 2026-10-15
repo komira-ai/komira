@@ -17,14 +17,14 @@ test "tables, strings, integers, comments; a # inside a string is text" {
         \\# a comment
         \\[zig]            # trailing
         \\version = "0.12.0"
-        \\url = "https://x/y#frag"
+        \\url = "https://x.example/y#frag"
         \\
         \\[zig.platform.linux-x86_64]
         \\size = 42
     , &d);
     try t.expectEqual(@as(usize, 2), tables.len);
     try t.expectEqualStrings("zig", tables[0].path);
-    try t.expectEqualStrings("https://x/y#frag", tables[0].get("url").?.value.string);
+    try t.expectEqualStrings("https://x.example/y#frag", tables[0].get("url").?.value.string);
     try t.expectEqual(@as(u64, 42), tables[1].get("size").?.value.int);
     try t.expectEqual(@as(usize, 0), d.count());
 }

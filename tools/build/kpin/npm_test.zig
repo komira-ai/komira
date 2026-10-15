@@ -84,17 +84,17 @@ test "merge: two lockfiles that disagree about one version's bytes" {
     const a = ar.allocator();
     var d = Diag.init(a);
     const sri2 = try fx.sri512(a, fx.ABD);
-    const l1 = [_]npm.Pkg{.{ .key = "a@1.0.0", .name = "a", .version = "1.0.0", .url = "https://r/a.tgz", .sri512 = fx.ABC_SRI512 }};
-    const l2 = [_]npm.Pkg{.{ .key = "a@1.0.0", .name = "a", .version = "1.0.0", .url = "https://r/a.tgz", .sri512 = sri2 }};
+    const l1 = [_]npm.Pkg{.{ .key = "a@1.0.0", .name = "a", .version = "1.0.0", .url = "https://r.example/a.tgz", .sri512 = fx.ABC_SRI512 }};
+    const l2 = [_]npm.Pkg{.{ .key = "a@1.0.0", .name = "a", .version = "1.0.0", .url = "https://r.example/a.tgz", .sri512 = sri2 }};
     try t.expectError(error.Invalid, npm.merge(a, &.{ &l1, &l2 }, &d));
     try t.expect(d.count() == 1);
     // The same bytes under two URLs is fine, and the smaller URL wins whichever list is first.
-    const l3 = [_]npm.Pkg{.{ .key = "a@1.0.0", .name = "a", .version = "1.0.0", .url = "https://m/a.tgz", .sri512 = fx.ABC_SRI512 }};
+    const l3 = [_]npm.Pkg{.{ .key = "a@1.0.0", .name = "a", .version = "1.0.0", .url = "https://m.example/a.tgz", .sri512 = fx.ABC_SRI512 }};
     var d2 = Diag.init(a);
     const m1 = try npm.merge(a, &.{ &l1, &l3 }, &d2);
     const m2 = try npm.merge(a, &.{ &l3, &l1 }, &d2);
-    try t.expectEqualStrings("https://m/a.tgz", m1[0].url);
-    try t.expectEqualStrings("https://m/a.tgz", m2[0].url);
+    try t.expectEqualStrings("https://m.example/a.tgz", m1[0].url);
+    try t.expectEqualStrings("https://m.example/a.tgz", m2[0].url);
 }
 
 test "a workspaces lockfile: members and link targets are local and skipped; a node_modules entry without resolved is still refused" {

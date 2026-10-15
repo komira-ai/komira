@@ -63,10 +63,10 @@ test "parse reads what render wrote" {
 
 test "render refuses a value that could be code: a quote, a backslash, a newline, a space" {
     const bad_urls = [_][]const u8{
-        "https://h/x\", \"pwn\": \"y",
-        "https://h/x\\",
-        "https://h/x\ny",
-        "https://h/x y",
+        "https://h.example/x\", \"pwn\": \"y",
+        "https://h.example/x\\",
+        "https://h.example/x\ny",
+        "https://h.example/x y",
         "ftp://h/x",
         "https://",
     };
@@ -75,14 +75,14 @@ test "render refuses a value that could be code: a quote, a backslash, a newline
         const pins = [_]lockfmt.LockPin{.{ .name = "a", .version = "1", .files = &files }};
         try t.expectError(error.UnsafeValue, lockfmt.render(t.allocator, .{ .pins = &pins }));
     }
-    const files = [_]lockfmt.File{.{ .platform = "p", .url = "https://h/x", .sha256 = fx.ABC_SHA256, .size = 1 }};
+    const files = [_]lockfmt.File{.{ .platform = "p", .url = "https://h.example/x", .sha256 = fx.ABC_SHA256, .size = 1 }};
     const bad_names = [_][]const u8{ "a\"b", "A", "a b", "" };
     for (bad_names) |n| {
         const pins = [_]lockfmt.LockPin{.{ .name = n, .version = "1", .files = &files }};
         try t.expectError(error.UnsafeValue, lockfmt.render(t.allocator, .{ .pins = &pins }));
     }
     // A sha256 must be 64 lower-case hex digits; a sha512 SRI is not one.
-    const f2 = [_]lockfmt.File{.{ .platform = "p", .url = "https://h/x", .sha256 = fx.ABC_SRI512, .size = 1 }};
+    const f2 = [_]lockfmt.File{.{ .platform = "p", .url = "https://h.example/x", .sha256 = fx.ABC_SRI512, .size = 1 }};
     const p2 = [_]lockfmt.LockPin{.{ .name = "a", .version = "1", .files = &f2 }};
     try t.expectError(error.UnsafeValue, lockfmt.render(t.allocator, .{ .pins = &p2 }));
     // npm: a key that is not name@version, a sha256 where the sri512 goes.
@@ -116,7 +116,7 @@ test "parse refuses a lock that is not what render writes" {
     try parseFails("PINS = {}\nNPM = {}\n");
     try parseFails("KPIN_LOCK_VERSION = 1\nPINS = {}\nNPM = {}\nEVIL = {}\n");
     try parseFails("KPIN_LOCK_VERSION = 1\nPINS = {\"a\": {\"version\": \"1\", \"files\": {}, \"extra\": \"x\"}}\nNPM = {}\n");
-    try parseFails("KPIN_LOCK_VERSION = 1\nPINS = {\"a\": {\"version\": \"1\", \"files\": {\"p\": {\"url\": \"https://h/x\", \"sha256\": \"zz\", \"size\": 1}}}}\nNPM = {}\n");
+    try parseFails("KPIN_LOCK_VERSION = 1\nPINS = {\"a\": {\"version\": \"1\", \"files\": {\"p\": {\"url\": \"https://h.example/x\", \"sha256\": \"zz\", \"size\": 1}}}}\nNPM = {}\n");
     try parseFails("KPIN_LOCK_VERSION = 1\nPINS = {}\nNPM = {\"a@1\": {\"name\": \"a\"}}\n");
     try parseFails("KPIN_LOCK_VERSION = 1\nPINS = {\"a\\\"\": {}}\nNPM = {}\n");
     try parseFails("KPIN_LOCK_VERSION = 1\nPINS = {\n");
