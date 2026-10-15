@@ -106,7 +106,30 @@ zig_exe(
     visibility = ["PUBLIC"],
 )
 
-# The same for macOS arm64 (the darwin toolchain's `run_check`), built on a Linux worker.
+# doc_check (tools/doc_check.zig): the golden, symbol and copy checks of
+# mojo_doc_json (doc.bzl). Built behind its unit tests; the cases are
+# tests//negative/mojo_doc_json (a stale golden, missing symbols) and the docs
+# of the library packages.
+zig_test(
+    name = "doc_check_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/doc_check.zig"],
+    src = "tools/doc_check_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "doc_check",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/doc_check.zig",
+    unit_tests = [":doc_check_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
+
+# The same for macOS arm64 (the darwin toolchain's `act`), built on a Linux worker.
 zig_exe(
     name = "act_darwin",
     exec_compatible_with = LINUX_X86_64,
