@@ -20,7 +20,7 @@ pub const Entry = struct {
 pub const Table = struct {
     path: []const u8,
     line: usize,
-    entries: std.ArrayListUnmanaged(Entry) = .{},
+    entries: std.ArrayList(Entry) = .empty,
 
     pub fn get(self: *const Table, key: []const u8) ?Entry {
         for (self.entries.items) |e| if (std.mem.eql(u8, e.key, key)) return e;
@@ -52,7 +52,7 @@ pub fn stripComment(line: []const u8) []const u8 {
 /// `error.Parse` if there was any.
 pub fn parse(a: std.mem.Allocator, text: []const u8, diag: *Diag) error{Parse}![]Table {
     const before = diag.count();
-    var tables = std.ArrayListUnmanaged(Table){};
+    var tables = std.ArrayList(Table).empty;
     var cur: ?usize = null;
     var line_no: usize = 0;
     var it = std.mem.splitScalar(u8, text, '\n');

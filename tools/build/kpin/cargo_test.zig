@@ -379,11 +379,11 @@ const Env = struct {
         self.ar = std.heap.ArenaAllocator.init(t.allocator);
         self.tmp = std.testing.tmpDir(.{});
         self.dir = try self.tmp.dir.realpathAlloc(self.ar.allocator(), ".");
-        try self.tmp.dir.writeFile("Cargo.lock", lock_text);
-        try self.tmp.dir.writeFile("metadata.json", metadata_text);
-        try self.tmp.dir.writeFile("raw_metadata.json", raw_metadata_text);
-        try self.tmp.dir.writeFile("overrides.json", overrides_text);
-        try self.tmp.dir.writeFile("sizes.txt", sizes_text);
+        try self.tmp.dir.writeFile(.{ .sub_path = "Cargo.lock", .data = lock_text });
+        try self.tmp.dir.writeFile(.{ .sub_path = "metadata.json", .data = metadata_text });
+        try self.tmp.dir.writeFile(.{ .sub_path = "raw_metadata.json", .data = raw_metadata_text });
+        try self.tmp.dir.writeFile(.{ .sub_path = "overrides.json", .data = overrides_text });
+        try self.tmp.dir.writeFile(.{ .sub_path = "sizes.txt", .data = sizes_text });
         return self;
     }
 
@@ -404,16 +404,14 @@ const Env = struct {
     const Run = struct { code: u8, out: []const u8, err: []const u8 };
 
     fn kpin(self: *Env, extra: []const []const u8) Run {
-        var argv = std.ArrayListUnmanaged([]const u8){};
+        var argv = std.ArrayList([]const u8).empty;
         argv.appendSlice(self.a(), &.{ "cargo", "--cargo-lock", self.path("Cargo.lock"), "--metadata", self.path("metadata.json"), "--overrides", self.path("overrides.json"), "--sizes", self.path("sizes.txt"), "--rustc", "1.85.0", "--target", target, "--cargo-out", self.path("crates.bzl") }) catch @panic("oom");
         argv.appendSlice(self.a(), extra) catch @panic("oom");
-        var out = std.ArrayList(u8).init(self.a());
-        var err = std.ArrayList(u8).init(self.a());
+        var out = std.Io.Writer.Allocating.init(self.a());
+        var err = std.Io.Writer.Allocating.init(self.a());
         var http = fetch.HttpFetcher{ .allocator = self.a() };
-        const ow = out.writer();
-        const ew = err.writer();
-        const code = main.run(self.a(), argv.items, ow.any(), ew.any(), &http);
-        return .{ .code = code, .out = out.items, .err = err.items };
+        const code = main.run(self.a(), argv.items, &out.writer, &err.writer, &http);
+        return .{ .code = code, .out = out.written(), .err = err.written() };
     }
 
     fn read(self: *Env, name: []const u8) []const u8 {
@@ -441,7 +439,7 @@ test "a hand-edited output is caught by --check, naming the line, and is not rew
     const good = e.read("crates.bzl");
     const at = std.mem.indexOf(u8, good, "size = 1148").?;
     const edited = try std.mem.concat(e.a(), u8, &.{ good[0..at], "size = 1149", good[at + "size = 1148".len ..] });
-    try e.tmp.dir.writeFile("crates.bzl", edited);
+    try e.tmp.dir.writeFile(.{ .sub_path = "crates.bzl", .data = edited });
     const c = e.kpin(&.{"--check"});
     try t.expectEqual(@as(u8, 1), c.code);
     try t.expect(has(c.err, "is not what the inputs generate (first difference at line "));
@@ -457,7 +455,7 @@ test "a stale output is caught by --check when an input changes" {
     try t.expectEqual(@as(u8, 0), e.kpin(&.{}).code);
     // A new feature in the metadata, with the committed output untouched.
     const meta = try edit(e.a(), metadata_text, "\"extra_traits\"", "extra_traits", "extra_traits\",\n    \"align");
-    try e.tmp.dir.writeFile("metadata.json", meta);
+    try e.tmp.dir.writeFile(.{ .sub_path = "metadata.json", .data = meta });
     const c = e.kpin(&.{"--check"});
     try t.expectEqual(@as(u8, 1), c.code);
     try t.expect(has(c.err, "is not what the inputs generate"));
@@ -475,7 +473,7 @@ test "a refused input writes nothing and no stamp" {
     const e = try Env.init();
     defer e.deinit();
     const bad = try edit(e.a(), lock_text, "name = \"libc\"", "e" ** 64, "nope");
-    try e.tmp.dir.writeFile("Cargo.lock", bad);
+    try e.tmp.dir.writeFile(.{ .sub_path = "Cargo.lock", .data = bad });
     const r = e.kpin(&.{ "--stamp", e.path("stamp.json") });
     try t.expectEqual(@as(u8, 1), r.code);
     try t.expect(has(r.err, "libc 0.2.150"));
@@ -493,14 +491,14 @@ test "the stamp is a passing validation result, written on success only" {
 test "a missing flag is named, and the cargo flags belong to the cargo command" {
     const e = try Env.init();
     defer e.deinit();
-    var out = std.ArrayList(u8).init(e.a());
-    var err = std.ArrayList(u8).init(e.a());
+    var out = std.Io.Writer.Allocating.init(e.a());
+    var err = std.Io.Writer.Allocating.init(e.a());
     var http = fetch.HttpFetcher{ .allocator = e.a() };
-    const code = main.run(e.a(), &.{ "cargo", "--rustc", "1.85.0" }, out.writer().any(), err.writer().any(), &http);
+    const code = main.run(e.a(), &.{ "cargo", "--rustc", "1.85.0" }, &out.writer, &err.writer, &http);
     try t.expectEqual(@as(u8, 1), code);
-    try t.expect(has(err.items, "kpin cargo needs --cargo-lock"));
+    try t.expect(has(err.written(), "kpin cargo needs --cargo-lock"));
     err.clearRetainingCapacity();
-    const code2 = main.run(e.a(), &.{ "lock", "--rustc", "1.85.0" }, out.writer().any(), err.writer().any(), &http);
+    const code2 = main.run(e.a(), &.{ "lock", "--rustc", "1.85.0" }, &out.writer, &err.writer, &http);
     try t.expectEqual(@as(u8, 2), code2);
 }
 
@@ -509,7 +507,7 @@ test "kpin cargo --trim writes the trimmed metadata, which generates the same fi
     defer e.deinit();
     const r = e.kpin(&.{ "--trim", e.path("trimmed.json"), "--metadata", e.path("raw_metadata.json") });
     try t.expectEqual(@as(u8, 0), r.code);
-    try e.tmp.dir.writeFile("metadata.json", e.read("trimmed.json"));
+    try e.tmp.dir.writeFile(.{ .sub_path = "metadata.json", .data = e.read("trimmed.json") });
     try t.expectEqual(@as(u8, 0), e.kpin(&.{}).code);
     try t.expectEqualStrings(expected_text, e.read("crates.bzl"));
 }
@@ -518,13 +516,13 @@ test "a Cargo.lock checksum that differs from the base's for one crate version i
     const e = try Env.init();
     defer e.deinit();
     const moved = try edit(e.a(), lock_text, "name = \"libc\"", "e" ** 64, "f" ** 64);
-    try e.tmp.dir.writeFile("Cargo.lock", moved);
-    try e.tmp.dir.writeFile("base.lock", lock_text);
+    try e.tmp.dir.writeFile(.{ .sub_path = "Cargo.lock", .data = moved });
+    try e.tmp.dir.writeFile(.{ .sub_path = "base.lock", .data = lock_text });
     const r = e.kpin(&.{ "--previous-lock", e.path("base.lock") });
     try t.expectEqual(@as(u8, 3), r.code);
     try t.expect(has(r.err, "libc 0.2.150: Cargo.lock has checksum"));
     try t.expectError(error.FileNotFound, e.tmp.dir.access("crates.bzl", .{}));
     // The same lock is no alarm.
-    try e.tmp.dir.writeFile("Cargo.lock", lock_text);
+    try e.tmp.dir.writeFile(.{ .sub_path = "Cargo.lock", .data = lock_text });
     try t.expectEqual(@as(u8, 0), e.kpin(&.{ "--previous-lock", e.path("base.lock") }).code);
 }

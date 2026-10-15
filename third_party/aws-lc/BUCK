@@ -260,5 +260,8 @@ cxx_binary(
     preprocessor_flags = _SSL_TOOL_DEFINES + ["-DINTERNAL_TOOL"],
     deps = [":ssl"],
     target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],  # komira-limit:aws-lc-x86-64-linux
-    visibility = ["//src/tests/e2e/komira_tls_interop_e2e/..."],
+    visibility = [
+        "//src/tests/e2e/komira_tls_interop_e2e/...",
+        "//tools/build/kpin:tls_unit",
+    ],
 )

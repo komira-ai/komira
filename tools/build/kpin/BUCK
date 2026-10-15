@@ -40,6 +40,13 @@ _SUPPORT = [
 # loads and that pins.bzl reads it (the package fails to load otherwise).
 _ = SELFTEST
 
+# kpin builds with zig 0.15.2 (`:zig_next`): the std.http client of 0.12 cannot
+# complete a TLS handshake with the registries kpin updates from. The rest of
+# the tools stay on the zig of `:zig`. The executable is built behind the check
+# that the pin is the release it names.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+
 # ---- Unit tests: `zig test` of each, run as a build action -------------------
 
 [
@@ -49,7 +56,7 @@ _ = SELFTEST
         src = name + "_test.zig",
         imports = _SRCS + _SUPPORT,
         busybox = "komira//tools/build/toolchains:busybox",
-        zig = "komira//tools/build/toolchains:zig",
+        zig = _ZIG,
     )
     for name in [
         "cargo",
@@ -63,6 +70,26 @@ _ = SELFTEST
         "update",
     ]
 ]
+
+# The https client against a real TLS server on loopback (tls_test.zig): aws-lc's
+# `bssl s_server` pinned to TLS 1.2 and to TLS 1.3, with the throwaway
+# certificates of komira_http_core's tests. A validation, as it runs a built
+# tool; kpin is built behind it.
+zig_test(
+    name = "tls_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tls_test.zig",
+    imports = ["fetch.zig"],
+    data = {
+        "fixtures/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
+        "fixtures/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+        "fixtures/root_ca.pem": "//src/komira_http_core:tests/fixtures/tls/root_ca.pem",
+        "fixtures/smoke_cert.pem": "//src/komira_http_core:tests/fixtures/smoke_cert.pem",
+    },
+    exec_tools = {"BSSL": "//third_party/aws-lc:bssl"},
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
 
 # ---- The tool, built only when every unit test passed ------------------------
 
@@ -80,9 +107,11 @@ zig_exe(
         ":pins_unit",
         ":resolve_unit",
         ":toml_unit",
+        ":tls_unit",
         ":update_unit",
+        _ZIG_VERSION,
     ],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
     visibility = ["PUBLIC"],
 )
