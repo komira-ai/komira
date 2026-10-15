@@ -12,7 +12,26 @@ load(":no_shell.bzl", "no_shell")
 
 export_file(name = "readme_api_coverage.sh", visibility = ["PUBLIC"])
 
-export_file(name = "test_weld.sh", visibility = ["PUBLIC"])
+# test_weld (test_weld.zig): the action of the test_weld lint (test_weld.bzl,
+# test_weld.bxl). Built behind its unit tests.
+zig_test(
+    name = "test_weld_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["test_weld.zig"],
+    src = "test_weld_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "test_weld_bin",
+    exec_compatible_with = LINUX_X86_64,
+    src = "test_weld.zig",
+    unit_tests = [":test_weld_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
 
 # The Mojo lexer the lint tools share (mojo_tokens.zig): strings, comments,
 # triple-quoted strings over lines, bracket nesting.
@@ -69,7 +88,7 @@ tar_member(
 # The lint actions' own scripts.
 shell_lint(
     name = "shell_lint",
-    srcs = ["readme_api_coverage.sh", "test_weld.sh"],
+    srcs = ["readme_api_coverage.sh"],
     visibility = ["PUBLIC"],
 )
 
