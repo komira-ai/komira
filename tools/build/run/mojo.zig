@@ -51,8 +51,8 @@ fn usage(comptime fmt: []const u8, a: anytype) u8 {
 
 /// Parses argv after `mojo`; an exit status on a refusal.
 pub fn parse(alloc: std.mem.Allocator, argv: []const []const u8, a: *Args) ?u8 {
-    a.env = std.ArrayList([]const u8).init(alloc);
-    a.args = std.ArrayList([]const u8).init(alloc);
+    a.env = std.ArrayList([]const u8).empty;
+    a.args = std.ArrayList([]const u8).empty;
     var i: usize = 0;
     var have = [_]bool{false} ** 10;
     const names = [_][]const u8{ "--busybox", "--runtime-lib", "--label", "--test", "--marker", "--mem-cap-mib", "--deadline-s", "--runner-timeout-s", "--limit-s", "--limit-report" };
@@ -68,12 +68,12 @@ pub fn parse(alloc: std.mem.Allocator, argv: []const []const u8, a: *Args) ?u8 {
             for (reserved) |r| {
                 if (std.mem.eql(u8, name, r)) return usage("--env may not set {s}; the runner sets it", .{name});
             }
-            a.env.append(kv) catch return 2;
+            a.env.append(alloc, kv) catch return 2;
             continue;
         }
         if (std.mem.eql(u8, flag, "--arg")) {
             if (i + 1 >= argv.len) return usage("--arg needs a value", .{});
-            a.args.append(argv[i + 1]) catch return 2;
+            a.args.append(alloc, argv[i + 1]) catch return 2;
             continue;
         }
         const k = for (names, 0..) |n, j| {
@@ -145,37 +145,37 @@ fn envName(kv: []const u8) []const u8 {
 /// (and on macOS DYLD_LIBRARY_PATH), TMPDIR, TEST_TMPDIR, HOME and PWD set
 /// by the runner, then each --env in order (a later one of a name wins).
 pub fn buildEnv(alloc: std.mem.Allocator, inherited: []const []const u8, run: []const u8, lib: []const u8, cwd: []const u8, extra: []const []const u8) ![]const []const u8 {
-    var fixed = std.ArrayList([]const u8).init(alloc);
-    try fixed.append(try std.fmt.allocPrint(alloc, "PATH={s}/bin", .{run}));
-    try fixed.append(try std.fmt.allocPrint(alloc, "LD_LIBRARY_PATH={s}", .{lib}));
-    if (sys.is_darwin) try fixed.append(try std.fmt.allocPrint(alloc, "DYLD_LIBRARY_PATH={s}", .{lib}));
-    try fixed.append(try std.fmt.allocPrint(alloc, "TMPDIR={s}/tmp", .{run}));
-    try fixed.append(try std.fmt.allocPrint(alloc, "TEST_TMPDIR={s}/tmp", .{run}));
-    try fixed.append(try std.fmt.allocPrint(alloc, "HOME={s}/home", .{run}));
-    try fixed.append(try std.fmt.allocPrint(alloc, "PWD={s}", .{cwd}));
-    var all = std.ArrayList([]const u8).init(alloc);
+    var fixed = std.ArrayList([]const u8).empty;
+    try fixed.append(alloc, try std.fmt.allocPrint(alloc, "PATH={s}/bin", .{run}));
+    try fixed.append(alloc, try std.fmt.allocPrint(alloc, "LD_LIBRARY_PATH={s}", .{lib}));
+    if (sys.is_darwin) try fixed.append(alloc, try std.fmt.allocPrint(alloc, "DYLD_LIBRARY_PATH={s}", .{lib}));
+    try fixed.append(alloc, try std.fmt.allocPrint(alloc, "TMPDIR={s}/tmp", .{run}));
+    try fixed.append(alloc, try std.fmt.allocPrint(alloc, "TEST_TMPDIR={s}/tmp", .{run}));
+    try fixed.append(alloc, try std.fmt.allocPrint(alloc, "HOME={s}/home", .{run}));
+    try fixed.append(alloc, try std.fmt.allocPrint(alloc, "PWD={s}", .{cwd}));
+    var all = std.ArrayList([]const u8).empty;
     outer: for (inherited) |kv| {
         const n = envName(kv);
         for (fixed.items) |f| if (std.mem.eql(u8, envName(f), n)) continue :outer;
         for (extra) |f| if (std.mem.eql(u8, envName(f), n)) continue :outer;
-        try all.append(kv);
+        try all.append(alloc, kv);
     }
-    try all.appendSlice(fixed.items);
+    try all.appendSlice(alloc, fixed.items);
     for (extra, 0..) |kv, i| {
         // A later --env of the same name replaces this one.
         var later = false;
         for (extra[i + 1 ..]) |k2| {
             if (std.mem.eql(u8, envName(k2), envName(kv))) later = true;
         }
-        if (!later) try all.append(kv);
+        if (!later) try all.append(alloc, kv);
     }
     return all.items;
 }
 
 /// The action's environment, as the test inherits it.
 pub fn inheritedEnv(alloc: std.mem.Allocator) ![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
-    for (std.os.environ) |e| try out.append(std.mem.span(e));
+    var out = std.ArrayList([]const u8).empty;
+    for (std.os.environ) |e| try out.append(alloc, std.mem.span(e));
     return out.items;
 }
 
@@ -203,9 +203,9 @@ fn runParsed(alloc: std.mem.Allocator, a: *Args) !u8 {
     };
     const root = bin[0..cut];
 
-    var expanded = std.ArrayList([]const u8).init(alloc);
-    try expanded.append(bin);
-    for (a.args.items) |v| try expanded.append(try util.replaceAll(alloc, v, action_dir_token, here));
+    var expanded = std.ArrayList([]const u8).empty;
+    try expanded.append(alloc, bin);
+    for (a.args.items) |v| try expanded.append(alloc, try util.replaceAll(alloc, v, action_dir_token, here));
 
     const run = try util.makeTempDir(alloc, here, ".komira_test.");
     defer util.removeTree(run);
@@ -291,8 +291,8 @@ fn coverageExpired(alloc: std.mem.Allocator, a: *Args, o: supervise.Outcome, log
         return red(a.label, "cov_run: /proc is not readable as this run's own: /proc/{d}/stat and /proc/self/stat must both start with this process's pid {d}, and start with '{d}' and '{d}'. So whether the time limit's kill reached every process of the run cannot be checked.", .{ me, me, seen[0], seen[1] });
     }
     if (o.survivors.len > 0) {
-        var list = std.ArrayList(u8).init(alloc);
-        for (o.survivors) |m| list.writer().print("{d} {c} {s};", .{ m.pid, m.state, m.comm }) catch {};
+        var list = std.ArrayList(u8).empty;
+        for (o.survivors) |m| list.writer(alloc).print("{d} {c} {s};", .{ m.pid, m.state, m.comm }) catch {};
         return red(a.label, "After the time limit ({d} s), processes of the coverage run survived the kill of its process group {d} (pid state comm: {s}). The limit must kill the whole group, kcov, the test and every child it left; they are killed now.", .{ a.limit_s.?, o.pid, list.items });
     }
     util.err("------------------------------------------------------------------ output (last 200 lines)\n", .{});

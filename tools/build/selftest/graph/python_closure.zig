@@ -168,17 +168,17 @@ const Finding = struct { key: []const u8, why: []const u8, subject: []const u8, 
 
 /// Checks `facts`. `texts` holds the contents of each `scan` path.
 pub fn pythonClosure(a: std.mem.Allocator, cell: []const u8, facts: []const u8, texts: *const std.StringHashMap([]const u8)) !Outcome {
-    var refused = std.ArrayList([]const u8).init(a);
-    var nodes = std.ArrayList(Node).init(a);
+    var refused = std.ArrayList([]const u8).empty;
+    var nodes = std.ArrayList(Node).empty;
     var index = std.StringHashMap(usize).init(a);
-    var files = std.ArrayList([]const u8).init(a);
-    var scans = std.ArrayList([]const u8).init(a);
-    var surface = std.ArrayList([]const u8).init(a);
-    var ceiling = std.ArrayList([]const u8).init(a);
+    var files = std.ArrayList([]const u8).empty;
+    var scans = std.ArrayList([]const u8).empty;
+    var surface = std.ArrayList([]const u8).empty;
+    var ceiling = std.ArrayList([]const u8).empty;
     const Edge = struct { from: []const u8, to: []const u8 };
-    var edges = std.ArrayList(Edge).init(a);
+    var edges = std.ArrayList(Edge).empty;
     const Src = struct { node: []const u8, path: []const u8 };
-    var srcs = std.ArrayList(Src).init(a);
+    var srcs = std.ArrayList(Src).empty;
     var n_facts: usize = 0;
 
     var it = std.mem.splitScalar(u8, facts, '\n');
@@ -190,28 +190,28 @@ pub fn pythonClosure(a: std.mem.Allocator, cell: []const u8, facts: []const u8, 
         const kind = f[0];
         const want: usize = if (std.mem.eql(u8, kind, "node")) 4 else if (std.mem.eql(u8, kind, "dep") or std.mem.eql(u8, kind, "src")) 3 else 2;
         if (n != want) {
-            try refused.append(try std.fmt.allocPrint(a, "a malformed fact: {s}", .{line}));
+            try refused.append(a, try std.fmt.allocPrint(a, "a malformed fact: {s}", .{line}));
             continue;
         }
         if (std.mem.eql(u8, kind, "node")) {
             const g = try index.getOrPut(f[1]);
             if (g.found_existing) continue;
             g.value_ptr.* = nodes.items.len;
-            try nodes.append(.{ .label = f[2], .kind = f[3], .deps = std.ArrayList(usize).init(a) });
+            try nodes.append(a, .{ .label = f[2], .kind = f[3], .deps = std.ArrayList(usize).empty });
         } else if (std.mem.eql(u8, kind, "dep")) {
-            try edges.append(.{ .from = f[1], .to = f[2] });
+            try edges.append(a, .{ .from = f[1], .to = f[2] });
         } else if (std.mem.eql(u8, kind, "src")) {
-            try srcs.append(.{ .node = f[1], .path = f[2] });
+            try srcs.append(a, .{ .node = f[1], .path = f[2] });
         } else if (std.mem.eql(u8, kind, "file")) {
-            try files.append(f[1]);
+            try files.append(a, f[1]);
         } else if (std.mem.eql(u8, kind, "scan")) {
-            try scans.append(f[1]);
+            try scans.append(a, f[1]);
         } else if (std.mem.eql(u8, kind, "surface")) {
-            try surface.append(f[1]);
+            try surface.append(a, f[1]);
         } else if (std.mem.eql(u8, kind, "ceiling")) {
-            try ceiling.append(f[1]);
+            try ceiling.append(a, f[1]);
         } else {
-            try refused.append(try std.fmt.allocPrint(a, "a malformed fact: {s}", .{line}));
+            try refused.append(a, try std.fmt.allocPrint(a, "a malformed fact: {s}", .{line}));
         }
     }
 
@@ -221,10 +221,10 @@ pub fn pythonClosure(a: std.mem.Allocator, cell: []const u8, facts: []const u8, 
         const from = index.get(e.from);
         const to = index.get(e.to);
         if (from == null or to == null) {
-            try refused.append(try std.fmt.allocPrint(a, "the facts are not a closure: the dependency {s} -> {s} names a node they do not hold", .{ e.from, e.to }));
+            try refused.append(a, try std.fmt.allocPrint(a, "the facts are not a closure: the dependency {s} -> {s} names a node they do not hold", .{ e.from, e.to }));
             continue;
         }
-        try nodes.items[from.?].deps.append(to.?);
+        try nodes.items[from.?].deps.append(a, to.?);
     }
     for (nodes.items) |*nd| {
         nd.data_tree = std.mem.eql(u8, kindName(nd.kind), "doc_tree");
@@ -235,14 +235,14 @@ pub fn pythonClosure(a: std.mem.Allocator, cell: []const u8, facts: []const u8, 
     }
     for (srcs.items) |s| {
         const i = index.get(s.node) orelse {
-            try refused.append(try std.fmt.allocPrint(a, "the facts are not a closure: the source {s} is of a node they do not hold ({s})", .{ s.path, s.node }));
+            try refused.append(a, try std.fmt.allocPrint(a, "the facts are not a closure: the source {s} is of a node they do not hold ({s})", .{ s.path, s.node }));
             continue;
         };
         if (std.mem.eql(u8, kindName(nodes.items[i].kind), BOOTSTRAP_HELPER)) continue;
         if (nodes.items[i].own == null and std.mem.endsWith(u8, s.path, ".py")) nodes.items[i].own = try std.fmt.allocPrint(a, "it has the Python source {s}", .{s.path});
     }
 
-    var found = std.ArrayList(Finding).init(a);
+    var found = std.ArrayList(Finding).empty;
     var seen = std.StringHashMap(void).init(a);
     for (nodes.items, 0..) |nd, i| {
         const m = reach(nodes.items, i) orelse continue;
@@ -250,33 +250,33 @@ pub fn pythonClosure(a: std.mem.Allocator, cell: []const u8, facts: []const u8, 
         if ((try seen.getOrPut(key)).found_existing) continue;
         const marker = nodes.items[m];
         const why = if (m == i) marker.own.? else try std.fmt.allocPrint(a, "its closure holds {s}: {s}", .{ marker.label, marker.own.? });
-        try found.append(.{ .key = key, .why = why, .subject = packageOf(nd.label), .in_cell = std.mem.eql(u8, cellOf(nd.label), cell) });
+        try found.append(a, .{ .key = key, .why = why, .subject = packageOf(nd.label), .in_cell = std.mem.eql(u8, cellOf(nd.label), cell) });
     }
     for (files.items) |p| {
         if (!std.mem.endsWith(u8, p, ".py")) continue;
         const key = try std.fmt.allocPrint(a, "file {s}", .{p});
         if ((try seen.getOrPut(key)).found_existing) continue;
-        try found.append(.{ .key = key, .why = "a Python file", .subject = p, .in_cell = true });
+        try found.append(a, .{ .key = key, .why = "a Python file", .subject = p, .in_cell = true });
     }
     for (scans.items) |p| {
         const text = texts.get(p) orelse {
-            try refused.append(try std.fmt.allocPrint(a, "cannot read the scanned file {s}", .{p}));
+            try refused.append(a, try std.fmt.allocPrint(a, "cannot read the scanned file {s}", .{p}));
             continue;
         };
         const textproto = std.mem.endsWith(u8, p, ".textproto");
         var lines = std.mem.splitScalar(u8, text, '\n');
         var no: usize = 0;
-        var hits = std.ArrayList(u8).init(a);
+        var hits = std.ArrayList(u8).empty;
         while (lines.next()) |l| {
             no += 1;
             const hit = if (textproto) textprotoRunsPython(l) else workflowRunsPython(l);
             if (!hit) continue;
-            try hits.writer().print("{s}line {d}: {s}", .{ @as([]const u8, if (hits.items.len > 0) "; " else ""), no, std.mem.trim(u8, l, " \t\r") });
+            try hits.writer(a).print("{s}line {d}: {s}", .{ @as([]const u8, if (hits.items.len > 0) "; " else ""), no, std.mem.trim(u8, l, " \t\r") });
         }
         if (hits.items.len == 0) continue;
         const key = try std.fmt.allocPrint(a, "exec {s}", .{p});
         if ((try seen.getOrPut(key)).found_existing) continue;
-        try found.append(.{ .key = key, .why = try std.fmt.allocPrint(a, "it runs Python ({s})", .{hits.items}), .subject = p, .in_cell = true });
+        try found.append(a, .{ .key = key, .why = try std.fmt.allocPrint(a, "it runs Python ({s})", .{hits.items}), .subject = p, .in_cell = true });
     }
 
     // The allowlist.
@@ -285,7 +285,7 @@ pub fn pythonClosure(a: std.mem.Allocator, cell: []const u8, facts: []const u8, 
     var allowed: usize = 0;
     for (ceiling.items, 0..) |c, i| {
         for (ceiling.items[0..i]) |d| if (std.mem.eql(u8, c, d)) {
-            try refused.append(try std.fmt.allocPrint(a, "the ceiling names `{s}` twice", .{c}));
+            try refused.append(a, try std.fmt.allocPrint(a, "the ceiling names `{s}` twice", .{c}));
             break;
         };
     }
@@ -304,13 +304,13 @@ pub fn pythonClosure(a: std.mem.Allocator, cell: []const u8, facts: []const u8, 
             allowed += 1;
             continue;
         }
-        try refused.append(try std.fmt.allocPrint(a, "{s}: {s}; Python serves only the Python surface", .{ fd.key, fd.why }));
+        try refused.append(a, try std.fmt.allocPrint(a, "{s}: {s}; Python serves only the Python surface", .{ fd.key, fd.why }));
     }
     for (ceiling.items, 0..) |c, i| {
         if (used[i]) continue;
-        try refused.append(try std.fmt.allocPrint(a, "the ceiling entry `{s}` is no longer found: delete it (the ceiling only shrinks)", .{c}));
+        try refused.append(a, try std.fmt.allocPrint(a, "the ceiling entry `{s}` is no longer found: delete it (the ceiling only shrinks)", .{c}));
     }
-    return .{ .facts = n_facts, .nodes = nodes.items.len, .files = files.items.len, .scanned = scans.items.len, .allowed = allowed, .refused = try refused.toOwnedSlice() };
+    return .{ .facts = n_facts, .nodes = nodes.items.len, .files = files.items.len, .scanned = scans.items.len, .allowed = allowed, .refused = try refused.toOwnedSlice(a) };
 }
 
 // ---- Unit tests: facts the check must refuse, and ones it must pass. ----
