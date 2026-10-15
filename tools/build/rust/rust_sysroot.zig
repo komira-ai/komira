@@ -137,6 +137,7 @@ pub fn takeLibs(out: std.fs.Dir, libs: std.fs.Dir, name: *[std.fs.MAX_NAME_BYTES
         if (dir.statFile(e.name)) |_| {
             @memcpy(name[0..e.name.len], e.name);
             name_len.* = e.name.len;
+            return error.Duplicate;
         } else |err| switch (err) {
             error.FileNotFound => {},
             else => return err,
