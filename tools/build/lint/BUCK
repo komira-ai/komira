@@ -8,6 +8,7 @@ load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs")
 load(":defs.bzl", "shell_lint", "tar_member")
 load(":interpreter_budget.bzl", "interpreter_budget")
+load(":no_shell.bzl", "no_shell")
 
 export_file(name = "readme_api_coverage.sh", visibility = ["PUBLIC"])
 
@@ -85,5 +86,19 @@ interpreter_budget(
     allowlist = "tools/build/lint/interpreter_allowlist.tsv",
     cells = {"tools/build/tests": "tests//:doc_tree"},
     dotfiles = ["//:github_tree"],
+    tree = "//:doc_tree",
+)
+
+# The no-shell list (no_shell.bzl): no BUCK, .bzl or .bxl file of the repository
+# starts a shell beyond the counts no_shell_list.tsv states per file and
+# category, and every shell script has a `script` row (still an action's or
+# test's, to be ported) or sits in a place a `human` row names. The same
+# trees as the interpreter list. A row comes out when its site or script is
+# ported to Zig; a row is added only with a reason review accepts.
+no_shell(
+    name = "no_shell",
+    cells = {"tools/build/tests": "tests//:doc_tree"},
+    dotfiles = ["//:github_tree"],
+    list = "tools/build/lint/no_shell_list.tsv",
     tree = "//:doc_tree",
 )
