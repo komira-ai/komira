@@ -73,7 +73,7 @@ tools/build/tests/proto_tests.sh	build system self-tests: to port to Zig
 tools/build/tests/run_tests.sh	build system self-tests: to port to Zig
 tools/build/tests/rust_tests.sh	build system self-tests: to port to Zig
 tools/build/tests/tool_lib.sh	build system self-tests: to port to Zig
-tools/build/third_party_srcs/upstream_versions.sh	toolchain or vendored-source builder or check: to port to Zig
+tools/build/third_party_srcs/upstream_versions.sh	a report people run by hand (pinned downloads against the newest releases); never a build or test action
 tools/build/toolchains/kcov/kcov_build.sh	toolchain or vendored-source builder or check: to port to Zig
 tools/build/toolchains/kcov/kcov_check.sh	toolchain or vendored-source builder or check: to port to Zig
 tools/build/toolchains/llvm_branch/check.sh	toolchain or vendored-source builder or check: to port to Zig

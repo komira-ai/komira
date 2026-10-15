@@ -82,7 +82,6 @@ use	tools/build/tests/re_probe/probe.bzl	busybox_sh	2	shell action; to port to Z
 use	tools/build/tests/re_probe/probe.bzl	shell_path	1	a shell path written into an action or launcher script; to port to Zig
 use	tools/build/tests/src/tests/coverage/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/third_party_srcs/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/third_party_srcs/defs.bzl	sh_argv	8	shell action; to port to Zig (no-shell series)
 use	tools/build/toolchains/darwin/BUCK	sh_script	3	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/toolchains/kcov/BUCK	sh_script	7	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/toolchains/kcov/defs.bzl	sh_argv	2	shell action; to port to Zig (no-shell series)
@@ -149,7 +148,7 @@ human	tools/build/tests/proto_tests.sh	-	-	client-side driver or fixture regener
 script	tools/build/tests/run_tests.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 human	tools/build/tests/rust_tests.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
 human	tools/build/tests/tool_lib.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
-script	tools/build/third_party_srcs/upstream_versions.sh	-	-	script of an action or test; to port to Zig (no-shell series)
+human	tools/build/third_party_srcs/upstream_versions.sh	-	-	a report people run by hand (upstream_versions.sh compares the pinned downloads with the newest releases); it gates nothing and is no build or test action
 script	tools/build/toolchains/kcov/kcov_build.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 script	tools/build/toolchains/kcov/kcov_check.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 script	tools/build/toolchains/llvm_branch/check.sh	-	-	script of an action or test; to port to Zig (no-shell series)

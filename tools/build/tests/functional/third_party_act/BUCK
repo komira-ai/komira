@@ -1,4 +1,4 @@
-load("@komira//tools/build/mojo:toolchain.bzl", "zig_test")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
 # The process behaviour of `third_party_act` (tools/build/third_party_srcs/
@@ -8,14 +8,26 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 # tools/build/third_party_srcs:third_party_act_unit; every botocore_model and
 # third_party_srcs of the repository runs through it too.
 
+zig_exe(
+    name = "fake_gen",
+    exec_compatible_with = LINUX_X86_64,
+    src = "fake_gen.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
 zig_test(
     name = "driver",
     exec_compatible_with = LINUX_X86_64,
     exec_tools = {
+        "FAKE_GEN": ":fake_gen",
         "THIRD_PARTY_ACT": "komira//tools/build/third_party_srcs:third_party_act",
     },
     src = "driver_test.zig",
-    deps = ["tests//functional/driver_kit:driver_kit"],
+    deps = [
+        "komira//tools/build/node_tools:node_tartest",
+        "tests//functional/driver_kit:driver_kit",
+    ],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
 )
