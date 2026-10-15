@@ -48,7 +48,7 @@ pub fn clearSitePackages(a: std.mem.Allocator, root: std.fs.Dir) !void {
         for (found.items) |e| {
             if (e.name.len > 0 and e.name[0] == '.') continue;
             if (e.kind == .directory) {
-                continue;
+                try site.deleteTree(e.name);
             } else {
                 try site.deleteFile(e.name);
             }
