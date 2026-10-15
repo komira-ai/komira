@@ -288,7 +288,7 @@ pub fn main() !void {
         try std.fs.cwd().makePath(work);
         if (plan.data) |m| try layData(readManifest(a, m), work);
         if (plan.tools) |m| {
-            for (readManifest(a, m)) |e| try env.put(e.left, try abs(a, cwd, e.right));
+            for (readManifest(a, m)) |e| try env.put(e.left, e.right);
         }
     }
 
