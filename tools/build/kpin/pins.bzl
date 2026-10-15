@@ -12,9 +12,9 @@ def _need(d, key, what):
     return d[key]
 
 def pin_kwargs(pins, pin, platform, **extra):
-    """kwargs for `pinned_file` that fetch pin `pin` for `platform` from the `PINS` of a lock; `extra` (name, visibility, ...) is added. The lock's `size` is not passed: `pinned_file` has no such attribute yet (`pin_size` returns it)."""
+    """kwargs for `pinned_file` that fetch pin `pin` for `platform` from the `PINS` of a lock; `extra` (name, visibility, ...) is added. The size is passed as `size_bytes`, which `pinned_file` requires."""
     files = _need(_need(pins, pin, "pin `{}`".format(pin))["files"], platform, "file `{}` of pin `{}`".format(platform, pin))
-    kw = {"sha256": files["sha256"], "url": files["url"]}
+    kw = {"sha256": files["sha256"], "size_bytes": files["size"], "url": files["url"]}
     kw.update(extra)
     return kw
 
@@ -27,8 +27,8 @@ def pin_size(pins, pin, platform):
     return _need(_need(pins, pin, "pin `{}`".format(pin))["files"], platform, "file `{}` of pin `{}`".format(platform, pin))["size"]
 
 def npm_kwargs(npm, key, **extra):
-    """kwargs for `pinned_file` that fetch the npm tarball `name@version` from the `NPM` of a lock; `extra` is added. The sha256 is the one the farm's CAS keys on, not npm's sha512 (which is `npm[key]["sri512"]`)."""
+    """kwargs for `pinned_file` that fetch the npm tarball `name@version` from the `NPM` of a lock; `extra` is added. The sha256 and `size_bytes` are the ones the farm's CAS keys on, not npm's sha512 (which is `npm[key]["sri512"]`)."""
     e = _need(npm, key, "npm package `{}`".format(key))
-    kw = {"sha256": e["sha256"], "url": e["url"]}
+    kw = {"sha256": e["sha256"], "size_bytes": e["size"], "url": e["url"]}
     kw.update(extra)
     return kw

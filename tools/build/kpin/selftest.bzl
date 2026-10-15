@@ -13,6 +13,7 @@ _expect(
     {
         "name": "zig",
         "sha256": "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad",
+        "size_bytes": 45480516,
         "url": "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz",
     },
 )
@@ -23,6 +24,7 @@ _expect(
     npm_kwargs(EXAMPLE_NPM, "@scope/pkg@2.0.1"),
     {
         "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "size_bytes": 3,
         "url": "https://registry.npmjs.org/@scope/pkg/-/pkg-2.0.1.tgz",
     },
 )
