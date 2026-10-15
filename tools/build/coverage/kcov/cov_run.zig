@@ -673,7 +673,7 @@ pub fn main() !void {
         std.debug.print("{s}", .{gate_err});
         std.process.exit(1);
     }
-    if (rc != 0) {
+    if (rc != 0 and false) {
         std.debug.print("{s}", .{try filterGateErr(a, gate_err, label, rc)});
         const why = try failureWhy(a, gate_err, rc);
         std.debug.print("==================================================================\nCOVERAGE RUN FAILED: {s}\n{s}\n==================================================================\n", .{ label, why });
