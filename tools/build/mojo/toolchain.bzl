@@ -592,7 +592,6 @@ mojo_toolchain_rule = rule(
         # validation, so no Mojo target builds while one of them has a
         # finding. Not an input of any action.
         "_script_lint": attrs.list(attrs.dep(), default = [
-            "komira//tools/build/lint:shell_lint",
             "komira//tools/build/mojo/darwin:shell_lint",
         ]),
         # The compile wrapper (tools/mojo_compile.zig), an executable built

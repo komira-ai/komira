@@ -1,6 +1,6 @@
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "row")
-load(":toolchain.bzl", "zig_bootstrap_exe", "zig_exe", "zig_test")
+load(":toolchain.bzl", "zig_bootstrap_exe", "zig_exe", "zig_module", "zig_test")
 
 # Scripts and tool sources used by the Mojo rules.
 # The compile wrapper (tools/mojo_compile.zig; docs/design/zig_compile_wrapper.md):
@@ -184,6 +184,13 @@ zig_test(
     src = "tools/proto_fixture_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
+)
+
+# unified_diff (tools/unified_diff.zig) as a module other packages import by name.
+zig_module(
+    name = "unified_diff",
+    src = "tools/unified_diff.zig",
+    visibility = ["//tools/build/lint:"],
 )
 
 zig_exe(

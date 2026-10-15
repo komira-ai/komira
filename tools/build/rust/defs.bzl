@@ -124,11 +124,6 @@ rust_toolchain = rule(
         "zig": attrs.exec_dep(),
         "_gate": attrs.exec_dep(default = "komira//tools/build/run:gate"),
         "_act": attrs.exec_dep(default = "komira//tools/build/mojo:act"),
-        # The lint of the scripts the Rust rules run: a validation (see
-        # tools/build/lint/defs.bzl), not an input of any action.
-        "_script_lint": attrs.list(attrs.dep(), default = [
-            "komira//tools/build/lint:shell_lint",
-        ]),
         # The compile launcher (tools/build/rust/rustc_launch.zig; no shell).
         "_launcher": attrs.exec_dep(default = "komira//tools/build/rust:rustc_launch"),
     },

@@ -26,9 +26,6 @@ use	tools/build/cloud/aws.bzl	sh_argv	3	shell action; to port to Zig (no-shell s
 use	tools/build/coverage/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/coverage/defs.bzl	sh_argv	1	shell action; to port to Zig (no-shell series)
 use	tools/build/coverage/kcov/defs.bzl	sh_argv	1	shell action; to port to Zig (no-shell series)
-use	tools/build/lint/BUCK	sh_script	2	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/lint/readme_api_coverage.bzl	sh_argv	2	shell action; to port to Zig (no-shell series)
-use	tools/build/lint/readme_api_coverage.bzl	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/mojo/darwin/BUCK	sh_script	2	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/mojo/toolchain.bzl	busybox_sh	2	shell action; to port to Zig (no-shell series)
 use	tools/build/mojo/toolchain.bzl	sh_argv	3	shell action; to port to Zig (no-shell series)
@@ -96,7 +93,6 @@ script	src/tests/conformance/komira_git_protocol_conformance/capture.sh	-	-	scri
 script	third_party/git/git_build.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 script	third_party/git/git_check.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 human	tools/build/coverage/census.sh	-	-	measures every library with ./buck2 by hand at the top of a checkout (run, collect); not an action (the build actions are census_render)
-script	tools/build/lint/readme_api_coverage.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 script	tools/build/mojo/darwin/busybox.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 script	tools/build/package/kcov_guard.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 script	tools/build/package/list_conda_targets.sh	-	-	script of an action or test; to port to Zig (no-shell series)

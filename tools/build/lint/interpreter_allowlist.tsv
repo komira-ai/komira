@@ -23,7 +23,6 @@ src/tests/e2e/komira_tls_interop_e2e/cpython_peer.py	interop peer: a TLS peer on
 third_party/git/git_build.sh	toolchain or vendored-source builder or check: to port to Zig
 third_party/git/git_check.sh	toolchain or vendored-source builder or check: to port to Zig
 tools/build/coverage/census.sh	coverage and mutation tooling: to port to Zig
-tools/build/lint/readme_api_coverage.sh	lint or validation: to port to Zig
 tools/build/mojo/darwin/busybox.sh	a thin wrapper: the darwin applet allowlist
 tools/build/package/kcov_guard.sh	packaging: to port to Zig
 tools/build/package/list_conda_targets.sh	packaging: to port to Zig
