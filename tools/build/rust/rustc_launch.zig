@@ -230,7 +230,7 @@ pub fn main() !void {
             },
             .has_cwd => {
                 std.debug.print("rustc_launch: {s} contains this action's working directory ({s})\n", .{ plan.output, cwd });
-                rc = 5;
+                rc = 4;
             },
         }
     }
