@@ -7,6 +7,10 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("//functional/coverage:defs.bzl", "cov_branch_check", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_zig_tree", "kcov_stub_dir")
 
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+
 # A coverage link whose relocator rewrites nothing (test 41). Its [coverage]
 # must fail with mojo_compile's exit 4, "contains this action's working
 # directory": the wrapper's check of every output stays on for coverage
@@ -16,7 +20,7 @@ zig_exe(
     src = "noop_relocate.zig",
     busybox = "komira//tools/build/toolchains:busybox",
     exec_compatible_with = LINUX_X86_64,
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 cov_link_dir(
@@ -241,7 +245,7 @@ zig_exe(
     src = "kcov_refused.zig",
     busybox = "komira//tools/build/toolchains:busybox",
     exec_compatible_with = LINUX_X86_64,
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 kcov_stub_dir(
@@ -872,7 +876,7 @@ _TOOL_SRCS = [
             imports = [":{}_src[{}]".format(name, f) for f in _TOOL_SRCS],
             src = ":{}_src[cov_branch]".format(name),
             busybox = "komira//tools/build/toolchains:busybox",
-            zig = "komira//tools/build/toolchains:zig",
+            zig = _ZIG,
         ),
         cov_branch_dir(
             name = "{}_branch".format(name),
@@ -954,7 +958,7 @@ zig_exe(
     imports = [":branchlinkline_link_src[{}]".format(f) for f in _TOOL_SRCS],
     src = ":branchlinkline_link_src[cov_branch]",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 cov_branch_dir(
@@ -981,7 +985,7 @@ cov_link_line_check(
 # "the counters of quarter are '...' (sorted), not '0,2000000,2000000,6000000'".
 cov_plant(
     name = "branchnonatomic_link_zig",
-    expr = "s|try v.appendSlice(&.{ \"-mllvm\", \"-instrprof-atomic-counter-update-all\" });||",
+    expr = "s|try v.appendSlice(alloc, &.{ \"-mllvm\", \"-instrprof-atomic-counter-update-all\" });||",
     out = "cov_branch_link.zig",
     src = _BRANCH_SRC + "cov_branch_link.zig",
 )
@@ -1000,7 +1004,7 @@ zig_exe(
     imports = [":branchnonatomic_link_src[{}]".format(f) for f in _TOOL_SRCS],
     src = ":branchnonatomic_link_src[cov_branch]",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 cov_branch_dir(
