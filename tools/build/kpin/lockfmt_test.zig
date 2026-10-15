@@ -67,7 +67,7 @@ test "render refuses a value that could be code: a quote, a backslash, a newline
         "https://h.example/x\\",
         "https://h.example/x\ny",
         "https://h.example/x y",
-        "ftp://h/x",
+        "ftp://h.example/x",
         "https://",
     };
     for (bad_urls) |u| {

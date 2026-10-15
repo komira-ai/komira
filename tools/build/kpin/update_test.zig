@@ -261,7 +261,7 @@ test "urlAllowed" {
     try t.expect(!fetch.urlAllowed("http://127.0.0.1@evil.example/a", true));
     try t.expect(!fetch.urlAllowed("https://user@host.example/a", false));
     try t.expect(!fetch.urlAllowed("https:///a", false));
-    try t.expect(!fetch.urlAllowed("ftp://h/a", false));
+    try t.expect(!fetch.urlAllowed("ftp://h.example/a", false));
     try t.expect(!fetch.urlAllowed("file:///etc/passwd", true));
 }
 

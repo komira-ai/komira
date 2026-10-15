@@ -49,7 +49,7 @@ test "expand: only {version} and {platform}" {
     try t.expectEqualStrings("https://h.example/1.0/p-linux", try pins.expand(a, "https://h.example/{version}/p-{platform}", "1.0", "linux"));
     try t.expectError(error.BadTemplate, pins.expand(a, "https://h.example/{os}", "1", "l"));
     try t.expectError(error.BadTemplate, pins.expand(a, "https://h.example/}", "1", "l"));
-    try t.expectError(error.BadTemplate, pins.expand(a, "ftp://h/x", "1", "l"));
+    try t.expectError(error.BadTemplate, pins.expand(a, "ftp://h.example/x", "1", "l"));
     // A token cannot smuggle a quote into the URL.
     try t.expectError(error.BadTemplate, pins.expand(a, "https://h.example/{platform}", "1", "l\"x"));
 }
@@ -101,7 +101,7 @@ test "load refusals: each validated field" {
     try refuses("[a]\nversion = 1\nurl = \"https://h.example/x\"" ++ plat, "must be a string");
     try refuses("[a]\nversion = \"1\"\nurl = 5" ++ plat, "must be a string");
     // latest_url / latest_field / version_prefix.
-    try refuses(head ++ "latest_url = \"ftp://h/l\"\nlatest_field = \"v\"" ++ plat, "latest_url");
+    try refuses(head ++ "latest_url = \"ftp://h.example/l\"\nlatest_field = \"v\"" ++ plat, "latest_url");
     try refuses(head ++ "latest_url = \"https://h.example/l\"\nlatest_field = \"a..b\"" ++ plat, "latest_field");
     try refuses(head ++ "latest_url = \"https://h.example/l\"\nlatest_field = \".a\"" ++ plat, "latest_field");
     try refuses(head ++ "version_prefix = \"v$\"" ++ plat, "version_prefix");
