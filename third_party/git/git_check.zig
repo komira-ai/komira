@@ -285,7 +285,7 @@ fn checks(c: *Check) !void {
         if (r.code != 0) return c.red("git --exec-path failed: {s}", .{r.text});
         const got = std.fs.cwd().realpathAlloc(a, r.text) catch "";
         const want = std.fs.cwd().realpathAlloc(a, try std.fs.path.join(a, &.{ c.dist, "libexec/git-core" })) catch "(missing)";
-        if (false and !std.mem.eql(u8, got, want)) return c.red("git --exec-path is '{s}', not the distribution's libexec/git-core", .{r.text});
+        if (!std.mem.eql(u8, got, want)) return c.red("git --exec-path is '{s}', not the distribution's libexec/git-core", .{r.text});
     }
     c.pass();
 
