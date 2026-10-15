@@ -15,6 +15,12 @@
 //! template gets each pair in file order, every occurrence of the key replaced
 //! by the value, literally.
 //!
+//!        archive_files unpack <archive> <out dir> [--exec <path>]... [--nonempty <path>]...
+//!
+//! `unpack` extracts the whole archive into <out dir> (created), makes each
+//! `--exec` path executable and refuses (exit 2) a `--nonempty` path that is
+//! missing or empty: a toolchain taken out of a pinned archive (protoc).
+//!
 //! Exit status: 0; 2 for an unsupported archive, a path that is not a file in
 //! the archive, a malformed substitutions file or any failure of the tool's own.
 
@@ -180,10 +186,60 @@ fn die(comptime fmt: []const u8, args: anytype) noreturn {
     std.process.exit(2);
 }
 
+/// Extracts `archive` (of `kind`) into `xd`; dies on any failure.
+fn extractArchive(a: std.mem.Allocator, xd: std.fs.Dir, archive: []const u8, kind: Kind) void {
+    const file = std.fs.cwd().openFile(archive, .{}) catch |e| die("cannot open {s}: {s}", .{ archive, @errorName(e) });
+    defer file.close();
+    switch (kind) {
+        .tar_gz => {
+            var br = std.io.bufferedReader(file.reader());
+            var dec = std.compress.gzip.decompressor(br.reader());
+            extractTar(xd, dec.reader()) catch |e| die("cannot extract {s}: {s}", .{ archive, @errorName(e) });
+        },
+        .tar => {
+            var br = std.io.bufferedReader(file.reader());
+            extractTar(xd, br.reader()) catch |e| die("cannot extract {s}: {s}", .{ archive, @errorName(e) });
+        },
+        .zip => {
+            const bytes = file.readToEndAlloc(a, 1 << 31) catch |e| die("cannot read {s}: {s}", .{ archive, @errorName(e) });
+            extractZip(a, xd, bytes) catch |e| die("cannot extract {s}: {s}", .{ archive, @errorName(e) });
+        },
+    }
+}
+
+/// `archive_files unpack <archive> <out dir> [--exec <path>]... [--nonempty <path>]...`
+fn unpack(a: std.mem.Allocator, args: []const []const u8) void {
+    if (args.len < 2) die("usage: archive_files unpack <archive> <out dir> [--exec <path>]... [--nonempty <path>]...", .{});
+    const archive = args[0];
+    const kind = kindOf(archive) orelse die("unsupported archive type: {s}", .{archive});
+    std.fs.cwd().makePath(args[1]) catch |e| die("cannot create {s}: {s}", .{ args[1], @errorName(e) });
+    var dir = std.fs.cwd().openDir(args[1], .{ .iterate = true }) catch |e| die("cannot open {s}: {s}", .{ args[1], @errorName(e) });
+    defer dir.close();
+    extractArchive(a, dir, archive, kind);
+    var i: usize = 2;
+    while (i < args.len) : (i += 2) {
+        if (i + 1 >= args.len) die("{s} needs a path", .{args[i]});
+        const p = args[i + 1];
+        if (!contained(p)) die("{s} is not a path inside the archive", .{p});
+        if (std.mem.eql(u8, args[i], "--exec")) {
+            const f = dir.openFile(p, .{}) catch |e| die("{s} is not in {s}: {s}", .{ p, archive, @errorName(e) });
+            defer f.close();
+            f.chmod(0o755) catch |e| die("cannot make {s} executable: {s}", .{ p, @errorName(e) });
+        } else if (std.mem.eql(u8, args[i], "--nonempty")) {
+            const st = dir.statFile(p) catch die("{s} is missing from {s}", .{ p, archive });
+            if (st.size == 0) die("{s} is empty in {s}", .{ p, archive });
+        } else die("unknown option {s}", .{args[i]});
+    }
+}
+
 pub fn main() !void {
     var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const a = arena_state.allocator();
     const argv = try std.process.argsAlloc(a);
+    if (argv.len > 1 and std.mem.eql(u8, argv[1], "unpack")) {
+        unpack(a, argv[2..]);
+        return;
+    }
     if (argv.len < 4) die("usage: archive_files <archive> <prefix> <substitutions> [--tree <dir>] (file|template <path> <out>)...", .{});
     const archive = argv[1];
     const prefix = argv[2];
@@ -204,23 +260,7 @@ pub fn main() !void {
     var xd = try std.fs.cwd().openDir(x, .{ .iterate = true });
     defer xd.close();
 
-    const file = std.fs.cwd().openFile(archive, .{}) catch |e| die("cannot open {s}: {s}", .{ archive, @errorName(e) });
-    defer file.close();
-    switch (kind) {
-        .tar_gz => {
-            var br = std.io.bufferedReader(file.reader());
-            var dec = std.compress.gzip.decompressor(br.reader());
-            extractTar(xd, dec.reader()) catch |e| die("cannot extract {s}: {s}", .{ archive, @errorName(e) });
-        },
-        .tar => {
-            var br = std.io.bufferedReader(file.reader());
-            extractTar(xd, br.reader()) catch |e| die("cannot extract {s}: {s}", .{ archive, @errorName(e) });
-        },
-        .zip => {
-            const bytes = file.readToEndAlloc(a, 1 << 31) catch |e| die("cannot read {s}: {s}", .{ archive, @errorName(e) });
-            extractZip(a, xd, bytes) catch |e| die("cannot extract {s}: {s}", .{ archive, @errorName(e) });
-        },
-    }
+    extractArchive(a, xd, archive, kind);
     const src_root = try std.fs.path.join(a, &.{ x, prefix });
 
     var tree: []const u8 = "";

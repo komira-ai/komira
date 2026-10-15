@@ -152,6 +152,29 @@ zig_exe(
     visibility = ["PUBLIC"],
 )
 
+# proto_gen (tools/proto_gen.zig): protoc with a plugin into one directory,
+# held to the files the rule declared (proto.bzl, generate_proto_dir). Built
+# behind its unit tests; its cases are the proto libraries and
+# tests//negative/proto.
+zig_test(
+    name = "proto_gen_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/proto_gen.zig"],
+    src = "tools/proto_gen_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "proto_gen",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/proto_gen.zig",
+    unit_tests = [":proto_gen_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
+
 # The same for macOS arm64 (the darwin toolchain's `act`), built on a Linux worker.
 zig_exe(
     name = "act_darwin",
