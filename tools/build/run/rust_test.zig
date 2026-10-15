@@ -84,8 +84,8 @@ test "R3 environment: exactly PATH, TMPDIR and HOME" {
     const head = "GATED TEST FAILED: //r:t (exit 7)\n";
     const i = std.mem.indexOf(u8, r.err, head).?;
     var it = util.lines(r.err[i + head.len ..]);
-    var names = std.ArrayList([]const u8).init(e.a);
-    while (it.next()) |l| try names.append(l[0 .. std.mem.indexOfScalar(u8, l, '=') orelse l.len]);
+    var names = std.ArrayList([]const u8).empty;
+    while (it.next()) |l| try names.append(e.a, l[0 .. std.mem.indexOfScalar(u8, l, '=') orelse l.len]);
     try std.testing.expectEqual(@as(usize, 3), names.items.len);
     try std.testing.expectEqualStrings("PATH", names.items[0]);
     try std.testing.expectEqualStrings("TMPDIR", names.items[1]);

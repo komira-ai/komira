@@ -112,9 +112,9 @@ pub fn placeFile(alloc: Alloc, o: *const Opts, name: []const u8) File {
         const path = std.mem.concat(alloc, u8, &.{ o.src, rel }) catch oom();
         const src = std.fs.cwd().readFileAlloc(alloc, path, max_src) catch |err|
             fail("{s} ({s}): cannot read the measured source: {s}", .{ f.repo, path, @errorName(err) });
-        var lines = std.ArrayList([]const u8).init(alloc);
+        var lines = std.ArrayList([]const u8).empty;
         var it = std.mem.splitScalar(u8, src, '\n');
-        while (it.next()) |l| lines.append(l) catch oom();
+        while (it.next()) |l| lines.append(alloc, l) catch oom();
         f.lines = lines.items;
         return f;
     }
@@ -426,10 +426,10 @@ pub fn forHead(alloc: Alloc, lines: []const []const u8, idx: usize) ?u64 {
     if (ln == idx) {
         raw = line[from..colon_at];
     } else {
-        var parts = std.ArrayList([]const u8).init(alloc);
-        parts.append(line[from..]) catch oom();
-        for (lines[idx + 1 .. ln]) |mid| parts.append(mid) catch oom();
-        parts.append(last[0..colon_at]) catch oom();
+        var parts = std.ArrayList([]const u8).empty;
+        parts.append(alloc, line[from..]) catch oom();
+        for (lines[idx + 1 .. ln]) |mid| parts.append(alloc, mid) catch oom();
+        parts.append(alloc, last[0..colon_at]) catch oom();
         raw = std.mem.join(alloc, "\n", parts.items) catch oom();
     }
     const lead = raw.len - std.mem.trimLeft(u8, raw, " ").len;
@@ -449,7 +449,7 @@ fn quotedLines(alloc: Alloc, f: *File) []bool {
     var open: u8 = 0; // the quote of the triple-quoted string open, or 0
     var depth: usize = 0; // brackets open outside strings and comments
     // The 1-based line of each bracket still open, innermost last.
-    var opened = std.ArrayList(usize).init(alloc);
+    var opened = std.ArrayList(usize).empty;
     for (lines, 0..) |l, n| {
         out[n] = open != 0 or depth > 0;
         var i: usize = 0;
@@ -475,7 +475,7 @@ fn quotedLines(alloc: Alloc, f: *File) []bool {
                 switch (c) {
                     '(', '[', '{' => {
                         depth += 1;
-                        opened.append(n + 1) catch oom();
+                        opened.append(alloc, n + 1) catch oom();
                     },
                     ')', ']', '}' => {
                         if (depth == 0) {

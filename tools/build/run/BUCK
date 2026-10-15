@@ -2,6 +2,11 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test", "zig_test
 load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "row")
 
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+
 # gate (README.md): runs and supervises every welded test, in place of the
 # shell runners (docs/design/zig_gate_runner.md). Built by the pinned zig,
 # statically linked, and published behind its unit tests: no test of any
@@ -34,7 +39,7 @@ _TESTS = [
         imports = _SRCS + ["testkit.zig"],
         src = t + ".zig",
         busybox = "komira//tools/build/toolchains:busybox",
-        zig = "komira//tools/build/toolchains:zig",
+        zig = _ZIG,
     )
     for t in _TESTS
 ]
@@ -44,9 +49,9 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     imports = _SRCS,
     src = "gate.zig",
-    unit_tests = [":" + t for t in _TESTS],
+    unit_tests = [":" + t for t in _TESTS] + [_ZIG_VERSION],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
     visibility = ["PUBLIC"],
 )
 
@@ -73,7 +78,7 @@ _DARWIN_TESTS = [
         src = t + ".zig",
         target = row("darwin-arm64")["zig_triple"],
         busybox = "komira//tools/build/toolchains:busybox",
-        zig = "komira//tools/build/toolchains:zig",
+        zig = _ZIG,
     )
     for t in _DARWIN_TESTS
 ]
@@ -96,8 +101,8 @@ zig_exe(
     imports = _SRCS,
     src = "gate.zig",
     target = row("darwin-arm64")["zig_triple"],
-    unit_tests = [":" + t for t in _TESTS] + [":" + t + "_darwin" for t in _DARWIN_TESTS],
+    unit_tests = [":" + t for t in _TESTS] + [":" + t + "_darwin" for t in _DARWIN_TESTS] + [_ZIG_VERSION],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
     visibility = ["PUBLIC"],
 )

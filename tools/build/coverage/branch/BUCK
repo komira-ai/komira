@@ -8,6 +8,11 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "cov_branch_dir")
 
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+
 # The directory every mojo_library's branch coverage build links and runs
 # from (tools/build/mojo/coverage_branch.bzl).
 cov_branch_dir(
@@ -45,7 +50,7 @@ zig_test(
     imports = _COV_BRANCH_SRCS,
     src = "cov_branch.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 # Welded: no branch coverage run has the tool unless its unit tests passed.
@@ -54,9 +59,9 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     imports = _COV_BRANCH_SRCS,
     src = "cov_branch.zig",
-    unit_tests = [":cov_branch_unit"],
+    unit_tests = [":cov_branch_unit", _ZIG_VERSION],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
     visibility = ["PUBLIC"],
 )
 
@@ -67,7 +72,7 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "cov_branch_link_stub.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 # The stand-in lld and llvm-profdata of the process tests of `cov_branch
@@ -77,7 +82,7 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "cov_branch_annotate_stub.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 # The shipped executable's `link` run as a process
@@ -95,7 +100,7 @@ zig_test(
     imports = ["bounded_run.zig"],
     src = "cov_branch_link_exe_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 # The shipped executable's `annotate` run as a process
@@ -116,7 +121,7 @@ zig_test(
     imports = ["cov_branch_annotate_fixture.zig"],
     src = "cov_branch_exe_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 # The tool every branch coverage directory takes (defs.bzl): :cov_branch_exe,
@@ -156,7 +161,7 @@ zig_exe(
     ],
     src = "cov_branch_classify.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 # Its cases (README.md#tests): `zig test` of each file, run as a build
@@ -191,7 +196,7 @@ _CLASSIFY_CASES = ["andor", "case", "files", "main", "rules", "try"]
         imports = _CLASSIFY_CASE_INPUTS,
         src = "cov_branch_classify_{}_test.zig".format(group),
         busybox = "komira//tools/build/toolchains:busybox",
-        zig = "komira//tools/build/toolchains:zig",
+        zig = _ZIG,
     )
     for group in _CLASSIFY_CASES
 ]

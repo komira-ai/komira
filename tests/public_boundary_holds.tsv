@@ -113,8 +113,6 @@ ip	src/komira_db/tests/test_h1_keepalive_pooled_conn.mojo	7	a private address as
 ip	src/komira_db_postgres/wire/tests/test_dns_resolve_pg_host.mojo	1	a private address as test input
 ip	src/komira_gcp_compute/tests/test_compute_instances.mojo	2	an instance's internal address in a recorded API response (test data)
 ip	src/komira_gcp_compute/tests/test_compute_network.mojo	5	VPC subnet ranges in recorded API responses (test data)
-ip	src/komira_http_client/tests/test_http_client_h1_keepalive_reuse.mojo	1	a private address as test input
-ip	src/komira_http_client/tests/test_request_writer.mojo	2	a private address as test input
 ip	src/komira_log/tests/test_log_ring_bounded_drain_arena.mojo	1	a private address as test input
 ip	src/komira_net/tests/test_dns_addrinfo_offsets.mojo	1	a private address as test input
 ip	src/komira_net/tests/test_dns_literal.mojo	2	a private address as test input

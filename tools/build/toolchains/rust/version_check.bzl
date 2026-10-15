@@ -9,6 +9,7 @@ target instead of compiling with a compiler nobody pinned.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/rust:defs.bzl", "RustVersionInfo")
 
 def _impl(ctx):
     sysroot = ctx.attrs.sysroot[DefaultInfo].default_outputs[0]
@@ -26,6 +27,8 @@ def _impl(ctx):
     )
     return [
         DefaultInfo(default_output = sysroot),
+        # The toolchain reads the release from here (RustToolchainInfo.version).
+        ctx.attrs.sysroot[RustVersionInfo],
         ValidationInfo(validations = [ValidationSpec(name = "rustc_version", validation_result = result)]),
     ]
 

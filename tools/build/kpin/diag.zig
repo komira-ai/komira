@@ -5,7 +5,7 @@ const std = @import("std");
 
 pub const Diag = struct {
     a: std.mem.Allocator,
-    msgs: std.ArrayListUnmanaged([]const u8) = .{},
+    msgs: std.ArrayList([]const u8) = .empty,
 
     pub fn init(a: std.mem.Allocator) Diag {
         return .{ .a = a };

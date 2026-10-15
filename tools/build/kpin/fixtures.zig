@@ -27,14 +27,13 @@ pub const NpmEntry = struct { path: []const u8, name: ?[]const u8 = null, versio
 
 /// A package-lock.json (lockfileVersion 3) with these packages.
 pub fn packageLock(a: std.mem.Allocator, entries: []const NpmEntry) ![]u8 {
-    var out = std.ArrayListUnmanaged(u8){};
-    const w = out.writer(a);
-    try w.writeAll("{\"name\":\"app\",\"lockfileVersion\":3,\"requires\":true,\"packages\":{\"\":{\"name\":\"app\",\"version\":\"1.0.0\"}");
+    var out = std.ArrayList(u8).empty;
+    try out.appendSlice(a, "{\"name\":\"app\",\"lockfileVersion\":3,\"requires\":true,\"packages\":{\"\":{\"name\":\"app\",\"version\":\"1.0.0\"}");
     for (entries) |e| {
-        try w.print(",\"{s}\":{{", .{e.path});
-        if (e.name) |n| try w.print("\"name\":\"{s}\",", .{n});
-        try w.print("\"version\":\"{s}\",\"resolved\":\"{s}\",\"integrity\":\"{s}\"}}", .{ e.version, e.resolved, e.integrity });
+        try out.print(a, ",\"{s}\":{{", .{e.path});
+        if (e.name) |n| try out.print(a, "\"name\":\"{s}\",", .{n});
+        try out.print(a, "\"version\":\"{s}\",\"resolved\":\"{s}\",\"integrity\":\"{s}\"}}", .{ e.version, e.resolved, e.integrity });
     }
-    try w.writeAll("}}");
+    try out.appendSlice(a, "}}");
     return out.toOwnedSlice(a);
 }

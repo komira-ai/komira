@@ -33,15 +33,15 @@ pub const Table = struct {
     pub fn tree(self: Table, alloc: std.mem.Allocator, root: i32) ?[]i32 {
         const r = self.find(root) orelse return null;
         if (r.state == 'Z') return null;
-        var out = std.ArrayList(i32).init(alloc);
-        out.append(root) catch return null;
+        var out = std.ArrayList(i32).empty;
+        out.append(alloc, root) catch return null;
         var grew = true;
         while (grew) {
             grew = false;
             for (self.procs) |p| {
                 if (std.mem.indexOfScalar(i32, out.items, p.pid) != null) continue;
                 if (std.mem.indexOfScalar(i32, out.items, p.ppid) == null) continue;
-                out.append(p.pid) catch return null;
+                out.append(alloc, p.pid) catch return null;
                 grew = true;
             }
         }
@@ -95,7 +95,7 @@ pub fn read(alloc: std.mem.Allocator) ?Table {
     if (!sys.is_linux) return null;
     var dir = std.fs.openDirAbsolute("/proc", .{ .iterate = true }) catch return null;
     defer dir.close();
-    var procs = std.ArrayList(Proc).init(alloc);
+    var procs = std.ArrayList(Proc).empty;
     var it = dir.iterate();
     var buf: [4096]u8 = undefined;
     while (true) {
@@ -108,7 +108,7 @@ pub fn read(alloc: std.mem.Allocator) ?Table {
         defer f.close();
         const n = f.readAll(&buf) catch continue;
         const p = parseStatus(buf[0..n]) orelse continue;
-        procs.append(p) catch return null;
+        procs.append(alloc, p) catch return null;
     }
     return Table{ .procs = procs.items };
 }
@@ -147,7 +147,7 @@ pub fn groupMembers(alloc: std.mem.Allocator, pgid: i32) ?[]Member {
     if (!sys.is_linux) return null;
     var dir = std.fs.openDirAbsolute("/proc", .{ .iterate = true }) catch return null;
     defer dir.close();
-    var out = std.ArrayList(Member).init(alloc);
+    var out = std.ArrayList(Member).empty;
     var it = dir.iterate();
     var buf: [1024]u8 = undefined;
     while (true) {
@@ -161,7 +161,7 @@ pub fn groupMembers(alloc: std.mem.Allocator, pgid: i32) ?[]Member {
         const n = f.readAll(&buf) catch continue;
         const s = parseStat(buf[0..n]) orelse continue;
         if (s.pgrp != pgid or s.state == 'Z' or s.state == 'X') continue;
-        out.append(.{ .pid = s.pid, .state = s.state, .comm = alloc.dupe(u8, s.comm) catch return null }) catch return null;
+        out.append(alloc, .{ .pid = s.pid, .state = s.state, .comm = alloc.dupe(u8, s.comm) catch return null }) catch return null;
     }
     return out.items;
 }

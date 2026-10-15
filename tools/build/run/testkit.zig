@@ -63,7 +63,7 @@ pub fn busybox(alloc: std.mem.Allocator) ![]const u8 {
     var it = std.mem.splitScalar(u8, path, ':');
     while (it.next()) |d| {
         const sh = try std.fmt.allocPrint(alloc, "{s}/sh", .{d});
-        var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+        var buf: [std.fs.max_path_bytes]u8 = undefined;
         const target = std.fs.cwd().readLink(sh, &buf) catch continue;
         return alloc.dupe(u8, target);
     }
@@ -112,7 +112,7 @@ pub fn runGate(alloc: std.mem.Allocator, cwd: []const u8, argv: []const []const 
         if (now - start > opts.timeout_ms) {
             sys.kill(h, posix.SIG.KILL);
             _ = sys.waitpid(h, false);
-            std.debug.print("runGate: the gate did not finish within {d} ms: {s}\n", .{ opts.timeout_ms, argv });
+            std.debug.print("runGate: the gate did not finish within {d} ms: {s}\n", .{ opts.timeout_ms, std.mem.join(std.heap.page_allocator, " ", argv) catch "" });
             return error.Timeout;
         }
         sys.sleepMs(5);
@@ -159,9 +159,9 @@ pub fn pidsFrom(alloc: std.mem.Allocator, path: []const u8, n: usize) ![]i32 {
     const end = sys.monotonicMs().? + 5000;
     while (true) {
         if (std.fs.cwd().readFileAlloc(alloc, path, 4096)) |text| {
-            var out = std.ArrayList(i32).init(alloc);
+            var out = std.ArrayList(i32).empty;
             var it = std.mem.tokenizeScalar(u8, text, '\n');
-            while (it.next()) |t| try out.append(try std.fmt.parseInt(i32, t, 10));
+            while (it.next()) |t| try out.append(alloc, try std.fmt.parseInt(i32, t, 10));
             if (out.items.len >= n) return out.items;
         } else |_| {}
         if (sys.monotonicMs().? >= end) return error.NoPids;
@@ -230,12 +230,12 @@ pub fn fixture(path: [*:0]const u8, argv: [*:null]const ?[*:0]const u8, envp: [*
     sys.defaultSignals();
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const a = arena.allocator();
-    var args = std.ArrayList([]const u8).init(a);
+    var args = std.ArrayList([]const u8).empty;
     var i: usize = 0;
-    while (argv[i]) |p| : (i += 1) args.append(std.mem.span(p)) catch posix.exit(99);
-    var env = std.ArrayList([]const u8).init(a);
+    while (argv[i]) |p| : (i += 1) args.append(a, std.mem.span(p)) catch posix.exit(99);
+    var env = std.ArrayList([]const u8).empty;
     i = 0;
-    while (envp[i]) |p| : (i += 1) env.append(std.mem.span(p)) catch posix.exit(99);
+    while (envp[i]) |p| : (i += 1) env.append(a, std.mem.span(p)) catch posix.exit(99);
     behave(a, std.fs.path.basename(std.mem.span(path)), args.items, env.items);
 }
 
@@ -299,7 +299,7 @@ fn behave(a: std.mem.Allocator, name: []const u8, args: []const []const u8, env:
         posix.exit(3);
     }
     if (std.mem.eql(u8, name, "where")) {
-        var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+        var buf: [std.fs.max_path_bytes]u8 = undefined;
         const cwd = posix.getcwd(&buf) catch "?";
         var b: [64]u8 = undefined;
         const n = posix.read(0, &b) catch 999;

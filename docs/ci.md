@@ -14,7 +14,7 @@ Nothing is compiled on the runner.
 | pull request from a branch of this repository | `pr / check`; and `coverage`, informational, not required ([below](#coverageyml-the-pull-requests-coverage-not-a-gate)) |
 | pull request from a fork | nothing: no farm job runs ([below](#pull-requests-from-forks)) |
 | manual (`workflow_dispatch`) | the release path of `kci.yml`, on the chosen ref |
-| weekly (schedule) and manual | [`kpin-update.yml`](../tools/build/kpin/README.md#the-weekly-update): updates the pins and opens one pull request; no farm, and its pull request does not start `pr / check` by itself |
+| weekly (schedule) and manual | [`kpin-update.yml`](../tools/build/kpin/README.md#the-weekly-update): updates the pins and opens one pull request; no farm, and its pull request does not start `pr / check` by itself. A manual run with `real_hosts` instead checks kpin against the real registries |
 
 There is no separate static or lint job, and no other pull request check
 that can block a merge: the `coverage` workflow only reports. The scheduled

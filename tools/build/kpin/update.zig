@@ -143,12 +143,12 @@ pub fn run(
     }
 
     // 2. the hashes
-    var seed_pins = std.ArrayListUnmanaged(lockfmt.LockPin){};
+    var seed_pins = std.ArrayList(lockfmt.LockPin).empty;
     for (list) |p| {
         const old = prev.findPin(p.name);
         const same = old != null and std.mem.eql(u8, old.?.version, p.version);
         const selected = opts.only == null or std.mem.eql(u8, opts.only.?, p.name);
-        var files = std.ArrayListUnmanaged(lockfmt.File){};
+        var files = std.ArrayList(lockfmt.File).empty;
         for (p.platforms) |pf| {
             const prior: ?lockfmt.File = if (same) lockfmt.findFile(old.?, pf.id) else null;
             const need = selected and (prior == null or opts.verify);
@@ -178,7 +178,7 @@ pub fn run(
         try seed_pins.append(a, .{ .name = p.name, .version = p.version, .files = try files.toOwnedSlice(a) });
     }
 
-    var seed_npm = std.ArrayListUnmanaged(lockfmt.Npm){};
+    var seed_npm = std.ArrayList(lockfmt.Npm).empty;
     for (npm_pkgs) |pkg| {
         const prior = prev.findNpm(pkg.key);
         const need = opts.only == null and (prior == null or opts.verify);
