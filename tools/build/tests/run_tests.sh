@@ -214,6 +214,8 @@
 #      and an #[ignore]d test are each refused; a hanging test is NO VERDICT
 #      at its timeout. There are no holds: every welded test must pass.
 #      `buck2 test` of a binary welded to a red test fails.
+#  35b. The Cargo-driven attributes of the Rust rules (env, renamed_deps,
+#      native_deps, patch, proc_macro_extern): see tools/build/tests/rust_tests.sh.
 #  36. mojo_aws_client (tools/build/cloud/aws.bzl; tests//functional/mojo_aws_client): a
 #      pure-mode CloudWatch Logs client generated from the pinned botocore
 #      model with operations = [GetLogEvents], over stub runtime deps, builds

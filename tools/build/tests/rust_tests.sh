@@ -69,3 +69,20 @@ expect_red rust_ext_red_count "1 passed; 1 failed" "$RX:ext_red"
 expect_red rust_ext_red_consumer "GATED TEST FAILED: $RX:ext_red tests/ext_fail.rs" "$RX:ext_red_consumer"
 expect_red rust_ext_both_red "GATED TEST FAILED: $RX:red" "$RX:both_red"
 expect_red rust_ext_both_ext_red "GATED TEST FAILED: $RX:both_ext_red tests/ext_fail.rs" "$RX:both_ext_red"
+
+# 35b. The Cargo-driven attributes of the Rust rules (env, renamed_deps,
+#      native_deps, patch, proc_macro_extern). The greens are
+#      tests//functional/rust_cargo (in the pull-request check); each planted
+#      defect below is the same green with that attribute removed or broken,
+#      and must fail naming its cause. (The refusals at analysis are
+#      //tools/build/selftest:analysis_refusals_rust.)
+RC=tests//negative/rust_cargo
+expect_red rust_cargo_env_missing "environment variable \`CARGO_PKG_NAME\` not defined at compile time" "$RC:env_missing"
+expect_red rust_cargo_env_wrong "differs from" "$RC:env_wrong"
+expect_red rust_cargo_renamed_missing "use of undeclared crate or module \`shared_two\`" "$RC:renamed_missing"
+expect_red rust_cargo_native_missing "undefined symbol: komira_rust_native_add" "$RC:native_missing"
+expect_red rust_cargo_native_test_missing "undefined symbol: komira_rust_native_add" "$RC:native_test_missing"
+expect_red rust_cargo_out_dir_unpatched "environment variable \`OUT_DIR\` not defined at compile time" "$RC:out_dir_unpatched"
+expect_red rust_cargo_out_dir_no_add "generated.rs: No such file or directory" "$RC:out_dir_no_add"
+expect_red rust_cargo_patch_count "matched 1 times, expected 2" "$RC:out_dir_count"
+expect_red rust_cargo_pm_no_extern "use of undeclared crate or module \`proc_macro\`" "$RC:pm_consumer"

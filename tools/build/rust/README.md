@@ -122,3 +122,31 @@ pinned rustc, the cfg is written in `cfgs`. A proc-macro is an ordinary
 dependency, compiled once for linux x86_64, which is both the execution and
 the target platform. The wrapper refuses an output containing the action's
 working directory (exit 4); rustc's own record of it is remapped.
+
+## Cargo crates
+
+A crate from a registry is built by Cargo's rules: its build script runs, and
+what the script learned about the compiler or the target decides the cfgs, the
+environment and the generated files. Nothing here runs a build script; what
+the script would decide for the pinned rustc is stated on the target instead,
+and `kpin cargo` ([kpin](../kpin/README.md)) writes it. Five attributes of
+`rust_library`, `rust_binary` and `rust_test` carry it. Worked uses:
+[`tests//functional/rust_cargo`](../tests/functional/rust_cargo/BUCK), and
+their planted defects in [`negative/rust_cargo`](../tests/negative/rust_cargo/BUCK)
+(test [35b](../tests/README.md#35b-rust-attributes-cargo-needs)).
+
+| attribute | what it does | Cargo's equivalent |
+|---|---|---|
+| `env = {"K": "v"}` | variables of the rustc action, for `env!` and `option_env!`. Names the wrapper sets itself (`PATH`, `HOME`, `TMPDIR`, `LD_*`, `RUSTFLAGS`, ..) are refused. A target without `env` has the action it always had. It is the compile environment only, not that of a test run. | `CARGO_PKG_NAME`, `CARGO_PKG_VERSION`, `CARGO_PKG_VERSION_MAJOR/MINOR/PATCH/PRE`, `CARGO_CRATE_NAME`, and a build script's `cargo:rustc-env` |
+| `renamed_deps = {"alias": ":dep"}` | `--extern=alias=<lib>`: the dependency is reached under `alias`, not its crate name. Two crates of one name (two versions) are told apart this way. | `package = "http"` under another name in `[dependencies]` |
+| `native_deps = [":c[static-pic]"]` | `-Clink-arg=<archive>` on the link of a `rust_binary` or `rust_test`, and of the test crates of a library's `test_srcs`. A library's own `rlib` is not linked, so it takes none. | a build script's `cargo:rustc-link-lib` / `-link-search` |
+| `patch = {"copy": [..], "sub": [..], "add": [..]}` | run by [`crate_patch`](crate_patch.zig) before rustc, over the sources (`src_dir` or `srcs`): `copy` keeps only those entries (everything when empty), `sub` entries `{file, from, to, count}` are exact text substitutions, `add` entries `{file, content}` are generated files. `count` (default 1) is how many times `from` must match; any other number fails the build, so a patch that stops matching after a crate upgrade is an error. A `sub` on a file not copied, an `add` of a file the crate has, and a path with `..` are errors. | a build script writing to `OUT_DIR` |
+| `proc_macro_extern = True` | with `proc_macro = True`, `--extern=proc_macro`, so the crate can name `proc_macro::..` without `extern crate proc_macro;` (editions 2018 and later). Opt-in so that a proc-macro crate that compiled before keeps its action. | passed to every proc-macro crate |
+
+`OUT_DIR` itself is not defined: a crate that does
+`include!(concat!(env!("OUT_DIR"), "/x.rs"))` is patched to `include!("x.rs")`
+(`sub`, with its `count`) and the file is added beside it (`add`). `include!`
+resolves a relative name against the including file, so an `OUT_DIR` naming a
+build directory could not work for the crates that include from several
+directories, and a path naming the action's working directory would differ on
+every run (the wrapper refuses an output that holds it).
