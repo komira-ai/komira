@@ -4,7 +4,7 @@
 //!
 //! A `.conda` file is a zip (stored entries, zip64 size fields) holding
 //! `pkg-*.tar.zst`, the payload, and `info-*.tar.zst`. The pinned busybox
-//! reads neither zip64 nor zstd, so kcov_build.sh runs this and untars the
+//! reads neither zip64 nor zstd, so kcov_build runs this and untars the
 //! result with busybox. The zip walk is the one of
 //! tools/build/mojo/tools/conda_unpack.zig, which this does not change: an
 //! edit there would re-key every Mojo action.

@@ -1,6 +1,6 @@
 """kcov built from source on the farm, and the checks that gate it (README.md).
 
-`kcov_dist` runs kcov_build.sh in one build action: it unpacks the pinned
+`kcov_dist` runs kcov_build (kcov_build.zig) in one build action: it unpacks the pinned
 kcov source archive and conda packages, builds the embedded helper libraries
 and generated sources, and compiles and links kcov with the pinned zig. Its
 output is a directory: `bin/kcov`, `lib/libgcc_s.so.1` (the one library it
@@ -26,15 +26,12 @@ def _out(dep):
     return dep[DefaultInfo].default_outputs[0]
 
 def _dist_impl(ctx):
-    staged = _stage(ctx, "build_srcs", [ctx.attrs.script] + ctx.attrs.shim)
+    staged = _stage(ctx, "build_srcs", ctx.attrs.shim)
     out = ctx.actions.declare_output("kcov", dir = True)
     packages = [cmd_args(name, "=", _out(dep), delimiter = "") for name, dep in sorted(ctx.attrs.packages.items())]
     ctx.actions.run(
         cmd_args(
-            _out(ctx.attrs._busybox),
-            "sh",
-            staged.project(ctx.attrs.script.short_path),
-            _out(ctx.attrs._busybox),
+            ctx.attrs._build[RunInfo],
             _out(ctx.attrs._zig),
             _out(ctx.attrs.conda_payload),
             _out(ctx.attrs.elf_rpath),
@@ -52,18 +49,17 @@ def _dist_impl(ctx):
 
 _kcov_dist = rule(
     impl = _dist_impl,
-    doc = "kcov built by kcov_build.sh from `archive` (unpacked under `strip_prefix`) against the static libraries of the conda `packages`; the output is a directory holding `bin/kcov`, `lib/libgcc_s.so.1` and `share/licenses/`.",
+    doc = "kcov built by kcov_build from `archive` (unpacked under `strip_prefix`) against the static libraries of the conda `packages`; the output is a directory holding `bin/kcov`, `lib/libgcc_s.so.1` and `share/licenses/`.",
     attrs = {
         "archive": attrs.dep(doc = "The pinned kcov source archive."),
         "conda_payload": attrs.exec_dep(doc = "The tool that writes a .conda package's payload tar."),
         "elf_rpath": attrs.exec_dep(doc = "The tool that turns bin/kcov's DT_RUNPATH into a DT_RPATH."),
         "packages": attrs.dict(attrs.string(), attrs.dep(), doc = "name -> pinned .conda: elfutils, zlib, bzip2, zstd, lzma, libgcc."),
-        "script": attrs.source(),
         "shim": attrs.list(attrs.source(), doc = "shim/: the curl functions kcov calls, without libcurl."),
         "strip_prefix": attrs.string(doc = "The archive's top directory."),
         "version": attrs.string(doc = "What `kcov --version` prints after `kcov `."),
         "zig_triple": attrs.string(doc = "The zig target of the link: the platform row's `zig_triple`."),
-        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+        "_build": attrs.exec_dep(default = "komira//tools/build/toolchains/kcov:kcov_build", providers = [RunInfo]),
         "_zig": attrs.exec_dep(default = "komira//tools/build/toolchains:zig"),
     },
 )

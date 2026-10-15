@@ -61,13 +61,13 @@ sha256 check fails the build; it never builds from bytes nobody pinned.
 
 ## How it is built
 
-[`kcov_build.sh`](kcov_build.sh) is one action of `:kcov_dist`
+[`kcov_build.zig`](kcov_build.zig) is one action of `:kcov_dist`
 ([`defs.bzl`](defs.bzl)). Its steps:
 
 1. **Unpack.** The conda packages are unpacked with `:conda_payload`
    ([`conda_payload.zig`](conda_payload.zig)), which writes a package's
-   payload tar for busybox `tar`. busybox cannot read a `.conda`: it handles
-   neither the zip64 sizes nor the zstd payload. The zip walk is copied from
+   payload tar, which the program extracts itself (`std.tar`). A `.conda` is
+   not a tar: its zip has zip64 sizes and a zstd payload. The zip walk is copied from
    [`mojo/tools/conda_unpack.zig`](../../mojo/tools/conda_unpack.zig) and
    that file is left unchanged, because it is an input of the Mojo compiler
    closure and editing it would re-key every Mojo action. `conda_unpack
@@ -75,7 +75,7 @@ sha256 check fails the build; it never builds from bytes nobody pinned.
    and kcov also needs the headers.
 2. **Generate the sources kcov's CMake build would generate.** Upstream turns
    files into C++ byte arrays with `bin-to-c-source.py`; here the same format
-   is written with busybox `od` and `sed`, because no Python is pinned. The
+   is written by the program (`bin2c`), because no Python is pinned. The
    generated sources are:
    - `library.cc`: the preload library `kcov_sowrapper`
      (`solib-parser/{phdr_data,lib}.c`, `zig cc -shared`);
@@ -151,7 +151,7 @@ cache eviction would then re-run all of them.
 
 ### Patches
 
-`kcov_build.sh` changes v42's source with `sed` before compiling it. Each
+`kcov_build` changes v42's source before compiling it. Each
 changed line holds `KOMIRA PATCH`, and the build fails when an expression
 marks another number of lines than expected (a new kcov changed the code
 there), so a patch is never silently lost. Both make a test run under kcov
@@ -236,7 +236,7 @@ replace it without changing what reads the report.
 kcov is GPL-2.0, and `bin/kcov` embeds the files of its `data/` (jQuery and
 handlebars, MIT; tablesorter, GPL-2.0 or MIT) and links elfutils' `libdw`
 and `libelf` statically. `lib/libgcc_s.so.1` is GCC's runtime library
-(GPL-3.0 with the GCC Runtime Library Exception). `kcov_build.sh` copies
+(GPL-3.0 with the GCC Runtime Library Exception). `kcov_build` copies
 kcov's `COPYING` and `COPYING.externals` into `share/licenses/kcov/` and
 writes `share/licenses/NOTICE`, which lists every component with the licence
 its conda-forge package declares. Check 1 requires those files.
@@ -333,7 +333,7 @@ digit (`bin/kcov's sha256 is 57243a23..., but KCOV_BIN_SHA256 ... is
 
 ## Changing kcov or a pin
 
-- **Any change of kcov's bytes** (a pin, `kcov_build.sh`, the zig pin):
+- **Any change of kcov's bytes** (a pin, `kcov_build`, the zig pin):
   `:kcov_identity` fails naming the new sha256; write it into
   `KCOV_BIN_SHA256` of [`identity.bzl`](identity.bzl). That re-keys only the
   package guard's actions.
@@ -341,7 +341,7 @@ digit (`bin/kcov's sha256 is 57243a23..., but KCOV_BIN_SHA256 ... is
   `version` in [`BUCK`](BUCK). If its usage line changed, `:kcov_identity`
   says so; update `KCOV_USAGE_LINE` and review the near misses of
   `kcov_guard.sh cases`, which are written for the current line. Compare `src/CMakeLists.txt` with the source
-  list and the generated sources of `kcov_build.sh`. If the report format
+  list and the generated sources of `kcov_build`. If the report format
   changed, the red checks 4 and 6 print the difference against the golden; review
   it before updating the golden.
 - **A new conda package build.** Update its pin in the table. The build stops

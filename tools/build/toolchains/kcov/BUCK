@@ -3,7 +3,7 @@
 # (limits.tsv `coverage-linux-x86-64`).
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
-load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs", "row")
 load("@komira//tools/build/toolchains/loader_closure:defs.bzl", "loader_closure_check")
@@ -45,6 +45,27 @@ zig_exe(
     zig = "komira//tools/build/toolchains:zig",
 )
 
+# kcov built from source (kcov_build.zig), behind its unit tests.
+zig_test(
+    name = "kcov_build_unit",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    imports = ["kcov_build.zig"],
+    src = "kcov_build_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "kcov_build",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    src = "kcov_build.zig",
+    unit_tests = [":kcov_build_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
 # DT_RUNPATH -> DT_RPATH, which zig 0.12 cannot link into an executable.
 zig_exe(
     name = "elf_rpath",
@@ -70,7 +91,6 @@ _DIST = dict(
         "zlib": _PIN["kcov_zlib"],
         "zstd": _PIN["kcov_zstd"],
     },
-    script = "kcov_build.sh",
     shim = [
         "shim/curl/curl.h",
         "shim/curl_shim.c",
@@ -176,7 +196,6 @@ kcov_identity(
 shell_lint(
     name = "shell_lint",
     srcs = [
-        "kcov_build.sh",
         "kcov_check.sh",
     ],
 )

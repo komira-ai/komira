@@ -38,7 +38,7 @@
 #      reported as marked in its file, and the normalized report is
 #      fixtures/cov_fixture_relocated.cobertura.xml byte for byte.
 #   7. The HTML report writes the data files of the source archive's data/
-#      byte for byte (the arrays kcov_build.sh generated from them).
+#      byte for byte (the arrays kcov_build generated from them).
 # `cases` runs the functions behind 5, and elf_rpath and
 # conda_payload, and the mode `identity` (in its own process), on inputs
 # whose answer is known, wrong ones included.
@@ -593,7 +593,7 @@ identity() {
     got=$(sha256sum <"$KCOV") || red "cannot read bin/kcov"
     got=${got%% *}
     [ "$got" = "$WANT" ] ||
-        red "bin/kcov's sha256 is $got, but KCOV_BIN_SHA256 in tools/build/toolchains/kcov/identity.bzl is $WANT: kcov's bytes changed (a pin, kcov_build.sh or zig). Update KCOV_BIN_SHA256 to $got: the package guard refuses a file by it (tools/build/package/README.md, \"kcov is never packed\")"
+        red "bin/kcov's sha256 is $got, but KCOV_BIN_SHA256 in tools/build/toolchains/kcov/identity.bzl is $WANT: kcov's bytes changed (a pin, kcov_build or zig). Update KCOV_BIN_SHA256 to $got: the package guard refuses a file by it (tools/build/package/README.md, \"kcov is never packed\")"
     pass
     rc=0
     grep -F -q -e "$LINE" "$KCOV" || rc=$?
