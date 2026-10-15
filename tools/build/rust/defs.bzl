@@ -51,6 +51,10 @@ RustCrateInfo = provider(fields = {
     # duplicates. A list, not a transitive set: a transitive set's type is
     # per loading cell, and crates are used across cells.
     "closure": provider_field(list),
+    # Native archives (`native_deps`) of this crate and of every crate it
+    # depends on, without duplicates: linked into each binary or test that
+    # links the crate, as `cargo:rustc-link-lib` of a `-sys` crate is.
+    "natives": provider_field(list, default = []),
 })
 
 # A rust_test: the `.passed` marker its run writes. Only a passing run writes
@@ -91,8 +95,8 @@ def _rust_sysroot_impl(ctx):
 RUSTC="$1"; STD="$2"; OUT="$3"; TRIPLE="$4"; VERSION="$5"; LIBS="$6"
 X="$OUT.x"
 mkdir -p "$X" "$OUT/bin" "$OUT/lib/rustlib/$TRIPLE"
-tar -xJf "$RUSTC" -C "$X"
-tar -xJf "$STD" -C "$X"
+tar -xzf "$RUSTC" -C "$X"
+tar -xzf "$STD" -C "$X"
 R="$X/rustc-$VERSION-$TRIPLE/rustc"
 S="$X/rust-std-$VERSION-$TRIPLE/rust-std-$TRIPLE/lib/rustlib/$TRIPLE/lib"
 mv "$R/bin/rustc" "$OUT/bin/rustc"
@@ -182,10 +186,64 @@ def _crate_name(ctx):
         fail("{}: crate name `{}` is not a Rust identifier; set `crate_name`".format(ctx.label, name))
     return name
 
+# Variables the compile wrapper (rustc_wrapper.sh) sets or clears itself: an
+# `env` naming one would be silently overridden, so it is refused.
+_RESERVED_ENV = ["BUCK_SCRATCH_PATH", "HOME", "LD_LIBRARY_PATH", "LD_PRELOAD", "PATH", "RUSTC_BOOTSTRAP", "RUSTFLAGS", "TMPDIR", "XDG_CACHE_HOME", "ZIG_GLOBAL_CACHE_DIR", "ZIG_LOCAL_CACHE_DIR"]
+
+def _rustc_env(ctx):
+    """`env`, checked: the variables rustc sees (`env!("CARGO_PKG_VERSION")`)."""
+    for k in ctx.attrs.env:
+        if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", k):
+            fail("{}: env name `{}` is not a variable name".format(ctx.label.raw_target(), k))
+        if k in _RESERVED_ENV:
+            fail("{}: env `{}` is set by the compile wrapper and cannot be overridden".format(ctx.label.raw_target(), k))
+    return ctx.attrs.env
+
+def _patch_spec(ctx):
+    """The crate_patch spec (json) for `patch`, checked at analysis."""
+    where = str(ctx.label.raw_target())
+    p = ctx.attrs.patch
+    for k in p:
+        if k not in ["add", "copy", "sub"]:
+            fail("{}: patch has no `{}`; its keys are copy, sub and add".format(where, k))
+    for c in p.get("copy", []):
+        if type(c) != "string":
+            fail("{}: patch.copy holds paths (strings), not {}".format(where, repr(c)))
+    for e in p.get("sub", []):
+        for k in e:
+            if k not in ["file", "from", "to", "count"]:
+                fail("{}: a patch.sub entry has no `{}` (file, from, to, count)".format(where, k))
+        for k in ["file", "from", "to"]:
+            if type(e.get(k)) != "string":
+                fail("{}: every patch.sub entry needs a string `{}`: {}".format(where, k, repr(e)))
+        if e["from"] == "":
+            fail("{}: a patch.sub entry has an empty `from`".format(where))
+    for e in p.get("add", []):
+        for k in e:
+            if k not in ["file", "content"]:
+                fail("{}: a patch.add entry has no `{}` (file, content)".format(where, k))
+        for k in ["file", "content"]:
+            if type(e.get(k)) != "string":
+                fail("{}: every patch.add entry needs a string `{}`: {}".format(where, k, repr(e)))
+    return json.encode(p)
+
+def _patched(ctx, d):
+    """`d` (a directory of sources) edited by `patch`, or `d` when there is none."""
+    if ctx.attrs.patch == None:
+        return d
+    spec = ctx.actions.write("patch.json", _patch_spec(ctx))
+    out = ctx.actions.declare_output("patched", dir = True)
+    ctx.actions.run(
+        cmd_args(ctx.attrs._patch_tool[RunInfo], spec, d, out.as_output()),
+        category = "crate_patch",
+    )
+    return out
+
 def _root(ctx):
     """(root source argument, hidden inputs, path remap args)."""
     if ctx.attrs.src_dir != None:
         d = ctx.attrs.src_dir[DefaultInfo].default_outputs[0]
+        d = _patched(ctx, d)
         remap = []
         if ctx.attrs.src_dir_label:
             # Paths recorded in the output (panic locations, file!()) name
@@ -204,25 +262,46 @@ def _root(ctx):
     # name, not its location. Paths recorded in the output (panic locations,
     # file!()) read <cell>/<package>/<file>, not the copy's path.
     d = ctx.actions.copied_dir("__srcs__", {s.short_path: s for s in ctx.attrs.srcs})
+    d = _patched(ctx, d)
     remap = [cmd_args(d, format = "--remap-path-prefix={}=" + ctx.label.cell + "/" + ctx.label.package)]
     return d.project(roots[0].short_path), [d], remap
 
-def _externs(deps):
-    """(--extern args of `deps`, their library closure without duplicates)."""
+def _externs(deps, renamed = {}):
+    """(--extern args of `deps` and `renamed`, their library closure without duplicates).
+
+    A dependency in `renamed` is reached under its alias (`--extern=alias=lib`),
+    not under its crate name; the aliases are taken in sorted order.
+    """
     externs = []
     closure = []
     seen = {}
-    for d in deps:
+    pairs = [(d, None) for d in deps] + [(renamed[a], a) for a in sorted(renamed)]
+    for d, alias in pairs:
         info = d[RustCrateInfo]
-        externs.append(cmd_args(info.lib, format = "--extern=" + info.crate_name + "={}"))
+        externs.append(cmd_args(info.lib, format = "--extern=" + (alias or info.crate_name) + "={}"))
         for lib in info.closure:
             if lib not in seen:
                 seen[lib] = True
                 closure.append(lib)
     return externs, closure
 
+def _natives(ctx):
+    """The native archives `ctx`'s crate links: its own `native_deps`, then its dependencies' (renamed ones in alias order), each once."""
+    out = []
+    for n in ctx.attrs.native_deps:
+        a = n[DefaultInfo].default_outputs[0]
+        if a not in out:
+            out.append(a)
+    for d in ctx.attrs.deps + [ctx.attrs.renamed_deps[k] for k in sorted(ctx.attrs.renamed_deps)]:
+        for a in d[RustCrateInfo].natives:
+            if a not in out:
+                out.append(a)
+    return out
+
 def _rustc(ctx, crate, crate_type, root, hidden, remap, externs, closure, metadata, out, identifier):
     tc = ctx.attrs.toolchain[RustToolchainInfo]
+    # Linking: only a bin or a test is linked, and only it takes native_deps.
+    natives = [cmd_args(n, format = "-Clink-arg={}") for n in _natives(ctx)] if crate_type in ["bin", "test"] else []
     rustc_args = cmd_args(
         "--crate-name=" + crate,
         # `test`: a libtest harness over the crate's #[test] functions.
@@ -238,7 +317,10 @@ def _rustc(ctx, crate, crate_type, root, hidden, remap, externs, closure, metada
         ["--cap-lints=allow"] if ctx.attrs.cap_lints else [],
         remap,
         externs,
+        # Cargo gives a proc-macro crate the compiler's own proc_macro crate.
+        ["--extern=proc_macro"] if crate_type == "proc-macro" and getattr(ctx.attrs, "proc_macro_extern", False) else [],
         [cmd_args(lib, format = "-Ldependency={}", parent = 1) for lib in closure],
+        natives,
         ctx.attrs.rustc_flags,
         "-o",
         out.as_output(),
@@ -258,6 +340,9 @@ def _rustc(ctx, crate, crate_type, root, hidden, remap, externs, closure, metada
             "--",
             rustc_args,
         ),
+        # Only an `env` the target sets reaches the action, so a target
+        # without one has the action it always had.
+        env = _rustc_env(ctx),
         category = "rustc",
         identifier = identifier,
     )
@@ -268,7 +353,7 @@ def _metadata(ctx):
 def _compile(ctx, crate_type, out):
     """Compiles the target's own crate to `out`; returns its deps' closure."""
     root, hidden, remap = _root(ctx)
-    externs, closure = _externs(ctx.attrs.deps)
+    externs, closure = _externs(ctx.attrs.deps, ctx.attrs.renamed_deps)
     crate = _crate_name(ctx)
     _rustc(ctx, crate, crate_type, root, hidden, remap, externs, closure, _metadata(ctx), out, crate)
     return closure
@@ -283,8 +368,25 @@ _COMMON_ATTRS = {
     "crate_root": attrs.string(),
     "deps": attrs.list(attrs.dep(providers = [RustCrateInfo]), default = []),
     "edition": attrs.string(default = "2021"),
+    # Environment of the rustc action: what `env!("CARGO_PKG_VERSION")` and
+    # `option_env!` read at compile time. Not the environment of a test run.
+    "env": attrs.dict(attrs.string(), attrs.string(), default = {}),
     "features": attrs.list(attrs.string(), default = []),
+    # Native archives (a cxx_library's `[static-pic]`, say) linked into a
+    # binary or test, and into the test crates of a library's `test_srcs`:
+    # `-Clink-arg=<archive>`, after the objects that need them. A library's
+    # are also linked into every binary or test that depends on it.
+    "native_deps": attrs.list(attrs.dep(), default = []),
     "opt_level": attrs.string(default = "3"),
+    # Edits to the sources before rustc reads them, where Cargo would run a
+    # build script (README, "Cargo crates"): a dict with `copy` (entries of
+    # the source tree to keep; all when empty), `sub` (exact text
+    # substitutions {file, from, to, count}) and `add` (generated files
+    # {file, content}).
+    "patch": attrs.option(attrs.dict(attrs.string(), attrs.any()), default = None),
+    # Dependencies a crate names differently from their crate name
+    # (`package = "http"` in Cargo): alias -> dependency, `--extern=alias=lib`.
+    "renamed_deps": attrs.dict(attrs.string(), attrs.dep(providers = [RustCrateInfo]), default = {}),
     "rustc_flags": attrs.list(attrs.string(), default = []),
     # A directory holding the crate's sources (an unpacked registry crate).
     "src_dir": attrs.option(attrs.dep(), default = None),
@@ -292,6 +394,7 @@ _COMMON_ATTRS = {
     "src_dir_label": attrs.option(attrs.string(), default = None),
     "srcs": attrs.list(attrs.source(), default = []),
     "toolchain": attrs.toolchain_dep(default = "toolchains//:rust", providers = [RustToolchainInfo]),
+    "_patch_tool": attrs.exec_dep(default = "komira//tools/build/rust:crate_patch"),
 }
 
 # ---- the test weld -----------------------------------------------------------
@@ -402,7 +505,7 @@ def _external_tests(ctx, tc, crate, ungated, deps_closure):
     """
     d = ctx.actions.copied_dir("__test_srcs__", {s.short_path: s for s in ctx.attrs.test_srcs})
     remap = [cmd_args(d, format = "--remap-path-prefix={}=" + ctx.label.cell + "/" + ctx.label.package)]
-    externs, _ = _externs(ctx.attrs.deps)
+    externs, _ = _externs(ctx.attrs.deps, ctx.attrs.renamed_deps)
     externs = externs + [cmd_args(ungated, format = "--extern=" + crate + "={}")]
     closure = [ungated] + deps_closure
     label = str(ctx.label.raw_target())
@@ -425,6 +528,8 @@ def _external_tests(ctx, tc, crate, ungated, deps_closure):
 def _library_impl(ctx):
     tc = ctx.attrs.toolchain[RustToolchainInfo]
     crate = _crate_name(ctx)
+    if ctx.attrs.proc_macro_extern and not ctx.attrs.proc_macro:
+        fail("{}: proc_macro_extern is for a proc-macro crate; set proc_macro = True".format(ctx.label.raw_target()))
     ext = "so" if ctx.attrs.proc_macro else "rlib"
     path = "{}/lib{}.{}".format(crate, crate, ext)
     lib = ctx.actions.declare_output(path)
@@ -445,6 +550,7 @@ def _library_impl(ctx):
             crate_name = crate,
             lib = lib,
             closure = [lib] + deps_closure,
+            natives = _natives(ctx),
         ),
         rerun_info(ctx),
     ]
@@ -453,6 +559,12 @@ rust_library_rule = rule(
     impl = _library_impl,
     attrs = _COMMON_ATTRS | _WELD_ATTRS | RERUN_ATTRS | {
         "proc_macro": attrs.bool(default = False),
+        # With `proc_macro`, `--extern=proc_macro`: the compiler's proc_macro
+        # crate in the extern prelude, as Cargo gives it to every proc-macro
+        # crate (edition 2018 and later need it to name `proc_macro::..`
+        # without `extern crate`). Opt-in so that a proc-macro crate that
+        # compiled before keeps its action.
+        "proc_macro_extern": attrs.bool(default = False),
         # External tests: each `tests/<name>.rs` is a test crate compiled
         # against the ungated library and run; the library is published
         # behind them. Other files under tests/ are modules they use.
