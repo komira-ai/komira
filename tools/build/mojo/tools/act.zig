@@ -10,6 +10,8 @@
 //!   act cat <out> <in>...
 //!       Writes the concatenation of the files <in> to <out> (the README
 //!       join's marker).
+//!   act refuse <message>
+//!       Prints <message> on stderr and exits 2: a tool a toolchain does not provide.
 //!   act run-check <busybox> <binary> <out> [<expected>]
 //!       Runs <binary> (the binary inside its runnable directory, next to
 //!       lib/) with the busybox applets as PATH, a TMPDIR and HOME of its own,
@@ -160,12 +162,15 @@ pub fn main() void {
     var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const a = arena_state.allocator();
     const argv = std.process.argsAlloc(a) catch die("out of memory", .{});
-    if (argv.len < 2) die("usage: act (copy|cat|run-check) ...", .{});
+    if (argv.len < 2) die("usage: act (copy|cat|refuse|run-check) ...", .{});
     const sub = argv[1];
     if (std.mem.eql(u8, sub, "copy")) {
         copy(argv[2..]);
     } else if (std.mem.eql(u8, sub, "cat")) {
         cat(a, argv[2..]);
+    } else if (std.mem.eql(u8, sub, "refuse")) {
+        std.debug.print("{s}\n", .{if (argv.len > 2) argv[2] else "refused"});
+        std.process.exit(2);
     } else if (std.mem.eql(u8, sub, "run-check")) {
         const rc = runCheck(a, argv[2..]);
         if (rc != 0) std.process.exit(rc);

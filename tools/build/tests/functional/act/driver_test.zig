@@ -151,6 +151,14 @@ test "run-check of a binary that fails: exit 1, its exit status, the last 100 li
     try t.expect(std.mem.indexOf(u8, r2.stderr, " exited 7\n") != null);
 }
 
+test "refuse prints its message on stderr and exits 2" {
+    var c = try Ctx.init("refuse");
+    defer c.deinit();
+    const r = try c.run(&.{ "refuse", "cxx toolchain: a linker is not provided" }, "ok");
+    try t.expectEqual(@as(u8, 2), r.code);
+    try t.expectEqualStrings("cxx toolchain: a linker is not provided\n", r.stderr);
+}
+
 test "run-check usage and a binary that cannot start" {
     var c = try Ctx.init("rc_usage");
     defer c.deinit();

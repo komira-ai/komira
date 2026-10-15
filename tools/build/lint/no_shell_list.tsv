@@ -41,7 +41,6 @@ use	tools/build/mojo/BUCK	sh_script	3	names a shell script (an action script, th
 use	tools/build/mojo/archive.bzl	busybox_sh	2	shell action; to port to Zig (no-shell series)
 use	tools/build/mojo/coverage.bzl	sh_argv	2	shell action; to port to Zig (no-shell series)
 use	tools/build/mojo/coverage.bzl	sh_script	2	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/mojo/cxx.bzl	sh_argv	3	shell action; to port to Zig (no-shell series)
 use	tools/build/mojo/darwin.bzl	busybox_sh	2	shell action; to port to Zig (no-shell series)
 use	tools/build/mojo/darwin/BUCK	sh_script	3	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/mojo/doc.bzl	busybox_sh	2	shell action; to port to Zig (no-shell series)
