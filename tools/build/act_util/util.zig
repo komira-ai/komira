@@ -216,6 +216,7 @@ pub fn runCapture(a: std.mem.Allocator, argv: []const []const u8, env: ?*const s
 pub fn envWithoutLoaderVars(a: std.mem.Allocator) !std.process.EnvMap {
     var base = try std.process.getEnvMap(a);
     base.remove("LD_LIBRARY_PATH");
+    base.remove("LD_PRELOAD");
     return base;
 }
 
