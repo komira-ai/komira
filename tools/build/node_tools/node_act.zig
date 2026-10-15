@@ -288,7 +288,7 @@ fn cmdBundle(a: std.mem.Allocator, args: []const []const u8) u8 {
     defer empty.deinit();
     var child = std.process.Child.init(&.{ exe, entry, "--bundle", "--platform=node", fmt_arg, out_arg, "--log-level=warning" }, a);
     child.env_map = &empty;
-    _ = dir_abs;
+    child.cwd = dir_abs;
     const term = child.spawnAndWait() catch |e| return usage("cannot run {s}: {s}", .{ exe, @errorName(e) });
     return U.exitCodeOf(term);
 }
