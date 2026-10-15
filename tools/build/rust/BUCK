@@ -1,4 +1,6 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
 # Scripts used by the Rust rules.
 export_file(name = "rustc_wrapper.sh", visibility = ["PUBLIC"])
@@ -9,5 +11,26 @@ shell_lint(
     srcs = [
         "rustc_wrapper.sh",
     ],
+    visibility = ["PUBLIC"],
+)
+
+# crate_patch (crate_patch.zig): the `patch` attribute of the Rust rules, run
+# in a build action. A Zig tool, built behind its unit tests like every tool
+# under tools/build.
+zig_test(
+    name = "crate_patch_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "crate_patch.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "crate_patch",
+    exec_compatible_with = LINUX_X86_64,
+    src = "crate_patch.zig",
+    unit_tests = [":crate_patch_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
 )

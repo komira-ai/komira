@@ -839,6 +839,34 @@ buck2 build tests//functional/rust_test: //tools/build/examples/rust/ext:
 buck2 build tests//negative/rust_test:bin       # must fail: GATED TEST FAILED
 ```
 
+## 35b. Rust attributes Cargo needs
+
+`env`, `renamed_deps`, `native_deps`, `patch` and `proc_macro_extern` of the
+Rust rules ([`../rust/README.md`](../rust/README.md#cargo-crates)). The greens are
+[`functional/rust_cargo`](functional/rust_cargo/BUCK), each a binary whose run
+check compares its stdout (or a test): `env_pkg` reads `env!("CARGO_PKG_*")`,
+`renamed` links two crates both named `shared` (one under an alias), `native`
+and `native_test` call a C archive, `out_dir_main` links a crate whose
+`include!(concat!(env!("OUT_DIR"), ..))` is rewritten and whose file is added
+by `patch`, `pm_main` uses a proc-macro that names `proc_macro` without
+`extern crate`. In [`negative/rust_cargo`](negative/rust_cargo/BUCK) each green
+is repeated over the same source with its attribute removed or broken, and must
+fail naming its cause ([`rust_tests.sh`](rust_tests.sh)): `env` missing
+(`not defined at compile time`) or wrong (the run check differs), the alias
+missing (`undeclared crate or module`), no `native_deps` (`undefined symbol`, for
+a binary and a test), no patch (`OUT_DIR` not defined), a rewritten include with
+no file added, a substitution whose `count` is wrong (`matched 1 times, expected
+2`), and no `proc_macro_extern` (`proc_macro` undeclared). The refusals at
+analysis (a reserved or malformed `env`, an unknown `patch` key, a malformed
+`sub`, `proc_macro_extern` on a library that is no proc-macro) are rows of
+[`analysis_refusals_rust`](../selftest/analysis_refusals_rust.zig). `patch` is
+run by [`crate_patch`](../rust/crate_patch.zig), whose unit tests gate it.
+
+```sh
+buck2 build tests//functional/rust_cargo:
+buck2 build tests//negative/rust_cargo:env_missing   # must fail
+```
+
 ## 37. Platform table
 
 [`functional/platform_table`](functional/platform_table/BUCK): the platform
