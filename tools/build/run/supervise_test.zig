@@ -34,11 +34,11 @@ const Env = struct {
     }
 
     fn args(e: *Env, what: []const u8, extra: []const []const u8) ![]const []const u8 {
-        var l = std.ArrayList([]const u8).init(e.a);
-        try l.appendSlice(&.{ "mojo", "--busybox", e.bb, "--runtime-lib", "rt/lib", "--label", label, "--test" });
-        try l.append(try std.fmt.allocPrint(e.a, "root/bin/{s}", .{what}));
-        try l.appendSlice(&.{ "--marker", "passed" });
-        try l.appendSlice(extra);
+        var l = std.ArrayList([]const u8).empty;
+        try l.appendSlice(e.a, &.{ "mojo", "--busybox", e.bb, "--runtime-lib", "rt/lib", "--label", label, "--test" });
+        try l.append(e.a, try std.fmt.allocPrint(e.a, "root/bin/{s}", .{what}));
+        try l.appendSlice(e.a, &.{ "--marker", "passed" });
+        try l.appendSlice(e.a, extra);
         return l.items;
     }
 
@@ -188,9 +188,9 @@ fn flakyTable(alloc: std.mem.Allocator) ?proctab.Table {
 }
 fn blindTable(alloc: std.mem.Allocator) ?proctab.Table {
     const t = proctab.read(alloc) orelse return null;
-    var out = std.ArrayList(proctab.Proc).init(alloc);
+    var out = std.ArrayList(proctab.Proc).empty;
     for (t.procs) |p| {
-        if (p.pid != sys.getpid()) out.append(p) catch return null;
+        if (p.pid != sys.getpid()) out.append(alloc, p) catch return null;
     }
     return .{ .procs = out.items };
 }

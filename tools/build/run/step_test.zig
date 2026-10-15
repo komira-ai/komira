@@ -30,11 +30,11 @@ const Env = struct {
     }
 
     fn step(e: *Env, opts: []const []const u8, cmd: []const []const u8, env: ?[]const []const u8) !kit.Result {
-        var l = std.ArrayList([]const u8).init(e.a);
-        try l.appendSlice(&.{ "step", "--status", "status" });
-        try l.appendSlice(opts);
-        try l.append("--");
-        try l.appendSlice(cmd);
+        var l = std.ArrayList([]const u8).empty;
+        try l.appendSlice(e.a, &.{ "step", "--status", "status" });
+        try l.appendSlice(e.a, opts);
+        try l.append(e.a, "--");
+        try l.appendSlice(e.a, cmd);
         return kit.runGate(e.a, e.dir, l.items, .{ .env = env, .timeout_ms = 30_000 });
     }
 
@@ -65,7 +65,7 @@ test "S1 usage: each bad command line exits 2, and an unreadable --after file fa
     }) |c| {
         const r = try kit.runGate(e.a, e.dir, c.argv, .{});
         if (r.status != 2 or !std.mem.eql(u8, r.err, c.msg)) {
-            std.debug.print("{s}: exit {d}, stderr {s}\n", .{ c.argv, r.status, r.err });
+            std.debug.print("{s}: exit {d}, stderr {s}\n", .{ std.mem.join(std.heap.page_allocator, " ", c.argv) catch "", r.status, r.err });
             return error.TestUnexpectedResult;
         }
         try std.testing.expect(!kit.exists(e.p("s")));
