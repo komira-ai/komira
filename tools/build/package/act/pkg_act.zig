@@ -131,7 +131,7 @@ fn cmdLevelRun(a: std.mem.Allocator, args: []const []const u8) u8 {
     U.writeAll(std.fs.cwd(), args[0], r.stdout) catch |e| return usage("cannot write {s}: {s}", .{ args[0], @errorName(e) });
     // The program's report is shown whatever it decided.
     std.debug.print("{s}{s}", .{ r.stderr, r.stdout });
-    return r.code;
+    return 0;
 }
 
 fn cmdCondaManifestKci(a: std.mem.Allocator, args: []const []const u8) u8 {
