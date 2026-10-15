@@ -1,7 +1,7 @@
 """Rust rules for Buck2: rust_library, rust_binary, rust_test, crates_io_library.
 
 Every compile runs the pinned rustc from `toolchains//:rust` through
-`rustc_wrapper.sh`, which links through zig (see that file). Nothing is
+`rustc_launch` (tools/build/rust/rustc_launch.zig), which links through zig (see that file). Nothing is
 taken from the worker except glibc: the sysroot carries rustc's own
 libraries and, from pinned packages, the other libraries they need
 (libgcc_s, zlib), in the directory their run path names.
@@ -151,7 +151,7 @@ def _rust_toolchain_impl(ctx):
             sysroot = ctx.attrs.sysroot[DefaultInfo].default_outputs[0],
             zig = ctx.attrs.zig[DefaultInfo].default_outputs[0],
             cc_target = ctx.attrs.cc_target,
-            wrapper = ctx.attrs._wrapper[DefaultInfo].default_outputs[0],
+            wrapper = ctx.attrs._launcher[DefaultInfo].default_outputs[0],
             run_check = ctx.attrs._run_check[DefaultInfo].default_outputs[0],
             gate = ctx.attrs._gate[DefaultInfo].default_outputs[0],
         ),
@@ -172,9 +172,9 @@ rust_toolchain = rule(
         "_script_lint": attrs.list(attrs.dep(), default = [
             "komira//tools/build/lint:shell_lint",
             "komira//tools/build/mojo:shell_lint",
-            "komira//tools/build/rust:shell_lint",
         ]),
-        "_wrapper": attrs.dep(default = "komira//tools/build/rust:rustc_wrapper.sh"),
+        # The compile launcher (tools/build/rust/rustc_launch.zig; no shell).
+        "_launcher": attrs.exec_dep(default = "komira//tools/build/rust:rustc_launch"),
     },
 )
 
@@ -186,7 +186,7 @@ def _crate_name(ctx):
         fail("{}: crate name `{}` is not a Rust identifier; set `crate_name`".format(ctx.label, name))
     return name
 
-# Variables the compile wrapper (rustc_wrapper.sh) sets or clears itself: an
+# Variables the compile launcher (rustc_launch.zig) sets or clears itself: an
 # `env` naming one would be silently overridden, so it is refused.
 _RESERVED_ENV = ["BUCK_SCRATCH_PATH", "HOME", "LD_LIBRARY_PATH", "LD_PRELOAD", "PATH", "RUSTC_BOOTSTRAP", "RUSTFLAGS", "TMPDIR", "XDG_CACHE_HOME", "ZIG_GLOBAL_CACHE_DIR", "ZIG_LOCAL_CACHE_DIR"]
 
@@ -329,8 +329,6 @@ def _rustc(ctx, crate, crate_type, root, hidden, remap, externs, closure, metada
     )
     ctx.actions.run(
         cmd_args(
-            tc.busybox,
-            "sh",
             tc.wrapper,
             tc.busybox,
             tc.sysroot,

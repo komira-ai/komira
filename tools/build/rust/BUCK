@@ -1,16 +1,26 @@
-load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
-# Scripts used by the Rust rules.
-export_file(name = "rustc_wrapper.sh", visibility = ["PUBLIC"])
+# The compile launcher of every rustc action (rustc_launch.zig): the sysroot,
+# the zig linker shim, a fixed environment and the output checks. Built behind
+# its unit tests; its process cases (the environment, the exit statuses, the
+# shim) are tests//functional/rustc_launch.
+zig_test(
+    name = "rustc_launch_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "rustc_launch_test.zig",
+    imports = ["rustc_launch.zig"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
 
-# A validation of the Rust toolchain (defs.bzl).
-shell_lint(
-    name = "shell_lint",
-    srcs = [
-        "rustc_wrapper.sh",
-    ],
+zig_exe(
+    name = "rustc_launch",
+    exec_compatible_with = LINUX_X86_64,
+    src = "rustc_launch.zig",
+    unit_tests = [":rustc_launch_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
 )
 

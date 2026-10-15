@@ -4,7 +4,7 @@
 //!     version_check <rustc> <expected line> <result.json>
 //!
 //! rustc runs with an empty environment: it finds its libraries through its
-//! own run path ($ORIGIN/../lib), as it does under rustc_wrapper.sh. Exit 1
+//! own run path ($ORIGIN/../lib), as it does under rustc_launch. Exit 1
 //! when the line differs (or rustc does not run), 2 on a usage error. Only a
 //! match writes <result.json>, the validation result of the sysroot.
 const std = @import("std");
@@ -29,7 +29,7 @@ pub fn main() void {
         std.process.exit(2);
     }
     var env = std.process.EnvMap.init(a);
-    // An absolute path, as rustc_wrapper.sh gives it: $ORIGIN is the
+    // An absolute path, as rustc_launch gives it: $ORIGIN is the
     // directory of the path rustc was started by.
     const rustc = std.fs.path.resolve(a, &.{args[1]}) catch std.process.exit(2);
     const r = std.ChildProcess.run(.{

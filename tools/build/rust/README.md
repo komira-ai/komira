@@ -115,7 +115,7 @@ unless its `bin/rustc --version` prints the pinned line
 ([`version_check.zig`](../toolchains/rust/version_check.zig), a validation of
 `toolchains/rust:sysroot` that every build holding the toolchain runs), so a pin
 that names one release over the tarballs of another fails every Rust target.
-rustc runs through [`rustc_wrapper.sh`](rustc_wrapper.sh)
+rustc runs through [`rustc_launch`](rustc_launch.zig), a Zig program (no shell),
 with `--sysroot` set to the unpacked toolchain (and `-C linker-features=-lld`:
 since 1.90 rustc links x86_64 linux with its own rust-lld, which the sysroot does
 not keep); links go through zig
@@ -129,7 +129,7 @@ outside glibc and the sysroot). No Cargo and no build scripts run: features are
 stated per crate, and where a crate's build script would emit a cfg for the
 pinned rustc, the cfg is written in `cfgs`. A proc-macro is an ordinary
 dependency, compiled once for linux x86_64, which is both the execution and
-the target platform. The wrapper refuses an output containing the action's
+the target platform. The launcher refuses an output containing the action's
 working directory (exit 4); rustc's own record of it is remapped.
 
 ## Cargo crates

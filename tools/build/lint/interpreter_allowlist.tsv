@@ -38,7 +38,6 @@ tools/build/package/release_version.sh	dead: to be deleted
 tools/build/python/oracle_run.py	action runtime of the Python rules: runs inside the pinned interpreter it serves
 tools/build/python/pyrun.py	action runtime of the Python rules: runs inside the pinned interpreter it serves
 tools/build/python/wheel_install.py	action runtime of the Python rules: runs inside the pinned interpreter it serves
-tools/build/rust/rustc_wrapper.sh	action runtime of the rules: to port to Zig
 tools/build/tests/assert_level_tests.sh	build system self-tests: to port to Zig
 tools/build/tests/c_libs_tests.sh	build system self-tests: to port to Zig
 tools/build/tests/coverage_branch_tests.sh	build system self-tests: to port to Zig

@@ -387,16 +387,18 @@ Each pull request deletes its shell in the same change, and none re-runs a build
 pull-request check builds the affected targets, and the macOS proof is the one farm build the check cannot
 make.
 
-## Follow-on: `rustc_wrapper.sh`
+## Follow-on: `rustc_launch`
 
-`tools/build/rust/rustc_wrapper.sh` (88 lines) is the same shape without the watchdog: a closure check
-(`bin/rustc`, `zig`), private scratch, a generated `cc` shim (`zig cc -target <t> -Wl,--strip-debug`, no
-rewriting) handed to rustc as `-C linker=`, an environment of `HOME`, `TMPDIR`, `XDG_CACHE_HOME` and the
-zig caches with `LD_LIBRARY_PATH`, `LD_PRELOAD`, `RUSTFLAGS` and `RUSTC_BOOTSTRAP` unset,
-`--remap-path-prefix=$PWD=.`, and the same exit 3 and 4 checks. It becomes a second `main`
-(`rustc_compile.zig`) over the shared modules: scratch, exact environment, the shim's exec, and the output
-checks move into a `compile_common.zig` that both import. It is its own pull request after the Linux one,
-because it invalidates every Rust compile once and nothing in the Mojo port depends on it.
+The Rust compile has the same shape without the watchdog, and it was a shell script
+(`rustc_wrapper.sh`). It is now `tools/build/rust/rustc_launch.zig`, its own program: a closure check
+(`bin/rustc`, `zig`), private scratch, a `cc` shim (`zig cc -target <t> -Wl,--strip-debug`, no rewriting;
+the program itself under the name `cc`, with its configuration beside it) handed to rustc as `-C linker=`,
+an environment of `HOME`, `TMPDIR`, `XDG_CACHE_HOME` and the zig caches with `LD_LIBRARY_PATH`,
+`LD_PRELOAD`, `RUSTFLAGS` and `RUSTC_BOOTSTRAP` unset, `--remap-path-prefix=<cwd>=.`, `-C
+linker-features=-lld`, and the same exit 3 and 4 checks. It keeps the wrapper's command line, so the argv
+of every rustc action is the old one without the `busybox sh rustc_wrapper.sh` prefix. It does not share
+modules with `mojo_compile`: the two differ in their environment and in what they check, and the shared
+part is a few lines (scratch placement, an exit status).
 
 ## Risks and open questions
 
