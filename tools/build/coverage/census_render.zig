@@ -263,7 +263,7 @@ pub fn parseCensus(a: Alloc, name: []const u8, text: []const u8, held: std.Strin
         fn less(_: void, p: Row, q: Row) bool {
             const bp1 = bpOf(p);
             const bp2 = bpOf(q);
-            if (bp1 != bp2) return bp1 < bp2;
+            if (bp1 != bp2) return bp1 > bp2;
             return std.mem.lessThan(u8, p.library, q.library);
         }
     };
