@@ -105,7 +105,7 @@ pub fn parse(a: std.mem.Allocator, b: []const u8) ParseError!Elf {
     const phnum: u64 = try rd(u16, b, 0x38);
     if (phnum > 0 and phentsize < 56) return error.Truncated;
     var out = Elf{};
-    var loads = std.ArrayList([3]u64).init(a);
+    var loads = std.ArrayList([3]u64).empty;
     var dyn: ?[2]u64 = null;
     var i: u64 = 0;
     while (i < phnum) : (i += 1) {
@@ -116,7 +116,7 @@ pub fn parse(a: std.mem.Allocator, b: []const u8) ParseError!Elf {
         const filesz = try rd(u64, b, ph + 32);
         if (off > b.len or b.len - off < filesz) return error.Truncated;
         switch (ty) {
-            PT_LOAD => try loads.append(.{ off, vaddr, filesz }),
+            PT_LOAD => try loads.append(a, .{ off, vaddr, filesz }),
             PT_DYNAMIC => {
                 if (dyn != null) return error.BadDynamic;
                 dyn = .{ off, filesz };
@@ -128,7 +128,7 @@ pub fn parse(a: std.mem.Allocator, b: []const u8) ParseError!Elf {
     const d = dyn orelse return out;
     var strtab: ?u64 = null;
     var strsz: ?u64 = null;
-    var needed = std.ArrayList(u64).init(a);
+    var needed = std.ArrayList(u64).empty;
     var rpath: ?u64 = null;
     var runpath: ?u64 = null;
     var soname: ?u64 = null;
@@ -138,7 +138,7 @@ pub fn parse(a: std.mem.Allocator, b: []const u8) ParseError!Elf {
         const val = try rd(u64, b, at + 8);
         switch (tag) {
             DT_NULL => break,
-            DT_NEEDED => try needed.append(val),
+            DT_NEEDED => try needed.append(a, val),
             DT_STRTAB => strtab = val,
             DT_STRSZ => strsz = val,
             DT_SONAME => soname = val,
@@ -156,8 +156,8 @@ pub fn parse(a: std.mem.Allocator, b: []const u8) ParseError!Elf {
     if (needed.items.len == 0 and rpath == null and runpath == null and soname == null) return out;
     const st = try offsetOf(loads.items, strtab orelse return error.BadDynamic);
     const end = st + (strsz orelse return error.BadDynamic);
-    var names = std.ArrayList([]const u8).init(a);
-    for (needed.items) |n| try names.append(try strAt(a, b, st, end, n));
+    var names = std.ArrayList([]const u8).empty;
+    for (needed.items) |n| try names.append(a, try strAt(a, b, st, end, n));
     out.needed = names.items;
     if (rpath) |r| out.rpath = try strAt(a, b, st, end, r);
     if (runpath) |r| out.runpath = try strAt(a, b, st, end, r);
@@ -167,7 +167,7 @@ pub fn parse(a: std.mem.Allocator, b: []const u8) ParseError!Elf {
 
 /// Each minor m of a `GLIBC_2.<m>` string in `b` with m > `floor`, added to
 /// `over` once. Returns whether `b` names any GLIBC_2. version.
-pub fn glibcOver(b: []const u8, floor: u32, over: *std.ArrayList(u32)) !bool {
+pub fn glibcOver(a: std.mem.Allocator, b: []const u8, floor: u32, over: *std.ArrayList(u32)) !bool {
     const key = "GLIBC_2.";
     var any = false;
     var from: usize = 0;
@@ -178,7 +178,7 @@ pub fn glibcOver(b: []const u8, floor: u32, over: *std.ArrayList(u32)) !bool {
         if (e == from) continue;
         any = true;
         const m = std.fmt.parseInt(u32, b[from..e], 10) catch std.math.maxInt(u32);
-        if (m > floor and std.mem.indexOfScalar(u32, over.items, m) == null) try over.append(m);
+        if (m > floor and std.mem.indexOfScalar(u32, over.items, m) == null) try over.append(a, m);
     }
     return any;
 }
@@ -223,9 +223,9 @@ pub fn expand(a: std.mem.Allocator, entry: []const u8, origin: []const u8) !Expa
     }
     if (rest.len != 0 and rest[0] != '/') return .{ .why = try std.fmt.allocPrint(a, "the run path entry '{s}', which names a token other than $ORIGIN", .{entry}) };
     if (std.mem.indexOfScalar(u8, rest, '$') != null) return .{ .why = try std.fmt.allocPrint(a, "the run path entry '{s}', which names a token after $ORIGIN", .{entry}) };
-    var parts = std.ArrayList([]const u8).init(a);
+    var parts = std.ArrayList([]const u8).empty;
     var it = std.mem.tokenizeScalar(u8, origin, '/');
-    while (it.next()) |p| try parts.append(p);
+    while (it.next()) |p| try parts.append(a, p);
     it = std.mem.tokenizeScalar(u8, rest, '/');
     while (it.next()) |p| {
         if (std.mem.eql(u8, p, ".")) continue;
@@ -234,7 +234,7 @@ pub fn expand(a: std.mem.Allocator, entry: []const u8, origin: []const u8) !Expa
             _ = parts.pop();
             continue;
         }
-        try parts.append(p);
+        try parts.append(a, p);
     }
     return .{ .dir = try std.mem.join(a, "/", parts.items) };
 }
@@ -254,7 +254,7 @@ const Prefix = struct {
     fn red(self: *Prefix, comptime fmt: []const u8, args: anytype) !void {
         const s = try std.fmt.allocPrint(self.a, fmt, args);
         for (self.report.findings.items) |f| if (std.mem.eql(u8, f, s)) return;
-        try self.report.findings.append(s);
+        try self.report.findings.append(self.a, s);
     }
 
     /// The path in the prefix of `rel` with links resolved; `.none` when no
@@ -321,8 +321,8 @@ fn searchPath(p: *Prefix, obj: []const u8, tag: []const u8, rp: []const u8, name
 }
 
 fn closure(p: *Prefix, root: []const u8, seen: *std.StringHashMap(void)) !void {
-    var maps = std.ArrayList(Mapped).init(p.a);
-    try maps.append(.{ .rel = root, .name = root, .elf = p.elfs.get(root).?, .loader = null });
+    var maps = std.ArrayList(Mapped).empty;
+    try maps.append(p.a, .{ .rel = root, .name = root, .elf = p.elfs.get(root).?, .loader = null });
     var i: usize = 0;
     while (i < maps.items.len) : (i += 1) {
         const obj = maps.items[i];
@@ -353,14 +353,14 @@ fn closure(p: *Prefix, root: []const u8, seen: *std.StringHashMap(void)) !void {
                         // Mapped all the same, loaded by `obj`, so what it
                         // needs is checked too, through a chain that holds
                         // an object with a DT_RUNPATH.
-                        if (p.elfs.get(at)) |elf| try maps.append(.{ .rel = at, .name = name, .elf = elf, .loader = i });
+                        if (p.elfs.get(at)) |elf| try maps.append(p.a, .{ .rel = at, .name = name, .elf = elf, .loader = i });
                         continue;
                     }
                 }
             }
             const f = found orelse {
                 if (isSystem(name)) {
-                    try p.report.lines.append(try std.fmt.allocPrint(p.a, "{s}: {s} <- {s}: the system's", .{ root, name, obj.rel }));
+                    try p.report.lines.append(p.a, try std.fmt.allocPrint(p.a, "{s}: {s} <- {s}: the system's", .{ root, name, obj.rel }));
                 } else {
                     try p.red("{s} needs {s}, which is not in the prefix: the loader would take it from LD_LIBRARY_PATH or the system", .{ obj.rel, name });
                 }
@@ -375,8 +375,8 @@ fn closure(p: *Prefix, root: []const u8, seen: *std.StringHashMap(void)) !void {
                 try p.red("{s} needs {s}, found at {s}, which is not an ELF64 little-endian file", .{ obj.rel, name, at });
                 continue;
             };
-            try p.report.lines.append(try std.fmt.allocPrint(p.a, "{s}: {s} <- {s}: {s} (through {s})", .{ root, name, obj.rel, at, f.how }));
-            try maps.append(.{ .rel = at, .name = name, .elf = elf, .loader = i });
+            try p.report.lines.append(p.a, try std.fmt.allocPrint(p.a, "{s}: {s} <- {s}: {s} (through {s})", .{ root, name, obj.rel, at, f.how }));
+            try maps.append(p.a, .{ .rel = at, .name = name, .elf = elf, .loader = i });
             if (!seen.contains(at)) {
                 try seen.put(at, {});
                 p.report.mapped += 1;
@@ -388,17 +388,17 @@ fn closure(p: *Prefix, root: []const u8, seen: *std.StringHashMap(void)) !void {
 /// The check of the prefix `prefix`. Everything is allocated in `a` (an
 /// arena: nothing is freed but file contents).
 pub fn check(a: std.mem.Allocator, prefix: []const u8, opts: Options) !Report {
-    var report = Report{ .findings = std.ArrayList([]const u8).init(a), .lines = std.ArrayList([]const u8).init(a) };
+    var report = Report{ .findings = std.ArrayList([]const u8).empty, .lines = std.ArrayList([]const u8).empty };
     var dir = try std.fs.cwd().openDir(prefix, .{ .iterate = true });
     defer dir.close();
     var p = Prefix{ .a = a, .dir = dir, .real = try dir.realpathAlloc(a, "."), .elfs = std.StringHashMap(Elf).init(a), .report = &report };
 
     // Every regular file, in path order; a file read once per inode.
-    var paths = std.ArrayList([]const u8).init(a);
+    var paths = std.ArrayList([]const u8).empty;
     var walker = try dir.walk(a);
     defer walker.deinit();
     while (try walker.next()) |e| {
-        if (e.kind == .file) try paths.append(try a.dupe(u8, e.path));
+        if (e.kind == .file) try paths.append(a, try a.dupe(u8, e.path));
     }
     std.mem.sort([]const u8, paths.items, {}, struct {
         fn lt(_: void, x: []const u8, y: []const u8) bool {
@@ -406,7 +406,7 @@ pub fn check(a: std.mem.Allocator, prefix: []const u8, opts: Options) !Report {
         }
     }.lt);
     var by_inode = std.AutoHashMap(u64, Elf).init(a);
-    var over = std.ArrayList(u32).init(a);
+    var over = std.ArrayList(u32).empty;
     var any_glibc = false;
     const bytes_alloc = std.heap.page_allocator;
     for (paths.items) |rel| {
@@ -433,11 +433,11 @@ pub fn check(a: std.mem.Allocator, prefix: []const u8, opts: Options) !Report {
         };
         if (opts.glibc_floor) |floor| {
             over.clearRetainingCapacity();
-            if (try glibcOver(b, floor, &over)) any_glibc = true;
+            if (try glibcOver(a, b, floor, &over)) any_glibc = true;
             if (over.items.len != 0) {
                 std.mem.sort(u32, over.items, {}, std.sort.asc(u32));
-                var names = std.ArrayList(u8).init(a);
-                for (over.items, 0..) |m, k| try names.writer().print("{s}GLIBC_2.{d}", .{ if (k == 0) "" else " ", m });
+                var names = std.ArrayList(u8).empty;
+                for (over.items, 0..) |m, k| try names.writer(a).print("{s}GLIBC_2.{d}", .{ if (k == 0) "" else " ", m });
                 try p.red("{s} needs {s}, above the floor GLIBC_2.{d}", .{ rel, names.items, floor });
             }
         }
@@ -479,7 +479,7 @@ pub fn main() !void {
     var prefix: ?[]const u8 = null;
     var out: ?[]const u8 = null;
     var opts = Options{};
-    var roots = std.ArrayList([]const u8).init(a);
+    var roots = std.ArrayList([]const u8).empty;
     var i: usize = 1;
     while (i < args.len) : (i += 2) {
         if (i + 1 >= args.len) usage();
@@ -490,7 +490,7 @@ pub fn main() !void {
         } else if (std.mem.eql(u8, k, "--out")) {
             out = v;
         } else if (std.mem.eql(u8, k, "--root")) {
-            try roots.append(v);
+            try roots.append(a, v);
         } else if (std.mem.eql(u8, k, "--interp")) {
             opts.interp = v;
         } else if (std.mem.eql(u8, k, "--glibc-floor")) {
@@ -503,12 +503,12 @@ pub fn main() !void {
         for (report.findings.items) |f| std.debug.print("loader_closure RED: {s}\n", .{f});
         std.process.exit(1);
     }
-    const stdout = std.io.getStdOut().writer();
+    const stdout = std.fs.File.stdout().deprecatedWriter();
     for (report.lines.items) |l| try stdout.print("{s}\n", .{l});
     const floor = if (opts.glibc_floor) |f| try std.fmt.allocPrint(a, ", nothing above GLIBC_2.{d}", .{f}) else "";
     const msg = try std.fmt.allocPrint(a, "loader_closure: {d} programs, {d} libraries of the prefix through DT_RPATH, the rest glibc's{s}", .{ report.programs, report.mapped, floor });
     try stdout.print("loader_closure GREEN: {s}\n", .{msg});
     const file = try std.fs.cwd().createFile(out orelse usage(), .{});
     defer file.close();
-    try file.writer().print("{{\"version\": 1, \"data\": {{\"status\": \"success\", \"message\": \"{s}\"}}}}\n", .{msg});
+    try file.deprecatedWriter().print("{{\"version\": 1, \"data\": {{\"status\": \"success\", \"message\": \"{s}\"}}}}\n", .{msg});
 }

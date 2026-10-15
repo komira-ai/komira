@@ -54,7 +54,7 @@ fn die(comptime fmt: []const u8, args: anytype) noreturn {
 }
 
 fn write(name: []const u8, data: []const u8) void {
-    std.fs.cwd().writeFile(name, data) catch |e| die("cannot write {s}: {s}", .{ name, @errorName(e) });
+    std.fs.cwd().writeFile(.{ .sub_path = name, .data = data }) catch |e| die("cannot write {s}: {s}", .{ name, @errorName(e) });
 }
 
 fn writePid(name: []const u8, pid: i32) void {
@@ -63,7 +63,7 @@ fn writePid(name: []const u8, pid: i32) void {
 }
 
 fn sleepSecs(s: u64) void {
-    std.time.sleep(s * std.time.ns_per_s);
+    std.Thread.sleep(s * std.time.ns_per_s);
 }
 
 fn spin(s: i64) void {
@@ -127,17 +127,17 @@ fn execCc(arena: std.mem.Allocator, out: []const u8) noreturn {
     const path = posix.getenv("PATH") orelse die("no PATH", .{});
     var dirs = std.mem.splitScalar(u8, path, ':');
     const cc = while (dirs.next()) |d| {
-        const p = std.fmt.allocPrintZ(arena, "{s}/cc", .{d}) catch die("out of memory", .{});
+        const p = std.fmt.allocPrintSentinel(arena, "{s}/cc", .{d}, 0) catch die("out of memory", .{});
         if (posix.accessZ(p, posix.X_OK)) |_| break p else |_| {}
     } else die("no cc on PATH {s}", .{path});
-    var argv = std.ArrayList(?[*:0]const u8).init(arena);
-    argv.append("cc") catch unreachable;
-    for (link_inputs) |a| argv.append(arena.dupeZ(u8, a) catch unreachable) catch unreachable;
-    argv.append("-o") catch unreachable;
-    argv.append(arena.dupeZ(u8, out) catch unreachable) catch unreachable;
+    var argv = std.ArrayList(?[*:0]const u8).empty;
+    argv.append(arena, "cc") catch unreachable;
+    for (link_inputs) |a| argv.append(arena, arena.dupeZ(u8, a) catch unreachable) catch unreachable;
+    argv.append(arena, "-o") catch unreachable;
+    argv.append(arena, arena.dupeZ(u8, out) catch unreachable) catch unreachable;
     // Last: a trailing -Xlinker passes through.
-    argv.append("-Xlinker") catch unreachable;
-    argv.append(null) catch unreachable;
+    argv.append(arena, "-Xlinker") catch unreachable;
+    argv.append(arena, null) catch unreachable;
     const envp = arena.allocSentinel(?[*:0]const u8, std.os.environ.len, null) catch unreachable;
     for (std.os.environ, 0..) |e, i| envp[i] = e;
     const rc = linux.execve(cc, @ptrCast(argv.items.ptr), envp);
@@ -147,7 +147,7 @@ fn execCc(arena: std.mem.Allocator, out: []const u8) noreturn {
 fn disposition(sig: u6) []const u8 {
     var old: posix.Sigaction = undefined;
     if (macos) {
-        posix.sigaction(sig, null, &old) catch {};
+        posix.sigaction(sig, null, &old);
     } else {
         _ = linux.sigaction(sig, null, &old);
     }
@@ -175,10 +175,10 @@ fn sigstate() void {
 }
 
 fn envdump(arena: std.mem.Allocator) void {
-    var out = std.ArrayList(u8).init(arena);
+    var out = std.ArrayList(u8).empty;
     for (std.os.environ) |e| {
-        out.appendSlice(std.mem.span(e)) catch unreachable;
-        out.append('\n') catch unreachable;
+        out.appendSlice(arena, std.mem.span(e)) catch unreachable;
+        out.append(arena, '\n') catch unreachable;
     }
     write("env.txt", out.items);
 }
@@ -193,10 +193,10 @@ pub fn main() void {
     const out = output(args[1..]);
 
     if (std.mem.eql(u8, name, "zig")) {
-        var rec = std.ArrayList(u8).init(arena);
+        var rec = std.ArrayList(u8).empty;
         for (args) |a| {
-            rec.appendSlice(a) catch unreachable;
-            rec.append('\n') catch unreachable;
+            rec.appendSlice(arena, a) catch unreachable;
+            rec.append(arena, '\n') catch unreachable;
         }
         write("zig.argv", rec.items);
         write(out orelse die("zig: no -o", .{}), "linked\n");
@@ -262,10 +262,10 @@ pub fn main() void {
         // wrapper neither catches nor forwards it.
         if (macos) {
             const sa = posix.Sigaction{ .handler = .{ .handler = posix.SIG.DFL }, .mask = 0, .flags = 0 };
-            posix.sigaction(posix.SIG.USR1, &sa, null) catch {};
+            posix.sigaction(posix.SIG.USR1, &sa, null);
             _ = std.c.kill(getpid(), posix.SIG.USR1);
         } else {
-            const sa = linux.Sigaction{ .handler = .{ .handler = linux.SIG.DFL }, .mask = linux.empty_sigset, .flags = 0 };
+            const sa = linux.Sigaction{ .handler = .{ .handler = linux.SIG.DFL }, .mask = linux.sigemptyset(), .flags = 0 };
             _ = linux.sigaction(linux.SIG.USR1, &sa, null);
             _ = linux.kill(linux.getpid(), linux.SIG.USR1);
         }

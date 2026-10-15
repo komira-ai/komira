@@ -60,11 +60,11 @@ fn str(comptime f: []const u8, args: anytype) []const u8 {
 }
 
 fn strZ(comptime f: []const u8, args: anytype) [:0]const u8 {
-    return std.fmt.allocPrintZ(arena, f, args) catch die("out of memory", .{});
+    return std.fmt.allocPrintSentinel(arena, f, args, 0) catch die("out of memory", .{});
 }
 
 fn writeFile(path: []const u8, data: []const u8) void {
-    std.fs.cwd().writeFile(path, data) catch |e| die("cannot write {s}: {s}", .{ path, @errorName(e) });
+    std.fs.cwd().writeFile(.{ .sub_path = path, .data = data }) catch |e| die("cannot write {s}: {s}", .{ path, @errorName(e) });
 }
 
 fn readFile(path: []const u8) ?[]const u8 {
@@ -134,20 +134,20 @@ fn scratchOf(dir: []const u8) []const u8 {
 fn spawn(s: Spec) struct { pid: i32, dir: []const u8 } {
     const dir = caseDir(s.name);
     std.fs.cwd().makePath(str("{s}/bsp", .{dir})) catch die("cannot make {s}", .{dir});
-    var argv = std.ArrayList(?[*:0]const u8).init(arena);
-    argv.append(wrapper) catch unreachable;
-    argv.append(strZ("--compiler={s}/{s}", .{ root, s.tc })) catch unreachable;
+    var argv = std.ArrayList(?[*:0]const u8).empty;
+    argv.append(arena, wrapper) catch unreachable;
+    argv.append(arena, strZ("--compiler={s}/{s}", .{ root, s.tc })) catch unreachable;
     if (macos) {
-        argv.append("--deployment-target=11.0") catch unreachable;
-        if (host_flag.len > 0) argv.append(host_flag) catch unreachable;
+        argv.append(arena, "--deployment-target=11.0") catch unreachable;
+        if (host_flag.len > 0) argv.append(arena, host_flag) catch unreachable;
     } else {
-        argv.append(strZ("--zig={s}/zig", .{root})) catch unreachable;
-        argv.append("--cc-target=x86_64-linux-gnu") catch unreachable;
+        argv.append(arena, strZ("--zig={s}/zig", .{root})) catch unreachable;
+        argv.append(arena, "--cc-target=x86_64-linux-gnu") catch unreachable;
     }
-    for (s.flags) |f| argv.append(strZ("{s}", .{f})) catch unreachable;
-    argv.append("--") catch unreachable;
-    for (s.mojo) |a| argv.append(strZ("{s}", .{a})) catch unreachable;
-    argv.append(null) catch unreachable;
+    for (s.flags) |f| argv.append(arena, strZ("{s}", .{f})) catch unreachable;
+    argv.append(arena, "--") catch unreachable;
+    for (s.mojo) |a| argv.append(arena, strZ("{s}", .{a})) catch unreachable;
+    argv.append(arena, null) catch unreachable;
     const envp = [_:null]?[*:0]const u8{
         strZ("PWD={s}", .{dir}),
         strZ("BUCK_SCRATCH_PATH={s}/bsp", .{dir}),
@@ -179,7 +179,7 @@ fn childLinux(dir_z: [*:0]const u8, log_z: [*:0]const u8, in_z: [*:0]const u8, a
     if (posix.errno(in) != .SUCCESS) linux.exit_group(122);
     _ = linux.dup2(@intCast(in), 0);
     for ([_]u6{ SIG.HUP, SIG.INT, SIG.QUIT, SIG.TERM }) |sig| {
-        const sa = linux.Sigaction{ .handler = .{ .handler = SIG.DFL }, .mask = linux.empty_sigset, .flags = 0 };
+        const sa = linux.Sigaction{ .handler = .{ .handler = SIG.DFL }, .mask = linux.sigemptyset(), .flags = 0 };
         _ = linux.sigaction(sig, &sa, null);
     }
     _ = linux.execve(wrapper, argv, envp);
@@ -198,7 +198,7 @@ fn childMacos(dir_z: [*:0]const u8, log_z: [*:0]const u8, in_z: [*:0]const u8, a
     _ = c.dup2(in, 0);
     for ([_]u6{ SIG.HUP, SIG.INT, SIG.QUIT, SIG.TERM }) |sig| {
         const sa = posix.Sigaction{ .handler = .{ .handler = SIG.DFL }, .mask = 0, .flags = 0 };
-        posix.sigaction(sig, &sa, null) catch {};
+        posix.sigaction(sig, &sa, null);
     }
     _ = c.execve(wrapper, argv, envp);
     c._exit(123);
@@ -215,7 +215,7 @@ fn waitFor(pid: i32, secs: u64) ?u8 {
     while (std.time.milliTimestamp() < end) {
         const r = posix.waitpid(pid, W.NOHANG);
         if (r.pid == pid) return statusOf(r.status);
-        std.time.sleep(50 * std.time.ns_per_ms);
+        std.Thread.sleep(50 * std.time.ns_per_ms);
     }
     kill(pid, SIG.KILL);
     _ = posix.waitpid(pid, 0);
@@ -275,10 +275,10 @@ fn verdict(name: []const u8, why: ?[]const u8, log: []const u8) void {
     if (why) |w| {
         const line = str("BAD {s}: {s}: {s}\n", .{ name, w, lastLines(log) });
         std.debug.print("{s}", .{line});
-        report.appendSlice(line) catch unreachable;
+        report.appendSlice(arena, line) catch unreachable;
         bad = true;
     } else {
-        report.appendSlice(str("ok {s}\n", .{name})) catch unreachable;
+        report.appendSlice(arena, str("ok {s}\n", .{name})) catch unreachable;
     }
 }
 
@@ -319,10 +319,10 @@ fn expect(s: Spec, want: u8, text: ?[]const u8) void {
     if (why) |w| {
         const line = str("BAD {s}: {s}\n", .{ s.name, w });
         std.debug.print("{s}", .{line});
-        report.appendSlice(line) catch unreachable;
+        report.appendSlice(arena, line) catch unreachable;
         bad = true;
     } else {
-        report.appendSlice(str("ok {s}\n", .{s.name})) catch unreachable;
+        report.appendSlice(arena, str("ok {s}\n", .{s.name})) catch unreachable;
     }
 }
 
@@ -337,7 +337,7 @@ fn killed(name: []const u8, sig: u6, want: u8) void {
     defer killLeftovers(sp.dir);
     var n: usize = 0;
     while (n < 200 and (pidIn(sp.dir, "child.pid") == null or pidIn(sp.dir, "compiler.pid") == null)) : (n += 1) {
-        std.time.sleep(100 * std.time.ns_per_ms);
+        std.Thread.sleep(100 * std.time.ns_per_ms);
     }
     const why: ?[]const u8 = blk: {
         const child = pidIn(sp.dir, "child.pid") orelse {
@@ -356,7 +356,7 @@ fn killed(name: []const u8, sig: u6, want: u8) void {
             if (alive(compiler)) left = str("{s} {d}", .{ left, compiler });
             if (alive(child)) left = str("{s} {d}", .{ left, child });
             if (left.len == 0) break;
-            std.time.sleep(100 * std.time.ns_per_ms);
+            std.Thread.sleep(100 * std.time.ns_per_ms);
         }
         if (left.len > 0) break :blk str("still alive 5 s after signal {d} to the wrapper:{s}", .{ sig, left });
         if (sig != SIG.KILL and exists(scratchOf(sp.dir))) break :blk "the scratch directory was left";
@@ -366,10 +366,10 @@ fn killed(name: []const u8, sig: u6, want: u8) void {
 }
 
 fn lines(text: []const u8) [][]const u8 {
-    var out = std.ArrayList([]const u8).init(arena);
+    var out = std.ArrayList([]const u8).empty;
     var it = std.mem.splitScalar(u8, std.mem.trimRight(u8, text, "\n"), '\n');
-    while (it.next()) |l| out.append(l) catch unreachable;
-    return out.toOwnedSlice() catch unreachable;
+    while (it.next()) |l| out.append(arena, l) catch unreachable;
+    return out.toOwnedSlice(arena) catch unreachable;
 }
 
 fn lessThan(_: void, a: []const u8, b: []const u8) bool {
@@ -403,7 +403,7 @@ fn expectFile(s: Spec, file: []const u8, want: []const []const u8, sort: bool) v
 pub fn main() void {
     var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     arena = arena_state.allocator();
-    report = std.ArrayList(u8).init(arena);
+    report = std.ArrayList(u8).empty;
     const argv = std.process.argsAlloc(arena) catch die("out of memory", .{});
     if (argv.len != 4) die("usage: cases <mojo_compile> <standin> <report>", .{});
     const cwd = std.process.getCwdAlloc(arena) catch die("cannot read the working directory", .{});
@@ -509,12 +509,12 @@ pub fn main() void {
     // stand-in replaces; its line is cc_shim.zig's unit tests, and a real
     // link on the macOS workers is the build of any darwin Mojo binary.
     if (!macos) {
-        var want = std.ArrayList([]const u8).init(arena);
-        want.appendSlice(&.{
+        var want = std.ArrayList([]const u8).empty;
+        want.appendSlice(arena, &.{
             str("{s}/zig/zig", .{root}), "cc",                     "-target",              "x86_64-linux-gnu",
             "-Wl,--strip-debug",         "-Wl,--enable-new-dtags", "-Wl,-rpath,$ORIGIN/x",
         }) catch unreachable;
-        want.appendSlice(&.{
+        want.appendSlice(arena, &.{
             "-L/d",   "-lfoo",    "-Wl,--gc-sections", "-Xlinker", "-soname",   "-Xlinker", "libx.so",
             "-Xlinker", "-z",     "keep.o",            "-Xlinker", "now",       "bare.o",   "-L/f",
             "-lg",    "-o",       "out.mojoc",         "-Xlinker", "libtail.a", "-lc++",
@@ -577,7 +577,7 @@ pub fn main() void {
     if (ok_lines < floor) {
         const line = str("BAD floor: {d} ok case(s), fewer than the {d} cases of this runner\n", .{ ok_lines, floor });
         std.debug.print("{s}", .{line});
-        report.appendSlice(line) catch unreachable;
+        report.appendSlice(arena, line) catch unreachable;
         bad = true;
     }
 

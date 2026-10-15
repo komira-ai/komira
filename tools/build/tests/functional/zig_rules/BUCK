@@ -9,7 +9,7 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_te
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
 _BUSYBOX = "komira//tools/build/toolchains:busybox"
-_ZIG = "komira//tools/build/toolchains:zig"
+_ZIG = "komira//tools/build/toolchains:zig_next"
 
 
 # The sources the planted defects (tests//negative/zig_rules) reuse.
