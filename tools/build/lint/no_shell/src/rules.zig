@@ -326,6 +326,40 @@ pub fn verdict(r: Result, report: []const u8, expect: []const []const u8) Verdic
     return .{ .ok = r.findings > 0 };
 }
 
+/// The validation result Buck2 reads, and its message, for the findings `report` of `r` and the
+/// verdict `v` (with `expect`, a planted case: its message says whether the
+/// defect was refused as expected).
+pub const Rendered = struct {
+    /// The file Buck2 reads.
+    json: []const u8,
+    /// The message inside it, for the log.
+    message: []const u8,
+};
+
+pub fn render(alloc: Alloc, name: []const u8, r: Result, v: Verdict, report: []const u8, expect: []const []const u8) !Rendered {
+    var message = std.ArrayList(u8).init(alloc);
+    const mw = message.writer();
+    if (expect.len > 0) {
+        if (v.missing) |m| {
+            try mw.print("no_shell: the planted defect was not refused as expected: no finding holds `{s}`; {d} finding(s):\n{s}", .{ m, r.findings, report });
+        } else if (!v.ok) {
+            try mw.print("no_shell: the planted defect was not refused: no finding over {d} build file(s) and {d} script(s)", .{ r.build_files, r.scripts });
+        } else {
+            try mw.print("no_shell: the planted defect was refused as expected ({d} finding(s)):\n{s}", .{ r.findings, report });
+        }
+    } else if (r.findings > 0) {
+        try mw.print("no_shell: {d} finding(s) over {d} build file(s) with shell sites and {d} shell script(s)\n{s}", .{ r.findings, r.build_files, r.scripts, report });
+    } else {
+        try mw.print("no_shell: {d} build file(s) with shell sites and {d} shell script(s) checked against {s}", .{ r.build_files, r.scripts, name });
+    }
+    var json = std.ArrayList(u8).init(alloc);
+    const jw = json.writer();
+    try jw.print("{{\"version\": 1, \"data\": {{\"status\": \"{s}\", \"message\": ", .{if (v.ok) "success" else "failure"});
+    try std.json.encodeJsonString(message.items, .{}, jw);
+    try jw.writeAll("}}\n");
+    return .{ .json = try json.toOwnedSlice(), .message = try message.toOwnedSlice() };
+}
+
 test {
     _ = @import("scan_test.zig");
     _ = @import("rules_test.zig");

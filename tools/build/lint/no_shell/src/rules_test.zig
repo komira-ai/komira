@@ -211,3 +211,61 @@ test "verdict: green with no finding; a planted defect only when refused with ev
     // Expected text and no finding: the planted defect was not refused.
     try t.expect(!rules.verdict(clean, "busybox_sh", &.{"busybox_sh"}).ok);
 }
+
+fn rendered(r: rules.Result, report: []const u8, expect: []const []const u8) !rules.Rendered {
+    return rules.render(t.allocator, al, r, rules.verdict(r, report, expect), report, expect);
+}
+
+fn expectStatus(json: []const u8, status: []const u8) !void {
+    var want_buf: [64]u8 = undefined;
+    const want = try std.fmt.bufPrint(&want_buf, "\"status\": \"{s}\"", .{status});
+    if (std.mem.indexOf(u8, json, want) == null) {
+        std.debug.print("no `{s}` in:\n{s}\n", .{ want, json });
+        return error.TestExpectedStatus;
+    }
+}
+
+test "render: a finding is a failure, none a success, and a planted case inverts" {
+    const clean = rules.Result{ .build_files = 3, .scripts = 4, .findings = 0 };
+    const dirty = rules.Result{ .build_files = 3, .scripts = 4, .findings = 2 };
+
+    const ok = try rendered(clean, "", &.{});
+    defer t.allocator.free(ok.json);
+    defer t.allocator.free(ok.message);
+    try expectStatus(ok.json, "success");
+    try t.expectEqualStrings("no_shell: 3 build file(s) with shell sites and 4 shell script(s) checked against " ++ al, ok.message);
+
+    const bad = try rendered(dirty, "x: finding\n", &.{});
+    defer t.allocator.free(bad.json);
+    defer t.allocator.free(bad.message);
+    try expectStatus(bad.json, "failure");
+    try t.expect(std.mem.indexOf(u8, bad.message, "2 finding(s) over 3 build file(s) with shell sites and 4 shell script(s)\nx: finding\n") != null);
+
+    const refused = try rendered(dirty, "x: busybox_sh\n", &.{"busybox_sh"});
+    defer t.allocator.free(refused.json);
+    defer t.allocator.free(refused.message);
+    try expectStatus(refused.json, "success");
+    try t.expect(std.mem.indexOf(u8, refused.message, "refused as expected (2 finding(s))") != null);
+
+    const wrong = try rendered(dirty, "x: other\n", &.{"busybox_sh"});
+    defer t.allocator.free(wrong.json);
+    defer t.allocator.free(wrong.message);
+    try expectStatus(wrong.json, "failure");
+    try t.expect(std.mem.indexOf(u8, wrong.message, "no finding holds `busybox_sh`") != null);
+
+    // (Only reachable when the report holds the text and counts no finding.)
+    const none = try rendered(clean, "busybox_sh", &.{"busybox_sh"});
+    defer t.allocator.free(none.json);
+    defer t.allocator.free(none.message);
+    try expectStatus(none.json, "failure");
+    try t.expect(std.mem.indexOf(u8, none.message, "was not refused: no finding over 3 build file(s) and 4 script(s)") != null);
+}
+
+test "render: the message is one JSON string, escaped" {
+    const dirty = rules.Result{ .build_files = 1, .scripts = 0, .findings = 1 };
+    const r = try rendered(dirty, "a \"quoted\" path\n", &.{});
+    defer t.allocator.free(r.json);
+    defer t.allocator.free(r.message);
+    try t.expect(std.mem.indexOf(u8, r.json, "a \\\"quoted\\\" path\\n") != null);
+    try t.expect(std.mem.endsWith(u8, r.json, "}}\n"));
+}

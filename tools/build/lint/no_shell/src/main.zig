@@ -70,27 +70,10 @@ pub fn main() void {
     const r = rules.check(alloc, name, text, found, &report) catch fail("out of memory", .{});
     const v = rules.verdict(r, report.items, expect.items);
 
-    var message = std.ArrayList(u8).init(alloc);
-    const mw = message.writer();
-    const status = if (v.ok) "success" else "failure";
-    (if (expect.items.len > 0) blk: {
-        if (v.missing) |m| {
-            break :blk mw.print("no_shell: the planted defect was not refused as expected: no finding holds `{s}`; {d} finding(s):\n{s}", .{ m, r.findings, report.items });
-        }
-        if (!v.ok) break :blk mw.print("no_shell: the planted defect was not refused: no finding over {d} build file(s) and {d} script(s)", .{ r.build_files, r.scripts });
-        break :blk mw.print("no_shell: the planted defect was refused as expected ({d} finding(s)):\n{s}", .{ r.findings, report.items });
-    } else if (r.findings > 0)
-        mw.print("no_shell: {d} finding(s) over {d} build file(s) with shell sites and {d} shell script(s)\n{s}", .{ r.findings, r.build_files, r.scripts, report.items })
-    else
-        mw.print("no_shell: {d} build file(s) with shell sites and {d} shell script(s) checked against {s}", .{ r.build_files, r.scripts, name })) catch fail("out of memory", .{});
-    var json = std.ArrayList(u8).init(alloc);
-    const jw = json.writer();
-    jw.print("{{\"version\": 1, \"data\": {{\"status\": \"{s}\", \"message\": ", .{status}) catch fail("out of memory", .{});
-    std.json.encodeJsonString(message.items, .{}, jw) catch fail("out of memory", .{});
-    jw.writeAll("}}\n") catch fail("out of memory", .{});
-    std.fs.cwd().writeFile(out_path, json.items) catch |err|
+    const rendered = rules.render(alloc, name, r, v, report.items, expect.items) catch fail("out of memory", .{});
+    std.fs.cwd().writeFile(out_path, rendered.json) catch |err|
         fail("cannot write {s}: {s}", .{ out_path, @errorName(err) });
-    if (!v.ok) std.debug.print("{s}", .{message.items});
+    if (!v.ok) std.debug.print("{s}", .{rendered.message});
 }
 
 test {
