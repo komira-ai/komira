@@ -56,6 +56,7 @@ test "gen: the generator's own failure, an empty or missing module, a stray file
     try t.expect(has(r4.stderr, "mojo_aws_client: the generated package holds files that were not declared:\n"));
     try t.expect(has(r4.stderr, "stray.mojo\n"));
     // a hand-written source named like a generated file merges into it: one file fewer
+    try std.fs.cwd().deleteFile(try c.path("pkg/stray.mojo"));
     try c.write("src/svc.mojo", "# hand\n", 0o644);
     const r5 = try c.run(try genArgs(&c, "mode=ok", &.{"src/svc.mojo"}), &.{});
     try t.expectEqual(@as(u8, 1), r5.code);
