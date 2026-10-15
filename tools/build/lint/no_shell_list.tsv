@@ -18,10 +18,9 @@ use	src/tests/conformance/komira_git_protocol_conformance/BUCK	sh_script	2	names
 use	src/tests/conformance/komira_git_protocol_conformance/defs.bzl	sh_argv	1	shell action; to port to Zig (no-shell series)
 use	src/tests/conformance/komira_git_protocol_conformance/defs.bzl	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	src/tests/helpers/komira_udf_spike_node_worker/defs.bzl	sh_argv	1	shell action; to port to Zig (no-shell series)
-use	third_party/botocore/defs.bzl	busybox_sh	2	shell action; to port to Zig (no-shell series)
-use	third_party/git/BUCK	sh_script	5	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	third_party/git/defs.bzl	sh_argv	2	shell action; to port to Zig (no-shell series)
-use	third_party/git/defs.bzl	sh_script	2	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
+use	third_party/git/BUCK	sh_script	3	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
+use	third_party/git/defs.bzl	sh_argv	1	shell action; to port to Zig (no-shell series)
+use	third_party/git/defs.bzl	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/coverage/BUCK	sh_script	4	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/coverage/census.bzl	sh_argv	1	shell action; to port to Zig (no-shell series)
 use	tools/build/coverage/census.bzl	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
@@ -101,8 +100,7 @@ human	buck2	-	-	the wrapper people and CI run to get the pinned buck2; never an 
 human	src/tests/conformance/komira_datetime_conformance/regen_goldens.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
 script	src/tests/conformance/komira_git_pack_conformance/gen_packs.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 script	src/tests/conformance/komira_git_protocol_conformance/capture.sh	-	-	script of an action or test; to port to Zig (no-shell series)
-script	third_party/git/git_build.sh	-	-	script of an action or test; to port to Zig (no-shell series)
-script	third_party/git/git_check.sh	-	-	script of an action or test; to port to Zig (no-shell series)
+script	third_party/git/git_build.sh	-	-	EXCEPTION, not to be ported: it drives git's own make, curl's configure and zlib's build, which run sh themselves; the one vendored build system in the tree
 script	tools/build/coverage/census.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 script	tools/build/coverage/cov_gate.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 script	tools/build/coverage/kcov/cov_run.sh	-	-	script of an action or test; to port to Zig (no-shell series)

@@ -151,3 +151,21 @@ test "parseFlags: values by arity, repeated flags in order, the rest after --, r
     try t.expectEqualStrings("--pair", bad);
     try t.expectError(error.MissingValue, U.parseFlags(a, &.{"--out"}, &spec, &bad));
 }
+
+test "cloneEnv: a copy that changing leaves the original alone" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var base = std.process.EnvMap.init(a);
+    try base.put("A", "1");
+    try base.put("B", "2");
+    var copy = try U.cloneEnv(a, base);
+    try copy.put("A", "changed");
+    copy.remove("B");
+    try copy.put("C", "3");
+    try t.expectEqualStrings("1", base.get("A").?);
+    try t.expectEqualStrings("2", base.get("B").?);
+    try t.expect(base.get("C") == null);
+    try t.expectEqual(@as(u32, 2), base.count());
+    try t.expectEqualStrings("changed", copy.get("A").?);
+}

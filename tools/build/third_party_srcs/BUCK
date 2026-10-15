@@ -1,5 +1,7 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "fixture_archive", "third_party_srcs")
 
 # Reads a vendored C library's source lists out of its release archive; see
@@ -52,4 +54,28 @@ third_party_srcs(
 shell_lint(
     name = "shell_lint",
     srcs = ["upstream_versions.sh"],
+)
+
+# third_party_act (third_party_act.zig): the actions of the vendored-source
+# rules in place of their busybox scripts. Built behind its unit tests; its
+# process cases are tests//functional/third_party_act.
+zig_test(
+    name = "third_party_act_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "third_party_act_test.zig",
+    imports = ["third_party_act.zig"],
+    deps = ["//tools/build/act_util:act_util"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "third_party_act",
+    exec_compatible_with = LINUX_X86_64,
+    src = "third_party_act.zig",
+    deps = ["//tools/build/act_util:act_util"],
+    unit_tests = [":third_party_act_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
 )

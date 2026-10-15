@@ -223,6 +223,14 @@ pub fn envWithoutLoaderVars(a: std.mem.Allocator) !std.process.EnvMap {
     return base;
 }
 
+/// A copy of `env` (`EnvMap.copy` is not public in zig 0.12).
+pub fn cloneEnv(a: std.mem.Allocator, env: std.process.EnvMap) !std.process.EnvMap {
+    var out = std.process.EnvMap.init(a);
+    var it = env.iterator();
+    while (it.next()) |e| try out.put(e.key_ptr.*, e.value_ptr.*);
+    return out;
+}
+
 /// Prints `<prog>: <message>` on stderr and exits 2 (a failure of the tool's own).
 pub fn die(prog: []const u8, comptime fmt: []const u8, args: anytype) noreturn {
     std.debug.print("{s}: ", .{prog});
