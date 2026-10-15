@@ -3,9 +3,12 @@ load("@komira//tools/build/rust:defs.bzl", "crates_io_library")
 # The crates.io closure of the protobuf codec (prost) and its derive macro,
 # each pinned by the sha256 and size of its `.crate` file. Features are the ones Cargo
 # resolves for `prost` and `prost-types` with default features. No build
-# script runs: where a crate's build.rs emits a cfg for rustc 1.85, the cfg
-# is listed here (proc-macro2: `wrap_proc_macro`; anyhow and quote emit none
-# for 1.85).
+# script runs: where a crate's build.rs emits a cfg for rustc 1.99, the cfg
+# is listed here (proc-macro2: `wrap_proc_macro`, and `proc_macro_span_location`
+# and `proc_macro_span_file`, which its build.rs emits for rustc 1.88 and later
+# when its probes of the Span methods stabilized in 1.88 compile; anyhow and
+# quote emit none for 1.99: their cfgs mark rustc older than 1.81, 1.85 and
+# 1.78, or a nightly's generic member access).
 
 crates_io_library(
     name = "anyhow",
@@ -45,7 +48,11 @@ crates_io_library(
     version = "1.0.106",
     sha256 = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934",
     size = 59765,
-    cfgs = ["wrap_proc_macro"],
+    cfgs = [
+        "proc_macro_span_file",
+        "proc_macro_span_location",
+        "wrap_proc_macro",
+    ],
     features = ["default", "proc-macro"],
     deps = [":unicode-ident"],
 )

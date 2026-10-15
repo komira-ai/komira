@@ -106,10 +106,19 @@ unique across `srcs`; that is not checked, and of two files with the same
 short path one is silently dropped.
 
 The toolchain, `toolchains//:rust` (declared by `komira_rust_toolchains()`, see
-[toolchains](../toolchains/README.md)), is rustc 1.85.0
+[toolchains](../toolchains/README.md)), is rustc 1.99.0
 and its standard library for `x86_64-unknown-linux-gnu`, both sha256-pinned
-release tarballs. rustc runs through [`rustc_wrapper.sh`](rustc_wrapper.sh)
-with `--sysroot` set to the unpacked toolchain; links go through zig
+release tarballs. They are the `.tar.gz` of the release, not the `.tar.xz`:
+the pinned busybox unpacks xz with a dictionary of at most 64 MiB, and the
+`.tar.xz` of 1.99.0 uses 128 MiB ("corrupted data"). The sysroot is refused
+unless its `bin/rustc --version` prints the pinned line
+([`version_check.zig`](../toolchains/rust/version_check.zig), a validation of
+`toolchains/rust:sysroot` that every build holding the toolchain runs), so a pin
+that names one release over the tarballs of another fails every Rust target.
+rustc runs through [`rustc_wrapper.sh`](rustc_wrapper.sh)
+with `--sysroot` set to the unpacked toolchain (and `-C linker-features=-lld`:
+since 1.90 rustc links x86_64 linux with its own rust-lld, which the sysroot does
+not keep); links go through zig
 (`zig cc -target x86_64-linux-gnu.2.34`), so binaries need glibc 2.34 or
 newer and nothing else. rustc itself takes only glibc from the worker:
 `libgcc_s.so.1` and `libz.so.1`, which its own libraries need, come from
