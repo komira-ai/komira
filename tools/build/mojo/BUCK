@@ -129,6 +129,29 @@ zig_exe(
     visibility = ["PUBLIC"],
 )
 
+# archive_files (tools/archive_files.zig): the `archive_files` rule's action
+# (archive.bzl): files out of a pinned archive, copied or with substitutions.
+# Built behind its unit tests; its cases are the archive_files targets of
+# third_party.
+zig_test(
+    name = "archive_files_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/archive_files.zig"],
+    src = "tools/archive_files_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "archive_files",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/archive_files.zig",
+    unit_tests = [":archive_files_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
+
 # The same for macOS arm64 (the darwin toolchain's `act`), built on a Linux worker.
 zig_exe(
     name = "act_darwin",
