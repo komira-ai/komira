@@ -125,7 +125,6 @@ src_layout(
 # shell_lint and is named here.
 _TESTS_LINTS = [
     "tests//:shell_lint",
-    "tests//functional/coverage:shell_lint",
     "tests//functional/darwin:shell_lint",
     "tests//functional/install_gate:shell_lint",
     "tests//functional/platform_table:shell_lint",

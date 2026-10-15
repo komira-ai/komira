@@ -41,10 +41,6 @@ tools/build/tests/functional/buck2_run.sh	build system self-tests: to port to Zi
 tools/build/tests/functional/bundle.sh	build system self-tests: to port to Zig
 tools/build/tests/functional/conda.sh	build system self-tests: to port to Zig
 tools/build/tests/functional/conda_set.sh	build system self-tests: to port to Zig
-tools/build/tests/functional/coverage/branch_check.sh	build system self-tests: to port to Zig
-tools/build/tests/functional/coverage/check.sh	build system self-tests: to port to Zig
-tools/build/tests/functional/coverage/link_line.sh	build system self-tests: to port to Zig
-tools/build/tests/functional/coverage/report.sh	build system self-tests: to port to Zig
 tools/build/tests/functional/coverage_keys.sh	build system self-tests: to port to Zig
 tools/build/tests/functional/coverage_platforms.sh	build system self-tests: to port to Zig
 tools/build/tests/functional/coverage_shared_lib.sh	build system self-tests: to port to Zig

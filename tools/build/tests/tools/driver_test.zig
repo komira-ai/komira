@@ -208,3 +208,38 @@ test "rest-extract: the block between the markers; a marker missing or doubled i
     try t.expectEqual(@as(u8, 1), twice.code);
     try t.expect(std.mem.indexOf(u8, twice.stderr, "holds the marker '# ---- REST URL helpers (one copy per REST file) ----' 2 times, not once") != null);
 }
+
+test "cov-plant: the copy has the expression applied and must differ; an expression that changes nothing, or that sed would run but this does not, is refused" {
+    var w = try Work.init("plant");
+    defer w.deinit();
+    w.put("src.zig", "const n = @N@;\nconst m = 2;\n");
+    const ok = try w.run(&.{ "cov-plant", "s/@N@/4/", "src.zig", "out.zig" });
+    try t.expectEqual(@as(u8, 0), ok.code);
+    try t.expectEqualStrings("const n = 4;\nconst m = 2;\n", std.fs.cwd().readFileAlloc(w.arena.allocator(), w.p("out.zig"), 1000) catch "");
+    const none = try w.run(&.{ "cov-plant", "s/@NOPE@/4/", "src.zig", "out2.zig" });
+    try t.expectEqual(@as(u8, 1), none.code);
+    try t.expect(std.mem.indexOf(u8, none.stderr, "changes nothing") != null);
+    try t.expect(!exists(w.p("out2.zig")));
+    const unsupported = try w.run(&.{ "cov-plant", "s/@N*/4/", "src.zig", "out3.zig" });
+    try t.expectEqual(@as(u8, 1), unsupported.code);
+}
+
+test "cov-report-check: golden reports must be byte for byte; a result JSON must hold each expected string" {
+    var w = try Work.init("covreport");
+    defer w.deinit();
+    w.put("golden.xml", "<a/>\n");
+    w.put("same.xml", "<a/>\n");
+    w.put("other.xml", "<b/>\n");
+    const ok = try w.run(&.{ "cov-report-check", "out1", "golden", "--golden", "golden.xml", "same.xml" });
+    try t.expectEqual(@as(u8, 0), ok.code);
+    try t.expectEqualStrings("ok same.xml = golden.xml (5 bytes)\n", std.fs.cwd().readFileAlloc(w.arena.allocator(), w.p("out1"), 1000) catch "");
+    const bad = try w.run(&.{ "cov-report-check", "out2", "golden", "--golden", "golden.xml", "other.xml" });
+    try t.expectEqual(@as(u8, 1), bad.code);
+    try t.expect(std.mem.indexOf(u8, bad.stderr, "other.xml is not golden.xml byte for byte") != null);
+    w.put("result.json", "{\"conclusion\":\"success\",\"held_line\":true}");
+    const res = try w.run(&.{ "cov-report-check", "out3", "result", "--expect", "\"held_line\":true", "--json", "result.json" });
+    try t.expectEqual(@as(u8, 0), res.code);
+    const miss = try w.run(&.{ "cov-report-check", "out4", "result", "--expect", "\"held_line\":false", "--json", "result.json" });
+    try t.expectEqual(@as(u8, 1), miss.code);
+    try t.expect(std.mem.indexOf(u8, miss.stderr, "the gate's result JSON does not hold '\"held_line\":false'") != null);
+}

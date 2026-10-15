@@ -215,3 +215,68 @@ test "parity: the report words of a difference, signal cases compare only the fi
     try t.expectEqualStrings(" stderr-first-line", try parity.differences(a, .{ .rc = 134, .out = "", .err = "" }, .{ .rc = 134, .out = "", .err = "" }, .signal));
     try t.expectEqualStrings("a b|c|d", try parity.flatten(a, "a b\nc\ndropped", 7));
 }
+
+const minised = @import("minised.zig");
+const cov = @import("cov_checks.zig");
+
+test "minised: the expressions cov_plant uses" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    try t.expectEqualStrings("x = 2 @FACTOR@\ny = 2\n", try minised.run(a, "s/@FACTOR@/2/", "x = @FACTOR@ @FACTOR@\ny = @FACTOR@\n"));
+    // Two commands; only the first match of each line.
+    try t.expectEqualStrings("a07b01 @N@\n", try minised.run(a, "s/@N@/07/; s/@V@/01/", "a@N@b@V@ @N@\n"));
+    // Anchors, `.` any character, another delimiter, `\&` a literal ampersand and `&` the match.
+    try t.expectEqualStrings("    copy(&.{ r0 });\n  copy(src);\n", try minised.run(a, "s|^    copy(src);$|    copy(\\&.{ r0 });|", "    copy(src);\n  copy(src);\n"));
+    try t.expectEqualStrings("else x-import;\n", try minised.run(a, "s#else args.import;$#else x-import;#", "else args.import;\n"));
+    try t.expectEqualStrings("else argsXimport; else args.import; \n", try minised.run(a, "s/else args.import;$/&/", "else argsXimport; else args.import; \n"));
+    try t.expectEqualStrings("[ab]\n", try minised.run(a, "s/ab/[&]/", "ab\n"));
+    // An empty replacement; a pattern with the delimiter escaped.
+    try t.expectEqualStrings("a  b\n", try minised.run(a, "s|try v.appendSlice(x);||", "a try v.appendSlice(x); b\n"));
+    try t.expectEqualStrings("a-b\n", try minised.run(a, "s/a\\/b/a-b/", "a/b\n"));
+    // A line the pattern is not at the start of is untouched by ^.
+    try t.expectEqualStrings("  x\n", try minised.run(a, "s/^x/y/", "  x\n"));
+    // No trailing newline stays none.
+    try t.expectEqualStrings("y", try minised.run(a, "s/x/y/", "x"));
+}
+
+test "minised: what it does not do is refused" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    for ([_][]const u8{ "s/a*/b/", "s/[ab]/c/", "s/a/b/g", "y/a/b/", "s/a/b", "", "s/\\(a\\)/\\1/" }) |bad| {
+        try t.expectError(error.UnsupportedSed, minised.run(a, bad, "a\n"));
+    }
+}
+
+test "strings, hasPlaceholder, plain directories" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const ss = try cov.strings(a, "ab\x00tests\x01value.mojo\x00x\x7f/lib64/ld.so\x00", 4);
+    try t.expectEqual(@as(usize, 3), ss.len);
+    try t.expectEqualStrings("tests", ss[0]);
+    try t.expect(cov.hasString(ss, "value.mojo"));
+    try t.expect(!cov.hasString(ss, "value"));
+    try t.expect(cov.hasPlaceholder("..\x00/________\x00..", false));
+    try t.expect(!cov.hasPlaceholder("/_______\x00", false)); // seven
+    try t.expect(cov.hasPlaceholder("/__________/src", true));
+    try t.expect(!cov.hasPlaceholder("/__________\x00/src", true));
+    try t.expect(!cov.hasPlaceholder("/__________", true));
+}
+
+test "blockCounts, normalize and withoutRuntime: the link lines of the two builds compare equal once normalized" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    try t.expectEqualStrings("2,3,", try cov.blockCounts(a, "  main:\n    Block counts: [3, 2]\n"));
+    const mojo = "cc\n-target\nx86_64-linux-gnu.2.28\n/w/tc/lib/libstd.so\n/w/b/mojo_archive-7f.a\n-lm\n-o\n/w/out/exe\n----\n";
+    const branch = "cc\n-target\nx86_64-linux-gnu.2.28\n/w/tc/lib/libstd.so\n/w/b/cov_branch_link/pg.o\n-Wl,--whole-archive\n/r/libclang_rt.profile-x86_64.a\n-Wl,--no-whole-archive\n-lm\n-o\n/w/other/exe\n----\n";
+    const m = try cov.normalize(a, mojo, "/w/tc", "x86_64-linux-gnu.2.28", .mojo);
+    const b = try cov.withoutRuntime(a, try cov.normalize(a, branch, "/w/tc", "x86_64-linux-gnu.2.28", .branch));
+    try t.expectEqualStrings("cc\n-target\n<target>\n<TC>/lib/libstd.so\n<object>\n-lm\n-o\n<out>\n", m);
+    try t.expectEqualStrings(m, b);
+    // A runtime not in a whole-archive group, or something else in it, is reported.
+    try t.expectEqualStrings("a\n<no profile runtime>\n", try cov.withoutRuntime(a, "a\n"));
+    try t.expectEqualStrings("-Wl,x\n<unexpected in the whole archive> -lfoo\n<no profile runtime>\n", try cov.withoutRuntime(a, "-Wl,x\n-Wl,--whole-archive\n-lfoo\n-Wl,--no-whole-archive\n"));
+}

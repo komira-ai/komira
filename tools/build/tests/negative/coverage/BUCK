@@ -57,7 +57,6 @@ _DIRS = [
         dirs = _DIRS,
         mode = "hermetic",
         names = ["value.mojo"],
-        script = "//functional/coverage:check.sh",
     )
     for name in ("abs_relocated", "abs_other", "no_reldir")
 ]
@@ -536,7 +535,6 @@ _RESULTS = {
         expect = expect,
         mode = "result",
         reports = [":{}_census[coverage][gate][result]".format(name)],
-        script = "//functional/coverage:report.sh",
     )
     for name, expect in _RESULTS.items()
 ]
@@ -573,7 +571,6 @@ cov_report_check(
     ],
     mode = "result",
     reports = [":covtop_census[coverage][gate][result]"],
-    script = "//functional/coverage:report.sh",
 )
 
 # Test 46. A library that depends on covlow, whose gate (enforce) is red:
@@ -671,7 +668,6 @@ _CENSUS_OK = {p.removeprefix("census/ok/"): p for p in glob(["census/ok/**/cover
         goldens = ["census/" + golden],
         mode = "golden",
         reports = [":census_ok"],
-        script = "//functional/coverage:report.sh",
     )
     for name, golden in (
         ("census_ok_doc", "doc.txt"),
@@ -991,7 +987,6 @@ cov_link_line_check(
     branch = ":branchlinkline_branch",
     exec_compatible_with = LINUX_X86_64,
     lib = ":branchnoprof",
-    script = "//functional/coverage:link_line.sh",
     src = "tests/test_one.mojo",
 )
 
@@ -1047,7 +1042,6 @@ cov_branch_check(
     exec_compatible_with = LINUX_X86_64,
     function = "quarter",
     profdata = ":branchnonatomic_lib[coverage][branch][test_threads]",
-    script = "//functional/coverage:branch_check.sh",
 )
 
 # ---- Shared libraries (mojo_shared_lib) -----------------------------------------

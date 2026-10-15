@@ -17,6 +17,11 @@
 //!        tests_act aws-refuse <generator> <stamp> <message> <probe 0|1> -- <generator args>...
 //!        tests_act aws-cmp <stamp> <gen dir> <module> <golden> <golden probe|-> [<must contain>...]
 //!        tests_act bundle-parity <runnable dir> <binary> <bundle> <out>
+//!        tests_act cov-debug-check <out> <debug_relocate> hermetic|same [--name=<s>]... [--dir=<s>]... <binary>...
+//!        tests_act cov-report-check <out> golden|census|result ...
+//!        tests_act cov-branch-check <out> <llvm dir> <profdata> <function> <count>,<count>...
+//!        tests_act cov-link-line <out> <busybox> <wrapper> <compiler dir> <zig dir> <cc target> <cpu> <test.mojo> <bitcode> <link dir> [-I<dir>...]
+//!        tests_act cov-plant <sed expression> <source> <out>
 //!        tests_act stand-in-archive <busybox> <out.tar.gz> <top> (file:<path>|program:<path>)...
 //!
 //! Each exits 0 when its check holds, 1 when it does not (saying what, on stderr),
@@ -40,6 +45,9 @@
 //! aws-gen, aws-refuse, aws-cmp: the checks over aws-client-gen (aws_checks.zig).
 //! bundle-parity: a program built as an executable and as a bundle, run through the
 //! same cases (parity.zig).
+//! cov-*: the checks of coverage builds (cov_checks.zig); cov-plant applies a sed
+//! expression of a small subset (minised.zig). Called under the name `zig`, the
+//! program is the recorder of cov-link-line.
 //! stand-in-archive: a `.tar.gz` of the named files and programs (archives.zig).
 
 const std = @import("std");
@@ -49,6 +57,7 @@ const archives = @import("archives.zig");
 const proto_checks = @import("proto_checks.zig");
 const aws_checks = @import("aws_checks.zig");
 const parity = @import("parity.zig");
+const cov = @import("cov_checks.zig");
 
 fn fail(comptime fmt: []const u8, args: anytype) noreturn {
     std.debug.print(fmt ++ "\n", args);
@@ -254,6 +263,7 @@ pub fn main() !void {
     var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const a = arena_state.allocator();
     const argv = try std.process.argsAlloc(a);
+    if (std.mem.eql(u8, std.fs.path.basename(argv[0]), "zig")) std.process.exit(cov.recorder(a, argv) catch 1);
     if (argv.len < 2) usage("tests_act <subcommand> ...");
     const cmd = argv[1];
     const rest = argv[2..];
@@ -272,6 +282,11 @@ pub fn main() !void {
     if (std.mem.eql(u8, cmd, "aws-refuse")) return aws_checks.refuse(a, rest) catch |e| fail("tests_act: aws-refuse: {s}", .{@errorName(e)});
     if (std.mem.eql(u8, cmd, "aws-cmp")) return aws_checks.cmp(a, rest) catch |e| fail("tests_act: aws-cmp: {s}", .{@errorName(e)});
     if (std.mem.eql(u8, cmd, "bundle-parity")) std.process.exit(parity.parity(a, rest) catch |e| fail("tests_act: bundle-parity: {s}", .{@errorName(e)}));
+    if (std.mem.eql(u8, cmd, "cov-debug-check")) return cov.debugCheck(a, rest) catch |e| fail("tests_act: cov-debug-check: {s}", .{@errorName(e)});
+    if (std.mem.eql(u8, cmd, "cov-report-check")) return cov.reportCheck(a, rest) catch |e| fail("tests_act: cov-report-check: {s}", .{@errorName(e)});
+    if (std.mem.eql(u8, cmd, "cov-branch-check")) return cov.branchCheck(a, rest) catch |e| fail("tests_act: cov-branch-check: {s}", .{@errorName(e)});
+    if (std.mem.eql(u8, cmd, "cov-link-line")) return cov.linkLine(a, rest) catch |e| fail("tests_act: cov-link-line: {s}", .{@errorName(e)});
+    if (std.mem.eql(u8, cmd, "cov-plant")) return cov.plant(a, rest) catch |e| fail("tests_act: cov-plant: {s}", .{@errorName(e)});
     std.debug.print("tests_act: unknown subcommand {s}\n", .{cmd});
     std.process.exit(2);
 }
