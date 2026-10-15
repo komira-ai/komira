@@ -130,7 +130,7 @@ fn cmdDrift(a: std.mem.Allocator, args: []const []const u8) u8 {
     const rows = shown(a, ops, 6) catch return 2;
     for (rows) |r| out.print("{s}\n", .{r}) catch return 2;
     out.print("regenerate: {s}\n", .{regen}) catch return 2;
-    return 1;
+    return 0;
 }
 
 // ---- srcs-gen ---------------------------------------------------------------
