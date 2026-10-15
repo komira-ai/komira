@@ -99,7 +99,7 @@ test "9h a measured file with no decision: SF with no record, in its sorted plac
     while (i < want.lines.items.len) : (i += 1) {
         const l = want.lines.items[i];
         if (std.mem.eql(u8, l, "end_of_record") and std.mem.eql(u8, cur, "SF:src/pkg/b.mojo")) {
-            try want.lines.insertSlice(i + 1, &.{ "SF:src/pkg/bb.mojo", "end_of_record" });
+            try want.lines.insertSlice(want.al, i + 1, &.{ "SF:src/pkg/bb.mojo", "end_of_record" });
             i += 2;
         }
         if (std.mem.startsWith(u8, l, "SF:")) cur = l;

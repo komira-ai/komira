@@ -88,18 +88,19 @@ pub const Error = error{ Refused, Usage };
 /// messages a run prints.
 pub const Diag = struct {
     text: std.ArrayList(u8),
+    alloc: Alloc,
 
     pub fn init(alloc: Alloc) Diag {
-        return .{ .text = std.ArrayList(u8).init(alloc) };
+        return .{ .text = std.ArrayList(u8).empty, .alloc = alloc };
     }
 
     fn refuse(self: *Diag, comptime fmt: []const u8, args: anytype) error{Refused} {
-        self.text.writer().print("census_files: " ++ fmt ++ "\n", args) catch oom();
+        self.text.writer(self.alloc).print("census_files: " ++ fmt ++ "\n", args) catch oom();
         return error.Refused;
     }
 
     fn usageFail(self: *Diag, comptime fmt: []const u8, args: anytype) error{Usage} {
-        self.text.writer().print("census_files: " ++ fmt ++ "\n" ++ usage, args) catch oom();
+        self.text.writer(self.alloc).print("census_files: " ++ fmt ++ "\n" ++ usage, args) catch oom();
         return error.Usage;
     }
 };
@@ -133,7 +134,7 @@ pub const Head = struct {
 /// The lines of `text` (refusing a carriage return, an empty line and a
 /// last line with no newline is accepted).
 fn lines(alloc: Alloc, diag: *Diag, path: []const u8, text: []const u8) ![][]const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
+    var out = std.ArrayList([]const u8).empty;
     if (std.mem.indexOfScalar(u8, text, '\r')) |at| {
         const n = std.mem.count(u8, text[0..at], "\n") + 1;
         return diag.refuse("{s}:{d}: a carriage return (the file must use LF line ends)", .{ path, n });
@@ -146,15 +147,15 @@ fn lines(alloc: Alloc, diag: *Diag, path: []const u8, text: []const u8) ![][]con
             if (it.peek() == null) break;
             return diag.refuse("{s}:{d}: an empty line (a comment starts with '#')", .{ path, n });
         }
-        out.append(l) catch oom();
+        out.append(alloc, l) catch oom();
     }
     return out.items;
 }
 
 fn fields(alloc: Alloc, line: []const u8) [][]const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
+    var out = std.ArrayList([]const u8).empty;
     var it = std.mem.splitScalar(u8, line, '\t');
-    while (it.next()) |f| out.append(f) catch oom();
+    while (it.next()) |f| out.append(alloc, f) catch oom();
     return out.items;
 }
 
@@ -254,7 +255,7 @@ fn censusRows(alloc: Alloc, diag: *Diag, path: []const u8, package: []const u8, 
         }
         if (f.len < 2 or !std.mem.eql(u8, f[1], package))
             return diag.refuse("{s}:{d}: the row's package is {s}, not its directory {s}", .{ path, n, if (f.len < 2) "missing" else f[1], package });
-        rows.append(.{ .key = f[0], .line = l }) catch oom();
+        rows.append(alloc, .{ .key = f[0], .line = l }) catch oom();
         count += 1;
     }
     if (head == null or count == 0) return diag.refuse("{s}: no census line and library row", .{path});
@@ -267,7 +268,7 @@ fn readAll(alloc: Alloc, diag: *Diag, dir: std.fs.Dir, path: []const u8) ![]cons
 
 fn writeAll(diag: *Diag, dir: std.fs.Dir, path: []const u8, bytes: []const u8) !void {
     if (std.fs.path.dirname(path)) |d| dir.makePath(d) catch |e| return diag.refuse("{s}: cannot make it: {s}", .{ d, @errorName(e) });
-    dir.writeFile(path, bytes) catch |e| return diag.refuse("{s}: cannot write it: {s}", .{ path, @errorName(e) });
+    dir.writeFile(.{ .sub_path = path, .data = bytes }) catch |e| return diag.refuse("{s}: cannot write it: {s}", .{ path, @errorName(e) });
 }
 
 /// The census line of the assembled census.
@@ -292,16 +293,16 @@ fn assemble(alloc: Alloc, diag: *Diag, cwd: std.fs.Dir, args: []const []const u8
     const target = try parseTarget(diag, args[0]);
     var root = cwd.openDir(args[1], .{ .iterate = true }) catch |e| return diag.refuse("{s}: cannot open it: {s}", .{ args[1], @errorName(e) });
     defer root.close();
-    var paths = std.ArrayList([]const u8).init(alloc);
+    var paths = std.ArrayList([]const u8).empty;
     var walk = root.walk(alloc) catch oom();
     while (walk.next() catch |e| return diag.refuse("{s}: cannot list it: {s}", .{ args[1], @errorName(e) })) |e| {
         if (e.kind == .directory) continue;
-        paths.append(alloc.dupe(u8, e.path) catch oom()) catch oom();
+        paths.append(alloc, alloc.dupe(u8, e.path) catch oom()) catch oom();
     }
     std.mem.sort([]const u8, paths.items, {}, strLess);
     var held = std.StringArrayHashMap(Hold).init(alloc);
-    var rows = std.ArrayList(Row).init(alloc);
-    var heads = std.ArrayList(Head).init(alloc);
+    var rows = std.ArrayList(Row).empty;
+    var heads = std.ArrayList(Head).empty;
     for (paths.items) |p| {
         const base = std.fs.path.basename(p);
         const package = std.fs.path.dirname(p) orelse
@@ -310,7 +311,7 @@ fn assemble(alloc: Alloc, diag: *Diag, cwd: std.fs.Dir, args: []const []const u8
         if (std.mem.eql(u8, base, held_name)) {
             held.put(package, try parseHold(alloc, diag, p, text)) catch oom();
         } else if (std.mem.eql(u8, base, census_name)) {
-            heads.append(try censusRows(alloc, diag, p, package, text, &rows)) catch oom();
+            heads.append(alloc, try censusRows(alloc, diag, p, package, text, &rows)) catch oom();
         } else return diag.refuse("{s}: not a {s} or a {s}", .{ p, held_name, census_name });
     }
     if (heads.items.len == 0) return diag.refuse("{s}: no {s} under it", .{ args[1], census_name });
@@ -319,28 +320,28 @@ fn assemble(alloc: Alloc, diag: *Diag, cwd: std.fs.Dir, args: []const []const u8
     var reach = reached(alloc, rows.items, target);
     const pkgs = alloc.dupe([]const u8, reach.keys()) catch oom();
     std.mem.sort([]const u8, pkgs, {}, keyLess);
-    var missing = std.ArrayList(u8).init(alloc);
+    var missing = std.ArrayList(u8).empty;
     for (pkgs) |pkg| {
         const r = reach.get(pkg).?;
         const h = held.get(pkg) orelse Hold{};
         for ([_]struct { []const u8, bool, bool }{ .{ "line", r.line == 1, h.line }, .{ "branch", r.branch == 1, h.branch } }) |m| {
-            if (m[1] and !m[2]) missing.writer().print("\n  {s}: {s} reached {d} basis points in every library; add `{s}` to {s}/{s}", .{ pkg, m[0], target, m[0], pkg, held_name }) catch oom();
+            if (m[1] and !m[2]) missing.writer(alloc).print("\n  {s}: {s} reached {d} basis points in every library; add `{s}` to {s}/{s}", .{ pkg, m[0], target, m[0], pkg, held_name }) catch oom();
         }
     }
     if (missing.items.len > 0)
         return diag.refuse("a package the census measured at the target does not hold it (census_files split adds the hold):{s}", .{missing.items});
-    var c = std.ArrayList(u8).init(alloc);
-    c.appendSlice(assembled_census_comment) catch oom();
-    c.appendSlice(combine(alloc, heads.items)) catch oom();
-    for (rows.items) |r| c.writer().print("{s}\n", .{r.line}) catch oom();
+    var c = std.ArrayList(u8).empty;
+    c.appendSlice(alloc, assembled_census_comment) catch oom();
+    c.appendSlice(alloc, combine(alloc, heads.items)) catch oom();
+    for (rows.items) |r| c.writer(alloc).print("{s}\n", .{r.line}) catch oom();
     const hk = alloc.dupe([]const u8, held.keys()) catch oom();
     std.mem.sort([]const u8, hk, {}, keyLess);
-    var f = std.ArrayList(u8).init(alloc);
-    f.appendSlice(assembled_held_comment) catch oom();
+    var f = std.ArrayList(u8).empty;
+    f.appendSlice(alloc, assembled_held_comment) catch oom();
     for (hk) |pkg| {
         const h = held.get(pkg).?;
         const m: []const u8 = if (h.line and h.branch) "line,branch" else if (h.line) "line" else if (h.branch) "branch" else "-";
-        f.writer().print("{s}\t{s}\n", .{ pkg, m }) catch oom();
+        f.writer(alloc).print("{s}\t{s}\n", .{ pkg, m }) catch oom();
     }
     try writeAll(diag, cwd, args[2], c.items);
     try writeAll(diag, cwd, args[3], f.items);
@@ -353,7 +354,7 @@ fn split(alloc: Alloc, diag: *Diag, cwd: std.fs.Dir, args: []const []const u8) !
     var out = std.StringArrayHashMap(std.ArrayList(u8)).init(alloc);
     const census = try lines(alloc, diag, args[1], try readAll(alloc, diag, cwd, args[1]));
     var head: ?[]const u8 = null;
-    var rows = std.ArrayList(Row).init(alloc);
+    var rows = std.ArrayList(Row).empty;
     for (census, 1..) |l, n| {
         if (l[0] == '#') continue;
         const f = fields(alloc, l);
@@ -364,14 +365,14 @@ fn split(alloc: Alloc, diag: *Diag, cwd: std.fs.Dir, args: []const []const u8) !
             continue;
         }
         if (f.len < 2 or f[1].len == 0) return diag.refuse("{s}:{d}: a row with no package", .{ args[1], n });
-        rows.append(.{ .key = f[0], .line = l }) catch oom();
+        rows.append(alloc, .{ .key = f[0], .line = l }) catch oom();
         const path = std.fmt.allocPrint(alloc, "{s}/{s}", .{ f[1], census_name }) catch oom();
         const g = out.getOrPut(path) catch oom();
         if (!g.found_existing) {
-            g.value_ptr.* = std.ArrayList(u8).init(alloc);
-            g.value_ptr.writer().print("{s}{s}\n", .{ census_comment, head.? }) catch oom();
+            g.value_ptr.* = std.ArrayList(u8).empty;
+            g.value_ptr.writer(alloc).print("{s}{s}\n", .{ census_comment, head.? }) catch oom();
         }
-        g.value_ptr.writer().print("{s}\n", .{l}) catch oom();
+        g.value_ptr.writer(alloc).print("{s}\n", .{l}) catch oom();
     }
     if (head == null) return diag.refuse("{s}: no census line", .{args[1]});
     var dir = cwd.openDir(args[2], .{}) catch |e| return diag.refuse("{s}: cannot open it: {s}", .{ args[2], @errorName(e) });
@@ -388,17 +389,17 @@ fn split(alloc: Alloc, diag: *Diag, cwd: std.fs.Dir, args: []const []const u8) !
         var have = Hold{};
         if (dir.readFileAlloc(alloc, path, max_file)) |text| {
             have = try parseHold(alloc, diag, path, text);
-            var cs = std.ArrayList(u8).init(alloc);
-            for (try lines(alloc, diag, path, text)) |l| if (l[0] == '#') cs.writer().print("{s}\n", .{l}) catch oom();
+            var cs = std.ArrayList(u8).empty;
+            for (try lines(alloc, diag, path, text)) |l| if (l[0] == '#') cs.writer(alloc).print("{s}\n", .{l}) catch oom();
             comments = cs.items;
         } else |err| if (err != error.FileNotFound) return diag.refuse("{s}: cannot read it: {s}", .{ path, @errorName(err) });
         const line = have.line or want.line;
         const branch = have.branch or want.branch;
         if (line == have.line and branch == have.branch) continue;
-        var b = std.ArrayList(u8).init(alloc);
-        b.appendSlice(comments) catch oom();
-        if (line) b.appendSlice("line\n") catch oom();
-        if (branch) b.appendSlice("branch\n") catch oom();
+        var b = std.ArrayList(u8).empty;
+        b.appendSlice(alloc, comments) catch oom();
+        if (line) b.appendSlice(alloc, "line\n") catch oom();
+        if (branch) b.appendSlice(alloc, "branch\n") catch oom();
         out.put(path, b) catch oom();
     }
     var wit = out.iterator();
@@ -429,5 +430,5 @@ pub fn main() u8 {
     const argv = std.process.argsAlloc(alloc) catch oom();
     const args = alloc.alloc([]const u8, argv.len -| 1) catch oom();
     for (args, 1..) |*a, i| a.* = argv[i];
-    return entry(alloc, std.fs.cwd(), args, std.io.getStdErr().writer());
+    return entry(alloc, std.fs.cwd(), args, std.fs.File.stderr().deprecatedWriter());
 }
