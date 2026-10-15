@@ -389,8 +389,8 @@ test "a crate only a weak feature names is not linked, and so needs no size, che
         "[[package]]\nname = \"base64\"\nversion = \"0.22.0\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"" ++ sum ++ "\"\n";
     // ring, defmt, cc and rare have no [[package]] entry here at all: were any of them linked, this would be refused.
     const linked = try cargo.linkedCrates(a, .{ .lock = lock, .metadata = trimmed, .target = target }, &d);
-    var names = std.ArrayList([]const u8).init(a);
-    for (linked) |c| try names.append(c.name);
+    var names: std.ArrayList([]const u8) = .empty;
+    for (linked) |c| try names.append(a, c.name);
     std.mem.sort([]const u8, names.items, {}, struct {
         fn less(_: void, x: []const u8, y: []const u8) bool {
             return std.mem.order(u8, x, y) == .lt;
