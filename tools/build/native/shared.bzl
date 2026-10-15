@@ -18,6 +18,7 @@ is linked", is the design; the checks are its "Checks, per library".
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:providers.bzl", "MojoInfo", "MojoToolchainInfo")
 load("@komira//tools/build/platforms:table.bzl", "os_floor_version", "row")
+load("@komira//tools/build/platforms:action_category.bzl", "run_heavy")
 
 NativeSharedInfo = provider(
     doc = "A komira library's own shared library, for the libraries that declare it a NEEDED owner and for its library's conda package.",
@@ -115,7 +116,8 @@ def _native_shared_library_impl(ctx):
     closure = {soname: so}
     for d in ctx.attrs.needed_owners:
         closure.update(d[NativeSharedInfo].closure)
-    ctx.actions.run(
+    run_heavy(
+        ctx.actions,
         cmd_args(
             ctx.attrs._launcher[RunInfo],
             tc.link,

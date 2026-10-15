@@ -33,6 +33,7 @@ load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "row")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
+load("@komira//tools/build/platforms:action_category.bzl", "run_heavy")
 
 NodeDistInfo = provider(
     doc = "An unpacked Node.js: its root directory (`bin/node`, `include/node`) and the libraries `node` loads beyond glibc.",
@@ -386,7 +387,8 @@ def _c_shared_lib_impl(ctx):
     args.extend(ctx.attrs.copts)
     for s in ctx.attrs.srcs:
         args.append(staged.project(s.short_path))
-    ctx.actions.run(
+    run_heavy(
+        ctx.actions,
         busybox_sh(_out(ctx.attrs._busybox), _SHARED_SCRIPT, _out(ctx.attrs._zig), out.as_output(), ctx.attrs.zig_triple, args),
         category = "c_shared_lib",
     )

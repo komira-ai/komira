@@ -26,6 +26,7 @@ load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:run_check.bzl", "run_check_validation")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/platforms:action_category.bzl", "run_heavy")
 
 RustToolchainInfo = provider(fields = {
     "busybox": provider_field(typing.Any),
@@ -245,7 +246,8 @@ def _rustc(ctx, crate, crate_type, root, hidden, remap, externs, closure, metada
         root,
         hidden = hidden,
     )
-    ctx.actions.run(
+    run_heavy(
+        ctx.actions,
         cmd_args(
             tc.busybox,
             "sh",

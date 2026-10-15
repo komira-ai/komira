@@ -143,6 +143,29 @@ service that learns each action's memory size, for example, places it by
 that). Multi-NUMA and performance runs are not part of the build graph;
 they run on reserved hardware outside it.
 
+What the rules do tell the service is which actions are heavy. A
+remote-execution request carries an action's environment but not its
+category, so every compiler run of komira's rules goes through `run_heavy`
+([`action_category.bzl`](action_category.bzl)), which sets
+`KBF_ACTION_CATEGORY` to the action's category: a service that books memory
+per action (komira-ai/komira-build-farm) reads it, and any other runs the
+action unchanged. The heavy categories:
+
+| category | rule file |
+|---|---|
+| `mojo_build`, `mojo_build_test`, `mojo_build_shared`, `mojo_build_gate_driver`, `mojo_build_cov_test`, `mojo_readme_object` (every `mojo build`) | [`mojo/defs.bzl`](../mojo/defs.bzl) |
+| `mojo_precompile` | [`mojo/defs.bzl`](../mojo/defs.bzl), [`mojo/proto.bzl`](../mojo/proto.bzl) |
+| `rustc` | [`rust/defs.bzl`](../rust/defs.bzl) |
+| `zig_build_exe`, `zig_test`, `zig_test_binary` | [`mojo/toolchain.bzl`](../mojo/toolchain.bzl) |
+| `c_exe` | [`native/defs.bzl`](../native/defs.bzl) |
+| `native_link` | [`native/shared.bzl`](../native/shared.bzl) |
+| `c_shared_lib` | [`node/defs.bzl`](../node/defs.bzl) |
+
+The compiles and links of the prelude's `cxx_library` carry no variable: the
+prelude gives a toolchain no way to add one to their environment. The
+variable is part of each action's key. [`action_category/`](action_category/BUCK)
+reads it back inside a `zig_test` action under the name the service reads.
+
 To see what a target got, and why the others were skipped:
 
 ```sh

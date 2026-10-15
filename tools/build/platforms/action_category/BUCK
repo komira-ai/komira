@@ -1,0 +1,12 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# The action-category variable of the heavy actions (../action_category.bzl),
+# read back inside one of them: a zig_test action.
+zig_test(
+    name = "action_category_test",
+    exec_compatible_with = LINUX_X86_64,
+    src = "action_category_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)

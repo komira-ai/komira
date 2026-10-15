@@ -10,6 +10,7 @@ load(":providers.bzl", "MojoToolchainInfo")
 load(":test_runtime.bzl", "RUNNER_ENV", "data_map")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
+load("@komira//tools/build/platforms:action_category.bzl", "run_heavy")
 
 def busybox_sh(busybox, script, *args):
     """argv running `script` under the declared busybox shell.
@@ -202,7 +203,8 @@ rm -rf "$T"
         # Each `zig_test`'s output is an input: the executable is not built
         # unless they passed.
         cmd = cmd_args(cmd, hidden = [t[DefaultInfo].default_outputs[0] for t in ctx.attrs.unit_tests])
-    ctx.actions.run(
+    run_heavy(
+        ctx.actions,
         cmd,
         category = "zig_build_exe",
     )
@@ -309,7 +311,8 @@ __DRIVER__"$1/zig" test -target TARGET "$2"
         script = script.replace("__DRIVER__", _ZIG_TEST_DRIVER)
     else:
         script = script.replace("__DRIVER__", "")
-    ctx.actions.run(
+    run_heavy(
+        ctx.actions,
         cmd_args(busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output()), hidden = hidden),
         category = "zig_test",
         env = env,
@@ -375,7 +378,8 @@ export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME
 "$1/zig" test -target TARGET --test-no-exec "-femit-bin=$3" "$2"
 rm -rf "$T"
 """.replace("-target TARGET ", "-target {} ".format(ctx.attrs.target))
-    ctx.actions.run(
+    run_heavy(
+        ctx.actions,
         cmd_args(busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output()), hidden = ctx.attrs.imports),
         category = "zig_test_binary",
     )

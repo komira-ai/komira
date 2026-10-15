@@ -47,6 +47,7 @@ load(":readme.bzl", "readme_gate", "readme_kwargs")
 load(":run_check.bzl", "run_check_validation")
 load(":test_limit.bzl", "TEST_LIMIT_ATTRS", "deadline_flags", "with_test_limit")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
+load("@komira//tools/build/platforms:action_category.bzl", "run_heavy")
 
 def _toolchain(ctx):
     return ctx.attrs.toolchain[MojoToolchainInfo]
@@ -306,7 +307,8 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
         tail = cmd_args(tail, link_extra) if tail else cmd_args(link_extra)
     if emit_object:
         emit, tail = ["--emit", "object"], None
-    ctx.actions.run(
+    run_heavy(
+        ctx.actions,
         mojo_compile_cmd(tc, [
             "build",
             emit,
@@ -400,7 +402,8 @@ def _library_impl(ctx):
     ungated = ctx.actions.declare_output("ungated/" + import_name + ".mojoc")
     dep_closure = ctx.actions.tset(MojoPkgTSet, children = deps)
     _check_closure_excludes(ctx, dep_closure)
-    ctx.actions.run(
+    run_heavy(
+        ctx.actions,
         mojo_precompile_cmd(tc, dep_closure.project_as_args("include"), src_dir, ungated.as_output()),
         category = "mojo_precompile",
     )

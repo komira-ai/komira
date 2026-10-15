@@ -45,6 +45,7 @@ the action key.
 load(":defs.bzl", "mojo_library", "mojo_precompile_cmd")
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoToolchainInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/platforms:action_category.bzl", "run_heavy")
 
 MojoProtoToolchainInfo = provider(fields = {
     "busybox": provider_field(typing.Any),
@@ -285,7 +286,8 @@ def _generate_package(ctx, plugin, plugin_name, opt, tree, trees, generate, name
     deps = mojo_pkg_children(ctx, [d[MojoInfo] for d in ctx.attrs.deps])
     pkg = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
     dep_closure = ctx.actions.tset(MojoPkgTSet, children = deps)
-    ctx.actions.run(
+    run_heavy(
+        ctx.actions,
         mojo_precompile_cmd(tc, dep_closure.project_as_args("include"), gen_dir, pkg.as_output()),
         category = "mojo_precompile",
     )

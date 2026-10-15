@@ -18,6 +18,7 @@ komira as a cell, and so would the action's digest.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/platforms:action_category.bzl", "run_heavy")
 
 _BUSYBOX = "komira//tools/build/toolchains:busybox"
 
@@ -43,7 +44,8 @@ export PATH ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME
 "$1/zig" cc -target x86_64-linux-musl -O2 -static -Wall -Werror "$2" -o "$3"
 rm -rf "$T"
 """
-    ctx.actions.run(
+    run_heavy(
+        ctx.actions,
         cmd_args(bb, "sh", "-euc", script, "sh", bb, zig, _staged(ctx, ctx.attrs.src), out.as_output()),
         category = "c_exe",
     )
