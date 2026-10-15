@@ -68,7 +68,7 @@ fn cmdDist(a: std.mem.Allocator, args: []const []const u8) u8 {
     const bytes = std.fs.cwd().readFileAlloc(a, archive, 1 << 31) catch |e| return usage("cannot read {s}: {s}", .{ archive, @errorName(e) });
     var dest = std.fs.cwd().makeOpenPath(out, .{ .iterate = true }) catch |e| return usage("cannot create {s}: {s}", .{ out, @errorName(e) });
     defer dest.close();
-    U.extract.extractTgz(dest, bytes, "other", U.extract.keepAll) catch |e| {
+    U.extract.extractTgz(dest, bytes, "python", U.extract.keepAll) catch |e| {
         std.debug.print("python_dist: cannot unpack {s}: {s}\n", .{ archive, @errorName(e) });
         return 2;
     };
