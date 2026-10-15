@@ -166,7 +166,7 @@ pub fn extractZip(a: std.mem.Allocator, dest: std.fs.Dir, data: []const u8) !voi
         }
         if (content.items.len != usize_ or std.hash.Crc32.hash(content.items) != crc) return error.BadZip;
         if (std.fs.path.dirname(name)) |d| try dest.makePath(d);
-        const exec = (made_by >> 8) == 3 and (attrs >> 16) & 0o100 != 0 and false;
+        const exec = (made_by >> 8) == 3 and (attrs >> 16) & 0o100 != 0;
         const mode: std.fs.File.Mode = if (exec) 0o755 else 0o644;
         const f = try dest.createFile(name, .{ .mode = mode });
         defer f.close();
