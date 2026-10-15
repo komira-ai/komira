@@ -105,7 +105,7 @@ def test_h2_post_body_reaches_the_wire() raises:
     var client = HttpClient[ScriptedConnector].with_defaults(connector^)
 
     # Build the POST exactly as GeneratedStorageApi.rewrite_object does.
-    var url = Url.https(String("storage.googleapis.com"), UInt16(443), String("/rewriteTo"))
+    var url = Url.https(String("10.0.0.1"), UInt16(443), String("/rewriteTo"))
     var headers = HeaderMap()
     headers.append(String("Content-Type"), String("application/json"))
     var req = build_request_with_body[BytesBody](

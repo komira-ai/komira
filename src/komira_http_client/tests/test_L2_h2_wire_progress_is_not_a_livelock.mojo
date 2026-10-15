@@ -319,7 +319,7 @@ def _drive_against(pendings: Int, wire_step: Int) raises -> Tuple[Int, Int, Stri
     var connector = SlowDrainConnector(peer^)
     var client = HttpClient[SlowDrainConnector].with_defaults(connector^)
     var url = Url.https(
-        String("storage.googleapis.com"), UInt16(443), String("/storage/v1/b/x/o")
+        String("10.0.0.1"), UInt16(443), String("/storage/v1/b/x/o")
     )
     var headers = HeaderMap()
     var req = build_get_request(url^, headers^)

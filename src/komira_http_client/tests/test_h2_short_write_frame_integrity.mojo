@@ -162,7 +162,7 @@ def _run_h2_put_with_write_clamp(clamp: Int) raises -> List[UInt8]:
     var client = HttpClient[ScriptedConnector].with_defaults(connector^)
 
     var url = Url.https(
-        String("storage.googleapis.com"),
+        String("10.0.0.1"),
         UInt16(443),
         String("/upload/storage/v1/b/x/o"),
     )
