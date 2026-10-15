@@ -76,3 +76,8 @@ the tests passed, and removes the scratch directory. A failing test makes the
 launcher exit with zig's own status and write nothing. The launcher is built
 by the pinned zig directly (`zig_bootstrap_exe`: no busybox, no shell), behind
 its unit tests, because no rule that needs it can build it.
+
+`zig_exe` and `zig_test_binary` run through the same launcher (its `zig` subcommand): a scratch
+directory for `HOME` and the zig caches, the busybox applets as `PATH`, then `zig build-exe` or
+`zig test --test-no-exec` with the arguments the rule states. `zig_test_run`, which runs a test binary
+on a macOS worker, still runs a busybox script.
