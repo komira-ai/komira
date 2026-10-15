@@ -10,7 +10,7 @@ const layout = @import("layout.zig");
 const runner = @import("runner.zig");
 
 fn die(comptime fmt: []const u8, args: anytype) u8 {
-    std.io.getStdErr().writer().print("node_modules: " ++ fmt ++ "\n", args) catch {};
+    std.fs.File.stderr().deprecatedWriter().print("node_modules: " ++ fmt ++ "\n", args) catch {};
     return 1;
 }
 
@@ -50,29 +50,29 @@ fn doAssemble(a: std.mem.Allocator, cwd: []const u8, spec_json: std.json.Value, 
     try std.fs.cwd().makePath(out_abs);
     var dir = try std.fs.cwd().openDir(out_abs, .{});
     defer dir.close();
-    try layout.assemble(a, spec, dir, out_abs, std.io.getStdErr().writer());
+    try layout.assemble(a, spec, dir, out_abs, std.fs.File.stderr().deprecatedWriter());
 }
 
 fn doRun(a: std.mem.Allocator, cwd: []const u8, j: std.json.Value, out: []const u8) !void {
     const args_v = field(j, "args") orelse return error.BadSpec;
     const env_v = field(j, "env") orelse return error.BadSpec;
     if (args_v != .array or env_v != .object) return error.BadSpec;
-    var args = std.ArrayList([]const u8).init(a);
+    var args = std.ArrayList([]const u8).empty;
     for (args_v.array.items) |x| {
         if (x != .string) return error.BadSpec;
-        try args.append(x.string);
+        try args.append(a, x.string);
     }
-    var env = std.ArrayList([2][]const u8).init(a);
+    var env = std.ArrayList([2][]const u8).empty;
     for (env_v.object.keys(), env_v.object.values()) |k, v| {
         if (v != .string) return error.BadSpec;
-        try env.append(.{ k, v.string });
+        try env.append(a, .{ k, v.string });
     }
-    var tools = std.ArrayList([2][]const u8).init(a);
+    var tools = std.ArrayList([2][]const u8).empty;
     if (field(j, "pathTools")) |pt| {
         if (pt != .object) return error.BadSpec;
         for (pt.object.keys(), pt.object.values()) |k, v| {
             if (v != .string) return error.BadSpec;
-            try tools.append(.{ k, try abs(a, cwd, v.string) });
+            try tools.append(a, .{ k, try abs(a, cwd, v.string) });
         }
     }
     const out_dir_v = field(j, "outDir");
@@ -90,7 +90,7 @@ fn doRun(a: std.mem.Allocator, cwd: []const u8, j: std.json.Value, out: []const 
         .out_dir = if (out_dir_v) |v| (if (v == .string) v.string else null) else null,
         .scratch = scratch,
     };
-    try runner.run(a, spec, try abs(a, cwd, out), std.io.getStdErr().writer());
+    try runner.run(a, spec, try abs(a, cwd, out), std.fs.File.stderr().deprecatedWriter());
 }
 
 pub fn main() u8 {

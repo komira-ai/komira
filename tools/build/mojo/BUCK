@@ -1,7 +1,7 @@
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "row")
-load(":toolchain.bzl", "zig_exe", "zig_test")
+load(":toolchain.bzl", "zig_bootstrap_exe", "zig_exe", "zig_test")
 
 # Scripts and tool sources used by the Mojo rules.
 # The compile wrapper (tools/mojo_compile.zig; docs/design/zig_compile_wrapper.md):
@@ -66,6 +66,18 @@ zig_exe(
     target = row("darwin-arm64")["zig_triple"],
     unit_tests = [":mojo_compile_darwin_unit"],
     busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
+
+# The runner of every `zig_test` action (tools/zig_launch.zig). It is built by
+# the pinned zig directly (`zig_bootstrap_exe`: no shell, no busybox), behind
+# its unit tests, because the rules that run it cannot build it.
+zig_bootstrap_exe(
+    name = "zig_launch",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/zig_launch.zig",
+    test_src = "tools/zig_launch_test.zig",
     zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
 )

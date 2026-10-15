@@ -299,6 +299,6 @@ pub fn trim(a: std.mem.Allocator, label: []const u8, text: []const u8, target: [
     r.put("nodes", .{ .array = nodes }) catch return error.Invalid;
     out.put("resolve", .{ .object = r }) catch return error.Invalid;
     if (diag.count() != before) return error.Invalid;
-    const text_out = std.json.stringifyAlloc(a, Value{ .object = out }, .{ .whitespace = .indent_1 }) catch return error.Invalid;
+    const text_out = std.json.Stringify.valueAlloc(a, Value{ .object = out }, .{ .whitespace = .indent_1 }) catch return error.Invalid;
     return std.mem.concat(a, u8, &.{ text_out, "\n" }) catch error.Invalid;
 }

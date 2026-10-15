@@ -60,8 +60,12 @@ pub const Registry = struct {
             const conn = self.server.accept() catch continue;
             defer conn.stream.close();
             if (self.stopping.load(.acquire)) return;
-            var buf: [8192]u8 = undefined;
-            var srv = std.http.Server.init(conn, &buf);
+            var rbuf: [8192]u8 = undefined;
+            var wbuf: [1024]u8 = undefined;
+            var reader = conn.stream.reader(&rbuf);
+            var writer = conn.stream.writer(&wbuf);
+            const w = &writer.interface;
+            var srv = std.http.Server.init(reader.interface(), w);
             const req = srv.receiveHead() catch continue;
             const target = req.head.target;
             var found: ?*Route = null;
@@ -74,13 +78,15 @@ pub const Registry = struct {
                 const len = r.claim_length orelse r.body.len;
                 const loc = if (r.location) |l| std.fmt.bufPrint(head_buf[256..], "Location: {s}\r\n", .{l}) catch "" else "";
                 const head = std.fmt.bufPrint(head_buf[0..256], "HTTP/1.1 {d} X\r\nContent-Length: {d}\r\nConnection: close\r\n", .{ r.status, len }) catch continue;
-                conn.stream.writeAll(head) catch continue;
-                conn.stream.writeAll(loc) catch continue;
-                conn.stream.writeAll("\r\n") catch continue;
-                conn.stream.writeAll(r.body) catch continue;
+                w.writeAll(head) catch continue;
+                w.writeAll(loc) catch continue;
+                w.writeAll("\r\n") catch continue;
+                w.writeAll(r.body) catch continue;
             } else {
-                conn.stream.writeAll("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n") catch continue;
+                w.writeAll("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n") catch continue;
             }
+            // The writer buffers; the client reads nothing until it is flushed.
+            w.flush() catch continue;
         }
     }
 };

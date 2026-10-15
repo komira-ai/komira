@@ -100,7 +100,7 @@ fn strList(a: std.mem.Allocator, o: ObjectMap, key: []const u8, where: []const u
         diag.add("{s}: `{s}` is not a list", .{ where, key });
         return &.{};
     };
-    var out = std.ArrayListUnmanaged([]const u8){};
+    var out = std.ArrayList([]const u8).empty;
     for (items) |x| {
         const s = str(x) orelse {
             diag.add("{s}: `{s}` holds a non-string", .{ where, key });
@@ -166,7 +166,7 @@ fn parseOverrides(a: std.mem.Allocator, label: []const u8, text: []const u8, dia
         ov.natives = strList(a, o, "native_deps", where, diag);
         if (o.get("env")) |ev| {
             if (objOf(ev)) |eo| {
-                var list = std.ArrayListUnmanaged(KV){};
+                var list = std.ArrayList(KV).empty;
                 var ei = eo.iterator();
                 while (ei.next()) |e| {
                     const v = str(e.value_ptr.*) orelse {
@@ -189,7 +189,7 @@ fn parseOverrides(a: std.mem.Allocator, label: []const u8, text: []const u8, dia
                 knownKeys(po, &.{ "copy", "sub", "add" }, where, diag);
                 ov.copy = strList(a, po, "copy", where, diag);
                 if (po.get("sub")) |sv| {
-                    var subs = std.ArrayListUnmanaged(Sub){};
+                    var subs = std.ArrayList(Sub).empty;
                     for (arrOf(sv) orelse no_values) |x| {
                         const so = objOf(x) orelse {
                             diag.add("{s}: a patch.sub entry is not an object", .{where});
@@ -213,7 +213,7 @@ fn parseOverrides(a: std.mem.Allocator, label: []const u8, text: []const u8, dia
                     ov.subs = subs.items;
                 }
                 if (po.get("add")) |av| {
-                    var adds = std.ArrayListUnmanaged(Add){};
+                    var adds = std.ArrayList(Add).empty;
                     for (arrOf(av) orelse no_values) |x| {
                         const ao = objOf(x) orelse {
                             diag.add("{s}: a patch.add entry is not an object", .{where});
@@ -358,7 +358,7 @@ fn strListLine(w: anytype, name: []const u8, items: []const []const u8) !void {
 const Graph = struct {
     by_id: std.StringHashMapUnmanaged(*Pkg),
     /// The crates linked into a binary, in discovery order.
-    linked: std.ArrayListUnmanaged(*Pkg),
+    linked: std.ArrayList(*Pkg),
 };
 
 /// A triple that names a platform other than `target` in an edge's `target`
@@ -425,7 +425,7 @@ fn collect(a: std.mem.Allocator, label: []const u8, text: []const u8, target: []
         const id = strField(no, "id") orelse continue;
         if (by_id.get(id)) |p| p.node = no;
     }
-    var queue = std.ArrayListUnmanaged(*Pkg){};
+    var queue = std.ArrayList(*Pkg).empty;
     for (arrOf(resolve.get("workspace_members") orelse root.get("workspace_members") orelse .null) orelse no_values) |wv| {
         const id = str(wv) orelse continue;
         if (by_id.get(id)) |p| {
@@ -441,7 +441,7 @@ fn collect(a: std.mem.Allocator, label: []const u8, text: []const u8, target: []
 
     // The crates linked into a binary: normal edges only, from the members.
     // Build- and dev-dependencies are not (no build script runs here).
-    var linked = std.ArrayListUnmanaged(*Pkg){};
+    var linked = std.ArrayList(*Pkg).empty;
     var qi: usize = 0;
     while (qi < queue.items.len) : (qi += 1) {
         const p = queue.items[qi];
@@ -449,7 +449,7 @@ fn collect(a: std.mem.Allocator, label: []const u8, text: []const u8, target: []
             diag.add("{s}: {s} {s} has no node in the resolved graph", .{ label, p.name, p.version });
             continue;
         };
-        var edges = std.ArrayListUnmanaged(Edge){};
+        var edges = std.ArrayList(Edge).empty;
         for (arrOf(node.get("deps") orelse .null) orelse no_values) |dv| {
             const d = objOf(dv) orelse continue;
             var normal = false;
@@ -490,7 +490,7 @@ pub fn linkedCrates(a: std.mem.Allocator, in: Inputs, diag: *Diag) error{Invalid
     const before = diag.count();
     const lock = lockfile.parse(a, in.lock_label, in.lock, diag) catch return error.Invalid;
     const g = try collect(a, in.metadata_label, in.metadata, in.target, diag);
-    var out = std.ArrayListUnmanaged(Crate){};
+    var out = std.ArrayList(Crate).empty;
     for (g.linked.items) |p| {
         var sum: []const u8 = "";
         for (lock) |e| {
@@ -576,7 +576,7 @@ pub fn generate(a: std.mem.Allocator, in: Inputs, diag: *Diag) error{Invalid}![]
         if (!valid.isCrateName(p.lib_name) or !valid.isRelPath(p.root)) diag.add("{s}: a library name or root with unsupported characters", .{where});
 
         // Features Cargo resolved.
-        var feats = std.ArrayListUnmanaged([]const u8){};
+        var feats = std.ArrayList([]const u8).empty;
         const node = p.node orelse continue;
         for (arrOf(node.get("features") orelse .null) orelse no_values) |fv| {
             const f = str(fv) orelse continue;
@@ -605,7 +605,7 @@ pub fn generate(a: std.mem.Allocator, in: Inputs, diag: *Diag) error{Invalid}![]
     }
     // An entry nothing uses is stale: a crate left the graph or moved on.
     {
-        var names = std.ArrayListUnmanaged([]const u8){};
+        var names = std.ArrayList([]const u8).empty;
         var it = ovs.map.iterator();
         while (it.next()) |kv| if (!kv.value_ptr.used) names.append(a, kv.key_ptr.*) catch return error.Invalid;
         std.mem.sort([]const u8, names.items, {}, lessStr);
@@ -622,7 +622,7 @@ pub fn generate(a: std.mem.Allocator, in: Inputs, diag: *Diag) error{Invalid}![]
         p.target = if (p.dup) std.fmt.allocPrint(a, "{s}-{s}", .{ p.name, p.version }) catch return error.Invalid else p.name;
     }
 
-    var out = std.ArrayListUnmanaged(u8){};
+    var out = std.ArrayList(u8).empty;
     const w = out.writer(a);
     w.print(
         \\# Generated by `kpin cargo` (tools/build/kpin/README.md, "Cargo") from Cargo.lock, `cargo metadata`
@@ -673,8 +673,8 @@ fn render(a: std.mem.Allocator, w: anytype, p: *Pkg, by_id: std.StringHashMapUnm
 
     // Dependencies: the edges that are linked; the name a crate gives one
     // that is not the dependency's library name is a rename.
-    var deps = std.ArrayListUnmanaged([]const u8){};
-    var renamed = std.ArrayListUnmanaged([2][]const u8){};
+    var deps = std.ArrayList([]const u8).empty;
+    var renamed = std.ArrayList([2][]const u8).empty;
     for (p.edges) |e| {
         const d = by_id.get(e.id).?;
         if (d.workspace) continue;
@@ -686,7 +686,7 @@ fn render(a: std.mem.Allocator, w: anytype, p: *Pkg, by_id: std.StringHashMapUnm
         }
     }
     std.mem.sort([]const u8, deps.items, {}, lessStr);
-    var uniq = std.ArrayListUnmanaged([]const u8){};
+    var uniq = std.ArrayList([]const u8).empty;
     for (deps.items) |d| {
         if (uniq.items.len == 0 or !std.mem.eql(u8, uniq.items[uniq.items.len - 1], d)) try uniq.append(a, d);
     }

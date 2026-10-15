@@ -27,7 +27,7 @@ const Case = struct {
 
     fn put(self: *Case, path: []const u8, bytes: []const u8) !void {
         if (std.fs.path.dirname(path)) |d| try self.tmp.dir.makePath(d);
-        try self.tmp.dir.writeFile(path, bytes);
+        try self.tmp.dir.writeFile(.{ .sub_path = path, .data = bytes });
     }
 
     fn get(self: *Case, path: []const u8) ![]const u8 {
@@ -41,8 +41,8 @@ const Case = struct {
 
     /// Runs the program; returns its status, its stderr in `err`.
     fn run(self: *Case, args: []const []const u8, err: *[]const u8) u8 {
-        var buf = std.ArrayList(u8).init(self.arena.allocator());
-        const status = C.entry(self.arena.allocator(), self.tmp.dir, args, buf.writer());
+        var buf = std.ArrayList(u8).empty;
+        const status = C.entry(self.arena.allocator(), self.tmp.dir, args, buf.writer(self.arena.allocator()));
         err.* = buf.items;
         return status;
     }

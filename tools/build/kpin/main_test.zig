@@ -44,7 +44,7 @@ const Env = struct {
     }
 
     fn write(self: *Env, name: []const u8, data: []const u8) void {
-        self.tmp.dir.writeFile(name, data) catch @panic("write");
+        self.tmp.dir.writeFile(.{ .sub_path = name, .data = data }) catch @panic("write");
     }
 
     fn read(self: *Env, name: []const u8) []const u8 {
@@ -52,15 +52,13 @@ const Env = struct {
     }
 
     fn kpin(self: *Env, cmd: []const []const u8) Run {
-        var argv = std.ArrayListUnmanaged([]const u8){};
+        var argv = std.ArrayList([]const u8).empty;
         argv.appendSlice(self.a(), cmd) catch @panic("oom");
         argv.appendSlice(self.a(), &.{ "--pins", self.path("pins.toml"), "--lock", self.path("pins.lock.bzl"), "--npm", self.path("package-lock.json") }) catch @panic("oom");
-        var out = std.ArrayList(u8).init(self.a());
-        var err = std.ArrayList(u8).init(self.a());
-        const ow = out.writer();
-        const ew = err.writer();
-        const code = main.run(self.a(), argv.items, ow.any(), ew.any(), &self.http);
-        return .{ .code = code, .out = out.items, .err = err.items };
+        var out = std.Io.Writer.Allocating.init(self.a());
+        var err = std.Io.Writer.Allocating.init(self.a());
+        const code = main.run(self.a(), argv.items, &out.writer, &err.writer, &self.http);
+        return .{ .code = code, .out = out.written(), .err = err.written() };
     }
 
     fn pkgLock(self: *Env, entries: []const fx.NpmEntry) void {
@@ -257,11 +255,10 @@ test "MUTANT non-deterministic output: the order of the package-lock.json entrie
     e.write("pins.toml", "");
     const names = [_][]const u8{ "delta", "alpha", "charlie", "bravo" };
     // Seed a lock that holds them all (as update would have written it).
-    var seed = std.ArrayListUnmanaged(u8){};
-    const w = seed.writer(e.a());
-    try w.writeAll("KPIN_LOCK_VERSION = 1\n\nPINS = {}\n\nNPM = {\n");
-    for (names) |n| try w.print("    \"{s}@1.0.0\": {{\"name\": \"{s}\", \"version\": \"1.0.0\", \"url\": \"https://r.example/{s}.tgz\", \"sri512\": \"{s}\", \"sha256\": \"{s}\", \"size\": 3}},\n", .{ n, n, n, fx.ABC_SRI512, fx.ABC_SHA256 });
-    try w.writeAll("}\n");
+    var seed = std.ArrayList(u8).empty;
+    try seed.appendSlice(e.a(), "KPIN_LOCK_VERSION = 1\n\nPINS = {}\n\nNPM = {\n");
+    for (names) |n| try seed.print(e.a(), "    \"{s}@1.0.0\": {{\"name\": \"{s}\", \"version\": \"1.0.0\", \"url\": \"https://r.example/{s}.tgz\", \"sri512\": \"{s}\", \"sha256\": \"{s}\", \"size\": 3}},\n", .{ n, n, n, fx.ABC_SRI512, fx.ABC_SHA256 });
+    try seed.appendSlice(e.a(), "}\n");
     e.write("pins.lock.bzl", seed.items);
 
     var entries: [4]fx.NpmEntry = undefined;

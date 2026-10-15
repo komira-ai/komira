@@ -1,6 +1,11 @@
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+
 # The limits check's tool (src/limits.zig says what it checks): `tree` is the
 # validation //:limits runs (limits.bzl), `merged` is run by the platform
 # table's check (tests//functional/platform_table:check.sh) over the commit
@@ -26,7 +31,7 @@ _TESTS = [
         imports = _SRCS + ["src/testkit.zig"],
         src = "src/{}.zig".format(t),
         busybox = "komira//tools/build/toolchains:busybox",
-        zig = "komira//tools/build/toolchains:zig",
+        zig = _ZIG,
     )
     for t in _TESTS
 ]
@@ -37,8 +42,8 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     imports = _SRCS,
     src = "src/main.zig",
-    unit_tests = [":" + t for t in _TESTS],
+    unit_tests = [":" + t for t in _TESTS] + [_ZIG_VERSION],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
     visibility = ["PUBLIC"],
 )

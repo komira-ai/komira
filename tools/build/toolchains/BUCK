@@ -113,6 +113,7 @@ zig_test(
     src = "zig_next_version_test.zig",
     busybox = ":busybox",
     zig = ":zig",
+    visibility = ["PUBLIC"],
 )
 
 zig_exe(
