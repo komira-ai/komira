@@ -109,8 +109,7 @@ fn cat(a: std.mem.Allocator, args: []const []const u8) void {
 /// Whether the file at `path` exists and is not empty (`test -s`, following links).
 pub fn nonEmpty(path: []const u8) bool {
     const st = std.fs.cwd().statFile(path) catch return false;
-    _ = st;
-    return true;
+    return st.size > 0;
 }
 
 fn copyLibs(a: std.mem.Allocator, args: []const []const u8) noreturn {
