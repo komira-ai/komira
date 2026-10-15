@@ -191,16 +191,18 @@ fn appendPid(path: []const u8, pid: i32) void {
     f.writeAll(s) catch return;
 }
 
-fn hold(mib: u64, secs: u64, pace_ms: u64) noreturn {
+/// Says it starts (while it is still small, so the line is in the log
+/// whenever the cap kills it mid-touch), touches `mib` MiB, pausing
+/// `pause_ms` after each MiB (0: none), says it holds them, and sleeps.
+fn hold(mib: u64, secs: u64, pause_ms: u64) noreturn {
+    say("hog touches {d} MiB\n", .{mib});
     const mem = std.heap.page_allocator.alloc(u8, mib << 20) catch posix.exit(99);
-    // Printed before the pages are touched: a supervisor sampling every 100 ms
-    // can kill the hog while it is still touching them.
-    say("hog holds {d} MiB\n", .{mib});
     var i: usize = 0;
     while (i < mem.len) : (i += 4096) {
         mem[i] = 1;
-        if (pace_ms > 0 and i % (1 << 20) == 0) sys.sleepMs(pace_ms);
+        if (pause_ms > 0 and (i + 4096) % (1 << 20) == 0) sys.sleepMs(pause_ms);
     }
+    say("hog holds {d} MiB\n", .{mib});
     sys.sleepMs(secs * 1000);
     posix.exit(0);
 }
@@ -209,8 +211,9 @@ fn hold(mib: u64, secs: u64, pace_ms: u64) noreturn {
 ///   exit N             exits N
 ///   signal N           kills itself with signal N
 ///   sleep S [N]        sleeps S s, exits N
-///   hog MiB [S [P]]    holds MiB of touched memory for S s (60), exits 0; P ms
-///                      (0) of pause per MiB touched, to stretch the allocation
+///   hog MiB [S] [P]    says "hog touches MiB", touches MiB of memory (pausing
+///                      P ms after each MiB, 0), says "hog holds MiB", holds
+///                      them for S s (60), exits 0
 ///   daemon FILE KIND   forks a child (KIND: sleep or hog) that stays in the
 ///                      group, writes its pid to FILE, and exits 0 at once
 ///   spawnwait FILE     forks a 100 s sleeper, writes its pid, waits for it

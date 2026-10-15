@@ -15,6 +15,13 @@ load("@komira//tools/build/mojo:toolchain.bzl", "conda_closure", "mojo_runtime")
 # @rpath/ (its own lib/), /usr/lib or /System, and the minimum OS is 11.0.
 pinned_file(**pinned_kwargs("darwin-arm64", "mojo_compiler"))
 
+# liblz4 (conda-forge lz4-c), which komira_lz4 opens at run time by the name
+# `liblz4.dylib`. macOS ships no liblz4 (on linux the worker's loader finds
+# `liblz4.so.1`), so the compiler closure's lib/ carries it below: that
+# directory is what the gate puts on DYLD_LIBRARY_PATH for every gated test.
+# It loads only /usr/lib/libSystem.B.dylib.
+pinned_file(**pinned_kwargs("darwin-arm64", "liblz4"))
+
 # ---- Unpacked by linux actions ------------------------------------------------
 
 # Unpacking moves bytes only, so it runs on the linux execution platform,
@@ -27,13 +34,18 @@ conda_closure(
     name = "mojo_compiler",
     exec_compatible_with = LINUX_X86_64,
     target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-mojo-compiler
+    libs = {
+        "lib/liblz4.dylib": ":" + pinned_kwargs("darwin-arm64", "liblz4")["name"],
+    },
     package = ":mojo_compiler_1.0.0_osx-arm64.conda",
     unpacker = "komira//tools/build/toolchains:conda_unpack",
     visibility = ["PUBLIC"],
 )
 
-# What a built binary loads: the compiler's three runtime libraries. Everything
-# else it loads (libc++, libSystem, frameworks) is the operating system's.
+# What a built binary loads: the compiler's three runtime libraries, and
+# liblz4 (above), which komira_lz4 opens at run time. Everything else it loads
+# (libc++, libSystem, frameworks) is the operating system's. The list is
+# every .dylib of the closure's lib/ (functional/darwin/check.sh).
 mojo_runtime(
     name = "mojo_runtime",
     exec_compatible_with = LINUX_X86_64,
@@ -44,6 +56,7 @@ mojo_runtime(
         "libAsyncRTRuntimeGlobals.dylib",
         "libKGENCompilerRTShared.dylib",
         "libMSupportGlobals.dylib",
+        "liblz4.dylib",
     ],
     visibility = ["PUBLIC"],
 )

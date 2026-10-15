@@ -105,6 +105,8 @@ selftest_scenario(name = "analysis_refusals_node")
 
 selftest_scenario(name = "planted_red_builds_node")
 
+selftest_scenario(name = "planted_red_builds_npm_modules")
+
 selftest_scenario(name = "analysis_refusals_zig_rules")
 
 selftest_scenario(name = "planted_red_builds_zig_rules")

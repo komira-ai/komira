@@ -6,7 +6,7 @@ and file utilities), the zig distribution (C link driver, and the compiler for
 Actions never search the worker's PATH.
 """
 
-load(":providers.bzl", "MojoToolchainInfo")
+load(":providers.bzl", "MojoToolchainInfo", "ZigExeInfo")
 load(":test_runtime.bzl", "RUNNER_ENV", "data_map")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
@@ -206,7 +206,7 @@ rm -rf "$T"
         cmd,
         category = "zig_build_exe",
     )
-    return [DefaultInfo(default_output = out), RunInfo(args = cmd_args(out))]
+    return [DefaultInfo(default_output = out), RunInfo(args = cmd_args(out)), ZigExeInfo(target = ctx.attrs.target)]
 
 zig_exe_rule = rule(
     impl = _zig_exe_impl,

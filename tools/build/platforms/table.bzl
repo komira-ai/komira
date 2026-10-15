@@ -59,6 +59,7 @@ ASSET_ROLES = [
     "kcov_zlib",
     "kcov_zstd",
     "libgcc",
+    "liblz4",
     "libstdcxx",
     "libzlib",
     "llvm_branch_libiconv",
@@ -83,7 +84,11 @@ _KCOV_ROLES = ["kcov_bzip2", "kcov_elfutils", "kcov_lzma", "kcov_src", "kcov_zli
 # llvm-profdata 23 with the libraries it loads, and the compiler-rt 23 profile
 # runtime. linux-x86_64 only, like kcov; every other row states `none`.
 _LLVM_BRANCH_ROLES = ["llvm_branch_libiconv", "llvm_branch_libllvm", "llvm_branch_libxml2", "llvm_branch_rt", "llvm_branch_tools", "llvm_branch_zstd"]
-_NONE_ALLOWED = ["busybox", "libgcc", "libstdcxx", "libzlib"] + _KCOV_ROLES + _LLVM_BRANCH_ROLES
+# liblz4, which komira_lz4 opens at run time: a platform pins it only where
+# the operating system of its workers ships none (macOS). On linux the
+# loader finds `liblz4.so.1` without a pin.
+_LIBLZ4_LINUX = "the loader of a linux worker finds liblz4.so.1 (komira_lz4's dlopen) without a pin"
+_NONE_ALLOWED = ["busybox", "libgcc", "liblz4", "libstdcxx", "libzlib"] + _KCOV_ROLES + _LLVM_BRANCH_ROLES
 
 # Roles whose pin is the executable itself, downloaded with its mode bit set
 # and never unpacked: a real pin of one of these must say `executable = True`.
@@ -201,6 +206,7 @@ PLATFORMS = {
                 "0bb57ee8557aad33317eeb881e3957b6fab776dd75473311c25789fa3a29f792",
                 size = 1042438,
             ),
+            "liblz4": none(_LIBLZ4_LINUX),
             "libstdcxx": pin(
                 "libstdcxx_15.3.0_linux-64.conda",
                 "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-15.3.0-h934c35e_7.conda",
@@ -404,6 +410,16 @@ PLATFORMS = {
             "kcov_zlib": none(_KCOV_NONE),  # komira-limit:coverage-linux-x86-64
             "kcov_zstd": none(_KCOV_NONE),  # komira-limit:coverage-linux-x86-64
             "libgcc": none("the osx-arm64 compiler links only the operating system (every load command names @rpath/, /usr/lib or /System)"),
+            # liblz4, which komira_lz4 opens at run time (dlopen of
+            # `liblz4.dylib`): macOS ships none, so the toolchain's lib/,
+            # the directory the gate puts on DYLD_LIBRARY_PATH, carries it
+            # (tools/build/toolchains/darwin/BUCK). It loads only libSystem.
+            "liblz4": pin(
+                "lz4-c_1.10.0_osx-arm64.conda",
+                "https://conda.anaconda.org/conda-forge/osx-arm64/lz4-c-1.10.0-h286801f_1.conda",
+                "94d3e2a485dab8bdfdd4837880bde3dd0d701e2b97d6134b8806b7c8e69c8652",
+                size = 148824,
+            ),
             "libstdcxx": none("the osx-arm64 compiler links only the operating system (every load command names @rpath/, /usr/lib or /System)"),
             "libzlib": none("the osx-arm64 closure takes no conda library: rustc for aarch64-apple-darwin links and runs without one"),
             "llvm_branch_libiconv": none(_LLVM_BRANCH_NONE),  # komira-limit:coverage-linux-x86-64
@@ -525,6 +541,7 @@ PLATFORMS = {
                 "df096c235cf04e802487602f68dbe60d3ab866a7e59e81ae0458f3596a752700",
                 size = 624560,
             ),
+            "liblz4": none(_LIBLZ4_LINUX),
             "libstdcxx": pin(
                 "libstdcxx_15.3.0_linux-aarch64.conda",
                 "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-15.3.0-hef695bb_7.conda",

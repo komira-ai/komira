@@ -57,32 +57,52 @@ fn before(hay: []const u8, first: []const u8, second: []const u8) bool {
     return i < j;
 }
 
-// M2, M3. Mutants: `>=` for `>` (not caught here: the sums are far from
-// the cap; see the boundary test below), spare C (the single-process hog
-// survives its cap and passes after 3 s), or print the cap's line before
-// the banner.
-test "M3 cap: a hog over its cap is killed (137), the banner first, then the MEMORY CAP line" {
+// The MiB that the MEMORY CAP line reports, null when there is none.
+fn cappedMib(err: []const u8) ?u64 {
+    const key = "MEMORY CAP: killed //x:y at ";
+    const i = std.mem.indexOf(u8, err, key) orelse return null;
+    const rest = err[i + key.len ..];
+    const sp = std.mem.indexOfScalar(u8, rest, ' ') orelse return null;
+    return std.fmt.parseInt(u64, rest[0..sp], 10) catch null;
+}
+
+// M3 for a hog of 64 MiB under a cap of 32 MiB, touching its pages at
+// `pause_ms` per MiB. The cap may kill the hog at any tick once it is over
+// 32 MiB, which may be before it has touched all 64 (a loaded host makes
+// the touching slow), so the only line of the hog's that the test relies on
+// is the one it prints before it touches anything. The hog holds its pages
+// for 30 s: only the cap ends it within the run's limit.
+fn capKillsHog(pause_ms: []const u8) !void {
     const e = try Env.init();
     defer e.deinit();
-    const r = try kit.runGate(e.a, e.dir, try e.args("hog", &.{ "--mem-cap-mib", "32", "--arg", "64", "--arg", "3" }), .{});
+    const r = try kit.runGate(e.a, e.dir, try e.args("hog", &.{ "--mem-cap-mib", "32", "--arg", "64", "--arg", "30", "--arg", pause_ms }), .{});
     try std.testing.expectEqual(@as(u8, 137), r.status);
-    try std.testing.expect(contains(r.err, "hog holds 64 MiB"));
-    try std.testing.expect(before(r.err, banner137, "MEMORY CAP: killed //x:y at "));
+    try std.testing.expect(r.ms < 30_000);
+    // The banner, then the log's tail (the hog's first line), then the cap's line.
+    try std.testing.expect(before(r.err, banner137, "hog touches 64 MiB\n"));
+    try std.testing.expect(before(r.err, "hog touches 64 MiB\n", "MEMORY CAP: killed //x:y at "));
     try std.testing.expect(contains(r.err, " MiB resident, over its cap of 32 MiB\n"));
+    // The reading is the hog's own memory: over the cap, as resident.
+    const mib = cappedMib(r.err) orelse return error.NoCapReading;
+    try std.testing.expect(mib >= 32);
     try std.testing.expect(!kit.exists(try e.pidFile("passed")));
 }
 
-// The supervisor samples every 100 ms, so on a loaded machine (slow page
-// faults) a hog can be over its cap before it finishes touching its memory.
-// The hog's line must therefore be out before it touches anything: 64 MiB at
-// 20 ms per MiB crosses the 32 MiB cap long before it ends.
-test "M3 cap: a hog killed while it is still touching its memory has printed its line" {
-    const e = try Env.init();
-    defer e.deinit();
-    const r = try kit.runGate(e.a, e.dir, try e.args("hog", &.{ "--mem-cap-mib", "32", "--arg", "64", "--arg", "3", "--arg", "20" }), .{});
-    try std.testing.expectEqual(@as(u8, 137), r.status);
-    try std.testing.expect(contains(r.err, "hog holds 64 MiB"));
-    try std.testing.expect(contains(r.err, " MiB resident, over its cap of 32 MiB\n"));
+// M2, M3. Mutants: `>=` for `>` (not caught here: the sums are far from
+// the cap; see the boundary test below), spare C (the single-process hog
+// survives its cap: exit 0 after 30 s), or print the cap's line before
+// the banner.
+test "M3 cap: a hog over its cap is killed (137), the banner first, then the MEMORY CAP line" {
+    try capKillsHog("0");
+}
+
+// M3 on a loaded host: the hog's pages come slowly (20 ms per MiB), so the
+// cap kills it in the middle of its touching, long before it could print
+// "hog holds". The run must read the same as when the hog is quick. Defect
+// caught: a test (or a supervisor) that only works when the hog has finished
+// growing before the first tick over the cap. Mutants: those of the test above.
+test "M3 cap: a hog killed while its pages are still being touched reads the same" {
+    try capKillsHog("20");
 }
 
 test "M3 cap: a test under its cap passes" {

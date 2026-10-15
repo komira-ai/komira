@@ -99,6 +99,57 @@ tarballs of `name_nested`, `name_absent`, `version_nested`, `version_number`,
 and pinned at their own sha512: a tarball built in the action would carry
 the worker's file owner and times, so it would have no fixed digest.
 
+## node_modules from a package-lock.json
+
+[`modules.bzl`](modules.bzl) adds the rules a TypeScript project needs: `node_modules` laid out from its
+lockfile, and the programs of those packages (`tsc`, `jest`, `cdk`) run over its sources. They are the offline
+equivalent of `npm ci --ignore-scripts` followed by `npm test`. They share the other rules' runtime (the pinned
+node; nothing inherited from the host, UTC, a scratch `HOME`, no network), but no shell runs: `node_tools`, a Zig
+program, lays out the tree and starts node.
+
+```
+load("@komira//tools/build/node:modules.bzl", "cdk_synth", "jest_test", "npm_modules", "tsc_check")
+load(":pins.lock.bzl", "NPM")        # written by `kpin lock` / `kpin update` from package-lock.json
+
+npm_modules(name = "modules", lockfile = "package-lock.json", npm = NPM)
+tsc_check(name = "typecheck", modules = ":modules", srcs = glob(["bin/**", "lib/**", "test/**", "tsconfig.json"]))
+jest_test(name = "test", modules = ":modules", srcs = glob([...]))
+```
+
+| rule or macro | what it builds |
+|---|---|
+| `npm_modules(name, lockfile, npm, tarballs)` | The `node_modules` directory of `lockfile` (lockfileVersion 3). `npm` is the `NPM` table of the kpin lock: the macro declares one `pinned_file` per entry (sha256 and size from the lock) unless `tarballs` ({`name@version`: label}) names the files. The assembly ([`node_tools`](../node_tools/README.md), a Zig program: no shell, no node) checks, per package: a tarball exists for it; the lock's `sri512` equals the lockfile's `integrity`; the tarball's sha512 equals it; the unpacked `package.json` states the locked name and version. It unpacks at the path the lockfile gives (nested `node_modules` included, the first path component of the tarball dropped, as npm does), files `0644` or `0755` when the tarball marks them executable, links in the tarball not extracted, and creates `.bin/<cmd>` relative links (the target made executable) in the `node_modules` directory that holds each package. An optional package whose `os`, `cpu` or `libc` excludes linux x64 (fsevents) is skipped; a non-optional one fails. Bundled packages (`inBundle`) come from their parent's tarball and must be there. **No install script runs.** The tree holds `.komira-node-modules.json`: the count of packages, the install scripts not run and what was skipped. |
+| `node_tree_test(name, program, modules, srcs, data, args, env, tools)` | Runs `program` (a path in the package, e.g. `node_modules/.bin/tsc`) with the pinned node and `args`, in a copy of `srcs` (staged at their path in the cell) and `data` ({destination from the cell root: source}, a build output allowed) with `modules` linked in as the package's own `node_modules`; the working directory is the package. The environment is exactly `LC_ALL=C TZ=UTC0`, `HOME` and `TMPDIR` in the action's scratch, `PATH` (the pinned node's `bin`, then a directory of the `tools` links: `{"bzip2": "komira//tools/build/toolchains:busybox"}` makes `bzip2` run busybox's applet; no other command is there), `LD_LIBRARY_PATH` (its C++ runtime) and `env`; the host's is never inherited. The target `<name>.pass` exists only if the program exited 0. Sibling packages' files a test reads by relative path (`../access/x.json`) are `data` at their cell path. |
+| `node_tree_build(name, program, ..., out_dir)` | The same, and the target is the directory `out_dir` of the package after the program passed. |
+| `tsc_check(name, modules, srcs, data, project)` | `tsc --noEmit -p <project>`. |
+| `tsc_build(name, modules, srcs, data, project, out_dir)` | `tsc -p <project>`; the target is `out_dir` (`dist`). |
+| `jest_test(name, modules, srcs, data, config, max_workers)` | `jest --ci --maxWorkers=<max_workers> --cacheDirectory=.jest-cache --watchman=false --config <config>`; the cache is in the scratch copy, and a run that finds no test fails. `max_workers` defaults to 2: ts-jest workers reach about 1.6 GB each. |
+| `cdk_synth(name, modules, srcs, app, data, context, env)` | `cdk synth --quiet --app <app> --output cdk.out --no-version-reporting --no-notices` with `context` as `-c key=value`. There is no `npx`, so `app` is the command of cdk.json with `node node_modules/.bin/ts-node ...` for `npx ts-node ...`. `env` is the account and region of the test (`CDK_DEFAULT_ACCOUNT`, `CDK_DEFAULT_REGION`); a context lookup would need AWS and fails. |
+
+`node` (the test macros) defaults to `komira//third_party/node:node`, which only the test-only packages see. A repository that
+uses komira as a cell declares its own `node_dist` (rules are loaded once per cell, so a provider of
+komira's own load is not the consuming repository's: upstream facebook/buck2#683) and passes it as `node =`.
+
+Limits: linux x86_64 only; a package with an install script that does something other than build a native
+addon works only if it needs no script (the lockfile's `hasInstallScript` entries are listed in the report); a
+dependency from git or a file path has no tarball and kpin refuses it.
+
+### Planted defects of the node_modules rules
+
+Every target of [`tests//negative/npm_modules`](../tests/negative/npm_modules/BUCK) must fail, printing the text its
+row in scenario [`planted_red_builds_npm_modules`](../selftest/planted_red_builds_npm_modules.zig) holds:
+
+| planted defect | what it proves |
+|---|---|
+| `package_not_pinned` | a lockfile package with no tarball in the pinned lock is an error naming the package |
+| `pinned_lock_disagrees` | the pinned lock's sri512 is held to the lockfile's integrity |
+| `tarball_bytes_differ` | a tarball whose bytes have another sha512 than the lockfile's integrity is refused |
+| `package_json_differs` | a tarball whose package.json states another name or version is refused |
+| `bundled_missing`, `other_os_not_optional` | a bundled package its parent lacks, and a non-optional package for another os, are refused |
+| `program_absent`, `synth_wrong_context`, `synth_no_env`, `tool_not_declared` | a program node_modules lacks, a failing program, an environment variable the target does not set, and a command the target did not name in `tools` (the host's commands are not on PATH) fail the target |
+| `out_dir_not_written` | an `out_dir` the program never wrote fails |
+| `type_error`, `jest_fails`, `jest_finds_nothing` | a type error, a failing test and a run that finds no test each fail |
+
 ## Limits
 
 - linux x86_64 only: the archive is Node's `linux-x64` build, and the zig
