@@ -513,7 +513,7 @@ lines it reached count. A library naming `coverage_tests` cannot depend on
 those tests (they depend on it), so its gate is the target
 `<name>_cov_gate` (as a library of the ledger's, below): it runs each
 named test's -O0 binary under kcov against the library's sources
-(`<name>_cov_gate[tests][<test>]`, through the same `cov_run.sh`) and runs
+(`<name>_cov_gate[tests][<test>]`, through the same `cov_run`) and runs
 the same gate over the library's reports and those
 (`<name>_cov_gate[gate]`). A named test's source is staged at its
 repository path: in the library's package it is a `--test-source`; in

@@ -12,7 +12,7 @@
 #   a BUCK file in <dir>, with every --file and that BUCK file as the
 #   repository's files, no hold and the target 99%. It must exit 0, and its
 #   result JSON must hold each --expect string (the package's numbers): the
-#   reports cov_run.sh writes are what covcheck reads, end to end.
+#   reports cov_run writes are what covcheck reads, end to end.
 # result (test 46): the result JSON of a library's coverage gate holds each
 #   --expect string.
 # Writes what it checked to <out>; exits 1 naming the first failure.

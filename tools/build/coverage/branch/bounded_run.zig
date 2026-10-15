@@ -2,7 +2,7 @@
 //! (under which it leads a session of its own), and report how it ended.
 //!
 //! What the coverage actions do in shell today, once: cov_branch_run (no
-//! limit: the release gate's runner, waited for alone), cov_run.sh (a limit,
+//! limit: the release gate's runner, waited for alone), cov_run (a limit,
 //! then SIGKILL to the whole process group and a scan of /proc for members
 //! that survived it) and mut_step.sh (a limit, then SIGTERM to the group, a
 //! grace period, and SIGKILL). The module is pure std (no import of its own)
@@ -291,7 +291,7 @@ fn firstField(alloc: std.mem.Allocator, path: []const u8) ?[]const u8 {
     return text[0..end];
 }
 
-/// One /proc/<pid>/stat line, read as cov_run.sh reads it: the fields after
+/// One /proc/<pid>/stat line, read as cov_run reads it: the fields after
 /// the LAST ')' (comm may hold one) are state, ppid and pgrp.
 pub fn parseStat(line: []const u8) ?struct { pid: i32, comm: []const u8, state: u8, pgrp: i32 } {
     const open = std.mem.indexOfScalar(u8, line, '(') orelse return null;
