@@ -60,7 +60,7 @@ fn secondsAt(text: []const u8, i: usize) usize {
 /// put `render_seconds` after `, `; that first time becomes `#.###s`. In
 /// any line, the first `"milliseconds":<digits>` (affected's --json) becomes
 /// `"milliseconds":#`. Nothing else changes.
-fn normalizeLine(out: *std.ArrayList(u8), line: []const u8) !void {
+fn normalizeLine(a: std.mem.Allocator, out: *std.ArrayList(u8), line: []const u8) !void {
     if (std.mem.startsWith(u8, line, "affected: ") and !std.mem.startsWith(u8, line, "affected: WARN ") and
         !std.mem.startsWith(u8, line, "affected: cannot tell: "))
     {
@@ -69,9 +69,9 @@ fn normalizeLine(out: *std.ArrayList(u8), line: []const u8) !void {
             const n = secondsAt(line, at + 2);
             const end = at + 2 + n;
             if (n > 0 and (end == line.len or std.mem.startsWith(u8, line[end..], " -- "))) {
-                try out.appendSlice(line[0 .. at + 2]);
-                try out.appendSlice(timing_placeholder);
-                try out.appendSlice(line[end..]);
+                try out.appendSlice(a, line[0 .. at + 2]);
+                try out.appendSlice(a, timing_placeholder);
+                try out.appendSlice(a, line[end..]);
                 return;
             }
             i = at + 2;
@@ -81,26 +81,26 @@ fn normalizeLine(out: *std.ArrayList(u8), line: []const u8) !void {
         var k = at + ms_key.len;
         while (k < line.len and std.ascii.isDigit(line[k])) k += 1;
         if (k > at + ms_key.len) {
-            try out.appendSlice(line[0 .. at + ms_key.len]);
-            try out.append('#');
-            try out.appendSlice(line[k..]);
+            try out.appendSlice(a, line[0 .. at + ms_key.len]);
+            try out.append(a, '#');
+            try out.appendSlice(a, line[k..]);
             return;
         }
     }
-    try out.appendSlice(line);
+    try out.appendSlice(a, line);
 }
 
 /// `text` with its timing normalized, line by line (`normalizeLine`).
 pub fn normalize(a: std.mem.Allocator, text: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var it = std.mem.splitScalar(u8, text, '\n');
     var first = true;
     while (it.next()) |line| {
-        if (!first) try out.append('\n');
+        if (!first) try out.append(a, '\n');
         first = false;
-        try normalizeLine(&out, line);
+        try normalizeLine(a, &out, line);
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// `actual` with each declared divergence of `stream` undone: every `other`
@@ -141,12 +141,12 @@ fn firstDifference(a: std.mem.Allocator, what: []const u8, want: []const u8, got
     const start = if (std.mem.lastIndexOfScalar(u8, want[0..at], '\n')) |p| p + 1 else 0;
     const want_end = std.mem.indexOfScalarPos(u8, want, at, '\n') orelse want.len;
     const got_end = std.mem.indexOfScalarPos(u8, got, at, '\n') orelse got.len;
-    var out = std.ArrayList(u8).init(a);
-    try out.writer().print("{s} differs from the golden at byte {d} (line {d}; golden {d} bytes, subject {d} bytes)\n  golden:  ", .{ what, at, line_no, want.len, got.len });
-    try format.quote(&out, want[start..want_end]);
-    try out.appendSlice("\n  subject: ");
-    try format.quote(&out, got[start..got_end]);
-    return out.toOwnedSlice();
+    var out = std.ArrayList(u8).empty;
+    try out.writer(a).print("{s} differs from the golden at byte {d} (line {d}; golden {d} bytes, subject {d} bytes)\n  golden:  ", .{ what, at, line_no, want.len, got.len });
+    try format.quote(a, &out, want[start..want_end]);
+    try out.appendSlice(a, "\n  subject: ");
+    try format.quote(a, &out, got[start..got_end]);
+    return out.toOwnedSlice(a);
 }
 
 /// The failures of the calls: an unrecorded call, a call made more often
@@ -156,7 +156,7 @@ pub fn checkCalls(a: std.mem.Allocator, entries: []const format.Entry, calls: []
     @memset(used, false);
     for (calls) |c| {
         if (!c.recorded) {
-            try failures.append(try std.fmt.allocPrint(a, "unrecorded call: {s}", .{try format.quoteArgv(a, c.argv)}));
+            try failures.append(a, try std.fmt.allocPrint(a, "unrecorded call: {s}", .{try format.quoteArgv(a, c.argv)}));
             continue;
         }
         var hit = false;
@@ -166,42 +166,42 @@ pub fn checkCalls(a: std.mem.Allocator, entries: []const format.Entry, calls: []
             hit = true;
             break;
         }
-        if (!hit) try failures.append(try std.fmt.allocPrint(a, "a call made more often than recorded: {s}", .{try format.quoteArgv(a, c.argv)}));
+        if (!hit) try failures.append(a, try std.fmt.allocPrint(a, "a call made more often than recorded: {s}", .{try format.quoteArgv(a, c.argv)}));
     }
     for (entries, 0..) |e, k| {
-        if (!used[k]) try failures.append(try std.fmt.allocPrint(a, "a recorded call the subject never made: {s}", .{try format.quoteArgv(a, e.argv)}));
+        if (!used[k]) try failures.append(a, try std.fmt.allocPrint(a, "a recorded call the subject never made: {s}", .{try format.quoteArgv(a, e.argv)}));
     }
 }
 
 /// Every check of a run, as messages; none: the case passes.
 pub fn check(a: std.mem.Allocator, golden: Golden, entries: []const format.Entry, actual: Actual) ![]const []const u8 {
-    var failures = std.ArrayList([]const u8).init(a);
+    var failures = std.ArrayList([]const u8).empty;
     switch (actual.term) {
-        .exited => |v| if (v != golden.exit) try failures.append(try std.fmt.allocPrint(a, "exit {d}, golden {d}", .{ v, golden.exit })),
-        .signaled => |s| try failures.append(try std.fmt.allocPrint(a, "killed by signal {d}, golden exit {d}", .{ s, golden.exit })),
-        .other => try failures.append("the subject ended neither by exit nor by signal"),
+        .exited => |v| if (v != golden.exit) try failures.append(a, try std.fmt.allocPrint(a, "exit {d}, golden {d}", .{ v, golden.exit })),
+        .signaled => |s| try failures.append(a, try std.fmt.allocPrint(a, "killed by signal {d}, golden exit {d}", .{ s, golden.exit })),
+        .other => try failures.append(a, "the subject ended neither by exit nor by signal"),
     }
     const out = try applyAlts(a, try normalize(a, actual.stdout), golden.alts, .stdout);
-    if (!std.mem.eql(u8, out, golden.stdout)) try failures.append(try firstDifference(a, "stdout", golden.stdout, out));
+    if (!std.mem.eql(u8, out, golden.stdout)) try failures.append(a, try firstDifference(a, "stdout", golden.stdout, out));
     const err = try applyAlts(a, try normalize(a, actual.stderr), golden.alts, .stderr);
-    if (!std.mem.eql(u8, err, golden.stderr)) try failures.append(try firstDifference(a, "stderr", golden.stderr, err));
+    if (!std.mem.eql(u8, err, golden.stderr)) try failures.append(a, try firstDifference(a, "stderr", golden.stderr, err));
     try checkCalls(a, entries, actual.calls, &failures);
-    return failures.toOwnedSlice();
+    return failures.toOwnedSlice(a);
 }
 
 /// The paths of the BUCK files the transcript's `git ls-files` answer
 /// lists (its non-empty lines, a trailing CR dropped, as affected reads them).
 pub fn listedBuckFiles(a: std.mem.Allocator, entries: []const format.Entry) ![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(a);
+    var out = std.ArrayList([]const u8).empty;
     for (entries) |e| {
         if (e.argv.len < 2 or !std.mem.eql(u8, e.argv[0], "git") or !std.mem.eql(u8, e.argv[1], "ls-files")) continue;
         var it = std.mem.splitScalar(u8, e.stdout, '\n');
         while (it.next()) |raw| {
             const line = if (std.mem.endsWith(u8, raw, "\r")) raw[0 .. raw.len - 1] else raw;
-            if (line.len > 0 and format.safeRelative(line)) try out.append(line);
+            if (line.len > 0 and format.safeRelative(line)) try out.append(a, line);
         }
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// `arg` with each `{name}` of a declared input replaced by its path.
@@ -218,13 +218,13 @@ pub fn bindArg(a: std.mem.Allocator, arg: []const u8, inputs: []const format.Inp
 // ---- the run -------------------------------------------------------------
 
 fn die(comptime fmt: []const u8, args: anytype) noreturn {
-    std.io.getStdErr().writer().print("parity: " ++ fmt ++ "\n", args) catch {};
+    std.fs.File.stderr().deprecatedWriter().print("parity: " ++ fmt ++ "\n", args) catch {};
     std.process.exit(1);
 }
 
 fn writeAt(root: std.fs.Dir, path: []const u8, bytes: []const u8) void {
     if (std.fs.path.dirname(path)) |d| root.makePath(d) catch |e| die("cannot make {s}: {s}", .{ d, @errorName(e) });
-    root.writeFile(path, bytes) catch |e| die("cannot write {s}: {s}", .{ path, @errorName(e) });
+    root.writeFile(.{ .sub_path = path, .data = bytes }) catch |e| die("cannot write {s}: {s}", .{ path, @errorName(e) });
 }
 
 fn placeReplay(root: std.fs.Dir, replay: []const u8, path: []const u8) void {
@@ -299,14 +299,14 @@ pub fn main() !void {
     writeAt(root, ".parity/calls", "");
 
     // The run.
-    var cmd = std.ArrayList([]const u8).init(a);
-    try cmd.append(try std.fs.cwd().realpathAlloc(a, subject));
-    for (case.args) |arg| try cmd.append(try bindArg(a, arg, case.inputs));
+    var cmd = std.ArrayList([]const u8).empty;
+    try cmd.append(a, try std.fs.cwd().realpathAlloc(a, subject));
+    for (case.args) |arg| try cmd.append(a, try bindArg(a, arg, case.inputs));
     var env = std.process.EnvMap.init(a);
     try env.put("PATH", try std.fs.path.join(a, &.{ root_path, ".parity", "bin" }));
     try env.put("TMPDIR", try std.fs.path.join(a, &.{ root_path, "tmp" }));
     try env.put("HOME", try std.fs.path.join(a, &.{ root_path, "home" }));
-    const r = std.ChildProcess.run(.{ .allocator = a, .argv = cmd.items, .cwd = root_path, .env_map = &env, .max_output_bytes = 1 << 28 }) catch |e|
+    const r = std.process.Child.run(.{ .allocator = a, .argv = cmd.items, .cwd = root_path, .env_map = &env, .max_output_bytes = 1 << 28 }) catch |e|
         die("cannot run the subject {s}: {s}", .{ subject, @errorName(e) });
     const term: Term = switch (r.term) {
         .Exited => |v| .{ .exited = v },
@@ -317,29 +317,29 @@ pub fn main() !void {
     const calls = format.parseLog(a, log_text, &diag) catch die("the call log, line {d}: {s}", .{ diag.line, diag.msg });
     const failures = try check(a, golden, entries, .{ .term = term, .stdout = r.stdout, .stderr = r.stderr, .calls = calls });
 
-    var report = std.ArrayList(u8).init(a);
-    for (failures) |f| try report.writer().print("FAILED: {s}\n", .{f});
+    var report = std.ArrayList(u8).empty;
+    for (failures) |f| try report.writer(a).print("FAILED: {s}\n", .{f});
     if (recording) {
         try std.fs.cwd().makePath(record);
         var d = try std.fs.cwd().openDir(record, .{});
         defer d.close();
-        try d.writeFile("stdout", try normalize(a, r.stdout));
-        try d.writeFile("stderr", try normalize(a, r.stderr));
-        try d.writeFile("exit", switch (term) {
+        try d.writeFile(.{ .sub_path = "stdout", .data = try normalize(a, r.stdout) });
+        try d.writeFile(.{ .sub_path = "stderr", .data = try normalize(a, r.stderr) });
+        try d.writeFile(.{ .sub_path = "exit", .data = switch (term) {
             .exited => |v| try std.fmt.allocPrint(a, "exit {d}\n", .{v}),
             .signaled => |s| try std.fmt.allocPrint(a, "signal {d}\n", .{s}),
             .other => "other\n",
-        });
-        try d.writeFile("calls", log_text);
-        try d.writeFile("failures", report.items);
+        } });
+        try d.writeFile(.{ .sub_path = "calls", .data = log_text });
+        try d.writeFile(.{ .sub_path = "failures", .data = report.items });
         std.fs.deleteTreeAbsolute(root_path) catch {};
         return;
     }
     if (failures.len > 0) {
-        const stderr = std.io.getStdErr().writer();
+        const stderr = std.fs.File.stderr().deprecatedWriter();
         try stderr.print("parity case {s}: {d} check(s) failed\n{s}---- subject stderr (raw)\n{s}----\n", .{ name, failures.len, report.items, r.stderr });
         std.process.exit(1);
     }
     std.fs.deleteTreeAbsolute(root_path) catch {};
-    try std.fs.cwd().writeFile(out, "passed\n");
+    try std.fs.cwd().writeFile(.{ .sub_path = out, .data = "passed\n" });
 }

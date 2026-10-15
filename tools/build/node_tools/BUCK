@@ -6,6 +6,11 @@
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+
 _SRCS = [
     "layout.zig",
     "main.zig",
@@ -24,7 +29,7 @@ _SUPPORT = ["tartest.zig"]
         src = name + "_test.zig",
         imports = _SRCS + _SUPPORT,
         busybox = "komira//tools/build/toolchains:busybox",
-        zig = "komira//tools/build/toolchains:zig",
+        zig = _ZIG,
     )
     for name in [
         "layout",
@@ -46,8 +51,9 @@ zig_exe(
         ":runner_unit",
         ":sri_unit",
         ":unpack_unit",
+        _ZIG_VERSION,
     ],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
     visibility = ["PUBLIC"],
 )

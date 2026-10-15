@@ -32,7 +32,7 @@ pub const Word = struct {
 
 /// The words of one line.
 pub fn parseLine(a: std.mem.Allocator, line: []const u8, line_no: usize, diag: *Diag) Error![]Word {
-    var out = std.ArrayList(Word).init(a);
+    var out = std.ArrayList(Word).empty;
     var i: usize = 0;
     while (true) {
         while (i < line.len and line[i] == ' ') i += 1;
@@ -40,11 +40,11 @@ pub fn parseLine(a: std.mem.Allocator, line: []const u8, line_no: usize, diag: *
         if (line[i] != '"') {
             const start = i;
             while (i < line.len and line[i] != ' ') i += 1;
-            try out.append(.{ .quoted = false, .bytes = line[start..i] });
+            try out.append(a, .{ .quoted = false, .bytes = line[start..i] });
             continue;
         }
         i += 1;
-        var w = std.ArrayList(u8).init(a);
+        var w = std.ArrayList(u8).empty;
         var closed = false;
         while (i < line.len) {
             const c = line[i];
@@ -54,7 +54,7 @@ pub fn parseLine(a: std.mem.Allocator, line: []const u8, line_no: usize, diag: *
                 break;
             }
             if (c != '\\') {
-                try w.append(c);
+                try w.append(a, c);
                 i += 1;
                 continue;
             }
@@ -62,16 +62,16 @@ pub fn parseLine(a: std.mem.Allocator, line: []const u8, line_no: usize, diag: *
             const e = line[i + 1];
             i += 2;
             switch (e) {
-                '\\' => try w.append('\\'),
-                '"' => try w.append('"'),
-                'n' => try w.append('\n'),
-                'r' => try w.append('\r'),
-                't' => try w.append('\t'),
-                '0' => try w.append(0),
+                '\\' => try w.append(a, '\\'),
+                '"' => try w.append(a, '"'),
+                'n' => try w.append(a, '\n'),
+                'r' => try w.append(a, '\r'),
+                't' => try w.append(a, '\t'),
+                '0' => try w.append(a, 0),
                 'x' => {
                     if (i + 2 > line.len) return fail(diag, line_no, "\\x needs two hex digits");
                     const v = std.fmt.parseInt(u8, line[i .. i + 2], 16) catch return fail(diag, line_no, "\\x needs two hex digits");
-                    try w.append(v);
+                    try w.append(a, v);
                     i += 2;
                 },
                 else => return fail(diag, line_no, "unknown escape in a quoted word"),
@@ -79,51 +79,51 @@ pub fn parseLine(a: std.mem.Allocator, line: []const u8, line_no: usize, diag: *
         }
         if (!closed) return fail(diag, line_no, "a quoted word is not closed");
         if (i < line.len and line[i] != ' ') return fail(diag, line_no, "a quoted word runs into the next one");
-        try out.append(.{ .quoted = true, .bytes = try w.toOwnedSlice() });
+        try out.append(a, .{ .quoted = true, .bytes = try w.toOwnedSlice(a) });
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// Appends `bytes` as one quoted word. A valid UTF-8 sequence of more than
 /// one byte is kept as it is, so non-ASCII text stays readable; every other
 /// byte outside printable ASCII is escaped.
-pub fn quote(out: *std.ArrayList(u8), bytes: []const u8) !void {
-    try out.append('"');
+pub fn quote(a: std.mem.Allocator, out: *std.ArrayList(u8), bytes: []const u8) !void {
+    try out.append(a, '"');
     var i: usize = 0;
     while (i < bytes.len) {
         const c = bytes[i];
         if (c >= 0x80) {
             const n = std.unicode.utf8ByteSequenceLength(c) catch 0;
             if (n > 1 and i + n <= bytes.len and std.unicode.utf8ValidateSlice(bytes[i .. i + n])) {
-                try out.appendSlice(bytes[i .. i + n]);
+                try out.appendSlice(a, bytes[i .. i + n]);
                 i += n;
                 continue;
             }
-            try out.writer().print("\\x{x:0>2}", .{c});
+            try out.writer(a).print("\\x{x:0>2}", .{c});
             i += 1;
             continue;
         }
         switch (c) {
-            '\\' => try out.appendSlice("\\\\"),
-            '"' => try out.appendSlice("\\\""),
-            '\n' => try out.appendSlice("\\n"),
-            '\r' => try out.appendSlice("\\r"),
-            '\t' => try out.appendSlice("\\t"),
-            else => if (c < 0x20 or c == 0x7f) try out.writer().print("\\x{x:0>2}", .{c}) else try out.append(c),
+            '\\' => try out.appendSlice(a, "\\\\"),
+            '"' => try out.appendSlice(a, "\\\""),
+            '\n' => try out.appendSlice(a, "\\n"),
+            '\r' => try out.appendSlice(a, "\\r"),
+            '\t' => try out.appendSlice(a, "\\t"),
+            else => if (c < 0x20 or c == 0x7f) try out.writer(a).print("\\x{x:0>2}", .{c}) else try out.append(a, c),
         }
         i += 1;
     }
-    try out.append('"');
+    try out.append(a, '"');
 }
 
 /// `argv` as quoted words separated by spaces (for messages and the log).
 pub fn quoteArgv(a: std.mem.Allocator, argv: []const []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     for (argv, 0..) |w, k| {
-        if (k > 0) try out.append(' ');
-        try quote(&out, w);
+        if (k > 0) try out.append(a, ' ');
+        try quote(a, &out, w);
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 // ---- bodies --------------------------------------------------------------
@@ -140,19 +140,19 @@ pub const Files = struct {
 /// `*<n>` then a quoted word (that word n times), `@<file>` (a file of the
 /// case) or `%<file>` (a file of the shared directory). No word: empty.
 pub fn body(a: std.mem.Allocator, words: []const Word, files: Files, line_no: usize, diag: *Diag) Error![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var k: usize = 0;
     while (k < words.len) : (k += 1) {
         const w = words[k];
         if (w.quoted) {
-            try out.appendSlice(w.bytes);
+            try out.appendSlice(a, w.bytes);
             continue;
         }
         if (w.bytes.len > 1 and w.bytes[0] == '*') {
             const n = std.fmt.parseInt(usize, w.bytes[1..], 10) catch return fail(diag, line_no, "`*<n>` needs a count");
             if (k + 1 >= words.len or !words[k + 1].quoted) return fail(diag, line_no, "`*<n>` needs a quoted word after it");
             k += 1;
-            for (0..n) |_| try out.appendSlice(words[k].bytes);
+            for (0..n) |_| try out.appendSlice(a, words[k].bytes);
             continue;
         }
         if (w.bytes.len > 1 and (w.bytes[0] == '@' or w.bytes[0] == '%')) {
@@ -161,12 +161,12 @@ pub fn body(a: std.mem.Allocator, words: []const Word, files: Files, line_no: us
             if (!safeRelative(w.bytes[1..])) return fail(diag, line_no, "a file word must be a relative path inside its directory");
             const path = try std.fs.path.join(a, &.{ dir, w.bytes[1..] });
             const bytes = std.fs.cwd().readFileAlloc(a, path, 1 << 28) catch return fail(diag, line_no, "a file word names a file that cannot be read");
-            try out.appendSlice(bytes);
+            try out.appendSlice(a, bytes);
             continue;
         }
         return fail(diag, line_no, "a body word is a quoted word, `*<n>`, `@<file>` or `%<file>`");
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// A relative path with no empty, `.` or `..` component.
@@ -216,10 +216,10 @@ pub const Case = struct {
 ///   alt stdout|stderr "<golden>" "<other>"
 ///                               an allowed divergence (runner.zig: `applyAlts`)
 pub fn parseCase(a: std.mem.Allocator, text: []const u8, files: Files, diag: *Diag) Error!Case {
-    var args = std.ArrayList([]const u8).init(a);
-    var tree = std.ArrayList(File).init(a);
-    var inputs = std.ArrayList(Input).init(a);
-    var alts = std.ArrayList(Alt).init(a);
+    var args = std.ArrayList([]const u8).empty;
+    var tree = std.ArrayList(File).empty;
+    var inputs = std.ArrayList(Input).empty;
+    var alts = std.ArrayList(Alt).empty;
     var exit: ?u8 = null;
     var it = std.mem.splitScalar(u8, text, '\n');
     var n: usize = 0;
@@ -232,17 +232,17 @@ pub fn parseCase(a: std.mem.Allocator, text: []const u8, files: Files, diag: *Di
         const d = w[0].bytes;
         if (std.mem.eql(u8, d, "arg")) {
             if (w.len != 2 or !w[1].quoted) return fail(diag, n, "`arg` takes one quoted word");
-            try args.append(w[1].bytes);
+            try args.append(a, w[1].bytes);
         } else if (std.mem.eql(u8, d, "input")) {
             if (w.len < 2 or w[1].quoted or w[1].bytes.len == 0) return fail(diag, n, "`input` takes a bare name, then a body");
             for (inputs.items) |x| if (std.mem.eql(u8, x.name, w[1].bytes)) return fail(diag, n, "an input is declared twice");
-            try inputs.append(.{ .name = w[1].bytes, .bytes = try body(a, w[2..], files, n, diag) });
+            try inputs.append(a, .{ .name = w[1].bytes, .bytes = try body(a, w[2..], files, n, diag) });
         } else if (std.mem.eql(u8, d, "file")) {
             if (w.len < 2 or !w[1].quoted) return fail(diag, n, "`file` takes a quoted path, then a body");
             if (!safeRelative(w[1].bytes) or std.mem.startsWith(u8, w[1].bytes, ".parity/") or std.mem.eql(u8, w[1].bytes, "buck2"))
                 return fail(diag, n, "a file's path is relative, inside the tree, and not the replay's");
             for (tree.items) |x| if (std.mem.eql(u8, x.path, w[1].bytes)) return fail(diag, n, "a file is declared twice");
-            try tree.append(.{ .path = w[1].bytes, .bytes = try body(a, w[2..], files, n, diag) });
+            try tree.append(a, .{ .path = w[1].bytes, .bytes = try body(a, w[2..], files, n, diag) });
         } else if (std.mem.eql(u8, d, "exit")) {
             if (exit != null) return fail(diag, n, "`exit` is given twice");
             exit = try number(u8, w, n, diag);
@@ -250,15 +250,15 @@ pub fn parseCase(a: std.mem.Allocator, text: []const u8, files: Files, diag: *Di
             if (w.len != 4 or w[1].quoted or !w[2].quoted or !w[3].quoted) return fail(diag, n, "`alt` takes stdout|stderr and two quoted words");
             const s: Stream = if (std.mem.eql(u8, w[1].bytes, "stdout")) .stdout else if (std.mem.eql(u8, w[1].bytes, "stderr")) .stderr else return fail(diag, n, "`alt` names stdout or stderr");
             if (w[3].bytes.len == 0) return fail(diag, n, "an `alt`'s other text is not empty");
-            try alts.append(.{ .stream = s, .golden = w[2].bytes, .other = w[3].bytes });
+            try alts.append(a, .{ .stream = s, .golden = w[2].bytes, .other = w[3].bytes });
         } else return fail(diag, n, "unknown directive");
     }
     return .{
-        .args = try args.toOwnedSlice(),
-        .files = try tree.toOwnedSlice(),
-        .inputs = try inputs.toOwnedSlice(),
+        .args = try args.toOwnedSlice(a),
+        .files = try tree.toOwnedSlice(a),
+        .inputs = try inputs.toOwnedSlice(a),
         .exit = exit orelse return fail(diag, 0, "case.txt gives no `exit`"),
-        .alts = try alts.toOwnedSlice(),
+        .alts = try alts.toOwnedSlice(a),
     };
 }
 
@@ -282,11 +282,11 @@ pub const Entry = struct {
 ///   stdout <body>               what it prints (lines concatenate)
 ///   stderr <body>
 pub fn parseTranscript(a: std.mem.Allocator, text: []const u8, files: Files, diag: *Diag) Error![]Entry {
-    var out = std.ArrayList(Entry).init(a);
+    var out = std.ArrayList(Entry).empty;
     var argv: ?[]const []const u8 = null;
     var end: ?End = null;
-    var so = std.ArrayList(u8).init(a);
-    var se = std.ArrayList(u8).init(a);
+    var so = std.ArrayList(u8).empty;
+    var se = std.ArrayList(u8).empty;
     var it = std.mem.splitScalar(u8, text, '\n');
     var n: usize = 0;
     var opened_at: usize = 0;
@@ -298,22 +298,22 @@ pub fn parseTranscript(a: std.mem.Allocator, text: []const u8, files: Files, dia
         const opens = w.len > 0 and !w[0].quoted and std.mem.eql(u8, w[0].bytes, "call");
         if (next == null or opens) {
             if (argv) |v| {
-                try out.append(.{
+                try out.append(a, .{
                     .argv = v,
                     .end = end orelse return fail(diag, opened_at, "a call has no `exit` or `signal`"),
-                    .stdout = try so.toOwnedSlice(),
-                    .stderr = try se.toOwnedSlice(),
+                    .stdout = try so.toOwnedSlice(a),
+                    .stderr = try se.toOwnedSlice(a),
                 });
             }
             if (next == null) break;
             if (w.len < 2) return fail(diag, n, "`call` names the program");
             if (w[1].bytes.len == 0 or std.mem.indexOfScalar(u8, w[1].bytes, '/') != null) return fail(diag, n, "a call's program is a basename");
-            var v = std.ArrayList([]const u8).init(a);
+            var v = std.ArrayList([]const u8).empty;
             for (w[1..], 0..) |x, k| {
                 if (k > 0 and !x.quoted) return fail(diag, n, "a call's arguments are quoted words");
-                try v.append(x.bytes);
+                try v.append(a, x.bytes);
             }
-            argv = try v.toOwnedSlice();
+            argv = try v.toOwnedSlice(a);
             end = null;
             opened_at = n;
             continue;
@@ -327,32 +327,32 @@ pub fn parseTranscript(a: std.mem.Allocator, text: []const u8, files: Files, dia
             const v = try number(u8, w, n, diag);
             end = if (d[0] == 'e') .{ .exit = v } else .{ .signal = v };
         } else if (std.mem.eql(u8, d, "stdout")) {
-            try so.appendSlice(try body(a, w[1..], files, n, diag));
+            try so.appendSlice(a, try body(a, w[1..], files, n, diag));
         } else if (std.mem.eql(u8, d, "stderr")) {
-            try se.appendSlice(try body(a, w[1..], files, n, diag));
+            try se.appendSlice(a, try body(a, w[1..], files, n, diag));
         } else return fail(diag, n, "unknown directive");
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// The transcript as `parseTranscript` reads it back with no file words:
 /// what the runner hands the replay.
 pub fn renderTranscript(a: std.mem.Allocator, entries: []const Entry) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     for (entries) |e| {
-        try out.appendSlice("call ");
-        try out.appendSlice(try quoteArgv(a, e.argv));
+        try out.appendSlice(a, "call ");
+        try out.appendSlice(a, try quoteArgv(a, e.argv));
         switch (e.end) {
-            .exit => |v| try out.writer().print("\nexit {d}\n", .{v}),
-            .signal => |v| try out.writer().print("\nsignal {d}\n", .{v}),
+            .exit => |v| try out.writer(a).print("\nexit {d}\n", .{v}),
+            .signal => |v| try out.writer(a).print("\nsignal {d}\n", .{v}),
         }
-        try out.appendSlice("stdout ");
-        try quote(&out, e.stdout);
-        try out.appendSlice("\nstderr ");
-        try quote(&out, e.stderr);
-        try out.append('\n');
+        try out.appendSlice(a, "stdout ");
+        try quote(a, &out, e.stdout);
+        try out.appendSlice(a, "\nstderr ");
+        try quote(a, &out, e.stderr);
+        try out.append(a, '\n');
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// Whether two argvs are the same call: the same program basename and the
@@ -385,15 +385,15 @@ pub const Call = struct { recorded: bool, argv: []const []const u8 };
 
 /// The log line of a call: `call` or `unrecorded`, then the argv quoted.
 pub fn logLine(a: std.mem.Allocator, recorded: bool, argv: []const []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
-    try out.appendSlice(if (recorded) "call " else "unrecorded ");
-    try out.appendSlice(try quoteArgv(a, argv));
-    try out.append('\n');
-    return out.toOwnedSlice();
+    var out = std.ArrayList(u8).empty;
+    try out.appendSlice(a, if (recorded) "call " else "unrecorded ");
+    try out.appendSlice(a, try quoteArgv(a, argv));
+    try out.append(a, '\n');
+    return out.toOwnedSlice(a);
 }
 
 pub fn parseLog(a: std.mem.Allocator, text: []const u8, diag: *Diag) Error![]Call {
-    var out = std.ArrayList(Call).init(a);
+    var out = std.ArrayList(Call).empty;
     var it = std.mem.splitScalar(u8, text, '\n');
     var n: usize = 0;
     while (it.next()) |line| {
@@ -403,11 +403,11 @@ pub fn parseLog(a: std.mem.Allocator, text: []const u8, diag: *Diag) Error![]Cal
         if (w.len < 2 or w[0].quoted) return fail(diag, n, "a log line is `call` or `unrecorded`, then the argv");
         const recorded = std.mem.eql(u8, w[0].bytes, "call");
         if (!recorded and !std.mem.eql(u8, w[0].bytes, "unrecorded")) return fail(diag, n, "a log line is `call` or `unrecorded`, then the argv");
-        var v = std.ArrayList([]const u8).init(a);
-        for (w[1..]) |x| try v.append(x.bytes);
-        try out.append(.{ .recorded = recorded, .argv = try v.toOwnedSlice() });
+        var v = std.ArrayList([]const u8).empty;
+        for (w[1..]) |x| try v.append(a, x.bytes);
+        try out.append(a, .{ .recorded = recorded, .argv = try v.toOwnedSlice(a) });
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// How many calls of `log` are recorded calls with the same argv as `argv`.

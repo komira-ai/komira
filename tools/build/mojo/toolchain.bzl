@@ -229,33 +229,8 @@ zig_exe_rule = rule(
     },
 )
 
-# Variables a driver test's action sets itself.
-_ZIG_TEST_OWN_ENV = ["XDG_CACHE_HOME", "ZIG_GLOBAL_CACHE_DIR", "ZIG_LOCAL_CACHE_DIR", "KOMIRA_TEST_WORK", "KOMIRA_ZT_DATA", "KOMIRA_ZT_TOOLS"]
-
-# What a zig_test with `exec_tools` or `data` does before `zig test`: XDG_CACHE_HOME
-# in the scratch, KOMIRA_TEST_WORK a writable directory holding a copy of
-# `data` (executable bits kept), each `exec_tools` variable the absolute path
-# of its tool. (A manifest ends without a newline: the last line is read
-# while it holds something.)
-_ZIG_TEST_DRIVER = """R="$PWD"; TAB=$(printf '\\t')
-XDG_CACHE_HOME="$T/cache"; KOMIRA_TEST_WORK="$T/work"
-export XDG_CACHE_HOME KOMIRA_TEST_WORK
-mkdir -p "$XDG_CACHE_HOME" "$KOMIRA_TEST_WORK"
-while IFS="$TAB" read -r dest src || [ -n "$dest" ]; do
-    if [ -d "$src" ]; then
-        mkdir -p "$KOMIRA_TEST_WORK/$dest"
-        cp -R "$src/." "$KOMIRA_TEST_WORK/$dest/"
-    else
-        mkdir -p "$KOMIRA_TEST_WORK/$(dirname "$dest")"
-        cp "$src" "$KOMIRA_TEST_WORK/$dest"
-    fi
-done < "$KOMIRA_ZT_DATA"
-chmod -R u+w "$KOMIRA_TEST_WORK"
-while IFS="$TAB" read -r name path || [ -n "$name" ]; do
-    export "$name=$R/$path"
-done < "$KOMIRA_ZT_TOOLS"
-unset KOMIRA_ZT_DATA KOMIRA_ZT_TOOLS
-"""
+# Variables a driver test's action sets itself (tools/mojo/tools/zig_launch.zig).
+_ZIG_TEST_OWN_ENV = ["XDG_CACHE_HOME", "ZIG_GLOBAL_CACHE_DIR", "ZIG_LOCAL_CACHE_DIR", "KOMIRA_TEST_WORK"]
 
 def _zig_test_impl(ctx):
     bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
@@ -267,23 +242,25 @@ def _zig_test_impl(ctx):
     # `passed`, as it always did.
     validation = bool(ctx.attrs.env_tools or ctx.attrs.exec_tools)
     out = ctx.actions.declare_output(ctx.label.name + (".json" if validation else ".passed"))
-    passed = """printf '{"version": 1, "data": {"status": "success", "message": "zig test passed"}}\\n' > "$3"\n""" if validation else "echo passed > \"$3\"\n"
-    # The tests run with the busybox applets as their PATH and a TMPDIR of
-    # their own, inside the action's scratch directory.
-    script = _PRELUDE + """
-ZIG_GLOBAL_CACHE_DIR="$T/zig-global"; ZIG_LOCAL_CACHE_DIR="$T/zig-local"; HOME="$T/home"; TMPDIR="$T/tmp"
-export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME TMPDIR
-mkdir -p "$TMPDIR"
-__DRIVER__"$1/zig" test -target TARGET "$2"
-""" + passed + """rm -rf "$T"
-"""
-    # The target and the optimization mode are written into the script; with
-    # the defaults (`x86_64-linux-musl`, `Debug`: no flag, zig's own default)
-    # the command, and the action key, are what they were before the
-    # attributes existed.
+    stamp = '{"version": 1, "data": {"status": "success", "message": "zig test passed"}}\n' if validation else "passed\n"
     if not regex_match("^[a-z0-9_.-]+$", ctx.attrs.target):
         fail("{}: target {} is not a zig target triple".format(ctx.label, repr(ctx.attrs.target)))
-    script = script.replace("test -target TARGET ", "test {}-target {} ".format("" if _zig_optimize(ctx) == "Debug" else "-O" + ctx.attrs.optimize + " ", ctx.attrs.target))
+    # The launcher (tools/zig_launch.zig; no shell) gives the tests the busybox
+    # applets as their PATH and a HOME, TMPDIR and caches of their own inside
+    # the action's scratch directory, runs `zig test`, and writes the stamp
+    # when it passed. `-O<mode>` is left out for `Debug`, zig's own default.
+    cmd = cmd_args(
+        ctx.attrs._launcher[RunInfo],
+        "test",
+        "--busybox",
+        bb,
+        "--zig",
+        zig,
+        "--out",
+        out.as_output(),
+        "--stamp",
+        stamp,
+    )
     # The pinned tools a test runs, as environment variables naming their
     # paths.
     env = {name: dep[DefaultInfo].default_outputs[0] for name, dep in ctx.attrs.env_tools.items()}
@@ -291,8 +268,8 @@ __DRIVER__"$1/zig" test -target TARGET "$2"
     hidden = list(ctx.attrs.imports)
     if ctx.attrs.exec_tools or ctx.attrs.data:
         # A driver test: built tools by absolute path, fixtures in a writable
-        # directory (KOMIRA_TEST_WORK). Both come from manifests, so a test
-        # without them keeps the command it always had.
+        # directory (KOMIRA_TEST_WORK). Both come from manifests the launcher
+        # reads, so a test without them is not a driver.
         where = str(ctx.label.raw_target())
         for name in ctx.attrs.exec_tools:
             if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", name):
@@ -303,14 +280,14 @@ __DRIVER__"$1/zig" test -target TARGET "$2"
         tools = {name: dep[DefaultInfo].default_outputs[0] for name, dep in ctx.attrs.exec_tools.items()}
         data_manifest, _ = ctx.actions.write(ctx.label.name + ".data", [cmd_args(d, a, delimiter = "\t") for d, a in sorted(srcs.items())], allow_args = True)
         tools_manifest, _ = ctx.actions.write(ctx.label.name + ".tools", [cmd_args(n, t, delimiter = "\t") for n, t in sorted(tools.items())], allow_args = True)
-        env["KOMIRA_ZT_DATA"] = data_manifest
-        env["KOMIRA_ZT_TOOLS"] = tools_manifest
+        cmd.add("--data", data_manifest, "--tools", tools_manifest)
         hidden += srcs.values() + tools.values()
-        script = script.replace("__DRIVER__", _ZIG_TEST_DRIVER)
-    else:
-        script = script.replace("__DRIVER__", "")
+    cmd.add("--", "test")
+    if _zig_optimize(ctx) != "Debug":
+        cmd.add("-O" + ctx.attrs.optimize)
+    cmd.add("-target", ctx.attrs.target, _zig_root(ctx))
     ctx.actions.run(
-        cmd_args(busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output()), hidden = hidden),
+        cmd_args(cmd, hidden = hidden),
         category = "zig_test",
         env = env,
     )
@@ -360,7 +337,50 @@ zig_test_rule = rule(
         # of its cpu).
         "target": attrs.string(default = "x86_64-linux-musl"),
         "zig": attrs.dep(),
+        # The runner of the action (tools/zig_launch.zig), built by the
+        # pinned zig directly: no test needs a shell to run.
+        "_launcher": attrs.exec_dep(default = "komira//tools/build/mojo:zig_launch"),
     } | RERUN_ATTRS,
+)
+
+def _zig_bootstrap_exe_impl(ctx):
+    zig = ctx.attrs.zig[DefaultInfo].default_outputs[0]
+    if not regex_match("^[a-z0-9_.-]+$", ctx.attrs.target):
+        fail("{}: target {} is not a zig target triple".format(ctx.label, repr(ctx.attrs.target)))
+    # No script, no busybox: zig is run as the action's executable. Its caches
+    # are directories of the action's working directory (as zig_cc_launcher's).
+    env = {"ZIG_GLOBAL_CACHE_DIR": ".zig-cache/global", "ZIG_LOCAL_CACHE_DIR": ".zig-cache/local"}
+    zig_exe = cmd_args(zig, "/zig", delimiter = "")
+    inputs = [ctx.attrs.src, ctx.attrs.test_src] + ctx.attrs.imports
+    # `zig test` runs the tests of `test_src` and, given -femit-bin, leaves the
+    # test executable behind: the output exists only if every test passed.
+    tested = ctx.actions.declare_output(ctx.label.name + ".tested")
+    ctx.actions.run(
+        cmd_args(zig_exe, "test", "-target", ctx.attrs.target, ctx.attrs.test_src, cmd_args(tested.as_output(), format = "-femit-bin={}"), hidden = inputs),
+        env = env,
+        category = "zig_bootstrap_test",
+    )
+    out = ctx.actions.declare_output(ctx.label.name)
+    ctx.actions.run(
+        cmd_args(zig_exe, "build-exe", "-OReleaseSafe", "-target", ctx.attrs.target, "-fstrip", ctx.attrs.src, cmd_args(out.as_output(), format = "-femit-bin={}"), hidden = [tested] + inputs),
+        env = env,
+        category = "zig_bootstrap_exe",
+    )
+    return [DefaultInfo(default_output = out), RunInfo(args = cmd_args(out))]
+
+# An executable built by the pinned zig with no shell and no busybox, behind
+# the unit tests in `test_src` (which imports `src`): the launchers of the
+# other rules are built this way, so those rules need no shell either. Built
+# `-OReleaseSafe -fstrip` like `zig_exe`.
+zig_bootstrap_exe_rule = rule(
+    impl = _zig_bootstrap_exe_impl,
+    attrs = {
+        "imports": attrs.list(attrs.source(), default = []),
+        "src": attrs.source(),
+        "target": attrs.string(default = "x86_64-linux-musl"),
+        "test_src": attrs.source(),
+        "zig": attrs.dep(),
+    },
 )
 
 def _zig_test_binary_impl(ctx):
@@ -583,6 +603,7 @@ conda_libs = declares_docs(conda_libs_rule)
 mojo_runtime = declares_docs(mojo_runtime_rule)
 mojo_toolchain = declares_docs(mojo_toolchain_rule)
 zig_dist = declares_docs(zig_dist_rule)
+zig_bootstrap_exe = declares_docs(zig_bootstrap_exe_rule)
 zig_exe = declares_docs(zig_exe_rule)
 zig_test = declares_docs(zig_test_rule)
 zig_test_binary = declares_docs(zig_test_binary_rule)
