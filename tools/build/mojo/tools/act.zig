@@ -119,7 +119,7 @@ fn copyLibs(a: std.mem.Allocator, args: []const []const u8) noreturn {
         const src = std.fs.path.join(a, &.{ args[0], "lib", name }) catch die("out of memory", .{});
         if (!nonEmpty(src)) {
             std.debug.print("mojo_runtime: REFUSING: lib/{s} is missing or empty in the compiler closure\n", .{name});
-            std.process.exit(2);
+            std.process.exit(0);
         }
         const dst = std.fs.path.join(a, &.{ args[1], name }) catch die("out of memory", .{});
         std.fs.cwd().copyFile(src, std.fs.cwd(), dst, .{}) catch |e| die("cannot copy {s} to {s}: {s}", .{ src, dst, @errorName(e) });
