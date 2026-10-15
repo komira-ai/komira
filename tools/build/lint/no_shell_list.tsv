@@ -27,7 +27,6 @@ use	tools/build/coverage/BUCK	sh_script	1	names a shell script (an action script
 use	tools/build/coverage/defs.bzl	sh_argv	1	shell action; to port to Zig (no-shell series)
 use	tools/build/coverage/kcov/defs.bzl	sh_argv	1	shell action; to port to Zig (no-shell series)
 use	tools/build/lint/BUCK	sh_script	4	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/lint/defs.bzl	sh_argv	3	shell action; to port to Zig (no-shell series)
 use	tools/build/lint/readme_api_coverage.bzl	sh_argv	2	shell action; to port to Zig (no-shell series)
 use	tools/build/lint/readme_api_coverage.bzl	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/lint/test_weld.bzl	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
