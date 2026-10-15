@@ -93,7 +93,7 @@ pub fn runGuard(a: std.mem.Allocator, args: []const []const u8) u8 {
         std.debug.print("usage: pkg_act kcov-guard guard <kcov_sha256> <usage_line> <out> <what> [<dest> <path>]...\n", .{});
         return 2;
     }
-    const id = Identity{ .ksum = args[0], .marker = args[1] };
+    const id = Identity{ .ksum = args[1], .marker = args[0] };
     var out = U.Out.init(a);
     argsOk(&out, "guard", id) catch return fail(out.items);
     const what = args[3];
