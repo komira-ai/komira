@@ -221,7 +221,6 @@ static int symtab(const char *path) {
 }
 
 int main(int argc, char **argv) {
-    int unused_on_purpose;
     if (argc == 3 && strcmp(argv[1], "armap") == 0) return armap(argv[2]);
     if (argc == 3 && strcmp(argv[1], "symtab") == 0) return symtab(argv[2]);
     fprintf(stderr, "usage: elfsyms armap <lib.a> | elfsyms symtab <lib.a>\n");
