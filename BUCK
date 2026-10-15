@@ -37,7 +37,10 @@ export_file(
 doc_tree(
     name = "github_tree",
     srcs = glob([".github/**"]),
-    visibility = ["//tools/build/lint:interpreter_budget"],
+    visibility = [
+        "//tools/build/lint:interpreter_budget",
+        "//tools/build/lint:no_shell",
+    ],
 )
 
 shell_lint(
