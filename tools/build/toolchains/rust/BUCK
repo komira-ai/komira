@@ -70,7 +70,7 @@ rust_version_check(
     name = "sysroot",
     exec_compatible_with = LINUX_X86_64,
     checker = ":version_check",
-    expected = "rustc 1.99.0 (b940084d7 2026-09-28)",
+    expected = "rustc 1.98.1 (b940084d7 2026-09-28)",
     sysroot = ":unchecked_sysroot",
     visibility = ["PUBLIC"],
 )
