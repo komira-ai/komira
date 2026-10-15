@@ -255,8 +255,7 @@ pub fn main() !void {
     var out_buf = std.ArrayList(u8).init(a);
     var err_buf = std.ArrayList(u8).init(a);
     try child.collectOutput(&out_buf, &err_buf, 1 << 28);
-    const rc0 = exitCodeOf(try child.wait());
-    const rc: u8 = if (rc0 == 3) 0 else rc0;
+    const rc = exitCodeOf(try child.wait());
     // (stdout then stderr: the script sent both to one file; covcheck writes
     // its message to one of them.)
     var both = std.ArrayList(u8).init(a);
