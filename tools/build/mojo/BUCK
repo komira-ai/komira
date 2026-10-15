@@ -190,7 +190,7 @@ zig_test(
 zig_module(
     name = "unified_diff",
     src = "tools/unified_diff.zig",
-    visibility = ["//tools/build/lint:", "//tools/build/toolchains/kcov:"],
+    visibility = ["//tools/build/lint:", "//tools/build/toolchains/kcov:", "tests//tools:"],
 )
 
 zig_exe(

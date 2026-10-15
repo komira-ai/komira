@@ -142,3 +142,40 @@ test "gzipStored: more than one stored block" {
     var edec = std.compress.gzip.decompressor(efbs.reader());
     try t.expectEqual(@as(usize, 0), (try edec.reader().readAllAlloc(a, 100)).len);
 }
+
+const proto_checks = @import("proto_checks.zig");
+
+test "restBlock: the begin and end marker lines and everything between, nothing around" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const src = "head\n" ++ proto_checks.rest_begin ++ "\nfn url():\n    pass\n" ++ proto_checks.rest_end ++ "\ntail\n";
+    try t.expectEqualStrings(proto_checks.rest_begin ++ "\nfn url():\n    pass\n" ++ proto_checks.rest_end ++ "\n", try proto_checks.restBlock(a, src));
+    try t.expectEqualStrings("", try proto_checks.restBlock(a, "no markers\n"));
+}
+
+test "treeDiff: null when the trees are the same; names a changed, a missing and an extra file" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try tmp.dir.makePath("g/sub");
+    try tmp.dir.makePath("o/sub");
+    try tmp.dir.writeFile("g/same.mojo", "x\n");
+    try tmp.dir.writeFile("o/same.mojo", "x\n");
+    var g = try tmp.dir.openDir("g", .{ .iterate = true });
+    defer g.close();
+    var o = try tmp.dir.openDir("o", .{ .iterate = true });
+    defer o.close();
+    try t.expect((try proto_checks.treeDiff(a, g, "g", o, "o")) == null);
+    try tmp.dir.writeFile("g/changed.mojo", "one\ntwo\n");
+    try tmp.dir.writeFile("o/changed.mojo", "one\n2\n");
+    try tmp.dir.writeFile("g/sub/gone.mojo", "g");
+    try tmp.dir.writeFile("o/extra.mojo", "e");
+    const d = (try proto_checks.treeDiff(a, g, "g", o, "o")).?;
+    try t.expect(std.mem.indexOf(u8, d, "diff -r -u g/changed.mojo o/changed.mojo\n") != null);
+    try t.expect(std.mem.indexOf(u8, d, "-two\n+2\n") != null);
+    try t.expect(std.mem.indexOf(u8, d, "Only in g: sub/gone.mojo\n") != null);
+    try t.expect(std.mem.indexOf(u8, d, "Only in o: extra.mojo\n") != null);
+}

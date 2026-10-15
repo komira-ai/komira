@@ -10,6 +10,9 @@
 //!        tests_act delete-member <source dir> <dest dir> <member>
 //!        tests_act re-probe <toolchain dir> <report>
 //!        tests_act loader-trace <wrapper> <launcher> <toolchain> <zig> <cc target> <cpu> <source> <exe> <report>
+//!        tests_act proto-gen <protoc dir> <plugin> <corpus> <out dir> <options> <n roots> <root>... <import path>...
+//!        tests_act proto-check <gen> <golden dir or ""> <expected error or ""> <mark> <n absent> <absent>... <present>...
+//!        tests_act rest-extract <generated file> <out>
 //!        tests_act stand-in-archive <busybox> <out.tar.gz> <top> (file:<path>|program:<path>)...
 //!
 //! Each exits 0 when its check holds, 1 when it does not (saying what, on stderr),
@@ -28,12 +31,15 @@
 //! re-probe: a report of what the worker provides (probes.zig).
 //! loader-trace: one compile and one run, with the loader's record of what each
 //! mapped and initialized; exits 1 unless both succeed (probes.zig).
+//! proto-gen, proto-check, rest-extract: the golden checks of protoc-gen-mojo
+//! (proto_checks.zig).
 //! stand-in-archive: a `.tar.gz` of the named files and programs (archives.zig).
 
 const std = @import("std");
 const A = std.mem.Allocator;
 const probes = @import("probes.zig");
 const archives = @import("archives.zig");
+const proto_checks = @import("proto_checks.zig");
 
 fn fail(comptime fmt: []const u8, args: anytype) noreturn {
     std.debug.print(fmt ++ "\n", args);
@@ -250,6 +256,9 @@ pub fn main() !void {
     if (std.mem.eql(u8, cmd, "re-probe")) return probes.reProbe(a, rest) catch |e| fail("tests_act: re-probe: {s}", .{@errorName(e)});
     if (std.mem.eql(u8, cmd, "loader-trace")) std.process.exit(probes.loaderTrace(a, rest) catch |e| fail("tests_act: loader-trace: {s}", .{@errorName(e)}));
     if (std.mem.eql(u8, cmd, "stand-in-archive")) return archives.standInArchive(a, rest) catch |e| fail("tests_act: stand-in-archive: {s}", .{@errorName(e)});
+    if (std.mem.eql(u8, cmd, "proto-gen")) return proto_checks.protoGen(a, rest) catch |e| fail("tests_act: proto-gen: {s}", .{@errorName(e)});
+    if (std.mem.eql(u8, cmd, "proto-check")) return proto_checks.protoCheck(a, rest) catch |e| fail("tests_act: proto-check: {s}", .{@errorName(e)});
+    if (std.mem.eql(u8, cmd, "rest-extract")) return proto_checks.restExtract(a, rest) catch |e| fail("tests_act: rest-extract: {s}", .{@errorName(e)});
     std.debug.print("tests_act: unknown subcommand {s}\n", .{cmd});
     std.process.exit(2);
 }

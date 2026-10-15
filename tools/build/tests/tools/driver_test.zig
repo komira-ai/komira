@@ -148,3 +148,63 @@ test "delete-member: the copy lacks the member and keeps the rest; the source is
     const none = try w.run(&.{ "delete-member", "src", "dst2", "lib/nosuch" });
     try t.expectEqual(@as(u8, 1), none.code);
 }
+
+fn genDir(w: *Work, name: []const u8, rc: []const u8, stderr: []const u8) void {
+    w.put(std.fmt.allocPrint(w.arena.allocator(), "{s}/rc", .{name}) catch @panic("oom"), rc);
+    w.put(std.fmt.allocPrint(w.arena.allocator(), "{s}/stderr", .{name}) catch @panic("oom"), stderr);
+    std.fs.cwd().makePath(w.p(std.fmt.allocPrint(w.arena.allocator(), "{s}/files", .{name}) catch @panic("oom"))) catch @panic("mkdir");
+}
+
+test "proto-check with golden files: the same tree passes, a changed one fails with the diff" {
+    var w = try Work.init("pcheck");
+    defer w.deinit();
+    genDir(&w, "gen", "0\n", "");
+    w.put("gen/files/a.mojo", "one\ntwo\n");
+    w.put("golden/a.mojo", "one\ntwo\n");
+    const ok = try w.run(&.{ "proto-check", "gen", "golden", "", "mark", "1", "forbidden", "two" });
+    try t.expectEqual(@as(u8, 0), ok.code);
+    w.put("golden/a.mojo", "one\n2\n");
+    const bad = try w.run(&.{ "proto-check", "gen", "golden", "", "mark2", "0", "two" });
+    try t.expectEqual(@as(u8, 1), bad.code);
+    try t.expect(std.mem.indexOf(u8, bad.stderr, "-2\n+two\n") != null or std.mem.indexOf(u8, bad.stderr, "-two\n+2\n") != null or std.mem.indexOf(u8, bad.stderr, "@@") != null);
+    try t.expect(std.mem.indexOf(u8, bad.stderr, "the generated files differ from the golden files (above)") != null);
+    w.put("golden/a.mojo", "one\ntwo\n");
+    const absent = try w.run(&.{ "proto-check", "gen", "golden", "", "mark3", "1", "one" });
+    try t.expectEqual(@as(u8, 1), absent.code);
+    try t.expect(std.mem.indexOf(u8, absent.stderr, "which must be absent") != null);
+}
+
+test "proto-check expecting an error: protoc must fail with the text and write nothing" {
+    var w = try Work.init("pcheck_err");
+    defer w.deinit();
+    genDir(&w, "fail", "1\n", "x.proto: Import \"y\" was not found\n");
+    const ok = try w.run(&.{ "proto-check", "fail", "", "was not found", "m1", "0" });
+    try t.expectEqual(@as(u8, 0), ok.code);
+    const other = try w.run(&.{ "proto-check", "fail", "", "different text", "m2", "0" });
+    try t.expectEqual(@as(u8, 1), other.code);
+    try t.expect(std.mem.indexOf(u8, other.stderr, "protoc-gen-mojo failed, but not with: different text") != null);
+    genDir(&w, "wrote", "1\n", "boom\n");
+    w.put("wrote/files/a.mojo", "partial");
+    const wrote = try w.run(&.{ "proto-check", "wrote", "", "boom", "m3", "0" });
+    try t.expectEqual(@as(u8, 1), wrote.code);
+    try t.expect(std.mem.indexOf(u8, wrote.stderr, "failed but wrote files:\na.mojo") != null);
+    genDir(&w, "okgen", "0\n", "");
+    const succ = try w.run(&.{ "proto-check", "okgen", "", "boom", "m4", "0" });
+    try t.expectEqual(@as(u8, 1), succ.code);
+    try t.expect(std.mem.indexOf(u8, succ.stderr, "was expected to fail with: boom; it succeeded") != null);
+}
+
+test "rest-extract: the block between the markers; a marker missing or doubled is refused" {
+    var w = try Work.init("rest");
+    defer w.deinit();
+    const b = "# ---- REST URL helpers (one copy per REST file) ----";
+    const e = "# ---- end of REST URL helpers ----";
+    w.put("good.mojo", "head\n" ++ b ++ "\nbody\n" ++ e ++ "\ntail\n");
+    const ok = try w.run(&.{ "rest-extract", "good.mojo", "out.mojo" });
+    try t.expectEqual(@as(u8, 0), ok.code);
+    try t.expectEqualStrings(b ++ "\nbody\n" ++ e ++ "\n", std.fs.cwd().readFileAlloc(w.arena.allocator(), w.p("out.mojo"), 1000) catch "");
+    w.put("twice.mojo", b ++ "\n" ++ b ++ "\n" ++ e ++ "\n");
+    const twice = try w.run(&.{ "rest-extract", "twice.mojo", "o2.mojo" });
+    try t.expectEqual(@as(u8, 1), twice.code);
+    try t.expect(std.mem.indexOf(u8, twice.stderr, "holds the marker '# ---- REST URL helpers (one copy per REST file) ----' 2 times, not once") != null);
+}

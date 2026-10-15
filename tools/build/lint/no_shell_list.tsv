@@ -48,7 +48,6 @@ use	tools/build/tests/functional/install_gate/BUCK	sh_script	6	names a shell scr
 use	tools/build/tests/functional/install_gate/defs.bzl	sh_argv	1	shell action; to port to Zig (no-shell series)
 use	tools/build/tests/functional/platform_table/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/tests/functional/platform_table/cases.bzl	sh_argv	1	data: a planted applet list, not an invocation
-use	tools/build/tests/functional/proto_codegen/defs.bzl	sh_argv	9	shell action; to port to Zig (no-shell series)
 use	tools/build/tests/golden/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/tests/negative/coverage/BUCK	sh_script	6	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/tests/negative/coverage/heldfile/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
