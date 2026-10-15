@@ -76,6 +76,8 @@ pub fn rustcArgv(a: std.mem.Allocator, rustc: []const u8, sysroot: []const u8, l
     try v.append(sysroot);
     try v.append("-C");
     try v.append(try std.fmt.allocPrint(a, "linker={s}", .{linker}));
+    try v.append("-C");
+    try v.append("linker-features=-lld");
     try v.append(try std.fmt.allocPrint(a, "--remap-path-prefix={s}=.", .{cwd}));
     try v.appendSlice(rest);
     return v.toOwnedSlice();

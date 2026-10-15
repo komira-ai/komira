@@ -54,6 +54,8 @@ test "rustcArgv: the sysroot, the shim, no rust-lld, the remap, then the caller'
         "/s",
         "-C",
         "linker=/t/cc/cc",
+        "-C",
+        "linker-features=-lld",
         "--remap-path-prefix=/w=.",
         "--crate-name=a",
         "lib.rs",
