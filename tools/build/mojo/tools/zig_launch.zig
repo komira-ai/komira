@@ -194,7 +194,7 @@ pub fn copyTree(src: std.fs.Dir, dst: std.fs.Dir) !void {
 pub fn makeWritable(dir: std.fs.Dir) !void {
     const self = std.fs.File{ .handle = dir.fd };
     const st = try self.stat();
-    try self.chmod(st.mode);
+    try self.chmod(st.mode | 0o200);
     var it = dir.iterate();
     while (try it.next()) |e| {
         switch (e.kind) {

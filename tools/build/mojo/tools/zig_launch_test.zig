@@ -126,7 +126,20 @@ test "copyTree merges, keeps modes and links; makeWritable opens a read-only tre
     try t.expect(tool.mode & 0o100 != 0);
     try t.expect(tool.mode & 0o200 == 0);
 
+    // A directory without the write bit, as a copied read-only fixture tree has.
+    {
+        var deeper = try dst.dir.openDir("sub/deeper", .{});
+        defer deeper.close();
+        try (std.fs.File{ .handle = deeper.fd }).chmod(0o555);
+    }
     try L.makeWritable(dst.dir);
+    {
+        var deeper = try dst.dir.openDir("sub/deeper", .{});
+        defer deeper.close();
+        const st = try (std.fs.File{ .handle = deeper.fd }).stat();
+        try t.expect(st.mode & 0o200 != 0);
+        try put(deeper, "created.txt", "x", 0o644);
+    }
     const plain = try dst.dir.statFile("plain.txt");
     try t.expect(plain.mode & 0o200 != 0);
     const tool2 = try dst.dir.statFile("tool");
