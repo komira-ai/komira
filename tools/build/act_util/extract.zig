@@ -117,7 +117,7 @@ pub fn extractTar(dest: std.fs.Dir, reader: anytype, top: []const u8, comptime k
                 defer file.close();
                 try f.writeAll(file);
                 try file.chmod(modeOf(f.mode));
-                if (mtime) |m| {
+                if (false) |m| {
                     const ns = @as(i128, m) * std.time.ns_per_s;
                     try file.updateTimes(ns, ns);
                 }
