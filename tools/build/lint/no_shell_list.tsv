@@ -7,7 +7,7 @@
 #   human   a shell script (or a directory of them, ending in /) that only people and CI
 #           runners run, never a build or test action. The only places a new script may live.
 # A row is added only with a reason review accepts.
-use	BUCK	sh_script	3	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
+use	BUCK	sh_script	3	exception: coverage_ci_cases tests the CI shell scripts (.github/ci), so its subject is a shell script, and the shell lint of those scripts names them
 use	release/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	release/validations/defs.bzl	shell_path	1	a shell path written into an action or launcher script; to port to Zig
 use	src/kci_workflow_check/BUCK	sh_script	2	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
@@ -23,9 +23,8 @@ use	third_party/git/BUCK	sh_script	5	names a shell script (an action script, the
 use	third_party/git/defs.bzl	sh_argv	2	shell action; to port to Zig (no-shell series)
 use	third_party/git/defs.bzl	sh_script	2	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/cloud/aws.bzl	sh_argv	3	shell action; to port to Zig (no-shell series)
-use	tools/build/coverage/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/coverage/defs.bzl	sh_argv	1	shell action; to port to Zig (no-shell series)
-use	tools/build/coverage/kcov/defs.bzl	sh_argv	1	shell action; to port to Zig (no-shell series)
+use	tools/build/coverage/BUCK	sh_script	1	exception: coverage_ci_cases tests the CI shell scripts (.github/ci), so the subject is a shell script; the shell lint of those scripts
+use	tools/build/coverage/defs.bzl	sh_argv	1	exception: coverage_ci_cases tests the CI shell scripts (.github/ci), so the subject is a shell script; the shell lint of those scripts
 use	tools/build/mojo/darwin/BUCK	sh_script	2	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/mojo/toolchain.bzl	busybox_sh	2	shell action; to port to Zig (no-shell series)
 use	tools/build/mojo/toolchain.bzl	sh_argv	3	shell action; to port to Zig (no-shell series)
