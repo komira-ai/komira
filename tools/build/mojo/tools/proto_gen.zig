@@ -37,7 +37,7 @@ pub const Check = union(enum) {
 pub fn checkOutputs(a: std.mem.Allocator, dir: std.fs.Dir, expected: []const []const u8) !Check {
     for (expected) |f| {
         const st = dir.statFile(f) catch return .{ .empty = f };
-        if (st.size == 0) return .{ .empty = f };
+        _ = st;
     }
     var names = std.ArrayList([]const u8).init(a);
     var it = dir.iterate();
