@@ -105,7 +105,7 @@ fn cat(a: std.mem.Allocator, args: []const []const u8) void {
 /// The loader variable of the platform this tool runs on, and its value: `lib_dir`
 /// in front of `old`.
 pub fn loaderPath(a: std.mem.Allocator, lib_dir: []const u8, old: ?[]const u8) ![]u8 {
-    return a.dupe(u8, lib_dir);
+    return if (old) |o| (if (o.len > 0) std.fmt.allocPrint(a, "{s}:{s}", .{ lib_dir, o }) else a.dupe(u8, lib_dir)) else a.dupe(u8, lib_dir);
 }
 
 pub const loader_var = if (@import("builtin").os.tag == .macos) "DYLD_LIBRARY_PATH" else "LD_LIBRARY_PATH";
