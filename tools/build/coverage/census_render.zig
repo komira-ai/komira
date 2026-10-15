@@ -517,7 +517,6 @@ pub fn main() !void {
         write(argv[6], "");
         const refused = try renderTo(a, argv[2], argv[3], argv[4], argv[6]);
         const msg: ?[]const u8 = if (refused) |m| try std.fmt.allocPrint(a, "the census is not one census.sh renders: {s}\n", .{m}) else null;
-        _ = msg;
-        write(argv[5], try resultJson(a, null));
+        write(argv[5], try resultJson(a, msg));
     } else usage("unknown command {s}", .{argv[1]});
 }
