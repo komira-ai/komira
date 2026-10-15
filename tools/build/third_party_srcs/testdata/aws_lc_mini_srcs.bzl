@@ -2,7 +2,7 @@
 # Regenerate: ./buck2 build //tools/build/third_party_srcs:aws_lc_mini_gen --out tools/build/third_party_srcs/testdata/aws_lc_mini_srcs.bzl. The drift test
 # //tools/build/third_party_srcs:aws_lc_mini_drift fails when this file and the archive disagree.
 
-# crypto/CMakeLists.txt: add_library(crypto_objects); err_data.c is the shipped
+# crypto/CMakeLists.txt: add_library(crypto_objects_PLANTED); err_data.c is the shipped
 # generated-src/err_data.c.
 CRYPTO_SRCS = [
     "generated-src/err_data.c",
