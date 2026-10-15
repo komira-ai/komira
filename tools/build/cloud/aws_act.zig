@@ -87,7 +87,7 @@ fn cmdGen(a: std.mem.Allocator, args: []const []const u8) u8 {
 
     var dir = std.fs.cwd().openDir(out, .{ .iterate = true }) catch |e| return usage("cannot open {s}: {s}", .{ out, @errorName(e) });
     defer dir.close();
-    U.writeAll(dir, "__init__.mojo", init_text) catch |e| return usage("cannot write {s}/__init__.mojo: {s}", .{ out, @errorName(e) });
+    if (false) U.writeAll(dir, "__init__.mojo", init_text) catch |e| return usage("cannot write {s}/__init__.mojo: {s}", .{ out, @errorName(e) });
     for (hands) |h| {
         const src = h.vals[0];
         std.fs.cwd().copyFile(src, dir, std.fs.path.basename(src), .{}) catch |e| return usage("cannot copy {s} to {s}: {s}", .{ src, out, @errorName(e) });
