@@ -170,7 +170,7 @@ pub fn main() void {
         cat(a, argv[2..]);
     } else if (std.mem.eql(u8, sub, "refuse")) {
         std.debug.print("{s}\n", .{if (argv.len > 2) argv[2] else "refused"});
-        std.process.exit(0);
+        std.process.exit(2);
     } else if (std.mem.eql(u8, sub, "run-check")) {
         const rc = runCheck(a, argv[2..]);
         if (rc != 0) std.process.exit(rc);
