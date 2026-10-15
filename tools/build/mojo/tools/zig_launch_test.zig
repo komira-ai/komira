@@ -43,9 +43,30 @@ test "parse: arguments after the double dash are zig's, whatever they look like"
     try t.expectEqualStrings("--out", p.zig_args[0]);
 }
 
+test "parse: the zig subcommand takes the zig and busybox only" {
+    const p = try ok(&.{ "zig", "--busybox", "bb", "--zig", "z", "--", "build-exe", "-OReleaseSafe", "a.zig" });
+    try t.expect(p.sub == .zig);
+    try t.expectEqualStrings("bb", p.busybox);
+    try t.expectEqualStrings("z", p.zig_dir);
+    try t.expectEqualStrings("", p.out);
+    try t.expect(!p.isDriver());
+    try t.expectEqual(@as(usize, 3), p.zig_args.len);
+    const q = try ok(&.{ "test", "--busybox", "b", "--zig", "z", "--out", "o", "--stamp", "s", "--", "test", "a.zig" });
+    try t.expect(q.sub == .@"test");
+}
+
+test "parse: the zig subcommand refuses what is for test" {
+    for ([_][2][]const u8{ .{ "--out", "o" }, .{ "--stamp", "s" }, .{ "--data", "d" }, .{ "--tools", "t" } }) |opt| {
+        const args = [_][]const u8{ "zig", "--busybox", "b", "--zig", "z", opt[0], opt[1], "--", "build-exe", "a.zig" };
+        try bad(&args, "--out, --stamp, --data and --tools are for `test`");
+    }
+    try bad(&.{ "zig", "--zig", "z", "--", "x" }, "--busybox and --zig are required");
+    try bad(&.{ "zig", "--busybox", "b", "--", "x" }, "--busybox and --zig are required");
+}
+
 test "parse: refusals" {
-    try bad(&.{}, "the subcommand is `test`");
-    try bad(&.{"run"}, "the subcommand is `test`");
+    try bad(&.{}, "the subcommand is `test` or `zig`");
+    try bad(&.{"run"}, "the subcommand is `test` or `zig`");
     try bad(&.{ "test", "--bogus", "x" }, "unknown argument");
     try bad(&.{ "test", "--out" }, "an option has no value");
     try bad(&.{ "test", "--out", "a", "--out", "b" }, "an option is given twice");

@@ -181,19 +181,26 @@ def _zig_exe_impl(ctx):
     bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
     zig = ctx.attrs.zig[DefaultInfo].default_outputs[0]
     out = ctx.actions.declare_output(ctx.label.name)
-    script = _PRELUDE + """
-ZIG_GLOBAL_CACHE_DIR="$T/zig-global"; ZIG_LOCAL_CACHE_DIR="$T/zig-local"; HOME="$T/home"
-export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME
-"$1/zig" build-exe -OReleaseSafe -target TARGET -fstrip "$2" "-femit-bin=$3"
-rm -rf "$T"
-"""
-    # The target, the optimization mode and the strip flag are written into
-    # the script, so that with the defaults the command (and the action key)
-    # of every zig_exe is what it was before the attributes existed.
     if not regex_match("^[a-z0-9_.-]+$", ctx.attrs.target):
         fail("{}: target {} is not a zig target triple".format(ctx.label, repr(ctx.attrs.target)))
-    script = script.replace("-OReleaseSafe -target TARGET -fstrip ", "-O{} -target {} {} ".format(_zig_optimize(ctx), ctx.attrs.target, "-fstrip" if ctx.attrs.strip else "-fno-strip"))
-    cmd = busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output())
+    # The launcher (tools/zig_launch.zig; no shell) gives zig a scratch
+    # directory for its caches and HOME, and the busybox applets as PATH.
+    cmd = cmd_args(
+        ctx.attrs._launcher[RunInfo],
+        "zig",
+        "--busybox",
+        bb,
+        "--zig",
+        zig,
+        "--",
+        "build-exe",
+        "-O" + _zig_optimize(ctx),
+        "-target",
+        ctx.attrs.target,
+        "-fstrip" if ctx.attrs.strip else "-fno-strip",
+        _zig_root(ctx),
+        cmd_args(out.as_output(), format = "-femit-bin={}"),
+    )
     if ctx.attrs.imports:
         # Files `src` imports by a relative name: inputs at their paths, so
         # beside it, and not on the command line.
@@ -226,6 +233,8 @@ zig_exe_rule = rule(
         # `zig_test` targets the executable waits for.
         "unit_tests": attrs.list(attrs.dep(), default = []),
         "zig": attrs.dep(),
+        # The runner of the action (tools/zig_launch.zig).
+        "_launcher": attrs.exec_dep(default = "komira//tools/build/mojo:zig_launch"),
     },
 )
 
@@ -389,14 +398,23 @@ def _zig_test_binary_impl(ctx):
     out = ctx.actions.declare_output(ctx.label.name)
     if not regex_match("^[a-z0-9_.-]+$", ctx.attrs.target):
         fail("{}: target {} is not a zig target triple".format(ctx.label, repr(ctx.attrs.target)))
-    script = _PRELUDE + """
-ZIG_GLOBAL_CACHE_DIR="$T/zig-global"; ZIG_LOCAL_CACHE_DIR="$T/zig-local"; HOME="$T/home"
-export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME
-"$1/zig" test -target TARGET --test-no-exec "-femit-bin=$3" "$2"
-rm -rf "$T"
-""".replace("-target TARGET ", "-target {} ".format(ctx.attrs.target))
     ctx.actions.run(
-        cmd_args(busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output()), hidden = ctx.attrs.imports),
+        cmd_args(
+            ctx.attrs._launcher[RunInfo],
+            "zig",
+            "--busybox",
+            bb,
+            "--zig",
+            zig,
+            "--",
+            "test",
+            "-target",
+            ctx.attrs.target,
+            "--test-no-exec",
+            cmd_args(out.as_output(), format = "-femit-bin={}"),
+            _zig_root(ctx),
+            hidden = ctx.attrs.imports,
+        ),
         category = "zig_test_binary",
     )
     return [DefaultInfo(default_output = out)]
@@ -413,6 +431,7 @@ zig_test_binary_rule = rule(
         "src": attrs.source(),
         "target": attrs.string(),
         "zig": attrs.dep(),
+        "_launcher": attrs.exec_dep(default = "komira//tools/build/mojo:zig_launch"),
     },
 )
 
