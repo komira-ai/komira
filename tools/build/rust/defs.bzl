@@ -37,7 +37,7 @@ RustToolchainInfo = provider(fields = {
     # zig -target triple for link steps.
     "cc_target": provider_field(str),
     "wrapper": provider_field(typing.Any),
-    "run_check": provider_field(typing.Any),
+    "act": provider_field(typing.Any),
     # The gate (tools/build/run): `gate rust` runs one rust_test in a build
     # action.
     "gate": provider_field(typing.Any),
@@ -109,7 +109,7 @@ def _rust_toolchain_impl(ctx):
             zig = ctx.attrs.zig[DefaultInfo].default_outputs[0],
             cc_target = ctx.attrs.cc_target,
             wrapper = ctx.attrs._launcher[DefaultInfo].default_outputs[0],
-            run_check = ctx.attrs._run_check[DefaultInfo].default_outputs[0],
+            act = ctx.attrs._act[DefaultInfo].default_outputs[0],
             gate = ctx.attrs._gate[DefaultInfo].default_outputs[0],
         ),
     ]
@@ -123,7 +123,7 @@ rust_toolchain = rule(
         "sysroot": attrs.exec_dep(),
         "zig": attrs.exec_dep(),
         "_gate": attrs.exec_dep(default = "komira//tools/build/run:gate"),
-        "_run_check": attrs.dep(default = "komira//tools/build/mojo:run_check.sh"),
+        "_act": attrs.exec_dep(default = "komira//tools/build/mojo:act"),
         # The lint of the scripts the Rust rules run: a validation (see
         # tools/build/lint/defs.bzl), not an input of any action.
         "_script_lint": attrs.list(attrs.dep(), default = [
@@ -380,7 +380,7 @@ def _runner(tc, label, exe, marker_arg, timeout_s):
 def _gate(ctx, tc, ungated, public, markers):
     """Publishes `ungated` as `public` once every marker in `markers` exists."""
     ctx.actions.run(
-        cmd_args(tc.busybox, "cp", ungated, public.as_output(), hidden = markers),
+        cmd_args(tc.act, "copy", ungated, public.as_output(), hidden = markers),
         category = "rust_gate_join",
     )
     return markers
@@ -546,7 +546,7 @@ def _binary_impl(ctx):
         out = ctx.actions.declare_output(ctx.label.name + ".stdout")
         expected = ctx.actions.write(ctx.label.name + ".expected", ctx.attrs.expected_stdout)
         ctx.actions.run(
-            cmd_args(tc.busybox, "sh", tc.run_check, tc.busybox, exe, out.as_output(), expected),
+            cmd_args(tc.act, "run-check", tc.busybox, exe, out.as_output(), expected),
             env = rerun_env(ctx),
             category = "rust_run_check",
         )

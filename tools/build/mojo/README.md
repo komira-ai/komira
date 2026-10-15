@@ -980,7 +980,7 @@ rules, sub-targets, scope and fixtures are in [coverage.md](coverage.md).
 | `cov_zig: ... has debug sections but holds the working directory (...) nowhere` | [`cov_zig.zig`](../coverage/kcov/cov_zig.zig) | a coverage link's debug info holds neither spelling of the working directory: zig's C runtime units (the only ones that record a directory) record one the relocation was not given, so the binary would differ by machine, or have no debug info |
 | `cov_zig: a link with the optimization level <level> is refused` | [`cov_zig.zig`](../coverage/kcov/cov_zig.zig) | a coverage link at a release level, where lld would merge string tails the relocation cannot see |
 | `cov_zig: debug_relocate refused <output>` | [`cov_zig.zig`](../coverage/kcov/cov_zig.zig) | the relocation refused a coverage link's output (a longer name starting with the directory, a compressed section); its own message follows |
-| `run_check: stdout of <binary> differs from <expected>` | [`run_check.sh`](run_check.sh) | `[run_check]` output did not match `expected_stdout` |
+| `run_check: stdout of <binary> differs from <expected>` | [`act.zig`](tools/act.zig) | `[run_check]` output did not match `expected_stdout` |
 | ``<target>: test_assert_level `<v>` is not one of none, warn, safe, all`` (or `assert_level`) | [`defines.bzl`](defines.bzl) | an assert level Mojo's `debug_assert` does not read |
 | ``<target>: test_defines sets ASSERT; set `test_assert_level` instead`` (or `defines`, `assert_level`) | [`defines.bzl`](defines.bzl) | the assert level is its own attribute |
 | `<target>: defines entry "<e>" is not NAME or NAME=VALUE with NAME an identifier`, `... sets <NAME> twice` | [`defines.bzl`](defines.bzl) | a define the compiler would misread, or two values for one name |

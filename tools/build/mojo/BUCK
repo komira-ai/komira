@@ -82,7 +82,41 @@ zig_bootstrap_exe(
     visibility = ["PUBLIC"],
 )
 
-export_file(name = "run_check.sh", visibility = ["PUBLIC"])
+# act (tools/act.zig): the small actions of the Mojo and Rust rules (copy a
+# published file once its markers exist, cat the README join's markers, run a
+# built binary in a clean environment and compare its stdout), in place of
+# run_check.sh and the busybox cp and cat applets. Built behind its unit tests;
+# its process cases are tests//functional/act.
+zig_test(
+    name = "act_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/act.zig"],
+    src = "tools/act_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "act",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/act.zig",
+    unit_tests = [":act_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
+
+# The same for macOS arm64 (the darwin toolchain's `run_check`), built on a Linux worker.
+zig_exe(
+    name = "act_darwin",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/act.zig",
+    target = row("darwin-arm64")["zig_triple"],
+    unit_tests = [":act_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
 
 export_file(name = "proto_fixture.sh", visibility = ["PUBLIC"])
 

@@ -83,7 +83,7 @@ def _mojo_darwin_toolchain_impl(ctx):
             watchdog_idle_secs = ctx.attrs.watchdog_idle_secs,
             watchdog_sample_secs = ctx.attrs.watchdog_sample_secs,
             gate = one(ctx.attrs.gate),
-            run_check = one(ctx.attrs._run_check),
+            act = one(ctx.attrs._act),
             launcher = one(ctx.attrs.launcher),
             runtime = one(ctx.attrs.runtime),
             os = "darwin",
@@ -109,7 +109,7 @@ mojo_darwin_toolchain_rule = rule(
         # The compile watchdog of the wrapper, as mojo_toolchain's.
         "watchdog_idle_secs": attrs.int(default = 300),
         "watchdog_sample_secs": attrs.int(default = 30),
-        "_run_check": attrs.dep(default = "komira//tools/build/mojo:run_check.sh"),
+        "_act": attrs.dep(default = "komira//tools/build/mojo:act_darwin"),
         "_wrapper": attrs.dep(default = "komira//tools/build/mojo:mojo_compile_darwin"),
     },
 )

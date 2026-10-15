@@ -27,7 +27,7 @@
 #      actions): its Mach-O load commands, read by tools/build/inspect (`inspect macho`), and the
 #      launcher is launch.sh behind dyld_prelude.sh.
 #   6. The macOS scripts, run on this machine against stand-ins: busybox.sh
-#      (applets only from /bin and /usr/bin, anything else refused), and run_check.sh
+#      (applets only from /bin and /usr/bin, anything else refused), and `act run-check`
 #      (clears DYLD_* as well as LD_*). (The gate, which runs welded tests,
 #      has its macOS unit tests in komira//tools/build/run, run on the macOS
 #      workers.)
@@ -382,16 +382,18 @@ fi
 TC="$U/tc"
 mkdir -p "$TC/lib"
 
-# run_check.sh starts the binary with no library path of any loader.
+# `act run-check` starts the binary with no library path of any loader.
 printf '#!/bin/sh\necho "[${LD_LIBRARY_PATH-}${LD_PRELOAD-}${DYLD_LIBRARY_PATH-}${DYLD_FALLBACK_LIBRARY_PATH-}${DYLD_INSERT_LIBRARIES-}]"\n' > "$U/envbin"
 chmod +x "$U/envbin"
-if ! (cd "$U" && LD_LIBRARY_PATH=/a LD_PRELOAD=/b DYLD_LIBRARY_PATH=/c DYLD_FALLBACK_LIBRARY_PATH=/d DYLD_INSERT_LIBRARIES=/e \
-        sh "$OLDPWD/tools/build/mojo/run_check.sh" "$BB" envbin env_out.txt) > "$U/run_check.txt" 2>&1; then
-    fail "run_check.sh: the stand-in binary did not run (see $U/run_check.txt)"
+if ! "$BUCK2" build komira//tools/build/mojo:act_darwin --out "$U/act" > "$U/act_build.txt" 2>&1; then
+    fail "act run-check: komira//tools/build/mojo:act_darwin did not build (see $U/act_build.txt)"
+elif ! (cd "$U" && LD_LIBRARY_PATH=/a LD_PRELOAD=/b DYLD_LIBRARY_PATH=/c DYLD_FALLBACK_LIBRARY_PATH=/d DYLD_INSERT_LIBRARIES=/e \
+        "$U/act" run-check "$BB" envbin env_out.txt) > "$U/run_check.txt" 2>&1; then
+    fail "act run-check: the stand-in binary did not run (see $U/run_check.txt)"
 elif [ "$(cat "$U/env_out.txt")" != "[]" ]; then
-    fail "run_check.sh: the binary inherited a library path: $(cat "$U/env_out.txt")"
+    fail "act run-check: the binary inherited a library path: $(cat "$U/env_out.txt")"
 else
-    pass "run_check.sh: the binary starts with no LD_* or DYLD_* library path"
+    pass "act run-check: the binary starts with no LD_* or DYLD_* library path"
 fi
 
 # ---- 7. live, on the macOS workers ----------------------------------------------
