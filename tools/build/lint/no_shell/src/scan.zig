@@ -63,7 +63,7 @@ fn isIdentChar(c: u8) bool {
 pub fn literal(counts: *Counts, content: []const u8) void {
     if (std.mem.eql(u8, content, "busybox_sh") or std.mem.eql(u8, content, "_busybox_sh")) {
         counts[@intFromEnum(Category.busybox_sh)] += 1;
-    } else if (eqlAny(content, &shell_names) or eqlAny(content, &shell_options)) {
+    } else if (eqlAny(content, &shell_options)) {
         counts[@intFromEnum(Category.sh_argv)] += 1;
     } else if (holdsAny(content, &shell_paths)) {
         counts[@intFromEnum(Category.shell_path)] += 1;
