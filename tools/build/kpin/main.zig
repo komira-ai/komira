@@ -65,7 +65,7 @@ pub fn parseArgs(a: std.mem.Allocator, argv: []const []const u8) ArgError!Config
     if (argv.len == 0) return error.NoCommand;
     const cmd = std.meta.stringToEnum(Command, argv[0]) orelse return error.UnknownCommand;
     var cfg = Config{ .command = cmd };
-    var npms = std.ArrayListUnmanaged([]const u8){};
+    var npms = std.ArrayList([]const u8).empty;
     var i: usize = 1;
     while (i < argv.len) : (i += 1) {
         const arg = argv[i];
@@ -111,7 +111,7 @@ fn readFile(a: std.mem.Allocator, path: []const u8) ![]u8 {
 /// Writes through a sibling file and a rename: a crash never leaves half a lock.
 fn writeFile(a: std.mem.Allocator, path: []const u8, data: []const u8) !void {
     const tmp = try std.fmt.allocPrint(a, "{s}.kpin-tmp", .{path});
-    try std.fs.cwd().writeFile(tmp, data);
+    try std.fs.cwd().writeFile(.{ .sub_path = tmp, .data = data });
     try std.fs.cwd().rename(tmp, path);
 }
 
@@ -126,7 +126,7 @@ fn readLock(a: std.mem.Allocator, path: []const u8, missing_ok: bool, rep: *Repo
 }
 
 fn readNpm(a: std.mem.Allocator, cfg: Config, rep: *Report) ?[]npm.Pkg {
-    var lists = std.ArrayListUnmanaged([]const npm.Pkg){};
+    var lists = std.ArrayList([]const npm.Pkg).empty;
     for (cfg.npm_paths) |path| {
         const text = readFile(a, path) catch |e| {
             rep.errors.add("cannot read {s}: {s}", .{ path, @errorName(e) });
@@ -145,7 +145,7 @@ fn readPinsText(a: std.mem.Allocator, cfg: Config, rep: *Report) ?[]const u8 {
     };
 }
 
-fn emit(rep: *const Report, err: std.io.AnyWriter) u8 {
+fn emit(rep: *const Report, err: *std.Io.Writer) u8 {
     for (rep.errors.msgs.items) |m| err.print("error: {s}\n", .{m}) catch {};
     for (rep.alarms.msgs.items) |m| err.print("ALARM: {s}\n", .{m}) catch {};
     if (rep.alarms.count() > 0) {
@@ -155,7 +155,7 @@ fn emit(rep: *const Report, err: std.io.AnyWriter) u8 {
     return if (rep.errors.count() > 0) EXIT_FAIL else EXIT_OK;
 }
 
-pub fn run(a: std.mem.Allocator, argv: []const []const u8, out: std.io.AnyWriter, err: std.io.AnyWriter, http: *fetch.HttpFetcher) u8 {
+pub fn run(a: std.mem.Allocator, argv: []const []const u8, out: *std.Io.Writer, err: *std.Io.Writer, http: *fetch.HttpFetcher) u8 {
     const cfg = parseArgs(a, argv) catch |e| {
         err.print("kpin: {s}\n\n{s}", .{ @errorName(e), usage }) catch {};
         return EXIT_USAGE;
@@ -169,7 +169,7 @@ pub fn run(a: std.mem.Allocator, argv: []const []const u8, out: std.io.AnyWriter
     return emit(&rep, err);
 }
 
-fn cmdLock(a: std.mem.Allocator, cfg: Config, out: std.io.AnyWriter, rep: *Report) void {
+fn cmdLock(a: std.mem.Allocator, cfg: Config, out: *std.Io.Writer, rep: *Report) void {
     const pins_text = readPinsText(a, cfg, rep) orelse return;
     const list = pins.load(a, pins_text, &rep.errors) catch return;
     const npm_pkgs = readNpm(a, cfg, rep) orelse return;
@@ -191,7 +191,7 @@ fn cmdLock(a: std.mem.Allocator, cfg: Config, out: std.io.AnyWriter, rep: *Repor
     out.print("kpin: wrote {s} ({d} pins, {d} npm packages)\n", .{ cfg.lock_path, lock.pins.len, lock.npm.len }) catch {};
 }
 
-fn cmdCheck(a: std.mem.Allocator, cfg: Config, out: std.io.AnyWriter, rep: *Report) void {
+fn cmdCheck(a: std.mem.Allocator, cfg: Config, out: *std.Io.Writer, rep: *Report) void {
     const pins_text = readPinsText(a, cfg, rep) orelse return;
     const list = pins.load(a, pins_text, &rep.errors) catch return;
     const npm_pkgs = readNpm(a, cfg, rep) orelse return;
@@ -213,7 +213,7 @@ fn cmdCheck(a: std.mem.Allocator, cfg: Config, out: std.io.AnyWriter, rep: *Repo
     out.print("kpin: {s} is up to date ({d} pins, {d} npm packages)\n", .{ cfg.lock_path, lock.pins.len, lock.npm.len }) catch {};
 }
 
-fn cmdUpdate(a: std.mem.Allocator, cfg: Config, out: std.io.AnyWriter, rep: *Report, http: *fetch.HttpFetcher) void {
+fn cmdUpdate(a: std.mem.Allocator, cfg: Config, out: *std.Io.Writer, rep: *Report, http: *fetch.HttpFetcher) void {
     http.allow_http_loopback = cfg.allow_http_loopback;
     const pins_text = readPinsText(a, cfg, rep) orelse return;
     const npm_pkgs = readNpm(a, cfg, rep) orelse return;
@@ -247,8 +247,14 @@ pub fn main() !void {
     var http = fetch.HttpFetcher{ .allocator = a };
     const argv = try a.alloc([]const u8, args.len - 1);
     for (args[1..], 0..) |s, i| argv[i] = s;
-    const out = std.io.getStdOut().writer();
-    const err = std.io.getStdErr().writer();
-    const code = run(a, argv, out.any(), err.any(), &http);
+    // Buffered writers (zig 0.15's writers have no unbuffered default),
+    // flushed before the process exits.
+    var out_buf: [4096]u8 = undefined;
+    var err_buf: [4096]u8 = undefined;
+    var out = std.fs.File.stdout().writer(&out_buf);
+    var err = std.fs.File.stderr().writer(&err_buf);
+    const code = run(a, argv, &out.interface, &err.interface, &http);
+    out.interface.flush() catch {};
+    err.interface.flush() catch {};
     std.process.exit(code);
 }

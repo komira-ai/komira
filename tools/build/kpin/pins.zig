@@ -50,7 +50,7 @@ fn str(t: *const toml.Table, key: []const u8, diag: *Diag) ?[]const u8 {
 
 /// `{version}` and `{platform}` replaced; any other brace is an error.
 pub fn expand(a: std.mem.Allocator, template: []const u8, version: []const u8, token: []const u8) error{ BadTemplate, OutOfMemory }![]u8 {
-    var out = std.ArrayListUnmanaged(u8){};
+    var out = std.ArrayList(u8).empty;
     var i: usize = 0;
     while (i < template.len) {
         const c = template[i];
@@ -87,8 +87,8 @@ fn lessPin(_: void, x: Pin, y: Pin) bool {
 pub fn load(a: std.mem.Allocator, text: []const u8, diag: *Diag) error{Invalid}![]Pin {
     const before = diag.count();
     const tables = toml.parse(a, text, diag) catch return error.Invalid;
-    var pins = std.ArrayListUnmanaged(Pin){};
-    var plats = std.ArrayListUnmanaged(std.ArrayListUnmanaged(Platform)){};
+    var pins = std.ArrayList(Pin).empty;
+    var plats = std.ArrayList(std.ArrayList(Platform)).empty;
 
     // Pass 1: the pin tables, `[name]`.
     for (tables) |*t| {
@@ -216,7 +216,7 @@ pub fn load(a: std.mem.Allocator, text: []const u8, diag: *Diag) error{Invalid}!
 /// `text` with the `version` line of `[name]` set to `new`. Everything else,
 /// comments included, is kept byte for byte.
 pub fn setVersion(a: std.mem.Allocator, text: []const u8, name: []const u8, new: []const u8) error{ NotFound, OutOfMemory }![]u8 {
-    var out = std.ArrayListUnmanaged(u8){};
+    var out = std.ArrayList(u8).empty;
     var in_section = false;
     var done = false;
     var it = std.mem.splitScalar(u8, text, '\n');
@@ -228,7 +228,7 @@ pub fn setVersion(a: std.mem.Allocator, text: []const u8, name: []const u8, new:
         if (t.len > 0 and t[0] == '[') {
             in_section = t.len == name.len + 2 and std.mem.eql(u8, t[1 .. t.len - 1], name);
         } else if (in_section and !done and std.mem.startsWith(u8, t, "version")) {
-            const rest = std.mem.trimLeft(u8, t["version".len..], " \t");
+            const rest = std.mem.trimStart(u8, t["version".len..], " \t");
             if (rest.len > 0 and rest[0] == '=') {
                 const q1 = std.mem.indexOfScalar(u8, raw, '"');
                 const q2 = if (q1) |q| std.mem.indexOfScalarPos(u8, raw, q + 1, '"') else null;
