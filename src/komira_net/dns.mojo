@@ -62,16 +62,20 @@ def _null_ext_byte() -> UnsafePointer[UInt8, MutUntrackedOrigin]:
 comptime _AF_INET: Int32 = Int32(2)        # AF_INET == 2 on BOTH glibc + BSD/Darwin
 comptime _SOCK_STREAM: Int32 = Int32(1)    # SOCK_STREAM == 1 on BOTH
 
-# AI_ADDRCONFIG — return addresses only for families the local host has a
-# configured interface for (avoids returning A records on an IPv6-only host and
-# vice versa). The CONSTANT VALUE DIFFERS by platform:
-#   - glibc netdb.h:           0x0020
-#   - BSD/Darwin netdb.h:      0x0400
-# The resolver forces ai_family=AF_INET anyway, but we pass the correct per-platform
-# flag so the hints struct is honored rather than silently ignored.
-comptime _AI_ADDRCONFIG: Int32 = (
-    Int32(0x0400) if CompilationTarget.is_macos() else Int32(0x0020)
-)
+# ai_flags is 0: no AI_ADDRCONFIG. AI_ADDRCONFIG makes getaddrinfo return a
+# family only when the host has a configured address of that family, and glibc
+# does not count loopback addresses. On a host whose only interface is `lo`
+# (a sandbox or container with networking off) every AF_INET lookup then fails
+# with EAI_NONAME before the hosts file is read, so even `localhost` does not
+# resolve. What the flag guards against is AAAA answers (and AAAA queries) on
+# an IPv4-only host. This resolver asks for AF_INET only (ai_family below), so
+# it never receives an AAAA answer and the flag has nothing left to guard; its
+# one remaining effect would be the loopback-only failure. On an IPv6-only
+# host the A records still come back and the failure surfaces at connect,
+# naming the unreachable network, rather than as a false NXDOMAIN.
+# 0 is 0 on every platform, so no per-platform constant (and no C shim) is
+# needed.
+comptime _AI_FLAGS: Int32 = Int32(0)
 
 # EAI_* return codes (NOT errno). Mapped to error model (distinct
 # DnsError[...] message prefixes). THE CODES DIFFER by platform — glibc uses
@@ -304,6 +308,26 @@ def _collect_a_records_from_addrinfo_list(
     return out^
 
 
+def _resolver_hints() -> Array[UInt8, _ADDRINFO_SIZE]:
+    """The getaddrinfo hints: a zeroed 48-byte struct addrinfo with
+    ai_flags=_AI_FLAGS (0, no AI_ADDRCONFIG), ai_family=AF_INET and
+    ai_socktype=SOCK_STREAM. libc reads only these int fields, which sit at
+    the same offsets (0, 4, 8) on glibc and BSD/Darwin; the layouts differ
+    only in the trailing pointer fields, which hints leave zero. A function
+    of its own so a test can read the flags the resolver passes."""
+    var hints = Array[UInt8, _ADDRINFO_SIZE](fill=UInt8(0))
+    # SAFETY: `hp` points into `hints`, a local that outlives every write;
+    # each write is an aligned Int32 inside the 48 bytes.
+    var hp = hints.unsafe_ptr()
+    # ai_flags @ 0 (Int32)
+    hp.bitcast[Int32]()[0] = _AI_FLAGS
+    # ai_family @ 4 (Int32)
+    (hp + _AI_OFF_FAMILY).bitcast[Int32]()[0] = _AF_INET
+    # ai_socktype @ 8 (Int32)
+    (hp + 8).bitcast[Int32]()[0] = _SOCK_STREAM
+    return hints^
+
+
 def _getaddrinfo_collect(host: String, port: UInt16) raises -> List[IpAddr]:
     """Resolve `host` via getaddrinfo(3) and return one IpAddr per AF_INET (A)
     record, as a deep COPY (no glibc memory borrowed past this thunk).
@@ -344,21 +368,8 @@ def _getaddrinfo_collect(host: String, port: UInt16) raises -> List[IpAddr]:
     var host_local = host.copy()
     var service = String(Int(port))
 
-    # hints: a 48-byte zeroed struct addrinfo with ai_family=AF_INET,
-    # ai_socktype=SOCK_STREAM, ai_flags=AI_ADDRCONFIG. Stack-local; libc reads
-    # only the int fields we set. The hint int-fields (ai_flags @ 0, ai_family
-    # @ 4, ai_socktype @ 8) sit at IDENTICAL offsets on glibc + BSD/Darwin —
-    # the layout difference is ONLY in the trailing pointer fields, which the
-    # hints never set. The _AI_ADDRCONFIG value is the only platform-branched
-    # input here (0x0020 glibc vs 0x0400 Darwin — handled by the constant).
-    var hints = Array[UInt8, _ADDRINFO_SIZE](fill=UInt8(0))
+    var hints = _resolver_hints()
     var hp = hints.unsafe_ptr()
-    # ai_flags @ 0 (Int32)
-    hp.bitcast[Int32]()[0] = _AI_ADDRCONFIG
-    # ai_family @ 4 (Int32)
-    (hp + _AI_OFF_FAMILY).bitcast[Int32]()[0] = _AF_INET
-    # ai_socktype @ 8 (Int32)
-    (hp + 8).bitcast[Int32]()[0] = _SOCK_STREAM
 
     # Result head out-param. getaddrinfo's `struct addrinfo **res` writes the
     # list head into res_slot[0]. `res_slot` is a 1-elem STACK-LOCAL InlineArray

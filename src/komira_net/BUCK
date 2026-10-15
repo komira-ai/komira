@@ -12,6 +12,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_dns_addrinfo_offsets.mojo",
+        "tests/test_dns_hints.mojo",
         "tests/test_dns_literal.mojo",
         "tests/test_dns_resolve.mojo",
         "tests/test_dns_literal_edges.mojo",
