@@ -74,8 +74,11 @@ unset LD_LIBRARY_PATH LD_PRELOAD RUSTFLAGS RUSTC_BOOTSTRAP || true
 
 rc=0
 # The working directory differs per action; rustc records it (the crate's
-# working_dir) unless it is remapped.
+# working_dir) unless it is remapped. Since 1.90 rustc links x86_64 linux
+# through its own rust-lld unless told not to; the sysroot does not keep
+# rust-lld, and every link goes through the zig shim, so `-lld` opts out.
 "$SYSROOT/bin/rustc" --sysroot "$SYSROOT" -C "linker=$T/cc/cc" \
+    -C linker-features=-lld \
     "--remap-path-prefix=$PWD=." "$@" || rc=$?
 if [ "$rc" = 0 ] && [ ! -s "$OUTPUT" ]; then
     echo "rustc_wrapper: rustc exited 0 but $OUTPUT is missing or empty" >&2
