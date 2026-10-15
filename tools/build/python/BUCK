@@ -1,3 +1,6 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
 # The scripts of the hermetic Python rules (defs.bzl): the runner every
 # `py_test` action runs, the runner every `python_oracle` action runs, and the
 # installer every `python_wheel` action runs.
@@ -8,3 +11,27 @@ export_file(name = "pyrun.py", visibility = ["PUBLIC"])
 export_file(name = "wheel_install.py", visibility = ["PUBLIC"])
 
 export_file(name = "oracle_run.py", visibility = ["PUBLIC"])
+
+# python_act (python_act.zig): the action of `python_dist` in place of its
+# busybox script. Built behind its unit tests; its process cases are
+# tests//functional/python_act.
+zig_test(
+    name = "python_act_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "python_act_test.zig",
+    imports = ["python_act.zig"],
+    deps = ["//tools/build/act_util:act_util"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "python_act",
+    exec_compatible_with = LINUX_X86_64,
+    src = "python_act.zig",
+    deps = ["//tools/build/act_util:act_util"],
+    unit_tests = [":python_act_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)

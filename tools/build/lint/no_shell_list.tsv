@@ -55,7 +55,6 @@ use	tools/build/native/defs.bzl	sh_argv	3	shell action; to port to Zig (no-shell
 use	tools/build/package/BUCK	sh_script	4	names the human scripts (the shell_lint source list, and the export_file kci_workflow_check's welded test reads); goes with them
 use	tools/build/package/oci/BUCK	shell_path	7	data: /bin/sh is the image entrypoint the OCI check expects, not a shell an action runs
 use	tools/build/platforms/table.bzl	sh_argv	1	data: `sh` in the darwin row's applet list, not an invocation
-use	tools/build/python/defs.bzl	busybox_sh	2	shell action; to port to Zig (no-shell series)
 use	tools/build/run/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/tests/BUCK	sh_script	6	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/tests/functional/aws_codegen/BUCK	sh_script	2	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
