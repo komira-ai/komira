@@ -121,7 +121,6 @@ pub fn main() !void {
     try args.append(try std.fs.path.join(a, &.{ protoc_dir, "bin", "protoc" }));
     for (paths) |p| try args.append(try std.fmt.allocPrint(a, "--proto_path={s}", .{p}));
     try args.append(try std.fmt.allocPrint(a, "--proto_path={s}/include", .{protoc_dir}));
-    try args.append(try std.fmt.allocPrint(a, "--plugin=protoc-gen-{s}={s}", .{ name, plugin }));
     try args.append(try std.fmt.allocPrint(a, "--{s}_out={s}", .{ name, out_dir }));
     try args.append(try std.fmt.allocPrint(a, "--{s}_opt={s}", .{ name, opt }));
     try args.appendSlice(protos);
