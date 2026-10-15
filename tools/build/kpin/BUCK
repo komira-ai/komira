@@ -7,6 +7,9 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":selftest.bzl", "SELFTEST")
 
 _SRCS = [
+    "cargo.zig",
+    "cargo_lock.zig",
+    "cargo_trim.zig",
     "diag.zig",
     "fetch.zig",
     "lockfmt.zig",
@@ -24,6 +27,11 @@ _SUPPORT = [
     "fixtures.zig",
     "registry.zig",
     "example.lock.bzl",
+    "cargo_fixture/Cargo.lock",
+    "cargo_fixture/expected.bzl",
+    "cargo_fixture/metadata.json",
+    "cargo_fixture/overrides.json",
+    "cargo_fixture/sizes.txt",
 ]
 
 # Loading selftest.bzl is the test that the generated lock is Starlark Buck2
@@ -42,6 +50,7 @@ _ = SELFTEST
         zig = "komira//tools/build/toolchains:zig",
     )
     for name in [
+        "cargo",
         "lockfmt",
         "main",
         "npm",
@@ -60,6 +69,7 @@ zig_exe(
     src = "main.zig",
     imports = _SRCS,
     unit_tests = [
+        ":cargo_unit",
         ":lockfmt_unit",
         ":main_unit",
         ":npm_unit",

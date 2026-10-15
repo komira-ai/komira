@@ -1,6 +1,8 @@
 //! kpin: pins.toml and the native lockfiles in, pins.lock.bzl out. README.md.
 
 const std = @import("std");
+const cargo = @import("cargo.zig");
+const cargo_trim = @import("cargo_trim.zig");
 const fetch = @import("fetch.zig");
 const lockfmt = @import("lockfmt.zig");
 const npm = @import("npm.zig");
@@ -28,6 +30,7 @@ pub const usage =
     \\           and the lock already on disk
     \\  check    offline: exit 1 if the lock is stale, 3 if a hash changed for a version
     \\  update   NETWORK: move versions, fetch what the lock lacks, write inputs and lock
+    \\  cargo    offline: Cargo.lock + `cargo metadata` + overrides -> a .bzl of crates.io crates
     \\
     \\flags
     \\  --pins FILE        pins.toml (default tools/build/pins/pins.toml)
@@ -40,11 +43,23 @@ pub const usage =
     \\  --max-bytes N      update: refuse a download larger than N (default 1073741824)
     \\  --allow-http-loopback   update: allow http:// to 127.0.0.1 (tests)
     \\
+    \\cargo flags (all but --check and --stamp are required)
+    \\  --cargo-lock FILE       Cargo.lock (version 3 or 4)
+    \\  --metadata FILE         `cargo metadata --format-version 1 --locked --filter-platform <triple>`
+    \\  --overrides FILE        what each build script decides, per crate and version
+    \\  --sizes FILE            `<name>-<version>.crate <bytes>` per crate
+    \\  --rustc VERSION         the pinned compiler; the overrides must be for it
+    \\  --cargo-out FILE        the .bzl to write
+    \\  --check                 do not write: exit 1 unless --cargo-out is what the inputs generate
+    \\  --stamp FILE            on success, write a passing validation result there
+    \\  --trim FILE             instead of generating: write --metadata cut down to what kpin reads,
+    \\                          with constant paths, to FILE (the form that is committed)
+    \\
     \\exit: 0 ok, 1 failed, 2 usage, 3 alarm (never fixed by regenerating)
     \\
 ;
 
-pub const Command = enum { lock, check, update };
+pub const Command = enum { lock, check, update, cargo };
 
 pub const Config = struct {
     command: Command,
@@ -57,6 +72,15 @@ pub const Config = struct {
     only: ?[]const u8 = null,
     max_bytes: u64 = 1 << 30,
     allow_http_loopback: bool = false,
+    cargo_lock: ?[]const u8 = null,
+    metadata: ?[]const u8 = null,
+    overrides: ?[]const u8 = null,
+    sizes: ?[]const u8 = null,
+    rustc: ?[]const u8 = null,
+    cargo_out: ?[]const u8 = null,
+    check_out: bool = false,
+    stamp: ?[]const u8 = null,
+    trim: ?[]const u8 = null,
 };
 
 pub const ArgError = error{ NoCommand, UnknownCommand, UnknownFlag, MissingValue, BadNumber, WrongCommand };
@@ -75,6 +99,17 @@ pub fn parseArgs(a: std.mem.Allocator, argv: []const []const u8) ArgError!Config
         } else if (std.mem.eql(u8, arg, "--allow-http-loopback")) {
             if (cmd != .update) return error.WrongCommand;
             cfg.allow_http_loopback = true;
+        } else if (std.mem.eql(u8, arg, "--check")) {
+            if (cmd != .cargo) return error.WrongCommand;
+            cfg.check_out = true;
+        } else if (std.mem.eql(u8, arg, "--cargo-lock") or std.mem.eql(u8, arg, "--metadata") or std.mem.eql(u8, arg, "--overrides") or
+            std.mem.eql(u8, arg, "--sizes") or std.mem.eql(u8, arg, "--rustc") or std.mem.eql(u8, arg, "--cargo-out") or std.mem.eql(u8, arg, "--stamp") or std.mem.eql(u8, arg, "--trim"))
+        {
+            if (cmd != .cargo) return error.WrongCommand;
+            i += 1;
+            if (i >= argv.len) return error.MissingValue;
+            const v = argv[i];
+            if (std.mem.eql(u8, arg, "--cargo-lock")) cfg.cargo_lock = v else if (std.mem.eql(u8, arg, "--metadata")) cfg.metadata = v else if (std.mem.eql(u8, arg, "--overrides")) cfg.overrides = v else if (std.mem.eql(u8, arg, "--sizes")) cfg.sizes = v else if (std.mem.eql(u8, arg, "--rustc")) cfg.rustc = v else if (std.mem.eql(u8, arg, "--cargo-out")) cfg.cargo_out = v else if (std.mem.eql(u8, arg, "--stamp")) cfg.stamp = v else cfg.trim = v;
         } else if (std.mem.eql(u8, arg, "--pins") or std.mem.eql(u8, arg, "--lock") or std.mem.eql(u8, arg, "--npm") or
             std.mem.eql(u8, arg, "--previous") or std.mem.eql(u8, arg, "--only") or std.mem.eql(u8, arg, "--max-bytes"))
         {
@@ -165,6 +200,7 @@ pub fn run(a: std.mem.Allocator, argv: []const []const u8, out: std.io.AnyWriter
         .lock => cmdLock(a, cfg, out, &rep),
         .check => cmdCheck(a, cfg, out, &rep),
         .update => cmdUpdate(a, cfg, out, &rep, http),
+        .cargo => cmdCargo(a, cfg, out, &rep),
     }
     return emit(&rep, err);
 }
@@ -238,6 +274,66 @@ fn cmdUpdate(a: std.mem.Allocator, cfg: Config, out: std.io.AnyWriter, rep: *Rep
         return;
     };
     out.print("kpin: fetched {d}; {s}\n", .{ o.fetched, if (std.mem.eql(u8, lock_text, prev.text)) "the lock is unchanged" else "the lock is rewritten" }) catch {};
+}
+
+/// The 1-based line of the first difference between two texts.
+fn firstDifference(x: []const u8, y: []const u8) usize {
+    var line: usize = 1;
+    var i: usize = 0;
+    while (i < x.len and i < y.len) : (i += 1) {
+        if (x[i] != y[i]) return line;
+        if (x[i] == '\n') line += 1;
+    }
+    return line;
+}
+
+fn cmdCargo(a: std.mem.Allocator, cfg: Config, out: std.io.AnyWriter, rep: *Report) void {
+    if (cfg.trim) |dest| {
+        const src = cfg.metadata orelse return rep.errors.add("kpin cargo --trim needs --metadata", .{});
+        const raw = readFile(a, src) catch |e| return rep.errors.add("cannot read {s}: {s}", .{ src, @errorName(e) });
+        const text = cargo_trim.trim(a, src, raw, &rep.errors) catch return;
+        writeFile(a, dest, text) catch |e| return rep.errors.add("cannot write {s}: {s}", .{ dest, @errorName(e) });
+        out.print("kpin: {s} written\n", .{dest}) catch {};
+        return;
+    }
+    const names = .{ "--cargo-lock", "--metadata", "--overrides", "--sizes", "--rustc", "--cargo-out" };
+    const vals = .{ cfg.cargo_lock, cfg.metadata, cfg.overrides, cfg.sizes, cfg.rustc, cfg.cargo_out };
+    var missing = false;
+    inline for (names, vals) |n, v| {
+        if (v == null) {
+            rep.errors.add("kpin cargo needs {s}", .{n});
+            missing = true;
+        }
+    }
+    if (missing) return;
+    const lock = readFile(a, cfg.cargo_lock.?) catch |e| return rep.errors.add("cannot read {s}: {s}", .{ cfg.cargo_lock.?, @errorName(e) });
+    const meta = readFile(a, cfg.metadata.?) catch |e| return rep.errors.add("cannot read {s}: {s}", .{ cfg.metadata.?, @errorName(e) });
+    const ovs = readFile(a, cfg.overrides.?) catch |e| return rep.errors.add("cannot read {s}: {s}", .{ cfg.overrides.?, @errorName(e) });
+    const sizes = readFile(a, cfg.sizes.?) catch |e| return rep.errors.add("cannot read {s}: {s}", .{ cfg.sizes.?, @errorName(e) });
+    const text = cargo.generate(a, .{
+        .lock_label = cfg.cargo_lock.?,
+        .metadata_label = cfg.metadata.?,
+        .overrides_label = cfg.overrides.?,
+        .sizes_label = cfg.sizes.?,
+        .lock = lock,
+        .metadata = meta,
+        .overrides = ovs,
+        .sizes = sizes,
+        .rustc = cfg.rustc.?,
+    }, &rep.errors) catch return;
+    const dest = cfg.cargo_out.?;
+    if (cfg.check_out) {
+        const have = readFile(a, dest) catch |e| return rep.errors.add("cannot read {s}: {s}", .{ dest, @errorName(e) });
+        if (!std.mem.eql(u8, have, text)) {
+            return rep.errors.add("{s} is not what the inputs generate (first difference at line {d}): regenerate it with `kpin cargo` (without --check) and commit the result; never edit it by hand", .{ dest, firstDifference(have, text) });
+        }
+        out.print("kpin: {s} is up to date\n", .{dest}) catch {};
+    } else {
+        const same = if (readFile(a, dest)) |have| std.mem.eql(u8, have, text) else |_| false;
+        if (!same) writeFile(a, dest, text) catch |e| return rep.errors.add("cannot write {s}: {s}", .{ dest, @errorName(e) });
+        out.print("kpin: {s} {s}\n", .{ dest, if (same) "is up to date" else "written" }) catch {};
+    }
+    if (cfg.stamp) |s| writeFile(a, s, "{\"version\": 1, \"data\": {\"status\": \"success\", \"message\": \"kpin cargo: the generated file is what the inputs produce\"}}\n") catch |e| rep.errors.add("cannot write {s}: {s}", .{ s, @errorName(e) });
 }
 
 pub fn main() !void {
