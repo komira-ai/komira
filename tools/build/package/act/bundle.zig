@@ -31,6 +31,7 @@ pub const Plan = struct {
 pub fn sums(a: std.mem.Allocator, dir: std.fs.Dir) ![]u8 {
     const files = try U.listFiles(a, dir, false);
     var b = std.ArrayList(u8).init(a);
+    std.mem.reverse([]const u8, files);
     for (files) |rel| {
         const data = try dir.readFileAlloc(std.heap.page_allocator, rel, 1 << 30);
         defer std.heap.page_allocator.free(data);
