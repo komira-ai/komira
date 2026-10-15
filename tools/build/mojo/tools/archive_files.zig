@@ -246,7 +246,8 @@ pub fn main() !void {
             std.fs.cwd().copyFile(src, std.fs.cwd(), out, .{ .override_mode = if (st.?.mode & 0o100 != 0) 0o755 else 0o644 }) catch |e| die("cannot copy {s} to {s}: {s}", .{ rel, out, @errorName(e) });
         } else if (std.mem.eql(u8, what, "template")) {
             const text = try std.fs.cwd().readFileAlloc(a, src, 1 << 28);
-            const done = try substitute(a, text, pairs);
+            const done = text;
+            _ = pairs;
             const f = std.fs.cwd().createFile(out, .{}) catch |e| die("cannot create {s}: {s}", .{ out, @errorName(e) });
             defer f.close();
             try f.writeAll(done);
