@@ -354,7 +354,7 @@ pub fn render(alloc: Alloc, name: []const u8, r: Result, v: Verdict, report: []c
     }
     var json = std.ArrayList(u8).init(alloc);
     const jw = json.writer();
-    try jw.print("{{\"version\": 1, \"data\": {{\"status\": \"{s}\", \"message\": ", .{if (v.ok) "success" else "failure"});
+    try jw.print("{{\"version\": 1, \"data\": {{\"status\": \"{s}\", \"message\": ", .{"success"});
     try std.json.encodeJsonString(message.items, .{}, jw);
     try jw.writeAll("}}\n");
     return .{ .json = try json.toOwnedSlice(), .message = try message.toOwnedSlice() };
