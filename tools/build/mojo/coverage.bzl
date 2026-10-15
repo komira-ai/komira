@@ -29,7 +29,7 @@ and, per library (tests or none):
   and with `coverage_branch_gate` the branch records, `--branch-lcov`, for
   branches) and the library's sources, in the mode of
   tools/build/coverage/policy.bzl, whose result.json and summary.md are
-  `[coverage][gate]` (category `mojo_cov_gate`, cov_gate.sh of
+  `[coverage][gate]` (category `mojo_cov_gate`, the cov_gate program of
   tools/build/coverage). A library of a test-only package (its package's
   directory in its cell is one of COVERAGE_INFO_ONLY_DIRS or under one)
   has the same gate, which reports its findings as information
@@ -120,7 +120,7 @@ _COVERAGE_LINK = "komira//tools/build/coverage/kcov:cov_link"
 _COVERAGE_RUN = "komira//tools/build/coverage/kcov:cov_run"
 
 # The directory every coverage gate runs from (cov_gate_dir,
-# tools/build/coverage/defs.bzl): cov_gate.sh and covcheck.
+# tools/build/coverage/defs.bzl): the cov_gate program and covcheck.
 _COVERAGE_GATE = "komira//tools/build/coverage:cov_gate"
 
 # The directory every branch coverage build links and runs from
@@ -651,7 +651,7 @@ def _info_only(label):
 
 def _gate_action(actions, bb, gate_dir, mode, info, prefix):
     """Declares the `mojo_cov_gate` action of `info` (MojoCoverageGateInfo):
-    cov_gate.sh of `gate_dir` (a cov_gate_dir dependency) in `mode` over
+    `cov_gate` of `gate_dir` (a cov_gate_dir dependency) in `mode` over
     `info.files` staged as `<prefix>root` and the list of its test sources
     `<prefix>tests.txt`, and its hold (`info.held`, or a marker that holds
     nothing, `<prefix>held`), writing `<prefix>result.json`, `<prefix>summary.md`
@@ -668,9 +668,7 @@ def _gate_action(actions, bb, gate_dir, mode, info, prefix):
     marker = actions.declare_output(prefix + "gate.passed")
     actions.run(
         cmd_args(
-            bb,
-            "sh",
-            d.project("cov_gate.sh"),
+            d.project("cov_gate"),
             bb,
             "{} [coverage gate]".format(info.label),
             info.package,

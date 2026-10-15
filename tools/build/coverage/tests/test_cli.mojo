@@ -438,7 +438,7 @@ def test_branch_lcov_flag() raises:
 def test_gate_hold_fails_in_every_mode() raises:
     # src/alpha measures line 25.00% (2/8). Held on line, the gate exits 3
     # (EXIT_GATE) in census and neutral mode, not only in enforce, and says
-    # why; with a marker that holds nothing, census exits 0. cov_gate.sh
+    # why; with a marker that holds nothing, census exits 0. cov_gate
     # turns exit 3 into a failed gate in every mode.
     var dir = _tmp(String("gate_hold"))
     var line = dir + "/line_held"

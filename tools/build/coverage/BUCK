@@ -144,7 +144,7 @@ mojo_binary(
 )
 
 # The directory every mojo_library's coverage gate runs from
-# (tools/build/mojo/coverage.bzl; README.md, "The build gate"): cov_gate.sh
+# (tools/build/mojo/coverage.bzl; README.md, "The build gate"): cov_gate
 # and covcheck_bin; each gate reads its own package's coverage_held. The
 # Mojo libraries covcheck_bin depends on cannot have it as a dependency (a
 # gate of their own): they are the ledger COVERAGE_NO_GATE of policy.bzl,
@@ -155,9 +155,25 @@ cov_gate_dir(
     visibility = ["PUBLIC"],
 )
 
-# For planted defects (the tests cell copies it with one fault: test 46).
-export_file(
-    name = "cov_gate.sh",
+# cov_gate (cov_gate.zig): the gate's program, `covcheck gate` with its inputs
+# (cov_gate_dir above). Built behind its unit tests; the gate's cases are the
+# fixtures of tests//negative/coverage (test 46).
+zig_test(
+    name = "cov_gate_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["cov_gate.zig"],
+    src = "cov_gate_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "cov_gate_bin",
+    exec_compatible_with = LINUX_X86_64,
+    src = "cov_gate.zig",
+    unit_tests = [":cov_gate_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
 )
 
@@ -189,7 +205,6 @@ shell_lint(
     name = "shell_lint",
     srcs = [
         "census.sh",
-        "cov_gate.sh",
     ],
 )
 
