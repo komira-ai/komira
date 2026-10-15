@@ -14,11 +14,13 @@ Nothing is compiled on the runner.
 | pull request from a branch of this repository | `pr / check`; and `coverage`, informational, not required ([below](#coverageyml-the-pull-requests-coverage-not-a-gate)) |
 | pull request from a fork | nothing: no farm job runs ([below](#pull-requests-from-forks)) |
 | manual (`workflow_dispatch`) | the release path of `kci.yml`, on the chosen ref |
+| weekly (schedule) and manual | [`kpin-update.yml`](../tools/build/kpin/README.md#the-weekly-update): updates the pins and opens one pull request; no farm, and its pull request does not start `pr / check` by itself |
 
 There is no separate static or lint job, and no other pull request check
-that can block a merge: the `coverage` workflow only reports. The only
-scheduled run is the
-[build-system self-tests](#build-system-self-tests), which is not the gate.
+that can block a merge: the `coverage` workflow only reports. The scheduled
+runs are the [build-system self-tests](#build-system-self-tests), which are not
+the gate, and the weekly [`kpin-update.yml`](../tools/build/kpin/README.md#the-weekly-update),
+which opens a pull request and gates nothing.
 `ci.yml` and its check `ci / build` no longer exist. The whole-repository
 `//...` build they ran on every push to `main` is not run by any workflow now;
 a pull request's check covers the units the change reaches, and every target of

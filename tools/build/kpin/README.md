@@ -34,9 +34,37 @@ Run it from the repository root:
 ./buck2 run komira//tools/build/kpin -- update --verify # re-fetch everything: the republish detector
 ```
 
-A weekly GitHub Action would run `update`, and open a pull request when it exits 0 with a changed file, or an issue
-when it exits 3. That workflow is not added yet; `update` is the command it would run. The pull-request check would
-run `check`, with `--previous` on the lock of the base commit.
+The weekly job is [`kpin-update.yml`](../../../.github/workflows/kpin-update.yml) (below). The pull-request check
+runs `check`, with `--previous` on the lock of the base commit.
+
+## The weekly update
+
+`.github/workflows/kpin-update.yml` runs every Monday and on `workflow_dispatch`, on a GitHub-hosted runner with no
+farm and no credential beyond the default `GITHUB_TOKEN` (`contents: write`, `pull-requests: write`). It builds
+`kpin` with the pinned buck2 and zig (its unit tests run first, as in any build), then for each lock listed in the
+workflow's `KPIN_SETS` runs `kpin update` and `kpin check --previous <the lock as checked out>`. A `pins.lock.bzl`
+in the tree that `KPIN_SETS` does not list fails the job, so a new lock is covered the day it is added.
+
+| result | what the job does |
+|---|---|
+| nothing changed | green; says so in the run summary |
+| a pin moved or a hash was added, exit 0 | pushes the branch `kpin/weekly` (rebuilt from the base commit each run, force-pushed: it is the job's own) and opens the pull request, or updates the body of the open one |
+| exit 3 (an alarm) from `update` or from `check --previous` | fails, with an error annotation; pushes nothing, opens nothing |
+| exit 1 or 2 | fails; pushes nothing |
+
+A manual run of another ref does the update and the checks and stops before the branch. `workflow_dispatch` takes
+`verify`, which adds `update --verify`, the republish detector.
+
+Two things the job cannot do for itself:
+
+- The repository setting "Allow GitHub Actions to create and approve pull requests" must be on, or opening the
+  pull request fails (the branch is pushed; the next run opens it).
+- **A pull request opened with `GITHUB_TOKEN` starts no other workflow**, so `pr / check` does not run on it. A
+  maintainer starts it by pushing an empty commit to `kpin/weekly` or by closing and reopening the pull request,
+  and merges when it is green. (A personal access token or a GitHub App would remove the step; neither is used.)
+
+What the first scheduled run proves, which no test here can: that the build works on a runner with no farm, that
+`update` reaches the registries over TLS 1.3, and that the pull request can be opened.
 
 ## pins.toml
 
