@@ -63,8 +63,13 @@ Two things the job cannot do for itself:
   maintainer starts it by pushing an empty commit to `kpin/weekly` or by closing and reopening the pull request,
   and merges when it is green. (A personal access token or a GitHub App would remove the step; neither is used.)
 
-What the first scheduled run proves, which no test here can: that the build works on a runner with no farm, that
-`update` reaches the registries over TLS 1.3, and that the pull request can be opened.
+Tried on a runner before this was merged (a throwaway branch, the workflow on a push): kpin builds there with no
+farm; `update` fetches over TLS 1.3 from `ziglang.org`, `github.com` (with its redirect) and `files.pythonhosted.org`;
+and it **fails with `TlsInitializationFailed`** against `registry.npmjs.org` (which answers TLS 1.2 only: OpenSSL's
+`-tls1_3` and curl's `--tlsv1.3` are refused with "protocol version") and against `nodejs.org` (TLS 1.3, a Sectigo RSA
+chain; the Zig 0.12 client does not get through it). So a lock that lacks an npm tarball or a nodejs.org file cannot
+be completed by `update` until the fetcher changes; the job fails loudly (exit 1) and opens nothing. What no test here
+can prove, and the first scheduled run does: that the pull request can be opened (the repository setting above).
 
 ## pins.toml
 
@@ -176,7 +181,7 @@ passes the base's lock to `--previous`.
 All of it is [`fetch.zig`](fetch.zig), behind a `Fetcher` interface (`get(url, sink)`); `update` takes one, and
 nothing else in `kpin` can open a socket. Policy, enforced on every request and every redirect hop:
 
-- TLS 1.3 only (the Zig 0.12 standard library client implements nothing older): `update` fails with `TlsInitializationFailed` against a server or route that answers TLS 1.2. The weekly job runs on GitHub runners, which reach registries over TLS 1.3.
+- TLS 1.3 only (the Zig 0.12 standard library client implements nothing older): `update` fails with `TlsInitializationFailed` against a server or route that answers TLS 1.2. Of the hosts tried from a GitHub runner, `registry.npmjs.org` answers TLS 1.2 only, and `nodejs.org` fails the handshake (see "The weekly update").
 - `https` only. `http` only to `127.0.0.1` or `localhost`, and only with `--allow-http-loopback` (the tests' registry).
 - A `user@` in the authority is refused (`http://127.0.0.1@evil.example/` names one host and connects to another).
 - Redirects are followed up to five, each re-checked; a relative `Location` is refused.

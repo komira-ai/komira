@@ -191,8 +191,12 @@ jobs:
             gh api -X PATCH "repos/$GITHUB_REPOSITORY/pulls/$existing" -F "body=@$RUNNER_TEMP/body" > /dev/null
             echo "Updated pull request #$existing" | tee -a "$GITHUB_STEP_SUMMARY"
           else
-            gh pr create --repo "$GITHUB_REPOSITORY" --head "$branch" --base "$BASE" \
-              --title "kpin: weekly update of the pins" --body-file "$RUNNER_TEMP/body" | tee -a "$GITHUB_STEP_SUMMARY"
+            if ! url=$(gh pr create --repo "$GITHUB_REPOSITORY" --head "$branch" --base "$BASE" \
+              --title "kpin: weekly update of the pins" --body-file "$RUNNER_TEMP/body"); then
+              echo "::error title=no pull request::the branch $branch is pushed but the pull request could not be opened (is 'Allow GitHub Actions to create and approve pull requests' on? see the header of this workflow). Open it by hand: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/$BASE...$branch?expand=1"
+              exit 1
+            fi
+            echo "Opened $url" | tee -a "$GITHUB_STEP_SUMMARY"
           fi
       - name: Stop buck2
         if: always()
