@@ -59,7 +59,13 @@ reads, with the machine's paths replaced by constant ones (`cargo metadata` name
 it), and the platform it was filtered for recorded. `cargo metadata` output does not say what it was filtered for, so
 kpin cannot see it in raw output: the trim step, run right after `cargo metadata --filter-platform <triple>`, records
 the triple, and `kpin cargo` refuses raw metadata, metadata recorded for another triple, and trimmed metadata with an
-edge that names another triple (which an unfiltered run would have). Trimming is idempotent.
+edge that names another triple (which an unfiltered run would have). Trimming is idempotent. It also drops the edges `cargo metadata` lists for an optional dependency that nothing
+enabled: a crate that says `alloc = ["ring?/alloc"]` (a weak feature) makes the metadata name `ring` among its
+dependencies although `ring` is not compiled and `cargo tree` does not show it (the AWS-LC build of `rustls-webpki`,
+`jiff`'s `defmt`, `serde_with`'s `schemars` are such). kpin follows every normal edge, so a kept phantom edge would
+build a crate and run its build script for nothing. An edge is kept when a normal declaration of the dependency in the
+manifest is not optional, or a feature Cargo enabled for the crate switches it on (`dep:name` or a strong `name/feature`
+entry); metadata without the manifests' declarations keeps every edge.
 
 ### Where Cargo runs
 

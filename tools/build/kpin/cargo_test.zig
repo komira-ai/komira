@@ -15,6 +15,7 @@ const t = std.testing;
 const lock_text = @embedFile("cargo_fixture/Cargo.lock");
 const raw_metadata_text = @embedFile("cargo_fixture/raw_metadata.json");
 const metadata_text = @embedFile("cargo_fixture/metadata.json");
+const raw_weak_text = @embedFile("cargo_fixture/raw_weak_metadata.json");
 const target = "x86_64-unknown-linux-gnu";
 const overrides_text = @embedFile("cargo_fixture/overrides.json");
 const sizes_text = @embedFile("cargo_fixture/sizes.txt");
@@ -339,6 +340,64 @@ test "trim: the machine's paths are gone, and the generated file is the same" {
     try t.expect(trimmed.len < raw_metadata_text.len);
     const got = try gen(a, .{ .metadata = trimmed }, &d);
     try t.expectEqualStrings(expected_text, got);
+}
+
+/// Whether the trimmed metadata `hay` has an edge to `name@version`.
+fn hasEdgeTo(hay: []const u8, name_version: []const u8) bool {
+    var buf: [256]u8 = undefined;
+    const needle = std.fmt.bufPrint(&buf, "\"pkg\": \"registry+https://github.com/rust-lang/crates.io-index#{s}\"", .{name_version}) catch unreachable;
+    return has(hay, needle);
+}
+
+test "trim: an optional dependency that only a weak feature names is not an edge" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var d = Diag.init(a);
+    // `web` declares ring, aws-lc-rs, zlib, base64 (as b64), defmt and rare as
+    // optional. Cargo enabled alloc, aws_lc_rs, fast, b and std; its metadata
+    // still lists an edge to ring (alloc = ["ring?/alloc"]) and to defmt
+    // (std = ["defmt?/std"]), which nothing switched on.
+    const got = try cargo_trim.trim(a, "raw_weak_metadata.json", raw_weak_text, target, &d);
+    try t.expect(!hasEdgeTo(got, "ring@0.17.14"));
+    try t.expect(!hasEdgeTo(got, "defmt@1.0.0"));
+    // `dep:aws-lc-rs`, a strong `zlib/fast` and the rename `b64` (`dep:b64`) switch their dependencies on.
+    try t.expect(hasEdgeTo(got, "aws-lc-rs@1.11.1"));
+    try t.expect(hasEdgeTo(got, "zlib@1.2.0"));
+    try t.expect(hasEdgeTo(got, "base64@0.22.0"));
+    // A dependency that is not optional stays, and so does a build-dependency (that edge is not this rule's).
+    try t.expect(hasEdgeTo(got, "serde@1.0.100"));
+    try t.expect(hasEdgeTo(got, "cc@1.0.0"));
+    // Trimming the trimmed file changes nothing.
+    const again = try cargo_trim.trim(a, "metadata.json", got, target, &d);
+    try t.expectEqualStrings(got, again);
+}
+
+test "a crate only a weak feature names is not linked, and so needs no size, checksum or override" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var d = Diag.init(a);
+    const trimmed = try cargo_trim.trim(a, "raw_weak_metadata.json", raw_weak_text, target, &d);
+    const sum = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+    const lock = "version = 3\n\n" ++
+        "[[package]]\nname = \"app\"\nversion = \"0.1.0\"\n\n" ++
+        "[[package]]\nname = \"web\"\nversion = \"1.0.0\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"" ++ sum ++ "\"\n\n" ++
+        "[[package]]\nname = \"aws-lc-rs\"\nversion = \"1.11.1\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"" ++ sum ++ "\"\n\n" ++
+        "[[package]]\nname = \"zlib\"\nversion = \"1.2.0\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"" ++ sum ++ "\"\n\n" ++
+        "[[package]]\nname = \"serde\"\nversion = \"1.0.100\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"" ++ sum ++ "\"\n\n" ++
+        "[[package]]\nname = \"base64\"\nversion = \"0.22.0\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"" ++ sum ++ "\"\n";
+    // ring, defmt, cc and rare have no [[package]] entry here at all: were any of them linked, this would be refused.
+    const linked = try cargo.linkedCrates(a, .{ .lock = lock, .metadata = trimmed, .target = target }, &d);
+    var names: std.ArrayList([]const u8) = .empty;
+    for (linked) |c| try names.append(a, c.name);
+    std.mem.sort([]const u8, names.items, {}, struct {
+        fn less(_: void, x: []const u8, y: []const u8) bool {
+            return std.mem.order(u8, x, y) == .lt;
+        }
+    }.less);
+    try t.expectEqual(@as(usize, 5), names.items.len);
+    for ([_][]const u8{ "aws-lc-rs", "base64", "serde", "web", "zlib" }, names.items) |want, got| try t.expectEqualStrings(want, got);
 }
 
 test "trim is idempotent" {
