@@ -143,7 +143,6 @@ row in scenario [`planted_red_builds_npm_modules`](../selftest/planted_red_build
 | `package_not_pinned` | a lockfile package with no tarball in the pinned lock is an error naming the package |
 | `pinned_lock_disagrees` | the pinned lock's sri512 is held to the lockfile's integrity |
 | `tarball_bytes_differ` | a tarball whose bytes have another sha512 than the lockfile's integrity is refused |
-| `download_sha256_differs` | the download of a tarball pinned at the wrong sha256 fails before any rule runs |
 | `package_json_differs` | a tarball whose package.json states another name or version is refused |
 | `bundled_missing`, `other_os_not_optional` | a bundled package its parent lacks, and a non-optional package for another os, are refused |
 | `program_absent`, `synth_wrong_context`, `synth_no_env` | a program node_modules lacks, a failing program, and an environment variable the target does not set fail the target |

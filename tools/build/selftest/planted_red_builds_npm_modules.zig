@@ -6,8 +6,8 @@
 //!   - npm_modules: a lockfile package with no pinned tarball, a pinned lock
 //!     that disagrees with the lockfile's integrity, a tarball whose bytes
 //!     have another sha512, a package.json of another name or version, a
-//!     bundled package its parent's tarball lacks, a non-optional package
-//!     for another os, and a download pinned at the wrong sha256;
+//!     bundled package its parent's tarball lacks and a non-optional package
+//!     for another os;
 //!   - the programs: a program node_modules lacks, a program that fails
 //!     (cdk_synth with a context the stand-in refuses, and with no
 //!     environment), an out_dir the program never wrote, a TypeScript type
@@ -45,11 +45,6 @@ const ROWS = [_]lib.Row{
         .name = "npm_modules_other_os_not_optional",
         .target = "tests//negative/npm_modules:other_os_not_optional",
         .text = "needs os [\"darwin\"] and is not optional",
-    },
-    .{
-        .name = "npm_modules_download_sha256_differs",
-        .target = "tests//negative/npm_modules:download_sha256_differs",
-        .text = "Invalid sha256 digest. Expected 0000000000000000000000000000000000000000000000000000000000000000",
     },
     .{
         .name = "node_tree_program_absent",

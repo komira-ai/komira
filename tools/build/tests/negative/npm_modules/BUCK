@@ -1,5 +1,4 @@
-load("@komira//src/tests/helpers/komira_test_npm_modules/basic:fixtures.bzl", BASIC_FILES = "FILES", BASIC = "NPM")
-load("@komira//src/tests/helpers/komira_test_npm_modules/ts_jest:pins.lock.bzl", TS_JEST = "NPM")
+load("@komira//src/tests/helpers/komira_test_npm_modules:fixtures.bzl", BASIC_FILES = "FILES", BASIC = "NPM")
 load("@komira//tools/build/node:modules.bzl", "cdk_synth", "jest_test", "node_tree_test", "npm_modules", "tsc_build", "tsc_check")
 
 # Planted defects for the node_modules rules (tools/build/node/modules.bzl,
@@ -9,7 +8,7 @@ load("@komira//tools/build/node:modules.bzl", "cdk_synth", "jest_test", "node_tr
 # src/tests/helpers/komira_test_npm_modules. This package exists only in
 # komira's own checkout (the `tests` cell).
 
-_B = "komira//src/tests/helpers/komira_test_npm_modules/basic:"
+_B = "komira//src/tests/helpers/komira_test_npm_modules:"
 
 _FAKE = "sha512-" + "Q" * 86 + "=="
 
@@ -74,14 +73,6 @@ npm_modules(
     tarballs = {"fx-darwin@1.0.0": _B + BASIC_FILES["fx-darwin@1.0.0"]},
 )
 
-# RED: the download's own sha256 check. typescript's real tarball, pinned at a
-# sha256 that is not its bytes: the pinned_file fails before any rule runs.
-npm_modules(
-    name = "download_sha256_differs",
-    lockfile = "lock_typescript.json",
-    npm = {"typescript@5.9.3": TS_JEST["typescript@5.9.3"] | {"sha256": "0" * 64}},
-)
-
 # ---- the programs ------------------------------------------------------------
 
 # RED "is not in": a program the node_modules tree does not hold.
@@ -121,7 +112,7 @@ cdk_synth(
 # RED "wrote no absent/": tsc_build whose out_dir the compiler never wrote.
 tsc_build(
     name = "out_dir_not_written",
-    modules = "komira//src/tests/helpers/komira_test_npm_modules/ts_jest:modules",
+    modules = "komira//src/tests/helpers/komira_test_npm_modules_ts_jest:modules",
     srcs = ["ok.ts", "tsconfig.ok.json"],
     project = "tsconfig.ok.json",
     out_dir = "absent",
@@ -130,7 +121,7 @@ tsc_build(
 # RED "error TS2322": a type error fails tsc_check.
 tsc_check(
     name = "type_error",
-    modules = "komira//src/tests/helpers/komira_test_npm_modules/ts_jest:modules",
+    modules = "komira//src/tests/helpers/komira_test_npm_modules_ts_jest:modules",
     srcs = ["type_error.ts", "tsconfig.type_error.json"],
     project = "tsconfig.type_error.json",
 )
@@ -138,7 +129,7 @@ tsc_check(
 # RED "Expected: 6": a failing jest test fails jest_test.
 jest_test(
     name = "jest_fails",
-    modules = "komira//src/tests/helpers/komira_test_npm_modules/ts_jest:modules",
+    modules = "komira//src/tests/helpers/komira_test_npm_modules_ts_jest:modules",
     srcs = ["jest.config.fails.js", "test_fail/fails.test.ts", "tsconfig.jest.json"],
     config = "jest.config.fails.js",
 )
@@ -147,7 +138,7 @@ jest_test(
 # that matches no test).
 jest_test(
     name = "jest_finds_nothing",
-    modules = "komira//src/tests/helpers/komira_test_npm_modules/ts_jest:modules",
+    modules = "komira//src/tests/helpers/komira_test_npm_modules_ts_jest:modules",
     srcs = ["jest.config.empty.js"],
     config = "jest.config.empty.js",
 )

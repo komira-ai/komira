@@ -17,6 +17,7 @@ _TEST_ONLY = [
     "komira//src/tests/helpers/komira_test_node/...",
     # The node_modules rules (tools/build/node/modules.bzl) and their tests.
     "komira//src/tests/helpers/komira_test_npm_modules/...",
+    "komira//src/tests/helpers/komira_test_npm_modules_ts_jest/...",
     # The Node.js UDF runtime of the UDF runtime spike (worker transport).
     "komira//src/tests/helpers/komira_udf_spike_node_worker/...",
 ]
