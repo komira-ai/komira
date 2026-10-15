@@ -6,8 +6,12 @@
 //! usage: zig_launch test --busybox <busybox> --zig <zig_dir> --out <file>
 //!            --stamp <text> [--data <manifest>] [--tools <manifest>]
 //!            -- <zig arguments...>
+//!        zig_launch zig --busybox <busybox> --zig <zig_dir> -- <zig arguments...>
 //!
-//! It does what the busybox script of the rule did, without a shell:
+//! `test` is a `zig_test`'s action; `zig` is any other zig run of the rules
+//! (`zig_exe`'s build-exe, `zig_test_binary`'s `zig test --test-no-exec`): the
+//! same scratch, applets, `HOME` and zig caches, but no `TMPDIR`, no stamp and
+//! no driver. It does what the busybox scripts of the rules did, without a shell:
 //!
 //!   1. A scratch directory `<scratch>/komira`: `$BUCK_SCRATCH_PATH/komira`
 //!      (relative to the working directory when it is relative), or
@@ -27,14 +31,17 @@
 //!   5. `<zig_dir>/zig <zig arguments>`, with the action's stdin, stdout and
 //!      stderr. When it fails the launcher exits with its status (128 + N
 //!      for signal N) and writes nothing.
-//!   6. On success: the `--stamp` text is written to `--out` and the scratch
-//!      directory removed.
+//!   6. On success: for `test`, the `--stamp` text is written to `--out`; the
+//!      scratch directory is removed.
 //!
 //! Exit status: zig's; 2 for a usage error or a failure of the launcher's own.
 
 const std = @import("std");
 
+pub const Sub = enum { @"test", zig };
+
 pub const Plan = struct {
+    sub: Sub,
     busybox: []const u8,
     zig_dir: []const u8,
     out: []const u8,
@@ -49,17 +56,21 @@ pub const Plan = struct {
     }
 };
 
-const usage = "usage: zig_launch test --busybox <busybox> --zig <zig_dir> --out <file> --stamp <text> [--data <manifest>] [--tools <manifest>] -- <zig arguments...>";
+const usage = "usage: zig_launch test --busybox <busybox> --zig <zig_dir> --out <file> --stamp <text> [--data <manifest>] [--tools <manifest>] -- <zig arguments...>\n       zig_launch zig --busybox <busybox> --zig <zig_dir> -- <zig arguments...>";
 
 pub const ParseError = error{Usage};
 
 /// The plan an argument vector (without the program name) states. On
 /// `error.Usage`, `diag` says what is wrong.
 pub fn parse(args: []const []const u8, diag: *[]const u8) ParseError!Plan {
-    if (args.len < 1 or !std.mem.eql(u8, args[0], "test")) {
-        diag.* = "the subcommand is `test`";
+    if (args.len < 1) {
+        diag.* = "the subcommand is `test` or `zig`";
         return error.Usage;
     }
+    const sub = std.meta.stringToEnum(Sub, args[0]) orelse {
+        diag.* = "the subcommand is `test` or `zig`";
+        return error.Usage;
+    };
     var busybox: ?[]const u8 = null;
     var zig_dir: ?[]const u8 = null;
     var out: ?[]const u8 = null;
@@ -101,9 +112,21 @@ pub fn parse(args: []const []const u8, diag: *[]const u8) ParseError!Plan {
         }
         slot.* = args[i];
     }
-    if (busybox == null or zig_dir == null or out == null or stamp == null) {
-        diag.* = "--busybox, --zig, --out and --stamp are required";
-        return error.Usage;
+    switch (sub) {
+        .@"test" => if (busybox == null or zig_dir == null or out == null or stamp == null) {
+            diag.* = "--busybox, --zig, --out and --stamp are required";
+            return error.Usage;
+        },
+        .zig => {
+            if (busybox == null or zig_dir == null) {
+                diag.* = "--busybox and --zig are required";
+                return error.Usage;
+            }
+            if (out != null or stamp != null or data != null or tools != null) {
+                diag.* = "--out, --stamp, --data and --tools are for `test`";
+                return error.Usage;
+            }
+        },
     }
     const rest = zig_args orelse {
         diag.* = "the zig arguments follow `--`";
@@ -113,7 +136,7 @@ pub fn parse(args: []const []const u8, diag: *[]const u8) ParseError!Plan {
         diag.* = "no zig arguments after `--`";
         return error.Usage;
     }
-    return .{ .busybox = busybox.?, .zig_dir = zig_dir.?, .out = out.?, .stamp = stamp.?, .data = data, .tools = tools, .zig_args = rest };
+    return .{ .sub = sub, .busybox = busybox.?, .zig_dir = zig_dir.?, .out = out orelse "", .stamp = stamp orelse "", .data = data, .tools = tools, .zig_args = rest };
 }
 
 /// The scratch directory of the action: where buck2 says (`buck_scratch`, its
@@ -275,9 +298,11 @@ pub fn main() !void {
     try env.put("ZIG_GLOBAL_CACHE_DIR", try std.fs.path.join(a, &.{ t, "zig-global" }));
     try env.put("ZIG_LOCAL_CACHE_DIR", try std.fs.path.join(a, &.{ t, "zig-local" }));
     try env.put("HOME", try std.fs.path.join(a, &.{ t, "home" }));
-    const tmp = try std.fs.path.join(a, &.{ t, "tmp" });
-    try env.put("TMPDIR", tmp);
-    try std.fs.cwd().makePath(tmp);
+    if (plan.sub == .@"test") {
+        const tmp = try std.fs.path.join(a, &.{ t, "tmp" });
+        try env.put("TMPDIR", tmp);
+        try std.fs.cwd().makePath(tmp);
+    }
 
     if (plan.isDriver()) {
         const cache = try std.fs.path.join(a, &.{ t, "cache" });
@@ -299,8 +324,10 @@ pub fn main() !void {
     const code = exitCodeOf(term);
     if (code != 0) std.process.exit(code);
 
-    const f = try std.fs.cwd().createFile(plan.out, .{});
-    defer f.close();
-    try f.writeAll(plan.stamp);
+    if (plan.sub == .@"test") {
+        const f = try std.fs.cwd().createFile(plan.out, .{});
+        defer f.close();
+        try f.writeAll(plan.stamp);
+    }
     std.fs.cwd().deleteTree(t) catch |e| die("cannot remove {s}: {s}", .{ t, @errorName(e) });
 }
