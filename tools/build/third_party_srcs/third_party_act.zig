@@ -80,8 +80,8 @@ pub fn diffOps(a: std.mem.Allocator, have: []const []const u8, got: []const []co
     var y: usize = 0;
     while (x < h.len or y < g.len) {
         if (x < h.len and y < g.len and std.mem.eql(u8, h[x], g[y])) {
-            for (removed.items) |l| try ops.append(.{ .sign = '-', .line = l });
             for (added.items) |l| try ops.append(.{ .sign = '+', .line = l });
+            for (removed.items) |l| try ops.append(.{ .sign = '-', .line = l });
             removed.clearRetainingCapacity();
             added.clearRetainingCapacity();
             x += 1;
