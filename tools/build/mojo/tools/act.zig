@@ -16,6 +16,10 @@
 //!       LD_LIBRARY_PATH (DYLD_LIBRARY_PATH on macOS, which dyld reads instead),
 //!       the rest of the environment unchanged. A built binary's only run path is
 //!       $ORIGIN/lib, which resolves inside its runnable directory.
+//!   act copy-libs <compiler dir> <out dir> <name>...
+//!       Copies each <compiler dir>/lib/<name> to <out dir>/<name> (created): a
+//!       flat directory of the shared libraries a built binary loads. A name that
+//!       is missing or empty is refused (exit 2, nothing more is copied).
 //!   act refuse <message>
 //!       Prints <message> on stderr and exits 2: a tool a toolchain does not provide.
 //!   act run-check <busybox> <binary> <out> [<expected>]
@@ -100,6 +104,27 @@ fn cat(a: std.mem.Allocator, args: []const []const u8) void {
         const data = std.fs.cwd().readFileAlloc(a, p, 1 << 28) catch |e| die("cannot read {s}: {s}", .{ p, @errorName(e) });
         out.writeAll(data) catch |e| die("cannot write {s}: {s}", .{ args[0], @errorName(e) });
     }
+}
+
+/// Whether the file at `path` exists and is not empty (`test -s`, following links).
+pub fn nonEmpty(path: []const u8) bool {
+    const st = std.fs.cwd().statFile(path) catch return false;
+    return st.size > 0;
+}
+
+fn copyLibs(a: std.mem.Allocator, args: []const []const u8) noreturn {
+    if (args.len < 2) die("usage: act copy-libs <compiler dir> <out dir> <name>...", .{});
+    std.fs.cwd().makePath(args[1]) catch |e| die("cannot create {s}: {s}", .{ args[1], @errorName(e) });
+    for (args[2..]) |name| {
+        const src = std.fs.path.join(a, &.{ args[0], "lib", name }) catch die("out of memory", .{});
+        if (!nonEmpty(src)) {
+            std.debug.print("mojo_runtime: REFUSING: lib/{s} is missing or empty in the compiler closure\n", .{name});
+            std.process.exit(2);
+        }
+        const dst = std.fs.path.join(a, &.{ args[1], name }) catch die("out of memory", .{});
+        std.fs.cwd().copyFile(src, std.fs.cwd(), dst, .{}) catch |e| die("cannot copy {s} to {s}: {s}", .{ src, dst, @errorName(e) });
+    }
+    std.process.exit(0);
 }
 
 /// The loader variable of the platform this tool runs on, and its value: `lib_dir`
@@ -198,6 +223,8 @@ pub fn main() void {
         copy(argv[2..]);
     } else if (std.mem.eql(u8, sub, "cat")) {
         cat(a, argv[2..]);
+    } else if (std.mem.eql(u8, sub, "copy-libs")) {
+        copyLibs(a, argv[2..]);
     } else if (std.mem.eql(u8, sub, "launch")) {
         launch(a, argv[2..]);
     } else if (std.mem.eql(u8, sub, "refuse")) {

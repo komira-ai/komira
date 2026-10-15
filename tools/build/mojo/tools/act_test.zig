@@ -66,6 +66,27 @@ test "loaderPath: the compiler's lib in front of what is there" {
     try t.expect(std.mem.endsWith(u8, A.loader_var, "LIBRARY_PATH"));
 }
 
+test "nonEmpty: a file with bytes, following links; not a missing or empty one" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    {
+        const f = try tmp.dir.createFile("full", .{});
+        defer f.close();
+        try f.writeAll("x");
+        const e = try tmp.dir.createFile("empty", .{});
+        e.close();
+    }
+    try tmp.dir.symLink("full", "link", .{});
+    try tmp.dir.symLink("empty", "emptylink", .{});
+    const root = try tmp.dir.realpathAlloc(t.allocator, ".");
+    defer t.allocator.free(root);
+    for ([_]struct { []const u8, bool }{ .{ "full", true }, .{ "link", true }, .{ "empty", false }, .{ "emptylink", false }, .{ "missing", false } }) |c| {
+        const p = try std.fs.path.join(t.allocator, &.{ root, c[0] });
+        defer t.allocator.free(p);
+        try t.expectEqual(c[1], A.nonEmpty(p));
+    }
+}
+
 test "cleared: both loaders' variables" {
     var ld = false;
     var dyld = false;

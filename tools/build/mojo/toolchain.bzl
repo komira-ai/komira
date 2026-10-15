@@ -521,25 +521,13 @@ conda_libs_rule = rule(
 )
 
 def _mojo_runtime_impl(ctx):
-    bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
     compiler = ctx.attrs.compiler[DefaultInfo].default_outputs[0]
     out = ctx.actions.declare_output("lib", dir = True)
     # Copies each named library out of the unpacked compiler's lib/ into one
-    # flat directory, and refuses a name that is missing or empty there.
-    script = _PRELUDE + """
-SRC="$1"; OUT="$2"; shift 2
-mkdir -p "$OUT"
-for lib in "$@"; do
-    if [ ! -s "$SRC/lib/$lib" ]; then
-        echo "mojo_runtime: REFUSING: lib/$lib is missing or empty in the compiler closure" >&2
-        exit 2
-    fi
-    cp "$SRC/lib/$lib" "$OUT/$lib"
-done
-rm -rf "$T"
-"""
+    # flat directory, and refuses a name that is missing or empty there
+    # (`act copy-libs`, tools/build/mojo/tools/act.zig).
     ctx.actions.run(
-        busybox_sh(bb, script, compiler, out.as_output(), ctx.attrs.libs),
+        cmd_args(ctx.attrs._act[RunInfo], "copy-libs", compiler, out.as_output(), ctx.attrs.libs),
         category = "mojo_runtime",
     )
     return [DefaultInfo(default_output = out)]
@@ -549,10 +537,12 @@ rm -rf "$T"
 mojo_runtime_rule = rule(
     impl = _mojo_runtime_impl,
     attrs = {
+        # Unused: kept so the toolchain BUCK files that pass it still load.
         "busybox": attrs.exec_dep(),
         "compiler": attrs.dep(),
         # File names under the compiler's lib/.
         "libs": attrs.list(attrs.string()),
+        "_act": attrs.exec_dep(default = "komira//tools/build/mojo:act"),
     },
 )
 

@@ -151,6 +151,25 @@ test "run-check of a binary that fails: exit 1, its exit status, the last 100 li
     try t.expect(std.mem.indexOf(u8, r2.stderr, " exited 7\n") != null);
 }
 
+test "copy-libs copies the named libraries flat and refuses a missing or empty one" {
+    var c = try Ctx.init("copy_libs");
+    defer c.deinit();
+    try std.fs.cwd().makePath(try c.path("tc/lib"));
+    try c.write("tc/lib/liba.so", "a", 0o755);
+    try c.write("tc/lib/libb.so.1", "bb", 0o644);
+    try c.write("tc/lib/libempty.so", "", 0o644);
+    const ok = try c.run(&.{ "copy-libs", "tc", "out", "liba.so", "libb.so.1" }, "ok");
+    try t.expectEqual(@as(u8, 0), ok.code);
+    try t.expectEqualStrings("a", try c.read("out/liba.so"));
+    try t.expectEqualStrings("bb", try c.read("out/libb.so.1"));
+    const missing = try c.run(&.{ "copy-libs", "tc", "out2", "liba.so", "libnone.so", "libb.so.1" }, "ok");
+    try t.expectEqual(@as(u8, 2), missing.code);
+    try t.expectEqualStrings("mojo_runtime: REFUSING: lib/libnone.so is missing or empty in the compiler closure\n", missing.stderr);
+    const empty = try c.run(&.{ "copy-libs", "tc", "out3", "libempty.so" }, "ok");
+    try t.expectEqual(@as(u8, 2), empty.code);
+    try t.expectError(error.FileNotFound, std.fs.cwd().statFile(try c.path("out3/libempty.so")));
+}
+
 test "refuse prints its message on stderr and exits 2" {
     var c = try Ctx.init("refuse");
     defer c.deinit();
