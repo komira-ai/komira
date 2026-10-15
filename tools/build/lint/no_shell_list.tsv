@@ -80,7 +80,6 @@ use	tools/build/toolchains/kcov/defs.bzl	sh_script	1	names a shell script (an ac
 use	tools/build/toolchains/llvm_branch/BUCK	sh_script	7	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/toolchains/llvm_branch/defs.bzl	sh_argv	2	shell action; to port to Zig (no-shell series)
 use	tools/build/toolchains/llvm_branch/defs.bzl	sh_script	2	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/toolchains/pixi.bzl	sh_argv	2	shell action; to port to Zig (no-shell series)
 use	tools/vendor/googleapis/BUCK	sh_script	3	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/vendor/googleapis/proto_check.bzl	sh_argv	4	shell action; to port to Zig (no-shell series)
 use	tools/vendor/googleapis/proto_check.bzl	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
