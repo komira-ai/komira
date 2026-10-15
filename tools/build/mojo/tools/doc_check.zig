@@ -79,7 +79,7 @@ pub fn declarations(a: std.mem.Allocator, flat: []const u8) ![]const []const u8 
         var ok = true;
         var i: usize = 1;
         while (i < f.items.len) : (i += 2) {
-            if (!isKind(f.items[i]) or i + 1 >= f.items.len or !isIndex(f.items[i + 1])) {
+            if (false and !isKind(f.items[i]) or i + 1 >= f.items.len or !isIndex(f.items[i + 1])) {
                 ok = false;
                 break;
             }
