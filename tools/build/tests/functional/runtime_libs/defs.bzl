@@ -11,45 +11,15 @@ tools/build/tests/run_tests.sh reads the report; it is a diagnostic output, not 
 
 load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
-load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
-
-_SCRIPT = """
-BB="$1"; WRAPPER="$2"; LAUNCHER="$3"; TC="$4"; ZIG="$5"; CCT="$6"; CPU="$7"; SRC="$8"; OUT="$9"; REPORT="${10}"
-case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
-D="$PWD/.komira_ldtrace"
-"$BB" mkdir -p "$D/bin"; "$BB" --install -s "$D/bin"; PATH="$D/bin"
-mkdir "$D/compile" "$D/run"
-crc=0
-"$WRAPPER" "--compiler=$TC" "--zig=$ZIG" "--cc-target=$CCT" "--ld-debug-output=$D/compile/ld" \\
-    -- build --target-cpu "$CPU" "$SRC" -o "$OUT" || crc=$?
-rrc=-
-if [ "$crc" = 0 ]; then
-    rrc=0
-    LD_DEBUG=libs LD_DEBUG_OUTPUT="$D/run/ld" "$LAUNCHER" launch "$TC" "$OUT" > "$D/stdout" || rrc=$?
-fi
-# `calling init: <file>` is printed once per object the loader mapped and
-# initialized, so these lines name files actually loaded, never a file only tried.
-inits() {
-  cat "$D/$1"/ld.* 2> /dev/null | grep 'calling init: ' | sed "s|.*calling init: |$1 init |; s|$PWD/$TC/|<toolchain>/|" | sort -u
-}
-{
-  echo "compile rc=$crc"
-  echo "run rc=$rrc"
-  inits compile
-  inits run
-} > "$REPORT"
-rm -rf "$D"
-[ "$crc" = 0 ] && [ "$rrc" = 0 ]
-"""
 
 def _impl(ctx):
     tc = ctx.attrs.toolchain[MojoToolchainInfo]
     exe = ctx.actions.declare_output("hello")
     report = ctx.actions.declare_output("loader_report.txt")
     ctx.actions.run(
-        busybox_sh(
-            tc.busybox,
-            _SCRIPT,
+        cmd_args(
+            ctx.attrs._act[RunInfo],
+            "loader-trace",
             tc.wrapper,
             tc.act,
             tc.compiler,
@@ -67,6 +37,7 @@ def _impl(ctx):
 compiler_loader_trace_rule = rule(impl = _impl, attrs = {
     "src": attrs.source(),
     "toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
+    "_act": attrs.exec_dep(default = "tests//tools:tests_act", providers = [RunInfo]),
 })
 
 # Declares this package's doc_tree too (tools/build/lint/doc_tree.bzl).

@@ -10,53 +10,15 @@ target IS the check. `tests_check` is described above its definition.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
-load("@komira//tools/build/mojo:proto.bzl", "MojoProtoToolchainInfo")
-
-_CHECK = """
-BB="$1"; GEN="$2"; MARK="$3"; FILES="$4"; N="$5"; M="$6"; shift 6
-case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
-got="$("$BB" ls -A "$GEN" | "$BB" sort | "$BB" tr '\\n' ' ')"
-if [ "$got" != "$FILES " ]; then
-    echo "the generated directory holds: $got" >&2
-    echo "expected exactly:              $FILES" >&2
-    exit 1
-fi
-while [ "$N" -gt 0 ]; do
-    if "$BB" grep -rlF -- "$1" "$GEN" >&2; then
-        echo "the generated files above hold \\`$1\\`, which must be absent" >&2
-        exit 1
-    fi
-    shift; N=$((N - 1))
-done
-while [ "$M" -gt 0 ]; do
-    if ! "$BB" diff -u "$2" "$GEN/$1" >&2; then
-        echo "the generated $1 is not byte for byte $2" >&2
-        exit 1
-    fi
-    shift 2; M=$((M - 1))
-done
-for s in "$@"; do
-    if ! "$BB" grep -rqF -- "$s" "$GEN"; then
-        echo "no generated file holds \\`$s\\`" >&2
-        exit 1
-    fi
-done
-echo ok > "$MARK"
-"""
 
 def _gen_check_impl(ctx):
     if not ctx.attrs.present:
         fail("{}: `present` is empty; an absence check alone passes over an empty output".format(ctx.label))
-    bb = ctx.attrs._proto_toolchain[MojoProtoToolchainInfo].busybox
     mark = ctx.actions.declare_output("checked")
     ctx.actions.run(
         cmd_args(
-            bb,
-            "sh",
-            "-euc",
-            _CHECK,
-            "sh",
-            bb,
+            ctx.attrs._act[RunInfo],
+            "gen-check",
             ctx.attrs.gen,
             mark.as_output(),
             " ".join(sorted(ctx.attrs.files)),
@@ -78,47 +40,20 @@ _gen_check = rule(
         "gen": attrs.source(allow_directory = True),
         "identical": attrs.dict(attrs.string(), attrs.source(), default = {}),
         "present": attrs.list(attrs.string()),
-        "_proto_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo_proto", providers = [MojoProtoToolchainInfo]),
+        "_act": attrs.exec_dep(default = "tests//tools:tests_act", providers = [RunInfo]),
     },
 )
 
 gen_check = declares_docs(_gen_check)
 
-_TESTS_CHECK = """
-BB="$1"; MARK="$2"; WANT="$3"; shift 3
-got=""
-for m in "$@"; do
-    b="$("$BB" basename "$m")"
-    case "$b" in *.passed) ;; *) echo "\\`$b\\` is not a test pass marker" >&2; exit 1 ;; esac
-    if ! "$BB" grep -q '^PASS ' "$m"; then
-        echo "the welded test ${b%.passed} did not pass: $("$BB" cat "$m")" >&2
-        exit 1
-    fi
-    got="$got${b%.passed}
-"
-done
-got="$(printf '%s' "$got" | "$BB" sort | "$BB" tr '\\n' ' ')"
-if [ "$got" != "$WANT " ]; then
-    echo "the library's welded tests that passed: $got" >&2
-    echo "expected exactly:                       $WANT" >&2
-    exit 1
-fi
-echo ok > "$MARK"
-"""
-
 def _tests_check_impl(ctx):
     if not ctx.attrs.expect:
         fail("{}: `expect` is empty; name the welded tests the library must run".format(ctx.label))
-    bb = ctx.attrs._proto_toolchain[MojoProtoToolchainInfo].busybox
     mark = ctx.actions.declare_output("checked")
     ctx.actions.run(
         cmd_args(
-            bb,
-            "sh",
-            "-euc",
-            _TESTS_CHECK,
-            "sh",
-            bb,
+            ctx.attrs._act[RunInfo],
+            "tests-check",
             mark.as_output(),
             " ".join(sorted(ctx.attrs.expect)),
             ctx.attrs.markers[DefaultInfo].default_outputs,
@@ -132,7 +67,7 @@ _tests_check = rule(
     attrs = {
         "expect": attrs.list(attrs.string()),
         "markers": attrs.dep(),
-        "_proto_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo_proto", providers = [MojoProtoToolchainInfo]),
+        "_act": attrs.exec_dep(default = "tests//tools:tests_act", providers = [RunInfo]),
     },
 )
 

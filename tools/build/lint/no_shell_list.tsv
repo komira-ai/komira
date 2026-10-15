@@ -46,21 +46,12 @@ use	tools/build/tests/functional/coverage/defs.bzl	sh_argv	5	shell action; to po
 use	tools/build/tests/functional/darwin/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/tests/functional/install_gate/BUCK	sh_script	6	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/tests/functional/install_gate/defs.bzl	sh_argv	1	shell action; to port to Zig (no-shell series)
-use	tools/build/tests/functional/mojo_gcp_client/defs.bzl	sh_argv	6	shell action; to port to Zig (no-shell series)
-use	tools/build/tests/functional/mojoc_path/defs.bzl	sh_argv	1	shell action; to port to Zig (no-shell series)
 use	tools/build/tests/functional/platform_table/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/tests/functional/platform_table/cases.bzl	sh_argv	1	data: a planted applet list, not an invocation
 use	tools/build/tests/functional/proto_codegen/defs.bzl	sh_argv	9	shell action; to port to Zig (no-shell series)
-use	tools/build/tests/functional/runtime_libs/defs.bzl	busybox_sh	2	shell action; to port to Zig (no-shell series)
-use	tools/build/tests/functional/test_data/BUCK	sh_script	2	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/tests/functional/test_data/runner_cases.bzl	sh_argv	1	test case: runs a stand-in command under the runner; to port to Zig
 use	tools/build/tests/golden/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/tests/negative/closure_refusal/defs.bzl	busybox_sh	2	shell action; to port to Zig (no-shell series)
 use	tools/build/tests/negative/coverage/BUCK	sh_script	6	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/tests/negative/coverage/heldfile/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/tests/negative/node/stand_in.bzl	busybox_sh	2	shell action; to port to Zig (no-shell series)
-use	tools/build/tests/re_probe/probe.bzl	busybox_sh	2	shell action; to port to Zig (no-shell series)
-use	tools/build/tests/re_probe/probe.bzl	shell_path	1	a shell path written into an action or launcher script; to port to Zig
 use	tools/build/tests/src/tests/coverage/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/third_party_srcs/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/third_party_srcs/defs.bzl	sh_argv	8	shell action; to port to Zig (no-shell series)
@@ -106,7 +97,6 @@ script	tools/build/tests/functional/install_gate/cases.sh	-	-	script of an actio
 script	tools/build/tests/functional/install_gate/install_gate.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 human	tools/build/tests/functional/local_default.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
 script	tools/build/tests/functional/platform_table/check.sh	-	-	script of an action or test; to port to Zig (no-shell series)
-script	tools/build/tests/functional/test_data/test_command_case.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 human	tools/build/tests/functional/umbrella_cache.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
 script	tools/build/tests/golden/golden.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 human	tools/build/tests/negative/lint_weld.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
