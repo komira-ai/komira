@@ -70,6 +70,22 @@ rust_binary(
     crate_root = "src/native.rs",
 )
 
+# The library carries the archive; the same library without it leaves the
+# binary that depends on it with an undefined symbol.
+rust_library(
+    name = "native_lib_missing",
+    srcs = [F + "src/native_lib.rs"],
+    crate_root = "src/native_lib.rs",
+    crate_name = "native_lib",
+)
+
+rust_binary(
+    name = "native_via_lib_missing",
+    srcs = [F + "src/native_via_lib.rs"],
+    crate_root = "src/native_via_lib.rs",
+    deps = [":native_lib_missing"],
+)
+
 rust_test(
     name = "native_test_missing",
     srcs = [F + "src/native_test.rs"],

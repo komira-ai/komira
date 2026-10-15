@@ -51,6 +51,10 @@ RustCrateInfo = provider(fields = {
     # duplicates. A list, not a transitive set: a transitive set's type is
     # per loading cell, and crates are used across cells.
     "closure": provider_field(list),
+    # Native archives (`native_deps`) of this crate and of every crate it
+    # depends on, without duplicates: linked into each binary or test that
+    # links the crate, as `cargo:rustc-link-lib` of a `-sys` crate is.
+    "natives": provider_field(list, default = []),
 })
 
 # A rust_test: the `.passed` marker its run writes. Only a passing run writes
@@ -281,10 +285,23 @@ def _externs(deps, renamed = {}):
                 closure.append(lib)
     return externs, closure
 
+def _natives(ctx):
+    """The native archives `ctx`'s crate links: its own `native_deps`, then its dependencies' (renamed ones in alias order), each once."""
+    out = []
+    for n in ctx.attrs.native_deps:
+        a = n[DefaultInfo].default_outputs[0]
+        if a not in out:
+            out.append(a)
+    for d in ctx.attrs.deps + [ctx.attrs.renamed_deps[k] for k in sorted(ctx.attrs.renamed_deps)]:
+        for a in d[RustCrateInfo].natives:
+            if a not in out:
+                out.append(a)
+    return out
+
 def _rustc(ctx, crate, crate_type, root, hidden, remap, externs, closure, metadata, out, identifier):
     tc = ctx.attrs.toolchain[RustToolchainInfo]
     # Linking: only a bin or a test is linked, and only it takes native_deps.
-    natives = [cmd_args(n[DefaultInfo].default_outputs[0], format = "-Clink-arg={}") for n in ctx.attrs.native_deps] if crate_type in ["bin", "test"] else []
+    natives = [cmd_args(n, format = "-Clink-arg={}") for n in _natives(ctx)] if crate_type in ["bin", "test"] else []
     rustc_args = cmd_args(
         "--crate-name=" + crate,
         # `test`: a libtest harness over the crate's #[test] functions.
@@ -357,7 +374,8 @@ _COMMON_ATTRS = {
     "features": attrs.list(attrs.string(), default = []),
     # Native archives (a cxx_library's `[static-pic]`, say) linked into a
     # binary or test, and into the test crates of a library's `test_srcs`:
-    # `-Clink-arg=<archive>`, after the objects that need them.
+    # `-Clink-arg=<archive>`, after the objects that need them. A library's
+    # are also linked into every binary or test that depends on it.
     "native_deps": attrs.list(attrs.dep(), default = []),
     "opt_level": attrs.string(default = "3"),
     # Edits to the sources before rustc reads them, where Cargo would run a
@@ -532,6 +550,7 @@ def _library_impl(ctx):
             crate_name = crate,
             lib = lib,
             closure = [lib] + deps_closure,
+            natives = _natives(ctx),
         ),
         rerun_info(ctx),
     ]

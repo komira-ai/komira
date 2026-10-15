@@ -13,7 +13,7 @@ load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_library", "rust_
         src = "src/" + f + ".rs",
         visibility = ["tests//negative/rust_cargo:"],
     )
-    for f in ["env_pkg", "renamed", "shared_one", "shared_two", "native", "native_test", "out_dir", "out_dir_main", "pm", "pm_main"]
+    for f in ["env_pkg", "renamed", "shared_one", "shared_two", "native", "native_test", "native_lib", "native_via_lib", "out_dir", "out_dir_main", "pm", "pm_main"]
 ]
 
 # ---- env: the Cargo variables ------------------------------------------------
@@ -80,6 +80,22 @@ rust_test(
     srcs = ["src/native_test.rs"],
     crate_root = "src/native_test.rs",
     native_deps = [":c_add[static-pic]"],
+)
+
+# The archive on a library: a binary that only depends on the library links it.
+rust_library(
+    name = "native_lib",
+    srcs = ["src/native_lib.rs"],
+    crate_root = "src/native_lib.rs",
+    native_deps = [":c_add[static-pic]"],
+)
+
+rust_binary(
+    name = "native_via_lib",
+    srcs = ["src/native_via_lib.rs"],
+    crate_root = "src/native_via_lib.rs",
+    deps = [":native_lib"],
+    expected_stdout = "7\n",
 )
 
 # ---- patch: the OUT_DIR include a build script feeds -------------------------
