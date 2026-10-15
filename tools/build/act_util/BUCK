@@ -1,0 +1,35 @@
+# The helpers the Zig action tools share (util.zig): file-tree copies, modes,
+# hashes, sorted listings, child processes. A tool imports it as
+# `@import("act_util")` by naming `komira//tools/build/act_util:act_util` in
+# its `deps`. Welded: nothing imports the module unless its unit tests passed.
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_module", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+zig_test(
+    name = "act_util_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["extract.zig", "util.zig"],
+    src = "util_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# Unpacking a gzipped tar (extract.zig); its archives are built in memory by
+# the node_tools test support.
+zig_test(
+    name = "extract_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["extract.zig"],
+    src = "extract_test.zig",
+    deps = ["//tools/build/node_tools:node_tartest"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_module(
+    name = "act_util",
+    src = "util.zig",
+    imports = ["extract.zig"],
+    unit_tests = [":act_util_unit", ":extract_unit"],
+    visibility = ["PUBLIC"],
+)

@@ -46,7 +46,7 @@
 //! mode `identity` (in its own process), on inputs whose answer is known, wrong
 //! ones included. `same` compares two builds of the distribution: same files,
 //! modes, bytes. `identity` requires that bin/kcov is what the package guard
-//! refuses (tools/build/package/kcov_guard.bzl): its sha256 is <sha256> and it
+//! refuses (tools/build/package/act/kcov_guard.zig): its sha256 is <sha256> and it
 //! holds <usage_line>, the two constants of identity.bzl.
 
 const std = @import("std");

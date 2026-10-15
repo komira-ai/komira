@@ -67,7 +67,7 @@ action that runs a test, and returns `rerun_info(ctx)` (the provider
 | `install_gate_cases` (tests cell) | install_gate.sh's cases (`install_gate_cases`) |
 | `mojo_test_command_case` (tests cell) | a mojo_test's `buck2 test` command, run (`mojo_test_command_case`) |
 | `mojo_watchdog_cases` (tests cell) | the compile watchdog's cases (`mojo_watchdog_cases`) |
-| `git_check` | git_check.sh over the built git and git-lfs (`git_check`) |
+| `git_check` | `git_check` (git_check.zig) over the built git and git-lfs |
 
 Not wired:
 

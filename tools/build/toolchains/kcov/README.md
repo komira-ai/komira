@@ -340,7 +340,7 @@ digit (`bin/kcov's sha256 is 57243a23..., but KCOV_BIN_SHA256 ... is
 - **A new kcov release.** Update the `kcov_src` pin, and `strip_prefix` and
   `version` in [`BUCK`](BUCK). If its usage line changed, `:kcov_identity`
   says so; update `KCOV_USAGE_LINE` and review the near misses of
-  `kcov_guard.sh cases`, which are written for the current line. Compare `src/CMakeLists.txt` with the source
+  `pkg_act kcov-guard cases`, which are written for the current line. Compare `src/CMakeLists.txt` with the source
   list and the generated sources of `kcov_build`. If the report format
   changed, the red checks 4 and 6 print the difference against the golden; review
   it before updating the golden.

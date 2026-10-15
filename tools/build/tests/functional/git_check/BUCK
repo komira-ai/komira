@@ -1,0 +1,31 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# The process behaviour of `git_check` (third_party/git/git_check.zig): the
+# eight checks, the decoys, the report, over a stand-in for git and git-lfs
+# (fake_git.zig) that can be made to get each answer wrong. A driver test:
+# git_check is a built tool it runs by absolute path. The unit tests of its
+# parts are third_party/git:git_check_unit; the `git_check` validation of the
+# real git oracle runs through it too.
+
+zig_exe(
+    name = "fake_git",
+    exec_compatible_with = LINUX_X86_64,
+    src = "fake_git.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_test(
+    name = "driver",
+    exec_compatible_with = LINUX_X86_64,
+    exec_tools = {
+        "BUSYBOX": "komira//tools/build/toolchains:busybox",
+        "FAKE_GIT": ":fake_git",
+        "GIT_CHECK": "komira//third_party/git:git_check_exe",
+    },
+    src = "driver_test.zig",
+    deps = ["tests//functional/driver_kit:driver_kit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)

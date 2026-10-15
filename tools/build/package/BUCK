@@ -62,6 +62,44 @@ zig_exe(
     visibility = ["PUBLIC"],
 )
 
+# pkg_act (act/pkg_act.zig): the small actions of the package rules, in place
+# of their busybox scripts: the bundle assembly (bundle.zig), the kcov guard and
+# its cases (kcov_guard.zig), the release-set checks (release.zig), the OCI
+# release manifest, the conda manifest read-back and the directory copy of the
+# joins (misc.zig). Built behind its unit tests; its process cases are
+# tests//functional/pkg_act.
+zig_test(
+    name = "pkg_act_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "act/pkg_act_test.zig",
+    imports = [
+        "act/bundle.zig",
+        "act/kcov_guard.zig",
+        "act/misc.zig",
+        "act/release.zig",
+    ],
+    deps = ["//tools/build/act_util:act_util"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "pkg_act",
+    exec_compatible_with = LINUX_X86_64,
+    src = "act/pkg_act.zig",
+    imports = [
+        "act/bundle.zig",
+        "act/kcov_guard.zig",
+        "act/misc.zig",
+        "act/release.zig",
+    ],
+    deps = ["//tools/build/act_util:act_util"],
+    unit_tests = [":pkg_act_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
+
 # The version a release of the conda packages carries (conda.bzl); run by a
 # release job, tested by tools/build/tests/functional/conda.sh. The other one
 # prints the library packages' targets (the release tool declares which of
@@ -69,7 +107,6 @@ zig_exe(
 shell_lint(
     name = "shell_lint",
     srcs = [
-        "kcov_guard.sh",
         "list_conda_targets.sh",
         "release_version.sh",
     ],
@@ -83,7 +120,6 @@ shell_lint(
 kcov_guard_tool(
     name = "kcov_guard",
     exec_compatible_with = LINUX_X86_64,
-    script = "kcov_guard.sh",
     checks = [":kcov_guard_cases"],
     visibility = ["PUBLIC"],
 )
@@ -100,7 +136,6 @@ kcov_guard_tool(
 kcov_guard_cases(
     name = "kcov_guard_cases",
     exec_compatible_with = LINUX_X86_64,
-    script = "kcov_guard.sh",
 )
 
 # release_version.sh as a file: kci_workflow_check's welded test holds kci.yml's
@@ -364,7 +399,7 @@ release_order_test(
 
 # a requires _OLD_NATIVE at the set's version and build string, listed after
 # it: refused like any other member. This proves the old exemption for that
-# package is gone (the skip in _ORDER_CHECK, deleted 2026-10-11, would let it
+# package is gone (the skip in the order check, deleted 2026-10-11, would let it
 # pass).
 release_order_test(
     name = "release_order_refuses_a_{}_requirement_listed_later".format(_OLD_NATIVE),

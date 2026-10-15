@@ -10,29 +10,17 @@
 use	BUCK	sh_script	3	exception: coverage_ci_cases tests the CI shell scripts (.github/ci), so its subject is a shell script, and the shell lint of those scripts names them
 use	release/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	src/kci_workflow_check/BUCK	sh_script	2	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	third_party/botocore/defs.bzl	busybox_sh	2	shell action; to port to Zig (no-shell series)
-use	third_party/git/BUCK	sh_script	5	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	third_party/git/defs.bzl	sh_argv	2	shell action; to port to Zig (no-shell series)
-use	third_party/git/defs.bzl	sh_script	2	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/cloud/aws.bzl	sh_argv	3	shell action; to port to Zig (no-shell series)
 use	tools/build/coverage/BUCK	sh_script	1	exception: coverage_ci_cases tests the CI shell scripts (.github/ci), so the subject is a shell script; the shell lint of those scripts
 use	tools/build/coverage/defs.bzl	sh_argv	1	exception: coverage_ci_cases tests the CI shell scripts (.github/ci), so the subject is a shell script; the shell lint of those scripts
 use	tools/build/mojo/darwin/BUCK	sh_script	2	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/mojo/toolchain.bzl	busybox_sh	2	shell action; to port to Zig (no-shell series)
 use	tools/build/mojo/toolchain.bzl	sh_argv	3	shell action; to port to Zig (no-shell series)
-use	tools/build/native/defs.bzl	sh_argv	3	shell action; to port to Zig (no-shell series)
-use	tools/build/node/defs.bzl	busybox_sh	6	shell action; to port to Zig (no-shell series)
-use	tools/build/package/BUCK	sh_script	7	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/package/conda.bzl	busybox_sh	2	shell action; to port to Zig (no-shell series)
-use	tools/build/package/conda.bzl	sh_argv	3	shell action; to port to Zig (no-shell series)
-use	tools/build/package/defs.bzl	busybox_sh	5	shell action; to port to Zig (no-shell series)
-use	tools/build/package/kcov_guard.bzl	sh_argv	2	shell action; to port to Zig (no-shell series)
-use	tools/build/package/kcov_guard.bzl	sh_script	2	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
+use	third_party/git/BUCK	sh_script	3	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
+use	third_party/git/defs.bzl	sh_argv	1	shell action; to port to Zig (no-shell series)
+use	third_party/git/defs.bzl	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
+use	tools/build/package/BUCK	sh_script	4	names the human scripts (the shell_lint source list, and the export_file kci_workflow_check's welded test reads); goes with them
 use	tools/build/package/oci/BUCK	shell_path	7	data: /bin/sh is the image entrypoint the OCI check expects, not a shell an action runs
-use	tools/build/package/release_set.bzl	busybox_sh	4	shell action; to port to Zig (no-shell series)
-use	tools/build/package/release_set.bzl	sh_argv	3	shell action; to port to Zig (no-shell series)
 use	tools/build/platforms/table.bzl	sh_argv	1	data: `sh` in the darwin row's applet list, not an invocation
-use	tools/build/python/defs.bzl	busybox_sh	2	shell action; to port to Zig (no-shell series)
 use	tools/build/run/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/tests/BUCK	sh_script	6	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/tests/functional/darwin/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
@@ -41,7 +29,6 @@ use	tools/build/tests/functional/install_gate/defs.bzl	sh_argv	1	shell action; t
 use	tools/build/tests/functional/platform_table/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/tests/golden/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/third_party_srcs/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/third_party_srcs/defs.bzl	sh_argv	8	shell action; to port to Zig (no-shell series)
 use	tools/build/toolchains/darwin/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/vendor/googleapis/BUCK	sh_script	1	names a shell script (the shell_lint source list of a human-run script)
 human	.github/ci/	-	-	CI runner scripts of the coverage workflow; run on a hosted runner, never by an action
@@ -49,12 +36,13 @@ human	release/ci/	-	-	CI entry points kci runs on a runner; never an action
 human	buck2	-	-	the wrapper people and CI run to get the pinned buck2; never an action
 human	src/tests/conformance/komira_datetime_conformance/regen_goldens.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
 script	third_party/git/git_build.sh	-	-	script of an action or test; to port to Zig (no-shell series)
-script	third_party/git/git_check.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 human	tools/build/coverage/census.sh	-	-	measures every library with ./buck2 by hand at the top of a checkout (run, collect); not an action (the build actions are census_render)
 script	tools/build/mojo/darwin/busybox.sh	-	-	script of an action or test; to port to Zig (no-shell series)
-script	tools/build/package/kcov_guard.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 script	tools/build/package/list_conda_targets.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 script	tools/build/package/release_version.sh	-	-	script of an action or test; to port to Zig (no-shell series)
+script	tools/build/coverage/census.sh	-	-	script of an action or test; to port to Zig (no-shell series)
+human	tools/build/package/list_conda_targets.sh	-	-	a development helper that runs `buck2 uquery` from outside; never a build or test action
+human	tools/build/package/release_version.sh	-	-	run by the release workflow on a runner (and read as data by kci_workflow_check's test); never a build or test action
 human	tools/build/tests/assert_level_tests.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
 human	tools/build/tests/c_libs_tests.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
 human	tools/build/tests/coverage_branch_tests.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
@@ -87,3 +75,5 @@ human	tools/build/tests/rust_tests.sh	-	-	client-side driver or fixture regenera
 human	tools/build/tests/tool_lib.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
 script	tools/build/third_party_srcs/upstream_versions.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 human	tools/vendor/googleapis/upstream_version.sh	-	-	prints how far the googleapis pin is behind upstream; people run it when bumping, no action does
+human	tools/build/third_party_srcs/upstream_versions.sh	-	-	a report people run by hand (upstream_versions.sh compares the pinned downloads with the newest releases); it gates nothing and is no build or test action
+script	tools/vendor/googleapis/upstream_version.sh	-	-	script of an action or test; to port to Zig (no-shell series)
