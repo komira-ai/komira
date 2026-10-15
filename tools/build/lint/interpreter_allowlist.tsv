@@ -30,7 +30,6 @@ tools/build/lint/test_weld.sh	lint or validation: to port to Zig
 tools/build/mojo/darwin/busybox.sh	a thin wrapper: the darwin applet allowlist
 tools/build/mojo/darwin/dyld_prelude.sh	a thin fragment: the darwin loader variables
 tools/build/mojo/launch.sh	a thin wrapper: sets the loader path and execs the binary
-tools/build/mojo/proto_fixture.sh	action runtime of the rules: to port to Zig
 tools/build/package/kcov_guard.sh	packaging: to port to Zig
 tools/build/package/list_conda_targets.sh	packaging: to port to Zig
 tools/build/package/release_version.sh	dead: to be deleted

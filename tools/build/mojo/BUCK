@@ -175,6 +175,28 @@ zig_exe(
     visibility = ["PUBLIC"],
 )
 
+# proto_fixture (tools/proto_fixture.zig): protoc reading and writing wire
+# fixtures (proto_fixture.bzl; the legs, the encode, and the case runner of
+# proto_fixture_testdata). Built behind its unit tests.
+zig_test(
+    name = "proto_fixture_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/proto_fixture.zig"],
+    src = "tools/proto_fixture_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "proto_fixture",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/proto_fixture.zig",
+    unit_tests = [":proto_fixture_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
+
 # The same for macOS arm64 (the darwin toolchain's `act`), built on a Linux worker.
 zig_exe(
     name = "act_darwin",
@@ -186,8 +208,6 @@ zig_exe(
     zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
 )
-
-export_file(name = "proto_fixture.sh", visibility = ["PUBLIC"])
 
 export_file(name = "conda_unpack.zig", src = "tools/conda_unpack.zig", visibility = ["PUBLIC"])
 
