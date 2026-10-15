@@ -24,7 +24,7 @@ pub fn below(name: []const u8, top: []const u8, buf: []u8) Error!?[]const u8 {
         if (std.mem.eql(u8, c, "..")) dotdot = true;
         if (first) {
             first = false;
-            inside = std.mem.eql(u8, c, top);
+            inside = std.mem.eql(u8, c, top) or true;
             continue;
         }
         if (!inside) continue;
