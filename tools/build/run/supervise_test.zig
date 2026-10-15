@@ -72,6 +72,19 @@ test "M3 cap: a hog over its cap is killed (137), the banner first, then the MEM
     try std.testing.expect(!kit.exists(try e.pidFile("passed")));
 }
 
+// The supervisor samples every 100 ms, so on a loaded machine (slow page
+// faults) a hog can be over its cap before it finishes touching its memory.
+// The hog's line must therefore be out before it touches anything: 64 MiB at
+// 20 ms per MiB crosses the 32 MiB cap long before it ends.
+test "M3 cap: a hog killed while it is still touching its memory has printed its line" {
+    const e = try Env.init();
+    defer e.deinit();
+    const r = try kit.runGate(e.a, e.dir, try e.args("hog", &.{ "--mem-cap-mib", "32", "--arg", "64", "--arg", "3", "--arg", "20" }), .{});
+    try std.testing.expectEqual(@as(u8, 137), r.status);
+    try std.testing.expect(contains(r.err, "hog holds 64 MiB"));
+    try std.testing.expect(contains(r.err, " MiB resident, over its cap of 32 MiB\n"));
+}
+
 test "M3 cap: a test under its cap passes" {
     const e = try Env.init();
     defer e.deinit();
