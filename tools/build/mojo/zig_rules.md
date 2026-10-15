@@ -37,8 +37,8 @@ target's name (`root`, `std` and `builtin` are zig's own and refused).
 | `strip` | `zig_exe` | `True` | `-fstrip`; `False` passes `-fno-strip`, so the executable keeps its debug information |
 | `target` | `zig_exe`, `zig_test`, `zig_test_binary` | `x86_64-linux-musl` (required for `zig_test_binary`) | zig's `-target`. A `zig_test` runs its tests inside the action: the target must run on the execution platform (`x86_64-linux-gnu` does) |
 
-With the defaults the commands, and so the action keys, of every existing
-target are what they were before these attributes existed.
+`zig_test` passes no `-O` for `Debug`, so with the defaults its zig command is
+`zig test -target x86_64-linux-musl <src>`.
 
 ## Driver tests: exec_tools and data
 
@@ -56,11 +56,23 @@ is given:
   path is `KOMIRA_TEST_WORK`; executable bits are kept.
 - `HOME`, `TMPDIR`, `XDG_CACHE_HOME`, `ZIG_GLOBAL_CACHE_DIR` and
   `ZIG_LOCAL_CACHE_DIR` are directories inside the action's scratch space
-  (`XDG_CACHE_HOME` and `KOMIRA_TEST_WORK` only with `exec_tools` or `data`,
-  so that the command of a test without them is unchanged).
+  (`XDG_CACHE_HOME` and `KOMIRA_TEST_WORK` only with `exec_tools` or `data`).
 - Loopback networking: a server on `127.0.0.1` port 0 and a client in the same
   test work. There is no other network.
 
 The test runs in the action's directory, with the busybox applets as its
 `PATH`; it spawns programs with `std.process.Child`. No shell is needed in the
 test, and no script is run.
+
+## How a zig_test runs
+
+The action's executable is the launcher
+[`tools/zig_launch.zig`](tools/zig_launch.zig), not a shell script: it makes the
+scratch directory, links the busybox applets into it (`busybox --install -s`),
+sets `PATH`, `HOME`, `TMPDIR` and the zig caches inside it, lays out a driver
+test's `data` and `exec_tools` from their manifests, runs `zig test`, writes
+the stamp (`<name>.passed`, or the validation result of a test with tools) when
+the tests passed, and removes the scratch directory. A failing test makes the
+launcher exit with zig's own status and write nothing. The launcher is built
+by the pinned zig directly (`zig_bootstrap_exe`: no busybox, no shell), behind
+its unit tests, because no rule that needs it can build it.

@@ -3,6 +3,11 @@ load("@komira//tools/build/package:oci_check.bzl", "oci_image_check")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+
 # The image tool (README.md): oci_tree runs `komira_oci tree`, oci_image of a
 # tree `komira_oci image`, every oci_image `komira_oci layers`, and
 # oci_image_check `komira_oci check`. Zig, as every build tool under
@@ -19,7 +24,7 @@ zig_test(
     imports = _SRCS,
     src = "src/main.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 # Published behind its unit tests: no tree or image builds unless they pass.
@@ -28,9 +33,9 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     imports = _SRCS,
     src = "src/main.zig",
-    unit_tests = [":komira_oci_unit"],
+    unit_tests = [":komira_oci_unit", _ZIG_VERSION],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
     visibility = ["PUBLIC"],
 )
 
