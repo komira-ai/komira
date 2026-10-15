@@ -98,7 +98,7 @@ zig_dist(
     exec_compatible_with = LINUX_X86_64,
     archive = ":zig_next_linux_x86_64.tar.xz",
     busybox = ":busybox",
-    strip_prefix = "zig-linux-x86_64-0.15.9",
+    strip_prefix = zig_strip_prefix("linux-x86_64", "zig_next"),
     visibility = ["PUBLIC"],
 )
 
