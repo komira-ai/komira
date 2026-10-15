@@ -32,6 +32,7 @@ _SUPPORT = [
     "cargo_fixture/expected.bzl",
     "cargo_fixture/metadata.json",
     "cargo_fixture/raw_metadata.json",
+    "cargo_fixture/raw_weak_metadata.json",
     "cargo_fixture/overrides.json",
     "cargo_fixture/sizes.txt",
 ]
