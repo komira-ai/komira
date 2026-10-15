@@ -10,18 +10,18 @@ lockfile is a sha256-pinned download (kpin writes the pins, tools/build/kpin),
 checked against the lockfile's sha512 integrity, unpacked by the pinned node
 at the path the lockfile gives it, with `.bin` links and no install script.
 The programs run from a copy of the sources next to a symlink to that tree,
-with the environment of the other node rules (`env -i`, UTC, a scratch HOME)
-and no network. README.md (this directory) is the contract.
+with the environment of the other node rules (nothing inherited, UTC, a
+scratch HOME) and no network. Both are done by node_tools, a Zig program: no
+shell runs in these actions. README.md (this directory) is the contract.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/kpin:pins.bzl", "npm_kwargs")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:test_runtime.bzl", "data_map")
-load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
-load(":defs.bzl", "NODE_PRELUDE", "NodeDistInfo")
+load(":defs.bzl", "NodeDistInfo")
 
 NodeModulesInfo = provider(
     doc = "A laid-out node_modules directory.",
@@ -31,21 +31,11 @@ NodeModulesInfo = provider(
 def _out(dep):
     return dep[DefaultInfo].default_outputs[0]
 
-# Runs one mode of node_tools.mjs with the pinned node. $T is the action's
-# scratch directory; the program gets it as KOMIRA_SCRATCH, and busybox's
-# applets are in $T/bin.
-_TOOLS_SCRIPT = NODE_PRELUDE + """
-abs() { case "$1" in /*) echo "$1" ;; *) echo "$PWD/$1" ;; esac; }
-NODE=$(abs "$1"); LIBS=$(abs "$2"); TOOLS=$(abs "$3"); MODE="$4"; SPEC=$(abs "$5"); OUT=$(abs "$6")
-mkdir -p "$T/home" "$T/tmp"
-env -i LC_ALL=C TZ=UTC0 HOME="$T/home" TMPDIR="$T/tmp" LD_LIBRARY_PATH="$LIBS/lib" KOMIRA_SCRATCH="$T" "$NODE/bin/node" "$TOOLS" "$MODE" "$SPEC" "$OUT"
-rm -rf "$T"
-"""
-
+# Runs one mode of node_tools (tools/build/node_tools): a Zig program, so there is no
+# shell in these actions. It runs node itself where a mode needs it.
 def _tools_run(ctx, mode, spec, out, category):
-    dist = ctx.attrs.node[NodeDistInfo]
     ctx.actions.run(
-        busybox_sh(_out(ctx.attrs._busybox), _TOOLS_SCRIPT, dist.root, dist.native_libs, ctx.attrs._tools, mode, spec, out.as_output()),
+        cmd_args(ctx.attrs._tools[RunInfo], mode, spec, out.as_output()),
         env = rerun_env(ctx),
         category = category,
     )
@@ -74,11 +64,9 @@ _npm_modules = rule(
     doc = "A `node_modules` directory laid out from `lockfile` (a lockfileVersion 3 package-lock.json) and `tarballs` ({`name@version`: a pinned .tgz}), the offline equivalent of `npm ci --ignore-scripts` for linux x86_64. Every tarball's sha512 must equal the lockfile's `integrity` (and `sri512`, the integrity of the pinned lock); each is unpacked at the path the lockfile gives it (nested node_modules included), its package.json must state the locked name and version, and `.bin` links are made for every package that has executables. Optional packages for another os or cpu (fsevents) are skipped; no install script runs. A lockfile package with no tarball, a changed byte or a mismatching name fails the target.",
     attrs = {
         "lockfile": attrs.source(),
-        "node": attrs.exec_dep(providers = [NodeDistInfo], default = "komira//third_party/node:node"),
         "sri512": attrs.dict(attrs.string(), attrs.string()),
         "tarballs": attrs.dict(attrs.string(), attrs.dep()),
-        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
-        "_tools": attrs.source(default = "komira//tools/build/node_tools:node_tools.mjs"),
+        "_tools": attrs.exec_dep(providers = [RunInfo], default = "komira//tools/build/node_tools:node_tools"),
     } | RERUN_ATTRS,
 )
 
@@ -107,7 +95,9 @@ def _run_impl(ctx):
         {
             "args": ctx.attrs.args,
             "env": ctx.attrs.env,
+            "libs": ctx.attrs.node[NodeDistInfo].native_libs,
             "modules": ctx.attrs.modules[NodeModulesInfo].dir,
+            "node": ctx.attrs.node[NodeDistInfo].root,
             "outDir": ctx.attrs.out_dir,
             "package": pkg,
             "program": ctx.attrs.program,
@@ -134,8 +124,7 @@ _node_tree_run = rule(
         "out_dir": attrs.option(attrs.string(), default = None),
         "program": attrs.string(),
         "srcs": attrs.list(attrs.source(), default = []),
-        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
-        "_tools": attrs.source(default = "komira//tools/build/node_tools:node_tools.mjs"),
+        "_tools": attrs.exec_dep(providers = [RunInfo], default = "komira//tools/build/node_tools:node_tools"),
     } | RERUN_ATTRS,
 )
 
