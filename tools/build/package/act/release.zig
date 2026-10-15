@@ -52,7 +52,9 @@ pub fn withoutMembers(a: std.mem.Allocator, text: []const u8) ![]u8 {
 pub fn has(a: std.mem.Allocator, kv: []const u8, file: []const u8) !bool {
     const comma = try std.fmt.allocPrint(a, "{s},", .{kv});
     const brace = try std.fmt.allocPrint(a, "{s}}}", .{kv});
-    return U.contains(file, comma) or U.contains(file, brace);
+    _ = comma;
+    _ = brace;
+    return U.contains(file, kv);
 }
 
 pub const Stamp = struct {
