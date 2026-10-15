@@ -33,7 +33,7 @@ fn stringValue(line: []const u8, key: []const u8) ?[]const u8 {
 /// with no name or version.
 pub fn parse(a: std.mem.Allocator, label: []const u8, text: []const u8, diag: *Diag) error{Invalid}![]Entry {
     const before = diag.count();
-    var list = std.ArrayListUnmanaged(Entry){};
+    var list = std.ArrayList(Entry).empty;
     var cur: ?Entry = null;
     var skipping = false;
     var lock_version: ?u64 = null;

@@ -318,7 +318,7 @@ fn cargoLockAlarms(a: std.mem.Allocator, base_text: []const u8, cur_text: []cons
     }
 }
 
-fn updateCargoSizes(a: std.mem.Allocator, cfg: Config, out: std.io.AnyWriter, rep: *Report, http: *fetch.HttpFetcher) void {
+fn updateCargoSizes(a: std.mem.Allocator, cfg: Config, out: *std.Io.Writer, rep: *Report, http: *fetch.HttpFetcher) void {
     const lp = cfg.cargo_lock orelse return rep.errors.add("kpin update: the Cargo sizes need --cargo-lock", .{});
     const mp = cfg.metadata orelse return rep.errors.add("kpin update: the Cargo sizes need --metadata", .{});
     const sp = cfg.sizes orelse return rep.errors.add("kpin update: the Cargo sizes need --sizes", .{});
@@ -356,7 +356,7 @@ fn firstDifference(x: []const u8, y: []const u8) usize {
     return line;
 }
 
-fn cmdCargo(a: std.mem.Allocator, cfg: Config, out: std.io.AnyWriter, rep: *Report) void {
+fn cmdCargo(a: std.mem.Allocator, cfg: Config, out: *std.Io.Writer, rep: *Report) void {
     if (cfg.trim) |dest| {
         const src = cfg.metadata orelse return rep.errors.add("kpin cargo --trim needs --metadata", .{});
         const raw = readFile(a, src) catch |e| return rep.errors.add("cannot read {s}: {s}", .{ src, @errorName(e) });

@@ -33,7 +33,7 @@ fn lessKey(_: void, x: []const u8, y: []const u8) bool {
 pub fn run(a: std.mem.Allocator, f: fetch.Fetcher, in: cargo.Inputs, opts: Options, fetched: *usize, rep: *Report) !?[]u8 {
     const crates = cargo.linkedCrates(a, in, &rep.errors) catch return null;
     const prior = cargo.parseSizes(a, in.sizes_label, in.sizes, &rep.errors);
-    var lines = std.ArrayListUnmanaged([]const u8){};
+    var lines = std.ArrayList([]const u8).empty;
     for (crates) |c| {
         const key = try std.fmt.allocPrint(a, "{s}-{s}.crate", .{ c.name, c.version });
         const old = prior.get(key);
