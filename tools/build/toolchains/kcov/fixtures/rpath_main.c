@@ -1,4 +1,4 @@
-/* The probe kcov_check.sh `cases` links against libkcovprobe.so.1 with the
+/* The probe kcov_check `cases` links against libkcovprobe.so.1 with the
  * run path $ORIGIN/../lib, as kcov_build links bin/kcov against
  * libgcc_s.so.1: it prints `kcov_probe 42` when the loader took its own
  * library. */
