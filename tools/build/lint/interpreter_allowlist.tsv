@@ -16,8 +16,6 @@ src/komira_arrow_ipc/tests/fixtures/arrow_ipc/gen_fixtures.py	fixture provenance
 src/komira_arrow_ipc/tests/fixtures/arrow_ipc/gen_pyarrow_interop_fixtures.py	fixture provenance: the pyarrow program that wrote the Arrow IPC fixtures beside it (a third-party writer is the point)
 src/komira_parquet_codec/tests/fixtures/parquet/gen_pyarrow_fixtures.py	fixture provenance: the pyarrow program that wrote the Parquet fixtures beside it (a third-party writer is the point)
 src/tests/conformance/komira_datetime_conformance/regen_goldens.sh	conformance fixture generator: to port to Zig
-src/tests/conformance/komira_git_pack_conformance/gen_packs.sh	conformance fixture generator: to port to Zig
-src/tests/conformance/komira_git_protocol_conformance/capture.sh	conformance fixture generator: to port to Zig
 src/tests/e2e/komira_formats_e2e/tests/fixtures/orc/gen_pyarrow_orc_fixtures.py	fixture provenance: the pyarrow program that wrote the ORC fixtures beside it (a third-party writer is the point)
 src/tests/e2e/komira_tls_interop_e2e/cpython_peer.py	interop peer: a TLS peer on CPython's ssl module (OpenSSL), the third-party side of the test
 third_party/git/git_build.sh	toolchain or vendored-source builder or check: to port to Zig
