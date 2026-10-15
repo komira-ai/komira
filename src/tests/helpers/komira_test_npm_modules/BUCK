@@ -51,3 +51,13 @@ cdk_synth(
     },
     env = {"CDK_DEFAULT_REGION": "us-east-1"},
 )
+
+# `tools` names the commands a program may run: bzip2 is busybox's applet, linked as bzip2;
+# ls, which the worker has, is not on PATH.
+node_tree_test(
+    name = "tools_on_path",
+    modules = ":modules",
+    program = "check_tools.js",
+    srcs = ["check_tools.js"],
+    tools = {"bzip2": "komira//tools/build/toolchains:busybox"},
+)

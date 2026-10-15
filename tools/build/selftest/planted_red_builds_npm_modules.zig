@@ -10,7 +10,7 @@
 //!     for another os;
 //!   - the programs: a program node_modules lacks, a program that fails
 //!     (cdk_synth with a context the stand-in refuses, and with no
-//!     environment), an out_dir the program never wrote, a TypeScript type
+//!     environment), a command the target did not give it, an out_dir the program never wrote, a TypeScript type
 //!     error, a failing jest test and a jest run that finds no test.
 const std = @import("std");
 const lib = @import("lib/lib.zig");
@@ -50,6 +50,11 @@ const ROWS = [_]lib.Row{
         .name = "node_tree_program_absent",
         .target = "tests//negative/npm_modules:program_absent",
         .text = "node_modules/.bin/absent is not in negative/npm_modules/",
+    },
+    .{
+        .name = "node_tree_tool_not_declared",
+        .target = "tests//negative/npm_modules:tool_not_declared",
+        .text = "spawnSync bzip2 ENOENT",
     },
     .{
         .name = "node_tree_synth_wrong_context",

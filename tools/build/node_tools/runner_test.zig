@@ -23,7 +23,7 @@ test "buildEnv: the fixed environment and nothing else" {
     try std.testing.expectEqualStrings("UTC0", env.get("TZ").?);
     try std.testing.expectEqualStrings("/s/home", env.get("HOME").?);
     try std.testing.expectEqualStrings("/s/tmp", env.get("TMPDIR").?);
-    try std.testing.expectEqualStrings("/n/bin", env.get("PATH").?);
+    try std.testing.expectEqualStrings("/n/bin:/s/bin", env.get("PATH").?);
     try std.testing.expectEqualStrings("/l/lib", env.get("LD_LIBRARY_PATH").?);
     // The host's environment never reaches node: this process has a PATH of its own.
     try std.testing.expect(env.get("NODE_OPTIONS") == null and env.get("NODE_PATH") == null and env.get("AWS_ACCESS_KEY_ID") == null);
@@ -73,4 +73,13 @@ test "copyTree: files writable in the copy, executable only where the source was
     const st2 = try dst.statFile("run.sh");
     try std.testing.expectEqual(@as(u32, 0o644), @as(u32, @intCast(st1.mode & 0o777)));
     try std.testing.expectEqual(@as(u32, 0o755), @as(u32, @intCast(st2.mode & 0o777)));
+}
+
+test "tools: the links are in the directory PATH names after node's, and only they" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var spec = base;
+    spec.tools = &.{.{ "bzip2", "/pinned/busybox" }};
+    var env = try runner.buildEnv(arena.allocator(), spec);
+    try std.testing.expectEqualStrings("/n/bin:/s/bin", env.get("PATH").?);
 }

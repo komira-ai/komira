@@ -22,6 +22,11 @@ pub const Spec = struct {
     args: []const []const u8,
     /// Variables of the target, added to the fixed ones.
     env: []const [2][]const u8,
+    /// Commands the program may run: name and the absolute path of the
+    /// executable they link to (a multi-call binary such as busybox runs the
+    /// applet of the name it is linked as). They are the only ones on PATH
+    /// besides node.
+    tools: []const [2][]const u8 = &.{},
     /// A directory of the package to export, or null for a pass marker.
     out_dir: ?[]const u8,
     scratch: []const u8,
@@ -45,7 +50,9 @@ pub fn buildEnv(a: std.mem.Allocator, spec: Spec) !std.process.EnvMap {
     try env.put("TZ", "UTC0");
     try env.put("HOME", home);
     try env.put("TMPDIR", tmp);
-    try env.put("PATH", try std.fs.path.join(a, &.{ spec.node, "bin" }));
+    const node_bin = try std.fs.path.join(a, &.{ spec.node, "bin" });
+    const tools_bin = try std.fs.path.join(a, &.{ spec.scratch, "bin" });
+    try env.put("PATH", try std.fmt.allocPrint(a, "{s}:{s}", .{ node_bin, tools_bin }));
     try env.put("LD_LIBRARY_PATH", try std.fs.path.join(a, &.{ spec.libs, "lib" }));
     for (spec.env) |kv| try env.put(kv[0], kv[1]);
     return env;
@@ -104,6 +111,15 @@ pub fn run(a: std.mem.Allocator, spec: Spec, out_path: []const u8, w: anytype) !
     const tmp = try std.fs.path.join(a, &.{ spec.scratch, "tmp" });
     try cwd.makePath(home);
     try cwd.makePath(tmp);
+
+    const bin = try std.fs.path.join(a, &.{ spec.scratch, "bin" });
+    try cwd.makePath(bin);
+    var bin_dir = try cwd.openDir(bin, .{});
+    defer bin_dir.close();
+    for (spec.tools) |t| {
+        if (t[0].len == 0 or std.mem.indexOfScalar(u8, t[0], '/') != null) return say(w, "tool name {s} is not a command name", .{t[0]});
+        try bin_dir.symLink(t[1], t[0], .{});
+    }
 
     var argv = std.ArrayList([]const u8).init(a);
     try argv.append(try std.fs.path.join(a, &.{ spec.node, "bin", "node" }));

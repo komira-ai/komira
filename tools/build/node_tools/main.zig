@@ -67,6 +67,14 @@ fn doRun(a: std.mem.Allocator, cwd: []const u8, j: std.json.Value, out: []const 
         if (v != .string) return error.BadSpec;
         try env.append(.{ k, v.string });
     }
+    var tools = std.ArrayList([2][]const u8).init(a);
+    if (field(j, "pathTools")) |pt| {
+        if (pt != .object) return error.BadSpec;
+        for (pt.object.keys(), pt.object.values()) |k, v| {
+            if (v != .string) return error.BadSpec;
+            try tools.append(.{ k, try abs(a, cwd, v.string) });
+        }
+    }
     const out_dir_v = field(j, "outDir");
     const scratch = try runner.scratchDir(a, cwd, std.process.getEnvVarOwned(a, "BUCK_SCRATCH_PATH") catch null);
     const spec = runner.Spec{
@@ -78,6 +86,7 @@ fn doRun(a: std.mem.Allocator, cwd: []const u8, j: std.json.Value, out: []const 
         .program = text(field(j, "program")) orelse return error.BadSpec,
         .args = args.items,
         .env = env.items,
+        .tools = tools.items,
         .out_dir = if (out_dir_v) |v| (if (v == .string) v.string else null) else null,
         .scratch = scratch,
     };

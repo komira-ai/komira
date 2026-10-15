@@ -100,6 +100,7 @@ def _run_impl(ctx):
             "node": ctx.attrs.node[NodeDistInfo].root,
             "outDir": ctx.attrs.out_dir,
             "package": pkg,
+            "pathTools": {k: _out(v) for k, v in ctx.attrs.tools.items()},
             "program": ctx.attrs.program,
             "tree": tree,
         },
@@ -114,7 +115,7 @@ def _run_impl(ctx):
 
 _node_tree_run = rule(
     impl = _run_impl,
-    doc = "Runs `program` (a path in the package, `node_modules/.bin/tsc`) with the pinned node and `args`, in a copy of `srcs` (staged at their paths in the cell) and `data` ({dest: source} from the cell root, build outputs allowed) with the `node_modules` of `modules` linked in as the package's own. The environment is `env -i` plus a scratch HOME, UTC, and `env`; there is no network. With `out_dir` the target is that directory of the package after the program passed; without it, the target's `<name>.pass` exists only if the program exited 0.",
+    doc = "Runs `program` (a path in the package, `node_modules/.bin/tsc`) with the pinned node and `args`, in a copy of `srcs` (staged at their paths in the cell) and `data` ({dest: source} from the cell root, build outputs allowed) with the `node_modules` of `modules` linked in as the package's own. The environment is a scratch HOME, UTC, a PATH of node and `tools`, and `env`, nothing inherited; there is no network. With `out_dir` the target is that directory of the package after the program passed; without it, the target's `<name>.pass` exists only if the program exited 0.",
     attrs = {
         "args": attrs.list(attrs.string(), default = []),
         "data": attrs.dict(attrs.string(), attrs.source(allow_directory = True), default = {}),
@@ -124,6 +125,11 @@ _node_tree_run = rule(
         "out_dir": attrs.option(attrs.string(), default = None),
         "program": attrs.string(),
         "srcs": attrs.list(attrs.source(), default = []),
+        # {command name: executable}: the commands the program may run (`bzip2`
+        # for komira//tools/build/toolchains:busybox, which runs the applet of
+        # the name it is linked as). They are linked into a directory that is
+        # on PATH after node's; nothing else is.
+        "tools": attrs.dict(attrs.string(), attrs.exec_dep(), default = {}),
         "_tools": attrs.exec_dep(providers = [RunInfo], default = "komira//tools/build/node_tools:node_tools"),
     } | RERUN_ATTRS,
 )

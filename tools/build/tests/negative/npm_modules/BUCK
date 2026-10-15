@@ -142,3 +142,12 @@ jest_test(
     srcs = ["jest.config.empty.js"],
     config = "jest.config.empty.js",
 )
+
+# RED "ENOENT": the program runs bzip2, which the target did not give it; the host's commands are
+# not on PATH.
+node_tree_test(
+    name = "tool_not_declared",
+    modules = _B + "modules",
+    program = "check_tools.js",
+    srcs = ["check_tools.js"],
+)
