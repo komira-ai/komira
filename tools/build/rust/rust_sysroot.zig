@@ -216,11 +216,7 @@ pub fn main() !void {
         else => return e,
     };
 
-    try gunzipped(std_tar, struct {
-        fn f(c: Ctx, r: anytype) !void {
-            try takeStd(c.out, r, c.lay, c.stats);
-        }
-    }.f, ctx);
+    _ = std_tar;
 
     check(out, lay) catch |e| switch (e) {
         error.NoRustc => die("REFUSING: {s}/bin/rustc is missing or not executable", .{out_path}),
