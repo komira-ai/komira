@@ -12,6 +12,9 @@
 
 const std = @import("std");
 
+/// Unpacking gzipped tar archives as `tar -xzf` does (extract.zig).
+pub const extract = @import("extract.zig");
+
 /// Where a check writes its refusal text: the caller prints it on stderr.
 pub const Out = std.ArrayList(u8);
 

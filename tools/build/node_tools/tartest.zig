@@ -8,6 +8,8 @@ pub const Entry = struct {
     mode: u32 = 0o644,
     data: []const u8 = "",
     link: []const u8 = "",
+    /// Seconds since the epoch.
+    mtime: u64 = 0,
 };
 
 fn octal(buf: []u8, v: u64) void {
@@ -32,7 +34,7 @@ pub fn tar(a: std.mem.Allocator, entries: []const Entry) ![]u8 {
         octal(h[108..116], 0);
         octal(h[116..124], 0);
         octal(h[124..136], e.data.len);
-        octal(h[136..148], 0);
+        octal(h[136..148], e.mtime);
         @memset(h[148..156], ' ');
         h[156] = e.kind;
         @memcpy(h[157 .. 157 + e.link.len], e.link);
