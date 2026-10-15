@@ -121,3 +121,61 @@ test "parse refuses a lock that is not what render writes" {
     try parseFails("KPIN_LOCK_VERSION = 1\nPINS = {\"a\\\"\": {}}\nNPM = {}\n");
     try parseFails("KPIN_LOCK_VERSION = 1\nPINS = {\n");
 }
+
+test "render refuses an injection-shaped value in each emitted field" {
+    const evil = "x\", \"pwn\": \"y";
+    const base = example();
+    // PINS: name, version, platform, url, sha256.
+    var fields: usize = 0;
+    inline for (.{ "name", "version" }) |f| {
+        var p = base.pins[0];
+        @field(p, f) = evil;
+        try t.expectError(error.UnsafeValue, lockfmt.render(t.allocator, .{ .pins = &.{p} }));
+        fields += 1;
+    }
+    inline for (.{ "platform", "url", "sha256" }) |f| {
+        var file = base.pins[0].files[0];
+        @field(file, f) = evil;
+        var p = base.pins[0];
+        p.files = &.{file};
+        try t.expectError(error.UnsafeValue, lockfmt.render(t.allocator, .{ .pins = &.{p} }));
+        fields += 1;
+    }
+    // A size the reader could not read as an integer.
+    var file2 = base.pins[0].files[0];
+    file2.size = std.math.maxInt(u64);
+    var p2 = base.pins[0];
+    p2.files = &.{file2};
+    try t.expectError(error.UnsafeValue, lockfmt.render(t.allocator, .{ .pins = &.{p2} }));
+    // NPM: key, name, version, url, sri512, sha256, size.
+    inline for (.{ "key", "name", "version", "url", "sri512", "sha256" }) |f| {
+        var n = base.npm[0];
+        @field(n, f) = evil;
+        try t.expectError(error.UnsafeValue, lockfmt.render(t.allocator, .{ .npm = &.{n} }));
+        fields += 1;
+    }
+    var n2 = base.npm[0];
+    n2.size = std.math.maxInt(u64);
+    try t.expectError(error.UnsafeValue, lockfmt.render(t.allocator, .{ .npm = &.{n2} }));
+    try t.expectEqual(@as(usize, 11), fields);
+}
+
+fn parseMutated(find: []const u8, replace: []const u8) !void {
+    const text = try std.mem.replaceOwned(u8, t.allocator, golden, find, replace);
+    defer t.allocator.free(text);
+    try t.expect(!std.mem.eql(u8, text, golden)); // the mutation applied
+    try parseFails(text);
+}
+
+test "parse refuses a bad value in each field of the lock text" {
+    try parseMutated("\"zig\": {", "\"Zig\": {");
+    try parseMutated("\"version\": \"0.12.0\",", "\"version\": \"0.12.0 x\",");
+    try parseMutated("\"linux-aarch64\": {", "\"linux aarch64\": {");
+    try parseMutated("zig-linux-aarch64-0.12.0.tar.xz\",", "zig-linux-aarch64-0.12.0.tar.xz y\",");
+    try parseMutated("c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad", "C7AE866B8A76A568E2D5CFD31FE89CDB629BDD161FDD5018B29A4A0A17045CAD");
+    try parseMutated("\"size\": 45480516,", "\"size\": \"45480516\",");
+    try parseMutated("\"left-pad@1.3.0\": {", "\"left-pad@1.3.1\": {");
+    try parseMutated("\"name\": \"left-pad\",", "\"name\": \"left pad\",");
+    try parseMutated("\"url\": \"https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz\",", "\"url\": \"ftp://registry.npmjs.org/left-pad.tgz\",");
+    try parseMutated("3a81oZNherrMQXNJriBBMRLm+k6JqX6iCp7u5ktV05ohkpkqJ0/BqDa6PCOj/uu9RU1EI2Q86A4qmslPpUyknw==", "3a81");
+}

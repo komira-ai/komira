@@ -297,3 +297,85 @@ test "jsonString: a dotted path to a string, nothing else" {
     try t.expect(update.jsonString(a, "{\"info\":1}", "info.version") == null);
     try t.expect(update.jsonString(a, "not json", "a") == null);
 }
+
+fn fetchFails(e: *Env, path: []const u8, want: anyerror) !void {
+    var c = fetch.Collect{ .a = e.a(), .max = 100 };
+    try t.expectError(want, e.http.fetcher().get(e.url(path), c.sink()));
+}
+
+test "redirect limits: a loop stops, a 302 without Location is an error, a redirect to a user@ URL is refused" {
+    var routes = [_]registry.Route{
+        .{ .path = "/loop", .status = 302, .location = null },
+        .{ .path = "/nolocation", .status = 302 },
+        .{ .path = "/userinfo", .status = 302, .location = "http://127.0.0.1:1@localhost/x" },
+    };
+    const e = try Env.init(&routes);
+    defer e.deinit();
+    routes[0].location = e.url("/loop");
+    try fetchFails(e, "/loop", error.TooManyRedirects);
+    // 1 + max_redirects requests, no more.
+    try t.expectEqual(@as(usize, 6), e.reg.hitsOf("/loop"));
+    try fetchFails(e, "/nolocation", error.RedirectWithoutLocation);
+    try fetchFails(e, "/userinfo", error.UrlNotAllowed);
+}
+
+test "only 200 is a download: 204, 206 and 500 are refused" {
+    var routes = [_]registry.Route{
+        .{ .path = "/204", .status = 204 },
+        .{ .path = "/206", .status = 206, .body = fx.ABC },
+        .{ .path = "/500", .status = 500, .body = fx.ABC },
+    };
+    const e = try Env.init(&routes);
+    defer e.deinit();
+    try fetchFails(e, "/204", error.HttpStatusNotOk);
+    try fetchFails(e, "/206", error.HttpStatusNotOk);
+    try fetchFails(e, "/500", error.HttpStatusNotOk);
+}
+
+test "the metadata cap: a latest_url document larger than max_meta is refused and nothing moves" {
+    var routes = [_]registry.Route{.{ .path = "/latest", .body = "{\"tag_name\":\"v9.0.0\"}" }};
+    const e = try Env.init(&routes);
+    defer e.deinit();
+    const extra = std.fmt.allocPrint(e.a(), "latest_url = \"{s}\"\nlatest_field = \"tag_name\"\nversion_prefix = \"v\"", .{e.url("/latest")}) catch @panic("oom");
+    var rep = Report.init(e.a());
+    const o = try update.run(e.a(), e.http.fetcher(), toolToml(e, "1.0.0", extra), &.{}, .{}, .{ .max_meta = 5 }, &rep);
+    try t.expect(std.mem.indexOf(u8, rep.errors.msgs.items[0], "ResponseTooLarge") != null);
+    try t.expect(o.pins_text == null and o.lock_text == null);
+}
+
+test "a newest version from the registry that fails the version charset is refused" {
+    const bad = [_][]const u8{ "{\"tag_name\":\"v1.2.0$x\"}", "{\"tag_name\":\"v1.2.0 x\"}", "{\"tag_name\":\"v-1\"}", "{\"tag_name\":\"v\"}" };
+    for (bad) |body| {
+        var routes = [_]registry.Route{
+            .{ .path = "/latest", .body = body },
+            .{ .path = "/tool-1.0.0-linux-x86_64.bin", .body = fx.ABC },
+            .{ .path = "/tool-1.0.0-darwin.bin", .body = fx.ABC },
+        };
+        const e = try Env.init(&routes);
+        defer e.deinit();
+        const extra = std.fmt.allocPrint(e.a(), "latest_url = \"{s}\"\nlatest_field = \"tag_name\"\nversion_prefix = \"v\"", .{e.url("/latest")}) catch @panic("oom");
+        var rep = Report.init(e.a());
+        const o = try update.run(e.a(), e.http.fetcher(), toolToml(e, "1.0.0", extra), &.{}, .{}, .{}, &rep);
+        // The files are served, so the only error possible is the version.
+        try t.expectEqual(@as(usize, 1), rep.errors.count());
+        try t.expect(std.mem.indexOf(u8, rep.errors.msgs.items[0], "unsupported characters") != null);
+        try t.expect(o.pins_text == null);
+    }
+}
+
+test "ALARM: npm --verify finds other bytes for a locked name@version (not a package-lock error)" {
+    var routes = [_]registry.Route{.{ .path = "/a.tgz", .body = fx.ABC }};
+    const e = try Env.init(&routes);
+    defer e.deinit();
+    const pkgs = [_]npm.Pkg{pkg(e, "a", "/a.tgz", fx.ABC_SRI512)};
+    var rep = Report.init(e.a());
+    const first = try update.run(e.a(), e.http.fetcher(), "", &pkgs, .{}, .{}, &rep);
+    var d = Diag.init(e.a());
+    const lock = try lockfmt.parse(e.a(), first.lock_text.?, &d);
+    routes[0].body = fx.ABD;
+    var rep2 = Report.init(e.a());
+    const o = try update.run(e.a(), e.http.fetcher(), "", &pkgs, lock, .{ .verify = true }, &rep2);
+    try t.expectEqual(@as(usize, 1), rep2.alarms.count());
+    try t.expectEqual(@as(usize, 0), rep2.errors.count());
+    try t.expect(o.lock_text == null);
+}

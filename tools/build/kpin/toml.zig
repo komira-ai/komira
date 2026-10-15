@@ -39,7 +39,7 @@ fn validSegment(s: []const u8) bool {
 }
 
 /// The line without its comment, trimmed. A `#` inside a string is text.
-fn stripComment(line: []const u8) []const u8 {
+pub fn stripComment(line: []const u8) []const u8 {
     var in_str = false;
     for (line, 0..) |c, i| {
         if (c == '"') in_str = !in_str;

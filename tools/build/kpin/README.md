@@ -76,7 +76,7 @@ npm owns the versions (`npm install`, `npm update`); `kpin` follows the lockfile
 and a `sha512-...` integrity becomes one tarball, keyed `name@version`, once however many places in the tree name it.
 Several `--npm` files merge; one `name@version` with two different integrities is an error. Refused, with the
 package and the reason: another lockfileVersion, a missing `resolved`/`integrity`, a `sha1-` or `sha256-` integrity,
-a URL that is not `https`. Links and bundled entries have no tarball and are skipped.
+a URL that is not `https`. Links, bundled entries, and local entries outside `node_modules` (workspace members, link targets) have no tarball and are skipped; a `node_modules` entry with no `resolved` is still refused.
 
 npm's integrity is a sha512. The farm's content store and `pinned_file` key on sha256, so `kpin update` fetches
 each tarball once, **checks its sha512 against `package-lock.json`** (a tarball that differs is an error, nothing

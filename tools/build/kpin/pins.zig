@@ -224,7 +224,7 @@ pub fn setVersion(a: std.mem.Allocator, text: []const u8, name: []const u8, new:
     while (it.next()) |raw| {
         if (!first) try out.append(a, '\n');
         first = false;
-        const t = std.mem.trim(u8, raw, " \t\r");
+        const t = toml.stripComment(raw);
         if (t.len > 0 and t[0] == '[') {
             in_section = t.len == name.len + 2 and std.mem.eql(u8, t[1 .. t.len - 1], name);
         } else if (in_section and !done and std.mem.startsWith(u8, t, "version")) {

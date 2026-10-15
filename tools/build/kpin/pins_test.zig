@@ -93,3 +93,34 @@ test "setVersion rewrites only that pin's version line and keeps the rest byte f
     try t.expectEqualStrings("[a]\nversion = \"1.0.1\"  # keep me\nurl = \"https://h/x\"\n\n[b]\nversion = \"2.0.0\"\n", out2);
     try t.expectError(error.NotFound, pins.setVersion(a, src, "c", "1"));
 }
+
+const head = "[a]\nversion = \"1\"\nurl = \"https://h/x\"\n";
+
+test "load refusals: each validated field" {
+    // Types: a field that must be a string is an integer.
+    try refuses("[a]\nversion = 1\nurl = \"https://h/x\"" ++ plat, "must be a string");
+    try refuses("[a]\nversion = \"1\"\nurl = 5" ++ plat, "must be a string");
+    // latest_url / latest_field / version_prefix.
+    try refuses(head ++ "latest_url = \"ftp://h/l\"\nlatest_field = \"v\"" ++ plat, "latest_url");
+    try refuses(head ++ "latest_url = \"https://h/l\"\nlatest_field = \"a..b\"" ++ plat, "latest_field");
+    try refuses(head ++ "latest_url = \"https://h/l\"\nlatest_field = \".a\"" ++ plat, "latest_field");
+    try refuses(head ++ "version_prefix = \"v$\"" ++ plat, "version_prefix");
+    // Platform: id, token, size type, sha256 charset (uppercase).
+    try refuses(head ++ "[a.platform.P]\n", "platform id");
+    try refuses(head ++ "[a.platform.p]\ntoken = \"l x\"\n", "token");
+    try refuses(head ++ "[a.platform.p]\nsha256 = \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015AD\"\nsize = 3\n", "64 lower-case hex");
+    try refuses(head ++ "[a.platform.p]\nsha256 = \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"\nsize = \"3\"\n", "must be an integer");
+    try refuses(head ++ "[a.platform.p]\nbogus = 1\n", "unknown key `bogus`");
+    // A url that is not http(s), and a template whose expansion has a bad character.
+    try refuses("[a]\nversion = \"1\"\nurl = \"file:///x\"" ++ plat, "does not expand");
+    try refuses("[a]\nversion = \"1\"\nurl = \"https://h/x y\"" ++ plat, "does not expand");
+    try refuses("[a]\nversion = \"-1\"\nurl = \"https://h/x\"" ++ plat, "unsupported characters");
+    try refuses("[a]\nversion = \"1\"\nurl = \"https://h/x\"\nversion_prefix = \"-\"" ++ plat, "version_prefix");
+}
+
+test "setVersion finds a [name] header that has a comment, as the parser does" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const out = try pins.setVersion(ar.allocator(), "[a] # toolchain\nversion = \"1.0.0\" # pinned\nurl = \"https://h/x\"\n", "a", "1.0.1");
+    try t.expectEqualStrings("[a] # toolchain\nversion = \"1.0.1\" # pinned\nurl = \"https://h/x\"\n", out);
+}

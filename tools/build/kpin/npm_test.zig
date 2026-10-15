@@ -96,3 +96,38 @@ test "merge: two lockfiles that disagree about one version's bytes" {
     try t.expectEqualStrings("https://m/a.tgz", m1[0].url);
     try t.expectEqualStrings("https://m/a.tgz", m2[0].url);
 }
+
+test "a workspaces lockfile: members and link targets are local and skipped; a node_modules entry without resolved is still refused" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var d = Diag.init(a);
+    const ok =
+        \\{"lockfileVersion":3,"packages":{
+        \\"":{"workspaces":["packages/*"]},
+        \\"packages/app":{"name":"app","version":"1.0.0"},
+        \\"../foo":{"name":"foo","version":"1.0.0"},
+        \\"node_modules/app":{"resolved":"packages/app","link":true},
+        \\"node_modules/x":{"version":"2.0.0","resolved":"https://registry.npmjs.org/x/-/x-2.0.0.tgz","integrity":"
+    ++ fx.ABC_SRI512 ++
+        \\"},
+        \\"packages/app/node_modules/y":{"version":"3.0.0","resolved":"https://registry.npmjs.org/y/-/y-3.0.0.tgz","integrity":"
+    ++ fx.ABC_SRI512 ++
+        \\"}}}
+    ;
+    const pkgs = try npm.read(a, "package-lock.json", ok, &d);
+    try t.expectEqual(@as(usize, 2), pkgs.len);
+    try t.expectEqualStrings("x@2.0.0", pkgs[0].key);
+    try t.expectEqualStrings("y@3.0.0", pkgs[1].key);
+    try refuses("{\"lockfileVersion\":3,\"packages\":{\"packages/app\":{},\"node_modules/z\":{\"version\":\"1.0.0\"}}}", "no `resolved`");
+}
+
+test "resolved URL and version charsets are refused" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    try refuses(try fx.packageLock(a, &.{.{ .path = "node_modules/a", .version = "1.0.0", .resolved = "https://r.example/a$b.tgz", .integrity = fx.ABC_SRI512 }}), "resolved");
+    try refuses(try fx.packageLock(a, &.{.{ .path = "node_modules/a", .version = "1.0.0", .resolved = "https://r.example/a b.tgz", .integrity = fx.ABC_SRI512 }}), "resolved");
+    try refuses(try fx.packageLock(a, &.{.{ .path = "node_modules/a", .version = "1.0.0$x", .resolved = "https://r.example/a.tgz", .integrity = fx.ABC_SRI512 }}), "unsupported characters");
+    try refuses(try fx.packageLock(a, &.{.{ .path = "node_modules/a", .version = "-1", .resolved = "https://r.example/a.tgz", .integrity = fx.ABC_SRI512 }}), "unsupported characters");
+}

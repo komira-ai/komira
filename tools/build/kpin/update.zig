@@ -191,16 +191,16 @@ pub fn run(
             continue;
         };
         out.fetched += 1;
-        if (!std.mem.eql(u8, d.sri512, pkg.sri512)) {
-            // Not the lock's alarm: the registry disagrees with the lockfile it
-            // is supposed to match. Still nothing is written.
-            rep.errors.add("{s}: the tarball's sha512 is {s}, package-lock.json says {s}", .{ pkg.key, d.sri512, pkg.sri512 });
-            continue;
-        }
         if (prior) |pr| if (!std.mem.eql(u8, pr.sha256, d.sha256) or pr.size != d.size) {
             rep.alarms.add("{s}: the lock has sha256 {s} size {d}, {s} now serves sha256 {s} size {d}", .{ pkg.key, pr.sha256, pr.size, pkg.url, d.sha256, d.size });
             continue;
         };
+        if (!std.mem.eql(u8, d.sri512, pkg.sri512)) {
+            // No prior lock entry to alarm against: the registry disagrees with the
+            // lockfile it is supposed to match. Nothing is written.
+            rep.errors.add("{s}: the tarball's sha512 is {s}, package-lock.json says {s}", .{ pkg.key, d.sri512, pkg.sri512 });
+            continue;
+        }
         try seed_npm.append(a, .{ .key = pkg.key, .name = pkg.name, .version = pkg.version, .url = pkg.url, .sri512 = pkg.sri512, .sha256 = d.sha256, .size = d.size });
     }
     if (!rep.clean()) return out;

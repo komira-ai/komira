@@ -89,6 +89,9 @@ pub fn read(a: std.mem.Allocator, label: []const u8, text: []const u8, diag: *Di
         };
         if (flag(obj, "link")) continue; // a workspace link: no tarball
         if (flag(obj, "inBundle")) continue; // inside its parent's tarball
+        // A workspace member or a link target (`packages/app`, `../foo`) is local:
+        // no tarball, and not under node_modules. A node_modules entry still needs one.
+        if (field(obj, "resolved") == null and nameFromPath(path) == null) continue;
         const resolved = field(obj, "resolved") orelse {
             diag.add("{s}: packages[{s}] has no `resolved` (a git or file dependency, or a bundled one); kpin cannot pin it", .{ label, path });
             continue;

@@ -81,10 +81,13 @@ fn lessNpm(_: void, x: Npm, y: Npm) bool {
 pub const RenderError = error{ UnsafeValue, OutOfMemory };
 
 fn checkFile(f: File) RenderError!void {
+    // maxInt is what the reader stores for a size that is not an integer.
+    if (f.size == std.math.maxInt(u64)) return error.UnsafeValue;
     if (!valid.isPinName(f.platform) or !valid.isUrl(f.url) or !valid.isSha256(f.sha256)) return error.UnsafeValue;
 }
 
 fn checkNpm(n: Npm, a: std.mem.Allocator) RenderError!void {
+    if (n.size == std.math.maxInt(u64)) return error.UnsafeValue;
     const want = try std.fmt.allocPrint(a, "{s}@{s}", .{ n.name, n.version });
     defer a.free(want);
     if (!valid.isPackageName(n.name) or !valid.isVersion(n.version) or !std.mem.eql(u8, want, n.key)) return error.UnsafeValue;
@@ -328,7 +331,7 @@ pub fn parse(a: std.mem.Allocator, text: []const u8, diag: *Diag) error{Invalid}
                 .platform = fkv.k,
                 .url = strOf(get(fdd, "url")) orelse "",
                 .sha256 = strOf(get(fdd, "sha256")) orelse "",
-                .size = intOf(get(fdd, "size")) orelse 0,
+                .size = intOf(get(fdd, "size")) orelse std.math.maxInt(u64),
             };
             checkFile(f) catch {
                 diag.add("lock: PINS[{s}][{s}] has a malformed field", .{ kv.k, fkv.k });
@@ -352,7 +355,7 @@ pub fn parse(a: std.mem.Allocator, text: []const u8, diag: *Diag) error{Invalid}
             .url = strOf(get(d, "url")) orelse "",
             .sri512 = strOf(get(d, "sri512")) orelse "",
             .sha256 = strOf(get(d, "sha256")) orelse "",
-            .size = intOf(get(d, "size")) orelse 0,
+            .size = intOf(get(d, "size")) orelse std.math.maxInt(u64),
         };
         checkNpm(n, a) catch {
             diag.add("lock: NPM[{s}] has a malformed field", .{kv.k});
