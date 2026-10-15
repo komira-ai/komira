@@ -179,3 +179,39 @@ test "treeDiff: null when the trees are the same; names a changed, a missing and
     try t.expect(std.mem.indexOf(u8, d, "Only in g: sub/gone.mojo\n") != null);
     try t.expect(std.mem.indexOf(u8, d, "Only in o: extra.mojo\n") != null);
 }
+
+const aws_checks = @import("aws_checks.zig");
+const parity = @import("parity.zig");
+
+test "holds: whole lines with their leading spaces removed; a needle may span lines but not match a tail" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const module = "struct S:\n    var a: Int\n        var b: Int\n    def f(self):\n";
+    try t.expect(try aws_checks.holds(a, module, "var a: Int"));
+    try t.expect(try aws_checks.holds(a, module, "var a: Int\nvar b: Int"));
+    try t.expect(try aws_checks.holds(a, module, "struct S:\n   var a: Int"));
+    // The tail of a longer line is not a line.
+    try t.expect(!try aws_checks.holds(a, module, "a: Int"));
+    try t.expect(!try aws_checks.holds(a, module, "var a: Int\ndef f(self):"));
+    // A needle that opens with spaces cannot match: the haystack's lines have none.
+    try t.expect(!try aws_checks.holds(a, module, "  var a: Int"));
+    try t.expect(try aws_checks.holds(a, module, "def f(self):"));
+}
+
+test "parity: the report words of a difference, signal cases compare only the first stderr line" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    const same = parity.Run{ .rc = 0, .out = "o", .err = "e" };
+    try t.expectEqualStrings("", try parity.differences(a, same, same, .exact));
+    try t.expectEqualStrings(" stdout stderr exit(0 vs 3)", try parity.differences(a, same, .{ .rc = 3, .out = "x", .err = "y" }, .exact));
+    const e = parity.Run{ .rc = 134, .out = "", .err = "Stack dump\n0x1234 frame\n" };
+    const b = parity.Run{ .rc = 134, .out = "", .err = "Stack dump\n0x9999 other\n" };
+    try t.expectEqualStrings("", try parity.differences(a, e, b, .signal));
+    try t.expectEqualStrings(" stderr", try parity.differences(a, e, b, .exact));
+    try t.expectEqualStrings(" stderr-first-line", try parity.differences(a, e, .{ .rc = 134, .out = "", .err = "Other\n" }, .signal));
+    // An empty stderr under a signal means no dump was printed: a difference.
+    try t.expectEqualStrings(" stderr-first-line", try parity.differences(a, .{ .rc = 134, .out = "", .err = "" }, .{ .rc = 134, .out = "", .err = "" }, .signal));
+    try t.expectEqualStrings("a b|c|d", try parity.flatten(a, "a b\nc\ndropped", 7));
+}

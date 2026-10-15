@@ -18,13 +18,11 @@ It passes `--probe-out` unless `probe_out = False`.
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 _GEN = "komira//tools/build/proto-codegen:aws-client-gen"
-_SCRIPT = "tests//functional/aws_codegen:aws_codegen.sh"
 
 def _common(ctx):
-    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
+    act = ctx.attrs._act[RunInfo]
     gen = ctx.attrs._gen[DefaultInfo].default_outputs[0]
-    script = ctx.attrs._script[DefaultInfo].default_outputs[0]
-    return bb, gen, script
+    return act, gen
 
 def _golden_impl(ctx):
     for s in ctx.attrs.must_contain:
@@ -32,16 +30,13 @@ def _golden_impl(ctx):
             fail("{}: a must_contain entry is empty; it matches every module".format(
                 ctx.label,
             ))
-    bb, gen, script = _common(ctx)
+    act, gen = _common(ctx)
     gen_dir = ctx.actions.declare_output(ctx.label.name + "_gen", dir = True)
     probe = "1" if ctx.attrs.golden_probe else "0"
     ctx.actions.run(
         cmd_args(
-            bb,
-            "sh",
-            script,
-            bb,
-            "gen",
+            act,
+            "aws-gen",
             gen,
             gen_dir.as_output(),
             ctx.attrs.module,
@@ -56,11 +51,8 @@ def _golden_impl(ctx):
     stamp = ctx.actions.declare_output(ctx.label.name + ".ok")
     ctx.actions.run(
         cmd_args(
-            bb,
-            "sh",
-            script,
-            bb,
-            "cmp",
+            act,
+            "aws-cmp",
             stamp.as_output(),
             gen_dir,
             ctx.attrs.module,
@@ -76,15 +68,12 @@ def _golden_impl(ctx):
     )]
 
 def _refusal_impl(ctx):
-    bb, gen, script = _common(ctx)
+    act, gen = _common(ctx)
     stamp = ctx.actions.declare_output(ctx.label.name + ".ok")
     ctx.actions.run(
         cmd_args(
-            bb,
-            "sh",
-            script,
-            bb,
-            "refuse",
+            act,
+            "aws-refuse",
             gen,
             stamp.as_output(),
             ctx.attrs.expect,
@@ -99,9 +88,8 @@ def _refusal_impl(ctx):
     return [DefaultInfo(default_output = stamp)]
 
 _TOOLS = {
-    "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+    "_act": attrs.exec_dep(default = "tests//tools:tests_act", providers = [RunInfo]),
     "_gen": attrs.exec_dep(default = _GEN),
-    "_script": attrs.dep(default = _SCRIPT),
 }
 
 aws_codegen_golden_rule = rule(

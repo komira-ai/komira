@@ -13,6 +13,10 @@
 //!        tests_act proto-gen <protoc dir> <plugin> <corpus> <out dir> <options> <n roots> <root>... <import path>...
 //!        tests_act proto-check <gen> <golden dir or ""> <expected error or ""> <mark> <n absent> <absent>... <present>...
 //!        tests_act rest-extract <generated file> <out>
+//!        tests_act aws-gen <generator> <out dir> <module> <probe 0|1> -- <generator args>...
+//!        tests_act aws-refuse <generator> <stamp> <message> <probe 0|1> -- <generator args>...
+//!        tests_act aws-cmp <stamp> <gen dir> <module> <golden> <golden probe|-> [<must contain>...]
+//!        tests_act bundle-parity <runnable dir> <binary> <bundle> <out>
 //!        tests_act stand-in-archive <busybox> <out.tar.gz> <top> (file:<path>|program:<path>)...
 //!
 //! Each exits 0 when its check holds, 1 when it does not (saying what, on stderr),
@@ -33,6 +37,9 @@
 //! mapped and initialized; exits 1 unless both succeed (probes.zig).
 //! proto-gen, proto-check, rest-extract: the golden checks of protoc-gen-mojo
 //! (proto_checks.zig).
+//! aws-gen, aws-refuse, aws-cmp: the checks over aws-client-gen (aws_checks.zig).
+//! bundle-parity: a program built as an executable and as a bundle, run through the
+//! same cases (parity.zig).
 //! stand-in-archive: a `.tar.gz` of the named files and programs (archives.zig).
 
 const std = @import("std");
@@ -40,6 +47,8 @@ const A = std.mem.Allocator;
 const probes = @import("probes.zig");
 const archives = @import("archives.zig");
 const proto_checks = @import("proto_checks.zig");
+const aws_checks = @import("aws_checks.zig");
+const parity = @import("parity.zig");
 
 fn fail(comptime fmt: []const u8, args: anytype) noreturn {
     std.debug.print(fmt ++ "\n", args);
@@ -259,6 +268,10 @@ pub fn main() !void {
     if (std.mem.eql(u8, cmd, "proto-gen")) return proto_checks.protoGen(a, rest) catch |e| fail("tests_act: proto-gen: {s}", .{@errorName(e)});
     if (std.mem.eql(u8, cmd, "proto-check")) return proto_checks.protoCheck(a, rest) catch |e| fail("tests_act: proto-check: {s}", .{@errorName(e)});
     if (std.mem.eql(u8, cmd, "rest-extract")) return proto_checks.restExtract(a, rest) catch |e| fail("tests_act: rest-extract: {s}", .{@errorName(e)});
+    if (std.mem.eql(u8, cmd, "aws-gen")) return aws_checks.gen(a, rest) catch |e| fail("tests_act: aws-gen: {s}", .{@errorName(e)});
+    if (std.mem.eql(u8, cmd, "aws-refuse")) return aws_checks.refuse(a, rest) catch |e| fail("tests_act: aws-refuse: {s}", .{@errorName(e)});
+    if (std.mem.eql(u8, cmd, "aws-cmp")) return aws_checks.cmp(a, rest) catch |e| fail("tests_act: aws-cmp: {s}", .{@errorName(e)});
+    if (std.mem.eql(u8, cmd, "bundle-parity")) std.process.exit(parity.parity(a, rest) catch |e| fail("tests_act: bundle-parity: {s}", .{@errorName(e)}));
     std.debug.print("tests_act: unknown subcommand {s}\n", .{cmd});
     std.process.exit(2);
 }

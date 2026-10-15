@@ -36,11 +36,9 @@ tools/build/tests/coverage_run_tests.sh	build system self-tests: to port to Zig
 tools/build/tests/coverage_tests.sh	build system self-tests: to port to Zig
 tools/build/tests/cxx_tests.sh	build system self-tests: to port to Zig
 tools/build/tests/functional/assert_level.sh	build system self-tests: to port to Zig
-tools/build/tests/functional/aws_codegen/aws_codegen.sh	build system self-tests: to port to Zig
 tools/build/tests/functional/bootstrap.sh	build system self-tests: to port to Zig
 tools/build/tests/functional/buck2_run.sh	build system self-tests: to port to Zig
 tools/build/tests/functional/bundle.sh	build system self-tests: to port to Zig
-tools/build/tests/functional/bundle_parity/parity.sh	build system self-tests: to port to Zig
 tools/build/tests/functional/conda.sh	build system self-tests: to port to Zig
 tools/build/tests/functional/conda_set.sh	build system self-tests: to port to Zig
 tools/build/tests/functional/coverage/branch_check.sh	build system self-tests: to port to Zig

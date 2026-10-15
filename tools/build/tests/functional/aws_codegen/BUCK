@@ -1,5 +1,4 @@
 load("@komira//third_party/botocore:models.bzl", "botocore_model")
-load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/proto-codegen/aws_query:model.bzl", "TINY_EC2", "TINY_QUERY")
 load("@komira//tools/build/proto-codegen/aws_rest_json:model.bzl", "TINY_REST_JSON")
 load("@komira//tools/build/proto-codegen/aws_rest_xml:model.bzl", "TINY_REST_XML")
@@ -659,17 +658,6 @@ aws_codegen_refusal(
 # gives every operation a Request and a Response struct (synthesising an
 # empty one where the model declares no input or output), so every module
 # the CLI emits has at least two structs to probe.
-
-export_file(
-    name = "aws_codegen.sh",
-    visibility = ["//negative/aws_codegen:"],
-)
-
-shell_lint(
-    name = "shell_lint",
-    srcs = ["aws_codegen.sh"],
-    visibility = ["komira//:tests_lints"],
-)
 
 # For tests//negative/aws_codegen, which plants a golden that differs, and
 # must_contain strings the module holds only non-adjacently or as the tail of

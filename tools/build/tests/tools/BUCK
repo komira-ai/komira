@@ -8,7 +8,7 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 zig_test(
     name = "tests_act_unit",
     exec_compatible_with = LINUX_X86_64,
-    imports = ["tests_act.zig", "probes.zig", "archives.zig", "proto_checks.zig"],
+    imports = ["tests_act.zig", "probes.zig", "archives.zig", "proto_checks.zig", "aws_checks.zig", "parity.zig"],
     deps = ["komira//tools/build/mojo:unified_diff"],
     src = "tests_act_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
@@ -18,7 +18,7 @@ zig_test(
 zig_exe(
     name = "tests_act",
     exec_compatible_with = LINUX_X86_64,
-    imports = ["probes.zig", "archives.zig", "proto_checks.zig"],
+    imports = ["probes.zig", "archives.zig", "proto_checks.zig", "aws_checks.zig", "parity.zig"],
     deps = ["komira//tools/build/mojo:unified_diff"],
     src = "tests_act.zig",
     unit_tests = [":tests_act_unit"],
