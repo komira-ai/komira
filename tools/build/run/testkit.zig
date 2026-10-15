@@ -191,10 +191,17 @@ fn appendPid(path: []const u8, pid: i32) void {
     f.writeAll(s) catch return;
 }
 
-fn hold(mib: u64, secs: u64) noreturn {
+/// Says it starts (while it is still small, so the line is in the log
+/// whenever the cap kills it mid-touch), touches `mib` MiB, pausing
+/// `pause_ms` after each MiB (0: none), says it holds them, and sleeps.
+fn hold(mib: u64, secs: u64, pause_ms: u64) noreturn {
+    say("hog touches {d} MiB\n", .{mib});
     const mem = std.heap.page_allocator.alloc(u8, mib << 20) catch posix.exit(99);
     var i: usize = 0;
-    while (i < mem.len) : (i += 4096) mem[i] = 1;
+    while (i < mem.len) : (i += 4096) {
+        mem[i] = 1;
+        if (pause_ms > 0 and (i + 4096) % (1 << 20) == 0) sys.sleepMs(pause_ms);
+    }
     say("hog holds {d} MiB\n", .{mib});
     sys.sleepMs(secs * 1000);
     posix.exit(0);
@@ -204,7 +211,9 @@ fn hold(mib: u64, secs: u64) noreturn {
 ///   exit N             exits N
 ///   signal N           kills itself with signal N
 ///   sleep S [N]        sleeps S s, exits N
-///   hog MiB [S]        holds MiB of touched memory for S s (60), exits 0
+///   hog MiB [S] [P]    says "hog touches MiB", touches MiB of memory (pausing
+///                      P ms after each MiB, 0), says "hog holds MiB", holds
+///                      them for S s (60), exits 0
 ///   daemon FILE KIND   forks a child (KIND: sleep or hog) that stays in the
 ///                      group, writes its pid to FILE, and exits 0 at once
 ///   spawnwait FILE     forks a 100 s sleeper, writes its pid, waits for it
@@ -245,13 +254,13 @@ fn behave(a: std.mem.Allocator, name: []const u8, args: []const []const u8, env:
         sys.sleepMs(num(arg(args, 1), 1) * 1000);
         posix.exit(@intCast(num(arg(args, 2), 0)));
     }
-    if (std.mem.eql(u8, name, "hog")) hold(num(arg(args, 1), 64), num(arg(args, 2), 60));
+    if (std.mem.eql(u8, name, "hog")) hold(num(arg(args, 1), 64), num(arg(args, 2), 60), num(arg(args, 3), 0));
     if (std.mem.eql(u8, name, "daemon")) {
         const file = arg(args, 1) orelse posix.exit(99);
         const kind = arg(args, 2) orelse "sleep";
         const pid = posix.fork() catch posix.exit(99);
         if (pid == 0) {
-            if (std.mem.eql(u8, kind, "hog")) hold(64, 60);
+            if (std.mem.eql(u8, kind, "hog")) hold(64, 60, 0);
             sys.sleepMs(100_000);
             posix.exit(0);
         }
@@ -273,7 +282,7 @@ fn behave(a: std.mem.Allocator, name: []const u8, args: []const []const u8, env:
     if (std.mem.eql(u8, name, "treehog")) {
         const secs = num(arg(args, 3), 5);
         const pid = posix.fork() catch posix.exit(99);
-        if (pid == 0) hold(num(arg(args, 2), 24), secs);
+        if (pid == 0) hold(num(arg(args, 2), 24), secs, 0);
         const mem = std.heap.page_allocator.alloc(u8, num(arg(args, 1), 16) << 20) catch posix.exit(99);
         var k: usize = 0;
         while (k < mem.len) : (k += 4096) mem[k] = 1;
