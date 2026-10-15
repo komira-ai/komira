@@ -10,6 +10,12 @@
 //!   act cat <out> <in>...
 //!       Writes the concatenation of the files <in> to <out> (the README
 //!       join's marker).
+//!   act launch <compiler dir> <binary> [<argument>...]
+//!       Starts a linked Mojo binary from outside its runnable directory: runs
+//!       <binary> with the loader pointed at <compiler dir>/lib in front of
+//!       LD_LIBRARY_PATH (DYLD_LIBRARY_PATH on macOS, which dyld reads instead),
+//!       the rest of the environment unchanged. A built binary's only run path is
+//!       $ORIGIN/lib, which resolves inside its runnable directory.
 //!   act refuse <message>
 //!       Prints <message> on stderr and exits 2: a tool a toolchain does not provide.
 //!   act run-check <busybox> <binary> <out> [<expected>]
@@ -96,6 +102,30 @@ fn cat(a: std.mem.Allocator, args: []const []const u8) void {
     }
 }
 
+/// The loader variable of the platform this tool runs on, and its value: `lib_dir`
+/// in front of `old`.
+pub fn loaderPath(a: std.mem.Allocator, lib_dir: []const u8, old: ?[]const u8) ![]u8 {
+    return if (old) |o| (if (o.len > 0) std.fmt.allocPrint(a, "{s}:{s}", .{ lib_dir, o }) else a.dupe(u8, lib_dir)) else a.dupe(u8, lib_dir);
+}
+
+pub const loader_var = if (@import("builtin").os.tag == .macos) "DYLD_LIBRARY_PATH" else "LD_LIBRARY_PATH";
+
+fn launch(a: std.mem.Allocator, args: []const []const u8) noreturn {
+    if (args.len < 2) die("usage: act launch <compiler dir> <binary> [<argument>...]", .{});
+    const cwd = std.fs.cwd().realpathAlloc(a, ".") catch |e| die("cannot resolve the working directory: {s}", .{@errorName(e)});
+    const tc = abs(a, cwd, args[0]) catch die("out of memory", .{});
+    const bin = abs(a, cwd, args[1]) catch die("out of memory", .{});
+    const lib = std.fs.path.join(a, &.{ tc, "lib" }) catch die("out of memory", .{});
+    var env = std.process.getEnvMap(a) catch die("cannot read the environment", .{});
+    const path = loaderPath(a, lib, env.get(loader_var)) catch die("out of memory", .{});
+    env.put(loader_var, path) catch die("out of memory", .{});
+    var argv = std.ArrayList([]const u8).init(a);
+    argv.append(bin) catch die("out of memory", .{});
+    argv.appendSlice(args[2..]) catch die("out of memory", .{});
+    const err = std.process.execve(a, argv.items, &env);
+    die("cannot run {s}: {s}", .{ bin, @errorName(err) });
+}
+
 fn runCheck(a: std.mem.Allocator, args: []const []const u8) u8 {
     if (args.len < 3 or args.len > 4) die("usage: act run-check <busybox> <binary> <out> [<expected>]", .{});
     const cwd = std.fs.cwd().realpathAlloc(a, ".") catch |e| die("cannot resolve the working directory: {s}", .{@errorName(e)});
@@ -168,6 +198,8 @@ pub fn main() void {
         copy(argv[2..]);
     } else if (std.mem.eql(u8, sub, "cat")) {
         cat(a, argv[2..]);
+    } else if (std.mem.eql(u8, sub, "launch")) {
+        launch(a, argv[2..]);
     } else if (std.mem.eql(u8, sub, "refuse")) {
         std.debug.print("{s}\n", .{if (argv.len > 2) argv[2] else "refused"});
         std.process.exit(2);

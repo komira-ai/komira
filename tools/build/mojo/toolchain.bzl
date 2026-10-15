@@ -570,7 +570,6 @@ def _mojo_toolchain_impl(ctx):
             watchdog_sample_secs = ctx.attrs.watchdog_sample_secs,
             gate = ctx.attrs._gate[DefaultInfo].default_outputs[0],
             act = ctx.attrs._act[DefaultInfo].default_outputs[0],
-            launcher = ctx.attrs._launcher[DefaultInfo].default_outputs[0],
             runtime = ctx.attrs.runtime[DefaultInfo].default_outputs[0],
         ),
     ]
@@ -598,14 +597,12 @@ mojo_toolchain_rule = rule(
         # The gate (tools/build/run): runs every gated test and mutation
         # step. An exec dep: it runs in the actions, on the execution platform.
         "_gate": attrs.exec_dep(default = "komira//tools/build/run:gate"),
-        "_launcher": attrs.dep(default = "komira//tools/build/mojo:launch.sh"),
         "_act": attrs.exec_dep(default = "komira//tools/build/mojo:act"),
         # The lint of every script the Mojo rules run (tools/build/lint): a
         # validation, so no Mojo target builds while one of them has a
         # finding. Not an input of any action.
         "_script_lint": attrs.list(attrs.dep(), default = [
             "komira//tools/build/lint:shell_lint",
-            "komira//tools/build/mojo:shell_lint",
             "komira//tools/build/mojo/darwin:shell_lint",
         ]),
         # The compile wrapper (tools/mojo_compile.zig), an executable built

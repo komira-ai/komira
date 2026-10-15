@@ -37,14 +37,11 @@ use	tools/build/lint/readme_api_coverage.bzl	sh_argv	2	shell action; to port to 
 use	tools/build/lint/readme_api_coverage.bzl	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/lint/test_weld.bzl	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/lint/test_weld_check.bzl	sh_argv	1	shell action; to port to Zig (no-shell series)
-use	tools/build/mojo/BUCK	sh_script	2	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/mojo/coverage.bzl	sh_argv	2	shell action; to port to Zig (no-shell series)
 use	tools/build/mojo/coverage.bzl	sh_script	2	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/mojo/darwin.bzl	busybox_sh	2	shell action; to port to Zig (no-shell series)
-use	tools/build/mojo/darwin/BUCK	sh_script	3	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
+use	tools/build/mojo/darwin/BUCK	sh_script	2	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/mojo/toolchain.bzl	busybox_sh	3	shell action; to port to Zig (no-shell series)
 use	tools/build/mojo/toolchain.bzl	sh_argv	3	shell action; to port to Zig (no-shell series)
-use	tools/build/mojo/toolchain.bzl	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/native/defs.bzl	sh_argv	3	shell action; to port to Zig (no-shell series)
 use	tools/build/node/defs.bzl	busybox_sh	6	shell action; to port to Zig (no-shell series)
 use	tools/build/package/BUCK	sh_script	7	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
@@ -89,7 +86,7 @@ use	tools/build/tests/re_probe/probe.bzl	shell_path	1	a shell path written into 
 use	tools/build/tests/src/tests/coverage/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/third_party_srcs/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/third_party_srcs/defs.bzl	sh_argv	8	shell action; to port to Zig (no-shell series)
-use	tools/build/toolchains/darwin/BUCK	sh_script	3	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
+use	tools/build/toolchains/darwin/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/toolchains/kcov/BUCK	sh_script	7	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
 use	tools/build/toolchains/kcov/defs.bzl	sh_argv	2	shell action; to port to Zig (no-shell series)
 use	tools/build/toolchains/kcov/defs.bzl	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
@@ -114,8 +111,6 @@ script	tools/build/coverage/kcov/cov_run.sh	-	-	script of an action or test; to 
 script	tools/build/lint/readme_api_coverage.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 script	tools/build/lint/test_weld.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 script	tools/build/mojo/darwin/busybox.sh	-	-	script of an action or test; to port to Zig (no-shell series)
-script	tools/build/mojo/darwin/dyld_prelude.sh	-	-	script of an action or test; to port to Zig (no-shell series)
-script	tools/build/mojo/launch.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 script	tools/build/package/kcov_guard.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 script	tools/build/package/list_conda_targets.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 script	tools/build/package/release_version.sh	-	-	script of an action or test; to port to Zig (no-shell series)

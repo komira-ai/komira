@@ -3,7 +3,7 @@
 Runs one real compile through the real wrapper (which gives the compiler
 `LD_DEBUG=libs` through its --ld-debug-output flag: the compiler sees no
 other variable of this action), then the built binary through the real
-`launch.sh` with `LD_DEBUG=libs`, and reports every file the
+`act launch` with `LD_DEBUG=libs`, and reports every file the
 loader mapped and initialized in each (`compile init <file>`, `run init
 <file>`), with the toolchain directory written as `<toolchain>`.
 tools/build/tests/run_tests.sh reads the report; it is a diagnostic output, not part of any build.
@@ -25,7 +25,7 @@ crc=0
 rrc=-
 if [ "$crc" = 0 ]; then
     rrc=0
-    LD_DEBUG=libs LD_DEBUG_OUTPUT="$D/run/ld" "$BB" sh "$LAUNCHER" "$BB" "$TC" "$OUT" > "$D/stdout" || rrc=$?
+    LD_DEBUG=libs LD_DEBUG_OUTPUT="$D/run/ld" "$LAUNCHER" launch "$TC" "$OUT" > "$D/stdout" || rrc=$?
 fi
 # `calling init: <file>` is printed once per object the loader mapped and
 # initialized, so these lines name files actually loaded, never a file only tried.
@@ -51,7 +51,7 @@ def _impl(ctx):
             tc.busybox,
             _SCRIPT,
             tc.wrapper,
-            tc.launcher,
+            tc.act,
             tc.compiler,
             tc.link,
             tc.cc_target,

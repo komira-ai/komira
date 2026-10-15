@@ -24,8 +24,7 @@
 #      path.
 #   4. The linux actions are the same with and without the darwin key.
 #   5. The osx-arm64 closure, unpacked and cut on the farm (linux
-#      actions): its Mach-O load commands, read by tools/build/inspect (`inspect macho`), and the
-#      launcher is launch.sh behind dyld_prelude.sh.
+#      actions): its Mach-O load commands, read by tools/build/inspect (`inspect macho`).
 #   6. The macOS scripts, run on this machine against stand-ins: busybox.sh
 #      (applets only from /bin and /usr/bin, anything else refused), and `act run-check`
 #      (clears DYLD_* as well as LD_*). (The gate, which runs welded tests,
@@ -263,11 +262,10 @@ fi
 # ---- 2. set: resolution and load-time refusals --------------------------------
 want=$(printf '%s komira//tools/build/platforms:darwin-arm64\n' "${MOJO_TARGETS[@]/#\/\//komira//}"
        printf '%s komira//tools/build/platforms:linux-x86_64\n' komira//tools/build/toolchains/darwin:mojo_compiler komira//tools/build/toolchains/darwin:mojo_runtime \
-           komira//tools/build/run:gate_darwin komira//tools/build/toolchains/darwin:launcher)
+           komira//tools/build/run:gate_darwin)
 want=$(printf '%s\n' "$want" | LC_ALL=C sort)
 if ! got=$(resolve darwin_set "${PLACEHOLDER[@]}" "${DARWIN[@]}" "${MOJO_TARGETS[@]}" \
-        komira//tools/build/toolchains/darwin:mojo_compiler komira//tools/build/toolchains/darwin:mojo_runtime komira//tools/build/run:gate_darwin \
-        komira//tools/build/toolchains/darwin:launcher); then
+        komira//tools/build/toolchains/darwin:mojo_compiler komira//tools/build/toolchains/darwin:mojo_runtime komira//tools/build/run:gate_darwin); then
     fail "set: audit failed (see $LOG/darwin_set.txt)"
 elif [ "$(printf '%s\n' "$got" | LC_ALL=C sort)" != "$want" ]; then
     fail "set: resolution differs: $(diff <(printf '%s\n' "$want") <(printf '%s\n' "$got" | LC_ALL=C sort) | grep '^[<>]' | tr '\n' ' ')"
@@ -299,8 +297,7 @@ else
 fi
 if ! "$BUCK2" build "${UNSET[@]}" 'komira//tools/build/toolchains/darwin/...' > "$LOG/darwin_wildcard.txt" 2>&1; then
     fail "unset: a wildcard over tools/build/toolchains/darwin fails without a macOS platform (see $LOG/darwin_wildcard.txt)"
-elif ! grep -q 'komira//tools/build/toolchains/darwin:launcher ' "$LOG/darwin_wildcard.txt" ||
-    ! grep -q 'komira//tools/build/toolchains/darwin:mojo ' "$LOG/darwin_wildcard.txt"; then
+elif ! grep -q 'komira//tools/build/toolchains/darwin:mojo ' "$LOG/darwin_wildcard.txt"; then
     fail "unset: the wildcard did not report the darwin-only targets as skipped (see $LOG/darwin_wildcard.txt)"
 else
     pass "unset: a wildcard over tools/build/toolchains/darwin skips the darwin-only targets"
@@ -334,8 +331,7 @@ else
 fi
 
 # ---- 5. the osx-arm64 closure, built on the farm --------------------------------
-if ! "$BUCK2" build "${DARWIN[@]}" komira//tools/build/toolchains/darwin:mojo_compiler komira//tools/build/toolchains/darwin:mojo_runtime \
-        komira//tools/build/toolchains/darwin:launcher --materializations all --show-full-output \
+if ! "$BUCK2" build "${DARWIN[@]}" komira//tools/build/toolchains/darwin:mojo_compiler komira//tools/build/toolchains/darwin:mojo_runtime --materializations all --show-full-output \
         > "$LOG/darwin_closure.txt" 2> "$LOG/darwin_closure.log"; then
     fail "closure: build failed (see $LOG/darwin_closure.log)"
 else
@@ -352,11 +348,6 @@ else
         fail "closure: bin/lld is in the closure, but links go through the cc on PATH"
     else
         pass "closure: modular.cfg asks for the one run path the wrapper rewrites; no bin/lld"
-    fi
-    if ! cmp -s "$(out launcher)" <(cat tools/build/mojo/darwin/dyld_prelude.sh tools/build/mojo/launch.sh); then
-        fail "dyld scripts: launcher differs from dyld_prelude.sh + launch.sh"
-    else
-        pass "dyld scripts: launcher is launch.sh behind dyld_prelude.sh"
     fi
 fi
 

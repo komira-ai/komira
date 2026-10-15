@@ -304,8 +304,8 @@ there, and in `bin/` of its bundle, where it finds them next to its own
 executable ([helpers.bzl](helpers.bzl)). A `mojo_helper_check` (same file)
 runs a helper's copy in `[runnable]` as a build action, so a binary that lost
 it, or a copy that does not start, is red (`//bin/kci:runnable_readme_examples`).
-([`launch.sh`](launch.sh) starts a binary from outside its runnable
-directory, pointing the loader at the toolchain's `lib/`.) The list of
+(`act launch` ([`act.zig`](tools/act.zig)) starts a binary from outside its
+runnable directory, pointing the loader at the toolchain's `lib/`.) The list of
 libraries is checked against what the loader actually maps during a run
 ([test 8](../tests/README.md#8-host-floor-and-runtime-libraries)).
 

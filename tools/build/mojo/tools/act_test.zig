@@ -56,6 +56,16 @@ test "cleanEnv: the library path variables are gone, three are set, the rest is 
     try t.expect(base.get("LD_PRELOAD") != null);
 }
 
+test "loaderPath: the compiler's lib in front of what is there" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try t.expectEqualStrings("/tc/lib", try A.loaderPath(a, "/tc/lib", null));
+    try t.expectEqualStrings("/tc/lib", try A.loaderPath(a, "/tc/lib", ""));
+    try t.expectEqualStrings("/tc/lib:/a:/b", try A.loaderPath(a, "/tc/lib", "/a:/b"));
+    try t.expect(std.mem.endsWith(u8, A.loader_var, "LIBRARY_PATH"));
+}
+
 test "cleared: both loaders' variables" {
     var ld = false;
     var dyld = false;

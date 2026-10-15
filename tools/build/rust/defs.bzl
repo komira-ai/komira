@@ -128,7 +128,6 @@ rust_toolchain = rule(
         # tools/build/lint/defs.bzl), not an input of any action.
         "_script_lint": attrs.list(attrs.dep(), default = [
             "komira//tools/build/lint:shell_lint",
-            "komira//tools/build/mojo:shell_lint",
         ]),
         # The compile launcher (tools/build/rust/rustc_launch.zig; no shell).
         "_launcher": attrs.exec_dep(default = "komira//tools/build/rust:rustc_launch"),

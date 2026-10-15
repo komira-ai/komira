@@ -19,10 +19,9 @@ mojo_binary and mojo_test are unchanged; what differs is what each field holds:
             (tools/build/mojo/tools/mojo_compile_macos.zig) built for macOS arm64.
   gate      komira//tools/build/run:gate_darwin, the gate built for macOS
             (it sets DYLD_LIBRARY_PATH beside LD_LIBRARY_PATH for the test).
-  launcher  launch.sh with tools/build/mojo/darwin/dyld_prelude.sh prepended
-            (a `dyld_script`), so it sets DYLD_LIBRARY_PATH. (`launcher` is
-            read only by bundles, which are linux only; it is the field's
-            macOS form.)
+  act       komira//tools/build/mojo:act_darwin, the same tool built for macOS;
+            its `launch` points the loader at the compiler's lib/ with
+            DYLD_LIBRARY_PATH.
 
 Link story, measured on the macOS workers: the compiler links through the
 `cc` on PATH, as it does on linux (where every link goes through the zig cc
@@ -40,27 +39,7 @@ host whose identity is not among them.
 """
 
 load(":providers.bzl", "MojoToolchainInfo")
-load(":toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
-
-def _dyld_script_impl(ctx):
-    bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
-    out = ctx.actions.declare_output(ctx.label.name + ".sh")
-    ctx.actions.run(
-        busybox_sh(bb, 'BB="$1"; "$BB" cat "$2" "$3" > "$4"', ctx.attrs.prelude, ctx.attrs.src, out.as_output()),
-        category = "dyld_script",
-    )
-    return [DefaultInfo(default_output = out)]
-
-# `prelude` followed by `src`, as one script.
-dyld_script_rule = rule(
-    impl = _dyld_script_impl,
-    attrs = {
-        "busybox": attrs.exec_dep(),
-        "prelude": attrs.source(),
-        "src": attrs.source(),
-    },
-)
 
 def _mojo_darwin_toolchain_impl(ctx):
     def one(dep):
@@ -84,7 +63,6 @@ def _mojo_darwin_toolchain_impl(ctx):
             watchdog_sample_secs = ctx.attrs.watchdog_sample_secs,
             gate = one(ctx.attrs.gate),
             act = one(ctx.attrs._act),
-            launcher = one(ctx.attrs.launcher),
             runtime = one(ctx.attrs.runtime),
             os = "darwin",
         ),
@@ -99,8 +77,6 @@ mojo_darwin_toolchain_rule = rule(
         "deployment_target": attrs.string(),
         # The gate built for macOS (komira//tools/build/run:gate_darwin).
         "gate": attrs.exec_dep(),
-        # A `dyld_script` of komira//tools/build/mojo:launch.sh.
-        "launcher": attrs.exec_dep(),
         # The host identities (what `mojo_compile host-identity` prints) a
         # compile may run on; the wrapper refuses any other host.
         "macos_hosts": attrs.list(attrs.string()),
@@ -116,5 +92,4 @@ mojo_darwin_toolchain_rule = rule(
 
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
-dyld_script = declares_docs(dyld_script_rule)
 mojo_darwin_toolchain = declares_docs(mojo_darwin_toolchain_rule)

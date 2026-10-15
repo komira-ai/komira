@@ -1,4 +1,3 @@
-load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "row")
 load(":toolchain.bzl", "zig_bootstrap_exe", "zig_exe", "zig_test")
@@ -212,17 +211,9 @@ zig_exe(
 
 export_file(name = "conda_unpack.zig", src = "tools/conda_unpack.zig", visibility = ["PUBLIC"])
 
-export_file(name = "launch.sh", visibility = ["PUBLIC"])
 export_file(name = "zig_cc_launcher.zig", src = "tools/zig_cc_launcher.zig", visibility = ["PUBLIC"])
 
 # The rule of the branch coverage actions, as data for the coverage
 # workflow's cases (the root BUCK's coverage_ci_cases), which hold
 # .github/ci/coverage_measure.sh's list of their categories equal to its.
 export_file(name = "coverage_branch.bzl", visibility = ["PUBLIC"])
-
-# Every script above; a validation of the Mojo toolchain (toolchain.bzl).
-shell_lint(
-    name = "shell_lint",
-    srcs = glob(["*.sh"]),
-    visibility = ["PUBLIC"],
-)
