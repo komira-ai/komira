@@ -48,7 +48,7 @@ in the tree that `KPIN_SETS` does not list fails the job, so a new lock is cover
 | result | what the job does |
 |---|---|
 | nothing changed | green; says so in the run summary |
-| a pin moved or a hash was added, exit 0 | pushes the branch `kpin/weekly` (rebuilt from the base commit each run, force-pushed: it is the job's own) and opens the pull request, or updates the body of the open one |
+| a pin moved or a hash was added, exit 0 | pushes a new branch `kpin/weekly-<run id>` (a plain push, never a force-push), opens a pull request from it, then closes every older open `kpin/weekly-*` pull request with a comment linking the new one and deletes its branch |
 | exit 3 (an alarm) from `update` or from `check --previous` | fails, with an error annotation; pushes nothing, opens nothing |
 | exit 1 or 2 | fails; pushes nothing |
 
@@ -58,9 +58,9 @@ A manual run of another ref does the update and the checks and stops before the 
 Two things the job cannot do for itself:
 
 - The repository setting "Allow GitHub Actions to create and approve pull requests" must be on, or opening the
-  pull request fails (the branch is pushed; the next run opens it).
+  pull request fails (the branch is pushed, the job fails with the compare URL, and the older weekly pull requests stay open).
 - **A pull request opened with `GITHUB_TOKEN` starts no other workflow**, so `pr / check` does not run on it. A
-  maintainer starts it by pushing an empty commit to `kpin/weekly` or by closing and reopening the pull request,
+  maintainer starts it by pushing an empty commit to its branch or by closing and reopening the pull request,
   and merges when it is green. (A personal access token or a GitHub App would remove the step; neither is used.)
 
 Tried on a runner before this was merged (a throwaway branch, the workflow on a push): kpin builds there with no
