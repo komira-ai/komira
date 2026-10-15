@@ -2,6 +2,7 @@ load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:archive.bzl", "archive_files")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load(":proto_check.bzl", "proto_check", "proto_check_case")
 
 # googleapis, Apache-2.0 (LICENSE in the archive), at one pinned commit of its
@@ -561,13 +562,30 @@ proto_check(
 shell_lint(
     name = "shell_lint",
     srcs = [
-        "proto_check.sh",
         "upstream_version.sh",
     ],
 )
 
-# The check proto_check runs (proto_check.bzl, `_script`).
-export_file(name = "proto_check.sh")
+# The check proto_check runs (proto_check.zig; proto_check.bzl, `_tool`), built
+# behind its unit tests.
+zig_test(
+    name = "proto_check_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["proto_check.zig"],
+    src = "proto_check_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "proto_check_bin",
+    exec_compatible_with = LINUX_X86_64,
+    src = "proto_check.zig",
+    unit_tests = [":proto_check_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
 
 # The self-test of proto_check's check, over the fixtures in testdata/: one
 # tree it must accept, and one change per case that it must refuse, each with

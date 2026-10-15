@@ -71,5 +71,4 @@ tools/build/tests/tool_lib.sh	build system self-tests: to port to Zig
 tools/build/third_party_srcs/upstream_versions.sh	toolchain or vendored-source builder or check: to port to Zig
 tools/build/toolchains/kcov/kcov_build.sh	toolchain or vendored-source builder or check: to port to Zig
 tools/build/toolchains/kcov/kcov_check.sh	toolchain or vendored-source builder or check: to port to Zig
-tools/vendor/googleapis/proto_check.sh	toolchain or vendored-source builder or check: to port to Zig
-tools/vendor/googleapis/upstream_version.sh	toolchain or vendored-source builder or check: to port to Zig
+tools/vendor/googleapis/upstream_version.sh	people run it to see how far the pin is behind upstream; no action does
