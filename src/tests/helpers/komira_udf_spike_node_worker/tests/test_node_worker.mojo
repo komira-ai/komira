@@ -2,13 +2,13 @@
 # (UdfRuntime), beyond the shared corpus.
 #
 # What it proves, and the defect each part catches:
-#   - describe: a managed runtime, one context per engine thread, the
-#     worker transport only, no global lock (capabilities copied wrongly
-#     across the wire);
-#   - validate refuses by name, from the descriptor and the bundle's text
-#     alone: an entry without `#`, a bundle path that leaves the code
-#     directory, a missing bundle, form VALUE, an unbuilt shape (a validator
-#     that lets mid-run failures through);
+#   - describe: a managed runtime on the CPU, descriptor version 1, no
+#     feature bit (capabilities copied wrongly across the wire);
+#   - validate refuses by name, from the spec and its descriptor alone: an
+#     entry without `#`, a bundle path that leaves the code directory, form
+#     VALUE, an unbuilt shape (a validator that lets mid-run failures
+#     through); a missing bundle passes validate (it opens no code, design
+#     section 4.3) and is refused by load, ERR_LOAD;
 #   - open_instance refuses an export that is not a function (ERR_LOAD);
 #   - a float returned for int64, and an Int32Array returned for float64,
 #     are ERR_RETURN_TYPE with the row (an unsafe cast accepted);
@@ -18,11 +18,12 @@
 #   - state per context: a module-global counter counts 1, 2, 3 in one
 #     context and starts at 1 in another (contexts sharing one process);
 #   - a worker that exits mid-batch, and one killed by a signal, are
-#     ERR_INSTANCE_LOST naming the exit status or signal; the lost context is
-#     never called again, and a new context works (a crash mapped to a user
-#     error, or a dead channel reused);
+#     ERR_WORKER_CRASHED naming the exit status or signal (user code ran,
+#     design section 4.5); a later call on the lost context is
+#     ERR_INSTANCE_LOST (no user code ran for it), and a new context works
+#     (a crash mapped to a user error, or a dead channel reused);
 #   - a cancel the user's code never checks (a batch function that spins):
-#     the proxy kills the worker after its grace period, ERR_INSTANCE_LOST;
+#     the proxy kills the worker after its grace period, ERR_KILLED;
 #   - a cancel belongs to its call: after a call cancelled mid-batch, the
 #     next call on the same instance runs to the end (the proxy never clears
 #     the cancel word, so a worker that honours any nonzero word, not only
@@ -155,11 +156,9 @@ def _describe(mut rt: UdfRuntime) raises:
     for i in range(4, len(abi)):
         assert_true(abi[i] >= 48 and abi[i] <= 57, "runtime_abi '" + caps.runtime_abi + "': not node<major>")
     assert_equal(caps.udf_class, CLASS_MANAGED)
-    assert_equal(caps.hosting, HOSTING_EMBEDDED)
-    assert_equal(caps.threading, CONTEXT_PER_THREAD)
-    assert_equal(caps.transports, TRANSPORT_WORKER)
-    assert_equal(caps.global_lock, 0)
-    assert_equal(caps.thread_affine, 0)
+    assert_equal(caps.max_descriptor_version, 1)
+    assert_equal(caps.devices, DEVICE_CPU)
+    assert_equal(caps.features, 0, "no feature bit is claimed")
 
 
 def _validate(mut rt: UdfRuntime) raises:
@@ -171,7 +170,8 @@ def _validate(mut rt: UdfRuntime) raises:
         "is not <bundle>.mjs#<export>",
         "a path out of the code directory",
     )
-    _expect(rt.validate(_spec(SHAPE_SCALAR, "missing.mjs#double", TYPE_INT64)), ERR_DESCRIPTOR, "no bundle missing.mjs", "no bundle")
+    _expect(rt.validate(_spec(SHAPE_SCALAR, "missing.mjs#double", TYPE_INT64)), OK, "", "no bundle: validate opens no code")
+    _expect(rt.load(_spec(SHAPE_SCALAR, "missing.mjs#double", TYPE_INT64)).outcome, ERR_LOAD, "no bundle missing.mjs", "no bundle")
     var value = _spec(SHAPE_SCALAR, "fixtures.mjs#double", TYPE_INT64)
     value.form = FORM_VALUE
     _expect(rt.validate(value), ERR_UNSUPPORTED, "BUNDLE only", "form VALUE")
@@ -271,8 +271,11 @@ def _crashes(mut rt: UdfRuntime) raises:
     var s = _spec(SHAPE_SCALAR, "fixtures.mjs#exit_on_row_2", TYPE_INT64)
     var b = _bind(rt, s, 0)
     var r = rt.call_batch(b.inst, s, _ints([0, 1, 2, 3]), CallOptions.plain())
-    _expect(r.outcome, ERR_INSTANCE_LOST, "exited with status 3", "exit mid-batch")
+    _expect(r.outcome, ERR_WORKER_CRASHED, "exited with status 3", "exit mid-batch")
     assert_equal(r.outcome.row, -1, "the row of a lost worker's error")
+    # The harness refuses a call into a lost context; this checks what the
+    # runtime answers one.
+    rt.allow_calls_on_lost_contexts()
     var again = rt.call_batch(b.inst, s, _ints([0]), CallOptions.plain())
     _expect(again.outcome, ERR_INSTANCE_LOST, "worker lost", "a call on the lost context")
     _unbind(rt, b)
@@ -285,7 +288,7 @@ def _crashes(mut rt: UdfRuntime) raises:
     var s3 = _spec(SHAPE_SCALAR, "fixtures.mjs#abort_now", TYPE_INT64)
     var ab = _bind(rt, s3, 0)
     var r3 = rt.call_batch(ab.inst, s3, _ints([0]), CallOptions.plain())
-    _expect(r3.outcome, ERR_INSTANCE_LOST, "killed by signal 6", "abort")
+    _expect(r3.outcome, ERR_WORKER_CRASHED, "killed by signal 6", "abort")
     _unbind(rt, ab)
 
 
@@ -293,10 +296,11 @@ def _hard_cancel(mut rt: UdfRuntime) raises:
     var s = _spec(SHAPE_MAP_BATCHES_COLUMN, "fixtures.mjs#spin_forever", TYPE_INT64)
     var b = _bind(rt, s, 0)
     var r = rt.call_batch(b.inst, s, _ints([1, 2]), CallOptions(False, True, False))
-    _expect(r.outcome, ERR_INSTANCE_LOST, "did not answer within 500 ms", "a cancel user code ignores")
+    _expect(r.outcome, ERR_KILLED, "did not answer within 500 ms", "a cancel user code ignores")
+    assert_equal(r.outcome.run_error(), "UDF_CANCELLED", "a forced stop after a cancel is the run's cancel")
     # killed, then reaped and named (a kill left unreaped reads "could not
     # be reaped")
-    _expect(r.outcome, ERR_INSTANCE_LOST, "was killed by signal 9", "a cancel user code ignores")
+    _expect(r.outcome, ERR_KILLED, "was killed by signal 9", "a cancel user code ignores")
     assert_equal(r.outcome.row, -1, "the row of a worker killed after a cancel")
     _unbind(rt, b)
 
@@ -348,7 +352,7 @@ def _corrupt_hellos() raises:
     var why = _open_fails(CORRUPT_LIB)
     assert_true("ERR_INSTANCE_LOST" in why and "exited with status 5" in why, "HELLO 0, no answer: " + why)
     why = _open_fails(CORRUPT_LIB)
-    assert_true("ERR_ABI" in why and "the worker speaks wire 2, ABI 1.0" in why, "HELLO 1, wire 2: " + why)
+    assert_true("ERR_ABI" in why and "the worker speaks wire 3, ABI 1.0" in why, "HELLO 1, wire 3: " + why)
     why = _open_fails(CORRUPT_LIB)
     assert_true("ERR_ABI" in why and "the worker speaks wire 0, ABI 0.0" in why, "HELLO 2, 8 bytes: " + why)
 
@@ -581,7 +585,7 @@ def _corrupt_outputs() raises:
     for k in range(101, 106):
         var f = _bind(rt, s, 0)
         var r = rt.call_batch(f.inst, s, _ints([k]), CallOptions.plain())
-        _expect(r.outcome, ERR_INSTANCE_LOST, "a reply broke the framing", "corrupt case " + String(k))
+        _expect(r.outcome, ERR_WORKER_CRASHED, "a reply broke the framing", "corrupt case " + String(k))
         _unbind(rt, f)
     # Case 106: a payload of exactly the limit (2^31 bytes) is not a framing
     # break; the worker exits before sending it, so the call ends at end of
@@ -590,7 +594,7 @@ def _corrupt_outputs() raises:
     var r6 = rt.call_batch(f6.inst, s, _ints([106]), CallOptions.plain())
     assert_true("broke the framing" not in r6.outcome.message, "corrupt case 106: " + String(r6.outcome))
     assert_true(
-        r6.outcome.status == ERR_INSTANCE_LOST or r6.outcome.status == ERR_OUT_OF_MEMORY,
+        r6.outcome.status == ERR_WORKER_CRASHED or r6.outcome.status == ERR_OUT_OF_MEMORY,
         "corrupt case 106: " + String(r6.outcome),
     )
     _unbind(rt, f6)

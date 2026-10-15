@@ -1,0 +1,15 @@
+{
+ "name": "nested_batches_mismatch",
+ "defect": "a deliberate mismatch: the nested frame's output is not the one named",
+ "run": "nested_frame",
+ "entry": "running_sum",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "nested": {"entry": "double", "shape": "SCALAR", "args": [{"type": "int64", "nullable": true}], "result": [{"type": "int64", "nullable": true}]},
+ "levels": 1,
+ "inputs": [{"length": 1, "columns": [{"type": "int64", "values": [1]}]}],
+ "expect": {"status": "OK", "batches": [{"length": 1, "columns": [{"type": "int64", "values": [1]}]}]},
+ "runner_fails_with": "batch 0"
+}

@@ -393,7 +393,9 @@ In the pull-request check, not `run_tests.sh`:
 indexes a `List`, so the binary records the main file's source location. It
 builds only because the wrapper strips the staging directory from recorded
 paths, and its run check, a validation of the binary, compares stdout
-exactly.
+exactly. `tests//functional/mojoc_path:same_bytes` precompiles one package
+twice, sources and `-I` staged at different paths, and fails unless the two
+`.mojoc` are identical ([why](../mojo/README.md#outputs-and-the-runnable-directory)).
 
 ## 22. Rust rules
 

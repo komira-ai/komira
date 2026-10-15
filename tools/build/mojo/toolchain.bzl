@@ -6,8 +6,10 @@ and file utilities), the zig distribution (C link driver, and the compiler for
 Actions never search the worker's PATH.
 """
 
-load(":providers.bzl", "MojoToolchainInfo")
+load(":providers.bzl", "MojoToolchainInfo", "ZigExeInfo")
+load(":test_runtime.bzl", "RUNNER_ENV", "data_map")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 def busybox_sh(busybox, script, *args):
     """argv running `script` under the declared busybox shell.
@@ -62,8 +64,10 @@ zig_dist_rule = rule(
 # in a `zig_exe` or `zig_test` that lists the target in `deps`. Zig refuses
 # a relative `@import` of a file outside the importing file's directory, so a
 # file shared by tools in two packages is passed to the compiler as a module
-# of its own (`-M<name>=<root>`). A module imports no other module (it has
-# no `deps` of its own); that is added when a module first needs one.
+# of its own (`-M<name>=<root>`). A module may import other modules by name:
+# its `deps` are `zig_module` targets, and a compile that imports it is given
+# the whole closure, each module with the imports of its own `deps` only (as
+# `zig build` wires `addImport`).
 ZigModuleInfo = provider(fields = {
     # The import name: the target's name.
     "name": provider_field(str),
@@ -72,8 +76,16 @@ ZigModuleInfo = provider(fields = {
     # What a compile importing the module takes as inputs: the files `root`
     # imports by a relative name, and the `.passed` output of each of the
     # module's `unit_tests`, so nothing imports the module unless its tests
-    # passed.
+    # passed. (The same of its `deps` are in `closure`.)
     "inputs": provider_field(list),
+    # The modules this one imports by name, as import names.
+    "deps": provider_field(list),
+    # The target's label, as a string (what two modules of one name are told
+    # apart by).
+    "label": provider_field(str),
+    # Every module this one reaches through `deps`, direct ones first, each
+    # once: structs of name, label, root, inputs and deps (import names).
+    "closure": provider_field(list),
 })
 
 # Names zig gives modules of its own: the importing file is `root`, and
@@ -81,18 +93,48 @@ ZigModuleInfo = provider(fields = {
 # clash with them.
 _ZIG_RESERVED_MODULES = ["root", "std", "builtin"]
 
+def _zig_closure(where, deps):
+    """The modules `deps` (ZigModuleInfo of the direct deps, in order) reach,
+    each once, direct ones first. Fails when two different targets of one
+    import name are reached."""
+    out = []
+    labels = {}
+    for dep in deps:
+        for e in [struct(name = dep.name, label = dep.label, root = dep.root, inputs = dep.inputs, deps = dep.deps)] + dep.closure:
+            if e.name in labels:
+                if labels[e.name] != e.label:
+                    fail("{}: two different modules are imported as \"{}\": {} and {} (a zig_module's import name is its target name)".format(where, e.name, labels[e.name], e.label))
+                continue
+            labels[e.name] = e.label
+            out.append(e)
+    return out
+
 def _zig_module_impl(ctx):
     if ctx.label.name in _ZIG_RESERVED_MODULES:
         fail("{}: a zig_module may not be named {} (zig's own module names: {})".format(ctx.label.raw_target(), ctx.label.name, ", ".join(_ZIG_RESERVED_MODULES)))
     passed = [t[DefaultInfo].default_outputs[0] for t in ctx.attrs.unit_tests]
+    mods = [d[ZigModuleInfo] for d in ctx.attrs.deps]
+    names = [m.name for m in mods]
+    if len(names) != len(set(names)):
+        fail("{}: two deps are imported by one name (a zig_module's import name is its target name): {}".format(ctx.label.raw_target(), ", ".join(names)))
+    where = str(ctx.label.raw_target())
     return [
         DefaultInfo(default_output = ctx.attrs.src, other_outputs = passed),
-        ZigModuleInfo(name = ctx.label.name, root = ctx.attrs.src, inputs = ctx.attrs.imports + passed),
+        ZigModuleInfo(
+            name = ctx.label.name,
+            root = ctx.attrs.src,
+            inputs = ctx.attrs.imports + passed,
+            deps = names,
+            label = where,
+            closure = _zig_closure(where, mods),
+        ),
     ]
 
 zig_module_rule = rule(
     impl = _zig_module_impl,
     attrs = {
+        # `zig_module` targets `src` imports by name.
+        "deps": attrs.list(attrs.dep(providers = [ZigModuleInfo]), default = []),
         # Files `src` imports by a relative name (beside it).
         "imports": attrs.list(attrs.source(), default = []),
         "src": attrs.source(),
@@ -103,8 +145,9 @@ zig_module_rule = rule(
 
 def _zig_root(ctx):
     """What the compile is given as its root: `src`; with `deps`, an argument
-    file naming `src` as the root module and each dep as a module it may
-    import (`@file` is zig's own argument file, read in place of the
+    file naming `src` as the root module and each module it may import (the
+    `deps` and what they import, with the imports of each module declared
+    before it; `@file` is zig's own argument file, read in place of the
     argument). Without `deps` the command line is the one it always was, so
     no existing action changes its key. Two deps of one import name (the
     same target twice, or two targets of one name) fail analysis rather
@@ -117,11 +160,22 @@ def _zig_root(ctx):
         if m.name in seen:
             fail("{}: two deps are imported as \"{}\": {} and {} (a zig_module's import name is its target name)".format(ctx.label.raw_target(), m.name, seen[m.name], d.label.raw_target()))
         seen[m.name] = d.label.raw_target()
+    closure = _zig_closure(str(ctx.label.raw_target()), mods)
     args = [cmd_args("--dep", m.name) for m in mods]
     args.append(cmd_args(ctx.attrs.src, format = "-Mroot={}"))
-    args += [cmd_args(m.root, format = "-M" + m.name + "={}") for m in mods]
+    for e in closure:
+        args += [cmd_args("--dep", n) for n in e.deps]
+        args.append(cmd_args(e.root, format = "-M" + e.name + "={}"))
     argfile, _ = ctx.actions.write(ctx.label.name + ".zig_modules", cmd_args(args), allow_args = True)
-    return cmd_args(argfile, format = "@{}", hidden = [ctx.attrs.src] + [m.root for m in mods] + [i for m in mods for i in m.inputs])
+    return cmd_args(argfile, format = "@{}", hidden = [ctx.attrs.src] + [e.root for e in closure] + [i for e in closure for i in e.inputs])
+
+# zig's optimization modes, for `optimize`.
+ZIG_OPTIMIZE_MODES = ["Debug", "ReleaseSafe", "ReleaseFast", "ReleaseSmall"]
+
+def _zig_optimize(ctx):
+    if ctx.attrs.optimize not in ZIG_OPTIMIZE_MODES:
+        fail("{}: optimize {} is not a zig optimization mode ({})".format(ctx.label.raw_target(), repr(ctx.attrs.optimize), ", ".join(ZIG_OPTIMIZE_MODES)))
+    return ctx.attrs.optimize
 
 def _zig_exe_impl(ctx):
     bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
@@ -133,12 +187,12 @@ export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME
 "$1/zig" build-exe -OReleaseSafe -target TARGET -fstrip "$2" "-femit-bin=$3"
 rm -rf "$T"
 """
-    # The target is written into the script, so that with the default the
-    # command (and the action key) of every zig_exe is what it was before
-    # the attribute existed.
+    # The target, the optimization mode and the strip flag are written into
+    # the script, so that with the defaults the command (and the action key)
+    # of every zig_exe is what it was before the attributes existed.
     if not regex_match("^[a-z0-9_.-]+$", ctx.attrs.target):
         fail("{}: target {} is not a zig target triple".format(ctx.label, repr(ctx.attrs.target)))
-    script = script.replace("-target TARGET ", "-target {} ".format(ctx.attrs.target))
+    script = script.replace("-OReleaseSafe -target TARGET -fstrip ", "-O{} -target {} {} ".format(_zig_optimize(ctx), ctx.attrs.target, "-fstrip" if ctx.attrs.strip else "-fno-strip"))
     cmd = busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output())
     if ctx.attrs.imports:
         # Files `src` imports by a relative name: inputs at their paths, so
@@ -152,7 +206,7 @@ rm -rf "$T"
         cmd,
         category = "zig_build_exe",
     )
-    return [DefaultInfo(default_output = out), RunInfo(args = cmd_args(out))]
+    return [DefaultInfo(default_output = out), RunInfo(args = cmd_args(out)), ZigExeInfo(target = ctx.attrs.target)]
 
 zig_exe_rule = rule(
     impl = _zig_exe_impl,
@@ -161,7 +215,11 @@ zig_exe_rule = rule(
         # `zig_module` targets `src` imports by name.
         "deps": attrs.list(attrs.dep(providers = [ZigModuleInfo]), default = []),
         "imports": attrs.list(attrs.source(), default = []),
+        # zig's -O: the optimization mode.
+        "optimize": attrs.string(default = "ReleaseSafe"),
         "src": attrs.source(),
+        # Strip symbols and debug information from the executable.
+        "strip": attrs.bool(default = True),
         # zig's -target: what the executable runs on (it is built on the
         # linux execution platform whatever this says).
         "target": attrs.string(default = "x86_64-linux-musl"),
@@ -171,6 +229,34 @@ zig_exe_rule = rule(
     },
 )
 
+# Variables a driver test's action sets itself.
+_ZIG_TEST_OWN_ENV = ["XDG_CACHE_HOME", "ZIG_GLOBAL_CACHE_DIR", "ZIG_LOCAL_CACHE_DIR", "KOMIRA_TEST_WORK", "KOMIRA_ZT_DATA", "KOMIRA_ZT_TOOLS"]
+
+# What a zig_test with `exec_tools` or `data` does before `zig test`: XDG_CACHE_HOME
+# in the scratch, KOMIRA_TEST_WORK a writable directory holding a copy of
+# `data` (executable bits kept), each `exec_tools` variable the absolute path
+# of its tool. (A manifest ends without a newline: the last line is read
+# while it holds something.)
+_ZIG_TEST_DRIVER = """R="$PWD"; TAB=$(printf '\\t')
+XDG_CACHE_HOME="$T/cache"; KOMIRA_TEST_WORK="$T/work"
+export XDG_CACHE_HOME KOMIRA_TEST_WORK
+mkdir -p "$XDG_CACHE_HOME" "$KOMIRA_TEST_WORK"
+while IFS="$TAB" read -r dest src || [ -n "$dest" ]; do
+    if [ -d "$src" ]; then
+        mkdir -p "$KOMIRA_TEST_WORK/$dest"
+        cp -R "$src/." "$KOMIRA_TEST_WORK/$dest/"
+    else
+        mkdir -p "$KOMIRA_TEST_WORK/$(dirname "$dest")"
+        cp "$src" "$KOMIRA_TEST_WORK/$dest"
+    fi
+done < "$KOMIRA_ZT_DATA"
+chmod -R u+w "$KOMIRA_TEST_WORK"
+while IFS="$TAB" read -r name path || [ -n "$name" ]; do
+    export "$name=$R/$path"
+done < "$KOMIRA_ZT_TOOLS"
+unset KOMIRA_ZT_DATA KOMIRA_ZT_TOOLS
+"""
+
 def _zig_test_impl(ctx):
     bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
     zig = ctx.attrs.zig[DefaultInfo].default_outputs[0]
@@ -179,7 +265,7 @@ def _zig_test_impl(ctx):
     # `cases`), as the test cannot be an input of the tool it runs. Its
     # result is then a validation result; a test without tools writes
     # `passed`, as it always did.
-    validation = bool(ctx.attrs.env_tools)
+    validation = bool(ctx.attrs.env_tools or ctx.attrs.exec_tools)
     out = ctx.actions.declare_output(ctx.label.name + (".json" if validation else ".passed"))
     passed = """printf '{"version": 1, "data": {"status": "success", "message": "zig test passed"}}\\n' > "$3"\n""" if validation else "echo passed > \"$3\"\n"
     # The tests run with the busybox applets as their PATH and a TMPDIR of
@@ -188,14 +274,43 @@ def _zig_test_impl(ctx):
 ZIG_GLOBAL_CACHE_DIR="$T/zig-global"; ZIG_LOCAL_CACHE_DIR="$T/zig-local"; HOME="$T/home"; TMPDIR="$T/tmp"
 export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME TMPDIR
 mkdir -p "$TMPDIR"
-"$1/zig" test -target x86_64-linux-musl "$2"
+__DRIVER__"$1/zig" test -target TARGET "$2"
 """ + passed + """rm -rf "$T"
 """
+    # The target and the optimization mode are written into the script; with
+    # the defaults (`x86_64-linux-musl`, `Debug`: no flag, zig's own default)
+    # the command, and the action key, are what they were before the
+    # attributes existed.
+    if not regex_match("^[a-z0-9_.-]+$", ctx.attrs.target):
+        fail("{}: target {} is not a zig target triple".format(ctx.label, repr(ctx.attrs.target)))
+    script = script.replace("test -target TARGET ", "test {}-target {} ".format("" if _zig_optimize(ctx) == "Debug" else "-O" + ctx.attrs.optimize + " ", ctx.attrs.target))
     # The pinned tools a test runs, as environment variables naming their
     # paths.
     env = {name: dep[DefaultInfo].default_outputs[0] for name, dep in ctx.attrs.env_tools.items()}
+    env.update(rerun_env(ctx))
+    hidden = list(ctx.attrs.imports)
+    if ctx.attrs.exec_tools or ctx.attrs.data:
+        # A driver test: built tools by absolute path, fixtures in a writable
+        # directory (KOMIRA_TEST_WORK). Both come from manifests, so a test
+        # without them keeps the command it always had.
+        where = str(ctx.label.raw_target())
+        for name in ctx.attrs.exec_tools:
+            if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", name):
+                fail("{}: exec_tools name {} is not a shell variable name".format(where, repr(name)))
+            if name in RUNNER_ENV or name in _ZIG_TEST_OWN_ENV or name in ctx.attrs.env_tools:
+                fail("{}: exec_tools name {} is set by the action or by env_tools".format(where, name))
+        srcs = data_map(ctx, where, ctx.attrs.data)
+        tools = {name: dep[DefaultInfo].default_outputs[0] for name, dep in ctx.attrs.exec_tools.items()}
+        data_manifest, _ = ctx.actions.write(ctx.label.name + ".data", [cmd_args(d, a, delimiter = "\t") for d, a in sorted(srcs.items())], allow_args = True)
+        tools_manifest, _ = ctx.actions.write(ctx.label.name + ".tools", [cmd_args(n, t, delimiter = "\t") for n, t in sorted(tools.items())], allow_args = True)
+        env["KOMIRA_ZT_DATA"] = data_manifest
+        env["KOMIRA_ZT_TOOLS"] = tools_manifest
+        hidden += srcs.values() + tools.values()
+        script = script.replace("__DRIVER__", _ZIG_TEST_DRIVER)
+    else:
+        script = script.replace("__DRIVER__", "")
     ctx.actions.run(
-        cmd_args(busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output()), hidden = ctx.attrs.imports),
+        cmd_args(busybox_sh(bb, script, zig, _zig_root(ctx), out.as_output()), hidden = hidden),
         category = "zig_test",
         env = env,
     )
@@ -203,8 +318,9 @@ mkdir -p "$TMPDIR"
         return [
             DefaultInfo(default_output = out),
             ValidationInfo(validations = [ValidationSpec(name = ctx.label.name, validation_result = out)]),
+            rerun_info(ctx),
         ]
-    return [DefaultInfo(default_output = out)]
+    return [DefaultInfo(default_output = out), rerun_info(ctx)]
 
 # `zig test` of `src` (and the `test` blocks of the files it imports, the
 # `imports`), run as a build action: the target exists only if every test
@@ -226,10 +342,25 @@ zig_test_rule = rule(
         # directory of executables: the pinned zig
         # (komira//tools/build/toolchains:zig) is the directory holding `zig`.
         "env_tools": attrs.dict(attrs.string(), attrs.exec_dep(), default = {}),
+        # Files a driver test reads and writes, copied into the writable
+        # directory KOMIRA_TEST_WORK: a list of sources (files or directories,
+        # each at its path from the cell root) or {destination: source}.
+        "data": attrs.one_of(attrs.list(attrs.source(allow_directory = True)), attrs.dict(attrs.string(), attrs.source(allow_directory = True)), default = []),
+        # name -> a built tool the tests run, in the environment as its
+        # ABSOLUTE path (env_tools' paths are relative to the action's
+        # directory). Like env_tools, it makes the test a validation.
+        "exec_tools": attrs.dict(attrs.string(), attrs.exec_dep(), default = {}),
         "imports": attrs.list(attrs.source(), default = []),
+        # zig's -O: the optimization mode the tests are built with. `Debug`
+        # is zig's own default (no flag is passed).
+        "optimize": attrs.string(default = "Debug"),
         "src": attrs.source(),
+        # zig's -target. The tests run as part of the action, so it must be a
+        # target the execution platform runs (the default, or another libc
+        # of its cpu).
+        "target": attrs.string(default = "x86_64-linux-musl"),
         "zig": attrs.dep(),
-    },
+    } | RERUN_ATTRS,
 )
 
 def _zig_test_binary_impl(ctx):

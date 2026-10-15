@@ -128,7 +128,7 @@ assert_equal(
 | `timestamp.mojo` | epoch seconds to and from UTC fields; RFC 3339, `YYYY-MM-DD`, `YYYYMMDDTHHMMSSZ` |
 | `http_date.mojo` | the HTTP-date (IMF-fixdate) |
 | `zone_offset.mojo` | `ZoneOffset` (seconds east of UTC, DST flag, abbreviation), `Transition` |
-| `posix_tz.mojo` | the POSIX TZ string: `parse_posix_tz`, rule dates, DST per year |
+| `posix_tz.mojo` | the POSIX TZ string: `parse_posix_tz`, rule dates, DST from the latest rule instant |
 | `tzif.mojo` | `parse_tzif`, and what it refuses |
 | `zone.mojo` | `Zone`: `offset_at`, `next_transition`, `resolve`, `to_utc`; the policies; `local_seconds`, `posix_zone`, `utc_zone` |
 | `zoneinfo.mojo` | `load_zone` from a zoneinfo directory, `check_zone_name` |

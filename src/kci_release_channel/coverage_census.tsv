@@ -1,0 +1,3 @@
+# What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
+census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
+komira//src/kci_release_channel:kci_release_channel	src/kci_release_channel	library	OK	460	460	-	-	no	release	-	-

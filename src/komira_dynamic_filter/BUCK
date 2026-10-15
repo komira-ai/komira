@@ -11,10 +11,13 @@ mojo_library(
     test_srcs = [
         "tests/test_bloom_filter_simd_parity.mojo",
         "tests/test_bloom_filter_unit.mojo",
+        "tests/test_bloom_from_bytes_merge_tail.mojo",
+        "tests/test_bloom_hash_families.mojo",
         "tests/test_bloom_in_list_filter.mojo",
         "tests/test_bloom_merge_or_range_simd_parity.mojo",
         "tests/test_bloom_range_filter.mojo",
         "tests/test_bloom_selectivity_tracker.mojo",
+        "tests/test_constant_filter.mojo",
     ],
     visibility = ["PUBLIC"],
 )
