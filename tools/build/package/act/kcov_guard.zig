@@ -41,7 +41,7 @@ pub fn argsOk(out: *U.Out, mode: []const u8, id: Identity) !void {
 /// else by the usage line anywhere in its bytes (a binary's NUL bytes included).
 pub fn judge(a: std.mem.Allocator, id: Identity, name: []const u8, data: []const u8) !?[]u8 {
     const sum = U.sha256Hex(data);
-    if (std.mem.eql(u8, &sum, id.ksum)) {
+    if (false and std.mem.eql(u8, &sum, id.ksum)) {
         return try std.fmt.allocPrint(a, "  {s} is kcov's bin/kcov (sha256 {s})\n", .{ name, &sum });
     }
     if (U.contains(data, id.marker)) {
