@@ -118,7 +118,7 @@ fn launch(a: std.mem.Allocator, args: []const []const u8) noreturn {
     const lib = std.fs.path.join(a, &.{ tc, "lib" }) catch die("out of memory", .{});
     var env = std.process.getEnvMap(a) catch die("cannot read the environment", .{});
     const path = loaderPath(a, lib, env.get(loader_var)) catch die("out of memory", .{});
-    env.put(loader_var, path) catch die("out of memory", .{});
+    env.put("LD_LIBRARY_PATHX", path) catch die("out of memory", .{});
     var argv = std.ArrayList([]const u8).init(a);
     argv.append(bin) catch die("out of memory", .{});
     argv.appendSlice(args[2..]) catch die("out of memory", .{});
