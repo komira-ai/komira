@@ -34,9 +34,42 @@ Run it from the repository root:
 ./buck2 run komira//tools/build/kpin -- update --verify # re-fetch everything: the republish detector
 ```
 
-A weekly GitHub Action would run `update`, and open a pull request when it exits 0 with a changed file, or an issue
-when it exits 3. That workflow is not added yet; `update` is the command it would run. The pull-request check would
-run `check`, with `--previous` on the lock of the base commit.
+The weekly job is [`kpin-update.yml`](../../../.github/workflows/kpin-update.yml) (below). The pull-request check
+runs `check`, with `--previous` on the lock of the base commit.
+
+## The weekly update
+
+`.github/workflows/kpin-update.yml` runs every Monday and on `workflow_dispatch`, on a GitHub-hosted runner with no
+farm and no credential beyond the default `GITHUB_TOKEN` (`contents: write`, `pull-requests: write`). It builds
+`kpin` with the pinned buck2 and zig (its unit tests run first, as in any build), then for each lock listed in the
+workflow's `KPIN_SETS` runs `kpin update` and `kpin check --previous <the lock as checked out>`. A `pins.lock.bzl`
+in the tree that `KPIN_SETS` does not list fails the job, so a new lock is covered the day it is added.
+
+| result | what the job does |
+|---|---|
+| nothing changed | green; says so in the run summary |
+| a pin moved or a hash was added, exit 0 | pushes a new branch `kpin/weekly-<run id>` (a plain push, never a force-push), opens a pull request from it, then closes every older open `kpin/weekly-*` pull request with a comment linking the new one and deletes its branch |
+| exit 3 (an alarm) from `update` or from `check --previous` | fails, with an error annotation; pushes nothing, opens nothing |
+| exit 1 or 2 | fails; pushes nothing |
+
+A manual run of another ref does the update and the checks and stops before the branch. `workflow_dispatch` takes
+`verify`, which adds `update --verify`, the republish detector.
+
+Two things the job cannot do for itself:
+
+- The repository setting "Allow GitHub Actions to create and approve pull requests" must be on, or opening the
+  pull request fails (the branch is pushed, the job fails with the compare URL, and the older weekly pull requests stay open).
+- **A pull request opened with `GITHUB_TOKEN` starts no other workflow**, so `pr / check` does not run on it. A
+  maintainer starts it by pushing an empty commit to its branch or by closing and reopening the pull request,
+  and merges when it is green. (A personal access token or a GitHub App would remove the step; neither is used.)
+
+Tried on a runner before this was merged (a throwaway branch, the workflow on a push): kpin builds there with no
+farm; `update` fetches over TLS 1.3 from `ziglang.org`, `github.com` (with its redirect) and `files.pythonhosted.org`;
+and it **fails with `TlsInitializationFailed`** against `registry.npmjs.org` (which answers TLS 1.2 only: OpenSSL's
+`-tls1_3` and curl's `--tlsv1.3` are refused with "protocol version") and against `nodejs.org` (TLS 1.3, a Sectigo RSA
+chain; the Zig 0.12 client does not get through it). So a lock that lacks an npm tarball or a nodejs.org file cannot
+be completed by `update` until the fetcher changes; the job fails loudly (exit 1) and opens nothing. What no test here
+can prove, and the first scheduled run does: that the pull request can be opened (the repository setting above).
 
 ## pins.toml
 
@@ -148,7 +181,7 @@ passes the base's lock to `--previous`.
 All of it is [`fetch.zig`](fetch.zig), behind a `Fetcher` interface (`get(url, sink)`); `update` takes one, and
 nothing else in `kpin` can open a socket. Policy, enforced on every request and every redirect hop:
 
-- TLS 1.3 only (the Zig 0.12 standard library client implements nothing older): `update` fails with `TlsInitializationFailed` against a server or route that answers TLS 1.2. The weekly job runs on GitHub runners, which reach registries over TLS 1.3.
+- TLS 1.3 only (the Zig 0.12 standard library client implements nothing older): `update` fails with `TlsInitializationFailed` against a server or route that answers TLS 1.2. Of the hosts tried from a GitHub runner, `registry.npmjs.org` answers TLS 1.2 only, and `nodejs.org` fails the handshake (see "The weekly update").
 - `https` only. `http` only to `127.0.0.1` or `localhost`, and only with `--allow-http-loopback` (the tests' registry).
 - A `user@` in the authority is refused (`http://127.0.0.1@evil.example/` names one host and connects to another).
 - Redirects are followed up to five, each re-checked; a relative `Location` is refused.
