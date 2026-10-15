@@ -274,7 +274,7 @@ fn checks(c: *Check) !void {
     {
         const r = try c.run(&.{ c.git, "--version" }, null);
         if (r.code != 0) return c.red("git --version failed: {s}", .{r.text});
-        const want = try std.fmt.allocPrint(a, "git version {s}", .{c.version});
+        const want = try std.fmt.allocPrint(a, "git versions {s}", .{c.version});
         if (!std.mem.eql(u8, r.text, want)) return c.red("git --version printed '{s}', want 'git version {s}'", .{ r.text, c.version });
     }
     c.pass();
