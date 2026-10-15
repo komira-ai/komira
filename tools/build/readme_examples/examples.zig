@@ -123,7 +123,7 @@ pub fn isModule(info: []const u8) bool {
 fn refuse(alloc: Allocator, out: *std.ArrayList(Refusal), display: []const u8, line: usize, comptime f: []const u8, args: anytype) Allocator.Error!void {
     const head = try std.fmt.allocPrint(alloc, "{s}:{d}: ", .{ display, line });
     const body = try std.fmt.allocPrint(alloc, f, args);
-    try out.append(.{ .line = line, .text = try std.mem.concat(alloc, u8, &.{ head, body }) });
+    try out.append(alloc, .{ .line = line, .text = try std.mem.concat(alloc, u8, &.{ head, body }) });
 }
 
 fn isBlank(s: []const u8) bool {
@@ -136,7 +136,7 @@ fn isBlank(s: []const u8) bool {
 // holding `-->`), those whose opening line reads `<!-- mojo-hidden`. A block
 // whose opening line spells the marker differently is refused.
 fn hiddenComments(alloc: Allocator, lines: []const []const u8, mask: []const bool, display: []const u8, refusals: *std.ArrayList(Refusal)) Allocator.Error![]Hidden {
-    var out = std.ArrayList(Hidden).init(alloc);
+    var out = std.ArrayList(Hidden).empty;
     for (try md.htmlComments(alloc, lines, mask)) |c| {
         const i = c.open_line;
         const body = md.strip(md.strip(lines[i])[4..]);
@@ -163,8 +163,8 @@ fn hiddenComments(alloc: Allocator, lines: []const []const u8, mask: []const boo
         var h = Hidden{
             .first = i,
             .last = i,
-            .code = std.ArrayList([]const u8).init(alloc),
-            .code_lines = std.ArrayList(usize).init(alloc),
+            .code = std.ArrayList([]const u8).empty,
+            .code_lines = std.ArrayList(usize).empty,
         };
         if (c.close_line == i) {
             // One line: `<!-- mojo-hidden CODE -->`.
@@ -174,10 +174,10 @@ fn hiddenComments(alloc: Allocator, lines: []const []const u8, mask: []const boo
                 try refuse(alloc, refusals, display, i + 1, "text after `-->` on a mojo-hidden line", .{});
             }
             if (code.len > 0) {
-                try h.code.append(code);
-                try h.code_lines.append(i + 1);
+                try h.code.append(alloc, code);
+                try h.code_lines.append(alloc, i + 1);
             }
-            try out.append(h);
+            try out.append(alloc, h);
             continue;
         }
         if (md.strip(rest).len > 0) {
@@ -188,22 +188,22 @@ fn hiddenComments(alloc: Allocator, lines: []const []const u8, mask: []const boo
             break;
         };
         for (i + 1..j) |k| {
-            try h.code.append(lines[k]);
-            try h.code_lines.append(k + 1);
+            try h.code.append(alloc, lines[k]);
+            try h.code_lines.append(alloc, k + 1);
         }
         const e = std.mem.indexOf(u8, lines[j], "-->").?;
         const tail = lines[j][0..e];
         if (!isBlank(tail)) {
-            try h.code.append(tail);
-            try h.code_lines.append(j + 1);
+            try h.code.append(alloc, tail);
+            try h.code_lines.append(alloc, j + 1);
         }
         if (md.strip(lines[j][e + 3 ..]).len > 0) {
             try refuse(alloc, refusals, display, j + 1, "text after `-->` on a mojo-hidden line", .{});
         }
         h.last = j;
-        try out.append(h);
+        try out.append(alloc, h);
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 /// `line` without up to `indent` leading spaces and tabs.
@@ -226,12 +226,12 @@ fn byLine(_: void, a: Refusal, b: Refusal) bool {
 pub fn extract(alloc: Allocator, text: []const u8, display: []const u8, refuse_relative_links: bool) Allocator.Error!Extracted {
     const lines = try md.splitLines(alloc, text);
     const mask = try md.codeMask(alloc, lines);
-    var refusals = std.ArrayList(Refusal).init(alloc);
+    var refusals = std.ArrayList(Refusal).empty;
     const fs = try md.fences(alloc, lines);
     const hidden = try hiddenComments(alloc, lines, mask, display, &refusals);
     const used = try alloc.alloc(bool, hidden.len);
     @memset(used, false);
-    var out = std.ArrayList(Example).init(alloc);
+    var out = std.ArrayList(Example).empty;
     for (fs) |f| {
         const at = f.open_line + 1;
         if (try infoRefusal(alloc, f.info)) |why| {
@@ -243,8 +243,8 @@ pub fn extract(alloc: Allocator, text: []const u8, display: []const u8, refuse_r
             try refuse(alloc, &refusals, display, at, "the ```mojo example is never closed", .{});
             continue;
         };
-        var code = std.ArrayList([]const u8).init(alloc);
-        var code_lines = std.ArrayList(usize).init(alloc);
+        var code = std.ArrayList([]const u8).empty;
+        var code_lines = std.ArrayList(usize).empty;
         for (hidden, 0..) |h, k| {
             if (f.open_line > 0 and h.last == f.open_line - 1) {
                 // Fences are read in document order, so a comment that
@@ -254,26 +254,26 @@ pub fn extract(alloc: Allocator, text: []const u8, display: []const u8, refuse_r
                         " put a blank line on one side", .{});
                 }
                 used[k] = true;
-                try code.appendSlice(h.code.items);
-                try code_lines.appendSlice(h.code_lines.items);
+                try code.appendSlice(alloc, h.code.items);
+                try code_lines.appendSlice(alloc, h.code_lines.items);
             }
         }
         for (f.open_line + 1..close) |li| {
-            try code.append(dedent(lines[li], f.indent));
-            try code_lines.append(li + 1);
+            try code.append(alloc, dedent(lines[li], f.indent));
+            try code_lines.append(alloc, li + 1);
         }
         for (hidden, 0..) |h, k| {
             if (h.first == close + 1) {
                 used[k] = true;
-                try code.appendSlice(h.code.items);
-                try code_lines.appendSlice(h.code_lines.items);
+                try code.appendSlice(alloc, h.code.items);
+                try code_lines.appendSlice(alloc, h.code_lines.items);
             }
         }
-        try out.append(.{
+        try out.append(alloc, .{
             .line = at,
             .module = isModule(f.info),
-            .code = try code.toOwnedSlice(),
-            .code_lines = try code_lines.toOwnedSlice(),
+            .code = try code.toOwnedSlice(alloc),
+            .code_lines = try code_lines.toOwnedSlice(alloc),
         });
     }
     for (hidden, 0..) |h, k| {
@@ -292,12 +292,12 @@ pub fn extract(alloc: Allocator, text: []const u8, display: []const u8, refuse_r
     if (refusals.items.len > 0) {
         // Document order; stable, so refusals of one line keep their order.
         std.sort.insertion(Refusal, refusals.items, {}, byLine);
-        var msg = std.ArrayList(u8).init(alloc);
+        var msg = std.ArrayList(u8).empty;
         for (refusals.items, 0..) |r, k| {
-            if (k > 0) try msg.append('\n');
-            try msg.appendSlice(r.text);
+            if (k > 0) try msg.append(alloc, '\n');
+            try msg.appendSlice(alloc, r.text);
         }
-        return .{ .refused = try msg.toOwnedSlice() };
+        return .{ .refused = try msg.toOwnedSlice(alloc) };
     }
-    return .{ .examples = try out.toOwnedSlice() };
+    return .{ .examples = try out.toOwnedSlice(alloc) };
 }

@@ -140,7 +140,7 @@ A crate from a registry is built by Cargo's rules: its build script runs, and
 what the script learned about the compiler or the target decides the cfgs, the
 environment and the generated files. Nothing here runs a build script; what
 the script would decide for the pinned rustc is stated on the target instead,
-and `kpin cargo` ([kpin](../kpin/README.md)) writes it. Five attributes of
+and `kpin cargo` ([kpin](../kpin/README.md#cargo)) writes it (`cargo_pkg_env(name, version)` is the `env` of the `CARGO_PKG_*` variables; `crates_io_library` takes the same attributes). Five attributes of
 `rust_library`, `rust_binary` and `rust_test` carry it. Worked uses:
 [`tests//functional/rust_cargo`](../tests/functional/rust_cargo/BUCK), and
 their planted defects in [`negative/rust_cargo`](../tests/negative/rust_cargo/BUCK)

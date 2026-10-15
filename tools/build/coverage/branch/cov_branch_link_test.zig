@@ -30,8 +30,8 @@ const Fake = struct {
     k: ?[]const u8 = null,
     dirs: std.ArrayList([3]bool),
 
-    fn init(alloc: std.mem.Allocator) Fake {
-        return .{ .calls = std.ArrayList(br.Spec).init(alloc), .dirs = std.ArrayList([3]bool).init(alloc) };
+    fn init(_: std.mem.Allocator) Fake {
+        return .{ .calls = std.ArrayList(br.Spec).empty, .dirs = std.ArrayList([3]bool).empty };
     }
 
     fn isDir(alloc: std.mem.Allocator, k: []const u8, name: []const u8) !bool {
@@ -60,8 +60,8 @@ const Fake = struct {
         var copy = spec;
         copy.argv = try alloc.dupe([]const u8, spec.argv);
         copy.env = try alloc.dupe([]const u8, spec.env);
-        try self.calls.append(copy);
-        if (self.k) |k| try self.dirs.append(.{ try isDir(alloc, k, "bin"), try isDir(alloc, k, "home"), try isDir(alloc, k, "tmp") });
+        try self.calls.append(alloc, copy);
+        if (self.k) |k| try self.dirs.append(alloc, .{ try isDir(alloc, k, "bin"), try isDir(alloc, k, "home"), try isDir(alloc, k, "tmp") });
         const step: []const u8 = if (std.mem.eql(u8, spec.argv[1], "--install"))
             "install"
         else if (std.mem.eql(u8, spec.argv[1], "-flavor"))
@@ -94,9 +94,8 @@ const Case = struct {
     fn init() !Case {
         var c = Case{ .arena = std.heap.ArenaAllocator.init(testing.allocator), .tmp = testing.tmpDir(.{}) };
         c.root = try c.tmp.dir.realpathAlloc(c.arena.allocator(), ".");
-        // Not the arena's: the Case is copied out of this function, and an
-        // allocator of its arena would point at this copy.
-        c.err = std.ArrayList(u8).init(testing.allocator);
+        // Empty here; it grows with the arena's allocator (a()) and the arena frees it.
+        c.err = std.ArrayList(u8).empty;
         // The inputs, each a file that is not empty.
         for ([_][2][]const u8{
             .{ "link/lld/bin/lld", "lld" },
@@ -110,11 +109,10 @@ const Case = struct {
 
     fn put(self: *Case, path: []const u8, data: []const u8) !void {
         if (std.fs.path.dirname(path)) |d| try self.tmp.dir.makePath(d);
-        try self.tmp.dir.writeFile(path, data);
+        try self.tmp.dir.writeFile(.{ .sub_path = path, .data = data });
     }
 
     fn deinit(self: *Case) void {
-        self.err.deinit();
         self.tmp.cleanup();
         self.arena.deinit();
     }
@@ -328,8 +326,8 @@ test "a bitcode without the bitcode magic is refused before lld runs, named as g
 test "lld failing fails the link with the last 40 lines of its log; zig does not run; the scratch is kept" {
     var c = try Case.init();
     defer c.deinit();
-    var log = std.ArrayList(u8).init(c.a());
-    for (1..51) |i| try log.writer().print("lld line {d}\n", .{i});
+    var log = std.ArrayList(u8).empty;
+    for (1..51) |i| try log.writer(c.a()).print("lld line {d}\n", .{i});
     var fake = Fake.init(c.a());
     fake.lld_status = .{ .exited = 1 };
     fake.lld_log = log.items;
@@ -512,9 +510,9 @@ test "usage errors: a missing, repeated, empty, unknown or valueless flag" {
     // Each flag left out.
     var i: usize = 0;
     while (i < full.len) : (i += 2) {
-        var v = std.ArrayList([]const u8).init(a);
-        try v.appendSlice(full[0..i]);
-        try v.appendSlice(full[i + 2 ..]);
+        var v = std.ArrayList([]const u8).empty;
+        try v.appendSlice(a, full[0..i]);
+        try v.appendSlice(a, full[i + 2 ..]);
         try testing.expect((try l.parseArgs(a, v.items, &why)) == null);
         try testing.expectEqualStrings(try std.fmt.allocPrint(a, "{s} is missing", .{full[i]}), why);
     }

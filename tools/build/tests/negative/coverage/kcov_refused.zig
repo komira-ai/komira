@@ -6,6 +6,6 @@
 const std = @import("std");
 
 pub fn main() void {
-    std.io.getStdErr().writer().print("Can't set personality: Operation not permitted\n", .{}) catch {};
+    std.fs.File.stderr().deprecatedWriter().print("Can't set personality: Operation not permitted\n", .{}) catch {};
     std.process.exit(255);
 }

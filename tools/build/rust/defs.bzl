@@ -38,9 +38,17 @@ RustToolchainInfo = provider(fields = {
     "cc_target": provider_field(str),
     "wrapper": provider_field(typing.Any),
     "act": provider_field(typing.Any),
+    # The compiler release (`1.85.0`): what the build-script outcomes that
+    # `kpin cargo` reads from its overrides were derived for.
+    "version": provider_field(str),
     # The gate (tools/build/run): `gate rust` runs one rust_test in a build
     # action.
     "gate": provider_field(typing.Any),
+})
+
+# The compiler release a rust_sysroot unpacks (`1.85.0`).
+RustVersionInfo = provider(fields = {
+    "version": provider_field(str),
 })
 
 RustCrateInfo = provider(fields = {
@@ -84,7 +92,7 @@ def _rust_sysroot_impl(ctx):
         ),
         category = "rust_sysroot",
     )
-    return [DefaultInfo(default_output = out)]
+    return [DefaultInfo(default_output = out), RustVersionInfo(version = ctx.attrs.version)]
 
 rust_sysroot_rule = rule(
     impl = _rust_sysroot_impl,
@@ -110,6 +118,7 @@ def _rust_toolchain_impl(ctx):
             cc_target = ctx.attrs.cc_target,
             wrapper = ctx.attrs._launcher[DefaultInfo].default_outputs[0],
             act = ctx.attrs._act[DefaultInfo].default_outputs[0],
+            version = ctx.attrs.sysroot[RustVersionInfo].version,
             gate = ctx.attrs._gate[DefaultInfo].default_outputs[0],
         ),
     ]
@@ -618,19 +627,42 @@ crate_source = rule(
     },
 )
 
+def cargo_pkg_env(name, version, crate_name = None):
+    """The variables Cargo sets from a package's manifest, as an `env` dict.
+
+    `CARGO_PKG_NAME`, `CARGO_PKG_VERSION` (the whole version, build metadata
+    included), `CARGO_PKG_VERSION_MAJOR`/`_MINOR`/`_PATCH`, `CARGO_PKG_VERSION_PRE`
+    (the part after `-`, without build metadata) and `CARGO_CRATE_NAME`
+    (`crate_name`, default `name` with `-` as `_`). `kpin cargo` writes a call
+    for each crate; `env!("CARGO_PKG_VERSION")` and friends then compile.
+    """
+    core, _, pre = version.split("+")[0].partition("-")
+    nums = (core.split(".") + ["0", "0"])[:3]
+    return {
+        "CARGO_CRATE_NAME": crate_name or name.replace("-", "_"),
+        "CARGO_PKG_NAME": name,
+        "CARGO_PKG_VERSION": version,
+        "CARGO_PKG_VERSION_MAJOR": nums[0],
+        "CARGO_PKG_VERSION_MINOR": nums[1],
+        "CARGO_PKG_VERSION_PATCH": nums[2],
+        "CARGO_PKG_VERSION_PRE": pre,
+    }
+
 def crates_io_library(
         name,
         version,
         sha256,
         size,
         crate = None,
+        crate_name = None,
         crate_root = "src/lib.rs",
         busybox = "komira//tools/build/toolchains:busybox",
         visibility = ["PUBLIC"],
         **kwargs):
     """A crates.io crate, pinned by the sha256 and size (bytes) of its `.crate` file, compiled with rust_library.
 
-    `crate` is the registry name (default `name`). Features and cfgs are
+    `crate` is the registry name (default `name`), `crate_name` the library's
+    name (default `crate` with `-` as `_`). Features and cfgs are
     stated explicitly: nothing is resolved and no build script runs, so a
     cfg that a crate's build.rs would emit for the pinned rustc is written
     here instead.
@@ -652,7 +684,7 @@ def crates_io_library(
     )
     rust_library(
         name = name,
-        crate_name = crate.replace("-", "_"),
+        crate_name = crate_name or crate.replace("-", "_"),
         src_dir = ":{}.src".format(name),
         src_dir_label = prefix,
         crate_root = crate_root,

@@ -20,8 +20,8 @@ test "a quoted word reads back every byte quote wrote" {
     for (&all, 0..) |*b, k| b.* = @intCast(k);
     const samples = [_][]const u8{ "", "plain", "a \"q\" \\ b", "tab\there\r\n", "\xc3\xa9 \xef\xbf\xbd", "\xff\xc3", &all };
     for (samples) |s| {
-        var buf = std.ArrayList(u8).init(a);
-        try format.quote(&buf, s);
+        var buf = std.ArrayList(u8).empty;
+        try format.quote(arena.allocator(), &buf, s);
         var diag = format.Diag{};
         const w = try format.parseLine(a, buf.items, 1, &diag);
         try t.expectEqual(@as(usize, 1), w.len);
@@ -33,8 +33,8 @@ test "a quoted word reads back every byte quote wrote" {
 test "quote keeps valid UTF-8 readable and escapes a broken sequence" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
-    var buf = std.ArrayList(u8).init(arena.allocator());
-    try format.quote(&buf, "\xc3\xa9\xc3\x1b");
+    var buf = std.ArrayList(u8).empty;
+    try format.quote(arena.allocator(), &buf, "\xc3\xa9\xc3\x1b");
     try t.expectEqualStrings("\"\xc3\xa9\\xc3\\x1b\"", buf.items);
 }
 

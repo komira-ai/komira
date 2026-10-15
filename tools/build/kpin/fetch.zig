@@ -28,7 +28,7 @@ pub const Fetcher = struct {
 /// A sink that keeps the body (metadata documents), up to `max` bytes.
 pub const Collect = struct {
     a: std.mem.Allocator,
-    buf: std.ArrayListUnmanaged(u8) = .{},
+    buf: std.ArrayList(u8) = .empty,
     max: usize,
 
     pub fn sink(self: *Collect) Sink {
@@ -111,6 +111,10 @@ pub const HttpFetcher = struct {
     allocator: std.mem.Allocator,
     allow_http_loopback: bool = false,
     max_redirects: u8 = 5,
+    /// Tests only (main never sets it): an absolute path of a PEM file that is
+    /// the only set of trust anchors, instead of the system's, so a loopback
+    /// TLS server with a throwaway certificate can be verified like a real one.
+    ca_file: ?[]const u8 = null,
 
     pub fn fetcher(self: *HttpFetcher) Fetcher {
         return .{ .ctx = self, .getFn = get };
@@ -120,8 +124,15 @@ pub const HttpFetcher = struct {
         const self: *HttpFetcher = @ptrCast(@alignCast(ctx));
         var arena = std.heap.ArenaAllocator.init(self.allocator);
         defer arena.deinit();
-        var client = std.http.Client{ .allocator = self.allocator };
+        // The response head (status line and headers) must fit in
+        // `read_buffer_size`: 16 KiB, as the buffer the client was given before.
+        var client = std.http.Client{ .allocator = self.allocator, .read_buffer_size = 16 * 1024 };
         defer client.deinit();
+        if (self.ca_file) |path| {
+            try client.ca_bundle.addCertsFromFilePathAbsolute(self.allocator, path);
+            // Not the system's roots as well.
+            client.next_https_rescan_certs = false;
+        }
 
         var cur: []const u8 = url;
         var hops: u8 = 0;
@@ -129,9 +140,7 @@ pub const HttpFetcher = struct {
             // Checked on every hop: a redirect is a new URL a registry chose.
             if (!urlAllowed(cur, self.allow_http_loopback)) return error.UrlNotAllowed;
             const uri = try std.Uri.parse(cur);
-            var hdr: [16 * 1024]u8 = undefined;
-            var req = try client.open(.GET, uri, .{
-                .server_header_buffer = &hdr,
+            var req = try client.request(.GET, uri, .{
                 .redirect_behavior = .unhandled,
                 .keep_alive = false,
                 .headers = .{
@@ -140,28 +149,38 @@ pub const HttpFetcher = struct {
                 },
             });
             defer req.deinit();
-            try req.send();
-            try req.finish();
-            try req.wait();
-            const status = req.response.status;
+            try req.sendBodiless();
+            // Redirects are never followed by the client (`.unhandled`), so no
+            // redirect buffer is needed: the Location is read from the head.
+            var response = try req.receiveHead(&.{});
+            const status = response.head.status;
             if (status.class() == .redirect) {
-                const loc = req.response.location orelse return error.RedirectWithoutLocation;
+                const loc = response.head.location orelse return error.RedirectWithoutLocation;
                 hops += 1;
                 if (hops > self.max_redirects) return error.TooManyRedirects;
                 cur = try arena.allocator().dupe(u8, loc);
                 continue;
             }
             if (status != .ok) return error.HttpStatusNotOk;
+            const content_length = response.head.content_length;
+            var transfer: [64]u8 = undefined;
+            const body = response.reader(&transfer);
             var buf: [64 * 1024]u8 = undefined;
             var total: u64 = 0;
             while (true) {
-                const n = try req.read(&buf);
-                if (n == 0) break;
-                total += n;
-                try sink.write(buf[0..n]);
+                // Less than a full buffer only at the end of the body.
+                const n = body.readSliceShort(&buf) catch {
+                    // A body that ended early must not be pinned as if it were whole.
+                    if (content_length != null) return error.TruncatedBody;
+                    return response.bodyErr() orelse error.ReadFailed;
+                };
+                if (n > 0) {
+                    total += n;
+                    try sink.write(buf[0..n]);
+                }
+                if (n < buf.len) break;
             }
-            // A body that ended early must not be pinned as if it were whole.
-            if (req.response.content_length) |cl| {
+            if (content_length) |cl| {
                 if (total != cl) return error.TruncatedBody;
             }
             return;

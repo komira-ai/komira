@@ -33,7 +33,7 @@ pub fn main() void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const alloc = arena.allocator();
     const args = std.process.argsAlloc(alloc) catch std.process.exit(2);
-    var list = std.ArrayList([]const u8).init(alloc);
-    for (args[1..]) |a| list.append(a) catch std.process.exit(2);
+    var list = std.ArrayList([]const u8).empty;
+    for (args[1..]) |a| list.append(alloc, a) catch std.process.exit(2);
     std.process.exit(entry(alloc, list.items));
 }

@@ -121,10 +121,10 @@ pub fn run(a: std.mem.Allocator, spec: Spec, out_path: []const u8, w: anytype) !
         try bin_dir.symLink(t[1], t[0], .{});
     }
 
-    var argv = std.ArrayList([]const u8).init(a);
-    try argv.append(try std.fs.path.join(a, &.{ spec.node, "bin", "node" }));
-    try argv.append(try std.fs.path.join(a, &.{ pkg_path, spec.program }));
-    try argv.appendSlice(spec.args);
+    var argv = std.ArrayList([]const u8).empty;
+    try argv.append(a, try std.fs.path.join(a, &.{ spec.node, "bin", "node" }));
+    try argv.append(a, try std.fs.path.join(a, &.{ pkg_path, spec.program }));
+    try argv.appendSlice(a, spec.args);
     var env = try buildEnv(a, spec);
     var child = std.process.Child.init(argv.items, a);
     child.cwd = pkg_path;

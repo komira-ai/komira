@@ -26,11 +26,11 @@ pub const Inputs = struct {
 /// Nothing is returned for an input with a problem; the problems are in `rep`
 /// and the lock is only as complete as they allow.
 pub fn compute(a: std.mem.Allocator, in: Inputs, prev: lockfmt.Lock, rep: *Report) error{OutOfMemory}!lockfmt.Lock {
-    var out_pins = std.ArrayListUnmanaged(lockfmt.LockPin){};
+    var out_pins = std.ArrayList(lockfmt.LockPin).empty;
     for (in.pins) |p| {
         const old = prev.findPin(p.name);
         const same_version = old != null and std.mem.eql(u8, old.?.version, p.version);
-        var files = std.ArrayListUnmanaged(lockfmt.File){};
+        var files = std.ArrayList(lockfmt.File).empty;
         for (p.platforms) |pf| {
             const url = pins.expand(a, p.url, p.version, pf.token) catch |e| switch (e) {
                 error.OutOfMemory => return error.OutOfMemory,
@@ -57,7 +57,7 @@ pub fn compute(a: std.mem.Allocator, in: Inputs, prev: lockfmt.Lock, rep: *Repor
         try out_pins.append(a, .{ .name = p.name, .version = p.version, .files = try files.toOwnedSlice(a) });
     }
 
-    var out_npm = std.ArrayListUnmanaged(lockfmt.Npm){};
+    var out_npm = std.ArrayList(lockfmt.Npm).empty;
     for (in.npm) |pkg| {
         if (prev.findNpm(pkg.key)) |old| {
             if (!std.mem.eql(u8, old.sri512, pkg.sri512)) {

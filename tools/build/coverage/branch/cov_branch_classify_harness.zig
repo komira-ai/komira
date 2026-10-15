@@ -203,12 +203,12 @@ pub const Case = struct {
             else => return e,
         };
         const exe = try tool(al);
-        var argv = std.ArrayList([]const u8).init(al);
-        try argv.append(exe);
-        try argv.appendSlice(args);
+        var argv = std.ArrayList([]const u8).empty;
+        try argv.append(al, exe);
+        try argv.appendSlice(al, args);
         // The child's environment is built here, empty.
         var env = std.process.EnvMap.init(al);
-        const r = try std.ChildProcess.run(.{
+        const r = try std.process.Child.run(.{
             .allocator = al,
             .argv = argv.items,
             .cwd_dir = self.tmp.dir,
@@ -263,18 +263,18 @@ pub const Ir = struct {
     lines: std.ArrayList([]const u8),
 
     pub fn of(al: Alloc, bytes: []const u8) !Ir {
-        var ir = Ir{ .al = al, .lines = std.ArrayList([]const u8).init(al) };
+        var ir = Ir{ .al = al, .lines = std.ArrayList([]const u8).empty };
         var it = std.mem.splitScalar(u8, bytes, '\n');
-        while (it.next()) |l| try ir.lines.append(l);
+        while (it.next()) |l| try ir.lines.append(al, l);
         if (bytes.len > 0 and bytes[bytes.len - 1] == '\n') _ = ir.lines.pop();
         return ir;
     }
 
     pub fn text(self: *const Ir) ![]const u8 {
-        var b = std.ArrayList(u8).init(self.al);
+        var b = std.ArrayList(u8).empty;
         for (self.lines.items) |l| {
-            try b.appendSlice(l);
-            try b.append('\n');
+            try b.appendSlice(self.al, l);
+            try b.append(self.al, '\n');
         }
         return b.items;
     }
@@ -343,7 +343,7 @@ pub const Ir = struct {
         var n: usize = 0;
         while (i < self.lines.items.len) : (i += 1) {
             if (std.mem.eql(u8, self.lines.items[i], at)) {
-                try self.lines.insertSlice(i + 1, add);
+                try self.lines.insertSlice(self.al, i + 1, add);
                 i += add.len;
                 n += 1;
             }
@@ -358,7 +358,7 @@ pub const Ir = struct {
         var n: usize = 0;
         while (i < self.lines.items.len) : (i += 1) {
             if (std.mem.startsWith(u8, self.lines.items[i], prefix)) {
-                try self.lines.insertSlice(i, add);
+                try self.lines.insertSlice(self.al, i, add);
                 i += add.len;
                 n += 1;
             }
@@ -367,19 +367,19 @@ pub const Ir = struct {
     }
 
     pub fn append(self: *Ir, add: []const []const u8) !void {
-        try self.lines.appendSlice(add);
+        try self.lines.appendSlice(self.al, add);
     }
 
     /// grep -v: the lines matching `s` dropped.
     pub fn drop(self: *Ir, s: []const u8, m: Match) !void {
-        var kept = std.ArrayList([]const u8).init(self.al);
+        var kept = std.ArrayList([]const u8).empty;
         for (self.lines.items) |l| {
             const hit = switch (m) {
                 .exact => std.mem.eql(u8, l, s),
                 .prefix => std.mem.startsWith(u8, l, s),
                 .contains => std.mem.indexOf(u8, l, s) != null,
             };
-            if (!hit) try kept.append(l);
+            if (!hit) try kept.append(self.al, l);
         }
         if (kept.items.len == self.lines.items.len) return unchanged("drop", s);
         self.lines = kept;

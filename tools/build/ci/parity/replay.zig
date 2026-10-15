@@ -21,7 +21,7 @@ const exit_unrecorded = 99;
 const exit_broken = 98;
 
 fn die(comptime fmt: []const u8, args: anytype) noreturn {
-    std.io.getStdErr().writer().print("replay: " ++ fmt ++ "\n", args) catch {};
+    std.fs.File.stderr().deprecatedWriter().print("replay: " ++ fmt ++ "\n", args) catch {};
     std.process.exit(exit_broken);
 }
 
@@ -48,13 +48,13 @@ pub fn main() !void {
 
     const k = format.answerIndex(entries, argv, format.priorCalls(log, argv)) orelse {
         appendLog(try format.logLine(a, false, argv));
-        std.io.getStdErr().writer().print("replay: unrecorded call: {s}\n", .{try format.quoteArgv(a, argv)}) catch {};
+        std.fs.File.stderr().deprecatedWriter().print("replay: unrecorded call: {s}\n", .{try format.quoteArgv(a, argv)}) catch {};
         std.process.exit(exit_unrecorded);
     };
     appendLog(try format.logLine(a, true, argv));
     const e = entries[k];
-    try std.io.getStdOut().writeAll(e.stdout);
-    try std.io.getStdErr().writeAll(e.stderr);
+    try std.fs.File.stdout().writeAll(e.stdout);
+    try std.fs.File.stderr().writeAll(e.stderr);
     switch (e.end) {
         .exit => |v| std.process.exit(v),
         .signal => |s| {
