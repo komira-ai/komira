@@ -26,7 +26,7 @@ fn octal(buf: []u8, v: u64) void {
 }
 
 pub fn tar(a: std.mem.Allocator, entries: []const Entry) ![]u8 {
-    var out = std.ArrayList(u8).empty;
+    var out = std.ArrayListUnmanaged(u8){};
     for (entries) |e| {
         var h = [_]u8{0} ** 512;
         @memcpy(h[0..e.name.len], e.name);
@@ -57,7 +57,7 @@ pub fn tar(a: std.mem.Allocator, entries: []const Entry) ![]u8 {
 
 /// A gzip stream of `bytes` in stored (uncompressed) deflate blocks.
 pub fn gzip(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).empty;
+    var out = std.ArrayListUnmanaged(u8){};
     try out.appendSlice(a, &.{ 0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3 });
     var off: usize = 0;
     while (true) {
@@ -78,7 +78,7 @@ pub fn gzip(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
 /// `package/package.json` of a package, and the files after it, as a .tgz.
 pub fn tgz(a: std.mem.Allocator, name: []const u8, version: []const u8, more: []const Entry) ![]u8 {
     const pj = try std.fmt.allocPrint(a, "{{\"name\":\"{s}\",\"version\":\"{s}\"}}", .{ name, version });
-    var all = std.ArrayList(Entry).empty;
+    var all = std.ArrayListUnmanaged(Entry){};
     try all.append(a, .{ .name = "package/", .kind = '5', .mode = 0o755 });
     try all.append(a, .{ .name = "package/package.json", .data = pj });
     try all.appendSlice(a, more);
