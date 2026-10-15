@@ -181,7 +181,7 @@ zig_exe(
 zig_test(
     name = "proto_fixture_unit",
     exec_compatible_with = LINUX_X86_64,
-    imports = ["tools/proto_fixture.zig"],
+    imports = ["tools/proto_fixture.zig", "tools/unified_diff.zig"],
     src = "tools/proto_fixture_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
@@ -190,6 +190,7 @@ zig_test(
 zig_exe(
     name = "proto_fixture",
     exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/unified_diff.zig"],
     src = "tools/proto_fixture.zig",
     unit_tests = [":proto_fixture_unit"],
     busybox = "komira//tools/build/toolchains:busybox",
