@@ -399,7 +399,7 @@ release_order_test(
 
 # a requires _OLD_NATIVE at the set's version and build string, listed after
 # it: refused like any other member. This proves the old exemption for that
-# package is gone (the skip in _ORDER_CHECK, deleted 2026-10-11, would let it
+# package is gone (the skip in the order check, deleted 2026-10-11, would let it
 # pass).
 release_order_test(
     name = "release_order_refuses_a_{}_requirement_listed_later".format(_OLD_NATIVE),

@@ -44,7 +44,7 @@
 # whose answer is known, wrong ones included.
 # `same` compares two builds of the distribution: same files, modes, bytes.
 # `identity` requires that bin/kcov is what the package guard refuses
-# (tools/build/package/kcov_guard.sh): its sha256 is <sha256> and it holds
+# (tools/build/package/act/kcov_guard.zig): its sha256 is <sha256> and it holds
 # <usage_line>, the two constants of identity.bzl.
 # Every pipeline fails when any of its stages fails (pipefail), so a stage
 # that cannot read its input never passes as an empty result. A grep that
