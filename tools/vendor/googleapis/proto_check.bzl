@@ -34,6 +34,7 @@ checked tree, not only of its own test.
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:proto.bzl", "MojoProtoToolchainInfo", "ProtoSrcsInfo")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 # Checking runs on the one Linux execution platform: it parses a few files and compiles nothing.
 _LINUX = LINUX_X86_64
@@ -147,17 +148,18 @@ def _proto_check_case_impl(ctx):
     bb, _, args = _check_args(ctx)
     ctx.actions.run(
         cmd_args(bb, "sh", "-euc", _CASE_SCRIPT, "sh", ctx.attrs._script, ctx.attrs.expect, report.as_output(), args, ctx.attrs.roots),
+        env = rerun_env(ctx),
         category = "proto_check_case",
         identifier = ctx.attrs.name,
     )
-    return [DefaultInfo(default_output = report)]
+    return [DefaultInfo(default_output = report), rerun_info(ctx)]
 
 _proto_check_case = rule(
     impl = _proto_check_case_impl,
     doc = "The proto_check check over a fixture, with its verdict asserted: accepted when `expect` is empty, otherwise refused with a message holding `expect`.",
     attrs = _COMMON | {
         "expect": attrs.string(default = ""),
-    },
+    } | RERUN_ATTRS,
 )
 
 def proto_check(**kwargs):

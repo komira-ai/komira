@@ -1,0 +1,33 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# The interpreter list's tool (src/budget.zig says what it checks), run by
+# //tools/build/lint:interpreter_budget (tools/build/lint/interpreter_budget.bzl).
+
+_SRCS = glob(["src/*.zig"])
+
+# The unit tests (a clean tree; an unlisted shell, Python, awk, Perl, Ruby or
+# sed file, by its extension or its `#!` line, through env and busybox; a
+# node or dotslash `#!` line not counted; a listed script grown by 50 lines
+# passing unchanged; a stale row after a delete; a scope; malformed rows; the
+# verdict of a planted case): `zig test` of main.zig, run as a build action.
+zig_test(
+    name = "interpreter_budget_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "src/main.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# Built only behind its unit tests.
+zig_exe(
+    name = "interpreter_budget",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "src/main.zig",
+    unit_tests = [":interpreter_budget_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)

@@ -14,7 +14,7 @@
 //!   --runtime   llvm/runtime/libclang_rt.profile-x86_64.a of the link
 //!               directory (the profile runtime)
 //!   --bitcode   the test's LLVM bitcode ([coverage][bc][<test>])
-//!   after `--` the C libraries of the test's closure, as mojo_wrapper.sh
+//!   after `--` the C libraries of the test's closure, as mojo_compile
 //!               appends them to the end of a link line, given to zig as
 //!               they are (relative to the working directory)
 //!
@@ -27,11 +27,12 @@
 //!      symbolic link is followed), else a usage error; the bitcode starts
 //!      with the bitcode magic `BC 0xC0DE`.
 //!   1. lld instruments the bitcode, as an LTO link with -r at -O0 whose pass
-//!      pipeline is `pgo-instr-gen,instrprof,default<O0>`: a relocatable
-//!      object with IR profile counters. lld is the LLVM the Mojo compiler is
-//!      built on, so the bitcode is read by its own LLVM.
+//!      pipeline is `pgo-instr-gen,instrprof,default<O0>` and
+//!      `-mllvm -instrprof-atomic-counter-update-all`: a relocatable object
+//!      with IR profile counters, each updated atomically. lld is the LLVM
+//!      the Mojo compiler is built on, so the bitcode is read by its own LLVM.
 //!   2. zig links that object as a release test is linked (the line zig is
-//!      given when `mojo build` links through mojo_wrapper.sh's `cc` shim:
+//!      given when `mojo build` links through mojo_compile's `cc` shim:
 //!      the compiler's runtime library, `--gc-sections`, `-lm`,
 //!      `--strip-debug`, the one run path `$ORIGIN/lib` as DT_RUNPATH, then
 //!      the link tail), with the profile runtime as a whole archive. Test 47's
@@ -154,6 +155,10 @@ pub fn lldArgv(alloc: std.mem.Allocator, lld: []const u8, bc: []const u8, k: []c
     try v.appendSlice(&.{ lld, "-flavor", "gnu", "-r", "-m", "elf_x86_64", bc, "-o" });
     try v.append(try std.fmt.allocPrint(alloc, "{s}/pg.o", .{k}));
     try v.appendSlice(&.{ "--lto-O0", "--lto-newpm-passes=pgo-instr-gen,instrprof,default<O0>" });
+    // Atomic counter updates (README.md, "Atomic counters"): `instrprof`
+    // lowers each increment to an `atomicrmw add` (a `lock`-prefixed add),
+    // so threads that increment one counter at once lose none.
+    try v.appendSlice(&.{ "-mllvm", "-instrprof-atomic-counter-update-all" });
     return v.toOwnedSlice();
 }
 
@@ -313,7 +318,7 @@ pub fn linkAll(alloc: std.mem.Allocator, a: Args, where: run_cmd.Where, runner: 
         return red(alloc, err, k, try std.fmt.allocPrint(alloc, "lld could not instrument {s} (pgo-instr-gen)", .{a.bitcode}));
     }
 
-    // 2. Link, as mojo_wrapper.sh's cc shim links a release test.
+    // 2. Link, as mojo_compile's cc shim links a release test.
     const z = runner.runFn(runner.ptr, alloc, .{ .argv = try zigArgv(alloc, zig, a.target, k, kgen, out, rt, a.tail), .env = env, .stdout_path = log, .stderr_to_stdout = true }) catch |e| {
         try err.writer().print("cov_branch link: cannot run {s}: {s}\n", .{ zig, @errorName(e) });
         return 2;

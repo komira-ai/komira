@@ -1,0 +1,15 @@
+{
+ "name": "deadline_passes_while_pull_held",
+ "defect": "a batch a pull returns after the call's deadline passed is passed to user code (design 4.3: ERR_DEADLINE from that frame_next, the batch never run)",
+ "run": "nested_frame",
+ "entry": "running_sum",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "levels": 0,
+ "pull_action": {"at": 1, "do": "advance_clock"},
+ "options": {"deadline_after_ns": 1000000000000},
+ "inputs": [{"length": 1, "columns": [{"type": "int64", "values": [1]}]}, {"length": 1, "columns": [{"type": "int64", "values": [2]}]}],
+ "expect": {"status": "ERR_DEADLINE", "run_error": "UDF_DEADLINE_EXCEEDED", "batches": [{"length": 1, "columns": [{"type": "int64", "values": [1]}]}]}
+}

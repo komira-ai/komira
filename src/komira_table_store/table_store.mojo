@@ -216,9 +216,12 @@ def _is_lost_slot_412(msg: String) -> Bool:
     error never originates here; matching it would risk misclassifying an
     unrelated error as a retryable lost-slot signal (up to
     _MAX_ASYNC_COMMIT_ATTEMPTS spurious retries). The 412 / precondition /
-    If-None-Match substrings fully cover both conformers' lost-slot wording."""
+    If-None-Match substrings fully cover both conformers' lost-slot wording.
+    The group-commit appender (`TableStoreExactSlotAppender.
+    classify_append_error`) does the same create-CAS and calls this function,
+    so both paths agree on what a lost slot is."""
     return (
-        msg.find("412") >= 0
+        msg.find("status=412") >= 0
         or msg.find("precondition") >= 0
         or msg.find("If-None-Match") >= 0
     )
@@ -740,32 +743,30 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         for i in range(len(self._idx_lineage_ords)):
             if self._idx_lineage_ords[i] == index_lineage_ord:
                 return  # already registered — no-op (idempotent open()/re-run)
-        self._idx_lineage_ords.append(index_lineage_ord)
-        self._idx_indexes.append(OwnedPointer[KeyIndex](KeyIndex()))
-        var slot = len(self._idx_indexes) - 1
-        # catch-up fold over the already-folded WAL range for THIS lineage only.
+        # catch-up fold over the already-folded WAL range for THIS lineage only,
+        # into a memtable that is registered only once the fold is complete.
+        # Every slot in `[log_start, _folded_seq]` was folded by this handle, so
+        # it exists: a failed read is retried as replay retries it
+        # (`_read_chunk_settled`) and otherwise raised, leaving the lineage
+        # unregistered so a later register_index re-runs the fold.
+        var idx = KeyIndex()
         if self._folded_seq >= Int64(0):
             var ls = self._wal.read_log_start()
-            var start = ls.log_start_seq
-            if start < Int64(0):
-                start = Int64(0)
-            var seq = start
+            var seq = ls.log_start_seq
+            if seq < Int64(0):
+                seq = Int64(0)
             while seq <= self._folded_seq:
-                var body: List[UInt8]
-                try:
-                    body = self._wal.read_chunk(seq)
-                except e:
-                    _ = e
-                    break  # no committed chunk at/below the bound — stop.
-                var chunk = decode_commit_chunk(body)
+                var chunk = self._read_chunk_settled(seq)
                 # Option-A S-b: a sharded-index chunk folds at its explicit
                 # stamp_lsn (the heap DML-LSN), else the WAL seq (byte-identical).
                 var fold_lsn = _fold_lsn_for_chunk(seq, chunk)
                 for wi in range(len(chunk.write_set)):
                     ref w = chunk.write_set[wi]
                     if self._key_lineage_ord(w.key) == index_lineage_ord:
-                        self._idx_indexes[slot][].apply_write(fold_lsn, w)
+                        idx.apply_write(fold_lsn, w)
                 seq += Int64(1)
+        self._idx_lineage_ords.append(index_lineage_ord)
+        self._idx_indexes.append(OwnedPointer[KeyIndex](idx^))
 
     @always_inline
     def _key_lineage_ord(self, key: List[UInt8]) -> Int32:

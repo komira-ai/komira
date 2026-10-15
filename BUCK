@@ -33,11 +33,11 @@ export_file(
 )
 
 # The files under .github/, which the root doc_tree's glob skips, at their
-# paths, for the shell budget (//tools/build/lint:shell_budget).
+# paths, for the interpreter list (//tools/build/lint:interpreter_budget).
 doc_tree(
     name = "github_tree",
     srcs = glob([".github/**"]),
-    visibility = ["//tools/build/lint:shell_budget"],
+    visibility = ["//tools/build/lint:interpreter_budget"],
 )
 
 shell_lint(
@@ -60,7 +60,6 @@ coverage_ci_cases(
     ],
     data = {
         "tools/build/coverage/policy.bzl": "//tools/build/coverage:policy.bzl",
-        "tools/build/coverage/ratchet.tsv": "//tools/build/coverage:ratchet.tsv",
         "tools/build/mojo/coverage_branch.bzl": "//tools/build/mojo:coverage_branch.bzl",
     },
 )
@@ -128,11 +127,8 @@ _TESTS_LINTS = [
     "tests//functional/coverage:shell_lint",
     "tests//functional/darwin:shell_lint",
     "tests//functional/install_gate:shell_lint",
-    "tests//functional/mem_cap:shell_lint",
     "tests//functional/platform_table:shell_lint",
     "tests//functional/test_data:shell_lint",
-    "tests//functional/test_deadline:shell_lint",
-    "tests//functional/watchdog:shell_lint",
     "tests//golden:shell_lint",
 ] if read_root_config("cells", "tests") else []
 
@@ -196,6 +192,11 @@ _TESTS_LINTS = [
         # The package of the superseded one-library plan for komira's C
         # (docs/design/native_packaging.md).
         "komira" + "_native",
+        # A comptime core count is the core count of the build worker that
+        # compiled the package, not of the machine the program runs on
+        # (komira-ai/komira#994). Query std.sys.num_physical_cores() at run
+        # time instead.
+        "NUM" + "_CORES",
     ],
     srcs = [".buckconfig.local.example"] + glob([".github/**"]),
     tree = ":doc_tree",
@@ -269,13 +270,15 @@ _TESTS_LINTS = [
     tree = ":doc_tree",
 ) for _ in _TESTS_LINTS[:1]]
 
-# The coverage census (tools/build/coverage/census.md):
-# docs/coverage_census.md and the floors of tools/build/coverage/ratchet.tsv
-# are exactly what tools/build/coverage/census.sh renders from census.tsv, so
-# the doc is never edited by hand and no floor is under what was measured.
+# The coverage census (tools/build/coverage/census.md): its default output,
+# coverage_census.md, is the doc tools/build/coverage/census.sh renders from
+# every package's coverage_census.tsv and coverage_held, found in
+# `:doc_tree` (`--show-output` prints its path; it is not committed), and the
+# build fails while a package the census measured at the 99% target does not
+# hold it in its coverage_held.
 [coverage_census(
     name = "coverage_census",
-    doc = "docs/coverage_census.md",
+    tree = ":doc_tree",
 ) for _ in _TESTS_LINTS[:1]]
 
 # The Mojo pointer rules (docs/design/mojo_safety_and_idioms.md, "What must

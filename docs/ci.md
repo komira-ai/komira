@@ -14,11 +14,13 @@ Nothing is compiled on the runner.
 | pull request from a branch of this repository | `pr / check`; and `coverage`, informational, not required ([below](#coverageyml-the-pull-requests-coverage-not-a-gate)) |
 | pull request from a fork | nothing: no farm job runs ([below](#pull-requests-from-forks)) |
 | manual (`workflow_dispatch`) | the release path of `kci.yml`, on the chosen ref |
+| weekly (schedule) and manual | [`kpin-update.yml`](../tools/build/kpin/README.md#the-weekly-update): updates the pins and opens one pull request; no farm, and its pull request does not start `pr / check` by itself |
 
 There is no separate static or lint job, and no other pull request check
-that can block a merge: the `coverage` workflow only reports. The only
-scheduled run is the
-[build-system self-tests](#build-system-self-tests), which is not the gate.
+that can block a merge: the `coverage` workflow only reports. The scheduled
+runs are the [build-system self-tests](#build-system-self-tests), which are not
+the gate, and the weekly [`kpin-update.yml`](../tools/build/kpin/README.md#the-weekly-update),
+which opens a pull request and gates nothing.
 `ci.yml` and its check `ci / build` no longer exist. The whole-repository
 `//...` build they ran on every push to `main` is not run by any workflow now;
 a pull request's check covers the units the change reaches, and every target of
@@ -214,7 +216,7 @@ other run.
 | `tmpdir_outside_checkout` (reported): no directory from `TEST_TMPDIR` up to `/` holds `.git` or `.buckconfig` | outside: six levels walked to `/`, no marker | the install-path test, whose scratch must be outside any checkout |
 
 `tmpdir_outside_checkout` is reported, not required: the gate runner
-([`gate_runner.sh`](../tools/build/mojo/gate_runner.sh)) makes `TEST_TMPDIR`
+([`gate mojo`](../tools/build/run/README.md)) makes `TEST_TMPDIR`
 under the action's working directory, which for an action run on the client
 (no farm configured) is inside the checkout, so a required check would fail
 there for that reason rather than for a missing capability (derived from the
@@ -866,7 +868,9 @@ stderr whole up to 8 KiB, else the first and last 4 KiB), and kci FAILS the
 check (`KCI-E-BUILD-FAILED`). The decision is the failure, not buck2's text:
 the target buck2 names, when it names one, only leads the message. So a
 change that plants a target buck2 cannot configure fails its own check,
-widened or not. A
+widened or not. **A coverage hold is never dropped:** `affected` reads each changed
+`coverage_held` at the base and in the checkout, and answers `BROKEN` when a
+metric the base held is gone ([The 99% threshold and holds](../tools/build/coverage/README.md#the-99-threshold-and-holds)). A
 non-empty change that reaches no unit answers `AFFECTED 0`, which kci refuses
 (`KCI-E-AFFECTED-VACUOUS`): never a pass. The job's checkout has the full
 history, so the base commit is there. In `pr.yml` the base is the first parent
@@ -938,7 +942,9 @@ retries ran out of budget is not called interference. Without the flag,
 each run has its `--build-timeout-s` and there is no total.
 
 `pr.yml` passes the time its job has left: its first step writes the job's
-deadline, 115 of the job's 120 minutes (`timeout-minutes`), and the
+deadline, 325 of the job's 330 minutes (`timeout-minutes`, under the 360 a
+GitHub-hosted job may run, so that a change that rebuilds most of the tree
+on the farm finishes), and the
 `kci run` step stops with an error if that file is missing, then passes the
 seconds left until it. The time `build kci` took is therefore not taken from
 a wide change's build, and kci reports which units it did not build about 5
@@ -948,7 +954,9 @@ those 5 minutes). `build kci` itself takes from seconds (a cached kci) to most
 of an hour (a change to kci or to what it depends on), so a fixed per-batch
 number either wasted the job's time or overran it. The welded test
 `src/kci_workflow_check/tests/test_repo_kci_yml.mojo` holds `pr.yml` to these
-steps and numbers.
+steps and numbers: `timeout-minutes` within 300 to 360, and the deadline
+step's minutes exactly `timeout-minutes` less 5, so the two cannot drift
+apart. `coverage.yml`'s `measure` job has the same 330 minutes.
 
 Whatever the outcome, a `BUILT <unit>` line names exactly the units a
 successful run covered. The result document's `affected_by.units` is the set
@@ -1029,7 +1037,7 @@ change touches, and the branch coverage of those whose coverage gate reads
 branch records (`COVERAGE_BRANCH_GATE`), as covcheck's summary and
 annotations on the lines of the "Files changed" view. It is **informational**: not a required check, its
 conclusion is `neutral` in the policy's census mode, except that a touched
-package measured under its floor of `tools/build/coverage/ratchet.tsv` (a
+package under the 99.00% target on a metric it holds (its `coverage_held`: a
 `Regression`, which fails in every mode) makes it `failure`; it cannot make
 `pr / check` red, so that failure shows on the pull request without
 blocking it. Job `measure` (the same farm connection and permissions as

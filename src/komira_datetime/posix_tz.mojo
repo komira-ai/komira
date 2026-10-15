@@ -15,17 +15,14 @@
 # time, the end in daylight time. A DST name needs both rules: zic always
 # writes them, and POSIX leaves the default to the implementation.
 #
-# DST is evaluated per year of local standard time: the year's start and end
-# instants in UTC, then in effect from start up to end, or outside end..start
-# when the end comes first in the year (the southern hemisphere). A rule
-# starting 1 January 00:00 and ending 31 December 24:00 plus the DST
-# difference is DST all year (RFC 8536 section 3.3.1): its end equals the next
-# year's start.
-#
-# Known limitation, see komira-ai/komira#883: a rule time that carries the
-# start past 31 December ("AAA0BBB,J365/120,J30" starts DST on 5 January of
-# the next year) is folded into that next year's own end-before-start test,
-# so 1..4 January read as DST where tzcode starts DST on 5 January.
+# Each rule year y gives a start and an end instant in UTC, which may fall in
+# a neighbouring calendar year when the rule time is large or negative
+# ("AAA0BBB,J365/120,J30" starts DST on 5 January of y + 1). An instant reads
+# the type of the latest start or end at or before it, the way tzcode's
+# localtime.c lays the instants out year after year without folding them
+# back into the year the rule names. A year whose end comes a full year or
+# more after its start (1 January 00:00 to 31 December 24:00 plus the DST
+# difference, RFC 8536 section 3.3.1) has no instants: DST all year.
 # =============================================================================
 
 from .civil import (
@@ -134,14 +131,37 @@ struct PosixTz(Copyable, Movable):
         """The local time type the string gives for the UTC instant `utc`."""
         if not self.has_dst:
             return self.standard.copy()
+        # The latest rule instant at or before `utc` decides, over the rule
+        # years whose instants can reach this standard-time year: a rule time
+        # moves an instant at most 167 hours off its date, so year - 1 (two
+        # instants as late as 7 January) and year + 1 (as early as 24
+        # December) can, and year - 2 always lies wholly before `utc`. The
+        # years are walked in order and each year's two instants in time
+        # order, so on a tie the later one in that order wins.
         var year = self._year_of(utc)
-        var s = self.start_utc(year)
-        var e = self.end_utc(year)
-        var in_dst: Bool
-        if s < e:
-            in_dst = s <= utc and utc < e
-        else:
-            in_dst = not (e <= utc and utc < s)
+        var found = False
+        var latest = 0
+        var in_dst = True  # no instant at all: DST every year
+        for y in range(year - 2, year + 2):
+            var s = self.start_utc(y)
+            var e = self.end_utc(y)
+            var year_seconds = (
+                days_from_civil(y + 1, 1, 1) - days_from_civil(y, 1, 1)
+            ) * _SECONDS_PER_DAY
+            var reversed = e < s
+            if not reversed and not (s < e and e - s < year_seconds):
+                continue  # DST the whole year: no edge (RFC 8536 3.3.1)
+            # In time order: (first, its type), then (second, its type).
+            var first = e if reversed else s
+            var second = s if reversed else e
+            if first <= utc and (not found or first >= latest):
+                latest = first
+                in_dst = not reversed
+                found = True
+            if second <= utc and (not found or second >= latest):
+                latest = second
+                in_dst = reversed
+                found = True
         if in_dst:
             return self.daylight.copy()
         return self.standard.copy()

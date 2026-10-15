@@ -19,7 +19,7 @@ For a library `L` with import name `I` and tests `t1`, `t2`:
 ```
 mojo precompile  ->  L/ungated/I.mojoc
                        |                    \
-        build t1 against it, run (gate_runner.sh) -> L/tests/t1.passed   "PASS <label>"
+        build t1 against it, run (gate mojo)      -> L/tests/t1.passed   "PASS <label>"
         build t2 against it, run                  -> L/tests/t2.passed
                        |                    /
         cp ungated/I.mojoc  (markers are hidden inputs)  ->  L/pkg/I.mojoc   (the public package)
@@ -71,7 +71,7 @@ The tests reach `ungated` in the rule and never through a label. That is why a b
 
 ### Why does the test run in a staged tree with a fixed environment?
 
-**Decision.** `gate_runner.sh` runs a test from a tree of its own, with a fixed environment, and gives a `test_env` variable to the test process only, never to the runner's own shell. The rule refuses the reserved names, and the script refuses them again.
+**Decision.** The gate (`gate mojo`, `tools/build/run`) runs a test from a tree of its own, with a fixed environment, and gives a `test_env` variable to the test process only: it builds the test's environment itself and reads none of its own state from it. The rule refuses the reserved names, and the gate refuses them again.
 
 **Because.** A test that reaches a file it did not declare passes here and fails somewhere that lacks the file. Staging the declared data under `share/` and running from there makes a relative path reach a declared file and nothing else. Exported into the runner's shell, a variable would reach the values the verdict is computed from, so a `BIN` set in `env` would change what the runner decides. Putting the variable on the test's own command line closes that.
 
@@ -129,7 +129,7 @@ The tests reach `ungated` in the rule and never through a label. That is why a b
 | What | Where |
 |---|---|
 | The gate: compile, tests, copy | `tools/build/mojo/defs.bzl` (`mojo_library`) |
-| The test runner | `tools/build/mojo/gate_runner.sh` |
+| The test runner | `tools/build/run` (`gate`, a Zig executable) |
 | The lint rules | `tools/build/lint/defs.bzl`; the action most of them run, the Zig tool `tools/build/lint/tool` (`src/main.zig` says each kind) |
 | The pinned linters | `tools/build/lint/BUCK` (shellcheck, actionlint) |
 | The doc tree | `tools/build/lint/doc_tree.bzl`, `includes.bzl` |
@@ -154,7 +154,7 @@ The tests reach `ungated` in the rule and never through a label. That is why a b
 | `readme_api_coverage` | README API coverage: per package under `src/`, the public symbols its `__init__.mojo` exports and which of them its README examples use, written as a census (`[packages]`, `[symbols]`, `[report]`); report-only (`enforce = False`), failing on a malformed or stale row of its shrink-only ledger, `tests/readme_api_exceptions.tsv`; `tools/build/lint/readme_api_coverage.bzl`, rules and census in [readme_api_coverage.md](../readme_api_coverage.md) |
 | `surface_capability_matrix` | product coverage: for every surface and every capability of the plan, the surface e2e test target that exercises it (in `src/tests/e2e/<surface>_e2e/`), or `-`, written as a census (`[matrix]`, `[report]`); a missing cell is never a finding; fails on a malformed or lying row of its ledger, `tests/surface_capability_matrix.bzl` (an unknown name, a pair with two rows or none, a target outside its surface's package exactly, an alias of a test elsewhere, no test, one test filling two cells of a surface, or not existing: every named target is a dependency, so an incompatible one fails the build too), on a capability not grounded in the plan constants of its grounding files (or a constant of a grounding family no capability names, or in a form it cannot read), and on fewer filled cells than `floor` (that the floor only rises is a review rule); `tools/build/lint/surface_capability_matrix.bzl` (the rows at analysis), the Zig tool `tools/build/lint/surface_grounding` (the grounding files), test 53, rules and census in [surface_capability_matrix.md](../surface_capability_matrix.md) |
 | `limits` | every place the build says it builds for one platform only (a `target_compatible_with` line) carries a `komira-limit:<id>` marker, every marker names a row of `tools/build/platforms/limits.tsv`, every row has a marker, and the rows are well formed, over every file of the repository but Markdown and the check's own directory; the Zig tool `tools/build/platforms/limits` (`limits_check tree`), whose `merged` mode the platform table's check (test 37) runs over the commit subjects of main |
-| `shell_budget` | existence only: every shell script of the repository (a `.sh` or `.bash` file, or a file whose `#!` line names a shell) has a row in `tools/build/lint/shell_allowlist.tsv` (path, reason), and every row names such a script, so a new unlisted script fails the build, and so does a row whose script was deleted or is no longer shell (the list only shrinks); a script's size is never checked, so editing a listed script never touches the list; a new row is refused by review unless its reason is accepted; `tools/build/lint/shell_budget.bzl`, the Zig tool `tools/build/lint/shell_budget/` and its welded unit tests |
+| `interpreter_budget` | existence only: every interpreter file of the repository has a row in `tools/build/lint/interpreter_allowlist.tsv` (path, reason), and every row names one, so a new unlisted file fails the build, and so does a row whose file was deleted or is no longer an interpreter file (the list only shrinks). An interpreter file is shell, Python, Perl, awk, sed or Ruby: by its extension (`.sh`, `.bash`, `.zsh`, `.ksh`, `.py`, `.pyw`, `.pl`, `.pm`, `.awk`, `.sed`, `.rb`, any case) or by a first `#!` line naming `sh`, `bash`, `ash`, `dash`, `ksh`, `mksh`, `zsh`, any `python*`, `perl`, `awk`, `gawk`, `mawk`, `nawk`, `sed` or `ruby`, directly, through `env` (its options and `NAME=value` words) or through `busybox`; a `#!` line naming another program (`node`, `dotslash`, a data marker) is not counted: JavaScript here runs on the pinned Node toolchain as a product runtime (UDF workers and their fixtures), not as build glue. A file's size is never checked, so editing a listed file never touches the list; a new row is refused by review unless its reason is accepted. `scope` (path prefixes) limits a target to part of a tree (a row outside it is a finding), and `expect` makes a target a planted case that passes only while refused with the expected findings; a repository using komira as a cell declares its own target in a cell its root `.buckconfig` names in `[komira] doc_tree_cells`, which makes that cell's packages declare the doc_tree targets the rule reads (`tools/build/lint/doc_tree.bzl`). `tools/build/lint/interpreter_budget.bzl`, the Zig tool `tools/build/lint/interpreter_budget/` and its welded unit tests, and the cases of `tests//functional/interpreter_budget`, used from the `tests` cell |
 
 ## How is it tested?
 

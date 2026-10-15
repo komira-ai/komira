@@ -3,8 +3,10 @@
 # =============================================================================
 # The DNS resolver.
 # Exercises the REAL getaddrinfo path + the FFI thunk + freeaddrinfo discipline,
-# hermetically: `localhost` is always in /etc/hosts (no network), and the
-# `.invalid` TLD is RFC-2606 reserved (guaranteed NXDOMAIN, no real query).
+# `localhost` is always in /etc/hosts (no network). The `.invalid` TLD is
+# RFC-2606 reserved, but glibc still sends the query to the configured
+# resolver, so these tests assert only that the lookup raises (a resolver that
+# times out raises TRANSIENT instead of NXDOMAIN).
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true

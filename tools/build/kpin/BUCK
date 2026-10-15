@@ -1,0 +1,74 @@
+# kpin (README.md): pins.toml and the native lockfiles (package-lock.json v3)
+# in, a generated pins.lock.bzl out; `update` is the one command that touches
+# the network and never runs in a build action. A Zig tool, as every build tool
+# under tools/build is; built behind its unit tests.
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":selftest.bzl", "SELFTEST")
+
+_SRCS = [
+    "diag.zig",
+    "fetch.zig",
+    "lockfmt.zig",
+    "main.zig",
+    "npm.zig",
+    "pins.zig",
+    "resolve.zig",
+    "toml.zig",
+    "update.zig",
+    "valid.zig",
+]
+
+# Test support, and the golden lock (which the load above also reads).
+_SUPPORT = [
+    "fixtures.zig",
+    "registry.zig",
+    "example.lock.bzl",
+]
+
+# Loading selftest.bzl is the test that the generated lock is Starlark Buck2
+# loads and that pins.bzl reads it (the package fails to load otherwise).
+_ = SELFTEST
+
+# ---- Unit tests: `zig test` of each, run as a build action -------------------
+
+[
+    zig_test(
+        name = name + "_unit",
+        exec_compatible_with = LINUX_X86_64,
+        src = name + "_test.zig",
+        imports = _SRCS + _SUPPORT,
+        busybox = "komira//tools/build/toolchains:busybox",
+        zig = "komira//tools/build/toolchains:zig",
+    )
+    for name in [
+        "lockfmt",
+        "main",
+        "npm",
+        "pins",
+        "resolve",
+        "toml",
+        "update",
+    ]
+]
+
+# ---- The tool, built only when every unit test passed ------------------------
+
+zig_exe(
+    name = "kpin",
+    exec_compatible_with = LINUX_X86_64,
+    src = "main.zig",
+    imports = _SRCS,
+    unit_tests = [
+        ":lockfmt_unit",
+        ":main_unit",
+        ":npm_unit",
+        ":pins_unit",
+        ":resolve_unit",
+        ":toml_unit",
+        ":update_unit",
+    ],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)

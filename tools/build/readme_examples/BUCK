@@ -1,6 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:table.bzl", "row")
 
 # The README examples tool (README.md of tools/build/mojo, "README
 # examples"): `generate` makes a README's ```mojo examples into programs, one
@@ -8,7 +9,9 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 # line n, plus the runner of them all; `map` rewrites a report's program
 # lines to README lines; `link` reads a packaged README's `sh komira-link`
 # block (the link commands the packer writes) and `link-check` compares it
-# with what the packer wrote (cli.zig, link.zig). mojo_library runs it on its package's
+# with what the packer wrote (cli.zig, link.zig); `release-check` refuses a
+# release member that packages no README or one with no example
+# (tools/build/package/release_set.bzl). mojo_library runs it on its package's
 # README.md as an action, and so do the coverage build and the README API
 # census; kci ships it beside its executable and runs it on an installed
 # README (src/kci_validate). Zig, as every build tool under tools/build is;
@@ -31,11 +34,24 @@ zig_test(
 
 # Welded: no README is made into programs unless `:readme_examples_unit`
 # passed.
+#
+# Built for the platform it is configured for. Its users take it as an
+# exec_dep (mojo_library's `generate` action, conda, the census), so its
+# configuration is that of the execution platform their action runs on: on a
+# darwin-arm64 Mojo target that is the macOS one, whose workers cannot run a
+# Linux executable. zig cross-compiles it on the linux execution platform
+# either way. On linux the triple is the one it always had, so linux action
+# keys are unchanged. mojo_library refuses at analysis a tool built for
+# another os than its action (tools/build/mojo/readme.bzl, ZigExeInfo).
 zig_exe(
     name = "tool",
     exec_compatible_with = LINUX_X86_64,
     imports = _SRCS,
     src = "main.zig",
+    target = select({
+        "prelude//os/constraints:macos": row("darwin-arm64")["zig_triple"],
+        "DEFAULT": "x86_64-linux-musl",
+    }),
     deps = ["//tools/build/markdown:markdown"],
     unit_tests = [":readme_examples_unit"],
     busybox = "komira//tools/build/toolchains:busybox",

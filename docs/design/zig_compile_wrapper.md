@@ -25,8 +25,8 @@ and the order of the pull requests.
 
 **Scope, stated exactly.** `busybox.sh` and `dyld_prelude.sh` are not the compile wrapper's alone:
 
-- `dyld_prelude.sh` is prepended to `gate_runner.sh` and `launch.sh` (the `dyld_script` rule in
-  `darwin.bzl`); the compile never reads it. It goes when the Zig gate runner and launcher take a
+- `dyld_prelude.sh` is prepended to `launch.sh` (the `dyld_script` rule in `darwin.bzl`; it was
+  prepended to `gate_runner.sh` too until the macOS gate replaced that); the compile never reads it. It goes when the Zig gate runner and launcher take a
   loader-variable flag (`--library-path-var=DYLD_LIBRARY_PATH`), which is the gate-runner port, not this one.
 - `busybox.sh` is the darwin toolchain's `busybox` field, run by every darwin action that starts
   `tc.busybox`: the compile today, and also the gate runner, `run_check.sh`, the memory cap and deadline
@@ -51,7 +51,11 @@ Every item is something the shell does today, with the test (see "Tests") that p
 4. The output is the value after the last `-o` in the compiler's arguments; none is exit 2.
 5. `--source-root=<dir>`: only when the subcommand is `build`, `-strip-file-prefix=<abs dir>/` is inserted
    right after the subcommand. The absolute path is `$PWD/<dir>` for a relative dir, spelled exactly as
-   the shell spells it (not canonicalised), because the compiler matches the prefix as a string.
+   the shell spells it (not canonicalised), because the compiler matches the prefix as a string. When the
+   subcommand is `precompile` (which ignores `-strip-file-prefix`), the compiler instead runs from the
+   root's parent, the argument naming the root becomes its basename, and `-o` and relative `-I` are made
+   absolute: the `.mojoc` records `<name>/<file>.mojo` under any isolation directory
+   (`compile_args.runDir`; `tests//functional/mojoc_path:same_bytes`).
 6. Input paths (compiler dir, link dir) are made absolute the same way, `$PWD/<path>`.
 7. macOS only: an argument `shared-lib` without an argument `-install_name` is exit 2 (bundles are
    Linux only; a C-ABI library names itself for dyld).

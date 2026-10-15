@@ -34,8 +34,12 @@
 #       raises the same, after its first RUNNING beat.
 #   test_a_terminal_beat_with_no_delay_is_retried_at_once
 #       `finalize_heartbeat_within` with a first delay of 0 against a reporter
-#       that always answers 503: exactly `max_attempts` sends, back to back,
-#       and the last outcome returned. A 404 is sent once.
+#       that always answers 503: exactly `max_attempts` (8) sends and the last
+#       outcome returned, in less than 9.5 s: a retry that slept the default
+#       schedule instead of the caller's 0 (250 ms doubling to 2 s) would add
+#       9.75 s between the eight sends. Ten zero sleeps return in less than
+#       9.5 s too, where ten that slept even 1 s would take 10 s. A 404 is
+#       sent once.
 #   test_a_failure_report_copy_keeps_the_panic_line
 #       `FailureReport.copy()` carries the panic line over.
 # =============================================================================
@@ -59,7 +63,13 @@ from komira_job_supervisor import (
     SupervisorHeartbeat,
     run_job_supervisor,
 )
-from komira_job_supervisor.job_supervisor import _detect_panic, _sleep_secs
+from komira_job_supervisor.job_supervisor import (
+    TERMINAL_BEAT_FIRST_DELAY_MS,
+    TERMINAL_BEAT_MAX_ATTEMPTS,
+    TERMINAL_BEAT_MAX_DELAY_MS,
+    _detect_panic,
+    _sleep_secs,
+)
 from komira_job_supervisor.job_supervisor_state import (
     FailureReport,
     JobSupervisorPhase,
@@ -167,8 +177,8 @@ def test_the_final_drain_keeps_the_unterminated_tails() raises:
     assert_equal(len(js.stderr_ring), 2, "stderr: one whole line and the tail")
     assert_equal(js.stderr_ring[0], String("err-1"))
     assert_equal(js.stderr_ring[1], String("err-tail"))
-    assert_equal(js.stdout_partial, String(""))
-    assert_equal(js.stderr_partial, String(""))
+    assert_equal(len(js.stdout_partial), 0)
+    assert_equal(len(js.stderr_partial), 0)
 
     # The pipes closed: a drain of either kind reads nothing and keeps the rings.
     js.supervisor.close()
@@ -323,14 +333,29 @@ def test_a_terminal_beat_with_no_delay_is_retried_at_once() raises:
     var js = JobSupervisor[Answering, InMemoryConditionalStore](
         _config(String("/bin/true")), Answering(503, sends), None
     )
+    # A retry that ignored the caller's first delay and slept the default
+    # schedule would sleep after each of the first seven sends: 250, 500,
+    # 1000, then 2000 four times, 9750 ms. The bound is just under that, so a
+    # slow or instrumented send has seconds to spare and only such a delay
+    # fails it.
+    var broken_ms = 0
+    var d = TERMINAL_BEAT_FIRST_DELAY_MS
+    for _ in range(TERMINAL_BEAT_MAX_ATTEMPTS - 1):
+        broken_ms += d
+        d = min(d * 2, TERMINAL_BEAT_MAX_DELAY_MS)
+    assert_equal(broken_ms, 9750, "the default schedule this bound sits under")
     var t0 = now_ns()
-    var out = js.finalize_heartbeat_within(60_000, 0, 3)
+    var out = js.finalize_heartbeat_within(60_000, 0, TERMINAL_BEAT_MAX_ATTEMPTS)
     var took_ms = Int((now_ns() - t0) // 1_000_000)
-    assert_equal(sends[], 3, "max_attempts sends")
+    assert_equal(sends[], TERMINAL_BEAT_MAX_ATTEMPTS, "max_attempts sends")
     assert_equal(out.status, 503, "the last outcome")
-    assert_true(took_ms < 1000, "no delay between them: " + String(took_ms))
-    _sleep_secs(0)
-    assert_true(Int((now_ns() - t0) // 1_000_000) < 1000, "a zero sleep returns")
+    assert_true(took_ms < 9500, "no delay between them: " + String(took_ms))
+    # Ten zero sleeps: ten that slept even 1 s would take 10 000 ms.
+    var t1 = now_ns()
+    for _ in range(10):
+        _sleep_secs(0)
+    var slept_ms = Int((now_ns() - t1) // 1_000_000)
+    assert_true(slept_ms < 9500, "a zero sleep returns: " + String(slept_ms))
     # CONTROL: a 404 cannot change by repeating: one send.
     var once = ArcPointer[Int](0)
     var js404 = JobSupervisor[Answering, InMemoryConditionalStore](

@@ -204,6 +204,7 @@ test "a link: the install, lld's and zig's command lines and environments, the b
     try expectArgv(&.{
         c.p("link/lld/bin/lld"), "-flavor",  "gnu",                                                    "-r", "-m", "elf_x86_64", c.p("cov/test_one.bc"), "-o",
         c.p("scratch/cov_branch_link/pg.o"), "--lto-O0", "--lto-newpm-passes=pgo-instr-gen,instrprof,default<O0>",
+        "-mllvm",                            "-instrprof-atomic-counter-update-all",
     }, lld.argv);
     try testing.expectEqualStrings(c.p("scratch/cov_branch_link/log"), lld.stdout_path.?);
     try testing.expect(lld.stderr_to_stdout);
@@ -235,6 +236,25 @@ test "a link: the install, lld's and zig's command lines and environments, the b
 
     try testing.expectEqualStrings(ELF, try c.tmp.dir.readFileAlloc(c.a(), "cov/test_one", 1 << 20));
     try testing.expect(!c.exists("scratch/cov_branch_link"));
+}
+
+test "lldArgv asks LLVM for atomic counter updates: -mllvm and the option, adjacent, once" {
+    // Without it the counters are a load, an add and a store (an `incq` or
+    // `addq` with no `lock`), and two threads incrementing one counter lose
+    // increments; README.md, "Atomic counters".
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const v = try l.lldArgv(arena.allocator(), "/l/lld", "/b/t.bc", "/k");
+    var at: ?usize = null;
+    for (v, 0..) |a, i| {
+        if (std.mem.eql(u8, a, "-instrprof-atomic-counter-update-all")) {
+            try testing.expect(at == null);
+            at = i;
+        }
+    }
+    try testing.expect(at != null);
+    try testing.expect(at.? >= 1);
+    try testing.expectEqualStrings("-mllvm", v[at.? - 1]);
 }
 
 test "no link tail: zig's line ends with the profile runtime" {
