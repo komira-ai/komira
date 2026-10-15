@@ -43,6 +43,8 @@ def _kpin_cargo_impl(ctx):
         ctx.attrs.sizes,
         "--rustc",
         tc.version,
+        "--target",
+        ctx.attrs.target,
     )
     out = ctx.actions.declare_output(ctx.label.name + ".bzl")
     ctx.actions.run(cmd_args(base, "--cargo-out", out.as_output()), category = "kpin_cargo")
@@ -65,6 +67,8 @@ kpin_cargo_rule = rule(
         "cargo_metadata": attrs.source(),
         "overrides": attrs.source(),
         "sizes": attrs.source(),
+        # The platform `cargo_metadata` was filtered for (`--filter-platform`).
+        "target": attrs.string(default = "x86_64-unknown-linux-gnu"),
         "toolchain": attrs.toolchain_dep(default = "toolchains//:rust", providers = [RustToolchainInfo]),
         "_kpin": attrs.exec_dep(default = "komira//tools/build/kpin:kpin"),
     },

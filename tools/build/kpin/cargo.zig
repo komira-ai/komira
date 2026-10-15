@@ -32,11 +32,13 @@ pub const Inputs = struct {
     sizes_label: []const u8 = "sizes.txt",
     lock: []const u8,
     metadata: []const u8,
-    overrides: []const u8,
+    overrides: []const u8 = "",
     /// One line per crate: `<name>-<version>.crate <bytes>`.
-    sizes: []const u8,
+    sizes: []const u8 = "",
     /// The pinned compiler the overrides must have been derived for.
-    rustc: []const u8,
+    rustc: []const u8 = "",
+    /// The platform the metadata must have been filtered for (`--filter-platform`).
+    target: []const u8,
 };
 
 // ---- the overrides -----------------------------------------------------------
@@ -294,7 +296,7 @@ fn lessPkg(_: void, x: *Pkg, y: *Pkg) bool {
     return std.mem.order(u8, x.version, y.version) == .lt;
 }
 
-fn parseSizes(a: std.mem.Allocator, label: []const u8, text: []const u8, diag: *Diag) std.StringHashMapUnmanaged(u64) {
+pub fn parseSizes(a: std.mem.Allocator, label: []const u8, text: []const u8, diag: *Diag) std.StringHashMapUnmanaged(u64) {
     var m = std.StringHashMapUnmanaged(u64){};
     var n: usize = 0;
     var it = std.mem.splitScalar(u8, text, '\n');
@@ -353,31 +355,48 @@ fn strListLine(w: anytype, name: []const u8, items: []const []const u8) !void {
     }
 }
 
-/// The generated `.bzl`, or `error.Invalid` with every problem in `diag`.
-pub fn generate(a: std.mem.Allocator, in: Inputs, diag: *Diag) error{Invalid}![]u8 {
-    const before = diag.count();
+const Graph = struct {
+    by_id: std.StringHashMapUnmanaged(*Pkg),
+    /// The crates linked into a binary, in discovery order.
+    linked: std.ArrayListUnmanaged(*Pkg),
+};
 
-    const lock = lockfile.parse(a, in.lock_label, in.lock, diag) catch return error.Invalid;
-    const sizes = parseSizes(a, in.sizes_label, in.sizes, diag);
-    const ovs = parseOverrides(a, in.overrides_label, in.overrides, diag) catch return error.Invalid;
-    if (!std.mem.eql(u8, ovs.rustc, in.rustc)) {
-        diag.add("{s}: derived for rustc {s}, but the pinned compiler is {s}: re-derive each entry for the new compiler (cfgs and generated files are per version), then set `rustc`", .{ in.overrides_label, ovs.rustc, in.rustc });
-    }
+/// A triple that names a platform other than `target` in an edge's `target`
+/// field means the metadata was not filtered for `target`.
+fn foreignTriple(edge_target: []const u8, target: []const u8) bool {
+    if (std.mem.startsWith(u8, edge_target, "cfg(")) return false;
+    return !std.mem.eql(u8, edge_target, target);
+}
 
-    const parsed = std.json.parseFromSlice(Value, a, in.metadata, .{}) catch {
-        diag.add("{s}: not valid JSON", .{in.metadata_label});
+/// The packages of `cargo metadata` output (raw or trimmed) and the crates
+/// linked into the workspace's members. The metadata must have been made with
+/// `--filter-platform <target>`; if it records the platform (trimmed
+/// metadata does), that must be `target`, and no edge may name another
+/// triple. Raw output records nothing, and is refused: trim it first.
+fn collect(a: std.mem.Allocator, label: []const u8, text: []const u8, target: []const u8, diag: *Diag) error{Invalid}!Graph {
+    const parsed = std.json.parseFromSlice(Value, a, text, .{}) catch {
+        diag.add("{s}: not valid JSON", .{label});
         return error.Invalid;
     };
     const root = objOf(parsed.value) orelse {
-        diag.add("{s}: not a JSON object", .{in.metadata_label});
+        diag.add("{s}: not a JSON object", .{label});
         return error.Invalid;
     };
+    if (strField(root, "filter_platform")) |fp| {
+        if (!std.mem.eql(u8, fp, target)) {
+            diag.add("{s}: filtered for {s}, but the pinned target is {s}: make it with `cargo metadata --filter-platform {s}`", .{ label, fp, target, target });
+            return error.Invalid;
+        }
+    } else {
+        diag.add("{s}: records no platform: `cargo metadata` output does not say what it was filtered for. Trim it first (`kpin cargo --metadata RAW --target {s} --trim OUT`), after `cargo metadata --filter-platform {s}`", .{ label, target, target });
+        return error.Invalid;
+    }
     const pkg_values = arrOf(root.get("packages") orelse .null) orelse {
-        diag.add("{s}: no `packages` list", .{in.metadata_label});
+        diag.add("{s}: no `packages` list", .{label});
         return error.Invalid;
     };
     const resolve = objOf(root.get("resolve") orelse .null) orelse {
-        diag.add("{s}: no `resolve` (it was made with --no-deps): kpin needs the resolved graph", .{in.metadata_label});
+        diag.add("{s}: no `resolve` (it was made with --no-deps): kpin needs the resolved graph", .{label});
         return error.Invalid;
     };
 
@@ -386,7 +405,7 @@ pub fn generate(a: std.mem.Allocator, in: Inputs, diag: *Diag) error{Invalid}![]
     for (pkg_values) |pv| {
         const o = objOf(pv) orelse continue;
         const id = strField(o, "id") orelse {
-            diag.add("{s}: a package with no id", .{in.metadata_label});
+            diag.add("{s}: a package with no id", .{label});
             continue;
         };
         const name = strField(o, "name") orelse "";
@@ -416,7 +435,7 @@ pub fn generate(a: std.mem.Allocator, in: Inputs, diag: *Diag) error{Invalid}![]
         }
     }
     if (queue.items.len == 0) {
-        diag.add("{s}: no workspace members", .{in.metadata_label});
+        diag.add("{s}: no workspace members", .{label});
         return error.Invalid;
     }
 
@@ -427,7 +446,7 @@ pub fn generate(a: std.mem.Allocator, in: Inputs, diag: *Diag) error{Invalid}![]
     while (qi < queue.items.len) : (qi += 1) {
         const p = queue.items[qi];
         const node = p.node orelse {
-            diag.add("{s}: {s} {s} has no node in the resolved graph", .{ in.metadata_label, p.name, p.version });
+            diag.add("{s}: {s} {s} has no node in the resolved graph", .{ label, p.name, p.version });
             continue;
         };
         var edges = std.ArrayListUnmanaged(Edge){};
@@ -437,12 +456,16 @@ pub fn generate(a: std.mem.Allocator, in: Inputs, diag: *Diag) error{Invalid}![]
             for (arrOf(d.get("dep_kinds") orelse .null) orelse no_values) |kv| {
                 const ko = objOf(kv) orelse continue;
                 if ((ko.get("kind") orelse .null) == .null) normal = true;
+                if (strField(ko, "target")) |et| if (foreignTriple(et, target)) {
+                    diag.add("{s}: {s} {s} has an edge for {s}, not {s}: the metadata was not filtered for {s}", .{ label, p.name, p.version, et, target, target });
+                    return error.Invalid;
+                };
             }
             if (!normal) continue;
             const id = strField(d, "pkg") orelse continue;
             const alias = strField(d, "name") orelse "";
             const t = by_id.get(id) orelse {
-                diag.add("{s}: {s} {s} depends on an id that is not a package: {s}", .{ in.metadata_label, p.name, p.version, id });
+                diag.add("{s}: {s} {s} depends on an id that is not a package: {s}", .{ label, p.name, p.version, id });
                 continue;
             };
             edges.append(a, .{ .alias = alias, .id = id }) catch return error.Invalid;
@@ -455,6 +478,52 @@ pub fn generate(a: std.mem.Allocator, in: Inputs, diag: *Diag) error{Invalid}![]
         }
         p.edges = edges.items;
     }
+    return .{ .by_id = by_id, .linked = linked };
+}
+
+/// A crate the build links, with the checksum Cargo.lock holds for it.
+pub const Crate = struct { name: []const u8, version: []const u8, checksum: []const u8 };
+
+/// The registry crates linked into the workspace (what `generate` would
+/// emit), for `kpin update` to fetch. Errors into `diag`.
+pub fn linkedCrates(a: std.mem.Allocator, in: Inputs, diag: *Diag) error{Invalid}![]Crate {
+    const before = diag.count();
+    const lock = lockfile.parse(a, in.lock_label, in.lock, diag) catch return error.Invalid;
+    const g = try collect(a, in.metadata_label, in.metadata, in.target, diag);
+    var out = std.ArrayListUnmanaged(Crate){};
+    for (g.linked.items) |p| {
+        var sum: []const u8 = "";
+        for (lock) |e| {
+            if (std.mem.eql(u8, e.name, p.name) and std.mem.eql(u8, e.version, p.version) and std.mem.eql(u8, e.source, p.source)) sum = e.checksum;
+        }
+        if (!std.mem.eql(u8, p.source, crates_io)) {
+            diag.add("{s} {s} comes from `{s}`: kpin pins crates.io crates only", .{ p.name, p.version, p.source });
+            continue;
+        }
+        if (!valid.isSha256(sum)) {
+            diag.add("{s} {s}: no valid checksum in {s}", .{ p.name, p.version, in.lock_label });
+            continue;
+        }
+        out.append(a, .{ .name = p.name, .version = p.version, .checksum = sum }) catch return error.Invalid;
+    }
+    if (diag.count() != before) return error.Invalid;
+    return out.toOwnedSlice(a) catch error.Invalid;
+}
+
+/// The generated `.bzl`, or `error.Invalid` with every problem in `diag`.
+pub fn generate(a: std.mem.Allocator, in: Inputs, diag: *Diag) error{Invalid}![]u8 {
+    const before = diag.count();
+
+    const lock = lockfile.parse(a, in.lock_label, in.lock, diag) catch return error.Invalid;
+    const sizes = parseSizes(a, in.sizes_label, in.sizes, diag);
+    const ovs = parseOverrides(a, in.overrides_label, in.overrides, diag) catch return error.Invalid;
+    if (!std.mem.eql(u8, ovs.rustc, in.rustc)) {
+        diag.add("{s}: derived for rustc {s}, but the pinned compiler is {s}: re-derive each entry for the new compiler (cfgs and generated files are per version), then set `rustc`", .{ in.overrides_label, ovs.rustc, in.rustc });
+    }
+
+    const g = try collect(a, in.metadata_label, in.metadata, in.target, diag);
+    const by_id = g.by_id;
+    const linked = g.linked;
 
     var overrides_used: usize = 0;
     for (linked.items) |p| {

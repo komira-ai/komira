@@ -13,7 +13,9 @@ const Diag = @import("diag.zig").Diag;
 const t = std.testing;
 
 const lock_text = @embedFile("cargo_fixture/Cargo.lock");
+const raw_metadata_text = @embedFile("cargo_fixture/raw_metadata.json");
 const metadata_text = @embedFile("cargo_fixture/metadata.json");
+const target = "x86_64-unknown-linux-gnu";
 const overrides_text = @embedFile("cargo_fixture/overrides.json");
 const sizes_text = @embedFile("cargo_fixture/sizes.txt");
 const expected_text = @embedFile("cargo_fixture/expected.bzl");
@@ -24,10 +26,11 @@ const Fix = struct {
     overrides: []const u8 = overrides_text,
     sizes: []const u8 = sizes_text,
     rustc: []const u8 = "1.85.0",
+    target: []const u8 = target,
 };
 
 fn gen(a: std.mem.Allocator, f: Fix, d: *Diag) ![]u8 {
-    return cargo.generate(a, .{ .lock = f.lock, .metadata = f.metadata, .overrides = f.overrides, .sizes = f.sizes, .rustc = f.rustc }, d) catch error.Invalid;
+    return cargo.generate(a, .{ .lock = f.lock, .metadata = f.metadata, .overrides = f.overrides, .sizes = f.sizes, .rustc = f.rustc, .target = f.target }, d) catch error.Invalid;
 }
 
 /// `text` with the first `from` after `anchor` replaced; the edit must apply.
@@ -65,6 +68,18 @@ test "golden: the fixture workspace generates exactly the committed file" {
     const got = try gen(a, .{}, &d);
     if (!std.mem.eql(u8, got, expected_text)) {
         std.debug.print("---- generated ----\n{s}---- end ----\n", .{got});
+        return error.TestGoldenMismatch;
+    }
+}
+
+test "the committed trimmed fixture is what --trim makes of the raw one" {
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var d = Diag.init(a);
+    const got = try cargo_trim.trim(a, "raw_metadata.json", raw_metadata_text, target, &d);
+    if (!std.mem.eql(u8, got, metadata_text)) {
+        std.debug.print("---- trimmed ----\n{s}---- end ----\n", .{got});
         return error.TestGoldenMismatch;
     }
 }
@@ -285,6 +300,28 @@ test "Cargo.lock: dependencies are skipped, the [metadata] table ends the packag
     try t.expectEqualStrings("0" ** 64, es[0].checksum);
 }
 
+// ---- the platform the metadata was filtered for ------------------------------------
+
+test "metadata filtered for another platform is refused" {
+    const a = t.allocator;
+    const other = try edit(a, metadata_text, "\"filter_platform\"", "x86_64-unknown-linux-gnu", "aarch64-apple-darwin");
+    defer a.free(other);
+    try refuses(.{ .metadata = other }, "filtered for aarch64-apple-darwin, but the pinned target is x86_64-unknown-linux-gnu");
+    try refuses(.{ .target = "aarch64-apple-darwin" }, "filtered for x86_64-unknown-linux-gnu, but the pinned target is aarch64-apple-darwin");
+}
+
+test "raw cargo metadata, which records no platform, is refused with the way to trim it" {
+    try refuses(.{ .metadata = raw_metadata_text }, "records no platform");
+}
+
+test "an edge for another platform's triple shows the metadata was not filtered" {
+    const a = t.allocator;
+    // serde's edge to libc, as made for windows.
+    const bad = try edit(a, metadata_text, "\"name\": \"libc\"", "\"target\": null", "\"target\": \"x86_64-pc-windows-msvc\"");
+    defer a.free(bad);
+    try refuses(.{ .metadata = bad }, "has an edge for x86_64-pc-windows-msvc, not x86_64-unknown-linux-gnu");
+}
+
 // ---- trimmed metadata ------------------------------------------------------------
 
 test "trim: the machine's paths are gone, and the generated file is the same" {
@@ -292,14 +329,14 @@ test "trim: the machine's paths are gone, and the generated file is the same" {
     defer ar.deinit();
     const a = ar.allocator();
     var d = Diag.init(a);
-    const trimmed = try cargo_trim.trim(a, "metadata.json", metadata_text, &d);
+    const trimmed = try cargo_trim.trim(a, "metadata.json", raw_metadata_text, target, &d);
     try t.expect(!has(trimmed, "/reg/"));
     try t.expect(!has(trimmed, "/w/app"));
     try t.expect(has(trimmed, "/m/serde-1.0.100/src/lib.rs"));
     // Only what kpin reads: no test targets, no dependency lists.
     try t.expect(!has(trimmed, "tests/t.rs"));
     try t.expect(!has(trimmed, "crate_types"));
-    try t.expect(trimmed.len < metadata_text.len);
+    try t.expect(trimmed.len < raw_metadata_text.len);
     const got = try gen(a, .{ .metadata = trimmed }, &d);
     try t.expectEqualStrings(expected_text, got);
 }
@@ -309,8 +346,8 @@ test "trim is idempotent" {
     defer ar.deinit();
     const a = ar.allocator();
     var d = Diag.init(a);
-    const once = try cargo_trim.trim(a, "metadata.json", metadata_text, &d);
-    const twice = try cargo_trim.trim(a, "metadata.json", once, &d);
+    const once = try cargo_trim.trim(a, "metadata.json", raw_metadata_text, target, &d);
+    const twice = try cargo_trim.trim(a, "metadata.json", once, target, &d);
     try t.expectEqualStrings(once, twice);
 }
 
@@ -319,14 +356,14 @@ test "trim refuses metadata made with --no-deps, and a target outside its packag
     var ar = std.heap.ArenaAllocator.init(a);
     defer ar.deinit();
     var d = Diag.init(ar.allocator());
-    const nr = try edit(a, metadata_text, "\"resolve\"", "\"resolve\"", "\"resolved\"");
+    const nr = try edit(a, raw_metadata_text, "\"resolve\"", "\"resolve\"", "\"resolved\"");
     defer a.free(nr);
-    try t.expectError(error.Invalid, cargo_trim.trim(ar.allocator(), "metadata.json", nr, &d));
+    try t.expectError(error.Invalid, cargo_trim.trim(ar.allocator(), "metadata.json", nr, target, &d));
     try t.expect(has(d.msgs.items[0], "no `resolve`"));
-    const out = try edit(a, metadata_text, "\"name\": \"foo-bar\"", "/reg/foo-bar-1.0.0/src/foo.rs", "/elsewhere/foo.rs");
+    const out = try edit(a, raw_metadata_text, "\"name\": \"foo-bar\"", "/reg/foo-bar-1.0.0/src/foo.rs", "/elsewhere/foo.rs");
     defer a.free(out);
     var d2 = Diag.init(ar.allocator());
-    try t.expectError(error.Invalid, cargo_trim.trim(ar.allocator(), "metadata.json", out, &d2));
+    try t.expectError(error.Invalid, cargo_trim.trim(ar.allocator(), "metadata.json", out, target, &d2));
     try t.expect(has(d2.msgs.items[0], "foo-bar 1.0.0: a target's src_path is not under its manifest directory"));
 }
 
@@ -344,6 +381,7 @@ const Env = struct {
         self.dir = try self.tmp.dir.realpathAlloc(self.ar.allocator(), ".");
         try self.tmp.dir.writeFile("Cargo.lock", lock_text);
         try self.tmp.dir.writeFile("metadata.json", metadata_text);
+        try self.tmp.dir.writeFile("raw_metadata.json", raw_metadata_text);
         try self.tmp.dir.writeFile("overrides.json", overrides_text);
         try self.tmp.dir.writeFile("sizes.txt", sizes_text);
         return self;
@@ -367,7 +405,7 @@ const Env = struct {
 
     fn kpin(self: *Env, extra: []const []const u8) Run {
         var argv = std.ArrayListUnmanaged([]const u8){};
-        argv.appendSlice(self.a(), &.{ "cargo", "--cargo-lock", self.path("Cargo.lock"), "--metadata", self.path("metadata.json"), "--overrides", self.path("overrides.json"), "--sizes", self.path("sizes.txt"), "--rustc", "1.85.0", "--cargo-out", self.path("crates.bzl") }) catch @panic("oom");
+        argv.appendSlice(self.a(), &.{ "cargo", "--cargo-lock", self.path("Cargo.lock"), "--metadata", self.path("metadata.json"), "--overrides", self.path("overrides.json"), "--sizes", self.path("sizes.txt"), "--rustc", "1.85.0", "--target", target, "--cargo-out", self.path("crates.bzl") }) catch @panic("oom");
         argv.appendSlice(self.a(), extra) catch @panic("oom");
         var out = std.ArrayList(u8).init(self.a());
         var err = std.ArrayList(u8).init(self.a());
@@ -469,9 +507,24 @@ test "a missing flag is named, and the cargo flags belong to the cargo command" 
 test "kpin cargo --trim writes the trimmed metadata, which generates the same file" {
     const e = try Env.init();
     defer e.deinit();
-    const r = e.kpin(&.{ "--trim", e.path("trimmed.json") });
+    const r = e.kpin(&.{ "--trim", e.path("trimmed.json"), "--metadata", e.path("raw_metadata.json") });
     try t.expectEqual(@as(u8, 0), r.code);
     try e.tmp.dir.writeFile("metadata.json", e.read("trimmed.json"));
     try t.expectEqual(@as(u8, 0), e.kpin(&.{}).code);
     try t.expectEqualStrings(expected_text, e.read("crates.bzl"));
+}
+
+test "a Cargo.lock checksum that differs from the base's for one crate version is an alarm, not an error" {
+    const e = try Env.init();
+    defer e.deinit();
+    const moved = try edit(e.a(), lock_text, "name = \"libc\"", "e" ** 64, "f" ** 64);
+    try e.tmp.dir.writeFile("Cargo.lock", moved);
+    try e.tmp.dir.writeFile("base.lock", lock_text);
+    const r = e.kpin(&.{ "--previous-lock", e.path("base.lock") });
+    try t.expectEqual(@as(u8, 3), r.code);
+    try t.expect(has(r.err, "libc 0.2.150: Cargo.lock has checksum"));
+    try t.expectError(error.FileNotFound, e.tmp.dir.access("crates.bzl", .{}));
+    // The same lock is no alarm.
+    try e.tmp.dir.writeFile("Cargo.lock", lock_text);
+    try t.expectEqual(@as(u8, 0), e.kpin(&.{ "--previous-lock", e.path("base.lock") }).code);
 }

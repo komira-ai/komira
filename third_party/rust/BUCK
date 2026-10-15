@@ -12,13 +12,23 @@ load(":crates.bzl", "crates")
 #
 # Nobody edits crates.bzl. `:crates_gen` writes it and fails unless the
 # committed file is exactly that (a hand edit, a stale file, a changed input,
-# or a compiler bump that left the overrides behind). To update:
+# or a compiler bump that left the overrides behind).
 #
-#   cd tools/build/proto-codegen && cargo update            # or edit Cargo.toml
-#   cargo metadata --format-version 1 --locked --filter-platform x86_64-unknown-linux-gnu > raw.json
-#   ./buck2 run komira//tools/build/kpin -- cargo --metadata raw.json --trim third_party/rust/cargo/metadata.json
-#   ls -l ~/.cargo/registry/cache/*/  -> third_party/rust/cargo/sizes.txt
+# Cargo runs only on a runner or a contributor's machine, never in a build:
+# the weekly kpin-update workflow (also workflow_dispatch) refreshes
+# tools/build/proto-codegen/Cargo.lock, makes and trims the metadata, fetches the
+# sizes, regenerates crates.bzl and opens the pull request. By hand, from the
+# repository root, with kpin built (`./buck2 build komira//tools/build/kpin`):
+#
+#   (cd tools/build/proto-codegen && cargo update && cargo metadata --format-version 1 --locked \
+#       --filter-platform x86_64-unknown-linux-gnu) > raw.json
+#   kpin cargo --metadata raw.json --target x86_64-unknown-linux-gnu --trim third_party/rust/cargo/metadata.json
+#   kpin update --no-pins --cargo-lock tools/build/proto-codegen/Cargo.lock --metadata third_party/rust/cargo/metadata.json \
+#       --sizes third_party/rust/cargo/sizes.txt --target x86_64-unknown-linux-gnu
 #   ./buck2 build komira//third_party/rust:crates_gen --show-output   # copy it over crates.bzl
+#
+# The overrides (cargo/overrides.json) are re-derived by a person when a build
+# script's crate or the compiler changes.
 kpin_cargo(
     name = "crates_gen",
     cargo_lock = "//tools/build/proto-codegen:Cargo.lock",

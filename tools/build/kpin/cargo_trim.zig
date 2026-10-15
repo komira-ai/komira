@@ -37,11 +37,12 @@ fn isLibKind(k: []const u8) bool {
     return std.mem.eql(u8, k, "lib") or std.mem.eql(u8, k, "rlib") or std.mem.eql(u8, k, "proc-macro") or std.mem.eql(u8, k, "custom-build");
 }
 
-/// The trimmed metadata, as JSON text. Every package keeps its name, version,
+/// The trimmed metadata, as JSON text, recording that it was made for
+/// `--filter-platform target`. Every package keeps its name, version,
 /// id, source and edition, and the library and build-script targets; its
 /// paths become `/m/<name>-<version>/...`. The resolved graph keeps each
 /// node's id, features and dependencies (name, package, kinds).
-pub fn trim(a: std.mem.Allocator, label: []const u8, text: []const u8, diag: *Diag) error{Invalid}![]u8 {
+pub fn trim(a: std.mem.Allocator, label: []const u8, text: []const u8, target: []const u8, diag: *Diag) error{Invalid}![]u8 {
     const before = diag.count();
     const parsed = std.json.parseFromSlice(Value, a, text, .{}) catch {
         diag.add("{s}: not valid JSON", .{label});
@@ -55,6 +56,9 @@ pub fn trim(a: std.mem.Allocator, label: []const u8, text: []const u8, diag: *Di
         },
     };
     var out = obj(a);
+    // What the metadata was filtered for: `cargo metadata` does not say, so the
+    // person or job that ran it does, once, here; `kpin cargo` checks it.
+    out.put("filter_platform", .{ .string = target }) catch return error.Invalid;
     var packages = std.json.Array.init(a);
     const pkgs = switch (get(root, "packages")) {
         .array => |x| x.items,

@@ -10,6 +10,7 @@ _SRCS = [
     "cargo.zig",
     "cargo_lock.zig",
     "cargo_trim.zig",
+    "cargo_update.zig",
     "diag.zig",
     "fetch.zig",
     "lockfmt.zig",
@@ -30,6 +31,7 @@ _SUPPORT = [
     "cargo_fixture/Cargo.lock",
     "cargo_fixture/expected.bzl",
     "cargo_fixture/metadata.json",
+    "cargo_fixture/raw_metadata.json",
     "cargo_fixture/overrides.json",
     "cargo_fixture/sizes.txt",
 ]
@@ -51,6 +53,7 @@ _ = SELFTEST
     )
     for name in [
         "cargo",
+        "cargo_update",
         "lockfmt",
         "main",
         "npm",
@@ -70,6 +73,7 @@ zig_exe(
     imports = _SRCS,
     unit_tests = [
         ":cargo_unit",
+        ":cargo_update_unit",
         ":lockfmt_unit",
         ":main_unit",
         ":npm_unit",

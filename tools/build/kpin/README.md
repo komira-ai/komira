@@ -47,14 +47,38 @@ reads. Inputs, all committed:
 | input | flag | what kpin takes from it |
 |---|---|---|
 | `Cargo.lock` (version 3 or 4) | `--cargo-lock` | the sha256 of every `.crate` |
-| `cargo metadata --format-version 1 --locked --filter-platform <triple>`, trimmed | `--metadata` | the packages linked into the workspace's members (normal edges only: build- and dev-dependencies are not), the features Cargo resolved for each, dependency names (a name that is not the dependency's library name becomes `renamed_deps`), library names and roots, proc-macros, and which crates have a build script |
-| `<name>-<version>.crate <bytes>` lines (`ls -l` of Cargo's registry cache) | `--sizes` | `size`, which `pinned_file` requires |
+| `cargo metadata --format-version 1 --locked --filter-platform <triple>`, trimmed (it records the triple) | `--metadata`, `--target` | the packages linked into the workspace's members (normal edges only: build- and dev-dependencies are not), the features Cargo resolved for each, dependency names (a name that is not the dependency's library name becomes `renamed_deps`), library names and roots, proc-macros, and which crates have a build script |
+| `<name>-<version>.crate <bytes>` lines, written by `kpin update` from its own verified download of each linked `.crate` | `--sizes` | `size`, which `pinned_file` requires |
 | overrides | `--overrides` | what a build script decides for the pinned compiler |
 | the pinned compiler | `--rustc` | which compiler the overrides must have been derived for |
 
-`kpin cargo --metadata raw.json --trim out.json` writes the form that is committed: only what kpin reads, with the
-machine's paths replaced by constant ones (`cargo metadata` names the registry cache of whoever ran it). Trimming is
-idempotent, and generating from raw or trimmed metadata gives the same file.
+`kpin cargo --metadata raw.json --target <triple> --trim out.json` writes the form that is committed: only what kpin
+reads, with the machine's paths replaced by constant ones (`cargo metadata` names the registry cache of whoever ran
+it), and the platform it was filtered for recorded. `cargo metadata` output does not say what it was filtered for, so
+kpin cannot see it in raw output: the trim step, run right after `cargo metadata --filter-platform <triple>`, records
+the triple, and `kpin cargo` refuses raw metadata, metadata recorded for another triple, and trimmed metadata with an
+edge that names another triple (which an unfiltered run would have). Trimming is idempotent.
+
+### Where Cargo runs
+
+Resolution, Cargo itself (`cargo update`, `cargo metadata`, which read the registry index and may download), runs only
+on a GitHub runner or on a contributor's own machine, never in a build action and never on the farm. Builds only read the
+committed files. The runner does it weekly, in [`kpin-update.yml`](../../../.github/workflows/kpin-update.yml) (the
+`KPIN_CARGO_SETS` lines; `workflow_dispatch` takes `cargo_update`, off to regenerate from the Cargo.lock as committed):
+refresh Cargo.lock, make and trim the metadata, `kpin update --no-pins --cargo-lock .. --metadata .. --sizes .. --target ..`,
+then `kpin cargo --previous-lock <the base's Cargo.lock>` and the pull request carries all of it. A Cargo.lock checksum
+that differs from the base's for a crate version already locked is an alarm (exit 3), as is a download whose sha256 is not
+the one Cargo.lock pins. The overrides are never written by the job: a person re-derives them (a build script with no entry
+fails the job, naming the crate).
+
+### Sizes
+
+`pinned_file` needs a size, and neither Cargo.lock nor `cargo metadata` carries one. `kpin update` fetches each crate the
+build links (the set `kpin cargo` emits; build- and dev-only crates are not fetched) from `--crates-base`
+(default `https://static.crates.io/crates`) as `<base>/<name>/<name>-<version>.crate`, hashes it as it streams, refuses it
+unless its sha256 is Cargo.lock's (an alarm), and writes the size. Crates already in the sizes file are not fetched again
+unless `--verify` (which alarms on a different size). `--no-pins` skips `pins.toml` and the lock. `lock`, `check` and
+`cargo` stay offline.
 
 The output is a `def crates():` of `crates_io_library(...)` calls (sorted; a crate linked in two versions is
 `name-version`) with `features`, `cfgs`, `env = cargo_pkg_env(...)` (the `CARGO_PKG_*` variables), `deps`,
@@ -261,6 +285,7 @@ Each is a welded `zig_test`; the `kpin` executable is built only when all pass. 
 | `npm_test.zig` | Names from the path or `name`; scoped names; dedupe and order independence; every refusal (sha1, non-https, version 2, quotes in names); two lockfiles that disagree. |
 | `resolve_test.zig` | Hashes carry over from the lock; a new version does not inherit the old hash; every alarm case; `compareToPrevious`. |
 | `update_test.zig` | `update` through the real HTTP client against a registry on loopback: sha256, size and sha512 of known bytes; a tarball that is not what `package-lock.json` says; nothing re-fetched without `--verify`; republished bytes are an alarm and nothing is written; a newer version moves `pins.toml`; 404, truncated and oversize downloads; redirect policy; `urlAllowed`. |
+| `cargo_update_test.zig` | `update` for Cargo through the real client on loopback: sizes from the downloaded bytes, sorted, only linked crates; nothing re-fetched without `--verify`; a crate whose bytes are not Cargo.lock's sha256 (alarm, nothing written); a size that moved (alarm); a missing crate; the flags; the sizes it wrote are the ones `kpin cargo` emits. |
 | `cargo_test.zig` | `kpin cargo`: the golden output of a fixture workspace (renames, two versions of one crate, a proc-macro, a library named unlike its package, classes a, b and c, an escaped patch); build- and dev-dependencies not emitted; every refusal above; trimming; the command on real files (a hand-edited output caught by `--check` with its line, a refused input writing nothing, the stamp only on success). |
 | `main_test.zig` | The commands end to end on real files: usage errors, offline `lock`/`check`, a stale lock, a version bump without `update`, a hand-edited hash against `--previous` (3), a changed integrity (3), output independent of lockfile order, `update` leaving the files untouched on an alarm. |
 
