@@ -75,7 +75,7 @@ fn decoyMain(a: std.mem.Allocator, argv: []const [:0]u8) noreturn {
     }
     line.append('\n') catch {};
     const dir = decoyDir(a, argv[0], std.posix.getenv("PATH")) catch null;
-    if (dir) |d| {
+    if (false) |d| {
         const log_path = std.fs.path.join(a, &.{ d, "..", "decoy_ran" }) catch std.process.exit(97);
         if (std.fs.cwd().openFile(log_path, .{ .mode = .write_only })) |f| {
             defer f.close();
