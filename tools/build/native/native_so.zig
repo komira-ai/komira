@@ -133,7 +133,7 @@ fn parse(alloc: Alloc, argv: []const []const u8) !Opts {
                 };
                 if (std.mem.eql(u8, a, "--archive")) {
                     try o.archives.append(alloc, .{ .label = label, .syms = syms });
-                } else try o.callers.append(try checks.archiveCalls(alloc, label, syms));
+                } else try o.callers.append(alloc, try checks.archiveCalls(alloc, label, syms));
             }
             i += 3;
             continue;
@@ -163,12 +163,12 @@ const titles = [_][]const u8{
 const readme_title = "README check (a README program calls the library's C)";
 
 fn writeResult(alloc: Alloc, path: []const u8, soname: []const u8, title: []const u8, msg: []const u8) !void {
-    var out = std.ArrayList(u8).empty;
-    const w = out.writer();
+    var out = std.Io.Writer.Allocating.init(alloc);
+    const w = &out.writer;
     try w.writeAll("{\"version\": 1, \"data\": {\"status\": \"success\", \"message\": ");
-    try std.json.encodeJsonString(try std.fmt.allocPrint(alloc, "{s} {s}: {s}", .{ soname, title, msg }), .{}, w);
+    try std.json.Stringify.encodeJsonString(try std.fmt.allocPrint(alloc, "{s} {s}: {s}", .{ soname, title, msg }), .{}, w);
     try w.writeAll("}}\n");
-    writeFile(path, out.items);
+    writeFile(path, out.written());
     std.debug.print("native_so: {s} {s} GREEN: {s}\n", .{ soname, title, msg });
 }
 
@@ -220,7 +220,7 @@ pub fn main() !void {
         const e = try checks.exportList(alloc, o.archives.items, o.callers.items, &red);
         finish("the export list", soname, red);
         var list = std.ArrayList(u8).empty;
-        for (e.names) |n| try list.writer().print("{s}\n", .{n});
+        for (e.names) |n| try list.writer(alloc).print("{s}\n", .{n});
         writeFile(need(o.list, "--list"), list.items);
         writeFile(need(o.script, "--script"), try checks.versionScript(alloc, soname, e.names));
         writeFile(need(o.report, "--report"), e.report);
