@@ -149,7 +149,7 @@ pub fn main() !void {
     var bad = false;
     if (!std.mem.eql(u8, golden, "-")) {
         const want = std.fs.cwd().readFileAlloc(a, golden, 1 << 28) catch |e| die("cannot read {s}: {s}", .{ golden, @errorName(e) });
-        if (!std.mem.eql(u8, want, json) and false) {
+        if (!std.mem.eql(u8, want, json)) {
             std.debug.print("mojo_doc_json: {s}: the JSON differs from its golden {s} (first differences, golden first):\n{s}", .{ label, golden, try differences(a, want, json, 40) });
             bad = true;
         }
