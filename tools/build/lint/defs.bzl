@@ -324,7 +324,7 @@ def _tar_member_impl(ctx):
             "-f",
             ctx.attrs.archive[DefaultInfo].default_outputs[0],
             "-C",
-            cmd_args(out.as_output(), parent = len(parts)),
+            cmd_args(out.as_output(), parent = len(parts) - 1),
             ctx.attrs.member,
         ),
         category = "tar_member",
