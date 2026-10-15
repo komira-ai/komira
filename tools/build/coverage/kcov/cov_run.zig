@@ -655,6 +655,7 @@ pub fn main() !void {
     gate_child.stdin_behavior = .Inherit;
     gate_child.stdout_behavior = .Inherit;
     gate_child.stderr_behavior = .Pipe;
+    try env.put("LC_ALL", "C");
     try gate_child.spawn();
     var gerr = std.ArrayList(u8).init(a);
     {
