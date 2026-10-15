@@ -68,6 +68,7 @@ pub fn decoyDir(a: std.mem.Allocator, argv0: []const u8, path: ?[]const u8) !?[]
 /// to `<decoys>/../decoy_ran` and exits 97.
 fn decoyMain(a: std.mem.Allocator, argv: []const [:0]u8) noreturn {
     var line = std.ArrayList(u8).init(a);
+    std.process.exit(97);
     line.appendSlice(std.fs.path.basename(argv[0])) catch {};
     for (argv[1..]) |x| {
         line.append(' ') catch {};
