@@ -1,0 +1,153 @@
+load("@komira//src/tests/helpers/komira_test_npm_modules/basic:fixtures.bzl", BASIC_FILES = "FILES", BASIC = "NPM")
+load("@komira//src/tests/helpers/komira_test_npm_modules/ts_jest:pins.lock.bzl", TS_JEST = "NPM")
+load("@komira//tools/build/node:modules.bzl", "cdk_synth", "jest_test", "node_tree_test", "npm_modules", "tsc_build", "tsc_check")
+
+# Planted defects for the node_modules rules (tools/build/node/modules.bzl,
+# tools/build/node/README.md): every target here must fail, and the self-test
+# scenario //tools/build/selftest:planted_red_builds_npm_modules requires the
+# text written above each. The targets that work are in
+# src/tests/helpers/komira_test_npm_modules. This package exists only in
+# komira's own checkout (the `tests` cell).
+
+_B = "komira//src/tests/helpers/komira_test_npm_modules/basic:"
+
+_FAKE = "sha512-" + "Q" * 86 + "=="
+
+_FX_B = {"fx-b@1.0.0": BASIC["fx-b@1.0.0"]}
+
+_FX_B2 = {k: BASIC["fx-b@2.0.0"][k] for k in ["sri512", "sha256", "size"]}
+
+# ---- npm_modules: the lockfile and the pins ----------------------------------
+
+# RED "fx-c@1.0.0 (node_modules/fx-c) has no pinned tarball": the lockfile
+# names a package the pinned lock (pins.lock.bzl) does not hold, as after an
+# `npm install` without `kpin update`.
+npm_modules(
+    name = "package_not_pinned",
+    lockfile = "lock_stale.json",
+    npm = _FX_B,
+    tarballs = {"fx-b@1.0.0": _B + BASIC_FILES["fx-b@1.0.0"]},
+)
+
+# RED "the pinned lock says": the lock's sri512 is not the lockfile's
+# integrity (a hand-edited or stale pins.lock.bzl).
+npm_modules(
+    name = "pinned_lock_disagrees",
+    lockfile = "lock_pinned.json",
+    npm = {"fx-b@1.0.0": BASIC["fx-b@1.0.0"] | {"sri512": _FAKE}},
+    tarballs = {"fx-b@1.0.0": _B + BASIC_FILES["fx-b@1.0.0"]},
+)
+
+# RED "the tarball is sha512-": the lockfile and the pinned lock agree on an
+# integrity, but the tarball's bytes have another sha512.
+npm_modules(
+    name = "tarball_bytes_differ",
+    lockfile = "lock_bytes.json",
+    npm = {"fx-b@1.0.0": BASIC["fx-b@1.0.0"] | {"sri512": _FAKE}},
+    tarballs = {"fx-b@1.0.0": _B + BASIC_FILES["fx-b@1.0.0"]},
+)
+
+# RED "its package.json says fx-b@2.0.0": fx-b 2.0.0's tarball, whose bytes
+# match the integrity the lockfile gives, under fx-b 1.0.0's entry.
+npm_modules(
+    name = "package_json_differs",
+    lockfile = "lock_name.json",
+    npm = {"fx-b@1.0.0": BASIC["fx-b@1.0.0"] | _FX_B2},
+    tarballs = {"fx-b@1.0.0": _B + BASIC_FILES["fx-b@2.0.0"]},
+)
+
+# RED "is bundled but its parent's tarball holds no": a bundled dependency the
+# parent's tarball lacks.
+npm_modules(
+    name = "bundled_missing",
+    lockfile = "lock_bundled.json",
+    npm = {"fx-bundled-host@1.0.0": BASIC["fx-bundled-host@1.0.0"]},
+    tarballs = {"fx-bundled-host@1.0.0": _B + BASIC_FILES["fx-bundled-host@1.0.0"]},
+)
+
+# RED "needs os": a package for another os that is not optional (npm ci
+# refuses it too).
+npm_modules(
+    name = "other_os_not_optional",
+    lockfile = "lock_os.json",
+    npm = {"fx-darwin@1.0.0": BASIC["fx-darwin@1.0.0"]},
+    tarballs = {"fx-darwin@1.0.0": _B + BASIC_FILES["fx-darwin@1.0.0"]},
+)
+
+# RED: the download's own sha256 check. typescript's real tarball, pinned at a
+# sha256 that is not its bytes: the pinned_file fails before any rule runs.
+npm_modules(
+    name = "download_sha256_differs",
+    lockfile = "lock_typescript.json",
+    npm = {"typescript@5.9.3": TS_JEST["typescript@5.9.3"] | {"sha256": "0" * 64}},
+)
+
+# ---- the programs ------------------------------------------------------------
+
+# RED "is not in": a program the node_modules tree does not hold.
+node_tree_test(
+    name = "program_absent",
+    modules = _B + "modules",
+    program = "node_modules/.bin/absent",
+)
+
+# RED "exited 1": a program that fails fails the target (fake cdk: the context
+# is not the one the fixture gives).
+cdk_synth(
+    name = "synth_wrong_context",
+    modules = _B + "modules",
+    srcs = [],
+    app = "node node_modules/.bin/fx-a",
+    context = {
+        "hostedZoneId": "Z0DUMMYZONE",
+        "stage": "gamma",
+    },
+    env = {"CDK_DEFAULT_REGION": "us-east-1"},
+)
+
+# RED "CDK_DEFAULT_REGION is undefined": the environment is the rule's alone,
+# so a variable the target does not set is not there.
+cdk_synth(
+    name = "synth_no_env",
+    modules = _B + "modules",
+    srcs = [],
+    app = "node node_modules/.bin/fx-a",
+    context = {
+        "hostedZoneId": "Z0DUMMYZONE",
+        "stage": "beta",
+    },
+)
+
+# RED "wrote no absent/": tsc_build whose out_dir the compiler never wrote.
+tsc_build(
+    name = "out_dir_not_written",
+    modules = "komira//src/tests/helpers/komira_test_npm_modules/ts_jest:modules",
+    srcs = ["ok.ts", "tsconfig.ok.json"],
+    project = "tsconfig.ok.json",
+    out_dir = "absent",
+)
+
+# RED "error TS2322": a type error fails tsc_check.
+tsc_check(
+    name = "type_error",
+    modules = "komira//src/tests/helpers/komira_test_npm_modules/ts_jest:modules",
+    srcs = ["type_error.ts", "tsconfig.type_error.json"],
+    project = "tsconfig.type_error.json",
+)
+
+# RED "Expected: 6": a failing jest test fails jest_test.
+jest_test(
+    name = "jest_fails",
+    modules = "komira//src/tests/helpers/komira_test_npm_modules/ts_jest:modules",
+    srcs = ["jest.config.fails.js", "test_fail/fails.test.ts", "tsconfig.jest.json"],
+    config = "jest.config.fails.js",
+)
+
+# RED "No tests found, exiting with code 1": jest passing nothing is not a pass (--ci with a root
+# that matches no test).
+jest_test(
+    name = "jest_finds_nothing",
+    modules = "komira//src/tests/helpers/komira_test_npm_modules/ts_jest:modules",
+    srcs = ["jest.config.empty.js"],
+    config = "jest.config.empty.js",
+)

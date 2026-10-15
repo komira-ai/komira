@@ -120,12 +120,11 @@ NPM = {
 
 | function | returns |
 |---|---|
-| `pin_kwargs(PINS, pin, platform, **extra)` | `{"url", "sha256"}` plus `extra`, for `pinned_file(**...)`. |
+| `pin_kwargs(PINS, pin, platform, **extra)` | `{"url", "sha256", "size_bytes"}` plus `extra`, for `pinned_file(**...)`. |
 | `pin_version(PINS, pin)`, `pin_size(PINS, pin, platform)` | The version; the size in bytes. |
-| `npm_kwargs(NPM, "name@version", **extra)` | `{"url", "sha256"}` plus `extra`. |
+| `npm_kwargs(NPM, "name@version", **extra)` | `{"url", "sha256", "size_bytes"}` plus `extra`. |
 
-A missing name fails analysis with the names that exist. `pinned_file` has no `size_bytes` attribute yet, so
-`pin_kwargs` does not pass the size.
+A missing name fails analysis with the names that exist. `pinned_file` requires `size_bytes`, so both pass the lock's size.
 
 ## The alarm, and what it covers
 

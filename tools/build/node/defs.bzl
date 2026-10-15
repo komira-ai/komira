@@ -70,6 +70,10 @@ PATH="$T/bin"; export PATH
 abs() { case "$1" in /*) echo "$1" ;; *) echo "$PWD/$1" ;; esac; }
 """
 
+# The prelude, for the rules of modules.bzl, which run the same scripts' shell
+# around `node`.
+NODE_PRELUDE = _PRELUDE
+
 def _out(dep):
     return dep[DefaultInfo].default_outputs[0]
 

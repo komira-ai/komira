@@ -1,0 +1,7 @@
+# The program the node_modules rules run with the pinned node
+# (tools/build/node/modules.bzl): a source file, named by the rules' hidden
+# `_tools` attribute.
+export_file(
+    name = "node_tools.mjs",
+    visibility = ["PUBLIC"],
+)

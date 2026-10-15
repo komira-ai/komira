@@ -50,6 +50,7 @@ given `--nested`, which the guard refuses.
 | [`analysis_refusals_python_oracle`](analysis_refusals_python_oracle.zig) | inputs built outside third_party/ | the owner check dropped |
 | [`analysis_refusals_node`](analysis_refusals_node.zig) | the Node.js rules' 8 analysis refusals | the staged-twice check deleted |
 | [`planted_red_builds_node`](planted_red_builds_node.zig) | the Node.js rules' 36 planted defects that fail in an action: node_test's verdict, esbuild, npm_package's and node_dist's pins, c_shared_lib's `-Werror` | expect_error matched case-insensitively; `-Werror` dropped |
+| [`planted_red_builds_npm_modules`](planted_red_builds_npm_modules.zig) | the node_modules rules' 14 planted defects: a lockfile package not pinned, a pinned lock or tarball that disagrees with the integrity, a changed package.json, a download at the wrong sha256, a missing program, a failing cdk synth, a type error, a failing and an empty jest run | the tarball sha512 check dropped; `--ci` and the no-test failure dropped |
 | [`analysis_refusals_rust`](analysis_refusals_rust.zig) | rust_library's test_srcs refusals | the `.rs` check deleted |
 | [`analysis_refusals_coverage`](analysis_refusals_coverage.zig) | the coverage rules' analysis refusals | the import-name, no-args and LLVM_PROFILE_FILE checks deleted |
 | [`config_refusals`](config_refusals.zig) | `komira.coverage`, `komira.mutation`, `komira.test_timeout_s` values refused at load | any value but true read as false; the margin's `<=` made `<` |
