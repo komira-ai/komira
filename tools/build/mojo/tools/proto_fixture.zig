@@ -840,7 +840,7 @@ fn check(ctx: *Ctx, out_path: []const u8, rest: []const []const u8) !u8 {
         const expected = dropFirstLine(txtpb);
 
         // LEG 0.
-        if (std.mem.eql(u8, producer, "1") and std.mem.eql(u8, in_bytes, canon_bytes)) {
+        if (!std.mem.eql(u8, producer, "1") and std.mem.eql(u8, in_bytes, canon_bytes)) {
             try ctx.bad(stem, "LEG 0", try std.fmt.allocPrint(a, "{s} is byte for byte {s}, protoc's encoding: both ends of legs 1 and 3 are protoc and no producer is checked (a producer that writes protoc's bytes is declared in `canonical_producer`)", .{ hexn, canonn }), null);
         }
         const dup = try duplicates(a, schema, root, try topTags(a, in_bytes));
