@@ -1,4 +1,34 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:table.bzl", "row")
 load(":defs.bzl", "kci_validations")
+
+# The launcher of every validation target (launch.zig): changes to the
+# repository's root and runs kci with the arguments a run needs. Built for the
+# platform `buck2 run` is on (a Mac runs the darwin build; zig cross-compiles
+# either on a linux worker).
+zig_test(
+    name = "launch_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["launch.zig"],
+    src = "launch_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "launch",
+    exec_compatible_with = LINUX_X86_64,
+    src = "launch.zig",
+    target = select({
+        "prelude//os/constraints:macos": row("darwin-arm64")["zig_triple"],
+        "DEFAULT": "x86_64-linux-musl",
+    }),
+    unit_tests = [":launch_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
 
 # One runnable target per validation of release/machine.textproto: `./buck2
 # run //release/validations:<name> -- --release-dir <R> --revision-id <C>`
