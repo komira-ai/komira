@@ -13,11 +13,28 @@ load(":policy.bzl", "COVERAGE_BRANCH_GATE")
 # package's own `coverage_held` (README.md, "The 99% threshold and holds").
 #
 # The coverage census (census.md): census_files assembles every package's
-# coverage_census.tsv and coverage_held, census.sh renders the census doc
+# coverage_census.tsv and coverage_held, census_render renders the census doc
 # from them; the root BUCK's :coverage_census builds the doc and fails while
 # a package the census measured at the target does not hold it.
-export_file(
-    name = "census.sh",
+# census_render (census_render.zig): the census doc and its check, the
+# actions of //:coverage_census (census.bzl). Built behind its unit tests; the
+# cases are tests//negative/coverage:census_* (test 46).
+zig_test(
+    name = "census_render_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["census_render.zig"],
+    src = "census_render_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "census_render",
+    exec_compatible_with = LINUX_X86_64,
+    src = "census_render.zig",
+    unit_tests = [":census_render_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
 )
 
