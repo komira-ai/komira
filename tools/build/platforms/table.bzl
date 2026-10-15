@@ -75,6 +75,7 @@ ASSET_ROLES = [
     "rustc",
     "shellcheck",
     "zig",
+    "zig_next",
 ]
 # kcov, the line coverage tool (tools/build/toolchains/kcov/README.md): its
 # source archive and the conda-forge packages holding the static libraries it
@@ -305,6 +306,14 @@ PLATFORMS = {
                 "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad",
                 size = 45480516,
             ),
+            # The zig that kpin and later the tools move to (0.15.2); `zig` above
+            # stays what every other action uses until the last step flips it.
+            "zig_next": pin(
+                "zig_next_linux_x86_64.tar.xz",
+                "https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz",
+                "02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239",
+                size = 53733924,
+            ),
         },
         "bundles": True,
         "cache_line_bytes": 64,
@@ -472,6 +481,14 @@ PLATFORMS = {
                 "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f",
                 size = 43447724,
             ),
+            # The zig that kpin and later the tools move to (0.15.2); `zig` above
+            # stays what every other action uses until the last step flips it.
+            "zig_next": pin(
+                "zig_next_macos_aarch64.tar.xz",
+                "https://ziglang.org/download/0.15.2/zig-aarch64-macos-0.15.2.tar.xz",
+                "3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b",
+                size = 50635984,
+            ),
         },
         # Bundles, OCI images and the launcher are Linux server products.
         "bundles": False,
@@ -596,6 +613,14 @@ PLATFORMS = {
                 "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz",
                 "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63",
                 size = 41849060,
+            ),
+            # The zig that kpin and later the tools move to (0.15.2); `zig` above
+            # stays what every other action uses until the last step flips it.
+            "zig_next": pin(
+                "zig_next_linux_aarch64.tar.xz",
+                "https://ziglang.org/download/0.15.2/zig-aarch64-linux-0.15.2.tar.xz",
+                "958ed7d1e00d0ea76590d27666efbf7a932281b3d7ba0c6b01b0ff26498f667f",
+                size = 49471996,
             ),
         },
         "bundles": True,
@@ -897,9 +922,9 @@ def os_floor_version(name):
     """The version of row `name`'s `os_floor` (`macos-11.0` -> `11.0`)."""
     return row(name)["os_floor"].split("-", 1)[1]
 
-def zig_strip_prefix(name):
-    """The directory a row's zig archive unpacks into (`zig-linux-x86_64-0.12.0`): its URL's file name without `.tar.xz`."""
-    return asset(name, "zig")["url"].split("/")[-1][:-len(".tar.xz")]
+def zig_strip_prefix(name, role = "zig"):
+    """The directory a row's zig archive (`role`: `zig` or `zig_next`) unpacks into (`zig-linux-x86_64-0.12.0`, `zig-x86_64-linux-0.15.2`): its URL's file name without `.tar.xz`."""
+    return asset(name, role)["url"].split("/")[-1][:-len(".tar.xz")]
 
 def host_row(host):
     """The registered row whose host `host` (a `host_info()`) is, or None."""

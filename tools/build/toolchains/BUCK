@@ -2,7 +2,7 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "by_target_os", "pinned_kwargs", "release_version", "row", "zig_strip_prefix")
 load("@komira//tools/build/package:defs.bzl", "oci_base")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
-load("@komira//tools/build/mojo:toolchain.bzl", "conda_closure", "mojo_runtime", "zig_dist", "zig_exe")
+load("@komira//tools/build/mojo:toolchain.bzl", "conda_closure", "mojo_runtime", "zig_dist", "zig_exe", "zig_test")
 load(":pixi.bzl", "pixi_pin_record", "pixi_version_check")
 
 # ---- Pinned inputs (linux x86_64 execution platform) -----------------------
@@ -14,6 +14,11 @@ pinned_file(**pinned_kwargs("linux-x86_64", "busybox", visibility = ["PUBLIC"]))
 
 # zig: the C link driver for `mojo build`, and the compiler for conda_unpack.
 pinned_file(**pinned_kwargs("linux-x86_64", "zig"))
+
+# zig 0.15.2, the release the build tools move to one area at a time: a target
+# names it as its `zig` (kpin does). Nothing else consumes it yet, so no action
+# key of any other target depends on it.
+pinned_file(**pinned_kwargs("linux-x86_64", "zig_next"))
 
 # The Mojo compiler package.
 pinned_file(**pinned_kwargs("linux-x86_64", "mojo_compiler"))
@@ -86,6 +91,28 @@ zig_dist(
     busybox = ":busybox",
     strip_prefix = zig_strip_prefix("linux-x86_64"),
     visibility = ["PUBLIC"],
+)
+
+zig_dist(
+    name = "zig_next",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":zig_next_linux_x86_64.tar.xz",
+    busybox = ":busybox",
+    strip_prefix = zig_strip_prefix("linux-x86_64", "zig_next"),
+    visibility = ["PUBLIC"],
+)
+
+# `:zig_next` reports 0.15.2 (zig_next_version_test.zig). Compiled and run by the
+# 0.12 zig, so it does not depend on what it checks. A target that builds with
+# `:zig_next` lists this test in its `unit_tests` (kpin does), so none of them
+# exists unless the pin is the release it names.
+zig_test(
+    name = "zig_next_version",
+    exec_compatible_with = LINUX_X86_64,
+    env_tools = {"ZIG_NEXT": ":zig_next"},
+    src = "zig_next_version_test.zig",
+    busybox = ":busybox",
+    zig = ":zig",
 )
 
 zig_exe(
