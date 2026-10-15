@@ -5,5 +5,5 @@ const builtin = @import("builtin");
 const mid = @import("zr_mid");
 
 pub fn main() !void {
-    try std.io.getStdOut().writer().print("{d} {s}\n", .{ mid.answer(), @tagName(builtin.mode) });
+    try std.fs.File.stdout().deprecatedWriter().print("{d} {s}\n", .{ mid.answer(), @tagName(builtin.mode) });
 }

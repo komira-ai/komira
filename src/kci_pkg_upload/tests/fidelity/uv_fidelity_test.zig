@@ -38,14 +38,14 @@ fn bodyOf(request: []const u8) []const u8 {
 /// The HTTP request uv would have sent for a committed `.request`, with the
 /// given Authorization (none when null), as the recorder receives it.
 fn wire(a: std.mem.Allocator, request: []const u8, auth: ?[]const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
-    const w = out.writer();
+    var out = std.ArrayList(u8).empty;
+    const w = out.writer(a);
     try w.print("{s} {s} HTTP/1.1\r\n", .{ headValue(request, "METHOD"), headValue(request, "PATH") });
     try w.print("content-type: {s}\r\naccept: {s}\r\n", .{ headValue(request, "CONTENT-TYPE"), headValue(request, "ACCEPT") });
     if (auth) |v| try w.print("authorization: {s}\r\n", .{v});
     try w.print("content-length: {d}\r\nhost: 127.0.0.1:1\r\n\r\n", .{bodyOf(request).len});
     try w.writeAll(bodyOf(request));
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 // ---- The wheel --------------------------------------------------------------
@@ -242,15 +242,15 @@ test "compareFile: a request differing only in its boundary is the same; one fli
     var ar = arena();
     defer ar.deinit();
     const a = ar.allocator();
-    var report = std.ArrayList(u8).init(a);
+    var report = std.ArrayList(u8).empty;
     const c = COMMITTED[0].request;
     const old_b = headValue(c, "BOUNDARY");
     const other = try std.mem.replaceOwned(u8, a, c, old_b, "0123456789abcdef-0123456789abcdef-0123456789abcdef-0123456789abcdef");
-    try testing.expect(try fid.compareFile(a, report.writer(), "minimal.request", c, other));
+    try testing.expect(try fid.compareFile(a, report.writer(a), "minimal.request", c, other));
     try testing.expectEqual(@as(usize, 0), report.items.len);
 
     const flipped = try a.dupe(u8, COMMITTED[0].whl);
     flipped[100] ^= 1;
-    try testing.expect(!try fid.compareFile(a, report.writer(), "minimal.whl", COMMITTED[0].whl, flipped));
+    try testing.expect(!try fid.compareFile(a, report.writer(a), "minimal.whl", COMMITTED[0].whl, flipped));
     try testing.expect(std.mem.indexOf(u8, report.items, "minimal.whl: committed 1283 bytes, captured 1283 bytes; first difference at byte 100") != null);
 }

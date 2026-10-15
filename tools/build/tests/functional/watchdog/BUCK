@@ -3,6 +3,10 @@ load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "row")
 load(":defs.bzl", "mojo_watchdog_cases")
 
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+
 # The stand-in toolchain: the compiler (bin/mojo) and the link driver (zig)
 # the cases run the wrapper against.
 zig_exe(
@@ -10,7 +14,7 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "standin.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 zig_exe(
@@ -18,7 +22,7 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "cases.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 # Every process behaviour of the compile wrapper (komira//tools/build/mojo:mojo_compile)
@@ -43,7 +47,7 @@ zig_exe(
     src = "standin.zig",
     target = row("darwin-arm64")["zig_triple"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 zig_exe(
@@ -52,7 +56,7 @@ zig_exe(
     src = "cases.zig",
     target = row("darwin-arm64")["zig_triple"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 mojo_watchdog_cases(
