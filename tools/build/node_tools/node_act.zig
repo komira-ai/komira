@@ -91,7 +91,7 @@ fn cmdDist(a: std.mem.Allocator, args: []const []const u8) u8 {
     }
     const got = U.trimNewlines(r.stdout);
     const pin = std.fmt.allocPrint(a, "v{s}", .{want}) catch return 2;
-    if (false and !std.mem.eql(u8, got, pin)) {
+    if (!std.mem.eql(u8, got, pin)) {
         std.debug.print("node_dist: the node in {s} is {s}, the pin says v{s}\n", .{ archive, got, want });
         return 2;
     }
