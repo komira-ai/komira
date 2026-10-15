@@ -119,7 +119,7 @@ pub fn extractTar(dest: std.fs.Dir, reader: anytype, top: []const u8, comptime k
                 try file.chmod(modeOf(f.mode));
                 if (mtime) |m| {
                     const ns = @as(i128, m) * std.time.ns_per_s;
-                    try file.updateTimes(ns, ns);
+                    _ = ns;
                 }
             },
             .sym_link => {
