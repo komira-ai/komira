@@ -8,39 +8,35 @@
 #           runners run, never a build or test action. The only places a new script may live.
 # A row is added only with a reason review accepts.
 use	BUCK	sh_script	3	exception: coverage_ci_cases tests the CI shell scripts (.github/ci), so its subject is a shell script, and the shell lint of those scripts names them
-use	release/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	src/kci_workflow_check/BUCK	sh_script	2	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
+use	release/BUCK	sh_script	1	exception: the shell lint of human-run shell scripts; a lint of scripts that only people and CI run, not an action that runs a shell
+use	src/kci_workflow_check/BUCK	sh_script	2	exception: kci_workflow_check reads release_version.sh (a shell script run by the release workflow) as data to hold kci.yml to it
 use	tools/build/coverage/BUCK	sh_script	1	exception: coverage_ci_cases tests the CI shell scripts (.github/ci), so the subject is a shell script; the shell lint of those scripts
 use	tools/build/coverage/defs.bzl	sh_argv	1	exception: coverage_ci_cases tests the CI shell scripts (.github/ci), so the subject is a shell script; the shell lint of those scripts
-use	tools/build/mojo/darwin/BUCK	sh_script	2	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/mojo/toolchain.bzl	busybox_sh	2	shell action; to port to Zig (no-shell series)
-use	tools/build/mojo/toolchain.bzl	sh_argv	3	shell action; to port to Zig (no-shell series)
-use	third_party/git/BUCK	sh_script	3	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	third_party/git/defs.bzl	sh_argv	1	shell action; to port to Zig (no-shell series)
-use	third_party/git/defs.bzl	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/package/BUCK	sh_script	4	names the human scripts (the shell_lint source list, and the export_file kci_workflow_check's welded test reads); goes with them
-use	tools/build/package/oci/BUCK	shell_path	7	data: /bin/sh is the image entrypoint the OCI check expects, not a shell an action runs
-use	tools/build/platforms/table.bzl	sh_argv	1	data: `sh` in the darwin row's applet list, not an invocation
-use	tools/build/run/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/tests/BUCK	sh_script	6	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/tests/functional/darwin/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/tests/functional/install_gate/BUCK	sh_script	6	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/tests/functional/install_gate/defs.bzl	sh_argv	1	shell action; to port to Zig (no-shell series)
-use	tools/build/tests/functional/platform_table/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/tests/golden/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/third_party_srcs/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/build/toolchains/darwin/BUCK	sh_script	1	names a shell script (an action script, the shell_lint source list, or test data); goes with the script
-use	tools/vendor/googleapis/BUCK	sh_script	1	names a shell script (the shell_lint source list of a human-run script)
+use	tools/build/mojo/darwin/BUCK	sh_script	2	exception: macOS has no static busybox, so the darwin toolchain provides the busybox calling convention through a shell shim (mojo/darwin/busybox.sh)
+use	tools/build/mojo/toolchain.bzl	busybox_sh	2	exception: zig_test_run runs a prebuilt zig test on a macOS worker through the darwin busybox shim (see mojo/darwin/busybox.sh)
+use	tools/build/mojo/toolchain.bzl	sh_argv	3	exception: busybox_sh, the helper zig_test_run uses on a macOS worker, builds its argv from the shell (see mojo/darwin/busybox.sh)
+use	third_party/git/BUCK	sh_script	3	exception: git's own build is make, which needs a shell (git_build.sh); no shell-free way to build git exists
+use	third_party/git/defs.bzl	sh_argv	1	exception: git's own build is make, which needs a shell (git_build.sh); no shell-free way to build git exists
+use	third_party/git/defs.bzl	sh_script	1	exception: git's own build is make, which needs a shell (git_build.sh); no shell-free way to build git exists
+use	tools/build/package/BUCK	sh_script	4	exception: the shell lint and the data export of the human-run scripts list_conda_targets.sh and release_version.sh
+use	tools/build/platforms/table.bzl	sh_argv	1	exception: the macOS row lists `sh` among the applets of its busybox shim (data, see mojo/darwin/busybox.sh)
+use	tools/build/run/BUCK	sh_script	1	exception: macOS has no static busybox, so the darwin toolchain provides the busybox calling convention through a shell shim (mojo/darwin/busybox.sh)
+use	tools/build/tests/BUCK	sh_script	6	exception: the shell lint of human-run shell scripts; a lint of scripts that only people and CI run, not an action that runs a shell
+use	tools/build/tests/functional/darwin/BUCK	sh_script	1	exception: the shell lint of human-run shell scripts; a lint of scripts that only people and CI run, not an action that runs a shell
+use	tools/build/tests/functional/install_gate/BUCK	sh_script	6	exception: install_gate_cases tests install_gate.sh, conda.sh and conda_set.sh, shell scripts, so its subject is a shell
+use	tools/build/tests/functional/install_gate/defs.bzl	sh_argv	1	exception: install_gate_cases tests install_gate.sh, conda.sh and conda_set.sh, shell scripts, so its subject is a shell
+use	tools/build/tests/functional/platform_table/BUCK	sh_script	1	exception: the shell lint of human-run shell scripts; a lint of scripts that only people and CI run, not an action that runs a shell
+use	tools/build/tests/golden/BUCK	sh_script	1	exception: the shell lint of human-run shell scripts; a lint of scripts that only people and CI run, not an action that runs a shell
+use	tools/build/third_party_srcs/BUCK	sh_script	1	exception: the shell lint of human-run shell scripts; a lint of scripts that only people and CI run, not an action that runs a shell
+use	tools/build/toolchains/darwin/BUCK	sh_script	1	exception: macOS has no static busybox, so the darwin toolchain provides the busybox calling convention through a shell shim (mojo/darwin/busybox.sh)
+use	tools/vendor/googleapis/BUCK	sh_script	1	exception: the shell lint of human-run shell scripts; a lint of scripts that only people and CI run, not an action that runs a shell
 human	.github/ci/	-	-	CI runner scripts of the coverage workflow; run on a hosted runner, never by an action
 human	release/ci/	-	-	CI entry points kci runs on a runner; never an action
 human	buck2	-	-	the wrapper people and CI run to get the pinned buck2; never an action
 human	src/tests/conformance/komira_datetime_conformance/regen_goldens.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
-script	third_party/git/git_build.sh	-	-	script of an action or test; to port to Zig (no-shell series)
+script	third_party/git/git_build.sh	-	-	exception: git's own build is make, which needs a shell (git_build.sh); no shell-free way to build git exists
 human	tools/build/coverage/census.sh	-	-	measures every library with ./buck2 by hand at the top of a checkout (run, collect); not an action (the build actions are census_render)
-script	tools/build/mojo/darwin/busybox.sh	-	-	script of an action or test; to port to Zig (no-shell series)
-script	tools/build/package/list_conda_targets.sh	-	-	script of an action or test; to port to Zig (no-shell series)
-script	tools/build/package/release_version.sh	-	-	script of an action or test; to port to Zig (no-shell series)
-script	tools/build/coverage/census.sh	-	-	script of an action or test; to port to Zig (no-shell series)
+script	tools/build/mojo/darwin/busybox.sh	-	-	exception: macOS has no static busybox, so the darwin toolchain provides the busybox calling convention through a shell shim (mojo/darwin/busybox.sh)
 human	tools/build/package/list_conda_targets.sh	-	-	a development helper that runs `buck2 uquery` from outside; never a build or test action
 human	tools/build/package/release_version.sh	-	-	run by the release workflow on a runner (and read as data by kci_workflow_check's test); never a build or test action
 human	tools/build/tests/assert_level_tests.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
@@ -54,26 +50,24 @@ human	tools/build/tests/functional/assert_level.sh	-	-	client-side driver or fix
 human	tools/build/tests/functional/bootstrap.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
 human	tools/build/tests/functional/buck2_run.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
 human	tools/build/tests/functional/bundle.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
-script	tools/build/tests/functional/conda.sh	-	-	script of an action or test; to port to Zig (no-shell series)
-script	tools/build/tests/functional/conda_set.sh	-	-	script of an action or test; to port to Zig (no-shell series)
+human	tools/build/tests/functional/conda.sh	-	-	run by people and CI against a real pixi (it is also run up to its install_gate call by install_gate_cases, an exception)
+human	tools/build/tests/functional/conda_set.sh	-	-	run by people and CI against a real pixi (it is also run up to its install_gate call by install_gate_cases, an exception)
 human	tools/build/tests/functional/coverage_keys.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
 human	tools/build/tests/functional/coverage_platforms.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
 human	tools/build/tests/functional/coverage_shared_lib.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
-script	tools/build/tests/functional/darwin/check.sh	-	-	script of an action or test; to port to Zig (no-shell series)
+human	tools/build/tests/functional/darwin/check.sh	-	-	client-side: runs buck2 on a Mac from outside; never an action
 human	tools/build/tests/functional/formats.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
 human	tools/build/tests/functional/glibc_level.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
-script	tools/build/tests/functional/install_gate/cases.sh	-	-	script of an action or test; to port to Zig (no-shell series)
-script	tools/build/tests/functional/install_gate/install_gate.sh	-	-	script of an action or test; to port to Zig (no-shell series)
+script	tools/build/tests/functional/install_gate/cases.sh	-	-	exception: install_gate_cases tests install_gate.sh, conda.sh and conda_set.sh, shell scripts, so its subject is a shell
+script	tools/build/tests/functional/install_gate/install_gate.sh	-	-	exception: install_gate_cases tests install_gate.sh, conda.sh and conda_set.sh, shell scripts, so its subject is a shell
 human	tools/build/tests/functional/local_default.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
-script	tools/build/tests/functional/platform_table/check.sh	-	-	script of an action or test; to port to Zig (no-shell series)
+human	tools/build/tests/functional/platform_table/check.sh	-	-	client-side: runs buck2 from outside; never an action
 human	tools/build/tests/functional/umbrella_cache.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
-script	tools/build/tests/golden/golden.sh	-	-	script of an action or test; to port to Zig (no-shell series)
+human	tools/build/tests/golden/golden.sh	-	-	client-side: read by platform_table/check.sh; never an action
 human	tools/build/tests/negative/lint_weld.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
 human	tools/build/tests/proto_tests.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
-script	tools/build/tests/run_tests.sh	-	-	script of an action or test; to port to Zig (no-shell series)
+human	tools/build/tests/run_tests.sh	-	-	the test runner people and CI run: it runs buck2 from outside; never an action
 human	tools/build/tests/rust_tests.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
 human	tools/build/tests/tool_lib.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
-script	tools/build/third_party_srcs/upstream_versions.sh	-	-	script of an action or test; to port to Zig (no-shell series)
 human	tools/vendor/googleapis/upstream_version.sh	-	-	prints how far the googleapis pin is behind upstream; people run it when bumping, no action does
 human	tools/build/third_party_srcs/upstream_versions.sh	-	-	a report people run by hand (upstream_versions.sh compares the pinned downloads with the newest releases); it gates nothing and is no build or test action
-script	tools/vendor/googleapis/upstream_version.sh	-	-	script of an action or test; to port to Zig (no-shell series)
