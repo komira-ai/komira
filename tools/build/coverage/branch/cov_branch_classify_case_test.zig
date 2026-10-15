@@ -75,10 +75,10 @@ test "2 reversed metadata: the same bytes as the golden" {
     var c = try h.Case.init("reversed metadata");
     defer c.deinit();
     const ir = try h.Ir.of(c.a(), h.case_ll);
-    var code = std.ArrayList([]const u8).init(c.a());
-    var meta = std.ArrayList([]const u8).init(c.a());
+    var code = std.ArrayList([]const u8).empty;
+    var meta = std.ArrayList([]const u8).empty;
     for (ir.lines.items) |l| {
-        if (l.len >= 2 and l[0] == '!' and std.ascii.isDigit(l[1])) try meta.append(l) else try code.append(l);
+        if (l.len >= 2 and l[0] == '!' and std.ascii.isDigit(l[1])) try meta.append(c.a(), l) else try code.append(c.a(), l);
     }
     std.mem.reverse([]const u8, meta.items);
     var rev = h.Ir{ .al = c.a(), .lines = code };
@@ -92,7 +92,7 @@ test "2 reversed metadata: the same bytes as the golden" {
 
 /// Each line of `info` cut to its first three comma fields (cut -d, -f1-3).
 fn ids(al: std.mem.Allocator, info: []const u8) ![]const u8 {
-    var b = std.ArrayList(u8).init(al);
+    var b = std.ArrayList(u8).empty;
     var it = std.mem.splitScalar(u8, info, '\n');
     while (it.next()) |l| {
         var n: usize = 0;
@@ -106,8 +106,8 @@ fn ids(al: std.mem.Allocator, info: []const u8) ![]const u8 {
                 }
             }
         }
-        try b.appendSlice(l[0..end]);
-        try b.append('\n');
+        try b.appendSlice(al, l[0..end]);
+        try b.append(al, '\n');
     }
     return b.items;
 }
@@ -230,8 +230,8 @@ test "7 zero branches: refused for a.mojo, not for b.mojo" {
     try e.drop("  ], ", .prefix);
     try e.drop("    i64 0, label ", .prefix);
     try e.drop("    i64 1, label ", .prefix);
-    var kept = std.ArrayList([]const u8).init(c.a());
-    for (e.lines.items) |l| if (!std.mem.endsWith(u8, l, "!dbg !50")) try kept.append(l);
+    var kept = std.ArrayList([]const u8).empty;
+    for (e.lines.items) |l| if (!std.mem.endsWith(u8, l, "!dbg !50")) try kept.append(c.a(), l);
     e.lines = kept;
     const r = try c.refused("zero branches", "src/pkg/a.mojo: zero branches parsed, yet the IR has code on its decision line 3", try e.text());
     try r.silent("src/pkg/b.mojo");
@@ -423,7 +423,7 @@ test "9b copies differ in number" {
     while (i < e.lines.items.len) : (i += 1) {
         const l = e.lines.items[i];
         if (!std.mem.endsWith(u8, l, ", !dbg !40, !prof !70")) continue;
-        try e.lines.insert(i + 1, try std.mem.concat(c.a(), u8, &.{ l[0 .. l.len - "!prof !70".len], "!prof !72" }));
+        try e.lines.insert(c.a(), i + 1, try std.mem.concat(c.a(), u8, &.{ l[0 .. l.len - "!prof !70".len], "!prof !72" }));
         i += 1;
         n += 1;
     }
@@ -497,12 +497,12 @@ test "9c an 'or' whose constant arrives straight from the branch's block" {
     defer c.deinit();
     var e = try h.Ir.of(c.a(), h.case_ll);
     const f = try e.function("@\"pkg::c::spend\"");
-    var kept = std.ArrayList([]const u8).init(c.a());
+    var kept = std.ArrayList([]const u8).empty;
     var skip: usize = 0;
     for (e.lines.items, 0..) |l, i| {
         const in = i > f[0] and i < f[1];
         if (in and std.mem.startsWith(u8, l, "  br i1 %3, label %4, label %5, !dbg !111")) {
-            try kept.append("  br i1 %3, label %7, label %5, !dbg !111, !prof !130");
+            try kept.append(c.a(), "  br i1 %3, label %7, label %5, !dbg !111, !prof !130");
             continue;
         }
         if (in and std.mem.startsWith(u8, l, "4:  ")) skip = 3;
@@ -510,7 +510,7 @@ test "9c an 'or' whose constant arrives straight from the branch's block" {
             skip -= 1;
             continue;
         }
-        try kept.append(l);
+        try kept.append(c.a(), l);
     }
     e.lines = kept;
     const g = try e.function("@\"pkg::c::spend\"");

@@ -97,52 +97,53 @@ fn checkNpm(n: Npm, a: std.mem.Allocator) RenderError!void {
 /// The lock as text. Sorts (copies of) the entries, so the order the caller
 /// built them in never shows.
 pub fn render(a: std.mem.Allocator, lock: Lock) RenderError![]u8 {
-    var out = std.ArrayListUnmanaged(u8){};
+    var out = std.ArrayList(u8).empty;
     errdefer out.deinit(a);
-    const w = out.writer(a);
-    try w.writeAll(header);
-    try w.print("\nKPIN_LOCK_VERSION = {d}\n\nPINS = {{", .{version});
+    try out.appendSlice(a, header);
+    try out.print(a, "\nKPIN_LOCK_VERSION = {d}\n\nPINS = {{", .{version});
 
     const pins = try a.dupe(LockPin, lock.pins);
     defer a.free(pins);
     std.mem.sort(LockPin, pins, {}, lessPin);
-    if (pins.len == 0) try w.writeAll("}\n") else {
-        try w.writeAll("\n");
+    if (pins.len == 0) try out.appendSlice(a, "}\n") else {
+        try out.appendSlice(a, "\n");
         for (pins, 0..) |p, i| {
             if (!valid.isPinName(p.name) or !valid.isVersion(p.version)) return error.UnsafeValue;
             if (i > 0 and std.mem.eql(u8, pins[i - 1].name, p.name)) return error.UnsafeValue;
-            try w.print("    \"{s}\": {{\n        \"version\": \"{s}\",\n        \"files\": {{\n", .{ p.name, p.version });
+            try out.print(a, "    \"{s}\": {{\n        \"version\": \"{s}\",\n        \"files\": {{\n", .{ p.name, p.version });
             const files = try a.dupe(File, p.files);
             defer a.free(files);
             std.mem.sort(File, files, {}, lessFile);
             for (files, 0..) |f, j| {
                 try checkFile(f);
                 if (j > 0 and std.mem.eql(u8, files[j - 1].platform, f.platform)) return error.UnsafeValue;
-                try w.print(
+                try out.print(
+                    a,
                     "            \"{s}\": {{\n                \"url\": \"{s}\",\n                \"sha256\": \"{s}\",\n                \"size\": {d},\n            }},\n",
                     .{ f.platform, f.url, f.sha256, f.size },
                 );
             }
-            try w.writeAll("        },\n    },\n");
+            try out.appendSlice(a, "        },\n    },\n");
         }
-        try w.writeAll("}\n");
+        try out.appendSlice(a, "}\n");
     }
 
-    try w.writeAll("\nNPM = {");
+    try out.appendSlice(a, "\nNPM = {");
     const npm = try a.dupe(Npm, lock.npm);
     defer a.free(npm);
     std.mem.sort(Npm, npm, {}, lessNpm);
-    if (npm.len == 0) try w.writeAll("}\n") else {
-        try w.writeAll("\n");
+    if (npm.len == 0) try out.appendSlice(a, "}\n") else {
+        try out.appendSlice(a, "\n");
         for (npm, 0..) |n, i| {
             try checkNpm(n, a);
             if (i > 0 and std.mem.eql(u8, npm[i - 1].key, n.key)) return error.UnsafeValue;
-            try w.print(
+            try out.print(
+                a,
                 "    \"{s}\": {{\n        \"name\": \"{s}\",\n        \"version\": \"{s}\",\n        \"url\": \"{s}\",\n        \"sri512\": \"{s}\",\n        \"sha256\": \"{s}\",\n        \"size\": {d},\n    }},\n",
                 .{ n.key, n.name, n.version, n.url, n.sri512, n.sha256, n.size },
             );
         }
-        try w.writeAll("}\n");
+        try out.appendSlice(a, "}\n");
     }
     return out.toOwnedSlice(a);
 }
@@ -214,7 +215,7 @@ const Parser = struct {
         }
         if (c == '{') {
             self.i += 1;
-            var kvs = std.ArrayListUnmanaged(KV){};
+            var kvs = std.ArrayList(KV).empty;
             while (true) {
                 if (self.eat('}')) break;
                 const k = try self.string();
@@ -304,7 +305,7 @@ pub fn parse(a: std.mem.Allocator, text: []const u8, diag: *Diag) error{Invalid}
         return error.Invalid;
     }
     const before = diag.count();
-    var pins = std.ArrayListUnmanaged(LockPin){};
+    var pins = std.ArrayList(LockPin).empty;
     for (pins_v orelse &[_]KV{}) |kv| {
         const d = dictOf(kv.v) orelse {
             diag.add("lock: PINS[{s}] is not a dict", .{kv.k});
@@ -320,7 +321,7 @@ pub fn parse(a: std.mem.Allocator, text: []const u8, diag: *Diag) error{Invalid}
             diag.add("lock: PINS[{s}] has a bad name or version", .{kv.k});
             continue;
         }
-        var files = std.ArrayListUnmanaged(File){};
+        var files = std.ArrayList(File).empty;
         for (fd) |fkv| {
             const fdd = dictOf(fkv.v) orelse &[_]KV{};
             if (!onlyKeys(fdd, &.{ "url", "sha256", "size" })) {
@@ -341,7 +342,7 @@ pub fn parse(a: std.mem.Allocator, text: []const u8, diag: *Diag) error{Invalid}
         }
         pins.append(a, .{ .name = kv.k, .version = pv, .files = files.toOwnedSlice(a) catch return error.Invalid }) catch return error.Invalid;
     }
-    var npm = std.ArrayListUnmanaged(Npm){};
+    var npm = std.ArrayList(Npm).empty;
     for (npm_v orelse &[_]KV{}) |kv| {
         const d = dictOf(kv.v) orelse &[_]KV{};
         if (!onlyKeys(d, &.{ "name", "version", "url", "sri512", "sha256", "size" })) {

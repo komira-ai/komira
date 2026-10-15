@@ -81,7 +81,7 @@ fn derive(st: *State, di: usize, b_or_null: ?[]const u64, rhs_val: []const u8) v
     if (p.weights == null and !b_ran) {
         st.decs.items[di].need = .none;
         rhs.weights = null;
-        st.decs.append(rhs) catch oom();
+        st.decs.append(st.alloc, rhs) catch oom();
         st.derived += 1;
         return inner(st, rhs_val, null);
     }
@@ -107,7 +107,7 @@ fn derive(st: *State, di: usize, b_or_null: ?[]const u64, rhs_val: []const u8) v
     }
     st.decs.items[di].need = .none;
     rhs.weights = w;
-    st.decs.append(rhs) catch oom();
+    st.decs.append(st.alloc, rhs) catch oom();
     st.derived += 1;
     inner(st, rhs_val, w);
 }
@@ -171,16 +171,16 @@ pub fn selectAt(st: *State, di: usize, name: []const u8, ops: []const u8, cond: 
 
 /// The incoming values of phi text `rest` (after `phi <ty> `) and the
 /// blocks they arrive from.
-fn incoming(rest: []const u8, ins: *std.ArrayList([]const u8), from: *std.ArrayList([]const u8)) bool {
+fn incoming(alloc: std.mem.Allocator, rest: []const u8, ins: *std.ArrayList([]const u8), from: *std.ArrayList([]const u8)) bool {
     const ty_end = std.mem.indexOf(u8, rest, " [") orelse return false;
     var it = std.mem.splitSequence(u8, core(rest[ty_end + 1 ..]), "], ");
     while (it.next()) |piece| {
         const p = std.mem.trim(u8, piece, " ");
         if (p.len == 0 or p[0] != '[') break;
         const v = operand(std.mem.trim(u8, p[1..], " "));
-        ins.append(v) catch oom();
+        ins.append(alloc, v) catch oom();
         const after = std.mem.trim(u8, p[1..], " ");
-        from.append(if (after.len > v.len + 2) std.mem.trim(u8, after[v.len + 2 ..], " ]") else "") catch oom();
+        from.append(alloc, if (after.len > v.len + 2) std.mem.trim(u8, after[v.len + 2 ..], " ]") else "") catch oom();
     }
     return true;
 }
@@ -201,9 +201,9 @@ fn forward(ins: []const []const u8) bool {
 pub fn phiAt(st: *State, t: []const u8, ln: usize) void {
     const eq = std.mem.indexOf(u8, t, " = phi ") orelse return;
     const rest = t[eq + " = phi ".len ..];
-    var ins = std.ArrayList([]const u8).init(st.alloc);
-    var from = std.ArrayList([]const u8).init(st.alloc);
-    if (!incoming(rest, &ins, &from)) return;
+    var ins = std.ArrayList([]const u8).empty;
+    var from = std.ArrayList([]const u8).empty;
+    if (!incoming(st.alloc, rest, &ins, &from)) return;
     if (std.mem.startsWith(u8, rest, "i1 ") and forward(ins.items)) {
         if (st.awaits.get(ins.items[0])) |a| st.awaits.put(t[0..eq], a) catch oom();
     }

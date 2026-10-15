@@ -107,7 +107,7 @@ pub const Outcome = struct {
 
 var sig_pipe: [2]sys.fd_t = .{ -1, -1 };
 
-fn onSignal(sig: i32) callconv(.C) void {
+fn onSignal(sig: i32) callconv(.c) void {
     const b = [1]u8{@intCast(sig & 0xff)};
     _ = posix.system.write(sig_pipe[1], &b, 1);
 }
@@ -115,17 +115,17 @@ fn onSignal(sig: i32) callconv(.C) void {
 fn installSignals() !void {
     if (sig_pipe[0] != -1) return;
     sig_pipe = try posix.pipe2(.{ .CLOEXEC = true, .NONBLOCK = true });
-    const act = posix.Sigaction{ .handler = .{ .handler = onSignal }, .mask = posix.empty_sigset, .flags = 0 };
-    for ([_]u6{ posix.SIG.HUP, posix.SIG.INT, posix.SIG.TERM }) |s| try posix.sigaction(s, &act, null);
+    const act = posix.Sigaction{ .handler = .{ .handler = onSignal }, .mask = posix.sigemptyset(), .flags = 0 };
+    for ([_]u6{ posix.SIG.HUP, posix.SIG.INT, posix.SIG.TERM }) |s| posix.sigaction(s, &act, null);
     if (sys.is_darwin) {
         // macOS: C's exit wakes the loop through SIGCHLD (byte 0 is not a
         // signal the loop acts on; it only checks for an exit).
-        const chld = posix.Sigaction{ .handler = .{ .handler = onChild }, .mask = posix.empty_sigset, .flags = posix.SA.NOCLDSTOP };
+        const chld = posix.Sigaction{ .handler = .{ .handler = onChild }, .mask = posix.sigemptyset(), .flags = posix.SA.NOCLDSTOP };
         try posix.sigaction(posix.SIG.CHLD, &chld, null);
     }
 }
 
-fn onChild(_: i32) callconv(.C) void {
+fn onChild(_: i32) callconv(.c) void {
     const b = [1]u8{0};
     _ = posix.system.write(sig_pipe[1], &b, 1);
 }

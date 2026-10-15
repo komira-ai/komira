@@ -100,9 +100,8 @@ pub fn pidfdOpen(pid: pid_t) ?fd_t {
 
 /// CLOCK_MONOTONIC in milliseconds, or null when the clock cannot be read.
 pub fn monotonicMs() ?u64 {
-    var ts: posix.timespec = undefined;
-    posix.clock_gettime(posix.CLOCK.MONOTONIC, &ts) catch return null;
-    return @as(u64, @intCast(ts.tv_sec)) * 1000 + @as(u64, @intCast(ts.tv_nsec)) / 1_000_000;
+    const ts = posix.clock_gettime(posix.CLOCK.MONOTONIC) catch return null;
+    return @as(u64, @intCast(ts.sec)) * 1000 + @as(u64, @intCast(ts.nsec)) / 1_000_000;
 }
 
 pub fn sleepMs(ms: u64) void {
@@ -157,8 +156,8 @@ pub fn devNullOnto(target: fd_t, write: bool) void {
 /// Signal dispositions back to the default (a forked child that does not
 /// exec keeps the parent's handlers).
 pub fn defaultSignals() void {
-    const act = posix.Sigaction{ .handler = .{ .handler = posix.SIG.DFL }, .mask = posix.empty_sigset, .flags = 0 };
+    const act = posix.Sigaction{ .handler = .{ .handler = posix.SIG.DFL }, .mask = posix.sigemptyset(), .flags = 0 };
     for ([_]u6{ posix.SIG.HUP, posix.SIG.INT, posix.SIG.TERM, posix.SIG.CHLD, posix.SIG.ALRM, posix.SIG.PIPE }) |s| {
-        posix.sigaction(s, &act, null) catch {};
+        posix.sigaction(s, &act, null);
     }
 }

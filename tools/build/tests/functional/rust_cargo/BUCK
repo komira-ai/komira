@@ -1,5 +1,5 @@
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
-load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+load("@komira//tools/build/rust:defs.bzl", "cargo_pkg_env", "rust_binary", "rust_library", "rust_test")
 
 # The greens of the Cargo-driven attributes of the Rust rules (env,
 # renamed_deps, native_deps, patch, proc_macro_extern); each has its planted
@@ -27,6 +27,16 @@ rust_binary(
         "CARGO_PKG_VERSION": "1.2.3",
     },
     expected_stdout = "demo 1.2.3\n",
+)
+
+# cargo_pkg_env, what `kpin cargo` writes for every crate: a pre-release and
+# build metadata version.
+rust_binary(
+    name = "pkg_env",
+    srcs = ["src/pkg_env.rs"],
+    crate_root = "src/pkg_env.rs",
+    env = cargo_pkg_env("my-crate", "1.2.3-alpha.1+b7", "my_lib"),
+    expected_stdout = "my-crate|1.2.3-alpha.1+b7|1|2|3|alpha.1|my_lib\n",
 )
 
 # ---- renamed_deps: two crates of one name ------------------------------------

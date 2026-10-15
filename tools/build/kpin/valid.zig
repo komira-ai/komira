@@ -89,3 +89,50 @@ pub fn isSri512(s: []const u8) bool {
 pub fn isJsonPath(s: []const u8) bool {
     return s.len >= 1 and s.len <= 128 and all(s, pathChar) and s[0] != '.' and s[s.len - 1] != '.' and std.mem.indexOf(u8, s, "..") == null;
 }
+
+fn crateChar(c: u8) bool {
+    return alnum(c) or c == '-' or c == '_';
+}
+
+fn featureChar(c: u8) bool {
+    return alnum(c) or switch (c) {
+        '-', '_', '.', '+', '/', ':' => true,
+        else => false,
+    };
+}
+
+fn relPathChar(c: u8) bool {
+    return alnum(c) or switch (c) {
+        '-', '_', '.', '+', '/' => true,
+        else => false,
+    };
+}
+
+/// A crates.io package name: letters, digits, `-`, `_`.
+pub fn isCrateName(s: []const u8) bool {
+    return s.len >= 1 and s.len <= 64 and alnum(s[0]) and all(s, crateChar);
+}
+
+/// A Cargo feature name as `cargo metadata` prints it.
+pub fn isFeatureName(s: []const u8) bool {
+    return s.len >= 1 and s.len <= 128 and all(s, featureChar);
+}
+
+/// A relative path inside a crate: no `..`, no leading or doubled `/`.
+pub fn isRelPath(s: []const u8) bool {
+    if (s.len < 1 or s.len > 256 or !all(s, relPathChar) or s[0] == '/' or s[s.len - 1] == '/') return false;
+    var it = std.mem.splitScalar(u8, s, '/');
+    while (it.next()) |part| {
+        if (part.len == 0 or std.mem.eql(u8, part, ".") or std.mem.eql(u8, part, "..")) return false;
+    }
+    return true;
+}
+
+/// A Rust edition as `cargo metadata` prints it (`2021`).
+pub fn isEdition(s: []const u8) bool {
+    return s.len == 4 and all(s, struct {
+        fn f(c: u8) bool {
+            return c >= '0' and c <= '9';
+        }
+    }.f);
+}

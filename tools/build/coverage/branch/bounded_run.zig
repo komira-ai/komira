@@ -109,9 +109,9 @@ fn sysErr(rc: usize) linux.E {
 /// NAME=VALUE entries of `map`, sorted by name (a fixed order, so a command's
 /// environment does not depend on the map's).
 pub fn envFromMap(alloc: std.mem.Allocator, map: *const std.process.EnvMap) ![]const []const u8 {
-    var names = std.ArrayList([]const u8).init(alloc);
+    var names = std.ArrayList([]const u8).empty;
     var it = map.iterator();
-    while (it.next()) |e| try names.append(e.key_ptr.*);
+    while (it.next()) |e| try names.append(alloc, e.key_ptr.*);
     std.mem.sort([]const u8, names.items, {}, lessThan);
     const out = try alloc.alloc([]const u8, names.items.len);
     for (names.items, 0..) |n, i| out[i] = try std.fmt.allocPrint(alloc, "{s}={s}", .{ n, map.get(n).? });
@@ -167,7 +167,7 @@ pub fn run(alloc: std.mem.Allocator, spec: Spec) Error!Outcome {
         }
         const now = std.time.Instant.now() catch return error.Unexpected;
         if (now.since(start) >= spec.limit_ms.? * std.time.ns_per_ms) break;
-        std.time.sleep(nap);
+        std.Thread.sleep(nap);
         nap = @min(nap * 2, 50 * std.time.ns_per_ms);
     }
 
@@ -178,7 +178,7 @@ pub fn run(alloc: std.mem.Allocator, spec: Spec) Error!Outcome {
     if (spec.term_grace_ms) |grace| {
         _ = linux.kill(-pid, linux.SIG.TERM);
         _ = linux.kill(pid, linux.SIG.TERM);
-        std.time.sleep(grace * std.time.ns_per_ms);
+        std.Thread.sleep(grace * std.time.ns_per_ms);
     }
     _ = linux.kill(-pid, linux.SIG.KILL);
     _ = linux.kill(pid, linux.SIG.KILL);
@@ -209,7 +209,7 @@ pub fn survivorsAfterKill(alloc: std.mem.Allocator, root: []const u8, pgid: i32,
             if (left.len != 0) _ = linux.kill(-pgid, linux.SIG.KILL);
             return left;
         }
-        std.time.sleep(100 * std.time.ns_per_ms);
+        std.Thread.sleep(100 * std.time.ns_per_ms);
         waited += 100;
     }
 }
@@ -310,8 +310,8 @@ pub fn parseStat(line: []const u8) ?struct { pid: i32, comm: []const u8, state: 
 /// The processes of group `pgid` under `root` that are not zombies (Z) or
 /// dead (X). A process that exits while this reads is skipped.
 pub fn groupLeft(alloc: std.mem.Allocator, root: []const u8, pgid: i32) ![]const Survivor {
-    var out = std.ArrayList(Survivor).init(alloc);
-    var dir = std.fs.cwd().openDir(root, .{ .iterate = true }) catch return out.toOwnedSlice();
+    var out = std.ArrayList(Survivor).empty;
+    var dir = std.fs.cwd().openDir(root, .{ .iterate = true }) catch return out.toOwnedSlice(alloc);
     defer dir.close();
     var it = dir.iterate();
     while (it.next() catch null) |e| {
@@ -320,10 +320,10 @@ pub fn groupLeft(alloc: std.mem.Allocator, root: []const u8, pgid: i32) ![]const
         const text = std.fs.cwd().readFileAlloc(alloc, p, 1 << 16) catch continue;
         const s = parseStat(std.mem.trimRight(u8, text, "\n")) orelse continue;
         if (s.pgrp != pgid or s.state == 'Z' or s.state == 'X') continue;
-        try out.append(.{ .pid = s.pid, .state = s.state, .comm = s.comm });
+        try out.append(alloc, .{ .pid = s.pid, .state = s.state, .comm = s.comm });
     }
     std.mem.sort(Survivor, out.items, {}, byPid);
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 fn byPid(_: void, a: Survivor, b: Survivor) bool {
@@ -476,7 +476,7 @@ test "stderr_to_stdout wins over stderr_path, whose file is still created empty"
     const dir = try tmp.dir.realpathAlloc(a, ".");
     const o = try std.fs.path.join(a, &.{ dir, "o" });
     const e = try std.fs.path.join(a, &.{ dir, "e" });
-    try tmp.dir.writeFile("e", "stale\n");
+    try tmp.dir.writeFile(.{ .sub_path = "e", .data = "stale\n" });
     var spec = try shSpec(a, "echo out; echo err >&2");
     spec.stdout_path = o;
     spec.stderr_path = e;
@@ -575,7 +575,7 @@ fn writeStat(dir: std.fs.Dir, pid: []const u8, line: []const u8) !void {
     try dir.makePath(pid);
     const p = try std.fmt.allocPrint(testing.allocator, "{s}/stat", .{pid});
     defer testing.allocator.free(p);
-    try dir.writeFile(p, line);
+    try dir.writeFile(.{ .sub_path = p, .data = line });
 }
 
 test "the survivor scan reads state and group after the last ')', and skips zombies" {
@@ -720,7 +720,7 @@ test "survivors still running after the wait are sent SIGKILL again" {
     try testing.expectEqual(member, left[0].pid);
     // Within 5 s the member is dead of SIGKILL.
     var waited: u32 = 0;
-    while (!exitedNoReap(member, false) and waited < 5000) : (waited += 20) std.time.sleep(20 * std.time.ns_per_ms);
+    while (!exitedNoReap(member, false) and waited < 5000) : (waited += 20) std.Thread.sleep(20 * std.time.ns_per_ms);
     try testing.expect(waited < 5000);
     member_reaped = true;
     try testing.expectEqual(Status{ .signaled = linux.SIG.KILL }, reap(member));

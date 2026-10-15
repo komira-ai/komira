@@ -131,10 +131,10 @@ const ROWS = [_]lib.Row{
 const CONTROL = "komira//tools/build/markdown:importer_unit";
 
 fn build(c: *lib.Ctx, cfg: []const []const u8) !lib.runner.Result {
-    var words = std.ArrayList([]const u8).init(c.a);
-    try words.append("build");
-    for (KINDS) |k| try words.append(k.target);
-    try words.append(CONTROL);
+    var words = std.ArrayList([]const u8).empty;
+    try words.append(c.a, "build");
+    for (KINDS) |k| try words.append(c.a, k.target);
+    try words.append(c.a, CONTROL);
     return c.run(words.items, .{ .cfg = cfg, .timeout_s = 1200 });
 }
 
@@ -196,12 +196,12 @@ fn kinds(c: *lib.Ctx) !void {
         verdict(c, try std.fmt.allocPrint(c.a, "one named ({s})", .{v1}), lib.whatran.rerun(wr, &.{one}));
     }
 
-    var labels = std.ArrayList([]const u8).init(c.a);
-    var entries = std.ArrayList([]const u8).init(c.a);
+    var labels = std.ArrayList([]const u8).empty;
+    var entries = std.ArrayList([]const u8).empty;
     const n = try fresh(c);
     for (KINDS) |k| {
-        try labels.append(k.target);
-        try entries.append(try std.fmt.allocPrint(c.a, "{s}#{s}", .{ k.target, n }));
+        try labels.append(c.a, k.target);
+        try entries.append(c.a, try std.fmt.allocPrint(c.a, "{s}#{s}", .{ k.target, n }));
     }
     const all = try lib.text.join(c.a, entries.items, ",");
     if (try flagged(c, "every kind named", all)) |wr| {

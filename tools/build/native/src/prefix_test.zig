@@ -205,8 +205,8 @@ test "check: fewer than min prefixed definitions is red, after the other finding
 }
 
 test "check: a red finding counts every name and lists the first 50" {
-    var t = std.ArrayList(u8).init(P.a());
-    for (0..60) |i| t.writer().print("DEF GLOBAL FUNC DEFAULT bad{d:0>2}\n", .{i}) catch unreachable;
+    var t = std.ArrayList(u8).empty;
+    for (0..60) |i| t.writer(P.a()).print("DEF GLOBAL FUNC DEFAULT bad{d:0>2}\n", .{i}) catch unreachable;
     const v = try P.check(t.items, &.{}, "/x/lib.a", "komira_", 0, &.{});
     try expect(v.red);
     try expect(std.mem.startsWith(u8, v.stderr, "archive_check RED: 60 defined symbols without the prefix komira_ in /x/lib.a:\n  bad00\n"));

@@ -124,12 +124,12 @@ fn pids(alloc: std.mem.Allocator, pgid: ?i32) ?[]i32 {
 /// One reading of the table; null when the pid list cannot be read.
 pub fn read(alloc: std.mem.Allocator) ?proctab.Table {
     const all = pids(alloc, null) orelse return null;
-    var procs = std.ArrayList(proctab.Proc).init(alloc);
+    var procs = std.ArrayList(proctab.Proc).empty;
     for (all) |pid| {
         if (pid <= 0) continue;
         const b = bsdInfo(pid) orelse continue;
         const st = state(b.pbi_status);
-        procs.append(.{
+        procs.append(alloc, .{
             .pid = @intCast(b.pbi_pid),
             .ppid = @intCast(b.pbi_ppid),
             .state = st,
@@ -143,7 +143,7 @@ pub fn read(alloc: std.mem.Allocator) ?proctab.Table {
 /// list cannot be read.
 pub fn groupMembers(alloc: std.mem.Allocator, pgid: i32) ?[]proctab.Member {
     const all = pids(alloc, pgid) orelse return null;
-    var out = std.ArrayList(proctab.Member).init(alloc);
+    var out = std.ArrayList(proctab.Member).empty;
     for (all) |pid| {
         if (pid <= 0) continue;
         const b = bsdInfo(pid) orelse continue;
@@ -151,7 +151,7 @@ pub fn groupMembers(alloc: std.mem.Allocator, pgid: i32) ?[]proctab.Member {
         const st = state(b.pbi_status);
         if (st == 'Z') continue;
         const comm = std.mem.sliceTo(&b.pbi_comm, 0);
-        out.append(.{ .pid = pid, .state = st, .comm = alloc.dupe(u8, comm) catch return null }) catch return null;
+        out.append(alloc, .{ .pid = pid, .state = st, .comm = alloc.dupe(u8, comm) catch return null }) catch return null;
     }
     return out.items;
 }

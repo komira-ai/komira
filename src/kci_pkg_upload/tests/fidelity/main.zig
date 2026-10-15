@@ -41,8 +41,8 @@ const EXIT_USAGE: u8 = 2;
 const EXIT_CANNOT_MEASURE: u8 = 3;
 const UV_TIMEOUT_S: i64 = 120;
 
-fn stderr() std.fs.File.Writer {
-    return std.io.getStdErr().writer();
+fn stderr() std.fs.File.DeprecatedWriter {
+    return std.fs.File.stderr().deprecatedWriter();
 }
 
 fn usage(why: []const u8) noreturn {
@@ -89,11 +89,11 @@ const Recorder = struct {
     /// until uv closes it (by a reset, which is how uv ends: not a failure).
     fn serve(r: *Recorder, stream: std.net.Stream) !void {
         const a = r.arena.allocator();
-        var buf = std.ArrayList(u8).init(a);
+        var buf = std.ArrayList(u8).empty;
         var chunk: [1 << 16]u8 = undefined;
         while (true) {
             while (try fid.parseRequest(a, buf.items)) |p| {
-                try r.captured.append(p.request);
+                try r.captured.append(a, p.request);
                 try stream.writeAll("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK");
                 const rest = buf.items.len - p.consumed;
                 std.mem.copyForwards(u8, buf.items[0..rest], buf.items[p.consumed..]);
@@ -104,7 +104,7 @@ const Recorder = struct {
                 else => return e,
             };
             if (n == 0) return;
-            try buf.appendSlice(chunk[0..n]);
+            try buf.appendSlice(a, chunk[0..n]);
         }
     }
 };
@@ -124,7 +124,7 @@ const Watch = struct {
                 std.posix.kill(w.pid, std.posix.SIG.KILL) catch {};
                 return;
             }
-            std.time.sleep(100 * std.time.ns_per_ms);
+            std.Thread.sleep(100 * std.time.ns_per_ms);
         }
     }
 };
@@ -133,7 +133,7 @@ const Ran = struct { ok: bool, why: []const u8, stdout: []const u8, stderr: []co
 
 /// Runs argv with exactly `env`, killed at UV_TIMEOUT_S.
 fn run(a: Allocator, argv: []const []const u8, env: *const std.process.EnvMap) !Ran {
-    var child = std.ChildProcess.init(argv, a);
+    var child = std.process.Child.init(argv, a);
     child.env_map = env;
     child.stdin_behavior = .Ignore;
     child.stdout_behavior = .Pipe;
@@ -141,9 +141,9 @@ fn run(a: Allocator, argv: []const []const u8, env: *const std.process.EnvMap) !
     try child.spawn();
     var watch = Watch{ .pid = child.id, .deadline_ms = std.time.milliTimestamp() + UV_TIMEOUT_S * 1000 };
     const thread = try std.Thread.spawn(.{}, Watch.loop, .{&watch});
-    var out = std.ArrayList(u8).init(a);
-    var err = std.ArrayList(u8).init(a);
-    const collected = child.collectOutput(&out, &err, 1 << 24);
+    var out = std.ArrayList(u8).empty;
+    var err = std.ArrayList(u8).empty;
+    const collected = child.collectOutput(a, &out, &err, 1 << 24);
     const term = child.wait();
     watch.done.store(true, .release);
     thread.join();
@@ -221,7 +221,7 @@ fn captureCase(a: Allocator, uv: []const u8, root: []const u8, case: fid.Case, o
         .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
         .captured = undefined,
     };
-    rec.captured = std.ArrayList(fid.Request).init(rec.arena.allocator());
+    rec.captured = std.ArrayList(fid.Request).empty;
     defer rec.arena.deinit();
     defer rec.server.deinit();
     // The address the socket is actually bound to, from the kernel.
@@ -230,7 +230,7 @@ fn captureCase(a: Allocator, uv: []const u8, root: []const u8, case: fid.Case, o
     std.posix.getsockname(rec.server.stream.handle, &bound.any, &bound_len) catch |e|
         cannotMeasure("{s}: cannot read the recorder's bound address: {s}", .{ case.name, @errorName(e) });
     if (!fid.isLoopback(bound))
-        cannotMeasure("{s}: recorder is not loopback-only (bound to {})", .{ case.name, bound });
+        cannotMeasure("{s}: recorder is not loopback-only (bound to {f})", .{ case.name, bound });
     const port = bound.getPort();
     const thread = std.Thread.spawn(.{}, Recorder.loop, .{&rec}) catch |e|
         cannotMeasure("{s}: cannot start the recorder thread: {s}", .{ case.name, @errorName(e) });
@@ -262,9 +262,9 @@ fn captureCase(a: Allocator, uv: []const u8, root: []const u8, case: fid.Case, o
     const request = fid.renderRequest(a, rec.captured.items[0]) catch |e|
         cannotMeasure("{s}: {s}", .{ case.name, @errorName(e) });
 
-    try out.append(.{ .name = try std.mem.concat(a, u8, &.{ case.name, ".whl" }), .data = wheel });
-    try out.append(.{ .name = try std.mem.concat(a, u8, &.{ case.name, ".METADATA" }), .data = case.metadata });
-    try out.append(.{ .name = try std.mem.concat(a, u8, &.{ case.name, ".request" }), .data = request });
+    try out.append(a, .{ .name = try std.mem.concat(a, u8, &.{ case.name, ".whl" }), .data = wheel });
+    try out.append(a, .{ .name = try std.mem.concat(a, u8, &.{ case.name, ".METADATA" }), .data = case.metadata });
+    try out.append(a, .{ .name = try std.mem.concat(a, u8, &.{ case.name, ".request" }), .data = request });
 }
 
 fn uvVersion(a: Allocator, uv: []const u8, root: []const u8) []const u8 {
@@ -302,7 +302,7 @@ fn runMain() !void {
 
     const root = scratch(a) catch |e| cannotMeasure("cannot make the scratch directory: {s}", .{@errorName(e)});
     const version = uvVersion(a, uv.?, root);
-    var fresh = std.ArrayList(Fixture).init(a);
+    var fresh = std.ArrayList(Fixture).empty;
     for (fid.CASES) |case| try captureCase(a, uv.?, root, case, &fresh);
 
     if (!is_check) {
@@ -314,7 +314,7 @@ fn runMain() !void {
         return;
     }
 
-    var report = std.ArrayList(u8).init(a);
+    var report = std.ArrayList(u8).empty;
     var same = true;
     var committed_dir = try std.fs.cwd().openDir(fixtures.?, .{});
     defer committed_dir.close();
@@ -322,14 +322,14 @@ fn runMain() !void {
         const committed = committed_dir.readFileAlloc(a, f.name, 1 << 24) catch |e| switch (e) {
             // A fixture the capture writes but nobody committed is a difference.
             error.FileNotFound => {
-                try report.writer().print("  {s}: not committed\n", .{f.name});
+                try report.writer(a).print("  {s}: not committed\n", .{f.name});
                 same = false;
                 continue;
             },
             // Any other read failure means nothing was compared.
             else => cannotMeasure("reading committed fixture {s}: {s}", .{ f.name, @errorName(e) }),
         };
-        if (!try fid.compareFile(a, report.writer(), f.name, committed, f.data)) same = false;
+        if (!try fid.compareFile(a, report.writer(a), f.name, committed, f.data)) same = false;
     }
     if (!same) {
         try stderr().print("uv_fidelity: FIDELITY DRIFT: {s} no longer sends what the committed fixtures " ++
