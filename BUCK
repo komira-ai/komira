@@ -8,6 +8,8 @@ load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdow
 load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
 load("@komira//tools/build/lint:surface_capability_matrix.bzl", "surface_capability_matrix")
 load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms/limits:limits.bzl", "limits")
 load("@komira//tools/build/selftest:defs.bzl", "graph_check")
 load("//tests:python_closure_allowlist.bzl", "PYTHON_CEILING", "PYTHON_SURFACE")
@@ -67,7 +69,25 @@ coverage_ci_cases(
     },
 )
 
+# The cases of the farm-connect action (.github/actions/farm-connect/action_test.zig
+# says what each catches): its input checks and the buckconfig it writes, run
+# from action.yml's own scripts with the busybox sh in a HOME of each case's
+# own; and every workflow step that uses the action, which must pass `tls`
+# from the FARM_TLS variable. A build action, so a failing case fails
+# `./buck2 build //...`.
 WORKFLOWS = glob([".github/workflows/*.yml"])
+
+zig_test(
+    name = "farm_connect_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = ".github/actions/farm-connect/action_test.zig",
+    data = dict(
+        {"action.yml": ".github/actions/farm-connect/action.yml"},
+        **{w.removeprefix(".github/"): w for w in WORKFLOWS}
+    ),
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
 
 # The local actions the workflows call (.github/actions/<name>/action.yml): not
 # workflows, so actionlint does not read them, but the pins and the endpoint

@@ -40,6 +40,7 @@ jobs:
           farm-address: ${{ vars.FARM_ADDRESS }}
           farm-instance: ${{ vars.FARM_INSTANCE }}
           farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+          tls: ${{ vars.FARM_TLS || 'false' }}
       # The pinned pixi the conda install cases (33a, 33b) run: the platform
       # table's linux-x86_64 pin (tools/build/platforms/table.bzl), which
       # buck2 downloads and keeps only at the pin's sha256. With

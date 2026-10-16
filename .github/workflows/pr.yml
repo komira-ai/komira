@@ -75,6 +75,7 @@ jobs:
           farm-address: ${{ vars.FARM_ADDRESS }}
           farm-instance: ${{ vars.FARM_INSTANCE }}
           farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+          tls: ${{ vars.FARM_TLS || 'false' }}
       - name: the buckconfig names the farm
         run: |
           for key in linux_x86_64_properties; do
