@@ -72,17 +72,22 @@ coverage_ci_cases(
 # The cases of the farm-connect action (.github/actions/farm-connect/action_test.zig
 # says what each catches): its input checks and the buckconfig it writes, run
 # from action.yml's own scripts with the busybox sh in a HOME of each case's
-# own. A build action, so a failing case fails `./buck2 build //...`.
+# own; and every workflow step that uses the action, which must pass `tls`
+# from the FARM_TLS variable. A build action, so a failing case fails
+# `./buck2 build //...`.
+WORKFLOWS = glob([".github/workflows/*.yml"])
+
 zig_test(
     name = "farm_connect_cases",
     exec_compatible_with = LINUX_X86_64,
     src = ".github/actions/farm-connect/action_test.zig",
-    data = {"action.yml": ".github/actions/farm-connect/action.yml"},
+    data = dict(
+        {"action.yml": ".github/actions/farm-connect/action.yml"},
+        **{w.removeprefix(".github/"): w for w in WORKFLOWS}
+    ),
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
 )
-
-WORKFLOWS = glob([".github/workflows/*.yml"])
 
 # The local actions the workflows call (.github/actions/<name>/action.yml): not
 # workflows, so actionlint does not read them, but the pins and the endpoint

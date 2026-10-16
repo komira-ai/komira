@@ -116,7 +116,10 @@ input, a value holding a line break, half of the macOS pair, a macOS set equal
 to the linux one, `tls` other than `true` or `false`, and a CA file that is not
 an absolute path to a readable file are refused. `//:farm_connect_cases` runs
 those checks and the writer from `action.yml`'s own scripts and compares the
-buckconfig written whole.
+buckconfig written whole. It also reads every workflow and holds each step
+that uses the action to `tls: ${{ vars.FARM_TLS || 'false' }}` under its
+`with:`: a caller that dropped `tls` would connect in plain text whatever
+`FARM_TLS` says.
 
 A job that calls it needs `permissions: id-token: write` (to ask GitHub for the
 token) next to `contents: read`, and nothing else: the job reads no secret, holds
