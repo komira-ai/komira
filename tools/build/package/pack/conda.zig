@@ -47,46 +47,47 @@ pub const license_member = "info/licenses/LICENSE";
 const zstd_window_byte: u8 = 0x38; // exponent 7, mantissa 0: a 128 KiB window
 const zstd_block_max: usize = 128 * 1024;
 
-fn put16(out: *std.ArrayList(u8), v: u16) !void {
+fn put16(alloc: Alloc, out: *std.ArrayList(u8), v: u16) !void {
     var b: [2]u8 = undefined;
     std.mem.writeInt(u16, &b, v, .little);
-    try out.appendSlice(&b);
+    try out.appendSlice(alloc, &b);
 }
 
-fn put32(out: *std.ArrayList(u8), v: u32) !void {
+fn put32(alloc: Alloc, out: *std.ArrayList(u8), v: u32) !void {
     var b: [4]u8 = undefined;
     std.mem.writeInt(u32, &b, v, .little);
-    try out.appendSlice(&b);
+    try out.appendSlice(alloc, &b);
 }
 
 /// `data` as one zstd frame of raw blocks: no dictionary, no checksum, a
 /// 128 KiB window, the content size stated. Valid zstd that no encoder
 /// version can change.
 fn zstdRaw(alloc: Alloc, data: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(alloc);
-    try out.appendSlice(&[_]u8{ 0x28, 0xB5, 0x2F, 0xFD, 0xC0, zstd_window_byte });
+    var out = std.ArrayList(u8).empty;
+    try out.appendSlice(alloc, &[_]u8{ 0x28, 0xB5, 0x2F, 0xFD, 0xC0, zstd_window_byte });
     var fcs: [8]u8 = undefined;
     std.mem.writeInt(u64, &fcs, data.len, .little);
-    try out.appendSlice(&fcs);
+    try out.appendSlice(alloc, &fcs);
     var at: usize = 0;
     while (true) {
         const n = @min(zstd_block_max, data.len - at);
         const last = at + n == data.len;
         const hdr: u32 = (@as(u32, @intCast(n)) << 3) | @intFromBool(last); // block type 0: Raw
-        try out.appendSlice(&[_]u8{ @truncate(hdr), @truncate(hdr >> 8), @truncate(hdr >> 16) });
-        try out.appendSlice(data[at .. at + n]);
+        try out.appendSlice(alloc, &[_]u8{ @truncate(hdr), @truncate(hdr >> 8), @truncate(hdr >> 16) });
+        try out.appendSlice(alloc, data[at .. at + n]);
         at += n;
         if (last) break;
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 pub fn zstdDecode(alloc: Alloc, data: []const u8, what: []const u8) []u8 {
-    const window = alloc.alloc(u8, 8 * 1024 * 1024) catch fail("out of memory", .{});
-    var fbs = std.io.fixedBufferStream(data);
-    var dz = std.compress.zstd.decompressor(fbs.reader(), .{ .window_buffer = window });
-    return dz.reader().readAllAlloc(alloc, 1 << 31) catch |err|
-        fail("{s}: not a valid zstd stream: {s}", .{ what, @errorName(err) });
+    const window_len: u32 = 8 * 1024 * 1024;
+    const window = alloc.alloc(u8, window_len + std.compress.zstd.block_size_max) catch fail("out of memory", .{});
+    var in: std.Io.Reader = .fixed(data);
+    var dz = std.compress.zstd.Decompress.init(&in, window, .{ .window_len = window_len });
+    return dz.reader.allocRemaining(alloc, .limited(1 << 31)) catch |err|
+        fail("{s}: not a valid zstd stream: {s}", .{ what, @errorName(if (err == error.ReadFailed) (dz.err orelse err) else err) });
 }
 
 const ZipMember = struct { name: []const u8, data: []const u8 };
@@ -96,57 +97,57 @@ const zip_date: u16 = 0x0021; // 1980-01-01, the earliest a zip can say
 /// A zip of stored members in the given order: no extra fields, no comment,
 /// no data descriptors, every date 1980-01-01 00:00:00, mode 0644.
 fn zipStored(alloc: Alloc, members: []const ZipMember) ![]u8 {
-    var out = std.ArrayList(u8).init(alloc);
+    var out = std.ArrayList(u8).empty;
     const offsets = try alloc.alloc(u32, members.len);
     for (members, 0..) |m, i| {
         if (m.data.len >= 0xffff_0000 or out.items.len >= 0xffff_0000)
             fail("{s}: a conda member of 4 GiB or more needs zip64, which this tool does not write", .{m.name});
         offsets[i] = @intCast(out.items.len);
-        try put32(&out, 0x04034b50);
-        try put16(&out, 20);
-        try put16(&out, 0);
-        try put16(&out, 0);
-        try put16(&out, 0);
-        try put16(&out, zip_date);
-        try put32(&out, std.hash.Crc32.hash(m.data));
-        try put32(&out, @intCast(m.data.len));
-        try put32(&out, @intCast(m.data.len));
-        try put16(&out, @intCast(m.name.len));
-        try put16(&out, 0);
-        try out.appendSlice(m.name);
-        try out.appendSlice(m.data);
+        try put32(alloc, &out, 0x04034b50);
+        try put16(alloc, &out, 20);
+        try put16(alloc, &out, 0);
+        try put16(alloc, &out, 0);
+        try put16(alloc, &out, 0);
+        try put16(alloc, &out, zip_date);
+        try put32(alloc, &out, std.hash.Crc32.hash(m.data));
+        try put32(alloc, &out, @intCast(m.data.len));
+        try put32(alloc, &out, @intCast(m.data.len));
+        try put16(alloc, &out, @intCast(m.name.len));
+        try put16(alloc, &out, 0);
+        try out.appendSlice(alloc, m.name);
+        try out.appendSlice(alloc, m.data);
     }
     const cd_at = out.items.len;
     for (members, 0..) |m, i| {
-        try put32(&out, 0x02014b50);
-        try put16(&out, 0x031e); // made by: unix, spec 3.0
-        try put16(&out, 20);
-        try put16(&out, 0);
-        try put16(&out, 0);
-        try put16(&out, 0);
-        try put16(&out, zip_date);
-        try put32(&out, std.hash.Crc32.hash(m.data));
-        try put32(&out, @intCast(m.data.len));
-        try put32(&out, @intCast(m.data.len));
-        try put16(&out, @intCast(m.name.len));
-        try put16(&out, 0);
-        try put16(&out, 0);
-        try put16(&out, 0);
-        try put16(&out, 0);
-        try put32(&out, 0o100644 << 16);
-        try put32(&out, offsets[i]);
-        try out.appendSlice(m.name);
+        try put32(alloc, &out, 0x02014b50);
+        try put16(alloc, &out, 0x031e); // made by: unix, spec 3.0
+        try put16(alloc, &out, 20);
+        try put16(alloc, &out, 0);
+        try put16(alloc, &out, 0);
+        try put16(alloc, &out, 0);
+        try put16(alloc, &out, zip_date);
+        try put32(alloc, &out, std.hash.Crc32.hash(m.data));
+        try put32(alloc, &out, @intCast(m.data.len));
+        try put32(alloc, &out, @intCast(m.data.len));
+        try put16(alloc, &out, @intCast(m.name.len));
+        try put16(alloc, &out, 0);
+        try put16(alloc, &out, 0);
+        try put16(alloc, &out, 0);
+        try put16(alloc, &out, 0);
+        try put32(alloc, &out, 0o100644 << 16);
+        try put32(alloc, &out, offsets[i]);
+        try out.appendSlice(alloc, m.name);
     }
     const cd_len = out.items.len - cd_at;
-    try put32(&out, 0x06054b50);
-    try put16(&out, 0);
-    try put16(&out, 0);
-    try put16(&out, @intCast(members.len));
-    try put16(&out, @intCast(members.len));
-    try put32(&out, @intCast(cd_len));
-    try put32(&out, @intCast(cd_at));
-    try put16(&out, 0);
-    return out.toOwnedSlice();
+    try put32(alloc, &out, 0x06054b50);
+    try put16(alloc, &out, 0);
+    try put16(alloc, &out, 0);
+    try put16(alloc, &out, @intCast(members.len));
+    try put16(alloc, &out, @intCast(members.len));
+    try put32(alloc, &out, @intCast(cd_len));
+    try put32(alloc, &out, @intCast(cd_at));
+    try put16(alloc, &out, 0);
+    return out.toOwnedSlice(alloc);
 }
 
 fn rd16(b: []const u8, at: usize) u16 {
@@ -165,7 +166,7 @@ pub fn readZip(alloc: Alloc, z: []const u8, what: []const u8) ![]ZipMember {
     const n = rd16(z, e + 10);
     if (rd16(z, e + 8) != n or rd16(z, e + 4) != 0 or rd16(z, e + 6) != 0) fail("{s}: a split or inconsistent zip", .{what});
     var at: usize = rd32(z, e + 16);
-    var list = std.ArrayList(ZipMember).init(alloc);
+    var list = std.ArrayList(ZipMember).empty;
     var i: usize = 0;
     while (i < n) : (i += 1) {
         if (at + 46 > z.len or rd32(z, at) != 0x02014b50) fail("{s}: bad central directory entry {d}", .{ what, i });
@@ -190,11 +191,11 @@ pub fn readZip(alloc: Alloc, z: []const u8, what: []const u8) ![]ZipMember {
             fail("{s}: member {s}: local header differs from the central directory", .{ what, name });
         const data = z[off + 30 + lnlen ..][0..csize];
         if (std.hash.Crc32.hash(data) != crc) fail("{s}: member {s}: bad CRC-32", .{ what, name });
-        try list.append(.{ .name = name, .data = data });
+        try list.append(alloc, .{ .name = name, .data = data });
         at += 46 + nlen;
     }
     if (at != e) fail("{s}: bytes between the central directory and its end record", .{what});
-    return list.toOwnedSlice();
+    return list.toOwnedSlice(alloc);
 }
 
 /// A tar member: a regular file, or a symbolic link (`link` its target, no data).
@@ -220,7 +221,7 @@ fn allZero(b: []const u8) bool {
 /// names) or any other entry type. Which links a package may hold is the
 /// check's (conda_check.zig): only the link name of its shared library.
 pub fn readTar(alloc: Alloc, t: []const u8, what: []const u8) ![]TarFile {
-    var list = std.ArrayList(TarFile).init(alloc);
+    var list = std.ArrayList(TarFile).empty;
     var at: usize = 0;
     while (true) {
         if (at + 512 > t.len) fail("{s}: truncated tar", .{what});
@@ -241,11 +242,11 @@ pub fn readTar(alloc: Alloc, t: []const u8, what: []const u8) ![]TarFile {
         at += 512;
         if (at + size > t.len) fail("{s}: {s}: truncated tar member", .{ what, name });
         if (link.len != 0 and size != 0) fail("{s}: {s}: a symbolic link with data", .{ what, name });
-        try list.append(.{ .name = name, .mode = mode, .data = t[at .. at + size], .link = link });
+        try list.append(alloc, .{ .name = name, .mode = mode, .data = t[at .. at + size], .link = link });
         at += (size + 511) / 512 * 512;
     }
     if (!allZero(t[at..])) fail("{s}: bytes after the end of the tar", .{what});
-    return list.toOwnedSlice();
+    return list.toOwnedSlice(alloc);
 }
 
 pub fn findTar(files: []const TarFile, name: []const u8) ?TarFile {
@@ -318,24 +319,24 @@ fn guardFor(subdir: []const u8) []const u8 {
 /// this package's. Direct dependencies only: the solver's closure is the
 /// build's.
 pub fn runRequirements(alloc: Alloc, subdir: []const u8, glibc: ?[]const u8, pin: []const u8, version: []const u8, build: []const u8, deps: []const []const u8) ![][]const u8 {
-    var list = std.ArrayList([]const u8).init(alloc);
-    try list.append(guardFor(subdir));
-    if (glibc) |g| try list.append(g);
-    try list.append(try std.fmt.allocPrint(alloc, "{s} =={s}", .{ mojo_conda_name, pin }));
+    var list = std.ArrayList([]const u8).empty;
+    try list.append(alloc, guardFor(subdir));
+    if (glibc) |g| try list.append(alloc, g);
+    try list.append(alloc, try std.fmt.allocPrint(alloc, "{s} =={s}", .{ mojo_conda_name, pin }));
     const sorted = try alloc.dupe([]const u8, deps);
     std.mem.sort([]const u8, sorted, {}, lessStr);
-    for (sorted) |d| try list.append(try std.fmt.allocPrint(alloc, "{s} =={s} {s}", .{ d, version, build }));
-    return list.toOwnedSlice();
+    for (sorted) |d| try list.append(alloc, try std.fmt.allocPrint(alloc, "{s} =={s} {s}", .{ d, version, build }));
+    return list.toOwnedSlice(alloc);
 }
 
 /// The run requirements of the metapackage: the platform guard, then every
 /// member at exactly its version and build string, sorted by name. No compiler
 /// pin: the members carry it.
 pub fn metaRequirements(alloc: Alloc, subdir: []const u8, members: []const Member) ![][]const u8 {
-    var list = std.ArrayList([]const u8).init(alloc);
-    try list.append(guardFor(subdir));
-    for (members) |m| try list.append(try std.fmt.allocPrint(alloc, "{s} =={s} {s}", .{ m.name, m.version, m.build }));
-    return list.toOwnedSlice();
+    var list = std.ArrayList([]const u8).empty;
+    try list.append(alloc, guardFor(subdir));
+    for (members) |m| try list.append(alloc, try std.fmt.allocPrint(alloc, "{s} =={s} {s}", .{ m.name, m.version, m.build }));
+    return list.toOwnedSlice(alloc);
 }
 
 pub fn strArray(alloc: Alloc, items: []const []const u8) !json.Value {
@@ -345,9 +346,9 @@ pub fn strArray(alloc: Alloc, items: []const []const u8) !json.Value {
 }
 
 pub fn jsonLine(alloc: Alloc, v: json.Value) ![]u8 {
-    var out = std.ArrayList(u8).init(alloc);
-    try writeSorted(alloc, v, out.writer());
-    try out.append('\n');
+    var out = std.Io.Writer.Allocating.init(alloc);
+    try writeSorted(alloc, v, &out.writer);
+    try out.writer.writeByte('\n');
     return out.toOwnedSlice();
 }
 
@@ -373,7 +374,7 @@ pub fn lessDoc(_: void, x: DocFile, y: DocFile) bool {
 /// tar name (100 bytes), since conda-check reads no extended header. The same
 /// path twice is refused. The bytes are read here; each is installed mode 0644.
 pub fn docFiles(alloc: Alloc, a: Args, name: []const u8) ![]DocFile {
-    var list = std.ArrayList(DocFile).init(alloc);
+    var list = std.ArrayList(DocFile).empty;
     for (try all(alloc, a, "--doc-file")) |df| {
         const eq = std.mem.indexOfScalar(u8, df, '=') orelse fail("--doc-file `{s}` is not <relative path>=<file>", .{df});
         const rel = df[0..eq];
@@ -390,9 +391,9 @@ pub fn docFiles(alloc: Alloc, a: Args, name: []const u8) ![]DocFile {
         const path = try std.fmt.allocPrint(alloc, "{s}{s}/{s}", .{ doc_dir, name, rel });
         if (path.len > 100) fail("--doc-file path `{s}` is {d} bytes; it must fit 100", .{ path, path.len });
         for (list.items) |d| if (std.mem.eql(u8, d.path, path)) fail("--doc-file {s} given twice", .{rel});
-        try list.append(.{ .path = path, .data = readAll(alloc, df[eq + 1 ..]) });
+        try list.append(alloc, .{ .path = path, .data = readAll(alloc, df[eq + 1 ..]) });
     }
-    const docs = try list.toOwnedSlice();
+    const docs = try list.toOwnedSlice(alloc);
     std.mem.sort(DocFile, docs, {}, lessDoc);
     return docs;
 }
@@ -416,7 +417,7 @@ pub fn aboutAndLicense(alloc: Alloc, a: Args, info_entries: *std.ArrayList(Entry
     try about.object.put("home", str(need(one(a, "--home"), "--home")));
     try about.object.put("license", str(need(one(a, "--license"), "--license")));
     try about.object.put("summary", str(summary));
-    try info_entries.append(.{ .path = "info/about.json", .mode = 0o644, .data = try jsonLine(alloc, about) });
+    try info_entries.append(alloc, .{ .path = "info/about.json", .mode = 0o644, .data = try jsonLine(alloc, about) });
     var have_license = false;
     for (try all(alloc, a, "--extra-file")) |ef| {
         const eq = std.mem.indexOfScalar(u8, ef, '=') orelse fail("--extra-file `{s}` is not info/<path>=<file>", .{ef});
@@ -424,7 +425,7 @@ pub fn aboutAndLicense(alloc: Alloc, a: Args, info_entries: *std.ArrayList(Entry
         if (!std.mem.startsWith(u8, dest, "info/licenses/") or std.mem.indexOf(u8, dest, "..") != null or dest.len > 100)
             fail("--extra-file destination `{s}` must be a short path under info/licenses/", .{dest});
         have_license = have_license or std.mem.eql(u8, dest, license_member);
-        try info_entries.append(.{ .path = dest, .mode = 0o644, .data = readAll(alloc, ef[eq + 1 ..]) });
+        try info_entries.append(alloc, .{ .path = dest, .mode = 0o644, .data = readAll(alloc, ef[eq + 1 ..]) });
     }
     if (!have_license) fail("no {s}: Apache-2.0 requires the licence text to accompany a redistributed package", .{license_member});
 }
@@ -508,15 +509,15 @@ pub fn platformFor(subdir: []const u8) []const u8 {
 }
 
 pub fn contractManifest(alloc: Alloc, name: []const u8, version: []const u8, subdir: []const u8, file: []const u8, sha: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(alloc);
-    const w = out.writer();
+    var out = std.Io.Writer.Allocating.init(alloc);
+    const w = &out.writer;
     try w.writeAll("{\"format\":\"kci.artifact_manifest\",\"schema_version\":1,\"artifact_type\":\"CONDA\"");
     const vals = [_][2][]const u8{ .{ "name", name }, .{ "version", version }, .{ "platform", platformFor(subdir) }, .{ "subdir", subdir }, .{ "file", file }, .{ "sha256", sha }, .{ "metadata", conda_manifest_metadata } };
     for (vals) |kv| {
         try w.writeAll(",\"");
         try w.writeAll(kv[0]);
         try w.writeAll("\":");
-        try json.encodeJsonString(kv[1], .{}, w);
+        try json.Stringify.encodeJsonString(kv[1], .{}, w);
     }
     try w.writeAll("}\n");
     return out.toOwnedSlice();
@@ -640,11 +641,11 @@ pub fn cmdConda(alloc: Alloc, a: Args) !void {
 
     // pkg/: the payload and the doc files, sorted by path (writeTar sorts
     // the tar the same way), and one paths.json row each in that order.
-    var pkg_list = std.ArrayList(Entry).init(alloc);
-    try pkg_list.append(.{ .path = payload_path, .mode = 0o644, .data = payload });
-    for (docs) |d| try pkg_list.append(.{ .path = d.path, .mode = 0o644, .data = d.data });
-    for (libs) |f| try pkg_list.append(.{ .path = f.path, .mode = f.mode(), .data = if (f.kind == .link) "" else f.data, .link = f.target });
-    const pkg_entries = try pkg_list.toOwnedSlice();
+    var pkg_list = std.ArrayList(Entry).empty;
+    try pkg_list.append(alloc, .{ .path = payload_path, .mode = 0o644, .data = payload });
+    for (docs) |d| try pkg_list.append(alloc, .{ .path = d.path, .mode = 0o644, .data = d.data });
+    for (libs) |f| try pkg_list.append(alloc, .{ .path = f.path, .mode = f.mode(), .data = if (f.kind == .link) "" else f.data, .link = f.target });
+    const pkg_entries = try pkg_list.toOwnedSlice(alloc);
     std.mem.sort(Entry, pkg_entries, {}, lessEntry);
     var rows = newArray(alloc);
     for (pkg_entries) |e| {
@@ -655,9 +656,9 @@ pub fn cmdConda(alloc: Alloc, a: Args) !void {
     try paths.object.put("paths", rows);
     try paths.object.put("paths_version", .{ .integer = 1 });
 
-    var info_entries = std.ArrayList(Entry).init(alloc);
-    try info_entries.append(.{ .path = "info/index.json", .mode = 0o644, .data = try jsonLine(alloc, index) });
-    try info_entries.append(.{ .path = "info/paths.json", .mode = 0o644, .data = try jsonLine(alloc, paths) });
+    var info_entries = std.ArrayList(Entry).empty;
+    try info_entries.append(alloc, .{ .path = "info/index.json", .mode = 0o644, .data = try jsonLine(alloc, index) });
+    try info_entries.append(alloc, .{ .path = "info/paths.json", .mode = 0o644, .data = try jsonLine(alloc, paths) });
     try aboutAndLicense(alloc, a, &info_entries);
 
     const stem = try std.fmt.allocPrint(alloc, "{s}-{s}-{s}", .{ name, version, build });
