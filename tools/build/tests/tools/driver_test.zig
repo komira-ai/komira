@@ -30,15 +30,15 @@ const Work = struct {
     fn put(self: *Work, name: []const u8, data: []const u8) void {
         const path = self.p(name);
         if (std.fs.path.dirname(path)) |d| std.fs.cwd().makePath(d) catch {};
-        std.fs.cwd().writeFile(path, data) catch @panic("write");
+        std.fs.cwd().writeFile(.{ .sub_path = path, .data = data }) catch @panic("write");
     }
 
     fn run(self: *Work, args: []const []const u8) !Res {
         const a = self.arena.allocator();
         const tool = try std.process.getEnvVarOwned(a, "TESTS_ACT");
-        var argv = std.ArrayList([]const u8).init(a);
-        try argv.append(tool);
-        try argv.appendSlice(args);
+        var argv = std.ArrayList([]const u8).empty;
+        try argv.append(a, tool);
+        try argv.appendSlice(a, args);
         const r = try std.process.Child.run(.{ .allocator = a, .argv = argv.items, .cwd = self.dir });
         return .{ .code = switch (r.term) {
             .Exited => |c| c,

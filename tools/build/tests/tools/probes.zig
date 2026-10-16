@@ -13,23 +13,23 @@ fn lessThan(_: void, a: []const u8, b: []const u8) bool {
 /// The environment variables, `NAME=value`, sorted.
 pub fn environment(a: A) ![]u8 {
     var env = try std.process.getEnvMap(a);
-    var lines = std.ArrayList([]const u8).init(a);
+    var lines = std.ArrayList([]const u8).empty;
     var it = env.iterator();
-    while (it.next()) |e| try lines.append(try std.fmt.allocPrint(a, "{s}={s}", .{ e.key_ptr.*, e.value_ptr.* }));
+    while (it.next()) |e| try lines.append(a, try std.fmt.allocPrint(a, "{s}={s}", .{ e.key_ptr.*, e.value_ptr.* }));
     std.mem.sort([]const u8, lines.items, {}, lessThan);
-    var out = std.ArrayList(u8).init(a);
-    for (lines.items) |l| try out.writer().print("{s}\n", .{l});
-    return out.toOwnedSlice();
+    var out = std.ArrayList(u8).empty;
+    for (lines.items) |l| try out.writer(a).print("{s}\n", .{l});
+    return out.toOwnedSlice(a);
 }
 
 /// The lines of `text` that start with `ID=` or `VERSION_ID=`.
 pub fn osRelease(a: A, text: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var it = std.mem.splitScalar(u8, text, '\n');
     while (it.next()) |l| {
-        if (std.mem.startsWith(u8, l, "ID=") or std.mem.startsWith(u8, l, "VERSION_ID=")) try out.writer().print("{s}\n", .{l});
+        if (std.mem.startsWith(u8, l, "ID=") or std.mem.startsWith(u8, l, "VERSION_ID=")) try out.writer(a).print("{s}\n", .{l});
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// `line` without the first ` (0x<hex>)` (the load address `ld.so --list` prints).
@@ -47,8 +47,8 @@ pub fn stripAddress(a: A, line: []const u8) ![]u8 {
 pub fn reProbe(a: A, args: []const []const u8) !void {
     if (args.len != 2) return error.Usage;
     const toolchain = args[0];
-    var out = std.ArrayList(u8).init(a);
-    const w = out.writer();
+    var out = std.ArrayList(u8).empty;
+    const w = out.writer(a);
     try w.writeAll("== inherited environment\n");
     try w.writeAll(try environment(a));
     try w.writeAll("== host paths\n");
@@ -88,10 +88,10 @@ pub fn inits(a: A, dir: std.fs.Dir, which: []const u8, strip: []const u8) ![][]c
     var set = std.StringHashMap(void).init(a);
     var d = dir.openDir(which, .{ .iterate = true }) catch return &.{};
     defer d.close();
-    var names = std.ArrayList([]const u8).init(a);
+    var names = std.ArrayList([]const u8).empty;
     var it = d.iterate();
     while (try it.next()) |e| {
-        if (e.kind == .file and std.mem.startsWith(u8, e.name, "ld.")) try names.append(try a.dupe(u8, e.name));
+        if (e.kind == .file and std.mem.startsWith(u8, e.name, "ld.")) try names.append(a, try a.dupe(u8, e.name));
     }
     std.mem.sort([]const u8, names.items, {}, lessThan);
     for (names.items) |n| {
@@ -109,11 +109,11 @@ pub fn inits(a: A, dir: std.fs.Dir, which: []const u8, strip: []const u8) ![][]c
             try set.put(line, {});
         }
     }
-    var out = std.ArrayList([]const u8).init(a);
+    var out = std.ArrayList([]const u8).empty;
     var ki = set.keyIterator();
-    while (ki.next()) |k| try out.append(k.*);
+    while (ki.next()) |k| try out.append(a, k.*);
     std.mem.sort([]const u8, out.items, {}, lessThan);
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 fn exitCode(term: std.process.Child.Term) u32 {
@@ -157,8 +157,8 @@ pub fn loaderTrace(a: A, args: []const []const u8) !u8 {
         run.stdout_behavior = .Ignore;
         rrc = exitCode(try run.spawnAndWait());
     }
-    var report = std.ArrayList(u8).init(a);
-    const w = report.writer();
+    var report = std.ArrayList(u8).empty;
+    const w = report.writer(a);
     try w.print("compile rc={d}\n", .{crc});
     if (rrc) |r| try w.print("run rc={d}\n", .{r}) else try w.writeAll("run rc=-\n");
     var root = try cwd.openDir(d, .{ .iterate = true });

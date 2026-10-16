@@ -29,10 +29,10 @@ pub fn main() !void {
     if (argv.len < 5) die("usage: bench_run <program> <data dir> <out> <run id file> [<argument>...]", .{});
     const program = if (std.fs.path.isAbsolute(argv[1])) argv[1] else try std.fs.path.join(a, &.{ try std.fs.cwd().realpathAlloc(a, "."), argv[1] });
     const run_id_text = std.fs.cwd().readFileAlloc(a, argv[4], 1 << 20) catch |e| die("cannot read {s}: {s}", .{ argv[4], @errorName(e) });
-    var cmd = std.ArrayList([]const u8).init(a);
-    try cmd.append(program);
-    try cmd.appendSlice(argv[5..]);
-    try cmd.append(firstLine(run_id_text));
+    var cmd = std.ArrayList([]const u8).empty;
+    try cmd.append(a, program);
+    try cmd.appendSlice(a, argv[5..]);
+    try cmd.append(a, firstLine(run_id_text));
     const out = std.fs.cwd().createFile(argv[3], .{}) catch |e| die("cannot create {s}: {s}", .{ argv[3], @errorName(e) });
     defer out.close();
     var child = std.process.Child.init(cmd.items, a);
@@ -41,7 +41,7 @@ pub fn main() !void {
     child.stderr_behavior = .Inherit;
     child.spawn() catch |e| die("cannot run {s}: {s}", .{ program, @errorName(e) });
     var buf: [65536]u8 = undefined;
-    const reader = child.stdout.?.reader();
+    const reader = child.stdout.?;
     while (true) {
         const n = reader.read(&buf) catch |e| die("cannot read the program's output: {s}", .{@errorName(e)});
         if (n == 0) break;

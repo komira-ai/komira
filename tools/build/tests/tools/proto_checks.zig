@@ -47,15 +47,15 @@ pub fn protoGen(a: A, args: []const []const u8) !void {
     try env.put("HOME", try cwd.realpathAlloc(a, t));
     // protoc searches the corpus first, then the roots in order, then its own
     // well-known types.
-    var argv = std.ArrayList([]const u8).init(a);
-    try argv.append(try std.fs.path.join(a, &.{ protoc, "bin/protoc" }));
-    try argv.append(try std.fmt.allocPrint(a, "--proto_path={s}", .{corpus}));
-    try argv.appendSlice(generate);
-    for (roots) |r| try argv.append(try std.fmt.allocPrint(a, "--proto_path={s}", .{r}));
-    try argv.append(try std.fmt.allocPrint(a, "--proto_path={s}/include", .{protoc}));
-    try argv.append(try std.fmt.allocPrint(a, "--plugin=protoc-gen-mojo={s}", .{plugin}));
-    try argv.append(try std.fmt.allocPrint(a, "--mojo_out={s}", .{files}));
-    try argv.append(try std.fmt.allocPrint(a, "--mojo_opt={s}", .{options}));
+    var argv = std.ArrayList([]const u8).empty;
+    try argv.append(a, try std.fs.path.join(a, &.{ protoc, "bin/protoc" }));
+    try argv.append(a, try std.fmt.allocPrint(a, "--proto_path={s}", .{corpus}));
+    try argv.appendSlice(a, generate);
+    for (roots) |r| try argv.append(a, try std.fmt.allocPrint(a, "--proto_path={s}", .{r}));
+    try argv.append(a, try std.fmt.allocPrint(a, "--proto_path={s}/include", .{protoc}));
+    try argv.append(a, try std.fmt.allocPrint(a, "--plugin=protoc-gen-mojo={s}", .{plugin}));
+    try argv.append(a, try std.fmt.allocPrint(a, "--mojo_out={s}", .{files}));
+    try argv.append(a, try std.fmt.allocPrint(a, "--mojo_opt={s}", .{options}));
     const r = try std.process.Child.run(.{ .allocator = a, .argv = argv.items, .env_map = &env, .max_output_bytes = 1 << 26 });
     const rc: u32 = switch (r.term) {
         .Exited => |c| c,
@@ -73,31 +73,31 @@ fn writeFile(path: []const u8, data: []const u8) !void {
 }
 
 fn listTop(a: A, dir: std.fs.Dir) ![][]const u8 {
-    var names = std.ArrayList([]const u8).init(a);
+    var names = std.ArrayList([]const u8).empty;
     var it = dir.iterate();
-    while (try it.next()) |e| try names.append(try a.dupe(u8, e.name));
+    while (try it.next()) |e| try names.append(a, try a.dupe(u8, e.name));
     std.mem.sort([]const u8, names.items, {}, lessThan);
-    return names.toOwnedSlice();
+    return names.toOwnedSlice(a);
 }
 
 /// The relative paths of the regular files under `dir`, sorted.
 fn listFiles(a: A, dir: std.fs.Dir) ![][]const u8 {
-    var out = std.ArrayList([]const u8).init(a);
+    var out = std.ArrayList([]const u8).empty;
     var w = try dir.walk(a);
     while (try w.next()) |e| {
-        if (e.kind != .directory) try out.append(try a.dupe(u8, e.path));
+        if (e.kind != .directory) try out.append(a, try a.dupe(u8, e.path));
     }
     std.mem.sort([]const u8, out.items, {}, lessThan);
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 fn grepHits(a: A, dir: std.fs.Dir, needle: []const u8) ![][]const u8 {
-    var hits = std.ArrayList([]const u8).init(a);
+    var hits = std.ArrayList([]const u8).empty;
     for (try listFiles(a, dir)) |f| {
         const data = try dir.readFileAlloc(a, f, 1 << 28);
-        if (std.mem.indexOf(u8, data, needle) != null) try hits.append(f);
+        if (std.mem.indexOf(u8, data, needle) != null) try hits.append(a, f);
     }
-    return hits.toOwnedSlice();
+    return hits.toOwnedSlice(a);
 }
 
 /// The differences between the trees `golden` and `got` as `diff -r -u` shows
@@ -106,27 +106,27 @@ pub fn treeDiff(a: A, golden: std.fs.Dir, golden_name: []const u8, got: std.fs.D
     var names = std.StringHashMap(void).init(a);
     for (try listFiles(a, golden)) |f| try names.put(f, {});
     for (try listFiles(a, got)) |f| try names.put(f, {});
-    var sorted = std.ArrayList([]const u8).init(a);
+    var sorted = std.ArrayList([]const u8).empty;
     var it = names.keyIterator();
-    while (it.next()) |k| try sorted.append(k.*);
+    while (it.next()) |k| try sorted.append(a, k.*);
     std.mem.sort([]const u8, sorted.items, {}, lessThan);
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     for (sorted.items) |f| {
         const x = golden.readFileAlloc(a, f, 1 << 28) catch null;
         const y = got.readFileAlloc(a, f, 1 << 28) catch null;
         if (x == null) {
-            try out.writer().print("Only in {s}: {s}\n", .{ got_name, f });
+            try out.writer(a).print("Only in {s}: {s}\n", .{ got_name, f });
         } else if (y == null) {
-            try out.writer().print("Only in {s}: {s}\n", .{ golden_name, f });
+            try out.writer(a).print("Only in {s}: {s}\n", .{ golden_name, f });
         } else if (!std.mem.eql(u8, x.?, y.?)) {
             const l1 = try std.fmt.allocPrint(a, "{s}/{s}", .{ golden_name, f });
             const l2 = try std.fmt.allocPrint(a, "{s}/{s}", .{ got_name, f });
-            try out.writer().print("diff -r -u {s} {s}\n", .{ l1, l2 });
-            if (try diff.unifiedDiff(a, l1, l2, x.?, y.?)) |d| try out.appendSlice(d);
+            try out.writer(a).print("diff -r -u {s} {s}\n", .{ l1, l2 });
+            if (try diff.unifiedDiff(a, l1, l2, x.?, y.?)) |d| try out.appendSlice(a, d);
         }
     }
     if (out.items.len == 0) return null;
-    return try out.toOwnedSlice();
+    return try out.toOwnedSlice(a);
 }
 
 /// proto-check <gen> <golden dir or ""> <expected error or ""> <mark> <n absent> <absent>... <present>...
@@ -186,16 +186,16 @@ pub const rest_end = "# ---- end of REST URL helpers ----";
 
 /// The lines of `src` from the begin marker to the end marker, both included.
 pub fn restBlock(a: A, src: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var on = false;
     var lines = std.mem.splitScalar(u8, src, '\n');
     while (lines.next()) |l| {
         if (lines.peek() == null and l.len == 0) break;
         if (std.mem.eql(u8, l, rest_begin)) on = true;
-        if (on) try out.writer().print("{s}\n", .{l});
+        if (on) try out.writer(a).print("{s}\n", .{l});
         if (std.mem.eql(u8, l, rest_end)) on = false;
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 fn countLines(src: []const u8, line: []const u8) usize {

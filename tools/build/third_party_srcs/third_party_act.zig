@@ -33,11 +33,11 @@ pub const Op = struct { sign: u8, line: []const u8 };
 /// The lines of `text` as `diff` sees them: split at newlines, the empty piece
 /// after a final newline not a line.
 pub fn lines(a: std.mem.Allocator, text: []const u8) ![][]const u8 {
-    var list = std.ArrayList([]const u8).init(a);
+    var list = std.ArrayList([]const u8).empty;
     var it = std.mem.splitScalar(u8, text, '\n');
-    while (it.next()) |l| try list.append(l);
+    while (it.next()) |l| try list.append(a, l);
     if (list.items.len > 0 and list.items[list.items.len - 1].len == 0) _ = list.pop();
-    return list.toOwnedSlice();
+    return list.toOwnedSlice(a);
 }
 
 /// The `-` and `+` lines of `diff -U0 have got`, in its order: within a run of
@@ -55,11 +55,11 @@ pub fn diffOps(a: std.mem.Allocator, have: []const []const u8, got: []const []co
     }
     const h = have[start..he];
     const g = got[start..ge];
-    var ops = std.ArrayList(Op).init(a);
+    var ops = std.ArrayList(Op).empty;
     if (h.len == 0 or g.len == 0 or h.len * g.len > 16 * 1024 * 1024) {
-        for (h) |l| try ops.append(.{ .sign = '-', .line = l });
-        for (g) |l| try ops.append(.{ .sign = '+', .line = l });
-        return ops.toOwnedSlice();
+        for (h) |l| try ops.append(a, .{ .sign = '-', .line = l });
+        for (g) |l| try ops.append(a, .{ .sign = '+', .line = l });
+        return ops.toOwnedSlice(a);
     }
     // lcs[i][j]: the length of the longest common subsequence of h[i..] and g[j..].
     const w = g.len + 1;
@@ -74,41 +74,41 @@ pub fn diffOps(a: std.mem.Allocator, have: []const []const u8, got: []const []co
             lcs[i * w + j] = if (std.mem.eql(u8, h[i], g[j])) lcs[(i + 1) * w + j + 1] + 1 else @max(lcs[(i + 1) * w + j], lcs[i * w + j + 1]);
         }
     }
-    var removed = std.ArrayList([]const u8).init(a);
-    var added = std.ArrayList([]const u8).init(a);
+    var removed = std.ArrayList([]const u8).empty;
+    var added = std.ArrayList([]const u8).empty;
     var x: usize = 0;
     var y: usize = 0;
     while (x < h.len or y < g.len) {
         if (x < h.len and y < g.len and std.mem.eql(u8, h[x], g[y])) {
-            for (removed.items) |l| try ops.append(.{ .sign = '-', .line = l });
-            for (added.items) |l| try ops.append(.{ .sign = '+', .line = l });
+            for (removed.items) |l| try ops.append(a, .{ .sign = '-', .line = l });
+            for (added.items) |l| try ops.append(a, .{ .sign = '+', .line = l });
             removed.clearRetainingCapacity();
             added.clearRetainingCapacity();
             x += 1;
             y += 1;
         } else if (x < h.len and (y >= g.len or lcs[(x + 1) * w + y] >= lcs[x * w + y + 1])) {
-            try removed.append(h[x]);
+            try removed.append(a, h[x]);
             x += 1;
         } else {
-            try added.append(g[y]);
+            try added.append(a, g[y]);
             y += 1;
         }
     }
-    for (removed.items) |l| try ops.append(.{ .sign = '-', .line = l });
-    for (added.items) |l| try ops.append(.{ .sign = '+', .line = l });
-    return ops.toOwnedSlice();
+    for (removed.items) |l| try ops.append(a, .{ .sign = '-', .line = l });
+    for (added.items) |l| try ops.append(a, .{ .sign = '+', .line = l });
+    return ops.toOwnedSlice(a);
 }
 
 /// What the script showed of a diff: the changed lines whose text does not
 /// begin with `-` or `+` (a line with no text is not shown), the first `max`.
 pub fn shown(a: std.mem.Allocator, ops: []const Op, max: usize) ![][]u8 {
-    var out = std.ArrayList([]u8).init(a);
+    var out = std.ArrayList([]u8).empty;
     for (ops) |op| {
         if (out.items.len == max) break;
         if (op.line.len == 0 or op.line[0] == '-' or op.line[0] == '+') continue;
-        try out.append(try std.fmt.allocPrint(a, "{c}{s}", .{ op.sign, op.line }));
+        try out.append(a, try std.fmt.allocPrint(a, "{c}{s}", .{ op.sign, op.line }));
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 fn cmdDrift(a: std.mem.Allocator, args: []const []const u8) u8 {
@@ -120,7 +120,7 @@ fn cmdDrift(a: std.mem.Allocator, args: []const []const u8) u8 {
     const regen = f.need("regenerate") catch return usage("drift needs --regenerate", .{});
     const got = std.fs.cwd().readFileAlloc(a, got_path, 1 << 28) catch |e| return usage("cannot read {s}: {s}", .{ got_path, @errorName(e) });
     const have = std.fs.cwd().readFileAlloc(a, have_path, 1 << 28) catch |e| return usage("cannot read {s}: {s}", .{ have_path, @errorName(e) });
-    const out = std.io.getStdOut().writer();
+    const out = std.fs.File.stdout().deprecatedWriter();
     if (std.mem.eql(u8, got, have)) {
         out.print("third_party_srcs: {s} matches the archive\n", .{have_path}) catch return 2;
         return 0;
@@ -141,14 +141,20 @@ pub fn gunzip(dir: std.fs.Dir, src: []const u8, dst: []const u8) !void {
     defer in.close();
     const out = try dir.createFile(dst, .{});
     defer out.close();
-    var br = std.io.bufferedReader(in.reader());
-    var dec = std.compress.gzip.decompressor(br.reader());
+    // Whole file inflated with no window buffer: the standard library's windowed
+    // decoder mishandles a fixed-Huffman match at the end of its window.
+    const a = std.heap.page_allocator;
+    const gz = try in.readToEndAlloc(a, 1 << 31);
+    defer a.free(gz);
+    var gz_in: std.Io.Reader = .fixed(gz);
+    var dec = std.compress.flate.Decompress.init(&gz_in, .gzip, &.{});
     var buf: [65536]u8 = undefined;
-    while (true) {
-        const n = try dec.reader().read(&buf);
-        if (n == 0) break;
-        try out.writeAll(buf[0..n]);
-    }
+    var fw = out.writer(&buf);
+    _ = dec.reader.streamRemaining(&fw.interface) catch |e| return switch (e) {
+        error.ReadFailed => dec.err orelse e,
+        error.WriteFailed => fw.err orelse e,
+    };
+    try fw.interface.flush();
 }
 
 fn cmdSrcsGen(a: std.mem.Allocator, args: []const []const u8) u8 {

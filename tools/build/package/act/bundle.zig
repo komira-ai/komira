@@ -30,13 +30,13 @@ pub const Plan = struct {
 /// LC_ALL=C sort`, then `sha256sum`).
 pub fn sums(a: std.mem.Allocator, dir: std.fs.Dir) ![]u8 {
     const files = try U.listFiles(a, dir, false);
-    var b = std.ArrayList(u8).init(a);
+    var b = std.ArrayList(u8).empty;
     for (files) |rel| {
         const data = try dir.readFileAlloc(std.heap.page_allocator, rel, 1 << 30);
         defer std.heap.page_allocator.free(data);
-        try b.writer().print("{s}  {s}\n", .{ &U.sha256Hex(data), rel });
+        try b.writer(a).print("{s}  {s}\n", .{ &U.sha256Hex(data), rel });
     }
-    return b.toOwnedSlice();
+    return b.toOwnedSlice(a);
 }
 
 pub fn assemble(a: std.mem.Allocator, p: Plan) !void {

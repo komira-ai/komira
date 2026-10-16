@@ -45,35 +45,6 @@ pub fn modeOf(tar_mode: u32) std.fs.File.Mode {
     return if (tar_mode & 0o111 != 0) 0o755 else 0o644;
 }
 
-/// A reader that remembers the last 512 bytes read through it. The tar
-/// iterator has read exactly the header block of an entry when it returns it,
-/// so those bytes are that header (the standard library's File has no mtime).
-fn Tee(comptime R: type) type {
-    return struct {
-        inner: R,
-        last: [512]u8 = [_]u8{0} ** 512,
-
-        const Self = @This();
-        pub const ReadError = R.Error;
-        pub const Reader = std.io.Reader(*Self, ReadError, read);
-
-        pub fn reader(self: *Self) Reader {
-            return .{ .context = self };
-        }
-
-        fn read(self: *Self, dest: []u8) ReadError!usize {
-            const n = try self.inner.read(dest);
-            if (n >= 512) {
-                @memcpy(&self.last, dest[n - 512 .. n]);
-            } else if (n > 0) {
-                std.mem.copyForwards(u8, self.last[0 .. 512 - n], self.last[n..]);
-                @memcpy(self.last[512 - n ..], dest[0..n]);
-            }
-            return n;
-        }
-    };
-}
-
 /// The modification time (seconds) a tar header block states: octal digits,
 /// or GNU's base-256 form; null when it states none that can be read.
 pub fn headerMtime(header: *const [512]u8) ?u64 {
@@ -98,15 +69,16 @@ pub fn headerMtime(header: *const [512]u8) ?u64 {
 }
 
 /// Extracts the entries of the tar read from `reader` that are below `top` and
-/// that `keep` accepts (it is given the path below `top`) into `dest`.
-pub fn extractTar(dest: std.fs.Dir, reader: anytype, top: []const u8, comptime keep: fn ([]const u8) bool) !void {
+/// that `keep` accepts (it is given the path below `top`) into `dest`. The tar
+/// iterator has read exactly the header block of an entry when it returns it,
+/// so `header_buffer` is that header (the standard library's File has no mtime).
+pub fn extractTar(dest: std.fs.Dir, reader: *std.Io.Reader, top: []const u8, comptime keep: fn ([]const u8) bool) !void {
     var name_buf: [4096]u8 = undefined;
     var link_buf: [4096]u8 = undefined;
     var rel_buf: [4096]u8 = undefined;
-    var tee = Tee(@TypeOf(reader)){ .inner = reader };
-    var it = std.tar.iterator(tee.reader(), .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
+    var it = std.tar.Iterator.init(reader, .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
     while (try it.next()) |f| {
-        const mtime = headerMtime(&tee.last);
+        const mtime = headerMtime(&it.header_buffer);
         const rest = (try below(f.name, top, &rel_buf)) orelse continue;
         if (rest.len == 0 or !keep(rest)) continue;
         switch (f.kind) {
@@ -115,7 +87,10 @@ pub fn extractTar(dest: std.fs.Dir, reader: anytype, top: []const u8, comptime k
                 if (std.fs.path.dirname(rest)) |d| try dest.makePath(d);
                 const file = try dest.createFile(rest, .{ .mode = modeOf(f.mode) });
                 defer file.close();
-                try f.writeAll(file);
+                var fbuf: [64 * 1024]u8 = undefined;
+                var fw = file.writer(&fbuf);
+                try it.streamRemaining(f, &fw.interface);
+                try fw.interface.flush();
                 try file.chmod(modeOf(f.mode));
                 if (mtime) |m| {
                     const ns = @as(i128, m) * std.time.ns_per_s;
@@ -131,11 +106,18 @@ pub fn extractTar(dest: std.fs.Dir, reader: anytype, top: []const u8, comptime k
     }
 }
 
-/// `extractTar` over the gzip stream `bytes`.
-pub fn extractTgz(dest: std.fs.Dir, bytes: []const u8, top: []const u8, comptime keep: fn ([]const u8) bool) !void {
-    var fbs = std.io.fixedBufferStream(bytes);
-    var dec = std.compress.gzip.decompressor(fbs.reader());
-    return extractTar(dest, dec.reader(), top, keep);
+/// `extractTar` over the gzip stream `bytes`. The stream is inflated into memory
+/// first, with no window buffer: the standard library's windowed decoder mishandles a
+/// fixed-Huffman match that reaches the end of its window, and a stream read to its
+/// end also has its gzip trailer (CRC and length) checked.
+pub fn extractTgz(a: std.mem.Allocator, dest: std.fs.Dir, bytes: []const u8, top: []const u8, comptime keep: fn ([]const u8) bool) !void {
+    var in: std.Io.Reader = .fixed(bytes);
+    var dec = std.compress.flate.Decompress.init(&in, .gzip, &.{});
+    var tar_bytes = std.Io.Writer.Allocating.init(a);
+    defer tar_bytes.deinit();
+    _ = dec.reader.streamRemaining(&tar_bytes.writer) catch |e| return if (e == error.ReadFailed) (dec.err orelse e) else e;
+    var tar: std.Io.Reader = .fixed(tar_bytes.written());
+    return extractTar(dest, &tar, top, keep);
 }
 
 pub fn keepAll(_: []const u8) bool {

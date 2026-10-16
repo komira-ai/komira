@@ -39,16 +39,16 @@ pub fn checkOutputs(a: std.mem.Allocator, dir: std.fs.Dir, expected: []const []c
         const st = dir.statFile(f) catch return .{ .empty = f };
         if (st.size == 0) return .{ .empty = f };
     }
-    var names = std.ArrayList([]const u8).init(a);
+    var names = std.ArrayList([]const u8).empty;
     var it = dir.iterate();
-    while (try it.next()) |e| try names.append(try a.dupe(u8, e.name));
+    while (try it.next()) |e| try names.append(a, try a.dupe(u8, e.name));
     if (names.items.len != expected.len + 1) {
         std.mem.sort([]const u8, names.items, {}, struct {
             fn lt(_: void, x: []const u8, y: []const u8) bool {
                 return std.mem.lessThan(u8, x, y);
             }
         }.lt);
-        return .{ .undeclared = try names.toOwnedSlice() };
+        return .{ .undeclared = try names.toOwnedSlice(a) };
     }
     return .ok;
 }
@@ -117,14 +117,14 @@ pub fn main() !void {
     try env.put("TMPDIR", tmp);
     try env.put("HOME", t);
 
-    var args = std.ArrayList([]const u8).init(a);
-    try args.append(try std.fs.path.join(a, &.{ protoc_dir, "bin", "protoc" }));
-    for (paths) |p| try args.append(try std.fmt.allocPrint(a, "--proto_path={s}", .{p}));
-    try args.append(try std.fmt.allocPrint(a, "--proto_path={s}/include", .{protoc_dir}));
-    try args.append(try std.fmt.allocPrint(a, "--plugin=protoc-gen-{s}={s}", .{ name, plugin }));
-    try args.append(try std.fmt.allocPrint(a, "--{s}_out={s}", .{ name, out_dir }));
-    try args.append(try std.fmt.allocPrint(a, "--{s}_opt={s}", .{ name, opt }));
-    try args.appendSlice(protos);
+    var args = std.ArrayList([]const u8).empty;
+    try args.append(a, try std.fs.path.join(a, &.{ protoc_dir, "bin", "protoc" }));
+    for (paths) |p| try args.append(a, try std.fmt.allocPrint(a, "--proto_path={s}", .{p}));
+    try args.append(a, try std.fmt.allocPrint(a, "--proto_path={s}/include", .{protoc_dir}));
+    try args.append(a, try std.fmt.allocPrint(a, "--plugin=protoc-gen-{s}={s}", .{ name, plugin }));
+    try args.append(a, try std.fmt.allocPrint(a, "--{s}_out={s}", .{ name, out_dir }));
+    try args.append(a, try std.fmt.allocPrint(a, "--{s}_opt={s}", .{ name, opt }));
+    try args.appendSlice(a, protos);
     var child = std.process.Child.init(args.items, a);
     child.env_map = &env;
     const term = child.spawnAndWait() catch |e| die(2, "cannot run {s}: {s}", .{ args.items[0], @errorName(e) });

@@ -161,13 +161,13 @@ test "modeString and listing: type, permissions, sha256 of files, sorted by path
     var tmp = t.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     try tmp.dir.makePath("lib");
-    try tmp.dir.writeFile("lib/b", "hello");
-    try tmp.dir.writeFile("a", "");
+    try tmp.dir.writeFile(.{ .sub_path = "lib/b", .data = "hello" });
+    try tmp.dir.writeFile(.{ .sub_path = "a", .data = "" });
     const path = try tmp.dir.realpathAlloc(a, ".");
     const l = try C.listing(a, path);
     var lines = std.mem.splitScalar(u8, std.mem.trimRight(u8, l, "\n"), '\n');
-    var paths = std.ArrayList([]const u8).init(a);
-    while (lines.next()) |x| try paths.append(x[std.mem.lastIndexOfScalar(u8, x, ' ').? + 1 ..]);
+    var paths = std.ArrayList([]const u8).empty;
+    while (lines.next()) |x| try paths.append(a, x[std.mem.lastIndexOfScalar(u8, x, ' ').? + 1 ..]);
     try t.expectEqual(@as(usize, 4), paths.items.len);
     try t.expectEqualStrings(".", paths.items[0]);
     try t.expectEqualStrings("./a", paths.items[1]);

@@ -32,10 +32,10 @@ pub fn gen(a: A, args: []const []const u8) !void {
     const out = args[1];
     const module = args[2];
     try std.fs.cwd().makePath(out);
-    var argv = std.ArrayList([]const u8).init(a);
-    try argv.appendSlice(&.{ args[0], "--module", module, "--out", try std.fmt.allocPrint(a, "{s}/{s}.mojo", .{ out, module }) });
-    if (std.mem.eql(u8, args[3], "1")) try argv.appendSlice(&.{ "--probe-out", try std.fmt.allocPrint(a, "{s}/_layout_probe.mojo", .{out}) });
-    try argv.appendSlice(args[5..]);
+    var argv = std.ArrayList([]const u8).empty;
+    try argv.appendSlice(a, &.{ args[0], "--module", module, "--out", try std.fmt.allocPrint(a, "{s}/{s}.mojo", .{ out, module }) });
+    if (std.mem.eql(u8, args[3], "1")) try argv.appendSlice(a, &.{ "--probe-out", try std.fmt.allocPrint(a, "{s}/_layout_probe.mojo", .{out}) });
+    try argv.appendSlice(a, args[5..]);
     var child = std.process.Child.init(argv.items, a);
     const code = exitCode(try child.spawnAndWait());
     if (code != 0) std.process.exit(@intCast(code));
@@ -51,10 +51,10 @@ pub fn refuse(a: A, args: []const []const u8) !void {
     try std.fs.cwd().deleteTree(t);
     try std.fs.cwd().makePath(out);
     defer std.fs.cwd().deleteTree(t) catch {};
-    var argv = std.ArrayList([]const u8).init(a);
-    try argv.appendSlice(&.{ args[0], "--module", "refused", "--out", try std.fs.path.join(a, &.{ out, "refused.mojo" }) });
-    if (std.mem.eql(u8, args[3], "1")) try argv.appendSlice(&.{ "--probe-out", try std.fs.path.join(a, &.{ out, "_layout_probe.mojo" }) });
-    try argv.appendSlice(args[5..]);
+    var argv = std.ArrayList([]const u8).empty;
+    try argv.appendSlice(a, &.{ args[0], "--module", "refused", "--out", try std.fs.path.join(a, &.{ out, "refused.mojo" }) });
+    if (std.mem.eql(u8, args[3], "1")) try argv.appendSlice(a, &.{ "--probe-out", try std.fs.path.join(a, &.{ out, "_layout_probe.mojo" }) });
+    try argv.appendSlice(a, args[5..]);
     // The probe flag precedes the user's arguments, as the script's `set --` put it.
     const r = try std.process.Child.run(.{ .allocator = a, .argv = argv.items, .max_output_bytes = 1 << 26 });
     const rc = exitCode(r.term);
@@ -65,11 +65,11 @@ pub fn refuse(a: A, args: []const []const u8) !void {
     }
     var d = try std.fs.cwd().openDir(out, .{ .iterate = true });
     defer d.close();
-    var names = std.ArrayList(u8).init(a);
+    var names = std.ArrayList(u8).empty;
     var it = d.iterate();
     while (try it.next()) |e| {
-        if (names.items.len > 0) try names.append(' ');
-        try names.appendSlice(e.name);
+        if (names.items.len > 0) try names.append(a, ' ');
+        try names.appendSlice(a, e.name);
     }
     if (names.items.len > 0) fail("aws_codegen: the generator refused but wrote: {s}", .{names.items});
     try writeFile(args[1], try std.fmt.allocPrint(a, "refused (exit {d}): {s}\n", .{ rc, args[2] }));
@@ -77,14 +77,14 @@ pub fn refuse(a: A, args: []const []const u8) !void {
 
 /// `text` as one line: each line with its leading spaces dropped, followed by \x1e.
 pub fn flat(a: A, text: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var lines = std.mem.splitScalar(u8, text, '\n');
     while (lines.next()) |l| {
         if (lines.peek() == null and l.len == 0) break;
-        try out.appendSlice(std.mem.trimLeft(u8, l, " "));
-        try out.append(0x1e);
+        try out.appendSlice(a, std.mem.trimLeft(u8, l, " "));
+        try out.append(a, 0x1e);
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// Whether the generated `module` holds `want` as whole lines, leading spaces
@@ -94,29 +94,29 @@ pub fn flat(a: A, text: []const u8) ![]u8 {
 pub fn holds(a: A, module: []const u8, want: []const u8) !bool {
     const hay = try std.mem.concat(a, u8, &.{ "\x1e", try flat(a, module) });
     var lines = std.mem.splitScalar(u8, want, '\n');
-    var needle = std.ArrayList(u8).init(a);
-    try needle.append(0x1e);
+    var needle = std.ArrayList(u8).empty;
+    try needle.append(a, 0x1e);
     var first = true;
     while (lines.next()) |l| {
         if (lines.peek() == null and l.len == 0 and !first) break;
-        try needle.appendSlice(if (first) l else std.mem.trimLeft(u8, l, " "));
-        try needle.append(0x1e);
+        try needle.appendSlice(a, if (first) l else std.mem.trimLeft(u8, l, " "));
+        try needle.append(a, 0x1e);
         first = false;
     }
     return std.mem.indexOf(u8, hay, needle.items) != null;
 }
 
 fn head60(a: A, text: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var lines = std.mem.splitScalar(u8, text, '\n');
     var n: usize = 0;
     while (lines.next()) |l| {
         if (lines.peek() == null and l.len == 0) break;
         if (n == 60) break;
-        try out.writer().print("{s}\n", .{l});
+        try out.writer(a).print("{s}\n", .{l});
         n += 1;
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// aws-cmp <stamp> <gen dir> <module> <golden> <golden probe|-> [<must contain>...]

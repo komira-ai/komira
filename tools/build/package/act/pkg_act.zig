@@ -155,9 +155,9 @@ fn cmdCondaManifestKci(a: std.mem.Allocator, args: []const []const u8) u8 {
     env.put("HOME", home) catch return 2;
 
     const manifest = std.fs.path.join(a, &.{ dir, "manifest.json" }) catch return 2;
-    var argv = std.ArrayList([]const u8).init(a);
-    argv.appendSlice(args[2..]) catch return 2;
-    argv.append(manifest) catch return 2;
+    var argv = std.ArrayList([]const u8).empty;
+    argv.appendSlice(a, args[2..]) catch return 2;
+    argv.append(a, manifest) catch return 2;
     const r = U.runCapture(a, argv.items, &env, null) catch |e| return usage("cannot run {s}: {s}", .{ args[2], @errorName(e) });
     const all = std.mem.concat(a, u8, &.{ r.stdout, r.stderr }) catch return 2;
     const line = U.trimNewlines(all);
@@ -238,10 +238,10 @@ fn cmdOrderTest(a: std.mem.Allocator, args: []const []const u8, exe: []const u8)
     defer std.fs.cwd().deleteTree(scratch) catch {};
     const marker = std.fs.path.join(a, &.{ scratch, "out" }) catch return 2;
 
-    var argv = std.ArrayList([]const u8).init(a);
-    argv.appendSlice(&.{ exe, "release-order-check", "--out", marker, "--set", f.need("set") catch return 2, "--version", f.need("version") catch return 2, "--build", f.need("build") catch return 2 }) catch return 2;
+    var argv = std.ArrayList([]const u8).empty;
+    argv.appendSlice(a, &.{ exe, "release-order-check", "--out", marker, "--set", f.need("set") catch return 2, "--version", f.need("version") catch return 2, "--build", f.need("build") catch return 2 }) catch return 2;
     const ms = f.all(a, "member") catch return 2;
-    for (ms) |m| argv.appendSlice(&.{ "--member", m.vals[0], m.vals[1] }) catch return 2;
+    for (ms) |m| argv.appendSlice(a, &.{ "--member", m.vals[0], m.vals[1] }) catch return 2;
     const r = U.runCapture(a, argv.items, null, null) catch |e| return usage("cannot run the order check: {s}", .{@errorName(e)});
     const verdict = release.judgeOrderRun(a, r.code, r.stderr, want) catch return 2;
     if (verdict) |why| {

@@ -18,7 +18,7 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const a = arena.allocator();
     const args = try std.process.argsAlloc(a);
-    const out = std.io.getStdOut().writer();
+    const out = std.fs.File.stdout().deprecatedWriter();
     const mode = std.process.getEnvVarOwned(a, "PROBE_MODE") catch "ok";
     if (std.mem.eql(u8, mode, "level")) {
         try out.writeAll("level report\n");

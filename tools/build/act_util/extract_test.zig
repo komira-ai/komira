@@ -46,7 +46,7 @@ test "extractTgz: only the kept entries under the top, with tar's modes, links k
     });
     var tmp = t.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
-    try X.extractTgz(tmp.dir, try tartest.gzip(a, tar), "node-x", keepDist);
+    try X.extractTgz(a, tmp.dir, try tartest.gzip(a, tar), "node-x", keepDist);
     try t.expectEqualStrings("NODE", try tmp.dir.readFileAlloc(a, "bin/node", 100));
     try t.expectEqual(@as(std.fs.File.Mode, 0o755), try modeOf(tmp.dir, "bin/node"));
     try t.expectEqual(@as(std.fs.File.Mode, 0o644), try modeOf(tmp.dir, "LICENSE"));
@@ -70,12 +70,12 @@ test "extractTgz: keepAll takes the whole package; an escaping path is refused" 
         .{ .name = "package/bin/run", .mode = 0o755, .data = "R" },
         .{ .name = "package/lib/a.js", .mode = 0o400, .data = "A" },
     });
-    try X.extractTgz(tmp.dir, ok, "package", X.keepAll);
+    try X.extractTgz(a, tmp.dir, ok, "package", X.keepAll);
     try t.expectEqual(@as(std.fs.File.Mode, 0o755), try modeOf(tmp.dir, "bin/run"));
     try t.expectEqual(@as(std.fs.File.Mode, 0o644), try modeOf(tmp.dir, "lib/a.js"));
     _ = try tmp.dir.statFile("package.json");
     const bad = try tartest.tgz(a, "p", "1.0.0", &.{.{ .name = "package/../../etc/x", .data = "no" }});
-    try t.expectError(error.PathEscapes, X.extractTgz(tmp.dir, bad, "package", X.keepAll));
+    try t.expectError(error.PathEscapes, X.extractTgz(a, tmp.dir, bad, "package", X.keepAll));
 }
 
 
@@ -108,7 +108,7 @@ test "extractTgz: each file gets its header's modification time, so what a progr
         .{ .name = "package/dir/b.js", .data = "B", .mtime = 1700000000 },
         .{ .name = "package/c.js", .data = "C", .mtime = 0 },
     });
-    try X.extractTgz(tmp.dir, gz, "package", X.keepAll);
+    try X.extractTgz(a, tmp.dir, gz, "package", X.keepAll);
     const sec = std.time.ns_per_s;
     try t.expectEqual(@as(i128, 499162500) * sec, (try tmp.dir.statFile("a.js")).mtime);
     try t.expectEqual(@as(i128, 1700000000) * sec, (try tmp.dir.statFile("dir/b.js")).mtime);

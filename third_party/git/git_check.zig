@@ -67,13 +67,13 @@ pub fn decoyDir(a: std.mem.Allocator, argv0: []const u8, path: ?[]const u8) !?[]
 /// What a decoy does, run as `<decoys>/<name> args...`: appends `<name> args...`
 /// to `<decoys>/../decoy_ran` and exits 97.
 fn decoyMain(a: std.mem.Allocator, argv: []const [:0]u8) noreturn {
-    var line = std.ArrayList(u8).init(a);
-    line.appendSlice(std.fs.path.basename(argv[0])) catch {};
+    var line = std.ArrayList(u8).empty;
+    line.appendSlice(a, std.fs.path.basename(argv[0])) catch {};
     for (argv[1..]) |x| {
-        line.append(' ') catch {};
-        line.appendSlice(x) catch {};
+        line.append(a, ' ') catch {};
+        line.appendSlice(a, x) catch {};
     }
-    line.append('\n') catch {};
+    line.append(a, '\n') catch {};
     const dir = decoyDir(a, argv[0], std.posix.getenv("PATH")) catch null;
     if (dir) |d| {
         const log_path = std.fs.path.join(a, &.{ d, "..", "decoy_ran" }) catch std.process.exit(97);
@@ -113,11 +113,11 @@ pub fn commitBody(a: std.mem.Allocator, tree: []const u8) ![]u8 {
 /// `text` with, on each line, the first ` after <digits> ms: ` written
 /// ` after <ms> ms: ` (`sed -e 's/ after [0-9]* ms: / after <ms> ms: /'`).
 pub fn msSubst(a: std.mem.Allocator, text: []const u8) ![]u8 {
-    var b = std.ArrayList(u8).init(a);
+    var b = std.ArrayList(u8).empty;
     var lines = std.mem.splitScalar(u8, text, '\n');
     var first = true;
     while (lines.next()) |line| {
-        if (!first) try b.append('\n');
+        if (!first) try b.append(a, '\n');
         first = false;
         var from: usize = 0;
         var done = false;
@@ -125,17 +125,17 @@ pub fn msSubst(a: std.mem.Allocator, text: []const u8) ![]u8 {
             var e = at + " after ".len;
             while (e < line.len and line[e] >= '0' and line[e] <= '9') e += 1;
             if (std.mem.startsWith(u8, line[e..], " ms: ")) {
-                try b.appendSlice(line[0..at]);
-                try b.appendSlice(" after <ms> ms: ");
-                try b.appendSlice(line[e + " ms: ".len ..]);
+                try b.appendSlice(a, line[0..at]);
+                try b.appendSlice(a, " after <ms> ms: ");
+                try b.appendSlice(a, line[e + " ms: ".len ..]);
                 done = true;
                 break;
             }
             from = at + 1;
         }
-        if (!done) try b.appendSlice(line);
+        if (!done) try b.appendSlice(a, line);
     }
-    return b.toOwnedSlice();
+    return b.toOwnedSlice(a);
 }
 
 /// The last `n` lines of `text` (`tail -n`).
@@ -173,14 +173,14 @@ pub const required = [_][]const u8{
 pub fn sharedLibraries(a: std.mem.Allocator, dir: std.fs.Dir, prefix: []const u8) ![][]const u8 {
     var walker = try dir.walk(a);
     defer walker.deinit();
-    var list = std.ArrayList([]const u8).init(a);
+    var list = std.ArrayList([]const u8).empty;
     while (try walker.next()) |e| {
         const base = e.basename;
         if (std.mem.endsWith(u8, base, ".so") or std.mem.indexOf(u8, base, ".so.") != null) {
-            try list.append(try std.fmt.allocPrint(a, "{s}/{s}", .{ prefix, e.path }));
+            try list.append(a, try std.fmt.allocPrint(a, "{s}/{s}", .{ prefix, e.path }));
         }
     }
-    const items = try list.toOwnedSlice();
+    const items = try list.toOwnedSlice(a);
     std.mem.sort([]const u8, items, {}, U.lessBytes);
     return items;
 }
@@ -232,9 +232,9 @@ const Check = struct {
     }
 
     fn gitC(self: *Check, dir: []const u8, rest: []const []const u8) !Out {
-        var argv = std.ArrayList([]const u8).init(self.a);
-        try argv.appendSlice(&.{ self.git, "-C", dir });
-        try argv.appendSlice(rest);
+        var argv = std.ArrayList([]const u8).empty;
+        try argv.appendSlice(self.a, &.{ self.git, "-C", dir });
+        try argv.appendSlice(self.a, rest);
         return self.run(argv.items, null);
     }
 };

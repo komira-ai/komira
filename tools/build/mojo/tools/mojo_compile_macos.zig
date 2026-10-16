@@ -154,12 +154,12 @@ fn capture(arena: std.mem.Allocator, argv_items: []const []const u8, with_stderr
         c._exit(127);
     }
     posix.close(p[1]);
-    var out = std.ArrayList(u8).init(arena);
+    var out = std.ArrayList(u8).empty;
     var buf: [4096]u8 = undefined;
     while (out.items.len < 1 << 20) {
         const n = posix.read(p[0], &buf) catch break;
         if (n == 0) break;
-        out.appendSlice(buf[0..n]) catch oom();
+        out.appendSlice(arena, buf[0..n]) catch oom();
     }
     posix.close(p[0]);
     _ = posix.waitpid(pid, 0);
@@ -197,12 +197,12 @@ fn hostIdentityMain(arena: std.mem.Allocator, args: []const []const u8) noreturn
     else
         std.fmt.allocPrint(arena, "{s}\n", .{host_identity.identity(arena, v) catch oom()}) catch oom();
     if (output) |path| {
-        std.fs.cwd().writeFile(path, out) catch |e| {
+        std.fs.cwd().writeFile(.{ .sub_path = path, .data = out }) catch |e| {
             std.debug.print("host_identity: cannot write {s}: {s}\n", .{ path, @errorName(e) });
             std.process.exit(2);
         };
     } else {
-        std.io.getStdOut().writeAll(out) catch std.process.exit(2);
+        std.fs.File.stdout().writeAll(out) catch std.process.exit(2);
     }
     std.process.exit(0);
 }
@@ -214,10 +214,10 @@ fn checkHost(arena: std.mem.Allocator, hosts: []const []const u8) void {
     if (have) |h| {
         for (hosts) |listed| if (std.mem.eql(u8, listed, h)) return;
     }
-    var listed = std.ArrayList(u8).init(arena);
+    var listed = std.ArrayList(u8).empty;
     for (hosts) |h| {
-        listed.appendSlice(h) catch oom();
-        listed.append(' ') catch oom();
+        listed.appendSlice(arena, h) catch oom();
+        listed.append(arena, ' ') catch oom();
     }
     say("REFUSING: this host's identity is '{s}', not one of [{s}] ([komira_re] darwin_macos_hosts). This host:", .{ have orelse "unreadable", listed.items });
     for (host_identity.fields, v) |f, value| std.debug.print("{s}={s}\n", .{ f.name, value });
@@ -271,7 +271,7 @@ fn wrapperMain(arena: std.mem.Allocator, args: []const []const u8) noreturn {
     const final = (modular_cfg.macosSharedLibs(arena, rendered, tc) catch oom()) orelse
         refuse("REFUSING: modular.cfg's shared_libs is not the one run path to the compiler's lib/", .{});
     const modular_home = join(arena, t, "modular");
-    std.fs.cwd().writeFile(join(arena, modular_home, "modular.cfg"), final) catch |e| refuse("cannot write modular.cfg: {s}", .{@errorName(e)});
+    std.fs.cwd().writeFile(.{ .sub_path = join(arena, modular_home, "modular.cfg"), .data = final }) catch |e| refuse("cannot write modular.cfg: {s}", .{@errorName(e)});
 
     // ---- the host is one the action key names
     checkHost(arena, o.macos_hosts);
@@ -283,7 +283,7 @@ fn wrapperMain(arena: std.mem.Allocator, args: []const []const u8) noreturn {
         error.BadConfig => refuse("REFUSING: a shim setting holds a newline", .{}),
         error.OutOfMemory => oom(),
     };
-    std.fs.cwd().writeFile(shim_cfg, shim_text) catch |e| refuse("cannot write {s}: {s}", .{ shim_cfg, @errorName(e) });
+    std.fs.cwd().writeFile(.{ .sub_path = shim_cfg, .data = shim_text }) catch |e| refuse("cannot write {s}: {s}", .{ shim_cfg, @errorName(e) });
     const self = std.fs.selfExePathAlloc(arena) catch |e| refuse("cannot read this program's path: {s}", .{@errorName(e)});
     for (cc_shim.shim_names) |n| {
         const link = join(arena, cc_dir, n);
@@ -292,7 +292,7 @@ fn wrapperMain(arena: std.mem.Allocator, args: []const []const u8) noreturn {
     }
 
     // ---- the compiler's environment, built from nothing
-    var env = std.ArrayList([]const u8).init(arena);
+    var env = std.ArrayList([]const u8).empty;
     const cache = join(arena, t, "cache");
     const pairs = [_][2][]const u8{
         .{ "PATH", std.fmt.allocPrint(arena, "{s}:{s}/bin", .{ cc_dir, tc }) catch oom() },
@@ -308,14 +308,14 @@ fn wrapperMain(arena: std.mem.Allocator, args: []const []const u8) noreturn {
         .{ "KOMIRA_CC_SHIM", shim_cfg },
         .{ "PWD", compile_args.runDir(o.common()) orelse pwd },
     };
-    for (pairs) |kv| env.append(std.fmt.allocPrint(arena, "{s}={s}", .{ kv[0], kv[1] }) catch oom()) catch oom();
-    if (bsp.len > 0) env.append(std.fmt.allocPrint(arena, "BUCK_SCRATCH_PATH={s}", .{bsp}) catch oom()) catch oom();
+    for (pairs) |kv| env.append(arena, std.fmt.allocPrint(arena, "{s}={s}", .{ kv[0], kv[1] }) catch oom()) catch oom();
+    if (bsp.len > 0) env.append(arena, std.fmt.allocPrint(arena, "BUCK_SCRATCH_PATH={s}", .{bsp}) catch oom()) catch oom();
     const envp = common.toArgv(arena, env.items) catch oom();
 
     const mojo = join(arena, tc, "bin/mojo");
-    var cmd = std.ArrayList([]const u8).init(arena);
-    cmd.append(mojo) catch oom();
-    cmd.appendSlice(compile_args.compilerArgs(arena, o.common()) catch oom()) catch oom();
+    var cmd = std.ArrayList([]const u8).empty;
+    cmd.append(arena, mojo) catch oom();
+    cmd.appendSlice(arena, compile_args.compilerArgs(arena, o.common()) catch oom()) catch oom();
     const argv = common.toArgv(arena, cmd.items) catch oom();
     if (compile_args.runDir(o.common())) |d| child_dir = (arena.dupeZ(u8, d) catch oom()).ptr;
     const subcmd = if (o.mojo_args.len > 0) o.mojo_args[0] else "";
@@ -391,13 +391,13 @@ fn runPlain(mojo: []const u8, argv: Argv, envp: Envp) u8 {
     return statusOf(st);
 }
 
-fn onSignal(sig: i32) callconv(.C) void {
+fn onSignal(sig: i32) callconv(.c) void {
     caught.store(@intCast(sig), .seq_cst);
 }
 
 fn setHandler(sig: u6, handler: ?posix.Sigaction.handler_fn) void {
     const sa = posix.Sigaction{ .handler = .{ .handler = handler }, .mask = 0, .flags = 0 };
-    posix.sigaction(sig, &sa, null) catch {};
+    posix.sigaction(sig, &sa, null);
 }
 
 const caught_signals = [_]u6{ posix.SIG.HUP, posix.SIG.INT, posix.SIG.TERM };
@@ -467,7 +467,7 @@ fn reaped(pid: i32) ?u32 {
 
 fn sleepOneSecond() void {
     // Interrupted early by a caught signal (no SA_RESTART).
-    const ts = c.timespec{ .tv_sec = 1, .tv_nsec = 0 };
+    const ts = c.timespec{ .sec = 1, .nsec = 0 };
     _ = c.nanosleep(&ts, null);
 }
 

@@ -68,10 +68,11 @@ const Found = union(enum) {
 fn find(a: A, tar_path: []const u8, member: []const u8, dest: ?[]const u8) !Found {
     const file = try std.fs.cwd().openFile(tar_path, .{});
     defer file.close();
-    var br = std.io.bufferedReader(file.reader());
-    var name_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var link_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var it = std.tar.iterator(br.reader(), .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
+    var rbuf: [64 * 1024]u8 = undefined;
+    var fr = file.reader(&rbuf);
+    var name_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var link_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var it = std.tar.Iterator.init(&fr.interface, .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
     while (try it.next()) |f| {
         var name = std.mem.trimRight(u8, f.name, "/");
         if (std.mem.startsWith(u8, name, "./")) name = name[2..];
@@ -85,7 +86,10 @@ fn find(a: A, tar_path: []const u8, member: []const u8, dest: ?[]const u8) !Foun
                     const mode: std.fs.File.Mode = if (f.mode & 0o111 != 0) 0o755 else 0o644;
                     const out = try std.fs.cwd().createFile(d, .{ .mode = mode });
                     defer out.close();
-                    try f.writeAll(out);
+                    var obuf: [64 * 1024]u8 = undefined;
+                    var ow = out.writer(&obuf);
+                    try it.streamRemaining(f, &ow.interface);
+                    try ow.interface.flush();
                     try out.chmod(mode);
                 }
                 return .{ .file = f.size };
@@ -112,32 +116,32 @@ fn writeFile(path: []const u8, data: []const u8) !void {
 pub fn extractMembers(a: A, pkg_dir: []const u8, out: []const u8, specs: []const []const u8, msg: *std.ArrayList(u8)) !usize {
     var n: usize = 0;
     for (specs) |spec| {
-        const eq = std.mem.indexOfScalar(u8, spec, '=') orelse return refuse(msg, "bad destination in '{s}'", .{spec});
+        const eq = std.mem.indexOfScalar(u8, spec, '=') orelse return refuse(a, msg, "bad destination in '{s}'", .{spec});
         const dest = spec[0..eq];
         const src = spec[eq + 1 ..];
-        if (dest.len == 0 or dest[0] == '/' or std.mem.indexOf(u8, dest, "..") != null) return refuse(msg, "bad destination in '{s}'", .{dest});
-        const slash = std.mem.indexOfScalar(u8, src, '/') orelse return refuse(msg, "'{s}' names no member (<dest>=<package>/<member>)", .{spec});
+        if (dest.len == 0 or dest[0] == '/' or std.mem.indexOf(u8, dest, "..") != null) return refuse(a, msg, "bad destination in '{s}'", .{dest});
+        const slash = std.mem.indexOfScalar(u8, src, '/') orelse return refuse(a, msg, "'{s}' names no member (<dest>=<package>/<member>)", .{spec});
         const name = src[0..slash];
         const member = src[slash + 1 ..];
         const tar = try std.fmt.allocPrint(a, "{s}/{s}.tar", .{ pkg_dir, name });
-        std.fs.cwd().access(tar, .{}) catch return refuse(msg, "'{s}' names package '{s}', which is not given", .{ spec, name });
+        std.fs.cwd().access(tar, .{}) catch return refuse(a, msg, "'{s}' names package '{s}', which is not given", .{ spec, name });
         const dest_path = try std.fs.path.join(a, &.{ out, dest });
         if (std.fs.path.dirname(dest_path)) |d| try std.fs.cwd().makePath(d);
         var m: []const u8 = member;
         var hops: usize = 0;
         while (true) {
             switch (try find(a, tar, m, dest_path)) {
-                .missing => return refuse(msg, "{s} is not a member of {s}", .{ m, name }),
-                .directory => return refuse(msg, "{s}/{s} is not a non-empty file", .{ name, member }),
+                .missing => return refuse(a, msg, "{s} is not a member of {s}", .{ m, name }),
+                .directory => return refuse(a, msg, "{s}/{s} is not a non-empty file", .{ name, member }),
                 .file => |size| {
-                    if (size == 0) return refuse(msg, "{s}/{s} is not a non-empty file", .{ name, member });
+                    if (size == 0) return refuse(a, msg, "{s}/{s} is not a non-empty file", .{ name, member });
                     break;
                 },
                 .link => |target| {
-                    if (!linkContained(target)) return refuse(msg, "{s} is a link to '{s}', outside its directory", .{ m, target });
+                    if (!linkContained(target)) return refuse(a, msg, "{s} is a link to '{s}', outside its directory", .{ m, target });
                     m = try resolveLink(a, m, target);
                     hops += 1;
-                    if (hops >= 8) return refuse(msg, "{s}: more than 8 links", .{member});
+                    if (hops >= 8) return refuse(a, msg, "{s}: more than 8 links", .{member});
                 },
             }
         }
@@ -146,8 +150,8 @@ pub fn extractMembers(a: A, pkg_dir: []const u8, out: []const u8, specs: []const
     return n;
 }
 
-fn refuse(msg: *std.ArrayList(u8), comptime fmt: []const u8, args: anytype) error{ Unpack, OutOfMemory } {
-    try msg.writer().print(fmt, args);
+fn refuse(a: A, msg: *std.ArrayList(u8), comptime fmt: []const u8, args: anytype) error{ Unpack, OutOfMemory } {
+    try msg.writer(a).print(fmt, args);
     return error.Unpack;
 }
 
@@ -174,7 +178,7 @@ fn unpack(a: A, args: []const []const u8) !void {
         if (!ok) fail("conda_payload failed on package {s}", .{name});
     }
     if (i >= args.len) fail("no '--' before the members", .{});
-    var msg = std.ArrayList(u8).init(a);
+    var msg = std.ArrayList(u8).empty;
     const n = extractMembers(a, pkg_dir, out, args[i + 1 ..], &msg) catch |e| switch (e) {
         error.Unpack => fail("{s}", .{msg.items}),
         else => return e,
@@ -203,11 +207,11 @@ const Ctx = struct {
         std.debug.print("llvm_branch {s} RED: " ++ fmt ++ "\n", .{self.mode} ++ args);
         if (self.log) |l| {
             std.debug.print("--- log:\n", .{});
-            var lines = std.ArrayList([]const u8).init(self.a);
+            var lines = std.ArrayList([]const u8).empty;
             var it = std.mem.splitScalar(u8, l, '\n');
             while (it.next()) |x| {
                 if (it.peek() == null and x.len == 0) break;
-                lines.append(x) catch {};
+                lines.append(self.a, x) catch {};
             }
             const from = if (lines.items.len > 40) lines.items.len - 40 else 0;
             for (lines.items[from..]) |x| std.debug.print("{s}\n", .{x});
@@ -286,28 +290,28 @@ const Ctx = struct {
     fn exactly(self: *Ctx, dir: []const u8, names: []const []const u8) void {
         var d = std.fs.cwd().openDir(dir, .{ .iterate = true }) catch |e| self.red("cannot open {s}: {s}", .{ dir, @errorName(e) });
         defer d.close();
-        var got = std.ArrayList([]const u8).init(self.a);
-        var links = std.ArrayList(u8).init(self.a);
+        var got = std.ArrayList([]const u8).empty;
+        var links = std.ArrayList(u8).empty;
         var w = d.walk(self.a) catch @panic("oom");
         while (w.next() catch |e| self.red("cannot walk {s}: {s}", .{ dir, @errorName(e) })) |e| {
             if (e.kind == .directory) continue;
-            got.append(self.a.dupe(u8, e.path) catch @panic("oom")) catch @panic("oom");
-            if (e.kind == .sym_link) links.writer().print("./{s}\n", .{e.path}) catch @panic("oom");
+            got.append(self.a, self.a.dupe(u8, e.path) catch @panic("oom")) catch @panic("oom");
+            if (e.kind == .sym_link) links.writer(self.a).print("./{s}\n", .{e.path}) catch @panic("oom");
         }
         const want_sorted = self.a.dupe([]const u8, names) catch @panic("oom");
         std.mem.sort([]const u8, want_sorted, {}, lessThan);
         std.mem.sort([]const u8, got.items, {}, lessThan);
-        var log = std.ArrayList(u8).init(self.a);
+        var log = std.ArrayList(u8).empty;
         var differ = false;
         for (want_sorted) |x| {
             if (!contains(got.items, x)) {
-                log.writer().print("< {s}\n", .{x}) catch @panic("oom");
+                log.writer(self.a).print("< {s}\n", .{x}) catch @panic("oom");
                 differ = true;
             }
         }
         for (got.items) |x| {
             if (!contains(want_sorted, x)) {
-                log.writer().print("> {s}\n", .{x}) catch @panic("oom");
+                log.writer(self.a).print("> {s}\n", .{x}) catch @panic("oom");
                 differ = true;
             }
         }
@@ -330,7 +334,7 @@ fn contains(xs: []const []const u8, x: []const u8) bool {
 /// define `symbol`: the class letters of lines of exactly three fields whose
 /// last is `symbol`, each followed by a blank.
 pub fn nmClasses(a: A, nm: []const u8, symbol: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var lines = std.mem.splitScalar(u8, nm, '\n');
     while (lines.next()) |l| {
         var f = std.mem.tokenizeAny(u8, l, " \t");
@@ -341,11 +345,11 @@ pub fn nmClasses(a: A, nm: []const u8, symbol: []const u8) ![]u8 {
             k += 1;
         }
         if (k == 3 and std.mem.eql(u8, parts[2], symbol)) {
-            try out.appendSlice(parts[1]);
-            try out.append(' ');
+            try out.appendSlice(a, parts[1]);
+            try out.append(a, ' ');
         }
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// Whether some line of `nm` has exactly three fields and `symbol` last.
@@ -367,7 +371,7 @@ pub fn nmDefines(nm: []const u8, symbol: []const u8) bool {
 /// The block counts `llvm-profdata show --counts` printed, sorted numerically,
 /// each followed by a comma ("2,3,").
 pub fn blockCounts(a: A, show: []const u8) ![]u8 {
-    var nums = std.ArrayList(u64).init(a);
+    var nums = std.ArrayList(u64).empty;
     var lines = std.mem.splitScalar(u8, show, '\n');
     while (lines.next()) |l| {
         const t = std.mem.trimLeft(u8, l, " ");
@@ -384,34 +388,34 @@ pub fn blockCounts(a: A, show: []const u8) ![]u8 {
                     k += 1;
                 }
             }
-            try nums.append(std.fmt.parseInt(u64, clean[0..k], 10) catch 0);
+            try nums.append(a, std.fmt.parseInt(u64, clean[0..k], 10) catch 0);
         }
     }
     std.mem.sort(u64, nums.items, {}, std.sort.asc(u64));
-    var out = std.ArrayList(u8).init(a);
-    for (nums.items) |x| try out.writer().print("{d},", .{x});
-    return out.toOwnedSlice();
+    var out = std.ArrayList(u8).empty;
+    for (nums.items) |x| try out.writer(a).print("{d},", .{x});
+    return out.toOwnedSlice(a);
 }
 
 /// The first `n` lines of `text`, each followed by a blank (`head -n N | tr '\n' ' '`).
 fn firstLinesSpaced(a: A, text: []const u8, n: usize) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var it = std.mem.splitScalar(u8, text, '\n');
     var k: usize = 0;
     while (it.next()) |l| {
         if (it.peek() == null and l.len == 0) break;
         if (k == n) break;
-        try out.appendSlice(l);
-        try out.append(' ');
+        try out.appendSlice(a, l);
+        try out.append(a, ' ');
         k += 1;
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// The numbers after `; expected version = ` on the lines of a merge log,
 /// each followed by a blank, less the last blank.
 pub fn expectedVersions(a: A, log: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var lines = std.mem.splitScalar(u8, log, '\n');
     const key = "; expected version = ";
     while (lines.next()) |l| {
@@ -420,11 +424,11 @@ pub fn expectedVersions(a: A, log: []const u8) ![]u8 {
         const s = e;
         while (e < l.len and l[e] >= '0' and l[e] <= '9') e += 1;
         if (e == s) continue;
-        try out.appendSlice(l[s..e]);
-        try out.append(' ');
+        try out.appendSlice(a, l[s..e]);
+        try out.append(a, ' ');
     }
     if (out.items.len > 0 and out.items[out.items.len - 1] == ' ') _ = out.pop();
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 const raw_magic: u64 = 0xff6c70726f667281;
@@ -441,13 +445,13 @@ fn mergeVersion(c: *Ctx) []const u8 {
     // `llvm-profdata --version | sed -n 's/^ *LLVM version //p'`
     const exe = c.join(&.{ c.tools_dir, "bin/llvm-profdata" });
     const out = c.run(&.{ exe, "--version" }, null) orelse "";
-    var res = std.ArrayList(u8).init(c.a);
+    var res = std.ArrayList(u8).empty;
     var lines = std.mem.splitScalar(u8, out, '\n');
     while (lines.next()) |l| {
         const t = std.mem.trimLeft(u8, l, " ");
         if (std.mem.startsWith(u8, t, "LLVM version ")) {
-            if (res.items.len > 0) res.append('\n') catch {};
-            res.appendSlice(t["LLVM version ".len..]) catch {};
+            if (res.items.len > 0) res.append(c.a, '\n') catch {};
+            res.appendSlice(c.a, t["LLVM version ".len..]) catch {};
         }
     }
     return res.items;
@@ -492,9 +496,9 @@ const runtime = "runtime/libclang_rt.profile-x86_64.a";
 fn toolsMode(c: *Ctx) void {
     const version = c.want("profdata");
     const symbols = c.want("symbols");
-    var names = std.ArrayList([]const u8).init(c.a);
-    names.appendSlice(&.{ "bin/llvm-nm", "bin/llvm-profdata", runtime }) catch @panic("oom");
-    for (libs23) |l| names.append(c.print("lib/{s}", .{l})) catch @panic("oom");
+    var names = std.ArrayList([]const u8).empty;
+    names.appendSlice(c.a, &.{ "bin/llvm-nm", "bin/llvm-profdata", runtime }) catch @panic("oom");
+    for (libs23) |l| names.append(c.a, c.print("lib/{s}", .{l})) catch @panic("oom");
     c.exactly(c.tools_dir, names.items);
     const profdata = c.join(&.{ c.tools_dir, "bin/llvm-profdata" });
     const nm = c.join(&.{ c.tools_dir, "bin/llvm-nm" });

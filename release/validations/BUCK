@@ -13,7 +13,7 @@ zig_test(
     imports = ["launch.zig"],
     src = "launch_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 zig_exe(
@@ -24,9 +24,9 @@ zig_exe(
         "prelude//os/constraints:macos": row("darwin-arm64")["zig_triple"],
         "DEFAULT": "x86_64-linux-musl",
     }),
-    unit_tests = [":launch_unit"],
+    unit_tests = [":launch_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 

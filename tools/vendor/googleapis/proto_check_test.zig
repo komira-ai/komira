@@ -6,38 +6,38 @@ const std = @import("std");
 const P = @import("proto_check.zig");
 const t = std.testing;
 
-fn varint(out: *std.ArrayList(u8), v: usize) !void {
+fn varint(alloc: std.mem.Allocator, out: *std.ArrayList(u8), v: usize) !void {
     var x = v;
     while (x >= 0x80) {
-        try out.append(@intCast((x & 0x7f) | 0x80));
+        try out.append(alloc, @intCast((x & 0x7f) | 0x80));
         x >>= 7;
     }
-    try out.append(@intCast(x));
+    try out.append(alloc, @intCast(x));
 }
 
 /// A FileDescriptorProto holding `name` (field 1) and a package (field 2).
 fn file(a: std.mem.Allocator, out: *std.ArrayList(u8), name: []const u8) !void {
-    var body = std.ArrayList(u8).init(a);
-    try body.append(0x0a);
-    try varint(&body, name.len);
-    try body.appendSlice(name);
-    try body.append(0x12);
-    try varint(&body, 3);
-    try body.appendSlice("pkg");
-    try out.append(0x0a);
-    try varint(out, body.items.len);
-    try out.appendSlice(body.items);
+    var body = std.ArrayList(u8).empty;
+    try body.append(a, 0x0a);
+    try varint(a, &body, name.len);
+    try body.appendSlice(a, name);
+    try body.append(a, 0x12);
+    try varint(a, &body, 3);
+    try body.appendSlice(a, "pkg");
+    try out.append(a, 0x0a);
+    try varint(a, out, body.items.len);
+    try out.appendSlice(a, body.items);
 }
 
 test "setNames: the name of each file, in order; other fields are skipped" {
     var ar = std.heap.ArenaAllocator.init(t.allocator);
     defer ar.deinit();
     const a = ar.allocator();
-    var set = std.ArrayList(u8).init(a);
+    var set = std.ArrayList(u8).empty;
     try file(a, &set, "google/protobuf/timestamp.proto");
     try file(a, &set, "fix/dep.proto");
     // An unknown varint field (2: 7) and a fixed32 (3) between files.
-    try set.appendSlice(&.{ 0x10, 0x07, 0x1d, 1, 2, 3, 4 });
+    try set.appendSlice(a, &.{ 0x10, 0x07, 0x1d, 1, 2, 3, 4 });
     var long: [200]u8 = undefined;
     @memset(&long, 'x');
     try file(a, &set, &long);
@@ -53,7 +53,7 @@ test "setNames: a truncated set is refused" {
     var ar = std.heap.ArenaAllocator.init(t.allocator);
     defer ar.deinit();
     const a = ar.allocator();
-    var set = std.ArrayList(u8).init(a);
+    var set = std.ArrayList(u8).empty;
     try file(a, &set, "fix/dep.proto");
     try t.expectError(error.BadDescriptorSet, P.setNames(a, set.items[0 .. set.items.len - 2]));
     try t.expectError(error.BadDescriptorSet, P.setNames(a, &.{0x0b}));
@@ -75,8 +75,8 @@ test "listFiles: files and links, sorted, nested paths relative" {
     var tmp = t.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     try tmp.dir.makePath("z/y");
-    try tmp.dir.writeFile("z/y/f.proto", "x");
-    try tmp.dir.writeFile("a.proto", "x");
+    try tmp.dir.writeFile(.{ .sub_path = "z/y/f.proto", .data = "x" });
+    try tmp.dir.writeFile(.{ .sub_path = "a.proto", .data = "x" });
     try tmp.dir.makePath("empty");
     const fs = try P.listFiles(a, tmp.dir);
     try t.expectEqual(@as(usize, 2), fs.len);

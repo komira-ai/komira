@@ -12,9 +12,9 @@ fn run(a: std.mem.Allocator, root: []const u8, tmp: []const u8, tail: []const []
     const probe = try std.process.getEnvVarOwned(a, "PROBE");
     var env = try std.process.getEnvMap(a);
     try env.put("TMPDIR", tmp);
-    var argv = std.ArrayList([]const u8).init(a);
-    try argv.appendSlice(&.{ launch, root, probe });
-    try argv.appendSlice(tail);
+    var argv = std.ArrayList([]const u8).empty;
+    try argv.appendSlice(a, &.{ launch, root, probe });
+    try argv.appendSlice(a, tail);
     const r = try std.process.Child.run(.{ .allocator = a, .argv = argv.items, .env_map = &env });
     return .{ .code = switch (r.term) {
         .Exited => |c| c,

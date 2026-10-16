@@ -57,9 +57,9 @@ const Ctx = struct {
         try env.put("DYLD_INSERT_LIBRARIES", "/e");
         try env.put("KEPT", "kept");
         try env.put("PROBE_MODE", mode);
-        var argv = std.ArrayList([]const u8).init(al);
-        try argv.append(self.act);
-        try argv.appendSlice(argv_tail);
+        var argv = std.ArrayList([]const u8).empty;
+        try argv.append(al, self.act);
+        try argv.appendSlice(al, argv_tail);
         const r = try std.process.Child.run(.{ .allocator = al, .argv = argv.items, .cwd = self.dir, .env_map = &env });
         return .{ .code = switch (r.term) {
             .Exited => |c| c,

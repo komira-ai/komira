@@ -16,10 +16,10 @@ test "lastLines: tail -n" {
 }
 
 test "lastLines: a long stderr keeps exactly the last 100 lines" {
-    var buf = std.ArrayList(u8).init(t.allocator);
-    defer buf.deinit();
+    var buf = std.ArrayList(u8).empty;
+    defer buf.deinit(t.allocator);
     var i: usize = 0;
-    while (i < 250) : (i += 1) try buf.writer().print("line {d}\n", .{i});
+    while (i < 250) : (i += 1) try buf.writer(std.testing.allocator).print("line {d}\n", .{i});
     const tail = A.lastLines(buf.items, 100);
     var lines: usize = 0;
     for (tail) |c| {

@@ -129,9 +129,9 @@ pub fn parseHeld(a: Alloc, text: []const u8) !std.StringHashMap([]const u8) {
 /// holds. On a refusal `err` holds one `census.sh: error: <file>:<line>: ...`
 /// line.
 pub fn parseCensus(a: Alloc, name: []const u8, text: []const u8, held: std.StringHashMap([]const u8), target: i64, err: *[]const u8) !Census {
-    var ok = std.ArrayList(Row).init(a);
-    var failed = std.ArrayList(Row).init(a);
-    var tests = std.ArrayList(Row).init(a);
+    var ok = std.ArrayList(Row).empty;
+    var failed = std.ArrayList(Row).empty;
+    var tests = std.ArrayList(Row).empty;
     var date: []const u8 = "";
     var note: []const u8 = "";
     var head = false;
@@ -142,9 +142,9 @@ pub fn parseCensus(a: Alloc, name: []const u8, text: []const u8, held: std.Strin
         fnr += 1;
         if (lines.peek() == null and line.len == 0) break;
         if (line.len > 0 and line[0] == '#') continue;
-        var f = std.ArrayList([]const u8).init(a);
+        var f = std.ArrayList([]const u8).empty;
         var it = std.mem.splitScalar(u8, line, '\t');
-        while (it.next()) |x| try f.append(x);
+        while (it.next()) |x| try f.append(a, x);
         const nf = f.items.len;
         if (!head) {
             if (nf != 4 or !std.mem.eql(u8, f.items[0], "census") or !isDate(f.items[1]) or !isCommit(f.items[2]) or f.items[3].len == 0) {
@@ -240,12 +240,12 @@ pub fn parseCensus(a: Alloc, name: []const u8, text: []const u8, held: std.Strin
             .branch_found = x[7], .branch_gate = x[8], .published = x[9], .unmeasured = x[10], .note = x[11], .held = h, .below = false,
         };
         if (std.mem.eql(u8, x[2], "test")) {
-            try tests.append(row);
+            try tests.append(a, row);
             continue;
         }
         // Under the target on a held metric: its gate fails (a library with no line has nothing to cover).
         row.below = lf > 0 and ((contains(h, "line") and lb < target) or (contains(h, "branch") and (std.mem.eql(u8, x[6], "-") or (bb >= 0 and bb < target))));
-        if (is_ok) try ok.append(row) else try failed.append(row);
+        if (is_ok) try ok.append(a, row) else try failed.append(a, row);
     }
     if (!head) {
         err.* = try std.fmt.allocPrint(a, "census.sh: error: {s}: no census line", .{name});
@@ -270,7 +270,7 @@ pub fn parseCensus(a: Alloc, name: []const u8, text: []const u8, held: std.Strin
     std.mem.sort(Row, ok.items, {}, Key.less);
     std.mem.sort(Row, failed.items, {}, rowLess);
     std.mem.sort(Row, tests.items, {}, rowLess);
-    return .{ .date = date, .note = note, .ok = try ok.toOwnedSlice(), .failed = try failed.toOwnedSlice(), .tests = try tests.toOwnedSlice() };
+    return .{ .date = date, .note = note, .ok = try ok.toOwnedSlice(a), .failed = try failed.toOwnedSlice(a), .tests = try tests.toOwnedSlice(a) };
 }
 
 fn pct(w: anytype, b: u64) !void {
@@ -313,8 +313,8 @@ fn num(s: []const u8) u64 {
 
 /// The doc.
 pub fn renderDoc(a: Alloc, c: Census, target: u64) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
-    const w = out.writer();
+    var out = std.ArrayList(u8).empty;
+    const w = out.writer(a);
     var th: u64 = 0;
     var tf: u64 = 0;
     var tbh: u64 = 0;
@@ -331,7 +331,7 @@ pub fn renderDoc(a: Alloc, c: Census, target: u64) ![]u8 {
     var n_conda: u64 = 0;
     var n_no: u64 = 0;
     var nbelow: u64 = 0;
-    var v = std.ArrayList(u64).init(a);
+    var v = std.ArrayList(u64).empty;
     for (c.ok) |r| {
         th += num(r.line_hit);
         tf += num(r.line_found);
@@ -342,7 +342,7 @@ pub fn renderDoc(a: Alloc, c: Census, target: u64) ![]u8 {
         }
         if (num(r.line_found) > 0) {
             const b = num(r.line_hit) * 10000 / num(r.line_found);
-            try v.append(b);
+            try v.append(a, b);
             if (b == 10000) full += 1 else if (b >= 9000) hi += 1 else if (b >= 5000) mid += 1 else lo += 1;
         } else na += 1;
         if (nfiles(r.unmeasured) > 0) {
@@ -432,15 +432,15 @@ pub fn renderDoc(a: Alloc, c: Census, target: u64) ![]u8 {
             try w.print("| `{s}` | - | - | - | - | {s}: {s} |\n", .{ short(r.library), r.status, r.note });
         }
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// The validation result JSON: success, or failure with `msg` (control characters
 /// other than tab and newline dropped; backslash, quote and tab escaped; each line
 /// followed by a literal `\n`).
 pub fn resultJson(a: Alloc, msg: ?[]const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
-    const w = out.writer();
+    var out = std.ArrayList(u8).empty;
+    const w = out.writer(a);
     if (msg) |m| {
         try w.writeAll("{\"version\": 1, \"data\": {\"status\": \"failure\", \"message\": \"coverage_census: ");
         var lines = std.mem.splitScalar(u8, m, '\n');
@@ -461,7 +461,7 @@ pub fn resultJson(a: Alloc, msg: ?[]const u8) ![]u8 {
     } else {
         try w.writeAll("{\"version\": 1, \"data\": {\"status\": \"success\", \"message\": \"coverage_census: the census renders\"}}\n");
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 fn usage(comptime fmt: []const u8, args: anytype) noreturn {

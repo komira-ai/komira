@@ -26,7 +26,7 @@ zig_exe(
     name = "debug_relocate_exe",
     exec_compatible_with = LINUX_X86_64,
     src = "debug_relocate.zig",
-    unit_tests = [":debug_relocate_unit", _ZIG_VERSION],
+    unit_tests = [":debug_relocate_unit", _ZIG_VERSION, "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = _ZIG,
 )
@@ -74,7 +74,7 @@ zig_exe(
     name = "cov_normalize_exe",
     exec_compatible_with = LINUX_X86_64,
     src = "cov_normalize.zig",
-    unit_tests = [":cov_normalize_unit", _ZIG_VERSION],
+    unit_tests = [":cov_normalize_unit", _ZIG_VERSION, "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = _ZIG,
 )
@@ -139,7 +139,7 @@ zig_exe(
     name = "cov_zig_exe",
     exec_compatible_with = LINUX_X86_64,
     src = "cov_zig.zig",
-    unit_tests = [":cov_zig_unit", _ZIG_VERSION],
+    unit_tests = [":cov_zig_unit", _ZIG_VERSION, "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = _ZIG,
 )
@@ -202,16 +202,16 @@ zig_test(
     imports = ["cov_run.zig"],
     src = "cov_run_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 zig_exe(
     name = "cov_run_bin",
     exec_compatible_with = LINUX_X86_64,
     src = "cov_run.zig",
-    unit_tests = [":cov_run_unit"],
+    unit_tests = [":cov_run_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 

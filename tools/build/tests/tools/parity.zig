@@ -57,17 +57,17 @@ fn firstLine(s: []const u8) []const u8 {
 
 /// What differs between the runs in E and B, as the report's words (empty: nothing).
 pub fn differences(a: A, e: Run, b: Run, mode: Cmp) ![]u8 {
-    var what = std.ArrayList(u8).init(a);
-    if (!std.mem.eql(u8, e.out, b.out)) try what.appendSlice(" stdout");
+    var what = std.ArrayList(u8).empty;
+    if (!std.mem.eql(u8, e.out, b.out)) try what.appendSlice(a, " stdout");
     switch (mode) {
         // A fatal signal prints the runtime's stack dump: raw addresses (ASLR,
         // different on every run) and module names (probe vs libprobe.so), so
         // only its first line is compared. Status and stdout stay exact.
-        .signal => if (!(std.mem.eql(u8, firstLine(e.err), firstLine(b.err)) and e.err.len > 0)) try what.appendSlice(" stderr-first-line"),
-        .exact => if (!std.mem.eql(u8, e.err, b.err)) try what.appendSlice(" stderr"),
+        .signal => if (!(std.mem.eql(u8, firstLine(e.err), firstLine(b.err)) and e.err.len > 0)) try what.appendSlice(a, " stderr-first-line"),
+        .exact => if (!std.mem.eql(u8, e.err, b.err)) try what.appendSlice(a, " stderr"),
     }
-    if (e.rc != b.rc) try what.writer().print(" exit({d} vs {d})", .{ e.rc, b.rc });
-    return what.toOwnedSlice();
+    if (e.rc != b.rc) try what.writer(a).print(" exit({d} vs {d})", .{ e.rc, b.rc });
+    return what.toOwnedSlice(a);
 }
 
 fn copyTree(a: A, src: std.fs.Dir, dest: std.fs.Dir) !void {
@@ -87,7 +87,7 @@ fn copyTree(a: A, src: std.fs.Dir, dest: std.fs.Dir) !void {
             },
             .sym_link => {
                 if (std.fs.path.dirname(e.path)) |d| try dest.makePath(d);
-                var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+                var buf: [std.fs.max_path_bytes]u8 = undefined;
                 try dest.symLink(try src.readLink(e.path, &buf), e.path, .{});
             },
             else => {},
@@ -98,9 +98,9 @@ fn copyTree(a: A, src: std.fs.Dir, dest: std.fs.Dir) !void {
 fn runCase(a: A, tree: []const u8, program: []const u8, c: Case) !Run {
     var env = std.process.EnvMap.init(a);
     for (c.env) |kv| try env.put(kv[0], kv[1]);
-    var argv = std.ArrayList([]const u8).init(a);
-    try argv.append(program);
-    try argv.appendSlice(c.args);
+    var argv = std.ArrayList([]const u8).empty;
+    try argv.append(a, program);
+    try argv.appendSlice(a, c.args);
     var child = std.process.Child.init(argv.items, a);
     child.cwd = tree;
     child.env_map = &env;
@@ -108,9 +108,9 @@ fn runCase(a: A, tree: []const u8, program: []const u8, c: Case) !Run {
     child.stdout_behavior = .Pipe;
     child.stderr_behavior = .Pipe;
     try child.spawn();
-    var out = std.ArrayList(u8).init(a);
-    var err = std.ArrayList(u8).init(a);
-    try child.collectOutput(&out, &err, 1 << 26);
+    var out = std.ArrayList(u8).empty;
+    var err = std.ArrayList(u8).empty;
+    try child.collectOutput(a, &out, &err, 1 << 26);
     const term = try child.wait();
     const rc: u32 = switch (term) {
         .Exited => |x| x,
@@ -159,8 +159,8 @@ pub fn parity(a: A, args: []const []const u8) !u8 {
         const target = try std.fmt.allocPrint(a, "../bin/{s}", .{bin});
         try std.fs.cwd().symLink(target, try std.fmt.allocPrint(a, "{s}/other-name", .{links}), .{});
     }
-    var report = std.ArrayList(u8).init(a);
-    const w = report.writer();
+    var report = std.ArrayList(u8).empty;
+    const w = report.writer(a);
     var bad: usize = 0;
     for (cases) |c| {
         const program = c.prog orelse try std.fmt.allocPrint(a, "bin/{s}", .{bin});

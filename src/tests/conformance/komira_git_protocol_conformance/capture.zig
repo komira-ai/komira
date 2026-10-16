@@ -59,8 +59,8 @@ const A = std.mem.Allocator;
 /// bare characters, `'...'` groups and `\x` escapes, joined when adjacent;
 /// words are split at blanks outside quotes.
 pub fn shellWords(a: A, s: []const u8) ![][]const u8 {
-    var words = std.ArrayList([]const u8).init(a);
-    var cur = std.ArrayList(u8).init(a);
+    var words = std.ArrayList([]const u8).empty;
+    var cur = std.ArrayList(u8).empty;
     var have = false;
     var i: usize = 0;
     while (i < s.len) : (i += 1) {
@@ -68,31 +68,31 @@ pub fn shellWords(a: A, s: []const u8) ![][]const u8 {
         switch (c) {
             ' ', '\t', '\n' => {
                 if (have) {
-                    try words.append(try cur.toOwnedSlice());
-                    cur = std.ArrayList(u8).init(a);
+                    try words.append(a, try cur.toOwnedSlice(a));
+                    cur = std.ArrayList(u8).empty;
                     have = false;
                 }
             },
             '\'' => {
                 have = true;
                 i += 1;
-                while (i < s.len and s[i] != '\'') : (i += 1) try cur.append(s[i]);
+                while (i < s.len and s[i] != '\'') : (i += 1) try cur.append(a, s[i]);
                 if (i >= s.len) return error.UnterminatedQuote;
             },
             '\\' => {
                 have = true;
                 i += 1;
                 if (i >= s.len) return error.TrailingBackslash;
-                try cur.append(s[i]);
+                try cur.append(a, s[i]);
             },
             else => {
                 have = true;
-                try cur.append(c);
+                try cur.append(a, c);
             },
         }
     }
-    if (have) try words.append(try cur.toOwnedSlice());
-    return words.toOwnedSlice();
+    if (have) try words.append(a, try cur.toOwnedSlice(a));
+    return words.toOwnedSlice(a);
 }
 
 pub const Remote = struct { service: []const u8, path: []const u8 };
@@ -137,8 +137,8 @@ const Pump = struct {
 
 fn shim(a: A, git: []const u8, args: []const []const u8) !u8 {
     // The client may close its end while the server still writes.
-    const ignore = std.posix.Sigaction{ .handler = .{ .handler = std.posix.SIG.IGN }, .mask = std.posix.empty_sigset, .flags = 0 };
-    try std.posix.sigaction(std.posix.SIG.PIPE, &ignore, null);
+    const ignore = std.posix.Sigaction{ .handler = .{ .handler = std.posix.SIG.IGN }, .mask = std.posix.sigemptyset(), .flags = 0 };
+    std.posix.sigaction(std.posix.SIG.PIPE, &ignore, null);
     const remote = try parseSsh(a, args);
     var req: ?std.fs.File = null;
     var resp: ?std.fs.File = null;
@@ -157,11 +157,11 @@ fn shim(a: A, git: []const u8, args: []const []const u8) !u8 {
     child.stdin_behavior = .Pipe;
     child.stdout_behavior = .Pipe;
     try child.spawn();
-    const feed = Pump{ .from = std.io.getStdIn(), .to = child.stdin.?, .tee = req, .close_to = true };
+    const feed = Pump{ .from = std.fs.File.stdin(), .to = child.stdin.?, .tee = req, .close_to = true };
     child.stdin = null;
     const t = try std.Thread.spawn(.{}, Pump.run, .{feed});
     t.detach();
-    const back = Pump{ .from = child.stdout.?, .to = std.io.getStdOut(), .tee = resp, .close_to = false };
+    const back = Pump{ .from = child.stdout.?, .to = std.fs.File.stdout(), .tee = resp, .close_to = false };
     back.run();
     _ = child.wait() catch {};
     return 0;
@@ -183,11 +183,11 @@ const Cap = struct {
         std.debug.print("git capture RED: " ++ fmt ++ "\n", args);
         if (self.log.len > 0) {
             std.debug.print("--- log:\n", .{});
-            var lines = std.ArrayList([]const u8).init(self.a);
+            var lines = std.ArrayList([]const u8).empty;
             var it = std.mem.splitScalar(u8, self.log, '\n');
             while (it.next()) |x| {
                 if (it.peek() == null and x.len == 0) break;
-                lines.append(x) catch {};
+                lines.append(self.a, x) catch {};
             }
             const from = if (lines.items.len > 40) lines.items.len - 40 else 0;
             for (lines.items[from..]) |x| std.debug.print("{s}\n", .{x});
@@ -212,18 +212,18 @@ const Cap = struct {
         while (it.next()) |e| env.put(e.key_ptr.*, e.value_ptr.*) catch @panic("oom");
         for (extra) |kv| env.put(kv[0], kv[1]) catch @panic("oom");
         if (capture) |dir| env.put("KGC_CAPTURE", dir) catch @panic("oom");
-        var argv = std.ArrayList([]const u8).init(self.a);
-        argv.append(self.git) catch @panic("oom");
-        argv.appendSlice(args) catch @panic("oom");
+        var argv = std.ArrayList([]const u8).empty;
+        argv.append(self.a, self.git) catch @panic("oom");
+        argv.appendSlice(self.a, args) catch @panic("oom");
         var child = std.process.Child.init(argv.items, self.a);
         child.env_map = &env;
         child.stdin_behavior = .Ignore;
         child.stdout_behavior = .Pipe;
         child.stderr_behavior = .Pipe;
         child.spawn() catch |e| self.red("cannot run git: {s}", .{@errorName(e)});
-        var out = std.ArrayList(u8).init(self.a);
-        var err = std.ArrayList(u8).init(self.a);
-        child.collectOutput(&out, &err, 1 << 30) catch |e| self.red("cannot read git's output: {s}", .{@errorName(e)});
+        var out = std.ArrayList(u8).empty;
+        var err = std.ArrayList(u8).empty;
+        child.collectOutput(self.a, &out, &err, 1 << 30) catch |e| self.red("cannot read git's output: {s}", .{@errorName(e)});
         const term = child.wait() catch |e| self.red("cannot wait for git: {s}", .{@errorName(e)});
         self.log = err.items;
         const ok = switch (term) {
@@ -271,7 +271,7 @@ const Cap = struct {
         const objects = self.git_(&.{ "-C", repo, "cat-file", "--batch-all-objects", "--batch-check=%(objectname) %(objecttype)" }, self.pf("cat-file --batch-all-objects in {s}", .{repo}));
         self.write(self.join(&.{ dir, "objects.txt" }), objects);
         self.write(self.join(&.{ dir, "parents.txt" }), self.git_(&.{ "-C", repo, "rev-list", "--all", "--parents" }, self.pf("rev-list in {s}", .{repo})));
-        var tags = std.ArrayList(u8).init(self.a);
+        var tags = std.ArrayList(u8).empty;
         var lines = std.mem.splitScalar(u8, objects, '\n');
         while (lines.next()) |l| {
             var f = std.mem.tokenizeScalar(u8, l, ' ');
@@ -283,7 +283,7 @@ const Cap = struct {
             var w = std.mem.tokenizeScalar(u8, first, ' ');
             _ = w.next();
             const target = w.next() orelse "";
-            tags.writer().print("{s} {s}\n", .{ id, target }) catch @panic("oom");
+            tags.writer(self.a).print("{s} {s}\n", .{ id, target }) catch @panic("oom");
         }
         self.write(self.join(&.{ dir, "tags.txt" }), tags.items);
     }
@@ -314,15 +314,15 @@ const Cap = struct {
 /// `<id> <refname> <peeled id or ->` per line of for-each-ref's
 /// `%(objectname) %(refname) %(*objectname)`.
 pub fn refsText(a: A, text: []const u8) ![]u8 {
-    var o = std.ArrayList(u8).init(a);
+    var o = std.ArrayList(u8).empty;
     var lines = std.mem.splitScalar(u8, text, '\n');
     while (lines.next()) |l| {
         var f = std.mem.tokenizeScalar(u8, l, ' ');
         const id = f.next() orelse continue;
         const name = f.next() orelse continue;
-        try o.writer().print("{s} {s} {s}\n", .{ id, name, f.next() orelse "-" });
+        try o.writer(a).print("{s} {s} {s}\n", .{ id, name, f.next() orelse "-" });
     }
-    return o.toOwnedSlice();
+    return o.toOwnedSlice(a);
 }
 
 pub fn main() !void {
@@ -344,7 +344,7 @@ pub fn main() !void {
     try std.fs.cwd().deleteTree(t0);
     try std.fs.cwd().makePath(try std.fs.path.join(a, &.{ t0, "home" }));
     const t = try std.fs.cwd().realpathAlloc(a, t0);
-    var self_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var self_buf: [std.fs.max_path_bytes]u8 = undefined;
     const self_exe = try a.dupe(u8, try std.fs.selfExePath(&self_buf));
     const git = try std.fs.path.join(a, &.{ dist, "bin/git" });
     var env = std.process.EnvMap.init(a);

@@ -33,7 +33,7 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const a = arena.allocator();
     const args = try std.process.argsAlloc(a);
-    const out = std.io.getStdOut().writer();
+    const out = std.fs.File.stdout().deprecatedWriter();
     const base = std.fs.path.basename(args[0]);
     if (std.mem.eql(u8, base, "git-lfs")) {
         try out.writeAll("git-lfs/3.8.0 (GitHub; linux amd64; go 1.25.0)\n");
