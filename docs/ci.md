@@ -99,10 +99,24 @@ It does three things, in this order:
    a job that cannot reach the farm must fail, not quietly build on the runner.
 3. **Writes the farm's machine buckconfig**, `~/.buckconfig.d/farm.buckconfig`
    (buck2 reads `~/.buckconfig.d/` and `/etc/buckconfig.d/`): the
-   `[buck2_re_client]` addresses, instance name, `tls = false` and
+   `[buck2_re_client]` addresses, instance name, `tls` and
    `execution_concurrency_limit`, and `linux_x86_64_properties` under
    `[komira_re]`. Developers put the same keys in their own gitignored
-   `.buckconfig.local` ([DEVELOPMENT.md](../DEVELOPMENT.md)).
+   `.buckconfig.local` ([DEVELOPMENT.md](../DEVELOPMENT.md)). Optional
+   inputs add the rest: `darwin-properties` with `darwin-macos-hosts` (both or
+   neither) write `darwin_arm64_properties` and `darwin_macos_hosts`; `tls`
+   (`false` by default) and `tls-ca-certs`, the absolute path of a PEM CA file
+   on the runner, only with `tls: true`, write `tls` and `tls_ca_certs`.
+   A user buckconfig is read before the repository's own, so a key the
+   repository's `.buckconfig` (or a file it includes) sets wins over the one
+   written here.
+
+Every input is checked before the tailnet is joined: an empty required
+input, a value holding a line break, half of the macOS pair, a macOS set equal
+to the linux one, `tls` other than `true` or `false`, and a CA file that is not
+an absolute path to a readable file are refused. `//:farm_connect_cases` runs
+those checks and the writer from `action.yml`'s own scripts and compares the
+buckconfig written whole.
 
 A job that calls it needs `permissions: id-token: write` (to ask GitHub for the
 token) next to `contents: read`, and nothing else: the job reads no secret, holds
