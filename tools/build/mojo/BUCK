@@ -23,7 +23,7 @@ zig_test(
     imports = _MOJO_COMPILE_SRCS,
     src = "tools/mojo_compile.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 zig_exe(
@@ -31,9 +31,9 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     imports = _MOJO_COMPILE_SRCS,
     src = "tools/mojo_compile.zig",
-    unit_tests = [":mojo_compile_unit"],
+    unit_tests = [":mojo_compile_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 
@@ -54,7 +54,7 @@ zig_test(
     imports = _MOJO_COMPILE_MACOS_SRCS,
     src = "tools/mojo_compile_macos.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 zig_exe(
@@ -63,9 +63,9 @@ zig_exe(
     imports = _MOJO_COMPILE_MACOS_SRCS,
     src = "tools/mojo_compile_macos.zig",
     target = row("darwin-arm64")["zig_triple"],
-    unit_tests = [":mojo_compile_darwin_unit"],
+    unit_tests = [":mojo_compile_darwin_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 
@@ -77,7 +77,7 @@ zig_bootstrap_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "tools/zig_launch.zig",
     test_src = "tools/zig_launch_test.zig",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 
@@ -92,16 +92,16 @@ zig_test(
     imports = ["tools/act.zig"],
     src = "tools/act_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 zig_exe(
     name = "act",
     exec_compatible_with = LINUX_X86_64,
     src = "tools/act.zig",
-    unit_tests = [":act_unit"],
+    unit_tests = [":act_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 
@@ -115,16 +115,16 @@ zig_test(
     imports = ["tools/doc_check.zig"],
     src = "tools/doc_check_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 zig_exe(
     name = "doc_check",
     exec_compatible_with = LINUX_X86_64,
     src = "tools/doc_check.zig",
-    unit_tests = [":doc_check_unit"],
+    unit_tests = [":doc_check_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 
@@ -138,16 +138,16 @@ zig_test(
     imports = ["tools/archive_files.zig"],
     src = "tools/archive_files_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 zig_exe(
     name = "archive_files",
     exec_compatible_with = LINUX_X86_64,
     src = "tools/archive_files.zig",
-    unit_tests = [":archive_files_unit"],
+    unit_tests = [":archive_files_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 
@@ -161,16 +161,16 @@ zig_test(
     imports = ["tools/proto_gen.zig"],
     src = "tools/proto_gen_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 zig_exe(
     name = "proto_gen",
     exec_compatible_with = LINUX_X86_64,
     src = "tools/proto_gen.zig",
-    unit_tests = [":proto_gen_unit"],
+    unit_tests = [":proto_gen_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 
@@ -183,7 +183,7 @@ zig_test(
     imports = ["tools/proto_fixture.zig", "tools/unified_diff.zig"],
     src = "tools/proto_fixture_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 # unified_diff (tools/unified_diff.zig) as a module other packages import by name.
@@ -198,9 +198,9 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     imports = ["tools/unified_diff.zig"],
     src = "tools/proto_fixture.zig",
-    unit_tests = [":proto_fixture_unit"],
+    unit_tests = [":proto_fixture_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 
@@ -210,9 +210,9 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "tools/act.zig",
     target = row("darwin-arm64")["zig_triple"],
-    unit_tests = [":act_unit"],
+    unit_tests = [":act_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 
