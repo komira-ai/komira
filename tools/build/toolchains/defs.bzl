@@ -33,7 +33,11 @@ MOJO_TOOLCHAIN_ATTRS = dict(
     # (AVX2, BMI2, FMA): built binaries and gated tests need a worker, and a
     # deployment host, that implements it.
     target_cpu = row("linux-x86_64")["target_cpu"],
-    zig = _TOOLCHAINS + "zig",
+    # The Mojo link driver stays zig 0.12.0 (the `zig_link` pin): a coverage build
+    # relocates the action's directory out of the DWARF this link keeps, by bytes,
+    # and lld of zig 0.15 lays `.debug_str` out by the hash of each string, so the
+    # layout of a coverage binary would depend on the directory it was relocated from.
+    zig = _TOOLCHAINS + "zig_link",
 )
 
 # What a linux x86_64 toolchain compiles for, and where its actions run: a

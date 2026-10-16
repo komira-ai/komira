@@ -11,7 +11,7 @@ zig_test(
     imports = ["aws_act.zig"],
     deps = ["//tools/build/act_util:act_util"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 zig_exe(
@@ -19,8 +19,8 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "aws_act.zig",
     deps = ["//tools/build/act_util:act_util"],
-    unit_tests = [":aws_act_unit", "komira//tools/build/toolchains:zig_next_version"],
+    unit_tests = [":aws_act_unit", "komira//tools/build/toolchains:zig_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
 )

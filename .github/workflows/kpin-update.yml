@@ -25,7 +25,7 @@
 # pinned buck2 (./buck2: sha256-checked) and the pinned zig (the toolchain cell,
 # sha256-checked downloads), on the runner itself: kpin's unit tests are welded
 # into its build and run there first. kpin is built with zig 0.15.2
-# (`:zig_next`), whose std.http client reaches registry.npmjs.org (TLS 1.2) and
+# (`:zig`), whose std.http client reaches registry.npmjs.org (TLS 1.2) and
 # nodejs.org (TLS 1.3). `update` is the one step that opens a socket (https
 # only, TLS 1.2 or 1.3; kpin refuses plain http).
 #

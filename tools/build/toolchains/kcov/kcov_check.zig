@@ -599,7 +599,8 @@ fn casesMode(ck: *Ck, args: []const []const u8) void {
     const m_probe = ck.join(&.{ m_dir, "bin/probe" });
     ck.copy(lib, m_probe_lib);
     _ = ck.must(zc(ck, triple, &.{ "-shared", "-fPIC", "-Dkcov_probe=kcov_glibc_named", rpath_lib, "-Wl,-soname,libm.so.6", "-o", m_libm }), &.{}, null, "zig cc of rpath_lib.c as libm.so.6 failed", .{});
-    _ = ck.must(zc(ck, triple, &.{ rpath_main, m_probe_lib, m_libm, "-Wl,--disable-new-dtags", "-Wl,-rpath,$ORIGIN/../lib", "-o", m_probe }), &.{}, null, "zig cc of rpath_main.c with a libm.so.6 failed", .{});
+    // zig 0.15 links with --as-needed: the libm.so.6 of its own is referenced by no symbol, so say it is needed.
+    _ = ck.must(zc(ck, triple, &.{ "-Wl,--no-as-needed", rpath_main, m_probe_lib, m_libm, "-Wl,--disable-new-dtags", "-Wl,-rpath,$ORIGIN/../lib", "-o", m_probe }), &.{}, null, "zig cc of rpath_main.c with a libm.so.6 failed", .{});
     _ = ck.must(&.{ elf_rpath, m_probe }, &.{}, null, "elf_rpath refused the probe with a libm.so.6", .{});
     const named = ck.join(&.{ ck.t, "named" });
     _ = ck.must(&.{m_probe}, &.{ .{ "LD_DEBUG", "libs" }, .{ "LD_DEBUG_OUTPUT", named }, .{ "LD_LIBRARY_PATH", decoy } }, null, "the probe with a libm.so.6 of its own failed", .{});

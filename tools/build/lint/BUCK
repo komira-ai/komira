@@ -10,10 +10,10 @@ load(":defs.bzl", "tar_member")
 load(":interpreter_budget.bzl", "interpreter_budget")
 load(":no_shell.bzl", "no_shell")
 
-# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# Built with zig 0.15.2 (`:zig`); the executables are built behind the check
 # that the pin is that release.
-_ZIG = "komira//tools/build/toolchains:zig_next"
-_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+_ZIG = "komira//tools/build/toolchains:zig"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_version"
 
 
 # test_weld (test_weld.zig): the action of the test_weld lint (test_weld.bzl,

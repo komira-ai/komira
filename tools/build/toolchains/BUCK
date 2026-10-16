@@ -12,13 +12,12 @@ load(":pixi.bzl", "pixi_pin_record", "pixi_version_check")
 # Static busybox: `sh` and the file utilities every action uses.
 pinned_file(**pinned_kwargs("linux-x86_64", "busybox", visibility = ["PUBLIC"]))
 
-# zig: the C link driver for `mojo build`, and the compiler for conda_unpack.
+# zig 0.15.2: the compiler of every Zig build tool, the C link driver for `mojo
+# build`, and the C compiler of the vendored C libraries.
 pinned_file(**pinned_kwargs("linux-x86_64", "zig"))
 
-# zig 0.15.2, the release the build tools move to one area at a time: a target
-# names it as its `zig` (kpin does). Nothing else consumes it yet, so no action
-# key of any other target depends on it.
-pinned_file(**pinned_kwargs("linux-x86_64", "zig_next"))
+# zig 0.12.0, the Mojo link driver (see the `zig_link` pin in platforms/table.bzl).
+pinned_file(**pinned_kwargs("linux-x86_64", "zig_link"))
 
 # The Mojo compiler package.
 pinned_file(**pinned_kwargs("linux-x86_64", "mojo_compiler"))
@@ -68,16 +67,16 @@ zig_test(
     imports = ["version_check.zig"],
     src = "version_check_test.zig",
     busybox = ":busybox",
-    zig = ":zig_next",
+    zig = ":zig",
 )
 
 zig_exe(
     name = "version_check",
     exec_compatible_with = LINUX_X86_64,
     src = "version_check.zig",
-    unit_tests = [":version_check_unit", ":zig_next_version"],
+    unit_tests = [":version_check_unit", ":zig_version"],
     busybox = ":busybox",
-    zig = ":zig_next",
+    zig = ":zig",
     visibility = ["PUBLIC"],
 )
 
@@ -112,24 +111,26 @@ zig_dist(
     visibility = ["PUBLIC"],
 )
 
+# The zig every `mojo build` links with (MOJO_TOOLCHAIN_ATTRS `zig`), and the one
+# a coverage build wraps (tools/build/coverage/kcov/cov_zig.zig).
 zig_dist(
-    name = "zig_next",
+    name = "zig_link",
     exec_compatible_with = LINUX_X86_64,
-    archive = ":zig_next_linux_x86_64.tar.xz",
+    archive = ":zig_link_linux_x86_64.tar.xz",
     busybox = ":busybox",
-    strip_prefix = zig_strip_prefix("linux-x86_64", "zig_next"),
+    strip_prefix = zig_strip_prefix("linux-x86_64", "zig_link"),
     visibility = ["PUBLIC"],
 )
 
-# `:zig_next` reports 0.15.2 (zig_next_version_test.zig). Compiled and run by the
-# 0.12 zig, so it does not depend on what it checks. A target that builds with
-# `:zig_next` lists this test in its `unit_tests` (kpin does), so none of them
-# exists unless the pin is the release it names.
+# `:zig` reports 0.15.2 (zig_version_test.zig). A target that builds with `:zig`
+# lists this test in its `unit_tests`, so none of them exists unless the pin is
+# the release it names. (It is compiled by the zig it checks: a pin that
+# unpacked to another release would still run, and report that release.)
 zig_test(
-    name = "zig_next_version",
+    name = "zig_version",
     exec_compatible_with = LINUX_X86_64,
-    env_tools = {"ZIG_NEXT": ":zig_next"},
-    src = "zig_next_version_test.zig",
+    env_tools = {"ZIG": ":zig"},
+    src = "zig_version_test.zig",
     busybox = ":busybox",
     zig = ":zig",
     visibility = ["PUBLIC"],
@@ -140,7 +141,7 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "komira//tools/build/mojo:conda_unpack.zig",
     busybox = ":busybox",
-    zig = ":zig_next",
+    zig = ":zig",
     visibility = ["PUBLIC"],
 )
 
@@ -188,7 +189,7 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "komira//tools/build/mojo:zig_cc_launcher.zig",
     busybox = ":busybox",
-    zig = ":zig_next",
+    zig = ":zig",
     visibility = ["PUBLIC"],
 )
 

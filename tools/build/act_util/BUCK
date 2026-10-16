@@ -11,7 +11,7 @@ zig_test(
     imports = ["extract.zig", "util.zig"],
     src = "util_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 # Unpacking a gzipped tar (extract.zig); its archives are built in memory by
@@ -23,13 +23,13 @@ zig_test(
     src = "extract_test.zig",
     deps = ["//tools/build/node_tools:node_tartest"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 zig_module(
     name = "act_util",
     src = "util.zig",
     imports = ["extract.zig"],
-    unit_tests = [":act_util_unit", ":extract_unit", "komira//tools/build/toolchains:zig_next_version"],
+    unit_tests = [":act_util_unit", ":extract_unit", "komira//tools/build/toolchains:zig_version"],
     visibility = ["PUBLIC"],
 )

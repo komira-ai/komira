@@ -3,9 +3,9 @@ load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "row")
 load(":defs.bzl", "mojo_watchdog_cases")
 
-# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# Built with zig 0.15.2 (`:zig`); the executables are built behind the check
 # that the pin is that release.
-_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG = "komira//tools/build/toolchains:zig"
 
 # The stand-in toolchain: the compiler (bin/mojo) and the link driver (zig)
 # the cases run the wrapper against.

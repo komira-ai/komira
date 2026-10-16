@@ -75,7 +75,7 @@ ASSET_ROLES = [
     "rustc",
     "shellcheck",
     "zig",
-    "zig_next",
+    "zig_link",
 ]
 # kcov, the line coverage tool (tools/build/toolchains/kcov/README.md): its
 # source archive and the conda-forge packages holding the static libraries it
@@ -302,17 +302,20 @@ PLATFORMS = {
             ),
             "zig": pin(
                 "zig_linux_x86_64.tar.xz",
-                "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz",
-                "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad",
-                size = 45480516,
-            ),
-            # The zig that kpin and later the tools move to (0.15.2); `zig` above
-            # stays what every other action uses until the last step flips it.
-            "zig_next": pin(
-                "zig_next_linux_x86_64.tar.xz",
                 "https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz",
                 "02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239",
                 size = 53733924,
+            ),
+            # zig 0.12.0, the Mojo link driver only (the toolchain's `link`): the
+            # coverage build keeps the DWARF its link wrote and relocates the
+            # action's directory out of it by bytes, and lld 20 (zig 0.15) lays
+            # `.debug_str` out by the hash of each string, so the layout of a
+            # binary depends on the directory that was in it.
+            "zig_link": pin(
+                "zig_link_linux_x86_64.tar.xz",
+                "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz",
+                "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad",
+                size = 45480516,
             ),
         },
         "bundles": True,
@@ -396,7 +399,7 @@ PLATFORMS = {
         "target_cpu": "x86-64-v3",
         "target_features": [],
         "unpack_triple": "x86_64-linux-musl",
-        "zig_exe_sha256": "871186494014f9630683fea5780ae89bd1be16bab11f229f08acba08263c799a",
+        "zig_exe_sha256": "2858dc89dbbfdd08cceda1b841e7fd0a793a1a67b49f150bc3d0d1de44ed7f51",
         "zig_triple": "x86_64-linux-gnu.2.34",
     },
     "darwin-arm64": {
@@ -477,17 +480,20 @@ PLATFORMS = {
             ),
             "zig": pin(
                 "zig_macos_aarch64.tar.xz",
-                "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz",
-                "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f",
-                size = 43447724,
-            ),
-            # The zig that kpin and later the tools move to (0.15.2); `zig` above
-            # stays what every other action uses until the last step flips it.
-            "zig_next": pin(
-                "zig_next_macos_aarch64.tar.xz",
                 "https://ziglang.org/download/0.15.2/zig-aarch64-macos-0.15.2.tar.xz",
                 "3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b",
                 size = 50635984,
+            ),
+            # zig 0.12.0, the Mojo link driver only (the toolchain's `link`): the
+            # coverage build keeps the DWARF its link wrote and relocates the
+            # action's directory out of it by bytes, and lld 20 (zig 0.15) lays
+            # `.debug_str` out by the hash of each string, so the layout of a
+            # binary depends on the directory that was in it.
+            "zig_link": pin(
+                "zig_link_macos_aarch64.tar.xz",
+                "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz",
+                "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f",
+                size = 43447724,
             ),
         },
         # Bundles, OCI images and the launcher are Linux server products.
@@ -523,7 +529,7 @@ PLATFORMS = {
         "target_cpu": "apple-m1",
         "target_features": [],
         "unpack_triple": "aarch64-macos",
-        "zig_exe_sha256": "c007814ca1128eeceeb9ce4d625be4d0b13d85228bef8a5534aeb6bcfb56a529",
+        "zig_exe_sha256": "c65cd34917923f575448cc0603dd7c2326da0af0e5c323043d090662dcdf351c",
         "zig_triple": "aarch64-macos.11.0",
     },
     # RESERVED. Linux on aarch64: Ampere Altra servers (Neoverse N1) are the
@@ -610,17 +616,20 @@ PLATFORMS = {
             ),
             "zig": pin(
                 "zig_linux_aarch64.tar.xz",
-                "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz",
-                "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63",
-                size = 41849060,
-            ),
-            # The zig that kpin and later the tools move to (0.15.2); `zig` above
-            # stays what every other action uses until the last step flips it.
-            "zig_next": pin(
-                "zig_next_linux_aarch64.tar.xz",
                 "https://ziglang.org/download/0.15.2/zig-aarch64-linux-0.15.2.tar.xz",
                 "958ed7d1e00d0ea76590d27666efbf7a932281b3d7ba0c6b01b0ff26498f667f",
                 size = 49471996,
+            ),
+            # zig 0.12.0, the Mojo link driver only (the toolchain's `link`): the
+            # coverage build keeps the DWARF its link wrote and relocates the
+            # action's directory out of it by bytes, and lld 20 (zig 0.15) lays
+            # `.debug_str` out by the hash of each string, so the layout of a
+            # binary depends on the directory that was in it.
+            "zig_link": pin(
+                "zig_link_linux_aarch64.tar.xz",
+                "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz",
+                "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63",
+                size = 41849060,
             ),
         },
         "bundles": True,
@@ -654,7 +663,7 @@ PLATFORMS = {
         "target_cpu": "generic",
         "target_features": ["+outline-atomics"],
         "unpack_triple": "aarch64-linux-musl",
-        "zig_exe_sha256": "63eb4d2bd19140feee8fe02b50dc6dd2264567c5d6dae0fb7ccec5150e96ae8a",
+        "zig_exe_sha256": "931b8e9a9327dac87bc439067f07604219510fa541133ff6e542c6243968cc86",
         "zig_triple": "aarch64-linux-gnu.2.34",
     },
 }
@@ -923,7 +932,7 @@ def os_floor_version(name):
     return row(name)["os_floor"].split("-", 1)[1]
 
 def zig_strip_prefix(name, role = "zig"):
-    """The directory a row's zig archive (`role`: `zig` or `zig_next`) unpacks into (`zig-linux-x86_64-0.12.0`, `zig-x86_64-linux-0.15.2`): its URL's file name without `.tar.xz`."""
+    """The directory a row's zig archive (`role`: `zig` or `zig_link`) unpacks into (`zig-x86_64-linux-0.15.2`): its URL's file name without `.tar.xz`."""
     return asset(name, role)["url"].split("/")[-1][:-len(".tar.xz")]
 
 def host_row(host):

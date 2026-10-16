@@ -7,9 +7,9 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("//functional/coverage:defs.bzl", "cov_branch_check", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_zig_tree", "kcov_stub_dir")
 
-# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# Built with zig 0.15.2 (`:zig`); the executables are built behind the check
 # that the pin is that release.
-_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG = "komira//tools/build/toolchains:zig"
 
 # A coverage link whose relocator rewrites nothing (test 41). Its [coverage]
 # must fail with mojo_compile's exit 4, "contains this action's working
@@ -96,7 +96,7 @@ zig_exe(
     src = ":lost_run_src",
     busybox = "komira//tools/build/toolchains:busybox",
     exec_compatible_with = LINUX_X86_64,
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 cov_run_dir(
@@ -170,7 +170,7 @@ zig_exe(
     src = ":lostdir_run_src",
     busybox = "komira//tools/build/toolchains:busybox",
     exec_compatible_with = LINUX_X86_64,
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 cov_run_dir(
@@ -209,7 +209,7 @@ zig_exe(
     src = ":longarg_run_src",
     busybox = "komira//tools/build/toolchains:busybox",
     exec_compatible_with = LINUX_X86_64,
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 cov_run_dir(
@@ -1067,7 +1067,7 @@ zig_exe(
     src = ":covso_skip_run_src",
     busybox = "komira//tools/build/toolchains:busybox",
     exec_compatible_with = LINUX_X86_64,
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 cov_run_dir(

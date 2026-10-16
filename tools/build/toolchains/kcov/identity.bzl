@@ -22,7 +22,7 @@ it without loading kcov's rules.
 # sha256 of `bin/kcov` of `:kcov_dist` (one build: it hard-codes the
 # linux-x86_64 row, and `:kcov_reproducible` requires two builds to be the
 # same bytes).
-KCOV_BIN_SHA256 = "4468362dc51f234df19825338794cbb1d642182ccb1ec12a4a8dc8db81b897b7"
+KCOV_BIN_SHA256 = "8226a1ac340a956f9442c680b2a37c1c129495368820c41b075a3680898fb5f3"
 
 # kcov's usage line, the start of one string literal of its
 # src/configuration.cc (the C++ compiler joins the adjacent literals), so the

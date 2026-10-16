@@ -2,9 +2,8 @@
 
 `kpin` turns the versions people write into the URL, sha256 and size the build pins, in a generated lock that
 `pinned_file` consumes. It is a Zig tool, built behind its unit tests like every tool under
-[`tools/build`](../README.md), with zig 0.15.2 (`komira//tools/build/toolchains:zig_next`): the standard library
-client of the zig the other tools still use (0.12) cannot complete a TLS handshake with `registry.npmjs.org` or
-`nodejs.org`.
+[`tools/build`](../README.md), with zig 0.15.2 (`komira//tools/build/toolchains:zig`): the standard library client of 0.12, the
+zig the build used before, could not complete a TLS handshake with `registry.npmjs.org` or `nodejs.org`.
 
 - People edit versions: `pins.toml` for things with no lockfile of their own (toolchains, release binaries), and the
   native lockfile where there is one (`package-lock.json`, lockfileVersion 3).

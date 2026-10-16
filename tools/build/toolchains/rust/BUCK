@@ -53,16 +53,16 @@ zig_test(
     src = "version_check_test.zig",
     imports = ["version_check.zig"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 zig_exe(
     name = "version_check",
     exec_compatible_with = LINUX_X86_64,
     src = "version_check.zig",
-    unit_tests = [":version_check_unit", "komira//tools/build/toolchains:zig_next_version"],
+    unit_tests = [":version_check_unit", "komira//tools/build/toolchains:zig_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 rust_version_check(

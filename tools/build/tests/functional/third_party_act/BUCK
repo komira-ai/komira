@@ -13,7 +13,7 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "fake_gen.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 zig_test(
@@ -29,5 +29,5 @@ zig_test(
         "tests//functional/driver_kit:driver_kit",
     ],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )

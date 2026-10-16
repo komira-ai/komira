@@ -64,7 +64,7 @@ def _zig_cxx_toolchain_impl(ctx):
     cxx = _zig_tool(launcher, zig, "c++")
 
     # Flags every compile gets, before the target's own.
-    base = ["-target", ctx.attrs.target, "-mcpu=" + ctx.attrs.target_cpu.replace("-", "_"), "-fPIC", "-g0"]
+    base = ["-target", ctx.attrs.target, "-mcpu=" + ctx.attrs.target_cpu.replace("-", "_"), "-fPIC", "-g0", "-fsanitize-trap=undefined"]
     c_info = CCompilerInfo(
         compiler = cc,
         compiler_type = "clang",

@@ -5,10 +5,10 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "branch_gate_rows", "cov_gate_dir")
 load(":policy.bzl", "COVERAGE_BRANCH_GATE")
 
-# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# Built with zig 0.15.2 (`:zig`); the executables are built behind the check
 # that the pin is that release.
-_ZIG = "komira//tools/build/toolchains:zig_next"
-_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+_ZIG = "komira//tools/build/toolchains:zig"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_version"
 
 # covcheck: coverage reports (kcov's Cobertura, lcov, and the branch records
 # of tools/build/coverage/branch) to per-package numbers,
@@ -30,16 +30,16 @@ zig_test(
     imports = ["census_render.zig"],
     src = "census_render_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 zig_exe(
     name = "census_render",
     exec_compatible_with = LINUX_X86_64,
     src = "census_render.zig",
-    unit_tests = [":census_render_unit", "komira//tools/build/toolchains:zig_next_version"],
+    unit_tests = [":census_render_unit", "komira//tools/build/toolchains:zig_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
 )
 
@@ -186,16 +186,16 @@ zig_test(
     imports = ["cov_gate.zig"],
     src = "cov_gate_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 zig_exe(
     name = "cov_gate_bin",
     exec_compatible_with = LINUX_X86_64,
     src = "cov_gate.zig",
-    unit_tests = [":cov_gate_unit", "komira//tools/build/toolchains:zig_next_version"],
+    unit_tests = [":cov_gate_unit", "komira//tools/build/toolchains:zig_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
 )
 
@@ -217,7 +217,7 @@ zig_exe(
     name = "census_files",
     exec_compatible_with = LINUX_X86_64,
     src = "census_files.zig",
-    unit_tests = [":census_files_unit", _ZIG_VERSION, "komira//tools/build/toolchains:zig_next_version"],
+    unit_tests = [":census_files_unit", _ZIG_VERSION, "komira//tools/build/toolchains:zig_version"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = _ZIG,
     visibility = ["PUBLIC"],

@@ -44,7 +44,7 @@ zig_test(
     imports = ["llvm_branch.zig"],
     src = "llvm_branch_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 zig_exe(
@@ -52,9 +52,9 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
     src = "llvm_branch.zig",
-    unit_tests = [":llvm_branch_unit", "komira//tools/build/toolchains:zig_next_version"],
+    unit_tests = [":llvm_branch_unit", "komira//tools/build/toolchains:zig_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
 )
 

@@ -6,10 +6,10 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "bisect_scenario")
 
-# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# Built with zig 0.15.2 (`:zig`); the executables are built behind the check
 # that the pin is that release.
-_ZIG = "komira//tools/build/toolchains:zig_next"
-_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+_ZIG = "komira//tools/build/toolchains:zig"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_version"
 
 _SRCS = [
     "classify.zig",

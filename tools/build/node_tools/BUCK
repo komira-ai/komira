@@ -6,10 +6,10 @@
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
-# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# Built with zig 0.15.2 (`:zig`); the executables are built behind the check
 # that the pin is that release.
-_ZIG = "komira//tools/build/toolchains:zig_next"
-_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+_ZIG = "komira//tools/build/toolchains:zig"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_version"
 
 _SRCS = [
     "layout.zig",
@@ -52,7 +52,7 @@ zig_exe(
         ":sri_unit",
         ":unpack_unit",
         _ZIG_VERSION,
-        "komira//tools/build/toolchains:zig_next_version",
+        "komira//tools/build/toolchains:zig_version",
     ],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = _ZIG,
@@ -72,7 +72,7 @@ zig_test(
     imports = ["node_act.zig"],
     deps = ["//tools/build/act_util:act_util"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 zig_exe(
@@ -80,9 +80,9 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "node_act.zig",
     deps = ["//tools/build/act_util:act_util"],
-    unit_tests = [":node_act_unit", "komira//tools/build/toolchains:zig_next_version"],
+    unit_tests = [":node_act_unit", "komira//tools/build/toolchains:zig_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
 )
 

@@ -3,10 +3,10 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "row")
 
-# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# Built with zig 0.15.2 (`:zig`); the executables are built behind the check
 # that the pin is that release.
-_ZIG = "komira//tools/build/toolchains:zig_next"
-_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+_ZIG = "komira//tools/build/toolchains:zig"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_version"
 
 # The README examples tool (README.md of tools/build/mojo, "README
 # examples"): `generate` makes a README's ```mojo examples into programs, one

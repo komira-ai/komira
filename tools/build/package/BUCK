@@ -38,7 +38,7 @@ zig_test(
         "pack/readme_link.zig",
     ],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 # The package-format writer (tar, OCI), a static executable, built only
@@ -47,7 +47,7 @@ zig_exe(
     name = "komira_pack",
     exec_compatible_with = LINUX_X86_64,
     src = "pack/komira_pack.zig",
-    unit_tests = [":komira_pack_unit", "komira//tools/build/toolchains:zig_next_version"],
+    unit_tests = [":komira_pack_unit", "komira//tools/build/toolchains:zig_version"],
     imports = [
         "pack/common.zig",
         "pack/conda.zig",
@@ -61,7 +61,7 @@ zig_exe(
         "pack/tar_oci.zig",
     ],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
 )
 
@@ -83,7 +83,7 @@ zig_test(
     ],
     deps = ["//tools/build/act_util:act_util"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 zig_exe(
@@ -97,9 +97,9 @@ zig_exe(
         "act/release.zig",
     ],
     deps = ["//tools/build/act_util:act_util"],
-    unit_tests = [":pkg_act_unit", "komira//tools/build/toolchains:zig_next_version"],
+    unit_tests = [":pkg_act_unit", "komira//tools/build/toolchains:zig_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
 )
 

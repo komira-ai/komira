@@ -11,16 +11,16 @@ zig_test(
     src = "rustc_launch_test.zig",
     imports = ["rustc_launch.zig"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 zig_exe(
     name = "rustc_launch",
     exec_compatible_with = LINUX_X86_64,
     src = "rustc_launch.zig",
-    unit_tests = [":rustc_launch_unit", "komira//tools/build/toolchains:zig_next_version"],
+    unit_tests = [":rustc_launch_unit", "komira//tools/build/toolchains:zig_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
 )
 
@@ -32,16 +32,16 @@ zig_test(
     exec_compatible_with = LINUX_X86_64,
     src = "crate_patch.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 zig_exe(
     name = "crate_patch",
     exec_compatible_with = LINUX_X86_64,
     src = "crate_patch.zig",
-    unit_tests = [":crate_patch_unit", "komira//tools/build/toolchains:zig_next_version"],
+    unit_tests = [":crate_patch_unit", "komira//tools/build/toolchains:zig_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
 )
 
@@ -54,15 +54,15 @@ zig_test(
     src = "rust_sysroot_test.zig",
     imports = ["rust_sysroot.zig"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 zig_exe(
     name = "rust_sysroot",
     exec_compatible_with = LINUX_X86_64,
     src = "rust_sysroot.zig",
-    unit_tests = [":rust_sysroot_unit", "komira//tools/build/toolchains:zig_next_version"],
+    unit_tests = [":rust_sysroot_unit", "komira//tools/build/toolchains:zig_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
 )

@@ -100,7 +100,7 @@ zig_test(
     imports = ["git_check.zig"],
     deps = ["//tools/build/act_util:act_util"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 zig_exe(
@@ -108,9 +108,9 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "git_check.zig",
     deps = ["//tools/build/act_util:act_util"],
-    unit_tests = [":git_check_unit", "komira//tools/build/toolchains:zig_next_version"],
+    unit_tests = [":git_check_unit", "komira//tools/build/toolchains:zig_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
 )
 

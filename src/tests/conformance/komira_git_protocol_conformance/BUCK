@@ -80,15 +80,15 @@ zig_test(
     imports = ["capture.zig"],
     src = "capture_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 zig_exe(
     name = "capture",
     exec_compatible_with = LINUX_X86_64,
     src = "capture.zig",
-    unit_tests = [":capture_unit", "komira//tools/build/toolchains:zig_next_version"],
+    unit_tests = [":capture_unit", "komira//tools/build/toolchains:zig_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
     visibility = ["tests//functional/git_capture:"],
 )

@@ -41,7 +41,7 @@ zig_exe(
     busybox = "komira//tools/build/toolchains:busybox",
     # llvm_branch unpacks its conda packages with it too.
     visibility = ["komira//tools/build/toolchains/llvm_branch:"],
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 # kcov built from source (kcov_build.zig), behind its unit tests.
@@ -52,7 +52,7 @@ zig_test(
     imports = ["kcov_build.zig"],
     src = "kcov_build_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 zig_exe(
@@ -60,9 +60,9 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
     src = "kcov_build.zig",
-    unit_tests = [":kcov_build_unit", "komira//tools/build/toolchains:zig_next_version"],
+    unit_tests = [":kcov_build_unit", "komira//tools/build/toolchains:zig_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 # The checks of kcov (kcov_check.zig), behind their unit tests.
@@ -74,7 +74,7 @@ zig_test(
     src = "kcov_check_test.zig",
     deps = ["//tools/build/mojo:unified_diff"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 zig_exe(
@@ -84,9 +84,9 @@ zig_exe(
     imports = ["kcov_check_scan.zig"],
     src = "kcov_check.zig",
     deps = ["//tools/build/mojo:unified_diff"],
-    unit_tests = [":kcov_check_unit", "komira//tools/build/toolchains:zig_next_version"],
+    unit_tests = [":kcov_check_unit", "komira//tools/build/toolchains:zig_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 # DT_RUNPATH -> DT_RPATH, which zig 0.12 cannot link into an executable.
@@ -96,7 +96,7 @@ zig_exe(
     target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
     src = "elf_rpath.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 _DIST = dict(

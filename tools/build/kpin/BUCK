@@ -41,12 +41,12 @@ _SUPPORT = [
 # loads and that pins.bzl reads it (the package fails to load otherwise).
 _ = SELFTEST
 
-# kpin builds with zig 0.15.2 (`:zig_next`): the std.http client of 0.12 cannot
+# kpin builds with zig 0.15.2 (`:zig`): the std.http client of 0.12 cannot
 # complete a TLS handshake with the registries kpin updates from. The rest of
 # the tools stay on the zig of `:zig`. The executable is built behind the check
 # that the pin is the release it names.
-_ZIG = "komira//tools/build/toolchains:zig_next"
-_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+_ZIG = "komira//tools/build/toolchains:zig"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_version"
 
 # ---- Unit tests: `zig test` of each, run as a build action -------------------
 
