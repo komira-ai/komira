@@ -1,13 +1,12 @@
 # S3Fs keeps up to its in-flight bound of requests in flight, and never more.
 #
-# Over S3Fs, with a fake S3 whose every ranged GET and UploadPart takes
-# _DELAY_MS: a prefetch of _RANGES ranges too far apart to coalesce, with
-# `prefetch_max_inflight` K, takes at least ceil(_RANGES / K) delays (more
-# than K requests at once would finish sooner), and every one of its requests
-# is in flight together with K - 1 others and never with more (the fake
-# counts, below); with `prefetch_max_inflight` 0 (every range) and S3Config's
-# `max_inflight` 2, likewise with K = 2; a write of _PARTS parts with
-# `upload_max_inflight` K likewise.
+# Over S3Fs, with a fake S3 whose every ranged GET and UploadPart is held
+# for _DELAY_MS: a prefetch of _RANGES ranges too far apart to coalesce, with
+# `prefetch_max_inflight` K, has every one of its requests in flight together
+# with K - 1 others and never with more (the fake counts, below); with
+# `prefetch_max_inflight` 0 (every range) and S3Config's `max_inflight` 2,
+# likewise with K = 2; a write of _PARTS parts with `upload_max_inflight` K
+# likewise.
 #
 # HOW THE FAKE COUNTS. While a timed run is armed with its bound K (`_arm`),
 # each slow request adds itself to a process-wide in-flight count
@@ -16,11 +15,9 @@
 # is the process's, not theirs), waits until K are in flight (or
 # _GATHER_GUARD_MS pass, once per run), holds _DELAY_MS, and leaves. It
 # records whether it saw K in flight and any moment it saw more. "K at a time"
-# is then a count, not a duration: a wall-clock ceiling such as "under 5
-# delays" also charges the CPU time of building, signing and summing 5 MiB
-# parts, which under coverage instrumentation alone was 7 s and failed a
-# runner that kept its bound. The floor of ceil(n / K) delays stays: CPU time
-# can only lengthen a run, never shorten it.
+# is then a count, not a duration: no test here reads a clock. The only
+# wait is the fake's gather loop, capped by _GATHER_GUARD_MS, which exists to
+# end a run that never reaches its bound instead of hanging.
 # Every request of a prefetch carries the handle's ETag, whichever worker's
 # store sends it: under `ver/` the fake answers a ranged GET by its
 # precondition (If-Match "v1": version 1; none, past offset 0: version 2,
@@ -43,7 +40,6 @@ from std.ffi import external_call
 from std.memory import ArcPointer
 from std.memory import Pointer
 from std.testing import assert_equal, assert_raises, assert_true
-from std.time import perf_counter_ns
 
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
@@ -465,8 +461,8 @@ def _check(got: Slab[SharedAlignedBuffer[HeapRegion]]) raises:
             assert_equal(view[b], _byte_at(i * _SPACING + b))
 
 
-def _timed_prefetch_ms(bound: Int, expect_k: Int, max_inflight: Int = 64) raises -> Int:
-    """Milliseconds of a prefetch of the far ranges on a handle a first
+def _counted_prefetch(bound: Int, expect_k: Int, max_inflight: Int = 64) raises:
+    """A prefetch of the far ranges on a handle a first
     prefetch has already read through (so the stores are built and the
     handle's version is known), with the bytes checked and the fake's counts
     checked against `expect_k` in flight; `bound` is `prefetch_max_inflight`
@@ -475,35 +471,22 @@ def _timed_prefetch_ms(bound: Int, expect_k: Int, max_inflight: Int = 64) raises
     var f = fs.open("v/big")
     _check(fs.read_ranges_prefetched(f, _far_ranges()))
     _arm(expect_k, _RANGES)
-    var start = perf_counter_ns()
     var out = fs.read_ranges_prefetched(f, _far_ranges())
-    var ms = Int((perf_counter_ns() - start) // 1_000_000)
     _check(out)
     _check_counts(
         String(_RANGES) + " requests under a bound of " + String(expect_k), expect_k, _RANGES
     )
-    return ms
 
 
 def test_a_prefetch_keeps_its_bound_in_flight() raises:
     # K = 4: two rounds of four requests.
-    var ms = _timed_prefetch_ms(4, 4)
-    assert_true(
-        ms >= 2 * _DELAY_MS,
-        String("8 requests under a bound of 4 took ") + String(ms) + " ms: more than 4 were in flight",
-    )
+    _counted_prefetch(4, 4)
 
 
 def test_s3_config_max_inflight_caps_the_prefetch() raises:
     # prefetch_max_inflight 0 is every range at once; S3Config's max_inflight
-    # of 2 caps it at two: four rounds, ceil(8 / 2) = 4 delays at least.
-    var ms = _timed_prefetch_ms(0, 2, max_inflight=2)
-    assert_true(
-        ms >= 4 * _DELAY_MS,
-        String("8 requests under S3Config.max_inflight 2 took ")
-        + String(ms)
-        + " ms: more than 2 were in flight",
-    )
+    # of 2 caps it at two: four rounds of two requests.
+    _counted_prefetch(0, 2, max_inflight=2)
 
 
 def _check_version_1(got: Slab[SharedAlignedBuffer[HeapRegion]]) raises:
@@ -534,17 +517,13 @@ def test_every_request_of_a_prefetch_carries_the_etag() raises:
 
 
 def test_a_bound_of_one_is_one_at_a_time() raises:
-    var ms = _timed_prefetch_ms(1, 1)
-    assert_true(
-        ms >= _RANGES * _DELAY_MS,
-        String("8 requests under a bound of 1 took ") + String(ms) + " ms: more than 1 was in flight",
-    )
+    _counted_prefetch(1, 1)
 
 
-def _timed_write_ms(bound: Int) raises -> Int:
-    """Milliseconds of a write of the _PARTS parts (one write_at and the
-    close), the completion checked by the fake and its counts checked against
-    `bound` in flight."""
+def _counted_write(bound: Int) raises:
+    """A write of the _PARTS parts (one write_at and the close), the
+    completion checked by the fake and its counts checked against `bound` in
+    flight."""
     var fs = _fs(1, bound)
     var total = (_PARTS - 1) * _PART + _LAST
     var data = List[UInt8](capacity=total)
@@ -552,23 +531,16 @@ def _timed_write_ms(bound: Int) raises -> Int:
         data.append(_pattern_at(i))
     var w = fs.open_write("w/big", WriteMode.create_truncate())
     _arm(bound, _PARTS)
-    var start = perf_counter_ns()
     assert_equal(fs.write_at(w, Span(data)), Int64(total))
     fs.close_write(w^)
-    var ms = Int((perf_counter_ns() - start) // 1_000_000)
     _check_counts(
         String(_PARTS) + " parts under a bound of " + String(bound), bound, _PARTS
     )
-    return ms
 
 
 def test_a_write_keeps_its_bound_in_flight() raises:
     # K = 3: parts 1-3 together once three are held, then 4-6 at close.
-    var ms = _timed_write_ms(3)
-    assert_true(
-        ms >= 2 * _DELAY_MS,
-        String("6 parts under a bound of 3 took ") + String(ms) + " ms: more than 3 were in flight",
-    )
+    _counted_write(3)
 
 
 def test_file_systems_made_and_dropped_over_and_over() raises:
@@ -590,11 +562,7 @@ def test_file_systems_made_and_dropped_over_and_over() raises:
 
 
 def test_a_write_bound_of_one_is_one_part_at_a_time() raises:
-    var ms = _timed_write_ms(1)
-    assert_true(
-        ms >= _PARTS * _DELAY_MS,
-        String("6 parts under a bound of 1 took ") + String(ms) + " ms: more than 1 was in flight",
-    )
+    _counted_write(1)
 
 
 # =============================================================================
