@@ -239,7 +239,7 @@ const LINUX_ONLY =
     \\  cas_address = grpc://re.example.com:8980
     \\  instance_name = main
     \\  tls = false
-    \\  execution_concurrency_limit = 32
+    \\  execution_concurrency_limit = 256
     \\[komira_re]
     \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
     \\
@@ -280,7 +280,7 @@ test "tls true with no CA file: tls = true and no tls_ca_certs (the system's roo
         \\  cas_address = grpc://re.example.com:8980
         \\  instance_name = main
         \\  tls = true
-        \\  execution_concurrency_limit = 32
+        \\  execution_concurrency_limit = 256
         \\[komira_re]
         \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
         \\
@@ -307,7 +307,7 @@ test "tls true with a CA file: tls_ca_certs names that path" {
         \\  instance_name = main
         \\  tls = true
         \\  tls_ca_certs = {s}
-        \\  execution_concurrency_limit = 32
+        \\  execution_concurrency_limit = 256
         \\[komira_re]
         \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
         \\
