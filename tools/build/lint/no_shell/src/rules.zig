@@ -116,8 +116,8 @@ fn byPathScript(_: void, a: Script, b: Script) bool {
 /// The build files with sites and the shell scripts under `dir` (opened with
 /// `.iterate = true`), sorted by path. A symbolic link is followed.
 pub fn collect(alloc: Alloc, dir: std.fs.Dir) !Collected {
-    var builds = std.ArrayList(BuildFile).init(alloc);
-    var scripts = std.ArrayList(Script).init(alloc);
+    var builds = std.ArrayList(BuildFile).empty;
+    var scripts = std.ArrayList(Script).empty;
     var walker = try dir.walk(alloc);
     defer walker.deinit();
     var head: [head_len]u8 = undefined;
@@ -137,7 +137,7 @@ pub fn collect(alloc: Alloc, dir: std.fs.Dir) !Collected {
                 else => return err,
             };
             const counts = scan.scan(text);
-            if (scan.total(counts) > 0) try builds.append(.{ .path = try alloc.dupe(u8, e.path), .counts = counts });
+            if (scan.total(counts) > 0) try builds.append(alloc, .{ .path = try alloc.dupe(u8, e.path), .counts = counts });
             continue;
         }
         const n = f.readAll(&head) catch |err| switch (err) {
@@ -145,10 +145,10 @@ pub fn collect(alloc: Alloc, dir: std.fs.Dir) !Collected {
             else => return err,
         };
         const why = try classify(alloc, e.path, head[0..n]) orelse continue;
-        try scripts.append(.{ .path = try alloc.dupe(u8, e.path), .why = why });
+        try scripts.append(alloc, .{ .path = try alloc.dupe(u8, e.path), .why = why });
     }
-    const b = try builds.toOwnedSlice();
-    const s = try scripts.toOwnedSlice();
+    const b = try builds.toOwnedSlice(alloc);
+    const s = try scripts.toOwnedSlice(alloc);
     std.mem.sort(BuildFile, b, {}, byPathBuild);
     std.mem.sort(Script, s, {}, byPathScript);
     return .{ .build_files = b, .scripts = s };
@@ -175,10 +175,10 @@ pub fn covers(row: []const u8, path: []const u8) bool {
 /// Checks `found` against `list`, the text of the file named `name`, and
 /// writes one line per finding to `out`.
 pub fn check(alloc: Alloc, name: []const u8, list: []const u8, found: Collected, out: *std.ArrayList(u8)) !Result {
-    const w = out.writer();
+    const w = out.writer(alloc);
     var findings: usize = 0;
-    var rows = std.ArrayList(Row).init(alloc);
-    defer rows.deinit();
+    var rows = std.ArrayList(Row).empty;
+    defer rows.deinit(alloc);
     var keys = std.StringHashMap(usize).init(alloc);
     defer keys.deinit();
 
@@ -246,7 +246,7 @@ pub fn check(alloc: Alloc, name: []const u8, list: []const u8, found: Collected,
             continue;
         }
         slot.value_ptr.* = rows.items.len;
-        try rows.append(.{ .kind = kind, .path = path, .category = category, .count = n, .line = lineno });
+        try rows.append(alloc, .{ .kind = kind, .path = path, .category = category, .count = n, .line = lineno });
     }
 
     var build_files: usize = 0;
@@ -337,8 +337,8 @@ pub const Rendered = struct {
 };
 
 pub fn render(alloc: Alloc, name: []const u8, r: Result, v: Verdict, report: []const u8, expect: []const []const u8) !Rendered {
-    var message = std.ArrayList(u8).init(alloc);
-    const mw = message.writer();
+    var message = std.ArrayList(u8).empty;
+    const mw = message.writer(alloc);
     if (expect.len > 0) {
         if (v.missing) |m| {
             try mw.print("no_shell: the planted defect was not refused as expected: no finding holds `{s}`; {d} finding(s):\n{s}", .{ m, r.findings, report });
@@ -352,12 +352,12 @@ pub fn render(alloc: Alloc, name: []const u8, r: Result, v: Verdict, report: []c
     } else {
         try mw.print("no_shell: {d} build file(s) with shell sites and {d} shell script(s) checked against {s}", .{ r.build_files, r.scripts, name });
     }
-    var json = std.ArrayList(u8).init(alloc);
-    const jw = json.writer();
+    var json = std.Io.Writer.Allocating.init(alloc);
+    const jw = &json.writer;
     try jw.print("{{\"version\": 1, \"data\": {{\"status\": \"{s}\", \"message\": ", .{if (v.ok) "success" else "failure"});
-    try std.json.encodeJsonString(message.items, .{}, jw);
+    try std.json.Stringify.encodeJsonString(message.items, .{}, jw);
     try jw.writeAll("}}\n");
-    return .{ .json = try json.toOwnedSlice(), .message = try message.toOwnedSlice() };
+    return .{ .json = try json.toOwnedSlice(), .message = try message.toOwnedSlice(alloc) };
 }
 
 test {

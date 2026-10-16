@@ -14,14 +14,14 @@ const Run = struct {
 fn write(dir: std.fs.Dir, files: []const [2][]const u8) !void {
     for (files) |f| {
         if (std.fs.path.dirname(f[0])) |d| try dir.makePath(d);
-        try dir.writeFile(f[0], f[1]);
+        try dir.writeFile(.{ .sub_path = f[0], .data = f[1] });
     }
 }
 
 /// Collects the interpreter files of `dir` in `scope` and checks them against `allowlist`.
 fn checkScoped(arena: std.mem.Allocator, dir: std.fs.Dir, allowlist: []const u8, scope: []const []const u8) !Run {
     const found = try budget.collect(arena, dir, scope);
-    var out = std.ArrayList(u8).init(arena);
+    var out = std.ArrayList(u8).empty;
     const r = try budget.check(arena, al, allowlist, scope, found, &out);
     return .{ .result = r, .report = out.items };
 }

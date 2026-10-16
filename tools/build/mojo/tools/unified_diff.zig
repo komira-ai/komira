@@ -2,8 +2,45 @@
 
 const std = @import("std");
 
+/// A growable list over one allocator. The standard library's list changed its
+/// interface between the zig releases this file is built with; this one does
+/// not depend on it.
+fn List(comptime T: type) type {
+    return struct {
+        a: std.mem.Allocator,
+        buf: []T = &.{},
+        items: []T = &.{},
+
+        fn init(a: std.mem.Allocator) @This() {
+            return .{ .a = a };
+        }
+
+        fn append(self: *@This(), v: T) !void {
+            if (self.items.len == self.buf.len) {
+                self.buf = try self.a.realloc(self.buf, if (self.buf.len == 0) 16 else self.buf.len * 2);
+            }
+            self.buf[self.items.len] = v;
+            self.items = self.buf[0 .. self.items.len + 1];
+        }
+
+        fn appendSlice(self: *@This(), vs: []const T) !void {
+            for (vs) |v| try self.append(v);
+        }
+
+        fn print(self: *@This(), comptime fmt: []const u8, args: anytype) !void {
+            const text = try std.fmt.allocPrint(self.a, fmt, args);
+            defer self.a.free(text);
+            try self.appendSlice(text);
+        }
+
+        fn toOwnedSlice(self: *@This()) ![]T {
+            return self.a.realloc(self.buf, self.items.len);
+        }
+    };
+}
+
 fn splitLines(a: std.mem.Allocator, text: []const u8) ![][]const u8 {
-    var out = std.ArrayList([]const u8).init(a);
+    var out = List([]const u8).init(a);
     var it = std.mem.splitScalar(u8, text, '\n');
     while (it.next()) |l| {
         if (it.peek() == null and l.len == 0) break;
@@ -42,7 +79,7 @@ pub fn unifiedDiff(a: std.mem.Allocator, label1: []const u8, label2: []const u8,
     }
     // Ops over the whole files: ' ' common, '-' only in the first, '+' only in the second.
     const Op = struct { kind: u8, line: []const u8 };
-    var ops = std.ArrayList(Op).init(a);
+    var ops = List(Op).init(a);
     for (x[0..pre]) |l| try ops.append(.{ .kind = ' ', .line = l });
     var p: usize = 0;
     var q: usize = 0;
@@ -61,8 +98,8 @@ pub fn unifiedDiff(a: std.mem.Allocator, label1: []const u8, label2: []const u8,
     }
     for (x[n - suf ..]) |l| try ops.append(.{ .kind = ' ', .line = l });
 
-    var out = std.ArrayList(u8).init(a);
-    try out.writer().print("--- {s}\n+++ {s}\n", .{ label1, label2 });
+    var out = List(u8).init(a);
+    try out.print("--- {s}\n+++ {s}\n", .{ label1, label2 });
     const context = 3;
     // The line number of each op in the old and the new file.
     const old_at = try a.alloc(usize, ops.items.len + 1);
@@ -98,8 +135,8 @@ pub fn unifiedDiff(a: std.mem.Allocator, label1: []const u8, label2: []const u8,
         }
         const o1 = if (olds == 0) old_at[start] - 1 else old_at[start];
         const n1 = if (news == 0) new_at[start] - 1 else new_at[start];
-        try out.writer().print("@@ -{d},{d} +{d},{d} @@\n", .{ o1, olds, n1, news });
-        for (ops.items[start..stop]) |op| try out.writer().print("{c}{s}\n", .{ op.kind, op.line });
+        try out.print("@@ -{d},{d} +{d},{d} @@\n", .{ o1, olds, n1, news });
+        for (ops.items[start..stop]) |op| try out.print("{c}{s}\n", .{ op.kind, op.line });
         k = stop;
     }
     return try out.toOwnedSlice();
