@@ -274,6 +274,20 @@ def test_warmup_baseline_is_exact_mean_of_five_durations() raises:
     assert_equal(af.baseline_ns(), Float64(4000))
 
 
+def test_end_filter_clamps_a_start_in_the_future_to_zero() raises:
+    """`end_filter` measures `now - start`; a start time after `now` (clock
+    skew) is clamped to a zero duration instead of wrapping. A start of
+    UInt64.MAX is after any reading, so this holds on every machine with no
+    clock comparison: five such iterations leave the baseline at exactly 0."""
+    var af = AdaptiveFilter(n_predicates=4, worker_id=0)
+    for _ in range(5):
+        _ = af.begin_filter()
+        af.end_filter(UInt64.MAX)
+    assert_equal(af.total_iterations(), UInt64(5))
+    assert_equal(af.current_phase(), ADAPTIVE_FILTER_PHASE_EXPLORE)
+    assert_equal(af.baseline_ns(), Float64(0))
+
+
 def _run_one_window(mut af: AdaptiveFilter, first_ns: UInt64, rest_ns: UInt64):
     """One EXPLORE iter at `first_ns`, then the OBSERVE iters at `rest_ns`."""
     _ = af.begin_filter()
