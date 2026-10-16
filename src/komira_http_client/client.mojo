@@ -121,6 +121,7 @@ from komira_http_core.transport.io_stream import (
     Connector,
     IoStream,
     NEGOTIATED_HTTP_2,
+    NoDialAddress,
 )
 
 
@@ -639,7 +640,17 @@ struct HttpClient[C: Connector](HttpService, Movable, Deinitable):
         §2.5 documents for the dispatch helpers).
         """
         self._dial_resolves = self._dial_resolves + 1
-        return _ip_be_from_host(host, port)
+        comptime if conforms_to(Self.C, NoDialAddress):
+            # A connector that opens no socket (ScriptedConnector) never reads
+            # the address, so a NAME is not looked up: it dials address 0. An
+            # IP literal still parses to itself, so a test that dials a literal
+            # sees the same `ip_be` as before.
+            var lit = parse_ip_literal(host)
+            if lit:
+                return lit.value().v4_be
+            return UInt32(0)
+        else:
+            return _ip_be_from_host(host, port)
 
     @always_inline
     def dial_resolve_steps_total(self) -> Int:
@@ -2907,7 +2918,7 @@ def _run_one_request_streaming[
     _scheme_check_or_raise[C2](is_https, is_http, connector)
     var host_str = req.url.host_copy()
     var port = req.url.effective_port()
-    var ip_be = _ip_be_from_host(host_str, port)
+    var ip_be = _ip_be_for_connector[C2](host_str, port)
     # ★ PER-REQUEST SNI — the host, not just the address. See
     # `Connector.set_dial_host`.
     # ⚠ THIS HELPER CONSULTS NO POOL AND ALWAYS DIALS, so the resolve
@@ -3027,7 +3038,7 @@ def _run_one_request_buffered_with_dispatch[
     _scheme_check_or_raise[C2](is_https, is_http, connector)
     var host_str = req.url.host_copy()
     var port = req.url.effective_port()
-    var ip_be = _ip_be_from_host(host_str, port)
+    var ip_be = _ip_be_for_connector[C2](host_str, port)
     # ★ PER-REQUEST SNI — the host, not just the address. See
     # `Connector.set_dial_host`.
     # ⚠ THIS HELPER CONSULTS NO POOL AND ALWAYS DIALS, so the resolve
@@ -3970,7 +3981,7 @@ def _run_one_request_buffered[
     _scheme_check_or_raise[C2](is_https, is_http, connector)
     var host_str = req.url.host_copy()
     var port = req.url.effective_port()
-    var ip_be = _ip_be_from_host(host_str, port)
+    var ip_be = _ip_be_for_connector[C2](host_str, port)
     # ★ PER-REQUEST SNI — the host, not just the address. See
     # `Connector.set_dial_host`.
     # ⚠ THIS HELPER CONSULTS NO POOL AND ALWAYS DIALS, so the resolve
@@ -4049,6 +4060,22 @@ def _run_one_request_buffered[
 #
 # Both branches return the SAME UInt32 ip_be the Connector.connect path wants,
 # so no dial site changes. `port` is threaded for getaddrinfo's service hint.
+
+
+def _ip_be_for_connector[
+    C: Connector
+](host: String, port: UInt16) raises -> UInt32:
+    """`_ip_be_from_host` for the free-function dial helpers, except that a
+    `NoDialAddress` connector (ScriptedConnector) gets address 0 for a host
+    name instead of a lookup. `HttpClient._resolve_dial_ip_be` does the same
+    for the method dial paths."""
+    comptime if conforms_to(C, NoDialAddress):
+        var lit = parse_ip_literal(host)
+        if lit:
+            return lit.value().v4_be
+        return UInt32(0)
+    else:
+        return _ip_be_from_host(host, port)
 
 
 def _ip_be_from_host(host: String, port: UInt16 = UInt16(0)) raises -> UInt32:

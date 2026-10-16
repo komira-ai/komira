@@ -612,9 +612,7 @@ def test_a_host_override_must_be_a_bare_host() raises:
     `[a-z0-9.-]`, with a bad byte first, inside or last, by the whole
     message; a refused override leaves the host as it was. A host holding
     every accepted range edge (`a z 0 9 . -`), at the first and the last
-    byte too, is accepted. The overrides that dial are IP literals because
-    the client resolves the host before it dials, even over a scripted
-    connector: a literal is parsed, never looked up."""
+    byte too, is accepted."""
     var f = _fetcher(_armed(_sts_ok(), _capture()))
     with assert_raises(contains="STS host is empty"):
         f.set_sts_host(String(""))
