@@ -1,0 +1,37 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# The checks of the tests cell's rules (tests_act.zig), run as build actions
+# where the rules used busybox shell snippets. Built behind their unit tests;
+# driver_test.zig runs each check on good and bad inputs.
+
+zig_test(
+    name = "tests_act_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tests_act.zig", "probes.zig", "archives.zig", "proto_checks.zig", "aws_checks.zig", "parity.zig", "cov_checks.zig", "minised.zig"],
+    deps = ["komira//tools/build/mojo:unified_diff"],
+    src = "tests_act_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "tests_act",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["probes.zig", "archives.zig", "proto_checks.zig", "aws_checks.zig", "parity.zig", "cov_checks.zig", "minised.zig"],
+    deps = ["komira//tools/build/mojo:unified_diff"],
+    src = "tests_act.zig",
+    unit_tests = [":tests_act_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
+
+zig_test(
+    name = "driver",
+    exec_compatible_with = LINUX_X86_64,
+    exec_tools = {"TESTS_ACT": ":tests_act"},
+    src = "driver_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)

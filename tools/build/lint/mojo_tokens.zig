@@ -33,16 +33,16 @@ pub const Lexer = struct {
 
     /// The spans of `line` (no newline), in order, covering it; empty for
     /// an empty line.
-    pub fn scan(self: *Lexer, line: []const u8, spans: *std.ArrayList(Span)) !void {
+    pub fn scan(self: *Lexer, a: std.mem.Allocator, line: []const u8, spans: *std.ArrayList(Span)) !void {
         spans.clearRetainingCapacity();
         var i: usize = 0;
         if (self.long_quote != 0) {
             if (closeLong(line, 0, self.long_quote)) |e| {
-                try spans.append(.{ .kind = .long_string, .start = 0, .end = e });
+                try spans.append(a, .{ .kind = .long_string, .start = 0, .end = e });
                 self.long_quote = 0;
                 i = e;
             } else {
-                if (line.len > 0) try spans.append(.{ .kind = .long_string, .start = 0, .end = line.len });
+                if (line.len > 0) try spans.append(a, .{ .kind = .long_string, .start = 0, .end = line.len });
                 return;
             }
         }
@@ -50,21 +50,21 @@ pub const Lexer = struct {
         while (i < line.len) {
             const c = line[i];
             if (c == '#') {
-                try addCode(spans, code_start, i);
-                try spans.append(.{ .kind = .comment, .start = i, .end = line.len });
+                try addCode(a, spans, code_start, i);
+                try spans.append(a, .{ .kind = .comment, .start = i, .end = line.len });
                 return;
             }
             if (c != '"' and c != '\'') {
                 i += 1;
                 continue;
             }
-            try addCode(spans, code_start, i);
+            try addCode(a, spans, code_start, i);
             if (i + 2 < line.len and line[i + 1] == c and line[i + 2] == c) {
                 if (closeLong(line, i + 3, c)) |e| {
-                    try spans.append(.{ .kind = .long_string, .start = i, .end = e, .opens = true });
+                    try spans.append(a, .{ .kind = .long_string, .start = i, .end = e, .opens = true });
                     i = e;
                 } else {
-                    try spans.append(.{ .kind = .long_string, .start = i, .end = line.len, .opens = true });
+                    try spans.append(a, .{ .kind = .long_string, .start = i, .end = line.len, .opens = true });
                     self.long_quote = c;
                     return;
                 }
@@ -74,17 +74,17 @@ pub const Lexer = struct {
                     if (line[j] == '\\') j += 1;
                 }
                 const e = if (j < line.len) j + 1 else line.len;
-                try spans.append(.{ .kind = .string, .start = i, .end = e });
+                try spans.append(a, .{ .kind = .string, .start = i, .end = e });
                 i = e;
             }
             code_start = i;
         }
-        try addCode(spans, code_start, line.len);
+        try addCode(a, spans, code_start, line.len);
     }
 };
 
-fn addCode(spans: *std.ArrayList(Span), start: usize, end: usize) !void {
-    if (end > start) try spans.append(.{ .kind = .code, .start = start, .end = end });
+fn addCode(a: std.mem.Allocator, spans: *std.ArrayList(Span), start: usize, end: usize) !void {
+    if (end > start) try spans.append(a, .{ .kind = .code, .start = start, .end = end });
 }
 
 /// The index just past the triple quote `q` that closes a string whose body
@@ -106,16 +106,16 @@ pub const Strings = enum { blank, keep };
 /// Appends `line` as code to `out`: comments dropped, a string literal as
 /// its two quotes (`.blank`) or whole (`.keep`), a triple-quoted string as
 /// `""` where it opens and nothing elsewhere.
-pub fn view(line: []const u8, spans: []const Span, strings: Strings, out: *std.ArrayList(u8)) !void {
+pub fn view(a: std.mem.Allocator, line: []const u8, spans: []const Span, strings: Strings, out: *std.ArrayList(u8)) !void {
     for (spans) |s| switch (s.kind) {
-        .code => try out.appendSlice(line[s.start..s.end]),
+        .code => try out.appendSlice(a, line[s.start..s.end]),
         .string => if (strings == .keep) {
-            try out.appendSlice(line[s.start..s.end]);
+            try out.appendSlice(a, line[s.start..s.end]);
         } else {
-            try out.append(line[s.start]);
-            try out.append(line[s.start]);
+            try out.append(a, line[s.start]);
+            try out.append(a, line[s.start]);
         },
-        .long_string => if (s.opens) try out.appendSlice("\"\""),
+        .long_string => if (s.opens) try out.appendSlice(a, "\"\""),
         .comment => {},
     };
 }
@@ -155,16 +155,16 @@ const testing = std.testing;
 /// Scans `lines` in turn and returns each line's code view, joined by `|`.
 fn views(lines: []const []const u8, strings: Strings) ![]u8 {
     var lx = Lexer{};
-    var spans = std.ArrayList(Span).init(testing.allocator);
-    defer spans.deinit();
-    var out = std.ArrayList(u8).init(testing.allocator);
-    errdefer out.deinit();
+    var spans = std.ArrayList(Span).empty;
+    defer spans.deinit(testing.allocator);
+    var out = std.ArrayList(u8).empty;
+    errdefer out.deinit(testing.allocator);
     for (lines, 0..) |l, n| {
-        if (n > 0) try out.append('|');
-        try lx.scan(l, &spans);
-        try view(l, spans.items, strings, &out);
+        if (n > 0) try out.append(testing.allocator, '|');
+        try lx.scan(testing.allocator, l, &spans);
+        try view(testing.allocator, l, spans.items, strings, &out);
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(testing.allocator);
 }
 
 fn expectViews(lines: []const []const u8, strings: Strings, want: []const u8) !void {
@@ -219,15 +219,15 @@ test "an unterminated string runs to the end of its line only" {
 
 test "the lexer's open string is carried until it closes" {
     var lx = Lexer{};
-    var spans = std.ArrayList(Span).init(testing.allocator);
-    defer spans.deinit();
-    try lx.scan("x = '''", &spans);
+    var spans = std.ArrayList(Span).empty;
+    defer spans.deinit(testing.allocator);
+    try lx.scan(testing.allocator, "x = '''", &spans);
     try testing.expectEqual(@as(u8, '\''), lx.long_quote);
-    try lx.scan("\"\"\" inside", &spans);
+    try lx.scan(testing.allocator, "\"\"\" inside", &spans);
     try testing.expectEqual(@as(u8, '\''), lx.long_quote);
     try testing.expectEqual(@as(usize, 1), spans.items.len);
     try testing.expectEqual(Kind.long_string, spans.items[0].kind);
-    try lx.scan("''' # c", &spans);
+    try lx.scan(testing.allocator, "''' # c", &spans);
     try testing.expectEqual(@as(u8, 0), lx.long_quote);
     try testing.expectEqual(Kind.comment, spans.items[spans.items.len - 1].kind);
 }

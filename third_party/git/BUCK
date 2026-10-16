@@ -3,6 +3,7 @@
 # (//third_party/git-lfs). linux-x86_64 only
 # (limits.tsv `git-oracle-linux-x86-64`).
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "row")
@@ -86,8 +87,31 @@ git_check(
     git = ":git_dist",
     git_lfs = "//third_party/git-lfs:git-lfs[git-lfs]",
     lfs_version = _LFS_VERSION,
-    script = "git_check.sh",
     version = _VERSION,
+)
+
+# git_check.zig: the checks above, as a program, in place of git_check.sh. Built
+# behind its unit tests; its process cases are tests//functional/git_check.
+# (git_build.sh stays: it runs git's own make, which needs a shell.)
+zig_test(
+    name = "git_check_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "git_check_test.zig",
+    imports = ["git_check.zig"],
+    deps = ["//tools/build/act_util:act_util"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "git_check_exe",
+    exec_compatible_with = LINUX_X86_64,
+    src = "git_check.zig",
+    deps = ["//tools/build/act_util:act_util"],
+    unit_tests = [":git_check_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
 )
 
 # What the loader maps for each program, read from the ELF files
@@ -110,10 +134,7 @@ loader_closure_check(
 
 shell_lint(
     name = "shell_lint",
-    srcs = [
-        "git_build.sh",
-        "git_check.sh",
-    ],
+    srcs = ["git_build.sh"],
 )
 
 # ---- What other targets use ----------------------------------------------------

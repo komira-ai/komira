@@ -23,8 +23,8 @@ runs included ([The coverage workflow](#the-coverage-workflow), step 4).
 |---|---|
 | `:covcheck` | the library (`covcheck/*.mojo`), its tests welded |
 | `:covcheck_bin` | the command line (`main.mojo`, dispatching to `covcheck/cli.mojo`) |
-| `:cov_gate` | the directory every mojo_library's coverage gate runs from: `cov_gate.sh`, `covcheck_bin` ([The build gate](#the-build-gate)); the hold a gate reads is its package's own `coverage_held` ([The 99% threshold and holds](#the-99-threshold-and-holds)) |
-| `:census.sh`, `:census_files`, `census.bzl` | the census: the script that measures every library and renders the census doc, the Zig tool that assembles every package's `coverage_census.tsv` and `coverage_held` for it (refusing a package the census measured at the target that does not hold it) and splits a census back into the packages, adding the holds, and the rule of the root's `:coverage_census`, which builds the doc ([The census](#the-census)) |
+| `:cov_gate` | the directory every mojo_library's coverage gate runs from: `cov_gate`, `covcheck_bin` ([The build gate](#the-build-gate)); the hold a gate reads is its package's own `coverage_held` ([The 99% threshold and holds](#the-99-threshold-and-holds)) |
+| `:census_render`, `:census_files`, `census.bzl` (and `census.sh`, run by hand) | the census: `census.sh` measures every library by hand (it is not a target), the Zig tool `census_render` renders the census doc, the Zig tool that assembles every package's `coverage_census.tsv` and `coverage_held` for it (refusing a package the census measured at the target that does not hold it) and splits a census back into the packages, adding the holds, and the rule of the root's `:coverage_census`, which builds the doc ([The census](#the-census)) |
 | `policy.bzl` | the gate's mode and target, and the ledger of libraries that cannot have a gate of their own |
 | `no_gate.bxl` | the check that holds that ledger equal to the libraries the gate depends on |
 | `:branch_gate_rows` (`BUCK`, `defs.bzl`) | the check that every row of `COVERAGE_BRANCH_GATE` (`policy.bzl`) names a Mojo library and is spelled exactly as that library's label (`komira//src/<p>:<p>`, the string `mojo_library` looks itself up by): a row naming none, or spelled another way, is read by nothing, so it fails this target's build |
@@ -471,7 +471,7 @@ With `-c komira.coverage=true`, every `mojo_library` on linux-x86_64 has a
 coverage build (`tools/build/mojo/README.md`, "Coverage builds"):
 each test's -O0 binary is run under kcov and gives a Cobertura report in
 repository paths (`kcov/README.md`, "cov_run"). The gate is one more
-action per library, `mojo_cov_gate` (`cov_gate.sh`, run from
+action per library, `mojo_cov_gate` (`cov_gate`, run from
 `:cov_gate`):
 
 1. The library's sources are staged at their repository paths: every
@@ -513,7 +513,7 @@ lines it reached count. A library naming `coverage_tests` cannot depend on
 those tests (they depend on it), so its gate is the target
 `<name>_cov_gate` (as a library of the ledger's, below): it runs each
 named test's -O0 binary under kcov against the library's sources
-(`<name>_cov_gate[tests][<test>]`, through the same `cov_run.sh`) and runs
+(`<name>_cov_gate[tests][<test>]`, through the same `cov_run`) and runs
 the same gate over the library's reports and those
 (`<name>_cov_gate[gate]`). A named test's source is staged at its
 repository path: in the library's package it is a `--test-source`; in

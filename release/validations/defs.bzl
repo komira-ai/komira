@@ -35,26 +35,6 @@ _MACHINE = "<machine>"
 _PIXI = "<pixi>"
 _PIXI_SHA256 = "<pixi-sha256>"  # the target platform row's pin: a Mac's differs
 
-# From the repository's root ($1): a scratch directory, a run id and an
-# attempt when the caller gave none, then the kci command.
-_LAUNCHER = """#!/bin/sh
-set -eu
-cd "$1"
-shift
-scratch= run_id= attempt=
-for a in "$@"; do
-    case $a in
-        --scratch-dir|--scratch-dir=*) scratch=1 ;;
-        --run-id|--run-id=*) run_id=1 ;;
-        --attempt|--attempt=*) attempt=1 ;;
-    esac
-done
-[ -n "$run_id" ] || set -- "$@" --run-id local
-[ -n "$attempt" ] || set -- "$@" --attempt 1
-[ -n "$scratch" ] || set -- "$@" --scratch-dir "$(mktemp -d)"
-exec "$@"
-"""
-
 def _argv(stage, name, sha256):
     return [
         "run",
@@ -76,9 +56,9 @@ def _validation_impl(ctx):
         _MACHINE: ctx.attrs.machine,
         _PIXI: ctx.attrs.pixi[DefaultInfo].default_outputs[0],
     }
-    launcher = ctx.actions.write(ctx.label.name + ".sh", _LAUNCHER, is_executable = True)
+    launcher = ctx.attrs._launch[DefaultInfo].default_outputs[0]
     command = cmd_args(
-        launcher,
+        ctx.attrs._launch[RunInfo],
         cmd_args(ctx.attrs.root_file, parent = ctx.attrs.root_parents),
         ctx.attrs.kci[RunInfo],
         [paths.get(a, a) for a in argv],
@@ -102,6 +82,8 @@ _kci_validation = rule(
         "root_file": attrs.source(),
         "root_parents": attrs.int(),
         "stage": attrs.string(),
+        # Changes to the repository's root and adds the default arguments (launch.zig).
+        "_launch": attrs.dep(default = "komira//release/validations:launch", providers = [RunInfo]),
     },
 )
 

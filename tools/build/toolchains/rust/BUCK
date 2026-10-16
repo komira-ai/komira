@@ -37,7 +37,6 @@ conda_libs(
 rust_sysroot(
     name = "unchecked_sysroot",
     exec_compatible_with = LINUX_X86_64,
-    busybox = "komira//tools/build/toolchains:busybox",
     libs = ":rustc_libs",
     rust_std = ":rust-std-1.99.0-x86_64-unknown-linux-gnu.tar.gz",
     rustc = ":rustc-1.99.0-x86_64-unknown-linux-gnu.tar.gz",
@@ -54,16 +53,16 @@ zig_test(
     src = "version_check_test.zig",
     imports = ["version_check.zig"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 zig_exe(
     name = "version_check",
     exec_compatible_with = LINUX_X86_64,
     src = "version_check.zig",
-    unit_tests = [":version_check_unit"],
+    unit_tests = [":version_check_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 rust_version_check(

@@ -85,8 +85,10 @@ MojoToolchainInfo = provider(fields = {
     # built by zig_exe behind its unit tests: run:gate on linux (static),
     # run:gate_darwin on darwin-arm64 (libSystem, as every macOS program).
     "gate": provider_field(typing.Any, default = None),
-    "run_check": provider_field(typing.Any),
-    "launcher": provider_field(typing.Any),
+    # tools/build/mojo:act: copies the gated artifact, joins markers, runs the
+    # run check of a binary and starts a built binary from outside its runnable
+    # directory (`launch`) (act.zig).
+    "act": provider_field(typing.Any),
     # Directory: only the shared libraries a built binary loads (a
     # `mojo_runtime`). A runnable binary carries a copy of it as lib/.
     "runtime": provider_field(typing.Any),

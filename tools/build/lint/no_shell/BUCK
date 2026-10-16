@@ -1,6 +1,11 @@
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+
 # The no-shell list's tool (src/rules.zig says what it checks), run by
 # //tools/build/lint:no_shell (tools/build/lint/no_shell.bzl).
 
@@ -17,7 +22,7 @@ zig_test(
     imports = _SRCS,
     src = "src/main.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 # Built only behind its unit tests.
@@ -26,8 +31,8 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     imports = _SRCS,
     src = "src/main.zig",
-    unit_tests = [":no_shell_unit"],
+    unit_tests = [":no_shell_unit", _ZIG_VERSION],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
     visibility = ["PUBLIC"],
 )

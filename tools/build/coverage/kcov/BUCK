@@ -1,6 +1,5 @@
 # The path tools of a kcov coverage run (README.md): static executables built
 # with the pinned zig, each gated by its cases, which run as build actions.
-load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "cov_link_dir", "cov_run_dir", "kcov_tool")
@@ -185,25 +184,39 @@ cov_link_dir(
 )
 
 # The directory every mojo_library's coverage run runs from
-# (tools/build/mojo/coverage.bzl): cov_run.sh, which runs one test's coverage
+# (tools/build/mojo/coverage.bzl): cov_run, which runs one test's coverage
 # binary under kcov through the release gate's runner and normalizes its
 # report; kcov; cov_normalize.
 cov_run_dir(
     name = "cov_run",
     exec_compatible_with = LINUX_X86_64,
-    script = "cov_run.sh",
+    visibility = ["PUBLIC"],
+)
+
+# cov_run (cov_run.zig): the program of a coverage run. Built behind its unit
+# tests; the run's cases are the fixtures of tests//negative/coverage and
+# tests//functional/coverage (tests 41 to 47).
+zig_test(
+    name = "cov_run_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["cov_run.zig"],
+    src = "cov_run_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "cov_run_bin",
+    exec_compatible_with = LINUX_X86_64,
+    src = "cov_run.zig",
+    unit_tests = [":cov_run_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
 )
 
 # For planted defects (the tests cell copies it with one fault: test 43).
 export_file(
-    name = "cov_run.sh",
+    name = "cov_run.zig",
     visibility = ["PUBLIC"],
-)
-
-shell_lint(
-    name = "shell_lint",
-    srcs = [
-        "cov_run.sh",
-    ],
 )

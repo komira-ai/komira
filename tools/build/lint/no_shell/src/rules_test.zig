@@ -21,7 +21,7 @@ fn counts(sh_argv: usize, busybox_sh: usize) scan.Counts {
 }
 
 fn runWith(arena: std.mem.Allocator, builds: []const rules.BuildFile, scripts: []const rules.Script, list: []const u8) !Run {
-    var out = std.ArrayList(u8).init(arena);
+    var out = std.ArrayList(u8).empty;
     const r = try rules.check(arena, al, list, .{ .build_files = builds, .scripts = scripts }, &out);
     return .{ .result = r, .report = out.items };
 }

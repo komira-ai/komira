@@ -491,8 +491,8 @@ def _library_impl(ctx):
         public = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
         ctx.actions.run(
             cmd_args(
-                tc.busybox,
-                "cp",
+                tc.act,
+                "copy",
                 ungated,
                 public.as_output(),
                 hidden = markers,
@@ -571,7 +571,7 @@ def _readme_test_impl(actions, label, gate_label, examples, package, src, marker
         )
         markers.append(m)
     actions.run(
-        cmd_args(tc.busybox, "sh", "-c", 'b=$1; shift; "$b" cat "$@" >"$0"', marker, tc.busybox, markers),
+        cmd_args(tc.act, "cat", marker, markers),
         category = "mojo_readme_join",
     )
     actions.copied_dir(objects, built)
@@ -684,7 +684,7 @@ def _run_check(ctx, tc, command):
     # The action runs on this target's execution platform. With
     # `expected_stdout` it is also a validation of the binary (run_check.bzl).
     out = ctx.actions.declare_output(ctx.label.name + ".stdout")
-    args = [tc.busybox, "sh", tc.run_check, tc.busybox, command, out.as_output()]
+    args = [tc.act, "run-check", tc.busybox, command, out.as_output()]
     if ctx.attrs.expected_stdout == None:
         ctx.actions.run(cmd_args(args), env = rerun_env(ctx), category = "mojo_run_check")
         return out, []
@@ -943,7 +943,7 @@ def _shared_lib_impl(ctx):
 
     public = ctx.actions.declare_output("pub/" + so_file)
     ctx.actions.run(
-        cmd_args(tc.busybox, "cp", ungated, public.as_output(), hidden = markers),
+        cmd_args(tc.act, "copy", ungated, public.as_output(), hidden = markers),
         category = "mojo_shared_lib_join",
     )
     return [DefaultInfo(

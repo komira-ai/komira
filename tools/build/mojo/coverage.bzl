@@ -10,7 +10,7 @@ linux-x86_64, per `test_srcs` entry:
   `[coverage][bin][<test>]` (category `mojo_build_cov_test`);
 - one run of it under kcov, through the release gate's runner, whose
   Cobertura report in repository paths is `[coverage][tests][<test>]`
-  (category `mojo_cov_run`, `cov_run.sh` in the same directory);
+  (category `mojo_cov_run`, `cov_run` in the same directory);
 - its branch coverage: the test as LLVM bitcode, that bitcode instrumented
   with profile counters and linked, the merged profile of its run through
   the release gate's runner, that profile applied to the bitcode, and the
@@ -29,7 +29,7 @@ and, per library (tests or none):
   and with `coverage_branch_gate` the branch records, `--branch-lcov`, for
   branches) and the library's sources, in the mode of
   tools/build/coverage/policy.bzl, whose result.json and summary.md are
-  `[coverage][gate]` (category `mojo_cov_gate`, cov_gate.sh of
+  `[coverage][gate]` (category `mojo_cov_gate`, the cov_gate program of
   tools/build/coverage). A library of a test-only package (its package's
   directory in its cell is one of COVERAGE_INFO_ONLY_DIRS or under one)
   has the same gate, which reports its findings as information
@@ -116,11 +116,11 @@ load(":providers.bzl", "MojoToolchainInfo")
 _COVERAGE_LINK = "komira//tools/build/coverage/kcov:cov_link"
 
 # The directory every coverage run runs from (cov_run_dir, kcov/defs.bzl):
-# cov_run.sh, kcov and cov_normalize.
+# cov_run, kcov and cov_normalize.
 _COVERAGE_RUN = "komira//tools/build/coverage/kcov:cov_run"
 
 # The directory every coverage gate runs from (cov_gate_dir,
-# tools/build/coverage/defs.bzl): cov_gate.sh and covcheck.
+# tools/build/coverage/defs.bzl): the cov_gate program and covcheck.
 _COVERAGE_GATE = "komira//tools/build/coverage:cov_gate"
 
 # The directory every branch coverage build links and runs from
@@ -391,7 +391,7 @@ def _run_facts(ctx, src_dir, import_name, root):
 def _cov_run(actions, tc, facts, label, where, t, name, stem, cov_bin, test_repo, data, env_args, solib = None, stage = None):
     """Declares the `mojo_cov_run` action of the coverage binary `cov_bin`
     of test source `t` (staged at `name`, the path its line tables name it
-    by, with its `data`), run under kcov by cov_run.sh of `facts.dir`
+    by, with its `data`), run under kcov by cov_run of `facts.dir`
     against the library sources of `facts` (_run_facts), through the
     release gate's runner with `env_args`, as `label`. `test_repo` is the
     path the report names `t` by; `solib` as coverage_run's; `stage`, when
@@ -403,7 +403,7 @@ def _cov_run(actions, tc, facts, label, where, t, name, stem, cov_bin, test_repo
     for dest in data:
         if dest == name or dest.startswith(name + "/") or name.startswith(dest + "/"):
             fail("{}: the test's data destination {} collides with its source, which a coverage run stages at {}".format(where, repr(dest), repr(name)))
-        # cov_run.sh stages [src] at <import_name>/, where the line tables
+        # cov_run stages [src] at <import_name>/, where the line tables
         # name its sources; for a shared library's driver, which names none
         # of it, at its own path under buck-out/ (its sources are data).
         src_stage = "buck-out" if solib else facts.import_name
@@ -417,9 +417,7 @@ def _cov_run(actions, tc, facts, label, where, t, name, stem, cov_bin, test_repo
     marker = actions.declare_output("cov/tests/{}.passed".format(stem))
     actions.run(
         cmd_args(
-            tc.busybox,
-            "sh",
-            facts.dir.project("cov_run.sh"),
+            facts.dir.project("cov_run"),
             tc.busybox,
             tc.gate,
             tc.compiler,
@@ -445,7 +443,7 @@ def _cov_run(actions, tc, facts, label, where, t, name, stem, cov_bin, test_repo
 
 def coverage_run(ctx, tc, t, stem, cov_bin, src_dir, import_name, root, data, env_args, solib = None):
     """Declares the `mojo_cov_run` action of test source `t`: its coverage
-    binary `cov_bin` run under kcov by cov_run.sh, through the release gate's
+    binary `cov_bin` run under kcov by cov_run, through the release gate's
     runner with the gate's environment (`env_args`) and data (`data`, staged
     as the gate stages it). `src_dir` is the library's [src] (it ends in
     `src/<import_name>`; the run stages it at `<import_name>/`, the directory
@@ -453,7 +451,7 @@ def coverage_run(ctx, tc, t, stem, cov_bin, src_dir, import_name, root, data, en
     directory it stages (_package_root). `solib`, for a shared library's driver
     (coverage_shared_lib): (the library's file in `data`, which the driver
     loads, and its sources, also in `data` at their paths in the package,
-    `main` first), cov_run.sh's `--solib` and `--solib-src`: kcov measures
+    `main` first), cov_run's `--solib` and `--solib-src`: kcov measures
     the libraries the driver loads, and the report must hold `main`.
     Returns (report, marker):
     `cov/tests/<stem>.xml`, the test's Cobertura report in repository paths,
@@ -651,7 +649,7 @@ def _info_only(label):
 
 def _gate_action(actions, bb, gate_dir, mode, info, prefix):
     """Declares the `mojo_cov_gate` action of `info` (MojoCoverageGateInfo):
-    cov_gate.sh of `gate_dir` (a cov_gate_dir dependency) in `mode` over
+    `cov_gate` of `gate_dir` (a cov_gate_dir dependency) in `mode` over
     `info.files` staged as `<prefix>root` and the list of its test sources
     `<prefix>tests.txt`, and its hold (`info.held`, or a marker that holds
     nothing, `<prefix>held`), writing `<prefix>result.json`, `<prefix>summary.md`
@@ -668,9 +666,7 @@ def _gate_action(actions, bb, gate_dir, mode, info, prefix):
     marker = actions.declare_output(prefix + "gate.passed")
     actions.run(
         cmd_args(
-            bb,
-            "sh",
-            d.project("cov_gate.sh"),
+            d.project("cov_gate"),
             bb,
             "{} [coverage gate]".format(info.label),
             info.package,
@@ -938,7 +934,7 @@ def coverage_shared_lib(ctx, tc, build, srcs, main, closure, c_link, link_extra,
       under kcov through the release gate's runner with that build as its
       data, where the release gate stages the library, and the library's
       sources at their paths in the package, and kcov measuring the
-      libraries the driver loads (cov_run.sh `--solib`):
+      libraries the driver loads (cov_run `--solib`):
       `[coverage][tests][<driver>]` (`mojo_cov_run`). The generated exports
       driver is not run: it only loads the library and looks its symbols up.
     - The gate, `covcheck gate` over those reports, the library's
@@ -954,7 +950,7 @@ def coverage_shared_lib(ctx, tc, build, srcs, main, closure, c_link, link_extra,
     if link == None:
         return {}
     _check_shared_tools(ctx)
-    # cov_run.sh's [src] (it names nothing the library's build names: that
+    # cov_run's [src] (it names nothing the library's build names: that
     # names its sources by their paths in the package, given as data).
     out_name = so_file[:so_file.rfind(".")]
     src_dir = ctx.actions.copied_dir("cov/src/" + out_name, {s.short_path: s for s in srcs})

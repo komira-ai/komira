@@ -1,0 +1,26 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# The process behaviour of the validation launcher (release/validations/launch.zig)
+# over real directories and a stand-in for kci (probe.zig). A driver test: the
+# launcher is a built tool it runs by absolute path.
+
+zig_exe(
+    name = "probe",
+    exec_compatible_with = LINUX_X86_64,
+    src = "probe.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_test(
+    name = "driver",
+    exec_compatible_with = LINUX_X86_64,
+    exec_tools = {
+        "LAUNCH": "komira//release/validations:launch",
+        "PROBE": ":probe",
+    },
+    src = "driver_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)

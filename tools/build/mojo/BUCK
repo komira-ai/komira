@@ -1,7 +1,6 @@
-load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "row")
-load(":toolchain.bzl", "zig_bootstrap_exe", "zig_exe", "zig_test")
+load(":toolchain.bzl", "zig_bootstrap_exe", "zig_exe", "zig_module", "zig_test")
 
 # Scripts and tool sources used by the Mojo rules.
 # The compile wrapper (tools/mojo_compile.zig; docs/design/zig_compile_wrapper.md):
@@ -82,23 +81,146 @@ zig_bootstrap_exe(
     visibility = ["PUBLIC"],
 )
 
-export_file(name = "run_check.sh", visibility = ["PUBLIC"])
+# act (tools/act.zig): the small actions of the Mojo and Rust rules (copy a
+# published file once its markers exist, cat the README join's markers, run a
+# built binary in a clean environment and compare its stdout), in place of
+# run_check.sh and the busybox cp and cat applets. Built behind its unit tests;
+# its process cases are tests//functional/act.
+zig_test(
+    name = "act_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/act.zig"],
+    src = "tools/act_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
 
-export_file(name = "proto_fixture.sh", visibility = ["PUBLIC"])
+zig_exe(
+    name = "act",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/act.zig",
+    unit_tests = [":act_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
+
+# doc_check (tools/doc_check.zig): the golden, symbol and copy checks of
+# mojo_doc_json (doc.bzl). Built behind its unit tests; the cases are
+# tests//negative/mojo_doc_json (a stale golden, missing symbols) and the docs
+# of the library packages.
+zig_test(
+    name = "doc_check_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/doc_check.zig"],
+    src = "tools/doc_check_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "doc_check",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/doc_check.zig",
+    unit_tests = [":doc_check_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
+
+# archive_files (tools/archive_files.zig): the `archive_files` rule's action
+# (archive.bzl): files out of a pinned archive, copied or with substitutions.
+# Built behind its unit tests; its cases are the archive_files targets of
+# third_party.
+zig_test(
+    name = "archive_files_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/archive_files.zig"],
+    src = "tools/archive_files_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "archive_files",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/archive_files.zig",
+    unit_tests = [":archive_files_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
+
+# proto_gen (tools/proto_gen.zig): protoc with a plugin into one directory,
+# held to the files the rule declared (proto.bzl, generate_proto_dir). Built
+# behind its unit tests; its cases are the proto libraries and
+# tests//negative/proto.
+zig_test(
+    name = "proto_gen_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/proto_gen.zig"],
+    src = "tools/proto_gen_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "proto_gen",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/proto_gen.zig",
+    unit_tests = [":proto_gen_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
+
+# proto_fixture (tools/proto_fixture.zig): protoc reading and writing wire
+# fixtures (proto_fixture.bzl; the legs, the encode, and the case runner of
+# proto_fixture_testdata). Built behind its unit tests.
+zig_test(
+    name = "proto_fixture_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/proto_fixture.zig", "tools/unified_diff.zig"],
+    src = "tools/proto_fixture_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# unified_diff (tools/unified_diff.zig) as a module other packages import by name.
+zig_module(
+    name = "unified_diff",
+    src = "tools/unified_diff.zig",
+    visibility = ["//tools/build/lint:", "//tools/build/toolchains/kcov:", "tests//tools:"],
+)
+
+zig_exe(
+    name = "proto_fixture",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/unified_diff.zig"],
+    src = "tools/proto_fixture.zig",
+    unit_tests = [":proto_fixture_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
+
+# The same for macOS arm64 (the darwin toolchain's `act`), built on a Linux worker.
+zig_exe(
+    name = "act_darwin",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/act.zig",
+    target = row("darwin-arm64")["zig_triple"],
+    unit_tests = [":act_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
 
 export_file(name = "conda_unpack.zig", src = "tools/conda_unpack.zig", visibility = ["PUBLIC"])
 
-export_file(name = "launch.sh", visibility = ["PUBLIC"])
 export_file(name = "zig_cc_launcher.zig", src = "tools/zig_cc_launcher.zig", visibility = ["PUBLIC"])
 
 # The rule of the branch coverage actions, as data for the coverage
 # workflow's cases (the root BUCK's coverage_ci_cases), which hold
 # .github/ci/coverage_measure.sh's list of their categories equal to its.
 export_file(name = "coverage_branch.bzl", visibility = ["PUBLIC"])
-
-# Every script above; a validation of the Mojo toolchain (toolchain.bzl).
-shell_lint(
-    name = "shell_lint",
-    srcs = glob(["*.sh"]),
-    visibility = ["PUBLIC"],
-)

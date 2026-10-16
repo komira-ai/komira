@@ -12,7 +12,7 @@ replaced, is `docs/design/zig_gate_runner.md`.
 
 | Mode | Runs | Called by |
 |---|---|---|
-| `gate mojo` | one gated Mojo test, optionally under a memory cap, a test time limit or a coverage run's limit | `gate_mojo` in [test_runtime.bzl](../mojo/test_runtime.bzl) (linux and macOS); `cov_run.sh` and `cov_branch run` ([cov_branch_run.zig](../coverage/branch/cov_branch_run.zig)) |
+| `gate mojo` | one gated Mojo test, optionally under a memory cap, a test time limit or a coverage run's limit | `gate_mojo` in [test_runtime.bzl](../mojo/test_runtime.bzl) (linux and macOS); `cov_run` and `cov_branch run` ([cov_branch_run.zig](../coverage/branch/cov_branch_run.zig)) |
 | `gate rust` | one libtest harness: list, then run every test | `_runner` in [rust/defs.bzl](../rust/defs.bzl) |
 | `gate step` | one mutation step, its result recorded | `_step` in [mutation.bzl](../mojo/mutation.bzl) |
 

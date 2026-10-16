@@ -70,17 +70,17 @@ pub fn scratchRoot(a: std.mem.Allocator, cwd: []const u8, buck_scratch: ?[]const
 /// The arguments rustc is run with, before the caller's: the sysroot, the
 /// linker shim, no rust-lld, and the working directory remapped.
 pub fn rustcArgv(a: std.mem.Allocator, rustc: []const u8, sysroot: []const u8, linker: []const u8, cwd: []const u8, rest: []const []const u8) ![]const []const u8 {
-    var v = std.ArrayList([]const u8).init(a);
-    try v.append(rustc);
-    try v.append("--sysroot");
-    try v.append(sysroot);
-    try v.append("-C");
-    try v.append(try std.fmt.allocPrint(a, "linker={s}", .{linker}));
-    try v.append("-C");
-    try v.append("linker-features=-lld");
-    try v.append(try std.fmt.allocPrint(a, "--remap-path-prefix={s}=.", .{cwd}));
-    try v.appendSlice(rest);
-    return v.toOwnedSlice();
+    var v = std.ArrayList([]const u8).empty;
+    try v.append(a, rustc);
+    try v.append(a, "--sysroot");
+    try v.append(a, sysroot);
+    try v.append(a, "-C");
+    try v.append(a, try std.fmt.allocPrint(a, "linker={s}", .{linker}));
+    try v.append(a, "-C");
+    try v.append(a, "linker-features=-lld");
+    try v.append(a, try std.fmt.allocPrint(a, "--remap-path-prefix={s}=.", .{cwd}));
+    try v.appendSlice(a, rest);
+    return v.toOwnedSlice(a);
 }
 
 /// What rustc is not allowed to inherit from the worker.
@@ -149,9 +149,9 @@ fn shim(a: std.mem.Allocator, argv: []const []const u8) noreturn {
     const zig_dir = lines.next() orelse die(2, "{s} is empty", .{cfg_path});
     const target = lines.next() orelse die(2, "{s} has no target", .{cfg_path});
     const zig = std.fs.path.join(a, &.{ zig_dir, "zig" }) catch die(2, "out of memory", .{});
-    var out = std.ArrayList([]const u8).init(a);
-    out.appendSlice(&.{ zig, "cc", "-target", target, "-Wl,--strip-debug" }) catch die(2, "out of memory", .{});
-    out.appendSlice(argv[1..]) catch die(2, "out of memory", .{});
+    var out = std.ArrayList([]const u8).empty;
+    out.appendSlice(a, &.{ zig, "cc", "-target", target, "-Wl,--strip-debug" }) catch die(2, "out of memory", .{});
+    out.appendSlice(a, argv[1..]) catch die(2, "out of memory", .{});
     var env = std.process.getEnvMap(a) catch die(2, "cannot read the environment", .{});
     const err = std.process.execve(a, out.items, &env);
     die(127, "cannot run {s}: {s}", .{ zig, @errorName(err) });

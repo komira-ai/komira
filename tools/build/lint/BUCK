@@ -6,13 +6,36 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs")
-load(":defs.bzl", "shell_lint", "tar_member")
+load(":defs.bzl", "tar_member")
 load(":interpreter_budget.bzl", "interpreter_budget")
 load(":no_shell.bzl", "no_shell")
 
-export_file(name = "readme_api_coverage.sh", visibility = ["PUBLIC"])
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
 
-export_file(name = "test_weld.sh", visibility = ["PUBLIC"])
+
+# test_weld (test_weld.zig): the action of the test_weld lint (test_weld.bzl,
+# test_weld.bxl). Built behind its unit tests.
+zig_test(
+    name = "test_weld_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["test_weld.zig"],
+    src = "test_weld_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
+
+zig_exe(
+    name = "test_weld_bin",
+    exec_compatible_with = LINUX_X86_64,
+    src = "test_weld.zig",
+    unit_tests = [":test_weld_unit", _ZIG_VERSION],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+    visibility = ["PUBLIC"],
+)
 
 # The Mojo lexer the lint tools share (mojo_tokens.zig): strings, comments,
 # triple-quoted strings over lines, bracket nesting.
@@ -21,7 +44,7 @@ zig_test(
     exec_compatible_with = LINUX_X86_64,
     src = "mojo_tokens.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 # The pointer lint's scenarios (pointer_lint_test.zig): each rule's sites,
@@ -32,7 +55,7 @@ zig_test(
     imports = ["mojo_tokens.zig", "pointer_lint.zig"],
     src = "pointer_lint_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 # The action of the pointer_lint rule (defs.bzl): a static executable built
@@ -42,9 +65,9 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     imports = ["mojo_tokens.zig"],
     src = "pointer_lint.zig",
-    unit_tests = [":mojo_tokens_test", ":pointer_lint_test"],
+    unit_tests = [":mojo_tokens_test", ":pointer_lint_test", _ZIG_VERSION],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
     visibility = ["PUBLIC"],
 )
 
@@ -66,10 +89,28 @@ tar_member(
     visibility = ["PUBLIC"],
 )
 
-# The lint actions' own scripts.
-shell_lint(
-    name = "shell_lint",
-    srcs = ["readme_api_coverage.sh", "test_weld.sh"],
+# readme_api_coverage (readme_api_coverage.zig, its scanners in
+# readme_api_scan.zig): the actions of the readme_api_coverage lint
+# (readme_api_coverage.bzl). Built behind their unit tests.
+zig_test(
+    name = "readme_api_coverage_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["readme_api_coverage.zig", "readme_api_scan.zig"],
+    src = "readme_api_coverage_test.zig",
+    deps = ["//tools/build/mojo:unified_diff"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
+
+zig_exe(
+    name = "readme_api_coverage_bin",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["readme_api_scan.zig"],
+    src = "readme_api_coverage.zig",
+    deps = ["//tools/build/mojo:unified_diff"],
+    unit_tests = [":readme_api_coverage_unit", _ZIG_VERSION],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
     visibility = ["PUBLIC"],
 )
 

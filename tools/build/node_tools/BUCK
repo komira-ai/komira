@@ -3,7 +3,7 @@
 # pinned tarballs, and a program of node_modules run by the pinned node over a
 # copy of a source tree. A Zig tool, as every build tool under tools/build is;
 # built behind its unit tests.
-load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
 # Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
@@ -55,5 +55,38 @@ zig_exe(
     ],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = _ZIG,
+    visibility = ["PUBLIC"],
+)
+
+# node_act (node_act.zig): the actions of the node rules (tools/build/node/
+# defs.bzl) in place of their busybox scripts: the Node.js distribution, the
+# npm package, the node test and the esbuild bundle. Built behind its unit
+# tests; its process cases are tests//functional/node_act. tartest.zig is also
+# a module, so the tar extraction tests (act_util) and that driver test can
+# build archives.
+zig_test(
+    name = "node_act_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "node_act_test.zig",
+    imports = ["node_act.zig"],
+    deps = ["//tools/build/act_util:act_util"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "node_act",
+    exec_compatible_with = LINUX_X86_64,
+    src = "node_act.zig",
+    deps = ["//tools/build/act_util:act_util"],
+    unit_tests = [":node_act_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
+
+zig_module(
+    name = "node_tartest",
+    src = "tartest.zig",
     visibility = ["PUBLIC"],
 )

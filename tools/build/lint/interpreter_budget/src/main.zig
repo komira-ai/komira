@@ -42,8 +42,8 @@ pub fn main() void {
     var tree: ?[]const u8 = null;
     var allowlist: ?[]const u8 = null;
     var out: ?[]const u8 = null;
-    var scope = std.ArrayList([]const u8).init(alloc);
-    var expect = std.ArrayList([]const u8).init(alloc);
+    var scope = std.ArrayList([]const u8).empty;
+    var expect = std.ArrayList([]const u8).empty;
     var i: usize = 1;
     while (i < argv.len) : (i += 2) {
         if (i + 1 >= argv.len) usageFail("{s} needs a value", .{argv[i]});
@@ -56,10 +56,10 @@ pub fn main() void {
             out = v;
         } else if (std.mem.eql(u8, argv[i], "--scope")) {
             if (v.len == 0) usageFail("--scope needs a non-empty path prefix", .{});
-            scope.append(v) catch fail("out of memory", .{});
+            scope.append(alloc, v) catch fail("out of memory", .{});
         } else if (std.mem.eql(u8, argv[i], "--expect")) {
             if (v.len == 0) usageFail("--expect needs a non-empty text", .{});
-            expect.append(v) catch fail("out of memory", .{});
+            expect.append(alloc, v) catch fail("out of memory", .{});
         } else usageFail("unknown argument {s}", .{argv[i]});
     }
     const tree_path = tree orelse usageFail("--tree is required", .{});
@@ -74,12 +74,12 @@ pub fn main() void {
     const found = budget.collect(alloc, dir, scope.items) catch |err|
         fail("cannot read the tree {s}: {s}", .{ tree_path, @errorName(err) });
 
-    var report = std.ArrayList(u8).init(alloc);
+    var report = std.ArrayList(u8).empty;
     const r = budget.check(alloc, name, text, scope.items, found, &report) catch fail("out of memory", .{});
     const v = budget.verdict(r, report.items, expect.items);
 
-    var message = std.ArrayList(u8).init(alloc);
-    const mw = message.writer();
+    var message = std.ArrayList(u8).empty;
+    const mw = message.writer(alloc);
     const status = if (v.ok) "success" else "failure";
     (if (expect.items.len > 0) blk: {
         if (v.missing) |m| {
@@ -91,12 +91,12 @@ pub fn main() void {
         mw.print("interpreter_budget: {d} finding(s) over {d} interpreter file(s)\n{s}", .{ r.findings, r.files, report.items })
     else
         mw.print("interpreter_budget: {d} interpreter file(s) checked against {s}", .{ r.files, name })) catch fail("out of memory", .{});
-    var json = std.ArrayList(u8).init(alloc);
-    const jw = json.writer();
+    var json = std.Io.Writer.Allocating.init(alloc);
+    const jw = &json.writer;
     jw.print("{{\"version\": 1, \"data\": {{\"status\": \"{s}\", \"message\": ", .{status}) catch fail("out of memory", .{});
-    std.json.encodeJsonString(message.items, .{}, jw) catch fail("out of memory", .{});
+    std.json.Stringify.encodeJsonString(message.items, .{}, jw) catch fail("out of memory", .{});
     jw.writeAll("}}\n") catch fail("out of memory", .{});
-    std.fs.cwd().writeFile(out_path, json.items) catch |err|
+    std.fs.cwd().writeFile(.{ .sub_path = out_path, .data = json.written() }) catch |err|
         fail("cannot write {s}: {s}", .{ out_path, @errorName(err) });
     if (!v.ok) std.debug.print("{s}", .{message.items});
 }
