@@ -32,7 +32,7 @@ pub fn main() void {
     // An absolute path, as rustc_launch gives it: $ORIGIN is the
     // directory of the path rustc was started by.
     const rustc = std.fs.path.resolve(a, &.{args[1]}) catch std.process.exit(2);
-    const r = std.ChildProcess.run(.{
+    const r = std.process.Child.run(.{
         .allocator = a,
         .argv = &.{ rustc, "--version" },
         .env_map = &env,
@@ -52,7 +52,7 @@ pub fn main() void {
         });
         std.process.exit(1);
     }
-    std.fs.cwd().writeFile(args[3], result_json) catch |e| {
+    std.fs.cwd().writeFile(.{ .sub_path = args[3], .data = result_json }) catch |e| {
         std.debug.print("version_check: cannot write {s}: {s}\n", .{ args[3], @errorName(e) });
         std.process.exit(1);
     };
