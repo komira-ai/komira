@@ -1,5 +1,5 @@
 # =============================================================================
-# test_drain_throughput.mojo — drain-throughput microbench
+# test_drain_throughput.mojo — drain correctness under concurrent producers
 # =============================================================================
 #
 # Targets for a sustained run: producers @ 1M / 2M / 5M events/sec
@@ -7,9 +7,9 @@
 # CPU < 100%; p99 producer-side `span_end → drain_visible` latency ≤
 # 200µs.
 #
-# This test is a calibrated single-shot variant (10 workers, 1_000
-# events/worker, 10_000 events total, asserted record for record); the
-# 60s sustained version is a benchmark, not a unit test.
+# This test is a single-shot variant (10 workers, 1_000 events/worker, 10_000
+# events total, asserted record for record) that prints the rate it saw and
+# asserts none of it; the 60s sustained version is a benchmark, not a unit test.
 # =============================================================================
 
 from std.collections import Dict
@@ -32,21 +32,21 @@ from komira_trace.span_record import SPAN_STATUS_CLOSED
 # A drain that loses, duplicates or mis-attributes a record fails the test no
 # matter how fast it is.
 #
-# The rate is only a sanity floor. It times the producers (fork_join, 10
-# threads) AND the single drain, and the drain's OPEN/CLOSE join is part of it:
-# while the join scanned the records once per CLOSE (O(n^2), 5e7 comparisons
-# for these 10,000 spans) the join dominated, the farm measured 44k to 84k
-# events/s and a coverage build 1.7k to 2.3k, under the floor. With the
-# linear join the farm measures about 1.5M events/s, and about 250k under
-# coverage. The floor stays far below that so scheduler noise on a shared
-# builder cannot fail a build that merely depends on this package; the join's
-# growth is gated by test_drain_join_scales.mojo, the performance target by
+# Two counters stand in for the old events/sec floor, which depended on the
+# builder's speed:
+#
+#   - No producer blocks or drops: after the fork_join wave every worker's ring
+#     holds exactly 2 * EVENTS_PER_WORKER packets and reports zero blocked and
+#     zero dropped pushes, so a producer that stalled on a full ring (or lost a
+#     packet) fails here.
+#   - The drain's OPEN/CLOSE join is linear: `Tracer.join_probes()` equals the
+#     number of CLOSE packets. A join that scans the records once per CLOSE
+#     (5e7 comparisons for these 10,000 spans) probes far more often. The
+#     growth law is also gated at two sizes by test_drain_join_scales.mojo.
+#
+# The rate is printed as information only; the performance target belongs to
 # the sustained benchmark.
 # =============================================================================
-
-# Generous absolute floor; only a drain that is broken (for example one that
-# stalls) falls under it.
-comptime RATE_FLOOR_EVENTS_PER_SEC = 5_000
 
 
 # =============================================================================
@@ -85,8 +85,8 @@ struct _ProducerBody[o: Origin[mut=True]](ForkJoinBody):
 
 
 def run_drain_throughput() raises -> Float64:
-    """Returns aggregate ingestion+drain throughput (events/sec): the
-    producers' wall time plus the drain's, join included.
+    """Returns aggregate ingestion+drain throughput (events/sec), for
+    printing only: the producers' wall time plus the drain's, join included.
 
     Uses OVERFLOW_DROP — a sustained version would BLOCK and run a
     concurrent drain thread. The single-shot DROP variant exercises the data path
@@ -98,13 +98,26 @@ def run_drain_throughput() raises -> Float64:
                         overflow_policy=OVERFLOW_DROP)
     tracer.install_mock_ids(trace_seed=UInt64(1), span_seed=UInt64(1))
 
-    # Phase A: producers. We pre-warm so the ring stays partly drained
-    # by spinning a single drain pass between producer dispatches.
+    # Phase A: producers.
     var t_start = perf_counter_ns()
 
     fork_join(
         _ProducerBody(Pointer(to=tracer), EVENTS_PER_WORKER), N_WORKERS
     )
+
+    # No producer blocked or dropped: every worker's ring holds exactly its
+    # own OPEN + CLOSE packets.
+    for w in range(N_WORKERS):
+        assert_equal(
+            tracer.ring_size(w), Int64(2 * EVENTS_PER_WORKER),
+            "each ring holds the packets of its own worker's spans",
+        )
+        assert_equal(
+            tracer.ring_blocked_count(w), Int64(0), "no producer blocked"
+        )
+        assert_equal(
+            tracer.ring_dropped_count(w), Int64(0), "no packet dropped"
+        )
 
     # Phase B: drain.
     var exp = CapturingExporter()
@@ -146,12 +159,17 @@ def run_drain_throughput() raises -> Float64:
             "each worker's spans are attributed to that worker",
         )
     assert_equal(len(seen), exp.count(), "span ids are unique")
+    # One join probe per CLOSE packet, one CLOSE per span: a linear join.
+    assert_equal(
+        tracer.join_probes(), N_WORKERS * EVENTS_PER_WORKER,
+        "the drain join probes once per CLOSE packet",
+    )
     return events_per_sec
 
 
 def main() raises:
-    print("test_drain_throughput — drain-throughput microbench")
-    print("=================================================")
+    print("test_drain_throughput — drain correctness, rate printed only")
+    print("=============================================================")
     var rate = run_drain_throughput()
     print()
     if rate >= Float64(5_000_000):
@@ -160,8 +178,5 @@ def main() raises:
         print("drain throughput YELLOW: 1-5M events/sec range")
     else:
         print("drain throughput INFO:", rate, "events/sec — single-shot bench number")
-    # Sanity floor only (see the header); correctness is asserted above.
-    assert_true(rate > Float64(RATE_FLOOR_EVENTS_PER_SEC),
-                "drain throughput floor missed: " + String(rate))
     print()
     print("test PASS")
