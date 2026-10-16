@@ -32,8 +32,10 @@
 # `raises` lookup into the KGEN runtime's process-global registry, keyed by the
 # global's NAME STRING, inside a `try`/`except` — on the order of 30 ns/call,
 # against the ~2-4 ns a relaxed atomic load costs, on a path every breaker
-# crosses. `tests/test_explain_analyze_disarmed_cost.mojo` holds the disarmed
-# path to at most 20 ns/call over a same-shape baseline in the same binary.
+# crosses. `tests/test_explain_analyze_disarmed_cost.mojo` holds the flag in the
+# C file: `ea_armed()` must follow a direct write to the C flag, so it reads
+# that flag and not a Mojo-side mirror. (It prints the disarmed ns/call; no time
+# is asserted.)
 #
 # THE DISARMED COST IS TWO-TIER:
 #
