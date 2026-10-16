@@ -12,7 +12,7 @@ zig_test(
     deps = ["komira//tools/build/mojo:unified_diff"],
     src = "tests_act_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 zig_exe(
@@ -21,9 +21,9 @@ zig_exe(
     imports = ["probes.zig", "archives.zig", "proto_checks.zig", "aws_checks.zig", "parity.zig", "cov_checks.zig", "minised.zig"],
     deps = ["komira//tools/build/mojo:unified_diff"],
     src = "tests_act.zig",
-    unit_tests = [":tests_act_unit"],
+    unit_tests = [":tests_act_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 
@@ -33,5 +33,5 @@ zig_test(
     exec_tools = {"TESTS_ACT": ":tests_act"},
     src = "driver_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )

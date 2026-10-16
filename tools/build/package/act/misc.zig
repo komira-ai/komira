@@ -65,18 +65,18 @@ pub fn kciLineOk(a: std.mem.Allocator, line: []const u8, dir: []const u8) !bool 
 /// `text` with the first `<dir>/` of each line removed (`sed "s|$DIR/||"`).
 pub fn stripDir(a: std.mem.Allocator, text: []const u8, dir: []const u8) ![]u8 {
     const needle = try std.fmt.allocPrint(a, "{s}/", .{dir});
-    var b = std.ArrayList(u8).init(a);
+    var b = std.ArrayList(u8).empty;
     var lines = std.mem.splitScalar(u8, text, '\n');
     var first = true;
     while (lines.next()) |line| {
-        if (!first) try b.append('\n');
+        if (!first) try b.append(a, '\n');
         first = false;
         if (std.mem.indexOf(u8, line, needle)) |at| {
-            try b.appendSlice(line[0..at]);
-            try b.appendSlice(line[at + needle.len ..]);
-        } else try b.appendSlice(line);
+            try b.appendSlice(a, line[0..at]);
+            try b.appendSlice(a, line[at + needle.len ..]);
+        } else try b.appendSlice(a, line);
     }
-    return b.toOwnedSlice();
+    return b.toOwnedSlice(a);
 }
 
 /// The directory an uploader copies is the package, its manifest and its

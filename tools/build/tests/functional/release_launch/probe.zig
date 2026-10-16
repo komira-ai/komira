@@ -6,7 +6,7 @@ pub fn main() !void {
     var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const a = arena_state.allocator();
     const cwd = try std.fs.cwd().realpathAlloc(a, ".");
-    const out = std.io.getStdOut().writer();
+    const out = std.fs.File.stdout().deprecatedWriter();
     try out.print("cwd={s}\n", .{cwd});
     const argv = try std.process.argsAlloc(a);
     for (argv[1..]) |x| try out.print("arg={s}\n", .{x});

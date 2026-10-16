@@ -87,11 +87,11 @@ const Ck = struct {
         std.debug.print("kcov_check {s} RED: " ++ fmt ++ "\n", .{self.mode} ++ args);
         if (self.log) |l| {
             std.debug.print("--- log:\n", .{});
-            var lines = std.ArrayList([]const u8).init(self.a);
+            var lines = std.ArrayList([]const u8).empty;
             var it = std.mem.splitScalar(u8, l, '\n');
             while (it.next()) |x| {
                 if (it.peek() == null and x.len == 0) break;
-                lines.append(x) catch {};
+                lines.append(self.a, x) catch {};
             }
             const from = if (lines.items.len > 40) lines.items.len - 40 else 0;
             for (lines.items[from..]) |x| std.debug.print("{s}\n", .{x});
@@ -197,12 +197,12 @@ const Ck = struct {
         const base = std.fs.path.basename(prefix);
         var d = std.fs.cwd().openDir(dir, .{ .iterate = true }) catch return &.{};
         defer d.close();
-        var out = std.ArrayList([]const u8).init(self.a);
+        var out = std.ArrayList([]const u8).empty;
         var it = d.iterate();
         while (it.next() catch null) |e| {
             if (e.kind != .file) continue;
             if (e.name.len > base.len and std.mem.startsWith(u8, e.name, base) and e.name[base.len] == '.')
-                out.append(self.join(&.{ dir, e.name })) catch @panic("oom");
+                out.append(self.a, self.join(&.{ dir, e.name })) catch @panic("oom");
         }
         std.mem.sort([]const u8, out.items, {}, lessThan);
         return out.items;
@@ -221,10 +221,10 @@ const Ck = struct {
             for (lines) |l| {
                 const zero = std.mem.eql(u8, kind, "miss");
                 if (!(lineHits(self.a, class, l, zero) catch false)) {
-                    var ls = std.ArrayList(u8).init(self.a);
+                    var ls = std.ArrayList(u8).empty;
                     var it = std.mem.splitScalar(u8, class, '\n');
                     while (it.next()) |x| {
-                        if (std.mem.indexOf(u8, x, "<line ") != null) ls.writer().print("{s}\n", .{x}) catch {};
+                        if (std.mem.indexOf(u8, x, "<line ") != null) ls.writer(self.a).print("{s}\n", .{x}) catch {};
                     }
                     self.red("{s} line {d} (COV:{s}) is not reported as {s}: {s}", .{ file, l, kind, if (zero) "missed" else "hit", std.mem.trimRight(u8, ls.items, "\n") });
                 }
@@ -246,11 +246,18 @@ const Ck = struct {
 fn extractSome(ck: *Ck, archive: []const u8, dest: std.fs.Dir, wanted: []const []const u8) void {
     const f = std.fs.cwd().openFile(archive, .{}) catch |e| ck.red("cannot open {s}: {s}", .{ archive, @errorName(e) });
     defer f.close();
-    var br = std.io.bufferedReader(f.reader());
-    var gz = std.compress.gzip.decompressor(br.reader());
-    var name_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var link_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var it = std.tar.iterator(gz.reader(), .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
+    // Inflated into memory with no window buffer (the windowed decoder of this
+    // release mishandles a fixed-Huffman match at the end of its window).
+    const pa = std.heap.page_allocator;
+    const gz_bytes = f.readToEndAlloc(pa, 1 << 31) catch |e| ck.red("cannot read {s}: {s}", .{ archive, @errorName(e) });
+    var gz_in: std.Io.Reader = .fixed(gz_bytes);
+    var gz = std.compress.flate.Decompress.init(&gz_in, .gzip, &.{});
+    var tar_bytes = std.Io.Writer.Allocating.init(pa);
+    _ = gz.reader.streamRemaining(&tar_bytes.writer) catch |e| ck.red("cannot read {s}: {s}", .{ archive, @errorName(if (e == error.ReadFailed) (gz.err orelse e) else e) });
+    var tar_in: std.Io.Reader = .fixed(tar_bytes.written());
+    var name_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var link_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var it = std.tar.Iterator.init(&tar_in, .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
     while (it.next() catch |e| ck.red("cannot read {s}: {s}", .{ archive, @errorName(e) })) |ent| {
         const name = std.mem.trimRight(u8, ent.name, "/");
         var take = false;
@@ -261,18 +268,21 @@ fn extractSome(ck: *Ck, archive: []const u8, dest: std.fs.Dir, wanted: []const [
         if (std.fs.path.dirname(name)) |d| dest.makePath(d) catch {};
         const out = dest.createFile(name, .{}) catch |e| ck.red("cannot create {s}: {s}", .{ name, @errorName(e) });
         defer out.close();
-        ent.writeAll(out) catch |e| ck.red("cannot extract {s}: {s}", .{ name, @errorName(e) });
+        var obuf: [64 * 1024]u8 = undefined;
+        var ow = out.writer(&obuf);
+        it.streamRemaining(ent, &ow.interface) catch |e| ck.red("cannot extract {s}: {s}", .{ name, @errorName(e) });
+        ow.interface.flush() catch |e| ck.red("cannot extract {s}: {s}", .{ name, @errorName(e) });
     }
 }
 
 fn listNonDirs(ck: *Ck, dir: []const u8) [][]const u8 {
     var d = std.fs.cwd().openDir(dir, .{ .iterate = true }) catch |e| ck.red("cannot open {s}: {s}", .{ dir, @errorName(e) });
     defer d.close();
-    var out = std.ArrayList([]const u8).init(ck.a);
+    var out = std.ArrayList([]const u8).empty;
     var w = d.walk(ck.a) catch @panic("oom");
     while (w.next() catch |e| ck.red("cannot walk {s}: {s}", .{ dir, @errorName(e) })) |e| {
         if (e.kind == .directory) continue;
-        out.append(ck.pf("./{s}", .{e.path})) catch @panic("oom");
+        out.append(ck.a, ck.pf("./{s}", .{e.path})) catch @panic("oom");
     }
     std.mem.sort([]const u8, out.items, {}, lessThan);
     return out.items;
@@ -314,10 +324,10 @@ fn checkMode(ck: *Ck, args: []const []const u8) void {
         }
     }
     if (!same_files) {
-        var got = std.ArrayList(u8).init(ck.a);
-        for (files) |x| got.writer().print("{s} ", .{x}) catch {};
-        var wantl = std.ArrayList(u8).init(ck.a);
-        for (want_files) |x| wantl.writer().print("{s} ", .{x}) catch {};
+        var got = std.ArrayList(u8).empty;
+        for (files) |x| got.writer(ck.a).print("{s} ", .{x}) catch {};
+        var wantl = std.ArrayList(u8).empty;
+        for (want_files) |x| wantl.writer(ck.a).print("{s} ", .{x}) catch {};
         ck.red("the distribution holds {s}, want {s}", .{ got.items, wantl.items });
     }
     for ([_][]const u8{ "COPYING", "COPYING.externals" }) |f| {
@@ -481,9 +491,9 @@ fn absolute(ck: *Ck, p: []const u8) []u8 {
 
 /// `zig cc -target <triple> -O1 <extra...>`.
 fn zc(ck: *Ck, triple: []const u8, extra: []const []const u8) []const []const u8 {
-    var v = std.ArrayList([]const u8).init(ck.a);
-    v.appendSlice(&.{ ck.zig, "cc", "-target", triple, "-O1" }) catch @panic("oom");
-    v.appendSlice(extra) catch @panic("oom");
+    var v = std.ArrayList([]const u8).empty;
+    v.appendSlice(ck.a, &.{ ck.zig, "cc", "-target", triple, "-O1" }) catch @panic("oom");
+    v.appendSlice(ck.a, extra) catch @panic("oom");
     return v.items;
 }
 
@@ -622,15 +632,15 @@ fn casesMode(ck: *Ck, args: []const []const u8) void {
         .{ .name = "both_paths", .at = debug, .bytes = &.{0x0f} },
         .{ .name = "two_runpaths", .at = debug, .bytes = &.{0x1d} },
     };
-    var subjects = std.ArrayList([]const u8).init(ck.a);
-    subjects.appendSlice(&.{ probe, plain, ck.join(&.{ decoy, "libkcovprobe.so.1" }) }) catch @panic("oom");
+    var subjects = std.ArrayList([]const u8).empty;
+    subjects.appendSlice(ck.a, &.{ probe, plain, ck.join(&.{ decoy, "libkcovprobe.so.1" }) }) catch @panic("oom");
     for (defects) |d| {
         const edited = ck.a.dupe(u8, orig) catch @panic("oom");
         @memcpy(edited[d.at .. d.at + d.bytes.len], d.bytes);
         if (countDiffs(orig, edited) < 1) ck.red("the {s} edit changed nothing", .{d.name});
         const p = ck.join(&.{ ck.t, d.name });
         ck.write(p, edited);
-        subjects.append(p) catch @panic("oom");
+        subjects.append(ck.a, p) catch @panic("oom");
     }
     for (subjects.items) |subject| {
         const before = ck.read(subject);
@@ -690,7 +700,7 @@ fn casesMode(ck: *Ck, args: []const []const u8) void {
         .{ .name = "sha", .sha = bad_sha, .line = id_line, .want = ck.pf("Update KCOV_BIN_SHA256 to {s}", .{id_sha}) },
         .{ .name = "line", .sha = id_sha, .line = ck.pf("{s} out-dir", .{id_line}), .want = "does not hold KCOV_USAGE_LINE" },
     };
-    var self_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var self_buf: [std.fs.max_path_bytes]u8 = undefined;
     const self_exe = std.fs.selfExePath(&self_buf) catch |e| ck.red("cannot find myself: {s}", .{@errorName(e)});
     for (id_cases) |c| {
         const report = ck.join(&.{ idir, "report" });
@@ -719,20 +729,20 @@ pub fn listing(a: A, dir: []const u8) ![]u8 {
     var d = try std.fs.cwd().openDir(dir, .{ .iterate = true });
     defer d.close();
     const Ent = struct { path: []const u8, kind: std.fs.File.Kind };
-    var entries = std.ArrayList(Ent).init(a);
-    try entries.append(.{ .path = ".", .kind = .directory });
+    var entries = std.ArrayList(Ent).empty;
+    try entries.append(a, .{ .path = ".", .kind = .directory });
     var w = try d.walk(a);
-    while (try w.next()) |e| try entries.append(.{ .path = try std.fmt.allocPrint(a, "./{s}", .{e.path}), .kind = e.kind });
+    while (try w.next()) |e| try entries.append(a, .{ .path = try std.fmt.allocPrint(a, "./{s}", .{e.path}), .kind = e.kind });
     std.mem.sort(Ent, entries.items, {}, struct {
         fn f(_: void, x: Ent, y: Ent) bool {
             return std.mem.lessThan(u8, x.path, y.path);
         }
     }.f);
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     for (entries.items) |e| {
         const rel = if (std.mem.eql(u8, e.path, ".")) "." else e.path[2..];
         if (e.kind == .sym_link) {
-            try out.writer().print("lrwxrwxrwx - {s}\n", .{e.path});
+            try out.writer(a).print("lrwxrwxrwx - {s}\n", .{e.path});
             continue;
         }
         const st = try d.statFile(rel);
@@ -741,10 +751,10 @@ pub fn listing(a: A, dir: []const u8) ![]u8 {
             const data = try d.readFileAlloc(a, rel, 1 << 30);
             var h: [32]u8 = undefined;
             std.crypto.hash.sha2.Sha256.hash(data, &h, .{});
-            try out.writer().print("{s} {s} {s}\n", .{ ms, std.fmt.fmtSliceHexLower(&h), e.path });
-        } else try out.writer().print("{s} - {s}\n", .{ ms, e.path });
+            try out.writer(a).print("{s} {x} {s}\n", .{ ms, &h, e.path });
+        } else try out.writer(a).print("{s} - {s}\n", .{ ms, e.path });
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 fn sameMode(ck: *Ck, args: []const []const u8) void {
@@ -768,7 +778,7 @@ fn identityMode(ck: *Ck, args: []const []const u8) void {
     const data = std.fs.cwd().readFileAlloc(ck.a, kcov, 1 << 30) catch ck.red("{s} is not a file", .{kcov});
     var h: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(data, &h, .{});
-    const got = ck.pf("{s}", .{std.fmt.fmtSliceHexLower(&h)});
+    const got = ck.pf("{x}", .{&h});
     if (!std.mem.eql(u8, got, want))
         ck.red("bin/kcov's sha256 is {s}, but KCOV_BIN_SHA256 in tools/build/toolchains/kcov/identity.bzl is {s}: kcov's bytes changed (a pin, kcov_build or zig). Update KCOV_BIN_SHA256 to {s}: the package guard refuses a file by it (tools/build/package/README.md, \"kcov is never packed\")", .{ got, want, got });
     ck.pass();

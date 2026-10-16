@@ -26,25 +26,25 @@ pub const Member = struct { name: []const u8, path: []const u8 };
 /// rows (which carry `build` and `version` too) gone. (`sed
 /// 's/"members":\[[^]]*\],*//'`.)
 pub fn withoutMembers(a: std.mem.Allocator, text: []const u8) ![]u8 {
-    var b = std.ArrayList(u8).init(a);
+    var b = std.ArrayList(u8).empty;
     var lines = std.mem.splitScalar(u8, text, '\n');
     var first = true;
     while (lines.next()) |line| {
-        if (!first) try b.append('\n');
+        if (!first) try b.append(a, '\n');
         first = false;
         const key = "\"members\":[";
         if (std.mem.indexOf(u8, line, key)) |at| {
             if (std.mem.indexOfScalarPos(u8, line, at + key.len, ']')) |close| {
                 var end = close + 1;
                 while (end < line.len and line[end] == ',') end += 1;
-                try b.appendSlice(line[0..at]);
-                try b.appendSlice(line[end..]);
+                try b.appendSlice(a, line[0..at]);
+                try b.appendSlice(a, line[end..]);
                 continue;
             }
         }
-        try b.appendSlice(line);
+        try b.appendSlice(a, line);
     }
-    return b.toOwnedSlice();
+    return b.toOwnedSlice(a);
 }
 
 /// Whether `file` holds the compact-JSON pair `kv` as a whole value: followed
@@ -109,7 +109,7 @@ fn stamped(a: std.mem.Allocator, out: *U.Out, s: Stamp, what: []const u8, name: 
 /// and the metapackage against the test stamp. Returns the marker text.
 pub fn stampCheck(a: std.mem.Allocator, out: *U.Out, s: Stamp) ![]u8 {
     const text = std.fs.cwd().readFileAlloc(a, s.set, 1 << 24) catch |e| return no(out, "cannot read {s}: {s}", .{ s.set, @errorName(e) });
-    var want = std.ArrayList(u8).init(a);
+    var want = std.ArrayList(u8).empty;
     var got_meta: []const u8 = "";
     var got_lic: []const u8 = "";
     var got_sum: []const u8 = "";
@@ -125,8 +125,8 @@ pub fn stampCheck(a: std.mem.Allocator, out: *U.Out, s: Stamp) ![]u8 {
         if (std.mem.eql(u8, k, "metapackage")) {
             got_meta = v;
         } else if (std.mem.eql(u8, k, "member")) {
-            try want.append(' ');
-            try want.appendSlice(v);
+            try want.append(a, ' ');
+            try want.appendSlice(a, v);
         } else if (std.mem.eql(u8, k, "license")) {
             got_lic = v;
         } else if (std.mem.eql(u8, k, "summary")) {
@@ -140,11 +140,11 @@ pub fn stampCheck(a: std.mem.Allocator, out: *U.Out, s: Stamp) ![]u8 {
     if (!std.mem.eql(u8, got_sum, s.summary)) return no(out, "{s}'s summary is '{s}', conda-meta is given '{s}'", .{ s.set, got_sum, s.summary });
     if (!std.mem.eql(u8, got_home, s.home)) return no(out, "{s}'s home is '{s}', conda-meta is given '{s}'", .{ s.set, got_home, s.home });
 
-    var names = std.ArrayList(u8).init(a);
+    var names = std.ArrayList(u8).empty;
     for (s.members) |m| {
         try stamped(a, out, s, "member", m.name, m.path);
-        try names.append(' ');
-        try names.appendSlice(m.name);
+        try names.append(a, ' ');
+        try names.appendSlice(a, m.name);
     }
     if (!std.mem.eql(u8, names.items, want.items)) return no(out, "libs are [{s} ], {s}'s members are [{s} ]: the two lists of the release set differ", .{ names.items, s.set, want.items });
     try stamped(a, out, s, "metapackage", s.meta, s.meta_dir);
@@ -171,10 +171,10 @@ pub fn orderCheck(a: std.mem.Allocator, out: *U.Out, set: []const u8, version: [
             }
         }
     }
-    var names = std.ArrayList(u8).init(a);
+    var names = std.ArrayList(u8).empty;
     for (members) |m| {
-        try names.append(' ');
-        try names.appendSlice(m.name);
+        try names.append(a, ' ');
+        try names.appendSlice(a, m.name);
     }
     return std.fmt.allocPrint(a, "in order:{s}\n", .{names.items});
 }

@@ -10,10 +10,10 @@ test "listingWords: the entries, hidden ones too, sorted, each followed by a bla
     const a = ar.allocator();
     var tmp = t.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
-    try tmp.dir.writeFile("b.mojo", "x");
-    try tmp.dir.writeFile(".hidden", "x");
+    try tmp.dir.writeFile(.{ .sub_path = "b.mojo", .data = "x" });
+    try tmp.dir.writeFile(.{ .sub_path = ".hidden", .data = "x" });
     try tmp.dir.makePath("a_dir/inner");
-    try tmp.dir.writeFile("a_dir/inner/f", "x");
+    try tmp.dir.writeFile(.{ .sub_path = "a_dir/inner/f", .data = "x" });
     try t.expectEqualStrings(".hidden a_dir b.mojo ", try T.listingWords(a, tmp.dir));
 }
 
@@ -24,9 +24,9 @@ test "grepFiles: files under the directory, nested, that hold the string, sorted
     var tmp = t.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     try tmp.dir.makePath("d/e");
-    try tmp.dir.writeFile("d/e/z.txt", "has needle here");
-    try tmp.dir.writeFile("d/a.txt", "needle");
-    try tmp.dir.writeFile("d/none.txt", "nothing");
+    try tmp.dir.writeFile(.{ .sub_path = "d/e/z.txt", .data = "has needle here" });
+    try tmp.dir.writeFile(.{ .sub_path = "d/a.txt", .data = "needle" });
+    try tmp.dir.writeFile(.{ .sub_path = "d/none.txt", .data = "nothing" });
     const hits = try T.grepFiles(a, tmp.dir, "gen", "needle");
     try t.expectEqual(@as(usize, 2), hits.len);
     try t.expectEqualStrings("gen/d/a.txt", hits[0]);
@@ -55,7 +55,7 @@ test "copyTree: directories, files with the executable bit, links kept" {
         defer f.close();
         try f.writeAll("elf");
     }
-    try tmp.dir.writeFile("src/data", "d");
+    try tmp.dir.writeFile(.{ .sub_path = "src/data", .data = "d" });
     try tmp.dir.symLink("tool", "src/bin/alias", .{});
     var s = try tmp.dir.openDir("src", .{ .iterate = true });
     defer s.close();
@@ -89,14 +89,24 @@ test "inits: the objects the loader initialized, per record file, sorted, the to
     var tmp = t.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     try tmp.dir.makePath("compile");
-    try tmp.dir.writeFile("compile/ld.100", "  100:\tfile=libc.so.6 [0]; needed by x\n  100:\tcalling init: /lib/libc.so.6\n  100:\tcalling init: /w/tc/lib/libA.so\n");
-    try tmp.dir.writeFile("compile/ld.101", "  101:\tcalling init: /lib/libc.so.6\n");
-    try tmp.dir.writeFile("compile/other", "calling init: /ignored\n");
+    try tmp.dir.writeFile(.{ .sub_path = "compile/ld.100", .data = "  100:\tfile=libc.so.6 [0]; needed by x\n  100:\tcalling init: /lib/libc.so.6\n  100:\tcalling init: /w/tc/lib/libA.so\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "compile/ld.101", .data = "  101:\tcalling init: /lib/libc.so.6\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "compile/other", .data = "calling init: /ignored\n" });
     const got = try probes.inits(a, tmp.dir, "compile", "/w/tc/");
     try t.expectEqual(@as(usize, 2), got.len);
     try t.expectEqualStrings("compile init /lib/libc.so.6", got[0]);
     try t.expectEqualStrings("compile init <toolchain>/lib/libA.so", got[1]);
     try t.expectEqual(@as(usize, 0), (try probes.inits(a, tmp.dir, "run", "/w/tc/")).len);
+}
+
+/// `gz` inflated, with no window buffer (the windowed decoder of this release
+/// mishandles a fixed-Huffman match at the end of its window).
+fn gunzip(a: std.mem.Allocator, gz: []const u8) ![]u8 {
+    var in: std.Io.Reader = .fixed(gz);
+    var dec = std.compress.flate.Decompress.init(&in, .gzip, &.{});
+    var out = std.Io.Writer.Allocating.init(a);
+    _ = try dec.reader.streamRemaining(&out.writer);
+    return out.written();
 }
 
 test "stand-in tar.gz: the top directory, its files with their modes, the programs' bytes; gunzip and untar round-trip" {
@@ -105,17 +115,15 @@ test "stand-in tar.gz: the top directory, its files with their modes, the progra
     const a = ar.allocator();
     const tar = try archives.standInTar(a, "pkg", &.{ "file:package.json", "program:bin/node" }, "BUSYBOX");
     const gz = try archives.gzipStored(a, tar);
-    var fbs = std.io.fixedBufferStream(gz);
-    var dec = std.compress.gzip.decompressor(fbs.reader());
-    const back = try dec.reader().readAllAlloc(a, 1 << 20);
+    const back = try gunzip(a, gz);
     try t.expectEqualSlices(u8, tar, back);
-    var name_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var link_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var tfbs = std.io.fixedBufferStream(back);
-    var it = std.tar.iterator(tfbs.reader(), .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
-    var names = std.ArrayList([]const u8).init(a);
+    var name_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var link_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var tin: std.Io.Reader = .fixed(back);
+    var it = std.tar.Iterator.init(&tin, .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
+    var names = std.ArrayList([]const u8).empty;
     while (try it.next()) |f| {
-        try names.append(try a.dupe(u8, f.name));
+        try names.append(a, try a.dupe(u8, f.name));
         if (std.mem.eql(u8, f.name, "pkg/bin/node")) {
             try t.expectEqual(@as(u32, 0o755), f.mode & 0o777);
             try t.expectEqual(@as(u64, 7), f.size);
@@ -134,13 +142,9 @@ test "gzipStored: more than one stored block" {
     const data = try a.alloc(u8, 70000);
     for (data, 0..) |*b, i| b.* = @intCast(i % 251);
     const gz = try archives.gzipStored(a, data);
-    var fbs = std.io.fixedBufferStream(gz);
-    var dec = std.compress.gzip.decompressor(fbs.reader());
-    try t.expectEqualSlices(u8, data, try dec.reader().readAllAlloc(a, 1 << 20));
+    try t.expectEqualSlices(u8, data, try gunzip(a, gz));
     const empty = try archives.gzipStored(a, "");
-    var efbs = std.io.fixedBufferStream(empty);
-    var edec = std.compress.gzip.decompressor(efbs.reader());
-    try t.expectEqual(@as(usize, 0), (try edec.reader().readAllAlloc(a, 100)).len);
+    try t.expectEqual(@as(usize, 0), (try gunzip(a, empty)).len);
 }
 
 const proto_checks = @import("proto_checks.zig");
@@ -162,17 +166,17 @@ test "treeDiff: null when the trees are the same; names a changed, a missing and
     defer tmp.cleanup();
     try tmp.dir.makePath("g/sub");
     try tmp.dir.makePath("o/sub");
-    try tmp.dir.writeFile("g/same.mojo", "x\n");
-    try tmp.dir.writeFile("o/same.mojo", "x\n");
+    try tmp.dir.writeFile(.{ .sub_path = "g/same.mojo", .data = "x\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "o/same.mojo", .data = "x\n" });
     var g = try tmp.dir.openDir("g", .{ .iterate = true });
     defer g.close();
     var o = try tmp.dir.openDir("o", .{ .iterate = true });
     defer o.close();
     try t.expect((try proto_checks.treeDiff(a, g, "g", o, "o")) == null);
-    try tmp.dir.writeFile("g/changed.mojo", "one\ntwo\n");
-    try tmp.dir.writeFile("o/changed.mojo", "one\n2\n");
-    try tmp.dir.writeFile("g/sub/gone.mojo", "g");
-    try tmp.dir.writeFile("o/extra.mojo", "e");
+    try tmp.dir.writeFile(.{ .sub_path = "g/changed.mojo", .data = "one\ntwo\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "o/changed.mojo", .data = "one\n2\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "g/sub/gone.mojo", .data = "g" });
+    try tmp.dir.writeFile(.{ .sub_path = "o/extra.mojo", .data = "e" });
     const d = (try proto_checks.treeDiff(a, g, "g", o, "o")).?;
     try t.expect(std.mem.indexOf(u8, d, "diff -r -u g/changed.mojo o/changed.mojo\n") != null);
     try t.expect(std.mem.indexOf(u8, d, "-two\n+2\n") != null);

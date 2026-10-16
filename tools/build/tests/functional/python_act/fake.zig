@@ -13,7 +13,7 @@ pub fn main() !void {
     const dir = std.fs.path.dirname(args[0]) orelse ".";
     const prints = try std.fs.path.join(a, &.{ dir, "..", "PRINTS" });
     const text = std.fs.cwd().readFileAlloc(a, prints, 1 << 16) catch "3.13.1\n";
-    const out = std.io.getStdOut().writer();
+    const out = std.fs.File.stdout().deprecatedWriter();
     try out.print("{s}\n", .{std.mem.sliceTo(text, '\n')});
     std.debug.print("stderr of the interpreter\n", .{});
 }

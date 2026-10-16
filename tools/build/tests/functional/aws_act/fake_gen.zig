@@ -10,7 +10,7 @@ pub fn main() !void {
     const a = arena.allocator();
     const args = try std.process.argsAlloc(a);
     if (args.len < 7 or !std.mem.eql(u8, args[1], "--module") or !std.mem.eql(u8, args[3], "--out") or !std.mem.eql(u8, args[5], "--probe-out")) std.process.exit(9);
-    const out = std.io.getStdOut().writer();
+    const out = std.fs.File.stdout().deprecatedWriter();
     var mode: []const u8 = "ok";
     for (args[7..]) |x| {
         if (std.mem.startsWith(u8, x, "mode=")) mode = x[5..];

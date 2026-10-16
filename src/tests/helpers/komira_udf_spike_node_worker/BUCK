@@ -225,16 +225,16 @@ zig_test(
     imports = ["bench_run.zig"],
     src = "bench_run_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 zig_exe(
     name = "bench_run",
     exec_compatible_with = LINUX_X86_64,
     src = "bench_run.zig",
-    unit_tests = [":bench_run_unit"],
+    unit_tests = [":bench_run_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 

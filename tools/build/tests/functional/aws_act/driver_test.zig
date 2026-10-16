@@ -10,11 +10,11 @@ fn newCtx(name: []const u8) !kit.Ctx {
 }
 
 fn genArgs(c: *kit.Ctx, mode: []const u8, hands: []const []const u8) ![]const []const u8 {
-    var list = std.ArrayList([]const u8).init(c.alloc());
-    try list.appendSlice(&.{ "gen", "--gen", try c.env("FAKE_GEN"), "--out", "pkg", "--module", "svc", "--hands" });
-    try list.append(try std.fmt.allocPrint(c.alloc(), "{d}", .{hands.len}));
-    for (hands) |h| try list.appendSlice(&.{ "--hand", h });
-    try list.appendSlice(&.{ "--", "--model", "m.json", "--operations", "A,B", mode });
+    var list = std.ArrayList([]const u8).empty;
+    try list.appendSlice(c.alloc(), &.{ "gen", "--gen", try c.env("FAKE_GEN"), "--out", "pkg", "--module", "svc", "--hands" });
+    try list.append(c.alloc(), try std.fmt.allocPrint(c.alloc(), "{d}", .{hands.len}));
+    for (hands) |h| try list.appendSlice(c.alloc(), &.{ "--hand", h });
+    try list.appendSlice(c.alloc(), &.{ "--", "--model", "m.json", "--operations", "A,B", mode });
     return list.items;
 }
 

@@ -54,7 +54,7 @@ pub fn judge(a: std.mem.Allocator, id: Identity, name: []const u8, data: []const
 /// that is neither a file nor a directory, or one that cannot be read) the
 /// text for stderr is in `out` and the result is `error.Refused`.
 pub fn guard(a: std.mem.Allocator, out: *U.Out, mode: []const u8, id: Identity, what: []const u8, pairs: []const Pair) !void {
-    var refused = std.ArrayList(u8).init(a);
+    var refused = std.ArrayList(u8).empty;
     // A file is read whole and freed after it is judged: a bundle holds
     // libraries of tens of megabytes.
     const big = std.heap.page_allocator;
@@ -72,13 +72,13 @@ pub fn guard(a: std.mem.Allocator, out: *U.Out, mode: []const u8, id: Identity, 
                     const name = if (std.mem.eql(u8, p.dest, ".")) rel else try std.fmt.allocPrint(a, "{s}/{s}", .{ p.dest, rel });
                     const data = dir.readFileAlloc(big, rel, 1 << 30) catch |e| return U.refuse(out, "kcov_guard {s}: cannot read {s}/{s}: {s}\n", .{ mode, p.path, rel, @errorName(e) });
                     defer big.free(data);
-                    if (try judge(a, id, name, data)) |line| try refused.appendSlice(line);
+                    if (try judge(a, id, name, data)) |line| try refused.appendSlice(a, line);
                 }
             },
             .file => {
                 const data = std.fs.cwd().readFileAlloc(big, p.path, 1 << 30) catch |e| return U.refuse(out, "kcov_guard {s}: cannot read {s}: {s}\n", .{ mode, p.path, @errorName(e) });
                 defer big.free(data);
-                if (try judge(a, id, p.dest, data)) |line| try refused.appendSlice(line);
+                if (try judge(a, id, p.dest, data)) |line| try refused.appendSlice(a, line);
             },
             else => return U.refuse(out, "kcov_guard {s}: {s}: {s} ({s}) is neither a file nor a directory\n", .{ mode, what, p.path, p.dest }),
         }
@@ -102,9 +102,9 @@ pub fn runGuard(a: std.mem.Allocator, args: []const []const u8) u8 {
         std.debug.print("kcov_guard guard: {s}: <dest> {s} has no <path>\n", .{ what, rest[rest.len - 1] });
         return 1;
     }
-    var pairs = std.ArrayList(Pair).init(a);
+    var pairs = std.ArrayList(Pair).empty;
     var i: usize = 0;
-    while (i < rest.len) : (i += 2) pairs.append(.{ .dest = rest[i], .path = rest[i + 1] }) catch return 2;
+    while (i < rest.len) : (i += 2) pairs.append(a, .{ .dest = rest[i], .path = rest[i + 1] }) catch return 2;
     guard(a, &out, "guard", id, what, pairs.items) catch return fail(out.items);
     U.writeAll(std.fs.cwd(), args[2], "ok\n") catch |e| {
         std.debug.print("kcov_guard guard: cannot write {s}: {s}\n", .{ args[2], @errorName(e) });

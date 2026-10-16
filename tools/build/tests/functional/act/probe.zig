@@ -6,7 +6,7 @@ const std = @import("std");
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const a = arena.allocator();
-    const out = std.io.getStdOut().writer();
+    const out = std.fs.File.stdout().deprecatedWriter();
     for ([_][]const u8{ "LD_LIBRARY_PATH", "LD_PRELOAD", "DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "KEPT" }) |n| {
         const v = std.process.getEnvVarOwned(a, n) catch "(unset)";
         try out.print("{s}={s}\n", .{ n, v });
@@ -20,7 +20,7 @@ pub fn main() !void {
         std.process.exit(3);
     }
     if (std.mem.eql(u8, mode, "stdin")) {
-        const data = try std.io.getStdIn().readToEndAlloc(a, 1 << 20);
+        const data = try std.fs.File.stdin().readToEndAlloc(a, 1 << 20);
         try out.print("stdin {d} bytes\n", .{data.len});
     }
     const home = std.process.getEnvVarOwned(a, "HOME") catch "(unset)";

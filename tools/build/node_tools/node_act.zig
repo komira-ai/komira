@@ -65,7 +65,7 @@ fn cmdDist(a: std.mem.Allocator, args: []const []const u8) u8 {
     const bytes = std.fs.cwd().readFileAlloc(a, archive, 1 << 30) catch |e| return usage("cannot read {s}: {s}", .{ archive, @errorName(e) });
     var dest = std.fs.cwd().makeOpenPath(out, .{ .iterate = true }) catch |e| return usage("cannot create {s}: {s}", .{ out, @errorName(e) });
     defer dest.close();
-    X.extractTgz(dest, bytes, top, keepDist) catch |e| {
+    X.extractTgz(a, dest, bytes, top, keepDist) catch |e| {
         std.debug.print("node_dist: cannot unpack {s}: {s}\n", .{ archive, @errorName(e) });
         return 2;
     };
@@ -116,7 +116,7 @@ pub fn sriHex(a: std.mem.Allocator, sri: []const u8) ![]u8 {
     const buf = try a.alloc(u8, n);
     dec.decode(buf, b64) catch return a.dupe(u8, "");
     const hex = try a.alloc(u8, n * 2);
-    _ = std.fmt.bufPrint(hex, "{}", .{std.fmt.fmtSliceHexLower(buf)}) catch unreachable;
+    _ = std.fmt.bufPrint(hex, "{x}", .{buf}) catch unreachable;
     return hex;
 }
 
@@ -145,7 +145,7 @@ fn cmdNpm(a: std.mem.Allocator, args: []const []const u8) u8 {
     const bytes = std.fs.cwd().readFileAlloc(a, tgz, 1 << 30) catch |e| return usage("cannot read {s}: {s}", .{ tgz, @errorName(e) });
     var digest: [64]u8 = undefined;
     std.crypto.hash.sha2.Sha512.hash(bytes, &digest, .{});
-    const got = std.fmt.allocPrint(a, "{}", .{std.fmt.fmtSliceHexLower(&digest)}) catch return 2;
+    const got = std.fmt.allocPrint(a, "{x}", .{&digest}) catch return 2;
     const want = sriHex(a, sri) catch return 2;
     if (!std.mem.eql(u8, got, want)) {
         std.debug.print("npm_package: {s}: the sha512 of {s} is {s}; the pinned integrity {s} is {s}\n", .{ name, tgz, got, sri, want });
@@ -153,7 +153,7 @@ fn cmdNpm(a: std.mem.Allocator, args: []const []const u8) u8 {
     }
     var dest = std.fs.cwd().makeOpenPath(out, .{ .iterate = true }) catch |e| return usage("cannot create {s}: {s}", .{ out, @errorName(e) });
     defer dest.close();
-    X.extractTgz(dest, bytes, "package", X.keepAll) catch |e| {
+    X.extractTgz(a, dest, bytes, "package", X.keepAll) catch |e| {
         std.debug.print("npm_package: {s}: cannot unpack {s}: {s}\n", .{ name, tgz, @errorName(e) });
         return 2;
     };
@@ -170,7 +170,7 @@ fn cmdNpm(a: std.mem.Allocator, args: []const []const u8) u8 {
     const where = std.fmt.allocPrint(a, "npm_package: {s}: package.json of {s}", .{ name, tgz }) catch return 2;
     const r = U.runCapture(a, &.{ node_exe, "-e", js, manifest, where, name, version }, &env, null) catch |e| return usage("cannot run {s}: {s}", .{ node_exe, @errorName(e) });
     std.debug.print("{s}", .{r.stderr});
-    if (r.stdout.len > 0) std.io.getStdOut().writeAll(r.stdout) catch {};
+    if (r.stdout.len > 0) std.fs.File.stdout().writeAll(r.stdout) catch {};
     if (r.code != 0) return r.code;
 
     if (!std.mem.eql(u8, exe, "-")) {
@@ -238,10 +238,10 @@ fn cmdTest(a: std.mem.Allocator, args: []const []const u8) u8 {
     const dir_abs = U.abs(a, cwd, dir) catch return 2;
     const script_path = std.fs.path.join(a, &.{ dir_abs, script }) catch return 2;
     const env = testEnv(a, scratch, libs_abs) catch return 2;
-    var argv = std.ArrayList([]const u8).init(a);
-    argv.append(std.fmt.allocPrint(a, "{s}/bin/node", .{node_abs}) catch return 2) catch return 2;
-    argv.append(script_path) catch return 2;
-    argv.appendSlice(f.rest) catch return 2;
+    var argv = std.ArrayList([]const u8).empty;
+    argv.append(a, std.fmt.allocPrint(a, "{s}/bin/node", .{node_abs}) catch return 2) catch return 2;
+    argv.append(a, script_path) catch return 2;
+    argv.appendSlice(a, f.rest) catch return 2;
 
     if (!want_fail) {
         var child = std.process.Child.init(argv.items, a);
@@ -251,7 +251,7 @@ fn cmdTest(a: std.mem.Allocator, args: []const []const u8) u8 {
         if (code != 0) return code;
     } else {
         const r = U.runCapture(a, argv.items, &env, null) catch |e| return usage("cannot run node: {s}", .{@errorName(e)});
-        if (r.stdout.len > 0) std.io.getStdOut().writeAll(r.stdout) catch {};
+        if (r.stdout.len > 0) std.fs.File.stdout().writeAll(r.stdout) catch {};
         if (r.code == 0) {
             std.debug.print("node_test: {s} exited 0; it was expected to fail with: {s}\n", .{ script_path, err_text });
             return 1;

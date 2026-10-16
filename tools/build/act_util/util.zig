@@ -8,7 +8,7 @@
 //!
 //! The zig 0.12 / 0.15 common subset: no `std.io` writers beyond
 //! `ArrayList.writer()`, no `Dir.writeFile` with a struct, no
-//! `MAX_PATH_BYTES`. `std.ArrayList(T).init` is the one mechanical edit for 0.15.
+//! `max_path_bytes`. `std.ArrayList(T).init` is the one mechanical edit for 0.15.
 
 const std = @import("std");
 
@@ -16,7 +16,9 @@ const std = @import("std");
 pub const extract = @import("extract.zig");
 
 /// Where a check writes its refusal text: the caller prints it on stderr.
-pub const Out = std.ArrayList(u8);
+/// The text buffer the act tools build their messages in: the managed list, which keeps
+/// its allocator, so `refuse` and the printers need not be passed one.
+pub const Out = std.array_list.Managed(u8);
 
 /// Appends the formatted text to `out` and returns `error.Refused`.
 pub fn refuse(out: *Out, comptime fmt: []const u8, args: anytype) error{ Refused, OutOfMemory } {
@@ -128,9 +130,9 @@ pub fn setModes(dir: std.fs.Dir, dir_mode: std.fs.File.Mode, file_mode: std.fs.F
 /// links to files and to directories are followed (`find -L`); a dangling link
 /// is skipped. Without it, links are not files.
 pub fn listFiles(a: std.mem.Allocator, dir: std.fs.Dir, follow: bool) ![][]const u8 {
-    var list = std.ArrayList([]const u8).init(a);
+    var list = std.ArrayList([]const u8).empty;
     try listInto(a, dir, "", follow, 0, &list);
-    const items = try list.toOwnedSlice();
+    const items = try list.toOwnedSlice(a);
     std.mem.sort([]const u8, items, {}, lessBytes);
     return items;
 }
@@ -147,7 +149,7 @@ fn listInto(a: std.mem.Allocator, dir: std.fs.Dir, prefix: []const u8, follow: b
             kind = st.kind;
         }
         switch (kind) {
-            .file => try list.append(rel),
+            .file => try list.append(a, rel),
             .directory => {
                 var d = try dir.openDir(e.name, .{ .iterate = true });
                 defer d.close();
@@ -160,22 +162,22 @@ fn listInto(a: std.mem.Allocator, dir: std.fs.Dir, prefix: []const u8, follow: b
 
 /// The names directly in `dir` (hidden ones included, as `ls -A`), sorted bytewise.
 pub fn listNames(a: std.mem.Allocator, dir: std.fs.Dir) ![][]const u8 {
-    var list = std.ArrayList([]const u8).init(a);
+    var list = std.ArrayList([]const u8).empty;
     var it = dir.iterate();
-    while (try it.next()) |e| try list.append(try a.dupe(u8, e.name));
-    const items = try list.toOwnedSlice();
+    while (try it.next()) |e| try list.append(a, try a.dupe(u8, e.name));
+    const items = try list.toOwnedSlice(a);
     std.mem.sort([]const u8, items, {}, lessBytes);
     return items;
 }
 
 /// `names` as `ls -A | tr '\n' ' '` shows them: each followed by a space.
 pub fn spaced(a: std.mem.Allocator, names: []const []const u8) ![]u8 {
-    var b = std.ArrayList(u8).init(a);
+    var b = std.ArrayList(u8).empty;
     for (names) |n| {
-        try b.appendSlice(n);
-        try b.append(' ');
+        try b.appendSlice(a, n);
+        try b.append(a, ' ');
     }
-    return b.toOwnedSlice();
+    return b.toOwnedSlice(a);
 }
 
 /// Creates `path`'s parent directories (relative to `dir`).
@@ -207,9 +209,9 @@ pub fn runCapture(a: std.mem.Allocator, argv: []const []const u8, env: ?*const s
     child.stdout_behavior = .Pipe;
     child.stderr_behavior = .Pipe;
     try child.spawn();
-    var out = std.ArrayList(u8).init(a);
-    var err = std.ArrayList(u8).init(a);
-    try child.collectOutput(&out, &err, 1 << 28);
+    var out = std.ArrayList(u8).empty;
+    var err = std.ArrayList(u8).empty;
+    try child.collectOutput(a, &out, &err, 1 << 28);
     const term = try child.wait();
     return .{ .code = exitCodeOf(term), .stdout = out.items, .stderr = err.items };
 }
@@ -264,11 +266,11 @@ pub const Flags = struct {
 
     /// Every occurrence of `--name`, in order.
     pub fn all(self: Flags, a: std.mem.Allocator, name: []const u8) ![]const Item {
-        var list = std.ArrayList(Item).init(a);
+        var list = std.ArrayList(Item).empty;
         for (self.items) |it| {
-            if (std.mem.eql(u8, it.name, name)) try list.append(it);
+            if (std.mem.eql(u8, it.name, name)) try list.append(a, it);
         }
-        return list.toOwnedSlice();
+        return list.toOwnedSlice(a);
     }
 };
 
@@ -276,7 +278,7 @@ pub const FlagError = error{ UnknownFlag, MissingValue, OutOfMemory };
 
 /// Parses `args` by `spec`. On an error, `bad` names the argument at fault.
 pub fn parseFlags(a: std.mem.Allocator, args: []const []const u8, spec: []const Spec, bad: *[]const u8) FlagError!Flags {
-    var items = std.ArrayList(Flags.Item).init(a);
+    var items = std.ArrayList(Flags.Item).empty;
     var i: usize = 0;
     var rest: []const []const u8 = &.{};
     outer: while (i < args.len) {
@@ -291,7 +293,7 @@ pub fn parseFlags(a: std.mem.Allocator, args: []const []const u8, spec: []const 
                     bad.* = arg;
                     return error.MissingValue;
                 }
-                try items.append(.{ .name = sp.name, .vals = args[i + 1 .. i + 1 + sp.arity] });
+                try items.append(a, .{ .name = sp.name, .vals = args[i + 1 .. i + 1 + sp.arity] });
                 i += 1 + sp.arity;
                 continue :outer;
             }
@@ -299,5 +301,5 @@ pub fn parseFlags(a: std.mem.Allocator, args: []const []const u8, spec: []const 
         bad.* = arg;
         return error.UnknownFlag;
     }
-    return .{ .items = try items.toOwnedSlice(), .rest = rest };
+    return .{ .items = try items.toOwnedSlice(a), .rest = rest };
 }

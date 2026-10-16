@@ -69,7 +69,7 @@ zig_test(
         "//tools/build/node_tools:node_tartest",
     ],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 zig_exe(
@@ -77,8 +77,8 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "third_party_act.zig",
     deps = ["//tools/build/act_util:act_util"],
-    unit_tests = [":third_party_act_unit"],
+    unit_tests = [":third_party_act_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )

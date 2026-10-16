@@ -574,16 +574,16 @@ zig_test(
     imports = ["proto_check.zig"],
     src = "proto_check_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 zig_exe(
     name = "proto_check_bin",
     exec_compatible_with = LINUX_X86_64,
     src = "proto_check.zig",
-    unit_tests = [":proto_check_unit"],
+    unit_tests = [":proto_check_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 

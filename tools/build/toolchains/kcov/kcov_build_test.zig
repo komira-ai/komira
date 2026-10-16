@@ -90,32 +90,32 @@ test "bin2c: sixteen bytes to a line, lower-case hex, the GeneratedData tail" {
     try t.expect(std.mem.indexOf(u8, two, "y_data_raw[] = {\n0x42,\n};") != null);
 }
 
-fn arHeader(out: *std.ArrayList(u8), name: []const u8, size: usize) !void {
+fn arHeader(alloc: std.mem.Allocator, out: *std.ArrayList(u8), name: []const u8, size: usize) !void {
     var h: [60]u8 = undefined;
     @memset(&h, ' ');
     @memcpy(h[0..name.len], name);
     _ = try std.fmt.bufPrint(h[48..58], "{d}", .{size});
     h[58] = '`';
     h[59] = '\n';
-    try out.appendSlice(&h);
+    try out.appendSlice(alloc, &h);
 }
 
 test "arMembers: GNU names, a long-name table, the symbol table skipped, odd sizes padded" {
     var ar = arena();
     defer ar.deinit();
     const a = ar.allocator();
-    var d = std.ArrayList(u8).init(a);
-    try d.appendSlice("!<arch>\n");
-    try arHeader(&d, "/", 4);
-    try d.appendSlice("\x00\x00\x00\x00");
+    var d = std.ArrayList(u8).empty;
+    try d.appendSlice(a, "!<arch>\n");
+    try arHeader(a, &d, "/", 4);
+    try d.appendSlice(a, "\x00\x00\x00\x00");
     const long = "a_very_long_object_name.o/\n";
-    try arHeader(&d, "//", long.len);
-    try d.appendSlice(long);
-    try d.append(0); // padding: 27 is odd
-    try arHeader(&d, "crc32.o/", 3);
-    try d.appendSlice("abc\n");
-    try arHeader(&d, "/0", 2);
-    try d.appendSlice("zz");
+    try arHeader(a, &d, "//", long.len);
+    try d.appendSlice(a, long);
+    try d.append(a, 0); // padding: 27 is odd
+    try arHeader(a, &d, "crc32.o/", 3);
+    try d.appendSlice(a, "abc\n");
+    try arHeader(a, &d, "/0", 2);
+    try d.appendSlice(a, "zz");
     const ms = try K.arMembers(a, d.items);
     try t.expectEqual(@as(usize, 2), ms.len);
     try t.expectEqualStrings("crc32.o", ms[0].name);

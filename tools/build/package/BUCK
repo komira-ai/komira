@@ -80,7 +80,7 @@ zig_test(
     ],
     deps = ["//tools/build/act_util:act_util"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 zig_exe(
@@ -94,9 +94,9 @@ zig_exe(
         "act/release.zig",
     ],
     deps = ["//tools/build/act_util:act_util"],
-    unit_tests = [":pkg_act_unit"],
+    unit_tests = [":pkg_act_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 

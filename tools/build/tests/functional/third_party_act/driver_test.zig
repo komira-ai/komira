@@ -72,12 +72,12 @@ test "drift: a difference is red, names the first lines (- committed, + generate
     try t.expectEqual(@as(u8, 1), r.code);
     try t.expectEqualStrings("third_party_srcs: src/committed.bzl differs from what the archive gives (- committed, + generated):\n-old_a\n+new_a\n-old_b\n+new_b\nregenerate: ./buck2 build //p:srcs_gen --out p/committed.bzl\n", r.stdout);
     // only the first six changed lines are shown
-    var many = std.ArrayList(u8).init(c.alloc());
-    var other = std.ArrayList(u8).init(c.alloc());
+    var many = std.ArrayList(u8).empty;
+    var other = std.ArrayList(u8).empty;
     var i: usize = 0;
     while (i < 20) : (i += 1) {
-        try many.writer().print("same{d}\nhave{d}\n", .{ i, i });
-        try other.writer().print("same{d}\ngot{d}\n", .{ i, i });
+        try many.writer(c.alloc()).print("same{d}\nhave{d}\n", .{ i, i });
+        try other.writer(c.alloc()).print("same{d}\ngot{d}\n", .{ i, i });
     }
     try c.write("src/committed.bzl", many.items, 0o644);
     try c.write("generated.bzl", other.items, 0o644);

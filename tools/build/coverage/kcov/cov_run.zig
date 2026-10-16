@@ -158,7 +158,7 @@ pub fn parse(a: std.mem.Allocator, argv: []const []const u8, diag: *[]const u8) 
         }
         r.solib = argv[i + 1];
         i += 2;
-        var srcs = std.ArrayList([]const u8).init(a);
+        var srcs = std.ArrayList([]const u8).empty;
         while (i < argv.len and std.mem.eql(u8, argv[i], "--solib-src")) {
             if (i + 1 >= argv.len) {
                 diag.* = "--solib-src needs a path";
@@ -169,17 +169,17 @@ pub fn parse(a: std.mem.Allocator, argv: []const []const u8, diag: *[]const u8) 
                 diag.* = try std.fmt.allocPrint(a, "--solib-src {s} must be a relative file path outside buck-out/ without a space, , or :", .{p});
                 return error.Usage;
             }
-            try srcs.append(p);
+            try srcs.append(a, p);
             i += 2;
         }
-        r.solib_srcs = try srcs.toOwnedSlice();
+        r.solib_srcs = try srcs.toOwnedSlice(a);
     }
     // The package's repository directory, for --solib: <test_repo> is it then <test>.
     if (r.solib != null and pkgRepo(r.test_repo, r.test_) == null) {
         diag.* = try std.fmt.allocPrint(a, "with --solib, <test_repo> {s} must be a directory then <test> {s}", .{ r.test_repo, r.test_ });
         return error.Usage;
     }
-    var gens = std.ArrayList([]const u8).init(a);
+    var gens = std.ArrayList([]const u8).empty;
     while (i < argv.len and std.mem.eql(u8, argv[i], "--gen")) {
         if (i + 1 >= argv.len) {
             diag.* = "--gen needs a file";
@@ -190,10 +190,10 @@ pub fn parse(a: std.mem.Allocator, argv: []const []const u8, diag: *[]const u8) 
             diag.* = try std.fmt.allocPrint(a, "--gen {s} must be a relative path without a space, , or :", .{p});
             return error.Usage;
         }
-        try gens.append(p);
+        try gens.append(a, p);
         i += 2;
     }
-    r.gen = try gens.toOwnedSlice();
+    r.gen = try gens.toOwnedSlice(a);
     r.rest = argv[i..];
     return r;
 }
@@ -230,7 +230,7 @@ fn printable(c: u8) bool {
 
 /// The runs of printable bytes of `data` (`strings -n 1`).
 pub fn strings(a: std.mem.Allocator, data: []const u8) ![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(a);
+    var out = std.ArrayList([]const u8).empty;
     var i: usize = 0;
     while (i < data.len) {
         if (!printable(data[i])) {
@@ -239,9 +239,9 @@ pub fn strings(a: std.mem.Allocator, data: []const u8) ![]const []const u8 {
         }
         const start = i;
         while (i < data.len and printable(data[i])) i += 1;
-        try out.append(data[start..i]);
+        try out.append(a, data[start..i]);
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 fn nameChar(c: u8) bool {
@@ -251,7 +251,7 @@ fn nameChar(c: u8) bool {
 /// `grep -o -E '[A-Za-z0-9_./+@=-]*buck-out/[A-Za-z0-9_./+@=-]*'` over `lines`: each
 /// maximal run of those characters that holds `buck-out/`.
 pub fn buckNames(a: std.mem.Allocator, lines: []const []const u8) ![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(a);
+    var out = std.ArrayList([]const u8).empty;
     for (lines) |l| {
         var i: usize = 0;
         while (i < l.len) {
@@ -261,10 +261,10 @@ pub fn buckNames(a: std.mem.Allocator, lines: []const []const u8) ![]const []con
             }
             const start = i;
             while (i < l.len and nameChar(l[i])) i += 1;
-            if (std.mem.indexOf(u8, l[start..i], "buck-out/") != null) try out.append(l[start..i]);
+            if (std.mem.indexOf(u8, l[start..i], "buck-out/") != null) try out.append(a, l[start..i]);
         }
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// The [src] directories of the library the binary names: of `names`, those with
@@ -272,7 +272,7 @@ pub fn buckNames(a: std.mem.Allocator, lines: []const []const u8) ![]const []con
 /// after the last such `/src/<import>`; sorted, unique.
 pub fn elsewhere(a: std.mem.Allocator, names: []const []const u8, import: []const u8) ![]const []const u8 {
     const needle = try std.fmt.allocPrint(a, "/src/{s}", .{import});
-    var out = std.ArrayList([]const u8).init(a);
+    var out = std.ArrayList([]const u8).empty;
     for (names) |n| {
         // /__[^/]+__/ somewhere, then /src/<import> after it.
         var from: usize = 0;
@@ -296,18 +296,18 @@ pub fn elsewhere(a: std.mem.Allocator, names: []const []const u8, import: []cons
             if (end == n.len or n[end] == '/') cut = end;
             pos = at + 1;
         }
-        if (cut) |c| try out.append(n[0..c]);
+        if (cut) |c| try out.append(a, n[0..c]);
     }
     std.mem.sort([]const u8, out.items, {}, struct {
         fn lt(_: void, x: []const u8, y: []const u8) bool {
             return std.mem.lessThan(u8, x, y);
         }
     }.lt);
-    var uniq = std.ArrayList([]const u8).init(a);
+    var uniq = std.ArrayList([]const u8).empty;
     for (out.items) |s| {
-        if (uniq.items.len == 0 or !std.mem.eql(u8, uniq.items[uniq.items.len - 1], s)) try uniq.append(s);
+        if (uniq.items.len == 0 or !std.mem.eql(u8, uniq.items[uniq.items.len - 1], s)) try uniq.append(a, s);
     }
-    return uniq.toOwnedSlice();
+    return uniq.toOwnedSlice(a);
 }
 
 fn wordChar(c: u8) bool {
@@ -365,7 +365,7 @@ pub fn namesStage(lines: []const []const u8, stage: []const u8) bool {
 pub fn filterGateErr(a: std.mem.Allocator, text: []const u8, label: []const u8, rc: u8) ![]u8 {
     const header = try std.fmt.allocPrint(a, "GATED TEST FAILED: {s} (exit {d})", .{ label, rc });
     const trailer = "The library's package is not produced until this test passes.";
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var held = false;
     var done = false;
     var lines = std.mem.splitScalar(u8, text, '\n');
@@ -381,14 +381,14 @@ pub fn filterGateErr(a: std.mem.Allocator, text: []const u8, label: []const u8, 
             continue;
         }
         if (held) {
-            try out.appendSlice(header);
-            try out.append('\n');
+            try out.appendSlice(a, header);
+            try out.append(a, '\n');
             held = false;
         }
-        try out.appendSlice(l);
-        try out.append('\n');
+        try out.appendSlice(a, l);
+        try out.append(a, '\n');
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 fn hasLineStarting(text: []const u8, prefixes: []const []const u8) bool {
@@ -561,10 +561,10 @@ pub fn main() !void {
     const names = try buckNames(a, lines);
     const wrong = try elsewhere(a, names, args.import);
     if (wrong.len > 0) {
-        var joined = std.ArrayList(u8).init(a);
+        var joined = std.ArrayList(u8).empty;
         for (wrong) |w| {
-            try joined.appendSlice(w);
-            try joined.append(' ');
+            try joined.appendSlice(a, w);
+            try joined.append(a, ' ');
         }
         red(label, "the test binary names the library's sources by {s}but this run stages them at {s}/: kcov would drop them without an error (README.md, \"cov_run\").", .{ joined.items, stage });
     }
@@ -620,20 +620,20 @@ pub fn main() !void {
     }
 
     // 2. kcov under the gate's runner.
-    var inc = std.ArrayList(u8).init(a);
-    try inc.writer().print("{s}/{s},{s}/{s},{s}/{s},{s}/{s}", .{ s, stage, s, args.test_, l, stage, l, args.test_ });
-    for (args.solib_srcs) |p| try inc.writer().print(",{s}/{s},{s}/{s}", .{ s, p, l, p });
-    var gate_args = std.ArrayList([]const u8).init(a);
-    try gate_args.appendSlice(&.{
+    var inc = std.ArrayList(u8).empty;
+    try inc.writer(a).print("{s}/{s},{s}/{s},{s}/{s},{s}/{s}", .{ s, stage, s, args.test_, l, stage, l, args.test_ });
+    for (args.solib_srcs) |p| try inc.writer(a).print(",{s}/{s},{s}/{s}", .{ s, p, l, p });
+    var gate_args = std.ArrayList([]const u8).empty;
+    try gate_args.appendSlice(a, &.{
         gate, "mojo", "--busybox", bb, "--runtime-lib", try std.fs.path.join(a, &.{ args.compiler, "lib" }), "--label", label,
         "--test", try std.fs.path.join(a, &.{ r, "bin", "kcov" }), "--marker", try std.fs.path.join(a, &.{ k, "gate.passed" }),
         "--limit-s", limit, "--limit-report", "coverage",
     });
-    try gate_args.appendSlice(args.rest);
-    var kcov_args = std.ArrayList([]const u8).init(a);
-    try kcov_args.append("--cobertura-only");
-    if (args.solib == null) try kcov_args.append("--skip-solibs");
-    try kcov_args.appendSlice(&.{
+    try gate_args.appendSlice(a, args.rest);
+    var kcov_args = std.ArrayList([]const u8).empty;
+    try kcov_args.append(a, "--cobertura-only");
+    if (args.solib == null) try kcov_args.append(a, "--skip-solibs");
+    try kcov_args.appendSlice(a, &.{
         "--configure=cobertura-full-paths=1",
         try std.fmt.allocPrint(a, "--include-path={s}", .{inc.items}),
         try std.fmt.allocPrint(a, "--replace-src-path=^(?!/):{s}/", .{l}),
@@ -647,8 +647,8 @@ pub fn main() !void {
             red(label, "cov_run: a kcov argument of {d} bytes ({s}...) is longer than kcov takes ({d}): kcov reads each argument before the program as a path and fails \"Too long string!\" (README.md, \"cov_run\").", .{ ka.len, ka[0..@min(ka.len, 80)], kcov_arg_max });
     }
     for (kcov_args.items) |ka| {
-        try gate_args.append("--arg");
-        try gate_args.append(ka);
+        try gate_args.append(a, "--arg");
+        try gate_args.append(a, ka);
     }
     var gate_child = std.process.Child.init(gate_args.items, a);
     gate_child.env_map = &env;
@@ -656,13 +656,13 @@ pub fn main() !void {
     gate_child.stdout_behavior = .Inherit;
     gate_child.stderr_behavior = .Pipe;
     try gate_child.spawn();
-    var gerr = std.ArrayList(u8).init(a);
+    var gerr = std.ArrayList(u8).empty;
     {
         var buf: [65536]u8 = undefined;
         while (true) {
             const n = try gate_child.stderr.?.read(&buf);
             if (n == 0) break;
-            try gerr.appendSlice(buf[0..n]);
+            try gerr.appendSlice(a, buf[0..n]);
         }
     }
     const rc = exitCodeOf(try gate_child.wait());
@@ -683,29 +683,29 @@ pub fn main() !void {
     // 3. Exactly one report.
     var out_dir = std.fs.cwd().openDir(out, .{ .iterate = true }) catch red(label, "kcov wrote no output directory ({s})", .{out});
     defer out_dir.close();
-    var found = std.ArrayList([]const u8).init(a);
+    var found = std.ArrayList([]const u8).empty;
     {
         var w = try out_dir.walk(a);
         defer w.deinit();
         while (try w.next()) |e| {
-            if (e.kind == .file and std.mem.endsWith(u8, e.basename, ".xml")) try found.append(try std.fs.path.join(a, &.{ out, e.path }));
+            if (e.kind == .file and std.mem.endsWith(u8, e.basename, ".xml")) try found.append(a, try std.fs.path.join(a, &.{ out, e.path }));
         }
     }
     if (found.items.len != 1) {
-        var joined = std.ArrayList(u8).init(a);
+        var joined = std.ArrayList(u8).empty;
         for (found.items) |f| {
-            try joined.appendSlice(f);
-            try joined.append(' ');
+            try joined.appendSlice(a, f);
+            try joined.append(a, ' ');
         }
         red(label, "kcov wrote {d} XML report(s), expected exactly one: {s}", .{ found.items.len, joined.items });
     }
 
     // 4. Repository paths.
-    var norm = std.ArrayList([]const u8).init(a);
-    try norm.append(try std.fs.path.join(a, &.{ here, "cov_normalize" }));
-    try norm.appendSlice(&.{ "--in", found.items[0], "--out", xml });
-    try norm.appendSlice(&.{ "--map", try std.fmt.allocPrint(a, "{s}/{s}/={s}", .{ s, stage, args.src_repo }) });
-    try norm.appendSlice(&.{ "--map", try std.fmt.allocPrint(a, "{s}/{s}={s}", .{ s, test_dir, test_repo_dir }) });
+    var norm = std.ArrayList([]const u8).empty;
+    try norm.append(a, try std.fs.path.join(a, &.{ here, "cov_normalize" }));
+    try norm.appendSlice(a, &.{ "--in", found.items[0], "--out", xml });
+    try norm.appendSlice(a, &.{ "--map", try std.fmt.allocPrint(a, "{s}/{s}/={s}", .{ s, stage, args.src_repo }) });
+    try norm.appendSlice(a, &.{ "--map", try std.fmt.allocPrint(a, "{s}/{s}={s}", .{ s, test_dir, test_repo_dir }) });
     // The shell's $PWD: the environment's when it names this directory, else the physical one.
     const pwd = blk: {
         const e = std.process.getEnvVarOwned(a, "PWD") catch break :blk cwd;
@@ -713,21 +713,21 @@ pub fn main() !void {
         const re = std.fs.cwd().realpathAlloc(a, e) catch break :blk cwd;
         break :blk if (std.mem.eql(u8, re, cwd)) e else cwd;
     };
-    try norm.appendSlice(&.{ "--must-contain", args.test_repo, "--forbid", pwd, "--forbid", r, "--forbid", l });
+    try norm.appendSlice(a, &.{ "--must-contain", args.test_repo, "--forbid", pwd, "--forbid", r, "--forbid", l });
     if (args.solib != null) {
-        if (test_dir.len > 0) try norm.appendSlice(&.{ "--map", try std.fmt.allocPrint(a, "{s}/={s}", .{ s, pkg_repo }) });
-        try norm.appendSlice(&.{ "--must-contain", try std.fmt.allocPrint(a, "{s}{s}", .{ pkg_repo, args.solib_srcs[0] }) });
+        if (test_dir.len > 0) try norm.appendSlice(a, &.{ "--map", try std.fmt.allocPrint(a, "{s}/={s}", .{ s, pkg_repo }) });
+        try norm.appendSlice(a, &.{ "--must-contain", try std.fmt.allocPrint(a, "{s}{s}", .{ pkg_repo, args.solib_srcs[0] }) });
     }
     const p_real = realpath(a, pwd);
-    if (!std.mem.eql(u8, p_real, pwd)) try norm.appendSlice(&.{ "--forbid", p_real });
+    if (!std.mem.eql(u8, p_real, pwd)) try norm.appendSlice(a, &.{ "--forbid", p_real });
     var nchild = std.process.Child.init(norm.items, a);
     nchild.env_map = &env;
     nchild.stdout_behavior = .Pipe;
     nchild.stderr_behavior = .Pipe;
     try nchild.spawn();
-    var nout = std.ArrayList(u8).init(a);
-    var nerr = std.ArrayList(u8).init(a);
-    try nchild.collectOutput(&nout, &nerr, 1 << 26);
+    var nout = std.ArrayList(u8).empty;
+    var nerr = std.ArrayList(u8).empty;
+    try nchild.collectOutput(a, &nout, &nerr, 1 << 26);
     const nrc = exitCodeOf(try nchild.wait());
     if (nrc != 0) {
         // (The script sent both streams to one file and showed it.)
@@ -739,7 +739,7 @@ pub fn main() !void {
     }
     const mf = std.fs.cwd().createFile(marker, .{}) catch |e| die("cannot create {s}: {s}", .{ marker, @errorName(e) });
     defer mf.close();
-    try mf.writer().print("PASS {s}\n", .{label});
+    try mf.deprecatedWriter().print("PASS {s}\n", .{label});
     std.fs.cwd().deleteTree(k) catch {};
 }
 

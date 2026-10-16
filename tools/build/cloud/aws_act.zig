@@ -45,11 +45,11 @@ pub fn judge(a: std.mem.Allocator, dir: std.fs.Dir, module: []const u8, hands: u
     }
     const names = try U.listNames(a, dir);
     if (names.len != 3 + hands) {
-        var b = std.ArrayList(u8).init(a);
-        try b.appendSlice("mojo_aws_client: the generated package holds files that were not declared:\n");
+        var b = std.ArrayList(u8).empty;
+        try b.appendSlice(a, "mojo_aws_client: the generated package holds files that were not declared:\n");
         for (names) |n| {
-            try b.appendSlice(n);
-            try b.append('\n');
+            try b.appendSlice(a, n);
+            try b.append(a, '\n');
         }
         return b.items;
     }
@@ -71,15 +71,15 @@ fn cmdGen(a: std.mem.Allocator, args: []const []const u8) u8 {
     std.fs.cwd().makePath(out) catch |e| return usage("cannot create {s}: {s}", .{ out, @errorName(e) });
     const cwd = std.fs.cwd().realpathAlloc(a, ".") catch return 2;
     const gen_abs = U.abs(a, cwd, gen) catch return 2;
-    var argv = std.ArrayList([]const u8).init(a);
-    argv.append(gen_abs) catch return 2;
-    argv.append("--module") catch return 2;
-    argv.append(module) catch return 2;
-    argv.append("--out") catch return 2;
-    argv.append(std.fmt.allocPrint(a, "{s}/{s}.mojo", .{ out, module }) catch return 2) catch return 2;
-    argv.append("--probe-out") catch return 2;
-    argv.append(std.fmt.allocPrint(a, "{s}/{s}", .{ out, probe_name }) catch return 2) catch return 2;
-    argv.appendSlice(f.rest) catch return 2;
+    var argv = std.ArrayList([]const u8).empty;
+    argv.append(a, gen_abs) catch return 2;
+    argv.append(a, "--module") catch return 2;
+    argv.append(a, module) catch return 2;
+    argv.append(a, "--out") catch return 2;
+    argv.append(a, std.fmt.allocPrint(a, "{s}/{s}.mojo", .{ out, module }) catch return 2) catch return 2;
+    argv.append(a, "--probe-out") catch return 2;
+    argv.append(a, std.fmt.allocPrint(a, "{s}/{s}", .{ out, probe_name }) catch return 2) catch return 2;
+    argv.appendSlice(a, f.rest) catch return 2;
     var child = std.process.Child.init(argv.items, a);
     const term = child.spawnAndWait() catch |e| return usage("cannot run {s}: {s}", .{ gen, @errorName(e) });
     const code = U.exitCodeOf(term);

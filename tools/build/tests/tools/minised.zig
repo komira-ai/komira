@@ -22,7 +22,7 @@ pub const RepPiece = union(enum) { text: []const u8, matched };
 
 /// The commands of `expr`.
 pub fn parse(a: A, expr: []const u8) ![]Command {
-    var cmds = std.ArrayList(Command).init(a);
+    var cmds = std.ArrayList(Command).empty;
     var i: usize = 0;
     while (true) {
         while (i < expr.len and (expr[i] == ' ' or expr[i] == ';' or expr[i] == '\n')) i += 1;
@@ -35,36 +35,36 @@ pub fn parse(a: A, expr: []const u8) ![]Command {
         const rep = try field(a, expr, &i, delim);
         // Flags: none are supported.
         while (i < expr.len and expr[i] != ';' and expr[i] != ' ' and expr[i] != '\n') return error.UnsupportedSed;
-        try cmds.append(try command(a, pat, rep));
+        try cmds.append(a, try command(a, pat, rep));
     }
     if (cmds.items.len == 0) return error.UnsupportedSed;
-    return cmds.toOwnedSlice();
+    return cmds.toOwnedSlice(a);
 }
 
 /// Reads up to the next unescaped `delim`; `\<delim>` is the delimiter itself,
 /// every other escape is kept for the caller.
 fn field(a: A, s: []const u8, i: *usize, delim: u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     while (i.* < s.len) : (i.* += 1) {
         const c = s[i.*];
         if (c == '\\' and i.* + 1 < s.len) {
             if (s[i.* + 1] == delim) {
-                try out.append(delim);
+                try out.append(a, delim);
             } else {
-                try out.append('\\');
-                try out.append(s[i.* + 1]);
+                try out.append(a, '\\');
+                try out.append(a, s[i.* + 1]);
             }
             i.* += 1;
         } else if (c == delim) {
             i.* += 1;
-            return out.toOwnedSlice();
-        } else try out.append(c);
+            return out.toOwnedSlice(a);
+        } else try out.append(a, c);
     }
     return error.UnsupportedSed;
 }
 
 fn command(a: A, pat: []const u8, rep: []const u8) !Command {
-    var pieces = std.ArrayList(Piece).init(a);
+    var pieces = std.ArrayList(Piece).empty;
     var start = false;
     var end = false;
     var i: usize = 0;
@@ -82,19 +82,19 @@ fn command(a: A, pat: []const u8, rep: []const u8) !Command {
                 // A backslash before a character BRE gives no special meaning to
                 // here makes it literal; `\(`, `\{` and `\n` and friends are not supported.
                 if (std.mem.indexOfScalar(u8, ".*[]^$\\&/|#,\"'-:;", e) == null) return error.UnsupportedSed;
-                try pieces.append(.{ .lit = e });
+                try pieces.append(a, .{ .lit = e });
             },
-            '.' => try pieces.append(.any),
+            '.' => try pieces.append(a, .any),
             '$' => {
                 if (i + 1 != pat.len) return error.UnsupportedSed;
                 end = true;
             },
             '*', '[' => return error.UnsupportedSed,
-            else => try pieces.append(.{ .lit = c }),
+            else => try pieces.append(a, .{ .lit = c }),
         }
     }
-    var reps = std.ArrayList(RepPiece).init(a);
-    var text = std.ArrayList(u8).init(a);
+    var reps = std.ArrayList(RepPiece).empty;
+    var text = std.ArrayList(u8).empty;
     var j: usize = 0;
     while (j < rep.len) : (j += 1) {
         const c = rep[j];
@@ -103,15 +103,15 @@ fn command(a: A, pat: []const u8, rep: []const u8) !Command {
             if (j >= rep.len) return error.UnsupportedSed;
             const e = rep[j];
             if (std.mem.indexOfScalar(u8, "&\\/|#,\"'-:;.*[]^$", e) == null) return error.UnsupportedSed;
-            try text.append(e);
+            try text.append(a, e);
         } else if (c == '&') {
-            if (text.items.len > 0) try reps.append(.{ .text = try text.toOwnedSlice() });
-            text = std.ArrayList(u8).init(a);
-            try reps.append(.matched);
-        } else try text.append(c);
+            if (text.items.len > 0) try reps.append(a, .{ .text = try text.toOwnedSlice(a) });
+            text = std.ArrayList(u8).empty;
+            try reps.append(a, .matched);
+        } else try text.append(a, c);
     }
-    if (text.items.len > 0) try reps.append(.{ .text = try text.toOwnedSlice() });
-    return .{ .pattern = try pieces.toOwnedSlice(), .anchored_start = start, .anchored_end = end, .replacement = try reps.toOwnedSlice() };
+    if (text.items.len > 0) try reps.append(a, .{ .text = try text.toOwnedSlice(a) });
+    return .{ .pattern = try pieces.toOwnedSlice(a), .anchored_start = start, .anchored_end = end, .replacement = try reps.toOwnedSlice(a) };
 }
 
 fn matchAt(c: Command, line: []const u8, at: usize) ?usize {
@@ -133,17 +133,16 @@ fn applyLine(a: A, c: Command, line: []const u8, out: *std.ArrayList(u8)) !void 
     while (at <= line.len) : (at += 1) {
         if (c.anchored_start and at != 0) break;
         if (matchAt(c, line, at)) |e| {
-            try out.appendSlice(line[0..at]);
+            try out.appendSlice(a, line[0..at]);
             for (c.replacement) |r| switch (r) {
-                .text => |t| try out.appendSlice(t),
-                .matched => try out.appendSlice(line[at..e]),
+                .text => |t| try out.appendSlice(a, t),
+                .matched => try out.appendSlice(a, line[at..e]),
             };
-            try out.appendSlice(line[e..]);
+            try out.appendSlice(a, line[e..]);
             return;
         }
     }
-    _ = a;
-    try out.appendSlice(line);
+    try out.appendSlice(a, line);
 }
 
 /// `text` with the commands of `expr` applied to each line, in order.
@@ -151,15 +150,15 @@ pub fn run(a: A, expr: []const u8, text: []const u8) ![]u8 {
     const cmds = try parse(a, expr);
     var cur = try a.dupe(u8, text);
     for (cmds) |c| {
-        var out = std.ArrayList(u8).init(a);
+        var out = std.ArrayList(u8).empty;
         var i: usize = 0;
         while (i < cur.len) {
             const e = if (std.mem.indexOfScalarPos(u8, cur, i, '\n')) |n| n else cur.len;
             try applyLine(a, c, cur[i..e], &out);
-            if (e < cur.len) try out.append('\n');
+            if (e < cur.len) try out.append(a, '\n');
             i = e + 1;
         }
-        cur = try out.toOwnedSlice();
+        cur = try out.toOwnedSlice(a);
     }
     return cur;
 }

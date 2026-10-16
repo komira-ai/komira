@@ -14,7 +14,7 @@ fn lessThan(_: void, a: []const u8, b: []const u8) bool {
 /// of each line written `timestamp="0"`.
 pub fn normalize(a: A, xml: []const u8, dir: []const u8, name: []const u8) ![]u8 {
     const replaced = if (dir.len == 0) try a.dupe(u8, xml) else try std.mem.replaceOwned(u8, a, xml, dir, name);
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var lines = std.mem.splitScalar(u8, replaced, '\n');
     const key = "timestamp=\"";
     while (lines.next()) |l| {
@@ -25,34 +25,34 @@ pub fn normalize(a: A, xml: []const u8, dir: []const u8, name: []const u8) ![]u8
             var e = at + key.len;
             while (e < l.len and l[e] >= '0' and l[e] <= '9') e += 1;
             if (e < l.len and l[e] == '"') {
-                try out.appendSlice(l[0..at]);
-                try out.appendSlice("timestamp=\"0\"");
-                try out.appendSlice(l[e + 1 ..]);
+                try out.appendSlice(a, l[0..at]);
+                try out.appendSlice(a, "timestamp=\"0\"");
+                try out.appendSlice(a, l[e + 1 ..]);
                 done = true;
             } else from = at + 1;
         }
-        if (!done) try out.appendSlice(l);
-        if (lines.peek() != null) try out.append('\n');
+        if (!done) try out.appendSlice(a, l);
+        if (lines.peek() != null) try out.append(a, '\n');
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// The lines of the `<class ...filename="...<file>">` elements of a Cobertura
 /// report, from the opening line to the closing `</class>`.
 pub fn classLines(a: A, xml: []const u8, file: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var in_class = false;
     const suffix = try std.fmt.allocPrint(a, "/{s}\"", .{file});
     var lines = std.mem.splitScalar(u8, xml, '\n');
     while (lines.next()) |l| {
         if (!in_class and opensClass(l, suffix)) in_class = true;
         if (in_class) {
-            try out.appendSlice(l);
-            try out.append('\n');
+            try out.appendSlice(a, l);
+            try out.append(a, '\n');
             if (std.mem.indexOf(u8, l, "</class>") != null) in_class = false;
         }
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// `<class [^>]*filename="[^"]*/file"`: a `<class ` whose attributes (before
@@ -96,14 +96,14 @@ pub fn lineHits(a: A, class: []const u8, n: usize, zero: bool) !bool {
 /// The 1-based numbers of the lines of `src` holding `/* COV:<kind> */`.
 pub fn markerLines(a: A, src: []const u8, kind: []const u8) ![]usize {
     const m = try std.fmt.allocPrint(a, "/* COV:{s} */", .{kind});
-    var out = std.ArrayList(usize).init(a);
+    var out = std.ArrayList(usize).empty;
     var lines = std.mem.splitScalar(u8, src, '\n');
     var n: usize = 0;
     while (lines.next()) |l| {
         n += 1;
-        if (std.mem.indexOf(u8, l, m) != null) try out.append(n);
+        if (std.mem.indexOf(u8, l, m) != null) try out.append(a, n);
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// The objects an `LD_DEBUG=libs` record initialised: the text after the last
@@ -115,11 +115,11 @@ pub fn inits(a: A, record: []const u8) ![][]const u8 {
     while (lines.next()) |l| {
         if (std.mem.lastIndexOf(u8, l, key)) |at| try set.put(l[at + key.len ..], {});
     }
-    var out = std.ArrayList([]const u8).init(a);
+    var out = std.ArrayList([]const u8).empty;
     var it = set.keyIterator();
-    while (it.next()) |k| try out.append(k.*);
+    while (it.next()) |k| try out.append(a, k.*);
     std.mem.sort([]const u8, out.items, {}, lessThan);
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 fn glibcOutside(path: []const u8, dir: []const u8, decoy: []const u8) bool {
@@ -197,8 +197,8 @@ pub fn dynTagOff(d: []const u8, want: u32) ?usize {
 /// A zip local header and the data of member `name`: compression `method`,
 /// sizes 32-bit, or 0xffffffff with a zip64 extra field holding them.
 pub fn zipMember(a: A, name: []const u8, method: u16, zip64: bool, data: []const u8) ![]u8 {
-    var o = std.ArrayList(u8).init(a);
-    const w = o.writer();
+    var o = std.ArrayList(u8).empty;
+    const w = o.writer(a);
     try w.writeAll(&.{ 0x50, 0x4b, 0x03, 0x04, 0x0a, 0x00, 0x00, 0x00 });
     try w.writeInt(u16, method, .little);
     try w.writeAll(&[_]u8{0} ** 8);
@@ -219,7 +219,7 @@ pub fn zipMember(a: A, name: []const u8, method: u16, zip64: bool, data: []const
         try w.writeInt(u32, 0, .little);
     }
     try w.writeAll(data);
-    return o.toOwnedSlice();
+    return o.toOwnedSlice(a);
 }
 
 /// `ls -ld`'s ten-character mode of a file kind and permission bits.

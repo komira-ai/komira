@@ -29,9 +29,9 @@ test "modelRefusal: the pinned digest passes; any other bytes name both digests"
 }
 
 fn strs(a: std.mem.Allocator, ops: []const T.Op) ![]u8 {
-    var b = std.ArrayList(u8).init(a);
-    for (ops) |op| try b.writer().print("{c}{s}\n", .{ op.sign, op.line });
-    return b.toOwnedSlice();
+    var b = std.ArrayList(u8).empty;
+    for (ops) |op| try b.writer(a).print("{c}{s}\n", .{ op.sign, op.line });
+    return b.toOwnedSlice(a);
 }
 
 fn diffText(a: std.mem.Allocator, have: []const u8, got: []const u8) ![]u8 {

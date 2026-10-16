@@ -23,9 +23,9 @@ fn shim(a: std.mem.Allocator, capture_dir: ?[]const u8, command: []const u8, inp
     try child.stdin.?.writeAll(input);
     child.stdin.?.close();
     child.stdin = null;
-    var out = std.ArrayList(u8).init(a);
-    var err = std.ArrayList(u8).init(a);
-    try child.collectOutput(&out, &err, 1 << 20);
+    var out = std.ArrayList(u8).empty;
+    var err = std.ArrayList(u8).empty;
+    try child.collectOutput(a, &out, &err, 1 << 20);
     const term = try child.wait();
     return .{ .code = switch (term) {
         .Exited => |c| c,

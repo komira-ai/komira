@@ -15,11 +15,11 @@ fn run(a: std.mem.Allocator, name: []const u8, run_id: []const u8, args: []const
     const data = try std.fs.path.join(a, &.{ dir, "data" });
     try std.fs.cwd().makePath(data);
     const id_file = try std.fs.path.join(a, &.{ dir, "run_id" });
-    try std.fs.cwd().writeFile(id_file, run_id);
+    try std.fs.cwd().writeFile(.{ .sub_path = id_file, .data = run_id });
     const out = try std.fs.path.join(a, &.{ dir, "out.json" });
-    var argv = std.ArrayList([]const u8).init(a);
-    try argv.appendSlice(&.{ tool, probe, data, out, id_file });
-    try argv.appendSlice(args);
+    var argv = std.ArrayList([]const u8).empty;
+    try argv.appendSlice(a, &.{ tool, probe, data, out, id_file });
+    try argv.appendSlice(a, args);
     const r = try std.process.Child.run(.{ .allocator = a, .argv = argv.items, .cwd = dir });
     return .{ .r = .{ .code = switch (r.term) {
         .Exited => |c| c,
