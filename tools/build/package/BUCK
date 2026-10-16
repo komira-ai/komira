@@ -33,10 +33,12 @@ zig_test(
         "pack/common.zig",
         "pack/conda_dlopen.zig",
         "pack/conda_lib.zig",
+        "pack/deflate.zig",
+        "pack/deflate_test.zig",
         "pack/readme_link.zig",
     ],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 # The package-format writer (tar, OCI), a static executable, built only
@@ -45,7 +47,7 @@ zig_exe(
     name = "komira_pack",
     exec_compatible_with = LINUX_X86_64,
     src = "pack/komira_pack.zig",
-    unit_tests = [":komira_pack_unit"],
+    unit_tests = [":komira_pack_unit", "komira//tools/build/toolchains:zig_next_version"],
     imports = [
         "pack/common.zig",
         "pack/conda.zig",
@@ -54,11 +56,12 @@ zig_exe(
         "pack/conda_index.zig",
         "pack/conda_lib.zig",
         "pack/conda_meta.zig",
+        "pack/deflate.zig",
         "pack/readme_link.zig",
         "pack/tar_oci.zig",
     ],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 
