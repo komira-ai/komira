@@ -69,14 +69,17 @@ pub fn isRustcLib(rest: []const u8) bool {
 
 pub const Stats = struct { bin: usize = 0, libs: usize = 0, std_entries: usize = 0 };
 
-fn put(dir: std.fs.Dir, f: anytype, rel: []const u8) !void {
+fn put(dir: std.fs.Dir, it: *std.tar.Iterator, f: std.tar.Iterator.File, rel: []const u8) !void {
     if (std.fs.path.dirname(rel)) |d| try dir.makePath(d);
     switch (f.kind) {
         .directory => try dir.makePath(rel),
         .file => {
             const file = try dir.createFile(rel, .{ .mode = modeOf(f.mode) });
             defer file.close();
-            try f.writeAll(file);
+            var wbuf: [64 * 1024]u8 = undefined;
+            var fw = file.writer(&wbuf);
+            try it.streamRemaining(f, &fw.interface);
+            try fw.interface.flush();
             try file.chmod(modeOf(f.mode));
         },
         .sym_link => {
@@ -88,37 +91,37 @@ fn put(dir: std.fs.Dir, f: anytype, rel: []const u8) !void {
 
 /// Takes from the gzipped tar read by `reader` the members of the rustc
 /// release a sysroot keeps, into `out`.
-pub fn takeRustc(out: std.fs.Dir, reader: anytype, lay: Layout, stats: *Stats) !void {
-    var name_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var link_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var it = std.tar.iterator(reader, .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
-    var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+pub fn takeRustc(out: std.fs.Dir, reader: *std.Io.Reader, lay: Layout, stats: *Stats) !void {
+    var name_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var link_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var it = std.tar.Iterator.init(reader, .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
     while (try it.next()) |f| {
         const under = try below(f.name, lay.rustc_prefix) orelse continue;
         if (f.kind == .directory) continue;
         if (std.mem.eql(u8, under, "bin/rustc")) {
             if (f.kind != .file) return error.NotAFile;
-            try put(out, f, "bin/rustc");
+            try put(out, &it, f, "bin/rustc");
             stats.bin += 1;
         } else if (std.mem.startsWith(u8, under, "lib/") and isRustcLib(under["lib/".len..])) {
             const rel = try std.fmt.bufPrint(&buf, "lib/{s}", .{under["lib/".len..]});
-            try put(out, f, rel);
+            try put(out, &it, f, rel);
             stats.libs += 1;
         }
     }
 }
 
 /// Takes the standard library of the rust-std release into `out`.
-pub fn takeStd(out: std.fs.Dir, reader: anytype, lay: Layout, stats: *Stats) !void {
-    var name_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var link_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var it = std.tar.iterator(reader, .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
-    var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+pub fn takeStd(out: std.fs.Dir, reader: *std.Io.Reader, lay: Layout, stats: *Stats) !void {
+    var name_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var link_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var it = std.tar.Iterator.init(reader, .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
     while (try it.next()) |f| {
         const under = try below(f.name, lay.std_prefix) orelse continue;
         if (under.len == 0) continue;
         const rel = try std.fmt.bufPrint(&buf, "{s}/{s}", .{ lay.std_dest, under });
-        try put(out, f, rel);
+        try put(out, &it, f, rel);
         stats.std_entries += 1;
     }
 }
@@ -128,7 +131,7 @@ pub const LibsError = error{Duplicate};
 /// Copies each file of `libs` (the `lib/` of a conda_libs output) into
 /// `out/lib/`; a name already there is a library of rustc's own. On
 /// `error.Duplicate`, `name` is the library.
-pub fn takeLibs(out: std.fs.Dir, libs: std.fs.Dir, name: *[std.fs.MAX_NAME_BYTES]u8, name_len: *usize) !usize {
+pub fn takeLibs(out: std.fs.Dir, libs: std.fs.Dir, name: *[std.fs.max_name_bytes]u8, name_len: *usize) !usize {
     var n: usize = 0;
     var dir = try out.openDir("lib", .{});
     defer dir.close();
@@ -172,9 +175,13 @@ fn die(comptime fmt: []const u8, args: anytype) noreturn {
 fn gunzipped(path: []const u8, comptime body: anytype, ctx: anytype) !void {
     const file = std.fs.cwd().openFile(path, .{}) catch |e| die("cannot open {s}: {s}", .{ path, @errorName(e) });
     defer file.close();
-    var br = std.io.bufferedReader(file.reader());
-    var dec = std.compress.gzip.decompressor(br.reader());
-    try body(ctx, dec.reader());
+    // The sysroot tarballs are pinned (sha256), so the decode is the same on every
+    // run; the streaming (windowed) decoder is used so a 200 MB tar is not held.
+    var rbuf: [64 * 1024]u8 = undefined;
+    var fr = file.reader(&rbuf);
+    var window: [std.compress.flate.max_window_len]u8 = undefined;
+    var dec = std.compress.flate.Decompress.init(&fr.interface, .gzip, &window);
+    body(ctx, &dec.reader) catch |e| return if (e == error.ReadFailed) (dec.err orelse e) else e;
 }
 
 pub fn main() !void {
@@ -201,7 +208,7 @@ pub fn main() !void {
     const Ctx = struct { out: std.fs.Dir, lay: Layout, stats: *Stats };
     const ctx = Ctx{ .out = out, .lay = lay, .stats = &stats };
     try gunzipped(rustc_tar, struct {
-        fn f(c: Ctx, r: anytype) !void {
+        fn f(c: Ctx, r: *std.Io.Reader) !void {
             try takeRustc(c.out, r, c.lay, c.stats);
         }
     }.f, ctx);
@@ -209,7 +216,7 @@ pub fn main() !void {
     const libs_lib = try std.fs.path.join(a, &.{ libs_path, "lib" });
     var libs = std.fs.cwd().openDir(libs_lib, .{ .iterate = true }) catch |e| die("cannot open {s}: {s}", .{ libs_lib, @errorName(e) });
     defer libs.close();
-    var dup_name: [std.fs.MAX_NAME_BYTES]u8 = undefined;
+    var dup_name: [std.fs.max_name_bytes]u8 = undefined;
     var dup_len: usize = 0;
     stats.libs += takeLibs(out, libs, &dup_name, &dup_len) catch |e| switch (e) {
         error.Duplicate => die("REFUSING: {s} is both a rustc library and in libs", .{dup_name[0..dup_len]}),
@@ -217,7 +224,7 @@ pub fn main() !void {
     };
 
     try gunzipped(std_tar, struct {
-        fn f(c: Ctx, r: anytype) !void {
+        fn f(c: Ctx, r: *std.Io.Reader) !void {
             try takeStd(c.out, r, c.lay, c.stats);
         }
     }.f, ctx);

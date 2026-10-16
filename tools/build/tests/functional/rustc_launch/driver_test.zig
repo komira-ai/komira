@@ -80,9 +80,9 @@ const Case = struct {
         try env.put("RUSTFLAGS", "-Cprefer-dynamic");
         try env.put("RUSTC_BOOTSTRAP", "1");
         try env.put("KEPT", "kept-value");
-        var argv = std.ArrayList([]const u8).init(al);
-        try argv.append(tools.launch);
-        try argv.appendSlice(args);
+        var argv = std.ArrayList([]const u8).empty;
+        try argv.append(al, tools.launch);
+        try argv.appendSlice(al, args);
         const r = try std.process.Child.run(.{ .allocator = al, .argv = argv.items, .cwd = self.cwd, .env_map = &env });
         self.exit = switch (r.term) {
             .Exited => |c| c,

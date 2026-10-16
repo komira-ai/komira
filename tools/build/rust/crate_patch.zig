@@ -48,17 +48,17 @@ pub const Diag = struct {
 pub fn replaceAll(a: std.mem.Allocator, text: []const u8, from: []const u8, to: []const u8, n: *usize) ![]u8 {
     n.* = 0;
     if (from.len == 0) return error.EmptyPattern;
-    var out = std.ArrayList(u8).init(a);
-    errdefer out.deinit();
+    var out = std.ArrayList(u8).empty;
+    errdefer out.deinit(a);
     var i: usize = 0;
     while (std.mem.indexOfPos(u8, text, i, from)) |at| {
-        try out.appendSlice(text[i..at]);
-        try out.appendSlice(to);
+        try out.appendSlice(a, text[i..at]);
+        try out.appendSlice(a, to);
         i = at + from.len;
         n.* += 1;
     }
-    try out.appendSlice(text[i..]);
-    return out.toOwnedSlice();
+    try out.appendSlice(a, text[i..]);
+    return out.toOwnedSlice(a);
 }
 
 /// A relative path with no `..`, no leading `/` and no empty or `.` part.
@@ -82,13 +82,13 @@ fn copyFile(a: std.mem.Allocator, src: std.fs.Dir, dst: std.fs.Dir, name: []cons
             return error.WrongMatchCount;
         }
     }
-    try dst.writeFile(name, data);
+    try dst.writeFile(.{ .sub_path = name, .data = data });
 }
 
 fn copyTree(a: std.mem.Allocator, src: std.fs.Dir, dst: std.fs.Dir, spec: Spec, prefix: []const u8, diag: *Diag) !void {
-    var names = std.ArrayList(std.fs.Dir.Entry).init(a);
+    var names = std.ArrayList(std.fs.Dir.Entry).empty;
     var it = src.iterate();
-    while (try it.next()) |e| try names.append(.{ .name = try a.dupe(u8, e.name), .kind = e.kind });
+    while (try it.next()) |e| try names.append(a, .{ .name = try a.dupe(u8, e.name), .kind = e.kind });
     // Directory order is the file system's; sort so the work is deterministic.
     std.mem.sort(std.fs.Dir.Entry, names.items, {}, struct {
         fn less(_: void, x: std.fs.Dir.Entry, y: std.fs.Dir.Entry) bool {
@@ -157,7 +157,7 @@ pub fn patchTree(a: std.mem.Allocator, in: std.fs.Dir, out: std.fs.Dir, spec: Sp
             return error.AddCollides;
         } else |_| {}
         if (std.fs.path.dirname(f.file)) |d| try out.makePath(d);
-        try out.writeFile(f.file, f.content);
+        try out.writeFile(.{ .sub_path = f.file, .data = f.content });
     }
 }
 
@@ -225,10 +225,10 @@ test "safeRel refuses escapes" {
 fn fixture(tmp: *std.testing.TmpDir) !void {
     try tmp.dir.makePath("in/src/sub");
     try tmp.dir.makePath("in/other");
-    try tmp.dir.writeFile("in/src/lib.rs", "include!(concat!(env!(\"OUT_DIR\"), \"/g.rs\"));\n");
-    try tmp.dir.writeFile("in/src/sub/m.rs", "A A\n");
-    try tmp.dir.writeFile("in/other/skip.rs", "not copied");
-    try tmp.dir.writeFile("in/Cargo.toml", "[package]\n");
+    try tmp.dir.writeFile(.{ .sub_path = "in/src/lib.rs", .data = "include!(concat!(env!(\"OUT_DIR\"), \"/g.rs\"));\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "in/src/sub/m.rs", .data = "A A\n" });
+    try tmp.dir.writeFile(.{ .sub_path = "in/other/skip.rs", .data = "not copied" });
+    try tmp.dir.writeFile(.{ .sub_path = "in/Cargo.toml", .data = "[package]\n" });
     try tmp.dir.makePath("out");
 }
 

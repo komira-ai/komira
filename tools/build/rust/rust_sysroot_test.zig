@@ -30,7 +30,7 @@ fn octal(buf: []u8, v: u64) void {
 }
 
 pub fn tar(a: std.mem.Allocator, entries: []const Entry) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     for (entries) |e| {
         var h = [_]u8{0} ** 512;
         // A name over 100 bytes is split at a `/` into the ustar prefix field and the name.
@@ -61,33 +61,33 @@ pub fn tar(a: std.mem.Allocator, entries: []const Entry) ![]u8 {
         octal(h[148..155], sum);
         h[154] = 0;
         h[155] = ' ';
-        try out.appendSlice(&h);
-        try out.appendSlice(e.data);
+        try out.appendSlice(a, &h);
+        try out.appendSlice(a, e.data);
         const pad = (512 - e.data.len % 512) % 512;
-        try out.appendNTimes(0, pad);
+        try out.appendNTimes(a, 0, pad);
     }
-    try out.appendNTimes(0, 1024);
-    return out.toOwnedSlice();
+    try out.appendNTimes(a, 0, 1024);
+    return out.toOwnedSlice(a);
 }
 
 /// A gzip stream of `bytes` in stored (uncompressed) deflate blocks.
 pub fn gzip(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
-    try out.appendSlice(&.{ 0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3 });
+    var out = std.ArrayList(u8).empty;
+    try out.appendSlice(a, &.{ 0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3 });
     var off: usize = 0;
     while (true) {
         const n = @min(bytes.len - off, 65535);
         const last = off + n == bytes.len;
-        try out.append(if (last) 1 else 0);
-        try out.writer().writeInt(u16, @intCast(n), .little);
-        try out.writer().writeInt(u16, @intCast(~@as(u16, @intCast(n))), .little);
-        try out.appendSlice(bytes[off .. off + n]);
+        try out.append(a, if (last) 1 else 0);
+        try out.writer(a).writeInt(u16, @intCast(n), .little);
+        try out.writer(a).writeInt(u16, @intCast(~@as(u16, @intCast(n))), .little);
+        try out.appendSlice(a, bytes[off .. off + n]);
         off += n;
         if (last) break;
     }
-    try out.writer().writeInt(u32, std.hash.Crc32.hash(bytes), .little);
-    try out.writer().writeInt(u32, @intCast(bytes.len), .little);
-    return out.toOwnedSlice();
+    try out.writer(a).writeInt(u32, std.hash.Crc32.hash(bytes), .little);
+    try out.writer(a).writeInt(u32, @intCast(bytes.len), .little);
+    return out.toOwnedSlice(a);
 }
 
 fn gz(a: std.mem.Allocator, entries: []const Entry) ![]u8 {
@@ -164,11 +164,21 @@ fn rustcArchive(a: std.mem.Allocator) ![]u8 {
     });
 }
 
+/// `gz` inflated with no window buffer (the windowed decoder of this release
+/// mishandles a fixed-Huffman match at the end of its window).
+fn gunzip(a: std.mem.Allocator, data: []const u8) ![]u8 {
+    var in: std.Io.Reader = .fixed(data);
+    var dec = std.compress.flate.Decompress.init(&in, .gzip, &.{});
+    var out = std.Io.Writer.Allocating.init(a);
+    _ = try dec.reader.streamRemaining(&out.writer);
+    return out.written();
+}
+
 fn takeRustcFrom(out: std.fs.Dir, a: std.mem.Allocator, bytes: []const u8) !S.Stats {
-    var fbs = std.io.fixedBufferStream(bytes);
-    var dec = std.compress.gzip.decompressor(fbs.reader());
+    const raw = try gunzip(a, bytes);
+    var rd: std.Io.Reader = .fixed(raw);
     var stats = S.Stats{};
-    try S.takeRustc(out, dec.reader(), try lay(a), &stats);
+    try S.takeRustc(out, &rd, try lay(a), &stats);
     return stats;
 }
 
@@ -231,10 +241,10 @@ fn stdArchive(a: std.mem.Allocator) ![]u8 {
 }
 
 fn takeStdFrom(out: std.fs.Dir, a: std.mem.Allocator, bytes: []const u8) !S.Stats {
-    var fbs = std.io.fixedBufferStream(bytes);
-    var dec = std.compress.gzip.decompressor(fbs.reader());
+    const raw = try gunzip(a, bytes);
+    var rd: std.Io.Reader = .fixed(raw);
     var stats = S.Stats{};
-    try S.takeStd(out, dec.reader(), try lay(a), &stats);
+    try S.takeStd(out, &rd, try lay(a), &stats);
     return stats;
 }
 
@@ -274,7 +284,7 @@ test "takeLibs: copies each library into lib/; a name rustc already has is refus
     defer out.close();
     var libs = try tmp.dir.openDir("libs", .{ .iterate = true });
     defer libs.close();
-    var name: [std.fs.MAX_NAME_BYTES]u8 = undefined;
+    var name: [std.fs.max_name_bytes]u8 = undefined;
     var len: usize = 0;
     try t.expectEqual(@as(usize, 2), try S.takeLibs(out, libs, &name, &len));
     try expectFile(out, "lib/libgcc_s.so.1", "gcc");
