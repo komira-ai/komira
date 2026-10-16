@@ -21,6 +21,24 @@
 #       raise is after a join (tid 0 finished), and when a thread failed to
 #       start AND a started body raised, the start failure is the one reported.
 #
+# Nothing may allocate new address space while the limit is low. The allocator
+# (tcmalloc) maps 1 GiB-aligned regions, which can never fit in the headroom,
+# so a small allocation that is not served from memory the allocator already
+# holds aborts the process. What could need fresh memory under the limit is
+# the work spawn_join and this file do while it is low: the two lists in
+# spawn_join, the formatted error text, `String(e)`, and the allocator state of
+# the CPU the work runs on. This file makes each of those a reuse:
+#   * main() pins the process (so every thread it starts) to the CPU it is on,
+#     so there is one CPU whose allocator caches matter;
+#   * `_prewarm_heap` allocates and frees objects of every small size class on
+#     that CPU, leaving them in the allocator's caches;
+#   * the warm-up thread of the second test raises through the same path as
+#     the measured one, so a thread's exit/error path is warm as well;
+#   * the thread body's error text ("fault 0") fits String's inline storage and
+#     never allocates.
+# The limit is restored right after spawn_join returns, before any print or
+# assertion.
+#
 # macOS does not bound mmap by RLIMIT_AS, so there the tests print SKIP and
 # say why.
 # =============================================================================
@@ -66,6 +84,66 @@ struct _Body[o: MutOrigin](SpawnJoinBody):
             _ = self.tally[].finished.fetch_add(Int64(1))
             raise Error("fault " + String(tid))
         _ = self.tally[].finished.fetch_add(Int64(1))
+
+
+comptime _CPU_MASK_WORDS = 256  # 16384 CPUs
+
+
+def _pin_to_current_cpu() raises -> InlineArray[UInt64, _CPU_MASK_WORDS]:
+    """Restrict the process to the CPU it runs on; returns the old affinity
+    mask so the caller can restore it. Threads started later inherit it."""
+    var old = InlineArray[UInt64, _CPU_MASK_WORDS](fill=UInt64(0))
+    var one = InlineArray[UInt64, _CPU_MASK_WORDS](fill=UInt64(0))
+    var cpu = Int(external_call["sched_getcpu", Int32]())
+    if cpu < 0 or cpu >= _CPU_MASK_WORDS * 64:
+        raise Error("sched_getcpu failed or CPU index out of range")
+    one[cpu // 64] = UInt64(1) << UInt64(cpu % 64)
+    # SAFETY: `old` is a local mask of the size passed; the call fills it
+    # synchronously.
+    var rc = external_call["sched_getaffinity", Int32](
+        Int32(0), UInt64(_CPU_MASK_WORDS * 8), old.unsafe_ptr()
+    )
+    if rc != Int32(0):
+        raise Error("sched_getaffinity failed")
+    # SAFETY: `one` is a local mask of the size passed; read synchronously.
+    rc = external_call["sched_setaffinity", Int32](
+        Int32(0), UInt64(_CPU_MASK_WORDS * 8), one.unsafe_ptr()
+    )
+    if rc != Int32(0):
+        raise Error("sched_setaffinity failed")
+    return old^
+
+
+def _restore_affinity(mask: InlineArray[UInt64, _CPU_MASK_WORDS]):
+    # SAFETY: `mask` is a local mask of the size passed; read synchronously.
+    _ = external_call["sched_setaffinity", Int32](
+        Int32(0), UInt64(_CPU_MASK_WORDS * 8), mask.unsafe_ptr()
+    )
+
+
+def _prewarm_heap() raises:
+    """Allocate and free 16 objects of every size class up to 2 KiB, and build
+    and drop the strings the failure path builds, so the allocator holds
+    memory for them and takes none from the system under the limit."""
+    var held = List[List[UInt8]]()
+    var size = 16
+    while size <= 2048:
+        for _ in range(16):
+            held.append(List[UInt8](length=size, fill=UInt8(0)))
+        size += 16
+    held.clear()
+    for started in range(4):
+        for n in range(1, 5):
+            var text = (
+                "spawn_join: pthread_create failed (rc="
+                + String(11)
+                + "), started "
+                + String(started)
+                + " of "
+                + String(n)
+            )
+            var copy = String(Error(text))
+            assert_true(copy.byte_length() > 0, "prewarm text")
 
 
 def _mapped_bytes() raises -> UInt64:
@@ -118,6 +196,7 @@ def _check_start_failure(msg: String, started: Int, n: Int) raises:
 
 
 def test_first_thread_cannot_start() raises:
+    _prewarm_heap()
     var tally = _Tally()
     var body = _Body(Pointer(to=tally), -1)
     var msg = _spawn_join_under_limit(body, 2)
@@ -127,11 +206,18 @@ def test_first_thread_cannot_start() raises:
 
 
 def test_second_thread_cannot_start_and_the_first_is_joined() raises:
-    # One thread runs and exits; its stack stays cached for the next one.
+    # One thread runs, raises and exits; its stack stays cached for the next
+    # one, and its error path has run once.
     var warm_tally = _Tally()
-    var warm = _Body(Pointer(to=warm_tally), -1)
-    spawn_join(warm, 1)
+    var warm = _Body(Pointer(to=warm_tally), 0)
+    var warm_msg = String("")
+    try:
+        spawn_join(warm, 1)
+    except e:
+        warm_msg = String(e)
+    assert_equal(warm_msg, "fault 0", "the warm-up body raised")
     assert_equal(warm_tally.runs.load(), Int64(1), "the warm-up ran")
+    _prewarm_heap()
 
     var tally = _Tally()
     var body = _Body(Pointer(to=tally), 0)
@@ -148,8 +234,10 @@ def main() raises:
     print("test_spawn_join_start_failure")
     print("=============================")
     comptime if CompilationTarget.is_linux():
+        var affinity = _pin_to_current_cpu()
         test_first_thread_cannot_start()
         test_second_thread_cannot_start_and_the_first_is_joined()
+        _restore_affinity(affinity)
     else:
         print("  SKIP: RLIMIT_AS does not bound thread stacks off Linux")
     print()
