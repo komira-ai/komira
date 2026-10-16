@@ -37,19 +37,18 @@ PATH="$T/bin"; export PATH
 
 def _zig_dist_impl(ctx):
     bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
-    out = ctx.actions.declare_output("zig", dir = True)
-    script = _PRELUDE + """
-mkdir -p "$2.x"
-tar -xJf "$1" -C "$2.x"
-mv "$2.x/$3" "$2"
-rm -rf "$2.x" "$T"
-test -x "$2/zig"
-"""
+    if "/" in ctx.attrs.strip_prefix:
+        fail("{}: strip_prefix {} is not one directory name".format(ctx.label, repr(ctx.attrs.strip_prefix)))
+    # The archive unpacks into a directory named `strip_prefix`: the busybox
+    # tar applet (no shell) extracts into the parent of an output declared
+    # with that name (a wrong prefix leaves it missing), and the toolchain is
+    # that directory under the name `zig`.
+    raw = ctx.actions.declare_output(ctx.attrs.strip_prefix, dir = True)
     ctx.actions.run(
-        busybox_sh(bb, script, ctx.attrs.archive[DefaultInfo].default_outputs[0], out.as_output(), ctx.attrs.strip_prefix),
+        cmd_args(bb, "tar", "-xJf", ctx.attrs.archive[DefaultInfo].default_outputs[0], "-C", cmd_args(raw.as_output(), parent = 1)),
         category = "zig_unpack",
     )
-    return [DefaultInfo(default_output = out)]
+    return [DefaultInfo(default_output = ctx.actions.copy_dir("zig", raw))]
 
 zig_dist_rule = rule(
     impl = _zig_dist_impl,
@@ -522,25 +521,13 @@ conda_libs_rule = rule(
 )
 
 def _mojo_runtime_impl(ctx):
-    bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
     compiler = ctx.attrs.compiler[DefaultInfo].default_outputs[0]
     out = ctx.actions.declare_output("lib", dir = True)
     # Copies each named library out of the unpacked compiler's lib/ into one
-    # flat directory, and refuses a name that is missing or empty there.
-    script = _PRELUDE + """
-SRC="$1"; OUT="$2"; shift 2
-mkdir -p "$OUT"
-for lib in "$@"; do
-    if [ ! -s "$SRC/lib/$lib" ]; then
-        echo "mojo_runtime: REFUSING: lib/$lib is missing or empty in the compiler closure" >&2
-        exit 2
-    fi
-    cp "$SRC/lib/$lib" "$OUT/$lib"
-done
-rm -rf "$T"
-"""
+    # flat directory, and refuses a name that is missing or empty there
+    # (`act copy-libs`, tools/build/mojo/tools/act.zig).
     ctx.actions.run(
-        busybox_sh(bb, script, compiler, out.as_output(), ctx.attrs.libs),
+        cmd_args(ctx.attrs._act[RunInfo], "copy-libs", compiler, out.as_output(), ctx.attrs.libs),
         category = "mojo_runtime",
     )
     return [DefaultInfo(default_output = out)]
@@ -550,10 +537,12 @@ rm -rf "$T"
 mojo_runtime_rule = rule(
     impl = _mojo_runtime_impl,
     attrs = {
+        # Unused: kept so the toolchain BUCK files that pass it still load.
         "busybox": attrs.exec_dep(),
         "compiler": attrs.dep(),
         # File names under the compiler's lib/.
         "libs": attrs.list(attrs.string()),
+        "_act": attrs.exec_dep(default = "komira//tools/build/mojo:act"),
     },
 )
 
@@ -570,8 +559,7 @@ def _mojo_toolchain_impl(ctx):
             watchdog_idle_secs = ctx.attrs.watchdog_idle_secs,
             watchdog_sample_secs = ctx.attrs.watchdog_sample_secs,
             gate = ctx.attrs._gate[DefaultInfo].default_outputs[0],
-            run_check = ctx.attrs._run_check[DefaultInfo].default_outputs[0],
-            launcher = ctx.attrs._launcher[DefaultInfo].default_outputs[0],
+            act = ctx.attrs._act[DefaultInfo].default_outputs[0],
             runtime = ctx.attrs.runtime[DefaultInfo].default_outputs[0],
         ),
     ]
@@ -599,14 +587,11 @@ mojo_toolchain_rule = rule(
         # The gate (tools/build/run): runs every gated test and mutation
         # step. An exec dep: it runs in the actions, on the execution platform.
         "_gate": attrs.exec_dep(default = "komira//tools/build/run:gate"),
-        "_launcher": attrs.dep(default = "komira//tools/build/mojo:launch.sh"),
-        "_run_check": attrs.dep(default = "komira//tools/build/mojo:run_check.sh"),
+        "_act": attrs.exec_dep(default = "komira//tools/build/mojo:act"),
         # The lint of every script the Mojo rules run (tools/build/lint): a
         # validation, so no Mojo target builds while one of them has a
         # finding. Not an input of any action.
         "_script_lint": attrs.list(attrs.dep(), default = [
-            "komira//tools/build/lint:shell_lint",
-            "komira//tools/build/mojo:shell_lint",
             "komira//tools/build/mojo/darwin:shell_lint",
         ]),
         # The compile wrapper (tools/mojo_compile.zig), an executable built

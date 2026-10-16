@@ -1,0 +1,30 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# The process behaviour of `pkg_act` (tools/build/package/act): each subcommand
+# over real files and a stand-in child (probe.zig), by exit status, stderr and
+# the bytes it writes. A driver test: pkg_act is a built tool it runs by
+# absolute path. The unit tests of its checks are tools/build/package:pkg_act_unit;
+# every mojo_bundle, conda_package, oci_image and release-set check of the
+# repository runs through it too.
+
+zig_exe(
+    name = "probe",
+    exec_compatible_with = LINUX_X86_64,
+    src = "probe.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_test(
+    name = "driver",
+    exec_compatible_with = LINUX_X86_64,
+    exec_tools = {
+        "PKG_ACT": "komira//tools/build/package:pkg_act",
+        "PROBE": ":probe",
+    },
+    src = "driver_test.zig",
+    deps = ["tests//functional/driver_kit:driver_kit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)

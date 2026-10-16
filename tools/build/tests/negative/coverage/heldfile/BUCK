@@ -33,6 +33,5 @@ cov_report_check(
     ],
     mode = "result",
     reports = [":covfile[coverage][gate][result]"],
-    script = "//functional/coverage:report.sh",
     visibility = ["//negative/coverage:greens"],
 )

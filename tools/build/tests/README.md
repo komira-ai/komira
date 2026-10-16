@@ -625,7 +625,8 @@ shell lints through `//:tests_lints` in the root [`BUCK`](../../../BUCK),
 because `//...` does not reach into another cell.
 [`lint_weld.sh`](negative/lint_weld.sh) requires the `_script_lint` lists of the Mojo
 and Rust toolchains ([`mojo/toolchain.bzl`](../mojo/toolchain.bzl),
-[`rust/defs.bzl`](../rust/defs.bzl)) to equal the lists it pins, so a lint
+[`rust/defs.bzl`](../rust/defs.bzl); the Rust rules run no script, so that list is
+empty) to equal the lists it pins, so a lint
 dropped from a toolchain fails it; for each lint target on them it plants
 an unused variable (SC2034) in one of that target's scripts, alone, in a
 snapshot of the tree, and requires the build of

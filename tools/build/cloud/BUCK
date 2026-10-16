@@ -1,0 +1,26 @@
+# aws_act (aws_act.zig): the action of the `mojo_aws_client` generation rule
+# (aws.bzl) in place of its busybox script. Built behind its unit tests; its
+# process cases are tests//functional/aws_act.
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+zig_test(
+    name = "aws_act_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "aws_act_test.zig",
+    imports = ["aws_act.zig"],
+    deps = ["//tools/build/act_util:act_util"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "aws_act",
+    exec_compatible_with = LINUX_X86_64,
+    src = "aws_act.zig",
+    deps = ["//tools/build/act_util:act_util"],
+    unit_tests = [":aws_act_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)

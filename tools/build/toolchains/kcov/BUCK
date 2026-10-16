@@ -1,9 +1,8 @@
 # kcov v42 built from source with the pinned zig (README.md): the line
 # coverage tool of the Mojo coverage variant. linux-x86_64 only
 # (limits.tsv `coverage-linux-x86-64`).
-load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
-load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs", "row")
 load("@komira//tools/build/toolchains/loader_closure:defs.bzl", "loader_closure_check")
@@ -45,6 +44,51 @@ zig_exe(
     zig = "komira//tools/build/toolchains:zig",
 )
 
+# kcov built from source (kcov_build.zig), behind its unit tests.
+zig_test(
+    name = "kcov_build_unit",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    imports = ["kcov_build.zig"],
+    src = "kcov_build_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "kcov_build",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    src = "kcov_build.zig",
+    unit_tests = [":kcov_build_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+# The checks of kcov (kcov_check.zig), behind their unit tests.
+zig_test(
+    name = "kcov_check_unit",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    imports = ["kcov_check.zig", "kcov_check_scan.zig"],
+    src = "kcov_check_test.zig",
+    deps = ["//tools/build/mojo:unified_diff"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_exe(
+    name = "kcov_check_bin",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    imports = ["kcov_check_scan.zig"],
+    src = "kcov_check.zig",
+    deps = ["//tools/build/mojo:unified_diff"],
+    unit_tests = [":kcov_check_unit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
 # DT_RUNPATH -> DT_RPATH, which zig 0.12 cannot link into an executable.
 zig_exe(
     name = "elf_rpath",
@@ -70,7 +114,6 @@ _DIST = dict(
         "zlib": _PIN["kcov_zlib"],
         "zstd": _PIN["kcov_zstd"],
     },
-    script = "kcov_build.sh",
     shim = [
         "shim/curl/curl.h",
         "shim/curl_shim.c",
@@ -114,7 +157,6 @@ kcov_check(
         "fixtures/cov_part.c",
     ],
     kcov = ":kcov_dist",
-    script = "kcov_check.sh",
     strip_prefix = "kcov-42",
     version = "v42",
     zig_triple = _TRIPLE,
@@ -145,7 +187,6 @@ kcov_check_cases(
         "fixtures/rpath_lib.c",
         "fixtures/rpath_main.c",
     ],
-    script = "kcov_check.sh",
     zig_triple = _TRIPLE,
 )
 
@@ -157,7 +198,6 @@ kcov_same(
     target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
     a = ":kcov_dist",
     b = ":kcov_dist_again",
-    script = "kcov_check.sh",
 )
 
 # bin/kcov is what the package guard refuses (tools/build/package/kcov_guard.bzl):
@@ -168,17 +208,8 @@ kcov_identity(
     exec_compatible_with = LINUX_X86_64,
     target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
     kcov = ":kcov_dist",
-    script = "kcov_check.sh",
     sha256 = KCOV_BIN_SHA256,
     usage_line = KCOV_USAGE_LINE,
-)
-
-shell_lint(
-    name = "shell_lint",
-    srcs = [
-        "kcov_build.sh",
-        "kcov_check.sh",
-    ],
 )
 
 # ---- What other targets use ----------------------------------------------------
@@ -193,7 +224,6 @@ kcov_tool(
         ":kcov_closure",
         ":kcov_identity",
         ":kcov_reproducible",
-        ":shell_lint",
     ],
     dist = ":kcov_dist",
     visibility = ["PUBLIC"],

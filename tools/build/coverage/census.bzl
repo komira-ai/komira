@@ -15,7 +15,7 @@ actions:
   and `[held]`. It fails the build while a package the census measured at
   the target (policy.bzl's COVERAGE_TARGET_BP) on a metric does not hold
   it, naming each: a package that reached 99% stays held there.
-- `census.sh check` renders the doc (the ranked table, `<name>.md`), the
+- `census_render check` (census_render.zig) renders the doc (the ranked table, `<name>.md`), the
   target's default output: `./buck2 build //:coverage_census --show-output`.
   The doc is a build output and is never committed, so a change to one
   package's coverage touches nothing outside its directory. It fails the
@@ -41,7 +41,6 @@ def _census_files(ctx):
 def _coverage_census_impl(ctx):
     if (ctx.attrs.files == None) == (ctx.attrs.tree == None):
         fail("{}: give exactly one of `tree` and `files`".format(ctx.label.raw_target()))
-    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     staged = ctx.actions.copied_dir("packages", _census_files(ctx))
     census = ctx.actions.declare_output("assembled/census.tsv")
     held = ctx.actions.declare_output("assembled/held.tsv")
@@ -52,7 +51,7 @@ def _coverage_census_impl(ctx):
     doc = ctx.actions.declare_output(ctx.label.name + ".md")
     checked = ctx.actions.declare_output("check/validation.json")
     ctx.actions.run(
-        cmd_args(bb, "sh", ctx.attrs._script, "check", bb, str(COVERAGE_TARGET_BP), census, held, checked.as_output(), doc.as_output()),
+        cmd_args(ctx.attrs._render[RunInfo], "check", str(COVERAGE_TARGET_BP), census, held, checked.as_output(), doc.as_output()),
         category = "coverage_census",
     )
     result = ctx.actions.copy_file("validation.json", checked)
@@ -71,9 +70,8 @@ _coverage_census_rule = rule(
     attrs = {
         "files": attrs.option(attrs.dict(attrs.string(), attrs.source()), default = None, doc = "A fixture's files, {repository path: file}, instead of `tree`."),
         "tree": attrs.option(attrs.dep(providers = [DocTreeInfo]), default = None, doc = "The root package's doc_tree: every file of the cell."),
-        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
         "_census_files": attrs.exec_dep(providers = [RunInfo], default = "komira//tools/build/coverage:census_files"),
-        "_script": attrs.source(default = "komira//tools/build/coverage:census.sh"),
+        "_render": attrs.exec_dep(providers = [RunInfo], default = "komira//tools/build/coverage:census_render"),
     },
 )
 

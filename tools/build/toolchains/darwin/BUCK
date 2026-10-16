@@ -1,6 +1,6 @@
 load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64", "darwin_macos_hosts")
 load("@komira//tools/build/platforms:table.bzl", "os_floor_version", "pinned_kwargs", "row")
-load("@komira//tools/build/mojo:darwin.bzl", "dyld_script", "mojo_darwin_toolchain")
+load("@komira//tools/build/mojo:darwin.bzl", "mojo_darwin_toolchain")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "conda_closure", "mojo_runtime")
 
@@ -61,21 +61,6 @@ mojo_runtime(
     visibility = ["PUBLIC"],
 )
 
-# MojoToolchainInfo requires a `launcher` (launch.sh: starts a built binary
-# from outside its runnable directory, pointing the loader at the compiler's
-# lib/). No rule in this repository consumes it yet, on either platform; the
-# macOS toolchain carries the macOS form, DYLD_LIBRARY_PATH instead of
-# LD_LIBRARY_PATH, so that the field is right wherever it is read. Nothing
-# builds it unless asked (functional/darwin/check.sh does).
-dyld_script(
-    name = "launcher",
-    exec_compatible_with = LINUX_X86_64,
-    busybox = "komira//tools/build/toolchains:busybox",
-    prelude = "komira//tools/build/mojo/darwin:dyld_prelude.sh",
-    src = "komira//tools/build/mojo:launch.sh",
-    target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-launcher
-)
-
 # The toolchain of darwin-arm64 targets (selected by toolchains//:mojo).
 mojo_darwin_toolchain(
     name = "mojo",
@@ -86,7 +71,6 @@ mojo_darwin_toolchain(
     # Matches the compiler's own minimum OS.
     deployment_target = os_floor_version("darwin-arm64"),
     gate = "komira//tools/build/run:gate_darwin",
-    launcher = ":launcher",
     # The host identities a compile may run on (`[komira_re] darwin_macos_hosts`
     # of the root cell; see DARWIN_HOSTS_KEY in platforms/defs.bzl). Unset,
     # analysing this toolchain for darwin-arm64 fails naming that key; nothing

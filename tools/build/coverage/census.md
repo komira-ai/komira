@@ -53,7 +53,7 @@ names. Two build actions:
    for the metric, keeps it from reaching it; a library with no executable
    line (0/0: its sources are all generated) neither reaches nor keeps it
    from reaching. This check reads committed data only, so it cannot flake.
-2. `census.sh check` writes the doc, the target's default output, and is a
+2. `census_render check` writes the doc, the target's default output, and is a
    validation: a census `render` refuses (a malformed row, a library's row
    twice) fails the build.
 

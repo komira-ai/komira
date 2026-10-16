@@ -37,7 +37,6 @@ conda_libs(
 rust_sysroot(
     name = "unchecked_sysroot",
     exec_compatible_with = LINUX_X86_64,
-    busybox = "komira//tools/build/toolchains:busybox",
     libs = ":rustc_libs",
     rust_std = ":rust-std-1.99.0-x86_64-unknown-linux-gnu.tar.gz",
     rustc = ":rustc-1.99.0-x86_64-unknown-linux-gnu.tar.gz",

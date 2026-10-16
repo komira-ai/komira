@@ -1,0 +1,29 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# The process behaviour of `act` (tools/build/mojo/tools/act.zig): copy, cat
+# and run-check over real files and a stand-in binary (probe.zig). A driver
+# test: act is a built tool it runs by absolute path. The unit tests of act's
+# pure parts are in tools/build/mojo; every Mojo library's join and every
+# [run_check] runs through it too.
+
+zig_exe(
+    name = "probe",
+    exec_compatible_with = LINUX_X86_64,
+    src = "probe.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_test(
+    name = "driver",
+    exec_compatible_with = LINUX_X86_64,
+    exec_tools = {
+        "ACT": "komira//tools/build/mojo:act",
+        "BUSYBOX": "komira//tools/build/toolchains:busybox",
+        "PROBE": ":probe",
+    },
+    src = "driver_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)

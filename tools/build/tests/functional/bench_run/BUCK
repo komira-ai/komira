@@ -1,0 +1,26 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# The process behaviour of bench_run (the action of udf_bench) over real
+# directories and a stand-in for the bench program (probe.zig). A driver test:
+# bench_run is a built tool it runs by absolute path.
+
+zig_exe(
+    name = "probe",
+    exec_compatible_with = LINUX_X86_64,
+    src = "probe.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)
+
+zig_test(
+    name = "driver",
+    exec_compatible_with = LINUX_X86_64,
+    exec_tools = {
+        "BENCH_RUN": "komira//src/tests/helpers/komira_udf_spike_node_worker:bench_run",
+        "PROBE": ":probe",
+    },
+    src = "driver_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig",
+)

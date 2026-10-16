@@ -62,6 +62,25 @@ pixi_pin_record(
 # The linux pin runs and reports the release its URL names. A remote linux
 # action, so `./buck2 build //...` fails when the bytes are not that release.
 # The macOS pin is checked by its sha256 only: no linux worker can run it.
+zig_test(
+    name = "version_check_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["version_check.zig"],
+    src = "version_check_test.zig",
+    busybox = ":busybox",
+    zig = ":zig",
+)
+
+zig_exe(
+    name = "version_check",
+    exec_compatible_with = LINUX_X86_64,
+    src = "version_check.zig",
+    unit_tests = [":version_check_unit"],
+    busybox = ":busybox",
+    zig = ":zig",
+    visibility = ["PUBLIC"],
+)
+
 pixi_version_check(
     name = "pixi_version",
     exec_compatible_with = LINUX_X86_64,
