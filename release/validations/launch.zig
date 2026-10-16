@@ -29,12 +29,12 @@ pub fn names(args: []const []const u8, flag: []const u8) bool {
 /// `args` and the defaults it lacks. `scratch` makes the scratch directory, and
 /// is called only when the arguments name none.
 pub fn withDefaults(a: A, args: []const []const u8, scratch: anytype) ![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(a);
-    try out.appendSlice(args);
-    if (!names(args, "--run-id")) try out.appendSlice(&.{ "--run-id", "local" });
-    if (!names(args, "--attempt")) try out.appendSlice(&.{ "--attempt", "1" });
-    if (!names(args, "--scratch-dir")) try out.appendSlice(&.{ "--scratch-dir", try scratch.make(a) });
-    return out.toOwnedSlice();
+    var out = std.ArrayList([]const u8).empty;
+    try out.appendSlice(a, args);
+    if (!names(args, "--run-id")) try out.appendSlice(a, &.{ "--run-id", "local" });
+    if (!names(args, "--attempt")) try out.appendSlice(a, &.{ "--attempt", "1" });
+    if (!names(args, "--scratch-dir")) try out.appendSlice(a, &.{ "--scratch-dir", try scratch.make(a) });
+    return out.toOwnedSlice(a);
 }
 
 /// A fresh, private directory under $TMPDIR (else /tmp), as `mktemp -d` makes one.
@@ -45,7 +45,7 @@ const TempScratch = struct {
         while (tries < 100) : (tries += 1) {
             var r: [8]u8 = undefined;
             std.crypto.random.bytes(&r);
-            const path = try std.fmt.allocPrint(a, "{s}/tmp.{s}", .{ std.mem.trimRight(u8, base, "/"), std.fmt.fmtSliceHexLower(&r) });
+            const path = try std.fmt.allocPrint(a, "{s}/tmp.{x}", .{ std.mem.trimRight(u8, base, "/"), &r });
             std.posix.mkdir(path, 0o700) catch |e| switch (e) {
                 error.PathAlreadyExists => continue,
                 else => return e,
@@ -69,9 +69,9 @@ pub fn main() !void {
         std.process.exit(1);
     };
     const full = try withDefaults(a, argv[3..], TempScratch{});
-    var cmd = std.ArrayList([]const u8).init(a);
-    try cmd.append(argv[2]);
-    try cmd.appendSlice(full);
+    var cmd = std.ArrayList([]const u8).empty;
+    try cmd.append(a, argv[2]);
+    try cmd.appendSlice(a, full);
     const e = std.process.execv(a, cmd.items);
     std.debug.print("launch: cannot run {s}: {s}\n", .{ argv[2], @errorName(e) });
     std.process.exit(1);

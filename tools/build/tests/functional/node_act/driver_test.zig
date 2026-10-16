@@ -218,9 +218,9 @@ test "npm-package: each refusal in its words, with the exit status of the script
 // ---- node-test ----------------------------------------------------------------------
 
 fn testArgs(c: *kit.Ctx, expect: []const u8, err: []const u8, out: []const u8, extra: []const []const u8) ![]const []const u8 {
-    var list = std.ArrayList([]const u8).init(c.alloc());
-    try list.appendSlice(&.{ "node-test", "--node", "node", "--libs", "libs", "--out", out, "--dir", "src", "--script", "t.mjs", "--expect", expect, "--error", err, "--" });
-    try list.appendSlice(extra);
+    var list = std.ArrayList([]const u8).empty;
+    try list.appendSlice(c.alloc(), &.{ "node-test", "--node", "node", "--libs", "libs", "--out", out, "--dir", "src", "--script", "t.mjs", "--expect", expect, "--error", err, "--" });
+    try list.appendSlice(c.alloc(), extra);
     return list.items;
 }
 

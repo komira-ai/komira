@@ -13,7 +13,7 @@ pub fn main() !void {
     const tar = try std.fs.cwd().readFileAlloc(a, args[2], 1 << 24);
     const f = try std.fs.cwd().createFile(args[3], .{});
     defer f.close();
-    const w = f.writer();
+    const w = f.deprecatedWriter();
     try w.print("library={s}\ntar_bytes={d}\ntar_name={s}\ngen_label={s}\ndrift_label={s}\ncommitted={s}\n", .{
         args[1], tar.len, std.mem.sliceTo(tar[0..@min(tar.len, 100)], 0), args[4], args[5], args[6],
     });

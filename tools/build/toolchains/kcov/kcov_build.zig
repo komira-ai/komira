@@ -49,14 +49,14 @@ pub const marker = "KOMIRA PATCH";
 /// The lines of `text`, each with its newline (the last without one when the
 /// text has none).
 pub fn splitKeep(a: A, text: []const u8) ![][]const u8 {
-    var out = std.ArrayList([]const u8).init(a);
+    var out = std.ArrayList([]const u8).empty;
     var i: usize = 0;
     while (i < text.len) {
         const e = if (std.mem.indexOfScalarPos(u8, text, i, '\n')) |n| n + 1 else text.len;
-        try out.append(text[i..e]);
+        try out.append(a, text[i..e]);
         i = e;
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 fn body(line: []const u8) []const u8 {
@@ -112,7 +112,7 @@ pub const Patch = enum {
 /// The text of a source file after `patch`.
 pub fn applyPatch(a: A, patch: Patch, text: []const u8) ![]u8 {
     const ls = try splitKeep(a, text);
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var in_range = false;
     var skip_next_subst = false;
     for (ls) |line| {
@@ -148,9 +148,9 @@ pub fn applyPatch(a: A, patch: Patch, text: []const u8) ![]u8 {
                     cur = try std.fmt.allocPrint(a, "{s}if (who == m_firstChild) /* {s}: the test, not another process */{s}", .{ b[0..n], marker, line[b.len..] });
             },
         }
-        try out.appendSlice(cur);
+        try out.appendSlice(a, cur);
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 fn countMarked(text: []const u8) usize {
@@ -167,8 +167,8 @@ fn countMarked(text: []const u8) usize {
 /// The text `bin-to-c-source.py` of kcov writes for the (file, name) pairs:
 /// each file as a byte array, sixteen `0xhh,` to a line, and a GeneratedData.
 pub fn bin2c(a: A, files: []const [2][]const u8, data: []const []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
-    const w = out.writer();
+    var out = std.ArrayList(u8).empty;
+    const w = out.writer(a);
     try w.writeAll("#include <stdint.h>\n#include <stdlib.h>\n#include <generated-data-base.hh>\nusing namespace kcov;\n");
     for (files, data) |f, d| {
         const name = f[1];
@@ -181,7 +181,7 @@ pub fn bin2c(a: A, files: []const [2][]const u8, data: []const []const u8) ![]u8
         }
         try w.print("}};\nGeneratedData {s}_data({s}_data_raw, sizeof({s}_data_raw));\n", .{ name, name, name });
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 // ---- ar -------------------------------------------------------------------
@@ -191,7 +191,7 @@ pub const Member = struct { name: []const u8, data: []const u8 };
 /// The members of a GNU or BSD `ar` archive (not its symbol table).
 pub fn arMembers(a: A, d: []const u8) ![]Member {
     if (!std.mem.startsWith(u8, d, "!<arch>\n")) return error.NotAr;
-    var out = std.ArrayList(Member).init(a);
+    var out = std.ArrayList(Member).empty;
     var long: []const u8 = "";
     var at: usize = 8;
     while (at + 60 <= d.len) {
@@ -222,10 +222,10 @@ pub fn arMembers(a: A, d: []const u8) ![]Member {
         } else if (raw_name.len > 0 and raw_name[raw_name.len - 1] == '/') {
             name = raw_name[0 .. raw_name.len - 1];
         }
-        try out.append(.{ .name = name, .data = data });
+        try out.append(a, .{ .name = name, .data = data });
     }
     if (at != d.len) return error.BadAr;
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 // ---- files ----------------------------------------------------------------
@@ -256,10 +256,10 @@ fn contained(name: []const u8) bool {
 
 /// Extracts the tar read from `reader` into `dest`: directories, files (with
 /// their executable bit) and symbolic links.
-fn extractTar(dest: std.fs.Dir, reader: anytype) !void {
-    var name_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var link_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var it = std.tar.iterator(reader, .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
+fn extractTar(dest: std.fs.Dir, reader: *std.Io.Reader) !void {
+    var name_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var link_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var it = std.tar.Iterator.init(reader, .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
     while (try it.next()) |f| {
         const name = std.mem.trimRight(u8, f.name, "/");
         if (name.len == 0 or std.mem.eql(u8, name, ".")) continue;
@@ -271,7 +271,10 @@ fn extractTar(dest: std.fs.Dir, reader: anytype) !void {
                 const mode: std.fs.File.Mode = if (f.mode & 0o111 != 0) 0o755 else 0o644;
                 const file = try dest.createFile(name, .{ .mode = mode });
                 defer file.close();
-                try f.writeAll(file);
+                var fbuf: [64 * 1024]u8 = undefined;
+                var fw = file.writer(&fbuf);
+                try it.streamRemaining(f, &fw.interface);
+                try fw.interface.flush();
                 try file.chmod(mode);
             },
             .sym_link => {
@@ -314,11 +317,11 @@ const Build = struct {
 
     /// `zig <kind> <flags...> <rest...>`.
     fn zigRun(self: *Build, kind: []const u8, flags: []const []const u8, rest: []const []const u8) void {
-        var argv = std.ArrayList([]const u8).init(self.a);
-        argv.append(self.zig) catch @panic("oom");
-        argv.append(kind) catch @panic("oom");
-        argv.appendSlice(flags) catch @panic("oom");
-        argv.appendSlice(rest) catch @panic("oom");
+        var argv = std.ArrayList([]const u8).empty;
+        argv.append(self.a, self.zig) catch @panic("oom");
+        argv.append(self.a, kind) catch @panic("oom");
+        argv.appendSlice(self.a, flags) catch @panic("oom");
+        argv.appendSlice(self.a, rest) catch @panic("oom");
         self.run(argv.items);
     }
 };
@@ -403,10 +406,11 @@ pub fn main() !void {
         {
             const f = try cwd.openFile(tar, .{});
             defer f.close();
-            var br = std.io.bufferedReader(f.reader());
+            var rbuf: [64 * 1024]u8 = undefined;
+            var fr = f.reader(&rbuf);
             var dd = try cwd.openDir(d, .{});
             defer dd.close();
-            try extractTar(dd, br.reader());
+            try extractTar(dd, &fr.interface);
         }
         try cwd.deleteFile(tar);
     }
@@ -431,12 +435,12 @@ pub fn main() !void {
         try names.put(m.name, {});
     }
     if (!names.contains("crc32.o")) fail("libelf.a has no crc32.o; drop the workaround", .{});
-    var libelf_objs = std.ArrayList([]const u8).init(a);
+    var libelf_objs = std.ArrayList([]const u8).empty;
     for (members) |m| {
         if (std.mem.eql(u8, m.name, "crc32.o")) continue;
         const p = join(a, &.{ libelf_dir, m.name });
         try writeFile(p, m.data);
-        if (std.mem.endsWith(u8, m.name, ".o")) try libelf_objs.append(p);
+        if (std.mem.endsWith(u8, m.name, ".o")) try libelf_objs.append(a, p);
     }
     std.mem.sort([]const u8, libelf_objs.items, {}, lessThan);
 
@@ -445,11 +449,17 @@ pub fn main() !void {
     {
         const f = try cwd.openFile(archive, .{});
         defer f.close();
-        var br = std.io.bufferedReader(f.reader());
-        var gz = std.compress.gzip.decompressor(br.reader());
+        // Inflated into memory with no window buffer: the standard library's
+        // windowed decoder mishandles a fixed-Huffman match at the end of its window.
+        const gz_bytes = try f.readToEndAlloc(a, 1 << 30);
+        var gz_in: std.Io.Reader = .fixed(gz_bytes);
+        var gz = std.compress.flate.Decompress.init(&gz_in, .gzip, &.{});
+        var tar_bytes = std.Io.Writer.Allocating.init(a);
+        _ = gz.reader.streamRemaining(&tar_bytes.writer) catch |e| return if (e == error.ReadFailed) (gz.err orelse e) else e;
+        var tar_in: std.Io.Reader = .fixed(tar_bytes.written());
         var dd = try cwd.openDir(src_root, .{});
         defer dd.close();
-        try extractTar(dd, gz.reader());
+        try extractTar(dd, &tar_in);
     }
     const top = join(a, &.{ src_root, prefix });
     const s = join(a, &.{ top, "src" });
@@ -486,10 +496,10 @@ pub fn main() !void {
     const cflags = try std.mem.concat(a, []const u8, &.{ &.{ "-target", triple, "-O2", "-g0", "-fPIC" }, &defs, &incs });
     const cxxflags = try std.mem.concat(a, []const u8, &.{ &.{ "-target", triple, "-std=c++17", "-O2", "-g0", "-fPIC" }, &defs, &incs });
     const zlib_a = join(a, &.{ conda, "zlib/lib/libz.a" });
-    var static_libs = std.ArrayList([]const u8).init(a);
-    try static_libs.append(join(a, &.{ conda, "elfutils/lib/libdw.a" }));
-    try static_libs.appendSlice(libelf_objs.items);
-    try static_libs.appendSlice(&.{ zlib_a, join(a, &.{ conda, "lzma/lib/liblzma.a" }), join(a, &.{ conda, "bzip2/lib/libbz2.a" }), join(a, &.{ conda, "zstd/lib/libzstd.a" }) });
+    var static_libs = std.ArrayList([]const u8).empty;
+    try static_libs.append(a, join(a, &.{ conda, "elfutils/lib/libdw.a" }));
+    try static_libs.appendSlice(a, libelf_objs.items);
+    try static_libs.appendSlice(a, &.{ zlib_a, join(a, &.{ conda, "lzma/lib/liblzma.a" }), join(a, &.{ conda, "bzip2/lib/libbz2.a" }), join(a, &.{ conda, "zstd/lib/libzstd.a" }) });
 
     // The C objects (zig c++ would pass -std=c++17 to a .c source).
     try writeFile(join(a, &.{ g, "version.c" }), pf(a, "const char *kcov_version = \"{s}\";\n", .{version}));
@@ -537,24 +547,24 @@ pub fn main() !void {
         } },
     };
     for (gens) |gen| {
-        var datas = std.ArrayList([]const u8).init(a);
-        for (gen.pairs) |p| try datas.append(readFile(a, p[0]));
+        var datas = std.ArrayList([]const u8).empty;
+        for (gen.pairs) |p| try datas.append(a, readFile(a, p[0]));
         try writeFile(join(a, &.{ g, gen.out }), try bin2c(a, gen.pairs, datas.items));
     }
 
     // kcov_SRCS of src/CMakeLists.txt for Linux, without libbfd and libcurl.
-    var link = std.ArrayList([]const u8).init(a);
-    for (srcs_list) |f| try link.append(join(a, &.{ s, f }));
-    for ([_][]const u8{ "library.cc", "bash-redirector-library.cc", "bash-cloexec-library.cc", "python-helper.cc", "bash-helper.cc", "kcov-system-library.cc", "html-data-files.cc" }) |f| try link.append(join(a, &.{ g, f }));
-    try link.appendSlice(&.{ join(a, &.{ g, "version.o" }), join(a, &.{ g, "phdr_data.o" }), curl_o });
-    try link.appendSlice(static_libs.items);
-    try link.append(join(a, &.{ conda, "libgcc/lib/libgcc_s.so.1" }));
+    var link = std.ArrayList([]const u8).empty;
+    for (srcs_list) |f| try link.append(a, join(a, &.{ s, f }));
+    for ([_][]const u8{ "library.cc", "bash-redirector-library.cc", "bash-cloexec-library.cc", "python-helper.cc", "bash-helper.cc", "kcov-system-library.cc", "html-data-files.cc" }) |f| try link.append(a, join(a, &.{ g, f }));
+    try link.appendSlice(a, &.{ join(a, &.{ g, "version.o" }), join(a, &.{ g, "phdr_data.o" }), curl_o });
+    try link.appendSlice(a, static_libs.items);
+    try link.append(a, join(a, &.{ conda, "libgcc/lib/libgcc_s.so.1" }));
     const bin_dir = join(a, &.{ out, "bin" });
     const lib_dir = join(a, &.{ out, "lib" });
     try cwd.makePath(bin_dir);
     try cwd.makePath(lib_dir);
     const kcov = join(a, &.{ bin_dir, "kcov" });
-    try link.appendSlice(&.{ "-lpthread", "-ldl", "-lm", "-s", "-Wl,--disable-new-dtags", "-Wl,-rpath,$ORIGIN/../lib", "-o", kcov });
+    try link.appendSlice(a, &.{ "-lpthread", "-ldl", "-lm", "-s", "-Wl,--disable-new-dtags", "-Wl,-rpath,$ORIGIN/../lib", "-o", kcov });
     b.zigRun("c++", cxxflags, link.items);
     b.run(&.{ elf_rpath, kcov });
     {

@@ -11,10 +11,10 @@ fn base() [13][]const u8 {
 }
 
 fn parseOf(a: std.mem.Allocator, extra: []const []const u8, diag: *[]const u8) !C.Args {
-    var v = std.ArrayList([]const u8).init(a);
+    var v = std.ArrayList([]const u8).empty;
     const b = base();
-    try v.appendSlice(&b);
-    try v.appendSlice(extra);
+    try v.appendSlice(a, &b);
+    try v.appendSlice(a, extra);
     return C.parse(a, v.items, diag);
 }
 
@@ -83,9 +83,9 @@ test "parse: refusals" {
     // With --solib, <test_repo> is a directory then <test>.
     b = base();
     b[11] = "src/imp/other.mojo";
-    var v = std.ArrayList([]const u8).init(a);
-    try v.appendSlice(&b);
-    try v.appendSlice(&.{ "--solib", "a.so" });
+    var v = std.ArrayList([]const u8).empty;
+    try v.appendSlice(a, &b);
+    try v.appendSlice(a, &.{ "--solib", "a.so" });
     try t.expectError(error.Usage, C.parse(a, v.items, &diag));
     try t.expectEqualStrings("with --solib, <test_repo> src/imp/other.mojo must be a directory then <test> tests/test_a.mojo", diag);
 }

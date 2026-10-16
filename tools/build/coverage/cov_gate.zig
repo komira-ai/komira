@@ -90,55 +90,55 @@ pub fn parseTail(a: std.mem.Allocator, package: []const u8, tail: []const []cons
         info = rest[1];
         rest = rest[2..];
     }
-    var inputs = std.ArrayList(Input).init(a);
+    var inputs = std.ArrayList(Input).empty;
     var flag: []const u8 = "--cobertura";
     for (rest) |arg| {
         if (std.mem.eql(u8, arg, "--branch-lcov") and std.mem.eql(u8, flag, "--cobertura")) {
             flag = "--branch-lcov";
             continue;
         }
-        try inputs.append(.{ .flag = flag, .path = arg });
+        try inputs.append(a, .{ .flag = flag, .path = arg });
     }
-    return .{ .info = info, .inputs = try inputs.toOwnedSlice() };
+    return .{ .info = info, .inputs = try inputs.toOwnedSlice(a) };
 }
 
 /// The files under `dir` (regular files, at their paths from `dir`), sorted
 /// bytewise.
 pub fn repoFiles(a: std.mem.Allocator, dir: std.fs.Dir) ![][]const u8 {
-    var out = std.ArrayList([]const u8).init(a);
+    var out = std.ArrayList([]const u8).empty;
     var w = try dir.walk(a);
     defer w.deinit();
     while (try w.next()) |e| {
-        if (e.kind == .file) try out.append(try a.dupe(u8, e.path));
+        if (e.kind == .file) try out.append(a, try a.dupe(u8, e.path));
     }
     std.mem.sort([]const u8, out.items, {}, struct {
         fn lt(_: void, x: []const u8, y: []const u8) bool {
             return std.mem.lessThan(u8, x, y);
         }
     }.lt);
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// `names` NUL-terminated and concatenated (`find ... | sort | tr '\n' '\0'`).
 pub fn nulSeparated(a: std.mem.Allocator, names: []const []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     for (names) |n| {
-        try out.appendSlice(n);
-        try out.append(0);
+        try out.appendSlice(a, n);
+        try out.append(a, 0);
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// The lines of the tests file that end in a newline (a last line without one is
 /// not read, as `while read` does).
 pub fn testSources(a: std.mem.Allocator, text: []const u8) ![][]const u8 {
-    var out = std.ArrayList([]const u8).init(a);
+    var out = std.ArrayList([]const u8).empty;
     var rest = text;
     while (std.mem.indexOfScalar(u8, rest, '\n')) |nl| {
-        try out.append(rest[0..nl]);
+        try out.append(a, rest[0..nl]);
         rest = rest[nl + 1 ..];
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// A report or record path as covcheck takes it: `=<path>` when the path holds
@@ -227,23 +227,23 @@ pub fn main() !void {
         try f.writeAll(try nulSeparated(a, try repoFiles(a, root_dir)));
     }
 
-    var args = std.ArrayList([]const u8).init(a);
-    try args.append(try std.fs.path.join(a, &.{ here, "covcheck", "covcheck" }));
-    try args.appendSlice(&.{ "gate", "--package", package, "--repo-files", repo_path, "--source-root", root });
-    try args.appendSlice(&.{ "--held", try std.fmt.allocPrint(a, "={s}", .{held}), "--mode", mode_s, "--target-bp", target });
-    try args.appendSlice(&.{ "--result-out", result, "--summary-out", summary });
+    var args = std.ArrayList([]const u8).empty;
+    try args.append(a, try std.fs.path.join(a, &.{ here, "covcheck", "covcheck" }));
+    try args.appendSlice(a, &.{ "gate", "--package", package, "--repo-files", repo_path, "--source-root", root });
+    try args.appendSlice(a, &.{ "--held", try std.fmt.allocPrint(a, "={s}", .{held}), "--mode", mode_s, "--target-bp", target });
+    try args.appendSlice(a, &.{ "--result-out", result, "--summary-out", summary });
     for (tail.inputs) |in| {
-        try args.append(in.flag);
-        try args.append(try inputArg(a, abs(a, cwd, in.path)));
+        try args.append(a, in.flag);
+        try args.append(a, try inputArg(a, abs(a, cwd, in.path)));
     }
     const tests_text = std.fs.cwd().readFileAlloc(a, tests_path, 1 << 24) catch |e| die("cannot read {s}: {s}", .{ tests_path, @errorName(e) });
     for (try testSources(a, tests_text)) |t| {
-        try args.append("--test-source");
-        try args.append(t);
+        try args.append(a, "--test-source");
+        try args.append(a, t);
     }
     if (tail.info) |i| {
-        try args.append("--info-package");
-        try args.append(i);
+        try args.append(a, "--info-package");
+        try args.append(a, i);
     }
 
     var child = std.process.Child.init(args.items, a);
@@ -252,21 +252,21 @@ pub fn main() !void {
     child.stdout_behavior = .Pipe;
     child.stderr_behavior = .Pipe;
     try child.spawn();
-    var out_buf = std.ArrayList(u8).init(a);
-    var err_buf = std.ArrayList(u8).init(a);
-    try child.collectOutput(&out_buf, &err_buf, 1 << 28);
+    var out_buf = std.ArrayList(u8).empty;
+    var err_buf = std.ArrayList(u8).empty;
+    try child.collectOutput(a, &out_buf, &err_buf, 1 << 28);
     const rc = exitCodeOf(try child.wait());
     // (stdout then stderr: the script sent both to one file; covcheck writes
     // its message to one of them.)
-    var both = std.ArrayList(u8).init(a);
-    try both.appendSlice(out_buf.items);
-    try both.appendSlice(err_buf.items);
+    var both = std.ArrayList(u8).empty;
+    try both.appendSlice(a, out_buf.items);
+    try both.appendSlice(a, err_buf.items);
 
     switch (rc) {
         0 => {
             const f = try std.fs.cwd().createFile(marker, .{});
             defer f.close();
-            try f.writer().print("PASS {s} ({s})\n", .{ label, mode_s });
+            try f.deprecatedWriter().print("PASS {s} ({s})\n", .{ label, mode_s });
         },
         3 => {
             const bar = "==================================================================";

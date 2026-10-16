@@ -51,26 +51,26 @@ fn lessThan(_: void, a: []const u8, b: []const u8) bool {
 
 /// src/a.txt at commit `i`: 400 lines, one of each thirty carrying the revision.
 pub fn fileA(a: A, i: usize) ![]u8 {
-    var o = std.ArrayList(u8).init(a);
+    var o = std.ArrayList(u8).empty;
     var k: usize = 1;
-    while (k <= 400) : (k += 1) try o.writer().print("line {d} of a.txt, revision {d}\n", .{ k, if (k % 30 == i % 30) i else 0 });
-    return o.toOwnedSlice();
+    while (k <= 400) : (k += 1) try o.writer(a).print("line {d} of a.txt, revision {d}\n", .{ k, if (k % 30 == i % 30) i else 0 });
+    return o.toOwnedSlice(a);
 }
 
 /// src/deep/er/big.txt at commit `i`: 5000 + 100 i lines.
 pub fn fileBig(a: A, i: usize) ![]u8 {
-    var o = std.ArrayList(u8).init(a);
+    var o = std.ArrayList(u8).empty;
     var k: usize = 1;
-    while (k <= 5000 + 100 * i) : (k += 1) try o.writer().print("{d:0>8} {s}\n", .{ (k * 7919) % 100000, if (k % 97 == i) "edited" else "same" });
-    return o.toOwnedSlice();
+    while (k <= 5000 + 100 * i) : (k += 1) try o.writer(a).print("{d:0>8} {s}\n", .{ (k * 7919) % 100000, if (k % 97 == i) "edited" else "same" });
+    return o.toOwnedSlice(a);
 }
 
 /// src/n<i>.txt: 20 i lines.
 pub fn fileNew(a: A, i: usize) ![]u8 {
-    var o = std.ArrayList(u8).init(a);
+    var o = std.ArrayList(u8).empty;
     var k: usize = 1;
-    while (k <= 20 * i) : (k += 1) try o.writer().print("new file {d}, line {d}\n", .{ i, k });
-    return o.toOwnedSlice();
+    while (k <= 20 * i) : (k += 1) try o.writer(a).print("new file {d}, line {d}\n", .{ i, k });
+    return o.toOwnedSlice(a);
 }
 
 /// The date of commit `i`: `<seconds> +0000`.
@@ -81,12 +81,12 @@ pub fn date(a: A, i: usize) ![]u8 {
 /// The lines of `verify-pack -v` that name an object, reshaped as
 /// `<id> <type> <size> <size-in-pack> <offset> <depth> <base>`.
 pub fn verifyLines(a: A, text: []const u8) ![]u8 {
-    var o = std.ArrayList(u8).init(a);
+    var o = std.ArrayList(u8).empty;
     var lines = std.mem.splitScalar(u8, text, '\n');
     while (lines.next()) |l| {
-        var f = std.ArrayList([]const u8).init(a);
+        var f = std.ArrayList([]const u8).empty;
         var it = std.mem.tokenizeAny(u8, l, " \t");
-        while (it.next()) |x| try f.append(x);
+        while (it.next()) |x| try f.append(a, x);
         if (f.items.len < 5) continue;
         const id = f.items[0];
         if (id.len != 40 and id.len != 64) continue;
@@ -95,24 +95,24 @@ pub fn verifyLines(a: A, text: []const u8) ![]u8 {
             if (!std.ascii.isDigit(c) and !(c >= 'a' and c <= 'f')) hex = false;
         }
         if (!hex) continue;
-        try o.writer().print("{s} {s} {s} {s} {s}", .{ id, f.items[1], f.items[2], f.items[3], f.items[4] });
-        if (f.items.len >= 7) try o.writer().print(" {s} {s}\n", .{ f.items[5], f.items[6] }) else try o.appendSlice(" 0 -\n");
+        try o.writer(a).print("{s} {s} {s} {s} {s}", .{ id, f.items[1], f.items[2], f.items[3], f.items[4] });
+        if (f.items.len >= 7) try o.writer(a).print(" {s} {s}\n", .{ f.items[5], f.items[6] }) else try o.appendSlice(a, " 0 -\n");
     }
-    return o.toOwnedSlice();
+    return o.toOwnedSlice(a);
 }
 
 /// The first `width` bytes of each line of `text`, sorted, each followed by a newline.
 pub fn sortedPrefixes(a: A, text: []const u8, width: usize) ![]u8 {
-    var ids = std.ArrayList([]const u8).init(a);
+    var ids = std.ArrayList([]const u8).empty;
     var lines = std.mem.splitScalar(u8, text, '\n');
     while (lines.next()) |l| {
         if (lines.peek() == null and l.len == 0) break;
-        try ids.append(l[0..@min(width, l.len)]);
+        try ids.append(a, l[0..@min(width, l.len)]);
     }
     std.mem.sort([]const u8, ids.items, {}, lessThan);
-    var o = std.ArrayList(u8).init(a);
-    for (ids.items) |x| try o.writer().print("{s}\n", .{x});
-    return o.toOwnedSlice();
+    var o = std.ArrayList(u8).empty;
+    for (ids.items) |x| try o.writer(a).print("{s}\n", .{x});
+    return o.toOwnedSlice(a);
 }
 
 // ---- running git ----------------------------------------------------------
@@ -128,11 +128,11 @@ const Git = struct {
         std.debug.print("gen_packs: " ++ fmt ++ "\n", args);
         if (self.log.len > 0) {
             std.debug.print("--- log:\n", .{});
-            var lines = std.ArrayList([]const u8).init(self.a);
+            var lines = std.ArrayList([]const u8).empty;
             var it = std.mem.splitScalar(u8, self.log, '\n');
             while (it.next()) |x| {
                 if (it.peek() == null and x.len == 0) break;
-                lines.append(x) catch {};
+                lines.append(self.a, x) catch {};
             }
             const from = if (lines.items.len > 40) lines.items.len - 40 else 0;
             for (lines.items[from..]) |x| std.debug.print("{s}\n", .{x});
@@ -142,9 +142,9 @@ const Git = struct {
 
     /// Runs `git <args>`; its stdout, or a failure naming `what`.
     fn run(self: *Git, args: []const []const u8, extra: []const [2][]const u8, stdin: ?[]const u8, what: []const u8) []u8 {
-        var argv = std.ArrayList([]const u8).init(self.a);
-        argv.append(self.exe) catch @panic("oom");
-        argv.appendSlice(args) catch @panic("oom");
+        var argv = std.ArrayList([]const u8).empty;
+        argv.append(self.a, self.exe) catch @panic("oom");
+        argv.appendSlice(self.a, args) catch @panic("oom");
         var env = std.process.EnvMap.init(self.a);
         var it = self.env.iterator();
         while (it.next()) |e| env.put(e.key_ptr.*, e.value_ptr.*) catch @panic("oom");
@@ -158,9 +158,9 @@ const Git = struct {
         if (stdin) |s| child.stdin.?.writeAll(s) catch {};
         child.stdin.?.close();
         child.stdin = null;
-        var out = std.ArrayList(u8).init(self.a);
-        var err = std.ArrayList(u8).init(self.a);
-        child.collectOutput(&out, &err, 1 << 30) catch |e| self.fail("cannot read git's output: {s}", .{@errorName(e)});
+        var out = std.ArrayList(u8).empty;
+        var err = std.ArrayList(u8).empty;
+        child.collectOutput(self.a, &out, &err, 1 << 30) catch |e| self.fail("cannot read git's output: {s}", .{@errorName(e)});
         const term = child.wait() catch |e| self.fail("cannot wait for git: {s}", .{@errorName(e)});
         self.log = err.items;
         switch (term) {
@@ -218,10 +218,10 @@ fn history(g: *Git, repo: []const u8, format: []const u8) !void {
 /// into <name>.pack, .idx and .verify.
 fn pack(g: *Git, repo: []const u8, work: []const u8, out: []const u8, name: []const u8, opts: []const []const u8) !void {
     const a = g.a;
-    var args = std.ArrayList([]const u8).init(a);
-    try args.appendSlice(&.{ "-C", repo, "-c", "pack.threads=1", "pack-objects", "-q", "--all" });
-    try args.appendSlice(opts);
-    try args.append(join(a, &.{ work, name }));
+    var args = std.ArrayList([]const u8).empty;
+    try args.appendSlice(a, &.{ "-C", repo, "-c", "pack.threads=1", "pack-objects", "-q", "--all" });
+    try args.appendSlice(a, opts);
+    try args.append(a, join(a, &.{ work, name }));
     const sum = std.mem.trimRight(u8, g.run(args.items, &.{}, "", pf(a, "git pack-objects {s}", .{name})), "\n");
     const made = join(a, &.{ work, pf(a, "{s}-{s}.pack", .{ name, sum }) });
     const pack_path = join(a, &.{ out, pf(a, "{s}.pack", .{name}) });

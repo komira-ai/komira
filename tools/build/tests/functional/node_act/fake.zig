@@ -35,7 +35,7 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const a = arena.allocator();
     const args = try std.process.argsAlloc(a);
-    const out = std.io.getStdOut().writer();
+    const out = std.fs.File.stdout().deprecatedWriter();
     const base = std.fs.path.basename(args[0]);
     if (std.mem.eql(u8, base, "node")) {
         if (args.len >= 2 and std.mem.eql(u8, args[1], "--version")) {
@@ -103,13 +103,13 @@ pub fn main() !void {
         }
         var cwd_buf: [4096]u8 = undefined;
         const cwd = try std.process.getCwd(&cwd_buf);
-        var body = std.ArrayList(u8).init(a);
-        try body.writer().print("cwd={s}\nenv={d}\n", .{ std.fs.path.basename(cwd), envCount() });
+        var body = std.ArrayList(u8).empty;
+        try body.writer(a).print("cwd={s}\nenv={d}\n", .{ std.fs.path.basename(cwd), envCount() });
         for (args[1..]) |x| {
             if (std.mem.startsWith(u8, x, "--outfile=")) continue;
-            try body.writer().print("arg={s}\n", .{x});
+            try body.writer(a).print("arg={s}\n", .{x});
         }
-        try body.writer().print("outfile_absolute={s}\n", .{if (std.fs.path.isAbsolute(outfile)) "yes" else "no"});
+        try body.writer(a).print("outfile_absolute={s}\n", .{if (std.fs.path.isAbsolute(outfile)) "yes" else "no"});
         const f = try std.fs.cwd().createFile(outfile, .{});
         defer f.close();
         try f.writeAll(body.items);

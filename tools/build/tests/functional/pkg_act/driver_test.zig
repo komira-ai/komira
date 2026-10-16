@@ -156,10 +156,10 @@ test "bundle: the layout, the modes, and SHA256SUMS of every other file in byte 
     try t.expectEqual(@as(std.fs.File.Mode, 0o755), try c.mode("out/b"));
     try t.expectEqual(@as(std.fs.File.Mode, 0o755), try c.mode("out/b/share/doc"));
     const names = [_][]const u8{ "VERSION", "bin/helper", "bin/prog", "lib/glibc-hwcaps/x86-64-v3/libprog.so", "lib/libone.so", "lib/libtwo.so", "share/doc/d.txt" };
-    var want = std.ArrayList(u8).init(c.alloc());
+    var want = std.ArrayList(u8).empty;
     for (names) |n| {
         const data = try c.read(try std.fmt.allocPrint(c.alloc(), "out/b/{s}", .{n}));
-        try want.writer().print("{s}  {s}\n", .{ &sha(data), n });
+        try want.writer(c.alloc()).print("{s}  {s}\n", .{ &sha(data), n });
     }
     try t.expectEqualStrings(want.items, try c.read("out/b/SHA256SUMS"));
 }
@@ -312,8 +312,8 @@ fn member(c: *kit.Ctx, name: []const u8, requires: []const []const u8) !void {
     const conda = try std.fmt.allocPrint(al, "{s}/{s}-1.2.3-{s}.conda", .{ name, name, build });
     try c.write(conda, "pkg", 0o644);
     try c.write(try std.fmt.allocPrint(al, "{s}/manifest.json", .{name}), try std.fmt.allocPrint(al, "{{\"file\":\"{s}-1.2.3-{s}.conda\",\"version\":\"1.2.3\"}}", .{ name, build }), 0o644);
-    var deps = std.ArrayList(u8).init(al);
-    for (requires) |r| try deps.writer().print("\"{s} ==1.2.3 {s}\",", .{ r, build });
+    var deps = std.ArrayList(u8).empty;
+    for (requires) |r| try deps.writer(c.alloc()).print("\"{s} ==1.2.3 {s}\",", .{ r, build });
     try c.write(try std.fmt.allocPrint(al, "{s}/metadata.json", .{name}), try std.fmt.allocPrint(al, "{{\"depends\":[{s}],\"build\":\"{s}\",\"build_number\":999999999,\"source_commit\":\"c0ffee\",\"stamped\":true,\"timestamp_ms\":1000}}", .{ deps.items, build }), 0o644);
 }
 

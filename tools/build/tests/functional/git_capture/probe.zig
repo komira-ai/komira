@@ -7,9 +7,9 @@ pub fn main() !void {
     var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const a = arena_state.allocator();
     const argv = try std.process.argsAlloc(a);
-    const out = std.io.getStdOut().writer();
+    const out = std.fs.File.stdout().deprecatedWriter();
     try out.print("service={s} path={s}\n", .{ argv[1], argv[2] });
-    const input = try std.io.getStdIn().readToEndAlloc(a, 1 << 20);
+    const input = try std.fs.File.stdin().readToEndAlloc(a, 1 << 20);
     try out.writeAll(input);
     if (std.mem.eql(u8, input, "die")) std.process.exit(7);
 }

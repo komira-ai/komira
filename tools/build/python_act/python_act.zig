@@ -42,9 +42,9 @@ pub fn clearSitePackages(a: std.mem.Allocator, root: std.fs.Dir) !void {
         var site = lib.openDir(try std.fmt.allocPrint(a, "{s}/site-packages", .{n}), .{ .iterate = true }) catch continue;
         defer site.close();
         // (Collected first: a directory is not changed while it is read.)
-        var found = std.ArrayList(struct { name: []const u8, kind: std.fs.File.Kind }).init(a);
+        var found = std.ArrayList(struct { name: []const u8, kind: std.fs.File.Kind }).empty;
         var it = site.iterate();
-        while (try it.next()) |e| try found.append(.{ .name = try a.dupe(u8, e.name), .kind = e.kind });
+        while (try it.next()) |e| try found.append(a, .{ .name = try a.dupe(u8, e.name), .kind = e.kind });
         for (found.items) |e| {
             if (e.name.len > 0 and e.name[0] == '.') continue;
             if (e.kind == .directory) {
@@ -68,7 +68,7 @@ fn cmdDist(a: std.mem.Allocator, args: []const []const u8) u8 {
     const bytes = std.fs.cwd().readFileAlloc(a, archive, 1 << 31) catch |e| return usage("cannot read {s}: {s}", .{ archive, @errorName(e) });
     var dest = std.fs.cwd().makeOpenPath(out, .{ .iterate = true }) catch |e| return usage("cannot create {s}: {s}", .{ out, @errorName(e) });
     defer dest.close();
-    U.extract.extractTgz(dest, bytes, "python", U.extract.keepAll) catch |e| {
+    U.extract.extractTgz(a, dest, bytes, "python", U.extract.keepAll) catch |e| {
         std.debug.print("python_dist: cannot unpack {s}: {s}\n", .{ archive, @errorName(e) });
         return 2;
     };

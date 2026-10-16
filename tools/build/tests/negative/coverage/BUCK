@@ -96,7 +96,7 @@ zig_exe(
     src = ":lost_run_src",
     busybox = "komira//tools/build/toolchains:busybox",
     exec_compatible_with = LINUX_X86_64,
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 cov_run_dir(
@@ -170,7 +170,7 @@ zig_exe(
     src = ":lostdir_run_src",
     busybox = "komira//tools/build/toolchains:busybox",
     exec_compatible_with = LINUX_X86_64,
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 cov_run_dir(
@@ -209,7 +209,7 @@ zig_exe(
     src = ":longarg_run_src",
     busybox = "komira//tools/build/toolchains:busybox",
     exec_compatible_with = LINUX_X86_64,
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 cov_run_dir(
@@ -1067,7 +1067,7 @@ zig_exe(
     src = ":covso_skip_run_src",
     busybox = "komira//tools/build/toolchains:busybox",
     exec_compatible_with = LINUX_X86_64,
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 cov_run_dir(

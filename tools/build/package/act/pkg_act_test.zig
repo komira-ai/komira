@@ -165,8 +165,8 @@ fn stampFixture(tmp: *std.testing.TmpDir, name: []const u8, dir: []const u8, req
     const manifest = try std.fmt.allocPrint(a, "{s}/manifest.json", .{dir});
     const mtext = try std.fmt.allocPrint(a, "{{\"file\":\"{s}-1.2.3-h7e57c0de_999999999.conda\",\"version\":\"1.2.3\"}}", .{name});
     try put(tmp, manifest, mtext);
-    var depends = std.ArrayList(u8).init(a);
-    for (requires) |r| try depends.writer().print("\"{s} ==1.2.3 h7e57c0de_999999999\",", .{r});
+    var depends = std.ArrayList(u8).empty;
+    for (requires) |r| try depends.writer(a).print("\"{s} ==1.2.3 h7e57c0de_999999999\",", .{r});
     const meta = try std.fmt.allocPrint(a, "{{\"depends\":[{s}],{s}}}", .{ depends.items, stamp_meta[1 .. stamp_meta.len - 1] });
     try put(tmp, try std.fmt.allocPrint(a, "{s}/metadata.json", .{dir}), meta);
 }
@@ -329,11 +329,11 @@ test "bundle assemble: layout, modes, and SHA256SUMS of every other file in byte
         .files = &.{ .{ "share/doc/d.txt", r.p(a, &tmp, "in/data.txt") }, .{ "bin/helper", r.p(a, &tmp, "in/helper") } },
     });
     const sums = try tmp.dir.readFileAlloc(a, "o/SHA256SUMS", 1 << 20);
-    var expect = std.ArrayList(u8).init(a);
+    var expect = std.ArrayList(u8).empty;
     const names = [_][]const u8{ "VERSION", "bin/helper", "bin/prog", "lib/glibc-hwcaps/x86-64-v3/libprog.so", "lib/libone.so", "lib/libtwo.so", "share/doc/d.txt" };
     for (names) |n| {
         const data = try tmp.dir.readFileAlloc(a, try std.fmt.allocPrint(a, "o/{s}", .{n}), 1 << 20);
-        try expect.writer().print("{s}  {s}\n", .{ &U.sha256Hex(data), n });
+        try expect.writer(a).print("{s}  {s}\n", .{ &U.sha256Hex(data), n });
     }
     try t.expectEqualStrings(expect.items, sums);
     const modes = [_]struct { p: []const u8, m: std.fs.File.Mode }{

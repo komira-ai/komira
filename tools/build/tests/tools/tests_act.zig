@@ -94,29 +94,29 @@ fn writeAll(path: []const u8, data: []const u8) void {
 
 /// The entries of `dir` (`ls -A`), sorted and joined, each followed by a blank.
 pub fn listingWords(a: A, dir: std.fs.Dir) ![]u8 {
-    var names = std.ArrayList([]const u8).init(a);
+    var names = std.ArrayList([]const u8).empty;
     var it = dir.iterate();
-    while (try it.next()) |e| try names.append(try a.dupe(u8, e.name));
+    while (try it.next()) |e| try names.append(a, try a.dupe(u8, e.name));
     std.mem.sort([]const u8, names.items, {}, lessThan);
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     for (names.items) |n| {
-        try out.appendSlice(n);
-        try out.append(' ');
+        try out.appendSlice(a, n);
+        try out.append(a, ' ');
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// The files under `dir` (recursively, links not followed) that hold `needle`, sorted.
 pub fn grepFiles(a: A, dir: std.fs.Dir, base: []const u8, needle: []const u8) ![][]const u8 {
-    var hits = std.ArrayList([]const u8).init(a);
+    var hits = std.ArrayList([]const u8).empty;
     var w = try dir.walk(a);
     while (try w.next()) |e| {
         if (e.kind != .file) continue;
         const data = try dir.readFileAlloc(a, e.path, 1 << 30);
-        if (std.mem.indexOf(u8, data, needle) != null) try hits.append(try std.fs.path.join(a, &.{ base, e.path }));
+        if (std.mem.indexOf(u8, data, needle) != null) try hits.append(a, try std.fs.path.join(a, &.{ base, e.path }));
     }
     std.mem.sort([]const u8, hits.items, {}, lessThan);
-    return hits.toOwnedSlice();
+    return hits.toOwnedSlice(a);
 }
 
 fn genCheck(a: A, args: []const []const u8) void {
@@ -165,17 +165,17 @@ fn testsCheck(a: A, args: []const []const u8) void {
     if (args.len < 2) usage("tests-check <mark> <expected tests> <marker>...");
     const mark = args[0];
     const want = args[1];
-    var got = std.ArrayList([]const u8).init(a);
+    var got = std.ArrayList([]const u8).empty;
     for (args[2..]) |m| {
         const b = std.fs.path.basename(m);
         if (!std.mem.endsWith(u8, b, ".passed")) fail("`{s}` is not a test pass marker", .{b});
         const text = readAll(a, m);
         if (!hasPassLine(text)) fail("the welded test {s} did not pass: {s}", .{ b[0 .. b.len - ".passed".len], std.mem.trimRight(u8, text, "\n") });
-        got.append(b[0 .. b.len - ".passed".len]) catch @panic("oom");
+        got.append(a, b[0 .. b.len - ".passed".len]) catch @panic("oom");
     }
     std.mem.sort([]const u8, got.items, {}, lessThan);
-    var joined = std.ArrayList(u8).init(a);
-    for (got.items) |g| joined.writer().print("{s} ", .{g}) catch @panic("oom");
+    var joined = std.ArrayList(u8).empty;
+    for (got.items) |g| joined.writer(a).print("{s} ", .{g}) catch @panic("oom");
     const want_words = std.fmt.allocPrint(a, "{s} ", .{want}) catch @panic("oom");
     if (!std.mem.eql(u8, joined.items, want_words))
         fail("the library's welded tests that passed: {s}\nexpected exactly:                       {s}", .{ joined.items, want });
@@ -199,7 +199,7 @@ fn sameBytes(a: A, args: []const []const u8) void {
     if (!std.mem.eql(u8, x, y)) fail("BAD: the same package precompiled under two staging paths differs: the .mojoc records where it was built ({s} {s})", .{ args[0], args[1] });
     var h: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(x, &h, .{});
-    writeAll(args[2], std.fmt.allocPrint(a, "same bytes: {s}\n", .{std.fmt.fmtSliceHexLower(&h)}) catch @panic("oom"));
+    writeAll(args[2], std.fmt.allocPrint(a, "same bytes: {x}\n", .{&h}) catch @panic("oom"));
 }
 
 fn testCommand(a: A, args: []const []const u8) void {
@@ -238,7 +238,7 @@ pub fn copyTree(a: A, src: std.fs.Dir, dest: std.fs.Dir) !void {
             },
             .sym_link => {
                 if (std.fs.path.dirname(e.path)) |d| try dest.makePath(d);
-                var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+                var buf: [std.fs.max_path_bytes]u8 = undefined;
                 const target = try src.readLink(e.path, &buf);
                 try dest.symLink(target, e.path, .{});
             },

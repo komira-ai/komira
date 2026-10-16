@@ -37,14 +37,14 @@ fn lessThan(_: void, a: []const u8, b: []const u8) bool {
 
 /// The relative paths of the files and links of `dir`, sorted.
 pub fn listFiles(a: A, dir: std.fs.Dir) ![][]const u8 {
-    var out = std.ArrayList([]const u8).init(a);
+    var out = std.ArrayList([]const u8).empty;
     var w = try dir.walk(a);
     while (try w.next()) |e| {
         if (e.kind == .directory) continue;
-        try out.append(try a.dupe(u8, e.path));
+        try out.append(a, try a.dupe(u8, e.path));
     }
     std.mem.sort([]const u8, out.items, {}, lessThan);
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 fn readVarint(d: []const u8, at: *usize) !u64 {
@@ -85,7 +85,7 @@ fn field(d: []const u8, at: *usize, wt: u64) !?[]const u8 {
 
 /// The `name` (field 1) of every `file` (field 1) of a FileDescriptorSet.
 pub fn setNames(a: A, set: []const u8) ![][]const u8 {
-    var out = std.ArrayList([]const u8).init(a);
+    var out = std.ArrayList([]const u8).empty;
     var at: usize = 0;
     while (at < set.len) {
         const key = try readVarint(set, &at);
@@ -97,12 +97,12 @@ pub fn setNames(a: A, set: []const u8) ![][]const u8 {
             const k = try readVarint(f, &p);
             const inner = try field(f, &p, k & 7);
             if (k >> 3 == 1 and inner != null) {
-                try out.append(inner.?);
+                try out.append(a, inner.?);
                 break;
             }
         }
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// The first reason the tree is not exactly the closure, or null. `tree` and
@@ -115,8 +115,8 @@ pub fn mismatch(a: A, tree: []const []const u8, closure: []const []const u8) !?[
 }
 
 fn has(sorted: []const []const u8, x: []const u8) bool {
-    return std.sort.binarySearch([]const u8, x, sorted, {}, struct {
-        fn f(_: void, k: []const u8, item: []const u8) std.math.Order {
+    return std.sort.binarySearch([]const u8, sorted, x, struct {
+        fn f(k: []const u8, item: []const u8) std.math.Order {
             return std.mem.order(u8, k, item);
         }
     }.f) != null;
@@ -140,8 +140,8 @@ fn check(a: A, protoc: []const u8, tree_path: []const u8, out_set: []const u8, o
     try std.fs.cwd().makePath(scratch);
     defer std.fs.cwd().deleteTree(scratch) catch {};
     const set_path = try std.fs.path.join(a, &.{ scratch, "set.pb" });
-    var argv = std.ArrayList([]const u8).init(a);
-    try argv.appendSlice(&.{
+    var argv = std.ArrayList([]const u8).empty;
+    try argv.appendSlice(a, &.{
         try std.fs.path.join(a, &.{ protoc, "bin/protoc" }),
         "-I",
         tree_path,
@@ -150,7 +150,7 @@ fn check(a: A, protoc: []const u8, tree_path: []const u8, out_set: []const u8, o
         "--include_imports",
         try std.fmt.allocPrint(a, "--descriptor_set_out={s}", .{set_path}),
     });
-    try argv.appendSlice(roots);
+    try argv.appendSlice(a, roots);
     const r = try std.process.Child.run(.{ .allocator = a, .argv = argv.items, .max_output_bytes = 1 << 24 });
     const ok = switch (r.term) {
         .Exited => |c| c == 0,
@@ -158,9 +158,9 @@ fn check(a: A, protoc: []const u8, tree_path: []const u8, out_set: []const u8, o
     };
     if (!ok) return try std.fmt.allocPrint(a, "protoc cannot parse the roots from the tree: {s}", .{std.mem.trimRight(u8, r.stderr, "\n")});
     const set = try std.fs.cwd().readFileAlloc(a, set_path, 1 << 28);
-    var closure = std.ArrayList([]const u8).init(a);
+    var closure = std.ArrayList([]const u8).empty;
     for (setNames(a, set) catch return try a.dupe(u8, "protoc cannot decode the descriptor set")) |n| {
-        if (!std.mem.startsWith(u8, n, "google/protobuf/")) try closure.append(n);
+        if (!std.mem.startsWith(u8, n, "google/protobuf/")) try closure.append(a, n);
     }
     std.mem.sort([]const u8, closure.items, {}, lessThan);
     if (closure.items.len == 0) return try a.dupe(u8, "the descriptor set names no file");

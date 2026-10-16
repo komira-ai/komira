@@ -23,7 +23,7 @@ fn octal(dst: []u8, v: u64) void {
 }
 
 fn tarOf(a: std.mem.Allocator, entries: []const Entry) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     for (entries) |e| {
         var h = [_]u8{0} ** 512;
         @memcpy(h[0..e.name.len], e.name);
@@ -42,13 +42,13 @@ fn tarOf(a: std.mem.Allocator, entries: []const Entry) ![]u8 {
         octal(h[148..155], sum);
         h[154] = 0;
         h[155] = ' ';
-        try out.appendSlice(&h);
-        try out.appendSlice(e.data);
+        try out.appendSlice(a, &h);
+        try out.appendSlice(a, e.data);
         const pad = (512 - e.data.len % 512) % 512;
-        try out.appendNTimes(0, pad);
+        try out.appendNTimes(a, 0, pad);
     }
-    try out.appendNTimes(0, 1024);
-    return out.toOwnedSlice();
+    try out.appendNTimes(a, 0, 1024);
+    return out.toOwnedSlice(a);
 }
 
 const Fx = struct {
@@ -66,7 +66,7 @@ const Fx = struct {
 
     fn put(self: *Fx, a: std.mem.Allocator, pkg: []const u8, entries: []const Entry) !void {
         const name = try std.fmt.allocPrint(a, "pkg/{s}.tar", .{pkg});
-        try self.tmp.dir.writeFile(name, try tarOf(a, entries));
+        try self.tmp.dir.writeFile(.{ .sub_path = name, .data = try tarOf(a, entries) });
     }
 
     fn run(self: *Fx, a: std.mem.Allocator, specs: []const []const u8, msg: *std.ArrayList(u8)) !usize {
@@ -84,7 +84,7 @@ test "unpack: a regular member is written with its executable bit; nothing else 
         .{ .name = "bin/lld", .kind = '0', .data = "ELF", .mode = 0o755 },
         .{ .name = "lib/other", .kind = '0', .data = "x" },
     });
-    var msg = std.ArrayList(u8).init(a);
+    var msg = std.ArrayList(u8).empty;
     try t.expectEqual(@as(usize, 1), try fx.run(a, &.{"bin/lld=mojo/bin/lld"}, &msg));
     var d = try fx.tmp.dir.openDir("out", .{ .iterate = true });
     defer d.close();
@@ -118,7 +118,7 @@ test "unpack: a link is followed within the package, as many as seven hops" {
         .{ .name = "lib/h", .kind = '2', .link = "i" },
         .{ .name = "lib/i", .kind = '0', .data = "end" },
     });
-    var msg = std.ArrayList(u8).init(a);
+    var msg = std.ArrayList(u8).empty;
     try t.expectEqual(@as(usize, 1), try fx.run(a, &.{"lib/libz.so.1=libs/lib/libz.so.1"}, &msg));
     var d = try fx.tmp.dir.openDir("out", .{});
     defer d.close();
@@ -155,7 +155,7 @@ test "unpack: refusals name the member, the link, or the package" {
         .{ "noequals", "bad destination in 'noequals'" },
     };
     for (cases) |c| {
-        var msg = std.ArrayList(u8).init(a);
+        var msg = std.ArrayList(u8).empty;
         try t.expectError(error.Unpack, fx.run(a, &.{c[0]}, &msg));
         try t.expectEqualStrings(c[1], msg.items);
     }

@@ -66,7 +66,7 @@ fn scratch(a: A, name: []const u8) []u8 {
 /// The runs of at least `min` printable bytes (tab and 0x20..0x7e) of `data`, as
 /// `strings -n` lists them.
 pub fn strings(a: A, data: []const u8, min: usize) ![][]const u8 {
-    var out = std.ArrayList([]const u8).init(a);
+    var out = std.ArrayList([]const u8).empty;
     var start: ?usize = null;
     var i: usize = 0;
     while (i <= data.len) : (i += 1) {
@@ -74,11 +74,11 @@ pub fn strings(a: A, data: []const u8, min: usize) ![][]const u8 {
         if (printable) {
             if (start == null) start = i;
         } else if (start) |s| {
-            if (i - s >= min) try out.append(data[s..i]);
+            if (i - s >= min) try out.append(a, data[s..i]);
             start = null;
         }
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 pub fn hasString(list: []const []const u8, want: []const u8) bool {
@@ -145,20 +145,20 @@ pub fn debugCheck(a: A, args: []const []const u8) !void {
     const out_path = args[0];
     const reloc = absolute(a, args[1]);
     const mode = args[2];
-    var names = std.ArrayList([]const u8).init(a);
-    var dirs = std.ArrayList([]const u8).init(a);
+    var names = std.ArrayList([]const u8).empty;
+    var dirs = std.ArrayList([]const u8).empty;
     var i: usize = 3;
     while (i < args.len) : (i += 1) {
         if (std.mem.startsWith(u8, args[i], "--name=")) {
-            try names.append(args[i]["--name=".len..]);
+            try names.append(a, args[i]["--name=".len..]);
         } else if (std.mem.startsWith(u8, args[i], "--dir=")) {
-            try dirs.append(args[i]["--dir=".len..]);
+            try dirs.append(a, args[i]["--dir=".len..]);
         } else break;
     }
     const bins = args[i..];
     if (bins.len < 1) usage("check.sh: no binary");
-    var report = std.ArrayList(u8).init(a);
-    const w = report.writer();
+    var report = std.ArrayList(u8).empty;
+    const w = report.writer(a);
     if (std.mem.eql(u8, mode, "hermetic")) {
         if (names.items.len == 0) usage("check.sh: hermetic needs a --name");
         for (dirs.items) |d| if (!plainDir(d)) usage("cov-debug-check: --dir takes a literal string, not a pattern");
@@ -191,10 +191,10 @@ pub fn debugCheck(a: A, args: []const []const u8) !void {
             f.close();
             const r = try std.process.Child.run(.{ .allocator = a, .argv = &.{ reloc, copy, "/nonexistent/directory/name" }, .max_output_bytes = 1 << 24 });
             if (exitCode(r.term) != 0) red("cov_debug_check", "{s}: debug_relocate refused it: {s}", .{ n, std.mem.trimRight(u8, try std.mem.concat(a, u8, &.{ r.stdout, r.stderr }), "\n") });
-            var nm = std.ArrayList(u8).init(a);
-            for (names.items) |s| try nm.writer().print(" {s}", .{s});
-            var dr = std.ArrayList(u8).init(a);
-            for (dirs.items) |s| try dr.writer().print(" {s}", .{s});
+            var nm = std.ArrayList(u8).empty;
+            for (names.items) |s| try nm.writer(a).print(" {s}", .{s});
+            var dr = std.ArrayList(u8).empty;
+            for (dirs.items) |s| try dr.writer(a).print(" {s}", .{s});
             try w.print("ok {s}: .debug_line, line tables naming{s}, relative directories{s}, placeholder, no absolute path, no compressed section\n", .{ n, nm.items, dr.items });
         }
     } else if (std.mem.eql(u8, mode, "same")) {
@@ -205,7 +205,7 @@ pub fn debugCheck(a: A, args: []const []const u8) !void {
             std.crypto.hash.sha2.Sha256.hash(readFile(a, b), &h, .{});
             const abs = absolute(a, b);
             const shown = if (std.mem.startsWith(u8, abs, cwd) and abs.len > cwd.len and abs[cwd.len] == '/') abs[cwd.len + 1 ..] else abs;
-            try w.print("{s} {s}\n", .{ std.fmt.fmtSliceHexLower(&h), shown });
+            try w.print("{x} {s}\n", .{ &h, shown });
             if (first == null) first = h;
             if (!std.mem.eql(u8, &first.?, &h)) {
                 const flat = try a.dupe(u8, report.items);
@@ -230,8 +230,8 @@ pub fn reportCheck(a: A, args: []const []const u8) !void {
     const out_path = args[0];
     const mode = args[1];
     var rest = args[2..];
-    var report = std.ArrayList(u8).init(a);
-    const w = report.writer();
+    var report = std.ArrayList(u8).empty;
+    const w = report.writer(a);
     if (std.mem.eql(u8, mode, "golden")) {
         if (rest.len < 3) red("cov_report_check", "golden: no report", .{});
         while (rest.len > 0) {
@@ -248,9 +248,9 @@ pub fn reportCheck(a: A, args: []const []const u8) !void {
     } else if (std.mem.eql(u8, mode, "census")) {
         try census(a, rest, w);
     } else if (std.mem.eql(u8, mode, "result")) {
-        var expects = std.ArrayList([]const u8).init(a);
+        var expects = std.ArrayList([]const u8).empty;
         while (rest.len >= 2 and std.mem.eql(u8, rest[0], "--expect")) {
-            try expects.append(rest[1]);
+            try expects.append(a, rest[1]);
             rest = rest[2..];
         }
         if (!(rest.len == 2 and std.mem.eql(u8, rest[0], "--json") and expects.items.len > 0)) usage("report.sh: result needs --expect <s>... --json <file>");
@@ -266,8 +266,8 @@ pub fn reportCheck(a: A, args: []const []const u8) !void {
 fn census(a: A, args: []const []const u8, w: anytype) !void {
     if (args.len < 1 or !std.mem.eql(u8, args[0], "--covcheck")) usage("report.sh: census needs --covcheck first");
     var i: usize = 1;
-    var cc = std.ArrayList([]const u8).init(a);
-    while (i < args.len and !std.mem.eql(u8, args[i], "--package")) : (i += 1) try cc.append(absolute(a, args[i]));
+    var cc = std.ArrayList([]const u8).empty;
+    while (i < args.len and !std.mem.eql(u8, args[i], "--package")) : (i += 1) try cc.append(a, absolute(a, args[i]));
     if (args.len - i < 2) usage("report.sh: census needs --package");
     const pkg = args[i + 1];
     i += 2;
@@ -277,20 +277,20 @@ fn census(a: A, args: []const []const u8, w: anytype) !void {
     try std.fs.cwd().makePath(try std.fs.path.join(a, &.{ root, pkg }));
     defer std.fs.cwd().deleteTree(t) catch {};
     writeFile(try std.fs.path.join(a, &.{ root, pkg, "BUCK" }), "");
-    var repo_files = std.ArrayList(u8).init(a);
-    try repo_files.writer().print("{s}/BUCK\x00", .{pkg});
-    var expects = std.ArrayList([]const u8).init(a);
-    var coberturas = std.ArrayList([]const u8).init(a);
+    var repo_files = std.ArrayList(u8).empty;
+    try repo_files.writer(a).print("{s}/BUCK\x00", .{pkg});
+    var expects = std.ArrayList([]const u8).empty;
+    var coberturas = std.ArrayList([]const u8).empty;
     while (i < args.len) {
         if (std.mem.eql(u8, args[i], "--file") and i + 2 < args.len) {
             writeFile(try std.fs.path.join(a, &.{ root, args[i + 1] }), readFile(a, args[i + 2]));
-            try repo_files.writer().print("{s}\x00", .{args[i + 1]});
+            try repo_files.writer(a).print("{s}\x00", .{args[i + 1]});
             i += 3;
         } else if (std.mem.eql(u8, args[i], "--expect") and i + 1 < args.len) {
-            try expects.append(args[i + 1]);
+            try expects.append(a, args[i + 1]);
             i += 2;
         } else if (std.mem.eql(u8, args[i], "--cobertura") and i + 1 < args.len) {
-            try coberturas.append(absolute(a, args[i + 1]));
+            try coberturas.append(a, absolute(a, args[i + 1]));
             i += 2;
         } else {
             std.debug.print("report.sh: unknown argument {s}\n", .{args[i]});
@@ -300,11 +300,11 @@ fn census(a: A, args: []const []const u8, w: anytype) !void {
     const repo_path = try std.fs.path.join(a, &.{ t, "repo_files" });
     writeFile(repo_path, repo_files.items);
     const result_path = try std.fs.path.join(a, &.{ t, "result.json" });
-    var argv = std.ArrayList([]const u8).init(a);
-    try argv.appendSlice(cc.items);
-    try argv.appendSlice(&.{ "gate", "--package", pkg, "--repo-files", repo_path, "--source-root", root });
-    for (coberturas.items) |c| try argv.appendSlice(&.{ "--cobertura", c });
-    try argv.appendSlice(&.{ "--target-bp", "9900", "--mode", "census", "--result-out", result_path, "--summary-out", try std.fs.path.join(a, &.{ t, "summary.md" }) });
+    var argv = std.ArrayList([]const u8).empty;
+    try argv.appendSlice(a, cc.items);
+    try argv.appendSlice(a, &.{ "gate", "--package", pkg, "--repo-files", repo_path, "--source-root", root });
+    for (coberturas.items) |c| try argv.appendSlice(a, &.{ "--cobertura", c });
+    try argv.appendSlice(a, &.{ "--target-bp", "9900", "--mode", "census", "--result-out", result_path, "--summary-out", try std.fs.path.join(a, &.{ t, "summary.md" }) });
     var env = try std.process.getEnvMap(a);
     try env.put("LC_ALL", "C");
     const r = try std.process.Child.run(.{ .allocator = a, .argv = argv.items, .env_map = &env, .max_output_bytes = 1 << 26 });
@@ -322,42 +322,42 @@ fn census(a: A, args: []const []const u8, w: anytype) !void {
 
 /// The block counts `llvm-profdata show --counts` printed, sorted numerically, each followed by a comma.
 pub fn blockCounts(a: A, show: []const u8) ![]u8 {
-    var nums = std.ArrayList(u64).init(a);
+    var nums = std.ArrayList(u64).empty;
     var lines = std.mem.splitScalar(u8, show, '\n');
     while (lines.next()) |l| {
         const t = std.mem.trimLeft(u8, l, " ");
         const pre = "Block counts: [";
         if (!std.mem.startsWith(u8, t, pre) or t.len == 0 or t[t.len - 1] != ']') continue;
         var parts = std.mem.splitScalar(u8, t[pre.len .. t.len - 1], ',');
-        while (parts.next()) |p| try nums.append(std.fmt.parseInt(u64, std.mem.trim(u8, p, " "), 10) catch 0);
+        while (parts.next()) |p| try nums.append(a, std.fmt.parseInt(u64, std.mem.trim(u8, p, " "), 10) catch 0);
     }
     std.mem.sort(u64, nums.items, {}, std.sort.asc(u64));
-    var out = std.ArrayList(u8).init(a);
-    for (nums.items) |x| try out.writer().print("{d},", .{x});
-    return out.toOwnedSlice();
+    var out = std.ArrayList(u8).empty;
+    for (nums.items) |x| try out.writer(a).print("{d},", .{x});
+    return out.toOwnedSlice(a);
 }
 
 /// The function header lines of `show` (`  name:`), joined by blanks.
 fn headers(a: A, show: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var lines = std.mem.splitScalar(u8, show, '\n');
     while (lines.next()) |l| {
-        if (l.len > 2 and std.mem.startsWith(u8, l, "  ") and l[2] != ' ' and l[l.len - 1] == ':') try out.writer().print("{s} ", .{l});
+        if (l.len > 2 and std.mem.startsWith(u8, l, "  ") and l[2] != ' ' and l[l.len - 1] == ':') try out.writer(a).print("{s} ", .{l});
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 fn firstTwo(a: A, text: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var it = std.mem.splitScalar(u8, text, '\n');
     var n: usize = 0;
     while (it.next()) |l| {
         if (it.peek() == null and l.len == 0) break;
         if (n == 2) break;
-        try out.writer().print("{s} ", .{l});
+        try out.writer(a).print("{s} ", .{l});
         n += 1;
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// cov-branch-check <out> <llvm dir> <profdata> <function> <count>,<count>...
@@ -409,16 +409,16 @@ pub fn recorder(a: A, argv: []const []const u8) !u8 {
     var lines = std.mem.splitScalar(u8, conf, '\n');
     const log = lines.next() orelse return error.BadRecorderConf;
     const real = lines.next() orelse return error.BadRecorderConf;
-    var text = std.ArrayList(u8).init(a);
-    for (argv[1..]) |x| try text.writer().print("{s}\n", .{x});
-    try text.appendSlice("----\n");
+    var text = std.ArrayList(u8).empty;
+    for (argv[1..]) |x| try text.writer(a).print("{s}\n", .{x});
+    try text.appendSlice(a, "----\n");
     const f = std.fs.cwd().openFile(log, .{ .mode = .write_only }) catch try std.fs.cwd().createFile(log, .{});
     defer f.close();
     try f.seekFromEnd(0);
     try f.writeAll(text.items);
-    var cmd = std.ArrayList([]const u8).init(a);
-    try cmd.append(real);
-    try cmd.appendSlice(argv[1..]);
+    var cmd = std.ArrayList([]const u8).empty;
+    try cmd.append(a, real);
+    try cmd.appendSlice(a, argv[1..]);
     return std.process.execv(a, cmd.items) catch 1;
 }
 
@@ -426,20 +426,20 @@ pub fn recorder(a: A, argv: []const []const u8) !u8 {
 /// to compare two links: the compiler's object `<object>`, the output `<out>`, the
 /// target `<target>`, the profile runtime `<runtime>` and the toolchain `<TC>/...`.
 pub fn normalize(a: A, argv_text: []const u8, tc: []const u8, target: []const u8, kind: enum { mojo, branch }) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var after_o = false;
     var lines = std.mem.splitScalar(u8, argv_text, '\n');
     while (lines.next()) |l| {
         if (lines.peek() == null and l.len == 0) break;
         if (std.mem.eql(u8, l, "----")) continue;
         if (after_o) {
-            try out.appendSlice("<out>\n");
+            try out.appendSlice(a, "<out>\n");
             after_o = false;
             continue;
         }
         if (std.mem.eql(u8, l, "-o")) after_o = true;
         if (std.mem.eql(u8, l, target)) {
-            try out.appendSlice("<target>\n");
+            try out.appendSlice(a, "<target>\n");
             continue;
         }
         const is_obj = switch (kind) {
@@ -447,25 +447,25 @@ pub fn normalize(a: A, argv_text: []const u8, tc: []const u8, target: []const u8
             .branch => std.mem.endsWith(u8, l, "/cov_branch_link/pg.o"),
         };
         if (is_obj) {
-            try out.appendSlice("<object>\n");
+            try out.appendSlice(a, "<object>\n");
             continue;
         }
         if (std.mem.endsWith(u8, l, "/libclang_rt.profile-x86_64.a")) {
-            try out.appendSlice("<runtime>\n");
+            try out.appendSlice(a, "<runtime>\n");
             continue;
         }
         if (std.mem.startsWith(u8, l, tc) and l.len > tc.len and l[tc.len] == '/') {
-            try out.writer().print("<TC>/{s}\n", .{l[tc.len + 1 ..]});
+            try out.writer(a).print("<TC>/{s}\n", .{l[tc.len + 1 ..]});
             continue;
         }
-        try out.writer().print("{s}\n", .{l});
+        try out.writer(a).print("{s}\n", .{l});
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// The branch line without its profile runtime: the whole-archive group that holds only `<runtime>` is removed.
 pub fn withoutRuntime(a: A, branch: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var held = false;
     var seen = false;
     var rt = false;
@@ -486,13 +486,13 @@ pub fn withoutRuntime(a: A, branch: []const u8) ![]u8 {
             continue;
         }
         if (held) {
-            try out.writer().print("<unexpected in the whole archive> {s}\n", .{l});
+            try out.writer(a).print("<unexpected in the whole archive> {s}\n", .{l});
             continue;
         }
-        try out.writer().print("{s}\n", .{l});
+        try out.writer(a).print("{s}\n", .{l});
     }
-    if (!rt) try out.appendSlice("<no profile runtime>\n");
-    return out.toOwnedSlice();
+    if (!rt) try out.appendSlice(a, "<no profile runtime>\n");
+    return out.toOwnedSlice(a);
 }
 
 fn runs(text: []const u8) usize {
@@ -513,15 +513,15 @@ fn flatLines(a: A, text: []const u8) []u8 {
 }
 
 fn tail5(a: A, text: []const u8) []u8 {
-    var lines = std.ArrayList([]const u8).init(a);
+    var lines = std.ArrayList([]const u8).empty;
     var it = std.mem.splitScalar(u8, text, '\n');
     while (it.next()) |l| {
         if (it.peek() == null and l.len == 0) break;
-        lines.append(l) catch @panic("oom");
+        lines.append(a, l) catch @panic("oom");
     }
     const from = if (lines.items.len > 5) lines.items.len - 5 else 0;
-    var out = std.ArrayList(u8).init(a);
-    for (lines.items[from..]) |l| out.writer().print("{s} ", .{l}) catch @panic("oom");
+    var out = std.ArrayList(u8).empty;
+    for (lines.items[from..]) |l| out.writer(a).print("{s} ", .{l}) catch @panic("oom");
     return out.items;
 }
 
@@ -543,7 +543,7 @@ pub fn linkLine(a: A, args: []const []const u8) !void {
     try cwd.deleteTree(k);
     try cwd.makePath(try std.fs.path.join(a, &.{ k, "src/tests" }));
     defer cwd.deleteTree(k) catch {};
-    var self_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var self_buf: [std.fs.max_path_bytes]u8 = undefined;
     const self_exe = try std.fs.selfExePath(&self_buf);
     // The stand-in zigs, one per link: this program under the name `zig`, which
     // records its arguments and runs the toolchain's zig.
@@ -560,8 +560,8 @@ pub fn linkLine(a: A, args: []const []const u8) !void {
     writeFile(staged, readFile(a, src));
 
     // 1. The release build of the test, through the wrapper.
-    var argv = std.ArrayList([]const u8).init(a);
-    try argv.appendSlice(&.{
+    var argv = std.ArrayList([]const u8).empty;
+    try argv.appendSlice(a, &.{
         wrapper,
         try std.fmt.allocPrint(a, "--compiler={s}", .{tc}),
         try std.fmt.allocPrint(a, "--zig={s}/zig_mojo", .{k}),
@@ -576,8 +576,8 @@ pub fn linkLine(a: A, args: []const []const u8) !void {
         "--debug-level",
         "line-tables",
     });
-    try argv.appendSlice(args[10..]);
-    try argv.appendSlice(&.{ staged, "-o", try std.fmt.allocPrint(a, "{s}/mojo.exe", .{k}) });
+    try argv.appendSlice(a, args[10..]);
+    try argv.appendSlice(a, &.{ staged, "-o", try std.fmt.allocPrint(a, "{s}/mojo.exe", .{k}) });
     const m = try std.process.Child.run(.{ .allocator = a, .argv = argv.items, .env_map = &env, .max_output_bytes = 1 << 26 });
     if (exitCode(m.term) != 0) red("link_line", "mojo_compile could not build {s}: {s}", .{ test_name, tail5(a, try std.mem.concat(a, u8, &.{ m.stdout, m.stderr })) });
 
@@ -614,7 +614,7 @@ pub fn linkLine(a: A, args: []const []const u8) !void {
     const branch_line = try withoutRuntime(a, branch_full);
     if (!std.mem.eql(u8, mojo_line, branch_line))
         red("link_line", "the branch coverage link is not the release link plus the profile runtime: release: {s}| branch: {s}", .{ flatLines(a, mojo_line), flatLines(a, branch_line) });
-    var report = std.ArrayList(u8).init(a);
-    try report.writer().print("release (mojo build through mojo_compile's cc shim):\n{s}branch coverage (cov_branch link):\n{s}", .{ mojo_line, branch_full });
+    var report = std.ArrayList(u8).empty;
+    try report.writer(a).print("release (mojo build through mojo_compile's cc shim):\n{s}branch coverage (cov_branch link):\n{s}", .{ mojo_line, branch_full });
     writeFile(out_path, report.items);
 }

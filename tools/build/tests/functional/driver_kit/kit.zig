@@ -88,9 +88,9 @@ pub const Ctx = struct {
         const al = self.alloc();
         var e = try std.process.getEnvMap(al);
         for (extra_env) |kv| try e.put(kv[0], kv[1]);
-        var argv = std.ArrayList([]const u8).init(al);
-        try argv.append(tool);
-        try argv.appendSlice(argv_tail);
+        var argv = std.ArrayList([]const u8).empty;
+        try argv.append(al, tool);
+        try argv.appendSlice(al, argv_tail);
         const r = try std.process.Child.run(.{ .allocator = al, .argv = argv.items, .cwd = self.dir, .env_map = &e, .max_output_bytes = 1 << 22 });
         return .{
             .code = switch (r.term) {

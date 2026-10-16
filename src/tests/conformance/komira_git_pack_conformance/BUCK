@@ -64,14 +64,14 @@ zig_test(
     imports = ["gen_packs.zig"],
     src = "gen_packs_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 zig_exe(
     name = "gen_packs",
     exec_compatible_with = LINUX_X86_64,
     src = "gen_packs.zig",
-    unit_tests = [":gen_packs_unit"],
+    unit_tests = [":gen_packs_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
