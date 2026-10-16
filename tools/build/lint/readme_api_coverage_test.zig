@@ -86,9 +86,9 @@ test "exports: the import needs 'import' followed by a blank; a lone module name
 }
 
 fn methodsOf(a: std.mem.Allocator, src: []const u8) ![]S.Method {
-    var out = std.ArrayList(S.Method).init(a);
+    var out = std.ArrayList(S.Method).empty;
     try S.methods(a, "f.mojo", src, &out);
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 test "methods: public def/fn at four spaces of a column-0 struct; header may span lines" {
@@ -197,7 +197,7 @@ test "ledger: comments and blanks skipped; malformed and repeated rows are findi
     var ar = arena();
     defer ar.deinit();
     const a = ar.allocator();
-    var report = std.ArrayList(u8).init(a);
+    var report = std.ArrayList(u8).empty;
     const text = "# c\n\n  \npkg\tSym\twhy\npkg\tType.method\twhy\nbad row\npkg\tSym\tagain\npkg\tSym2\t \n9pkg\tS\tr\npkg\ta.b.c\tr\n";
     const rows = try C.parseLedger(a, "l.tsv", text, &report);
     try t.expectEqual(@as(usize, 2), rows.len);
@@ -231,7 +231,7 @@ test "symbols: names, then methods in the module the import names; overloads are
         .{ .strukt = "Sq", .name = "perimeter", .file = "src/p/shapes.mojo", .line = 12 },
         .{ .strukt = "Real", .name = "go", .file = "src/p/other.mojo", .line = 4 },
     };
-    var out = std.ArrayList(C.Symbol).init(a);
+    var out = std.ArrayList(C.Symbol).empty;
     try C.symbolsOf(a, "p", "src/p", &es, &ms, &out);
     const want = [_][3][]const u8{
         .{ "name", "Sq", "src/p/__init__.mojo:3" },
@@ -254,8 +254,8 @@ test "verdict text: control characters dropped, quote, backslash and tab escaped
     defer ar.deinit();
     const a = ar.allocator();
     try t.expectEqualStrings("a\\\"b\\\\c\\td\\n\\n", try C.escapedFindings(a, "a\"b\\c\td\x01\r\n\n"));
-    var big = std.ArrayList(u8).init(a);
-    for (0..250) |_| try big.appendSlice("x\n");
+    var big = std.ArrayList(u8).empty;
+    for (0..250) |_| try big.appendSlice(a, "x\n");
     const e = try C.escapedFindings(a, big.items);
     try t.expectEqual(@as(usize, 200), std.mem.count(u8, e, "\\n"));
 }

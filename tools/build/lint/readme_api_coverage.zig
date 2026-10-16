@@ -57,15 +57,15 @@ fn isSpace(c: u8) bool {
 /// The ledger: `<package><TAB><symbol><TAB><reason>`; a malformed or repeated
 /// row is a finding appended to `report`.
 pub fn parseLedger(a: A, name: []const u8, text: []const u8, report: *std.ArrayList(u8)) ![]Row {
-    var rows = std.ArrayList(Row).init(a);
+    var rows = std.ArrayList(Row).empty;
     var first = std.StringHashMap(usize).init(a);
     const ls = try scan.records(a, text);
     for (ls, 1..) |line, nr| {
         const t = std.mem.trimLeft(u8, line, " \t\n\r\x0b\x0c");
         if (t.len == 0 or t[0] == '#') continue;
-        var f = std.ArrayList([]const u8).init(a);
+        var f = std.ArrayList([]const u8).empty;
         var it = std.mem.splitScalar(u8, line, '\t');
-        while (it.next()) |x| try f.append(x);
+        while (it.next()) |x| try f.append(a, x);
         var bad = f.items.len != 3 or !scan.isIdent(f.items[0]);
         if (!bad) {
             const sym = f.items[1];
@@ -81,18 +81,18 @@ pub fn parseLedger(a: A, name: []const u8, text: []const u8, report: *std.ArrayL
             if (spaces) bad = true;
         }
         if (bad) {
-            try report.writer().print("{s}:{d}: a row is <package><TAB><symbol><TAB><reason>, with a reason\n", .{ name, nr });
+            try report.writer(a).print("{s}:{d}: a row is <package><TAB><symbol><TAB><reason>, with a reason\n", .{ name, nr });
             continue;
         }
         const key = try std.fmt.allocPrint(a, "{s}\t{s}", .{ f.items[0], f.items[1] });
         if (first.get(key)) |prev| {
-            try report.writer().print("{s}:{d}: {s} {s} has a row already, on line {d}\n", .{ name, nr, f.items[0], f.items[1], prev });
+            try report.writer(a).print("{s}:{d}: {s} {s} has a row already, on line {d}\n", .{ name, nr, f.items[0], f.items[1], prev });
             continue;
         }
         try first.put(key, nr);
-        try rows.append(.{ .pkg = f.items[0], .sym = f.items[1], .line = nr });
+        try rows.append(a, .{ .pkg = f.items[0], .sym = f.items[1], .line = nr });
     }
-    return rows.toOwnedSlice();
+    return rows.toOwnedSlice(a);
 }
 
 pub const Symbol = struct {
@@ -120,7 +120,7 @@ pub fn symbolsOf(a: A, pkg: []const u8, dir: []const u8, exps: []const scan.Expo
     for (exps) |e| {
         if (std.mem.eql(u8, e.name, "*") or seen.contains(e.name)) continue;
         try seen.put(e.name, {});
-        try out.append(.{ .pkg = pkg, .kind = "name", .sym = e.name, .id = e.name, .where = try std.fmt.allocPrint(a, "{s}__init__.mojo:{d}", .{ dir_slash, e.line }) });
+        try out.append(a, .{ .pkg = pkg, .kind = "name", .sym = e.name, .id = e.name, .where = try std.fmt.allocPrint(a, "{s}__init__.mojo:{d}", .{ dir_slash, e.line }) });
         if (std.mem.eql(u8, e.path, "-")) continue;
         var local = false;
         for (ms) |m| {
@@ -132,7 +132,7 @@ pub fn symbolsOf(a: A, pkg: []const u8, dir: []const u8, exps: []const scan.Expo
             if (local and !inModule(m.file, dir_slash.len, e.path)) continue;
             if (got.contains(m.name)) continue;
             try got.put(m.name, {});
-            try out.append(.{
+            try out.append(a, .{
                 .pkg = pkg,
                 .kind = "method",
                 .sym = try std.fmt.allocPrint(a, "{s}.{s}", .{ e.name, m.name }),
@@ -167,43 +167,43 @@ pub fn packagesUnder(a: A, tree: std.fs.Dir, root: []const u8) ![][]const u8 {
         if (std.mem.eql(u8, top, "tests")) continue;
         try names.put(try a.dupe(u8, top), {});
     }
-    var out = std.ArrayList([]const u8).init(a);
+    var out = std.ArrayList([]const u8).empty;
     var it = names.keyIterator();
-    while (it.next()) |k| try out.append(k.*);
+    while (it.next()) |k| try out.append(a, k.*);
     std.mem.sort([]const u8, out.items, {}, lessThan);
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 pub fn sourcesOf(a: A, tree: std.fs.Dir, root: []const u8, p: []const u8) ![][]const u8 {
     const dir = try std.fmt.allocPrint(a, "{s}/{s}", .{ root, p });
     var d = try tree.openDir(dir, .{ .iterate = true });
     defer d.close();
-    var out = std.ArrayList([]const u8).init(a);
+    var out = std.ArrayList([]const u8).empty;
     var w = try d.walk(a);
     while (try w.next()) |e| {
         if (e.kind != .file and e.kind != .sym_link) continue;
         if (!std.mem.endsWith(u8, e.basename, ".mojo")) continue;
         const full = try std.fmt.allocPrint(a, "{s}/{s}", .{ dir, e.path });
         if (std.mem.indexOf(u8, full, "/tests/") != null) continue;
-        try out.append(full);
+        try out.append(a, full);
     }
     std.mem.sort([]const u8, out.items, {}, lessThan);
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 fn firstLines(a: A, log: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var n: usize = 0;
     var it = std.mem.splitScalar(u8, log, '\n');
     while (it.next()) |l| {
         if (it.peek() == null and l.len == 0) break;
         if (n == 3) break;
-        try out.appendSlice(l);
-        try out.append(' ');
+        try out.appendSlice(a, l);
+        try out.append(a, ' ');
         n += 1;
     }
     while (out.items.len > 0 and out.items[out.items.len - 1] == ' ') _ = out.pop();
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 fn census(a: A, argv: []const []const u8) !void {
@@ -230,11 +230,11 @@ fn census(a: A, argv: []const []const u8) !void {
     var tree = cwd.openDir(tree_path, .{ .iterate = true }) catch |e| die("cannot open {s}: {s}", .{ tree_path, @errorName(e) });
     defer tree.close();
 
-    var findings = std.ArrayList(u8).init(a);
-    var notes = std.ArrayList(u8).init(a);
-    var syms = std.ArrayList(Symbol).init(a);
+    var findings = std.ArrayList(u8).empty;
+    var notes = std.ArrayList(u8).empty;
+    var syms = std.ArrayList(Symbol).empty;
     var ids = std.StringHashMap(void).init(a); // "pkg\tn|a\tid"
-    var pkgs = std.ArrayList(PkgRow).init(a);
+    var pkgs = std.ArrayList(PkgRow).empty;
 
     const names = try packagesUnder(a, tree, root);
     for (names) |p| {
@@ -247,9 +247,9 @@ fn census(a: A, argv: []const []const u8) !void {
         if (init) {
             const exps = try scan.exports(a, p, readAll(a, tree, init_path));
             for (exps) |e| {
-                if (std.mem.eql(u8, e.name, "*")) try notes.writer().print("{s}: `from {s} import *` at {s}:{d}: its names cannot be listed, so none is counted\n", .{ p, e.path, init_path, e.line });
+                if (std.mem.eql(u8, e.name, "*")) try notes.writer(a).print("{s}: `from {s} import *` at {s}:{d}: its names cannot be listed, so none is counted\n", .{ p, e.path, init_path, e.line });
             }
-            var ms = std.ArrayList(scan.Method).init(a);
+            var ms = std.ArrayList(scan.Method).empty;
             for (try sourcesOf(a, tree, root, p)) |f| try scan.methods(a, f, readAll(a, tree, f), &ms);
             try symbolsOf(a, p, dir, exps, ms.items, &syms);
         }
@@ -273,7 +273,7 @@ fn census(a: A, argv: []const []const u8) !void {
             if (rc != 0) {
                 readme = "refused";
                 const log = try std.mem.concat(a, u8, &.{ r.stdout, r.stderr });
-                try notes.writer().print("{s}: the readme tool refused {s}/README.md (exit {d}): {s}\n", .{ p, dir, rc, try firstLines(a, log) });
+                try notes.writer(a).print("{s}: the readme tool refused {s}/README.md (exit {d}): {s}\n", .{ p, dir, rc, try firstLines(a, log) });
             } else {
                 const ex = cwd.readFileAlloc(a, examples, 1 << 24) catch "";
                 var count: usize = 0;
@@ -299,25 +299,25 @@ fn census(a: A, argv: []const []const u8) !void {
                 }
             }
         }
-        try pkgs.append(.{ .name = p, .init = init, .readme = readme });
+        try pkgs.append(a, .{ .name = p, .init = init, .readme = readme });
     }
 
     // The ledger, with its line numbers; a malformed or repeated row is a finding.
-    try findings.appendSlice("");
+    try findings.appendSlice(a, "");
     const ledger_text = readAll(a, cwd, ledger_path);
     const rows = try parseLedger(a, ledger_name, ledger_text, &findings);
     var lrow = std.StringHashMap(usize).init(a);
     for (rows) |r| try lrow.put(try std.fmt.allocPrint(a, "{s}\t{s}", .{ r.pkg, r.sym }), r.line);
 
     // The census: symbols, packages, the report, and the ledger's findings.
-    var sym_out = std.ArrayList(u8).init(a);
-    try sym_out.appendSlice("package\tsymbol\tkind\tstatus\twhere\n");
-    var pk_out = std.ArrayList(u8).init(a);
-    try pk_out.appendSlice("package\tinit\treadme\texported\tused\tpercent\tnames\tnames_used\tmethods\tmethods_used\texcepted\tundocumented\n");
+    var sym_out = std.ArrayList(u8).empty;
+    try sym_out.appendSlice(a, "package\tsymbol\tkind\tstatus\twhere\n");
+    var pk_out = std.ArrayList(u8).empty;
+    try pk_out.appendSlice(a, "package\tinit\treadme\texported\tused\tpercent\tnames\tnames_used\tmethods\tmethods_used\texcepted\tundocumented\n");
     const Count = struct { n: u64 = 0, u: u64 = 0, nn: u64 = 0, nu: u64 = 0, mn: u64 = 0, mu: u64 = 0, ex: u64 = 0, un: u64 = 0 };
     var counts = std.StringHashMap(Count).init(a);
     var exported = std.StringHashMap(void).init(a);
-    var undoc = std.ArrayList(u8).init(a);
+    var undoc = std.ArrayList(u8).empty;
     for (syms.items) |s| {
         const key = try std.fmt.allocPrint(a, "{s}\t{s}", .{ s.pkg, s.sym });
         try exported.put(key, {});
@@ -326,7 +326,7 @@ fn census(a: A, argv: []const []const u8) !void {
         const used = ids.contains(id_key);
         const excepted = lrow.contains(key);
         const status: []const u8 = if (used) "used" else if (excepted) "excepted" else "undocumented";
-        try sym_out.writer().print("{s}\t{s}\t{s}\t{s}\t{s}\n", .{ s.pkg, s.sym, s.kind, status, s.where });
+        try sym_out.writer(a).print("{s}\t{s}\t{s}\t{s}\t{s}\n", .{ s.pkg, s.sym, s.kind, status, s.where });
         const gop = try counts.getOrPut(s.pkg);
         if (!gop.found_existing) gop.value_ptr.* = .{};
         const c = gop.value_ptr;
@@ -342,29 +342,29 @@ fn census(a: A, argv: []const []const u8) !void {
         if (std.mem.eql(u8, status, "excepted")) c.ex += 1;
         if (std.mem.eql(u8, status, "undocumented")) {
             c.un += 1;
-            try undoc.writer().print("{s}\t{s}\t{s}\n", .{ s.pkg, s.sym, s.where });
+            try undoc.writer(a).print("{s}\t{s}\t{s}\n", .{ s.pkg, s.sym, s.where });
             if (enforce)
-                try findings.writer().print("{s}{s}: {s} {s}: exported and used by no README example; use it in a ```mojo example of {s}/{s}/README.md, or give it a row in {s}\n", .{ prefix, s.where, s.pkg, s.sym, root, s.pkg, ledger_name });
+                try findings.writer(a).print("{s}{s}: {s} {s}: exported and used by no README example; use it in a ```mojo example of {s}/{s}/README.md, or give it a row in {s}\n", .{ prefix, s.where, s.pkg, s.sym, root, s.pkg, ledger_name });
         }
         if (used and excepted)
-            try findings.writer().print("{s}:{d}: {s} {s}: {s}/{s}/README.md uses it now; delete the row (the ledger only shrinks)\n", .{ ledger_name, lrow.get(key).?, s.pkg, s.sym, root, s.pkg });
+            try findings.writer(a).print("{s}:{d}: {s} {s}: {s}/{s}/README.md uses it now; delete the row (the ledger only shrinks)\n", .{ ledger_name, lrow.get(key).?, s.pkg, s.sym, root, s.pkg });
     }
     for (rows) |r| {
         const key = try std.fmt.allocPrint(a, "{s}\t{s}", .{ r.pkg, r.sym });
         if (!exported.contains(key))
-            try findings.writer().print("{s}:{d}: {s} {s}: not exported by {s}/{s}/__init__.mojo; delete the row\n", .{ ledger_name, r.line, r.pkg, r.sym, root, r.pkg });
+            try findings.writer(a).print("{s}:{d}: {s} {s}: not exported by {s}/{s}/__init__.mojo; delete the row\n", .{ ledger_name, r.line, r.pkg, r.sym, root, r.pkg });
     }
     var tot = Count{};
     var np: usize = 0;
-    var noinit = std.ArrayList(u8).init(a);
-    var noexp = std.ArrayList(u8).init(a);
-    var noreadme_list = std.ArrayList(u8).init(a);
+    var noinit = std.ArrayList(u8).empty;
+    var noexp = std.ArrayList(u8).empty;
+    var noreadme_list = std.ArrayList(u8).empty;
     var noreadme: u64 = 0;
-    var table = std.ArrayList(u8).init(a);
+    var table = std.ArrayList(u8).empty;
     for (pkgs.items) |p| {
         const c = counts.get(p.name) orelse Count{};
         const pc = try percent(a, c.u, c.n, "");
-        try pk_out.writer().print("{s}\t{s}\t{s}\t{d}\t{d}\t{s}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\n", .{ p.name, if (p.init) "yes" else "no", p.readme, c.n, c.u, pc, c.nn, c.nu, c.mn, c.mu, c.ex, c.un });
+        try pk_out.writer(a).print("{s}\t{s}\t{s}\t{d}\t{d}\t{s}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\n", .{ p.name, if (p.init) "yes" else "no", p.readme, c.n, c.u, pc, c.nn, c.nu, c.mn, c.mu, c.ex, c.un });
         np += 1;
         tot.n += c.n;
         tot.u += c.u;
@@ -375,18 +375,18 @@ fn census(a: A, argv: []const []const u8) !void {
         tot.ex += c.ex;
         tot.un += c.un;
         if (!p.init) {
-            try noinit.writer().print(" {s}", .{p.name});
+            try noinit.writer(a).print(" {s}", .{p.name});
         } else if (c.n == 0) {
-            try noexp.writer().print(" {s}", .{p.name});
+            try noexp.writer(a).print(" {s}", .{p.name});
         } else if (std.mem.eql(u8, p.readme, "none")) {
             noreadme += 1;
-            try noreadme_list.writer().print(" {s}", .{p.name});
+            try noreadme_list.writer(a).print(" {s}", .{p.name});
         }
         const pcs = try percent(a, c.u, c.n, "%");
-        try table.writer().print("  {s:<40} {s:>6} {d:>5}/{d:<5} names {d}/{d} methods {d}/{d}  {s}\n", .{ p.name, pcs, c.u, c.n, c.nu, c.nn, c.mu, c.mn, p.readme });
+        try table.writer(a).print("  {s:<40} {s:>6} {d:>5}/{d:<5} names {d}/{d} methods {d}/{d}  {s}\n", .{ p.name, pcs, c.u, c.n, c.nu, c.nn, c.mu, c.mn, p.readme });
     }
-    var rep = std.ArrayList(u8).init(a);
-    const w = rep.writer();
+    var rep = std.ArrayList(u8).empty;
+    const w = rep.writer(a);
     try w.print("README API coverage ({s})\n\n", .{if (enforce) "enforcing" else "report-only"});
     try w.print("packages: {d}; exported: {d}; used: {d} ({s}); names {d}/{d} ({s}); methods {d}/{d} ({s}); excepted: {d}; undocumented: {d}\n", .{
         np,     tot.n,                                    tot.u,  try percent(a, tot.u, tot.n, "%"),
@@ -420,7 +420,7 @@ fn census(a: A, argv: []const []const u8) !void {
         if (std.mem.eql(u8, want_path, "-")) continue;
         const want = readAll(a, cwd, want_path);
         if (std.mem.eql(u8, want, got)) continue;
-        try findings.writer().print("the census differs from {s} (- expected, + got):\n", .{want_name});
+        try findings.writer(a).print("the census differs from {s} (- expected, + got):\n", .{want_name});
         if (try diff.unifiedDiff(a, "expected", "got", want, got)) |d| {
             var ls = std.mem.splitScalar(u8, d, '\n');
             var k: usize = 0;
@@ -430,12 +430,12 @@ fn census(a: A, argv: []const []const u8) !void {
                 k += 1;
                 if (k <= 2) continue;
                 if (emitted == 60) break;
-                try findings.writer().print("{s}\n", .{l});
+                try findings.writer(a).print("{s}\n", .{l});
                 emitted += 1;
             }
         }
     }
-    if (names.len == 0) try findings.writer().print("readme_api_coverage: checked nothing (no package under {s})\n", .{root});
+    if (names.len == 0) try findings.writer(a).print("readme_api_coverage: checked nothing (no package under {s})\n", .{root});
 
     writeFile(packages_out, pk_out.items);
     writeFile(symbols_out, sym_out.items);
@@ -453,21 +453,21 @@ fn writeFile(path: []const u8, data: []const u8) void {
 /// but tab and newline dropped, backslash, quote and tab escaped, each line
 /// ended by a `\n` escape.
 pub fn escapedFindings(a: A, findings: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     const ls = try scan.records(a, findings);
     for (ls[0..@min(ls.len, 200)]) |line| {
         for (line) |c| {
             switch (c) {
                 0...8, 11...31 => {},
-                '\\' => try out.appendSlice("\\\\"),
-                '"' => try out.appendSlice("\\\""),
-                '\t' => try out.appendSlice("\\t"),
-                else => try out.append(c),
+                '\\' => try out.appendSlice(a, "\\\\"),
+                '"' => try out.appendSlice(a, "\\\""),
+                '\t' => try out.appendSlice(a, "\\t"),
+                else => try out.append(a, c),
             }
         }
-        try out.appendSlice("\\n");
+        try out.appendSlice(a, "\\n");
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 fn verdict(a: A, argv: []const []const u8) !void {
@@ -482,12 +482,12 @@ fn verdict(a: A, argv: []const []const u8) !void {
         n += 1;
         if (n == 3) totals = l;
     }
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     if (findings.len > 0) {
         const lines = std.mem.count(u8, findings, "\n");
-        try out.writer().print("{{\"version\": 1, \"data\": {{\"status\": \"failure\", \"message\": \"readme_api_coverage: {d} finding line(s)\\n{s}\"}}}}\n", .{ lines, try escapedFindings(a, findings) });
+        try out.writer(a).print("{{\"version\": 1, \"data\": {{\"status\": \"failure\", \"message\": \"readme_api_coverage: {d} finding line(s)\\n{s}\"}}}}\n", .{ lines, try escapedFindings(a, findings) });
     } else {
-        try out.writer().print("{{\"version\": 1, \"data\": {{\"status\": \"success\", \"message\": \"readme_api_coverage: {s}\"}}}}\n", .{totals});
+        try out.writer(a).print("{{\"version\": 1, \"data\": {{\"status\": \"success\", \"message\": \"readme_api_coverage: {s}\"}}}}\n", .{totals});
     }
     writeFile(argv[2], out.items);
 }

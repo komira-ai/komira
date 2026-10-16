@@ -15,13 +15,13 @@ const A = std.mem.Allocator;
 /// The records of an awk program over `text`: lines, the last one not needing
 /// its newline, no empty record after a final newline.
 pub fn records(a: A, text: []const u8) ![][]const u8 {
-    var out = std.ArrayList([]const u8).init(a);
+    var out = std.ArrayList([]const u8).empty;
     var it = std.mem.splitScalar(u8, text, '\n');
     while (it.next()) |l| {
         if (it.peek() == null and l.len == 0) break;
-        try out.append(l);
+        try out.append(a, l);
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// The non-overlapping `"""` on a line, as awk's gsub counts them.
@@ -128,12 +128,12 @@ fn emit(a: A, out: *std.ArrayList(Export), stmt: []const u8, ln: usize) !void {
         const it = std.mem.trim(u8, raw, " \t");
         if (it.len == 0) continue;
         if (std.mem.eql(u8, it, "*")) {
-            try out.append(.{ .name = "*", .orig = "*", .path = mod, .line = ln });
+            try out.append(a, .{ .name = "*", .orig = "*", .path = mod, .line = ln });
             continue;
         }
-        var w = std.ArrayList([]const u8).init(a);
+        var w = std.ArrayList([]const u8).empty;
         var parts = std.mem.tokenizeAny(u8, it, " \t");
-        while (parts.next()) |x| try w.append(x);
+        while (parts.next()) |x| try w.append(a, x);
         const orig = w.items[0];
         const name = if (w.items.len >= 3 and std.mem.eql(u8, w.items[1], "as")) w.items[2] else orig;
         if (name[0] == '_' or !isIdent(name)) continue;
@@ -145,7 +145,7 @@ fn emit(a: A, out: *std.ArrayList(Export), stmt: []const u8, ln: usize) !void {
             }
             path = p;
         }
-        try out.append(.{ .name = name, .orig = orig, .path = path, .line = ln });
+        try out.append(a, .{ .name = name, .orig = orig, .path = path, .line = ln });
     }
 }
 
@@ -154,7 +154,7 @@ fn emit(a: A, out: *std.ArrayList(Export), stmt: []const u8, ln: usize) !void {
 /// parenthesised and backslash-continued forms included), and the column-0
 /// declarations. Lines in triple-quoted strings and comments are not read.
 pub fn exports(a: A, pkg: []const u8, text: []const u8) ![]Export {
-    var out = std.ArrayList(Export).init(a);
+    var out = std.ArrayList(Export).empty;
     const own = try std.fmt.allocPrint(a, "from {s}.", .{pkg});
     var instr = false;
     var pending: ?[]const u8 = null;
@@ -201,13 +201,13 @@ pub fn exports(a: A, pkg: []const u8, text: []const u8) ![]Export {
             if (afterWord(line, kw)) |rest| {
                 if (rest.len > 0 and isIdentStart(rest[0])) {
                     const name = identPrefix(rest);
-                    if (name[0] != '_') try out.append(.{ .name = name, .orig = name, .path = "__init__", .line = nr });
+                    if (name[0] != '_') try out.append(a, .{ .name = name, .orig = name, .path = "__init__", .line = nr });
                 }
                 break;
             }
         }
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 pub const Method = struct {
@@ -277,7 +277,7 @@ pub fn methods(a: A, file: []const u8, text: []const u8, out: *std.ArrayList(Met
             if (rest.len == 0 or !isIdentStart(rest[0])) continue;
             const name = identPrefix(rest);
             if (name[0] == '_' or std.mem.eql(u8, name, "write_to") or std.mem.eql(u8, name, "write_repr_to")) continue;
-            try out.append(.{ .strukt = cur, .name = name, .file = file, .line = nr });
+            try out.append(a, .{ .strukt = cur, .name = name, .file = file, .line = nr });
         }
     }
 }
@@ -292,14 +292,14 @@ pub const Ids = struct {
     imp: i64 = 0,
 
     fn scan(self: *Ids, a: A, s: []const u8) ![]u8 {
-        var out = std.ArrayList(u8).init(a);
+        var out = std.ArrayList(u8).empty;
         var i: usize = 0;
         while (i < s.len) {
             if (self.q.len > 0) {
                 if (std.mem.startsWith(u8, s[i..], self.q)) {
                     i += self.q.len;
                     self.q = "";
-                    try out.append(' ');
+                    try out.append(a, ' ');
                     continue;
                 }
                 if (s[i] == '\\') {
@@ -315,14 +315,14 @@ pub const Ids = struct {
                 const three: []const u8 = if (c == '"') "\"\"\"" else "'''";
                 self.q = if (std.mem.startsWith(u8, s[i..], three)) three else if (c == '"') "\"" else "'";
                 i += self.q.len;
-                try out.append(' ');
+                try out.append(a, ' ');
                 continue;
             }
-            try out.append(c);
+            try out.append(a, c);
             i += 1;
         }
         if (self.q.len == 1) self.q = "";
-        return out.toOwnedSlice();
+        return out.toOwnedSlice(a);
     }
 
     pub fn feed(self: *Ids, a: A, line: []const u8, keys: *std.StringHashMap(void)) !void {
@@ -346,14 +346,14 @@ pub const Ids = struct {
             }
         }
         // gsub(/\./, " .") then everything but [A-Za-z0-9_.] to a blank.
-        var spaced = std.ArrayList(u8).init(a);
+        var spaced = std.ArrayList(u8).empty;
         for (s) |c| {
             if (c == '.') {
-                try spaced.append(' ');
-                try spaced.append('.');
+                try spaced.append(a, ' ');
+                try spaced.append(a, '.');
             } else if (isIdentChar(c)) {
-                try spaced.append(c);
-            } else try spaced.append(' ');
+                try spaced.append(a, c);
+            } else try spaced.append(a, ' ');
         }
         var prev: []const u8 = "";
         var toks = std.mem.tokenizeScalar(u8, spaced.items, ' ');

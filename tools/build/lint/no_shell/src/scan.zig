@@ -24,7 +24,7 @@ const std = @import("std");
 
 pub const Category = enum { busybox_sh, sh_argv, shell_path, sh_script, shell_rule };
 
-pub const category_count = @typeInfo(Category).Enum.fields.len;
+pub const category_count = @typeInfo(Category).@"enum".fields.len;
 
 pub const Counts = [category_count]usize;
 

@@ -62,7 +62,7 @@ test "parseLedger: rows, comments, and the two refusals" {
     var ar = arena();
     defer ar.deinit();
     const a = ar.allocator();
-    var report = std.ArrayList(u8).init(a);
+    var report = std.ArrayList(u8).empty;
     const text = "# c\n\nsrc/a\tno test yet\nsrc/b\n\t\nsrc/c\t \nsrc/a\tsecond\n  # indented comment\nsrc/d\treason with\ttab\nsrc/e\tok\n";
     const rows = try W.parseLedger(a, "ledger.tsv", text, &report);
     try t.expectEqual(@as(usize, 2), rows.len);
@@ -81,7 +81,7 @@ test "parseLedger: rows, comments, and the two refusals" {
 fn run(a: std.mem.Allocator, welded: []const []const u8, ledger: []const u8) ![][]const u8 {
     const cs = try W.classify(a, "src", &mojo, welded);
     const ps = try W.packages(a, cs);
-    var report = std.ArrayList(u8).init(a);
+    var report = std.ArrayList(u8).empty;
     const rows = try W.parseLedger(a, "ledger.tsv", ledger, &report);
     return W.findings(a, "src", "komira//", "ledger.tsv", cs, ps, rows);
 }

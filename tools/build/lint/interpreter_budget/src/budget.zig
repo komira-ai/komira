@@ -132,7 +132,7 @@ fn lessThan(_: void, a: Found, b: Found) bool {
 /// `scope`, sorted by path. Each file is read only for its first `head_len`
 /// bytes. A symbolic link is followed.
 pub fn collect(alloc: Alloc, dir: std.fs.Dir, scope: []const []const u8) ![]const Found {
-    var list = std.ArrayList(Found).init(alloc);
+    var list = std.ArrayList(Found).empty;
     var walker = try dir.walk(alloc);
     defer walker.deinit();
     var head: [head_len]u8 = undefined;
@@ -152,9 +152,9 @@ pub fn collect(alloc: Alloc, dir: std.fs.Dir, scope: []const []const u8) ![]cons
             else => return err,
         };
         const why = try classify(alloc, e.path, head[0..n]) orelse continue;
-        try list.append(.{ .path = try alloc.dupe(u8, e.path), .why = why });
+        try list.append(alloc, .{ .path = try alloc.dupe(u8, e.path), .why = why });
     }
-    const found = try list.toOwnedSlice();
+    const found = try list.toOwnedSlice(alloc);
     std.mem.sort(Found, found, {}, lessThan);
     return found;
 }
@@ -169,10 +169,10 @@ const Row = struct {
 /// `allowlist`, the text of the file named `name`, and writes one line per
 /// finding to `out`.
 pub fn check(alloc: Alloc, name: []const u8, allowlist: []const u8, scope: []const []const u8, found: []const Found, out: *std.ArrayList(u8)) !Result {
-    const w = out.writer();
+    const w = out.writer(alloc);
     var findings: usize = 0;
-    var rows = std.ArrayList(Row).init(alloc);
-    defer rows.deinit();
+    var rows = std.ArrayList(Row).empty;
+    defer rows.deinit(alloc);
     var by_path = std.StringHashMap(usize).init(alloc);
     defer by_path.deinit();
 
@@ -216,7 +216,7 @@ pub fn check(alloc: Alloc, name: []const u8, allowlist: []const u8, scope: []con
             continue;
         }
         slot.value_ptr.* = rows.items.len;
-        try rows.append(.{ .path = path, .line = lineno });
+        try rows.append(alloc, .{ .path = path, .line = lineno });
     }
 
     for (found) |f| {
