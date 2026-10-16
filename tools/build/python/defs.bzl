@@ -142,7 +142,7 @@ _python_dist = rule(
         "native_libs": attrs.option(attrs.dep(), default = None),
         "preload": attrs.list(attrs.string(), default = []),
         "version": attrs.string(),
-        "_python_act": attrs.exec_dep(default = "komira//tools/build/python:python_act", providers = [RunInfo]),
+        "_python_act": attrs.exec_dep(default = "komira//tools/build/python_act:python_act", providers = [RunInfo]),
     },
 )
 

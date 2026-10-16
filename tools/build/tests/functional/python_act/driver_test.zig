@@ -1,4 +1,4 @@
-//! The process behaviour of `python_act dist` (tools/build/python/python_act.zig)
+//! The process behaviour of `python_act dist` (tools/build/python_act/python_act.zig)
 //! over archives built in memory and a stand-in interpreter (fake.zig).
 const std = @import("std");
 const kit = @import("driver_kit");
