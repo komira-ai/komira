@@ -34,10 +34,12 @@
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
-from std.time import perf_counter_ns
 
 from komira_column_kernels.regexp_nfa import (
     RegexProgram,
+    RegexScratch,
+    REGEX_ENGINE_PIKE,
+    REGEX_ENGINE_BITSTATE,
     ANCHOR_NONE,
     ANCHOR_BOS,
     ANCHOR_BOL,
@@ -369,141 +371,188 @@ def test_utf8_dot_is_a_byte_and_that_is_unchanged() raises:
 
 
 # ---------------------------------------------------------------------------
-# 7. PERF — the RED/GREEN for Fix B.  RATIO-based, so it is independent of
-#    machine speed; the real effect is ~1000x on this input and the bar is 8x.
+# 7. COST PINS — the RED/GREEN for Fix B and Fix A, by COUNTING.
+#
+#    Nothing below reads a clock.  The VM carries witness counters (see
+#    `_ThreadList` / `BitStateScratch`): seeds, threads stepped, byte positions
+#    visited, heap-block events.  A cost regression changes those counts, and
+#    the counts are the same on every machine, loaded or idle.
 # ---------------------------------------------------------------------------
 
 
-def _time_ns_matching(pattern: String, subject: List[UInt8], reps: Int) raises -> Int:
-    var prog = RegexProgram.compile(pattern, "")
-    # Warm.
-    _ = prog.is_match(subject)
-    var t0 = perf_counter_ns()
-    for _ in range(reps):
-        var m = prog.is_match(subject)
-        if m:
-            raise Error("regexp anchor perf pin: pattern must match NOTHING")
-    return perf_counter_ns() - t0
-
-
-def test_perf_anchored_no_match_is_far_cheaper_than_unanchored() raises:
-    # ⛔ THE RED.  Before the doomed-seed elision these two are within ~1.4x of
-    # each other (MEASURED on ClickBench Q28: 6,593 s vs 9,400 s of CPU) because
-    # the anchored program is seeded at every byte position and only discovers
-    # `^` cannot hold one epsilon-step later, AFTER allocating the slot vector.
-    # After the elision the anchored arm does O(1) work per subject.
-    var n = 32768
+def _letters(n: Int, modulus: Int) -> List[UInt8]:
     var subj = List[UInt8](capacity=n)
     for i in range(n):
-        subj.append(UInt8(ord("a") + (i % 23)))
-    var anchored = _time_ns_matching("^ZQXJ://[^/]+/", subj, 3)
-    var unanchored = _time_ns_matching("ZQXJ://[^/]+/", subj, 3)
-    # 8x is a floor with two orders of magnitude of headroom; it is not a
-    # measurement, it is a refusal to regress to the old behaviour.
-    assert_true(
-        unanchored > 8 * anchored,
-        String(
-            "anchored seed elision is not in effect: anchored=",
-            anchored,
-            "ns unanchored=",
-            unanchored,
-            "ns ratio=",
-            Float64(unanchored) / Float64(max(anchored, 1)),
-        ),
-    )
+        subj.append(UInt8(ord("a") + (i % modulus)))
+    return subj^
 
 
-def _calibrate_ns(subject: List[UInt8], reps: Int) -> Int:
-    """A machine-speed RULER: allocation-free, non-vectorisable byte work over
-    the same buffer the regexp arms walk.
+struct _Counts(Copyable, Movable):
+    var seeds: Int
+    var steps: Int
+    var positions: Int
 
-    ⭐ WHY A RULER AND NOT A WALL CLOCK.  The perf pin below has to survive
-    running on any farm worker, so it asserts a DIMENSIONLESS ratio.  This loop
-    carries a serial dependency (`acc` feeds itself), so it cannot be
-    vectorised away and it tracks core clock and nothing else.  MEASURED, it
-    reproduced to 0.1% across two different binaries: 2,995,416 ns and
-    2,992,317 ns for the same 200 reps.
-    """
-    var best = -1
-    var sink = 0
-    for _ in range(4):
-        var t0 = perf_counter_ns()
-        for _ in range(reps):
-            var acc = 1
-            for i in range(len(subject)):
-                acc = (acc * 31 + Int(subject[i])) & 0xFFFFFFF
-            sink += acc
-        var dt = perf_counter_ns() - t0
-        if best < 0 or dt < best:
-            best = dt
-    if sink == -12345:      # never true; keeps the loop from being elided
-        return -1
-    return best
+    def __init__(out self, seeds: Int, steps: Int, positions: Int):
+        self.seeds = seeds
+        self.steps = steps
+        self.positions = positions
 
 
-def _bench_is_match_ns(pattern: String, subject: List[UInt8], reps: Int) raises -> Int:
+def _pike_counts(pattern: String, flags: String, subject: List[UInt8]) raises -> _Counts:
+    """Run a fresh Pike VM over `subject` (no match allowed) and read its witness."""
+    var prog = RegexProgram.compile(pattern, flags)
+    var sc = RegexScratch()
+    var m = prog.find_from_with_engine(Span(subject), 0, sc, REGEX_ENGINE_PIKE)
+    if m.matched:
+        raise Error("regexp cost pin: pattern must match NOTHING")
+    return _Counts(sc.vm_seeds(), sc.vm_steps(), sc.vm_positions())
+
+
+def _bitstate_counts(pattern: String, flags: String, subject: List[UInt8]) raises -> _Counts:
+    """Same, on the BitState engine: seeds = start positions tried, steps =
+    (pc, position) states visited."""
+    var prog = RegexProgram.compile(pattern, flags)
+    var sc = RegexScratch()
+    var m = prog.find_from_with_engine(Span(subject), 0, sc, REGEX_ENGINE_BITSTATE)
+    if m.matched:
+        raise Error("regexp cost pin: pattern must match NOTHING")
+    return _Counts(sc.bits.seeds, sc.bits.visits, 0)
+
+
+def test_anchored_no_match_seeds_one_thread_unanchored_seeds_every_byte() raises:
+    # ⛔ THE RED FOR FIX B.  Before the doomed-seed elision an anchored program
+    # was seeded at every byte position and only discovered `^` could not hold
+    # one epsilon-step later, so a non-matching anchored search cost as much as
+    # an unanchored one.  After it, the anchored search seeds ONLY where the
+    # anchor can hold.  Counted on both engines, at two subject lengths: the
+    # anchored counts are the same at 1,024 and 32,768 bytes (O(1)), the
+    # unanchored ones are exactly one seed per byte position (O(n)).
+    var small = _letters(1024, 23)
+    var big = _letters(32768, 23)
+    var anch = "^ZQXJ://[^/]+/"
+    var unanch = "ZQXJ://[^/]+/"
+
+    var pa_small = _pike_counts(anch, "", small)
+    var pa_big = _pike_counts(anch, "", big)
+    assert_equal(pa_big.seeds, 1, "anchored Pike search must seed exactly once")
+    assert_equal(pa_big.positions, 1, "anchored Pike search must visit exactly one position")
+    assert_equal(pa_big.seeds, pa_small.seeds, "anchored seeds depend on subject length")
+    assert_equal(pa_big.steps, pa_small.steps, "anchored steps depend on subject length")
+    assert_equal(pa_big.positions, pa_small.positions, "anchored positions depend on subject length")
+    assert_true(pa_big.steps < 8, String("anchored Pike search stepped ", pa_big.steps, " threads"))
+
+    var pu = _pike_counts(unanch, "", big)
+    assert_equal(pu.seeds, 32768 + 1, "unanchored Pike search seeds one thread per byte position")
+    assert_equal(pu.positions, 32768 + 1)
+    assert_true(pu.steps >= 32768, String("unanchored Pike stepped only ", pu.steps, " threads"))
+
+    var ba_small = _bitstate_counts(anch, "", small)
+    var ba_big = _bitstate_counts(anch, "", big)
+    assert_equal(ba_big.seeds, 1, "anchored BitState search must try exactly one start")
+    assert_equal(ba_big.seeds, ba_small.seeds)
+    assert_equal(ba_big.steps, ba_small.steps, "anchored BitState visits depend on subject length")
+    assert_true(ba_big.steps < 8, String("anchored BitState visited ", ba_big.steps, " states"))
+
+    var bu = _bitstate_counts(unanch, "", big)
+    assert_equal(bu.seeds, 32768 + 1, "unanchored BitState tries every start position")
+    assert_true(bu.steps >= 32768, String("unanchored BitState visited only ", bu.steps, " states"))
+
+
+def test_multiline_caret_seeds_once_per_line_start() raises:
+    # `^` under `(?m)` can hold at position 0 and after each `\n`, so a
+    # 5-line subject is seeded exactly 5 times -- not once per byte.
+    var line = 100
+    var subj = List[UInt8]()
+    for k in range(5):
+        if k > 0:
+            subj.append(UInt8(10))
+        for i in range(line):
+            subj.append(UInt8(ord("a") + (i % 23)))
+    var pike = _pike_counts("(?m)^ZQXJ://[^/]+/", "", subj)
+    assert_equal(pike.seeds, 5, "BOL-anchored Pike search must seed once per line start")
+    assert_equal(pike.positions, 5, "BOL-anchored Pike search must visit only line starts")
+    var bit = _bitstate_counts("(?m)^ZQXJ://[^/]+/", "", subj)
+    assert_equal(bit.seeds, 5, "BOL-anchored BitState search must try once per line start")
+
+
+def _assert_epsilon_closure_is_allocation_free(pattern: String, min_steps_per_byte: Int) raises:
+    """A warm scratch runs `pattern` over 512 and then 4,096 bytes and must
+    not grow, rebuild or re-fill anything, whatever the subject length."""
+    var small = 512
+    var large = 4096
     var prog = RegexProgram.compile(pattern, "")
-    _ = prog.is_match(subject)          # warm
-    var best = -1
-    for _ in range(4):
-        var t0 = perf_counter_ns()
-        for _ in range(reps):
-            _ = prog.is_match(subject)
-        var dt = perf_counter_ns() - t0
-        if best < 0 or dt < best:
-            best = dt
-    return best
+    var sc = RegexScratch()
+    var s1 = _letters(small, 16)
+    var s8 = _letters(large, 16)
+
+    # Cold call: the witness must be live (it must register the first growth),
+    # or a zero below would prove nothing.
+    assert_false(prog.is_match_with(Span(s1), sc))
+    assert_true(sc.vm_grows() > 0, "the grow witness did not register the cold call's growth")
+    var cap_warm = sc.vm_capacity()
+    assert_true(cap_warm[3] > 0, "the closure slot stack was never used")
+
+    var g0 = sc.vm_grows()
+    var gen0 = sc.vm_generation()
+    var steps0 = sc.vm_steps()
+    assert_false(prog.is_match_with(Span(s1), sc))
+    var g1 = sc.vm_grows()
+    var gen1 = sc.vm_generation()
+    var steps1 = sc.vm_steps()
+    assert_false(prog.is_match_with(Span(s8), sc))
+    var g2 = sc.vm_grows()
+    var gen2 = sc.vm_generation()
+    var steps2 = sc.vm_steps()
+
+    # (1) No heap-block event on a warm scratch, at either length.
+    assert_equal(g1 - g0, 0, String("a warm short search allocated ", g1 - g0, " times"))
+    assert_equal(g2 - g1, 0, String("a warm long search allocated ", g2 - g1, " times"))
+    # (2) Every list kept its capacity: the same heap blocks served both lengths.
+    var cap_after = sc.vm_capacity()
+    for k in range(len(cap_warm)):
+        assert_equal(cap_after[k], cap_warm[k], String("list ", k, " changed capacity"))
+    # (3) The `seen` set is cleared by a generation bump per byte position, not
+    # by writing the array: the generation moves by at least one per position.
+    assert_true(gen1 - gen0 >= small, String("seen set not reset by generation: moved ", gen1 - gen0))
+    assert_true(gen2 - gen1 >= large, String("seen set not reset by generation: moved ", gen2 - gen1))
+    # (4) The arm is not vacuous: it really steps that many threads per byte.
+    assert_true(steps1 - steps0 >= min_steps_per_byte * small, String("only ", steps1 - steps0, " threads stepped"))
+    assert_true(steps2 - steps1 >= min_steps_per_byte * large, String("only ", steps2 - steps1, " threads stepped"))
 
 
-def test_perf_the_epsilon_closure_is_not_allocating_per_step() raises:
-    # ⛔ THE RED FOR FIX A, in units of the ruler above.
-    #
-    # Before Fix A every epsilon SPLIT/SAVE allocated a fresh `List[Int]`
-    # capture vector, `_add_thread` allocated its two closure stacks on EVERY
-    # call, `slots_for` allocated one more list per thread per byte position,
-    # and `reset` memset the whole `seen` array once per byte.  MEASURED on
-    # ClickBench Q28 that is an 81.73% allocator profile at IPC 1.87 -- pure
-    # instruction count, nothing stalling.
-    #
-    # MEASURED HERE, same subject, same reps, both arms normalised by the ruler:
-    #
-    #     arm                              pre-Fix-A   post-Fix-A   bar
-    #     16-way alternation (many SPLITs)    40.17        8.60      20.0
-    #     equivalent char class (no SPLITs)    7.52        1.72       4.0
-    #
-    # Each bar sits ~2.0x below the old value and ~2.3x above the new one.  Both
-    # arms are kept because the alternation arm alone would let a fix that only
-    # cheapened SPLIT pass; the char-class arm has almost no SPLITs and still
-    # moved 4.4x, which is the seed and per-thread allocations going away.
-    var n = 8192
-    var subj = List[UInt8](capacity=n)
-    for i in range(n):
-        subj.append(UInt8(ord("a") + (i % 16)))
+def test_epsilon_closure_alternation_does_not_allocate_per_step() raises:
+    # ⛔ THE RED FOR FIX A, arm 1: 15 SPLITs per seed.  Before Fix A every
+    # SPLIT/SAVE allocated a fresh `List[Int]`, `_add_thread` allocated its
+    # closure stacks on every call, and the `seen` set was memset per byte.
+    # Each of those shows up here: a list that grows or is rebuilt bumps the
+    # grow witness, and a memset in place of the generation bump leaves the
+    # generation still.
+    _assert_epsilon_closure_is_allocation_free("(?:a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p)zz", 16)
 
-    var ruler = _calibrate_ns(subj, 200)
-    assert_true(ruler > 0, "calibration loop produced no time")
 
-    var alt = _bench_is_match_ns("(?:a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p)zz", subj, 3)
-    var alt_r = Float64(alt) / Float64(ruler)
-    assert_true(
-        alt_r < 20.0,
-        String(
-            "epsilon SPLIT steps still allocate: alt=", alt,
-            "ns ruler=", ruler, "ns ratio=", alt_r,
-            " (bar 20.0; measured pre-Fix-A 40.17, post-Fix-A 8.60)",
-        ),
-    )
+def test_epsilon_closure_char_class_does_not_allocate_per_step() raises:
+    # Arm 2: `[a-p]zz` has almost no SPLITs, so it guards the per-seed and
+    # per-thread allocations (init slots, stack_pc, stack_slots, the SAVE copy)
+    # rather than the SPLIT cost.  A fix that only cheapened SPLIT passes arm 1
+    # and fails here.
+    _assert_epsilon_closure_is_allocation_free("[a-p]zz", 1)
 
-    var cls = _bench_is_match_ns("[a-p]zz", subj, 3)
-    var cls_r = Float64(cls) / Float64(ruler)
-    assert_true(
-        cls_r < 4.0,
-        String(
-            "the per-thread / per-seed allocations are still there: cls=", cls,
-            "ns ruler=", ruler, "ns ratio=", cls_r,
-            " (bar 4.0; measured pre-Fix-A 7.52, post-Fix-A 1.72)",
-        ),
-    )
+
+def test_a_scratch_rebuilt_per_call_is_not_free() raises:
+    # The witness's own falsifier: constructing a fresh scratch per call is the
+    # allocation pattern Fix A removed, and it must read as growth every time.
+    var prog = RegexProgram.compile("[a-p]zz", "")
+    var s = _letters(256, 16)
+    for _ in range(3):
+        var sc = RegexScratch()
+        assert_false(prog.is_match_with(Span(s), sc))
+        assert_true(sc.vm_grows() > 0, "a fresh scratch must register growth")
+    var warm = RegexScratch()
+    assert_false(prog.is_match_with(Span(s), warm))
+    var before = warm.vm_grows()
+    for _ in range(3):
+        assert_false(prog.is_match_with(Span(s), warm))
+    assert_equal(warm.vm_grows(), before, "a reused scratch must not grow")
 
 
 def main() raises:
