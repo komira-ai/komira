@@ -41,7 +41,7 @@ inputs:
   execution-concurrency-limit:
     description: How many actions this client lets run on the farm at once.
     required: false
-    default: "32"
+    default: "256"
   darwin-properties:
     description: The macOS arm64 worker property set. Given together with darwin-macos-hosts or not at all, and different from farm-properties. Left out, no macOS platform is configured.
     required: false
