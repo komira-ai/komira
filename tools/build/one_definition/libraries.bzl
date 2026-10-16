@@ -44,6 +44,9 @@ SRC_C_LIBRARIES = [
     "//src/tests/helpers/komira_udf_spike_native:komira_udf_spike_native_c",
     "//src/tests/helpers/komira_udf_spike_node_worker:komira_udf_node_worker_proxy",
     "//src/tests/helpers/komira_udf_spike_node_worker:komira_udf_spike_node_worker_engine",
+    "//src/tests/helpers/komira_udf_spike_pyworker:komira_udf_pyworker_drive",
+    "//src/tests/helpers/komira_udf_spike_pyworker:komira_udf_pyworker_probe",
+    "//src/tests/helpers/komira_udf_spike_pyworker:komira_udf_pyworker_proxy",
 ]
 
 THIRD_PARTY_C_LIBRARIES = [
