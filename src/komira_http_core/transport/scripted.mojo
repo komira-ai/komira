@@ -43,6 +43,7 @@ from komira_async.runtime.runtime_trait import Runtime
 from .io_stream import (
     Connector,
     IoStream,
+    NoDialAddress,
     NEGOTIATED_HTTP_1_1,
     Pending,
     StreamIo,
@@ -670,7 +671,7 @@ struct ScriptedStream(IoStream, Movable, Deinitable):
 # refinement; This version ships the single-connect case which covers ~80% of
 # state-machine tests).
 
-struct ScriptedConnector(Connector, Movable, Deinitable):
+struct ScriptedConnector(Connector, NoDialAddress, Movable, Deinitable):
     """Mock Connector. Pre-loads a ScriptedStream; hands it
     out on connect(). The `[RT: Runtime]` parameterization is the same
     as KernelTcpConnector — tests get the same monomorphization shape.
@@ -831,6 +832,12 @@ struct ScriptedConnector(Connector, Movable, Deinitable):
         send_buffered calls via h2 multiplex result in exactly ONE
         connect (the second call reuses the pooled conn)."""
         return self._connect_call_count
+
+    def ignores_dial_address(self) -> Bool:
+        """`NoDialAddress`: no socket is opened, so `connect` never reads the
+        `ip_be` it is given and the client resolves no name for this
+        connector."""
+        return True
 
     def set_dial_host(mut self, var host: String):
         """RECORD the host the next dial is FOR (`Connector.set_dial_host`).
