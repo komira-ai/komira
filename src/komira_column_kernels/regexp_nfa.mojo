@@ -1842,9 +1842,9 @@ struct RegexProgram(Movable, Copyable):
         # `clear()` + a generation bump, which keeps every heap block the previous
         # row already grew.
         if len(clist.seen_gen) != prog_len:
-            clist = _ThreadList(prog_len)
+            clist.rebuild(prog_len)
         if len(nlist.seen_gen) != prog_len:
-            nlist = _ThreadList(prog_len)
+            nlist.rebuild(prog_len)
         clist.reset()
         nlist.reset()
         var matched = False
@@ -1860,14 +1860,22 @@ struct RegexProgram(Movable, Copyable):
         # start-anchored, so the unanchored search is bit-for-bit unchanged.
         var anchor = self.start_anchor
         var sp = min_start
+        # Witness counts (see `_ThreadList`): locals, folded into the scratch
+        # once at the end, so the stepping loop pays register increments only.
+        var w_seeds = 0
+        var w_steps = 0
+        var w_positions = 0
         while True:
+            w_positions += 1
             # Seed an unanchored start thread at sp (only while no match yet,
             # sp >= min_start, and the program's start anchor can hold here).
             if not matched and sp >= min_start and _seed_can_survive(anchor, subject, sp):
+                w_seeds += 1
                 self._seed_thread(clist, nslots, subject, sp, n)
             var b = Int(subject[sp]) if sp < n else -1
             var ti = 0
             while ti < clist.count:
+                w_steps += 1
                 var pc = clist.pcs[ti]
                 var base = ti * nslots     # this thread's slots in `slots_flat`
                 var ins = self.prog[pc]
@@ -1921,6 +1929,9 @@ struct RegexProgram(Movable, Copyable):
                     clist.reset()
                     sp = nxt
 
+        clist.seeds += w_seeds
+        clist.steps += w_steps
+        clist.positions += w_positions
         var result = RegexMatch()
         result.matched = matched
         if matched:
@@ -1937,9 +1948,9 @@ struct RegexProgram(Movable, Copyable):
         """Add the start thread (pc 0, all slots unset) at `pos`."""
         tl.stack_pc.clear()
         tl.stack_slots.clear()
-        tl.stack_pc.append(0)
+        tl.push_stack_pc(0)
         for _ in range(nslots):
-            tl.stack_slots.append(-1)
+            tl.push_stack_slot(-1)
         self._closure(tl, nslots, subject, pos, n)
 
     def _add_thread_from(self, mut tl: _ThreadList, pc: Int, src: List[Int], src_base: Int, nslots: Int, subject: Span[UInt8, _], pos: Int, n: Int):
@@ -1952,9 +1963,9 @@ struct RegexProgram(Movable, Copyable):
         """
         tl.stack_pc.clear()
         tl.stack_slots.clear()
-        tl.stack_pc.append(pc)
+        tl.push_stack_pc(pc)
         for k in range(nslots):
-            tl.stack_slots.append(src[src_base + k])
+            tl.push_stack_slot(src[src_base + k])
         self._closure(tl, nslots, subject, pos, n)
 
     def _closure(self, mut tl: _ThreadList, nslots: Int, subject: Span[UInt8, _], pos: Int, n: Int):
@@ -1981,26 +1992,26 @@ struct RegexProgram(Movable, Copyable):
             var ins = self.prog[cur_pc]
             if ins.op == OP_JMP:
                 # Slots are inherited unchanged by the jump target.
-                tl.stack_pc.append(ins.a)
+                tl.push_stack_pc(ins.a)
             elif ins.op == OP_SPLIT:
                 # a = higher priority; push b first so a is popped first.  The
                 # region already at `sbase` becomes b's; a gets the duplicate on
                 # top.  They are equal, so which one is "the original" does not
                 # matter -- only the pc order does.
-                tl.stack_pc.append(ins.b)
-                tl.stack_pc.append(ins.a)
+                tl.push_stack_pc(ins.b)
+                tl.push_stack_pc(ins.a)
                 for k in range(nslots):
                     var v = tl.stack_slots[sbase + k]
-                    tl.stack_slots.append(v)
+                    tl.push_stack_slot(v)
             elif ins.op == OP_SAVE:
                 # In-place: this region is uniquely owned by this stack entry
                 # (a SPLIT is the only thing that ever shares, and it copies).
                 if ins.a < nslots:
                     tl.stack_slots[sbase + ins.a] = pos
-                tl.stack_pc.append(cur_pc + 1)
+                tl.push_stack_pc(cur_pc + 1)
             elif ins.op == OP_ASSERT:
                 if self._assert_holds(ins.a, subject, pos, n):
-                    tl.stack_pc.append(cur_pc + 1)
+                    tl.push_stack_pc(cur_pc + 1)
                 else:
                     tl.stack_slots.resize(sbase, 0)   # thread dies
             elif ins.op == OP_TAIL_MATCH:
@@ -2036,18 +2047,18 @@ struct RegexProgram(Movable, Copyable):
                     # this step wins, exactly as it would have at `n`.
                     if not tl.is_seen(tpc):
                         tl.mark_seen(tpc)
-                        tl.pcs.append(tpc)
+                        tl.push_pc(tpc)
                         for k in range(nslots):
                             var v = tl.stack_slots[sbase + k]
-                            tl.slots_flat.append(v)
+                            tl.push_slot(v)
                         tl.count += 1
                 tl.stack_slots.resize(sbase, 0)
             else:
                 # Consuming (CHAR / CLASS / ANY) or MATCH.
-                tl.pcs.append(cur_pc)
+                tl.push_pc(cur_pc)
                 for k in range(nslots):
                     var v = tl.stack_slots[sbase + k]
-                    tl.slots_flat.append(v)
+                    tl.push_slot(v)
                 tl.count += 1
                 tl.stack_slots.resize(sbase, 0)
 
@@ -2118,6 +2129,48 @@ struct RegexScratch(Movable):
         self.match_slots = List[Int]()
         self.bits = BitStateScratch()
 
+    # ⭐ WITNESSES.  Cumulative counters over this scratch's whole life; a test
+    # reads one before and after a call and compares the difference.  Pike VM
+    # counters sum the two thread lists, because the lists swap roles every
+    # byte position.  They exist so a cost property can be proven by counting
+    # operations, which does not depend on the machine.
+
+    def vm_grows(self) -> Int:
+        """Heap-block events on the Pike VM's own lists (a list that had to grow,
+        or a list set rebuilt).  Zero for a warm scratch is the contract."""
+        return self.clist.grows + self.nlist.grows
+
+    def vm_seeds(self) -> Int:
+        """Start threads the Pike VM seeded."""
+        return self.clist.seeds + self.nlist.seeds
+
+    def vm_steps(self) -> Int:
+        """Threads the Pike VM's byte-stepping loop examined."""
+        return self.clist.steps + self.nlist.steps
+
+    def vm_positions(self) -> Int:
+        """Byte positions the Pike VM's stepping loop visited."""
+        return self.clist.positions + self.nlist.positions
+
+    def vm_generation(self) -> Int:
+        """Sum of the two lists' `seen` generation stamps.  Resetting the seen
+        set is a bump of one of them, so this moves by one per reset."""
+        return self.clist.gen + self.nlist.gen
+
+    def vm_capacity(self) -> List[Int]:
+        """Capacity of every list the Pike VM owns: for each of the two thread
+        lists, pcs / slots_flat / stack_pc / stack_slots / seen_gen, then the
+        match slots.  The lists swap roles every byte position, so the pair is
+        returned as sums per kind."""
+        var out = List[Int]()
+        out.append(self.clist.pcs.capacity() + self.nlist.pcs.capacity())
+        out.append(self.clist.slots_flat.capacity() + self.nlist.slots_flat.capacity())
+        out.append(self.clist.stack_pc.capacity() + self.nlist.stack_pc.capacity())
+        out.append(self.clist.stack_slots.capacity() + self.nlist.stack_slots.capacity())
+        out.append(self.clist.seen_gen.capacity() + self.nlist.seen_gen.capacity())
+        out.append(self.match_slots.capacity())
+        return out^
+
 
 # ---------------------------------------------------------------------------
 # Thread list + a per-step "seen pc" set.
@@ -2160,6 +2213,18 @@ struct _ThreadList(Movable):
     # and entry i of `stack_pc` owns `stack_slots[i*nslots : (i+1)*nslots]`.
     var stack_pc: List[Int]
     var stack_slots: List[Int]
+    # ⭐ WITNESS COUNTERS (read through `RegexScratch.vm_*`; they never steer
+    # the search).  They let a test prove a cost property by COUNTING instead of
+    # timing, so the proof does not depend on the machine it runs on:
+    #   grows      heap-block events on the VM's own lists: every append that
+    #              had to grow a list, plus every rebuild of the list itself.
+    #   seeds      start threads seeded.
+    #   steps      threads examined by the byte-stepping loop.
+    #   positions  byte positions the stepping loop visited.
+    var grows: Int
+    var seeds: Int
+    var steps: Int
+    var positions: Int
 
     def __init__(out self, prog_len: Int):
         self.pcs = List[Int]()
@@ -2169,6 +2234,10 @@ struct _ThreadList(Movable):
         self.count = 0
         self.stack_pc = List[Int]()
         self.stack_slots = List[Int]()
+        self.grows = 0
+        self.seeds = 0
+        self.steps = 0
+        self.positions = 0
 
     def copy(self) -> Self:
         var t = Self(len(self.seen_gen))
@@ -2177,7 +2246,48 @@ struct _ThreadList(Movable):
         t.seen_gen = self.seen_gen.copy()
         t.gen = self.gen
         t.count = self.count
+        t.grows = self.grows
+        t.seeds = self.seeds
+        t.steps = self.steps
+        t.positions = self.positions
         return t^
+
+    def rebuild(mut self, prog_len: Int):
+        """Re-arm for a program of `prog_len` instructions: a fresh list set.
+        The witness counters survive, and the rebuild itself counts as a heap
+        event, so a scratch that is rebuilt on every call cannot look free."""
+        self.pcs = List[Int]()
+        self.slots_flat = List[Int]()
+        self.seen_gen = List[Int](length=prog_len, fill=0)
+        self.gen = 1
+        self.count = 0
+        self.stack_pc = List[Int]()
+        self.stack_slots = List[Int]()
+        self.grows += 1
+
+    @always_inline
+    def push_pc(mut self, v: Int):
+        if len(self.pcs) == self.pcs.capacity():
+            self.grows += 1
+        self.pcs.append(v)
+
+    @always_inline
+    def push_slot(mut self, v: Int):
+        if len(self.slots_flat) == self.slots_flat.capacity():
+            self.grows += 1
+        self.slots_flat.append(v)
+
+    @always_inline
+    def push_stack_pc(mut self, v: Int):
+        if len(self.stack_pc) == self.stack_pc.capacity():
+            self.grows += 1
+        self.stack_pc.append(v)
+
+    @always_inline
+    def push_stack_slot(mut self, v: Int):
+        if len(self.stack_slots) == self.stack_slots.capacity():
+            self.grows += 1
+        self.stack_slots.append(v)
 
     def reset(mut self):
         self.pcs.clear()
