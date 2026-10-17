@@ -68,16 +68,16 @@ zig_test(
     imports = ["version_check.zig"],
     src = "version_check_test.zig",
     busybox = ":busybox",
-    zig = ":zig",
+    zig = ":zig_next",
 )
 
 zig_exe(
     name = "version_check",
     exec_compatible_with = LINUX_X86_64,
     src = "version_check.zig",
-    unit_tests = [":version_check_unit"],
+    unit_tests = [":version_check_unit", ":zig_next_version"],
     busybox = ":busybox",
-    zig = ":zig",
+    zig = ":zig_next",
     visibility = ["PUBLIC"],
 )
 
@@ -140,7 +140,7 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "komira//tools/build/mojo:conda_unpack.zig",
     busybox = ":busybox",
-    zig = ":zig",
+    zig = ":zig_next",
     visibility = ["PUBLIC"],
 )
 
@@ -188,7 +188,7 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "komira//tools/build/mojo:zig_cc_launcher.zig",
     busybox = ":busybox",
-    zig = ":zig",
+    zig = ":zig_next",
     visibility = ["PUBLIC"],
 )
 

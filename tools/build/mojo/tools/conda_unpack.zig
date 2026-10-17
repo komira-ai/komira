@@ -44,6 +44,29 @@
 
 const std = @import("std");
 
+/// The window the zstd frames of a conda package may use (the decoder refuses a
+/// frame whose window does not fit; conda-forge packages use far smaller ones).
+const window_len: u32 = 1 << 27;
+
+/// Reads past the content of the tar entry `f`. The tar iterator would discard it
+/// itself, but the discard of this release's zstd reader asserts (it needs a
+/// buffer of two windows and more than a window already buffered), so it is
+/// streamed into nothing instead.
+fn skipEntry(it: *std.tar.Iterator, f: std.tar.Iterator.File) !void {
+    if (f.size == 0) return;
+    var sink = std.Io.Writer.Discarding.init(&.{});
+    try it.streamRemaining(f, &sink.writer);
+}
+
+/// The `f.size` bytes of the tar entry `f`, in memory (at most `max`); the
+/// iterator is left at the end of the entry.
+fn fileBytes(a: std.mem.Allocator, it: *std.tar.Iterator, f: std.tar.Iterator.File, max: u64) ![]u8 {
+    if (f.size > max) return error.StreamTooLong;
+    const bytes = try it.reader.readAlloc(a, @intCast(f.size));
+    it.unread_file_bytes = 0;
+    return bytes;
+}
+
 const token = "@@MOJO_TOOLCHAIN_ROOT@@";
 const cfg_path = "share/max/modular.cfg";
 const required = [_][]const u8{
@@ -184,8 +207,8 @@ fn extractLib(
     path: []const u8,
     member: []const u8,
     window: []u8,
-    name_buf: *[std.fs.MAX_PATH_BYTES]u8,
-    link_buf: *[std.fs.MAX_PATH_BYTES]u8,
+    name_buf: *[std.fs.max_path_bytes]u8,
+    link_buf: *[std.fs.max_path_bytes]u8,
 ) !void {
     if (!std.mem.startsWith(u8, member, "lib/") or std.mem.indexOf(u8, member, "..") != null)
         fail("--lib member {s}: must be a path under lib/", .{member});
@@ -196,16 +219,19 @@ fn extractLib(
     // Every entry under lib/: links are resolved after the whole payload is read.
     var entries = std.StringHashMap(LibEntry).init(a);
     {
-        var fbs = std.io.fixedBufferStream(parts.pkg);
-        var dz = std.compress.zstd.decompressor(fbs.reader(), .{ .window_buffer = window });
-        var it = std.tar.iterator(dz.reader(), .{ .file_name_buffer = name_buf, .link_name_buffer = link_buf });
+        var zin: std.Io.Reader = .fixed(parts.pkg);
+        var dz = std.compress.zstd.Decompress.init(&zin, window, .{ .window_len = window_len });
+        var it = std.tar.Iterator.init(&dz.reader, .{ .file_name_buffer = name_buf, .link_name_buffer = link_buf });
         while (try it.next()) |f| {
-            if (!std.mem.startsWith(u8, f.name, "lib/")) continue;
+            if (!std.mem.startsWith(u8, f.name, "lib/")) {
+                try skipEntry(&it, f);
+                continue;
+            }
             const name = try a.dupe(u8, f.name);
             switch (f.kind) {
-                .file => try entries.put(name, .{ .link = null, .bytes = try f.reader().readAllAlloc(a, 1 << 30), .mode = f.mode }),
+                .file => try entries.put(name, .{ .link = null, .bytes = try fileBytes(a, &it, f, 1 << 30), .mode = f.mode }),
                 .sym_link => try entries.put(name, .{ .link = try a.dupe(u8, f.link_name), .bytes = "", .mode = 0 }),
-                else => {},
+                else => try skipEntry(&it, f),
             }
         }
     }
@@ -224,14 +250,17 @@ fn extractLib(
     if (entry.bytes.len == 0) fail("{s}: {s} is empty", .{ path, name });
 
     // The bytes are copied verbatim, so neither name may carry a placeholder.
-    var fbs = std.io.fixedBufferStream(parts.info);
-    var dz = std.compress.zstd.decompressor(fbs.reader(), .{ .window_buffer = window });
-    var it = std.tar.iterator(dz.reader(), .{ .file_name_buffer = name_buf, .link_name_buffer = link_buf });
+    var zin: std.Io.Reader = .fixed(parts.info);
+    var dz = std.compress.zstd.Decompress.init(&zin, window, .{ .window_len = window_len });
+    var it = std.tar.Iterator.init(&dz.reader, .{ .file_name_buffer = name_buf, .link_name_buffer = link_buf });
     var saw_paths = false;
     while (try it.next()) |f| {
-        if (f.kind != .file or !std.mem.eql(u8, f.name, "info/paths.json")) continue;
+        if (f.kind != .file or !std.mem.eql(u8, f.name, "info/paths.json")) {
+            try skipEntry(&it, f);
+            continue;
+        }
         saw_paths = true;
-        const pj = try f.reader().readAllAlloc(a, 1 << 26);
+        const pj = try fileBytes(a, &it, f, 1 << 26);
         const path_key = "\"_path\"";
         var pos: usize = 0;
         while (std.mem.indexOfPos(u8, pj, pos, path_key)) |p| {
@@ -255,12 +284,12 @@ fn extractLib(
 
 fn writeManifest(a: std.mem.Allocator, out: std.fs.Dir, kept: [][]const u8) !void {
     std.mem.sort([]const u8, kept, {}, lessThan);
-    var manifest = std.ArrayList(u8).init(a);
+    var manifest = std.ArrayList(u8).empty;
     for (kept) |k| {
-        try manifest.appendSlice(k);
-        try manifest.append('\n');
+        try manifest.appendSlice(a, k);
+        try manifest.append(a, '\n');
     }
-    try out.writeFile("CLOSURE_MANIFEST", manifest.items);
+    try out.writeFile(.{ .sub_path = "CLOSURE_MANIFEST", .data = manifest.items });
 }
 
 /// `--only-libs <out_dir> (--lib <library.conda> <member>)...`
@@ -274,14 +303,14 @@ fn onlyLibs(a: std.mem.Allocator, args: []const [:0]u8) !void {
     std.fs.cwd().makePath(args[2]) catch |e| fail("cannot create {s}: {s}", .{ args[2], @errorName(e) });
     var out = try std.fs.cwd().openDir(args[2], .{});
     defer out.close();
-    const window = try a.alloc(u8, 1 << 27);
-    var name_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var link_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var kept = std.ArrayList([]const u8).init(a);
+    const window = try a.alloc(u8, window_len + std.compress.zstd.block_size_max);
+    var name_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var link_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var kept = std.ArrayList([]const u8).empty;
     li = 3;
     while (li < args.len) : (li += 3) {
         try extractLib(a, out, args[li + 1], args[li + 2], window, &name_buf, &link_buf);
-        try kept.append(args[li + 2]);
+        try kept.append(a, args[li + 2]);
     }
     try writeManifest(a, out, kept.items);
 }
@@ -297,17 +326,17 @@ pub fn main() !void {
     if (args.len < 3) fail(usage, .{});
     // `--keep <member>`: one more package member to extract.
     // `--lib <library.conda> <member>`: one member of another package.
-    var keep_members = std.ArrayList([]const u8).init(a);
-    var libs = std.ArrayList([2][]const u8).init(a);
+    var keep_members = std.ArrayList([]const u8).empty;
+    var libs = std.ArrayList([2][]const u8).empty;
     var li: usize = 3;
     while (li < args.len) {
         if (std.mem.eql(u8, args[li], "--keep") and li + 1 < args.len) {
             if (std.mem.startsWith(u8, args[li + 1], "/") or std.mem.indexOf(u8, args[li + 1], "..") != null)
                 fail("--keep {s}: expected a relative package member", .{args[li + 1]});
-            try keep_members.append(args[li + 1]);
+            try keep_members.append(a, args[li + 1]);
             li += 2;
         } else if (std.mem.eql(u8, args[li], "--lib") and li + 2 < args.len) {
-            try libs.append(.{ args[li + 1], args[li + 2] });
+            try libs.append(a, .{ args[li + 1], args[li + 2] });
             li += 3;
         } else fail(usage, .{});
     }
@@ -317,11 +346,11 @@ pub fn main() !void {
     var out = try std.fs.cwd().openDir(args[2], .{});
     defer out.close();
 
-    const window = try a.alloc(u8, 1 << 27);
-    var name_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var link_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    const window = try a.alloc(u8, window_len + std.compress.zstd.block_size_max);
+    var name_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var link_buf: [std.fs.max_path_bytes]u8 = undefined;
 
-    var kept = std.ArrayList([]const u8).init(a);
+    var kept = std.ArrayList([]const u8).empty;
     var paths_json: ?[]const u8 = null;
     var saw_pkg = false;
 
@@ -351,26 +380,30 @@ pub fn main() !void {
         const is_info = std.mem.startsWith(u8, name, "info-") and std.mem.endsWith(u8, name, ".tar.zst");
         if (!is_pkg and !is_info) continue;
 
-        var fbs = std.io.fixedBufferStream(body);
-        var dz = std.compress.zstd.decompressor(fbs.reader(), .{ .window_buffer = window });
-        var it = std.tar.iterator(dz.reader(), .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
+        var zin: std.Io.Reader = .fixed(body);
+        var dz = std.compress.zstd.Decompress.init(&zin, window, .{ .window_len = window_len });
+        var it = std.tar.Iterator.init(&dz.reader, .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
         while (try it.next()) |f| {
             if (is_info) {
                 if (f.kind == .file and std.mem.eql(u8, f.name, "info/paths.json")) {
-                    paths_json = try f.reader().readAllAlloc(a, 1 << 26);
-                }
+                    paths_json = try fileBytes(a, &it, f, 1 << 26);
+                } else try skipEntry(&it, f);
                 continue;
             }
-            if (!keep(f.name, keep_members.items)) continue;
+            if (!keep(f.name, keep_members.items)) {
+                try skipEntry(&it, f);
+                continue;
+            }
             if (f.kind != .file) fail("closure member {s} is not a regular file", .{f.name});
             if (std.fs.path.dirname(f.name)) |d| try out.makePath(d);
             const mode: std.fs.File.Mode = if (f.mode & 0o111 != 0) 0o755 else 0o644;
             const file = try out.createFile(f.name, .{ .exclusive = true, .mode = mode });
             defer file.close();
-            var bw = std.io.bufferedWriter(file.writer());
-            try f.writeAll(bw.writer());
-            try bw.flush();
-            try kept.append(try a.dupe(u8, f.name));
+            var wbuf: [64 * 1024]u8 = undefined;
+            var fw = file.writer(&wbuf);
+            try it.streamRemaining(f, &fw.interface);
+            try fw.interface.flush();
+            try kept.append(a, try a.dupe(u8, f.name));
         }
         if (is_pkg) saw_pkg = true;
     }
@@ -406,18 +439,18 @@ pub fn main() !void {
     if (std.mem.indexOf(u8, cfg, needle) == null) fail("{s} does not name the placeholder as <prefix>/bin/mojo", .{cfg_path});
     const tokenized = try std.mem.replaceOwned(u8, a, cfg, ph, token);
     if (std.mem.indexOf(u8, tokenized, "= /") != null) fail("{s} still holds an absolute path after tokenizing", .{cfg_path});
-    try out.writeFile(cfg_path, tokenized);
+    try out.writeFile(.{ .sub_path = cfg_path, .data = tokenized });
 
     for (libs.items) |l| {
         try extractLib(a, out, l[0], l[1], window, &name_buf, &link_buf);
-        try kept.append(l[1]);
+        try kept.append(a, l[1]);
     }
 
     std.mem.sort([]const u8, kept.items, {}, lessThan);
-    var manifest = std.ArrayList(u8).init(a);
+    var manifest = std.ArrayList(u8).empty;
     for (kept.items) |k| {
-        try manifest.appendSlice(k);
-        try manifest.append('\n');
+        try manifest.appendSlice(a, k);
+        try manifest.append(a, '\n');
     }
-    try out.writeFile("CLOSURE_MANIFEST", manifest.items);
+    try out.writeFile(.{ .sub_path = "CLOSURE_MANIFEST", .data = manifest.items });
 }
