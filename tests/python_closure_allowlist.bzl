@@ -5,8 +5,7 @@ Python serves only komira's Python surface: its SDK or bindings and their own
 tests. No other target depends on it, no other file is Python, and no CI step
 runs it.
 
-PYTHON_SURFACE: package paths (`src/<pkg>`) where Python is allowed. Empty:
-komira has no Python surface yet. Adding one is a ruling, not a review.
+PYTHON_SURFACE: package paths (`src/<pkg>`) where Python is allowed. Adding one is a ruling, not a review.
 
 PYTHON_CEILING: the findings allowed today, exactly as the check spells them
 (`target <label>`, `file <path>`, `exec <path>`). It only shrinks: the check
@@ -14,7 +13,10 @@ fails on an entry it no longer finds, so a change that removes a violator
 deletes its entries here, and a new violator has no entry to land with.
 """
 
-PYTHON_SURFACE = []
+PYTHON_SURFACE = [
+    # Python UDF runtimes are Python surface and get their own hermetic Python.
+    "src/tests/helpers/komira_udf_spike_pyworker",
+]
 
 PYTHON_CEILING = [
     # The hermetic-Python rules, their runner scripts and their refusal fixture.
