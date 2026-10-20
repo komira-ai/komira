@@ -121,7 +121,7 @@ fn installSignals() !void {
         // macOS: C's exit wakes the loop through SIGCHLD (byte 0 is not a
         // signal the loop acts on; it only checks for an exit).
         const chld = posix.Sigaction{ .handler = .{ .handler = onChild }, .mask = posix.sigemptyset(), .flags = posix.SA.NOCLDSTOP };
-        try posix.sigaction(posix.SIG.CHLD, &chld, null);
+        posix.sigaction(posix.SIG.CHLD, &chld, null);
     }
 }
 
