@@ -8,7 +8,7 @@
 #           runners run, never a build or test action. The only places a new script may live.
 # A row is added only with a reason review accepts.
 use	BUCK	sh_script	3	exception: coverage_ci_cases tests the CI shell scripts (.github/ci), so its subject is a shell script, and the shell lint of those scripts names them
-use	release/BUCK	sh_script	1	exception: the shell lint of human-run shell scripts; a lint of scripts that only people and CI run, not an action that runs a shell
+use	release/ci/BUCK	sh_script	1	exception: the shell lint of human-run shell scripts; a lint of scripts that only people and CI run, not an action that runs a shell
 use	src/kci_workflow_check/BUCK	sh_script	2	exception: kci_workflow_check reads release_version.sh (a shell script run by the release workflow) as data to hold kci.yml to it
 use	tools/build/coverage/BUCK	sh_script	1	exception: coverage_ci_cases tests the CI shell scripts (.github/ci), so the subject is a shell script; the shell lint of those scripts
 use	tools/build/coverage/defs.bzl	sh_argv	1	exception: coverage_ci_cases tests the CI shell scripts (.github/ci), so the subject is a shell script; the shell lint of those scripts

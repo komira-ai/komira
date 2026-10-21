@@ -70,6 +70,27 @@ naming the targets and the command that regenerates the list, so a new package
 that nobody added to the aggregate cannot go untested. Configuring `//ci:pr`
 also fails on a label in the list that no longer exists.
 
+**The aggregate holds no Python.** Python serves only the Python SDK and its
+tests (`PYTHON_SURFACE` in `tests/python_closure_allowlist.bzl`, empty until
+the SDK lands), so the checks of `EXCLUDED` in `rules.bzl` are left out of
+`TARGETS` and of the completeness guard, each with its reason: the pinned
+CPython and wheels (`third_party/python`), the py_test of the CI scripts, and
+the three TLS interop tests that run a CPython peer. A row whose package is
+deleted fails the generator; delete the row with it.
+
+```sh
+./buck2 bxl komira//tools/build/ci/python_guard.bxl:check
+```
+
+`python_guard.bxl` fails when `//ci:pr` reaches any Python target (a rule kind
+holding `python` or starting `py_`, a target of `third_party/python` or
+`tools/build/python`, a `.py` source; the prelude's bootstrap helpers and a
+`doc_tree`'s data are not) outside the SDK's packages and what their own
+targets reach. It walks the configured closure, every kind of dependency, and
+names the targets and the way out (a row of `EXCLUDED`, then regenerate).
+`cases.bxl` holds its table cases and one case over the real pinned
+interpreter.
+
 Because the aggregate depends on every root, three things are different from
 an ordinary package:
 

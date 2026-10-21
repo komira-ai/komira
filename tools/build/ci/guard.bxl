@@ -13,16 +13,22 @@
 # Options: --scope <patterns>, --aggregate <label>.
 
 load(":ci_graph.bzl", "check_nodes", "closure", "findings")
-load(":rules.bzl", "AGGREGATE", "UNIVERSE")
+load(":rules.bzl", "AGGREGATE", "EXCLUDED", "UNIVERSE")
 
 def _check(ctx):
     scope = ctx.cli_args.scope or UNIVERSE
     aggregate = ctx.cli_args.aggregate or AGGREGATE
-    nodes = check_nodes(ctx, scope, aggregate.split(":")[0] + ":")
+    left_out = [p for p, _ in EXCLUDED] if not ctx.cli_args.scope else []
+    nodes = check_nodes(ctx, scope, aggregate.split(":")[0] + ":", left_out)
     text = findings(sorted(nodes.keys()), closure(ctx, aggregate), aggregate)
     if text:
         fail(text)
-    ctx.output.print("guard: all {} check target(s) of {} are in {}".format(len(nodes), " + ".join(scope), aggregate))
+    ctx.output.print("guard: all {} check target(s) of {} are in {}; left out on purpose: {}".format(
+        len(nodes),
+        " + ".join(scope),
+        aggregate,
+        "; ".join(["{} ({})".format(p, why) for p, why in EXCLUDED] if left_out else []) or "none",
+    ))
 
 check = bxl_main(
     impl = _check,

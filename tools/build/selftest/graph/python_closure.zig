@@ -465,7 +465,7 @@ test "a textproto whose executable is python3 is refused; one that only mentions
 test "a workflow that runs python or sets it up is refused; one that names it otherwise is not" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
-    const red = "      - name: Alert\n        run: python3 -I release/ci/main_red.py --repo x\n";
+    const red = "      - name: Alert\n        run: python3 -I tools/alert.py --repo x\n";
     const block = "    steps:\n      - run: |\n          set -e\n          /usr/bin/python3.12 x.py\n";
     const setup = "      - uses: actions/setup-python@0123456789abcdef0123456789abcdef01234567\n";
     const clean = "      - name: python tests are gone\n        run: ./buck2 build //...  # not python3\n";
@@ -477,7 +477,7 @@ test "a workflow that runs python or sets it up is refused; one that names it ot
     });
     try t.expectEqual(@as(usize, 4), o.scanned);
     try t.expectEqual(@as(usize, 3), o.refused.len);
-    try t.expect(holds(o, "exec .github/workflows/red.yml: it runs Python (line 2: run: python3 -I release/ci/main_red.py --repo x)"));
+    try t.expect(holds(o, "exec .github/workflows/red.yml: it runs Python (line 2: run: python3 -I tools/alert.py --repo x)"));
     try t.expect(holds(o, "exec .github/workflows/block.yml: it runs Python (line 4:"));
     try t.expect(holds(o, "exec .github/actions/s/action.yml"));
 }

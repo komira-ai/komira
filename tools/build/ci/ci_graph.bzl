@@ -48,13 +48,16 @@ def make_graph(ctx, scope, excluded):
 
     return struct(exists = exists, owners = owners, package_targets = package_targets, including = including, rdeps = rdeps)
 
-def check_nodes(ctx, scope, excluded):
+def check_nodes(ctx, scope, excluded, left_out = []):
     """label -> configured node of every check in `scope` (cquery: a target
     incompatible with the host platform is not there, as a build pattern
-    skips it), without the aggregate's package."""
+    skips it), without the aggregate's package and without the patterns of
+    `left_out` (rules.bzl EXCLUDED: the checks the aggregate leaves out on
+    purpose)."""
     # uquery first: a cquery of the patterns would configure the aggregate too, and
     # an aggregate whose list is stale fails there, before the guard can say why.
-    labels = [str(t.label) for t in ctx.uquery().eval("({}) - {}".format(" + ".join(["(" + s + ")" for s in scope]), excluded))]
+    gone = " - ".join([excluded] + ["(" + p + ")" for p in left_out])
+    labels = [str(t.label) for t in ctx.uquery().eval("({}) - {}".format(" + ".join(["(" + s + ")" for s in scope]), gone))]
     nodes = ctx.cquery().eval("set({})".format(" ".join(labels))) if labels else []
     return {str(n.label.raw_target()): n for n in nodes if n.rule_type not in SOURCE_KINDS}
 
@@ -104,3 +107,89 @@ def render(root_labels, test_labels):
     lines += ['    "{}",'.format(l) for l in test_labels]
     lines += ["]", ""]
     return lines
+
+# ---- Python in the aggregate ------------------------------------------------
+
+# Packages whose every target is Python (the hermetic Python of the tests and its rules).
+PYTHON_PACKAGES = ["third_party/python", "tools/build/python"]
+
+# The prelude's C/C++ rules name Python helper programs as attributes, run by the
+# `python_bootstrap` toolchain's interpreter. komira's toolchain provides none, so
+# these two kinds are not Python (the graph check python_closure says the same).
+NO_INTERPRETER_KINDS = ["python_bootstrap_binary", "no_python_bootstrap_toolchain"]
+
+# A doc_tree holds every file of its package as data for the lints, a `.py`
+# file among them; nothing runs it (python_closure does not walk it either).
+DATA_KINDS = ["doc_tree"]
+
+def kind_name(rule_type):
+    """`cell//path.bzl:_name_rule` -> `name`."""
+    k = rule_type.split(":")[-1].lstrip("_")
+    return k[:-len("_rule")] if k.endswith("_rule") else k
+
+def package_of(label):
+    """`cell//a/b:c` (configured or not) -> `a/b`."""
+    return label.split(" ")[0].split("//", 1)[-1].split(":")[0]
+
+def _in_package(package, root):
+    return package == root or package.startswith(root + "/")
+
+def python_reason(label, kind, srcs):
+    """Why a target is Python, or "": a rule kind whose name holds `python` or
+    starts with `py_`, a target of the hermetic-Python packages, or a `.py`
+    source. The two bootstrap kinds and the doc_tree are none of these."""
+    k = kind_name(kind)
+    if k in NO_INTERPRETER_KINDS or k in DATA_KINDS:
+        return ""
+    if "python" in k or k.startswith("py_"):
+        return "rule kind " + k
+    for p in PYTHON_PACKAGES:
+        if _in_package(package_of(label), p):
+            return "a target of " + p
+    for s in srcs:
+        if s.endswith(".py"):
+            return "source " + s
+    return ""
+
+def python_findings(nodes, surface, own_deps, aggregate):
+    """The failure text for the Python targets `aggregate` reaches outside the
+    Python SDK, or "". `nodes` is a list of structs (label, kind, srcs) of the
+    aggregate's closure, `surface` the package paths of the Python SDK
+    (PYTHON_SURFACE) and `own_deps` the labels the SDK's own targets reach:
+    Python inside either is allowed, anything else is a finding."""
+    found = []
+    for n in nodes:
+        why = python_reason(n.label, n.kind, n.srcs)
+        if not why:
+            continue
+        if any([_in_package(package_of(n.label), s) for s in surface]) or n.label in own_deps:
+            continue
+        found.append("{} ({})".format(n.label, why))
+    if not found:
+        return ""
+    found = sorted(found)
+    return "{} Python target(s) are reached from {} outside the Python SDK's tests (first {}): {}. Python serves only the SDK (PYTHON_SURFACE in tests/python_closure_allowlist.bzl): leave them out of the aggregate with a row of EXCLUDED in tools/build/ci/rules.bzl, then regenerate ci/targets.bzl.".format(
+        len(found),
+        aggregate,
+        min(len(found), 25),
+        ", ".join(found[:25]),
+    )
+
+def python_nodes(ctx, aggregate):
+    """The structs (label, kind, srcs) of every target `aggregate` reaches."""
+    out = []
+    for n in ctx.cquery().eval("deps({})".format(aggregate)):
+        out.append(struct(
+            label = str(n.label.raw_target()),
+            kind = n.rule_type,
+            srcs = [s.short_path for s in n.sources()],
+        ))
+    return out
+
+def sdk_own_deps(ctx, nodes, surface):
+    """label -> True of every target the Python SDK's own targets (those in a
+    package of `surface`) reach: their wheels and interpreter."""
+    own = [n.label for n in nodes if any([_in_package(package_of(n.label), s) for s in surface])]
+    if not own:
+        return {}
+    return {str(n.label.raw_target()): True for n in ctx.cquery().eval("deps(set({}))".format(" ".join(own)))}
