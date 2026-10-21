@@ -1,5 +1,6 @@
 # =============================================================================
 # komira_encoding/base32.mojo -- base32 (RFC 4648 section 6).
+# (a comment only, for a throwaway selection case)
 # =============================================================================
 #
 # Alphabet `A-Z 2-7`. Encoding emits upper case, unpadded by default (the
