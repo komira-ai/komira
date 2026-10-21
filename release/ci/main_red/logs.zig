@@ -53,21 +53,48 @@ fn buckTsLen(s: []const u8) usize {
     return n;
 }
 
-/// `line` without colour codes (`ESC [ digits/semicolons letter`), in a new
-/// string.
+/// `line` without terminal escape sequences, in a new string: a CSI
+/// (`ESC [`, parameter bytes 0x30-0x3f, intermediate bytes 0x20-0x2f, a final
+/// byte 0x40-0x7e: colours, cursor moves, erases), an OSC (`ESC ]` up to BEL
+/// or `ESC \`), any other `ESC` and the byte after it; then every control
+/// byte left but the blanks (tab, newline, vertical tab, form feed, return)
+/// and DEL. No ESC byte survives, so no escape reaches an issue.
 fn withoutAnsi(a: std.mem.Allocator, line: []const u8) ![]u8 {
     var out = try std.ArrayList(u8).initCapacity(a, line.len);
     var i: usize = 0;
     while (i < line.len) {
-        if (line[i] == 0x1b and i + 1 < line.len and line[i + 1] == '[') {
-            var j = i + 2;
-            while (j < line.len and (isDigit(line[j]) or line[j] == ';')) j += 1;
-            if (j < line.len and std.ascii.isAlphabetic(line[j])) {
-                i = j + 1;
-                continue;
+        const c = line[i];
+        if (c == 0x1b) {
+            i += 1;
+            if (i >= line.len) break;
+            if (line[i] == '[') {
+                i += 1;
+                while (i < line.len and line[i] >= 0x30 and line[i] <= 0x3f) i += 1;
+                while (i < line.len and line[i] >= 0x20 and line[i] <= 0x2f) i += 1;
+                if (i < line.len and line[i] >= 0x40 and line[i] <= 0x7e) i += 1;
+            } else if (line[i] == ']') {
+                i += 1;
+                while (i < line.len and line[i] != 0x07) {
+                    if (line[i] == 0x1b) break;
+                    i += 1;
+                }
+                if (i < line.len and line[i] == 0x07) {
+                    i += 1;
+                } else if (i + 1 < line.len and line[i] == 0x1b and line[i + 1] == '\\') {
+                    i += 2;
+                }
+            } else if (line[i] != 0x1b) {
+                // `ESC`, intermediate bytes (`(` of a charset choice), a final byte.
+                while (i < line.len and line[i] >= 0x20 and line[i] <= 0x2f) i += 1;
+                if (i < line.len and line[i] >= 0x30 and line[i] <= 0x7e) i += 1;
             }
+            continue;
         }
-        try out.append(a, line[i]);
+        if ((c < 0x20 and !isSpace(c)) or c == 0x7f) {
+            i += 1;
+            continue;
+        }
+        try out.append(a, c);
         i += 1;
     }
     return out.toOwnedSlice(a);

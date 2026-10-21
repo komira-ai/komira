@@ -18,6 +18,23 @@ pub fn classify(stdout: []const u8, stderr: []const u8) Failure {
     return .other;
 }
 
+/// The command line of one call: `gh api --allow-escape-sequences <args>`.
+/// A job log holds the terminal escape sequences of the tools that wrote it,
+/// and gh refuses to print a response with any unless it is told to; every
+/// call passes the flag (a JSON answer carries them escaped, so it is
+/// harmless there), and the program strips them from what it reads
+/// (logs.stripLogLine) before any text reaches an issue.
+pub fn buildArgv(a: std.mem.Allocator, gh: []const u8, args: []const []const u8) ![]const []const u8 {
+    var argv = std.ArrayList([]const u8).empty;
+    try argv.append(a, gh);
+    try argv.append(a, "api");
+    try argv.append(a, ALLOW_ESCAPES);
+    try argv.appendSlice(a, args);
+    return argv.items;
+}
+
+pub const ALLOW_ESCAPES = "--allow-escape-sequences";
+
 pub const GhApi = struct {
     a: std.mem.Allocator,
     /// The `gh` executable (a flag, so a test can stand in for it).
@@ -28,15 +45,14 @@ pub const GhApi = struct {
     backoff_ms: u64 = 1000,
     /// The stderr of the last failed attempt, for the message.
     last_err: []const u8 = "",
+    /// The arguments (after `gh api`) of the last failed call, for the message.
+    last_call: []const u8 = "",
 
     const Run = struct { ok: bool, stdout: []const u8, stderr: []const u8 };
 
     fn once(self: *GhApi, args: []const []const u8, stdin: ?[]const u8) !Run {
-        var argv = std.ArrayList([]const u8).empty;
-        try argv.append(self.a, self.gh);
-        try argv.append(self.a, "api");
-        try argv.appendSlice(self.a, args);
-        var child = std.process.Child.init(argv.items, self.a);
+        const argv = try buildArgv(self.a, self.gh, args);
+        var child = std.process.Child.init(argv, self.a);
         child.stdin_behavior = if (stdin != null) .Pipe else .Ignore;
         child.stdout_behavior = .Pipe;
         child.stderr_behavior = .Pipe;
@@ -63,6 +79,7 @@ pub const GhApi = struct {
             const r = try self.once(args, stdin);
             if (r.ok) return r.stdout;
             self.last_err = std.mem.trim(u8, r.stderr, " \t\r\n");
+            self.last_call = try std.mem.join(self.a, " ", args);
             switch (classify(r.stdout, r.stderr)) {
                 .not_found => return error.NotFound,
                 .already_exists => return error.AlreadyExists,
