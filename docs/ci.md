@@ -5,7 +5,7 @@ the one job `check` of [`.github/workflows/pr.yml`](#pryml-the-pull-requests-che
 a workflow of its own, on a GitHub-hosted runner that reaches the build farm
 over a tailnet. The runner is
 a thin buck2 client: it checks the repository out and asks the farm to build
-the units the change reaches ([the units](#the-per-change-checks-units)).
+and test the targets the change reaches ([pr.yml](#pryml-the-pull-requests-check)).
 Nothing is compiled on the runner.
 
 | event | runs |
@@ -1045,14 +1045,13 @@ is a row of `src/kci_workflow_check/tests/test_workflow_subset.mojo`.
 
 ## pr.yml: the pull request's check
 
-[`.github/workflows/pr.yml`](../.github/workflows/pr.yml) is the machine file's
-`pr` stage and nothing else: workflow `pr`, one job `check`, so the status check
-is **`pr / check`**. It is written by hand and held to the machine file the way
-kci.yml is (rule R6 of `src/kci_workflow_check/rules.mojo`, `check_pull_request_workflow`):
-`kci run --stage pr` reads the file it runs under (`GITHUB_WORKFLOW_REF`) and
-holds it to the pull request's rules (a run of any other stage holds its file
-to the release workflow's), and the welded test
-`src/kci_workflow_check/tests/test_repo_kci_yml.mojo` reads both files on every build.
+[`.github/workflows/pr.yml`](../.github/workflows/pr.yml) is workflow `pr` with
+one job `check`, so the status check is **`pr / check`** (GitHub lists the
+context as `check`; the repository's ruleset requires that context, and only
+pr.yml has a job of that id). It runs named Buck2 targets on the farm and does
+not run kci. The welded test
+`src/kci_workflow_check/tests/test_repo_kci_yml.mojo` still holds `kci.yml`, the
+release workflow, to the machine file.
 
 | | |
 |---|---|
@@ -1060,7 +1059,7 @@ to the release workflow's), and the welded test
 | job | the one job `check`, only for a pull request from a branch of this repository (`github.event.pull_request.head.repo.full_name == github.repository`; a fork's run gets no tailnet credential, and a maintainer reads the change and pushes it to a branch here), written bare or as exactly `${{ <condition> }}` (a block scalar or whitespace inside quotes makes GitHub read the `if:` as a format string, which is always true) |
 | runner | `runs-on: ubuntu-24.04`, written as that plain scalar: a GitHub-hosted machine, fresh per job. A self-hosted label, label list, runner group, expression (`${{ vars.X }}`) or quoted value is refused, so a pull request's code never reaches a runner that keeps state between jobs |
 | permissions | its own `permissions:` mapping, `contents: read` and `id-token: write` (for the farm connection, [farm-connect](#how-it-reaches-the-farm), only); no environment, no secret (no value of the job, nor of the workflow-level `env:`, names `secrets` other than `secrets.GITHUB_TOKEN`), no publish step |
-| steps | the pinned full-history checkout of the merge commit, `farm-connect`, `//bin/kci:kci[runnable]`, then `kci run --stage pr --affected-by "$change_base"`, where `change_base` is the merge commit's first parent (`git rev-parse --verify HEAD^1`, the `main` the pull request is merged into; the step stops when HEAD has no second parent). Never the event's `github.event.pull_request.base.sha`: that is `main` when the event fired, and once `main` moves every change merged to it since then would count as the pull request's own and widen the check. `src/kci_workflow_check` (R6) holds the exact line, and lets no `${{ }}` into a script (R18). It builds and tests the units the change reaches on the farm, in one batch per shared build command, a failed batch retried unit by unit to name its failing units. The units are the artifacts of `release/artifacts.textproto` and the checks derived from the build graph when the job runs (see [The per-change check's units](#the-per-change-checks-units)), so a pull request that adds or deletes a package needs no edit to any release file. Nothing ships. |
+| steps | the pinned full-history checkout of the merge commit, `farm-connect`, and the farm assertion (`//tools/build/ci:assert_remote`). Then the change: `git diff --name-only HEAD^1...HEAD` and the coverage holds of both sides, where HEAD^1 is the merge commit's first parent (the `main` the pull request is merged into; the step stops when HEAD has no second parent). Never the event's `github.event.pull_request.base.sha`: that is `main` when the event fired, and once `main` moves every change merged to it since then would count as the pull request's own and widen the check. Then, each as the `buck2-farm` action (so each fails unless no action ran on the runner): the BXL selector `tools/build/ci/affected.bxl:affected` (the owners of the changed files and everything that depends on them, or `//ci:pr`, the whole check set, when a file cannot be mapped or touches the build system), `build --keep-going` of its list, the checks only BXL can make over the whole graph (`test_weld.bxl:check` for each test_weld lint, `graph/checks.bxl:check` for each graph_check, `guard.bxl:check` that `//ci:pr` holds every check target, `python_guard.bxl:check` that it reaches no Python outside the SDK, and `cases.bxl:run`), and `test` of the list's targets that are not of the tests cell. A pull request that adds or deletes a package needs no edit to any release file; adding a target to the check set means regenerating `ci/targets.bzl` (the guard fails, naming the command, when it is not). Nothing ships. |
 | every `uses:` | pinned to a full commit id (the local farm-connect action excepted) |
 
 The repository's branch settings require the check **`pr / check`**.
