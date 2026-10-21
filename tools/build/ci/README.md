@@ -82,3 +82,4 @@ an ordinary package:
   package widens instead.
 - Building it runs every dependency's validations (the lints) and welded tests,
   as building each one does.
+- (a line for a throwaway selection case)
