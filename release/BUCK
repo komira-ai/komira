@@ -12,10 +12,7 @@
 # The machine file's validations run each installed library's README examples
 # (src/<library>/README.md, shipped as share/doc/<name>/README.md): the same
 # examples are a welded test of the library's own build, so they cannot rot.
-# release/ci (a package of its own) holds the `build_targets` command the
-# per-change check runs (artifacts.textproto); its `affected` and
-# `derive_checks` are the binaries //tools/build/ci:affected and
-# //tools/build/ci:derive_checks. It also holds main_red, the program of
+# release/ci (a package of its own) holds main_red, the program of
 # .github/workflows/main_red.yml, built behind //release/ci/tests:test_main_red.
 # Changes need the release approver's review (.github/CODEOWNERS).
 

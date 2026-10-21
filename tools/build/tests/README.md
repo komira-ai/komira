@@ -31,11 +31,11 @@ do:
   exit status); [`lint_weld.sh`](negative/lint_weld.sh) plants its defects
   in a snapshot of the tree. A fixture that fails to analyse, to compile
   or to pass its gate is fine as an ordinary package: the CI's
-  reverse-dependency query (`//tools/build/ci:affected`, a `cquery` over
-  `tests//...`) configures every target but analyses none. Only a
+  reverse-dependency query (`tools/build/ci/affected.bxl`, over
+  `tests//functional/...`) configures every target but analyses none. Only a
   configuration failure breaks it: a target with an unknown or invisible
   dependency makes the query fail for every change, and any failure of
-  that query answers BROKEN (with buck2's error, which names the target)
+  that query fails the selector (with buck2's error, which names the target)
   and fails the check, never a widening. Such a fixture must not
   be loadable: it is a `<case>.BUCK` file that the driver copies to
   `<case>/BUCK` for its one build and deletes, its directory gitignored, as

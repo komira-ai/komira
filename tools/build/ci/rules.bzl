@@ -1,10 +1,9 @@
 """The rules of affected.bxl that are DATA, not code.
 
-The same widening and inert rules as `rules.txt`, which the Mojo selector
-(`affected`) reads; `rules_parity` (a welded test of this package) holds the
-two files to the same rows, so changing one without the other is red until
-the Mojo selector is gone. A BXL script cannot read a text file, which is
-why the rules are Starlark here.
+A BXL script cannot read a text file, which is why the rules are Starlark
+here. `cases.bxl` holds the shipped rows to the paths that must never be
+left out (the build system, the prelude, the pinned buck2, the project
+configuration).
 
   WIDEN   a changed file matching the pattern affects EVERY target of the
           check set: a change to it cannot be mapped to the targets it

@@ -451,9 +451,9 @@ test "a textproto whose executable is python3 is refused; one that only mentions
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const proto =
-        "# `python3 release/ci/derive_checks.py --from x` prints it\n" ++
-        "  derive_checks {\n    executable: \"python3\"\n    args: \"release/ci/derive_checks.py\"\n  }\n" ++
-        "  affected {\n    executable: \"buck2\"\n  }\n";
+        "# `python3 release/ci/check.py --from x` prints it\n" ++
+        "  validation {\n    executable: \"python3\"\n    args: \"release/ci/check.py\"\n  }\n" ++
+        "  build_system {\n    executable: \"buck2\"\n  }\n";
     const o = try run(arena.allocator(), "scan\trelease/artifacts.textproto\nscan\trelease/machine.textproto\n", &.{
         .{ "release/artifacts.textproto", proto },
         .{ "release/machine.textproto", "executable: \"buck2\"\n# conda pulls python for mojo-python\n" },

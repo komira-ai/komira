@@ -17,7 +17,7 @@ description: Run one ./buck2 command and fail unless buck2 succeeded and no acti
 
 inputs:
   args:
-    description: The buck2 subcommand and its arguments, such as `build //tools/build/ci:affected`.
+    description: The buck2 subcommand and its arguments, such as `build //tools/build/ci:assert_remote`.
     required: true
   assert-remote:
     description: Path of the built //tools/build/ci:assert_remote executable.
