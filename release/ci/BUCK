@@ -1,0 +1,45 @@
+# release/ci: the scripts of the workflows. main_red is the alert of
+# .github/workflows/main_red.yml (docs/ci.md, "The main red alert"): a Zig
+# program, built behind its cases (//release/ci/tests:test_main_red), and run
+# by the workflow as the binary this target builds.
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# Built with zig 0.15.2 (`:zig_next`); the executable is built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+
+# What the alert does, as a module the program and its cases both import.
+zig_module(
+    name = "main_red_lib",
+    src = "main_red/lib.zig",
+    imports = [
+        "main_red/args.zig",
+        "main_red/gh.zig",
+        "main_red/issue.zig",
+        "main_red/logs.zig",
+        "main_red/range.zig",
+        "main_red/run.zig",
+    ],
+    visibility = ["//release/ci/tests:"],
+)
+
+zig_exe(
+    name = "main_red",
+    exec_compatible_with = LINUX_X86_64,
+    src = "main_red.zig",
+    deps = [":main_red_lib"],
+    unit_tests = ["//release/ci/tests:test_main_red", _ZIG_VERSION],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+    visibility = ["PUBLIC"],
+)
+
+# The `build_targets` command the per-change check runs
+# (artifacts.textproto) is a script of this directory.
+shell_lint(
+    name = "shell_lint",
+    srcs = glob(["*.sh"]),
+)

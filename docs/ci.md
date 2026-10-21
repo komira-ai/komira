@@ -1109,19 +1109,24 @@ pull request, within an hour of the alert, before anything else merges on
 top of it.
 
 [`.github/workflows/main_red.yml`](../.github/workflows/main_red.yml) is the
-alert. It runs when a run of `kci.yml` on `main` completes (`workflow_run`)
-and runs [`release/ci/main_red.py`](../release/ci/main_red.py) with
-`issues: write`, `actions: read` and `contents: read`, checking out `main`
-and running no code of any pull request. It acts only on a run started by a
-push to `main`:
+alert. It runs when a run of `kci.yml` on `main` completes (`workflow_run`),
+builds the Zig program [`//release/ci:main_red`](../release/ci/main_red.zig)
+on the farm (`./buck2 build`, then runs the binary that build produced) with
+`issues: write`, `actions: read`, `contents: read` and the `id-token: write`
+the farm connection exchanges, checking out `main` and running no code of any
+pull request. The workflows it reads are `--workflow <name>` flags of that
+step (and the trigger's `workflows:` list): the program names none itself, so
+a replacement push workflow is added to both in its own pull request. It acts
+only on a run of a named workflow started by a push to `main`:
 
 - **Red** (`failure`, `timed_out`, `startup_failure`): the last green
-  commit is the newest commit of a successful push run of `kci.yml` on
-  `main` that is an ancestor of the red one; the culprits are the pull
+  commit is the newest commit of a successful push run of a named workflow
+  on `main` that is an ancestor of the red one; the culprits are the pull
   requests merged into `main` after it (the first-parent commits of the
   range, newest first); the failing targets are the `Action failed:`,
   `GATED TEST FAILED:` and ``Validation for `<target>` failed`` lines of
-  the failed jobs' logs (with none, the failed job and step). If no issue
+  the failed jobs' logs, which are buck2's own output (with none, the
+  failed job and step). If no issue
   labelled `main-red` is open, it opens one titled `main red: <first
   failing target>`; otherwise it comments on the open one. A red commit
   that a later green run already contains (a re-run of an old run) is
@@ -1159,7 +1164,8 @@ replaced or cancelled; if two red runs race to open the issue, the newer
 issue is closed as a duplicate of the older. One delay remains: a push
 that changes only `docs/**` or `*.md` files starts no `kci.yml` run (rule
 R17), so a README example it breaks is found by the next push's run, whose
-range names it. Cases: `//release/ci/tests:test_main_red`.
+range names it. Cases: `//release/ci/tests:test_main_red`, a `zig_test` the
+program is built behind.
 
 ## Running it yourself
 
