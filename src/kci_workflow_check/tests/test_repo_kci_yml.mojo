@@ -1,12 +1,11 @@
 # =============================================================================
 # src/kci_workflow_check/tests/test_repo_kci_yml.mojo -- the repository's own
-#   two workflows, .github/workflows/kci.yml (the release) and pr.yml (the pull
-#   request's check), each held to the machine file, release/machine.textproto,
-#   by the same check `kci run` makes at start-up (`check_running_workflow`,
-#   with `pull_request_file` for pr.yml): it finds nothing. A drift between the
-#   two (a renamed job or environment, a stage the workflow does not run, a
-#   `pull_request` trigger in kci.yml, a job in pr.yml that is not the pull
-#   request's check, a pr job a fork reaches, an unpinned
+#   release workflow, .github/workflows/kci.yml, held to the machine file,
+#   release/machine.textproto, by the same check `kci run` makes at start-up
+#   (`check_running_workflow`): it finds nothing. (pr.yml, the pull request's
+#   check, runs Buck2 targets and no longer runs kci, so it is not held to the
+#   machine file.) A drift (a renamed job or environment, a stage the workflow
+#   does not run, a `pull_request` trigger in kci.yml, an unpinned
 #   action, a split of a stage that does not
 #   run all of it exactly once, a `kci run` without --summary-file or reading
 #   another machine file, farm-connect on the wrong job) fails this test, and with it `./buck2 build //...` on every pull
@@ -241,91 +240,11 @@ def test_kci_yml_agrees_with_the_machine_file() raises:
         raise Error(String(".github/workflows/kci.yml disagrees with release/machine.textproto:") + all)
 
 
-def test_pr_yml_agrees_with_the_machine_file() raises:
-    # the pull request's check: the PULL_REQUEST stage alone, the same entry point
-    # `kci run --stage pr` calls (pull_request_file)
-    var findings = check_running_workflow(
-        _graph(), _channels(), Path(String("pr.yml")).read_text(), String(DEFAULT_MACHINE_FILE), True
-    )
-    if len(findings) > 0:
-        raise Error(String(".github/workflows/pr.yml disagrees with release/machine.textproto:") + _joined(findings))
-    var doc = read_workflow(Path(String("pr.yml")).read_text())
-    # the check is `pr / check`: workflow `pr`, the one job `check`
-    assert_equal(doc.text(doc.child(0, String("name"))), String("pr"))
-    var jobs = doc.child(0, String("jobs"))
-    var ids = doc.keys(jobs)
-    assert_equal(len(ids), 1)
-    assert_equal(ids[0], String("check"))
-    # nothing but the pull_request trigger
-    var triggers = doc.keys(doc.child(0, String("on")))
-    assert_equal(len(triggers), 1)
-    assert_equal(triggers[0], String("pull_request"))
-    # one `kci run --stage pr --affected-by`, one farm connection, no environment
-    var steps = doc.items(doc.child(doc.items(jobs)[0], String("steps")))
-    var runs = 0
-    var farm = 0
-    for i in range(len(steps)):
-        var u = doc.child(steps[i], String("uses"))
-        if u >= 0 and doc.kind(u) == NODE_SCALAR and doc.text(u) == FARM_CONNECT_ACTION:
-            farm += 1
-        var r = doc.child(steps[i], String("run"))
-        if r >= 0 and doc.kind(r) == NODE_SCALAR:
-            var calls = kci_run_calls(doc.text(r))
-            for k in range(len(calls)):
-                runs += 1
-                assert_equal(calls[k].stage, String("pr"))
-                assert_true(calls[k].has_affected_by)
-                assert_true(calls[k].has_summary_file)
-    assert_equal(runs, 1)
-    assert_equal(farm, 1)
-    assert_true(doc.child(doc.items(jobs)[0], String("environment")) < 0)
-    # the build budget: the job has about 5 hours (at least 300 minutes, so a
-    # change that rebuilds most of the tree on the farm finishes; at most the
-    # 360 a GitHub-hosted job may run). The FIRST step takes the job's
-    # deadline, 5 minutes before GitHub would cancel it, read off
-    # `timeout-minutes` here so the two numbers cannot drift apart, and the one
-    # `kci run` gets the seconds left of it as --build-budget-s (kci_build THE
-    # BUDGET)
-    var job_minutes = Int(doc.text(doc.child(doc.items(jobs)[0], String("timeout-minutes"))))
-    assert_true(
-        job_minutes >= 300 and job_minutes <= 360,
-        String("pr.yml's timeout-minutes is ") + String(job_minutes) + String(", not within 300..360"),
-    )
-    var first = doc.child(steps[0], String("run"))
-    assert_true(first >= 0, String("pr.yml's first step runs nothing"))
-    assert_equal(
-        doc.text(first),
-        String('echo "$(( $(date +%s) + ')
-        + String(job_minutes - 5)
-        + String(' * 60 ))" > "$RUNNER_TEMP/job_deadline_s"\n'),
-    )
-    var budgeted = 0
-    for i in range(len(steps)):
-        var r = doc.child(steps[i], String("run"))
-        if r >= 0 and doc.kind(r) == NODE_SCALAR and len(kci_run_calls(doc.text(r))) > 0:
-            var t = doc.text(r)
-            # a missing deadline file stops the step before the arithmetic
-            # (which would read it as 0: a huge negative budget)
-            assert_true(
-                t.startswith(
-                    String('[ -s "$RUNNER_TEMP/job_deadline_s" ] || { echo "::error::no job deadline in ')
-                    + String("\\$RUNNER_TEMP/job_deadline_s: the job's first step did not write it\"; exit 1; }\n")
-                    + String('budget_s=$(( $(cat "$RUNNER_TEMP/job_deadline_s") - $(date +%s) ))\n')
-                ),
-                t,
-            )
-            assert_true(t.find(String(' --build-budget-s "$budget_s" ')) >= 0, t)
-            budgeted += 1
-    assert_equal(budgeted, 1)
-
-
-def test_each_real_workflow_is_refused_when_read_as_the_other() raises:
+def test_the_release_workflow_is_refused_when_read_as_the_pull_requests() raises:
     var g = _graph()
     var tokens = id_token_stages(g, _channels())
     var kci_as_pr = check_workflow(Path(String("kci.yml")).read_text(), g, tokens, String(DEFAULT_MACHINE_FILE), True)
     assert_true(len(kci_as_pr) > 0, String("kci.yml read as the pull request's workflow is not refused"))
-    var pr_as_release = check_workflow(Path(String("pr.yml")).read_text(), g, tokens, String(DEFAULT_MACHINE_FILE), False)
-    assert_true(len(pr_as_release) > 0, String("pr.yml read as the release workflow is not refused"))
     # the real kci.yml has no pull_request trigger
     var doc = read_workflow(Path(String("kci.yml")).read_text())
     var triggers = doc.keys(doc.child(0, String("on")))
@@ -369,7 +288,7 @@ def test_kci_yml_splits_only_beta_and_reads_the_default_machine_file() raises:
     assert_equal(only_seen[0], String("beta beta step:publish"))
     assert_equal(only_seen[1], String("beta_validate beta validation:install-komira-encoding"))
     assert_equal(only_seen[2], String("beta_validate beta validation:install-set"))
-    # the build job, and only it, joins the tailnet (pr.yml's check is the other)
+    # the build job, and only it, joins the tailnet (pr.yml's check, which runs no kci, joins it too)
     assert_equal(farm, 1)
     # the beta_validate job: no environment, no identity token, after the publish
     var validate = doc.child(jobs, String("beta_validate"))

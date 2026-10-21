@@ -2,7 +2,7 @@
 # demand. It tests buck2's own behaviour (where actions ran, cache identity
 # across checkouts, analysis-time refusals, a `buck2 run` from a fresh clone,
 # targets that must fail by design) and is NOT the gate: the gate is the build
-# (the check kci / pr), where building a target runs the tests welded to it. This workflow
+# (the check pr / check), where building a target runs the tests welded to it. This workflow
 # has no push or pull_request trigger, so it never holds up a change. See
 # docs/ci.md, "Build-system self-tests".
 #

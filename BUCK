@@ -27,13 +27,6 @@ export_file(
     visibility = ["//src/kci_workflow_check:"],
 )
 
-# The pull request's check, held to the same machine file by the same welded test.
-export_file(
-    name = "pr.yml",
-    src = ".github/workflows/pr.yml",
-    visibility = ["//src/kci_workflow_check:"],
-)
-
 # The files under .github/, which the root doc_tree's glob skips, at their
 # paths, for the interpreter list (//tools/build/lint:interpreter_budget).
 doc_tree(
