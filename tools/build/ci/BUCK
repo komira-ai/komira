@@ -88,6 +88,24 @@ mojo_binary(
     visibility = ["PUBLIC"],
 )
 
+# The BXL selector (affected.bxl, affected.bzl; cases.bxl, guard.bxl,
+# python_guard.bxl and targets.bxl are scripts, not targets) reads its widen and inert rows from
+# rules.bzl, because a BXL script cannot read rules.txt. Until the Mojo
+# selector above is gone this test holds the two files to the same rows: a
+# row changed in one and not the other is red. Built behind nothing: a
+# welded check, part of `//ci:pr` like every other.
+zig_test(
+    name = "rules_parity",
+    exec_compatible_with = LINUX_X86_64,
+    src = "rules_parity_test.zig",
+    data = {
+        "rules.bzl": "rules.bzl",
+        "rules.txt": "rules.txt",
+    },
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
 # assert_remote: reads the output of one ./buck2 run and exits non-zero unless
 # every action ran on the farm (assert_remote.zig says what buck2 prints and
 # what is accepted). The CI action `buck2-farm` runs it over the run's log.
@@ -138,3 +156,4 @@ zig_exe(
     zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["//:buck2_farm_cases"],
 )
+

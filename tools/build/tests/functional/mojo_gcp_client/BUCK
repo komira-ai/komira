@@ -306,7 +306,7 @@ tests_check(
 # it and generate its service.
 proto_srcs(
     name = "shop_api",
-    visibility = ["//negative/mojo_gcp_client:"],
+    visibility = ["//negative/mojo_gcp_client:", "komira//ci:"],
     srcs = ["example/shop/v1/shop.proto"],
     proto_deps = [":shop_deps"],
 )
