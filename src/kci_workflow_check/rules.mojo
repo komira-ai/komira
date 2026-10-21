@@ -164,6 +164,7 @@
 # =============================================================================
 
 from kci_api import DEFAULT_MACHINE_FILE, Selector, parse_selector
+from kci_scratch_no_such_module import planted_defect
 from kci_release_channel import Channel, find_channel, parse_channels_file
 from kci_release_machine import Selection, Stage, ReleaseMachine, joined_names, resolve_selection
 
