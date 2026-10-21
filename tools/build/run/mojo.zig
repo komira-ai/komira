@@ -11,7 +11,7 @@
 //! exit 0. Otherwise the banner (`GATED TEST FAILED: <label> (exit <rc>)`,
 //! the last 200 lines of the test's output) and the test's own status. The
 //! marker bytes and the banner lines are contracts (G9, G11): a package
-//! action takes every marker as an input, release/ci/main_red.py matches the
+//! action takes every marker as an input, release/ci/main_red matches the
 //! banner, and the coverage runs remove two of its lines by exact text.
 
 const std = @import("std");

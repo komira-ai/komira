@@ -33,7 +33,6 @@ const KINDS = [_]Kind{
     .{ .rule = "rust_binary run check", .target = "komira//tools/build/examples/rust/ext:ext_consumer" },
     .{ .rule = "zig_test", .target = "komira//tools/build/markdown:markdown_unit" },
     .{ .rule = "node_test", .target = "komira//src/tests/helpers/komira_test_node:isolation" },
-    .{ .rule = "py_test", .target = "komira//release/ci/tests:test_main_red" },
     .{ .rule = "launcher_level_test", .target = "komira//tools/build/package:level_test" },
     .{ .rule = "release_order_test", .target = "komira//tools/build/package:release_order_passes_a_longer_name" },
     .{ .rule = "kcov_guard_cases", .target = "komira//tools/build/package:kcov_guard_cases" },
@@ -62,7 +61,7 @@ const BxlRow = struct { name: []const u8, value: []const u8, text: ?[]const u8, 
 const BXL_ROWS = [_]BxlRow{
     .{
         .name = "rerun_check_known",
-        .value = "komira//release/ci/tests:test_main_red#3,tests//functional/readme_examples/ok:ok#4",
+        .value = "komira//tools/build/markdown:markdown_unit#3,tests//functional/readme_examples/ok:ok#4",
         .text = null,
         .also = "rerun: tests//functional/readme_examples/ok:ok runs its test actions again with KOMIRA_RERUN=4",
     },
