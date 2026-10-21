@@ -1,0 +1,33 @@
+# The completeness guard of `//ci:pr`: fails when a check target exists
+# outside it.
+#
+#   ./buck2 bxl komira//tools/build/ci/guard.bxl:check
+#
+# Every check of the scope (UNIVERSE of rules.bzl; a check is any target
+# but a source, SOURCE_KINDS) must be in the closure of the aggregate.
+# Building that closure is the whole check set, so a check outside it is
+# one the pull request check would never build. The failure lists the
+# targets and the command that regenerates ci/targets.bzl. Configuring the
+# aggregate also fails on a label in ci/targets.bzl that no longer exists.
+#
+# Options: --scope <patterns>, --aggregate <label>.
+
+load(":ci_graph.bzl", "check_nodes", "closure", "findings")
+load(":rules.bzl", "AGGREGATE", "UNIVERSE")
+
+def _check(ctx):
+    scope = ctx.cli_args.scope or UNIVERSE
+    aggregate = ctx.cli_args.aggregate or AGGREGATE
+    nodes = check_nodes(ctx, scope, aggregate.split(":")[0] + ":")
+    text = findings(sorted(nodes.keys()), closure(ctx, aggregate), aggregate)
+    if text:
+        fail(text)
+    ctx.output.print("guard: all {} check target(s) of {} are in {}".format(len(nodes), " + ".join(scope), aggregate))
+
+check = bxl_main(
+    impl = _check,
+    cli_args = {
+        "aggregate": cli_args.string(default = ""),
+        "scope": cli_args.list(cli_args.string(), default = []),
+    },
+)

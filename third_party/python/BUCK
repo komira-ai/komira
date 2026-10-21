@@ -16,6 +16,8 @@ _TEST_ONLY = [
     "komira//src/tests/e2e/komira_tls_interop_e2e/...",
     # The tests of the CI scripts under release/ci (a py_test alone).
     "komira//release/ci/tests:",
+    # The aggregate of the pull request check builds every wheel (tools/build/ci).
+    "komira//ci:",
 ]
 
 pinned_file(

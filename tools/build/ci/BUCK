@@ -1,4 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
 # affected: the targets a change affects, and the units of the release
 # template it reaches (see affected.mojo). The mapping is `change_map`, a
@@ -84,4 +86,22 @@ mojo_binary(
         "//tools/build/inspect:buildtools",
     ],
     visibility = ["PUBLIC"],
+)
+
+# The BXL selector (affected.bxl, affected.bzl; cases.bxl, guard.bxl and
+# targets.bxl are scripts, not targets) reads its widen and inert rows from
+# rules.bzl, because a BXL script cannot read rules.txt. Until the Mojo
+# selector above is gone this test holds the two files to the same rows: a
+# row changed in one and not the other is red. Built behind nothing: a
+# welded check, part of `//ci:pr` like every other.
+zig_test(
+    name = "rules_parity",
+    exec_compatible_with = LINUX_X86_64,
+    src = "rules_parity_test.zig",
+    data = {
+        "rules.bzl": "rules.bzl",
+        "rules.txt": "rules.txt",
+    },
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
 )

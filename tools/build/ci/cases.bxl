@@ -1,0 +1,279 @@
+# The cases of the BXL selector and the aggregate's guard.
+#
+#   ./buck2 bxl komira//tools/build/ci/cases.bxl:run
+#
+# Fails, listing every case that answered otherwise. Two layers:
+#
+#   table cases  affected.bzl over a graph written out in this file: every
+#                file shape (leaf source, BUCK, .bzl, deleted, build system,
+#                ownerless, inert, empty), the coverage holds, the patterns.
+#   real cases   the same functions over the real Buck2 graph of the fixture
+#                package (fixture/BUCK, fixture/agg/BUCK): the queries the
+#                selector asks (owner, targets in a build file, reverse
+#                dependencies, the loaders of a .bzl), and the guard green
+#                over a complete aggregate and red over one that leaves a
+#                check out.
+#
+# Each case names what it proves. A defect planted in affected.bzl,
+# ci_graph.bzl or the fixture turns a named case red (see the PR that added
+# this file for the mutants tried).
+
+load(":affected.bzl", "AFFECTED", "EMPTY", "VACUOUS", "WIDENED", "held_refusals", "is_held_file", "parse_held_lines", "pattern_matches", "select")
+load(":ci_graph.bzl", "check_nodes", "closure", "findings", "make_graph", "render", "roots")
+
+# ---- the table graph ---------------------------------------------------
+#
+#   src/a/a.mojo  -> owned by a:a        src/a/BUCK (package src/a: a:a, a:a_test)
+#   src/b/b.mojo  -> owned by b:b        b:b depends on a:a; c:c depends on b:b
+#   src/lib.bzl   -> loaded by src/a/BUCK and src/b/BUCK
+#   docs/x.md     -> owned by docs:doc_tree
+#   .hidden       -> owned by nothing
+#   ci/BUCK, ci/targets.bzl -> the aggregate's package (ci:pr)
+
+_FILES = {
+    "src/a/a.mojo": True,
+    "src/a/BUCK": True,
+    "src/b/b.mojo": True,
+    "src/b/BUCK": True,
+    "src/lib.bzl": True,
+    "docs/x.md": True,
+    "docs/BUCK": True,
+    "README.md": True,
+    ".hidden": True,
+    "ci/BUCK": True,
+    "ci/targets.bzl": True,
+    "orphan.bzl": True,
+}
+_OWNERS = {
+    "src/a/a.mojo": ["k//src/a:a"],
+    "src/b/b.mojo": ["k//src/b:b"],
+    "docs/x.md": ["k//docs:doc_tree"],
+    "ci/targets.bzl": ["k//ci:pr"],
+}
+_PACKAGES = {
+    "src/a": ["k//src/a:a", "k//src/a:a_test"],
+    "src/b": ["k//src/b:b"],
+    "docs": ["k//docs:doc_tree"],
+    "ci": ["k//ci:pr"],
+}
+_INCLUDING = {
+    "src/lib.bzl": ["k//src/a:a", "k//src/a:a_test", "k//src/b:b"],
+    "ci/targets.bzl": ["k//ci:pr"],
+}
+
+# reverse edges: who depends on a target (the aggregate is not in the universe)
+_DEPENDENTS = {
+    "k//src/a:a": ["k//src/b:b", "k//src/a:a_test"],
+    "k//src/b:b": ["k//src/c:c"],
+}
+
+def _reverse_closure(seeds):
+    seen = {}
+    todo = list(seeds)
+    for _ in range(1000):
+        if not todo:
+            break
+        t = todo.pop()
+        if t in seen:
+            continue
+        seen[t] = True
+        todo += _DEPENDENTS.get(t, [])
+    return seen.keys()
+
+def _table():
+    return struct(
+        exists = lambda p: p in _FILES,
+        owners = lambda p: _OWNERS.get(p, []),
+        package_targets = lambda d: _PACKAGES.get(d, []),
+        including = lambda p: _INCLUDING.get(p, []),
+        rdeps = _reverse_closure,
+    )
+
+_RULES = struct(
+    widen = [
+        (".buckconfig", "the configuration"),
+        ("tools/build/**", "the build system"),
+        ("third_party/**", "pinned sources"),
+    ],
+    inert = ["*.md", ".github/CODEOWNERS"],
+)
+
+def _table_case(name, changed, kind, targets = None, reason = None):
+    v = select(_RULES, changed, _table(), "ci")
+    problems = []
+    if v.kind != kind:
+        problems.append("kind {} (reason: {}), wanted {}".format(v.kind, v.reason, kind))
+    if targets != None and v.targets != targets:
+        problems.append("targets {}, wanted {}".format(v.targets, targets))
+    if reason != None and reason not in v.reason:
+        problems.append("reason '{}' lacks '{}'".format(v.reason, reason))
+    return [] if not problems else ["{}: {}".format(name, "; ".join(problems))]
+
+def _table_cases():
+    out = []
+    a_and_dependents = ["k//src/a:a", "k//src/a:a_test", "k//src/b:b", "k//src/c:c"]
+
+    # a leaf change selects its owner and every dependent, transitively, and nothing else
+    out += _table_case("leaf source selects owner and dependents", ["src/a/a.mojo"], AFFECTED, a_and_dependents)
+    out += _table_case("a leaf with one dependent chain", ["src/b/b.mojo"], AFFECTED, ["k//src/b:b", "k//src/c:c"])
+
+    # BUCK seeds the package, .bzl the loaders
+    out += _table_case("BUCK change selects the package and dependents", ["src/b/BUCK"], AFFECTED, ["k//src/b:b", "k//src/c:c"])
+    out += _table_case("bzl change selects every loader and dependents", ["src/lib.bzl"], AFFECTED, a_and_dependents)
+    out += _table_case("a bzl no BUCK loads widens", ["orphan.bzl"], WIDENED, reason = "loaded by no BUCK file")
+
+    # the build system and the toolchain widen, whatever else is in the change
+    out += _table_case("tools/build change widens", ["tools/build/mojo/defs.bzl"], WIDENED, reason = "tools/build/**")
+    out += _table_case("third_party change widens", ["third_party/uv/pin.txt"], WIDENED, reason = "third_party/**")
+    out += _table_case(".buckconfig widens", [".buckconfig"], WIDENED, reason = ".buckconfig")
+    out += _table_case("a widening file beside a leaf change widens", ["src/a/a.mojo", "tools/build/x.zig"], WIDENED)
+
+    # docs only: owned by the doc tree, so selected (not vacuous)
+    out += _table_case("docs-only change selects the doc tree", ["docs/x.md"], AFFECTED, ["k//docs:doc_tree"])
+    out += _table_case("inert unowned files alone are vacuous", ["README.md", ".github/CODEOWNERS"], VACUOUS)
+    out += _table_case("an inert file beside a leaf change is ignored", ["README.md", "src/b/b.mojo"], AFFECTED, ["k//src/b:b", "k//src/c:c"])
+
+    # no owner and no inert row: widens (never silently dropped)
+    out += _table_case("an existing file no target owns widens", [".hidden"], WIDENED, reason = "no target owns '.hidden'")
+
+    # deleted files: the package above them, a deleted BUCK widens
+    out += _table_case("deleted file selects its package and dependents", ["src/a/old.mojo"], AFFECTED, a_and_dependents)
+    out += _table_case("deleted BUCK widens", ["src/a/deleted/BUCK"], WIDENED, reason = "its package is gone")
+    out += _table_case("deleted file in no package, not inert, widens", ["nowhere/old.txt"], WIDENED, reason = "no package holds it")
+    out += _table_case("deleted inert file in no package is ignored alone (vacuous)", ["gone/NOTES.md"], VACUOUS)
+
+    # the aggregate's own list changing is not a selection: it widens
+    out += _table_case("a change to the aggregate's package widens", ["ci/targets.bzl"], WIDENED, reason = "aggregate's own package")
+    out += _table_case("the aggregate's BUCK widens", ["ci/BUCK"], WIDENED, reason = "aggregate's own package")
+
+    # a seed that reaches nothing widens (the universe does not hold it)
+    v = select(_RULES, ["src/a/a.mojo"], struct(exists = lambda p: True, owners = lambda p: ["k//elsewhere:x"], package_targets = lambda d: [], including = lambda p: [], rdeps = lambda s: []), "ci")
+    if v.kind != WIDENED:
+        out.append("reverse query answering nothing: kind {}, wanted {}".format(v.kind, WIDENED))
+
+    # empty
+    out += _table_case("no changed file is EMPTY, not a pass", [], EMPTY)
+    out += _table_case("blank lines are no file", ["", ""], EMPTY)
+
+    # patterns
+    for pattern, path, wanted in [
+        ("tools/build/**", "tools/build/a/b.zig", True),
+        ("tools/build/**", "tools/buildx/a", False),
+        ("tools/build/**", "tools/build", False),
+        ("tools/buck2*", "tools/buck2.toml", True),
+        ("tools/buck2*", "tools/buck", False),
+        ("*.md", "docs/a/b.md", True),
+        ("*.md", "docs/a/b.mdx", False),
+        ("buck2", "buck2", True),
+        ("buck2", "tools/buck2", False),
+    ]:
+        if pattern_matches(pattern, path) != wanted:
+            out.append("pattern {} on {}: wanted {}".format(pattern, path, wanted))
+    return out
+
+# ---- coverage holds ------------------------------------------------------
+
+def _held(changed, lines, package_stays = True):
+    base, head = parse_held_lines(lines, "HEAD")
+    g = struct(exists = lambda p: package_stays)
+    return held_refusals(changed, base, head, g)
+
+def _held_cases():
+    out = []
+    marker = "src/a/coverage_held"
+
+    def case(name, changed, lines, wanted, package_stays = True):
+        got = _held(changed, lines, package_stays)
+        if got != wanted:
+            out.append("held: {}: {}, wanted {}".format(name, got, wanted))
+
+    base = ["abc123:{}:1:# held".format(marker), "abc123:{}:2:line".format(marker), "abc123:{}:3:branch".format(marker)]
+    case("a metric taken out is refused", [marker], base + ["HEAD:{}:1:line".format(marker)], [marker + ": branch is no longer held"])
+    case("every metric taken out, marker emptied, is refused", [marker], base, [marker + ": branch is no longer held", marker + ": line is no longer held"])
+    case("a reordered marker passes", [marker], base + ["HEAD:{}:1:branch".format(marker), "HEAD:{}:2:line".format(marker)], [])
+    case("a gained metric passes", [marker], ["abc123:{}:1:line".format(marker), "HEAD:{}:1:line".format(marker), "HEAD:{}:2:branch".format(marker)], [])
+    case("a comment taken out passes", [marker], base + ["HEAD:{}:1:line".format(marker), "HEAD:{}:2:branch".format(marker)], [])
+    case("a new marker passes", [marker], ["HEAD:{}:1:line".format(marker)], [])
+    case("a marker deleted with its package stays refused", [marker], base, [marker + ": branch is no longer held", marker + ": line is no longer held"])
+    case("a marker deleted with its package's BUCK passes", [marker], base, [], package_stays = False)
+    case("a marker the change does not name is not read", ["src/a/a.mojo"], base, [])
+    case("another package's marker is its own", [marker], base + ["HEAD:src/b/coverage_held:1:line", "HEAD:{}:1:line".format(marker), "HEAD:{}:2:branch".format(marker)], [])
+    if not is_held_file("coverage_held") or not is_held_file("src/a/coverage_held") or is_held_file("src/a/coverage_held.md"):
+        out.append("held: is_held_file")
+    return out
+
+# ---- the real graph: the fixture ----------------------------------------
+
+_F = "komira//tools/build/ci/fixture"
+_SCOPE = ["{}:{}".format(_F, n) for n in ["leaf_src", "lonely_src", "leaf", "mid", "top", "lonely"]]
+_AGG = "{}/agg:agg_complete".format(_F)
+_AGG_PKG = "tools/build/ci/fixture/agg"
+_FIXTURE_RULES = struct(
+    widen = [("tools/build/ci/fixture/widen*", "a fixture row")],
+    inert = [],
+)
+
+def _real_case(g, name, changed, kind, targets = None):
+    v = select(_FIXTURE_RULES, changed, g, _AGG_PKG)
+    problems = []
+    if v.kind != kind:
+        problems.append("kind {} (reason: {}), wanted {}".format(v.kind, v.reason, kind))
+    if targets != None:
+        got = [t for t in v.targets if t.startswith(_F + ":")]
+        want = ["{}:{}".format(_F, t) for t in targets]
+        if got != want:
+            problems.append("targets {}, wanted {}".format(got, want))
+    return [] if not problems else ["real: {}: {}".format(name, "; ".join(problems))]
+
+def _real_cases(ctx):
+    out = []
+    g = make_graph(ctx, _SCOPE, "komira//" + _AGG_PKG + ":")
+    both = ["leaf", "leaf_src", "lonely", "lonely_src", "mid", "top"]
+    dir = "tools/build/ci/fixture/"
+
+    # the owner query, then the reverse dependencies within the scope
+    out += _real_case(g, "a leaf file selects its owner and every dependent, not the unrelated check", [dir + "leaf.txt"], AFFECTED, ["leaf", "leaf_src", "mid", "top"])
+    out += _real_case(g, "the other leaf selects only its own chain", [dir + "lonely.txt"], AFFECTED, ["lonely", "lonely_src"])
+    out += _real_case(g, "a BUCK file selects its whole package", [dir + "BUCK"], AFFECTED, both)
+    out += _real_case(g, "a file deleted from the package selects the package", [dir + "gone.txt"], AFFECTED, both)
+    out += _real_case(g, "a bzl selects the packages that load it", ["tools/build/ci/aggregate.bzl"], AFFECTED, both)
+
+    # a file no target owns widens; inert, it is vacuous
+    out += _real_case(g, "a file no target owns widens", [dir + ".unowned"], WIDENED)
+    out += _real_case(g, "a widen row widens", [dir + "widen_me"], WIDENED)
+    out += _real_case(g, "the aggregate's package widens", [_AGG_PKG + "/BUCK"], WIDENED)
+    v = select(struct(widen = [], inert = [dir + ".unowned"]), [dir + ".unowned"], g, _AGG_PKG)
+    if v.kind != VACUOUS:
+        out.append("real: an inert unowned file: kind {}, wanted {}".format(v.kind, VACUOUS))
+
+    # the aggregate's side: roots, closure, the guard
+    nodes = check_nodes(ctx, _SCOPE, "komira//" + _AGG_PKG + ":")
+    got_checks = sorted(nodes.keys())
+    want_checks = sorted(["{}:{}".format(_F, n) for n in ["leaf", "mid", "top", "lonely"]])
+    if got_checks != want_checks:
+        out.append("real: the checks of the scope (sources are none): {}, wanted {}".format(got_checks, want_checks))
+    got_roots = roots(nodes)
+    want_roots = sorted(["{}:{}".format(_F, n) for n in ["top", "lonely"]])
+    if got_roots != want_roots:
+        out.append("real: roots of the checks: {}, wanted {}".format(got_roots, want_roots))
+    complete = findings(got_checks, closure(ctx, _AGG), _AGG)
+    if complete:
+        out.append("real: guard over the complete aggregate failed: " + complete)
+    missing_agg = "{}/agg:agg_missing".format(_F)
+    text = findings(got_checks, closure(ctx, missing_agg), missing_agg)
+    if "{}:lonely".format(_F) not in text or "1 check target(s)" not in text or "targets.bxl:generate" not in text:
+        out.append("real: guard over an aggregate that leaves `lonely` out did not name it and the regeneration: '{}'".format(text))
+    rendered = render(["a//:x"], ["a//:t"])
+    if rendered[-8:] != ["TARGETS = [", '    "a//:x",', "]", "", "TESTS = [", '    "a//:t",', "]", ""]:
+        out.append("real: render of targets.bzl: {}".format(rendered[-8:]))
+    return out
+
+def _run(ctx):
+    table = _table_cases() + _held_cases()
+    real = _real_cases(ctx)
+    failures = table + real
+    if failures:
+        fail("{} case(s) failed:\n  ".format(len(failures)) + "\n  ".join(failures))
+    ctx.output.print("cases: table and real cases all passed")
+
+run = bxl_main(impl = _run, cli_args = {})
