@@ -1176,3 +1176,5 @@ The lints alone, without building the rest:
 ```
 
 A failing lint prints `Validation for <target> failed:` and its findings.
+
+(A paragraph for a throwaway selection case.)
