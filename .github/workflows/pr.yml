@@ -13,8 +13,9 @@
 #      cannot be mapped or touches the build system;
 #   3. `build` of that list (a library's welded tests run inside its build);
 #   4. the checks only a BXL script can make, over the whole graph: the
-#      test_weld and graph_check lints, the completeness guard of //ci:pr and
-#      the cases of the selector and the guard;
+#      test_weld and graph_check lints, the completeness guard of //ci:pr, the
+#      guard that it reaches no Python, and the cases of the selector and the
+#      guard;
 #   5. `test` of the list's standalone tests.
 # Every Buck2 step is the buck2-farm action (.github/actions/buck2-farm), which
 # fails the step unless buck2 succeeded and no action ran on the runner. The
@@ -144,6 +145,11 @@ jobs:
         uses: ./.github/actions/buck2-farm
         with:
           args: bxl komira//tools/build/ci/guard.bxl:check
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: the aggregate reaches no Python
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: bxl komira//tools/build/ci/python_guard.bxl:check
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: the selector and guard cases
         uses: ./.github/actions/buck2-farm
