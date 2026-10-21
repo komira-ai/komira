@@ -89,6 +89,25 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
+# The cases of the buck2-farm action (.github/actions/buck2-farm/action_test.zig
+# says what each catches): action.yml's shape, and its two run lines run
+# end to end over recorded buck2 output with the real //tools/build/ci:assert_remote.
+zig_test(
+    name = "buck2_farm_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = ".github/actions/buck2-farm/action_test.zig",
+    data = {
+        "action.yml": ".github/actions/buck2-farm/action.yml",
+        "fixtures": "//tools/build/ci:assert_remote_fixtures",
+    },
+    exec_tools = {
+        "ASSERT_REMOTE": "//tools/build/ci:assert_remote",
+        "STAND_IN_BUCK2": "//tools/build/ci:stand_in_buck2",
+    },
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
 # The local actions the workflows call (.github/actions/<name>/action.yml): not
 # workflows, so actionlint does not read them, but the pins and the endpoint
 # lints do.

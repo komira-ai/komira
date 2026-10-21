@@ -1,5 +1,5 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
-load("@komira//tools/build/mojo:toolchain.bzl", "zig_test")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
 # affected: the targets a change affects, and the units of the release
@@ -105,3 +105,55 @@ zig_test(
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
 )
+
+# assert_remote: reads the output of one ./buck2 run and exits non-zero unless
+# every action ran on the farm (assert_remote.zig says what buck2 prints and
+# what is accepted). The CI action `buck2-farm` runs it over the run's log.
+# Its cases are recorded buck2 output (assert_remote/fixtures); welded: the
+# tool is built only when they pass.
+zig_test(
+    name = "assert_remote_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "assert_remote/assert_remote_test.zig",
+    imports = [
+        "assert_remote/assert_remote.zig",
+        "assert_remote/fixtures/build_cached.log",
+        "assert_remote/fixtures/build_failed_unknown_target.log",
+        "assert_remote/fixtures/build_remote.log",
+        "assert_remote/fixtures/bxl_cached.log",
+        "assert_remote/fixtures/bxl_remote.log",
+        "assert_remote/fixtures/test_none_ran.log",
+    ],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "assert_remote",
+    exec_compatible_with = LINUX_X86_64,
+    src = "assert_remote/assert_remote.zig",
+    unit_tests = [":assert_remote_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# The recorded buck2 output of assert_remote's cases, as a directory, for the
+# cases of the CI action that runs it (//:buck2_farm_cases).
+export_file(
+    name = "assert_remote_fixtures",
+    src = "assert_remote/fixtures",
+    visibility = ["//:buck2_farm_cases"],
+)
+
+# What the cases of the buck2-farm action run as `./buck2`: it prints a
+# recorded log and exits as told (assert_remote/stand_in_buck2.zig).
+zig_exe(
+    name = "stand_in_buck2",
+    exec_compatible_with = LINUX_X86_64,
+    src = "assert_remote/stand_in_buck2.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["//:buck2_farm_cases"],
+)
+

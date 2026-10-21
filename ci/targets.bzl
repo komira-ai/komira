@@ -4,6 +4,7 @@
 
 TARGETS = [
     "komira//:action_pins",
+    "komira//:buck2_farm_cases",
     "komira//:coverage_census",
     "komira//:coverage_ci_cases",
     "komira//:docs",

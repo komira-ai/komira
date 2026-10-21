@@ -152,6 +152,24 @@ service that keys the cache by instance (Buildbarn does; a cache tier that
 ignores instance names, such as bazel-remote without
 `--enable_ac_key_instance_mangling`, does not).
 
+### Running a buck2 command on the farm
+
+The local action
+[`.github/actions/buck2-farm`](../.github/actions/buck2-farm/action.yml) runs
+one `./buck2` command (build, test or bxl) and fails its step unless buck2
+succeeded and no action ran locally. It is two lines: buck2's output is tee'd to
+a file, and the built tool `//tools/build/ci:assert_remote`
+([`assert_remote.zig`](../tools/build/ci/assert_remote/assert_remote.zig)) reads
+the file. The tool fails when a `Commands:` summary line says `local:` anything
+but `0`, when the log ends a failed run (`BUILD FAILED`, `BXL FAILED`), or when
+there is no summary line although the run used the network. A run that executed
+no action (everything cached, or a query-only bxl script) prints no summary line
+at all, only `Network: up 0B  down 0B`, and passes on that line. `build` and
+`bxl` print the same summary. The caller builds the tool first and passes its
+path as `assert-remote`. The cases are recorded buck2 output
+(`//tools/build/ci:assert_remote_unit`) and the action's own two lines run over
+it (`//:buck2_farm_cases`).
+
 ## Pull requests from forks
 
 A fork's pull request gets no OIDC token and no repository variables
