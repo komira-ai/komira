@@ -20,8 +20,13 @@ pub fn value(a: std.mem.Allocator, text: []const u8) ![]const u8 {
     var out = std.ArrayList(u8).empty;
     var it = std.mem.tokenizeAny(u8, text, " \t\r\n\x0b\x0c");
     while (it.next()) |word| {
-        if (out.items.len > 0) try out.append(a, ' ');
-        try out.appendSlice(a, word);
+        const before = out.items.len;
+        if (before > 0) try out.append(a, ' ');
+        // No control byte (an ESC above all) enters an issue.
+        for (word) |c| {
+            if (c >= 0x20 and c != 0x7f) try out.append(a, c);
+        }
+        if (out.items.len == before + @intFromBool(before > 0)) out.shrinkRetainingCapacity(before);
     }
     var n = @min(out.items.len, MAX_VALUE);
     // A continuation byte (10xxxxxx) at the cut: back up to the sequence's start.

@@ -22,6 +22,11 @@
 //!   green; nothing on a cancelled or skipped run, a manual run, another
 //!   branch or a workflow that is not named.
 //! - the command line and `gh`: the flags, and what a failed call means.
+//! - terminal escapes: every `gh api` call passes --allow-escape-sequences
+//!   (without it gh refuses a job log and the alert is silent), and no
+//!   escape sequence of a log survives into the targets, the key lines or
+//!   the issue body. A call without the flag, a stripper that knows only
+//!   colours, or a body that takes a log's bytes as they are is red.
 const std = @import("std");
 const lib = @import("main_red_lib");
 const t = std.testing;
@@ -510,4 +515,78 @@ test "gh: a dry run prints the write and sends nothing" {
     const answer = try api.write("POST", "repos/o/r/issues", "{\"title\":\"x\"}");
     try t.expectEqual(@as(i64, 0), answer.object.get("number").?.integer);
     try t.expectEqualStrings("main_red: DRY RUN POST repos/o/r/issues {\"title\":\"x\"}\n", sink.written());
+}
+
+// ---- terminal escape sequences -----------------------------------------------
+
+/// A job log as a terminal-aware tool writes it: colours (SGR with several
+/// parameters), a private-mode CSI (`?25l` hides the cursor), a cursor move
+/// and an erase, and a window-title OSC ended by BEL, each in front of the
+/// text a reader matches on.
+const ESCAPE_LOG =
+    "2026-10-05T12:06:22.3345183Z [2026-10-05T12:06:22.334+00:00] \x1b[31mAction failed:\x1b[0m komira//src/a:a (komira//p:linux#03cc) (compile)\n" ++
+    "2026-10-05T12:06:23.0000000Z \x1b[?25l\x1b[2K\x1b[1GGATED TEST FAILED: komira//src/b:b:tests/t.mojo\x1b[?25h\n" ++
+    "2026-10-05T12:06:24.0000000Z \x1b]0;buck2 title\x07\x1b[1;38;5;196mValidation for `komira//v:v` failed\x1b[m\n" ++
+    "2026-10-05T12:06:25.0000000Z BUILD FAILED \x1b(B\x1b[0m\x01end\n";
+
+test "a log with terminal escapes still names its failing targets, and none keeps an ESC byte" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try expectStrings(&.{ "komira//src/a:a", "komira//src/b:b:tests/t.mojo", "komira//v:v" }, try logs.failingTargets(a, ESCAPE_LOG, logs.MAX_TARGETS));
+    const keys = try logs.keyLogLines(a, ESCAPE_LOG, 5);
+    try t.expectEqual(@as(usize, 3), keys.len);
+    for (keys) |k| try t.expect(std.mem.indexOfScalar(u8, k, 0x1b) == null);
+    try t.expectEqualStrings("BUILD FAILED end", try logs.stripLogLine(a, "2026-10-05T12:06:25.0000000Z BUILD FAILED \x1b(B\x1b[0m\x01end"));
+    // A lone ESC at the end and an unterminated OSC drop out too.
+    try t.expectEqualStrings("x", try logs.stripLogLine(a, "x\x1b"));
+    try t.expectEqualStrings("x", try logs.stripLogLine(a, "x\x1b]0;never ended"));
+}
+
+test "no text from a log puts an ESC byte in the issue body, whatever it is" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // Straight from the log, through the issue.
+    const failing = try logs.failingTargets(a, ESCAPE_LOG, logs.MAX_TARGETS);
+    const keys = try logs.keyLogLines(a, ESCAPE_LOG, 5);
+    const body = try issue.issueBody(a, RUN_URL, HEAD, null, &.{}, failing, keys);
+    try t.expect(std.mem.indexOfScalar(u8, body, 0x1b) == null);
+    try t.expect(std.mem.indexOf(u8, body, "Failing: komira//src/a:a\n") != null);
+    // And a value given with escapes, as a last line of defence.
+    const v = try issue.value(a, "\x1b[31ma\x1b[0m \x01 b");
+    try t.expect(std.mem.indexOfScalar(u8, v, 0x1b) == null);
+    try t.expectEqualStrings("[31ma[0m b", v);
+    const title = try issue.issueTitle(a, &.{"\x1bx"});
+    try t.expect(std.mem.indexOfScalar(u8, title, 0x1b) == null);
+}
+
+test "gh: every call is `gh api --allow-escape-sequences` and then its arguments" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // The three shapes of call: a read, a log read, a write from stdin.
+    const calls = [_][]const []const u8{
+        &.{"repos/o/r/actions/runs/7"},
+        &.{"repos/o/r/actions/jobs/70/logs"},
+        &.{ "--method", "POST", "repos/o/r/issues", "--input", "-" },
+    };
+    for (calls) |args| {
+        const argv = try lib.gh.buildArgv(a, "gh", args);
+        try t.expectEqual(args.len + 3, argv.len);
+        try t.expectEqualStrings("gh", argv[0]);
+        try t.expectEqualStrings("api", argv[1]);
+        try t.expectEqualStrings("--allow-escape-sequences", argv[2]);
+        try expectStrings(args, argv[3..]);
+    }
+}
+
+test "gh: a failed call remembers which call it was, for the message" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var sink = std.Io.Writer.Allocating.init(a);
+    var api = lib.gh.GhApi{ .a = a, .gh = "false", .out = &sink.writer, .backoff_ms = 0 };
+    try t.expectError(error.GhFailed, api.text("repos/o/r/actions/jobs/70/logs"));
+    try t.expectEqualStrings("repos/o/r/actions/jobs/70/logs", api.last_call);
 }

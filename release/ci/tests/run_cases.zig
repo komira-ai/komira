@@ -189,6 +189,24 @@ test "a red with an open issue comments on the oldest" {
     try f.expectWrite(0, "POST", R ++ "/issues/4/comments", try expectedComment(a, EXPECTED_BODY));
 }
 
+test "a job log full of terminal escapes opens the same issue, with no ESC byte in it" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var f = Fake.init(a);
+    try redWorld(&f, "[]", true);
+    try f.put(R ++ "/actions/jobs/70/logs",
+        "2026-10-05T12:06:22.3345183Z \x1b[?25l\x1b[31mAction failed:\x1b[0m komira//tools/build/toolchains:busybox (cfg) (download_file busybox)\n" ++
+            "2026-10-05T12:06:23.0000000Z \x1b]0;t\x07BUILD FAILED\n");
+    try f.run(7);
+    try t.expectEqual(@as(usize, 1), f.writes.items.len);
+    const body = f.writes.items[0].body;
+    try t.expect(std.mem.indexOfScalar(u8, body, 0x1b) == null);
+    try t.expect(std.mem.indexOf(u8, body, "\\u001b") == null);
+    try t.expect(std.mem.indexOf(u8, body, "\"title\":\"main red: komira//tools/build/toolchains:busybox\"") != null);
+    try t.expect(std.mem.indexOf(u8, body, "Failing: komira//tools/build/toolchains:busybox\\n") != null);
+}
+
 test "a pull request is not an open issue: the issues API lists both" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();

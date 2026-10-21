@@ -89,7 +89,8 @@ fn run() !void {
     alert.run(args.run_id) catch |e| {
         out.flush() catch {};
         if (e == error.GhFailed) {
-            std.fs.File.stderr().deprecatedWriter().print("main_red: gh api failed: {s}\n", .{api.last_err}) catch {};
+            const why = if (api.last_err.len > 0) api.last_err else "(gh printed nothing on stderr)";
+            std.fs.File.stderr().deprecatedWriter().print("main_red: gh api {s} failed: {s}\n", .{ api.last_call, why }) catch {};
             std.process.exit(1);
         }
         return e;
