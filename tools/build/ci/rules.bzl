@@ -59,3 +59,16 @@ SOURCE_KINDS = [
 
 # The aggregate every pull request check builds, and its package.
 AGGREGATE = "komira//ci:pr"
+
+# The checks `//ci:pr` leaves out on purpose, each a (pattern, reason): they are Python, and
+# Python serves only the Python SDK and its py_tests (tests/python_closure_allowlist.bzl,
+# PYTHON_SURFACE). The aggregate holds no Python rule; `python_guard.bxl:check` fails when it
+# reaches one. A pattern that no longer names a package fails the generator and the guards:
+# delete the row with the package.
+EXCLUDED = [
+    ("komira//third_party/python/...", "the pinned CPython and wheels: inputs of Python tests only"),
+    ("komira//release/ci/tests:", "py_test of the CI scripts, not of the Python SDK"),
+    ("komira//src/tests/e2e/komira_tls_interop_e2e:test_komira_client_vs_cpython_server", "runs a CPython peer, not a test of the Python SDK"),
+    ("komira//src/tests/e2e/komira_tls_interop_e2e:test_cpython_client_vs_komira_server", "runs a CPython peer, not a test of the Python SDK"),
+    ("komira//src/tests/e2e/komira_tls_interop_e2e:test_komira_client_refuses_cpython_server", "runs a CPython peer, not a test of the Python SDK"),
+]

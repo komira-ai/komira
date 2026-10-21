@@ -118,10 +118,4 @@ PYTHON_CEILING = [
     "file src/komira_arrow_ipc/tests/fixtures/arrow_ipc/gen_pyarrow_interop_fixtures.py",
     "file src/komira_parquet_codec/tests/fixtures/parquet/gen_pyarrow_fixtures.py",
     "file src/tests/e2e/komira_formats_e2e/tests/fixtures/orc/gen_pyarrow_orc_fixtures.py",
-
-    # The aggregate of the pull request check (ci/BUCK) holds every root of the check set, and
-    # so the Python ones above (the pinned CPython, its wheels, the py_test of the CI scripts)
-    # that `//...` built before the aggregate existed. It adds no Python: each rule it reaches
-    # is already listed. Not a surface: it runs nothing itself.
-    "target komira//ci:pr",
 ]
