@@ -6,7 +6,7 @@
 # has no push or pull_request trigger, so it never holds up a change. See
 # docs/ci.md, "Build-system self-tests".
 #
-# It reaches the farm as kci.yml's pr job does, through the local action
+# It reaches the farm as pr.yml's job does, through the local action
 # .github/actions/farm-connect, and holds `id-token: write` for that alone.
 name: build-system-selftests
 
