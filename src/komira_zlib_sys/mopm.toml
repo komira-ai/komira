@@ -1,0 +1,23 @@
+[package]
+name = "komira_zlib_sys"
+version = "0.1.0"
+description = "zlib 1.3.2 as a static native library for Mojo: the unmodified C sources, built into lib/libkomira_zlib_sys.a. The Mojo module is empty; a package calls zlib through its own external_call declarations."
+license = "Zlib"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+# The id is namespaced (not `zlib`): it becomes a bare dependency name in a registry's package index, where a plain `zlib` is the
+# name of another project's package. The archive is lib<id>.a.
+# cflags are what zlib's ./configure sets on Linux (the tarball's zconf.h is the unconfigured one): unistd.h (Z_HAVE_UNISTD_H),
+# the 64-bit file offsets of the gz*64 functions (_LARGEFILE64_SOURCE) and the hidden attribute (HAVE_HIDDEN), which keeps zlib's
+# internal functions out of the archive's exports.
+[native.komira_zlib_sys]
+kind = "static"
+srcs = ["vendor/zlib-1.3.2/*.c"]
+hdrs = ["vendor/zlib-1.3.2/*.h"]
+cflags = ["-O2", "-DNDEBUG", "-DZ_HAVE_UNISTD_H", "-D_LARGEFILE64_SOURCE=1", "-DHAVE_HIDDEN"]
+
+[targets]
+lib = { path = "src/komira_zlib_sys" }
+tests = ["tests"]
