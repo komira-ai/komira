@@ -310,8 +310,9 @@ with Buck2 targets on the farm. It runs no kci. It is written by hand.
 **komira publishes to no channel for now**, and publishing will move to mopm
 (see [releases](releases.md)): the workflow builds the set, so a push to `main`
 still proves the release builds, keeps what it built as a workflow artifact, and
-publishes nothing, with no publishing credential and no channel. It has one
-job, `release`, on a GitHub-hosted runner (`ubuntu-24.04`) joined to the farm by
+publishes nothing, with no publishing credential and no channel. Its job
+`release` (two more, for the packages moved to mopm, are
+[below](#the-mopm-jobs)) is on a GitHub-hosted runner (`ubuntu-24.04`) joined to the farm by
 [`farm-connect`](#how-it-reaches-the-farm), in the environment `build`, with
 `contents: read` and `id-token: write` (for the tailnet only). Triggers: a push
 to `main` that is not documentation only (`docs/**`, `**.md`: the stamp does not
@@ -347,6 +348,46 @@ The release machine file, [`release/machine.textproto`](../release/machine.textp
 and `kci` itself are not part of the release now: no workflow runs either, and no
 workflow is held to the machine file. The file stays for kci's own tests until
 kci is removed from this repository.
+
+### The mopm jobs
+
+The libraries moved to mopm (built with buildrules' `mojo_package`, which
+gives each a `:lib` and a `:conda`) are published to a mopm registry apart from
+the release set. [`//release:mopm_set`](../release/mopm_set.bzl) lists them,
+and is the publish list: it builds each package's `:lib` and `:conda` into one
+tree. Two more jobs of `release.yml` use it, both only for a push to `main`
+(a manual run starts neither):
+
+| job | when | what it does |
+|---|---|---|
+| `mopm-dry-run` | every push to `main` | on the farm (environment `build`, the farm's tailnet token only): builds [`//release/ci:mopm_publish`](../release/ci/mopm_publish.zig), the one mopm the packages pin (`toolchains//:mopm_0_0_20`, the pin of their `mopm-toolchain.toml`) and `//release:mopm_set`, then runs `mopm_publish --mode dry-run`: `mopm publish --registry gamma --dry-run` for each package. Nothing is sent and no token is read. The tool refuses unless the `would upload` line names the `.conda` the build made, with its sha256 (what would be uploaded is the tested package, byte for byte), and unless the set and the `src/` directories that have a `mopm.toml` are the same list (a package moved to mopm and not added to `mopm_set`, or the reverse, is red). It uploads what it built as a workflow artifact (a day) for the next job. |
+| `mopm-publish` | after `release` and `mopm-dry-run`, **only when the repository variable `MOPM_PUBLISH_ENABLED` is `true`** (unset today: the job is skipped) | in the environment `gamma`, with `contents: read` and `id-token: write` (the identity token the registry exchanges for a publish token) and no farm: it joins no tailnet and runs no `buck2`. It checks out the commit (for the manifests), downloads the artifact and runs `mopm_publish --mode publish`: the dry run of each package again, then `mopm publish --registry gamma`. A version the registry already has (it says "already exists ... versions are immutable") is skipped, so a re-run is safe; any other refusal fails the job. The tool refuses to publish with an empty `MOPM_TOKEN`. A version is never replaced. |
+
+The cases of the tool (the dry run's line, the check against the build,
+dry-run mode never running a publish, the skip of an existing version and no
+other refusal, the two-way check of the list) are
+[`//release/ci/tests:test_release`](../release/ci/tests/test_mopm_publish.zig),
+a build action of the tool.
+
+#### Enabling the mopm publish
+
+Nothing publishes until all of this is done, in this order. Each step is a
+human's, outside this repository:
+
+1. On the gamma registry, a komira-ai company owner exists and owns the
+   package names `komira_json` and `komira_encoding` (ownership is a registry
+   record, not something `mopm.toml` can express).
+2. On the registry, a trusted publisher is registered for each package:
+   this repository, the workflow `release.yml`, the environment `gamma`.
+   This needs mopm's CI identity-token exchange, which is not released yet.
+3. In the repository's settings, the environment `gamma` exists and deploys
+   only from `main`.
+4. This repository's `mopm-publish` job gets its exchange step: the step
+   named `the publish token` stops the job today, because the exchange's
+   client side does not exist yet. It must write the publish token as the
+   step's `token` output (the next step sets it as `MOPM_TOKEN`).
+5. Set the variable: `gh variable set MOPM_PUBLISH_ENABLED --body true --repo komira-ai/komira`.
+   Deleting the variable (or any value but `true`) disables the job again.
 
 > **Removed: publishing.** The rest of this page, from "Continuous
 > auto-promotion" to "GitHub settings the release relies on", describes the

@@ -15,6 +15,7 @@
 # (main_red, check_release_ref, release_json), built behind their cases.
 # Changes need the release approver's review (.github/CODEOWNERS).
 
+load(":mopm_set.bzl", "mopm_set")
 load(":release_set.bzl", "release_set")
 
 export_file(
@@ -32,6 +33,20 @@ export_file(
     name = "machine.textproto",
     mode = "reference",
     visibility = ["//release/validations:", "//src/kci_release_machine:"],
+)
+
+# The packages published to mopm (mopm_set.bzl): the libraries moved to mopm,
+# built as `:lib` and `:conda`. This list is the publish list, and
+# //release/ci:mopm_publish holds it to the src/ packages that have a mopm.toml.
+# release.yml's `mopm-dry-run` job builds it and dry-runs the publish on every
+# push to main; `mopm-publish` publishes it, only when enabled (docs/ci.md).
+mopm_set(
+    name = "mopm_set",
+    packages = [
+        "komira_encoding",
+        "komira_json",
+    ],
+    visibility = ["PUBLIC"],
 )
 
 # The release set: every package release/artifacts.textproto declares, in its

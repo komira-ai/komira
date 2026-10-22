@@ -6,3 +6,4 @@ pub const ref_guard = @import("ref_guard.zig");
 pub const stamp = @import("stamp.zig");
 pub const artifacts = @import("artifacts.zig");
 pub const set_json = @import("set_json.zig");
+pub const mopm_publish = @import("mopm_publish.zig");
