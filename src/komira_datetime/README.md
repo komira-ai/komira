@@ -149,9 +149,9 @@ that are not sources:
 
 `:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a source,
 a test, `mopm.toml`, `mopm.lock` or `mopm-toolchain.toml`, run `buildrules mojo sync`, commit what it
-writes, and build `komira//src/komira_datetime:lib` on the farm. (The sync writes the toolchain pins to a `toolchains/`
-directory at the repository root; here the toolchains cell is `tools/build/cells/toolchains/`, so its
-`mojo_pins.bzl` and `mopm_pins.bzl` are copied there.) A test file that `buildrules mojo sync` has not listed is not
+writes, and build `komira//src/komira_datetime:lib` on the farm. (The sync writes the toolchain pins,
+`mojo_pins.bzl` and `mopm_pins.bzl`, to the directory the `[cells] toolchains` line of `.buckconfig` names:
+`tools/build/cells/toolchains/` here.) A test file that `buildrules mojo sync` has not listed is not
 run: run the sync after adding one.
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
