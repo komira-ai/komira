@@ -1,3 +1,10 @@
+# NO STAGE NAMES THIS FILE TODAY. komira publishes to no channel for now:
+# release/machine.textproto has the build stage alone, and publishing will move
+# to mopm (docs/releases.md). The file stays only because kci's channels parser
+# refuses a file with no channel and src/kci_release_channel's welded test reads
+# it; it is not a statement that these channels receive releases. The text below
+# describes the channels as they were declared.
+#
 # The release channels (src/kci_release_channel): where a PUBLISH step
 # (`kci run --stage <S>`) may push, and how. release/machine.textproto names
 # this file and, per stage, the channel: stage `beta` publishes to `beta`,
