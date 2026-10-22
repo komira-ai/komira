@@ -375,8 +375,9 @@ Nothing publishes until all of this is done, in this order. Each step is a
 human's, outside this repository:
 
 1. On the gamma registry, a komira-ai company owner exists and owns the
-   package names `komira_json` and `komira_encoding` (ownership is a registry
-   record, not something `mopm.toml` can express).
+   name of every package in `//release:mopm_set` (that is, every `src/`
+   directory with a `mopm.toml`, which `checkSync` enforces; ownership is a
+   registry record, not something `mopm.toml` can express).
 2. On the registry, a trusted publisher is registered for each package:
    this repository, the workflow `release.yml`, the environment `gamma`.
    This needs mopm's CI identity-token exchange, which is not released yet.

@@ -2,7 +2,7 @@
 
     mopm_set(
         name = "mopm_set",
-        packages = ["komira_json", "komira_encoding"],
+        packages = ["komira_encoding", "komira_json"],
     )
 
 A package is a library built with buildrules' `mojo_package` (its BUCK file

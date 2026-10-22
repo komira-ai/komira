@@ -43,8 +43,10 @@ export_file(
 mopm_set(
     name = "mopm_set",
     packages = [
+        "komira_datetime",
         "komira_encoding",
         "komira_json",
+        "komira_protobuf",
     ],
     visibility = ["PUBLIC"],
 )
