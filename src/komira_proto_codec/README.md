@@ -140,3 +140,32 @@ def main() raises:
     assert_true(message.startswith('JsonError: unknown field "nmae" at $'))
     assert_equal(decode_json_lenient[User]('{"name": "ada", "nmae": "typo"}').name, "ada")
 ```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_proto_codec`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_proto_codec/`, its tests are `tests/`. It has no native archive. It
+depends on three libraries of this repository, `komira_encoding`, `komira_json` and `komira_protobuf`, as mopm path
+dependencies (`[dependencies]` of `mopm.toml`, each with a path and the version `0.1`). The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the three path dependencies, where the library and its tests are |
+| `mopm.lock` | what `mopm lock` writes (with no registry reachable); it lists the three path dependencies and pins the toolchain |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above; `buildrules mojo check` fails when they are stale |
+| `generated_tests/` | the tests and `.proto` files that need a generated message type; they are not in `tests/`, so `:lib` does not wait for them (see below) |
+
+`:lib` is the library file and exists only once every test of `tests/` has passed, and, built from the unit graph of
+the three dependencies, only once their own tests have passed. After any change to a source, a test, `mopm.toml`,
+`mopm.lock` or `mopm-toolchain.toml`, run `buildrules mojo sync`, commit what it writes, and build
+`komira//src/komira_proto_codec:lib` on the farm.
+
+`:komira_proto_codec` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`). Its `deps` are the adopted
+labels of the same three packages, so a dependent of this library also sees their `.mojoc` files; the list is kept equal
+by hand to the `[dependencies]` of `mopm.toml`. It also compiles and runs the README's examples against `:lib`
+(`[tests][readme]`); the tests are not run again.
+
+`generated_tests/` holds `test_copy_hazard`, `test_float32_json_binades` and `test_implicit_presence_json` with the two
+`.proto` files they need. A generated message type is built from this library (`mojo_proto_library` over
+`:komira_proto_codec`), so a test that uses one cannot be a test of `:lib`. They stay targets of komira's own rules.

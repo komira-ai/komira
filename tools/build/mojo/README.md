@@ -236,7 +236,10 @@ The package's `:lib` is the library file, made only after every test run passed.
 builds only once the library's tests have passed. With a `readme` it carries the README-example gate of a `mojo_library`
 (`[tests][readme]`, with `[file]`, `[generated]` and `[objects]`; the same `readme_gate`, compiled against `:lib`, so the
 package's tests are not run a second time). It carries no branch coverage gate and no mutation sub-targets, and
-`coverage.yml` selects `mojo_library` targets, so an adopted package is measured by buildrules' own `:coverage`. `conda_package` takes the adopted library as it takes a
+`coverage.yml` selects `mojo_library` targets, so an adopted package is measured by buildrules' own `:coverage`. `deps` names the
+adopted libraries of the package's mopm path dependencies (`//src/komira_proto_codec`): their packages become children of the
+adopted library's package set and its `direct` and `direct_conda` list them, exactly as a `mojo_library` with the same `deps`; the
+file stays `:lib`. `conda_package` takes the adopted library as it takes a
 `mojo_library`, so the conda packages of the libraries that depend on it still name it. The mopm package's `.conda` is
 the library's `:conda` (buildrules' `mojo_conda` over `:lib`), so it too exists only after the tests passed.
 

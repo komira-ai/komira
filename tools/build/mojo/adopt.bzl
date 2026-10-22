@@ -15,8 +15,8 @@ adopts, and it hands on what they made.
         readme = "README.md",
     )
 
-What a dependent gets is what `mojo_library` would give it, for a library with no deps and no native
-code: `-I` on the file of `lib`, so the file exists (and the dependent builds) only once every test has
+What a dependent gets is what `mojo_library` would give it, for a library with no native code:
+`-I` on the file of `lib` (and on those of `deps`), so the file exists (and the dependent builds) only once every test has
 passed, because `lib` is made only then. The same facts the conda package reads (`conda_name`, the
 README, the `src` and `tests` sub-targets) are the library's own, so `conda_package(lib = ...)` packs
 it as it packs a `mojo_library`.
@@ -34,15 +34,20 @@ of the README and the mutation sub-targets of a `mojo_library`. A library adopte
 them until buildrules has them. In particular the pull request's coverage job (`coverage.yml`)
 selects `mojo_library` targets, so an adopted package is measured by buildrules' own `:coverage`.
 
-A library that has deps or native code is not adopted by this rule: it has no `deps` or `native`
-attribute, so a BUCK file that needs them stops at the attribute, not at a wrong `MojoInfo`.
+A library that depends on other libraries names them in `deps`, the adopted labels of the packages
+that are its mopm path dependencies (src/komira_proto_codec): a dependent then sees their `.mojoc`
+files as well, and `conda_package` names them as requirements. `deps` is the Buck side of the
+`[dependencies]` of the package's `mopm.toml`; buildrules' `mojo_package` builds `:lib` from the
+members' own `:lib`, so the two lists are kept equal by hand. A library with native code is not
+adopted by this rule: it has no `native` attribute, so a BUCK file that needs it stops at the
+attribute, not at a wrong `MojoInfo`.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env")
 load(":defs.bzl", "adopt_readme_test")
 load(":opt_level.bzl", "TEST_OPT_LEVEL")
-load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoToolchainInfo", "welded_tests_info")
+load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoToolchainInfo", "mojo_pkg_children", "welded_tests_info")
 load(":readme.bzl", "readme_gate")
 
 # The README examples tool of mojo_library (readme.bzl): Zig, so it depends on no Mojo library.
@@ -88,7 +93,8 @@ def _impl(ctx):
             fail("{}: {} is outside the package root {}".format(ctx.label, s.short_path, root))
         mapping[s.short_path[len(root) + 1:]] = s
     src_dir = ctx.actions.copied_dir("src/" + import_name, mapping)
-    pkgs = ctx.actions.tset(MojoPkgTSet, value = public)
+    dep_infos = [d[MojoInfo] for d in ctx.attrs.deps]
+    pkgs = ctx.actions.tset(MojoPkgTSet, value = public, children = mojo_pkg_children(ctx, dep_infos))
 
     # The README gate, as a mojo_library's (readme.bzl, readme_gate): compiled against `lib`, with no C
     # closure; the README ships in the conda package, so a relative link in it is refused.
@@ -118,8 +124,11 @@ def _impl(ctx):
             conda_name = ctx.attrs.conda_name or import_name,
             conda_refusal = None,
             dlopen = [],
-            direct = [],
-            direct_conda = {},
+            direct = sorted([i.import_name for i in dep_infos]),
+            direct_conda = {
+                i.import_name: struct(name = i.conda_name, refusal = i.conda_refusal)
+                for i in dep_infos
+            },
             import_name = import_name,
             native = _NO_NATIVE,
             pkgs = pkgs,
@@ -133,6 +142,7 @@ _adopted = rule(
     impl = _impl,
     attrs = {
         "conda_name": attrs.option(attrs.string(), default = None),
+        "deps": attrs.list(attrs.dep(providers = [MojoInfo]), default = []),
         "import_name": attrs.option(attrs.string(), default = None),
         "lib": attrs.dep(),
         "readme": attrs.option(attrs.source(), default = None),
