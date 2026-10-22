@@ -5,9 +5,10 @@ What komira publishes today, and how another repository pins a version of it.
 ## What exists today
 
 **komira publishes to no channel for now.** A push to `main` builds the release
-set (`.github/workflows/kci.yml`, the `build` stage) and nothing more; the
-earlier conda channels on prefix.dev are no longer published to, and publishing
-will move to mopm. Read the sections below about uploading, channels and the
+set (`.github/workflows/release.yml`: the packages, `release.json` and its set
+hash, kept as a workflow artifact, [docs/ci.md](ci.md#releaseyml-the-release))
+and nothing more; the earlier conda channels on prefix.dev are no longer
+published to, and publishing will move to mopm. Read the sections below about uploading, channels and the
 publish step as the design of that step, not as something a push does today.
 
 Komira has no release tags and no version number of its own, and this
