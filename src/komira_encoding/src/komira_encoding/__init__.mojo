@@ -36,8 +36,11 @@ input, that it was invalid and where the first invalid byte is (the error
 says so anyway). Limits: the guarantee is about this source code. The
 compiler may in principle turn a mask select into a branch (there is no
 value barrier in Mojo to prevent it), and the output buffer and its growth
-are ordinary heap memory; the decoded bytes are not zeroized after an
-error. Treat it as BoringSSL-level hygiene for keys and tokens, not as a
+are ordinary heap memory (a decoder that fails wipes the bytes it had
+decoded through libc's `explicit_bzero`, `memset_s` on macOS, before the
+error is raised, and `pem_decode` wipes its scratch copy of the base64 body
+on every way out; the buffer a successful decode returns belongs to the
+caller, who wipes it). Treat it as BoringSSL-level hygiene for keys and tokens, not as a
 verified constant-time implementation.
 """
 

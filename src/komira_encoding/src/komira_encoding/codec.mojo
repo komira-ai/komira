@@ -138,6 +138,14 @@ def encode(scheme: Int, data: Span[UInt8, _], pad: Bool) -> String:
     return String(unsafe_from_utf8=Span(out))
 
 
+# FFI-BOUNDARY: `wipe_bytes` is the one place this package calls into C, and
+# it calls libc only: `explicit_bzero` (glibc 2.25 and later, musl) or, on
+# macOS, `memset_s` (libSystem). Both symbols are in the C library every
+# Mojo program links, so the package ships no native archive. The only
+# pointer is the data pointer of the caller's `List[UInt8]`: the list owns
+# and frees that memory, libc only writes `n` zero bytes into it during the
+# call and keeps nothing, and no pointer is taken or returned by a public
+# function.
 def wipe_bytes(mut buf: List[UInt8]):
     """Zero every element of `buf` through libc's secure-zero call
     (`explicit_bzero`, or `memset_s` on macOS), which the optimizer cannot
