@@ -185,6 +185,7 @@ TARGETS = [
     "komira//src/komira_join_assembly:komira_join_assembly_conda",
     "komira//src/komira_jose:komira_jose_conda",
     "komira//src/komira_json:ci",
+    "komira//src/komira_json:conda",
     "komira//src/komira_json:komira_json_conda",
     "komira//src/komira_json:table",
     "komira//src/komira_json:test_json_duplicate_keys__cov",

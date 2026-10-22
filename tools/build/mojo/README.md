@@ -233,9 +233,10 @@ and `tools/build/platforms/default` registers the one execution platform its rul
 The package's `:lib` is the library file, made only after every test run passed. `mojo_adopted_library`
 ([`adopt.bzl`](adopt.bzl)) is the target the dependents name (`//src/komira_json:komira_json`): it gives komira's own rules the
 `MojoInfo` they require of a dependency over that same file, and runs and compiles nothing. A dependent therefore
-builds only once the library's tests have passed. It carries no README-example gate, no branch coverage gate and
+builds only once the library's tests have passed. The library carries no README-example gate, no branch coverage gate and
 no mutation sub-targets: buildrules has none of the three. `conda_package` takes the adopted library as it takes a
-`mojo_library`, so the conda packages of the libraries that depend on it still name it.
+`mojo_library`, so the conda packages of the libraries that depend on it still name it. The mopm package's `.conda` is
+the library's `:conda` (buildrules' `mojo_conda` over `:lib`), so it too exists only after the tests passed.
 
 ## Binaries and tests
 

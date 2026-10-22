@@ -103,3 +103,7 @@ a test, `mopm.toml`, `mopm.lock` or `mopm-toolchain.toml`, run `buildrules mojo 
 writes, and build `komira//src/komira_json:lib` on the farm. (The sync writes the toolchain pins to a `toolchains/`
 directory at the repository root; here the toolchains cell is `tools/build/cells/toolchains/`, so its
 `mojo_pins.bzl` and `mopm_pins.bzl` are copied there.)
+
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
+(`mojo-komira_json-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the tests have passed.
+Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.
