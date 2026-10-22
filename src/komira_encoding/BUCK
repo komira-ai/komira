@@ -31,12 +31,14 @@ mojo_adopted_library(
 # The README's examples, compiled and run by komira's own rules (`[tests][readme]`): the adopted
 # library above does not carry that gate (adopt.bzl), and kci_validate's golden test reads this
 # README's gate output (`[tests][readme][file]` and `[generated]`). The same sources under the same
-# import name, with no tests of its own: the tests of this package gate `:lib`. Nothing depends on
-# this target except that test.
+# import name, with the same tests: komira's coverage measurement takes the package's `mojo_library`
+# targets, so a copy with no tests would be measured at 80% (the README run alone) and fail the
+# package's held 99% line coverage. Nothing depends on this target except that test.
 mojo_library(
     name = "komira_encoding_readme",
     import_name = "komira_encoding",
     srcs = glob(["src/komira_encoding/**/*.mojo"]),
+    test_srcs = glob(["tests/test_*.mojo"]),
     visibility = ["PUBLIC"],
 )
 
