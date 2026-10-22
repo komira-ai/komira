@@ -128,5 +128,5 @@ directory at the repository root; here the toolchains cell is `tools/build/cells
 (`mojo-komira_encoding-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the tests have passed.
 Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.
 
-`:komira_encoding_readme` is the same sources under komira's own Mojo rules with no tests: it exists so that the
-README's examples above are still compiled and run (`[tests][readme]`), which `:lib` does not do.
+`:komira_encoding` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`). It also compiles and runs the
+README's examples above (`[tests][readme]`) against `:lib`, which `:lib` does not do; the tests are not run again.

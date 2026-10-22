@@ -1,5 +1,4 @@
 load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load("@buildrules//rules/mojo:pack.bzl", "mojo_conda")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":buildrules.mojo.bzl", "mojo_package")
@@ -17,7 +16,8 @@ mojo_package(path = ".")
 
 # `:komira_encoding`, the target the packages that depend on this library name, is `:lib` as komira's
 # Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds only once the
-# tests have passed.
+# tests have passed. It carries the README gate too (`[tests][readme]`, with `[file]` and `[generated]`,
+# which kci_validate's golden test reads): the examples run against `:lib`; the tests are not run again.
 mojo_adopted_library(
     name = "komira_encoding",
     lib = ":lib",
@@ -25,20 +25,6 @@ mojo_adopted_library(
     srcs = glob(["src/komira_encoding/**/*.mojo"]),
     test_srcs = glob(["tests/test_*.mojo"]),
     test_runs = ":test",
-    visibility = ["PUBLIC"],
-)
-
-# The README's examples, compiled and run by komira's own rules (`[tests][readme]`): the adopted
-# library above does not carry that gate (adopt.bzl), and kci_validate's golden test reads this
-# README's gate output (`[tests][readme][file]` and `[generated]`). The same sources under the same
-# import name, with the same tests: komira's coverage measurement takes the package's `mojo_library`
-# targets, so a copy with no tests would be measured at 80% (the README run alone) and fail the
-# package's held 99% line coverage. Nothing depends on this target except that test.
-mojo_library(
-    name = "komira_encoding_readme",
-    import_name = "komira_encoding",
-    srcs = glob(["src/komira_encoding/**/*.mojo"]),
-    test_srcs = glob(["tests/test_*.mojo"]),
     visibility = ["PUBLIC"],
 )
 

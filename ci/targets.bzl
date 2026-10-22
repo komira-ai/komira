@@ -144,7 +144,6 @@ TARGETS = [
     "komira//src/komira_dynamic_filter:komira_dynamic_filter_conda",
     "komira//src/komira_encoding:ci",
     "komira//src/komira_encoding:conda",
-    "komira//src/komira_encoding:komira_encoding_readme_conda",
     "komira//src/komira_encoding:table",
     "komira//src/komira_encoding:test_base32__cov",
     "komira//src/komira_encoding:test_base64__cov",
