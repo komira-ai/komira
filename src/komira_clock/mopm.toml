@@ -1,0 +1,15 @@
+[package]
+name = "komira_clock"
+version = "0.1.0"
+description = "The process clocks: monotonic, wall-clock and thread CPU time, read as plain integers through a C shim that owns the clock ids."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[native.komira_clock]
+kind = "static"
+
+[targets]
+lib = { path = "src/komira_clock" }
+tests = ["tests"]

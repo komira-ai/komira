@@ -1,12 +1,15 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load(":buildrules.mojo.bzl", "mojo_package")
 
-# The process clocks: monotonic nanoseconds, wall-clock milliseconds and
-# microseconds, and the calling thread's CPU nanoseconds. Each is a direct
-# `clock_gettime` call; the package has no C shim and no dependencies beyond
-# the standard library, so it is a leaf any package can import.
-mojo_library(
-    name = "komira_clock",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
-    test_srcs = ["tests/test_clock.mojo"],
+# WORK IN PROGRESS, RED: not mergeable. buildrules v0.0.25 builds a package's own tests without the
+# package's own `[native.komira_clock]` archive: mopm's unit graph lists `"natives": []` for the lib
+# and test units (buildrules.mojo.lock.bzl), `mojo_package` compiles nothing under `native/`, and
+# `natives = {...}` is read only for natives the graph lists. `:test_clock__bin` fails to link with
+# `undefined symbol: komira_clock_monotonic_ns` (and the realtime and thread CPU functions).
+mojo_package(path = ".", natives = {"libkomira_clock.a": ":komira_clock_c"})
+
+cxx_library(
+    name = "komira_clock_c",
+    srcs = ["native/komira_clock.c"],
+    preferred_linkage = "static",
     visibility = ["PUBLIC"],
 )
