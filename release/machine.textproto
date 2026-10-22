@@ -12,71 +12,26 @@
 # a drift fails `./buck2 build //...`. This file owns the stages: edit both
 # together.
 #
+# komira publishes to NO channel for now: the stages that published to a
+# channel, and the validations that installed from it, were removed, and
+# publishing will move to mopm (docs/releases.md). release/channels.textproto
+# is kept (kci's channels parser refuses a file with no channel) but no stage
+# names it.
+#
 #   build  builds every artifact release/artifacts.textproto declares, for
 #          linux-x86_64, into a release directory with release.json. It is
 #          FARM-CONNECTED: its job joins the tailnet to reach the build farm,
 #          and so it may never publish.
-#   beta   publishes that release set to the channel `beta` (prefix.dev
-#          komira-ai/beta, release/channels.textproto), in the GitHub
-#          environment `beta` that the channel's trusted publisher names,
-#          on a push to main only (no `break_glass`, below).
-#          Its two validations then install what was published the way a
-#          consumer gets it, each on the machine that runs kci with no
-#          container (CONDA_INSTALL_ENV: the pinned pixi, a fresh scratch
-#          directory outside the checkout, an environment built from
-#          nothing): the channel's index is read anonymously (it must list
-#          every file with the build's sha256 and serve those bytes), pixi
-#          installs at this release's version and build from the channel,
-#          with mojo-compiler from Modular's channel, and each installed
-#          library's README examples (share/doc/<name>/README.md, whose
-#          sha256 the release records) run against the install. A
-#          native library (shipped `.so` or a system codec) also gets the
-#          native install checks (src/kci_validate/native_rows.mojo).
-#            install-komira-encoding  komira_encoding ALONE: its own
-#                                     requirements must suffice
-#            install-set              komira_all ALONE: kci reads its members
-#                                     from the built metapackage's own
-#                                     requirements (they must be exactly the
-#                                     release's libraries, at its version and
-#                                     build) and checks every one of them
-#          kci.yml runs the stage as two jobs: `beta` (`--only
-#          step:publish`) and `beta_validate` (`--only validation:<name>` for each
-#          of the two, no environment, no identity token), and prod waits
-#          for both.
-#          Each validation is also a target a developer runs, before or
-#          after publishing: `./buck2 run //release/validations:<name>`
-#          (release/validations/BUCK, held equal to the validations here).
-#   prod   publishes the SAME release set (never rebuilt) to the channel
-#          `prod` (prefix.dev komira-ai/prod), in the GitHub environment
-#          `prod`, after beta's publish and validation, on every push to main
-#          (continuous auto-promotion). It is the one stage that is not
-#          break_glass: it runs only on a push to main, for the pushed commit
-#          on main's history, and never publishes a build number lower than
-#          its channel holds.
-#          The beta job's summary lists the names new to prod (NEW NAMES).
 #
 # There is no pull request stage: the required check `pr / check` is pr.yml's
 # one job, which runs the BXL selector tools/build/ci/affected.bxl and builds
 # and tests what it names through the farm action, with no kci.
 #
-# BREAK-GLASS: only build is `break_glass: true`, so a manual run (of any
-# branch, main included; with a required reason) builds its revision on
-# the farm and stops there: it publishes nothing. beta and prod are not
-# break_glass, so only a push to main reaches them: the workflow's `if:`
-# on each of their jobs (rule R15 of src/kci_workflow_check), its step
-# `only a push to main reaches this job` (R21), and kci itself
-# (KCI-E-NOT-ON-MAIN). The GitHub environment `beta` has no branch
-# policy, so those three, not the environment, keep a branch's or a
-# manual run's publish out of the channel `beta`. The break-glass stages
-# are a prefix of the chain (the machine file refuses a break_glass stage
-# after one that is not).
+# BREAK-GLASS: build is `break_glass: true`, so a manual run (of any branch,
+# main included; with a required reason) builds its revision on the farm. The
+# break-glass stages are a prefix of the chain (the machine file refuses a
+# break_glass stage after one that is not).
 #
-# A stage's `environment` is the GitHub environment its job runs in, and the
-# one its channel's trusted publisher names (push_identity
-# `...:environment:<env>`); kci refuses a trusted publish from any other.
-#
-# Publishing and deploying are separate stages in separate GitHub environments:
-# a deploy stage, when there is one, is added here as a stage of its own.
 # Relative paths are relative to the directory kci is started in (the
 # repository's root in kci.yml). Changes need the release approver's review
 # (.github/CODEOWNERS).
@@ -94,57 +49,5 @@ stage {
     kind: BUILD
     platform: "linux-x86_64"
     artifacts: "release/artifacts.textproto"
-  }
-}
-
-stage {
-  name: "beta"
-  environment: "beta"
-  after: "build"
-  step {
-    name: "publish"
-    kind: PUBLISH
-    platform: "linux-x86_64"
-    artifacts: "release/artifacts.textproto"
-    channels: "release/channels.textproto"
-    channel: "beta"
-    # Each validation installs from the step's channel only; mojo-compiler,
-    # pinned to the libraries' mojo_pin, comes from compiler_channel, and
-    # its own dependencies (python for mojo-python) from conda-forge. Only
-    # the ABSENCE of a file in the channel's index is waited for (the
-    # registry indexes an upload after it lands; a subdir's FIRST index can
-    # take a quarter of an hour); then it fails. Each poll is logged.
-    validation {
-      name: "install-komira-encoding"
-      kind: CONDA_INSTALL_ENV
-      install: "komira_encoding"
-      compiler_channel: "https://conda.modular.com/max"
-      extra_channel: "conda-forge"
-      smoke: README
-      wait_for_index_seconds: 1800
-    }
-    validation {
-      name: "install-set"
-      kind: CONDA_INSTALL_ENV
-      install: "komira_all"
-      compiler_channel: "https://conda.modular.com/max"
-      extra_channel: "conda-forge"
-      smoke: README
-      wait_for_index_seconds: 1800
-    }
-  }
-}
-
-stage {
-  name: "prod"
-  environment: "prod"
-  after: "beta"
-  step {
-    name: "publish"
-    kind: PUBLISH
-    platform: "linux-x86_64"
-    artifacts: "release/artifacts.textproto"
-    channels: "release/channels.textproto"
-    channel: "prod"
   }
 }

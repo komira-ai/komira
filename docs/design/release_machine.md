@@ -144,8 +144,10 @@ tool that writes them is itself a pinned build output.
 [`release/machine.textproto`](../../release/machine.textproto) (format
 `kci.machine`, read by `src/kci_release_machine`) is komira's own release machine:
 its stages in order, and the steps of each. `kci run --stage <S>` runs one
-stage. Three stages today: `build` (one BUILD step), `beta` and `prod` (one
-PUBLISH step each, to prefix.dev `komira-ai/beta` and `komira-ai/prod`). Three
+stage. One stage today: `build` (one BUILD step). komira publishes to no
+channel for now: the `beta` and `prod` stages (one PUBLISH step each) were
+removed, and publishing will move to mopm; the fields below still describe
+what kci accepts for a publishing stage. Three
 fields of a stage carry what the CI workflow must agree with:
 
 | field | meaning |

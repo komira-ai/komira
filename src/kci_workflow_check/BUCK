@@ -71,23 +71,21 @@ mojo_library(
         # and machine file, each ending in its rule's finding
         "tests/test_ci_auto_promotion.mojo",
     ],
-    # The repository's own release workflow, machine file and channels file
-    # (the root BUCK and release/BUCK), the pixi pin its validate job
-    # downloads (the platform table's, written by //tools/build/toolchains),
-    # and the validation targets' record (release/validations/BUCK).
+    # test_repo_kci_yml: the repository's own release workflow and machine
+    # file (the root BUCK and release/BUCK; one build stage, no channel).
+    # test_ci_auto_promotion: a FIXTURE pair, the workflow and machine file
+    # komira had while it published to channels (tests/data/publish_*), so
+    # the rules that guard a publishing job stay tested while kci can publish.
     test_data = {
         "tests/test_ci_auto_promotion.mojo": {
-            "channels.textproto": "//release:channels.textproto",
-            "kci.yml": "//:kci.yml",
-            "machine.textproto": "//release:machine.textproto",
+            "channels.textproto": "tests/data/publish_channels.textproto",
+            "kci.yml": "tests/data/publish_kci.yml",
+            "machine.textproto": "tests/data/publish_machine.textproto",
         },
         "tests/test_repo_kci_yml.mojo": {
-            "channels.textproto": "//release:channels.textproto",
             "kci.yml": "//:kci.yml",
             "machine.textproto": "//release:machine.textproto",
             "release_version.sh": "//tools/build/package:release_version.sh",
-            "pixi_pin.txt": "//tools/build/toolchains:pixi_pin_linux_x86_64",
-            "validations.txt": "//release/validations:names",
         },
     },
     visibility = ["PUBLIC"],
