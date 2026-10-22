@@ -22,9 +22,14 @@
 # which the build runs. It names no workflow itself: every workflow it reads
 # is a `--workflow <name>` flag of the step, and each must also be in
 # `workflows:` of the trigger (a name in only one of them is never read, or
-# never started). A push-to-main workflow that replaces `kci` is added to both
-# lists in the pull request that introduces it, so no run of main goes
-# unwatched in between.
+# never started). A push-to-main workflow is added to both lists in the pull
+# request that introduces it, so no run of main goes unwatched in between.
+# `release` is the release workflow's name. `kci` is the name of the release
+# workflow it replaced: its file is deleted and it starts no run, but GitHub
+# keeps a deleted workflow and its runs in the API, so the program still reads
+# its successful pushes to main as last-green candidates, and the first red run
+# of `release` names its culprits from kci's last green instead of "unknown".
+# Drop `kci` from both lists once `release` has a green push of its own.
 #
 # WHY NO RED IS HIDDEN. The push runs of the watched workflows share a
 # concurrency group with cancel-in-progress false: a running release is
@@ -49,7 +54,7 @@ name: main-red
 
 on:
   workflow_run:
-    workflows: [kci]
+    workflows: [release, kci]
     types: [completed]
     branches: [main]
 
@@ -87,7 +92,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.event.workflow_run.id }}
-        run: '"$RUNNER_TEMP/main_red" --repo "$GITHUB_REPOSITORY" --run-id "$RUN_ID" --workflow kci'
+        run: '"$RUNNER_TEMP/main_red" --repo "$GITHUB_REPOSITORY" --run-id "$RUN_ID" --workflow release --workflow kci'
       - name: Stop buck2
         if: always()
         run: ./buck2 kill || true
