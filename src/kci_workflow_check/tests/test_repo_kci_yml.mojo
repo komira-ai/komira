@@ -142,29 +142,19 @@ def _pixi_pin_findings(text: String, pin: String) raises -> List[String]:
 def test_the_release_machine() raises:
     var g = _graph()
     var names = g.stage_names()
-    assert_equal(len(names), 4)
+    assert_equal(len(names), 3)
     assert_equal(names[0], String("build"))
     assert_equal(names[1], String("beta"))
     assert_equal(names[2], String("prod"))
-    assert_equal(names[3], String("pr"))
-    # the pull request's check: no environment, farm-connected, one BUILD
-    # step over the release's artifacts file, after nothing
-    var pr = g.stage(String("pr"))
-    assert_true(pr.is_pull_request())
-    assert_equal(pr.environment, String(""))
-    assert_true(pr.farm_connected)
-    assert_equal(pr.after, String(""))
-    assert_equal(len(pr.steps), 1)
-    assert_true(pr.steps[0].is_build())
-    assert_equal(pr.steps[0].platform, String("linux-x86_64"))
-    assert_equal(pr.steps[0].artifacts, String("release/artifacts.textproto"))
+    # the pull request's check is no stage: pr.yml runs buck2, not kci
+    for i in range(len(names)):
+        assert_false(g.stage(names[i]).is_pull_request(), names[i])
     # continuous auto-promotion: a manual run (of a branch or of main)
     # reaches build only (break-glass); beta and prod run only on a push to
-    # main; the pr stage is no release stage
+    # main
     assert_true(g.stage(String("build")).break_glass)
     assert_false(g.stage(String("beta")).break_glass)
     assert_false(g.stage(String("prod")).break_glass)
-    assert_false(pr.break_glass)
     var b = g.stage(String("build"))
     assert_equal(b.environment, String("build"))
     assert_true(b.farm_connected)

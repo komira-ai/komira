@@ -725,8 +725,8 @@ metric: most packages have no branch measurement (only the libraries of
 alone until its branches are measured at the target.
 
 **A hold is never dropped.** The per-change check refuses a change that
-drops one: `affected --base` (tools/build/ci/affected.mojo, the command the
-pull request check runs) reads each changed `coverage_held` at the change's
+drops one: the selector (tools/build/ci/affected.bxl, which the pull request
+check runs) reads each changed `coverage_held` at the change's
 base and at its head, and answers BROKEN, which fails the check, naming
 each metric the base held that the head does not: a line taken out, or the
 file deleted while its package stays. A new file, a metric added, and a

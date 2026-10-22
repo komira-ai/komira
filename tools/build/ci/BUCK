@@ -1,110 +1,10 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
-# affected: the targets a change affects, and the units of the release
-# template it reaches (see affected.mojo). The mapping is `change_map`, a
-# pure function over a `Graph`; its unit tests answer the graph from tables,
-# and are welded: nothing builds against the package while one fails.
-#
-# What the mapping widens on is DATA, `rules.txt`; the test that reads the
-# shipped file holds it to the cases that must never be left out (the build
-# system, the prelude, the pinned buck2, the project configuration).
-export_file(
-    name = "rules.txt",
-    visibility = ["PUBLIC"],
-)
-
-mojo_library(
-    name = "change_map",
-    srcs = [
-        "change_map/__init__.mojo",
-        "change_map/cells.mojo",
-        "change_map/derive.mojo",
-        "change_map/graph.mojo",
-        "change_map/held.mojo",
-        "change_map/labels.mojo",
-        "change_map/plan.mojo",
-        "change_map/process.mojo",
-        "change_map/report.mojo",
-        "change_map/rules.mojo",
-        "change_map/units.mojo",
-    ],
-    deps = [
-        "//tools/build/inspect:buildtools",
-    ],
-    test_srcs = [
-        # every file shape against a table graph: leaf source, .bzl, BUCK,
-        # deleted, toolchain, ownerless, inert, empty, and every failure
-        "tests/test_plan.mojo",
-        # the patterns, the data file's grammar, the cell table, the labels
-        "tests/test_rules_cells_labels.mojo",
-        # kci's protocol and the JSON and text renderings
-        "tests/test_units_and_report.mojo",
-        # the shipped rules.txt widens on what must never be left out
-        "tests/test_rules_file.mojo",
-        # a real process: streams kept apart, exit code, quoting, a program that is not there
-        "tests/test_process.mojo",
-        # derive_checks: every naming and grouping rule, each a table row
-        "tests/test_derive_naming.mojo",
-        # derive_checks: the answer kci reads, BROKEN for any failed query
-        "tests/test_derive_answer.mojo",
-        # a hold is never dropped: added, kept, gained, deleted with its
-        # package pass; a metric taken out, the marker deleted alone refused
-        "tests/test_held.mojo",
-    ],
-    test_data = {
-        "tests/test_plan.mojo": {
-            "tools/build/ci/rules.txt": ":rules.txt",
-        },
-        "tests/test_rules_file.mojo": {
-            "tools/build/ci/rules.txt": ":rules.txt",
-        },
-    },
-    visibility = ["PUBLIC"],
-)
-
-mojo_binary(
-    name = "affected",
-    srcs = ["affected.mojo"],
-    deps = [
-        ":change_map",
-        "//tools/build/inspect:buildtools",
-    ],
-    visibility = ["PUBLIC"],
-)
-
-# derive_checks: the `derive_checks` command of the buck2 build system in
-# release/artifacts.textproto, the checks the per-change check derives from
-# the live graph (change_map/derive.mojo). Its naming and its answer are
-# change_map's welded tests.
-mojo_binary(
-    name = "derive_checks",
-    srcs = ["derive_checks.mojo"],
-    deps = [
-        ":change_map",
-        "//tools/build/inspect:buildtools",
-    ],
-    visibility = ["PUBLIC"],
-)
-
-# The BXL selector (affected.bxl, affected.bzl; cases.bxl, guard.bxl,
-# python_guard.bxl and targets.bxl are scripts, not targets) reads its widen and inert rows from
-# rules.bzl, because a BXL script cannot read rules.txt. Until the Mojo
-# selector above is gone this test holds the two files to the same rows: a
-# row changed in one and not the other is red. Built behind nothing: a
-# welded check, part of `//ci:pr` like every other.
-zig_test(
-    name = "rules_parity",
-    exec_compatible_with = LINUX_X86_64,
-    src = "rules_parity_test.zig",
-    data = {
-        "rules.bzl": "rules.bzl",
-        "rules.txt": "rules.txt",
-    },
-    busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig_next",
-)
+# The BXL selector of the pull request check (affected.bxl, affected.bzl) and the
+# aggregate's generator and guards (targets.bxl, guard.bxl, python_guard.bxl) are
+# scripts, not targets; cases.bxl holds their cases. The rows the selector widens
+# and treats as inert on are data in rules.bzl (README.md).
 
 # assert_remote: reads the output of one ./buck2 run and exits non-zero unless
 # every action ran on the farm (assert_remote.zig says what buck2 prints and
@@ -156,4 +56,3 @@ zig_exe(
     zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["//:buck2_farm_cases"],
 )
-

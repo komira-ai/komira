@@ -42,8 +42,8 @@ checks nothing; `buck2 bxl //tools/build/lint/test_weld.bxl:check -- --lint
 WeldedTestsInfo of every target it yields, and runs the check as a build
 action (test_weld_check.bzl) on Linux x86-64, the platform its busybox is
 resolved for (so a test_weld target takes no `exec_compatible_with`). The
-pull request's check runs it for every test_weld target of a unit it builds
-(release/ci/build_targets.sh). The query is configured for the target
+pull request's check runs it for each test_weld target it names
+(.github/workflows/pr.yml). The query is configured for the target
 platform, as `buck2 cquery` sees it: a test target incompatible with that
 platform welds nothing there.
 """

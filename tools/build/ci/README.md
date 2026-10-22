@@ -1,8 +1,9 @@
 # tools/build/ci: what a change affects, and the aggregate of every check
 
-Two things live here. The Mojo selector `affected` (`affected.mojo`,
-`change_map/`) is the older one; the BXL selector and the aggregate target
-`//ci:pr` replace it for the pull request check.
+Two things live here: the BXL selector, which names the targets a pull
+request's change affects, and the aggregate target `//ci:pr`, which builds
+every check. `pr.yml` runs the selector and builds what it names through the
+`buck2-farm` action; no kci and no Mojo selector is involved.
 
 ## The BXL selector: `affected.bxl`
 
@@ -35,9 +36,8 @@ spell the `--` and the option that take the lines that follow.
 | a query Buck2 cannot answer | fails with Buck2's own error |
 
 The reason for a widening and the warnings go to the log. The rows are
-data in `rules.bzl` (a BXL script cannot read
-`rules.txt`); the `rules_parity` test holds the two files to the
-same rows until the Mojo selector is gone. The mapping itself is
+data in `rules.bzl` (a BXL script cannot read a text file), and `cases.bxl`
+holds them to the paths that must always widen. The mapping itself is
 `affected.bzl`, a pure function over a graph facade, so
 `cases.bxl` answers it from tables and from the real graph of
 the fixture package (`fixture/`).

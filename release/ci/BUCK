@@ -2,7 +2,6 @@
 # .github/workflows/main_red.yml (docs/ci.md, "The main red alert"): a Zig
 # program, built behind its cases (//release/ci/tests:test_main_red), and run
 # by the workflow as the binary this target builds.
-load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
@@ -35,11 +34,4 @@ zig_exe(
     busybox = "komira//tools/build/toolchains:busybox",
     zig = _ZIG,
     visibility = ["PUBLIC"],
-)
-
-# The `build_targets` command the per-change check runs
-# (artifacts.textproto) is a script of this directory.
-shell_lint(
-    name = "shell_lint",
-    srcs = glob(["*.sh"]),
 )

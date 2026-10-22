@@ -23,14 +23,16 @@ the gate, and the weekly [`kpin-update.yml`](../tools/build/kpin/README.md#the-w
 which opens a pull request and gates nothing.
 `ci.yml` and its check `ci / build` no longer exist. The whole-repository
 `//...` build they ran on every push to `main` is not run by any workflow now;
-a pull request's check covers the units the change reaches, and every target of
-the graph is in some unit, so a change to any target is built by its unit.
+a pull request's check builds and tests the targets the change affects, and
+`//ci:pr`, the aggregate of every check, holds every check target of the graph
+(a guard fails when one is left out), so a change to any target is built
+by the check.
 
 ## What the check builds
 
 The build is the gate: building a target runs the tests welded to it and to its
 dependencies, so the check points at build targets and nothing else. What a
-build of the whole repository covers, and so what the units add up to:
+build of the whole repository covers, and so what the affected targets add up to:
 
 1. **`./buck2 build //...`** builds every target of the komira cell on the
    farm. That is more than compiling:
@@ -58,14 +60,14 @@ build of the whole repository covers, and so what the units add up to:
 3. **`./buck2 build --keep-going tests//functional/...`** builds every
    positive target of the `tests` cell, which `//...` does not reach (it is a
    cell of its own so that `//...` holds no target that fails by design). A
-   target there that does not build fails its unit; the targets that must fail
+   target there that does not build fails the check; the targets that must fail
    are `tests//negative`, built as `expect_red`s by the
    [self-tests](#build-system-self-tests) and not by this one. Every target of `tests//functional` is meant to build, so nothing
    there is excluded: a probe or fixture that is expected to fail belongs in
    `tests//negative`.
 A contributor runs the same three commands on any client. A green local
 `./buck2 build //... && ./buck2 test //...` is the whole-repository form of
-what the units of `pr / check` prove, dead Markdown links included (`//:docs`).
+what `pr / check` proves for the targets a change affects, dead Markdown links included (`//:docs`).
 
 Publishing is not part of the check. The release workflow
 [kci.yml](#kciyml-the-release) has no `pull_request` trigger: a pull request
@@ -228,7 +230,7 @@ rows are required: the test fails, naming the capability, when one is
 missing. The rest are reported and never fail it.
 
 The probe watches the workers only when it runs: the PR check runs it when
-its unit (`//src/tests/helpers/komira_test_minio/...`) is affected, that is, when a PR
+its targets (`//src/tests/helpers/komira_test_minio/...`) are affected, that is, when a PR
 touches `komira_test_minio` or one of its dependencies. Anyone can run it on
 demand with the command above. A test result is not cached, so each run is a
 fresh probe.
@@ -295,11 +297,9 @@ or the komira cell; sub-targets and the greens of `tests//negative` and
 check already built are gone from the script.
 Slice 3 added the scenarios: `buck2 test` targets under
 [`tools/build/selftest`](../tools/build/selftest/README.md) that drive buck2
-from outside, each inner build on the farm. They are one declared check,
-`build_selftests` (`release/artifacts.textproto`), which a widened change
-reaches (the derived check `tools_build`, whose pattern `//tools/build/...`
-still covers the package, reaches them too: open, see the design), and
-`build_targets.sh` runs the package's graph checks with their BXL script. The analysis-time refusals, where targets execute and the
+from outside, each inner build on the farm. They are targets of the aggregate `//ci:pr`, which a widened
+change (one under `tools/build/`, say) selects, and `pr.yml` runs the
+package's graph checks with their BXL script. The analysis-time refusals, where targets execute and the
 unconfigured query through the prelude's select moved there.
 
 ## kci.yml: the release
@@ -308,9 +308,9 @@ unconfigured query through the prelude's select moved there.
 packages that `release/artifacts.textproto` declares, through `kci` (`bin/kci`).
 It is written by hand. The stages are owned by the release machine,
 [`release/machine.textproto`](../release/machine.textproto): `build`, then
-`beta`, then `prod`, and `pr`, the per-change check of a pull request, which is
-the one job of [`pr.yml`](#pryml-the-pull-requests-check), not of this file. The
-workflow runs one job per stage (but `pr`), named for its
+`beta`, then `prod`. The per-change check of a pull request is no stage: it is
+the one job of [`pr.yml`](#pryml-the-pull-requests-check), which runs no kci. The
+workflow runs one job per stage, named for its
 stage, running in the stage's GitHub environment and running exactly one
 `kci run --stage <its name>`, except that `beta` is split over two jobs:
 `beta` runs its step (`--only step:publish`) and `beta_validate` its two
@@ -850,161 +850,6 @@ HEAD:refs/heads/MAIN`); it must be refused.
 - **Known residual:** the publish jobs run the kci binary the `build` job made
   (it travels in the workflow artifact). How kci itself reaches the runner is
   an open design question.
-
-### The per-change check's units
-
-`kci run --stage pr --affected-by <base>` builds UNITS, and a unit passes only
-when it builds and its tests pass. The units are derived when the check runs,
-so the release files list no package:
-
-- **Declared:** the artifacts of `release/artifacts.textproto` (and any
-  explicit `checks` it declares, to group targets its own way).
-- **Derived:** the buck2 build system's `derive_checks` command,
-  `//tools/build/ci:derive_checks`, reads `//...` and `tests//functional/...`
-  from the live graph (`buck2 cquery`) and answers one check per path group
-  for every target no declared unit names or matches: `<p>` for each
-  library `//src/<p>/...` and each test-only package
-  `//src/tests/<kind>/<p>/...`, `repo_root` for `//:`, `tools_<t>` for each
-  `//tools/<t>/...`, `<d>` for any other top directory, `functional_tests`
-  for `tests//functional/...`; a name an artifact holds gets `_package`.
-  Every name is one kci accepts (`[a-z][a-z0-9_]*`) whatever the directory
-  is called: upper case becomes lower, any other character `_`, and a name
-  not starting with a letter gets `pkg_` (`//src/3d` is `pkg_3d`); groups
-  whose names meet are one check. kci adds them after the declared units,
-  under the file's own rules.
-- **Coverage by construction:** every target of the graph is in some unit. A
-  pull request that adds a package gets a check for it, and one that deletes
-  a package no longer derives one; neither edits a release file.
-- **A declared target that matches nothing:** for a check, a NOTICE line in
-  the result (the package it named is gone; the rest of the check builds);
-  for an artifact, a refusal (`KCI-E-ARTIFACT`): a release must build what an
-  artifact names. A derive tool that fails or answers outside its grammar is
-  "cannot tell" (`KCI-E-AFFECTED`), never a pass.
-- **A universe the derive tool cannot query:** when its `buck2 cquery` fails,
-  for any reason (a target with an unknown or invisible dependency, a
-  transport error, a buck2 that does not start), `derive_checks` answers
-  one `BROKEN <reason>` line holding buck2's error, and kci FAILS the check
-  (`KCI-E-BUILD-FAILED`): nothing is built, and no affected command runs.
-
-**Which units a change reaches:** each build system's `affected` command,
-`buck2 run //tools/build/ci:affected` ([`tools/build/ci`](../tools/build/ci)),
-maps the change's files to the targets that own them (a `BUCK` file to its
-package, a `.bzl` file to every package that loads it, a deleted file to the
-package that held it at the base commit), takes their reverse dependencies, and
-answers the units whose targets (labels, or the package patterns of the derived
-checks) are among them. A file it cannot map, and a change to `.buckconfig`,
-the toolchains, `tools/build`, `prelude` or `third_party`
-([`rules.txt`](../tools/build/ci/rules.txt)), answer `WIDENED`: every unit.
-A widened answer is given only after `buck2 cquery` configures the whole
-universe. A failed query is never a widening: when the query mapping the
-files, the reverse-dependency query or the query configuring the universe
-fails, for any reason (a target with an unknown or invisible dependency, a
-transport error), the answer is `BROKEN`, carrying buck2's error (its
-stderr whole up to 8 KiB, else the first and last 4 KiB), and kci FAILS the
-check (`KCI-E-BUILD-FAILED`). The decision is the failure, not buck2's text:
-the target buck2 names, when it names one, only leads the message. So a
-change that plants a target buck2 cannot configure fails its own check,
-widened or not. **A coverage hold is never dropped:** `affected` reads each changed
-`coverage_held` at the base and in the checkout, and answers `BROKEN` when a
-metric the base held is gone ([The 99% threshold and holds](../tools/build/coverage/README.md#the-99-threshold-and-holds)). A
-non-empty change that reaches no unit answers `AFFECTED 0`, which kci refuses
-(`KCI-E-AFFECTED-VACUOUS`): never a pass. The job's checkout has the full
-history, so the base commit is there. In `pr.yml` the base is the first parent
-of the merge commit the job builds, so the change is the pull request's alone
-however far `main` has moved since the pull request's event.
-
-**How the reached units are built:** units whose `build_targets` commands are
-identical (both build systems of `release/artifacts.textproto` share
-`sh release/ci/build_targets.sh`) are built in ONE run over the union of their
-targets, so a `build_targets` command must be correct on such a union.
-`release/ci/build_targets.sh` builds with `--keep-going`, then checks the lints
-and runs the tests among all the targets (a failed build stops before the lints
-and tests). The run's timeout bounds the whole batch, not each unit in it:
-with the build budget (below), all of the budget left; without it, the
-per-run timeout (`--build-timeout-s`, default 3600 s).
-The run's output is in
-`<log dir>/_batch_<k>.stdout` and `.stderr`, and its full argv, one argument per
-line, in `_batch_<k>.argv` (k counts the batches from 1; a unit alone logs to
-`<unit>.stdout` and `.stderr`).
-
-- **The batch passes:** every unit in it is `BUILT`. Nothing is retried.
-- **The batch fails:** kci builds its units one at a time, in order, to name
-  the failing ones. Each retry re-runs `sh release/ci/build_targets.sh` over
-  that one unit's targets, with its own timeout (as the batch's), and logs to
-  `<unit>.stdout` and `.stderr`; the batch already built every target that
-  does not depend on a failure, so the retries run on a warm cache. A failing
-  wide change therefore costs the batch's time plus the retries, up to the
-  cap. A retry that fails, times out or is killed is a failed unit. After 3
-  failed units it stops retrying: the rest are listed as not tried, and a
-  later batch that fails is noted as not attributed (a later batch that
-  passes still builds its units). The step is FAILED (`KCI-E-BUILD-FAILED`);
-  the summary's line is `BUILD step: F of N unit(s) failed: ...`.
-- **The batch times out (or is killed by a signal):** the batch had all that
-  was left of the build budget (the note then says `timed out after N min[ S
-  s], all that was left of the build budget (--build-budget-s B)`, N min S s
-  the time it was allowed), or without a budget the whole `--build-timeout-s`
-  (default 3600 s), not a share per unit. It is not retried and no unit of
-  it is attributed: FAILED.
-- **The batch fails but every unit builds alone:** the units interfere or the
-  build is flaky. That is INDETERMINATE (`KCI-E-CANNOT-TELL`), never a pass.
-  FAILED outranks it: if a unit failed or a batch was not attributed anywhere
-  in the step, the step is FAILED and the interference is a note.
-- **A run cannot be started** (a batch, a unit alone or a retry): the step
-  stops at once, nothing after it is started, and the step is INDETERMINATE
-  (`KCI-E-CANNOT-TELL`) even when a unit has already failed.
-
-**The build budget** (`--build-budget-s <n>`, accepted only with
-`--affected-by`, at most 604800, a week): the seconds the per-change check
-may take, counted from kci's own start on the monotonic clock
-(`CLOCK_MONOTONIC`), so everything kci does first (the workflow check, the
-git reads, the derive and affected commands) is charged to it. Every run
-(each derive and affected command, a batch, a unit alone, a retry) gets all
-the whole seconds left until the deadline, read just before it starts
-(`--build-timeout-s` is refused beside `--build-budget-s`: no fixed cap
-cuts a wide batch short of the budget); a run that passed, failed or timed out is
-charged alike. A build run (a batch, a unit alone, a retry) that times out
-is FAILED, with the `timed out after N min[ S s], ...` note above. A derive
-or affected command that times out is INDETERMINATE (`KCI-E-AFFECTED`), its
-note a plain `timed out`: it gets all the budget left too, so a hung
-affected command can use the whole budget before the step ends
-INDETERMINATE. A run with less than one second left is not started. A
-derive or affected command not started makes the step INDETERMINATE
-(`KCI-E-AFFECTED`: kci cannot tell what the change reaches). A build run not
-started lists its units, and those of every later run, as `BUILD step: U of
-N unit(s) not built: the build budget (--build-budget-s B) was spent before
-their run could start: ...`, which is FAILED (`KCI-E-BUILD-FAILED`), never
-a pass; the units earlier runs built keep their `BUILT` lines. A batch whose
-retries ran out of budget is not called interference. Without the flag,
-each run has its `--build-timeout-s` and there is no total.
-
-`pr.yml` passes the time its job has left: its first step writes the job's
-deadline, 325 of the job's 330 minutes (`timeout-minutes`, under the 360 a
-GitHub-hosted job may run, so that a change that rebuilds most of the tree
-on the farm finishes), and the
-`kci run` step stops with an error if that file is missing, then passes the
-seconds left until it. The time `build kci` took is therefore not taken from
-a wide change's build, and kci reports which units it did not build about 5
-minutes before GitHub would cancel the job (kci's own last seconds of
-writing its result, and the steps after kci, which take seconds, fall in
-those 5 minutes). `build kci` itself takes from seconds (a cached kci) to most
-of an hour (a change to kci or to what it depends on), so a fixed per-batch
-number either wasted the job's time or overran it. The welded test
-`src/kci_workflow_check/tests/test_repo_kci_yml.mojo` holds `pr.yml` to these
-steps and numbers: `timeout-minutes` within 300 to 360, and the deadline
-step's minutes exactly `timeout-minutes` less 5, so the two cannot drift
-apart. `coverage.yml`'s `measure` job has the same 330 minutes.
-
-Whatever the outcome, a `BUILT <unit>` line names exactly the units a
-successful run covered. The result document's `affected_by.units` is the set
-the change reached, not the set that built.
-
-To see the units a change would build, with nothing built:
-
-```sh
-kci run --stage pr --affected-by <base commit> --revision-id <HEAD> \
-  --work-dir "$PWD" --log-dir <dir> --result-file <file> --plan
-./buck2 run //tools/build/ci:derive_checks -- --from release/artifacts.textproto  # the derived checks alone
-```
 
 ### The workflow subset kci reads
 

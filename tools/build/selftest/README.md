@@ -74,8 +74,8 @@ action, belongs in a refusal table.
 [`graph/`](graph/BUCK): each `graph_check` names a check and the targets it
 queries, as strings. [`graph/checks.bxl`](graph/checks.bxl) collects the
 check's facts and runs its checker, [`graph/graph_checks.zig`](graph/graph_checks.zig),
-over them as a build action; `release/ci/build_targets.sh` runs it for every
-graph_check of a batch. `selftest_closure` fails when the closure of this
+over them as a build action; `.github/workflows/pr.yml` runs it for every
+graph_check. `selftest_closure` fails when the closure of this
 package holds a library under `src/` (a scenario names what it builds as a
 string), so a change to a library does not reach `build_selftests`.
 `python_closure` (declared in the root package, `//:python_closure`) fails on

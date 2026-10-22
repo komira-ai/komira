@@ -3,11 +3,11 @@
 # stage, every step of it in order (`--only step:<name>` runs a selection, which
 # is reported as SELECTIVE, never as a full run). kci reads THIS path by
 # convention (release/machine.textproto); `--machine <path>` overrides it.
-# .github/workflows/kci.yml runs each stage but `pr` as the job of the same name,
-# in the stage's GitHub environment; the `pr` stage is the one job (`check`) of
-# .github/workflows/pr.yml, in none. kci holds the workflow it runs under to this
-# file at start-up under GitHub Actions (a run of the pr stage: pr.yml; any other
-# stage: kci.yml), and the welded test
+# .github/workflows/kci.yml runs each stage as the job of the same name,
+# in the stage's GitHub environment. The pull request's check is no stage of
+# this file: .github/workflows/pr.yml selects and builds with buck2 and runs no
+# kci (docs/ci.md). kci holds the workflow it runs under to this
+# file at start-up under GitHub Actions, and the welded test
 # src/kci_workflow_check/tests/test_repo_kci_yml.mojo does the same on every build, so
 # a drift fails `./buck2 build //...`. This file owns the stages: edit both
 # together.
@@ -54,19 +54,10 @@
 #          on main's history, and never publishes a build number lower than
 #          its channel holds.
 #          The beta job's summary lists the names new to prod (NEW NAMES).
-#   pr     the per-change check of a pull request (trigger PULL_REQUEST):
-#          `kci run --stage pr --affected-by <the merge commit's first parent>`
-#          builds, with each build system's `build_targets` command, exactly
-#          the units of release/artifacts.textproto (its artifacts and
-#          checks) that the change reaches, as each build system's
-#          `affected` command says, and ships nothing. It is the only job of
-#          pr.yml (the required check `pr / check`), which has no other
-#          trigger and no other job; kci.yml has no pull_request trigger. It
-#          runs only for a pull request
-#          from a branch of this repository (a fork's runs nothing). No
-#          environment, no publishing step; FARM-CONNECTED, like build, so its
-#          identity token is the farm connection's only. It runs after no
-#          stage and no stage runs after it.
+#
+# There is no pull request stage: the required check `pr / check` is pr.yml's
+# one job, which runs the BXL selector tools/build/ci/affected.bxl and builds
+# and tests what it names through the farm action, with no kci.
 #
 # BREAK-GLASS: only build is `break_glass: true`, so a manual run (of any
 # branch, main included; with a required reason) builds its revision on
@@ -155,17 +146,5 @@ stage {
     artifacts: "release/artifacts.textproto"
     channels: "release/channels.textproto"
     channel: "prod"
-  }
-}
-
-stage {
-  name: "pr"
-  trigger: PULL_REQUEST
-  farm_connected: true
-  step {
-    name: "check"
-    kind: BUILD
-    platform: "linux-x86_64"
-    artifacts: "release/artifacts.textproto"
   }
 }

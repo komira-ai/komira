@@ -18,7 +18,8 @@
 # ci_graph.bzl or the fixture turns a named case red (see the PR that added
 # this file for the mutants tried).
 
-load(":affected.bzl", "AFFECTED", "EMPTY", "VACUOUS", "WIDENED", "held_refusals", "is_held_file", "parse_held_lines", "pattern_matches", "select")
+load(":affected.bzl", "AFFECTED", "EMPTY", "VACUOUS", "WIDENED", "held_refusals", "is_held_file", "is_inert", "parse_held_lines", "pattern_matches", "select", "widen_reason")
+load(":rules.bzl", "INERT", "WIDEN")
 load(":ci_graph.bzl", "check_nodes", "closure", "findings", "make_graph", "python_findings", "python_nodes", "render", "roots", "sdk_own_deps")
 
 # ---- the table graph ---------------------------------------------------
@@ -329,8 +330,56 @@ def _python_cases(ctx):
         out.append("python: the real pinned interpreter in the surface was a finding: " + green)
     return out
 
+# ---- the shipped rules -------------------------------------------------------
+#
+# rules.bzl as shipped, held to the paths that must never be mapped by guess: a
+# change to any of them can reach every target through the configuration, the
+# rules or the toolchain, so a widen row (not the ownerless-file fallback) names
+# it. Deleting a row of WIDEN, or narrowing a pattern, turns the named case red.
+
+_MUST_WIDEN = [
+    ".buckconfig",
+    ".buckconfig.local.example",
+    "buck2",
+    "tools/buck2/main",
+    "prelude/cxx/cxx.bzl",
+    "tools/build/platforms/BUCK",
+    "tools/build/cells/toolchains/BUCK",
+    "tools/build/mojo/defs.bzl",
+    "tools/build/ci/rules.bzl",
+    "tools/build/ci/affected.bzl",
+    "third_party/snappy/pin.bzl",
+]
+
+_ORDINARY = [
+    "src/komira_collections/BUCK",
+    "src/komira_collections/slab.mojo",
+    "docs/ci.md",
+    "release/artifacts.textproto",
+    ".github/workflows/pr.yml",
+    "ci/targets.bzl",
+]
+
+def _shipped_rules_cases():
+    out = []
+    shipped = struct(widen = WIDEN, inert = INERT)
+    for p in _MUST_WIDEN:
+        v = select(shipped, [p], _table(), "ci")
+        if v.kind != WIDENED or "matches widen rule" not in v.reason:
+            out.append("shipped rules: '{}' must match a widen row, got {} ({})".format(p, v.kind, v.reason))
+    for p in _ORDINARY:
+        if widen_reason(shipped, p):
+            out.append("shipped rules: '{}' is ordinary and must match no widen row, got '{}'".format(p, widen_reason(shipped, p)))
+    for p in ["README.md", "LICENSE", "docs/README.md"]:
+        if not is_inert(shipped, p):
+            out.append("shipped rules: '{}' builds nothing and must be inert".format(p))
+    for p in ["src/x/x.mojo", "release/channels.textproto", "tools/build/ci/BUCK"]:
+        if is_inert(shipped, p):
+            out.append("shipped rules: '{}' builds something and must not be inert".format(p))
+    return out
+
 def _run(ctx):
-    table = _table_cases() + _held_cases() + _python_cases(ctx)
+    table = _table_cases() + _held_cases() + _python_cases(ctx) + _shipped_rules_cases()
     real = _real_cases(ctx)
     failures = table + real
     if failures:

@@ -168,9 +168,9 @@ _TESTS_LINTS = [
     lints = _TESTS_LINTS,
 ) for _ in _TESTS_LINTS[:1]]
 
-# The greens of the tests cell that no derived unit builds: the pull-request
-# check builds `//...` and `tests//functional/...` (//tools/build/ci:derive_checks),
-# so a target of tests//negative or tests//src that must build, beside the
+# The greens of the tests cell that the aggregate `//ci:pr` does not hold: it
+# holds the checks of this cell and of `tests//functional/...` (rules.bzl
+# UNIVERSE in tools/build/ci), so a target of tests//negative or tests//src that must build, beside the
 # planted defects it serves, is named here, through its package's
 # target_suite (a package's sub-targets need one too, and a suite in the same
 # package names them with no visibility to grant). Not declared where there
@@ -245,7 +245,7 @@ _TESTS_LINTS = [
 # and the `main` of every mojo_test under src/, as the rules received them.
 # Building this target checks nothing: `./buck2 bxl
 # //tools/build/lint/test_weld.bxl:check -- --lint //:test_weld` checks it, and
-# the pull request's check runs that (release/ci/build_targets.sh).
+# the pull request's check runs that (.github/workflows/pr.yml).
 [test_weld(
     name = "test_weld",
     known_untested = "tests/known_untested.tsv",
@@ -396,9 +396,9 @@ limits(
 # dependency) holds a target under third_party/python/ or
 # tools/build/python/, a Python rule or a `.py` source; no `.py` file in the
 # repository; no kci textproto or GitHub workflow that runs Python. Building
-# it checks nothing: release/ci/build_targets.sh runs `./buck2 bxl
+# it checks nothing: .github/workflows/pr.yml runs `./buck2 bxl
 # //tools/build/selftest/graph/checks.bxl:check -- --check //:python_closure`,
-# as it does for every graph_check of a batch.
+# as it does for every graph_check.
 #
 # The allowlist, tests/python_closure_allowlist.bzl: the Python surface
 # (empty today) and the ceiling, every finding allowed today, which only

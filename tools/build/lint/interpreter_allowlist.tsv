@@ -9,7 +9,6 @@
 .github/ci/coverage_measure.sh	coverage and mutation tooling: to port to Zig
 .github/ci/tests/coverage_ci_cases.sh	coverage and mutation tooling: to port to Zig
 buck2	a thin wrapper: runs the pinned buck2 release
-release/ci/build_targets.sh	a thin wrapper: the check's build, test_weld and test commands
 src/komira_arrow_ipc/tests/fixtures/arrow_ipc/gen_fixtures.py	fixture provenance: the pyarrow program that wrote the Arrow IPC fixtures beside it (a third-party writer is the point)
 src/komira_arrow_ipc/tests/fixtures/arrow_ipc/gen_pyarrow_interop_fixtures.py	fixture provenance: the pyarrow program that wrote the Arrow IPC fixtures beside it (a third-party writer is the point)
 src/komira_parquet_codec/tests/fixtures/parquet/gen_pyarrow_fixtures.py	fixture provenance: the pyarrow program that wrote the Parquet fixtures beside it (a third-party writer is the point)

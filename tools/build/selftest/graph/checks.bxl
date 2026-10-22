@@ -6,7 +6,7 @@
 # check names from the build graph into a file, and runs the check's Zig
 # checker over that file as a build action on the check's execution
 # platform. A finding fails that action, so `buck2 bxl` exits non-zero;
-# release/ci/build_targets.sh runs this for every graph_check of a batch.
+# .github/workflows/pr.yml runs this for every graph_check.
 #
 # The checks:
 #   selftest_closure  the unconfigured labels of the configured closure
