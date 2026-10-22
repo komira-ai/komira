@@ -221,6 +221,22 @@ no longer counts there, since macOS keeps no CPU time of reaped children
 ([`tests/functional/watchdog`](../tests/functional/watchdog/cases.zig):
 `cases` on Linux, `cases_darwin` on a macOS worker).
 
+## Libraries built with buildrules
+
+[`src/komira_json`](../../../src/komira_json/) is built with buildrules' `mojo_package`, from a `mopm.toml`, and
+not with `mojo_library`. The `buildrules` cell is a git external cell pinned in
+[`.buckconfig`](../../../.buckconfig) to a release commit; the `toolchains` cell holds its pinned mopm and Mojo
+toolchains (`tools/build/cells/toolchains/mopm_pins.bzl`, `mojo_pins.bzl`, written by `buildrules mojo sync`),
+and `tools/build/platforms/default` registers the one execution platform its rules need
+([`with_buildrules.bzl`](../platforms/with_buildrules.bzl)). Its rules are loaded from that cell only.
+
+The package's `:lib` is the library file, made only after every test run passed. `mojo_adopted_library`
+([`adopt.bzl`](adopt.bzl)) is the target the dependents name (`//src/komira_json:komira_json`): it gives komira's own rules the
+`MojoInfo` they require of a dependency over that same file, and runs and compiles nothing. A dependent therefore
+builds only once the library's tests have passed. It carries no README-example gate, no branch coverage gate and
+no mutation sub-targets: buildrules has none of the three. `conda_package` takes the adopted library as it takes a
+`mojo_library`, so the conda packages of the libraries that depend on it still name it.
+
 ## Binaries and tests
 
 - **`main`**: the file holding `main()`. It defaults to the only file in

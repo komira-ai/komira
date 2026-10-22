@@ -1,4 +1,5 @@
 load("@komira//tools/build/platforms:defs.bzl", "komira_default_execution_platforms")
+load("@komira//tools/build/platforms:with_buildrules.bzl", "execution_platforms_plus")
 
 # The execution platforms of a standalone checkout (`[build]
 # execution_platforms` in .buckconfig). With no `.buckconfig.local`, every
@@ -12,6 +13,16 @@ load("@komira//tools/build/platforms:defs.bzl", "komira_default_execution_platfo
 # `[komira_re]` is read, so its platforms live in its root cell.
 
 komira_default_execution_platforms(
+    name = "komira",
+    visibility = ["PUBLIC"],
+)
+
+# `default` is komira's registration plus the platform buildrules' rules run on
+# (with_buildrules.bzl says why), so that a library built with buildrules'
+# `mojo_package` (src/komira_json) builds here. Komira's own platform stays first.
+execution_platforms_plus(
     name = "default",
+    base = ":komira",
+    extra = ["buildrules//platforms:linux_x86_64"],
     visibility = ["PUBLIC"],
 )
