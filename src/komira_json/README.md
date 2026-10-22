@@ -94,7 +94,7 @@ sources:
 | file | what |
 |---|---|
 | `mopm.toml` | the mopm manifest: name, version, the Mojo version, where the library and its tests are |
-| `mopm.lock` | what `mopm lock` writes; the package has no dependencies, so it pins the toolchain only |
+| `mopm.lock` | what `mopm lock` writes (with no registry reachable); the package has no dependencies, so it pins the toolchain only |
 | `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
 | `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above; `buildrules mojo check` fails when they are stale |
 
