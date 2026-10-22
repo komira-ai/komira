@@ -8,7 +8,6 @@
 #           runners run, never a build or test action. The only places a new script may live.
 # A row is added only with a reason review accepts.
 use	BUCK	sh_script	3	exception: coverage_ci_cases tests the CI shell scripts (.github/ci), so its subject is a shell script, and the shell lint of those scripts names them
-use	src/kci_workflow_check/BUCK	sh_script	2	exception: kci_workflow_check reads release_version.sh (a shell script run by the release workflow) as data to hold kci.yml to it
 use	tools/build/coverage/BUCK	sh_script	1	exception: coverage_ci_cases tests the CI shell scripts (.github/ci), so the subject is a shell script; the shell lint of those scripts
 use	tools/build/coverage/defs.bzl	sh_argv	1	exception: coverage_ci_cases tests the CI shell scripts (.github/ci), so the subject is a shell script; the shell lint of those scripts
 use	tools/build/mojo/darwin/BUCK	sh_script	2	exception: macOS has no static busybox, so the darwin toolchain provides the busybox calling convention through a shell shim (mojo/darwin/busybox.sh)

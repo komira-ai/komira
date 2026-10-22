@@ -37,7 +37,6 @@
 # retargeted to main and then pushed to: a retarget alone is an `edited`
 # event, which neither this file nor pr.yml listens for), on a GitHub-hosted
 # runner, with every action pinned.
-# It is not held by kci_workflow_check, which holds the release workflow.
 name: coverage
 
 on:

@@ -18,15 +18,6 @@ load("//tests:surface_capability_matrix.bzl", "CAPABILITIES", "MATRIX", "NOT_CAP
 # The licence text every published package carries (tools/build/package/conda.bzl).
 export_file(name = "LICENSE", visibility = ["PUBLIC"])
 
-# The release workflow, read by kci_workflow_check's welded test, which holds it to
-# release/machine.textproto with the check `kci run` makes at start-up, so a
-# drift fails `./buck2 build //...`.
-export_file(
-    name = "kci.yml",
-    src = ".github/workflows/kci.yml",
-    visibility = ["//src/kci_workflow_check:"],
-)
-
 # The files under .github/, which the root doc_tree's glob skips, at their
 # paths, for the interpreter list (//tools/build/lint:interpreter_budget).
 doc_tree(
