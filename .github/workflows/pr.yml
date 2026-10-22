@@ -1,8 +1,8 @@
 # The pull request's check (docs/ci.md, "pr.yml"): the ONE job of this workflow,
 # so the required status check is `pr / check` (workflow name `pr`, job id
-# `check`) and a pull request never shows a skipped beta, beta_validate, prod or
-# build job. The release is .github/workflows/kci.yml, which has no
-# `pull_request` trigger.
+# `check`) and a pull request never shows a skipped job of the release. The
+# release is .github/workflows/release.yml, which has no `pull_request`
+# trigger.
 #
 # The job runs named Buck2 targets on the farm and nothing else:
 #   1. the files the change touches (`git diff` of the merge commit against its

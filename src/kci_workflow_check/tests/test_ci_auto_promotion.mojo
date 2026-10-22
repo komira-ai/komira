@@ -4,9 +4,9 @@
 #   environment and R4's allow-list),
 #   held by a table of mutations of a FIXTURE workflow and machine file: the
 #   pair komira's own kci.yml and release/machine.textproto were while komira
-#   published to channels (beta, validation, prod). The repository's own
-#   files now have a build stage only (test_repo_kci_yml), so this fixture
-#   keeps the publishing rules tested for as long as kci can publish. The
+#   published to channels (beta, validation, prod). The repository holds no
+#   such workflow now (its release workflow runs Buck2 targets), so this
+#   fixture keeps the publishing rules tested for as long as kci can publish. The
 #   canonical pair agrees, and every row that
 #   breaks a rule must end in that rule's finding (or the reader's "cannot
 #   tell", or the machine file's refusal). A row that reads green fails the

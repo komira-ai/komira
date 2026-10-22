@@ -1,0 +1,164 @@
+# The release build of komira's conda packages (docs/ci.md, "release.yml").
+#
+# komira publishes to NO channel for now, and publishing will move to mopm
+# (docs/releases.md). This workflow builds the release set, so a push to main
+# still proves the release builds, and keeps what it built as a workflow
+# artifact: the packages, `release.json` (format kci.release_set major 2: the
+# revision, the platform, the run, every member and the set hash) and
+# `set_hash.txt`. It publishes nothing, and holds no publishing credential and
+# no channel.
+#
+# It runs named Buck2 targets on the farm, through the buck2-farm action
+# (.github/actions/buck2-farm), which fails a step unless buck2 succeeded and
+# no action ran on the runner, and then runs the programs those builds made, as
+# binaries. No step runs buck2 around buck2.
+#   1. //release/ci:check_release_ref, the guard (release/ci/release_lib/
+#      ref_guard.zig has the rules): the run is a push to main of a commit on
+#      main's history, or a manual run with a reason; the checkout is that
+#      commit; a push of a commit without release/artifacts.textproto has
+#      nothing to release and is skipped, a manual run of one is refused.
+#   2. //release/ci:release_json `stamp`: the build number, source commit and
+#      commit time the packages are stamped with, from git (full history).
+#   3. //release:release_set, built with that stamp: every package
+#      release/artifacts.textproto declares, the metapackage over them, and
+#      release.json and the set hash, all as actions of the farm
+#      (release/release_set.bzl). A build action holds the set to the artifacts
+#      file, and release_json `write` checks every package before it writes
+#      release.json: a package whose bytes, name, platform or metadata are not
+#      what its manifest says, or that is not stamped, is a red build.
+#
+# Triggers: a push to main (not one that touches only documentation:
+# `paths-ignore`, the same documentation the stamp does not count) and a
+# manual run, and nothing else. A pull request never starts this workflow (pr.yml
+# answers it), so no environment or release job is reached from a pull
+# request's code.
+#
+# ONE RELEASE AT A TIME (concurrency). A PUSH to main is in the group
+# `release-main`: a running release is NEVER cancelled; GitHub keeps at most
+# one PENDING run per group, and a newer one cancels the pending one and takes
+# its place, so the newest pushed revision wins and queued pushes coalesce
+# (main moves forward only, so the newer push carries the older one's
+# changes). A cancelled pending run shows as cancelled with no summary: it
+# never started. A manual run is never in that group: it is in
+# `release-ref-<ref name>`. GitHub compares the group's `github.ref` ignoring
+# case, so a push of a branch `MAIN` would join it too: the guard refuses a
+# ref that is main in another case, and the repository ruleset that refuses
+# such branches (docs/ci.md) keeps them out.
+#
+# A manual run (of a branch, or of main) is break-glass: the input `reason` is
+# required, at most 200 bytes on one line, and is recorded as the first line of
+# the job's summary (`BREAK-GLASS: <ref> <commit> by <actor>: <reason>`). A
+# manual run builds the commit it was started on: there is no revision input
+# (the guard and the tools are built from the checkout, so the checkout is the
+# commit they guard). The reason reaches the guard only through a job's `env:`,
+# never inside a `run:`, and no `name:` holds any expression.
+#
+# The job holds `contents: read` and the `id-token: write` that the farm
+# connection exchanges for the tailnet, nothing else, in the environment
+# `build` (the claim the tailnet's trust for this workflow was set for). Every
+# action is pinned.
+name: release
+
+on:
+  push:
+    branches: [main]
+    # documentation only: no release (the stamp does not count these either)
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "why this manual run (recorded in the job summary); a manual run is break-glass: it builds the commit it starts on and publishes nothing"
+        type: string
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || format('ref-{0}', github.ref_name) }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    environment: build
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      # for farm-connect only: the token Tailscale trusts
+      id-token: write
+    env:
+      # a manual run's reason, read by the guard (never inside a `run:`)
+      REASON: ${{ inputs.reason }}
+    steps:
+      # The commit the run started on, with the full history: the stamp is
+      # derived from git and refuses a shallow clone.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      # The farm connection: tailnet join, refusal unless the farm answers, and
+      # the machine buckconfig, from repository variables (docs/ci.md).
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+          tls: ${{ vars.FARM_TLS || 'false' }}
+      # A guard on the file farm-connect wrote: without the linux property set
+      # a build would run on this runner.
+      - name: the buckconfig names the farm
+        run: |
+          ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'
+      # The tool the buck2-farm action runs over each step's output; its path
+      # is the step's output.
+      - name: build the farm assertion
+        id: assert
+        run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+      - name: build the guard
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //release/ci:check_release_ref --out ${{ runner.temp }}/check_release_ref
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # Refuses (the step fails, nothing is built) or says `release=false` for a
+      # push of a commit with nothing to release: the steps below are skipped.
+      - name: the guard
+        id: guard
+        run: '"$RUNNER_TEMP/check_release_ref" --event "$GITHUB_EVENT_NAME" --ref "$GITHUB_REF" --sha "$GITHUB_SHA" --artifacts release/artifacts.textproto --reason "$REASON" --actor "$GITHUB_ACTOR" --github-output "$GITHUB_OUTPUT" --summary-file "$GITHUB_STEP_SUMMARY"'
+      - name: build the release tool
+        if: steps.guard.outputs.release == 'true'
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //release/ci:release_json --out ${{ runner.temp }}/release_json
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The stamp the packages carry: the build number, the commit it counts
+      # and its commit time, from git.
+      - name: the stamp
+        id: stamp
+        if: steps.guard.outputs.release == 'true'
+        run: '"$RUNNER_TEMP/release_json" stamp --revision "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT"'
+      # The whole release set, stamped, into the platform's release directory.
+      - name: build the release set
+        if: steps.guard.outputs.release == 'true'
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira.package_stamp=${{ steps.stamp.outputs.build_number }} -c komira.package_commit=${{ steps.stamp.outputs.source_commit }} -c komira.package_timestamp_ms=${{ steps.stamp.outputs.timestamp_ms }} -c komira.release_revision=${{ github.sha }} -c komira.release_run_id=gh-${{ github.run_id }} -c komira.release_attempt=${{ github.run_attempt }} //release:release_set --out ${{ runner.temp }}/release/linux-x86_64
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: the set hash
+        if: steps.guard.outputs.release == 'true'
+        run: echo "release set $(cat "$RUNNER_TEMP/release/linux-x86_64/set_hash.txt") built from $GITHUB_SHA (nothing published)" >> "$GITHUB_STEP_SUMMARY"
+      # The packages, release.json and set_hash.txt, as one artifact.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.guard.outputs.release == 'true'
+        with:
+          name: release-${{ github.sha }}
+          path: ${{ runner.temp }}/release
+          if-no-files-found: error
+          retention-days: 14
+      - name: Stop buck2
+        if: always()
+        run: ./buck2 kill || true
