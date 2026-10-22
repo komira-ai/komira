@@ -500,7 +500,8 @@ def test_slow_but_progressing_body_under_the_same_budget_succeeds() raises:
 
     ⛔ NOT OPTIONAL. The obvious fix for every RED in this file (abandon the
     drain when the peer stalls) trades a hang for silent DATA LOSS and would
-    pass every other test here. This is the one that goes RED on it. Modelled on
+    pass every other test here; this test fails for that fix, because it
+    asserts the bytes arrive. Modelled on
     reqwest's `read_timeout_allows_slow_response_body`: the assertion is on the
     BYTES (`012`), not merely on "it did not raise". The peer stalls for 8
     reads, then hands over one byte per read."""
