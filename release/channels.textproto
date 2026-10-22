@@ -18,9 +18,13 @@
 # channel holds no file of yet (NEW NAMES), and the beta stage reports prod's
 # before the prod approval.
 #
-# The credential is TRUSTED PUBLISHING (OIDC): each channel trusts the GitHub
-# repository komira-ai/komira, the workflow file kci.yml and ONE GitHub
-# environment (beta, prod). Neither names a break-glass publisher: both
+# No workflow publishes now: kci.yml, the workflow these channels were declared
+# for, is deleted, and .github/workflows/release.yml builds the release set and
+# publishes nothing. The file is kept only because kci's parser needs it.
+#
+# As declared, the credential was TRUSTED PUBLISHING (OIDC): each channel
+# trusted the GitHub repository komira-ai/komira, the workflow file kci.yml and
+# ONE GitHub environment (beta, prod). Neither names a break-glass publisher: both
 # stages run only on a push to main (a manual run builds and stops there,
 # release/machine.textproto). The publish job mints the job's ID token
 # (audience prefix.dev) and exchanges it at prefix.dev's mint endpoint for a
