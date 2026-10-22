@@ -306,36 +306,30 @@ unconfigured query through the prelude's select moved there.
 
 [`.github/workflows/kci.yml`](../.github/workflows/kci.yml) releases the conda
 packages that `release/artifacts.textproto` declares, through `kci` (`bin/kci`).
-It is written by hand. The stages are owned by the release machine,
-[`release/machine.textproto`](../release/machine.textproto): `build`, then
-`beta`, then `prod`. The per-change check of a pull request is no stage: it is
+It is written by hand. **komira publishes to no channel for now**: the `beta`
+and `prod` stages and the `beta_validate` job were removed, and publishing will
+move to mopm (see [releases](releases.md)). What a push to `main` runs today is
+the `build` stage alone, so the release set still has to build. The stages are
+owned by the release machine,
+[`release/machine.textproto`](../release/machine.textproto): `build`. The
+per-change check of a pull request is no stage: it is
 the one job of [`pr.yml`](#pryml-the-pull-requests-check), which runs no kci. The
 workflow runs one job per stage, named for its
 stage, running in the stage's GitHub environment and running exactly one
-`kci run --stage <its name>`, except that `beta` is split over two jobs:
-`beta` runs its step (`--only step:publish`) and `beta_validate` its two
-validations (`--only validation:install-komira-encoding --only
-validation:install-set`). kci reads `release/machine.textproto` by
+`kci run --stage <its name>`. kci reads `release/machine.textproto` by
 convention (its one default path), so no line of the workflow names it.
 
 | job (stage) | runner | what it does |
 |---|---|---|
 | `build` | GitHub-hosted (`ubuntu-24.04`) joined to the farm by [`farm-connect`](#how-it-reaches-the-farm), environment `build`, `contents: read` + `id-token: write` (for the tailnet only) | builds `//bin/kci:kci[runnable]`, then `kci run --stage build --revision-id <REVISION>`: every declared artifact, built on the farm, stamped from git, verified, and `release.json` with the set hash. The release directory, the kci binary and the build's result file leave the job as one workflow artifact named `kci-release-<REVISION>`. |
-| `beta` | GitHub-hosted (`ubuntu-24.04`), environment `beta`, `id-token: write`; on a PUSH to `main` only (see [Break-glass](#break-glass-a-manual-run-builds-only)) | runs `release_version.sh` at `REVISION`, then `kci run --stage beta --only step:publish`: the release directory `build` made, published to the channel `komira-ai/beta`. Nothing is built here. |
-| `beta_validate` (stage `beta`) | GitHub-hosted (`ubuntu-24.04`), no environment, `contents: read` only; on a PUSH to `main` only | downloads the platform table's linux-x86_64 pixi pin (its URL and sha256 are the job's `PIXI_URL` and `PIXI_SHA256`, held to the table by `test_repo_kci_yml`) and keeps it only at that sha256, then `kci run --stage beta --only validation:install-komira-encoding --only validation:install-set --pixi <that file> --pixi-sha256 "$PIXI_SHA256"`: what `beta` published, installed from the channel the way a consumer gets it, on the runner with no container (see Validations). Holds no identity token; re-running it re-validates without re-publishing. |
-| `prod` | GitHub-hosted (`ubuntu-24.04`), environment `prod`, `id-token: write` | after `beta` and `beta_validate`, on a PUSH to `main` only (a manual run, of `main` too, stops at `build`): the same bytes (the set `beta_validate` validated, by hash), published to `komira-ai/prod` with no manual step. Nothing is built here. |
 
-The same release directory, from the one artifact `kci-release-<REVISION>`,
-is published to each channel: it is never rebuilt. `build.set_hash`,
-`beta.set_hash` and `prod.set_hash` in the three result files are the same
-value, and the release's `release_produced_by` names the one build run. It
-is checked, not assumed: the `build` job's output `set_hash` (read from its
-kci result) goes to `beta` and `beta_validate` as `--release-set-hash`; the
-`beta_validate` job's output `validated_set_hash` (read from ITS result, never
-from the value it was given) goes to `prod`. kci recomputes the unpacked
-release's set and refuses another (exit 3, `KCI-E-SET-HASH`) before anything
-is read from a channel, so `prod` publishes exactly the set `beta` published
-and `beta_validate` installed (rule R19 holds the wiring).
+> **Removed: publishing.** The rest of this page, from "Continuous
+> auto-promotion" to "GitHub settings the release relies on", describes the
+> publishing stages (`beta`, `beta_validate`, `prod`) that `kci.yml` no longer
+> runs, and the channels they published to. It is kept as the description of
+> what kci's publish machinery enforces (the rules are still tested, against a
+> fixture pair in `src/kci_workflow_check/tests/data`) until kci itself is
+> retired. Read it as history, not as what a push to `main` does today.
 
 ### Continuous auto-promotion
 

@@ -1,4 +1,10 @@
-# The release of komira's conda packages through kci (docs/ci.md, "kci.yml").
+# The release build of komira's conda packages through kci (docs/ci.md, "kci.yml").
+#
+# komira publishes to NO channel for now: the earlier publish stages (a beta
+# channel, a validation that installed from it, a prod channel) are gone, and
+# publishing will move to mopm (docs/releases.md). What remains is the stage
+# that builds the release set, so a push to main still proves the release
+# builds.
 #
 # HAND-WRITTEN. The machine file (release/machine.textproto: kci's default, so
 # no `kci` line names it) owns the release machine; this file runs it, one job per
@@ -14,166 +20,66 @@
 # farm-connected stage; each job runs exactly one `kci run` with
 # `--summary-file`, reading the machine file being checked; NO `pull_request`
 # trigger (the pull request's check is its own workflow, pr.yml); the inputs
-# `revision`, `reason` and `dry_run`; every action pinned. A job runs its whole
-# stage (a FULL run) unless the stage is SPLIT: beta is, into `beta` (its
-# step, `--only step:publish`) and `beta_validate` (its two validations, `--only
-# validation:install-komira-encoding --only validation:install-set`), which
-# together run all of it exactly once; a job
-# that runs only validations has no environment and no identity token and
-# needs the stage's own job. [The split is PENDING A RULING on rules R1 and
-# R9 of the workflow check, src/kci_workflow_check.]
-#
-# ⛔ CONTINUOUS AUTO-PROMOTION. A push to main IS the release: build -> beta
-# -> beta_validate -> prod, the same bytes at each step, nothing else to do. Every
-# job that runs after build receives the release set's hash and kci refuses a
-# release directory that recomputes to another (`--release-set-hash`, R19):
-# prod publishes exactly the set beta published and beta_validate installed.
+# `revision`, `reason` and `dry_run`; every action pinned.
 #
 #   build  on a GitHub-hosted runner joined to the build farm's tailnet
 #          (./.github/actions/farm-connect; the stage is farm_connected), in
 #          the environment `build`: builds bin/kci and runs
 #          `kci run --stage build` at the release revision, on the farm. The
-#          release directory, the kci binary and the build's result file
-#          travel to the publish jobs as one workflow artifact named for the
-#          revision, so they publish the bytes `build` verified, never
-#          rebuilt. Its output `set_hash` is the release set's hash, read
-#          from its kci result. This job holds a tailnet node and no
-#          publishing token.
-#   beta   on a GitHub-hosted runner, with `id-token: write`, in the GitHub
-#          environment `beta`: `kci run --stage beta --only step:publish`
-#          publishes to prefix.dev komira-ai/beta. It runs only on a PUSH to
-#          main (`github.event_name == 'push' && github.ref ==
-#          'refs/heads/main'` in its `if:`, R15, and its third step, R21):
-#          the `beta` environment has no branch policy, so this file and
-#          kci (KCI-E-NOT-ON-MAIN) are what keep a manual run, dry or not,
-#          out of the channel (BREAK-GLASS, below). Its job summary also lists
-#          the names new to komira-ai/prod (NEW NAMES).
-#   beta_validate
-#          on a plain GitHub-hosted runner, in no environment and with
-#          `contents: read` only, on a push to main only (as beta): `kci run
-#          --stage beta --only validation:install-komira-encoding --only
-#          validation:install-set`
-#          installs what beta published from the channel, anonymously, on
-#          the runner itself with the pinned pixi (the platform table's
-#          linux-x86_64 pin, downloaded by this job and kept only at the
-#          pin's sha256; no container, no setup action: a scratch directory
-#          outside the checkout and an environment built from nothing),
-#          komira_encoding alone and then komira_all alone, and runs each
-#          installed library's README examples. It holds no identity token, so it
-#          cannot publish; a failed validation is exit 7, no network at all
-#          exit 5, and prod does not start. On a push it validates FOR REAL
-#          (R22: a push is never a dry run; kci itself refuses `--plan` on a
-#          push to main, KCI-E-PLAN-ON-RELEASE). Its output
-#          `validated_set_hash` (read from its own kci result) is what prod
-#          publishes; kci writes a set hash there only for a run that is
-#          not a dry run and whose two validations both VALIDATED and
-#          SUCCEEDED.
-#   prod   the same as beta, after beta AND beta_validate, in the GitHub
-#          environment `prod`, to prefix.dev komira-ai/prod. It runs only on
-#          a PUSH to main (`github.event_name == 'push' && github.ref ==
-#          'refs/heads/main'`, R15; a manual run, of main too, stops at
-#          build), its third step compares GITHUB_REF byte for byte (R21),
-#          and kci refuses a run that is not a push to main, a revision that
-#          is not the pushed commit or not on main's history
-#          (KCI-E-NOT-ON-MAIN) and a build number lower than the channel
-#          already holds (KCI-E-SUPERSEDED). The `prod` environment's
-#          deployment branches are `main` only, so a job naming it from
-#          another ref is rejected by GitHub before it starts: that, not
-#          this file, is the lock (GitHub compares `github.ref` ignoring
-#          case). Its summary lists the commits the release carried since
-#          the channel's previous build. TO PAUSE promotion, add a required
-#          reviewer to that environment (docs/ci.md, "Pausing promotion to
-#          prod"); no change here.
+#          release directory, the kci binary and the build's result file are
+#          kept as one workflow artifact named for the revision. Its output
+#          `set_hash` is the release set's hash, read from its kci result.
+#          This job holds a tailnet node and no publishing token.
 #   (The pull request's check, the machine file's `pr` stage, is NOT in this
-#   file: it is the one job of .github/workflows/pr.yml, so a pull request
-#   never shows a skipped beta, beta_validate, prod or build job. This file has
-#   no `pull_request` trigger.)
+#   file: it is the one job of .github/workflows/pr.yml. This file has no
+#   `pull_request` trigger.)
 #
 # Every release job ends with the step `the prod line` (R20), which says in
-# one plain line of the job summary what happens to prod: SKIPPED (and why),
-# NEXT, PLAN ONLY, or FAILED; prod's own kci run says `promoted to prod: ...`.
-# The step never runs `exit`, so it reaches its end on every path.
-#
-# Each channel trusts this repository, this file (kci.yml) and one environment
-# (trusted publishing): no secret is stored anywhere. The publish jobs stay
-# top-level jobs of this file; a reusable-workflow call would change the
-# workflow the token names. Deploying, when there is one, is a stage and an
-# environment of its own.
+# one plain line of the job summary that nothing is published. The step never
+# runs `exit`, so it reaches its end on every path.
 #
 # Triggers: a push to main (not one that touches only documentation:
 # `paths-ignore`, R17, the same documentation release_version.sh does not
-# count) and a manual run release, and nothing else. A pull request never
-# starts this workflow (pr.yml answers it), so no environment, publishing
-# token or release job is reached from a pull request's code. The welded test
-# holds it (rule R6 of src/kci_workflow_check: a `pull_request` trigger here is
-# refused; pr.yml is held to the pull request's check alone).
+# count) and a manual run, and nothing else. A pull request never starts this
+# workflow (pr.yml answers it), so no environment or release job is reached
+# from a pull request's code. The welded test holds it (rule R6 of
+# src/kci_workflow_check: a `pull_request` trigger here is refused; pr.yml is
+# held to the pull request's check alone).
 #
 # ONE RELEASE AT A TIME (concurrency, R16). A PUSH to main is in the group
 # `kci-release-main`: a running release is NEVER cancelled; GitHub keeps at
 # most one PENDING run per group, and a newer one cancels the pending one
 # and takes its place, so the newest pushed revision wins and queued pushes
 # coalesce (main moves forward only, so the newer push carries the older
-# one's changes; prod's summary lists every commit it carried). A cancelled
-# pending run shows as cancelled with no summary: it never started, and no
-# job can list the runs it replaced without a permission no job holds, so
-# the run that releases a commit names it instead (prod's "carried"
-# list). A manual run is never in that group, so it can neither replace a
-# pending release nor be replaced by one: a dry run in `kci-plan-<run id>`,
-# any other manual run in `kci-ref-<ref name>`.
+# one's changes). A cancelled pending run shows as cancelled with no summary:
+# it never started. A manual run is never in that group: a dry run in
+# `kci-plan-<run id>`, any other manual run in `kci-ref-<ref name>`.
 # GitHub compares the group's `github.ref` ignoring case, so a push of a
 # branch `MAIN` would join it too: the repository ruleset that refuses such
-# branches (docs/ci.md) is what keeps them out. A RE-RUN of an old PUSH
-# run of main is a push run and joins `kci-release-main`: never re-run one
-# while a release is pending (docs/ci.md, "Queued runs"). ⚠ A re-run runs
-# the workflow file AS COMMITTED AT ITS RUN'S COMMIT, with that run's own
-# kci: a re-run of a MANUAL run of main started before this file was on
-# main runs the old file, whose prod job ran on any manual run of main.
-# Nothing in this file or in kci can refuse that; the CEO action in
-# docs/ci.md ("Re-runs of runs from before auto-promotion") closes it.
+# branches (docs/ci.md) is what keeps them out.
 #
-# BREAK-GLASS. Every manual run (of a branch, or of main) is break-glass:
-# it BUILDS its revision and PUBLISHES NOTHING. build is the machine file's
-# only `break_glass` stage; beta and prod are not (each job's `if:`, R15;
-# R21's step `only a push to main reaches this job`; kci's start-up check
-# KCI-E-NOT-ON-MAIN; and, for prod, the `prod` environment's branch
-# policy). The `beta` environment has NO branch policy (the project
-# owner's choice), so this file's `if:` and step and kci are what keep a
-# manual run out of the channel beta. They hold only for this file and kci
-# as committed: a manual run of a BRANCH runs that branch's own copy of
-# both, and the channel's trusted publisher names this repository, kci.yml
-# and the environment `beta`, not a branch, so a branch whose copy drops
-# the `if:` can still publish to beta. Only a `main`-only deployment branch
-# policy on `beta` would close that (docs/ci.md, "Break-glass" and "Settings
-# this relies on"); prod's policy is `main` only. No break-glass
-# environment exists or is named here. The input `reason` is required and
-# recorded in every job's summary (`BREAK-GLASS: <ref> <revision> by
+# A manual run (of a branch, or of main) is break-glass: build is the machine
+# file's only `break_glass` stage. The input `reason` is required and
+# recorded in the job's summary (`BREAK-GLASS: <ref> <revision> by
 # <actor>: <reason>`); kci refuses a break-glass run without one
 # (KCI-E-BREAK-GLASS-REASON). The reason reaches kci only through a job's
 # `env:`, never inside a `run:`, and no `name:` holds any expression (R18).
 #
-# THE REVISION. Everything a run builds and publishes is the commit REVISION:
-# the pushed commit, or a manual run's input `revision` (a full commit id; empty
-# means the commit the run was started on). Every job checks it out, kci refuses
-# a checkout whose HEAD is not it, and every artifact and result is named for
+# THE REVISION. Everything a run builds is the commit REVISION: the pushed
+# commit, or a manual run's input `revision` (a full commit id; empty means
+# the commit the run was started on). Every job checks it out, kci refuses a
+# checkout whose HEAD is not it, and every artifact and result is named for
 # it. Every release job's second step (R21) refuses, before anything built
 # from REVISION runs, a REVISION that is not a full commit id, or, on any
-# run that can publish (a push, or a manual run that is not a dry run),
-# is not GITHUB_SHA, the commit the run started on; only a manual DRY run
-# may name another revision, on GITHUB_SHA's history. On a run of main
-# this file is main's own, so a `revision` input naming an unmerged commit
-# stops there, before the revision's own code (farm-connect, ./buck2, kci)
-# runs. kci holds the same at start-up (and REVISION on
+# run that is not a manual dry run, is not GITHUB_SHA, the commit the run
+# started on; only a manual DRY run may name another revision, on GITHUB_SHA's
+# history. kci holds the same at start-up (and REVISION on
 # `refs/remotes/origin/main`'s history on a push to main).
 #
-# DRY RUN. A push is a real run, beta_validate included (R22: DRY_RUN is set
-# once, in this file's `env:`, from the manual run's input alone; no
-# release job's script names DRY_RUN outside its plan line and the revision
-# check, or GITHUB_ENV at all, which would re-set it for later steps). The
-# lock is kci, built from main on a push: it refuses `--plan` on a push to
-# main (KCI-E-PLAN-ON-RELEASE). A manual
-# run reaches build only (BREAK-GLASS, above), so its input dry_run changes
-# only which revision it may name (R21's revision step): no publish job, and
-# so no `kci run --plan` against a channel, runs on a manual run.
+# DRY RUN. DRY_RUN is set once, in this file's `env:`, from the manual run's
+# input alone (R22): no release job's script names DRY_RUN outside its plan
+# line and the revision check, or GITHUB_ENV at all, which would re-set it for
+# later steps. kci refuses `--plan` on a push to main (KCI-E-PLAN-ON-RELEASE).
 name: kci
 
 on:
@@ -191,11 +97,11 @@ on:
         type: string
         default: ""
       reason:
-        description: "why this manual run (recorded in every job summary); a manual run is BREAK-GLASS: it builds and publishes nothing"
+        description: "why this manual run (recorded in the job summary); a manual run is BREAK-GLASS: it builds and publishes nothing"
         type: string
         required: true
       dry_run:
-        description: "dry run: check and read the channels, publish nothing"
+        description: "dry run: the revision may name an earlier commit on this run's history"
         type: boolean
         default: false
 
@@ -207,17 +113,16 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # The release machine: its stages, and through them the artifacts, the
-  # channels file and the channels. kci reads it by convention (kci_api's
-  # DEFAULT_MACHINE_FILE), so no `kci` line passes --machine; this name is used
-  # only by the step that skips a revision without one. The welded test
-  # test_repo_kci_yml holds it equal to kci's default.
+  # The release machine: its stages, and through them the artifacts. kci reads
+  # it by convention (kci_api's DEFAULT_MACHINE_FILE), so no `kci` line passes
+  # --machine; this name is used only by the step that skips a revision
+  # without one. The welded test test_repo_kci_yml holds it equal to kci's
+  # default.
   KCI_MACHINE: release/machine.textproto
   # The commit this run releases (THE REVISION, above).
   REVISION: ${{ inputs.revision || github.sha }}
-  # A push is a real run, beta_validate included; a manual run is a dry run only
-  # when it asks (R22: set here and nowhere else). The revision step (R21)
-  # and every `kci run` read it.
+  # A manual run is a dry run only when it asks (R22: set here and nowhere
+  # else). The revision step (R21) and every `kci run` read it.
   DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
 
 jobs:
@@ -232,8 +137,7 @@ jobs:
       # farm-connected; it publishes nothing)
       id-token: write
     outputs:
-      # "true" when this revision has a release machine; the publish jobs run
-      # only then.
+      # "true" when this revision has a release machine
       release: ${{ steps.machine.outputs.release }}
       # the release set's hash, from kci's result (R19)
       set_hash: ${{ steps.set_hash.outputs.set_hash }}
@@ -283,8 +187,8 @@ jobs:
           done
       # A revision without a release machine is not a failure of a push to
       # main: the job says so (a warning and a summary line) and every later
-      # step, and the publish jobs, are skipped. A MANUAL run asked for a
-      # release, so there a missing machine file is a refusal.
+      # step is skipped. A MANUAL run asked for a release, so there a missing
+      # machine file is a refusal.
       - name: the release machine exists
         id: machine
         run: |
@@ -298,10 +202,9 @@ jobs:
             exit 1
           fi
           echo "::warning title=kci skipped::$msg"
-          echo "kci SKIPPED: $msg (build and the publish jobs did nothing)" >> "$GITHUB_STEP_SUMMARY"
+          echo "kci SKIPPED: $msg (build did nothing)" >> "$GITHUB_STEP_SUMMARY"
           echo "release=false" >> "$GITHUB_OUTPUT"
-      # The runnable directory: the binary and the runtime libraries it loads,
-      # so it starts on the publish jobs' runners with no environment.
+      # The runnable directory: the binary and the runtime libraries it loads.
       - name: build kci
         if: steps.machine.outputs.release == 'true'
         run: ./buck2 build '//bin/kci:kci[runnable]' --out "$RUNNER_TEMP/kci"
@@ -330,7 +233,7 @@ jobs:
             --work-dir "$GITHUB_WORKSPACE" --release-dir "$RUNNER_TEMP/release" \
             --log-dir "$RUNNER_TEMP/kci-logs" --result-file "$RUNNER_TEMP/kci-result-build.json" \
             --summary-file "$GITHUB_STEP_SUMMARY" "$@"
-      # The set hash every later job is held to, read from kci's own result.
+      # The set hash of the release, read from kci's own result.
       - name: the set hash
         id: set_hash
         if: steps.machine.outputs.release == 'true'
@@ -372,352 +275,12 @@ jobs:
       - name: Stop buck2
         if: always()
         run: ./buck2 kill || true
-      # R20: what happens to prod, in one plain line (file header).
-      - name: the prod line
-        if: always()
-        env:
-          JOB_STATUS: ${{ job.status }}
-          RELEASE: ${{ steps.machine.outputs.release }}
-        run: |
-          line=""
-          if [ "$JOB_STATUS" != success ]; then
-            line="prod: SKIPPED (build $JOB_STATUS)"
-          elif [ "$RELEASE" != true ]; then
-            line="prod: SKIPPED (nothing to release)"
-          elif [ "$GITHUB_EVENT_NAME" != push ]; then
-            line="prod: SKIPPED (break-glass: a $GITHUB_EVENT_NAME of $GITHUB_REF_NAME builds only; beta and prod run on a push to main)"
-          elif [ "$GITHUB_REF" != refs/heads/main ]; then
-            line="prod: SKIPPED (a push of $GITHUB_REF, not refs/heads/main)"
-          fi
-          if [ -n "$line" ]; then
-            echo "### $line" >> "$GITHUB_STEP_SUMMARY"
-            echo "$line" >&2
-          fi
-
-  beta:
-    needs: build
-    # not a break_glass stage: a PUSH to main only (R15; R21's third step
-    # compares the ref byte for byte). The `beta` environment has no branch
-    # policy, so this `if:` is what keeps a manual run (dry or not) out of
-    # the channel beta (BREAK-GLASS, above).
-    if: needs.build.outputs.release == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    # R2: the stage's environment, the one the channel's trusted publisher
-    # names (docs/ci.md, "Settings this relies on")
-    environment: beta
-    permissions:
-      contents: read
-      id-token: write
-    env:
-      # the set build made (R19): kci refuses a release that recomputes to another
-      RELEASE_SET_HASH: ${{ needs.build.outputs.set_hash }}
-      REASON: ${{ inputs.reason }}
-    steps:
-      # The machine file, the artifacts, the channels file and
-      # release_version.sh at the release revision, with the full history the
-      # version (and the "on main" check, and kci's read of this workflow at
-      # its commit) needs.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ env.REVISION }}
-          fetch-depth: 0
-          persist-credentials: false
-      # R21: the revision this run releases, checked by THIS file (on a run of
-      # main, main's own) before anything built from the revision runs.
-      - name: the revision this run releases
-        run: |
-          case "$REVISION" in
-            *[!0-9a-f]*) echo "refused: REVISION '$REVISION' is not a full commit id"; exit 1 ;;
-          esac
-          [ "${#REVISION}" = 40 ] || { echo "refused: REVISION '$REVISION' is not a full commit id"; exit 1; }
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$DRY_RUN" = true ]; then
-            git merge-base --is-ancestor "$REVISION" "$GITHUB_SHA" ||
-              { echo "refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on"; exit 1; }
-          else
-            [ "$REVISION" = "$GITHUB_SHA" ] ||
-              { echo "refused: a run that can publish releases the commit it started on ($GITHUB_SHA), not $REVISION (a revision input is for a dry run)"; exit 1; }
-          fi
-      # R21: a push to main, byte for byte (no `if:` can compare case).
-      - name: only a push to main reaches this job
-        run: |
-          [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/main ] ||
-            { echo "refused: only a push to refs/heads/main reaches this job; this run is a $GITHUB_EVENT_NAME of $GITHUB_REF"; exit 1; }
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: kci-release-${{ env.REVISION }}
-          path: ${{ runner.temp }}/in
-      - name: unpack the release
-        run: tar -C "$RUNNER_TEMP" -xf "$RUNNER_TEMP/in/kci-release.tar"
-      # kci compares this with every package before any request.
-      - name: release_version.sh
-        run: tools/build/package/release_version.sh "$REVISION" | tee "$RUNNER_TEMP/release_version.txt"
-      # The channel's credential is trusted publishing (OIDC): kci reads the
-      # job's ID token itself and resolves no secret, so the store is none. kci
-      # refuses the token unless its environment is this stage's, beta. The
-      # stage's validation runs in the `beta_validate` job, not here.
-      - name: kci run --stage beta --only step:publish
-        run: |
-          set --
-          if [ "$DRY_RUN" = true ]; then set -- --plan; fi
-          if [ -n "$REASON" ]; then set -- "$@" --context reason="$REASON"; fi
-          "$RUNNER_TEMP/kci/kci" run --stage beta --only step:publish \
-            --revision-id "$REVISION" --run-id "gh-$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
-            --context driver=github-actions --context event="$GITHUB_EVENT_NAME" \
-            --context ref="$GITHUB_REF" --context actor_id="$GITHUB_ACTOR_ID" \
-            --context run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --release-dir "$RUNNER_TEMP/release" --release-version "$RUNNER_TEMP/release_version.txt" \
-            --release-set-hash "$RELEASE_SET_HASH" \
-            --secret-store none --result-file "$RUNNER_TEMP/kci-result-beta.json" \
-            --summary-file "$GITHUB_STEP_SUMMARY" "$@"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: kci-result-beta-${{ env.REVISION }}
-          path: ${{ runner.temp }}/kci-result-beta.json
-          if-no-files-found: warn
-          retention-days: 90
-      # R20: what happens to prod, in one plain line (file header).
+      # R20: one plain line in the job summary (file header).
       - name: the prod line
         if: always()
         env:
           JOB_STATUS: ${{ job.status }}
         run: |
-          if [ "$JOB_STATUS" != success ]; then
-            rc=$(jq -r '.exit_code // empty' "$RUNNER_TEMP/kci-result-beta.json" 2>/dev/null || true)
-            line="prod: SKIPPED (beta $JOB_STATUS${rc:+: exit $rc})"
-            echo "### $line" >> "$GITHUB_STEP_SUMMARY"
-            echo "$line" >&2
-          fi
-
-  beta_validate:
-    needs: [build, beta]
-    # a part of beta: a PUSH to main only, as beta (R15, R21)
-    if: needs.build.outputs.release == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-    # no farm, no tailnet, no container: the validations install on the runner
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    # No environment: no approval, and no environment secret to leak.
-    permissions:
-      # no id-token: this job cannot mint a publishing token
-      contents: read
-    outputs:
-      # the set this job installed and validated, from its own kci result
-      # (never the value it was given): what prod publishes (R19)
-      validated_set_hash: ${{ steps.validated.outputs.set_hash }}
-    env:
-      RELEASE_SET_HASH: ${{ needs.build.outputs.set_hash }}
-      REASON: ${{ inputs.reason }}
-      # The pixi the validations install with: the linux-x86_64 pixi pin of
-      # tools/build/platforms/table.bzl, both values exactly (src/kci_workflow_check's
-      # test_repo_kci_yml holds them to it).
-      PIXI_URL: https://github.com/prefix-dev/pixi/releases/download/v0.67.2/pixi-x86_64-unknown-linux-musl
-      PIXI_SHA256: 807eabf195b13d6393b832ecccf93bf59bf784425674a60c7b50b1b84a58367f
-    steps:
-      # The machine file at the release revision; the full history kci's
-      # read of this workflow at its commit needs. The README examples the
-      # validations run come from the INSTALLED packages, never from here.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ env.REVISION }}
-          fetch-depth: 0
-          persist-credentials: false
-      # R21: the revision this run releases, checked by THIS file (on a run of
-      # main, main's own) before anything built from the revision runs.
-      - name: the revision this run releases
-        run: |
-          case "$REVISION" in
-            *[!0-9a-f]*) echo "refused: REVISION '$REVISION' is not a full commit id"; exit 1 ;;
-          esac
-          [ "${#REVISION}" = 40 ] || { echo "refused: REVISION '$REVISION' is not a full commit id"; exit 1; }
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$DRY_RUN" = true ]; then
-            git merge-base --is-ancestor "$REVISION" "$GITHUB_SHA" ||
-              { echo "refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on"; exit 1; }
-          else
-            [ "$REVISION" = "$GITHUB_SHA" ] ||
-              { echo "refused: a run that can publish releases the commit it started on ($GITHUB_SHA), not $REVISION (a revision input is for a dry run)"; exit 1; }
-          fi
-      # R21: a push to main, byte for byte (no `if:` can compare case).
-      - name: only a push to main reaches this job
-        run: |
-          [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/main ] ||
-            { echo "refused: only a push to refs/heads/main reaches this job; this run is a $GITHUB_EVENT_NAME of $GITHUB_REF"; exit 1; }
-      # The SAME artifact beta published: the pins are its release.json's.
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: kci-release-${{ env.REVISION }}
-          path: ${{ runner.temp }}/in
-      - name: unpack the release
-        run: tar -C "$RUNNER_TEMP" -xf "$RUNNER_TEMP/in/kci-release.tar"
-      # The pinned pixi, kept only when its bytes have the pin's sha256; kci
-      # compares them against the same value again before it runs them.
-      - name: the pinned pixi
-        run: |
-          mkdir -p "$RUNNER_TEMP/pixi"
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/pixi/pixi" "$PIXI_URL"
-          printf '%s  %s\n' "$PIXI_SHA256" "$RUNNER_TEMP/pixi/pixi" | sha256sum -c -
-          chmod 0755 "$RUNNER_TEMP/pixi/pixi"
-      # kci reads the channel anonymously and runs pixi with nothing of this
-      # job's environment, in a fresh scratch directory outside the checkout.
-      - name: kci run --stage beta --only validation:install-komira-encoding --only validation:install-set
-        run: |
-          set --
-          if [ "$DRY_RUN" = true ]; then set -- --plan; fi
-          if [ -n "$REASON" ]; then set -- "$@" --context reason="$REASON"; fi
-          "$RUNNER_TEMP/kci/kci" run --stage beta \
-            --only validation:install-komira-encoding --only validation:install-set \
-            --pixi "$RUNNER_TEMP/pixi/pixi" --pixi-sha256 "$PIXI_SHA256" \
-            --revision-id "$REVISION" --run-id "gh-$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
-            --context driver=github-actions --context event="$GITHUB_EVENT_NAME" \
-            --context ref="$GITHUB_REF" --context actor_id="$GITHUB_ACTOR_ID" \
-            --context run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --release-dir "$RUNNER_TEMP/release" --scratch-dir "$RUNNER_TEMP/validate" \
-            --release-set-hash "$RELEASE_SET_HASH" \
-            --result-file "$RUNNER_TEMP/kci-result-beta_validate.json" \
-            --summary-file "$GITHUB_STEP_SUMMARY" "$@"
-      # The set kci recomputed and validated, from its result: prod's input.
-      # kci writes it only for a run that is not a dry run and whose
-      # validations all VALIDATED and SUCCEEDED; a dry run's result has none,
-      # and the output stays empty (prod runs only on a push, never a dry
-      # run, and refuses an empty hash).
-      - name: the validated set hash
-        id: validated
-        run: |
-          if [ "$(jq -r '.plan' "$RUNNER_TEMP/kci-result-beta_validate.json")" != false ]; then
-            echo "a dry run validates nothing: no validated set hash is handed on"
-            exit 0
-          fi
-          h=$(jq -r '.set_hash' "$RUNNER_TEMP/kci-result-beta_validate.json")
-          case "$h" in
-            *[!0-9a-f]*|"") echo "the validation's result holds no set hash ('$h')"; exit 1 ;;
-          esac
-          [ "${#h}" = 64 ] || { echo "the validated set hash is not 64 hex characters ('$h')"; exit 1; }
-          echo "set_hash=$h" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: kci-result-beta_validate-${{ env.REVISION }}
-          path: ${{ runner.temp }}/kci-result-beta_validate.json
-          if-no-files-found: warn
-          retention-days: 90
-      # R20: what happens to prod, in one plain line (file header). Whether
-      # the prod environment waits for a reviewer is not read here (that
-      # needs a permission no job holds): NEXT says so.
-      - name: the prod line
-        if: always()
-        env:
-          JOB_STATUS: ${{ job.status }}
-        run: |
-          if [ "$JOB_STATUS" != success ]; then
-            rc=$(jq -r '.exit_code // empty' "$RUNNER_TEMP/kci-result-beta_validate.json" 2>/dev/null || true)
-            line="prod: SKIPPED (beta_validate $JOB_STATUS${rc:+: exit $rc})"
-          else
-            line="prod: NEXT (runs automatically; it waits only while the prod environment has a required reviewer)"
-          fi
+          line="nothing published: komira publishes to no channel for now (build $JOB_STATUS)"
           echo "### $line" >> "$GITHUB_STEP_SUMMARY"
           echo "$line" >&2
-
-  prod:
-    # after the stage beta: its publish AND its validation
-    needs: [beta, beta_validate]
-    # a PUSH to main only (R15; the prod environment's deployment branches
-    # say main, and R21's step compares the ref byte for byte): a manual
-    # run, of main too, stops at build. A skipped beta or beta_validate (no
-    # release machine, a failure) skips prod: no `always()` here.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    environment: prod
-    permissions:
-      contents: read
-      id-token: write
-    env:
-      # the set beta_validate installed (R19), never build's or beta's
-      RELEASE_SET_HASH: ${{ needs.beta_validate.outputs.validated_set_hash }}
-      REASON: ${{ inputs.reason }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ env.REVISION }}
-          fetch-depth: 0
-          persist-credentials: false
-      # R21: the revision this run releases, checked by THIS file (on a run of
-      # main, main's own) before anything built from the revision runs.
-      - name: the revision this run releases
-        run: |
-          case "$REVISION" in
-            *[!0-9a-f]*) echo "refused: REVISION '$REVISION' is not a full commit id"; exit 1 ;;
-          esac
-          [ "${#REVISION}" = 40 ] || { echo "refused: REVISION '$REVISION' is not a full commit id"; exit 1; }
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$DRY_RUN" = true ]; then
-            git merge-base --is-ancestor "$REVISION" "$GITHUB_SHA" ||
-              { echo "refused: $REVISION is not on the history of $GITHUB_SHA, the commit this run started on"; exit 1; }
-          else
-            [ "$REVISION" = "$GITHUB_SHA" ] ||
-              { echo "refused: a run that can publish releases the commit it started on ($GITHUB_SHA), not $REVISION (a revision input is for a dry run)"; exit 1; }
-          fi
-      # R21: a push to main, byte for byte (no `if:` can compare case).
-      - name: only a push to main reaches this job
-        run: |
-          [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/main ] ||
-            { echo "refused: only a push to refs/heads/main reaches this job; this run is a $GITHUB_EVENT_NAME of $GITHUB_REF"; exit 1; }
-      # The SAME artifact beta published: the bytes are never rebuilt.
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: kci-release-${{ env.REVISION }}
-          path: ${{ runner.temp }}/in
-      - name: unpack the release
-        run: tar -C "$RUNNER_TEMP" -xf "$RUNNER_TEMP/in/kci-release.tar"
-      - name: release_version.sh
-        run: tools/build/package/release_version.sh "$REVISION" | tee "$RUNNER_TEMP/release_version.txt"
-      # kci refuses the token unless its environment is this stage's, prod;
-      # refuses a run off main or of a revision not on main's history; and
-      # refuses a build number lower than the channel holds.
-      - name: kci run --stage prod
-        run: |
-          set --
-          if [ "$DRY_RUN" = true ]; then set -- --plan; fi
-          if [ -n "$REASON" ]; then set -- "$@" --context reason="$REASON"; fi
-          "$RUNNER_TEMP/kci/kci" run --stage prod \
-            --revision-id "$REVISION" --run-id "gh-$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
-            --context driver=github-actions --context event="$GITHUB_EVENT_NAME" \
-            --context ref="$GITHUB_REF" --context actor_id="$GITHUB_ACTOR_ID" \
-            --context run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --release-dir "$RUNNER_TEMP/release" --release-version "$RUNNER_TEMP/release_version.txt" \
-            --release-set-hash "$RELEASE_SET_HASH" \
-            --secret-store none --result-file "$RUNNER_TEMP/kci-result-prod.json" \
-            --summary-file "$GITHUB_STEP_SUMMARY" "$@"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: kci-result-prod-${{ env.REVISION }}
-          path: ${{ runner.temp }}/kci-result-prod.json
-          if-no-files-found: warn
-          retention-days: 90
-      # R20: kci itself wrote `promoted to prod: ...` and the commits this
-      # release carried on success; this step says the failure, and, on a
-      # failure AND on a success, a main that has moved past this revision
-      # (a newer run is pending, or one was replaced or cancelled: docs/ci.md,
-      # "Queued runs"). A re-run of an old push run of main that replaced a
-      # newer pending release, then was refused at prod (KCI-E-SUPERSEDED),
-      # gets that line too, so its summary asks for the newer release to be
-      # re-run. The script has no `exit` (R20), and it writes neither
-      # GITHUB_ENV nor DRY_RUN (R22).
-      - name: the prod line
-        if: always()
-        env:
-          JOB_STATUS: ${{ job.status }}
-        run: |
-          if [ "$JOB_STATUS" != success ]; then
-            rc=$(jq -r '.exit_code // empty' "$RUNNER_TEMP/kci-result-prod.json" 2>/dev/null || true)
-            line="prod: FAILED ($JOB_STATUS${rc:+: exit $rc}) $REVISION: see kci-result-prod-$REVISION"
-            echo "### $line" >> "$GITHUB_STEP_SUMMARY"
-            echo "$line" >&2
-          fi
-          tip=$(git rev-parse --verify --quiet refs/remotes/origin/main 2>/dev/null || true)
-          if [ -n "$tip" ] && [ "$tip" != "$REVISION" ] &&
-            [ -n "$(git rev-list --first-parent --max-count=1 "$REVISION..$tip" -- . ':(exclude)docs' ':(exclude)*.md' 2>/dev/null)" ]; then
-            line="prod: main is at ${tip:0:8}, past ${REVISION:0:8}: a newer run is pending, or was replaced or cancelled; if none is queued, re-run the newest cancelled run of main"
-            echo "### $line" >> "$GITHUB_STEP_SUMMARY"
-            echo "$line" >&2
-          fi
