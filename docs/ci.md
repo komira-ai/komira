@@ -318,6 +318,12 @@ to `main` that is not documentation only (`docs/**`, `**.md`: the stamp does not
 count them either), and a manual run with a required `reason`, nothing else. A
 pull request never starts it.
 
+Two checks of kci's build stage are not made here: that every package's
+requirements are inside the set (requirement closure), and the refusal of a
+duplicate key in a JSON file. Neither is enforced until mopm's publish path
+re-creates them; the header of
+[`set_json.zig`](../release/ci/release_lib/set_json.zig) lists what was dropped.
+
 Each Buck2 step is the [`buck2-farm`](#running-a-buck2-command-on-the-farm)
 action, which fails the step unless buck2 succeeded and no action ran on the
 runner; the programs those builds made are then run as binaries, never through

@@ -8,7 +8,11 @@ What komira publishes today, and how another repository pins a version of it.
 set (`.github/workflows/release.yml`: the packages, `release.json` and its set
 hash, kept as a workflow artifact, [docs/ci.md](ci.md#releaseyml-the-release))
 and nothing more; the earlier conda channels on prefix.dev are no longer
-published to, and publishing will move to mopm. Read the sections below about uploading, channels and the
+published to, and publishing will move to mopm. Two checks that kci's build stage made are not
+made by this build and are not enforced until mopm's publish path re-creates
+them: that every package's requirements are inside the set (requirement
+closure), and the refusal of a duplicate key in a JSON file; the header of
+`release/ci/release_lib/set_json.zig` lists what was dropped. Read the sections below about uploading, channels and the
 publish step as the design of that step, not as something a push does today.
 
 Komira has no release tags and no version number of its own, and this
