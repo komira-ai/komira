@@ -73,4 +73,5 @@ EXCLUDED = [
     # Not Python: a check that is red for a reason outside this repository, until that is fixed.
     ("komira//src/komira_json:coverage", "buildrules' `mojo_package` coverage refuses a library file that no report names, and the `__init__.mojo` of komira_json only re-exports, so kcov reports no line for it"),
     ("komira//src/komira_encoding:coverage", "same reason as komira_json: the `__init__.mojo` of komira_encoding only re-exports, so kcov reports no line for it and buildrules' `mojo_package` coverage refuses the library file"),
+    ("komira//src/komira_protobuf:coverage", "same reason as komira_json: the `__init__.mojo` of komira_protobuf only re-exports, so kcov reports no line for it and buildrules' `mojo_package` coverage refuses the library file"),
 ]
