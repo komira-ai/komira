@@ -110,8 +110,8 @@ mojo_library(
         # test, to compare kci's programs with
         "tests/test_install_env_golden.mojo": {
             "readme_examples": "//tools/build/readme_examples:tool",
-            "encoding_readme": "//src/komira_encoding:komira_encoding_readme[tests][readme][file]",
-            "encoding_generated": "//src/komira_encoding:komira_encoding_readme[tests][readme][generated]",
+            "encoding_readme": "//src/komira_encoding:komira_encoding[tests][readme][file]",
+            "encoding_generated": "//src/komira_encoding:komira_encoding[tests][readme][generated]",
         },
         "tests/test_readme_tool.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
         "tests/test_readme_link.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
