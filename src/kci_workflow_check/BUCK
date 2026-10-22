@@ -1,10 +1,11 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The workflow consistency check: a hand-written CI workflow
-# (.github/workflows/kci.yml) held to the release machine. It is
-# library code, not a command: the welded test that holds this repository's
-# kci.yml to release/machine.textproto uses it, and `kci run` runs it at
-# start-up on the workflow it runs under (`check_running_workflow`). The
+# The workflow consistency check: a hand-written CI workflow held to the
+# release machine. It is library code, not a command: `kci run` runs it at
+# start-up on the workflow it runs under (`check_running_workflow`), and its
+# welded tests hold fixture workflows to it. No workflow of this repository
+# is held to it now (the release workflow, .github/workflows/release.yml,
+# runs Buck2 targets and no kci); it goes when kci does. The
 # machine file owns the stages; the workflow must agree: one job per stage with
 # the stage's name, running in the stage's environment, `needs` = the stage's
 # `after`, `id-token: write` exactly on the stages that publish by OIDC
@@ -65,27 +66,20 @@ mojo_library(
         # R6 for kci.yml: no pull_request trigger and no job for the
         # PULL_REQUEST stage; each file refused when read as the other
         "tests/test_ci_two_workflows.mojo",
-        # the repository's own kci.yml held to its own release/machine.textproto
-        "tests/test_repo_kci_yml.mojo",
-        # R15-R20 and R4's allow-list: mutations of the repository's own kci.yml
-        # and machine file, each ending in its rule's finding
+        # R15-R20 and R4's allow-list: mutations of a FIXTURE workflow and
+        # machine file, each ending in its rule's finding
         "tests/test_ci_auto_promotion.mojo",
     ],
-    # test_repo_kci_yml: the repository's own release workflow and machine
-    # file (the root BUCK and release/BUCK; one build stage, no channel).
     # test_ci_auto_promotion: a FIXTURE pair, the workflow and machine file
     # komira had while it published to channels (tests/data/publish_*), so
     # the rules that guard a publishing job stay tested while kci can publish.
+    # No workflow of this repository is held to a machine file any more: the
+    # release workflow (.github/workflows/release.yml) runs Buck2 targets.
     test_data = {
         "tests/test_ci_auto_promotion.mojo": {
             "channels.textproto": "tests/data/publish_channels.textproto",
             "kci.yml": "tests/data/publish_kci.yml",
             "machine.textproto": "tests/data/publish_machine.textproto",
-        },
-        "tests/test_repo_kci_yml.mojo": {
-            "kci.yml": "//:kci.yml",
-            "machine.textproto": "//release:machine.textproto",
-            "release_version.sh": "//tools/build/package:release_version.sh",
         },
     },
     visibility = ["PUBLIC"],

@@ -156,9 +156,11 @@ fields of a stage carry what the CI workflow must agree with:
 | `stage.farm_connected` | the stage's job joins the build farm's tailnet (the `farm-connect` action), which needs the job's ID token. A farm-connected stage may not publish: the job that holds a farm network node never holds a publishing token. |
 | `step.validation` | a check of what a PUBLISH step published, by kind (`CONDA_INSTALL_SMOKE`: `image` pinned by digest, `install` (repeated), `compiler_channel`, `extra_channel`, `program` under `release/`, `wait_for_index_seconds`). A FULL run runs it after its step; `--only validation:<name>` runs it alone against what is published; `--only step:<name>` runs the step without it. A failure is exit 7, never a skip. |
 
-The workflow that runs the stages, `.github/workflows/kci.yml`, is held to this
-file by `kci run` itself at start-up under GitHub Actions and by a welded test
-([docs/ci.md](../ci.md#kciyml-the-release)).
+No workflow of this repository runs the stages now: the release workflow
+(`.github/workflows/release.yml`, [docs/ci.md](../ci.md#releaseyml-the-release))
+builds Buck2 targets and runs no kci. A workflow that did run them, the retired
+`kci.yml`, was held to this file by `kci run` itself at start-up under GitHub
+Actions and by a welded test.
 
 A second validation kind, `CONDA_INSTALL_ENV`, runs on the machine that runs
 kci, with no container. It takes the same fields as `CONDA_INSTALL_SMOKE`

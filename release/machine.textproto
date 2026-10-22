@@ -3,14 +3,13 @@
 # stage, every step of it in order (`--only step:<name>` runs a selection, which
 # is reported as SELECTIVE, never as a full run). kci reads THIS path by
 # convention (release/machine.textproto); `--machine <path>` overrides it.
-# .github/workflows/kci.yml runs each stage as the job of the same name,
-# in the stage's GitHub environment. The pull request's check is no stage of
-# this file: .github/workflows/pr.yml selects and builds with buck2 and runs no
-# kci (docs/ci.md). kci holds the workflow it runs under to this
-# file at start-up under GitHub Actions, and the welded test
-# src/kci_workflow_check/tests/test_repo_kci_yml.mojo does the same on every build, so
-# a drift fails `./buck2 build //...`. This file owns the stages: edit both
-# together.
+# NO WORKFLOW RUNS THIS FILE NOW. The release workflow,
+# .github/workflows/release.yml, builds the release set with Buck2 targets
+# (//release:release_set, docs/ci.md) and runs no kci, and the pull request's
+# check (.github/workflows/pr.yml) never ran kci stages. The file stays because
+# kci still reads it in its own tests (src/kci_release_machine, bin/kci) until
+# kci is removed from this repository; it is not a statement of what a release
+# does, and nothing holds it to a workflow.
 #
 # komira publishes to NO channel for now: the stages that published to a
 # channel, and the validations that installed from it, were removed, and
@@ -33,7 +32,7 @@
 # break_glass stage after one that is not).
 #
 # Relative paths are relative to the directory kci is started in (the
-# repository's root in kci.yml). Changes need the release approver's review
+# repository's root). Changes need the release approver's review
 # (.github/CODEOWNERS).
 
 # The file format's major (kci_api's format table): kci refuses a file
