@@ -100,9 +100,9 @@ sources:
 
 `:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a source,
 a test, `mopm.toml`, `mopm.lock` or `mopm-toolchain.toml`, run `buildrules mojo sync`, commit what it
-writes, and build `komira//src/komira_json:lib` on the farm. (The sync writes the toolchain pins to a `toolchains/`
-directory at the repository root; here the toolchains cell is `tools/build/cells/toolchains/`, so its
-`mojo_pins.bzl` and `mopm_pins.bzl` are copied there.)
+writes, and build `komira//src/komira_json:lib` on the farm. (The sync writes the toolchain pins,
+`mojo_pins.bzl` and `mopm_pins.bzl`, to the directory the `[cells] toolchains` line of `.buckconfig` names:
+`tools/build/cells/toolchains/` here.)
 
 `:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
 (`mojo-komira_json-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the tests have passed.
