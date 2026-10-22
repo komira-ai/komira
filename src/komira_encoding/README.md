@@ -103,3 +103,30 @@ The kinds are `InvalidCharacter`, `InvalidPadding`, `InvalidLength`,
 `NonCanonical` (non-zero unused bits, RFC 4648 section 3.5),
 `InvalidBoundary` and `LabelMismatch` (PEM). Each is exported as a constant
 (`INVALID_CHARACTER`, ...).
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_encoding`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_encoding/`, its tests are `tests/`. The package has no native archive:
+its one call into C, `wipe_bytes` in `codec.mojo`, zeroes decoded secret bytes through `explicit_bzero` (`memset_s`
+on macOS), and both are in the C library every Mojo program links. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, where the library and its tests are |
+| `mopm.lock` | what `mopm lock` writes (with no registry reachable); the package has no dependencies, so it pins the toolchain only |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a source,
+a test, `mopm.toml`, `mopm.lock` or `mopm-toolchain.toml`, run `buildrules mojo sync`, commit what it
+writes, and build `komira//src/komira_encoding:lib` on the farm. (The sync writes the toolchain pins to a `toolchains/`
+directory at the repository root; here the toolchains cell is `tools/build/cells/toolchains/`, so its
+`mojo_pins.bzl` and `mopm_pins.bzl` are copied there.)
+
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
+(`mojo-komira_encoding-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the tests have passed.
+Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.
+
+`:komira_encoding` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`). It also compiles and runs the
+README's examples above (`[tests][readme]`) against `:lib`, which `:lib` does not do; the tests are not run again.

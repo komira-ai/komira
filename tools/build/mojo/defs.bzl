@@ -29,14 +29,7 @@ load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":coverage.bzl", "COVERAGE_ATTRS", "COVERAGE_SHARED_LIB_ATTRS", "COVERAGE_TEST_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_readme", "coverage_run", "coverage_branch_of", "coverage_shared_lib", "coverage_shared_lib_macro", "coverage_sub_targets", "coverage_test", "coverage_test_kwargs")
 load(":test_deps.bzl", "check_test_deps", "test_c_link", "test_closure")
 load(":mutation.bzl", "MUTATION_ATTRS", "mutation_kwargs", "mutation_sub_targets")
-load(
-    ":test_runtime.bzl",
-    _arg_args = "arg_args",
-    _data_map = "data_map",
-    _env_args = "env_args",
-    _test_root = "test_root",
-    gate_mojo = "gate_mojo",
-)
+load(":test_runtime.bzl", _arg_args = "arg_args", _data_map = "data_map", _env_args = "env_args", _test_root = "test_root", gate_mojo = "gate_mojo")
 load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "cap_flags", "define_args", "memory_cap")
 load(":native_facts.bzl", "NATIVE_ATTRS", "native_facts", "native_refusal")
 load(":native_reach.bzl", "NATIVE_REACH_ATTRS", "native_reach", "native_reach_kwargs")
@@ -1000,6 +993,7 @@ def _mojo_library(**kwargs):
 
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
+adopt_readme_test = _readme_test  # the README gate's action, for adopt.bzl
 mojo_binary = declares_docs(mojo_binary_rule)
 mojo_library = declares_docs(_mojo_library)
 mojo_shared_lib = declares_docs(coverage_shared_lib_macro(mojo_shared_lib_rule))

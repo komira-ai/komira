@@ -1,0 +1,3 @@
+[toolchain]
+mopm = "0.0.20"
+mojo = "1.0.0"
