@@ -933,8 +933,11 @@ The repository's branch settings require the check **`pr / check`**.
 ## coverage.yml: the pull request's coverage (not a gate)
 
 [`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml) posts
-the check run `coverage`: the line coverage of the `mojo_library` targets the
-change touches, and the branch coverage of those whose coverage gate reads
+the check run `coverage`: the line coverage of the `mojo_library` targets and of
+the `mojo_package` packages the change touches (the latter from their
+`:coverage[reports]`, one kcov report per test; their reports hold no branch
+records, so a `branch` line of their `coverage_held` is kept and not checked),
+and the branch coverage of the libraries whose coverage gate reads
 branch records (`COVERAGE_BRANCH_GATE`), as covcheck's summary and
 annotations on the lines of the "Files changed" view. It is **informational**: not a required check, its
 conclusion is `neutral` in the policy's census mode, except that a touched

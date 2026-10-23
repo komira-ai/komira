@@ -235,8 +235,13 @@ The package's `:lib` is the library file, made only after every test run passed.
 `MojoInfo` they require of a dependency over that same file, and runs and compiles nothing. A dependent therefore
 builds only once the library's tests have passed. With a `readme` it carries the README-example gate of a `mojo_library`
 (`[tests][readme]`, with `[file]`, `[generated]` and `[objects]`; the same `readme_gate`, compiled against `:lib`, so the
-package's tests are not run a second time). It carries no branch coverage gate and no mutation sub-targets, and
-`coverage.yml` selects `mojo_library` targets, so an adopted package is measured by buildrules' own `:coverage`. `conda_package` takes the adopted library as it takes a
+package's tests are not run a second time). It carries no branch coverage gate and no mutation sub-targets. Its
+coverage is the package's own: `:coverage` (line counts per file), `:coverage[reports]` (one kcov report per test, in
+repository paths) and, when `coverage_floor.txt` (`lines NN.NN`) sits beside the BUCK file, `:coverage_floor`, which is
+green only while the line coverage is exactly that figure (a fall and a rise both fail; the pull request check builds
+it). `coverage.yml` selects these packages as well as `mojo_library` targets, and feeds their reports to `covcheck`, which
+counts the library's sources only (the tests' own sources are in the reports and left out); a `branch` line of the
+package's `coverage_held` is kept and not checked, since the reports hold no branch records. `conda_package` takes the adopted library as it takes a
 `mojo_library`, so the conda packages of the libraries that depend on it still name it. The mopm package's `.conda` is
 the library's `:conda` (buildrules' `mojo_conda` over `:lib`), so it too exists only after the tests passed.
 
