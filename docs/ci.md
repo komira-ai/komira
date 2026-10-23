@@ -982,12 +982,7 @@ the farm connection exchanges, checking out `main` and running no code of any
 pull request. The workflows it reads are `--workflow <name>` flags of that
 step (and the trigger's `workflows:` list): the program names none itself, so
 a replacement push workflow is added to both in its own pull request. It names
-two: `release`, and `kci`, the retired workflow `release.yml` replaced. `kci`
-starts no run (its file is deleted), but GitHub keeps a deleted workflow and
-its runs in the API, so the program still reads kci's successful pushes to
-`main` as last-green candidates, and the first red run of `release` names its
-culprits from kci's last green instead of `unknown`; drop `kci` from both lists
-once `release` has a green push of its own. It acts
+one: `release`. It acts
 only on a run of a named workflow started by a push to `main`:
 
 - **Red** (`failure`, `timed_out`, `startup_failure`): the last green
