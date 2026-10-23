@@ -24,14 +24,21 @@ FIRST_MOPM_WITH_OVERLAY = None
 
 PACKAGES = {
     "komira_anomaly": "0.1.0",
+    "komira_content_line": "0.1.0",
     "komira_datetime": "0.1.0",
     "komira_encoding": "0.1.0",
     "komira_hash": "0.1.0",
+    "komira_host": "0.1.0",
     "komira_json": "0.1.0",
+    "komira_kafka_server": "0.1.0",
+    "komira_mail_address": "0.1.0",
     "komira_protobuf": "0.1.0",
     "komira_retry": "0.1.0",
+    "komira_rowcell": "0.1.0",
     "komira_scalar_arithmetic": "0.1.0",
     "komira_simd": "0.1.0",
+    "komira_test_verdict": "0.1.0",
     "komira_textproto": "0.1.0",
+    "komira_validation_run": "0.1.0",
     "komira_xml": "0.1.0",
 }
