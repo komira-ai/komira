@@ -74,3 +74,32 @@ assert_equal(one.domain(), "acme.example")
 - Local parts are compared exactly (RFC 5321 lets a receiving system treat
   them as case-sensitive); whether to compare them without case is the
   caller's decision.
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_mail_address`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_mail_address/` (`address.mojo`, `chars.mojo`, `errors.mojo`, `parse.mojo`
+and the `__init__.mojo` that re-exports them), its tests are `tests/`. The package has no native archive and calls no
+foreign function: it is Mojo over `List`, `Span` and `String`. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, where the library and its tests are |
+| `mopm.lock` | what `mopm lock` writes (with no registry reachable); the package has no dependencies, so it pins the toolchain only |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `coverage_floor.txt` | `lines NN.NN`: the line coverage `:coverage` measures, exactly; `:coverage_floor` fails when it falls below and when it rises above, until the figure is changed |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a source,
+a test, `mopm.toml`, `mopm.lock` or `mopm-toolchain.toml`, run `buildrules mojo sync`, commit what it
+writes, and build `komira//src/komira_mail_address:lib` on the farm. (The sync writes the toolchain pins,
+`mojo_pins.bzl` and `mopm_pins.bzl`, to the directory the `[cells] toolchains` line of `.buckconfig` names:
+`tools/build/cells/toolchains/` here.) A test file that `buildrules mojo sync` has not listed is not
+run: run the sync after adding one.
+
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
+(`mojo-komira_mail_address-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the tests have passed.
+Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.
+
+`:komira_mail_address` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`). It also compiles and runs the
+README's examples above (`[tests][readme]`) against `:lib`, which `:lib` does not do; the tests are not run again.

@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_kafka_server/wire/record_batch_v2.mojo — Kafka message-set "RecordBatch v2"
+# src/komira_kafka_server/src/komira_kafka_server/wire/record_batch_v2.mojo — Kafka message-set "RecordBatch v2"
 # =============================================================================
 #
 # The Kafka v2 RecordBatch (message format magic=2,

@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_kafka_server/produce_error.mojo — the Produce error code for a
+# src/komira_kafka_server/src/komira_kafka_server/produce_error.mojo — the Produce error code for a
 # failed partition append
 # =============================================================================
 #

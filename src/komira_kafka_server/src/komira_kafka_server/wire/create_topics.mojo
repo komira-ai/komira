@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_kafka_server/wire/create_topics.mojo — Kafka CreateTopics (api_key 19)
+# src/komira_kafka_server/src/komira_kafka_server/wire/create_topics.mojo — Kafka CreateTopics (api_key 19)
 # =============================================================================
 #
 # CreateTopics is the RPC a vanilla Kafka

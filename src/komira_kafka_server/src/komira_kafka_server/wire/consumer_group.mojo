@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_kafka_server/wire/consumer_group.mojo — FindCoordinator / OffsetCommit /
+# src/komira_kafka_server/src/komira_kafka_server/wire/consumer_group.mojo — FindCoordinator / OffsetCommit /
 #                                          OffsetFetch wire codecs
 # =============================================================================
 #

@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_kafka_server/wire/wire.mojo — Kafka wire-protocol primitive codec
+# src/komira_kafka_server/src/komira_kafka_server/wire/wire.mojo — Kafka wire-protocol primitive codec
 # =============================================================================
 #
 # The Kafka binary protocol primitive types (encode/decode only; the TCP
