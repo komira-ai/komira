@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_kafka_server/wire/transaction.mojo — Kafka transactional RPCs
+# src/komira_kafka_server/src/komira_kafka_server/wire/transaction.mojo — Kafka transactional RPCs
 # =============================================================================
 #
 # Transactions. The wire codecs for the four transactional RPCs a

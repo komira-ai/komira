@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_kafka_server/wire/crc32c.mojo — CRC-32C (Castagnoli) over a byte span
+# src/komira_kafka_server/src/komira_kafka_server/wire/crc32c.mojo — CRC-32C (Castagnoli) over a byte span
 # =============================================================================
 #
 # The Kafka RecordBatch-v2 batch header carries a CRC-32C
