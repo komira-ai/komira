@@ -6,7 +6,7 @@
 # guard (`readme_e2e_complete`, defs.bzl) is built by the pull request check over the
 # real files; these are the shapes it must tell apart.
 
-load(":guard.bzl", "findings", "moved_packages")
+load(":guard.bzl", "EXCLUDED_PATTERN", "findings", "moved_packages", "mopm_findings")
 
 _PATHS = [
     "src/a/mopm.toml",
@@ -56,6 +56,19 @@ def _cases():
 
     nested = findings(_PATHS, ["a", "b", "c", "d"])
     expect_in("a test package or nested directory is not a moved package", nested, "2 README e2e target(s) are for a package with no src/<name>/mopm.toml: c, d")
+
+    # The row of EXCLUDED and the pinned mopm move together.
+    row = [EXCLUDED_PATTERN, "komira//third_party/python/..."]
+    other = ["komira//third_party/python/..."]
+    old = "toolchains//:mopm_0_0_25"
+    expect("no mopm has --overlay yet: the row stays", mopm_findings(old, None, row), "")
+    expect("older than the first with --overlay: the row stays", mopm_findings(old, "toolchains//:mopm_0_0_33", row), "")
+    expect("the first with --overlay is pinned and the row is gone", mopm_findings("toolchains//:mopm_0_0_33", "toolchains//:mopm_0_0_33", other), "")
+    expect("a later mopm than the first with --overlay, row gone", mopm_findings("toolchains//:mopm_0_1_0", "toolchains//:mopm_0_0_33", other), "")
+    expect("versions compare as numbers, not text", mopm_findings("toolchains//:mopm_0_0_100", "toolchains//:mopm_0_0_33", other), "")
+    expect_in("the pin has --overlay and the row remains", mopm_findings("toolchains//:mopm_0_0_33", "toolchains//:mopm_0_0_33", row), "has --overlay", "Delete that row")
+    expect_in("no --overlay and the row is missing", mopm_findings(old, None, other), "has no --overlay", "Restore the row")
+    expect_in("older than the first with --overlay and the row is missing", mopm_findings(old, "toolchains//:mopm_0_0_33", other), "has no --overlay", "Restore the row")
     return out
 
 def _run(ctx):

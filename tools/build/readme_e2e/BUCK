@@ -71,6 +71,7 @@ _SCENARIOS = [
     "changed_file",
     "compile_error",
     "dependency",
+    "import_outside_closure",
     "missing_file",
     "missing_package",
     "no_example",
@@ -115,10 +116,10 @@ zig_exe(
 # `mopm add --overlay` of a set that holds its whole closure (fake.zig): the
 # `mopm` of the one target that runs the real compiler over a real package
 # (tools/build/tests, functional/readme_e2e). The release's targets name the
-# pinned mopm, never this.
+# pinned mopm, never this: its visibility is that one tests package, so no release target can name it.
 readme_e2e_standin(
     name = "standin_mopm",
     fake = ":fake",
     program = "mopm",
-    visibility = ["PUBLIC"],
+    visibility = ["tests//functional/readme_e2e:"],
 )

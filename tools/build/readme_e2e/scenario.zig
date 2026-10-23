@@ -225,6 +225,25 @@ fn compileError(env: Env) void {
     if (env.exists("run.marker")) die("a marker was written for a package that did not pass", .{});
 }
 
+fn importOutsideClosure(env: Env) void {
+    // The second example imports `outside`, which no installed package provides. A module of
+    // that name sits in the staged set and among the inputs, where a compile that looked
+    // beyond the installed copy would find it.
+    const pkg = goodReadme(env, &.{ good_use, "from good import value\nfrom outside import other" });
+    expectCode(env.stage(&.{pkg}, "1.0.0"), 0, "stage");
+    env.put("set/outside.mojoc", "mojoc of outside");
+    env.put("set/lib/mojo/outside.mojoc", "mojoc of outside");
+    env.put("in/outside.mojoc", "mojoc of outside");
+    env.put("in/good/outside.mojoc", "mojoc of outside");
+    const r = env.verify("good", "1.2.3", "1.0.0", "mopm");
+    expectCode(r, 1, "verify");
+    expectText(r, lineText(env, "example README.md:{d}: compiled and passed", .{fenceLine(pkg.readme, 1)}));
+    expectText(r, lineText(env, "FAIL compile: good: README.md:{d} does not compile against the installed package", .{fenceLine(pkg.readme, 2)}));
+    expectText(r, "unable to locate module 'outside'");
+    expectNoText(r, "PASS good");
+    if (env.exists("run.marker")) die("a marker was written for a package that did not pass", .{});
+}
+
 fn runError(env: Env) void {
     const pkg = goodReadme(env, &.{ good_use, "from good import value\nRUN_ERROR" });
     expectCode(env.stage(&.{pkg}, "1.0.0"), 0, "stage");
@@ -247,10 +266,14 @@ fn missingPackage(env: Env) void {
 fn missingFile(env: Env) void {
     expectCode(env.stage(&.{goodReadme(env, &.{good_use})}, "1.0.0"), 0, "stage");
     std.fs.cwd().deleteFile(env.join(&.{"set/linux-64/mojo-good-1.2.3-mojo1.0.0_0.conda"})) catch |e| die("cannot delete the staged file: {s}", .{@errorName(e)});
-    const r = env.verify("good", "1.2.3", "1.0.0", "mopm");
+    // A lock made from the plan names the file the set lacks, so the mopm does not die
+    // first: it is verify's own check that refuses.
+    const r = env.verify("good", "1.2.3", "1.0.0", "mopm_plan");
     expectCode(r, 1, "verify");
-    expectText(r, "FAIL install: good:");
+    expectText(r, "FAIL install: good: linux-64/mojo-good-1.2.3-mojo1.0.0_0.conda is in the plan and not in the staged set");
     expectNoText(r, "PASS good");
+    if (env.exists("run/prefix/lib/mojo/good.mojoc")) die("something was unpacked for a file the set lacks", .{});
+    if (env.exists("run.marker")) die("a marker was written for a package that did not install", .{});
 }
 
 fn tamperedFile(env: Env) void {
@@ -403,6 +426,7 @@ const table = [_]Scenario{
     .{ .name = "passes", .run = passes },
     .{ .name = "dependency", .run = dependency },
     .{ .name = "compile_error", .run = compileError },
+    .{ .name = "import_outside_closure", .run = importOutsideClosure },
     .{ .name = "run_error", .run = runError },
     .{ .name = "missing_package", .run = missingPackage },
     .{ .name = "missing_file", .run = missingFile },

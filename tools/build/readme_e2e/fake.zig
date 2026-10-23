@@ -11,6 +11,11 @@
 //!     fake mopm_registry add ...
 //!         The same, but the lock holds the sha256 and size the plan gives, as a
 //!         lock made from a registry's index would: the file is not read for them.
+//!     fake mopm_plan add ...
+//!         The same, but the lock is made from the plan alone: no file is read, so a
+//!         member's file the staged set lacks is still locked (with the plan's sha256
+//!         and size and no dependencies), as a lock made from a registry's index
+//!         would name a file this set does not carry.
 //!     fake mopm_usage add ...
 //!         A mopm that predates `--overlay` as the pinned release answers it: its usage
 //!         text, exit 2 (recorded from mopm 0.0.25).
@@ -48,7 +53,10 @@ fn buildOf(filename: []const u8, name: []const u8, version: []const u8) []const 
     return filename[head_len .. filename.len - ".conda".len];
 }
 
-fn mopmAdd(a: Allocator, args: []const []const u8, from_plan: bool) void {
+const Mode = enum { read_files, plan_hashes, plan_only };
+
+fn mopmAdd(a: Allocator, args: []const []const u8, mode: Mode) void {
+    const from_plan = mode != .read_files;
     if (args.len != 4 or !std.mem.eql(u8, args[0], "add") or !std.mem.eql(u8, args[2], "--overlay")) {
         die("mopm: usage: add NAME@=VERSION --overlay DIR", .{});
     }
@@ -76,15 +84,17 @@ fn mopmAdd(a: Allocator, args: []const []const u8, from_plan: bool) void {
         if (m.files.len != 1) die("mopm: {s}: this stand-in reads one file per member", .{name});
         const f = m.files[0];
         const rel = std.fs.path.join(a, &.{ f.subdir, f.filename }) catch die("mopm: out of memory", .{});
-        const bytes = fileOrDie(a, staged, rel);
-        const files = conda.read(a, bytes, &why) catch die("mopm: {s}: {s}", .{ rel, why });
-        const meta_path = std.fmt.allocPrint(a, "lib/mojo/{s}.mopm.json", .{name}) catch die("mopm: out of memory", .{});
-        const meta_bytes = conda.find(files, meta_path) orelse die("mopm: {s} holds no {s}", .{ rel, meta_path });
-        const meta = plan_mod.parseMetadata(a, meta_bytes, &why) catch die("mopm: {s}", .{why});
+        const bytes: []const u8 = if (mode == .plan_only) "" else fileOrDie(a, staged, rel);
         var deps: std.ArrayList([]const u8) = .empty;
-        for (meta.deps) |d| {
-            deps.append(a, d.name) catch die("mopm: out of memory", .{});
-            todo.append(a, d.name) catch die("mopm: out of memory", .{});
+        if (mode != .plan_only) {
+            const files = conda.read(a, bytes, &why) catch die("mopm: {s}: {s}", .{ rel, why });
+            const meta_path = std.fmt.allocPrint(a, "lib/mojo/{s}.mopm.json", .{name}) catch die("mopm: out of memory", .{});
+            const meta_bytes = conda.find(files, meta_path) orelse die("mopm: {s} holds no {s}", .{ rel, meta_path });
+            const meta = plan_mod.parseMetadata(a, meta_bytes, &why) catch die("mopm: {s}", .{why});
+            for (meta.deps) |d| {
+                deps.append(a, d.name) catch die("mopm: out of memory", .{});
+                todo.append(a, d.name) catch die("mopm: out of memory", .{});
+            }
         }
         const build = buildOf(f.filename, name, m.version);
         locked.append(a, .{
@@ -179,8 +189,9 @@ pub fn main() !void {
     const argv = try std.process.argsAlloc(a);
     if (argv.len < 2) die("fake: usage: fake mopm|mopm_old|compile|gate ...", .{});
     const rest = argv[2..];
-    if (std.mem.eql(u8, argv[1], "mopm")) return mopmAdd(a, rest, false);
-    if (std.mem.eql(u8, argv[1], "mopm_registry")) return mopmAdd(a, rest, true);
+    if (std.mem.eql(u8, argv[1], "mopm")) return mopmAdd(a, rest, .read_files);
+    if (std.mem.eql(u8, argv[1], "mopm_registry")) return mopmAdd(a, rest, .plan_hashes);
+    if (std.mem.eql(u8, argv[1], "mopm_plan")) return mopmAdd(a, rest, .plan_only);
     if (std.mem.eql(u8, argv[1], "mopm_old")) die("mopm: unknown option '--overlay'", .{});
     if (std.mem.eql(u8, argv[1], "mopm_usage")) {
         std.fs.File.stderr().writeAll("usage: mopm lock   [--registry <prod|gamma|beta|url>]\n       mopm update [<package>...] [--registry <prod|gamma|beta|url>]\n       mopm tree\n       mopm sync   [--locked] [--registry <prod|gamma|beta|url>] [--pixi <path>]\n       mopm add    <package>[@<requirement>] [--dev] [--path <dir>] [--registry <prod|gamma|beta|url>]\n") catch {};

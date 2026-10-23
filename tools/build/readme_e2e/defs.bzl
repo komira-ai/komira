@@ -8,7 +8,7 @@ its README examples against the installed copy, as one build action.
 
 load("@komira//tools/build/lint:doc_tree.bzl", "DocTreeInfo", "declares_docs")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_compile_cmd")
-load(":guard.bzl", _guard_findings = "findings")
+load(":guard.bzl", _guard_findings = "findings", _mopm_findings = "mopm_findings")
 load("@komira//tools/build/mojo:opt_level.bzl", "TEST_OPT_LEVEL", "opt_level_args")
 load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
@@ -180,6 +180,8 @@ readme_e2e_all = declares_docs(readme_e2e_all)
 def _complete_impl(ctx):
     paths = ctx.attrs.tree[DocTreeInfo].files.keys()
     why = _guard_findings(paths, ctx.attrs.covered)
+    if not why and ctx.attrs.mopm:
+        why = _mopm_findings(ctx.attrs.mopm, ctx.attrs.first_mopm_with_overlay, ctx.attrs.excluded)
     if why:
         fail("{}: {}".format(ctx.label, why))
     out = ctx.actions.write(ctx.label.name + ".txt", "README e2e targets: {}\n".format(" ".join(sorted(ctx.attrs.covered))))
@@ -190,6 +192,9 @@ _readme_e2e_complete = rule(
     doc = "Fails analysis when a package with `src/<name>/mopm.toml` (read from `tree`, the cell's root doc_tree, which holds every file) is not in `covered`, or `covered` names one without. `targets` are the README e2e targets of `covered`: analysed, never built, so a name with no target is an analysis error too.",
     attrs = {
         "covered": attrs.list(attrs.string()),
+        "excluded": attrs.list(attrs.string(), default = [], doc = "The patterns of EXCLUDED (tools/build/ci/rules.bzl)."),
+        "first_mopm_with_overlay": attrs.option(attrs.string(), default = None, doc = "The label of the first mopm that has `--overlay`, or none while no release has it."),
+        "mopm": attrs.string(default = "", doc = "The mopm the release's e2e installs with (MOPM in release/readme_e2e/packages.bzl). When set, the row of EXCLUDED for the e2e must agree with it (guard.bzl, mopm_findings)."),
         "targets": attrs.list(attrs.dep(), default = []),
         "tree": attrs.dep(providers = [DocTreeInfo]),
     },

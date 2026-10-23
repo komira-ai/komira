@@ -13,7 +13,8 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms/limits:limits.bzl", "limits")
 load("@komira//tools/build/readme_e2e:defs.bzl", "readme_e2e_complete")
 load("@komira//tools/build/selftest:defs.bzl", "graph_check")
-load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES")
+load("@komira//tools/build/ci:rules.bzl", "EXCLUDED")
+load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES", README_E2E_MOPM = "MOPM", README_E2E_FIRST_MOPM_WITH_OVERLAY = "FIRST_MOPM_WITH_OVERLAY")
 load("//tests:python_closure_allowlist.bzl", "PYTHON_CEILING", "PYTHON_SURFACE")
 load("//tests:surface_capability_matrix.bzl", "CAPABILITIES", "MATRIX", "NOT_CAPABILITIES", "SURFACES")
 
@@ -127,6 +128,9 @@ no_endpoint(
 [readme_e2e_complete(
     name = "readme_e2e_complete",
     covered = sorted(README_E2E_PACKAGES.keys()),
+    excluded = [p for p, _ in EXCLUDED],
+    first_mopm_with_overlay = README_E2E_FIRST_MOPM_WITH_OVERLAY,
+    mopm = README_E2E_MOPM,
     targets = ["//release/readme_e2e/verify:" + name for name in sorted(README_E2E_PACKAGES.keys())],
     tree = ":doc_tree",
 ) for _ in [1] if docs_checked()]

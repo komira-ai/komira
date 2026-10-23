@@ -59,6 +59,24 @@ then: the `install` phase fails, quotes what mopm said and names the option, so
 `--overlay` (bump the pins with `buildrules mojo sync`). That is the whole switch.
 Until then, the pull request check does not build those targets
 (`EXCLUDED` in [`ci/rules.bzl`](../ci/rules.bzl)); remove that row when the pin moves.
+The flip is one change and an enforced one: `FIRST_MOPM_WITH_OVERLAY` in `packages.bzl`
+names the first mopm that has `--overlay` (`None` until one does), and
+`//:readme_e2e_complete` fails analysis while the row is present and `MOPM` is that
+release or later, and while the row is absent and `MOPM` is older (or the constant is
+`None`). The comparison is [`mopm_findings`](guard.bzl); its cases are in
+[`cases.bxl`](cases.bxl).
+
+### Members the plan marks `skip`
+
+A plan member's action is `upload` (its bytes are in the set), `skip` (the registry
+already holds identical bytes, so the set does not carry them) or `refuse`. `verify`
+refuses a `skip` member loudly (phase `staged`: the member is `skip`, not `upload`, so
+its bytes are not in the set) rather than testing something else. Under komira's version
+scheme every release bumps every package's version together, so every member is an
+`upload` and `skip` cannot occur. **If komira ever publishes only the packages that
+changed, this policy must be revisited:** a `skip` member's README examples would then
+need its published bytes (fetched from the registry or carried in the set), and `verify`
+would have to install and test them. The scenario `skipped_member` holds today's behaviour.
 
 What is proven today, with the real compiler and the real packages, is everything but
 mopm's resolution: [`tests//functional/readme_e2e:komira_hash`](../tests/functional/readme_e2e/BUCK)
@@ -124,13 +142,14 @@ line and what was and was not written.
 | `compile_error` | an example that does not compile fails the phase `compile`, naming its README line; the one before it passed; no marker |
 | `run_error` | an example that fails when run fails the phase `run`, naming its line; not `compile` |
 | `missing_package` | a package missing from the staged set fails `staged` and installs nothing |
-| `missing_file` | a member whose file is not in the set fails `install` |
+| `import_outside_closure` | an example that imports a module the installed closure lacks fails `compile` with the compiler's message naming the module, although a module of that name sits in the staged set and the inputs: only the installed copy is on the path |
+| `missing_file` | a member whose file is in the plan and not in the set (a lock made from the plan names it) fails `install` with verify's own message, before anything is unpacked |
 | `tampered_file` | a file that is not the one a lock pins (lock from the plan's hashes) is refused before it is unpacked |
 | `changed_file` | a file changed after staging (lock from the file) is not a file of the plan: refused |
 | `old_mopm`, `old_mopm_usage` | a mopm without `--overlay` (unknown option; the pinned release's usage text) fails `install` loudly, quoting mopm and naming `--overlay`; no marker |
 | `wrong_compiler` | a package built for another Mojo than the release's fails `install` |
 | `wrong_version` | a release version the set does not hold fails `staged` |
-| `skipped_member` | a `skip` member (its bytes are not in the set) fails `staged` |
+| `skipped_member` | a `skip` member (its bytes are not in the set) fails `staged` (policy: "Members the plan marks `skip`") |
 | `no_example` | a README with no example fails `readme` (it would test nothing) |
 | `refused_readme`, `relative_link` | a README the examples tool refuses, and one with a relative link, fail `readme` naming the line |
 | `assemble_missing_dependency`, `assemble_cycle`, `assemble_wrong_package`, `assemble_link` | the set is not written for a member that needs a package the set lacks, for a cycle, for a file that holds another package, for a package whose payload is a link |
