@@ -34,10 +34,10 @@
 
 [external_cell_buildrules]
   git_origin = https://github.com/komira-ai/buildrules.git
-  # The commit of the buildrules release v0.0.23 (which pins mopm 0.0.20). A bump is one change: this line, then
+  # The commit of the buildrules release v0.0.25 (which pins mopm 0.0.25). A bump is one change: this line, then
   # `buildrules mojo sync` (the pins in the directory `[cells] toolchains` names, and each package's
   # buildrules.mojo.lock.bzl) when the release pins another mopm.
-  commit_hash = b26a8050a5b54e9b753fe33b5f64da204dbc2450
+  commit_hash = e230b4c45eea9533ecafabc61d4a604a90bafd13
 
 [buildfile]
   name = BUCK

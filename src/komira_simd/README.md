@@ -88,3 +88,24 @@ var bits = Span(bitmap)
 assert_equal(pack_validity_from_null_flags(Span(is_null), bits), 2)
 assert_equal(bitmap[0], UInt8(0b0000_1101))  # rows 0, 2 and 3 are present
 ```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_simd`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_simd/`, its tests are `tests/`. The files that are not
+sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, where the library and its tests are |
+| `mopm.lock` | what `mopm lock` writes (with no registry reachable); the package has no dependencies, so it pins the toolchain only |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a source,
+a test, `mopm.toml`, `mopm.lock` or `mopm-toolchain.toml`, run `buildrules mojo sync`, commit what it
+writes, and build `komira//src/komira_simd:lib` on the farm.
+
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
+(`mojo-komira_simd-0.1.0-mojo1.0.0_0.conda`), which therefore exists only once the tests have passed.
+Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that file, not a build action.
