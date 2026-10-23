@@ -3,7 +3,7 @@
 # anything.
 load("@komira//tools/build/coverage:census.bzl", "coverage_census")
 load("@komira//tools/build/coverage:defs.bzl", "coverage_ci_cases")
-load("@komira//tools/build/lint:doc_tree.bzl", "doc_tree")
+load("@komira//tools/build/lint:doc_tree.bzl", "doc_tree", "docs_checked")
 load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "public_boundary", "retired_names", "shell_lint", "src_layout", "target_suite", "workflow_lint")
 load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
 load("@komira//tools/build/lint:surface_capability_matrix.bzl", "surface_capability_matrix")
@@ -11,7 +11,9 @@ load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms/limits:limits.bzl", "limits")
+load("@komira//tools/build/readme_e2e:defs.bzl", "readme_e2e_complete")
 load("@komira//tools/build/selftest:defs.bzl", "graph_check")
+load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES")
 load("//tests:python_closure_allowlist.bzl", "PYTHON_CEILING", "PYTHON_SURFACE")
 load("//tests:surface_capability_matrix.bzl", "CAPABILITIES", "MATRIX", "NOT_CAPABILITIES", "SURFACES")
 
@@ -116,6 +118,18 @@ no_endpoint(
     gitignore = ".gitignore",
     srcs = [".buckconfig.local.example"] + WORKFLOWS + ACTIONS,
 )
+
+# The README e2e covers every package moved to mopm (tools/build/readme_e2e/README.md):
+# a `src/<name>/mopm.toml` with no target in //release/readme_e2e/verify fails this
+# target's analysis, naming the package, and so does a target for a package that has
+# none. The paths are those of the cell's root doc_tree, which holds every file.
+# Analysed and never built: the e2e targets it names are not built here.
+[readme_e2e_complete(
+    name = "readme_e2e_complete",
+    covered = sorted(README_E2E_PACKAGES.keys()),
+    targets = ["//release/readme_e2e/verify:" + name for name in sorted(README_E2E_PACKAGES.keys())],
+    tree = ":doc_tree",
+) for _ in [1] if docs_checked()]
 
 # The layout of src/ (tools/build/lint/defs.bzl, src_layout): src/<name> holds
 # what komira ships; a package that exists only to test others is
