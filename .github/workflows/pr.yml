@@ -156,6 +156,13 @@ jobs:
         with:
           args: bxl komira//tools/build/ci/cases.bxl:run
           assert-remote: ${{ steps.assert.outputs.path }}
+      # The README e2e's completeness guard (//:readme_e2e_complete, in the list above)
+      # tells a moved package with no e2e target from one with; these are its cases.
+      - name: the README e2e guard cases
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: bxl komira//tools/build/readme_e2e/cases.bxl:run
+          assert-remote: ${{ steps.assert.outputs.path }}
       # The standalone tests of the list (the tests cell is built, never run,
       # as `./buck2 build tests//functional/...` builds it). The step exists
       # when the list holds a target that is not of that cell.
