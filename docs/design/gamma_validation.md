@@ -508,7 +508,7 @@ check (PROPOSED).
 `komira_validation_run` defines the label `kci-run-id`, legal as both an AWS
 tag and a GCP label, and `kci_cloud` writes it on resources created in a
 scope that carries a validation run id (EXISTS:
-`src/komira_validation_run/validation_run_tag.mojo`,
+`src/komira_validation_run/src/komira_validation_run/validation_run_tag.mojo`,
 `src/kci_cloud/adapter.mojo`). **No kci verb sets a scope's validation run id
 yet**, so nothing real is stamped. And `kci_cloud` stamps only the objects
 `kci_cloud` itself creates: a resource that a validation program creates
