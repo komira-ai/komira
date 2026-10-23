@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_kafka_server/wire/produce_fetch.mojo — Produce / Fetch / ListOffsets codecs
+# src/komira_kafka_server/src/komira_kafka_server/wire/produce_fetch.mojo — Produce / Fetch / ListOffsets codecs
 # =============================================================================
 #
 # The DATA-path request/response message schemas on top of the wire

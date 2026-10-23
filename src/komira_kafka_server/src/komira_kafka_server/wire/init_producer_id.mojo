@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_kafka_server/wire/init_producer_id.mojo — Kafka InitProducerId (api_key 22)
+# src/komira_kafka_server/src/komira_kafka_server/wire/init_producer_id.mojo — Kafka InitProducerId (api_key 22)
 # =============================================================================
 #
 # The idempotent producer. InitProducerId is the RPC a producer with

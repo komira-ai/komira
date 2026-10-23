@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_kafka_server/wire/messages.mojo — Kafka request header + ApiVersions +
+# src/komira_kafka_server/src/komira_kafka_server/wire/messages.mojo — Kafka request header + ApiVersions +
 #                                    Metadata message codec
 # =============================================================================
 #
