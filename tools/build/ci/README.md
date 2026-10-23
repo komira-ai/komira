@@ -35,6 +35,8 @@ spell the `--` and the option that take the lines that follow.
 | a coverage hold taken out of a `coverage_held`, or a marker deleted while its package stays | fails: `BROKEN`; a hold is never dropped |
 | a query Buck2 cannot answer | fails with Buck2's own error |
 
+The targets the aggregate leaves out on purpose (`rules.bzl` `EXCLUDED`) are dropped from every answer, so a change to a file one of them owns never selects it; an answer left empty by that is `komira//ci:pr`.
+
 The reason for a widening and the warnings go to the log. The rows are
 data in `rules.bzl` (a BXL script cannot read a text file), and `cases.bxl`
 holds them to the paths that must always widen. The mapping itself is

@@ -127,6 +127,10 @@ mojo_library(
         # and the full annotations file, every exit code, --info-package
         # (information, notices, a gate passing in enforce mode)
         "tests/test_cli.mojo",
+        # a mojo_package's per-test reports (repository paths, the tests/ source of
+        # each test in them): summed across tests, library sources only, the package's
+        # hold read against those numbers, tests counted only with --include-tests
+        "tests/test_package_reports.mojo",
     ],
     test_data = {
         "tests/test_lcov.mojo": ["tests/fixtures/basic.info"],

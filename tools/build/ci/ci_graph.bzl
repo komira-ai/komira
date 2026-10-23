@@ -48,6 +48,15 @@ def make_graph(ctx, scope, excluded):
 
     return struct(exists = exists, owners = owners, package_targets = package_targets, including = including, rdeps = rdeps)
 
+def without_left_out(ctx, targets, left_out):
+    """`targets` (labels) without those the patterns of `left_out` match: the
+    selector leaves out what the aggregate leaves out (rules.bzl EXCLUDED), so a
+    change to a file an excluded target owns never selects it."""
+    if not left_out or not targets:
+        return list(targets)
+    gone = {str(t.label): True for t in ctx.uquery().eval(" + ".join(["(" + p + ")" for p in left_out]))}
+    return [t for t in targets if t not in gone]
+
 def check_nodes(ctx, scope, excluded, left_out = []):
     """label -> configured node of every check in `scope` (cquery: a target
     incompatible with the host platform is not there, as a build pattern
