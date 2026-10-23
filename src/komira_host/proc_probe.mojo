@@ -115,13 +115,15 @@ def _read_small_file_to_string(var path: String) -> String:
         var n_int = Int(n_read)
         if n_int > 0 and buf[n_int - 1] == UInt8(_NEWLINE):
             n_int -= 1
-        var s = String("")
-        var i = 0
-        while i < n_int:
-            s += chr(Int(buf[i]))
-            i += 1
+        # Collect the BYTES and decode once: `chr` takes a code point, so
+        # `s += chr(Int(buf[i]))` re-encodes every byte >= 0x80 as two bytes
+        # (a non-ASCII cgroup path then misses its `memory.max`).
+        var bytes = List[UInt8](capacity=n_int)
+        for i in range(n_int):
+            bytes.append(buf[i])
         buf.free()
-        return s
+        var s = String(StringSlice(unsafe_from_utf8=Span[UInt8](bytes)))
+        return s^
     else:
         # Unreachable on macOS (we only call from the Linux arm). Return
         # empty so a misrouted caller fails-soft.
@@ -251,9 +253,18 @@ def _cgroup_v2_self_rel_path() -> String:
 
     Format (unified hierarchy): a single line `0::/<path>`. A hybrid
     (v1+v2) file has one `0::` line among several controller lines; we
-    scan for `0::` and take bytes up to the next newline.
+    scan for `0::` and take bytes up to the next newline
+    (`_cgroup_v2_rel_path_of`).
     """
-    var contents = _read_small_file_to_string(String("/proc/self/cgroup"))
+    return _cgroup_v2_rel_path_of(
+        _read_small_file_to_string(String("/proc/self/cgroup"))
+    )
+
+
+def _cgroup_v2_rel_path_of(contents: String) -> String:
+    """Return the bytes after the first `0::` in `contents` up to the next
+    '\\n' or '\\r', or "" if there is no `0::`. The path is copied as a byte
+    slice: a cgroup name may hold bytes >= 0x80."""
     var n = contents.byte_length()
     if n == 0:
         return String("")
@@ -261,15 +272,16 @@ def _cgroup_v2_self_rel_path() -> String:
     var pos = _find_substring_bytes(bs, "0::")
     if pos < 0:
         return String("")
-    var i = pos + 3  # len("0::")
-    var out = String("")
+    var start = pos + 3  # len("0::")
+    var i = start
     while i < n:
         var c = Int(bs[i])
         if c == _NEWLINE or c == _CR:
             break
-        out += chr(c)
         i += 1
-    return out^
+    # The slice starts just after ':' and ends at '\n', '\r' or the end, so it
+    # never splits a UTF-8 sequence.
+    return String(contents[byte=start:i])
 
 
 def _parent_cgroup_path(p: String) -> String:
@@ -287,12 +299,8 @@ def _parent_cgroup_path(p: String) -> String:
         i += 1
     if last_slash <= 0:
         return String("/")
-    var out = String("")
-    var j = 0
-    while j < last_slash:
-        out += chr(Int(bs[j]))
-        j += 1
-    return out^
+    # A byte slice up to the '/': a segment may hold bytes >= 0x80.
+    return String(p[byte=0:last_slash])
 
 
 def _linux_read_cgroup_v2_mem_max_bytes() -> Int:
