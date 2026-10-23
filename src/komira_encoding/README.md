@@ -116,6 +116,7 @@ on macOS), and both are in the C library every Mojo program links. The files tha
 | `mopm.toml` | the mopm manifest: name, version, the Mojo version, where the library and its tests are |
 | `mopm.lock` | what `mopm lock` writes (with no registry reachable); the package has no dependencies, so it pins the toolchain only |
 | `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `coverage_floor.txt` | `lines NN.NN`: the line coverage `:coverage` measures, exactly; `:coverage_floor` fails when it falls below and when it rises above, until the figure is changed |
 | `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above; `buildrules mojo check` fails when they are stale |
 
 `:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a source,

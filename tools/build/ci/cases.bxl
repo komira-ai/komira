@@ -268,7 +268,7 @@ def _real_cases(ctx):
             out.append("real: the EXCLUDED row '{}' must drop all its targets and nothing else".format(pattern))
 
     # the aggregate's side: roots, closure, the guard
-    nodes =check_nodes(ctx, _SCOPE, "komira//" + _AGG_PKG + ":")
+    nodes = check_nodes(ctx, _SCOPE, "komira//" + _AGG_PKG + ":")
     got_checks = sorted(nodes.keys())
     want_checks = sorted(["{}:{}".format(_F, n) for n in ["leaf", "mid", "top", "lonely"]])
     if got_checks != want_checks:
