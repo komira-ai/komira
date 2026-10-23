@@ -935,10 +935,13 @@ The repository's branch settings require the check **`pr / check`**.
 [`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml) posts
 the check run `coverage`: the line coverage of the `mojo_library` targets and of
 the `mojo_package` packages the change touches (the latter from their
-`:coverage[reports]`, one kcov report per test; their reports hold no branch
-records, so a `branch` line of their `coverage_held` is kept and not checked),
-and the branch coverage of the libraries whose coverage gate reads
-branch records (`COVERAGE_BRANCH_GATE`), as covcheck's summary and
+`:coverage[reports]`, one kcov report per test), and the branch coverage of
+the libraries whose coverage gate reads branch records
+(`COVERAGE_BRANCH_GATE`) and of the packages with `:coverage[branches]` (one
+lcov file per test, from the compiler's IR; a `branch` line of such a
+package's `coverage_held` is checked against it, and only a package whose
+tests link a native library, which has no branch records, has that line left
+out of what covcheck reads), as covcheck's summary and
 annotations on the lines of the "Files changed" view. It is **informational**: not a required check, its
 conclusion is `neutral` in the policy's census mode, except that a touched
 package under the 99.00% target on a metric it holds (its `coverage_held`: a

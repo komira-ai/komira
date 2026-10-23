@@ -235,13 +235,14 @@ The package's `:lib` is the library file, made only after every test run passed.
 `MojoInfo` they require of a dependency over that same file, and runs and compiles nothing. A dependent therefore
 builds only once the library's tests have passed. With a `readme` it carries the README-example gate of a `mojo_library`
 (`[tests][readme]`, with `[file]`, `[generated]` and `[objects]`; the same `readme_gate`, compiled against `:lib`, so the
-package's tests are not run a second time). It carries no branch coverage gate and no mutation sub-targets. Its
-coverage is the package's own: `:coverage` (line counts per file), `:coverage[reports]` (one kcov report per test, in
-repository paths) and, when `coverage_floor.txt` (`lines NN.NN`) sits beside the BUCK file, `:coverage_floor`, which is
-a minimum: the build fails when the line coverage falls below that figure; above it, it passes and prints a hint to raise
-the floor (the pull request check builds it). `coverage.yml` selects these packages as well as `mojo_library` targets, and feeds their reports to `covcheck`, which
-counts the library's sources only (the tests' own sources are in the reports and left out); a `branch` line of the
-package's `coverage_held` is kept and not checked, since the reports hold no branch records. `conda_package` takes the adopted library as it takes a
+package's tests are not run a second time). It carries no branch coverage gate of a `mojo_library` and no mutation sub-targets. Its
+coverage is the package's own: `:coverage` (line and branch counts per file), `:coverage[reports]` (one kcov report per test, in
+repository paths), `:coverage[branches]` (one lcov file per test, the branch records from the compiler's IR) and, when
+`coverage_floor.txt` (`lines NN.NN`, and `branches NN.NN` when the package has branches) sits beside the BUCK file,
+`:coverage_floor`, which is a minimum: the build fails when the line or the branch coverage falls below its figure; above it, it passes and prints a hint to raise
+the floor (the pull request check builds it). `coverage.yml` selects these packages as well as `mojo_library` targets, and feeds their reports and branch records to `covcheck`, which
+counts the library's sources only, for lines and for branches (the tests' own sources are in the reports and left out); a `branch` line of the
+package's `coverage_held` is checked against those branch records. `conda_package` takes the adopted library as it takes a
 `mojo_library`, so the conda packages of the libraries that depend on it still name it. The mopm package's `.conda` is
 the library's `:conda` (buildrules' `mojo_conda` over `:lib`), so it too exists only after the tests passed.
 
