@@ -181,7 +181,7 @@ that are not sources:
 | `mopm.toml` | the mopm manifest: name, version, the Mojo version, where the library and its tests are |
 | `mopm.lock` | what `mopm lock` writes (with no registry reachable); the package has no dependencies, so it pins the toolchain only |
 | `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
-| `coverage_floor.txt` | `lines NN.NN`: the line coverage `:coverage` measures, exactly; `:coverage_floor` fails when it falls below and when it rises above, until the figure is changed |
+| `coverage_floor.txt` | `lines NN.NN`: the least line coverage `:coverage` may measure; `:coverage_floor` fails when it falls below, and above it passes and prints a hint to raise the figure |
 | `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above; `buildrules mojo check` fails when they are stale |
 
 `:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a source,
