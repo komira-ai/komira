@@ -19,8 +19,8 @@
 # this file for the mutants tried).
 
 load(":affected.bzl", "AFFECTED", "EMPTY", "VACUOUS", "WIDENED", "held_refusals", "is_held_file", "is_inert", "parse_held_lines", "pattern_matches", "select", "widen_reason")
-load(":rules.bzl", "INERT", "WIDEN")
-load(":ci_graph.bzl", "check_nodes", "closure", "findings", "make_graph", "python_findings", "python_nodes", "render", "roots", "sdk_own_deps")
+load(":rules.bzl", "EXCLUDED", "INERT", "WIDEN")
+load(":ci_graph.bzl", "check_nodes", "closure", "findings", "make_graph", "python_findings", "python_nodes", "render", "roots", "sdk_own_deps", "without_left_out")
 
 # ---- the table graph ---------------------------------------------------
 #
@@ -247,8 +247,28 @@ def _real_cases(ctx):
     if v.kind != VACUOUS:
         out.append("real: an inert unowned file: kind {}, wanted {}".format(v.kind, VACUOUS))
 
+    # what the aggregate leaves out (rules.bzl EXCLUDED) is never selected: a change to
+    # lonely.txt reaches `lonely` and `lonely_src`; with a row naming `lonely` only the source stays
+    v = select(_FIXTURE_RULES, [dir + "lonely.txt"], g, _AGG_PKG)
+    row = [_F + ":lonely"]
+    kept = without_left_out(ctx, v.targets, row)
+    if _F + ":lonely" not in v.targets or kept != [t for t in v.targets if t != _F + ":lonely"] or _F + ":lonely_src" not in kept:
+        out.append("real: an EXCLUDED row naming `lonely` must drop it from the selection and keep `lonely_src`: selected {}, kept {}".format(v.targets, kept))
+    if without_left_out(ctx, v.targets, []) != v.targets:
+        out.append("real: no EXCLUDED row must leave the selection as it is")
+    if without_left_out(ctx, v.targets, [_F + ":"]) != []:
+        out.append("real: a package pattern in EXCLUDED must drop every target of the package")
+
+    # each shipped row names real targets, and the filter drops exactly those
+    for pattern, _ in EXCLUDED:
+        named = [str(t.label) for t in ctx.uquery().eval(pattern)]
+        if not named:
+            out.append("real: the EXCLUDED row '{}' names no target".format(pattern))
+        elif without_left_out(ctx, named + ["komira//ci:pr"], [pattern]) != ["komira//ci:pr"]:
+            out.append("real: the EXCLUDED row '{}' must drop all its targets and nothing else".format(pattern))
+
     # the aggregate's side: roots, closure, the guard
-    nodes = check_nodes(ctx, _SCOPE, "komira//" + _AGG_PKG + ":")
+    nodes =check_nodes(ctx, _SCOPE, "komira//" + _AGG_PKG + ":")
     got_checks = sorted(nodes.keys())
     want_checks = sorted(["{}:{}".format(_F, n) for n in ["leaf", "mid", "top", "lonely"]])
     if got_checks != want_checks:
