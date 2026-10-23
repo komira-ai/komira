@@ -83,7 +83,7 @@ struct _Counts(Copyable, ImplicitlyCopyable, Movable):
 def _describe(t: ZoneOffset) -> String:
     return (
         t.abbreviation + " (utoff " + String(t.utc_offset) + ", isdst "
-        + String(Int(t.is_dst)) + ")"
+        + ("1" if t.is_dst else "0") + ")"
     )
 
 
