@@ -24,6 +24,7 @@ FIRST_MOPM_WITH_OVERLAY = None
 
 PACKAGES = {
     "komira_anomaly": "0.1.0",
+    "komira_atomic_alias": "0.1.0",
     "komira_content_line": "0.1.0",
     "komira_datetime": "0.1.0",
     "komira_encoding": "0.1.0",

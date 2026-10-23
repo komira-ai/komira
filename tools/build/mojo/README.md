@@ -238,8 +238,8 @@ builds only once the library's tests have passed. With a `readme` it carries the
 package's tests are not run a second time). It carries no branch coverage gate and no mutation sub-targets. Its
 coverage is the package's own: `:coverage` (line counts per file), `:coverage[reports]` (one kcov report per test, in
 repository paths) and, when `coverage_floor.txt` (`lines NN.NN`) sits beside the BUCK file, `:coverage_floor`, which is
-green only while the line coverage is exactly that figure (a fall and a rise both fail; the pull request check builds
-it). `coverage.yml` selects these packages as well as `mojo_library` targets, and feeds their reports to `covcheck`, which
+a minimum: the build fails when the line coverage falls below that figure; above it, it passes and prints a hint to raise
+the floor (the pull request check builds it). `coverage.yml` selects these packages as well as `mojo_library` targets, and feeds their reports to `covcheck`, which
 counts the library's sources only (the tests' own sources are in the reports and left out); a `branch` line of the
 package's `coverage_held` is kept and not checked, since the reports hold no branch records. `conda_package` takes the adopted library as it takes a
 `mojo_library`, so the conda packages of the libraries that depend on it still name it. The mopm package's `.conda` is
