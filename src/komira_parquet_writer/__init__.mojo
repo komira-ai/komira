@@ -132,8 +132,6 @@ from .writer_multi_batch import (
     encode_two_to_buffer,
 )
 from .writer_bloom import (
-    BloomFilterWrite,
-    append_bloom_filter_to_buffer,
     serialize_bloom_filter,
     serialize_bloom_filter_header,
 )
