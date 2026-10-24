@@ -63,17 +63,16 @@ def parse_keychain_ref(secret_ref: String) raises -> KeychainRef:
             slash = i
             break
 
+    # The split is at an ASCII '/', so both halves are UTF-8 boundaries and a
+    # non-ASCII service or account is kept byte for byte.
     var service = String("")
     var account = String("")
     if slash < 0:
         # Service-only ref.
-        for i in range(n):
-            service += chr(Int(sb[i]))
+        service = String(secret_ref)
     else:
-        for i in range(slash):
-            service += chr(Int(sb[i]))
-        for i in range(slash + 1, n):
-            account += chr(Int(sb[i]))
+        service = String(secret_ref[byte=0:slash])
+        account = String(secret_ref[byte=slash + 1 : n])
 
     if len(service.as_bytes()) == 0:
         raise Error(

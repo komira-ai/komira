@@ -241,6 +241,23 @@ def test_parse_account_with_slash() raises:
     assert_equal(p.account, String("a/c/c/t"), "account keeps later slashes")
 
 
+def test_parse_keeps_non_ascii_names() raises:
+    """A non-ASCII service or account reaches the backend unchanged (one byte
+    is not one character)."""
+    var p = parse_keychain_ref(String("café/àccount"))
+    assert_equal(p.service, String("café"), "non-ASCII service")
+    assert_equal(p.account, String("àccount"), "non-ASCII account")
+    var only = parse_keychain_ref(String("naïve"))
+    assert_equal(only.service, String("naïve"), "non-ASCII service-only ref")
+    var b = StaticKeychainBackend()
+    b.put(String("café"), String("àccount"), String("v"))
+    var store = KeychainSecretStore[StaticKeychainBackend](b^)
+    var sv = store.resolve(String("café/àccount"))
+    assert_equal(sv.len(), 1, "resolved through the non-ASCII names")
+    _ = sv^
+    _ = store^
+
+
 def test_parse_empty_service_raises() raises:
     """A leading '/' (empty service) RAISES."""
     var raised = False
@@ -377,6 +394,7 @@ def main() raises:
     test_parse_two_part_ref()
     test_parse_service_only_ref()
     test_parse_account_with_slash()
+    test_parse_keeps_non_ascii_names()
     test_parse_empty_service_raises()
     test_build_security_argv_two_part()
     test_build_security_argv_service_only()
