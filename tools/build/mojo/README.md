@@ -522,7 +522,8 @@ mojo_test(
   directories the runner makes for this run inside the action's working
   directory, so no two runs share them, and they are removed afterwards.
 - **Finding data from the executable.**
-  [`komira//tools/build/mojo/runtime_paths:komira_runtime_paths`](runtime_paths/__init__.mojo)
+  [`komira//src/komira_runtime_paths:komira_runtime_paths`](../../../src/komira_runtime_paths/src/komira_runtime_paths/__init__.mojo)
+  (the old label `komira//tools/build/mojo/runtime_paths:komira_runtime_paths` is an alias of it)
   gives `executable_path()`, `install_root()` (the parent of the binary's
   directory), `share_dir()`, `data_path(rel)`, `read_data(rel)` and
   `test_tmpdir()` (which raises rather than fall back to `/tmp`). A bundle

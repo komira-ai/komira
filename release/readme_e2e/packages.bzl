@@ -37,6 +37,7 @@ PACKAGES = {
     "komira_protobuf": "0.1.0",
     "komira_retry": "0.1.0",
     "komira_rowcell": "0.1.0",
+    "komira_runtime_paths": "0.1.0",
     "komira_scalar_arithmetic": "0.1.0",
     "komira_simd": "0.1.0",
     "komira_test_verdict": "0.1.0",

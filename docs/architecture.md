@@ -207,6 +207,7 @@ runs a whole plan yet ([Layers still to come](#layers-still-to-come)).
 
 | module | what it is |
 |---|---|
+| [`komira_runtime_paths`](../src/komira_runtime_paths/) | where a running program finds its files, from its own executable path: `install_root`, `share_dir`, `data_path`, `read_data`, and `test_tmpdir` for a test's private directory. It has no dependencies; `komira_resources` is built on it. |
 | [`komira_resources`](../src/komira_resources/) | the files a program reads at run time: `read_resource` and `resource_path`. |
 | [`komira_snapshotter`](../src/komira_snapshotter/) | the provider-agnostic change-stream seam: one trait every change-stream provider conforms to, so a snapshotter's apply, write, commit and checkpoint half is written once. It holds no provider client code. |
 | [`komira_retry`](../src/komira_retry/) | generic retry: when to retry and how long to wait, never which failures. A pure `RetryPolicy`, a `RetryLoop` over injected clock, sleeper and random-source seams, and an optional retry budget; classifying a failure belongs to the client library that knows the protocol. |
