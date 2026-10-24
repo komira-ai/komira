@@ -16,10 +16,11 @@
 # returning an empty value.
 #
 # The handle is `{account}/{variable_id}` (the variable id is a slash-delimited
-# policy path, so the split is on the FIRST '/'), or
-# `{appliance_host}|{account}/{variable_id}` to name the appliance in the handle.
-# A handle that names a host makes the store send the access token to that host:
-# accept such handles only from a source you trust.
+# policy path, so the split is on the FIRST '/'). The appliance is fixed when the
+# store is built; a handle never names a host. Handles often come from
+# configuration other people write, and a handle that chose the host would choose
+# where the access token is sent, so a handle that names a host (it holds `|`) is
+# refused before anything is sent, and the refusal does not quote it.
 #
 # The connector factory is a non-capturing `def () thin -> C`; production binds
 # a TLS connector factory and a test binds a `ScriptedConnector` factory.
@@ -69,46 +70,33 @@ struct ConjurSecretRef(Copyable, Movable, Deinitable):
     var account: String
     var variable_id: String
 
-    # Host is OPTIONAL in the ref — when absent the store uses the
-    # appliance host configured at construction. An empty host means "use the
-    # configured appliance host".
-    var appliance_host: String
-
 
 def parse_conjur_ref(secret_ref: String) raises -> ConjurSecretRef:
-    """Parse an opaque Conjur `secret_ref` into its parts (two accepted forms).
-
-    Forms:
-
-      * `{account}/{variable_id}` — the common case; the appliance host comes
-        from the store's construction-time config. e.g.
-        `myorg/app/db/password` → account=`myorg`,
-        variable_id=`app/db/password`.
-      * `{appliance_host}|{account}/{variable_id}` — a fully-qualified ref that
-        also names the appliance host (the `|` separates the host from the
-        account/id), for multi-appliance deployments.
+    """Parse an opaque Conjur `secret_ref`, `{account}/{variable_id}`, into its
+    parts. The appliance host comes from the store's construction-time config,
+    never from the handle: e.g. `myorg/app/db/password` gives account `myorg`
+    and variable_id `app/db/password`.
 
     The variable_id may contain `/` (Conjur policy paths are slash-delimited),
-    so the account split is on the FIRST `/` AFTER any host prefix. A malformed
-    ref (no `/`, or an empty account/variable) RAISES — fail fast and loud, never
-    a silent mis-read of the wrong variable. Pure — no network."""
-    var rest = secret_ref
-    var host = String("")
-    # Optional `{host}|` prefix.
-    var bar = _index_of(rest, ord("|"))
-    if bar >= 0:
-        host = _slice(rest, 0, bar)
-        rest = _slice(rest, bar + 1, len(rest.as_bytes()))
+    so the account split is on the FIRST `/`. A handle that names a host (it
+    holds `|`, the old `{host}|{account}/{variable_id}` form) RAISES without
+    quoting the handle. A malformed handle (no `/`, or an empty account or
+    variable) RAISES: fail fast and loud, never a silent mis-read of the wrong
+    variable. Pure: no network."""
+    var rest = secret_ref.copy()
+    if _index_of(rest, ord("|")) >= 0:
+        raise Error(
+            String("ConjurSecretStore: secret_ref names a host: write")
+            + String(" '{account}/{variable_id}'; the appliance is fixed when the")
+            + String(" store is built")
+        )
     # Split account from variable_id on the FIRST `/`.
     var slash = _index_of(rest, ord("/"))
     if slash <= 0:
         raise Error(
             String("ConjurSecretStore: malformed secret_ref '")
             + secret_ref
-            + String(
-                "' — expected '{account}/{variable_id}' (or"
-                " '{host}|{account}/{variable_id}')"
-            )
+            + String("' — expected '{account}/{variable_id}'")
         )
     var account = _slice(rest, 0, slash)
     var variable_id = _slice(rest, slash + 1, len(rest.as_bytes()))
@@ -118,9 +106,7 @@ def parse_conjur_ref(secret_ref: String) raises -> ConjurSecretRef:
             + secret_ref
             + String("' — empty account or variable id")
         )
-    return ConjurSecretRef(
-        account=account^, variable_id=variable_id^, appliance_host=host^
-    )
+    return ConjurSecretRef(account=account^, variable_id=variable_id^)
 
 
 def read_path_for(account: String, variable_id: String) -> String:
@@ -179,8 +165,8 @@ struct ConjurSecretStore[C: Connector, T: ConjurAuthSource](
     # The Conjur access-token source (moved in). Owns the live authn POST
     # or the canned token (test).
     var _auth: Self.T
-    # The default Conjur appliance host + port (used when the secret_ref does not
-    # carry its own host).
+    # The Conjur appliance host + port every request goes to (fixed at
+    # construction; a handle never names a host).
     var _appliance_host: String
     var _appliance_port: UInt16
 
@@ -192,7 +178,7 @@ struct ConjurSecretStore[C: Connector, T: ConjurAuthSource](
         appliance_port: UInt16 = CONJUR_DEFAULT_PORT,
     ):
         """Construct with the read-connector factory + the (moved-in) auth
-        source + the default appliance host/port."""
+        source + the appliance host/port."""
         self._mk_connector = mk_connector
         self._auth = auth^
         self._appliance_host = appliance_host^
@@ -220,10 +206,9 @@ struct ConjurSecretStore[C: Connector, T: ConjurAuthSource](
         # (`read_path_for` / `build_read_request_headers`) so the auth-header
         # stamping is unit-testable WITHOUT a wire round-trip.
         var path = read_path_for(parsed.account, parsed.variable_id)
-        var host = parsed.appliance_host.copy()
-        if len(host.as_bytes()) == 0:
-            host = self._appliance_host.copy()
-        var url = Url.https(host^, self._appliance_port, path^)
+        var url = Url.https(
+            self._appliance_host.copy(), self._appliance_port, path^
+        )
         # MOVE the token into the header builder (no lingering local copy on this
         # frame): after this, `token` is consumed and the only copy lives on the
         # request's header bytes.

@@ -388,23 +388,6 @@ def test_parse_conjur_ref_splits_account_from_variable() raises:
         String("app/db/password"),
         "variable_id keeps its remaining slash path",
     )
-    assert_equal(r.appliance_host, String(""), "no host in the bare form")
-
-
-def test_parse_conjur_ref_extracts_optional_host() raises:
-    """The `{host}|{account}/{variable_id}` form extracts the appliance host."""
-    var r = parse_conjur_ref(
-        String("conjur.eu.example.com|euorg/app/key")
-    )
-    assert_equal(
-        r.appliance_host,
-        String("conjur.eu.example.com"),
-        "the host prefix is extracted",
-    )
-    assert_equal(r.account, String("euorg"), "account follows the host bar")
-    assert_equal(
-        r.variable_id, String("app/key"), "variable_id is the remainder"
-    )
 
 
 def test_parse_conjur_ref_rejects_no_slash() raises:
@@ -419,7 +402,7 @@ def test_parse_conjur_ref_rejects_no_slash() raises:
 
 
 # =============================================================================
-# More refusals, the status hints, the host-named handle and the token trim.
+# More refusals, the status hints, the host-bearing handle and the token trim.
 # =============================================================================
 def _mk_403_read_connector() -> ScriptedConnector:
     return _scripted_connector_for(
@@ -559,17 +542,38 @@ def test_build_authn_request_headers_holds_no_key() raises:
     assert_false(headers.get(String("Authorization")).__bool__(), "no Authorization header")
 
 
-def test_resolve_through_host_named_handle() raises:
-    """A `host|account/variable` handle resolves too: the host prefix is parsed
-    off and the read still returns the body."""
-    var auth = StaticConjurAuthSource(String(_CANNED_TOKEN))
-    var store = ConjurSecretStore[ScriptedConnector, StaticConjurAuthSource](
-        _mk_ok_read_connector, auth^, String("unused.example")
-    )
-    var sv = store.resolve(String("127.0.0.1|myorg/app/db/password"))
-    assert_equal(sv.len(), len(String(_CANNED_SECRET).as_bytes()), "resolved")
-    _ = sv^
-    _ = store^
+def _no_dial() -> ScriptedConnector:
+    # A connector with nothing to read: if the store dialled it and sent a
+    # request, the error would be a transport error, never "names a host".
+    return ScriptedConnector.with_stream_tls(ScriptedStream.empty())
+
+
+def test_host_bearing_handle_sends_nothing() raises:
+    """A handle that names a host is refused before any connector is dialled,
+    so the access token cannot be sent to that host, and the refusal quotes
+    neither the handle nor the host. The connector factory answers nothing: a
+    store that dialled it would fail with a transport error instead."""
+    var handles = List[String]()
+    handles.append(String("evil.example|myorg/app/db/password"))
+    handles.append(String("127.0.0.1|myorg/app/db/password"))
+    handles.append(String("|myorg/app/db/password"))
+    handles.append(String("myorg/app/db|evil.example"))
+    for i in range(len(handles)):
+        var auth = StaticConjurAuthSource(String(_CANNED_TOKEN))
+        var store = ConjurSecretStore[ScriptedConnector, StaticConjurAuthSource](
+            _no_dial, auth^, String("conjur.example.test")
+        )
+        var msg = String("")
+        try:
+            var sv = store.resolve(handles[i])
+            _ = sv^
+        except e:
+            msg = String(e)
+        assert_true(msg.find(String("names a host")) >= 0, "refused as host-bearing: " + msg)
+        assert_true(msg.find(String("evil.example")) < 0, "host not quoted: " + msg)
+        assert_true(msg.find(String("127.0.0.1")) < 0, "host not quoted: " + msg)
+        assert_true(msg.find(String("myorg")) < 0, "handle not quoted: " + msg)
+        _ = store^
 
 
 def test_parse_conjur_ref_refuses_empty_parts() raises:
@@ -578,8 +582,6 @@ def test_parse_conjur_ref_refuses_empty_parts() raises:
     var refs = List[String]()
     refs.append(String("myorg/"))
     refs.append(String("/app/db"))
-    refs.append(String("host.example|"))
-    refs.append(String("host.example|myorg"))
     refs.append(String(""))
     for i in range(len(refs)):
         var raised = False
@@ -609,7 +611,6 @@ def main() raises:
     test_read_path_for_builds_variable_path()
     test_authn_path_for_builds_authenticate_path()
     test_parse_conjur_ref_splits_account_from_variable()
-    test_parse_conjur_ref_extracts_optional_host()
     test_parse_conjur_ref_rejects_no_slash()
     # refusals, hints, host-named handle, token trim
     test_read_error_has_status_hint_and_no_body_or_token()
@@ -617,6 +618,6 @@ def main() raises:
     test_live_authn_trims_whitespace_around_token()
     test_live_authn_blank_token_raises()
     test_build_authn_request_headers_holds_no_key()
-    test_resolve_through_host_named_handle()
+    test_host_bearing_handle_sends_nothing()
     test_parse_conjur_ref_refuses_empty_parts()
     print("PASS test_conjur_secret_store")

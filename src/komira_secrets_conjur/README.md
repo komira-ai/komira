@@ -17,11 +17,13 @@ status raises with the status and a hint (404 variable missing, 403 role lacks
 an empty body raises rather than yielding an empty value.
 
 A handle is `{account}/{variable_id}` (the variable id is a slash-delimited
-policy path, so the split is on the first `/`), or
-`{appliance_host}|{account}/{variable_id}`. A handle that names a host makes the
-store send the access token to that host, so take such handles only from a
-source you trust. A handle with no `/` or an empty account or variable id
-raises before any request.
+policy path, so the split is on the first `/`). The appliance host and port are
+fixed when the store is built and every request goes there; a handle never
+names a host. Handles often come from configuration other people write, and a
+handle that chose the host would choose where the access token is sent, so a
+handle that names a host (one containing `|`) is refused before any request,
+and the refusal does not quote it. A handle with no `/` or an empty account or
+variable id raises before any request.
 
 The access token comes from a `ConjurAuthSource`. `LiveConjurAuthSource[C]`
 POSTs the API key (as the request body, never a header) to
@@ -89,4 +91,8 @@ def main() raises:
 
     with assert_raises(contains="malformed secret_ref"):
         _ = parse_conjur_ref("no-slash")
+
+    # A handle never names the host the token is sent to.
+    with assert_raises(contains="names a host"):
+        _ = store.resolve("evil.example|myorg/app/db/password")
 ```
