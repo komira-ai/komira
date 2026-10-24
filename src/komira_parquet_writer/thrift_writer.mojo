@@ -450,7 +450,8 @@ struct ThriftCompactWriter(Movable):
             compressed_size: Compressed page body size in bytes.
             num_values: Number of values in the page.
             encoding: Encoding used for values.
-            crc: Optional CRC-32C checksum of the page body.
+            crc: Optional CRC-32 of the stored page body (the standard
+                CRC-32 of gzip and zlib, not CRC-32C), `PageHeader.crc`.
 
         Raises:
             Error: named `ParquetPageSizeOverflow`, when either size field
@@ -514,7 +515,8 @@ struct ThriftCompactWriter(Movable):
             def_levels_byte_length: Byte length of definition levels section.
             rep_levels_byte_length: Byte length of repetition levels section.
             is_compressed: Whether the values section is compressed.
-            crc: Optional CRC-32C checksum.
+            crc: Optional CRC-32 of the stored page body (standard CRC-32,
+                not CRC-32C).
 
         Raises:
             Error: named `ParquetPageSizeOverflow`, when either size field

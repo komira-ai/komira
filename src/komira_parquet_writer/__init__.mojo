@@ -21,7 +21,8 @@ magic, column chunks, footer, footer length, magic (`file_assembly` builds the
 chunk entries and the footer, `encoded_column` is the column-parallel hand-off).
 Several arrays encode as one column chunk without an Arrow concat
 (`writer_multi_batch`), and `writer_multi_batch_stats` folds a column's
-statistics across batches. It opens no file: where the bytes go is the caller's decision. It reads no
+statistics across batches. `writer_advanced` (`AdvancedParquetWriter`) adds row groups, the page index,
+bloom filters (`writer_bloom`) and page CRCs (`page_crc`). It opens no file: where the bytes go is the caller's decision. It reads no
 Parquet file either, and does not depend on the reader (`komira_parquet`);
 its tests do, through `test_deps`, to prove the bytes decode.
 """
@@ -126,4 +127,17 @@ from .writer_multi_batch import (
     encode_two_primitives,
     encode_two_strings,
     encode_two_to_buffer,
+)
+from .writer_bloom import (
+    BloomFilterWrite,
+    append_bloom_filter_to_buffer,
+    serialize_bloom_filter,
+    serialize_bloom_filter_header,
+)
+from .page_crc import page_with_crc
+from .writer_advanced import (
+    AdvancedParquetWriter,
+    RowGroupState,
+    SerializedBloomFilter,
+    WriterConfig,
 )

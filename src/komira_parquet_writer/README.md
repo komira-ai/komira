@@ -140,6 +140,44 @@ assert_equal(Int(file[0]), 0x50)  # PAR1 at both ends
 assert_equal(Int(file[len(file) - 1]), 0x31)
 ```
 
+## Row groups, the page index, bloom filters, page CRCs
+
+`AdvancedParquetWriter` takes one chunk per column per row group
+(`add_column_page_simple`, or `add_column_page` with explicit min and max for
+the ColumnIndex), `flush_row_group` closes a row group, and `close_to_bytes`
+returns the file. A bloom filter (`set_bloom_filter`, a `komira_dynamic_filter`
+`BloomFilter`) is written when `WriterConfig(enable_bloom_filters=True)`. With
+`enable_crc` each data page's header carries the standard CRC-32 of the stored
+body (not CRC-32C), which `komira_parquet`'s reader checks; dictionary chunks
+carry none. The OffsetIndex locates data pages (past a dictionary page), and a
+chunk with no min and max gets an OffsetIndex only.
+
+```mojo
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_parquet_api import ParquetType
+from komira_parquet_writer import (
+    AdvancedParquetWriter,
+    WriterConfig,
+    encode_plain_column,
+    make_schema_elements,
+)
+from std.testing import assert_equal
+
+var names: List[String] = ["id"]
+var types: List[ParquetType] = [ParquetType.INT64]
+var writer = AdvancedParquetWriter.create(
+    make_schema_elements(names^, types^), WriterConfig(enable_crc=True)
+)
+for g in range(2):  # two row groups
+    var vals: List[Int64] = [Int64(g * 10), Int64(g * 10 + 1)]
+    var ids = PrimitiveArray[DType.int64].from_list(vals)
+    writer.add_column_page_simple(encode_plain_column[DType.int64](0, ids, "id"))
+    writer.flush_row_group()
+var file = writer.close_to_bytes()
+assert_equal(Int(file[0]), 0x50)
+assert_equal(writer.total_num_rows, 4)
+```
+
 ## Several arrays as one chunk
 
 A column held as several morsels encodes without an Arrow concat:
