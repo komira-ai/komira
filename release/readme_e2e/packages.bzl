@@ -10,17 +10,16 @@ built says another.
 MOJO = "1.0.0"
 
 # The pinned mopm the e2e installs with. It must have `mopm add --overlay`; one that lacks it fails every
-# target of //release/readme_e2e/verify at its install step, naming the option. Bump it with the pins
-# (`buildrules mojo sync`).
-MOPM = "toolchains//:mopm_0_0_25"
+# target of //release/readme_e2e/verify at its install step, naming the option. It is a pin of
+# buildrules-pins.toml (`buildrules mojo sync`) that no package builds with.
+MOPM = "toolchains//:mopm_0_0_40"
 
 # The first mopm that has `mopm add --overlay`, as a label like MOPM, or None while no release
 # has it. `readme_e2e_complete` (root BUCK) compares it with MOPM: the row of EXCLUDED in
 # tools/build/ci/rules.bzl that leaves //release/readme_e2e/verify out of the pull request check
-# must be present while MOPM is older than this (or this is None), and absent from this on. Making
-# the e2e part of the pull request check is one change: name the release here, bump MOPM to it or
-# later, delete the row.
-FIRST_MOPM_WITH_OVERLAY = None
+# must be present while MOPM is older than this (or this is None), and absent from this on. The
+# row is gone: the e2e is part of the pull request check.
+FIRST_MOPM_WITH_OVERLAY = "toolchains//:mopm_0_0_40"
 
 PACKAGES = {
     "komira_anomaly": "0.1.0",

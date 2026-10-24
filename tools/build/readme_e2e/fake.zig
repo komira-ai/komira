@@ -3,11 +3,17 @@
 //! real package before the pinned mopm has `--overlay` (tools/build/tests,
 //! functional/readme_e2e).
 //!
-//!     fake mopm add NAME@=VERSION --overlay DIR
+//!     fake mopm add NAME@=VERSION --overlay DIR --registry URL
 //!         What `mopm add --overlay` does for a staged set that holds the whole
-//!         closure: reads DIR/plan.json and the packages it names, and writes
-//!         `mopm.lock` (version 1) in the current directory, one entry per
-//!         package of the closure. A package the set lacks is refused.
+//!         closure: reads the registry's configuration (URL must be a loopback
+//!         one, offline.zig), reads DIR/plan.json and the packages it names, and
+//!         writes `mopm.lock` (version 1) in the current directory, one entry per
+//!         package of the closure. A package the set lacks is asked of the
+//!         registry, as the real one does, and the registry's refusal fails the
+//!         command. Both options are required: the e2e names its registry itself.
+//!     fake mopm_swallow add ...
+//!         The same, but a refusal of the registry is ignored: the package is left
+//!         out of the lock and the command exits 0.
 //!     fake mopm_registry add ...
 //!         The same, but the lock holds the sha256 and size the plan gives, as a
 //!         lock made from a registry's index would: the file is not read for them.
@@ -35,6 +41,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const conda = @import("conda.zig");
 const plan_mod = @import("plan.zig");
+const offline = @import("offline.zig");
 
 fn die(comptime fmt: []const u8, args: anytype) noreturn {
     var buf: [2048]u8 = undefined;
@@ -53,19 +60,39 @@ fn buildOf(filename: []const u8, name: []const u8, version: []const u8) []const 
     return filename[head_len .. filename.len - ".conda".len];
 }
 
-const Mode = enum { read_files, plan_hashes, plan_only };
+const Mode = enum { read_files, plan_hashes, plan_only, swallow };
+
+/// What mopm does for a package the overlay lacks: asks the registry for its index. A refusal
+/// (any answer but 200 and 404) is mopm's error, as the real one reports it; `swallow` mode
+/// is a mopm that ignores it. Returns when the refusal was ignored.
+fn askRegistry(a: Allocator, registry: []const u8, name: []const u8, mode: Mode) void {
+    const target = offline.indexTarget(a, name) catch die("mopm: out of memory", .{});
+    const answer = offline.get(a, registry, target) catch |e| die("mopm: cannot read {s}{s}: {s}", .{ registry, target, @errorName(e) });
+    if (answer.status == 404) die("mopm: no package {s} in the overlay or the registry", .{name});
+    if (answer.status == 200) die("mopm: this stand-in has no package {s} to take from the registry", .{name});
+    if (mode == .swallow) return;
+    die("mopm: {s}{s} answered HTTP {d}: {s}", .{ registry, target, answer.status, answer.body });
+}
 
 fn mopmAdd(a: Allocator, args: []const []const u8, mode: Mode) void {
-    const from_plan = mode != .read_files;
-    if (args.len != 4 or !std.mem.eql(u8, args[0], "add") or !std.mem.eql(u8, args[2], "--overlay")) {
-        die("mopm: usage: add NAME@=VERSION --overlay DIR", .{});
+    const from_plan = mode == .plan_hashes or mode == .plan_only;
+    // add NAME@=VERSION --overlay DIR --registry URL: the e2e names an offline registry itself
+    // (offline.zig) and never leaves mopm its default one.
+    if (args.len != 6 or !std.mem.eql(u8, args[0], "add") or !std.mem.eql(u8, args[2], "--overlay") or !std.mem.eql(u8, args[4], "--registry")) {
+        die("mopm: usage: add NAME@=VERSION --overlay DIR --registry URL", .{});
     }
+    const registry = args[5];
+    if (!std.mem.startsWith(u8, registry, "http://127.0.0.1:")) die("mopm: the registry {s} is not a loopback URL: the e2e must be offline", .{registry});
     const at = std.mem.indexOf(u8, args[1], "@=") orelse die("mopm: {s} is not name@=version", .{args[1]});
     const want_name = args[1][0..at];
     const want_version = args[1][at + 2 ..];
     var why: []const u8 = "";
     var staged = std.fs.cwd().openDir(args[3], .{}) catch |e| die("mopm: cannot open the overlay {s}: {s}", .{ args[3], @errorName(e) });
     defer staged.close();
+    // A registry that is not the production one is asked for its configuration, once, for the
+    // channel the lock names (the real mopm does the same).
+    const config = offline.get(a, registry, "/index/config.json") catch |e| die("mopm: cannot read the configuration of {s}: {s}", .{ registry, @errorName(e) });
+    if (config.status != 200) die("mopm: {s}/index/config.json answered HTTP {d}", .{ registry, config.status });
     const plan = plan_mod.parsePlan(a, fileOrDie(a, staged, "plan.json"), &why) catch die("mopm: {s}", .{why});
     const manifest = fileOrDie(a, std.fs.cwd(), "mopm.toml");
     if (std.mem.indexOf(u8, manifest, "[toolchain]") == null) die("mopm: mopm.toml has no [toolchain] mojo", .{});
@@ -77,7 +104,10 @@ fn mopmAdd(a: Allocator, args: []const []const u8, mode: Mode) void {
         var seen = false;
         for (locked.items) |l| seen = seen or std.mem.eql(u8, l.name, name);
         if (seen) continue;
-        const m = plan.member(name) orelse die("mopm: no package {s} in the overlay or the registry", .{name});
+        const m = plan.member(name) orelse {
+            askRegistry(a, registry, name, mode);
+            continue;
+        };
         if (std.mem.eql(u8, name, want_name) and !std.mem.eql(u8, m.version, want_version)) {
             die("mopm: no {s} {s} (the overlay holds {s})", .{ name, want_version, m.version });
         }
@@ -192,6 +222,7 @@ pub fn main() !void {
     if (std.mem.eql(u8, argv[1], "mopm")) return mopmAdd(a, rest, .read_files);
     if (std.mem.eql(u8, argv[1], "mopm_registry")) return mopmAdd(a, rest, .plan_hashes);
     if (std.mem.eql(u8, argv[1], "mopm_plan")) return mopmAdd(a, rest, .plan_only);
+    if (std.mem.eql(u8, argv[1], "mopm_swallow")) return mopmAdd(a, rest, .swallow);
     if (std.mem.eql(u8, argv[1], "mopm_old")) die("mopm: unknown option '--overlay'", .{});
     if (std.mem.eql(u8, argv[1], "mopm_usage")) {
         std.fs.File.stderr().writeAll("usage: mopm lock   [--registry <prod|gamma|beta|url>]\n       mopm update [<package>...] [--registry <prod|gamma|beta|url>]\n       mopm tree\n       mopm sync   [--locked] [--registry <prod|gamma|beta|url>] [--pixi <path>]\n       mopm add    <package>[@<requirement>] [--dev] [--path <dir>] [--registry <prod|gamma|beta|url>]\n") catch {};

@@ -43,26 +43,41 @@ user's resolution from mopm, and does the unpacking itself:
 
 * **`mopm add <package>@=<version> --overlay <staged set>`** resolves the closure
   from the staged set and writes `mopm.lock`. `--overlay` is a read-only local
-  channel that has priority over the registry for the packages it holds; with the
-  default registry and a fully staged closure it needs no network.
+  channel that has priority over the registry for the packages it holds; with a
+  fully staged closure it needs no request for an index, repodata or package.
+  The command also gets **`--registry <a loopback registry of the e2e's own>`**
+  (see "Offline, enforced" below).
 * The e2e reads the lock, checks each locked file against the staged file and the
   plan, and unpacks it into the prefix, the layout `mopm sync` leaves in
   `.mopm/.pixi/envs/default` (`lib/mojo/<name>.mojoc` and `<name>.mopm.json`;
   [`conda.zig`](conda.zig) reads a package the way a client does and refuses
   anything outside the paths mopm writes).
 
-**`--overlay` is a mopm option that the pinned release does not have yet.** A mopm
-without it answers `add ... --overlay` with its usage text. The e2e does not skip
-then: the `install` phase fails, quotes what mopm said and names the option, so
-`./buck2 build komira//release/readme_e2e/verify:all` is red until `MOPM` in
-[`release/readme_e2e/packages.bzl`](../../../release/readme_e2e/packages.bzl) names a mopm release that has
-`--overlay` (bump the pins with `buildrules mojo sync`). That is the whole switch.
-Until then, the pull request check does not build those targets
-(`EXCLUDED` in [`ci/rules.bzl`](../ci/rules.bzl)); remove that row when the pin moves.
-The flip is one change and an enforced one: `FIRST_MOPM_WITH_OVERLAY` in `packages.bzl`
-names the first mopm that has `--overlay` (`None` until one does), and
-`//:readme_e2e_complete` fails analysis while the row is present and `MOPM` is that
-release or later, and while the row is absent and `MOPM` is older (or the constant is
+**Offline, enforced.** With the production registry (mopm's default) and a closure
+the staged set holds entirely, mopm makes no request; with a closure member the set
+lacks it would fetch that member from the network, silently on a machine that has
+one. So `verify` runs mopm with `--registry` set to a loopback server of its own
+([`offline.zig`](offline.zig)) that answers the one thing mopm asks of a registry that
+is not the production one (`GET /index/config.json`, which names the channel the lock
+records) and refuses every other request with HTTP 403 (`the README e2e is offline`),
+remembering it. A package outside the set makes mopm ask for its index, so mopm fails
+with the refusal; and `verify` fails on any remembered refusal (phase `install`,
+naming each `GET <path>`) even when mopm exited 0, so a mopm that ignored the refusal
+cannot pass on a closure it did not take from the set. (An address nothing listens on
+would not do: mopm reads the configuration of a registry that is not the production
+one, so it could not even lock a fully staged closure.) The scenarios
+`closure_member_missing` and `swallowed_refusal` hold both.
+
+**`--overlay` is a mopm option that releases before mopm 0.0.40 do not have.** A
+mopm without it answers `add ... --overlay` with its usage text. The e2e does not skip
+then: the `install` phase fails, quotes what mopm said and names the option.
+`MOPM` in [`release/readme_e2e/packages.bzl`](../../../release/readme_e2e/packages.bzl) names the mopm the e2e
+installs with: a pin of `buildrules-pins.toml` (`buildrules mojo sync`) that no package builds with,
+so a package's own mopm pin does not move with it. Because the targets pass, the pull request check builds them (`//ci:pr` holds
+`verify:all`). The switch is one change and an enforced one: `FIRST_MOPM_WITH_OVERLAY` in
+`packages.bzl` names the first mopm that has `--overlay`, and `//:readme_e2e_complete` fails
+analysis while a row of `EXCLUDED` ([`ci/rules.bzl`](../ci/rules.bzl)) leaves the e2e out and `MOPM` is that
+release or later, and while no such row is there and `MOPM` is older (or the constant is
 `None`). The comparison is [`mopm_findings`](guard.bzl); its cases are in
 [`cases.bxl`](cases.bxl).
 
@@ -78,10 +93,13 @@ changed, this policy must be revisited:** a `skip` member's README examples woul
 need its published bytes (fetched from the registry or carried in the set), and `verify`
 would have to install and test them. The scenario `skipped_member` holds today's behaviour.
 
-What is proven today, with the real compiler and the real packages, is everything but
-mopm's resolution: [`tests//functional/readme_e2e:komira_hash`](../tests/functional/readme_e2e/BUCK)
-runs the pipeline over the real `.conda` of `komira_hash` with a stand-in for `mopm add
---overlay` ([`fake.zig`](fake.zig)) and passes.
+The release's targets run the real mopm, the real compiler and the real packages.
+[`tests//functional/readme_e2e:komira_hash`](../tests/functional/readme_e2e/BUCK) is the
+same pipeline over the real `.conda` of `komira_hash` with the stand-in for `mopm add
+--overlay` ([`fake.zig`](fake.zig)) as mopm. It was the proof of everything but mopm's
+resolution while the pinned mopm lacked `--overlay`; `//release/readme_e2e/verify:komira_hash`
+now covers it, so it stays only as the one target that runs the tool with the stand-in
+and a real compiler together, and can be deleted with `standin_mopm` without losing a check.
 
 ## The staged set
 
@@ -102,12 +120,12 @@ e2e the set it will publish (`staged = <that target>`) and nothing else changes.
 
 ## The release's targets
 
-* [`//release/readme_e2e:staged`](../../../release/readme_e2e/BUCK): the staged set of every package moved to mopm.
-  It builds today, so the pull request check builds it: each package assembles and
-  is the version its entry says.
+* [`//release/readme_e2e:staged`](../../../release/readme_e2e/BUCK): the staged set of every package moved to mopm:
+  each package assembles and is the version its entry says.
 * [`//release/readme_e2e/verify:<package>`](../../../release/readme_e2e/verify/BUCK): one `readme_e2e` per package.
-* **`//release/readme_e2e/verify:all`**: every package. The release workflow builds
-  this one target: `./buck2 build komira//release/readme_e2e/verify:all`. It is green
+* **`//release/readme_e2e/verify:all`**: every package. The pull request check builds
+  it (it is in `//ci:pr`), and so does the release workflow:
+  `./buck2 build komira//release/readme_e2e/verify:all`. It is green
   only when every package of the release passed.
 
 The packages are the list in [`packages.bzl`](../../../release/readme_e2e/packages.bzl), the names of every
@@ -126,8 +144,9 @@ Every one is a build action; the tool (`:readme_e2e`) is built only when they pa
 [`unit_test.zig`](unit_test.zig) (`:unit`) holds the package reader (a package is
 read; a link, a path outside `lib/`, a name twice, a deflated member, a missing or
 truncated payload and garbage are each refused), the plan and lock readers and writers
-(round trip; version, duplicate, action and url refusals), the command line, and the
-source root the compile gets.
+(round trip; version, duplicate, action and url refusals), the command line, the
+source root the compile gets, and the offline registry (it serves its configuration,
+refuses and remembers every other request, and answers for no other host).
 
 [`scenario.zig`](scenario.zig) runs one scenario per target (`:passes`, ...): it builds
 made-up packages ([`fixture.zig`](fixture.zig)), stages them with the real `assemble`,
@@ -146,6 +165,8 @@ line and what was and was not written.
 | `missing_file` | a member whose file is in the plan and not in the set (a lock made from the plan names it) fails `install` with verify's own message, before anything is unpacked |
 | `tampered_file` | a file that is not the one a lock pins (lock from the plan's hashes) is refused before it is unpacked |
 | `changed_file` | a file changed after staging (lock from the file) is not a file of the plan: refused |
+| `closure_member_missing` | a closure member the staged set lacks (a plan with a hole) is asked of the offline registry, which refuses: `install` fails naming the refused `GET /index/...` and mopm's own "HTTP 403"; nothing is unpacked, no marker |
+| `swallowed_refusal` | a mopm that ignores the refusal and exits 0 with a lock that leaves the member out still fails `install`: the registry remembered the request |
 | `old_mopm`, `old_mopm_usage` | a mopm without `--overlay` (unknown option; the pinned release's usage text) fails `install` loudly, quoting mopm and naming `--overlay`; no marker |
 | `wrong_compiler` | a package built for another Mojo than the release's fails `install` |
 | `wrong_version` | a release version the set does not hold fails `staged` |

@@ -62,11 +62,10 @@ AGGREGATE = "komira//ci:pr"
 # The checks `//ci:pr` leaves out on purpose, each a (pattern, reason). Most are Python, and
 # Python serves only the Python SDK and its py_tests (tests/python_closure_allowlist.bzl,
 # PYTHON_SURFACE). The aggregate holds no Python rule; `python_guard.bxl:check` fails when it
-# reaches one. The README e2e's targets (tools/build/readme_e2e/README.md) are not Python: they
-# fail until the pinned mopm has `--overlay`, and the release workflow builds them. A pattern that
-# no longer names a package fails the generator and the guards: delete the row with the package.
+# reaches one. A pattern that no longer names a package fails the generator and the guards: delete
+# the row with the package. (The README e2e's targets, tools/build/readme_e2e/README.md, were
+# a row here while the pinned mopm lacked `--overlay`; they are Python-free and in the check now.)
 EXCLUDED = [
-    ("komira//release/readme_e2e/verify:", "the README e2e of the release: each target installs with `mopm add --overlay`, which the pinned mopm lacks, and fails there; built by the release workflow. Delete this row when the pin names a mopm that has it"),
     ("komira//third_party/python/...", "the pinned CPython and wheels: inputs of Python tests only"),
     ("komira//release/ci/tests:", "py_test of the CI scripts, not of the Python SDK"),
     ("komira//src/tests/e2e/komira_tls_interop_e2e:test_komira_client_vs_cpython_server", "runs a CPython peer, not a test of the Python SDK"),
