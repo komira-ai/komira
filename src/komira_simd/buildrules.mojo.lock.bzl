@@ -52,7 +52,7 @@ GRAPH_JSON = r'''{
         {"path": "src/komira_simd/byte_class/quote_region_mask.mojo", "sha256": "a954030d32e3f9e39ab7149b64470b64dadbc4bbcc171a3c48ad6400e90ffeac"},
         {"path": "src/komira_simd/byte_class/table_lookup.mojo", "sha256": "cdad0f8fd3d75c5db24dd29d1927fb07356d5a00b603d0bb99f0d119ccbbd736"},
         {"path": "src/komira_simd/byte_class/type_cast.mojo", "sha256": "72a923cf823eb449b7094f254be3840b7bed1baba479c8dc388328ee51238fb5"},
-        {"path": "src/komira_simd/compress.mojo", "sha256": "24b86c11fe167787ba977d08e78d443871ad07b63e6177b3b4facd693daa91a3"},
+        {"path": "src/komira_simd/compress.mojo", "sha256": "4a212321b8b19b2014f8f26f9235bef8280bd2ba02844716e6c4651721343091"},
         {"path": "src/komira_simd/fast_copy.mojo", "sha256": "4bf7b06091d855eeb7a34b3dcd17c2f7d7b4580bc67f21072b1ab97825402fdf"},
         {"path": "src/komira_simd/gather.mojo", "sha256": "8a86a2e260b7713e56dd4556372781a561ec379dd4a332d3709a4e9f0762fc5c"},
         {"path": "src/komira_simd/horizontal_add.mojo", "sha256": "21052fac413360347701a0a38a2a8fa3ea9fced0a0397e262c0f261fd2266e8f"},
@@ -60,13 +60,13 @@ GRAPH_JSON = r'''{
         {"path": "src/komira_simd/popcount.mojo", "sha256": "05987bd53849a589c6d3d5e4459bb7193aacc8b7bb8fdc2565bf23b9f23cf25e"},
         {"path": "src/komira_simd/simd_helpers.mojo", "sha256": "a32dbccdc5da0c13798110ad1f5610ba16081a4dbf763237c3bcbb00596d8885"},
         {"path": "src/komira_simd/validity_pack.mojo", "sha256": "3894d17b8fdda34e684b618fe71e568c35faa008fe9d462de177984c20cd1f15"},
-        {"path": "src/komira_simd/width_policy.mojo", "sha256": "924d03894e8549e75c5c7a2eff5603ea3afe06f2f609b49b6cd76584cfe1490a"}
+        {"path": "src/komira_simd/width_policy.mojo", "sha256": "79c23ff2f1326b677889a731a01b92812ffd533ed0c585f4c5cba8750b524986"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["komira_simd.mojoc"],
-      "key": "88572cea8cd2e024a1d8fda1bb242d913e9a7f9fa516ad13016b31b9a8fe95ca"
+      "key": "8d67f2547ad88ed72a1f478ed01a351cc8d8d7ec2a11c3cf4c91f78bf7393dde"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_byte_class_compare_reduce.mojo",
@@ -80,7 +80,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_class_compare_reduce.pass"],
-      "key": "8584d6b8432f998fc916192b68dacef6505969bbb4be65573387b0201ab2a695"
+      "key": "12ac874dd6b1c23ddd8de3fb019a1e1f001bfa5184a418a135117ee5f28abb3f"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_byte_class_iota_prefix_xor.mojo",
@@ -94,7 +94,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_class_iota_prefix_xor.pass"],
-      "key": "dd7b247edcd6cd3e8b3800868f64dff1430a1669d73cdc59550bfc265f9c1e9f"
+      "key": "2f7a564ac707c5b8688956f4831a9bc28496b718d14ed35da9086257fe984cb4"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_byte_class_movemask.mojo",
@@ -108,7 +108,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_class_movemask.pass"],
-      "key": "f5f9f0d148c9f9a85da7904a22de4643da5ff900976d98698f3182ecc89c32c2"
+      "key": "8161b4cd69d5b5c647892e15db41c87b6c870fc627312a10f0f4be5643847a00"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_byte_class_shuffle_compress.mojo",
@@ -122,7 +122,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_class_shuffle_compress.pass"],
-      "key": "bf28ed7394aa12d32b7f79c2a4423436b4b3f904f45ea09f2f5cf4c759f6a645"
+      "key": "e7c51ad002555975a8472519cf09662ae0373d3060aee4dd975fd4c04cdab0dc"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_byte_class_wide_forms.mojo",
@@ -136,7 +136,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_class_wide_forms.pass"],
-      "key": "80fa87d73775dc09f704909f1822ad72a837a4f9d16198d4eb33360874d1b84b"
+      "key": "d9b77f11d925b9637e8fc30eeba1d73909d8708ddb41458ab5137c4d976eedbe"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_byte_equal_simd.mojo",
@@ -150,7 +150,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_equal_simd.pass"],
-      "key": "897668e246e6bdf36c80fb14749dcceafc83b9749a1b977660ea2fedc5f131bc"
+      "key": "18fd15363e8375ed6b8ffc3ba691a3c3187b29667c2b187244aa92639149ce60"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_byte_memmem.mojo",
@@ -164,7 +164,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_memmem.pass"],
-      "key": "9df0fe0f1bff3d55d4f39356c94da36a5306db585e3504b2355445493305d1e4"
+      "key": "78c7a49cfea3071a6a99698624ce52537ccc55a61a6c4b3812965f2876018cf3"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_byte_set_nibble_luts.mojo",
@@ -178,7 +178,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_byte_set_nibble_luts.pass"],
-      "key": "0917cb0a58a2de29e527c3ec4a16391f4b4bbd4913f8a2a3a337e45e42ebff47"
+      "key": "9567b4febc64ecefb83416772ad1252a503bd77d8578c5ac49b0b38bc65f92e0"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_fast_copy_byte_oracle.mojo",
@@ -192,7 +192,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_fast_copy_byte_oracle.pass"],
-      "key": "0518d076ed64bfca63fd381d04dd9f028fb67ebdaf53a6d909152495004c95de"
+      "key": "67342a34639bb3d14233be5f6f55085a27708f9a0891f0c1deabe953136d99f6"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_fast_copy_edges.mojo",
@@ -206,7 +206,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_fast_copy_edges.pass"],
-      "key": "3c887c1c04cc90e83d5b2a3ac1a41609e4290e75fc451820f9abbaf57665805b"
+      "key": "6acc12240ac65ea3b6b2c5b3a05a10155884d066c7f64468733a20587af4ab8a"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_fast_copy_erms_band.mojo",
@@ -220,7 +220,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_fast_copy_erms_band.pass"],
-      "key": "2ecd05483d6cd810c45486ebc2d88674248f8c91ff1265ae277358dfe0f0e4e4"
+      "key": "1af4cf23ca48692f6110ad12d3729d31d1475dd6ad2b2f35d074f1c2f0448797"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_fast_copy_size_ladder.mojo",
@@ -234,7 +234,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_fast_copy_size_ladder.pass"],
-      "key": "4487df83795f913959210dfe7b8dcae0c3ee5fe9df129b24f7440417161e1fb8"
+      "key": "ff7c44d23b742c16c1601771a54acb42e617d76ce481dedcaea87e793f7b9b3e"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_simd_bit_unpack.mojo",
@@ -248,7 +248,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_bit_unpack.pass"],
-      "key": "be11ab62129735c43b4cf19e93290d18c3f2068811a780b141a573b66cef36aa"
+      "key": "8f99b8a7859a87557ad5659e46f66644d9385d95497be60079c0526136c16d63"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_simd_blend.mojo",
@@ -262,7 +262,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_blend.pass"],
-      "key": "4a1eb03590643923aa435c2a5c6ea326fd52bf33ab6f028f132f79a99f3219ef"
+      "key": "eee0b4dcebd5809347650fdae29100d417b3b8cc331fc4b5a6f256ac5a46ef32"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_simd_compress.mojo",
@@ -276,7 +276,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_compress.pass"],
-      "key": "e7b5fbf80741ccba26d99a07c6ef7323522f2110ec6bd3d5914b9dc85d832d5e"
+      "key": "09441ec0d0d1f5191afff4d514c5fb80971f7b86c1a1c99501f515874825f259"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_simd_gather.mojo",
@@ -290,7 +290,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_gather.pass"],
-      "key": "5b0e0abd6110181d3a2f19c94f39c7d8481b87231318373880f74a58c9e4d517"
+      "key": "2abf963d4d22db914ac10d31f1c16869dcc940d3f14c4f1e67a5192405a1c80d"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_simd_helpers.mojo",
@@ -304,7 +304,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_helpers.pass"],
-      "key": "7b0b6c726799d1c39fb1c7d5fea18e9dbf8545b4d91be16fb6e5f28e45972776"
+      "key": "fd01975a8e131085f17be926b2c0d3f2998ea4a39aaaab400d528369cb4189e1"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_simd_helpers_edges.mojo",
@@ -318,7 +318,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_helpers_edges.pass"],
-      "key": "61a9b29432cc333daf3e65515f0138a23678bcdabba91569efcc4af858f5d971"
+      "key": "7455c4c022825e6f05323e6ce2c18d2aab2df2ad04246c12c0f65cfc4a4501b3"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_simd_horizontal_add.mojo",
@@ -332,7 +332,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_horizontal_add.pass"],
-      "key": "54b14c8ea2fce937458850a684167c4782d3b8a6014c4130d62c6932d529ac53"
+      "key": "bf4c882bb32b3a11a00375a2656ec2926a7e77ec0a9e6bdd45d20f8e1685b0fc"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_simd_pattern_copy_extend.mojo",
@@ -346,7 +346,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_pattern_copy_extend.pass"],
-      "key": "46c4b5b5c874d5ef41c1bed09460889355bd4348531162ed043e82e492c6ae9f"
+      "key": "47d3dc891ffa4e69f08fa5fcdac2eba5569aed00069bf2f912b39499b33cbb06"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_simd_popcount.mojo",
@@ -360,7 +360,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_popcount.pass"],
-      "key": "76597fdb583c41072c9384a0e89b1f3449e2376b269c6e221dfef8a0bd403b9c"
+      "key": "337b6b3ea9488351de4ee9afd0f577568e9bb028f82623ed33734f699c01b88c"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_simd_validity_pack.mojo",
@@ -374,7 +374,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_validity_pack.pass"],
-      "key": "84ff39e84e619eee7cf4ae02d639b50b0b0d3cd424853cb318bc9dbc09d8d561"
+      "key": "284ded19892c068e50d1dfe62beb2d8b98d1410e316f20833615cbdd64b2db70"
     },
     {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:tests/test_simd_width_policy.mojo",
@@ -388,7 +388,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_simd_width_policy.pass"],
-      "key": "8e86f1107ca62177ee352beb8afad39e2f7697a930fb8fe641ac791628e44108"
+      "key": "a2f24ef2b8b31088355ae81e25ae559581c7ea097eab87e69df821cae1d2e7cc"
     }
   ]
 }

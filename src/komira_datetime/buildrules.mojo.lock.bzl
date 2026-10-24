@@ -38,7 +38,7 @@ GRAPH_JSON = r'''{
         {"path": "src/komira_datetime/http_date.mojo", "sha256": "05c84f01d7d09e13d88ac1eb0f051213e94b9d9709d93ba8bbbc2b9dc1a34d13"},
         {"path": "src/komira_datetime/posix_tz.mojo", "sha256": "8a3ce828a8618f95828547ec3528e129fca5250de2a5d99433ee7971de8cd840"},
         {"path": "src/komira_datetime/timestamp.mojo", "sha256": "5fe6658e308b04eb17dfaa014d6d47b7a3c90d53f0d1ed0fc4e11100ff913bbd"},
-        {"path": "src/komira_datetime/tzif.mojo", "sha256": "063f7d4cac9319c874461050eb3b4d4acd50705cf83ac814b4fb888c0cad303f"},
+        {"path": "src/komira_datetime/tzif.mojo", "sha256": "1c5ece2ecd8c50f74bb4f6e6611574405bf9091725fc28d8c0b8352aa1394250"},
         {"path": "src/komira_datetime/zone.mojo", "sha256": "0d2050c6115569eb934d98b56335792e712e1d7a6ab29e90229f1a2338d42197"},
         {"path": "src/komira_datetime/zone_offset.mojo", "sha256": "fbd7f38fc148da416e47b388a04069e8f30c597e3eaa91fe2778b8d631e13371"},
         {"path": "src/komira_datetime/zoneinfo.mojo", "sha256": "5f59141c1f75a5fc56e72820da97b4f5dd06e73a80574e255c64adb539dd6fc8"}
@@ -47,7 +47,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["komira_datetime.mojoc"],
-      "key": "3dbfc17476304b05dade940a6dbb66a0af9ad9eced76f7b8fe152f84a9cb491a"
+      "key": "140009576b65edaab43b83f11732b55e6d3d796cc718d02448d990dfb303f8b6"
     },
     {
       "id": "komira_datetime@0.1.0#mojo1.0.0/test:tests/test_civil.mojo",
@@ -61,7 +61,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_civil.pass"],
-      "key": "6b6a096172d71a29c2dc42e81949b3e0597ca263f195f5f7260b2bdcdaff9fe0"
+      "key": "785fe76bf5c8225c27ffbe2d7c2ac7952a3a31cca699923a2bea5cbb45e285e4"
     },
     {
       "id": "komira_datetime@0.1.0#mojo1.0.0/test:tests/test_http_date.mojo",
@@ -75,7 +75,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_http_date.pass"],
-      "key": "ee1b39ebcc970bd4d7ad65d80fb398572dca327a7ff4abbac768de83661dd906"
+      "key": "70118b41cdb4703f6498f7d4fa4f5805f460f47ffdafae56d6cd528cfc20c4da"
     },
     {
       "id": "komira_datetime@0.1.0#mojo1.0.0/test:tests/test_posix_tz.mojo",
@@ -89,7 +89,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_posix_tz.pass"],
-      "key": "2c07c952f85a5267aed4507d1459d72423d15255c6ca7be9a680d274d88236aa"
+      "key": "792b0d06016914fe31d3a5b4c448dc1e66cedd45af92f7fdbbb55197970c77d4"
     },
     {
       "id": "komira_datetime@0.1.0#mojo1.0.0/test:tests/test_resolve.mojo",
@@ -103,7 +103,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_resolve.pass"],
-      "key": "990fcc33afd1ff59e2b5775599bb02d7de2a84c7632cffe885d351c6beea3652"
+      "key": "555e112868cd8943be9abac356512526b4a60195759a806cf5ed7f8936e35039"
     },
     {
       "id": "komira_datetime@0.1.0#mojo1.0.0/test:tests/test_timestamp.mojo",
@@ -117,7 +117,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_timestamp.pass"],
-      "key": "2be6303aefe31d772e60f18ce5ba3f85a5aec491928f9f8dabc0335b45191030"
+      "key": "0cce195cd5587a7ccc8415f2fe3bc03fd1c7c8b5b86c6572ab635d01f252a22f"
     },
     {
       "id": "komira_datetime@0.1.0#mojo1.0.0/test:tests/test_tzif.mojo",
@@ -131,7 +131,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_tzif.pass"],
-      "key": "62ce691e3164f45e6cf4930783852e348c115aef44728ec99e39a3bc8d0cc7d4"
+      "key": "4e08979267c4f537dda6d451ed2f36b41b858986484e156d10f530ed6ad1d8b1"
     },
     {
       "id": "komira_datetime@0.1.0#mojo1.0.0/test:tests/test_zone_name.mojo",
@@ -145,7 +145,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_zone_name.pass"],
-      "key": "246178483a291cf72f0584f18ec498a74ac72b0f8120ec4592d14ff8b85b8960"
+      "key": "23b9c1d26aaabfd5d9ea87da7c330064a73aa3ede08274ef58bfe00d7acee7c1"
     }
   ]
 }
