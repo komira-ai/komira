@@ -583,7 +583,7 @@ by the runner's own unit tests (below); mapping the runner's status to a
 verdict is Buck2's. The `bad_*` targets and the `test_deps` refusals at
 analysis are the scenario
 [`analysis_refusals_mojo`](../selftest/analysis_refusals_mojo.zig). The gate test
-of `komira//tools/build/mojo/runtime_paths:komira_runtime_paths` (built with
+of `komira//src/komira_runtime_paths:komira_runtime_paths` (built with
 the examples) covers the executable-relative helpers.
 The runner's unit tests ([`tools/build/run/mojo_test.zig`](../run/mojo_test.zig),
 welded to the runner, so a pull request that builds any test runs them) run
