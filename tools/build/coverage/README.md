@@ -863,7 +863,12 @@ runs `.github/ci/coverage_measure.sh` (its header has the details):
    '^coverage_branch_gate$'`): whether its gate reads its tests' branch
    records. The attribute is what mojo_library sets from
    `COVERAGE_BRANCH_GATE` and the gate reads, so the script's list is the
-   gate's own rather than a second parse of `policy.bzl`;
+   gate's own rather than a second parse of `policy.bzl`. The packages built
+   with buildrules' `mojo_package` are listed too, as the `:coverage` target
+   of each (`kind('^mojo_cov_summary_rule$', ...)` with its `branches`
+   attribute, `--output-attribute '^branches$'`); they have no branch gate and
+   no `coverage_tests`, and have branch records (`:coverage[branches]`) unless
+   the attribute is empty (the package's tests link a native library);
 4. one `buck2 build -c komira.coverage=true --keep-going --build-report F
    '<library>[coverage][tests]'...` of all of them, with
    `'<library>[coverage][branch_info]'` beside each library whose gate reads
@@ -897,7 +902,18 @@ runs `.github/ci/coverage_measure.sh` (its header has the details):
    what its gate reads. When its branch coverage actions failed, or its gate did (which
    reads the same records with covcheck, so `report` could refuse them
    too), none of its records is read and it is listed as `branch not
-   measured`, with the reason, in both summaries; the job stays green;
+   measured`, with the reason, in both summaries; the job stays green. A
+   `mojo_package`'s `:coverage` is built as `<label>[reports]`, with
+   `<label>[branches]` beside it when it has branch records: its entry's
+   `*.cobertura.xml` paths are its reports (one kcov report per test, in
+   repository paths) and its `__info__/*.info` paths its branch records (one
+   lcov file per test, in repository paths, from the compiler's IR; the count
+   is checked like a library's); `SUCCESS` is measured, and any failure, a
+   library source in no report included or a branch record the classifier
+   refused, lists it as not measured (the entry is one, so its lines too). The reports also hold each
+   test's own `tests/` source, which `covcheck` sets aside as a test source, so
+   the package's numbers are its library's sources (the same as `coverage.txt`'s
+   total);
 5. `covcheck report` over the reports of the libraries measured and their
    branch records (`--branch-lcov`), with the
    policy's mode and target, each directory of its
@@ -908,7 +924,11 @@ runs `.github/ci/coverage_measure.sh` (its header has the details):
    `git ls-files -z` as `--repo-files`, the head
    as `--head-sha`, and the `coverage_held` of each measured library's
    package only, as `--held <package>=<file>` (a held package is in the
-   run, and one not measured here would read as a `Regression`). With no
+   run, and one not measured here would read as a `Regression`). For a
+   `mojo_package`'s package with branch records the file is its `coverage_held`
+   as it is, so a held `branch` is read against the records' figure; for one
+   without (its tests link a native library) it is a copy without the `branch`
+   line, because a held branch with no records is a `Regression`. With no
    report at all (no library touched, none
    measured, none has a test, or the query failed), the script writes the
    summary and a neutral two-body check run itself, in covcheck's shape.

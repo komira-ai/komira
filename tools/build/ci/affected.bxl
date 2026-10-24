@@ -27,8 +27,8 @@
 # <label> (default: AGGREGATE of rules.bzl).
 
 load(":affected.bzl", "AFFECTED", "EMPTY", "VACUOUS", "WIDENED", "held_refusals", "label_package", "parse_held_lines", "select")
-load(":ci_graph.bzl", "make_graph")
-load(":rules.bzl", "AGGREGATE", "INERT", "UNIVERSE", "WIDEN")
+load(":ci_graph.bzl", "make_graph", "without_left_out")
+load(":rules.bzl", "AGGREGATE", "EXCLUDED", "INERT", "UNIVERSE", "WIDEN")
 
 def _impl(ctx):
     scope = ctx.cli_args.scope or UNIVERSE
@@ -52,8 +52,15 @@ def _impl(ctx):
         print("affected: WIDENED: " + verdict.reason)
         ctx.output.print(aggregate)
         return
-    print("affected: AFFECTED: {} file(s), {} target(s)".format(verdict.files, len(verdict.targets)))
-    for t in verdict.targets:
+    targets = without_left_out(ctx, verdict.targets, [p for p, _ in EXCLUDED])
+    if not targets:
+        # Every target the change reaches is left out of the aggregate on purpose: nothing to build
+        # but the aggregate itself, which holds the rest of the check set.
+        print("affected: WIDENED: every target reached is left out of the aggregate (rules.bzl EXCLUDED)")
+        ctx.output.print(aggregate)
+        return
+    print("affected: AFFECTED: {} file(s), {} target(s), {} left out (EXCLUDED)".format(verdict.files, len(targets), len(verdict.targets) - len(targets)))
+    for t in targets:
         ctx.output.print(t)
 
 affected = bxl_main(

@@ -169,6 +169,15 @@ struct ScriptedStream(IoStream, Movable, Deinitable):
     # ArcPointer[List[UInt8]] is the established shared-byte-buffer primitive
     # in this package (header_map.mojo's response-head sharing).
     var _shared_capture: Optional[ArcPointer[List[UInt8]]]
+
+    # SCRIPTED TIME. When a clock cell is attached (`advance_clock_on_read`),
+    # every `try_read` moves the shared cell: `_clock_pending_step_us` for a
+    # read that answers Pending (the peer is silent), `_clock_data_step_us` for
+    # a read that answers with bytes. A test that hands the same cell to the
+    # code under test gets time that depends on the script and nothing else.
+    var _clock_cell: Optional[ArcPointer[Int]]
+    var _clock_pending_step_us: Int
+    var _clock_data_step_us: Int
     # ★ THE DELAYED WRITE-FAULT SLOT.
     # The read side of a reaped pooled connection is covered by the
     # fault-at-an-OFFSET vocabulary above (`arm_error_at(len(script), errno)`
@@ -206,6 +215,9 @@ struct ScriptedStream(IoStream, Movable, Deinitable):
         self._max_read_per_call = -1
         self._negotiated = NEGOTIATED_HTTP_1_1
         self._shared_capture = None
+        self._clock_cell = None
+        self._clock_pending_step_us = 0
+        self._clock_data_step_us = 0
         self._pending_after_script = 0
         self._eof_at_offset = -1
         self._error_at_offset = -1
@@ -255,6 +267,27 @@ struct ScriptedStream(IoStream, Movable, Deinitable):
     # IoStream trait; they're concrete-type-only conveniences. Tests
     # use them with the concrete `ScriptedStream` handle BEFORE the
     # stream is moved into a generic IoStream slot.
+
+    def advance_clock_on_read(
+        mut self,
+        clock_cell: ArcPointer[Int],
+        pending_step_us: Int,
+        data_step_us: Int = 0,
+    ):
+        """Add `pending_step_us` to `clock_cell` on every `try_read` that
+        answers Pending and `data_step_us` on every one that delivers bytes.
+        EOF and error answers advance nothing. Time then passes exactly where
+        the script says the peer is silent (or slow), never because the
+        machine is."""
+        self._clock_cell = Optional[ArcPointer[Int]](clock_cell)
+        self._clock_pending_step_us = pending_step_us
+        self._clock_data_step_us = data_step_us
+
+    def _tick_clock(mut self, step_us: Int):
+        if self._clock_cell:
+            self._clock_cell.value()[] = (
+                self._clock_cell.value()[] + step_us
+            )
 
     def queue_read_pending(mut self, n: Int):
         """Make the next `n` try_read calls return StreamIo.pending(...)
@@ -447,6 +480,7 @@ struct ScriptedStream(IoStream, Movable, Deinitable):
             return StreamIo.eof()
         if self._pending_on_read > 0:
             self._pending_on_read = self._pending_on_read - 1
+            self._tick_clock(self._clock_pending_step_us)
             return StreamIo.pending(Int64(self._read_cursor))
         # ----- OFFSET-TRIGGERED FAULTS --------------------
         # Fire only once the cursor has REACHED the armed offset, i.e.
@@ -461,6 +495,7 @@ struct ScriptedStream(IoStream, Movable, Deinitable):
             self._pending_at_count = self._pending_at_count - 1
             if self._pending_at_count <= 0:
                 self._pending_at_offset = -1
+            self._tick_clock(self._clock_pending_step_us)
             return StreamIo.pending(Int64(self._read_cursor))
         if (
             self._error_at_offset >= 0
@@ -479,6 +514,7 @@ struct ScriptedStream(IoStream, Movable, Deinitable):
             # the connection open and sending nothing.
             if self._pending_after_script > 0:
                 self._pending_after_script = self._pending_after_script - 1
+                self._tick_clock(self._clock_pending_step_us)
                 return StreamIo.pending(Int64(self._read_cursor))
             return StreamIo.eof()
         var n_to_copy = remaining
@@ -507,6 +543,7 @@ struct ScriptedStream(IoStream, Movable, Deinitable):
         var src_ptr = self._read_script.unsafe_ptr() + self._read_cursor
         unsafe_memcpy(dest=dst_ptr, src=src_ptr, count=n_to_copy)
         self._read_cursor = self._read_cursor + n_to_copy
+        self._tick_clock(self._clock_data_step_us)
         return StreamIo.ready(Int64(n_to_copy))
 
     def unread(mut self, src: Span[UInt8, _]) raises:

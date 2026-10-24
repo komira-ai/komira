@@ -1,0 +1,27 @@
+# The README e2e over a real package (tools/build/readme_e2e/README.md, "Tests"): the
+# staged set holds the real `.conda` of komira_hash, `mopm add --overlay` is the stand-in
+# of fake.zig (not the release's mopm: //release/readme_e2e/verify runs that one), and everything else is the real
+# thing: the real README examples tool, the pinned Mojo compiler building each example
+# against the package unpacked from the `.conda`, and the gate that runs every welded
+# test. Green only when the README of komira_hash compiles and runs against the
+# installed package alone; the release's own targets are //release/readme_e2e/verify.
+load("@komira//tools/build/readme_e2e:defs.bzl", "readme_e2e", "readme_e2e_staged")
+
+readme_e2e_staged(
+    name = "staged",
+    members = {
+        "komira_hash": (
+            "0.1.0",
+            "komira//src/komira_hash:conda",
+            "komira//src/komira_hash:komira_hash[tests][readme][file]",
+        ),
+    },
+)
+
+readme_e2e(
+    name = "komira_hash",
+    mopm = "komira//tools/build/readme_e2e:standin_mopm",
+    package = "komira_hash",
+    staged = ":staged",
+    version = "0.1.0",
+)

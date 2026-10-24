@@ -427,6 +427,7 @@ case "\$1" in
     uquery)
         [ ! -f "$W/uquery_fail" ] || { echo "uquery: a BUCK file failed to load" >&2; exit 3; }
         case "\$*" in *attrregexfilter*) if [ -f "$W/cov_tests_out" ]; then cat "$W/cov_tests_out"; fi; exit 0 ;; esac
+        case "\$*" in *mojo_cov_summary_rule*) exit 0 ;; esac
         if [ -f "$W/uquery_raw" ]; then cat "$W/uquery_raw"; exit 0; fi
         printf '{\n'
         n=0
@@ -566,6 +567,7 @@ printf 'komira//src/alpha:alpha\nkomira//src/beta:beta\nkomira//src/gamma:gamma\
 # gamma's), docs/ (the root package), and files of the two other cells.
 printf 'src/alpha/sub/deep.mojo\nsrc/alpha/alpha.mojo\nsrc/beta/beta.mojo\nsrc/gamma/gone.mojo\ndocs/notes.md\ntools/build/tests/functional/x/x.mojo\ntools/build/cells/toolchains/BUCK\n' >"$W/git_names"
 QUERY="kind('^mojo_library_rule\$', set( //: //src/alpha: //src/beta: //src/gamma: ))"
+PQUERY="kind('^mojo_cov_summary_rule\$', set( //: //src/alpha: //src/beta: //src/gamma: ))"
 
 measure() { # <case>: a fresh out dir, fresh call records
     O="$W/o_$1"
@@ -593,6 +595,7 @@ measure M1
 [ "$RC" -eq 0 ] || red "M1: a failed coverage build, and the script exited $RC (it must exit 0)"
 {
     echo "uquery -c komira.coverage=true $QUERY --output-attribute ^coverage_branch_gate\$"
+    echo "uquery -c komira.coverage=true $PQUERY --output-attribute ^branches\$"
     echo "uquery -c komira.coverage=true attrregexfilter(coverage_tests, '.', $QUERY)"
     echo "build -c komira.coverage=true --keep-going --build-report $O/logs/build_report.json komira//src/alpha:alpha[coverage][tests] komira//src/beta:beta[coverage][tests] komira//src/gamma:gamma[coverage][tests]"
 } >"$W/want_buck2"
@@ -746,6 +749,7 @@ printf 'komira//src/alpha:alpha\n' >"$W/branch_gate"
 printf 'src/alpha/alpha.mojo\nsrc/beta/beta.mojo\n' >"$W/git_names"
 printf 'komira//src/alpha:alpha\nkomira//src/beta:beta\n' >"$W/uquery_out"
 QUERY2="kind('^mojo_library_rule\$', set( //src/alpha: //src/beta: ))"
+PQUERY2="kind('^mojo_cov_summary_rule\$', set( //src/alpha: //src/beta: ))"
 
 # B1. alpha (listed) and beta (not) both build. ONE build call: alpha's
 # tests and branch records, beta's tests alone; covcheck reads alpha's
@@ -759,6 +763,7 @@ measure B1
 [ "$RC" -eq 0 ] || red "B1: exited $RC"
 {
     echo "uquery -c komira.coverage=true $QUERY2 --output-attribute ^coverage_branch_gate\$"
+    echo "uquery -c komira.coverage=true $PQUERY2 --output-attribute ^branches\$"
     echo "uquery -c komira.coverage=true attrregexfilter(coverage_tests, '.', $QUERY2)"
     echo "build -c komira.coverage=true --keep-going --build-report $O/logs/build_report.json komira//src/alpha:alpha[coverage][tests] komira//src/alpha:alpha[coverage][branch_info] komira//src/beta:beta[coverage][tests]"
 } >"$W/want_buck2"

@@ -967,7 +967,7 @@ not run kci. Neither it nor
 | job | the one job `check`, only for a pull request from a branch of this repository (`github.event.pull_request.head.repo.full_name == github.repository`; a fork's run gets no tailnet credential, and a maintainer reads the change and pushes it to a branch here), written bare or as exactly `${{ <condition> }}` (a block scalar or whitespace inside quotes makes GitHub read the `if:` as a format string, which is always true) |
 | runner | `runs-on: ubuntu-24.04`, written as that plain scalar: a GitHub-hosted machine, fresh per job. A self-hosted label, label list, runner group, expression (`${{ vars.X }}`) or quoted value is refused, so a pull request's code never reaches a runner that keeps state between jobs |
 | permissions | its own `permissions:` mapping, `contents: read` and `id-token: write` (for the farm connection, [farm-connect](#how-it-reaches-the-farm), only); no environment, no secret (no value of the job, nor of the workflow-level `env:`, names `secrets` other than `secrets.GITHUB_TOKEN`), no publish step |
-| steps | the pinned full-history checkout of the merge commit, `farm-connect`, and the farm assertion (`//tools/build/ci:assert_remote`). Then the change: `git diff --name-only HEAD^1...HEAD` and the coverage holds of both sides, where HEAD^1 is the merge commit's first parent (the `main` the pull request is merged into; the step stops when HEAD has no second parent). Never the event's `github.event.pull_request.base.sha`: that is `main` when the event fired, and once `main` moves every change merged to it since then would count as the pull request's own and widen the check. Then, each as the `buck2-farm` action (so each fails unless no action ran on the runner): the BXL selector `tools/build/ci/affected.bxl:affected` (the owners of the changed files and everything that depends on them, or `//ci:pr`, the whole check set, when a file cannot be mapped or touches the build system), `build --keep-going` of its list, the checks only BXL can make over the whole graph (`test_weld.bxl:check` for each test_weld lint, `graph/checks.bxl:check` for each graph_check, `guard.bxl:check` that `//ci:pr` holds every check target, `python_guard.bxl:check` that it reaches no Python outside the SDK, and `cases.bxl:run`), and `test` of the list's targets that are not of the tests cell. A pull request that adds or deletes a package needs no edit to any release file; adding a target to the check set means regenerating `ci/targets.bzl` (the guard fails, naming the command, when it is not). Nothing ships. |
+| steps | the pinned full-history checkout of the merge commit, `farm-connect`, and the farm assertion (`//tools/build/ci:assert_remote`). Then the change: `git diff --name-only HEAD^1...HEAD` and the coverage holds of both sides, where HEAD^1 is the merge commit's first parent (the `main` the pull request is merged into; the step stops when HEAD has no second parent). Never the event's `github.event.pull_request.base.sha`: that is `main` when the event fired, and once `main` moves every change merged to it since then would count as the pull request's own and widen the check. Then, each as the `buck2-farm` action (so each fails unless no action ran on the runner): the BXL selector `tools/build/ci/affected.bxl:affected` (the owners of the changed files and everything that depends on them, or `//ci:pr`, the whole check set, when a file cannot be mapped or touches the build system), `build --keep-going` of its list, the checks only BXL can make over the whole graph (`test_weld.bxl:check` for each test_weld lint, `graph/checks.bxl:check` for each graph_check, `guard.bxl:check` that `//ci:pr` holds every check target, `python_guard.bxl:check` that it reaches no Python outside the SDK, `cases.bxl:run`, and `readme_e2e/cases.bxl:run`, the cases of the README e2e's completeness guard), and `test` of the list's targets that are not of the tests cell. A pull request that adds or deletes a package needs no edit to any release file; adding a target to the check set means regenerating `ci/targets.bzl` (the guard fails, naming the command, when it is not). Nothing ships. |
 | every `uses:` | pinned to a full commit id (the local farm-connect action excepted) |
 
 The repository's branch settings require the check **`pr / check`**.
@@ -975,9 +975,15 @@ The repository's branch settings require the check **`pr / check`**.
 ## coverage.yml: the pull request's coverage (not a gate)
 
 [`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml) posts
-the check run `coverage`: the line coverage of the `mojo_library` targets the
-change touches, and the branch coverage of those whose coverage gate reads
-branch records (`COVERAGE_BRANCH_GATE`), as covcheck's summary and
+the check run `coverage`: the line coverage of the `mojo_library` targets and of
+the `mojo_package` packages the change touches (the latter from their
+`:coverage[reports]`, one kcov report per test), and the branch coverage of
+the libraries whose coverage gate reads branch records
+(`COVERAGE_BRANCH_GATE`) and of the packages with `:coverage[branches]` (one
+lcov file per test, from the compiler's IR; a `branch` line of such a
+package's `coverage_held` is checked against it, and only a package whose
+tests link a native library, which has no branch records, has that line left
+out of what covcheck reads), as covcheck's summary and
 annotations on the lines of the "Files changed" view. It is **informational**: not a required check, its
 conclusion is `neutral` in the policy's census mode, except that a touched
 package under the 99.00% target on a metric it holds (its `coverage_held`: a
@@ -1024,12 +1030,7 @@ the farm connection exchanges, checking out `main` and running no code of any
 pull request. The workflows it reads are `--workflow <name>` flags of that
 step (and the trigger's `workflows:` list): the program names none itself, so
 a replacement push workflow is added to both in its own pull request. It names
-two: `release`, and `kci`, the retired workflow `release.yml` replaced. `kci`
-starts no run (its file is deleted), but GitHub keeps a deleted workflow and
-its runs in the API, so the program still reads kci's successful pushes to
-`main` as last-green candidates, and the first red run of `release` names its
-culprits from kci's last green instead of `unknown`; drop `kci` from both lists
-once `release` has a green push of its own. It acts
+one: `release`. It acts
 only on a run of a named workflow started by a push to `main`:
 
 - **Red** (`failure`, `timed_out`, `startup_failure`): the last green

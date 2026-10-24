@@ -1,0 +1,128 @@
+# readme_e2e (README.md): a package of a release tried as the user of what was
+# staged. A Zig tool, as every build tool under tools/build is; built behind
+# its unit tests and its scenarios.
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":defs.bzl", "readme_e2e_scenario", "readme_e2e_standin")
+
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+
+_SRCS = [
+    "assemble.zig",
+    "cli.zig",
+    "conda.zig",
+    "main.zig",
+    "offline.zig",
+    "plan.zig",
+    "verify.zig",
+]
+
+# ---- Unit tests: `zig test`, run as a build action ---------------------------
+
+zig_test(
+    name = "unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "unit_test.zig",
+    imports = _SRCS + ["fixture.zig"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
+
+# ---- The tool the scenarios run, behind its unit tests -----------------------
+
+zig_exe(
+    name = "readme_e2e_unchecked",
+    exec_compatible_with = LINUX_X86_64,
+    src = "main.zig",
+    imports = _SRCS,
+    unit_tests = [":unit", _ZIG_VERSION],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
+
+# ---- Scenarios (scenario.zig): one build action each -------------------------
+
+# The stand-ins of mopm, the compiler and the gate (fake.zig).
+zig_exe(
+    name = "fake",
+    exec_compatible_with = LINUX_X86_64,
+    src = "fake.zig",
+    imports = ["conda.zig", "offline.zig", "plan.zig"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
+
+zig_exe(
+    name = "scenario",
+    exec_compatible_with = LINUX_X86_64,
+    src = "scenario.zig",
+    imports = ["fixture.zig", "plan.zig"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
+
+_SCENARIOS = [
+    "assemble_cycle",
+    "assemble_link",
+    "assemble_missing_dependency",
+    "assemble_wrong_package",
+    "changed_file",
+    "closure_member_missing",
+    "compile_error",
+    "dependency",
+    "import_outside_closure",
+    "missing_file",
+    "missing_package",
+    "no_example",
+    "old_mopm",
+    "old_mopm_usage",
+    "passes",
+    "refused_readme",
+    "relative_link",
+    "run_error",
+    "skipped_member",
+    "swallowed_refusal",
+    "tampered_file",
+    "usage",
+    "wrong_compiler",
+    "wrong_version",
+]
+
+[
+    readme_e2e_scenario(
+        name = s,
+        fake = ":fake",
+        scenario = ":scenario",
+        tool = ":readme_e2e_unchecked",
+    )
+    for s in _SCENARIOS
+]
+
+# ---- The tool: built only when every unit test and scenario passed -----------
+
+zig_exe(
+    name = "readme_e2e",
+    exec_compatible_with = LINUX_X86_64,
+    src = "main.zig",
+    imports = _SRCS,
+    unit_tests = [":unit"] + [":" + s for s in _SCENARIOS] + [_ZIG_VERSION],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+    visibility = ["PUBLIC"],
+)
+
+# ---- A stand-in mopm for a staged set -----------------------------------------
+
+# `mopm add --overlay` of a set that holds its whole closure (fake.zig): the
+# `mopm` of the one target that runs the real compiler over a real package
+# (tools/build/tests, functional/readme_e2e). The release's targets name the
+# pinned mopm, never this: its visibility is that one tests package, so no release target can name it.
+readme_e2e_standin(
+    name = "standin_mopm",
+    fake = ":fake",
+    program = "mopm",
+    visibility = ["tests//functional/readme_e2e:"],
+)
