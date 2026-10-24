@@ -32,12 +32,12 @@ is set by this macro, as `mojo_library`'s is.
 What it does not carry, because buildrules' rules do not: the branch coverage gate, the coverage runs
 of the README and the mutation sub-targets of a `mojo_library`. A library adopted here has none of
 them until buildrules has them. Its coverage is the package's own: `:coverage` (the per-file line
-counts), `:coverage[reports]` (one kcov report per test, the per-line records) and, with a
-`coverage_floor.txt` beside the BUCK file, `:coverage_floor` (the line floor, a minimum: the build fails below it and above it prints a hint to raise it; the pull
+and branch counts), `:coverage[reports]` (one kcov report per test, the per-line records),
+`:coverage[branches]` (one lcov file per test, the branch records) and, with a
+`coverage_floor.txt` beside the BUCK file, `:coverage_floor` (the line floor and the branch floor, minimums: the build fails below either and above it prints a hint to raise it; the pull
 request check builds). The pull request's coverage job (`coverage.yml`) selects `mojo_package`
-packages as well as `mojo_library` targets and reads `:coverage[reports]`: line coverage, the
-per-line annotations and the `line` entry of `coverage_held`; branch records are not in those
-reports, so the `branch` entry of `coverage_held` is kept and not checked until they are.
+packages as well as `mojo_library` targets and reads `:coverage[reports]` and `:coverage[branches]`: line and branch coverage, the
+per-line annotations and the `line` and `branch` entries of `coverage_held`.
 
 A library that has deps or native code is not adopted by this rule: it has no `deps` or `native`
 attribute, so a BUCK file that needs them stops at the attribute, not at a wrong `MojoInfo`.
