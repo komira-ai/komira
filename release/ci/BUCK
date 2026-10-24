@@ -1,8 +1,8 @@
 # release/ci: the programs of the workflows. main_red is the alert of
 # .github/workflows/main_red.yml (docs/ci.md, "The main red alert"): a Zig
 # program, built behind its cases (//release/ci/tests:test_main_red), and run
-# by the workflow as the binary this target builds. check_release_ref,
-# release_json and mopm_publish are the release workflow's (.github/workflows/release.yml,
+# by the workflow as the binary this target builds. check_release_ref and
+# release_json are the release workflow's (.github/workflows/release.yml,
 # docs/ci.md, "release.yml"), built behind //release/ci/tests:test_release the
 # same way.
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module")
@@ -47,7 +47,6 @@ zig_module(
     src = "release_lib/lib.zig",
     imports = [
         "release_lib/artifacts.zig",
-        "release_lib/mopm_publish.zig",
         "release_lib/ref_guard.zig",
         "release_lib/set_json.zig",
         "release_lib/stamp.zig",
@@ -76,20 +75,6 @@ zig_exe(
     name = "release_json",
     exec_compatible_with = LINUX_X86_64,
     src = "release_json.zig",
-    deps = [":release_lib"],
-    unit_tests = ["//release/ci/tests:test_release", _ZIG_VERSION],
-    busybox = "komira//tools/build/toolchains:busybox",
-    zig = _ZIG,
-    visibility = ["PUBLIC"],
-)
-
-# The mopm publish (.github/workflows/release.yml, jobs `mopm-dry-run` and
-# `mopm-publish`): runs the pinned `mopm publish` over //release:mopm_set,
-# the dry run on every push to main and the publish only when enabled.
-zig_exe(
-    name = "mopm_publish",
-    exec_compatible_with = LINUX_X86_64,
-    src = "mopm_publish.zig",
     deps = [":release_lib"],
     unit_tests = ["//release/ci/tests:test_release", _ZIG_VERSION],
     busybox = "komira//tools/build/toolchains:busybox",

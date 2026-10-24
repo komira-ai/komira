@@ -15,8 +15,9 @@
 # (main_red, check_release_ref, release_json), built behind their cases.
 # Changes need the release approver's review (.github/CODEOWNERS).
 
-load(":mopm_set.bzl", "mopm_set")
+load(":mopm_artifacts.bzl", "mopm_artifacts")
 load(":release_set.bzl", "release_set")
+load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES")
 
 export_file(
     name = "artifacts.textproto",
@@ -35,19 +36,16 @@ export_file(
     visibility = ["//release/validations:", "//src/kci_release_machine:"],
 )
 
-# The packages published to mopm (mopm_set.bzl): the libraries moved to mopm,
-# built as `:lib` and `:conda`. This list is the publish list, and
-# //release/ci:mopm_publish holds it to the src/ packages that have a mopm.toml.
-# release.yml's `mopm-dry-run` job builds it and dry-runs the publish on every
-# push to main; `mopm-publish` publishes it, only when enabled (docs/ci.md).
-mopm_set(
-    name = "mopm_set",
-    packages = [
-        "komira_datetime",
-        "komira_encoding",
-        "komira_json",
-        "komira_protobuf",
-    ],
+# The build artifacts of the libraries moved to mopm (mopm_artifacts.bzl): each
+# package's `:lib`, as `linux-64/<name>.mojoc`, the directory `mopm stage
+# --artifacts` packs. The list is //release/readme_e2e:packages.bzl's, which
+# //:readme_e2e_complete holds to the src/ packages that have a mopm.toml.
+# release.yml's `mopm-stage` job builds it, stages it, tries the README
+# examples against the staged set and dry-runs the publish on every push to
+# main; `mopm-publish` publishes the set, only when enabled (docs/ci.md).
+mopm_artifacts(
+    name = "mopm_artifacts",
+    packages = sorted(README_E2E_PACKAGES.keys()),
     visibility = ["PUBLIC"],
 )
 

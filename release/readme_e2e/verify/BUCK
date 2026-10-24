@@ -1,17 +1,21 @@
 # The README e2e of the release: one target per package moved to mopm, and `:all`.
-# Each installs the package from //release/readme_e2e:staged into a fresh project and
-# runs its README examples against the installed copy (tools/build/readme_e2e/README.md).
-# The release workflow builds `:all`.
+# Each installs the package from a staged set into a fresh project and runs its README
+# examples against the installed copy (tools/build/readme_e2e/README.md). The pull request
+# check builds `:all` against the assembled set; the release workflow builds it against the
+# set `mopm stage` wrote (below).
 load("@komira//tools/build/readme_e2e:defs.bzl", "readme_e2e", "readme_e2e_all")
 load("//release/readme_e2e:packages.bzl", "MOJO", "MOPM", "PACKAGES")
+load("//release/readme_e2e:staged_choice.bzl", "staged_label")
 
+# The staged set the targets install from is `-c komira_release.staged=<which>`
+# (staged_choice.bzl): the assembled one by default, the one `mopm stage` wrote with `stage`.
 [
     readme_e2e(
         name = name,
         mojo = MOJO,
         mopm = MOPM,
         package = name,
-        staged = "//release/readme_e2e:staged",
+        staged = staged_label(),
         version = version,
         visibility = ["PUBLIC"],
     )

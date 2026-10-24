@@ -8,22 +8,28 @@
 # `set_hash.txt`. The job `release` publishes nothing, and holds no publishing
 # credential and no channel.
 #
-# THE MOPM JOBS. The libraries moved to mopm (//release:mopm_set lists them;
-# //release/ci:mopm_publish holds that list to the src/ packages that have a
-# mopm.toml) are published to a mopm registry, apart from the release set:
-#   `mopm-dry-run`  on every push to main: builds the packages, the pinned mopm
-#                   and the tool on the farm, and runs `mopm publish --registry
-#                   gamma --dry-run` for each package, so the path is exercised.
-#                   It sends nothing and holds no credential.
-#   `mopm-publish`  after `release` and `mopm-dry-run`, ONLY when the repository
-#                   variable MOPM_PUBLISH_ENABLED is `true` (it is unset: the job
-#                   is skipped). In the environment `gamma`, with the OIDC
-#                   `id-token: write` that the publish token's exchange needs on
-#                   this job and no other job but the farm's tailnet one; it
-#                   joins no farm and runs no buck2: it takes what `mopm-dry-run`
-#                   built (a workflow artifact) and runs the tool over it.
+# THE MOPM JOBS. The libraries moved to mopm (every src/<name> that has a
+# mopm.toml; //release:mopm_artifacts builds them) are published to the mopm
+# registry as one group, apart from the release set, in four steps:
+# build, stage, try, publish.
+#   `mopm-stage`    on every push to main (and on a manual run, which only
+#                   stages): builds the packages and the pinned mopm on the
+#                   farm; `mopm stage` writes the staged set S on the runner (it
+#                   asks the registry which versions exist, so it cannot be a
+#                   build action); the README e2e of every package runs on the
+#                   farm against S (//release/readme_e2e/verify:all, with
+#                   `-c komira_release.staged=stage`); then `mopm publish
+#                   --staged S --registry prod --dry-run`. It sends nothing and
+#                   holds no token.
+#   `mopm-publish`  after `release` and `mopm-stage`, ONLY on a push to main and
+#                   when the repository variable MOPM_PUBLISH_ENABLED is `true`
+#                   (it is unset: the job is skipped, and no token is read). In
+#                   the environment `prod`, which holds the registry token this
+#                   job and no other job reads; it joins no farm and runs no
+#                   buck2: it takes S and mopm from the artifact `mopm-stage`
+#                   made and runs `mopm publish --staged S --registry prod`.
 #                   What must exist before the variable is set is in docs/ci.md,
-#                   "release.yml", "Enabling the mopm publish".
+#                   "The mopm jobs", "Enabling the mopm publish".
 #
 # It runs named Buck2 targets on the farm, through the buck2-farm action
 # (.github/actions/buck2-farm), which fails a step unless buck2 succeeded and
@@ -180,12 +186,10 @@ jobs:
         if: always()
         run: ./buck2 kill || true
 
-  # The mopm packages, built on the farm, and `mopm publish --dry-run` for each
-  # (see the header). It runs on every push to main, whether or not publishing
-  # is enabled. A manual run does not start it: break-glass builds the release
-  # set and publishes nothing.
-  mopm-dry-run:
-    if: github.event_name == 'push'
+  # Build, stage and try the mopm packages (see the header). It runs on every
+  # push to main, whether or not publishing is enabled, and on a manual run,
+  # which sends nothing either: this job reads no token.
+  mopm-stage:
     runs-on: ubuntu-24.04
     environment: build
     timeout-minutes: 120
@@ -212,78 +216,85 @@ jobs:
       - name: build the farm assertion
         id: assert
         run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
-      # The tool (built behind its cases), the one mopm the packages pin
-      # (toolchains//:mopm_0_0_20, the pin of their mopm-toolchain.toml), and
-      # the packages: each `.mojoc` exists only once its library's tests passed.
-      - name: build the publish tool
-        uses: ./.github/actions/buck2-farm
-        with:
-          args: build //release/ci:mopm_publish --out ${{ runner.temp }}/mopm-publish/mopm_publish
-          assert-remote: ${{ steps.assert.outputs.path }}
+      # The mopm that stages and publishes: the pin the README e2e installs with
+      # (MOPM in release/readme_e2e/packages.bzl; it must be a release that has
+      # `stage` and `publish --staged`), and the packages: each `.mojoc` exists
+      # only once its library's tests passed.
       - name: build the pinned mopm
         uses: ./.github/actions/buck2-farm
         with:
-          args: build toolchains//:mopm_0_0_20 --out ${{ runner.temp }}/mopm-publish/mopm
+          args: build toolchains//:mopm_0_0_40 --out ${{ runner.temp }}/mopm-publish/mopm
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: build the packages
         uses: ./.github/actions/buck2-farm
         with:
-          args: build //release:mopm_set --out ${{ runner.temp }}/mopm-publish/set
+          args: build //release:mopm_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts
           assert-remote: ${{ steps.assert.outputs.path }}
-      # Sends nothing and reads no token: it checks that what would be uploaded
-      # is, byte for byte, the package the build made, and that the set and the
-      # src/ packages that have a mopm.toml are the same list.
-      - name: mopm publish --dry-run
-        run: '"$RUNNER_TEMP/mopm-publish/mopm_publish" --mode dry-run --set "$RUNNER_TEMP/mopm-publish/set" --mopm "$RUNNER_TEMP/mopm-publish/mopm" --repo . --registry gamma --summary-file "$GITHUB_STEP_SUMMARY"'
-      # What `mopm-publish` runs, as built here (it needs no farm).
+      # STAGE. Packs each member of src/ from its built `.mojoc` (compiler: MOJO
+      # of packages.bzl), asks the registry, without a token, which versions it
+      # holds, and writes the staged set: plan.json, each `.conda`, each README.
+      # It stays out of the build because it makes requests; the directory is a
+      # gitignored input of //release/staged_set. A version the registry holds
+      # with other bytes, or has yanked, makes the step fail.
+      - name: mopm stage
+        run: '"$RUNNER_TEMP/mopm-publish/mopm" stage --workspace-root src --artifacts "$RUNNER_TEMP/mopm-publish/artifacts" --compiler 1.0.0 --out release/staged_set --registry prod'
+      # TRY. Every package's README examples, compiled and run on the farm as a
+      # user would, against the `.conda` files of the set that was just staged
+      # (the e2e installs offline from it, so the closure must be in it).
+      - name: the README e2e against the staged set
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira_release.staged=stage //release/readme_e2e/verify:all
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # Reads plan.json and hashes every file; sends nothing and reads no token.
+      - name: mopm publish --staged --dry-run
+        run: '"$RUNNER_TEMP/mopm-publish/mopm" publish --staged release/staged_set --registry prod --dry-run'
+      # What `mopm-publish` publishes: the set the e2e just passed on, byte for
+      # byte, and the mopm that checked it (it needs no farm).
+      - name: keep the staged set
+        run: cp -r release/staged_set "$RUNNER_TEMP/mopm-publish/staged"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: mopm-publish-${{ github.sha }}
-          path: ${{ runner.temp }}/mopm-publish
+          name: mopm-staged-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/mopm-publish/mopm
+            ${{ runner.temp }}/mopm-publish/staged
           if-no-files-found: error
           retention-days: 1
       - name: Stop buck2
         if: always()
         run: ./buck2 kill || true
 
-  # The publish to the gamma registry. DISABLED: it runs only when the
-  # repository variable MOPM_PUBLISH_ENABLED is exactly `true`, and nobody has
-  # set it (docs/ci.md, "Enabling the mopm publish", says what must exist
-  # first). It joins no farm and runs no buck2; the only credential it can
-  # hold is the publish token that the OIDC exchange gives this job.
+  # PUBLISH. The staged set the e2e passed on, to the prod registry, as one
+  # group: every package is visible, or none is. DISABLED: it runs only on a
+  # push to main and when the repository variable MOPM_PUBLISH_ENABLED is
+  # exactly `true`, and nobody has set it (docs/ci.md, "Enabling the mopm
+  # publish", says what must exist first, among it that the registry's group
+  # publish is live). While the variable is unset the job is skipped before it
+  # starts: it is never assigned a runner, and the environment's secret is not
+  # read. It joins no farm, runs no buck2 and checks out nothing; the only
+  # credential it holds is the registry token of the environment, on this job
+  # and no other.
   mopm-publish:
-    needs: [release, mopm-dry-run]
+    needs: [release, mopm-stage]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true'
     runs-on: ubuntu-24.04
-    environment: gamma
+    environment: prod
     timeout-minutes: 30
     permissions:
       contents: read
-      # the identity token the registry exchanges for a publish token
-      # (the trusted publisher of this repository, workflow and environment)
-      id-token: write
     steps:
-      # The manifests and readmes the tool reads (src/<name>/mopm.toml,
-      # README.md); the programs and packages come from the artifact.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: mopm-publish-${{ github.sha }}
+          name: mopm-staged-${{ github.sha }}
           path: ${{ runner.temp }}/mopm-publish
-      - name: the programs are executable
-        run: chmod +x "$RUNNER_TEMP/mopm-publish/mopm_publish" "$RUNNER_TEMP/mopm-publish/mopm"
-      # The exchange of this job's identity token for a publish token is
-      # mopm's (its registry side is not released). Until it is written here
-      # the job stops: a publish with no token is refused by the tool anyway.
-      - name: the publish token
-        id: token
-        run: |
-          echo "::error title=mopm publish::the OIDC exchange step is not written yet (docs/ci.md, Enabling the mopm publish)"
-          exit 1
-      - name: mopm publish
+      - name: mopm is executable
+        run: chmod +x "$RUNNER_TEMP/mopm-publish/mopm"
+      # The token is read after the plan has been checked and goes only to the
+      # registry's API. A rerun of a failed run resumes the same group (the
+      # group's name is derived from the plan) and sends only what the registry
+      # does not hold.
+      - name: mopm publish --staged
         env:
-          MOPM_TOKEN: ${{ steps.token.outputs.token }}
-        run: '"$RUNNER_TEMP/mopm-publish/mopm_publish" --mode publish --set "$RUNNER_TEMP/mopm-publish/set" --mopm "$RUNNER_TEMP/mopm-publish/mopm" --repo . --registry gamma --summary-file "$GITHUB_STEP_SUMMARY"'
+          MOPM_TOKEN: ${{ secrets.MOPM_TOKEN }}
+        run: '"$RUNNER_TEMP/mopm-publish/mopm" publish --staged "$RUNNER_TEMP/mopm-publish/staged" --registry prod'

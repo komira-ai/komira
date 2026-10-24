@@ -27,15 +27,14 @@ zig_test(
 # The cases of the release workflow's tools (release/ci/check_release_ref.zig
 # and release_json.zig): the guard, the stamp, the artifacts file the release
 # set is held to, and the release set's hash and release.json (test_set_json.zig),
-# the last against goldens of the writer they replace, and the mopm publish
-# (test_mopm_publish.zig, against a fake mopm). Run as a build action:
-# building any of the tools is running them.
+# the last against goldens of the writer they replace. Run as a build action:
+# building either tool is running them.
 zig_test(
     name = "test_release",
     exec_compatible_with = LINUX_X86_64,
     src = "test_release.zig",
     deps = ["//release/ci:release_lib"],
-    imports = ["test_set_json.zig", "test_mopm_publish.zig"],
+    imports = ["test_set_json.zig"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["//release/ci:"],

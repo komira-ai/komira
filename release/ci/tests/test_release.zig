@@ -17,7 +17,6 @@
 //! - the artifacts file (artifacts.zig): the names and the metapackage's
 //!   arguments the set is held to.
 //! - the flags (util.zig).
-//! - the mopm publish (mopm_publish.zig), whose cases are test_mopm_publish.zig.
 const std = @import("std");
 const lib = @import("release_lib");
 const t = std.testing;
@@ -29,7 +28,6 @@ const artifacts = lib.artifacts;
 
 test {
     _ = @import("test_set_json.zig");
-    _ = @import("test_mopm_publish.zig");
 }
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
