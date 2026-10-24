@@ -109,6 +109,7 @@ from .file_assembly import (
     append_magic,
     column_chunk_for_page,
     finish_file,
+    row_group_for_chunks,
 )
 from .writer import ParquetFileWriter
 from .encoded_column import (

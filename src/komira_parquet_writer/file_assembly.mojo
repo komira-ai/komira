@@ -75,6 +75,16 @@ def column_chunk_for_page(page: ColumnPage, page_offset: Int) -> ColumnChunk:
     return ColumnChunk(file_offset=page_offset, meta_data=meta^)
 
 
+def row_group_for_chunks(var chunks: List[ColumnChunk], num_rows: Int) -> RowGroup:
+    """A footer RowGroup over `chunks`. `total_byte_size` is the sum of the
+    chunks' uncompressed sizes: parquet.thrift defines it as "total byte size
+    of all the uncompressed column data in this row group"."""
+    var total = 0
+    for i in range(len(chunks)):
+        total += chunks[i].meta_data.total_uncompressed_size
+    return RowGroup(columns=chunks^, total_byte_size=total, num_rows=num_rows)
+
+
 def finish_file(
     mut file_bytes: List[UInt8],
     schema: List[SchemaElement],

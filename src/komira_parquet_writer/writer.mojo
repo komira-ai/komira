@@ -36,6 +36,7 @@ from .file_assembly import (
     append_magic,
     column_chunk_for_page,
     finish_file,
+    row_group_for_chunks,
 )
 from .writer_dict import encode_dict_string_column_page
 from .writer_encode import (
@@ -269,7 +270,6 @@ struct ParquetFileWriter(Movable):
         var file_bytes = List[UInt8]()
         append_magic(file_bytes)
         var chunks = List[ColumnChunk]()
-        var total_byte_size = 0
         # Chunks go to the footer in schema order, whatever order they were
         # written in; the file holds them in written order.
         var by_leaf = List[Int]()
@@ -280,7 +280,6 @@ struct ParquetFileWriter(Movable):
             offsets.append(len(file_bytes))
             _append_bytes(file_bytes, self.column_pages[i].data)
             by_leaf[self.column_pages[i].column_index] = i
-            total_byte_size += len(self.column_pages[i].data)
         for leaf in range(leaves):
             var i = by_leaf[leaf]
             if i >= 0:
@@ -289,12 +288,6 @@ struct ParquetFileWriter(Movable):
                 )
         var row_groups = List[RowGroup]()
         if len(chunks) > 0:
-            row_groups.append(
-                RowGroup(
-                    columns=chunks^,
-                    total_byte_size=total_byte_size,
-                    num_rows=self.num_rows,
-                )
-            )
+            row_groups.append(row_group_for_chunks(chunks^, self.num_rows))
         finish_file(file_bytes, self.schema_elements, self.num_rows, row_groups^)
         return file_bytes^

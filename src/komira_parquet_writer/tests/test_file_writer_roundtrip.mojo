@@ -15,8 +15,8 @@
 #     written without levels reads back shifted).
 #   * test_footer_describes_the_file: PAR1 at both ends, the footer length
 #     word, num_rows, the schema, created_by, one chunk per leaf in schema
-#     order, offsets that point at each chunk's first page, sizes that sum to
-#     the bytes between the magics. Catches a footer that places a chunk
+#     order, offsets that point at each chunk's first page, chunk sizes that
+#     tile the file, RowGroup.total_byte_size as the uncompressed sum. Catches a footer that places a chunk
 #     wrongly or reports the codec's savings as the uncompressed size.
 #   * test_chunk_sizes_tell_compressed_from_raw: a compressible column reports
 #     a small total_compressed_size and a raw-sized total_uncompressed_size.
@@ -229,6 +229,7 @@ def test_footer_describes_the_file() raises:
     var names: List[String] = ["i32", "i64", "f64", "f32", "b_opt", "b_req", "s_opt", "s_req"]
     var pos = 4
     var total_compressed = 0
+    var total_uncompressed = 0
     for c in range(8):
         ref meta = rg.columns[c].meta_data
         assert_equal(meta.path_in_schema[0], names[c])
@@ -246,8 +247,12 @@ def test_footer_describes_the_file() raises:
             )
         pos += meta.total_compressed_size
         total_compressed += meta.total_compressed_size
+        total_uncompressed += meta.total_uncompressed_size
     assert_equal(pos, 4 + total_compressed)
-    assert_equal(rg.total_byte_size, total_compressed)
+    # parquet.thrift: RowGroup.total_byte_size counts the UNCOMPRESSED column
+    # data, so it is not the bytes between the magics.
+    assert_equal(rg.total_byte_size, total_uncompressed)
+    assert_true(total_uncompressed != total_compressed)
 
 
 def test_chunk_sizes_tell_compressed_from_raw() raises:
