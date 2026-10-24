@@ -1,9 +1,10 @@
 # komira_parquet_writer
 
-A Parquet writer's encoders and page builders. The writer that assembles
-column chunks into a file is a later part of this package; what is here
-writes no file, reads no Parquet file and does not depend on the reader,
-`komira_parquet`.
+A Parquet writer: its encoders and page builders, and `ParquetFileWriter`,
+which assembles whole columns into a file and returns the file's bytes. The
+package opens no file (where the bytes go is the caller's decision), reads no
+Parquet file and does not depend on the reader, `komira_parquet`; its tests
+decode what it writes with that reader, through `test_deps`.
 
 - `thrift_writer`: `ThriftCompactWriter`, the Thrift compact protocol
   serializer for the footer (`serialize_file_metadata`), data page headers
@@ -110,6 +111,33 @@ var footer = FileMetaData(
 )
 var thrift = serialize_file_metadata(footer)
 assert_true(len(thrift) > 0)
+```
+
+## A file
+
+`ParquetFileWriter` takes the flattened schema (`make_schema_elements`,
+`make_schema_elements_nullable`) and one call per column; a column's
+nullability is its schema element's. `close_to_bytes` returns the whole file
+and ends the writer.
+
+```mojo
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.string_array import StringArray
+from komira_parquet_api import CompressionCodec, ParquetType
+from komira_parquet_writer import ParquetFileWriter, make_schema_elements
+from std.testing import assert_equal
+
+var names: List[String] = ["id", "city"]
+var types: List[ParquetType] = [ParquetType.INT64, ParquetType.BYTE_ARRAY]
+var writer = ParquetFileWriter.create(
+    make_schema_elements(names^, types^), CompressionCodec.SNAPPY
+)
+writer.write_batch[DType.int64](0, PrimitiveArray[DType.int64].from_list([1, 2, 3]))
+var cities: List[String] = ["oslo", "oslo", "rome"]
+writer.write_string_batch_dict(1, StringArray.from_strings(cities))
+var file = writer.close_to_bytes()
+assert_equal(Int(file[0]), 0x50)  # PAR1 at both ends
+assert_equal(Int(file[len(file) - 1]), 0x31)
 ```
 
 ## A PLAIN page

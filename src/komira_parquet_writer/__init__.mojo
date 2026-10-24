@@ -15,9 +15,13 @@ BYTE_ARRAY, BOOLEAN, and the definition levels), DELTA_BINARY_PACKED
 (`writer_dict`, `writer_dict_numeric`) and Decimal128 as
 FIXED_LEN_BYTE_ARRAY(16) (`decimal_encode`).
 
-It writes no file: the writer that assembles column chunks into a file and
-returns the file's metadata is a later part of this package. It reads no
-Parquet file either, and does not depend on the reader (`komira_parquet`).
+The file writer (`writer`: `ParquetFileWriter`) takes whole columns, encodes
+each as one page or dictionary chunk, and `close_to_bytes` returns the file:
+magic, column chunks, footer, footer length, magic (`file_assembly` builds the
+chunk entries and the footer, `encoded_column` is the column-parallel hand-off).
+It opens no file: where the bytes go is the caller's decision. It reads no
+Parquet file either, and does not depend on the reader (`komira_parquet`);
+its tests do, through `test_deps`, to prove the bytes decode.
 """
 
 from .thrift_writer import ThriftCompactWriter, serialize_file_metadata
@@ -99,4 +103,17 @@ from .decimal_encode import (
     decimal128_schema_element,
     encode_decimal128_column_page,
     patch_decimal_schema_elements,
+)
+from .file_assembly import (
+    PARQUET_CREATED_BY,
+    append_magic,
+    column_chunk_for_page,
+    finish_file,
+)
+from .writer import ParquetFileWriter
+from .encoded_column import (
+    EncodedColumn,
+    encode_column_to_buffer,
+    write_batch_parallel_homogeneous,
+    write_parquet_file_from_encoded,
 )
