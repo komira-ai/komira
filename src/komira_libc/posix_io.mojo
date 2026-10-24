@@ -6,12 +6,12 @@
 #
 # A streaming Arrow IPC body sink issues one write per buffer: ~26 buffers
 # per RecordBatch, over a thousand `FileHandle.write` calls for a large
-# file; each call constructs a `String` from the source bytes via
-# `String(unsafe_from_utf8=...)` then dispatches to `write(2)`. The String
-# construction dominates that cost.
+# file; each call (`FileHandle.write_bytes`, which takes the bytes as a
+# span and builds no `String`) dispatches to its own `write(2)`. The
+# per-buffer syscall count is that cost.
 #
 # POSIX `writev(2)` lets the kernel gather N disjoint buffers in ONE
-# syscall — no userspace memcpy, no String wrap, one trip into the
+# syscall — no userspace memcpy, one trip into the
 # kernel per RB instead of ~26. This file exposes that primitive with
 # raw pointers kept inside the module.
 #

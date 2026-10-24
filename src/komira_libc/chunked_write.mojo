@@ -98,7 +98,7 @@ def write_chunked(
         single-write fast path; the on-disk bytes are identical to what
         a hypothetical bug-free `handle.write` would have produced.
       - Multi-chunk input writes each 64 MiB slice as its own
-        `handle.write` call; chunk boundaries are arbitrary byte offsets
+        `handle.write_bytes` call; chunk boundaries are arbitrary byte offsets
         (the OS write(2) does not interpret bytes). The on-disk byte
         sequence is the concatenation of the chunks in order — identical
         to the input span.
@@ -118,8 +118,8 @@ def write_chunked(
         # validity requirement) is involved.
         handle.write_bytes(bytes)
         return
-    # Slow path: chunk the write to keep each `handle.write` call under
-    # the stdlib's Int32 threshold.
+    # Slow path: chunk the write to keep each `handle.write_bytes` call
+    # under the stdlib's Int32 threshold.
     var off = 0
     while off < n:
         var end = off + CHUNK_BYTES
