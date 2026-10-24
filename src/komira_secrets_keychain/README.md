@@ -18,8 +18,11 @@ keychain. `MacosSecurityKeychainBackend` runs
 [komira_supervisor](https://github.com/komira-ai/komira/blob/main/src/komira_supervisor/__init__.mojo):
 exit 0 is a hit (the one newline `-w` appends is stripped), exit 44 is a miss,
 anything else is an error carrying the exit code and a bounded stderr tail.
-It is compiled only on macOS; on any other platform its `fetch` answers an
-error and starts no process. A Linux or Windows keychain is a new
+The spawn is compiled only on macOS; on any other platform `fetch` answers an
+error and starts no process. The exit-code mapping and the stdout parsing are
+`map_security_result`, which has no platform dependency and is tested on every
+platform; the spawn itself is not exercised by CI (the package's tests run on
+Linux, where the macOS branch is not compiled). A Linux or Windows keychain is a new
 `KeychainBackend`, with no change to the store.
 
 This store reads a developer's own keychain. It is not a production secret
@@ -33,7 +36,7 @@ store.
 | `parse_keychain_ref`, `KeychainRef` | [keychain_secret_store.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_secrets_keychain/keychain_secret_store.mojo) | the handle grammar |
 | `KeychainBackend`, `KeychainLookup` | [keychain_backend.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_secrets_keychain/keychain_backend.mojo) | the fetch seam and its found / miss / error result |
 | `StaticKeychainBackend` | [keychain_backend.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_secrets_keychain/keychain_backend.mojo) | the hermetic double, recording each query |
-| `MacosSecurityKeychainBackend`, `build_security_argv` | [macos_security_backend.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_secrets_keychain/macos_security_backend.mojo) | the macOS backend and its argv |
+| `MacosSecurityKeychainBackend`, `build_security_argv`, `map_security_result` | [macos_security_backend.mojo](https://github.com/komira-ai/komira/blob/main/src/komira_secrets_keychain/macos_security_backend.mojo) | the macOS backend and its argv |
 
 ## Examples
 

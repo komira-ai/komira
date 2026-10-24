@@ -131,37 +131,46 @@ struct MacosSecurityKeychainBackend(KeychainBackend, Movable):
             sup.close()
             var exit_code = Int(info.exit_code)
 
-            # --- 4. errSecItemNotFound (44) is a clean MISS, not an error. ---
-            if exit_code == SECURITY_NOT_FOUND_EXIT:
-                _wipe_string(stdout_text)
-                _wipe_string(stderr_text)
-                return KeychainLookup.miss()
-
-            # --- 5. Any non-zero exit (other than 44) is a backend ERROR. The
-            #        reason carries the exit code + a bounded, NON-secret stderr tail
-            #        (stderr is `security`'s diagnostics, NEVER the value). stdout
-            #        (the secret) is wiped and NEVER folded into the error. ---
-            if exit_code != 0:
-                var reason = String("/usr/bin/security exited ") + String(exit_code)
-                var tail = _bounded_tail(stderr_text)
-                if len(tail.as_bytes()) > 0:
-                    reason += String(": ") + tail^
-                _wipe_string(stdout_text)
-                _wipe_string(stderr_text)
-                return KeychainLookup.error(reason^)
-
-            # --- 6. Exit 0 -> found. Copy stdout (minus the trailing newline the
-            #        `-w` form appends) into the lookup's byte buffer, then wipe the
-            #        transients. ---
-            var bytes = _stdout_to_secret_bytes(stdout_text)
-            _wipe_string(stdout_text)
-            _wipe_string(stderr_text)
-            return KeychainLookup.found(bytes^)
+            # --- 4. Map the exit code and the captured output (platform-neutral,
+            #        tested on every platform). ---
+            return map_security_result(exit_code, stdout_text, stderr_text)
         else:
             return KeychainLookup.error(
                 String("MacosSecurityKeychainBackend: the macOS `security` ")
                 + String("tool is only available on macOS")
             )
+
+
+# =============================================================================
+# §1.5 — exit code + captured output -> KeychainLookup (platform-neutral).
+# =============================================================================
+def map_security_result(
+    exit_code: Int, mut stdout_text: String, mut stderr_text: String
+) -> KeychainLookup:
+    """Map one finished `security find-generic-password -w` run to a lookup.
+    Exit 44 (errSecItemNotFound) is a clean MISS. Any other non-zero exit is an
+    ERROR whose reason is `/usr/bin/security exited N` plus a bounded stderr
+    tail (stderr is `security`'s diagnostics); stdout, which is the secret, is
+    never folded into it. Exit 0 is FOUND: stdout minus the one newline `-w`
+    appends. Both captured Strings are dropped on every path. This has no
+    platform dependency, so every platform's tests run it; only the spawn that
+    produces its inputs is macOS-only."""
+    if exit_code == SECURITY_NOT_FOUND_EXIT:
+        _wipe_string(stdout_text)
+        _wipe_string(stderr_text)
+        return KeychainLookup.miss()
+    if exit_code != 0:
+        var reason = String("/usr/bin/security exited ") + String(exit_code)
+        var tail = _bounded_tail(stderr_text)
+        if len(tail.as_bytes()) > 0:
+            reason += String(": ") + tail^
+        _wipe_string(stdout_text)
+        _wipe_string(stderr_text)
+        return KeychainLookup.error(reason^)
+    var bytes = _stdout_to_secret_bytes(stdout_text)
+    _wipe_string(stdout_text)
+    _wipe_string(stderr_text)
+    return KeychainLookup.found(bytes^)
 
 
 # =============================================================================
@@ -209,10 +218,13 @@ def _bounded_tail(s: String) -> String:
     var start = 0
     if n > MAX:
         start = n - MAX
-    var out = String("")
-    for i in range(start, n):
-        out += chr(Int(src[i]))
-    return out^
+        # Do not start inside a multi-byte character: skip UTF-8 continuation
+        # bytes (10xxxxxx) to the next character boundary.
+        while start < n and (src[start] & UInt8(0xC0)) == UInt8(0x80):
+            start += 1
+    # Trimming ASCII from the end and starting at a boundary keep the slice
+    # valid UTF-8, so non-ASCII diagnostics are kept as they are.
+    return String(s[byte=start:n])
 
 
 # =============================================================================

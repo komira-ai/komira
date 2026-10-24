@@ -12,6 +12,8 @@
 #                               find-generic-password ... -w` through
 #                               komira_supervisor. On any other platform its
 #                               `fetch` answers an error and starts no process.
+#     The exit-code mapping and stdout parsing are `map_security_result`, which
+#     compiles and is tested on every platform.
 #   * `StaticKeychainBackend`   the hermetic, recording test double.
 #   * `parse_keychain_ref`, `build_security_argv`  pure helpers.
 #
@@ -38,4 +40,5 @@ from komira_secrets_keychain.macos_security_backend import (
     SECURITY_NOT_FOUND_EXIT,
     MacosSecurityKeychainBackend,
     build_security_argv,
+    map_security_result,
 )

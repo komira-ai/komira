@@ -35,6 +35,7 @@ from komira_secrets_keychain.macos_security_backend import (
     MacosSecurityKeychainBackend,
     build_security_argv,
     _bounded_tail,
+    map_security_result,
     _stdout_to_secret_bytes,
 )
 
@@ -353,6 +354,71 @@ def test_bounded_tail_trims_and_bounds() raises:
     assert_equal(_bounded_tail(String("   ")), String(""), "all blank")
 
 
+def test_bounded_tail_keeps_non_ascii() raises:
+    """Diagnostics are UTF-8: a tail that starts inside a character skips to the
+    next boundary instead of re-encoding each byte (one byte is not one
+    character), and a short non-ASCII message comes back as it is."""
+    assert_equal(
+        _bounded_tail(String("clé introuvable\n")),
+        String("clé introuvable"),
+        "short non-ASCII message unchanged",
+    )
+    var long = String("a")
+    for _ in range(150):
+        long += "é"
+    long += "b"  # 302 bytes; the 200-byte window starts mid-character
+    var want = String("")
+    for _ in range(99):
+        want += "é"
+    want += "b"
+    assert_equal(_bounded_tail(long), want, "window starts at a boundary")
+
+
+def test_map_security_result_exit_codes() raises:
+    """Every exit class of `security find-generic-password -w`, with no process:
+    0 is found (one newline stripped), 44 is a miss, anything else an error with
+    the code and a bounded stderr tail, and stdout (the secret) never reaches an
+    error."""
+    var out = String("hunter2\n")
+    var err = String("")
+    var found = map_security_result(0, out, err)
+    assert_true(found.is_found(), "exit 0 is found")
+    assert_equal(len(found.bytes), 7, "the CLI's newline is stripped")
+    assert_equal(out, String(""), "stdout dropped")
+
+    var out44 = String("SECRET-IN-STDOUT")
+    var err44 = String("The specified item could not be found in the keychain.\n")
+    assert_true(map_security_result(44, out44, err44).is_miss(), "44 is a miss")
+
+    var out36 = String("SECRET-IN-STDOUT")
+    var err36 = String("User interaction is not allowed.\n")
+    var locked = map_security_result(36, out36, err36)
+    assert_true(locked.is_error(), "36 is an error")
+    assert_equal(
+        locked.error_reason,
+        String("/usr/bin/security exited 36: User interaction is not allowed."),
+        "code and stderr tail",
+    )
+    assert_true(locked.error_reason.find(String("SECRET")) < 0, "no stdout in the error")
+
+    var out128 = String("SECRET-IN-STDOUT")
+    var err128 = String("")
+    var cancelled = map_security_result(128, out128, err128)
+    assert_equal(
+        cancelled.error_reason,
+        String("/usr/bin/security exited 128"),
+        "no stderr, no colon",
+    )
+    assert_true(cancelled.error_reason.find(String("SECRET")) < 0, "no stdout")
+
+    var out1 = String("pw")
+    var err1 = String("x")
+    assert_true(map_security_result(1, out1, err1).is_error(), "1 is an error")
+    var outm = String("pw")
+    var errm = String("")
+    assert_true(map_security_result(-1, outm, errm).is_error(), "a signal-style code is an error")
+
+
 def test_macos_backend_is_gated_by_platform() raises:
     """Off macOS, `fetch` answers an error lookup and starts no process. On
     macOS it is not called here: the test never runs the `security` tool."""
@@ -401,5 +467,7 @@ def main() raises:
     test_keychain_lookup_outcomes()
     test_stdout_strips_exactly_one_newline()
     test_bounded_tail_trims_and_bounds()
+    test_bounded_tail_keeps_non_ascii()
+    test_map_security_result_exit_codes()
     test_macos_backend_is_gated_by_platform()
     print("PASS test_keychain_secret_store")
