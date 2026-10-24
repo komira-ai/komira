@@ -710,6 +710,7 @@ TARGETS = [
     "tests//functional/readme_api_coverage:doc_tree",
     "tests//functional/readme_api_coverage:ok",
     "tests//functional/readme_e2e:doc_tree",
+    "tests//functional/readme_e2e:fixture_native_e2e",
     "tests//functional/readme_e2e:komira_hash",
     "tests//functional/readme_examples/module_mode:doc_tree",
     "tests//functional/readme_examples/module_mode:module_mode_conda",
