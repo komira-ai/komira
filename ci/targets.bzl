@@ -120,6 +120,7 @@ TARGETS = [
     "komira//src/komira_exec_types:komira_exec_types_conda",
     "komira//src/komira_expr:komira_expr_conda",
     "komira//src/komira_flight:komira_flight_conda",
+    "komira//src/komira_flight_server:komira_flight_server_conda",
     "komira//src/komira_gcp_apigateway:komira_gcp_apigateway_conda",
     "komira//src/komira_gcp_artifactregistry:komira_gcp_artifactregistry_conda",
     "komira//src/komira_gcp_cloudscheduler:komira_gcp_cloudscheduler_conda",
