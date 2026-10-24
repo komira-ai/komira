@@ -135,6 +135,7 @@ TARGETS = [
     "komira//src/komira_gcp_serviceusage:komira_gcp_serviceusage_conda",
     "komira//src/komira_gcp_storage:komira_gcp_storage_conda",
     "komira//src/komira_git:komira_git_conda",
+    "komira//src/komira_group_ratchet:komira_group_ratchet_conda",
     "komira//src/komira_grpc:komira_grpc_conda",
     "komira//src/komira_hash:ci",
     "komira//src/komira_hash:coverage_floor",

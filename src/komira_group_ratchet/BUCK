@@ -1,0 +1,30 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# A Megolm-equivalent end-to-end group ratchet, built on komira_crypto's
+# primitives only: a sender's outbound session advances a 4-part 256-bit
+# HMAC-SHA-256 ratchet, HKDF-SHA-256 derives each message's key and nonce,
+# ChaCha20-Poly1305 seals it and Ed25519 signs the envelope; an inbound
+# session is rebuilt from {session key, index} and ratchets forward only.
+# Keys are delivered X25519-sealed; rotate_on_membership_change starts a
+# fresh session so a removed member cannot read later traffic. Every secret
+# is zeroized on drop.
+#
+# Old-rule shape: its one dependency, komira_crypto, is still a
+# mojo_library (it carries native code), and a mojo_package cannot depend on
+# one. The package moves to the mopm shape with komira_crypto.
+mojo_library(
+    name = "komira_group_ratchet",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_crypto:komira_crypto",
+    ],
+    test_srcs = [
+        # ratchet advance and key schedule against independent vectors; the
+        # envelope codec; sealed key delivery; rotation; every refusal
+        "tests/test_group_ratchet.mojo",
+        # malformed wire input refused at every cut; seed length; key-share
+        # lengths; the all-zero prekey; accessors; rotation changes the id
+        "tests/test_group_ratchet_refusals.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
