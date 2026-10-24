@@ -26,6 +26,17 @@ batch by it.
   `sort_batch_by_keys` uses when every key is INT32 / INT64 / STRING: keys
   are encoded as Int64 ranks and, when the ranks fit in 62 bits, packed into
   one Int64 and radix-sorted.
+- `sort_topn_sink`: the sort and top-N sink kernels (`_execute_sort_sink`,
+  `_execute_topn_sink` over `SortSinkData` / `TopNSinkData` of
+  `komira_physical_plan`), and `append_deterministic_tiebreak[_schema]`,
+  the one rule that makes a tied top-N cut deterministic.
+- `sort_topn_heap`: `topn_heap_select`, multi-key top-K over a
+  `RecordBatch` by a bounded heap, O(N log K), for INT64 / INT32 / FLOAT64 /
+  STRING keys.
+- `sort_buffer_untyped`: `SortBuffer_Untyped`, a multi-key sort buffer
+  whose column types are known only at run time (a `ColDescriptor` layout
+  over `komira_column_format` storage), fed from `BatchView`s and read back
+  per DType; its cell codec is `sort_buffer_cells`.
 - `sort_loser_tree`: `LoserTree`, a tournament tree for the k-way merge of
   sorted runs, driven by a caller's `LoserTreeComparator`.
 
