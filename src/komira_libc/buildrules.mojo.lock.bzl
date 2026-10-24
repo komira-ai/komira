@@ -34,11 +34,11 @@ GRAPH_JSON = r'''{
       "root": "src/komira_libc/src/komira_libc",
       "srcs": [
         {"path": "src/komira_libc/src/komira_libc/__init__.mojo", "sha256": "dd8da9da6f72fbc0a7a14e3002b070b31b14054fa5c965140448915365061601"},
-        {"path": "src/komira_libc/src/komira_libc/chunked_write.mojo", "sha256": "07b18a0c630981e5c78f87b8bb2ac484ba48d31ed46159afc164f70818d97907"},
+        {"path": "src/komira_libc/src/komira_libc/chunked_write.mojo", "sha256": "c56257b3b65f63d05f7577627469a31ad0b056116922e1571a448f0de7bc8e4c"},
         {"path": "src/komira_libc/src/komira_libc/fd_write_all.mojo", "sha256": "25a04ebf0b05eda701182a0397a2296e875e84daafeede9a8317e59195751715"},
         {"path": "src/komira_libc/src/komira_libc/owned_fd.mojo", "sha256": "fc905c2a7e34ec0620fbac576a6f98b49eafdbe25ca506bd7ea8585fb3c4deb5"},
         {"path": "src/komira_libc/src/komira_libc/posix.mojo", "sha256": "d50b728092859fb79162ceb93180071d97429a21ec2fb052983f84356d3bb998"},
-        {"path": "src/komira_libc/src/komira_libc/posix_io.mojo", "sha256": "e32c281a6a1ebceecde7173252a844ffab67026f44f7932cff706db9b4e672e0"}
+        {"path": "src/komira_libc/src/komira_libc/posix_io.mojo", "sha256": "30b826930f29a2f9a368c36143e82a155455f8a4c42a5e0edffc1606c87fedbd"}
       ],
       "deps": [],
       "natives": [
@@ -46,7 +46,7 @@ GRAPH_JSON = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["komira_libc.mojoc"],
-      "key": "0847823a39f25dfb01712840feee31c66b3e2879a5ef29c5285e093fccc4f1fb"
+      "key": "a0fcb09111f10dc1256e18b2e3e56181564ae4e1e36171eab0409b1c7812c0e9"
     },
     {
       "id": "komira_libc@0.1.0#mojo1.0.0/test:src/komira_libc/tests/test_chunked_write.mojo",
@@ -54,7 +54,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_libc/tests/test_chunked_write.mojo", "sha256": "47d81e9bf7696deea34fd3fa7e78e983d8d4f358dd0b82aa1963c29d1d348355"}
+        {"path": "src/komira_libc/tests/test_chunked_write.mojo", "sha256": "39acb1da0b76e44331bfd2dae133bb3dec10dab5209c9496ee1172001d045967"}
       ],
       "deps": ["komira_libc@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -62,7 +62,7 @@ GRAPH_JSON = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_chunked_write.pass"],
-      "key": "8356e08d18d038639243ced71f751181c9bcbb5a1c72859d866320bcef9bd9e4"
+      "key": "019f0ae19e57e82dca46d918312520674d10055116e8c058cec993d3e164b76a"
     },
     {
       "id": "komira_libc@0.1.0#mojo1.0.0/test:src/komira_libc/tests/test_fd_write_all_clamps_per_call_length.mojo",
@@ -78,7 +78,7 @@ GRAPH_JSON = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_fd_write_all_clamps_per_call_length.pass"],
-      "key": "bcafe6c956c0ea579d62f5d7b7beeeb7192f278c1005d48c11873451b6e8f247"
+      "key": "3fc11d8335e2b47e906b85dffb82f3fe6370c60c835eecbb12d8e6375b5837a5"
     },
     {
       "id": "komira_libc@0.1.0#mojo1.0.0/test:src/komira_libc/tests/test_owned_fd.mojo",
@@ -94,7 +94,7 @@ GRAPH_JSON = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_owned_fd.pass"],
-      "key": "1b07718394ce6bfe10cf98ba5dbf3ceb861647468bca41a7f947c62452ba53f5"
+      "key": "ee725ab960165f5d8bfff50a44caf1b23562e8070e26b7d098dd7b74d69b7430"
     },
     {
       "id": "komira_libc@0.1.0#mojo1.0.0/test:src/komira_libc/tests/test_posix_io_relative_path_open.mojo",
@@ -110,7 +110,7 @@ GRAPH_JSON = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_posix_io_relative_path_open.pass"],
-      "key": "296a9141a652a2de65e465add3503bbbd3b01e754d726e30e093d95c826808f5"
+      "key": "ebcea43454b733101a04924ea6673dcd4acfbafc2fbd3faf7c69d3de95cba77b"
     },
     {
       "id": "komira_libc@0.1.0#mojo1.0.0/test:src/komira_libc/tests/test_posix_io_writev.mojo",
@@ -126,7 +126,7 @@ GRAPH_JSON = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_posix_io_writev.pass"],
-      "key": "3ad59ffd48729057fc23e958335f7b51b4348c3dbafed80c32ea4ff7d4ee710d"
+      "key": "1c70a54701cd3b13a317d4f78ac2cf9feea1f2b73bea67c1c7aff57a1fd8f1ff"
     },
     {
       "id": "komira_libc@0.1.0#mojo1.0.0/test:src/komira_libc/tests/test_posix_read_env.mojo",
@@ -142,7 +142,7 @@ GRAPH_JSON = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_posix_read_env.pass"],
-      "key": "1f7c7810f8fcddddf2101dfe0b0347f286f47a065556116026bdd426c76ba45e"
+      "key": "261c1d20342c70b034583a8ce7e006c347dbad4559a8eb8bea235e7ece7e1972"
     },
     {
       "id": "komira_libc@0.1.0#mojo1.0.0/test:src/komira_libc/tests/test_posix_unset_env.mojo",
@@ -158,7 +158,7 @@ GRAPH_JSON = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_posix_unset_env.pass"],
-      "key": "d254095e363a11d399349a21f618267e52b7c3655983763c92849a337ce9b69a"
+      "key": "26b23d8ddbb3e9b9bb53fae11857df4c20a0541cb5eefe457872de2ff7c79fa4"
     },
     {
       "id": "komira_libc@0.1.0#mojo1.0.0/test:src/komira_libc/tests/test_pwrite_at.mojo",
@@ -174,7 +174,7 @@ GRAPH_JSON = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_pwrite_at.pass"],
-      "key": "5c6b3c907d609ceb37452f2911d89e9fcf7f5da2ad5adbd1a6037578578c7fe8"
+      "key": "ddb4f3cf8d967d9a995ff4ad3a3dd078ed368220b1abcdfcb1f012c359214e57"
     },
     {
       "id": "komira_libc@0.1.0#mojo1.0.0/test:src/komira_libc/tests/test_thread_self_discriminates.mojo",
@@ -190,7 +190,7 @@ GRAPH_JSON = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_thread_self_discriminates.pass"],
-      "key": "ad77f09be7b62ac54fb91017195a058111ef21b436de96f8c7833f3eb8efb71e"
+      "key": "64aef3379fdc5a0e5ae1ed50bf55b9452b4b509b691c2b48899e78cc6ff09428"
     },
     {
       "id": "native:komira_libc/komira_libc_posix",
