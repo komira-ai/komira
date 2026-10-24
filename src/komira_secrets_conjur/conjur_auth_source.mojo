@@ -224,6 +224,12 @@ struct LiveConjurAuthSource[C: Connector](ConjurAuthSource, Movable):
         # defensively so the stamped header value is clean.
         var token = _ascii_trim(String(unsafe_from_utf8=Span(resp_bytes)))
         _wipe_list(resp_bytes)
+        if token.byte_length() > 0 and not is_header_safe_token(token):
+            raise Error(
+                String("LiveConjurAuthSource: authn POST returned a body that")
+                + String(" is not a valid access token (it holds a space, a")
+                + String(" control byte or a non-ASCII byte)")
+            )
         if token.byte_length() == 0:
             raise Error(
                 String("LiveConjurAuthSource: authn POST returned 200 with an")
@@ -235,6 +241,21 @@ struct LiveConjurAuthSource[C: Connector](ConjurAuthSource, Movable):
 # =============================================================================
 # §3 — tiny helpers (no external string-util dep needed for these).
 # =============================================================================
+def is_header_safe_token(token: String) -> Bool:
+    """Whether `token` can sit inside `Authorization: Token token="..."`: every
+    byte printable ASCII (0x21 to 0x7E) and no `"` or `\\`. A Conjur access
+    token is base64, so a real one always passes; CR, LF, a space, a control
+    byte or a non-ASCII byte means the appliance (or a test double) is sending
+    something that would break out of the header."""
+    var b = token.as_bytes()
+    for i in range(len(b)):
+        if b[i] < UInt8(0x21) or b[i] > UInt8(0x7E):
+            return False
+        if b[i] == UInt8(0x22) or b[i] == UInt8(0x5C):
+            return False
+    return True
+
+
 def _authn_status_hint(status: Int) -> StaticString:
     """A short, NON-secret hint for the common Conjur authn error statuses —
     aids the operator without echoing the response body or the API key."""

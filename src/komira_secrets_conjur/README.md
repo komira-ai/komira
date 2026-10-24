@@ -6,7 +6,7 @@ A `SecretStore` (see [komira_secret_store](https://github.com/komira-ai/komira/b
 over CyberArk Conjur's REST API. `resolve("myorg/app/db/password")` sends
 
 ```text
-GET /secrets/myorg/variable/app/db/password
+GET /secrets/myorg/variable/app%2Fdb%2Fpassword
 Authorization: Token token="<base64 access token>"
 ```
 
@@ -22,8 +22,16 @@ fixed when the store is built and every request goes there; a handle never
 names a host. Handles often come from configuration other people write, and a
 handle that chose the host would choose where the access token is sent, so a
 handle that names a host (one containing `|`) is refused before any request,
-and the refusal does not quote it. A handle with no `/` or an empty account or
-variable id raises before any request.
+and the refusal does not quote it. The handle is untrusted text. The account and the variable id are each sent as
+one percent-encoded path component (the variable id is URL-encoded as Conjur's
+API documents, so its `/` is `%2F` and a `?`, `#`, `%` or space cannot start a
+query or an escape), a variable id or account of `.` or `..` is refused (it would
+walk the path), and a control byte (CR, LF, NUL, any byte below 0x20, DEL)
+anywhere in a handle is refused so it cannot add request headers; none of these
+refusals quotes the handle. Non-ASCII is kept as UTF-8 and sent encoded. A handle
+with no `/` or an empty account or variable id raises before any request. An
+access token holding a space, a control byte or a non-ASCII byte is refused
+rather than stamped into the `Authorization` header.
 
 The access token comes from a `ConjurAuthSource`. `LiveConjurAuthSource[C]`
 POSTs the API key (as the request body, never a header) to
@@ -78,7 +86,7 @@ def main() raises:
     var parsed = parse_conjur_ref("myorg/app/db/password")
     assert_equal(parsed.account, "myorg")
     assert_equal(parsed.variable_id, "app/db/password")
-    assert_equal(read_path_for(parsed.account, parsed.variable_id), "/secrets/myorg/variable/app/db/password")
+    assert_equal(read_path_for(parsed.account, parsed.variable_id), "/secrets/myorg/variable/app%2Fdb%2Fpassword")
     var headers = build_read_request_headers("dG9rZW4=")
     assert_equal(headers.get("Authorization").value(), 'Token token="dG9rZW4="')
 

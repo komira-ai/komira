@@ -26,6 +26,7 @@ from komira_secrets_conjur.conjur_auth_source import (
     StaticConjurAuthSource,
     authn_path_for,
     build_authn_request_headers,
+    is_header_safe_token,
 )
 from komira_secrets_conjur.conjur_secret_store import (
     CONJUR_DEFAULT_PORT,

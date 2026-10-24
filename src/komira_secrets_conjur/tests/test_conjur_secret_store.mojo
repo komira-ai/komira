@@ -363,8 +363,8 @@ def test_read_path_for_builds_variable_path() raises:
     var path = read_path_for(String("myorg"), String("app/db/password"))
     assert_equal(
         path,
-        String("/secrets/myorg/variable/app/db/password"),
-        "the read path is /secrets/{account}/variable/{variable_id}",
+        String("/secrets/myorg/variable/app%2Fdb%2Fpassword"),
+        "the read path is /secrets/{account}/variable/{variable_id}, the id encoded",
     )
 
 
@@ -593,6 +593,164 @@ def test_parse_conjur_ref_refuses_empty_parts() raises:
         assert_true(raised, "refused: " + refs[i])
 
 
+# =============================================================================
+# The handle is untrusted text: control bytes, path syntax, dot segments, UTF-8.
+# =============================================================================
+def _refuses(secret_ref: String) -> String:
+    """The refusal text of `parse_conjur_ref(secret_ref)` ("" if accepted)."""
+    try:
+        var r = parse_conjur_ref(secret_ref)
+        _ = r
+    except e:
+        return String(e)
+    return String("")
+
+
+def test_control_bytes_in_handle_are_refused() raises:
+    """CR, LF, NUL, another control byte and DEL in the account or the variable
+    id would reach the request line and add headers; each is refused, and the
+    refusal quotes nothing of the handle."""
+    var bad = List[String]()
+    bad.append(String("myorg/app\r\nX-Evil: 1"))
+    bad.append(String("myorg/app\ndb"))
+    bad.append(String("myorg/app\rdb"))
+    bad.append(String("my\r\norg/app/db"))
+    bad.append(String("my\torg/app/db"))
+    bad.append(String("myorg/app") + chr(0) + "db")
+    bad.append(String("myorg/app") + chr(0x1B) + "db")
+    bad.append(String("myorg/app") + chr(0x7F) + "db")
+    for i in range(len(bad)):
+        var msg = _refuses(bad[i])
+        assert_true(msg.find(String("control character")) >= 0, "refused: " + msg)
+        assert_true(msg.find(String("myorg")) < 0, "no handle in the refusal")
+        assert_true(msg.find(String("Evil")) < 0, "no handle in the refusal")
+
+
+def _no_dial_conn() -> ScriptedConnector:
+    return ScriptedConnector.with_stream_tls(ScriptedStream.empty())
+
+
+def test_control_bytes_send_nothing_through_resolve() raises:
+    """Through `resolve`, a handle with CRLF is refused before a request is
+    built (the connector answers nothing, so a store that sent would fail with
+    a transport error instead)."""
+    var auth = StaticConjurAuthSource(String(_CANNED_TOKEN))
+    var store = ConjurSecretStore[ScriptedConnector, StaticConjurAuthSource](
+        _no_dial_conn, auth^, String("conjur.example.test")
+    )
+    var msg = String("")
+    try:
+        var sv = store.resolve(String("myorg/app\r\nX-Evil: 1"))
+        _ = sv^
+    except e:
+        msg = String(e)
+    assert_true(msg.find(String("control character")) >= 0, msg)
+    _ = store^
+
+
+def test_read_path_percent_encodes_the_variable_id() raises:
+    """A variable id holding `/`, `?`, a space and `%` is one encoded path
+    component: it cannot start a query, add segments or smuggle an escape."""
+    var r = parse_conjur_ref(String("myorg/a/b?c d%e#f"))
+    assert_equal(r.variable_id, String("a/b?c d%e#f"), "parsed whole")
+    assert_equal(
+        read_path_for(r.account, r.variable_id),
+        String("/secrets/myorg/variable/a%2Fb%3Fc%20d%25e%23f"),
+        "exactly one encoded component",
+    )
+    assert_equal(
+        read_path_for(String("my org"), String("app/db/password")),
+        String("/secrets/my%20org/variable/app%2Fdb%2Fpassword"),
+        "the account is a component too; `/` in a variable id is %2F",
+    )
+    assert_equal(
+        read_path_for(String("a"), String("AZaz09-._~")),
+        String("/secrets/a/variable/AZaz09-._~"),
+        "unreserved bytes stay as they are",
+    )
+
+
+def test_dot_segments_are_refused() raises:
+    """A variable id (or account) of `.` or `..` is a dot segment: after the
+    other bytes are encoded it would still walk the path. Refused; ids that only
+    contain dots are fine."""
+    assert_true(_refuses(String("myorg/..")).find(String("dot segment")) >= 0, "..")
+    assert_true(_refuses(String("myorg/.")).find(String("dot segment")) >= 0, ".")
+    assert_true(_refuses(String("../x")).find(String("dot segment")) >= 0, "account ..")
+    assert_true(_refuses(String("./x")).find(String("dot segment")) >= 0, "account .")
+    assert_equal(_refuses(String("myorg/...")), String(""), "three dots are a name")
+    assert_equal(_refuses(String("myorg/a/../b")), String(""), "inside an encoded id")
+    assert_equal(
+        read_path_for(String("myorg"), String("a/../b")),
+        String("/secrets/myorg/variable/a%2F..%2Fb"),
+        "the slashes are encoded, so it is one segment",
+    )
+
+
+def test_non_ascii_handle_is_kept_and_encoded() raises:
+    """Non-ASCII is kept byte for byte (UTF-8, as the keychain store does) and
+    sent percent-encoded."""
+    var r = parse_conjur_ref(String("café/dé/ç"))
+    assert_equal(r.account, String("café"), "account")
+    assert_equal(r.variable_id, String("dé/ç"), "variable id")
+    assert_equal(
+        read_path_for(r.account, r.variable_id),
+        String("/secrets/caf%C3%A9/variable/d%C3%A9%2F%C3%A7"),
+        "UTF-8 percent-encoded",
+    )
+
+
+def test_token_with_control_bytes_is_refused() raises:
+    """A token with CR/LF (or any byte a header value cannot hold) is refused
+    rather than stamped into the Authorization header, without echoing it."""
+    var bad = List[String]()
+    bad.append(String("ab\r\nX-Evil: 1"))
+    bad.append(String("ab\ncd"))
+    bad.append(String("ab cd"))
+    bad.append(String("ab") + chr(0) + "cd")
+    bad.append(String("abé"))
+    for i in range(len(bad)):
+        var raised = False
+        try:
+            var h = build_read_request_headers(bad[i].copy())
+            _ = h^
+        except e:
+            raised = True
+            assert_true(String(e).find(String("Evil")) < 0, "token not echoed")
+        assert_true(raised, "refused token " + String(i))
+
+
+def _mk_injected_token_connector() -> ScriptedConnector:
+    return _scripted_connector_for(
+        _http_response(String("200 OK"), String("abc\r\nX-Evil: 1"))
+    )
+
+
+def test_live_source_refuses_interior_control_bytes() raises:
+    """An authn answer with an interior CR/LF is refused (the edges are trimmed,
+    the interior is not trusted); the message does not echo it."""
+    var msg = _live_error(_mk_injected_token_connector)
+    assert_true(msg.find(String("not a valid access token")) >= 0, msg)
+    assert_true(msg.find(String("Evil")) < 0, msg)
+
+
+def test_static_token_with_crlf_sends_nothing() raises:
+    """A static source whose token holds CRLF makes `resolve` raise before the
+    request is sent."""
+    var auth = StaticConjurAuthSource(String("ab\r\nX-Evil: 1"))
+    var store = ConjurSecretStore[ScriptedConnector, StaticConjurAuthSource](
+        _no_dial_conn, auth^, String("conjur.example.test")
+    )
+    var msg = String("")
+    try:
+        var sv = store.resolve(String(_TEST_REF))
+        _ = sv^
+    except e:
+        msg = String(e)
+    assert_true(msg.find(String("not a valid access token")) >= 0, msg)
+    _ = store^
+
+
 def main() raises:
     # (a) authn -> read happy path
     test_resolve_returns_raw_body()
@@ -620,4 +778,13 @@ def main() raises:
     test_build_authn_request_headers_holds_no_key()
     test_host_bearing_handle_sends_nothing()
     test_parse_conjur_ref_refuses_empty_parts()
+    # untrusted handle and token
+    test_control_bytes_in_handle_are_refused()
+    test_control_bytes_send_nothing_through_resolve()
+    test_read_path_percent_encodes_the_variable_id()
+    test_dot_segments_are_refused()
+    test_non_ascii_handle_is_kept_and_encoded()
+    test_token_with_control_bytes_is_refused()
+    test_live_source_refuses_interior_control_bytes()
+    test_static_token_with_crlf_sends_nothing()
     print("PASS test_conjur_secret_store")

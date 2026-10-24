@@ -39,7 +39,10 @@ from komira_http_core.transport.io_stream import Connector
 from komira_secret_store.secret_store import SecretStore
 from komira_secret_store.secret_value import SecretValue
 
-from komira_secrets_conjur.conjur_auth_source import ConjurAuthSource
+from komira_secrets_conjur.conjur_auth_source import (
+    ConjurAuthSource,
+    is_header_safe_token,
+)
 
 
 # =============================================================================
@@ -84,13 +87,24 @@ def parse_conjur_ref(secret_ref: String) raises -> ConjurSecretRef:
     variable) RAISES: fail fast and loud, never a silent mis-read of the wrong
     variable. Pure: no network."""
     var rest = secret_ref.copy()
+    # The handle is untrusted text. A control byte (CR, LF, NUL, DEL, ...) would
+    # reach the request line and could add headers; none is accepted, and the
+    # refusal quotes nothing.
+    var rb = rest.as_bytes()
+    for i in range(len(rb)):
+        if rb[i] < UInt8(0x20) or rb[i] == UInt8(0x7F):
+            raise Error(
+                String("ConjurSecretStore: secret_ref holds a control character")
+                + String(" (CR, LF or another byte below 0x20, or DEL)")
+            )
     if _index_of(rest, ord("|")) >= 0:
         raise Error(
             String("ConjurSecretStore: secret_ref names a host: write")
             + String(" '{account}/{variable_id}'; the appliance is fixed when the")
             + String(" store is built")
         )
-    # Split account from variable_id on the FIRST `/`.
+    # Split account from variable_id on the FIRST `/` (an ASCII byte, so both
+    # halves are UTF-8 boundaries and a non-ASCII name is kept byte for byte).
     var slash = _index_of(rest, ord("/"))
     if slash <= 0:
         raise Error(
@@ -98,22 +112,35 @@ def parse_conjur_ref(secret_ref: String) raises -> ConjurSecretRef:
             + secret_ref
             + String("' — expected '{account}/{variable_id}'")
         )
-    var account = _slice(rest, 0, slash)
-    var variable_id = _slice(rest, slash + 1, len(rest.as_bytes()))
+    var n = rest.byte_length()
+    var account = String(rest[byte=0:slash])
+    var variable_id = String(rest[byte = slash + 1 : n])
     if len(account.as_bytes()) == 0 or len(variable_id.as_bytes()) == 0:
         raise Error(
             String("ConjurSecretStore: malformed secret_ref '")
             + secret_ref
             + String("' — empty account or variable id")
         )
+    # `.` and `..` stay dot segments after encoding and would walk the path.
+    if _is_dot_segment(account) or _is_dot_segment(variable_id):
+        raise Error(
+            String("ConjurSecretStore: secret_ref's account or variable id is a")
+            + String(" dot segment ('.' or '..')")
+        )
     return ConjurSecretRef(account=account^, variable_id=variable_id^)
 
 
 def read_path_for(account: String, variable_id: String) -> String:
     """The Conjur secret-read REST path:
-    `/secrets/{account}/variable/{variable_id}`. Pure — no network."""
+    `/secrets/{account}/variable/{variable_id}`, each of the two a single
+    percent-encoded path component (so a `/` in a variable id is `%2F`, and
+    `?`, `#`, `%` and a space cannot start a query or an escape). Pure: no
+    network."""
     return (
-        CONJUR_SECRETS_PREFIX + account + CONJUR_VARIABLE_KIND + variable_id
+        CONJUR_SECRETS_PREFIX
+        + _percent_encode(account)
+        + CONJUR_VARIABLE_KIND
+        + _percent_encode(variable_id)
     )
 
 
@@ -126,6 +153,11 @@ def build_read_request_headers(var token: String) raises -> HeaderMap:
     round-trip — a test asserts the `Token token="…"` header off the returned
     `HeaderMap` (the 'the auth path sends a Conjur Token header' gate). Pure — no
     network."""
+    if not is_header_safe_token(token):
+        raise Error(
+            String("ConjurSecretStore: the access token is not a valid access")
+            + String(" token (it holds a byte a header value cannot carry)")
+        )
     var headers = HeaderMap()
     # Build the Conjur `Token token="<base64>"` header value. The token is moved
     # in BY VALUE; concatenate via a single owned local so the move binds before
@@ -276,19 +308,37 @@ def _index_of(haystack: String, byte: Int) -> Int:
     return -1
 
 
-def _slice(s: String, start: Int, end: Int) -> String:
-    """A byte-range substring `s[start:end]` (ASCII-safe — Conjur refs are
-    ASCII). Bounds are assumed valid by the caller (the parse computes them)."""
-    var sb = s.as_bytes()
+def _is_dot_segment(s: String) -> Bool:
+    return s == "." or s == ".."
+
+
+def _hex_digit(v: Int) -> String:
+    if v < 10:
+        return chr(0x30 + v)
+    return chr(0x41 + (v - 10))
+
+
+def _percent_encode(s: String) -> String:
+    """Percent-encode the UTF-8 bytes of `s` as one path component: the RFC 3986
+    unreserved bytes (letters, digits, `-` `.` `_` `~`) stay, everything else
+    (`/` included) becomes `%XX`."""
     var out = String("")
-    var lo = start
-    if lo < 0:
-        lo = 0
-    var hi = end
-    if hi > len(sb):
-        hi = len(sb)
-    for k in range(lo, hi):
-        out += chr(Int(sb[k]))
+    var b = s.as_bytes()
+    for i in range(len(b)):
+        var c = b[i]
+        var keep = (
+            (c >= UInt8(0x41) and c <= UInt8(0x5A))
+            or (c >= UInt8(0x61) and c <= UInt8(0x7A))
+            or (c >= UInt8(0x30) and c <= UInt8(0x39))
+            or c == UInt8(0x2D)
+            or c == UInt8(0x2E)
+            or c == UInt8(0x5F)
+            or c == UInt8(0x7E)
+        )
+        if keep:
+            out += chr(Int(c))
+        else:
+            out += "%" + _hex_digit(Int(c) >> 4) + _hex_digit(Int(c) & 0xF)
     return out^
 
 
