@@ -215,6 +215,9 @@ struct Tracer(Deinitable):
     var _span_counter: AtomicU64
     # Backpressure policy snapshot at construction.
     var _overflow_policy: UInt8
+    # Drain-join work counter: span records examined to resolve CLOSE
+    # packets, summed over every drain of this Tracer (see `join_probes`).
+    var _join_probes: Int
 
     def __init__(
         out self,
@@ -237,6 +240,7 @@ struct Tracer(Deinitable):
         self._trace_counter = AtomicU64(UInt64(1))
         self._span_counter = AtomicU64(UInt64(1))
         self._overflow_policy = overflow_policy
+        self._join_probes = 0
 
     def install_mock_clock(mut self, var clock: MockClock):
         """Test helper. Replace the production timestamp source with a
@@ -463,6 +467,11 @@ struct Tracer(Deinitable):
         for i in range(len(packets)):
             ref p = packets[i]
             if p.kind == PACKET_CLOSE:
+                # One index lookup resolves this CLOSE: one probe. A join
+                # that scanned `records` instead must count every record it
+                # compares here, which is what makes it visible to
+                # `join_probes()`.
+                self._join_probes += 1
                 var hit = index.get(p.span_id)
                 if hit:
                     var j = hit.value()
@@ -487,6 +496,17 @@ struct Tracer(Deinitable):
             exporter.flush_record(records[i], self._name_registry)
 
     @always_inline
+    def join_probes(self) -> Int:
+        """Span records the drain examined to resolve CLOSE packets, summed
+        over every drain of this Tracer.
+
+        A test observable for the join's complexity: the indexed join costs
+        exactly one probe per CLOSE packet, a per-CLOSE scan over the records
+        costs one per record compared (quadratic in the span count).
+        """
+        return self._join_probes
+
+    @always_inline
     def name_registry_count(self) -> Int:
         return self._name_registry.count()
 
@@ -494,3 +514,15 @@ struct Tracer(Deinitable):
     def ring_size(self, worker_id: Int) -> Int64:
         ref ring = self._rings.get_mut_interior(worker_id)
         return ring.approximate_size()
+
+    @always_inline
+    def ring_blocked_count(self, worker_id: Int) -> Int64:
+        """Pushes on this worker's ring that found it full and waited."""
+        ref ring = self._rings.get_mut_interior(worker_id)
+        return ring.overflow_blocked_count()
+
+    @always_inline
+    def ring_dropped_count(self, worker_id: Int) -> Int64:
+        """Pushes on this worker's ring refused because it was full."""
+        ref ring = self._rings.get_mut_interior(worker_id)
+        return ring.overflow_dropped_count()
