@@ -26,7 +26,7 @@ No pointer type appears in any signature. The data plane is owned by value; the
 service is the `G` that HttpServer holds by value for its whole lifetime.
 """
 
-from .flight_broker_data import FlightBrokerData
+from .flight_broker_data import FlightBrokerData, MAX_TOPIC_NAME_BYTES
 
 from .flight_service import (
     FLIGHT_DO_GET_PATH,

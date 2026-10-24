@@ -72,6 +72,7 @@ from komira_connect.status import (
 
 from komira_arrow.record_batch import RecordBatch
 from komira_arrow.schema import Schema
+from komira_collections.slab import Slab
 from komira_arrow_ipc.ipc_encoder_dispatch import encode_schema_message
 
 from komira_flight import (
@@ -88,7 +89,7 @@ from komira_flight import (
     flight_data_to_record_batch,
 )
 
-from .flight_broker_data import FlightBrokerData
+from .flight_broker_data import FlightBrokerData, MAX_TOPIC_NAME_BYTES
 
 
 comptime FLIGHT_GET_INFO_PATH: String = "/arrow.flight.protocol.FlightService/GetFlightInfo"
@@ -311,6 +312,18 @@ struct FlightBrokerService(
                 + "])",
                 resp_ct^,
             )
+        if get_partition >= self._data.num_partitions(topic):
+            return _stream_error(
+                GRPC_STATUS_INVALID_ARGUMENT,
+                String("DoGet ticket partition ")
+                + String(get_partition)
+                + " is out of range for topic '"
+                + topic
+                + "' (it has "
+                + String(self._data.num_partitions(topic))
+                + " partitions)",
+                resp_ct^,
+            )
         var batches = self._data.read_batches(
             topic, get_partition, bt.start_offset
         )
@@ -362,6 +375,20 @@ struct FlightBrokerService(
                 resp_ct^,
             )
         var topic = first.flight_descriptor.path[0]
+        if len(topic.as_bytes()) == 0:
+            return _stream_error(
+                GRPC_STATUS_INVALID_ARGUMENT,
+                String("DoPut descriptor path[0] (the topic) is empty"),
+                resp_ct^,
+            )
+        if len(topic.as_bytes()) > MAX_TOPIC_NAME_BYTES:
+            return _stream_error(
+                GRPC_STATUS_INVALID_ARGUMENT,
+                String("DoPut topic name is longer than ")
+                + String(MAX_TOPIC_NAME_BYTES)
+                + " bytes",
+                resp_ct^,
+            )
         # The client-supplied target partition rides the descriptor path as
         # path[1] (a decimal string). Absent (single-segment path) -> 0. The
         # partition is caller-supplied on the wire; there is no hash router.
@@ -381,12 +408,6 @@ struct FlightBrokerService(
                     + String(MAX_TOPIC_PARTITIONS) + "])",
                     resp_ct^,
                 )
-        if not self._data.has_topic(topic):
-            # Auto-register the topic on first DoPut (Flight clients do_put to a
-            # path without a prior CreateTopic; the broker materializes it). The
-            # auto-registered topic must have ENOUGH partitions for the supplied
-            # index (>= put_partition + 1); a single-partition put gives 1.
-            self._data.add_topic(topic.copy(), put_partition + 1)
 
         # The schema message bytes for reassembly (data_header of FlightData[0]).
         var schema_header = first.data_header.copy()
@@ -397,22 +418,76 @@ struct FlightBrokerService(
                 resp_ct^,
             )
 
-        # Establish the topic schema from the first batch (decoded below) so
-        # GetFlightInfo can surface it. Done after we decode batch 0.
-        var schema_set = False
-        var n_produced = Int64(0)
-        var now_ms = Int64(0)
-
+        # VALIDATE THE WHOLE STREAM BEFORE CHANGING ANYTHING. Every batch is
+        # decoded against the stream's schema first; a batch that does not
+        # decode refuses the DoPut, so none of its rows is produced and the
+        # topic is not registered. Then the partition is checked against an
+        # existing topic, and the stream's schema against the topic's.
+        var batches = Slab[RecordBatch]()
         for i in range(1, len(req_messages)):
             var fd = FlightData.decode(Span(req_messages[i]))
             if len(fd.data_header) == 0:
                 # A schema-only / metadata-only FlightData (no batch); skip.
                 continue
-            var batch = flight_data_to_record_batch(
-                schema_header.copy(), fd.data_header.copy(), fd.data_body.copy()
-            )
+            try:
+                batches.append(
+                    flight_data_to_record_batch(
+                        schema_header.copy(),
+                        fd.data_header.copy(),
+                        fd.data_body.copy(),
+                    )
+                )
+            except e:
+                return _stream_error(
+                    GRPC_STATUS_INVALID_ARGUMENT,
+                    String("DoPut FlightData message ")
+                    + String(i)
+                    + " is not a valid record batch: "
+                    + String(e),
+                    resp_ct^,
+                )
+        if self._data.has_topic(topic):
+            if put_partition >= self._data.num_partitions(topic):
+                return _stream_error(
+                    GRPC_STATUS_INVALID_ARGUMENT,
+                    String("DoPut partition ")
+                    + String(put_partition)
+                    + " is out of range for topic '"
+                    + topic
+                    + "' (it has "
+                    + String(self._data.num_partitions(topic))
+                    + " partitions)",
+                    resp_ct^,
+                )
+            if self._data.has_schema(topic) and len(batches) > 0:
+                # Every batch decoded against the one schema header, so the
+                # first batch's schema is the stream's.
+                var stream_schema = _ipc_schema_message_bytes(
+                    batches[0].schema.copy()
+                )
+                if stream_schema != _ipc_schema_message_bytes(
+                    self._data.schema_copy(topic)
+                ):
+                    return _stream_error(
+                        GRPC_STATUS_INVALID_ARGUMENT,
+                        String("DoPut schema differs from the schema of topic '")
+                        + topic
+                        + "'",
+                        resp_ct^,
+                    )
+
+        if not self._data.has_topic(topic):
+            # Auto-register the topic on first DoPut (Flight clients do_put to a
+            # path without a prior CreateTopic; the broker materializes it). The
+            # auto-registered topic must have ENOUGH partitions for the supplied
+            # index (>= put_partition + 1); a single-partition put gives 1.
+            self._data.add_topic(topic.copy(), put_partition + 1)
+
+        var now_ms = Int64(0)
+        var schema_set = self._data.has_schema(topic)
+        for i in range(len(batches)):
             if not schema_set:
-                self._data.set_schema(topic, batch.schema.copy())
+                self._data.set_schema(topic, batches[i].schema.copy())
                 schema_set = True
             # NOT LEASE-FENCED. This Flight produce has no assignment or
             # lease ingestion wired in, so `produce` runs at the default lease
@@ -420,11 +495,14 @@ struct FlightBrokerService(
             # fence it, the coordinator's assigned generations would have to
             # be plumbed into this server and passed to `produce` as
             # writer and current lease epochs.
-            # Route to the client-supplied partition (descriptor path[1];
-            # default 0). FlightBrokerData.produce bounds-checks it.
-            var base = self._data.produce(topic, put_partition, batch^, now_ms)
-            n_produced += Int64(1)
-            _ = base
+            # Each batch is flushed durably as it is produced, so a failure of
+            # the object store part-way through the loop leaves the earlier
+            # batches stored: the validation above is what makes an invalid
+            # stream all-or-nothing, not this loop.
+            var rb = batches.take_slot_unchecked(i)
+            _ = self._data.produce(topic, put_partition, rb^, now_ms)
+        batches.set_len_unchecked(0)
+        _ = batches^
 
         # PutResult with empty app_metadata (the standard "all received" ack).
         var pr = PutResult()

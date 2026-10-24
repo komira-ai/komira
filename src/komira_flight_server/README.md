@@ -21,9 +21,22 @@ the broker cores.
 
   The other `FlightService` RPCs (Handshake, ListFlights, PollFlightInfo,
   GetSchema, DoExchange, DoAction, ListActions) are not served and answer
-  `NOT_FOUND`. A malformed or out-of-range request is `INVALID_ARGUMENT`: a
+  `NOT_FOUND`. A request the client got wrong is `INVALID_ARGUMENT`: a
   partition that is not a decimal number from 0 to 1024 in a DoPut descriptor
-  or a DoGet ticket.
+  or a DoGet ticket, a partition past the end of an existing topic, a topic
+  name that is empty or longer than 255 bytes (`MAX_TOPIC_NAME_BYTES`), a DoPut
+  whose schema differs from the topic's, and a DoPut message that is not a
+  valid record batch.
+
+  A DoPut is validated as a whole before it changes anything: every batch is
+  decoded, the partition and the schema are checked, and only then is the topic
+  registered (when new) and the batches produced. A refused DoPut therefore
+  registers no topic and stores no row. One limit remains: each batch is flushed
+  to the object store as it is produced, so if the store itself fails part-way
+  through a valid stream, the batches before the failure stay stored and the
+  client gets an error. A flushed segment cannot be taken back, and this
+  server does not group a stream into one flush, so a client that retries after such an error can store those
+  batches twice.
 - `FlightBrokerData` is the data plane: per topic and partition, one
   `BrokerCore` for produce (each DoPut batch is flushed before it is
   acknowledged) and one `ConsumeCore` for reads, over one in-memory

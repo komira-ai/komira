@@ -8,8 +8,11 @@ the h2 serve loop does, and decode the framed responses. What they pin:
     values, order, the schema, one endpoint per partition, ticket contents;
   * partition routing through the wire (descriptor path[1], ticket field 3);
   * every refusal and its gRPC status: unknown topic and unknown method are
-    NOT_FOUND, a malformed or out-of-range request is INVALID_ARGUMENT, and a
-    protobuf that does not parse is INTERNAL;
+    NOT_FOUND, a malformed or out-of-range request (a partition past the topic,
+    a topic name that is empty or too long, a schema that differs from the
+    topic's, a batch that does not decode) is INVALID_ARGUMENT, and a protobuf
+    that does not parse is INTERNAL; a refused DoPut registers nothing and
+    stores no row;
   * the partition-count ceiling that stops a DoPut from asking for an unbounded
     number of cores, including a digit run that would wrap a 64-bit Int.
 """
@@ -54,6 +57,7 @@ from komira_flight_server import (
     FLIGHT_GET_INFO_PATH,
     FlightBrokerData,
     FlightBrokerService,
+    MAX_TOPIC_NAME_BYTES,
 )
 
 comptime _CT = "application/grpc+proto"
@@ -70,22 +74,22 @@ def _lb(values: List[UInt8]) -> List[UInt8]:
     return values.copy()
 
 
-def _schema() -> Schema:
+def _schema(name: String = String("val")) -> Schema:
     return Schema(
-        names=[String("val")],
+        names=[name.copy()],
         arrow_types=[ArrowType.INT64.type_id],
         dtypes=[DType.int64],
         nullables=[False],
     )
 
 
-def _batch(base: Int64, n: Int) raises -> RecordBatch:
+def _batch(base: Int64, n: Int, column: String = String("val")) raises -> RecordBatch:
     var values = List[Int64]()
     for i in range(n):
         values.append(base + Int64(i))
     var arr = PrimitiveArray[DType.int64].from_list(values)
     var col = Column.from_primitive[DType.int64](arr^)
-    return RecordBatch.from_typed_columns_1(_schema(), col^)
+    return RecordBatch.from_typed_columns_1(_schema(column), col^)
 
 
 def _service() raises -> FlightBrokerService:
@@ -99,16 +103,21 @@ def _descriptor_path(topic: String, partition: String = String("")) -> FlightDes
     return d^
 
 
-def _put_body(var descriptor: FlightDescriptor, base: Int64, n_batches: Int) raises -> List[UInt8]:
+def _put_body(
+    var descriptor: FlightDescriptor,
+    base: Int64,
+    n_batches: Int,
+    column: String = String("val"),
+) raises -> List[UInt8]:
     """A DoPut request body: the schema message carrying the descriptor, then
     `n_batches` batches of three rows, each batch starting `10` above the last."""
     var body = List[UInt8]()
-    var first = FlightData.decode(Span(encode_schema_flight_data(_schema())))
+    var first = FlightData.decode(Span(encode_schema_flight_data(_schema(column))))
     first.flight_descriptor = descriptor^
     first.has_descriptor = True
     grpc_append_message(body, Span(first.encode()))
     for b in range(n_batches):
-        var fd_bytes = encode_batch_flight_data(_batch(base + Int64(10 * b), 3))
+        var fd_bytes = encode_batch_flight_data(_batch(base + Int64(10 * b), 3, column))
         grpc_append_message(body, Span(fd_bytes))
     return body^
 
@@ -302,9 +311,9 @@ def test_do_get_refusals() raises:
         svc, BrokerTicket(String("t"), Int64(0), Int64(9_000_000_000)).encode()
     )
     assert_equal(Int(huge.grpc_status), Int(GRPC_STATUS_INVALID_ARGUMENT))
-    # In range for the ceiling but not for this topic: the broker refuses it.
+    # In range for the ceiling but not for this topic: also the client's error.
     var past = _do_get(svc, BrokerTicket(String("t"), Int64(0), Int64(5)).encode())
-    assert_equal(Int(past.grpc_status), Int(GRPC_STATUS_INTERNAL))
+    assert_equal(Int(past.grpc_status), Int(GRPC_STATUS_INVALID_ARGUMENT))
     # Exactly one request message is expected.
     var two = List[UInt8]()
     grpc_append_message(two, Span(Ticket(BrokerTicket(String("t"), Int64(0)).encode()).encode()))
@@ -340,6 +349,15 @@ def test_do_get_refusals() raises:
     print("    OK: every DoGet refusal carries its status")
 
 
+def _not_registered(mut svc: FlightBrokerService, topic: String) raises:
+    var info = _get_info(svc, FlightDescriptor.for_path(topic.copy()))
+    assert_equal(
+        Int(info.grpc_status),
+        Int(GRPC_STATUS_NOT_FOUND),
+        String("a refused DoPut registered topic '") + topic + "'",
+    )
+
+
 def test_do_put_refusals() raises:
     print("  test_do_put_refusals...")
     var svc = _service()
@@ -353,13 +371,15 @@ def test_do_put_refusals() raises:
     var empty_path = _put_body(FlightDescriptor(), Int64(0), 0)
     assert_equal(Int(_do_put(svc, empty_path).grpc_status), Int(GRPC_STATUS_INVALID_ARGUMENT))
 
-    # The first message must carry the schema header.
+    # The first message must carry the schema header; the topic it names is
+    # not registered by the refusal.
     var no_schema = FlightData(
-        FlightDescriptor.for_path(String("t")), True, List[UInt8](), List[UInt8](), List[UInt8]()
+        FlightDescriptor.for_path(String("no_schema")), True, List[UInt8](), List[UInt8](), List[UInt8]()
     )
     var no_schema_body = List[UInt8]()
     grpc_append_message(no_schema_body, Span(no_schema.encode()))
     assert_equal(Int(_do_put(svc, no_schema_body).grpc_status), Int(GRPC_STATUS_INVALID_ARGUMENT))
+    _not_registered(svc, String("no_schema"))
 
     # path[1] must be a decimal partition within the ceiling. 25 digits would
     # wrap a 64-bit Int to a positive value if the parser did not cap its
@@ -383,27 +403,132 @@ def test_do_put_refusals() raises:
             Int(GRPC_STATUS_INVALID_ARGUMENT),
             String("path[1] = '") + bad_partitions[i] + "'",
         )
-    # None of the refusals registered the topic.
-    var info = _get_info(svc, FlightDescriptor.for_path(String("hostile")))
-    assert_equal(Int(info.grpc_status), Int(GRPC_STATUS_NOT_FOUND))
-
-    # An empty path[1] (a trailing empty segment) is also not a partition.
+        _not_registered(svc, String("hostile"))
+    # An empty path[1] is built by hand: `_descriptor_path` drops it.
     var empty_seg = FlightDescriptor.for_path(String("hostile"))
     empty_seg.path.append(String(""))
     assert_equal(
         Int(_do_put(svc, _put_body(empty_seg^, Int64(0), 1)).grpc_status),
         Int(GRPC_STATUS_INVALID_ARGUMENT),
     )
+    _not_registered(svc, String("hostile"))
 
-    # A partition past the end of an existing topic is refused by the broker.
+    # A partition past the end of an existing topic is the client's error, and
+    # nothing is produced.
     svc.add_topic(String("two"), 2)
     var past = _do_put(svc, _put_body(_descriptor_path(String("two"), String("2")), Int64(0), 1))
-    assert_equal(Int(past.grpc_status), Int(GRPC_STATUS_INTERNAL))
+    assert_equal(Int(past.grpc_status), Int(GRPC_STATUS_INVALID_ARGUMENT))
+    assert_equal(len(_values_of(_do_get(svc, BrokerTicket(String("two"), Int64(0), Int64(0)).encode()))), 0)
 
     # A truncated envelope never reaches the handler.
     var trunc = _do_put(svc, _lb([0, 0, 0, 0, 9, 1]))
     assert_equal(Int(trunc.grpc_status), Int(GRPC_STATUS_INVALID_ARGUMENT))
     print("    OK: every DoPut refusal carries its status; none registers a topic")
+
+
+def test_topic_name_limits() raises:
+    print("  test_topic_name_limits...")
+    var svc = _service()
+    var empty = _do_put(svc, _put_body(FlightDescriptor.for_path(String("")), Int64(0), 1))
+    assert_equal(Int(empty.grpc_status), Int(GRPC_STATUS_INVALID_ARGUMENT))
+    var longest = String("")
+    for _ in range(MAX_TOPIC_NAME_BYTES):
+        longest += "a"
+    var ok = _do_put(svc, _put_body(FlightDescriptor.for_path(longest.copy()), Int64(0), 1))
+    assert_equal(Int(ok.grpc_status), Int(GRPC_STATUS_OK))
+    var too_long = longest + "a"
+    var refused = _do_put(svc, _put_body(FlightDescriptor.for_path(too_long.copy()), Int64(0), 1))
+    assert_equal(Int(refused.grpc_status), Int(GRPC_STATUS_INVALID_ARGUMENT))
+    _not_registered(svc, too_long)
+    # The data plane refuses the same names for a caller that skips the service.
+    var data = FlightBrokerData(String("names"))
+    var raised = False
+    try:
+        data.add_topic(String(""), 1)
+    except:
+        raised = True
+    assert_true(raised, "an empty topic name must raise")
+    raised = False
+    try:
+        data.add_topic(too_long.copy(), 1)
+    except:
+        raised = True
+    assert_true(raised, "an over-long topic name must raise")
+    print("    OK: empty and over-long topic names are refused, the longest is accepted")
+
+
+def test_do_put_schema_mismatch_is_refused() raises:
+    print("  test_do_put_schema_mismatch_is_refused...")
+    var svc = _service()
+    var first = _do_put(svc, _put_body(_descriptor_path(String("t")), Int64(10), 1))
+    assert_equal(Int(first.grpc_status), Int(GRPC_STATUS_OK))
+    # A second DoPut under another schema (another column name) is refused and
+    # leaves the topic as it was.
+    var other = _do_put(
+        svc, _put_body(_descriptor_path(String("t")), Int64(500), 1, String("other"))
+    )
+    assert_equal(Int(other.grpc_status), Int(GRPC_STATUS_INVALID_ARGUMENT))
+    var got = _do_get(svc, BrokerTicket(String("t"), Int64(0), Int64(0)).encode())
+    assert_equal(len(got.messages), 2)  # the first schema + the first batch only
+    var vals = _values_of(got)
+    assert_equal(len(vals), 3)
+    assert_equal(vals[0], Int64(10))
+    var info = FlightInfo.decode(
+        grpc_decode_unary(Span(_get_info(svc, FlightDescriptor.for_path(String("t"))).body))
+    )
+    assert_equal(info.total_records, Int64(3))
+    # The same schema again is still accepted.
+    var again = _do_put(svc, _put_body(_descriptor_path(String("t")), Int64(20), 1))
+    assert_equal(Int(again.grpc_status), Int(GRPC_STATUS_OK))
+    assert_equal(len(_values_of(_do_get(svc, BrokerTicket(String("t"), Int64(0), Int64(0)).encode()))), 6)
+    print("    OK: a different schema is refused and changes nothing")
+
+
+def test_do_put_with_a_bad_batch_stores_nothing() raises:
+    print("  test_do_put_with_a_bad_batch_stores_nothing...")
+    var svc = _service()
+    # Schema, a good batch, then a batch whose header is not an IPC message.
+    var body = _put_body(_descriptor_path(String("atomic")), Int64(1), 1)
+    var bad = FlightData.batch_message(_lb([1, 2, 3, 4, 5, 6, 7, 8]), _lb([9, 9]))
+    grpc_append_message(body, Span(bad.encode()))
+    var resp = _do_put(svc, body)
+    assert_equal(Int(resp.grpc_status), Int(GRPC_STATUS_INVALID_ARGUMENT))
+    # A refused new topic is not registered and holds no rows.
+    _not_registered(svc, String("atomic"))
+
+    # On an existing topic, the good first batch of a refused DoPut is not stored.
+    var ok = _do_put(svc, _put_body(_descriptor_path(String("kept")), Int64(100), 1))
+    assert_equal(Int(ok.grpc_status), Int(GRPC_STATUS_OK))
+    var body2 = _put_body(_descriptor_path(String("kept")), Int64(200), 1)
+    grpc_append_message(body2, Span(bad.encode()))
+    assert_equal(Int(_do_put(svc, body2).grpc_status), Int(GRPC_STATUS_INVALID_ARGUMENT))
+    var vals = _values_of(_do_get(svc, BrokerTicket(String("kept"), Int64(0), Int64(0)).encode()))
+    assert_equal(len(vals), 3)
+    assert_equal(vals[0], Int64(100))
+    print("    OK: one bad batch refuses the whole DoPut and stores no row of it")
+
+
+def test_partition_1024_edge() raises:
+    print("  test_partition_1024_edge...")
+    var svc = _service()
+    # path[1] = "1024" is the highest partition a DoPut can name; it creates a
+    # 1025-partition topic.
+    var put = _do_put(svc, _put_body(_descriptor_path(String("wide"), String("1024")), Int64(7), 1))
+    assert_equal(Int(put.grpc_status), Int(GRPC_STATUS_OK))
+    var last = _values_of(_do_get(svc, BrokerTicket(String("wide"), Int64(0), Int64(1024)).encode()))
+    assert_equal(len(last), 3)
+    assert_equal(last[0], Int64(7))
+    var first = _do_get(svc, BrokerTicket(String("wide"), Int64(0), Int64(0)).encode())
+    assert_equal(Int(first.grpc_status), Int(GRPC_STATUS_OK))
+    assert_equal(len(_values_of(first)), 0)
+    # One past the topic is the client's error, not an internal one.
+    var past = _do_get(svc, BrokerTicket(String("wide"), Int64(0), Int64(1025)).encode())
+    assert_equal(Int(past.grpc_status), Int(GRPC_STATUS_INVALID_ARGUMENT))
+    var info = FlightInfo.decode(
+        grpc_decode_unary(Span(_get_info(svc, FlightDescriptor.for_path(String("wide"))).body))
+    )
+    assert_equal(len(info.endpoint), 1025)
+    print("    OK: partition 1024 of a 1025-partition topic is served; 1025 is refused")
 
 
 def test_do_put_skips_header_less_messages() raises:
@@ -474,6 +599,10 @@ def main() raises:
     test_get_flight_info_refusals()
     test_do_get_refusals()
     test_do_put_refusals()
+    test_topic_name_limits()
+    test_do_put_schema_mismatch_is_refused()
+    test_do_put_with_a_bad_batch_stores_nothing()
+    test_partition_1024_edge()
     test_do_put_skips_header_less_messages()
     test_stream_kind_and_data_plane_limits()
-    print("== Flight service dispatch PASSED (8 tests) ==")
+    print("== Flight service dispatch PASSED (12 tests) ==")

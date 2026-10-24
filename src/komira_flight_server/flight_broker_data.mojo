@@ -64,6 +64,9 @@ comptime _Store = SharedInMemoryConditionalStore
 # that path is exactly 1025.
 comptime MAX_ADD_TOPIC_PARTITIONS: Int = 1025
 
+# The longest topic name, in bytes, `add_topic` accepts.
+comptime MAX_TOPIC_NAME_BYTES: Int = 255
+
 
 # =============================================================================
 # _FlightTopic — one topic's per-partition broker cores + its registered schema.
@@ -146,6 +149,14 @@ struct FlightBrokerData(Movable, Deinitable):
         single-partition shape)."""
         if self._index_of(name) >= 0:
             return
+        if len(name.as_bytes()) == 0:
+            raise Error("FlightBrokerData.add_topic: the topic name is empty")
+        if len(name.as_bytes()) > MAX_TOPIC_NAME_BYTES:
+            raise Error(
+                "FlightBrokerData.add_topic: the topic name is longer than "
+                + String(MAX_TOPIC_NAME_BYTES)
+                + " bytes"
+            )
         if num_partitions < 1:
             raise Error(
                 "FlightBrokerData.add_topic: num_partitions must be >= 1 (got "
