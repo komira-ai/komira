@@ -32,7 +32,7 @@ def _staged_impl(ctx):
 
 _readme_e2e_staged = rule(
     impl = _staged_impl,
-    doc = "The staged set of a release (mopm's spec/staged-set.md): `plan.json`, each member's `.conda` under its subdir, each README at `<name>/README.md`. `members` is {name: (version, the package's `.conda` target, its README target)}, written in dependency order with the sha256 and size of each file. A member whose package does not hold the name, version and file name given, or that needs a package the set lacks, fails the build. This stands in for `mopm stage` until the release flow has it: any target whose output is a directory in that layout is a `staged` of `readme_e2e`.",
+    doc = "The staged set of a release (mopm's spec/staged-set.md): `plan.json`, each member's `.conda` under its subdir, each README at `<name>/README.md`. `members` is {name: (version, the package's `.conda` target, its README target)}, written in dependency order with the sha256 and size of each file. A member whose package does not hold the name, version and file name given, or that needs a package the set lacks, fails the build. This is the hermetic stand-in for `mopm stage`, which asks the registry and so cannot be a build action: the pull request check uses it, and the release workflow tries the set `mopm stage` wrote (README.md, \"The staged set\"). Any target whose output is a directory in that layout is a `staged` of `readme_e2e`.",
     attrs = {
         "members": attrs.dict(attrs.string(), attrs.tuple(attrs.string(), attrs.dep(), attrs.dep())),
         "mojo": attrs.string(default = "1.0.0"),

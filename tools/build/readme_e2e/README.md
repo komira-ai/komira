@@ -115,8 +115,27 @@ or file name disagrees with the metadata inside it, or that needs a package the 
 lacks, fails the build: the e2e installs offline, so the set holds the whole closure.
 
 `readme_e2e` takes any target whose output is a directory in that layout as its
-`staged`. `mopm stage` writes the same directory, so the release flow can hand the
-e2e the set it will publish (`staged = <that target>`) and nothing else changes.
+`staged`. `mopm stage` writes the same directory, and the release flow hands the e2e
+that set, the one it publishes, and nothing else changes. There are two sources of
+`staged` in the release's targets, and which one a build uses is
+`-c komira_release.staged=<which>` ([`verify/BUCK`](../../../release/readme_e2e/verify/BUCK)):
+
+* **`assembled`** (the default): `//release/readme_e2e:staged`, written by
+  `readme_e2e_staged` from the packages the build made. The pull request check builds
+  the e2e with it. It is the one that can be a build action: `mopm stage` asks the
+  registry which versions exist (a request, with no token), and a build action is
+  offline, so the real stage cannot run inside the build.
+* **`stage`**: `//release/staged_set:set`, the files of the directory of that package,
+  where the release workflow's job `mopm-stage` has had `mopm stage --out` write the set
+  that `publish --staged` will publish. The files are an input of the build (uploaded to
+  the farm) and are not in the repository, so the target is empty in a checkout. The e2e
+  then runs on the farm against the real set; against the empty target it fails at
+  phase `staged` (no `plan.json`), so a release that did not stage fails. Any other
+  value of the option is an error.
+
+The assembled set stays for the pull request check because it is the only one with no
+network and no registry state in it: it tests, on every change, that the packages
+install and their examples run. The real set tests what will be published.
 
 ## The release's targets
 

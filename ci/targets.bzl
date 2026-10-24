@@ -30,6 +30,7 @@ TARGETS = [
     "komira//release/ci:check_release_ref",
     "komira//release/ci:main_red",
     "komira//release/readme_e2e/verify:all",
+    "komira//release:mopm_artifacts",
     "komira//release:release_set",
     "komira//src/kci_build:kci_build_lib_conda",
     "komira//src/kci_cli:kci_cli_conda",
