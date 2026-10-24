@@ -34,6 +34,7 @@ from komira_secrets_azure.azure_key_vault_store import (
     AzureKeyVaultStore,
     KeyVaultRef,
     _extract_value,
+    build_kv_request,
     build_kv_request_headers,
     parse_key_vault_ref,
 )
@@ -509,6 +510,7 @@ def test_parse_key_vault_ref_refusals() raises:
     underscore) are each refused."""
     assert_true(_refused(String("http://a.vault.azure.net/secrets/x")), "http")
     assert_true(_refused(String("https://a.vault.azure.net")), "no path")
+    assert_true(_refused(String("ht")), "shorter than the scheme")
     assert_true(_refused(String("https://a.vault.azure.net/keys/x")), "not /secrets/")
     assert_true(_refused(String("https://evil.example/secrets/x")), "foreign host")
     assert_true(_refused(String("https://u@a.vault.azure.net/secrets/x")), "userinfo")
@@ -519,6 +521,160 @@ def test_parse_key_vault_ref_refusals() raises:
     assert_true(_refused(String("https://a_b.vault.azure.net/secrets/x")), "underscore")
     assert_true(_refused(String("https://a.b.vault.azure.net/secrets/x")), "dotted label")
     assert_false(_refused(String("https://Acme-KV-9.vault.azure.net/secrets/x")), "letters, digits, hyphen")
+
+
+# =============================================================================
+# The handle is untrusted text: the path is `/secrets/{name}[/{version}]` and
+# nothing else, and a refusal never quotes the handle.
+# =============================================================================
+def _refusal_text(secret_ref: String) -> String:
+    """The refusal text of `parse_key_vault_ref(secret_ref)` ("" if accepted)."""
+    try:
+        var kv = parse_key_vault_ref(secret_ref)
+        _ = kv^
+    except e:
+        return String(e)
+    return String("")
+
+
+def test_path_injection_and_query_are_refused() raises:
+    """Request-line injection, a query (which could override api-version), a
+    fragment, dot segments, extra or empty segments, spaces, control bytes and
+    characters outside the Key Vault name grammar are each refused."""
+    var bad = List[String]()
+    bad.append(String("https://a.vault.azure.net/secrets/x HTTP/1.1\r\nX-Evil: 1"))
+    bad.append(String("https://a.vault.azure.net/secrets/x\r\nX-Evil: 1"))
+    bad.append(String("https://a.vault.azure.net/secrets/x\nX"))
+    bad.append(String("https://a.vault.azure.net/secrets/x y"))
+    bad.append(String("https://a.vault.azure.net/secrets/x?api-version=2016-10-01"))
+    bad.append(String("https://a.vault.azure.net/secrets/x#frag"))
+    bad.append(String("https://a.vault.azure.net/secrets/../keys/x"))
+    bad.append(String("https://a.vault.azure.net/secrets/.."))
+    bad.append(String("https://a.vault.azure.net/secrets/x/.."))
+    bad.append(String("https://a.vault.azure.net/secrets/x/v1/extra"))
+    bad.append(String("https://a.vault.azure.net/secrets/"))
+    bad.append(String("https://a.vault.azure.net/secrets//v1"))
+    bad.append(String("https://a.vault.azure.net/secrets/x/"))
+    bad.append(String("https://a.vault.azure.net/secrets/x%2e%2e"))
+    bad.append(String("https://a.vault.azure.net/secrets/x_y"))
+    bad.append(String("https://a.vault.azure.net/secrets/x.y"))
+    bad.append(String("https://a.vault.azure.net/secrets/x/v 1"))
+    bad.append(String("https://a.vault.azure.net/secrets/x/v1?a=b"))
+    bad.append(String("https://a.vault.azure.net/secrets/café"))
+    bad.append(String("https://a.vault.azure.net//secrets/x"))
+    for i in range(len(bad)):
+        assert_true(_refusal_text(bad[i]).byte_length() > 0, "refused: " + String(i))
+
+
+def test_name_and_version_length_limits() raises:
+    """A secret name is 1 to 127 of letters, digits and `-`; a version 1 to 64."""
+    var n127 = String("")
+    for _ in range(127):
+        n127 += "a"
+    var v64 = String("")
+    for _ in range(64):
+        v64 += "b"
+    assert_equal(_refusal_text("https://a.vault.azure.net/secrets/" + n127), String(""), "127 ok")
+    assert_true(_refusal_text("https://a.vault.azure.net/secrets/" + n127 + "a").byte_length() > 0, "128 refused")
+    assert_equal(_refusal_text("https://a.vault.azure.net/secrets/x/" + v64), String(""), "64 ok")
+    assert_true(_refusal_text("https://a.vault.azure.net/secrets/x/" + v64 + "b").byte_length() > 0, "65 refused")
+
+
+def test_refusals_do_not_quote_the_handle() raises:
+    """No refusal repeats the handle, its host or its path, so a secret pasted
+    into a handle field cannot reach an error text."""
+    var bad = List[String]()
+    bad.append(String("canary-zz9"))
+    bad.append(String("http://canary-zz9.vault.azure.net/secrets/x"))
+    bad.append(String("https://canary-zz9.vault.azure.net"))
+    bad.append(String("https://canary-zz9.example/secrets/x"))
+    bad.append(String("https://canary_zz9.vault.azure.net/secrets/x"))
+    bad.append(String("https://a.vault.azure.net/keys/canary-zz9"))
+    bad.append(String("https://a.vault.azure.net/secrets/canary zz9"))
+    bad.append(String("https://a.vault.azure.net/secrets/x/canary-zz9/extra"))
+    for i in range(len(bad)):
+        var msg = _refusal_text(bad[i])
+        assert_true(msg.byte_length() > 0, "refused: " + String(i))
+        assert_true(msg.find(String("canary")) < 0, "not quoted: " + msg)
+
+
+def test_http_scheme_is_refused_as_a_scheme() raises:
+    """`http://` with a valid vault label is refused for its scheme, not by some
+    other rule: the message says https."""
+    var msg = _refusal_text(String("http://ab.vault.azure.net/secrets/x"))
+    assert_true(msg.find(String("https://")) >= 0, msg)
+    assert_true(msg.find(String("ab.vault")) < 0, msg)
+
+
+def test_malformed_documents_are_refused() raises:
+    """Truncated or broken envelopes answer empty (the store raises): no
+    object, EOF after `{`, an unterminated key, a missing colon, EOF where a
+    value should be, an unterminated string value, and unterminated strings or
+    containers inside a skipped value."""
+    var bad = List[String]()
+    bad.append(String(""))
+    bad.append(String("   "))
+    bad.append(String("{"))
+    bad.append(String('{"abc'))
+    bad.append(String('{"abc"'))
+    bad.append(String('{"a"x'))
+    bad.append(String('{"a":'))
+    bad.append(String('{"a":   '))
+    bad.append(String('{"a":"abc'))
+    bad.append(String('{"a":"abc\\'))
+    bad.append(String('{"a":["b'))
+    bad.append(String('{"a":{"b":1'))
+    bad.append(String('{"a":1 "value":"x"}'))
+    bad.append(String('{"a":,"value":"x"}'))
+    bad.append(String('{,"value":"x"}'))
+    for i in range(len(bad)):
+        assert_equal(_decode(bad[i]), String(""), "refused: " + bad[i])
+
+
+def test_value_is_a_top_level_key() raises:
+    """`value` is read as a top-level key only: a nested `"value"` (tags, an
+    array of objects) or text that looks like one inside another string never
+    wins, whatever the order."""
+    assert_equal(_decode(String('{"tags":{"value":"EVIL"},"value":"real"}')), String("real"), "nested object")
+    assert_equal(_decode(String('{"x":[{"value":"EVIL"}],"value":"real"}')), String("real"), "array of objects")
+    assert_equal(
+        _decode(String('{"id":"a\\"value\\":\\"EVIL\\"","value":"real"}')),
+        String("real"),
+        "inside another string",
+    )
+    assert_equal(
+        _decode(String('{"attributes":{"enabled":true,"exp":5,"x":null},"n":-1.5e3,"value":"real","id":"y"}')),
+        String("real"),
+        "numbers, literals and objects skipped",
+    )
+    assert_equal(_decode(String('{"value":"first","value":"second"}')), String("first"), "first wins")
+    assert_equal(_decode(String('{"tags":{"value":"EVIL"}}')), String(""), "only nested: refused")
+    assert_equal(_decode(String('[{"value":"EVIL"}]')), String(""), "not an object")
+    assert_equal(_decode(String('{"x":{"y":[1,2,{"z":"}"}]},"value":"real"}')), String("real"), "braces inside strings")
+    assert_equal(_decode(String('{"x":tru,"value":"real"}')), String("real"), "a bare word is skipped, not parsed")
+    assert_equal(_decode(String('{"x":{"value":"EVIL"')), String(""), "unterminated")
+
+
+def test_request_bytes_carry_bearer_and_exact_target() raises:
+    """The bytes `resolve` sends (it builds its request with `build_kv_request`)
+    start with the exact request line, carry `Authorization: Bearer <token>` and
+    `Accept: application/json`, and hold nothing else from the handle."""
+    var kv = parse_key_vault_ref(String(_TEST_REF_VERSIONED))
+    var req = build_kv_request(kv.host.copy(), kv.path.copy(), String(_CANNED_TOKEN))
+    var wire = String(unsafe_from_utf8=Span(req.request_bytes))
+    assert_true(
+        wire.startswith(
+            "GET /secrets/pg-conn/abc123def456?api-version=7.4 HTTP/1.1\r\n"
+        ),
+        wire,
+    )
+    assert_true(
+        wire.find(String("\r\nauthorization: Bearer ") + String(_CANNED_TOKEN) + "\r\n") >= 0,
+        wire,
+    )
+    assert_true(wire.find(String("\r\naccept: application/json\r\n")) >= 0, wire)
+    assert_equal(wire.find(String("api-version")), wire.rfind(String("api-version")), "one api-version")
+    assert_true(wire.endswith(String("\r\n\r\n")), "no body")
 
 
 # =============================================================================
@@ -683,6 +839,13 @@ def main() raises:
     test_resolve_decodes_unicode_escapes()
     test_resolve_undecodable_value_raises()
     test_parse_key_vault_ref_refusals()
+    test_path_injection_and_query_are_refused()
+    test_name_and_version_length_limits()
+    test_refusals_do_not_quote_the_handle()
+    test_http_scheme_is_refused_as_a_scheme()
+    test_request_bytes_carry_bearer_and_exact_target()
+    test_value_is_a_top_level_key()
+    test_malformed_documents_are_refused()
     test_service_principal_source_mints_token()
     test_service_principal_source_refusal_raises_without_secret()
     test_managed_identity_sources_mint_token()

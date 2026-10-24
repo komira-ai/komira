@@ -22,8 +22,14 @@ never the response body or the token.
 A handle is a secret identifier URI, `https://{vault}.vault.azure.net/secrets/{name}[/{version}]`.
 The token is sent only to a Key Vault host, so the host must be a plain DNS name
 ending in `.vault.azure.net` (one label of letters, digits and `-`; a port,
-userinfo, `#`, `\` or a dotted label is refused), and the path must start with
-`/secrets/`. A refused handle raises before anything is sent.
+userinfo, `#`, `\` or a dotted label is refused), and the path must be exactly
+`/secrets/{name}[/{version}]`, the name 1 to 127 and the version 1 to 64 of
+letters, digits and `-`: a query (which could override `api-version`), a
+fragment, a dot segment, an extra or empty segment, a space or a control byte is
+refused, so the handle cannot add request lines or headers. A refused handle
+raises before anything is sent, and the refusal never quotes the handle. The
+`value` is read as a top-level key of the answer only: a `"value"` nested in
+`tags` or inside another string is never taken for it.
 `AzureKeyVaultStore.with_dial_host` points the TCP dial at another host (a
 private endpoint, or `127.0.0.1` in a test) while the handle's vault stays the
 logical identity.

@@ -31,6 +31,7 @@ from komira_async.runtime.blocking_runtime import BlockingRuntime
 
 from komira_http_client.body import EmptyBody
 from komira_http_client.client import HttpClient, build_request_with_body
+from komira_http_client.service import ClientRequest
 from komira_http_client.header_map import HeaderMap
 from komira_http_client.url import Url
 from komira_http_core.codec.types import HTTP_METHOD_GET, HttpMethod
@@ -74,70 +75,97 @@ struct KeyVaultRef(Movable, Deinitable):
 
 def parse_key_vault_ref(secret_ref: String) raises -> KeyVaultRef:
     """Parse an Azure Key Vault secret identifier URI into (host, path). The
-    canonical form is
+    only accepted form is
         https://{vault}.vault.azure.net/secrets/{name}[/{version}]
-    Returns the per-vault host + the `/secrets/{name}[/{version}]` path. RAISES
-    (fail fast and loud, up-front) on a malformed ref — not an https URL, not a
-    `*.vault.azure.net` host, or no `/secrets/` segment — rather than emitting a
-    nonsense request that would 404 confusingly. Pure — no network."""
+    where {vault} is one DNS label (letters, digits, `-`), {name} is 1 to 127 of
+    letters, digits and `-` (Key Vault's grammar) and {version} is 1 to 64 of
+    letters, digits and `-`. Everything else RAISES up-front: another scheme,
+    host, port, userinfo, query, fragment, dot segment, empty or extra segment,
+    space or control byte. The handle is untrusted text that becomes the request
+    line, so nothing outside that grammar can reach it. No refusal quotes the
+    handle (it may be a value pasted into the wrong field). Pure: no network."""
     var s = secret_ref
-    # --- 1. Strip the scheme (https:// required; the public KV data plane is
-    #        HTTPS only). ---
+    # --- 1. The scheme: https:// only (the Key Vault data plane is HTTPS only).
     var scheme = String("https://")
     if not _starts_with(s, scheme):
         raise Error(
-            String(
-                "AzureKeyVaultStore: secret_ref must be an https:// Key Vault"
-                " secret URI, got: "
-            )
-            + s
+            String("AzureKeyVaultStore: secret_ref must be an https:// Key Vault")
+            + String(" secret URI")
         )
     var after_scheme = _substr_from(s, len(scheme.as_bytes()))
     # --- 2. Split host from path at the first '/'. ---
     var slash = _find(after_scheme, String("/"))
     if slash < 0:
         raise Error(
-            String(
-                "AzureKeyVaultStore: secret_ref has no path (expected"
-                " /secrets/{name}), got: "
-            )
-            + secret_ref
+            String("AzureKeyVaultStore: secret_ref has no path (expected")
+            + String(" /secrets/{name}[/{version}])")
         )
     var host = _substr_range(after_scheme, 0, slash)
     var path = _substr_from(after_scheme, slash)
-    # --- 3. Validate the host is a Key Vault host + the path is a secret. ---
-    if not _ends_with(host, AZURE_KV_DNS_SUFFIX):
-        raise Error(
-            String(
-                "AzureKeyVaultStore: secret_ref host is not a *"
-            )
-            + AZURE_KV_DNS_SUFFIX
-            + String(" Key Vault host, got host: ")
-            + host
+    # --- 3. The host: the token goes there, so the label before the suffix must
+    #        be a plain DNS label (letters, digits, '-'), which keeps `user@`,
+    #        ports, '#', '?' and '\\' out. ---
+    var plain = _ends_with(host, AZURE_KV_DNS_SUFFIX)
+    if plain:
+        var label = String(
+            host[byte=0 : host.byte_length() - AZURE_KV_DNS_SUFFIX.byte_length()]
         )
-    # The token goes to this host: the label before the suffix must be a plain
-    # DNS label (letters, digits, '-'), so `user@`, ports, '#', '?' and '\\' in
-    # the handle cannot redirect the request.
-    var label = String(
-        host[byte=0 : host.byte_length() - AZURE_KV_DNS_SUFFIX.byte_length()]
-    )
-    if not _is_dns_label(label):
+        plain = _is_dns_label(label)
+    if not plain:
         raise Error(
             String("AzureKeyVaultStore: secret_ref host is not a plain ")
             + String("*")
             + AZURE_KV_DNS_SUFFIX
-            + String(" name, got host: ")
-            + host
+            + String(" name")
         )
-    if not _starts_with(path, AZURE_KV_SECRETS_SEGMENT):
+    # --- 4. The path: /secrets/{name}[/{version}], each segment in Key Vault's
+    #        grammar. ---
+    var parts = List[String]()
+    for piece in path.split("/"):
+        parts.append(String(piece))
+    var ok = (
+        (len(parts) == 3 or len(parts) == 4)
+        and parts[0] == ""
+        and parts[1] == "secrets"
+        and _segment_ok(parts[2], 127)
+    )
+    if ok and len(parts) == 4:
+        ok = _segment_ok(parts[3], 64)
+    if not ok:
         raise Error(
-            String(
-                "AzureKeyVaultStore: secret_ref path is not a secret resource"
-                " (expected /secrets/{name}), got path: "
-            )
-            + path
+            String("AzureKeyVaultStore: secret_ref path is not")
+            + String(" /secrets/{name}[/{version}], with each segment 1 to the")
+            + String(" Key Vault limit of letters, digits and '-'")
         )
     return KeyVaultRef(host^, path^)
+
+
+def _segment_ok(s: String, max_len: Int) -> Bool:
+    """1 to `max_len` bytes of letters, digits and '-'."""
+    var n = s.byte_length()
+    if n < 1 or n > max_len:
+        return False
+    return _is_dns_label(s)
+
+
+def build_kv_request(
+    var dial_host: String, var path: String, var token: String
+) raises -> ClientRequest[EmptyBody]:
+    """The exact request `resolve` sends: `GET {path}?api-version=7.4` to
+    `dial_host` with `Authorization: Bearer <token>` and `Accept:
+    application/json`. Factored out so a test reads the bytes `resolve` puts on
+    the wire (`request_bytes`) without a socket. `path` must come from
+    `parse_key_vault_ref`."""
+    var url = Url.https(dial_host^, AZURE_KV_PORT, path^)
+    # The mandatory api-version query parameter (a bare GET 400s).
+    url.query = String("api-version=") + AZURE_KV_API_VERSION
+    var headers = build_kv_request_headers(token^)
+    return build_request_with_body[EmptyBody](
+        HttpMethod(code=HTTP_METHOD_GET),
+        url^,
+        headers^,
+        EmptyBody.new(),
+    )
 
 
 def build_kv_request_headers(var token: String) raises -> HeaderMap:
@@ -249,19 +277,9 @@ struct AzureKeyVaultStore[C: Connector, T: AzureTokenSource](
         var dial_host = kv.host.copy()
         if self._dial_host_override.byte_length() > 0:
             dial_host = self._dial_host_override.copy()
-        var url = Url.https(dial_host^, AZURE_KV_PORT, kv.path.copy())
-        # The mandatory api-version query parameter (a bare GET 400s).
-        url.query = String("api-version=") + AZURE_KV_API_VERSION
-        # MOVE the token into the header builder (no lingering local copy on this
-        # frame): after this, `token` is consumed and the only copy lives on the
-        # request's header bytes.
-        var headers = build_kv_request_headers(token^)
-        var req = build_request_with_body[EmptyBody](
-            HttpMethod(code=HTTP_METHOD_GET),
-            url^,
-            headers^,
-            EmptyBody.new(),
-        )
+        # MOVE the token into the request builder (no lingering local copy on
+        # this frame): the only copy lives on the request's header bytes.
+        var req = build_kv_request(dial_host^, kv.path.copy(), token^)
 
         # --- 4. Dial a fresh connector + drive one synchronous GET. ---
         var connector = self._mk_connector()
@@ -383,28 +401,134 @@ def _append_utf8(mut out: List[UInt8], cp: Int):
         out.append(UInt8(0x80 | (cp & 0x3F)))
 
 
-def _extract_value(body: Span[UInt8, _]) -> List[UInt8]:
-    """The decoded `value` string of the Key Vault GET-secret envelope as
-    bytes, or an empty list when it is absent, empty or malformed (the caller
-    raises). The scan finds the FIRST `"value"` key; the KV envelope has one."""
-    var out = List[UInt8]()
-    var key_at = _find_bytes(body, String('"value"'))
-    if key_at < 0:
-        return out^
-    var n = len(body)
-    var i = key_at + 7  # len('"value"') == 7
-    # Skip whitespace and the colon to the opening quote.
-    while i < n and (
+def _skip_ws(body: Span[UInt8, _], at: Int) -> Int:
+    var i = at
+    while i < len(body) and (
         body[i] == UInt8(ord(" "))
         or body[i] == UInt8(ord("\t"))
         or body[i] == UInt8(ord("\n"))
         or body[i] == UInt8(ord("\r"))
-        or body[i] == UInt8(ord(":"))
     ):
         i += 1
-    if i >= n or body[i] != UInt8(ord('"')):
-        return out^
-    i += 1  # past the opening quote
+    return i
+
+
+def _skip_string(body: Span[UInt8, _], at: Int) -> Int:
+    """The index just past the closing quote of the string whose body starts at
+    `at` (just after its opening quote), or -1 if it is unterminated. A
+    backslash skips the byte after it."""
+    var i = at
+    var n = len(body)
+    while i < n:
+        if body[i] == UInt8(ord("\\")):
+            i += 2
+            continue
+        if body[i] == UInt8(ord('"')):
+            return i + 1
+        i += 1
+    return -1
+
+
+def _skip_value(body: Span[UInt8, _], at: Int) -> Int:
+    """The index just past the JSON value starting at `at` (a string, an object
+    or array with nesting, or a bare number / literal), or -1 when it is
+    malformed or unterminated. Only the extent is found; the content is not
+    validated."""
+    var n = len(body)
+    if at >= n:
+        return -1
+    var c = body[at]
+    if c == UInt8(ord('"')):
+        return _skip_string(body, at + 1)
+    if c == UInt8(ord("{")) or c == UInt8(ord("[")):
+        var depth = 0
+        var i = at
+        while i < n:
+            var b = body[i]
+            if b == UInt8(ord('"')):
+                i = _skip_string(body, i + 1)
+                if i < 0:
+                    return -1
+                continue
+            if b == UInt8(ord("{")) or b == UInt8(ord("[")):
+                depth += 1
+            elif b == UInt8(ord("}")) or b == UInt8(ord("]")):
+                depth -= 1
+                if depth == 0:
+                    return i + 1
+            i += 1
+        return -1
+    var i = at
+    while i < n and not (
+        body[i] == UInt8(ord(","))
+        or body[i] == UInt8(ord("}"))
+        or body[i] == UInt8(ord("]"))
+        or body[i] == UInt8(ord(" "))
+        or body[i] == UInt8(ord("\t"))
+        or body[i] == UInt8(ord("\n"))
+        or body[i] == UInt8(ord("\r"))
+    ):
+        i += 1
+    if i == at:
+        return -1
+    return i
+
+
+def _extract_value(body: Span[UInt8, _]) -> List[UInt8]:
+    """The decoded `value` string of the Key Vault GET-secret envelope as
+    bytes, or an empty list when it is absent, empty, not a string or the
+    document is malformed (the caller raises). `value` is read as a key of the
+    TOP-LEVEL object only: nested objects, arrays and other strings are skipped
+    as a whole, so a `"value"` inside `tags` or inside another string can never
+    be taken for it. The first top-level `value` wins."""
+    var empty = List[UInt8]()
+    var n = len(body)
+    var i = _skip_ws(body, 0)
+    if i >= n or body[i] != UInt8(ord("{")):
+        return empty^
+    i += 1
+    while True:
+        i = _skip_ws(body, i)
+        if i >= n or body[i] != UInt8(ord('"')):
+            return empty^  # no key: `}` (no value), or malformed
+        var key_start = i + 1
+        var after_key = _skip_string(body, key_start)
+        if after_key < 0:
+            return empty^
+        var key_end = after_key - 1
+        i = _skip_ws(body, after_key)
+        if i >= n or body[i] != UInt8(ord(":")):
+            return empty^
+        i = _skip_ws(body, i + 1)
+        var is_value = (
+            key_end - key_start == 5
+            and body[key_start] == UInt8(ord("v"))
+            and body[key_start + 1] == UInt8(ord("a"))
+            and body[key_start + 2] == UInt8(ord("l"))
+            and body[key_start + 3] == UInt8(ord("u"))
+            and body[key_start + 4] == UInt8(ord("e"))
+        )
+        if is_value:
+            if i >= n or body[i] != UInt8(ord('"')):
+                return empty^
+            return _decode_string(body, i + 1)
+        i = _skip_value(body, i)
+        if i < 0:
+            return empty^
+        i = _skip_ws(body, i)
+        if i < n and body[i] == UInt8(ord(",")):
+            i += 1
+            continue
+        return empty^  # `}` with no `value`, or malformed
+
+
+def _decode_string(body: Span[UInt8, _], at: Int) -> List[UInt8]:
+    """Decode the JSON string whose body starts at `at` (just past its opening
+    quote) to bytes, or an empty list when it is unterminated or holds an escape
+    that cannot be decoded."""
+    var out = List[UInt8]()
+    var n = len(body)
+    var i = at
     while i < n:
         var b = body[i]
         if b == UInt8(ord('"')):
@@ -463,15 +587,10 @@ def _extract_value(body: Span[UInt8, _]) -> List[UInt8]:
 # §3 — tiny String helpers (no external string-util dep needed for these).
 # =============================================================================
 def _find(haystack: String, needle: String) -> Int:
-    """Index of the first occurrence of `needle` in `haystack`, or -1."""
-    return _find_bytes(haystack.as_bytes(), needle)
-
-
-def _find_bytes(hb: Span[UInt8, _], needle: String) -> Int:
-    """Index of the first occurrence of `needle` in the bytes `hb`, or -1."""
+    """Index of the first occurrence of `needle` (not empty, not longer than
+    `haystack`) in `haystack`, or -1."""
+    var hb = haystack.as_bytes()
     var nb = needle.as_bytes()
-    if len(nb) == 0 or len(nb) > len(hb):
-        return -1
     var last = len(hb) - len(nb)
     for s in range(0, last + 1):
         var ok = True
