@@ -25,6 +25,8 @@ mojo_library(
         # malformed wire input refused at every cut; seed length; key-share
         # lengths; the all-zero prekey; accessors; rotation changes the id
         "tests/test_group_ratchet_refusals.mojo",
+        # the skip bound is exact on signed messages; sealed key-share known answer
+        "tests/test_group_ratchet_bounds.mojo",
     ],
     visibility = ["PUBLIC"],
 )

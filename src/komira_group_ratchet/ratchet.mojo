@@ -311,7 +311,7 @@ struct GroupRatchet(Movable, Deinitable):
         never derive keys for index < N).
 
         NOTE: this is O(target - index) HMAC calls. The caller (inbound session)
-        bounds the gap via a skipped-key cache (see session.mojo) so a malicious
+        bounds the gap with MAX_INBOUND_SKIP (see session.mojo) so a malicious
         far-future index cannot force unbounded work on the receiver."""
         if target < self._index:
             raise Error(
@@ -332,7 +332,7 @@ struct GroupRatchet(Movable, Deinitable):
         """Derive the per-message AEAD key + nonce seed from the CURRENT state.
 
         aead_key(32) || nonce_seed(12) = HKDF-SHA-256(salt=0, IKM=R_i,
-        info=KEY_SCHEDULE_INFO, L=44). Mirrors Megolm's the Megolm specification
+        info=KEY_SCHEDULE_INFO, L=44). Mirrors the Megolm specification's
         per-message derivation (HKDF-SHA-256 over the full 128-byte ratchet)
         with OUR info string + OUR ChaCha20-Poly1305 output sizing (see the
         substitution note in session.mojo).

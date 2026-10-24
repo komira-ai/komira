@@ -490,11 +490,18 @@ struct InboundGroupSession(Movable, Deinitable):
 
         var cipher = ChaCha20Poly1305(keys.aead_key)
         # open_in_place raises on tag failure (constant-time verify-then-decrypt).
-        cipher.open_in_place(
-            nonce,
-            Span[UInt8, origin_of(aad)](aad),
-            Span[UInt8, origin_of(buf)](buf),
-        )
+        try:
+            cipher.open_in_place(
+                nonce,
+                Span[UInt8, origin_of(aad)](aad),
+                Span[UInt8, origin_of(buf)](buf),
+            )
+        except e:
+            # Whatever the failed open left in the buffer is not returned
+            # and not left behind.
+            for i in range(len(buf)):
+                buf[i] = UInt8(0)
+            raise e^
 
         # On success the plaintext occupies the first len-TAG bytes.
         var plaintext = List[UInt8]()
