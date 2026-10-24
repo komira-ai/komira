@@ -65,6 +65,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   by a decoder in the test (the location is the data page, past a dictionary
 #   page); a chunk with no range gets no ColumnIndex; a bloom filter's header,
 #   bitset and probes read back from the file.
+# - test_record_batch_writer: RecordBatches (twelve column kinds, nulls) written
+#   to bytes and decoded by komira_parquet's reader: one batch under three
+#   codecs, DATE32 and DECIMAL128 types kept, row-group cutting with a page
+#   index, several batches with and without the concat-free path, nullability
+#   per field or per data, refusals.
 # - test_no_env_reads: the package's sources read no environment, hold no
 #   raw pointer in a public signature, and import only these deps. It is
 #   staged every source `srcs` compiles.
@@ -78,6 +83,7 @@ mojo_library(
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_parquet_api:komira_parquet_api",
         "//src/komira_parquet_codec:komira_parquet_codec",
@@ -105,6 +111,7 @@ mojo_library(
         "tests/test_multi_batch_stats_direct.mojo",
         "tests/test_no_env_reads.mojo",
         "tests/test_numeric_dict_preestimate.mojo",
+        "tests/test_record_batch_writer.mojo",
         "tests/test_page_size_limit_direct.mojo",
         "tests/test_stats_direct.mojo",
         "tests/test_thrift_writer_direct.mojo",
