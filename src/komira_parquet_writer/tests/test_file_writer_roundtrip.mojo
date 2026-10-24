@@ -29,6 +29,8 @@
 #     column skip its null slots.
 #   * test_a_page_from_another_builder_is_placed: a DELTA_BINARY_PACKED page
 #     added through write_column_page decodes.
+#   * test_caller_statistics_replace_the_computed_ones: write_batch_with_stats puts
+#     the caller's min/max in the footer, not the encoder's.
 #   * test_empty_column_file: zero rows is a valid file.
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -44,7 +46,7 @@ from komira_parquet.bytes_decode import (
 )
 from komira_parquet.metadata_parser import parse_full_metadata
 from komira_parquet.morsel_reader import ColumnProjection
-from komira_parquet_api.metadata import FileMetaData, SchemaElement
+from komira_parquet_api.metadata import FileMetaData, SchemaElement, Statistics
 from komira_parquet_api.types import (
     CompressionCodec,
     Encoding,
@@ -346,6 +348,26 @@ def test_a_page_from_another_builder_is_placed() raises:
         if e == Encoding.DELTA_BINARY_PACKED:
             has_delta = True
     assert_true(has_delta)
+
+
+def test_caller_statistics_replace_the_computed_ones() raises:
+    var names: List[String] = ["a"]
+    var types: List[ParquetType] = [ParquetType.INT64]
+    var nullable: List[Bool] = [False]
+    var w = ParquetFileWriter.create(make_schema_elements_nullable(names^, types^, nullable^))
+    var lo: List[UInt8] = [1, 0, 0, 0, 0, 0, 0, 0]
+    var hi: List[UInt8] = [200, 0, 0, 0, 0, 0, 0, 0]
+    w.write_batch_with_stats[DType.int64](
+        0,
+        PrimitiveArray[DType.int64].from_list([5, 6, 7]),
+        Statistics(null_count=0, min_value=lo^, max_value=hi^),
+    )
+    var md = _footer(w.close_to_bytes())
+    ref s = md.row_groups[0].columns[0].meta_data.statistics.value()
+    # The data's own range is 5..7; the footer carries the caller's 1..200.
+    assert_equal(Int(s.min_value.value()[0]), 1)
+    assert_equal(Int(s.max_value.value()[0]), 200)
+    assert_false(Bool(s.distinct_count))
 
 
 def test_empty_column_file() raises:
