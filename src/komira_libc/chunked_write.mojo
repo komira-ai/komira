@@ -44,13 +44,15 @@
 #
 # Both:
 #   - Are no-ops on empty input.
-#   - Take the fast path (single `handle.write` call) when the input fits
-#     in one chunk (≤ `CHUNK_BYTES`), which is the common case.
-#   - Otherwise iterate `Span(ptr=buf.unsafe_ptr() + off, length=...)`
-#     views and call `handle.write(String(unsafe_from_utf8=...))` per
-#     chunk. Byte-identical output to one big write would have produced
-#     (chunk boundaries are arbitrary byte offsets; the stdlib write(2)
+#   - Take the fast path (single `handle.write_bytes` call) when the input
+#     fits in one chunk (≤ `CHUNK_BYTES`), which is the common case.
+#   - Otherwise iterate slices of the span and call `handle.write_bytes`
+#     per chunk. Byte-identical output to one big write would have
+#     produced (chunk boundaries are arbitrary byte offsets; write(2)
 #     does not interpret bytes).
+#   - Never build a `String` from the bytes: a `String` must hold valid
+#     UTF-8 (the stdlib asserts it under `assert=all`), and a binary
+#     buffer or a chunk cut mid-sequence is not.
 #
 # Encapsulation:
 #   - No `UnsafePointer` in public signatures. Public API takes `Span`
@@ -84,8 +86,8 @@ def write_chunked(
 ) raises:
     """Write `bytes` to `handle` in chunks of at most `CHUNK_BYTES`.
 
-    This is the safe replacement for `handle.write(String(unsafe_from_utf8=
-    bytes))` for any payload whose length COULD exceed ~2 GB. The
+    This is the safe replacement for `handle.write` of a `String` for any
+    payload whose length COULD exceed ~2 GB. The
     underlying Mojo stdlib `FileHandle.write(s)` silently flushes
     0 bytes for strings > ~2 GB; chunking at 64 MiB keeps every call
     well below that threshold.
@@ -112,10 +114,9 @@ def write_chunked(
     if n <= CHUNK_BYTES:
         # Fast path: single-write for sub-chunk payloads. This is the
         # common case (per-batch writes are typically MB, not GB).
-        # SAFETY: the String is a byte carrier for `handle.write`, which
-        # writes the bytes as-is; nothing reads them as UTF-8 text.
-        var s = String(unsafe_from_utf8=bytes)
-        handle.write(s)
+        # `write_bytes` takes the span as bytes; no String (and so no UTF-8
+        # validity requirement) is involved.
+        handle.write_bytes(bytes)
         return
     # Slow path: chunk the write to keep each `handle.write` call under
     # the stdlib's Int32 threshold.
@@ -126,10 +127,8 @@ def write_chunked(
             end = n
         # A slice of `bytes` keeps its origin; no pointer is built.
         var chunk = bytes[off:end]
-        # SAFETY: as in the fast path, the String only carries bytes to
-        # `handle.write`; a chunk may split a UTF-8 sequence, which is fine.
-        var s = String(unsafe_from_utf8=chunk)
-        handle.write(s)
+        # A chunk may split a UTF-8 sequence; as bytes that is fine.
+        handle.write_bytes(chunk)
         off = end
 
 

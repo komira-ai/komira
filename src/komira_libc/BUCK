@@ -35,6 +35,9 @@ mojo_library(
         "tests/test_pwrite_at.mojo",
         "tests/test_thread_self_discriminates.mojo",
     ],
+    # Every assert on in the tests: a String built from non-UTF-8 bytes
+    # (what chunked_write once did) aborts there and is silent at the default.
+    test_assert_level = "all",
     visibility = ["PUBLIC"],
 )
 
