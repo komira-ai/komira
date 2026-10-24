@@ -187,7 +187,7 @@ def _encode_column_to_page(
             nullable=nullable,
             codec=codec,
         )
-    raise Error(
+    raise Error(  # cov: unreachable schema derivation (`arrow_type_to_parquet_type`) refuses every Arrow type this function has no arm for, and runs first
         "write_record_batch_to_parquet: unsupported column type "
         + String(at)
         + " for column '"

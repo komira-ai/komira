@@ -26,6 +26,14 @@
 #     column forces the concat path; values across the batch boundaries.
 #   * test_nullability_is_the_field_for_one_batch_and_the_data_for_several:
 #     footer repetition types.
+#   * test_high_cardinality_columns_take_the_delta_split_and_plain_arms: 40000
+#     rows of all-distinct values (no dictionary can be built) write integers
+#     DELTA_BINARY_PACKED, floats BYTE_STREAM_SPLIT and a unique LARGE_STRING
+#     column PLAIN, and decode.
+#   * test_a_single_batch_of_exactly_max_rows_*, test_several_batches_at_exactly_max_rows_*:
+#     the row-group boundary at total_rows == max_rows_per_rg (<=, not <).
+#   * test_batches_whose_column_types_differ_are_refused,
+#     test_a_short_element_list_is_refused_by_the_date_patch: error paths.
 #   * test_refusals: no batch, no column, a batch with another column count, a
 #     non-positive row group size, an unsigned column, a REQUIRED field that
 #     holds a null.
@@ -50,9 +58,11 @@ from komira_parquet.bytes_decode import (
 )
 from komira_parquet.metadata_parser import parse_full_metadata
 from komira_parquet.morsel_reader import ColumnProjection
-from komira_parquet_api.metadata import FileMetaData
+from komira_parquet_api.metadata import FileMetaData, SchemaElement
 from komira_parquet_api.types import CompressionCodec, Encoding, FieldRepetitionType
+from komira_parquet_writer.record_batch_writer import _require_positive_row_group_size
 from komira_parquet_writer import (
+    patch_date32_schema_elements,
     write_record_batch_to_parquet_bytes,
     write_record_batches_to_parquet_bytes,
 )
@@ -304,8 +314,13 @@ def test_a_large_batch_is_cut_into_row_groups() raises:
             assert_true(Bool(md.row_groups[g].columns[c].offset_index_offset))
 
 
-def _three_batches(general: Bool) raises -> Slab[RecordBatch]:
+def _three_batches(general: Bool, rows_each: Int = 0) raises -> Slab[RecordBatch]:
+    """Three batches: 400, 350 and 250 rows, or `rows_each` rows each."""
     var batches = Slab[RecordBatch]()
+    if rows_each > 0:
+        for i in range(3):
+            batches.append(_batch(i * rows_each, rows_each, general))
+        return batches^
     batches.append(_batch(0, 400, general))
     batches.append(_batch(400, 350, general))
     batches.append(_batch(750, 250, general))
@@ -375,6 +390,135 @@ def test_nullability_is_the_field_for_one_batch_and_the_data_for_several() raise
     assert_true(_repetition(many, 5) == FieldRepetitionType.REQUIRED)
 
 
+def _wide_batch(n: Int) raises -> RecordBatch:
+    """n rows (n > 32768) of columns with all-distinct values, so no
+    dictionary is built: i32, i64 (nullable), f32, f64, unique LARGE_STRING."""
+    var a0 = PrimitiveArray[DType.int32].allocate(n)
+    var a1 = PrimitiveArray[DType.int64].allocate_nullable(n)
+    var a2 = PrimitiveArray[DType.float32].allocate(n)
+    var a3 = PrimitiveArray[DType.float64].allocate(n)
+    var s = List[String]()
+    for r in range(n):
+        a0.set(r, Int32(r * 3 - 5))
+        a1.set(r, Int64(r) * 1000003)
+        if r % 10 == 7:
+            a1._set_null(r)
+        a2.set(r, Float32(r) * 0.37 + 0.5)
+        a3.set(r, Float64(r) * 1.37 + 0.001)
+        s.append(String("u-") + String(r * 7919))
+    var sb = SchemaBuilder()
+    var b = RecordBatchBuilder()
+    sb.add_field(Field("i32", ArrowType.INT32, False))
+    b.add_column(Column.from_primitive[DType.int32](a0))
+    sb.add_field(Field("i64", ArrowType.INT64, True))
+    b.add_column(Column.from_primitive[DType.int64](a1))
+    sb.add_field(Field("f32", ArrowType.FLOAT32, False))
+    b.add_column(Column.from_primitive[DType.float32](a2))
+    sb.add_field(Field("f64", ArrowType.FLOAT64, False))
+    b.add_column(Column.from_primitive[DType.float64](a3))
+    sb.add_field(Field("large", ArrowType.LARGE_STRING, False))
+    b.add_column(Column.from_large_string(LargeStringArray.from_strings(s)))
+    return b.build(sb.build())
+
+
+def _has(md: FileMetaData, col: Int, e: Encoding) -> Bool:
+    for x in md.row_groups[0].columns[col].meta_data.encodings:
+        if x == e:
+            return True
+    return False
+
+
+def test_high_cardinality_columns_take_the_delta_split_and_plain_arms() raises:
+    # More than 32768 distinct values per column: no dictionary. Integers
+    # fall to DELTA_BINARY_PACKED, floats to BYTE_STREAM_SPLIT, and a unique
+    # LARGE_STRING column to PLAIN BYTE_ARRAY.
+    var n = 40000
+    var file = write_record_batch_to_parquet_bytes(_wide_batch(n), CompressionCodec.SNAPPY)
+    var md = _footer(file)
+    assert_true(_has(md, 0, Encoding.DELTA_BINARY_PACKED))
+    assert_true(_has(md, 1, Encoding.DELTA_BINARY_PACKED))
+    assert_true(_has(md, 2, Encoding.BYTE_STREAM_SPLIT))
+    assert_true(_has(md, 3, Encoding.BYTE_STREAM_SPLIT))
+    assert_true(_has(md, 4, Encoding.PLAIN))
+    for c in range(5):
+        assert_false(Bool(md.row_groups[0].columns[c].meta_data.dictionary_page_offset))
+    var b = _read_rg(file, md, 0)
+    assert_equal(b.num_rows(), n)
+    for r in range(n):
+        assert_equal(Int(b.column_at(0).as_primitive[DType.int32]().get(r)), r * 3 - 5)
+        assert_equal(b.column_at(1).is_null_at(r), r % 10 == 7)
+        if r % 10 != 7:
+            assert_equal(Int(b.column_at(1).as_primitive[DType.int64]().get(r)), r * 1000003)
+        assert_equal(b.column_at(2).as_primitive[DType.float32]().get(r), Float32(r) * 0.37 + 0.5)
+        assert_equal(b.column_at(3).as_primitive[DType.float64]().get(r), Float64(r) * 1.37 + 0.001)
+        ref c4 = b.column_at(4)
+        var text = c4.as_large_string().get(r) if c4.arrow_type == ArrowType.LARGE_STRING else c4.as_string().get(r)
+        assert_equal(text, String("u-") + String(r * 7919))
+
+
+def test_a_single_batch_of_exactly_max_rows_is_one_row_group_without_index() raises:
+    # total_rows == max_rows_per_rg is one row group through the plain file
+    # writer (no page index); one row more is cut in two with the index.
+    var at = write_record_batch_to_parquet_bytes(_batch(0, 300, False), max_rows_per_rg=300)
+    var md = _footer(at)
+    assert_equal(len(md.row_groups), 1)
+    assert_false(Bool(md.row_groups[0].columns[0].offset_index_offset))
+    _check_file(at, 300, False, 300)
+    var over = write_record_batch_to_parquet_bytes(_batch(0, 301, False), max_rows_per_rg=300)
+    var md2 = _footer(over)
+    assert_equal(len(md2.row_groups), 2)
+    assert_equal(md2.row_groups[1].num_rows, 1)
+    assert_true(Bool(md2.row_groups[0].columns[0].offset_index_offset))
+    _check_file(over, 301, False, 300)
+
+
+def test_several_batches_at_exactly_max_rows_stay_concat_free() raises:
+    # 300 rows in three batches with max 300: the concat-free PLAIN page (the
+    # dictionary-eligible column stays PLAIN). 301 rows: concatenated and cut.
+    var at = write_record_batches_to_parquet_bytes(_three_batches(False, 100), max_rows_per_rg=300)
+    var md = _footer(at)
+    assert_equal(len(md.row_groups), 1)
+    assert_false(Bool(md.row_groups[0].columns[5].meta_data.dictionary_page_offset))
+    _check_file(at, 300, False, 300)
+    var batches = Slab[RecordBatch]()
+    batches.append(_batch(0, 100, False))
+    batches.append(_batch(100, 100, False))
+    batches.append(_batch(200, 101, False))
+    var over = write_record_batches_to_parquet_bytes(batches^, max_rows_per_rg=300)
+    var md2 = _footer(over)
+    assert_equal(len(md2.row_groups), 2)
+    _check_file(over, 301, False, 300)
+
+
+def test_batches_whose_column_types_differ_are_refused() raises:
+    # Same column count, different Arrow type in one column: not eligible for
+    # the concat-free path, and the concat refuses the disagreement.
+    var batches = Slab[RecordBatch]()
+    batches.append(_batch(0, 10, False))
+    var sb = SchemaBuilder()
+    var b = RecordBatchBuilder()
+    var sb0 = _batch(10, 10, False)
+    for c in range(7):
+        sb.add_field(sb0.schema.field_at_unchecked(c))
+    for c in range(7):
+        if c == 0:
+            var wide = PrimitiveArray[DType.int64].allocate(10)
+            b.add_column(Column.from_primitive[DType.int64](wide))
+        else:
+            b.add_column(sb0.column_at(c).deep_copy())
+    batches.append(b.build(sb.build()))
+    with assert_raises():
+        _ = write_record_batches_to_parquet_bytes(batches^)
+
+
+def test_a_short_element_list_is_refused_by_the_date_patch() raises:
+    var batch = _batch(0, 5, True)
+    var short = List[SchemaElement]()
+    short.append(SchemaElement(name="schema", num_children=1))
+    with assert_raises(contains="leaf element(s) for"):
+        patch_date32_schema_elements(short, batch.schema)
+
+
 def test_refusals() raises:
     with assert_raises(contains="no batches"):
         _ = write_record_batches_to_parquet_bytes(Slab[RecordBatch]())
@@ -383,8 +527,15 @@ def test_refusals() raises:
     var no_cols = no_cols_builder.build(empty_schema.build())
     with assert_raises(contains="batch has no columns"):
         _ = write_record_batch_to_parquet_bytes(no_cols)
-    with assert_raises(contains="max_rows_per_rg must be positive"):
-        _ = write_record_batch_to_parquet_bytes(_batch(0, 10, False), max_rows_per_rg=0)
+    # A zero-row batch with a non-positive size cannot loop whatever the
+    # guard does, so a weakened guard fails these instead of hanging them.
+    with assert_raises(contains="max_rows_per_rg must be positive, got 0"):
+        _ = write_record_batch_to_parquet_bytes(_batch(0, 0, False), max_rows_per_rg=0)
+    with assert_raises(contains="max_rows_per_rg must be positive, got -5"):
+        _ = write_record_batch_to_parquet_bytes(_batch(0, 0, False), max_rows_per_rg=-5)
+    _require_positive_row_group_size("t", 1)
+    with assert_raises(contains="t: max_rows_per_rg must be positive, got 0"):
+        _require_positive_row_group_size("t", 0)
     var mismatch = Slab[RecordBatch]()
     mismatch.append(_batch(0, 10, False))
     mismatch.append(_batch(10, 10, True))

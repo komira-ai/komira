@@ -213,7 +213,7 @@ def _encode_fast_path_column(
         return _encode_n_batches_string(
             batches, n_batches, col, name, nullable, codec
         )
-    raise Error(
+    raise Error(  # cov: unreachable the caller admits only columns `_column_is_fast_path_eligible` accepted, and every accepted type has an arm above
         "parquet writer: column "
         + String(col)
         + " of Arrow type "
