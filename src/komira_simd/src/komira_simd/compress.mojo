@@ -151,24 +151,14 @@ def _scalar_compress[D: DType, W: Int](
     checks per chunk); used as fallback on AVX2 + non-x86 + W=1.
 
     Lane order is preserved. Trailing lanes (count..W) are zeroed.
-
-    There is no per-lane decision: every lane is written at the next free
-    slot and the slot advances by the mask lane (0 or 1), so a lane that is
-    not selected is overwritten by the next one or masked off at the end.
-    The slot never passes lane k, so the write is always in range.
     """
     var out = SIMD[D, W](0)
-    var steps = mask.cast[DType.uint8]()
     var c: Int = 0
-    var live = SIMD[DType.bool, W](fill=False)
     comptime for k in range(W):
-        out[c] = vec[k]
-        c = c + Int(steps[k])
-    comptime for k in range(W):
-        live[k] = k < c
-    return CompressResult[D, W](
-        compacted=live.select(out, SIMD[D, W](0)), count=UInt8(c)
-    )
+        if mask[k]:
+            out[c] = vec[k]
+            c = c + 1
+    return CompressResult[D, W](compacted=out, count=UInt8(c))
 
 
 # =============================================================================

@@ -112,11 +112,8 @@ comptime _SIMD_W_U64_DELTA: Int = 0
 # width (see gather.mojo). This is
 # the SAME gate the explicit-intrinsic SIMD wrappers (compress / gather) use to
 # decide whether to emit AVX-512 intrinsics.
-comptime _AVX512_NATIVE = CompilationTarget.is_x86() and simd_width_of[DType.uint32]() == 16
-
-
 def _target_is_avx512() -> Bool:
-    return _AVX512_NATIVE
+    return CompilationTarget.is_x86() and simd_width_of[DType.uint32]() == 16
 
 
 # -----------------------------------------------------------------------------
