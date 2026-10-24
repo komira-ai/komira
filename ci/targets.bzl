@@ -131,6 +131,7 @@ TARGETS = [
     "komira//src/komira_gcp_logging:komira_gcp_logging_conda",
     "komira//src/komira_gcp_monitoring:komira_gcp_monitoring_conda",
     "komira//src/komira_gcp_monitoring_client:komira_gcp_monitoring_client_conda",
+    "komira//src/komira_gcp_secret_store:komira_gcp_secret_store_conda",
     "komira//src/komira_gcp_secretmanager:komira_gcp_secretmanager_conda",
     "komira//src/komira_gcp_serviceusage:komira_gcp_serviceusage_conda",
     "komira//src/komira_gcp_storage:komira_gcp_storage_conda",
