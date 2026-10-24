@@ -104,6 +104,12 @@ mojo_library(
         # the full-source denominator: a measured package's source file no
         # report names counts uncovered and raises UnmeasuredFile
         "tests/test_full_source.mojo",
+        # generated sources: a `.mojo` file whose first line contains
+        # `@generated` is left out whether a report reaches it or not (lines,
+        # branch records, mutants), and counted in the result; the token on
+        # a later line, in a docstring or string, in an empty file's place,
+        # or on line 2 of a CRLF file does not exempt
+        "tests/test_generated_marker.mojo",
         # declaration-only files: a fixture of bodiless trait methods,
         # comptime values and imports no test compiled counts no line and is
         # a DeclarationOnlyFile note; the near-miss fixture (a default

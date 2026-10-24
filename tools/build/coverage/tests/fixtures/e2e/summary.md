@@ -37,4 +37,5 @@ Uncovered changed lines:
 
 - 1 report files outside the repository (the Mojo standard library, other code not in the repository)
 - 1 test source files (`<package>/tests/` and each `--test-source`; `--include-tests` counts them)
+- 0 generated source files (first line contains `@generated`; neither measured nor counted; the result JSON names them)
 - 0 mutants outside the repository, 0 in test sources
