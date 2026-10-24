@@ -35,8 +35,11 @@
 #     (`buck2 uquery -c komira.coverage=true "kind('^mojo_cov_summary_rule$',
 #     set(//<package>: ...))"`): each one's `:coverage` target is one more
 #     entry of the libraries list, and of package_libraries.txt. Such a
-#     package has no branch records (kcov writes none for Mojo and buildrules'
-#     rules have no classifier), no coverage_tests and no gate of its own here.
+#     package has no coverage_tests and no gate of its own here. Its branch
+#     records are `<label>[branches]`, one lcov file per test from the
+#     compiler's IR (buildrules' classifier), when the `branches` attribute of
+#     its `mojo_cov_summary_rule` is not empty (a package whose tests link a
+#     native library has none): such a package is also in branch_libraries.txt.
 #     Then which of the mojo_library ones name mojo_test targets in `coverage_tests`
 #     (`buck2 uquery -c komira.coverage=true "attrregexfilter(coverage_tests,
 #     '.', <the same query>)"`): their runs are `<library>_cov_gate[tests]`.
@@ -69,12 +72,16 @@
 #     coverage actions or gate failed gives none and is listed as branch NOT
 #     MEASURED: its records did not all build, or its gate, which reads the
 #     same records with covcheck, failed (so `report` could refuse them too).
-#     A mojo_package's `:coverage` is built as `<label>[reports]`: its entry's
-#     `*.cobertura.xml` paths are one kcov report per test, in repository
-#     paths, and SUCCESS is measured (any FAIL, a source in no report
-#     included, leaves it NOT MEASURED). The reports also record each test's
-#     own tests/ source; covcheck sets those aside as test sources, so the
-#     package's numbers are its library's sources.
+#     A mojo_package's `:coverage` is built as `<label>[reports]`, and with
+#     `<label>[branches]` after it when the package has branch records: its
+#     entry's `*.cobertura.xml` paths are one kcov report per test, in
+#     repository paths, and its `__info__/*.info` paths are one branch record
+#     file per test (one per report, as for a library), and SUCCESS is
+#     measured (any FAIL, a source in no report included, a branch record the
+#     classifier refused included, leaves it NOT MEASURED, lines too: the
+#     entry is one). The reports also record each test's own tests/ source;
+#     covcheck sets those aside as test sources, so the package's numbers are
+#     its library's sources.
 #  5. `covcheck report` over the reports of the libraries measured, and
 #     their branch records (`--branch-lcov`), in the
 #     mode and against the target of <policy>, each directory of its
@@ -83,11 +90,11 @@
 #     covcheck finds in a package under one is information: no finding, no
 #     failure conclusion, its annotations notices; with the holds of the
 #     measured libraries' packages only, each package's coverage_held at
-#     <head> as `--held <package>=<file>`; for a mojo_package's package the
-#     file is a copy without its `branch` line, because the package's reports
-#     hold no branch records and a held branch with none is a Regression
-#     (the line is kept in the package's own coverage_held, and is checked
-#     again when branch records exist). When there is no
+#     <head> as `--held <package>=<file>`; for a mojo_package's package with
+#     branch records the file is its coverage_held as it is, `branch` line
+#     included; for one without (its tests link a native library) it is a copy
+#     without the `branch` line, because a held branch with no records is a
+#     Regression. When there is no
 #     report (no library touched, none built, none has a test, or the
 #     libraries could not be listed) this script writes the summary and a
 #     neutral check run itself, in covcheck's shape (000.json the POST,
@@ -97,7 +104,8 @@
 # request bodies, sorted file order is send order), summary.md, result.json,
 # annotations.json, libraries.txt (the libraries of step 3, and the `:coverage`
 # of each mojo_package), package_libraries.txt (those `:coverage` targets),
-# branch_libraries.txt (those of them whose gate reads branch records),
+# branch_libraries.txt (those of them whose gate reads branch records, and the
+# mojo_package `:coverage` targets that have branch records),
 # coverage_tests_libraries.txt (those naming coverage_tests),
 # not_measured.txt (those whose coverage build failed) and
 # branch_not_measured.txt (those measured whose branch records are not read). <out> also holds the
@@ -267,27 +275,49 @@ if [ -s "$OUT/packages.txt" ]; then
     fi
     # The packages built with buildrules' mojo_package: the `:coverage` of
     # each (a mojo_cov_summary_rule). Its `[reports]` sub-target is the
-    # package's per-line records, one kcov report per test; it has no
-    # coverage_branch_gate and no branch records, so it joins the libraries as
-    # one that does not read them.
+    # package's per-line records, one kcov report per test, and its
+    # `[branches]` sub-target the branch records, one lcov file per test; the
+    # rule's `branches` attribute is empty when the package has none (its
+    # tests link a native library, and the sub-target does not exist). It has
+    # no coverage_branch_gate: it joins the libraries, and the branch libraries
+    # when its attribute is not empty.
     if [ -z "$SELECT_FAILED" ]; then
         pquery="kind('^mojo_cov_summary_rule\$', set($pats ))"
-        say "buck2 uquery \"$pquery\""
+        say "buck2 uquery \"$pquery\" --output-attribute '^branches\$'"
         rc=0
-        "$BUCK2" uquery -c komira.coverage=true "$pquery" \
+        "$BUCK2" uquery -c komira.coverage=true "$pquery" --output-attribute '^branches$' \
             >"$OUT/package_targets.raw" 2>"$OUT/logs/uquery_packages.log" </dev/null || rc=$?
         if [ "$rc" -ne 0 ]; then
             SELECT_FAILED="buck2 uquery of the mojo_package targets exited $rc"
             say "$SELECT_FAILED; its last lines:"
             tail -n 20 "$OUT/logs/uquery_packages.log"
         else
-            while IFS= read -r l; do
-                [ -n "$l" ] || continue
+            # buck2's JSON, pretty-printed: per package target a line
+            # `  "<label>": {`, then `    "branches": [],` or `    "branches": [`,
+            # the labels of its branch targets and `    ]`. "pkg has|none
+            # <label>" per target; "bad <line>" for any other line.
+            awk '
+                /^\{\}?$/ || /^\}$/ || /^  \},?$/ { next }
+                lab == "" && /^  ".*": \{$/ { lab = $0; sub(/^  "/, "", lab); sub(/": \{$/, "", lab); next }
+                lab != "" && /^    "branches": \[\]$/ { print "pkg none " lab; lab = ""; next }
+                lab != "" && /^    "branches": \[$/ { print "pkg has " lab; lab = ""; inb = 1; next }
+                inb && /^      ".*",?$/ { next }
+                inb && /^    \],?$/ { inb = 0; next }
+                { if (lab != "") print "bad " lab; print "bad " $0; lab = ""; inb = 0 }
+                END { if (lab != "") print "bad " lab }
+            ' "$OUT/package_targets.raw" >"$OUT/package_targets.tsv"
+            while IFS= read -r a; do
+                case "$a" in
+                    "pkg has "* | "pkg none "*) ;;
+                    *) die "buck2 uquery printed '${a#bad }', which is not a mojo_package target with its branches" ;;
+                esac
+                l=${a#pkg * }
                 echo "$l" | grep -qE '^[A-Za-z0-9_]*//[A-Za-z0-9_./+-]*:[A-Za-z0-9_.+-]+$' ||
                     die "buck2 uquery printed '$l', which is not a target label"
                 echo "$l" >>"$PUB/libraries.txt"
                 echo "$l" >>"$PUB/package_libraries.txt"
-            done <"$OUT/package_targets.raw"
+                case "$a" in "pkg has "*) echo "$l" >>"$PUB/branch_libraries.txt" ;; esac
+            done <"$OUT/package_targets.tsv"
         fi
     fi
 fi
@@ -327,6 +357,7 @@ if [ -s "$PUB/libraries.txt" ]; then
     while IFS= read -r lib; do
         if is_package "$lib"; then
             set -- "$@" "${lib}[reports]"
+            if reads_branch "$lib"; then set -- "$@" "${lib}[branches]"; fi
             continue
         fi
         set -- "$@" "${lib}[coverage][tests]"
@@ -385,6 +416,9 @@ if [ -s "$PUB/libraries.txt" ]; then
                 x = $0; sub(/^ *"/, "", x); sub(/",?$/, "", x); print lab " report " x
             }
             /^ *"buck-out\/[^"]*\/cov\/branch\/[^"\/]*\.info",?$/ {
+                x = $0; sub(/^ *"/, "", x); sub(/",?$/, "", x); print lab " info " x
+            }
+            /^ *"buck-out\/[^"]*\/__[^"\/]*__info__\/[^"\/]*\.info",?$/ {
                 x = $0; sub(/^ *"/, "", x); sub(/",?$/, "", x); print lab " info " x
             }
         ' "$br" >"$OUT/verdicts.txt"
@@ -450,8 +484,14 @@ fi
 
 # Each measured library's package (a label's path: komira//src/x:x is src/x).
 sed 's|^[A-Za-z0-9_]*//\([^:]*\):.*$|\1|' "$OUT/measured.txt" | sort -u >"$OUT/measured_packages.txt"
-# ... and the directories of those that are a mojo_package's.
-sed 's|^[A-Za-z0-9_]*//\([^:]*\):.*$|\1|' "$PUB/package_libraries.txt" | sort -u >"$OUT/package_dirs.txt"
+# ... and the directories of the mojo_packages without branch records (their
+# tests link a native library).
+: >"$OUT/package_dirs.txt"
+while IFS= read -r l; do
+    [ -n "$l" ] || continue
+    reads_branch "$l" || echo "$l" | sed 's|^[A-Za-z0-9_]*//\([^:]*\):.*$|\1|' >>"$OUT/package_dirs.txt"
+done <"$PUB/package_libraries.txt"
+sort -u -o "$OUT/package_dirs.txt" "$OUT/package_dirs.txt"
 
 # The text of a JSON string from stdin: lines joined with \n. The texts
 # written here hold no quote or backslash (checked by json_safe).
@@ -494,9 +534,9 @@ if [ "$N_REPORTS" -gt 0 ]; then
     while IFS= read -r x; do set -- "$@" --cobertura "$x"; done <"$OUT/reports.txt"
     while IFS= read -r x; do set -- "$@" --branch-lcov "$x"; done <"$OUT/branch_records.txt"
     for d in $INFO_DIRS; do set -- "$@" --info-package "$d"; done
-    # A mojo_package's package holds no branch records, so its `branch` hold, which
-    # covcheck would read as a Regression (a held metric not measured), is left out of the copy
-    # covcheck reads; the marker itself keeps it for when branch records exist.
+    # A mojo_package with no branch records (its tests link a native library) is
+    # given a copy of its hold without `branch`, which covcheck would read as a
+    # Regression (a held metric not measured); every other package's hold is read as it is.
     mkdir -p "$OUT/held"
     while IFS= read -r p; do
         [ -f "$p/coverage_held" ] || continue
@@ -504,7 +544,7 @@ if [ "$N_REPORTS" -gt 0 ]; then
         if grep -qxF -- "$p" "$OUT/package_dirs.txt" && grep -qx 'branch' "$h"; then
             h="$OUT/held/$(echo "$p" | tr '/' '_')"
             awk '$0 != "branch"' "$p/coverage_held" >"$h"
-            say "$p: its coverage_held branch is not checked (a mojo_package's reports hold no branch records)"
+            say "$p: its coverage_held branch is not checked (a mojo_package whose tests link a native library has no branch records)"
         fi
         set -- "$@" --held "$p=$h"
     done <"$OUT/measured_packages.txt"

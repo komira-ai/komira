@@ -1,6 +1,6 @@
 from std.testing import assert_equal, assert_true
 
-from covcheck.analyze import FORMAT_COBERTURA, Analysis, Input, Options, Sources, analyze
+from covcheck.analyze import FORMAT_BRANCH_LCOV, FORMAT_COBERTURA, Analysis, Input, Options, Sources, analyze
 from covcheck.held import Held, add_hold
 from covcheck.paths import RepoFiles, repo_files_of
 
@@ -8,7 +8,10 @@ from covcheck.paths import RepoFiles, repo_files_of
 # kcov Cobertura file per test, every path relative to the repository root, and each report names
 # the test's own source under the package's `tests/` next to the library's sources. A path in
 # several reports is summed. `covcheck report` must count the library's sources only, leave the
-# tests/ sources out, and read the package's `coverage_held` against those numbers.
+# tests/ sources out, and read the package's `coverage_held` against those numbers. The same
+# package's `:coverage[branches]` is one lcov file per test (`--branch-lcov`): its branches count
+# the library's sources only, summed across the tests, and the package's held `branch` is read
+# against them.
 
 comptime PKG = "src/mp"
 comptime LIB = "src/mp/src/mp/lib.mojo"
@@ -142,7 +145,86 @@ def test_the_tests_sources_are_counted_only_when_asked() raises:
     assert_equal(a.packages[k].files, 3)
 
 
+def _branch_file(origin: String, arm0: Int, arm1: Int, test_path: String) -> Input:
+    """One test's branch records: the library's one decision (the `if` of line 2, two arms taken
+    `arm0` and `arm1` times), then a record of the test's own source, which must count nowhere."""
+    var t = String("SF:") + String(LIB) + String("\nBRDA:2,5:br:0/1,0,") + String(arm0)
+    t += String("\nBRDA:2,5:br:0/1,1,") + String(arm1) + String("\nend_of_record\n")
+    t += String("SF:") + test_path + String("\nBRDA:2,5:br:0/1,0,1\nBRDA:2,5:br:0/1,1,1\nend_of_record\n")
+    return Input(String(FORMAT_BRANCH_LCOV), String(""), origin, t)
+
+
+def _two_tests_with_branches(
+    lib_a: List[Int], lib_b: List[Int], a0: Int, a1: Int, b0: Int, b1: Int
+) -> List[Input]:
+    var l = _two_tests(lib_a, lib_b)
+    l.append(_branch_file(String("buck-out/v2/art/komira/x/src/mp/__test_a__info__/test_a__info.info"), a0, a1, String(TEST_A)))
+    l.append(_branch_file(String("buck-out/v2/art/komira/x/src/mp/__test_b__info__/test_b__info.info"), b0, b1, String(TEST_B)))
+    return l^
+
+
+def _held_line_and_branch() raises -> Held:
+    var h = Held()
+    add_hold(h, String(PKG), String("line\nbranch\n"), String("src/mp/coverage_held"), List[String]())
+    return h^
+
+
+def test_per_test_branch_records_are_summed_and_count_library_sources_only() raises:
+    # Test a takes the `if`'s first arm, test b its second: between them 2 of 2 arms. The two
+    # tests' own sources each hold a decision of 2 arms taken, in the records and in no number.
+    var o = Options()
+    o.mode = String("enforce")
+    var a = analyze(
+        _two_tests_with_branches(_hits(1, 1, 0, 1), _hits(1, 0, 1, 0), 3, 0, 0, 2),
+        List[Input](), _repo(), _held_line_and_branch(), _sources(), o,
+    )
+    var k = a.package_index(String(PKG))
+    assert_true(k >= 0)
+    assert_equal(a.packages[k].branch_found, 2)
+    assert_equal(a.packages[k].branch_hit, 2)
+    assert_equal(a.packages[k].branch_bp(), 10000)
+    assert_equal(a.packages[k].line_hit, 4)
+    # Held line and branch are both met: no finding, and no BranchNotMeasured.
+    assert_equal(_kinds(a), "")
+    assert_equal(a.conclusion, "success")
+
+
+def test_a_branch_arm_no_test_takes_is_below_the_held_branch() raises:
+    # Neither test takes the second arm (a count of 0): 1 of 2 arms, 50%, while every line runs.
+    # With the tests' own decisions counted (2 arms each, all taken) it would read 5 of 6, so the
+    # hold failing at 50% shows they are left out.
+    var o = Options()
+    o.mode = String("enforce")
+    var a = analyze(
+        _two_tests_with_branches(_hits(1, 1, 1, 1), _hits(1, 1, 1, 1), 1, 0, 2, 0),
+        List[Input](), _repo(), _held_line_and_branch(), _sources(), o,
+    )
+    var k = a.package_index(String(PKG))
+    assert_true(k >= 0)
+    assert_equal(a.packages[k].branch_found, 2)
+    assert_equal(a.packages[k].branch_hit, 1)
+    assert_equal(a.packages[k].branch_bp(), 5000)
+    assert_true(_kinds(a).find(String("Regression")) >= 0, _kinds(a))
+    assert_equal(a.conclusion, "failure")
+
+
+def test_a_held_branch_with_no_branch_records_is_a_regression() raises:
+    # The reports of the package alone (no `--branch-lcov`): a held `branch` has no figure to be
+    # read against, which is the finding the CI script used to avoid by dropping the hold.
+    var o = Options()
+    o.mode = String("enforce")
+    var a = analyze(
+        _two_tests(_hits(1, 1, 1, 1), _hits(1, 1, 1, 1)),
+        List[Input](), _repo(), _held_line_and_branch(), _sources(), o,
+    )
+    assert_true(_kinds(a).find(String("Regression")) >= 0, _kinds(a))
+    assert_equal(a.conclusion, "failure")
+
+
 def main() raises:
+    test_per_test_branch_records_are_summed_and_count_library_sources_only()
+    test_a_branch_arm_no_test_takes_is_below_the_held_branch()
+    test_a_held_branch_with_no_branch_records_is_a_regression()
     test_per_test_reports_are_summed_and_count_library_sources_only()
     test_a_line_no_test_runs_is_below_the_hold_and_the_tests_do_not_lift_it()
     test_the_tests_sources_are_counted_only_when_asked()

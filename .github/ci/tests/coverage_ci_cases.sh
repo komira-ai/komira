@@ -595,7 +595,7 @@ measure M1
 [ "$RC" -eq 0 ] || red "M1: a failed coverage build, and the script exited $RC (it must exit 0)"
 {
     echo "uquery -c komira.coverage=true $QUERY --output-attribute ^coverage_branch_gate\$"
-    echo "uquery -c komira.coverage=true $PQUERY"
+    echo "uquery -c komira.coverage=true $PQUERY --output-attribute ^branches\$"
     echo "uquery -c komira.coverage=true attrregexfilter(coverage_tests, '.', $QUERY)"
     echo "build -c komira.coverage=true --keep-going --build-report $O/logs/build_report.json komira//src/alpha:alpha[coverage][tests] komira//src/beta:beta[coverage][tests] komira//src/gamma:gamma[coverage][tests]"
 } >"$W/want_buck2"
@@ -763,7 +763,7 @@ measure B1
 [ "$RC" -eq 0 ] || red "B1: exited $RC"
 {
     echo "uquery -c komira.coverage=true $QUERY2 --output-attribute ^coverage_branch_gate\$"
-    echo "uquery -c komira.coverage=true $PQUERY2"
+    echo "uquery -c komira.coverage=true $PQUERY2 --output-attribute ^branches\$"
     echo "uquery -c komira.coverage=true attrregexfilter(coverage_tests, '.', $QUERY2)"
     echo "build -c komira.coverage=true --keep-going --build-report $O/logs/build_report.json komira//src/alpha:alpha[coverage][tests] komira//src/alpha:alpha[coverage][branch_info] komira//src/beta:beta[coverage][tests]"
 } >"$W/want_buck2"
