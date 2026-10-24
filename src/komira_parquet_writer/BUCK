@@ -51,6 +51,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   missing column, mismatched row counts, a null in a REQUIRED column.
 # - test_encoded_column: encode_column_to_buffer's bytes equal the writer's,
 #   and the column-parallel assembly decodes.
+# - test_multi_batch_direct: two arrays (and n raw-byte arrays) encode to the
+#   page the single-array encoder gives for their concatenation, byte for
+#   byte, with the same statistics; nulls, slices, codecs.
+# - test_multi_batch_stats_direct: chunk statistics folded across batches
+#   equal the concatenation's (ints with HLL, floats with NaN and signed
+#   zero), all-null and all-NaN publish no bounds.
 # - test_no_env_reads: the package's sources read no environment, hold no
 #   raw pointer in a public signature, and import only these deps. It is
 #   staged every source `srcs` compiles.
@@ -83,6 +89,8 @@ mojo_library(
         "tests/test_encoded_column.mojo",
         "tests/test_file_writer_errors.mojo",
         "tests/test_file_writer_roundtrip.mojo",
+        "tests/test_multi_batch_direct.mojo",
+        "tests/test_multi_batch_stats_direct.mojo",
         "tests/test_no_env_reads.mojo",
         "tests/test_numeric_dict_preestimate.mojo",
         "tests/test_page_size_limit_direct.mojo",
