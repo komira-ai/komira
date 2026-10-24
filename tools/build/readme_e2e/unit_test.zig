@@ -7,6 +7,7 @@ const conda = @import("conda.zig");
 const plan = @import("plan.zig");
 const cli = @import("cli.zig");
 const verify = @import("verify.zig");
+const offline = @import("offline.zig");
 const fix = @import("fixture.zig");
 
 fn arena() std.heap.ArenaAllocator {
@@ -248,4 +249,56 @@ test "the compile wrapper's options get the source root, a command without them 
     const plain = [_][]const u8{ "fake", "compile", "build" };
     const same = try verify.withSourceRoot(a, &plain, "work/src");
     try std.testing.expectEqual(@as(usize, 3), same.len);
+}
+
+// ---- offline.zig --------------------------------------------------------------
+
+test "the offline registry serves its configuration and refuses and remembers everything else" {
+    const a = std.heap.page_allocator;
+    const reg = try offline.Registry.start();
+    const base = try reg.url(a);
+    try std.testing.expect(std.mem.startsWith(u8, base, "http://127.0.0.1:"));
+
+    const config = try offline.get(a, base, "/index/config.json");
+    try std.testing.expectEqual(@as(u16, 200), config.status);
+    const parsed = try std.json.parseFromSlice(std.json.Value, a, config.body, .{});
+    const o = parsed.value.object;
+    try std.testing.expectEqual(@as(i64, 1), o.get("index_version").?.integer);
+    // Every URL the configuration names is this server, so mopm's other requests come back here.
+    const own = try std.fmt.allocPrint(a, "http://127.0.0.1:{d}/", .{reg.port});
+    try std.testing.expect(std.mem.startsWith(u8, o.get("api_url").?.string, own));
+    try std.testing.expect(std.mem.startsWith(u8, o.get("channel_url").?.string, own));
+
+    for ([_][]const u8{ "/index/gh/os/ghost", "/channel/linux-64/repodata.json", "/index/config.json/", "/" }) |target| {
+        const r = try offline.get(a, base, target);
+        try std.testing.expectEqual(@as(u16, 403), r.status);
+        try std.testing.expect(std.mem.indexOf(u8, r.body, "\"code\":\"offline\"") != null);
+    }
+    reg.stop();
+    const refused = try reg.refused(a);
+    try std.testing.expectEqual(@as(usize, 4), refused.len);
+    try std.testing.expectEqualStrings("GET /index/gh/os/ghost", refused[0]);
+    try std.testing.expectEqualStrings("GET /channel/linux-64/repodata.json", refused[1]);
+    try std.testing.expectEqualStrings("GET /index/config.json/", refused[2]);
+    try std.testing.expectEqualStrings("GET /", refused[3]);
+}
+
+test "the configuration request alone is not a refusal" {
+    const a = std.heap.page_allocator;
+    const reg = try offline.Registry.start();
+    const base = try reg.url(a);
+    _ = try offline.get(a, base, "/index/config.json");
+    reg.stop();
+    try std.testing.expectEqual(@as(usize, 0), (try reg.refused(a)).len);
+}
+
+test "a package's index is asked for at <aa>/<bb>/<name>, short names padded with underscores" {
+    const a = std.heap.page_allocator;
+    try std.testing.expectEqualStrings("/index/gh/os/ghost", try offline.indexTarget(a, "ghost"));
+    try std.testing.expectEqualStrings("/index/ap/p_/app", try offline.indexTarget(a, "app"));
+    try std.testing.expectEqualStrings("/index/__/__/", try offline.indexTarget(a, ""));
+}
+
+test "a registry that is not a loopback URL is not asked" {
+    try std.testing.expectError(error.NotLoopback, offline.get(std.heap.page_allocator, "https://api.mopm.dev", "/index/config.json"));
 }

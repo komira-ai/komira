@@ -15,6 +15,7 @@ _SRCS = [
     "cli.zig",
     "conda.zig",
     "main.zig",
+    "offline.zig",
     "plan.zig",
     "verify.zig",
 ]
@@ -49,7 +50,7 @@ zig_exe(
     name = "fake",
     exec_compatible_with = LINUX_X86_64,
     src = "fake.zig",
-    imports = ["conda.zig", "plan.zig"],
+    imports = ["conda.zig", "offline.zig", "plan.zig"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = _ZIG,
 )
@@ -69,6 +70,7 @@ _SCENARIOS = [
     "assemble_missing_dependency",
     "assemble_wrong_package",
     "changed_file",
+    "closure_member_missing",
     "compile_error",
     "dependency",
     "import_outside_closure",
@@ -82,6 +84,7 @@ _SCENARIOS = [
     "relative_link",
     "run_error",
     "skipped_member",
+    "swallowed_refusal",
     "tampered_file",
     "usage",
     "wrong_compiler",
@@ -111,7 +114,7 @@ zig_exe(
     visibility = ["PUBLIC"],
 )
 
-# ---- A mopm for a staged set, before the pinned one has `--overlay` ----------
+# ---- A stand-in mopm for a staged set -----------------------------------------
 
 # `mopm add --overlay` of a set that holds its whole closure (fake.zig): the
 # `mopm` of the one target that runs the real compiler over a real package

@@ -298,6 +298,54 @@ fn changedFile(env: Env) void {
     expectText(r, "is not a file of the staged plan");
 }
 
+/// A set whose `app` needs `ghost` and does not hold it: both are staged (the tool refuses a
+/// set with a hole), then `ghost` is taken out of the plan and the set, as a release whose
+/// staging missed a member would be.
+fn stageWithHole(env: Env) void {
+    const ghost = Pkg{ .name = "ghost", .readme = readmeOf(env, "ghost", &.{"from ghost import x"}) };
+    const app = Pkg{ .name = "app", .deps = &.{"ghost"}, .readme = readmeOf(env, "app", &.{"from app import run\nprint(run())"}) };
+    expectCode(env.stage(&.{ app, ghost }, "1.0.0"), 0, "stage");
+    var why: []const u8 = "";
+    const plan = plan_mod.parsePlan(env.a, env.get("set/plan.json").?, &why) catch die("plan.json: {s}", .{why});
+    var kept: std.ArrayList(plan_mod.Member) = .empty;
+    for (plan.members) |m| {
+        if (!std.mem.eql(u8, m.name, "ghost")) kept.append(env.a, m) catch die("out of memory", .{});
+    }
+    if (kept.items.len != 1) die("the plan held {d} member(s) besides ghost, want 1", .{kept.items.len});
+    const text = plan_mod.renderPlan(env.a, .{ .version = plan.version, .members = kept.items }) catch die("cannot write the plan", .{});
+    env.put("set/plan.json", text);
+    std.fs.cwd().deleteFile(env.join(&.{"set/linux-64/mojo-ghost-1.2.3-mojo1.0.0_0.conda"})) catch |e| die("cannot delete the staged file: {s}", .{@errorName(e)});
+}
+
+fn closureMemberMissing(env: Env) void {
+    // mopm needs `ghost`, which the set lacks: it asks the registry, which is the offline one and
+    // refuses, so the install fails with the refusal. Nothing is fetched and nothing unpacked.
+    stageWithHole(env);
+    const r = env.verify("app", "1.2.3", "1.0.0", "mopm");
+    expectCode(r, 1, "verify");
+    expectText(r, "FAIL install: app: ");
+    expectText(r, "the offline registry refused 1 request(s) beyond its configuration (GET /index/gh/os/ghost)");
+    // mopm's own message carries the registry's refusal.
+    expectText(r, "answered HTTP 403");
+    expectText(r, "the README e2e is offline");
+    expectNoText(r, "PASS app");
+    if (env.exists("run/prefix/lib/mojo/app.mojoc")) die("a package was unpacked from a closure the set does not hold", .{});
+    if (env.exists("run.marker")) die("a marker was written for a package that did not install", .{});
+}
+
+fn swallowedRefusal(env: Env) void {
+    // A mopm that ignores the refusal exits 0 with a lock that leaves `ghost` out. The e2e still
+    // fails: the registry remembers the request, and any request beyond its configuration is a
+    // fetch the set should have made unnecessary.
+    stageWithHole(env);
+    const r = env.verify("app", "1.2.3", "1.0.0", "mopm_swallow");
+    expectCode(r, 1, "verify");
+    expectText(r, "FAIL install: app: `mopm add app@=1.2.3` exited 0, and the offline registry refused 1 request(s) beyond its configuration (GET /index/gh/os/ghost)");
+    expectNoText(r, "PASS app");
+    if (env.exists("run/prefix/lib/mojo/app.mojoc")) die("a package was unpacked although mopm asked the registry for more than the set", .{});
+    if (env.exists("run.marker")) die("a marker was written for a package that did not install", .{});
+}
+
 fn oldMopm(env: Env) void {
     expectCode(env.stage(&.{goodReadme(env, &.{good_use})}, "1.0.0"), 0, "stage");
     const r = env.verify("good", "1.2.3", "1.0.0", "mopm_old");
@@ -432,6 +480,8 @@ const table = [_]Scenario{
     .{ .name = "missing_file", .run = missingFile },
     .{ .name = "tampered_file", .run = tamperedFile },
     .{ .name = "changed_file", .run = changedFile },
+    .{ .name = "closure_member_missing", .run = closureMemberMissing },
+    .{ .name = "swallowed_refusal", .run = swallowedRefusal },
     .{ .name = "old_mopm", .run = oldMopm },
     .{ .name = "old_mopm_usage", .run = oldMopmUsage },
     .{ .name = "wrong_compiler", .run = wrongCompiler },

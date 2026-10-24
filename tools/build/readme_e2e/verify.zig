@@ -5,7 +5,10 @@
 //!   staged    the staged set's plan.json holds the package at the version
 //!             (an `upload` member), names its README, and the README is there
 //!   install   a fresh project (a mopm.toml of its own, nothing else) runs
-//!             `mopm add <package>@=<version> --overlay <staged set>`; the lock
+//!             `mopm add <package>@=<version> --overlay <staged set> --registry
+//!             <a loopback registry that refuses every request but its own
+//!             configuration>` (offline.zig), so a closure member the set lacks
+//!             is a refusal and not a fetch; the lock
 //!             it writes names the closure, each locked file is the staged
 //!             file byte for byte (sha256 and size) and the plan's, and each is
 //!             unpacked into the project's prefix, `lib/mojo/<name>.mojoc`
@@ -27,6 +30,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const conda = @import("conda.zig");
 const plan_mod = @import("plan.zig");
+const offline = @import("offline.zig");
 
 pub const Options = struct {
     package: []const u8,
@@ -220,8 +224,25 @@ fn run(c: *Ctx) !void {
     try env.put("XDG_CONFIG_HOME", home_abs);
 
     const spec = try std.fmt.allocPrint(c.a, "{s}@={s}", .{ opts.package, opts.version });
-    const add = try concatArgs(c.a, try absolutize(c.a, opts.mopm), &.{ "add", spec, "--overlay", staged_abs });
+    // Offline by enforcement: mopm's registry is a loopback server that serves its configuration
+    // and refuses every other request (offline.zig), so what the staged set lacks cannot be fetched.
+    const registry = offline.Registry.start() catch |e|
+        return c.fail("install", "cannot start the offline registry: {s}", .{@errorName(e)});
+    const registry_url = try registry.url(c.a);
+    const add = try concatArgs(c.a, try absolutize(c.a, opts.mopm), &.{ "add", spec, "--overlay", staged_abs, "--registry", registry_url });
     const added = try runProcess(c, add, project_abs, &env);
+    registry.stop();
+    const asked = try registry.refused(c.a);
+    if (asked.len != 0) {
+        const how: []const u8 = if (added.code) |x| try std.fmt.allocPrint(c.a, "exited {d}", .{x}) else "did not exit";
+        return c.fail("install", "`mopm add {s}` {s}, and the offline registry refused {d} request(s) beyond its configuration ({s}): the staged set must hold the whole closure, and mopm may fetch nothing\n{s}", .{
+            spec,
+            how,
+            asked.len,
+            try std.mem.join(c.a, ", ", asked),
+            try tail(c.a, added.output, 20),
+        });
+    }
     if (added.code != 0) {
         const hint = if (std.ascii.indexOfIgnoreCase(added.output, "overlay") != null or std.ascii.indexOfIgnoreCase(added.output, "usage:") != null)
             "\nthe pinned mopm may predate `--overlay` (it needs a mopm release that has it); bump the pin"
