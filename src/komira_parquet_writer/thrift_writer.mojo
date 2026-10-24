@@ -588,8 +588,12 @@ struct ThriftCompactWriter(Movable):
         # Field 1: list<bool> null_pages
         self.write_list_begin(1, _COMPACT_BOOLEAN_TRUE, num_pages)
         for i in range(num_pages):
-            # Booleans in a list are written as single bytes (1=true, 0=false)
-            self.write_byte(UInt8(1) if null_pages[i] else UInt8(0))
+            # Booleans in a list are single bytes, 1 for true and 2 for false
+            # (compact protocol: the two boolean type ids); a 0 is not a
+            # boolean and a strict reader rejects it.
+            self.write_byte(
+                _COMPACT_BOOLEAN_TRUE if null_pages[i] else _COMPACT_BOOLEAN_FALSE
+            )
 
         # Field 2: list<binary> min_values
         self.write_list_begin(2, _COMPACT_BINARY, num_pages)

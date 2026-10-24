@@ -24,6 +24,8 @@
 #     bitset size, a bitset equal to the filter's, and a filter loaded back
 #     from the file's bytes has no false negative over the inserted values
 #     and rejects a value that was never inserted.
+#   * test_null_pages_list_uses_the_compact_boolean_bytes: the ColumnIndex's
+#     list<bool> bytes are 1 for a null page and 2 (not 0) for a page that is not.
 #   * test_bloom_filter_errors: disabled, out of range, repeated, a filter of
 #     another hash family.
 from std.testing import TestSuite, assert_equal, assert_false, assert_raises, assert_true
@@ -43,7 +45,9 @@ from komira_parquet_writer import (
     WriterConfig,
     encode_dict_string_column_page,
     encode_plain_column,
+    ColumnPageTracker,
     make_schema_elements_nullable,
+    serialize_column_index,
 )
 from komira_arrow.string_array import StringArray
 
@@ -352,6 +356,22 @@ def test_bloom_filter_is_written_and_probes() raises:
     assert_true(absent > 90, "a filter at 1% fpp rejects almost every value it never saw")
 
 
+def test_null_pages_list_uses_the_compact_boolean_bytes() raises:
+    # list<bool> in the compact protocol: element type 1, then 1 for true and
+    # 2 for false. Field 1 header 0x19 (delta 1, list), list header 0x21
+    # (two elements, boolean).
+    var t = ColumnPageTracker(ParquetType.INT32)
+    var lo: List[UInt8] = [1, 0, 0, 0]
+    var hi: List[UInt8] = [9, 0, 0, 0]
+    t.add_page(0, 10, 0, lo.copy(), hi.copy(), 0, False)
+    t.add_page(10, 10, 5, List[UInt8](), List[UInt8](), 5, True)
+    var blob = serialize_column_index(t)
+    assert_equal(Int(blob[0]), 0x19)
+    assert_equal(Int(blob[1]), 0x21)
+    assert_equal(Int(blob[2]), 2, "a page that is not null is the false byte, 2")
+    assert_equal(Int(blob[3]), 1, "a null page is the true byte, 1")
+
+
 def test_bloom_filter_errors() raises:
     var off = AdvancedParquetWriter.create(_schema(), WriterConfig())
     with assert_raises(contains="needs WriterConfig(enable_bloom_filters=True)"):
@@ -364,6 +384,13 @@ def test_bloom_filter_errors() raises:
         w.set_bloom_filter(0, BloomFilter.create(64))
     with assert_raises(contains="declares XXHASH"):
         w.set_bloom_filter(1, BloomFilter.create(64, HashFamily.fnv1a()))
+    var closed = AdvancedParquetWriter.create(_schema(), WriterConfig(enable_bloom_filters=True))
+    closed.add_column_page_simple(_page_n(10))
+    closed.add_column_page_simple(_page_s(10))
+    closed.add_column_page_simple(_page_z_all_null(10))
+    _ = closed.close_to_bytes()
+    with assert_raises(contains="already closed"):
+        closed.set_bloom_filter(0, BloomFilter.create(64))
     # An incomplete row group is refused at close, whatever was set on it.
     w.add_column_page_simple(_page_n(10))
     with assert_raises(contains="the row group has 1 of 3 columns"):

@@ -19,6 +19,11 @@
 #   * test_crc_off_by_default_and_dictionary_chunks_carry_none: no crc field
 #     without enable_crc; with it, a dictionary chunk's pages carry none
 #     (documented in page_crc), and still decode.
+#   * test_crc_keeps_the_pages_own_encoding: DELTA_BINARY_PACKED and
+#     BYTE_STREAM_SPLIT pages with a CRC keep their encoding in the header
+#     and decode; a header forced to PLAIN fails.
+#   * test_page_with_crc_refuses_a_malformed_page, test_create_refuses_a_bad_schema:
+#     the error paths.
 #   * test_row_group_must_be_complete: a row group short of a column is
 #     refused at flush and at close.
 #   * test_add_column_page_errors: closed writer, column out of range, a
@@ -37,12 +42,15 @@ from komira_parquet.metadata_parser import parse_full_metadata
 from komira_parquet.morsel_reader import ColumnProjection
 from komira_parquet.page_header_parser import _parse_page_header
 from komira_parquet_api.metadata import FileMetaData, SchemaElement
-from komira_parquet_api.types import CompressionCodec, ParquetType
+from komira_parquet_api.types import CompressionCodec, Encoding, ParquetType
 from komira_parquet_writer import (
     AdvancedParquetWriter,
     ColumnPage,
     WriterConfig,
+    encode_bss_column_page,
+    encode_dbp_column_page,
     encode_dict_string_column_page,
+    page_with_crc,
     encode_plain_column,
     encode_string_column_page,
     make_schema_elements_nullable,
@@ -221,6 +229,67 @@ def test_crc_off_by_default_and_dictionary_chunks_carry_none() raises:
     assert_false(Bool(_chunk_header(on, md, 0, 1)[0]))
     for g in range(3):
         _ = _read_rg(on, md, g)
+
+
+def test_crc_keeps_the_pages_own_encoding() raises:
+    # DELTA_BINARY_PACKED and BYTE_STREAM_SPLIT pages, neither PLAIN nor a
+    # dictionary: the rewritten header must still name the page's encoding,
+    # or the reader decodes the body as PLAIN.
+    var names: List[String] = ["d", "f"]
+    var types: List[ParquetType] = [ParquetType.INT64, ParquetType.DOUBLE]
+    var nullable: List[Bool] = [False, False]
+    for codec in [CompressionCodec.UNCOMPRESSED, CompressionCodec.SNAPPY]:
+        var d = PrimitiveArray[DType.int64].allocate(500)
+        var f = PrimitiveArray[DType.float64].allocate(500)
+        for i in range(500):
+            d.set(i, Int64(i * i * 31 + 7))
+            f.set(i, Float64(i) * 1.37 + 0.001)
+        var w = AdvancedParquetWriter.create(
+            make_schema_elements_nullable(names.copy(), types.copy(), nullable.copy()),
+            WriterConfig(enable_crc=True),
+        )
+        w.add_column_page_simple(encode_dbp_column_page[DType.int64](0, d, "d", codec=codec))
+        w.add_column_page_simple(encode_bss_column_page[DType.float64](1, f, "f", codec=codec))
+        var file = w.close_to_bytes()
+        var md = _footer(file)
+        var want: List[Encoding] = [Encoding.DELTA_BINARY_PACKED, Encoding.BYTE_STREAM_SPLIT]
+        for c in range(2):
+            ref meta = md.row_groups[0].columns[c].meta_data
+            var r = _parse_page_header(Span(file)[meta.data_page_offset :])
+            assert_true(r.header.encoding == want[c], "column " + String(c) + " header encoding")
+            assert_true(Bool(r.header.crc))
+            var body = Span(file)[meta.data_page_offset + r.bytes_consumed : meta.data_page_offset + r.bytes_consumed + r.header.compressed_page_size]
+            assert_equal(Int(r.header.crc.value()), Int(zlib_crc32(body)))
+        var b = _read_rg(file, md, 0)
+        for i in range(500):
+            assert_equal(Int(b.column_at(0).as_primitive[DType.int64]().get(i)), i * i * 31 + 7)
+            assert_equal(b.column_at(1).as_primitive[DType.float64]().get(i), Float64(i) * 1.37 + 0.001)
+
+
+def test_page_with_crc_refuses_a_malformed_page() raises:
+    var enc: List[Encoding] = [Encoding.PLAIN]
+    var three: List[UInt8] = [0, 0, 0]
+    var no_header = ColumnPage(
+        three.copy(), 0, 1, 3, 3, ParquetType.INT64, "c", enc.copy(), CompressionCodec.UNCOMPRESSED
+    )
+    with assert_raises(contains="a 3-byte page with a 3-byte body"):
+        _ = page_with_crc(no_header^)
+    var eight: List[UInt8] = [0, 0, 0, 0, 0, 0, 0, 0]
+    var no_enc = ColumnPage(
+        eight^, 0, 1, 3, 3, ParquetType.INT64, "c", List[Encoding](), CompressionCodec.UNCOMPRESSED
+    )
+    with assert_raises(contains="page with a 3-byte body"):
+        _ = page_with_crc(no_enc^)
+
+
+def test_create_refuses_a_bad_schema() raises:
+    with assert_raises(contains="no root element"):
+        _ = AdvancedParquetWriter.create(List[SchemaElement](), WriterConfig())
+    var group_only = List[SchemaElement]()
+    group_only.append(SchemaElement(name="schema", num_children=1))
+    group_only.append(SchemaElement(name="nested", num_children=2))
+    with assert_raises(contains="schema leaf 'nested' has no physical type"):
+        _ = AdvancedParquetWriter.create(group_only^, WriterConfig())
 
 
 def test_row_group_must_be_complete() raises:
