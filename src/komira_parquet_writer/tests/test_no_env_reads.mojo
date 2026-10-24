@@ -51,6 +51,8 @@ comptime _FILES: List[String] = [
     "writer_encode.mojo",
     "writer_float_stats.mojo",
     "writer_helpers.mojo",
+    "writer_multi_batch.mojo",
+    "writer_multi_batch_stats.mojo",
     "writer_page_index.mojo",
 ]
 

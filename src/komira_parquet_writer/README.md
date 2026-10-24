@@ -140,6 +140,30 @@ assert_equal(Int(file[0]), 0x50)  # PAR1 at both ends
 assert_equal(Int(file[len(file) - 1]), 0x31)
 ```
 
+## Several arrays as one chunk
+
+A column held as several morsels encodes without an Arrow concat:
+`encode_two_primitives` and `encode_two_strings` give the page the
+single-array encoder gives for the concatenation (nulls, statistics and codec
+included), and `encode_n_primitives` takes any number of REQUIRED arrays as
+raw bytes. `writer_multi_batch_stats` folds a column's statistics across
+RecordBatches the same way.
+
+```mojo
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_parquet_writer import encode_plain_column, encode_two_primitives
+from std.testing import assert_equal
+
+var a = PrimitiveArray[DType.int64].from_list([1, 2])
+var b = PrimitiveArray[DType.int64].from_list([3, 4, 5])
+var both = PrimitiveArray[DType.int64].from_list([1, 2, 3, 4, 5])
+var two = encode_two_primitives[DType.int64](0, a, b, "n")
+var one = encode_plain_column[DType.int64](0, both, "n")
+assert_equal(len(two.data), len(one.data))
+for i in range(len(one.data)):
+    assert_equal(Int(two.data[i]), Int(one.data[i]))
+```
+
 ## A PLAIN page
 
 ```mojo
