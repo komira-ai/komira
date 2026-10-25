@@ -410,6 +410,49 @@ def test_resolve_bad_handle_and_long_payload() raises:
     print("  test_resolve_bad_handle_and_long_payload PASS")
 
 
+def test_crc_mismatch_error_holds_no_payload() raises:
+    """A checksum refusal names the handle and the fact, never a byte of the
+    payload (plain or base64) or the checksums: the payload is the secret."""
+    var capture = ArcPointer[List[UInt8]](List[UInt8]())
+    var damaged = GcpSecretManagerStore(
+        _client(
+            capture,
+            _http(
+                200,
+                "OK",
+                '{"name":"projects/0/secrets/smtp/versions/3","payload":'
+                + '{"data":"aHVudGVyMw==","dataCrc32c":"1736498283"}}',
+            ),
+        )
+    )
+    var text = String("")
+    try:
+        _ = damaged.resolve(String("projects/demo-project/secrets/smtp"))
+    except e:
+        text = String(e)
+    assert_true(text.find("CRC32C") >= 0, text)
+    assert_true(text.startswith("GcpSecretManagerStore: resolve of secret_ref projects/demo-project/secrets/smtp failed:"), text)
+    assert_false(text.find("hunter") >= 0, text)
+    assert_false(text.find("aHVudGVy") >= 0, text)
+    assert_false(text.find("1736498283") >= 0, text)
+    # The same for an answer with no checksum.
+    var no_sum = GcpSecretManagerStore(
+        _client(
+            ArcPointer[List[UInt8]](List[UInt8]()),
+            _http(200, "OK", '{"name":"projects/0/secrets/smtp/versions/3","payload":{"data":"aHVudGVyMg=="}}'),
+        )
+    )
+    text = String("")
+    try:
+        _ = no_sum.resolve(String("projects/demo-project/secrets/smtp"))
+    except e:
+        text = String(e)
+    assert_true(text.find("dataCrc32c") >= 0, text)
+    assert_false(text.find("hunter") >= 0, text)
+    assert_false(text.find("aHVudGVy") >= 0, text)
+    print("  test_crc_mismatch_error_holds_no_payload PASS")
+
+
 def main() raises:
     test_handle_grammar()
     test_version_aliases()
@@ -418,4 +461,5 @@ def main() raises:
     test_resolve_error_names_the_handle()
     test_handle_shapes()
     test_resolve_bad_handle_and_long_payload()
+    test_crc_mismatch_error_holds_no_payload()
     print("PASS komira_gcp_secret_store")
