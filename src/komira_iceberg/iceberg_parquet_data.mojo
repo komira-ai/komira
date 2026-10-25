@@ -302,6 +302,23 @@ def _write_primitive_col[
 # =============================================================================
 
 
+def check_row_group_range(start: Int, end: Int, limit: Int) raises:
+    """Refuse a row-group byte range `[start, end)` that is negative, inverted
+    (an overflowed sum ends below its start) or reaches past `limit`, the end of
+    the file's data region. `SharedAlignedBuffer.view_range_ro` checks its
+    bounds only in debug builds, and the range comes from the footer."""
+    if start < 0 or end < start or end > limit:
+        raise Error(
+            "read_parquet_data_file: a row group claims bytes ["
+            + String(start)
+            + ", "
+            + String(end)
+            + ") outside the file's data region [0, "
+            + String(limit)
+            + ")"
+        )
+
+
 def read_parquet_data_file(
     bytes: List[UInt8], col_types: List[Int]
 ) raises -> List[List[RowCell]]:
@@ -363,6 +380,9 @@ def read_parquet_data_file(
     for rg_idx in range(num_rgs):
         var rg = meta.row_groups[rg_idx].copy()
         var rg_br = row_group_byte_range(rg)
+        # The range comes from the footer, which is untrusted, and the view
+        # below is bounds-checked only in debug builds.
+        check_row_group_range(rg_br.start, rg_br.end, metadata_offset)
         var rg_view = buf.view_range_ro(rg_br.start, rg_br.length())
         var batch = decode_row_group_from_bytes(
             rg_view,

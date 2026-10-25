@@ -294,6 +294,12 @@ def read_live_rows_from[
                     )
                 )
             elif e.content == ICE_DATA_CONTENT_EQUALITY_DELETES:
+                if len(e.equality_ids) == 0:
+                    raise Error(
+                        "iceberg read: equality-delete file '"
+                        + e.file_path
+                        + "' lists no equality ids (it would match every row)"
+                    )
                 # the equality columns' types (in equality-id order).
                 var eq_types = List[Int]()
                 for k in range(len(e.equality_ids)):

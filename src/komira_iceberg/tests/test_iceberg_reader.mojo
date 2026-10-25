@@ -400,6 +400,29 @@ def test_the_reader_struct_matches_the_free_function() raises:
     _expect(reader.read_live_rows(), [6])
 
 
+def test_an_equality_delete_listing_no_ids_is_refused() raises:
+    var t = _Table()
+    var a = List[List[RowCell]]()
+    a.append(_row(1, String("eu")))
+    _ = t.add_data(a, Int64(1))
+    var keys = List[List[RowCell]]()
+    keys.append(_id_key(1))
+    var bytes = build_equality_delete_file(_eq_ids(), _eq_types(), keys)
+    var path = String(_LOC) + "/data/noids.avro"
+    _put(t.store, path, bytes)
+    # A v2 equality delete with no equality ids: read as an empty key it would
+    # match, and delete, every older row.
+    t.deletes.append(
+        DataFileInfo(
+            path^, len(bytes), 1, List[ColumnBound](),
+            ICE_DATA_CONTENT_EQUALITY_DELETES, List[Int](), Int64(2),
+        )
+    )
+    t.publish(Int64(2))
+    with assert_raises():
+        _ = t.read()
+
+
 def test_a_corrupt_pointer_and_a_missing_table_are_refused() raises:
     var store = InMemoryConditionalStore()
     with assert_raises():
@@ -418,5 +441,6 @@ def main() raises:
     test_position_delete_sequence_gates_on_greater_or_equal()
     test_a_partitioned_table_reads_and_its_partition_values_decode()
     test_the_reader_struct_matches_the_free_function()
+    test_an_equality_delete_listing_no_ids_is_refused()
     test_a_corrupt_pointer_and_a_missing_table_are_refused()
     print("test_iceberg_reader: all passed")

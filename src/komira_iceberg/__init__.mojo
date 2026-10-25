@@ -120,6 +120,7 @@ from .iceberg_avro_manifest import (
     encode_manifest_entry,
     encode_manifest_file_record,
     build_manifest_file,
+    avro_field_name,
     build_manifest_list,
 )
 
@@ -148,11 +149,13 @@ from .iceberg_row_value import (
     col_types_of,
     build_data_file,
     read_data_file,
+    read_checked_string,
 )
 
 from .iceberg_parquet_data import (
     build_parquet_data_file,
     read_parquet_data_file,
+    check_row_group_range,
 )
 
 from .iceberg_delete_writer import (

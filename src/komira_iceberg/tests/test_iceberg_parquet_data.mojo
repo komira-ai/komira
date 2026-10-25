@@ -39,6 +39,7 @@ from komira_iceberg import (
     col_types_of,
     build_parquet_data_file,
     read_parquet_data_file,
+    check_row_group_range,
 )
 
 
@@ -225,6 +226,44 @@ def test_an_unmapped_type_tag_is_refused() raises:
         _ = build_parquet_data_file(schema, rows)
 
 
+def test_the_row_group_range_check() raises:
+    check_row_group_range(4, 100, 100)
+    check_row_group_range(0, 0, 0)
+    with assert_raises():
+        check_row_group_range(-1, 10, 100)
+    with assert_raises():
+        check_row_group_range(50, 40, 100)
+    with assert_raises():
+        check_row_group_range(4, 101, 100)
+    # An overflowed sum wraps below its start.
+    with assert_raises():
+        check_row_group_range(4611686018427387904, -9223372036854775808, 100)
+    with assert_raises():
+        check_row_group_range(0, 9223372036854775807, 100)
+
+
+def test_a_footer_pointing_outside_the_file_is_refused() raises:
+    var schema = IcebergSchema(0)
+    schema.add(String("id"), ICE_T_LONG, required=True)
+    var rows = List[List[RowCell]]()
+    for i in range(200):
+        var r = List[RowCell]()
+        r.append(make_long_cell(Int64(i)))
+        rows.append(r^)
+    var bytes = build_parquet_data_file(schema, rows)
+    var n = len(bytes)
+    assert_equal(len(read_parquet_data_file(bytes, col_types_of(schema))), 200)
+    # Drop 64 bytes from the middle of the data region: the footer (kept
+    # whole) now names byte ranges that reach past where the data ends.
+    var cut = List[UInt8]()
+    for i in range(4):
+        cut.append(bytes[i])
+    for i in range(68, n):
+        cut.append(bytes[i])
+    with assert_raises():
+        _ = read_parquet_data_file(cut, col_types_of(schema))
+
+
 def main() raises:
     test_every_type_and_null_round_trips()
     test_rows_come_back_in_written_order()
@@ -232,4 +271,6 @@ def main() raises:
     test_a_narrower_file_reads_with_added_columns_null()
     test_bad_input_is_refused()
     test_an_unmapped_type_tag_is_refused()
+    test_the_row_group_range_check()
+    test_a_footer_pointing_outside_the_file_is_refused()
     print("test_iceberg_parquet_data: all passed")

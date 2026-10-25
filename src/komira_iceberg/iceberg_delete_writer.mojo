@@ -53,6 +53,7 @@ from .iceberg_types import (
     iceberg_type_name,
 )
 from .iceberg_row_value import (
+    read_checked_string,
     RowCell,
     encode_row,
     decode_row,
@@ -153,6 +154,11 @@ def read_equality_delete_file(
     `col_types` is the equality columns' types in order (the reader knows them
     from the manifest entry's `equality_ids` + the table schema). Returns one
     `List[RowCell]` per delete row."""
+    if len(col_types) == 0:
+        raise Error(
+            "read_equality_delete_file: no equality columns (a delete row with"
+            " no key would match every row)"
+        )
     var out = List[List[RowCell]]()
     var blocks = scan_ocf_blocks(Span(bytes))
     for bi in range(len(blocks)):
@@ -161,8 +167,19 @@ def read_equality_delete_file(
         var end = start + blk.payload_len
         var reader = AvroByteReader(Span(bytes)[start:end])
         var nrec = Int(blk.object_count)
+        # Every row takes at least one byte per column: a larger count is a lie.
+        if nrec > blk.payload_len:
+            raise Error(
+                "read_equality_delete_file: block claims "
+                + String(nrec)
+                + " rows in "
+                + String(blk.payload_len)
+                + " payload bytes"
+            )
         for _r in range(nrec):
             out.append(decode_row(reader, col_types))
+        if not reader.at_end():
+            raise Error("read_equality_delete_file: trailing bytes")
     return out^
 
 
@@ -203,14 +220,63 @@ def _position_delete_schema_json() -> String:
     return out^
 
 
+def _entry_lt(a: PositionDeleteEntry, b: PositionDeleteEntry) -> Bool:
+    """`a` sorts before `b`: file_path by unsigned bytes, then pos."""
+    var ab = a.file_path.as_bytes()
+    var bb = b.file_path.as_bytes()
+    var m = len(ab) if len(ab) < len(bb) else len(bb)
+    for i in range(m):
+        if ab[i] != bb[i]:
+            return ab[i] < bb[i]
+    if len(ab) != len(bb):
+        return len(ab) < len(bb)
+    return a.pos < b.pos
+
+
+def _sorted_order(entries: List[PositionDeleteEntry]) -> List[Int]:
+    """The indices of `entries` in (file_path, pos) order: a stable bottom-up
+    merge sort (n log n; the entries are not copied)."""
+    var n = len(entries)
+    var cur = List[Int](capacity=n)
+    for i in range(n):
+        cur.append(i)
+    var width = 1
+    while width < n:
+        var nxt = List[Int](capacity=n)
+        var lo = 0
+        while lo < n:
+            var mid = lo + width if lo + width < n else n
+            var hi = lo + 2 * width if lo + 2 * width < n else n
+            var i = lo
+            var j = mid
+            while i < mid and j < hi:
+                # Take from the right only when strictly smaller: stable.
+                if _entry_lt(entries[cur[j]], entries[cur[i]]):
+                    nxt.append(cur[j])
+                    j += 1
+                else:
+                    nxt.append(cur[i])
+                    i += 1
+            while i < mid:
+                nxt.append(cur[i])
+                i += 1
+            while j < hi:
+                nxt.append(cur[j])
+                j += 1
+            lo += 2 * width
+        cur = nxt^
+        width *= 2
+    return cur^
+
+
 def build_position_delete_file(
     entries: List[PositionDeleteEntry],
 ) raises -> List[UInt8]:
     """Serialize a POSITION-delete file (Avro OCF) over `entries`.
 
-    Each row is {file_path: string, pos: long}. Iceberg recommends sorting by
-    (file_path, pos); the caller supplies the order it wants (the reader does not
-    rely on sort order — it matches on exact (path, pos))."""
+    Each row is {file_path: string, pos: long}. The spec requires the rows
+    sorted by file_path (unsigned bytes), then pos, so they are written in that
+    order whatever order the caller supplies. A negative position is refused."""
     var sync = generate_sync_marker()
     var out = List[UInt8]()
 
@@ -224,10 +290,17 @@ def build_position_delete_file(
     var schema = _position_delete_schema_json()
     emit_ocf_header_kv(schema, AVRO_CODEC_NULL, sync, kv_keys, kv_vals, out)
 
+    for i in range(len(entries)):
+        if entries[i].pos < Int64(0):
+            raise Error(
+                "build_position_delete_file: negative position "
+                + String(entries[i].pos)
+            )
+    var order = _sorted_order(entries)
     var payload = List[UInt8]()
     var count = 0
-    for i in range(len(entries)):
-        ref e = entries[i]
+    for k in range(len(order)):
+        ref e = entries[order[k]]
         encode_string(e.file_path, payload)
         encode_long(e.pos, payload)
         count += 1
@@ -249,8 +322,19 @@ def read_position_delete_file(
         var end = start + blk.payload_len
         var reader = AvroByteReader(Span(bytes)[start:end])
         var nrec = Int(blk.object_count)
+        # A row is a string (at least its length byte) and a long: two bytes.
+        if nrec > blk.payload_len // 2:
+            raise Error(
+                "read_position_delete_file: block claims "
+                + String(nrec)
+                + " rows in "
+                + String(blk.payload_len)
+                + " payload bytes"
+            )
         for _r in range(nrec):
-            var fp = reader.read_string()
+            var fp = read_checked_string(reader)
             var pos = reader.read_long()
             out.append(PositionDeleteEntry(fp^, pos))
+        if not reader.at_end():
+            raise Error("read_position_delete_file: trailing bytes")
     return out^

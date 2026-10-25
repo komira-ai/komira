@@ -52,6 +52,7 @@ from komira_iceberg import (
     manifest_entry_schema_json,
     manifest_file_schema_json,
     build_manifest_file,
+    avro_field_name,
     build_manifest_list,
     read_manifest_list,
     read_manifest_entries,
@@ -355,6 +356,131 @@ def test_empty_manifest_list_and_garbage() raises:
     assert_equal(ICE_SEQ_INHERIT, Int64(-1))
 
 
+def _legal_avro_name(name: String) -> Bool:
+    var bs = name.as_bytes()
+    if len(bs) == 0:
+        return False
+    for i in range(len(bs)):
+        var c = Int(bs[i])
+        var letter = (c >= ord("a") and c <= ord("z")) or (c >= ord("A") and c <= ord("Z")) or c == ord("_")
+        var digit = c >= ord("0") and c <= ord("9")
+        if not (letter or (digit and i > 0)):
+            return False
+    return True
+
+
+def _every_name_is_legal(js: String) raises -> Int:
+    """Check every `"name":"..."` of an Avro schema; returns how many."""
+    var n = 0
+    var at = js.find('"name":"')
+    while at >= 0:
+        var start = at + 8
+        var end = js.find('"', start)
+        assert_true(_legal_avro_name(String(js[byte=start:end])), "illegal Avro name in " + js)
+        n += 1
+        at = js.find('"name":"', end)
+    return n
+
+
+def test_avro_field_names_follow_the_iceberg_rule() raises:
+    assert_equal(avro_field_name(String("region")), String("region"))
+    assert_equal(avro_field_name(String("_a1")), String("_a1"))
+    assert_equal(avro_field_name(String("my-region")), String("my_x2Dregion"))
+    assert_equal(avro_field_name(String("a.b")), String("a_x2Eb"))
+    assert_equal(avro_field_name(String("1st")), String("_1st"))
+    assert_equal(avro_field_name(String("地域")), String("_x5730_x57DF"))
+    assert_equal(avro_field_name(String("é")), String("_xE9"))
+    assert_equal(avro_field_name(String("😀")), String("_x1F600"))
+    assert_equal(avro_field_name(String("")), String("_"))
+    assert_equal(avro_field_name(String("a b")), String("a_x20b"))
+
+
+def test_a_manifest_with_free_text_partition_names_is_valid_avro() raises:
+    var schema = _schema()
+    var spec = PartitionSpec(0)
+    spec.add_identity(2, String("地域"))
+    spec.add_identity(2, String("my-region"))
+    spec.add_identity(2, String("1st"))
+    spec.add_identity(2, String("region"))
+    var files = List[DataFileInfo]()
+    var bytes = build_manifest_file(
+        schema, schema_json(schema), Int64(7), Int64(3), files,
+        ICE_MANIFEST_CONTENT_DATA, spec,
+    )
+    var js = decode_ocf_header(Span(bytes)).schema_json
+    assert_true(_every_name_is_legal(js) > 20)
+    _ = AvroSchema.parse(js)
+    # The legal names are in the schema; the originals ride along where they
+    # changed, and the partition-spec header keeps the real names.
+    assert_true(_has(js, '"name":"_x5730_x57DF","type":"string","field-id":1000,"iceberg-field-name":"地域"'))
+    assert_true(_has(js, '"name":"my_x2Dregion"'))
+    assert_true(_has(js, '"name":"_1st"'))
+    assert_true(_has(js, '"name":"region","type":"string","field-id":1003}'))
+    assert_true(_contains(bytes, _kv(String("partition-spec"), partition_spec_fields_json(spec))))
+    assert_true(_has(partition_spec_fields_json(spec), '"name":"地域"'))
+
+
+def test_non_ascii_partition_values_and_paths_round_trip() raises:
+    var schema = _schema()
+    var spec = PartitionSpec(0)
+    spec.add_identity(2, String("地域"))
+    var types = partition_value_type_tags(spec, schema)
+    var row = List[RowCell]()
+    row.append(make_long_cell(Int64(1)))
+    row.append(make_string_cell(String("日本 😀")))
+    var pv = partition_value_of(spec, schema, row)
+    var files = List[DataFileInfo]()
+    files.append(
+        _data_file(String("data/é/日本.parquet"), 2, 9).with_partition(
+            encode_partition_values(pv), types.copy()
+        )
+    )
+    var bytes = build_manifest_file(
+        schema, schema_json(schema), Int64(7), Int64(3), files,
+        ICE_MANIFEST_CONTENT_DATA, spec,
+    )
+    var got = read_manifest_entries(bytes, types)
+    assert_equal(len(got), 1)
+    assert_equal(got[0].file_path, String("data/é/日本.parquet"))
+    assert_equal(
+        decode_partition_cell(got[0].partition_avro[0], ICE_T_STRING).as_string(),
+        String("日本 😀"),
+    )
+    var entries = List[ManifestFileEntry]()
+    entries.append(ManifestFileEntry(String("m/é-m0.avro"), 10, 1, Int64(2)))
+    var back = read_manifest_list(build_manifest_list(Int64(1), Int64(1), entries))
+    assert_equal(back[0].manifest_path, String("m/é-m0.avro"))
+
+
+def test_a_path_that_is_not_utf8_is_refused() raises:
+    var entries = List[ManifestFileEntry]()
+    entries.append(ManifestFileEntry(String("m/é-m0.avro"), 10, 1, Int64(2)))
+    var bytes = build_manifest_list(Int64(1), Int64(1), entries)
+    # é is C3 A9: make the continuation byte 0x28, which is not one.
+    var at = -1
+    for i in range(len(bytes)):
+        if bytes[i] == UInt8(0xC3):
+            at = i
+            break
+    assert_true(at >= 0)
+    bytes[at + 1] = UInt8(0x28)
+    with assert_raises():
+        _ = read_manifest_list(bytes)
+    var schema = _schema()
+    var files = List[DataFileInfo]()
+    files.append(_data_file(String("d/é.parquet"), 1, 5))
+    var mbytes = build_manifest_file(schema, schema_json(schema), Int64(7), Int64(3), files)
+    var m = -1
+    for i in range(len(mbytes)):
+        if mbytes[i] == UInt8(0xC3):
+            m = i
+            break
+    assert_true(m >= 0)
+    mbytes[m + 1] = UInt8(0x28)
+    with assert_raises():
+        _ = read_manifest_entries(mbytes)
+
+
 def main() raises:
     test_manifest_entry_schema_has_spec_names_and_ids()
     test_manifest_list_schema_has_spec_names_and_ids()
@@ -364,4 +490,8 @@ def main() raises:
     test_entries_round_trip_partitioned()
     test_manifest_list_round_trip_and_carry_forward()
     test_empty_manifest_list_and_garbage()
+    test_avro_field_names_follow_the_iceberg_rule()
+    test_a_manifest_with_free_text_partition_names_is_valid_avro()
+    test_non_ascii_partition_values_and_paths_round_trip()
+    test_a_path_that_is_not_utf8_is_refused()
     print("test_iceberg_manifest_spec: all passed")
