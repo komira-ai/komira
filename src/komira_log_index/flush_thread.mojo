@@ -21,26 +21,30 @@
 #   * the loop: `drive_once(handoff, gate, now_ms())`, then a short park when
 #     idle (no units and nothing buffered), so the thread is cheap when quiet;
 #   * on shutdown, `request_shutdown()` sets the atomic flag; the loop exits at
-#     its next iteration AFTER a final `shutdown_flush` (which publishes the last
-#     partial segment, so a graceful stop loses nothing and only a crash loses
-#     the un-flushed window); the owner then joins the thread. The consumer and
+#     its next iteration, then drains the handoff one last time (every unit the
+#     producer offered before it stopped) and runs a final `shutdown_flush`,
+#     which publishes the last partial segment, so a graceful stop loses nothing
+#     the producer handed off and only a crash loses the un-flushed window. The
+#     owner quiesces the producer before it requests shutdown; a unit offered
+#     after the final drain is not published. The owner then joins the thread. The consumer and
 #     its metastore drop only after the join, so the thread never touches freed
 #     state.
 #
 # Encapsulation: no UnsafePointer in any signature. The consumer is owned by
-# value; the handoff and gate are borrowed by `ref` into the loop (shared with
-# the producing drain core).
+# value; the handoff and gate are borrowed mutably into the loop. Their methods
+# take `mut self`, so running the loop on one thread while the producer uses the
+# same handoff and gate on another is not expressible in safe code here: the
+# thread-launch design the owner supplies has to settle how they are shared.
 # =============================================================================
 
 from std.atomic import Atomic
-from std.ffi import external_call
 
 from komira_clock import now_unix_ms
 
 from komira_objectstore.store import ConditionalWriteStore
 
 from komira_log_index.consumer import LogIndexConsumer
-from komira_log_index.flush_stage import InFlightBytesGate
+from komira_log_index.flush_stage import InFlightBytesGate, _sleep_us
 from komira_log_index.handoff import LogIndexHandoff
 
 
@@ -54,17 +58,6 @@ from komira_log_index.handoff import LogIndexHandoff
 comptime DEFAULT_IDLE_PARK_US: Int64 = Int64(2000)  # 2 ms
 
 
-@always_inline
-def _park_us(us: Int64):
-    """Park `us` microseconds via `usleep` (the in-tree idiom; the standard
-    library's `time.sleep` calls `nanosleep`, which collides with the async
-    reactor's declaration in an AOT binary)."""
-    if us <= Int64(0):
-        return
-    # FFI-BOUNDARY: libc `usleep`, no pointers.
-    _ = external_call["usleep", Int32](UInt32(us))
-
-
 # -----------------------------------------------------------------------------
 # OffCoreFlushThread[Storage]: owns the consumer and the shutdown flag, borrows
 # the handoff and gate, and runs the off-core drive loop.
@@ -75,8 +68,8 @@ def _park_us(us: Int64):
 #
 # THE HANDOFF AND GATE ARE BORROWED, NOT OWNED. They are shared with the
 # producing drain core (the producer offers; this thread drains and releases).
-# The owner keeps them and passes them by `ref` into `run_until_shutdown`; they
-# outlive the thread (the thread is joined before they drop).
+# The owner keeps them and passes them into `run_until_shutdown`; they outlive
+# the thread (the thread is joined before they drop).
 # -----------------------------------------------------------------------------
 
 
@@ -122,17 +115,22 @@ struct OffCoreFlushThread[Storage: ConditionalWriteStore](
     ):
         """The off-core drive loop (the thread body). Drains the handoff and
         flushes on the byte/time ceiling each iteration; parks when idle. On the
-        shutdown signal it does a final shutdown_flush (publishes the last
-        partial segment) and returns. Borrows the shared handoff and gate by
-        `ref`."""
+        shutdown signal it drains the handoff once more (units offered since
+        the last iteration are buffered, not dropped), then does a final
+        shutdown_flush (publishes the last partial segment) and returns. The
+        producer must be quiesced before shutdown is requested."""
         while not self._is_shutdown():
             var now_ms = now_unix_ms()
             var n = self._consumer.drive_once(handoff, gate, now_ms)
             # Park only when fully idle (no units accepted AND nothing buffered
             # waiting on the time ceiling); otherwise loop hot to keep up.
             if n == 0 and self._consumer.buffered_rows() == Int64(0):
-                _park_us(self._idle_park_us)
-        # FINAL flush on clean shutdown: publish the last partial segment.
+                _sleep_us(self._idle_park_us)
+        # Drain what the producer offered after the last iteration (its
+        # reservations travel with the units and are released by the flush
+        # below), then FINAL flush on clean shutdown: publish the last partial
+        # segment.
+        _ = self._consumer.drive_once(handoff, gate, now_unix_ms())
         self._consumer.shutdown_flush(gate)
 
     @always_inline

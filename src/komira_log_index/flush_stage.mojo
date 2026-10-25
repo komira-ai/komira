@@ -50,6 +50,7 @@
 # =============================================================================
 
 from std.atomic import Atomic
+from std.ffi import external_call
 
 from komira_arrow.record_batch import RecordBatch
 from komira_collections.slab import Slab
@@ -73,6 +74,31 @@ comptime DEFAULT_INFLIGHT_CAP_BYTES: Int64 = Int64(64 * 1024 * 1024)  # 64 MiB
 
 
 # -----------------------------------------------------------------------------
+# _sleep_us: the one microsecond sleep of this package (the consumer's retry
+# backoff and the flush thread's idle park). It uses libc `usleep`, the in-tree
+# idiom (the standard library's `time.sleep` calls `nanosleep`, which collides
+# with the async reactor's declaration in an AOT binary). `usleep` may fail with
+# EINVAL for a value of one second or more on some libcs, and its argument is a
+# 32-bit `useconds_t`, so a long sleep is split into chunks of at most half a
+# second; a value of zero or less is a no-op.
+# -----------------------------------------------------------------------------
+
+comptime _SLEEP_CHUNK_US: Int64 = Int64(500_000)
+
+
+def _sleep_us(us: Int64):
+    var remaining = us
+    while remaining > Int64(0):
+        var chunk = remaining
+        if chunk > _SLEEP_CHUNK_US:
+            chunk = _SLEEP_CHUNK_US
+        # FFI-BOUNDARY: libc `usleep`, no pointers; the argument is a value
+        # in (0, 500_000].
+        _ = external_call["usleep", Int32](UInt32(chunk))
+        remaining -= chunk
+
+
+# -----------------------------------------------------------------------------
 # FlushRetryPolicy: the bounded retry of the publish step. A transient failure
 # (a slow PUT, a momentary 503, a cold connection) is retried a few times with a
 # short backoff, so a blip that would succeed on attempt 2 or 3 lands the records
@@ -85,11 +111,12 @@ comptime DEFAULT_INFLIGHT_CAP_BYTES: Int64 = Int64(64 * 1024 * 1024)  # 64 MiB
 #
 # THE BUDGET CONTRACT. The consumer's retry loop stamps a start time, then
 # before each backoff sleep checks `elapsed + backoff < budget_us`; if the next
-# attempt would exceed the budget it stops and surfaces the failure. So the loop
-# cannot block past `budget_us` regardless of `max_attempts`. The per-attempt
-# request is independently bounded by the store's own request timeout; the
-# budget bounds the sum of attempts and backoffs, so set it comfortably under
-# the grace period minus one request timeout.
+# backoff would reach the budget it stops and surfaces the failure. So no new
+# backoff starts past `budget_us`, whatever `max_attempts` says. A `put` or
+# `publish` call already in flight is not interrupted: the per-attempt request
+# is bounded only by the store's own request timeout, so size the budget with
+# one request timeout of slack under the grace period. A `budget_us` of zero or
+# less disables the check, and `max_attempts` alone bounds the loop.
 # -----------------------------------------------------------------------------
 
 

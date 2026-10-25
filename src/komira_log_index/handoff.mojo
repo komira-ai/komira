@@ -30,9 +30,17 @@
 # The gate reservation travels with the unit and is released by the CONSUMER
 # after the batch is published; the handoff only reserves on offer.
 #
+# THE LOCK. `_acquire` is a compare-and-swap spin (default, sequentially
+# consistent ordering) that yields the CPU every `_SPINS_BEFORE_YIELD` failed
+# attempts, so a holder preempted on a shared core does not leave the other side
+# spinning at full speed. The queue is allocated at its depth cap up front and
+# `drain_all` swaps in a fresh full-capacity queue allocated BEFORE the lock is
+# taken, so no allocation happens while the lock is held.
+#
 # Encapsulation: no UnsafePointer in any signature. NON-MOVABLE (it owns an
-# `Atomic`); shared by `ref` between the producer and the consumer. Wrap it in an
-# `OwnedPointer` to move it.
+# `Atomic`). Its methods take `mut self`; sharing one handoff between a producer
+# thread and a consumer thread is the owner's thread-launch design (see
+# flush_thread). Wrap it in an `OwnedPointer` to move it.
 # =============================================================================
 
 from std.atomic import Atomic
@@ -40,6 +48,7 @@ from std.atomic import Atomic
 from komira_arrow.record_batch import RecordBatch
 from komira_collections.slab import Slab
 
+from komira_async.runtime.wake_primitives import cpu_pause
 from komira_log import LogRecordView
 
 from komira_log_index.flush_stage import (
@@ -47,6 +56,9 @@ from komira_log_index.flush_stage import (
     _estimate_batch_bytes,
 )
 from komira_log_index.transpose import log_views_to_record_batch
+
+
+comptime _SPINS_BEFORE_YIELD: Int = 64
 
 
 # -----------------------------------------------------------------------------
@@ -102,7 +114,7 @@ struct LogIndexHandoff(Deinitable):
 
     Bounded by COUNT (`_depth_cap` queued batches) and by BYTES (the shared
     `InFlightBytesGate`). The producer is pushed back on either. NON-MOVABLE
-    (owns the Atomic spinlock); share by `ref`."""
+    (owns the Atomic spinlock)."""
 
     # HandoffUnit is move-only (it owns a RecordBatch), so the queue is a
     # `Slab[HandoffUnit]`, not a `List` (`List[T]` requires `T: Copyable`).
@@ -117,19 +129,31 @@ struct LogIndexHandoff(Deinitable):
     var _polled: Atomic[DType.int64]
 
     def __init__(out self, depth_cap: Int = 256):
-        self._queue = Slab[HandoffUnit]()
+        self._queue = Self._fresh_queue(depth_cap)
         self._depth_cap = depth_cap
         self._lock = Atomic[DType.uint8](UInt8(0))
         self._depth_rejections = Atomic[DType.int64](Int64(0))
         self._offered = Atomic[DType.int64](Int64(0))
         self._polled = Atomic[DType.int64](Int64(0))
 
+    @staticmethod
+    def _fresh_queue(depth_cap: Int) -> Slab[HandoffUnit]:
+        # Capacity for a full queue, so an `append` below the cap never grows.
+        if depth_cap > 0:
+            return Slab[HandoffUnit](depth_cap)
+        return Slab[HandoffUnit]()
+
     @always_inline
     def _acquire(mut self):
+        var spins = 0
         while True:
             var expected = UInt8(0)
             if self._lock.compare_exchange(expected, UInt8(1)):
                 return
+            spins += 1
+            if spins >= _SPINS_BEFORE_YIELD:
+                spins = 0
+                cpu_pause()
 
     @always_inline
     def _release(mut self):
@@ -150,8 +174,8 @@ struct LogIndexHandoff(Deinitable):
     def polled_count(self) -> Int64:
         return self._polled.load()
 
-    def approx_depth(mut self) -> Int:
-        """Current queued-batch count (read under the lock, so consistent)."""
+    def depth(mut self) -> Int:
+        """Current queued-batch count, read under the lock."""
         self._acquire()
         var d = len(self._queue)
         self._release()
@@ -199,9 +223,16 @@ struct LogIndexHandoff(Deinitable):
         split's [min_ts, max_ts] is [first, last]). A bulk drain (instead of one
         pop at a time) also avoids a Slab LIFO `pop` reversing the order and
         keeps the lock hold short (one move, not N)."""
+        # Nothing offered since the last drain: skip the lock and the
+        # allocation (an idle flush thread polls here every few milliseconds).
+        # A unit enqueued just after this check is taken by the next drain.
+        if self._offered.load() == self._polled.load():
+            return Slab[HandoffUnit]()
+        # Allocate the replacement queue BEFORE taking the lock.
+        var fresh = Self._fresh_queue(self._depth_cap)
         self._acquire()
         var out = self._queue^
-        self._queue = Slab[HandoffUnit]()
+        self._queue = fresh^
         var n = Int64(len(out))
         self._release()
         if n > Int64(0):

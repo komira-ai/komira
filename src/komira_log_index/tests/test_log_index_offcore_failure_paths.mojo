@@ -40,6 +40,10 @@ from komira_log.engine.site_dictionary import SiteDictionary
 from komira_log.levels import LEVEL_INFO
 from komira_log.log_arg import ArgI64, ArgStr
 
+from komira_arrow.record_batch import RecordBatch
+from komira_collections.slab import Slab
+from komira_log_index.consumer import _BatchAcceptor, _drain_batches_into
+from komira_log_index.transpose import log_views_to_record_batch
 from komira_log_index import (
     FlushRetryPolicy,
     InFlightBytesGate,
@@ -305,7 +309,10 @@ def test_failed_publish_leaves_only_an_unreferenced_object() raises:
     # The object exists but no summary names it.
     var bytes = store.get(Path.parse(puts[0]))
     assert_true(len(bytes) > 0, "the orphan object is in the store")
-    store._st[].fail_conditional = False
+    assert_true(
+        _count_prefix(store.log(), "cond:") >= 1,
+        "the summary append was attempted after the PUT",
+    )
     assert_equal(_live(store), 0, "nothing is live")
     assert_equal(gate.in_flight_bytes(), Int64(0), "the gate does not leak")
 
@@ -382,6 +389,159 @@ def test_a_restart_over_the_same_store_keeps_earlier_splits() raises:
 
 
 # -----------------------------------------------------------------------------
+# Retry: exhaustion and the budget cutoff.
+# -----------------------------------------------------------------------------
+
+
+def test_retry_exhaustion_counts_one_failure_after_every_attempt() raises:
+    var store = RecordingStore()
+    store._st[].fail_put_times = 3
+    var consumer = _consumer(store, FlushRetryPolicy.fast_test())
+    var gate = InFlightBytesGate(Int64(1_000_000))
+    var handoff = LogIndexHandoff(8)
+    assert_true(_offer(handoff, gate, 8), "offer accepted")
+    _ = consumer.drive_once(handoff, gate, Int64(0))
+    assert_equal(len(_put_keys(store.log())), 3, "all three attempts ran")
+    assert_equal(Int(consumer.stats().publish_failures), 1, "one failure counted")
+    assert_equal(Int(consumer.stats().splits_published), 0, "nothing published")
+    assert_equal(_count_prefix(store.log(), "cond:"), 0, "no summary appended")
+    assert_equal(_live(store), 0, "nothing is live")
+    assert_equal(gate.in_flight_bytes(), Int64(0), "the gate does not leak")
+
+
+def test_the_third_attempt_can_still_land() raises:
+    var store = RecordingStore()
+    store._st[].fail_put_times = 2
+    var consumer = _consumer(store, FlushRetryPolicy.fast_test())
+    var gate = InFlightBytesGate(Int64(1_000_000))
+    var handoff = LogIndexHandoff(8)
+    assert_true(_offer(handoff, gate, 8), "offer accepted")
+    _ = consumer.drive_once(handoff, gate, Int64(0))
+    assert_equal(len(_put_keys(store.log())), 3, "two failures then a success")
+    assert_equal(Int(consumer.stats().splits_published), 1, "the last attempt landed")
+    assert_equal(Int(consumer.stats().publish_failures), 0, "no failure counted")
+    assert_equal(_live(store), 1, "the split is live")
+
+
+def test_the_budget_stops_the_retry_before_a_backoff() raises:
+    var store = RecordingStore()
+    store._st[].fail_put = True
+    # A 1 s backoff against a 1 us budget: the budget check fires after the first
+    # failure, before any sleep, so exactly one attempt runs.
+    var consumer = _consumer(
+        store, FlushRetryPolicy(3, Int64(1_000_000), Int64(1))
+    )
+    var gate = InFlightBytesGate(Int64(1_000_000))
+    var handoff = LogIndexHandoff(8)
+    assert_true(_offer(handoff, gate, 8), "offer accepted")
+    _ = consumer.drive_once(handoff, gate, Int64(0))
+    assert_equal(len(_put_keys(store.log())), 1, "the budget cut the retry short")
+    assert_equal(Int(consumer.stats().publish_failures), 1, "one failure counted")
+    assert_equal(gate.in_flight_bytes(), Int64(0), "the gate does not leak")
+
+
+def test_a_zero_budget_means_attempts_only() raises:
+    var store = RecordingStore()
+    store._st[].fail_put = True
+    var consumer = _consumer(store, FlushRetryPolicy(3, Int64(1), Int64(0)))
+    var gate = InFlightBytesGate(Int64(1_000_000))
+    var handoff = LogIndexHandoff(8)
+    assert_true(_offer(handoff, gate, 8), "offer accepted")
+    _ = consumer.drive_once(handoff, gate, Int64(0))
+    assert_equal(len(_put_keys(store.log())), 3, "all attempts ran with no budget")
+
+
+# -----------------------------------------------------------------------------
+# Sequence: two flushes of one consumer never share a key.
+# -----------------------------------------------------------------------------
+
+
+def test_consecutive_flushes_of_one_consumer_write_distinct_keys() raises:
+    var store = RecordingStore()
+    var consumer = _consumer(store, FlushRetryPolicy.single_attempt())
+    var gate = InFlightBytesGate(Int64(1_000_000))
+    var handoff = LogIndexHandoff(8)
+    for _ in range(2):
+        assert_true(_offer(handoff, gate, 3), "offer accepted")
+        assert_equal(consumer.drive_once(handoff, gate, Int64(0)), 1, "one unit")
+    var keys = _put_keys(store.log())
+    assert_equal(len(keys), 2, "two objects")
+    assert_true(keys[0] != keys[1], "the second flush did not overwrite the first")
+    assert_equal(_live(store), 2, "both splits are live")
+
+
+def test_every_epoch_byte_changes_the_split_key() raises:
+    var store = RecordingStore()
+    var base = _first_put_key(store, UInt8(0), Int64(0))
+    # One epoch bit in each of the seven epoch bytes, and a low-byte-only step.
+    for i in range(7):
+        var key = _first_put_key(store, UInt8(0), Int64(1) << Int64(i * 8))
+        assert_true(key != base, "epoch byte " + String(i) + " is in the key")
+    var low = _first_put_key(store, UInt8(0), Int64(1_000_000))
+    var low_next = _first_put_key(store, UInt8(0), Int64(1_000_001))
+    assert_true(low != low_next, "a one-microsecond epoch step is in the key")
+    # Distinct high bytes with identical low bytes.
+    var hi_a = _first_put_key(store, UInt8(0), Int64(1) << Int64(48))
+    var hi_b = _first_put_key(store, UInt8(0), Int64(2) << Int64(48))
+    assert_true(hi_a != hi_b, "epochs that differ only in a high byte differ")
+
+
+# -----------------------------------------------------------------------------
+# The batch drain survives a raise from the sink.
+# -----------------------------------------------------------------------------
+
+
+struct _FailOnNth(_BatchAcceptor):
+    var calls: Int
+    var fail_on: Int
+    var rows_seen: Int
+
+    def __init__(out self, fail_on: Int):
+        self.calls = 0
+        self.fail_on = fail_on
+        self.rows_seen = 0
+
+    def accept(mut self, var rb: RecordBatch) raises:
+        self.calls += 1
+        if self.calls == self.fail_on:
+            raise Error("injected accept failure")
+        self.rows_seen += rb.num_rows()
+
+
+def _three_batches() raises -> Slab[RecordBatch]:
+    var batches = Slab[RecordBatch]()
+    for n in range(1, 4):
+        batches.append(log_views_to_record_batch(_login_views(n)))
+    return batches^
+
+
+def test_a_raising_accept_leaves_the_slab_empty_and_reraises() raises:
+    var batches = _three_batches()
+    assert_equal(len(batches), 3, "three buffered batches")
+    var acceptor = _FailOnNth(2)
+    var raised = False
+    try:
+        _drain_batches_into(acceptor, batches)
+    except e:
+        raised = True
+        assert_true("injected accept failure" in String(e), "the error is the sink's")
+    assert_true(raised, "the failure propagates")
+    assert_equal(acceptor.calls, 2, "the third batch never reached the sink")
+    assert_equal(acceptor.rows_seen, 1, "only the first batch was accepted")
+    # The slab claims no slot: its destructor has nothing left to destroy.
+    assert_equal(len(batches), 0, "every slot was taken or dropped")
+
+
+def test_a_clean_drain_feeds_every_batch_in_order() raises:
+    var batches = _three_batches()
+    var acceptor = _FailOnNth(99)
+    _drain_batches_into(acceptor, batches)
+    assert_equal(acceptor.calls, 3, "all three batches were fed")
+    assert_equal(acceptor.rows_seen, 6, "1 + 2 + 3 rows")
+    assert_equal(len(batches), 0, "the slab is empty")
+
+
+# -----------------------------------------------------------------------------
 # Handoff: the bound.
 # -----------------------------------------------------------------------------
 
@@ -392,9 +552,9 @@ def test_handoff_rejects_when_the_depth_cap_is_reached() raises:
     assert_true(_offer(handoff, gate, 1), "first fits")
     assert_true(_offer(handoff, gate, 2), "second fits")
     var held = gate.in_flight_bytes()
-    assert_equal(handoff.approx_depth(), 2, "two queued")
+    assert_equal(handoff.depth(), 2, "two queued")
     assert_false(_offer(handoff, gate, 3), "third is rejected, not blocked")
-    assert_equal(handoff.approx_depth(), 2, "the queue did not grow")
+    assert_equal(handoff.depth(), 2, "the queue did not grow")
     assert_equal(Int(handoff.depth_rejection_count()), 1, "rejection counted")
     assert_equal(Int(gate.rejection_count()), 0, "not a byte rejection")
     assert_equal(
@@ -409,7 +569,7 @@ def test_handoff_rejects_when_the_depth_cap_is_reached() raises:
     assert_equal(Int(units[1].row_count), 2, "second after it")
     units.set_len_unchecked(0)
     assert_equal(Int(handoff.polled_count()), 2, "two polled")
-    assert_equal(handoff.approx_depth(), 0, "empty after the drain")
+    assert_equal(handoff.depth(), 0, "empty after the drain")
     assert_true(_offer(handoff, gate, 3), "accepts again once drained")
 
 
@@ -421,10 +581,24 @@ def test_handoff_rejects_when_the_byte_cap_is_reached() raises:
     assert_false(_offer(handoff, gate, 5), "second would exceed the cap")
     assert_equal(Int(gate.rejection_count()), 1, "byte rejection counted")
     assert_equal(Int(handoff.depth_rejection_count()), 0, "not a depth rejection")
-    assert_equal(handoff.approx_depth(), 1, "only the first is queued")
+    assert_equal(handoff.depth(), 1, "only the first is queued")
     assert_true(
         gate.in_flight_bytes() <= gate.cap_bytes(), "never above the cap"
     )
+
+
+def test_a_drain_of_an_idle_queue_is_empty_and_the_queue_keeps_working() raises:
+    var gate = InFlightBytesGate(Int64(10_000_000))
+    var handoff = LogIndexHandoff(4)
+    var none = handoff.drain_all()
+    assert_equal(len(none), 0, "nothing queued, nothing drained")
+    for i in range(1, 4):
+        assert_true(_offer(handoff, gate, i), "offer accepted")
+        var units = handoff.drain_all()
+        assert_equal(len(units), 1, "the unit offered since the last drain")
+        assert_equal(Int(units[0].row_count), i, "the right unit")
+        units.set_len_unchecked(0)
+    assert_equal(handoff.depth(), 0, "empty at the end")
 
 
 def test_an_empty_offer_reserves_nothing() raises:
@@ -432,7 +606,7 @@ def test_an_empty_offer_reserves_nothing() raises:
     var handoff = LogIndexHandoff(1)
     assert_true(offer_log_views(handoff, gate, List[LogRecordView]()), "no-op")
     assert_equal(gate.in_flight_bytes(), Int64(0), "nothing reserved")
-    assert_equal(handoff.approx_depth(), 0, "nothing queued")
+    assert_equal(handoff.depth(), 0, "nothing queued")
 
 
 def test_gate_admits_an_oversize_reservation_only_when_empty() raises:
@@ -477,6 +651,40 @@ def test_flush_thread_shutdown_publishes_the_partial_segment() raises:
     assert_equal(gate.in_flight_bytes(), Int64(0), "the gate is released")
     thread.final_flush(gate)
     assert_equal(Int(thread.consumer_stats_splits()), 1, "a second flush is a no-op")
+
+
+def test_shutdown_drains_units_the_producer_offered_last() raises:
+    var store = RecordingStore()
+    var consumer = _consumer(
+        store,
+        FlushRetryPolicy.single_attempt(),
+        UInt8(0),
+        Int64(-1),
+        Int64(1_000_000_000),
+    )
+    var gate = InFlightBytesGate(Int64(1_000_000))
+    var handoff = LogIndexHandoff(8)
+    var thread = OffCoreFlushThread[RecordingStore](consumer^)
+    # The unit is still in the handoff when the flag is set: the loop body never
+    # runs, so only the shutdown path can pick it up.
+    assert_true(_offer(handoff, gate, 4), "offer accepted")
+    assert_equal(handoff.depth(), 1, "the unit is queued")
+    thread.request_shutdown()
+    thread.request_shutdown()  # idempotent
+    thread.run_until_shutdown(handoff, gate)
+    assert_equal(handoff.depth(), 0, "the handoff was drained")
+    assert_equal(Int(thread.consumer_stats_splits()), 1, "the queued unit was published")
+    assert_equal(_live(store), 1, "the split is live")
+    assert_equal(gate.in_flight_bytes(), Int64(0), "its reservation was released")
+
+
+def test_the_thread_handle_is_recorded() raises:
+    var store = RecordingStore()
+    var consumer = _consumer(store, FlushRetryPolicy.single_attempt())
+    var thread = OffCoreFlushThread[RecordingStore](consumer^)
+    assert_equal(Int(thread.thread_id()), 0, "no thread yet")
+    thread.set_thread_id(Int64(42))
+    assert_equal(Int(thread.thread_id()), 42, "the owner's handle")
 
 
 def main() raises:

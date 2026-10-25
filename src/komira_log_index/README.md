@@ -67,11 +67,18 @@ every setting is an argument.
   counted in `PublishStats` and printed, and the reserved bytes are released
   either way. Split uuids are the worker discriminant byte, the install-time
   epoch and a sequence, so a restarted consumer does not overwrite an earlier
-  one's objects.
+  one's objects. The retry stops starting backoffs once the policy budget is
+  spent; a `put` or `publish` already in flight is not interrupted. A summary
+  append that lands but raises can be appended again by the retry, leaving a
+  duplicate summary for one object.
 - `flush_thread`: `OffCoreFlushThread[Storage]`, the drive loop
   (`run_until_shutdown`) and shutdown protocol for the dedicated flush thread.
   It does not create the OS thread; the owner launches a thread whose body calls
-  `run_until_shutdown`, and joins it before dropping the handoff and gate.
+  `run_until_shutdown`, and joins it before dropping the handoff and gate. On
+  shutdown the loop drains the handoff once more and flushes the last partial
+  segment; the owner quiesces the producer first. The handoff and gate methods
+  take `mut self`, so how they are shared with a producer on another thread is
+  part of that thread-launch design, not of this package.
 
 Parts 1 and 2 are included. The metric sink and split log search (part 3) are
 not in this package.

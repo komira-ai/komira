@@ -43,11 +43,12 @@
 # earlier process already published; the epoch keeps the keys apart.
 #
 # Encapsulation: no UnsafePointer in any signature. The views carry owned Strings;
-# the RecordBatch columns are List-owned; the gate is borrowed by `ref`; the
+# the RecordBatch columns are List-owned; the gate and handoff are borrowed
+# mutably by the methods that use them (sharing them with a producer on another
+# thread needs the owner's thread-launch design, see flush_thread); the
 # metastore and store are owned by value.
 # =============================================================================
 
-from std.ffi import external_call
 from std.time import perf_counter_ns
 
 from komira_arrow.record_batch import RecordBatch
@@ -73,6 +74,7 @@ from komira_log_index.flush_stage import (
     LogIndexFlushBuffer,
     FlushRetryPolicy,
     _estimate_batch_bytes,
+    _sleep_us,
     DEFAULT_FLUSH_BYTES,
     DEFAULT_FLUSH_MS,
 )
@@ -80,19 +82,49 @@ from komira_log_index.handoff import HandoffUnit, LogIndexHandoff
 
 
 # -----------------------------------------------------------------------------
-# _sleep_us: a fixed microsecond sleep via `usleep`, the in-tree idiom (the
-# standard library's `time.sleep` calls `nanosleep`, which collides with the
-# async reactor's declaration in an AOT binary). No-op for us <= 0.
+# _drain_batches_into: move every buffered batch into the sink, in FIFO order.
+#
+# `accept` raises, and `Slab.take_slot_unchecked` leaves the slab claiming all
+# its slots until a trailing `set_len_unchecked(0)`; a raise in between would
+# make the slab destroy slots already moved out (a double free of the batches'
+# heap columns). So the loop counts the slots it has taken, and on a raise the
+# handler takes and drops the rest, zeroes the length and re-raises: the slab is
+# empty on every exit path. The batch handed to the failing `accept` is consumed
+# by it.
 # -----------------------------------------------------------------------------
 
 
-@always_inline
-def _sleep_us(us: Int64):
-    if us <= Int64(0):
-        return
-    # FFI-BOUNDARY: libc `usleep`, no pointers. useconds_t is UInt32; the backoff
-    # band is tens to hundreds of milliseconds, far under 2^32 us.
-    _ = external_call["usleep", Int32](UInt32(us))
+trait _BatchAcceptor:
+    def accept(mut self, var rb: RecordBatch) raises:
+        ...
+
+
+struct _SinkAcceptor(_BatchAcceptor, Movable):
+    var sink: SearchSink
+
+    def __init__(out self, var sink: SearchSink):
+        self.sink = sink^
+
+    def accept(mut self, var rb: RecordBatch) raises:
+        self.sink.accept_batch(rb^)
+
+
+def _drain_batches_into[
+    A: _BatchAcceptor
+](mut acceptor: A, mut batches: Slab[RecordBatch]) raises:
+    var nb = len(batches)
+    var taken = 0
+    try:
+        while taken < nb:
+            var rb = batches.take_slot_unchecked(taken)
+            taken += 1
+            acceptor.accept(rb^)
+    except e:
+        for j in range(taken, nb):
+            _ = batches.take_slot_unchecked(j)
+        batches.set_len_unchecked(0)
+        raise e^
+    batches.set_len_unchecked(0)
 
 
 # -----------------------------------------------------------------------------
@@ -136,7 +168,7 @@ struct LogIndexConsumer[Storage: ConditionalWriteStore](
     (advanced across publishes) and a store for the split-bytes PUT.
 
     Move-only: it owns a SearchMetastore. The gate is NOT a field (it is shared
-    across producer and consumer); it is passed by `ref` into the methods that
+    across producer and consumer); it is borrowed mutably by the methods that
     release."""
 
     var _store: Self.Storage
@@ -147,8 +179,8 @@ struct LogIndexConsumer[Storage: ConditionalWriteStore](
     var _index: String
     var _stats: PublishStats
     # The bounded retry of the publish step: a transient failure is retried a few
-    # times with a short backoff, total elapsed bounded by the policy budget, so
-    # a blip that succeeds on attempt 2 or 3 lands the records instead of
+    # times with a short backoff, no new backoff starting past the policy budget,
+    # so a blip that succeeds on attempt 2 or 3 lands the records instead of
     # dropping them. POD, no heap.
     var _flush_retry: FlushRetryPolicy
     # Monotone split-uuid counter (per consumer, so per sub-lineage). The 16-byte
@@ -159,11 +191,6 @@ struct LogIndexConsumer[Storage: ConditionalWriteStore](
     var _worker_disc: UInt8
     # Wall-clock microseconds read once at construction; mixed into every uuid.
     var _epoch_us: UInt64
-    # The uuid and object key of the most recently built segment (set by
-    # _build_segment / _next_uuid, read by _publish_segment; they run back to
-    # back inside _flush_now). POD InlineArray plus an owned String.
-    var _last_uuid: InlineArray[UInt8, 16]
-    var _last_object_key: String
 
     def __init__(
         out self,
@@ -195,8 +222,6 @@ struct LogIndexConsumer[Storage: ConditionalWriteStore](
             self._epoch_us = UInt64(now_unix_us())
         else:
             self._epoch_us = UInt64(epoch_us)
-        self._last_uuid = InlineArray[UInt8, 16](fill=UInt8(0))
-        self._last_object_key = String("")
 
     @always_inline
     def stats(self) -> PublishStats:
@@ -312,8 +337,12 @@ struct LogIndexConsumer[Storage: ConditionalWriteStore](
         # blip) there is nothing to retry; it surfaces as the loss immediately.
         var built_ok = True
         var split_bytes = List[UInt8]()
+        # The uuid and object key are fixed here, once per flush, and passed to
+        # the publish: a retry re-writes the same key.
+        var uuid = self._next_uuid()
+        var object_key = String("")
         try:
-            split_bytes = self._build_segment(batches^)
+            split_bytes = self._build_segment(batches^, uuid, object_key)
         except e:
             print(
                 "ERROR LogIndexConsumer: index-build failed (at-most-once",
@@ -334,8 +363,10 @@ struct LogIndexConsumer[Storage: ConditionalWriteStore](
             # unreferenced object, and a re-PUT of the same bytes under the same
             # key is idempotent. The total elapsed time is bounded by
             # `budget_us`: before each backoff the wall time is checked against
-            # the budget and the loop STOPS if the next step would exceed it, so
-            # it cannot block past the caller's grace period.
+            # the budget and the loop STOPS if the next backoff would exceed it.
+            # This bounds the time spent backing off, not the time inside one
+            # `put` or `publish` call, which is not interrupted. A `budget_us`
+            # of zero or less disables the check: attempts alone bound the loop.
             var blen = Int64(len(split_bytes))
             var start_ns = perf_counter_ns()
             var attempts = self._flush_retry.max_attempts
@@ -346,10 +377,11 @@ struct LogIndexConsumer[Storage: ConditionalWriteStore](
             var k = 0
             while k < attempts:
                 try:
-                    # Re-PUT and re-append the SAME built bytes. Copy the bytes
-                    # per attempt so a failed attempt that consumed them leaves
-                    # the original intact for the next attempt.
-                    self._publish_segment(split_bytes.copy(), doc_count, blen)
+                    # Re-PUT and re-append the SAME built bytes (borrowed, so a
+                    # retry copies nothing).
+                    self._publish_segment(
+                        split_bytes, object_key, uuid, doc_count, blen
+                    )
                     published = True
                     break
                 except e:
@@ -390,57 +422,61 @@ struct LogIndexConsumer[Storage: ConditionalWriteStore](
                     last_err,
                 )
                 self._stats.publish_failures += Int64(1)
-            _ = split_bytes^
 
         # ---- RELEASE the reservation, ALWAYS (success or failure) ----
         gate.release(reserved)
 
     # -------------------------------------------------------------------------
     # _build_segment: the heavy off-core index build (tokenize, invert,
-    # serialize). Drives the same public SearchSink the batch path uses.
+    # serialize). Drives the same public SearchSink the batch path uses. The
+    # object key the sink resolves from `uuid` is written to `object_key`.
     # -------------------------------------------------------------------------
 
-    def _build_segment(mut self, var batches: Slab[RecordBatch]) raises -> List[UInt8]:
-        var uuid = self._next_uuid()
+    def _build_segment(
+        mut self,
+        var batches: Slab[RecordBatch],
+        uuid: InlineArray[UInt8, 16],
+        mut object_key: String,
+    ) raises -> List[UInt8]:
         var sink = SearchSink(
             self._bucket,
             self._key_prefix,
             self._index,
             LOG_INDEX_TEXT_FIELD,  # message is the inverted TEXT field
-            uuid,
+            uuid.copy(),
             LOG_INDEX_SOURCE_FIELD,  # designated _source column
         )
         sink.init_sink(log_index_schema())
-        # Move each batch into the sink in FIFO order (RecordBatch is move-only;
-        # take_slot_unchecked and set_len_unchecked are the forward drain).
-        var nb = len(batches)
-        for i in range(nb):
-            sink.accept_batch(batches.take_slot_unchecked(i))
-        batches.set_len_unchecked(0)
-        sink.finish()
-        # Stash the object key for the publish summary (the sink computes it from
-        # the same uuid, prefix and index).
-        self._last_object_key = sink.object_key()
-        return sink.take_split_bytes()
+        var acceptor = _SinkAcceptor(sink^)
+        _drain_batches_into(acceptor, batches)
+        acceptor.sink.finish()
+        # The sink computes the key from the same uuid, prefix and index.
+        object_key = acceptor.sink.object_key()
+        return acceptor.sink.take_split_bytes()
 
     # -------------------------------------------------------------------------
     # _publish_segment: the two-step publish. The split object is written FIRST
     # (an unreferenced object if the process dies before the next step), the
     # summary is appended to the metastore SECOND (the step that makes the split
     # searchable). The same order every publisher over the catalog follows,
-    # generic over the store type.
+    # generic over the store type. A summary append that lands server-side but
+    # raises can be appended again by the retry: a duplicate summary for one
+    # object.
     # -------------------------------------------------------------------------
 
     def _publish_segment(
-        mut self, var split_bytes: List[UInt8], doc_count: Int64, byte_size: Int64
+        mut self,
+        split_bytes: List[UInt8],
+        object_key: String,
+        uuid: InlineArray[UInt8, 16],
+        doc_count: Int64,
+        byte_size: Int64,
     ) raises:
-        var object_key = self._last_object_key
         # (1) split PUT FIRST.
         _ = self._store.put(Path.parse(object_key), split_bytes)
         # (2) metastore append SECOND.
-        var uuid = self._last_uuid.copy()
         var summary = make_split_summary(
-            uuid^,
+            uuid.copy(),
             doc_count,
             byte_size,
             Int64(0),  # min_doc_id (per-split base 0)
@@ -453,8 +489,8 @@ struct LogIndexConsumer[Storage: ConditionalWriteStore](
 
     # -------------------------------------------------------------------------
     # _next_uuid: mint a split uuid unique per (worker discriminant, install
-    # epoch, sequence). Byte 0 is the worker discriminant, bytes 1..8 the low 56
-    # bits of the install-time epoch (microseconds), bytes 8..16 the sequence.
+    # epoch, sequence). Byte 0 is the worker discriminant, bytes 1..7 the low 56
+    # bits of the install-time epoch (microseconds), bytes 8..15 the sequence.
     # POD InlineArray, no heap.
     # -------------------------------------------------------------------------
 
@@ -469,5 +505,4 @@ struct LogIndexConsumer[Storage: ConditionalWriteStore](
         var s = UInt64(self._split_seq)
         for i in range(8):
             u[8 + i] = UInt8(Int((s >> UInt64(i * 8)) & UInt64(0xFF)))
-        self._last_uuid = u.copy()
         return u^
