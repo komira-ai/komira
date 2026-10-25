@@ -37,6 +37,11 @@ names this version or a later one). The current version is the hint's number and
 every higher metadata file that exists, so a writer that stopped between the
 create and the hint move has still committed. The first commit creates the hint.
 
+A commit that fails (a conflict, a store error) after writing its manifests
+leaves them behind, unreferenced; no reader looks at a file no snapshot names.
+The writer deletes nothing: data files, old manifests and old metadata files
+stay until a maintenance job removes them.
+
 Every delete file's sequence number is stamped by the commit. A table keeps one
 partition spec; a commit under another is refused. A caller's extra summary key
 may not collide with one the commit writes. Table uuids and snapshot ids are
