@@ -247,6 +247,23 @@ struct AzureKeyVaultStore[C: Connector, T: AzureTokenSource](
         store._dial_host_override = dial_host
         return store^
 
+    def build_request(mut self, secret_ref: String) raises -> ClientRequest[EmptyBody]:
+        """The request `resolve(secret_ref)` sends, without sending it: parse
+        and validate the handle up-front (a refusal builds nothing and mints no
+        token), mint the runtime-identity token (the auth seam), and build the
+        GET with `build_kv_request`. The DIAL host is the handle's vault host in
+        production; a test or private endpoint overrides it (`with_dial_host`)
+        while the logical handle and path stay the real vault identity. `resolve`
+        calls this, so a test that reads the bytes sees what `resolve` sends."""
+        var kv = parse_key_vault_ref(secret_ref)
+        var token = self._token_source.access_token()
+        var dial_host = kv.host.copy()
+        if self._dial_host_override.byte_length() > 0:
+            dial_host = self._dial_host_override.copy()
+        # MOVE the token into the request builder (no lingering local copy on
+        # this frame): the only copy lives on the request's header bytes.
+        return build_kv_request(dial_host^, kv.path.copy(), token^)
+
     # -------------------------------------------------------------------------
     # The SecretStore trait method — handle in, zeroizing value out.
     # -------------------------------------------------------------------------
@@ -260,26 +277,8 @@ struct AzureKeyVaultStore[C: Connector, T: AzureTokenSource](
         lands directly in a zeroizing `SecretValue`, and every transient that
         held it is WIPED before return. The error NEVER carries the secret body
         or the Bearer token."""
-        # --- 1. Parse + validate the ref up-front (fail fast on a bad URI). ---
-        var kv = parse_key_vault_ref(secret_ref)
-
-        # --- 2. Mint / fetch the runtime-identity AAD token (the auth seam). ---
-        var token = self._token_source.access_token()
-
-        # --- 3. Build the GET over a fresh client. The path + header
-        # construction are factored into pure helpers (`parse_key_vault_ref` /
-        # `build_kv_request_headers`) so the auth-header stamping is
-        # unit-testable WITHOUT a wire round-trip — a test asserts the
-        # `Authorization: Bearer <token>` header off the built HeaderMap.
-        # The DIAL host is the ref's vault host in production; a test / private
-        # endpoint overrides it (e.g. 127.0.0.1, the loopback fast path — ZERO
-        # DNS) while the logical ref + path stay the real vault identity.
-        var dial_host = kv.host.copy()
-        if self._dial_host_override.byte_length() > 0:
-            dial_host = self._dial_host_override.copy()
-        # MOVE the token into the request builder (no lingering local copy on
-        # this frame): the only copy lives on the request's header bytes.
-        var req = build_kv_request(dial_host^, kv.path.copy(), token^)
+        # --- 1-3. Parse the handle, mint the token, build the request. ---
+        var req = self.build_request(secret_ref)
 
         # --- 4. Dial a fresh connector + drive one synchronous GET. ---
         var connector = self._mk_connector()

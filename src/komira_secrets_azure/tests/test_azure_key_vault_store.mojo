@@ -631,6 +631,51 @@ def test_malformed_documents_are_refused() raises:
         assert_equal(_decode(bad[i]), String(""), "refused: " + bad[i])
 
 
+def test_longer_keys_with_the_value_prefix_are_not_value() raises:
+    """A key that merely starts with `value` (`valuex`, `values`, `value_`, a
+    case change) is not `value`, whichever side of the real one it is on, and a
+    shorter key (`valu`) is not either."""
+    assert_equal(_decode(String('{"valuex":"EVIL","value":"real"}')), String("real"), "valuex first")
+    assert_equal(_decode(String('{"values":"EVIL","value":"real"}')), String("real"), "values first")
+    assert_equal(_decode(String('{"value_":"EVIL","valu":"EVIL","Value":"EVIL","value":"real"}')), String("real"), "others first")
+    assert_equal(_decode(String('{"value":"real","valuex":"EVIL"}')), String("real"), "after")
+    assert_equal(_decode(String('{"valuex":"EVIL"}')), String(""), "only valuex: no value")
+    assert_equal(_decode(String('{"valu":"EVIL"}')), String(""), "only valu: no value")
+
+
+def test_store_builds_the_request_for_the_parsed_handle() raises:
+    """The request `resolve` sends is the one `build_request` returns for the
+    same handle (`resolve` calls it): the parsed path (name and version), the
+    api-version, the dial host, and the bearer the token source minted."""
+    var store = _make_store(_mk_ok_connector, StaticAzureTokenSource(String(_CANNED_TOKEN)))
+    var req = store.build_request(String(_TEST_REF_VERSIONED))
+    var wire = String(unsafe_from_utf8=Span(req.request_bytes))
+    assert_true(
+        wire.startswith("GET /secrets/pg-conn/abc123def456?api-version=7.4 HTTP/1.1\r\n"), wire
+    )
+    assert_true(wire.find(String("\r\nhost: ") + String(_DIAL_HOST)) >= 0 or wire.find(String("\r\nHost: ") + String(_DIAL_HOST)) >= 0, wire)
+    assert_true(
+        wire.find(String("\r\nauthorization: Bearer ") + String(_CANNED_TOKEN) + "\r\n") >= 0, wire
+    )
+    var plain = store.build_request(String(_TEST_REF))
+    var w2 = String(unsafe_from_utf8=Span(plain.request_bytes))
+    assert_true(w2.startswith("GET /secrets/pg-conn?api-version=7.4 HTTP/1.1\r\n"), w2)
+    var other = store.build_request(String("https://acme-kv.vault.azure.net/secrets/other-name"))
+    var w3 = String(unsafe_from_utf8=Span(other.request_bytes))
+    assert_true(w3.startswith("GET /secrets/other-name?api-version=7.4 HTTP/1.1\r\n"), w3)
+    var raised = False
+    try:
+        var bad = store.build_request(String("https://acme-kv.vault.azure.net/secrets/x?y=1"))
+        _ = bad^
+    except:
+        raised = True
+    assert_true(raised, "a refused handle builds no request")
+    assert_equal(store._token_source.mint_count(), 3, "one token per built request, none for a refusal")
+    _ = req^
+    _ = plain^
+    _ = other^
+
+
 def test_value_is_a_top_level_key() raises:
     """`value` is read as a top-level key only: a nested `"value"` (tags, an
     array of objects) or text that looks like one inside another string never
@@ -845,6 +890,8 @@ def main() raises:
     test_http_scheme_is_refused_as_a_scheme()
     test_request_bytes_carry_bearer_and_exact_target()
     test_value_is_a_top_level_key()
+    test_longer_keys_with_the_value_prefix_are_not_value()
+    test_store_builds_the_request_for_the_parsed_handle()
     test_malformed_documents_are_refused()
     test_service_principal_source_mints_token()
     test_service_principal_source_refusal_raises_without_secret()
