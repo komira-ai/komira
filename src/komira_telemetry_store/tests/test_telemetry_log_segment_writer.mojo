@@ -75,7 +75,6 @@ from komira_telemetry_store.log_writer import (
 from komira_telemetry_store.manifest import open_partition_manifest
 from komira_telemetry_store.segment_entry import (
     TELEMETRY_UUID_BYTES,
-    TelemetrySegmentEntry,
     make_log_segment_entry,
 )
 
@@ -894,91 +893,6 @@ def test_11_the_row_group_knob_is_threaded_to_the_encoder() raises:
     _ = store^
 
 
-# =============================================================================
-# CASE 12 — TWO WRITER LIFETIMES DO NOT SHARE A SEGMENT-UUID NAMESPACE.
-#
-# THE SHAPE THIS PREVENTS IS A PROCESS RESTART. `_next_uuid`'s counter starts at
-# 0 in every process, so `(worker_disc, counter)` alone re-mints byte-identical
-# uuids after a restart with the same `writer_id`, as happens when `writer_id`
-# is derived from a stable node id. `merge_input_uuids` / `uuid_in_flat` key on
-# this uuid, so a collision makes the dup-window skip drop the WRONG live
-# segment.
-#
-# The two writers below differ in EXACTLY ONE FIELD — the nonce — and CASE 13 is
-# the negative control that shows it is the field doing the work.
-# =============================================================================
-
-
-def _uuid_hex(u: InlineArray[UInt8, TELEMETRY_UUID_BYTES]) -> String:
-    var hexd = "0123456789abcdef"
-    var hb = hexd.as_bytes()
-    var out = String("")
-    for i in range(TELEMETRY_UUID_BYTES):
-        out += chr(Int(hb[(Int(u[i]) >> 4) & 0xF]))
-        out += chr(Int(hb[Int(u[i]) & 0xF]))
-    return out^
-
-
-def _one_line_publish(
-    store: SharedInMemoryConditionalStore, writer_id: String, nonce: Int64
-) raises -> TelemetrySegmentEntry:
-    var w = TelemetryLogSegmentWriter[SharedInMemoryConditionalStore](
-        store.clone(), writer_id.copy(), TELEMETRY_ROOT,
-        TELEMETRY_DEFAULT_CODEC, TELEMETRY_LOG_ROWS_PER_ROW_GROUP,
-        RetryPolicy.default(), UInt8(0), nonce,
-    )
-    var msgs = List[String]()
-    var ts = List[Int64]()
-    msgs.append(String("restart-line"))
-    ts.append(_DAY_T0 + Int64(7))
-    var entries = w.publish_batches(
-        _one_batch(_log_batch(msgs^, ts^))
-    )
-    var e = entries[0].copy()
-    _ = w^
-    return e^
-
-
-def test_12_a_recreated_writer_does_not_remint_the_same_segment_uuid() raises:
-    var store = SharedInMemoryConditionalStore()
-    # SAME writer_id, SAME worker_disc, SAME row content, SAME timestamp — the
-    # restart shape. Only the construction nonce differs.
-    var first = _one_line_publish(store, String("restarted"), Int64(1_000))
-    var second = _one_line_publish(store, String("restarted"), Int64(2_000))
-    assert_true(
-        _uuid_hex(first.segment_uuid) != _uuid_hex(second.segment_uuid),
-        "12: a writer re-created with the SAME writer_id and worker_disc must"
-        " NOT re-mint the same segment uuid. The dup-window skip keys on this"
-        " uuid, so a collision drops the wrong live segment's rows from every"
-        " read. Got the same uuid twice: " + _uuid_hex(first.segment_uuid),
-    )
-    assert_true(
-        first.object_key != second.object_key,
-        "12: ...and therefore the object keys differ too. Identical uuids AND"
-        " identical timestamps produce the same key, which is the second"
-        " process OVERWRITING the first's data object",
-    )
-    _ = store^
-
-
-def test_13_the_nonce_is_the_field_that_separates_them() raises:
-    """NEGATIVE CONTROL for CASE 12. With the nonce held EQUAL, the two writers
-    collide exactly as they did before the fix — which is what proves CASE 12
-    measures the nonce and not some incidental difference between two
-    constructions."""
-    var store = SharedInMemoryConditionalStore()
-    var first = _one_line_publish(store, String("collide"), Int64(4_242))
-    var second = _one_line_publish(store, String("collide"), Int64(4_242))
-    assert_equal(
-        _uuid_hex(first.segment_uuid),
-        _uuid_hex(second.segment_uuid),
-        "13: with the SAME nonce the two writers MUST collide. If they do not,"
-        " something other than the nonce is separating them and CASE 12 is not"
-        " measuring what it claims",
-    )
-    _ = store^
-
-
 def main() raises:
     test_01_marquee_the_base_artifact_is_time_sorted_parquet()
     test_02_a_flush_across_midnight_becomes_two_partitioned_objects()
@@ -991,8 +905,6 @@ def main() raises:
     test_09_the_object_is_put_before_its_manifest_entry_is_appended()
     test_10_the_ordering_probe_fires_on_an_entry_naming_an_absent_object()
     test_11_the_row_group_knob_is_threaded_to_the_encoder()
-    test_12_a_recreated_writer_does_not_remint_the_same_segment_uuid()
-    test_13_the_nonce_is_the_field_that_separates_them()
     print("PASS komira_telemetry_store.test_telemetry_log_segment_writer (the")
     print("     base artifact is TIME-PARTITIONED, TIME-SORTED Parquet — sort")
     print("     order read back OUT OF THE PUBLISHED BYTES — and the")

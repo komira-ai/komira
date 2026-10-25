@@ -60,6 +60,7 @@ mojo_library(
     test_deps = ["//src/komira_parquet:komira_parquet"],
     test_srcs = [
         "tests/test_telemetry_keys.mojo",
+        "tests/test_telemetry_log_segment_uuid.mojo",
         "tests/test_telemetry_log_segment_writer.mojo",
         "tests/test_telemetry_manifest_replay.mojo",
         "tests/test_telemetry_metric_segment_writer.mojo",
