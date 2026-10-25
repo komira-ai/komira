@@ -45,5 +45,40 @@ The store is a type parameter bounded by `komira_objectstore`'s
 cloud client is named here, and the package reads no environment variable:
 every setting is an argument.
 
-This is the first part of the log index: the flush stage, handoff queue and
-consumer that feed it are not in this package.
+- `flush_stage`: the safety primitives of the off-core stage.
+  `InFlightBytesGate` is the memory cap on unpublished bytes (an atomic counter;
+  a reservation over the cap is rejected, except that an over-sized reservation
+  runs alone on an empty pool). `LogIndexFlushBuffer` flushes at a byte ceiling
+  or a time ceiling, whichever comes first, so a low-volume stream still becomes
+  searchable. `FlushRetryPolicy` bounds the publish retry by attempts and by a
+  total time budget.
+- `handoff`: `LogIndexHandoff`, a spinlock-guarded single-producer,
+  single-consumer queue of transposed batches (`HandoffUnit`) from the drain
+  core to the flush thread, bounded by depth and by the shared gate.
+  `offer` never blocks: when the queue is full or the gate rejects, it returns
+  False, counts the rejection, gives back any reservation it took and drops the
+  batch, and the caller decides (count the drop, or stop draining so the ring's
+  overflow policy throttles the producer). `offer_log_views` is the on-core
+  transpose and offer.
+- `consumer`: `LogIndexConsumer[Storage]`, the off-core driver. It buffers
+  handed-off batches, and at a flush ceiling builds one split with `SearchSink`
+  and publishes it: `store.put` of the split object first, then
+  `SearchMetastore.publish` of its summary. A failed build or publish is
+  counted in `PublishStats` and printed, and the reserved bytes are released
+  either way. Split uuids are the worker discriminant byte, the install-time
+  epoch and a sequence, so a restarted consumer does not overwrite an earlier
+  one's objects. The retry stops starting backoffs once the policy budget is
+  spent; a `put` or `publish` already in flight is not interrupted. A summary
+  append that lands but raises can be appended again by the retry, leaving a
+  duplicate summary for one object.
+- `flush_thread`: `OffCoreFlushThread[Storage]`, the drive loop
+  (`run_until_shutdown`) and shutdown protocol for the dedicated flush thread.
+  It does not create the OS thread; the owner launches a thread whose body calls
+  `run_until_shutdown`, and joins it before dropping the handoff and gate. On
+  shutdown the loop drains the handoff once more and flushes the last partial
+  segment; the owner quiesces the producer first. The handoff and gate methods
+  take `mut self`, so how they are shared with a producer on another thread is
+  part of that thread-launch design, not of this package.
+
+Parts 1 and 2 are included. The metric sink and split log search (part 3) are
+not in this package.
