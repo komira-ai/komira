@@ -1,4 +1,5 @@
 load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
+load("@komira//tools/build/gen:defs.bzl", "committed_data")
 
 # API Gateway v1: a REST/JSON client generated at build time from the
 # googleapis protos //tools/vendor/googleapis:apigateway_v1 extracts from
@@ -79,7 +80,7 @@ mojo_gcp_client(
     test_data = {
         # The whole generated package, so the scan covers every file the
         # generator writes with no second list of them to drift.
-        "tests/test_no_env_reads.mojo": {"gen": ":komira_gcp_apigateway_gen"},
+        "tests/test_no_env_reads.mojo": committed_data("komira_gcp_apigateway"),
     },
     test_srcs = [
         "tests/test_apigateway_default_host.mojo",
