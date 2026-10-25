@@ -8,7 +8,8 @@
      "findings": [<finding>...], "exemptions": [<exemption>...],
      "unrecorded_functions": [<function>...],
      "unrecorded_functions_unreliable": [<function>...], "ignored_files",
-     "excluded_test_files", "ignored_mutants", "excluded_test_mutants",
+     "excluded_test_files", "generated_files", "generated_paths" (the left-out
+     generated sources, generated.mojo), "ignored_mutants", "excluded_test_mutants",
      "info_packages": [...], "info_findings": [<finding>...]}
 
 `covcheck gate`: `{"conclusion", "mode", "target_bp", "package": <package>,
@@ -140,6 +141,13 @@ def _tail(mut j: JsonOut, a: Analysis):
     _unrecorded(j, a, String("unrecorded_functions_unreliable"), False)
     j.field_int(String("ignored_files"), a.ignored_files)
     j.field_int(String("excluded_test_files"), a.excluded_test_files)
+    j.field_int(String("generated_files"), len(a.generated_paths))
+    j.key(String("generated_paths"))
+    j.begin_array()
+    for i in range(len(a.generated_paths)):
+        j.item()
+        j.str_value(a.generated_paths[i])
+    j.end_array()
     j.field_int(String("ignored_mutants"), a.ignored_mutants)
     j.field_int(String("excluded_test_mutants"), a.excluded_test_mutants)
     j.key(String("info_packages"))

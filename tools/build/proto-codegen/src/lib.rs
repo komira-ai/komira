@@ -11,6 +11,7 @@ pub mod emit_aws;
 pub mod emit_dbstorable;
 pub mod emit_index;
 pub mod emit_rest;
+pub mod header;
 pub mod http_options;
 pub mod ir;
 pub mod json;
@@ -25,8 +26,12 @@ pub mod retry_policy;
 pub mod routing_options;
 pub mod service_config;
 pub mod service_options;
+pub mod sha256;
 pub mod xml_equiv;
 pub mod yaml_subset;
+
+#[cfg(test)]
+mod generated_header_tests;
 
 pub const FEATURE_PROTO3_OPTIONAL: u64 = 1;
 
@@ -283,6 +288,7 @@ fn generate_scoped(
     http_rules: http_options::HttpRuleTable,
     routing_rules: routing_options::RoutingRuleTable,
     default_hosts: service_options::DefaultHostTable,
+    pins: &plugin::InputPins,
     mode: ProtocolMode,
 ) -> Result<Vec<(String, String)>, String> {
     if params.gcp && mode == ProtocolMode::Connect {
@@ -317,6 +323,7 @@ fn generate_scoped(
         &params.scope,
         &params.module_names,
     )?;
+    pins.apply(&mut model);
     for file in &mut model.files {
         for svc in &mut file.services {
             svc.default_host = default_hosts
@@ -361,6 +368,7 @@ pub fn generate(
         http_options::HttpRuleTable::default(),
         routing_options::RoutingRuleTable::default(),
         service_options::DefaultHostTable::default(),
+        &plugin::InputPins::from_request(request),
         mode,
     )
 }
@@ -383,7 +391,8 @@ pub fn generate_with_routing(
         routing_options::RoutingRuleTable::from_request_bytes(request_bytes)?;
     let http_rules = http_options::HttpRuleTable::from_request_bytes(request_bytes)?;
     let default_hosts = service_options::DefaultHostTable::from_request_bytes(request_bytes)?;
-    generate_scoped(request, &params, http_rules, routing_rules, default_hosts, mode)
+    let pins = plugin::InputPins::from_request_bytes(request, request_bytes);
+    generate_scoped(request, &params, http_rules, routing_rules, default_hosts, &pins, mode)
 }
 
 pub fn generate_db(
@@ -392,11 +401,13 @@ pub fn generate_db(
 ) -> Result<Vec<(String, String)>, String> {
     let params = PluginParameters::parse(request.parameter.as_deref().unwrap_or(""))?;
     params.require_only_package_prefix("protoc-gen-mojo-db")?;
-    let model = lower::lower(
+    let mut model = lower::lower(
         &request.proto_file,
         &request.file_to_generate,
         &params.package_prefix,
     )?;
+    plugin::InputPins::from_descriptor_set_bytes(request, descriptor_set_bytes)
+        .apply(&mut model);
     let opts = db_options::DbOptionTable::from_descriptor_set_bytes(descriptor_set_bytes)?;
     Ok(emit_dbstorable::emit_db_model(&model, &opts))
 }
@@ -438,6 +449,7 @@ pub fn generate_rest(
         http_rules,
         routing_options::RoutingRuleTable::default(),
         default_hosts,
+        &plugin::InputPins::from_descriptor_set_bytes(request, descriptor_set_bytes),
         mode,
     )
 }
@@ -448,8 +460,22 @@ pub fn generate_from_openapi(
 ) -> Result<(Vec<(String, String)>, Vec<String>), String> {
     let doc = json::parse(doc_text)
         .map_err(|e| format!("OpenAPI document is not valid JSON: {e}"))?;
-    let lowering = openapi_in::lower_openapi(&doc, doc_path, package_prefix)?;
+    // The document is named by its file name: a header must not carry the
+    // directory it was read from.
+    let doc_name = doc_path.rsplit(['/', '\\']).next().unwrap_or(doc_path);
+    let mut lowering = openapi_in::lower_openapi(&doc, doc_name, package_prefix)?;
+    let doc_sha256 = sha256::hex(doc_text.as_bytes());
+    for file in &mut lowering.model.files {
+        file.source_sha256 = doc_sha256.clone();
+    }
     Ok((emit::emit_model(&lowering.model), lowering.notes))
+}
+
+/// The package `__init__.mojo` of the OpenAPI front-end: a header and nothing
+/// else, as the modules beside it are named by the importer. (The binary
+/// has no Buck target, so its text lives here, where a test reaches it.)
+pub fn openapi_package_init_text() -> String {
+    header::render("mojo-gen-openapi", header::PLUGIN_GENERATOR_VERSION, &[])
 }
 
 pub fn respond_with_bytes(
@@ -474,6 +500,7 @@ pub fn respond_with_bytes(
                         rules,
                         routing_options::RoutingRuleTable::default(),
                         hosts,
+                        &plugin::InputPins::from_request_bytes(request, request_bytes),
                         ProtocolMode::Rest,
                     )
                 }
