@@ -30,10 +30,11 @@
 # The gate reservation travels with the unit and is released by the CONSUMER
 # after the batch is published; the handoff only reserves on offer.
 #
-# THE LOCK. `_acquire` is a compare-and-swap spin (default, sequentially
-# consistent ordering) that yields the CPU every `_SPINS_BEFORE_YIELD` failed
-# attempts, so a holder preempted on a shared core does not leave the other side
-# spinning at full speed. The queue is allocated at its depth cap up front and
+# THE LOCK. `_acquire` is a compare-and-swap spin (`Atomic.compare_exchange`
+# with its default memory ordering) that yields the CPU every
+# `_SPINS_BEFORE_YIELD` failed attempts, so a holder preempted on a shared
+# core does not leave the other side spinning at full speed. The queue is
+# allocated at its depth cap up front and
 # `drain_all` swaps in a fresh full-capacity queue allocated BEFORE the lock is
 # taken, so no allocation happens while the lock is held.
 #
