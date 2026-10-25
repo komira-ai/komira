@@ -146,6 +146,7 @@ TARGETS = [
     "komira//src/komira_host:table",
     "komira//src/komira_http_auth:komira_http_auth_conda",
     "komira//src/komira_http_server:komira_http_server_conda",
+    "komira//src/komira_iceberg:komira_iceberg_conda",
     "komira//src/komira_iceberg_catalog:komira_iceberg_catalog_conda",
     "komira//src/komira_iceberg_catalog:test_iceberg_rest_loopback",
     "komira//src/komira_job_supervisor:job_supervisor_main",
