@@ -463,7 +463,7 @@ registry serves the bytes that were staged, and do the README examples of the pa
    exact name and version the plan names, following no redirect and speaking only https. It compares
    each file's **sha256 and size** with the plan and **fails the job, naming every file that differs**
    (a package that was not published, another size, another hash). Only when every file matches does
-   it write `release/beta_set` (gitignored): the plan, the READMEs, and the downloaded files, a staged
+   it write into `release/beta_set` (its checked-in `BUCK` stays there; the tool refuses any other file already in the directory): the plan, the READMEs, and the downloaded files, a staged
    set made of the published bytes.
 3. **The README e2e on the downloaded set.** `./buck2 build -c komira_release.staged=beta -c
    komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all`, on the farm. The
@@ -494,8 +494,7 @@ that plan pass on those downloaded bytes.
 `release_beta_fetch` refuses a plan it cannot check (no member, a member that is not an `upload`, a
 path that leaves its directory, a malformed sha256, a file above 64 MiB, a name listed twice, two
 paths of the set that collide, in any letter case) before it makes a request, and leaves no `--out`
-unless every file matched and every write succeeded (it writes next to `--out` and moves the directory
-into place). A file is capped at 64 MiB whatever size the plan declares. Its cases
+unless every file matched and every write succeeded (it writes next to `--out` and moves the members into place, beside the `BUCK`; a failed move takes back what it moved). A file is capped at 64 MiB whatever size the plan declares. Its cases
 (`//tools/build/ci:release_beta_fetch_unit`) run against a registry in memory and a socket on
 loopback, and cover a changed byte, another size, a missing package, an index of another stage, and
 a redirect, and that the staged `.conda` files are never what is written.
