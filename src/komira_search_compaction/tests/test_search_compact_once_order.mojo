@@ -23,9 +23,17 @@
 # `__probe__/` and the probe skips them, so it never observes its own writes.
 #
 # Cases:
-#   1  `compact_once` writes the merged object before the append (and the probe
-#      fired at all: a probe that never fired would pass for free).
-#   2  positive control: an append to `_base` that names an object nothing ever
+#   1  `compact_once` over the unsharded lineage writes the merged object before
+#      the append (the probe fired at all: a probe that never fired would pass
+#      for free), and the summary in `_base` names the very key that was
+#      written.
+#   2  the same over per-writer shard lineages.
+#   3  a failed object write publishes nothing and retires nothing; an orphan
+#      object left at the merged key by an earlier attempt is overwritten by
+#      the next pass, which then publishes.
+#   4  a transient failure reading a retired chunk during the reap leaves the
+#      chunk and its split object in place; the next pass reaps both.
+#   5  positive control: an append to `_base` that names an object nothing ever
 #      wrote is reported as a violation, so the silence in case 1 is evidence.
 # =============================================================================
 
@@ -62,15 +70,22 @@ from komira_search.split import SplitView
 
 from komira_search_catalog import (
     SearchMetastore,
+    SplitSummary,
     make_merged_split_summary,
+    make_shard_id,
     make_split_summary,
     shard_manifest_prefix,
+)
+from komira_search_catalog.metastore import (
+    list_live_splits_across_shards_with_seq,
 )
 
 from komira_search_compaction import (
     compact_once,
     CompactionConfig,
+    CompactionResult,
     MERGE_FACTOR,
+    content_addressed_merge_key,
 )
 
 
@@ -81,6 +96,11 @@ comptime _META: String = "order-run/logs/meta"
 comptime _PROBE_DATA_SEEN: String = "__probe__/merged_object_was_written"
 comptime _PROBE_OK: String = "__probe__/append_saw_its_object"
 comptime _PROBE_VIOLATION: String = "__probe__/append_preceded_its_object"
+comptime _PROBE_FAIL_PUT: String = "__probe__/fail_merged_object_put"
+comptime _PROBE_FAIL_READS: String = "__probe__/fail_unsharded_chunk_reads"
+comptime _PROBE_REAP_REACHED: String = "__probe__/reap_reached"
+comptime _PROBE_FAIL_FIRED: String = "__probe__/chunk_read_failure_fired"
+comptime _PROBE_WROTE: String = "__probe__/wrote/"
 
 
 struct OrderProbeStore(
@@ -92,7 +112,9 @@ struct OrderProbeStore(
 ):
     """A `SharedInMemoryConditionalStore` that records, for every manifest
     chunk written to the `_base` lineage, whether a merged split object had
-    already been written at that instant."""
+    already been written at that instant. It can also fail the write of a
+    merged object, or, once the reap has started, the first read of an unsharded-lineage
+    manifest chunk, while a marker in the shared map says so."""
 
     var _inner: SharedInMemoryConditionalStore
 
@@ -121,7 +143,10 @@ struct OrderProbeStore(
         if raw.find(String("__probe__/")) == 0:
             return
         if raw.find(String("/splits/merged-")) > 0:
+            if self._exists(_PROBE_FAIL_PUT):
+                raise Error("injected: the merged object write failed")
             self._mark(_PROBE_DATA_SEEN)
+            self._mark(String(_PROBE_WROTE) + raw)
             return
         if (
             raw.find(String("/_lineage/_base/manifest/")) > 0
@@ -164,10 +189,38 @@ struct OrderProbeStore(
         return self._inner.get_range(path, start, length)
 
     def get(self, path: Path) raises -> List[UInt8]:
+        var raw = path.raw()
+        # The reap is the only reader of a tombstone, so the first tombstone
+        # read marks the point where the pass has left the snapshot (which also
+        # reads chunks) and entered the reap.
+        if raw.find(String("/logs/meta/tombstones/")) > 0:
+            self._mark(_PROBE_REAP_REACHED)
+        if (
+            raw.find(String("/logs/meta/manifest/")) > 0
+            and raw.find(String(".chunk")) > 0
+            and self._exists(_PROBE_FAIL_READS)
+            and self._exists(_PROBE_REAP_REACHED)
+            and not self._exists(_PROBE_FAIL_FIRED)
+        ):
+            self._mark(_PROBE_FAIL_FIRED)
+            raise Error("injected: transient chunk read failure")
         return self._inner.get(path)
 
     def delete(self, path: Path) raises -> None:
         return self._inner.delete(path)
+
+
+def _flag() -> List[UInt8]:
+    var b = List[UInt8]()
+    b.append(UInt8(1))
+    return b^
+
+
+def _garbage() -> List[UInt8]:
+    var b = List[UInt8]()
+    for _ in range(3):
+        b.append(UInt8(7))
+    return b^
 
 
 def _marked(store: SharedInMemoryConditionalStore, key: String) -> Bool:
@@ -248,70 +301,242 @@ def _ingest_to_split(ndjson: String, seed: Int) raises -> List[UInt8]:
     return sink.take_split_bytes()
 
 
+def _publish_raw(
+    inner: SharedInMemoryConditionalStore, lineage: String, i: Int
+) raises:
+    """One real one-document split, object and summary, into `lineage`."""
+    var manifest = CasManifestStore[SharedInMemoryConditionalStore](
+        inner.clone(), lineage.copy(), RetryPolicy.fast_test()
+    )
+    var meta = SearchMetastore[SharedInMemoryConditionalStore](
+        manifest^, String(_INDEX)
+    )
+    var bts = _ingest_to_split(
+        _one_doc_ndjson(String("w") + String(i), "active", 10 * (i + 1)), i
+    )
+    var okey = String(_KEY_PREFIX) + "/logs/splits/raw" + String(i) + ".split"
+    _ = inner.put(Path.parse(okey), bts.copy())
+    var view = SplitView.parse(bts.copy())
+    _ = meta.publish(
+        make_split_summary(
+            view.split_uuid(),
+            Int64(view.doc_count()),
+            Int64(len(bts)),
+            Int64(view.min_doc_id()),
+            Int64(view.max_doc_id()),
+            String(_INDEX),
+            String("body"),
+            okey^,
+        )
+    )
+    _ = meta^
+
+
+def _publish_unsharded(inner: SharedInMemoryConditionalStore) raises:
+    for i in range(MERGE_FACTOR):
+        _publish_raw(inner, String(_META), i)
+
+
+def _publish_sharded(inner: SharedInMemoryConditionalStore) raises:
+    for i in range(MERGE_FACTOR):
+        _publish_raw(
+            inner,
+            shard_manifest_prefix(
+                String(_META), make_shard_id(String("node"), i)
+            ),
+            i,
+        )
+
+
+def _pass(
+    probe: OrderProbeStore, now_ms: Int64, seed: Int
+) raises -> CompactionResult:
+    return compact_once(
+        probe,
+        String(_META),
+        String(_INDEX),
+        String("body"),
+        CompactionConfig(String(_KEY_PREFIX), now_ms, Int64(60_000)),
+        _uuid(seed),
+    )
+
+
+def _merged_entries(
+    inner: SharedInMemoryConditionalStore,
+) raises -> List[SplitSummary]:
+    var live = list_live_splits_across_shards_with_seq(
+        inner, String(_META), String(_INDEX)
+    )
+    var out = List[SplitSummary]()
+    for i in range(len(live)):
+        if live[i].summary.is_merged():
+            out.append(live[i].summary.copy())
+    return out^
+
+
+def _assert_order_and_key(
+    inner: SharedInMemoryConditionalStore, tag: String
+) raises:
+    # Non-vacuity: the probe must have seen a `_base` chunk write at all. A
+    # probe that never fired would satisfy the ordering assertion for free.
+    assert_true(
+        _marked(inner, _PROBE_OK) or _marked(inner, _PROBE_VIOLATION),
+        tag
+        + ": NON-VACUITY: the probe saw no `_base` chunk write, so the ordering"
+        " assertion would be vacuous; the append stopped going through the"
+        " store or the key shape changed",
+    )
+    assert_true(
+        _marked(inner, _PROBE_DATA_SEEN),
+        tag + ": the probe saw the merged object being written",
+    )
+    assert_false(
+        _marked(inner, _PROBE_VIOLATION),
+        tag
+        + ": ORDER: a summary was appended to `_base` while the merged object"
+        " did not exist yet; the object must be written first",
+    )
+    assert_true(
+        _marked(inner, _PROBE_OK),
+        tag + ": the append saw its merged object already written",
+    )
+    # The oracle is coarse (any merged object counts), so also pin the key:
+    # the summary visible in the catalog names exactly the key that was
+    # written, and that object is a split of all the merged documents.
+    var merged = _merged_entries(inner)
+    assert_equal(len(merged), 1, tag + ": one merged summary is live")
+    var key = merged[0].object_key.copy()
+    assert_true(
+        _marked(inner, String(_PROBE_WROTE) + Path.parse(key).raw()),
+        tag + ": the summary names a key the pass wrote",
+    )
+    var view = SplitView.parse(inner.get(Path.parse(key)))
+    assert_equal(
+        view.doc_count(),
+        MERGE_FACTOR,
+        tag + ": the named object holds every merged document",
+    )
+
 
 def test_the_merged_object_is_written_before_its_summary_is_appended() raises:
     var inner = SharedInMemoryConditionalStore()
-    # Ingest MERGE_FACTOR small splits into the unsharded lineage, through the
-    # plain store (the probe only watches the compaction pass).
+    _publish_unsharded(inner)
+    var probe = OrderProbeStore(inner.clone())
+    var result = _pass(probe, Int64(1_000_000), 950)
+    assert_true(result.merged, "1: the pass merged")
+    _assert_order_and_key(inner, String("1"))
+    _ = probe^
+    _ = inner^
+
+
+def test_the_order_holds_for_writer_shard_inputs() raises:
+    var inner = SharedInMemoryConditionalStore()
+    _publish_sharded(inner)
+    var probe = OrderProbeStore(inner.clone())
+    var result = _pass(probe, Int64(1_000_000), 952)
+    assert_true(result.merged, "2: the pass merged")
+    assert_equal(result.seqs_retired, MERGE_FACTOR, "2: every input retired")
+    _assert_order_and_key(inner, String("2"))
+    _ = probe^
+    _ = inner^
+
+
+def test_a_failed_object_write_publishes_nothing_and_an_orphan_is_replaced() raises:
+    var inner = SharedInMemoryConditionalStore()
+    _publish_unsharded(inner)
+    _ = inner.put(Path.parse(_PROBE_FAIL_PUT), _flag())
+    var probe = OrderProbeStore(inner.clone())
+    var raised = False
+    try:
+        _ = _pass(probe, Int64(1_000_000), 953)
+    except e:
+        raised = String(e).find(String("injected")) >= 0
+    assert_true(raised, "3: the pass raises the object write failure")
+    # Nothing was published and nothing was retired.
+    assert_false(
+        _marked(inner, _PROBE_OK) or _marked(inner, _PROBE_VIOLATION),
+        "3: no summary was appended to `_base`",
+    )
+    var live = list_live_splits_across_shards_with_seq(
+        inner, String(_META), String(_INDEX)
+    )
+    assert_equal(len(live), MERGE_FACTOR, "3: every input is still live")
+    assert_equal(len(_merged_entries(inner)), 0, "3: no merged summary")
+
+    # An earlier attempt that wrote the object and stopped before the append
+    # leaves garbage at the merged key. The next pass overwrites it.
+    var uuids = List[Array[UInt8, 16]]()
+    for i in range(len(live)):
+        uuids.append(live[i].summary.split_uuid.copy())
+    var okey = content_addressed_merge_key(
+        String(_KEY_PREFIX), String(_INDEX), uuids
+    )
+    inner.delete(Path.parse(_PROBE_FAIL_PUT))
+    _ = inner.put(Path.parse(okey), _garbage())
+    var result = _pass(probe, Int64(1_000_000), 954)
+    assert_true(result.merged, "3: the rerun merged")
+    var merged = _merged_entries(inner)
+    assert_equal(len(merged), 1, "3: one merged summary after the rerun")
+    assert_equal(merged[0].object_key, okey, "3: it names the orphan's key")
+    var view = SplitView.parse(inner.get(Path.parse(okey)))
+    assert_equal(
+        view.doc_count(), MERGE_FACTOR, "3: the orphan was overwritten"
+    )
+    _ = probe^
+    _ = inner^
+
+
+def test_a_transient_chunk_read_failure_does_not_orphan_the_split_object() raises:
+    var inner = SharedInMemoryConditionalStore()
+    _publish_unsharded(inner)
+    var probe = OrderProbeStore(inner.clone())
+    _ = _pass(probe, Int64(1_000_000), 955)
+    var raw_keys = List[String]()
+    for i in range(MERGE_FACTOR):
+        raw_keys.append(
+            String(_KEY_PREFIX) + "/logs/splits/raw" + String(i) + ".split"
+        )
+
+    # Past the grace period, with the first chunk read of the reap failing: the
+    # reap must leave that chunk, and the object only it names, alone.
+    # The first pass's reap already read the tombstones inside their grace
+    # period; forget that, so only this pass's reap arms the failure.
+    inner.delete(Path.parse(_PROBE_REAP_REACHED))
+    _ = inner.put(Path.parse(_PROBE_FAIL_READS), _flag())
+    var failed = _pass(probe, Int64(2_000_000), 956)
+    assert_true(
+        _marked(inner, _PROBE_FAIL_FIRED), "4: the read failure was injected"
+    )
+    assert_equal(
+        failed.chunks_reaped, MERGE_FACTOR - 1, "4: the other chunks are reaped"
+    )
+    assert_equal(failed.splits_reaped, MERGE_FACTOR - 1, "4: and their objects")
+    assert_true(
+        _marked(inner, raw_keys[0]),
+        "4: the object of the chunk whose read failed still exists",
+    )
+    for i in range(1, MERGE_FACTOR):
+        assert_false(
+            _marked(inner, raw_keys[i]), "4: a read chunk's object is deleted"
+        )
     var manifest = CasManifestStore[SharedInMemoryConditionalStore](
         inner.clone(), String(_META), RetryPolicy.fast_test()
     )
     var meta = SearchMetastore[SharedInMemoryConditionalStore](
         manifest^, String(_INDEX)
     )
-    for i in range(MERGE_FACTOR):
-        var bts = _ingest_to_split(
-            _one_doc_ndjson(String("w") + String(i), "active", 10 * (i + 1)), i
-        )
-        var okey = String(_KEY_PREFIX) + "/logs/splits/raw" + String(i) + ".split"
-        _ = inner.put(Path.parse(okey), bts.copy())
-        var view = SplitView.parse(bts.copy())
-        _ = meta.publish(
-            make_split_summary(
-                view.split_uuid(),
-                Int64(view.doc_count()),
-                Int64(len(bts)),
-                Int64(view.min_doc_id()),
-                Int64(view.max_doc_id()),
-                String(_INDEX),
-                String("body"),
-                okey^,
-            )
-        )
+    assert_equal(
+        len(meta.tombstoned_seqs()),
+        1,
+        "4: the chunk whose read failed is still retired, not reaped",
+    )
     _ = meta^
 
-    var probe = OrderProbeStore(inner.clone())
-    var result = compact_once(
-        probe,
-        String(_META),
-        String(_INDEX),
-        String("body"),
-        CompactionConfig(String(_KEY_PREFIX), Int64(1_000_000), Int64(60_000)),
-        _uuid(950),
-    )
-    assert_true(result.merged, "1: the pass merged")
-
-    # Non-vacuity: the probe must have seen a `_base` chunk write at all. A
-    # probe that never fired would satisfy the ordering assertion for free.
-    assert_true(
-        _marked(inner, _PROBE_OK) or _marked(inner, _PROBE_VIOLATION),
-        "1: NON-VACUITY: the probe saw no `_base` chunk write, so the ordering"
-        " assertion would be vacuous; the append stopped going through the"
-        " store or the key shape changed",
-    )
-    assert_true(
-        _marked(inner, _PROBE_DATA_SEEN),
-        "1: the probe saw the merged object being written",
-    )
-    assert_false(
-        _marked(inner, _PROBE_VIOLATION),
-        "1: ORDER: a summary was appended to `_base` while the merged object"
-        " did not exist yet; the object must be written first",
-    )
-    assert_true(
-        _marked(inner, _PROBE_OK),
-        "1: the append saw its merged object already written",
-    )
+    # The next pass reaps it and its object.
+    var again = _pass(probe, Int64(2_000_000), 957)
+    assert_equal(again.chunks_reaped, 1, "4: the retry reaps the chunk")
+    assert_equal(again.splits_reaped, 1, "4: and its object")
+    assert_false(_marked(inner, raw_keys[0]), "4: the object is deleted")
     _ = probe^
     _ = inner^
 
@@ -343,13 +568,13 @@ def test_the_probe_reports_an_append_naming_an_object_never_written() raises:
     )
     assert_true(
         _marked(inner, _PROBE_VIOLATION),
-        "2: POSITIVE CONTROL: the probe must report a violation when an"
+        "5: POSITIVE CONTROL: the probe must report a violation when an"
         " append names an object nothing wrote; if it does not, case 1 is"
         " inert",
     )
     assert_false(
         _marked(inner, _PROBE_OK),
-        "2: ...and must not also report OK",
+        "5: ...and must not also report OK",
     )
     _ = base^
     _ = probe^

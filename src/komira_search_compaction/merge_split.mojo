@@ -370,7 +370,6 @@ def merge_split_bytes(
     key_prefix: String,
     text_field: String,
     merged_uuid: Array[UInt8, 16],
-    object_key: String,
 ) raises -> MergeResult:
     """Merge K input splits' bytes into ONE merged `.split` via RE-INDEX.
 
@@ -385,6 +384,9 @@ def merge_split_bytes(
     -> widen FLOAT64; else FAIL THE MERGE (raise — the caller leaves the inputs
     live). The merged split gets a fresh dense 0..M-1 doc-id space + the passed
     `merged_uuid`.
+
+    `bucket` is only recorded by the sink; nothing is written to it here. The
+    caller writes the returned bytes to the merged object's key.
 
     Returns the merged bytes + the metadata for the merged SplitSummary."""
     if len(input_split_bytes) == 0:
@@ -492,7 +494,6 @@ def merge_split_bytes(
     for i in range(len(input_uuids)):
         for k in range(16):
             flat.append(input_uuids[i][k])
-    _ = object_key  # the caller writes to this key; carried for symmetry.
 
     return MergeResult(
         merged_bytes^,

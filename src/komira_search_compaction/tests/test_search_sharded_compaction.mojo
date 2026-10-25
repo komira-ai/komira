@@ -365,7 +365,6 @@ def _drive_cross_shard_compaction(
         String("prefix"),
         String("body"),
         merged_uuid,
-        object_key,
     )
     var merge_ops = mr.merge_ops
     var input_uuids_flat = mr.input_uuids_flat.copy()
@@ -479,6 +478,19 @@ def _live_shard_ids(
     for i in range(len(all_ids)):
         if retired.find(all_ids[i]) < 0:
             out.append(all_ids[i])
+        else:
+            # A retired shard holds no live split and no pending retirement.
+            var mf = CasManifestStore[SharedInMemoryConditionalStore](
+                store.clone(),
+                shard_manifest_prefix(String(_META), all_ids[i]),
+                RetryPolicy.fast_test(),
+            )
+            var m = SearchMetastore[SharedInMemoryConditionalStore](
+                mf^, String("logs")
+            )
+            assert_equal(len(m.list_live_splits()), 0, "retired: no live split")
+            assert_equal(len(m.tombstoned_seqs()), 0, "retired: no retirement")
+            _ = m^
     return out^
 
 

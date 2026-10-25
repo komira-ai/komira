@@ -315,7 +315,6 @@ def test_01_merge_correctness() raises:
         String("prefix"),
         String("body"),
         merged_uuid,
-        okey,
     )
     assert_equal(mr.doc_count, 3, "1: merged has 3 docs")
 
@@ -498,7 +497,7 @@ def test_03_concurrent_indexer_no_dup() raises:
     )
     var mr = merge_split_bytes(
         merge_inputs, String("logs"), String("bucket"), String("prefix"),
-        String("body"), merged_uuid, okey,
+        String("body"), merged_uuid,
     )
     assert_equal(mr.doc_count, 5, "3: M has the 5 snapshotted docs")
 
@@ -616,14 +615,14 @@ def test_04_idempotent_content_addressed_key() raises:
     var merged_uuid = _uuid(50)
     var mr1 = merge_split_bytes(
         inputs, String("logs"), String("bucket"), String("prefix"),
-        String("body"), merged_uuid, k_fwd,
+        String("body"), merged_uuid,
     )
     var inputs2 = List[List[UInt8]]()
     inputs2.append(b0.copy())
     inputs2.append(b1.copy())
     var mr2 = merge_split_bytes(
         inputs2, String("logs"), String("bucket"), String("prefix"),
-        String("body"), merged_uuid, k_fwd,
+        String("body"), merged_uuid,
     )
     assert_equal(
         len(mr1.split_bytes), len(mr2.split_bytes), "4: re-merge same byte len"
@@ -867,7 +866,7 @@ def test_08_full_pass_orchestration() raises:
     )
     var mr = merge_split_bytes(
         merge_inputs, String("logs"), String("bucket"), String("prefix"),
-        String("body"), merged_uuid, okey,
+        String("body"), merged_uuid,
     )
     assert_equal(mr.doc_count, MERGE_FACTOR, "8: merged holds all N docs")
     var merged_bytes = mr.split_bytes.copy()

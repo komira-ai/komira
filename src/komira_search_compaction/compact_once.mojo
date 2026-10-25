@@ -33,8 +33,9 @@
 #                  was never appended is a harmless orphan; the reverse order
 #                  would publish a summary naming a missing object. The
 #                  summary lists the input UUIDs, so a catalog read hides the
-#                  inputs from the moment it is live and publishing the merge
-#                  and retiring the inputs look atomic;
+#                  inputs from the moment it is live: to a reader, publishing
+#                  the merge and retiring the inputs look atomic. They are not
+#                  atomic in the store (see "Failure windows" below);
 #      d. retire   exactly the snapshot chunks that were merged, each in its
 #                  source lineage (`retire_at`). A split published into a shard
 #                  after the snapshot is outside the retire set, so no update
@@ -47,18 +48,42 @@
 #                  splits all folded into `_base`.
 #   6. Return      a `CompactionResult`.
 #
-# A pass is idempotent. The merged object key is content-addressed, so a re-run
-# over the same inputs writes the same key; `select_merge` excludes the merged
-# split it just produced; the reap tolerates a chunk that is already gone.
+# A pass that runs to the end and finds nothing new is a no-op: `select_merge`
+# excludes the merged split it just produced, and the reap tolerates a chunk
+# that is already gone.
+#
+# Failure windows (a pass that stops partway):
+#   * the object is written but the append fails or the process stops: the
+#     object is an orphan under a key derived from the input UUIDs. No summary
+#     names it, the inputs stay live, and the next pass merges them again and
+#     overwrites the key (with a fresh merged UUID in the bytes). The orphan is
+#     reclaimed only by such a later pass.
+#   * the append succeeds but a retire then fails: the merged split is live
+#     and a catalog read hides every input, so the inputs that were not retired
+#     are no longer candidates. They are not retired or reaped by any later
+#     pass, and a writer shard that holds them does not drain. This pass does
+#     not repair that; it needs an operator or a follow-up step that retires
+#     any live chunk a merged summary names.
 #
 # One compaction pass at a time per index is the caller's contract. This module
-# takes no lock; it relies on the store's compare-and-swap and on the
-# content-addressed key to stay correct even if two runs overlap by accident.
+# takes no lock and two overlapping runs over the same inputs are NOT safe:
+# the merged object key depends only on the input UUIDs, but the merged bytes
+# carry the caller's `merged_uuid`, so the second run overwrites the key with
+# bytes whose footer UUID differs from the one the first run's summary names.
+#
+# Peak memory: one merge holds every input object, a parsed copy of each, the
+# extracted text and source strings, the merged bytes and a copy of them for
+# the footer, all at once. That is a small multiple of the merged size, which
+# `MAX_MERGED_BYTES` bounds.
 #
 # No pointer appears in any signature.
 # =============================================================================
 
-from komira_objectstore.cas_manifest import CasManifestStore, RetryPolicy
+from komira_objectstore.cas_manifest import (
+    CasManifestStore,
+    RetryPolicy,
+    is_not_found,
+)
 from komira_objectstore.path import Path
 from komira_objectstore.store import CloneableConditionalWriteStore
 from komira_objectstore.sublineage_shard_keys import (
@@ -242,11 +267,12 @@ def compact_once[
     shards (and itself the unsharded lineage).
 
     `merged_uuid` is the fresh 16-byte UUID of the merged split. The caller
-    mints it, so this function reads no clock and no random source and the
-    merged bytes are a deterministic function of the input set.
+    mints it, so this function reads no clock and no random source; the merged
+    bytes are a deterministic function of the input set and `merged_uuid`.
 
-    The pass is idempotent. At most one pass should run at a time per index;
-    that is the caller's contract and this function takes no lock."""
+    At most one pass should run at a time per index; that is the caller's
+    contract and this function takes no lock. A pass that stops partway can
+    leave an orphan object or unretired inputs (see the module header)."""
     # ---- 1. Snapshot the live splits of every lineage. ----
     # Each entry carries (shard_id, chunk_seq, summary); the unsharded lineage
     # is tagged shard id "". The merged-input skip over the union is already
@@ -301,7 +327,8 @@ def compact_once[
         retire_seqs.append(cand.chunk_seq)
 
     # The content-addressed merged key: deterministic in the sorted input UUIDs,
-    # so a re-run with the same set writes the same key (a harmless overwrite).
+    # so a re-run with the same set writes the same key (see the failure
+    # windows in the module header).
     var object_key = content_addressed_merge_key(
         config.key_prefix, index, input_uuids
     )
@@ -315,7 +342,6 @@ def compact_once[
         config.key_prefix,
         field,
         merged_uuid,
-        object_key,
     )
 
     # Read the scalars and the input-UUID set (a small copy) BEFORE consuming
@@ -348,6 +374,7 @@ def compact_once[
         merge_ops,
         input_uuids_flat^,
     )
+    # A publish that fails after the put leaves the object as an orphan.
     _ = storage.put(Path.parse(object_key), split_bytes^)
     var base_meta = _base_metastore[Storage](storage, index_meta_prefix, index)
     _ = base_meta.publish(merged_summary^)
@@ -415,7 +442,7 @@ def _reap_past_grace_tombstones_cross_shard[
     The discovery lists the `_lineage/` directory, so it also finds a shard with
     no live split but a pending retirement, which the live-split snapshot does
     not show. `_base` is included: reaping its own past-grace retirements is
-    correct, and today it holds none because merged splits are never merged
+    correct; it holds no retirement while merged splits are never merged
     again.
 
     Per lineage it delegates to `_reap_shard_tombstones`. Returns the sum of
@@ -425,8 +452,9 @@ def _reap_past_grace_tombstones_cross_shard[
     var retired = read_retired_shards(storage, index_meta_prefix)
     var shard_ids = _discover_shard_ids(storage, index_meta_prefix)
     for si in range(len(shard_ids)):
-        # A retired shard holds only a seal and reaped stubs, and had no
-        # pending retirement when it was retired; it has nothing to reap.
+        # An optimisation: a retired shard holds only a seal and reaped stubs,
+        # and had no pending retirement when it was retired, so a sweep of it
+        # would find nothing.
         if retired.find(shard_ids[si]) >= 0:
             continue
         var meta = _shard_metastore[Storage](
@@ -487,13 +515,17 @@ def _reap_shard_tombstones[
             continue
 
         # Capture the split object's key BEFORE reaping the chunk that holds
-        # it. A chunk that is already gone yields "": the object was deleted
-        # when that chunk was reaped, so skip it.
+        # it. A chunk that is already gone (not-found) yields "": the object
+        # was deleted when that chunk was reaped, so skip the delete. Any other
+        # error (a transient store failure) leaves the chunk alone, because
+        # reaping it would drop the only record of the key and orphan the
+        # object; the next pass retries.
         var object_key: String
         try:
             object_key = metastore.tombstoned_chunk_object_key(seq)
         except e:
-            _ = String(e)
+            if not is_not_found(String(e)):
+                continue
             object_key = String("")
 
         if object_key.byte_length() > 0:

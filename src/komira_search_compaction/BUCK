@@ -22,7 +22,6 @@ mojo_library(
     deps = [
         "//src/komira_arrow:komira_arrow",
         "//src/komira_buffer:komira_buffer",
-        "//src/komira_collections:komira_collections",
         "//src/komira_json:komira_json",
         "//src/komira_objectstore:komira_objectstore",
         "//src/komira_search:komira_search",
