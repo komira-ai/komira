@@ -218,6 +218,28 @@ Each path (`covcheck/paths.mojo`), in this order:
    `--include-tests` too: it has no source). Any other unmapped path stays
    an error.
 
+**Generated sources.** A `.mojo` file whose first line is the generator
+header is left out of coverage: after an optional UTF-8 byte order mark, the
+line starts with exactly `# @generated` (a hash, one space, the token),
+followed by the end of the line or a space or tab. Such a file is neither
+measured nor counted as a file no test compiled (`UnmeasuredFile`), and it is
+in no floor or hold. A test that reaches it changes nothing: its line records,
+its branch records and its mutants are dropped. Nothing else marks a file: not
+the token elsewhere on line 1 (`# not @generated`, `#@generated`), not blanks
+before the hash, not a docstring that opens line 1 with the token, not the
+token on a later line or in a docstring or string literal, and an empty file
+is not generated. A CR before the first line feed (a CRLF file) is no part of
+the match (`covcheck/generated.mojo`, tests `tests/test_generated_marker.mojo`).
+
+The exclusion is visible. The summary's "Set aside" list names the files
+(the first ten, then how many more), and the result JSON holds
+`generated_files` and `generated_paths`. The census writes each package's
+generated paths into its committed `coverage_census.tsv`, one
+`generated<TAB><path>` line after the rows (`census.md`), so a hand-written
+file that gains the header shows as a diff of that file when the census is
+refreshed. A generated source that is not a committed file (a build output)
+is not staged for the gate at all (below).
+
 A file's package is the nearest directory above it holding a `BUCK` file
 (`src/m/x/y.mojo` is in `src/m`); `(root)` when only the top directory holds
 one; an error when none does. Files under `tests/` directly inside a package
@@ -475,7 +497,8 @@ action per library, `mojo_cov_gate` (`cov_gate`, run from
 `:cov_gate`):
 
 1. The library's sources are staged at their repository paths: every
-   `srcs` file that is a source (a generated one is not measured), every
+   `srcs` file that is a source (a generated build output is not staged; a
+   committed source marked `# @generated` is staged and left out by covcheck), every
    test source (a generated one at its output path in the package), and a
    BUCK file at the package's directory, so covcheck's nearest-BUCK rule
    names the package. A tests-cell package is under
@@ -632,7 +655,11 @@ is not a one-line change today:
   `mojo_gcp_client`: its hand-written sources pass through the generator
   too) stages no source, so its gate is `NotMeasured` and fails in enforce
   mode; its hand-written code is never measured. It needs measuring (by
-  its repository path) or a documented exemption.
+  its repository path) or a documented exemption. A library whose
+  generated sources are committed files marked `# @generated` on their first
+  line (see "Generated sources" above) leaves those files out of its
+  numbers; a library with nothing else to measure is `NotMeasured` all the
+  same, and its hand-written files are measured.
 - **Open decision: files only a README or a `coverage_tests` run reaches,
   in a library whose gate reads branch records.** Those runs give line
   coverage only, so such a file has line records and no branch record:
