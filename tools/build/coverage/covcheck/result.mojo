@@ -38,6 +38,9 @@ marker with a reason. `unrecorded_functions` holds the `plain` ones, the
 class a census can count; `unrecorded_functions_unreliable` the
 `always_inline` and `comptime_if` ones, which a test may call all the same
 (decls.mojo). Both are reported only: no number or finding counts them.
+`excluded_lines` and `excluded_arms` are the line records and branch arms of buildrules'
+uncompiled report that the numbers leave out (uncompiled.mojo), `excluded_files` each file's
+`{"package", "path", "lines", "arms"}`; all zero when no such report is given.
 """
 
 from covcheck.analyze import Analysis
@@ -139,6 +142,20 @@ def _tail(mut j: JsonOut, a: Analysis):
     j.end_array()
     _unrecorded(j, a, String("unrecorded_functions"), True)
     _unrecorded(j, a, String("unrecorded_functions_unreliable"), False)
+    j.field_int(String("excluded_lines"), a.excluded_lines())
+    j.field_int(String("excluded_arms"), a.excluded_arms())
+    j.key(String("excluded_files"))
+    j.begin_array()
+    for i in range(len(a.excluded)):
+        ref x = a.excluded[i]
+        j.item()
+        j.begin_object()
+        j.field_str(String("package"), x.package)
+        j.field_str(String("path"), x.path)
+        j.field_int(String("lines"), x.lines)
+        j.field_int(String("arms"), x.arms)
+        j.end_object()
+    j.end_array()
     j.field_int(String("ignored_files"), a.ignored_files)
     j.field_int(String("excluded_test_files"), a.excluded_test_files)
     j.field_int(String("generated_files"), len(a.generated_paths))

@@ -1,36 +1,61 @@
-from std.testing import assert_equal, assert_true
+from std.testing import assert_equal, assert_false, assert_true
 
 from covcheck.analyze import FORMAT_BRANCH_LCOV, FORMAT_COBERTURA, Analysis, Input, Options, Sources, analyze
 from covcheck.held import Held
 from covcheck.paths import RepoFiles, repo_files_of
+from covcheck.result import report_json
+from covcheck.annotate import DiffCoverage
+from covcheck.summary import render_summary
 from covcheck.uncompiled import is_uncompiled_report
 
 # buildrules' report of the code no test compiled (`uncompiled.cobertura.xml`, `uncompiled.branches.info`):
 # the executable lines of every function none of whose lines has a record, as found and not hit, and the
 # arms of their decision words, as not taken. A function the compiler inlined into its callers, and one whose
-# code is in a `comptime if` arm dropped here, look the same, so those two classes (decls.mojo) are left out of
-# the numbers; a plain function is counted.
+# code is in a `comptime if` arm dropped here, look the same as a function nobody calls. A line is left out of
+# the numbers only with evidence that a test reached the function: a line that calls it, outside it, that a
+# test's report says was hit. An inlined function: all its lines. A gated function: the lines inside its
+# compile-time arms, never the lines outside them. Everything else is counted.
 
 comptime PKG = "src/mp"
 comptime LIB = "src/mp/src/mp/lib.mojo"
 
 comptime LIB_SOURCE = (
-    "def compiled(x: Int) -> Int:\n"     # 1
-    "    return x\n"                      # 2
-    "\n"                                  # 3
-    "def plain(x: Int) -> Int:\n"         # 4  a function no test calls
-    "    if x < 0:\n"                     # 5
-    "        return 0\n"                  # 6
-    "    return x\n"                      # 7
-    "\n"                                  # 8
-    "@always_inline\n"                    # 9
-    "def inlined(x: Int) -> Int:\n"       # 10
-    "    return x + 1\n"                  # 11
-    "\n"                                  # 12
-    "def gated(x: Int) -> Int:\n"         # 13
-    "    comptime if True:\n"             # 14
-    "        return x and x\n"            # 15
-    "    return 0\n"                      # 16
+    "def driver(x: Int) -> Int:\n"                       # 1  compiled: a test hit it
+    "    return inl_called(x) + gated_called(x) + outer(x)\n"  # 2
+    "\n"                                                  # 3
+    "def plain(x: Int) -> Int:\n"                         # 4  no test calls it
+    "    if x < 0:\n"                                     # 5
+    "        return 0\n"                                  # 6
+    "    return x\n"                                      # 7
+    "\n"                                                  # 8
+    "@always_inline\n"                                    # 9
+    "def inl_called(x: Int) -> Int:\n"                    # 10 inlined: driver calls it
+    "    return x + 1\n"                                  # 11
+    "\n"                                                  # 12
+    "@always_inline\n"                                    # 13
+    "def inl_uncalled(x: Int) -> Int:\n"                  # 14 inlined, and nothing calls it
+    "    return x + 2\n"                                  # 15
+    "\n"                                                  # 16
+    "def gated_called(x: Int) -> Int:\n"                  # 17 live code outside two arms; driver calls it
+    "    var y = x\n"                                     # 18
+    "    comptime if True:\n"                             # 19
+    "        y = x and x\n"                               # 20
+    "    comptime else:\n"                                # 21
+    "        y = 0\n"                                     # 22
+    "    return y\n"                                      # 23
+    "\n"                                                  # 24
+    "def gated_uncalled(x: Int) -> Int:\n"                # 25 an arm, and nothing calls it
+    "    comptime if True:\n"                             # 26
+    "        return x\n"                                  # 27
+    "    return 0\n"                                      # 28
+    "\n"                                                  # 29
+    "def outer(x: Int) -> Int:\n"                         # 30 plain; driver calls it
+    "    @parameter\n"                                    # 31
+    "    def inner() -> Int:\n"                           # 32 a closure with an arm of its own
+    "        comptime if True:\n"                         # 33
+    "            return x\n"                              # 34
+    "        return 0\n"                                  # 35
+    "    return inner()\n"                                # 36
 )
 
 comptime TEST_REPORT = "buck-out/v2/art/komira/x/src/mp/__test_a__cov__/test_a__cov.cobertura.xml"
@@ -61,103 +86,183 @@ def _report(origin: String, lines: List[Int], hits: Int) -> Input:
     return Input(String(FORMAT_COBERTURA), String(""), origin, t)
 
 
-def _ints(a: Int, b: Int, c: Int, d: Int) -> List[Int]:
+def _ints(*values: Int) -> List[Int]:
     var l = List[Int]()
-    l.append(a)
-    l.append(b)
-    l.append(c)
-    l.append(d)
+    for v in values:
+        l.append(v)
     return l^
 
 
 def _uncompiled_lines() -> List[Int]:
-    """Every own line of `plain`, `inlined` and `gated`."""
-    var l = _ints(4, 5, 6, 7)
-    l.append(10)
-    l.append(11)
-    l.append(13)
-    l.append(14)
-    l.append(15)
-    l.append(16)
-    return l^
+    """The own executable lines of every function no test compiled."""
+    return _ints(
+        4, 5, 6, 7, 10, 11, 14, 15, 17, 18, 19, 20, 21, 22, 23, 25, 26, 27, 28, 30, 31, 32, 33, 34, 35, 36
+    )
 
 
 def _uncompiled_branches(origin: String) -> Input:
-    """The arms of `if` (line 5, in `plain`) and of `and` (line 15, in `gated`), none taken."""
-    var t = String("SF:") + String(LIB) + String("\nBRDA:5,8:br:0/1,0,-\nBRDA:5,8:br:0/1,1,-\nBRDA:15,17:br:0/1,0,-\nBRDA:15,17:br:0/1,1,-\nend_of_record\n")
+    """The arms of `if` (line 5, in `plain`) and of `and` (line 20, in an arm of `gated_called`), none taken."""
+    var t = String("SF:") + String(LIB) + String("\nBRDA:5,8:br:0/1,0,-\nBRDA:5,8:br:0/1,1,-\nBRDA:20,17:br:0/1,0,-\nBRDA:20,17:br:0/1,1,-\nend_of_record\n")
     return Input(String(FORMAT_BRANCH_LCOV), String(""), origin, t)
 
 
-def _inputs(uncompiled_name: String, branch_name: String) -> List[Input]:
+def _inputs(driver_hit: Bool, uncompiled_name: String, branch_name: String) -> List[Input]:
+    """The test's report: `driver` (lines 1 and 2) ran, line 2 (the calls) with a hit only when `driver_hit`."""
     var l = List[Input]()
-    var compiled = List[Int]()
-    compiled.append(1)
-    compiled.append(2)
-    l.append(_report(String(TEST_REPORT), compiled, 1))
+    # The uncompiled report first: it must not matter where it is among the reports.
     l.append(_report(uncompiled_name, _uncompiled_lines(), 0))
     l.append(_uncompiled_branches(branch_name))
+    l.append(_report(String(TEST_REPORT), _ints(1), 1))
+    var calls = _ints(2)
+    l.append(_report(String("buck-out/v2/art/komira/x/src/mp/__test_b__cov__/test_b__cov.cobertura.xml"), calls, 1 if driver_hit else 0))
     return l^
 
 
-def test_the_two_unreliable_classes_are_left_out_of_an_uncompiled_report() raises:
-    # `compiled` (lines 1-2, hit) and the plain `plain` (lines 4-7, not hit): 2 of 6 lines. `inlined` and `gated`
-    # (lines 10-11, 13-16) are in the report and in no number. Of the four arms only `plain`'s two remain.
-    var a = analyze(_inputs(String(UNCOMPILED_REPORT), String(UNCOMPILED_BRANCHES)), List[Input](), _repo(), Held(), _sources(), Options())
+def _analyze(driver_hit: Bool) raises -> Analysis:
+    return analyze(_inputs(driver_hit, String(UNCOMPILED_REPORT), String(UNCOMPILED_BRANCHES)), List[Input](), _repo(), Held(), _sources(), Options())
+
+
+def _lib(a: Analysis) raises -> Int:
+    var i = a.file_index(String(LIB))
+    assert_true(i >= 0)
+    return i
+
+
+def test_a_function_a_test_called_is_left_out_and_the_rest_is_counted() raises:
+    # Line 2 (the calls) was hit. Of the 26 uncompiled lines 6 are left out: the 2 of `inl_called`, and the 4
+    # in the two arms of `gated_called` (19-22). The 2 test lines are hit: 2 + 20 = 22 lines found, 2 hit.
+    var a = _analyze(True)
     var k = a.package_index(String(PKG))
     assert_true(k >= 0)
-    assert_equal(a.packages[k].line_found, 6)
+    assert_equal(a.packages[k].line_found, 22)
     assert_equal(a.packages[k].line_hit, 2)
+    # Of the 4 arms the 2 on line 20 (in a left-out arm) go; the 2 of `plain` stay.
     assert_equal(a.packages[k].branch_found, 2)
     assert_equal(a.packages[k].branch_hit, 0)
+    assert_equal(a.excluded_lines(), 6)
+    assert_equal(a.excluded_arms(), 2)
+    assert_equal(len(a.excluded), 1)
+    assert_equal(a.excluded[0].path, String(LIB))
+    assert_equal(a.excluded[0].package, String(PKG))
+    assert_equal(a.excluded[0].lines, 6)
+    assert_equal(a.excluded[0].arms, 2)
+
+
+def test_a_function_nobody_calls_is_counted_whatever_its_class() raises:
+    # `inl_uncalled` (14, 15) is inlined and nothing calls it; `gated_uncalled` (25-28) has an arm and nothing
+    # calls it; `plain` (4-7) is plain: all counted, with `inl_called` and `gated_called` called or not.
+    var a = _analyze(True)
+    var h = a.files[_lib(a)].hits.copy()
+    for ln in _ints(4, 5, 6, 7, 14, 15, 25, 26, 27, 28):
+        assert_true(ln in h, "line " + String(ln) + " is not counted")
+
+
+def test_a_gated_function_is_left_out_by_arm_not_whole() raises:
+    # `gated_called` is called: its arm lines 19-22 go, its live lines 17, 18 and 23 stay.
+    var a = _analyze(True)
+    var h = a.files[_lib(a)].hits.copy()
+    for ln in _ints(19, 20, 21, 22, 10, 11):
+        assert_false(ln in h, "line " + String(ln) + " is counted")
+    for ln in _ints(17, 18, 23):
+        assert_true(ln in h, "line " + String(ln) + " is not counted")
+
+
+def test_a_closure_is_a_function_of_its_own_and_does_not_reclassify_the_outer() raises:
+    # `outer` is plain and called, so its lines (30, 31, 36) count; the closure `inner` has an arm (33, 34), and
+    # nothing hit calls it (its call is on line 36, which no test hit): counted.
+    var a = _analyze(True)
+    var h = a.files[_lib(a)].hits.copy()
+    for ln in _ints(30, 31, 36, 32, 33, 34, 35):
+        assert_true(ln in h, "line " + String(ln) + " is not counted")
+
+
+def test_without_a_hit_line_that_calls_them_nothing_is_left_out() raises:
+    # The same reports with line 2 not hit: no evidence for any function, so all 26 uncompiled lines and the 4
+    # arms count, and nothing is reported as left out.
+    var a = _analyze(False)
+    var k = a.package_index(String(PKG))
+    assert_true(k >= 0)
+    assert_equal(a.packages[k].line_found, 1 + 1 + 26)
+    assert_equal(a.packages[k].branch_found, 4)
+    assert_equal(a.excluded_lines(), 0)
+    assert_equal(len(a.excluded), 0)
 
 
 def test_the_same_reports_under_other_names_count_every_function() raises:
-    # Only the file name sets buildrules' report apart: a report of the same lines named otherwise is a test's,
-    # and its lines are all counted: 2 of 12 lines, 0 of 4 arms.
-    var a = analyze(_inputs(String("x/other.cobertura.xml"), String("x/other.info")), List[Input](), _repo(), Held(), _sources(), Options())
+    # Only the file name and its directory set buildrules' report apart: the same lines named otherwise are a
+    # test's, and are all counted: 2 + 26 lines, 4 arms.
+    var a = analyze(_inputs(True, String("x/other.cobertura.xml"), String("x/other.info")), List[Input](), _repo(), Held(), _sources(), Options())
     var k = a.package_index(String(PKG))
     assert_true(k >= 0)
-    assert_equal(a.packages[k].line_found, 12)
-    assert_equal(a.packages[k].line_hit, 2)
+    assert_equal(a.packages[k].line_found, 28)
     assert_equal(a.packages[k].branch_found, 4)
+    assert_equal(a.excluded_lines(), 0)
 
 
-def test_the_left_out_functions_are_still_listed_as_unreliable() raises:
-    # The report gave `inlined` and `gated` no line the numbers keep, so they have no record: they are in
-    # `unrecorded_functions` with the class that says it is no evidence.
-    var a = analyze(_inputs(String(UNCOMPILED_REPORT), String(UNCOMPILED_BRANCHES)), List[Input](), _repo(), Held(), _sources(), Options())
-    var kinds = String("")
-    for i in range(len(a.unrecorded_functions)):
-        kinds += a.unrecorded_functions[i].name + String(":") + a.unrecorded_functions[i].kind + String(" ")
-    assert_equal(kinds, "inlined:always_inline gated:comptime_if ")
+def test_what_is_left_out_is_in_the_result_and_the_summary() raises:
+    var a = _analyze(True)
+    var json = report_json(a, List[String](), DiffCoverage())
+    assert_true('"excluded_lines":6' in json)
+    assert_true('"excluded_arms":2' in json)
+    assert_true('"excluded_files":[{"package":"src/mp","path":"src/mp/src/mp/lib.mojo","lines":6,"arms":2}]' in json)
+    var summary = render_summary(a, List[String](), DiffCoverage(), False, String(""))
+    assert_true("6 lines and 2 branch arms of the code no test compiled" in summary)
+    assert_true("`src/mp/src/mp/lib.mojo`" in summary)
+    # Nothing left out: neither is said.
+    var b = _analyze(False)
+    assert_true('"excluded_lines":0' in report_json(b, List[String](), DiffCoverage()))
+    assert_false("of the code no test compiled" in render_summary(b, List[String](), DiffCoverage(), False, String("")))
 
 
-def test_a_file_only_unreliable_functions_make_is_not_named_by_the_report() raises:
-    # A file the uncompiled report names only for an unreliable function has nothing left in it: it is
-    # not named by the report, so the report alone measures no package (no empty file is counted as one
-    # no test compiled).
-    var only = List[Int]()
-    only.append(10)
-    only.append(11)
+def test_a_file_the_report_leaves_nothing_of_counts_like_one_no_report_names() raises:
+    # The uncompiled report names the file for `inl_called` alone (lines 10, 11), and line 2, which calls it, was
+    # hit in another file's report: nothing of the uncompiled file is left, so it is not named by that report;
+    # the files-no-test-compiled pass then counts it from its source, without the two lines the report left out.
     var l = List[Input]()
-    l.append(_report(String(UNCOMPILED_REPORT), only, 0))
-    var a = analyze(l, List[Input](), _repo(), Held(), _sources(), Options())
-    assert_equal(a.package_index(String(PKG)), -1)
-    assert_equal(len(a.files), 0)
+    l.append(_report(String(UNCOMPILED_REPORT), _ints(10, 11), 0))
+    l.append(Input(
+        String(FORMAT_COBERTURA), String(""), String(TEST_REPORT),
+        String("<coverage><packages><package name=\"\"><classes><class name=\"o\" filename=\"src/mp/src/mp/other.mojo\"><lines><line number=\"1\" hits=\"1\"/></lines></class></classes></package></packages></coverage>"),
+    ))
+    var files = List[String]()
+    files.append("src/mp/BUCK")
+    files.append(LIB)
+    files.append("src/mp/src/mp/other.mojo")
+    var s = Sources(String(""))
+    s.texts[String(LIB)] = String(LIB_SOURCE)
+    # `other.mojo` line 1 calls inl_called (a hit line).
+    s.texts[String("src/mp/src/mp/other.mojo")] = String("x = inl_called(1)\n")
+    var a = analyze(l, List[Input](), repo_files_of(files), Held(), s, Options())
+    var k = a.package_index(String(PKG))
+    assert_true(k >= 0)
+    var i = a.file_index(String(LIB))
+    assert_true(i >= 0)
+    assert_false(10 in a.files[i].hits)
+    assert_false(11 in a.files[i].hits)
+    assert_true(1 in a.files[i].hits)
+    assert_equal(a.excluded_lines(), 2)
 
 
 def test_the_names_that_set_the_reports_apart() raises:
     assert_true(is_uncompiled_report(String(UNCOMPILED_REPORT)))
     assert_true(is_uncompiled_report(String(UNCOMPILED_BRANCHES)))
-    assert_true(is_uncompiled_report(String("uncompiled.cobertura.xml")))
-    assert_true(not is_uncompiled_report(String("x/not_uncompiled.cobertura.xml")))
-    assert_true(not is_uncompiled_report(String("x/uncompiled.cobertura.xml.bak")))
-    assert_true(not is_uncompiled_report(String(TEST_REPORT)))
+    assert_true(is_uncompiled_report(String("__coverage__/uncompiled.cobertura.xml")))
+    # Not under `__coverage__/`, or another name: a test's report.
+    assert_false(is_uncompiled_report(String("uncompiled.cobertura.xml")))
+    assert_false(is_uncompiled_report(String("x/uncompiled.cobertura.xml")))
+    assert_false(is_uncompiled_report(String("x/__test_a__cov__/uncompiled.cobertura.xml")))
+    assert_false(is_uncompiled_report(String("x/__coverage__/not_uncompiled.cobertura.xml")))
+    assert_false(is_uncompiled_report(String("x/__coverage__/uncompiled.cobertura.xml.bak")))
+    assert_false(is_uncompiled_report(String(TEST_REPORT)))
 
 
 def main() raises:
-    test_the_two_unreliable_classes_are_left_out_of_an_uncompiled_report()
+    test_a_function_a_test_called_is_left_out_and_the_rest_is_counted()
+    test_a_function_nobody_calls_is_counted_whatever_its_class()
+    test_a_gated_function_is_left_out_by_arm_not_whole()
+    test_a_closure_is_a_function_of_its_own_and_does_not_reclassify_the_outer()
+    test_without_a_hit_line_that_calls_them_nothing_is_left_out()
     test_the_same_reports_under_other_names_count_every_function()
-    test_the_left_out_functions_are_still_listed_as_unreliable()
-    test_a_file_only_unreliable_functions_make_is_not_named_by_the_report()
+    test_what_is_left_out_is_in_the_result_and_the_summary()
+    test_a_file_the_report_leaves_nothing_of_counts_like_one_no_report_names()
     test_the_names_that_set_the_reports_apart()

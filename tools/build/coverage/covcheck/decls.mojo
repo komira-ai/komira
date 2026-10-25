@@ -45,10 +45,12 @@ Each listed function has a `kind`:
   may attribute what is left of it to the caller's lines or fold it away
   (a constant, a one-instruction body), so a test can call it while none of
   its lines has a record. Not evidence that no test calls it.
-- `comptime_if`: its body holds a `comptime if` or `@parameter` line. A
-  body whose code is all in a dropped arm (a platform-only or
-  build-flag-only function) emits nothing on this platform, and a body
-  folded to a constant leaves no line either. Not evidence either.
+- `comptime_if`: its own lines (a nested function's left out: a closure is a function of its
+  own) hold a `comptime if`, `comptime elif` or `comptime else` line, or a `@parameter` over a
+  statement (over a nested `def`, a closure, it is no arm). The lines of those arms are its
+  `arms`. A body whose code is all in a dropped arm (a platform-only or build-flag-only
+  function) emits nothing on this platform, and a body folded to a constant leaves no line
+  either. Not evidence either.
 - `plain`: neither. The class a census can count. Known false positive
   that remains: a function reached only through a dropped `comptime if`
   arm of another function (its caller is never compiled on this platform
@@ -89,7 +91,7 @@ of code from the heuristic and from this test alike.
 """
 
 from covcheck.lexer import LexState, SourceLine, executable_lines, lex_line, lex_source
-from covcheck.text import split_lines, substr, suffix, trim
+from covcheck.text import sort_ints, split_lines, substr, suffix, trim
 
 comptime KIND_PLAIN = "plain"
 comptime KIND_ALWAYS_INLINE = "always_inline"
@@ -108,6 +110,9 @@ struct FnDecl(Copyable, Movable):
     var end: Int
     var lines: List[Int]
     var kind: String
+    # The own lines inside a `comptime if`/`elif`/`else` or `@parameter` arm (its gate line
+    # included): the lines a platform or build can drop (see the module header).
+    var arms: List[Int]
 
     def __init__(out self, name: String, line: Int, end: Int):
         self.name = name
@@ -115,6 +120,7 @@ struct FnDecl(Copyable, Movable):
         self.end = end
         self.lines = List[Int]()
         self.kind = String(KIND_PLAIN)
+        self.arms = List[Int]()
 
 
 def _first_word_is_def(text: String) -> Int:
@@ -285,14 +291,9 @@ def _declarations(text: String, mut requirements: List[FnDecl]) -> List[FnDecl]:
             if _code_of(ls[d]).startswith("@always_inline"):
                 inline_dec = True
             d -= 1
-        var gated = False
-        for c in range(len(body_code)):
-            if body_code[c].startswith("comptime if") or body_code[c].startswith("@parameter"):
-                gated = True
+        # `comptime_if` is decided below, from the function's own lines: a nested function is a function of its own.
         if inline_dec:
             f.kind = String(KIND_ALWAYS_INLINE)
-        elif gated:
-            f.kind = String(KIND_COMPTIME_IF)
         out.append(f^)
     # Own lines: the function's range less its nested functions' ranges.
     for k in range(len(out)):
@@ -306,7 +307,71 @@ def _declarations(text: String, mut requirements: List[FnDecl]) -> List[FnDecl]:
                     break
             if not nested:
                 out[k].lines.append(ln)
+    # Its class and arms, from its own lines only: a `comptime if` (or `elif`, `else`) line, or a `@parameter`
+    # line that decorates a statement (not a nested function: that one is a closure, its own function), opens an
+    # arm that runs to the next code line indented no deeper. A function with one is `comptime_if`, unless its
+    # decorator makes it `always_inline`.
+    for k in range(len(out)):
+        var own = Dict[Int, Bool]()
+        for i in range(len(out[k].lines)):
+            own[out[k].lines[i]] = True
+        var gated = False
+        for g in range(len(out[k].lines)):
+            var gl = out[k].lines[g]
+            if not _opens_arm(ls, starts_in_string, gl - 1):
+                continue
+            gated = True
+            var ind = _indent(ls[gl - 1].text)
+            var j = gl  # the 0-based index of the line after the gate line
+            if _code_of(ls[gl - 1]).startswith("@parameter"):
+                # The arm is the statement the decorator opens and its body: past further decorators and
+                # the statement's own line.
+                while j < n and not (ls[j].code and not starts_in_string[j] and not _code_of(ls[j]).startswith("@")):
+                    j += 1
+                j += 1
+            var stop = n
+            while j < n:
+                if ls[j].code and not starts_in_string[j] and _indent(ls[j].text) <= ind:
+                    stop = j
+                    break
+                j += 1
+            for ln in range(gl, stop + 1):
+                if ln in own:
+                    out[k].arms.append(ln)
+        if gated and out[k].kind == String(KIND_PLAIN):
+            out[k].kind = String(KIND_COMPTIME_IF)
+        # Each arm line once, in order (nested arms overlap).
+        var seen = Dict[Int, Bool]()
+        var uniq = List[Int]()
+        for i in range(len(out[k].arms)):
+            if out[k].arms[i] not in seen:
+                seen[out[k].arms[i]] = True
+                uniq.append(out[k].arms[i])
+        sort_ints(uniq)
+        out[k].arms = uniq^
     return out^
+
+
+def _opens_arm(ls: List[SourceLine], starts_in_string: List[Bool], at: Int) -> Bool:
+    """Whether the line at 0-based index `at` opens a compile-time arm (see declared_functions)."""
+    if not ls[at].code or starts_in_string[at]:
+        return False
+    var c = _code_of(ls[at])
+    if c.startswith("comptime if") or c.startswith("comptime elif") or c.startswith("comptime else"):
+        return True
+    if not c.startswith("@parameter"):
+        return False
+    # The statement it decorates: the next code line past further decorators; a def is a closure.
+    var j = at + 1
+    while j < len(ls):
+        if ls[j].code and not starts_in_string[j]:
+            var d = _code_of(ls[j])
+            if d.startswith("@"):
+                j += 1
+                continue
+            return _first_word_is_def(ls[j].text) < 0
+        j += 1
+    return False
 
 
 def unrecorded_functions(text: String, recorded: Dict[Int, Int], exempt: Dict[Int, Bool]) -> List[FnDecl]:

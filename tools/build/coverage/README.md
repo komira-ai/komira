@@ -347,7 +347,7 @@ and the result JSON splits them:
 |---|---|---|---|
 | `plain` | neither below | `unrecorded_functions` | evidence no test reaches it; the class a census counts |
 | `always_inline` | a decorator line right above it starts with `@always_inline` | `unrecorded_functions_unreliable` | none: the body is inlined into its callers and what is left may be attributed to the caller's lines or folded away |
-| `comptime_if` | its body (a nested function's lines included) holds a `comptime if` or `@parameter` line, wherever: one such line moves the whole function, and a closure holding one moves the function around it | `unrecorded_functions_unreliable` | none: a body folded to a constant, or wholly in an arm dropped on this platform or build, emits no line though tests call it |
+| `comptime_if` | its own lines (a nested function's left out: a closure is a function of its own) hold a `comptime if`, `comptime elif` or `comptime else` line, or a `@parameter` over a statement (not over a nested `def`, which is a closure): the lines of those arms are its `arms` | `unrecorded_functions_unreliable` | none: a body folded to a constant, or wholly in an arm dropped on this platform or build, emits no line though tests call it |
 
 Known false positives, all seen on real reports: an `@always_inline` body
 whose code the compiler attributed to the caller (a test calls it, its
@@ -381,6 +381,40 @@ have no named `DW_TAG_subprogram` at all, only a compile unit named
 `<unknown>` with a line table, and a line-tables-only subprogram carries no
 `decl_file` or `decl_line` anyway; the line rows are the one place a
 library function shows up.
+
+## The code no test compiled (buildrules' uncompiled report)
+
+A mojo_package's `:coverage` ends its reports with `__coverage__/uncompiled.cobertura.xml` and
+its branch records with `__coverage__/uncompiled.branches.info` (buildrules, `docs/contract.md`,
+"uncompiled"): the executable lines of every function none of whose lines has a record, as found
+and not hit, and the arms of their decision words, as not taken. Those two files, told by their
+names and by the directory `__coverage__/` they sit in (a file of the same name elsewhere is a
+test's report), are read after every other report, and counted like any report **except** for the
+shapes that look like an uncalled function without being one:
+
+- an `@always_inline` function (class `always_inline` above) whose name a **hit line outside it
+  calls**: all its own lines and arms are left out;
+- a function with compile-time arms (class `comptime_if`) whose name a hit line calls: the lines
+  and arms **inside its arms** (`comptime if`/`elif`/`else` blocks, a `@parameter` statement) are left
+  out; its lines outside the arms are counted;
+- nothing else: a plain function, an inlined or gated function no hit line calls, and a nested
+  closure under its own class (the outer function keeps its own) are counted, as is every line of a
+  file no test compiled (above).
+
+The evidence is a line of a test's report (its test source included) with a hit, whose code (not
+its comment or strings) holds the function's name followed by `(` or `[`. A call with no such
+token is no evidence (`a != b` does not call `__ne__`: write `a.__ne__(b)` to say a test calls it).
+It is a heuristic over names, not a call graph: another function of the same name is evidence too.
+
+What is left out is reported, not hidden: `excluded_lines`, `excluded_arms` and `excluded_files`
+(`package`, `path`, `lines`, `arms`) in the result JSON, and a line in the summary's "Set aside"
+when any is left out. The functions stay in `unrecorded_functions_unreliable` only when no line of
+theirs has a record in any report. A file the uncompiled report leaves nothing of counts the same
+as one that no report names: from its source, without the lines that were left out.
+
+So a `line` hold of a package built with `mojo_package` means: every counted line is hit, and a line
+left out is one of an inlined or gated function a test was seen to call. The package's
+`coverage_floor.txt` is buildrules' own figure, which leaves nothing out.
 
 ## Exemptions
 
@@ -841,7 +875,8 @@ run at 20 requests (1 POST and 19 PATCHes).
 `mode`, `target_bp`, `total`, `diff`, `touched_packages`, `packages`,
 `findings`, `exemptions`, `unrecorded_functions` and
 `unrecorded_functions_unreliable` (report only: see "Functions with no
-recorded line") and the set-aside counts; `gate` writes `package`
+recorded line"), `excluded_lines`, `excluded_arms` and `excluded_files` (see
+"The code no test compiled") and the set-aside counts; `gate` writes `package`
 in place of `total`, `diff`, `touched_packages` and `packages`. A percentage
 that does not apply is `null`; a package's `held_line` and `held_branch`
 say what it holds. A package's `files` counts every

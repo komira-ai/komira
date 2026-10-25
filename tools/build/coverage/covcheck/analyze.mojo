@@ -115,7 +115,7 @@ from covcheck.model import FileCov, merge_by_path
 from covcheck.mutants import KILLED, SURVIVED, TIMEOUT, Mutant, parse_mutants
 from covcheck.paths import MAPPED, OUTSIDE, RepoFiles, generated_test_main, is_test_source, map_path, package_of
 from covcheck.held import Held
-from covcheck.uncompiled import drop_unreliable, is_uncompiled_report
+from covcheck.uncompiled import drop_unreliable, is_uncompiled_report, names_called_on
 from covcheck.stats import (
     BELOW_TARGET,
     BRANCH_NOT_MEASURED,
@@ -224,6 +224,23 @@ struct UnrecordedFunction(Copyable, Movable):
         self.lines = lines
 
 
+struct ExcludedFile(Copyable, Movable):
+    """What buildrules' report of the code no test compiled gave a file that the numbers leave out
+    (uncompiled.mojo): `lines` line records and `arms` branch arms of functions a test was seen to
+    call (an inlined function's lines, the lines of a gated function's arms)."""
+
+    var package: String
+    var path: String
+    var lines: Int
+    var arms: Int
+
+    def __init__(out self, package: String, path: String):
+        self.package = package
+        self.path = path
+        self.lines = 0
+        self.arms = 0
+
+
 struct Analysis(Copyable, Movable):
     """What one run measured and found. `files` holds the kept files (with
     exemptions applied), `file_packages` the package of each, `unmeasured`
@@ -248,6 +265,8 @@ struct Analysis(Copyable, Movable):
     var mutant_packages: List[String]
     var findings: List[Finding]
     var unrecorded_functions: List[UnrecordedFunction]
+    # The files the uncompiled report gave lines or arms that are left out of the numbers (path order).
+    var excluded: List[ExcludedFile]
     var info_dirs: List[String]
     var info_packages: List[String]
     var info_findings: List[Finding]
@@ -272,6 +291,7 @@ struct Analysis(Copyable, Movable):
         self.mutant_packages = List[String]()
         self.findings = List[Finding]()
         self.unrecorded_functions = List[UnrecordedFunction]()
+        self.excluded = List[ExcludedFile]()
         self.info_dirs = List[String]()
         self.info_packages = List[String]()
         self.info_findings = List[Finding]()
@@ -288,6 +308,18 @@ struct Analysis(Copyable, Movable):
             if self.packages[i].package == package:
                 return i
         return -1
+
+    def excluded_lines(self) -> Int:
+        var n = 0
+        for i in range(len(self.excluded)):
+            n += self.excluded[i].lines
+        return n
+
+    def excluded_arms(self) -> Int:
+        var n = 0
+        for i in range(len(self.excluded)):
+            n += self.excluded[i].arms
+        return n
 
     def file_index(self, path: String) -> Int:
         for i in range(len(self.files)):
@@ -362,6 +394,7 @@ def _unmeasured_files(
     opts: Options,
     mut notes: List[Finding],
     mut skipped: Dict[String, Bool],
+    left_lines: Dict[String, Dict[Int, Bool]],
 ) raises -> List[Finding]:
     """Step 4's full source: counts every file of a `measured` package that
     is not `named` (no line report gives it a record), with the branches
@@ -396,7 +429,11 @@ def _unmeasured_files(
                 len(exe),
             ))
             continue
+        # The lines the uncompiled report left out (uncompiled.mojo) are left out here too: the two
+        # passes count one file the same way.
         for k in range(len(exe)):
+            if paths[i] in left_lines and exe[k] in left_lines[paths[i]]:
+                continue
             f.add_line(exe[k], 0)
         if paths[i] in pending:
             f.absorb(pending[paths[i]])
@@ -490,7 +527,35 @@ def analyze(
     var line_branches = Dict[String, String]()
     var outside = Dict[String, Bool]()
     var generated = Dict[String, Bool]()
+    # The code no test compiled (uncompiled.mojo) is read after every other report: what it may leave out
+    # needs the evidence the others give (the lines a test hit that call a function).
+    var called = Dict[String, Bool]()
+    # What the uncompiled report left out, per path, and the lines of it (the files-no-test-compiled
+    # pass leaves them out too).
+    var left_lines = Dict[String, Dict[Int, Bool]]()
+    var excluded_at = Dict[String, Int]()
+    var any_uncompiled = False
     for r in range(len(reports)):
+        if is_uncompiled_report(reports[r].origin):
+            any_uncompiled = True
+    for pass_no in range(2 if any_uncompiled else 1):
+      if pass_no == 1:
+        var hit_of = Dict[String, Dict[Int, Bool]]()
+        for i in range(len(mapped)):
+            for e in mapped[i].hits.items():
+                if e.value > 0:
+                    if mapped[i].path not in hit_of:
+                        hit_of[mapped[i].path] = Dict[Int, Bool]()
+                    hit_of[mapped[i].path][e.key] = True
+        for e in hit_of.items():
+            # A hit line of a file whose source is not here (a test's generated main) gives no evidence.
+            try:
+                names_called_on(sources.read(e.key), e.value, called)
+            except:
+                pass
+      for r in range(len(reports)):
+        if is_uncompiled_report(reports[r].origin) != (pass_no == 1):
+            continue
         var fs = _parse_report(reports[r])
         var branch_file = reports[r].format == String(FORMAT_BRANCH_LCOV)
         # The repository paths this branch record file names: two spellings
@@ -501,10 +566,21 @@ def analyze(
             if m.kind == MAPPED:
                 var f = fs[i].copy()
                 f.path = m.path
-                if is_uncompiled_report(reports[r].origin):
-                    # Buildrules' report of the code no test compiled: the lines of an
-                    # unreliable-class function are not evidence (uncompiled.mojo).
-                    drop_unreliable(f, sources.read(m.path))
+                if pass_no == 1:
+                    # Buildrules' report of the code no test compiled: what a test was seen to
+                    # call, and is inlined or dropped on this platform, is left out (uncompiled.mojo).
+                    var d = drop_unreliable(f, sources.read(m.path), called)
+                    if d.lines > 0 or d.arms > 0:
+                        if m.path not in excluded_at:
+                            excluded_at[m.path] = len(a.excluded)
+                            a.excluded.append(ExcludedFile(_package_or_empty(m.path, repo), m.path))
+                        a.excluded[excluded_at[m.path]].lines += d.lines
+                        a.excluded[excluded_at[m.path]].arms += d.arms
+                    if d.lines > 0:
+                        if m.path not in left_lines:
+                            left_lines[m.path] = Dict[Int, Bool]()
+                        for e in d.line_set.items():
+                            left_lines[m.path][e.key] = True
                     if f.line_found() == 0 and f.branch_found() == 0:
                         continue
                 if branch_file:
@@ -701,7 +777,7 @@ def analyze(
         a.file_packages.append(pkg)
         a.unmeasured.append(False)
     var decl_notes = List[Finding]()
-    var unmeasured_findings = _unmeasured_files(a, at, exemptions, measured, named, pending, repo, sources, opts, decl_notes, left_out)
+    var unmeasured_findings = _unmeasured_files(a, at, exemptions, measured, named, pending, repo, sources, opts, decl_notes, left_out, left_lines)
     var left_keys = List[String]()
     for e in left_out.items():
         left_keys.append(e.key)
@@ -763,6 +839,14 @@ def analyze(
     var uorder = sort_by_keys(ukeys)
     for i in range(len(uorder)):
         a.unrecorded_functions.append(unrecorded[uorder[i]].copy())
+    var xkeys = List[String]()
+    for i in range(len(a.excluded)):
+        xkeys.append(a.excluded[i].path)
+    var xorder = sort_by_keys(xkeys)
+    var xsorted = List[ExcludedFile]()
+    for i in range(len(xorder)):
+        xsorted.append(a.excluded[xorder[i]].copy())
+    a.excluded = xsorted^
 
     # 7: findings.
     var findings = List[Finding]()
