@@ -256,6 +256,9 @@ def test_handle_shapes() raises:
     assert_equal(
         parse_aws_secret_ref(String("a/b_c+d=e.f@g-h0Z")).secret_id, "a/b_c+d=e.f@g-h0Z"
     )
+    # The shortest full ARN: a one-byte name, the hyphen, six alphanumerics.
+    var shortest = String("arn:aws:secretsmanager:us-east-1:000000000000:secret:a-AbCdEf")
+    assert_equal(parse_aws_secret_ref(shortest).secret_id, shortest)
     var gov = String("arn:aws-us-gov:secretsmanager:us-gov-west-1:123456789012:secret:app/db-a1B2c3")
     assert_equal(parse_aws_secret_ref(gov).secret_id, gov)
     assert_equal(
@@ -282,6 +285,14 @@ def test_handle_shapes() raises:
         "arn:aws:secretsmanager:us-east-1:000000000000:key:canary-zz9-AbCdEf",
         "arn:aws:secretsmanager:us-east-1:000000000000:secret:canary-zz9-AbC#ef",
         "arn:aws:secretsmanager:us-east-1:000000000000:secret:canary zz9-AbCdEf",
+        # The tail is `<name>-<six alphanumerics>`: the hyphen must sit exactly
+        # seven bytes from the end. Eight bytes and no hyphen, a hyphen one
+        # byte early or late, and one in the suffix are each refused.
+        "arn:aws:secretsmanager:us-east-1:000000000000:secret:canaryzz",
+        "arn:aws:secretsmanager:us-east-1:000000000000:secret:cana-rzzzabc",
+        "arn:aws:secretsmanager:us-east-1:000000000000:secret:canarz-zzabc",
+        "arn:aws:secretsmanager:us-east-1:000000000000:secret:canaryzzabc-d",
+        "arn:aws:secretsmanager:us-east-1:000000000000:secret:canary-zz-ab",
         # Too few parts, an empty region, a 12-byte account that is not digits.
         "arn:aws:secretsmanager:us-east-1:000000000000:secret",
         "arn:aws:secretsmanager::000000000000:secret:canary-zz9-AbCdEf",
@@ -300,6 +311,11 @@ def test_handle_shapes() raises:
         "is not a secret name",
         "is not a secret name",
         "is not a secret name",
+        "not a full Secrets Manager secret ARN",
+        "not a full Secrets Manager secret ARN",
+        "not a full Secrets Manager secret ARN",
+        "not a full Secrets Manager secret ARN",
+        "not a full Secrets Manager secret ARN",
         "not a full Secrets Manager secret ARN",
         "not a full Secrets Manager secret ARN",
         "not a full Secrets Manager secret ARN",
