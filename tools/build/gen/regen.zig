@@ -177,6 +177,18 @@ fn packageOf(label: []const u8) []const u8 {
     return label[at..colon];
 }
 
+/// Whether `dir` is a path inside its package: relative, with no `.`, `..` or
+/// empty segment (`generated/x`), so regen can never write or delete outside it.
+pub fn validCommittedDir(dir: []const u8) bool {
+    if (dir.len == 0 or dir[0] == '/' or dir[0] == '\\') return false;
+    var it = std.mem.splitScalar(u8, dir, '/');
+    while (it.next()) |seg| {
+        if (seg.len == 0 or std.mem.eql(u8, seg, ".") or std.mem.eql(u8, seg, "..")) return false;
+        if (std.mem.indexOfScalar(u8, seg, '\\') != null) return false;
+    }
+    return true;
+}
+
 /// The jobs in the JSON of `buck2 uquery --json -a committed_dir -a gen`: an
 /// object of label to attributes. Sorted by label.
 pub fn parseJobs(a: std.mem.Allocator, json: []const u8) ![]Job {
@@ -191,6 +203,7 @@ pub fn parseJobs(a: std.mem.Allocator, json: []const u8) ![]Job {
         const dir = attrs.get("committed_dir") orelse return error.BadQueryResult;
         const gen = attrs.get("gen") orelse return error.BadQueryResult;
         if (dir != .string or gen != .string) return error.BadQueryResult;
+        if (!validCommittedDir(dir.string)) return error.BadCommittedDir;
         const pkg = packageOf(label);
         const dest = if (pkg.len == 0) dir.string else try std.fmt.allocPrint(a, "{s}/{s}", .{ pkg, dir.string });
         try jobs.append(a, .{ .fresh = label, .gen = gen.string, .dest = dest, .cell = cellOf(label) });
@@ -329,28 +342,41 @@ fn run(a: std.mem.Allocator, buck2: []const u8, args: []const []const u8) u8 {
     for (all_jobs.items) |j| build.append(a, j.gen) catch return 2;
     const built = (buck(a, buck2, build.items) catch return usage("cannot run {s}", .{buck2})) orelse return 1;
 
+    // Every job is checked before any is written: a refusal leaves the whole
+    // run changed in nothing.
+    const Plan = struct { job: Job, gen_path: []const u8, dest: []const u8 };
+    var plans = std.ArrayList(Plan).empty;
     for (all_jobs.items) |j| {
         const gen_path = outputOf(built, j.gen) orelse return usage("buck2 printed no output path for {s}", .{j.gen});
         const root_out = (buck(a, buck2, &.{ "audit", "cell", "--paths-only", j.cell }) catch return usage("cannot run {s}", .{buck2})) orelse return 1;
         const root = std.mem.trim(u8, root_out, " \r\n");
         const dest = std.fs.path.join(a, &.{ root, j.dest }) catch return 2;
-        {
-            var root_dir = std.fs.openDirAbsolute(root, .{}) catch |e| return usage("cannot open {s}: {s}", .{ root, @errorName(e) });
-            defer root_dir.close();
-            const via = linkOnPath(a, root_dir, j.dest) catch |e| return usage("cannot inspect {s}: {s}", .{ dest, @errorName(e) });
-            if (via) |l| return refuseLink(root, l);
+        var root_dir = std.fs.openDirAbsolute(root, .{}) catch |e| return usage("cannot open {s}: {s}", .{ root, @errorName(e) });
+        defer root_dir.close();
+        const via = linkOnPath(a, root_dir, j.dest) catch |e| return usage("cannot inspect {s}: {s}", .{ dest, @errorName(e) });
+        if (via) |l| return refuseLink(root, l);
+        if (std.fs.openDirAbsolute(dest, .{ .iterate = true, .no_follow = true })) |opened| {
+            var existing = opened;
+            defer existing.close();
+            if (findLink(a, existing) catch |e| return usage("cannot inspect {s}: {s}", .{ dest, @errorName(e) })) |l| {
+                const full = std.fs.path.join(a, &.{ dest, l }) catch return 2;
+                return refuseLinkAt(full);
+            }
+        } else |err| switch (err) {
+            error.FileNotFound => {},
+            else => return usage("cannot open {s}: {s}", .{ dest, @errorName(err) }),
         }
-        var src = std.fs.openDirAbsolute(gen_path, .{ .iterate = true }) catch |e| return usage("cannot open the output of {s} ({s}): {s}", .{ j.gen, gen_path, @errorName(e) });
+        plans.append(a, .{ .job = j, .gen_path = gen_path, .dest = dest }) catch return 2;
+    }
+
+    for (plans.items) |p| {
+        var src = std.fs.openDirAbsolute(p.gen_path, .{ .iterate = true }) catch |e| return usage("cannot open the output of {s} ({s}): {s}", .{ p.job.gen, p.gen_path, @errorName(e) });
         defer src.close();
-        std.fs.cwd().makePath(dest) catch |e| return usage("cannot create {s}: {s}", .{ dest, @errorName(e) });
-        var dst = std.fs.openDirAbsolute(dest, .{ .iterate = true }) catch |e| return usage("cannot open {s}: {s}", .{ dest, @errorName(e) });
+        std.fs.cwd().makePath(p.dest) catch |e| return usage("cannot create {s}: {s}", .{ p.dest, @errorName(e) });
+        var dst = std.fs.openDirAbsolute(p.dest, .{ .iterate = true }) catch |e| return usage("cannot open {s}: {s}", .{ p.dest, @errorName(e) });
         defer dst.close();
-        if ((findLink(a, dst) catch |e| return usage("cannot inspect {s}: {s}", .{ dest, @errorName(e) })) ) |l| {
-            const full = std.fs.path.join(a, &.{ dest, l }) catch return 2;
-            return refuseLinkAt(full);
-        }
-        const sum = sync(a, src, dst) catch |e| return usage("cannot update {s}: {s}", .{ dest, @errorName(e) });
-        std.debug.print("{s}: {s}/: wrote {d}, removed {d}, unchanged {d}\n", .{ j.fresh, j.dest, sum.wrote, sum.removed, sum.unchanged });
+        const sum = sync(a, src, dst) catch |e| return usage("cannot update {s}: {s}", .{ p.dest, @errorName(e) });
+        std.debug.print("{s}: {s}/: wrote {d}, removed {d}, unchanged {d}\n", .{ p.job.fresh, p.job.dest, sum.wrote, sum.removed, sum.unchanged });
     }
     return 0;
 }

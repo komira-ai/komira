@@ -1,5 +1,3 @@
 # What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
 census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
 komira//src/komira_db_sqlite:komira_db_sqlite	src/komira_db_sqlite	library	OK	315	335	-	-	no	conda	-	-
-generated	src/komira_db_sqlite/generated/records_db/__init__.mojo
-generated	src/komira_db_sqlite/generated/records_db/records_db.mojo

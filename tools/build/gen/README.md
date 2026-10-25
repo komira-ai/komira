@@ -107,6 +107,15 @@ or holds one at any depth; it never writes or deletes through one. `_fresh`
 fails on a link in the committed directory, even one to a file with the right
 bytes, so a link cannot be committed green.
 
+`regen` checks every library of a run (the links, and that each `committed_dir`
+is a path inside its package: relative, no `.`, `..` or empty segment; the rule
+is also checked at analysis, in `gen_fresh`) before it writes any, so a refusal
+leaves the whole run unchanged.
+
+Hard links are out of scope: `regen` writes a file in place, so a committed
+file that is a hard link to a file elsewhere changes both. Git does not store
+hard links, so a checkout has none unless something made them.
+
 ## Layout and limits
 
 - A subdirectory is carried and compared like any file, and `committed_data`
@@ -119,3 +128,10 @@ bytes, so a link cannot be committed green.
 - The first line of every generated file carries `@generated` (see
   [`header.rs`](../proto-codegen/src/header.rs)); a tool that must tell a
   generated file from a written one matches it there.
+- The `generated` rows of a package's `coverage_census.tsv` (the files its
+  coverage gate sets aside) are not compared with the gate by
+  `komira//:coverage_census`: the check validates their form (sorted, `.mojo`
+  paths inside the package), not that every generated file has one. They are
+  refreshed only by `tools/build/coverage/census.sh collect` (census.md), whose
+  `census_files generated` reads the gate results' `generated_paths`; the rows of
+  the migrated packages are that tool's output.

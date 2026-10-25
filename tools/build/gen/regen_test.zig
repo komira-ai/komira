@@ -236,3 +236,24 @@ test "linkOnPath: a link anywhere on the path to the committed directory is foun
     try root.dir.symLink(target, "src/w", .{ .is_directory = true });
     try t.expectEqualStrings("src/w", (try R.linkOnPath(a, root.dir, "src/w/generated/w")).?);
 }
+
+test "validCommittedDir: a relative path of plain segments is one; absolute, `..`, `.` and empty segments are not" {
+    try t.expect(R.validCommittedDir("generated/x"));
+    try t.expect(R.validCommittedDir("generated/x/_parts"));
+    try t.expect(!R.validCommittedDir(""));
+    try t.expect(!R.validCommittedDir("/etc"));
+    try t.expect(!R.validCommittedDir("generated/../../../../outside/victim"));
+    try t.expect(!R.validCommittedDir(".."));
+    try t.expect(!R.validCommittedDir("generated/./x"));
+    try t.expect(!R.validCommittedDir("generated//x"));
+    try t.expect(!R.validCommittedDir("generated/x/"));
+    try t.expect(!R.validCommittedDir("generated\\x"));
+}
+
+test "parseJobs: a committed directory that leaves the package is refused" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try t.expectError(error.BadCommittedDir, R.parseJobs(a, "{\"komira//src/a:a_fresh\":{\"committed_dir\":\"generated/../../../../outside/victim\",\"gen\":\"komira//src/a:a_gen\"}}"));
+    try t.expectError(error.BadCommittedDir, R.parseJobs(a, "{\"komira//src/a:a_fresh\":{\"committed_dir\":\"/tmp/x\",\"gen\":\"komira//src/a:a_gen\"}}"));
+}

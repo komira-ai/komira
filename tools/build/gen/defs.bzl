@@ -40,7 +40,15 @@ GENERATED_DIR = "generated"
 # `tools/build/gen:command_agreement` holds them equal.
 REGEN_COMMAND = "./buck2 run komira//tools/build/gen:regen --"
 
+def valid_committed_dir(directory):
+    """Whether `directory` is a path inside its package: relative, with no `.`, `..` or empty segment. regen.zig holds the same rule (validCommittedDir)."""
+    if not directory or directory.startswith("/") or "\\" in directory:
+        return False
+    return not [seg for seg in directory.split("/") if seg in ["", ".", ".."]]
+
 def _fresh_impl(ctx):
+    if not valid_committed_dir(ctx.attrs.committed_dir):
+        fail("{}: `committed_dir` `{}` is not a path inside the package: it must be relative, with no `.`, `..` or empty segment, so that regen can never write or delete outside it".format(ctx.label, ctx.attrs.committed_dir))
     gen = ctx.attrs.gen[DefaultInfo].default_outputs[0]
 
     # The committed files, at their path in the committed directory (a

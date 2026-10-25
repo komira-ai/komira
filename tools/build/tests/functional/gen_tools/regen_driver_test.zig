@@ -216,3 +216,42 @@ test "usage errors exit 2: no target, an argument that is not a label, an unknow
     try t.expectEqual(@as(u8, 2), r3.code);
     try t.expect(!c.exists("calls.log"));
 }
+
+test "a refusal for one library leaves every library of the run unchanged, the ones before it included" {
+    var c = try newCtx("all_or_nothing");
+    defer c.deinit();
+    try rig(&c);
+    // Two libraries: `a` (clean, committed stale) and `b` (holds a link). Order is by label.
+    try c.write("out_b/__init__.mojo", "# b\n", 0o644);
+    try c.mkdir("cell/src/b");
+    try c.write("fake/uquery.json",
+        \\{"komira//src/a:a_fresh":{"committed_dir":"generated/a","gen":"komira//src/a:a_gen"},
+        \\ "komira//src/b:b_fresh":{"committed_dir":"generated/b","gen":"komira//src/b:b_gen"}}
+    , 0o644);
+    try c.write("fake/build.txt", try std.fmt.allocPrint(c.alloc(), "komira//src/a:a_gen {s}\nkomira//src/b:b_gen {s}\n", .{ try c.path("out"), try c.path("out_b") }), 0o644);
+    try c.write("cell/src/a/generated/a/svc.mojo", "stale\n", 0o644);
+    try c.write("victim/keep.txt", "keep me\n", 0o644);
+    try c.mkdir("cell/src/b/generated/b");
+    try std.posix.symlinkat(try c.path("victim/keep.txt"), std.fs.cwd().fd, try c.path("cell/src/b/generated/b/x.mojo"));
+    const r = try runRegen(&c, &.{ "komira//src/a:", "komira//src/b:" });
+    try t.expectEqual(@as(u8, 1), r.code);
+    try t.expect(has(r.stderr, "x.mojo is a symbolic link"));
+    try t.expect(!has(r.stderr, "wrote"));
+    try t.expectEqualStrings("stale\n", try c.read("cell/src/a/generated/a/svc.mojo"));
+    try t.expect(!c.exists("cell/src/a/generated/a/__init__.mojo"));
+}
+
+test "a committed directory that climbs out of the package is refused, and nothing outside is written or deleted" {
+    var c = try newCtx("escape");
+    defer c.deinit();
+    try rig(&c);
+    try c.write("fake/uquery.json",
+        \\{"komira//src/svc:svc_fresh":{"committed_dir":"generated/../../../../victim_dir","gen":"komira//src/svc:svc_gen"}}
+    , 0o644);
+    try c.write("victim_dir/keep.txt", "keep me\n", 0o644);
+    const r = try runRegen(&c, &.{svc});
+    try t.expectEqual(@as(u8, 2), r.code);
+    try t.expect(has(r.stderr, "BadCommittedDir"));
+    try t.expectEqualStrings("keep me\n", try c.read("victim_dir/keep.txt"));
+    try t.expect(!has(try c.read("calls.log"), "build"));
+}
