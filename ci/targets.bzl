@@ -94,6 +94,7 @@ TARGETS = [
     "komira//src/komira_chat_store:komira_chat_store_conda",
     "komira//src/komira_chunk:komira_chunk_conda",
     "komira//src/komira_column_format:komira_column_format_conda",
+    "komira//src/komira_comms_index:komira_comms_index_conda",
     "komira//src/komira_connect:komira_connect_conda",
     "komira//src/komira_contacts:komira_contacts_conda",
     "komira//src/komira_content_line:ci",
