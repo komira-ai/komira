@@ -19,7 +19,6 @@
 # checks and the chunk's encodings list are the ones every other encoder has.
 # =============================================================================
 
-from std.memory import memcpy
 from std.sys import size_of
 
 from komira_arrow.bitmap import Bitmap

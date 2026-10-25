@@ -57,6 +57,14 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # - test_multi_batch_stats_direct: chunk statistics folded across batches
 #   equal the concatenation's (ints with HLL, floats with NaN and signed
 #   zero), all-null and all-NaN publish no bounds.
+# - test_advanced_writer_roundtrip: three row groups decoded by komira_parquet's
+#   reader; chunks in schema order; the page CRC is the standard CRC-32 the
+#   reader checks (and a flipped byte is refused); incomplete row groups and
+#   bad chunks refused.
+# - test_advanced_writer_index_bloom: ColumnIndex and OffsetIndex blobs decoded
+#   by a decoder in the test (the location is the data page, past a dictionary
+#   page); a chunk with no range gets no ColumnIndex; a bloom filter's header,
+#   bitset and probes read back from the file.
 # - test_no_env_reads: the package's sources read no environment, hold no
 #   raw pointer in a public signature, and import only these deps. It is
 #   staged every source `srcs` compiles.
@@ -70,9 +78,11 @@ mojo_library(
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_parquet_api:komira_parquet_api",
         "//src/komira_parquet_codec:komira_parquet_codec",
         "//src/komira_simd:komira_simd",
+        "//src/komira_zlib:komira_zlib",
     ],
     # The reader decodes the writer's bytes in the file-writer tests. It is
     # not a dependency of the library: a test-only package, never shipped.
@@ -84,6 +94,8 @@ mojo_library(
         },
     },
     test_srcs = [
+        "tests/test_advanced_writer_index_bloom.mojo",
+        "tests/test_advanced_writer_roundtrip.mojo",
         "tests/test_decimal_encode_direct.mojo",
         "tests/test_dict_encoder_direct.mojo",
         "tests/test_encoded_column.mojo",
