@@ -127,6 +127,17 @@ def _indent(line: String) -> Int:
     return i
 
 
+def call_keys(line: String) -> List[String]:
+    """The calls the code of `line` makes: each key is `name` (a bare call of a free function) or `.name`
+    (a method call), as `names_called_on` records them. A declaration calls nothing."""
+    var d = Dict[String, Bool]()
+    _code_words_called(line, d)
+    var out = List[String]()
+    for e in d.items():
+        out.append(e.key)
+    return out^
+
+
 def names_called_on(text: String, hit: Dict[Int, Bool], mut into: Dict[String, Bool]):
     """Adds to `into` the names the lines of `text` in `hit` (1-based line numbers a test hit) call."""
     var lines = split_lines(text)
@@ -175,8 +186,12 @@ def unreliable_lines(text: String, called: Dict[String, Bool]) -> Dict[Int, Bool
 def drop_unreliable(mut f: FileCov, text: String, called: Dict[String, Bool]) -> Dropped:
     """Removes from `f` (a file of an uncompiled report) every line record, and every branch arm
     on a line, that `unreliable_lines` names; says what it removed."""
+    return drop_lines(f, unreliable_lines(text, called))
+
+
+def drop_lines(mut f: FileCov, lines: Dict[Int, Bool]) -> Dropped:
+    """Removes from `f` every line record, and every branch arm on a line, in `lines`; says what it removed."""
     var d = Dropped()
-    var lines = unreliable_lines(text, called)
     if len(lines) == 0:
         return d^
     var kept_lines = Dict[Int, Int]()

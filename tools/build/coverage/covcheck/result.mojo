@@ -41,6 +41,9 @@ class a census can count; `unrecorded_functions_unreliable` the
 `excluded_lines` and `excluded_arms` are the line records and branch arms of buildrules'
 uncompiled report that the numbers leave out (uncompiled.mojo), `excluded_files` each file's
 `{"package", "path", "lines", "arms"}`; all zero when no such report is given.
+`platform_gated` lists the functions left out because every call to them is in a compile-time arm this
+target did not compile (platform_gate.mojo), each `{"package", "path", "function", "line", "lines"}`, with
+`platform_gated_functions`, `platform_gated_lines` and `platform_gated_arms` their totals.
 """
 
 from covcheck.analyze import Analysis
@@ -154,6 +157,22 @@ def _tail(mut j: JsonOut, a: Analysis):
         j.field_str(String("path"), x.path)
         j.field_int(String("lines"), x.lines)
         j.field_int(String("arms"), x.arms)
+        j.end_object()
+    j.end_array()
+    j.field_int(String("platform_gated_functions"), len(a.platform_gated))
+    j.field_int(String("platform_gated_lines"), a.platform_gated_lines())
+    j.field_int(String("platform_gated_arms"), a.platform_gated_arms)
+    j.key(String("platform_gated"))
+    j.begin_array()
+    for i in range(len(a.platform_gated)):
+        ref x = a.platform_gated[i]
+        j.item()
+        j.begin_object()
+        j.field_str(String("package"), x.package)
+        j.field_str(String("path"), x.path)
+        j.field_str(String("function"), x.name)
+        j.field_int(String("line"), x.line)
+        j.field_int(String("lines"), x.lines)
         j.end_object()
     j.end_array()
     j.field_int(String("ignored_files"), a.ignored_files)

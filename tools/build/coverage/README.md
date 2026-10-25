@@ -408,6 +408,22 @@ no evidence for a free function `reduce_or`. A declaration line is no call. A ca
 token is no evidence (`a != b` does not call `__ne__`: write `a.__ne__(b)` to say a test calls it).
 It is a heuristic over names, not a call graph: another function of the same name is evidence too.
 
+**Platform-gated functions** (`covcheck/platform_gate.mojo`). A function of the uncompiled report is also
+left out when it is platform-gated: it has at least one call site (its own body not counted) and **every**
+call site is dropped on the measured target. The call sites are the lines of the function's package (tests
+included) whose code holds its name followed by `(` or `[` (method and free calls told as above; a same-named
+function elsewhere in the package with a live call keeps it counted). A call site is dropped when it is in a
+function the reports show compiled (one of its own lines has a record), on a line inside one of that
+function's compile-time arms (`arms`, class `comptime_if`) that has no record in any report: that arm was
+not compiled here. A call site inside a platform-gated function is dropped too, so a chain of them is gated
+as a whole (a fixpoint). The target is the one the reports were made for: nothing here names x86 or arm64.
+Everything else counts: no call site (an uncalled function), one live call site (outside every arm, or in an
+arm that has a record, or in a function no report shows compiled that is not itself gated). The gated
+functions are listed with their line counts: `platform_gated` (`package`, `path`, `function`, `line`,
+`lines`), `platform_gated_functions`, `platform_gated_lines` and `platform_gated_arms` in the result JSON, and
+a line of the summary's "Set aside", apart from `excluded_lines`. A package's line hold then reads: every
+counted line is hit, and what was left out is listed.
+
 What is left out is reported, not hidden: `excluded_lines`, `excluded_arms` and `excluded_files`
 (`package`, `path`, `lines`, `arms`) in the result JSON, and a line in the summary's "Set aside"
 when any is left out. The functions stay in `unrecorded_functions_unreliable` only when no line of

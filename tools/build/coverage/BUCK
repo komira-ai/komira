@@ -146,6 +146,10 @@ mojo_library(
         # comptime-if function left out of the numbers and kept in the unreliable list,
         # the reports told by their file names
         "tests/test_uncompiled.mojo",
+        # platform-gated functions (platform_gate.mojo): every caller in a dropped
+        # compile-time arm, a chain, a live caller, no caller, a compiled arm, a
+        # same-named function elsewhere, the result and the summary
+        "tests/test_platform_gate.mojo",
     ],
     test_data = {
         "tests/test_lcov.mojo": ["tests/fixtures/basic.info"],
