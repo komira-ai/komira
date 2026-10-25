@@ -106,6 +106,33 @@ def test_lossy_bytes_and_digit_parsing() raises:
     assert_equal(substr(String("hello"), 3, 2), String(""))
 
 
+def test_surrogate_escapes_are_combined_or_replaced_never_fatal() raises:
+    # A JSON writer spells a character above the BMP as a surrogate pair.
+    var pair = read_json_string_at(String('"\\uD83D\\uDE00!"'), 0)
+    assert_equal(pair.text, String("😀!"))
+    assert_equal(pair.text.byte_length(), 5)
+    assert_equal(read_json_string_at(String('"\\u65e5\\u00e9"'), 0).text, String("日é"))
+    var repl = chr(0xFFFD)
+    # A lone high surrogate, a lone low one, a high one followed by a non-low
+    # escape: each is U+FFFD, and what follows is kept.
+    assert_equal(read_json_string_at(String('"\\uD83Dx"'), 0).text, repl + String("x"))
+    assert_equal(read_json_string_at(String('"\\uDE00x"'), 0).text, repl + String("x"))
+    assert_equal(read_json_string_at(String('"\\uD83D\\u0041"'), 0).text, repl + String("A"))
+    assert_equal(read_json_string_at(String('"\\uD83D"'), 0).text, repl)
+    # A bad hex digit and a truncated escape are errors, not zeros.
+    with assert_raises():
+        _ = read_json_string_at(String('"\\u12G4"'), 0)
+    with assert_raises():
+        _ = read_json_string_at(String('"\\u12"'), 0)
+    with assert_raises():
+        _ = read_json_string_at(String('"\\uD83D\\uZZZZ"'), 0)
+    # Through a whole document, the way a Java writer's metadata.json arrives.
+    assert_equal(
+        json_str_field(String('{"name":"a\\uD83D\\uDE00b"}'), "name"),
+        String("a😀b"),
+    )
+
+
 def main() raises:
     test_string_escapes_and_utf8()
     test_unicode_escape_of_a_non_ascii_code_point()
@@ -113,4 +140,5 @@ def main() raises:
     test_array_items()
     test_field_readers()
     test_lossy_bytes_and_digit_parsing()
+    test_surrogate_escapes_are_combined_or_replaced_never_fatal()
     print("test_iceberg_json_scan: all passed")

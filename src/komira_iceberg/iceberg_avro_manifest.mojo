@@ -183,6 +183,64 @@ def _avro_type_name(type_tag: Int) raises -> String:
     return out^
 
 
+def _hex_upper(v: Int) -> String:
+    var digits = String("0123456789ABCDEF")
+    if v == 0:
+        return String("0")
+    var out = String("")
+    var started = False
+    var shift = 28
+    while shift >= 0:
+        var nib = (v >> shift) & 0xF
+        if nib != 0 or started:
+            started = True
+            out += String(digits[byte=nib : nib + 1])
+        shift -= 4
+    return out^
+
+
+def avro_field_name(name: String) -> String:
+    """`name` as an Avro field name (`[A-Za-z_][A-Za-z0-9_]*`), by the rule
+    Iceberg's own writers use: a character outside the grammar becomes `_x` and
+    its code point in upper-case hex, and a leading digit gets a `_` in front.
+    A legal name is returned unchanged. Partition field names are free text
+    (`my-region`, a name in any script) and become Avro record field names in
+    the manifest schema; an illegal one would make the manifest invalid Avro."""
+    var bs = name.as_bytes()
+    var n = len(bs)
+    var out = String("")
+    var i = 0
+    while i < n:
+        var b = Int(bs[i])
+        var cp = b
+        var width = 1
+        if b >= 0xF0 and i + 3 < n:
+            cp = ((b & 0x07) << 18) | ((Int(bs[i + 1]) & 0x3F) << 12) | ((Int(bs[i + 2]) & 0x3F) << 6) | (Int(bs[i + 3]) & 0x3F)
+            width = 4
+        elif b >= 0xE0 and i + 2 < n:
+            cp = ((b & 0x0F) << 12) | ((Int(bs[i + 1]) & 0x3F) << 6) | (Int(bs[i + 2]) & 0x3F)
+            width = 3
+        elif b >= 0xC0 and i + 1 < n:
+            cp = ((b & 0x1F) << 6) | (Int(bs[i + 1]) & 0x3F)
+            width = 2
+        var letter = (
+            (cp >= ord("a") and cp <= ord("z"))
+            or (cp >= ord("A") and cp <= ord("Z"))
+            or cp == ord("_")
+        )
+        var digit = cp >= ord("0") and cp <= ord("9")
+        if letter or (digit and i > 0):
+            out += chr(cp)
+        elif digit:
+            out += "_" + chr(cp)
+        else:
+            out += "_x" + _hex_upper(cp)
+        i += width
+    if out.byte_length() == 0:
+        return String("_")
+    return out^
+
+
 def manifest_entry_schema_json(
     spec: PartitionSpec = PartitionSpec(0),
     partition_value_types: List[Int] = List[Int](),
@@ -207,9 +265,14 @@ def manifest_entry_schema_json(
             partition_value_types[i] if i < len(partition_value_types)
             else ICE_T_INT
         )
-        partition_schema += '{"name":' + json_escape_string(pf.name)
+        var safe = avro_field_name(pf.name)
+        partition_schema += '{"name":' + json_escape_string(safe)
         partition_schema += ',"type":"' + _avro_type_name(vtag)
-        partition_schema += '","field-id":' + String(pf.field_id) + "}"
+        partition_schema += '","field-id":' + String(pf.field_id)
+        if safe != pf.name:
+            # Iceberg's own writers keep the original name beside the legal one.
+            partition_schema += ',"iceberg-field-name":' + json_escape_string(pf.name)
+        partition_schema += "}"
     partition_schema += "]}"
 
     var df = String('{"type":"record","name":"r2","fields":[')
