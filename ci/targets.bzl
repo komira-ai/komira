@@ -310,6 +310,7 @@ TARGETS = [
     "komira//src/komira_search:komira_search_conda",
     "komira//src/komira_search_catalog:komira_search_catalog_conda",
     "komira//src/komira_search_compaction:komira_search_compaction_conda",
+    "komira//src/komira_search_http:komira_search_http_conda",
     "komira//src/komira_search_scan:komira_search_scan_conda",
     "komira//src/komira_secret_registry:komira_secret_registry_conda",
     "komira//src/komira_secrets_azure:komira_secrets_azure_conda",
