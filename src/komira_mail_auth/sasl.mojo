@@ -85,11 +85,19 @@ def _text(b: Span[UInt8, _], start: Int, end: Int) -> String:
 def decode_sasl_plain(payload: String) -> Optional[SaslCredentials]:
     """Decode the base64 PLAIN response `authzid NUL authcid NUL password`.
 
-    Refused (None): a payload longer than `MAX_SASL_LINE_BYTES`, base64 that is not canonical, a payload that does not have
-    exactly three NUL-separated fields (a missing or an extra NUL), an empty
-    authcid, an empty password, an authzid that is not empty and differs from
-    the authcid, and a field that is not UTF-8. When the authzid is the
-    authcid it is accepted and the credentials are for the authcid."""
+    Refused (None): a payload longer than `MAX_SASL_LINE_BYTES`, base64 that
+    is not canonical, a payload that does not have exactly three NUL-separated
+    fields (a missing or an extra NUL), an empty authcid, an empty password,
+    an authzid that is not empty and differs from the authcid, and a field
+    that is not UTF-8. When the authzid is the authcid it is accepted and the
+    credentials are for the authcid.
+
+    The RFC 4954 empty initial response `=` and the empty string are None
+    like any bad payload: the caller treats `AUTH PLAIN =` and a bare
+    `AUTH PLAIN` as "send an empty 334 challenge" and decodes the next line.
+    The decoded buffer holding the password is not wiped, and no SASLprep
+    (RFC 4013) is applied. The authcid may hold CR, LF or other control
+    characters: do not log it raw."""
     if not sasl_line_within_cap(payload.byte_length()):
         return None
     var raw: List[UInt8]
@@ -136,7 +144,10 @@ def decode_sasl_plain(payload: String) -> Optional[SaslCredentials]:
 
 def decode_sasl_login_value(reply: String) -> Optional[String]:
     """Decode one base64 LOGIN reply (a username or a password). Refused
-    (None): a reply longer than `MAX_SASL_LINE_BYTES`, non-canonical base64, an empty value, a NUL byte, invalid UTF-8."""
+    (None): a reply longer than `MAX_SASL_LINE_BYTES`, non-canonical base64,
+    an empty value (`=` included), a NUL byte, invalid UTF-8. The decoded
+    buffer is not wiped, no SASLprep is applied, and a username may hold
+    control characters: do not log it raw."""
     if not sasl_line_within_cap(reply.byte_length()):
         return None
     var raw: List[UInt8]

@@ -49,6 +49,12 @@ an empty authcid or password, an authzid that is not empty and differs from
 the authcid, and bytes that are not UTF-8. `SaslCredentials` has no printable
 form.
 
+The RFC 4954 empty initial response `=` is None, the same as the empty string
+and any bad payload. The server treats `AUTH PLAIN =` and a bare `AUTH PLAIN`
+as "send an empty `334` challenge" and passes the next line in; it does not
+pass `=` to the decoder. The username is not checked for CR, LF or other
+control characters, so do not log it raw.
+
 ```mojo
 from komira_encoding import base64_encode
 from komira_mail_auth import decode_sasl_plain, decode_sasl_login
@@ -95,5 +101,7 @@ assert_false(sasl_line_within_cap(MAX_SASL_LINE_BYTES + 1))
 ## Limits
 
 - No production verifier (no argon2id or scrypt one yet), no SCRAM, no OAUTHBEARER.
+- No SASLprep (RFC 4013) normalisation of the username or password.
+- The decoded byte buffers that held a password are not wiped.
 - The fixture table is plaintext-derived data held in process memory; there
   is no persistence and no lockout or rate limit.

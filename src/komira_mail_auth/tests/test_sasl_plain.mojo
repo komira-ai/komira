@@ -12,6 +12,8 @@
 #   character at the end of the field is accepted; an overlong form, a code
 #   point above U+10FFFF, a truncated sequence and a bad continuation byte at
 #   the end of the field are refused;
+# - the RFC 4954 empty initial response `=` and the empty string are None, so
+#   a server must handle them itself (send an empty 334) before decoding;
 # - a payload over the line cap is refused, one at the cap is decoded.
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -204,6 +206,11 @@ def test_line_cap() raises:
     assert_false(Bool(decode_sasl_plain(over)))
 
 
+def test_empty_initial_response() raises:
+    assert_false(Bool(decode_sasl_plain("=")))
+    assert_false(Bool(decode_sasl_plain("")))
+
+
 def main() raises:
     test_good()
     test_authzid_equal_accepted()
@@ -215,4 +222,5 @@ def main() raises:
     test_utf8_edges_accepted()
     test_utf8_edges_refused()
     test_line_cap()
+    test_empty_initial_response()
     print("test_sasl_plain: OK")
