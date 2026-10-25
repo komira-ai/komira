@@ -1,2 +1,0 @@
-lines 77.32
-branches 79.16
