@@ -49,13 +49,13 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_test_verdict/tests/test_exit_processes.mojo", "sha256": "16e4b68d9a98348486b30484ae0196afd42708d2d53cad9f3a4f934ca9cebae6"}
+        {"path": "src/komira_test_verdict/tests/test_exit_processes.mojo", "sha256": "3f58c6a14c2c1e327a741936da3dc999428276a425571e6619462910ceb703fd"}
       ],
       "deps": ["komira_test_verdict@0.1.0#mojo1.0.0/lib"],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_exit_processes.pass"],
-      "key": "444f42544ddf586e7ce4121bc87b604aca743a3a918e3250ffa5376a87b173ab"
+      "key": "952f2b4c202b205d83a96e2a003682bb0bdb4f49a48d2a11955971eb6895cf0e"
     },
     {
       "id": "komira_test_verdict@0.1.0#mojo1.0.0/test:src/komira_test_verdict/tests/test_exits.mojo",

@@ -10,7 +10,7 @@
 # system's zoneinfo.
 # =============================================================================
 
-from std.os import makedirs
+from std.os import getenv, makedirs
 from std.pathlib import Path
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -98,12 +98,20 @@ def test_a_zone_reports_its_last_listed_transition_and_its_offset() raises:
     assert_equal(p.utc_offset_at(0), -5 * 3600)
 
 
+def _scratch() raises -> String:
+    """The runner's own scratch directory (`TEST_TMPDIR`: empty, writable, removed when the run ends)."""
+    var base = getenv("TEST_TMPDIR")
+    if base.byte_length() == 0:
+        raise Error("TEST_TMPDIR is not set")
+    return base^
+
+
 def test_load_zone_reads_the_named_file_of_a_directory() raises:
-    var dir = String("zoneinfo_probe/Test")
-    makedirs(dir, exist_ok=True)
+    var root = _scratch() + "/zoneinfo"
+    makedirs(root + "/Test", exist_ok=True)
     var data = _tzif_v1()
-    Path(dir + "/Zone").write_bytes(Span(data))
-    var z = load_zone(String("zoneinfo_probe"), "Test/Zone")
+    Path(root + "/Test/Zone").write_bytes(Span(data))
+    var z = load_zone(root, "Test/Zone")
     assert_equal(z.name, "Test/Zone")
     assert_equal(z.transition_count(), 1)
     assert_equal(z.utc_offset_at(5000), 3600)
@@ -112,7 +120,7 @@ def test_load_zone_reads_the_named_file_of_a_directory() raises:
 def test_load_zone_refuses_a_name_with_no_file() raises:
     var got = String()
     try:
-        _ = load_zone(String("zoneinfo_probe"), "Test/None")
+        _ = load_zone(_scratch() + "/zoneinfo", "Test/None")
     except e:
         got = String(e)
     assert_true('unknown time zone "Test/None"' in got)

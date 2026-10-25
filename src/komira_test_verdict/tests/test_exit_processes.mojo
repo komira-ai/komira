@@ -19,8 +19,10 @@ def _exit_status_of_child(skip: Bool) raises -> Int:
     """Forks; the child calls `exit_skip` (or `exit_cannot_tell`) and, if that returned, ends with 0.
     Returns the child's exit status, or -1 when it did not exit normally.
 
-    SAFETY: fork and _exit are POSIX symbols; waitpid writes the status word through a pointer to a
+    SAFETY: fflush(NULL), fork and _exit are POSIX symbols; waitpid writes the status word through a pointer to a
     local Int32 that outlives the call."""
+    # The parent's buffered output is written first, so the child's exit does not write a second copy of it.
+    _ = external_call["fflush", Int32](Int(0))
     var pid = external_call["fork", Int32]()
     if pid < Int32(0):
         raise Error("fork failed")
