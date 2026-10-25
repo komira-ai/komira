@@ -27,12 +27,18 @@ never committed:
   its package.
   When a gate left out generated sources (first line `# @generated`;
   README.md, "Generated sources"), then one `generated<TAB><path>` line each,
-  after every row: a path inside the package's directory ending `.mojo`,
-  sorted, each once. `census.sh collect` reads them from the gate results,
-  `split` writes each into the file of the package that holds the path, and
-  `assemble` checks them and leaves them out of the assembled census. A file
-  without such lines is as it was. A hand-written file that gains the header
-  is a diff of this file at the next refresh, which is where review sees it.
+  after every row: a `.mojo` file path inside the package's directory
+  (segments never empty, `.` or `..`; a name before `.mojo`), sorted, each
+  once. A path under a nested package's directory belongs to the nested
+  package: `assemble` refuses it in the parent's file, and `split` writes it
+  into the nested package's file. `census.sh collect` has
+  `census_files generated <out> <gate result.json>...` read the gate results'
+  `generated_paths` (a JSON reader, unit-tested; it refuses a path holding a
+  tab or line feed), `split` writes each line into the file of the package
+  that holds the path, and `assemble` checks them and leaves them out of the
+  assembled census. A file without such lines is as it was. A hand-written
+  file that gains the header is a diff of this file at the next refresh,
+  which is where review sees it.
 - `<package>/coverage_held`: the metrics it holds at the target, `line`
   and/or `branch`, one per line ([The 99% threshold and
   holds](README.md#the-99-threshold-and-holds)); a package that holds
