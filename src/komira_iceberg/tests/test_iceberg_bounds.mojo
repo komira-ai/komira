@@ -228,6 +228,90 @@ def test_bytes_bounds_keep_high_bytes_verbatim() raises:
     assert_false(Bool(none.lower))
 
 
+def _f64(vals: List[Float64]) raises -> ColumnBound:
+    return bound_float64(1, PrimitiveArray[DType.float64].from_list(vals))
+
+
+def _f32(vals: List[Float32]) raises -> ColumnBound:
+    return bound_float32(1, PrimitiveArray[DType.float32].from_list(vals))
+
+
+def test_zero_bounds_in_every_mix() raises:
+    var nz64 = bitcast[DType.float64, 1](UInt64(0x8000000000000000))
+    var nz32 = bitcast[DType.float32, 1](UInt32(0x80000000))
+    var NEG0_64: List[Int] = [0, 0, 0, 0, 0, 0, 0, 0x80]
+    var POS0_64: List[Int] = [0, 0, 0, 0, 0, 0, 0, 0]
+    # f64: lower is always -0.0 and upper +0.0 when that bound is a zero.
+    var a = List[Float64]()
+    a.append(nz64)
+    var ba = _f64(a)
+    assert_true(_same(ba.lower.value(), NEG0_64))
+    assert_true(_same(ba.upper.value(), POS0_64))
+    var b = List[Float64]()
+    b.append(Float64(0))
+    b.append(Float64(5))
+    var bb = _f64(b)
+    assert_true(_same(bb.lower.value(), NEG0_64))
+    assert_true(_same(bb.upper.value(), _le64(5.0)))
+    var c = List[Float64]()
+    c.append(Float64(-5))
+    c.append(nz64)
+    var bc = _f64(c)
+    assert_true(_same(bc.lower.value(), _le64(-5.0)))
+    assert_true(_same(bc.upper.value(), POS0_64))
+    # f32, the same four shapes.
+    var NEG0_32: List[Int] = [0, 0, 0, 0x80]
+    var POS0_32: List[Int] = [0, 0, 0, 0]
+    var d = List[Float32]()
+    d.append(Float32(0))
+    var bd = _f32(d)
+    assert_true(_same(bd.lower.value(), NEG0_32))
+    assert_true(_same(bd.upper.value(), POS0_32))
+    var e = List[Float32]()
+    e.append(nz32)
+    var be = _f32(e)
+    assert_true(_same(be.lower.value(), NEG0_32))
+    assert_true(_same(be.upper.value(), POS0_32))
+    var f = List[Float32]()
+    f.append(nz32)
+    f.append(Float32(5))
+    var bf = _f32(f)
+    assert_true(_same(bf.lower.value(), NEG0_32))
+    assert_true(_same(bf.upper.value(), [0, 0, 0xA0, 0x40]))
+    var g = List[Float32]()
+    g.append(Float32(-5))
+    g.append(Float32(0))
+    var bg = _f32(g)
+    assert_true(_same(bg.lower.value(), [0, 0, 0xA0, 0xC0]))
+    assert_true(_same(bg.upper.value(), POS0_32))
+
+
+def test_float_scans_count_nulls_and_all_nan() raises:
+    var arr = PrimitiveArray[DType.float32].allocate_nullable(3)
+    arr.set(0, Float32(1.5))
+    arr.set(1, Float32(9.0))
+    arr.set(2, Float32(-2.0))
+    arr._set_null(1)
+    var b = bound_float32(5, arr)
+    assert_equal(b.null_count, 1)
+    assert_equal(b.value_count, 3)
+    assert_true(_same(b.lower.value(), [0, 0, 0, 0xC0]))
+    assert_true(_same(b.upper.value(), [0, 0, 0xC0, 0x3F]))
+    var nan32 = Float32(0) / Float32(0)
+    var only = List[Float32]()
+    only.append(nan32)
+    only.append(nan32)
+    var bn = _f32(only)
+    assert_false(Bool(bn.lower))
+    assert_equal(bn.value_count, 2)
+    var inf = List[Float64]()
+    inf.append(Float64(1) / Float64(0))
+    inf.append(Float64(-1) / Float64(0))
+    var bi = _f64(inf)
+    assert_true(_same(bi.lower.value(), [0, 0, 0, 0, 0, 0, 0xF0, 0xFF]))
+    assert_true(_same(bi.upper.value(), [0, 0, 0, 0, 0, 0, 0xF0, 0x7F]))
+
+
 def main() raises:
     test_scalar_serialization_is_appendix_d()
     test_int_bounds_skip_nulls_and_count_them()
@@ -238,4 +322,6 @@ def main() raises:
     test_float_zero_bounds_cover_both_zeros()
     test_string_bounds_compare_unsigned_bytes()
     test_bytes_bounds_keep_high_bytes_verbatim()
+    test_zero_bounds_in_every_mix()
+    test_float_scans_count_nulls_and_all_nan()
     print("test_iceberg_bounds: all passed")

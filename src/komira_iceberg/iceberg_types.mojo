@@ -19,9 +19,8 @@
 # crate + pyiceberg emit these — a serde of fixed structs, not a row writer).
 #
 # SPEC SOURCE OF TRUTH: Apache Iceberg table spec, format-version 2
-# (https://iceberg.apache.org/spec/). The field-id constants below are the
-# spec-assigned ids — they are LOAD-BEARING for cross-engine readability
-# (readers match columns by field-id, not by name).
+# (https://iceberg.apache.org/spec/). Field ids are LOAD-BEARING for cross-engine
+# readability (readers match columns by field-id, not by name).
 #
 # Encapsulation: every type is a plain owned-field
 # struct; the JSON emit helpers take/return owned String / borrowed values.
