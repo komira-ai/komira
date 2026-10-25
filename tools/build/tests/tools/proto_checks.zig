@@ -91,6 +91,29 @@ fn listFiles(a: A, dir: std.fs.Dir) ![][]const u8 {
     return out.toOwnedSlice(a);
 }
 
+/// A generated `.mojo` file holds fewer lines than this: the repository's limit
+/// on a source file, which a generated one is held to as well (the generators
+/// split what would reach it; komira_proto_codegen's `split`).
+pub const max_lines: usize = 1000;
+
+/// The lines of `data`: its newlines, and one more for a last line with none.
+pub fn lineCount(data: []const u8) usize {
+    if (data.len == 0) return 0;
+    const n = std.mem.count(u8, data, "\n");
+    return if (data[data.len - 1] == '\n') n else n + 1;
+}
+
+/// The first (by path) `.mojo` file under `dir` of `max_lines` lines or more,
+/// as `<path> (<lines> lines)`, or null.
+pub fn tooLong(a: A, dir: std.fs.Dir) !?[]u8 {
+    for (try listFiles(a, dir)) |f| {
+        if (!std.mem.endsWith(u8, f, ".mojo")) continue;
+        const lines = lineCount(try dir.readFileAlloc(a, f, 1 << 28));
+        if (lines >= max_lines) return try std.fmt.allocPrint(a, "{s} ({d} lines)", .{ f, lines });
+    }
+    return null;
+}
+
 fn grepHits(a: A, dir: std.fs.Dir, needle: []const u8) ![][]const u8 {
     var hits = std.ArrayList([]const u8).empty;
     for (try listFiles(a, dir)) |f| {
@@ -160,6 +183,9 @@ pub fn protoCheck(a: A, args: []const []const u8) !void {
         if (!std.mem.eql(u8, rc_text, "0")) {
             std.debug.print("protoc-gen-mojo failed (exit {s}):\n{s}", .{ rc_text, stderr_text });
             std.process.exit(1);
+        }
+        if (try tooLong(a, files)) |f| {
+            fail("the generated file {s} reaches {d} lines, the limit of a source file; the plugin must split it", .{ f, max_lines });
         }
         var g = try cwd.openDir(golden, .{ .iterate = true });
         defer g.close();

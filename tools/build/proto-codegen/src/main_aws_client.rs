@@ -37,6 +37,7 @@ use komira_proto_codegen::emit_aws::{
 use komira_proto_codegen::json::parse;
 use komira_proto_codegen::overrides::AwsOverrides;
 use komira_proto_codegen::sha256;
+use komira_proto_codegen::split;
 
 struct Args {
     model: PathBuf,
@@ -165,7 +166,19 @@ fn run() -> Result<String, String> {
             Some((p, emit_layout_probe(&emitted, import)?))
         }
     };
-    write(&args.out, &emitted.source)?;
+    // A module that reaches the line limit is written as a facade at
+    // `--out` and its parts in `_parts/` beside it (komira_proto_codegen::split).
+    let file_name = args
+        .out
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("--out {} has no file name", args.out.display()))?;
+    let files = split::split_file(file_name, &emitted.source)
+        .map_err(|e| format!("{}: {e}", args.out.display()))?;
+    let dir = args.out.parent().unwrap_or_else(|| std::path::Path::new(""));
+    for f in &files {
+        write(&dir.join(&f.path), &f.text)?;
+    }
     if let Some((p, text)) = &probe {
         write(p, text)?;
     }
@@ -182,10 +195,17 @@ fn run() -> Result<String, String> {
         f.enums.len(),
         overrides.len(),
         emitted.source.len(),
-        match &probe {
-            Some(_) => format!(", probe of {} structs", emitted.structs.len()),
-            None => String::new(),
-        },
+        format!(
+            "{}{}",
+            match &probe {
+                Some(_) => format!(", probe of {} structs", emitted.structs.len()),
+                None => String::new(),
+            },
+            match files.len() {
+                1 => String::new(),
+                n => format!(", split into a facade and {} parts", n - 1),
+            }
+        ),
         match &endpoint_rules {
             Some(r) => format!(
                 ", endpoint ruleset of {} parameters embedded in {} + {} bytes",

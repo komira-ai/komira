@@ -2,7 +2,10 @@
 //! first, writes M's code to F and the probe to P, and prints the rest of its
 //! arguments on stdout, one per line after `rest:`. GEN_MODE (the first of the
 //! rest, as `mode=<m>`) says what else: `ok`, `empty` (an empty module),
-//! `extra` (a file nobody declared), `none` (writes nothing), `exit3`.
+//! `extra` (a file nobody declared), `none` (writes nothing), `exit3`, `parts`
+//! (the module split: two files in `_parts/` beside it, as the real generator
+//! writes a module over the line limit), `parts_stray` (a file in `_parts/` that
+//! is not `.mojo`) and `parts_empty` (an empty part).
 const std = @import("std");
 
 pub fn main() !void {
@@ -25,6 +28,20 @@ pub fn main() !void {
     const p = try std.fs.cwd().createFile(args[6], .{});
     defer p.close();
     try p.writeAll("# probe\n");
+    if (std.mem.startsWith(u8, mode, "parts")) {
+        const dir = std.fs.path.dirname(args[4]) orelse ".";
+        const parts = try std.fs.path.join(a, &.{ dir, "_parts" });
+        try std.fs.cwd().makePath(parts);
+        for ([_][]const u8{ "svc_p01.mojo", "svc_p02.mojo" }) |name| {
+            const f = try std.fs.cwd().createFile(try std.fs.path.join(a, &.{ parts, name }), .{});
+            defer f.close();
+            if (!std.mem.eql(u8, mode, "parts_empty") or !std.mem.eql(u8, name, "svc_p02.mojo")) try f.writeAll("# a part\n");
+        }
+        if (std.mem.eql(u8, mode, "parts_stray")) {
+            const f = try std.fs.cwd().createFile(try std.fs.path.join(a, &.{ parts, "notes.txt" }), .{});
+            f.close();
+        }
+    }
     if (std.mem.eql(u8, mode, "extra")) {
         const dir = std.fs.path.dirname(args[4]) orelse ".";
         const e = try std.fs.cwd().createFile(try std.fs.path.join(a, &.{ dir, "stray.mojo" }), .{});

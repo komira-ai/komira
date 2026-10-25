@@ -743,13 +743,47 @@ referenced googleapis files (monitored_resource, logging/type, rpc/status,
 nothing is added to the runtime the caller names, and they may be anything
 `mojo_library.deps` takes. Every refusal is at analysis. `<name>[gen]` is
 the generated directory, with `[gen][<file>]` one generated file and
-`[gen][proto]` the staged `.proto` inputs (`mojo_library`'s optional `gen`
+`[gen][proto]` the staged `.proto` inputs and `[gen][_parts]` the directory
+of the parts of a module the generator split (see below; `mojo_library`'s
+optional `gen`
 attribute re-exports a generating target whole, sub-targets included, as
 that sub-target; nothing checks that `srcs` come from it). The module
 docstring of
 [`../cloud/gcp.bzl`](../cloud/gcp.bzl) has the details;
 [`tests//functional/mojo_gcp_client`](../tests/functional/mojo_gcp_client/BUCK) and
 [`tests//negative/mojo_gcp_client`](../tests/negative/mojo_gcp_client/BUCK) exercise it.
+
+### Generated files under 1000 lines
+
+No file in the repository reaches 1000 lines (Mojo hangs on very large
+files), and a generated one has no exemption. The generators therefore
+split what they write: a module of 1000 lines or more is written as a
+FACADE, the file it always had (`compute.mojo`, `<name>.mojo`), holding the
+module's documentation and, imported from its parts, every name the module
+declares, and its PARTS, `_parts/<stem>_p01.mojo`, `_p02`, ..., holding
+the declarations in the order the emitter wrote them. A declaration is
+never cut, a part carries the module's `# @generated` header and imports
+what it uses (from the module's own imports, and from the parts that
+declare it: Mojo modules may import one another in a cycle), and every file
+is under the limit. `from <package>.<stem> import <name>` names what it
+named before the split. Code that reads a generated module as text (a
+scan, a count) reads the facade and then the parts.
+
+The split is `split_file` of
+[`proto-codegen/src/split.rs`](proto-codegen/src/split.rs), applied to every
+`.mojo` file of every plugin (`CodeGeneratorResponse::split_oversized`, from
+`to_stdout_bytes`) and to `aws-client-gen`'s module. It depends on nothing
+but the module's text, so the same input gives the same file set, byte for
+byte. It refuses (naming why) a declaration that does not fit a file by
+itself, a top-level statement that is neither an import nor a declaration,
+a name declared twice, and a module whose facade would reach the limit (about
+four thousand names).
+
+`_parts/` is in every generated package, split or not, because the rules
+name a library's sources before the generator has run: its `__init__.mojo`
+is written by the generation action (`proto_gen`, `aws_act`), which also
+refuses anything in it but non-empty `.mojo` files. A library lists it as
+one more source (`<name>_gen[_parts]`).
 
 ### Generated AWS clients: mojo_aws_client
 
@@ -764,7 +798,8 @@ endpoint_rules, partitions, overrides, hand_srcs, test_srcs, **kwargs)` (`kwargs
 botocore service model at build time; no generated code is checked in.
 `<name>_gen` runs `komira//tools/build/proto-codegen:aws-client-gen`, which
 writes the package `<name>`: `__init__.mojo`, the module `<name>.mojo`
-(imported as `<name>.<name>`) and `_layout_probe.mojo`; `<name>` is an
+(imported as `<name>.<name>`), `_layout_probe.mojo` and the parts directory
+`_parts/` (see "Generated files under 1000 lines" below); `<name>` is an
 ordinary `mojo_library` over them, welded like mojo_gcp_client's: the probe is
 its first `test_srcs` entry, then `_no_env_reads.mojo`, an environment scan
 written for the client at analysis (every file of the package is its data;

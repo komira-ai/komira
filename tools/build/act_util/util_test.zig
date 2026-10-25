@@ -169,3 +169,21 @@ test "cloneEnv: a copy that changing leaves the original alone" {
     try t.expectEqual(@as(u32, 2), base.count());
     try t.expectEqualStrings("changed", copy.get("A").?);
 }
+
+test "partsProblem: only non-empty .mojo files are parts; the first problem by name is reported" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = t.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try t.expect((try U.partsProblem(a, tmp.dir)) == null);
+    try U.writeAll(tmp.dir, "__init__.mojo", "x");
+    try U.writeAll(tmp.dir, "m_p01.mojo", "x");
+    try t.expect((try U.partsProblem(a, tmp.dir)) == null);
+    try U.writeAll(tmp.dir, "notes.txt", "x");
+    try t.expectEqualStrings("_parts/notes.txt is not a .mojo file", (try U.partsProblem(a, tmp.dir)).?);
+    try U.writeAll(tmp.dir, "m_p02.mojo", "");
+    try t.expectEqualStrings("_parts/m_p02.mojo is empty", (try U.partsProblem(a, tmp.dir)).?);
+    try tmp.dir.makeDir("a_dir");
+    try t.expectEqualStrings("_parts/a_dir is not a file", (try U.partsProblem(a, tmp.dir)).?);
+}

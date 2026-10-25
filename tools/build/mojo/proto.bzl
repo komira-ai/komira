@@ -26,7 +26,9 @@ same MojoInfo.
 Output layout of a target `L` with import name `I`:
 
     L/proto/...            the staged `.proto` files (sub-target `[proto]`)
-    L/gen/I/...            the generated package (sub-target per file name)
+    L/gen/I/...            the generated package (sub-target per file name, and
+                           `[_parts]`, the directory of the parts of a module
+                           too large for one file)
     L/pkg/I.mojoc          the precompiled package
 
 `mojo_routes_proto_library` generates the HTTP route table, handler trait and
@@ -45,6 +47,13 @@ the action key.
 load(":defs.bzl", "mojo_library", "mojo_precompile_cmd")
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoToolchainInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+
+# The directory of a generated package that holds the parts of a module the
+# generator split to keep every file under the line limit (komira_proto_codegen's
+# `split`). It is a name of every generated package, with an `__init__.mojo` the
+# generation action writes, so a rule can list it among a library's sources
+# before the generator has run; a module's facade imports its parts from it.
+PARTS_DIR = "_parts"
 
 MojoProtoToolchainInfo = provider(fields = {
     "busybox": provider_field(typing.Any),
@@ -185,8 +194,10 @@ def check_proto_import_name(ctx, name):
 def generate_proto_dir(ctx, plugin, plugin_name, opt, trees, generate, names, import_name):
     """Run protoc with `plugin` over `generate`: the generation half, no compile.
 
-    Writes `gen/<import_name>/`: `__init__.mojo` and exactly `names` (the
-    files the plugin must write), none empty. Returns that directory. Reads
+    Writes `gen/<import_name>/`: `__init__.mojo`, exactly `names` (the
+    files the plugin must write), none empty, and `_parts` (PARTS_DIR: the
+    parts of each of them the plugin split, holding only `.mojo` files; see
+    the plugin's `split`). Returns that directory. Reads
     `ctx.attrs.proto_toolchain`. Shared by the proto library rules here and
     by rules that compile the result themselves (tools/build/cloud/gcp.bzl).
     """
@@ -234,7 +245,7 @@ def _generate_package(ctx, plugin, plugin_name, opt, tree, trees, generate, name
         category = "mojo_precompile",
     )
 
-    files = {n: gen_dir.project(n) for n in ["__init__.mojo"] + names}
+    files = {n: gen_dir.project(n) for n in ["__init__.mojo", PARTS_DIR] + names}
     return [
         DefaultInfo(
             default_output = pkg,
@@ -380,7 +391,7 @@ def _mojo_proto_gen_impl(ctx):
         "package_prefix=" + (ctx.attrs.package_name or import_name),
     ])
     gen_dir = generate_proto_dir(ctx, ptc.plugin, "mojo", opt, trees, generate, names, import_name)
-    files = ["__init__.mojo"] + names
+    files = ["__init__.mojo", PARTS_DIR] + names
     return [
         DefaultInfo(
             default_output = gen_dir,
@@ -458,7 +469,7 @@ def _mojo_proto_library(
         lib["readme"] = kwargs["readme"]
     mojo_library(
         name = name,
-        srcs = [":{}[__init__.mojo]".format(gen)] + [":{}[{}.mojo]".format(gen, s) for s in stems],
+        srcs = [":{}[__init__.mojo]".format(gen), ":{}[{}]".format(gen, PARTS_DIR)] + [":{}[{}.mojo]".format(gen, s) for s in stems],
         deps = kwargs.get("deps", []),
         gen = ":" + gen,
         import_name = kwargs.get("import_name"),
@@ -545,7 +556,7 @@ def _mojo_routes_gen_impl(ctx):
         seen[o] = True
     opt = "package_prefix=" + ctx.attrs.messages[MojoInfo].import_name
     gen_dir = generate_proto_dir(ctx, ptc.routes_plugin, "mojo_routes", opt, trees, own_paths, ctx.attrs.outs, ctx.attrs.import_name)
-    files = ["__init__.mojo"] + ctx.attrs.outs
+    files = ["__init__.mojo", PARTS_DIR] + ctx.attrs.outs
     return [DefaultInfo(
         default_output = gen_dir,
         sub_targets = {"proto": [DefaultInfo(default_output = tree)]} |
@@ -600,7 +611,7 @@ def _mojo_routes_proto_library(
         lib["test_env"] = test_env
     mojo_library(
         name = name,
-        srcs = [":{}[__init__.mojo]".format(gen)] + [":{}[{}]".format(gen, o) for o in outs],
+        srcs = [":{}[__init__.mojo]".format(gen), ":{}[{}]".format(gen, PARTS_DIR)] + [":{}[{}]".format(gen, o) for o in outs],
         deps = deps + [messages],
         gen = ":" + gen,
         import_name = import_name,

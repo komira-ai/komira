@@ -132,6 +132,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load(
     "@komira//tools/build/mojo:proto.bzl",
     "MojoProtoToolchainInfo",
+    "PARTS_DIR",
     "ProtoSrcsInfo",
     "check_proto_import_name",
     "generate_proto_dir",
@@ -249,7 +250,7 @@ def _gcp_client_gen_impl(ctx):
     expected = names + [_LAYOUT_PROBE]
     gen_dir = generate_proto_dir(ctx, ptc.plugin, "mojo", cmd_args(opt, delimiter = ","), trees, generate, expected, import_name)
 
-    files = ["__init__.mojo"] + expected
+    files = ["__init__.mojo", PARTS_DIR] + expected
     return [
         DefaultInfo(
             default_output = gen_dir,
@@ -346,7 +347,7 @@ def _gcp_client(
         for p, ip in zip(protos + bundle_only, own + bundle_only)
         if p.endswith(".proto") and ":" not in p
     ]
-    srcs = [":{}[__init__.mojo]".format(gen)] + [":{}[{}.mojo]".format(gen, s) for s in stems]
+    srcs = [":{}[__init__.mojo]".format(gen), ":{}[{}]".format(gen, PARTS_DIR)] + [":{}[{}.mojo]".format(gen, s) for s in stems]
     mojo_library(
         name = name,
         srcs = srcs,

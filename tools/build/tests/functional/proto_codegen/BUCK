@@ -455,6 +455,30 @@ proto_codegen_golden(
     present = ["self._rest_host = String(\"logging.googleapis.com\")"],
 )
 
+# A module of 1000 lines or more, which no generated file may be: ten
+# messages of fourteen fields, about 1500 lines in one file. The plugin
+# writes `wide.mojo` as a facade (documentation, imports, and every name
+# imported from its part) and the messages in `_parts/wide_pNN.mojo`, each
+# under 1000 lines (proto-check holds every case to that) and each with the
+# generated-file header. Wide10 holds a Wide01 and Wide06 a Shade, so a part
+# imports another's names. To rewrite the goldens after a change, build
+# `:split_module[out]` and copy `files/wide.mojo` and `files/_parts/*.mojo`
+# over them, each with `.golden` added.
+proto_codegen_golden(
+    name = "split_module",
+    srcs = ["corpus/split/v1/wide.proto"],
+    generate = ["split/v1/wide.proto"],
+    golden = glob(["golden/split_module/**/*.golden"]),
+    options = "package_prefix=komira_split_fixture",
+    present = [
+        "struct Wide01(",
+        "struct Wide10(",
+        "from ._parts.wide_p01 import",
+        "from ._parts.wide_p02 import",
+        "from .wide_p01 import",
+    ],
+)
+
 # `**`, a verb after a capture, `{x=*}`, and repeated, optional and bool
 # query fields. The service declares no `(google.api.default_host)`, so the
 # client starts with no host and every method refuses to send until
@@ -848,6 +872,7 @@ proto_codegen_goldens(
         ":logging_rest_gcp",
         ":tiny_grpc_gcp",
         ":refuse_gcp_connect",
+        ":split_module",
         ":shapes_rest",
         ":wkt_rest",
         ":update_rest",

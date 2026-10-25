@@ -1,0 +1,184 @@
+// A proto library too large for one generated file: its ten messages of
+// fourteen fields each come to well over 1000 lines of Mojo, so the plugin
+// writes `wide.mojo` as a facade and the messages in `_parts/`. Wide10 holds
+// a Wide01 (and Wide06 a Shade), so a part imports from another part.
+syntax = "proto3";
+
+package komira.split.v1;
+
+enum Shade {
+  SHADE_UNSET = 0;
+  SHADE_LIGHT = 1;
+  SHADE_DARK = 2;
+}
+
+message Wide01 {
+  int32 count = 1;
+  string label = 2;
+  bool flag = 3;
+  double ratio = 4;
+  bytes payload = 5;
+  repeated string tags = 6;
+  int64 total = 7;
+  uint32 mask = 8;
+  float weight = 9;
+  string note = 10;
+  repeated int32 steps = 11;
+  bool done = 12;
+  string owner = 13;
+  int32 rank = 14;
+}
+
+message Wide02 {
+  int32 count = 1;
+  string label = 2;
+  bool flag = 3;
+  double ratio = 4;
+  bytes payload = 5;
+  repeated string tags = 6;
+  int64 total = 7;
+  uint32 mask = 8;
+  float weight = 9;
+  string note = 10;
+  repeated int32 steps = 11;
+  bool done = 12;
+  string owner = 13;
+  int32 rank = 14;
+}
+
+message Wide03 {
+  int32 count = 1;
+  string label = 2;
+  bool flag = 3;
+  double ratio = 4;
+  bytes payload = 5;
+  repeated string tags = 6;
+  int64 total = 7;
+  uint32 mask = 8;
+  float weight = 9;
+  string note = 10;
+  repeated int32 steps = 11;
+  bool done = 12;
+  string owner = 13;
+  int32 rank = 14;
+}
+
+message Wide04 {
+  int32 count = 1;
+  string label = 2;
+  bool flag = 3;
+  double ratio = 4;
+  bytes payload = 5;
+  repeated string tags = 6;
+  int64 total = 7;
+  uint32 mask = 8;
+  float weight = 9;
+  string note = 10;
+  repeated int32 steps = 11;
+  bool done = 12;
+  string owner = 13;
+  int32 rank = 14;
+}
+
+message Wide05 {
+  int32 count = 1;
+  string label = 2;
+  bool flag = 3;
+  double ratio = 4;
+  bytes payload = 5;
+  repeated string tags = 6;
+  int64 total = 7;
+  uint32 mask = 8;
+  float weight = 9;
+  string note = 10;
+  repeated int32 steps = 11;
+  bool done = 12;
+  string owner = 13;
+  int32 rank = 14;
+}
+
+message Wide06 {
+  int32 count = 1;
+  string label = 2;
+  bool flag = 3;
+  double ratio = 4;
+  bytes payload = 5;
+  repeated string tags = 6;
+  int64 total = 7;
+  uint32 mask = 8;
+  float weight = 9;
+  string note = 10;
+  repeated int32 steps = 11;
+  bool done = 12;
+  string owner = 13;
+  Shade shade = 14;
+}
+
+message Wide07 {
+  int32 count = 1;
+  string label = 2;
+  bool flag = 3;
+  double ratio = 4;
+  bytes payload = 5;
+  repeated string tags = 6;
+  int64 total = 7;
+  uint32 mask = 8;
+  float weight = 9;
+  string note = 10;
+  repeated int32 steps = 11;
+  bool done = 12;
+  string owner = 13;
+  int32 rank = 14;
+}
+
+message Wide08 {
+  int32 count = 1;
+  string label = 2;
+  bool flag = 3;
+  double ratio = 4;
+  bytes payload = 5;
+  repeated string tags = 6;
+  int64 total = 7;
+  uint32 mask = 8;
+  float weight = 9;
+  string note = 10;
+  repeated int32 steps = 11;
+  bool done = 12;
+  string owner = 13;
+  int32 rank = 14;
+}
+
+message Wide09 {
+  int32 count = 1;
+  string label = 2;
+  bool flag = 3;
+  double ratio = 4;
+  bytes payload = 5;
+  repeated string tags = 6;
+  int64 total = 7;
+  uint32 mask = 8;
+  float weight = 9;
+  string note = 10;
+  repeated int32 steps = 11;
+  bool done = 12;
+  string owner = 13;
+  int32 rank = 14;
+}
+
+message Wide10 {
+  int32 count = 1;
+  string label = 2;
+  bool flag = 3;
+  double ratio = 4;
+  bytes payload = 5;
+  repeated string tags = 6;
+  int64 total = 7;
+  uint32 mask = 8;
+  float weight = 9;
+  string note = 10;
+  repeated int32 steps = 11;
+  bool done = 12;
+  Wide01 first = 13;
+  int32 rank = 14;
+}
+
