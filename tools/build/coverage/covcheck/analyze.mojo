@@ -116,7 +116,7 @@ from covcheck.mutants import KILLED, SURVIVED, TIMEOUT, Mutant, parse_mutants
 from covcheck.paths import MAPPED, OUTSIDE, RepoFiles, generated_test_main, is_test_source, map_path, package_of
 from covcheck.held import Held
 from covcheck.platform_gate import Cand, platform_gated
-from covcheck.uncompiled import drop_lines, drop_unreliable, is_uncompiled_report, names_called_on
+from covcheck.uncompiled import declared_twice, drop_lines, drop_unreliable, is_uncompiled_report, names_called_on, unreliable_lines
 from covcheck.stats import (
     BELOW_TARGET,
     BRANCH_NOT_MEASURED,
@@ -521,6 +521,20 @@ def _reached(package: String, metric: String, bp: Int, target: Int) -> Finding:
     )
 
 
+def _package_texts(pkg: String, repo: RepoFiles, sources: Sources) -> Dict[String, String]:
+    """The sources of `pkg` (`.mojo` files of its directory tree, tests included), by path; a file that cannot be
+    read is left out."""
+    var texts = Dict[String, String]()
+    for e in repo.files.items():
+        if not e.key.endswith(".mojo") or _package_or_empty(e.key, repo) != pkg:
+            continue
+        try:
+            texts[e.key] = sources.read(e.key)
+        except:
+            pass
+    return texts^
+
+
 def _platform_gate(
     reports: List[Input],
     mapped: List[FileCov],
@@ -529,6 +543,7 @@ def _platform_gate(
     opts: Options,
     mut a: Analysis,
     mut gated_lines: Dict[String, Dict[Int, Bool]],
+    called: Dict[String, Dict[String, Bool]],
 ) raises:
     """Finds the platform-gated functions among those of the uncompiled line reports (platform_gate.mojo): fills
     `gated_lines` with their own lines per path and `a.platform_gated` with each, in path and line order."""
@@ -559,6 +574,7 @@ def _platform_gate(
     var by_pkg = Dict[String, List[Cand]]()
     var own_of = Dict[String, List[Int]]()
     var pkg_names = List[String]()
+    var pkg_dups = Dict[String, Dict[String, Bool]]()
     var unc_paths = List[String]()
     for e in unc.items():
         unc_paths.append(e.key)
@@ -568,13 +584,24 @@ def _platform_gate(
         var pkg = _package_or_empty(path, repo)
         if pkg.byte_length() == 0:
             continue
-        var fns = declared_functions(sources.read(path))
+        var src = sources.read(path)
+        var fns = declared_functions(src)
+        # What the call evidence leaves out already is not reported a second time.
+        if pkg not in pkg_dups:
+            pkg_dups[pkg] = declared_twice(_package_texts(pkg, repo, sources))
+        var pcalled = Dict[String, Bool]()
+        if pkg in called:
+            pcalled = called[pkg].copy()
+        var by_evidence = unreliable_lines(src, pcalled, pkg_dups[pkg])
         for k in range(len(fns)):
             var own = List[Int]()
+            var evidenced = True
             for q in range(len(fns[k].lines)):
                 if fns[k].lines[q] in unc[path]:
                     own.append(fns[k].lines[q])
-            if len(own) == 0:
+                    if fns[k].lines[q] not in by_evidence:
+                        evidenced = False
+            if len(own) == 0 or evidenced:
                 continue
             if pkg not in by_pkg:
                 by_pkg[pkg] = List[Cand]()
@@ -585,14 +612,7 @@ def _platform_gate(
     for pk in range(len(pkg_names)):
         var pkg = pkg_names[pk]
         # The package's sources, tests included: the call sites are searched there.
-        var texts = Dict[String, String]()
-        for e in repo.files.items():
-            if not e.key.endswith(".mojo") or _package_or_empty(e.key, repo) != pkg:
-                continue
-            try:
-                texts[e.key] = sources.read(e.key)
-            except:
-                pass
+        var texts = _package_texts(pkg, repo, sources)
         var flags = platform_gated(texts, recorded, by_pkg[pkg])
         for c in range(len(flags)):
             if not flags[c]:
@@ -645,7 +665,10 @@ def analyze(
     var generated = Dict[String, Bool]()
     # The code no test compiled (uncompiled.mojo) is read after every other report: what it may leave out
     # needs the evidence the others give (the lines a test hit that call a function).
-    var called = Dict[String, Bool]()
+    # The calls the hit lines make, per package (a call in another package is no evidence), and the function names
+    # each package declares more than once.
+    var called = Dict[String, Dict[String, Bool]]()
+    var dups_of = Dict[String, Dict[String, Bool]]()
     # What the uncompiled report left out, per path, and the lines of it (the files-no-test-compiled
     # pass leaves them out too).
     var left_lines = Dict[String, Dict[Int, Bool]]()
@@ -666,12 +689,15 @@ def analyze(
         for e in hit_of.items():
             # A hit line of a file whose source is not here (a test's generated main) gives no evidence.
             try:
-                names_called_on(sources.read(e.key), e.value, called)
+                var cpkg = _package_or_empty(e.key, repo)
+                if cpkg not in called:
+                    called[cpkg] = Dict[String, Bool]()
+                names_called_on(sources.read(e.key), e.value, called[cpkg])
             except:
                 pass
       var gated_lines = Dict[String, Dict[Int, Bool]]()
       if pass_no == 1:
-        _platform_gate(reports, mapped, repo, sources, opts, a, gated_lines)
+        _platform_gate(reports, mapped, repo, sources, opts, a, gated_lines, called)
       for r in range(len(reports)):
         if is_uncompiled_report(reports[r].origin) != (pass_no == 1):
             continue
@@ -688,7 +714,13 @@ def analyze(
                 if pass_no == 1:
                     # Buildrules' report of the code no test compiled: what a test was seen to
                     # call, and is inlined or dropped on this platform, is left out (uncompiled.mojo).
-                    var d = drop_unreliable(f, sources.read(m.path), called)
+                    var dpkg = _package_or_empty(m.path, repo)
+                    if dpkg not in dups_of:
+                        dups_of[dpkg] = declared_twice(_package_texts(dpkg, repo, sources))
+                    var dcalled = Dict[String, Bool]()
+                    if dpkg in called:
+                        dcalled = called[dpkg].copy()
+                    var d = drop_unreliable(f, sources.read(m.path), dcalled, dups_of[dpkg])
                     if d.lines > 0 or d.arms > 0:
                         if m.path not in excluded_at:
                             excluded_at[m.path] = len(a.excluded)

@@ -401,28 +401,38 @@ shapes that look like an uncalled function without being one:
   closure under its own class (the outer function keeps its own) are counted, as is every line of a
   file no test compiled (above).
 
-The evidence is a line of a test's report (its test source included) with a hit, whose code (not
-its comment or strings) holds the function's name followed by `(` or `[`: `x.name(` for a method (a
-declaration that is indented), a bare `name(` for a free function, so the method `reduce_or` of a SIMD value is
-no evidence for a free function `reduce_or`. A declaration line is no call. A call with no such
-token is no evidence (`a != b` does not call `__ne__`: write `a.__ne__(b)` to say a test calls it).
-It is a heuristic over names, not a call graph: another function of the same name is evidence too.
+The evidence is a line of a test's report (its test source included) with a hit, **in the function's own
+package**, whose code (not its comment or strings, and not the interior of a multi-line string) holds the function's
+name followed by `(` or `[`: `x.name(` for a method (a declaration that is indented), a bare `name(` for a free
+function, so the method `reduce_or` of a SIMD value is no evidence for a free function `reduce_or`. A declaration
+line is no call. A name the package declares **more than once** is no evidence for a free function; for a method of
+`struct T` it is evidence only when the call names the type (`T(...).name(` or `T.name(`: the receiver is a
+constructor call or a type name). A call with no such token is no evidence (`a != b` does not call `__ne__`:
+write `a.__ne__(b)`, or `T(a).__ne__(b)` where the package has several `__ne__`). It is a heuristic over names,
+not a call graph: a variable receiver (`p.name(`) is not resolved.
 
 **Platform-gated functions** (`covcheck/platform_gate.mojo`). A function of the uncompiled report is also
-left out when it is platform-gated: it has at least one call site (its own body not counted) and **every**
-call site is dropped on the measured target. The call sites are the lines of the function's package (tests
-included) whose code holds its name followed by `(` or `[` (method and free calls told as above; a same-named
-function elsewhere in the package with a live call keeps it counted). A call site is dropped when it is in a
-function the reports show compiled (one of its own lines has a record), on a line inside one of that
-function's compile-time arms (`arms`, class `comptime_if`) that has no record in any report: that arm was
-not compiled here. A call site inside a platform-gated function is dropped too, so a chain of them is gated
-as a whole (a fixpoint). The target is the one the reports were made for: nothing here names x86 or arm64.
-Everything else counts: no call site (an uncalled function), one live call site (outside every arm, or in an
-arm that has a record, or in a function no report shows compiled that is not itself gated). The gated
-functions are listed with their line counts: `platform_gated` (`package`, `path`, `function`, `line`,
-`lines`), `platform_gated_functions`, `platform_gated_lines` and `platform_gated_arms` in the result JSON, and
-a line of the summary's "Set aside", apart from `excluded_lines`. A package's line hold then reads: every
-counted line is hit, and what was left out is listed.
+left out when it is platform-gated: it has at least one use (its own body not counted) and **every** use is
+dropped on the measured target. This direction hides code, so a use is anything that could be one: any
+occurrence of the function's name as an identifier in the code of its package (tests included): a call
+`name(`, `x.name(` or `mod.name(`, a function passed as a value, a method reference. Comments, strings (a
+multi-line string's interior too), import lines and the name a declaration gives are not uses; an alias
+(`from x import name as z`) makes every use of `z` a use of `name`; a function of the same name elsewhere in
+the package that is used live keeps it counted. A use is dropped when it is in a function the reports show
+compiled (one of its own lines has a record), inside one of that function's compile-time arms
+(`comptime if`/`elif`/`else`, `@parameter`, and the plain `elif`/`else` continuing such a chain), **and no
+line of that arm has a record**: a line without a record in an arm that has others is a continuation line or
+a line the compiler attributed elsewhere, and the arm was compiled. A use on the line of the `comptime if`
+condition is live: the condition runs whichever arm is compiled. A use inside a platform-gated function is
+dropped too, so a chain of them is gated as a whole (a fixpoint). The target is the one the reports were made
+for: nothing here names x86 or arm64. Everything else counts: no use (an uncalled function), one live use
+(outside every arm, in an arm that has a record, in a function no report shows compiled that is not itself
+gated). Functions that use only each other, reachable only from a dropped arm, stay counted: the fixpoint
+starts from nothing gated, and each function needs a dropped use. A function the call evidence already leaves
+out is not reported as gated as well. The gated functions are listed with their line counts: `platform_gated`
+(`package`, `path`, `function`, `line`, `lines`), `platform_gated_functions`, `platform_gated_lines` and
+`platform_gated_arms` in the result JSON, and all named in the summary's "Set aside", apart from
+`excluded_lines`. A package's line hold then reads: every counted line is hit, and what was left out is listed.
 
 What is left out is reported, not hidden: `excluded_lines`, `excluded_arms` and `excluded_files`
 (`package`, `path`, `lines`, `arms`) in the result JSON, and a line in the summary's "Set aside"

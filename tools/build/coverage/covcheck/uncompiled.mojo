@@ -28,6 +28,7 @@ The reports are told by their file name and parent directory, the ones buildrule
 """
 
 from covcheck.decls import KIND_ALWAYS_INLINE, KIND_COMPTIME_IF, declared_functions
+from covcheck.lexer import lex_source
 from covcheck.model import FileCov
 from covcheck.text import parse_count, split_lines, substr
 
@@ -76,6 +77,40 @@ def _starts_word(line: String, at: Int, word: String) -> Bool:
     return b[at + len(w)] == UInt8(32) or b[at + len(w)] == UInt8(9)
 
 
+def _receiver_before(line: String, dot: Int) -> String:
+    """The name a call's receiver ends in, before the `.` at `dot`: an identifier (`T.name(`, `x.name(`), or the
+    identifier before the `(` of a call (`T(a).name(`); empty when it is neither."""
+    var b = line.as_bytes()
+    var j = dot - 1
+    if j < 0:
+        return String("")
+    var e = -1
+    if b[j] == UInt8(41):
+        var depth = 0
+        var p = j
+        while p >= 0:
+            if b[p] == UInt8(41):
+                depth += 1
+            elif b[p] == UInt8(40):
+                depth -= 1
+                if depth == 0:
+                    break
+            p -= 1
+        if p <= 0:
+            return String("")
+        e = p
+    elif _is_ident(Int(b[j])):
+        e = j + 1
+    else:
+        return String("")
+    var s = e
+    while s > 0 and _is_ident(Int(b[s - 1])):
+        s -= 1
+    if s >= e:
+        return String("")
+    return substr(line, s, e)
+
+
 def _code_words_called(line: String, mut into: Dict[String, Bool]):
     """Adds to `into` each identifier of the code of `line` that is followed by `(` or `[`: what
     the line calls. A comment and the inside of a quoted string are not code."""
@@ -114,7 +149,14 @@ def _code_words_called(line: String, mut into: Dict[String, Bool]):
             if start >= 0 and (c == 40 or c == 91):
                 # `.name(` is a method call, a bare `name(` a call of a free function.
                 var dotted = start > 0 and b[start - 1] == UInt8(46)
-                into[(String(".") if dotted else String("")) + substr(line, start, i)] = True
+                var called_name = substr(line, start, i)
+                into[(String(".") if dotted else String("")) + called_name] = True
+                if dotted:
+                    # The receiver, where it is a name or a constructor call (`T(...).name(`, `T.name(`):
+                    # `T.name`, which a method declared in `struct T` is resolved by.
+                    var recv = _receiver_before(line, start - 1)
+                    if recv.byte_length() > 0:
+                        into[recv + String(".") + called_name] = True
             start = -1
         i += 1
 
@@ -139,11 +181,51 @@ def call_keys(line: String) -> List[String]:
 
 
 def names_called_on(text: String, hit: Dict[Int, Bool], mut into: Dict[String, Bool]):
-    """Adds to `into` the names the lines of `text` in `hit` (1-based line numbers a test hit) call."""
-    var lines = split_lines(text)
+    """Adds to `into` the names the lines of `text` in `hit` (1-based line numbers a test hit) call. A line
+    that starts inside a string (a docstring's or a multi-line string's interior) or holds no code is no call."""
+    var ls = lex_source(text)
     for e in hit.items():
-        if e.key >= 1 and e.key <= len(lines):
-            _code_words_called(lines[e.key - 1], into)
+        if e.key >= 1 and e.key <= len(ls):
+            if ls[e.key - 1].in_string or not ls[e.key - 1].code:
+                continue
+            _code_words_called(ls[e.key - 1].text, into)
+
+
+def declared_twice(texts: Dict[String, String]) -> Dict[String, Bool]:
+    """The function names declared more than once among the sources `texts` (a package's): a call of such a name
+    is not told from a call of another function of it, so the name is no evidence for any."""
+    var seen = Dict[String, Int]()
+    for e in texts.items():
+        var fns = declared_functions(e.value)
+        for k in range(len(fns)):
+            seen[fns[k].name] = seen.get(fns[k].name, 0) + 1
+    var out = Dict[String, Bool]()
+    for e in seen.items():
+        if e.value > 1:
+            out[e.key] = True
+    return out^
+
+
+def _struct_of(lines: List[String], def_line: Int) -> String:
+    """The name of the `struct` a method declared at `def_line` (1-based) sits in, or the empty string."""
+    var ind = 0
+    var b = lines[def_line - 1].as_bytes()
+    while ind < len(b) and (b[ind] == UInt8(32) or b[ind] == UInt8(9)):
+        ind += 1
+    var i = def_line - 2
+    while i >= 0:
+        var t = lines[i].as_bytes()
+        var k = 0
+        while k < len(t) and (t[k] == UInt8(32) or t[k] == UInt8(9)):
+            k += 1
+        if k < ind and k < len(t) and _starts_word(lines[i], k, "struct"):
+            var s = k + 7
+            var e = s
+            while e < len(t) and _is_ident(Int(t[e])):
+                e += 1
+            return substr(lines[i], s, e)
+        i -= 1
+    return String("")
 
 
 struct Dropped(Copyable, Movable):
@@ -160,20 +242,31 @@ struct Dropped(Copyable, Movable):
         self.line_set = Dict[Int, Bool]()
 
 
-def unreliable_lines(text: String, called: Dict[String, Bool]) -> Dict[Int, Bool]:
+def unreliable_lines(text: String, called: Dict[String, Bool], dups: Dict[String, Bool]) -> Dict[Int, Bool]:
     """The lines of `text` an uncompiled report may not count: the own lines of an `@always_inline`
-    function, the lines in the arms of a gated one, each only when its name is in `called`."""
+    function, the lines in the arms of a gated one, each only with evidence. `called` holds the calls the hit
+    lines of the function's package make (`name`, `.name`, `Receiver.name`); `dups` the names the package
+    declares more than once: such a name is evidence only through `Struct.name` for a method of `struct Struct`
+    (the receiver of the call named the type), and for none for a free function."""
     var out = Dict[Int, Bool]()
     var fns = declared_functions(text)
     var lines = split_lines(text)
     for k in range(len(fns)):
         # A method (a declaration indented) is called as `x.name(`, a free function as `name(`: a
         # `.name(` call of a same-named method of another type is no evidence for a free function.
-        var key = fns[k].name
+        var method = False
         if fns[k].line >= 1 and fns[k].line <= len(lines) and _indent(lines[fns[k].line - 1]) > 0:
-            key = String(".") + key
-        if key not in called:
-            continue
+            method = True
+        if fns[k].name in dups:
+            if not method:
+                continue
+            var owner = _struct_of(lines, fns[k].line)
+            if owner.byte_length() == 0 or (owner + String(".") + fns[k].name) not in called:
+                continue
+        else:
+            var key = (String(".") if method else String("")) + fns[k].name
+            if key not in called:
+                continue
         if fns[k].kind == String(KIND_ALWAYS_INLINE):
             for i in range(len(fns[k].lines)):
                 out[fns[k].lines[i]] = True
@@ -183,10 +276,10 @@ def unreliable_lines(text: String, called: Dict[String, Bool]) -> Dict[Int, Bool
     return out^
 
 
-def drop_unreliable(mut f: FileCov, text: String, called: Dict[String, Bool]) -> Dropped:
+def drop_unreliable(mut f: FileCov, text: String, called: Dict[String, Bool], dups: Dict[String, Bool]) -> Dropped:
     """Removes from `f` (a file of an uncompiled report) every line record, and every branch arm
     on a line, that `unreliable_lines` names; says what it removed."""
-    return drop_lines(f, unreliable_lines(text, called))
+    return drop_lines(f, unreliable_lines(text, called, dups))
 
 
 def drop_lines(mut f: FileCov, lines: Dict[Int, Bool]) -> Dropped:

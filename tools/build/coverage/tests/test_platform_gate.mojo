@@ -163,8 +163,108 @@ def test_with_no_uncompiled_report_nothing_is_gated() raises:
     assert_true('"platform_gated_functions":0' in report_json(a, List[String](), DiffCoverage()))
 
 
+def _one(src: String, recorded: List[Int], unc: List[Int]) raises -> Analysis:
+    """One source file, the lines a test's report records (all hit) and the lines the uncompiled report lists."""
+    var l = List[Input]()
+    l.append(_report(String(UNCOMPILED_REPORT), _class(String(LIB), unc, 0)))
+    l.append(_report(String(TEST_REPORT), _class(String(LIB), recorded, 1)))
+    var files = List[String]()
+    files.append("src/mp/BUCK")
+    files.append(LIB)
+    var s = Sources(String(""))
+    s.texts[String(LIB)] = src
+    return analyze(l, List[Input](), repo_files_of(files), Held(), s, Options())
+
+
+def test_a_use_that_is_not_a_plain_call_keeps_a_function_counted() raises:
+    # Each function has a call in a dropped arm (line 7) and a live use of another form: a function used as a
+    # value (3), a qualified call `mod.name(` (4), and a call through an alias (`zz`, imported `as`, line 5).
+    var src = String(
+        "from lib import alias_target as zz\n"                                 # 1
+        "def driver(x: Int) -> Int:\n"                                         # 2
+        "    var cb = value_used\n"                                            # 3
+        "    var r = mod.qual_used(x)\n"                                       # 4
+        "    var q = zz(x)\n"                                                  # 5
+        "    comptime if DROPPED:\n"                                           # 6
+        "        q = value_used(q) + qual_used(q) + alias_target(q)\n"         # 7
+        "    return x\n"                                                       # 8
+        "\n"                                                                   # 9
+        "def value_used(x: Int) -> Int:\n"                                     # 10
+        "    return x\n"                                                       # 11
+        "\n"                                                                   # 12
+        "def qual_used(x: Int) -> Int:\n"                                      # 13
+        "    return x\n"                                                       # 14
+        "\n"                                                                   # 15
+        "def alias_target(x: Int) -> Int:\n"                                   # 16
+        "    return x\n"                                                       # 17
+    )
+    var a = _one(src, _ints(2, 3, 4, 5, 8), _ints(11, 14, 17))
+    assert_equal(len(a.platform_gated), 0)
+    var h = a.files[a.file_index(String(LIB))].hits.copy()
+    for ln in _ints(11, 14, 17):
+        assert_true(ln in h, "line " + String(ln) + " is not counted")
+
+
+def test_an_arm_is_dropped_only_when_no_line_of_it_has_a_record() raises:
+    # `helper(` is on line 4, which has no record, but line 5, a continuation line of the same call in the same
+    # arm, has one: the arm was compiled, so the call is live and `helper` counts.
+    var src = String(
+        "def driver(x: Int) -> Int:\n"        # 1
+        "    var y = x\n"                     # 2
+        "    comptime if LIVE:\n"             # 3
+        "        y = helper(\n"               # 4
+        "            y\n"                     # 5
+        "        )\n"                         # 6
+        "    return y\n"                      # 7
+        "\n"                                  # 8
+        "def helper(x: Int) -> Int:\n"        # 9
+        "    return x\n"                      # 10
+    )
+    var a = _one(src, _ints(1, 2, 5, 7), _ints(10))
+    assert_equal(len(a.platform_gated), 0)
+    assert_true(10 in a.files[a.file_index(String(LIB))].hits)
+    # The same arm with no record on any of its lines is dropped, and `helper` is gated.
+    var b = _one(src, _ints(1, 2, 7), _ints(10))
+    assert_equal(len(b.platform_gated), 1)
+
+
+def test_a_use_in_the_condition_of_a_comptime_if_is_live() raises:
+    var src = String(
+        "def driver(x: Int) -> Int:\n"        # 1
+        "    comptime if cond(x):\n"          # 2  evaluated whichever arm is compiled
+        "        return 1\n"                  # 3
+        "    return 0\n"                      # 4
+        "\n"                                  # 5
+        "def cond(x: Int) -> Bool:\n"         # 6
+        "    return True\n"                   # 7
+    )
+    var a = _one(src, _ints(1, 4), _ints(7))
+    assert_equal(len(a.platform_gated), 0)
+
+
+def test_functions_that_call_only_each_other_from_a_dropped_arm_stay_counted() raises:
+    var src = String(
+        "def driver(x: Int) -> Int:\n"        # 1
+        "    comptime if D:\n"                # 2
+        "        return ping(x)\n"            # 3
+        "    return x\n"                      # 4
+        "\n"                                  # 5
+        "def ping(x: Int) -> Int:\n"          # 6
+        "    return pong(x)\n"                # 7
+        "\n"                                  # 8
+        "def pong(x: Int) -> Int:\n"          # 9
+        "    return ping(x)\n"                # 10
+    )
+    var a = _one(src, _ints(1, 4), _ints(7, 10))
+    assert_equal(len(a.platform_gated), 0)
+
+
 def main() raises:
     test_every_caller_in_a_dropped_arm_is_gated_and_a_chain_of_them_too()
     test_a_live_caller_a_missing_caller_or_a_compiled_arm_keeps_a_function_counted()
     test_what_is_gated_is_in_the_result_and_the_summary()
     test_with_no_uncompiled_report_nothing_is_gated()
+    test_a_use_that_is_not_a_plain_call_keeps_a_function_counted()
+    test_an_arm_is_dropped_only_when_no_line_of_it_has_a_record()
+    test_a_use_in_the_condition_of_a_comptime_if_is_live()
+    test_functions_that_call_only_each_other_from_a_dropped_arm_stay_counted()

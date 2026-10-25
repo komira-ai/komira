@@ -321,6 +321,135 @@ def test_a_method_call_is_evidence_for_a_method_and_a_bare_call_for_a_free_funct
     assert_false(10 in h2)
 
 
+def _evidence_run(src: String, other_pkg: Bool, uncompiled: List[Int], hit_in_lib: List[Int]) raises -> Analysis:
+    """`src` is src/mp's file; the hit call `foo(1)` is on line 1 of a file of src/mp (the second file `other.mojo`),
+    or of src/other when `other_pkg`."""
+    var other = String("src/other/src/other/o.mojo") if other_pkg else String("src/mp/src/mp/other.mojo")
+    var files = List[String]()
+    files.append("src/mp/BUCK")
+    files.append(LIB)
+    files.append(other)
+    if other_pkg:
+        files.append("src/other/BUCK")
+    var s = Sources(String(""))
+    s.texts[String(LIB)] = src
+    s.texts[other] = String("x = foo(1)\n")
+    var l = List[Input]()
+    l.append(_report(String(UNCOMPILED_REPORT), uncompiled, 0))
+    l.append(_report(String(TEST_REPORT), hit_in_lib, 1))
+    l.append(Input(
+        String(FORMAT_COBERTURA), String(""), String("buck-out/v2/art/komira/x/src/mp/__test_c__cov__/test_c__cov.cobertura.xml"),
+        String("<coverage><packages><package name=\"\"><classes><class name=\"o\" filename=\"") + other
+        + String("\"><lines><line number=\"1\" hits=\"1\"/></lines></class></classes></package></packages></coverage>"),
+    ))
+    return analyze(l, List[Input](), repo_files_of(files), Held(), s, Options())
+
+
+def test_a_hit_call_in_another_package_is_no_evidence() raises:
+    var src = String(
+        "@always_inline\n"                    # 1
+        "def foo(x: Int) -> Int:\n"           # 2
+        "    return x\n"                      # 3
+        "\n"                                  # 4
+        "def driver(x: Int) -> Int:\n"        # 5
+        "    return x\n"                      # 6
+    )
+    # The hit `foo(1)` is in a file of the same package: left out. In another package: counted.
+    var same = _evidence_run(src, False, _ints(3), _ints(5, 6))
+    assert_equal(same.excluded_lines(), 1)
+    var other = _evidence_run(src, True, _ints(3), _ints(5, 6))
+    assert_equal(other.excluded_lines(), 0)
+    assert_true(3 in other.files[other.file_index(String(LIB))].hits)
+
+
+def test_a_name_the_package_declares_twice_is_no_evidence_for_a_free_function() raises:
+    # `foo` is declared in lib.mojo (inlined, uncalled) and in other.mojo: a call of the name could be either.
+    var src = String(
+        "@always_inline\n"                    # 1
+        "def foo(x: Int) -> Int:\n"           # 2
+        "    return x\n"                      # 3
+        "\n"                                  # 4
+        "def driver(x: Int) -> Int:\n"        # 5
+        "    return x\n"                      # 6
+    )
+    var files = List[String]()
+    files.append("src/mp/BUCK")
+    files.append(LIB)
+    files.append("src/mp/src/mp/other.mojo")
+    var s = Sources(String(""))
+    s.texts[String(LIB)] = src
+    s.texts[String("src/mp/src/mp/other.mojo")] = String("def foo(x: Int) -> Int:\n    return foo(x)\n")
+    var l = List[Input]()
+    l.append(_report(String(UNCOMPILED_REPORT), _ints(3), 0))
+    l.append(_report(String(TEST_REPORT), _ints(5, 6), 1))
+    l.append(Input(
+        String(FORMAT_COBERTURA), String(""), String("buck-out/v2/art/komira/x/src/mp/__test_c__cov__/test_c__cov.cobertura.xml"),
+        String("<coverage><packages><package name=\"\"><classes><class name=\"o\" filename=\"src/mp/src/mp/other.mojo\"><lines><line number=\"2\" hits=\"1\"/></lines></class></classes></package></packages></coverage>"),
+    ))
+    var a = analyze(l, List[Input](), repo_files_of(files), Held(), s, Options())
+    assert_equal(a.excluded_lines(), 0)
+    assert_true(3 in a.files[a.file_index(String(LIB))].hits)
+
+
+def test_a_method_is_told_by_the_type_its_call_names() raises:
+    # `A.ne` and `B.ne` are both inlined and uncompiled, and `ne` is declared twice. The hit call is
+    # `A(x).ne(1)`: its receiver names A, so A's lines are left out and B's are counted.
+    var src = String(
+        "struct A:\n"                         # 1
+        "    @always_inline\n"                # 2
+        "    def ne(self, o: Int) -> Bool:\n" # 3
+        "        return o == 1\n"             # 4
+        "\n"                                  # 5
+        "struct B:\n"                         # 6
+        "    @always_inline\n"                # 7
+        "    def ne(self, o: Int) -> Bool:\n" # 8
+        "        return o == 2\n"             # 9
+        "\n"                                  # 10
+        "def driver(x: Int) -> Bool:\n"       # 11
+        "    return A(x).ne(1)\n"             # 12
+    )
+    var files = List[String]()
+    files.append("src/mp/BUCK")
+    files.append(LIB)
+    var s = Sources(String(""))
+    s.texts[String(LIB)] = src
+    var l = List[Input]()
+    l.append(_report(String(UNCOMPILED_REPORT), _ints(3, 4, 8, 9), 0))
+    l.append(_report(String(TEST_REPORT), _ints(11, 12), 1))
+    var a = analyze(l, List[Input](), repo_files_of(files), Held(), s, Options())
+    var h = a.files[a.file_index(String(LIB))].hits.copy()
+    assert_false(3 in h)
+    assert_false(4 in h)
+    assert_true(8 in h)
+    assert_true(9 in h)
+
+
+def test_a_call_named_inside_a_multi_line_string_is_no_evidence() raises:
+    # Line 3 is the interior of a triple-quoted string; a report that marks it hit does not make it a call.
+    var src = String(
+        "def driver(x: Int) -> Int:\n"        # 1
+        "    var s = \"\"\"\n"             # 2
+        "inl_called(1)\n"                     # 3
+        "\"\"\"\n"                         # 4
+        "    return x\n"                      # 5
+        "\n"                                  # 6
+        "@always_inline\n"                    # 7
+        "def inl_called(x: Int) -> Int:\n"    # 8
+        "    return x\n"                      # 9
+    )
+    var files = List[String]()
+    files.append("src/mp/BUCK")
+    files.append(LIB)
+    var s = Sources(String(""))
+    s.texts[String(LIB)] = src
+    var l = List[Input]()
+    l.append(_report(String(UNCOMPILED_REPORT), _ints(9), 0))
+    l.append(_report(String(TEST_REPORT), _ints(1, 2, 3, 5), 1))
+    var a = analyze(l, List[Input](), repo_files_of(files), Held(), s, Options())
+    assert_equal(a.excluded_lines(), 0)
+    assert_true(9 in a.files[a.file_index(String(LIB))].hits)
+
+
 def main() raises:
     test_a_function_a_test_called_is_left_out_and_the_rest_is_counted()
     test_a_function_nobody_calls_is_counted_whatever_its_class()
@@ -332,4 +461,8 @@ def main() raises:
     test_a_file_the_report_leaves_nothing_of_counts_like_one_no_report_names()
     test_a_declaration_is_no_evidence_that_a_function_is_called()
     test_a_method_call_is_evidence_for_a_method_and_a_bare_call_for_a_free_function()
+    test_a_hit_call_in_another_package_is_no_evidence()
+    test_a_name_the_package_declares_twice_is_no_evidence_for_a_free_function()
+    test_a_method_is_told_by_the_type_its_call_names()
+    test_a_call_named_inside_a_multi_line_string_is_no_evidence()
     test_the_names_that_set_the_reports_apart()

@@ -113,6 +113,9 @@ struct FnDecl(Copyable, Movable):
     # The own lines inside a `comptime if`/`elif`/`else` or `@parameter` arm (its gate line
     # included): the lines a platform or build can drop (see the module header).
     var arms: List[Int]
+    # Each arm as a block: its own lines after its gate line (the `comptime if`/`elif`/`else` or `@parameter`
+    # line, whose condition is evaluated whichever arm is compiled).
+    var arm_blocks: List[List[Int]]
 
     def __init__(out self, name: String, line: Int, end: Int):
         self.name = name
@@ -121,6 +124,7 @@ struct FnDecl(Copyable, Movable):
         self.lines = List[Int]()
         self.kind = String(KIND_PLAIN)
         self.arms = List[Int]()
+        self.arm_blocks = List[List[Int]]()
 
 
 def _first_word_is_def(text: String) -> Int:
@@ -337,9 +341,14 @@ def _declarations(text: String, mut requirements: List[FnDecl]) -> List[FnDecl]:
                         stop = j
                         break
                     j += 1
+                var blk = List[Int]()
                 for ln in range(start + 1, stop + 1):
                     if ln in own:
                         out[k].arms.append(ln)
+                        if ln > start + 1:
+                            blk.append(ln)
+                if len(blk) > 0:
+                    out[k].arm_blocks.append(blk^)
                 # An `elif` or `else` at the same indent continues a compile-time chain: its block is an arm too.
                 if stop < n and ls[stop].code and not starts_in_string[stop] and _indent(ls[stop].text) == ind and _continues_chain(_code_of(ls[stop])):
                     start = stop
