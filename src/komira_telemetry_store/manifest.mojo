@@ -75,6 +75,7 @@ from komira_objectstore.cas_manifest import (
     CasManifestStore,
     RetryPolicy,
     decode_head,
+    is_not_found,
 )
 from komira_objectstore.store import (
     CloneableConditionalWriteStore,
@@ -96,21 +97,6 @@ from komira_telemetry_store.segment_entry import (
     encode_telemetry_segment_entry,
     uuid_in_flat,
 )
-
-
-def _is_absent(msg: String) -> Bool:
-    """Is this error the store's not-found arm?
-
-    Spelled here rather than imported: the CAS manifest's matcher is
-    module-private, and the replay's STOP RULE keys on it — a matcher that
-    silently stopped matching would turn the forward probe into a truncation.
-    Same four needles, deliberately."""
-    return (
-        msg.find("not_found") >= 0
-        or msg.find("NotFound") >= 0
-        or msg.find("404") >= 0
-        or msg.find("NoSuchKey") >= 0
-    )
 
 
 @fieldwise_init
@@ -171,7 +157,7 @@ struct TelemetrySegmentManifest[Storage: ConditionalWriteStore](
             var raw = self._manifest.get_object(self._manifest.prefix() + "/_HEAD")
             return decode_head(raw).chunk_seq
         except e:
-            if _is_absent(String(e)):
+            if is_not_found(String(e)):
                 return Int64(-1)
             raise e^
 
@@ -194,7 +180,7 @@ struct TelemetrySegmentManifest[Storage: ConditionalWriteStore](
                     )
                 )
             except e:
-                if not _is_absent(String(e)):
+                if not is_not_found(String(e)):
                     raise e^
             seq += Int64(1)
         # (b) the deferred-advance tail: STRICT stop at the first not-found.
@@ -203,7 +189,7 @@ struct TelemetrySegmentManifest[Storage: ConditionalWriteStore](
             try:
                 chunk = self._manifest.read_chunk(seq)
             except e:
-                if _is_absent(String(e)):
+                if is_not_found(String(e)):
                     break
                 raise e^
             out.append(
