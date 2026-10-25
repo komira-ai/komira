@@ -40,6 +40,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   empty drain touches the store zero times; the object is written before its
 #   entry is appended (recording store), and a failed write or append keeps the
 #   points pending.
+# - test_object_store_metric_sink_days: a flush spanning UTC days that fails on a
+#   later day retries only the uncommitted days (no duplicated rows).
+# - test_split_log_search_faults: the scan keeps a zero-timestamp hit through a
+#   window that excludes zero, and raises on a missing or corrupt split.
 # - test_split_log_search_route: splits published by the real build task are
 #   read back through the log-query seam and route: newest first with the
 #   publish sequence breaking a millisecond tie, a true total, a window filter,
@@ -64,6 +68,7 @@ mojo_library(
         "//src/komira_column_kernels:komira_column_kernels",
         "//src/komira_compression:komira_compression",
         "//src/komira_counters:komira_counters",
+        "//src/komira_crypto:komira_crypto",
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_fork_join:komira_fork_join",
         "//src/komira_fs:komira_fs",
@@ -110,6 +115,8 @@ mojo_library(
         "tests/test_log_native_indexing_l1.mojo",
         "tests/test_log_native_indexing_lread.mojo",
         "tests/test_object_store_metric_sink.mojo",
+        "tests/test_object_store_metric_sink_days.mojo",
+        "tests/test_split_log_search_faults.mojo",
         "tests/test_split_log_search_route.mojo",
         "tests/test_telemetry_codec_agreement.mojo",
         "tests/test_telemetry_log_base_artifact.mojo",

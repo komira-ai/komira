@@ -166,15 +166,15 @@ struct SplitIndexLogSearch[Storage: CloneableConditionalWriteStore](
                 Path.parse(live[i].summary.object_key)
             )
             var view = SplitView.parse(bytes^)
-            var q = self._query_for(query, want)
+            var ir = self._query_for(query, want)
             var res: SearchResult
             # The move happens in exactly one arm: `search_l0_split` borrows the
             # view, `SearchCore.from_view` consumes it.
             if view.has_l0_posting():
-                res = search_l0_split(view, q)
+                res = search_l0_split(view, ir)
             else:
                 var core = SearchCore.from_view(view^)
-                res = core.search(q)
+                res = core.search(ir)
             total += res.total_matches
             pages.append(_hits_of(res^))
             seqs.append(live[i].chunk_seq)
@@ -231,7 +231,9 @@ def _hits_of(var res: SearchResult) raises -> List[ServiceLogHit]:
     var keys = res.take_sort_keys()
     var rows = batch.num_rows()
     var typed = (
-        keys.mode == SORT_MODE_I64 and len(keys.key_i64) == rows
+        keys.mode == SORT_MODE_I64
+        and len(keys.key_i64) == rows
+        and len(keys.missing) == rows
     )
     var scores = batch.column_at(0).as_primitive[DType.float64]()
     var sources = batch.column_at(2).as_string()

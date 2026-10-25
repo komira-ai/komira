@@ -588,7 +588,11 @@ def test_07_the_pending_buffer_is_bounded_and_drops_the_oldest_loudly() raises:
         pts.append(
             counter_point(UInt32(1), UInt32(1), UInt32(0), Int64(i), t, t)
         )
-    assert_equal(sink.offer_points(pts^), 5, "7: five offered")
+    assert_equal(
+        sink.offer_points(pts^),
+        3,
+        "7: five offered, only the newest three of them are pending",
+    )
     assert_equal(sink.buffered_points(), 3, "7: three retained")
     assert_equal(
         sink.points_dropped(),

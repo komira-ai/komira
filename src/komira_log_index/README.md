@@ -64,8 +64,5 @@ every setting is an argument.
   manifest publish sequence as the tie-break, and filters to the time window.
   It requires a search term: the split catalog carries no time range.
 
-This package is split across three pull requests. The L0 index, build task and
-idle hook (`transpose`, `l0_index`, `l0_read`, `l0_build_task`,
-`idle_index_hook`) and the metric and split-search modules above are here; the
-flush stage, handoff queue and consumer that feed the index are in their own
-change.
+The flush stage, handoff queue and consumer that feed the index are not in this
+package.

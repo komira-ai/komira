@@ -67,7 +67,7 @@ from komira_metrics.metric_point import MetricPoint
 
 from komira_parquet_api.types import CompressionCodec
 
-from komira_telemetry_store.keys import TELEMETRY_ROOT
+from komira_telemetry_store.keys import TELEMETRY_ROOT, day_index_from_ns
 from komira_telemetry_store.metric_writer import (
     TELEMETRY_METRIC_ROWS_PER_ROW_GROUP,
     TelemetryMetricSegmentWriter,
@@ -178,8 +178,12 @@ struct ObjectStoreMetricSink[Storage: CloneableConditionalWriteStore](
     # -------------------------------------------------------------------------
 
     def offer_points(mut self, var points: List[MetricPoint]) -> Int:
-        """Accept a drain's owned points into the pending buffer. Returns the
-        number ACCEPTED (which is `len(points)` unless the ceiling bit).
+        """Accept a drain's owned points into the pending buffer. Returns how
+        many points OF THIS OFFER are pending afterwards: `len(points)` unless
+        the ceiling bit, and fewer when it dropped some of them (a single offer
+        larger than the ceiling keeps only its newest `buffer_max`). Older
+        buffered points the ceiling also evicts are not subtracted; read
+        `points_dropped()` for the cumulative loss.
 
         Does not raise and does not publish: an offer is a hand-off, and a
         producer on the serve thread must not be able to take an encoder error.
@@ -191,9 +195,8 @@ struct ObjectStoreMetricSink[Storage: CloneableConditionalWriteStore](
         if n == 0:
             _ = points^
             return 0
-        for i in range(n):
-            self._buf.append(points[i].copy())
-        _ = points^
+        var before = len(self._buf)
+        self._buf.extend(points^)
         # Overflow drops the oldest. See DEFAULT_METRIC_BUFFER_MAX.
         var over = len(self._buf) - self._buf_max
         if over > 0:
@@ -202,6 +205,11 @@ struct ObjectStoreMetricSink[Storage: CloneableConditionalWriteStore](
                 keep.append(self._buf[i].copy())
             self._buf = keep^
             self._points_dropped += Int64(over)
+            # The oldest `over` points go first: the buffered ones, then this
+            # offer's own leading points.
+            var from_offer = over - before
+            if from_offer > 0:
+                return n - from_offer
         return n
 
     # -------------------------------------------------------------------------
@@ -210,8 +218,8 @@ struct ObjectStoreMetricSink[Storage: CloneableConditionalWriteStore](
 
     def _publish_buffer(mut self) raises -> Int:
         """The one flush body. Transpose the pending points, publish the
-        `metrics` base artifact(s), clear the buffer. Returns the number of
-        points published.
+        `metrics` base artifact(s), clear what was published. Returns the number
+        of points published.
 
         One body, not two copies. `flush_pending_now` and `final_flush` differ
         only in what they are called for, and the ordering inside is the thing
@@ -226,26 +234,70 @@ struct ObjectStoreMetricSink[Storage: CloneableConditionalWriteStore](
         an empty 0-row batch would otherwise be built and concatenated on every
         idle serve iteration.
 
-        The buffer is cleared only after the publish returns. A publish that
-        raises leaves the points pending, so the next flush retries them rather
-        than dropping them — for a counter that is the difference between a gap
-        and a wrong rate."""
-        var n = len(self._buf)
-        if n == 0:
+        The points are published one UTC day at a time, oldest day first, and a
+        day's points leave the buffer only after that day's publish returned.
+        The writer commits day by day, so a failure on a later day must not
+        leave the earlier, already committed day pending: the retry would
+        publish it twice, and a duplicated counter delta is a wrong rate. A
+        publish that raises leaves the uncommitted days pending, so the next
+        flush retries exactly those — for a counter that is the difference
+        between a gap and a wrong rate. Within one day the writer puts the
+        object and then appends its entry, so a failure there leaves at most an
+        unreferenced object, never a duplicated row."""
+        if len(self._buf) == 0:
             return 0
-        var batch = metric_points_to_record_batch(self._buf)
-        var slab = Slab[RecordBatch](capacity=1)
-        slab.append(batch^)
-        var entries = self._writer.publish_batches(slab^)
-        # Cleared here — AFTER the publish returned without raising.
-        self._buf = List[MetricPoint]()
+        var days = List[Int64]()
+        for i in range(len(self._buf)):
+            var d = day_index_from_ns(Int64(self._buf[i].time_unix_ns))
+            var seen = False
+            for k in range(len(days)):
+                if days[k] == d:
+                    seen = True
+                    break
+            if not seen:
+                days.append(d)
+        # Oldest day first (insertion sort; a flush spans a handful of days).
+        for i in range(1, len(days)):
+            var j = i
+            while j > 0 and days[j - 1] > days[j]:
+                var tmp = days[j - 1]
+                days[j - 1] = days[j]
+                days[j] = tmp
+                j -= 1
         var published = Int64(0)
-        for k in range(len(entries)):
-            self._segments_published += Int64(1)
-            published += entries[k].row_count
-        self._points_published += published
-        if len(entries) > 0:
-            self._flush_publishes += Int64(1)
+        var counted_flush = False
+        for k in range(len(days)):
+            var batch: RecordBatch
+            var rest = List[MetricPoint]()
+            if len(days) == 1:
+                batch = metric_points_to_record_batch(self._buf)
+            else:
+                var group = List[MetricPoint]()
+                for i in range(len(self._buf)):
+                    if (
+                        day_index_from_ns(Int64(self._buf[i].time_unix_ns))
+                        == days[k]
+                    ):
+                        group.append(self._buf[i].copy())
+                    else:
+                        rest.append(self._buf[i].copy())
+                batch = metric_points_to_record_batch(group)
+            var slab = Slab[RecordBatch](capacity=1)
+            slab.append(batch^)
+            var entries = self._writer.publish_batches(slab^)
+            # This day's points leave the buffer only now, AFTER its publish
+            # returned without raising.
+            self._buf = rest^
+            var day_rows = Int64(0)
+            for e in range(len(entries)):
+                self._segments_published += Int64(1)
+                day_rows += entries[e].row_count
+            # Counted per day, so a later day's failure keeps this day's tally.
+            self._points_published += day_rows
+            published += day_rows
+            if len(entries) > 0 and not counted_flush:
+                self._flush_publishes += Int64(1)
+                counted_flush = True
         return Int(published)
 
     def flush_pending_now(mut self) raises -> Int:
