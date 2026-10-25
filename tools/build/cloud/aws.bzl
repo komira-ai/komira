@@ -18,8 +18,15 @@
         ],
     )
 
-is two targets:
+is three targets, built from committed sources (tools/build/gen/README.md):
+`generated/<name>/` of the package holds what the generator wrote, and the
+library is built from those files and nothing else. A library still in the
+transition ledger (tools/build/gen/transition.bzl) has two targets and is built
+from the generator, as described next; it has no `<name>_fresh`, and `[gen]`.
 
+  * `<name>_fresh` (committed form), the library's first gate: it regenerates
+    through `<name>_gen`, compares with `generated/<name>/` and fails, with the
+    command that rewrites the directory, when the two differ.
   * `<name>_gen`, the generation action: komira//tools/build/proto-codegen:
     aws-client-gen writes `gen/<name>/` with `__init__.mojo`, the module
     `<name>.mojo` and `_layout_probe.mojo` (one `size_of` per emitted
@@ -135,6 +142,7 @@ Every refusal of the rule happens at analysis, in `<name>_gen`, so a BUCK
 file with one wrong mojo_aws_client still loads.
 """
 
+load("@komira//tools/build/gen:defs.bzl", "committed_data", "committed_sources", "declare_fresh", "declare_uncommitted", "declare_unmigrated", "generated_state")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
@@ -151,7 +159,13 @@ _ENV_SCAN = "_no_env_reads.mojo"
 # The directory of the parts of a module the generator split (the Rust crate's
 # `split::PARTS_DIR`, the Zig actions' `act_util.parts_dir`).
 _PARTS = "_parts"
-_ENV_SCAN_PATH = "tests/" + _ENV_SCAN
+#
+# The scan is a test that exists only in the build, so it is staged in a directory
+# no package has (`_generated_tests/`), not in the package's `tests/`: covcheck
+# (tools/build/coverage/covcheck/paths.mojo, generated_test_main) sets a report's
+# own generated test aside only when its directory is none of the repository's, and
+# a path in a real `tests/` directory would be a missing file of the checkout.
+_ENV_SCAN_PATH = "_generated_tests/" + _ENV_SCAN
 
 # What the scan refuses in every file of the package, and, with a ruleset,
 # what it refuses beside them (komira_aws_core's endpoint path for a client
@@ -598,6 +612,31 @@ _aws_client_gen = rule(
     },
 )
 
+def _committed_client(name, gen, state, deps, test_srcs, test_data, kwargs):
+    """The library of a client whose generated sources are committed (tools/build/gen/defs.bzl).
+
+    Its sources are `generated/<name>/*.mojo` less the layout probe, which is
+    its first test; the environment scan is still written by `<name>_gen`
+    (analysis only: it does not read the generator's output) and reads the
+    committed files. `<name>_fresh` is the first gate.
+    """
+    declare_fresh(name, ":" + gen, state, kwargs.get("visibility"))
+    srcs = committed_sources(state, [_LAYOUT_PROBE])
+    if not srcs:
+        declare_uncommitted(name, ":" + gen, state, kwargs.get("visibility"))
+        return
+    probe = [f for f in state.files if f.rsplit("/", 1)[-1] == _LAYOUT_PROBE]
+    scan_data = committed_data(name, "gen", ".mojo")
+    mojo_library(
+        name = name,
+        srcs = srcs,
+        deps = deps,
+        fresh_gate = ":" + name + "_fresh",
+        test_data = test_data | {_ENV_SCAN_PATH: scan_data},
+        test_srcs = probe + [":{}[{}]".format(gen, _ENV_SCAN)] + test_srcs,
+        **kwargs
+    )
+
 def _aws_client(
         name,
         model,
@@ -637,6 +676,13 @@ def _aws_client(
         **vis
     )
 
+    state = generated_state(name)
+    if not state.legacy:
+        _committed_client(name, gen, state, deps, test_srcs, test_data, vis | kwargs)
+        return
+
+    # The transition (tools/build/gen/transition.bzl): built from the generator.
+    declare_unmigrated(name, state)
     # The file names the generation action is held to (it refuses a missing,
     # empty or extra file), so they can be named here. A hand_srcs entry that
     # is not a `.mojo` path is left out rather than turned into a sub-target

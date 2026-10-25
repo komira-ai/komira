@@ -109,6 +109,20 @@ def test_unmapped_repository_paths_stay_errors() raises:
     assert_true(e.startswith(prefix), e)
 
 
+def test_generated_environment_scan_is_a_test_source_only_outside_tests() raises:
+    # mojo_aws_client's generated environment scan is staged at
+    # `_generated_tests/_no_env_reads.mojo` of its package (a directory no package
+    # has), and its report names that path: a test source, no error. Staged in the
+    # package's real tests/ directory it would be a file missing from the checkout.
+    var origin = String("buck-out/v2/art/komira/03cc1a891c89e4be/src/komira_gcp_firestore/__komira_gcp_firestore_v1__/cov/tests/_no_env_reads.xml")
+    var r = List[Input]()
+    r.append(_report(origin, String(PKG) + "/_generated_tests/_no_env_reads.mojo"))
+    var a = _run(r, Options())
+    assert_equal(a.excluded_test_files, 1)
+    var e = _error_of(origin, String(PKG) + "/tests/_no_env_reads.mojo")
+    assert_true(e.startswith(String("unmapped paths")) and e.find("tests/_no_env_reads.mojo") >= 0, e)
+
+
 def test_report_test_main() raises:
     assert_equal(report_test_main(String(LISTEN)), String("_layout_probe.mojo"))
     assert_equal(report_test_main(String("a/cov/branch/test_x.info")), String("test_x.mojo"))
@@ -128,5 +142,6 @@ def test_report_test_main() raises:
 def main() raises:
     test_generated_layout_probes_are_test_sources()
     test_unmapped_repository_paths_stay_errors()
+    test_generated_environment_scan_is_a_test_source_only_outside_tests()
     test_report_test_main()
     print("test_generated_tests: PASS")
