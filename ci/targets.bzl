@@ -266,6 +266,7 @@ TARGETS = [
     "komira//src/komira_plan_wire:plan_wire_hostile_undeclared_enum",
     "komira//src/komira_plan_wire:plan_wire_hostile_undeclared_enum_only",
     "komira//src/komira_pplan_wire:komira_pplan_wire_conda",
+    "komira//src/komira_proto_codec:copy_hazard_proto_conda",
     "komira//src/komira_proto_codec:implicit_presence_proto_conda",
     "komira//src/komira_proto_codec:test_copy_hazard",
     "komira//src/komira_proto_codec:test_float32_json_binades_0_0",
