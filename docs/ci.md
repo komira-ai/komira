@@ -448,7 +448,7 @@ stage, with the run number, and no step of `mopm-stage` runs it.
 #### Verifying the beta publish
 
 `mopm-e2e-beta` runs after `mopm-publish-beta` and answers one question: **are the files the beta
-registry serves the bytes that were staged, and do the README examples of every package run on them?**
+registry serves the bytes that were staged, and do the README examples of the packages in the staged plan run on them?**
 `mopm-e2e-beta` makes only GET requests and holds no credential. It runs three steps, in this order
 (`//:release_workflow_cases` holds the order, the gate, the environment and the permissions):
 
@@ -458,8 +458,8 @@ registry serves the bytes that were staged, and do the README examples of every 
    [`release_beta_fetch`](../tools/build/ci/release_beta_fetch/release_beta_fetch.zig)
    (`//tools/build/ci:release_beta_fetch`, built on the farm by this job and run on the runner,
    because it makes requests; mopm 0.0.57 has no verb that fetches a file) reads the beta index
-   (`api.beta.mopm.dev/index/config.json`), requires its `stage` to be `beta`, takes its
-   `channel_url`, and downloads `<channel_url><subdir>/<filename>` for every file of the plan, with the
+   (`api.beta.mopm.dev/index/config.json`), requires its `stage` to be `beta`, requires its
+   `channel_url` to be exactly `https://conda.beta.mopm.dev/` (a constant of the tool; any other URL is refused), and downloads `<channel_url><subdir>/<filename>` for every file of the plan, with the
    exact name and version the plan names, following no redirect and speaking only https. It compares
    each file's **sha256 and size** with the plan and **fails the job, naming every file that differs**
    (a package that was not published, another size, another hash). Only when every file matches does
@@ -474,10 +474,12 @@ registry serves the bytes that were staged, and do the README examples of every 
    mopm, and the README examples are compiled and run against the installed copy
    ([`tools/build/readme_e2e`](../tools/build/readme_e2e/README.md)).
 
-**What this proves.** The files the beta channel served at the end of the run are, byte for byte
-(sha256 and size), the files staged by `mopm-stage-beta` and sent by `mopm-publish-beta`; and the
-README examples of every package (the `readme`, `compile` and `run` phases) pass on those downloaded
-bytes.
+**What this proves.** Exactly this is compared: each published file of the staged plan (the files
+the plan lists, by subdirectory and file name), as the beta channel served it at the end of the run,
+against the sha256 and the size the staged plan holds for it. The plan is what `mopm-stage-beta` staged
+and `mopm-publish-beta` sent, so a match means the registry serves the staged bytes for every file in
+the staged plan. Then the README examples (the `readme`, `compile` and `run` phases) of the packages in
+that plan pass on those downloaded bytes.
 
 **What it does not prove.**
 - A package's own unit tests are not in the `.conda` and do not run here: they ran when its `.mojoc`
@@ -490,8 +492,10 @@ bytes.
   not looked for.
 
 `release_beta_fetch` refuses a plan it cannot check (no member, a member that is not an `upload`, a
-path that leaves its directory, a malformed sha256, a name listed twice) before it makes a request, and
-writes nothing unless every file matched. Its cases
+path that leaves its directory, a malformed sha256, a file above 64 MiB, a name listed twice, two
+paths of the set that collide, in any letter case) before it makes a request, and leaves no `--out`
+unless every file matched and every write succeeded (it writes next to `--out` and moves the directory
+into place). A file is capped at 64 MiB whatever size the plan declares. Its cases
 (`//tools/build/ci:release_beta_fetch_unit`) run against a registry in memory and a socket on
 loopback, and cover a changed byte, another size, a missing package, an index of another stage, and
 a redirect, and that the staged `.conda` files are never what is written.

@@ -118,7 +118,7 @@ fn channel(config: rbf.Got, stage: []const u8) !void {
     defer ar.deinit();
     var fake = Fake{ .routes = &.{.{ .url = CONFIG_URL, .got = config }} };
     var why: []const u8 = "";
-    const got = rbf.channelOf(ar.allocator(), &why, fake.fetcher(), CONFIG_URL, stage);
+    const got = rbf.channelOf(ar.allocator(), &why, fake.fetcher(), CONFIG_URL, stage, null);
     if (got) |c| {
         try t.expectEqualStrings(CHANNEL, c);
     } else |_| return error.Refused;
@@ -129,7 +129,7 @@ fn channelRefused(config: rbf.Got, stage: []const u8, needle: []const u8) !void 
     defer ar.deinit();
     var fake = Fake{ .routes = &.{.{ .url = CONFIG_URL, .got = config }} };
     var why: []const u8 = "";
-    try refusedWith(&why, rbf.channelOf(ar.allocator(), &why, fake.fetcher(), CONFIG_URL, stage), needle);
+    try refusedWith(&why, rbf.channelOf(ar.allocator(), &why, fake.fetcher(), CONFIG_URL, stage, null), needle);
 }
 
 test "the channel is the one the beta index names" {
@@ -141,7 +141,7 @@ test "a channel_url without its closing slash gets one" {
     defer ar.deinit();
     var fake = Fake{ .routes = &.{.{ .url = CONFIG_URL, .got = .{ .body = @constCast("{\"channel_url\":\"https://c.example.test/x\",\"stage\":\"beta\"}") } }} };
     var why: []const u8 = "";
-    try t.expectEqualStrings("https://c.example.test/x/", try rbf.channelOf(ar.allocator(), &why, fake.fetcher(), CONFIG_URL, "beta"));
+    try t.expectEqualStrings("https://c.example.test/x/", try rbf.channelOf(ar.allocator(), &why, fake.fetcher(), CONFIG_URL, "beta", null));
 }
 
 test "an index of another stage is refused: a beta check cannot read prod" {
@@ -270,7 +270,7 @@ const Scene = struct {
 
 fn runScene(a: std.mem.Allocator, s: *Scene, fake: *Fake, why: *[]const u8) !rbf.Report {
     var sink = std.Io.Writer.Allocating.init(a);
-    return rbf.run(a, why, s.staged, fake.fetcher(), CONFIG_URL, "beta", s.out, &sink.writer);
+    return rbf.run(a, why, s.staged, fake.fetcher(), CONFIG_URL, "beta", null, s.out, &sink.writer);
 }
 
 fn goodRoutes() [3]Route {
@@ -522,7 +522,7 @@ test "the job over the real client: published bytes pass, one altered byte fails
     try mentionsOne(refused.failures, "mojo-pa-0.1.9-mojo1.0.0_0.conda: http://127.0.0.1");
 
     var http = rbf.Http{ .allow_loopback = true };
-    const channel_url = try rbf.channelOf(a, &why, http.fetcher(), try srv.url(a, "/index/config.json"), "beta");
+    const channel_url = try rbf.channelOf(a, &why, http.fetcher(), try srv.url(a, "/index/config.json"), "beta", null);
     const good = try rbf.checkFiles(a, plan, http.fetcher(), channel_url, &sink.writer);
     try t.expectEqual(@as(usize, 0), good.failures.len);
     try t.expectEqual(@as(usize, 2), good.checked.len);
@@ -544,4 +544,125 @@ test "which URLs the client fetches" {
     try t.expect(!rbf.urlAllowed("https:///x", false));
     try t.expect(!rbf.urlAllowed("ftp://host.test/", false));
     try t.expect(!rbf.urlAllowed("", false));
+}
+
+// ---- round 2: collisions, pinned channel, size cap, atomic write, file counts ------------
+
+const ZERO = "0000000000000000000000000000000000000000000000000000000000000000";
+
+fn memberJson(a: std.mem.Allocator, name: []const u8, readme: []const u8, subdir: []const u8, filename: []const u8, size: u64) ![]u8 {
+    return std.fmt.allocPrint(a, "{{\"name\":\"{s}\",\"version\":\"0.1.1\",\"action\":\"upload\",\"readme\":\"{s}\",\"files\":[{{\"subdir\":\"{s}\",\"filename\":\"{s}\",\"sha256\":\"{s}\",\"size\":{d}}}]}}", .{ name, readme, subdir, filename, ZERO, size });
+}
+
+fn planOf(a: std.mem.Allocator, members: []const []const u8) ![]u8 {
+    return std.fmt.allocPrint(a, "{{\"members\":[{s}]}}", .{try std.mem.join(a, ",", members)});
+}
+
+test "paths of the set that collide are refused: a README on a subdir, on plan.json, on another README or file, in any letter case" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const f = "x.conda";
+    // a README whose path is the directory of the packages
+    try parseRefused(try planOf(a, &.{try memberJson(a, "p", "linux-64", "linux-64", f, 1)}), "collide");
+    // a README under a name that is a file
+    try parseRefused(try planOf(a, &.{try memberJson(a, "p", "linux-64/x.conda/README.md", "linux-64", f, 1)}), "collide");
+    // a README that is plan.json
+    try parseRefused(try planOf(a, &.{try memberJson(a, "p", "plan.json", "linux-64", f, 1)}), "collide");
+    try parseRefused(try planOf(a, &.{try memberJson(a, "p", "PLAN.json", "linux-64", f, 1)}), "collide");
+    // two members, one README
+    try parseRefused(try planOf(a, &.{ try memberJson(a, "p", "r/README.md", "linux-64", "a.conda", 1), try memberJson(a, "q", "r/README.md", "linux-64", "b.conda", 1) }), "collide");
+    // case variants of one file, of one README, of one member
+    try parseRefused(try planOf(a, &.{ try memberJson(a, "p", "p/README.md", "linux-64", "a.conda", 1), try memberJson(a, "q", "q/README.md", "linux-64", "A.CONDA", 1) }), "collide");
+    try parseRefused(try planOf(a, &.{ try memberJson(a, "p", "p/README.md", "linux-64", "a.conda", 1), try memberJson(a, "q", "P/readme.md", "linux-64", "b.conda", 1) }), "collide");
+    try parseRefused(try planOf(a, &.{ try memberJson(a, "p", "p/README.md", "linux-64", "a.conda", 1), try memberJson(a, "P", "r/README.md", "linux-64", "b.conda", 1) }), "listed twice");
+    // a directory named like a file of another subdir is fine
+    var why: []const u8 = "";
+    _ = try rbf.parsePlan(a, &why, try planOf(a, &.{ try memberJson(a, "p", "p/README.md", "linux-64", "a.conda", 1), try memberJson(a, "q", "q/README.md", "noarch", "a.conda", 1) }));
+}
+
+test "a file size above the cap is refused before any request" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    var why: []const u8 = "";
+    _ = try rbf.parsePlan(a, &why, try planOf(a, &.{try memberJson(a, "p", "p/README.md", "linux-64", "a.conda", rbf.max_file_bytes)}));
+    try parseRefused(try planOf(a, &.{try memberJson(a, "p", "p/README.md", "linux-64", "a.conda", rbf.max_file_bytes + 1)}), "cap");
+    try parseRefused(try planOf(a, &.{try memberJson(a, "p", "p/README.md", "linux-64", "a.conda", 1099511627776)}), "cap");
+}
+
+test "the beta channel is pinned to one URL: another host or path is refused, the exact one is used" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    var why: []const u8 = "";
+    const pin = rbf.beta_channel;
+    try t.expectEqualStrings("https://conda.beta.mopm.dev/", pin);
+    const route = struct {
+        fn of(body: []const u8) Route {
+            return .{ .url = CONFIG_URL, .got = .{ .body = @constCast(body) } };
+        }
+    };
+    var ok = Fake{ .routes = &.{route.of("{\"channel_url\":\"https://conda.beta.mopm.dev/\",\"stage\":\"beta\"}")} };
+    try t.expectEqualStrings(pin, try rbf.channelOf(a, &why, ok.fetcher(), CONFIG_URL, "beta", pin));
+    const bad = [_][]const u8{
+        "{\"channel_url\":\"https://conda.mopm.dev/\",\"stage\":\"beta\"}",
+        "{\"channel_url\":\"https://conda.beta.mopm.dev.evil.test/\",\"stage\":\"beta\"}",
+        "{\"channel_url\":\"https://evil.test/\",\"stage\":\"beta\"}",
+        "{\"channel_url\":\"https://conda.beta.mopm.dev/x/\",\"stage\":\"beta\"}",
+        "{\"channel_url\":\"https://conda.beta.mopm.dev\",\"stage\":\"beta\"}",
+        "{\"channel_url\":\"http://conda.beta.mopm.dev/\",\"stage\":\"beta\"}",
+        "{\"channel_url\":\"https://CONDA.beta.mopm.dev/\",\"stage\":\"beta\"}",
+    };
+    for (bad) |body| {
+        var fk = Fake{ .routes = &.{route.of(body)} };
+        try refusedWith(&why, rbf.channelOf(a, &why, fk.fetcher(), CONFIG_URL, "beta", pin), "is not the pinned channel");
+    }
+}
+
+test "a write that fails midway leaves no --out and no partial directory, and says why" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realpathAlloc(a, ".");
+    const out = try std.fs.path.join(a, &.{ root, "out" });
+    var why: []const u8 = "";
+    const entries = [_]rbf.Entry{
+        .{ .rel = "plan.json", .data = "{}" },
+        .{ .rel = "linux-64/a.conda", .data = "bytes" },
+        .{ .rel = "plan.json/inside", .data = "x" },
+    };
+    try refusedWith(&why, rbf.writeSet(a, &why, out, &entries), "cannot write");
+    try t.expect(why.len != 0);
+    var n: usize = 0;
+    var d1 = try tmp.dir.openDir(".", .{ .iterate = true });
+    defer d1.close();
+    var it = d1.iterate();
+    while (try it.next()) |_| n += 1;
+    try t.expectEqual(@as(usize, 0), n);
+    // the same entries without the one under a file are written whole, and an empty --out is replaced
+    try tmp.dir.makePath("out");
+    try rbf.writeSet(a, &why, out, entries[0..2]);
+    try t.expectEqualStrings("bytes", try tmp.dir.readFileAlloc(a, "out/linux-64/a.conda", 100));
+    var m: usize = 0;
+    var d2 = try tmp.dir.openDir(".", .{ .iterate = true });
+    defer d2.close();
+    var it2 = d2.iterate();
+    while (try it2.next()) |_| m += 1;
+    try t.expectEqual(@as(usize, 1), m);
+}
+
+test "the summary counts files, not lines: one file with a wrong size and hash is 1 of 2" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    var s = try Scene.init(a, try planText(a, BYTES_A, BYTES_B));
+    defer s.tmp.cleanup();
+    var routes = goodRoutes();
+    routes[2].got = .{ .body = @constCast("short") };
+    var fake = Fake{ .routes = &routes };
+    var why: []const u8 = "";
+    try refusedWith(&why, runScene(a, &s, &fake, &why), "1 of 2 file(s) are not what the plan staged");
 }

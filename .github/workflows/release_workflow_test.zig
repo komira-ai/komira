@@ -103,6 +103,10 @@ fn mentions(lines: []const []const u8, needle: []const u8) bool {
     return false;
 }
 
+/// What no line of the e2e job may contain: it sends nothing to a registry (a mopm verb that writes, the
+/// OIDC exchange, a hand-made PUT or POST).
+const e2e_forbidden = [_][]const u8{ "publish", "--oidc", "yank", "login", "curl", "wget", "-X PUT", "-X POST", "--request", "--data", "--upload-file" };
+
 /// Null if the job `mopm-e2e-beta` holds its contract, else the refusal: it verifies what the
 /// beta publish sent and sends nothing itself.
 fn checkE2e(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
@@ -121,10 +125,16 @@ fn checkE2e(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     }
     if (perms != 2) return "e2e-beta permissions hold more than contents and id-token";
     // it sends nothing and holds no credential
-    if (mentions(job, "MOPM_TOKEN") or mentions(job, "secrets.")) return "e2e-beta reads a secret";
+    // any reference to the secrets context, in any spelling (`secrets.X`, `secrets['X']`, `toJSON(secrets)`,
+    // `secrets: inherit`), and the registry token
     for (job) |l| {
-        if (std.mem.eql(u8, l, "    needs: mopm-publish-beta")) continue;
-        if (std.mem.indexOf(u8, l, "publish") != null or std.mem.indexOf(u8, l, "--oidc") != null) return "e2e-beta publishes or runs mopm";
+        if (std.ascii.indexOfIgnoreCase(l, "secrets") != null or std.mem.indexOf(u8, l, "MOPM_TOKEN") != null) return "e2e-beta reads a secret";
+    }
+    for (job) |l| {
+        if (std.mem.eql(u8, l, "    needs: mopm-publish-beta") or std.mem.eql(u8, l, GATE)) continue;
+        for (e2e_forbidden) |w| {
+            if (std.ascii.indexOfIgnoreCase(l, w) != null) return "e2e-beta publishes, yanks, logs in or writes to a registry";
+        }
     }
     if (mentions(job, "environment: beta")) return "e2e-beta holds the beta environment";
     // the order: the plan, the farm, the tool, the download and check, then the e2e
@@ -418,8 +428,14 @@ test "each defect planted in the mopm-e2e-beta job of the real release.yml is re
     // it sends nothing and holds no credential
     try expectRefused(ar, try replaced(ar, text, fetch_step, fetch_name ++ "        env:\n          MOPM_TOKEN: x\n" ++ E2E_FETCH_RUN ++ "\n"), "reads a secret");
     try expectRefused(ar, try replaced(ar, text, fetch_step, fetch_name ++ "        env:\n          X: ${{ secrets.OTHER }}\n" ++ E2E_FETCH_RUN ++ "\n"), "reads a secret");
-    try expectRefused(ar, try replaced(ar, text, run_step, "      - run: \"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged x --registry beta\n" ++ run_step), "publishes or runs mopm");
-    try expectRefused(ar, try replaced(ar, text, run_step, "      - run: mopm-x --oidc\n" ++ run_step), "publishes or runs mopm");
+    try expectRefused(ar, try replaced(ar, text, run_step, "      - run: \"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged x --registry beta\n" ++ run_step), "publishes, yanks");
+    try expectRefused(ar, try replaced(ar, text, run_step, "      - run: mopm-x --oidc\n" ++ run_step), "publishes, yanks");
+    // every spelling of the secrets context, and every verb that writes to a registry
+    const secret_spellings = [_][]const u8{ "          X: ${{ secrets['OTHER'] }}\n", "          X: ${{ toJSON(secrets) }}\n", "          X: ${{ SECRETS.OTHER }}\n", "          X: ${{ secrets }}\n" };
+    inline for (secret_spellings) |line| try expectRefused(ar, try replaced(ar, text, fetch_step, fetch_name ++ "        env:\n" ++ line ++ E2E_FETCH_RUN ++ "\n"), "reads a secret");
+    try expectRefused(ar, try replaced(ar, text, E2E_FETCH_RUN ++ "\n", E2E_FETCH_RUN ++ "\n        secrets: inherit\n"), "reads a secret");
+    const writers = [_][]const u8{ "mopm publish --staged x", "mopm yank komira_hash 0.1.1", "mopm login --registry beta", "curl -X PUT https://x.test/y", "curl -X POST https://x.test/y", "curl --request POST https://x.test/y", "wget --post-data=x https://x.test/y" };
+    inline for (writers) |cmd| try expectRefused(ar, try replaced(ar, text, run_step, "      - run: " ++ cmd ++ "\n" ++ run_step), "publishes, yanks");
     // the order: the plan, the farm and the tool, the download and check, then the e2e
     try expectRefused(ar, try replaced(ar, text, download_step, ""), "does not download the staged beta plan");
     const without_download = try replaced(ar, text, download_step, "");
