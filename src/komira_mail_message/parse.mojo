@@ -195,13 +195,19 @@ struct Part(Copyable, Movable):
         """This part's header block as written, with the empty line that ends
         it, as a view into `raw` (the message's bytes: `Message.raw()`).
         Nothing is copied. A part with no empty line ends at its last
-        octet."""
+        octet. `raw` must be this part's own message's bytes: a view too short
+        for the part's span gives an empty view."""
+        if self._start < 0 or self._body_start < self._start or self._body_start > raw.len():
+            return ByteView[lo]()
         return raw.sub(self._start, self._body_start - self._start)
 
     def body_bytes[
         lo: Origin[mut=False], //
     ](self, raw: ByteView[lo]) -> ByteView[lo]:
-        """This part's body as written, as a view into `raw`."""
+        """This part's body as written, as a view into `raw`; an empty view
+        when `raw` is too short for the part's span (see `header_bytes`)."""
+        if self._body_start < 0 or self._body_end < self._body_start or self._body_end > raw.len():
+            return ByteView[lo]()
         return raw.sub(self._body_start, self._body_end - self._body_start)
 
     def body_octets(self) -> Int:
@@ -415,13 +421,19 @@ struct Message(Copyable, Movable):
         lo: Origin[mut=False], //
     ](ref [lo] self, index: Int) -> ByteView[lo]:
         """Part `index`'s header block as written, with its closing empty
-        line; see `Part.header_bytes`."""
+        line; see `Part.header_bytes`. An index out of range gives an empty
+        view."""
+        if index < 0 or index >= len(self._parts):
+            return ByteView[lo]()
         return self._parts[index].header_bytes(self.raw())
 
     def body_bytes[
         lo: Origin[mut=False], //
     ](ref [lo] self, index: Int) -> ByteView[lo]:
-        """Part `index`'s body as written, borrowed; `raw_body` copies."""
+        """Part `index`'s body as written, borrowed; `raw_body` copies. An index
+        out of range gives an empty view."""
+        if index < 0 or index >= len(self._parts):
+            return ByteView[lo]()
         return self._parts[index].body_bytes(self.raw())
 
     def part_by_section(self, path: String) -> Optional[Int]:
@@ -472,16 +484,25 @@ struct Message(Copyable, Movable):
     def open_rfc822(self, index: Int) raises -> Message:
         """The `message/rfc822` part `index` as a `Message` of its own (its
         body is the nested message's bytes, copied). The nested message
-        shares this one's limits: it may nest `max_depth - depth - 1`
-        multiparts and hold `max_parts - part_count` parts; a message that
-        would exceed them raises `Limit`. A part that is not a
-        `message/rfc822`, or an index out of range, raises
-        `InvalidValue`."""
+        shares this one's limits along a chain: it may nest
+        `max_depth - depth - 1` multiparts and hold `max_parts - part_count`
+        parts, so a chain of nested messages cannot restart the depth
+        budget; a message that would exceed them raises `Limit`. Sibling
+        nested messages are not bounded together (each gets the same
+        remainder; memory stays bounded by the input size). The body is read
+        as written: a part that is not `message/rfc822`, an index out of
+        range, or a `Content-Transfer-Encoding` other than `7bit`, `8bit`
+        or `binary` (RFC 2046 section 5.2.1) raises `InvalidValue`."""
         if index < 0 or index >= len(self._parts):
             raise message_error(INVALID_VALUE, "open_rfc822", "a part index out of range")
         if self._parts[index].media_type() != "message/rfc822":
             raise message_error(
                 INVALID_VALUE, "open_rfc822", "a part that is not message/rfc822"
+            )
+        var cte = self._parts[index]._encoding
+        if cte != "7bit" and cte != "8bit" and cte != "binary" and cte != "":
+            raise message_error(
+                INVALID_VALUE, "open_rfc822", "a message/rfc822 with a transfer encoding"
             )
         var depth_left = self._max_depth - self._parts[index]._depth - 1
         var parts_left = self._max_parts - len(self._parts)
@@ -489,8 +510,9 @@ struct Message(Copyable, Movable):
             raise message_error(LIMIT, "open_rfc822", "parts nested deeper than the limit")
         if parts_left < 1:
             raise message_error(LIMIT, "open_rfc822", "more parts than the limit")
-        var body = self.raw_body(index)
-        return parse_message(Span(body), depth_left, parts_left)
+        var whole = Span(self._raw)
+        var body = whole[self._parts[index]._body_start : self._parts[index]._body_end]
+        return parse_message(body, depth_left, parts_left)
 
     def headers(self) -> List[HeaderField]:
         """The message's header fields, in order."""

@@ -274,6 +274,37 @@ def test_open_rfc822_of_the_wrong_part_is_refused() raises:
     assert_equal(_open_error(m, 99), out_of_range)
 
 
+def test_views_refuse_a_wrong_view_and_a_bad_index() raises:
+    var m = _parse(MAIL)
+    var short = _parse("Subject: s\r\n\r\nx")
+    # A part of a long message given the bytes of a short one, or none.
+    assert_equal(m.part(3).header_bytes(short.raw()).len(), 0)
+    assert_equal(m.part(3).body_bytes(short.raw()).len(), 0)
+    assert_equal(m.part(6).body_bytes(short.raw()).len(), 0)
+    var empty = _parse("")
+    assert_equal(m.part(1).header_bytes(empty.raw()).len(), 0)
+    assert_equal(m.part(1).body_bytes(empty.raw()).len(), 0)
+    # The right view still works.
+    assert_equal(_text(m.part(1).body_bytes(m.raw())), "line1\r\nline2")
+    # An index out of range gives an empty view.
+    assert_equal(m.header_bytes(-1).len(), 0)
+    assert_equal(m.header_bytes(7).len(), 0)
+    assert_equal(m.body_bytes(-1).len(), 0)
+    assert_equal(m.body_bytes(7).len(), 0)
+
+
+def _encoded_message(cte: String) -> String:
+    return String("Content-Type: message/rfc822\r\nContent-Transfer-Encoding: ") + cte + "\r\n\r\nSubject: x\r\n\r\nb\r\n"
+
+
+def test_open_rfc822_refuses_an_encoded_body() raises:
+    var refused = "komira_mail_message.InvalidValue: open_rfc822: a message/rfc822 with a transfer encoding"
+    assert_equal(_open_error(_parse(_encoded_message("base64")), 0), refused)
+    assert_equal(_open_error(_parse(_encoded_message("quoted-printable")), 0), refused)
+    for ok in ["7bit", "8bit", "binary"]:
+        assert_equal(_parse(_encoded_message(String(ok))).open_rfc822(0).subject().value(), "x")
+
+
 def _chain(levels: Int) -> String:
     """A message/rfc822 holding a message/rfc822 ... `levels` of them, the
     innermost holding plain text."""
@@ -425,6 +456,8 @@ def main() raises:
     test_sections_of_a_message_that_is_not_a_multipart()
     test_open_rfc822()
     test_open_rfc822_of_the_wrong_part_is_refused()
+    test_views_refuse_a_wrong_view_and_a_bad_index()
+    test_open_rfc822_refuses_an_encoded_body()
     test_open_rfc822_shares_the_depth_limit()
     test_open_rfc822_inside_multiparts_counts_their_depth()
     test_open_rfc822_shares_the_part_limit()
