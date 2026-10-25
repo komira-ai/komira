@@ -1,6 +1,8 @@
 # Generated sources are committed and checked for freshness
 
-Status: decided and built, except the line-limit split, which is a separate change (see "The line limit").
+Status: decided. The mechanism is built and applies to the libraries that have a committed `generated/<name>/`; the rest are
+listed in [transition.bzl](../../tools/build/gen/transition.bzl) and still build from the generator (see "The transition
+ledger"). The line-limit split is a separate change (see "The line limit").
 Reference for the mechanism: [tools/build/gen/README.md](../../tools/build/gen/README.md).
 
 ## What problem does this solve?
@@ -41,7 +43,7 @@ installer under any option. It decides how the build side proves what was compil
 
 ## The single-path rule
 
-After this change a library `<name>` is built from `generated/<name>/` of its package and from nothing else.
+For a library that has been migrated (not listed in the ledger), `<name>` is built from `generated/<name>/` of its package and from nothing else.
 `<name>_gen` (the generator's output for the current inputs) is read by `<name>_fresh` only. `<name>_fresh`
 regenerates, compares file by file and byte by byte, and on a difference fails with the command that rewrites the
 directory:
@@ -51,8 +53,9 @@ directory:
 ```
 
 `<name>_fresh` is the library's first gate, a hidden input of its compile, so no `.mojoc` exists and no test of
-the library is built while the commit is not what the generator writes. There is no second path that compiles from
-`<name>_gen`: a parallel way would rot. The one exception is the transition ledger below, which has an end.
+the library is built while the commit is not what the generator writes. A migrated library has no second path that
+compiles from `<name>_gen`: a parallel way would rot. The one exception is the transition ledger below, which has an
+end: a listed library still builds from the generator until its commit lands.
 
 Both halves are deterministic, and that is tested: every emitter writes its header through one function, the
 output has no host path, time or user, and files are written sorted with one mode.
@@ -66,8 +69,12 @@ one matches the token on line 1 and nowhere else.
 
 ## How big is it?
 
-Measured on the farm at the time of writing: about 10 MiB and about 207,000 lines across 48 generated targets. The
-largest outputs are the AWS clients of the largest models and the Compute client.
+What is committed today: four libraries have a `generated/<name>/` directory (one AWS client, one Google Cloud client
+and two proto libraries); every other generated library is in the ledger.
+
+The figures below are a projection for the full migration, not what is committed. They were measured on the farm, at
+the time of writing, from the generator outputs of every generated library: about 10 MiB and about 207,000 lines
+across 48 generated targets. That is the size the repository reaches when the ledger is empty.
 
 This is the cost of A, and it is accepted because it is paid in repository size and in regeneration diffs, not in
 build time: an unchanged library's check is a cached action.

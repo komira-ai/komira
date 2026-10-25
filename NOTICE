@@ -12,7 +12,11 @@ Generated clients: text derived from Apache-2.0 inputs
 
 The files under `src/*/generated/*/` are written by the generators of
 tools/build/proto-codegen (see docs/design/generated_sources.md). Each file's
-first lines name its generator and the sha256 of every input. The inputs
+first lines name its generator and, where the generator pins them, the
+sha256 of each input. Not every generated library derives from third-party
+input: those generated from komira's own `.proto` files and models (for
+example komira_plan_proto, and records_db in komira_db_sqlite) are komira's
+own text. The inputs
 themselves are not committed here; the archives are pinned by sha256 and
 fetched at build time.
 
@@ -24,20 +28,24 @@ fetched at build time.
        Botocore
        Copyright 2012-2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-   (The rest of botocore's NOTICE concerns the vendored parts of the
-   `requests` library inside botocore's Python code; none of that is read or
+   (The rest of botocore's NOTICE concerns the vendorized parts of the
+   `requests` and `urllib3` libraries and a bundle of CA root certificates
+   inside botocore's Python code and data; none of that is read or
    reproduced here.) botocore's LICENSE.txt and NOTICE are extracted
    unmodified from the archive as `//third_party/botocore:files[LICENSE.txt]`
    and `[NOTICE]`.
 
-2. Google Cloud clients (`komira_gcp_*`) and other code generated from the
-   googleapis `.proto` files. Generated from the files of
+2. Google Cloud clients (`komira_gcp_*`) and the modules of their googleapis
+   protos. Generated from the `.proto` files of
    https://github.com/googleapis/googleapis (Apache License, Version 2.0; it
    ships no NOTICE), at the commit pinned in tools/vendor/googleapis/BUCK.
    The archive's LICENSE is extracted unmodified as
-   `//tools/vendor/googleapis:googleapis[LICENSE]`. Each googleapis file
-   carries its own license header, which
-   names the owner of the definitions the generated text derives from.
+   `//tools/vendor/googleapis:googleapis[LICENSE]`. The copyright holder
+   is Google LLC: the headers of the pinned protos read "Copyright <year>
+   Google LLC" and the Apache-2.0 notice (checked on google/type/expr.proto,
+   google/iam/v1/iam_policy.proto and
+   google/cloud/secretmanager/v1/service.proto). The generated Mojo does not
+   carry that header; this entry is where the attribution is.
 
 The Apache License, Version 2.0 is at http://www.apache.org/licenses/LICENSE-2.0
 and in the LICENSE file of this repository. The generated files are modified
