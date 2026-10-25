@@ -24,16 +24,16 @@
 #         `/_bulk` (no index) ................. 404 not_found
 #       GET and PUT on `_search` and `_bulk` .. 405 method_not_allowed, `allow: POST`
 #       a body of 600 bytes ................... 413 content_too_long_exception
-#       a `_bulk` of 5 lines (limit 4) ........ 413 content_too_long_exception
+#       a `_bulk` of 6 lines (limit 4) ........ 413 content_too_long_exception
 #     After the battery a search of the index answers 200 with total 0: no
 #     refusal indexed anything, and the server went on serving. Catches a
 #     refusal that becomes a 500, a 200 or a dropped connection, a wrong error
 #     type, a missing `allow` header, and a refusal that writes before it
 #     refuses.
-#   * test_bulk_partial_success_over_http -- one `_bulk` of five lines-pairs in
+#   * test_bulk_partial_success_over_http -- one `_bulk` of five line pairs in
 #     which items 1 (no text field), 3 (a `create` action) and 4 (a source that
 #     is not JSON) are bad. The reply is 200 with errors true and one item per
-#     action in wire order: 201, 400, 400, 201, 400, each failed item keyed by
+#     action in wire order: 201, 400, 201, 400, 400, each failed item keyed by
 #     its own verb and carrying an error type. The two good documents are
 #     searchable by their words, their `_source` byte-exact, and the three bad
 #     ones are not. Catches a bad item failing the whole request, good items
@@ -88,6 +88,13 @@ def _cases() -> List[_Case]:
     var out = List[_Case]()
     out.append(_Case("malformed json", post(String("/docs/_search"), String('{"query":')), 400, String("parse_exception")))
     out.append(_Case("dangling bulk action", post(String("/docs/_bulk"), String('{"index":{}}\n')), 400, String("parse_exception")))
+    # A good pair, then an action with no source: the whole request is refused,
+    # so the good pair (which matches the final search) must not be indexed.
+    out.append(_Case(
+        "dangling bulk action after a good pair",
+        post(String("/docs/_bulk"), String('{"index":{}}\n{"body":"fox"}\n{"index":{}}\n')),
+        400, String("parse_exception"),
+    ))
     out.append(_Case(
         "min_score",
         post(String("/docs/_search"), String('{"query":{"match":{"body":"fox"}},"min_score":1}')),
@@ -131,8 +138,8 @@ def _cases() -> List[_Case]:
         413, String("content_too_long_exception"),
     ))
     var lines = String()
-    for i in range(5):
-        lines += String('{"index":{}}\n') if i % 2 == 0 else String('{"body":"a"}\n')
+    for i in range(6):
+        lines += String('{"index":{}}\n') if i % 2 == 0 else String('{"body":"fox"}\n')
     out.append(_Case("bulk line limit", post(String("/docs/_bulk"), lines), 413, String("content_too_long_exception")))
     return out^
 
@@ -193,6 +200,7 @@ def test_bulk_partial_success_over_http() raises:
     script.append(post(String("/docs/_bulk"), bulk))
     script.append(post(String("/docs/_search"), String('{"query":{"match":{"body":"fox"}},"size":10}')))
     script.append(post(String("/docs/_search"), String('{"query":{"match":{"body":"gamma"}}}')))
+    script.append(post(String("/docs/_search"), String('{"query":{"match":{"body":"json"}}}')))
     var replies = exchange(new_front_door(root, String("node-a"), 1000), script^)
     assert_equal(replies[0].status, 200, "a bulk with bad items is still 200")
     var body = parse_json_value(replies[0].body)
@@ -211,17 +219,35 @@ def test_bulk_partial_success_over_http() raises:
     statuses.append(201)
     statuses.append(400)
     statuses.append(400)
+    var ids = List[String]()
+    ids.append(String("a"))
+    ids.append(String("b"))
+    ids.append(String("c"))
+    ids.append(String("d"))
+    ids.append(String("e"))
+    # What the dispatcher emits: a source without the text field is a mapping
+    # error, an unsupported action has its own type, a non-JSON source is a
+    # parse error.
+    var error_types = List[String]()
+    error_types.append(String(""))
+    error_types.append(String("mapper_parsing_exception"))
+    error_types.append(String(""))
+    error_types.append(String("action_not_supported"))
+    error_types.append(String("parse_exception"))
     for i in range(5):
         var item = items.element_at(i)
         assert_true(item.has(verbs[i]), "item " + String(i) + " keyed by " + verbs[i])
         var inner = item.get(verbs[i])
         assert_equal(Int(inner.get(String("status")).as_int64()), statuses[i], "item " + String(i) + " status")
+        assert_equal(inner.get(String("_id")).as_string(), ids[i], "item " + String(i) + " echoes its _id")
         if statuses[i] == 400:
-            assert_true(
-                len(inner.get(String("error")).get(String("type")).as_string().as_bytes()) > 0,
-                "item " + String(i) + " names its error type",
+            assert_equal(
+                inner.get(String("error")).get(String("type")).as_string(),
+                error_types[i],
+                "item " + String(i) + " error type",
             )
-    # Only the two good documents are searchable, byte-exact, in order.
+    # Only the two good documents are searchable, byte-exact. The scores tie
+    # to within the engine's tie-break, so the order is not asserted.
     assert_equal(replies[1].status, 200, "search status")
     var hits = parse_json_value(replies[1].body).get(String("hits"))
     assert_equal(Int(hits.get(String("total")).get(String("value")).as_int64()), 2, "two documents match fox")
@@ -237,6 +263,9 @@ def test_bulk_partial_success_over_http() raises:
     # The `create` document carried the word gamma and was refused.
     var gamma = parse_json_value(replies[2].body).get(String("hits")).get(String("total"))
     assert_equal(Int(gamma.get(String("value")).as_int64()), 0, "the refused create is not searchable")
+    # The words of the non-JSON source line were not indexed either.
+    var junk = parse_json_value(replies[3].body).get(String("hits")).get(String("total"))
+    assert_equal(Int(junk.get(String("value")).as_int64()), 0, "the refused index item is not searchable")
     print("  test_bulk_partial_success_over_http PASS")
 
 

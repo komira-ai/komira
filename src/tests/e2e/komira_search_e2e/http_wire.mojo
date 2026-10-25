@@ -23,6 +23,7 @@ from std.ffi import external_call
 from std.memory import UnsafePointer
 from std.sys.info import CompilationTarget
 
+from komira_async.reactor.socket_io import errno_get, msg_nosignal, set_nosigpipe
 from komira_clock import now_ns
 from komira_http_core.transport.grpc_emit import NoopGrpcDispatch
 from komira_http_server.routing import Router
@@ -40,6 +41,9 @@ comptime _SOCK_STREAM: Int32 = 1
 comptime _SOL_SOCKET: Int32 = Int32(0xFFFF) if CompilationTarget.is_macos() else Int32(1)
 comptime _SO_RCVTIMEO: Int32 = Int32(0x1006) if CompilationTarget.is_macos() else Int32(20)
 comptime _RECV_TIMEOUT_SECONDS = 10
+comptime _EINTR: Int32 = 4
+# A reply larger than this is a server bug here, not something to buffer.
+comptime _MAX_REPLY_BYTES = 8 * 1024 * 1024
 comptime _SCRIPT_DEADLINE_NS: UInt64 = 60_000_000_000
 
 
@@ -133,7 +137,15 @@ def _connect(port: UInt16) raises -> Int32:
     var fd = external_call["socket", Int32](_AF_INET, _SOCK_STREAM, Int32(0))
     if fd < Int32(0):
         raise Error("http_wire: socket() failed")
+    # A refusal can make the server close before it reads the whole request;
+    # the write then fails with EPIPE rather than killing the process (Linux
+    # uses MSG_NOSIGNAL per send, macOS SO_NOSIGPIPE on the fd).
+    _ = set_nosigpipe(fd)
     var addr = _sockaddr_loopback(port)
+    # SAFETY: `addr` is a 16-byte local that outlives the call; connect() reads
+    # at most the 16 bytes passed as the length.
+    # FFI-BOUNDARY: the fd is owned by the caller (`WireLeg.run`), which closes
+    # it in a `finally`; every failure path here closes it before raising.
     var addr_ptr = UnsafePointer(to=addr).bitcast[UInt8]()
     if external_call["connect", Int32](fd, addr_ptr, UInt32(16)) < Int32(0):
         _close(fd)
@@ -141,6 +153,8 @@ def _connect(port: UInt16) raises -> Int32:
     # struct timeval: tv_sec then tv_usec, two little-endian 8-byte words.
     var tv = Array[UInt8, 16](fill=UInt8(0))
     tv[0] = UInt8(_RECV_TIMEOUT_SECONDS)
+    # SAFETY: `tv` is a 16-byte local that outlives the call; the kernel reads
+    # exactly the 16 bytes passed as the length.
     var tv_ptr = UnsafePointer(to=tv).bitcast[UInt8]()
     if external_call["setsockopt", Int32](
         fd, _SOL_SOCKET, _SO_RCVTIMEO, tv_ptr, UInt32(16)
@@ -153,11 +167,16 @@ def _connect(port: UInt16) raises -> Int32:
 def _send_all(fd: Int32, bytes: List[UInt8]) raises:
     var total = len(bytes)
     var sent = 0
+    # SAFETY: `bytes` is borrowed for the whole function and `sent < total`, so
+    # `raw + sent` and the length stay inside its allocation; send() only reads.
+    # FFI-BOUNDARY: `fd` stays owned by the caller, which closes it.
     var raw = bytes.unsafe_ptr()
     while sent < total:
         var rc = external_call["send", Int64](
-            fd, raw + sent, UInt64(total - sent), Int32(0)
+            fd, raw + sent, UInt64(total - sent), msg_nosignal()
         )
+        if rc < Int64(0) and errno_get() == _EINTR:
+            continue
         if rc <= Int64(0):
             raise Error("http_wire: send() failed")
         sent += Int(rc)
@@ -210,8 +229,12 @@ def _content_length(head: String) raises -> Int:
         n = n * 10 + Int(b[i]) - 48
         digits += 1
         i += 1
+        if digits > 9:
+            raise Error("http_wire: Content-Length has too many digits: " + head)
     if digits == 0:
         raise Error("http_wire: malformed Content-Length: " + head)
+    if n > _MAX_REPLY_BYTES:
+        raise Error("http_wire: Content-Length over the reply cap: " + head)
     return n
 
 
@@ -227,9 +250,13 @@ def _read_reply(fd: Int32, give_up_ns: UInt64) raises -> WireReply:
             raise Error("http_wire: the script deadline passed mid-reply")
         if head_end >= 0 and len(acc) - head_end >= want:
             break
+        # SAFETY: `chunk` holds 16384 bytes and outlives the call; recv() writes
+        # at most the 16384 requested. FFI-BOUNDARY: `fd` is owned by the caller.
         var n = external_call["recv", Int64](
             fd, chunk.unsafe_ptr(), UInt64(16384), Int32(0)
         )
+        if n < Int64(0) and errno_get() == _EINTR:
+            continue
         if n < Int64(0):
             raise Error(
                 "http_wire: recv() timed out or failed after "
@@ -259,6 +286,12 @@ def _read_reply(fd: Int32, give_up_ns: UInt64) raises -> WireReply:
     while sp < len(hb) and hb[sp] >= UInt8(48) and hb[sp] <= UInt8(57):
         code = code * 10 + Int(hb[sp]) - 48
         sp += 1
+    if len(acc) != head_end + want:
+        raise Error(
+            "http_wire: "
+            + String(len(acc) - head_end - want)
+            + " bytes followed the reply body"
+        )
     return WireReply(code, head^, _text(acc, head_end, head_end + want))
 
 
