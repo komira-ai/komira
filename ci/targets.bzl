@@ -179,6 +179,7 @@ TARGETS = [
     "komira//src/komira_mail_address:ci",
     "komira//src/komira_mail_address:coverage_floor",
     "komira//src/komira_mail_address:table",
+    "komira//src/komira_mail_auth:komira_mail_auth_conda",
     "komira//src/komira_mail_store:komira_mail_store_conda",
     "komira//src/komira_metrics_reader:komira_metrics_reader_conda",
     "komira//src/komira_morsel:komira_morsel_conda",
