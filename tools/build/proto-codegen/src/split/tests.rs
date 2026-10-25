@@ -408,3 +408,61 @@ fn a_part_that_does_not_fit_with_its_imports_is_halved_until_it_does() {
     let names = imported_from(&files[0].text, "._parts.");
     assert_eq!(names, (0..24).map(|i| format!("S{i}")).collect::<BTreeSet<_>>());
 }
+
+#[test]
+fn two_parts_that_use_each_others_declarations_import_each_other() {
+    // The first struct holds the last and the last holds the first: the parts
+    // that declare them import one another, which Mojo accepts (the library
+    // packages generated this way compile on the farm).
+    let text = module(48, 50)
+        .replacen("    var f0: Int\n", "    var last: S47\n", 1)
+        .replace(
+            "struct S47(Copyable):\n    \"\"\"Struct 47.\"\"\"\n\n    var f0: Int\n",
+            "struct S47(Copyable):\n    \"\"\"Struct 47.\"\"\"\n\n    var first: S0\n",
+        );
+    let files = split_file("x.mojo", &text).unwrap();
+    let (first, last) = (&files[1], files.last().unwrap());
+    assert!(first.text.contains("var last: S47"));
+    assert!(last.text.contains("var first: S0"));
+    let from_last = format!("from .{} import S47\n", last.path.trim_start_matches("_parts/").trim_end_matches(".mojo"));
+    let from_first = format!("from .{} import S0\n", first.path.trim_start_matches("_parts/").trim_end_matches(".mojo"));
+    assert!(first.text.contains(&from_last), "{}", &first.text[..500]);
+    assert!(last.text.contains(&from_first), "{}", &last.text[..500]);
+    for f in &files[1..] {
+        let own = f.path.trim_start_matches("_parts/").trim_end_matches(".mojo");
+        assert!(!f.text.contains(&format!("from .{own} import")), "{} imports itself", f.path);
+    }
+}
+
+#[test]
+fn a_part_of_exactly_one_line_under_the_limit_fits_and_one_at_the_limit_does_not() {
+    // A header of three lines, two comment lines, two blank lines and the
+    // declaration: `k` fields make a part of 7 + 1 + k lines.
+    let build = |k: usize| {
+        let mut s = header();
+        s.push_str("\n\nstruct Big:\n");
+        for i in 0..k {
+            s.push_str(&format!("    var f{i}: Int\n"));
+        }
+        for i in 0..12 {
+            s.push_str(&format!("\n\ncomptime Z{i}: Int = {i}\n"));
+        }
+        s
+    };
+    let ok = split_with("x.mojo", &build(91), 100).unwrap();
+    assert!(ok.iter().any(|f| line_count(&f.text) == 99), "no part of 99 lines");
+    for f in &ok {
+        assert!(line_count(&f.text) < 100, "{}", f.path);
+    }
+    match split_with("x.mojo", &build(92), 100).unwrap_err() {
+        SplitError::DeclarationTooLarge { name, .. } => assert_eq!(name, "Big"),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_relative_import_is_refused() {
+    let mut text = module(48, 50);
+    text = text.replace("from lib_b import Gamma\n", "from lib_b import Gamma\nfrom .sibling import Other\n");
+    assert_eq!(split_file("x.mojo", &text).unwrap_err(), SplitError::RelativeImport(".sibling".into()));
+}

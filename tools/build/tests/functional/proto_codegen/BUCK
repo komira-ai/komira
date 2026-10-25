@@ -460,8 +460,8 @@ proto_codegen_golden(
 # writes `wide.mojo` as a facade (documentation, imports, and every name
 # imported from its part) and the messages in `_parts/wide_pNN.mojo`, each
 # under 1000 lines (proto-check holds every case to that) and each with the
-# generated-file header. Wide10 holds a Wide01 and Wide06 a Shade, so a part
-# imports another's names. To rewrite the goldens after a change, build
+# generated-file header. Wide10 holds a Wide01, Wide01 a Wide10 and Wide06 a
+# Shade, so each part imports names of the other. To rewrite the goldens after a change, build
 # `:split_module[out]` and copy `files/wide.mojo` and `files/_parts/*.mojo`
 # over them, each with `.golden` added.
 proto_codegen_golden(
@@ -476,6 +476,7 @@ proto_codegen_golden(
         "from ._parts.wide_p01 import",
         "from ._parts.wide_p02 import",
         "from .wide_p01 import",
+        "from .wide_p02 import",
     ],
 )
 

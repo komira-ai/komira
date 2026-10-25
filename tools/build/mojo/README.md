@@ -755,8 +755,9 @@ docstring of
 
 ### Generated files under 1000 lines
 
-No file in the repository reaches 1000 lines (Mojo hangs on very large
-files), and a generated one has no exemption. The generators therefore
+A source file is held to fewer than 1000 lines (Mojo hangs on very large
+files), and a generated one has no exemption (the hand-written files over
+the limit are tracked separately). The generators therefore
 split what they write: a module of 1000 lines or more is written as a
 FACADE, the file it always had (`compute.mojo`, `<name>.mojo`), holding the
 module's documentation and, imported from its parts, every name the module

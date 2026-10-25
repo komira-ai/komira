@@ -1,8 +1,7 @@
 //! Splitting a generated Mojo module that reaches the line limit.
 //!
-//! The repository holds every source file to fewer than [`MAX_FILE_LINES`]
-//! lines (Mojo hangs on very large files), and a generated file has no
-//! exemption. [`split_file`] is how every generator keeps to it: a module
+//! A source file is held to fewer than [`MAX_FILE_LINES`] lines (Mojo hangs
+//! on very large files), and a generated file has no exemption. [`split_file`] is how every generator keeps to it: a module
 //! under the limit is written as it is; a module at or over it is written as
 //! a FACADE, `<stem>.mojo`, beside a directory of PARTS,
 //! `_parts/<stem>_pNN.mojo`.
@@ -66,6 +65,9 @@ pub enum SplitError {
     Unrecognised { line: usize, text: String },
     /// One top-level name is declared twice.
     DuplicateName(String),
+    /// The module imports relatively (`from .x import y`): in a part, which
+    /// lives one package down in `_parts`, the dot would name another module.
+    RelativeImport(String),
     /// A declaration that does not fit in a file with its header and imports.
     DeclarationTooLarge { name: String, lines: usize },
     /// The facade (documentation and the re-export of every name) reaches the
@@ -91,6 +93,11 @@ impl fmt::Display for SplitError {
                 f,
                 "`{n}` is declared twice at the top level of the module, so the file it \
                  belongs to cannot be told"
+            ),
+            SplitError::RelativeImport(m) => write!(
+                f,
+                "the module imports `{m}`, a relative import, which would name another module \
+                 once moved into `{PARTS_DIR}/`"
             ),
             SplitError::DeclarationTooLarge { name, lines } => write!(
                 f,
@@ -505,6 +512,11 @@ impl Module {
             prelude = epilogue.drain(..).collect();
         }
 
+        for imp in &imports {
+            if let Some(m) = imp.module.as_deref().filter(|m| m.starts_with('.')) {
+                return Err(SplitError::RelativeImport(m.to_string()));
+            }
+        }
         let mut seen = BTreeSet::new();
         for u in &units {
             if !seen.insert(u.name.clone()) {
