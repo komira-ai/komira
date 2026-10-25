@@ -14,6 +14,11 @@ and the findings: the one computation both `covcheck report` and
    sources (`<package>/tests/...`, and each path of `test_sources`: a
    welded test elsewhere in its package, named by the gate) are counted and
    dropped unless `include_tests`.
+3b. A kept `.mojo` file whose first line is the header `# @generated`
+   (generated.mojo) leaves the run here: its report records, its branch
+   records and its mutants are dropped, and step 4 skips it, so it is
+   neither measured nor counted as a file no test compiled, and is in no
+   floor. `Analysis.generated_paths` lists them.
 4. Each kept file's source is read for exemption markers (exempt.mojo).
    Then the full source: a package is measured when a report names a kept
    file in it (with or without records), and the gated package
@@ -102,6 +107,7 @@ the files kept in step 3 only: a file left out counts nowhere.
 from covcheck.branch_lcov import DecisionShapes, parse_branch_lcov
 from covcheck.cobertura import parse_cobertura
 from covcheck.decls import declaration_only, unrecorded_functions
+from covcheck.generated import is_generated
 from covcheck.exempt import STATUS_NO_REASON, STATUS_STALE, Exemption, apply_exemptions, scan_markers
 from covcheck.lcov import parse_lcov
 from covcheck.lexer import executable_lines
@@ -246,6 +252,8 @@ struct Analysis(Copyable, Movable):
     var info_findings: List[Finding]
     var ignored_files: Int
     var excluded_test_files: Int
+    # Repository paths of the generated sources left out (generated.mojo), sorted.
+    var generated_paths: List[String]
     var ignored_mutants: Int
     var excluded_test_mutants: Int
     var total: PackageStats
@@ -266,6 +274,7 @@ struct Analysis(Copyable, Movable):
         self.info_dirs = List[String]()
         self.info_packages = List[String]()
         self.info_findings = List[Finding]()
+        self.generated_paths = List[String]()
         self.ignored_files = 0
         self.excluded_test_files = 0
         self.ignored_mutants = 0
@@ -316,6 +325,23 @@ def _keep(package: String, path: String, opts: Options) -> Int:
     return 0
 
 
+def _generated_path(path: String, repo: RepoFiles, sources: Sources, opts: Options, mut seen: Dict[String, Bool]) raises -> Bool:
+    """Whether `path` is a kept file whose source marks itself generated
+    (generated.mojo). A file `_keep` sets aside is not read; a source that
+    cannot be read is not generated here (the step that needs it raises)."""
+    if path in seen:
+        return seen[path]
+    var pkg = _package_or_empty(path, repo)
+    var gen = False
+    if pkg.byte_length() > 0 and path.endswith(".mojo") and _keep(pkg, path, opts) == 0:
+        try:
+            gen = is_generated(sources.read(path))
+        except:
+            gen = False
+    seen[path] = gen
+    return gen
+
+
 def _package_or_empty(path: String, repo: RepoFiles) -> String:
     try:
         return package_of(path, repo)
@@ -334,6 +360,7 @@ def _unmeasured_files(
     sources: Sources,
     opts: Options,
     mut notes: List[Finding],
+    mut skipped: Dict[String, Bool],
 ) raises -> List[Finding]:
     """Step 4's full source: counts every file of a `measured` package that
     is not `named` (no line report gives it a record), with the branches
@@ -354,6 +381,9 @@ def _unmeasured_files(
     for i in range(len(paths)):
         var pkg = package_of(paths[i], repo)
         var text = sources.read(paths[i])
+        if is_generated(text):
+            skipped[paths[i]] = True
+            continue
         var f = FileCov(paths[i])
         var exe = executable_lines(text)
         var markers = scan_markers(paths[i], text)
@@ -514,6 +544,35 @@ def analyze(
     if len(errors) > 0:
         raise Error(String("unmapped paths (each names a repository directory but no repository file):\n  ") + join(errors, String("\n  ")))
 
+    # Generated sources (generated.mojo) leave every list: no record of one
+    # is read, whether a test reached it or not.
+    var left_out = Dict[String, Bool]()
+    var seen = Dict[String, Bool]()
+    var line_kept = List[FileCov]()
+    for i in range(len(mapped)):
+        if _generated_path(mapped[i].path, repo, sources, opts, seen):
+            left_out[mapped[i].path] = True
+        else:
+            line_kept.append(mapped[i].copy())
+    mapped = line_kept^
+    var branch_kept = List[FileCov]()
+    var origins_kept = List[String]()
+    for i in range(len(bmapped)):
+        if _generated_path(bmapped[i].path, repo, sources, opts, seen):
+            left_out[bmapped[i].path] = True
+        else:
+            branch_kept.append(bmapped[i].copy())
+            origins_kept.append(borigins[i])
+    bmapped = branch_kept^
+    borigins = origins_kept^
+    var muts_kept = List[Mutant]()
+    for i in range(len(muts)):
+        if _generated_path(muts[i].path, repo, sources, opts, seen):
+            left_out[muts[i].path] = True
+        else:
+            muts_kept.append(muts[i].copy())
+    muts = muts_kept^
+
     # The checks of the branch records, over the files kept (step 3): a
     # file left out counts nowhere, so its records are not checked.
     var shapes = DecisionShapes()
@@ -635,7 +694,12 @@ def analyze(
         a.file_packages.append(pkg)
         a.unmeasured.append(False)
     var decl_notes = List[Finding]()
-    var unmeasured_findings = _unmeasured_files(a, at, exemptions, measured, named, pending, repo, sources, opts, decl_notes)
+    var unmeasured_findings = _unmeasured_files(a, at, exemptions, measured, named, pending, repo, sources, opts, decl_notes, left_out)
+    var left_keys = List[String]()
+    for e in left_out.items():
+        left_keys.append(e.key)
+    sort_strings(left_keys)
+    a.generated_paths = left_keys^
     var mut_pkgs = List[String]()
     var kept_muts = List[Mutant]()
     for i in range(len(muts)):

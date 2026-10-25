@@ -450,7 +450,8 @@ struct ThriftCompactWriter(Movable):
             compressed_size: Compressed page body size in bytes.
             num_values: Number of values in the page.
             encoding: Encoding used for values.
-            crc: Optional CRC-32C checksum of the page body.
+            crc: Optional CRC-32 of the stored page body (the standard
+                CRC-32 of gzip and zlib, not CRC-32C), `PageHeader.crc`.
 
         Raises:
             Error: named `ParquetPageSizeOverflow`, when either size field
@@ -514,7 +515,8 @@ struct ThriftCompactWriter(Movable):
             def_levels_byte_length: Byte length of definition levels section.
             rep_levels_byte_length: Byte length of repetition levels section.
             is_compressed: Whether the values section is compressed.
-            crc: Optional CRC-32C checksum.
+            crc: Optional CRC-32 of the stored page body (standard CRC-32,
+                not CRC-32C).
 
         Raises:
             Error: named `ParquetPageSizeOverflow`, when either size field
@@ -586,8 +588,12 @@ struct ThriftCompactWriter(Movable):
         # Field 1: list<bool> null_pages
         self.write_list_begin(1, _COMPACT_BOOLEAN_TRUE, num_pages)
         for i in range(num_pages):
-            # Booleans in a list are written as single bytes (1=true, 0=false)
-            self.write_byte(UInt8(1) if null_pages[i] else UInt8(0))
+            # Booleans in a list are single bytes, 1 for true and 2 for false
+            # (compact protocol: the two boolean type ids); a 0 is not a
+            # boolean and a strict reader rejects it.
+            self.write_byte(
+                _COMPACT_BOOLEAN_TRUE if null_pages[i] else _COMPACT_BOOLEAN_FALSE
+            )
 
         # Field 2: list<binary> min_values
         self.write_list_begin(2, _COMPACT_BINARY, num_pages)
