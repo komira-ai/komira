@@ -6,9 +6,11 @@
 # over `SharedInMemoryConditionalStore`, the way a server round does.
 #
 #   * routing: an unknown path is 404, a known path under another verb 405 with
-#     an `allow` header, a query string is ignored, an index name with a
+#     an `allow` header, a query string of harmless parameters is accepted and one
+#     that would change the answer (`size`, `q`, ...) is 400, an index name with a
 #     character outside a-z0-9._- is 400 and writes nothing, a percent-escape is
-#     not decoded, a body over the configured limit is 413 and writes nothing.
+#     not decoded, a body over the configured limit, or a `_bulk` body with
+#     more lines than the cap, is 413 and writes nothing.
 #   * `_bulk` then `_search` round trip: one split, then two (the second makes
 #     `_id` the namespaced `<split-uuid>_<doc_id>`), a filter, a field sort and
 #     an aggregation gated against the splits' fast fields.
@@ -195,7 +197,7 @@ def test_wrong_verb_is_405_with_allow() raises:
     assert_equal(_objects_under(store, "data/"), 0)
 
 
-def test_query_string_in_the_path_is_ignored() raises:
+def test_harmless_query_parameters_are_accepted() raises:
     var store = Store()
     var d = _new_dispatcher(store)
     var r = _post(d, String("/idx/_bulk?refresh=true&pretty"), _bulk_two())
@@ -203,11 +205,39 @@ def test_query_string_in_the_path_is_ignored() raises:
     assert_equal(_count(_text(r), '"status":201'), 2)
     r = _post(
         d,
-        String("/idx/_search?size=1"),
+        String("/idx/_search?pretty&human=true&error_trace=false&"),
         String('{"query":{"match":{"body":"fox"}}}'),
     )
     assert_equal(r.status, Int32(200))
     assert_true(_text(r).find('"total":{"value":1,"relation":"eq"}') >= 0)
+
+
+def test_result_changing_query_parameters_are_400() raises:
+    # `size`, `from`, `q`, `sort`, `_source` and the like are parameters of the
+    # official clients; this dispatcher reads them from the body only, so a
+    # request that sets one is refused and not answered as if it had not.
+    var store = Store()
+    var d = _new_dispatcher(store)
+    _ = _post(d, String("/idx/_bulk"), _bulk_two())
+    var body = String('{"query":{"match":{"body":"fox"}}}')
+    var names = List[String]()
+    names.append(String("size=1"))
+    names.append(String("from=1"))
+    names.append(String("q=fox"))
+    names.append(String("sort=n:asc"))
+    names.append(String("_source=false"))
+    names.append(String("rest_total_hits_as_int=true"))
+    names.append(String("pretty&size=1"))
+    names.append(String("size"))
+    names.append(String("%73ize=1"))
+    for i in range(len(names)):
+        var r = _post(d, String("/idx/_search?") + names[i], body)
+        assert_equal(r.status, Int32(400))
+        assert_true(_text(r).find('"type":"illegal_argument_exception"') >= 0)
+    var before = _objects_under(store, "data/")
+    var r2 = _post(d, String("/idx/_bulk?pipeline=p"), _bulk_two())
+    assert_equal(r2.status, Int32(400))
+    assert_equal(_objects_under(store, "data/"), before)
 
 
 def test_trailing_slash_is_accepted() raises:
@@ -272,6 +302,33 @@ def test_body_over_the_limit_is_413_and_writes_nothing() raises:
     # A body of exactly the limit is read (and fails to parse, as a 400).
     r = _post(d, String("/idx/_search"), String("x" * 64))
     assert_equal(r.status, Int32(400))
+
+
+def test_bulk_body_with_too_many_lines_is_413_and_writes_nothing() raises:
+    # Every line of a `_bulk` body can become an item, so a body of tiny failed
+    # items costs memory in proportion to its line count, not its byte count.
+    var store = Store()
+    var cfg = SearchHttpConfig(
+        String("catalog"), String("data"), String("body"), String("node-a"),
+        1024 * 1024, 1024, 4,
+    )
+    var d = SearchHttpDispatcher[Store](cfg^, store.clone(), 0, Int64(1000))
+    var pairs = String("")
+    for _i in range(3):
+        pairs += String("1\n1\n")
+    var r = _post(d, String("/idx/_bulk"), pairs)
+    assert_equal(r.status, Int32(413))
+    assert_true(_text(r).find('"type":"content_too_long_exception"') >= 0)
+    assert_equal(_objects_under(store, "catalog/"), 0)
+    assert_equal(_objects_under(store, "data/"), 0)
+    # Four lines (two good items) are at the cap and are served; blank lines do
+    # not count.
+    r = _post(d, String("/idx/_bulk"), String("\n") + _bulk_two() + String("\n\n"))
+    assert_equal(r.status, Int32(200))
+    assert_equal(_count(_text(r), '"status":201'), 2)
+    # The cap is on `_bulk`: a search body is not counted in lines.
+    r = _post(d, String("/idx/_search"), String('{"query":\n{"match":\n{"body":\n"fox"}}}'))
+    assert_equal(r.status, Int32(200))
 
 
 # -----------------------------------------------------------------------------

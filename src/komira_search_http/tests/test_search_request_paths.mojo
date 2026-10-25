@@ -12,13 +12,20 @@
 #   * is_valid_index_name accepts 1 to 255 bytes of a-z, 0-9, '.', '_', '-'
 #     starting with a letter or digit, and refuses everything else, including
 #     '%' (a percent-escape is never decoded, so it is never a name);
-#   * body_too_large is true strictly above the limit.
+#   * body_too_large is true strictly above the limit;
+#   * unsupported_query_param is false for no query and for refresh, pretty,
+#     human and error_trace (with or without a value), and true for any other
+#     name, including an escaped spelling and a name that only starts like an
+#     allowed one;
+#   * count_ndjson_lines counts non-empty lines, whatever the line ending.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
 from komira_search_http.request_path import (
     body_too_large,
+    count_ndjson_lines,
+    unsupported_query_param,
     is_valid_index_name,
     split_path,
     strip_query,
@@ -35,6 +42,9 @@ def test_strip_query_cuts_at_the_first_question_mark() raises:
 
 
 def test_strip_query_on_a_huge_path() raises:
+    # A smoke test: it checks the answer for a megabyte of path. It cannot
+    # fail on slowness, and the linear cost of strip_query is by construction
+    # (one pass), not proved by this test.
     var long = String("/") + String("a" * 1_000_000) + String("?q")
     var cut = strip_query(long)
     assert_equal(cut.byte_length(), 1_000_001)
@@ -71,6 +81,9 @@ def test_split_path_bounds_segments_and_length() raises:
     assert_equal(len(split_path(long)), 0)
     var ok = String("/") + String("a" * 4000)
     assert_equal(len(split_path(ok)), 1)
+    # The limit is 4096 bytes including the leading '/'.
+    assert_equal(len(split_path(String("/") + String("a" * 4095))), 1)
+    assert_equal(len(split_path(String("/") + String("a" * 4096))), 0)
 
 
 def test_valid_index_names() raises:
@@ -108,6 +121,37 @@ def test_body_limit_is_strict() raises:
     assert_false(body_too_large(0, 10))
     assert_false(body_too_large(10, 10))
     assert_true(body_too_large(11, 10))
+
+
+def test_unsupported_query_params() raises:
+    assert_false(unsupported_query_param(String("/a/_bulk")))
+    assert_false(unsupported_query_param(String("/a/_bulk?")))
+    assert_false(unsupported_query_param(String("/a/_bulk?&&")))
+    assert_false(unsupported_query_param(String("/a/_bulk?refresh")))
+    assert_false(unsupported_query_param(String("/a/_bulk?refresh=wait_for")))
+    assert_false(unsupported_query_param(String("/a?pretty&human=true&error_trace=1")))
+    assert_true(unsupported_query_param(String("/a?size=1")))
+    assert_true(unsupported_query_param(String("/a?pretty&size=1")))
+    assert_true(unsupported_query_param(String("/a?size")))
+    assert_true(unsupported_query_param(String("/a?=x")))
+    assert_true(unsupported_query_param(String("/a?prettyx")))
+    assert_true(unsupported_query_param(String("/a?pret")))
+    assert_true(unsupported_query_param(String("/a?%72efresh=true")))
+    assert_true(unsupported_query_param(String("/a?refresh=1&q=x")))
+    # Only the part after the FIRST '?' is the query string.
+    assert_true(unsupported_query_param(String("/a?pretty?size=1")))
+    assert_false(unsupported_query_param(String("/size=1/a")))
+
+
+def test_count_ndjson_lines() raises:
+    assert_equal(count_ndjson_lines(Span(List[UInt8]())), 0)
+    assert_equal(count_ndjson_lines(Span(String("\n\n\n").as_bytes())), 0)
+    assert_equal(count_ndjson_lines(Span(String("a").as_bytes())), 1)
+    assert_equal(count_ndjson_lines(Span(String("a\n").as_bytes())), 1)
+    assert_equal(count_ndjson_lines(Span(String("a\nb").as_bytes())), 2)
+    assert_equal(count_ndjson_lines(Span(String("\na\n\nb\n\n").as_bytes())), 2)
+    assert_equal(count_ndjson_lines(Span(String("a\r\nb\r\n").as_bytes())), 2)
+    assert_equal(count_ndjson_lines(Span(String("1\n" * 100_000).as_bytes())), 100_000)
 
 
 def main() raises:

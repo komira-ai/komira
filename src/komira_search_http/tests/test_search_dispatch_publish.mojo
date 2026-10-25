@@ -20,6 +20,9 @@
 #     sequence begins at 1 again) and a second worker of one process each get
 #     keys of their own, and a dispatcher built with the default epoch reads
 #     the wall clock.
+#   * a catalog read that fails and a split object that is damaged are 500 with a
+#     fixed reason; a malformed request and a request over the live-split cap
+#     read no split object.
 #   * an L0 split (the cheap drain format) in the catalog is searched by the
 #     L0 reader, alone and mixed with a split `_bulk` wrote.
 # =============================================================================
@@ -43,6 +46,8 @@ from komira_async.reactor.reactor import (
 from komira_async.runtime.blocking_runtime import BlockingRuntime
 
 from komira_http_core.codec import HttpMethod, HttpRequest, HttpResponse
+
+from komira_clock import now_unix_us
 
 from komira_log_index import L0SegmentBuilder
 
@@ -86,20 +91,26 @@ struct _RecStore(
 
     var _inner: Inner
     var _log: ArcPointer[List[String]]
+    var _reads: ArcPointer[List[String]]
     var _fail_put: Bool
     var _fail_cas: Bool
     var _fail_split_get: Bool
+    var _fail_list: Bool
 
     def __init__(
         out self,
         var inner: Inner,
         var log: ArcPointer[List[String]],
+        var reads: ArcPointer[List[String]],
         fail_put: Bool = False,
         fail_cas: Bool = False,
         fail_split_get: Bool = False,
+        fail_list: Bool = False,
     ):
         self._inner = inner^
         self._log = log^
+        self._reads = reads^
+        self._fail_list = fail_list
         self._fail_put = fail_put
         self._fail_cas = fail_cas
         self._fail_split_get = fail_split_get
@@ -108,18 +119,24 @@ struct _RecStore(
         return Self(
             self._inner.clone(),
             self._log.copy(),
+            self._reads.copy(),
             self._fail_put,
             self._fail_cas,
             self._fail_split_get,
+            self._fail_list,
         )
 
     def _note(self, verb: String, path: Path):
         self._log[].append(verb + String(" ") + path.raw())
 
     def head(self, path: Path) raises -> ObjectMeta:
+        self._reads[].append(String("head ") + path.raw())
         return self._inner.head(path)
 
     def list_with_delimiter(self, prefix: Path) raises -> ListResult:
+        self._reads[].append(String("list ") + prefix.raw())
+        if self._fail_list:
+            raise Error("injected list failure SECRET-DETAIL")
         return self._inner.list_with_delimiter(prefix)
 
     def coalesce_policy(self) -> CoalescePolicy:
@@ -153,6 +170,7 @@ struct _RecStore(
         return self._inner.get_range(path, start, length)
 
     def get(self, path: Path) raises -> List[UInt8]:
+        self._reads[].append(String("get ") + path.raw())
         if self._fail_split_get and path.raw().endswith(".split"):
             raise Error("injected split read failure SECRET-DETAIL")
         return self._inner.get(path)
@@ -198,12 +216,31 @@ def _dispatcher(
     fail_put: Bool = False,
     fail_cas: Bool = False,
     fail_split_get: Bool = False,
+    fail_list: Bool = False,
+    max_splits: Int = 1024,
+    reads: Optional[ArcPointer[List[String]]] = None,
 ) raises -> SearchHttpDispatcher[_RecStore]:
+    var rd = ArcPointer[List[String]](List[String]())
+    if reads:
+        rd = reads.value().copy()
     return SearchHttpDispatcher[_RecStore](
         SearchHttpConfig(
-            String("catalog"), String("data"), text_field.copy(), String("n")
+            String("catalog"),
+            String("data"),
+            text_field.copy(),
+            String("n"),
+            1024 * 1024,
+            max_splits,
         ),
-        _RecStore(inner.clone(), log.copy(), fail_put, fail_cas, fail_split_get),
+        _RecStore(
+            inner.clone(),
+            log.copy(),
+            rd^,
+            fail_put,
+            fail_cas,
+            fail_split_get,
+            fail_list,
+        ),
         worker,
         epoch_us,
     )
@@ -324,6 +361,96 @@ def test_failed_split_read_is_500_without_the_store_text() raises:
     assert_equal(r.status, Int32(400))
 
 
+def test_failed_catalog_read_is_500_without_the_store_text() raises:
+    var inner = Inner()
+    var log = ArcPointer[List[String]](List[String]())
+    var w = _dispatcher(inner, log)
+    _ = _post(w, String("/docs/_bulk"), _two_docs())
+    var d = _dispatcher(inner, log, 1, 2000, fail_list=True)
+    var r = _post(d, String("/docs/_search"), _search_fox())
+    assert_equal(r.status, Int32(500))
+    var t = _text(r)
+    assert_true(t.find('"type":"internal_error"') >= 0)
+    assert_true(t.find("reading the catalog") >= 0)
+    assert_false(t.find("SECRET-DETAIL") >= 0)
+
+
+def test_a_search_that_is_refused_early_reads_nothing_it_need_not() raises:
+    var inner = Inner()
+    var log = ArcPointer[List[String]](List[String]())
+    var reads = ArcPointer[List[String]](List[String]())
+    var d = _dispatcher(inner, log, max_splits=2, reads=reads)
+    for _i in range(3):
+        _ = _post(d, String("/docs/_bulk"), _two_docs())
+    reads[].clear()
+    # A malformed request is refused before the store is touched.
+    var r = _post(d, String("/docs/_search"), String("{bad"))
+    assert_equal(r.status, Int32(400))
+    assert_equal(len(reads[]), 0)
+    # Three live splits over a cap of two: the catalog is read, no split is.
+    r = _post(d, String("/docs/_search"), _search_fox())
+    assert_equal(r.status, Int32(503))
+    assert_true(len(reads[]) > 0, "the catalog was listed")
+    for i in range(len(reads[])):
+        assert_false(reads[][i].find(".split") >= 0, "no split object was read")
+
+
+def _publish_raw_split(inner: Inner, key: String, bytes: List[UInt8]) raises:
+    """Put `bytes` at `key` and list it in the catalog as a one-document split,
+    the way a writer that crashed mid-write or a damaged object would look."""
+    _ = inner.put(Path.parse(key), bytes)
+    var manifest = CasManifestStore[Inner](
+        inner.clone(),
+        shard_manifest_prefix(String("catalog/docs/meta"), String("ext-9-0")),
+        RetryPolicy.default(),
+    )
+    var meta = SearchMetastore[Inner](manifest^, String("docs"))
+    _ = meta.publish(
+        make_split_summary(
+            InlineArray[UInt8, 16](fill=UInt8(9)),
+            Int64(1),
+            Int64(len(bytes)),
+            Int64(0),
+            Int64(0),
+            String("docs"),
+            String("body"),
+            key,
+        )
+    )
+
+
+def test_corrupt_split_object_is_500_without_engine_text() raises:
+    # A split object that is damaged is the server's fault: 500 with a fixed
+    # reason, not a 400 that blames the client and echoes the engine's text.
+    var inner = Inner()
+    var log = ArcPointer[List[String]](List[String]())
+    _publish_raw_split(
+        inner,
+        String("data/docs/splits/09090909090909090909090909090909.split"),
+        _bytes(String("xx")),
+    )
+    var d = _dispatcher(inner, log, 1, 2000)
+    var r = _post(d, String("/docs/_search"), _search_fox())
+    assert_equal(r.status, Int32(500))
+    var t = _text(r)
+    assert_true(t.find('"type":"internal_error"') >= 0)
+    assert_true(t.find("corrupt") < 0, "the engine's text stays server-side")
+    assert_true(t.find("magic") < 0)
+    # The same split behind the fast-field gate (a sort) and next to a good one.
+    var sorted = String('{"query":{"match":{"body":"fox"}},"sort":[{"n":"asc"}]}')
+    r = _post(d, String("/docs/_search"), sorted)
+    assert_equal(r.status, Int32(500))
+    assert_true(_text(r).find("magic") < 0)
+    var w = _dispatcher(inner, log, 0, 1000)
+    _ = _post(w, String("/docs/_bulk"), _two_docs())
+    r = _post(d, String("/docs/_search"), _search_fox())
+    assert_equal(r.status, Int32(500))
+    assert_true(_text(r).find("magic") < 0)
+    # A request error is still the client's: 400.
+    r = _post(d, String("/docs/_search"), String("{bad"))
+    assert_equal(r.status, Int32(400))
+
+
 def test_first_split_key_is_discriminant_epoch_sequence() raises:
     var inner = Inner()
     var log = ArcPointer[List[String]](List[String]())
@@ -363,19 +490,47 @@ def test_restart_and_second_worker_mint_new_keys() raises:
     assert_true(_text(r).find('"_shards":{"total":3') >= 0)
 
 
+def _hex_digit(c: UInt8) -> Int:
+    if c >= UInt8(97):
+        return Int(c) - 97 + 10
+    return Int(c) - 48
+
+
+def _hex_byte(hex: String, idx: Int) -> Int:
+    """Byte `idx` of the uuid whose 32 hex digits are `hex`."""
+    var b = hex.as_bytes()
+    return _hex_digit(b[2 * idx]) * 16 + _hex_digit(b[2 * idx + 1])
+
+
 def test_default_epoch_reads_the_wall_clock() raises:
     var inner = Inner()
     var log = ArcPointer[List[String]](List[String]())
+    var before = Int(now_unix_us())
     var d = _dispatcher(inner, log, 0, Int64(-1))
+    var after = Int(now_unix_us())
     _ = _post(d, String("/docs/_bulk"), _two_docs())
     var keys = _split_keys(inner)
     assert_equal(len(keys), 1)
     var key = keys[0].copy()
     # data/docs/splits/ = 17 bytes; bytes 1..7 of the uuid are hex digits 2..15
     var hex = String(key[byte = 17 : 49])
-    var epoch_hex = String(hex[byte = 2 : 16])
-    assert_true(epoch_hex != String("00000000000000"))
+    var epoch = 0
+    for i in range(7):
+        # byte i of the little-endian epoch is hex digits 2+2i and 3+2i
+        var b = _hex_byte(hex, 1 + i)
+        epoch += b << (8 * i)
+    assert_true(
+        epoch >= before and epoch <= after,
+        "the epoch is the wall clock at construction",
+    )
     assert_equal(String(hex[byte = 16 : 18]), String("01"))
+    # A later request does not re-read the clock: the second split has the
+    # same epoch and the next sequence.
+    _ = _post(d, String("/docs/_bulk"), _two_docs())
+    keys = _split_keys(inner)
+    assert_equal(len(keys), 2)
+    assert_equal(String(keys[1][byte = 19 : 33]), String(hex[byte = 2 : 16]))
+    assert_equal(String(keys[1][byte = 33 : 35]), String("02"))
 
 
 def _l0_schema() raises -> Schema:

@@ -21,12 +21,24 @@ comptime SOURCE_FIELD: String = "_source"
 
 comptime DEFAULT_MAX_BODY_BYTES: Int = 32 * 1024 * 1024
 """The default request body limit (32 MiB). A `_bulk` body costs memory in
-proportion to its size (the parser holds the body, its lines and the batch)."""
+proportion to its size and to its line count (the parser holds the body, a
+record per line, the good documents as one batch and a result per item); the
+line count is bounded separately by `max_bulk_lines`."""
 
 comptime DEFAULT_MAX_SPLITS_PER_SEARCH: Int = 1024
-"""The default cap on the live splits one `_search` reads. Each split is read
-and searched in turn and the per-split results are held until the merge, so the
-cap bounds both the time and the memory of one request."""
+"""The default cap on the live splits one `_search` reads. Splits are read one
+at a time, so the cap bounds the number of split reads. It does not bound the
+results held until the merge: each split yields up to `from + size` rows
+(`from + size` is at most 10000), so a request holds up to the cap times that
+many rows. The catalog is listed in full before the cap is checked."""
+
+comptime DEFAULT_MAX_BULK_LINES: Int = 200_000
+"""The default cap on the non-empty lines of one `_bulk` body. A line can
+become an item, and a failed item costs far more memory than its bytes, so the
+byte limit alone does not bound a request."""
+
+comptime MAX_NODE_ID_BYTES: Int = 128
+"""The longest node id."""
 
 comptime MAX_KEY_PREFIX_BYTES: Int = 512
 """The longest key prefix or meta root accepted."""
@@ -75,13 +87,23 @@ struct SearchHttpConfig(Copyable, Movable, Deinitable):
                   handler extracts it from each document, the `_search` handler
                   searches it).
       node_id:    a stable identity of this node, folded into the dispatcher's
-                  catalog sub-lineage id (`<node_id>-<pid>-<worker>`) so two
-                  nodes never share a sub-lineage. May be empty (the process id
-                  still tells processes apart).
+                  catalog sub-lineage id (`<node_id>-<pid>-<worker>`). It must
+                  be unique among the nodes that share a store: the process id
+                  tells processes of one host apart, but processes in separate
+                  containers can all have the same pid, and two writers on one
+                  sub-lineage contend on its compare-and-swap and can mint the
+                  same split keys. Up to 128 bytes of a-z, A-Z, 0-9, '.', '_'
+                  and '-' (it becomes part of a catalog key). May be empty only
+                  when one process per host writes.
       max_body_bytes: a request body longer than this is refused with 413
-                  before it is parsed.
+                  before it is parsed. The server that feeds the dispatcher
+                  has its own read limit; keep it at or below this one, since
+                  a body is already in memory when the dispatcher sees it.
+      max_bulk_lines: a `_bulk` body with more non-empty lines than this is
+                  refused with 413 before it is parsed.
       max_splits_per_search: a `_search` over an index with more live splits
-                  than this is refused with 503 before any split is read.
+                  than this is refused with 503 before any split is read (the
+                  catalog listing that counts them is not bounded by it).
     """
 
     var meta_root: String
@@ -90,6 +112,7 @@ struct SearchHttpConfig(Copyable, Movable, Deinitable):
     var node_id: String
     var max_body_bytes: Int
     var max_splits_per_search: Int
+    var max_bulk_lines: Int
 
     def __init__(
         out self,
@@ -99,11 +122,13 @@ struct SearchHttpConfig(Copyable, Movable, Deinitable):
         var node_id: String = String(""),
         max_body_bytes: Int = DEFAULT_MAX_BODY_BYTES,
         max_splits_per_search: Int = DEFAULT_MAX_SPLITS_PER_SEARCH,
+        max_bulk_lines: Int = DEFAULT_MAX_BULK_LINES,
     ) raises:
         """Validate and take the values. Raises on an unusable prefix (empty,
         over 512 bytes, a control byte or backslash, an empty, `.` or `..`
         segment), an empty text field or one that collides with the
-        `_source` column, a node id with a control byte, or a limit below 1."""
+        `_source` column, a node id over 128 bytes or with a byte outside
+        a-z, A-Z, 0-9, '.', '_' and '-', or a limit below 1."""
         if not _is_clean_prefix(meta_root):
             raise Error(
                 "SearchHttpConfig: meta_root must be a non-empty key prefix"
@@ -119,21 +144,38 @@ struct SearchHttpConfig(Copyable, Movable, Deinitable):
         if text_field == String(SOURCE_FIELD):
             raise Error("SearchHttpConfig: text_field must not be _source")
         var nb = node_id.as_bytes()
+        if len(nb) > MAX_NODE_ID_BYTES:
+            raise Error("SearchHttpConfig: node_id is over 128 bytes")
         for i in range(len(nb)):
-            if nb[i] < UInt8(32) or nb[i] == UInt8(127):
-                raise Error("SearchHttpConfig: node_id has a control byte")
+            var c = nb[i]
+            var ok = (
+                (c >= UInt8(97) and c <= UInt8(122))
+                or (c >= UInt8(65) and c <= UInt8(90))
+                or (c >= UInt8(48) and c <= UInt8(57))
+                or c == UInt8(46)
+                or c == UInt8(95)
+                or c == UInt8(45)
+            )
+            if not ok:
+                raise Error(
+                    "SearchHttpConfig: node_id may hold only a-z, A-Z, 0-9,"
+                    " '.', '_' and '-'"
+                )
         if max_body_bytes < 1:
             raise Error("SearchHttpConfig: max_body_bytes must be at least 1")
         if max_splits_per_search < 1:
             raise Error(
                 "SearchHttpConfig: max_splits_per_search must be at least 1"
             )
+        if max_bulk_lines < 1:
+            raise Error("SearchHttpConfig: max_bulk_lines must be at least 1")
         self.meta_root = meta_root^
         self.key_prefix = key_prefix^
         self.text_field = text_field^
         self.node_id = node_id^
         self.max_body_bytes = max_body_bytes
         self.max_splits_per_search = max_splits_per_search
+        self.max_bulk_lines = max_bulk_lines
 
     def __init__(out self, *, copy: Self):
         """A field-by-field copy; the source was validated when it was built."""
@@ -143,3 +185,4 @@ struct SearchHttpConfig(Copyable, Movable, Deinitable):
         self.node_id = copy.node_id.copy()
         self.max_body_bytes = copy.max_body_bytes
         self.max_splits_per_search = copy.max_splits_per_search
+        self.max_bulk_lines = copy.max_bulk_lines

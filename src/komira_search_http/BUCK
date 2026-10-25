@@ -1,14 +1,19 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The wire translators and the request dispatcher of an OpenSearch/Elasticsearch compatible search shim:
-# the `_bulk` NDJSON parser (`ndjson_bulk_to_docbatch`: a document batch with
-# dynamic field mapping and a per-item outcome list), the `_search` request
-# translator (`search_json_to_queryir`: match, term and range filters, sort,
-# from/size and aggregations into a QueryIR) with the gates that check a parsed
-# request against a split's fast-field meta, the response envelopes, and the
-# JSON `HttpResponse` builders. They depend on `komira_search` (the engine's
-# batch, query and result types) and on `komira_json`; the engine itself sees
-# no wire byte.
+# An OpenSearch/Elasticsearch compatible search shim over the Arrow-native
+# engine. Wire translators: the `_bulk` NDJSON parser (`ndjson_bulk_to_docbatch`:
+# a document batch with dynamic field mapping and a per-item outcome list), the
+# `_search` request translator (`search_json_to_queryir`: match, term and range
+# filters, sort, from/size and aggregations into a QueryIR) with the gates that
+# check a parsed request against a split's fast-field meta, the response
+# envelopes, and the JSON `HttpResponse` builders. Dispatcher
+# (`SearchHttpDispatcher[Storage]`): the `_bulk` and `_search` routes of a
+# `komira_http_server` `RequestDispatcher`, writing split objects and the
+# `komira_search_catalog` catalog through a `komira_objectstore` store the caller
+# supplies. The package depends on `komira_search` (the engine's batch, query and
+# result types), `komira_json`, `komira_http_core` and `komira_http_server`,
+# `komira_objectstore`, `komira_search_catalog` and `komira_log_index`; the
+# engine itself sees no wire byte.
 #
 # The welded tests run in memory, with no network. They build splits with the
 # search sink and read them with `SearchCore`. The aggregation, filter,

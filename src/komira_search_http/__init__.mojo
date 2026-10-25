@@ -1,6 +1,6 @@
 # =============================================================================
-# komira_search_http — the wire translators of an OpenSearch/Elasticsearch
-# compatible search shim
+# komira_search_http — the wire translators and the dispatcher of an
+# OpenSearch/Elasticsearch compatible search shim
 # =============================================================================
 #
 # Part 1 is the wire translators; part 2 is the dispatcher and its config.
@@ -81,6 +81,7 @@ from .config import (
     DEFAULT_TEXT_FIELD,
     SOURCE_FIELD,
     DEFAULT_MAX_BODY_BYTES,
+    DEFAULT_MAX_BULK_LINES,
     DEFAULT_MAX_SPLITS_PER_SEARCH,
 )
 from .request_path import (
@@ -88,6 +89,8 @@ from .request_path import (
     split_path,
     is_valid_index_name,
     body_too_large,
+    unsupported_query_param,
+    count_ndjson_lines,
     MAX_PATH_BYTES,
     MAX_PATH_SEGMENTS,
     MAX_INDEX_NAME_BYTES,

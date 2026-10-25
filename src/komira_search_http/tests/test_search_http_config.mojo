@@ -20,6 +20,7 @@ from komira_objectstore.shared_in_memory_conditional_store import (
 
 from komira_search_http import (
     DEFAULT_MAX_BODY_BYTES,
+    DEFAULT_MAX_BULK_LINES,
     DEFAULT_MAX_SPLITS_PER_SEARCH,
     SearchHttpConfig,
     SearchHttpDispatcher,
@@ -43,6 +44,7 @@ def test_config_keeps_its_fields_and_defaults() raises:
     assert_equal(c.node_id, String(""))
     assert_equal(c.max_body_bytes, DEFAULT_MAX_BODY_BYTES)
     assert_equal(c.max_splits_per_search, DEFAULT_MAX_SPLITS_PER_SEARCH)
+    assert_equal(c.max_bulk_lines, DEFAULT_MAX_BULK_LINES)
     var d = SearchHttpConfig(String("m"), String("k"), String("message"), String("n1"), 10, 3)
     assert_equal(d.text_field, String("message"))
     assert_equal(d.node_id, String("n1"))
@@ -80,6 +82,14 @@ def test_config_refuses_bad_text_field_node_and_limits() raises:
     assert_true(_raises_with(String("m"), String("k"), String("body"), String("n") + chr(1)))
     var raised = False
     try:
+        _ = SearchHttpConfig(
+            String("m"), String("k"), String("body"), String(""), 5, 5, 0
+        )
+    except:
+        raised = True
+    assert_true(raised)
+    raised = False
+    try:
         _ = SearchHttpConfig(String("m"), String("k"), String("body"), String(""), 0, 5)
     except:
         raised = True
@@ -90,6 +100,22 @@ def test_config_refuses_bad_text_field_node_and_limits() raises:
     except:
         raised = True
     assert_true(raised)
+
+
+def test_node_id_is_a_safe_lineage_segment() raises:
+    # The node id becomes part of a catalog key, so it may not carry a '/', a
+    # '..' path or anything outside a-z A-Z 0-9 '.' '_' '-'.
+    assert_false(_raises_with(String("m"), String("k"), String("body"), String("node-A.b_1")))
+    assert_false(_raises_with(String("m"), String("k"), String("body"), String("n" * 128)))
+    assert_true(_raises_with(String("m"), String("k"), String("body"), String("n" * 129)))
+    assert_true(_raises_with(String("m"), String("k"), String("body"), String("a/b")))
+    assert_true(_raises_with(String("m"), String("k"), String("body"), String("../x")))
+    # ".." alone is allowed: the lineage id is `<node>-<pid>-<worker>`, so it
+    # is never a bare ".." segment; only a '/' could make one.
+    assert_false(_raises_with(String("m"), String("k"), String("body"), String("..")))
+    assert_true(_raises_with(String("m"), String("k"), String("body"), String("a b")))
+    assert_true(_raises_with(String("m"), String("k"), String("body"), String("a\\b")))
+    assert_true(_raises_with(String("m"), String("k"), String("body"), String("café")))
 
 
 def test_split_uuid_layout() raises:

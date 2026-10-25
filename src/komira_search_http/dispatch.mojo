@@ -88,6 +88,8 @@ from .envelopes import (
 )
 from .request_path import (
     body_too_large,
+    count_ndjson_lines,
+    unsupported_query_param,
     is_valid_index_name,
     split_path,
     strip_query,
@@ -106,16 +108,9 @@ from .search_query import (
 from .split_ids import make_split_uuid
 
 
-comptime _STORE_FAULT = "[STORE_FAULT] "
-"""Starts the message of a failure that came from the store, as opposed to a
-request the client got wrong. `_map_error` answers it with 500."""
-
-comptime _TOO_MANY_SPLITS = "[TOO_MANY_SPLITS] "
-"""Starts the message of a `_search` refused for the number of live splits."""
-
-
-def _store_fault(what: String, e: Error) -> Error:
-    return Error(String(_STORE_FAULT) + what + String(": ") + String(e))
+comptime _FAULT_NONE = 0
+comptime _FAULT_STORE = 1
+comptime _FAULT_TOO_MANY_SPLITS = 2
 
 
 def _split_short_id(summary: SplitSummary) -> String:
@@ -129,37 +124,6 @@ def _split_short_id(summary: SplitSummary) -> String:
         out += HEX[byte = (b >> 4) & 0xF]
         out += HEX[byte = b & 0xF]
     return out^
-
-
-def _strip_marker(msg: String, marker: String) -> Optional[String]:
-    """`msg` without the leading `marker`, or None when it does not start
-    with it."""
-    var mb = msg.as_bytes()
-    var kb = marker.as_bytes()
-    if len(mb) < len(kb):
-        return None
-    for i in range(len(kb)):
-        if mb[i] != kb[i]:
-            return None
-    var rest = List[UInt8](capacity=len(mb) - len(kb))
-    for i in range(len(kb), len(mb)):
-        rest.append(mb[i])
-    # SAFETY: the marker is ASCII, so cutting after it leaves valid UTF-8.
-    return String(StringSlice(unsafe_from_utf8=Span(rest)))
-
-
-def _up_to_colon(s: String) -> String:
-    var b = s.as_bytes()
-    var cut = len(b)
-    for i in range(len(b)):
-        if b[i] == UInt8(58):  # ':'
-            cut = i
-            break
-    var out = List[UInt8](capacity=cut)
-    for i in range(cut):
-        out.append(b[i])
-    # SAFETY: cut at an ASCII ':' (or the end), so the prefix is valid UTF-8.
-    return String(StringSlice(unsafe_from_utf8=Span(out)))
 
 
 def _trim_trailing_slash(s: String) -> String:
@@ -194,6 +158,12 @@ struct SearchHttpDispatcher[Storage: CloneableConditionalWriteStore](
     var _epoch_us: UInt64
     # The sequence of the last split uuid minted; the next is this plus one.
     var _split_seq: Int64
+    # How the request in flight failed, set by the handler just before it
+    # raises and read by `_map_error`; reset at the start of every request.
+    # A kind and a fixed operation name, not a prefix of the message, tell a
+    # store fault from a request error, so no message text can pose as one.
+    var _fault: Int
+    var _fault_what: String
 
     def __init__(
         out self,
@@ -204,7 +174,10 @@ struct SearchHttpDispatcher[Storage: CloneableConditionalWriteStore](
     ) raises:
         """Take the config and the store. `worker_idx` (0 to 255) tells apart
         the dispatchers of one process: it is the uuid discriminant byte and
-        part of the sub-lineage id. `epoch_us` is the install time mixed into
+        part of the sub-lineage id; it must be unique among the dispatchers of
+        one process that share a store, because two with the same index and
+        epoch mint the same split keys and the second `put` overwrites the
+        first. `epoch_us` is the install time mixed into
         every split uuid; a negative value (the default) reads the wall clock
         now, pass a value only to pin it. Raises when `worker_idx` is outside
         0 to 255."""
@@ -219,8 +192,17 @@ struct SearchHttpDispatcher[Storage: CloneableConditionalWriteStore](
         else:
             self._epoch_us = UInt64(epoch_us)
         self._split_seq = Int64(0)
+        self._fault = _FAULT_NONE
+        self._fault_what = String("")
         self._cfg = cfg^
         self._store = store^
+
+    def _store_fault(mut self, what: String, e: Error) -> Error:
+        """Record that the store (or an object it holds) failed while `what`,
+        and return the error to raise. The client is told `what` only."""
+        self._fault = _FAULT_STORE
+        self._fault_what = what.copy()
+        return Error(what + String(": ") + String(e))
 
     def shard_id(self) -> String:
         """The id of this dispatcher's catalog sub-lineage."""
@@ -262,6 +244,7 @@ struct SearchHttpDispatcher[Storage: CloneableConditionalWriteStore](
         another verb 405, a bad index name 400, a body over the limit 413. The
         handlers' failures are mapped to envelopes here, so nothing raises out.
         """
+        self._fault = _FAULT_NONE
         var segs = split_path(strip_query(req.path))
         var is_bulk = len(segs) == 2 and segs[1] == String("_bulk")
         var is_search = len(segs) == 2 and segs[1] == String("_search")
@@ -283,12 +266,30 @@ struct SearchHttpDispatcher[Storage: CloneableConditionalWriteStore](
             )
             r.headers[String("allow")] = String("POST")
             return r^
+        if unsupported_query_param(req.path):
+            return self._error_response(
+                String("illegal_argument_exception"),
+                String(
+                    "a query-string parameter other than refresh, pretty,"
+                    " human and error_trace is not supported; send it in the"
+                    " request body"
+                ),
+                400,
+            )
         if body_too_large(len(req.body), self._cfg.max_body_bytes):
             return self._error_response(
                 String("content_too_long_exception"),
                 String("the request body is longer than ")
                 + String(self._cfg.max_body_bytes)
                 + String(" bytes"),
+                413,
+            )
+        if is_bulk and count_ndjson_lines(req.body) > self._cfg.max_bulk_lines:
+            return self._error_response(
+                String("content_too_long_exception"),
+                String("the _bulk body has more than ")
+                + String(self._cfg.max_bulk_lines)
+                + String(" lines"),
                 413,
             )
         var index = segs[0].copy()
@@ -369,24 +370,36 @@ struct SearchHttpDispatcher[Storage: CloneableConditionalWriteStore](
         try:
             _ = self._store.put(Path.parse(object_key), split_bytes)
         except e:
-            raise _store_fault(String("writing the split object"), e)
+            raise self._store_fault(String("writing the split object"), e)
         # (2) the catalog append SECOND: from here on the split is searchable.
         try:
             var metastore = self._new_write_metastore(index)
             _ = metastore.publish(summary^)
         except e:
-            raise _store_fault(String("publishing the split"), e)
+            raise self._store_fault(String("publishing the split"), e)
 
         return ok_json(bulk_response_envelope_items(index, items, any_error))
 
     # -------------------------------------------------------------------------
     # The _search handler.
     # -------------------------------------------------------------------------
-    def _read_split(self, summary: SplitSummary) raises -> List[UInt8]:
+    def _read_split(mut self, summary: SplitSummary) raises -> List[UInt8]:
         try:
             return self._store.get(Path.parse(summary.object_key))
         except e:
-            raise _store_fault(String("reading a split object"), e)
+            raise self._store_fault(String("reading a split object"), e)
+
+    def _parse_split(mut self, var bytes: List[UInt8]) raises -> SplitView:
+        try:
+            return SplitView.parse(bytes^)
+        except e:
+            raise self._store_fault(String("reading a split object"), e)
+
+    def _open_core(mut self, var view: SplitView) raises -> SearchCore:
+        try:
+            return SearchCore.from_view(view^)
+        except e:
+            raise self._store_fault(String("opening a split object"), e)
 
     def _handle_search(
         mut self, index: String, body: List[UInt8]
@@ -413,7 +426,7 @@ struct SearchHttpDispatcher[Storage: CloneableConditionalWriteStore](
                 self._store, meta_prefix, index
             )
         except e:
-            raise _store_fault(String("reading the catalog"), e)
+            raise self._store_fault(String("reading the catalog"), e)
 
         var n_splits = len(splits)
         if n_splits == 0:
@@ -421,9 +434,9 @@ struct SearchHttpDispatcher[Storage: CloneableConditionalWriteStore](
                 empty_hits_envelope(index, AggResults(), query.has_aggs())
             )
         if n_splits > self._cfg.max_splits_per_search:
+            self._fault = _FAULT_TOO_MANY_SPLITS
             raise Error(
-                String(_TOO_MANY_SPLITS)
-                + String("the index has ")
+                String("the index has ")
                 + String(n_splits)
                 + String(" live splits; at most ")
                 + String(self._cfg.max_splits_per_search)
@@ -447,7 +460,7 @@ struct SearchHttpDispatcher[Storage: CloneableConditionalWriteStore](
         # search, so one request holds one split's bytes at a time.
         var first_bytes = self._read_split(splits[0])
         if query.has_filter() or needs_sort_gate or has_aggs:
-            var gate_view = SplitView.parse(first_bytes.copy())
+            var gate_view = self._parse_split(first_bytes.copy())
             var gate_reader = FastFieldReader(gate_view)
             if query.has_filter():
                 query = gate_filter_against_fastfields(query^, gate_reader)
@@ -478,11 +491,14 @@ struct SearchHttpDispatcher[Storage: CloneableConditionalWriteStore](
             # posting slot (the cheap drain format) is probed by
             # `search_l0_split`, any other by `SearchCore`. Both return the
             # same result shape, so a mixed set merges.
-            var split_view = SplitView.parse(split_bytes^)
+            # A split that does not parse is a damaged object (500). An error
+            # from the search itself is not wrapped: the query was gated, and
+            # the engine also refuses a request that does not fit the split.
+            var split_view = self._parse_split(split_bytes^)
             if split_view.has_l0_posting():
                 results.append(search_l0_split(split_view, leaf_query))
             else:
-                var core = SearchCore.from_view(split_view^)
+                var core = self._open_core(split_view^)
                 results.append(core.search(leaf_query))
 
         var merged_aggs = AggResults()
@@ -552,22 +568,17 @@ struct SearchHttpDispatcher[Storage: CloneableConditionalWriteStore](
             )
 
     def _map_error(self, msg: String) -> HttpResponse:
-        """A store failure is 500 with a fixed reason, a refused split count
-        503, anything else (a parse, gate or engine refusal of the request) 400.
-        """
-        var store_fault = _strip_marker(msg, String(_STORE_FAULT))
-        if store_fault:
-            # The text up to the first ':' names the operation; the store's own
-            # message after it is not sent to the client.
+        """A store fault is 500 with a fixed reason (the store's own message is
+        not sent), a refused split count 503, anything else (a parse, gate or
+        engine refusal of the request) 400."""
+        if self._fault == _FAULT_STORE:
             return self._error_response(
                 String("internal_error"),
-                String("the search store failed while ")
-                + _up_to_colon(store_fault.value()),
+                String("the search store failed while ") + self._fault_what,
                 500,
             )
-        var too_many = _strip_marker(msg, String(_TOO_MANY_SPLITS))
-        if too_many:
+        if self._fault == _FAULT_TOO_MANY_SPLITS:
             return self._error_response(
-                String("search_unavailable_exception"), too_many.value(), 503
+                String("search_unavailable_exception"), msg, 503
             )
         return self._error_response(String("parse_exception"), msg, 400)
