@@ -129,3 +129,26 @@ test "usage errors exit 2: a missing flag, an unknown flag, a directory that is 
     try t.expectEqual(@as(u8, 2), r3.code);
     try t.expect(has(r3.stderr, "cannot open nowhere"));
 }
+
+test "a difference in line endings alone is red and shown" {
+    var c = try newCtx("crlf");
+    defer c.deinit();
+    try inSync(&c);
+    try c.write("committed/svc.mojo", "struct A:\r\n    pass\r\n", 0o644);
+    const r = try runFresh(&c);
+    try expectRedWithCommand(r);
+    try t.expect(has(r.stderr, "differs: svc.mojo, first at line 1:\n    committed: struct A:\\r\n    generated: struct A:\n"));
+}
+
+test "a symbolic link in the committed directory is red even when it points at the right bytes" {
+    var c = try newCtx("link");
+    defer c.deinit();
+    try inSync(&c);
+    try c.write("elsewhere/svc.mojo", "struct A:\n    pass\n", 0o644);
+    try std.fs.cwd().deleteFile(try c.path("committed/svc.mojo"));
+    try std.posix.symlinkat(try c.path("elsewhere/svc.mojo"), std.fs.cwd().fd, try c.path("committed/svc.mojo"));
+    const r = try runFresh(&c);
+    try expectRedWithCommand(r);
+    try t.expect(has(r.stderr, "not a regular file (a symbolic link?): svc.mojo"));
+    try t.expect(!c.exists("stamp"));
+}

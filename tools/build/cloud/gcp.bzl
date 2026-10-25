@@ -134,7 +134,7 @@ Every refusal happens at analysis, in `<name>_gen`, so a BUCK file with one
 wrong mojo_gcp_client still loads.
 """
 
-load("@komira//tools/build/gen:defs.bzl", "committed_sources", "declare_fresh", "declare_uncommitted", "generated_state")
+load("@komira//tools/build/gen:defs.bzl", "committed_sources", "declare_fresh", "declare_uncommitted", "declare_unmigrated", "generated_state")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load(
@@ -360,6 +360,7 @@ def _gcp_client(
         return
 
     # The transition (tools/build/gen/transition.bzl): built from the generator.
+    declare_unmigrated(name, state)
     # The file names the generation action is held to (generate_proto_dir
     # refuses a missing, empty or extra file), so they can be named here. An
     # entry that is not a `.proto` path is left out rather than turned into a

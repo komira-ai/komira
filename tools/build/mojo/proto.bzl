@@ -52,7 +52,7 @@ the action key.
 
 load(":defs.bzl", "mojo_library", "mojo_precompile_cmd")
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoToolchainInfo")
-load("@komira//tools/build/gen:defs.bzl", "committed_sources", "declare_fresh", "declare_uncommitted", "generated_state")
+load("@komira//tools/build/gen:defs.bzl", "committed_sources", "declare_fresh", "declare_uncommitted", "declare_unmigrated", "generated_state")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 MojoProtoToolchainInfo = provider(fields = {
@@ -487,6 +487,7 @@ def _mojo_proto_library(
         return
 
     # The transition (tools/build/gen/transition.bzl): built from the generator.
+    declare_unmigrated(name, state)
     if not test_srcs:
         if test_data or test_env:
             fail("//{}:{}: `test_data` / `test_env` without `test_srcs`".format(native.package_name(), name))
@@ -610,6 +611,7 @@ def _mojo_db_proto_library(name, srcs, outs, **kwargs):
     state = generated_state(name)
     if state.legacy:
         # The transition (tools/build/gen/transition.bzl): built from the generator.
+        declare_unmigrated(name, state)
         mojo_db_proto_library_rule(name = name, srcs = srcs, outs = outs, **kwargs)
         return
     for k in kwargs:

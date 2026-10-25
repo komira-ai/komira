@@ -33,6 +33,11 @@ const prog = "regen";
 /// The kind of the rule `<name>_fresh` is (tools/build/gen/defs.bzl).
 pub const fresh_kind = "gen_fresh";
 
+/// The kind of the marker `<name>_unmigrated` a library still in the transition
+/// ledger declares (tools/build/gen/defs.bzl): no action, only a name regen can
+/// count and recognise.
+pub const unmigrated_kind = "gen_unmigrated";
+
 /// What `sync` did to a directory.
 pub const Summary = struct {
     wrote: usize = 0,
@@ -45,6 +50,9 @@ pub const Summary = struct {
 /// written, a file `src` does not have is removed (and a directory it leaves
 /// empty), a file already equal is not touched.
 pub fn sync(a: std.mem.Allocator, src: std.fs.Dir, dst: std.fs.Dir) !Summary {
+    // Nothing is written or removed through a symbolic link: one in the
+    // destination is refused before anything is touched.
+    if (try findLink(a, dst) != null) return error.SymlinkInDestination;
     var sum = Summary{};
     const want = try U.listFiles(a, src, true);
     const have = try U.listFiles(a, dst, false);
@@ -75,13 +83,57 @@ pub fn sync(a: std.mem.Allocator, src: std.fs.Dir, dst: std.fs.Dir) !Summary {
     return sum;
 }
 
+/// The first (bytewise) path under `dir` that is not a regular file or a
+/// directory, a symbolic link above all, found without following any link;
+/// null when there is none.
+pub fn findLink(a: std.mem.Allocator, dir: std.fs.Dir) !?[]const u8 {
+    var found = std.ArrayList([]const u8).empty;
+    try collectLinks(a, dir, "", &found);
+    if (found.items.len == 0) return null;
+    std.mem.sort([]const u8, found.items, {}, U.lessBytes);
+    return found.items[0];
+}
+
+fn collectLinks(a: std.mem.Allocator, dir: std.fs.Dir, prefix: []const u8, found: *std.ArrayList([]const u8)) !void {
+    var it = dir.iterate();
+    while (try it.next()) |e| {
+        const rel = if (prefix.len == 0) try a.dupe(u8, e.name) else try std.fmt.allocPrint(a, "{s}/{s}", .{ prefix, e.name });
+        switch (e.kind) {
+            .file => {},
+            .directory => {
+                var sub = try dir.openDir(e.name, .{ .iterate = true, .no_follow = true });
+                defer sub.close();
+                try collectLinks(a, sub, rel, found);
+            },
+            else => try found.append(a, rel),
+        }
+    }
+}
+
+/// The first prefix of the relative path `rel` (from `root`) that is a symbolic
+/// link, null when none is (or exists).
+pub fn linkOnPath(a: std.mem.Allocator, root: std.fs.Dir, rel: []const u8) !?[]const u8 {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    var it = std.mem.splitScalar(u8, rel, '/');
+    var end: usize = 0;
+    while (it.next()) |part| {
+        end += part.len;
+        const prefix = rel[0..end];
+        if (root.readLink(prefix, &buf)) |_| return try a.dupe(u8, prefix) else |err| switch (err) {
+            error.NotLink, error.FileNotFound => {},
+            else => return err,
+        }
+        end += 1;
+    }
+    return null;
+}
+
 /// Removes every directory under `dir` that holds no file, deepest first.
+/// Links are never followed.
 fn removeEmptyDirs(a: std.mem.Allocator, dir: std.fs.Dir) !void {
     const names = try U.listNames(a, dir);
     for (names) |n| {
-        const st = dir.statFile(n) catch continue;
-        if (st.kind != .directory) continue;
-        var sub = try dir.openDir(n, .{ .iterate = true });
+        var sub = dir.openDir(n, .{ .iterate = true, .no_follow = true }) catch continue;
         try removeEmptyDirs(a, sub);
         const left = try U.listNames(a, sub);
         sub.close();
@@ -162,6 +214,16 @@ pub fn outputOf(text: []const u8, label: []const u8) ?[]const u8 {
     return null;
 }
 
+fn refuseLink(root: []const u8, rel: []const u8) u8 {
+    std.debug.print(prog ++ ": {s}/{s} is a symbolic link; regen writes and removes files through no link, so nothing was changed. Replace it with the directory or file it stands for, or delete it\n", .{ root, rel });
+    return 1;
+}
+
+fn refuseLinkAt(path: []const u8) u8 {
+    std.debug.print(prog ++ ": {s} is a symbolic link (or another kind of file that is not a regular file); regen writes and removes files through no link, so nothing was changed. Replace it with the file it stands for, or delete it\n", .{path});
+    return 1;
+}
+
 fn usage(comptime fmt: []const u8, args: anytype) u8 {
     std.debug.print(prog ++ ": " ++ fmt ++ "\n", args);
     return 2;
@@ -205,6 +267,23 @@ fn buck(a: std.mem.Allocator, buck2: []const u8, argv: []const []const u8) !?[]u
     return out.items;
 }
 
+/// How many libraries of `pattern` carry the ledger's marker; null when the query failed.
+fn unmigrated(a: std.mem.Allocator, buck2: []const u8, pattern: []const u8) !?usize {
+    const q = try std.fmt.allocPrint(a, "kind('^{s}$', {s})", .{ unmigrated_kind, pattern });
+    const out = (try buck(a, buck2, &.{ "uquery", q })) orelse return null;
+    var n: usize = 0;
+    var lines = std.mem.splitScalar(u8, out, '\n');
+    while (lines.next()) |l| {
+        if (std.mem.trim(u8, l, " \r").len > 0) n += 1;
+    }
+    return n;
+}
+
+fn inLedger(arg: []const u8) u8 {
+    std.debug.print(prog ++ ": {s} is still in the transition ledger (tools/build/gen/transition.bzl): it is built from the generator on every build and has no committed directory. Take its line out of the ledger (and lower `max` of //tools/build/gen:transition), then run this again\n", .{arg});
+    return 1;
+}
+
 fn run(a: std.mem.Allocator, buck2: []const u8, args: []const []const u8) u8 {
     var patterns = std.ArrayList([]const u8).empty;
     for (args) |arg| {
@@ -214,11 +293,32 @@ fn run(a: std.mem.Allocator, buck2: []const u8, args: []const []const u8) u8 {
     var all_jobs = std.ArrayList(Job).empty;
     for (patterns.items, args) |p, arg| {
         const query = std.fmt.allocPrint(a, "kind('^{s}$', {s})", .{ fresh_kind, p }) catch return 2;
-        const out = (buck(a, buck2, &.{ "uquery", "--json", "-a", "committed_dir", "-a", "gen", query }) catch return usage("cannot run {s}", .{buck2})) orelse return 1;
+        const answer = buck(a, buck2, &.{ "uquery", "--json", "-a", "committed_dir", "-a", "gen", query }) catch return usage("cannot run {s}", .{buck2});
+        const out = answer orelse {
+            // buck2 knows no `<name>_fresh`. If the library has the marker of the ledger, say that.
+            if (!std.mem.eql(u8, arg, "all") and !std.mem.endsWith(u8, arg, ":") and !std.mem.endsWith(u8, arg, "...")) {
+                const marker = std.fmt.allocPrint(a, "{s}_unmigrated", .{arg}) catch return 2;
+                if ((unmigrated(a, buck2, marker) catch return 2)) |n| {
+                    if (n > 0) return inLedger(arg);
+                }
+            }
+            return 1;
+        };
         const jobs = parseJobs(a, out) catch |e| return usage("cannot read the result of the query {s}: {s}", .{ query, @errorName(e) });
         if (jobs.len == 0) {
-            std.debug.print(prog ++ ": {s} names no generated library with committed sources: either it is not a generated library, or it is still in the transition ledger (tools/build/gen/transition.bzl), whose entries are built from the generator on every build and have no committed directory; take it out of the ledger, then run this again\n", .{arg});
+            if (!std.mem.eql(u8, arg, "all")) {
+                const marker = if (std.mem.endsWith(u8, arg, ":") or std.mem.endsWith(u8, arg, "...")) p else std.fmt.allocPrint(a, "{s}_unmigrated", .{arg}) catch return 2;
+                if ((unmigrated(a, buck2, marker) catch return 2)) |n| {
+                    if (n > 0) return inLedger(arg);
+                }
+            }
+            std.debug.print(prog ++ ": {s} names no generated library with committed sources (it is not a generated library)\n", .{arg});
             return 1;
+        }
+        if (std.mem.eql(u8, arg, "all")) {
+            if ((unmigrated(a, buck2, "komira//...") catch return 2)) |n| {
+                std.debug.print(prog ++ ": all: skipped {d} libraries still in the transition ledger (tools/build/gen/transition.bzl): they are built from the generator and have no committed directory\n", .{n});
+            }
         }
         all_jobs.appendSlice(a, jobs) catch return 2;
     }
@@ -234,11 +334,21 @@ fn run(a: std.mem.Allocator, buck2: []const u8, args: []const []const u8) u8 {
         const root_out = (buck(a, buck2, &.{ "audit", "cell", "--paths-only", j.cell }) catch return usage("cannot run {s}", .{buck2})) orelse return 1;
         const root = std.mem.trim(u8, root_out, " \r\n");
         const dest = std.fs.path.join(a, &.{ root, j.dest }) catch return 2;
+        {
+            var root_dir = std.fs.openDirAbsolute(root, .{}) catch |e| return usage("cannot open {s}: {s}", .{ root, @errorName(e) });
+            defer root_dir.close();
+            const via = linkOnPath(a, root_dir, j.dest) catch |e| return usage("cannot inspect {s}: {s}", .{ dest, @errorName(e) });
+            if (via) |l| return refuseLink(root, l);
+        }
         var src = std.fs.openDirAbsolute(gen_path, .{ .iterate = true }) catch |e| return usage("cannot open the output of {s} ({s}): {s}", .{ j.gen, gen_path, @errorName(e) });
         defer src.close();
         std.fs.cwd().makePath(dest) catch |e| return usage("cannot create {s}: {s}", .{ dest, @errorName(e) });
         var dst = std.fs.openDirAbsolute(dest, .{ .iterate = true }) catch |e| return usage("cannot open {s}: {s}", .{ dest, @errorName(e) });
         defer dst.close();
+        if ((findLink(a, dst) catch |e| return usage("cannot inspect {s}: {s}", .{ dest, @errorName(e) })) ) |l| {
+            const full = std.fs.path.join(a, &.{ dest, l }) catch return 2;
+            return refuseLinkAt(full);
+        }
         const sum = sync(a, src, dst) catch |e| return usage("cannot update {s}: {s}", .{ dest, @errorName(e) });
         std.debug.print("{s}: {s}/: wrote {d}, removed {d}, unchanged {d}\n", .{ j.fresh, j.dest, sum.wrote, sum.removed, sum.unchanged });
     }

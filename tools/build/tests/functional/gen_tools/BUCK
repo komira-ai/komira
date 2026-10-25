@@ -1,3 +1,4 @@
+load("@komira//tools/build/gen:defs.bzl", "committed_data")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
@@ -36,6 +37,20 @@ zig_test(
     },
     src = "regen_driver_test.zig",
     deps = ["tests//functional/driver_kit:driver_kit"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# `committed_data` (tools/build/gen/defs.bzl), the data a test takes of a committed
+# generated directory: a file keeps its path inside the directory, nested files
+# included (the environment scans of the generated clients take their files so),
+# and `suffix` keeps only the files ending so. The directory is a fixture of
+# plain files, not generated ones.
+zig_test(
+    name = "committed_data",
+    exec_compatible_with = LINUX_X86_64,
+    data = committed_data("nested_fixture", "all") | committed_data("nested_fixture", "mojo_only", ".mojo"),
+    src = "committed_data_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
 )

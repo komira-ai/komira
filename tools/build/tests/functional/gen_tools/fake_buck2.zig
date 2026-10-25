@@ -1,7 +1,8 @@
 //! A stand-in for buck2, for the driver test of `regen`. It answers the three
 //! commands regen runs from files in its working directory, and records each call:
 //!
-//!   uquery ... <query>       prints fake/uquery.json (exit 3 if fake/uquery_fails exists)
+//!   uquery ... <query>       prints fake/uquery.json (exit 3 if fake/uquery_fails exists);
+//!                            a query naming gen_unmigrated prints fake/unmigrated.txt (exit 3 without it)
 //!   build --show-full-output <label>...   prints fake/build.txt (exit 4 if fake/build_fails exists)
 //!   audit cell --paths-only <cell>        prints fake/cell_root
 //!
@@ -35,6 +36,13 @@ pub fn main() void {
 
     if (argv.len < 2) std.process.exit(9);
     if (std.mem.eql(u8, argv[1], "uquery")) {
+        // The ledger's markers: the query names the kind. fake/unmigrated.txt is
+        // what it prints; without the file the target is unknown (exit 3).
+        if (std.mem.indexOf(u8, line.items, "gen_unmigrated") != null) {
+            if (!exists("fake/unmigrated.txt")) std.process.exit(3);
+            say("fake/unmigrated.txt");
+            return;
+        }
         if (exists("fake/uquery_fails")) std.process.exit(3);
         say("fake/uquery.json");
     } else if (std.mem.eql(u8, argv[1], "build")) {

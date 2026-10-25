@@ -151,15 +151,19 @@ def generated_state(name):
         fail("{}: `{}/` is committed, so the library is no longer in the transition: delete its line from tools/build/gen/transition.bzl".format(target, directory))
     return struct(legacy = legacy, dir = directory, files = files, target = target)
 
-def committed_data(name, at = "gen"):
-    """A test's `data` of the committed generated files of the library `name`, each at `<at>/<file>`.
+def committed_data(name, at = "gen", suffix = ""):
+    """A test's `data` of the committed generated files of the library `name`, each at `<at>/<path in the committed directory>`.
+
+    A file of a subdirectory (`_parts/x.mojo`) keeps its path, so a test that
+    walks the staged tree finds it where the generator put it. `suffix` keeps
+    only the files ending so (`.mojo`).
 
     For a test that reads every generated file (the environment scans): what it
     reads is what the library is built from, never `<name>_gen`. Empty while
     the library has no committed directory.
     """
     directory = GENERATED_DIR + "/" + name
-    return {at + "/" + f[len(directory) + 1:]: f for f in sorted(glob([directory + "/**"]))}
+    return {at + "/" + f[len(directory) + 1:]: f for f in sorted(glob([directory + "/**"])) if f.endswith(suffix)}
 
 def committed_sources(state, exclude = []):
     """The `.mojo` files of a committed directory a library is built from, less the named files (their basenames)."""
@@ -176,6 +180,21 @@ def declare_fresh(name, gen, state, visibility = None):
         target = state.target,
         **vis
     )
+
+def _unmigrated_impl(ctx):
+    return [DefaultInfo()]
+
+# The marker a library in the transition ledger declares, `<name>_unmigrated`:
+# no action. `regen` counts them (`regen -- all` says how many it skipped) and
+# recognises one to explain that a library is still in the ledger.
+gen_unmigrated = rule(
+    impl = _unmigrated_impl,
+    attrs = {"target": attrs.string()},
+)
+
+def declare_unmigrated(name, state):
+    """Declares `<name>_unmigrated` for a library of the transition ledger."""
+    gen_unmigrated(name = name + "_unmigrated", target = state.target)
 
 def declare_uncommitted(name, gen, state, visibility = None):
     """Declares `name` as the target that says to regenerate, for a library with nothing committed yet."""

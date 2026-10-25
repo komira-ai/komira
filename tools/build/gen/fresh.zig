@@ -39,19 +39,37 @@ pub const Report = struct {
     stale: []const []const u8,
     /// In both, with other bytes.
     differ: []const Diff,
+    /// Entries of the committed directory that are not regular files or
+    /// directories (a symbolic link above all): never committed green.
+    links: []const []const u8 = &.{},
 
     pub fn inSync(self: Report) bool {
-        return self.missing.len == 0 and self.stale.len == 0 and self.differ.len == 0;
+        return self.missing.len == 0 and self.stale.len == 0 and self.differ.len == 0 and self.links.len == 0;
     }
 };
 
 /// The longest part of a line the message quotes.
 const quote_max = 120;
 
+/// `s` cut to `quote_max` bytes, with the characters a reader cannot see written
+/// out: a carriage return as `\r`, a tab as `\t`, so a difference in line endings
+/// shows as one.
 fn clip(a: std.mem.Allocator, s: []const u8) ![]const u8 {
-    const t = std.mem.trimRight(u8, s, "\r");
-    if (t.len <= quote_max) return t;
-    return std.fmt.allocPrint(a, "{s}...", .{t[0..quote_max]});
+    var out = std.ArrayList(u8).empty;
+    var cut = false;
+    for (s) |c| {
+        if (out.items.len >= quote_max) {
+            cut = true;
+            break;
+        }
+        switch (c) {
+            '\r' => try out.appendSlice(a, "\\r"),
+            '\t' => try out.appendSlice(a, "\\t"),
+            else => try out.append(a, c),
+        }
+    }
+    if (cut) try out.appendSlice(a, "...");
+    return out.items;
 }
 
 /// The first line where `x` and `y` differ: its 1-based number and the line in
@@ -79,6 +97,7 @@ fn firstDifference(a: std.mem.Allocator, x: []const u8, y: []const u8) !struct {
 /// subdirectories included). Symbolic links are followed: a staged directory of
 /// source files may be made of them.
 pub fn judge(a: std.mem.Allocator, gen: std.fs.Dir, committed: std.fs.Dir) !Report {
+    const links = try findLinks(a, committed);
     const g = try U.listFiles(a, gen, true);
     const c = try U.listFiles(a, committed, true);
     var missing = std.ArrayList([]const u8).empty;
@@ -109,7 +128,32 @@ pub fn judge(a: std.mem.Allocator, gen: std.fs.Dir, committed: std.fs.Dir) !Repo
             },
         }
     }
-    return .{ .missing = missing.items, .stale = stale.items, .differ = differ.items };
+    return .{ .missing = missing.items, .stale = stale.items, .differ = differ.items, .links = links };
+}
+
+/// The paths under `dir` that are neither a regular file nor a directory,
+/// found without following a link, sorted.
+pub fn findLinks(a: std.mem.Allocator, dir: std.fs.Dir) ![]const []const u8 {
+    var found = std.ArrayList([]const u8).empty;
+    try collect(a, dir, "", &found);
+    std.mem.sort([]const u8, found.items, {}, U.lessBytes);
+    return found.items;
+}
+
+fn collect(a: std.mem.Allocator, dir: std.fs.Dir, prefix: []const u8, found: *std.ArrayList([]const u8)) !void {
+    var it = dir.iterate();
+    while (try it.next()) |e| {
+        const rel = if (prefix.len == 0) try a.dupe(u8, e.name) else try std.fmt.allocPrint(a, "{s}/{s}", .{ prefix, e.name });
+        switch (e.kind) {
+            .file => {},
+            .directory => {
+                var sub = try dir.openDir(e.name, .{ .iterate = true, .no_follow = true });
+                defer sub.close();
+                try collect(a, sub, rel, found);
+            },
+            else => try found.append(a, rel),
+        }
+    }
 }
 
 fn put(a: std.mem.Allocator, b: *std.ArrayList(u8), comptime fmt: []const u8, args: anytype) !void {
@@ -123,6 +167,7 @@ pub fn render(a: std.mem.Allocator, r: Report, label: []const u8, dir: []const u
     try put(a, &b, "{s}: the committed generated sources of {s} are out of date ({s}/).\n", .{ prog, label, dir });
     for (r.missing) |n| try put(a, &b, "  missing, generated now but not committed: {s}\n", .{n});
     for (r.stale) |n| try put(a, &b, "  stale, committed but no longer generated: {s}\n", .{n});
+    for (r.links) |n| try put(a, &b, "  not a regular file (a symbolic link?): {s}; generated files are committed as files\n", .{n});
     for (r.differ) |d| {
         try put(a, &b, "  differs: {s}, first at line {d}:\n    committed: {s}\n    generated: {s}\n", .{ d.name, d.line, d.committed, d.generated });
     }

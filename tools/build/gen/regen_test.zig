@@ -160,3 +160,79 @@ test "outputOf: the path printed for a label, not for a label it is a prefix of"
     try t.expectEqualStrings("/out/two", R.outputOf(text, "komira//src/a:a_gen2").?);
     try t.expect(R.outputOf(text, "komira//src/a:a") == null);
 }
+
+test "findLink: a symbolic link to a file or to a directory, at any depth, is found without following it" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var out = t.tmpDir(.{ .iterate = true });
+    defer out.cleanup();
+    var dst = t.tmpDir(.{ .iterate = true });
+    defer dst.cleanup();
+    try lay(out.dir, "x.mojo", "x\n");
+    const target = try out.dir.realpathAlloc(a, ".");
+    try lay(dst.dir, "plain.mojo", "p\n");
+    try t.expect((try R.findLink(a, dst.dir)) == null);
+    try lay(dst.dir, "sub/deeper/f.mojo", "f\n");
+    try dst.dir.symLink(try std.fmt.allocPrint(a, "{s}/x.mojo", .{target}), "sub/deeper/link.mojo", .{});
+    try t.expectEqualStrings("sub/deeper/link.mojo", (try R.findLink(a, dst.dir)).?);
+    try dst.dir.symLink(target, "aaa_dir", .{ .is_directory = true });
+    try t.expectEqualStrings("aaa_dir", (try R.findLink(a, dst.dir)).?);
+}
+
+test "sync: a symbolic link to a file outside the directory is refused, and the file outside is not written" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var src = t.tmpDir(.{ .iterate = true });
+    defer src.cleanup();
+    var dst = t.tmpDir(.{ .iterate = true });
+    defer dst.cleanup();
+    var outside = t.tmpDir(.{ .iterate = true });
+    defer outside.cleanup();
+    try lay(src.dir, "a.mojo", "generated\n");
+    try lay(outside.dir, "victim.txt", "keep me\n");
+    const victim = try outside.dir.realpathAlloc(a, "victim.txt");
+    try dst.dir.symLink(victim, "a.mojo", .{});
+    try t.expectError(error.SymlinkInDestination, R.sync(a, src.dir, dst.dir));
+    try expectFile(outside.dir, a, "victim.txt", "keep me\n");
+}
+
+test "sync: a symbolic link to a directory outside is refused, and nothing outside is deleted" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var src = t.tmpDir(.{ .iterate = true });
+    defer src.cleanup();
+    var dst = t.tmpDir(.{ .iterate = true });
+    defer dst.cleanup();
+    var outside = t.tmpDir(.{ .iterate = true });
+    defer outside.cleanup();
+    try lay(src.dir, "a.mojo", "generated\n");
+    try outside.dir.makePath("empty_dir");
+    try lay(outside.dir, "kept/file.txt", "keep me\n");
+    const target = try outside.dir.realpathAlloc(a, ".");
+    try dst.dir.symLink(target, "link", .{ .is_directory = true });
+    try t.expectError(error.SymlinkInDestination, R.sync(a, src.dir, dst.dir));
+    try expectFile(outside.dir, a, "kept/file.txt", "keep me\n");
+    _ = try outside.dir.statFile("empty_dir");
+}
+
+test "linkOnPath: a link anywhere on the path to the committed directory is found; plain and missing paths are not" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var root = t.tmpDir(.{ .iterate = true });
+    defer root.cleanup();
+    var outside = t.tmpDir(.{ .iterate = true });
+    defer outside.cleanup();
+    try root.dir.makePath("src/x/generated/x");
+    try t.expect((try R.linkOnPath(a, root.dir, "src/x/generated/x")) == null);
+    try t.expect((try R.linkOnPath(a, root.dir, "src/y/generated/y")) == null);
+    const target = try outside.dir.realpathAlloc(a, ".");
+    try root.dir.symLink(target, "src/x/generated/z", .{ .is_directory = true });
+    try t.expectEqualStrings("src/x/generated/z", (try R.linkOnPath(a, root.dir, "src/x/generated/z")).?);
+    try t.expectEqualStrings("src/x/generated/z", (try R.linkOnPath(a, root.dir, "src/x/generated/z/deeper")).?);
+    try root.dir.symLink(target, "src/w", .{ .is_directory = true });
+    try t.expectEqualStrings("src/w", (try R.linkOnPath(a, root.dir, "src/w/generated/w")).?);
+}

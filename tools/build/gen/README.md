@@ -85,14 +85,33 @@ empty the code that builds from `<name>_gen` is deleted.
   (labels separated by whitespace), and empties the list as it commits their
   generated sources: the same states, the same refusal of a listed library that
   has a committed directory. komira's own cells are never read from there.
+- Every listed library also declares a marker, `<name>_unmigrated` (no action).
+  `regen -- all` counts them and says how many libraries it skipped, and
+  `regen -- <listed library>` answers that the library is still in the ledger.
+- The lint reads the list, not the targets: a library that is renamed while
+  keeping the count leaves its old line orphaned, and the renamed library is in
+  no state the ledger knows, so its `<name>` is the target that fails with
+  "no generated sources are committed" at build time. The build catches it, not
+  the lint.
 - `:transition` writes the list as a file, and `:transition_lint` holds it
-  sorted, free of duplicates, and no longer than the count in its BUCK entry,
-  which only goes down. It prints every library still on the list when it runs.
+  sorted, free of duplicates, and exactly as long as the count in its BUCK
+  entry (`max`): a line added or removed is a change to two files, so a reviewer
+  sees the number move. The count only goes down by review, not by the lint. It prints every library still on the list when it runs.
+
+## Links
+
+`regen` and `<name>_fresh` never follow a symbolic link in the committed
+directory. `regen` refuses, naming the path and changing nothing, when the
+directory (or `generated/`, or any directory above it in the package) is a link,
+or holds one at any depth; it never writes or deletes through one. `_fresh`
+fails on a link in the committed directory, even one to a file with the right
+bytes, so a link cannot be committed green.
 
 ## Layout and limits
 
-- The directory is flat in practice (every generator writes one directory of
-  modules); a subdirectory is carried and compared like any file.
+- A subdirectory is carried and compared like any file, and `committed_data`
+  keeps a file's path inside the committed directory (`_parts/x.mojo` stays
+  `gen/_parts/x.mojo`).
 - A mojo_aws_client's `hand_srcs` are copied into the generated directory by the
   generator, as before, and so are committed there; `regen` keeps the copy equal
   to the hand-written source, and `_fresh` fails when the source is edited and

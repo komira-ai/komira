@@ -99,7 +99,7 @@ test "`all` queries every generated library of the cell komira; a package is que
     try t.expect(has(try c.read("calls.log"), "kind('^gen_fresh$', komira//src/svc:)\n"));
 }
 
-test "a target that has no fresh target (a library still in the ledger, or not generated) is refused, and nothing is built" {
+test "a target that is not a generated library at all is refused, and nothing is built" {
     var c = try newCtx("no_match");
     defer c.deinit();
     try rig(&c);
@@ -107,9 +107,78 @@ test "a target that has no fresh target (a library still in the ledger, or not g
     const r = try runRegen(&c, &.{"komira//src/other:other"});
     try t.expectEqual(@as(u8, 1), r.code);
     try t.expect(has(r.stderr, "komira//src/other:other names no generated library with committed sources"));
-    try t.expect(has(r.stderr, "tools/build/gen/transition.bzl"));
     try t.expect(!has(try c.read("calls.log"), "build"));
     try t.expect(!c.exists("cell/src/svc/generated"));
+}
+
+test "a library still in the ledger gets the ledger's explanation, whether buck2 answers the query with nothing or with an error" {
+    var c = try newCtx("ledgered");
+    defer c.deinit();
+    try rig(&c);
+    try c.write("fake/unmigrated.txt", "komira//src/old:old_unmigrated\n", 0o644);
+    // buck2 knows no `old_fresh`: the query fails.
+    try c.write("fake/uquery_fails", "", 0o644);
+    const r = try runRegen(&c, &.{"komira//src/old:old"});
+    try t.expectEqual(@as(u8, 1), r.code);
+    try t.expect(has(r.stderr, "komira//src/old:old is still in the transition ledger (tools/build/gen/transition.bzl)"));
+    try t.expect(has(try c.read("calls.log"), "kind('^gen_unmigrated$', komira//src/old:old_unmigrated)"));
+    try t.expect(!has(try c.read("calls.log"), "build"));
+    // The query answers with nothing (a package of ledgered libraries).
+    try std.fs.cwd().deleteFile(try c.path("fake/uquery_fails"));
+    try c.write("fake/uquery.json", "{}", 0o644);
+    const r2 = try runRegen(&c, &.{"komira//src/old:"});
+    try t.expectEqual(@as(u8, 1), r2.code);
+    try t.expect(has(r2.stderr, "komira//src/old: is still in the transition ledger"));
+}
+
+test "`all` says how many libraries still in the ledger it skipped" {
+    var c = try newCtx("all_skips");
+    defer c.deinit();
+    try rig(&c);
+    try c.write("fake/unmigrated.txt", "komira//src/a:a_unmigrated\nkomira//src/b:b_unmigrated\nkomira//src/c:c_unmigrated\n", 0o644);
+    const r = try runRegen(&c, &.{"all"});
+    try t.expectEqual(@as(u8, 0), r.code);
+    try t.expect(has(r.stderr, "all: skipped 3 libraries still in the transition ledger"));
+    try t.expect(has(try c.read("calls.log"), "kind('^gen_unmigrated$', komira//...)"));
+}
+
+test "a symbolic link in the committed directory is refused, nothing is written or deleted through it" {
+    var c = try newCtx("link_file");
+    defer c.deinit();
+    try rig(&c);
+    try c.write("victim/keep.txt", "keep me\n", 0o644);
+    try c.mkdir("cell/src/svc/generated/svc");
+    try std.posix.symlinkat(try c.path("victim/keep.txt"), std.fs.cwd().fd, try c.path("cell/src/svc/generated/svc/svc.mojo"));
+    const r = try runRegen(&c, &.{svc});
+    try t.expectEqual(@as(u8, 1), r.code);
+    try t.expect(has(r.stderr, "svc.mojo is a symbolic link"));
+    try t.expectEqualStrings("keep me\n", try c.read("victim/keep.txt"));
+    try t.expect(!c.exists("cell/src/svc/generated/svc/__init__.mojo"));
+}
+
+test "a symbolic link to a directory inside the committed directory, or above it, is refused and nothing outside is deleted" {
+    var c = try newCtx("link_dir");
+    defer c.deinit();
+    try rig(&c);
+    try c.write("victim/dir/keep.txt", "keep me\n", 0o644);
+    try c.mkdir("victim/empty");
+    // Inside: generated/svc/nested -> victim
+    try c.mkdir("cell/src/svc/generated/svc");
+    try std.posix.symlinkat(try c.path("victim"), std.fs.cwd().fd, try c.path("cell/src/svc/generated/svc/nested"));
+    const r = try runRegen(&c, &.{svc});
+    try t.expectEqual(@as(u8, 1), r.code);
+    try t.expect(has(r.stderr, "nested is a symbolic link"));
+    try t.expectEqualStrings("keep me\n", try c.read("victim/dir/keep.txt"));
+    try t.expect(c.exists("victim/empty"));
+    // Above: generated/svc itself is a link.
+    try std.fs.cwd().deleteFile(try c.path("cell/src/svc/generated/svc/nested"));
+    try std.fs.cwd().deleteDir(try c.path("cell/src/svc/generated/svc"));
+    try std.posix.symlinkat(try c.path("victim"), std.fs.cwd().fd, try c.path("cell/src/svc/generated/svc"));
+    const r2 = try runRegen(&c, &.{svc});
+    try t.expectEqual(@as(u8, 1), r2.code);
+    try t.expect(has(r2.stderr, "src/svc/generated/svc is a symbolic link"));
+    try t.expect(!c.exists("victim/svc.mojo"));
+    try t.expectEqualStrings("keep me\n", try c.read("victim/dir/keep.txt"));
 }
 
 test "a failed build leaves the committed directory as it was and exits 1" {

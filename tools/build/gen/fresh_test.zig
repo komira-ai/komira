@@ -167,3 +167,85 @@ test "render: a very long line is quoted cut" {
     try t.expect(rep.differ[0].generated.len < 200);
     try t.expect(std.mem.endsWith(u8, rep.differ[0].generated, "..."));
 }
+
+test "judge: a line-ending difference alone (CRLF against LF) is a difference" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var r = Rig.init();
+    defer r.deinit();
+    try U.writeAll(r.gen.dir, "a.mojo", "one\ntwo\n");
+    try U.writeAll(r.committed.dir, "a.mojo", "one\r\ntwo\r\n");
+    const rep = try F.judge(a, r.gen.dir, r.committed.dir);
+    try t.expect(!rep.inSync());
+    try t.expectEqual(@as(usize, 1), rep.differ.len);
+    try t.expectEqual(@as(usize, 1), rep.differ[0].line);
+    // The message shows the carriage return, so the two lines do not read alike.
+    try t.expectEqualStrings("one\\r", rep.differ[0].committed);
+    try t.expectEqualStrings("one", rep.differ[0].generated);
+}
+
+test "render: a tab and a carriage return in a quoted line are written out" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var r = Rig.init();
+    defer r.deinit();
+    try U.writeAll(r.gen.dir, "a.mojo", "x\ty\n");
+    try U.writeAll(r.committed.dir, "a.mojo", "x y\r\n");
+    const rep = try F.judge(a, r.gen.dir, r.committed.dir);
+    const text = try F.render(a, rep, "l", "d", "cmd");
+    try t.expect(std.mem.indexOf(u8, text, "committed: x y\\r\n") != null);
+    try t.expect(std.mem.indexOf(u8, text, "generated: x\\ty\n") != null);
+}
+
+test "judge: a symbolic link in the committed directory is refused, even to a file with the right bytes" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var r = Rig.init();
+    defer r.deinit();
+    var other = t.tmpDir(.{ .iterate = true });
+    defer other.cleanup();
+    try U.writeAll(other.dir, "real.mojo", "same\n");
+    try U.writeAll(r.gen.dir, "a.mojo", "same\n");
+    const target = try other.dir.realpathAlloc(a, "real.mojo");
+    try r.committed.dir.symLink(target, "a.mojo", .{});
+    const rep = try F.judge(a, r.gen.dir, r.committed.dir);
+    try t.expect(!rep.inSync());
+    try t.expectEqual(@as(usize, 1), rep.links.len);
+    try t.expectEqualStrings("a.mojo", rep.links[0]);
+    const text = try F.render(a, rep, "l", "d", "cmd");
+    try t.expect(std.mem.indexOf(u8, text, "not a regular file (a symbolic link?): a.mojo") != null);
+}
+
+test "judge: a symbolic link to a directory is refused and not walked into" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var r = Rig.init();
+    defer r.deinit();
+    var other = t.tmpDir(.{ .iterate = true });
+    defer other.cleanup();
+    try U.writeAll(other.dir, "x.mojo", "x\n");
+    try U.writeAll(r.gen.dir, "a.mojo", "a\n");
+    try U.writeAll(r.committed.dir, "a.mojo", "a\n");
+    const target = try other.dir.realpathAlloc(a, ".");
+    try r.committed.dir.symLink(target, "_parts", .{ .is_directory = true });
+    const rep = try F.judge(a, r.gen.dir, r.committed.dir);
+    try t.expectEqual(@as(usize, 1), rep.links.len);
+    try t.expectEqualStrings("_parts", rep.links[0]);
+}
+
+test "judge: a one-line file whose only difference is the line ending is a difference" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var r = Rig.init();
+    defer r.deinit();
+    try U.writeAll(r.gen.dir, "a.mojo", "one\n");
+    try U.writeAll(r.committed.dir, "a.mojo", "one\r\n");
+    const rep = try F.judge(a, r.gen.dir, r.committed.dir);
+    try t.expectEqual(@as(usize, 1), rep.differ.len);
+    try t.expectEqualStrings("one\\r", rep.differ[0].committed);
+}

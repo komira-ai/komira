@@ -134,7 +134,7 @@ Every refusal of the rule happens at analysis, in `<name>_gen`, so a BUCK
 file with one wrong mojo_aws_client still loads.
 """
 
-load("@komira//tools/build/gen:defs.bzl", "committed_sources", "declare_fresh", "declare_uncommitted", "generated_state")
+load("@komira//tools/build/gen:defs.bzl", "committed_data", "committed_sources", "declare_fresh", "declare_uncommitted", "declare_unmigrated", "generated_state")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
@@ -572,11 +572,7 @@ def _committed_client(name, gen, state, deps, test_srcs, test_data, kwargs):
         declare_uncommitted(name, ":" + gen, state, kwargs.get("visibility"))
         return
     probe = [f for f in state.files if f.rsplit("/", 1)[-1] == _LAYOUT_PROBE]
-    scan_data = {
-        "gen/" + f.rsplit("/", 1)[-1]: f
-        for f in state.files
-        if f.endswith(".mojo")
-    }
+    scan_data = committed_data(name, "gen", ".mojo")
     mojo_library(
         name = name,
         srcs = srcs,
@@ -632,6 +628,7 @@ def _aws_client(
         return
 
     # The transition (tools/build/gen/transition.bzl): built from the generator.
+    declare_unmigrated(name, state)
     # The file names the generation action is held to (it refuses a missing,
     # empty or extra file), so they can be named here. A hand_srcs entry that
     # is not a `.mojo` path is left out rather than turned into a sub-target
