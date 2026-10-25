@@ -58,3 +58,24 @@ from komira_log_index.idle_index_hook import (
     flush_all_pending_via_hook,
     DRAIN_CAP,
 )
+from komira_log_index.flush_stage import (
+    DEFAULT_FLUSH_BYTES,
+    DEFAULT_FLUSH_MS,
+    DEFAULT_INFLIGHT_CAP_BYTES,
+    FlushRetryPolicy,
+    InFlightBytesGate,
+    LogIndexFlushBuffer,
+)
+from komira_log_index.handoff import (
+    HandoffUnit,
+    LogIndexHandoff,
+    offer_log_views,
+)
+from komira_log_index.consumer import (
+    LogIndexConsumer,
+    PublishStats,
+)
+from komira_log_index.flush_thread import (
+    DEFAULT_IDLE_PARK_US,
+    OffCoreFlushThread,
+)

@@ -15,6 +15,16 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   publishes L0 splits that an immediate query finds (against an oracle), drains
 #   at most DRAIN_CAP records per fire, and loses nothing on a graceful final
 #   flush.
+# - test_log_native_indexing_l05: the off-core flush pipeline (handoff, consumer,
+#   in-flight gate) end to end: drained logs are searchable after the publish,
+#   the byte and time flush ceilings fire, an un-flushed window is the only loss
+#   on a crash, and the in-flight cap bounds memory under a stalled consumer.
+# - test_log_index_offcore_failure_paths: the consumer writes the split object
+#   before it publishes, a failed put or publish publishes nothing and releases
+#   the gate, a transient put failure is retried under the same key, a restarted
+#   consumer does not reuse split keys, the handoff rejects (never blocks) at
+#   its depth and byte bounds, and the flush thread's shutdown publishes the
+#   last partial segment.
 # - test_log_native_indexing_l0: the log seam and the transpose (message bytes
 #   identical to the text drain, scalars survive the seam, the frozen eight
 #   column schema with unsigned columns widened to Int64, schema invariance
@@ -81,8 +91,10 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_log_index_failure_paths.mojo",
+        "tests/test_log_index_offcore_failure_paths.mojo",
         "tests/test_log_native_indexing_idle_hook_e2e.mojo",
         "tests/test_log_native_indexing_l0.mojo",
+        "tests/test_log_native_indexing_l05.mojo",
         "tests/test_log_native_indexing_l1.mojo",
         "tests/test_log_native_indexing_lread.mojo",
         "tests/test_telemetry_log_base_artifact.mojo",
