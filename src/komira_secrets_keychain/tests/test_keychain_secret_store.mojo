@@ -354,6 +354,43 @@ def test_bounded_tail_trims_and_bounds() raises:
     assert_equal(_bounded_tail(String("   ")), String(""), "all blank")
 
 
+def _repeat(s: String, n: Int) -> String:
+    var out = String("")
+    for _ in range(n):
+        out += s
+    return out^
+
+
+def test_bounded_tail_window_inside_multibyte_characters() raises:
+    """The 200-byte window can start at any offset of a 2-, 3- or 4-byte
+    character. For each width and each trailing length (which moves the window
+    start across offsets 0 to 3 of a character) the tail is the whole characters
+    from the first boundary at or after the window start, plus the ASCII
+    suffix: never a split character and never a re-encoded byte."""
+    var chars = List[String]()
+    chars.append(String("é"))  # 2 bytes
+    chars.append(String("€"))  # 3 bytes
+    chars.append(String("😀"))  # 4 bytes
+    var widths = List[Int]()
+    widths.append(2)
+    widths.append(3)
+    widths.append(4)
+    for c in range(3):
+        var w = widths[c]
+        for pad in range(2):
+            for t in range(8):
+                var n_chars = 400 // w  # more than 200 bytes of characters
+                var text = _repeat(String("a"), pad) + _repeat(chars[c], n_chars) + _repeat(String("z"), t)
+                var n = pad + n_chars * w + t
+                var start = n - 200
+                # First character that starts at or after `start`.
+                var first_j = (start - pad + w - 1) // w
+                var want = _repeat(chars[c], n_chars - first_j) + _repeat(String("z"), t)
+                var got = _bounded_tail(text)
+                assert_equal(got, want, "width " + String(w) + " pad " + String(pad) + " t " + String(t))
+                assert_true(got.byte_length() <= 200, "bounded")
+
+
 def test_bounded_tail_keeps_non_ascii() raises:
     """Diagnostics are UTF-8: a tail that starts inside a character skips to the
     next boundary instead of re-encoding each byte (one byte is not one
@@ -468,6 +505,7 @@ def main() raises:
     test_stdout_strips_exactly_one_newline()
     test_bounded_tail_trims_and_bounds()
     test_bounded_tail_keeps_non_ascii()
+    test_bounded_tail_window_inside_multibyte_characters()
     test_map_security_result_exit_codes()
     test_macos_backend_is_gated_by_platform()
     print("PASS test_keychain_secret_store")
