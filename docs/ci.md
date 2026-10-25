@@ -389,13 +389,14 @@ completeness of the list.
 Nothing publishes until all of this is done, in this order. Each step is a
 human's, outside this repository:
 
-1. On mopm.dev, the package names exist under the `komira-ai` owner: the
-   owner claims the name of every package in
+1. On mopm.dev, the package names exist under the maintainers' publishing
+   account (a personal mopm.dev account the maintainers designate, not an
+   organization owner): that account claims the name of every package in
    [`packages.bzl`](../release/readme_e2e/packages.bzl) (every `src/`
    directory with a `mopm.toml`). Ownership is a registry record, not
    something `mopm.toml` can express.
 2. A registry token scoped to komira's packages (and no other) is minted for
-   that owner and stored as the secret `MOPM_TOKEN` of the repository's
+   that account and stored as the secret `MOPM_TOKEN` of the repository's
    environment `prod`. The environment deploys only from `main`. No job but
    `mopm-publish` names that secret.
 3. The registry's group publish is live. `mopm publish --staged` asks the

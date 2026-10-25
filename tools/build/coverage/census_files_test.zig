@@ -196,6 +196,169 @@ test "assemble refuses a census file without its census line, a row of another p
     try refusedWith("t/src/b/coverage_census.tsv", head, "census_files: src/b/coverage_census.tsv: no census line and library row");
 }
 
+const b_rows = "komira//src/b:b2\tsrc/b\tlibrary\tOK\t9\t10\t-\t-\tno\tno\t-\t-\n" ++
+    "komira//src/b:b1\tsrc/b\tlibrary\tOK\t9\t10\t-\t-\tno\tno\t-\t-\n";
+
+test "assemble reads a package's generated lines, checks them, and leaves them out of the census" {
+    var c = Case.init();
+    defer c.deinit();
+    try putGood(&c);
+    try c.put("t/src/b/coverage_census.tsv", C.census_comment ++ head ++ b_rows ++
+        "generated\tsrc/b/gen/a.mojo\ngenerated\tsrc/b/gen/b.mojo\n");
+    try c.assemble(0, "");
+    try std.testing.expectEqualStrings(good_census, try c.get("census.tsv"));
+}
+
+test "assemble refuses a malformed generated line: another package's path, not .mojo, unsorted, twice, fields, a row after" {
+    const g = C.census_comment ++ head ++ b_rows;
+    try refusedWith("t/src/b/coverage_census.tsv", g ++ "generated\tsrc/a/gen/a.mojo\n", "census_files: src/b/coverage_census.tsv:5: the generated path src/a/gen/a.mojo is not a .mojo file of src/b");
+    try refusedWith("t/src/b/coverage_census.tsv", g ++ "generated\tsrc/bb/x.mojo\n", "the generated path src/bb/x.mojo is not a .mojo file of src/b");
+    try refusedWith("t/src/b/coverage_census.tsv", g ++ "generated\tsrc/b/x.txt\n", "the generated path src/b/x.txt is not a .mojo file of src/b");
+    try refusedWith("t/src/b/coverage_census.tsv", g ++ "generated\tsrc/b\n", "is not a .mojo file of src/b");
+    try refusedWith("t/src/b/coverage_census.tsv", g ++ "generated\tsrc/b/b.mojo\ngenerated\tsrc/b/a.mojo\n", "src/b/a.mojo is not after src/b/b.mojo");
+    try refusedWith("t/src/b/coverage_census.tsv", g ++ "generated\tsrc/b/a.mojo\ngenerated\tsrc/b/a.mojo\n", "src/b/a.mojo is not after src/b/a.mojo");
+    try refusedWith("t/src/b/coverage_census.tsv", g ++ "generated\n", "a generated line is generated<TAB><path>");
+    try refusedWith("t/src/b/coverage_census.tsv", g ++ "generated\tsrc/b/a.mojo\textra\n", "a generated line is generated<TAB><path>");
+    try refusedWith("t/src/b/coverage_census.tsv", g ++ "generated\tsrc/b/a.mojo\nkomira//src/b:b3\tsrc/b\tlibrary\n", "a library row after a generated line");
+}
+
+test "split writes a generated line into the census file of the package that holds the path, after its rows" {
+    var c = Case.init();
+    defer c.deinit();
+    try putGood(&c);
+    try c.assemble(0, "");
+    // A census.tsv with generated lines after the rows: src/b's and the
+    // nested package src/tests/e2e/t's, whose directory is the longer match
+    // of a path under src/tests/e2e/t/.
+    const tsv = try std.mem.concat(c.arena.allocator(), u8, &.{
+        try c.get("census.tsv"),
+        "generated\tsrc/b/gen/a.mojo\ngenerated\tsrc/b/gen/b.mojo\ngenerated\tsrc/tests/e2e/t/x.mojo\n",
+    });
+    try c.put("with_gen.tsv", tsv);
+    try c.tmp.dir.makePath("out");
+    var err: []const u8 = "";
+    try std.testing.expectEqual(@as(u8, 0), c.run(&.{ "split", "9900", "with_gen.tsv", "out" }, &err));
+    try std.testing.expectEqualStrings(C.census_comment ++ head ++
+        "komira//src/b:b1\tsrc/b\tlibrary\tOK\t9\t10\t-\t-\tno\tno\t-\t-\n" ++
+        "komira//src/b:b2\tsrc/b\tlibrary\tOK\t9\t10\t-\t-\tno\tno\t-\t-\n" ++
+        "generated\tsrc/b/gen/a.mojo\ngenerated\tsrc/b/gen/b.mojo\n", try c.get("out/src/b/coverage_census.tsv"));
+    try std.testing.expectEqualStrings(C.census_comment ++ head ++
+        "komira//src/tests/e2e/t:t\tsrc/tests/e2e/t\ttest\tOK\t4\t4\t-\t-\tno\tno\t-\t-\n" ++
+        "generated\tsrc/tests/e2e/t/x.mojo\n", try c.get("out/src/tests/e2e/t/coverage_census.tsv"));
+    // A package with none has no generated line.
+    try std.testing.expect(std.mem.indexOf(u8, try c.get("out/src/a/coverage_census.tsv"), "generated") == null);
+    // Assembled again, the split tree gives back the census it read.
+    try std.testing.expectEqual(@as(u8, 0), c.run(&.{ "assemble", "9900", "out", "census2.tsv", "held2.tsv" }, &err));
+    try std.testing.expectEqualStrings(try c.get("census.tsv"), try c.get("census2.tsv"));
+    // A generated path in no package of the rows is refused, writing nothing.
+    try c.put("bad.tsv", try std.mem.concat(c.arena.allocator(), u8, &.{ try c.get("census.tsv"), "generated\tsrc/zz/x.mojo\n" }));
+    try c.tmp.dir.makePath("out2");
+    try std.testing.expectEqual(@as(u8, 1), c.run(&.{ "split", "9900", "bad.tsv", "out2" }, &err));
+    try std.testing.expect(std.mem.indexOf(u8, err, "the generated path src/zz/x.mojo is not a .mojo file path of any package of the rows above it") != null);
+    try std.testing.expect(!c.has("out2/src/b/coverage_census.tsv"));
+}
+
+test "assemble refuses a generated path with a dot or empty segment, a bare .mojo, or a trailing slash" {
+    const g = C.census_comment ++ head ++ b_rows;
+    const shapes = [_][]const u8{ "src/b/../a/x.mojo", "src/b//x.mojo", "src/b/./x.mojo", "src/b/.mojo", "src/b/gen/.mojo", "src/b/gen//.mojo", "src/b/gen/x.mojo/", "src/b/x.mojo/..", "src/b/", "src/b/.." };
+    for (shapes) |p| {
+        const text = try std.fmt.allocPrint(std.heap.page_allocator, "{s}generated\t{s}\n", .{ g, p });
+        defer std.heap.page_allocator.free(text);
+        try refusedWith("t/src/b/coverage_census.tsv", text, "is not a .mojo file of src/b");
+    }
+    // The shapes it accepts stay accepted: a dotted name, a nested directory.
+    var c = Case.init();
+    defer c.deinit();
+    try putGood(&c);
+    try c.put("t/src/b/coverage_census.tsv", g ++ "generated\tsrc/b/a/b.c.mojo\ngenerated\tsrc/b/a/c/.x.mojo\n");
+    try c.assemble(0, "");
+}
+
+const child_rows = "komira//src/b/child:child\tsrc/b/child\tlibrary\tOK\t9\t10\t-\t-\tno\tno\t-\t-\n";
+
+test "assemble refuses a nested package's path listed in its parent's file, and accepts it in the child's" {
+    var c = Case.init();
+    defer c.deinit();
+    try putGood(&c);
+    try c.put("t/src/b/child/coverage_census.tsv", C.census_comment ++ head ++ child_rows ++ "generated\tsrc/b/child/x.mojo\n");
+    try c.put("t/src/b/coverage_census.tsv", C.census_comment ++ head ++ b_rows ++ "generated\tsrc/b/y.mojo\n");
+    try c.assemble(0, "");
+    try c.tmp.dir.deleteFile("census.tsv");
+    try c.tmp.dir.deleteFile("held.tsv");
+    try c.put("t/src/b/coverage_census.tsv", C.census_comment ++ head ++ b_rows ++ "generated\tsrc/b/child/x.mojo\n");
+    try c.assemble(1, "census_files: src/b/coverage_census.tsv:5: the generated path src/b/child/x.mojo belongs to the nested package src/b/child, whose census file lists it");
+}
+
+test "split routes a path under a nested package to the child and the rest to the parent" {
+    var c = Case.init();
+    defer c.deinit();
+    const tsv = C.assembled_census_comment ++ head ++ child_rows ++ b_rows ++
+        "generated\tsrc/b/child/deep/x.mojo\ngenerated\tsrc/b/child/y.mojo\ngenerated\tsrc/b/childish.mojo\ngenerated\tsrc/b/z.mojo\n";
+    try c.put("census.tsv", tsv);
+    try c.tmp.dir.makePath("out");
+    var err: []const u8 = "";
+    try std.testing.expectEqual(@as(u8, 0), c.run(&.{ "split", "9900", "census.tsv", "out" }, &err));
+    try std.testing.expectEqualStrings(C.census_comment ++ head ++ child_rows ++
+        "generated\tsrc/b/child/deep/x.mojo\ngenerated\tsrc/b/child/y.mojo\n", try c.get("out/src/b/child/coverage_census.tsv"));
+    try std.testing.expectEqualStrings(C.census_comment ++ head ++ b_rows ++
+        "generated\tsrc/b/childish.mojo\ngenerated\tsrc/b/z.mojo\n", try c.get("out/src/b/coverage_census.tsv"));
+    // The same rows with the child listed first or last route the same way.
+    try c.put("census2.tsv", C.assembled_census_comment ++ head ++ b_rows ++ child_rows ++ "generated\tsrc/b/child/y.mojo\n");
+    try c.tmp.dir.makePath("out2");
+    try std.testing.expectEqual(@as(u8, 0), c.run(&.{ "split", "9900", "census2.tsv", "out2" }, &err));
+    try std.testing.expect(std.mem.indexOf(u8, try c.get("out2/src/b/child/coverage_census.tsv"), "generated\tsrc/b/child/y.mojo\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, try c.get("out2/src/b/coverage_census.tsv"), "generated") == null);
+    // A malformed path is refused by split too.
+    try c.put("census3.tsv", C.assembled_census_comment ++ head ++ b_rows ++ "generated\tsrc/b/../a/x.mojo\n");
+    try c.tmp.dir.makePath("out3");
+    try std.testing.expectEqual(@as(u8, 1), c.run(&.{ "split", "9900", "census3.tsv", "out3" }, &err));
+    try std.testing.expect(!c.has("out3/src/b/coverage_census.tsv"));
+}
+
+test "generated: the gate results' generated paths, unescaped, sorted, once; spaces and escapes kept" {
+    var c = Case.init();
+    defer c.deinit();
+    try c.put("r1.json", "{\"conclusion\":\"neutral\",\"generated_files\":3,\"generated_paths\":[\"src/p/z.mojo\",\"src/p/a b.mojo\",\"src/p/q\\\"uo\\\\te.mojo\"],\"x\":1}");
+    try c.put("r2.json", "{\"generated_paths\":[\"src/p/a b.mojo\",\"src/q/caf\\u00e9.mojo\"]}");
+    var err: []const u8 = "";
+    try std.testing.expectEqual(@as(u8, 0), c.run(&.{ "generated", "out.tsv", "r1.json", "r2.json" }, &err));
+    try std.testing.expectEqualStrings(
+        "generated\tsrc/p/a b.mojo\ngenerated\tsrc/p/q\"uo\\te.mojo\ngenerated\tsrc/p/z.mojo\ngenerated\tsrc/q/caf\xc3\xa9.mojo\n",
+        try c.get("out.tsv"),
+    );
+    // None: an empty file, and no result at all is an empty file.
+    try c.put("none.json", "{\"generated_files\":0,\"generated_paths\":[]}");
+    try std.testing.expectEqual(@as(u8, 0), c.run(&.{ "generated", "none.tsv", "none.json" }, &err));
+    try std.testing.expectEqualStrings("", try c.get("none.tsv"));
+    try std.testing.expectEqual(@as(u8, 0), c.run(&.{ "generated", "zero.tsv" }, &err));
+    try std.testing.expectEqualStrings("", try c.get("zero.tsv"));
+}
+
+test "generated refuses a result that is not JSON, has no generated_paths, or holds a path a line cannot" {
+    var c = Case.init();
+    defer c.deinit();
+    var err: []const u8 = "";
+    const cases = [_]struct { []const u8, []const u8 }{
+        .{ "{not json", "r.json: not JSON" },
+        .{ "[]", "r.json: not a JSON object" },
+        .{ "{\"package\":{}}", "r.json: no generated_paths" },
+        .{ "{\"generated_paths\":\"src/p/a.mojo\"}", "r.json: generated_paths is not an array" },
+        .{ "{\"generated_paths\":[1]}", "r.json: generated_paths holds something that is not a path" },
+        .{ "{\"generated_paths\":[\"\"]}", "r.json: generated_paths holds something that is not a path" },
+        .{ "{\"generated_paths\":[\"src/p/a\\tb.mojo\"]}", "holds a tab, line feed or carriage return" },
+        .{ "{\"generated_paths\":[\"src/p/a\\nb.mojo\"]}", "holds a tab, line feed or carriage return" },
+        .{ "{\"generated_paths\":[\"src/p/a\\rb.mojo\"]}", "holds a tab, line feed or carriage return" },
+    };
+    for (cases) |k| {
+        try c.put("r.json", k[0]);
+        try std.testing.expectEqual(@as(u8, 1), c.run(&.{ "generated", "o.tsv", "r.json" }, &err));
+        try std.testing.expect(std.mem.indexOf(u8, err, k[1]) != null);
+        try std.testing.expect(!c.has("o.tsv"));
+    }
+    try std.testing.expectEqual(@as(u8, 1), c.run(&.{ "generated", "o.tsv", "missing.json" }, &err));
+    try std.testing.expectEqual(@as(u8, 2), c.run(&.{"generated"}, &err));
+}
+
 test "assemble refuses another file, a file at the top, and a tree with no census" {
     try refusedWith("t/src/b/coverage_floor.tsv", "src/b\t9000\t-\n", "census_files: src/b/coverage_floor.tsv: not a coverage_held or a coverage_census.tsv");
     try refusedWith("t/coverage_held", "line\n", "coverage_held: at the top of t");

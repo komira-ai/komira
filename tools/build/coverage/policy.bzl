@@ -16,7 +16,9 @@ other library's gate still finds BranchNotMeasured.
 So in enforce mode every library with a test outside that list would fail,
 whatever its line coverage, and every library with no non-generated
 source (a cloud SDK client, whose sources all pass through its generator)
-would fail as NotMeasured. Moving to enforce first needs that list to
+would fail as NotMeasured. (A committed source whose first line contains
+`# @generated` is left out of every library's numbers, so it never counts
+against a floor; README.md, "Generated sources".) Moving to enforce first needs that list to
 cover the libraries (or a decided split of the target into line and
 branch) and a decision for generated libraries (README.md, "The build
 gate").
