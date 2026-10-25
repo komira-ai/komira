@@ -17,6 +17,8 @@ Keep the lines sorted (`:transition_lint`).
 """
 
 UNMIGRATED = [
+    # Stays: it must fail while the plugin generates (no google.api.http annotation), so it has no output to commit.
     "tests//negative/mojo_gcp_client:rest_reaches_plugin",
+    # Stays: it must fail while the plugin generates (note_db.mojo is not written), so it has no output to commit.
     "tests//negative/proto:tasks_db_wrong_outs",
 ]
