@@ -17,21 +17,6 @@ Keep the lines sorted (`:transition_lint`).
 """
 
 UNMIGRATED = [
-    "komira//src/kci_artifact_proto:kci_artifact_proto",
-    "komira//src/kci_deploy_model_proto:kci_deploy_model_proto",
-    "komira//src/kci_manifest_proto:kci_manifest_proto",
-    "komira//src/kci_resource_proto:kci_resource_proto",
-    "komira//src/komira_broker_proto:komira_broker_proto",
-    "komira//src/komira_calendar_proto:komira_calendar_proto",
-    "komira//src/komira_chat_proto:komira_chat_proto",
-    "komira//src/komira_contacts_proto:komira_contacts_proto",
-    "komira//src/komira_crm_proto:komira_crm_proto",
-    "komira//src/komira_job_report_proto:komira_job_report_proto",
-    "komira//src/komira_managed_mail_proto:komira_managed_mail_proto",
-    "komira//src/komira_proto_codec:copy_hazard_proto",
-    "komira//src/komira_proto_codec:implicit_presence_proto",
-    "komira//src/komira_supervisor_proto:komira_supervisor_proto",
-    "komira//src/komira_wkt:value_null_proto",
     "komira//tools/build/proto-codegen/aws_endpoint_rules:endpoint_bindings",
     "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_ec2",
     "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_query",
