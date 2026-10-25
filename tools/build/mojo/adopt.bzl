@@ -39,6 +39,12 @@ request check builds). The pull request's coverage job (`coverage.yml`) selects 
 packages as well as `mojo_library` targets and reads `:coverage[reports]` and `:coverage[branches]`: line and branch coverage, the
 per-line annotations and the `line` and `branch` entries of `coverage_held`.
 
+A package that opens a system library at run time (`OwnedDLHandle`; `[native-dependencies]` with `mode = "load"`
+in its `mopm.toml`, which `:conda` records as a conda requirement) declares the sonames in `dlopen`, as
+`mojo_library` does (`dlopen.bzl`): `MojoInfo.dlopen` and the conda refusal are the same, so
+`conda_package(lib = ...)` over the adopted label requires the conda package `system_libs.bzl` names for
+each soname, and the packer holds the declaration to the sources.
+
 A library that has Mojo deps is not adopted by this rule: it has no `deps` attribute, so a BUCK file
 that needs it stops at the attribute, not at a wrong `MojoInfo`.
 
@@ -65,6 +71,7 @@ load("@prelude//cxx:cxx_toolchain_types.bzl", "CxxToolchainInfo")
 load("@prelude//linking:link_info.bzl", "Archive", "ArchiveLinkable", "LibOutputStyle", "LinkInfo", "LinkInfos", "MergedLinkInfo", "create_merged_link_info")
 load("@prelude//linking:types.bzl", "Linkage")
 load(":defs.bzl", "adopt_link_tail", "adopt_readme_test")
+load(":dlopen.bzl", "DLOPEN_ATTRS", "dlopen_refusal", "dlopen_rows")
 load(":native_facts.bzl", "native_facts")
 load(":opt_level.bzl", "TEST_OPT_LEVEL")
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoToolchainInfo", "welded_tests_info")
@@ -170,8 +177,8 @@ def _impl(ctx):
         MojoInfo(
             c_link = c_link,
             conda_name = ctx.attrs.conda_name or import_name,
-            conda_refusal = None,
-            dlopen = [],
+            conda_refusal = dlopen_refusal(ctx),
+            dlopen = dlopen_rows(ctx),
             direct = [],
             direct_conda = {},
             import_name = import_name,
@@ -199,7 +206,7 @@ _adopted = rule(
         "test_srcs": attrs.list(attrs.source()),
         "test_runs": attrs.dep(),
         "toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
-    } | RERUN_ATTRS,
+    } | DLOPEN_ATTRS | RERUN_ATTRS,
 )
 
 def _mojo_adopted_library(**kwargs):
