@@ -31,6 +31,7 @@ const Allocator = std.mem.Allocator;
 const conda = @import("conda.zig");
 const plan_mod = @import("plan.zig");
 const offline = @import("offline.zig");
+const native = @import("native.zig");
 
 pub const Options = struct {
     package: []const u8,
@@ -155,6 +156,33 @@ fn mapped(c: *Ctx, output: []const u8, display: []const u8, report: []const u8) 
     return r.output;
 }
 
+/// The linker words `mopm build` gives the installed closure, after checking that they name every
+/// library `natives` says the packages ship. Fails the `link` phase when mopm refuses the environment
+/// (a library the metadata names is not on disk, two packages own one library, ...), prints something
+/// that is not a `mojo build` command, or leaves a shipped library out.
+fn linkPlan(c: *Ctx, natives: []const native.Native, project_abs: []const u8, prefix: []const u8, env: *const std.process.EnvMap) ![]const []const u8 {
+    const prefix_abs = std.fs.cwd().realpathAlloc(c.a, prefix) catch |e|
+        return c.fail("link", "cannot resolve {s}: {s}", .{ prefix, @errorName(e) });
+    const ask = try concatArgs(c.a, try absolutize(c.a, c.opts.mopm), &.{ "build", "--print-cmd", "--prefix", prefix_abs, "program.mojo", "-o", "program" });
+    const asked = try runProcess(c, ask, project_abs, env);
+    if (asked.code != 0) {
+        const how: []const u8 = if (asked.code) |x| try std.fmt.allocPrint(c.a, "exited {d}", .{x}) else "did not exit";
+        return c.fail("link", "`mopm build --print-cmd --prefix <installed closure>` {s}; the closure ships {d} native librar(ies) and mopm cannot plan their link:\n{s}", .{ how, natives.len, try tail(c.a, asked.output, 20) });
+    }
+    const words = native.shellWords(c.a, asked.output) catch |e| switch (e) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.Unterminated => return c.fail("link", "`mopm build --print-cmd` printed a line with an unterminated quote:\n{s}", .{try tail(c.a, asked.output, 5)}),
+    };
+    const args = native.linkWords(words) orelse
+        return c.fail("link", "`mopm build --print-cmd` printed no `mojo build ... -o` command:\n{s}", .{try tail(c.a, asked.output, 5)});
+    const left_out = try native.unlinked(c.a, natives, args);
+    if (left_out.len != 0) {
+        return c.fail("link", "{s}\nmopm's link words: {s}", .{ try std.mem.join(c.a, "\n", left_out), try std.mem.join(c.a, " ", args) });
+    }
+    c.say("link: mopm links {d} native librar(ies) with {d} argument(s)", .{ natives.len, args.len });
+    return native.forZigLinker(c.a, args);
+}
+
 const project_manifest =
     \\[package]
     \\name = "readme_e2e_user"
@@ -274,13 +302,11 @@ fn run(c: *Ctx) !void {
     defer prefix_dir.close();
     const want_build = try std.fmt.allocPrint(c.a, "mojo{s}_0", .{opts.mojo});
     var installed: usize = 0;
+    var natives: std.ArrayList(native.Native) = .empty;
     for (lock.packages) |p| {
         if (p.isPath()) return c.fail("install", "the lock holds the path dependency {s}, which no staged file carries", .{p.name});
         if (!std.mem.eql(u8, p.build, want_build)) {
             return c.fail("install", "{s} {s} is built as {s}, and the release's compiler is {s}", .{ p.name, p.version, p.build, opts.mojo });
-        }
-        if (p.native.len != 0) {
-            return c.fail("install", "{s} ships native libraries; the e2e links none and refuses a package that needs one", .{p.name});
         }
         const staged_member = plan.member(p.name) orelse
             return c.fail("install", "the lock needs {s} {s}, which the staged set does not hold", .{ p.name, p.version });
@@ -305,10 +331,32 @@ fn run(c: *Ctx) !void {
         const mojoc = try std.fmt.allocPrint(c.a, "lib/mojo/{s}.mojoc", .{p.name});
         const lib = conda.find(files, mojoc) orelse return c.fail("install", "{s} holds no {s}", .{ rel, mojoc });
         if (lib.len == 0) return c.fail("install", "{s}: {s} is empty", .{ rel, mojoc });
+        // What the package says it ships: its metadata (what `mopm build` plans from) and its lock entry.
+        var native_why: []const u8 = "";
+        native.collect(c.a, p.name, p.native, &natives, &native_why) catch |e| switch (e) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.Invalid => return c.fail("install", "mopm.lock: {s}", .{native_why}),
+        };
+        const meta_path = try std.fmt.allocPrint(c.a, "lib/mojo/{s}.mopm.json", .{p.name});
+        if (conda.find(files, meta_path)) |meta_bytes| {
+            const meta = plan_mod.parseMetadata(c.a, meta_bytes, &native_why) catch |e| switch (e) {
+                error.OutOfMemory => return error.OutOfMemory,
+                error.Invalid => return c.fail("install", "{s}: {s}", .{ rel, native_why }),
+            };
+            native.collect(c.a, p.name, meta.native, &natives, &native_why) catch |e| switch (e) {
+                error.OutOfMemory => return error.OutOfMemory,
+                error.Invalid => return c.fail("install", "{s}: {s}", .{ rel, native_why }),
+            };
+        }
         conda.extract(prefix_dir, files) catch |e| return c.fail("install", "cannot unpack {s} into {s}: {s}", .{ rel, prefix, @errorName(e) });
         installed += 1;
     }
     c.say("install: {d} package(s) locked and unpacked into {s}", .{ installed, prefix });
+
+    // ---- link ---------------------------------------------------------------
+    // The libraries the closure ships are linked the way `mopm build` links them: its command, asked
+    // for with --print-cmd, names them; the compile below takes those words.
+    const link_words: []const []const u8 = if (natives.items.len == 0) &.{} else try linkPlan(c, natives.items, project_abs, prefix, &env);
 
     // ---- readme -------------------------------------------------------------
     const readme_dir = try c.path(&.{ opts.work, "readme" });
@@ -351,7 +399,7 @@ fn run(c: *Ctx) !void {
         const stem = try std.fmt.allocPrint(c.a, "readme_{s}_{s}", .{ opts.package, line });
         const program = try c.path(&.{ programs, try std.fmt.allocPrint(c.a, "{s}.mojo", .{stem}) });
         const exe = try c.path(&.{ bin_dir, stem });
-        const build = try concatArgs(c.a, try withSourceRoot(c.a, opts.compile, programs), &.{ include, program, "-o", exe });
+        const build = try concatArgs(c.a, try withSourceRoot(c.a, opts.compile, programs), try std.mem.concat(c.a, []const u8, &.{ &.{include}, link_words, &.{ program, "-o", exe } }));
         const built = try runProcess(c, build, null, null);
         if (built.code != 0) {
             const report = try c.path(&.{ opts.work, "reports", try std.fmt.allocPrint(c.a, "{s}.compile.txt", .{line}) });

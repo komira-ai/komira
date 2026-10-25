@@ -119,6 +119,7 @@ gen_check(
         "komira_http",
     ],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "komira_aws_logs.mojo",
@@ -175,6 +176,7 @@ gen_check(
     name = "komira_aws_logs_hand_scoped",
     absent = ["HAND-OVERRIDE SEAM: no overrides are declared"],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "komira_aws_logs_hand.mojo",

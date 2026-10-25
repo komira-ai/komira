@@ -108,6 +108,7 @@ aws_codegen_golden(
         "komira_aws_tiny_rest.komira_aws_tiny_rest",
     ],
     golden = "golden/tiny_rest_json_client.mojo",
+    golden_parts = glob(["golden/tiny_rest_json_client_parts/*.mojo"]),
     golden_probe = "golden/tiny_rest_json_client_probe.mojo",
     model = TINY_REST_JSON.model,
     module = "komira_aws_tiny_rest",
@@ -120,6 +121,7 @@ gen_check(
     name = "tiny_rest_json_pure_scoped",
     absent = ["komira_http"],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "komira_aws_tiny_rest.mojo",
@@ -215,6 +217,7 @@ gen_check(
         "komira_json",
     ],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "komira_aws_tiny_xml.mojo",
@@ -284,6 +287,7 @@ gen_check(
         "komira_json",
     ],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "komira_aws_tiny_query.mojo",
@@ -318,6 +322,7 @@ gen_check(
     name = "tiny_query_client_scoped",
     absent = ["komira_json"],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "komira_aws_tiny_query_client.mojo",
@@ -360,6 +365,7 @@ aws_codegen_golden(
         "komira_aws_tiny_query.komira_aws_tiny_query",
     ],
     golden = "golden/query_client.mojo",
+    golden_parts = glob(["golden/query_client_parts/*.mojo"]),
     golden_probe = "golden/query_client_probe.mojo",
     model = TINY_QUERY.model,
     module = "komira_aws_tiny_query",
@@ -403,6 +409,7 @@ gen_check(
         "komira_json",
     ],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "komira_aws_tiny_ec2.mojo",

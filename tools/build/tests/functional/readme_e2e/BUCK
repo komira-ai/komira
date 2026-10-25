@@ -5,7 +5,10 @@
 # against the package unpacked from the `.conda`, and the gate that runs every welded
 # test. Green only when the README of komira_hash compiles and runs against the
 # installed package alone; the release's own targets are //release/readme_e2e/verify.
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load("@komira//tools/build/readme_e2e:defs.bzl", "readme_e2e", "readme_e2e_staged")
+load(":native.bzl", "native_conda")
 
 readme_e2e_staged(
     name = "staged",
@@ -23,5 +26,66 @@ readme_e2e(
     mopm = "komira//tools/build/readme_e2e:standin_mopm",
     package = "komira_hash",
     staged = ":staged",
+    version = "0.1.0",
+)
+
+# ---- a package that ships a native library -------------------------------------
+#
+# `fixture_native` is a real Mojo package that calls a C function, and `native_add` the real static
+# archive of it; `fixture_native_pack` packs both with the pinned `mopm pack --native`, which lays
+# the archive out as `lib/libkomira_fixture_native.a` and declares it in the package's metadata. The e2e below installs it with the
+# pinned mopm, asks that mopm for the link command (`mopm build --print-cmd`), and compiles, links and
+# runs the README example with the real compiler: it passes only if the compile took the archive from
+# mopm's command.
+
+staged_files(
+    name = "native_add_files",
+    srcs = ["native_add.c"],
+)
+
+cxx_library(
+    name = "native_add",
+    srcs = [":native_add_files[native_add.c]"],
+    preferred_linkage = "static",
+)
+
+mojo_library(
+    name = "fixture_native",
+    srcs = ["fixture_native/__init__.mojo"],
+    deps = [":native_add"],
+)
+
+export_file(
+    name = "fixture_native_readme",
+    src = "FIXTURE_README.md",
+)
+
+native_conda(
+    name = "fixture_native_pack",
+    archive = ":native_add[static-pic]",
+    lib = ":fixture_native",
+    manifest = "fixture_native.toml",
+    mopm = "toolchains//:mopm_0_0_49",
+    native_id = "komira_fixture_native",
+    package = "fixture_native",
+    version = "0.1.0",
+)
+
+readme_e2e_staged(
+    name = "staged_native",
+    members = {
+        "fixture_native": (
+            "0.1.0",
+            ":fixture_native_pack",
+            ":fixture_native_readme",
+        ),
+    },
+)
+
+readme_e2e(
+    name = "fixture_native_e2e",
+    mopm = "toolchains//:mopm_0_0_49",
+    package = "fixture_native",
+    staged = ":staged_native",
     version = "0.1.0",
 )

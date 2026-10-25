@@ -28,6 +28,8 @@ const Pkg = struct {
     readme: []const u8,
     /// The package's payload, for a scenario that needs another one.
     payload_name: ?[]const u8 = null,
+    /// Static native libraries the package declares (and, unless `ship` is false, holds).
+    natives: []const fix.Static = &.{},
 };
 
 const Env = struct {
@@ -90,7 +92,7 @@ const Env = struct {
         for (pkgs) |p| {
             const inside = p.payload_name orelse p.name;
             const mojoc = std.fmt.allocPrint(self.a, "mojoc of {s}", .{inside}) catch die("out of memory", .{});
-            const bytes = fix.package(self.a, inside, p.version, build, mojoc, p.deps) catch die("cannot build the fixture {s}", .{p.name});
+            const bytes = fix.packageWith(self.a, inside, p.version, build, mojoc, p.deps, p.natives) catch die("cannot build the fixture {s}", .{p.name});
             const file = std.fmt.allocPrint(self.a, "in/{s}/linux-64/mojo-{s}-{s}-{s}.conda", .{ p.name, p.name, p.version, build }) catch die("out of memory", .{});
             self.put(file, bytes);
             const readme = std.fmt.allocPrint(self.a, "in/{s}/README.md", .{p.name}) catch die("out of memory", .{});
@@ -468,6 +470,87 @@ fn usageError(env: Env) void {
     expectCode(none, 2, "no command");
 }
 
+// ---- native libraries -------------------------------------------------------
+
+/// A made-up static archive that defines `symbol` (the stand-in compiler looks for the name).
+fn archiveOf(env: Env, symbol: []const u8) []const u8 {
+    return lineText(env, "!<arch>\n{s}\n", .{symbol});
+}
+
+const native_use = "from good import value\n# NATIVE_CALL good_native_add\nprint(value())";
+
+fn nativePkg(env: Env, body: []const u8, ship: bool) Pkg {
+    // On the heap: the package outlives this function.
+    const natives = env.a.alloc(fix.Static, 1) catch die("out of memory", .{});
+    natives[0] = .{ .soname = "libgood_native.a", .bytes = archiveOf(env, "good_native_add"), .ship = ship };
+    return .{ .name = "good", .readme = readmeOf(env, "good", &.{body}), .natives = natives };
+}
+
+fn native(env: Env) void {
+    // The README calls a native symbol: it compiles and runs only because the compile
+    // took the archive from the command `mopm build --print-cmd` printed.
+    expectCode(env.stage(&.{nativePkg(env, native_use, true)}, "1.0.0"), 0, "stage");
+    const r = env.verify("good", "1.2.3", "1.0.0", "mopm");
+    expectCode(r, 0, "verify");
+    expectText(r, "link: mopm links 1 native librar(ies)");
+    expectText(r, "PASS good 1.2.3: 1 README example(s) compiled and ran against the installed package");
+    if (!env.exists("run/prefix/lib/libgood_native.a")) die("the archive was not unpacked into the prefix", .{});
+}
+
+fn nativeDependency(env: Env) void {
+    // The native belongs to a package the README's package needs, not to the package itself.
+    const z = Pkg{
+        .name = "zlib",
+        .readme = readmeOf(env, "zlib", &.{"from zlib import value\nprint(value())"}),
+        .natives = &.{.{ .soname = "libgood_native.a", .bytes = archiveOf(env, "good_native_add") }},
+    };
+    const app = Pkg{ .name = "app", .deps = &.{"zlib"}, .readme = readmeOf(env, "app", &.{"from app import run\n# NATIVE_CALL good_native_add\nprint(run(1))"}) };
+    expectCode(env.stage(&.{ app, z }, "1.0.0"), 0, "stage");
+    const r = env.verify("app", "1.2.3", "1.0.0", "mopm");
+    expectCode(r, 0, "verify");
+    expectText(r, "install: 2 package(s) locked and unpacked");
+    expectText(r, "link: mopm links 1 native librar(ies)");
+    expectText(r, "PASS app 1.2.3");
+}
+
+fn nativeMissingArchive(env: Env) void {
+    // The metadata declares libgood_native.a and the package holds no such file.
+    expectCode(env.stage(&.{nativePkg(env, native_use, false)}, "1.0.0"), 0, "stage");
+    const r = env.verify("good", "1.2.3", "1.0.0", "mopm");
+    expectCode(r, 1, "verify");
+    expectText(r, "FAIL link: good: `mopm build --print-cmd --prefix <installed closure>` exited 1");
+    expectText(r, "refused (missing_file)");
+    expectText(r, "libgood_native.a is named by the installed metadata but is not on disk");
+    expectNoText(r, "compiled and passed");
+    expectNoText(r, "PASS good");
+    if (env.exists("run.marker")) die("a marker was written for a package that did not pass", .{});
+}
+
+fn nativeUnlinked(env: Env) void {
+    // A mopm whose command leaves the archive out: the e2e refuses it, naming the library,
+    // before any example is compiled.
+    expectCode(env.stage(&.{nativePkg(env, native_use, true)}, "1.0.0"), 0, "stage");
+    const r = env.verify("good", "1.2.3", "1.0.0", "mopm_nolink");
+    expectCode(r, 1, "verify");
+    expectText(r, "FAIL link: good: good ships the native library libgood_native.a (static) and mopm's link command does not link it");
+    expectNoText(r, "compiled and passed");
+    expectNoText(r, "PASS good");
+    if (env.exists("run.marker")) die("a marker was written for a package that did not pass", .{});
+}
+
+fn nativeUndefinedSymbol(env: Env) void {
+    // The README calls a symbol the shipped archive does not define: the link fails, and the
+    // verdict is the compile's, naming the README line.
+    const body = "from good import value\n# NATIVE_CALL other_symbol\nprint(value())";
+    expectCode(env.stage(&.{nativePkg(env, body, true)}, "1.0.0"), 0, "stage");
+    const r = env.verify("good", "1.2.3", "1.0.0", "mopm");
+    expectCode(r, 1, "verify");
+    expectText(r, "link: mopm links 1 native librar(ies)");
+    expectText(r, "FAIL compile: good: README.md:");
+    expectText(r, "undefined symbol: other_symbol");
+    expectNoText(r, "PASS good");
+}
+
 const Scenario = struct { name: []const u8, run: *const fn (Env) void };
 
 const table = [_]Scenario{
@@ -494,6 +577,11 @@ const table = [_]Scenario{
     .{ .name = "assemble_cycle", .run = assembleCycle },
     .{ .name = "assemble_wrong_package", .run = assembleWrongPackage },
     .{ .name = "assemble_link", .run = assembleLink },
+    .{ .name = "native", .run = native },
+    .{ .name = "native_dependency", .run = nativeDependency },
+    .{ .name = "native_missing_archive", .run = nativeMissingArchive },
+    .{ .name = "native_unlinked", .run = nativeUnlinked },
+    .{ .name = "native_undefined_symbol", .run = nativeUndefinedSymbol },
     .{ .name = "usage", .run = usageError },
 };
 

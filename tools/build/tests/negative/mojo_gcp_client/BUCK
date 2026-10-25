@@ -78,6 +78,7 @@ gen_check(
     name = "absence_check_can_fail",
     absent = ["struct GetItemRequest("],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "item.mojo",

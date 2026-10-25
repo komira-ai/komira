@@ -160,6 +160,7 @@ zig_test(
     exec_compatible_with = LINUX_X86_64,
     imports = ["tools/proto_gen.zig"],
     src = "tools/proto_gen_test.zig",
+    deps = ["//tools/build/act_util:act_util"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
 )
@@ -168,6 +169,7 @@ zig_exe(
     name = "proto_gen",
     exec_compatible_with = LINUX_X86_64,
     src = "tools/proto_gen.zig",
+    deps = ["//tools/build/act_util:act_util"],
     unit_tests = [":proto_gen_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",

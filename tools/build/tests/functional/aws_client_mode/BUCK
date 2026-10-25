@@ -51,6 +51,7 @@ gen_check(
     name = "komira_aws_logs_client_send_surface",
     absent = ["mode         : pure (no transport)"],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "komira_aws_logs_client.mojo",

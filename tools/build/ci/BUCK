@@ -22,6 +22,7 @@ zig_test(
         "assert_remote/fixtures/build_remote.log",
         "assert_remote/fixtures/bxl_cached.log",
         "assert_remote/fixtures/bxl_remote.log",
+        "assert_remote/fixtures/test_cached_remote.log",
         "assert_remote/fixtures/test_none_ran.log",
     ],
     busybox = "komira//tools/build/toolchains:busybox",

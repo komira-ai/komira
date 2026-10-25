@@ -11,6 +11,9 @@
 # TARGETS: every check of the scope (UNIVERSE of rules.bzl) that no other
 # check depends on; building them builds every other check, as a
 # dependency. A check is a target of any kind but a source (SOURCE_KINDS).
+# An execution-platform registration (defs.bzl) does not remove what it names from
+# the roots (ci_graph.bzl REGISTRATION_KINDS): the macOS platform it names only
+# when `[komira_re]` has a macOS worker, and the list is the same either way.
 # EXCLUDED of rules.bzl names the checks left out on purpose (Python that is
 # not the Python SDK's); `guard.bxl` leaves the same ones out and
 # `python_guard.bxl` fails when the aggregate reaches one anyway.

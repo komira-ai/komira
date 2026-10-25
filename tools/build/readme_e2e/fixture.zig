@@ -81,19 +81,44 @@ pub fn condaDeflated(a: Allocator, stem: []const u8) ![]u8 {
     return out.items;
 }
 
+/// A static native library a package declares, as `mopm pack` lays one out for a workspace member:
+/// `lib/<soname>` (`lib<stem>.a`) named by `static_file` from `lib/mojo/`. `ship = false` declares it
+/// and leaves the file out, a package that cannot be linked.
+pub const Static = struct { soname: []const u8, bytes: []const u8, ship: bool = true };
+
 /// A package as `mopm pack` makes it: `lib/mojo/<name>.mojoc` (the bytes given)
 /// and `lib/mojo/<name>.mopm.json` naming `deps`.
 pub fn package(a: Allocator, name: []const u8, version: []const u8, build: []const u8, mojoc: []const u8, deps: []const []const u8) ![]u8 {
+    return packageWith(a, name, version, build, mojoc, deps, &.{});
+}
+
+/// The same, shipping `natives`.
+pub fn packageWith(a: Allocator, name: []const u8, version: []const u8, build: []const u8, mojoc: []const u8, deps: []const []const u8, natives: []const Static) ![]u8 {
     var meta: std.ArrayList(u8) = .empty;
     try meta.appendSlice(a, try std.fmt.allocPrint(a, "{{\"deps\":[", .{}));
     for (deps, 0..) |d, i| {
         if (i != 0) try meta.append(a, ',');
         try meta.appendSlice(a, try std.fmt.allocPrint(a, "{{\"name\":\"{s}\",\"range\":\"*\"}}", .{d}));
     }
-    try meta.appendSlice(a, try std.fmt.allocPrint(a, "],\"name\":\"{s}\",\"schema\":1,\"version\":\"{s}\"}}", .{ name, version }));
-    const tar = try tarOf(a, &.{
-        .{ .name = try std.fmt.allocPrint(a, "lib/mojo/{s}.mojoc", .{name}), .bytes = mojoc },
-        .{ .name = try std.fmt.allocPrint(a, "lib/mojo/{s}.mopm.json", .{name}), .bytes = meta.items },
-    });
+    try meta.appendSlice(a, "],\"name\":\"");
+    try meta.appendSlice(a, name);
+    try meta.appendSlice(a, "\"");
+    if (natives.len != 0) {
+        try meta.appendSlice(a, ",\"native\":[");
+        for (natives, 0..) |n, i| {
+            if (i != 0) try meta.append(a, ',');
+            const stem = n.soname["lib".len .. n.soname.len - ".a".len];
+            try meta.appendSlice(a, try std.fmt.allocPrint(a, "{{\"id\":\"{s}\",\"kind\":\"static\",\"soname\":\"{s}\",\"static_file\":\"../{s}\"}}", .{ stem, n.soname, n.soname }));
+        }
+        try meta.append(a, ']');
+    }
+    try meta.appendSlice(a, try std.fmt.allocPrint(a, ",\"schema\":1,\"version\":\"{s}\"}}", .{version}));
+    var entries: std.ArrayList(Entry) = .empty;
+    try entries.append(a, .{ .name = try std.fmt.allocPrint(a, "lib/mojo/{s}.mojoc", .{name}), .bytes = mojoc });
+    try entries.append(a, .{ .name = try std.fmt.allocPrint(a, "lib/mojo/{s}.mopm.json", .{name}), .bytes = meta.items });
+    for (natives) |n| {
+        if (n.ship) try entries.append(a, .{ .name = try std.fmt.allocPrint(a, "lib/{s}", .{n.soname}), .bytes = n.bytes });
+    }
+    const tar = try tarOf(a, entries.items);
     return condaOf(a, try std.fmt.allocPrint(a, "mojo-{s}-{s}-{s}", .{ name, version, build }), tar);
 }
