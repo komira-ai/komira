@@ -74,11 +74,13 @@ gives `SaslCredentials`. A server sends `SASL_LOGIN_USERNAME_CHALLENGE` and
 
 ## The continuation-line cap
 
-RFC 4954 section 4 allows a client response line of at most 12288 octets.
-`MAX_SASL_LINE_BYTES` is that number and `sasl_line_within_cap(length)` is
+RFC 4954 section 4 calls 12288 octets a sufficient line length and has a
+server answer a line over its own buffer with `500` (enhanced status `5.5.6`).
+`MAX_SASL_LINE_BYTES` is that number, counted without the CRLF (our choice; the
+RFC does not say), and `sasl_line_within_cap(length)` is
 true for a length from 0 to the cap (CRLF excluded). A server checks the
-length of the line before it decodes it and answers a longer one with a
-failure.
+length of the line before it decodes it and answers a longer one with
+`500 5.5.6`; the decoders also return None for a longer payload.
 
 ```mojo
 from komira_mail_auth import MAX_SASL_LINE_BYTES, sasl_line_within_cap

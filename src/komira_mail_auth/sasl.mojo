@@ -1,10 +1,13 @@
 # SASL PLAIN (RFC 4616) and LOGIN payload decoding, and the continuation-line
-# cap (RFC 4954 section 4: a client response line is at most 12288 octets).
+# cap. RFC 4954 section 4 calls 12288 octets a sufficient line length and has
+# a server fail the exchange with 500 (enhanced status 5.5.6) when a line
+# exceeds the server's own buffer.
 
 from komira_encoding import base64_decode
 
-# The longest client line, in bytes without the CRLF, that a server accepts
-# in answer to a `334` challenge.
+# The longest client line that a server accepts in answer to a `334`
+# challenge. The count excludes the CRLF; that is this library's choice, the
+# RFC does not say. A longer line is answered with 500 5.5.6.
 comptime MAX_SASL_LINE_BYTES: Int = 12288
 
 # base64 of "Username:" and of "Password:", the prompts of the LOGIN exchange.
@@ -14,7 +17,8 @@ comptime SASL_LOGIN_PASSWORD_CHALLENGE: StaticString = "UGFzc3dvcmQ6"
 
 struct SaslCredentials(Copyable, Movable):
     """A decoded username and password. It has no `Writable` form, so printing
-    it does not compile."""
+    it does not compile. It is Copyable and the password is a plain String: it
+    is not zeroed when the value is destroyed, so keep copies few."""
 
     var authcid: String
     var password: String
@@ -26,7 +30,8 @@ struct SaslCredentials(Copyable, Movable):
 
 def sasl_line_within_cap(length: Int) -> Bool:
     """True iff a continuation line of `length` bytes (CRLF excluded) is at
-    most `MAX_SASL_LINE_BYTES`. A server checks the length before it decodes."""
+    most `MAX_SASL_LINE_BYTES`. A server checks the length before it decodes;
+    the decoders refuse an over-long payload as well."""
     return length >= 0 and length <= MAX_SASL_LINE_BYTES
 
 
@@ -80,11 +85,13 @@ def _text(b: Span[UInt8, _], start: Int, end: Int) -> String:
 def decode_sasl_plain(payload: String) -> Optional[SaslCredentials]:
     """Decode the base64 PLAIN response `authzid NUL authcid NUL password`.
 
-    Refused (None): base64 that is not canonical, a payload that does not have
+    Refused (None): a payload longer than `MAX_SASL_LINE_BYTES`, base64 that is not canonical, a payload that does not have
     exactly three NUL-separated fields (a missing or an extra NUL), an empty
     authcid, an empty password, an authzid that is not empty and differs from
     the authcid, and a field that is not UTF-8. When the authzid is the
     authcid it is accepted and the credentials are for the authcid."""
+    if not sasl_line_within_cap(payload.byte_length()):
+        return None
     var raw: List[UInt8]
     try:
         raw = base64_decode(payload)
@@ -129,7 +136,9 @@ def decode_sasl_plain(payload: String) -> Optional[SaslCredentials]:
 
 def decode_sasl_login_value(reply: String) -> Optional[String]:
     """Decode one base64 LOGIN reply (a username or a password). Refused
-    (None): non-canonical base64, an empty value, a NUL byte, invalid UTF-8."""
+    (None): a reply longer than `MAX_SASL_LINE_BYTES`, non-canonical base64, an empty value, a NUL byte, invalid UTF-8."""
+    if not sasl_line_within_cap(reply.byte_length()):
+        return None
     var raw: List[UInt8]
     try:
         raw = base64_decode(reply)

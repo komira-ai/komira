@@ -5,6 +5,10 @@
 # - bad base64, an empty value, a NUL byte and invalid UTF-8 are refused;
 # - one bad reply refuses the pair;
 # - the two prompts are the base64 of "Username:" and "Password:";
+# - a value that ends in a 2-, 3- or 4-byte character is accepted, and an
+#   overlong form, a code point above U+10FFFF, a truncated sequence and a bad
+#   continuation byte at the end are refused;
+# - a reply over the line cap is refused by the decoder itself;
 # - the cap accepts exactly 12288 bytes and refuses 12289, and refuses a
 #   negative length.
 
@@ -49,6 +53,55 @@ def test_refusals() raises:
     assert_false(Bool(decode_sasl_login(_b64("alice"), String(""))))
 
 
+def _tail(*tail: Int) -> String:
+    var raw = List[UInt8]()
+    raw.append(0x70)
+    for v in tail:
+        raw.append(UInt8(v))
+    return base64_encode(Span(raw))
+
+
+def test_utf8_edges() raises:
+    var good = List[String]()
+    good.append(_tail(0xC3, 0xA9))
+    good.append(_tail(0xE2, 0x82, 0xAC))
+    good.append(_tail(0xF0, 0x9F, 0x98, 0x80))
+    good.append(_tail(0xF4, 0x8F, 0xBF, 0xBF))
+    for i in range(len(good)):
+        assert_true(Bool(decode_sasl_login_value(good[i])))
+        assert_true(Bool(decode_sasl_login(good[i], good[i])))
+    var bad = List[String]()
+    bad.append(_tail(0xC0, 0x80))
+    bad.append(_tail(0xE0, 0x80, 0x80))
+    bad.append(_tail(0xF0, 0x80, 0x80, 0x80))
+    bad.append(_tail(0xF4, 0x90, 0x80, 0x80))
+    bad.append(_tail(0xE2, 0x82))
+    bad.append(_tail(0xF0, 0x9F, 0x98))
+    bad.append(_tail(0xE2, 0x82, 0x41))
+    bad.append(_tail(0xED, 0xA0, 0x80))
+    for i in range(len(bad)):
+        assert_false(Bool(decode_sasl_login_value(bad[i])))
+        assert_false(Bool(decode_sasl_login(bad[i], _b64("pw"))))
+        assert_false(Bool(decode_sasl_login(_b64("alice"), bad[i])))
+
+
+def test_decoder_cap() raises:
+    var raw = List[UInt8]()
+    for _ in range(9216):  # 12288 base64 characters
+        raw.append(0x61)
+    var at_cap = base64_encode(Span(raw))
+    assert_equal(len(at_cap.as_bytes()), MAX_SASL_LINE_BYTES)
+    assert_true(Bool(decode_sasl_login_value(at_cap)))
+    raw.append(0x61)
+    raw.append(0x61)
+    raw.append(0x61)
+    var over = base64_encode(Span(raw))
+    assert_equal(len(over.as_bytes()), MAX_SASL_LINE_BYTES + 4)
+    assert_false(Bool(decode_sasl_login_value(over)))
+    assert_false(Bool(decode_sasl_login(over, _b64("pw"))))
+    assert_false(Bool(decode_sasl_login(_b64("alice"), over)))
+
+
 def test_prompts() raises:
     assert_equal(String(SASL_LOGIN_USERNAME_CHALLENGE), _b64("Username:"))
     assert_equal(String(SASL_LOGIN_PASSWORD_CHALLENGE), _b64("Password:"))
@@ -68,6 +121,8 @@ def test_cap() raises:
 def main() raises:
     test_round_trip()
     test_refusals()
+    test_utf8_edges()
+    test_decoder_cap()
     test_prompts()
     test_cap()
     print("test_sasl_login: OK")
