@@ -22,6 +22,14 @@
 //!  - the workflow's top-level `permissions` is `{}` (a job holds only what it
 //!    names) and its `on:` is a push to main and a manual run, nothing else (a
 //!    `pull_request_target` or a second branch would reach the jobs).
+//!  - the job `mopm-e2e-beta` verifies what the beta publish sent: it needs
+//!    `mopm-publish-beta`, has the same gate, runs in the environment `build` (the
+//!    farm's; a job holds one) with exactly `contents: read` and `id-token: write`,
+//!    reads no secret and publishes nothing, and runs its steps in this order: the
+//!    staged plan is downloaded, the farm is joined and `release_beta_fetch` built,
+//!    the download and check against the plan (`--stage beta`, the beta index,
+//!    `--out release/beta_set`, nothing else names that directory), then the e2e of
+//!    every package on that set at this run's version, every farm step asserted remote.
 //! The reader's own cases are workflow texts written here: each defect above
 //! is planted in the real text and must be refused with its message.
 
@@ -39,6 +47,13 @@ const REWRITE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/release_beta_vers
 const REWRITE_ENV = "          RUN_NUMBER: ${{ github.run_number }}";
 const STAGE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage --workspace-root src --artifacts \"$RUNNER_TEMP/mopm-publish/artifacts\" --compiler 1.0.0 --out \"$RUNNER_TEMP/mopm-publish/staged_beta\" --registry beta'";
 const GATE = "    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_BETA_PUBLISH_ENABLED == 'true'";
+const E2E_JOB = "mopm-e2e-beta";
+const E2E_DOWNLOAD_NAME = "          name: mopm-staged-beta-${{ github.sha }}";
+const E2E_FARM_CONNECT = "      - uses: ./.github/actions/farm-connect";
+const E2E_BUILD_FETCH = "          args: build //tools/build/ci:release_beta_fetch --out ${{ runner.temp }}/mopm-e2e-beta/release_beta_fetch";
+const E2E_FETCH_RUN = "        run: '\"$RUNNER_TEMP/mopm-e2e-beta/release_beta_fetch\" --staged \"$RUNNER_TEMP/mopm-e2e-beta/staged_beta\" --config-url https://api.beta.mopm.dev/index/config.json --stage beta --out release/beta_set'";
+const E2E_RUN = "          args: build -c komira_release.staged=beta -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all";
+const E2E_ASSERT = "          assert-remote: ${{ steps.assert.outputs.path }}";
 
 /// The lines of the job `name` of the `jobs:` map (a key at two spaces of
 /// indent), without comment lines and blank lines, or null if there is no such
@@ -86,6 +101,74 @@ fn lineAt(lines: []const []const u8, exact: []const u8) ?usize {
 fn mentions(lines: []const []const u8, needle: []const u8) bool {
     for (lines) |l| if (std.mem.indexOf(u8, l, needle) != null) return true;
     return false;
+}
+
+/// What no line of the e2e job may contain: it sends nothing to a registry (a mopm verb that writes, the
+/// OIDC exchange, a hand-made PUT or POST).
+const e2e_forbidden = [_][]const u8{ "publish", "--oidc", "yank", "login", "curl", "wget", "-X PUT", "-X POST", "--request", "--data", "--upload-file" };
+
+/// Null if the job `mopm-e2e-beta` holds its contract, else the refusal: it verifies what the
+/// beta publish sent and sends nothing itself.
+fn checkE2e(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
+    var n: usize = 0;
+    const job = (try jobLines(ar, text, E2E_JOB, &n)) orelse return "no job mopm-e2e-beta";
+    if (n != 1) return "mopm-e2e-beta is defined more than once";
+    if (!has(job, "    needs: mopm-publish-beta")) return "e2e-beta needs is not exactly mopm-publish-beta";
+    if (!has(job, GATE)) return "e2e-beta: the if is not the push-to-main and MOPM_BETA_PUBLISH_ENABLED gate";
+    if (!has(job, "    environment: build")) return "e2e-beta environment is not build (the farm's)";
+    if (!has(job, "    permissions:") or !has(job, "      contents: read") or !has(job, "      id-token: write"))
+        return "e2e-beta permissions are not contents: read and id-token: write";
+    var perms: usize = 0;
+    for (job) |l| {
+        if (std.mem.startsWith(u8, l, "      ") and !std.mem.startsWith(u8, l, "       ") and
+            (std.mem.indexOf(u8, l, ": read") != null or std.mem.indexOf(u8, l, ": write") != null)) perms += 1;
+    }
+    if (perms != 2) return "e2e-beta permissions hold more than contents and id-token";
+    // it sends nothing and holds no credential
+    // any reference to the secrets context, in any spelling (`secrets.X`, `secrets['X']`, `toJSON(secrets)`,
+    // `secrets: inherit`), and the registry token
+    for (job) |l| {
+        if (std.ascii.indexOfIgnoreCase(l, "secrets") != null or std.mem.indexOf(u8, l, "MOPM_TOKEN") != null) return "e2e-beta reads a secret";
+    }
+    for (job) |l| {
+        if (std.mem.eql(u8, l, "    needs: mopm-publish-beta") or std.mem.eql(u8, l, GATE)) continue;
+        for (e2e_forbidden) |w| {
+            if (std.ascii.indexOfIgnoreCase(l, w) != null) return "e2e-beta publishes, yanks, logs in or writes to a registry";
+        }
+    }
+    if (mentions(job, "environment: beta")) return "e2e-beta holds the beta environment";
+    // the order: the plan, the farm, the tool, the download and check, then the e2e
+    const download_at = lineAt(job, E2E_DOWNLOAD_NAME) orelse return "e2e-beta does not download the staged beta plan (mopm-staged-beta)";
+    const connect_at = lineAt(job, E2E_FARM_CONNECT) orelse return "e2e-beta does not join the farm";
+    const tool_at = lineAt(job, E2E_BUILD_FETCH) orelse return "e2e-beta does not build release_beta_fetch";
+    const fetch_at = lineAt(job, E2E_FETCH_RUN) orelse return "e2e-beta does not download and check against the plan (release_beta_fetch with --stage beta)";
+    const run_at = lineAt(job, E2E_RUN) orelse return "e2e-beta does not run the e2e on the downloaded set (staged=beta at this run's version)";
+    if (!(download_at < fetch_at)) return "e2e-beta checks before it has the plan";
+    if (!(connect_at < tool_at and tool_at < fetch_at)) return "e2e-beta fetches before the farm is joined and the tool built";
+    if (!(fetch_at < run_at)) return "e2e-beta runs the e2e before the download and check";
+    // nothing between the check and the e2e may touch the set, and nothing else may write it
+    var writers: usize = 0;
+    for (job) |l| {
+        if (std.mem.indexOf(u8, l, "beta_set") != null) writers += 1;
+    }
+    if (writers != 1) return "e2e-beta names release/beta_set other than in the one download step";
+    var fetch_runs: usize = 0;
+    for (job) |l| {
+        if (std.mem.indexOf(u8, l, "release_beta_fetch") != null and std.mem.startsWith(u8, l, "        run:")) fetch_runs += 1;
+    }
+    if (fetch_runs != 1) return "e2e-beta runs release_beta_fetch more than once";
+    // the one `|| true` is the daemon stop at the end, which must not fail the job
+    for (job) |l| {
+        if (std.mem.indexOf(u8, l, "|| true") != null and !std.mem.eql(u8, l, "        run: ./buck2 kill || true")) return "e2e-beta ignores a failure";
+    }
+    if (mentions(job, "continue-on-error")) return "e2e-beta ignores a failure";
+    // both farm steps are asserted to run remotely
+    var asserted: usize = 0;
+    for (job) |l| {
+        if (std.mem.eql(u8, l, E2E_ASSERT)) asserted += 1;
+    }
+    if (asserted != 2) return "e2e-beta has a farm step that is not asserted remote";
+    return null;
 }
 
 /// Null if the workflow text holds the contract, else the refusal.
@@ -160,6 +243,8 @@ fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     if (pn != 1) return "mopm-publish is defined more than once";
     if (!mentions(prod, "MOPM_TOKEN: ${{ secrets.MOPM_TOKEN }}")) return "the prod job lost its token";
     if (mentions(prod, "id-token")) return "the prod job gained id-token";
+
+    if (try checkE2e(ar, text)) |why| return why;
 
     // top-level permissions and the triggers
     var tp: usize = 0;
@@ -307,6 +392,72 @@ test "each defect planted in the real release.yml is refused with its message" {
     try expectRefused(ar, try replaced(ar, text, "    branches: [main]\n", "    branches: [main, 'release/**']\n"), "branches");
     // the prod job
     try expectRefused(ar, try replaced(ar, text, "          MOPM_TOKEN: ${{ secrets.MOPM_TOKEN }}\n", ""), "lost its token");
+}
+
+test "each defect planted in the mopm-e2e-beta job of the real release.yml is refused with its message" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const text = try readWorkflow(ar);
+    const need = "    needs: mopm-publish-beta\n";
+    const env_build = "    environment: build\n";
+    const head = need ++ GATE ++ "\n    runs-on: ubuntu-24.04\n" ++ env_build;
+    const perms_tail = "      # for farm-connect only: the token Tailscale trusts\n      id-token: write\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n          ref: ${{ github.sha }}\n          persist-credentials: false\n      - uses: actions/download-artifact";
+    const steps_head = "    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n          ref: ${{ github.sha }}\n          persist-credentials: false\n      - uses: actions/download-artifact";
+    const fetch_name = "      - name: download what beta serves and check it against the plan\n";
+    const fetch_step = fetch_name ++ E2E_FETCH_RUN ++ "\n";
+    const tool_step = "      - name: build the beta fetch tool\n        uses: ./.github/actions/buck2-farm\n        with:\n" ++ E2E_BUILD_FETCH ++ "\n" ++ E2E_ASSERT ++ "\n";
+    const run_step = "      - name: the README e2e against the downloaded set\n        uses: ./.github/actions/buck2-farm\n        with:\n" ++ E2E_RUN ++ "\n" ++ E2E_ASSERT ++ "\n";
+    const download_step = "      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1\n        with:\n" ++ E2E_DOWNLOAD_NAME ++ "\n          path: ${{ runner.temp }}/mopm-e2e-beta/staged_beta\n";
+
+    // the dependency: after the publish, and only it
+    try expectRefused(ar, try replaced(ar, text, head, head[need.len..]), "e2e-beta needs");
+    try expectRefused(ar, try replaced(ar, text, head, "    needs: mopm-stage-beta\n" ++ head[need.len..]), "e2e-beta needs");
+    try expectRefused(ar, try replaced(ar, text, head, "    needs: [mopm-publish-beta, release]\n" ++ head[need.len..]), "e2e-beta needs");
+    // the gate: each part, and the whole if
+    try expectRefused(ar, try replaced(ar, text, head, need ++ "    if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n    runs-on: ubuntu-24.04\n" ++ env_build), "e2e-beta: the if");
+    try expectRefused(ar, try replaced(ar, text, head, need ++ "    if: github.ref == 'refs/heads/main' && vars.MOPM_BETA_PUBLISH_ENABLED == 'true'\n    runs-on: ubuntu-24.04\n" ++ env_build), "e2e-beta: the if");
+    try expectRefused(ar, try replaced(ar, text, head, need ++ "    runs-on: ubuntu-24.04\n" ++ env_build), "e2e-beta: the if");
+    try expectRefused(ar, try replaced(ar, text, head, need ++ "    if: always()\n    runs-on: ubuntu-24.04\n" ++ env_build), "e2e-beta: the if");
+    // the environment: the farm's, not beta's or none
+    try expectRefused(ar, try replaced(ar, text, head, head[0 .. head.len - env_build.len] ++ "    environment: beta\n"), "environment is not build");
+    try expectRefused(ar, try replaced(ar, text, head, head[0 .. head.len - env_build.len]), "environment is not build");
+    // the permissions: exactly contents and id-token
+    try expectRefused(ar, try replaced(ar, text, perms_tail, steps_head), "e2e-beta permissions are not");
+    try expectRefused(ar, try replaced(ar, text, perms_tail, "      id-token: write\n      packages: write\n" ++ steps_head), "more than contents");
+    // it sends nothing and holds no credential
+    try expectRefused(ar, try replaced(ar, text, fetch_step, fetch_name ++ "        env:\n          MOPM_TOKEN: x\n" ++ E2E_FETCH_RUN ++ "\n"), "reads a secret");
+    try expectRefused(ar, try replaced(ar, text, fetch_step, fetch_name ++ "        env:\n          X: ${{ secrets.OTHER }}\n" ++ E2E_FETCH_RUN ++ "\n"), "reads a secret");
+    try expectRefused(ar, try replaced(ar, text, run_step, "      - run: \"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged x --registry beta\n" ++ run_step), "publishes, yanks");
+    try expectRefused(ar, try replaced(ar, text, run_step, "      - run: mopm-x --oidc\n" ++ run_step), "publishes, yanks");
+    // every spelling of the secrets context, and every verb that writes to a registry
+    const secret_spellings = [_][]const u8{ "          X: ${{ secrets['OTHER'] }}\n", "          X: ${{ toJSON(secrets) }}\n", "          X: ${{ SECRETS.OTHER }}\n", "          X: ${{ secrets }}\n" };
+    inline for (secret_spellings) |line| try expectRefused(ar, try replaced(ar, text, fetch_step, fetch_name ++ "        env:\n" ++ line ++ E2E_FETCH_RUN ++ "\n"), "reads a secret");
+    try expectRefused(ar, try replaced(ar, text, E2E_FETCH_RUN ++ "\n", E2E_FETCH_RUN ++ "\n        secrets: inherit\n"), "reads a secret");
+    const writers = [_][]const u8{ "mopm publish --staged x", "mopm yank komira_hash 0.1.1", "mopm login --registry beta", "curl -X PUT https://x.test/y", "curl -X POST https://x.test/y", "curl --request POST https://x.test/y", "wget --post-data=x https://x.test/y" };
+    inline for (writers) |cmd| try expectRefused(ar, try replaced(ar, text, run_step, "      - run: " ++ cmd ++ "\n" ++ run_step), "publishes, yanks");
+    // the order: the plan, the farm and the tool, the download and check, then the e2e
+    try expectRefused(ar, try replaced(ar, text, download_step, ""), "does not download the staged beta plan");
+    const without_download = try replaced(ar, text, download_step, "");
+    try expectRefused(ar, try replaced(ar, without_download, fetch_step, fetch_step ++ download_step), "checks before it has the plan");
+    try expectRefused(ar, try replaced(ar, text, tool_step ++ fetch_step, fetch_step ++ tool_step), "fetches before the farm is joined and the tool built");
+    try expectRefused(ar, try replaced(ar, text, fetch_step ++ run_step, run_step ++ fetch_step), "before the download and check");
+    try expectRefused(ar, try replaced(ar, text, fetch_step, ""), "does not download and check");
+    // the download and check: the beta stage, the beta index, the plan's directory, no escape
+    try expectRefused(ar, try replaced(ar, text, "--stage beta --out release/beta_set'", "--stage prod --out release/beta_set'"), "does not download and check");
+    try expectRefused(ar, try replaced(ar, text, "--stage beta --out release/beta_set'", "--stage beta --out release/beta_set || true'"), "does not download and check");
+    try expectRefused(ar, try replaced(ar, text, "https://api.beta.mopm.dev/index/config.json", "https://api.mopm.dev/index/config.json"), "does not download and check");
+    try expectRefused(ar, try replaced(ar, text, "staged_beta\" --config-url", "staged\" --config-url"), "does not download and check");
+    try expectRefused(ar, try replaced(ar, text, fetch_step, fetch_step ++ "      - run: cp x release/beta_set/y\n"), "beta_set other than");
+    try expectRefused(ar, try replaced(ar, text, fetch_step, fetch_step ++ fetch_step), "beta_set other than");
+    // the e2e: the downloaded set, at this run's version, all packages, on the farm, failing the job
+    try expectRefused(ar, try replaced(ar, text, "-c komira_release.staged=beta -c komira_release.beta_version", "-c komira_release.staged=stage -c komira_release.beta_version"), "does not run the e2e");
+    try expectRefused(ar, try replaced(ar, text, "-c komira_release.staged=beta -c komira_release.beta_version=0.1.${{ github.run_number }} //", "-c komira_release.staged=beta //"), "does not run the e2e");
+    try expectRefused(ar, try replaced(ar, text, "beta_version=0.1.${{ github.run_number }}", "beta_version=0.1.${{ github.run_attempt }}"), "does not run the e2e");
+    try expectRefused(ar, try replaced(ar, text, "beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all", "beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:komira_hash"), "does not run the e2e");
+    try expectRefused(ar, try replaced(ar, text, E2E_RUN ++ "\n" ++ E2E_ASSERT ++ "\n", E2E_RUN ++ "\n"), "not asserted remote");
+    try expectRefused(ar, try replaced(ar, text, E2E_RUN ++ "\n" ++ E2E_ASSERT ++ "\n", E2E_RUN ++ "\n" ++ E2E_ASSERT ++ "\n        continue-on-error: true\n"), "ignores a failure");
+    try expectRefused(ar, try replaced(ar, text, E2E_BUILD_FETCH ++ "\n" ++ E2E_ASSERT ++ "\n", E2E_BUILD_FETCH ++ "\n"), "not asserted remote");
 }
 
 test "a comment naming MOPM_TOKEN does not count, a line does" {

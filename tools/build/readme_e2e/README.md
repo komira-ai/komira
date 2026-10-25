@@ -117,7 +117,7 @@ lacks, fails the build: the e2e installs offline, so the set holds the whole clo
 
 `readme_e2e` takes any target whose output is a directory in that layout as its
 `staged`. `mopm stage` writes the same directory, and the release flow hands the e2e
-that set, the one it publishes, and nothing else changes. There are two sources of
+that set, the one it publishes, and nothing else changes. There are three sources of
 `staged` in the release's targets, and which one a build uses is
 `-c komira_release.staged=<which>` ([`verify/BUCK`](../../../release/readme_e2e/verify/BUCK)):
 
@@ -131,8 +131,16 @@ that set, the one it publishes, and nothing else changes. There are two sources 
   that `publish --staged` will publish. The files are an input of the build (uploaded to
   the farm) and are not in the repository, so the target is empty in a checkout. The e2e
   then runs on the farm against the real set; against the empty target it fails at
-  phase `staged` (no `plan.json`), so a release that did not stage fails. Any other
-  value of the option is an error.
+  phase `staged` (no `plan.json`), so a release that did not stage fails.
+* **`beta`**: `//release/beta_set:set`, the files of the beta channel as the release workflow's job
+  `mopm-e2e-beta` downloaded them after `mopm-publish-beta` (`release_beta_fetch`, which checked each
+  file's sha256 and size against the staged plan and wrote the plan, the READMEs and the downloaded
+  `.conda` files there; see `docs/ci.md`, "Verifying the beta publish"). The packages carry the version
+  of that run, not the one of `packages.bzl`, so `-c komira_release.beta_version=0.1.<n>` is required
+  with it. The e2e proves the README examples run on the published bytes; a package's own tests are
+  not in its `.conda` and do not run.
+
+Any other value of the option is an error.
 
 The assembled set stays for the pull request check because it is the only one with no
 network and no registry state in it: it tests, on every change, that the packages

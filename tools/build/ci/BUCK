@@ -82,3 +82,28 @@ zig_exe(
     zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
+
+# release_beta_fetch: downloads the packages a registry published and checks each file's
+# sha256 and size against the staged plan (release_beta_fetch.zig says what it reads, asks
+# and refuses). release.yml's `mopm-e2e-beta` job runs it after `mopm-publish-beta`; it is
+# built there, on the farm, and run on the runner, because it makes requests. Its cases run
+# against a registry in memory and a socket on loopback; welded: the tool is built only when
+# they pass.
+zig_test(
+    name = "release_beta_fetch_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "release_beta_fetch/release_beta_fetch_test.zig",
+    imports = ["release_beta_fetch/release_beta_fetch.zig"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "release_beta_fetch",
+    exec_compatible_with = LINUX_X86_64,
+    src = "release_beta_fetch/release_beta_fetch.zig",
+    unit_tests = [":release_beta_fetch_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
