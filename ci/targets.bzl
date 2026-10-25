@@ -76,6 +76,7 @@ TARGETS = [
     "komira//src/komira_aws_route53:komira_aws_route53_conda",
     "komira//src/komira_aws_s3:komira_aws_s3_conda",
     "komira//src/komira_aws_scheduler:komira_aws_scheduler_conda",
+    "komira//src/komira_aws_secret_store:komira_aws_secret_store_conda",
     "komira//src/komira_aws_secretsmanager:komira_aws_secretsmanager_conda",
     "komira//src/komira_aws_ses:komira_aws_ses_conda",
     "komira//src/komira_aws_sesv2:komira_aws_sesv2_conda",
