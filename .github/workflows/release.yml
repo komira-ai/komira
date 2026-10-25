@@ -35,7 +35,10 @@
 #                   MOPM_BETA_PUBLISH_ENABLED is `true` (it is unset: both are
 #                   skipped). The first stages the same built packages against
 #                   the registry `beta` (the set of `mopm-stage` is planned
-#                   against prod); the second publishes that set to `beta`, in
+#                   against prod), after giving every member of its checkout
+#                   the version 0.1.<run number> (a version can be created
+#                   once, so each push needs its own; nothing is pushed back);
+#                   the second publishes that set to `beta`, in
 #                   the environment `beta`, with the job's GitHub OIDC identity
 #                   (`--oidc`) and no secret. What
 #                   must exist before the variable is set is in docs/ci.md,
@@ -233,12 +236,19 @@ jobs:
       - name: build the pinned mopm
         uses: ./.github/actions/buck2-farm
         with:
-          args: build toolchains//:mopm_0_0_54 --out ${{ runner.temp }}/mopm-publish/mopm
+          args: build toolchains//:mopm_0_0_57 --out ${{ runner.temp }}/mopm-publish/mopm
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: build the packages
         uses: ./.github/actions/buck2-farm
         with:
           args: build //release:mopm_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # Built here, run only by `mopm-stage-beta` (no step of this job runs it): the beta
+      # job has no farm and no buck2, so it takes the tool from this job's artifact.
+      - name: build the beta version tool
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //tools/build/ci:release_beta_version --out ${{ runner.temp }}/mopm-publish/release_beta_version
           assert-remote: ${{ steps.assert.outputs.path }}
       # STAGE. Packs each member of src/ from its built `.mojoc` (compiler: MOJO
       # of packages.bzl), asks the registry, without a token, which versions it
@@ -268,6 +278,7 @@ jobs:
           name: mopm-staged-${{ github.sha }}
           path: |
             ${{ runner.temp }}/mopm-publish/mopm
+            ${{ runner.temp }}/mopm-publish/release_beta_version
             ${{ runner.temp }}/mopm-publish/staged
           if-no-files-found: error
           retention-days: 1
@@ -348,6 +359,19 @@ jobs:
           path: ${{ runner.temp }}/mopm-publish/artifacts
       - name: mopm is executable
         run: chmod +x "$RUNNER_TEMP/mopm-publish/mopm"
+      # A (name, version) pair can be created once on a registry and a mopm version is exactly
+      # MAJOR.MINOR.PATCH, so each push needs a version of its own: every member's version is
+      # set to 0.1.<run number> on this job's checkout (still inside >=0.1,<0.2, above 0.1.0,
+      # and the newest push is the newest version), with the exact pins between members.
+      # Nothing is committed or pushed back, and `mopm-stage` (prod) never runs this.
+      # `mopm stage` reads each version from mopm.toml when it runs, and the built
+      # packages carry none, so this is all the packages need.
+      - name: the beta version tool is executable
+        run: chmod +x "$RUNNER_TEMP/mopm-publish/release_beta_version"
+      - name: every member gets the beta version
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: '"$RUNNER_TEMP/mopm-publish/release_beta_version" --workspace-root src --version "0.1.$RUN_NUMBER"'
       - name: mopm stage against beta
         run: '"$RUNNER_TEMP/mopm-publish/mopm" stage --workspace-root src --artifacts "$RUNNER_TEMP/mopm-publish/artifacts" --compiler 1.0.0 --out "$RUNNER_TEMP/mopm-publish/staged_beta" --registry beta'
       - name: mopm publish --staged --dry-run

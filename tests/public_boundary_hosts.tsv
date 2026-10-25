@@ -9,6 +9,13 @@
 # does not belong here.
 amazonaws.com	the AWS service endpoints the AWS clients resolve and test
 amazonaws.com.cn	the AWS China partition's service endpoints
+amazonwebservices.com.cn	the AWS China partition's dual-stack service endpoints
+ic.gov	the AWS isolated partitions' service endpoints (c2s, aws, hci) in botocore's endpoint rules
+sgov.gov	the AWS isolated partition's service endpoints (sc2s) in botocore's endpoint rules
+amazonaws.eu	the AWS European Sovereign Cloud partition's service endpoints in botocore's endpoint rules
+amazonwebservices.eu	the AWS European Sovereign Cloud partition's dual-stack service endpoints
+adc-e.uk	an AWS isolated partition's service endpoints in botocore's endpoint rules
+aws.scloud	an AWS isolated partition's service endpoints in botocore's endpoint rules
 api.aws	the AWS dual-stack service endpoints
 amazon.com	AWS documentation
 googleapis.com	the Google Cloud API endpoints the GCP clients call

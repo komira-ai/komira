@@ -31,6 +31,13 @@ const t = std.testing;
 const JOB = "mopm-publish-beta";
 const PROD_JOB = "mopm-publish";
 const STAGE_JOB = "mopm-stage-beta";
+const PROD_STAGE_JOB = "mopm-stage";
+const TOOL = "release_beta_version";
+const BUILD_TOOL_LINE = "          args: build //tools/build/ci:release_beta_version --out ${{ runner.temp }}/mopm-publish/release_beta_version";
+const UPLOAD_TOOL_LINE = "            ${{ runner.temp }}/mopm-publish/release_beta_version";
+const REWRITE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/release_beta_version\" --workspace-root src --version \"0.1.$RUN_NUMBER\"'";
+const REWRITE_ENV = "          RUN_NUMBER: ${{ github.run_number }}";
+const STAGE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage --workspace-root src --artifacts \"$RUNNER_TEMP/mopm-publish/artifacts\" --compiler 1.0.0 --out \"$RUNNER_TEMP/mopm-publish/staged_beta\" --registry beta'";
 const GATE = "    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_BETA_PUBLISH_ENABLED == 'true'";
 
 /// The lines of the job `name` of the `jobs:` map (a key at two spaces of
@@ -69,6 +76,11 @@ fn jobLines(ar: std.mem.Allocator, text: []const u8, name: []const u8, count: *u
 fn has(lines: []const []const u8, exact: []const u8) bool {
     for (lines) |l| if (std.mem.eql(u8, l, exact)) return true;
     return false;
+}
+
+fn lineAt(lines: []const []const u8, exact: []const u8) ?usize {
+    for (lines, 0..) |l, i| if (std.mem.eql(u8, l, exact)) return i;
+    return null;
 }
 
 fn mentions(lines: []const []const u8, needle: []const u8) bool {
@@ -110,9 +122,38 @@ fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     if (!has(stage, "    permissions:") or !has(stage, "      contents: read")) return "stage-beta permissions are not contents: read";
     if (mentions(stage, "MOPM_TOKEN") or mentions(stage, "secrets.")) return "stage-beta reads a secret";
     if (mentions(stage, "farm") or mentions(stage, "buck2")) return "stage-beta joins the farm or runs buck2";
-    if (!has(stage, "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage --workspace-root src --artifacts \"$RUNNER_TEMP/mopm-publish/artifacts\" --compiler 1.0.0 --out \"$RUNNER_TEMP/mopm-publish/staged_beta\" --registry beta'"))
-        return "stage-beta does not stage against beta with --out staged_beta";
+    const stage_at = lineAt(stage, STAGE_RUN) orelse return "stage-beta does not stage against beta with --out staged_beta";
     if (mentions(stage, "--registry prod")) return "stage-beta names the prod registry";
+    // a version of its own for every push: the members are rewritten to 0.1.<run number>
+    // on the job's checkout, before the stage, and nothing is written back
+    const rewrite_at = lineAt(stage, REWRITE_RUN) orelse return "stage-beta does not give the members 0.1.<run number> (release_beta_version)";
+    if (rewrite_at > stage_at) return "stage-beta runs release_beta_version after mopm stage";
+    if (!has(stage, REWRITE_ENV)) return "stage-beta does not take the run number from github.run_number";
+    if (rewrite_at < 3 or !std.mem.eql(u8, stage[rewrite_at - 2], "        env:") or !std.mem.eql(u8, stage[rewrite_at - 1], REWRITE_ENV)) return "stage-beta: the rewrite step has no env";
+    var tool_runs: usize = 0;
+    for (stage) |l| {
+        if (std.mem.indexOf(u8, l, TOOL) != null and std.mem.indexOf(u8, l, "        run:") == 0 and
+            !std.mem.startsWith(u8, l, "        run: chmod +x ")) tool_runs += 1;
+    }
+    if (tool_runs != 1) return "stage-beta runs release_beta_version more than once";
+    if (mentions(stage, "git push") or mentions(stage, "git commit")) return "stage-beta commits or pushes what it rewrote";
+
+    // prod keeps the real versions: its job builds the tool for the beta job's artifact and
+    // never runs it
+    var psn: usize = 0;
+    const prod_stage = (try jobLines(ar, text, PROD_STAGE_JOB, &psn)) orelse return "no job mopm-stage";
+    if (psn != 1) return "mopm-stage is defined more than once";
+    var builds: usize = 0;
+    for (prod_stage) |l| {
+        if (std.mem.indexOf(u8, l, TOOL) == null) continue;
+        if (std.mem.eql(u8, l, BUILD_TOOL_LINE)) {
+            builds += 1;
+        } else if (!std.mem.eql(u8, l, UPLOAD_TOOL_LINE)) {
+            return "mopm-stage names release_beta_version other than to build it and hand it on: prod keeps the real versions";
+        }
+    }
+    if (builds != 1) return "mopm-stage does not build release_beta_version once for the beta job";
+    if (lineAt(prod_stage, UPLOAD_TOOL_LINE) == null) return "mopm-stage does not hand release_beta_version to the beta job";
 
     var pn: usize = 0;
     const prod = (try jobLines(ar, text, PROD_JOB, &pn)) orelse return "no job mopm-publish";
@@ -242,8 +283,20 @@ test "each defect planted in the real release.yml is refused with its message" {
     try expectRefused(ar, try replaced(ar, text, "    needs: mopm-stage\n    if:", "    needs: mopm-stage\n    # gate removed\n    xif:"), "stage-beta");
     try expectRefused(ar, try replaced(ar, text, "    timeout-minutes: 30\n    permissions:\n      contents: read\n    steps:\n      - uses: actions/checkout", "    timeout-minutes: 30\n    environment: beta\n    permissions:\n      contents: read\n    steps:\n      - uses: actions/checkout"), "stage-beta holds an environment");
     try expectRefused(ar, try replaced(ar, text, "    timeout-minutes: 30\n    permissions:\n      contents: read\n    steps:\n      - uses: actions/checkout", "    timeout-minutes: 30\n    permissions:\n      contents: read\n      id-token: write\n    steps:\n      - uses: actions/checkout"), "stage-beta holds id-token");
-    try expectRefused(ar, try replaced(ar, text, "      - name: mopm is executable\n        run: chmod +x \"$RUNNER_TEMP/mopm-publish/mopm\"\n      - name: mopm stage against beta", "      - name: mopm is executable\n        run: chmod +x \"$RUNNER_TEMP/mopm-publish/mopm\"\n        env:\n          T: ${{ secrets.MOPM_TOKEN }}\n      - name: mopm stage against beta"), "stage-beta reads a secret");
+    try expectRefused(ar, try replaced(ar, text, "      - name: the beta version tool is executable\n        run: chmod +x \"$RUNNER_TEMP/mopm-publish/release_beta_version\"\n", "      - name: the beta version tool is executable\n        run: chmod +x \"$RUNNER_TEMP/mopm-publish/release_beta_version\"\n        env:\n          T: ${{ secrets.MOPM_TOKEN }}\n"), "stage-beta reads a secret");
     try expectRefused(ar, try replaced(ar, text, "      - name: mopm stage against beta\n", "      - run: ./buck2 build //x\n      - name: mopm stage against beta\n"), "stage-beta joins");
+    // the beta version: the rewrite is there, before the stage, with the run number, once
+    const rewrite_step = "      - name: every member gets the beta version\n        env:\n" ++ REWRITE_ENV ++ "\n" ++ REWRITE_RUN ++ "\n";
+    try expectRefused(ar, try replaced(ar, text, rewrite_step, ""), "does not give the members");
+    try expectRefused(ar, try replaced(ar, text, REWRITE_RUN ++ "\n", "        run: '\"$RUNNER_TEMP/mopm-publish/release_beta_version\" --workspace-root src --version 0.1.0'\n"), "does not give the members");
+    try expectRefused(ar, try replaced(ar, text, REWRITE_RUN ++ "\n", "        run: '\"$RUNNER_TEMP/mopm-publish/release_beta_version\" --workspace-root src --version \"0.1.$RUN_NUMBER\" || true'\n"), "does not give the members");
+    try expectRefused(ar, try replaced(ar, text, REWRITE_ENV ++ "\n", "          RUN_NUMBER: ${{ github.run_attempt }}\n"), "run number");
+    try expectRefused(ar, try replaced(ar, text, rewrite_step ++ "      - name: mopm stage against beta\n" ++ STAGE_RUN ++ "\n", "      - name: mopm stage against beta\n" ++ STAGE_RUN ++ "\n" ++ rewrite_step), "after mopm stage");
+    try expectRefused(ar, try replaced(ar, text, REWRITE_RUN ++ "\n", REWRITE_RUN ++ "\n      - run: git push origin HEAD\n"), "pushes");
+    // the prod stage job never runs it, and no other job runs it either
+    try expectRefused(ar, try replaced(ar, text, "      - name: mopm stage\n        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage", "      - run: '\"$RUNNER_TEMP/mopm-publish/release_beta_version\" --workspace-root src --version 0.1.1'\n      - name: mopm stage\n        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage"), "prod keeps the real versions");
+    try expectRefused(ar, try replaced(ar, text, BUILD_TOOL_LINE ++ "\n", ""), "does not build release_beta_version once");
+    try expectRefused(ar, try replaced(ar, text, UPLOAD_TOOL_LINE ++ "\n", ""), "hand release_beta_version");
     // publish takes the set staged for prod instead of the beta one
     try expectRefused(ar, try replaced(ar, text, "publish --staged \"$RUNNER_TEMP/mopm-publish/staged_beta\" --oidc", "publish --staged \"$RUNNER_TEMP/mopm-publish/staged\" --oidc"), "publish command");
     // top-level permissions and the triggers

@@ -425,6 +425,7 @@ TARGETS = [
     "komira//tools/build/bisect:bisect",
     "komira//tools/build/ci/fixture/agg:agg_complete",
     "komira//tools/build/ci/fixture/agg:agg_missing",
+    "komira//tools/build/ci:release_beta_version",
     "komira//tools/build/coverage/mutate:mut_dir",
     "komira//tools/build/coverage:branch_gate_rows",
     "komira//tools/build/coverage:covcheck_conda",

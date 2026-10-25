@@ -8,6 +8,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # split object is written to the store first and its summary is appended to the
 # metastore (komira_search_catalog) second. The store is a type parameter over
 # komira_objectstore's conditional-write traits; no cloud client is named here.
+# Metric points are transposed to the `metrics` fact batch and stored by
+# ObjectStoreMetricSink through komira_telemetry_store's metric writer (object
+# first, catalog entry second). SplitIndexLogSearch answers the komira_log_query
+# search seam over the L0 splits.
 #
 # The welded tests (each file's header says which defect it catches):
 # - test_log_native_indexing_idle_hook_e2e: the idle hook installed on a real
@@ -40,6 +44,24 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # - test_telemetry_log_base_artifact: the batch the real transpose produces
 #   publishes through komira_telemetry_store as time-partitioned Parquet, and a
 #   time-range read resolves to it.
+# - test_object_store_metric_sink: metric points published through the telemetry
+#   store's metric writer come back out of the Parquet bytes sorted
+#   (series_id, ts) with a catalog entry whose bounds are true and tight; an
+#   empty drain touches the store zero times; the object is written before its
+#   entry is appended (recording store), and a failed write or append keeps the
+#   points pending.
+# - test_object_store_metric_sink_days: a flush spanning UTC days that fails on a
+#   later day retries only the uncommitted days (no duplicated rows).
+# - test_split_log_search_faults: the scan keeps a zero-timestamp hit through a
+#   window that excludes zero, and raises on a missing or corrupt split.
+# - test_split_log_search_route: splits published by the real build task are
+#   read back through the log-query seam and route: newest first with the
+#   publish sequence breaking a millisecond tie, a true total, a window filter,
+#   a term-free window refused, the caller's (meta_root, index) honoured, and
+#   L0 and optimized splits merged.
+# - test_telemetry_codec_agreement: the write and read packages reach one
+#   segment-entry codec, the golden envelope bytes are pinned, and both
+#   historical version-1 layouts are refused by name.
 mojo_library(
     name = "komira_log_index",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -56,19 +78,25 @@ mojo_library(
         "//src/komira_column_kernels:komira_column_kernels",
         "//src/komira_compression:komira_compression",
         "//src/komira_counters:komira_counters",
+        "//src/komira_crypto:komira_crypto",
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_fork_join:komira_fork_join",
         "//src/komira_fs:komira_fs",
         "//src/komira_hash:komira_hash",
         "//src/komira_host:komira_host",
+        "//src/komira_http_core:komira_http_core",
         "//src/komira_join_assembly:komira_join_assembly",
         "//src/komira_libc:komira_libc",
         "//src/komira_log:komira_log",
+        "//src/komira_log_query:komira_log_query",
         "//src/komira_lz4:komira_lz4",
         "//src/komira_metrics:komira_metrics",
         "//src/komira_name_registry:komira_name_registry",
         "//src/komira_objectstore:komira_objectstore",
         "//src/komira_objectstore:komira_objectstore_posix",
+        "//src/komira_parquet_api:komira_parquet_api",
+        "//src/komira_parquet_codec:komira_parquet_codec",
+        "//src/komira_parquet_writer:komira_parquet_writer",
         "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_plan_ir:komira_plan_ir",
         "//src/komira_plan_stats:komira_plan_stats",
@@ -78,16 +106,17 @@ mojo_library(
         "//src/komira_search_catalog:komira_search_catalog",
         "//src/komira_simd:komira_simd",
         "//src/komira_spsc_ring:komira_spsc_ring",
+        "//src/komira_telemetry_store:komira_telemetry_store",
         "//src/komira_trace:komira_trace",
         "//src/komira_zlib:komira_zlib",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
-    # The telemetry store is a test-only dependency: the test that drives the
-    # real transpose into its segment writer lives on this side of the edge,
-    # because komira_telemetry_store does not depend on this package. The
-    # Parquet reader is not needed here: the test checks the Parquet magic.
+    # Test-only: the Parquet reader decodes the metric sink's published objects,
+    # and the telemetry read package is the other half of the codec agreement
+    # test. Neither is a dependency of the library.
     test_deps = [
-        "//src/komira_telemetry_store:komira_telemetry_store",
+        "//src/komira_parquet:komira_parquet",
+        "//src/komira_telemetry_read:komira_telemetry_read",
     ],
     test_srcs = [
         "tests/test_log_index_failure_paths.mojo",
@@ -97,6 +126,11 @@ mojo_library(
         "tests/test_log_native_indexing_l05.mojo",
         "tests/test_log_native_indexing_l1.mojo",
         "tests/test_log_native_indexing_lread.mojo",
+        "tests/test_object_store_metric_sink.mojo",
+        "tests/test_object_store_metric_sink_days.mojo",
+        "tests/test_split_log_search_faults.mojo",
+        "tests/test_split_log_search_route.mojo",
+        "tests/test_telemetry_codec_agreement.mojo",
         "tests/test_telemetry_log_base_artifact.mojo",
     ],
     visibility = ["PUBLIC"],
