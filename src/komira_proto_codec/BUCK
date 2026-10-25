@@ -79,14 +79,16 @@ mojo_test(
 # four whole binades (about 34 million values; see the file header), one target
 # per (binade, quarter) so the 16 units run in parallel. Too slow for the
 # welded gate above, which samples every binade instead.
+_BINADE_PARTS = 4
+
 [
     mojo_test(
         name = "test_float32_json_binades_{}_{}".format(binade, part),
         srcs = ["tests/test_float32_json_binades.mojo"],
         deps = [":komira_proto_codec"],
         optimization_level = "3",
-        defines = ["BINADE={}".format(binade), "PART={}".format(part)],
+        defines = ["BINADE={}".format(binade), "PART={}".format(part), "PARTS={}".format(_BINADE_PARTS)],
     )
     for binade in [0, 1, 43, 254]
-    for part in range(4)
+    for part in range(_BINADE_PARTS)
 ]
