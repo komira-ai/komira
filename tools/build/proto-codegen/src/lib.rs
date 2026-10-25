@@ -471,6 +471,13 @@ pub fn generate_from_openapi(
     Ok((emit::emit_model(&lowering.model), lowering.notes))
 }
 
+/// The package `__init__.mojo` of the OpenAPI front-end: a header and nothing
+/// else, as the modules beside it are named by the importer. (The binary
+/// has no Buck target, so its text lives here, where a test reaches it.)
+pub fn openapi_package_init_text() -> String {
+    header::render("mojo-gen-openapi", header::PLUGIN_GENERATOR_VERSION, &[])
+}
+
 pub fn respond_with_bytes(
     request: &plugin::CodeGeneratorRequest,
     request_bytes: &[u8],

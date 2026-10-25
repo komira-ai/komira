@@ -5,8 +5,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
 
-use komira_proto_codegen::generate_from_openapi;
-use komira_proto_codegen::header;
+use komira_proto_codegen::{generate_from_openapi, openapi_package_init_text};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
@@ -44,7 +43,7 @@ fn main() -> ExitCode {
     // `mojo_proto_library`'s emitted `__init__.mojo`).
     if let Err(e) = write_file(
         Path::new(out_dir).join("__init__.mojo"),
-        &package_init_text(),
+        &openapi_package_init_text(),
     ) {
         eprintln!("mojo-gen-openapi: {e}");
         return ExitCode::FAILURE;
@@ -74,10 +73,4 @@ fn write_file(path: std::path::PathBuf, content: &str) -> Result<(), String> {
     f.write_all(content.as_bytes())
         .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     Ok(())
-}
-
-/// The package `__init__.mojo`: a header and nothing else, as the modules
-/// beside it are named by the importer.
-fn package_init_text() -> String {
-    header::render("mojo-gen-openapi", header::PLUGIN_GENERATOR_VERSION, &[])
 }
