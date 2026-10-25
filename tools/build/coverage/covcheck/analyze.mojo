@@ -115,6 +115,7 @@ from covcheck.model import FileCov, merge_by_path
 from covcheck.mutants import KILLED, SURVIVED, TIMEOUT, Mutant, parse_mutants
 from covcheck.paths import MAPPED, OUTSIDE, RepoFiles, generated_test_main, is_test_source, map_path, package_of
 from covcheck.held import Held
+from covcheck.uncompiled import drop_unreliable, is_uncompiled_report
 from covcheck.stats import (
     BELOW_TARGET,
     BRANCH_NOT_MEASURED,
@@ -500,6 +501,12 @@ def analyze(
             if m.kind == MAPPED:
                 var f = fs[i].copy()
                 f.path = m.path
+                if is_uncompiled_report(reports[r].origin):
+                    # Buildrules' report of the code no test compiled: the lines of an
+                    # unreliable-class function are not evidence (uncompiled.mojo).
+                    drop_unreliable(f, sources.read(m.path))
+                    if f.line_found() == 0 and f.branch_found() == 0:
+                        continue
                 if branch_file:
                     if m.path in once:
                         raise Error(
