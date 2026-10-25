@@ -11,9 +11,9 @@ What the package emits (format-version 2):
     per-file statistics (record count, lower and upper bounds, null counts).
   * the version-hint.text pointer to the latest metadata version.
 
-This part holds the metadata layer: the metadata.json emitter, the Avro
-manifest encoders and decoders, the current-version lookup and the snapshot
-summary reader, on top of the table model. The table reader and writer follow.
+This part holds the data leg and the reader: Parquet data files, the Avro delete
+files and the merge-on-read table reader, on top of the metadata layer and the
+table model. The table writer follows.
 """
 
 from .iceberg_types import (
@@ -144,4 +144,25 @@ from .iceberg_row_value import (
     col_types_of,
     build_data_file,
     read_data_file,
+)
+
+from .iceberg_parquet_data import (
+    build_parquet_data_file,
+    read_parquet_data_file,
+)
+
+from .iceberg_delete_writer import (
+    ICE_POS_DELETE_FILE_PATH_ID,
+    ICE_POS_DELETE_POS_ID,
+    PositionDeleteEntry,
+    build_equality_delete_file,
+    read_equality_delete_file,
+    build_position_delete_file,
+    read_position_delete_file,
+)
+
+from .iceberg_reader import (
+    IcebergTableReader,
+    read_partition_values_from_manifest,
+    parse_partition_spec_from_metadata,
 )
