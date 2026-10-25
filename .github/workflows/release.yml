@@ -30,6 +30,13 @@
 #                   made and runs `mopm publish --staged S --registry prod`.
 #                   What must exist before the variable is set is in docs/ci.md,
 #                   "The mopm jobs", "Enabling the mopm publish".
+#   `mopm-publish-beta`  after `mopm-stage`, ONLY on a push to main and when
+#                   the repository variable MOPM_BETA_PUBLISH_ENABLED is `true`
+#                   (it is unset: the job is skipped). The same staged set to
+#                   the registry `beta`, in the environment `beta`, with the
+#                   job's GitHub OIDC identity (`--oidc`) and no secret. What
+#                   must exist before the variable is set is in docs/ci.md,
+#                   "Enabling the mopm beta publish".
 #
 # It runs named Buck2 targets on the farm, through the buck2-farm action
 # (.github/actions/buck2-farm), which fails a step unless buck2 succeeded and
@@ -223,7 +230,7 @@ jobs:
       - name: build the pinned mopm
         uses: ./.github/actions/buck2-farm
         with:
-          args: build toolchains//:mopm_0_0_49 --out ${{ runner.temp }}/mopm-publish/mopm
+          args: build toolchains//:mopm_0_0_53 --out ${{ runner.temp }}/mopm-publish/mopm
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: build the packages
         uses: ./.github/actions/buck2-farm
@@ -298,3 +305,31 @@ jobs:
         env:
           MOPM_TOKEN: ${{ secrets.MOPM_TOKEN }}
         run: '"$RUNNER_TEMP/mopm-publish/mopm" publish --staged "$RUNNER_TEMP/mopm-publish/staged" --registry prod'
+
+  # PUBLISH TO BETA. The staged set the e2e passed on, to the beta registry,
+  # with this job's GitHub OIDC identity and no secret: the registry trusts
+  # this repository's release.yml, run on main from a push, in the environment
+  # `beta`, as a publisher. DISABLED: it runs only on a push to main and when
+  # the repository variable MOPM_BETA_PUBLISH_ENABLED is exactly `true`, and
+  # nobody has set it (docs/ci.md, "Enabling the mopm beta publish"). While it
+  # is unset the job is skipped before it starts. It joins no farm, runs no
+  # buck2 and checks out nothing. `id-token: write` is what lets mopm ask the
+  # runner for the job's ID token; no job reads MOPM_TOKEN here.
+  mopm-publish-beta:
+    needs: mopm-stage
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_BETA_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    environment: beta
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-staged-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-publish
+      - name: mopm is executable
+        run: chmod +x "$RUNNER_TEMP/mopm-publish/mopm"
+      - name: mopm publish --staged --oidc
+        run: '"$RUNNER_TEMP/mopm-publish/mopm" publish --staged "$RUNNER_TEMP/mopm-publish/staged" --oidc --registry beta'

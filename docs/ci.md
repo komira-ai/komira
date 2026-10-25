@@ -364,8 +364,9 @@ steps:
 
 | job | when | what it does |
 |---|---|---|
-| `mopm-stage` | every push to `main`, and a manual run (which sends nothing either) | on the farm (environment `build`, the farm's tailnet token only; it reads no registry token). **Build:** the one mopm the README e2e installs with (`toolchains//:mopm_0_0_49`, `MOPM` of `packages.bzl`) and `//release:mopm_artifacts`. **Stage:** `mopm stage --workspace-root src --artifacts <built> --compiler 1.0.0 --out release/staged_set --registry prod` packs every member from its built `.mojoc`, asks the registry (a read, no token) which versions it holds and writes the staged set S (`plan.json`, each `.conda`, each README: mopm's `spec/staged-set.md`). A version the registry holds with other bytes, or has yanked, fails the step. **Try:** `./buck2 build -c komira_release.staged=stage //release/readme_e2e/verify:all` on the farm: every package's README examples are compiled and run as a user of the `.conda` files of S (see the e2e's [README](../tools/build/readme_e2e/README.md)). Then `mopm publish --staged S --registry prod --dry-run`: the plan is validated and every file hashed against it, nothing is sent and no token is read. It uploads S and that mopm as a workflow artifact (a day) for the next job. |
+| `mopm-stage` | every push to `main`, and a manual run (which sends nothing either) | on the farm (environment `build`, the farm's tailnet token only; it reads no registry token). **Build:** the one mopm the README e2e installs with (`toolchains//:mopm_0_0_53`, `MOPM` of `packages.bzl`) and `//release:mopm_artifacts`. **Stage:** `mopm stage --workspace-root src --artifacts <built> --compiler 1.0.0 --out release/staged_set --registry prod` packs every member from its built `.mojoc`, asks the registry (a read, no token) which versions it holds and writes the staged set S (`plan.json`, each `.conda`, each README: mopm's `spec/staged-set.md`). A version the registry holds with other bytes, or has yanked, fails the step. **Try:** `./buck2 build -c komira_release.staged=stage //release/readme_e2e/verify:all` on the farm: every package's README examples are compiled and run as a user of the `.conda` files of S (see the e2e's [README](../tools/build/readme_e2e/README.md)). Then `mopm publish --staged S --registry prod --dry-run`: the plan is validated and every file hashed against it, nothing is sent and no token is read. It uploads S and that mopm as a workflow artifact (a day) for the next job. |
 | `mopm-publish` | after `release` and `mopm-stage`, **only on a push to `main` when the repository variable `MOPM_PUBLISH_ENABLED` is `true`** (unset today: the job is skipped before it starts) | in the environment `prod`, with `contents: read` and no farm: it joins no tailnet, runs no `buck2` and checks nothing out. It downloads the artifact and runs `mopm publish --staged S --registry prod` with `MOPM_TOKEN` from the environment's secret, the one place the token is read. The registry makes the group visible all together or not at all; a rerun of a failed run resumes the same group and sends only what the registry does not hold. A version is never replaced. |
+| `mopm-publish-beta` | after `mopm-stage`, **only on a push to `main` when the repository variable `MOPM_BETA_PUBLISH_ENABLED` is `true`** (unset today: the job is skipped before it starts) | in the environment `beta`, with `contents: read` and `id-token: write`, no farm and no secret: it joins no tailnet, runs no `buck2` and checks nothing out. It downloads the artifact and runs `mopm publish --staged S --oidc --registry beta`: mopm asks the runner for the job's ID token (which is what `id-token: write` allows) and exchanges it with the registry for a short-lived token. The registry trusts this repository's `release.yml`, run on `main` from a push or a manual run, in the environment `beta`, as a publisher that can create, own and publish new packages on `beta`; `gamma` and `prod` do not know it. The job never names `MOPM_TOKEN` (`//:release_workflow_cases` holds the gate, the permission and that absence). |
 
 **Why `mopm stage` is a step of the job and not a build action.** It asks the
 registry which versions exist, and an action is offline. So the farm takes the
@@ -409,6 +410,23 @@ human's, outside this repository:
 Until step 4 the job `mopm-publish` is skipped on every run (its `if` is false
 before the job starts), so the token of step 2 is not read, and the dry run of
 `mopm-stage` exercises everything up to the request for the group.
+
+#### Enabling the mopm beta publish
+
+`mopm-publish-beta` ships off and is separate from the prod publish above: it
+uses no secret, so nothing but the variable and the registry's trust gates it.
+It is off because the registry's group publish for this identity on `beta` is
+not live yet: until it is, `mopm publish --staged` (a group) is refused on
+`beta` for the CI identity, and only a single package can be published. Enabling
+it is a maintainers' step, in this order:
+
+1. The registry's group publish for the CI identity on `beta` is live.
+2. The maintainers decide to publish komira's packages to `beta`.
+3. Set the variable:
+   `gh variable set MOPM_BETA_PUBLISH_ENABLED --body true --repo komira-ai/komira`.
+   Deleting the variable (or any value but `true`) disables the job again.
+
+Until then the job is skipped on every run, before it starts.
 
 > **Removed: publishing.** The rest of this page, from "Continuous
 > auto-promotion" to "GitHub settings the release relies on", describes the

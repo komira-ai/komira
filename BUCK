@@ -76,6 +76,18 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
+# The cases of the job `mopm-publish-beta` of release.yml
+# (.github/workflows/release_workflow_test.zig says what each catches): its gate,
+# its OIDC permission, no secret, and its publish command. A build action.
+zig_test(
+    name = "release_workflow_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = ".github/workflows/release_workflow_test.zig",
+    data = {"workflows/release.yml": ".github/workflows/release.yml"},
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
 # The cases of the buck2-farm action (.github/actions/buck2-farm/action_test.zig
 # says what each catches): action.yml's shape, and its two run lines run
 # end to end over recorded buck2 output with the real //tools/build/ci:assert_remote.
