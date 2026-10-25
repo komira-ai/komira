@@ -237,6 +237,20 @@ GRAPH_JSON = r'''{
       "key": "150c66c47d60e73bad4ab2eb93d06e0b22df5c0230a8b6853fdd524c3fdf9f32"
     },
     {
+      "id": "komira_simd@0.1.0#mojo1.0.0/test:src/komira_simd/tests/test_internal_helpers.mojo",
+      "package": "komira_simd",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_simd/tests/test_internal_helpers.mojo", "sha256": "40e21954d60185f1ef02ff7dbabffa267f35b6de0d16cd5c2943be610f2091a8"}
+      ],
+      "deps": ["komira_simd@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_internal_helpers.pass"],
+      "key": "810ff592b806a80dd5d16b05cb2e7042a7483fb3425f45221582ea6e3fa2eaaf"
+    },
+    {
       "id": "komira_simd@0.1.0#mojo1.0.0/test:src/komira_simd/tests/test_simd_bit_unpack.mojo",
       "package": "komira_simd",
       "version": "0.1.0",
