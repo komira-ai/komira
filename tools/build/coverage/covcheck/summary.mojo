@@ -237,6 +237,29 @@ def render_summary(
         if len(a.generated_paths) > shown:
             s += String(", and ") + String(len(a.generated_paths) - shown) + String(" more (the result JSON names every one)")
     s += String("\n")
+    if len(a.excluded) > 0:
+        s += (
+            String("- ") + String(a.excluded_lines()) + String(" lines and ") + String(a.excluded_arms())
+            + String(" branch arms of the code no test compiled (a function a test calls that is inlined, or sits in a compile-time arm): ")
+        )
+        var shown = min(len(a.excluded), 10)
+        for x in range(shown):
+            if x > 0:
+                s += String(", ")
+            s += md_code(a.excluded[x].path) + String(" (") + String(a.excluded[x].lines) + String(" lines, ") + String(a.excluded[x].arms) + String(" arms)")
+        if len(a.excluded) > shown:
+            s += String(", and ") + String(len(a.excluded) - shown) + String(" more files (the result JSON names every one)")
+        s += String("\n")
+    if len(a.platform_gated) > 0:
+        s += (
+            String("- ") + String(len(a.platform_gated)) + String(" platform-gated functions, ") + String(a.platform_gated_lines())
+            + String(" lines (every use of them is in a compile-time arm this target did not compile; all named here): ")
+        )
+        for x in range(len(a.platform_gated)):
+            if x > 0:
+                s += String(", ")
+            s += md_code(a.platform_gated[x].name) + String(" in ") + md_code(a.platform_gated[x].path) + String(" (") + String(a.platform_gated[x].lines) + String(" lines)")
+        s += String("\n")
     s += String("- ") + String(a.ignored_mutants) + String(" mutants outside the repository, ") + String(a.excluded_test_mutants) + String(" in test sources\n")
     return s^
 

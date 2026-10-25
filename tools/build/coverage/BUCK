@@ -141,6 +141,15 @@ mojo_library(
         # library sources only, the held branch met, below it, and with no
         # records at all
         "tests/test_package_reports.mojo",
+        # buildrules' report of the code no test compiled (uncompiled.cobertura.xml,
+        # uncompiled.branches.info): a plain function counted, an always_inline or
+        # comptime-if function left out of the numbers and kept in the unreliable list,
+        # the reports told by their file names
+        "tests/test_uncompiled.mojo",
+        # platform-gated functions (platform_gate.mojo): every caller in a dropped
+        # compile-time arm, a chain, a live caller, no caller, a compiled arm, a
+        # same-named function elsewhere, the result and the summary
+        "tests/test_platform_gate.mojo",
     ],
     test_data = {
         "tests/test_lcov.mojo": ["tests/fixtures/basic.info"],
