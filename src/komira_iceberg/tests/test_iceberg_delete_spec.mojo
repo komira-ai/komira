@@ -18,7 +18,12 @@
 from std.testing import assert_true, assert_equal, assert_raises
 
 from komira_avro.avro_schema import AvroSchema
-from komira_avro.ocf_header import decode_ocf_header
+from komira_avro.ocf_block_emit import (
+    generate_sync_marker,
+    emit_ocf_header_kv,
+    emit_ocf_block,
+)
+from komira_avro.ocf_header import decode_ocf_header, AVRO_CODEC_NULL
 from komira_avro.varint_encode import encode_string
 
 from komira_iceberg import (
@@ -144,9 +149,101 @@ def test_arity_mismatches_and_empty_files() raises:
     assert_equal(len(read_position_delete_file(empty_pos)), 0)
 
 
+def _ocf_with(schema: String, count: Int, payload: List[UInt8]) raises -> List[UInt8]:
+    """A delete file whose single block CLAIMS `count` rows over `payload`."""
+    var sync = generate_sync_marker()
+    var out = List[UInt8]()
+    emit_ocf_header_kv(schema, AVRO_CODEC_NULL, sync, List[String](), List[String](), out)
+    emit_ocf_block(Span(payload), count, AVRO_CODEC_NULL, sync, out)
+    return out^
+
+
+comptime _EQ_SCHEMA: String = '{"type":"record","name":"equality_deletes","fields":[{"name":"f1","type":"long","field-id":1}]}'
+comptime _POS_SCHEMA: String = '{"type":"record","name":"position_deletes","fields":[{"name":"file_path","type":"string","field-id":2147483546},{"name":"pos","type":"long","field-id":2147483545}]}'
+
+
+def test_position_deletes_are_written_sorted_by_path_then_position() raises:
+    var entries = List[PositionDeleteEntry]()
+    entries.append(PositionDeleteEntry(String("b.parquet"), Int64(5)))
+    entries.append(PositionDeleteEntry(String("a.parquet"), Int64(9)))
+    entries.append(PositionDeleteEntry(String("a.parquet"), Int64(2)))
+    entries.append(PositionDeleteEntry(String("a"), Int64(7)))  # a prefix sorts first
+    entries.append(PositionDeleteEntry(String("é"), Int64(1)))  # bytes >= 0x80 sort last
+    entries.append(PositionDeleteEntry(String("b.parquet"), Int64(1)))
+    var back = read_position_delete_file(build_position_delete_file(entries))
+    assert_equal(len(back), 6)
+    var want_path = List[String]()
+    want_path.append(String("a"))
+    want_path.append(String("a.parquet"))
+    want_path.append(String("a.parquet"))
+    want_path.append(String("b.parquet"))
+    want_path.append(String("b.parquet"))
+    want_path.append(String("é"))
+    var want_pos = List[Int64]()
+    want_pos.append(Int64(7))
+    want_pos.append(Int64(2))
+    want_pos.append(Int64(9))
+    want_pos.append(Int64(1))
+    want_pos.append(Int64(5))
+    want_pos.append(Int64(1))
+    for i in range(6):
+        assert_equal(back[i].file_path, want_path[i])
+        assert_equal(back[i].pos, want_pos[i])
+    # Equal rows keep their order (stable), and 0/1/2-entry inputs are fine.
+    var one = List[PositionDeleteEntry]()
+    one.append(PositionDeleteEntry(String("x"), Int64(0)))
+    assert_equal(len(read_position_delete_file(build_position_delete_file(one))), 1)
+    # A negative position is not a row number.
+    var neg = List[PositionDeleteEntry]()
+    neg.append(PositionDeleteEntry(String("x"), Int64(-1)))
+    with assert_raises():
+        _ = build_position_delete_file(neg)
+
+
+def test_hostile_delete_files_are_refused_not_looped_on() raises:
+    var ids_types = List[Int]()
+    ids_types.append(ICE_T_LONG)
+    var payload = List[UInt8]()
+    payload.append(2)
+    payload.append(4)
+    # An equality file with no columns would loop on any count.
+    with assert_raises():
+        _ = read_equality_delete_file(_ocf_with(_EQ_SCHEMA, 5, payload), List[Int]())
+    with assert_raises():
+        _ = read_equality_delete_file(_ocf_with(_EQ_SCHEMA, 2000000000, List[UInt8]()), List[Int]())
+    with assert_raises():  # refused outright, even when nothing is claimed
+        _ = read_equality_delete_file(_ocf_with(_EQ_SCHEMA, 0, List[UInt8]()), List[Int]())
+    # A count larger than the payload, and bytes left over.
+    assert_equal(len(read_equality_delete_file(_ocf_with(_EQ_SCHEMA, 2, payload), ids_types)), 2)
+    with assert_raises():
+        _ = read_equality_delete_file(_ocf_with(_EQ_SCHEMA, 1000000, payload), ids_types)
+    with assert_raises():
+        _ = read_equality_delete_file(_ocf_with(_EQ_SCHEMA, 1, payload), ids_types)
+    # Position files: a row is at least two bytes.
+    var pos = List[UInt8]()
+    pos.append(2)  # string of length 1
+    pos.append(UInt8(ord("p")))
+    pos.append(0)  # pos 0
+    assert_equal(len(read_position_delete_file(_ocf_with(_POS_SCHEMA, 1, pos))), 1)
+    with assert_raises():
+        _ = read_position_delete_file(_ocf_with(_POS_SCHEMA, 1000000, pos))
+    with assert_raises():
+        _ = read_position_delete_file(_ocf_with(_POS_SCHEMA, 0, pos))  # leftover bytes
+    # A path that is not UTF-8.
+    var bad = List[UInt8]()
+    bad.append(4)
+    bad.append(0xC3)
+    bad.append(0x28)
+    bad.append(0)
+    with assert_raises():
+        _ = read_position_delete_file(_ocf_with(_POS_SCHEMA, 1, bad))
+
+
 def main() raises:
     test_position_delete_schema_ids()
     test_equality_delete_schema_carries_table_field_ids()
     test_a_mistyped_delete_key_is_refused()
     test_arity_mismatches_and_empty_files()
+    test_position_deletes_are_written_sorted_by_path_then_position()
+    test_hostile_delete_files_are_refused_not_looped_on()
     print("test_iceberg_delete_spec: all passed")

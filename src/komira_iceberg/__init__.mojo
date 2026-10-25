@@ -151,6 +151,7 @@ from .iceberg_row_value import (
 from .iceberg_parquet_data import (
     build_parquet_data_file,
     read_parquet_data_file,
+    check_row_group_range,
 )
 
 from .iceberg_delete_writer import (
