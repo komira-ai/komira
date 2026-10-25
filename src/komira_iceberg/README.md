@@ -5,8 +5,6 @@ files becomes a table any Iceberg engine reads by pointing at the object store;
 there is no catalog service. A commit is a create-if-absent write of the next
 metadata file, so concurrent writers never overwrite each other.
 
-This part holds the Parquet data leg, the delete files and the reader on top of
-the metadata layer and the table model. The table writer follows in a later part.
 
 ## What it holds
 
@@ -20,10 +18,30 @@ the metadata layer and the table model. The table writer follows in a later part
 | `iceberg_parquet_data` | typed rows to a Parquet data file (bytes in memory, no file opened) and back, in file-absolute row order |
 | `iceberg_delete_writer` | the equality-delete and position-delete files (Avro) and their decoders |
 | `iceberg_reader` | the merge-on-read reader: current metadata version -> manifest list -> manifests -> data and delete files, equality deletes by key and position deletes by (path, position) honoring sequence numbers |
+| `iceberg_writer`, `iceberg_writer_state` | `IcebergTableWriter`: appends data files and delete files as snapshots (the commit below); unique table and snapshot ids from a UUIDv7; the prior state a commit builds on |
 | `iceberg_row_value` | the Avro row form of a typed cell, and the encode-boundary type check |
 | `iceberg_summary` | reading the current snapshot's `summary` map back |
 | `iceberg_version` | which metadata version is current: the `version-hint.text` number, then every higher `v<N>.metadata.json` that exists |
 | `iceberg_json_scan` | byte-exact scanners over the `metadata.json` this package writes |
+
+## The commit
+
+`commit` writes the data and delete manifests and the manifest list (uuid-named,
+create-if-absent), then creates `v<N+1>.metadata.json` with create-if-absent:
+that create is the linearization point, so exactly one writer owns each
+version. A loser gets an `iceberg commit conflict` error (re-read the table and
+retry); the create is never tolerated, whatever the other file holds.
+`version-hint.text` is then moved by compare-and-swap from the etag read before
+the version was, never backwards (a swap that loses ends when the hint already
+names this version or a later one). The current version is the hint's number and
+every higher metadata file that exists, so a writer that stopped between the
+create and the hint move has still committed. The first commit creates the hint.
+
+Every delete file's sequence number is stamped by the commit. A table keeps one
+partition spec; a commit under another is refused. A caller's extra summary key
+may not collide with one the commit writes. Table uuids and snapshot ids are
+UUIDv7-derived (komira_uuid), so two writers on different hosts never mint the
+same id; `gen_table_uuid` therefore raises when the entropy source fails.
 
 ## Against the spec
 
@@ -67,6 +85,9 @@ Where it does not follow the spec, or does less:
 - Data files carry no `PARQUET:field_id` column metadata: a reader binds the
   columns to field ids through the `schema.name-mapping.default` table
   property.
+- `total-delete-files`, `total-position-deletes`, `total-equality-deletes` and
+  `total-files-size` are not in the summary; its delete counters are the
+  `added-*` ones of the commit.
 - Equality deletes on a nullable column are refused by the writer (null
   equality-key semantics are not implemented in the merge predicate).
 - The reader honors the sequence-number rules (equality: strictly lower data

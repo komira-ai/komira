@@ -2,18 +2,22 @@
 
 A set of Parquet data files becomes a table any Iceberg engine (pyiceberg,
 DuckDB, Spark, Trino) reads by pointing at the object store, with no catalog
-service. A commit is atomic through the object store's conditional writes.
+service. A commit creates the next `v<N>.metadata.json` with the object store's
+create-if-absent write, so exactly one writer ever owns each version.
 
 What the package emits (format-version 2):
   * table metadata.json: schema with stable field ids, partition spec,
     snapshots, current-snapshot-id, sequence numbers.
   * manifest list and manifest files (Avro) listing the data files with
     per-file statistics (record count, lower and upper bounds, null counts).
-  * the version-hint.text pointer to the latest metadata version.
+  * Avro equality-delete and position-delete files for merge-on-read.
+  * the version-hint.text file naming the latest version (a convenience: a
+    reader or writer steps over any higher metadata file).
 
-This part holds the data leg and the reader: Parquet data files, the Avro delete
-files and the merge-on-read table reader, on top of the metadata layer and the
-table model. The table writer follows.
+`IcebergTableWriter` appends data files and delete files as snapshots;
+`IcebergTableReader` reads the current snapshot with the deletes applied. The
+data files themselves are Parquet, built by `build_parquet_data_file` or by the
+caller.
 """
 
 from .iceberg_types import (
@@ -159,6 +163,16 @@ from .iceberg_delete_writer import (
     read_equality_delete_file,
     build_position_delete_file,
     read_position_delete_file,
+)
+
+from .iceberg_writer import (
+    IcebergCommitResult,
+    IcebergTableWriter,
+)
+
+from .iceberg_writer_state import (
+    gen_table_uuid,
+    gen_snapshot_id,
 )
 
 from .iceberg_reader import (
