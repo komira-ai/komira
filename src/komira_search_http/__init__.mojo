@@ -1,7 +1,9 @@
 # =============================================================================
-# komira_search_http — the wire translators of an OpenSearch/Elasticsearch
-# compatible search shim
+# komira_search_http — the wire translators and the dispatcher of an
+# OpenSearch/Elasticsearch compatible search shim
 # =============================================================================
+#
+# Part 1 is the wire translators; part 2 is the dispatcher and its config.
 #
 # These modules translate the JSON / NDJSON wire to and from the Arrow-native
 # search engine (`komira_search`): a `_bulk` body becomes a DocBatch
@@ -28,6 +30,16 @@
 #   * envelopes.mojo     the hits, `_bulk` and error response envelopes.
 #   * response.mojo      `json_response` / `ok_json`: a JSON HttpResponse from a
 #                        serialized body.
+#   * config.mojo        `SearchHttpConfig`: the dispatcher's plain value
+#                        config (key prefixes, text field, node id, limits).
+#   * request_path.mojo  the pure helpers that read an untrusted request
+#                        target: `strip_query`, `split_path`,
+#                        `is_valid_index_name`, `body_too_large`.
+#   * split_ids.mojo     `make_split_uuid`: the split uuid (worker, install
+#                        epoch, sequence).
+#   * dispatch.mojo      `SearchHttpDispatcher[Storage]`: the `RequestDispatcher`
+#                        for `POST /<index>/_bulk` and `POST /<index>/_search`
+#                        over a `CloneableConditionalWriteStore`.
 # =============================================================================
 
 from .bulk import (
@@ -64,3 +76,24 @@ from .envelopes import (
     TRACK_TOTAL_FALSE,
 )
 from .response import json_response, ok_json
+from .config import (
+    SearchHttpConfig,
+    DEFAULT_TEXT_FIELD,
+    SOURCE_FIELD,
+    DEFAULT_MAX_BODY_BYTES,
+    DEFAULT_MAX_BULK_LINES,
+    DEFAULT_MAX_SPLITS_PER_SEARCH,
+)
+from .request_path import (
+    strip_query,
+    split_path,
+    is_valid_index_name,
+    body_too_large,
+    unsupported_query_param,
+    count_ndjson_lines,
+    MAX_PATH_BYTES,
+    MAX_PATH_SEGMENTS,
+    MAX_INDEX_NAME_BYTES,
+)
+from .split_ids import make_split_uuid
+from .dispatch import SearchHttpDispatcher

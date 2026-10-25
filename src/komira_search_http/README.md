@@ -1,10 +1,14 @@
 # komira_search_http
 
-The wire translators of an OpenSearch/Elasticsearch compatible search shim.
-They convert the JSON and NDJSON a client sends into the Arrow-native types of
-`komira_search` and convert the results back, so the engine sees no wire byte
-and has no HTTP or JSON dependency. They are pure functions over bytes and
-values: no I/O, no store, no handler.
+An OpenSearch/Elasticsearch compatible search shim, in parts 1 and 2.
+
+Part 1 is the wire translators. They convert the JSON and NDJSON a client sends
+into the Arrow-native types of `komira_search` and convert the results back, so
+the engine sees no wire byte and has no HTTP or JSON dependency. They are pure
+functions over bytes and values: no I/O, no store, no handler.
+
+Part 2 is the request dispatcher that routes `_bulk` and `_search` to a store
+(see "The dispatcher" below).
 
 - `ndjson_bulk_to_docbatch(body, text_field)` (`bulk`) parses a `_bulk` body of
   action lines, each followed by a source line (a `delete` action has none),
@@ -66,8 +70,9 @@ summed, `MAX_DYNAMIC_FIELDS` (1000) on the fields a document carries and on the
 union of fields across the batch, and `MAX_BATCH_CELLS` (1048576) on committed
 documents times mapped fields (every committed document pads every mapped field
 with a cell, so the field cap alone does not bound memory). A body that is not
-valid UTF-8 is refused by the parser from its bytes. The caller still bounds the
-body size; with the cell budget a `_bulk` body costs memory in proportion to its
+valid UTF-8 is refused by the parser from its bytes. The dispatcher bounds the
+body size (`max_body_bytes`); with the cell budget a `_bulk` body costs memory
+in proportion to its
 size.
 
 ## Differences from OpenSearch
@@ -107,7 +112,103 @@ otherwise differs as follows.
 - Response shaping that clients may require (`typed_keys`, the
   `X-Elastic-Product` header, `root_cause` in an error body) is not produced.
 
+## The dispatcher
+
+`SearchHttpDispatcher[Storage]` (`dispatch`) is a `komira_http_server`
+`RequestDispatcher` with two routes, `POST /<index>/_bulk` and
+`POST /<index>/_search`. `Storage` is any `CloneableConditionalWriteStore` of
+`komira_objectstore`; the package names no cloud client, credential or endpoint.
+The program that mounts the dispatcher builds the store and passes it to
+`SearchHttpDispatcher(config, store, worker_idx, epoch_us)`. This package has no
+server binary and reads no environment variable or flag: `SearchHttpConfig`
+(`config`) is a plain value, built by the program from its own flags.
+
+- `SearchHttpConfig(meta_root, key_prefix, text_field="body", node_id="",
+  max_body_bytes, max_splits_per_search, max_bulk_lines)`. The catalog of index `<i>` lives
+  under `<meta_root>/<i>/meta` and its split objects at
+  `<key_prefix>/<i>/splits/<uuid>.split`. The constructor raises on an empty
+  prefix, a prefix with an empty, `.` or `..` segment, a control byte or a
+  backslash, an empty or `_source` text field, a node id over 128 bytes or
+  with a byte outside `a-z A-Z 0-9 . _ -`, and a limit below 1. `node_id` is
+  part of a catalog key and must be unique among the nodes that share a store.
+- `_bulk` parses the body with `ndjson_bulk_to_docbatch`, builds one split of
+  the good documents with `SearchSink`, writes the split object with
+  `storage.put`, and only then appends its summary with
+  `SearchMetastore.publish` (`komira_search_catalog`). The append is the point
+  at which the split becomes searchable. A failure between the two leaves an
+  unreferenced object, never a summary naming a missing one. The catalog append
+  goes to this dispatcher's own sub-lineage
+  `<node_id>-<pid>-<worker_idx>`. Two writers on one sub-lineage contend on its
+  compare-and-swap and can mint the same split keys, so `node_id` must differ
+  between nodes (processes in separate containers can all have the same pid) and
+  `worker_idx` between the dispatchers of one process. With those two true, a
+  dispatcher is the sole writer of its sub-lineage.
+- `_search` parses the request, reads the live splits of every sub-lineage, gates
+  the filter, sort and aggregations against the first split's fast fields,
+  searches each split (a split with an L0 posting slot through
+  `komira_log_index.search_l0_split`, any other through `SearchCore`), merges,
+  and renders the envelope. With several splits a hit's `_id` is
+  `<split-uuid>_<doc_id>`. The splits are read one at a time, so a request holds
+  one split's bytes at once; the per-split results are held until the merge, and
+  each is over-fetched to `from + size` rows, so a request can hold up to
+  `max_splits_per_search` times that many rows. The cap is checked after the
+  catalog has been listed in full.
+- Split uuids. A split's object key embeds its uuid and the split `put`
+  overwrites, so a key must never repeat. The uuid is the worker index
+  (`worker_idx`, 0 to 255, one per dispatcher of a process), the low 56 bits of
+  the install-time epoch in microseconds (the wall clock read when the
+  dispatcher was built; `epoch_us` pins it) and a per-dispatcher sequence. A
+  process restarted later starts its sequence at 1 again and gets a new epoch,
+  so it does not reuse an earlier process's keys.
+
+### Errors
+
+Nothing raises out of `dispatch`; every failure is an OpenSearch-style error
+envelope. A path other than the two routes is 404; a known path under any verb
+but POST is 405 with `allow: POST`; an index name that is not 1 to 255 bytes of
+`a-z`, `0-9`, `.`, `_`, `-` starting with a letter or digit is 400
+(`invalid_index_name_exception`); a body longer than `max_body_bytes` is 413,
+before it is parsed; a malformed or unsupported request is 400
+(`parse_exception`); a query-string parameter other than `refresh`, `pretty`,
+`human` and `error_trace` is 400 (`illegal_argument_exception`); a `_bulk` body
+with more than `max_bulk_lines` non-empty lines is 413; an index with more live splits than
+`max_splits_per_search` is 503 for `_search`; a failure of the store is 500 with
+a fixed reason that does not carry the store's own text. A split object that
+does not parse is a store failure too (500), not a request error. A 500 from
+`_bulk` does not prove that nothing was indexed: if the catalog append landed and
+its reply was lost, the split is searchable and a retry indexes the documents
+again.
+
+### Untrusted input
+
+The target is matched as it arrives, with no percent-decoding: `%2e%2e` is the
+name `%2e%2e`, which is refused, and `%2F` does not split a segment. The query
+string is cut off at the first `?` and read only to refuse a parameter that
+would change the answer (`size`, `from`, `q`, `sort`, `_source`,
+`rest_total_hits_as_int` and any other name outside the allowed four); no value
+is used. `split_path` accepts only
+`/seg/seg` with an optional trailing `/`: a missing leading slash, an empty
+segment, more than 8 segments or a path over 4096 bytes has no route.
+`strip_query`, `split_path` and `unsupported_query_param` make one pass over the
+target, and `split_path` stops at the limits above, so their cost is linear in
+the target. The body is in memory when the dispatcher sees it, so the server's
+own read limit (and its request-line limit) must be at or below
+`max_body_bytes`; the dispatcher's check is a second line of defence. A `_bulk`
+body is also bounded by its line count (`max_bulk_lines`), because a failed item
+costs far more memory than the bytes of its line.
+
+### What clients should not expect
+
+Only `POST /<index>/_bulk` and `POST /<index>/_search` exist. These are not
+served and answer 404 or 405: `/_bulk` without an index (the index is not read
+from the action lines), `GET` or `PUT` on `_search` and `_bulk`, `GET /`,
+`/_cluster/health`, `HEAD`, `PUT` or `GET` on `/<index>`, `_msearch`, and
+multi-index or wildcard targets (`a,b`, `_all`, `logs-*`; refused as an invalid
+index name). Errors are shaped like OpenSearch's but their `type` strings are
+this package's (`parse_exception` for every request error, `not_found` for an
+unknown path) and there is no `root_cause`.
+
 ## Not here
 
-The request handler that routes `_bulk` and `_search` to a store and the
-configuration it needs are not part of this package.
+A server binary, TLS and authentication. The program that serves the dispatcher
+owns them, and the store.
