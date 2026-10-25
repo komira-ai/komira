@@ -27,6 +27,14 @@ is one-way: `komira_log_index` depends on `komira_log`, never the reverse.
     It drains the worker's log ring, builds an L0 split and publishes it to the
     worker's own shard. The store is a type parameter bounded by
     `komira_objectstore`'s `CloneableConditionalWriteStore`.
+  * metric_transpose: `MetricPoint`s to the `metrics` fact batch
+    (`metric_points_to_record_batch`, `metrics_fact_schema`,
+    `metric_series_id`).
+  * object_store_metric_sink: `ObjectStoreMetricSink`, the at-rest store for
+    metrics, built on `komira_telemetry_store`'s metric writer (object first,
+    manifest entry second).
+  * split_log_search: `SplitIndexLogSearch`, a `komira_log_query` search over
+    the L0 splits, built with the caller's `(meta_root, index)` pair.
 """
 
 from komira_log_index.transpose import (
@@ -79,3 +87,14 @@ from komira_log_index.flush_thread import (
     DEFAULT_IDLE_PARK_US,
     OffCoreFlushThread,
 )
+from komira_log_index.metric_transpose import (
+    METRICS_FACT_COLUMNS,
+    metric_points_to_record_batch,
+    metric_series_id,
+    metrics_fact_schema,
+)
+from komira_log_index.object_store_metric_sink import (
+    DEFAULT_METRIC_BUFFER_MAX,
+    ObjectStoreMetricSink,
+)
+from komira_log_index.split_log_search import SplitIndexLogSearch
