@@ -34,10 +34,10 @@
 
 [external_cell_buildrules]
   git_origin = https://github.com/komira-ai/buildrules.git
-  # The commit of the buildrules release v0.0.36 (resolved through the annotated tag). A bump is one change: this line, then
+  # The commit of the buildrules release v0.0.43 (resolved through the annotated tag). A bump is one change: this line, then
   # `buildrules mojo sync` (the pins in the directory `[cells] toolchains` names, and each package's
   # buildrules.mojo.lock.bzl) when the release pins another mopm.
-  commit_hash = f83612cc4185a61a67068a1a7cad482c5214139d
+  commit_hash = 5802fb6c70fe8ebb7679dab525b764cc8bfe7a0b
 
 [buildfile]
   name = BUCK
