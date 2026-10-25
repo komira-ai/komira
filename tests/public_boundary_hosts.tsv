@@ -17,6 +17,7 @@ metadata.google.internal	the GCE metadata server, at a name Google publishes for
 microsoftonline.com	the Azure identity endpoint
 microsoftonline.us	the Azure Government identity endpoint
 azure.com	the Azure management endpoint
+vault.azure.net	the Azure Key Vault data-plane endpoints
 windows.net	the Azure Storage endpoints
 microsoft.com	Microsoft documentation
 apple.com	Apple developer documentation
