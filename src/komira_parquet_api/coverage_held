@@ -1,2 +1,3 @@
 # The metrics this package holds at the coverage target, one per line: line, branch (tools/build/coverage/README.md, "The 99% threshold and holds").
+line
 branch
