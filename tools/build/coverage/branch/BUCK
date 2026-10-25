@@ -201,9 +201,20 @@ _CLASSIFY_CASES = ["andor", "case", "files", "main", "rules", "try"]
     for group in _CLASSIFY_CASES
 ]
 
+# `placeFile`, which takes a `--gen` directory (the `_parts` of a split
+# generated module) as every file under it.
+zig_test(
+    name = "cov_branch_source_test",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["cov_branch_source.zig"],
+    src = "cov_branch_source_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
+
 kcov_tool(
     name = "cov_branch_classify",
-    cases = [":cov_branch_classify_{}_test".format(group) for group in _CLASSIFY_CASES],
+    cases = [":cov_branch_source_test"] + [":cov_branch_classify_{}_test".format(group) for group in _CLASSIFY_CASES],
     exec_compatible_with = LINUX_X86_64,
     exe = ":cov_branch_classify_exe",
     visibility = ["PUBLIC"],

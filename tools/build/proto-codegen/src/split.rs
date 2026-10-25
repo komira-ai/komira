@@ -1,8 +1,9 @@
 //! Splitting a generated Mojo module that reaches the line limit.
 //!
 //! A source file is held to fewer than [`MAX_FILE_LINES`] lines (Mojo hangs
-//! on very large files), and a generated file has no exemption. [`split_file`] is how every generator keeps to it: a module
-//! under the limit is written as it is; a module at or over it is written as
+//! on very large files), and a generated file has no exemption.
+//! [`split_file`] is how every generator keeps to it: a module under the
+//! limit is written as it is; a module at or over it is written as
 //! a FACADE, `<stem>.mojo`, beside a directory of PARTS,
 //! `_parts/<stem>_pNN.mojo`.
 //!

@@ -412,8 +412,9 @@ fn a_part_that_does_not_fit_with_its_imports_is_halved_until_it_does() {
 #[test]
 fn two_parts_that_use_each_others_declarations_import_each_other() {
     // The first struct holds the last and the last holds the first: the parts
-    // that declare them import one another, which Mojo accepts (the library
-    // packages generated this way compile on the farm).
+    // that declare them import one another, which Mojo accepts: the committed
+    // `komira_plan_proto` (13 parts, messages that refer to each other across
+    // them) compiles and passes its welded tests.
     let text = module(48, 50)
         .replacen("    var f0: Int\n", "    var last: S47\n", 1)
         .replace(
