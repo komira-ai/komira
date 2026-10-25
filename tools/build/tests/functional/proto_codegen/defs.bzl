@@ -21,6 +21,11 @@ With `service_config`, that file is passed to the plugin as its
 `proto_codegen_rest_helpers` cuts the REST URL helpers block out of one
 generated file, for a mojo_library whose welded test runs them.
 
+A generated file over the plugin's line limit is written as a facade and its
+parts in `_parts/` (komira_proto_codegen's `split`); a golden of a part lies in
+a directory named `_parts`. No generated `.mojo` file may reach 1000 lines,
+golden or not: the check refuses it.
+
 The `out` sub-target is the generated directory itself, checked or not:
 `buck2 build '<target>[out]' --out <dir>` is how a golden is (re)written.
 """
@@ -81,6 +86,12 @@ def _proto_codegen_golden_impl(ctx):
             name = g.basename
             if not name.endswith(".golden"):
                 fail("{}: golden file `{}` is not `<generated name>.golden`".format(ctx.label, g.short_path))
+
+            # A part of a split module is generated in `_parts/`, and its
+            # golden is a file of a directory of that name.
+            dirs = g.short_path.split("/")
+            if len(dirs) >= 2 and dirs[-2] == "_parts":
+                name = "_parts/" + name
             mapping[name[:-len(".golden")]] = g
         golden_dir = ctx.actions.copied_dir("golden", mapping)
 

@@ -174,6 +174,99 @@ test "proto-check with golden files: the same tree passes, a changed one fails w
     try t.expect(std.mem.indexOf(u8, absent.stderr, "which must be absent") != null);
 }
 
+/// `n` lines of Mojo-looking text, each ending in a newline.
+fn lines(w: *Work, n: usize) []const u8 {
+    var b = std.ArrayList(u8).empty;
+    var i: usize = 0;
+    while (i < n) : (i += 1) b.appendSlice(w.arena.allocator(), "comptime X: Int = 1\n") catch @panic("oom");
+    return b.items;
+}
+
+test "proto-check: a generated .mojo file of 1000 lines is refused, one of 999 is not, even when it equals its golden" {
+    var w = try Work.init("pcheck_limit");
+    defer w.deinit();
+    genDir(&w, "gen", "0\n", "");
+    w.put("gen/files/a.mojo", lines(&w, 999));
+    w.put("golden/a.mojo", lines(&w, 999));
+    const ok = try w.run(&.{ "proto-check", "gen", "golden", "", "mark", "0" });
+    try t.expectEqual(@as(u8, 0), ok.code);
+    w.put("gen/files/a.mojo", lines(&w, 1000));
+    w.put("golden/a.mojo", lines(&w, 1000));
+    const bad = try w.run(&.{ "proto-check", "gen", "golden", "", "mark2", "0" });
+    try t.expectEqual(@as(u8, 1), bad.code);
+    try t.expect(std.mem.indexOf(u8, bad.stderr, "a.mojo (1000 lines) reaches 1000 lines") != null or std.mem.indexOf(u8, bad.stderr, "a.mojo (1000 lines)") != null);
+    // A part in a directory is held to it too.
+    w.put("gen/files/a.mojo", "x\n");
+    w.put("golden/a.mojo", "x\n");
+    w.put("gen/files/_parts/a_p01.mojo", lines(&w, 1200));
+    w.put("golden/_parts/a_p01.mojo", lines(&w, 1200));
+    const part = try w.run(&.{ "proto-check", "gen", "golden", "", "mark3", "0" });
+    try t.expectEqual(@as(u8, 1), part.code);
+    try t.expect(std.mem.indexOf(u8, part.stderr, "_parts/a_p01.mojo (1200 lines)") != null);
+}
+
+test "proto-check: the goldens of the parts in _parts are compared file for file" {
+    var w = try Work.init("pcheck_parts");
+    defer w.deinit();
+    genDir(&w, "gen", "0\n", "");
+    w.put("gen/files/a.mojo", "facade\n");
+    w.put("gen/files/_parts/a_p01.mojo", "one\n");
+    w.put("golden/a.mojo", "facade\n");
+    w.put("golden/_parts/a_p01.mojo", "one\n");
+    const ok = try w.run(&.{ "proto-check", "gen", "golden", "", "mark", "0" });
+    try t.expectEqual(@as(u8, 0), ok.code);
+    w.put("golden/_parts/a_p01.mojo", "uno\n");
+    const changed = try w.run(&.{ "proto-check", "gen", "golden", "", "mark2", "0" });
+    try t.expectEqual(@as(u8, 1), changed.code);
+    w.put("golden/_parts/a_p01.mojo", "one\n");
+    w.put("gen/files/_parts/a_p02.mojo", "two\n");
+    const extra = try w.run(&.{ "proto-check", "gen", "golden", "", "mark3", "0" });
+    try t.expectEqual(@as(u8, 1), extra.code);
+    try t.expect(std.mem.indexOf(u8, extra.stderr, "Only in gen/files: _parts/a_p02.mojo") != null);
+}
+
+test "aws-cmp: parts goldens, no golden for parts, a file of 1000 lines, must-contain read across the parts" {
+    var w = try Work.init("awscmp");
+    defer w.deinit();
+    w.put("gen/svc.mojo", "facade\n");
+    w.put("gen/_layout_probe.mojo", "probe\n");
+    w.put("gold/svc.mojo", "facade\n");
+    w.put("gold/probe.mojo", "probe\n");
+    // Not split: no parts directory and no parts golden.
+    const whole = try w.run(&.{ "aws-cmp", "m1", "gen", "svc", "gold/svc.mojo", "gold/probe.mojo", "-", "facade" });
+    try t.expectEqual(@as(u8, 0), whole.code);
+    // Split: the parts are compared with their goldens, and a needle in a part is found.
+    w.put("gen/_parts/svc_p01.mojo", "part one\nvar needle: Int\n");
+    w.put("gen/_parts/svc_p02.mojo", "part two\n");
+    w.put("gold/parts/svc_p01.mojo", "part one\nvar needle: Int\n");
+    w.put("gold/parts/svc_p02.mojo", "part two\n");
+    const split = try w.run(&.{ "aws-cmp", "m2", "gen", "svc", "gold/svc.mojo", "gold/probe.mojo", "gold/parts", "var needle: Int" });
+    try t.expectEqual(@as(u8, 0), split.code);
+    const missing = try w.run(&.{ "aws-cmp", "m3", "gen", "svc", "gold/svc.mojo", "gold/probe.mojo", "gold/parts", "var absent: Int" });
+    try t.expectEqual(@as(u8, 1), missing.code);
+    try t.expect(std.mem.indexOf(u8, missing.stderr, "svc.mojo does not contain:") != null);
+    // A split module with no golden for its parts is refused, and so is a golden for parts that were not made.
+    const unnamed = try w.run(&.{ "aws-cmp", "m4", "gen", "svc", "gold/svc.mojo", "gold/probe.mojo", "-" });
+    try t.expectEqual(@as(u8, 1), unnamed.code);
+    try t.expect(std.mem.indexOf(u8, unnamed.stderr, "the module was split into parts and no golden names them") != null);
+    w.put("gold/parts/svc_p02.mojo", "part 2\n");
+    const differs = try w.run(&.{ "aws-cmp", "m5", "gen", "svc", "gold/svc.mojo", "gold/probe.mojo", "gold/parts" });
+    try t.expectEqual(@as(u8, 1), differs.code);
+    try t.expect(std.mem.indexOf(u8, differs.stderr, "the parts differ from their goldens") != null);
+    // No generated file may reach the limit.
+    w.put("gold/parts/svc_p02.mojo", "part two\n");
+    w.put("gen/_parts/svc_p02.mojo", lines(&w, 1000));
+    w.put("gold/parts/svc_p02.mojo", lines(&w, 1000));
+    const long = try w.run(&.{ "aws-cmp", "m6", "gen", "svc", "gold/svc.mojo", "gold/probe.mojo", "gold/parts" });
+    try t.expectEqual(@as(u8, 1), long.code);
+    try t.expect(std.mem.indexOf(u8, long.stderr, "_parts/svc_p02.mojo (1000 lines)") != null);
+    // Whole, with parts golden named but none made.
+    w.put("g2/svc.mojo", "facade\n");
+    const none = try w.run(&.{ "aws-cmp", "m7", "g2", "svc", "gold/svc.mojo", "-", "gold/parts" });
+    try t.expectEqual(@as(u8, 1), none.code);
+    try t.expect(std.mem.indexOf(u8, none.stderr, "the module was not split") != null);
+}
+
 test "proto-check expecting an error: protoc must fail with the text and write nothing" {
     var w = try Work.init("pcheck_err");
     defer w.deinit();

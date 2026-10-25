@@ -46,6 +46,7 @@ gen_check(
         "AuditRecord",
     ],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "item.mojo",
@@ -86,6 +87,7 @@ gen_check(
         "ShopService",
     ],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "item.mojo",
@@ -117,6 +119,7 @@ gen_check(
     name = "komira_gcp_shop_renamed_modules",
     absent = ["komira_gcp_shop_renamed.item"],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "shop.mojo",
@@ -150,6 +153,7 @@ gen_check(
     name = "komira_gcp_shop_own_renamed_modules",
     absent = ["size_of[shop."],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "item.mojo",
@@ -203,6 +207,7 @@ gen_check(
         "ShopService",
     ],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "item.mojo",
@@ -234,6 +239,7 @@ gen_check(
         "ProtocolConnect",
     ],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "tiny.mojo",
@@ -277,6 +283,7 @@ gen_check(
         "gcp_grpc_status_error",
     ],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "nohost.mojo",

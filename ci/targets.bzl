@@ -625,6 +625,7 @@ TARGETS = [
     "tests//functional/coverage:covgentest_report",
     "tests//functional/coverage:covgentest_result",
     "tests//functional/coverage:covmt_result",
+    "tests//functional/coverage:covparts_report",
     "tests//functional/coverage:covreadme_none_result",
     "tests//functional/coverage:covreadme_result",
     "tests//functional/coverage:covso_report",

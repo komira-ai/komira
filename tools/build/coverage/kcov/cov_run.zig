@@ -497,6 +497,11 @@ fn isFile(path: []const u8) bool {
     return st.kind == .file;
 }
 
+fn isDir(path: []const u8) bool {
+    const st = std.fs.cwd().statFile(path) catch return false;
+    return st.kind == .directory;
+}
+
 fn isSymlink(path: []const u8) bool {
     var buf: [4096]u8 = undefined;
     _ = std.fs.cwd().readLink(path, &buf) catch return false;
@@ -609,14 +614,17 @@ pub fn main() !void {
     const g = try std.fs.path.join(a, &.{ k, "gen" });
     for (args.gen) |gp| {
         const in_share = try std.fs.path.join(a, &.{ s, stage, gp });
-        if (!isFile(in_share) or isSymlink(in_share)) red(label, "the generated source {s} is not a file in {s}/", .{ gp, stage });
+        // A generated source is a file, or a directory of them (the parts of a
+        // split generated module): either is moved whole and linked back.
+        const is_dir = isDir(in_share);
+        if (!(isFile(in_share) or is_dir) or isSymlink(in_share)) red(label, "the generated source {s} is not a file or a directory in {s}/", .{ gp, stage });
         const moved = try std.fs.path.join(a, &.{ g, gp });
         if (std.fs.path.dirname(moved)) |d| mkdirs(d);
         std.fs.cwd().rename(in_share, moved) catch |e| die("cannot move {s}: {s}", .{ in_share, @errorName(e) });
-        std.fs.cwd().symLink(moved, in_share, .{}) catch |e| die("cannot link {s}: {s}", .{ in_share, @errorName(e) });
+        std.fs.cwd().symLink(moved, in_share, .{ .is_directory = is_dir }) catch |e| die("cannot link {s}: {s}", .{ in_share, @errorName(e) });
         const in_lost = try std.fs.path.join(a, &.{ l, stage, gp });
-        std.fs.cwd().deleteFile(in_lost) catch {};
-        std.fs.cwd().symLink(moved, in_lost, .{}) catch |e| die("cannot link {s}: {s}", .{ in_lost, @errorName(e) });
+        if (is_dir) std.fs.cwd().deleteTree(in_lost) catch {} else std.fs.cwd().deleteFile(in_lost) catch {};
+        std.fs.cwd().symLink(moved, in_lost, .{ .is_directory = is_dir }) catch |e| die("cannot link {s}: {s}", .{ in_lost, @errorName(e) });
     }
 
     // 2. kcov under the gate's runner.
