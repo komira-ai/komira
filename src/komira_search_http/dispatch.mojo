@@ -266,7 +266,15 @@ struct SearchHttpDispatcher[Storage: CloneableConditionalWriteStore](
             )
             r.headers[String("allow")] = String("POST")
             return r^
-        if unsupported_query_param(req.path):
+        # A real server hands the target over in two parts: `path` and
+        # `query_string` (no '?'). A caller that puts the whole target in
+        # `path` is read the same way.
+        # (A server splits at the first '?', so `path` holding a '?' while
+        # `query_string` is non-empty does not come from a real request.)
+        var target = req.path.copy()
+        if req.query_string.byte_length() > 0:
+            target += String("?") + req.query_string
+        if unsupported_query_param(target):
             return self._error_response(
                 String("illegal_argument_exception"),
                 String(

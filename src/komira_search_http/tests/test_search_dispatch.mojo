@@ -240,6 +240,31 @@ def test_result_changing_query_parameters_are_400() raises:
     assert_equal(_objects_under(store, "data/"), before)
 
 
+def test_split_query_string_is_read_like_a_whole_target() raises:
+    # A server hands over `path` and `query_string` apart (no '?'); a refused
+    # parameter there must be refused exactly as in a whole target.
+    var store = Store()
+    var d = _new_dispatcher(store)
+    var reactor = _new_reactor()
+    var req = _req(
+        HttpMethod.post(),
+        String("/idx/_search"),
+        String('{"query":{"match":{"body":"fox"}}}'),
+    )
+    req.query_string = String("size=1")
+    var r = d.dispatch[_Rt](reactor, req^)
+    assert_equal(r.status, Int32(400))
+    assert_true(_text(r).find('"type":"illegal_argument_exception"') >= 0)
+    var ok = _req(
+        HttpMethod.post(),
+        String("/idx/_search"),
+        String('{"query":{"match":{"body":"fox"}}}'),
+    )
+    ok.query_string = String("pretty&refresh=true")
+    var r2 = d.dispatch[_Rt](reactor, ok^)
+    assert_equal(r2.status, Int32(200))
+
+
 def test_trailing_slash_is_accepted() raises:
     var store = Store()
     var d = _new_dispatcher(store)
