@@ -603,32 +603,25 @@ _mojo_db_gen = rule(
     },
 )
 
-def _mojo_db_proto_library(
-        name,
-        srcs,
-        outs,
-        deps = [],
-        proto_deps = [],
-        import_name = None,
-        import_prefix = "",
-        package_name = None,
-        visibility = None):
+# What a db proto library of committed sources takes beside `srcs` and `outs`.
+_DB_COMMITTED_KWARGS = ["deps", "import_name", "import_prefix", "package_name", "proto_deps", "visibility"]
+
+def _mojo_db_proto_library(name, srcs, outs, **kwargs):
     state = generated_state(name)
-    vis = {"visibility": visibility} if visibility != None else {}
     if state.legacy:
         # The transition (tools/build/gen/transition.bzl): built from the generator.
-        mojo_db_proto_library_rule(
-            name = name,
-            srcs = srcs,
-            outs = outs,
-            deps = deps,
-            proto_deps = proto_deps,
-            import_name = import_name,
-            import_prefix = import_prefix,
-            package_name = package_name,
-            **vis
-        )
+        mojo_db_proto_library_rule(name = name, srcs = srcs, outs = outs, **kwargs)
         return
+    for k in kwargs:
+        if k not in _DB_COMMITTED_KWARGS:
+            fail("//{}:{}: `{}` is not taken by a library of committed sources; it takes {}".format(native.package_name(), name, k, ", ".join(_DB_COMMITTED_KWARGS)))
+    deps = kwargs.get("deps", [])
+    proto_deps = kwargs.get("proto_deps", [])
+    import_name = kwargs.get("import_name")
+    import_prefix = kwargs.get("import_prefix", "")
+    package_name = kwargs.get("package_name")
+    visibility = kwargs.get("visibility")
+    vis = {"visibility": visibility} if visibility != None else {}
     gen = name + "_gen"
     _mojo_db_gen(
         name = gen,

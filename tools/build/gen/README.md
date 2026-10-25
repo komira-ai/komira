@@ -80,6 +80,11 @@ empty the code that builds from `<name>_gen` is deleted.
 - Migrating one is a commit: delete its line, run `regen` on it, commit the
   directory. A line left behind for a library that has a committed directory is
   an error at load, so the list never says what is not true.
+- A repository that uses komira as a cell and calls these rules lists its own
+  libraries in its root `.buckconfig`, `[komira] generated_unmigrated`
+  (labels separated by whitespace), and empties the list as it commits their
+  generated sources: the same states, the same refusal of a listed library that
+  has a committed directory. komira's own cells are never read from there.
 - `:transition` writes the list as a file, and `:transition_lint` holds it
   sorted, free of duplicates, and no longer than the count in its BUCK entry,
   which only goes down. It prints every library still on the list when it runs.

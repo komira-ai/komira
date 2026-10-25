@@ -115,6 +115,24 @@ _uncommitted = rule(
 def _label(name):
     return "{}//{}:{}".format(native.repository_name().lstrip("@"), native.package_name(), name)
 
+# The cells of this repository: their libraries are listed in transition.bzl.
+_OWN_CELLS = ["komira", "tests"]
+
+def _in_transition(target):
+    """Whether `target` is built from the generator, as every library was before committed sources.
+
+    A library of this repository is listed in transition.bzl. A library of a
+    repository that uses komira as a cell is listed by that repository, in its
+    root `.buckconfig`, as `[komira] generated_unmigrated`: labels separated by
+    whitespace, which it empties as it commits the generated sources (README.md,
+    "Transition"). Never a label of this repository's own cells.
+    """
+    if target in UNMIGRATED:
+        return True
+    if target.split("//")[0] in _OWN_CELLS:
+        return False
+    return target in (read_root_config("komira", "generated_unmigrated", "") or "").split()
+
 def generated_state(name):
     """What a generated library `name` of this package is built from.
 
@@ -126,7 +144,7 @@ def generated_state(name):
     same commit, so the ledger never says what is not true.
     """
     target = _label(name)
-    legacy = target in UNMIGRATED
+    legacy = _in_transition(target)
     directory = GENERATED_DIR + "/" + name
     files = sorted(glob([directory + "/**"]))
     if legacy and files:
