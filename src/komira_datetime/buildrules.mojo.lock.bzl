@@ -153,13 +153,13 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_datetime/tests/test_zone_values_and_loading.mojo", "sha256": "2f890a17bf8f651cca11915af476fc3c7f94ea756dc88a6eacfff1b6dbedee88"}
+        {"path": "src/komira_datetime/tests/test_zone_values_and_loading.mojo", "sha256": "51aa8cc8666a6f854e27b85ed004d4f4ef8d6649c49e7917bdc0435fdfce0a0c"}
       ],
       "deps": ["komira_datetime@0.1.0#mojo1.0.0/lib"],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_zone_values_and_loading.pass"],
-      "key": "52f7815c1838f119e26674c77d44671185b535457b66d0c558991c41b98f33ec"
+      "key": "ee28595f7e221debab730df56bf1b35a219229d024fb22a53f76179e044d5b21"
     }
   ]
 }

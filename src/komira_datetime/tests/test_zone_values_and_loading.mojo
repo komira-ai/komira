@@ -10,6 +10,7 @@
 # system's zoneinfo.
 # =============================================================================
 
+from std.ffi import external_call
 from std.os import getenv, makedirs
 from std.pathlib import Path
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -99,11 +100,16 @@ def test_a_zone_reports_its_last_listed_transition_and_its_offset() raises:
 
 
 def _scratch() raises -> String:
-    """The runner's own scratch directory (`TEST_TMPDIR`: empty, writable, removed when the run ends)."""
+    """A directory of this process's own: under the runner's `TEST_TMPDIR` (the test and coverage runs set it:
+    empty, writable, removed when the run ends), else `TMPDIR`, else `/tmp` (the branch-coverage run sets none)."""
     var base = getenv("TEST_TMPDIR")
     if base.byte_length() == 0:
-        raise Error("TEST_TMPDIR is not set")
-    return base^
+        base = getenv("TMPDIR")
+    if base.byte_length() == 0:
+        base = String("/tmp")
+    var d = base + "/komira_datetime_zone_" + String(Int(external_call["getpid", Int32]()))
+    makedirs(d, exist_ok=True)
+    return d^
 
 
 def test_load_zone_reads_the_named_file_of_a_directory() raises:
