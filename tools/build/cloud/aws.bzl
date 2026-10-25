@@ -147,7 +147,13 @@ _LIST_SEPARATOR = ","
 # The environment scan written for each client (see the module docstring):
 # its file name, and where it is declared, which is its test_data key.
 _ENV_SCAN = "_no_env_reads.mojo"
-_ENV_SCAN_PATH = "tests/" + _ENV_SCAN
+#
+# The scan is a test that exists only in the build, so it is staged in a directory
+# no package has (`_generated_tests/`), not in the package's `tests/`: covcheck
+# (tools/build/coverage/covcheck/paths.mojo, generated_test_main) sets a report's
+# own generated test aside only when its directory is none of the repository's, and
+# a path in a real `tests/` directory would be a missing file of the checkout.
+_ENV_SCAN_PATH = "_generated_tests/" + _ENV_SCAN
 
 # What the scan refuses in every file of the package, and, with a ruleset,
 # what it refuses beside them (komira_aws_core's endpoint path for a client
