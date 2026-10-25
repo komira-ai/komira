@@ -57,3 +57,28 @@ zig_exe(
     zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["//:buck2_farm_cases"],
 )
+
+# release_beta_version: gives every member of a mopm workspace one beta version
+# (0.1.<run number>) and the exact pins between members with it, so each push
+# to main publishes to the beta registry under a version it has not seen
+# (release_beta_version.zig says what it edits and refuses). release.yml's
+# `mopm-stage` job builds it; only `mopm-stage-beta` runs it, before the stage.
+# Its cases run on scratch workspaces; welded: the tool is built only when they pass.
+zig_test(
+    name = "release_beta_version_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "release_beta_version/release_beta_version_test.zig",
+    imports = ["release_beta_version/release_beta_version.zig"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "release_beta_version",
+    exec_compatible_with = LINUX_X86_64,
+    src = "release_beta_version/release_beta_version.zig",
+    unit_tests = [":release_beta_version_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
