@@ -15,7 +15,12 @@
 
 from std.testing import assert_true, assert_equal, assert_false, assert_raises
 
-from komira_avro.ocf_header import decode_ocf_header
+from komira_avro.ocf_block_emit import (
+    generate_sync_marker,
+    emit_ocf_header_kv,
+    emit_ocf_block,
+)
+from komira_avro.ocf_header import decode_ocf_header, AVRO_CODEC_NULL
 from komira_avro.varint_decode_scalar import AvroByteReader
 
 from komira_iceberg import (
@@ -162,9 +167,86 @@ def test_the_avro_data_file_round_trips_and_names_field_ids() raises:
         _ = build_data_file(schema, ragged)
 
 
+def _ocf_with(count: Int, payload: List[UInt8]) raises -> List[UInt8]:
+    """A one-long-column data file whose single block CLAIMS `count` records
+    over `payload`: the header and framing are real, the count is the lie."""
+    var sync = generate_sync_marker()
+    var out = List[UInt8]()
+    emit_ocf_header_kv(
+        String('{"type":"record","name":"data","fields":[{"name":"id","type":"long","field-id":1}]}'),
+        AVRO_CODEC_NULL, sync, List[String](), List[String](), out,
+    )
+    emit_ocf_block(Span(payload), count, AVRO_CODEC_NULL, sync, out)
+    return out^
+
+
+def _long_types() -> List[Int]:
+    var t = List[Int]()
+    t.append(ICE_T_LONG)
+    return t^
+
+
+def test_a_string_from_the_store_must_be_valid_utf8_and_stays_whole() raises:
+    # Avro string: zigzag length, then the bytes. 0xC3 0x28 is not UTF-8.
+    var bad = List[UInt8]()
+    bad.append(4)
+    bad.append(0xC3)
+    bad.append(0x28)
+    var r = AvroByteReader(Span(bad))
+    with assert_raises():
+        _ = decode_cell(r, ICE_T_STRING)
+    # A NUL inside a string is legal and must not end it early: 3 bytes, and
+    # the cursor lands exactly at the end.
+    var nul = List[UInt8]()
+    nul.append(6)
+    nul.append(UInt8(ord("a")))
+    nul.append(0)
+    nul.append(UInt8(ord("b")))
+    var r2 = AvroByteReader(Span(nul))
+    var cell = decode_cell(r2, ICE_T_STRING)
+    assert_equal(cell.as_string().byte_length(), 3)
+    assert_true(r2.at_end())
+    # A truncated payload is refused too.
+    var cut = List[UInt8]()
+    cut.append(10)
+    cut.append(UInt8(ord("x")))
+    var r3 = AvroByteReader(Span(cut))
+    with assert_raises():
+        _ = decode_cell(r3, ICE_T_STRING)
+    # The same guard through a partition value.
+    with assert_raises():
+        _ = decode_partition_cell(bad, ICE_T_STRING)
+
+
+def test_a_data_file_cannot_claim_more_records_than_it_has_bytes() raises:
+    var payload = List[UInt8]()
+    payload.append(2)  # one long: zigzag(1)
+    payload.append(4)
+    payload.append(6)
+    # 3 bytes, 3 records: fine.
+    assert_equal(len(read_data_file(_ocf_with(3, payload), _long_types())), 3)
+    # 3 bytes cannot hold 1,000,000 records.
+    with assert_raises():
+        _ = read_data_file(_ocf_with(1000000, payload), _long_types())
+    # Bytes left over after the last record are refused.
+    with assert_raises():
+        _ = read_data_file(_ocf_with(2, payload), _long_types())
+    # No columns: a record would take no bytes, so any count would loop (and
+    # an empty payload has nothing left over to give it away).
+    with assert_raises():
+        _ = read_data_file(_ocf_with(5, payload), List[Int]())
+    with assert_raises():
+        _ = read_data_file(_ocf_with(2000000000, List[UInt8]()), List[Int]())
+    # Refused outright, even when nothing is claimed.
+    with assert_raises():
+        _ = read_data_file(_ocf_with(0, List[UInt8]()), List[Int]())
+
+
 def main() raises:
     test_a_row_of_every_type_round_trips()
     test_a_partition_value_decodes_from_its_blob()
     test_reconcile_accepts_a_matching_tag_and_refuses_the_rest()
     test_the_avro_data_file_round_trips_and_names_field_ids()
+    test_a_string_from_the_store_must_be_valid_utf8_and_stays_whole()
+    test_a_data_file_cannot_claim_more_records_than_it_has_bytes()
     print("test_iceberg_row_value: all passed")
