@@ -770,7 +770,7 @@ named before the split. Code that reads a generated module as text (a
 scan, a count) reads the facade and then the parts.
 
 The split is `split_file` of
-[`proto-codegen/src/split.rs`](proto-codegen/src/split.rs), applied to every
+[`proto-codegen/src/split.rs`](../proto-codegen/src/split.rs), applied to every
 `.mojo` file of every plugin (`CodeGeneratorResponse::split_oversized`, from
 `to_stdout_bytes`) and to `aws-client-gen`'s module. It depends on nothing
 but the module's text, so the same input gives the same file set, byte for
