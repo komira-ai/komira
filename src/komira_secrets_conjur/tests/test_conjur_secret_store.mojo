@@ -18,6 +18,7 @@ from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStrea
 from komira_secret_store.secret_value import SecretValue
 
 from komira_secrets_conjur.conjur_auth_source import (
+    is_header_safe_token,
     LiveConjurAuthSource,
     StaticConjurAuthSource,
     authn_path_for,
@@ -720,6 +721,47 @@ def test_token_with_control_bytes_is_refused() raises:
         assert_true(raised, "refused token " + String(i))
 
 
+def test_header_safe_token_rejects_each_unsafe_byte() raises:
+    """`is_header_safe_token`: a quote (it would end the quoted header value), a
+    backslash, DEL, a space, NUL and a non-ASCII byte are each refused on their
+    own, and the printable ASCII edges (`!` and `~`) and a base64 token pass."""
+    assert_false(is_header_safe_token(String('ab"cd')), "double quote")
+    assert_false(is_header_safe_token(String('"')), "a lone quote")
+    assert_false(is_header_safe_token(String("ab\\cd")), "backslash")
+    assert_false(is_header_safe_token(String("\\")), "a lone backslash")
+    assert_false(is_header_safe_token(String("ab") + chr(0x7F) + "cd"), "DEL")
+    assert_false(is_header_safe_token(chr(0x7F)), "a lone DEL")
+    assert_false(is_header_safe_token(String("ab cd")), "space")
+    assert_false(is_header_safe_token(String("ab\tcd")), "tab")
+    assert_false(is_header_safe_token(String("ab") + chr(0) + "cd"), "NUL")
+    assert_false(is_header_safe_token(String("abé")), "non-ASCII")
+    assert_true(is_header_safe_token(String("!~")), "the printable ASCII edges")
+    assert_true(is_header_safe_token(String("eyJwcm90ZWN0ZWQiOiJ+/=_-")), "base64-ish")
+
+
+def test_builder_refuses_quote_backslash_del_and_empty() raises:
+    """The header builder refuses a token with a quote, a backslash or DEL, and
+    an empty token (which would send `Authorization: Token token=""`)."""
+    var bad = List[String]()
+    bad.append(String('ab"cd'))
+    bad.append(String("ab\\cd"))
+    bad.append(String("ab") + chr(0x7F) + "cd")
+    bad.append(String(""))
+    for i in range(len(bad)):
+        var raised = False
+        try:
+            var h = build_read_request_headers(bad[i].copy())
+            _ = h^
+        except e:
+            raised = True
+            assert_true(String(e).find(String("not a valid access token")) >= 0, "message")
+        assert_true(raised, "refused token " + String(i))
+    var ok = build_read_request_headers(String("abc"))
+    assert_equal(
+        ok.get(String("Authorization")).value(), String('Token token="abc"'), "a good token passes"
+    )
+
+
 def _mk_injected_token_connector() -> ScriptedConnector:
     return _scripted_connector_for(
         _http_response(String("200 OK"), String("abc\r\nX-Evil: 1"))
@@ -785,6 +827,8 @@ def main() raises:
     test_dot_segments_are_refused()
     test_non_ascii_handle_is_kept_and_encoded()
     test_token_with_control_bytes_is_refused()
+    test_header_safe_token_rejects_each_unsafe_byte()
+    test_builder_refuses_quote_backslash_del_and_empty()
     test_live_source_refuses_interior_control_bytes()
     test_static_token_with_crlf_sends_nothing()
     print("PASS test_conjur_secret_store")

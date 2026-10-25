@@ -153,7 +153,7 @@ def build_read_request_headers(var token: String) raises -> HeaderMap:
     round-trip — a test asserts the `Token token="…"` header off the returned
     `HeaderMap` (the 'the auth path sends a Conjur Token header' gate). Pure — no
     network."""
-    if not is_header_safe_token(token):
+    if token.byte_length() == 0 or not is_header_safe_token(token):
         raise Error(
             String("ConjurSecretStore: the access token is not a valid access")
             + String(" token (it holds a byte a header value cannot carry)")
