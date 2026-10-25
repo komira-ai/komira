@@ -13,8 +13,15 @@
         deps = ["komira//src/komira_proto_codec:komira_proto_codec", ...],
     )
 
-is two targets:
+is three targets, built from committed sources (tools/build/gen/README.md):
+`generated/<name>/` of the package holds what the generator wrote, and the
+library is built from those files and nothing else. A library still in the
+transition ledger (tools/build/gen/transition.bzl) has two targets and is built
+from the generator, as described next; it has no `<name>_fresh`, and `[gen]`.
 
+  * `<name>_fresh` (committed form), the library's first gate: it regenerates
+    through `<name>_gen`, compares with `generated/<name>/` and fails, with the
+    command that rewrites the directory, when the two differ.
   * `<name>_gen`, the GENERATION half of the Mojo proto rules
     (tools/build/mojo/proto.bzl: `stage_proto_srcs`, `proto_closure`,
     `select_generated`, `generate_proto_dir`): protoc-gen-mojo writes
@@ -127,6 +134,7 @@ Every refusal happens at analysis, in `<name>_gen`, so a BUCK file with one
 wrong mojo_gcp_client still loads.
 """
 
+load("@komira//tools/build/gen:defs.bzl", "committed_sources", "declare_fresh", "declare_uncommitted", "generated_state")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 load(
@@ -333,6 +341,25 @@ def _gcp_client(
         **vis
     )
 
+    state = generated_state(name)
+    if not state.legacy:
+        declare_fresh(name, ":" + gen, state, visibility)
+        committed = committed_sources(state, [_LAYOUT_PROBE])
+        if not committed:
+            declare_uncommitted(name, ":" + gen, state, visibility)
+            return
+        probe = [f for f in state.files if f.rsplit("/", 1)[-1] == _LAYOUT_PROBE]
+        mojo_library(
+            name = name,
+            srcs = committed,
+            deps = deps,
+            fresh_gate = ":" + name + "_fresh",
+            test_srcs = probe + test_srcs,
+            **(vis | kwargs)
+        )
+        return
+
+    # The transition (tools/build/gen/transition.bzl): built from the generator.
     # The file names the generation action is held to (generate_proto_dir
     # refuses a missing, empty or extra file), so they can be named here. An
     # entry that is not a `.proto` path is left out rather than turned into a

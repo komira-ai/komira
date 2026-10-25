@@ -23,6 +23,14 @@ same MojoInfo.
   * `test_srcs` welds the package to its tests, as on a `mojo_library`:
     see "mojo_proto_library with test_srcs" below.
 
+A library of this package that has a committed directory `generated/<name>/`
+(tools/build/gen/README.md) is built from those files and nothing else:
+`<name>_gen` generates, `<name>_fresh` compares it with the committed files and
+is the library's first gate, and `<name>` is a `mojo_library` over the committed
+files. That form is the welded one below, and takes bundling too. The rules
+described in the rest of this docstring are those of a library still in the
+transition ledger (tools/build/gen/transition.bzl).
+
 Output layout of a target `L` with import name `I`:
 
     L/proto/...            the staged `.proto` files (sub-target `[proto]`)
@@ -44,6 +52,7 @@ the action key.
 
 load(":defs.bzl", "mojo_library", "mojo_precompile_cmd")
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoToolchainInfo")
+load("@komira//tools/build/gen:defs.bzl", "committed_sources", "declare_fresh", "declare_uncommitted", "generated_state")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 MojoProtoToolchainInfo = provider(fields = {
@@ -366,9 +375,11 @@ def _mojo_proto_gen_impl(ctx):
     trees, dep_paths = proto_closure(ctx, tree, own_paths)
     generate, names = select_generated(ctx, own_paths, dep_paths)
 
-    # The macro named the library's sources before analysis, from the same
-    # paths; hold it to what is generated so the two can never disagree.
-    if sorted(names) != sorted(ctx.attrs.expected):
+    # The macro of a library still in the transition named the library's
+    # sources before analysis, from the same paths; hold it to what is
+    # generated so the two can never disagree. A library of committed sources
+    # has none: `<name>_fresh` holds its directory to what is generated.
+    if ctx.attrs.expected != None and sorted(names) != sorted(ctx.attrs.expected):
         fail("{}: the welded library names {} but the generation writes {}".format(
             ctx.label,
             ", ".join(sorted(ctx.attrs.expected)),
@@ -393,13 +404,15 @@ def _mojo_proto_gen_impl(ctx):
 _mojo_proto_gen = rule(
     impl = _mojo_proto_gen_impl,
     attrs = {
-        # Always empty here (the macro refuses bundling); select_generated reads them.
+        # Empty for a library still in the transition (its macro refuses
+        # bundling); select_generated reads them.
         "bundle_only": attrs.list(attrs.string(), default = []),
         "bundle_proto_deps": attrs.bool(default = False),
         "default_protocol": attrs.string(default = "connect"),
         "default_wire": attrs.string(default = "proto"),
-        # The `<stem>.mojo` names the macro gave the library.
-        "expected": attrs.list(attrs.string()),
+        # The `<stem>.mojo` names the macro gave the library (a library still
+        # in the transition); none for a library of committed sources.
+        "expected": attrs.option(attrs.list(attrs.string()), default = None),
         "import_name": attrs.string(),
         "import_prefix": attrs.string(default = ""),
         "package_name": attrs.option(attrs.string(), default = None),
@@ -412,6 +425,55 @@ _mojo_proto_gen = rule(
 # Every other keyword is refused in the welded form rather than dropped.
 _WELDED_KWARGS = ["default_protocol", "default_wire", "deps", "import_name", "import_prefix", "package_name", "proto_deps", "readme", "visibility"]
 
+# What a library of committed sources takes beside `_WELDED_KWARGS`: bundling,
+# since `<name>_fresh` holds the generated set to the committed one.
+_COMMITTED_KWARGS = _WELDED_KWARGS + ["bundle_only", "bundle_proto_deps"]
+
+def _committed_proto_library(name, srcs, state, test_srcs, test_data, test_env, kwargs):
+    """A mojo_proto_library whose generated sources are committed (tools/build/gen/defs.bzl): `<name>_gen`, `<name>_fresh` and the library."""
+    for k in kwargs:
+        if k not in _COMMITTED_KWARGS:
+            fail("//{}:{}: `{}` is not taken by a library of committed sources; it takes {}".format(native.package_name(), name, k, ", ".join(_COMMITTED_KWARGS)))
+    for s in srcs:
+        if ":" in s or not s.endswith(".proto"):
+            fail("//{}:{}: `srcs` takes source paths of `.proto` files only, not `{}`".format(native.package_name(), name, s))
+    gen = name + "_gen"
+    vis = {"visibility": kwargs["visibility"]} if kwargs.get("visibility") != None else {}
+    _mojo_proto_gen(
+        name = gen,
+        srcs = srcs,
+        bundle_only = kwargs.get("bundle_only", []),
+        bundle_proto_deps = kwargs.get("bundle_proto_deps", False),
+        import_name = kwargs.get("import_name") or name,
+        import_prefix = kwargs.get("import_prefix", ""),
+        package_name = kwargs.get("package_name"),
+        proto_deps = kwargs.get("proto_deps", []),
+        default_protocol = kwargs.get("default_protocol", "connect"),
+        default_wire = kwargs.get("default_wire", "proto"),
+        **vis
+    )
+    declare_fresh(name, ":" + gen, state, kwargs.get("visibility"))
+    committed = committed_sources(state)
+    if not committed:
+        declare_uncommitted(name, ":" + gen, state, kwargs.get("visibility"))
+        return
+    lib = {}
+    if test_data != None:
+        lib["test_data"] = test_data
+    if test_env != None:
+        lib["test_env"] = test_env
+    if "readme" in kwargs:
+        lib["readme"] = kwargs["readme"]
+    mojo_library(
+        name = name,
+        srcs = committed,
+        deps = kwargs.get("deps", []),
+        fresh_gate = ":" + name + "_fresh",
+        import_name = kwargs.get("import_name"),
+        test_srcs = test_srcs,
+        **(vis | lib)
+    )
+
 def _mojo_proto_library(
         name,
         srcs,
@@ -419,6 +481,12 @@ def _mojo_proto_library(
         test_data = None,
         test_env = None,
         **kwargs):
+    state = generated_state(name)
+    if not state.legacy:
+        _committed_proto_library(name, srcs, state, test_srcs, test_data, test_env, kwargs)
+        return
+
+    # The transition (tools/build/gen/transition.bzl): built from the generator.
     if not test_srcs:
         if test_data or test_env:
             fail("//{}:{}: `test_data` / `test_env` without `test_srcs`".format(native.package_name(), name))
@@ -468,7 +536,8 @@ def _mojo_proto_library(
 
 # ---- mojo_db_proto_library -----------------------------------------------------
 
-def _mojo_db_proto_library_impl(ctx):
+def _db_checked(ctx):
+    """The staged inputs of a db proto library, after its checks: (toolchain, tree, trees, own paths)."""
     ptc = ctx.attrs.proto_toolchain[MojoProtoToolchainInfo]
     tree, own_paths = stage_proto_srcs(ctx)
     trees, _dep_paths = proto_closure(ctx, tree, own_paths)
@@ -489,7 +558,10 @@ def _mojo_db_proto_library_impl(ctx):
         if o in seen:
             fail("{}: `outs` lists `{}` twice".format(ctx.label, o))
         seen[o] = True
+    return ptc, tree, trees, own_paths
 
+def _mojo_db_proto_library_impl(ctx):
+    ptc, tree, trees, own_paths = _db_checked(ctx)
     import_name = ctx.attrs.import_name or ctx.label.name
     opt = "package_prefix=" + (ctx.attrs.package_name or import_name)
     return _generate_package(ctx, ptc.db_plugin, "mojo_db", opt, tree, trees, own_paths, ctx.attrs.outs)
@@ -502,6 +574,91 @@ mojo_db_proto_library_rule = rule(
         "outs": attrs.list(attrs.string()),
     },
 )
+
+# The generation half of a db proto library of committed sources
+# (tools/build/gen/defs.bzl): protoc-gen-mojo-db writes `gen/<import name>/`,
+# nothing is compiled. `<name>_fresh` is its only reader.
+def _mojo_db_gen_impl(ctx):
+    ptc, tree, trees, own_paths = _db_checked(ctx)
+    check_proto_import_name(ctx, ctx.attrs.import_name)
+    opt = "package_prefix=" + (ctx.attrs.package_name or ctx.attrs.import_name)
+    gen_dir = generate_proto_dir(ctx, ptc.db_plugin, "mojo_db", opt, trees, own_paths, ctx.attrs.outs, ctx.attrs.import_name)
+    files = ["__init__.mojo"] + ctx.attrs.outs
+    return [DefaultInfo(
+        default_output = gen_dir,
+        sub_targets = {"proto": [DefaultInfo(default_output = tree)]} |
+                      {f: [DefaultInfo(default_output = gen_dir.project(f))] for f in files},
+    )]
+
+_mojo_db_gen = rule(
+    impl = _mojo_db_gen_impl,
+    attrs = {
+        "import_name": attrs.string(),
+        "import_prefix": attrs.string(default = ""),
+        "outs": attrs.list(attrs.string()),
+        "package_name": attrs.option(attrs.string(), default = None),
+        "proto_deps": attrs.list(attrs.dep(providers = [ProtoSrcsInfo]), default = []),
+        "proto_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo_proto", providers = [MojoProtoToolchainInfo]),
+        "srcs": attrs.list(attrs.source()),
+    },
+)
+
+def _mojo_db_proto_library(
+        name,
+        srcs,
+        outs,
+        deps = [],
+        proto_deps = [],
+        import_name = None,
+        import_prefix = "",
+        package_name = None,
+        visibility = None):
+    state = generated_state(name)
+    vis = {"visibility": visibility} if visibility != None else {}
+    if state.legacy:
+        # The transition (tools/build/gen/transition.bzl): built from the generator.
+        mojo_db_proto_library_rule(
+            name = name,
+            srcs = srcs,
+            outs = outs,
+            deps = deps,
+            proto_deps = proto_deps,
+            import_name = import_name,
+            import_prefix = import_prefix,
+            package_name = package_name,
+            **vis
+        )
+        return
+    gen = name + "_gen"
+    _mojo_db_gen(
+        name = gen,
+        srcs = srcs,
+        outs = outs,
+        import_name = import_name or name,
+        import_prefix = import_prefix,
+        package_name = package_name,
+        proto_deps = proto_deps,
+        **vis
+    )
+    declare_fresh(name, ":" + gen, state, visibility)
+    committed = committed_sources(state)
+    if not committed:
+        declare_uncommitted(name, ":" + gen, state, visibility)
+        return
+
+    # No test and no README of its own, as the rule it replaces: its package
+    # is gated by what it is built from (`<name>_fresh`) and by the tests of
+    # the packages that use it.
+    mojo_library(
+        name = name,
+        srcs = committed,
+        deps = deps,
+        fresh_gate = ":" + name + "_fresh",
+        import_name = import_name,
+        conda = False,
+        readme = False,
+        **vis
+    )
 
 # ---- mojo_routes_proto_library -------------------------------------------------
 #
@@ -610,7 +767,7 @@ def _mojo_routes_proto_library(
 
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
-mojo_db_proto_library = declares_docs(mojo_db_proto_library_rule)
+mojo_db_proto_library = declares_docs(_mojo_db_proto_library)
 mojo_proto_library = declares_docs(_mojo_proto_library)
 mojo_routes_proto_library = declares_docs(_mojo_routes_proto_library)
 proto_srcs = declares_docs(proto_srcs_rule)
