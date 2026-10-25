@@ -78,7 +78,7 @@ zig_test(
 # change it with the ledger, in the same commit.
 gen_transition(
     name = "transition",
-    max = 65,
+    max = 50,
 )
 
 zig_test(
