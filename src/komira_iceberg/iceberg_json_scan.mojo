@@ -20,6 +20,45 @@ struct ParsedStr(Movable, Deinitable):
     var end: Int
 
 
+def _hex4_at(bs: Span[UInt8, _], at: Int) raises -> Int:
+    """The value of the four hex digits at `at`; raises if fewer than four
+    bytes remain or any is not a hex digit."""
+    if at + 4 > len(bs):
+        raise Error("json: truncated \\u escape")
+    var v = 0
+    for k in range(4):
+        var c = Int(bs[at + k])
+        var d = -1
+        if c >= ord("0") and c <= ord("9"):
+            d = c - ord("0")
+        elif c >= ord("a") and c <= ord("f"):
+            d = c - ord("a") + 10
+        elif c >= ord("A") and c <= ord("F"):
+            d = c - ord("A") + 10
+        if d < 0:
+            raise Error("json: bad hex digit in a \\u escape")
+        v = v * 16 + d
+    return v
+
+
+def _append_utf8(mut out: List[UInt8], cp: Int):
+    """Append the UTF-8 bytes of the (non-surrogate, <= 0x10FFFF) code point."""
+    if cp < 0x80:
+        out.append(UInt8(cp))
+    elif cp < 0x800:
+        out.append(UInt8(0xC0 | (cp >> 6)))
+        out.append(UInt8(0x80 | (cp & 0x3F)))
+    elif cp < 0x10000:
+        out.append(UInt8(0xE0 | (cp >> 12)))
+        out.append(UInt8(0x80 | ((cp >> 6) & 0x3F)))
+        out.append(UInt8(0x80 | (cp & 0x3F)))
+    else:
+        out.append(UInt8(0xF0 | (cp >> 18)))
+        out.append(UInt8(0x80 | ((cp >> 12) & 0x3F)))
+        out.append(UInt8(0x80 | ((cp >> 6) & 0x3F)))
+        out.append(UInt8(0x80 | (cp & 0x3F)))
+
+
 def read_json_string_at(s: String, start: Int) raises -> ParsedStr:
     """Read a JSON string beginning at the opening quote `start`; return the
     decoded value + the index JUST PAST the closing quote. Handles the escapes
@@ -48,16 +87,27 @@ def read_json_string_at(s: String, start: Int) raises -> ParsedStr:
                 out.append(UInt8(0x08))
             elif e == UInt8(ord("f")):
                 out.append(UInt8(0x0C))
-            elif e == UInt8(ord("u")) and i + 5 < n:
-                # \uXXXX: decode the 4 hex nibbles into a code point and
-                # append its UTF-8 bytes. Our emitter escapes only control
-                # characters this way; a surrogate pair is not combined.
-                var hi = hex_nibble(bs[i + 2]) * 16 + hex_nibble(bs[i + 3])
-                var lo = hex_nibble(bs[i + 4]) * 16 + hex_nibble(bs[i + 5])
-                var enc = chr(hi * 256 + lo)
-                for k in range(enc.byte_length()):
-                    out.append(enc.as_bytes()[k])
+            elif e == UInt8(ord("u")):
+                # \uXXXX: four hex digits, strictly. A high surrogate followed
+                # by a low one (how JSON writers spell a character above the
+                # BMP, an emoji for one) is one code point; a lone surrogate
+                # is U+FFFD. Nothing here can abort: chr() is never given a
+                # surrogate.
+                var cp = _hex4_at(bs, i + 2)
                 i += 6
+                if cp >= 0xD800 and cp <= 0xDBFF:
+                    var paired = False
+                    if i + 5 < n and bs[i] == UInt8(ord("\\")) and bs[i + 1] == UInt8(ord("u")):
+                        var lo = _hex4_at(bs, i + 2)
+                        if lo >= 0xDC00 and lo <= 0xDFFF:
+                            cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00)
+                            i += 6
+                            paired = True
+                    if not paired:
+                        cp = 0xFFFD
+                elif cp >= 0xDC00 and cp <= 0xDFFF:
+                    cp = 0xFFFD
+                _append_utf8(out, cp)
                 continue
             else:
                 # \" \\ \/ and any other escaped byte: the byte itself.

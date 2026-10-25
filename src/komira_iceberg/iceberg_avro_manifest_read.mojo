@@ -26,6 +26,7 @@ from .iceberg_types import (
     ICE_T_STRING,
 )
 from .iceberg_avro_manifest import ManifestFileEntry
+from .iceberg_row_value import read_checked_string
 
 
 # =============================================================================
@@ -63,7 +64,7 @@ def read_manifest_list(bytes: List[UInt8]) raises -> List[ManifestFileEntry]:
         var rec = 0
         var nrec = Int(blk.object_count)
         while rec < nrec:
-            var manifest_path = reader.read_string()
+            var manifest_path = read_checked_string(reader)
             var manifest_length = Int(reader.read_long())
             var spec_id = Int(reader.read_int())  # partition_spec_id
             var content = Int(reader.read_int())  # content (data / deletes)
@@ -297,7 +298,7 @@ def _read_partition_value_bytes[
     elif type_tag == ICE_T_DOUBLE:
         encode_double(reader.read_double(), out)
     elif type_tag == ICE_T_STRING:
-        encode_string(reader.read_string(), out)
+        encode_string(read_checked_string(reader), out)
     else:
         raise Error(
             "_read_partition_value_bytes: unknown partition type tag "
@@ -353,8 +354,8 @@ def read_manifest_entries(
 
             # ---- data_file (r2) ----
             var content = Int(reader.read_int())  # content
-            var file_path = reader.read_string()  # file_path
-            _ = reader.read_string()  # file_format
+            var file_path = read_checked_string(reader)  # file_path
+            _ = reader.read_bytes()  # file_format
             # partition (r102): one value per partition field (empty for an
             # unpartitioned table -> zero bytes). Recover each value's raw Avro
             # bytes so the caller can decode the partition tuple.
