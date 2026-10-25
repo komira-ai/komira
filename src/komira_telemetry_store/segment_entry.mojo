@@ -8,9 +8,8 @@
 # `_HEAD`, tombstones, the reaper) by supplying a new body type and nothing
 # else.
 #
-# -- WHY THIS IS NOT A SEARCH-INDEX SPLIT SUMMARY -----------------------------
-# A split summary of a text index carries a doc-id range and no time range. The
-# one thing this dataset needs is a time range: it is what lets "the last 200
+# -- WHY THE TIME RANGE IS THE PRUNING KEY ---------------------------------
+# The one thing this dataset needs is a time range: it is what lets "the last 200
 # lines", the most common log query, prune to the few objects that can hold
 # them instead of fetching EVERY live object. So the body is its own type, with
 # the time range as the pruning key.
@@ -42,24 +41,12 @@ comptime TELEMETRY_SEGMENT_ENTRY_VERSION: UInt8 = 2
 """Body schema version. A decoder REFUSES an unknown version rather than
 guessing a field layout.
 
-Version 1 is permanently reserved and is refused BY NAME. It was stamped by two
-different field orders:
+Version 1 is reserved and is refused BY NAME: it is never written, and a body
+that starts with it is not decoded as any layout. Writers emit 2. A future
+format goes to 3."""
 
-    layout A: [ver][uuid16][LP object_key][min_ts][max_ts][min_sid][max_sid]
-              [rows][bytes][merge_ops][LP merge_uuids][sidecar]
-    layout B: [ver][uuid16][min_ts][max_ts][min_sid][max_sid][rows][bytes]
-              [merge_ops][sidecar][LP object_key][LP merge_uuids]
-
-Because the version bytes agreed, neither decoder refused the other's bytes: a
-cross-decode can return without raising and report a range built from the
-object key's length prefix and text bytes, a range overlapping every query. No
-error, wrong data. So `1` is an ambiguity, not a layout, and `decode` refuses
-it rather than picking one of the two.
-
-NEVER REUSE 1. A future format goes to 3."""
-
-comptime TELEMETRY_SEGMENT_ENTRY_VERSION_AMBIGUOUS: UInt8 = 1
-"""The burned version. Named, not inlined, so the refusal below cannot drift
+comptime TELEMETRY_SEGMENT_ENTRY_VERSION_RESERVED: UInt8 = 1
+"""The reserved version. Named, not inlined, so the refusal below cannot drift
 from the constant it is about."""
 
 comptime TELEMETRY_UUID_BYTES: Int = 16
@@ -383,23 +370,17 @@ def decode_telemetry_segment_entry(
     if len(body) == 0:
         raise Error("telemetry segment entry: empty body (corrupt chunk)")
     var version = body[0]
-    if version == TELEMETRY_SEGMENT_ENTRY_VERSION_AMBIGUOUS:
+    if version == TELEMETRY_SEGMENT_ENTRY_VERSION_RESERVED:
         # THE RESERVED VERSION. Refused BY NAME, ahead of the generic
-        # unknown-version arm, because "version 1" is not an old format this
-        # build could be taught to read: it is two formats that were never
-        # distinguishable from each other.
+        # unknown-version arm, because "version 1" is reserved, not an old
+        # format this build could be taught to read.
         raise Error(
             "telemetry segment entry: REFUSING body version 1 ("
             + String(len(body))
-            + "-byte body). Version 1 is AMBIGUOUS: two incompatible field"
-            " orders were both published under it ([ver][uuid][LP"
-            " object_key][min_ts]... and"
-            " [ver][uuid][min_ts]...[sidecar][LP object_key])."
-            " Decoding it would pick one at random and return a plausible"
-            " entry with a wrong time range and a wrong object key, RAISING"
-            " NOTHING. This build writes and reads version "
+            + "-byte body). Version 1 is reserved and is never a"
+            " valid layout. This build writes and reads version "
             + String(Int(TELEMETRY_SEGMENT_ENTRY_VERSION))
-            + " only. Re-publish the segment; do not try to read this chunk."
+            + " only. Do not try to read this chunk."
         )
     if version != TELEMETRY_SEGMENT_ENTRY_VERSION:
         raise Error(

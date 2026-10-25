@@ -38,7 +38,7 @@
 #
 # -- THE KEYS -----------------------------------------------------------------
 #   <root>/<ds>/<YYYYMMDD>/data/<start_ms:020d>-<uuid32hex>.parquet   BASE
-#   <root>/<ds>/<YYYYMMDD>/text/<start_ms:020d>-<uuid32hex>.split     SIDECAR
+#   <root>/<ds>/<YYYYMMDD>/text/<start_ms:020d>-<uuid32hex>.textidx     SIDECAR
 #   <root>/<ds>/<YYYYMMDD>/_lineage/<writer_id>/manifest/<seq:020d>.chunk
 #   <root>/<ds>/<YYYYMMDD>/_lineage/<writer_id>/_HEAD
 #
@@ -70,7 +70,7 @@ comptime TELEMETRY_DATASET_METRICS: String = "metrics"
 comptime TELEMETRY_DATA_SEGMENT: String = "data"
 comptime TELEMETRY_TEXT_SEGMENT: String = "text"
 comptime TELEMETRY_DATA_SUFFIX: String = ".parquet"
-comptime TELEMETRY_TEXT_SUFFIX: String = ".split"
+comptime TELEMETRY_TEXT_SUFFIX: String = ".textidx"
 
 comptime TELEMETRY_PARTITION_PREFIX_DEPTH: Int = 3
 """`telemetry/<ds>/<YYYYMMDD>` — three segments, always."""
@@ -342,7 +342,7 @@ def telemetry_text_sidecar_key(data_key: String) raises -> String:
 
     One sidecar per data object, same basename: no independent lifecycle, no
     separate manifest, no listing to pair them, because the name is derivable.
-    This function IS that derivation, and it is the reason the text split can
+    This function IS that derivation, and it is the reason the text index can
     be a sidecar without adding a second manifest or a second discovery LIST.
 
     Fail-loud on a key this module did not produce: a sidecar key computed off a

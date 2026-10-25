@@ -17,12 +17,11 @@
 #                       substrate with a DIFFERENT sort key, `(series_id, ts)`.
 #
 # THE METRICS FACT TABLE IS HERE; THE PER-PARTITION SERIES SIDE TABLE IS NOT.
-# Building it needs the attribute STRINGS, which a producer that hands over
+# Building it needs the attribute STRINGS, which a caller that hands over
 # points carrying only an interned attribute-set id does not supply.
 # `TelemetrySegmentEntry` already carries `min_series_id` / `max_series_id`:
 # ONE body type across both datasets is what "one container, two schemas" means,
-# and retro-fitting the series axis later would have been a body-version bump on
-# live data.
+# so the series axis is part of the one body type from the start.
 # =============================================================================
 
 from komira_telemetry_store.keys import (

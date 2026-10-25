@@ -94,21 +94,23 @@ def _view[
 def _read_parquet_full(file: List[UInt8]) raises -> RecordBatch:
     """Decode a whole in-memory Parquet file into ONE RecordBatch.
 
-    TEST SUPPORT, kept in this file so it is never part of a public API. It is
-    built on `komira_parquet`'s reader, which shares no code with the writer
-    under test: the magic bytes and the footer length are checked, the footer is
-    parsed, and every row group is decoded from its byte range and concatenated
-    in file order."""
+    TEST SUPPORT, kept in this file so it is never part of a public API. Built
+    on `komira_parquet`'s reader, which shares no code with the writer under
+    test: checks the magic and footer length, parses the footer, decodes each
+    row group from its byte range and concatenates them in file order."""
     var n = len(file)
     if n < 12:
         raise Error("test: " + String(n) + " bytes is not a Parquet file")
-    var magic = String("PAR1").as_bytes()
+    var par1 = String("PAR1")
+    var magic = par1.as_bytes()
     for k in range(4):
         if file[k] != magic[k] or file[n - 4 + k] != magic[k]:
             raise Error("test: missing PAR1 magic")
     var flen = 0
     for k in range(4):
         flen |= Int(file[n - 8 + k]) << (8 * k)
+    if flen <= 0 or flen > n - 12:
+        raise Error("test: footer length out of range")
     var md = parse_full_metadata(_view(Span(file)[n - 8 - flen : n - 8]))
     var groups = Slab[RecordBatch](capacity=len(md.row_groups))
     for g in range(len(md.row_groups)):
@@ -410,13 +412,13 @@ def test_03_the_segment_is_discoverable_by_manifest_replay() raises:
 
 
 # =============================================================================
-# CASE 4 — THE DEMOTION. The text split is a SIDECAR: written beside the base
+# CASE 4 — THE DEMOTION. The text index is a SIDECAR: written beside the base
 # at a DERIVED key, flagged in the entry, and never the thing a time-range read
 # opens.
 # =============================================================================
 
 
-def test_04_the_text_split_is_a_sidecar_beside_the_base() raises:
+def test_04_the_text_index_is_a_sidecar_beside_the_base() raises:
     var store = SharedInMemoryConditionalStore()
     var w = TelemetryLogSegmentWriter[SharedInMemoryConditionalStore](
         store.clone(), String("writer-4")
@@ -426,12 +428,12 @@ def test_04_the_text_split_is_a_sidecar_beside_the_base() raises:
     msgs.append(String("connection refused"))
     ts.append(_DAY_T0 + Int64(5))
 
-    var split = List[UInt8]()
+    var text_index = List[UInt8]()
     for i in range(64):
-        split.append(UInt8(i))
+        text_index.append(UInt8(i))
     var entries = w.publish_batches(
         _one_batch(_log_batch(msgs^, ts^)),
-        Optional[List[UInt8]](split^),
+        Optional[List[UInt8]](text_index^),
     )
     assert_equal(len(entries), 1, "4: one object")
     ref e = entries[0]
@@ -462,13 +464,13 @@ def test_04_the_text_split_is_a_sidecar_beside_the_base() raises:
     assert_true(
         hit[0].object_key.find(String(".parquet")) > 0,
         "4: a TIME-RANGE READ RESOLVES TO THE .parquet BASE, never to the"
-        " .split. That is the whole inversion: the text index stays PRODUCED"
+        " .textidx. That is the whole inversion: the text index stays PRODUCED"
         " but stops being the artifact a time query must open. Got: "
         + hit[0].object_key,
     )
     assert_false(
-        hit[0].object_key.find(String(".split")) > 0,
-        "4: ...and specifically not the split",
+        hit[0].object_key.find(String(".textidx")) > 0,
+        "4: ...and specifically not the text-index sidecar",
     )
     _ = r^
     _ = w^
@@ -486,14 +488,14 @@ def test_05_a_sidecar_is_refused_when_the_flush_straddles_midnight() raises:
     ts.append(_DAY_T0 + NS_PER_DAY - Int64(1))
     msgs.append(String("after"))
     ts.append(_DAY_T0 + NS_PER_DAY)
-    var split = List[UInt8]()
-    split.append(UInt8(1))
+    var text_index = List[UInt8]()
+    text_index.append(UInt8(1))
 
     var refused = False
     try:
         _ = w.publish_batches(
             _one_batch(_log_batch(msgs^, ts^)),
-            Optional[List[UInt8]](split^),
+            Optional[List[UInt8]](text_index^),
         )
     except:
         refused = True
@@ -981,7 +983,7 @@ def main() raises:
     test_01_marquee_the_base_artifact_is_time_sorted_parquet()
     test_02_a_flush_across_midnight_becomes_two_partitioned_objects()
     test_03_the_segment_is_discoverable_by_manifest_replay()
-    test_04_the_text_split_is_a_sidecar_beside_the_base()
+    test_04_the_text_index_is_a_sidecar_beside_the_base()
     test_05_a_sidecar_is_refused_when_the_flush_straddles_midnight()
     test_06_a_batch_without_a_timestamp_column_is_refused()
     test_07_an_empty_flush_publishes_nothing()
@@ -993,6 +995,6 @@ def main() raises:
     test_13_the_nonce_is_the_field_that_separates_them()
     print("PASS komira_telemetry_store.test_telemetry_log_segment_writer (the")
     print("     base artifact is TIME-PARTITIONED, TIME-SORTED Parquet — sort")
-    print("     order read back OUT OF THE PUBLISHED BYTES — and the text")
-    print("     split is a sidecar at a DERIVED key that a time-range read")
+    print("     order read back OUT OF THE PUBLISHED BYTES — and the")
+    print("     text index is a sidecar at a DERIVED key that a time-range read")
     print("     never opens)")

@@ -213,8 +213,8 @@ def test_05_an_unknown_body_version_is_refused() raises:
         v1_message = String(err)
     assert_true(
         v1_message.find(String("REFUSING body version 1")) >= 0,
-        "5: version 1 is AMBIGUOUS (two layouts were stamped with it) and is"
-        " refused by name. Got: " + v1_message,
+        "5: version 1 is reserved and is refused by name."
+        " Got: " + v1_message,
     )
     var empty_refused = False
     try:
@@ -441,8 +441,7 @@ def test_09_the_envelope_field_order_is_the_documented_one() raises:
         Int(enc[len(enc) - 1]),
         1,
         "9: `has_text_sidecar` is the LAST byte of the envelope, not a field"
-        " ahead of `object_key` — the sibling reader places it before the key,"
-        " which is the other half of the same divergence",
+        " ahead of `object_key`",
     )
 
 

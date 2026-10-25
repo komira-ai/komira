@@ -85,21 +85,23 @@ def _view[
 def _read_parquet_full(file: List[UInt8]) raises -> RecordBatch:
     """Decode a whole in-memory Parquet file into ONE RecordBatch.
 
-    TEST SUPPORT, kept in this file so it is never part of a public API. It is
-    built on `komira_parquet`'s reader, which shares no code with the writer
-    under test: the magic bytes and the footer length are checked, the footer is
-    parsed, and every row group is decoded from its byte range and concatenated
-    in file order."""
+    TEST SUPPORT, kept in this file so it is never part of a public API. Built
+    on `komira_parquet`'s reader, which shares no code with the writer under
+    test: checks the magic and footer length, parses the footer, decodes each
+    row group from its byte range and concatenates them in file order."""
     var n = len(file)
     if n < 12:
         raise Error("test: " + String(n) + " bytes is not a Parquet file")
-    var magic = String("PAR1").as_bytes()
+    var par1 = String("PAR1")
+    var magic = par1.as_bytes()
     for k in range(4):
         if file[k] != magic[k] or file[n - 4 + k] != magic[k]:
             raise Error("test: missing PAR1 magic")
     var flen = 0
     for k in range(4):
         flen |= Int(file[n - 8 + k]) << (8 * k)
+    if flen <= 0 or flen > n - 12:
+        raise Error("test: footer length out of range")
     var md = parse_full_metadata(_view(Span(file)[n - 8 - flen : n - 8]))
     var groups = Slab[RecordBatch](capacity=len(md.row_groups))
     for g in range(len(md.row_groups)):

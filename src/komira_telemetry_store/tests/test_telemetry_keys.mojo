@@ -275,7 +275,7 @@ def test_07_a_segment_that_would_change_the_key_depth_is_refused() raises:
 
 
 # =============================================================================
-# CASE 8 — THE SIDECAR'S KEY IS DERIVED. This is what makes the text split a
+# CASE 8 — THE SIDECAR'S KEY IS DERIVED. This is what makes the text index a
 # sidecar WITHOUT adding a second manifest or a pairing LIST: the name is
 # derivable.
 # =============================================================================
@@ -290,7 +290,7 @@ def test_08_the_sidecar_key_is_derived_from_the_base_key() raises:
         telemetry_text_sidecar_key(base),
         String(
             "telemetry/logs/20261001/text/"
-            "00000001790812800123-000102030405060708090a0b0c0d0e0f.split"
+            "00000001790812800123-000102030405060708090a0b0c0d0e0f.textidx"
         ),
         "8: same partition, same basename, different leaf segment and suffix."
         " A reader that has the base key needs NO listing to find the sidecar",
@@ -306,7 +306,7 @@ def test_09_a_foreign_key_cannot_be_turned_into_a_sidecar_key() raises:
     var wrong_suffix = False
     try:
         _ = telemetry_text_sidecar_key(
-            String("telemetry/logs/20261001/data/000-abc.split")
+            String("telemetry/logs/20261001/data/000-abc.textidx")
         )
     except:
         wrong_suffix = True
