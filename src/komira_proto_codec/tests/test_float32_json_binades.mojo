@@ -3,8 +3,15 @@
 # round-trips through the proto3-JSON float32 writer and reader.
 # =============================================================================
 #
-# Not a welded gate (about 34 million values; run it with `buck2 test`). The
-# welded suite (`test_proto_codec_json_float32.mojo`) samples every binade;
+# Not a welded gate (about 34 million values; run it with `buck2 test`). Each
+# binade is split into PARTS equal frac ranges, and each (binade, part) is its
+# own target (`test_float32_json_binades_<field>_<part>` in BUCK, which passes
+# BINADE and PART as defines), so the units run as parallel actions and each
+# stays far below the test time limit. Together the units cover exactly the
+# values of the single sweep they replace: part k of a binade is frac in
+# [k * 2^23 / PARTS, (k + 1) * 2^23 / PARTS). Each unit asserts its own count
+# (the range size, less the zero pattern in binade 0), so a unit whose range
+# drops or repeats values fails. The welded suite (`test_proto_codec_json_float32.mojo`) samples every binade;
 # this one is exhaustive where the risks are densest:
 #   field 0    every subnormal (the 2^-149 grid, the zero / subnormal edge);
 #   field 1    the first normal binade (the subnormal / normal edge, where
@@ -18,13 +25,20 @@
 # =============================================================================
 
 from std.memory import bitcast
+from std.sys.defines import get_defined_int
 
 from komira_proto_codec import parse_decimal_f32, write_proto3_json_f32
 
 
-def check_binade(field: Int) raises -> Int:
+comptime BINADE = get_defined_int["BINADE"]()
+comptime PART = get_defined_int["PART"]()
+comptime PARTS = 4
+comptime PART_SIZE = (1 << 23) // PARTS
+
+
+def check_binade(field: Int, part: Int) raises -> Int:
     var checked = 0
-    for frac in range(1 << 23):
+    for frac in range(part * PART_SIZE, (part + 1) * PART_SIZE):
         var bits = (UInt32(field) << UInt32(23)) | UInt32(frac)
         if (frac & 1) == 1:
             bits |= UInt32(0x80000000)
@@ -50,9 +64,27 @@ def check_binade(field: Int) raises -> Int:
 
 
 def main() raises:
-    var total = 0
-    for field in [0, 1, 43, 254]:
-        var n = check_binade(field)
-        print("  binade", field, ":", n, "values round-trip")
-        total += n
-    print("test_float32_json_binades: ALL PASS (", total, "values )")
+    var n = check_binade(BINADE, PART)
+    var expected = PART_SIZE
+    if BINADE == 0 and PART == 0:
+        expected -= 1  # the zero pattern is skipped
+    if n != expected:
+        raise Error(
+            "binade "
+            + String(BINADE)
+            + " part "
+            + String(PART)
+            + ": checked "
+            + String(n)
+            + " values, expected "
+            + String(expected)
+        )
+    print(
+        "test_float32_json_binades: binade",
+        BINADE,
+        "part",
+        PART,
+        "PASS (",
+        n,
+        "values )",
+    )
