@@ -172,6 +172,7 @@ TARGETS = [
     "komira//src/komira_libc:conda_holds",
     "komira//src/komira_libc:coverage_floor",
     "komira//src/komira_libc:table",
+    "komira//src/komira_log_index:komira_log_index_conda",
     "komira//src/komira_log_query:komira_log_query_conda",
     "komira//src/komira_lowering_rules:komira_lowering_rules_conda",
     "komira//src/komira_mail_address:ci",
