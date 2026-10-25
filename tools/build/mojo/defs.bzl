@@ -1004,7 +1004,7 @@ def _mojo_library(**kwargs):
 
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
-adopt_readme_test = _readme_test  # the README gate's action, for adopt.bzl
+adopt_readme_test, adopt_link_tail = _readme_test, _link_tail  # the README gate's action and the link arguments of a C closure, for adopt.bzl
 mojo_binary = declares_docs(mojo_binary_rule)
 mojo_library = declares_docs(_mojo_library)
 mojo_shared_lib = declares_docs(coverage_shared_lib_macro(mojo_shared_lib_rule))
