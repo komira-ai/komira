@@ -70,6 +70,16 @@ def test_exact_bytes() raises:
     _check(16383, _b(0xFF, 0x7F))
     _check(16384, _b(0x80, 0x80, 0x01))
     _check(2147483647, _b(0xFF, 0xFF, 0xFF, 0xFF, 0x07))
+    _check(2147483648, _b(0x80, 0x80, 0x80, 0x80, 0x08))
+    _check(4294967295, _b(0xFF, 0xFF, 0xFF, 0xFF, 0x0F))
+    _check(4294967296, _b(0x80, 0x80, 0x80, 0x80, 0x10))
+    # 2^28 - 1 is four bytes, 2^28 is five; 2^56 is nine bytes.
+    _check(268435455, _b(0xFF, 0xFF, 0xFF, 0x7F))
+    _check(268435456, _b(0x80, 0x80, 0x80, 0x80, 0x01))
+    _check(
+        72057594037927936,
+        _b(0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01),
+    )
     _check(
         _MAX_I64,
         _b(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F),
@@ -123,7 +133,7 @@ def _expect_negative_refused(value: Int) raises:
     _ = external_call["alarm", UInt32](UInt32(0))
     assert_true(refused, "write_uleb128(" + String(value) + ") must raise")
     assert_true(
-        String(value) in message,
+        message.startswith("write_uleb128: negative value " + String(value)),
         "the error must name the value " + String(value) + ": " + message,
     )
     assert_equal(out, _b(0x42), "a refused value appends nothing")

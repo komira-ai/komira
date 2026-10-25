@@ -34,7 +34,7 @@ from .column_page import (
     _require_no_nulls_when_required,
 )
 from .writer_bitpack import _pack_count_bytes, _pack_fixed_width_into
-from komira_buffer.byte_buffer import write_uleb128
+from komira_buffer.byte_buffer import write_uleb128, write_uleb128_u64
 from .writer_encode import _def_levels
 from .writer_helpers import make_int32_statistics, make_int64_statistics
 
@@ -85,15 +85,7 @@ def _zigzag64(value: Int64) -> UInt64:
 
 
 def _write_zigzag64(mut buf: List[UInt8], value: Int64):
-    var z = _zigzag64(value)
-    while True:
-        var byte = UInt8(z & 0x7F)
-        z = z >> 7
-        if z != 0:
-            byte = byte | UInt8(0x80)
-        buf.append(byte)
-        if z == 0:
-            break
+    write_uleb128_u64(_zigzag64(value), buf)
 
 
 @always_inline

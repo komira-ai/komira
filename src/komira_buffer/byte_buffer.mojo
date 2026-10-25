@@ -558,6 +558,18 @@ def write_uleb128_u64(value: UInt64, mut out: List[UInt8]):
     out.append(UInt8(v))
 
 
+@no_inline
+def _raise_negative_uleb128(value: Int) raises:
+    """The refusal of `write_uleb128`, kept out of line (`@no_inline`) so the
+    raise path is not copied into every caller."""
+    raise Error(
+        "write_uleb128: negative value "
+        + String(value)
+        + " has no unsigned LEB128 encoding"
+    )
+
+
+@always_inline
 def write_uleb128(value: Int, mut out: List[UInt8]) raises:
     """Append the unsigned LEB128 (ULEB128) encoding of the non-negative
     `value` to `out`.
@@ -578,9 +590,5 @@ def write_uleb128(value: Int, mut out: List[UInt8]) raises:
     """
     # One comparison, outside the per-byte loop in write_uleb128_u64.
     if value < 0:
-        raise Error(
-            "write_uleb128: negative value "
-            + String(value)
-            + " has no unsigned LEB128 encoding"
-        )
+        _raise_negative_uleb128(value)
     write_uleb128_u64(UInt64(value), out)
