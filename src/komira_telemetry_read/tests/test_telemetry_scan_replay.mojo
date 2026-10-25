@@ -20,6 +20,7 @@ from std.testing import assert_equal, assert_false, assert_true
 from komira_objectstore.cas_manifest import (
     CasManifestStore,
     RetryPolicy,
+    chunk_key,
     is_not_found as _is_not_found,
 )
 from komira_objectstore.path import Path
@@ -331,9 +332,11 @@ def test_11_a_tombstone_above_the_durable_head_does_not_end_the_walk() raises:
 # whose oldest chunk has been reaped, which is every lineage past its first
 # retention sweep.
 #
-# `reap` deletes the tombstone marker with the chunk, which is what makes this a
-# bare HOLE rather than a tombstone: after the reap `tombstone_seqs()` no longer
-# names the seq, so the walk reaches the not-found arm and not the tombstone arm.
+# The hole is made by deleting the chunk object directly, with no tombstone,
+# so the walk reaches the not-found arm and not the tombstone arm. (Removing a
+# chunk this way is what a retire does to a merged input; the manifest's
+# `reap` verb only removes chunks below `_LOG_START`, which the walk never
+# visits.)
 # =============================================================================
 def test_12_a_reaped_gap_below_the_durable_head_is_walked_over() raises:
     var store = _Store()
@@ -366,10 +369,14 @@ def test_12_a_reaped_gap_below_the_durable_head_is_walked_over() raises:
         " reachable",
     )
 
-    # Tombstone, then reap. The reaper drops the marker with the chunk, so what
-    # is left at seq 0 is a NOT-FOUND chunk with NO tombstone.
-    mgr.schedule_for_delete_at(Int64(0), Int64(0))
-    mgr.reap(Int64(0))
+    # Delete chunk 0's object: what is left at seq 0 is a NOT-FOUND chunk with
+    # NO tombstone.
+    store.delete(chunk_key(_lineage(day, w), Int64(0)))
+    assert_equal(
+        len(mgr.tombstone_seqs()),
+        0,
+        "12: PRECONDITION: no tombstone names the hole",
+    )
 
     var plan = plan_telemetry_scan(
         store,

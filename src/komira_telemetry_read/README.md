@@ -7,7 +7,7 @@ turn a time range into the set of keys, because that needs the manifest replayed
 
 - `scan_plan`: `plan_telemetry_scan(store, dataset, t0_ns, t1_ns)` computes the
   UTC day partitions the range touches (arithmetic, no I/O), enumerates writer
-  shards with one LIST per day plus one per shard, replays each shard's manifest by exact GETs, and
+  shards with one LIST per day plus two per shard, replays each shard's manifest by exact GETs, and
   prunes on the catalog entries alone: time overlap, an optional series range
   (`TelemetrySeriesFilter`, off by default so logs are never emptied by it), and
   the merge-input skip that stops a compaction's inputs being read twice. The

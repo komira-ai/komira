@@ -28,9 +28,9 @@
 # -- HOW MANY LISTs, MEASURED -------------------------------------------------
 # Replaying one lineage needs the tombstone set, and
 # `CasManifestStore.tombstone_seqs()` discovers it by LISTing
-# `<prefix>/tombstones/`. So the cost is
+# `<prefix>/tombstones/` and `<prefix>/moved_tombstones/`. So the cost is
 #
-#     LISTs = (one per DAY, shard enumeration) + (one per SHARD, tombstones)
+#     LISTs = (one per DAY, shard enumeration) + (two per SHARD, tombstones)
 #
 # It is O(partitions), never O(objects), and every one of those LISTs is
 # single-level with a `/`-free remainder, so both object-store conformer

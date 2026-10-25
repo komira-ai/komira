@@ -357,15 +357,16 @@ def test_05_read_amplification_is_measured_not_asserted() raises:
     assert_equal(plan.entries_replayed, 6, "5: all six catalogs WERE replayed")
 
     # One day partition and one writer shard: one shard-enumeration LIST plus
-    # the substrate's tombstone LIST for that shard.
+    # the substrate's two tombstone LISTs for that shard (`tombstones/` and
+    # `moved_tombstones/`).
     assert_equal(
         lists,
-        Int64(2),
-        "5: the plan issued exactly (1 day-enumeration + 1 tombstone) LISTs;"
-        " the tombstone set is discovered by a LIST per shard",
+        Int64(3),
+        "5: the plan issued exactly (1 day-enumeration + 2 tombstone) LISTs;"
+        " the tombstone set is discovered by two LISTs per shard",
     )
 
-    # The same two LISTs when SIX segments survive.
+    # The same three LISTs when SIX segments survive.
     store.reset_op_counts()
     var wide = plan_telemetry_scan(
         store,
@@ -376,8 +377,8 @@ def test_05_read_amplification_is_measured_not_asserted() raises:
     assert_equal(len(wide.object_keys()), 6, "5: the wide plan keeps all six")
     assert_equal(
         store.n_list(),
-        Int64(2),
-        "5: SIX surviving segments cost the SAME two LISTs as one: the listing"
+        Int64(3),
+        "5: SIX surviving segments cost the SAME three LISTs as one: the listing"
         " count is a function of PARTITIONS, not of objects",
     )
 
