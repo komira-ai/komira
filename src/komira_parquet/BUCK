@@ -315,6 +315,8 @@ mojo_library(
         "tests/test_subrg_traces_direct.mojo",
         "tests/test_table_stats_direct.mojo",
         "tests/test_thrift_compact_direct.mojo",
+        "tests/test_cov_g1_column_assembly_and_finishing_dictionary_shapes.mojo",
+        "tests/test_cov_g1_column_assembly_and_finishing_plain_and_empty_chunks.mojo",
     ],
     test_deps = [
         "//src/tests/helpers/komira_test_parquet_file:komira_test_parquet_file",
