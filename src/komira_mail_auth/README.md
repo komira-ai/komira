@@ -1,7 +1,7 @@
 # komira_mail_auth
 
 Credential checks for a mail server (SMTP AUTH, RFC 4954, and IMAP LOGIN): a
-trait that answers "is this password right for this user", an in-memory
+trait that answers "is this password right for this user", a test/dev fixture
 implementation of it, the decoders for the SASL PLAIN (RFC 4616) and LOGIN
 payloads a client sends, and the cap on the line a client sends back after a
 `334` challenge. The package does no I/O and keeps no clock; the server that
@@ -11,22 +11,24 @@ Every example below runs as a test when the package is built.
 
 ## Verify a credential
 
-A server holds anything that conforms to `MailAuthVerifier`. `InMemoryAuthVerifier`
-keeps the SHA-256 digest of each password and compares the digest of what the
-client sent with `constant_time_eq_32`: the comparison takes the same time
+A server holds anything that conforms to `MailAuthVerifier`. `TestAuthVerifier`
+is a fixture for tests and local development. It stores unsalted SHA-256
+digests, which are not a password hash, so it must not hold real credentials,
+and no server wires it by default. A production verifier is a separate
+`MailAuthVerifier` implementation over a slow, salted hash (argon2id or
+scrypt), which this package does not provide yet.
+
+The fixture still avoids timing leaks: it compares the digest of what the
+client sent with `constant_time_eq_32`, so the comparison takes the same time
 wherever the bytes first differ, and a prefix or a longer password is refused
 like any other wrong one. An unknown user takes the same comparison, against
-a decoy digest. The time of the SHA-256 pass grows with the presented
-password's length (the caller's own input); the stored password's length takes
-no part. A username is compared with `==`. One SHA-256 pass is not a
-password-hashing function, so this table is for tests and small configured
-user sets.
+a decoy digest. A username is compared with `==`.
 
 ```mojo
-from komira_mail_auth import InMemoryAuthVerifier, MailAuthVerifier
+from komira_mail_auth import TestAuthVerifier, MailAuthVerifier
 from std.testing import assert_false, assert_true
 
-var users = InMemoryAuthVerifier()
+var users = TestAuthVerifier()
 users.add_user("alice", "correct horse")
 assert_true(users.verify("alice", "correct horse"))
 assert_false(users.verify("alice", "correct hors"))  # a prefix
@@ -92,6 +94,6 @@ assert_false(sasl_line_within_cap(MAX_SASL_LINE_BYTES + 1))
 
 ## Limits
 
-- No hashed-password or key-derivation verifier, no SCRAM, no OAUTHBEARER.
-- The in-memory table is plaintext-derived data held in process memory; there
+- No production verifier (no argon2id or scrypt one yet), no SCRAM, no OAUTHBEARER.
+- The fixture table is plaintext-derived data held in process memory; there
   is no persistence and no lockout or rate limit.

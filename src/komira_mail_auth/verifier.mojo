@@ -1,4 +1,4 @@
-# The credential-verification seam and an in-memory implementation.
+# The credential-verification seam and a test/dev fixture implementation.
 
 from komira_crypto import constant_time_eq_32, sha256_string
 
@@ -17,25 +17,26 @@ trait MailAuthVerifier(Movable):
         ...
 
 
-struct InMemoryAuthVerifier(MailAuthVerifier, Copyable, Movable):
-    """A user to password table held in memory, for tests and for small
-    deployments that configure their users at start.
+struct TestAuthVerifier(MailAuthVerifier, Copyable, Movable):
+    """A fixture for tests and local development. It is not a production
+    verifier and must not hold real credentials.
 
-    The table keeps the SHA-256 digest of each password, not the password. A
-    check hashes the presented password and compares the two 32-byte digests
-    with `constant_time_eq_32`, so the comparison takes the same time whatever
-    the bytes are and wherever they first differ, and a presented password
-    that is a prefix of, or longer than, the stored one is refused by the same
-    comparison as any other wrong password. An unknown user is compared
-    against a fixed decoy digest and refused after the same work.
+    It stores one UNSALTED SHA-256 digest per password, which is not a
+    password hash: it is fast and unsalted, so leaked digests fall to
+    guessing and precomputed tables. No server wires it by default. A
+    production verifier is a separate `MailAuthVerifier` implementation over
+    a slow, salted password hash (argon2id or scrypt); this package does not
+    provide one yet.
 
-    What this does not hide: the SHA-256 pass takes time per 64-byte block of
-    the presented password, so the length of what the caller sent is visible
-    to the caller (it is their own input); the stored password's length and
-    bytes take no part in the timing. The username comparison is not constant
-    time: a username is not a secret here. A digest of one SHA-256 pass is not
-    a password-hashing function, so this table is not a place to keep users
-    whose digests could leak."""
+    Even as a fixture it avoids teaching timing leaks. A check hashes the
+    presented password and compares the two 32-byte digests with
+    `constant_time_eq_32`, so the comparison takes the same time whatever the
+    bytes are and wherever they first differ, and a prefix or a longer
+    password is refused like any other wrong one. An unknown user is compared
+    against a fixed decoy digest and refused after the same work. The length
+    of what the caller sent is visible to the caller (their own input). The
+    username comparison is not constant time: a username is not a secret
+    here."""
 
     var _users: List[String]
     var _digests: List[Array[UInt8, 32]]

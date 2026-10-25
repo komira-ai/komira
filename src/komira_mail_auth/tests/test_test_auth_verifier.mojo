@@ -1,4 +1,4 @@
-# InMemoryAuthVerifier. What each case catches:
+# TestAuthVerifier (a test/dev fixture). What each case catches:
 # - the right password is accepted, per user (a verifier that checks only the
 #   username, or only that some user has the password, fails);
 # - a wrong password, a prefix of the right one, a longer one that starts with
@@ -15,15 +15,15 @@
 
 from std.testing import assert_false, assert_true
 
-from komira_mail_auth import InMemoryAuthVerifier, MailAuthVerifier
+from komira_mail_auth import TestAuthVerifier, MailAuthVerifier
 
 
 def _check[V: MailAuthVerifier](v: V, user: String, pw: String) -> Bool:
     return v.verify(user, pw)
 
 
-def _table() -> InMemoryAuthVerifier:
-    var v = InMemoryAuthVerifier()
+def _table() -> TestAuthVerifier:
+    var v = TestAuthVerifier()
     v.add_user("alice", "correct horse")
     v.add_user("bob", "battery staple")
     return v^
@@ -55,7 +55,7 @@ def test_rejects_missing_user() raises:
     assert_false(v.verify("", "correct horse"))
     assert_false(v.verify("Alice", "correct horse"))
     assert_false(v.verify("alic", "correct horse"))
-    assert_false(InMemoryAuthVerifier().verify("alice", "correct horse"))
+    assert_false(TestAuthVerifier().verify("alice", "correct horse"))
 
 
 def test_replace() raises:
@@ -79,4 +79,4 @@ def main() raises:
     test_rejects_missing_user()
     test_replace()
     test_unknown_user_cannot_pass_with_decoy()
-    print("test_in_memory_verifier: OK")
+    print("test_test_auth_verifier: OK")

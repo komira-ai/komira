@@ -1,11 +1,11 @@
 """Credential checks for a mail server: the `MailAuthVerifier` seam, an
-in-memory verifier, and the SASL PLAIN (RFC 4616) and LOGIN payload decoders
+test/dev fixture verifier, and the SASL PLAIN (RFC 4616) and LOGIN payload decoders
 that SMTP AUTH (RFC 4954) and IMAP use.
 
 | function / type | does |
 |---|---|
 | `MailAuthVerifier` | the trait a server calls with a decoded (username, password): `verify` answers True or False and nothing else (`verifier.mojo`) |
-| `InMemoryAuthVerifier` | a user to password table; the password comparison is constant time over fixed-width digests (`verifier.mojo`) |
+| `TestAuthVerifier` | a fixture for tests and local development: unsalted SHA-256 digests (not a password hash), no real credentials; the comparison is constant time over fixed-width digests (`verifier.mojo`) |
 | `SaslCredentials` | the decoded authcid and password; it has no printable form (`sasl.mojo`) |
 | `decode_sasl_plain` | the base64 PLAIN payload to `SaslCredentials`, or nothing (`sasl.mojo`) |
 | `decode_sasl_login_value`, `decode_sasl_login` | one LOGIN reply, or both replies, to a username or `SaslCredentials` (`sasl.mojo`) |
@@ -27,4 +27,4 @@ from .sasl import (
     decode_sasl_plain,
     sasl_line_within_cap,
 )
-from .verifier import InMemoryAuthVerifier, MailAuthVerifier
+from .verifier import TestAuthVerifier, MailAuthVerifier
