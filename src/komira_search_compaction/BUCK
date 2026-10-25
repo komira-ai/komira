@@ -1,0 +1,38 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Search compaction: merging small search splits into larger ones. The
+# selection policy (`select_merge`), the merge that re-indexes K splits into
+# one with their typed fast fields carried forward (`merge_split_bytes`), the
+# reaper for the objects of merged-away splits (`reap_retired_split`), and one
+# whole pass over an index's lineages (`compact_once`). Generic over
+# komira_objectstore's conditional-write stores; it names no cloud client.
+#
+# The welded tests run in memory, with no network. One drives the merge, the
+# policy, the reaper and the pass sequence step by step against an in-memory
+# metastore; one does the same across per-writer shard lineages (fold into
+# `_base`, drained-shard reap, the unsharded lineage). One runs `compact_once`
+# itself over the in-memory store: the unsharded lineage through the grace
+# period and the reap, and writer shards through their removal. The last pins
+# the order of the two writes of a merge with a probe store: the merged split
+# object exists in the store at the moment its summary is appended to the
+# catalog, and the probe reports the reverse order when it is built by hand.
+mojo_library(
+    name = "komira_search_compaction",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_json:komira_json",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_search:komira_search",
+        "//src/komira_search_catalog:komira_search_catalog",
+    ],
+    test_srcs = [
+        "tests/test_search_compact_once.mojo",
+        "tests/test_search_compact_once_order.mojo",
+        "tests/test_search_compaction.mojo",
+        "tests/test_search_sharded_compaction.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
