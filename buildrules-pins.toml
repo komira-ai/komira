@@ -5,10 +5,10 @@
 # A package that must stay on an older mopm adds `[mopm."<version>"]` here (url, sha256, size) and names
 # `toolchains//:mopm_<version with underscores>` in its `mojo_conda`.
 #
-# mopm 0.0.54 is the mopm of the README e2e (release/readme_e2e/packages.bzl): it has
+# mopm 0.0.57 is the mopm of the README e2e (release/readme_e2e/packages.bzl): it has
 # `mopm add --overlay`, which the e2e installs with, request time limits and retries, and upload URLs
 # refreshed during a long `publish --staged`. No package builds with it.
-[mopm."0.0.54"]
-url = "https://github.com/komira-ai/mopm/releases/download/v0.0.54/mopm-0.0.54-linux-x86_64.tar.gz"
-sha256 = "a9b91449643239b667ef6d5b48066d8e7bda1796304960754472b119349f7cfd"
-size = 1207652
+[mopm."0.0.57"]
+url = "https://github.com/komira-ai/mopm/releases/download/v0.0.57/mopm-0.0.57-linux-x86_64.tar.gz"
+sha256 = "3ce36096a1090ca2fde8986e0dd3e16c3ed97cdd5d6a9d970474c487476e77f7"
+size = 1209780
