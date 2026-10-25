@@ -393,8 +393,14 @@ def _library_impl(ctx):
     ungated = ctx.actions.declare_output("ungated/" + import_name + ".mojoc")
     dep_closure = ctx.actions.tset(MojoPkgTSet, children = deps)
     _check_closure_excludes(ctx, dep_closure)
+
+    # The first gate of a generated library (tools/build/gen/defs.bzl): the
+    # committed sources are what the generator writes now. A hidden input of
+    # the compile, so nothing is compiled, no test is built, and no package
+    # exists while it is red.
+    first = [ctx.attrs.fresh_gate[DefaultInfo].default_outputs[0]] if ctx.attrs.fresh_gate else []
     ctx.actions.run(
-        mojo_precompile_cmd(tc, dep_closure.project_as_args("include"), src_dir, ungated.as_output()),
+        cmd_args(mojo_precompile_cmd(tc, dep_closure.project_as_args("include"), src_dir, ungated.as_output()), hidden = first),
         category = "mojo_precompile",
     )
     ungated_tset = ctx.actions.tset(MojoPkgTSet, value = ungated, children = deps)
@@ -480,7 +486,7 @@ def _library_impl(ctx):
     cov_gate, cov_providers = coverage_gate(ctx, tc, cov_runs, cov_branch, src_dir, import_name, root) if cov_link else (None, [])
     reach = native_reach(ctx, src_dir, deps)  # native_reach.bzl: (providers, sub-targets)
     mutation = mutation_sub_targets(ctx, tc, mojo_compile_cmd, src_dir, root, deps, tests_closure[1:], _link_tail(tests_c_link), test_data, env_args, test_defines, cap)  # mutation.bzl
-    if markers:
+    if markers or first:
         public = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
         ctx.actions.run(
             cmd_args(
@@ -488,7 +494,7 @@ def _library_impl(ctx):
                 "copy",
                 ungated,
                 public.as_output(),
-                hidden = markers,
+                hidden = first + markers,
             ),
             category = "mojo_gate_join",
         )
@@ -614,6 +620,11 @@ mojo_library_rule = rule(
         # from); nothing else reads it. Unchecked: nothing verifies that `srcs`
         # come from this target, which is acceptable for a reader-only view.
         "gen": attrs.option(attrs.dep(), default = None),
+        # Optional: the freshness check of a library built from committed
+        # generated sources (`<name>_fresh`, tools/build/gen/defs.bzl). Its
+        # marker is the library's first gate: an input of the compile and of
+        # the join that makes the public package.
+        "fresh_gate": attrs.option(attrs.dep(), default = None),
         "import_name": attrs.option(attrs.string(), default = None),
         "srcs": attrs.list(attrs.source()),
         "test_optimization_level": attrs.string(default = TEST_OPT_LEVEL),
