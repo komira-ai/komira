@@ -402,7 +402,9 @@ shapes that look like an uncalled function without being one:
   file no test compiled (above).
 
 The evidence is a line of a test's report (its test source included) with a hit, whose code (not
-its comment or strings) holds the function's name followed by `(` or `[`. A call with no such
+its comment or strings) holds the function's name followed by `(` or `[`: `x.name(` for a method (a
+declaration that is indented), a bare `name(` for a free function, so the method `reduce_or` of a SIMD value is
+no evidence for a free function `reduce_or`. A declaration line is no call. A call with no such
 token is no evidence (`a != b` does not call `__ne__`: write `a.__ne__(b)` to say a test calls it).
 It is a heuristic over names, not a call graph: another function of the same name is evidence too.
 

@@ -12,6 +12,7 @@
 
 from std.testing import TestSuite, assert_equal
 
+from komira_simd.byte_class.horizontal_reduce import reduce_or
 from komira_simd.compress import _bool_mask_to_u16, _bool_mask_to_u8, _popcount_mask
 from komira_simd.fast_copy import nt_release_fence
 from komira_simd.pattern_copy import _cyclic_mask_16, _load_u8x16_unaligned, _store_u8x16_unaligned
@@ -86,6 +87,18 @@ def test_an_unaligned_16_byte_store_is_read_back_by_the_load() raises:
         assert_equal(Int(back[k]), k * 3 + 1)
     assert_equal(Int(buf[4]), 0)
     assert_equal(Int(buf[21]), 0)
+
+
+def test_reduce_or_is_the_or_of_every_lane() raises:
+    var v = SIMD[DType.uint8, 8](0)
+    assert_equal(Int(reduce_or[DType.uint8, 8](v)), 0)
+    v[2] = 0x05
+    v[7] = 0x30
+    assert_equal(Int(reduce_or[DType.uint8, 8](v)), 0x35)
+    var w = SIMD[DType.uint32, 4](0)
+    w[1] = 0x100
+    w[3] = 0x1
+    assert_equal(Int(reduce_or[DType.uint32, 4](w)), 0x101)
 
 
 def test_the_nt_fence_returns_and_leaves_memory_as_written() raises:

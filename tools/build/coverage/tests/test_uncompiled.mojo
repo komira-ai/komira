@@ -277,6 +277,50 @@ def test_a_declaration_is_no_evidence_that_a_function_is_called() raises:
     assert_equal(a.excluded_lines(), 0)
 
 
+def test_a_method_call_is_evidence_for_a_method_and_a_bare_call_for_a_free_function() raises:
+    # `free` (a free function) and `meth` (a method) are `@always_inline` and uncalled by any report. The hit line 1 reads
+    # `v.free()`: a method call of another type's `free`, no evidence for the free function; `meth` is called as
+    # `x.meth()`. A second hit line, a bare `free(v)`, is evidence for the free function.
+    var src = String(
+        "def driver(v: Int) -> Int:\n"        # 1
+        "    return v.free() + x.meth()\n"    # 2
+        "\n"                                  # 3
+        "@always_inline\n"                    # 4
+        "def free(v: Int) -> Int:\n"          # 5
+        "    return v\n"                      # 6
+        "\n"                                  # 7
+        "struct S:\n"                         # 8
+        "    @always_inline\n"                # 9
+        "    def meth(self) -> Int:\n"        # 10
+        "        pass\n"                      # 11
+        "\n"                                  # 12
+        "def driver2(v: Int) -> Int:\n"       # 13
+        "    return free(v)\n"                # 14
+    )
+    var files = List[String]()
+    files.append("src/mp/BUCK")
+    files.append(LIB)
+    var s = Sources(String(""))
+    s.texts[String(LIB)] = src
+    var one = List[Input]()
+    one.append(_report(String(UNCOMPILED_REPORT), _ints(5, 6, 10, 11), 0))
+    one.append(_report(String(TEST_REPORT), _ints(1, 2), 1))
+    var a = analyze(one, List[Input](), repo_files_of(files), Held(), s, Options())
+    var h = a.files[a.file_index(String(LIB))].hits.copy()
+    # `meth` (10, 11) is left out; `free` (5, 6) is counted: only a method call of that name was hit.
+    assert_false(10 in h)
+    assert_true(5 in h)
+    assert_true(6 in h)
+    # With the bare call hit too, `free` is left out as well.
+    var two = List[Input]()
+    two.append(_report(String(UNCOMPILED_REPORT), _ints(5, 6, 10, 11), 0))
+    two.append(_report(String(TEST_REPORT), _ints(1, 2, 14), 1))
+    var b = analyze(two, List[Input](), repo_files_of(files), Held(), s, Options())
+    var h2 = b.files[b.file_index(String(LIB))].hits.copy()
+    assert_false(5 in h2)
+    assert_false(10 in h2)
+
+
 def main() raises:
     test_a_function_a_test_called_is_left_out_and_the_rest_is_counted()
     test_a_function_nobody_calls_is_counted_whatever_its_class()
@@ -287,4 +331,5 @@ def main() raises:
     test_what_is_left_out_is_in_the_result_and_the_summary()
     test_a_file_the_report_leaves_nothing_of_counts_like_one_no_report_names()
     test_a_declaration_is_no_evidence_that_a_function_is_called()
+    test_a_method_call_is_evidence_for_a_method_and_a_bare_call_for_a_free_function()
     test_the_names_that_set_the_reports_apart()

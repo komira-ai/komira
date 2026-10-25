@@ -13,7 +13,8 @@ Those two shapes are told from a function nobody calls only by evidence that a t
 function, so a line of the report is left out of the numbers only with it:
 
 * an `@always_inline` function: every own line, when a line outside the function that calls it
-  (its name followed by `(` or `[`, in the code of the line) was hit in a test's report;
+  (its name followed by `(` or `[`, in the code of the line; `x.name(` for a method, a bare
+  `name(` for a free function) was hit in a test's report;
 * a function with `comptime if` / `@parameter` arms (decls.mojo, `arms`): the lines inside those
   arms, when the same evidence exists. The lines outside the arms are counted.
 
@@ -111,9 +112,19 @@ def _code_words_called(line: String, mut into: Dict[String, Bool]):
                 start = i
         else:
             if start >= 0 and (c == 40 or c == 91):
-                into[substr(line, start, i)] = True
+                # `.name(` is a method call, a bare `name(` a call of a free function.
+                var dotted = start > 0 and b[start - 1] == UInt8(46)
+                into[(String(".") if dotted else String("")) + substr(line, start, i)] = True
             start = -1
         i += 1
+
+
+def _indent(line: String) -> Int:
+    var b = line.as_bytes()
+    var i = 0
+    while i < len(b) and (b[i] == UInt8(32) or b[i] == UInt8(9)):
+        i += 1
+    return i
 
 
 def names_called_on(text: String, hit: Dict[Int, Bool], mut into: Dict[String, Bool]):
@@ -143,8 +154,14 @@ def unreliable_lines(text: String, called: Dict[String, Bool]) -> Dict[Int, Bool
     function, the lines in the arms of a gated one, each only when its name is in `called`."""
     var out = Dict[Int, Bool]()
     var fns = declared_functions(text)
+    var lines = split_lines(text)
     for k in range(len(fns)):
-        if fns[k].name not in called:
+        # A method (a declaration indented) is called as `x.name(`, a free function as `name(`: a
+        # `.name(` call of a same-named method of another type is no evidence for a free function.
+        var key = fns[k].name
+        if fns[k].line >= 1 and fns[k].line <= len(lines) and _indent(lines[fns[k].line - 1]) > 0:
+            key = String(".") + key
+        if key not in called:
             continue
         if fns[k].kind == String(KIND_ALWAYS_INLINE):
             for i in range(len(fns[k].lines)):
