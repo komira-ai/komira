@@ -495,6 +495,7 @@ TARGETS = [
     "komira//tools/build/package:release_set_kci",
     "komira//tools/build/package:shell_lint",
     "komira//tools/build/platforms/default:default",
+    "komira//tools/build/platforms:darwin-arm64",
     "komira//tools/build/platforms:host",
     "komira//tools/build/proto-codegen/aws_endpoint_rules:endpoint_bindings_conda",
     "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_ec2_conda",
