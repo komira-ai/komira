@@ -20,8 +20,8 @@ else
     fail "proto: generated package tests (see $LOG/proto_tests.log)"
 fi
 check_executor proto_tests
-if ! "$BUCK2" build 'tests//functional/proto:person_proto[person.mojo]' --out "$LOG/person.mojo" > "$LOG/proto_gen.log" 2>&1 ||
-    ! "$BUCK2" build 'tests//negative/proto:person_renamed_proto[person.mojo]' --out "$LOG/person_renamed.mojo" >> "$LOG/proto_gen.log" 2>&1; then
+if ! "$BUCK2" build 'tests//functional/proto:person_proto_gen[person.mojo]' --out "$LOG/person.mojo" > "$LOG/proto_gen.log" 2>&1 ||
+    ! "$BUCK2" build 'tests//negative/proto:person_renamed_proto_gen[person.mojo]' --out "$LOG/person_renamed.mojo" >> "$LOG/proto_gen.log" 2>&1; then
     fail "proto: generating person.mojo (see $LOG/proto_gen.log)"
 elif grep -q 'var id: Int64' "$LOG/person.mojo" && ! grep -q 'var ident:' "$LOG/person.mojo" &&
     grep -q 'var ident: Int64' "$LOG/person_renamed.mojo" && ! grep -q 'var id:' "$LOG/person_renamed.mojo"; then
@@ -38,11 +38,11 @@ expect_red proto_db_undeclared "protoc-gen-mojo_db wrote no code (or an empty fi
 # and compiles; bundling the whole closure also generates options.mojo, which
 # the package cannot compile. (A selection outside the closure is refused at
 # analysis: //tools/build/selftest:analysis_refusals_proto.)
-if ! "$BUCK2" build tests//functional/proto:roster_proto 'tests//functional/proto:roster_proto[gen]' --show-full-output \
+if ! "$BUCK2" build tests//functional/proto:roster_proto tests//functional/proto:roster_proto_gen --show-full-output \
     > "$LOG/proto_select.out" 2> "$LOG/proto_select.log"; then
     fail "proto: bundle_only package roster_proto (see $LOG/proto_select.log)"
-elif got=$(ls -A "$(awk '/\[gen\]/{print $2}' "$LOG/proto_select.out")" | tr '\n' ' ') &&
-    [ "$got" = "__init__.mojo person.mojo roster.mojo " ]; then
+elif got=$(ls -A "$(awk '$1 ~ /roster_proto_gen$/{print $2}' "$LOG/proto_select.out")" | tr '\n' ' ') &&
+    [ "$got" = "__init__.mojo _parts person.mojo roster.mojo " ]; then
     pass "proto: bundle_only generates the selected files only"
 else
     fail "proto: bundle_only package holds: ${got:-nothing} (see $LOG/proto_select.out)"
@@ -78,7 +78,7 @@ DET=komira_tests_det
 # An action that really ran, not a cache hit: `re(...)` remotely, `local` in a local-only run.
 if [ "${MODE:?set by run_tests.sh}" = local ]; then EXEC_RAN_RE='^local'; else EXEC_RAN_RE='^re\('; fi
 DET_TARGETS=(komira//tools/build/proto-codegen:protoc-gen-mojo komira//tools/build/proto-codegen:protoc-gen-mojo-db
-    'tests//functional/proto:person_proto[gen]' 'tests//functional/proto:team_proto[gen]' 'tests//functional/proto:tasks_db[gen]'
+    'tests//functional/proto:person_proto_gen' 'tests//functional/proto:team_proto_gen' 'tests//functional/proto:tasks_db_gen'
     tests//functional/proto:person_proto tests//functional/proto:tasks_db)
 det_build() { # run number; prints a reason on failure
     if ! "$BUCK2" --isolation-dir "$DET" clean > "$LOG/det_clean$1.log" 2>&1; then
