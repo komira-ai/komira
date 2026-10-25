@@ -33,7 +33,8 @@ from .dict_encoder import (
 from .page_size_limit import check_parquet_page_size
 from .thrift_writer import ThriftCompactWriter
 from .writer_bitpack import _pack_count_bytes, _pack_fixed_width_into, min_bit_width
-from .writer_encode import _append_prefixed, _def_levels, _write_uleb128
+from komira_buffer.byte_buffer import write_uleb128
+from .writer_encode import _append_prefixed, _def_levels
 from .writer_helpers import _compress_page_body
 
 
@@ -59,11 +60,11 @@ def encode_dict_indices_rle(indices: List[Int32], bit_width: Int) raises -> List
         return result^
     if bit_width == 0:
         # One RLE run of `n` zeros; the value takes ceil(0 / 8) = 0 bytes.
-        _write_uleb128(result, n << 1)
+        write_uleb128(n << 1, result)
         return result^
 
     var num_groups = (n + 7) >> 3
-    _write_uleb128(result, (num_groups << 1) | 1)
+    write_uleb128((num_groups << 1) | 1, result)
     var padded = num_groups * 8
     var values = List[Int64](length=padded, fill=Int64(0))
     for i in range(n):

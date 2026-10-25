@@ -80,7 +80,7 @@ def _column_is_fast_path_eligible(
     return True
 
 
-def _finish_levels(var bits: List[UInt8], rows: Int) -> List[UInt8]:
+def _finish_levels(var bits: List[UInt8], rows: Int) raises -> List[UInt8]:
     """The definition-level run over `rows` rows whose validity bits are
     `bits`."""
     var out = _def_level_frame(rows)

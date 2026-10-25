@@ -34,7 +34,8 @@ from .column_page import (
     _require_no_nulls_when_required,
 )
 from .writer_bitpack import _pack_count_bytes, _pack_fixed_width_into
-from .writer_encode import _def_levels, _write_uleb128
+from komira_buffer.byte_buffer import write_uleb128
+from .writer_encode import _def_levels
 from .writer_helpers import make_int32_statistics, make_int64_statistics
 
 
@@ -156,13 +157,13 @@ def _encode_delta_blocks(mut out: List[UInt8], deltas: List[Int64]):
         di += block_count
 
 
-def _encode_dbp[bits: Int](values: List[Int64]) -> List[UInt8]:
+def _encode_dbp[bits: Int](values: List[Int64]) raises -> List[UInt8]:
     """DELTA_BINARY_PACKED body of `values` (sign-extended when bits == 32)."""
     var n = len(values)
     var out = List[UInt8]()
-    _write_uleb128(out, DBP_BLOCK_SIZE)
-    _write_uleb128(out, DBP_NUM_MINIBLOCKS)
-    _write_uleb128(out, n)
+    write_uleb128(DBP_BLOCK_SIZE, out)
+    write_uleb128(DBP_NUM_MINIBLOCKS, out)
+    write_uleb128(n, out)
     _write_zigzag64(out, values[0] if n > 0 else Int64(0))
     if n <= 1:
         return out^
@@ -177,12 +178,12 @@ def _encode_dbp[bits: Int](values: List[Int64]) -> List[UInt8]:
     return out^
 
 
-def encode_delta_binary_packed_i64(values: List[Int64]) -> List[UInt8]:
+def encode_delta_binary_packed_i64(values: List[Int64]) raises -> List[UInt8]:
     """DELTA_BINARY_PACKED body of INT64 values (no page header, no levels)."""
     return _encode_dbp[64](values)
 
 
-def encode_delta_binary_packed_i32(values: List[Int32]) -> List[UInt8]:
+def encode_delta_binary_packed_i32(values: List[Int32]) raises -> List[UInt8]:
     """DELTA_BINARY_PACKED body of INT32 values, with 32-bit wrapping deltas
     (so no miniblock is wider than 32 bits)."""
     var wide = List[Int64](capacity=max(len(values), 1))

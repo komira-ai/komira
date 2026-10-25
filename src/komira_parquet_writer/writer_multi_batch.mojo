@@ -88,7 +88,7 @@ def _two_def_levels(
     offset2: Int,
     n2: Int,
     nulls2: Int,
-) -> List[UInt8]:
+) raises -> List[UInt8]:
     """The definition levels of two arrays in a row: one frame over `n1 + n2`
     rows, bit i set when row i is present."""
     var total = n1 + n2
