@@ -64,6 +64,17 @@ def _is_ident(c: Int) -> Bool:
     return (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95
 
 
+def _starts_word(line: String, at: Int, word: String) -> Bool:
+    var b = line.as_bytes()
+    var w = word.as_bytes()
+    if at + len(w) >= len(b):
+        return False
+    for k in range(len(w)):
+        if b[at + k] != w[k]:
+            return False
+    return b[at + len(w)] == UInt8(32) or b[at + len(w)] == UInt8(9)
+
+
 def _code_words_called(line: String, mut into: Dict[String, Bool]):
     """Adds to `into` each identifier of the code of `line` that is followed by `(` or `[`: what
     the line calls. A comment and the inside of a quoted string are not code."""
@@ -72,6 +83,12 @@ def _code_words_called(line: String, mut into: Dict[String, Bool]):
     var quote = 0
     var i = 0
     var start = -1
+    # A declaration calls nothing: `def f(` is no evidence that a test calls `f`.
+    var first = 0
+    while first < n and (b[first] == UInt8(32) or b[first] == UInt8(9)):
+        first += 1
+    if _starts_word(line, first, "def") or _starts_word(line, first, "fn"):
+        return
     while i < n:
         var c = Int(b[i])
         if quote != 0:

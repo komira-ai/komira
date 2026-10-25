@@ -256,6 +256,27 @@ def test_the_names_that_set_the_reports_apart() raises:
     assert_false(is_uncompiled_report(String(TEST_REPORT)))
 
 
+def test_a_declaration_is_no_evidence_that_a_function_is_called() raises:
+    # The hit line is the `def` line of another function that has the same name as `inl_called`
+    # (its parameter list opens right after the name): a declaration calls nothing, so nothing is left out.
+    var l = List[Input]()
+    l.append(_report(String(UNCOMPILED_REPORT), _uncompiled_lines(), 0))
+    l.append(_report(String(TEST_REPORT), _ints(1), 1))
+    var files = List[String]()
+    files.append("src/mp/BUCK")
+    files.append(LIB)
+    files.append("src/mp/src/mp/other.mojo")
+    l.append(Input(
+        String(FORMAT_COBERTURA), String(""), String("buck-out/v2/art/komira/x/src/mp/__test_c__cov__/test_c__cov.cobertura.xml"),
+        String("<coverage><packages><package name=\"\"><classes><class name=\"o\" filename=\"src/mp/src/mp/other.mojo\"><lines><line number=\"1\" hits=\"1\"/></lines></class></classes></package></packages></coverage>"),
+    ))
+    var s = Sources(String(""))
+    s.texts[String(LIB)] = String(LIB_SOURCE)
+    s.texts[String("src/mp/src/mp/other.mojo")] = String("  def inl_called(x: Int) -> Int:  # declared, not called\n")
+    var a = analyze(l, List[Input](), repo_files_of(files), Held(), s, Options())
+    assert_equal(a.excluded_lines(), 0)
+
+
 def main() raises:
     test_a_function_a_test_called_is_left_out_and_the_rest_is_counted()
     test_a_function_nobody_calls_is_counted_whatever_its_class()
@@ -265,4 +286,5 @@ def main() raises:
     test_the_same_reports_under_other_names_count_every_function()
     test_what_is_left_out_is_in_the_result_and_the_summary()
     test_a_file_the_report_leaves_nothing_of_counts_like_one_no_report_names()
+    test_a_declaration_is_no_evidence_that_a_function_is_called()
     test_the_names_that_set_the_reports_apart()
