@@ -351,15 +351,22 @@ def test_a_gated_function_has_arms_and_a_closure_is_a_function_of_its_own() rais
         "    for i in range(3):\n"       # 17
         "        pass\n"                 # 18
         "    return 0\n"                 # 19
+        "def d() -> Int:\n"              # 20
+        "    comptime if A:\n"           # 21
+        "        return 1\n"             # 22
+        "    elif B:\n"                  # 23
+        "        return 2\n"             # 24
+        "    else:\n"                    # 25
+        "        return 3\n"             # 26
     )
     # The arms are the own lines of the `comptime if` / `else` blocks, gate lines included; the lines
     # outside them (2, 7) are no arm. `outer` is plain: a closure's `comptime if` does not make the
     # function around it gated, and the `@parameter` over the closure's `def` is no arm; the closure is
-    # `comptime_if` on its own lines (11, 12). `@parameter` over a `for` opens an arm.
+    # `comptime_if` on its own lines (11, 12). `@parameter` over a `for` opens an arm. A plain `elif` or `else` at the gate's indent continues the chain: its block is an arm.
     assert_equal(
         _arms(declared_functions(src)),
         String("a=") + KIND_COMPTIME_IF + ":3,4,5,6;outer=" + KIND_PLAIN + ":;inner=" + KIND_COMPTIME_IF
-        + ":11,12;c=" + KIND_COMPTIME_IF + ":16,17,18;",
+        + ":11,12;c=" + KIND_COMPTIME_IF + ":16,17,18;d=" + KIND_COMPTIME_IF + ":21,22,23,24,25,26;",
     )
 
 

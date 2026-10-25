@@ -322,22 +322,29 @@ def _declarations(text: String, mut requirements: List[FnDecl]) -> List[FnDecl]:
                 continue
             gated = True
             var ind = _indent(ls[gl - 1].text)
-            var j = gl  # the 0-based index of the line after the gate line
-            if _code_of(ls[gl - 1]).startswith("@parameter"):
-                # The arm is the statement the decorator opens and its body: past further decorators and
-                # the statement's own line.
-                while j < n and not (ls[j].code and not starts_in_string[j] and not _code_of(ls[j]).startswith("@")):
+            var start = gl - 1  # the 0-based index of the first line of the arm
+            while True:
+                var j = start + 1  # the 0-based index of the line after it
+                if _code_of(ls[start]).startswith("@parameter"):
+                    # The arm is the statement the decorator opens and its body: past further decorators and
+                    # the statement's own line.
+                    while j < n and not (ls[j].code and not starts_in_string[j] and not _code_of(ls[j]).startswith("@")):
+                        j += 1
                     j += 1
-                j += 1
-            var stop = n
-            while j < n:
-                if ls[j].code and not starts_in_string[j] and _indent(ls[j].text) <= ind:
-                    stop = j
-                    break
-                j += 1
-            for ln in range(gl, stop + 1):
-                if ln in own:
-                    out[k].arms.append(ln)
+                var stop = n
+                while j < n:
+                    if ls[j].code and not starts_in_string[j] and _indent(ls[j].text) <= ind:
+                        stop = j
+                        break
+                    j += 1
+                for ln in range(start + 1, stop + 1):
+                    if ln in own:
+                        out[k].arms.append(ln)
+                # An `elif` or `else` at the same indent continues a compile-time chain: its block is an arm too.
+                if stop < n and ls[stop].code and not starts_in_string[stop] and _indent(ls[stop].text) == ind and _continues_chain(_code_of(ls[stop])):
+                    start = stop
+                    continue
+                break
         if gated and out[k].kind == String(KIND_PLAIN):
             out[k].kind = String(KIND_COMPTIME_IF)
         # Each arm line once, in order (nested arms overlap).
@@ -350,6 +357,22 @@ def _declarations(text: String, mut requirements: List[FnDecl]) -> List[FnDecl]:
         sort_ints(uniq)
         out[k].arms = uniq^
     return out^
+
+
+def _continues_chain(code: String) -> Bool:
+    """Whether `code` is an `elif` or an `else` (the word, then not an identifier byte)."""
+    for w in ["elif", "else"]:
+        var word = String(w)
+        if code.startswith(word):
+            var b = code.as_bytes()
+            var at = word.byte_length()
+            if at >= len(b):
+                return True
+            var c = Int(b[at])
+            var ident = (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95
+            if not ident:
+                return True
+    return False
 
 
 def _opens_arm(ls: List[SourceLine], starts_in_string: List[Bool], at: Int) -> Bool:

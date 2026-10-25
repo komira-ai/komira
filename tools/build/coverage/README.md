@@ -347,7 +347,7 @@ and the result JSON splits them:
 |---|---|---|---|
 | `plain` | neither below | `unrecorded_functions` | evidence no test reaches it; the class a census counts |
 | `always_inline` | a decorator line right above it starts with `@always_inline` | `unrecorded_functions_unreliable` | none: the body is inlined into its callers and what is left may be attributed to the caller's lines or folded away |
-| `comptime_if` | its own lines (a nested function's left out: a closure is a function of its own) hold a `comptime if`, `comptime elif` or `comptime else` line, or a `@parameter` over a statement (not over a nested `def`, which is a closure): the lines of those arms are its `arms` | `unrecorded_functions_unreliable` | none: a body folded to a constant, or wholly in an arm dropped on this platform or build, emits no line though tests call it |
+| `comptime_if` | its own lines (a nested function's left out: a closure is a function of its own) hold a `comptime if`, `comptime elif` or `comptime else` line, or a `@parameter` over a statement (not over a nested `def`, which is a closure), with the plain `elif` / `else` blocks that continue the chain at the same indent: the lines of those arms are its `arms` | `unrecorded_functions_unreliable` | none: a body folded to a constant, or wholly in an arm dropped on this platform or build, emits no line though tests call it |
 
 Known false positives, all seen on real reports: an `@always_inline` body
 whose code the compiler attributed to the caller (a test calls it, its
