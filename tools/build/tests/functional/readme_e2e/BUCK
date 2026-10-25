@@ -65,7 +65,7 @@ native_conda(
     archive = ":native_add[static-pic]",
     lib = ":fixture_native",
     manifest = "fixture_native.toml",
-    mopm = "toolchains//:mopm_0_0_40",
+    mopm = "toolchains//:mopm_0_0_49",
     native_id = "komira_fixture_native",
     package = "fixture_native",
     version = "0.1.0",
@@ -84,7 +84,7 @@ readme_e2e_staged(
 
 readme_e2e(
     name = "fixture_native_e2e",
-    mopm = "toolchains//:mopm_0_0_40",
+    mopm = "toolchains//:mopm_0_0_49",
     package = "fixture_native",
     staged = ":staged_native",
     version = "0.1.0",
