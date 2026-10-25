@@ -66,6 +66,13 @@ mod tests {
     }
 
     #[test]
+    fn the_first_line_starts_with_hash_space_token_space() {
+        let h = render("g", "1", &[]);
+        assert!(h.starts_with("# @generated "), "{h}");
+        assert_eq!(GENERATED_TOKEN, "@generated");
+    }
+
+    #[test]
     fn each_input_is_one_line_in_the_order_given() {
         let h = render(
             "g",

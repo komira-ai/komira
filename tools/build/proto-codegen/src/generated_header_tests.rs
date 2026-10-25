@@ -186,7 +186,7 @@ fn every_emitted_file_starts_with_the_generated_token() {
     for (label, text) in everything() {
         let first = text.lines().next().unwrap_or("");
         assert!(
-            first.starts_with('#') && first.contains(GENERATED_TOKEN),
+            first.starts_with(&format!("# {GENERATED_TOKEN} ")),
             "{label}: the first line is `{first}`"
         );
         assert!(

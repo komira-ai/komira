@@ -18,7 +18,7 @@ test "init_text: a generated-file header of two comment lines" {
         P.init_text,
     );
     var lines = std.mem.splitScalar(u8, P.init_text, '\n');
-    try t.expect(std.mem.indexOf(u8, lines.first(), "@generated") != null);
+    try t.expect(std.mem.startsWith(u8, lines.first(), "# @generated "));
 }
 
 test "checkOutputs: exactly the expected files and __init__.mojo is ok" {

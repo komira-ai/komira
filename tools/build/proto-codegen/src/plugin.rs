@@ -114,7 +114,9 @@ impl CodeGeneratorResponse {
 /// The sha256 of each input `.proto`, by import path: what a generated
 /// file's header pins ([`crate::header`]).
 ///
-/// The digest is of the file's `FileDescriptorProto` bytes. Those carry the
+/// The digest is of the file's `FileDescriptorProto` bytes without its
+/// `source_code_info` (field 9: spans and comments, which no generator reads,
+/// so a comment-only edit is not a new input). The bytes carry the
 /// `(google.api.http)` and `(komira.db.*)` options that `prost-types` drops
 /// on decode, so an annotation-only change moves the digest, when the bytes
 /// protoc sent are at hand ([`InputPins::from_request_bytes`],
@@ -138,11 +140,57 @@ struct DescriptorSetFileBytes {
     file: Vec<Vec<u8>>,
 }
 
+/// `FileDescriptorProto.source_code_info`.
+const SOURCE_CODE_INFO_FIELD: u64 = 9;
+
+/// `bytes`, a serialized message, without its field 9. A message that does
+/// not parse as protobuf wire format is returned as it is.
+fn without_source_info(bytes: Vec<u8>) -> Vec<u8> {
+    fn varint(b: &[u8], at: &mut usize) -> Option<u64> {
+        let mut v = 0u64;
+        for shift in (0..70).step_by(7) {
+            let byte = *b.get(*at)?;
+            *at += 1;
+            v |= u64::from(byte & 0x7f).checked_shl(shift)?;
+            if byte & 0x80 == 0 {
+                return Some(v);
+            }
+        }
+        None
+    }
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        let start = at;
+        let Some(tag) = varint(&bytes, &mut at) else { return bytes };
+        let end = match tag & 7 {
+            0 => varint(&bytes, &mut at).map(|_| at),
+            1 => Some(at + 8),
+            2 => varint(&bytes, &mut at).and_then(|n| at.checked_add(usize::try_from(n).ok()?)),
+            5 => Some(at + 4),
+            _ => None,
+        };
+        match end {
+            Some(e) if e <= bytes.len() => at = e,
+            _ => return bytes,
+        }
+        if tag >> 3 != SOURCE_CODE_INFO_FIELD {
+            out.extend_from_slice(&bytes[start..at]);
+        }
+    }
+    out
+}
+
 impl InputPins {
     /// Pins from the descriptors as decoded, re-encoded. Options `prost-types`
     /// does not model are not in these bytes.
     pub fn from_request(request: &CodeGeneratorRequest) -> Self {
-        Self::from_files(request, request.proto_file.iter().map(|f| f.encode_to_vec()).collect())
+        let files = request
+            .proto_file
+            .iter()
+            .map(|f| FileDescriptorProto { source_code_info: None, ..f.clone() }.encode_to_vec())
+            .collect();
+        Self::from_files(request, files)
     }
 
     /// Pins from the bytes of a `CodeGeneratorRequest`, as protoc wrote them.
@@ -169,6 +217,7 @@ impl InputPins {
         if files.len() != request.proto_file.len() {
             return Self::from_request(request);
         }
+        let files: Vec<Vec<u8>> = files.into_iter().map(without_source_info).collect();
         Self(
             request
                 .proto_file
@@ -230,6 +279,44 @@ mod tests {
         assert_eq!(pins.get("b/b.proto"), crate::sha256::hex(&b.encode_to_vec()));
         assert_ne!(pins.get("a/a.proto"), pins.get("b/b.proto"));
         assert_eq!(pins.get("c/c.proto"), "");
+    }
+
+    #[test]
+    fn source_info_is_not_part_of_a_pin() {
+        use prost_types::SourceCodeInfo;
+        let plain = file("a/a.proto");
+        let mut commented = plain.clone();
+        commented.source_code_info = Some(SourceCodeInfo { location: vec![] });
+        commented.source_code_info.as_mut().unwrap().location.push(
+            prost_types::source_code_info::Location {
+                leading_comments: Some(" a comment".into()),
+                ..Default::default()
+            },
+        );
+        assert_ne!(plain.encode_to_vec(), commented.encode_to_vec());
+        let a = request(vec![plain]);
+        let b = request(vec![commented]);
+        assert_eq!(InputPins::from_request(&a), InputPins::from_request(&b));
+        assert_eq!(
+            InputPins::from_request_bytes(&a, &a.encode_to_vec()),
+            InputPins::from_request_bytes(&b, &b.encode_to_vec())
+        );
+    }
+
+    #[test]
+    fn stripping_leaves_other_fields_and_unparseable_bytes_alone() {
+        let plain = file("a/a.proto").encode_to_vec();
+        assert_eq!(without_source_info(plain.clone()), plain);
+        // field 9, length 1; then an unknown field 99 varint
+        let mut with = plain.clone();
+        with.extend_from_slice(&[0x4a, 0x01, 0xff]);
+        with.extend_from_slice(&[0x98, 0x06, 0x01]);
+        let mut want = plain.clone();
+        want.extend_from_slice(&[0x98, 0x06, 0x01]);
+        assert_eq!(without_source_info(with), want);
+        // a length that runs past the end
+        let bad = vec![0x4a, 0x09, 0x01];
+        assert_eq!(without_source_info(bad.clone()), bad);
     }
 
     #[test]
