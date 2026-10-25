@@ -43,6 +43,12 @@
 #                   (`--oidc`) and no secret. What
 #                   must exist before the variable is set is in docs/ci.md,
 #                   "Enabling the mopm beta publish".
+#   `mopm-e2e-beta`  after `mopm-publish-beta`, under its gate, in the environment
+#                   `build` (it joins the farm; a job holds one environment): it
+#                   downloads the files the beta registry serves, checks each one's
+#                   sha256 and size against the staged plan, and runs the README e2e
+#                   on the farm against the downloaded bytes. It publishes nothing
+#                   and reads no secret. docs/ci.md, "Verifying the beta publish".
 #
 # It runs named Buck2 targets on the farm, through the buck2-farm action
 # (.github/actions/buck2-farm), which fails a step unless buck2 succeeded and
@@ -414,3 +420,70 @@ jobs:
         run: chmod +x "$RUNNER_TEMP/mopm-publish/mopm"
       - name: mopm publish --staged --oidc
         run: '"$RUNNER_TEMP/mopm-publish/mopm" publish --staged "$RUNNER_TEMP/mopm-publish/staged_beta" --oidc --registry beta'
+
+  # VERIFY WHAT BETA SERVES. `mopm-publish-beta` sent the staged set to the beta
+  # registry; this job downloads the files the registry now serves, proves they
+  # are the bytes that were staged, and runs the README e2e on them. It is its
+  # own job because a job holds one environment: `mopm-publish-beta` is in
+  # `beta`, and joining the farm needs `build`. Same gate as the beta jobs, after
+  # the publish. It publishes nothing and reads no secret: the only requests it
+  # makes are GETs of the beta index and channel. `id-token: write` is for
+  # farm-connect only (the token Tailscale trusts), as in `mopm-stage`.
+  #   1. the plan: the artifact of `mopm-stage-beta` (plan.json and the READMEs of
+  #      the staged set; the `.conda` files in it are never read);
+  #   2. `release_beta_fetch` (built on the farm, run here: it makes requests)
+  #      downloads every file of the plan from the channel the beta index names
+  #      and fails unless each file's sha256 and size are the plan's; only then
+  #      does it write release/beta_set (the plan, the READMEs, the DOWNLOADED
+  #      files);
+  #   3. the README e2e on the farm against that directory
+  #      (`-c komira_release.staged=beta`, at the version of this run).
+  # What it proves is in docs/ci.md, "Verifying the beta publish".
+  mopm-e2e-beta:
+    needs: mopm-publish-beta
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_BETA_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    environment: build
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      # for farm-connect only: the token Tailscale trusts
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-staged-beta-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-e2e-beta/staged_beta
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+          tls: ${{ vars.FARM_TLS || 'false' }}
+      - name: the buckconfig names the farm
+        run: |
+          ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'
+      - name: build the farm assertion
+        id: assert
+        run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+      - name: build the beta fetch tool
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //tools/build/ci:release_beta_fetch --out ${{ runner.temp }}/mopm-e2e-beta/release_beta_fetch
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: download what beta serves and check it against the plan
+        run: '"$RUNNER_TEMP/mopm-e2e-beta/release_beta_fetch" --staged "$RUNNER_TEMP/mopm-e2e-beta/staged_beta" --config-url https://api.beta.mopm.dev/index/config.json --stage beta --out release/beta_set'
+      - name: the README e2e against the downloaded set
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build -c komira_release.staged=beta -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: Stop buck2
+        if: always()
+        run: ./buck2 kill || true
