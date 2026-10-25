@@ -143,10 +143,12 @@ def test_column_index_bytes() raises:
     t.add_page(4, 10, 0, _i32(1), _i32(2), 3)
     var got = serialize_column_index(t)
     var want = List[UInt8]()
-    # 1: list<bool> null_pages, 1 element: 0x19 (delta 1, list), 0x11, 0x00
+    # 1: list<bool> null_pages, 1 element: 0x19 (delta 1, list), 0x11, then
+    # the element: 2 is false in the compact protocol (1 is true; 0 is not a
+    # boolean and a strict reader rejects it).
     want.append(0x19)
     want.append(0x11)
-    want.append(0x00)
+    want.append(0x02)
     # 2: list<binary> min_values: 0x19, 0x18, len 4, 01 00 00 00
     want.append(0x19)
     want.append(0x18)
