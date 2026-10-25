@@ -206,6 +206,9 @@ _CLASSIFY_CASES = ["andor", "case", "files", "main", "rules", "try"]
 zig_test(
     name = "cov_branch_source_test",
     exec_compatible_with = LINUX_X86_64,
+    # Unused by the test; what makes it a validation of the public target, as the
+    # cases below are (they receive the executable they run).
+    env_tools = {"COV_BRANCH_CLASSIFY": ":cov_branch_classify_exe"},
     imports = ["cov_branch_source.zig"],
     src = "cov_branch_source_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
