@@ -469,12 +469,12 @@ def test_13b_numeric_string_size_is_coerced() raises:
 
 def test_14_sibling_clauses_are_refused_not_dropped() raises:
     var one = String("more than one")
-    # `match` and `bool` side by side: the bool's tenant filter would be
+    # `match` and `bool` side by side: the bool's team filter would be
     # dropped.
     var e = _search_raises(
         String(
             '{"query":{"match":{"body":"x"},"bool":{"filter":'
-            '[{"term":{"tenant":"a"}}]}}}'
+            '[{"term":{"team":"a"}}]}}}'
         )
     )
     assert_true(e.find(one) >= 0, "14: match + bool: " + e)
@@ -482,7 +482,7 @@ def test_14_sibling_clauses_are_refused_not_dropped() raises:
     # split aggregated.
     e = _search_raises(
         String(
-            '{"query":{"match_all":{},"term":{"tenant":"a"}},'
+            '{"query":{"match_all":{},"term":{"team":"a"}},'
             '"aggs":{"a":{"avg":{"field":"f"}}}}'
         )
     )
@@ -491,7 +491,7 @@ def test_14_sibling_clauses_are_refused_not_dropped() raises:
     e = _search_raises(
         String(
             '{"query":{"bool":{"must":[{"match":{"body":"x"}},'
-            '{"term":{"tenant":"a","status":"b"}}]}}}'
+            '{"term":{"team":"a","status":"b"}}]}}}'
         )
     )
     assert_true(e.find(one) >= 0, "14: term with two fields: " + e)
@@ -508,7 +508,7 @@ def test_14_sibling_clauses_are_refused_not_dropped() raises:
     e = _search_raises(
         String(
             '{"query":{"bool":{"filter":[{"match":{"body":"x"},'
-            '"term":{"tenant":"a"}}]}}}'
+            '"term":{"team":"a"}}]}}}'
         )
     )
     assert_true(e.find(one) >= 0, "14: arm element with two clauses: " + e)
@@ -846,7 +846,7 @@ def test_23_empty_envelope_track_total_and_skeleton() raises:
 def test_24_filter_only_bool_with_aggs_refused() raises:
     var e = _search_raises(
         String(
-            '{"query":{"bool":{"filter":[{"term":{"tenant":"a"}}]}},'
+            '{"query":{"bool":{"filter":[{"term":{"team":"a"}}]}},'
             '"aggs":{"a":{"avg":{"field":"f"}}}}'
         )
     )
