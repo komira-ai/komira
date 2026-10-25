@@ -22,7 +22,9 @@
 //!  4. only when every file matched, writes `--out`: `plan.json` as it was, each README, and the
 //!     downloaded `.conda` files at `<subdir>/<filename>`: a staged set made of the published
 //!     bytes. They are written into `<out>.partial` and moved to `--out` at the end, so nothing is left
-//!     when anything failed, a write included. `--out` must be absent or empty.
+//!     when anything failed, a write included. `--out` must be absent or empty, except that it may hold
+//!     a file named `BUCK` (release/beta_set/BUCK, checked in), which is kept: the members are then
+//!     moved in beside it, and a failed move takes back the ones already moved.
 //!
 //! It makes read-only GET requests and holds no credential.
 const std = @import("std");
@@ -161,6 +163,7 @@ fn collide(x: []const u8, y: []const u8) bool {
 fn checkCollisions(a: Allocator, why: *[]const u8, plan: Plan) Error!void {
     var paths = std.ArrayList([]const u8).empty;
     try paths.append(a, "plan.json");
+    try paths.append(a, keep_name);
     for (plan.members) |m| {
         try paths.append(a, m.readme.?);
         for (m.files) |f| try paths.append(a, try std.fmt.allocPrint(a, "{s}/{s}", .{ f.subdir, f.filename }));
@@ -294,8 +297,50 @@ fn outIsFree(why: *[]const u8, a: Allocator, out: []const u8) Error!void {
     };
     defer dir.close();
     var it = dir.iterate();
-    const first = it.next() catch |e| return refuse(a, why, "cannot list --out {s}: {s}", .{ out, @errorName(e) });
-    if (first != null) return refuse(a, why, "--out {s} is not empty", .{out});
+    // The checked-in BUCK of the directory that holds the set (release/beta_set/BUCK) is the one entry allowed.
+    while (it.next() catch |e| return refuse(a, why, "cannot list --out {s}: {s}", .{ out, @errorName(e) })) |entry| {
+        if (entry.kind == .file and std.mem.eql(u8, entry.name, keep_name)) continue;
+        return refuse(a, why, "--out {s} is not empty (only a file named {s} may be there)", .{ out, keep_name });
+    }
+}
+
+/// The one file an existing `--out` may hold, and keeps: the BUCK file of the package whose directory is the set.
+pub const keep_name = "BUCK";
+
+fn dirExists(path: []const u8) bool {
+    var d = std.fs.cwd().openDir(path, .{}) catch return false;
+    d.close();
+    return true;
+}
+
+/// Moves each top-level entry of `tmp` into the existing directory `out`, then removes `tmp`; a failed
+/// move takes back the entries already moved.
+fn moveInto(a: Allocator, why: *[]const u8, tmp: []const u8, out: []const u8) Error!void {
+    var names = std.ArrayList([]const u8).empty;
+    {
+        var dir = std.fs.cwd().openDir(tmp, .{ .iterate = true }) catch |err| {
+            std.fs.cwd().deleteTree(tmp) catch {};
+            return refuse(a, why, "cannot write {s}: reading {s}: {s}; nothing was written", .{ out, tmp, @errorName(err) });
+        };
+        defer dir.close();
+        var it = dir.iterate();
+        while (it.next() catch null) |entry| try names.append(a, try a.dupe(u8, entry.name));
+    }
+    var failure: ?[]const u8 = null;
+    for (names.items, 0..) |name, i| {
+        const from = try std.fs.path.join(a, &.{ tmp, name });
+        const to = try std.fs.path.join(a, &.{ out, name });
+        std.fs.cwd().rename(from, to) catch |err| {
+            failure = try std.fmt.allocPrint(a, "cannot write {s}: moving {s} into place: {s}; nothing was written", .{ out, name, @errorName(err) });
+            for (names.items[0..i]) |done| std.fs.cwd().deleteTree(try std.fs.path.join(a, &.{ out, done })) catch {};
+            break;
+        };
+    }
+    std.fs.cwd().deleteTree(tmp) catch {};
+    if (failure) |f| {
+        why.* = f;
+        return error.Refused;
+    }
 }
 
 pub const Entry = struct { rel: []const u8, data: []const u8 };
@@ -311,7 +356,10 @@ pub fn writeSet(a: Allocator, why: *[]const u8, out: []const u8, entries: []cons
             return refuse(a, why, "cannot write {s} under {s}: {s}; nothing was written to {s}", .{ e.rel, tmp, @errorName(err), out });
         };
     }
+    // An absent or empty `out` is replaced by the directory. One that holds the kept file gets the
+    // members moved in beside it.
     std.fs.cwd().deleteDir(out) catch {};
+    if (dirExists(out)) return moveInto(a, why, tmp, out);
     std.fs.cwd().rename(tmp, out) catch |err| {
         std.fs.cwd().deleteTree(tmp) catch {};
         return refuse(a, why, "cannot write {s}: moving {s} into place: {s}", .{ out, tmp, @errorName(err) });

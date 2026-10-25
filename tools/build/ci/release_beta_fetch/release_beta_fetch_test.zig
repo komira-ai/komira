@@ -666,3 +666,93 @@ test "the summary counts files, not lines: one file with a wrong size and hash i
     var why: []const u8 = "";
     try refusedWith(&why, runScene(a, &s, &fake, &why), "1 of 2 file(s) are not what the plan staged");
 }
+
+// ---- the checkout state of release/beta_set: --out exists and holds its BUCK ------------------
+
+test "an --out that holds only its BUCK is written beside it, and the BUCK is kept" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    var s = try Scene.init(a, try planText(a, BYTES_A, BYTES_B));
+    defer s.tmp.cleanup();
+    try s.tmp.dir.makePath("out");
+    try s.tmp.dir.writeFile(.{ .sub_path = "out/BUCK", .data = "filegroup()\n" });
+    const routes = goodRoutes();
+    var fake = Fake{ .routes = &routes };
+    var why: []const u8 = "";
+    _ = try runScene(a, &s, &fake, &why);
+    try t.expectEqualStrings("filegroup()\n", try s.read(a, "out/BUCK"));
+    try t.expectEqualStrings(BYTES_A, try s.read(a, "out/linux-64/mojo-pa-0.1.9-mojo1.0.0_0.conda"));
+    try t.expectEqualStrings("readme b\n", try s.read(a, "out/pb/README.md"));
+    try t.expect((try s.read(a, "out/plan.json")).len > 0);
+    s.tmp.dir.access("out.partial", .{}) catch return;
+    return error.PartialLeft;
+}
+
+test "an --out with its BUCK and anything else, or a BUCK that is not a file, is refused" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    var s = try Scene.init(a, try planText(a, BYTES_A, BYTES_B));
+    defer s.tmp.cleanup();
+    try s.tmp.dir.makePath("out");
+    try s.tmp.dir.writeFile(.{ .sub_path = "out/BUCK", .data = "x" });
+    try s.tmp.dir.writeFile(.{ .sub_path = "out/stale.conda", .data = "x" });
+    const routes = goodRoutes();
+    var fake = Fake{ .routes = &routes };
+    var why: []const u8 = "";
+    try refusedWith(&why, runScene(a, &s, &fake, &why), "is not empty");
+    try s.tmp.dir.deleteFile("out/stale.conda");
+    try s.tmp.dir.deleteFile("out/BUCK");
+    try s.tmp.dir.makePath("out/BUCK");
+    try refusedWith(&why, runScene(a, &s, &fake, &why), "is not empty");
+}
+
+test "a mismatch with --out holding its BUCK leaves the BUCK alone and writes nothing" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    var s = try Scene.init(a, try planText(a, BYTES_A, BYTES_B));
+    defer s.tmp.cleanup();
+    try s.tmp.dir.makePath("out");
+    try s.tmp.dir.writeFile(.{ .sub_path = "out/BUCK", .data = "keep" });
+    var routes = goodRoutes();
+    routes[1].got = .{ .body = @constCast("package a bytez") };
+    var fake = Fake{ .routes = &routes };
+    var why: []const u8 = "";
+    try refusedWith(&why, runScene(a, &s, &fake, &why), "not what the plan staged");
+    try t.expectEqualStrings("keep", try s.read(a, "out/BUCK"));
+    try t.expectError(error.FileNotFound, s.tmp.dir.access("out/plan.json", .{}));
+}
+
+test "a move into an --out with its BUCK that fails midway takes back what it moved" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realpathAlloc(a, ".");
+    const out = try std.fs.path.join(a, &.{ root, "out" });
+    try tmp.dir.makePath("out/plan.json/inside"); // a directory where a file must go
+    try tmp.dir.writeFile(.{ .sub_path = "out/BUCK", .data = "keep" });
+    var why: []const u8 = "";
+    const entries = [_]rbf.Entry{
+        .{ .rel = "plan.json", .data = "{}" },
+        .{ .rel = "linux-64/a.conda", .data = "bytes" },
+        .{ .rel = "pa/README.md", .data = "r" },
+    };
+    try refusedWith(&why, rbf.writeSet(a, &why, out, &entries), "nothing was written");
+    try t.expectEqualStrings("keep", try tmp.dir.readFileAlloc(a, "out/BUCK", 100));
+    try t.expectError(error.FileNotFound, tmp.dir.access("out/linux-64", .{}));
+    try t.expectError(error.FileNotFound, tmp.dir.access("out/pa", .{}));
+    try t.expectError(error.FileNotFound, tmp.dir.access("out.partial", .{}));
+}
+
+test "a path of the set named BUCK is refused: it would replace the kept file" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    try parseRefused(try planOf(a, &.{try memberJson(a, "p", "BUCK", "linux-64", "a.conda", 1)}), "collide");
+    try parseRefused(try planOf(a, &.{try memberJson(a, "p", "buck/README.md", "linux-64", "a.conda", 1)}), "collide");
+    try parseRefused(try planOf(a, &.{try memberJson(a, "p", "p/README.md", "BUCK", "a.conda", 1)}), "collide");
+}
