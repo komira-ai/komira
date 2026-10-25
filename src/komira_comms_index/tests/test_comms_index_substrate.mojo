@@ -660,7 +660,7 @@ struct _ConcurrentAppendInjectStore(
     Store` and, on the FIRST base-chunk create, injects a REAL concurrent
     `put_delta` into that slot through a sibling handle BEFORE forwarding the
     base write (which then 412s + re-anchors). Every other verb forwards
-    verbatim. ZERO wildcard origins / UnsafePointer in any signature — the
+    verbatim. No pointer type in any signature — the
     shared latch rides an `ArcPointer[_InjectCell]` (interior mutability)."""
 
     var _inner: SharedInMemoryConditionalStore

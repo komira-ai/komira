@@ -79,7 +79,7 @@
 #   * No pointer in any public signature — the surface is value / `List[UInt8]`
 #     / `CommsState` (owned-List POD). The CAS round-trips flow through
 #     CasManifestStore's already-encapsulated verbs.
-#   * No wildcard origins, no `unsafe_from_address`, no `take_pointee`.
+#   * No wildcard origins and no partial move through a pointer.
 #   * The fold's live state is a plain `List[_FoldEntry]` (owned `List[UInt8]`
 #     key/value), not a `Slab[T]` byte slab with a wildcard cast. `KeyedDelta` is
 #     a stack value the fold holds, never a slab element.
@@ -476,7 +476,7 @@ struct CommsIndex[Store: ConditionalWriteStore](Movable, Deinitable):
         is the preservation check.
 
         The conformer holds a borrowed `Pointer` to `self._manifest` (a concrete
-        origin — NOT a wildcard / `unsafe_from_address`; the trait surface
+        origin, not a wildcard; the trait surface
         itself crosses only typed values).
         `compact()` re-derives its Int64 return (base_seq
         on WON, the re-read head on a 412-LOST, head.chunk_seq on a NO-OP) from
@@ -602,9 +602,8 @@ struct CommsIndex[Store: ConditionalWriteStore](Movable, Deinitable):
 #   * OutputRef = Int64 (the base chunk_seq) — POD; the trait surface crosses
 #     ONLY typed values (CompactRange / CompactProduct[Int64] / Int64 / Bool).
 #   * The conformer holds a BORROWED `Pointer[CasManifestStore[Store], origin]`
-#     to the index's manifest — a CONCRETE origin the compiler tracks, NOT a
-#     wildcard (`MutAnyOrigin` / `MutExternalOrigin`), NOT `unsafe_from_address`,
-#     NOT `take_pointee`. The pointer never crosses the TRAIT seam (the driver /
+#     to the index's manifest — a CONCRETE origin the compiler tracks, not a
+#     wildcard, and never moved out of. The pointer never crosses the TRAIT seam (the driver /
 #     helpers see only typed values); it is a private internal field.
 #   * The fold accumulator is a plain `List[_FoldEntry]` (owned `List[UInt8]`
 #     key/value), NOT a byte slab of heap-owning Movable elements, the same

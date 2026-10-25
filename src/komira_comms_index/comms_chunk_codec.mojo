@@ -47,7 +47,7 @@
 # -----------------------------------------------------------------------------
 #   * No pointer in any signature (the whole surface is value /
 #     `List[UInt8]` / POD, like cas_manifest.mojo's body codecs).
-#   * No wildcard origins, no `unsafe_from_address`, no `take_pointee`.
+#   * No wildcard origins and no partial move through a pointer.
 #   * `KeyedDelta` carries owned `List[UInt8]` fields and is a stack value the
 #     fold holds; it is never an element of a byte slab. The fold's live state
 #     is a plain `List[_FoldEntry]`, not a `Slab[T]` (comms_index.mojo).
