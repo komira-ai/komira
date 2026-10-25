@@ -299,6 +299,7 @@ TARGETS = [
     "komira//src/komira_spsc_ring:spsc_ring_bench",
     "komira//src/komira_sql:komira_sql_conda",
     "komira//src/komira_table_store:komira_table_store_conda",
+    "komira//src/komira_telemetry_read:komira_telemetry_read_conda",
     "komira//src/komira_telemetry_store:komira_telemetry_store_conda",
     "komira//src/komira_test_verdict:ci",
     "komira//src/komira_test_verdict:coverage_floor",
