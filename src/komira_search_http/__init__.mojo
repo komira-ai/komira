@@ -11,9 +11,15 @@
 #
 #   * bulk.mojo          `ndjson_bulk_to_docbatch`: `_bulk` NDJSON -> DocBatch
 #                        with dynamic field mapping and per-item outcomes.
+#   * bulk_fields.mojo   the dynamic-mapping accumulators and the typed
+#                        RecordBatch builder `bulk` drives.
 #   * search_query.mojo  `search_json_to_queryir`: `_search` match / filter /
 #                        sort / pagination / aggregation JSON -> QueryIR, plus
 #                        `parse_track_total_hits` and `sort_is_by_score`.
+#                        `search_json_to_queryir` takes the index's text field
+#                        (`text_field`, no default): a request with `aggs` and
+#                        no `match` targets it, and the engine refuses a
+#                        QueryIR whose field is not the split's text field.
 #   * search_gates.mojo  `gate_filter_against_fastfields`,
 #                        `gate_sort_against_fastfields`,
 #                        `gate_aggs_against_fastfields`: the checks against a
@@ -29,6 +35,7 @@ from .bulk import (
     BulkItem,
     ndjson_bulk_to_docbatch,
     MAX_DYNAMIC_FIELDS,
+    MAX_BATCH_CELLS,
 )
 from .search_query import (
     search_json_to_queryir,
@@ -37,6 +44,8 @@ from .search_query import (
     DEFAULT_SIZE,
     MAX_RESULT_WINDOW,
     MAX_BOOL_CLAUSES,
+    MAX_AGGS,
+    MAX_TERMS_SIZE,
 )
 from .search_gates import (
     gate_filter_against_fastfields,

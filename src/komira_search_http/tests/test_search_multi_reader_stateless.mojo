@@ -4,26 +4,25 @@
 #   return BYTE-IDENTICAL results (search is fully stateless).
 # =============================================================================
 #
-# Search is a stateless read-replica: `_handle_search` (the dispatcher)
+# Search is a stateless read-replica: a request handler
 # constructs a FRESH metastore per request, lists the live splits, fetches each
-# from S3, parses a FRESH SearchCore per split, merges in-node, and renders. N
-# search nodes are independent replicas with ZERO shared state — so the SAME
+# from object storage, parses a FRESH SearchCore per split, merges in-node, and
+# renders. N search nodes are independent replicas with ZERO shared state — so the SAME
 # query MUST return the SAME result regardless of which node serves it.
 #
 # THIS TEST proves reproducibility: build an index of M in-memory splits (M>=2),
 # then run the SAME query through N INDEPENDENT search paths — each path is a
 # fresh fan-out (fresh `SearchCore` PER split over a fresh COPY of the split
 # bytes -> the SAME merge reducers -> the SAME hitbatch_to_hits_envelope render,
-# exactly the value pipeline the dispatcher's search handler runs). We assert every
+# exactly the value pipeline a request handler runs). We assert every
 # path's RENDERED OpenSearch envelope JSON is byte-identical: same hits, same
 # order, same total, same _id, same _shards, same aggs. Any hidden shared state
 # (a cached plan, a leaked SearchCore, an order-dependent merge) would make two
 # independent paths diverge — this catches it.
 #
-# MECHANISM (and why): in-memory deterministic, no S3, no Reactor. The object
-# store fan-out belongs to the request handler; the stateless-reproducibility
-# PROPERTY is independent of the
-# transport — it lives in "fresh SearchCore + pure merge + pure render", which we
+# MECHANISM (and why): in-memory deterministic, no object store, no event loop.
+# The object store fan-out belongs to the request handler; the
+# stateless-reproducibility PROPERTY is independent of the transport — it lives in "fresh SearchCore + pure merge + pure render", which we
 # drive directly N times. Faster + fully deterministic + runs in CI.
 #
 # Matrix (each run through N=4 independent reader paths, byte-identical asserted):
@@ -91,7 +90,7 @@ def _uuid(seed: UInt8) -> InlineArray[UInt8, 16]:
 
 
 def _short_id_of(uuid: InlineArray[UInt8, 16]) -> String:
-    """Mirror the dispatcher's split short id (full 16 bytes, hex)."""
+    """Mirror a handler's split short id (full 16 bytes, hex)."""
     comptime HEX = "0123456789abcdef"
     var out = String("")
     for i in range(16):
@@ -159,7 +158,7 @@ def _build_split(
 
 # -----------------------------------------------------------------------------
 # ONE independent search path — the production shape: fresh SearchCore PER split
-# (over a fresh COPY of the split bytes, exactly like dispatch fetches fresh
+# (over a fresh COPY of the split bytes, as a handler fetches fresh
 # bytes per request), merge, render. NO shared state retained across calls.
 # Returns the serialized OpenSearch envelope JSON for one "node".
 # -----------------------------------------------------------------------------
@@ -175,7 +174,7 @@ def _one_reader_path(
     sorted_by_score: Bool,
 ) raises -> String:
     var m = len(splits)
-    # Per-split over-fetch rewrite (the dispatcher) — from=0, top_k=from+size.
+    # Per-split over-fetch rewrite (a request handler) — from=0, top_k=from+size.
     var leaf = base_query.copy()
     leaf.from_offset = 0
     leaf.top_k = base_from + base_size
@@ -201,7 +200,7 @@ def _one_reader_path(
         base_query.missing_order,
     )
 
-    # Namespaced ids when >1 split (the dispatcher).
+    # Namespaced ids when >1 split (a request handler).
     var client_ids = List[String]()
     if m > 1:
         var short_ids = List[String]()

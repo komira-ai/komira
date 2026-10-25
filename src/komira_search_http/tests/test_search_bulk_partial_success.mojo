@@ -3,9 +3,6 @@
 # PARTIAL-SUCCESS proof
 # =============================================================================
 #
-# Source of truth: the bulk dynamic-mapping design (per-item outcome policy),
-# §A6 (the per-item partial-success follow-on).
-#
 # This is the test that does the thing that 400'd the WHOLE request before P1.7:
 # a `_bulk` body with a MIX of good and bad docs now returns per-item outcomes
 # (HTTP 200, `{errors, items[]}` in NDJSON order); the GOOD docs still index and
@@ -244,7 +241,7 @@ def test_03_all_bad_batch_no_doc_indexed() raises:
 
     # No doc indexed: count==0, so the handler returns the all-error envelope and
     # publishes NO split (it never feeds the sink — the empty-batch path is the
-    # dispatcher's count==0 short-circuit). The committed docbatch is empty.
+    # caller's count==0 short-circuit). The committed docbatch is empty.
     assert_equal(parsed.docbatch.num_rows(), 0, "3: empty docbatch")
 
 

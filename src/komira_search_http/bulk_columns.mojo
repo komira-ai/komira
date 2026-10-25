@@ -53,7 +53,7 @@ def i64_col_nullable(
 def f64_col_nullable(
     raw: List[Float64], valid: List[Bool]
 ) raises -> Column[HeapRegion]:
-    """A nullable FLOAT64 fast-field column (NET-NEW, doc 18 §A4 — no
+    """A nullable FLOAT64 fast-field column (NET-NEW — no
     _f64_col_nullable existed in the unit fixtures; this mirrors
     _i64_col_nullable with DType.float64)."""
     var n = len(raw)

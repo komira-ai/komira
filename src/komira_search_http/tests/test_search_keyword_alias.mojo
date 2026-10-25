@@ -18,11 +18,11 @@
 # bare name, accepting ONLY when the bare field is a KEYWORD fast-field. The
 # QueryIR carries the BARE name (`status`) so the engine reads the right column.
 #
-# This is the SHIM-side proof: it drives the exact dispatch composition
+# This is the translator-side proof: it drives the gate composition a request handler runs
 #   search_json_to_queryir(body) -> gate_{filter,sort,aggs}_against_fastfields
 #   -> SearchCore.search
 # over an IN-MEMORY split built by the P0.4 writer (SearchSink) + P1.1
-# fast-fields — NO S3 / MinIO (mirrors test_search_filter_pushdown style).
+# fast-fields, no network (mirrors test_search_filter_pushdown style).
 #
 # Coverage:
 #   1.  {"term":{"status.keyword":"active"}} resolves + SAME results as bare
@@ -150,19 +150,19 @@ def _build_fixture(seed: UInt8) raises -> List[UInt8]:
 
 
 # -----------------------------------------------------------------------------
-# Dispatch-composition driver: parse JSON -> gate -> search. This is the EXACT
-# composition the dispatcher runs (the dispatcher's search handler): the parse step,
+# Gate-composition driver: parse JSON -> gate -> search. This is the EXACT
+# composition a request handler runs: the parse step,
 # then the field-existence/dtype + `.keyword` resolution gate against the split's
 # fast-fields, then SearchCore.search.
 # -----------------------------------------------------------------------------
 
 
 def _qir(body: String) raises -> QueryIR:
-    return search_json_to_queryir(Span(body.as_bytes()), Int64(0))
+    return search_json_to_queryir(Span(body.as_bytes()), Int64(0), String("body"))
 
 
 def _gate_all(var query: QueryIR, reader: FastFieldReader) raises -> QueryIR:
-    """Run the dispatch gate sequence (filter, then sort, then aggs) — each gate
+    """Run the gate sequence (filter, then sort, then aggs) — each gate
     resolves `.keyword` against the reader and rewrites the QueryIR to carry the
     bare keyword fast-field name."""
     if query.has_filter():
@@ -174,7 +174,7 @@ def _gate_all(var query: QueryIR, reader: FastFieldReader) raises -> QueryIR:
 
 
 def _run(bytes: List[UInt8], body: String) raises -> SearchResult:
-    """Full dispatch composition over `bytes` for the JSON `body`."""
+    """Full gate composition over `bytes` for the JSON `body`."""
     var view = SplitView.parse(bytes.copy())
     var reader = FastFieldReader(view)
     var query = _gate_all(_qir(body), reader)
@@ -183,7 +183,7 @@ def _run(bytes: List[UInt8], body: String) raises -> SearchResult:
 
 
 def _expect_400(bytes: List[UInt8], body: String) raises -> Bool:
-    """True iff the dispatch composition RAISES (a 400-shaped error) for `body`.
+    """True iff the gate composition RAISES (a 400-shaped error) for `body`.
     The raise may come from the parse step OR the gate step."""
     try:
         var _r = _run(bytes, body)

@@ -2,12 +2,8 @@
 # test_search_sort_pagination.mojo — P1.3 SORT + PAGINATION proof
 # =============================================================================
 #
-# Source of truth: the search shim design notes
-# (the Step-0 design) + the BINDING PRE-IMPL AMENDMENTS A1-A9 (folded into the
-# impl; these SUPERSEDE the doc body).
-#
 # Engine-side unit suite over an IN-MEMORY split built by the P0.4 writer
-# (SearchSink) + the P1.1 fast-fields — NO S3 / MinIO. Mirrors the P1.2
+# (SearchSink) + the P1.1 fast-fields, no network. Mirrors the P1.2
 # test_search_filter_pushdown style. Covers:
 #
 #   1.  default _score desc unchanged (golden-pin — proves ZERO regression).
@@ -560,7 +556,7 @@ def test_14_eviction_honors_sort_key() raises:
 
 
 def _qir(body: String) raises -> QueryIR:
-    return search_json_to_queryir(Span(body.as_bytes()), Int64(0))
+    return search_json_to_queryir(Span(body.as_bytes()), Int64(0), String("body"))
 
 
 def _make_hitbatch(

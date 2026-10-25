@@ -2,12 +2,8 @@
 # test_search_filter_pushdown.mojo — P1.2 FILTER PUSHDOWN proof
 # =============================================================================
 #
-# Source of truth: the search shim design notes
-# (the Step-0 design) + the BINDING AMENDMENTS CB1-4 / IM1-2 / PR1-5 (folded into
-# the impl; these SUPERSEDE the doc).
-#
 # Engine-side + shim-side unit suite over an IN-MEMORY split built by the P0.4
-# writer (SearchSink) + the P1.1 fast-fields — NO S3 / MinIO. Covers:
+# writer (SearchSink) + the P1.1 fast-fields, no network. Covers:
 #
 # ENGINE (SearchCore.search apply):
 #   1.  term eq on a keyword fast-field (restricted to matched + status==active).
@@ -23,7 +19,7 @@
 #       three-valued logic; would FALSE-POSITIVE without the null check).
 #   (Cases 9 and 10, the Searcher gate matrix and fingerprint distinctness, run
 #   with the search runtime package, which this package's tests do not depend
-#   on; the shim-side gate is case 16.)
+#   on; the shim-side gate is case 16 and its accept/reject matrix is case 17.)
 #
 # SHIM (search_json_to_queryir term/range/bool-AND lowering — Phase B):
 #   11. {"term":{...}} -> col == lit.
@@ -31,6 +27,10 @@
 #   13. {"bool":{"must":[match, term]}} -> match-spec QueryIR + QueryIR.filter.
 #   14. {"bool":{"should":[...]}} (OR) -> 400.
 #   15. non-fast-field / type-mismatch -> 400; filter-only -> 400 (CB4).
+#   16. the gate against a split's fast-field meta: a non-fast-field and a
+#       type mismatch raise, a valid filter passes.
+#   17. the gate accept/reject matrix, literal dtype against field dtype.
+#   18. the longest admitted filter chain survives rewrite, gate and drop.
 # =============================================================================
 
 from std.testing import (
@@ -481,7 +481,7 @@ def test_08_null_fails() raises:
 
 
 def _qir(body: String) raises -> QueryIR:
-    return search_json_to_queryir(Span(body.as_bytes()), Int64(0))
+    return search_json_to_queryir(Span(body.as_bytes()), Int64(0), String("body"))
 
 
 def test_11_shim_term() raises:
@@ -642,6 +642,167 @@ def test_16_shim_gate_against_fastfields() raises:
     )
     var gated = gate_filter_against_fastfields(q_ok^, reader)
     assert_true(gated.has_filter(), "16: valid filter passes the gate")
+
+
+# =============================================================================
+# Shim Case 17 — the gate accept/reject matrix over a split's fast-field meta
+# (cross-dtype rejection included).
+# =============================================================================
+
+
+def _gate_accepts(reader: FastFieldReader, var pred: Expr) raises -> Bool:
+    from komira_search_http.search_gates import gate_filter_against_fastfields
+
+    var q = QueryIR(
+        String("body"), String("alpha"), 10, _text_cfg(), 0,
+        Optional[Expr](pred^),
+    )
+    try:
+        _ = gate_filter_against_fastfields(q^, reader)
+    except:
+        return False
+    return True
+
+
+def test_17_gate_matrix() raises:
+    var bytes = _build_fixture(17)
+    var view = SplitView.parse(bytes.copy())
+    var reader = FastFieldReader(view)
+
+    # ACCEPT: keyword term, numeric range and term, float range, date range,
+    # bool-AND of two pushables.
+    assert_true(
+        _gate_accepts(reader, _col_eq_str(String("status"), String("active"))),
+        "17: keyword term accepted",
+    )
+    assert_true(
+        _gate_accepts(reader, _col_op_i64(BIN_GE, String("price"), Int64(100))),
+        "17: numeric range accepted",
+    )
+    assert_true(
+        _gate_accepts(reader, _col_op_i64(BIN_EQ, String("price"), Int64(100))),
+        "17: numeric term accepted",
+    )
+    assert_true(
+        _gate_accepts(
+            reader,
+            Expr.binary(
+                BIN_GT, Expr.col_ref(String("rating")),
+                Expr.literal(ScalarValue.from_float(Float64(2.0))),
+            ),
+        ),
+        "17: float range accepted",
+    )
+    assert_true(
+        _gate_accepts(
+            reader,
+            Expr.binary(
+                BIN_LT, Expr.col_ref(String("event_day")),
+                Expr.literal(ScalarValue.date32(Int32(19200))),
+            ),
+        ),
+        "17: date range accepted",
+    )
+    assert_true(
+        _gate_accepts(
+            reader,
+            Expr.binary(
+                BIN_AND,
+                _col_op_i64(BIN_GT, String("price"), Int64(50)),
+                _col_eq_str(String("status"), String("active")),
+            ),
+        ),
+        "17: bool-AND accepted",
+    )
+
+    # REJECT: range on a keyword field, an OR tree, a non-fast-field.
+    assert_false(
+        _gate_accepts(
+            reader,
+            Expr.binary(
+                BIN_LT, Expr.col_ref(String("status")),
+                Expr.literal(ScalarValue.from_string(String("m"))),
+            ),
+        ),
+        "17: keyword range rejected",
+    )
+    assert_false(
+        _gate_accepts(
+            reader,
+            Expr.binary(
+                BIN_OR,
+                _col_eq_str(String("status"), String("active")),
+                _col_op_i64(BIN_GT, String("price"), Int64(50)),
+            ),
+        ),
+        "17: OR rejected",
+    )
+    assert_false(
+        _gate_accepts(reader, _col_eq_str(String("body"), String("alpha"))),
+        "17: non-fast-field rejected",
+    )
+
+    # REJECT: literal dtype against field dtype.
+    assert_false(
+        _gate_accepts(reader, _col_eq_str(String("price"), String("active"))),
+        "17: string literal vs int field rejected",
+    )
+    assert_false(
+        _gate_accepts(reader, _col_eq_str(String("rating"), String("x"))),
+        "17: string literal vs float field rejected",
+    )
+    assert_false(
+        _gate_accepts(reader, _col_eq_str(String("event_day"), String("x"))),
+        "17: string literal vs date field rejected",
+    )
+    assert_false(
+        _gate_accepts(reader, _col_op_i64(BIN_EQ, String("status"), Int64(5))),
+        "17: int literal vs keyword field rejected",
+    )
+    assert_false(
+        _gate_accepts(
+            reader,
+            Expr.binary(
+                BIN_EQ, Expr.col_ref(String("price")),
+                Expr.literal(ScalarValue.from_float(Float64(1.5))),
+            ),
+        ),
+        "17: float literal vs int field rejected",
+    )
+    assert_false(
+        _gate_accepts(
+            reader,
+            Expr.binary(
+                BIN_EQ, Expr.col_ref(String("rating")),
+                Expr.literal(ScalarValue.from_int64(Int64(2))),
+            ),
+        ),
+        "17: int literal vs float field rejected",
+    )
+
+
+# =============================================================================
+# Shim Case 18 — the longest filter chain the parser admits survives the
+# keyword rewrite, the validating gate and the destructor.
+# =============================================================================
+
+
+def test_18_longest_filter_chain_through_the_gate() raises:
+    from komira_search_http.search_gates import gate_filter_against_fastfields
+    from komira_search_http.search_query import MAX_BOOL_CLAUSES
+
+    var body = String('{"query":{"bool":{"must":[{"match":{"body":"alpha"}}')
+    for i in range(MAX_BOOL_CLAUSES - 1):
+        body += ',{"term":{"status.keyword":"s' + String(i) + '"}}'
+    body += "]}}}"
+    var q = _qir(body)
+    assert_true(q.has_filter(), "18: filter attached")
+    var bytes = _build_fixture(18)
+    var view = SplitView.parse(bytes.copy())
+    var reader = FastFieldReader(view)
+    var gated = gate_filter_against_fastfields(q^, reader)
+    assert_true(gated.has_filter(), "18: the chain passes the gate")
+    # `gated` is dropped here: the predicate chain is destroyed recursively.
 
 
 def main() raises:

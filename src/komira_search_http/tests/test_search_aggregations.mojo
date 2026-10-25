@@ -2,12 +2,8 @@
 # test_search_aggregations.mojo — P1.4 AGGREGATIONS proof
 # =============================================================================
 #
-# Source of truth: the search shim design notes
-# (the Step-0 design) + the BINDING PRE-IMPL AMENDMENTS B1, M1, M2, m1-m5
-# (folded into the impl; these SUPERSEDE the doc body).
-#
 # Engine-side unit suite over an IN-MEMORY split built by the P0.4 writer
-# (SearchSink) + the P1.1 fast-fields — NO S3 / MinIO. Mirrors the P1.2/P1.3
+# (SearchSink) + the P1.1 fast-fields, no network. Mirrors the P1.2/P1.3
 # test style. Covers (engine half):
 #
 #   1.  metric avg/min/max/sum/value_count over a numeric field — exact, nulls
@@ -625,7 +621,7 @@ def test_13_parse_aggs_metric_and_terms() raises:
         '"a":{"avg":{"field":"price"}},'
         '"g":{"terms":{"field":"genre","size":5}}}}'
     )
-    var q = search_json_to_queryir(Span(body), Int64(0))
+    var q = search_json_to_queryir(Span(body), Int64(0), String("body"))
     assert_true(q.has_aggs(), "13: aggs attached")
     ref specs = q.aggs_ref()
     assert_equal(len(specs), 2, "13: 2 specs")
@@ -643,7 +639,7 @@ def test_13b_aggregations_synonym() raises:
         '{"query":{"match":{"body":"alpha"}},"aggregations":{'
         '"s":{"stats":{"field":"price"}}}}'
     )
-    var q = search_json_to_queryir(Span(body), Int64(0))
+    var q = search_json_to_queryir(Span(body), Int64(0), String("body"))
     assert_true(q.has_aggs(), "13b: `aggregations` synonym parsed")
     ref specs = q.aggs_ref()
     assert_equal(specs[0].kind, AGG_KIND_STATS, "13b: stats")
@@ -675,15 +671,15 @@ def test_14_B1_no_query_aggs_only() raises:
 
 def test_14a_aggs_only_targets_the_given_text_field() raises:
     # SearchCore answers a query only from a split of the field it targets, so
-    # an aggs-only / match_all request targets the index's text field, and the
-    # default (no field given) leaves it empty.
+    # an aggs-only / match_all request targets the index's text field, and an
+    # empty name leaves it empty (the engine refuses that query when it runs).
     var body = _jbytes(
         '{"size":0,"aggs":{"g":{"terms":{"field":"genre"}}}}'
     )
     var q = search_json_to_queryir(Span(body), Int64(0), String("body"))
     assert_equal(q.field_name, String("body"), "14a: targets the text field")
-    var q_default = search_json_to_queryir(Span(body), Int64(0))
-    assert_equal(q_default.field_name, String(""), "14a: default is empty")
+    var q_default = search_json_to_queryir(Span(body), Int64(0), String(""))
+    assert_equal(q_default.field_name, String(""), "14a: an empty name stays empty")
     var all_body = _jbytes(
         '{"query":{"match_all":{}},"size":0,'
         '"aggs":{"s":{"sum":{"field":"price"}}}}'
@@ -698,7 +694,7 @@ def test_14b_match_all_aggs() raises:
         '{"query":{"match_all":{}},"size":0,'
         '"aggs":{"s":{"sum":{"field":"price"}}}}'
     )
-    var q = search_json_to_queryir(Span(body), Int64(0))
+    var q = search_json_to_queryir(Span(body), Int64(0), String("body"))
     assert_true(q.has_aggs(), "14b: match_all aggs")
     assert_equal(q.query_text, String(""), "14b: no-term")
 
@@ -714,7 +710,7 @@ def test_15_400_nested_sub_aggs() raises:
         '{"field":"genre"},"aggs":{"sub":{"avg":{"field":"price"}}}}}}'
     )
     with assert_raises():
-        _ = search_json_to_queryir(Span(body), Int64(0))
+        _ = search_json_to_queryir(Span(body), Int64(0), String("body"))
 
 
 def test_15b_400_cardinality() raises:
@@ -723,7 +719,7 @@ def test_15b_400_cardinality() raises:
         '{"field":"genre"}}}}'
     )
     with assert_raises():
-        _ = search_json_to_queryir(Span(body), Int64(0))
+        _ = search_json_to_queryir(Span(body), Int64(0), String("body"))
 
 
 def test_15c_400_date_histogram() raises:
@@ -732,7 +728,7 @@ def test_15c_400_date_histogram() raises:
         '{"field":"event_day","calendar_interval":"day"}}}}'
     )
     with assert_raises():
-        _ = search_json_to_queryir(Span(body), Int64(0))
+        _ = search_json_to_queryir(Span(body), Int64(0), String("body"))
 
 
 def test_15d_400_multi_field_terms() raises:
@@ -741,7 +737,7 @@ def test_15d_400_multi_field_terms() raises:
         '{"query":{"match":{"body":"a"}},"aggs":{"g":{"terms":{"size":10}}}}'
     )
     with assert_raises():
-        _ = search_json_to_queryir(Span(body), Int64(0))
+        _ = search_json_to_queryir(Span(body), Int64(0), String("body"))
 
 
 def test_15e_400_unrecognized_agg_type() raises:
@@ -750,7 +746,7 @@ def test_15e_400_unrecognized_agg_type() raises:
         '{"field":"price"}}}}'
     )
     with assert_raises():
-        _ = search_json_to_queryir(Span(body), Int64(0))
+        _ = search_json_to_queryir(Span(body), Int64(0), String("body"))
 
 
 # =============================================================================

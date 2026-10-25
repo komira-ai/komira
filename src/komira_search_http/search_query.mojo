@@ -15,7 +15,7 @@
 #   {"range":{"<field>":{"gte":x,"gt":x,"lte":y,"lt":y}}}   (-> BIN_GE/GT/LE/LT)
 #
 # THE TWO-STEP LOWERING:
-#   (a) search_json_to_queryir(body, generation): the PARSE step. Parses the
+#   (a) search_json_to_queryir(body, generation, text_field): the PARSE step. Parses the
 #       match spec and collects the candidate fast-field conjuncts into a
 #       BIN_AND chain attached to QueryIR.filter. It runs a structural gate
 #       (reject should / bool-OR / must_not / filter-only) before any split
@@ -26,21 +26,27 @@
 #       aggregation names a non-fast-field or has a literal/field dtype
 #       mismatch. The direct path has no downstream Filter to fall back to.
 #
-# A filter-only / match_all / constant-score query (filter, term or range
-# clauses but no `match`) raises a clear 400. The filter applies inside the
-# posting accumulate loop, where only documents that matched a query term
-# iterate, so a filter-only request would silently return zero hits. The one
-# exception is a request with `aggs`, which takes the whole-split aggregation
-# path.
+# A filter-only / constant-score query (filter, term or range clauses but no
+# `match`) raises a clear 400. The filter applies inside the posting accumulate
+# loop, where only documents that matched a query term iterate, so a
+# filter-only request would silently return zero hits. The one exception is a
+# request with `aggs` and either no `query` or a `match_all` query, which takes
+# the whole-split aggregation path. A bool query with only filter arms and
+# `aggs` is refused too: the whole-split path carries no filter, so it would
+# aggregate documents the filter excludes.
 #
 # A JSON number keeps its raw text, so the translator inspects the text for
 # '.' / 'e' / 'E' to choose an int64 or a float64 literal.
 #
 # Untrusted input: this module parses HTTP request bodies. The JSON parser
 # (komira_json) refuses nesting deeper than its depth limit; this module bounds
-# the filter clause count (MAX_BOOL_CLAUSES), refuses a `from` or `size` above
+# the filter clause count (MAX_BOOL_CLAUSES), the aggregation count (MAX_AGGS)
+# and the `terms` bucket size (MAX_TERMS_SIZE), refuses a `from` or `size` above
 # the result window before adding them (no integer overflow), and rejects the
-# nested forms (nested bool, nested aggregations) rather than recursing.
+# nested forms (nested bool, nested aggregations) rather than recursing. A body
+# that names a key twice is refused, and so is an object that names more than
+# one clause where the DSL takes exactly one (a dropped sibling would silently
+# drop a filter).
 #
 # Pure value functions over Span[UInt8] / JsonValue -> QueryIR (+ Expr). No
 # pointers.
@@ -80,7 +86,7 @@ from komira_search.source import (
     DEFAULT_TERMS_SIZE,
 )
 
-from komira_json import JsonValue, parse_json_bytes
+from komira_json import JsonValue, parse_json_bytes, refuse_duplicate_keys
 
 from .envelopes import (
     TRACK_TOTAL_DEFAULT,
@@ -102,6 +108,33 @@ comptime MAX_RESULT_WINDOW: Int = 10000
 # unbounded count would let a request body drive the stack depth.
 comptime MAX_BOOL_CLAUSES: Int = 1024
 
+# The cap on the aggregations of one request. Each metric aggregation folds
+# every matched document, so an unbounded count would let a request body drive
+# the work of a search.
+comptime MAX_AGGS: Int = 100
+
+# The cap on one `terms` aggregation's `size` (OpenSearch's
+# `search.max_buckets` default is 65536; 10000 matches the result window). The
+# engine sizes per-split bucket lists from it, so it must stay far from the
+# Int range.
+comptime MAX_TERMS_SIZE: Int = 10000
+
+# Top-level `_search` keys that change WHICH documents match or are returned.
+# The translator does not implement them, so it refuses them rather than answer
+# with a result set the client did not ask for. Keys that only shape the
+# response (`_source`, `timeout`, `track_scores`, ...) are ignored.
+def _is_unsupported_root_key(key: String) -> Bool:
+    return (
+        key == String("min_score")
+        or key == String("post_filter")
+        or key == String("collapse")
+        or key == String("rescore")
+        or key == String("terminate_after")
+        or key == String("slice")
+        or key == String("knn")
+        or key == String("pit")
+    )
+
 
 def _parse_body(body: Span[UInt8, _]) raises -> JsonValue:
     """Parse the request body bytes as JSON. The bytes are handed to the parser
@@ -110,16 +143,20 @@ def _parse_body(body: Span[UInt8, _]) raises -> JsonValue:
     var buf = List[UInt8](capacity=len(body))
     for i in range(len(body)):
         buf.append(body[i])
-    return parse_json_bytes(buf)
+    var root = parse_json_bytes(buf)
+    # A key named twice reads as its first occurrence through `get`, which
+    # another reader of the same body may not agree with. Refuse it.
+    refuse_duplicate_keys(root)
+    return root^
 
 
 # =============================================================================
-# §1 — literal inference (PR3 — a JSON NUMBER keeps raw text, no is_integral).
+# — literal inference (a JSON NUMBER keeps raw text, no is_integral).
 # =============================================================================
 
 
 def _number_is_integral(text: String) -> Bool:
-    """A JSON number is INTEGRAL iff its raw text carries no '.'/'e'/'E' (PR3 —
+    """A JSON number is INTEGRAL iff its raw text carries no '.'/'e'/'E' (
     JsonValue has no kind distinction between 100 and 100.5; inspect the text)."""
     var b = text.as_bytes()
     for i in range(len(b)):
@@ -147,7 +184,7 @@ def _json_value_to_scalar(v: JsonValue) raises -> ScalarValue:
 
 
 # =============================================================================
-# §2 — clause -> Expr lowering (term / range; bool decomposed by the caller).
+# — clause -> Expr lowering (term / range; bool decomposed by the caller).
 # =============================================================================
 
 
@@ -155,6 +192,11 @@ def _lower_term(term_obj: JsonValue) raises -> Expr:
     """`{"term":{"<field>":<value>}}` -> `col(field) == literal` (BIN_EQ)."""
     if not term_obj.is_object() or len(term_obj.obj_keys) == 0:
         raise Error("search parse: `term` clause has no field")
+    if len(term_obj.obj_keys) > 1:
+        raise Error(
+            "search parse: `term` clause names more than one field (expected"
+            " exactly one)"
+        )
     var field = term_obj.obj_keys[0]
     var val = term_obj.get(field)
     var lit = _json_value_to_scalar(val)
@@ -166,12 +208,17 @@ def _lower_range(range_obj: JsonValue) raises -> Expr:
     BIN_AND of the per-bound comparisons (gte->BIN_GE, gt->BIN_GT, lte->BIN_LE,
     lt->BIN_LT) in canonical order (gte outermost-left, lt innermost-right). The
     right-leaning shape is the canonical optimizer-emitted shape so two
-    structurally-equal predicate sets hash equal (§5).
+    structurally-equal predicate sets hash equal.
 
     Built WITHOUT a `List[Expr]` (Expr is Movable-only — `List[T]` requires
     Copyable): a recursive fold over the fixed canonical bound order."""
     if not range_obj.is_object() or len(range_obj.obj_keys) == 0:
         raise Error("search parse: `range` clause has no field")
+    if len(range_obj.obj_keys) > 1:
+        raise Error(
+            "search parse: `range` clause names more than one field (expected"
+            " exactly one)"
+        )
     var field = range_obj.obj_keys[0]
     var bounds = range_obj.get(field)
     if not bounds.is_object():
@@ -219,29 +266,29 @@ def _fold_range_bounds(
 
 
 # =============================================================================
-# §3 — the PARSE step: search_json_to_queryir (match + structural filter gate).
+# — the PARSE step: search_json_to_queryir (match + structural filter gate).
 # =============================================================================
 
 
 def search_json_to_queryir(
     body: Span[UInt8, _],
     generation: Int64,
-    text_field: String = String(""),
+    text_field: String,
 ) raises -> QueryIR:
     """Parse the `_search` query into a QueryIR (P0.8 match + P1.2 fast-field
-    filter). THE PARSE STEP (IM1 (a)):
+    filter). THE PARSE STEP:
 
       * `{"match":{...}}` (top-level OR a `bool.must` arm) -> the match-spec
         QueryIR (field + raw query text + size + analyzer config).
       * `{"term":...}` / `{"range":...}` (a `bool.must`/`bool.filter` arm) ->
         a candidate fast-field conjunct, folded right-leaning into QueryIR.filter.
 
-    STRUCTURAL gate (CB4 / IM1), run BEFORE any split lookup so empty-index and
+    STRUCTURAL gate, run BEFORE any split lookup so empty-index and
     populated-index handling are consistent:
       * `should` / `bool`-OR -> 400 (P1.2 OUT).
       * `must_not` -> 400 (P1.2 OUT).
       * a filter/term/range query with NO `match` clause (filter-only /
-        constant-score) -> 400 (CB4 — the apply lives in the posting accumulate
+        constant-score) -> 400 (the apply lives in the posting accumulate
         loop; filter-only would silently return zero hits; it is P1.3).
 
     `text_field` names the text field the index searches. A `match` query names
@@ -249,14 +296,22 @@ def search_json_to_queryir(
     `match` (no query, or `match_all`) names no field at all, yet `SearchCore`
     answers a query only from a split of the field it targets, so such a request
     targets `text_field`; pass the index's text field when the QueryIR will be
-    run. The default "" is for a caller that only inspects the parse.
+    run. The parameter has no default: an empty name builds a QueryIR that the
+    engine refuses with SEARCH_QUERY_FIELD_MISMATCH. A caller that only inspects
+    the parse passes "".
 
     The field-existence / literal-dtype gate is NOT run here (it needs the split's
     fast-field meta) — see gate_filter_against_fastfields (the GATE-AND-ATTACH
-    step), wired into _handle_search after split resolution (§3.3 / IM1 (b))."""
+    step), wired into _handle_search after split resolution."""
     var root = _parse_body(body)
     if not root.is_object():
         raise Error("search parse: request body is not a JSON object")
+    for i in range(len(root.obj_keys)):
+        if _is_unsupported_root_key(root.obj_keys[i]):
+            raise Error(
+                "search parse: `" + root.obj_keys[i]
+                + "` is unsupported (it changes the result set)"
+            )
 
     # P1.4: parse `aggs` (or its synonym `aggregations`) off the request root
     # FIRST — B1 relaxes the mandatory-query/mandatory-match raises when aggs are
@@ -271,7 +326,7 @@ def search_json_to_queryir(
 
     # B1: a `query` clause is required UNLESS aggs are present (an aggs-only
     # request has no query). A `match_all` query is accepted only in the aggs
-    # case (it lowers to a no-term whole-split aggregation, §B1).
+    # case (it lowers to a no-term whole-split aggregation).
     var have_query = root.has(String("query"))
     if not have_query and not have_aggs:
         raise Error("search parse: request is missing the `query` clause")
@@ -281,6 +336,11 @@ def search_json_to_queryir(
         query = root.get(String("query"))
         if not query.is_object():
             raise Error("search parse: `query` is not a JSON object")
+        if len(query.obj_keys) > 1:
+            raise Error(
+                "search parse: `query` names more than one clause (expected"
+                " exactly one); wrap them in a `bool`"
+            )
 
     # `size` (top_k), default 10.
     var top_k = DEFAULT_SIZE
@@ -290,14 +350,14 @@ def search_json_to_queryir(
         if top_k < 0:
             raise Error("search parse: `size` must be non-negative")
 
-    # P1.3 §4.1: `from` (page offset), default 0; from<0 -> 400.
+    # P1.3: `from` (page offset), default 0; from<0 -> 400.
     var from_offset = 0
     if root.has(String("from")):
         from_offset = Int(root.get(String("from")).as_int64())
         if from_offset < 0:
             raise Error("search parse: `from` must be non-negative")
 
-    # P1.3 §4.1: the max_result_window cap (from + size <= 10000) -> 400 above.
+    # P1.3: the max_result_window cap (from + size <= 10000) -> 400 above.
     # Each operand is compared on its own first: `from` and `size` are
     # client-supplied Int64 values, and their sum wraps for operands near the
     # Int64 maximum, which would let a huge window pass the check below.
@@ -309,14 +369,14 @@ def search_json_to_queryir(
             + " (max_result_window)"
         )
 
-    # P1.3 §4.5: search_after -> explicit 400 (DEFER, not ignore).
+    # P1.3: search_after -> explicit 400 (DEFER, not ignore).
     if root.has(String("search_after")):
         raise Error(
             "search parse: search_after is not yet supported (P1.3 ships"
             " from/size pagination; search_after is a follow-on)"
         )
 
-    # P1.3 §4.2: parse `sort` (single-key; multi-level / non-fast-field handled
+    # P1.3: parse `sort` (single-key; multi-level / non-fast-field handled
     # structurally here + against the split meta in gate_sort_against_fastfields).
     var sort_field = String("")
     var sort_order = SORT_DESC
@@ -339,12 +399,12 @@ def search_json_to_queryir(
 
     # B1: the aggs-only / no-query / match_all path. When aggs are present AND
     # there is no query clause (or the query is `match_all`), build a NO-TERM
-    # QueryIR carrying the aggs — the engine's match-all-for-aggs path (§B1)
+    # QueryIR carrying the aggs — the engine's match-all-for-aggs path
     # populates `touched` with the whole split. This bypasses the
     # mandatory-match raise (which would 400 the canonical dashboard query).
     var is_match_all = have_query and query.has(String("match_all"))
     if have_aggs and (not have_query or is_match_all):
-        # H6: the SAME v1 TEXT analyzer (symmetry). The empty query_text yields
+        # The SAME v1 TEXT analyzer (symmetry). The empty query_text yields
         # zero tokens, so the engine takes the B1 whole-split aggregation path.
         var analyzer = AnalyzerConfig.text(text_field)
         return QueryIR(
@@ -388,7 +448,7 @@ def search_json_to_queryir(
         _walk_bool_arm(bq, String("must"), match_field, match_text, have_match, conjuncts)
         _walk_bool_arm(bq, String("filter"), match_field, match_text, have_match, conjuncts)
     elif query.has(String("term")) or query.has(String("range")):
-        # filter-only / constant-score (CB4) -> 400.
+        # filter-only / constant-score -> 400.
         raise Error(
             "search parse: filter-only / constant-score query unsupported in"
             " P1.2 — a `match` clause is required; filter-only is P1.3"
@@ -403,13 +463,13 @@ def search_json_to_queryir(
         )
 
     if not have_match:
-        # CB4: a bool with only filter/term/range arms (no match) -> 400.
+        # A bool with only filter/term/range arms (no match) -> 400.
         raise Error(
             "search parse: filter-only / constant-score query unsupported in"
             " P1.2 — a `match` clause is required; filter-only is P1.3"
         )
 
-    # H6: the SAME v1 TEXT analyzer the SearchSink hardcodes (the symmetry
+    # The SAME v1 TEXT analyzer the SearchSink hardcodes (the symmetry
     # guarantee). is_tokenized() == True (E7) — analyze_text raises otherwise.
     # P1.4: a match query MAY carry aggs (aggregated over the matched set).
     var analyzer = AnalyzerConfig.text(match_field)
@@ -426,10 +486,30 @@ def _parse_match(match_obj: JsonValue) raises -> Tuple[String, String]:
         raise Error("search parse: `match` is not a JSON object")
     if len(match_obj.obj_keys) == 0:
         raise Error("search parse: `match` clause has no field")
+    if len(match_obj.obj_keys) > 1:
+        raise Error(
+            "search parse: `match` clause names more than one field (expected"
+            " exactly one)"
+        )
     var field = match_obj.obj_keys[0]
     var mv = match_obj.get(field)
     var qtext: String
     if mv.is_object():
+        # `match` options that change which documents match (`operator: and`,
+        # `minimum_should_match`, `fuzziness`, `analyzer`, ...) are not
+        # implemented; refuse them instead of running an OR match.
+        for i in range(len(mv.obj_keys)):
+            var opt = mv.obj_keys[i]
+            if opt == String("query") or opt == String("boost"):
+                continue
+            if opt == String("operator") and mv.children[i].is_string():
+                var op = mv.children[i].as_string()
+                if op == String("or") or op == String("OR"):
+                    continue
+            raise Error(
+                "search parse: `match." + field + "." + opt + "` is"
+                " unsupported (only `query`, `boost` and `operator: or`)"
+            )
         if not mv.has(String("query")):
             raise Error(
                 "search parse: `match.<field>` object is missing the inner"
@@ -473,7 +553,7 @@ def _default_order_for(field: String) -> UInt8:
 
 
 def _parse_sort(sort_val: JsonValue) raises -> Tuple[String, UInt8, UInt8]:
-    """Parse the `sort` JSON array (P1.3 §4.2) -> (sort_field, sort_order,
+    """Parse the `sort` JSON array -> (sort_field, sort_order,
     missing_order). Single-key only: a multi-element array -> 400 (NOT silently
     truncated, C8). Element forms:
       * bare string: "price" -> (price, asc); "_score" -> (_score, desc);
@@ -552,6 +632,11 @@ def _walk_bool_arm(
         raise Error("search parse: `bool." + arm_key + "` is not an array")
     for i in range(len(arm.children)):
         ref el = arm.children[i]
+        if el.is_object() and len(el.obj_keys) > 1:
+            raise Error(
+                "search parse: a `bool." + arm_key + "` element names more"
+                " than one clause (expected exactly one)"
+            )
         if el.has(String("match")):
             if have_match:
                 raise Error(
@@ -582,7 +667,7 @@ def _walk_bool_arm(
 
 
 # =============================================================================
-# §3b — P1.4: the `aggs` request-block lowering (search_query §7.1).
+# — P1.4: the `aggs` request-block lowering (search_query).
 # =============================================================================
 
 
@@ -639,7 +724,7 @@ def _parse_terms_order(order_val: JsonValue) raises -> UInt8:
 
 
 def _parse_terms_agg(name: String, terms_obj: JsonValue) raises -> AggSpec:
-    """Parse a `terms` agg body -> an AggSpec (§7.1). Shape:
+    """Parse a `terms` agg body -> an AggSpec. Shape:
     {"field":"<f>"[,"size":N][,"order":{...}][,"min_doc_count":N][,"missing":"<s>"]}.
     Multi-field terms / scripted terms -> 400."""
     if not terms_obj.is_object():
@@ -659,6 +744,11 @@ def _parse_terms_agg(name: String, terms_obj: JsonValue) raises -> AggSpec:
         size = Int(terms_obj.get(String("size")).as_int64())
         if size < 0:
             raise Error("search parse: `terms.size` must be non-negative")
+        if size > MAX_TERMS_SIZE:
+            raise Error(
+                "search parse: `terms.size` above " + String(MAX_TERMS_SIZE)
+                + " is unsupported"
+            )
     var order_code = AGG_ORDER_COUNT_DESC
     if terms_obj.has(String("order")):
         order_code = _parse_terms_order(terms_obj.get(String("order")))
@@ -686,7 +776,7 @@ def _parse_one_agg(name: String, body: JsonValue) raises -> AggSpec:
             "search parse: agg '" + name + "' body must be a {<type>:{...}}"
             " object"
         )
-    # Nested sub-aggregations are OUT (§6) — a sibling aggs/aggregations key
+    # Nested sub-aggregations are OUT — a sibling aggs/aggregations key
     # alongside the agg type.
     if body.has(String("aggs")) or body.has(String("aggregations")):
         raise Error(
@@ -713,7 +803,7 @@ def _parse_one_agg(name: String, body: JsonValue) raises -> AggSpec:
         var field = inner.get(String("field")).as_string()
         return AggSpec(name, mk, field^)
 
-    # Explicit OOS agg types (§6) — each with a specific reason.
+    # Explicit OOS agg types — each with a specific reason.
     if agg_type == String("cardinality"):
         raise Error(
             "search parse: `cardinality` is unsupported in P1.4 (exact distinct"
@@ -742,16 +832,22 @@ def _parse_aggs(aggs_obj: JsonValue) raises -> List[AggSpec]:
     backward-compatible)."""
     if not aggs_obj.is_object():
         raise Error("search parse: `aggs` must be a JSON object")
+    if len(aggs_obj.obj_keys) > MAX_AGGS:
+        raise Error(
+            "search parse: too many aggregations ("
+            + String(len(aggs_obj.obj_keys)) + "); the limit is "
+            + String(MAX_AGGS)
+        )
     var out = List[AggSpec]()
+    # Members are read by position: `get(name)` scans the keys and copies the
+    # value. The parser keeps `children` aligned with `obj_keys`.
     for i in range(len(aggs_obj.obj_keys)):
-        var name = aggs_obj.obj_keys[i]
-        var body = aggs_obj.get(name)
-        out.append(_parse_one_agg(name, body))
+        out.append(_parse_one_agg(aggs_obj.obj_keys[i], aggs_obj.children[i]))
     return out^
 
 
 # =============================================================================
-# §6 — track_total_hits: the envelope render mode (P1.3 §4.4 / A5).
+# — track_total_hits: the envelope render mode.
 # =============================================================================
 
 
@@ -779,6 +875,6 @@ def parse_track_total_hits(body: Span[UInt8, _]) raises -> UInt8:
 
 def sort_is_by_score(query: QueryIR) -> Bool:
     """True iff the result is sorted by relevance (`_score` / the default ""),
-    NOT a field. Drives max_score rendering (null under field sort, §5 / A7)."""
+    NOT a field. Drives max_score rendering (null under field sort / A7)."""
     var sf = query.sort_field
     return sf.byte_length() == 0 or sf == SORT_FIELD_SCORE

@@ -51,7 +51,7 @@ comptime KEYWORD_SUFFIX: String = String(".keyword")
 
 def _resolve_keyword_field(name: String, reader: FastFieldReader) raises -> String:
     """P1.6-kw — resolve an OpenSearch `<field>.keyword` sub-field alias to the
-    bare keyword fast-field name. The fidelity gap (13_..._design / fix note):
+    bare keyword fast-field name. The gap it closes:
     real OS clients/Kibana use `<field>.keyword` for exact term/sort/terms-agg,
     but P1.6 builds keyword fast-fields under the BARE name (`status`), so a
     `status.keyword` reference would fail `has_field` and 400.
@@ -74,6 +74,9 @@ def _resolve_keyword_field(name: String, reader: FastFieldReader) raises -> Stri
     if not name.endswith(KEYWORD_SUFFIX):
         return name
     var nb = name.as_bytes()
+    # SAFETY: `name` ends with KEYWORD_SUFFIX (checked above), which is ASCII,
+    # so the cut sits on a character boundary and the prefix of well-formed
+    # UTF-8 is well-formed.
     var bare = String(
         StringSlice(unsafe_from_utf8=nb[: len(nb) - len(KEYWORD_SUFFIX.as_bytes())])
     )
@@ -97,21 +100,21 @@ def _resolve_keyword_field(name: String, reader: FastFieldReader) raises -> Stri
 
 
 # =============================================================================
-# §4 — the GATE-AND-ATTACH step: field-existence + literal-dtype gate (§3.3).
+# — the GATE-AND-ATTACH step: field-existence + literal-dtype gate.
 # =============================================================================
 
 
 def gate_filter_against_fastfields(
     var query: QueryIR, reader: FastFieldReader
 ) raises -> QueryIR:
-    """The DIRECT-PATH gate (IM1 (b) / §3.3): given the resolved split's
+    """The DIRECT-PATH gate: given the resolved split's
     fast-field reader, RAISE a clear 400 if any pushed conjunct names a
     non-fast-field or has a literal/field dtype mismatch — the direct path has no
     downstream Filter to fall back to, so silently dropping a filter would be
     silently-wrong (C8). Returns `query` unchanged if every conjunct passes (or
     if there is no filter).
 
-    Mirrors Searcher._pushdown_supported / CB3 EXACTLY (the accept-set here ==
+    Mirrors Searcher._pushdown_supported EXACTLY (the accept-set here ==
     the engine apply's eval-set).
 
     P1.6-kw: BEFORE validating, REWRITE any `<field>.keyword` col-ref to its bare
@@ -258,7 +261,7 @@ def _require_ff_class(name: String, reader: FastFieldReader, is_range: Bool) rai
 def _require_literal_matches(
     name: String, lit: ScalarValue, reader: FastFieldReader
 ) raises:
-    """CB3: raise (-> 400) if the literal dtype does not match the resolved
+    """Raise (-> 400) if the literal dtype does not match the resolved
     fast-field class. KEYWORD <- string; NUMERIC-int / DATE <- int/date/ts;
     NUMERIC-float <- float."""
     var fc = reader.field_class_of(name)
@@ -288,7 +291,7 @@ def _require_literal_matches(
 
 def _encoding_of(name: String, reader: FastFieldReader) raises -> UInt8:
     """The encoding byte for `name` (FF_ENC_FLOAT_FULL marks a float field).
-    Walks the public entry_meta_at accessor (IM2)."""
+    Walks the public entry_meta_at accessor."""
     for i in range(reader.num_fields()):
         var m = reader.entry_meta_at(i)
         if m[0] == name:
@@ -297,14 +300,14 @@ def _encoding_of(name: String, reader: FastFieldReader) raises -> UInt8:
 
 
 # =============================================================================
-# §5 — the SORT gate: field-existence + TEXT-field rejection (P1.3 §4.3).
+# — the SORT gate: field-existence + TEXT-field rejection.
 # =============================================================================
 
 
 def gate_sort_against_fastfields(
     var query: QueryIR, reader: FastFieldReader
 ) raises -> QueryIR:
-    """The DIRECT-PATH sort gate (P1.3 §4.3): given the resolved split's
+    """The DIRECT-PATH sort gate: given the resolved split's
     fast-field reader, RAISE a clear 400 if the sort target is not sortable on
     the direct path. `_score`/`_doc`/"" are ALWAYS allowed (no fast-field
     needed). A named field must be a fast-field of a non-TEXT class:
@@ -345,14 +348,14 @@ def gate_sort_against_fastfields(
 
 
 # =============================================================================
-# §5b — P1.4: the AGG gate: field-existence + class gate (m1 / §6).
+# — P1.4: the AGG gate: field-existence + class gate (m1 /).
 # =============================================================================
 
 
 def gate_aggs_against_fastfields(
     var query: QueryIR, reader: FastFieldReader
 ) raises -> QueryIR:
-    """The DIRECT-PATH agg gate (m1 / §6): given the resolved split's fast-field
+    """The DIRECT-PATH agg gate (m1 /): given the resolved split's fast-field
     reader, RAISE a clear 400 if any agg field is not a fast-field of the right
     class. The direct path has no downstream operator to fall back to, so a bad
     agg field cannot be silently kept (C8 fail-loud) — and without this gate the

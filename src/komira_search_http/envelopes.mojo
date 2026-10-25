@@ -38,13 +38,13 @@ from komira_json import JsonValue, parse_json_value
 from .bulk import BulkItem
 
 
-# track_total_hits render modes (P1.3 §4.4 / A5). A pure rendering knob — the
+# track_total_hits render modes. A pure rendering knob — the
 # leaf always computes the exact total; this only changes how it is rendered.
 comptime TRACK_TOTAL_DEFAULT: UInt8 = 0  # exact up to cap, relation gte above.
 comptime TRACK_TOTAL_TRUE: UInt8 = 1     # exact value, relation always eq.
 comptime TRACK_TOTAL_FALSE: UInt8 = 2    # omit the total object entirely.
 
-# The OpenSearch default cap on the rendered total (P1.3 §5).
+# The OpenSearch default cap on the rendered total.
 comptime TOTAL_CAP: Int = 10000
 
 
@@ -60,7 +60,7 @@ def _int(v: Int) -> JsonValue:
 def _shards_object(
     total: Int = 1, successful: Int = 1, failed: Int = 0
 ) -> JsonValue:
-    """The `_shards` object. P1.5 (§6.2): parameterized by the real per-query
+    """The `_shards` object. Parameterized by the real per-query
     shard counts — `total` = the number of live splits fanned out over,
     `successful` = splits that searched without error, `failed` = splits that
     raised. `skipped` is 0 for v1 (can-match pruning deferred). Defaults keep the
@@ -79,7 +79,7 @@ def _shards_object(
 
 def _embed_source(source_blob: String) -> JsonValue:
     """Embed the stored `_source` blob as a JSON VALUE (it IS a JSON object, so
-    inline it as parsed JSON, NOT a quoted string). Fail-SOFT (08 §2.3): if the
+    inline it as parsed JSON, NOT a quoted string). Fail-SOFT: if the
     blob is not well-formed JSON (a corrupt split), quote it as a string
     fallback so the envelope still renders syntactically valid JSON (NOT a
     500)."""
@@ -106,7 +106,7 @@ def _float_json(x: Float64) -> JsonValue:
 
 
 # =============================================================================
-# P1.4 — the `aggregations` response renderer (§7.2).
+# P1.4 — the `aggregations` response renderer.
 # =============================================================================
 
 
@@ -150,8 +150,7 @@ def _stats_member(ar: AggResult) raises -> JsonValue:
 
 def _terms_member(ar: AggResult) raises -> JsonValue:
     """Render a `terms` agg -> {doc_count_error_upper_bound, sum_other_doc_count,
-    buckets:[{key,doc_count}]}. doc_count_error_upper_bound is order-aware (§5.2 +
-    amendment E): 0 for a single split or key-order, the computed count-desc sum
+    buckets:[{key,doc_count}]}. doc_count_error_upper_bound is order-aware: 0 for a single split or key-order, the computed count-desc sum
     across splits that dropped a bucket, or -1 for count-asc/sub-agg order. The
     merge reducer (merge_agg_results) sets `ar.doc_count_error_upper_bound`; a
     single-split direct render leaves it 0 (the AggResult ctor default)."""
@@ -206,23 +205,22 @@ def hitbatch_to_hits_envelope(
     shards_successful: Int = 1,
     shards_failed: Int = 0,
 ) raises -> String:
-    """Render the HitBatch page as the OpenSearch hits-envelope JSON string
-    (08 §2.3 + P1.3 §5).
+    """Render the HitBatch page as the OpenSearch hits-envelope JSON string.
 
-    P1.5 (§6.2): `shards_*` carry the real per-query shard counts (the driver
+    `shards_*` carry the real per-query shard counts (the driver
     threads `len(splits)` / successful / failed); they default to the pre-P1.5
     single-shard literal so the existing callers are source-compatible.
 
     The HitBatch columns: column_at(0) = _score Float64, column_at(1) = _id
     Int64 (the engine doc_id), column_at(2) = _source STRING. Each `_source`
     blob is embedded verbatim as a JSON value. `_id` is rendered as the engine
-    doc_id stringified (08 §4.3 — the P0 _id contract; `client_ids` is accepted
-    for the P1 client-_id round-trip seam but unused in P0). The leaf already
+    doc_id stringified (`client_ids` is accepted but unused: the client
+    `_id` is not stored, so a hit carries the engine doc id). The leaf already
     returns the correctly-ordered + sliced page, so the rows render as-is.
 
-    H5: the top-level `_shards` single-shard object is included.
+    The top-level `_shards` single-shard object is included.
 
-    P1.3 §5 (the total/relation/max_score correctness fix):
+    P1.3 (the total/relation/max_score correctness fix):
       * `total.value` is the TRUE match total (`total_matches`, from
         SearchResult.total_matches — NOT `num_rows()`, which is the PAGE size and
         was the pre-P1.3 bug for any paginated query). track_total (A5):
@@ -246,7 +244,7 @@ def hitbatch_to_hits_envelope(
 
     var hits_obj = JsonValue.empty_object()
 
-    # P1.3 §5 / A5: render the true total per the track_total mode.
+    # P1.3 / A5: render the true total per the track_total mode.
     if track_total != TRACK_TOTAL_FALSE:
         var total = JsonValue.empty_object()
         var value: Int
@@ -284,8 +282,8 @@ def hitbatch_to_hits_envelope(
 
         var hit = JsonValue.empty_object()
         hit.set_member(String("_index"), JsonValue.from_string(index_name))
-        # _id: P0 single-split renders the engine doc_id stringified (08 §4.3).
-        # P1.5 (§4.3/§6.2): in a MULTI-SPLIT response the engine doc_id is
+        # _id: P0 single-split renders the engine doc_id stringified.
+        # In a MULTI-SPLIT response the engine doc_id is
         # per-split-local and COLLIDES across splits (every split stamps
         # min_doc_id=0), so two hits from different splits would both render
         # _id:"0". When `client_ids` carries one entry per page row (the driver
@@ -306,7 +304,7 @@ def hitbatch_to_hits_envelope(
     hits_obj.set_member(String("hits"), hits_arr^)
     root.set_member(String("hits"), hits_obj^)
 
-    # P1.4 (§7.2): the `aggregations` object is a SIBLING of `hits` at the
+    # The `aggregations` object is a SIBLING of `hits` at the
     # response root. Rendered iff aggs were requested (an empty AggResults still
     # renders the `{}` shell for an aggs-requested query — e.g. an empty matched
     # set yields zeroed/null metric members, not an absent block).
@@ -322,25 +320,32 @@ def empty_hits_envelope(
     index_name: String,
     var agg_results: AggResults = AggResults(),
     has_aggs: Bool = False,
+    track_total: UInt8 = TRACK_TOTAL_DEFAULT,
 ) raises -> String:
     """The empty hits envelope (no live splits / unknown index): total.value 0,
-    max_score null, hits [] (08 §4.1 step 5 — NOT a 500/404). H5 _shards
+    max_score null, hits []. _shards
     included.
 
-    P1.4 (§7.2): when aggs were requested but there are no live splits,
-    OpenSearch still returns the `aggregations` skeleton (empty buckets / zeroed
-    or null metric values). `agg_results` is the (empty) AggResults rendered when
-    `has_aggs` is set."""
+    When aggs were requested but there are no live splits, OpenSearch still
+    returns the `aggregations` skeleton (empty buckets / zeroed or null metric
+    values). This function renders the AggResults it is given and knows no
+    AggSpec, so the caller builds the skeleton: one `AggResult(name, kind)` per
+    requested aggregation, none of them folded. An empty AggResults renders
+    `{}`. `track_total` false omits `hits.total`, as the populated envelope
+    does."""
     var root = JsonValue.empty_object()
     root.set_member(String("took"), _int(0))
     root.set_member(String("timed_out"), JsonValue.from_bool(False))
     root.set_member(String("_shards"), _shards_object())
 
     var hits_obj = JsonValue.empty_object()
-    var total = JsonValue.empty_object()
-    total.set_member(String("value"), _int(0))
-    total.set_member(String("relation"), JsonValue.from_string(String("eq")))
-    hits_obj.set_member(String("total"), total^)
+    if track_total != TRACK_TOTAL_FALSE:
+        var total = JsonValue.empty_object()
+        total.set_member(String("value"), _int(0))
+        total.set_member(
+            String("relation"), JsonValue.from_string(String("eq"))
+        )
+        hits_obj.set_member(String("total"), total^)
     hits_obj.set_member(String("max_score"), JsonValue.null())
     hits_obj.set_member(String("hits"), JsonValue.empty_array())
     root.set_member(String("hits"), hits_obj^)
@@ -356,7 +361,7 @@ def empty_hits_envelope(
 def bulk_response_envelope(
     index_name: String, client_ids: List[String]
 ) raises -> String:
-    """The all-SUCCESS `_bulk` response (08 §3.4). One `items[]` entry per source
+    """The all-SUCCESS `_bulk` response. One `items[]` entry per source
     doc, keyed by the action verb (`index`): {_index, _id, _version:1,
     result:"created", status:201}. The wire field is `status` (NOT `_status`).
     `errors` is always false.
@@ -373,9 +378,9 @@ def bulk_response_envelope(
 
 
 def _bulk_index_item(index_name: String, item: BulkItem) raises -> JsonValue:
-    """Render ONE `_bulk` `items[]` entry, keyed by the action verb `index`.
+    """Render ONE `_bulk` `items[]` entry, keyed by the item's action verb.
     A SUCCESS item -> {_index, _id, _version:1, result:"created", status:201};
-    a FAILED item -> {_index, _id, status:400, error:{type,reason}} (08 §3.4 /
+    a FAILED item -> {_index, _id, status:400, error:{type,reason}} (
     P1.7 — the OpenSearch per-item shape `helpers.bulk` inspects)."""
     var index_action = JsonValue.empty_object()
     index_action.set_member(
@@ -402,14 +407,14 @@ def _bulk_index_item(index_name: String, item: BulkItem) raises -> JsonValue:
         index_action.set_member(String("error"), err^)
 
     var entry = JsonValue.empty_object()
-    entry.set_member(String("index"), index_action^)
+    entry.set_member(item.verb.copy(), index_action^)
     return entry^
 
 
 def bulk_response_envelope_items(
     index_name: String, items: List[BulkItem], errors: Bool
 ) raises -> String:
-    """The per-item `_bulk` response (P1.7 partial-success; 08 §3.4 + doc 18 A6).
+    """The per-item `_bulk` response (P1.7 partial success).
     HTTP 200 with `{"took":0,"errors":<bool>,"items":[...]}`; each `items[]`
     entry is keyed by the `index` action and is either a 201/created success or a
     400/error failure, IN NDJSON ORDER. `errors` is the request-level flag
@@ -431,7 +436,7 @@ def bulk_response_envelope_items(
 
 
 def error_envelope(error_type: String, reason: String, status: Int) raises -> String:
-    """The OpenSearch error envelope (08 §7):
+    """The OpenSearch error envelope:
     {"error":{"type":"<type>","reason":"<msg>"},"status":<4xx>}. The reason is
     escaped via the JsonValue serializer (no hand-concatenation)."""
     var err = JsonValue.empty_object()

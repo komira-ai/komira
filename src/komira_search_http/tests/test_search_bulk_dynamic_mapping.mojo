@@ -3,15 +3,11 @@
 # FIELD MAPPING proof
 # =============================================================================
 #
-# Source of truth: the search shim design notes
-# (the Step-0 design) + the BINDING PRE-IMPL AMENDMENTS A1-A6 / OQ-1/OQ-2 (folded
-# into the impl; these SUPERSEDE the doc body).
-#
 # This is the test that does the thing that 400'd before P1.6: index JSON docs
 # with mixed-type fields VIA the `_bulk` DocBatch builder, then filter/sort/agg
 # over them through the FULL pipeline (SearchSink -> SearchCore / FastFieldReader).
 #
-# TRANSLATOR units (over ndjson_bulk_to_docbatch / _build_doc_batch):
+# TRANSLATOR units (over ndjson_bulk_to_docbatch / build_doc_batch):
 #   1.  Type inference per JSON type {body,status,price,rating} ->
 #       STRING/INT64/FLOAT64 (asserted via FastFieldReader.field_class_of after a
 #       full ingest).
@@ -113,7 +109,7 @@ def _parse(ndjson: String) raises -> BulkParse:
 
 
 def _drive_sink_from_bulk(ndjson: String, seed: UInt8) raises -> List[UInt8]:
-    """The §8.3 full-pipeline path: NDJSON -> translator -> SearchSink ->
+    """The full-pipeline path: NDJSON -> translator -> SearchSink ->
     split bytes. Mirrors _drive_sink in test_search_filter_pushdown."""
     var parsed = _parse(ndjson)
     var docbatch = parsed.take_docbatch()

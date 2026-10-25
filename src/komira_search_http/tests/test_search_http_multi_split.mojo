@@ -2,18 +2,15 @@
 # test_search_http_multi_split.mojo — P1.5 shim/merge e2e units
 # =============================================================================
 #
-# Source of truth: the search shim design notes
-# (Step-0 design) + the BINDING PRE-IMPL AMENDMENTS A-F.
-#
 # Shim/driver-level units over MULTIPLE in-memory splits (built by the P0.4
-# writer, NO S3). Following the style of the other suites here,
-# these drive the SAME value pipeline `_handle_search` runs — build N split
+# writer, no network). Following the style of the other suites here,
+# these drive the value pipeline a search request handler runs — build N split
 # blobs -> SearchCore per split (with the per-split over-fetch rewrite) -> the
 # komira_search merge reducers -> hitbatch_to_hits_envelope with the real
 # `_shards{total,successful,failed}` counts + the namespaced cross-split
-# `client_ids` — and assert the RENDERED OpenSearch envelope JSON. (The literal
-# S3 get_object fan-out loop is an end-to-end test's concern — awkward
-# under the [C]-parametric dispatcher; this proves everything else.)
+# `client_ids` — and assert the RENDERED OpenSearch envelope JSON. (Fetching
+# the splits from object storage is an end-to-end test's concern; this proves
+# everything else.)
 #
 # Covers:
 #   1. merged hits + global total + real _shards{total:2,successful:2,failed:0}
@@ -81,15 +78,15 @@ def _uuid(seed: UInt8) -> InlineArray[UInt8, 16]:
 
 
 def _short_id(seed: UInt8) -> String:
-    """Mirror the dispatcher's split short id over the same _uuid(seed) the split
+    """Mirror a handler's split short id over the same _uuid(seed) the split
     carries (full 16 uuid bytes, hex — see the BUGFIX note on
-    the dispatcher's split short id; the prior 4-byte prefix collided on same-run
+    a handler's split short id; the prior 4-byte prefix collided on same-run
     UUIDv7 timestamp heads)."""
     return _short_id_of(_uuid(seed))
 
 
 def _short_id_of(uuid: InlineArray[UInt8, 16]) -> String:
-    """Mirror the dispatcher's split short id over an arbitrary 16-byte UUID (full 16
+    """Mirror a handler's split short id over an arbitrary 16-byte UUID (full 16
     bytes, hex)."""
     comptime HEX = "0123456789abcdef"
     var out = String("")
@@ -168,7 +165,7 @@ def _search_split(bytes: List[UInt8], query: QueryIR) raises -> SearchResult:
     return core.search(query)
 
 
-# Render the merged 2-split result the SAME way the dispatcher's search handler does:
+# Render the merged 2-split result the SAME way a request handler does:
 # over-fetch each split, merge, then hitbatch_to_hits_envelope with real shard
 # counts + namespaced ids. Returns the serialized envelope JSON.
 def _render_two_split_uuid(
