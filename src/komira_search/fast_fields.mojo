@@ -227,16 +227,31 @@ def _is_float_dtype(dt: DType) -> Bool:
 
 
 @always_inline
-def _zigzag_encode(v: Int) -> Int:
-    """Map a signed Int to a non-negative Int for ULEB128. 0->0, -1->1, 1->2,
-    -2->3, ... (the standard protobuf zig-zag, in 64-bit)."""
-    return (v << 1) ^ (v >> 63)
+def _zigzag_encode(v: Int) -> UInt64:
+    """Map a signed Int to an unsigned value for ULEB128. 0->0, -1->1, 1->2,
+    -2->3, ... (the standard protobuf zig-zag, in 64-bit). Unsigned because the
+    image of a magnitude of 2^62 or more needs all 64 bits; as a signed Int it
+    would be negative."""
+    return UInt64((v << 1) ^ (v >> 63))
 
 
 @always_inline
 def _zigzag_decode(u: Int) -> Int:
-    """Inverse of _zigzag_encode (treats `u` as the non-negative encoding)."""
-    return (u >> 1) ^ -(u & 1)
+    """Inverse of _zigzag_encode. `u` carries the 64-bit encoding as read by
+    `_read_uleb128_span`, whose top bit may be set."""
+    var w = UInt64(u)
+    return Int((w >> UInt64(1)) ^ (UInt64(0) - (w & UInt64(1))))
+
+
+def _write_uleb128_u64(value: UInt64, mut out: List[UInt8]):
+    """Append the ULEB128 encoding of an unsigned 64-bit `value` (at most 10
+    bytes). `write_uleb128` takes an Int and shifts it arithmetically, so it
+    never ends for a value with the top bit set."""
+    var v = value
+    while v >= UInt64(0x80):
+        out.append(UInt8(v & UInt64(0x7F)) | UInt8(0x80))
+        v = v >> UInt64(7)
+    out.append(UInt8(v))
 
 
 def _pack_bits_lsb_first_u64(
@@ -551,7 +566,7 @@ struct NumericFastFieldBuilder(Copyable, Movable, Deinitable):
         var bits = _min_bit_width(max_residual)
 
         write_uleb128(n, out)
-        write_uleb128(_zigzag_encode(min_v), out)
+        _write_uleb128_u64(_zigzag_encode(min_v), out)
         out.append(UInt8(bits))
         if any_null:
             out.append(1)

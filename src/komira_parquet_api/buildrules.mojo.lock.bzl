@@ -45,6 +45,20 @@ GRAPH_JSON = r'''{
       "key": "e08059a3be8e8cb1f0a7a08e573e4b6a466504f6a31cd2bb9246aba5900f545c"
     },
     {
+      "id": "komira_parquet_api@0.1.0#mojo1.0.0/test:src/komira_parquet_api/tests/test_enum_ne_operator.mojo",
+      "package": "komira_parquet_api",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_parquet_api/tests/test_enum_ne_operator.mojo", "sha256": "b90a461e04779694503b4ff68d7a296964911aecffecb931a25297495066fc3d"}
+      ],
+      "deps": ["komira_parquet_api@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_enum_ne_operator.pass"],
+      "key": "14678d342f77f3a0f6ba0311b3ba4dd17bca2ba54148bff1518832dd9d738d89"
+    },
+    {
       "id": "komira_parquet_api@0.1.0#mojo1.0.0/test:src/komira_parquet_api/tests/test_enum_unknown_values.mojo",
       "package": "komira_parquet_api",
       "version": "0.1.0",

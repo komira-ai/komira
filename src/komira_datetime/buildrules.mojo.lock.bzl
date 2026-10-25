@@ -146,6 +146,20 @@ GRAPH_JSON = r'''{
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_zone_name.pass"],
       "key": "8a0ceec5f8970edeab00cae8d44b62b143c2ce86a4a8f8f2bb0cad0871db864d"
+    },
+    {
+      "id": "komira_datetime@0.1.0#mojo1.0.0/test:src/komira_datetime/tests/test_zone_values_and_loading.mojo",
+      "package": "komira_datetime",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_datetime/tests/test_zone_values_and_loading.mojo", "sha256": "51aa8cc8666a6f854e27b85ed004d4f4ef8d6649c49e7917bdc0435fdfce0a0c"}
+      ],
+      "deps": ["komira_datetime@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_zone_values_and_loading.pass"],
+      "key": "ee28595f7e221debab730df56bf1b35a219229d024fb22a53f76179e044d5b21"
     }
   ]
 }

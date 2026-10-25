@@ -44,6 +44,20 @@ GRAPH_JSON = r'''{
       "key": "8eb813191c1a29017f37758327efd8736288508cadbe16088fe75ca0b4a2d600"
     },
     {
+      "id": "komira_test_verdict@0.1.0#mojo1.0.0/test:src/komira_test_verdict/tests/test_exit_processes.mojo",
+      "package": "komira_test_verdict",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_test_verdict/tests/test_exit_processes.mojo", "sha256": "3f58c6a14c2c1e327a741936da3dc999428276a425571e6619462910ceb703fd"}
+      ],
+      "deps": ["komira_test_verdict@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_exit_processes.pass"],
+      "key": "952f2b4c202b205d83a96e2a003682bb0bdb4f49a48d2a11955971eb6895cf0e"
+    },
+    {
       "id": "komira_test_verdict@0.1.0#mojo1.0.0/test:src/komira_test_verdict/tests/test_exits.mojo",
       "package": "komira_test_verdict",
       "version": "0.1.0",

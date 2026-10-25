@@ -30,6 +30,19 @@
 #                   made and runs `mopm publish --staged S --registry prod`.
 #                   What must exist before the variable is set is in docs/ci.md,
 #                   "The mopm jobs", "Enabling the mopm publish".
+#   `mopm-stage-beta`, `mopm-publish-beta`  after `mopm-stage`, ONLY on a push
+#                   to main and when the repository variable
+#                   MOPM_BETA_PUBLISH_ENABLED is `true` (it is unset: both are
+#                   skipped). The first stages the same built packages against
+#                   the registry `beta` (the set of `mopm-stage` is planned
+#                   against prod), after giving every member of its checkout
+#                   the version 0.1.<run number> (a version can be created
+#                   once, so each push needs its own; nothing is pushed back);
+#                   the second publishes that set to `beta`, in
+#                   the environment `beta`, with the job's GitHub OIDC identity
+#                   (`--oidc`) and no secret. What
+#                   must exist before the variable is set is in docs/ci.md,
+#                   "Enabling the mopm beta publish".
 #
 # It runs named Buck2 targets on the farm, through the buck2-farm action
 # (.github/actions/buck2-farm), which fails a step unless buck2 succeeded and
@@ -223,12 +236,19 @@ jobs:
       - name: build the pinned mopm
         uses: ./.github/actions/buck2-farm
         with:
-          args: build toolchains//:mopm_0_0_54 --out ${{ runner.temp }}/mopm-publish/mopm
+          args: build toolchains//:mopm_0_0_57 --out ${{ runner.temp }}/mopm-publish/mopm
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: build the packages
         uses: ./.github/actions/buck2-farm
         with:
           args: build //release:mopm_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # Built here, run only by `mopm-stage-beta` (no step of this job runs it): the beta
+      # job has no farm and no buck2, so it takes the tool from this job's artifact.
+      - name: build the beta version tool
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build //tools/build/ci:release_beta_version --out ${{ runner.temp }}/mopm-publish/release_beta_version
           assert-remote: ${{ steps.assert.outputs.path }}
       # STAGE. Packs each member of src/ from its built `.mojoc` (compiler: MOJO
       # of packages.bzl), asks the registry, without a token, which versions it
@@ -258,7 +278,15 @@ jobs:
           name: mopm-staged-${{ github.sha }}
           path: |
             ${{ runner.temp }}/mopm-publish/mopm
+            ${{ runner.temp }}/mopm-publish/release_beta_version
             ${{ runner.temp }}/mopm-publish/staged
+          if-no-files-found: error
+          retention-days: 1
+      # What `mopm-stage-beta` stages from again, against the beta registry.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mopm-artifacts-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-publish/artifacts
           if-no-files-found: error
           retention-days: 1
       - name: Stop buck2
@@ -298,3 +326,91 @@ jobs:
         env:
           MOPM_TOKEN: ${{ secrets.MOPM_TOKEN }}
         run: '"$RUNNER_TEMP/mopm-publish/mopm" publish --staged "$RUNNER_TEMP/mopm-publish/staged" --registry prod'
+
+  # STAGE FOR BETA. `mopm-stage` planned its set against prod: a member prod
+  # already holds is skipped there and a prod yank refuses the set, so that set
+  # is the wrong plan for beta. This job stages the same built packages again,
+  # against beta, with the mopm that job built, and `mopm-publish-beta` publishes
+  # this set. It runs under the same gate as `mopm-publish-beta` (skipped while
+  # MOPM_BETA_PUBLISH_ENABLED is unset), needs no farm, holds no environment, no
+  # id-token and no secret (staging asks the registry what it holds, a read
+  # with no token), and runs no buck2. `==` of a `github.ref` compares ignoring
+  # case; the environment `beta` restricting deployments to `main` is the lock
+  # (docs/ci.md, "Enabling the mopm beta publish").
+  mopm-stage-beta:
+    needs: mopm-stage
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_BETA_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-staged-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-publish
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-artifacts-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-publish/artifacts
+      - name: mopm is executable
+        run: chmod +x "$RUNNER_TEMP/mopm-publish/mopm"
+      # A (name, version) pair can be created once on a registry and a mopm version is exactly
+      # MAJOR.MINOR.PATCH, so each push needs a version of its own: every member's version is
+      # set to 0.1.<run number> on this job's checkout (still inside >=0.1,<0.2, above 0.1.0,
+      # and the newest push is the newest version), with the exact pins between members.
+      # Nothing is committed or pushed back, and `mopm-stage` (prod) never runs this.
+      # `mopm stage` reads each version from mopm.toml when it runs, and the built
+      # packages carry none, so this is all the packages need.
+      - name: the beta version tool is executable
+        run: chmod +x "$RUNNER_TEMP/mopm-publish/release_beta_version"
+      - name: every member gets the beta version
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: '"$RUNNER_TEMP/mopm-publish/release_beta_version" --workspace-root src --version "0.1.$RUN_NUMBER"'
+      - name: mopm stage against beta
+        run: '"$RUNNER_TEMP/mopm-publish/mopm" stage --workspace-root src --artifacts "$RUNNER_TEMP/mopm-publish/artifacts" --compiler 1.0.0 --out "$RUNNER_TEMP/mopm-publish/staged_beta" --registry beta'
+      - name: mopm publish --staged --dry-run
+        run: '"$RUNNER_TEMP/mopm-publish/mopm" publish --staged "$RUNNER_TEMP/mopm-publish/staged_beta" --registry beta --dry-run'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mopm-staged-beta-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-publish/staged_beta
+          if-no-files-found: error
+          retention-days: 1
+
+  # PUBLISH TO BETA. The set `mopm-stage-beta` staged against beta, with this
+  # job's GitHub OIDC identity and no secret: the registry trusts this
+  # repository's release.yml, run on main from a push, in the environment
+  # `beta`, as a publisher. DISABLED: it runs only on a push to main and when
+  # the repository variable MOPM_BETA_PUBLISH_ENABLED is exactly `true`, and
+  # nobody has set it (docs/ci.md, "Enabling the mopm beta publish"). While it
+  # is unset the job is skipped before it starts. It joins no farm, runs no
+  # buck2 and checks out nothing. `id-token: write` is what lets mopm ask the
+  # runner for the job's ID token; no job reads MOPM_TOKEN here.
+  mopm-publish-beta:
+    needs: mopm-stage-beta
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_BETA_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    environment: beta
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-staged-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-publish
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mopm-staged-beta-${{ github.sha }}
+          path: ${{ runner.temp }}/mopm-publish/staged_beta
+      - name: mopm is executable
+        run: chmod +x "$RUNNER_TEMP/mopm-publish/mopm"
+      - name: mopm publish --staged --oidc
+        run: '"$RUNNER_TEMP/mopm-publish/mopm" publish --staged "$RUNNER_TEMP/mopm-publish/staged_beta" --oidc --registry beta'

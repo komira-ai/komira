@@ -43,6 +43,20 @@ GRAPH_JSON = r'''{
       "key": "e91bd743c2cf3285b9e2aee7c2c6120e03bb922038bafc545c8478d4f861c212"
     },
     {
+      "id": "komira_validation_run@0.1.0#mojo1.0.0/test:src/komira_validation_run/tests/test_retention_tag_value.mojo",
+      "package": "komira_validation_run",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_validation_run/tests/test_retention_tag_value.mojo", "sha256": "58b3d5a046cebb0d3683bdeed5e7404fca997ef93cbc33a3dc6ba643e27a3a73"}
+      ],
+      "deps": ["komira_validation_run@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_retention_tag_value.pass"],
+      "key": "27ad268d6ab4ca48eedfb2142f8ece814e392ee146f46b729c02a5a2a4ebb7b6"
+    },
+    {
       "id": "komira_validation_run@0.1.0#mojo1.0.0/test:src/komira_validation_run/tests/test_validation_run_tag.mojo",
       "package": "komira_validation_run",
       "version": "0.1.0",
