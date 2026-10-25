@@ -655,6 +655,136 @@ def test_09_a_reaped_chunk_below_the_durable_head_is_a_hole_not_a_raise() raises
     _ = inner^
 
 
+# =============================================================================
+# CASE 10 — a store error that is NOT absence propagates, even when the key in
+# its message spells `404`.
+# =============================================================================
+#
+# Conformers build the error message around the object key
+# (`StoreError[<KIND>] <method> <scheme>://<bucket>/<key> status=<http>`). The
+# writer id is the caller's, so here it is `writer-404` and every manifest key
+# in the lineage contains `404`. A permission failure on a chunk below the
+# durable head must surface: treating it as a reaped hole would drop that
+# chunk's segment from every read with no error.
+
+
+struct FailOneGetStore(
+    CloneableConditionalWriteStore,
+    ConditionalWriteStore,
+    ObjectStore,
+    Movable,
+    Deinitable,
+):
+    """`SharedInMemoryConditionalStore` whose GET of one exact key raises a
+    conformer-shaped permission error (`status=403`) naming that key."""
+
+    var _inner: SharedInMemoryConditionalStore
+    var _fail_key: String
+
+    def __init__(
+        out self, var inner: SharedInMemoryConditionalStore, var fail_key: String
+    ):
+        self._inner = inner^
+        self._fail_key = fail_key^
+
+    def clone(self) -> Self:
+        return Self(self._inner.clone(), self._fail_key.copy())
+
+    def head(self, path: Path) raises -> ObjectMeta:
+        return self._inner.head(path)
+
+    def list_with_delimiter(self, prefix: Path) raises -> ListResult:
+        return self._inner.list_with_delimiter(prefix)
+
+    def coalesce_policy(self) -> CoalescePolicy:
+        return self._inner.coalesce_policy()
+
+    def conditional_put(
+        self, path: Path, bytes: List[UInt8], precond: WritePrecondition
+    ) raises -> ObjectMeta:
+        return self._inner.conditional_put(path, bytes, precond)
+
+    def compare_and_swap(
+        self, path: Path, bytes: List[UInt8], expected_version: String
+    ) raises -> ObjectMeta:
+        return self._inner.compare_and_swap(path, bytes, expected_version)
+
+    def put(self, path: Path, bytes: List[UInt8]) raises -> ObjectMeta:
+        return self._inner.put(path, bytes)
+
+    def get_range(
+        self, path: Path, start: Int64, length: Int64
+    ) raises -> List[UInt8]:
+        return self._inner.get_range(path, start, length)
+
+    def get(self, path: Path) raises -> List[UInt8]:
+        if path.raw() == self._fail_key:
+            raise Error(
+                "StoreError[PERMISSION_DENIED] get mem://bucket/"
+                + path.raw()
+                + " status=403"
+            )
+        return self._inner.get(path)
+
+    def delete(self, path: Path) raises -> None:
+        return self._inner.delete(path)
+
+
+def test_10_a_non_absence_error_on_a_key_spelling_404_propagates() raises:
+    var inner = SharedInMemoryConditionalStore()
+    var writer = String("writer-404")
+    var lineage = telemetry_partition_prefix(
+        TELEMETRY_ROOT, TELEMETRY_DATASET_LOGS, _DAY
+    ) + "/_lineage/" + writer
+    # One fresh handle per publish, as in CASE 9, so the durable `_HEAD`
+    # reaches seq 2 and the failing chunk (seq 1) is inside region (a).
+    for i in range(3):
+        var w = _open[SharedInMemoryConditionalStore](inner, writer)
+        var e = _entry(
+            UInt8(10), i, _DAY_T0 + Int64(i) * Int64(1000),
+            _DAY_T0 + Int64(i) * Int64(1000) + Int64(500),
+        )
+        _ = w.publish(e^)
+        _ = w^
+
+    var durable_head = decode_head(
+        inner.get(Path.parse(lineage + "/_HEAD"))
+    ).chunk_seq
+    assert_true(
+        durable_head >= Int64(2),
+        "10: PRECONDITION — the durable _HEAD must have reached seq 2, so the"
+        " failing chunk is in region (a). Observed chunk_seq = "
+        + String(durable_head),
+    )
+
+    var fail_key = lineage + "/manifest/" + _pad20(Int64(1)) + ".chunk"
+    assert_true(
+        fail_key.find("404") >= 0,
+        "10: PRECONDITION — the failing key must spell 404: " + fail_key,
+    )
+    var store = FailOneGetStore(inner.clone(), fail_key.copy())
+    var r = _open[FailOneGetStore](store, writer)
+    var live = List[TelemetrySegmentEntry]()
+    var err = String("")
+    try:
+        live = r.live_segments()
+    except e:
+        err = String(e)
+    assert_true(
+        err.find("status=403") >= 0,
+        "10: a permission error on a manifest chunk must PROPAGATE out of the"
+        " replay. It was treated as absence because the key in its message"
+        " contains 404, and the replay returned "
+        + String(len(live))
+        + " of 3 segments with no error. Got error: '"
+        + err
+        + "'",
+    )
+    _ = r^
+    _ = store^
+    _ = inner^
+
+
 def main() raises:
     test_01_a_published_segment_replays_without_listing()
     test_02_every_segment_replays_despite_the_deferred_head_advance()
@@ -665,6 +795,7 @@ def main() raises:
     test_07_a_partition_with_no_writers_plans_nothing_and_does_not_raise()
     test_08_the_write_path_bootstrap_lists_and_the_read_path_does_not()
     test_09_a_reaped_chunk_below_the_durable_head_is_a_hole_not_a_raise()
+    test_10_a_non_absence_error_on_a_key_spelling_404_propagates()
     print("PASS komira_telemetry_store.test_telemetry_manifest_replay (a fresh")
     print("     reader replays EVERY published segment over a store where")
     print("     LISTING RAISES — the deferred _HEAD advance included — and a")
