@@ -68,6 +68,7 @@ from komira_objectstore import (
     WritePrecondition,
 )
 from komira_objectstore.path import Path
+from komira_log_index.idle_index_hook import _build_and_publish_split
 from komira_search.analyzer import AnalyzerConfig
 from komira_search.sink import SearchSink
 from komira_search.split import SplitView
@@ -268,6 +269,36 @@ def test_split_is_put_before_it_is_published() raises:
     assert_true(
         _starts_with(log[0], "put:") and "/splits/" in log[0],
         "the first write is the split PUT: " + log[0],
+    )
+    assert_equal(_count_prefix(log, "put:"), 1, "exactly one split PUT")
+    assert_true(_count_prefix(log, "cond:") >= 1, "the manifest is written after")
+    assert_equal(_live(store), 1, "the split is live")
+
+
+def test_idle_hook_puts_the_split_before_it_publishes() raises:
+    """The idle hook's own build-and-publish path writes the split object
+    before its summary reaches the manifest, like L0BuildTask: a crash between
+    the two leaves an unreferenced object, never a summary naming a missing
+    one."""
+    var store = RecordingStore()
+    var uuid = InlineArray[UInt8, 16](fill=UInt8(0))
+    uuid[8] = UInt8(2)
+    var n = _build_and_publish_split[RecordingStore](
+        _login_views(8),
+        UInt16(0),
+        String("nodeA"),
+        String(_META_ROOT),
+        String(_INDEX),
+        store,
+        uuid^,
+        RetryPolicy.fast_test(),
+    )
+    assert_equal(n, 8, "the hook published every view")
+    var log = store.log()
+    assert_true(len(log) >= 2, "a put and at least one conditional write")
+    assert_true(
+        _starts_with(log[0], "put:") and "/splits/" in log[0],
+        "the hook's first write is the split PUT: " + log[0],
     )
     assert_equal(_count_prefix(log, "put:"), 1, "exactly one split PUT")
     assert_true(_count_prefix(log, "cond:") >= 1, "the manifest is written after")
