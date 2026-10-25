@@ -95,7 +95,13 @@ assert_equal(msg, "komira_mail_message.ForbiddenByte: MessageBuilder.set_subject
   2231 values are read in UTF-8, US-ASCII and ISO-8859-1 (and the ASCII
   bytes of other ISO-8859 and windows-125x charsets), any other word is kept
   as written.
-- `message/rfc822` parts are leaves (not opened), and a part of a
+- `message/rfc822` parts are leaves: `Message.open_rfc822(index)` opens one as a
+  `Message` of its own under the parent's remaining depth and part limits, and
+  `Message.part_by_section("1.2")` (RFC 3501 section 6.4.5) never crosses one.
+  `Message.raw()`, `header_bytes(index)` and `body_bytes(index)` lend the
+  message's own bytes as a `ByteView`; `parse_date_time` reads a `Date` value
+  (RFC 5322 with the obsolete zones and years) as milliseconds since 1970.
+  A part of a
   `multipart/digest` without a `Content-Type` is read as `text/plain`, not
   as RFC 2046 section 5.1.5's `message/rfc822`. Encoded words are decoded
   on unstructured fields (`Subject`) and on an attachment's plain (not RFC

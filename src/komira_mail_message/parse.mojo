@@ -25,11 +25,27 @@
 # or a part beyond `max_parts` is refused as `Limit` before it is read, so
 # work and memory stay bounded by the input size.
 #
+# Spans: a part knows where its header block and its body lie in the message's
+# bytes. `Message.raw`, `Message.header_bytes` and `Message.body_bytes` lend
+# those bytes as a `ByteView` (no copy); `Part.body_octets` and
+# `Part.body_lines` count the body as stored. A bare-LF message is counted by
+# its LF line breaks, a CRLF one by its CRLF pairs (a line ends at an LF; a
+# last line with no break counts as a line); nothing is normalised.
+#
+# Sections (RFC 3501 section 6.4.5): `part_by_section("1.2")` addresses the
+# part by 1-based numbers. `message/rfc822` is a leaf here, so a path never
+# crosses one: `open_rfc822(index)` opens it as a `Message` of its own, and
+# the caller resolves the rest of the path there. The limits are shared: the
+# nested message may nest `max_depth - depth - 1` multiparts and hold
+# `max_parts - part_count` parts, so a chain of nested messages cannot get a
+# fresh budget at every link.
+#
 # Views: `text_part` and `html_part` are the first leaf (depth first) of
 # media type `text/plain` and `text/html` whose disposition is not
 # `attachment`; `attachments` is every other leaf.
 # =============================================================================
 
+from komira_buffer.byte_view import ByteView
 from komira_encoding import base64_decode
 
 from .chars import (
@@ -44,7 +60,7 @@ from .chars import (
     lower_ascii_string,
     range_bytes,
 )
-from .errors import ENCODING, LIMIT, SYNTAX, message_error
+from .errors import ENCODING, INVALID_VALUE, LIMIT, SYNTAX, message_error
 from .header import HeaderField, split_header_fields_at
 from .params import MediaHeader, Param, parse_media_header
 from .quoted_printable import quoted_printable_decode
@@ -73,8 +89,10 @@ struct Part(Copyable, Movable):
     var _content_type: MediaHeader
     var _disposition: MediaHeader
     var _encoding: String
+    var _start: Int
     var _body_start: Int
     var _body_end: Int
+    var _lines: Int
     var _depth: Int
     var _parent: Int
     var _children: List[Int]
@@ -82,8 +100,10 @@ struct Part(Copyable, Movable):
     def __init__(
         out self,
         var headers: List[HeaderField],
+        start: Int,
         body_start: Int,
         body_end: Int,
+        lines: Int,
         depth: Int,
         parent: Int,
     ) raises:
@@ -104,8 +124,10 @@ struct Part(Copyable, Movable):
         else:
             self._encoding = String("7bit")
         self._headers = headers^
+        self._start = start
         self._body_start = body_start
         self._body_end = body_end
+        self._lines = lines
         self._depth = depth
         self._parent = parent
         self._children = List[Int]()
@@ -166,6 +188,32 @@ struct Part(Copyable, Movable):
         """The `Content-Transfer-Encoding` in lower case; `7bit` when
         absent."""
         return self._encoding
+
+    def header_bytes[
+        lo: Origin[mut=False], //
+    ](self, raw: ByteView[lo]) -> ByteView[lo]:
+        """This part's header block as written, with the empty line that ends
+        it, as a view into `raw` (the message's bytes: `Message.raw()`).
+        Nothing is copied. A part with no empty line ends at its last
+        octet."""
+        return raw.sub(self._start, self._body_start - self._start)
+
+    def body_bytes[
+        lo: Origin[mut=False], //
+    ](self, raw: ByteView[lo]) -> ByteView[lo]:
+        """This part's body as written, as a view into `raw`."""
+        return raw.sub(self._body_start, self._body_end - self._body_start)
+
+    def body_octets(self) -> Int:
+        """The number of octets of the body as written (a bare LF counts
+        one, a CRLF two)."""
+        return self._body_end - self._body_start
+
+    def body_lines(self) -> Int:
+        """The number of lines of the body as written: its LF line breaks,
+        plus one when the body does not end in a line break. An empty body
+        has none."""
+        return self._lines
 
     def depth(self) -> Int:
         return self._depth
@@ -272,6 +320,20 @@ def _split_multipart(
     return ranges^
 
 
+def _count_lines(data: Span[UInt8, _], start: Int, end: Int) -> Int:
+    """The lines of `data[start:end]`: its LFs, plus one for a last line
+    that has no LF."""
+    if end <= start:
+        return 0
+    var n = 0
+    for i in range(start, end):
+        if data[i] == LF:
+            n += 1
+    if data[end - 1] != LF:
+        n += 1
+    return n
+
+
 def _parse_entity(
     data: Span[UInt8, _],
     start: Int,
@@ -291,7 +353,17 @@ def _parse_entity(
     var block = split_header_fields_at(data, start, end, _FN)
     var body_start = block.body_start
     var index = len(parts)
-    parts.append(Part(block.fields.copy(), body_start, end, depth, parent))
+    parts.append(
+        Part(
+            block.fields.copy(),
+            start,
+            body_start,
+            end,
+            _count_lines(data, body_start, end),
+            depth,
+            parent,
+        )
+    )
     if parent >= 0:
         parts[parent]._children.append(index)
     if not parts[index].is_multipart():
@@ -315,10 +387,110 @@ struct Message(Copyable, Movable):
 
     var _raw: List[UInt8]
     var _parts: List[Part]
+    var _max_depth: Int
+    var _max_parts: Int
 
-    def __init__(out self, var raw: List[UInt8], var parts: List[Part]):
+    def __init__(
+        out self,
+        var raw: List[UInt8],
+        var parts: List[Part],
+        max_depth: Int = MAX_DEPTH,
+        max_parts: Int = MAX_PARTS,
+    ):
         self._raw = raw^
         self._parts = parts^
+        self._max_depth = max_depth
+        self._max_parts = max_parts
+
+    def raw[lo: Origin[mut=False], //](ref [lo] self) -> ByteView[lo]:
+        """The message's bytes as parsed, borrowed: no copy, valid while
+        the message is."""
+        # SAFETY: the bytes are `self._raw`, which `self` owns and never
+        # changes after parsing; the view carries the origin of the borrow of
+        # `self`, so it cannot outlive the message. The length is the list's.
+        var p = self._raw.unsafe_ptr().unsafe_origin_cast[lo]()
+        return ByteView[lo](p, len(self._raw))
+
+    def header_bytes[
+        lo: Origin[mut=False], //
+    ](ref [lo] self, index: Int) -> ByteView[lo]:
+        """Part `index`'s header block as written, with its closing empty
+        line; see `Part.header_bytes`."""
+        return self._parts[index].header_bytes(self.raw())
+
+    def body_bytes[
+        lo: Origin[mut=False], //
+    ](ref [lo] self, index: Int) -> ByteView[lo]:
+        """Part `index`'s body as written, borrowed; `raw_body` copies."""
+        return self._parts[index].body_bytes(self.raw())
+
+    def part_by_section(self, path: String) -> Optional[Int]:
+        """The part at the RFC 3501 section path `path` (`1`, `1.2`): 1-based
+        numbers joined by dots, each without a leading zero or sign. For a
+        multipart a number picks a child; for a message that is not a
+        multipart, `1` is its body (part 0). Anything else is `None`: `0`, a
+        number past the children, a number below a leaf (including a
+        `message/rfc822`, which `open_rfc822` opens), the empty path, and
+        any other text. A `.MIME`, `.TEXT`, `.HEADER` or `.HEADER.FIELDS`
+        suffix is not understood: the IMAP layer strips it and picks the
+        bytes (`header_bytes`, `body_bytes`) itself."""
+        var b = path.as_bytes()
+        var n = len(b)
+        if n == 0:
+            return None
+        var cur = 0
+        var i = 0
+        var first = True
+        while i < n:
+            var value = 0
+            var digits = 0
+            while i < n and is_digit(b[i]):
+                value = value * 10 + Int(b[i] - 48)
+                digits += 1
+                i += 1
+                if digits > 9:
+                    return None
+            if digits == 0 or value == 0:
+                return None
+            if digits > 1 and b[i - digits] == 48:
+                return None
+            if i < n:
+                if b[i] != 46 or i + 1 == n:
+                    return None
+                i += 1
+            if self._parts[cur].is_multipart():
+                if value > len(self._parts[cur]._children):
+                    return None
+                cur = self._parts[cur]._children[value - 1]
+            elif first and value == 1:
+                pass
+            else:
+                return None
+            first = False
+        return cur
+
+    def open_rfc822(self, index: Int) raises -> Message:
+        """The `message/rfc822` part `index` as a `Message` of its own (its
+        body is the nested message's bytes, copied). The nested message
+        shares this one's limits: it may nest `max_depth - depth - 1`
+        multiparts and hold `max_parts - part_count` parts; a message that
+        would exceed them raises `Limit`. A part that is not a
+        `message/rfc822`, or an index out of range, raises
+        `InvalidValue`."""
+        if index < 0 or index >= len(self._parts):
+            raise message_error(INVALID_VALUE, "open_rfc822", "a part index out of range")
+        if self._parts[index].media_type() != "message/rfc822":
+            raise message_error(
+                INVALID_VALUE, "open_rfc822", "a part that is not message/rfc822"
+            )
+        var depth_left = self._max_depth - self._parts[index]._depth - 1
+        var parts_left = self._max_parts - len(self._parts)
+        if depth_left < 0:
+            raise message_error(LIMIT, "open_rfc822", "parts nested deeper than the limit")
+        if parts_left < 1:
+            raise message_error(LIMIT, "open_rfc822", "more parts than the limit")
+        var body = self.raw_body(index)
+        return parse_message(Span(body), depth_left, parts_left)
 
     def headers(self) -> List[HeaderField]:
         """The message's header fields, in order."""
@@ -427,4 +599,4 @@ def parse_message(
     """`data` as a message; see the module header."""
     var parts = List[Part]()
     _parse_entity(data, 0, len(data), 0, -1, parts, max_depth, max_parts)
-    return Message(range_bytes(data, 0, len(data)), parts^)
+    return Message(range_bytes(data, 0, len(data)), parts^, max_depth, max_parts)

@@ -8,6 +8,8 @@ mojo_library(
     name = "komira_mail_message",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_datetime:komira_datetime",
         "//src/komira_encoding:komira_encoding",
         "//src/komira_mail_address:komira_mail_address",
     ],
@@ -19,6 +21,8 @@ mojo_library(
         "tests/test_folding.mojo",
         "tests/test_parse_corpus.mojo",
         "tests/test_refusals.mojo",
+        "tests/test_date_parse.mojo",
+        "tests/test_imap_gaps.mojo",
     ],
     visibility = ["PUBLIC"],
 )
