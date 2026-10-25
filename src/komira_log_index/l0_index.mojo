@@ -253,7 +253,9 @@ struct L0PostingBuilder(Movable, Deinitable):
 
 def _read_uleb128(region: Span[UInt8, _], mut off: Int, end: Int) raises -> Int:
     """Read one ULEB128 from `region[off..end)`, advancing `off`. Fail-loud on
-    truncation or a > 10-byte encoding (the split is untrusted input)."""
+    truncation or a > 10-byte encoding (the split is untrusted input). The
+    result is an `Int`, so a value of 2^63 or more comes back negative; every
+    caller must reject a negative result."""
     var result = UInt64(0)
     var shift = UInt64(0)
     var nbytes = 0
@@ -350,6 +352,11 @@ struct L0PostingIndex(Movable, Deinitable):
             var prev = 0
             for i in range(doc_freqs[d]):
                 var delta = _read_uleb128(region, off, n)
+                if i > 0 and delta < 1:
+                    raise Error(
+                        "L0PostingIndex.deserialize: doc-ids not strictly"
+                        " ascending"
+                    )
                 var docid = delta if i == 0 else prev + delta
                 if docid < 0 or docid >= num_docs:
                     raise Error(
@@ -364,8 +371,8 @@ struct L0PostingIndex(Movable, Deinitable):
             var tl = List[Int]()
             for _ in range(doc_freqs[d]):
                 var tf = _read_uleb128(region, off, n)
-                if tf < 0:
-                    raise Error("L0PostingIndex.deserialize: negative tf")
+                if tf < 1:
+                    raise Error("L0PostingIndex.deserialize: tf below 1")
                 tl.append(tf)
             tfs.append(tl^)
         return L0PostingIndex(keys^, postings^, tfs^, num_docs)

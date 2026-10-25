@@ -122,7 +122,7 @@ def _fill_ring(mut r: LogRecordRing, n: Int, base: Int):
             )
         else:
             _ = emit_record["connection {} from {} closed", "komira_broker"](
-                r, LEVEL_INFO, c, ArgI64(7), ArgStr(String("10.0.0.42"))
+                r, LEVEL_INFO, c, ArgI64(7), ArgStr(String("192.0.2.42"))
             )
 
 

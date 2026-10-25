@@ -80,6 +80,7 @@ mojo_library(
         "//src/komira_telemetry_store:komira_telemetry_store",
     ],
     test_srcs = [
+        "tests/test_log_index_failure_paths.mojo",
         "tests/test_log_native_indexing_idle_hook_e2e.mojo",
         "tests/test_log_native_indexing_l0.mojo",
         "tests/test_log_native_indexing_l1.mojo",

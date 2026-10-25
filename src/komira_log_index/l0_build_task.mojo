@@ -8,16 +8,15 @@
 # runs the L0 build through a function pointer without importing
 # komira_log_index.
 #
-# WHAT THE TASK DOES (small by design: it bounds the per-task build time to
-# about 50us, roughly 16 to 24 documents, below one reactor-poll starvation
-# window):
+# WHAT THE TASK DOES (small by design: the batch is a few dozen documents so a
+# task stays well below one reactor-poll starvation window):
 #   1. transpose the OWNED `List[LogRecordView]` batch into the typed log-index
 #      RecordBatch (`log_views_to_record_batch`);
 #   2. build the cheap L0 posting split (`L0SegmentBuilder`: the unsorted
 #      posting, the reused doc store and the reused fast-field region, in a
 #      SPLIT_VERSION=1 additive-footer container);
 #   3. publish the L0 split into the CAS-sharded sub-lineage: the split PUT
-#      first (an idempotent orphan if the process dies before the next step),
+#      first (an unreferenced object if the process dies before the next step),
 #      then the metastore CAS-append (the linearization point that makes the
 #      split searchable). The same two-step order any publisher over the
 #      catalog follows, generic over the store type.
@@ -176,8 +175,8 @@ struct L0BuildTask[Storage: ConditionalWriteStore](
             )
             var blen = Int64(len(split_bytes))
 
-            # (3) PUBLISH: the split PUT first (content-addressed and
-            #     idempotent, a harmless orphan on a crash before the CAS),
+            # (3) PUBLISH: the split PUT first (an unreferenced object if the
+            #     process dies before the CAS),
             #     then the metastore CAS-append (the linearization point that
             #     makes it searchable).
             var object_key = _object_key_for_uuid(

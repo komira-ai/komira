@@ -163,7 +163,7 @@ def _emit_corpus(mut eng: SharedEngine, wid: Int, n: Int):
             )
         elif m == 4:
             _ = emit_record["connection {} from {} closed", "komira_broker"](
-                r, LEVEL_INFO, c, ArgI64(7), ArgStr(String("10.0.0.42"))
+                r, LEVEL_INFO, c, ArgI64(7), ArgStr(String("192.0.2.42"))
             )
         else:
             _ = emit_record["login {} status {}", "komira_auth"](
@@ -234,7 +234,7 @@ def _oracle_term_count(n: Int, term: String) raises -> Int:
         elif m == 3:
             msg = String("retry 3 reason connection timeout to upstream")
         elif m == 4:
-            msg = String("connection 7 from 10.0.0.42 closed")
+            msg = String("connection 7 from 192.0.2.42 closed")
         else:
             msg = String("login login status 200")
         var af = analyze_text(msg, config)

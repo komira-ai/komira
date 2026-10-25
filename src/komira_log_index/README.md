@@ -44,3 +44,6 @@ The store is a type parameter bounded by `komira_objectstore`'s
 `ConditionalWriteStore` (`CloneableConditionalWriteStore` for the hook). No
 cloud client is named here, and the package reads no environment variable:
 every setting is an argument.
+
+This is the first part of the log index: the flush stage, handoff queue and
+consumer that feed it are not in this package.

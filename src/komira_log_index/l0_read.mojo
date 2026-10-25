@@ -104,6 +104,14 @@ def search_l0_split(view: SplitView, query: QueryIR) raises -> SearchResult:
     # ---- The L0 posting (the term substrate). Deserialized ONCE per query from
     # the borrowed l0_posting region (plain List storage). ----
     var posting = L0PostingIndex.deserialize(view.l0_posting_region())
+    if posting.num_docs() != big_n:
+        raise Error(
+            "search_l0_split: posting num_docs "
+            + String(posting.num_docs())
+            + " / split doc_count "
+            + String(big_n)
+            + " disagree (corrupt)"
+        )
 
     # ---- Sort mode resolution (identical to the optimized path). sort_field ""
     # / "_score" -> SORT_MODE_SCORE; "_doc" -> SORT_MODE_DOC; else a fast-field

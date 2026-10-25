@@ -31,7 +31,7 @@
 #        body as `L0BuildTask.run`, lifted here so it runs on the draining
 #        thread with no re-dispatch);
 #     4. publish into the worker's drain sub-lineage: the split PUT first (an
-#        idempotent orphan on a crash), then the metastore CAS-append (the
+#        unreferenced object on a crash), then the metastore CAS-append (the
 #        linearization point that makes it searchable). Each worker has its own
 #        shard (`make_shard_id(node, worker_id, "drain")`), so workers do not
 #        contend on a shared manifest head.
@@ -71,6 +71,8 @@
 from std.atomic import Atomic
 from std.memory import alloc, OwnedPointer
 
+from komira_clock import now_unix_us
+
 from komira_objectstore.path import Path
 from komira_objectstore.store import CloneableConditionalWriteStore
 from komira_objectstore.cas_manifest import CasManifestStore, RetryPolicy
@@ -105,8 +107,8 @@ from komira_log_index.l0_build_task import _object_key_for_uuid
 
 # -----------------------------------------------------------------------------
 # DRAIN_CAP — the per-fire drain bound. Sized to one cheap L0 build's worth of
-# records (about 16 to 24 documents, roughly 50us, below one reactor-poll
-# starvation window). One idle visit does at most one cheap build and publish;
+# records (24 documents, a design target that keeps one build below one
+# reactor-poll starvation window). One idle visit does at most one cheap build and publish;
 # the remaining records ride the next idle window or the owner's flush tick.
 comptime DRAIN_CAP: Int = 24
 
@@ -151,6 +153,9 @@ struct IdleIndexContext[
     var _meta_root: String  # "<key_prefix>/<index>/meta"
     var _index: String  # the index name (for example "logs")
     var _seq: OwnedPointer[Atomic[DType.int64]]
+    # Wall-clock microseconds read once at install; mixed into every split uuid
+    # so a restarted process does not reuse an earlier process's object keys.
+    var _epoch_us: UInt64
     var _retry: RetryPolicy
     # The baked engine reach: a concrete-mutable-origin handle to the engine,
     # reached through `get_mut()` for the `mut self` drain.
@@ -180,19 +185,26 @@ struct IdleIndexContext[
             unsafe_from_raw_pointer=seq_ptr
         )
         self._retry = retry
+        self._epoch_us = UInt64(now_unix_us())
         # Bake the concrete-mutable-origin engine handle; the worker reaches the
         # engine through it at drain time.
         self._engine = MutCarriedHandle[SharedEngine, Self.engine_origin](engine)
 
     def _next_uuid(mut self, worker_id: UInt16) -> InlineArray[UInt8, 16]:
-        """Mint a unique-per-build split uuid: worker_id in bytes 0 and 1 and a
+        """Mint a unique-per-build split uuid: worker_id in bytes 0 and 1, the
+        low 48 bits of the install time (microseconds) in bytes 2..8 and a
         process-wide atomic seq in bytes 8..16. (worker_id, seq) is unique across
-        all workers in this process, so content-addressed object keys never
-        collide."""
+        all workers in this process; the install time keeps a restarted process
+        (whose seq starts at 0 again) from minting a key an earlier process
+        already published, because the split `put` overwrites unconditionally."""
         var s = self._seq[].fetch_add(1)
         var u = InlineArray[UInt8, 16](fill=UInt8(0))
         u[0] = UInt8(Int(worker_id) & 0xFF)
         u[1] = UInt8((Int(worker_id) >> 8) & 0xFF)
+        for i in range(6):
+            u[2 + i] = UInt8(
+                Int((self._epoch_us >> UInt64(i * 8)) & UInt64(0xFF))
+            )
         var sv = UInt64(s)
         for i in range(8):
             u[8 + i] = UInt8(Int((sv >> UInt64(i * 8)) & UInt64(0xFF)))
@@ -343,7 +355,8 @@ def flush_all_pending_via_hook[
     """Rebuild the context from the hook's context home (through an
     OwnedPointer wrap), run `flush_all_pending`, then
     `unsafe_take_allocation().unsafe_leak()` to disown it (the home is freed once
-    by `drop_installed_hook`, not here). The public surface is pointer-free.
+    by `drop_installed_hook`, not here). The disown runs on the raise path too,
+    so a failed flush never frees the home. The public surface is pointer-free.
 
     Takes the `InstalledIndexHook`, not the bare `ErasedHook`: this call drains
     the engine, so it must be a use that keeps the engine alive, and only a
@@ -366,11 +379,17 @@ def flush_all_pending_via_hook[
         IdleIndexContext[Storage, engine_origin]
     ]()
     # SAFETY: the OwnedPointer is a borrow-in-disguise: it is disowned with
-    # `unsafe_leak()` below before it can free the home.
+    # `unsafe_leak()` on the success path and on the raise path before it can
+    # free the home.
     var owned = OwnedPointer[IdleIndexContext[Storage, engine_origin]](
         unsafe_from_raw_pointer=ctx_typed
     )
-    var total = owned[].flush_all_pending(num_workers)
+    var total = 0
+    try:
+        total = owned[].flush_all_pending(num_workers)
+    except e:
+        var _disowned_on_raise = owned^.unsafe_take_allocation().unsafe_leak()
+        raise e^
     var _disowned = owned^.unsafe_take_allocation().unsafe_leak()
     return total
 
@@ -415,8 +434,8 @@ def _build_and_publish_split[
     seg.add_batch(batch^)
     var split_bytes = seg.serialize_split_bytes(LOG_INDEX_TEXT_FIELD, uuid)
     var blen = Int64(len(split_bytes))
-    # (3) PUBLISH: the split PUT first (an idempotent, content-addressed orphan
-    #     on a crash before the CAS), then the metastore CAS-append (the
+    # (3) PUBLISH: the split PUT first (an unreferenced object if the process
+    #     dies before the CAS), then the metastore CAS-append (the
     #     linearization point that makes it searchable), into the per-worker
     #     drain shard.
     var object_key = _object_key_for_uuid(meta_root, index, uuid)

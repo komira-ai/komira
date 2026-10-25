@@ -127,7 +127,7 @@ def _fill_ring(mut r: LogRecordRing, n: Int):
             )
         else:
             _ = emit_record["connection {} from {} closed", "komira_broker"](
-                r, LEVEL_INFO, c, ArgI64(7), ArgStr(String("10.0.0.42"))
+                r, LEVEL_INFO, c, ArgI64(7), ArgStr(String("192.0.2.42"))
             )
 
 
@@ -423,7 +423,7 @@ def test_04_rtc_task_builds_publishes_and_is_queryable() raises:
     var drain_shard = make_shard_id(String("nodeA"), 0, String("drain"))
 
     # Build the metastore for the drain sub-lineage (the same wiring a
-    # consumer uses).
+    # caller uses).
     var lineage = shard_manifest_prefix(meta_root, drain_shard)
     var manifest = CasManifestStore[SharedInMemoryConditionalStore](
         store.clone(), lineage^, RetryPolicy.fast_test()

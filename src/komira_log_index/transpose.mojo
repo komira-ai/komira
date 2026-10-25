@@ -242,7 +242,7 @@ def log_views_to_record_batch(views: List[LogRecordView]) raises -> RecordBatch:
 
 struct LogIndexBatchPlan(Movable, Deinitable):
     """The transposed (frozen-schema, typed-batch) handoff for one drain window.
-    The consumer drives it into a SearchSink whose `text_field` is
+    The caller drives it into a SearchSink whose `text_field` is
     LOG_INDEX_TEXT_FIELD ('message') and whose `source_field` is
     LOG_INDEX_SOURCE_FIELD ('_source')."""
 
