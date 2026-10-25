@@ -168,6 +168,7 @@ TARGETS = [
     "komira//src/komira_kernels:komira_kernels_conda",
     "komira//src/komira_kg_code/tests/fixtures/repo:kgfix_dot_test",
     "komira//src/komira_kg_code:komira_kg_code_conda",
+    "komira//src/komira_log_index:komira_log_index_conda",
     "komira//src/komira_log_query:komira_log_query_conda",
     "komira//src/komira_lowering_rules:komira_lowering_rules_conda",
     "komira//src/komira_mail_address:ci",
