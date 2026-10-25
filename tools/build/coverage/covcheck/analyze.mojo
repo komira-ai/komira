@@ -14,7 +14,7 @@ and the findings: the one computation both `covcheck report` and
    sources (`<package>/tests/...`, and each path of `test_sources`: a
    welded test elsewhere in its package, named by the gate) are counted and
    dropped unless `include_tests`.
-3b. A kept `.mojo` file whose first line contains `@generated`
+3b. A kept `.mojo` file whose first line is the header `# @generated`
    (generated.mojo) leaves the run here: its report records, its branch
    records and its mutants are dropped, and step 4 skips it, so it is
    neither measured nor counted as a file no test compiled, and is in no

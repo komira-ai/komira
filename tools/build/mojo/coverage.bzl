@@ -102,7 +102,7 @@ Line coverage only: neither has branch coverage actions, so a library whose
 gate reads branch records reads those of its `test_srcs` alone (a file only
 they reach is BranchUnmeasuredFile). Generated library sources that are
 build outputs are not measured (nor staged for the gate); a committed
-source whose first line contains `@generated` is staged, and covcheck
+source whose first line is `# @generated` is staged, and covcheck
 leaves it out of the numbers (coverage/README.md, "Generated sources").
 A library every source of which is
 generated (a mojo_aws_client or mojo_gcp_client, whose hand-written sources

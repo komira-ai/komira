@@ -25,6 +25,14 @@ never committed:
   (when it was measured, of which commit), then one row per library in the
   12 fields `census.sh` describes, each naming the file's own directory as
   its package.
+  When a gate left out generated sources (first line `# @generated`;
+  README.md, "Generated sources"), then one `generated<TAB><path>` line each,
+  after every row: a path inside the package's directory ending `.mojo`,
+  sorted, each once. `census.sh collect` reads them from the gate results,
+  `split` writes each into the file of the package that holds the path, and
+  `assemble` checks them and leaves them out of the assembled census. A file
+  without such lines is as it was. A hand-written file that gains the header
+  is a diff of this file at the next refresh, which is where review sees it.
 - `<package>/coverage_held`: the metrics it holds at the target, `line`
   and/or `branch`, one per line ([The 99% threshold and
   holds](README.md#the-99-threshold-and-holds)); a package that holds
