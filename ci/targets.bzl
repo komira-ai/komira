@@ -293,6 +293,7 @@ TARGETS = [
     "komira//src/komira_search_scan:komira_search_scan_conda",
     "komira//src/komira_secret_registry:komira_secret_registry_conda",
     "komira//src/komira_secrets_conjur:komira_secrets_conjur_conda",
+    "komira//src/komira_secrets_keychain:komira_secrets_keychain_conda",
     "komira//src/komira_shuffle:komira_shuffle_conda",
     "komira//src/komira_shuffle_streaming:komira_shuffle_streaming_conda",
     "komira//src/komira_simd:ci",
