@@ -22,7 +22,10 @@ chunk entries and the footer, `encoded_column` is the column-parallel hand-off).
 Several arrays encode as one column chunk without an Arrow concat
 (`writer_multi_batch`), and `writer_multi_batch_stats` folds a column's
 statistics across batches. `writer_advanced` (`AdvancedParquetWriter`) adds row groups, the page index,
-bloom filters (`writer_bloom`) and page CRCs (`page_crc`). It opens no file: where the bytes go is the caller's decision. It reads no
+bloom filters (`writer_bloom`) and page CRCs (`page_crc`). `write_record_batch_to_parquet_bytes` and `write_record_batches_to_parquet_bytes`
+(`record_batch_writer`) turn Arrow RecordBatches into a whole file: the schema
+from the batches, each column encoded by its Arrow type, row groups cut at a
+row count. It opens no file: where the bytes go is the caller's decision. It reads no
 Parquet file either, and does not depend on the reader (`komira_parquet`);
 its tests do, through `test_deps`, to prove the bytes decode.
 """
@@ -138,4 +141,14 @@ from .writer_advanced import (
     RowGroupState,
     SerializedBloomFilter,
     WriterConfig,
+)
+from .record_batch_schema import (
+    arrow_type_to_parquet_type,
+    patch_date32_schema_elements,
+    schema_elements_for,
+)
+from .record_batch_writer import (
+    DEFAULT_MAX_ROWS_PER_RG,
+    write_record_batch_to_parquet_bytes,
+    write_record_batches_to_parquet_bytes,
 )

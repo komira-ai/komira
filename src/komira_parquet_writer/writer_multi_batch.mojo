@@ -59,6 +59,26 @@ def _is_valid(
     return True
 
 
+def _append_validity_bits(
+    mut bits: List[UInt8],
+    bit_pos: Int,
+    validity: Optional[Bitmap[HeapRegion]],
+    offset: Int,
+    n: Int,
+    null_count: Int,
+):
+    """Append the validity of one array's `n` rows (bit set = present) to
+    `bits` at bit position `bit_pos`, growing `bits` to hold them. The
+    arrays of a column are appended in order, each at the rows before it."""
+    var need = (bit_pos + n + 7) >> 3
+    if len(bits) < need:
+        bits.resize(need, UInt8(0))
+    for j in range(n):
+        if _is_valid(validity, offset, null_count, j):
+            var i = bit_pos + j
+            bits[i >> 3] = bits[i >> 3] | (UInt8(1) << UInt8(i & 7))
+
+
 def _two_def_levels(
     v1: Optional[Bitmap[HeapRegion]],
     offset1: Int,
@@ -75,14 +95,9 @@ def _two_def_levels(
     if nulls1 == 0 and nulls2 == 0:
         return encode_def_levels_all_valid(total)
     var out = _def_level_frame(total)
-    var bits = List[UInt8](capacity=(total + 7) >> 3)
-    bits.resize((total + 7) >> 3, UInt8(0))
-    for i in range(total):
-        var valid = _is_valid(v1, offset1, nulls1, i) if i < n1 else _is_valid(
-            v2, offset2, nulls2, i - n1
-        )
-        if valid:
-            bits[i >> 3] = bits[i >> 3] | (UInt8(1) << UInt8(i & 7))
+    var bits = List[UInt8]()
+    _append_validity_bits(bits, 0, v1, offset1, n1, nulls1)
+    _append_validity_bits(bits, n1, v2, offset2, n2, nulls2)
     _append_bytes(out, bits)
     return out^
 

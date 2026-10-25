@@ -140,6 +140,43 @@ assert_equal(Int(file[0]), 0x50)  # PAR1 at both ends
 assert_equal(Int(file[len(file) - 1]), 0x31)
 ```
 
+## Arrow batches to a file
+
+`write_record_batch_to_parquet_bytes(batch, codec, max_rows_per_rg)` and
+`write_record_batches_to_parquet_bytes(batches, ...)` derive the schema from
+the batches (OPTIONAL for a nullable Arrow field; for several batches, for a
+column with a validity buffer or a null), encode each column by its Arrow type
+(numeric dictionary else DELTA_BINARY_PACKED for integers, dictionary else
+BYTE_STREAM_SPLIT for floats, string dictionary else PLAIN, BOOLEAN, DECIMAL128
+as FIXED_LEN_BYTE_ARRAY(16), DATE32 annotated DATE) and cut row groups at
+`max_rows_per_rg` rows (default 122,880), with a page index. Several batches
+that fit one row group are encoded PLAIN without a concat when every column is
+INT32, INT64, FLOAT32, FLOAT64, STRING or LARGE_STRING; any other mix is
+concatenated first. A column of an Arrow type with no writer (unsigned and
+narrow integers, BINARY, nested types) is refused. TIMESTAMP, DATE64, TIME and
+DURATION are written as INT64 or INT32 with no logical-type annotation: the
+values are right and a reader sees integers.
+
+```mojo
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatchBuilder
+from komira_arrow.schema import Field, SchemaBuilder
+from komira_parquet_api import CompressionCodec
+from komira_parquet_writer import write_record_batch_to_parquet_bytes
+from std.testing import assert_equal
+
+var ids: List[Int64] = [10, 20, 30]
+var sb = SchemaBuilder()
+sb.add_field(Field("id", ArrowType.INT64, False))
+var builder = RecordBatchBuilder()
+builder.add_column(Column.from_primitive[DType.int64](PrimitiveArray[DType.int64].from_list(ids)))
+var batch = builder.build(sb.build())
+var file = write_record_batch_to_parquet_bytes(batch, CompressionCodec.SNAPPY)
+assert_equal(Int(file[len(file) - 1]), 0x31)  # PAR1
+```
+
 ## Row groups, the page index, bloom filters, page CRCs
 
 `AdvancedParquetWriter` takes one chunk per column per row group
