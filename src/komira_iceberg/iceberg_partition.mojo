@@ -5,7 +5,7 @@
 #
 # A table over real data almost always partitions (by date or key hash) for
 # reader pruning and file sizing. Without a spec the writer emits only
-# `unpartitioned_spec_json()`. This module adds:
+# an unpartitioned spec. This module adds:
 #
 #   1. A PARTITION-SPEC MODEL (`PartitionSpec` = a list of `PartitionField`,
 #      each a {source field-id, transform, partition field-id, name}).
@@ -315,7 +315,21 @@ def iceberg_bucket_of(cell: RowCell, type_tag: Int, buckets: Int) raises -> Int:
     """The Iceberg bucket index of `cell`: `(murmur3(bytes) & 0x7FFFFFFF) % N`.
 
     Matches the spec so an external engine derives the SAME bucket for the SAME
-    value (load-bearing for cross-engine partition pruning)."""
+    value (load-bearing for cross-engine partition pruning).
+
+    Raises on a null cell (a transform of null is null, and a null partition
+    value is not supported: it would otherwise hash as 0 or "" and share a
+    bucket with the real value) and on `buckets <= 0`."""
+    if buckets <= 0:
+        raise Error(
+            "iceberg bucket transform: bucket count must be positive, got "
+            + String(buckets)
+        )
+    if cell.is_null():
+        raise Error(
+            "iceberg bucket transform: a null value is not supported (null"
+            " partition values are not written)"
+        )
     var b = _iceberg_bucket_bytes(cell, type_tag)
     var h = murmur3_x86_32(b, UInt32(0))
     var pos = Int(h & UInt32(0x7FFFFFFF))
@@ -347,12 +361,26 @@ def partition_value_of(
     declared type); BUCKET yields an INT cell holding the bucket index. The
     returned tuple is the value the manifest's `partition` struct records + the
     grouping key for per-partition data-file routing."""
+    if len(row) != len(schema.fields):
+        raise Error(
+            "partition_value_of: row arity "
+            + String(len(row))
+            + " != schema column count "
+            + String(len(schema.fields))
+        )
     var out = List[RowCell]()
     for i in range(len(spec.fields)):
         ref pf = spec.fields[i]
         var ci = _col_index_of_field_id(schema, pf.source_field_id)
         var src_type = schema.fields[ci].type_tag
         if pf.transform == ICE_TRANSFORM_IDENTITY:
+            if row[ci].is_null():
+                raise Error(
+                    "partition_value_of: null value in identity partition"
+                    " source field-id "
+                    + String(pf.source_field_id)
+                    + " (null partition values are not supported)"
+                )
             out.append(row[ci].copy())
         elif pf.transform == ICE_TRANSFORM_BUCKET:
             var b = iceberg_bucket_of(row[ci], src_type, pf.param)
@@ -402,6 +430,14 @@ def partition_key_string(
     spec (a single file)."""
     if len(spec.fields) == 0:
         return String("")
+    if len(values) != len(spec.fields):
+        raise Error(
+            "partition_key_string: "
+            + String(len(values))
+            + " values for "
+            + String(len(spec.fields))
+            + " partition fields"
+        )
     var out = String("")
     for i in range(len(spec.fields)):
         if i > 0:
@@ -450,11 +486,20 @@ def _hex_upper(nib: Int) -> UInt8:
 def _cell_to_key_token(cell: RowCell) raises -> String:
     """A cell's stable string token for the partition path/key (type-agnostic:
     integral -> decimal, string -> the raw value, float -> decimal)."""
+    if cell.is_null():
+        raise Error(
+            "partition key: a null value is not supported (it would share a"
+            " key with the zero value)"
+        )
     var t = cell.type_tag
     if t == ICE_T_STRING:
         return cell.as_string()
     elif t == ICE_T_FLOAT or t == ICE_T_DOUBLE:
-        return String(cell.as_double())
+        var d = cell.as_double()
+        # -0.0 and +0.0 are equal values: one key.
+        if d == Float64(0):
+            return String("0.0")
+        return String(d)
     else:  # BOOLEAN / INT / LONG
         return String(cell.as_long())
 

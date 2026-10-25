@@ -99,8 +99,8 @@ from .iceberg_types import (
 #
 # A GENUINE NULL cell (`make_null_cell(tag)`) carries the DECLARED `type_tag`
 # (its null flag is orthogonal to its tag), so it MATCHES its column and does
-# NOT raise — a legitimately-null column value writes NULL, never 0, and never
-# wrongly raises. Only a TYPE-MISMATCH (a cell whose active tag differs from the
+# NOT raise (the Avro row form then writes the type's zero value; see the file
+# header) and never wrongly raises. Only a TYPE-MISMATCH (a cell whose active tag differs from the
 # column's declared tag — e.g. a STRING cell for a LONG column) raises.
 #
 # This check lives HERE, not with the cell model, because it is an ICEBERG
@@ -116,8 +116,8 @@ def reconcile_cell_type(
     `declared_tag`; return silently if it can.
 
     Representable iff `cell.type_tag == declared_tag`. A null cell carries its
-    declared tag, so a genuine null of the RIGHT type is representable (writes
-    NULL). A cell of a DIFFERENT tag (the over-Int64 STRING-for-LONG case, or any
+    declared tag, so a genuine null of the RIGHT type is representable (the Avro row form writes
+    the zero value). A cell of a DIFFERENT tag (the over-Int64 STRING-for-LONG case, or any
     tag/column mismatch that would silently coerce to a wrong value via the
     unused value arm) is NOT representable — this is a real ingest error, so we
     fail loud rather than silently encode 0 / the wrong wire form.
@@ -183,6 +183,22 @@ def encode_cell(cell: RowCell, mut out: List[UInt8]):
         encode_string(cell.s, out)
 
 
+def read_checked_string[
+    o: Origin[mut=False]
+](mut reader: AvroByteReader[o]) raises -> String:
+    """The next Avro string, as a `String` only if its bytes are valid UTF-8.
+
+    The reader's own `read_string` builds the `String` from a NUL-terminated
+    copy without validating it: invalid UTF-8 becomes an invalid `String`, and
+    an embedded NUL ends the text early while the cursor advances past it. These
+    bytes come from an object store, so they are checked here and kept whole."""
+    var raw = reader.read_bytes()
+    try:
+        return String(from_utf8=Span(raw))
+    except e:
+        raise Error("iceberg avro: string is not valid UTF-8")
+
+
 def decode_cell[
     o: Origin[mut=False]
 ](mut reader: AvroByteReader[o], type_tag: Int) raises -> RowCell:
@@ -198,7 +214,7 @@ def decode_cell[
     elif type_tag == ICE_T_DOUBLE:
         return make_double_cell(reader.read_double())
     elif type_tag == ICE_T_STRING:
-        return make_string_cell(reader.read_string())
+        return make_string_cell(read_checked_string(reader))
     raise Error("decode_cell: unknown type tag " + String(type_tag))
 
 
@@ -302,6 +318,8 @@ def read_data_file(
     """Decode a data file (Avro OCF) into its typed rows.
 
     `col_types` is the schema's column types in order (from `col_types_of`)."""
+    if len(col_types) == 0:
+        raise Error("read_data_file: no columns")
     var out = List[List[RowCell]]()
     var blocks = scan_ocf_blocks(Span(bytes))
     for bi in range(len(blocks)):
@@ -310,6 +328,18 @@ def read_data_file(
         var end = start + blk.payload_len
         var reader = AvroByteReader(Span(bytes)[start:end])
         var nrec = Int(blk.object_count)
+        # Every record takes at least one byte per column, so a count above
+        # the payload length is a lie: refuse it before looping on it.
+        if nrec > blk.payload_len:
+            raise Error(
+                "read_data_file: block claims "
+                + String(nrec)
+                + " records in "
+                + String(blk.payload_len)
+                + " payload bytes"
+            )
         for _r in range(nrec):
             out.append(decode_row(reader, col_types))
+        if not reader.at_end():
+            raise Error("read_data_file: trailing bytes after the last record")
     return out^
