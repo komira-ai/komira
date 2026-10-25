@@ -93,9 +93,11 @@ from .iceberg_version import (
 )
 from .iceberg_writer_state import (
     PriorState,
+    check_table_identity,
     gen_snapshot_id,
     gen_table_uuid,
     parse_prior_state,
+    validate_commit_files,
 )
 
 
@@ -144,6 +146,49 @@ struct IcebergCommitResult(Copyable, Movable, Deinitable):
     var manifest_list_key: String
     var manifest_key: String
     var pointer_key: String
+
+
+struct PreparedCommit(Movable):
+    """A commit with everything written except the commit itself.
+
+    Fields:
+      var version: Int             — the version `publish_commit` will create.
+      var meta_key: String         — object key of that v<N>.metadata.json.
+      var meta_bytes: List[UInt8]  — its content.
+      var hint_etag: Optional[String] — the version hint's etag, read before the
+                                     version was.
+      var snapshot_id / sequence_number / manifest_list_key / manifest_key — as
+                                     in IcebergCommitResult.
+    """
+
+    var version: Int
+    var meta_key: String
+    var meta_bytes: List[UInt8]
+    var hint_etag: Optional[String]
+    var snapshot_id: Int64
+    var sequence_number: Int64
+    var manifest_list_key: String
+    var manifest_key: String
+
+    def __init__(
+        out self,
+        version: Int,
+        var meta_key: String,
+        var meta_bytes: List[UInt8],
+        var hint_etag: Optional[String],
+        snapshot_id: Int64,
+        sequence_number: Int64,
+        var manifest_list_key: String,
+        var manifest_key: String,
+    ):
+        self.version = version
+        self.meta_key = meta_key^
+        self.meta_bytes = meta_bytes^
+        self.hint_etag = hint_etag^
+        self.snapshot_id = snapshot_id
+        self.sequence_number = sequence_number
+        self.manifest_list_key = manifest_list_key^
+        self.manifest_key = manifest_key^
 
 
 def _bytes_of(s: String) -> List[UInt8]:
@@ -331,6 +376,20 @@ struct IcebergTableWriter[Store: ConditionalWriteStore](Movable):
         var spec: PartitionSpec,
         extra_summary: List[SummaryKV],
     ) raises -> IcebergCommitResult:
+        """Commit a snapshot: `prepare_commit` (everything but the commit),
+        then `publish_commit` (the commit). See `prepare_commit`."""
+        var prepared = self.prepare_commit(
+            data_files^, delete_files^, spec^, extra_summary
+        )
+        return self.publish_commit(prepared^)
+
+    def prepare_commit(
+        mut self,
+        var data_files: List[DataFileInfo],
+        var delete_files: List[DataFileInfo],
+        var spec: PartitionSpec,
+        extra_summary: List[SummaryKV],
+    ) raises -> PreparedCommit:
         """Commit a snapshot referencing `data_files` (content=0) AND
         `delete_files` (content=1 position / 2 equality) under partition `spec`,
         STAMPING `extra_summary` into the snapshot summary.
@@ -346,9 +405,12 @@ struct IcebergTableWriter[Store: ConditionalWriteStore](Movable):
         metadata.json `partition-specs` / `default-spec-id`. A table keeps ONE
         spec: a commit under a different spec than the table's raises. Each data
         file's own `partition_avro` tuple (from `DataFileInfo.with_partition`) is
-        recorded in its manifest entry. DELETE files carry no partition: they
-        are global deletes, so their manifest is written under the unpartitioned
-        spec `delete_spec_of(spec)`.
+        recorded in its manifest entry. A POSITION delete applies only to data
+        files of its own spec and partition, so on a partitioned table its
+        manifest is written under `spec` and each position-delete file carries
+        its data file's partition tuple. An EQUALITY delete is global: its
+        manifest is written under the unpartitioned spec `delete_spec_of(spec)`
+        and carries no tuple.
 
         Delete files' sequence numbers are STAMPED by THIS commit: every delete
         file's `sequence_number` is set to this commit's sequence number
@@ -372,8 +434,17 @@ struct IcebergTableWriter[Store: ConditionalWriteStore](Movable):
         `added-position-deletes` counts. `extra_summary` may not use these or
         the count keys.
 
-        Raises an `iceberg commit conflict` error when another writer created
-        the next version first: re-read the table and retry."""
+        This is the part before the commit: it validates the files, writes the
+        manifests and the manifest list, and builds the metadata.json, but
+        creates nothing a reader looks at. `publish_commit` creates the next
+        metadata file; it raises an `iceberg commit conflict` error when another
+        writer created that version first: re-read the table and retry.
+
+        Refused before anything is written: a writer whose table uuid or schema
+        is not the table's, a data file whose content is not 0, a delete file
+        whose content is not 1 or 2, a data or position-delete file whose
+        partition tuple does not match the spec, an equality delete that
+        carries a tuple or lists no equality ids."""
         for si in range(len(extra_summary)):
             if _is_reserved_summary_key(extra_summary[si].key):
                 raise Error(
@@ -399,7 +470,9 @@ struct IcebergTableWriter[Store: ConditionalWriteStore](Movable):
                 )
             )
             prior = parse_prior_state(prior_json)
+            check_table_identity(prior_json, self._table_uuid, self._schema)
             self._check_spec_unchanged(prior_json, spec)
+        validate_commit_files(self._schema, data_files, delete_files, spec)
 
         var snapshot_id = gen_snapshot_id()
         var sequence_number = Int64(new_version)  # v2 seq monotone with version
@@ -488,40 +561,37 @@ struct IcebergTableWriter[Store: ConditionalWriteStore](Movable):
                 )
             )
 
-        # ---- 3. DELETE manifest (Avro) for this commit's delete files ----
+        # ---- 3. DELETE manifest(s) (Avro) for this commit's delete files ----
+        # A position delete applies only to data files of the same spec and
+        # partition, so on a partitioned table the position deletes go in a
+        # manifest under the TABLE spec, each entry carrying its data file's
+        # tuple. Equality deletes are global: they go under the unpartitioned
+        # spec `delete_spec_of(spec)` with no tuple. An unpartitioned table has
+        # one spec, so all its delete files share one manifest.
+        var pos_files = List[DataFileInfo]()
+        var eq_files = List[DataFileInfo]()
+        for i in range(len(delete_files)):
+            if delete_files[i].content == ICE_DATA_CONTENT_POSITION_DELETES:
+                pos_files.append(delete_files[i].copy())
+            else:
+                eq_files.append(delete_files[i].copy())
         var delete_manifest_key = String("")
         var added_delete_files = len(delete_files)
-        var added_delete_records = Int64(0)
-        for i in range(len(delete_files)):
-            added_delete_records += Int64(delete_files[i].record_count)
-        if added_delete_files > 0:
-            var delete_spec = delete_spec_of(spec)
-            var del_manifest_bytes = build_manifest_file(
-                self._schema,
-                sj,
-                snapshot_id,
-                sequence_number,
-                delete_files,
-                ICE_MANIFEST_CONTENT_DELETES,
-                delete_spec,
+        if spec.is_unpartitioned():
+            delete_manifest_key = self._write_delete_manifest(
+                delete_files, spec, sj, snapshot_id, sequence_number,
+                String("-mdel.avro"), mlist_entries,
             )
-            var del_manifest_len = len(del_manifest_bytes)
-            delete_manifest_key = (
-                meta_dir + "/" + gen_table_uuid() + "-mdel.avro"
+        else:
+            var pk = self._write_delete_manifest(
+                pos_files, spec, sj, snapshot_id, sequence_number,
+                String("-mdelpos.avro"), mlist_entries,
             )
-            self._put_new(delete_manifest_key, del_manifest_bytes^)
-            mlist_entries.append(
-                ManifestFileEntry(
-                    String(delete_manifest_key),
-                    del_manifest_len,
-                    added_delete_files,
-                    added_delete_records,
-                    ICE_MANIFEST_CONTENT_DELETES,
-                    sequence_number,
-                    snapshot_id,
-                    delete_spec.spec_id,
-                )
+            var ek = self._write_delete_manifest(
+                eq_files, delete_spec_of(spec), sj, snapshot_id,
+                sequence_number, String("-mdeleq.avro"), mlist_entries,
             )
+            delete_manifest_key = pk.copy() if pk.byte_length() > 0 else ek.copy()
 
         # ---- 4. manifest list (Avro) ----
         var mlist_bytes = build_manifest_list(
@@ -623,31 +693,89 @@ struct IcebergTableWriter[Store: ConditionalWriteStore](Movable):
             spec,  # partition-specs + default-spec-id + last-partition-id
             prior_schemas^,
         )
-        var meta_key = metadata_json_key(self._location, new_version)
-        self._create_version(meta_key, new_version, _bytes_of(meta_json))
-
-        # ---- 6. move the version hint (a convenience: the commit is done) ----
-        self._advance_hint(hint_etag, new_version)
-
-        # The `manifest_key` reported is the data manifest when present, else
-        # the delete manifest (a delete-only commit).
         var reported_manifest = (
             data_manifest_key if added_data_files
             > 0 else delete_manifest_key
         )
-        return IcebergCommitResult(
+        return PreparedCommit(
             new_version,
+            metadata_json_key(self._location, new_version),
+            _bytes_of(meta_json),
+            hint_etag^,
             snapshot_id,
             sequence_number,
-            String(meta_key),
-            String(manifest_list_key),
-            reported_manifest,
+            manifest_list_key^,
+            reported_manifest^,
+        )
+
+    def publish_commit(
+        mut self, var prepared: PreparedCommit
+    ) raises -> IcebergCommitResult:
+        """The second half of a commit: create `v<N+1>.metadata.json` (the
+        commit; a lost create raises an `iceberg commit conflict`), then move
+        the version hint. `commit_with_spec_and_summary` is `prepare_commit`
+        then this; the halves are public so a caller (and a test) can hold two
+        prepared commits of one table and publish them in either order."""
+        self._create_version(
+            prepared.meta_key, prepared.version, prepared.meta_bytes.copy()
+        )
+        self._advance_hint(prepared.hint_etag, prepared.version)
+        return IcebergCommitResult(
+            prepared.version,
+            prepared.snapshot_id,
+            prepared.sequence_number,
+            String(prepared.meta_key),
+            String(prepared.manifest_list_key),
+            String(prepared.manifest_key),
             pointer_key(self._location),
         )
 
     # -------------------------------------------------------------------------
     # Store helpers.
     # -------------------------------------------------------------------------
+
+    def _write_delete_manifest(
+        mut self,
+        files: List[DataFileInfo],
+        spec: PartitionSpec,
+        schema_json_text: String,
+        snapshot_id: Int64,
+        sequence_number: Int64,
+        suffix: String,
+        mut mlist_entries: List[ManifestFileEntry],
+    ) raises -> String:
+        """Write one delete manifest of `files` under `spec` and list it in
+        `mlist_entries`; returns its key, or "" when `files` is empty."""
+        if len(files) == 0:
+            return String("")
+        var records = Int64(0)
+        for i in range(len(files)):
+            records += Int64(files[i].record_count)
+        var bytes = build_manifest_file(
+            self._schema,
+            schema_json_text,
+            snapshot_id,
+            sequence_number,
+            files,
+            ICE_MANIFEST_CONTENT_DELETES,
+            spec,
+        )
+        var length = len(bytes)
+        var key = metadata_dir(self._location) + "/" + gen_table_uuid() + suffix
+        self._put_new(key, bytes^)
+        mlist_entries.append(
+            ManifestFileEntry(
+                String(key),
+                length,
+                len(files),
+                records,
+                ICE_MANIFEST_CONTENT_DELETES,
+                sequence_number,
+                snapshot_id,
+                spec.spec_id,
+            )
+        )
+        return key^
 
     def _put_new(mut self, key: String, var bytes: List[UInt8]) raises:
         """Create-if-absent PUT of a uuid-named file. It raises when the object

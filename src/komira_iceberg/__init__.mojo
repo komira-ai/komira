@@ -171,6 +171,7 @@ from .iceberg_delete_writer import (
 from .iceberg_writer import (
     IcebergCommitResult,
     IcebergTableWriter,
+    PreparedCommit,
 )
 
 from .iceberg_writer_state import (

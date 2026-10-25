@@ -305,12 +305,14 @@ struct DataFileInfo(Copyable, Movable, Deinitable):
     file.
 
     Fields:
-      var file_path: String       — the file's object key, recorded in the
-                                     manifest exactly as a reader will use it.
-                                     Iceberg readers accept either an absolute
-                                     URI (file:///…, s3://…) or a path the
-                                     catalog resolves; this writer records the
-                                     FULL location string the caller provides.
+      var file_path: String       — the file's object-store KEY, recorded in the
+                                     manifest exactly as given. It is a key of
+                                     the store the table lives in (`location`
+                                     plus a relative part), not a URI with a
+                                     scheme: the store normalizes its keys, so
+                                     `s3://b/k` would not survive a read back.
+                                     An engine that opens the table resolves
+                                     the key itself (see the README).
       var file_size_in_bytes: Int — on-disk byte size of the file.
       var record_count: Int       — number of rows in the file.
       var bounds: List[ColumnBound] — per-column stats keyed by field-id.

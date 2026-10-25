@@ -269,11 +269,13 @@ def read_live_rows_from[
     for mi in range(len(manifests)):
         ref m = manifests[mi]
         var manifest_bytes = store.get(Path.parse(m.manifest_path))
-        # DATA manifests carry the partition tuple in each entry's `r102`;
-        # DELETE manifests are unpartitioned (delete files carry no partition),
-        # so they decode with an empty partition-type list.
+        # A manifest written under the table's spec carries a partition tuple
+        # in each entry's `r102`: the data manifests, and the position-delete
+        # manifest of a partitioned table (each position delete names its data
+        # file's partition). A manifest written under another spec (the
+        # unpartitioned spec of the global equality deletes) has none.
         var this_partition_types = List[Int]()
-        if m.content == ICE_MANIFEST_CONTENT_DATA:
+        if m.partition_spec_id == table_spec.spec_id:
             for i in range(len(data_partition_types)):
                 this_partition_types.append(data_partition_types[i])
         var entries = read_manifest_entries(

@@ -18,13 +18,21 @@
 
 from komira_uuid.uuid import generate_uuidv7
 
+from .iceberg_types import (
+    IcebergSchema,
+    DataFileInfo,
+    ICE_DATA_CONTENT_DATA,
+    ICE_DATA_CONTENT_POSITION_DELETES,
+    ICE_DATA_CONTENT_EQUALITY_DELETES,
+)
+from .iceberg_partition import PartitionSpec, partition_value_type_tags
 from .iceberg_json_scan import (
     bare_int64_field,
     json_str_field,
     object_array_items,
     snapshot_objects,
 )
-from .iceberg_metadata_json import SnapshotInfo, SummaryKV
+from .iceberg_metadata_json import SnapshotInfo, SummaryKV, schema_json
 from .iceberg_summary import parse_summary_object
 
 
@@ -51,6 +59,148 @@ def gen_snapshot_id() raises -> Int64:
     if v == UInt64(0):
         v = UInt64(1)
     return Int64(v)
+
+
+# =============================================================================
+# What a commit may be handed.
+# =============================================================================
+
+
+def _check_partition_tuple(
+    df: DataFileInfo, types: List[Int], what: String
+) raises:
+    """The file's partition tuple must have exactly the spec's fields, with the
+    spec's value types: the manifest writer appends the tuple's bytes as the
+    entry's partition record, so a short, long or mistyped tuple would write an
+    Avro stream every reader decodes shifted."""
+    if len(df.partition_avro) != len(types) or len(df.partition_types) != len(
+        types
+    ):
+        raise Error(
+            "iceberg commit: "
+            + what
+            + " '"
+            + df.file_path
+            + "' carries "
+            + String(len(df.partition_avro))
+            + " partition values; the table's spec has "
+            + String(len(types))
+        )
+    for k in range(len(types)):
+        if df.partition_types[k] != types[k]:
+            raise Error(
+                "iceberg commit: "
+                + what
+                + " '"
+                + df.file_path
+                + "' partition value "
+                + String(k)
+                + " has the wrong type"
+            )
+
+
+def validate_commit_files(
+    schema: IcebergSchema,
+    data_files: List[DataFileInfo],
+    delete_files: List[DataFileInfo],
+    spec: PartitionSpec,
+) raises:
+    """Refuse, before anything is written, what a commit cannot publish.
+
+    Data files are content 0 and carry the spec's partition tuple. Delete files
+    are content 1 or 2. A POSITION delete applies only to data files of the same
+    spec and partition, so it carries its data file's tuple. An EQUALITY delete
+    is global (written under an unpartitioned spec): it carries no tuple, and it
+    must list its equality ids, since a delete with no key matches every older
+    row."""
+    var types = partition_value_type_tags(spec, schema)
+    for i in range(len(data_files)):
+        if data_files[i].content != ICE_DATA_CONTENT_DATA:
+            raise Error(
+                "iceberg commit: '"
+                + data_files[i].file_path
+                + "' is in data_files but its content is "
+                + String(data_files[i].content)
+            )
+        _check_partition_tuple(data_files[i], types, String("data file"))
+    for i in range(len(delete_files)):
+        ref d = delete_files[i]
+        if d.content == ICE_DATA_CONTENT_POSITION_DELETES:
+            _check_partition_tuple(d, types, String("position-delete file"))
+        elif d.content == ICE_DATA_CONTENT_EQUALITY_DELETES:
+            if len(d.equality_ids) == 0:
+                raise Error(
+                    "iceberg commit: equality-delete file '"
+                    + d.file_path
+                    + "' lists no equality ids (it would match every row)"
+                )
+            if len(d.partition_avro) != 0:
+                raise Error(
+                    "iceberg commit: equality-delete file '"
+                    + d.file_path
+                    + "' carries a partition tuple; equality deletes are global"
+                )
+        else:
+            raise Error(
+                "iceberg commit: '"
+                + d.file_path
+                + "' is in delete_files but its content is "
+                + String(d.content)
+            )
+
+
+def check_table_identity(
+    prior_json: String, table_uuid: String, schema: IcebergSchema
+) raises:
+    """The writer must be the table's: the uuid it was built with equals the
+    metadata's, and its schema is the table's current one or an add-column
+    extension of it (the first `last-column-id` columns identical). Otherwise a
+    commit would rewrite the table's identity or schema in its next metadata
+    file."""
+    var prior_uuid = json_str_field(prior_json, "table-uuid")
+    if prior_uuid != table_uuid:
+        raise Error(
+            "iceberg commit: this writer's table uuid '"
+            + table_uuid
+            + "' is not the table's '"
+            + prior_uuid
+            + "'"
+        )
+    var cur = Int(bare_int64_field(prior_json, "current-schema-id"))
+    if schema.schema_id < cur:
+        raise Error(
+            "iceberg commit: schema id "
+            + String(schema.schema_id)
+            + " is older than the table's current "
+            + String(cur)
+        )
+    var prior_schema = String("")
+    var objs = object_array_items(prior_json, "schemas")
+    for i in range(len(objs)):
+        if Int(bare_int64_field(objs[i], "schema-id")) == cur:
+            prior_schema = objs[i].copy()
+    if prior_schema.byte_length() == 0:
+        raise Error("iceberg commit: the table's current schema is not listed")
+    if schema.schema_id == cur:
+        if schema_json(schema) != prior_schema:
+            raise Error(
+                "iceberg commit: this writer's schema differs from the table's"
+                " current schema "
+                + String(cur)
+                + " (evolve it with evolve_add_column and set_schema)"
+            )
+        return
+    var n = Int(bare_int64_field(prior_json, "last-column-id"))
+    if schema.num_fields() < n:
+        raise Error("iceberg commit: the new schema drops columns")
+    var head = IcebergSchema(cur)
+    for i in range(n):
+        head.fields.append(schema.fields[i].copy())
+    if schema_json(head) != prior_schema:
+        raise Error(
+            "iceberg commit: the new schema is not an add-column extension of"
+            " the table's current schema"
+        )
 
 
 # =============================================================================

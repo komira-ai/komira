@@ -48,6 +48,9 @@ from komira_iceberg import (
     build_equality_delete_file,
     build_position_delete_file,
     read_manifest_list,
+    read_manifest_entries,
+    delete_spec_of,
+    summary_value_for,
     read_hint_version,
     current_version,
     metadata_json_key,
@@ -126,6 +129,25 @@ def _one(
     return out^
 
 
+def _one_in(
+    mut w: IcebergTableWriter[LocalFsConditionalStore],
+    name: String,
+    id: Int64,
+    spec: PartitionSpec,
+) raises -> List[DataFileInfo]:
+    """One data file in region "eu", carrying its partition tuple under `spec`."""
+    var rows = List[List[RowCell]]()
+    rows.append(_row(id, String("eu")))
+    var tup = encode_partition_values(partition_value_of(spec, _schema(), rows[0]))
+    var out = List[DataFileInfo]()
+    out.append(
+        _data(w, name, rows, _schema()).with_partition(
+            tup^, partition_value_type_tags(spec, _schema())
+        )
+    )
+    return out^
+
+
 def _text(bytes: List[UInt8]) -> String:
     return String(from_utf8_lossy=Span(bytes))
 
@@ -185,7 +207,7 @@ def test_a_lost_version_create_is_a_conflict_and_changes_nothing() raises:
 def test_a_commit_builds_on_a_version_the_hint_has_not_reached() raises:
     var tag = String("hintlag")
     var w = _writer(tag)
-    var uuid = String("11111111-1111-7111-8111-111111111111")
+    var uuid = w._table_uuid.copy()
     var r1 = w.commit_append(_one(w, String("a"), 1))
     assert_equal(r1.version, 1)
     # A writer stopped before moving the hint: put it back at 0.
@@ -308,7 +330,7 @@ def test_refusals() raises:
     # A table keeps its partition spec.
     var spec = PartitionSpec(0)
     spec.add_identity(2, String("region"))
-    _ = w.commit_with_spec(_one(w, String("b"), 2), List[DataFileInfo](), spec.copy())
+    _ = w.commit_with_spec(_one_in(w, String("b"), 2, spec), List[DataFileInfo](), spec.copy())
     with assert_raises():
         _ = w.commit_append(_one(w, String("c"), 3))
     var other = PartitionSpec(0)
@@ -389,6 +411,240 @@ def test_ids_are_unique_and_well_formed() raises:
     assert_true(s1 != s2)
 
 
+def _same_bytes(a: List[UInt8], b: List[UInt8]) -> Bool:
+    if len(a) != len(b):
+        return False
+    for i in range(len(a)):
+        if a[i] != b[i]:
+            return False
+    return True
+
+
+def test_position_deletes_in_a_partitioned_table_carry_their_files_partition() raises:
+    var w = _writer(String("posdel"))
+    var spec = PartitionSpec(0)
+    spec.add_identity(2, String("region"))
+    var types = partition_value_type_tags(spec, _schema())
+    # Two data files: region eu (ids 1, 2) and region us (id 3).
+    var eu_rows = List[List[RowCell]]()
+    eu_rows.append(_row(1, String("eu")))
+    eu_rows.append(_row(2, String("eu")))
+    var us_rows = List[List[RowCell]]()
+    us_rows.append(_row(3, String("us")))
+    var eu_tuple = encode_partition_values(partition_value_of(spec, _schema(), eu_rows[0]))
+    var us_tuple = encode_partition_values(partition_value_of(spec, _schema(), us_rows[0]))
+    var eu_info = _data(w, String("eu"), eu_rows, _schema())
+    var eu_path = eu_info.file_path.copy()
+    var files = List[DataFileInfo]()
+    files.append(eu_info^.with_partition(eu_tuple.copy(), types.copy()))
+    files.append(_data(w, String("us"), us_rows, _schema()).with_partition(us_tuple^, types.copy()))
+    _ = w.commit_with_spec(files^, List[DataFileInfo](), spec.copy())
+    # One commit with a position delete (row 0 of the eu file, which carries the
+    # eu tuple) and an equality delete (id 3, global).
+    var dels = List[DataFileInfo]()
+    dels.append(_pos_delete(w, String("p"), eu_path).with_partition(eu_tuple.copy(), types.copy()))
+    dels.append(_eq_delete(w, String("e"), 3))
+    var r2 = w.commit_with_spec(List[DataFileInfo](), dels^, spec.copy())
+    # What a conforming engine looks at: the manifest list names the position
+    # delete's manifest under the TABLE spec and the equality delete's under
+    # the unpartitioned spec; the position delete's entry holds the data file's
+    # partition tuple.
+    var entries = read_manifest_list(w.get_object(r2.manifest_list_key))
+    assert_equal(len(entries), 3)
+    assert_equal(entries[0].content, ICE_MANIFEST_CONTENT_DATA)
+    assert_equal(entries[0].partition_spec_id, 0)
+    assert_equal(entries[1].content, ICE_MANIFEST_CONTENT_DELETES)
+    assert_equal(entries[1].partition_spec_id, 0)
+    assert_equal(entries[2].content, ICE_MANIFEST_CONTENT_DELETES)
+    assert_equal(entries[2].partition_spec_id, delete_spec_of(spec).spec_id)
+    var pos_entries = read_manifest_entries(w.get_object(entries[1].manifest_path), types)
+    assert_equal(len(pos_entries), 1)
+    assert_equal(pos_entries[0].content, ICE_DATA_CONTENT_POSITION_DELETES)
+    assert_equal(len(pos_entries[0].partition_avro), 1)
+    assert_true(_same_bytes(pos_entries[0].partition_avro[0], eu_tuple[0]))
+    var eq_entries = read_manifest_entries(w.get_object(entries[2].manifest_path))
+    assert_equal(len(eq_entries), 1)
+    assert_equal(len(eq_entries[0].partition_avro), 0)
+    # The reader applies both: id 1 (position) and id 3 (equality) are gone.
+    var live = w.read_live_rows()
+    assert_equal(len(live), 1)
+    assert_equal(live[0][0].as_long(), Int64(2))
+    # A position delete without its file's tuple, or an equality delete with
+    # one, is refused and writes nothing.
+    var v = current_version(w._store, String("tbl"))
+    var no_tuple = List[DataFileInfo]()
+    no_tuple.append(_pos_delete(w, String("p2"), eu_path))
+    with assert_raises():
+        _ = w.commit_with_spec(List[DataFileInfo](), no_tuple^, spec.copy())
+    var tuple_on_eq = List[DataFileInfo]()
+    tuple_on_eq.append(_eq_delete(w, String("e2"), 1).with_partition(eu_tuple.copy(), types.copy()))
+    with assert_raises():
+        _ = w.commit_with_spec(List[DataFileInfo](), tuple_on_eq^, spec.copy())
+    assert_equal(current_version(w._store, String("tbl")), v)
+
+
+def test_commit_refuses_what_it_cannot_publish_before_writing() raises:
+    var w = _writer(String("validate"))
+    var v0 = current_version(w._store, String("tbl"))
+    # content 1/2 in data_files, content 0 in delete_files.
+    var wrong_data = List[DataFileInfo]()
+    wrong_data.append(_eq_delete(w, String("a"), 1))
+    with assert_raises():
+        _ = w.commit_append(wrong_data^)
+    var wrong_del = List[DataFileInfo]()
+    wrong_del.append(_one(w, String("b"), 1)[0].copy())
+    with assert_raises():
+        _ = w.commit(List[DataFileInfo](), wrong_del^)
+    # An equality delete listing no ids would match every older row.
+    var no_ids = List[DataFileInfo]()
+    no_ids.append(
+        DataFileInfo(
+            String("tbl/data/x.avro"), 1, 1, List[ColumnBound](),
+            ICE_DATA_CONTENT_EQUALITY_DELETES, List[Int](),
+        )
+    )
+    with assert_raises():
+        _ = w.commit(List[DataFileInfo](), no_ids^)
+    # A data file's tuple must match the spec: missing on a partitioned table,
+    # present on an unpartitioned one.
+    var spec = PartitionSpec(0)
+    spec.add_identity(2, String("region"))
+    with assert_raises():
+        _ = w.commit_with_spec(_one(w, String("c"), 1), List[DataFileInfo](), spec.copy())
+    var types = partition_value_type_tags(spec, _schema())
+    var tup = encode_partition_values(partition_value_of(spec, _schema(), _row(1, String("eu"))))
+    var extra = _one(w, String("d"), 1)
+    var with_tuple = List[DataFileInfo]()
+    with_tuple.append(extra[0].copy().with_partition(tup.copy(), types.copy()))
+    with assert_raises():
+        _ = w.commit_append(with_tuple^)
+    # A tuple value of the wrong type.
+    var bad_types = List[Int]()
+    bad_types.append(ICE_T_LONG)
+    var mistyped = List[DataFileInfo]()
+    mistyped.append(extra[0].copy().with_partition(tup.copy(), bad_types^))
+    with assert_raises():
+        _ = w.commit_with_spec(mistyped^, List[DataFileInfo](), spec.copy())
+    assert_equal(current_version(w._store, String("tbl")), v0)
+
+
+def test_a_writer_must_be_the_tables() raises:
+    var tag = String("identity")
+    var w = _writer(tag)
+    _ = w.commit_append(_one(w, String("a"), 1))
+    # Another uuid: the table's identity would be rewritten.
+    var other = _reopen(tag, _schema(), gen_table_uuid())
+    with assert_raises():
+        _ = other.commit_append(_one(other, String("b"), 2))
+    # The same uuid and schema id, a different schema.
+    var changed = IcebergSchema(0)
+    changed.add(String("id"), ICE_T_LONG, required=True)
+    changed.add(String("region"), ICE_T_DOUBLE, required=True)
+    var wrong = _reopen(tag, changed, w._table_uuid.copy())
+    with assert_raises():
+        _ = wrong.commit_append(List[DataFileInfo]())
+    # A schema older than the table's current one.
+    var evolved = evolve_add_column(_schema(), String("score"), ICE_T_DOUBLE)
+    w.set_schema(evolved.copy())
+    _ = w.commit_append(List[DataFileInfo]())
+    var stale = _reopen(tag, _schema(), w._table_uuid.copy())
+    var said_older = False
+    try:
+        _ = stale.commit_append(List[DataFileInfo]())
+    except e:
+        said_older = String(e).find("older than the table's current") >= 0
+    assert_true(said_older, "an older schema id must be refused as older")
+    # A schema id ahead of the table's that is not an extension of it.
+    var rewritten = IcebergSchema(5)
+    rewritten.add(String("id"), ICE_T_LONG, required=True)
+    rewritten.add(String("other"), ICE_T_STRING, required=True)
+    rewritten.add(String("score"), ICE_T_DOUBLE)
+    var bad = _reopen(tag, rewritten, w._table_uuid.copy())
+    with assert_raises():
+        _ = bad.commit_append(List[DataFileInfo]())
+    # The table's own writer, reopened, still commits.
+    var again = _reopen(tag, evolved, w._table_uuid.copy())
+    assert_equal(again.commit_append(List[DataFileInfo]()).version, 3)
+
+
+def test_two_prepared_commits_of_one_table_race_and_the_loser_retries() raises:
+    var tag = String("race")
+    var a = _writer(tag)
+    var uuid = a._table_uuid.copy()
+    var b = _reopen(tag, _schema(), uuid)
+    # Both prepare against an empty table: each writes its manifests and holds a
+    # v1.metadata.json it has not created yet.
+    var pa = a.prepare_commit(_one(a, String("a"), 1), List[DataFileInfo](), PartitionSpec(0), List[SummaryKV]())
+    var pb = b.prepare_commit(_one(b, String("b"), 2), List[DataFileInfo](), PartitionSpec(0), List[SummaryKV]())
+    assert_equal(pa.version, 1)
+    assert_equal(pb.version, 1)
+    var ra = a.publish_commit(pa^)
+    assert_equal(ra.version, 1)
+    var winner_bytes = a.get_object(ra.metadata_json_key)
+    var raised = False
+    try:
+        _ = b.publish_commit(pb^)
+    except e:
+        raised = True
+        assert_true(_has(String(e), "iceberg commit conflict"), String(e))
+    assert_true(raised, "the loser must get a conflict")
+    # The winner's file is untouched, the hint names it, and only its row is in
+    # the table.
+    assert_true(_same_bytes(a.get_object(ra.metadata_json_key), winner_bytes))
+    assert_equal(read_hint_version(a._store, String("tbl")), 1)
+    var rows = b.read_live_rows()
+    assert_equal(len(rows), 1)
+    assert_equal(rows[0][0].as_long(), Int64(1))
+    # The loser re-reads and retries: version 2 holds both rows.
+    var rb = b.commit_append(_one(b, String("b2"), 2))
+    assert_equal(rb.version, 2)
+    assert_equal(len(a.read_live_rows()), 2)
+    # The same race at version 2.
+    var p2a = a.prepare_commit(_one(a, String("a3"), 3), List[DataFileInfo](), PartitionSpec(0), List[SummaryKV]())
+    var p2b = b.prepare_commit(_one(b, String("b3"), 4), List[DataFileInfo](), PartitionSpec(0), List[SummaryKV]())
+    _ = b.publish_commit(p2b^)
+    with assert_raises():
+        _ = a.publish_commit(p2a^)
+    assert_equal(len(a.read_live_rows()), 3)
+
+
+def test_non_ascii_names_values_and_keys_end_to_end() raises:
+    var schema = IcebergSchema(0)
+    schema.add(String("id"), ICE_T_LONG, required=True)
+    schema.add(String("名前"), ICE_T_STRING, required=True)
+    var root = _scratch_dir() + String("/commit_unicode")
+    var w = IcebergTableWriter[LocalFsConditionalStore](
+        LocalFsConditionalStore(root), String("tbl_é"), schema.copy(), gen_table_uuid()
+    )
+    var spec = PartitionSpec(0)
+    spec.add_identity(2, String("名前"))
+    var types = partition_value_type_tags(spec, schema)
+    var rows = List[List[RowCell]]()
+    var r1 = List[RowCell]()
+    r1.append(make_long_cell(Int64(1)))
+    r1.append(make_string_cell(String("日本 😀")))
+    rows.append(r1^)
+    var info = _data(w, String("データ"), rows, schema)
+    var tup = encode_partition_values(partition_value_of(spec, schema, rows[0]))
+    var files = List[DataFileInfo]()
+    files.append(info^.with_partition(tup^, types.copy()))
+    var extra = List[SummaryKV]()
+    extra.append(SummaryKV(String("位置"), String("é😀")))
+    var res = w.commit_with_spec_and_summary(files^, List[DataFileInfo](), spec.copy(), extra)
+    var meta = _text(w.get_object(res.metadata_json_key))
+    assert_true(_has(meta, '"name":"名前"'))
+    assert_true(_has(meta, '"位置":"é😀"'))
+    assert_true(_has(meta, '"location":"tbl_é"'))
+    var live = w.read_live_rows()
+    assert_equal(len(live), 1)
+    assert_equal(live[0][1].as_string(), String("日本 😀"))
+    var fresh = IcebergTableWriter[LocalFsConditionalStore](
+        LocalFsConditionalStore(root), String("tbl_é"), schema.copy(), w._table_uuid.copy()
+    )
+    assert_equal(summary_value_for(fresh.read_current_summary(), String("位置")), String("é😀"))
+    assert_equal(fresh.commit_with_spec(List[DataFileInfo](), List[DataFileInfo](), spec.copy()).version, 2)
+
+
 def main() raises:
     test_a_lost_version_create_is_a_conflict_and_changes_nothing()
     test_a_commit_builds_on_a_version_the_hint_has_not_reached()
@@ -398,4 +654,9 @@ def main() raises:
     test_refusals()
     test_a_partitioned_table_with_deletes_names_the_delete_spec()
     test_ids_are_unique_and_well_formed()
+    test_position_deletes_in_a_partitioned_table_carry_their_files_partition()
+    test_commit_refuses_what_it_cannot_publish_before_writing()
+    test_a_writer_must_be_the_tables()
+    test_two_prepared_commits_of_one_table_race_and_the_loser_retries()
+    test_non_ascii_names_values_and_keys_end_to_end()
     print("test_iceberg_writer_commit: all passed")

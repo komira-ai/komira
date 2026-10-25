@@ -41,6 +41,7 @@ from komira_iceberg import (
     DataFileInfo,
     ColumnBound,
     PartitionSpec,
+    delete_spec_of,
     ManifestFileEntry,
     SnapshotInfo,
     RowCell,
@@ -169,14 +170,17 @@ struct _Table(Movable):
             )
         )
         if len(self.deletes) > 0:
+            # Equality deletes are global: written under the table's unpartitioned
+            # delete spec (its own id when the table is partitioned).
+            var dspec = delete_spec_of(self.spec)
             var xm = build_manifest_file(
-                schema, sj, Int64(1), top_seq, self.deletes, ICE_MANIFEST_CONTENT_DELETES,
+                schema, sj, Int64(1), top_seq, self.deletes, ICE_MANIFEST_CONTENT_DELETES, dspec,
             )
             _put(self.store, String(_LOC) + "/metadata/m-del.avro", xm)
             manifests.append(
                 ManifestFileEntry(
                     String(_LOC) + "/metadata/m-del.avro", len(xm), len(self.deletes),
-                    Int64(0), ICE_MANIFEST_CONTENT_DELETES, top_seq, Int64(1), 0,
+                    Int64(0), ICE_MANIFEST_CONTENT_DELETES, top_seq, Int64(1), dspec.spec_id,
                 )
             )
         var ml = build_manifest_list(Int64(1), top_seq, manifests)
