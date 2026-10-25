@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The wire translators of an OpenSearch/Elasticsearch compatible search shim:
+# The wire translators and the request dispatcher of an OpenSearch/Elasticsearch compatible search shim:
 # the `_bulk` NDJSON parser (`ndjson_bulk_to_docbatch`: a document batch with
 # dynamic field mapping and a per-item outcome list), the `_search` request
 # translator (`search_json_to_queryir`: match, term and range filters, sort,
@@ -16,9 +16,18 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the gates against those splits; the two bulk suites check dynamic mapping,
 # type conflicts and per-item partial success and index the committed batch;
 # the multi-split suites merge several splits and check the rendered envelope;
-# the last feeds the parsers hostile bodies (an overflowing from/size, a long
+# one feeds the parsers hostile bodies (an overflowing from/size, a long
 # bool clause list, nested bool and aggregation queries, a field named twice,
 # numbers out of range, too many fields, ill-formed UTF-8).
+#
+# Part 2 adds the dispatcher (`SearchHttpDispatcher[Storage]`, generic over a
+# `komira_objectstore` conditional-write store) and its plain config. Its suites
+# run over the in-memory store: routing, error statuses, the body and
+# live-split limits and the `_bulk` then `_search` round trip; a recording store
+# that checks the split object is put before the catalog is written and that a
+# failed put or a failed publish leaves nothing searchable; split keys across a
+# restart and across workers; an L0 split searched alone and next to a written
+# one; the config and uuid layout; and the request-path helpers.
 mojo_library(
     name = "komira_search_http",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -38,29 +47,38 @@ mojo_library(
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_encoding:komira_encoding",
         "//src/komira_fork_join:komira_fork_join",
+        "//src/komira_fs:komira_fs",
         "//src/komira_hash:komira_hash",
         "//src/komira_host:komira_host",
         "//src/komira_http_core:komira_http_core",
+        "//src/komira_http_server:komira_http_server",
         "//src/komira_join_assembly:komira_join_assembly",
         "//src/komira_json:komira_json",
-        "//src/komira_json_index:komira_json_index",
-        "//src/komira_jsonl:komira_jsonl",
         "//src/komira_libc:komira_libc",
         "//src/komira_log:komira_log",
+        "//src/komira_log_index:komira_log_index",
+        "//src/komira_log_query:komira_log_query",
         "//src/komira_lz4:komira_lz4",
         "//src/komira_metrics:komira_metrics",
         "//src/komira_name_registry:komira_name_registry",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_parquet:komira_parquet",
+        "//src/komira_parquet_api:komira_parquet_api",
+        "//src/komira_parquet_codec:komira_parquet_codec",
+        "//src/komira_parquet_writer:komira_parquet_writer",
         "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_plan_ir:komira_plan_ir",
         "//src/komira_plan_stats:komira_plan_stats",
-        "//src/komira_row_format:komira_row_format",
         "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
         "//src/komira_scan_source:komira_scan_source",
         "//src/komira_search:komira_search",
+        "//src/komira_search_catalog:komira_search_catalog",
         "//src/komira_simd:komira_simd",
         "//src/komira_spsc_ring:komira_spsc_ring",
+        "//src/komira_telemetry_read:komira_telemetry_read",
+        "//src/komira_telemetry_store:komira_telemetry_store",
         "//src/komira_trace:komira_trace",
-        "//src/komira_udf:komira_udf",
+        "//src/komira_uuid:komira_uuid",
         "//src/komira_zlib:komira_zlib",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
@@ -68,10 +86,15 @@ mojo_library(
         "tests/test_search_aggregations.mojo",
         "tests/test_search_bulk_dynamic_mapping.mojo",
         "tests/test_search_bulk_partial_success.mojo",
+        "tests/test_search_dispatch.mojo",
+        "tests/test_search_dispatch_publish.mojo",
         "tests/test_search_filter_pushdown.mojo",
+        "tests/test_search_http_config.mojo",
         "tests/test_search_http_multi_split.mojo",
         "tests/test_search_keyword_alias.mojo",
         "tests/test_search_multi_reader_stateless.mojo",
+        "tests/test_search_opensearch_shim.mojo",
+        "tests/test_search_request_paths.mojo",
         "tests/test_search_sort_pagination.mojo",
         "tests/test_search_untrusted_input.mojo",
     ],
