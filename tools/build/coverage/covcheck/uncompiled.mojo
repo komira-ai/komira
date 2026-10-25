@@ -242,31 +242,92 @@ struct Dropped(Copyable, Movable):
         self.line_set = Dict[Int, Bool]()
 
 
-def unreliable_lines(text: String, called: Dict[String, Bool], dups: Dict[String, Bool]) -> Dict[Int, Bool]:
-    """The lines of `text` an uncompiled report may not count: the own lines of an `@always_inline`
-    function, the lines in the arms of a gated one, each only with evidence. `called` holds the calls the hit
-    lines of the function's package make (`name`, `.name`, `Receiver.name`); `dups` the names the package
-    declares more than once: such a name is evidence only through `Struct.name` for a method of `struct Struct`
-    (the receiver of the call named the type), and for none for a free function."""
+struct Evidence(Copyable, Movable):
+    """What the hit lines of one package say about calls (textual, per package): `callers` maps a call key (`name`,
+    `.name`, `Receiver.name`) to the files with a hit line that makes it, `imports` a file to the identifiers of
+    its import lines."""
+
+    var callers: Dict[String, List[String]]
+    var imports: Dict[String, Dict[String, Bool]]
+
+    def __init__(out self):
+        self.callers = Dict[String, List[String]]()
+        self.imports = Dict[String, Dict[String, Bool]]()
+
+    def add(mut self, path: String, text: String, hit: Dict[Int, Bool]) raises:
+        """Records the calls the hit lines of `text` (file `path`) make, and its imports."""
+        var keys = Dict[String, Bool]()
+        names_called_on(text, hit, keys)
+        for e in keys.items():
+            if e.key not in self.callers:
+                self.callers[e.key] = List[String]()
+            var seen = False
+            for i in range(len(self.callers[e.key])):
+                if self.callers[e.key][i] == path:
+                    seen = True
+            if not seen:
+                self.callers[e.key].append(path)
+        var toks = Dict[String, Bool]()
+        var ls = lex_source(text)
+        for i in range(len(ls)):
+            if ls[i].is_import:
+                var line = ls[i].text
+                var b = line.as_bytes()
+                var start = -1
+                for p in range(len(b) + 1):
+                    var c = Int(b[p]) if p < len(b) else -1
+                    if c >= 0 and _is_ident(c):
+                        if start < 0:
+                            start = p
+                    else:
+                        if start >= 0:
+                            toks[substr(line, start, p)] = True
+                        start = -1
+        self.imports[path] = toks^
+
+
+def _module_of(path: String) -> String:
+    """The file name of `path` without `.mojo`: the module a `from pkg.module import` names."""
+    var parts = _split_path(path)
+    var base = parts[len(parts) - 1]
+    if base.endswith(".mojo"):
+        return substr(base, 0, base.byte_length() - 5)
+    return base
+
+
+def unreliable_lines(text: String, path: String, ev: Evidence, dups: Dict[String, Bool]) raises -> Dict[Int, Bool]:
+    """The lines of `text` (file `path`) an uncompiled report may not count: the own lines of an `@always_inline`
+    function, the lines in the arms of a gated one, each only with evidence, which is textual and per package
+    (`ev`, `dups`: the names the package declares more than once). Count when in doubt:
+
+    * a method has evidence only from a call that names its declaring type as the receiver, `T(x).m(` or
+      `T.m(`; any other receiver, an unknown one included, is none;
+    * a free function has evidence only from a hit call `f(` in the same file, or in a file that imports the
+      module (`from pkg.module import ...`) or the name; a free function whose name the package declares more
+      than once has none."""
     var out = Dict[Int, Bool]()
     var fns = declared_functions(text)
     var lines = split_lines(text)
+    var module = _module_of(path)
     for k in range(len(fns)):
-        # A method (a declaration indented) is called as `x.name(`, a free function as `name(`: a
-        # `.name(` call of a same-named method of another type is no evidence for a free function.
         var method = False
         if fns[k].line >= 1 and fns[k].line <= len(lines) and _indent(lines[fns[k].line - 1]) > 0:
             method = True
-        if fns[k].name in dups:
-            if not method:
-                continue
+        var name = fns[k].name
+        var ok = False
+        if method:
             var owner = _struct_of(lines, fns[k].line)
-            if owner.byte_length() == 0 or (owner + String(".") + fns[k].name) not in called:
-                continue
-        else:
-            var key = (String(".") if method else String("")) + fns[k].name
-            if key not in called:
-                continue
+            if owner.byte_length() > 0 and (owner + String(".") + name) in ev.callers:
+                ok = True
+        elif name not in dups and name in ev.callers:
+            for c in range(len(ev.callers[name])):
+                var caller = ev.callers[name][c].copy()
+                if caller == path:
+                    ok = True
+                elif caller in ev.imports and (name in ev.imports[caller] or module in ev.imports[caller]):
+                    ok = True
+        if not ok:
+            continue
         if fns[k].kind == String(KIND_ALWAYS_INLINE):
             for i in range(len(fns[k].lines)):
                 out[fns[k].lines[i]] = True
@@ -276,10 +337,10 @@ def unreliable_lines(text: String, called: Dict[String, Bool], dups: Dict[String
     return out^
 
 
-def drop_unreliable(mut f: FileCov, text: String, called: Dict[String, Bool], dups: Dict[String, Bool]) -> Dropped:
+def drop_unreliable(mut f: FileCov, text: String, path: String, ev: Evidence, dups: Dict[String, Bool]) raises -> Dropped:
     """Removes from `f` (a file of an uncompiled report) every line record, and every branch arm
     on a line, that `unreliable_lines` names; says what it removed."""
-    return drop_lines(f, unreliable_lines(text, called, dups))
+    return drop_lines(f, unreliable_lines(text, path, ev, dups))
 
 
 def drop_lines(mut f: FileCov, lines: Dict[Int, Bool]) -> Dropped:

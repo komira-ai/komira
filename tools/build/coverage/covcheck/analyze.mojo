@@ -116,7 +116,7 @@ from covcheck.mutants import KILLED, SURVIVED, TIMEOUT, Mutant, parse_mutants
 from covcheck.paths import MAPPED, OUTSIDE, RepoFiles, generated_test_main, is_test_source, map_path, package_of
 from covcheck.held import Held
 from covcheck.platform_gate import Cand, platform_gated
-from covcheck.uncompiled import declared_twice, drop_lines, drop_unreliable, is_uncompiled_report, names_called_on, unreliable_lines
+from covcheck.uncompiled import Evidence, declared_twice, drop_lines, drop_unreliable, is_uncompiled_report, unreliable_lines
 from covcheck.stats import (
     BELOW_TARGET,
     BRANCH_NOT_MEASURED,
@@ -543,7 +543,7 @@ def _platform_gate(
     opts: Options,
     mut a: Analysis,
     mut gated_lines: Dict[String, Dict[Int, Bool]],
-    called: Dict[String, Dict[String, Bool]],
+    called: Dict[String, Evidence],
 ) raises:
     """Finds the platform-gated functions among those of the uncompiled line reports (platform_gate.mojo): fills
     `gated_lines` with their own lines per path and `a.platform_gated` with each, in path and line order."""
@@ -589,10 +589,10 @@ def _platform_gate(
         # What the call evidence leaves out already is not reported a second time.
         if pkg not in pkg_dups:
             pkg_dups[pkg] = declared_twice(_package_texts(pkg, repo, sources))
-        var pcalled = Dict[String, Bool]()
+        var pcalled = Evidence()
         if pkg in called:
             pcalled = called[pkg].copy()
-        var by_evidence = unreliable_lines(src, pcalled, pkg_dups[pkg])
+        var by_evidence = unreliable_lines(src, path, pcalled, pkg_dups[pkg])
         for k in range(len(fns)):
             var own = List[Int]()
             var evidenced = True
@@ -667,7 +667,7 @@ def analyze(
     # needs the evidence the others give (the lines a test hit that call a function).
     # The calls the hit lines make, per package (a call in another package is no evidence), and the function names
     # each package declares more than once.
-    var called = Dict[String, Dict[String, Bool]]()
+    var called = Dict[String, Evidence]()
     var dups_of = Dict[String, Dict[String, Bool]]()
     # What the uncompiled report left out, per path, and the lines of it (the files-no-test-compiled
     # pass leaves them out too).
@@ -691,8 +691,8 @@ def analyze(
             try:
                 var cpkg = _package_or_empty(e.key, repo)
                 if cpkg not in called:
-                    called[cpkg] = Dict[String, Bool]()
-                names_called_on(sources.read(e.key), e.value, called[cpkg])
+                    called[cpkg] = Evidence()
+                called[cpkg].add(e.key, sources.read(e.key), e.value)
             except:
                 pass
       var gated_lines = Dict[String, Dict[Int, Bool]]()
@@ -717,10 +717,10 @@ def analyze(
                     var dpkg = _package_or_empty(m.path, repo)
                     if dpkg not in dups_of:
                         dups_of[dpkg] = declared_twice(_package_texts(dpkg, repo, sources))
-                    var dcalled = Dict[String, Bool]()
+                    var dcalled = Evidence()
                     if dpkg in called:
                         dcalled = called[dpkg].copy()
-                    var d = drop_unreliable(f, sources.read(m.path), dcalled, dups_of[dpkg])
+                    var d = drop_unreliable(f, sources.read(m.path), m.path, dcalled, dups_of[dpkg])
                     if d.lines > 0 or d.arms > 0:
                         if m.path not in excluded_at:
                             excluded_at[m.path] = len(a.excluded)

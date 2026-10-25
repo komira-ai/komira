@@ -23,7 +23,7 @@ so a use is anything that could be one:
 * any other use is live: a line outside every arm, an arm with a record, a function no report shows
   compiled that is not gated, a line outside any function.
 
-A function qualifies only with at least one use (not counting its own body) and every use dropped.
+A name the package declares more than once is never gated (it is counted, as the call evidence counts it). A function qualifies only with at least one use (not counting its own body) and every use dropped.
 No use: it counts as uncovered, as an uncalled function does. A group of functions that call only
 each other, reachable only from a dropped arm, is not gated either: the fixpoint starts from nothing
 gated and each function needs a dropped use, so such a cycle stays counted.
@@ -31,6 +31,7 @@ gated and each function needs a dropped use, so such a cycle stays counted.
 
 from covcheck.decls import FnDecl, declared_functions
 from covcheck.lexer import lex_source
+from covcheck.uncompiled import declared_twice
 
 
 struct Cand(Copyable, Movable):
@@ -196,6 +197,9 @@ def platform_gated(
                 sites[key].append(_Site(path, ln, inner))
         fi.fns = fns^
         files[path] = fi^
+    # A name the package declares more than once is told apart from nothing here either: it is counted, as the
+    # call evidence counts it.
+    var dups = declared_twice(texts)
     var gated = Dict[String, Bool]()  # "<path>:<def line>"
     var out = List[Bool]()
     for _ in range(len(cands)):
@@ -206,7 +210,7 @@ def platform_gated(
         for c in range(len(cands)):
             if out[c]:
                 continue
-            if cands[c].path not in files:
+            if cands[c].path not in files or cands[c].name in dups:
                 continue
             var key = cands[c].name
             if key not in sites:
