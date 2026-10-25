@@ -140,7 +140,7 @@ wildcard_origin	src/komira_log/config.mojo	3	predates the lint
 wildcard_origin	src/komira_log/engine/log_manager.mojo	2	predates the lint
 wildcard_origin	src/komira_log/log_write.mojo	2	predates the lint
 wildcard_origin	src/komira_log_query/search_seam.mojo	6	predates the lint
-wildcard_origin	src/komira_lz4/codec.mojo	5	predates the lint
+wildcard_origin	src/komira_lz4/src/komira_lz4/codec.mojo	5	predates the lint
 wildcard_origin	src/komira_metrics/metrics_set.mojo	3	predates the lint
 wildcard_origin	src/komira_metrics_reader/reader.mojo	6	predates the lint
 wildcard_origin	src/komira_morsel/scan_morsel_resolver.mojo	18	predates the lint
