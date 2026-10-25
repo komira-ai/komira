@@ -44,4 +44,5 @@ PACKAGES = {
     "komira_textproto": "0.1.0",
     "komira_validation_run": "0.1.0",
     "komira_xml": "0.1.0",
+    "komira_zlib": "0.1.0",
 }

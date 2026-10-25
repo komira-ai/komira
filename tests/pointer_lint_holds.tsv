@@ -178,4 +178,4 @@ wildcard_origin	src/komira_table_store/tests/test_table_store_concurrency.mojo	1
 wildcard_origin	src/komira_table_store/tests/test_table_store_multiwriter_gcs_occ.mojo	7	predates the lint
 wildcard_origin	src/komira_table_store/tests/test_table_store_si_thread_property.mojo	7	predates the lint
 wildcard_origin	src/komira_table_store/tests/test_table_store_unique_index.mojo	8	predates the lint
-wildcard_origin	src/komira_zlib/zlib_ffi.mojo	23	predates the lint
+wildcard_origin	src/komira_zlib/src/komira_zlib/zlib_ffi.mojo	23	predates the lint
