@@ -52,7 +52,7 @@ gen_check(
         "item.mojo",
         "shop.mojo",
     ],
-    gen = ":komira_gcp_shop[gen]",
+    gen = ":komira_gcp_shop_gen",
     present = [
         "struct GetItemRequest(",
         "struct GetItemResponse(",
@@ -93,7 +93,7 @@ gen_check(
         "item.mojo",
         "shop.mojo",
     ],
-    gen = ":komira_gcp_shop_roots[gen]",
+    gen = ":komira_gcp_shop_roots_gen",
     present = [
         "struct GetItemRequest(",
         "struct Item(",
@@ -125,7 +125,7 @@ gen_check(
         "shop.mojo",
         "shop_item.mojo",
     ],
-    gen = ":komira_gcp_shop_renamed[gen]",
+    gen = ":komira_gcp_shop_renamed_gen",
     present = [
         "struct Item(",
         "from komira_gcp_shop_renamed.shop_item import Item",
@@ -159,7 +159,7 @@ gen_check(
         "item.mojo",
         "shop_api.mojo",
     ],
-    gen = ":komira_gcp_shop_own_renamed[gen]",
+    gen = ":komira_gcp_shop_own_renamed_gen",
     present = [
         "struct GetItemRequest(",
         "size_of[shop_api.GetItemRequest]()",
@@ -167,7 +167,7 @@ gen_check(
 )
 
 # The layout probe is welded into each library, not only generated: the
-# libraries ran exactly these tests, and each passed. gen_check reads `[gen]`
+# libraries ran exactly these tests, and each passed. gen_check reads `<name>_gen`
 # and cannot see the weld.
 tests_check(
     name = "komira_gcp_shop_tests",
@@ -213,7 +213,7 @@ gen_check(
         "item.mojo",
         "shop.mojo",
     ],
-    gen = ":komira_gcp_shop_grpc_messages[gen]",
+    gen = ":komira_gcp_shop_grpc_messages_gen",
     present = [
         "struct GetItemRequest(",
         "struct GetItemResponse(",
@@ -244,7 +244,7 @@ gen_check(
         "_layout_probe.mojo",
         "tiny.mojo",
     ],
-    gen = _TINY_GRPC + "[gen]",
+    gen = _TINY_GRPC + "_gen",
     identical = {"tiny.mojo": "//functional/proto_codegen:tiny_grpc_gcp_golden"},
     present = [
         "from komira_gcp_core import GcpTokenSource, gcp_grpc_status_error",
@@ -288,7 +288,7 @@ gen_check(
         "_layout_probe.mojo",
         "nohost.mojo",
     ],
-    gen = _NOHOST_REST + "[gen]",
+    gen = _NOHOST_REST + "_gen",
     present = [
         "from komira_gcp_core import GcpTokenSource, gcp_status_error",
         "struct NoHostServiceClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):",

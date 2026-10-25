@@ -84,7 +84,7 @@ gen_check(
         "item.mojo",
         "shop.mojo",
     ],
-    gen = "//functional/mojo_gcp_client:komira_gcp_shop[gen]",
+    gen = "//functional/mojo_gcp_client:komira_gcp_shop_gen",
     present = ["struct Item("],
 )
 
