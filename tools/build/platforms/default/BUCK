@@ -24,5 +24,7 @@ execution_platforms_plus(
     name = "default",
     base = ":komira",
     extra = ["buildrules//platforms:linux_x86_64"],
+    # The macOS arm64 platform of buildrules' Mojo rules, on komira's macOS workers when it has them.
+    extra_darwin = ["buildrules//platforms:macos_aarch64"],
     visibility = ["PUBLIC"],
 )

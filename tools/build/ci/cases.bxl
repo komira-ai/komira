@@ -322,6 +322,24 @@ def _roots_cases():
         out.append("roots: an ordinary dependent still removes its dependency from the roots: got {}".format(roots(plain)))
     return out
 
+def _registration_cases(ctx):
+    """The execution platforms the checkout registers (`platforms/default:default`): whichever worker sets this
+    checkout's configuration names, the platform of buildrules' macOS rules is registered exactly when komira's
+    own macOS platform is, after it, and komira's linux platform stays first."""
+    out = []
+    got = [str(p.label) for p in ctx.analysis(ctx.configured_targets("komira//tools/build/platforms/default:default")).providers()[ExecutionPlatformRegistrationInfo].platforms]
+    if not got or got[0] != "komira//tools/build/platforms:linux-x86_64":
+        out.append("registration: komira's linux-x86_64 platform must stay first, got {}".format(got))
+    if "buildrules//platforms:linux_x86_64" not in got:
+        out.append("registration: buildrules' linux_x86_64 platform is missing: {}".format(got))
+    komira_mac = "komira//tools/build/platforms:darwin-arm64" in got
+    rules_mac = "buildrules//platforms:macos_aarch64" in got
+    if komira_mac != rules_mac:
+        out.append("registration: buildrules' macos_aarch64 platform must be registered exactly when komira's darwin-arm64 is (komira's: {}, buildrules': {}): {}".format(komira_mac, rules_mac, got))
+    if rules_mac and got.index("buildrules//platforms:macos_aarch64") < got.index("komira//tools/build/platforms:darwin-arm64"):
+        out.append("registration: buildrules' macos_aarch64 platform must come after komira's darwin-arm64: {}".format(got))
+    return out
+
 # ---- the Python guard ------------------------------------------------------
 
 _PYTEST = "komira//tools/build/python/defs.bzl:_py_test"
@@ -432,7 +450,7 @@ def _shipped_rules_cases():
     return out
 
 def _run(ctx):
-    table = _table_cases() + _held_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases()
+    table = _table_cases() + _held_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases() + _registration_cases(ctx)
     real = _real_cases(ctx)
     failures = table + real
     if failures:
