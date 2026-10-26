@@ -338,6 +338,43 @@ def test_empty_hash_and_duplicate_key_are_refused() raises:
         _ = SourceFingerprintSet.decode(dup)
 
 
+def test_a_duplicate_at_the_end_of_a_large_body_is_refused() raises:
+    # Thousands of distinct keys, then the first key again. The check must find
+    # it and, on a hostile count, in time linear in the count.
+    var n = 4000
+    var b = List[UInt8]()
+    _i64(b, 1)
+    _i64(b, Int64(n + 1))
+    for i in range(n):
+        _str(b, "p")
+        _str(b, "s" + String(i))
+        _str(b, "0123456789abcdef")
+        _str(b, "")
+    _str(b, "p")
+    _str(b, "s0")
+    _str(b, "0123456789abcdef")
+    _str(b, "")
+    assert_true(_refused(b))
+    with assert_raises(contains="source stored twice: s0"):
+        _ = SourceFingerprintSet.decode(b)
+
+
+def test_keys_that_differ_only_in_where_the_partition_ends_are_distinct() raises:
+    var b = List[UInt8]()
+    _i64(b, 1)
+    _i64(b, 2)
+    _str(b, "ab")
+    _str(b, "c")
+    _str(b, "0123456789abcdef")
+    _str(b, "")
+    _str(b, "a")
+    _str(b, "bc")
+    _str(b, "0123456789abcdef")
+    _str(b, "")
+    var back = SourceFingerprintSet.decode(b)
+    assert_equal(back.num_entries(), 2)
+
+
 def test_wrapping_length_and_non_utf8_strings_are_refused() raises:
     var wrap = List[UInt8]()
     _i64(wrap, 1)

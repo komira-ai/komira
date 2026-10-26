@@ -7,11 +7,14 @@
 #                chain with no delta and non-ASCII names round-trip; encoding is
 #                deterministic.
 #   layout       the encoded header of a delta and of a chain is the format
-#                version 3 as a little-endian i64 followed by the counts.
+#                version (delta 4, chain 3) as a little-endian i64 followed by
+#                the counts.
 #   kind         kg_chunk_is_chain_head tells a chain (version 3) from a base
-#                manifest (version 2), and refuses any other version or a body
-#                shorter than eight bytes; the two versions differ so the first
-#                eight bytes decide.
+#                manifest (version 2), and refuses a delta (version 4), any
+#                other version or a body shorter than eight bytes; the three
+#                versions differ so the first eight bytes decide.
+#   cross-kind   a delta is never decoded as a chain nor a chain as a delta,
+#                empty or not, including a delta whose length equals a chain's.
 #   refusal      every truncation of a valid delta and of a valid chain, a wrong
 #                version, a negative count, sequence number, schema version or
 #                row count, a count the bytes cannot hold (including 2^63 - 1,
@@ -33,6 +36,7 @@ from std.testing import (
 )
 
 from komira_kg_format import (
+    KG_CHAIN_FORMAT_VERSION,
     KG_DELTA_FORMAT_VERSION,
     KG_SNAPSHOT_FORMAT_VERSION,
     KgChainBody,
@@ -137,7 +141,7 @@ def test_delta_encoding_is_deterministic() raises:
 
 def test_delta_header_layout() raises:
     var bytes = _delta().encode()
-    assert_equal(_read_i64(bytes, 0), 3)
+    assert_equal(_read_i64(bytes, 0), 4)
     assert_equal(_read_i64(bytes, 8), 2)  # table count
     assert_equal(_read_i64(bytes, 16), 5)  # first name length: "edges"
 
@@ -145,7 +149,7 @@ def test_delta_header_layout() raises:
 def test_chain_round_trips_in_order() raises:
     var deltas: List[Int64] = [4, 2, 9]
     var back = KgChainBody.decode(KgChainBody(1, deltas^).encode())
-    assert_equal(back.format_version, KG_DELTA_FORMAT_VERSION)
+    assert_equal(back.format_version, KG_CHAIN_FORMAT_VERSION)
     assert_equal(back.base_seq, 1)
     assert_equal(back.num_deltas(), 3)
     assert_equal(back.delta_seqs[0], 4)
@@ -169,6 +173,7 @@ def test_chain_header_layout() raises:
     var bytes = KgChainBody(5).encode()
     assert_equal(len(bytes), 24)
     assert_equal(_read_i64(bytes, 0), 3)
+    assert_equal(KG_CHAIN_FORMAT_VERSION, 3)
     assert_equal(_read_i64(bytes, 8), 5)
     assert_equal(_read_i64(bytes, 16), 0)
 
@@ -177,6 +182,46 @@ def test_chunk_kind_is_read_from_the_version() raises:
     assert_true(kg_chunk_is_chain_head(KgChainBody(1).encode()))
     assert_false(kg_chunk_is_chain_head(KgManifestBody(3).encode()))
     assert_true(KG_DELTA_FORMAT_VERSION != KG_SNAPSHOT_FORMAT_VERSION)
+    assert_true(KG_DELTA_FORMAT_VERSION != KG_CHAIN_FORMAT_VERSION)
+    assert_true(KG_CHAIN_FORMAT_VERSION != KG_SNAPSHOT_FORMAT_VERSION)
+
+
+def test_no_delta_or_manifest_body_is_a_chain_head() raises:
+    assert_false(kg_chunk_is_chain_head(KgManifestBody(3).encode()))
+    with assert_raises(contains="unknown chunk format version 4"):
+        _ = kg_chunk_is_chain_head(_delta().encode())
+    with assert_raises(contains="unknown chunk format version 4"):
+        _ = kg_chunk_is_chain_head(KgDeltaBody().encode())
+    var one = KgDeltaBody()
+    one.add_table("t", "k", 1, 1)
+    with assert_raises(contains="unknown chunk format version 4"):
+        _ = kg_chunk_is_chain_head(one.encode())
+
+
+def test_a_delta_is_not_a_chain_and_a_chain_is_not_a_delta() raises:
+    assert_true(_refused_chain(_delta().encode()))
+    assert_true(_refused_chain(KgDeltaBody().encode()))
+    assert_true(_refused_delta(KgChainBody(1).encode()))
+    assert_true(_refused_delta(KgChainBody(0).encode()))
+    # An empty delta and a chain of no deltas are both 24 bytes.
+    assert_equal(len(KgDeltaBody().encode()), len(KgChainBody(0).encode()))
+    var chain_deltas: List[Int64] = [2, 3]
+    assert_true(_refused_delta(KgChainBody(1, chain_deltas^).encode()))
+
+
+def test_a_delta_of_a_chains_length_is_not_a_chain() raises:
+    # One table with an 11-byte name and a 45-byte key: the body is
+    # 16 + (8 + 11) + (8 + 45) + 16 + 8 = 112 bytes, and a chain of the same
+    # words would be read from the third word on. Under a shared version the
+    # chain decoder accepted it.
+    var d = KgDeltaBody()
+    d.add_table("abcdefghijk", "k" * 45, 1, 1)
+    var bytes = d.encode()
+    assert_true(_refused_chain(bytes))
+    assert_equal(_read_i64(bytes, 0), 4)
+    # The same bytes under the chain's version are not a delta either.
+    bytes[0] = 3
+    assert_true(_refused_delta(bytes))
 
 
 def test_chunk_kind_refuses_unknown_version_and_short_body() raises:
@@ -228,8 +273,8 @@ def test_trailing_bytes_are_refused() raises:
 
 def test_wrong_version_is_refused() raises:
     var d = _delta().encode()
-    d[0] = 2
-    with assert_raises(contains="unsupported delta format version 2"):
+    d[0] = 3
+    with assert_raises(contains="unsupported delta format version 3"):
         _ = KgDeltaBody.decode(d)
     var c = KgChainBody(1).encode()
     c[0] = 4
@@ -241,7 +286,7 @@ def test_counts_the_bytes_cannot_hold_are_refused() raises:
     var big: List[Int64] = [Int64.MAX, 1000000, 1]
     for k in range(len(big)):
         var d = List[UInt8]()
-        _i64(d, 3)
+        _i64(d, 4)
         _i64(d, big[k])  # table count
         _i64(d, 0)
         assert_true(_refused_delta(d), "table count " + String(big[k]))
@@ -251,7 +296,7 @@ def test_counts_the_bytes_cannot_hold_are_refused() raises:
         _i64(c, big[k])  # delta count
         assert_true(_refused_chain(c), "delta count " + String(big[k]))
         var ix = List[UInt8]()
-        _i64(ix, 3)
+        _i64(ix, 4)
         _i64(ix, 0)
         _i64(ix, big[k])  # name-index count
         assert_true(_refused_delta(ix), "index count " + String(big[k]))
@@ -259,7 +304,7 @@ def test_counts_the_bytes_cannot_hold_are_refused() raises:
 
 def test_negative_counts_and_numbers_are_refused() raises:
     var d = List[UInt8]()
-    _i64(d, 3)
+    _i64(d, 4)
     _i64(d, -1)
     with assert_raises(contains="negative table_count -1"):
         _ = KgDeltaBody.decode(d)
@@ -287,7 +332,7 @@ def test_negative_counts_and_numbers_are_refused() raises:
         _ = KgChainBody.decode(seq)
 
     var ix = List[UInt8]()
-    _i64(ix, 3)
+    _i64(ix, 4)
     _i64(ix, 0)
     _i64(ix, -1)
     with assert_raises(contains="negative entry count -1"):
@@ -296,7 +341,7 @@ def test_negative_counts_and_numbers_are_refused() raises:
 
 def _delta_with_one_table(schema_version: Int64, row_count: Int64) -> List[UInt8]:
     var d = List[UInt8]()
-    _i64(d, 3)
+    _i64(d, 4)
     _i64(d, 1)
     _str(d, "edges")
     _str(d, "d/k")
@@ -316,7 +361,7 @@ def test_negative_schema_version_and_row_count_are_refused() raises:
 
 def test_string_length_that_would_wrap_the_bounds_check_is_refused() raises:
     var d = List[UInt8]()
-    _i64(d, 3)
+    _i64(d, 4)
     _i64(d, 0)
     _i64(d, 1)  # one index entry
     _i64(d, Int64.MAX)  # its name length: offset + length would wrap negative
@@ -328,7 +373,7 @@ def test_string_length_that_would_wrap_the_bounds_check_is_refused() raises:
 
 def test_names_that_are_not_utf8_are_refused() raises:
     var d = List[UInt8]()
-    _i64(d, 3)
+    _i64(d, 4)
     _i64(d, 1)
     _i64(d, 2)  # a table name of two bytes
     d.append(0xC3)
@@ -341,7 +386,7 @@ def test_names_that_are_not_utf8_are_refused() raises:
         _ = KgDeltaBody.decode(d)
 
     var ix = List[UInt8]()
-    _i64(ix, 3)
+    _i64(ix, 4)
     _i64(ix, 0)
     _i64(ix, 1)
     _i64(ix, 1)
@@ -351,9 +396,28 @@ def test_names_that_are_not_utf8_are_refused() raises:
         _ = KgDeltaBody.decode(ix)
 
 
+def test_a_duplicate_table_at_the_end_of_a_large_delta_is_refused() raises:
+    var n = 4000
+    var d = List[UInt8]()
+    _i64(d, 4)
+    _i64(d, Int64(n + 1))
+    for i in range(n):
+        _str(d, "t" + String(i))
+        _str(d, "k")
+        _i64(d, 1)
+        _i64(d, 1)
+    _str(d, "t0")
+    _str(d, "k")
+    _i64(d, 1)
+    _i64(d, 1)
+    _i64(d, 0)
+    with assert_raises(contains="table named twice: t0"):
+        _ = KgDeltaBody.decode(d)
+
+
 def test_a_table_named_twice_is_refused_on_decode_and_on_add() raises:
     var d = List[UInt8]()
-    _i64(d, 3)
+    _i64(d, 4)
     _i64(d, 2)
     for _ in range(2):
         _str(d, "edges")

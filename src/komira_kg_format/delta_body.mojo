@@ -28,14 +28,16 @@
 # for the same normalized name wins.
 #
 # Which kind of chunk a body is, is told by the format version in its first
-# eight bytes. The base uses `KG_SNAPSHOT_FORMAT_VERSION` (2), the delta layer
-# uses `KG_DELTA_FORMAT_VERSION` (3), and `kg_chunk_is_chain_head` reads the
-# difference.
+# eight bytes, and each kind has its own: the base uses
+# `KG_SNAPSHOT_FORMAT_VERSION` (2), the chain head `KG_CHAIN_FORMAT_VERSION`
+# (3) and the delta `KG_DELTA_FORMAT_VERSION` (4). No two kinds share a version,
+# so no body of one kind can decode as another, whatever its length, and
+# `kg_chunk_is_chain_head` reads the difference between the head kinds.
 #
 # Layouts, little-endian:
 #
 #   KgDeltaBody
-#     [ format_version: i64 = 3 ]
+#     [ format_version: i64 = 4 ]
 #     [ table_count: i64 ]
 #     repeated table_count times:
 #       [ name_len ][ name ]  [ key_len ][ object_key ]  [ schema_version ][ row_count ]
@@ -58,10 +60,16 @@ from .manifest_body import KG_SNAPSHOT_FORMAT_VERSION
 from .wire import get_i64_le, get_str, put_i64_le, put_str
 
 
-# The format version of the delta-layer bodies. Distinct from
-# KG_SNAPSHOT_FORMAT_VERSION so the first eight bytes of a head chunk tell a
-# chain from a base-only manifest.
-comptime KG_DELTA_FORMAT_VERSION: Int64 = 3
+# The format version of a chain head. Distinct from KG_SNAPSHOT_FORMAT_VERSION
+# so the first eight bytes of a head chunk tell a chain from a base-only
+# manifest, and from KG_DELTA_FORMAT_VERSION so a delta is never a chain.
+comptime KG_CHAIN_FORMAT_VERSION: Int64 = 3
+
+# The format version of a delta body. Distinct from the other two chunk kinds:
+# an empty delta and a chain of no deltas are both 24 bytes, and a delta with
+# one table of the right lengths is the length of a chain, so only the version
+# can tell them apart.
+comptime KG_DELTA_FORMAT_VERSION: Int64 = 4
 
 
 @fieldwise_init
@@ -240,7 +248,7 @@ struct KgDeltaBody(Movable):
         raise Error("KgDeltaBody.resolve: table not present in delta: " + name)
 
     def encode(self) -> List[UInt8]:
-        """Encode to the little-endian wire form (format version 3)."""
+        """Encode to the little-endian wire form (format version 4)."""
         var out = List[UInt8]()
         put_i64_le(out, self.format_version)
         put_i64_le(out, Int64(len(self.tables)))
@@ -255,7 +263,7 @@ struct KgDeltaBody(Movable):
 
     @staticmethod
     def decode(bytes: List[UInt8]) raises -> KgDeltaBody:
-        """Decode the wire form (format version 3 only).
+        """Decode the wire form (format version 4 only).
 
         Raises:
             On any of the refusals the file header lists.
@@ -279,6 +287,9 @@ struct KgDeltaBody(Movable):
         if table_count > (len(bytes) - off) // 32:
             raise Error(who + ": truncated table list")
         var delta = KgDeltaBody()
+        # Names seen so far: a set, so a hostile count of tables costs linear
+        # time (has_table scans).
+        var seen = Dict[String, Bool]()
         for _ in range(table_count):
             var name = get_str(bytes, off, who, "table name")
             var key = get_str(bytes, off, who, "object_key")
@@ -292,8 +303,9 @@ struct KgDeltaBody(Movable):
                 )
             if row_count < 0:
                 raise Error(who + ": negative row_count " + String(row_count))
-            if delta.has_table(name):
+            if name in seen:
                 raise Error(who + ": table named twice: " + name)
+            seen[name] = True
             delta.tables.append(
                 KgDeltaTableEntry(name^, key^, schema_version, row_count)
             )
@@ -331,7 +343,7 @@ struct KgChainBody(Copyable, Movable):
             raise Error(
                 "KgChainBody: negative base_seq " + String(base_seq)
             )
-        self.format_version = KG_DELTA_FORMAT_VERSION
+        self.format_version = KG_CHAIN_FORMAT_VERSION
         self.base_seq = base_seq
         self.delta_seqs = List[Int64]()
 
@@ -350,7 +362,7 @@ struct KgChainBody(Copyable, Movable):
                 raise Error(
                     "KgChainBody: negative delta_seq " + String(delta_seqs[i])
                 )
-        self.format_version = KG_DELTA_FORMAT_VERSION
+        self.format_version = KG_CHAIN_FORMAT_VERSION
         self.base_seq = base_seq
         self.delta_seqs = delta_seqs^
 
@@ -393,13 +405,13 @@ struct KgChainBody(Copyable, Movable):
         """
         var who = String("KgChainBody.decode")
         var fmt = get_i64_le(bytes, 0, who)
-        if fmt != KG_DELTA_FORMAT_VERSION:
+        if fmt != KG_CHAIN_FORMAT_VERSION:
             raise Error(
                 who
                 + ": unsupported chain format version "
                 + String(fmt)
                 + " (this build understands "
-                + String(KG_DELTA_FORMAT_VERSION)
+                + String(KG_CHAIN_FORMAT_VERSION)
                 + ")"
             )
         var base_seq = get_i64_le(bytes, 8, who)
@@ -432,12 +444,14 @@ def kg_chunk_is_chain_head(bytes: List[UInt8]) raises -> Bool:
     """Whether a head chunk body is a `KgChainBody` (True) or a base-only
     `KgManifestBody` (False), read from its format version.
 
+    A delta body is not a head chunk: its version (4) is refused.
+
     Raises:
         On a body shorter than eight bytes or a version that is neither.
     """
     var who = String("kg_chunk_is_chain_head")
     var fmt = get_i64_le(bytes, 0, who)
-    if fmt == KG_DELTA_FORMAT_VERSION:
+    if fmt == KG_CHAIN_FORMAT_VERSION:
         return True
     if fmt == KG_SNAPSHOT_FORMAT_VERSION:
         return False
@@ -448,6 +462,6 @@ def kg_chunk_is_chain_head(bytes: List[UInt8]) raises -> Bool:
         + " (expected "
         + String(KG_SNAPSHOT_FORMAT_VERSION)
         + " base or "
-        + String(KG_DELTA_FORMAT_VERSION)
+        + String(KG_CHAIN_FORMAT_VERSION)
         + " chain)"
     )

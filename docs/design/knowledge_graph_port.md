@@ -107,8 +107,9 @@ exact scans, the out-degree count and rank fusion) read parquet bytes and score 
   `KG_SNAPSHOT_FORMAT_VERSION`.
 - `delta_body`, `delta_codec`: `encode_delta_table_object`, `delta_object_is_framed`,
   `delta_object_parquet_bytes`, `decode_framed_delta_to_batch`. `delta_body` also holds the chunk bodies `KgDeltaBody`,
-  `KgChainBody` and `KgNameIndexBody` and `kg_chunk_is_chain_head`; their format version is 3, distinct from the
-  manifest's 2, so the first eight bytes of a head chunk say which it is.
+  `KgChainBody` and `KgNameIndexBody` and `kg_chunk_is_chain_head`; each chunk kind has its own format
+  version (manifest 2, chain 3, delta 4), so the first eight bytes say which kind a body is and no body of one kind
+  decodes as another. A delta whose framed form would exceed the framed decoder's limit is written as Parquet.
 - `source_fingerprint`: `SourceFingerprint`, `SourceFingerprintSet`, `SourceFingerprintStore`,
   `content_hash_of`, `content_hash_of_extraction`, `fnv1a64_hex`. Keyed by partition id and an opaque source
   key.

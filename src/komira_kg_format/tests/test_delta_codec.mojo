@@ -19,6 +19,11 @@
 #   same values   the framed object and the Parquet object of the same rows
 #                 decode to the same values, so a reader that merges deltas does
 #                 not care which framing a delta used.
+#   size limit    framed_object_size equals the length of the framed object it
+#                 predicts (STRING and LARGE_STRING schemas, 0 to 63 rows), and
+#                 framed_size_is_decodable accepts 2^31 - 1 bytes and refuses
+#                 one more: the decoder's limit, past which the encoder writes
+#                 Parquet.
 #   size          a one-row delta is a small fraction of the Parquet file of the
 #                 same row.
 #   tag           delta_object_is_framed reads the tag and refuses an empty body
@@ -53,6 +58,8 @@ from komira_kg_format import (
     delta_object_is_framed,
     delta_object_parquet_bytes,
     encode_delta_table_object,
+    framed_object_size,
+    framed_size_is_decodable,
     pack_embedding_f32,
 )
 from komira_parquet_writer.record_batch_writer import (
@@ -268,6 +275,22 @@ def test_large_string_column_decodes_to_string() raises:
 def test_threshold_is_the_row_count() raises:
     assert_true(delta_object_is_framed(encode_delta_table_object(_batch(FRAMED_MAX_ROWS - 1))))
     assert_false(delta_object_is_framed(encode_delta_table_object(_batch(FRAMED_MAX_ROWS))))
+
+
+def test_framed_object_size_is_the_length_of_the_framed_object() raises:
+    for n in [0, 1, 5, FRAMED_MAX_ROWS - 1]:
+        var batch = _batch(n)
+        var size = framed_object_size(batch)
+        assert_equal(size, len(encode_delta_table_object(_batch(n))))
+        assert_equal(size, len(encode_delta_table_object(_batch(n, ArrowType.LARGE_STRING))))
+
+
+def test_the_framed_size_limit_is_the_decoders_limit() raises:
+    # The decoder refuses a body over 2^31 - 1 bytes, so a framed object may be
+    # at most that long; one byte more must be written as Parquet instead.
+    assert_true(framed_size_is_decodable(2147483647))
+    assert_false(framed_size_is_decodable(2147483648))
+    assert_true(framed_size_is_decodable(0))
 
 
 def test_a_batch_over_the_threshold_is_parquet_and_reads_back() raises:

@@ -235,6 +235,10 @@ struct SourceFingerprintSet(Movable):
         if count > (len(bytes) - off) // 32:
             raise Error(who + ": truncated entry list")
         var result = SourceFingerprintSet()
+        # Keys seen so far: a set, so a hostile count of entries costs linear
+        # time (_index_of scans). The key is length-prefixed so two different
+        # (partition, source) pairs never share one.
+        var seen = Dict[String, Bool]()
         for _ in range(count):
             var partition_id = get_str(bytes, off, who, "partition_id")
             var source = get_str(bytes, off, who, "source")
@@ -242,8 +246,10 @@ struct SourceFingerprintSet(Movable):
             var structural_sig = get_str(bytes, off, who, "structural_sig")
             if len(content_hash.as_bytes()) == 0:
                 raise Error(who + ": empty content_hash for " + source)
-            if result._index_of(partition_id, source) >= 0:
+            var key = String(len(partition_id.as_bytes())) + ":" + partition_id + source
+            if key in seen:
                 raise Error(who + ": source stored twice: " + source)
+            seen[key] = True
             result.entries.append(
                 SourceFingerprint(
                     partition_id^, source^, content_hash^, structural_sig^

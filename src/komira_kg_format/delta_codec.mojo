@@ -127,6 +127,35 @@ def _align_string_schema(mut batch: RecordBatch) raises:
     batch.schema = sb.build()
 
 
+def framed_object_size(batch: RecordBatch) raises -> Int:
+    """The byte length `_encode_framed` gives `batch`: the tag, the header, a
+    type code per column and, per cell, eight bytes plus any string bytes.
+    Computed from the cells without building the blob.
+
+    Raises:
+        If a column is neither INT64 nor a string type.
+    """
+    var size = 1 + 8 * 3
+    var nrows = batch.num_rows()
+    for c in range(batch.num_columns()):
+        var t = batch.column_at(c).arrow_type
+        size += 8 + 8 * nrows
+        if t == ArrowType.INT64:
+            continue
+        if not _is_string_type(t):
+            raise Error("framed_object_size: column is not INT64 or string")
+        var col = batch.column_as_string(c)
+        for r in range(nrows):
+            size += len(col.get_span(r))
+    return size
+
+
+def framed_size_is_decodable(size: Int) -> Bool:
+    """True iff a framed object of `size` bytes is one `decode_framed_delta_to_batch`
+    accepts (it refuses a body over `_MAX_FRAMED_BYTES`)."""
+    return size <= _MAX_FRAMED_BYTES
+
+
 def _encode_framed(batch: RecordBatch) raises -> List[UInt8]:
     var out = List[UInt8]()
     out.append(FRAME_TAG_FRAMED)
@@ -156,7 +185,9 @@ def encode_delta_table_object(var batch: RecordBatch) raises -> List[UInt8]:
 
     A batch of fewer than `FRAMED_MAX_ROWS` rows whose columns are all INT64 or
     string and hold no null becomes a framed blob; anything else becomes a
-    Parquet file (Snappy). Byte 0 of the result is the tag that says which.
+    Parquet file (Snappy); so does a batch whose framed blob would be larger
+    than the framed decoder accepts (its string cells total about 2 GiB).
+    Byte 0 of the result is the tag that says which.
 
     Args:
         batch: The rows, consumed.
@@ -168,7 +199,11 @@ def encode_delta_table_object(var batch: RecordBatch) raises -> List[UInt8]:
     if batch.num_columns() == 0:
         raise Error("encode_delta_table_object: batch has no columns")
     _align_string_schema(batch)
-    if batch.num_rows() < FRAMED_MAX_ROWS and _all_columns_framable(batch):
+    if (
+        batch.num_rows() < FRAMED_MAX_ROWS
+        and _all_columns_framable(batch)
+        and framed_size_is_decodable(framed_object_size(batch))
+    ):
         return _encode_framed(batch)
     var pq = write_record_batch_to_parquet_bytes(batch, CompressionCodec.SNAPPY)
     var out = List[UInt8](capacity=len(pq) + 1)

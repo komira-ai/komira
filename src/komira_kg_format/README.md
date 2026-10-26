@@ -71,10 +71,13 @@ Everything is exported from `komira_kg_format`:
   `KG_QUERY_RESULT_FORMAT_VERSION` (2).
 - Delta layer: `KgDeltaBody`, `KgDeltaTableEntry`, `KgNameIndexBody`,
   `KgNameIndexEntry`, `KgChainBody`, `kg_chunk_is_chain_head` and
-  `KG_DELTA_FORMAT_VERSION` (3, distinct from the manifest's 2 so the first
-  eight bytes of a head chunk tell the two apart).
+  `KG_CHAIN_FORMAT_VERSION` (3) and `KG_DELTA_FORMAT_VERSION` (4); with the
+  manifest's 2 every chunk kind has its own version, so the first eight bytes
+  tell the three apart and no body of one kind decodes as another.
 - Delta objects: `encode_delta_table_object`, `delta_object_is_framed`,
-  `delta_object_parquet_bytes`, `decode_framed_delta_to_batch` and the constants
+  `delta_object_parquet_bytes`, `decode_framed_delta_to_batch`, `framed_object_size`,
+  `framed_size_is_decodable` (a delta whose framed form would exceed what the
+  decoder accepts is written as Parquet) and the constants
   `FRAMED_MAX_ROWS`, `FRAME_TAG_FRAMED`, `FRAME_TAG_PARQUET`,
   `FRAMED_CODEC_VERSION`.
 - Fingerprints: `SourceFingerprint`, `SourceFingerprintSet`,

@@ -66,6 +66,7 @@ from .query_result import (
     ScoreEntry,
 )
 from .delta_body import (
+    KG_CHAIN_FORMAT_VERSION,
     KG_DELTA_FORMAT_VERSION,
     KgChainBody,
     KgDeltaBody,
@@ -83,6 +84,8 @@ from .delta_codec import (
     delta_object_is_framed,
     delta_object_parquet_bytes,
     encode_delta_table_object,
+    framed_object_size,
+    framed_size_is_decodable,
 )
 from .source_fingerprint import (
     KG_FINGERPRINT_FORMAT_VERSION,
