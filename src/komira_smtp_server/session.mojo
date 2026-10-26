@@ -128,11 +128,34 @@ struct SmtpRegistry(Movable):
         return out^
 
     def idle_ids(self, now_ms: Int, idle_ms: Int) -> List[Int]:
-        """The connections that have not been fed for more than `idle_ms`."""
+        """The connections that have not been fed for more than `idle_ms`. A
+        peer that sends a byte now and then is never idle: use `expired_ids`."""
         var out = List[Int]()
         for i in range(self._conns.len()):
             if now_ms - self._conns[i][].last_active_ms > idle_ms:
                 out.append(self._conns[i][].conn_id)
+        return out^
+
+    def expired_ids(self, now_ms: Int, config: SmtpServerConfig) -> List[Int]:
+        """The connections the serving loop should close (a 421 4.4.2 first):
+        no bytes received for `idle_ms`, older than `max_session_ms`, or in
+        the DATA phase for more than `max_data_ms`. The last two hold however
+        often the peer sends, so a peer that trickles one byte at a time is
+        reported too."""
+        var out = List[Int]()
+        for i in range(self._conns.len()):
+            ref c = self._conns[i][]
+            var expired = now_ms - c.last_active_ms > config.limits.idle_ms
+            if config.limits.max_session_ms > 0 and now_ms - c.accepted_ms > config.limits.max_session_ms:
+                expired = True
+            if (
+                config.limits.max_data_ms > 0
+                and c.state == SMTP_STATE_DATA
+                and now_ms - c.data_started_ms > config.limits.max_data_ms
+            ):
+                expired = True
+            if expired:
+                out.append(c.conn_id)
         return out^
 
     # ---- reply queue ----------------------------------------------------------
@@ -149,6 +172,14 @@ struct SmtpRegistry(Movable):
         if idx < 0:
             return List[UInt8]()
         return self._conns[idx][].tx_copy(max_bytes)
+
+    def tx_moved(self, conn_id: Int) -> Int:
+        """Bytes moved to compact the reply queue so far (a test oracle: it
+        stays within the bytes written, so the cost per byte is constant)."""
+        var idx = self._index_of(conn_id)
+        if idx < 0:
+            return 0
+        return self._conns[idx][].tx_moved
 
     def tx_consume(mut self, conn_id: Int, n: Int):
         """`n` bytes from the front of the queue were written."""
@@ -323,6 +354,20 @@ def _frame_cap(conn: SmtpConnection, config: SmtpServerConfig) -> Int:
     return config.limits.max_line
 
 
+def _tx_overflow(
+    mut conn: SmtpConnection, config: SmtpServerConfig, mut out: FeedOutcome
+) -> Bool:
+    """The peer is not reading: past `max_tx_bytes` of queued replies, queue
+    one 421 and close. True when it closed."""
+    if conn.tx_pending() <= config.limits.max_tx_bytes:
+        return False
+    conn.enqueue(String("421 4.7.0 Too many unread replies, closing\r\n"))
+    conn.mark_closing()
+    conn.clear_rx()
+    out.closing = True
+    return True
+
+
 def _drain[
     V: MailAuthVerifier,
     D: MailDelivery,
@@ -366,6 +411,17 @@ def _drain[
             conn.auth_stage = AUTH_NONE
             conn.auth_user_b64 = String("")
             conn.consume_bare()
+            # The reply costs more than the bytes that earned it, so it counts
+            # against the same caps as any command line.
+            conn.commands_in_txn += 1
+            if conn.commands_in_txn > config.limits.max_commands:
+                conn.enqueue(String("421 4.7.0 Too many commands, closing\r\n"))
+                conn.mark_closing()
+                conn.clear_rx()
+                out.closing = True
+                return
+            if _tx_overflow(conn, config, out):
+                return
             continue
         # FRAME_LINE
         out.lines += 1
@@ -389,9 +445,5 @@ def _drain[
         if result.action == SMTP_ACTION_START_TLS:
             out.starttls = True
             return
-        if conn.tx_pending() > config.limits.max_tx_bytes:
-            conn.enqueue(String("421 4.7.0 Too many unread replies, closing\r\n"))
-            conn.mark_closing()
-            conn.clear_rx()
-            out.closing = True
+        if _tx_overflow(conn, config, out):
             return

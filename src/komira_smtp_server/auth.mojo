@@ -32,6 +32,18 @@ def _upper(c: UInt8) -> UInt8:
     return c
 
 
+def _word_is(line: Span[UInt8, _], start: Int, end: Int, word: String) -> Bool:
+    """`line[start:end]` equals the upper-case ASCII `word`, ignoring case. The
+    client's bytes are compared as bytes and never made into a String."""
+    var w = word.as_bytes()
+    if end - start != len(w):
+        return False
+    for i in range(len(w)):
+        if _upper(line[start + i]) != w[i]:
+            return False
+    return True
+
+
 def text_of_printable(line: Span[UInt8, _], start: Int, end: Int) -> Optional[String]:
     """The bytes `line[start:end]` as a String when every byte is printable
     ASCII without a space, else None (a base64 value, an EHLO name)."""
@@ -76,6 +88,16 @@ def _check[
             String("501 5.5.2 Invalid authentication payload\r\n"),
         )
     var c = credentials.take()
+    # The name ends up in a delivery's trace header and in logs: a control
+    # character (CR, LF, NUL, DEL) in it is refused before the verifier runs.
+    var name = c.authcid.as_bytes()
+    for i in range(len(name)):
+        if name[i] < 0x20 or name[i] == 0x7F:
+            return _failure(
+                conn,
+                config,
+                String("535 5.7.8 Authentication credentials invalid\r\n"),
+            )
     if verifier.verify(c.authcid, c.password):
         conn.authed_user = c.authcid.copy()
         return CommandResult(String("235 2.7.0 Authentication successful\r\n"))
@@ -125,10 +147,6 @@ def handle_auth_command[
     var ir_end = n
     if mech_end == mech_start:
         return CommandResult(String("501 5.5.4 Syntax error: AUTH needs a mechanism\r\n"))
-    var mech = List[UInt8]()
-    for k in range(mech_start, mech_end):
-        mech.append(_upper(line[k]))
-    var mech_text = String(unsafe_from_utf8=Span(mech))
     var has_ir = ir_end > ir_start
     var ir = Optional[String]()
     if has_ir:
@@ -139,12 +157,12 @@ def handle_auth_command[
                 config,
                 String("501 5.5.2 Invalid authentication payload\r\n"),
             )
-    if mech_text == "PLAIN":
+    if _word_is(line, mech_start, mech_end, "PLAIN"):
         if has_ir and ir.value() != "=":
             return _check(conn, config, verifier, decode_sasl_plain(ir.value()))
         conn.auth_stage = AUTH_PLAIN
         return CommandResult(String("334 \r\n"))
-    if mech_text == "LOGIN":
+    if _word_is(line, mech_start, mech_end, "LOGIN"):
         conn.auth_stage = AUTH_LOGIN_USER
         if has_ir and ir.value() != "=":
             return continue_auth(conn, ir.value(), config, verifier)

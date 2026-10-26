@@ -14,7 +14,12 @@
 # - addresses go through komira_mail_address: a bad one is 501, the domain
 #   reaches the delivery in lower case, a quoted local part keeps its quotes;
 # - out-of-sequence commands, an empty line, an unknown verb, RSET, NOOP, QUIT,
-#   and the cap on commands in one transaction.
+#   and the cap on commands in one transaction;
+# - `RCPT TO:<postmaster>` without a domain is accepted (RFC 5321 section
+#   4.5.1) in any case and reaches the delivery as `postmaster`, while another
+#   name without a domain is still 501;
+# - what MAIL declared reaches the delivery: the null sender `<>` as the empty
+#   string, SIZE and BODY=8BITMIME, and a refused MAIL leaves nothing declared.
 
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -343,6 +348,55 @@ def test_commands_in_one_transaction_are_capped() raises:
     assert_false(t.outcome.closing)
 
 
+def test_postmaster_needs_no_domain() raises:
+    var s = _ready()
+    _ = s.send(String("MAIL FROM:<a@x.test>\r\n"))
+    assert_equal(s.send(String("RCPT TO:<postmaster>\r\n")), "250 2.1.5 Ok\r\n")
+    assert_equal(s.send(String("RCPT TO:<PostMaster>\r\n")), "250 2.1.5 Ok\r\n")
+    assert_equal(s.delivery.rcpt_addresses[0], "postmaster")
+    assert_equal(s.delivery.rcpt_addresses[1], "postmaster")
+    assert_equal(s.reg.recipient_count(s.conn_id), 2)
+    # Other names without a domain, and near misses, are still refused.
+    assert_true(s.send(String("RCPT TO:<postmasters>\r\n")).startswith("501 5.1.3"))
+    assert_true(s.send(String("RCPT TO:<postmaste>\r\n")).startswith("501 5.1.3"))
+    assert_true(s.send(String("RCPT TO:<root>\r\n")).startswith("501 5.1.3"))
+    assert_true(s.send(String("RCPT TO:<>\r\n")).startswith("501 5.1.3"))
+    # With a domain it is the ordinary address.
+    assert_equal(s.send(String("RCPT TO:<Postmaster@Y.test>\r\n")), "250 2.1.5 Ok\r\n")
+    assert_equal(s.delivery.rcpt_addresses[2], "Postmaster@y.test")
+    # RCPT parameters are still refused after it.
+    assert_true(s.send(String("RCPT TO:<postmaster> X=1\r\n")).startswith("555"))
+    assert_equal(len(s.delivery.rcpt_addresses), 3)
+
+
+def test_the_envelope_reaches_the_delivery() raises:
+    var s = _ready()
+    # The null sender is the empty string, and no SIZE or BODY is -1 / False.
+    _ = s.send(String("MAIL FROM:<>\r\nRCPT TO:<b@y.test>\r\nDATA\r\nx\r\n.\r\n"))
+    assert_equal(s.delivery.rcpt_mail_from[0], "")
+    assert_equal(s.delivery.message_from[0], "")
+    assert_equal(s.delivery.rcpt_sizes[0], -1)
+    assert_equal(s.delivery.message_sizes[0], -1)
+    assert_false(s.delivery.message_8bit[0])
+    # SIZE and BODY are passed on.
+    _ = s.send(
+        String("MAIL FROM:<a@x.test> SIZE=1234 BODY=8BITMIME\r\nRCPT TO:<b@y.test>\r\n")
+        + "DATA\r\nx\r\n.\r\n"
+    )
+    assert_equal(s.delivery.rcpt_sizes[1], 1234)
+    assert_equal(s.delivery.message_sizes[1], 1234)
+    assert_true(s.delivery.message_8bit[1])
+    # The next message starts clean, and so does one after a refused MAIL.
+    _ = s.send(String("MAIL FROM:<a@x.test> BODY=7BIT\r\nRCPT TO:<b@y.test>\r\nDATA\r\nx\r\n.\r\n"))
+    assert_equal(s.delivery.message_sizes[2], -1)
+    assert_false(s.delivery.message_8bit[2])
+    _ = s.send(String("MAIL FROM:<a@x.test> SIZE=77 BODY=8BITMIME\r\n"))
+    _ = s.send(String("RSET\r\nMAIL FROM:<a@x.test> SIZE=99999999999 BODY=8BITMIME\r\n"))
+    _ = s.send(String("MAIL FROM:<a@x.test>\r\nRCPT TO:<b@y.test>\r\nDATA\r\nx\r\n.\r\n"))
+    assert_equal(s.delivery.message_sizes[3], -1)
+    assert_false(s.delivery.message_8bit[3])
+
+
 def main() raises:
     test_ehlo_in_a_transaction_resets_it()
     test_ehlo_needs_one_name()
@@ -350,6 +404,8 @@ def main() raises:
     test_starttls_is_an_exact_word()
     test_vrfy_expn_help_are_502()
     test_ehlo_advertises_what_is_supported()
+    test_postmaster_needs_no_domain()
+    test_the_envelope_reaches_the_delivery()
     test_mail_parameters()
     test_recipient_cap_is_452()
     test_addresses_are_parsed()

@@ -29,6 +29,10 @@ struct RecordingDelivery(MailDelivery):
     var rcpt_users: List[String]
     var rcpt_tls: List[Bool]
     var rcpt_submission: List[Bool]
+    var rcpt_peers: List[String]
+    var rcpt_helos: List[String]
+    var rcpt_conn_ids: List[Int]
+    var rcpt_sizes: List[Int]
     var rule_address: List[String]
     var rule_code: List[Int]
     var rule_text: List[String]
@@ -42,6 +46,10 @@ struct RecordingDelivery(MailDelivery):
     var message_tls: List[Bool]
     var message_peers: List[String]
     var message_helos: List[String]
+    var message_submission: List[Bool]
+    var message_conn_ids: List[Int]
+    var message_sizes: List[Int]
+    var message_8bit: List[Bool]
     var message_now: List[Int]
 
     def __init__(out self):
@@ -51,6 +59,10 @@ struct RecordingDelivery(MailDelivery):
         self.rcpt_users = List[String]()
         self.rcpt_tls = List[Bool]()
         self.rcpt_submission = List[Bool]()
+        self.rcpt_peers = List[String]()
+        self.rcpt_helos = List[String]()
+        self.rcpt_conn_ids = List[Int]()
+        self.rcpt_sizes = List[Int]()
         self.rule_address = List[String]()
         self.rule_code = List[Int]()
         self.rule_text = List[String]()
@@ -64,6 +76,10 @@ struct RecordingDelivery(MailDelivery):
         self.message_tls = List[Bool]()
         self.message_peers = List[String]()
         self.message_helos = List[String]()
+        self.message_submission = List[Bool]()
+        self.message_conn_ids = List[Int]()
+        self.message_sizes = List[Int]()
+        self.message_8bit = List[Bool]()
         self.message_now = List[Int]()
 
     def refuse_rcpt(mut self, address: String, code: Int, text: String):
@@ -80,6 +96,10 @@ struct RecordingDelivery(MailDelivery):
         self.rcpt_users.append(session.authed_user)
         self.rcpt_tls.append(session.peer_tls)
         self.rcpt_submission.append(session.submission)
+        self.rcpt_peers.append(session.peer)
+        self.rcpt_helos.append(session.helo)
+        self.rcpt_conn_ids.append(session.conn_id)
+        self.rcpt_sizes.append(session.declared_size)
         for i in range(len(self.rule_address)):
             if self.rule_address[i] == rcpt:
                 return RcptDecision(self.rule_code[i], self.rule_text[i])
@@ -104,6 +124,10 @@ struct RecordingDelivery(MailDelivery):
         self.message_tls.append(session.peer_tls)
         self.message_peers.append(session.peer)
         self.message_helos.append(session.helo)
+        self.message_submission.append(session.submission)
+        self.message_conn_ids.append(session.conn_id)
+        self.message_sizes.append(session.declared_size)
+        self.message_8bit.append(session.body_8bit)
         self.message_now.append(now_ms)
         return DeliveryResult(self.result_code, self.result_text)
 

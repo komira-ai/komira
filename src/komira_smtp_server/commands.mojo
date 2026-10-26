@@ -191,11 +191,16 @@ def _parse_size(line: Span[UInt8, _], start: Int, end: Int) -> Int:
 
 
 def _mail_params(
-    line: Span[UInt8, _], start: Int, config: SmtpServerConfig
+    line: Span[UInt8, _],
+    start: Int,
+    config: SmtpServerConfig,
+    mut declared_size: Int,
+    mut body_8bit: Bool,
 ) -> Optional[String]:
-    """Check the parameters of MAIL FROM. None: all fine. Else the reply.
-    SIZE=n above the cap is 552 before any DATA; BODY=7BIT or 8BITMIME is
-    accepted; anything else is 555."""
+    """Check the parameters of MAIL FROM. None: all fine, and `declared_size`
+    and `body_8bit` hold what was declared. Else the reply. SIZE=n above the
+    cap is 552 before any DATA; BODY=7BIT or 8BITMIME is accepted; anything
+    else is 555."""
     var n = len(line)
     var i = start
     var seen_size = False
@@ -220,6 +225,7 @@ def _mail_params(
                 return Optional[String](
                     String("552 5.3.4 Message size exceeds fixed maximum\r\n")
                 )
+            declared_size = v
         elif _eq_ci(line, i, eq, "BODY") and eq < end:
             if seen_body:
                 return Optional[String](
@@ -233,6 +239,7 @@ def _mail_params(
                 return Optional[String](
                     String("555 5.5.4 BODY value not recognized\r\n")
                 )
+            body_8bit = _eq_ci(line, eq + 1, end, "8BITMIME")
         else:
             return Optional[String](
                 String("555 5.5.4 MAIL FROM parameter not recognized\r\n")
@@ -319,10 +326,14 @@ def _handle_mail(
             from_text = parsed.value().format()
     except:
         return CommandResult(String("501 5.1.7 Bad sender address syntax\r\n"))
-    var refusal = _mail_params(line, arg.params_start, config)
+    var declared = -1
+    var eight_bit = False
+    var refusal = _mail_params(line, arg.params_start, config, declared, eight_bit)
     if refusal:
         return CommandResult(refusal.take())
     conn.mail_from = from_text^
+    conn.declared_size = declared
+    conn.body_8bit = eight_bit
     conn.recipients = List[String]()
     conn.state = SMTP_STATE_MAIL
     return CommandResult(String("250 2.1.0 Ok\r\n"))
@@ -345,10 +356,18 @@ def _handle_rcpt[
     if not arg.ok:
         return _syntax(String("expected RCPT TO:<address>"))
     var rcpt: String
-    try:
-        rcpt = parse_path(Span(line)[arg.path_start : arg.path_end]).format()
-    except:
-        return CommandResult(String("501 5.1.3 Bad recipient address syntax\r\n"))
+    var path = Span(line)[arg.path_start : arg.path_end]
+    if _eq_ci(path, 1, len(path) - 1, "POSTMASTER") and path[0] == _LT:
+        # RFC 5321 section 4.5.1: the reserved mailbox is accepted without a
+        # domain (it names the postmaster of this server's domain).
+        rcpt = String("postmaster")
+    else:
+        try:
+            rcpt = parse_path(path).format()
+        except:
+            return CommandResult(
+                String("501 5.1.3 Bad recipient address syntax\r\n")
+            )
     if arg.params_start < len(line):
         return CommandResult(
             String("555 5.5.4 RCPT TO parameter not recognized\r\n")
@@ -416,6 +435,7 @@ def handle_command_line[
                 String("503 5.5.1 Bad sequence of commands (need RCPT first)\r\n")
             )
         conn.state = SMTP_STATE_DATA
+        conn.data_started_ms = now_ms
         return CommandResult(
             String("354 End data with <CR><LF>.<CR><LF>\r\n"),
             SMTP_ACTION_ENTER_DATA,

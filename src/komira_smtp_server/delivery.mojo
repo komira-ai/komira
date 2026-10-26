@@ -6,16 +6,25 @@ comptime _MAX_TEXT_BYTES: Int = 200
 struct SessionInfo(Copyable, Movable):
     """What a delivery may know about the connection a command came from.
 
-    `authed_user` is the username of a verified AUTH, else empty; STARTTLS
-    clears it. `peer` is the text the serving loop gave `SmtpRegistry.accept`
-    (an address, for a trace header) and `helo` the name the client gave in
-    EHLO or HELO (the client's claim, unverified)."""
+    `conn_id` names the connection for the life of the registry (a delivery
+    that keeps per-connection state, such as a recipient-failure count, keys it
+    on this). `authed_user` is the username of a verified AUTH, else empty;
+    STARTTLS clears it. It holds no control character, but it is still a
+    client-chosen name: quote it when it goes into a header or a log line.
+    `peer` is the text the serving loop gave `SmtpRegistry.accept` (an address,
+    for a trace header) and `helo` the name the client gave in EHLO or HELO
+    (the client's claim, unverified). `declared_size` is the `SIZE=` of the
+    MAIL line (-1 when none was given; the client's claim, already within the
+    server's cap) and `body_8bit` is True after `BODY=8BITMIME`."""
 
     var peer_tls: Bool
     var authed_user: String
     var submission: Bool
     var peer: String
     var helo: String
+    var conn_id: Int
+    var declared_size: Int
+    var body_8bit: Bool
 
     def __init__(
         out self,
@@ -24,19 +33,27 @@ struct SessionInfo(Copyable, Movable):
         submission: Bool = False,
         peer: String = "",
         helo: String = "",
+        conn_id: Int = 0,
+        declared_size: Int = -1,
+        body_8bit: Bool = False,
     ):
         self.peer_tls = peer_tls
         self.authed_user = authed_user
         self.submission = submission
         self.peer = peer
         self.helo = helo
+        self.conn_id = conn_id
+        self.declared_size = declared_size
+        self.body_8bit = body_8bit
 
 
 struct RcptDecision(Copyable, Movable):
     """The answer to one RCPT. `code` 0 (or 250) accepts the recipient. Any
     other code must be 400 to 599 (450, 550, 530 ...) and is the reply code
     with `text` as its text (an empty text gets a default). A code outside
-    those ranges is answered 451."""
+    those ranges is answered 451. A text normally starts with an enhanced
+    status code (`5.1.1 No such user`); the defaults used for an empty text
+    do, and a text that does not is sent as given."""
 
     var code: Int
     var text: String
@@ -50,7 +67,9 @@ struct DeliveryResult(Copyable, Movable):
     """The answer to one finished DATA. Code 250 means the message is durable;
     `text` is then the queue id echoed to the client. 451 (try later), 554
     (refused) and 552 (too big) are the others; any other code is answered
-    451, so an odd value never reads as success."""
+    451, so an odd value never reads as success. As for `RcptDecision`, a
+    text for a refusal normally starts with an enhanced status code (`4.3.0
+    ...`); the fallbacks do, and a text without one is sent as given."""
 
     var code: Int
     var text: String
@@ -69,7 +88,16 @@ trait MailDelivery(Movable):
     returns 451, so one storage failure cannot take down the connections that
     share the serving loop. It is all-or-nothing for one DATA: a transient
     failure for any recipient is 451 for the whole message. `message` is the
-    dot-unstuffed message, every line ending in CRLF, borrowed for the call."""
+    dot-unstuffed message, every line ending in CRLF, borrowed for the call.
+
+    Addresses: `mail_from` is the envelope sender as parsed; the empty string
+    is the null reverse-path (`MAIL FROM:<>`, a bounce), which no real sender
+    can be. `rcpt` is the parsed recipient; the bare word `postmaster` (RFC
+    5321 section 4.5.1, no domain) is passed as `postmaster` and means the
+    postmaster of whatever domain this server is for. `accept_recipient` is
+    only a check made at RCPT time: `deliver` gets the recipient list again
+    and must resolve and authorise every recipient itself, because what held at
+    RCPT time may not hold at DATA time."""
 
     def accept_recipient(
         mut self, session: SessionInfo, mail_from: String, rcpt: String

@@ -14,7 +14,14 @@
 # - a thousand connections added and dropped, with buffered bytes, leave the
 #   survivors' data intact and are dropped exactly once (the heap buffers of a
 #   connection in the table);
-# - the connection limit, the idle list and the reply-queue cap.
+# - bare LF and CR lines pay for their reply: a stream of them is cut off by
+#   the reply-queue cap and the command cap like any other command (a cheap
+#   input that earns a larger reply, with no limit on the queue);
+# - the reply queue of a slow reader is compacted at a cost proportional to
+#   the bytes written (a compaction on every small write);
+# - the connection limit, the idle list, the session and DATA deadlines (a peer
+#   that sends one byte at a time is never idle, but it is reported) and the
+#   reply-queue cap.
 
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -283,6 +290,115 @@ def test_unread_replies_are_capped() raises:
     assert_true(r.byte_length() < 50 * 14)
 
 
+def test_bare_lines_are_capped_by_the_reply_queue() raises:
+    var limits = SmtpLimits()
+    limits.max_tx_bytes = 100
+    var s = SmtpTestSession(SmtpServerConfig(String("mx.test"), limits=limits))
+    var script = String("")
+    for _ in range(50):
+        script += "\n\r\n"
+    assert_equal(script.byte_length(), 150)
+    var r = s.send(script)
+    assert_true(r.endswith("421 4.7.0 Too many unread replies, closing\r\n"))
+    assert_true(s.outcome.closing)
+    assert_true(r.byte_length() < 10 * 38)
+    # A peer that never reads: the queue stays bounded across many feeds.
+    var t = SmtpTestSession(SmtpServerConfig(String("mx.test"), limits=limits))
+    for _ in range(200):
+        _ = t.reg.feed(
+            t.conn_id, script.as_bytes(), t.config, t.verifier, t.delivery, 1000
+        )
+    assert_true(t.reg.is_closing(t.conn_id))
+    assert_true(t.reg.tx_len(t.conn_id) < 100 + 38 + 60)
+
+
+def test_bare_lines_count_as_commands() raises:
+    var limits = SmtpLimits()
+    limits.max_commands = 5
+    var s = SmtpTestSession(SmtpServerConfig(String("mx.test"), limits=limits))
+    var script = String("")
+    for _ in range(10):
+        script += "\n\r\n"
+    var r = s.send(script)
+    assert_true(r.endswith("421 4.7.0 Too many commands, closing\r\n"))
+    assert_true(s.outcome.closing)
+    var bare = String("500 5.5.2 Bare CR or LF is not allowed\r\n")
+    # The sixth line is the one over the cap: its own 500, then the 421.
+    assert_equal(r.find("421"), 6 * bare.byte_length())
+
+
+def test_reply_queue_compaction_cost_is_linear() raises:
+    var limits = SmtpLimits()
+    limits.max_commands = 10000000
+    limits.max_tx_bytes = 100000000
+    var s = SmtpTestSession(SmtpServerConfig(String("mx.test"), limits=limits))
+    var script = String("")
+    for _ in range(20000):
+        script += "NOOP\r\n"
+    _ = s.reg.feed(
+        s.conn_id, script.as_bytes(), s.config, s.verifier, s.delivery, 1000
+    )
+    var queued = s.reg.tx_len(s.conn_id)
+    assert_equal(queued, 20000 * 14)
+    # A writer takes 3000 bytes at a time from the long queue.
+    var written = 0
+    while s.reg.tx_len(s.conn_id) > 0:
+        var part = s.reg.tx_copy(s.conn_id, 3000)
+        written += len(part)
+        s.reg.tx_consume(s.conn_id, len(part))
+    assert_equal(written, queued)
+    assert_true(s.reg.tx_moved(s.conn_id) <= queued)
+
+
+def test_session_and_data_deadlines() raises:
+    var limits = SmtpLimits()
+    limits.idle_ms = 500
+    limits.max_session_ms = 3000
+    limits.max_data_ms = 1000
+    var config = SmtpServerConfig(String("mx.test"), limits=limits)
+    # One byte every 100 ms: never idle, but the session runs out.
+    var s = SmtpTestSession(config.copy())
+    var t = 1000
+    for _ in range(30):
+        t += 100
+        s.now_ms = t
+        _ = s.send(String("N"))
+        assert_equal(len(s.reg.idle_ids(t, 500)), 0)
+    assert_equal(t, 4000)
+    assert_equal(len(s.reg.expired_ids(4000, config)), 0)
+    assert_equal(len(s.reg.expired_ids(4001, config)), 1)
+    assert_equal(s.reg.expired_ids(4001, config)[0], s.conn_id)
+    # A quiet connection is expired by the idle time alone.
+    var q = SmtpTestSession(config.copy())
+    assert_equal(len(q.reg.expired_ids(1500, config)), 0)
+    assert_equal(len(q.reg.expired_ids(1501, config)), 1)
+    # In DATA a slow trickle is cut at max_data_ms, not before.
+    var d = SmtpTestSession(config.copy())
+    d.now_ms = 1100
+    _ = d.send(
+        String("EHLO c.test\r\nMAIL FROM:<a@x.test>\r\nRCPT TO:<b@y.test>\r\nDATA\r\n")
+    )
+    for k in range(1, 10):
+        d.now_ms = 1100 + k * 100
+        _ = d.send(String("x"))
+        assert_equal(len(d.reg.expired_ids(d.now_ms, config)), 0)
+    assert_equal(len(d.reg.expired_ids(2101, config)), 1)
+    # The time in DATA starts at DATA, not at the connection.
+    var late = SmtpTestSession(config.copy())
+    late.now_ms = 2500
+    _ = late.send(
+        String("EHLO c.test\r\nMAIL FROM:<a@x.test>\r\nRCPT TO:<b@y.test>\r\nDATA\r\n")
+    )
+    assert_equal(len(late.reg.expired_ids(2900, config)), 0)
+    # A limit of 0 turns the deadline off.
+    var off = limits.copy()
+    off.max_session_ms = 0
+    off.max_data_ms = 0
+    off.idle_ms = 100000000
+    var off_cfg = SmtpServerConfig(String("mx.test"), limits=off)
+    assert_equal(len(s.reg.expired_ids(99999999, off_cfg)), 0)
+
+
 def main() raises:
     test_greeting()
     test_command_line_cap_is_512_with_crlf()
@@ -297,4 +413,8 @@ def main() raises:
     test_connection_limit()
     test_idle_connections()
     test_unread_replies_are_capped()
+    test_bare_lines_are_capped_by_the_reply_queue()
+    test_bare_lines_count_as_commands()
+    test_reply_queue_compaction_cost_is_linear()
+    test_session_and_data_deadlines()
     print("test_framing: OK")

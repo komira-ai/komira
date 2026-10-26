@@ -39,6 +39,8 @@ struct SmtpConnection(Movable):
     var state: UInt8
     var closing: Bool
     var last_active_ms: Int
+    var accepted_ms: Int
+    var data_started_ms: Int
     var peer: String
     var helo: String
     # Receive side.
@@ -53,8 +55,11 @@ struct SmtpConnection(Movable):
     # Reply side.
     var tx: List[UInt8]
     var tx_off: Int
+    var tx_moved: Int
     # The transaction.
     var mail_from: String
+    var declared_size: Int
+    var body_8bit: Bool
     var recipients: List[String]
     var data: List[UInt8]
     var data_overflow: Bool
@@ -74,6 +79,8 @@ struct SmtpConnection(Movable):
         self.state = SMTP_STATE_GREETED
         self.closing = False
         self.last_active_ms = now_ms
+        self.accepted_ms = now_ms
+        self.data_started_ms = now_ms
         self.peer = peer
         self.helo = String("")
         self.rx = List[UInt8]()
@@ -86,7 +93,10 @@ struct SmtpConnection(Movable):
         self.skip_after_cr = False
         self.tx = List[UInt8]()
         self.tx_off = 0
+        self.tx_moved = 0
         self.mail_from = String("")
+        self.declared_size = -1
+        self.body_8bit = False
         self.recipients = List[String]()
         self.data = List[UInt8]()
         self.data_overflow = False
@@ -128,12 +138,16 @@ struct SmtpConnection(Movable):
         if self.tx_off >= len(self.tx):
             self.tx.clear()
             self.tx_off = 0
-        elif self.tx_off >= _COMPACT_AT:
+        elif self.tx_off >= _COMPACT_AT and self.tx_off * 2 >= len(self.tx):
+            # Compact only once the written part is at least half the queue,
+            # so the bytes moved never exceed the bytes written (a writer that
+            # takes a few KB at a time from a long queue costs O(1) per byte).
             var keep = len(self.tx) - self.tx_off
             for i in range(keep):
                 self.tx[i] = self.tx[self.tx_off + i]
             self.tx.resize(keep, UInt8(0))
             self.tx_off = 0
+            self.tx_moved += keep
 
     # ---- receive framing --------------------------------------------------
 
@@ -261,6 +275,8 @@ struct SmtpConnection(Movable):
         """Forget the envelope and the message; a connection that is not
         closing goes back to waiting for MAIL."""
         self.mail_from = String("")
+        self.declared_size = -1
+        self.body_8bit = False
         self.recipients = List[String]()
         self.data = List[UInt8]()
         self.data_overflow = False

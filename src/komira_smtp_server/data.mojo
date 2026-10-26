@@ -16,6 +16,9 @@ def session_info(conn: SmtpConnection, config: SmtpServerConfig) -> SessionInfo:
         config.submission,
         conn.peer,
         conn.helo,
+        conn.conn_id,
+        conn.declared_size,
+        conn.body_8bit,
     )
 
 

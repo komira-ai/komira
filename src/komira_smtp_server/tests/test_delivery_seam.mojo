@@ -11,14 +11,27 @@
 #   through with none of the first one's recipients or text;
 # - a refused recipient does not stop the transaction for the others, and a
 #   transaction with only refused recipients cannot DATA;
-# - `deliver` is not called for a message that was too big, or cut by a bare LF.
+# - `deliver` is not called for a message that was too big, or cut by a bare LF;
+# - a closed relay is the delivery's decision and works end to end: a delivery
+#   that only takes local recipients from the world and any recipient from an
+#   authenticated submission session sees, in `accept_recipient`, the listener,
+#   the verified user and TLS state of the connection, and its 554 reaches the
+#   wire (a core that dropped the session fields, or ignored a refusal, opens
+#   the relay).
 
 from std.testing import assert_equal, assert_false, assert_true
 
+from komira_encoding import base64_encode
+from komira_mail_auth import TestAuthVerifier
 from komira_smtp_server import (
+    DeliveryResult,
+    MailDelivery,
+    RcptDecision,
     SMTP_STATE_MAIL,
     SMTP_STATE_RCPT,
     SMTP_STATE_READY,
+    SessionInfo,
+    SmtpRegistry,
     SmtpServerConfig,
     SmtpTestSession,
 )
@@ -257,6 +270,115 @@ def test_deliver_is_not_called_without_a_complete_message() raises:
     assert_equal(t.delivery.delivery_count, 0)
 
 
+struct RelayCheckingDelivery(MailDelivery):
+    """A closed relay: `@local.test` from anyone, anything from an
+    authenticated submission session, else 554 5.7.1."""
+
+    var seen_submission: List[Bool]
+    var seen_user: List[String]
+    var seen_tls: List[Bool]
+    var delivered: Int
+
+    def __init__(out self):
+        self.seen_submission = List[Bool]()
+        self.seen_user = List[String]()
+        self.seen_tls = List[Bool]()
+        self.delivered = 0
+
+    def accept_recipient(
+        mut self, session: SessionInfo, mail_from: String, rcpt: String
+    ) -> RcptDecision:
+        self.seen_submission.append(session.submission)
+        self.seen_user.append(session.authed_user)
+        self.seen_tls.append(session.peer_tls)
+        if rcpt.endswith("@local.test"):
+            return RcptDecision(0, String(""))
+        if session.submission and session.authed_user.byte_length() > 0:
+            return RcptDecision(0, String(""))
+        return RcptDecision(554, String("5.7.1 Relay access denied"))
+
+    def deliver(
+        mut self,
+        session: SessionInfo,
+        mail_from: String,
+        recipients: List[String],
+        message: Span[UInt8, _],
+        now_ms: Int,
+    ) -> DeliveryResult:
+        self.delivered += 1
+        return DeliveryResult(250, String(""))
+
+
+def _run(
+    mut reg: SmtpRegistry,
+    id: Int,
+    config: SmtpServerConfig,
+    verifier: TestAuthVerifier,
+    mut delivery: RelayCheckingDelivery,
+    text: String,
+) -> String:
+    _ = reg.feed(id, text.as_bytes(), config, verifier, delivery, 1000)
+    var all = String("")
+    while reg.tx_len(id) > 0:
+        var part = reg.tx_copy(id, 4096)
+        all += String(unsafe_from_utf8=Span(part))
+        reg.tx_consume(id, len(part))
+    return all^
+
+
+def test_closed_relay_end_to_end() raises:
+    var verifier = TestAuthVerifier()
+    verifier.add_user(String("alice"), String("s3cret"))
+    # Port 25: no AUTH, no submission.
+    var port25 = SmtpServerConfig(String("mx.test"))
+    var reg = SmtpRegistry()
+    var delivery = RelayCheckingDelivery()
+    var id = reg.accept(Int32(5), port25, 1000).value()
+    _ = _run(reg, id, port25, verifier, delivery, String("EHLO c.test\r\nMAIL FROM:<a@x.test>\r\n"))
+    assert_equal(
+        _run(reg, id, port25, verifier, delivery, String("RCPT TO:<u@local.test>\r\n")),
+        "250 2.1.5 Ok\r\n",
+    )
+    assert_equal(
+        _run(reg, id, port25, verifier, delivery, String("RCPT TO:<v@elsewhere.test>\r\n")),
+        "554 5.7.1 Relay access denied\r\n",
+    )
+    assert_equal(len(delivery.seen_submission), 2)
+    assert_false(delivery.seen_submission[1])
+    assert_equal(delivery.seen_user[1], "")
+    assert_false(delivery.seen_tls[1])
+    # The refused recipient is not in the transaction: the one local one is.
+    assert_equal(reg.recipient_count(id), 1)
+    # A transaction with only a refused relay recipient cannot send DATA.
+    var id2 = reg.accept(Int32(6), port25, 1000).value()
+    _ = _run(reg, id2, port25, verifier, delivery, String("EHLO c.test\r\nMAIL FROM:<a@x.test>\r\nRCPT TO:<v@elsewhere.test>\r\n"))
+    assert_true(
+        _run(reg, id2, port25, verifier, delivery, String("DATA\r\n")).startswith("503")
+    )
+    assert_equal(delivery.delivered, 0)
+    # Submission listener: the same recipient is fine once authenticated.
+    var sub = SmtpServerConfig(String("mx.test"), submission=True)
+    var id3 = reg.accept(Int32(7), sub, 1000).value()
+    reg.mark_tls_active(id3)
+    var plain = base64_encode(String("\0alice\0s3cret").as_bytes())
+    _ = _run(reg, id3, sub, verifier, delivery, String("EHLO c.test\r\nAUTH PLAIN ") + plain + "\r\nMAIL FROM:<alice@x.test>\r\n")
+    var before = len(delivery.seen_user)
+    assert_equal(
+        _run(reg, id3, sub, verifier, delivery, String("RCPT TO:<v@elsewhere.test>\r\n")),
+        "250 2.1.5 Ok\r\n",
+    )
+    assert_true(delivery.seen_submission[before])
+    assert_equal(delivery.seen_user[before], "alice")
+    assert_true(delivery.seen_tls[before])
+    # STARTTLS-style reset: the user is gone with the TLS state, and the relay
+    # is closed again.
+    reg.mark_tls_active(id3)
+    _ = _run(reg, id3, sub, verifier, delivery, String("EHLO c.test\r\n"))
+    assert_true(
+        _run(reg, id3, sub, verifier, delivery, String("MAIL FROM:<a@x.test>\r\n")).startswith("530")
+    )
+
+
 def main() raises:
     test_one_accept_per_rcpt_and_one_deliver_per_data()
     test_every_rcpt_code_reaches_the_reply()
@@ -265,4 +387,5 @@ def main() raises:
     test_delivery_text_cannot_add_a_reply_line()
     test_a_451_leaves_a_clean_transaction()
     test_deliver_is_not_called_without_a_complete_message()
+    test_closed_relay_end_to_end()
     print("test_delivery_seam: OK")

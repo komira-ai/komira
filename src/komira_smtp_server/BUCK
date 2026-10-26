@@ -7,7 +7,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #
 # The welded tests (each file's header says which defects it catches):
 # - test_framing: the line caps with a bounded buffer, strict CRLF, split and
-#   pipelined input, the registry's connection lifetime.
+#   pipelined input, the registry's connection lifetime and deadlines, the
+#   reply-queue caps.
 # - test_commands: one case per command rule (EHLO reset, FROM:/TO: keywords,
 #   exact STARTTLS, VRFY/HELP, advertised capabilities, MAIL parameters, the
 #   recipient cap, address syntax).

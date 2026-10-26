@@ -13,6 +13,13 @@
 #   and closes;
 # - a submission listener refuses MAIL with 530 until TLS and AUTH, a port-25
 #   listener does not;
+# - a user name with a control character (CR, LF, NUL, DEL) is refused 535
+#   before the verifier is asked, even when the verifier knows it, and counts
+#   as a failure (a name that can inject a header line when a delivery writes
+#   it into a trace header); a mechanism name that is not text is 504;
+# - a refused MAIL (530) starts no transaction: no sender is kept;
+# - the delivery is told the listener, peer, EHLO name and connection in both
+#   calls on a submission listener with AUTH;
 # - with TLS not required AUTH works in the clear and is advertised.
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -255,11 +262,25 @@ def test_submission_listener_needs_auth() raises:
         "530 5.7.0 Authentication required\r\n",
     )
     assert_equal(s.reg.state_of(s.conn_id), SMTP_STATE_READY)
+    # The refused MAIL left nothing behind: no sender, and RCPT is out of order.
+    assert_equal(s.reg.mail_from_of(s.conn_id), "")
+    assert_true(s.send(String("RCPT TO:<b@y.test>\r\n")).startswith("503"))
+    assert_equal(len(s.delivery.calls), 0)
     _ = s.send(String("AUTH PLAIN ") + _good_plain() + "\r\n")
     assert_equal(s.send(String("MAIL FROM:<a@x.test>\r\n")), "250 2.1.0 Ok\r\n")
     # The delivery is told it is a submission session.
     _ = s.send(String("RCPT TO:<b@y.test>\r\n"))
     assert_true(s.delivery.rcpt_submission[0])
+    _ = s.send(String("DATA\r\nx\r\n.\r\n"))
+    assert_true(s.delivery.message_submission[0])
+    assert_equal(s.delivery.rcpt_users[0], "alice")
+    assert_equal(s.delivery.message_users[0], "alice")
+    assert_equal(s.delivery.rcpt_peers[0], "192.0.2.1")
+    assert_equal(s.delivery.message_peers[0], "192.0.2.1")
+    assert_equal(s.delivery.rcpt_helos[0], "c.test")
+    assert_equal(s.delivery.message_helos[0], "c.test")
+    assert_equal(s.delivery.rcpt_conn_ids[0], s.conn_id)
+    assert_equal(s.delivery.message_conn_ids[0], s.conn_id)
     # A port-25 listener takes mail without AUTH and without TLS.
     var port25 = SmtpTestSession(_plain_cfg())
     _ = port25.send(String("EHLO c.test\r\n"))
@@ -281,6 +302,58 @@ def test_auth_in_the_clear_when_allowed() raises:
     assert_false(s.reg.tls_active_of(s.conn_id))
 
 
+def test_control_characters_in_the_user_name_are_refused() raises:
+    var names = List[String]()
+    names.append(String("al\r\nice"))
+    names.append(String("al\nice"))
+    names.append(String("a\x7fb"))
+    names.append(String("a\tb"))
+    for i in range(len(names)):
+        var s = _tls_session(_many_attempts_cfg())
+        # The verifier knows this very name, so only the check can refuse it.
+        s.verifier.add_user(names[i], String("s3cret"))
+        var payload = _b64(String("\0") + names[i] + String("\0s3cret"))
+        assert_equal(
+            s.send(String("AUTH PLAIN ") + payload + "\r\n"),
+            "535 5.7.8 Authentication credentials invalid\r\n",
+        )
+        assert_equal(s.reg.authed_user_of(s.conn_id), "")
+        # LOGIN is checked the same way.
+        _ = s.send(String("AUTH LOGIN\r\n"))
+        _ = s.send(_b64(names[i]) + "\r\n")
+        assert_true(s.send(_b64(String("s3cret")) + "\r\n").startswith("535"))
+        assert_equal(s.reg.authed_user_of(s.conn_id), "")
+    # The refusals count as failures.
+    var t = _tls_session(_plain_cfg())
+    t.verifier.add_user(String("a\nb"), String("s3cret"))
+    var bad = String("AUTH PLAIN ") + _b64(String("\0a\nb\0s3cret")) + "\r\n"
+    _ = t.send(bad)
+    _ = t.send(bad)
+    assert_true(t.send(bad).startswith("421"))
+    assert_true(t.outcome.closing)
+    # A printable name with a space or a non-ASCII letter is still fine.
+    var u = _tls_session(_plain_cfg())
+    u.verifier.add_user(String("josé m"), String("s3cret"))
+    assert_true(
+        u.send(String("AUTH PLAIN ") + _b64(String("\0josé m\0s3cret")) + "\r\n").startswith("235")
+    )
+
+
+def test_a_mechanism_that_is_not_text_is_unrecognized() raises:
+    var s = _tls_session(_plain_cfg())
+    var raw = List[UInt8]()
+    raw.extend(String("AUTH ").as_bytes())
+    raw.append(0xFF)
+    raw.append(0xFE)
+    raw.extend(String("\r\n").as_bytes())
+    assert_equal(
+        s.send_bytes(Span(raw)), "504 5.5.4 Unrecognized authentication mechanism\r\n"
+    )
+    assert_false(s.outcome.closing)
+    # Mechanism names are case-insensitive.
+    assert_equal(s.send(String("auth Plain\r\n")), "334 \r\n")
+
+
 def main() raises:
     test_auth_needs_tls()
     test_plain_inline_sets_the_user()
@@ -293,4 +366,6 @@ def main() raises:
     test_continuation_line_cap()
     test_submission_listener_needs_auth()
     test_auth_in_the_clear_when_allowed()
+    test_control_characters_in_the_user_name_are_refused()
+    test_a_mechanism_that_is_not_text_is_unrecognized()
     print("test_auth: OK")

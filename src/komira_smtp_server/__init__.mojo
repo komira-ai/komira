@@ -6,7 +6,7 @@ sockets and TLS and calls into this package.
 
 | name | does |
 |---|---|
-| `SmtpRegistry` | the table of connections: `accept`, `feed` (bytes in, replies queued), `tx_copy` and `tx_consume` (replies out), `mark_tls_active`, `drop`, `idle_ids` (`session.mojo`) |
+| `SmtpRegistry` | the table of connections: `accept`, `feed` (bytes in, replies queued), `tx_copy` and `tx_consume` (replies out), `mark_tls_active`, `drop`, `idle_ids`, `expired_ids` (`session.mojo`) |
 | `FeedOutcome` | what one `feed` did: bytes taken, close, start TLS, and bytes the client pipelined after STARTTLS |
 | `SmtpLimits`, `SmtpServerConfig` | plain values the binary fills from flags (`limits.mojo`) |
 | `MailDelivery`, `SessionInfo`, `RcptDecision`, `DeliveryResult` | the seam: `accept_recipient` per RCPT and `deliver` once per DATA (`delivery.mojo`) |
