@@ -24,8 +24,7 @@ operator or a sink consumes but does not implement belongs here.
   moved and the pool's worker count; `concat_tasks`, `concat_tiled`,
   `concat_release`; `concat_dict_unify` unifies STRING dictionaries first;
   `concat_options` holds the route switches as a value).
-- Wake primitives (`wake_primitives`: wait on and wake an address, with an
-  optional timeout), counters, the FNV-1a hash (`spill.fnv1a`), and the small
+- Counters, the FNV-1a hash (`spill.fnv1a`), and the small
   shared row and column helpers (`row`, `group_ref`, `scan_source`,
   `streaming_morsel`, `dynamic_filter`, `band_sink`).
 

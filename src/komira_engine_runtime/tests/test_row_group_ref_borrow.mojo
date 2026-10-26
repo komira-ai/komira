@@ -2,15 +2,17 @@
 # Row / GroupRef / GroupColumn -- the pointer-free public API
 # =============================================================================
 #
-# These three views used to hold an `UnsafePointer[Column, MutUntrackedOrigin]`
-# and took one in their public constructors. They now borrow the parent batch
-# as a `Pointer[RecordBatch, origin]` whose origin is the batch's own, and are
-# built from the batch itself. This file drives them through that API only:
-# no `_columns_ptr()`, no pointer of any kind in the test.
+# These three views borrow the parent batch as a `Pointer[RecordBatch, origin]`
+# whose origin is the batch's own, and are built from the batch itself. This
+# file drives them through that API only: no pointer of any kind in the test.
 #
 # What it pins:
 #   * values read through each accessor are the batch's values, row by row, so
 #     a view that resolves the wrong column or the wrong row is red;
+#   * a view holds no copy of the column names: the name resolves against the
+#     batch schema;
+#   * a wrong-typed or out-of-range access raises instead of reading a
+#     reinterpreted or out-of-bounds slot;
 #   * the column NAME lookup resolves to the column index the view then reads
 #     (the second column is not the first);
 #   * the views read the batch where it LIVES: the batch is built by a helper
@@ -78,35 +80,18 @@ def _make_batch(n: Int) raises -> RecordBatch:
     return builder.build(schema^)
 
 
-def _names(batch: RecordBatch) -> List[String]:
-    var names = List[String]()
-    for i in range(batch.num_columns()):
-        names.append(batch.schema.field_name(i))
-    return names^
-
-
 def test_row_reads_every_row_by_name() raises:
     var batch = _make_batch(64)
-    var names = _names(batch)
     for i in range(64):
-        var row = Row(batch, names, i)
+        var row = Row(batch, i)
         assert_equal(Int(row.get_i64("a")), i)
         assert_equal(row.get_f64("b"), Float64(10 * i) + 0.5)
         assert_equal(row.row_index(), i)
 
 
-def test_row_factory_matches_constructor() raises:
-    var batch = _make_batch(8)
-    var names = _names(batch)
-    var row = Row.from_batch_with_names(batch, names, 5)
-    assert_equal(Int(row.get_i64("a")), 5)
-    assert_equal(row.get_f64("b"), 50.5)
-
-
 def test_row_copy_reads_same_row() raises:
     var batch = _make_batch(8)
-    var names = _names(batch)
-    var row = Row(batch, names, 3)
+    var row = Row(batch, 3)
     var copy = row.copy()
     assert_equal(Int(copy.get_i64("a")), 3)
     assert_equal(Int(row.get_i64("a")), 3)
@@ -114,8 +99,7 @@ def test_row_copy_reads_same_row() raises:
 
 def test_row_unknown_column_raises() raises:
     var batch = _make_batch(4)
-    var names = _names(batch)
-    var row = Row(batch, names, 0)
+    var row = Row(batch, 0)
     var raised = False
     try:
         _ = row.get_i64("nope")
@@ -124,11 +108,68 @@ def test_row_unknown_column_raises() raises:
     assert_true(raised)
 
 
+def test_row_wrong_type_raises_naming_accessor_and_column() raises:
+    var batch = _make_batch(4)
+    var row = Row(batch, 1)
+    var msg = String()
+    try:
+        _ = row.get_i64("b")
+    except e:
+        msg = String(e)
+    assert_true("get_i64" in msg and "'b'" in msg, msg)
+    msg = String()
+    try:
+        _ = row.get_f64("a")
+    except e:
+        msg = String(e)
+    assert_true("get_f64" in msg and "'a'" in msg, msg)
+    msg = String()
+    try:
+        _ = row.get_i32("a")
+    except e:
+        msg = String(e)
+    assert_true("get_i32" in msg, msg)
+
+
+def test_row_out_of_range_raises() raises:
+    var batch = _make_batch(4)
+    var past = Row(batch, 4)
+    var msg = String()
+    try:
+        _ = past.get_i64("a")
+    except e:
+        msg = String(e)
+    assert_true("outside column 'a'" in msg, msg)
+    var negative = Row(batch, -1)
+    msg = String()
+    try:
+        _ = negative.get_f64("b")
+    except e:
+        msg = String(e)
+    assert_true("outside column 'b'" in msg, msg)
+
+
+def test_group_column_out_of_range_raises() raises:
+    var batch = _make_batch(4)
+    var g = GroupRef(batch, 4)
+    var msg = String()
+    try:
+        _ = g.get("a").as_i64()
+    except e:
+        msg = String(e)
+    assert_true("outside the column" in msg, msg)
+    msg = String()
+    try:
+        _ = g.get("b").as_f64()
+    except e:
+        msg = String(e)
+    assert_true("outside the column" in msg, msg)
+
+
 def test_row_tracks_accessed_columns_per_view() raises:
     var batch = _make_batch(4)
-    var names = _names(batch)
-    var r0 = Row(batch, names, 0)
-    var r1 = Row(batch, names, 1)
+    var r0 = Row(batch, 0)
+    var r1 = Row(batch, 1)
     _ = r0.get_i64("a")
     _ = r1.get_f64("b")
     var c0 = r0.accessed_column_names()
@@ -142,26 +183,17 @@ def test_row_tracks_accessed_columns_per_view() raises:
 def test_group_ref_get_resolves_name_to_column() raises:
     var batch = _make_batch(16)
     for i in range(16):
-        var g = GroupRef.from_batch(batch, i)
+        var g = GroupRef(batch, i)
         assert_equal(Int(g.get("a").as_i64()), i)
         assert_equal(g.get("b").as_f64(), Float64(10 * i) + 0.5)
         assert_equal(g.row_index(), i)
-
-
-def test_group_ref_with_cached_names_matches_from_batch() raises:
-    var batch = _make_batch(8)
-    var names = _names(batch)
-    var g = GroupRef.from_batch_with_names(batch, names, 6)
-    assert_equal(Int(g.get("a").as_i64()), 6)
-    var g2 = GroupRef(batch, names, 7)
-    assert_equal(g2.get("b").as_f64(), 70.5)
 
 
 def test_group_column_outlives_group_ref_but_not_batch() raises:
     var batch = _make_batch(8)
     # The GroupRef is a temporary; the GroupColumn it returned borrows the
     # BATCH (not the GroupRef), so it stays valid after the GroupRef is gone.
-    var g = GroupRef.from_batch(batch, 2)
+    var g = GroupRef(batch, 2)
     var col = g.get("a")
     _ = g^
     assert_equal(Int(col.as_i64()), 2)
@@ -169,7 +201,7 @@ def test_group_column_outlives_group_ref_but_not_batch() raises:
 
 def test_group_column_type_mismatch_raises() raises:
     var batch = _make_batch(4)
-    var g = GroupRef.from_batch(batch, 0)
+    var g = GroupRef(batch, 0)
     var raised = False
     try:
         _ = g.get("b").as_i64()
@@ -186,7 +218,7 @@ def test_group_column_type_mismatch_raises() raises:
 
 def test_group_ref_unknown_column_raises_and_tracks() raises:
     var batch = _make_batch(4)
-    var g = GroupRef.from_batch(batch, 0)
+    var g = GroupRef(batch, 0)
     _ = g.get("a")
     var raised = False
     try:
@@ -203,10 +235,9 @@ def test_views_read_the_batch_where_it_lives() raises:
     var batches = List[RecordBatch]()
     batches.append(_make_batch(4))
     batches.append(_make_batch(9))
-    var names = _names(batches[1])
-    var row = Row(batches[1], names, 8)
+    var row = Row(batches[1], 8)
     assert_equal(Int(row.get_i64("a")), 8)
-    var g = GroupRef.from_batch(batches[1], 8)
+    var g = GroupRef(batches[1], 8)
     assert_equal(g.get("b").as_f64(), 80.5)
 
 
@@ -242,14 +273,13 @@ struct _Acc(_GroupFn, Movable):
 
 def test_bare_row_and_group_ref_in_user_traits() raises:
     var batch = _make_batch(5)
-    var names = _names(batch)
     var f = _SumAB()
     var acc = _Acc()
     var sum_rows = 0.0
     for i in range(5):
-        var row = Row.from_batch_with_names(batch, names, i)
+        var row = Row(batch, i)
         sum_rows += f(row)
-        var g = GroupRef.from_batch_with_names(batch, names, i)
+        var g = GroupRef(batch, i)
         acc.accumulate(g)
     # sum_i (i + 10 i + 0.5) = 11 * 10 + 2.5
     assert_equal(sum_rows, 112.5)
