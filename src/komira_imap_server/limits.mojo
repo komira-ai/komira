@@ -18,6 +18,9 @@ comptime IMAP_DEFAULT_MAX_LOGIN_FAILURES: Int = 3
 comptime IMAP_DEFAULT_MAX_FETCH_BYTES: Int = 32 * 1024 * 1024
 comptime IMAP_DEFAULT_MAX_TX_BYTES: Int = 64 * 1024 * 1024
 comptime IMAP_DEFAULT_MAX_MESSAGES: Int = 100_000
+# Message bytes one FETCH or one SEARCH may read from the store: the read is
+# synchronous inside the serve loop, so it is bounded as the reply is.
+comptime IMAP_DEFAULT_MAX_SCAN_BYTES: Int = 256 * 1024 * 1024
 # Every STORE, \Seen set by a fetch and EXPUNGE appends to a folder's flag
 # log, and every command folds it; past this many chunks it is folded into one.
 comptime IMAP_DEFAULT_COMPACT_FLAG_LOG_AT: Int = 256
@@ -44,6 +47,11 @@ struct ImapLimits(Copyable, Movable):
     the folder is held in memory for the life of the selection).
     `compact_flag_log_at`: a command that changed flags folds the folder's
     flag log into one chunk when it has more than this many.
+    `max_scan_bytes` bounds the message bytes one FETCH that needs the
+    message (any item but FLAGS, UID and RFC822.SIZE) or one SEARCH with a
+    key that reads the message (a header field, BODY, TEXT, a date) may read:
+    the sum of the sizes of the messages it covers, checked before any is
+    read, over it the command is `NO [LIMIT]`.
 
     Memory: one connection holds at most `max_tx_bytes` of replies, the
     selected folder's view (about 100 bytes per message) and about 20 KB of
@@ -61,6 +69,7 @@ struct ImapLimits(Copyable, Movable):
     var max_tx_bytes: Int
     var max_messages: Int
     var compact_flag_log_at: Int
+    var max_scan_bytes: Int
 
     def __init__(
         out self,
@@ -74,6 +83,7 @@ struct ImapLimits(Copyable, Movable):
         max_tx_bytes: Int = IMAP_DEFAULT_MAX_TX_BYTES,
         max_messages: Int = IMAP_DEFAULT_MAX_MESSAGES,
         compact_flag_log_at: Int = IMAP_DEFAULT_COMPACT_FLAG_LOG_AT,
+        max_scan_bytes: Int = IMAP_DEFAULT_MAX_SCAN_BYTES,
     ):
         self.max_line = max_line
         self.max_conns = max_conns
@@ -85,6 +95,7 @@ struct ImapLimits(Copyable, Movable):
         self.max_tx_bytes = max_tx_bytes
         self.max_messages = max_messages
         self.compact_flag_log_at = compact_flag_log_at
+        self.max_scan_bytes = max_scan_bytes
 
 
 struct ImapServerConfig(Copyable, Movable):

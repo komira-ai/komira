@@ -286,10 +286,11 @@ def test_empty_and_unknown_commands() raises:
         s.send(id, String("a2 FROBNICATE x\r\n")),
         "a2 BAD Command not recognized\r\n",
     )
-    # Commands of IMAP4rev1 that this part does not do are NO, not BAD.
+    # Commands of IMAP4rev1 that this server does not do are NO, not BAD;
+    # SEARCH is done, so before LOGIN it is a NO of the login gate.
     assert_equal(
         s.send(id, String("a3 SEARCH ALL\r\n")),
-        "a3 NO [CANNOT] This command is not supported\r\n",
+        "a3 NO Log in first\r\n",
     )
     assert_equal(
         s.send(id, String("a4 APPEND INBOX\r\n")),

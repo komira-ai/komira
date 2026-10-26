@@ -13,10 +13,12 @@
 #   BAD;
 # - \Seen: BODY[] and RFC822 set it durably on a read-write folder and the
 #   answer carries it (added when FLAGS was not asked for); BODY.PEEK[] does
-#   not, EXAMINE does not, a refused command does not;
-# - items that IMAP4rev1 has and this part does not (ENVELOPE, BODYSTRUCTURE,
-#   a section, a partial, the macros) are `NO [CANNOT]` before anything is
-#   read or sent; an unknown or malformed item is BAD;
+#   not, EXAMINE does not, a refused command does not (the \Seen of the
+#   section forms is in test_sections);
+# - an unknown or malformed item (a section or a partial that is not IMAP
+#   included) is BAD before anything is read or sent, and sets no flag
+#   (ENVELOPE, BODYSTRUCTURE and the sections are in test_bodystructure and
+#   test_sections);
 # - a FETCH whose message bytes would pass `max_fetch_bytes` is `NO [LIMIT]`,
 #   exactly at the limit is allowed, and a FLAGS-only fetch of the same
 #   messages is not limited;
@@ -384,41 +386,8 @@ def test_examine_does_not_set_seen() raises:
     )
 
 
-def test_items_this_part_does_not_do_are_refused_before_anything_runs() raises:
+def test_bad_items_are_refused_before_anything_runs() raises:
     var r = _rig()
-    var refused = List[String]()
-    refused.append(String("ENVELOPE"))
-    refused.append(String("BODYSTRUCTURE"))
-    refused.append(String("BODY"))
-    refused.append(String("INTERNALDATE"))
-    refused.append(String("RFC822.SIZE"))
-    refused.append(String("RFC822.HEADER"))
-    refused.append(String("RFC822.TEXT"))
-    refused.append(String("BODY[HEADER]"))
-    refused.append(String("BODY[1]"))
-    refused.append(String("BODY[TEXT]"))
-    refused.append(String("BODY[HEADER.FIELDS (FROM TO)]"))
-    refused.append(String("BODY.PEEK[HEADER]"))
-    refused.append(String("BODY.PEEK[1.MIME]"))
-    refused.append(String("BODY[]<0.100>"))
-    refused.append(String("ALL"))
-    refused.append(String("FAST"))
-    refused.append(String("FULL"))
-    for i in range(len(refused)):
-        # Mixed with an item that would set \Seen: the whole command is refused
-        # and the flag stays unset.
-        assert_equal(
-            r.text(String("f1 FETCH 1:3 (BODY[] ") + refused[i] + ")\r\n"),
-            "f1 NO [CANNOT] This FETCH item is not supported\r\n",
-        )
-        assert_equal(
-            r.text(String("f2 UID FETCH 1:* ") + refused[i] + "\r\n"),
-            "f2 NO [CANNOT] This FETCH item is not supported\r\n",
-        )
-    assert_equal(
-        r.text(String("f3 FETCH 1:3 FLAGS\r\n")),
-        "* 1 FETCH (FLAGS ())\r\n* 2 FETCH (FLAGS ())\r\n* 3 FETCH (FLAGS ())\r\nf3 OK FETCH completed\r\n",
-    )
     var unknown = List[String]()
     unknown.append(String("(FOO)"))
     unknown.append(String("(FLAGS FOO)"))
@@ -433,12 +402,38 @@ def test_items_this_part_does_not_do_are_refused_before_anything_runs() raises:
     unknown.append(String("(FLAGS BODY[)"))
     unknown.append(String("(UID BODY.PEEK[HEADER.FIELDS (FROM)"))
     unknown.append(String("(BODY.PEEK[] (FLAGS)"))
+    # Sections and partials that are not IMAP.
+    unknown.append(String("BODY[0]"))
+    unknown.append(String("BODY[1.]"))
+    unknown.append(String("BODY[.1]"))
+    unknown.append(String("BODY[01]"))
+    unknown.append(String("BODY[1HEADER]"))
+    unknown.append(String("BODY[MIME]"))
+    unknown.append(String("BODY[TEXT.HEADER]"))
+    unknown.append(String("BODY[HEADER.FIELDS]"))
+    unknown.append(String("BODY[HEADER.FIELDS ()]"))
+    unknown.append(String("BODY[HEADER.FIELDSX (A)]"))
+    unknown.append(String("BODY[]<0.0>"))
+    unknown.append(String("BODY[]<1>"))
+    unknown.append(String("BODY[]<a.1>"))
+    unknown.append(String("BODY[]<1.a>"))
+    unknown.append(String("BODY[]<1.2"))
+    unknown.append(String("BODY[]<99999999999.1>"))
     for i in range(len(unknown)):
         assert_equal(
             r.text(String("f4 FETCH 1 ") + unknown[i] + "\r\n"),
             "f4 BAD Invalid FETCH item\r\n",
         )
-    assert_false(r.s.reg.is_closing(r.id))
+        # Mixed with an item that would set \Seen: the whole command is
+        # refused and the flag stays unset.
+        assert_equal(
+            r.text(String("f5 FETCH 1:3 (BODY[] ") + unknown[i] + ")\r\n"),
+            "f5 BAD Invalid FETCH item\r\n",
+        )
+    assert_equal(
+        r.text(String("f3 FETCH 1:3 FLAGS\r\n")),
+        "* 1 FETCH (FLAGS ())\r\n* 2 FETCH (FLAGS ())\r\n* 3 FETCH (FLAGS ())\r\nf3 OK FETCH completed\r\n",
+    )
 
 
 def test_a_fetch_past_the_byte_limit_is_refused() raises:
@@ -520,7 +515,7 @@ def main() raises:
     test_malformed_sets_are_bad()
     test_body_sets_seen_and_peek_does_not()
     test_examine_does_not_set_seen()
-    test_items_this_part_does_not_do_are_refused_before_anything_runs()
+    test_bad_items_are_refused_before_anything_runs()
     test_a_fetch_past_the_byte_limit_is_refused()
     test_a_message_deleted_by_another_connection()
     print("test_fetch: OK")

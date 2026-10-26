@@ -1,5 +1,5 @@
 # STORE, UID STORE and EXPUNGE, and the expunge that CLOSE does silently.
-# (SEARCH will live here too; until then it is answered `NO [CANNOT]`.)
+# (SEARCH is in search.mojo.)
 #
 # STORE changes the durable flags (flags.mojo) of the messages a set names;
 # EXPUNGE removes the \Deleted ones: it first drops their flags from the log,

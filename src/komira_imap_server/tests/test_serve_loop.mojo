@@ -9,6 +9,9 @@
 #   LOGIN, SELECT and FETCH return the stored messages byte for byte, LOGOUT
 #   ends the connection (a loop that never upgrades, lets a password cross in
 #   the clear, or alters a message fails);
+# - ENVELOPE, BODYSTRUCTURE, a header-field section, a partial, INTERNALDATE
+#   and SEARCH answered over the same upgraded connection, with every byte of
+#   the reply exact (the structures and literals cross TLS whole);
 # - three wrong passwords on TLS end the connection with a `* BYE`;
 # - lines pipelined behind STARTTLS in the clear: the OK is written, the
 #   connection is closed, no TLS state is made, and nothing else is ever
@@ -269,6 +272,64 @@ def test_read_mail_over_starttls() raises:
     _wait_eof(rig, peer)
     assert_equal(rig.reg.conn_count(), 0)
     assert_equal(rig.tls.tls_conn_count(), 0)
+    peer.close()
+
+
+def test_structures_sections_and_search_over_starttls() raises:
+    var rig = _tls_rig(_config())
+    var raw = _text(
+        String(
+            "Date: Tue, 01 Sep 2026 10:00:00 +0000\r\n"
+            "From: a@sender.test\r\n"
+            "Subject: over tls\r\n"
+            "\r\n"
+            "secure body\r\n"
+        )
+    )
+    _ = store_message(
+        rig.view, String("bob@example.com"), String("INBOX"), raw
+    )
+    var peer = Peer.connect(rig.listener.local_port())
+    _greeting(rig, peer)
+    _upgrade(rig, peer)
+    var r = _run(rig, peer, String("c3 LOGIN bob@example.com s3cret"), String("\r\n"))
+    assert_equal(r, "c3 OK [CAPABILITY IMAP4rev1] LOGIN completed\r\n")
+    r = _run(rig, peer, String("c4 SELECT INBOX"), String("c4 OK [READ-WRITE] SELECT completed\r\n"))
+    assert_true(r.startswith("* 1 EXISTS\r\n"), r)
+    var sender = String('((NIL NIL "a" "sender.test"))')
+    r = _run(
+        rig,
+        peer,
+        String(
+            "f1 FETCH 1 (ENVELOPE BODYSTRUCTURE BODY.PEEK[HEADER.FIELDS (SUBJECT)]"
+            " BODY.PEEK[1]<0.6> INTERNALDATE)"
+        ),
+        String("f1 OK FETCH completed\r\n"),
+    )
+    # "Subject: over tls" and its line break, then the empty line: 21 octets;
+    # the body "secure body" and its line break are 13 octets in one line.
+    assert_equal(
+        r,
+        String('* 1 FETCH (ENVELOPE ("Tue, 01 Sep 2026 10:00:00 +0000" "over tls" ')
+        + sender
+        + " "
+        + sender
+        + " "
+        + sender
+        + " NIL NIL NIL NIL NIL)"
+        + ' BODYSTRUCTURE ("TEXT" "PLAIN" ("CHARSET" "US-ASCII") NIL NIL "7BIT" 13 1'
+        + " NIL NIL NIL NIL)"
+        + " BODY[HEADER.FIELDS (SUBJECT)] {21}\r\nSubject: over tls\r\n\r\n"
+        + " BODY[1]<0> {6}\r\nsecure"
+        + ' INTERNALDATE " 1-Sep-2026 10:00:00 +0000")\r\n'
+        + "f1 OK FETCH completed\r\n",
+    )
+    r = _run(rig, peer, String("s2 SEARCH SUBJECT TLS BODY secure"), String("s2 OK SEARCH completed\r\n"))
+    assert_equal(r, "* SEARCH 1\r\ns2 OK SEARCH completed\r\n")
+    r = _run(rig, peer, String("s3 SEARCH BODY nothing"), String("s3 OK SEARCH completed\r\n"))
+    assert_equal(r, "* SEARCH\r\ns3 OK SEARCH completed\r\n")
+    r = _run(rig, peer, String("c6 LOGOUT"), String("c6 OK LOGOUT completed\r\n"))
+    _wait_eof(rig, peer)
     peer.close()
 
 
@@ -553,6 +614,7 @@ def test_a_short_write_is_resumed_in_order() raises:
 
 def main() raises:
     test_read_mail_over_starttls()
+    test_structures_sections_and_search_over_starttls()
     test_failed_logins_on_tls_end_the_connection()
     test_lines_pipelined_behind_starttls_close_the_connection()
     test_max_conns_tells_the_extra_connection_bye()

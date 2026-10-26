@@ -4,11 +4,11 @@ An IMAP4rev1 server for reading received mail (RFC 3501, with STARTTLS as in
 RFC 2595): the connection table, the line framing, the command state machine,
 durable message flags, and a serve loop over non-blocking sockets. The mail
 lives in any `komira_objectstore` store, laid out by `komira_mail_store`: this
-server reads what `komira_smtp_server` wrote there. This is part A of the
-server: ENVELOPE, BODYSTRUCTURE, body sections and SEARCH are a later part.
-Part A alone is refused by most desktop and mobile clients, whose first sync is
-`FETCH (UID RFC822.SIZE FLAGS INTERNALDATE ...)`; use it with a client that
-can fetch `FLAGS`, `UID` and `BODY[]` only.
+server reads what `komira_smtp_server` wrote there. Messages are read with
+`komira_mail_message` (MIME structure, dates) and `komira_mail_address`
+(ENVELOPE addresses): FETCH answers ENVELOPE, BODYSTRUCTURE, every
+`BODY[section]<partial>` form and INTERNALDATE, and SEARCH has every key of
+RFC 3501.
 
 **It is a subset, and its UIDs are not general-purpose IMAP UIDs.** Use it to
 read, flag and delete mail with a client that does not need more; do not call
@@ -116,26 +116,26 @@ store, stalls every other connection and their deadlines.
 | `LOGIN` | through `komira_mail_auth.MailAuthVerifier`; only on TLS unless `require_tls_for_login` is off |
 | `SELECT`, `EXAMINE` | opens a folder: EXISTS, RECENT 0, FLAGS, PERMANENTFLAGS, UIDVALIDITY, UIDNEXT, `[READ-WRITE]` or `[READ-ONLY]` |
 | `LIST` | the user's folders, with `\HasChildren` or `\HasNoChildren`, `*` and `%` patterns |
-| `FETCH`, `UID FETCH` | `FLAGS`, `UID`, `BODY[]`, `BODY.PEEK[]`, `RFC822`, one item or a list |
+| `FETCH`, `UID FETCH` | `FLAGS`, `UID`, `INTERNALDATE`, `RFC822.SIZE`, `ENVELOPE`, `BODYSTRUCTURE`, `BODY`, `BODY[section]<partial>` and `BODY.PEEK[...]`, `RFC822`, `RFC822.HEADER`, `RFC822.TEXT`, the macros `ALL`, `FAST` and `FULL`; one item or a list (see "FETCH items") |
+| `SEARCH`, `UID SEARCH` | every RFC 3501 key, `NOT`, `OR`, groups, `CHARSET US-ASCII` or `UTF-8` (see "SEARCH") |
 | `STORE`, `UID STORE` | `FLAGS`, `+FLAGS`, `-FLAGS`, each with `.SILENT`; the five system flags |
 | `EXPUNGE` | deletes the `\Deleted` messages, answering `* n EXPUNGE` highest first |
 | `CLOSE` | the silent expunge, then leaves the folder (none after EXAMINE) |
 
-Anything else that IMAP4rev1 defines (`SEARCH`, `APPEND`, `CREATE`, `DELETE`,
-`RENAME`, `SUBSCRIBE`, `LSUB`, `STATUS`, `COPY`, `CHECK`, `AUTHENTICATE`, `UID
-SEARCH`, `UID EXPUNGE` ...) is answered `NO [CANNOT]`; a FETCH item it does not
-do (`ENVELOPE`, `BODYSTRUCTURE`, `INTERNALDATE`, `RFC822.SIZE`,
-`RFC822.HEADER`, `RFC822.TEXT`, a `BODY[<section>]`, a partial fetch, the macros
-`ALL`, `FAST` and `FULL`) is `NO [CANNOT]` before any message is read; a word
-that is not a command or an item is `BAD`. Not offered: APPEND, IDLE, CONDSTORE
+Anything else that IMAP4rev1 defines (`APPEND`, `CREATE`, `DELETE`, `RENAME`,
+`SUBSCRIBE`, `LSUB`, `STATUS`, `COPY`, `CHECK`, `AUTHENTICATE`, `UID EXPUNGE`
+...) is answered `NO [CANNOT]`; a word that is not a command or a FETCH item
+is `BAD`. Not offered: APPEND, IDLE, CONDSTORE
 (`HIGHESTMODSEQ` is never sent), LITERAL+, UIDPLUS, NAMESPACE, UNSELECT, ID.
 IMAP4rev1 only; RFC 9051 is out of scope.
 
 - SELECT sends `PERMANENTFLAGS` with the five flags; EXAMINE sends `PERMANENTFLAGS ()`
   (RFC 3501 section 6.3.2), since STORE is refused there.
-- `BODY[]` and `RFC822` set `\Seen` on a folder opened read-write, durably, and
-  the answer carries `FLAGS` when the flag changed; `BODY.PEEK[]` does not,
-  and nothing does after EXAMINE. The message bytes go out exactly as stored.
+- `BODY[...]` (any section, a partial too), `RFC822` and `RFC822.TEXT` set
+  `\Seen` on a folder opened read-write, durably, and the answer carries
+  `FLAGS` when the flag changed; `BODY.PEEK[...]` and `RFC822.HEADER` do not,
+  and nothing does after EXAMINE. A message that is answered `NO
+  [UNAVAILABLE]` is not marked. The message bytes go out exactly as stored.
 - A set is `n`, `a:b`, `*` and lists of them (`*` is the largest sequence
   number, or the largest UID for the UID forms); numbers past the end are
   skipped; a 0, an empty item or more than 1024 ranges is `BAD`. A range as
@@ -145,11 +145,133 @@ IMAP4rev1 only; RFC 9051 is out of scope.
   them changes nothing.
 - A message another connection deleted since SELECT is skipped, and the FETCH
   ends `NO [EXPUNGEISSUED]`. A FETCH whose message bytes would pass
-  `max_fetch_bytes` is `NO [LIMIT]` before any is read.
+  `max_fetch_bytes` is `NO [LIMIT]` before any is read (a section with a
+  partial counts as its length at most), and so is one that would read more
+  than `max_scan_bytes` of messages.
 - A store failure is `NO [SERVERBUG] Internal error, try again`, with nothing
   of the failure in the text (store errors quote keys, and keys hold mailbox
   names). The connection stays. A message whose delete failed stays, and no
   `* n EXPUNGE` is sent for it.
+
+## FETCH items
+
+| item | answer |
+|---|---|
+| `FLAGS`, `UID` | as before |
+| `RFC822.SIZE` | the stored size in octets |
+| `INTERNALDATE` | `" 1-Sep-2026 10:00:00 +0000"`, see below |
+| `ENVELOPE` | RFC 3501 section 7.4.2, see below |
+| `BODYSTRUCTURE`, `BODY` | the MIME structure with and without extension data, see below |
+| `BODY[]`, `RFC822` | the stored message |
+| `BODY[HEADER]`, `RFC822.HEADER` | the header block with its empty line |
+| `BODY[TEXT]`, `RFC822.TEXT` | everything after it |
+| `BODY[HEADER.FIELDS (...)]`, `BODY[HEADER.FIELDS.NOT (...)]` | the lines of the header block whose field is (is not) named, as written (folds included), in the message's order, then an empty line (CRLF, also for a message with bare LF line ends); names in any case, atoms or quoted |
+| `BODY[n.n.n]` | a part's body as written; `n.n.MIME` its header block |
+| `BODY[n.n.HEADER]`, `.HEADER.FIELDS`, `.HEADER.FIELDS.NOT`, `.TEXT` | of a part that is a `message/rfc822`: the nested message's, reached through it (`2.2.1` is the first part inside the nested message) |
+| `BODY[...]<origin.length>` | the window, answered `BODY[...]<origin>`; truncated at the end of the section, an empty literal at or past it; a length of 0 is not IMAP (`BAD`) |
+
+`ALL` is `FLAGS INTERNALDATE RFC822.SIZE ENVELOPE`, `FAST` the first three,
+`FULL` is `ALL BODY`. The reply names a section by its numbers, then the
+keyword in capitals (field names as the client wrote them); `PEEK` is not
+echoed. A section that does not exist (a part past the end, a number under a
+leaf, `HEADER` or `TEXT` of a part that is not a message) is `NIL`, and does
+not fail the command. A reply sends a quoted string for 7-bit text, and a
+literal for anything with a byte over 0x7F, a CR, an LF or a NUL.
+
+**What parses what.** The stored message is read from the store once per
+FETCH and parsed at most once, and only for `BODYSTRUCTURE`, `BODY` and a
+numbered section. The whole message, its header and text, a field subset,
+`ENVELOPE`, `INTERNALDATE` and `RFC822.SIZE` read the header block with a
+lenient scanner (a line without a colon is skipped, nothing raises), so they
+work on mail a MIME parser refuses. The section bytes go to the reply queue
+from a borrowed view of the parsed message: one copy per item.
+
+**MIME limits.** `komira_mail_message` reads at most 8 nested multiparts and
+128 parts. A message over them, a multipart without a boundary and a header
+line without a colon make `BODYSTRUCTURE`, `BODY` and the numbered sections
+`NO [UNAVAILABLE]` for that message: nothing of it is sent, it is not marked
+`\Seen`, the other messages of the command are answered, and the connection
+goes on. A nested `message/rfc822` is opened with the parent's depth and part
+budget (a chain of 9 nested messages is over it), and one with a transfer
+encoding other than 7bit, 8bit or binary cannot be opened: the structure of a
+message that holds it is `NO [UNAVAILABLE]` too.
+
+### INTERNALDATE
+
+The time of the first `Received` field (what follows its last `;`: the trace
+header the SMTP side adds on delivery, so when the mail arrived); if there is
+none or it is not a date, the time of the `Date` field; if neither is a date,
+the Unix epoch (`" 1-Jan-1970 00:00:00 +0000"`). It is written in UTC with a
+space-padded day: a zone in the field is converted, not kept.
+
+### ENVELOPE
+
+The fields as the sender wrote them (unfolded; RFC 2047 encoded words are not
+decoded, a client does that): date, subject, in-reply-to and message-id are
+strings, NIL when the field is absent and `""` when it is empty (the first
+field of a name is used). The address fields are read with
+`komira_mail_address.parse_address_list`: a mailbox is `(name NIL mailbox
+host)` (the host in lower case, as that package keeps it), a group is
+`(NIL NIL "name" NIL)`, its members, and `(NIL NIL NIL NIL)`. An absent field
+is NIL, and so is one that does not parse (a list that package refuses is not
+guessed at). sender and reply-to are from when absent; there is no source
+route.
+
+### BODYSTRUCTURE and BODY
+
+A multipart is `(part part ... "SUBTYPE" ("BOUNDARY" "b") dsp lang loc)`, with
+no separator between the parts and to any depth; a leaf is `("TYPE" "SUBTYPE"
+params id description "ENCODING" octets [lines] md5 dsp lang loc)`. The octets
+and lines are of the body as stored (the line break before a delimiter belongs
+to the delimiter; a last line with no break counts as a line), lines only for
+a text part, and for a `message/rfc822` the nested envelope, structure and
+lines come after the octets. Parameter names are in capitals and their values
+as written (RFC 2231 values decoded); a text part with no Content-Type has
+`("CHARSET" "US-ASCII")`; md5, disposition, language and location come from
+Content-MD5, Content-Disposition, Content-Language and Content-Location. `BODY`
+is the same without the extension data (the multipart's parameters, and md5
+onward).
+
+## SEARCH
+
+`SEARCH [CHARSET x] key ...` and `UID SEARCH`, answered `* SEARCH n n ...`
+(sequence numbers, or UIDs, ascending) and OK. All keys given are required.
+
+- `ALL`, `SEEN`, `UNSEEN`, `ANSWERED`, `UNANSWERED`, `FLAGGED`, `UNFLAGGED`,
+  `DELETED`, `UNDELETED`, `DRAFT`, `UNDRAFT`: the durable flags.
+- `RECENT`, `NEW` (RECENT and UNSEEN) and `OLD` (NOT RECENT): there is no
+  `\Recent` flag, so `RECENT` and `NEW` find nothing and `OLD` everything.
+  `KEYWORD word` finds nothing and `UNKEYWORD word` everything: no keyword can
+  be stored.
+- `FROM`, `TO`, `CC`, `BCC`, `SUBJECT`, `HEADER field string`: the string is a
+  case-insensitive substring of the field's value as written or with its
+  encoded words decoded; `HEADER field ""` finds a message that has the field.
+- `BODY string`, `TEXT string`: a case-insensitive ASCII substring of the
+  stored bytes after the header block (`BODY`) or of all of them (`TEXT`).
+  Nothing is decoded: base64 and quoted-printable are searched as written, and
+  text in another charset is searched by its bytes. The command line is 7-bit
+  text (literals are refused), so a search string is ASCII; `CHARSET` accepts
+  `US-ASCII` and `UTF-8` and anything else is `NO [BADCHARSET (US-ASCII
+  UTF-8)]`.
+- `BEFORE`, `ON`, `SINCE`: the INTERNALDATE; `SENTBEFORE`, `SENTON`,
+  `SENTSINCE`: the `Date` field, with no fallback (a message without a
+  readable `Date` is found by none of the three, and by `NOT` of them). A date
+  is `d-Mon-yyyy` or `dd-Mon-yyyy` (from 1900, the day must exist) and days
+  are UTC calendar days: the zone of a `Date` field is not kept.
+- `LARGER n`, `SMALLER n`: the stored size in octets.
+- a sequence set, `UID set`, `NOT key`, `OR key key`, `( key ... )`.
+
+The parser is bounded: 256 nodes and 24 levels of groups, `NOT` and `OR`;
+anything malformed (an unknown key, a missing argument, a bad date, number or
+set, an unbalanced group, a string that is not closed) is `BAD`. A message is
+read from the store at most once per search and only when the cheap keys
+(flags, sets, sizes) leave it undecided, its header block is scanned once, and
+`BODY` and `TEXT` are one linear pass (Knuth-Morris-Pratt) over its bytes: a
+search costs at most one scan of the header block and one pass of the body per
+message. A search with a key that reads messages is `NO [LIMIT]` before any
+is read when the folder's messages together are over `max_scan_bytes`. A
+message another connection deleted since SELECT is found only by keys that
+read nothing.
 
 ## Input rules
 
@@ -297,6 +419,7 @@ serves SMTP and IMAP over one store needs one that satisfies the bound.
 | `max_fetch_bytes` | 32 MiB | message bytes one FETCH may return |
 | `max_tx_bytes` | 64 MiB | replies queued for a peer that does not read, then `* BYE` |
 | `max_messages` | 100,000 | messages a SELECT may list |
+| `max_scan_bytes` | 256 MiB | message bytes one FETCH that reads messages, or one SEARCH with a key that does, may read (sizes summed, checked first) |
 | `compact_flag_log_at` | 256 | flag log chunks before it is folded |
 
 Every deadline compares strictly: a connection expires one millisecond after its
@@ -321,8 +444,12 @@ test sets, with `connect`, `send`, `send_chunks`, `login`, `take` and
 - `LOGIN` is the only way in; there is no AUTHENTICATE. The verifier is the
   caller's; `TestAuthVerifier` is a fixture, not a password store.
 - A store call is synchronous (see "Serving").
-- Message bytes are held in memory while a FETCH answers (bounded by
+- Message bytes are held in memory while a FETCH answers (one message at a
+  time, at most the SMTP side's message cap; the reply queue by
   `max_fetch_bytes`).
+- No `BINARY`, `ESEARCH`, `SORT`, `THREAD`, `SEARCHRES` or `CONDSTORE` forms.
+- `BODY` and `TEXT` searches and `BODY[...]` do not decode a transfer encoding
+  or a charset.
 
 ## Tests
 
@@ -330,7 +457,9 @@ The welded tests include `test_serve_loop`, which runs over real loopback socket
 with the `Peer` client of `komira_mail_test_support`, TLS included. They wait for
 progress (a reply, a finished handshake, the end of a connection) and never for a
 time; deadlines are tested by passing `now_ms`. The others (`test_framing`,
-`test_commands`, `test_mailbox`, `test_fetch`, `test_flags_store`,
-`test_folders`, `test_flag_identity`) drive the registry with no socket. `test_mailbox` and
+`test_commands`, `test_mailbox`, `test_fetch`, `test_bodystructure`,
+`test_sections`, `test_mime_limits`, `test_search`, `test_search_syntax`,
+`test_read_sequence`, `test_flags_store`, `test_folders`, `test_flag_identity`)
+drive the registry with no socket. `test_mailbox` and
 `test_folders` run over two stores; `test_flags_store` includes a store that
 fails on request.
