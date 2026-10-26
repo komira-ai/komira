@@ -556,15 +556,6 @@ artifacts {
 }
 
 artifacts {
-  name: "komira_mail_message"
-  build_system: "buck2"
-  args: "//src/komira_mail_message:komira_mail_message_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_mail_message:komira_mail_message_conda"
-}
-
-artifacts {
   name: "komira_vcard"
   build_system: "buck2"
   args: "//src/komira_vcard:komira_vcard_conda[release]"
@@ -679,6 +670,15 @@ artifacts {
   args: "--out"
   args: "{out_dir}"
   targets: "//src/komira_buffer:komira_buffer_conda"
+}
+
+artifacts {
+  name: "komira_mail_message"
+  build_system: "buck2"
+  args: "//src/komira_mail_message:komira_mail_message_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_mail_message:komira_mail_message_conda"
 }
 
 artifacts {
@@ -1136,8 +1136,6 @@ artifacts {
   args: "--member-manifest"
   args: "{release_dir}/komira_snapshotter/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_mail_message/manifest.json"
-  args: "--member-manifest"
   args: "{release_dir}/komira_vcard/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_trace/manifest.json"
@@ -1163,6 +1161,8 @@ artifacts {
   args: "{release_dir}/komira_async_api/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_buffer/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_mail_message/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_compression/manifest.json"
   args: "--member-manifest"
