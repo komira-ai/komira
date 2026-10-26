@@ -40,7 +40,7 @@ from komira_arrow.arrow_types import ArrowType
 from komira_arrow.record_batch import RecordBatch
 from komira_arrow.schema import Schema
 from komira_arrow.batch_view import batch_view_over, BatchView
-from komira_buffer.byte_buffer import write_uleb128
+from komira_buffer.byte_buffer import write_uleb128, write_uleb128_u64
 
 from komira_hash import fnv1a_64
 
@@ -233,7 +233,10 @@ struct L0PostingBuilder(Movable, Deinitable):
                         " ascending (term " + String(d) + ")"
                     )
                 var delta = docid - prev if i > 0 else docid
-                write_uleb128(delta, out)
+                # `docid >= prev` (checked above, with prev starting at 0), so
+                # `delta` is never negative: the unsigned writer needs no
+                # second sign test per posting.
+                write_uleb128_u64(UInt64(delta), out)
                 prev = docid
         # TIER 2b: per-term per-doc TF runs (parallel to the doc-id runs).
         for d in range(num_terms):

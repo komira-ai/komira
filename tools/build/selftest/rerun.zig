@@ -134,7 +134,7 @@ fn build(c: *lib.Ctx, cfg: []const []const u8) !lib.runner.Result {
     try words.append(c.a, "build");
     for (KINDS) |k| try words.append(c.a, k.target);
     try words.append(c.a, CONTROL);
-    return c.run(words.items, .{ .cfg = cfg, .timeout_s = 1200 });
+    return c.run(words.items, .{ .cfg = cfg });
 }
 
 /// An <n> no earlier build used: a fresh key, so the action cannot be a

@@ -29,6 +29,7 @@ doc_tree(
     visibility = [
         "//tools/build/lint:interpreter_budget",
         "//tools/build/lint:no_shell",
+        "//tools/build/lint:timing",
     ],
 )
 

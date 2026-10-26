@@ -15,6 +15,7 @@ _MOJO_COMPILE_SRCS = [
     "tools/modular_cfg.zig",
     "tools/mojo_compile.zig",
     "tools/proc_tree.zig",
+    "tools/watch_loop.zig",
 ]
 
 zig_test(
@@ -31,6 +32,20 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     imports = _MOJO_COMPILE_SRCS,
     src = "tools/mojo_compile.zig",
+    unit_tests = [":mojo_compile_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# The same wrapper with its watchdog's ticks supplied by the process that runs
+# it (tools/mojo_compile_ticked.zig): the process cases' wrapper, so they decide
+# how many ticks the watchdog has seen. Behind the same unit tests.
+zig_exe(
+    name = "mojo_compile_ticked",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _MOJO_COMPILE_SRCS + ["tools/mojo_compile_ticked.zig"],
+    src = "tools/mojo_compile_ticked.zig",
     unit_tests = [":mojo_compile_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
@@ -62,6 +77,20 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     imports = _MOJO_COMPILE_MACOS_SRCS,
     src = "tools/mojo_compile_macos.zig",
+    target = row("darwin-arm64")["zig_triple"],
+    unit_tests = [":mojo_compile_darwin_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# The macOS wrapper with its ticks supplied by the process that runs it, for
+# tests//functional/watchdog:cases_darwin.
+zig_exe(
+    name = "mojo_compile_darwin_ticked",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _MOJO_COMPILE_MACOS_SRCS + ["tools/mojo_compile_macos_ticked.zig"],
+    src = "tools/mojo_compile_macos_ticked.zig",
     target = row("darwin-arm64")["zig_triple"],
     unit_tests = [":mojo_compile_darwin_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",

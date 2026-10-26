@@ -22,6 +22,7 @@ from komira_objectstore.in_memory_conditional_store import (
 )
 from komira_objectstore.path import Path
 
+from komira_iceberg.iceberg_json_scan import json_str_field
 from komira_iceberg import (
     ICE_T_BOOLEAN,
     ICE_T_INT,
@@ -396,6 +397,34 @@ def test_summary_reader_refuses_a_corrupt_pointer() raises:
         _ = read_current_snapshot_summary(store, String("tbl"))
 
 
+def test_location_is_recorded_verbatim_and_non_ascii_tables_are_found() raises:
+    # `location` is the caller's string, escaped but otherwise untouched: a
+    # URI with a scheme, a non-ASCII prefix and a quote all come back as given.
+    var loc = String('s3://bucket/wh/café/日本/"q"')
+    var md = build_table_metadata_json(
+        String("u"), loc, _schema(), List[SnapshotInfo](), Int64(-1),
+        Int64(0), Int64(9),
+    )
+    assert_equal(json_str_field(md, String("location")), loc)
+    # The same non-ASCII prefix as a store key: the version and the summary
+    # are found under it.
+    var key = String("wh/café/日本")
+    var s = _snapshot(5, 1, -1)
+    s.extra_summary.append(SummaryKV(String("who"), String("日")))
+    var snaps = List[SnapshotInfo]()
+    snaps.append(s^)
+    var md2 = build_table_metadata_json(
+        String("u"), key, _schema(), snaps, Int64(5), Int64(1), Int64(9),
+    )
+    var store = InMemoryConditionalStore()
+    _ = store.put(
+        Path.parse(key + String("/metadata/v1.metadata.json")),
+        List[UInt8](md2.as_bytes()),
+    )
+    var kvs = read_current_snapshot_summary(store, key)
+    assert_equal(summary_value_for(kvs, String("who")), String("日"))
+
+
 def main() raises:
     test_schema_json_shape()
     test_metadata_has_every_required_v2_field()
@@ -412,4 +441,5 @@ def main() raises:
     test_summary_reader_survives_braces_quotes_and_controls_in_values()
     test_summary_reader_follows_a_version_the_hint_has_not_reached()
     test_summary_reader_refuses_a_corrupt_pointer()
+    test_location_is_recorded_verbatim_and_non_ascii_tables_are_found()
     print("test_iceberg_metadata_spec: all passed")

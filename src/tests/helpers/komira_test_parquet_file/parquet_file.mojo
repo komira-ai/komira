@@ -16,7 +16,8 @@
 #   - PLAIN data pages (DataPage V1, uncompressed), or a PLAIN dictionary
 #     page followed by RLE_DICTIONARY data pages;
 #   - any number of row groups (none for a file of no rows, unless the
-#     layout names them), and data pages of at most `page_rows` rows;
+#     layout names them), and data pages of at most `page_rows` rows (per
+#     column, when a column sets its own);
 #   - per-chunk Statistics (null_count, min_value, max_value) and, with
 #     `page_index`, a ColumnIndex (per-page min/max, null pages, null
 #     counts, boundary order UNORDERED) and an OffsetIndex per chunk.
@@ -61,6 +62,7 @@ struct TestColumn(Copyable, Movable):
     var optional: Bool
     var dictionary: Bool
     var converted_type: Int
+    var page_rows: Int
     var ints: List[Int]
     var doubles: List[Float64]
     var strings: List[String]
@@ -72,6 +74,7 @@ struct TestColumn(Copyable, Movable):
         self.optional = False
         self.dictionary = False
         self.converted_type = converted_type
+        self.page_rows = 0
         self.ints = List[Int]()
         self.doubles = List[Float64]()
         self.strings = List[String]()
@@ -117,6 +120,13 @@ struct TestColumn(Copyable, Movable):
         """This column, written as a dictionary page and RLE_DICTIONARY
         data pages."""
         self.dictionary = True
+        return self^
+
+    def with_page_rows(var self, page_rows: Int) -> TestColumn:
+        """This column, cut into data pages of at most `page_rows` rows
+        whatever the layout says (columns may then have different page
+        boundaries)."""
+        self.page_rows = page_rows
         return self^
 
     def num_rows(self) -> Int:
@@ -426,7 +436,8 @@ def _write_chunk(
             _plain_value(c, d.entries[k], dict_body)
         _page(out, 2, len(d.entries), _ENC_PLAIN, dict_body)
     ch.data_page_offset = len(out)
-    var step = page_rows if page_rows > 0 else max(hi - lo, 1)
+    var rows_per_page = c.page_rows if c.page_rows > 0 else page_rows
+    var step = rows_per_page if rows_per_page > 0 else max(hi - lo, 1)
     var p = lo
     while p < hi or (p == lo and hi == lo):
         var q = min(p + step, hi)
