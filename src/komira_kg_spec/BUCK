@@ -1,0 +1,26 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The knowledge graph's build configuration (docs/design/knowledge_graph_port.md):
+# the spec value (sources, extract config, synthesis binding, trigger), the scope
+# reference it compares (a scope id and an optional owner id, plain strings), its
+# validation, and the fail-safe resolution of its extract mode. Which inference
+# endpoints a graph may bind is an EndpointPolicy the host injects; the default
+# allows every endpoint. It decides nothing about authorization. It depends on
+# komira_kg_mode only, and reads no clock and no environment.
+#
+# The welded tests: test_graph_spec_validation checks that each defect is refused
+# with a message of its own and that valid specs are accepted and keep their
+# fields; test_graph_spec_resolve checks that a spec that fails validation in any
+# one way resolves to rules and never to model.
+mojo_library(
+    name = "komira_kg_spec",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_kg_mode:komira_kg_mode",
+    ],
+    test_srcs = [
+        "tests/test_graph_spec_resolve.mojo",
+        "tests/test_graph_spec_validation.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
