@@ -77,11 +77,11 @@ fn describe(kind: []const u8) []const u8 {
 
 /// The `/`-separated parts of `s` (none for an empty string, as awk splits).
 fn parts(c: *Ctx, s: []const u8) ![][]const u8 {
-    var out = std.ArrayList([]const u8).init(c.alloc);
-    if (s.len == 0) return out.toOwnedSlice();
+    var out = std.ArrayList([]const u8).empty;
+    if (s.len == 0) return out.toOwnedSlice(c.alloc);
     var it = std.mem.splitScalar(u8, s, '/');
-    while (it.next()) |p| try out.append(p);
-    return out.toOwnedSlice();
+    while (it.next()) |p| try out.append(c.alloc, p);
+    return out.toOwnedSlice(c.alloc);
 }
 
 /// A module map row, `| [`<name>`](<link>) |`: its name and its link.
@@ -164,8 +164,8 @@ pub fn srcLayout(c: *Ctx, args: []const []const u8) !void {
     if (std.mem.eql(u8, map, "-")) return;
 
     // The module map: one row per package, and no row for a path that is none.
-    var found = std.ArrayList(u8).init(c.alloc);
-    const w = found.writer();
+    var found = std.ArrayList(u8).empty;
+    const w = found.writer(c.alloc);
     var row = std.StringHashMap(usize).init(c.alloc);
     var lines = lint.Lines.init(try lint.readFile(c.alloc, map));
     while (lines.next()) |line| {
@@ -189,5 +189,5 @@ pub fn srcLayout(c: *Ctx, args: []const []const u8) !void {
     while (pi.next()) |k| {
         if (!row.contains(k.*)) try w.print("{s}{s}: no row in {s}; add one to the section it belongs in\n", .{ pre, k.*, map });
     }
-    try c.report.appendSlice(try lint.sortLines(c.alloc, found.items));
+    try c.report.appendSlice(c.alloc, try lint.sortLines(c.alloc, found.items));
 }

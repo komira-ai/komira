@@ -1,1 +1,0 @@
-BROKEN the reverse-dependency query failed, naming komira//src/b:b: buck2 cquery failed (exit 1): Error: Error looking up configured node komira//src/b:b (prelude//platforms:default#abcdef0123456789)  Caused by:     `komira//src/a:hidden` is not visible to `komira//src/b:b` (run `buck2 help-env` to suppress this error) 

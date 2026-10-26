@@ -345,10 +345,10 @@ struct ParquetSourceData(Movable):
     #     other breaker already takes, never the other way. ---
     var preserve_string_dict: Bool
     # --- The per-column integral-narrowing
-    #     instructions carried down from `ScanData.payload_narrow` by the
-    #     engine's join executor (not in this tree). EMPTY at construction at
-    #     every site (it is deliberately NOT a ctor argument — see the same note
-    #     on `ScanData.payload_narrow`).
+    #     instructions the host derives while it lowers the plan
+    #     (`komira_lowering_rules.derive_payload_narrow`) and sets here (not in
+    #     this tree). EMPTY at construction at every site (it is deliberately
+    #     NOT a ctor argument).
     #
     #     ⚠ IT IS ADVISORY, AND EXACTLY ONE LEAF HONOURS IT.
     #     The engine's parquet join materializer narrows the BUILD-side

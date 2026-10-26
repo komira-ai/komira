@@ -98,20 +98,20 @@ pub const Given = struct { name: []const u8, data: []const u8 };
 /// The files of a package: the shared library (at most one) and its link,
 /// then each static archive, sorted by path.
 pub fn libFilesOf(alloc: Alloc, shared: []const Given, statics: []const Given) Error![]LibFile {
-    var list = std.ArrayList(LibFile).init(alloc);
+    var list = std.ArrayList(LibFile).empty;
     if (shared.len > 1) return refuse(alloc, "{d} shared libraries given; a library ships one, lib<library>_native.so.1", .{shared.len});
     for (shared) |s| {
         const link = linkName(s.name) orelse return refuse(alloc, "shared library name `{s}` is not lib<name>.so.<number>", .{s.name});
         if (s.data.len == 0) return refuse(alloc, "{s} is empty", .{s.name});
-        try list.append(.{ .path = try std.fmt.allocPrint(alloc, lib_dir ++ "{s}", .{s.name}), .kind = .shared, .data = s.data });
-        try list.append(.{ .path = try std.fmt.allocPrint(alloc, lib_dir ++ "{s}", .{link}), .kind = .link, .data = s.data, .target = s.name });
+        try list.append(alloc, .{ .path = try std.fmt.allocPrint(alloc, lib_dir ++ "{s}", .{s.name}), .kind = .shared, .data = s.data });
+        try list.append(alloc, .{ .path = try std.fmt.allocPrint(alloc, lib_dir ++ "{s}", .{link}), .kind = .link, .data = s.data, .target = s.name });
     }
     for (statics) |s| {
         if (!staticName(s.name)) return refuse(alloc, "static archive name `{s}` is not lib<name>.a", .{s.name});
         if (s.data.len == 0) return refuse(alloc, "{s} is empty", .{s.name});
-        try list.append(.{ .path = try std.fmt.allocPrint(alloc, lib_dir ++ "{s}", .{s.name}), .kind = .static, .data = s.data });
+        try list.append(alloc, .{ .path = try std.fmt.allocPrint(alloc, lib_dir ++ "{s}", .{s.name}), .kind = .static, .data = s.data });
     }
-    const files = try list.toOwnedSlice();
+    const files = try list.toOwnedSlice(alloc);
     std.mem.sort(LibFile, files, {}, lessLib);
     for (files[0..files.len -| 1], 0..) |f, i| {
         if (std.mem.eql(u8, f.path, files[i + 1].path)) return refuse(alloc, "{s} given twice", .{f.path});
@@ -120,12 +120,12 @@ pub fn libFilesOf(alloc: Alloc, shared: []const Given, statics: []const Given) E
 }
 
 fn given(alloc: Alloc, a: Args, flag: []const u8) ![]Given {
-    var list = std.ArrayList(Given).init(alloc);
+    var list = std.ArrayList(Given).empty;
     for (try all(alloc, a, flag)) |v| {
         const eq = std.mem.indexOfScalar(u8, v, '=') orelse pack_common.fail("{s} `{s}` is not <file name>=<file>", .{ flag, v });
-        try list.append(.{ .name = v[0..eq], .data = pack_common.readAll(alloc, v[eq + 1 ..]) });
+        try list.append(alloc, .{ .name = v[0..eq], .data = pack_common.readAll(alloc, v[eq + 1 ..]) });
     }
-    return list.toOwnedSlice();
+    return list.toOwnedSlice(alloc);
 }
 
 /// The `--lib-shared` and `--lib-static` files of the command line.
@@ -195,7 +195,7 @@ pub fn needed(alloc: Alloc, elf: []const u8) Error![]const []const u8 {
         why = "ELF: section header entries are not 64 bytes";
         return error.Refused;
     }
-    var list = std.ArrayList([]const u8).init(alloc);
+    var list = std.ArrayList([]const u8).empty;
     var seen = false;
     var i: u64 = 0;
     while (i < shnum) : (i += 1) {
@@ -236,14 +236,14 @@ pub fn needed(alloc: Alloc, elf: []const u8) Error![]const []const u8 {
                 why = "ELF: a NEEDED name has no terminating NUL";
                 return error.Refused;
             };
-            try list.append(rest[0..end]);
+            try list.append(alloc, rest[0..end]);
         }
     }
     if (!seen) {
         why = "ELF: no dynamic section (not a shared object)";
         return error.Refused;
     }
-    return list.toOwnedSlice();
+    return list.toOwnedSlice(alloc);
 }
 
 /// Refused when `needed` names a komira library's shared library (`libkomira_`)
@@ -439,21 +439,21 @@ test "__glibc is the floor given, never a constant" {
 /// A minimal ELF64 shared object: a null section, a dynamic section holding
 /// one NEEDED per name, and its string table.
 pub fn testElf(alloc: Alloc, names: []const []const u8) ![]u8 {
-    var strtab = std.ArrayList(u8).init(alloc);
-    try strtab.append(0);
-    var dyn = std.ArrayList(u8).init(alloc);
+    var strtab = std.ArrayList(u8).empty;
+    try strtab.append(alloc, 0);
+    var dyn = std.ArrayList(u8).empty;
     for (names) |n| {
-        try dyn.writer().writeInt(u64, DT_NEEDED, .little);
-        try dyn.writer().writeInt(u64, strtab.items.len, .little);
-        try strtab.appendSlice(n);
-        try strtab.append(0);
+        try dyn.writer(alloc).writeInt(u64, DT_NEEDED, .little);
+        try dyn.writer(alloc).writeInt(u64, strtab.items.len, .little);
+        try strtab.appendSlice(alloc, n);
+        try strtab.append(alloc, 0);
     }
-    try dyn.writer().writeInt(u64, DT_NULL, .little);
-    try dyn.writer().writeInt(u64, 0, .little);
+    try dyn.writer(alloc).writeInt(u64, DT_NULL, .little);
+    try dyn.writer(alloc).writeInt(u64, 0, .little);
     const dyn_off: u64 = 64;
     const str_off: u64 = dyn_off + dyn.items.len;
     const sh_off: u64 = str_off + strtab.items.len;
-    var out = std.ArrayList(u8).init(alloc);
+    var out = std.ArrayList(u8).empty;
     var eh = [_]u8{0} ** 64;
     @memcpy(eh[0..4], "\x7fELF");
     eh[4] = 2;
@@ -461,22 +461,22 @@ pub fn testElf(alloc: Alloc, names: []const []const u8) ![]u8 {
     std.mem.writeInt(u64, eh[0x28..0x30], sh_off, .little);
     std.mem.writeInt(u16, eh[0x3A..0x3C], 64, .little);
     std.mem.writeInt(u16, eh[0x3C..0x3E], 3, .little);
-    try out.appendSlice(&eh);
-    try out.appendSlice(dyn.items);
-    try out.appendSlice(strtab.items);
-    try out.appendNTimes(0, 64); // section 0
+    try out.appendSlice(alloc, &eh);
+    try out.appendSlice(alloc, dyn.items);
+    try out.appendSlice(alloc, strtab.items);
+    try out.appendNTimes(alloc, 0, 64); // section 0
     var sh = [_]u8{0} ** 64;
     std.mem.writeInt(u32, sh[4..8], SHT_DYNAMIC, .little);
     std.mem.writeInt(u64, sh[0x18..0x20], dyn_off, .little);
     std.mem.writeInt(u64, sh[0x20..0x28], dyn.items.len, .little);
     std.mem.writeInt(u32, sh[0x28..0x2C], 2, .little);
-    try out.appendSlice(&sh);
+    try out.appendSlice(alloc, &sh);
     sh = [_]u8{0} ** 64;
     std.mem.writeInt(u32, sh[4..8], 3, .little);
     std.mem.writeInt(u64, sh[0x18..0x20], str_off, .little);
     std.mem.writeInt(u64, sh[0x20..0x28], strtab.items.len, .little);
-    try out.appendSlice(&sh);
-    return out.toOwnedSlice();
+    try out.appendSlice(alloc, &sh);
+    return out.toOwnedSlice(alloc);
 }
 
 test "NEEDED is read from the dynamic section" {

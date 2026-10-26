@@ -1,0 +1,14 @@
+# mopm versions this repository pins beyond the one buildrules pins itself (rules/mopm/pins.bzl).
+# `buildrules mojo sync` copies this file into tools/build/cells/toolchains/mopm_pins.bzl.
+#
+# No package names a mopm other than the one buildrules pins, so no table is needed for the packages.
+# A package that must stay on an older mopm adds `[mopm."<version>"]` here (url, sha256, size) and names
+# `toolchains//:mopm_<version with underscores>` in its `mojo_conda`.
+#
+# mopm 0.0.57 is the mopm of the README e2e (release/readme_e2e/packages.bzl): it has
+# `mopm add --overlay`, which the e2e installs with, request time limits and retries, and upload URLs
+# refreshed during a long `publish --staged`. No package builds with it.
+[mopm."0.0.57"]
+url = "https://github.com/komira-ai/mopm/releases/download/v0.0.57/mopm-0.0.57-linux-x86_64.tar.gz"
+sha256 = "3ce36096a1090ca2fde8986e0dd3e16c3ed97cdd5d6a9d970474c487476e77f7"
+size = 1209780

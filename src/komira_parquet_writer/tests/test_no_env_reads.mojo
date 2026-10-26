@@ -37,9 +37,19 @@ comptime _FILES: List[String] = [
     "decimal_encode.mojo",
     "dict_encoder.mojo",
     "dict_encoder_numeric.mojo",
+    "encoded_column.mojo",
+    "file_assembly.mojo",
+    "page_crc.mojo",
     "page_size_limit.mojo",
+    "record_batch_column.mojo",
+    "record_batch_multi.mojo",
+    "record_batch_schema.mojo",
+    "record_batch_writer.mojo",
     "stats.mojo",
     "thrift_writer.mojo",
+    "writer.mojo",
+    "writer_advanced.mojo",
+    "writer_bloom.mojo",
     "writer_bitpack.mojo",
     "writer_bss.mojo",
     "writer_delta.mojo",
@@ -48,6 +58,8 @@ comptime _FILES: List[String] = [
     "writer_encode.mojo",
     "writer_float_stats.mojo",
     "writer_helpers.mojo",
+    "writer_multi_batch.mojo",
+    "writer_multi_batch_stats.mojo",
     "writer_page_index.mojo",
 ]
 
@@ -183,10 +195,13 @@ def test_imports_only_its_deps() raises:
         "komira_atomic_alias",
         "komira_buffer",
         "komira_collections",
+        "komira_column_kernels",
+        "komira_dynamic_filter",
         "komira_parquet_api",
         "komira_parquet_codec",
         "komira_parquet_writer",
         "komira_simd",
+        "komira_zlib",
     ]
     var banned: List[String] = ["komira_obs", "komira_serde", "komira_" + "core"]
     var files = materialize[_FILES]()

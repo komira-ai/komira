@@ -91,74 +91,74 @@ pub fn exampleProgram(alloc: Allocator, ex: Example, display: []const u8, msg: *
         msg.* = try std.fmt.allocPrint(alloc, "{s}:{d}: the example's first line is README line 1, which leaves no line for its `def main`", .{ display, ex.line });
         return error.Refused;
     }
-    var out = std.ArrayList([]const u8).init(alloc);
+    var out = std.ArrayList([]const u8).empty;
     const header_room = (if (ex.module) first else main_line) - 1;
     if (header_room >= 1) {
-        try out.append(try std.fmt.allocPrint(alloc, GENERATED ++ "{s}, the example at line {d}. Do not edit: line n is README line n.", .{ display, ex.line }));
+        try out.append(alloc, try std.fmt.allocPrint(alloc, GENERATED ++ "{s}, the example at line {d}. Do not edit: line n is README line n.", .{ display, ex.line }));
     }
-    while (out.items.len + 1 < main_line) try out.append("");
-    if (!ex.module) try out.append("def main() raises:");
+    while (out.items.len + 1 < main_line) try out.append(alloc, "");
+    if (!ex.module) try out.append(alloc, "def main() raises:");
     for (ex.code, ex.code_lines) |line, n| {
         if (n <= out.items.len) {
             msg.* = try std.fmt.allocPrint(alloc, "{s}:{d}: README line {d} is copied out of order", .{ display, ex.line, n });
             return error.Refused;
         }
-        while (out.items.len < n - 1) try out.append("");
+        while (out.items.len < n - 1) try out.append(alloc, "");
         if (isBlank(line)) {
-            try out.append("");
+            try out.append(alloc, "");
         } else if (ex.module) {
-            try out.append(line);
+            try out.append(alloc, line);
         } else {
-            try out.append(try std.mem.concat(alloc, u8, &.{ "    ", line }));
+            try out.append(alloc, try std.mem.concat(alloc, u8, &.{ "    ", line }));
         }
     }
-    if (!ex.module and !holdsCode(ex.code)) try out.append("    pass");
-    var text = std.ArrayList(u8).init(alloc);
+    if (!ex.module and !holdsCode(ex.code)) try out.append(alloc, "    pass");
+    var text = std.ArrayList(u8).empty;
     for (out.items) |l| {
-        try text.appendSlice(l);
-        try text.append('\n');
+        try text.appendSlice(alloc, l);
+        try text.append(alloc, '\n');
     }
-    return text.toOwnedSlice();
+    return text.toOwnedSlice(alloc);
 }
 
 /// Every program of package `package`'s README `display`: one per example,
 /// in README order, each made from that example alone, then the runner (file
 /// header). error.Refused sets `msg.*`.
 pub fn generatePrograms(alloc: Allocator, examples: []const Example, package: []const u8, display: []const u8, msg: *[]const u8) Error![]const Program {
-    var out = std.ArrayList(Program).init(alloc);
+    var out = std.ArrayList(Program).empty;
     for (examples) |ex| {
-        try out.append(.{ .name = try exampleName(alloc, package, ex.line), .text = try exampleProgram(alloc, ex, display, msg) });
+        try out.append(alloc, .{ .name = try exampleName(alloc, package, ex.line), .text = try exampleProgram(alloc, ex, display, msg) });
     }
-    try out.append(.{ .name = try programName(alloc, package), .text = try runnerProgram(alloc, examples, package, display) });
-    return out.toOwnedSlice();
+    try out.append(alloc, .{ .name = try programName(alloc, package), .text = try runnerProgram(alloc, examples, package, display) });
+    return out.toOwnedSlice(alloc);
 }
 
 /// `s` as a double-quoted Mojo string literal.
 pub fn mojoStringLiteral(alloc: Allocator, s: []const u8) Allocator.Error![]const u8 {
-    var out = std.ArrayList(u8).init(alloc);
-    try out.append('"');
+    var out = std.ArrayList(u8).empty;
+    try out.append(alloc, '"');
     for (s) |c| {
         switch (c) {
-            '"' => try out.appendSlice("\\\""),
-            '\\' => try out.appendSlice("\\\\"),
-            '\n' => try out.appendSlice("\\n"),
-            else => try out.append(c),
+            '"' => try out.appendSlice(alloc, "\\\""),
+            '\\' => try out.appendSlice(alloc, "\\\\"),
+            '\n' => try out.appendSlice(alloc, "\\n"),
+            else => try out.append(alloc, c),
         }
     }
-    try out.append('"');
-    return out.toOwnedSlice();
+    try out.append(alloc, '"');
+    return out.toOwnedSlice(alloc);
 }
 
 /// The runner of the examples of package `package`'s README, named
 /// `display` in its messages (file header).
 pub fn runnerProgram(alloc: Allocator, examples: []const Example, package: []const u8, display: []const u8) Allocator.Error![]const u8 {
-    var out = std.ArrayList(u8).init(alloc);
-    const w = out.writer();
+    var out = std.ArrayList(u8).empty;
+    const w = out.writer(alloc);
     try w.print(GENERATED ++ "{s}. Do not edit: it runs each example's program, beside it.\n", .{display});
     if (examples.len == 0) {
         const none = try std.fmt.allocPrint(alloc, "NO EXAMPLE: {s} holds no ```mojo example", .{display});
         try w.print("\n\ndef main():\n    print({s})\n", .{try mojoStringLiteral(alloc, none)});
-        return out.toOwnedSlice();
+        return out.toOwnedSlice(alloc);
     }
     try w.writeAll("\n");
     for (examples) |ex| try w.print("import {s}\n", .{try exampleModule(alloc, package, ex.line)});
@@ -175,7 +175,7 @@ pub fn runnerProgram(alloc: Allocator, examples: []const Example, package: []con
     try w.writeAll("    if failed > 0:\n");
     const failed = try std.fmt.allocPrint(alloc, " of {d} README examples failed", .{total});
     try w.print("        raise Error(String(failed) + {s})\n", .{try mojoStringLiteral(alloc, failed)});
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 fn digitsFrom(s: []const u8, start: usize) usize {
@@ -190,7 +190,7 @@ fn digitsFrom(s: []const u8, start: usize) usize {
 pub fn mapReport(alloc: Allocator, report: []const u8, package: []const u8, display: []const u8) Allocator.Error![]const u8 {
     const stem = try std.fmt.allocPrint(alloc, "readme_{s}_", .{package});
     const ext = ".mojo:";
-    var out = std.ArrayList(u8).init(alloc);
+    var out = std.ArrayList(u8).empty;
     var i: usize = 0;
     var start: usize = 0;
     while (i < report.len) {
@@ -218,13 +218,13 @@ pub fn mapReport(alloc: Allocator, report: []const u8, package: []const u8, disp
             i = j;
             continue;
         }
-        if (p > start) try out.appendSlice(report[start..p]);
-        try out.appendSlice(display);
-        try out.append(':');
-        try out.appendSlice(report[d..e]);
+        if (p > start) try out.appendSlice(alloc, report[start..p]);
+        try out.appendSlice(alloc, display);
+        try out.append(alloc, ':');
+        try out.appendSlice(alloc, report[d..e]);
         start = e;
         i = e;
     }
-    try out.appendSlice(report[start..]);
-    return out.toOwnedSlice();
+    try out.appendSlice(alloc, report[start..]);
+    return out.toOwnedSlice(alloc);
 }

@@ -1,24 +1,36 @@
-# The pull request's check (docs/ci.md, "pr.yml"): the machine file's `pr` stage
-# (release/machine.textproto) as the ONE job of this workflow, so the required
-# status check is `pr / check` (workflow name `pr`, job id `check`) and a pull
-# request never shows a skipped beta, beta_validate, prod or build job. The release
-# is .github/workflows/kci.yml, which has no `pull_request` trigger.
+# The pull request's check (docs/ci.md, "pr.yml"): the ONE job of this workflow,
+# so the required status check is `pr / check` (workflow name `pr`, job id
+# `check`) and a pull request never shows a skipped job of the release. The
+# release is .github/workflows/release.yml, which has no `pull_request`
+# trigger.
 #
-# HAND-WRITTEN, and held to the machine file the way kci.yml is: `kci run`
-# itself at start-up under GitHub Actions (it reads this file as committed at
-# GITHUB_WORKFLOW_SHA, for a run of the PULL_REQUEST stage), and the welded test
-# src/kci_workflow_check/tests/test_repo_kci_yml.mojo, so a drift also fails
-# `./buck2 build //...`. This file may run the PULL_REQUEST stage and NOTHING
-# else (src/kci_workflow_check, rule R6): the `pull_request` trigger alone (no push,
-# no manual run, no `pull_request_target`, no `workflow_run`); one job `check`,
-# only for a pull request from a branch of this repository (a fork's run gets
-# no tailnet credential; a maintainer reads the change and pushes it to a
-# branch here); a GitHub-hosted runner (the literal `ubuntu-24.04`); no
-# environment and no secret; `contents: read` and the `id-token: write` the farm
-# connection exchanges, nothing else; every action pinned; no publish step.
-# `kci run --stage pr --affected-by <the merge commit's first parent>` builds the
-# units the change reaches (the artifacts of release/artifacts.textproto and the
-# checks derived from the build graph when it runs) and ships nothing.
+# The job runs named Buck2 targets on the farm and nothing else:
+#   1. the files the change touches (`git diff` of the merge commit against its
+#      first parent) and the coverage holds of both sides, into $RUNNER_TEMP;
+#   2. the BXL selector (tools/build/ci/affected.bxl) turns them into the
+#      targets to build: the owners of the files and everything that depends
+#      on them, or the aggregate //ci:pr (the whole check set) when a file
+#      cannot be mapped or touches the build system;
+#   3. `build` of that list (a library's welded tests run inside its build);
+#   4. the checks only a BXL script can make, over the whole graph: the
+#      test_weld and graph_check lints, the completeness guard of //ci:pr, the
+#      guard that it reaches no Python, and the cases of the selector and the
+#      guard;
+#   5. `test` of the list's standalone tests.
+# Every Buck2 step is the buck2-farm action (.github/actions/buck2-farm), which
+# fails the step unless buck2 succeeded and no action ran on the runner. The
+# one other `./buck2 build` is that action's own tool.
+#
+# The change base is the first parent of the merge commit checked out: exactly
+# the main the pull request is merged into, so the change is the pull request's
+# alone. Never the event's base.sha: that is main when the event fired, and once
+# main moves every change merged since then would count as this pull request's.
+#
+# Only for a pull request from a branch of this repository (a fork's run gets no
+# tailnet credential; a maintainer reads the change and pushes it to a branch
+# here); a GitHub-hosted runner; no environment and no secret; `contents: read`
+# and the `id-token: write` the farm connection exchanges, nothing else; every
+# action pinned; no publish step.
 name: pr
 
 on:
@@ -39,29 +51,18 @@ env:
 jobs:
   check:
     # A pull request from a branch of this repository, and nothing else: a
-    # fork's pull request runs nothing (R6).
+    # fork's pull request runs nothing.
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 330
     # No environment: no approval, and no environment secret reaches a pull
     # request's code.
     permissions:
       contents: read
-      # for farm-connect only: the token Tailscale trusts (the stage is
-      # farm-connected; it publishes nothing)
+      # for farm-connect only: the token Tailscale trusts
       id-token: write
     steps:
-      # The job's deadline, taken first: 115 of the job's 120 minutes
-      # (timeout-minutes above). kci gets what is left of it
-      # (--build-budget-s below), so a wide change has all the time a slow
-      # `build kci` did not use, and kci still reports which units it did not
-      # build before GitHub would cancel the job. The 5 minutes
-      # left cover the steps after it (the logs, the upload, buck2's stop).
-      - name: the job's deadline
-        run: |
-          echo "$(( $(date +%s) + 115 * 60 ))" > "$RUNNER_TEMP/job_deadline_s"
-      # The merge commit, with the full history: kci reads the change from
-      # git (`<base>...<revision>`) and refuses a shallow clone.
+      # The merge commit, with the full history: the change is read from git.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.REVISION }}
@@ -74,64 +75,106 @@ jobs:
           farm-address: ${{ vars.FARM_ADDRESS }}
           farm-instance: ${{ vars.FARM_INSTANCE }}
           farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+          tls: ${{ vars.FARM_TLS || 'false' }}
       - name: the buckconfig names the farm
         run: |
           for key in linux_x86_64_properties; do
             ./buck2 audit config "komira_re.$key" --style json | grep -q '": *"[^"]' ||
               { echo "the machine buckconfig sets no [komira_re] $key: this job would build on the runner"; exit 1; }
           done
-      # kci as the release's build job builds it, from the pull request's code.
-      - name: build kci
-        run: ./buck2 build '//bin/kci:kci[runnable]' --out "$RUNNER_TEMP/kci"
-      # The build systems name the program `buck2`; the repository's is the
-      # ./buck2 wrapper of this checkout.
-      - name: buck2 on PATH
+      # The tool the buck2-farm action runs over each step's output; its path
+      # is the step's output.
+      - name: build the farm assertion
+        id: assert
+        run: echo "path=$(./buck2 build komira//tools/build/ci:assert_remote --show-full-simple-output)" >> "$GITHUB_OUTPUT"
+      # The change: the files the pull request touches (renames as a delete and
+      # an add) and the coverage holds of the base and of the head. HEAD must be
+      # the merge commit.
+      - name: the change
         run: |
-          mkdir -p "$RUNNER_TEMP/bin"
-          printf '#!/bin/sh\nexec "%s/buck2" "$@"\n' "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/bin/buck2"
-          chmod +x "$RUNNER_TEMP/bin/buck2"
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-      # kci first holds this workflow (as committed) to the machine file, then
-      # builds the units the change reaches: the artifacts of
-      # release/artifacts.textproto and the checks its buck2 build system
-      # derives from the live graph (//tools/build/ci:derive_checks), so every
-      # target of the graph is in some unit. The change base is the first
-      # parent of the merge commit checked out (kci holds HEAD to
-      # $REVISION): exactly the main the pull request is merged into, so the
-      # change kci diffs is the pull request's alone. Never the event's
-      # base.sha: that is main when the event fired, and once main moves
-      # every change merged since then would count as this pull request's
-      # (src/kci_workflow_check, rule R6, holds this line). The build budget is the
-      # seconds left until the job's deadline (kci refuses a value under 1);
-      # kci counts it from its own start, so its work before the build is
-      # charged too. A missing deadline file stops the step here.
-      - name: kci run --stage pr
-        run: |
-          [ -s "$RUNNER_TEMP/job_deadline_s" ] || { echo "::error::no job deadline in \$RUNNER_TEMP/job_deadline_s: the job's first step did not write it"; exit 1; }
-          budget_s=$(( $(cat "$RUNNER_TEMP/job_deadline_s") - $(date +%s) ))
-          if ! git rev-parse --verify --quiet HEAD^2 > /dev/null || ! change_base=$(git rev-parse --verify HEAD^1); then echo "::error::the change base is the merge commit's first parent, and HEAD is not a merge commit"; exit 1; fi
-          "$RUNNER_TEMP/kci/kci" run --stage pr --affected-by "$change_base" \
-            --revision-id "$REVISION" --run-id "gh-$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
-            --context driver=github-actions --context event="$GITHUB_EVENT_NAME" \
-            --context ref="$GITHUB_REF" --context actor_id="$GITHUB_ACTOR_ID" \
-            --context run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --work-dir "$GITHUB_WORKSPACE" --log-dir "$RUNNER_TEMP/kci-logs" --build-budget-s "$budget_s" \
-            --result-file "$RUNNER_TEMP/kci-result-pr.json" \
-            --summary-file "$GITHUB_STEP_SUMMARY"
-      - name: the build logs
-        if: failure()
-        run: |
-          for f in "$RUNNER_TEMP"/kci-logs/*; do
-            [ -f "$f" ] && { echo "== $f"; cat "$f"; }
-          done
-          true
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
+          git rev-parse --verify --quiet HEAD^2 > /dev/null || { echo "::error::the change base is the merge commit's first parent, and HEAD is not a merge commit"; exit 1; }
+          git diff --no-renames --name-only HEAD^1...HEAD > "$RUNNER_TEMP/changed.txt"
+          git grep -n '' HEAD^1 HEAD -- '*coverage_held' > "$RUNNER_TEMP/held.txt"
+      - name: select the affected targets
+        uses: ./.github/actions/buck2-farm
         with:
-          name: kci-result-pr-${{ env.REVISION }}
-          path: ${{ runner.temp }}/kci-result-pr.json
-          if-no-files-found: warn
-          retention-days: 90
+          args: bxl komira//tools/build/ci/affected.bxl:affected @tools/build/ci/affected_changed.args @${{ runner.temp }}/changed.txt @tools/build/ci/affected_held.args @${{ runner.temp }}/held.txt
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The selector prints one label per line on stdout and its reasons on
+      # stderr (each line there starts with a time stamp): the labels are the
+      # lines of the action's log that start with a cell name.
+      - name: the targets to build
+        run: grep -E '^[a-z_]+//[^ ]+$' "$RUNNER_TEMP/buck2-farm.log" > "$RUNNER_TEMP/targets.txt"
+      - name: build
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: build --keep-going @${{ runner.temp }}/targets.txt
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # test_weld: every test file is welded by a target (the lints of the
+      # cell, and the two fixtures that hold the rule itself).
+      - name: test_weld, the cell
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: bxl komira//tools/build/lint/test_weld.bxl:check -- --lint komira//:test_weld
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: test_weld, the fixture over the rules
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: bxl komira//tools/build/lint/test_weld.bxl:check -- --lint tests//functional/test_weld:ok
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: test_weld, the fixture over real packages
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: bxl komira//tools/build/lint/test_weld.bxl:check -- --lint tests//functional/test_weld/real:ok
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # graph_check: queries of the whole build graph.
+      - name: graph check, python_closure
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: bxl komira//tools/build/selftest/graph/checks.bxl:check -- --check komira//:python_closure
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: graph check, selftest_closure
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: bxl komira//tools/build/selftest/graph/checks.bxl:check -- --check komira//tools/build/selftest/graph:selftest_closure
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # //ci:pr holds every check target of the graph (fails, naming the
+      # targets, when one exists outside it), and the selector and the guard
+      # answer their cases.
+      - name: the aggregate is complete
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: bxl komira//tools/build/ci/guard.bxl:check
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: the aggregate reaches no Python
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: bxl komira//tools/build/ci/python_guard.bxl:check
+          assert-remote: ${{ steps.assert.outputs.path }}
+      - name: the selector and guard cases
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: bxl komira//tools/build/ci/cases.bxl:run
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The README e2e's completeness guard (//:readme_e2e_complete, in the list above)
+      # tells a moved package with no e2e target from one with; these are its cases.
+      - name: the README e2e guard cases
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: bxl komira//tools/build/readme_e2e/cases.bxl:run
+          assert-remote: ${{ steps.assert.outputs.path }}
+      # The standalone tests of the list (the tests cell is built, never run,
+      # as `./buck2 build tests//functional/...` builds it). The step exists
+      # when the list holds a target that is not of that cell.
+      - name: the standalone test targets
+        id: tests
+        run: grep -v '^tests//' "$RUNNER_TEMP/targets.txt" > "$RUNNER_TEMP/test_targets.txt" && echo "any=true" >> "$GITHUB_OUTPUT" || true
+      - name: test
+        if: steps.tests.outputs.any == 'true'
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: test @${{ runner.temp }}/test_targets.txt
+          assert-remote: ${{ steps.assert.outputs.path }}
       - name: Stop buck2
         if: always()
         run: ./buck2 kill || true

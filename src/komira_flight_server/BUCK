@@ -1,0 +1,56 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The Arrow Flight service over the broker: `FlightBrokerService` serves
+# GetFlightInfo, DoGet and DoPut on the gRPC dispatch seams of komira_http_core,
+# and `FlightBrokerData` is the Arrow-native data plane under it (one broker
+# produce core and one consume core per partition per topic, over an in-memory
+# conditional-write store). The wire messages and the Arrow IPC bridge are in
+# komira_flight.
+#
+# Every test is hermetic. tests/test_flight_live_socket.mojo runs a real
+# HttpServer with the service over TLS + h2 on the loopback address against a
+# real GrpcClient, server and client on two komira_fork_join threads, reading
+# komira_http_core's exported TLS fixtures. Welded tests get no test-only deps,
+# so the packages that test imports are listed here: komira_grpc, komira_clock,
+# komira_atomic_alias and komira_fork_join are TEST-ONLY deps (no source outside
+# tests/ imports them). komira_http_server and komira_async are in the closure
+# through komira_connect and komira_http_core.
+
+_TLS_FIXTURES = {
+    "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
+    "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+    "src/komira_http_core/tests/fixtures/tls/root_ca.pem": "//src/komira_http_core:tests/fixtures/tls/root_ca.pem",
+}
+
+mojo_library(
+    name = "komira_flight_server",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_async:komira_async",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_broker:komira_broker",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_connect:komira_connect",
+        "//src/komira_flight:komira_flight",
+        "//src/komira_fork_join:komira_fork_join",
+        "//src/komira_grpc:komira_grpc",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_http_server:komira_http_server",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_op_sources:komira_op_sources",
+    ],
+    test_srcs = [
+        "tests/test_flight_broker_data.mojo",
+        "tests/test_flight_live_socket.mojo",
+        "tests/test_flight_multipartition.mojo",
+        "tests/test_flight_service_dispatch.mojo",
+    ],
+    test_data = {
+        "tests/test_flight_live_socket.mojo": _TLS_FIXTURES,
+    },
+    visibility = ["PUBLIC"],
+)

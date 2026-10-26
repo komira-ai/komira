@@ -107,7 +107,7 @@
 #      (standalone-only) fails to load there.
 #  20. C/C++ dependencies of Mojo targets: see tools/build/tests/cxx_tests.sh.
 #  21. (In the gate: tests//functional/location_path:main, whose run check
-#      is a validation.)
+#      is a validation, and tests//functional/mojoc_path:same_bytes.)
 #  22. Rust rules, and rustc's host floor: see
 #      tools/build/tests/rust_tests.sh.
 #  23. mojo_proto_library and mojo_db_proto_library, mojo_gcp_client (REST
@@ -134,8 +134,8 @@
 #      known-answer tests, a TLS handshake, the s2n-tls feature probes: see
 #      tools/build/tests/c_libs_tests.sh.
 #  28. (In the gate: tests//functional/watchdog:cases, the compile watchdog
-#      of mojo_wrapper.sh on stand-in compilers, whose action refuses a report
-#      with fewer ok cases than its floor.)
+#      of the compile wrapper (mojo_compile) on stand-in compilers, whose
+#      action refuses a report with fewer ok cases than its floor.)
 #  29. The test runtime contract (tests//functional/test_data): a gated test opens a
 #      declared fixture by its repository path from its staged share/, and a
 #      fixture it did not declare is absent (the gate goes red); TEST_TMPDIR
@@ -144,8 +144,8 @@
 #      komira//tools/build/mojo/mojo_test_testdata, in the gate); a mojo_test
 #      exiting 77 (SKIP to some harnesses) fails; a red test stays
 #      red with test_env {BIN: true} (library) and env {BIN: true} (mojo_test);
-#      (the runner's own cases, tests//functional/test_data:runner_cases, are
-#      in the gate, its action holding the report to a floor). A library's `test_deps`
+#      (the runner's own cases are the gate's unit tests, komira//tools/build/run,
+#      on linux and on macOS). A library's `test_deps`
 #      (tests//functional/test_deps) reach its welded tests: a test imports a
 #      test-support package the library does not depend on; and nothing else
 #      (tests//negative/test_deps): the library's source and a consumer of
@@ -214,6 +214,8 @@
 #      and an #[ignore]d test are each refused; a hanging test is NO VERDICT
 #      at its timeout. There are no holds: every welded test must pass.
 #      `buck2 test` of a binary welded to a red test fails.
+#  35b. The Cargo-driven attributes of the Rust rules (env, renamed_deps,
+#      native_deps, patch, proc_macro_extern): see tools/build/tests/rust_tests.sh.
 #  36. mojo_aws_client (tools/build/cloud/aws.bzl; tests//functional/mojo_aws_client): a
 #      pure-mode CloudWatch Logs client generated from the pinned botocore
 #      model with operations = [GetLogEvents], over stub runtime deps, builds

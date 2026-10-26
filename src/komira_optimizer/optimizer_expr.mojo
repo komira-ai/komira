@@ -99,6 +99,8 @@ from komira_plan_ir.plan_helpers import (
     _take_limit_child,
     _take_distinct_child,
     _take_topn_child,
+    _expr_has_foldable,
+    _expr_has_simplifiable,
 )
 # Tier 1 Expr → kernel template
 # matcher. The matcher reads from this comptime registry of stable template
@@ -187,60 +189,15 @@ def fold_constants(var plan: LogicalPlan) -> LogicalPlan:
 def fold_constants_inplace(mut plan: LogicalPlan):
     """In-place constant folding (avoids an O(n^2) tree rebuild).
 
-    Recurses through OwnedPointer-held children IN PLACE (no allocation),
-    and mutates predicate / expression fields directly. The Expr-level
-    `_fold_expr` is still consume-and-return (Expr is the unit of
-    transformation), but no new LogicalPlan node is constructed -- the
-    existing OwnedPointer wrappers and Schema fields are reused.
+    Rewrites every site of `_walk_expr_sites` in place, children first; no
+    new LogicalPlan node is constructed. The Expr-level `_fold_expr` is
+    consume-and-return (Expr is the unit of transformation).
 
     DuckDB pattern reference:
     `duckdb/src/optimizer/expression_rewriter.cpp:63-72`
     (`VisitOperator` mutates the operator in place).
     """
-    if plan.tag == PLAN_SCAN:
-        if plan._scan and plan._scan.value()[].filter:
-            var old_filter = plan._scan.value()[].filter.value().copy()
-            var folded = _fold_expr(old_filter^)
-            plan._scan.value()[].filter = folded^
-
-    elif plan.tag == PLAN_FILTER:
-        fold_constants_inplace(plan._filter.value()[].child[])
-        var pred_copy = plan._filter.value()[].predicate.copy()
-        var folded_pred = _fold_expr(pred_copy^)
-        plan._filter.value()[].predicate = folded_pred^
-
-    elif plan.tag == PLAN_PROJECT:
-        fold_constants_inplace(plan._project.value()[].child[])
-        # Fold each expression in place. ExprArray rebuild is local to
-        # the ProjectData; no parent Schema rebuild.
-        var new_exprs = ExprArray()
-        for i in range(len(plan._project.value()[].exprs)):
-            var expr_copy = plan._project.value()[].exprs[i].copy()
-            new_exprs.append(_fold_expr(expr_copy^))
-        plan._project.value()[].exprs = new_exprs^
-
-    elif plan.tag == PLAN_AGGREGATE:
-        fold_constants_inplace(plan._aggregate.value()[].child[])
-        _rewrite_agg_and_residual_sites[_SITE_RULE_FOLD](plan)
-
-    elif plan.tag == PLAN_JOIN:
-        fold_constants_inplace(plan._join.value()[].left[])
-        fold_constants_inplace(plan._join.value()[].right[])
-        _rewrite_agg_and_residual_sites[_SITE_RULE_FOLD](plan)
-
-    elif plan.tag == PLAN_SORT:
-        fold_constants_inplace(plan._sort.value()[].child[])
-
-    elif plan.tag == PLAN_LIMIT:
-        fold_constants_inplace(plan._limit.value()[].child[])
-
-    elif plan.tag == PLAN_DISTINCT:
-        fold_constants_inplace(plan._distinct.value()[].child[])
-
-    elif plan.tag == PLAN_TOPN:
-        fold_constants_inplace(plan._topn.value()[].child[])
-    # PLAN_PARTITION_BY / PLAN_PARTITION_TOPN / PLAN_ASOF_JOIN: untouched
-    # by the original; preserve that behavior.
+    _ = _walk_expr_sites[_SITE_RULE_FOLD, True](plan)
 
 
 def _fold_expr(var expr: Expr) -> Expr:
@@ -409,7 +366,11 @@ def _is_bool_literal(expr: Expr, value: Bool) -> Bool:
     return False
 
 
-# The expression rule `_rewrite_agg_and_residual_sites` applies.
+# =============================================================================
+# The expression sites the three rules rewrite, and the prechecks over them
+# =============================================================================
+
+# The expression rule `_walk_expr_sites` applies (or checks for).
 comptime _SITE_RULE_FOLD: Int = 0
 comptime _SITE_RULE_SIMPLIFY: Int = 1
 comptime _SITE_RULE_IN: Int = 2
@@ -425,34 +386,142 @@ def _apply_site_rule[rule: Int](var expr: Expr) -> Expr:
         return _rewrite_in_expr(expr^)
 
 
-def _rewrite_optional_site[rule: Int](mut slot: Optional[Expr]):
-    if slot:
+@always_inline
+def _site_has_work[rule: Int](expr: Expr) -> Bool:
+    """The precheck's reading of one site: True when `rule` may change `expr`.
+
+    Folding counts a binary operation on two literals or a unary operation on
+    a literal (`_expr_has_foldable`); the partial fold `x AND TRUE` is not
+    counted, because `simplify_predicates`, which the driver runs right after,
+    makes the same rewrite and `_expr_has_simplifiable` counts it. The IN
+    rewrite has no expression-level check: every site it visits counts, so
+    its precheck answers whether the plan holds such a site.
+    """
+    comptime if rule == _SITE_RULE_FOLD:
+        return _expr_has_foldable(expr)
+    elif rule == _SITE_RULE_SIMPLIFY:
+        return _expr_has_simplifiable(expr)
+    else:
+        return True
+
+
+@always_inline
+def _visit_site[rule: Int, rewrite: Bool](mut site: Expr) -> Bool:
+    comptime if rewrite:
+        var e = site.copy()
+        site = _apply_site_rule[rule](e^)
+        return False
+    else:
+        return _site_has_work[rule](site)
+
+
+@always_inline
+def _visit_optional_site[rule: Int, rewrite: Bool](mut slot: Optional[Expr]) -> Bool:
+    if not slot:
+        return False
+    comptime if rewrite:
         var e = slot.take()
         slot = _apply_site_rule[rule](e^)
+        return False
+    else:
+        return _site_has_work[rule](slot.value())
 
 
-def _rewrite_agg_and_residual_sites[rule: Int](mut plan: LogicalPlan):
-    """Apply one expression rule to every argument slot of an Aggregate's
-    aggregate functions, or to a Join's residual condition, in place.
+def _walk_expr_sites[rule: Int, rewrite: Bool](mut plan: LogicalPlan) -> Bool:
+    """The one list of the expression sites `fold_constants`,
+    `simplify_predicates` and `rewrite_in_clauses` rewrite, shared by the
+    passes and by their prechecks so the two cannot disagree.
 
-    An Aggregate's group-by keys are left as they are: the output column name
-    of a key that is not a plain column is inferred from the expression's
-    kind, so a rewritten key (an OR chain becoming an IN list) would infer a
-    different name than the one the Aggregate's schema already carries.
+    `rewrite` True applies `rule` at every site in place, children before the
+    node, and returns False. `rewrite` False changes nothing (it takes `mut`
+    only to share this body) and returns True at the first site whose
+    expression `_site_has_work[rule]` accepts.
+
+    The sites: a Scan's pushed filter (folding and simplification only), a
+    Filter's predicate, every Project expression, every argument slot of an
+    Aggregate's aggregate functions, and a Join's residual condition. The walk
+    descends through Filter, Project, Aggregate, Join (both children), Sort,
+    Limit, Distinct and TopN; every other node kind (PartitionBy,
+    PartitionTopN, AsofJoin, Union, ...) ends it.
+
+    An Aggregate's group-by keys are not sites: the output column name of a
+    key that is not a plain column is inferred from the expression's kind, so
+    a rewritten key (an OR chain becoming an IN list) would infer a different
+    name than the one the Aggregate's schema already carries.
     """
-    if plan.tag == PLAN_AGGREGATE:
+    if plan.tag == PLAN_SCAN:
+        comptime if rule != _SITE_RULE_IN:
+            if plan._scan and plan._scan.value()[].filter:
+                return _visit_optional_site[rule, rewrite](plan._scan.value()[].filter)
+        return False
+
+    elif plan.tag == PLAN_FILTER:
+        if _walk_expr_sites[rule, rewrite](plan._filter.value()[].child[]):
+            return True
+        return _visit_site[rule, rewrite](plan._filter.value()[].predicate)
+
+    elif plan.tag == PLAN_PROJECT:
+        if _walk_expr_sites[rule, rewrite](plan._project.value()[].child[]):
+            return True
+        ref exprs = plan._project.value()[].exprs
+        for i in range(len(exprs)):
+            if _visit_site[rule, rewrite](exprs[i]):
+                return True
+        return False
+
+    elif plan.tag == PLAN_AGGREGATE:
+        if _walk_expr_sites[rule, rewrite](plan._aggregate.value()[].child[]):
+            return True
         ref aggs = plan._aggregate.value()[].agg_exprs
         for i in range(len(aggs)):
             ref agg = aggs[i]
-            _rewrite_optional_site[rule](agg.child)
-            _rewrite_optional_site[rule](agg.child1)
-            _rewrite_optional_site[rule](agg.child2)
-            _rewrite_optional_site[rule](agg.child3)
+            if _visit_optional_site[rule, rewrite](agg.child):
+                return True
+            if _visit_optional_site[rule, rewrite](agg.child1):
+                return True
+            if _visit_optional_site[rule, rewrite](agg.child2):
+                return True
+            if _visit_optional_site[rule, rewrite](agg.child3):
+                return True
+        return False
+
     elif plan.tag == PLAN_JOIN:
+        if _walk_expr_sites[rule, rewrite](plan._join.value()[].left[]):
+            return True
+        if _walk_expr_sites[rule, rewrite](plan._join.value()[].right[]):
+            return True
         ref j = plan._join.value()[]
         if j.residual:
-            var e = j.residual.value()[].copy()
-            j.residual.value()[] = _apply_site_rule[rule](e^)
+            return _visit_site[rule, rewrite](j.residual.value()[])
+        return False
+
+    elif plan.tag == PLAN_SORT:
+        return _walk_expr_sites[rule, rewrite](plan._sort.value()[].child[])
+    elif plan.tag == PLAN_LIMIT:
+        return _walk_expr_sites[rule, rewrite](plan._limit.value()[].child[])
+    elif plan.tag == PLAN_DISTINCT:
+        return _walk_expr_sites[rule, rewrite](plan._distinct.value()[].child[])
+    elif plan.tag == PLAN_TOPN:
+        return _walk_expr_sites[rule, rewrite](plan._topn.value()[].child[])
+    return False
+
+
+def _plan_has_foldable_exprs(mut plan: LogicalPlan) -> Bool:
+    """True when some site `fold_constants` rewrites holds a foldable
+    expression (`_expr_has_foldable`). Changes nothing."""
+    return _walk_expr_sites[_SITE_RULE_FOLD, False](plan)
+
+
+def _plan_has_simplifiable_exprs(mut plan: LogicalPlan) -> Bool:
+    """True when some site `simplify_predicates` rewrites holds a
+    simplifiable expression (`_expr_has_simplifiable`). Changes nothing."""
+    return _walk_expr_sites[_SITE_RULE_SIMPLIFY, False](plan)
+
+
+def _plan_has_in_sites(mut plan: LogicalPlan) -> Bool:
+    """True when the plan holds a site `rewrite_in_clauses` rewrites.
+    Changes nothing."""
+    return _walk_expr_sites[_SITE_RULE_IN, False](plan)
 
 
 # =============================================================================
@@ -469,47 +538,8 @@ def simplify_predicates(var plan: LogicalPlan) -> LogicalPlan:
 
 
 def simplify_predicates_inplace(mut plan: LogicalPlan):
-    """In-place predicate simplification."""
-    if plan.tag == PLAN_FILTER:
-        simplify_predicates_inplace(plan._filter.value()[].child[])
-        var pred_copy = plan._filter.value()[].predicate.copy()
-        var simplified = _simplify_expr(pred_copy^)
-        plan._filter.value()[].predicate = simplified^
-
-    elif plan.tag == PLAN_PROJECT:
-        simplify_predicates_inplace(plan._project.value()[].child[])
-        var new_exprs = ExprArray()
-        for i in range(len(plan._project.value()[].exprs)):
-            var expr_copy = plan._project.value()[].exprs[i].copy()
-            new_exprs.append(_simplify_expr(expr_copy^))
-        plan._project.value()[].exprs = new_exprs^
-
-    elif plan.tag == PLAN_SCAN:
-        if plan._scan and plan._scan.value()[].filter:
-            var old_filter = plan._scan.value()[].filter.value().copy()
-            var simplified = _simplify_expr(old_filter^)
-            plan._scan.value()[].filter = simplified^
-
-    elif plan.tag == PLAN_AGGREGATE:
-        simplify_predicates_inplace(plan._aggregate.value()[].child[])
-        _rewrite_agg_and_residual_sites[_SITE_RULE_SIMPLIFY](plan)
-
-    elif plan.tag == PLAN_JOIN:
-        simplify_predicates_inplace(plan._join.value()[].left[])
-        simplify_predicates_inplace(plan._join.value()[].right[])
-        _rewrite_agg_and_residual_sites[_SITE_RULE_SIMPLIFY](plan)
-
-    elif plan.tag == PLAN_SORT:
-        simplify_predicates_inplace(plan._sort.value()[].child[])
-
-    elif plan.tag == PLAN_LIMIT:
-        simplify_predicates_inplace(plan._limit.value()[].child[])
-
-    elif plan.tag == PLAN_DISTINCT:
-        simplify_predicates_inplace(plan._distinct.value()[].child[])
-
-    elif plan.tag == PLAN_TOPN:
-        simplify_predicates_inplace(plan._topn.value()[].child[])
+    """In-place predicate simplification at every site of `_walk_expr_sites`."""
+    _ = _walk_expr_sites[_SITE_RULE_SIMPLIFY, True](plan)
 
 
 def _simplify_expr(var expr: Expr) -> Expr:
@@ -958,7 +988,8 @@ def _cse_rewrite_aggregate_axis3(mut plan: LogicalPlan, mut counter: _CseNameCou
     # lets us reassign `plan` at the end without holding any live `ref`
     # into `plan`'s internals (Mojo lifetime rule). The copy is a 1-time
     # cost in the rare-CSE-hit case; the no-op path bails before this.
-    if len(plan._aggregate.value()[].agg_exprs) == 0:
+    # A UDF Aggregate is left alone, as Axis 1 leaves a UDF Project.
+    if len(plan._aggregate.value()[].agg_exprs) == 0 or plan.has_udf():
         return
 
     # Phase 1: tally fingerprints from a brief borrow. ExprArray for
@@ -1046,8 +1077,8 @@ def _cse_rewrite_aggregate_axis3(mut plan: LogicalPlan, mut counter: _CseNameCou
     for i in range(len(ad_copy.group_by)):
         new_gb.append(ad_copy.group_by[i].copy())
 
-    # UDF aggs / chain_id preservation
-    # removed — AggregateData no longer carries those fields.
+    # A UDF Aggregate returned at the top, so the non-UDF factory drops
+    # nothing here.
     plan = LogicalPlan.aggregate(
         new_gb^, new_aggs^, below_project^
     )
@@ -1459,48 +1490,16 @@ def rewrite_in_clauses(var plan: LogicalPlan) -> LogicalPlan:
     one value to `col == v` (`_rewrite_in_expr`). Filter predicates and
     Project expressions, the argument slots of an Aggregate's aggregate
     functions and a Join's residual condition are rewritten; an Aggregate's
-    group-by keys are not (see `_rewrite_agg_and_residual_sites`).
+    group-by keys are not (see `_walk_expr_sites`).
     """
     rewrite_in_clauses_inplace(plan)
     return plan^
 
 
 def rewrite_in_clauses_inplace(mut plan: LogicalPlan):
-    """In-place IN-clause rewriting."""
-    if plan.tag == PLAN_FILTER:
-        rewrite_in_clauses_inplace(plan._filter.value()[].child[])
-        var pred_copy = plan._filter.value()[].predicate.copy()
-        var rewritten = _rewrite_in_expr(pred_copy^)
-        plan._filter.value()[].predicate = rewritten^
-
-    elif plan.tag == PLAN_PROJECT:
-        rewrite_in_clauses_inplace(plan._project.value()[].child[])
-        var new_exprs = ExprArray()
-        for i in range(len(plan._project.value()[].exprs)):
-            var expr_copy = plan._project.value()[].exprs[i].copy()
-            new_exprs.append(_rewrite_in_expr(expr_copy^))
-        plan._project.value()[].exprs = new_exprs^
-
-    elif plan.tag == PLAN_AGGREGATE:
-        rewrite_in_clauses_inplace(plan._aggregate.value()[].child[])
-        _rewrite_agg_and_residual_sites[_SITE_RULE_IN](plan)
-
-    elif plan.tag == PLAN_JOIN:
-        rewrite_in_clauses_inplace(plan._join.value()[].left[])
-        rewrite_in_clauses_inplace(plan._join.value()[].right[])
-        _rewrite_agg_and_residual_sites[_SITE_RULE_IN](plan)
-
-    elif plan.tag == PLAN_SORT:
-        rewrite_in_clauses_inplace(plan._sort.value()[].child[])
-
-    elif plan.tag == PLAN_LIMIT:
-        rewrite_in_clauses_inplace(plan._limit.value()[].child[])
-
-    elif plan.tag == PLAN_DISTINCT:
-        rewrite_in_clauses_inplace(plan._distinct.value()[].child[])
-
-    elif plan.tag == PLAN_TOPN:
-        rewrite_in_clauses_inplace(plan._topn.value()[].child[])
+    """In-place IN-clause rewriting at every site of `_walk_expr_sites` but a
+    Scan's pushed filter."""
+    _ = _walk_expr_sites[_SITE_RULE_IN, True](plan)
 
 
 def _rewrite_in_expr(var expr: Expr) -> Expr:

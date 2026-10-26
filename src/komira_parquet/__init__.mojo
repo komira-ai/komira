@@ -45,7 +45,14 @@ serves a footer's statistics to a planner (`table_stats`).
 
 It reads a local file a row group or a morsel at a time (`morsel_reader`,
 with its morsel windows in `morsel_slice`), and decodes a row group from
-bytes the caller already holds, with no I/O (`bytes_decode`).
+bytes the caller already holds, with no I/O (`bytes_decode`), or a whole
+in-memory file to one batch (`file_decode`, `decode_parquet_file_from_bytes`).
+
+It reads only the pages a filter needs: page indexes (`page_index`,
+`page_index_parser`, `page_index_cache`) and the pages a filter can skip
+(`page_pruner`); and it holds a scan source's row-group reads
+(`parquet_source_helpers`, `parquet_source_constants`,
+`parquet_source_page_picks`).
 """
 
 from .byte_stream_split import (
@@ -117,6 +124,7 @@ from .gather import decode_column_with_selection
 from .bloom_reader import BloomFilterHeaderInfo, load_bloom_filter, parse_bloom_filter_header
 from .bloom_pruner import can_prune_row_group_by_bloom
 from .num_rows_cache import ParquetNumRowsCache
+from .file_decode import decode_parquet_file_from_bytes
 from .partition_pred_bridge import pod_from_predicate, predicate_from_pod
 from .column_decoder import (
     NumericDictCodes,
@@ -137,4 +145,20 @@ from .bytes_decode import (
     decode_column_chunk_from_bytes,
     decode_row_group_from_bytes,
     row_group_byte_range,
+)
+from .page_index import (
+    ColumnIndex,
+    OffsetIndex,
+    PageByteRun,
+    coalesce_pages,
+    read_selected_pages_via_runs,
+)
+from .page_index_parser import parse_column_index_int64, parse_offset_index
+from .page_index_cache import ParquetPageIndexCache, get_or_parse_indexes_copy
+from .page_pruner import (
+    PageIndexBundle,
+    PageSelection,
+    PageSelectionSet,
+    evaluate_page_filter,
+    select_pages_for_unit,
 )
