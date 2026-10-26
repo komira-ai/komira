@@ -35,6 +35,12 @@
 #   end of DATA by the data budget, not the other way round.
 # - test_server_close_and_injection: EOF mid-reply is SmtpTransport; bytes
 #   behind the STARTTLS 220 are SmtpSecurity.
+# - test_huge_budgets_do_not_wrap: budgets of Int's maximum on a manual clock
+#   that is above zero still let a whole message through (no wrapped deadline).
+# - test_unsolicited_bytes_before_a_command: a reply left in the buffer when
+#   the next command is about to be written ends the session before any write.
+# - test_upgrade_refusals_close_the_session: upgrade_tls with no server name
+#   and with no descriptor closes the session.
 
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
@@ -783,6 +789,88 @@ def test_server_close_and_injection() raises:
     assert_true(m3.find("descriptor") >= 0, m3)
 
 
+def test_huge_budgets_do_not_wrap() raises:
+    # A budget near the top of Int must mean "very long", never an instant
+    # timeout: the deadline is the clock plus the budget, and that sum must not
+    # wrap negative. The clock is manual and starts above zero, so a plain sum
+    # of this budget wraps.
+    var cell = ArcPointer[Int](1000)
+    var cfg = _config()
+    cfg.clock = SmtpClock.manual(cell)
+    cfg.command_budget_us = 9223372036854775807
+    cfg.data_budget_us = 9223372036854775807
+    var rig = _open_with(
+        String(_G)
+        + _EHLO
+        + "250 ok\r\n250 ok\r\n354 go\r\n250 2.0.0 queued\r\n",
+        cfg,
+        False,
+        1,
+        0,
+        None,
+    )
+    var g = rig.session.read_greeting()
+    assert_equal(g.code, 220)
+    var h = rig.session.ehlo()
+    assert_equal(h.code, 250)
+    var r = rig.session.send(
+        String("a@sender.test"), _rcpts("bob@example.com"), Span(_b(_MSG))
+    )
+    assert_equal(r.code, 250)
+    assert_equal(r.stage, "accepted")
+    assert_false(rig.session.is_closed())
+
+
+def test_unsolicited_bytes_before_a_command() raises:
+    # The server sends a second reply before the client has written the
+    # command it would answer. The client must not take that leftover line as
+    # the answer to its next command (here STARTTLS): it ends the session and
+    # writes nothing more.
+    var rig = _open_with(
+        String("250-m\r\n250 STARTTLS\r\n220 INJECTED\r\n"),
+        _config(),
+        False,
+        4096,
+        0,
+        None,
+    )
+    var h = rig.session.ehlo()
+    assert_equal(h.code, 250)
+    var m = String("")
+    try:
+        _ = rig.session.starttls_command()
+    except e:
+        m = String(e)
+    assert_true(m.startswith("SmtpProtocol"), m)
+    assert_true(m.find("unsolicited") >= 0, m)
+    assert_true(rig.session.is_closed())
+    assert_equal(rig.sent(), "EHLO client.test\r\n")
+
+
+def test_upgrade_refusals_close_the_session() raises:
+    # After a raised error the session is closed, as the type says.
+    var noname = _open(String("220 go ahead\r\n"))
+    _ = noname.session.starttls_command()
+    var m1 = String("")
+    try:
+        _ = noname.session.upgrade_tls(String(""), String(""))
+    except e:
+        m1 = String(e)
+    assert_true(m1.startswith("SmtpSecurity"), m1)
+    assert_true(m1.find("server name") >= 0, m1)
+    assert_true(noname.session.is_closed())
+
+    var nofd = _open(String("220 go ahead\r\n"))
+    _ = nofd.session.starttls_command()
+    var m2 = String("")
+    try:
+        _ = nofd.session.upgrade_tls(String(""), String("mail.test"))
+    except e:
+        m2 = String(e)
+    assert_true(m2.find("descriptor") >= 0, m2)
+    assert_true(nofd.session.is_closed())
+
+
 def main() raises:
     # Every case runs; the failures are reported together.
     var failed = String("")
@@ -854,6 +942,18 @@ def main() raises:
         test_server_close_and_injection()
     except e:
         failed += "\n  test_server_close_and_injection: " + String(e)
+    try:
+        test_huge_budgets_do_not_wrap()
+    except e:
+        failed += "\n  test_huge_budgets_do_not_wrap: " + String(e)
+    try:
+        test_unsolicited_bytes_before_a_command()
+    except e:
+        failed += "\n  test_unsolicited_bytes_before_a_command: " + String(e)
+    try:
+        test_upgrade_refusals_close_the_session()
+    except e:
+        failed += "\n  test_upgrade_refusals_close_the_session: " + String(e)
     if failed.byte_length() > 0:
         raise Error("test_session: FAILED" + failed)
     print("test_session: OK")
