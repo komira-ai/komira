@@ -1,9 +1,9 @@
 # The knowledge graph port: packages, seams, engine dependencies and PR order
 
-Status: design; PRs 1 to 3 are in the tree. It decides how the existing data-graph library (a property graph built from
+Status: design; PRs 1 to 3 and 13 are in the tree. It decides how the existing data-graph library (a property graph built from
 documents and records, with a bi-temporal store and a read path) comes into komira as small, separately
 tested packages. Of the packages named here only parts 1 to 3 of [`komira_kg_format`](../../src/komira_kg_format/)
-(its `embedding`, `ingest_types`, `manifest_body`, `schemas`, `cosine`, `query_result`, `delta_body`, `delta_codec` and `source_fingerprint` modules) are in the tree yet. The code graph
+(its `embedding`, `ingest_types`, `manifest_body`, `schemas`, `cosine`, `query_result`, `delta_body`, `delta_codec` and `source_fingerprint` modules) and [`komira_kg_mode`](../../src/komira_kg_mode/) are in the tree yet. The code graph
 [`komira_kg_code`](../../src/komira_kg_code/) is a different thing and is untouched (see
 [knowledge_graph.md](../knowledge_graph.md)).
 
@@ -432,5 +432,5 @@ dedup scheme (MinHash with banded LSH) is tuned for names and short strings, not
 
 ## Where is the code?
 
-Parts 1 to 3 of `komira_kg_format` are in [`src/komira_kg_format/`](../../src/komira_kg_format/); every other location above is the one the package will have. Source sizes quoted are measured on the
+Parts 1 to 3 of `komira_kg_format` are in [`src/komira_kg_format/`](../../src/komira_kg_format/) and `komira_kg_mode` is in [`src/komira_kg_mode/`](../../src/komira_kg_mode/); every other location above is the one the package will have. Source sizes quoted are measured on the
 source implementation; re-measure each before its PR, because a count carried in a design drifts.

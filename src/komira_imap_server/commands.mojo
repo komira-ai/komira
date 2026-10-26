@@ -1,10 +1,10 @@
 # The command dispatcher: one complete line in, replies queued, an action out.
 #
 # CAPABILITY, NOOP, LOGOUT, STARTTLS and LOGIN are here; SELECT, EXAMINE,
-# LIST and CLOSE are in mailbox.mojo, FETCH in fetch.mojo, STORE and EXPUNGE
-# in search_store.mojo. A command this server does not implement is answered
-# `NO [CANNOT]` (a real IMAP4rev1 command) or `BAD` (not a command), never
-# with a dropped connection. No socket, no clock: the time is a parameter, the
+# LIST and CLOSE are in mailbox.mojo, FETCH in fetch.mojo, SEARCH in
+# search.mojo, STORE and EXPUNGE in search_store.mojo. A command this server
+# does not implement is answered `NO [CANNOT]` (a real IMAP4rev1 command) or
+# `BAD` (not a command), never with a dropped connection. No socket, no clock: the time is a parameter, the
 # connection is a value.
 
 from komira_mail_auth import MailAuthVerifier
@@ -40,6 +40,7 @@ from .reply import (
     tagged_ok,
     tagged_ok_code,
 )
+from .search import handle_search
 from .search_store import handle_expunge, handle_store
 
 # What `_classify` says about a command word.
@@ -83,14 +84,14 @@ def _classify(cmd: String) -> Int:
         or cmd == "LIST"
         or cmd == "CLOSE"
         or cmd == "FETCH"
+        or cmd == "SEARCH"
         or cmd == "STORE"
         or cmd == "EXPUNGE"
         or cmd == "UID"
     ):
         return _SUPPORTED
     if (
-        cmd == "SEARCH"
-        or cmd == "APPEND"
+        cmd == "APPEND"
         or cmd == "CREATE"
         or cmd == "DELETE"
         or cmd == "RENAME"
@@ -190,9 +191,6 @@ def handle_line[
     if kind == _UNKNOWN:
         tagged_bad(conn, tag, "Command not recognized")
         return IMAP_ACTION_CONTINUE
-    if cmd == "SEARCH":
-        _search(conn, tag, args, False)
-        return IMAP_ACTION_CONTINUE
     if kind == _UNSUPPORTED:
         tagged_no_code(conn, tag, "CANNOT", "This command is not supported")
         return IMAP_ACTION_CONTINUE
@@ -218,6 +216,8 @@ def handle_line[
         )
     elif cmd == "FETCH":
         handle_fetch(conn, store, config, tag, args, False)
+    elif cmd == "SEARCH":
+        handle_search(conn, store, config, tag, args, False)
     elif cmd == "STORE":
         handle_store(
             conn, store, config.limits.compact_flag_log_at, tag, args, False
@@ -237,7 +237,7 @@ def handle_line[
                 conn, store, config.limits.compact_flag_log_at, tag, words.rest, True
             )
         elif sub == "SEARCH":
-            _search(conn, tag, words.rest, True)
+            handle_search(conn, store, config, tag, words.rest, True)
         elif sub == "EXPUNGE" or sub == "COPY" or sub == "MOVE":
             tagged_no_code(
                 conn, tag, "CANNOT", "This UID command is not supported"
@@ -245,15 +245,6 @@ def handle_line[
         else:
             tagged_bad(conn, tag, "Unknown UID command")
     return IMAP_ACTION_CONTINUE
-
-
-def _search(mut conn: ImapConnection, tag: String, args: String, by_uid: Bool):
-    """`SEARCH` and `UID SEARCH`: the one place a later part implements them.
-    Until then both are refused, whatever the state."""
-    var what = String("This command is not supported")
-    if by_uid:
-        what = String("This UID command is not supported")
-    tagged_no_code(conn, tag, "CANNOT", what)
 
 
 def _starttls(

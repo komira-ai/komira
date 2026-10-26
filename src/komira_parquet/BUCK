@@ -62,7 +62,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # It reads a local file a row group or a morsel at a time
 # (morsel_reader, its morsel windows in morsel_slice, the data-page count of
 # the one-pass selection decode in data_page_count), and decodes a row group
-# from bytes the caller already holds, with no I/O (bytes_decode). Each
+# from bytes the caller already holds, with no I/O (bytes_decode), or a whole
+# in-memory file to one batch (file_decode). Each
 # column chunk decoded there is counted (komira_counters).
 #
 # The welded tests:
@@ -190,6 +191,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   chunk out of the whole file, INT64 and nullable INT32 dictionary codes
 #   mapped back to the rows (PLAIN and BYTE_ARRAY chunks get None), and the
 #   refusals.
+# - test_file_decode_direct: a whole in-memory file to one batch, on files
+#   written by komira_test_parquet_file: row groups and pages concatenated in
+#   file order, a projection, and the refusals (empty, short, truncated, bad
+#   magic at either end, footer length, garbage footer, no row group, a chunk
+#   outside the data region).
 # - test_no_env_reads: the package's sources read no environment, import no
 #   komira package outside the deps below (and never komira_core), hold no
 #   raw pointer in a public signature, rebuild no address from an integer
@@ -282,6 +288,7 @@ mojo_library(
         "tests/test_dictionary_resolve_int32_simd_parity.mojo",
         "tests/test_dictionary_resolve_int64_simd_parity.mojo",
         "tests/test_dictionary_strings_flba_direct.mojo",
+        "tests/test_file_decode_direct.mojo",
         "tests/test_file_reader_local.mojo",
         "tests/test_file_reader_object_store.mojo",
         "tests/test_flat_read_types_are_never_nested.mojo",

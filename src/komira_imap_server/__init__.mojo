@@ -1,10 +1,12 @@
 """An IMAP4rev1 server for reading received mail: the connection table, CRLF
 line framing with a cap, the command state machine, durable flags, and a
-caller-polled serve loop over non-blocking sockets with STARTTLS. Part A of
-the server: CAPABILITY, NOOP, LOGOUT, STARTTLS, LOGIN, SELECT, EXAMINE, LIST,
-CLOSE, FETCH (FLAGS, UID, BODY[], BODY.PEEK[], RFC822), STORE, EXPUNGE and the
-UID forms of FETCH and STORE. It is a subset, and its UIDs are not
-general-purpose IMAP UIDs: see README.md.
+caller-polled serve loop over non-blocking sockets with STARTTLS. Commands:
+CAPABILITY, NOOP, LOGOUT, STARTTLS, LOGIN, SELECT, EXAMINE, LIST, CLOSE, FETCH
+(FLAGS, UID, INTERNALDATE, RFC822.SIZE, ENVELOPE, BODYSTRUCTURE, BODY, every
+BODY[section]<partial>, RFC822, RFC822.HEADER, RFC822.TEXT, the macros),
+SEARCH with every key of RFC 3501, STORE, EXPUNGE and the UID forms of FETCH,
+STORE and SEARCH. It is a subset, and its UIDs are not general-purpose IMAP
+UIDs: see README.md.
 
 | name | does |
 |---|---|
@@ -12,6 +14,7 @@ general-purpose IMAP UIDs: see README.md.
 | `FeedOutcome` | what one `feed` did: bytes taken, close, start TLS, and bytes the client pipelined after STARTTLS |
 | `ImapLimits`, `ImapServerConfig` | plain values the binary fills from flags (`limits.mojo`) |
 | `handle_line` | one command line to queued replies and an action (`commands.mojo`) |
+| FETCH and SEARCH, run by `handle_line` | items in `fetch.mojo`, sections in `section.mojo`, ENVELOPE and BODYSTRUCTURE in `bodystructure.mojo`, the header scanner in `headers.mojo`, SEARCH in `search_parse.mojo` and `search.mojo` |
 | `MailboxFlagStore`, `FlagSnapshot` | durable, shared message flags and EXPUNGE over `komira_comms_index` (`flags.mojo`) |
 | `ListenSocket`, `bind_imap_listener` | the listening socket, which owns its descriptor (`listener.mojo`) |
 | `serve_one_iteration`, `ImapServeOutcome` | one caller-polled step over real sockets, with STARTTLS (`serve.mojo`) |
