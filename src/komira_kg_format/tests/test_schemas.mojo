@@ -9,7 +9,8 @@
 #   nullability no column of any table is nullable.
 #   versions    every SCHEMA_VERSION_* constant is 1, and is a value a manifest
 #               entry can carry.
-#   constants   TS_OPEN_SENTINEL is the stated open-interval value.
+#   constants   TS_OPEN_SENTINEL is Int64.MAX, above a current time in seconds,
+#               milliseconds, microseconds and nanoseconds.
 #   shared      the embedding columns are LARGE_STRING in every table that has
 #               one, and a delta-only projection repeats the entities columns it
 #               projects with the same type.
@@ -194,7 +195,22 @@ def test_version_is_carried_by_a_manifest_entry() raises:
 
 
 def test_open_sentinel_value() raises:
-    assert_equal(TS_OPEN_SENTINEL, Int64(999999999999))
+    assert_equal(TS_OPEN_SENTINEL, Int64.MAX)
+    assert_equal(TS_OPEN_SENTINEL, Int64(9223372036854775807))
+
+
+def test_open_sentinel_is_above_a_current_time_in_every_unit() raises:
+    # 2026-10-26 00:00:00 UTC is 1793000000 seconds after the epoch.
+    var seconds = Int64(1_793_000_000)
+    var millis = seconds * 1_000
+    var micros = seconds * 1_000_000
+    var nanos = seconds * 1_000_000_000
+    assert_true(seconds < TS_OPEN_SENTINEL)
+    assert_true(millis < TS_OPEN_SENTINEL)
+    assert_true(micros < TS_OPEN_SENTINEL)
+    assert_true(nanos < TS_OPEN_SENTINEL)
+    # The open-edge filter `invalid_at > T` therefore holds in each unit.
+    assert_true(TS_OPEN_SENTINEL > micros)
 
 
 def test_embedding_columns_are_large_string_everywhere() raises:

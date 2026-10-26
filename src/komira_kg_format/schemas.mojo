@@ -17,21 +17,19 @@
 # ids are always present. The bi-temporal end columns (`invalid_at`,
 # `expired_at`) are non-null INT64 holding `TS_OPEN_SENTINEL` while the interval
 # is still open, so the "as of T" read is the plain filter
-# `valid_at <= T and invalid_at > T` with no null handling (see the note on
-# `TS_OPEN_SENTINEL` for the units it holds for).
+# `valid_at <= T and invalid_at > T` with no null handling.
 # =============================================================================
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, Schema, SchemaBuilder
 
 
-# The value of an open end column (`invalid_at`, `expired_at`): 999_999_999_999.
-# The value is part of the stored data, so it is pinned here and not changed. It
-# is above every epoch-second timestamp; as a count of milliseconds or
-# microseconds it is a date in 2001, so a writer that stamps times in those units
-# must not rely on `invalid_at > T` to keep an open edge, and must test for the
-# sentinel itself.
-comptime TS_OPEN_SENTINEL: Int64 = 9999_9999_9999
+# The value of an open end column (`invalid_at`, `expired_at`): `Int64.MAX`. No
+# timestamp in seconds, milliseconds or microseconds reaches it, so "still open"
+# never collides with a real time and `invalid_at > T` keeps an open edge in any
+# unit. Code that tests for an open interval compares against this constant,
+# never against a literal.
+comptime TS_OPEN_SENTINEL: Int64 = Int64.MAX
 
 # Per-table schema versions. Every table starts at version 1: a reader refuses
 # a version it does not know.
