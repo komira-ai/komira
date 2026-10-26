@@ -1,10 +1,10 @@
 # The knowledge graph port: packages, seams, engine dependencies and PR order
 
-Status: design; PRs 1 to 3, 6, 13 and 14 are in the tree. It decides how the existing data-graph library (a property graph built from
+Status: design; PRs 1 to 3, 6, 13, 14 and 18 are in the tree. It decides how the existing data-graph library (a property graph built from
 documents and records, with a bi-temporal store and a read path) comes into komira as small, separately
 tested packages. Of the packages named here only parts 1 to 3 of [`komira_kg_format`](../../src/komira_kg_format/)
 (its `embedding`, `ingest_types`, `manifest_body`, `schemas`, `cosine`, `query_result`, `delta_body`, `delta_codec` and `source_fingerprint` modules) and part 1 of
-[`komira_kg`](../../src/komira_kg/) (`bitemporal`, `name_similarity`, `dedup`, `alias_map` and `source_facet`), [`komira_kg_mode`](../../src/komira_kg_mode/) and [`komira_kg_spec`](../../src/komira_kg_spec/) are in the tree yet. The code graph
+[`komira_kg`](../../src/komira_kg/) (`bitemporal`, `name_similarity`, `dedup`, `alias_map` and `source_facet`), [`komira_kg_mode`](../../src/komira_kg_mode/), [`komira_kg_spec`](../../src/komira_kg_spec/) and [`komira_kg_enrich`](../../src/komira_kg_enrich/) are in the tree yet. The code graph
 [`komira_kg_code`](../../src/komira_kg_code/) is a different thing and is untouched (see
 [knowledge_graph.md](../knowledge_graph.md)).
 
@@ -306,7 +306,7 @@ that brings it, at the seams named. A package's `deps` is stated in its first PR
 | 15 | `komira_kg_llm`: transports, `EmbeddingsWireEmbedder`, `ChatCompletionsLlmClient` with `ExtractionPrompt`, `KgExtractClient` | 1,700 | PRs 7, 12 and 13, async, http client | against an in-process server: request shape, a non-200, a truncated body, the configured path and auth header; a response of the wrong dimension is refused; two different prompts reach the wire unchanged; the request-timeout value reaches the connector (the transport takes a timeout value, not a clock, so no test waits) |
 | 16 | `komira_kg_sources`: `RawStore`, `PartitionBindingStore`, `AdapterRegistry`, `BIndex` | 1,300 | PR 12 | a raw record is stored once per content hash whatever its surface tag; a partition binds one store and one lineage; an unknown source system is refused against the host's set; the index returns the same top-k as a plain scan through two registered test adapters |
 | 17 | `komira_kg_capture`: server and `CaptureRoutes` (the domain routes are split out of the server first) | 2,000 (two PRs) | PR 12 and PR 16, http server | a push to a registered surface becomes an episode and an unregistered surface is refused; the query surface answers from the warm cache and from the snapshot alike; extra routes are only reachable if registered; the server takes its clock as an argument |
-| 18 | `komira_kg_enrich` with the `EnrichmentSender` trait | 1,150 | objectstore | an item is delivered once; a failed delivery is retried by the scheduler's stated schedule; a second worker cannot drain while a lease is held |
+| 18 | `komira_kg_enrich` with the `EnrichmentSender` trait | 1,150 | objectstore | an item is delivered at least once, and by one worker at a time only while that worker's lease holds; a failed delivery is retried by the scheduler's stated schedule; a second worker cannot drain while a lease is held |
 
 That is 19 PRs for about 18,500 lines in this wave. PRs 1 to 4 are a chain; 5 needs PRs 2 and 4; 6 needs
 PR 2; 13 needs nothing. After PR 2 the chain from 6 to 12 and the branches 13 and 18 run in parallel. The
@@ -338,7 +338,7 @@ What each package's tests must prove, and the rules that apply to all of them:
 | `komira_kg` | bi-temporal invariants (a superseded fact keeps its system-time row; no two open edges with the same key); ingest is idempotent per source fingerprint; erasure reaches rows, embeddings and fingerprints | a double-ingest; a contradiction that overwrites history; an erasure that leaves a copy |
 | `komira_kg_mode`, `komira_kg_spec` | each validation rule has a test that fails alone; an unknown mode falls back to rules | a rule silently dropped; a mode that turns inference on by accident |
 | `komira_kg_llm` | request and response shape against an in-process server; the prompt reaches the wire as given; failure paths | an unhandled non-200; a retry loop with no bound; a prompt baked into the client |
-| `komira_kg_capture`, `komira_kg_sources`, `komira_kg_enrich` | output of test adapters for made-up record types; routes reachable only when registered; a queue item delivered once, a lease held by one worker | an adapter that drops a field; an unauthenticated route; a surface tag that dispatches to the wrong adapter |
+| `komira_kg_capture`, `komira_kg_sources`, `komira_kg_enrich` | output of test adapters for made-up record types; routes reachable only when registered; a queue item delivered and acked, a lease held by one worker, a pass that loses its lease stopping before the next delivery | an adapter that drops a field; an unauthenticated route; a surface tag that dispatches to the wrong adapter |
 | `komira_kg_read` | each engine-run operation on a fixed snapshot; end-to-end write then read | a read that disagrees with what the writer stored |
 
 Rules:
@@ -433,5 +433,5 @@ dedup scheme (MinHash with banded LSH) is tuned for names and short strings, not
 
 ## Where is the code?
 
-Parts 1 to 3 of `komira_kg_format` are in [`src/komira_kg_format/`](../../src/komira_kg_format/), part 1 of `komira_kg` is in [`src/komira_kg/`](../../src/komira_kg/), `komira_kg_mode` is in [`src/komira_kg_mode/`](../../src/komira_kg_mode/) and `komira_kg_spec` is in [`src/komira_kg_spec/`](../../src/komira_kg_spec/); every other location above is the one the package will have. Source sizes quoted are measured on the
+Parts 1 to 3 of `komira_kg_format` are in [`src/komira_kg_format/`](../../src/komira_kg_format/), part 1 of `komira_kg` is in [`src/komira_kg/`](../../src/komira_kg/), `komira_kg_mode` is in [`src/komira_kg_mode/`](../../src/komira_kg_mode/), `komira_kg_spec` is in [`src/komira_kg_spec/`](../../src/komira_kg_spec/) and `komira_kg_enrich` is in [`src/komira_kg_enrich/`](../../src/komira_kg_enrich/); every other location above is the one the package will have. Source sizes quoted are measured on the
 source implementation; re-measure each before its PR, because a count carried in a design drifts.
