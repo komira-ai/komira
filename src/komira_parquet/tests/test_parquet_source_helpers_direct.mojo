@@ -188,5 +188,15 @@ def test_the_read_ahead_hint() raises:
         _advise_prefetch_next_rg(reader, md, g)
 
 
+def test_a_dictionary_offset_of_zero_is_no_dictionary() raises:
+    var reader = _Reader.open(_file())
+    var md = _meta(reader)
+    md.row_groups[0].columns[0].meta_data.dictionary_page_offset = Optional[Int](0)
+    var b = _decode_columns_subset_per_chunk(reader, md.row_groups[0], md.schema, [0], False)
+    assert_equal(b.num_rows(), 20)
+    for i in range(20):
+        assert_equal(Int(b.column_at(0).as_primitive[DType.int64]().get(i)), _a(i))
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

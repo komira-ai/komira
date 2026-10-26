@@ -76,7 +76,7 @@ def _chunk_lo(chunk: ColumnChunk) -> Int:
     var lo = chunk.meta_data.data_page_offset
     if chunk.meta_data.dictionary_page_offset:
         var d = chunk.meta_data.dictionary_page_offset.value()
-        if d < lo:
+        if d > 0 and d < lo:
             lo = d
     return lo
 
