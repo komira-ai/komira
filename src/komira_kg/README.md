@@ -2,14 +2,15 @@
 
 ## Responsibility
 
-The mutable data-graph store and its ingest. This is parts 1 to 3 of the package
+The mutable data-graph store and its ingest. This is parts 1 to 4 of the package
 described in
 [the knowledge graph port](https://github.com/komira-ai/komira/blob/main/docs/design/knowledge_graph_port.md):
 bi-temporal edges, entity resolution and the source facet, the three seams
 through which a host supplies a model (`Embedder`, `LlmClient`, `Extractor`),
 each with a stub for tests, an extractor driven by rules the host supplies, and
-the cursor that records how far an incremental read of a source got. Later
-parts add the working set and compaction, and ingest.
+the cursor that records how far an incremental read of a source got. The
+working set loads and rewrites snapshots; later parts add erasure, compaction and
+ingest.
 
 The graph keeps every fact on two time axes: event time (when it held in the
 world) and system time (when the graph learned it and when it learned it no
@@ -52,15 +53,35 @@ deleted, so "what did we believe at time T" stays answerable.
   `ConditionalWriteStore` and writes it with compare-and-set. A writer that loses
   a race is reported (`try_save` returns False), `save` retries a bounded number
   of times, and a stored cursor that does not decode is refused.
+- `working_rows`, `working_codec`, `working_set`: the in-memory working set of
+  one ingest. `WorkingEntity` and `WorkingEpisode` are plain value rows (with
+  `WorkingEdge`), and `SnapshotWorkingSet` holds the three lists and the node-id
+  high-water mark. It loads a base snapshot (`load_from`) or the live head, the
+  base merged with its deltas (`load_latest`, `load_merged`); the writer mints
+  ids (`next_nid`), adds entities, edges and episodes and closes edges in place;
+  `to_tables` writes the whole graph as a base snapshot and `delta_tables` only
+  what changed since the load, with `name_index_delta` for the exact-name index
+  that rides the same delta. The set carries the graph's embedding dimension
+  (given when it is made empty, the manifest's when loaded): an embedding of
+  another length is refused when it is added, when it is written and when it is
+  read. Tables come back through the Parquet reader and the delta codec from
+  bytes, and what is read from storage is checked: the schema version, the
+  columns and their types, null cells, UTF-8, the node-id range and repeats, and
+  a tombstone that matches no edge or that cannot tell its edge from another.
+  A tombstone names an edge by `(src, dst, created_at)`, so a delta cannot close
+  one of two open edges that share that key: `delta_tables` refuses it, and the
+  writer writes a base with `to_tables` instead, which keeps every edge's end
+  times in its own row.
 
 A facet, a source, a predicate and an entity name are opaque strings the host
 supplies: the package fixes no vocabulary. Prompts are values the caller passes
 in. It names no model, vendor or server and holds no network code: a model is a
 trait a host (or a transport package) implements. It calls no model, reads no clock
 and reads no environment; a time is always an argument, in whatever unit the
-graph stamps. It depends on `komira_kg_format` (the open-interval marker),
-`komira_json` (the facet's `attrs` JSON) and `komira_objectstore` (the cursor
-store), and no pointer crosses its API.
+graph stamps. It depends on `komira_kg_format` (the open-interval marker, the
+snapshot store, the schemas and the delta codec), `komira_json` (the facet's
+`attrs` JSON) and `komira_objectstore` (the cursor store and the snapshot
+objects), and no pointer crosses its API.
 
 ## Examples
 
@@ -397,6 +418,63 @@ assert_false(b.try_save(SurfaceCursor("part-1", "feed", "other", 300, 310), seen
 assert_equal(b.load("part-1", "feed").token, "page-2")
 ```
 
+A working set is loaded from the store's head, changed in memory, and written
+back as a delta of only the rows that changed. Reloading the head merges the
+base with the delta, so a reader sees the rows a full rewrite would hold. The
+dimension is the graph's, written once in the manifest:
+
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false, assert_true
+-->
+```mojo
+from komira_kg import SnapshotWorkingSet, WorkingEntity, open_edge
+from komira_kg_format import KgSnapshotStore, TS_OPEN_SENTINEL
+from komira_objectstore.shared_in_memory_conditional_store import (
+    SharedInMemoryConditionalStore,
+)
+
+var store = KgSnapshotStore[SharedInMemoryConditionalStore](
+    SharedInMemoryConditionalStore(), "graph"
+)
+
+# First ingest: an empty set of a stated dimension, written as the base.
+var first = SnapshotWorkingSet(2)
+var a = first.next_nid()
+var b = first.next_nid()
+var v = List[Float64]()
+v.append(0.5)
+v.append(0.25)
+first.add_entity(WorkingEntity(a, "ent-a", "part-1", "alpha", v.copy(), "", "{}"))
+first.add_entity(WorkingEntity(b, "ent-b", "part-1", "beta", v.copy(), "", "{}"))
+first.add_edge(open_edge(a, b, "", "alpha relates to beta", 10, 20, 10))
+_ = store.write_snapshot(first.to_tables(), first.embedding_dim)
+
+# A later ingest: load the head, change it, append only the difference.
+var ws = SnapshotWorkingSet.load_latest(store)
+assert_false(ws.has_delta())
+ws.edges[0].invalid_at = 30  # the fact stopped holding at event time 30
+ws.edges[0].expired_at = 40  # and the graph learned that at system time 40
+ws.add_entity(WorkingEntity(ws.next_nid(), "ent-c", "part-1", "gamma", v.copy(), "", "{}"))
+assert_true(ws.has_delta())
+_ = store.append_delta(ws.delta_tables(), ws.name_index_delta())
+
+var head = SnapshotWorkingSet.load_latest(store)
+assert_equal(len(head.entities), 3)
+assert_equal(head.edges[0].invalid_at, 30)
+assert_equal(head.edges[0].expired_at, 40)
+assert_equal(store.open_latest_chain().num_deltas(), 1)
+
+# An embedding of another dimension is refused.
+var wrong = List[Float64]()
+wrong.append(1.0)
+var refused = False
+try:
+    head.add_entity(WorkingEntity(head.next_nid(), "x", "p", "x", wrong^, "", "{}"))
+except:
+    refused = True
+assert_true(refused)
+```
+
 ## Limits
 
 `dedup_resolve` is pure and stateless: it tests the candidates it is given, so
@@ -410,6 +488,18 @@ differences are not folded.
 ingest, not a whole graph. If one id is claimed as an alias of two different
 canonical ids the answer depends on the order of the calls; consistent claims
 give the same answer in every order.
+
+`SnapshotWorkingSet` is for one ingest of one graph: it holds the whole graph
+in memory, finds an entity by node id with a linear scan (`entity_index_of_nid`),
+and expects ingest of a lineage to be serialized. `delta_tables` reads the loaded
+edges and episodes by position, so it refuses a set whose edges or episodes were
+removed since the load (write `to_tables` instead); an entity edited in place is
+carried by the delta, found by comparing it with the row that was loaded. A
+working edge carries no embedding, so the `fact_embedding` cell of every edge is
+written empty. Row counts recorded in manifests are diagnostics and are not
+checked against the objects. The table layouts are those of
+`komira_kg_format.schemas` at version 1; a table with fewer columns is refused,
+and one with more is read as the layout.
 
 `apply_invalidation` only shortens an interval (never below its start) and keeps
 the first system time an edge expired at, so applying a verdict twice is

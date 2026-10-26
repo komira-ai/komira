@@ -1,7 +1,8 @@
 # =============================================================================
-# komira_kg -- the mutable data-graph store and its ingest (parts 1 to 3:
+# komira_kg -- the mutable data-graph store and its ingest (parts 1 to 4:
 #   bi-temporal edges, entity resolution, the source facet, the model seams, the
-#   rule-driven extractor and the source cursor store).
+#   rule-driven extractor, the source cursor store and the in-memory working
+#   set).
 # =============================================================================
 #
 #   * bitemporal       -- `WorkingEdge`, `open_edge`,
@@ -30,9 +31,15 @@
 #   * cursor_store     -- `SurfaceCursor` and `CursorStore`: where an incremental
 #                         read of a source stopped, kept with compare-and-set on
 #                         a conditional-write store.
+#   * working_rows     -- `WorkingEntity` and `WorkingEpisode` (with the edges of
+#                         `bitemporal`, the rows of the working set).
+#   * working_codec    -- the table names, and the checked conversion between
+#                         the snapshot's table batches and working rows.
+#   * working_set      -- `SnapshotWorkingSet`: load a snapshot or a delta chain,
+#                         apply changes, write back a base or only the delta.
 #
 # Depends on `komira_kg_format`, `komira_json` and `komira_objectstore` and their
-# closure. Reads no
+# closure (the snapshot store, the schemas, the delta codec and the Parquet reader). Reads no
 # clock and no environment; a time is always an argument.
 # =============================================================================
 
@@ -100,3 +107,14 @@ from .cursor_store import (
     decode_cursor,
     encode_cursor,
 )
+from .working_rows import WorkingEntity, WorkingEpisode
+from .working_codec import (
+    EdgeClosure,
+    TABLE_EDGES,
+    TABLE_EDGES_TOMBSTONE,
+    TABLE_ENTITIES,
+    TABLE_ENTITIES_EMBEDDING,
+    TABLE_EPISODES,
+    check_embedding,
+)
+from .working_set import SnapshotWorkingSet
