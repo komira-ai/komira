@@ -554,13 +554,20 @@ def test_a_writer_must_be_the_tables() raises:
     except e:
         said_older = String(e).find("older than the table's current") >= 0
     assert_true(said_older, "an older schema id must be refused as older")
+    # An older schema id whose columns are the current schema's: only the
+    # older-id check refuses it (the columns alone would pass the prefix check).
+    var same_columns = evolved.copy()
+    same_columns.schema_id = 0
+    var stale_same = _reopen(tag, same_columns^, w._table_uuid.copy())
+    with assert_raises(contains="is older than the table's current"):
+        _ = stale_same.commit_append(List[DataFileInfo]())
     # A schema id ahead of the table's that is not an extension of it.
     var rewritten = IcebergSchema(5)
     rewritten.add(String("id"), ICE_T_LONG, required=True)
     rewritten.add(String("other"), ICE_T_STRING, required=True)
     rewritten.add(String("score"), ICE_T_DOUBLE)
     var bad = _reopen(tag, rewritten, w._table_uuid.copy())
-    with assert_raises():
+    with assert_raises(contains="not an add-column extension"):
         _ = bad.commit_append(List[DataFileInfo]())
     # The table's own writer, reopened, still commits.
     var again = _reopen(tag, evolved, w._table_uuid.copy())
