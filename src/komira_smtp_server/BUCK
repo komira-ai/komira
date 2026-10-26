@@ -1,0 +1,38 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The socket-free core of an SMTP server that receives mail: the connection
+# table, CRLF line framing with caps, the command state machine, AUTH over
+# komira_mail_auth, the DATA phase and the MailDelivery seam. No socket, no
+# clock. See __init__.mojo.
+#
+# The welded tests (each file's header says which defects it catches):
+# - test_framing: the line caps with a bounded buffer, strict CRLF, split and
+#   pipelined input, the registry's connection lifetime.
+# - test_commands: one case per command rule (EHLO reset, FROM:/TO: keywords,
+#   exact STARTTLS, VRFY/HELP, advertised capabilities, MAIL parameters, the
+#   recipient cap, address syntax).
+# - test_auth: PLAIN and LOGIN, TLS only, the second AUTH, the failure cap,
+#   MAIL needing AUTH on a submission listener.
+# - test_data: the DATA terminator corpus, dot-unstuffing, the size cap.
+# - test_delivery_seam: the calls and the replies against a recording fake.
+# - test_starttls: the STARTTLS reset and pipelined bytes after it.
+mojo_library(
+    name = "komira_smtp_server",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # Direct dependencies: the rule adds each one's own closure to the compiler.
+    deps = [
+        "//src/komira_collections:komira_collections",
+        "//src/komira_mail_address:komira_mail_address",
+        "//src/komira_mail_auth:komira_mail_auth",
+    ],
+    test_srcs = [
+        "tests/test_auth.mojo",
+        "tests/test_commands.mojo",
+        "tests/test_data.mojo",
+        "tests/test_delivery_seam.mojo",
+        "tests/test_framing.mojo",
+        "tests/test_starttls.mojo",
+    ],
+    test_deps = ["//src/komira_encoding:komira_encoding"],
+    visibility = ["PUBLIC"],
+)

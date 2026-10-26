@@ -332,6 +332,7 @@ TARGETS = [
     "komira//src/komira_simd:ci",
     "komira//src/komira_simd:coverage_floor",
     "komira//src/komira_simd:table",
+    "komira//src/komira_smtp_server:komira_smtp_server_conda",
     "komira//src/komira_source_url:komira_source_url_conda",
     "komira//src/komira_spsc_ring:spsc_ring_bench",
     "komira//src/komira_sql:komira_sql_conda",
