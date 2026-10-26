@@ -6,6 +6,9 @@
 #     rows written, and equal to the same rows written as one row group;
 #   - a projection returns only the listed columns, in the listed order;
 #   - a table of zero rows decodes to zero rows with its schema;
+#   - a footer value count that disagrees with the pages is refused before any
+#     buffer is sized from it; a LARGE_STRING column of non-UTF-8 bytes comes
+#     back intact (as STRING);
 #   - refusals built by rewriting a real file's footer: no row group, a nested
 #     column, and a chunk that names bytes outside the data region: a size
 #     near the Int maximum (which wraps when added to an offset), a negative
@@ -19,6 +22,7 @@ from std.testing import TestSuite, assert_equal, assert_raises, assert_true
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.boolean_array import BooleanArray
 from komira_arrow.column import Column
+from komira_arrow.large_string_array import LargeStringArray
 from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
 from komira_arrow.schema import Field, SchemaBuilder
@@ -369,6 +373,61 @@ def test_a_chunk_that_ends_exactly_at_the_footer_is_accepted() raises:
     meta2.total_compressed_size = end - lo + 1
     with assert_raises(contains="outside the data region"):
         _ = _decode(_with_footer(file, md2))
+
+
+def test_a_column_of_a_billion_values_in_the_footer_is_refused() raises:
+    # The footer's value count must not size a decode buffer: the pages here
+    # hold 10 values, the footer claims far more. Refused by name, at once.
+    var file = write_record_batch_to_parquet_bytes(_batch(0, 10))
+    var counts = [1 << 36, (0x7FFF_FFFF_FFFF_FFFF // 16) - 1, 11]
+    for count in counts:
+        var md = _footer_of(file)
+        md.row_groups[0].columns[0].meta_data.num_values = count
+        with assert_raises(contains="data pages hold 10"):
+            _ = _decode(_with_footer(file, md))
+
+
+def test_a_footer_count_below_the_pages_is_refused() raises:
+    var file = write_record_batch_to_parquet_bytes(_batch(0, 10))
+    var md = _footer_of(file)
+    md.row_groups[0].columns[0].meta_data.num_values = 9
+    with assert_raises(contains="remain undecoded"):
+        _ = _decode(_with_footer(file, md))
+
+
+def test_the_real_value_count_decodes() raises:
+    var file = write_record_batch_to_parquet_bytes(_batch(0, 10))
+    var md = _footer_of(file)
+    for c in range(7):
+        assert_equal(md.row_groups[0].columns[c].meta_data.num_values, 10)
+    _check_rows(_decode(_with_footer(file, md)), 0, 10)
+
+
+def test_a_large_string_column_keeps_arbitrary_bytes() raises:
+    # LARGE_STRING values need not be UTF-8. The reader returns the column as
+    # STRING (it has one string type), with the bytes intact.
+    var raw = List[List[UInt8]]()
+    raw.append([UInt8(0xFF), UInt8(0x00), UInt8(0x80), UInt8(0xC0)])
+    raw.append(List[UInt8]())
+    raw.append([UInt8(0xC0), UInt8(0xAF)])
+    raw.append([UInt8(0x41), UInt8(0x00), UInt8(0x42)])
+    var strings = List[String]()
+    for i in range(len(raw)):
+        strings.append(String(unsafe_from_utf8=Span(raw[i])))
+    var sb = SchemaBuilder()
+    sb.add_field(Field("blob", ArrowType.LARGE_STRING, False))
+    var b = RecordBatchBuilder()
+    b.add_column(Column.from_large_string(LargeStringArray.from_strings(strings)))
+    var file = write_record_batch_to_parquet_bytes(b.build(sb.build()))
+    var got = _decode(file)
+    assert_equal(got.num_rows(), 4)
+    assert_true(got.column_at(0).arrow_type == ArrowType.STRING)
+    ref col = got.column_at(0).as_string()
+    for i in range(4):
+        var span = col.get_span(i)
+        assert_equal(len(span), len(raw[i]), "row " + String(i))
+        for k in range(len(raw[i])):
+            assert_equal(span[k], raw[i][k], "row " + String(i))
 
 
 def main() raises:

@@ -247,7 +247,11 @@ And it reads a file's rows:
   `bytes_decode` and the row groups are concatenated in file order. An empty
   or short buffer, a missing `PAR1` magic, a footer length that does not fit,
   a footer that does not parse, a file with no row group, a nested column and
-  a chunk outside the data region are each refused with an `Error`.
+  a chunk outside the data region are each refused with an `Error`. A
+  `dictionary_page_offset` of 0 is refused as outside the data region (some
+  writers use 0 for "absent"; the Parquet footer says absent by omitting it).
+  A column chunk's `num_values` must equal the values its data page headers
+  declare: the footer's count never sizes a buffer alone.
 - Every column chunk these decode is counted
   (`komira_counters.parquet_column_chunks_decoded`), so a test can see which
   columns a scan read.
