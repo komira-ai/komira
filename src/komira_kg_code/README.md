@@ -14,7 +14,7 @@ a `CodeGraph`:
   depends on, so a library's tests are its welded tests and its standalone
   test targets together.
 - `add_mojo_doc_json(label, text)`: a library's `mojo doc` JSON, as the
-  [`mojo_doc_json`](../../tools/build/mojo/doc.md) rule makes it. Each
+  [`mojo_doc_json`](https://github.com/komira-ai/komira/blob/main/tools/build/mojo/doc.md) rule makes it. Each
   struct, trait, module-level function, `comptime` and method is a node
   (overloads are one), with `declares` edges from its file (or its struct)
   and `conforms` edges to the traits of the graph it conforms to.

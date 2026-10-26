@@ -1,0 +1,37 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Test-only: komira_lowering_rules' payload-narrowing rule against the
+# decisions of the optimizer rule it replaced (deleted). The library holds the
+# fixtures (fixtures.mojo: the builders of that rule's parity table, copied
+# verbatim; extra_fixtures.mojo: the cases added here), the rendering of the
+# rule's decisions as that table's rows, and the reader of
+# golden/payload_narrow.txt (that table verbatim, then the added rows).
+#
+#   test_payload_narrow_parity  for every golden row, the host rule renders
+#                               the row; the file is the 83 table rows then
+#                               the added cases; it holds every width and an
+#                               empty scan; the non-Parquet cases carry the
+#                               source type they name; the reader refuses a
+#                               malformed line and a repeated case.
+#
+# Nothing depends on this package.
+mojo_library(
+    name = "komira_lowering_rules_conformance",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_lowering_rules:komira_lowering_rules",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
+        "//src/komira_plan_stats:komira_plan_stats",
+        "//src/komira_scan_source:komira_scan_source",
+    ],
+    conda = False,
+    test_srcs = [
+        "tests/test_payload_narrow_parity.mojo",
+    ],
+    test_data = {
+        "tests/test_payload_narrow_parity.mojo": {"golden/payload_narrow.txt": "golden/payload_narrow.txt"},
+    },
+    visibility = ["PUBLIC"],
+)

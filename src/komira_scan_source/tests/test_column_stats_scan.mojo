@@ -20,8 +20,9 @@
 #      nulls, an empty string (first value and new minimum), prefixes in
 #      both directions, an all-null
 #      column, and a field that says STRING over a column with no offsets.
-#      The no-scanner arms (a DECIMAL128 field, DATE64), held only to what
-#      is right whether or not komira-ai/komira#940 is fixed. An empty batch,
+#      The no-scanner arm (a DECIMAL128 field): exact nulls, everything else
+#      Absent (part 3, test_column_stats_edges.mojo, has the rest of the
+#      unscanned cases). An empty batch,
 #      several batches whose SIMD blocks must fold into the running min/max,
 #      and no batches at all.
 #   6. Cardinality regimes, each on the SIMD path (no validity) and the
@@ -32,8 +33,6 @@
 #      the bloom poll disables the bloom and finalize drops it). The poll
 #      leaves no trace in the final stats, so it is checked on the
 #      accumulator's `bloom_active`.
-#
-# Nothing here asserts a value believed wrong (komira-ai/komira#940).
 # =============================================================================
 
 from std.testing import (
@@ -60,14 +59,13 @@ from komira_arrow.string_array import StringArray
 from komira_buffer.heap_region import HeapRegion
 from komira_collections.slab import Slab
 from komira_dynamic_filter.bloom_filter import BloomFilter
-from komira_scan_source.column_stats import (
+from komira_scan_source.column_stats import ColumnStats, compute_column_stats
+from komira_scan_source.column_stats_accum import (
     BLOOM_FPP,
-    ColumnStats,
     _ColAccum,
-    _mix64,
     _scan_int_simd_no_validity,
-    compute_column_stats,
 )
+from komira_scan_source.column_stats_hll import _mix64
 
 
 # =============================================================================
@@ -164,13 +162,19 @@ def _within(est: Int64, n: Int, label: String) raises:
     )
 
 
-def _assert_unscanned(s: ColumnStats, nulls: Int, label: String) raises:
-    """A column the docstring gives null_count only: exact nulls, no
-    min/max/sum. NDV is not asserted: the code reports Exact 0 for a column
-    holding values, the docstring says Absent (komira-ai/komira#940)."""
+def _assert_no_value_stats(s: ColumnStats, nulls: Int, label: String) raises:
+    """Exact nulls, no min/max/sum."""
     assert_equal(s.null_count, nulls, label + ": null_count")
     assert_true(s.min.is_absent() and s.max.is_absent(), label + ": no min/max")
     assert_true(s.sum.is_absent(), label + ": no sum")
+
+
+def _assert_unscanned(s: ColumnStats, nulls: Int, label: String) raises:
+    """A column holding values no scanner read: exact nulls, and no
+    min/max/sum, NDV, sketch or bloom."""
+    _assert_no_value_stats(s, nulls, label)
+    assert_true(s.distinct_count.is_absent(), label + ": NDV Absent")
+    assert_false(Bool(s.hll) or Bool(s.bloom), label + ": no sketch or bloom")
 
 
 # =============================================================================
@@ -234,6 +238,7 @@ def test_every_integer_type_in_four_layouts() raises:
     _check_int[DType.int16](ArrowType.INT16, _signed(), 2.0, "INT16")
     _check_int[DType.int32](ArrowType.INT32, _signed(), 4.0, "INT32")
     _check_int[DType.int32](ArrowType.DATE32, _signed(), 4.0, "DATE32")
+    _check_int[DType.int64](ArrowType.DATE64, _signed(), 8.0, "DATE64")
     _check_int[DType.int64](ArrowType.INT64, _signed(), 8.0, "INT64")
     _check_int[DType.int64](ArrowType.TIMESTAMP, _signed(), 8.0, "TIMESTAMP")
     _check_int[DType.int64](ArrowType.TIMESTAMP_S, _signed(), 8.0, "TIMESTAMP_S")
@@ -415,8 +420,7 @@ def test_strings_both_offset_widths() raises:
 
 def test_string_field_over_a_column_without_offsets() raises:
     """A field that says STRING over an INT32 column: no offsets buffer, so
-    the string scanner returns early. Exact nulls and no min/max are right
-    either way; NDV and average size are komira-ai/komira#940."""
+    the string scanner counts and does not read."""
     var vals = List[Int]()
     vals.append(1)
     vals.append(2)
@@ -436,13 +440,6 @@ def test_no_scanner_arms() raises:
     var ds = _stats1(d^, ArrowType.DECIMAL128)
     _assert_unscanned(ds, 2, "DECIMAL128")
     assert_equal(ds.avg_size_bytes, 16.0, "DECIMAL128 is 16 bytes")
-    # DATE64 is INT kind, but `_scan_int_column` has no DATE64 arm, so its
-    # min/max/NDV and width are wrong today (komira-ai/komira#940). Only the
-    # null count, right either way, is asserted.
-    var t = _int_col[DType.int64](vals)
-    t.arrow_type = ArrowType.DATE64
-    _set_nulls(t, nulls)
-    assert_equal(_stats1(t^, ArrowType.DATE64).null_count, 2, "DATE64 nulls")
 
 
 def test_empty_and_multiple_batches_fold() raises:
@@ -474,7 +471,7 @@ def test_empty_and_multiple_batches_fold() raises:
     var empty = compute_column_stats(none, schema)
     # No rows at all: NDV Exact 0 is right here.
     ref e = empty[0]
-    _assert_unscanned(e, 0, "no batches")
+    _assert_no_value_stats(e, 0, "no batches")
     assert_true(e.distinct_count.is_exact(), "no batches: NDV Exact")
     assert_equal(e.distinct_count.value.value().int_val, Int64(0), "no batches: NDV 0")
     assert_equal(e.avg_size_bytes, 8.0, "no batches: INT64 width")
@@ -568,7 +565,11 @@ def test_high_cardinality_drops_the_bloom() raises:
         _within(s.distinct_count.value.value().int_val, 140000, label)
         assert_false(Bool(s.bloom), label + " bloom dropped")
         assert_true(Bool(s.hll), label + " sketch kept")
-        assert_equal(Int64(s.hll.value()[].count()), s.distinct_count.value.value().int_val, label)
+        assert_equal(
+            Int64(min(Int(s.hll.value()[].count()), 140000)),
+            s.distinct_count.value.value().int_val,
+            label + ": the sketch's count, capped at the value count",
+        )
 
 
 def test_bloom_poll_stops_feeding_the_bloom() raises:

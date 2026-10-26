@@ -165,6 +165,38 @@ def test_tag_for_byte_non_structural() raises:
     assert_equal(tag_for_byte(UInt8(0x20)), TAG_INVALID)  # space
 
 
+def test_tag_for_byte_every_byte_at_run_time() raises:
+    """All 256 byte values, read from a list so no call is folded at compile
+    time: exactly the seven structural bytes have a tag, `"` included, and
+    every other byte (the neighbours of each structural among them) is
+    TAG_INVALID."""
+    var bytes = List[UInt8](capacity=256)
+    for v in range(256):
+        bytes.append(UInt8(v))
+    var tagged = 0
+    for i in range(len(bytes)):
+        var b = bytes[i]
+        var want = TAG_INVALID
+        if b == UInt8(0x7B):
+            want = TAG_OPEN_BRACE
+        elif b == UInt8(0x7D):
+            want = TAG_CLOSE_BRACE
+        elif b == UInt8(0x5B):
+            want = TAG_OPEN_BRACKET
+        elif b == UInt8(0x5D):
+            want = TAG_CLOSE_BRACKET
+        elif b == UInt8(0x3A):
+            want = TAG_COLON
+        elif b == UInt8(0x2C):
+            want = TAG_COMMA
+        elif b == UInt8(0x22):
+            want = TAG_QUOTE_OPEN
+        assert_equal(tag_for_byte(b), want, String("byte ") + String(Int(b)))
+        if tag_for_byte(b) != TAG_INVALID:
+            tagged += 1
+    assert_equal(tagged, 7)
+
+
 # =============================================================================
 # T2/T3 — movemask_to_uint_u8x16
 # =============================================================================
@@ -499,6 +531,7 @@ def main() raises:
     test_tag_for_byte_colon_comma()
     test_tag_for_byte_quote_returns_open()
     test_tag_for_byte_non_structural()
+    test_tag_for_byte_every_byte_at_run_time()
     test_movemask_all_zero()
     test_movemask_all_ones()
     test_movemask_single_lane()
@@ -524,4 +557,4 @@ def main() raises:
     test_emit_offsets_single_structural()
     test_emit_offsets_mixed_quote_and_structural()
     test_emit_offsets_ordered_walk()
-    print("simd_primitives: ALL TESTS PASS (29/29)")
+    print("simd_primitives: ALL TESTS PASS (30/30)")

@@ -55,8 +55,7 @@ trait StageSteps:
     own row, artifacts, new names and first error to `result`, and may call
     `recorder.begin` again before its own first effect. Then the reads the
     run makes around its steps: a later stage's NEW NAMES, a platform-set
-    variable, and the committed workflow file. Last, what these steps can
-    run at all (`runs_publish_into_cell`)."""
+    variable, and the committed workflow file."""
 
     def build(mut self, req: BuildRequest, mut result: KciRunResult, mut recorder: CliRecorder) -> StepEnd:
         ...
@@ -108,11 +107,3 @@ trait StageSteps:
         under `artifacts_file` (file header, 4b). Raises when the directory
         is refused."""
         ...
-
-    def runs_publish_into_cell(self) -> Bool:
-        """Whether `publish` runs a PUBLISH step into a cell (dispatch.mojo's
-        header, 1). False by default, and for `LibrarySteps`: kci_publish
-        has no cell destination yet (I3 of deploy_step.md), so the kci
-        binary refuses such a machine file at load. A test's steps answer
-        True to run a stage holding one, and push nothing."""
-        return False

@@ -4,7 +4,7 @@
 #
 # WHAT IS UNDER TEST. `join_payload_narrow_exec.mojo` (the build-side narrow +
 # its admission ladder) and `join_payload_widen.mojo` (the leaf-exit widen).
-# Together they turn the optimizer's inert `PayloadNarrowSpec` stamp into a
+# Together they turn the host lowering rule's inert `PayloadNarrowSpec` into a
 # physical narrow-through/widen-once transform inside ONE join leaf.
 #
 # ⛔⛔ WHY A VALUE ASSERTION ALONE CANNOT GUARD THIS. Narrow-then-widen is the
@@ -322,7 +322,7 @@ def _roundtrip_case(
     # The key must be UNTOUCHED. ⛔ The key exclusion is the load-bearing
     # refusal of the whole lever (a narrowed key declines the fused leaf into
     # a fallback that reached 130 GB anon-RSS), and here it holds because the
-    # optimizer never names it -- so the recorded disposition list must not
+    # lowering rule never names it -- so the recorded disposition list must not
     # mention it at all.
     assert_equal(
         Int(narrowed.column_at(0).arrow_type.type_id),

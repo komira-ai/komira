@@ -2,6 +2,12 @@
 /.buckconfig.local
 # zig's cache of a local C/C++ compile (tools/build/mojo/tools/zig_cc_launcher.zig).
 /.zig-cache/
+# The staged set the release workflow writes with `mopm stage` (release/staged_set/BUCK).
+/release/staged_set/*
+!/release/staged_set/BUCK
 # A private list of words the public boundary lint refuses (root BUCK,
 # public_boundary): kept by the repository that passes it, never here.
 /.public_boundary_deny
+# The beta set the job `mopm-e2e-beta` downloads (release/beta_set/BUCK).
+/release/beta_set/*
+!/release/beta_set/BUCK

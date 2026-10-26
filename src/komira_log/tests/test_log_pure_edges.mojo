@@ -4,7 +4,8 @@
 # sticky `LineWrite` verdict, the time and composite rotation policies, the
 # trailing partial line of a merged segment file, the constructor refusals,
 # module-only registration, the redaction rules' spacing / auth-scheme /
-# e-mail / UTF-8 cap arms, and the trace header helpers.
+# e-mail / non-ASCII pass-through / UTF-8 cap arms, and the trace header
+# helpers.
 #
 # Each case states the defect it catches; none depends on wall-clock time or
 # on another case's state.
@@ -36,6 +37,8 @@ from komira_log.pattern_layout import interpolate
 from komira_log.structured_log import (
     redact_log_text,
     _truncate_utf8,
+    _redact_keyed_secrets,
+    _redact_emails,
     trace_id_from_header,
     qualified_trace,
     REDACTED,
@@ -215,7 +218,7 @@ def test_list_encoders_of_u64_and_bool() raises:
 
 
 # -----------------------------------------------------------------------------
-# structured_log: redaction and trace helpers (ASCII inputs)
+# structured_log: redaction and trace helpers
 # -----------------------------------------------------------------------------
 
 
@@ -261,6 +264,62 @@ def test_utf8_cap_backs_off_a_split_code_point() raises:
     var got = _truncate_utf8(String("aé"), 2)
     assert_equal(got, String("a") + String(TRUNCATED_SUFFIX))
     assert_equal(_truncate_utf8(String("aé"), 3), String("aé"), "fits")
+
+
+def test_redaction_copies_non_ascii_text_byte_for_byte() raises:
+    """komira-ai/komira#1142: bytes the rules do not rewrite come out
+    unchanged. Each pass is checked on its own, so reverting either pass to
+    a per-byte `chr(Int(byte))` copy (which re-encodes 0xC3 as U+00C3, two
+    bytes) turns its assertion red; the composed call pins the case from the
+    issue (`é` became `ÃÂ©` through both passes). The credential and address
+    after the non-ASCII text are still cut at the right offset."""
+    assert_equal(
+        _redact_keyed_secrets(String("café ok")), String("café ok"), "rule 2"
+    )
+    assert_equal(_redact_emails(String("café ok")), String("café ok"), "rule 3")
+    assert_equal(redact_log_text(String("café ok")), String("café ok"))
+    assert_equal(
+        redact_log_text(String("Grüße 日本 token=abc ünd ann@example.com €")),
+        String("Grüße 日本 token=")
+        + String(REDACTED)
+        + String(" ünd ")
+        + String(REDACTED_EMAIL)
+        + String(" €"),
+    )
+
+
+def test_redaction_matches_a_key_directly_after_non_ascii_text() raises:
+    """The non-ASCII run copy in `_redact_keyed_secrets` stops at the first
+    ASCII byte, so a key that starts right after a code point is still seen.
+    A run loop that also takes the ASCII byte after a non-ASCII one (testing
+    `src[i - 1]` as well as `src[i]`) eats the `t` of `token` / the `B` of
+    `Bearer`, no key matches, and the credential is logged in clear. The
+    existing composed case puts a space before `token`, which hides that."""
+    assert_equal(
+        redact_log_text(String("日本token=abc")),
+        String("日本token=") + String(REDACTED),
+    )
+    assert_equal(
+        redact_log_text(String("éBearer xyz")),
+        String("éBearer ") + String(REDACTED),
+    )
+
+
+def test_redaction_copies_a_leading_non_ascii_run_byte_for_byte() raises:
+    """A copy run in `_redact_emails` can START on a non-ASCII byte only at
+    index 0 or right after a redacted address; everywhere else the byte is
+    absorbed into the run of the ASCII byte before it. Those are the two
+    places a copy that re-encodes the run's first byte with `chr` (0xC3 ->
+    U+00C3, two bytes) shows up; `café ok` never reaches it."""
+    assert_equal(
+        _redact_keyed_secrets(String("ünd ok")), String("ünd ok"), "rule 2"
+    )
+    assert_equal(_redact_emails(String("ünd ok")), String("ünd ok"), "rule 3")
+    assert_equal(redact_log_text(String("ünd ok")), String("ünd ok"))
+    assert_equal(
+        redact_log_text(String("ann@example.comé x")),
+        String(REDACTED_EMAIL) + String("é x"),
+    )
 
 
 def test_trace_id_from_header_and_qualified_trace() raises:

@@ -55,8 +55,6 @@ What it does not compare, and why:
   `fs_is_local`) are not compared either; the decoder refuses a hive scan and
   a non-local file system, so a decoded plan is always non-hive and local. The
   door's parquet fixtures set none of them.
-- `ScanData.payload_narrow`: an optimizer annotation that the wire does not
-  carry, so a decoded plan always has it empty.
 
 `wire_bytes_from_hex` reads the hex format `proto_encode` writes (hex digits,
 whitespace ignored).

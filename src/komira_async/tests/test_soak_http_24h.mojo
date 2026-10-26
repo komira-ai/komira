@@ -24,10 +24,13 @@
 # this for hours surfaces leaks / degradation that 100-iteration unit
 # tests miss.
 #
-# Soak duration comes from the `--soak-hours=N` command-line argument (same
+# The run length comes from the `--soak-hours=N` command-line argument (same
 # semantics as test_soak_continuous_churn.mojo):
-#   - Absent / 0 → 60 seconds smoke (the gated test run)
-#   - N > 0 → N hours (a manual long run of the test binary)
+#   - Absent / 0 → exactly SMOKE_REQUESTS requests (the gated test run). No
+#     wall-clock value is asserted: the request count is exact, so the result
+#     does not depend on how fast the machine is.
+#   - N > 0 → requests until N hours of wall time have elapsed (a manual long
+#     run of the test binary)
 #
 # Pointer discipline: zero new public-API pointers.
 # =============================================================================
@@ -45,6 +48,11 @@ from komira_async.runtime.runtime import (
     PLACEMENT_FIXED,
     PerCoreAsyncRuntime,
 )
+
+
+# Requests the gated smoke run performs. Enough for a per-request leak of one
+# fd or a few hundred bytes to exceed the fd and RSS budgets below.
+comptime SMOKE_REQUESTS = 100_000
 
 
 # -----------------------------------------------------------------------------
@@ -143,10 +151,14 @@ def _http_request_iteration(mut root: CancellationToken) raises:
     var req_pool = MorselPool[Int].with_capacity(UInt(8))
     req_pool.submit(0)
     req_pool.close()
+    var claimed = 0
     while True:
         var item = req_pool.try_claim()
         if not item.__bool__():
             break
+        claimed += 1
+    if claimed != 1:
+        raise Error("http soak request: claimed " + String(claimed) + " != 1")
     req_token.cancel(String("request_complete"))
     _ = req_token^
     _ = req_pool^
@@ -159,7 +171,8 @@ def _http_request_iteration(mut root: CancellationToken) raises:
 
 def test_soak_http_request_shape() raises:
     """HTTP-shape soak. One PerCoreAsyncRuntime stays
-    alive for the whole duration; per-iteration we simulate one
+    alive for the whole run (SMOKE_REQUESTS requests, or `--soak-hours=N` of
+    wall time); per-iteration we simulate one
     request lifecycle (child token + morsel pool + drain + cancel).
     Validates that the substrate doesn't accumulate per-request
     state over millions of cycles.
@@ -168,11 +181,8 @@ def test_soak_http_request_shape() raises:
     darwin-arm64.
     """
     var hours = _flag_int(String("--soak-hours="), Int64(0))
-    var duration_sec: Int64
-    if hours <= Int64(0):
-        duration_sec = Int64(60)
-    else:
-        duration_sec = hours * Int64(3600)
+    var smoke = hours <= Int64(0)
+    var duration_sec = hours * Int64(3600)
 
     var rss_budget_mb = _flag_int(
         String("--soak-rss-budget-mb="), Int64(100)
@@ -194,14 +204,22 @@ def test_soak_http_request_shape() raises:
     var rss_after_warmup = _peak_rss_kb()
     var fd_after_warmup = _fd_count()
 
-    print("SOAK_HTTP START duration=", duration_sec,
-          "s rss_baseline=", rss_after_warmup,
-          "KB fd_baseline=", fd_after_warmup)
+    if smoke:
+        print("SOAK_HTTP START requests=", SMOKE_REQUESTS,
+              "rss_baseline=", rss_after_warmup,
+              "KB fd_baseline=", fd_after_warmup)
+    else:
+        print("SOAK_HTTP START duration=", duration_sec,
+              "s rss_baseline=", rss_after_warmup,
+              "KB fd_baseline=", fd_after_warmup)
 
     var iter_count = Int64(0)
     var deadline = start_time + duration_sec
 
-    while _wall_seconds() < deadline:
+    # Smoke: a fixed request count, no clock read. Long run: until the deadline.
+    while (smoke and iter_count < Int64(SMOKE_REQUESTS)) or (
+        not smoke and _wall_seconds() < deadline
+    ):
         _http_request_iteration(root)
         iter_count += 1
         if iter_count % Int64(10_000) == Int64(0):
@@ -225,10 +243,15 @@ def test_soak_http_request_shape() raises:
     _ = root^
 
     # Assertions: same shape as continuous-churn soak.
-    assert_true(
-        iter_count >= Int64(1_000),
-        String("http soak iters=") + String(iter_count) + String(" < 1000"),
-    )
+    # The smoke run completed every request; a request that went wrong
+    # raised inside _http_request_iteration. A long run is bounded by wall
+    # time, so its count is not fixed.
+    if smoke:
+        assert_true(
+            iter_count == Int64(SMOKE_REQUESTS),
+            String("http soak iters=") + String(iter_count) + String(" != ")
+            + String(SMOKE_REQUESTS),
+        )
 
     if rss_after_warmup > Int64(0) and rss_final > Int64(0):
         var rss_delta = rss_final - rss_after_warmup

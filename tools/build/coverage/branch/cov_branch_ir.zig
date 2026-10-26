@@ -81,12 +81,12 @@ pub fn parseMeta(alloc: Alloc, text: []const u8) Meta {
     }
     if (std.mem.startsWith(u8, t, "!{!\"branch_weights\"")) {
         if (!std.mem.endsWith(u8, t, "}")) return .{ .not_counts = t };
-        var ws = std.ArrayList(u64).init(alloc);
+        var ws = std.ArrayList(u64).empty;
         var it = std.mem.splitSequence(u8, t["!{!\"branch_weights\"".len .. t.len - 1], ", ");
         _ = it.next(); // the empty piece before the first ", "
         while (it.next()) |e| {
             const n = if (std.mem.startsWith(u8, e, "i32 ")) e[4..] else if (std.mem.startsWith(u8, e, "i64 ")) e[4..] else return .{ .not_counts = t };
-            ws.append(std.fmt.parseInt(u64, n, 10) catch return .{ .not_counts = t }) catch oom();
+            ws.append(alloc, std.fmt.parseInt(u64, n, 10) catch return .{ .not_counts = t }) catch oom();
         }
         if (ws.items.len < 2) return .{ .not_counts = t };
         return .{ .weights = ws.items };
@@ -142,7 +142,7 @@ pub const Fn = struct {
     brs: std.StringHashMap(void),
 
     pub fn init(alloc: Alloc) Fn {
-        return .{ .alloc = alloc, .insts = std.ArrayList(Inst).init(alloc), .blocks = std.ArrayList(Block).init(alloc), .by_name = std.StringHashMap(usize).init(alloc), .defs = std.StringHashMap(Def).init(alloc), .brs = std.StringHashMap(void).init(alloc) };
+        return .{ .alloc = alloc, .insts = std.ArrayList(Inst).empty, .blocks = std.ArrayList(Block).empty, .by_name = std.StringHashMap(usize).init(alloc), .defs = std.StringHashMap(Def).init(alloc), .brs = std.StringHashMap(void).init(alloc) };
     }
 
     /// Starts the function: its entry block, until a label says otherwise.
@@ -152,7 +152,7 @@ pub const Fn = struct {
         self.by_name.clearRetainingCapacity();
         self.defs.clearRetainingCapacity();
         self.brs.clearRetainingCapacity();
-        self.blocks.append(.{ .name = "", .preds = &.{}, .first = 0, .end = 0 }) catch oom();
+        self.blocks.append(self.alloc, .{ .name = "", .preds = &.{}, .first = 0, .end = 0 }) catch oom();
     }
 
     /// A line of the function that is not an instruction: a label starts a
@@ -161,17 +161,17 @@ pub const Fn = struct {
         if (line.len == 0 or line[0] == ';') return;
         const colon = std.mem.indexOfScalar(u8, line, ':') orelse return;
         const name = std.mem.concat(self.alloc, u8, &.{ "%", line[0..colon] }) catch oom();
-        var preds = std.ArrayList([]const u8).init(self.alloc);
+        var preds = std.ArrayList([]const u8).empty;
         if (std.mem.indexOf(u8, line, "; preds = ")) |p| {
             var it = std.mem.splitSequence(u8, line[p + "; preds = ".len ..], ", ");
-            while (it.next()) |x| preds.append(std.mem.trim(u8, x, " ")) catch oom();
+            while (it.next()) |x| preds.append(self.alloc, std.mem.trim(u8, x, " ")) catch oom();
         }
         const last = &self.blocks.items[self.blocks.items.len - 1];
         if (last.name.len == 0 and last.first == self.insts.items.len and self.blocks.items.len == 1) {
             // The entry block is the labelled one: no unlabelled code before it.
             last.* = .{ .name = name, .preds = preds.items, .first = self.insts.items.len, .end = self.insts.items.len };
         } else {
-            self.blocks.append(.{ .name = name, .preds = preds.items, .first = self.insts.items.len, .end = self.insts.items.len }) catch oom();
+            self.blocks.append(self.alloc, .{ .name = name, .preds = preds.items, .first = self.insts.items.len, .end = self.insts.items.len }) catch oom();
         }
         self.by_name.put(name, self.blocks.items.len - 1) catch oom();
     }
@@ -186,7 +186,7 @@ pub const Fn = struct {
         if (after(text, "br i1 ")) |r| {
             self.brs.put(brKey(self.alloc, operand(r), metaId(text, "!dbg !") orelse 0, metaId(text, "!prof !") orelse 0), {}) catch oom();
         }
-        self.insts.append(.{ .text = text, .ln = ln, .block = b }) catch oom();
+        self.insts.append(self.alloc, .{ .text = text, .ln = ln, .block = b }) catch oom();
         self.blocks.items[b].end = self.insts.items.len;
     }
 
@@ -424,10 +424,10 @@ pub const Fn = struct {
     pub fn under(self: *const Fn, b: []const u8, t: []const u8, own: []const u8) bool {
         if (!self.soleFrom(t, own)) return false;
         var seen = std.StringHashMap(void).init(self.alloc);
-        var todo = std.ArrayList([]const u8).init(self.alloc);
-        todo.append(b) catch oom();
+        var todo = std.ArrayList([]const u8).empty;
+        todo.append(self.alloc, b) catch oom();
         seen.put(b, {}) catch oom();
-        while (todo.popOrNull()) |x| {
+        while (todo.pop()) |x| {
             if (std.mem.eql(u8, x, t)) continue;
             if (std.mem.eql(u8, x, own)) return false;
             const bi = self.by_name.get(x) orelse return false;
@@ -436,7 +436,7 @@ pub const Fn = struct {
             for (preds) |p| {
                 if (seen.contains(p)) continue;
                 seen.put(p, {}) catch oom();
-                todo.append(p) catch oom();
+                todo.append(self.alloc, p) catch oom();
             }
         }
         return true;

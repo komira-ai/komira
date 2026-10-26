@@ -4,8 +4,8 @@
 #
 # Full RFC 5869 Appendix A KAT corpus for HKDF-SHA-256 (the SHA-1 cases
 # A.4-A.6 are out of scope: Sha1 is not a `Hash`). Adds
-# SHA-512 vectors via Python-reference cross-verification to exercise
-# Hkdf[Sha512] generic instantiation.
+# SHA-512 vectors (no published HKDF-SHA-512 vector covers them; see the
+# SHA-512 section) to exercise Hkdf[Sha512] generic instantiation.
 #
 # Appendix A.1 — basic test case (also covered by test_hkdf_smoke).
 # Appendix A.2 — longer inputs/outputs (82-byte OKM = 3 SHA-256 blocks).
@@ -205,7 +205,9 @@ def test_rfc5869_a3_expand() raises:
 # -----------------------------------------------------------------------------
 # SHA-512 instantiation — verifies Hkdf[Sha512] works (exercises the
 # generic-over-H code path with a different H.OUTPUT_SIZE + BLOCK_SIZE).
-# Reference values computed via Python (`hmac` + `hashlib`).
+# Reference values: RFC 5869 Extract/Expand over the RFC 2104 HMAC
+# construction computed with GNU coreutils `sha512sum` (the same composition
+# over `sha256sum` reproduces RFC 5869 A.1).
 # -----------------------------------------------------------------------------
 
 
@@ -217,7 +219,7 @@ def test_hkdf_sha512_extract() raises:
     )
     var salt = _hex_to_bytes(String("000102030405060708090a0b0c"))
     var prk = Hkdf[Sha512].extract(Span[UInt8](salt), Span[UInt8](ikm))
-    # Reference: hmac.new(salt, ikm, hashlib.sha512).hexdigest()
+    # Reference: HMAC-SHA-512(key=salt, msg=ikm), per RFC 5869 section 2.2.
     assert_equal(
         _hex_of_inline64(prk),
         String(
@@ -240,7 +242,7 @@ def test_hkdf_sha512_expand() raises:
     Hkdf[Sha512].expand(
         Span[UInt8](prk), Span[UInt8](info), Span[UInt8](okm)
     )
-    # Reference computed via Python.
+    # Reference: RFC 5869 section 2.3 Expand: T(1) (64 bytes) truncated to 42.
     assert_equal(
         _hex_of_list(okm),
         String(

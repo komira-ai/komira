@@ -4,11 +4,21 @@ load("@komira//tools/build/native:shared.bzl", "native_shared_library")
 # Byte-stream codec trait and the eight codec implementations.
 mojo_library(
     name = "komira_compression",
+    # Its C ships in its package as komira_compression_native below (lib/libkomira_compression_native.so.1).
+    native = ":komira_compression_native",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_lz4:komira_lz4",
         "//src/komira_zlib:komira_zlib",
         "//third_party/snappy:snappy",
+    ],
+    # Opened at run time (OwnedDLHandle, codec_libraries.mojo): the conda
+    # package requires the conda-forge package
+    # tools/build/package/system_libs.bzl names for each.
+    dlopen = [
+        "libbz2.so.1.0",
+        "liblzma.so.5",
+        "libzstd.so.1",
     ],
     test_data = {
         "tests/test_gzip_lz4_frame_conformers.mojo": {
@@ -28,7 +38,7 @@ mojo_library(
 # libkomira_compression_native.so.1: the C this library owns, as its own
 # shared library exporting the names its callers call
 # (tools/build/native/README.md, "Each library's shared library"). Built and
-# checked here; no package ships it yet.
+# checked here, and packed into the library's conda package (`native`).
 native_shared_library(
     name = "komira_compression_native",
     archives = [

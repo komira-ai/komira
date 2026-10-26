@@ -84,7 +84,7 @@ pub fn main() void {
     const report = check.run(alloc, cfg, ledgers, paths, reader) catch |err|
         fail("cannot check the tree: {s}", .{@errorName(err)});
     const json = check.result(alloc, report) catch fail("out of memory", .{});
-    std.fs.cwd().writeFile(out_path, json) catch |err|
+    std.fs.cwd().writeFile(.{ .sub_path = out_path, .data = json }) catch |err|
         fail("cannot write {s}: {s}", .{ out_path, @errorName(err) });
     if (report.lines.len > 0) {
         for (report.lines[0..@min(report.lines.len, 200)]) |l| std.debug.print("{s}\n", .{l});

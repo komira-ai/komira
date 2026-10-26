@@ -97,7 +97,7 @@ Three properties of this check shape everything below:
 
 1. **A README example cannot reach a service.** Every ` ```mojo ` block runs;
    there is no skip word, and a sketch that cannot run must be fenced
-   ` ```text ` (`tools/build/readme_examples/readme_examples/examples.mojo`).
+   ` ```text ` (`tools/build/readme_examples/examples.zig`).
    The same examples are also a welded test of the library in source mode
    (`tools/build/mojo/defs.bzl`, the README gate), so they run inside a build
    action too. An example that needed a live service could not pass the
@@ -508,7 +508,7 @@ check (PROPOSED).
 `komira_validation_run` defines the label `kci-run-id`, legal as both an AWS
 tag and a GCP label, and `kci_cloud` writes it on resources created in a
 scope that carries a validation run id (EXISTS:
-`src/komira_validation_run/validation_run_tag.mojo`,
+`src/komira_validation_run/src/komira_validation_run/validation_run_tag.mojo`,
 `src/kci_cloud/adapter.mojo`). **No kci verb sets a scope's validation run id
 yet**, so nothing real is stamped. And `kci_cloud` stamps only the objects
 `kci_cloud` itself creates: a resource that a validation program creates

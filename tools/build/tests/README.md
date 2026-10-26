@@ -31,11 +31,11 @@ do:
   exit status); [`lint_weld.sh`](negative/lint_weld.sh) plants its defects
   in a snapshot of the tree. A fixture that fails to analyse, to compile
   or to pass its gate is fine as an ordinary package: the CI's
-  reverse-dependency query (`//tools/build/ci:affected`, a `cquery` over
-  `tests//...`) configures every target but analyses none. Only a
+  reverse-dependency query (`tools/build/ci/affected.bxl`, over
+  `tests//functional/...`) configures every target but analyses none. Only a
   configuration failure breaks it: a target with an unknown or invisible
   dependency makes the query fail for every change, and any failure of
-  that query answers BROKEN (with buck2's error, which names the target)
+  that query fails the selector (with buck2's error, which names the target)
   and fails the check, never a widening. Such a fixture must not
   be loadable: it is a `<case>.BUCK` file that the driver copies to
   `<case>/BUCK` for its one build and deletes, its directory gitignored, as
@@ -393,7 +393,9 @@ In the pull-request check, not `run_tests.sh`:
 indexes a `List`, so the binary records the main file's source location. It
 builds only because the wrapper strips the staging directory from recorded
 paths, and its run check, a validation of the binary, compares stdout
-exactly.
+exactly. `tests//functional/mojoc_path:same_bytes` precompiles one package
+twice, sources and `-I` staged at different paths, and fails unless the two
+`.mojoc` are identical ([why](../mojo/README.md#outputs-and-the-runnable-directory)).
 
 ## 22. Rust rules
 
@@ -523,21 +525,32 @@ dynamic symbol.
 ## 28. Compile watchdog
 
 In the pull-request check, not `run_tests.sh`:
-[`watchdog/cases.sh`](functional/watchdog/cases.sh), a remote action
+[`watchdog/cases.zig`](functional/watchdog/cases.zig), a remote action
 (`tests//functional/watchdog:cases`) that refuses its own report when it holds
-fewer ok cases than its floor (a case dropped), runs [`mojo_wrapper.sh`](../mojo/mojo_wrapper.sh)
-on a stand-in toolchain whose `mojo` sleeps, spins, or spawns children. A
+fewer ok cases than its floor (a case dropped), runs the compile wrapper
+(`komira//tools/build/mojo:mojo_compile`, [`mojo_compile.zig`](../mojo/tools/mojo_compile.zig))
+on a stand-in toolchain ([`standin.zig`](functional/watchdog/standin.zig)) whose `mojo` sleeps, spins, or spawns children. A
 tree using no CPU is killed with exit 124 and the message, and so are its
 child and an orphaned grandchild (a child left in any state but zombie fails
-the case); a tree spinning itself or through a child, a short idle and a
+the case); a tree spinning itself or through a child (which the stand-in
+waits for as `wait(2)` does, for every child it has), a short idle and a
 disabled watchdog run to completion; a compiler error keeps its status;
-malformed knobs exit 2. Every case runs under `timeout 60`, so a watchdog
-that never fires is a failed case, not a hung action. Two more signal the
-wrapper while its compiler and the compiler's child hang: after TERM the
-wrapper must exit 143 with both gone, and after KILL, which it cannot catch,
+malformed knobs exit 2. Every case runs under a 60 s deadline of its own, so a watchdog
+that never fires is a failed case, not a hung action. Four more signal the
+wrapper while its compiler and the compiler's child hang: after TERM, HUP or
+INT the wrapper must exit 143, 129 or 130 with both gone and its scratch
+directory removed, and after KILL, which it cannot catch,
 both must be gone within 5 s (the tether in the compiler's session, a read
-of a FIFO only the wrapper holds open, returns when the wrapper dies and
-kills the session). The macOS wrapper has the same watchdog, sampling
+of a pipe only the wrapper holds open, returns when the wrapper dies and
+kills the session). The rest pin what the compiler is given: exactly the
+environment the wrapper's header lists (a variable of the action does not
+reach it), the link line zig receives from the `cc` shim for every row of
+its rewrite table, stdin `/dev/null`, SIGINT and SIGQUIT ignored and its pid
+the session id with the watchdog on (and the wrapper's own stdin and
+dispositions with it off); and the output checks and refusals: an empty
+output 3, one holding the working directory 4, no `-o` 2, a manifest member
+missing 2, no compiler 127. After every case but KILL the scratch directory
+is gone. The macOS wrapper has the same watchdog, sampling
 `ps` rather than `/proc`; test 24 ([`darwin/check.sh`](functional/darwin/check.sh)) runs it on this client
 against a stand-in compiler: a hang is killed (124), a spin is not, a killed
 wrapper takes its compiler with it, a malformed knob is refused.
@@ -566,18 +579,21 @@ from the test command, their absolute prefix, or the inputs behind the
 tests//negative/test_data:skip_77` must fail with `GATED TEST FAILED:
 <label> (exit 77)` and count as `Fail 1`: exit 77, "skipped" to automake
 and some harnesses, is a failure. On a pull request that rule is checked
-only by `runner_cases` (below), which runs the runner itself; mapping the
-runner's status to a verdict is Buck2's. The `bad_*` targets and the
-`test_deps` refusals at analysis are the scenario
+by the runner's own unit tests (below); mapping the runner's status to a
+verdict is Buck2's. The `bad_*` targets and the `test_deps` refusals at
+analysis are the scenario
 [`analysis_refusals_mojo`](../selftest/analysis_refusals_mojo.zig). The gate test
-of `komira//tools/build/mojo/runtime_paths:komira_runtime_paths` (built with
+of `komira//src/komira_runtime_paths:komira_runtime_paths` (built with
 the examples) covers the executable-relative helpers.
-`runner_cases` (in the pull-request check; its action refuses a report with
-fewer ok cases than its floor) also runs the runner on a stand-in that kills itself: with
-SIGKILL it must exit 137 and with SIGABRT 134, each with no marker; one that
-exits 77 must exit 77 with no marker; `--arg` values must reach the
-stand-in in order, unexported, with every `@KOMIRA_ACTION_DIR@` replaced by
-the action's directory; and an `--env` after an `--arg` is refused (exit 2).
+The runner's unit tests ([`tools/build/run/mojo_test.zig`](../run/mojo_test.zig),
+welded to the runner, so a pull request that builds any test runs them) run
+it on a test that kills itself: with SIGKILL it must exit 137 and with SIGABRT
+134, each with no marker; one that exits 77 must exit 77 with no marker;
+`--arg` values must reach the test in order, unexported, with every
+`@KOMIRA_ACTION_DIR@` replaced by the action's directory; and an `--env`
+after an `--arg` is refused (exit 2). The darwin-arm64 build of the runner
+(`run:gate_darwin`) is published behind the same unit tests run on the macOS
+workers (`mojo_test_darwin`, `supervise_test_darwin`).
 
 ## 30. Optimization levels
 
@@ -609,7 +625,8 @@ shell lints through `//:tests_lints` in the root [`BUCK`](../../../BUCK),
 because `//...` does not reach into another cell.
 [`lint_weld.sh`](negative/lint_weld.sh) requires the `_script_lint` lists of the Mojo
 and Rust toolchains ([`mojo/toolchain.bzl`](../mojo/toolchain.bzl),
-[`rust/defs.bzl`](../rust/defs.bzl)) to equal the lists it pins, so a lint
+[`rust/defs.bzl`](../rust/defs.bzl); the Rust rules run no script, so that list is
+empty) to equal the lists it pins, so a lint
 dropped from a toolchain fails it; for each lint target on them it plants
 an unused variable (SC2034) in one of that target's scripts, alone, in a
 snapshot of the tree, and requires the build of
@@ -781,6 +798,15 @@ cp "$out/komira_aws_logs.mojo" tools/build/tests/functional/aws_codegen/golden/l
 cp "$out/_layout_probe.mojo" tools/build/tests/functional/aws_codegen/golden/logs_client_probe.mojo
 ```
 
+A module the generator splits (1000 lines or more, which no generated file may
+reach) is a facade, whose golden is the module's, and parts, `_parts/<module>_pNN.mojo`,
+whose goldens are the `golden_parts` of the case, one file each under its own
+name (`golden/query_client_parts/`): copy `$out/_parts/*.mojo` there. The check
+refuses a split module with no `golden_parts`, `golden_parts` for a module that
+was not split, a part that differs, and any generated file of 1000 lines or more.
+`must_contain` reads the facade and the parts together. The proto goldens do the
+same: a part's golden is a `<name>.mojo.golden` in a directory named `_parts`.
+
 ## 35. Rust tests are part of the build
 
 `rust_test` ([`../rust/README.md`](../rust/README.md#tests-are-part-of-the-build))
@@ -821,6 +847,34 @@ runs the `rust_test` its `tests` names.
 buck2 build //tools/build/proto-codegen:komira_proto_codegen_unit
 buck2 build tests//functional/rust_test: //tools/build/examples/rust/ext:
 buck2 build tests//negative/rust_test:bin       # must fail: GATED TEST FAILED
+```
+
+## 35b. Rust attributes Cargo needs
+
+`env`, `renamed_deps`, `native_deps`, `patch` and `proc_macro_extern` of the
+Rust rules ([`../rust/README.md`](../rust/README.md#cargo-crates)). The greens are
+[`functional/rust_cargo`](functional/rust_cargo/BUCK), each a binary whose run
+check compares its stdout (or a test): `env_pkg` reads `env!("CARGO_PKG_*")`,
+`renamed` links two crates both named `shared` (one under an alias), `native`
+and `native_test` call a C archive, `out_dir_main` links a crate whose
+`include!(concat!(env!("OUT_DIR"), ..))` is rewritten and whose file is added
+by `patch`, `pm_main` uses a proc-macro that names `proc_macro` without
+`extern crate`. In [`negative/rust_cargo`](negative/rust_cargo/BUCK) each green
+is repeated over the same source with its attribute removed or broken, and must
+fail naming its cause ([`rust_tests.sh`](rust_tests.sh)): `env` missing
+(`not defined at compile time`) or wrong (the run check differs), the alias
+missing (`undeclared crate or module`), no `native_deps` (`undefined symbol`, for
+a binary and a test), no patch (`OUT_DIR` not defined), a rewritten include with
+no file added, a substitution whose `count` is wrong (`matched 1 times, expected
+2`), and no `proc_macro_extern` (`proc_macro` undeclared). The refusals at
+analysis (a reserved or malformed `env`, an unknown `patch` key, a malformed
+`sub`, `proc_macro_extern` on a library that is no proc-macro) are rows of
+[`analysis_refusals_rust`](../selftest/analysis_refusals_rust.zig). `patch` is
+run by [`crate_patch`](../rust/crate_patch.zig), whose unit tests gate it.
+
+```sh
+buck2 build tests//functional/rust_cargo:
+buck2 build tests//negative/rust_cargo:env_missing   # must fail
 ```
 
 ## 37. Platform table
@@ -865,7 +919,7 @@ Analysis only.
 
 ## 38. README examples
 
-A library's `README.md` examples are a welded test, `[tests][readme]` ([README examples](../mojo/README.md#readme-examples)), and a BUCK file of several libraries names the one its README is about; [`run_tests.sh`](run_tests.sh) runs [these checks](readme_examples.md).
+A library's `README.md` examples are a welded test, `[tests][readme]` ([README examples](../mojo/README.md#readme-examples)), and a BUCK file of several libraries names the one its README is about: [these checks](readme_examples.md). Case 38 of [`run_tests.sh`](run_tests.sh) still asserts the outputs from before each example became its own program, so it is stale until the komira-ai/komira#1281 self-test slice replaces it.
 
 ## 39. Test welding
 

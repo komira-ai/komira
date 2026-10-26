@@ -1,10 +1,10 @@
 //! analysis_refusals_coverage: the coverage rules' analysis refusals
 //! (tools/build/mojo/coverage.bzl, coverage_branch.bzl), each with its exact
-//! message: a coverage run's data clashing with a source or under buck-out/;
+//! message: a coverage run's data clashing with a source or under the library's import name;
 //! coverage_tests naming a test that does not depend on the library, has
 //! args, a generated main or no coverage build; a test with a source's path;
 //! an enforced shared-library gate; and a branch run's test_env setting
-//! LLVM_PROFILE_FILE. Catches the buck-out check, the no-args check and the
+//! LLVM_PROFILE_FILE. Catches the import-name check, the no-args check and the
 //! LLVM_PROFILE_FILE `fail()` deleted.
 const std = @import("std");
 const lib = @import("lib/lib.zig");
@@ -16,9 +16,9 @@ const ROWS = [_]lib.Row{
         .text = "tests//negative/coverage:clash: coverage run of tests/test_lost.mojo: the test's data destination \"tests/test_lost.mojo\" collides with its source, which a coverage run stages at \"tests/test_lost.mojo\"",
     },
     .{
-        .name = "coverage_run_data_buckout",
-        .target = "tests//negative/coverage:clash_buckout",
-        .text = "tests//negative/coverage:clash_buckout: coverage run of tests/test_lost.mojo: the data destination \"buck-out/data.txt\" is under buck-out/, where a coverage run stages the library's sources",
+        .name = "coverage_run_data_import",
+        .target = "tests//negative/coverage:clash_import",
+        .text = "tests//negative/coverage:clash_import: coverage run of tests/test_lost.mojo: the data destination \"lostlib/data.txt\" is under lostlib/, where a coverage run stages the library's sources",
     },
     .{
         .name = "coverage_gate_mojo_test_stray",

@@ -5,6 +5,11 @@
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_module", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+
 # The reader's cases (markdown_test.zig), run by `zig test` as a build action.
 zig_test(
     name = "markdown_unit",
@@ -12,7 +17,7 @@ zig_test(
     imports = ["markdown.zig"],
     src = "markdown_test.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 # Welded: nothing imports the module unless `:markdown_unit` passed.
@@ -32,5 +37,5 @@ zig_test(
     src = "importer/importer_test.zig",
     deps = [":markdown"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )

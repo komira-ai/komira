@@ -13,8 +13,8 @@ pub fn main() void {
     for (raw, 0..) |arg, i| argv[i] = arg;
     const cwd = std.process.getCwdAlloc(P.a()) catch P.oom();
     const o = cli.outcome(argv, cwd);
-    std.io.getStdOut().writeAll(o.stdout) catch {};
-    std.io.getStdErr().writeAll(o.stderr) catch {};
+    std.fs.File.stdout().writeAll(o.stdout) catch {};
+    std.fs.File.stderr().writeAll(o.stderr) catch {};
     std.process.exit(o.code);
 }
 

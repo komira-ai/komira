@@ -33,14 +33,33 @@ def _read(name: String) raises -> String:
 
 comptime _FILES: List[String] = [
     "__init__.mojo",
+    "column_page.mojo",
+    "decimal_encode.mojo",
     "dict_encoder.mojo",
     "dict_encoder_numeric.mojo",
+    "encoded_column.mojo",
+    "file_assembly.mojo",
+    "page_crc.mojo",
     "page_size_limit.mojo",
+    "record_batch_column.mojo",
+    "record_batch_multi.mojo",
+    "record_batch_schema.mojo",
+    "record_batch_writer.mojo",
     "stats.mojo",
     "thrift_writer.mojo",
+    "writer.mojo",
+    "writer_advanced.mojo",
+    "writer_bloom.mojo",
     "writer_bitpack.mojo",
+    "writer_bss.mojo",
+    "writer_delta.mojo",
+    "writer_dict.mojo",
+    "writer_dict_numeric.mojo",
+    "writer_encode.mojo",
     "writer_float_stats.mojo",
     "writer_helpers.mojo",
+    "writer_multi_batch.mojo",
+    "writer_multi_batch_stats.mojo",
     "writer_page_index.mojo",
 ]
 
@@ -176,10 +195,13 @@ def test_imports_only_its_deps() raises:
         "komira_atomic_alias",
         "komira_buffer",
         "komira_collections",
+        "komira_column_kernels",
+        "komira_dynamic_filter",
         "komira_parquet_api",
         "komira_parquet_codec",
         "komira_parquet_writer",
         "komira_simd",
+        "komira_zlib",
     ]
     var banned: List[String] = ["komira_obs", "komira_serde", "komira_" + "core"]
     var files = materialize[_FILES]()
@@ -225,6 +247,8 @@ def test_the_scan_saw_the_package() raises:
     assert_equal(_count(_read("page_size_limit.mojo"), "\ndef set_parquet_page_size_limit("), 1)
     assert_equal(_count(_read("dict_encoder_numeric.mojo"), "\ndef encode_numeric_dict_column["), 1)
     assert_true(_read("stats.mojo").byte_length() > 10000)
+    assert_equal(_count(_read("column_page.mojo"), "\nstruct ColumnPage("), 1)
+    assert_equal(_count(_read("writer_delta.mojo"), "\ndef encode_dbp_column_page["), 1)
 
 
 def main() raises:

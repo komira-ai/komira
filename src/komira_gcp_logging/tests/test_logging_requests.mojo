@@ -3,8 +3,9 @@
 # the JSON body. The connector is komira_http_core's ScriptedConnector with
 # a shared write capture, so the bytes the client wrote outlive the stream
 # it dialled; no socket is opened. The client is given no host, so it sends
-# to the service's default, logging.googleapis.com, and resolves that name
-# before the dial: the test needs a resolver, not the service.
+# to the service's default, logging.googleapis.com. A ScriptedConnector never
+# reads the dial address, so the client resolves no name and the test needs
+# neither a resolver nor the service.
 #
 # The expected forms are written here from the Cloud Logging v2 REST
 # reference for `entries.list` (POST https://logging.googleapis.com/v2/
