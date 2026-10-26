@@ -8,7 +8,6 @@ from komira_mail_message import MessageBuilder
 from komira_smtp_client import (
     SmtpClientConfig,
     SmtpCredentials,
-    SmtpSecurity,
     send_built_message,
 )
 
@@ -94,12 +93,12 @@ def main() raises:
 
 ## What does a send do?
 
-`send_message(config, creds, mail_from, recipients, message)` connects, reads the greeting, says EHLO, secures the connection as `config.security` says, authenticates when `creds` is given, sends MAIL FROM, one RCPT TO per recipient and DATA, and QUITs. `send_built_message` is the same for a `MessageBuilder`. A caller that sends several messages on one connection uses `SmtpSession` directly (`read_greeting`, `ehlo`, `starttls_command`, `upgrade_tls`, `authenticate`, `send`, `quit`); an RSET goes before every message after the first. `send_via_session` runs the same steps over a session you opened on any `IoStream`.
+`send_message(config, creds, mail_from, recipients, message)` connects, reads the greeting, says EHLO, secures the connection as `config.security` says, authenticates when `creds` is given, sends MAIL FROM, one RCPT TO per recipient and DATA, and QUITs. `send_built_message` is the same for a `MessageBuilder`. A caller that sends several messages on one connection opens a session with `connect_session(NoWaitHook(), config)` and drives `SmtpSession` directly (`read_greeting`, `ehlo`, `starttls_command`, `upgrade_tls`, `authenticate`, `send`, `quit`); an RSET goes before every message after the first. `send_via_session` runs the same steps over a session you opened on any `IoStream`.
 
 - Addresses are `local@domain`, without angle brackets; an empty sender is the null path of a bounce. All of them are checked before any command is sent, with `komira_mail_address.parse_path`. The message must be non-empty.
-- The message is sent with every line break written CRLF (a bare LF or CR becomes CRLF, a final CRLF is added), lines that start with `.` stuffed, and `.` CRLF at the end.
+- The message is sent with every line break written CRLF (a bare LF becomes CRLF, and so does a bare CR, which changes the content of a line that held one; a final CRLF is added), lines that start with `.` stuffed, and `.` CRLF at the end.
 - If the server announces `SIZE` and the message is larger, the send is refused before MAIL. A message with bytes above 0x7F is refused when the server does not announce `8BITMIME` (the client does not re-encode it). An address with non-ASCII bytes needs `SMTPUTF8`: it is refused when the server does not announce it, and `SMTPUTF8` is added to MAIL FROM when it does.
-- If no recipient is accepted the client sends RSET and does not send DATA. If some are, the message is sent to those and the result lists each recipient's code and text.
+- If no recipient is accepted the client sends RSET and does not send DATA. If some are, the message is sent to those and the result lists each recipient's code and text. A 421 in the middle of the recipients closes the connection: the result is transient at stage `rcpt` with the answers so far.
 
 ## Security
 
@@ -107,19 +106,19 @@ def main() raises:
 
 `SmtpSecurity.implicit_tls()` runs TLS from the first byte (port 465). `SmtpSecurity.plaintext()` does neither; it is for tests and for a relay on a private loopback only, and AUTH then goes in the clear.
 
-The certificate must chain to `tls_trust_pem` (a PEM text: exactly those roots) or, when that is empty, to the system roots, and must name `tls_server_name` (default: `host`). There is no setting that turns verification off. TLS is TLS 1.3 and 1.2 (`default_tls13`). The connection is IPv4.
+The certificate must chain to `tls_trust_pem` (a PEM text: exactly those roots) or, when that is empty, to the system roots, and must name `tls_server_name` (default: `host`; when `host` is an IP address, set `tls_server_name` to the name in the certificate). There is no setting that turns verification off. TLS is TLS 1.3 and 1.2 (`default_tls13`). The connection is IPv4.
 
 AUTH is PLAIN, or LOGIN when PLAIN is not offered, and only over TLS unless the security is `plaintext()`. Credentials are passed to the one call and are not stored. The password appears in no error or result text: a reply that echoes it, or its base64 forms, comes back with `***` in its place.
 
 ## What does a result and an error say?
 
-A server's answer comes back as a value. `SendResult.outcome` is `SEND_ACCEPTED` (a 2xx after DATA: `text` is the final text, usually the queue id, `enhanced` its RFC 3463 code), `SEND_TRANSIENT` (a 4xx: try again later) or `SEND_PERMANENT` (a 5xx, or an unexpected reply). `stage` says where it ended (`greeting`, `ehlo`, `starttls`, `auth`, `mail`, `rcpt`, `data`, `end-of-data`), and `recipients` has one entry per RCPT TO. A message accepted for some recipients and refused for others is accepted, with `accepted_count()` below the recipient count.
+A server's answer comes back as a value. `SendResult.outcome` is `SEND_ACCEPTED` (a 2xx after DATA: `text` is the final text, usually the queue id, `enhanced` its RFC 3463 code), `SEND_TRANSIENT` (a 4xx: try again later) or `SEND_PERMANENT` (a 5xx, or an unexpected reply). `stage` says where it ended (`greeting`, `ehlo`, `starttls`, `auth`, `mail`, `rcpt`, `data`, `end-of-data`), and `recipients` has one entry per RCPT TO. A message accepted for some recipients and refused for others is accepted, with `accepted_count()` below the recipient count: `all_accepted()` is true only when every recipient was. When no recipient is accepted the outcome is transient if any refusal was 4xx; retry only the recipients whose own code is 4xx. Any other reply where a refusal belongs (a 250 to DATA, say) is a `SmtpProtocol` error, not an accepted message.
 
-Everything that is not a reply is raised as an error whose text starts with a kind: `SmtpTimeout` and `SmtpTransport` (retryable: `error_is_retryable`), `SmtpProtocol` (a malformed or over-long reply), `SmtpSecurity`, `SmtpAuth`, `SmtpEnvelope` (a bad address, SIZE, 8-bit or SMTPUTF8 refusal), `SmtpConfig`. After one the connection is closed.
+Everything that is not a reply is raised as an error whose text starts with a kind: `SmtpTimeout` and `SmtpTransport` (retryable: `error_is_retryable`), `SmtpProtocol` (a malformed or over-long reply), `SmtpSecurity`, `SmtpAuth`, `SmtpEnvelope` (a bad address, SIZE, 8-bit or SMTPUTF8 refusal), `SmtpConfig`. After one the connection is closed. An error at stage `end-of-data` (the reply after the body) says the server may have accepted the message: it is retryable, but a retry may deliver it twice (RFC 5321 section 6.1), so a caller that cannot tolerate duplicates must not retry it blindly.
 
 ## Budgets
 
-`connect_budget_us`, `command_budget_us` (each command with its reply, and the TLS handshake) and `data_budget_us` (the message body and the reply that ends DATA) are microseconds on `config.clock`. The system's monotonic clock is the default; a test passes `SmtpClock.manual(cell)` and moves time itself. When a budget runs out the connection is closed and a `SmtpTimeout` naming the stage is raised. A reply line is at most `max_reply_line_bytes` (4096), a reply at most 512 lines and 64 KiB, so a hostile server cannot grow memory without bound. The connect budget is passed to the TCP connect; DNS resolution is not bounded by it.
+`connect_budget_us`, `command_budget_us` (each command with its reply, and the TLS handshake) and `data_budget_us` (the message body and the reply that ends DATA) are microseconds on `config.clock`. The system's monotonic clock is the default; a test passes `SmtpClock.manual(cell)` and moves time itself. When a budget runs out the connection is closed and a `SmtpTimeout` naming the stage is raised. A reply line is at most `max_reply_line_bytes` (4096), a reply at most 512 lines and 64 KiB, so a hostile server cannot grow memory without bound. The connect budget is passed to the TCP connect; DNS resolution (getaddrinfo, on the calling thread) is not bounded by it, so give an address if a stalled resolver must not block. The data budget is one fixed total, not scaled by the message size: size it to the largest message and the slowest link.
 
 ## What it does not do
 
@@ -131,4 +130,4 @@ Everything that is not a reply is raised as an error whose text starts with a ki
 
 ## Tests
 
-`tests/test_reply_wire.mojo` (parsing, DATA bytes, the envelope), `tests/test_session.mojo` (every command and reply path over `ScriptedStream`, the budgets on a manual clock), `tests/test_policy.mojo` (STARTTLS and implicit-TLS policy: what is never written), and `tests/test_loopback.mojo` (a message over STARTTLS with AUTH PLAIN to `komira_smtp_server` on 127.0.0.1 with the real handshake, a bad password, an untrusted certificate, a wrong certificate name, a server without STARTTLS, a refused connection). The server has no implicit-TLS listener, so that path is tested on `ScriptedStream` only.
+`tests/test_reply_wire.mojo` (parsing, DATA bytes, the envelope), `tests/test_session.mojo` (every command and reply path over `ScriptedStream`, the budgets on a manual clock), `tests/test_edges.mojo` (DATA answered 2xx, a 421 mid-recipients, the duplicate warning, QUIT after a refused SIZE, the settings of the first example), `tests/test_policy.mojo` (STARTTLS and implicit-TLS policy: what is never written), and `tests/test_loopback.mojo` (a message over STARTTLS with AUTH PLAIN to `komira_smtp_server` on 127.0.0.1 with the real handshake, a bad password, an untrusted certificate, a wrong certificate name, a server without STARTTLS, a refused connection, the second EHLO after TLS). The server has no implicit-TLS listener, so that path is tested on `ScriptedStream` only.

@@ -5,7 +5,8 @@ send one message or several. See README.md.
 |---|---|
 | `send_message` | connect over TCP, STARTTLS or implicit TLS, AUTH, send one message, QUIT |
 | `send_built_message` | the same for a `komira_mail_message.MessageBuilder` |
-| `send_via_session`, `send_message_with_hook` | the same over a session you opened, or with a `WaitHook` |
+| `connect_session`, `send_via_session` | a session over a new TCP connection; the one-message send over a session you opened |
+| `send_message_with_hook`, `send_built_message_with_hook`, `WaitHook` | test seams: run a peer in the same thread while the client waits; production code uses `NoWaitHook` |
 | `SmtpClientConfig`, `SmtpSecurity`, `SmtpCredentials`, `SmtpClock` | the settings: host, security, trust, budgets, clock |
 | `SendResult`, `RecipientResult` | the server's answer; `error_is_retryable` classifies a raised error |
 | `SmtpSession` | one connection for several messages: `read_greeting`, `ehlo`, `starttls_command`, `upgrade_tls`, `authenticate`, `send`, `quit` |
@@ -32,15 +33,11 @@ from .result import (
     error_is_retryable,
 )
 from .send import (
+    connect_session,
     send_built_message,
     send_built_message_with_hook,
     send_message,
     send_message_with_hook,
     send_via_session,
 )
-from .session import NoWaitHook, SmtpRuntime, SmtpSession, WaitHook
-from .wire import (
-    dot_stuff_and_terminate,
-    has_eight_bit,
-    normalize_line_endings,
-)
+from .session import NoWaitHook, SmtpSession, WaitHook

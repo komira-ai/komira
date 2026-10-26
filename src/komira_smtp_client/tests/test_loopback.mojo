@@ -20,6 +20,11 @@
 #   the clear, or skips verification, fails).
 # - test_starttls_not_offered_by_server: a server without STARTTLS makes the
 #   send raise SmtpSecurity and nothing is delivered or authenticated.
+# - test_ehlo_again_after_tls: step by step with `connect_session`: the server
+#   offers STARTTLS and no AUTH in the clear; after the handshake the session
+#   holds no capabilities and refuses AUTH; the second EHLO shows AUTH and no
+#   STARTTLS (a client that keeps the old capabilities, or skips the second
+#   EHLO, fails).
 # - test_connection_refused: a closed port raises a retryable SmtpTransport.
 
 from std.memory import ArcPointer
@@ -39,6 +44,7 @@ from komira_smtp_client import (
     SmtpCredentials,
     SmtpSecurity,
     WaitHook,
+    connect_session,
     error_is_retryable,
     send_built_message_with_hook,
     send_message,
@@ -282,6 +288,33 @@ def test_starttls_not_offered_by_server() raises:
     assert_equal(_inbox_count(rig, String("bob@example.com")), 0)
 
 
+def test_ehlo_again_after_tls() raises:
+    var rig = _submission_rig()
+    var cfg = _config(rig)
+    var s = connect_session[_StepServer](_StepServer(rig), cfg)
+    assert_equal(s.read_greeting().code, 220)
+    assert_equal(s.ehlo().code, 250)
+    assert_true(s.capabilities().starttls)
+    assert_false(s.capabilities().offers_auth(String("PLAIN")))
+    assert_equal(s.starttls_command().code, 220)
+    var t = s.upgrade_tls(cfg.tls_trust_pem, cfg.effective_tls_server_name())
+    assert_true(t.is_secure())
+    assert_false(t.capabilities().starttls)
+    assert_false(t.capabilities().offers_auth(String("PLAIN")))
+    var msg = String("")
+    try:
+        _ = t.authenticate(
+            SmtpCredentials(String("alice"), String("s3cret")), False
+        )
+    except e:
+        msg = String(e)
+    assert_true(msg.startswith("SmtpProtocol: AUTH before a successful EHLO"), msg)
+    assert_equal(t.ehlo().code, 250)
+    assert_true(t.capabilities().offers_auth(String("PLAIN")))
+    assert_false(t.capabilities().starttls)
+    assert_equal(t.quit().code, 221)
+
+
 def test_connection_refused() raises:
     var listener = bind_smtp_listener(inet_loopback_be(), UInt16(0))
     var port = listener.local_port()
@@ -327,6 +360,10 @@ def main() raises:
         test_starttls_not_offered_by_server()
     except e:
         failed += "\n  test_starttls_not_offered_by_server: " + String(e)
+    try:
+        test_ehlo_again_after_tls()
+    except e:
+        failed += "\n  test_ehlo_again_after_tls: " + String(e)
     try:
         test_connection_refused()
     except e:

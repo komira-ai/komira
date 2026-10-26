@@ -55,6 +55,26 @@ def _authenticate_and_send[S: IoStream, H: WaitHook](
     recipients: List[String],
     message: Span[UInt8, _],
 ) raises -> SendResult:
+    """AUTH and send; a failure that is raised (a refused SIZE, an AUTH policy
+    error) still ends the connection with a QUIT, so a TLS stream sends its
+    close_notify and the server is told."""
+    try:
+        return _auth_send_inner(
+            session, config, creds, mail_from, recipients, message
+        )
+    except e:
+        _quit_quietly(session)
+        raise Error(String(e))
+
+
+def _auth_send_inner[S: IoStream, H: WaitHook](
+    mut session: SmtpSession[S, H],
+    config: SmtpClientConfig,
+    creds: Optional[SmtpCredentials],
+    mail_from: String,
+    recipients: List[String],
+    message: Span[UInt8, _],
+) raises -> SendResult:
     if creds:
         var ar = session.authenticate(
             creds.value(), config.security.is_plaintext()
@@ -141,6 +161,11 @@ def send_via_session[S: IoStream, H: WaitHook](
 
 
 def _dial(config: SmtpClientConfig, mut rt: SmtpRuntime) raises -> TcpIoStream:
+    # This calls `TcpStream.connect` and not `KernelTcpConnector`: the
+    # connector dials with a fixed 5 s connect limit and takes no budget, and
+    # `config.connect_budget_us` must bound the connect. It is the same call,
+    # wrapped in the same `TcpIoStream`, with `set_tcp_nodelay`. The name is
+    # resolved first, with getaddrinfo, which no budget bounds.
     try:
         var ip_be = resolve_host_be(config.host, config.port)
         var budget = config.connect_budget_us
@@ -158,22 +183,20 @@ def _dial(config: SmtpClientConfig, mut rt: SmtpRuntime) raises -> TcpIoStream:
         raise Error("SmtpTransport: connect: " + String(e))
 
 
-def send_message_with_hook[H: WaitHook](
-    var hook: H,
-    config: SmtpClientConfig,
-    creds: Optional[SmtpCredentials],
-    mail_from: String,
-    recipients: List[String],
-    message: Span[UInt8, _],
-) raises -> SendResult:
-    """`send_message` with a `WaitHook` that is called each time the client
-    waits for the server. A test that runs the server in the same thread passes
-    a hook that steps it; see `WaitHook`."""
+def connect_session[H: WaitHook](
+    var hook: H, config: SmtpClientConfig
+) raises -> SmtpSession[TcpIoStream, H]:
+    """Connect to `config.host:config.port` and return the session over the
+    plain TCP stream, before the greeting is read: for a caller that sends
+    several messages on one connection. It drives the steps itself
+    (`read_greeting`, `ehlo`, `starttls_command`, `upgrade_tls`, `ehlo`,
+    `authenticate`, `send`, `quit`), or hands the session to `send_via_session`
+    for one message. The session is plain whatever `config.security` says: for
+    implicit TLS call `upgrade_tls` on it before the greeting."""
     check_config(config)
-    _ = validate_envelope(mail_from, recipients, message)
     var rt = SmtpRuntime.new(NoopSink(_placeholder=UInt8(0)))
     var stream = _dial(config, rt)
-    var plain = SmtpSession[TcpIoStream, H](
+    return SmtpSession[TcpIoStream, H](
         stream^,
         hook^,
         rt^,
@@ -184,6 +207,23 @@ def send_message_with_hook[H: WaitHook](
         config.max_reply_line_bytes,
         False,
     )
+
+
+def send_message_with_hook[H: WaitHook](
+    var hook: H,
+    config: SmtpClientConfig,
+    creds: Optional[SmtpCredentials],
+    mail_from: String,
+    recipients: List[String],
+    message: Span[UInt8, _],
+) raises -> SendResult:
+    """`send_message` with a `WaitHook` that is called each time the client
+    waits for the server. A test that runs the server in the same thread passes
+    a hook that steps it; see `WaitHook`. This is a test seam: production code
+    calls `send_message`."""
+    check_config(config)
+    _ = validate_envelope(mail_from, recipients, message)
+    var plain = connect_session[H](hook^, config)
     if config.security.is_implicit_tls():
         var tls = plain.upgrade_tls(
             config.tls_trust_pem, config.effective_tls_server_name()
@@ -224,7 +264,8 @@ def send_built_message_with_hook[H: WaitHook](
     recipients: List[String],
     builder: MessageBuilder,
 ) raises -> SendResult:
-    """`send_message_with_hook` of the bytes `builder.build()` produces."""
+    """`send_message_with_hook` (a test seam) of the bytes `builder.build()`
+    produces."""
     var bytes = builder.build()
     return send_message_with_hook[H](
         hook^, config, creds, mail_from, recipients, Span(bytes)

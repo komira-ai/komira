@@ -316,7 +316,8 @@ def test_auth_policy() raises:
     except e:
         msg = String(e)
     assert_true(msg.startswith("SmtpAuth"), msg)
-    assert_equal(_text(w3), "EHLO client.test\r\n")
+    # The refusal is raised, and the connection still ends with QUIT.
+    assert_equal(_text(w3), "EHLO client.test\r\nQUIT\r\n")
 
     var w4 = _wire()
     var r4 = _run(

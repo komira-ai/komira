@@ -11,9 +11,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # - test_session: ScriptedStream conversations for every path of one message:
 #   greeting, EHLO, AUTH, MAIL, RCPT, DATA, SIZE, 8BITMIME, SMTPUTF8, RSET
 #   between messages, reply caps, budgets on a manual clock, the password.
+# - test_edges: DATA answered 2xx, a 421 mid-RCPT, the duplicate warning at the
+#   end of DATA, QUIT after a refused SIZE, all_accepted, the README settings.
 # - test_policy: the STARTTLS and implicit-TLS policy of `send_via_session`.
-# - test_loopback: a message over STARTTLS with AUTH PLAIN, and over implicit
-#   TLS, to komira_smtp_server on 127.0.0.1, with the real s2n handshake.
+# - test_loopback: a message over STARTTLS with AUTH PLAIN, plus the failure
+#   paths, to komira_smtp_server on 127.0.0.1 with the real s2n handshake. The
+#   server has no implicit-TLS listener: that path is in test_policy, on
+#   ScriptedStream.
 mojo_library(
     name = "komira_smtp_client",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -29,6 +33,7 @@ mojo_library(
         "//src/komira_net:komira_net",
     ],
     test_srcs = [
+        "tests/test_edges.mojo",
         "tests/test_loopback.mojo",
         "tests/test_policy.mojo",
         "tests/test_reply_wire.mojo",

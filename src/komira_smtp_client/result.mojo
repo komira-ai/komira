@@ -55,7 +55,16 @@ struct SendResult(Copyable, Movable):
     it; on success that is the final 250, whose text is usually the server's
     queue id. `recipients` holds one entry per recipient, in order, when the
     envelope got that far (a message accepted for some recipients and refused
-    for others is `SEND_ACCEPTED` with `accepted_count() < len(recipients)`).
+    for others is `SEND_ACCEPTED` with `accepted_count() < len(recipients)`;
+    check `all_accepted()`, or each entry, before telling a user it was
+    delivered to everyone).
+
+    When no recipient was accepted, `outcome` is transient if any refusal was
+    4xx (the first one decides `code` and `text`), else permanent. With a mix
+    of 4xx and 5xx refusals a retry should name only the recipients whose own
+    `code` is 4xx. A 421 after some RCPT closed the connection: the result is
+    `SEND_TRANSIENT` at stage `rcpt` with the recipients answered so far, and
+    no message was sent.
 
     Failures that are not a server reply (a timeout, a broken connection, a
     refused TLS policy, a bad address) are raised as errors instead; see
@@ -93,6 +102,12 @@ struct SendResult(Copyable, Movable):
     def is_permanent(self) -> Bool:
         return self.outcome == SEND_PERMANENT
 
+    def all_accepted(self) -> Bool:
+        """The message was accepted and every recipient was accepted."""
+        return self.is_accepted() and self.accepted_count() == len(
+            self.recipients
+        )
+
     def accepted_count(self) -> Int:
         """How many recipients the server accepted."""
         var n = 0
@@ -106,7 +121,12 @@ def error_is_retryable(error_text: String) -> Bool:
     """Whether a raised error of this package is worth retrying later: a
     timeout (`SmtpTimeout`) or a broken or refused connection
     (`SmtpTransport`). `SmtpProtocol`, `SmtpSecurity`, `SmtpEnvelope`,
-    `SmtpConfig` and `SmtpAuth` are not."""
+    `SmtpConfig` and `SmtpAuth` are not.
+
+    A `SmtpTimeout` or `SmtpTransport` at stage `end-of-data` (its text says
+    so) came after the whole message was sent: the server may have accepted
+    it, and a retry may deliver it twice (RFC 5321 section 6.1). A caller that
+    cannot tolerate duplicates must not retry that case blindly."""
     return error_text.startswith("SmtpTimeout") or error_text.startswith(
         "SmtpTransport"
     )

@@ -43,6 +43,8 @@ from .reply import (
 )
 from .result import (
     RecipientResult,
+    SEND_PERMANENT,
+    SEND_TRANSIENT,
     SendResult,
     outcome_of_code,
 )
@@ -62,8 +64,9 @@ comptime _PARK_SLICE_US: Int = 100_000
 
 
 trait WaitHook(Movable, Deinitable):
-    """Called each time a session is about to wait for the peer (a read or a
-    write was not ready), before it parks."""
+    """A test seam: production code uses `NoWaitHook`. Called each time a
+    session is about to wait for the peer (a read or a write was not ready),
+    before it parks."""
 
     def on_wait(mut self) raises -> Bool:
         """Return True when the hook made progress for the peer (it ran the
@@ -459,7 +462,14 @@ struct SmtpSession[S: IoStream, H: WaitHook](Movable):
         name `server_name`; if not, `SmtpSecurity` is raised and the
         connection closed. The returned session has no capabilities: EHLO again
         (RFC 3207 section 4.2). A stream without a descriptor (a scripted one)
-        cannot be upgraded."""
+        cannot be upgraded.
+
+        The handshake is stepped here, on the session's own clock and hook,
+        instead of with `TlsConnector.upgrade` of komira_http_client: that
+        call parks until its own deadline on the descriptor, which cannot work
+        when a test steps the server in the same thread. `TlsClientStream`
+        (the wrapper of a stream and its TLS connection) is komira_http_client's
+        and belongs in komira_http_core; the move is a follow-up."""
         self._check_open()
         if len(self._rbuf) > 0:
             self._shut()
@@ -611,8 +621,13 @@ struct SmtpSession[S: IoStream, H: WaitHook](Movable):
     def _failed(
         self, stage: String, reply: SmtpReply, var recipients: List[RecipientResult]
     ) -> SendResult:
+        # Only a 4xx can be retried; a reply that is neither 4xx nor 5xx (a
+        # 2xx where a refusal belongs) is not a success of this stage.
+        var outcome = SEND_PERMANENT
+        if reply.is_transient():
+            outcome = SEND_TRANSIENT
         return SendResult(
-            outcome_of_code(reply.code),
+            outcome,
             stage,
             reply.code,
             reply.text(),
@@ -676,6 +691,17 @@ struct SmtpSession[S: IoStream, H: WaitHook](Movable):
                     env.recipients[i], ok, rr.code, rr.text(), rr.enhanced.copy()
                 )
             )
+            if self._closed:
+                # A 421 closed the connection (RFC 5321 section 3.8): the
+                # rest cannot be tried here, and a retry can succeed.
+                return SendResult(
+                    outcome_of_code(rr.code),
+                    String("rcpt"),
+                    rr.code,
+                    rr.text(),
+                    rr.enhanced.copy(),
+                    results^,
+                )
         if accepted == 0:
             self._rset()
             # The reply that decides: the first 4xx (a retry may help), else
@@ -695,6 +721,13 @@ struct SmtpSession[S: IoStream, H: WaitHook](Movable):
             )
         var dr = self._exchange(String("DATA"), String("DATA"))
         if dr.code != 354:
+            if dr.is_positive():
+                raise self._protocol(
+                    String("DATA"),
+                    String("the server answered DATA with ")
+                    + String(dr.code)
+                    + ", not 354; the message was not sent",
+                )
             if not self._closed:
                 self._rset()
             return self._failed(String("data"), dr, results^)
@@ -702,7 +735,7 @@ struct SmtpSession[S: IoStream, H: WaitHook](Movable):
         var wire = dot_stuff_and_terminate(Span(normalized))
         var deadline = self._clock.now_us() + self._data_us
         self._write_all(Span(wire), String("DATA body"), deadline)
-        var fr = self._read_reply(String("end-of-data"), deadline)
+        var fr = self._read_final(deadline)
         self._dirty = True
         if fr.is_positive():
             return SendResult(
@@ -714,6 +747,19 @@ struct SmtpSession[S: IoStream, H: WaitHook](Movable):
                 results^,
             )
         return self._failed(String("end-of-data"), fr, results^)
+
+    def _read_final(mut self, deadline_us: Int) raises -> SmtpReply:
+        """The reply that ends DATA. A failure here (a timeout, a closed
+        connection) leaves it unknown whether the server kept the message
+        (RFC 5321 section 6.1), and the error says so."""
+        try:
+            return self._read_reply(String("end-of-data"), deadline_us)
+        except e:
+            raise Error(
+                String(e)
+                + " (the server may have accepted the message; a retry may"
+                " deliver it twice)"
+            )
 
     def quit(mut self) raises -> SmtpReply:
         """QUIT, read the 221 and close. The connection is closed even when the

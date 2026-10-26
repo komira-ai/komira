@@ -70,16 +70,22 @@ struct SmtpClientConfig(Copyable, Movable):
     the public fields you need to change.
 
     `host` and `port` are connected to over IPv4 (a name is resolved with
-    getaddrinfo on the calling thread). `tls_server_name` is the name the
-    server's certificate must carry (and the SNI value); empty means `host`.
+    getaddrinfo on the calling thread; no budget bounds that call, so a
+    stalled resolver blocks the caller: pass an address to avoid it).
+    `tls_server_name` is the name the server's certificate must carry (and the
+    SNI value); empty means `host`. When `host` is an IP address, set
+    `tls_server_name` to the certificate's name: an address is not a name to
+    verify against.
     `tls_trust_pem` empty means the system's root certificates; a PEM text
     means exactly those roots and no others. A certificate that does not chain
     to the roots, or does not name `tls_server_name`, fails the handshake.
 
     Budgets are microseconds on `clock`: `connect_budget_us` for the TCP
-    connect, `command_budget_us` for each command with its reply (and for the
-    TLS handshake), `data_budget_us` for the message body with the reply that
-    ends DATA."""
+    connect (not the name lookup), `command_budget_us` for each command with
+    its reply (and for the TLS handshake), `data_budget_us` for the message
+    body with the reply that ends DATA. The data budget is one fixed total, not
+    scaled by the message size: size it to the largest message and the slowest
+    link."""
 
     var host: String
     var port: UInt16
