@@ -284,6 +284,8 @@ def _stalled_head_on(clock: ArcPointer[Int]) -> ScriptedConnector:
 
 
 def test_request_timeout_bounds_a_stalled_peer() raises:
+    # ScriptedStream.advance_clock_on_read adds the step only on reads that
+    # answer Pending (data_step_us defaults to 0; EOF and errors add nothing).
     # The transport's request deadline reads a manual clock that only the
     # stalled peer moves. The failure must be the client's TIMEOUT, and it
     # must arrive when manual time reaches the budget: not earlier (the

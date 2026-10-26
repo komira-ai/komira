@@ -14,8 +14,9 @@
 # The server and the client run in one process on two threads
 # (komira_http_tls_e2e's `serve_while`): the server is stepped until the
 # client leg finishes, and gives up after that runner's SERVE_DEADLINE_NS;
-# each client request is bounded by `_REQUEST_TIMEOUT_US`, so a server that
-# stops answering fails the leg with a timeout instead of hanging the action.
+# each client request carries `_REQUEST_TIMEOUT_US`, a hang guard only: it
+# is far beyond any loaded host's round trip and nothing asserts on it; the
+# build watchdog handles a hang.
 #
 # The fake catalog:
 #   * any request whose Authorization is not `Bearer <_TOKEN>` -> 401 with an
@@ -82,10 +83,10 @@ comptime _PREFIX = "lakehouse-prod"
 comptime _LOCATION = "s3://wh/sales/orders/metadata/00007-9c1e.metadata.json"
 comptime _ORDERS_PATH = "/v1/lakehouse-prod/namespaces/sales/tables/orders"
 comptime _MISSING_PATH = "/v1/lakehouse-prod/namespaces/sales/tables/missing"
-# Each request's bound, from send-start to the parsed response head. A
-# loopback round trip takes milliseconds; five of these stay well inside the
-# server's 120 s deadline.
-comptime _REQUEST_TIMEOUT_US = 10_000_000
+# A hang guard (10 minutes) so a request cannot wait forever. No assertion
+# depends on it and no outcome is expected from it; the build watchdog
+# handles hangs.
+comptime _REQUEST_TIMEOUT_US = 600_000_000
 
 comptime _Transport = HttpIcebergRestTransport[KernelTcpConnector]
 comptime _Catalog = IcebergRestCatalog[_Transport, StaticBearerToken]
