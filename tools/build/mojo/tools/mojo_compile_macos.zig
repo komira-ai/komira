@@ -55,6 +55,7 @@ const std = @import("std");
 const posix = std.posix;
 const c = std.c;
 const common = @import("mojo_compile.zig");
+const watch_loop = @import("watch_loop.zig");
 const compile_args = @import("compile_args.zig");
 const cc_shim = @import("cc_shim.zig");
 const modular_cfg = @import("modular_cfg.zig");
@@ -443,6 +444,7 @@ fn rootChild(tether_pipe: [2]i32, report: [2]i32, argv: Argv, envp: Envp) noretu
 /// The tether: blocks on a pipe whose only writer is the wrapper; when the
 /// read returns, kills its own process group, the compiler's session.
 fn tether(fd: i32, report_w: i32) noreturn {
+    watch_loop.closeInForked();
     _ = c.close(report_w);
     _ = c.close(0);
     _ = c.close(1);
@@ -459,7 +461,7 @@ fn tether(fd: i32, report_w: i32) noreturn {
 }
 
 /// The compiler's wait status once it has exited (reaping it), else null.
-fn reaped(pid: i32) ?u32 {
+fn reapedOf(pid: i32) ?u32 {
     const r = posix.waitpid(pid, posix.W.NOHANG);
     if (r.pid == pid) return r.status;
     return null;
@@ -471,7 +473,7 @@ fn sleepOneSecond() void {
     _ = c.nanosleep(&ts, null);
 }
 
-fn checkSignal(alloc: std.mem.Allocator, pid: i32) void {
+fn checkSignalOf(alloc: std.mem.Allocator, pid: i32) void {
     const s = caught.load(.seq_cst);
     if (s == 0) return;
     proc_tree_macos.killTree(alloc, pid);
@@ -479,16 +481,42 @@ fn checkSignal(alloc: std.mem.Allocator, pid: i32) void {
 }
 
 /// The CPU ticks of the compiler's tree now, or null when it is not listed.
-fn treeTicks(alloc: std.mem.Allocator, pid: i32) ?i64 {
+fn treeTicksOf(alloc: std.mem.Allocator, pid: i32) ?i64 {
     const procs = proc_tree_macos.readAll(alloc) catch return null;
     const members = (proc_tree.select(alloc, procs, pid) catch return null) orelse return null;
     return proc_tree.cpu(procs, members);
 }
 
+/// What the shared loop (watch_loop.zig) needs of this wrapper.
+const WatchEnv = struct {
+    state: *std.heap.ArenaAllocator,
+    pid: i32,
+
+    pub fn beginTick(e: *WatchEnv) void {
+        _ = e.state.reset(.retain_capacity);
+    }
+    pub fn waitTick(_: *WatchEnv) void {
+        watch_loop.waitTick(sleepOneSecond);
+    }
+    pub fn checkSignal(e: *WatchEnv) void {
+        checkSignalOf(e.state.allocator(), e.pid);
+    }
+    pub fn reaped(e: *WatchEnv) ?u32 {
+        return reapedOf(e.pid);
+    }
+    pub fn treeTicks(e: *WatchEnv) ?i64 {
+        return treeTicksOf(e.state.allocator(), e.pid);
+    }
+    pub fn ack(_: *WatchEnv) void {
+        watch_loop.ack();
+    }
+};
+
 fn runWatched(o: compile_args.MacosOptions, mojo: []const u8, argv: Argv, envp: Envp, subcmd: []const u8) u8 {
     var loop_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const loop = loop_state.allocator();
     for (caught_signals) |s| setHandler(s, &onSignal);
+    watch_loop.closeOnExec();
     const tether_pipe = pipeCloexec();
     const report = pipeCloexec();
     const pid = posix.fork() catch |e| refuse("cannot fork: {s}", .{@errorName(e)});
@@ -511,21 +539,17 @@ fn runWatched(o: compile_args.MacosOptions, mojo: []const u8, argv: Argv, envp: 
         return execFailed(mojo, std.mem.readInt(u32, buf[4..8], .little));
     }
 
-    var status: ?u32 = reaped(pid);
-    var watch = proc_tree.Watch.init(o.idle_secs, o.sample_secs, treeTicks(loop, pid) orelse 0);
-    while (status == null) {
-        _ = loop_state.reset(.retain_capacity);
-        sleepOneSecond();
-        checkSignal(loop, pid);
-        status = reaped(pid);
-        if (status != null) break;
-        const ticks = treeTicks(loop, pid) orelse continue;
-        if (watch.tick(ticks)) {
+    var status: ?u32 = reapedOf(pid);
+    var watch = proc_tree.Watch.init(o.idle_secs, o.sample_secs, treeTicksOf(loop, pid) orelse 0);
+    var env = WatchEnv{ .state = &loop_state, .pid = pid };
+    switch (watch_loop.run(&env, &watch, status)) {
+        .exited => |st| status = st,
+        .killed => |idle| {
             proc_tree_macos.killTree(loop, pid);
             _ = posix.waitpid(pid, 0);
-            std.debug.print("mojo-watchdog: killed deadlocked compiler after {d}s of zero process-tree CPU (mojo {s}, output {s}); the action is safe to retry. Knobs: watchdog_idle_secs / watchdog_sample_secs of the Mojo toolchain.\n", .{ watch.idleSecs(), subcmd, o.output });
+            std.debug.print("mojo-watchdog: killed deadlocked compiler after {d}s of zero process-tree CPU (mojo {s}, output {s}); the action is safe to retry. Knobs: watchdog_idle_secs / watchdog_sample_secs of the Mojo toolchain.\n", .{ idle, subcmd, o.output });
             finish(124);
-        }
+        },
     }
     // The compiler is gone: stop the tether first, so the processes the
     // compiler orphaned are left alone.

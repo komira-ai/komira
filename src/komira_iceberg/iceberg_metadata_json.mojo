@@ -359,6 +359,11 @@ def build_table_metadata_json(
     sort-orders array (+ default-sort-order-id), properties, the snapshots
     array (+ current-snapshot-id), and the snapshot-log / metadata-log.
 
+    `location` is written verbatim as the table's `location`. It is the object
+    store key prefix the table lives under, not a URI with a scheme (see the
+    README); the spec's full-URI form needs a base URI this package does not
+    take yet.
+
     `spec` (default unpartitioned) is emitted as the default partition spec,
     first in `partition-specs`; `default-spec-id` = its spec-id and
     `last-partition-id` its highest partition field-id (999 for the

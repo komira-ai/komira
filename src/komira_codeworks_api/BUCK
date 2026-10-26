@@ -1,0 +1,17 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The CodeWorks HTTP surface as path classification: the git wire, the repository
+# and review control routes, the liveness probes, the owning arm, and the repository
+# a wire path names. Pure String functions, no dependencies. See README.md.
+mojo_library(
+    name = "komira_codeworks_api",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = [
+        # planes, sub-surfaces, owner arms, the wire's repository name, the
+        # route lookalikes, unknown paths
+        "tests/test_surface.mojo",
+        # the legal-repository-name check and the declared constants
+        "tests/test_repo_name_and_constants.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

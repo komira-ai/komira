@@ -45,6 +45,16 @@ Checked against the Apache Iceberg table spec, format version 2:
 
 Where it does not follow the spec, or does less:
 
+- Locations are object-store keys, not URIs. `location` is one string that is
+  both the key prefix the files are written under and the `location` in
+  `metadata.json`; it is recorded verbatim (JSON-escaped, non-ASCII intact),
+  and every key is built from it by joining with `/`. The spec asks for full
+  URIs with a filesystem scheme (`s3://bucket/prefix`); a URI given as the
+  location is not understood by this package's own store access, which
+  normalises `//` in a key. An engine therefore reads a table written here only
+  where its warehouse root maps to the store root, or after rewriting paths.
+  Writing absolute URIs needs a base URI separate from the store prefix; it is
+  not done yet.
 - Types: boolean, int, long, float, double and string only. No decimal, date,
   time, timestamp, uuid, fixed, binary or nested types.
 - Transforms: `identity` and `bucket[N]` (int, long and string sources). No
