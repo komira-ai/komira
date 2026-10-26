@@ -1,7 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The values and on-disk formats the data-graph writer and reader share, parts 1
-# to 4 (the first of the packages in docs/design/knowledge_graph_port.md): the
+# to 5 (the first of the packages in docs/design/knowledge_graph_port.md): the
 # packed f32 embedding cell, the extraction values (`Triple`, `EntityMention`,
 # `Extraction`), the snapshot manifest body (which
 # carries the graph's embedding dimension), the table schemas, cosine ranking of
@@ -9,11 +9,14 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # delta layer over a base snapshot (chunk bodies and delta objects) and the
 # change gate's source fingerprints with their lineage on an object store, and
 # the snapshot lineage store itself: bases, delta chains, folds and retired
-# deltas on a conditional-write object store.
+# deltas on a conditional-write object store, and the exact searches over a
+# snapshot's tables (embedding similarity, full-text counts, out-degree) with
+# rank fusion.
 # It depends on komira_arrow (schemas, string columns) and that package's
 # closure, on komira_json (the result's wire), on komira_hash (the fingerprints),
 # on komira_objectstore (their lineage) and on komira_parquet_writer (Parquet delta
-# objects), and reads no clock and no environment.
+# objects), on komira_parquet (to read a table's Parquet bytes back), and reads
+# no clock and no environment.
 #
 # The welded tests: test_embedding packs and unpacks f32 and f64 vectors and
 # holds a cell to a dimension; test_manifest_body round-trips the manifest and refuses
@@ -36,12 +39,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # to a rival and checks they are retried, reported and bounded;
 # test_snapshot_store_compaction folds a chain, carries forward the deltas that
 # arrive meanwhile and retires the folded ones; test_compaction_policy pins the
-# fold trigger.
+# fold trigger; test_search_scans writes snapshots and holds each scan to stated
+# rows, to cosine_topk, to the manifest's dimension and to the schema gate;
+# test_search_rrf pins the fused scores, the tie order and the refusals.
 mojo_library(
     name = "komira_kg_format",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
         "//src/komira_async:komira_async",
         "//src/komira_async_api:komira_async_api",
         "//src/komira_atomic_alias:komira_atomic_alias",
@@ -61,18 +67,17 @@ mojo_library(
         "//src/komira_metrics:komira_metrics",
         "//src/komira_objectstore:komira_objectstore",
         "//src/komira_objectstore:komira_objectstore_posix",
+        "//src/komira_parquet:komira_parquet",
         "//src/komira_parquet_api:komira_parquet_api",
         "//src/komira_parquet_codec:komira_parquet_codec",
         "//src/komira_parquet_writer:komira_parquet_writer",
         "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_stats:komira_plan_stats",
         "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
         "//src/komira_simd:komira_simd",
         "//src/komira_zlib:komira_zlib",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
-    # The reader decodes the writer's Parquet delta objects in the tests. It is
-    # not a dependency of the library.
-    test_deps = ["//src/komira_parquet:komira_parquet"],
     test_srcs = [
         "tests/test_cosine.mojo",
         "tests/test_cosine_topk.mojo",
@@ -85,6 +90,8 @@ mojo_library(
         "tests/test_query_result.mojo",
         "tests/test_query_result_wire.mojo",
         "tests/test_schemas.mojo",
+        "tests/test_search_rrf.mojo",
+        "tests/test_search_scans.mojo",
         "tests/test_compaction_policy.mojo",
         "tests/test_snapshot_store.mojo",
         "tests/test_snapshot_store_chain.mojo",
