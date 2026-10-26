@@ -177,7 +177,8 @@ def _apply_flags[
     for k in range(len(picked)):
         var at = picked[k]
         var uid = conn.view[at].uid
-        var current = snap.flags_of(uid)
+        var leaf = conn.view[at].leaf
+        var current = snap.flags_of(leaf)
         var wanted = current
         if op == "+FLAGS":
             wanted = current | named
@@ -186,7 +187,7 @@ def _apply_flags[
         else:
             wanted = named
         if wanted != current:
-            fstore.set_flags(uid, wanted)
+            fstore.set_flags(leaf, wanted)
             wrote = True
         if not silent:
             var line = String("* ") + String(at + 1) + " FETCH (FLAGS ("
@@ -244,10 +245,9 @@ def expunge_deleted[
         var snap = fstore.snapshot()
         var i = n - 1
         while i >= 0:
-            var uid = conn.view[i].uid
-            if (snap.flags_of(uid) & FLAG_DELETED) != 0:
-                var leaf = conn.view[i].leaf
-                fstore.expunge(uid)
+            var leaf = conn.view[i].leaf
+            if (snap.flags_of(leaf) & FLAG_DELETED) != 0:
+                fstore.expunge(leaf)
                 store.delete(
                     Path.parse(folder_message_key(conn.mailbox, conn.folder, leaf))
                 )

@@ -127,7 +127,8 @@ def handle_line[
     does next: continue, close after the replies are written, or start TLS.
 
     Checked before the command: the line is printable ASCII (a control byte
-    or a byte over 0x7F is BAD), the tag is a valid tag, and the line does not
+    or a byte over 0x7F is BAD, so a password with a non-ASCII byte never
+    reaches the verifier), the tag is a valid tag, and the line does not
     end in a literal announcement (`{n}` is BAD, `{n+}` is BAD and closes the
     connection, since its bytes are already on the way and would run as
     commands)."""
@@ -189,6 +190,9 @@ def handle_line[
     if kind == _UNKNOWN:
         tagged_bad(conn, tag, "Command not recognized")
         return IMAP_ACTION_CONTINUE
+    if cmd == "SEARCH":
+        _search(conn, tag, args, False)
+        return IMAP_ACTION_CONTINUE
     if kind == _UNSUPPORTED:
         tagged_no_code(conn, tag, "CANNOT", "This command is not supported")
         return IMAP_ACTION_CONTINUE
@@ -232,13 +236,24 @@ def handle_line[
             handle_store(
                 conn, store, config.limits.compact_flag_log_at, tag, words.rest, True
             )
-        elif sub == "SEARCH" or sub == "EXPUNGE" or sub == "COPY" or sub == "MOVE":
+        elif sub == "SEARCH":
+            _search(conn, tag, words.rest, True)
+        elif sub == "EXPUNGE" or sub == "COPY" or sub == "MOVE":
             tagged_no_code(
                 conn, tag, "CANNOT", "This UID command is not supported"
             )
         else:
             tagged_bad(conn, tag, "Unknown UID command")
     return IMAP_ACTION_CONTINUE
+
+
+def _search(mut conn: ImapConnection, tag: String, args: String, by_uid: Bool):
+    """`SEARCH` and `UID SEARCH`: the one place a later part implements them.
+    Until then both are refused, whatever the state."""
+    var what = String("This command is not supported")
+    if by_uid:
+        what = String("This UID command is not supported")
+    tagged_no_code(conn, tag, "CANNOT", what)
 
 
 def _starttls(

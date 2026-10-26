@@ -27,7 +27,9 @@ def assign_uid(leaf: String) -> Int:
     """The UID of the message stored under `leaf` (its content hash): 31 bits
     of a hash of the name. The same message always has the same UID, in any
     session and any folder. Two messages of one folder can share a UID (about
-    even odds near 55,000 messages), and UIDs do not follow delivery order."""
+    even odds near 55,000 messages), and UIDs do not follow delivery order.
+    Flags and EXPUNGE are keyed by leaf, so a shared UID never mixes them up;
+    only a UID-addressed command (UID FETCH, UID STORE) names both."""
     return _fold31(fnv1a64(leaf))
 
 
@@ -35,3 +37,18 @@ def uidvalidity_for(scope: String) -> Int:
     """UIDVALIDITY of a folder, from its flag scope (`flag_scope`): constant
     for a folder name across restarts."""
     return _fold31(fnv1a64(scope))
+
+
+def is_valid_leaf(leaf: String) -> Bool:
+    """Sixteen lowercase hex digits: what `komira_mail_store` names a message.
+    Anything else in a folder is not a message of this server."""
+    var bs = leaf.as_bytes()
+    if len(bs) != 16:
+        return False
+    for i in range(16):
+        var c = bs[i]
+        var digit = c >= 0x30 and c <= 0x39
+        var lower = c >= 0x61 and c <= 0x66
+        if not (digit or lower):
+            return False
+    return True

@@ -96,7 +96,10 @@ def _expected_select(
 ) -> String:
     var text = String("* ") + String(count) + " EXISTS\r\n* 0 RECENT\r\n"
     text += String("* FLAGS (") + _FLAGS + ")\r\n"
-    text += String("* OK [PERMANENTFLAGS (") + _FLAGS + ")] Flags that can be kept\r\n"
+    if read_only:
+        text += String("* OK [PERMANENTFLAGS ()] No permanent flags\r\n")
+    else:
+        text += String("* OK [PERMANENTFLAGS (") + _FLAGS + ")] Flags that can be kept\r\n"
     text += String("* OK [UIDVALIDITY ") + String(uidvalidity_for(scope)) + "] UIDs valid\r\n"
     text += String("* OK [UIDNEXT ") + String(uidnext) + "] Predicted next UID\r\n"
     if read_only:

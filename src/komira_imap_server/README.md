@@ -6,6 +6,9 @@ durable message flags, and a serve loop over non-blocking sockets. The mail
 lives in any `komira_objectstore` store, laid out by `komira_mail_store`: this
 server reads what `komira_smtp_server` wrote there. This is part A of the
 server: ENVELOPE, BODYSTRUCTURE, body sections and SEARCH are a later part.
+Part A alone is refused by most desktop and mobile clients, whose first sync is
+`FETCH (UID RFC822.SIZE FLAGS INTERNALDATE ...)`; use it with a client that
+can fetch `FLAGS`, `UID` and `BODY[]` only.
 
 **It is a subset, and its UIDs are not general-purpose IMAP UIDs.** Use it to
 read, flag and delete mail with a client that does not need more; do not call
@@ -84,6 +87,12 @@ STARTTLS is written; closes what is finished or whose peer is gone; and sends
 connection are one code path. The listener is the `ListenSocket` of
 `komira_smtp_server` (it owns its descriptor and closes it when it is
 destroyed), so a binary that serves both protocols holds one kind of listener.
+That dependency is temporary: it makes an IMAP-only binary carry the SMTP
+library, and `ListenSocket` belongs in a package both servers import.
+**Every store call blocks the whole loop.** SELECT lists up to `max_messages`
+objects, FETCH reads up to `max_fetch_bytes`, and every flag command folds a
+log, all synchronously inside `serve_one_iteration`: one slow command, or a slow
+store, stalls every other connection and their deadlines.
 
 - STARTTLS: the OK is written and flushed first. If the client sent bytes behind
   STARTTLS in the clear (`pending_after_starttls`), the connection is closed and
@@ -122,6 +131,8 @@ that is not a command or an item is `BAD`. Not offered: APPEND, IDLE, CONDSTORE
 (`HIGHESTMODSEQ` is never sent), LITERAL+, UIDPLUS, NAMESPACE, UNSELECT, ID.
 IMAP4rev1 only; RFC 9051 is out of scope.
 
+- SELECT sends `PERMANENTFLAGS` with the five flags; EXAMINE sends `PERMANENTFLAGS ()`
+  (RFC 3501 section 6.3.2), since STORE is refused there.
 - `BODY[]` and `RFC822` set `\Seen` on a folder opened read-write, durably, and
   the answer carries `FLAGS` when the flag changed; `BODY.PEEK[]` does not,
   and nothing does after EXAMINE. The message bytes go out exactly as stored.
@@ -147,7 +158,8 @@ IMAP4rev1 only; RFC 9051 is out of scope.
   never buffered past that: a longer one gets `* BYE` and the connection closes.
   The receive buffer holds at most `max_line` plus one 4096-byte slice.
 - A line must be printable ASCII (0x20 to 0x7E). A control byte or a byte over
-  0x7F is `* BAD`. The tag must be one to 64 ASTRING characters other than `+`,
+  0x7F is `* BAD`, before LOGIN's arguments are read: a password with a
+  non-ASCII byte cannot be sent, as an atom, a quoted string or a literal. The tag must be one to 64 ASTRING characters other than `+`,
   or the line is `* BAD`: the server echoes the tag, so it cannot be allowed to
   carry anything else.
 - Literals are not supported. A line ending in `{n}` is answered `BAD
@@ -164,7 +176,9 @@ IMAP4rev1 only; RFC 9051 is out of scope.
   `NO [PRIVACYREQUIRED]` and not counted as a failure; the greeting and
   CAPABILITY advertise `LOGINDISABLED` until TLS, and `STARTTLS` while it can be
   done. After `max_login_failures` (3) failed LOGINs the connection is told
-  `* BYE` and closed.
+  `* BYE` and closed. The count is per connection and starts again on a new
+  one: it is not brute-force protection, and throttling by source address
+  belongs in the verifier or the binary.
 - The user's mailbox is the one `komira_mail_store.normalize_recipient(login
   name)` names: the address the SMTP side stored the mail under (the case of
   letters does not matter). **There is no shared default mailbox**: a login
@@ -189,8 +203,12 @@ IMAP4rev1 only; RFC 9051 is out of scope.
 ## Flags
 
 Flags are durable and shared. Each folder has its own flag log on the same store
-as the messages (`mail/<mailbox>/_flags` for INBOX, `mail/<mailbox>/<folder>/_flags`
-for another folder, `<mailbox>` being the normalized name), kept by `komira_comms_index` as a delta log: STORE and the
+as the messages (`mail/<mailbox>/_flags` for INBOX, `mail/<mailbox>~<folder>/_flags` for another
+folder, `<mailbox>` being the normalized name; a `/` of the folder is written `~`, which no
+mailbox or folder name holds, so no log lies under another's prefix, a folder
+named `_flags` included), kept by `komira_comms_index` as a delta log. A flag is
+keyed by the message's leaf and not by its UID, so messages that share a UID
+still have their own flags and their own EXPUNGE: STORE and the
 `\Seen` of a read append one immutable delta, EXPUNGE appends a tombstone, and
 every command that needs flags folds the log. So two connections to a mailbox
 see the same flags, and they survive a restart. The same message in two folders
@@ -206,6 +224,19 @@ delete fails the message stays (without its flags) and the command is `NO`; the
 other order could leave a stale `\Deleted` flag that a later message of the same
 content would inherit and lose to an EXPUNGE.
 
+The flag logs are outside the mailbox's message tree: removing a mailbox by its
+message prefix leaves them, and a mailbox recreated under the same name finds
+the old flags of any message whose bytes it receives again. A session whose
+view still holds a message another session expunged can STORE on it, which
+writes a flag entry for a message that is gone; redelivered identical bytes
+inherit it. Take the mailbox's logs away with its messages.
+
+One IMAP serving process per store: a delta carries the sequence number its
+writer guessed (the log's head plus one) as the last-writer-wins tiebreak, and
+two processes writing one store (a second server, a command-line tool) can
+guess the same one. The commands of one process never interleave, so within a
+process the order is exact.
+
 The log grows with every flag change and each command folds all of it, so a
 command that changed flags folds the log into one base chunk when it has more
 than `compact_flag_log_at` chunks (256). A failed compaction is ignored.
@@ -220,8 +251,10 @@ never changes. Consequences, until a per-folder counter in `komira_comms_index`
 allocates UIDs:
 
 1. UIDs can collide: two messages of one folder share a UID with about even odds
-   near 55,000 messages (a birthday bound). They then share flags and cannot be
-   told apart by `UID FETCH`.
+   near 55,000 messages (a birthday bound). Their flags, `\Seen`, EXPUNGE and
+   CLOSE are still their own (they are keyed by leaf), but a UID-addressed
+   command (`UID FETCH`, `UID STORE`) names both of them, and a client that
+   keeps a UID cannot tell them apart.
 2. UIDs do not follow delivery order. A view is sorted by UID, so within one
    selection sequence numbers and UIDs both ascend, as a client needs; but a
    message delivered later can get a smaller UID and a smaller sequence number
@@ -287,6 +320,7 @@ test sets, with `connect`, `send`, `send_chunks`, `login`, `take` and
 - No implicit TLS (a port of its own); STARTTLS only.
 - `LOGIN` is the only way in; there is no AUTHENTICATE. The verifier is the
   caller's; `TestAuthVerifier` is a fixture, not a password store.
+- A store call is synchronous (see "Serving").
 - Message bytes are held in memory while a FETCH answers (bounded by
   `max_fetch_bytes`).
 
@@ -297,6 +331,6 @@ with the `Peer` client of `komira_mail_test_support`, TLS included. They wait fo
 progress (a reply, a finished handshake, the end of a connection) and never for a
 time; deadlines are tested by passing `now_ms`. The others (`test_framing`,
 `test_commands`, `test_mailbox`, `test_fetch`, `test_flags_store`,
-`test_folders`) drive the registry with no socket. `test_mailbox` and
+`test_folders`, `test_flag_identity`) drive the registry with no socket. `test_mailbox` and
 `test_folders` run over two stores; `test_flags_store` includes a store that
 fails on request.

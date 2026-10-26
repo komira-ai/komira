@@ -293,6 +293,17 @@ struct ImapRegistry(Movable):
             return -1
         return view[seq - 1].uid
 
+    def leaf_at(self, conn_id: Int, seq: Int) -> String:
+        """The store name of the message with sequence number `seq`
+        (1-based), or the empty string."""
+        var idx = self._index_of(conn_id)
+        if idx < 0:
+            return String("")
+        ref view = self._conns[idx][].view
+        if seq < 1 or seq > len(view):
+            return String("")
+        return view[seq - 1].leaf
+
     def login_failures_of(self, conn_id: Int) -> Int:
         var idx = self._index_of(conn_id)
         if idx < 0:

@@ -22,6 +22,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   refused items, the byte limit, a message deleted meanwhile.
 # - test_flags_store: the flag store over two stores and a restart, STORE,
 #   EXPUNGE, CLOSE, folding the flag log, and a store that fails on request.
+# - test_flag_identity: messages that share a UID keep their own flags and
+#   survive each other's EXPUNGE and CLOSE; STORE, EXPUNGE and CLOSE over the
+#   local-file store seen by a new store and a new server; a folder named
+#   `_flags`.
 # - test_folders: mail delivered by komira_smtp_server and mail filed in
 #   another folder, read over IMAP, over two stores.
 # - test_serve_loop: STARTTLS, LOGIN and FETCH over loopback sockets, the
@@ -44,6 +48,7 @@ mojo_library(
     test_srcs = [
         "tests/test_commands.mojo",
         "tests/test_fetch.mojo",
+        "tests/test_flag_identity.mojo",
         "tests/test_flags_store.mojo",
         "tests/test_folders.mojo",
         "tests/test_framing.mojo",

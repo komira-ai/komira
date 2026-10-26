@@ -37,7 +37,6 @@ from komira_imap_server import (
     ImapServerConfig,
     ImapTestServer,
     MailboxFlagStore,
-    assign_uid,
 )
 
 
@@ -121,7 +120,7 @@ def _check_folders[S: CloneableConditionalWriteStore](var store: S) raises:
     var filed = store_message(s.store, bob, String("Archive"), _archive_message())
     var scope = String("bob_40example.com/archive")
     var flags = MailboxFlagStore[S](s.store.clone(), scope)
-    flags.set_flags(assign_uid(filed.leaf), FLAG_FLAGGED)
+    flags.set_flags(filed.leaf, FLAG_FLAGGED)
     assert_equal(len(list_folder(s.store, bob, String("INBOX"))), 1)
     assert_equal(len(list_folder(s.store, bob, String("Archive"))), 1)
 

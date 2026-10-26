@@ -62,7 +62,6 @@ from komira_imap_server import (
     ImapServerConfig,
     ImapTestServer,
     MailboxFlagStore,
-    assign_uid,
     flag_bit_of,
     flags_to_text,
 )
@@ -91,6 +90,17 @@ def test_flags_as_text_and_bits() raises:
     assert_equal(flag_bit_of(String("")), UInt8(0))
 
 
+def _leaf(n: Int) -> String:
+    """A well-formed leaf (16 lowercase hex digits) for the number `n`."""
+    var digits = String("0123456789abcdef")
+    var out = String("")
+    var v = n
+    for _ in range(16):
+        out = String(digits[byte = v % 16 : v % 16 + 1]) + out
+        v = v // 16
+    return out^
+
+
 def _scrambled_uids() -> List[Int]:
     var uids = List[Int]()
     for i in range(60):
@@ -103,44 +113,44 @@ def _check_flag_store[
 ](mut store: S) raises:
     var scope = String("bob_40example.com/archive")
     var fs = MailboxFlagStore[S](store.clone(), scope)
-    assert_equal(fs.flags_of(7), UInt8(0))
+    assert_equal(fs.flags_of(_leaf(7)), UInt8(0))
     assert_equal(fs.snapshot().count(), 0)
-    fs.set_flags(7, FLAG_SEEN)
-    assert_equal(fs.flags_of(7), FLAG_SEEN)
-    fs.set_flags(7, FLAG_DRAFT)  # a later set replaces
-    assert_equal(fs.flags_of(7), FLAG_DRAFT)
-    fs.set_flags(3, FLAG_FLAGGED | FLAG_DELETED)
-    assert_equal(fs.flags_of(3), FLAG_FLAGGED | FLAG_DELETED)
-    assert_equal(fs.flags_of(4), UInt8(0))
+    fs.set_flags(_leaf(7), FLAG_SEEN)
+    assert_equal(fs.flags_of(_leaf(7)), FLAG_SEEN)
+    fs.set_flags(_leaf(7), FLAG_DRAFT)  # a later set replaces
+    assert_equal(fs.flags_of(_leaf(7)), FLAG_DRAFT)
+    fs.set_flags(_leaf(3), FLAG_FLAGGED | FLAG_DELETED)
+    assert_equal(fs.flags_of(_leaf(3)), FLAG_FLAGGED | FLAG_DELETED)
+    assert_equal(fs.flags_of(_leaf(4)), UInt8(0))
     # Bits that are not flags are not kept.
-    fs.set_flags(9, UInt8(0xFF))
-    assert_equal(fs.flags_of(9), FLAG_ALL)
+    fs.set_flags(_leaf(9), UInt8(0xFF))
+    assert_equal(fs.flags_of(_leaf(9)), FLAG_ALL)
     # Many UIDs, set in scrambled order, are each found.
     var uids = _scrambled_uids()
     for i in range(len(uids)):
-        fs.set_flags(uids[i], UInt8((uids[i] % 31) + 1))
+        fs.set_flags(_leaf(uids[i]), UInt8((uids[i] % 31) + 1))
     var snap = fs.snapshot()
     assert_equal(snap.count(), 3 + len(uids))
     for i in range(len(uids)):
-        assert_equal(snap.flags_of(uids[i]), UInt8((uids[i] % 31) + 1))
-    assert_equal(snap.flags_of(6), UInt8(0))
-    assert_equal(snap.flags_of(2000000), UInt8(0))
+        assert_equal(snap.flags_of(_leaf(uids[i])), UInt8((uids[i] % 31) + 1))
+    assert_equal(snap.flags_of(_leaf(6)), UInt8(0))
+    assert_equal(snap.flags_of(_leaf(2000000)), UInt8(0))
     # A second handle on the same store sees it; another scope does not.
     var second = MailboxFlagStore[S](store.clone(), scope)
-    assert_equal(second.flags_of(3), FLAG_FLAGGED | FLAG_DELETED)
+    assert_equal(second.flags_of(_leaf(3)), FLAG_FLAGGED | FLAG_DELETED)
     var other = MailboxFlagStore[S](store.clone(), String("bob_40example.com"))
-    assert_equal(other.flags_of(3), UInt8(0))
+    assert_equal(other.flags_of(_leaf(3)), UInt8(0))
     assert_equal(other.snapshot().count(), 0)
     # Expunge removes the flags, only of that message, and a later set works.
     # (A handle that has written does not see what another appends, so what
     # is read next is read through new handles.)
-    second.expunge(3)
+    second.expunge(_leaf(3))
     var fresh = MailboxFlagStore[S](store.clone(), scope)
-    assert_equal(fresh.flags_of(3), UInt8(0))
-    assert_equal(fresh.flags_of(7), FLAG_DRAFT)
+    assert_equal(fresh.flags_of(_leaf(3)), UInt8(0))
+    assert_equal(fresh.flags_of(_leaf(7)), FLAG_DRAFT)
     assert_equal(fresh.snapshot().count(), 2 + len(uids))
-    fresh.set_flags(3, FLAG_SEEN)
-    assert_equal(MailboxFlagStore[S](store.clone(), scope).flags_of(3), FLAG_SEEN)
+    fresh.set_flags(_leaf(3), FLAG_SEEN)
+    assert_equal(MailboxFlagStore[S](store.clone(), scope).flags_of(_leaf(3)), FLAG_SEEN)
     # Folding the log changes how many chunks it has, not what it says.
     var long = MailboxFlagStore[S](store.clone(), scope)
     var before = long.log_length()
@@ -151,13 +161,13 @@ def _check_flag_store[
     var folded = MailboxFlagStore[S](store.clone(), scope)
     assert_true(folded.log_length() <= 2)
     assert_equal(folded.snapshot().count(), 1 + len(uids) + 2)
-    assert_equal(folded.flags_of(3), FLAG_SEEN)
-    assert_equal(folded.flags_of(7), FLAG_DRAFT)
-    assert_equal(folded.flags_of(9), FLAG_ALL)
-    assert_equal(folded.flags_of(uids[17]), UInt8((uids[17] % 31) + 1))
+    assert_equal(folded.flags_of(_leaf(3)), FLAG_SEEN)
+    assert_equal(folded.flags_of(_leaf(7)), FLAG_DRAFT)
+    assert_equal(folded.flags_of(_leaf(9)), FLAG_ALL)
+    assert_equal(folded.flags_of(_leaf(uids[17])), UInt8((uids[17] % 31) + 1))
     # And it goes on from there.
-    folded.set_flags(7, FLAG_SEEN)
-    assert_equal(MailboxFlagStore[S](store.clone(), scope).flags_of(7), FLAG_SEEN)
+    folded.set_flags(_leaf(7), FLAG_SEEN)
+    assert_equal(MailboxFlagStore[S](store.clone(), scope).flags_of(_leaf(7)), FLAG_SEEN)
 
 
 def test_flag_store_over_the_shared_in_memory_store() raises:
@@ -174,9 +184,9 @@ def test_flag_store_over_the_local_file_store_and_a_restart() raises:
     var fs = MailboxFlagStore[LocalFsConditionalStore](
         again.clone(), String("bob_40example.com/archive")
     )
-    assert_equal(fs.flags_of(3), FLAG_SEEN)
-    assert_equal(fs.flags_of(7), FLAG_SEEN)  # the last thing the check set
-    assert_equal(fs.flags_of(9), FLAG_ALL)
+    assert_equal(fs.flags_of(_leaf(3)), FLAG_SEEN)
+    assert_equal(fs.flags_of(_leaf(7)), FLAG_SEEN)  # the last thing the check set
+    assert_equal(fs.flags_of(_leaf(9)), FLAG_ALL)
     assert_true(fs.log_length() <= 3)
 
 
@@ -288,7 +298,7 @@ def test_flags_are_shared_between_connections_and_survive_a_restart() raises:
     var fs = MailboxFlagStore[SharedInMemoryConditionalStore](
         s.store.clone(), normalize_recipient(String("bob@example.com"))
     )
-    assert_equal(fs.flags_of(assign_uid(leaves[0])), UInt8(0))
+    assert_equal(fs.flags_of(leaves[0]), UInt8(0))
     assert_equal(fs.snapshot().count(), 0)
 
 
@@ -430,8 +440,10 @@ def test_expunge_removes_the_deleted_messages_highest_first() raises:
     _ = _seed(s.store, String("INBOX"), 5)
     var id = _open(s)
     var uids = List[Int]()
+    var view_leaves = List[String]()
     for k in range(1, 6):
         uids.append(s.reg.uid_at(id, k))
+        view_leaves.append(s.reg.leaf_at(id, k))
     _ = s.send(id, String("f STORE 1:5 +FLAGS.SILENT (\\Flagged)\r\n"))
     _ = s.send(id, String("f STORE 2,3,5 +FLAGS.SILENT (\\Deleted)\r\n"))
     assert_equal(
@@ -452,8 +464,8 @@ def test_expunge_removes_the_deleted_messages_highest_first() raises:
         s.store.clone(), normalize_recipient(String("bob@example.com"))
     )
     assert_equal(fs.snapshot().count(), 2)
-    assert_equal(fs.flags_of(uids[1]), UInt8(0))
-    assert_equal(fs.flags_of(uids[0]), FLAG_FLAGGED)
+    assert_equal(fs.flags_of(view_leaves[1]), UInt8(0))
+    assert_equal(fs.flags_of(view_leaves[0]), FLAG_FLAGGED)
     # Another connection agrees.
     var other = _open(s)
     assert_equal(s.reg.view_count(other), 2)

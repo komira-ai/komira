@@ -26,7 +26,7 @@ from .reply import (
 )
 from .search_store import expunge_deleted
 from .sets import ascending_order
-from .uid import assign_uid, uidvalidity_for
+from .uid import assign_uid, is_valid_leaf, uidvalidity_for
 
 
 def resolve_folder(name: String) -> Optional[String]:
@@ -56,21 +56,6 @@ def resolve_folder(name: String) -> Optional[String]:
         return Optional[String](normalize_folder(name))
     except:
         return None
-
-
-def _valid_leaf(leaf: String) -> Bool:
-    """Sixteen lowercase hex digits: what `komira_mail_store` names a message.
-    Anything else in a folder is not a message of this server."""
-    var bs = leaf.as_bytes()
-    if len(bs) != 16:
-        return False
-    for i in range(16):
-        var c = bs[i]
-        var digit = c >= 0x30 and c <= 0x39
-        var lower = c >= 0x61 and c <= 0x66
-        if not (digit or lower):
-            return False
-    return True
 
 
 def handle_select[
@@ -112,7 +97,7 @@ def handle_select[
     var rows = List[ViewRow]()
     var uids = List[Int]()
     for i in range(len(entries)):
-        if not _valid_leaf(entries[i].leaf):
+        if not is_valid_leaf(entries[i].leaf):
             continue
         var uid = assign_uid(entries[i].leaf)
         rows.append(ViewRow(entries[i].leaf, uid, entries[i].size))
@@ -145,11 +130,15 @@ def handle_select[
     conn.enqueue(
         String("* FLAGS (") + flags_to_text(FLAG_ALL) + ")\r\n"
     )
-    conn.enqueue(
-        String("* OK [PERMANENTFLAGS (")
-        + flags_to_text(FLAG_ALL)
-        + ")] Flags that can be kept\r\n"
-    )
+    if read_only:
+        # RFC 3501 section 6.3.2: a read-only mailbox has no permanent flags.
+        conn.enqueue(String("* OK [PERMANENTFLAGS ()] No permanent flags\r\n"))
+    else:
+        conn.enqueue(
+            String("* OK [PERMANENTFLAGS (")
+            + flags_to_text(FLAG_ALL)
+            + ")] Flags that can be kept\r\n"
+        )
     conn.enqueue(
         String("* OK [UIDVALIDITY ")
         + String(uidvalidity_for(scope))

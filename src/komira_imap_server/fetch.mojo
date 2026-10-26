@@ -5,8 +5,14 @@
 # partial fetches, the macros ALL, FAST and FULL) is recognised and refused
 # with `NO [CANNOT]`; an item that is not IMAP at all is BAD. The refusal
 # happens before any message is read, so a command never answers half its
-# items. A later part adds the refused items in `emit_item` and moves their
-# names from `_is_known_unsupported` to `parse_fetch_items`.
+# items.
+#
+# An item is a `FetchItem`: its kind and the text the client wrote (a later part
+# parses a section, a partial range or a field list out of `text`). The parser
+# is `parse_fetch_items`, the answer for one item is `emit_item`, and
+# `_emit_messages` loops over the items of each message. A later part adds a
+# kind to `_kind_of` (taking its name out of `_is_known_unsupported`) and a
+# branch to `emit_item`.
 #
 # The message bytes go to the reply queue exactly as stored (a `{n}` literal
 # of n raw bytes); nothing is decoded or re-encoded.
@@ -56,6 +62,18 @@ def _is_known_unsupported(item: String) -> Bool:
     return False
 
 
+struct FetchItem(Copyable, Movable):
+    """One FETCH item: `kind` (an `ITEM_*`) and `text`, the item as the
+    client wrote it."""
+
+    var kind: Int
+    var text: String
+
+    def __init__(out self, kind: Int, var text: String):
+        self.kind = kind
+        self.text = text^
+
+
 def _kind_of(item: String) -> Int:
     var up = upper_ascii(item)
     if up == "FLAGS":
@@ -73,12 +91,12 @@ def _kind_of(item: String) -> Int:
     return ITEM_UNKNOWN
 
 
-def parse_fetch_items(spec: String) -> List[Int]:
-    """The kind of each item in a FETCH item list: one item, or a
+def parse_fetch_items(spec: String) -> List[FetchItem]:
+    """Each item in a FETCH item list: one item, or a
     parenthesised list. Brackets and parentheses inside an item (a section
     such as `HEADER.FIELDS (FROM TO)`) keep it in one piece. An empty result
     means the list is malformed (empty, or brackets that do not balance)."""
-    var kinds = List[Int]()
+    var items = List[FetchItem]()
     var text = spec
     var bs = text.as_bytes()
     var n = len(bs)
@@ -95,7 +113,9 @@ def parse_fetch_items(spec: String) -> List[Int]:
         var separator = c == 0x20 and depth_b == 0 and depth_p == 0
         if separator:
             if start >= 0:
-                kinds.append(_kind_of(String(unsafe_from_utf8=bs[start:i])))
+                var word = String(unsafe_from_utf8=bs[start:i])
+                var kind = _kind_of(word)
+                items.append(FetchItem(kind, word^))
                 start = -1
             continue
         if start < 0:
@@ -109,26 +129,26 @@ def parse_fetch_items(spec: String) -> List[Int]:
         elif c == 0x29:
             depth_p -= 1
         if depth_b < 0 or depth_p < 0:
-            return List[Int]()
+            return List[FetchItem]()
     if depth_b != 0 or depth_p != 0:
-        return List[Int]()
-    return kinds^
+        return List[FetchItem]()
+    return items^
 
 
-def _has(kinds: List[Int], kind: Int) -> Bool:
-    for i in range(len(kinds)):
-        if kinds[i] == kind:
+def _has(items: List[FetchItem], kind: Int) -> Bool:
+    for i in range(len(items)):
+        if items[i].kind == kind:
             return True
     return False
 
 
-def _count_bodies(kinds: List[Int]) -> Int:
+def _count_bodies(items: List[FetchItem]) -> Int:
     var n = 0
-    for i in range(len(kinds)):
+    for i in range(len(items)):
         if (
-            kinds[i] == ITEM_BODY
-            or kinds[i] == ITEM_BODY_PEEK
-            or kinds[i] == ITEM_RFC822
+            items[i].kind == ITEM_BODY
+            or items[i].kind == ITEM_BODY_PEEK
+            or items[i].kind == ITEM_RFC822
         ):
             n += 1
     return n
@@ -180,17 +200,17 @@ def handle_fetch[
     if not ids.ok:
         tagged_bad(conn, tag, "Invalid message set")
         return
-    var kinds = parse_fetch_items(item_text)
-    if len(kinds) == 0 or _has(kinds, ITEM_UNKNOWN):
+    var items = parse_fetch_items(item_text)
+    if len(items) == 0 or _has(items, ITEM_UNKNOWN):
         tagged_bad(conn, tag, "Invalid FETCH item")
         return
-    if _has(kinds, ITEM_UNSUPPORTED):
+    if _has(items, ITEM_UNSUPPORTED):
         tagged_no_code(
             conn, tag, "CANNOT", "This FETCH item is not supported"
         )
         return
     var picked = match_set(ids, view_keys(conn, by_uid))
-    var bodies = _count_bodies(kinds)
+    var bodies = _count_bodies(items)
     if bodies > 0:
         var total = 0
         for k in range(len(picked)):
@@ -206,7 +226,7 @@ def handle_fetch[
     var missing = False
     try:
         missing = _emit_messages(
-            conn, store, picked, kinds, by_uid, config.limits.compact_flag_log_at
+            conn, store, picked, items, by_uid, config.limits.compact_flag_log_at
         )
     except:
         internal_error(conn, tag)
@@ -222,23 +242,45 @@ def handle_fetch[
     tagged_ok(conn, tag, "FETCH completed")
 
 
+def emit_item(
+    mut conn: ImapConnection,
+    item: FetchItem,
+    uid: Int,
+    bits: UInt8,
+    msg_bytes: List[UInt8],
+):
+    """Queue the answer for one item of one message: `FLAGS (...)`, `UID n`,
+    or a `{n}` literal of the message bytes. `msg_bytes` is empty unless the
+    command asked for a body."""
+    if item.kind == ITEM_FLAGS:
+        conn.enqueue(String("FLAGS (") + flags_to_text(bits) + ")")
+    elif item.kind == ITEM_UID:
+        conn.enqueue(String("UID ") + String(uid))
+    elif item.kind == ITEM_RFC822:
+        conn.enqueue(String("RFC822 {") + String(len(msg_bytes)) + "}\r\n")
+        conn.enqueue_bytes(Span(msg_bytes))
+    elif item.kind == ITEM_BODY or item.kind == ITEM_BODY_PEEK:
+        conn.enqueue(String("BODY[] {") + String(len(msg_bytes)) + "}\r\n")
+        conn.enqueue_bytes(Span(msg_bytes))
+
+
 def _emit_messages[
     S: CloneableConditionalWriteStore,
 ](
     mut conn: ImapConnection,
     mut store: S,
     picked: List[Int],
-    kinds: List[Int],
+    items: List[FetchItem],
     by_uid: Bool,
     compact_at: Int,
 ) raises -> Bool:
     """Answer each picked message. True when one was missing from the store."""
-    var wants_flags = _has(kinds, ITEM_FLAGS)
-    var wants_uid = _has(kinds, ITEM_UID)
-    var bodies = _count_bodies(kinds)
+    var wants_flags = _has(items, ITEM_FLAGS)
+    var wants_uid = _has(items, ITEM_UID)
+    var bodies = _count_bodies(items)
     var sets_seen = (
         not conn.read_only
-        and (_has(kinds, ITEM_BODY) or _has(kinds, ITEM_RFC822))
+        and (_has(items, ITEM_BODY) or _has(items, ITEM_RFC822))
     )
     var fstore = MailboxFlagStore[S](store.clone(), conn.scope)
     var snap = FlagSnapshot()
@@ -250,7 +292,7 @@ def _emit_messages[
         var at = picked[k]
         var uid = conn.view[at].uid
         var leaf = conn.view[at].leaf
-        var bits = snap.flags_of(uid)
+        var bits = snap.flags_of(leaf)
         var got = FetchOutcome(False, List[UInt8](), String(""))
         if bodies > 0:
             got = fetch_message(store, conn.mailbox, conn.folder, leaf)
@@ -260,28 +302,14 @@ def _emit_messages[
         var changed = False
         if sets_seen and (bits & FLAG_SEEN) == 0:
             bits = bits | FLAG_SEEN
-            fstore.set_flags(uid, bits)
+            fstore.set_flags(leaf, bits)
             changed = True
             wrote = True
         conn.enqueue(String("* ") + String(at + 1) + " FETCH (")
-        for i in range(len(kinds)):
+        for i in range(len(items)):
             if i > 0:
                 conn.enqueue(String(" "))
-            var kind = kinds[i]
-            if kind == ITEM_FLAGS:
-                conn.enqueue(String("FLAGS (") + flags_to_text(bits) + ")")
-            elif kind == ITEM_UID:
-                conn.enqueue(String("UID ") + String(uid))
-            elif kind == ITEM_RFC822:
-                conn.enqueue(
-                    String("RFC822 {") + String(len(got.bytes)) + "}\r\n"
-                )
-                conn.enqueue_bytes(Span(got.bytes))
-            else:
-                conn.enqueue(
-                    String("BODY[] {") + String(len(got.bytes)) + "}\r\n"
-                )
-                conn.enqueue_bytes(Span(got.bytes))
+            emit_item(conn, items[i], uid, bits, got.bytes)
         if by_uid and not wants_uid:
             conn.enqueue(String(" UID ") + String(uid))
         if changed and not wants_flags:

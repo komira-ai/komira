@@ -1,24 +1,34 @@
 # Durable, shared message flags and EXPUNGE, on komira_comms_index.
 #
 # The schema is the substrate's generic keyed delta:
-#   key   = the message UID as decimal text
+#   key   = the message's leaf (16 hex digits, its name in the store)
 #   value = one byte, the flag bits below
 #   op    = PUT (set this message's flags) or TOMBSTONE (EXPUNGE)
 #
+# The key is the leaf, not the UID: UIDs are 31 bits of a hash (uid.mojo) and
+# two messages of a folder can share one, which must never make one message
+# inherit, or lose to, the other's flags or EXPUNGE.
+#
 # Every mutation appends one immutable delta to a log on the same store as the
-# messages, under `mail/<scope>/_flags`; every read folds the log (last writer
-# wins by sequence). So two connections to a mailbox, and a server that is
-# restarted, see the same flags. `<scope>` is the mailbox for INBOX and
-# `<mailbox>/<folder>` for another folder, so each folder has its own flags.
+# messages, under `mail/<scope>/_flags` with the `/` of a folder written `~`
+# (a character neither a mailbox nor a folder name holds, so no log's prefix
+# lies under another's: a folder named `_flags` is safe); every read folds the
+# log (last writer wins by sequence). So two connections to a mailbox, and a
+# server that is restarted, see the same flags. `<scope>` is the mailbox for
+# INBOX and `<mailbox>/<folder>` for another folder, so each folder has its
+# own flags. The log is not under the mailbox's message tree: removing a
+# mailbox by that prefix leaves its flag logs.
 #
 # The store handle is a clone of the one that holds the messages: the object
 # store, not the handle, is the shared state.
+
+from std.collections import Dict
 
 from komira_comms_index import CommsIndex, KeyedDelta, key_bytes
 from komira_objectstore.store import ConditionalWriteStore
 
 from .parse import lower_ascii
-from .sets import ascending_order
+from .uid import is_valid_leaf
 
 comptime FLAG_SEEN: UInt8 = 0x01
 comptime FLAG_ANSWERED: UInt8 = 0x02
@@ -88,49 +98,40 @@ def flag_scope(mailbox: String, folder: String) -> String:
     return mailbox + String("/") + folder
 
 
-def _parse_uid(key: List[UInt8]) -> Int:
-    """The number a decimal key spells, or -1 if it is not one."""
-    if len(key) == 0 or len(key) > 18:
-        return -1
-    var v = 0
-    for i in range(len(key)):
-        var c = key[i]
-        if c < 0x30 or c > 0x39:
-            return -1
-        v = v * 10 + Int(c - 0x30)
-    return v
-
-
 struct FlagSnapshot(Movable):
-    """The flags of a folder at one moment: the folded log, as UIDs in
-    ascending order with their bits. One fold answers any number of
-    `flags_of` calls, each a binary search."""
+    """The flags of a folder at one moment: the folded log, one entry per
+    message (by leaf) that has flags. One fold answers any number of
+    `flags_of` calls."""
 
-    var _uids: List[Int]
-    var _bits: List[UInt8]
+    var _bits: Dict[String, UInt8]
 
     def __init__(out self):
-        self._uids = List[Int]()
-        self._bits = List[UInt8]()
+        self._bits = Dict[String, UInt8]()
 
     def count(self) -> Int:
-        return len(self._uids)
+        return len(self._bits)
 
-    def flags_of(self, uid: Int) -> UInt8:
-        """The flag bits of `uid`; 0 for a message with no flags, an expunged
-        one, or one never flagged."""
-        var lo = 0
-        var hi = len(self._uids) - 1
-        while lo <= hi:
-            var mid = (lo + hi) // 2
-            var here = self._uids[mid]
-            if here == uid:
-                return self._bits[mid]
-            if here < uid:
-                lo = mid + 1
-            else:
-                hi = mid - 1
+    def flags_of(self, leaf: String) -> UInt8:
+        """The flag bits of the message `leaf`; 0 for a message with no flags,
+        an expunged one, or one never flagged."""
+        if leaf in self._bits:
+            try:
+                return self._bits[leaf]
+            except:
+                pass
         return UInt8(0)
+
+
+def _log_prefix(scope: String) -> String:
+    """The log's object prefix for a scope: `/` in the scope becomes `~`."""
+    var out = String("")
+    var bs = scope.as_bytes()
+    for i in range(len(bs)):
+        if bs[i] == 0x2F:
+            out += String("~")
+        else:
+            out += chr(Int(bs[i]))
+    return String("mail/") + out + "/" + _FLAG_SEGMENT
 
 
 struct MailboxFlagStore[S: ConditionalWriteStore](Movable):
@@ -143,40 +144,36 @@ struct MailboxFlagStore[S: ConditionalWriteStore](Movable):
 
     `flags_of` folds the log for one answer; to answer many, take one
     `snapshot()`. `set_flags` and `expunge` each append one delta. All three
-    raise on a store failure."""
+    raise on a store failure. A `leaf` argument is the message's name in the
+    store; the ones that are not 16 hex digits raise.
+
+    One process at a time may write a store's flag logs: a delta carries the
+    sequence number its writer guessed (the log's head plus one) and a second
+    process can guess the same."""
 
     var _idx: CommsIndex[Self.S]
 
     def __init__(out self, var store: Self.S, scope: String):
-        self._idx = CommsIndex[Self.S](
-            store^, String("mail/") + scope + "/" + _FLAG_SEGMENT
-        )
+        self._idx = CommsIndex[Self.S](store^, _log_prefix(scope))
 
     def snapshot(self) raises -> FlagSnapshot:
         """Fold the log into the live flags: one entry per message that has
         flags and was not expunged."""
         var state = self._idx.read_state()
-        var uids = List[Int]()
-        var bits = List[UInt8]()
+        var out = FlagSnapshot()
         for i in range(state.len()):
-            var uid = _parse_uid(state.keys[i])
-            if uid < 0:
+            var leaf = String(unsafe_from_utf8=Span(state.keys[i]))
+            if not is_valid_leaf(leaf):
                 continue
             var b = UInt8(0)
             if len(state.values[i]) > 0:
                 b = state.values[i][0] & FLAG_ALL
-            uids.append(uid)
-            bits.append(b)
-        var order = ascending_order(uids)
-        var out = FlagSnapshot()
-        for k in range(len(order)):
-            out._uids.append(uids[order[k]])
-            out._bits.append(bits[order[k]])
+            out._bits[leaf] = b
         return out^
 
-    def flags_of(self, uid: Int) raises -> UInt8:
+    def flags_of(self, leaf: String) raises -> UInt8:
         var snap = self.snapshot()
-        return snap.flags_of(uid)
+        return snap.flags_of(leaf)
 
     def log_length(self) raises -> Int:
         """How many chunks the log has now (the deltas since the last
@@ -194,15 +191,19 @@ struct MailboxFlagStore[S: ConditionalWriteStore](Movable):
         except:
             pass
 
-    def set_flags(mut self, uid: Int, bits: UInt8) raises:
-        """Durably set the flags of `uid` to exactly `bits`."""
+    def set_flags(mut self, leaf: String, bits: UInt8) raises:
+        """Durably set the flags of the message `leaf` to exactly `bits`."""
+        if not is_valid_leaf(leaf):
+            raise Error("flags: not a message leaf")
         var seq = self._idx.head_seq() + Int64(1)
         var value = List[UInt8]()
         value.append(bits & FLAG_ALL)
-        _ = self._idx.put_delta(KeyedDelta.put(seq, key_bytes(String(uid)), value^))
+        _ = self._idx.put_delta(KeyedDelta.put(seq, key_bytes(leaf), value^))
 
-    def expunge(mut self, uid: Int) raises:
-        """Durably drop the flags of `uid`: a tombstone in the log. The
-        message itself is the caller's to delete."""
+    def expunge(mut self, leaf: String) raises:
+        """Durably drop the flags of the message `leaf`: a tombstone in the
+        log. The message itself is the caller's to delete."""
+        if not is_valid_leaf(leaf):
+            raise Error("flags: not a message leaf")
         var seq = self._idx.head_seq() + Int64(1)
-        _ = self._idx.put_delta(KeyedDelta.tombstone(seq, key_bytes(String(uid))))
+        _ = self._idx.put_delta(KeyedDelta.tombstone(seq, key_bytes(leaf)))
