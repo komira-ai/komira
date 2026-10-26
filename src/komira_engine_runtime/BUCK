@@ -25,7 +25,8 @@ mojo_library(
     test_srcs = [
         "tests/test_cb20_morsel_count_mechanism.mojo",
         "tests/test_counters.mojo",
-        "tests/test_fnv1a_and_wake.mojo",
+        "tests/test_dynamic_filter_band_sink.mojo",
+        "tests/test_fnv1a_and_async_wake.mojo",
         "tests/test_hardware_profile.mojo",
         "tests/test_hardware_profile_detect.mojo",
         "tests/test_hardware_topology.mojo",
@@ -36,6 +37,7 @@ mojo_library(
         "tests/test_machine_topology.mojo",
         "tests/test_morsel_sizing_policy.mojo",
         "tests/test_row_group_ref_borrow.mojo",
+        "tests/test_scan_source_streaming_morsel.mojo",
         "tests/test_segment_execution.mojo",
         "tests/test_streaming_microbench.mojo",
         "tests/test_wave_uaf_batch_shape.mojo",
