@@ -41,10 +41,10 @@ def _near(a: Float64, b: Float64) -> Bool:
 
 
 def test_normalize_folds_case_space_and_punctuation() raises:
-    assert_equal(normalize_name("Acme Inc"), "acme inc")
-    assert_equal(normalize_name("acme inc "), "acme inc")
-    assert_equal(normalize_name("  ACME,  INC. "), "acme inc")
-    assert_equal(normalize_name("Acme, Inc."), "acme inc")
+    assert_equal(normalize_name("Alpha Inc"), "alpha inc")
+    assert_equal(normalize_name("alpha inc "), "alpha inc")
+    assert_equal(normalize_name("  ALPHA,  INC. "), "alpha inc")
+    assert_equal(normalize_name("Alpha, Inc."), "alpha inc")
     assert_equal(normalize_name("a-b_c"), "a b c")
     assert_equal(normalize_name("a\tb\nc"), "a b c")
     assert_equal(normalize_name("x1   y2"), "x1 y2")
@@ -68,7 +68,7 @@ def test_normalize_keeps_letters_of_other_scripts() raises:
 
 def test_normalize_is_idempotent() raises:
     var names = List[String]()
-    names.append("  ACME,  INC. ")
+    names.append("  ALPHA,  INC. ")
     names.append("Müller--GmbH")
     names.append("東京  タワー!")
     names.append("a\tb")
@@ -92,8 +92,8 @@ def test_entropy_is_higher_for_a_more_varied_name() raises:
 
 
 def test_signature_has_the_fixed_length_and_is_stable() raises:
-    var a = minhash_signature("acme inc")
-    var b = minhash_signature("acme inc")
+    var a = minhash_signature("alpha inc")
+    var b = minhash_signature("alpha inc")
     assert_equal(len(a), MINHASH_NUM_PERM)
     assert_equal(len(b), MINHASH_NUM_PERM)
     for i in range(len(a)):
@@ -113,28 +113,28 @@ def test_signature_values_match_an_independent_computation() raises:
 
 
 def test_identical_names_agree_everywhere() raises:
-    var a = minhash_signature(normalize_name("Acme Inc"))
-    var b = minhash_signature(normalize_name("acme inc"))
+    var a = minhash_signature(normalize_name("Alpha Inc"))
+    var b = minhash_signature(normalize_name("alpha inc"))
     assert_equal(jaccard_estimate(a, b), 1.0)
     assert_true(lsh_candidate(a, b))
 
 
 def test_unrelated_names_estimate_low_and_share_no_band() raises:
-    var a = minhash_signature("acme catalog models")
+    var a = minhash_signature("alpha catalog models")
     var far = minhash_signature("globex ltd")
     assert_true(jaccard_estimate(a, far) < 0.25)
     assert_false(lsh_candidate(a, far))
 
 
 def test_a_near_duplicate_estimates_high_and_shares_a_band() raises:
-    var a = minhash_signature("acme catalog models")
-    var b = minhash_signature("acme catalog model")
+    var a = minhash_signature("alpha catalog models")
+    var b = minhash_signature("alpha catalog model")
     assert_true(jaccard_estimate(a, b) >= 0.7)
     assert_true(lsh_candidate(a, b))
 
 
 def test_mismatched_or_empty_signatures_never_agree() raises:
-    var a = minhash_signature("acme inc")
+    var a = minhash_signature("alpha inc")
     var short = List[UInt64]()
     short.append(a[0])
     var empty = List[UInt64]()

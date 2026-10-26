@@ -1,9 +1,10 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The mutable data-graph store and its ingest, part 1 (the second of the packages
-# in docs/design/knowledge_graph_port.md): bi-temporal edges (a replaced fact is
-# closed, not erased), entity resolution (name similarity, the dedup cascade and
-# a directed alias map) and the source facet with its tombstone set. It depends
+# The mutable data-graph store and its ingest, parts 1 and 2 (the second of the
+# packages in docs/design/knowledge_graph_port.md): bi-temporal edges (a replaced
+# fact is closed, not erased), entity resolution (name similarity, the dedup
+# cascade and a directed alias map), the source facet with its tombstone set, and
+# the model seams (Embedder, Extractor, LlmClient, each with a stub). It depends
 # on komira_kg_format (for the open-interval marker) and komira_json (for the
 # facet's attrs JSON), and on their closure; it reads no clock and no
 # environment, and calls no model: a judgment is a trait the caller implements.
@@ -14,7 +15,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # test_dedup runs the cascade on stated inputs, with a scripted judge;
 # test_alias_map checks that resolution is stable under reordering;
 # test_source_facet round-trips the facet and keys the tombstone set by source
-# and facet.
+# and facet; test_embedder pins the reported dimension, the vector width against
+# unpack_embedding_checked and the stub's stated components; test_extractor and
+# test_llm_client check that the stubs satisfy their traits, answer from their
+# tables, and end a gleaning loop.
 mojo_library(
     name = "komira_kg",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -37,6 +41,9 @@ mojo_library(
         "tests/test_alias_map.mojo",
         "tests/test_bitemporal.mojo",
         "tests/test_dedup.mojo",
+        "tests/test_embedder.mojo",
+        "tests/test_extractor.mojo",
+        "tests/test_llm_client.mojo",
         "tests/test_name_similarity.mojo",
         "tests/test_source_facet.mojo",
     ],
