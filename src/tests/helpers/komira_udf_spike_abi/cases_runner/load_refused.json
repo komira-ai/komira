@@ -8,5 +8,5 @@
  "result": [{"type": "int64", "nullable": true}],
  "input": {"length": 1, "columns": [{"type": "int64", "values": [1]}]},
  "expect": {"status": "OK"},
- "runner_fails_with": "load: ERR_DESCRIPTOR"
+ "runner_fails_with": "load: ERR_LOAD"
 }

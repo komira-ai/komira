@@ -106,19 +106,9 @@ PYTHON_CEILING = [
     "target komira//src/tests/e2e/komira_tls_interop_e2e:test_komira_client_refuses_cpython_server",
     "target komira//src/tests/e2e/komira_tls_interop_e2e:test_komira_client_vs_cpython_server",
 
-    # The red-main alerter and its tests.
-    "exec .github/workflows/main_red.yml",
-    "file release/ci/main_red.py",
-    "file release/ci/tests/test_main_red.py",
-    "target komira//release/ci/tests:test_main_red",
-    "target komira//release:main_red.py",
-
     # The fixture generators of a foreign (pyarrow) writer.
     "file src/komira_arrow_ipc/tests/fixtures/arrow_ipc/gen_fixtures.py",
     "file src/komira_arrow_ipc/tests/fixtures/arrow_ipc/gen_pyarrow_interop_fixtures.py",
     "file src/komira_parquet_codec/tests/fixtures/parquet/gen_pyarrow_fixtures.py",
     "file src/tests/e2e/komira_formats_e2e/tests/fixtures/orc/gen_pyarrow_orc_fixtures.py",
-
-    # The uv publish capture of kci_pkg_upload fidelity fixtures.
-    "file src/kci_pkg_upload/tests/fidelity/capture_uv_publish.py",
 ]

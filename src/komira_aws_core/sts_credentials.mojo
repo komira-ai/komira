@@ -107,6 +107,23 @@ def _all_in(s: String, lo: UInt8, hi: UInt8) -> Bool:
     return True
 
 
+def _is_word(s: String) -> Bool:
+    """regionRegex's \\w+ over a region that passed check_region's alphabet:
+    one or more lowercase letters or digits (endpoint.mojo reads it alike)."""
+    var b = s.as_bytes()
+    if len(b) == 0:
+        return False
+    for i in range(len(b)):
+        var c = b[i]
+        var ok = (
+            (c >= UInt8(0x61) and c <= UInt8(0x7A))
+            or (c >= UInt8(0x30) and c <= UInt8(0x39))
+        )
+        if not ok:
+            return False
+    return True
+
+
 def sts_region_in_supported_partition(region: String) -> Bool:
     """True when `region` is in the 'aws' or 'aws-us-gov' partition, the two
     whose STS host is sts.<region>.amazonaws.com. The shapes are the
@@ -118,16 +135,14 @@ def sts_region_in_supported_partition(region: String) -> Bool:
     partition added later -- is outside, fail-closed: endpoint and partition
     resolution is not in this package yet."""
     var p = _region_parts(region)
-    var a = UInt8(0x61)
-    var z = UInt8(0x7A)
     var d0 = UInt8(0x30)
     var d9 = UInt8(0x39)
     if len(p) == 4:
         return (
-            p[0] == "us" and p[1] == "gov" and _all_in(p[2], a, z)
+            p[0] == "us" and p[1] == "gov" and _is_word(p[2])
             and _all_in(p[3], d0, d9)
         )
-    if len(p) != 3 or not _all_in(p[1], a, z) or not _all_in(p[2], d0, d9):
+    if len(p) != 3 or not _is_word(p[1]) or not _all_in(p[2], d0, d9):
         return False
     var prefixes: List[String] = [
         "us", "eu", "ap", "sa", "ca", "me", "af", "il", "mx"

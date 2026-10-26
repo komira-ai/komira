@@ -9,7 +9,8 @@
 #                          names another library of the set (BUILD refuses
 #                          an open one; PUBLISH's closure check also pins it)
 #   conda_metadata.mojo    `CondaMetadata`, `read_conda_metadata`; `LibFile`,
-#                          a `lib_files` row of a library shipping native files
+#                          a `lib_files` row of a library shipping native files;
+#                          `DlopenRow`, a `dlopen` row of one opening a codec
 #   system_libs.mojo       `system_libs`, `is_system_lib_requirement`: the
 #                          conda-forge requirements a library may carry for
 #                          a system library it opens (tools/build/package/
@@ -20,7 +21,8 @@
 #                          os_floor), and no other
 #   member.mojo            `ReleaseMember`, `verify_member`: the per-artifact
 #                          checks both verbs run, so build's early refusal and
-#                          publish's re-check cannot drift apart
+#                          publish's re-check cannot drift apart; an OCI
+#                          member's layout is verified blob by blob
 #   release_manifest.mojo  `release.json` (kci.release_set major 2): the
 #                          release identity (revision, platform), who
 #                          produced it, render, parse, read
@@ -35,6 +37,7 @@ from kci_release_set.conda_metadata import (
     KIND_METAPACKAGE,
     CondaMetadata,
     DocFile,
+    DlopenRow,
     LIB_DIR,
     LIB_KIND_LINK,
     LIB_KIND_SHARED,

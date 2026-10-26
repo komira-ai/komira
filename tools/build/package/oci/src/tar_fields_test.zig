@@ -43,7 +43,7 @@ fn item(p: []const u8, mode: u32, data: []const u8) T.Item {
 }
 
 fn zeros(out: *C.List(u8), n: usize) void {
-    out.appendNTimes(0, n) catch C.oom();
+    out.appendNTimes(C.a(), 0, n) catch C.oom();
 }
 
 fn sameBlocks(want: []const u8, got: []const u8) !void {

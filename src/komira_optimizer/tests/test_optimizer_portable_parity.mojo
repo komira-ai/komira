@@ -4,10 +4,10 @@
 # =============================================================================
 #
 # `optimize` and `optimize_portable` share one pass list,
-# `optimizer_driver._run_pass_order`; the only difference is its
-# `narrow_payload` flag, which turns step 20 off for the portable entry. A pass
-# made conditional on that flag would vanish from the portable profile and
-# nothing else would change. One check catches it: on a plan where that pass
+# `optimizer_driver._run_pass_order`; the only differences are the empty
+# scalar binding table and the profile check. A pass made conditional on the
+# entry (a flag passed to the shared list, or a second list that drifted)
+# would vanish from the portable profile and nothing else would change. One check catches it: on a plan where that pass
 # changes the result, the portable render differs from `optimize`'s.
 #
 # Each plan below is a small plan on which one pass (or one arm of a driver
@@ -16,8 +16,7 @@
 # (17) run after `optimize_window_rewrite` (18), or the window rewrite run
 # after `fuse_partition_topn` (19), gives a different plan
 # (`test_optimizer_portable_order.mojo` holds the other steps' orders). No
-# scan carries statistics, so step 20 stamps nothing, and no plan holds a
-# scalar site, so no request is recorded and the portable entry refuses none
+# scan carries statistics, and no plan holds a scalar site, so no request is recorded and the portable entry refuses none
 # of them.
 #
 # The passes these plans do not reach are reached in
@@ -36,7 +35,9 @@
 # create the first PartitionBy, and `fuse_partition_topn` fires on two
 # patterns: a Filter directly over a PartitionBy, and an identity Project
 # directly over a PartitionTopN, including one already in the input that
-# steps 5-17 leave in place (they do not descend into a PartitionTopN). So
+# steps 5-17 leave in place (step 16's build-side walk descends into a
+# PartitionTopN but only records join sides and moves no node; the other
+# steps do not descend into it). So
 # `identity_project_under_a_partition_topn` catches a step-19 gate that
 # reads PartitionBy from a scan after step 4. The opposite case, a
 # PartitionBy at step 4 and none at steps 18-19, does not occur under
@@ -639,8 +640,8 @@ def test_portable_renders_as_optimize_on_a_plan_per_pass() raises:
     """On each plan of the table, `optimize_portable` (v1) renders byte for
     byte as `optimize`, and `optimize` records no request on it.
 
-    Defect caught: a pass of the driver's order made conditional on
-    `narrow_payload` (so `optimize` runs it and `optimize_portable` does not),
+    Defect caught: a pass of the driver's order made conditional on the
+    entry (so `optimize` runs it and `optimize_portable` does not),
     for every pass call but the two named in the header. A Limit block gated
     that way, for one, leaves `Limit(n=10)` where `optimize` has
     `TopN(n=10, keys=[a ASC])`."""

@@ -431,6 +431,11 @@ struct JsonEncoder(WireEncoder):
         self._list_sep()
         write_json_string(self.buf, v)
 
+    def write_bytes_element(mut self, field_no: Int, v: List[UInt8]) raises:
+        # proto3 JSON: each element a base64 string, as a singular bytes field.
+        self._list_sep()
+        write_json_string(self.buf, base64_encode(v))
+
     def write_i64_element(mut self, field_no: Int, v: Int64) raises:
         # proto3 JSON: int64 -> JSON STRING.
         self._list_sep()
@@ -886,6 +891,11 @@ struct JsonDecoder(WireDecoder):
         var arr = self._cur_array()
         for i in range(len(arr.children)):
             out.append(arr.children[i].as_string())
+
+    def read_into_repeated_bytes(mut self, mut out: List[List[UInt8]]) raises:
+        var arr = self._cur_array()
+        for i in range(len(arr.children)):
+            out.append(base64_decode(arr.children[i].as_string()))
 
     def read_into_repeated_i64(mut self, mut out: List[Int64]) raises:
         var arr = self._cur_array()

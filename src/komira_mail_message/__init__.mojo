@@ -10,6 +10,8 @@
 | `quoted_printable_encode`, `quoted_printable_decode` | RFC 2045 section 6.7 |
 | `parse_media_header` | a `Content-Type` / `Content-Disposition` value with RFC 2231 parameters (at most `MAX_PARAMS`) |
 | `format_date`, `format_message_id` | the `Date` and `Message-ID` values |
+| `parse_date_time` | a `Date` value (RFC 5322 with the obsolete forms) as milliseconds since 1970 (`date_parse.mojo`) |
+| `Message.raw`, `header_bytes`, `body_bytes`, `part_by_section`, `open_rfc822` | borrowed views of a message's bytes, RFC 3501 section paths, and a nested `message/rfc822` opened under the parent's limits (`parse.mojo`) |
 
 The builder writes CRLF line breaks only, folds every header line to at most
 76 characters where it can and refuses one over 998 octets, and refuses CR,
@@ -23,6 +25,7 @@ and never holds input bytes (`errors.mojo`; `error_kind` reads the kind).
 
 from .build import MessageBuilder
 from .date import format_date, format_message_id
+from .date_parse import parse_date_time
 from .encoded_word import decode_header_text, encode_header_text
 from .errors import error_kind
 from .header import HeaderBlock, HeaderField, split_header_fields

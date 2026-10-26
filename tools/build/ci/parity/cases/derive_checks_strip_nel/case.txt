@@ -1,5 +1,0 @@
-# A cquery line with U+0085 (NEL) before and after the label: strip() leaves
-# both, so the label is in no group, and the answer cannot be made.
-arg "{units_file}"
-input units_file "lib_a\t//src/a:a\n"
-exit 1

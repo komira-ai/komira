@@ -56,9 +56,9 @@ const list = [_][]const u8{ "komira_awslc_SHA256", "komira_crypto_sha256_hw_capa
 
 fn withSym(s: Sym) elf.Shared {
     var so = good();
-    var syms = std.ArrayList(Sym).init(A);
-    syms.appendSlice(so.syms) catch unreachable;
-    syms.append(s) catch unreachable;
+    var syms = std.ArrayList(Sym).empty;
+    syms.appendSlice(A, so.syms) catch unreachable;
+    syms.append(A, s) catch unreachable;
     so.syms = syms.items;
     return so;
 }
@@ -74,9 +74,9 @@ fn expectRed(red: checks.Red, needle: []const u8) !void {
 // ---- call sites -------------------------------------------------------------
 
 fn scanAll(src: []const u8) ![][]const u8 {
-    var out = std.ArrayList([]const u8).init(A);
+    var out = std.ArrayList([]const u8).empty;
     var fail = cs.Failure{};
-    try cs.scan(src, &out, &fail);
+    try cs.scan(A, src, &out, &fail);
     return cs.sortUnique(out.items);
 }
 
@@ -116,11 +116,11 @@ test "call sites: names in comments, docstrings and strings are not read" {
 }
 
 test "call sites: a name that is not a string literal is refused with its line" {
-    var out = std.ArrayList([]const u8).init(A);
+    var out = std.ArrayList([]const u8).empty;
     var fail = cs.Failure{};
-    try t.expectError(error.CallSite, cs.scan("x\n\n_ = external_call[NAME, Int]()\n", &out, &fail));
+    try t.expectError(error.CallSite, cs.scan(A, "x\n\n_ = external_call[NAME, Int]()\n", &out, &fail));
     try t.expectEqual(@as(usize, 3), fail.line);
-    try t.expectError(error.CallSite, cs.scan("_ = external_call[\"\", Int]()\n", &out, &fail));
+    try t.expectError(error.CallSite, cs.scan(A, "_ = external_call[\"\", Int]()\n", &out, &fail));
 }
 
 // ---- the export list and version script -------------------------------------
@@ -509,4 +509,60 @@ test "readers: a thin archive, a non-archive and a non-ELF shared object are err
     };
     const short = "!<arch>\n" ++ member;
     try t.expectError(error.BadElf, elf.readArchive(A, short));
+}
+
+// ---- the README check (slice 10) ---------------------------------------------
+
+fn localDef(name: []const u8) Sym {
+    return .{ .name = name, .defined = true, .bind = .local, .vis = .default };
+}
+
+const metrics_exports = [_][]const u8{ "komira_ea_armed", "komira_ea_set_armed" };
+
+test "README check: green when one program references an export (undefined) or defines one (a local)" {
+    var red = checks.Red.init(A);
+    const progs = [_]checks.Program{
+        .{ .name = "readme_komira_metrics_33", .syms = &.{ def("main"), und("memcpy", "GLIBC_2.14") } },
+        .{ .name = "readme_komira_metrics_99", .syms = &.{ def("main"), und("komira_ea_armed", null) } },
+        .{ .name = "readme_komira_metrics_120", .syms = &.{localDef("komira_ea_set_armed")} },
+    };
+    const msg = try checks.checkReadme(A, &metrics_exports, &progs, &red);
+    try t.expect(red.green());
+    try t.expectEqualStrings("2 of 3 README programs reference an export: komira_ea_armed in readme_komira_metrics_99 and more", msg);
+}
+
+test "README check: red when no program references any export (komira_metrics's README before its example)" {
+    var red = checks.Red.init(A);
+    const progs = [_]checks.Program{
+        .{ .name = "readme_komira_metrics_33", .syms = &.{ def("main"), def("komira_other_owner_fn") } },
+    };
+    _ = try checks.checkReadme(A, &metrics_exports, &progs, &red);
+    try t.expect(!red.green());
+    try t.expect(std.mem.startsWith(u8, red.lines.items[0], "no README program references any export of the library"));
+    try t.expect(std.mem.indexOf(u8, red.lines.items[0], "readme_komira_metrics_33") != null);
+}
+
+test "README check: red with no program (no example) and with no export" {
+    var red = checks.Red.init(A);
+    _ = try checks.checkReadme(A, &metrics_exports, &.{}, &red);
+    try t.expect(std.mem.indexOf(u8, red.lines.items[0], "holds no ```mojo example") != null);
+    var red2 = checks.Red.init(A);
+    const progs = [_]checks.Program{.{ .name = "p", .syms = &.{def("komira_ea_armed")} }};
+    _ = try checks.checkReadme(A, &.{}, &progs, &red2);
+    try t.expect(!red2.green());
+}
+
+test "readProgram: a linked program's .symtab, locals included; an archive is refused" {
+    // This test's own executable is a linked program with a symbol table.
+    const self = try std.fs.cwd().readFileAlloc(A, "/proc/self/exe", 1 << 30);
+    const syms = try elf.readProgram(A, self);
+    var locals: usize = 0;
+    var defined: usize = 0;
+    for (syms) |s| {
+        if (s.bind == .local) locals += 1;
+        if (s.defined) defined += 1;
+    }
+    try t.expect(locals > 0);
+    try t.expect(defined > 0);
+    try t.expectError(error.BadElf, elf.readProgram(A, "!<arch>\n"));
 }

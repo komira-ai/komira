@@ -1,13 +1,13 @@
 """kcov built from source on the farm, and the checks that gate it (README.md).
 
-`kcov_dist` runs kcov_build.sh in one build action: it unpacks the pinned
+`kcov_dist` runs kcov_build (kcov_build.zig) in one build action: it unpacks the pinned
 kcov source archive and conda packages, builds the embedded helper libraries
 and generated sources, and compiles and links kcov with the pinned zig. Its
 output is a directory: `bin/kcov`, `lib/libgcc_s.so.1` (the one library it
 loads besides glibc) and `share/licenses/`.
 
 `kcov_check`, `kcov_check_cases`, `kcov_same` and `kcov_identity` each run
-a mode of kcov_check.sh in a build action and return a `ValidationInfo`.
+a mode of kcov_check (kcov_check.zig) in a build action and return a `ValidationInfo`.
 `kcov_tool` is the distribution as other targets use it, with those checks as
 dependencies, so no build that uses kcov succeeds unless they pass. The checks and the tool
 take the distribution as an `exec_dep` with the same `exec_compatible_with`,
@@ -26,15 +26,12 @@ def _out(dep):
     return dep[DefaultInfo].default_outputs[0]
 
 def _dist_impl(ctx):
-    staged = _stage(ctx, "build_srcs", [ctx.attrs.script] + ctx.attrs.shim)
+    staged = _stage(ctx, "build_srcs", ctx.attrs.shim)
     out = ctx.actions.declare_output("kcov", dir = True)
     packages = [cmd_args(name, "=", _out(dep), delimiter = "") for name, dep in sorted(ctx.attrs.packages.items())]
     ctx.actions.run(
         cmd_args(
-            _out(ctx.attrs._busybox),
-            "sh",
-            staged.project(ctx.attrs.script.short_path),
-            _out(ctx.attrs._busybox),
+            ctx.attrs._build[RunInfo],
             _out(ctx.attrs._zig),
             _out(ctx.attrs.conda_payload),
             _out(ctx.attrs.elf_rpath),
@@ -52,35 +49,31 @@ def _dist_impl(ctx):
 
 _kcov_dist = rule(
     impl = _dist_impl,
-    doc = "kcov built by kcov_build.sh from `archive` (unpacked under `strip_prefix`) against the static libraries of the conda `packages`; the output is a directory holding `bin/kcov`, `lib/libgcc_s.so.1` and `share/licenses/`.",
+    doc = "kcov built by kcov_build from `archive` (unpacked under `strip_prefix`) against the static libraries of the conda `packages`; the output is a directory holding `bin/kcov`, `lib/libgcc_s.so.1` and `share/licenses/`.",
     attrs = {
         "archive": attrs.dep(doc = "The pinned kcov source archive."),
         "conda_payload": attrs.exec_dep(doc = "The tool that writes a .conda package's payload tar."),
         "elf_rpath": attrs.exec_dep(doc = "The tool that turns bin/kcov's DT_RUNPATH into a DT_RPATH."),
         "packages": attrs.dict(attrs.string(), attrs.dep(), doc = "name -> pinned .conda: elfutils, zlib, bzip2, zstd, lzma, libgcc."),
-        "script": attrs.source(),
         "shim": attrs.list(attrs.source(), doc = "shim/: the curl functions kcov calls, without libcurl."),
         "strip_prefix": attrs.string(doc = "The archive's top directory."),
         "version": attrs.string(doc = "What `kcov --version` prints after `kcov `."),
         "zig_triple": attrs.string(doc = "The zig target of the link: the platform row's `zig_triple`."),
-        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+        "_build": attrs.exec_dep(default = "komira//tools/build/toolchains/kcov:kcov_build", providers = [RunInfo]),
         "_zig": attrs.exec_dep(default = "komira//tools/build/toolchains:zig"),
     },
 )
 
 def _validate(ctx, mode, srcs, args):
-    # Runs `kcov_check.sh <mode> <busybox> <zig_dir or -> <report_dir> args...`.
+    # Runs `kcov_check <mode> <zig_dir or -> <report_dir> args...`.
     # One output: buck2 refuses a validation result whose action produces
     # more than one. The result is copied out of the directory.
-    staged = _stage(ctx, "check_srcs", [ctx.attrs.script] + srcs)
+    staged = _stage(ctx, "check_srcs", srcs)
     report = ctx.actions.declare_output("report", dir = True)
     ctx.actions.run(
         cmd_args(
-            _out(ctx.attrs._busybox),
-            "sh",
-            staged.project(ctx.attrs.script.short_path),
+            ctx.attrs._check[RunInfo],
             mode,
-            _out(ctx.attrs._busybox),
             _out(ctx.attrs._zig) if hasattr(ctx.attrs, "_zig") else "-",
             report.as_output(),
             [staged.project("fixtures") if a == "@FIXTURES@" else a for a in args],
@@ -96,8 +89,7 @@ def _validate(ctx, mode, srcs, args):
 
 def _attrs(extra, zig = True):
     out = {
-        "script": attrs.source(doc = "kcov_check.sh"),
-        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+        "_check": attrs.exec_dep(default = "komira//tools/build/toolchains/kcov:kcov_check_bin", providers = [RunInfo]),
     }
     if zig:
         out["_zig"] = attrs.exec_dep(default = "komira//tools/build/toolchains:zig")
@@ -116,7 +108,7 @@ def _check_impl(ctx):
 
 _kcov_check = rule(
     impl = _check_impl,
-    doc = "Runs `kcov_check.sh check` against the `kcov` distribution: its files and licences, unwinder, version, the golden Cobertura reports of the fixtures (kcov's defaults, and the coverage variant's --replace-src-path regex and full paths), the preload library, and the HTML report's data files. Fails the build on a wrong result; `[report]` holds the fixture's reports.",
+    doc = "Runs `kcov_check check` against the `kcov` distribution: its files and licences, unwinder, version, the golden Cobertura reports of the fixtures (kcov's defaults, and the coverage variant's --replace-src-path regex and full paths), the preload library, and the HTML report's data files. Fails the build on a wrong result; `[report]` holds the fixture's reports.",
     attrs = _attrs({
         "archive": attrs.dep(doc = "The kcov source archive: its data/ files are what the HTML report must write."),
         "fixtures": attrs.list(attrs.source(), doc = "fixtures/cov_fixture.c and its golden report."),
@@ -137,7 +129,7 @@ def _cases_impl(ctx):
 
 _kcov_check_cases = rule(
     impl = _cases_impl,
-    doc = "Runs `kcov_check.sh cases`: the loader-record checks, elf_rpath and conda_payload on inputs whose answer is known, wrong ones included. Fails the build on a wrong answer.",
+    doc = "Runs `kcov_check cases`: the loader-record checks, elf_rpath and conda_payload on inputs whose answer is known, wrong ones included. Fails the build on a wrong answer.",
     attrs = _attrs({
         "conda_payload": attrs.exec_dep(),
         "elf_rpath": attrs.exec_dep(),
@@ -151,7 +143,7 @@ def _same_impl(ctx):
 
 _kcov_same = rule(
     impl = _same_impl,
-    doc = "Runs `kcov_check.sh same`: the directories `a` and `b`, two builds of one distribution, hold the same files with the same bytes. Fails the build otherwise.",
+    doc = "Runs `kcov_check same`: the directories `a` and `b`, two builds of one distribution, hold the same files with the same bytes. Fails the build otherwise.",
     attrs = _attrs({
         "a": attrs.exec_dep(),
         "b": attrs.exec_dep(),
@@ -163,7 +155,7 @@ def _identity_impl(ctx):
 
 _kcov_identity = rule(
     impl = _identity_impl,
-    doc = "Runs `kcov_check.sh identity`: the `kcov` distribution's `bin/kcov` has the sha256 `sha256` and holds `usage_line`, the constants of identity.bzl by which the package guard refuses kcov (tools/build/package/kcov_guard.bzl). Fails the build otherwise, saying which constant to update.",
+    doc = "Runs `kcov_check identity`: the `kcov` distribution's `bin/kcov` has the sha256 `sha256` and holds `usage_line`, the constants of identity.bzl by which the package guard refuses kcov (tools/build/package/kcov_guard.bzl). Fails the build otherwise, saying which constant to update.",
     attrs = _attrs({
         "kcov": attrs.exec_dep(),
         "sha256": attrs.string(doc = "KCOV_BIN_SHA256 of identity.bzl."),

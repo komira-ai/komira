@@ -730,3 +730,22 @@ trait Connector(Movable, Deinitable):
         `TlsConnector` forwards to its underlying connector as well as applying
         it, so a future stacked decorator sees it too."""
         ...
+
+
+trait NoDialAddress(Connector):
+    """A Connector whose `connect` never reads `ip_be`: nothing is dialled
+    over a network, so the client has no address to look up.
+
+    `HttpClient` resolves the URL's host to an `ip_be` before it calls
+    `connect`. For a conformer of this trait it takes the IP-literal path when
+    the host is a literal and passes `0` when the host is a name, and never
+    calls the system resolver. The host the request names is unchanged: it
+    still sets `Host`, `:authority` and the pool key, and it is still pushed
+    to the connector through `set_dial_host`. ScriptedConnector conforms, so a
+    test that sends over it needs no DNS. A connector that wraps another does
+    not inherit this: it resolves unless it conforms itself."""
+
+    def ignores_dial_address(self) -> Bool:
+        """Always True for a conformer; the method makes the contract
+        visible at the conformer's definition."""
+        ...

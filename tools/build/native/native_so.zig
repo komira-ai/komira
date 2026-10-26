@@ -23,6 +23,14 @@
 //!       Writes the validation result and exits 0 when green; prints every
 //!       finding and exits 1 when red.
 //!
+//!   native_so readme --result <out.json> --soname <s> --list <exports.txt>
+//!                    --objects <dir>
+//!       the README check (docs/design/native_packaging.md, slice 10):
+//!       green when some object in <dir>, the owning library's README
+//!       programs compiled to objects (its `[tests][readme][objects]`),
+//!       references or defines one name of the export list (native_checks.zig, `checkReadme`);
+//!       written and exit codes as `check`.
+//!
 //! Exit 2: a usage error, or an input it cannot read (native_elf.zig).
 
 const std = @import("std");
@@ -63,6 +71,7 @@ const Opts = struct {
     result: ?[]const u8 = null,
     so: ?[]const u8 = null,
     floor: ?[]const u8 = null,
+    objects: ?[]const u8 = null,
     weak: std.ArrayList([]const u8),
     owners: std.ArrayList(checks.Owner),
     archives: std.ArrayList(checks.Archive),
@@ -75,15 +84,15 @@ fn need(v: ?[]const u8, what: []const u8) []const u8 {
 
 fn parse(alloc: Alloc, argv: []const []const u8) !Opts {
     var o = Opts{
-        .weak = std.ArrayList([]const u8).init(alloc),
-        .owners = std.ArrayList(checks.Owner).init(alloc),
-        .archives = std.ArrayList(checks.Archive).init(alloc),
-        .callers = std.ArrayList(checks.Caller).init(alloc),
+        .weak = std.ArrayList([]const u8).empty,
+        .owners = std.ArrayList(checks.Owner).empty,
+        .archives = std.ArrayList(checks.Archive).empty,
+        .callers = std.ArrayList(checks.Caller).empty,
     };
     var i: usize = 0;
     while (i < argv.len) {
         const a = argv[i];
-        const one = [_][]const u8{ "--soname", "--list", "--script", "--report", "--result", "--so", "--floor", "--weak" };
+        const one = [_][]const u8{ "--soname", "--list", "--script", "--report", "--result", "--so", "--floor", "--weak", "--objects" };
         var matched = false;
         for (one) |flag| {
             if (!std.mem.eql(u8, a, flag)) continue;
@@ -96,7 +105,8 @@ fn parse(alloc: Alloc, argv: []const []const u8) !Opts {
             if (std.mem.eql(u8, flag, "--result")) o.result = v;
             if (std.mem.eql(u8, flag, "--so")) o.so = v;
             if (std.mem.eql(u8, flag, "--floor")) o.floor = v;
-            if (std.mem.eql(u8, flag, "--weak")) try o.weak.append(v);
+            if (std.mem.eql(u8, flag, "--objects")) o.objects = v;
+            if (std.mem.eql(u8, flag, "--weak")) try o.weak.append(alloc, v);
             i += 2;
             matched = true;
         }
@@ -106,7 +116,7 @@ fn parse(alloc: Alloc, argv: []const []const u8) !Opts {
             const path = argv[i + 1];
             const so = readShared(alloc, path);
             const soname = so.soname orelse usage("--owner {s}: no SONAME", .{path});
-            try o.owners.append(try checks.ownerOf(alloc, soname, so));
+            try o.owners.append(alloc, try checks.ownerOf(alloc, soname, so));
             i += 2;
             continue;
         }
@@ -115,15 +125,15 @@ fn parse(alloc: Alloc, argv: []const []const u8) !Opts {
             const label = argv[i + 1];
             const path = argv[i + 2];
             if (std.mem.eql(u8, a, "--caller")) {
-                try o.callers.append(.{ .label = label, .calls = try calls.scanDir(alloc, path) });
+                try o.callers.append(alloc, .{ .label = label, .calls = try calls.scanDir(alloc, path) });
             } else {
                 const syms = elf.readArchive(alloc, readFile(alloc, path)) catch |err| switch (err) {
                     error.BadElf => usage("{s} ({s}): {s}", .{ path, label, elf.why }),
                     else => usage("{s}: {s}", .{ path, @errorName(err) }),
                 };
                 if (std.mem.eql(u8, a, "--archive")) {
-                    try o.archives.append(.{ .label = label, .syms = syms });
-                } else try o.callers.append(try checks.archiveCalls(alloc, label, syms));
+                    try o.archives.append(alloc, .{ .label = label, .syms = syms });
+                } else try o.callers.append(alloc, try checks.archiveCalls(alloc, label, syms));
             }
             i += 3;
             continue;
@@ -150,17 +160,53 @@ const titles = [_][]const u8{
     "check 7 (undefined symbols: GLIBC_, komira_ or the weak list)",
 };
 
+const readme_title = "README check (a README program calls the library's C)";
+
+fn writeResult(alloc: Alloc, path: []const u8, soname: []const u8, title: []const u8, msg: []const u8) !void {
+    var out = std.Io.Writer.Allocating.init(alloc);
+    const w = &out.writer;
+    try w.writeAll("{\"version\": 1, \"data\": {\"status\": \"success\", \"message\": ");
+    try std.json.Stringify.encodeJsonString(try std.fmt.allocPrint(alloc, "{s} {s}: {s}", .{ soname, title, msg }), .{}, w);
+    try w.writeAll("}}\n");
+    writeFile(path, out.written());
+    std.debug.print("native_so: {s} {s} GREEN: {s}\n", .{ soname, title, msg });
+}
+
+/// The README programs' objects in `dir`, by file name.
+fn readPrograms(alloc: Alloc, dir_path: []const u8) ![]checks.Program {
+    var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch |err| usage("cannot read {s}: {s}", .{ dir_path, @errorName(err) });
+    defer dir.close();
+    var names = std.ArrayList([]const u8).empty;
+    var it = dir.iterate();
+    while (try it.next()) |e| try names.append(alloc, try alloc.dupe(u8, e.name));
+    std.mem.sort([]const u8, names.items, {}, struct {
+        fn less(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.lessThan(u8, a, b);
+        }
+    }.less);
+    var out = std.ArrayList(checks.Program).empty;
+    for (names.items) |n| {
+        const path = try std.fs.path.join(alloc, &.{ dir_path, n });
+        const syms = elf.readProgram(alloc, readFile(alloc, path)) catch |err| switch (err) {
+            error.BadElf => usage("{s}: {s}", .{ path, elf.why }),
+            else => usage("{s}: {s}", .{ path, @errorName(err) }),
+        };
+        try out.append(alloc, .{ .name = n, .syms = syms });
+    }
+    return out.toOwnedSlice(alloc);
+}
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const alloc = arena.allocator();
     const argv = try std.process.argsAlloc(alloc);
-    if (argv.len < 2) usage("usage: native_so dynsym|exports|check ... (see native_so.zig)", .{});
+    if (argv.len < 2) usage("usage: native_so dynsym|exports|check|readme ... (see native_so.zig)", .{});
     const mode = argv[1];
 
     if (std.mem.eql(u8, mode, "dynsym")) {
         if (argv.len != 4) usage("usage: native_so dynsym <lib.so> <out.txt>", .{});
-        var b = std.ArrayList(u8).init(alloc);
-        try elf.writeShared(b.writer(), readShared(alloc, argv[2]));
+        var b = std.ArrayList(u8).empty;
+        try elf.writeShared(b.writer(alloc), readShared(alloc, argv[2]));
         writeFile(argv[3], b.items);
         return;
     }
@@ -173,11 +219,23 @@ pub fn main() !void {
         var red = checks.Red.init(alloc);
         const e = try checks.exportList(alloc, o.archives.items, o.callers.items, &red);
         finish("the export list", soname, red);
-        var list = std.ArrayList(u8).init(alloc);
-        for (e.names) |n| try list.writer().print("{s}\n", .{n});
+        var list = std.ArrayList(u8).empty;
+        for (e.names) |n| try list.writer(alloc).print("{s}\n", .{n});
         writeFile(need(o.list, "--list"), list.items);
         writeFile(need(o.script, "--script"), try checks.versionScript(alloc, soname, e.names));
         writeFile(need(o.report, "--report"), e.report);
+        return;
+    }
+
+    if (std.mem.eql(u8, mode, "readme")) {
+        const o = try parse(alloc, argv[2..]);
+        const soname = need(o.soname, "--soname");
+        const exports = try checks.lines(alloc, readFile(alloc, need(o.list, "--list")));
+        const programs = try readPrograms(alloc, need(o.objects, "--objects"));
+        var red = checks.Red.init(alloc);
+        const msg = try checks.checkReadme(alloc, exports, programs, &red);
+        finish(readme_title, soname, red);
+        try writeResult(alloc, need(o.result, "--result"), soname, readme_title, msg);
         return;
     }
 
@@ -203,8 +261,8 @@ pub fn main() !void {
         },
         3 => try checks.check3(alloc, so, o.weak.items, o.owners.items, &red),
         4 => blk: {
-            var sonames = std.ArrayList([]const u8).init(alloc);
-            for (o.owners.items) |ow| try sonames.append(ow.soname);
+            var sonames = std.ArrayList([]const u8).empty;
+            for (o.owners.items) |ow| try sonames.append(alloc, ow.soname);
             break :blk try checks.check4(alloc, so, need(o.soname, "--soname"), sonames.items, &red);
         },
         5 => try checks.check5(alloc, so, need(o.floor, "--floor"), &red),
@@ -212,13 +270,7 @@ pub fn main() !void {
         else => try checks.check7(alloc, so, o.weak.items, &red),
     };
     finish(titles[n - 1], soname, red);
-    var out = std.ArrayList(u8).init(alloc);
-    const w = out.writer();
-    try w.writeAll("{\"version\": 1, \"data\": {\"status\": \"success\", \"message\": ");
-    try std.json.encodeJsonString(try std.fmt.allocPrint(alloc, "{s} {s}: {s}", .{ soname, titles[n - 1], msg }), .{}, w);
-    try w.writeAll("}}\n");
-    writeFile(need(o.result, "--result"), out.items);
-    std.debug.print("native_so: {s} {s} GREEN: {s}\n", .{ soname, titles[n - 1], msg });
+    try writeResult(alloc, need(o.result, "--result"), soname, titles[n - 1], msg);
 }
 
 test {

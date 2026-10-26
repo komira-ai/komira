@@ -1,0 +1,12 @@
+{
+ "name": "instance_lost_on_call_batch",
+ "defect": "a context lost by call_batch is called again (the split's second half): nothing is retried after a loss (design 4.5)",
+ "run": "split",
+ "entry": "lost_on_call",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 4, "columns": [{"type": "int64", "values": [1, 2, 3, 4]}]},
+ "split_at": 2,
+ "expect": {"status": "ERR_INSTANCE_LOST", "run_error": "UDF_WORKER_CRASHED", "message": "nonempty"}
+}

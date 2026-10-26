@@ -41,8 +41,11 @@ pub const File = struct {
 };
 
 pub const Opts = struct {
+    // What the IR names the library's sources by (--map's PREFIX).
     prefix: []const u8,
-    // PREFIX after its content-hash segment (`src/<lib>/`), or null.
+    // Where they are read: the library's [src] (--src, or PREFIX).
+    src: []const u8,
+    // `src` after its content-hash segment (`src/<lib>/`), or null.
     hash_tail: ?[]const u8,
     repo: []const u8,
     gens: [][]const u8,
@@ -98,7 +101,9 @@ pub fn placeFile(alloc: Alloc, o: *const Opts, name: []const u8) File {
     if (std.mem.startsWith(u8, name, o.prefix)) {
         const rel = name[o.prefix.len..];
         for (o.gens) |g| {
-            if (std.mem.eql(u8, g, rel)) {
+            // A --gen that names a directory (the parts of a split generated
+            // module) leaves out every file under it.
+            if (std.mem.eql(u8, g, rel) or (rel.len > g.len and std.mem.startsWith(u8, rel, g) and rel[g.len] == '/')) {
                 f.where = .excluded;
                 return f;
             }
@@ -106,11 +111,12 @@ pub fn placeFile(alloc: Alloc, o: *const Opts, name: []const u8) File {
         if (!cleanRel(rel)) fail("the measured file name '{s}' is not a clean relative path under --map ('{s}'): an empty, '.' or '..' segment, a control byte, a '\\' or not UTF-8", .{ name, o.prefix });
         f.where = .measured;
         f.repo = std.mem.concat(alloc, u8, &.{ o.repo, rel }) catch oom();
-        const src = std.fs.cwd().readFileAlloc(alloc, name, max_src) catch |err|
-            fail("{s} ({s}): cannot read the measured source: {s}", .{ f.repo, name, @errorName(err) });
-        var lines = std.ArrayList([]const u8).init(alloc);
+        const path = std.mem.concat(alloc, u8, &.{ o.src, rel }) catch oom();
+        const src = std.fs.cwd().readFileAlloc(alloc, path, max_src) catch |err|
+            fail("{s} ({s}): cannot read the measured source: {s}", .{ f.repo, path, @errorName(err) });
+        var lines = std.ArrayList([]const u8).empty;
         var it = std.mem.splitScalar(u8, src, '\n');
-        while (it.next()) |l| lines.append(l) catch oom();
+        while (it.next()) |l| lines.append(alloc, l) catch oom();
         f.lines = lines.items;
         return f;
     }
@@ -133,14 +139,14 @@ pub fn placeFile(alloc: Alloc, o: *const Opts, name: []const u8) File {
 /// name -> `<repo path>:<line>` of the declaration.
 pub fn nodebugNames(alloc: Alloc, o: *const Opts) std.StringHashMap([]const u8) {
     var names = std.StringHashMap([]const u8).init(alloc);
-    var dir = std.fs.cwd().openDir(o.prefix, .{ .iterate = true }) catch |err|
-        fail("--map's [src] '{s}' cannot be opened: {s}", .{ o.prefix, @errorName(err) });
+    var dir = std.fs.cwd().openDir(o.src, .{ .iterate = true }) catch |err|
+        fail("the [src] '{s}' cannot be opened: {s}", .{ o.src, @errorName(err) });
     defer dir.close();
     var walker = dir.walk(alloc) catch oom();
-    while (walker.next() catch |err| fail("walking '{s}': {s}", .{ o.prefix, @errorName(err) })) |w| {
+    while (walker.next() catch |err| fail("walking '{s}': {s}", .{ o.src, @errorName(err) })) |w| {
         if (w.kind == .directory or !std.mem.endsWith(u8, w.basename, ".mojo")) continue;
         const rel = alloc.dupe(u8, w.path) catch oom();
-        const src = dir.readFileAlloc(alloc, rel, max_src) catch |err| fail("{s}{s}: {s}", .{ o.prefix, rel, @errorName(err) });
+        const src = dir.readFileAlloc(alloc, rel, max_src) catch |err| fail("{s}{s}: {s}", .{ o.src, rel, @errorName(err) });
         var lines = std.mem.splitScalar(u8, src, '\n');
         var armed = false;
         var ln: usize = 0;
@@ -422,10 +428,10 @@ pub fn forHead(alloc: Alloc, lines: []const []const u8, idx: usize) ?u64 {
     if (ln == idx) {
         raw = line[from..colon_at];
     } else {
-        var parts = std.ArrayList([]const u8).init(alloc);
-        parts.append(line[from..]) catch oom();
-        for (lines[idx + 1 .. ln]) |mid| parts.append(mid) catch oom();
-        parts.append(last[0..colon_at]) catch oom();
+        var parts = std.ArrayList([]const u8).empty;
+        parts.append(alloc, line[from..]) catch oom();
+        for (lines[idx + 1 .. ln]) |mid| parts.append(alloc, mid) catch oom();
+        parts.append(alloc, last[0..colon_at]) catch oom();
         raw = std.mem.join(alloc, "\n", parts.items) catch oom();
     }
     const lead = raw.len - std.mem.trimLeft(u8, raw, " ").len;
@@ -445,7 +451,7 @@ fn quotedLines(alloc: Alloc, f: *File) []bool {
     var open: u8 = 0; // the quote of the triple-quoted string open, or 0
     var depth: usize = 0; // brackets open outside strings and comments
     // The 1-based line of each bracket still open, innermost last.
-    var opened = std.ArrayList(usize).init(alloc);
+    var opened = std.ArrayList(usize).empty;
     for (lines, 0..) |l, n| {
         out[n] = open != 0 or depth > 0;
         var i: usize = 0;
@@ -471,7 +477,7 @@ fn quotedLines(alloc: Alloc, f: *File) []bool {
                 switch (c) {
                     '(', '[', '{' => {
                         depth += 1;
-                        opened.append(n + 1) catch oom();
+                        opened.append(alloc, n + 1) catch oom();
                     },
                     ')', ']', '}' => {
                         if (depth == 0) {
