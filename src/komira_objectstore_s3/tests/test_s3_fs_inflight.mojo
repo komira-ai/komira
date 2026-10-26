@@ -16,7 +16,9 @@
 # position in the run (range or part number, divided by K); a request waits,
 # on progress and without a clock, until every request of its round is in
 # flight, then records that its round was in flight together, and leaves. A
-# request that finds more than K in flight records it. "K at a time" is then a
+# request that finds more than K in flight as it comes in records it (and only
+# then: on the way out, a round-mate's worker may already have its next
+# request in). "K at a time" is then a
 # count, not a duration: no test here reads a clock, sleeps or waits against a
 # deadline. A runner that keeps fewer than K in flight never completes a
 # round, so the run does not finish (the build's watchdog ends it); one that
@@ -115,6 +117,10 @@ def _slow_request(position: Int) raises:
     var k = _Counts.read(_ARMED_K)
     if k <= 0:
         return
+    # Counted on entry only. A worker leaves this function (having decremented)
+    # before it can take its next request, so a runner of K workers has at
+    # most K inside here at any moment, whatever order a round's members
+    # leave in; a count above K on entry is a runner with more than K workers.
     _Counts.incr(_IN_FLIGHT)
     if _Counts.read(_IN_FLIGHT) > k:
         _Counts.incr(_OVER)
@@ -123,10 +129,10 @@ def _slow_request(position: Int) raises:
     while _Counts.read(round) < k:
         _yield()
     # No request of this round leaves before all of it has arrived, so all
-    # K were in flight together.
+    # K were in flight together. (Nothing is observed about the others here:
+    # a round-mate that leaves first may already have its worker's next
+    # request in, which is not an overshoot.)
     _Counts.incr(_REACHED)
-    if _Counts.read(_IN_FLIGHT) > k:
-        _Counts.incr(_OVER)
     _Counts.add(_IN_FLIGHT, -1)
     _Counts.incr(_SERVED)
 
@@ -461,6 +467,12 @@ def _counted_prefetch(bound: Int, expect_k: Int, max_inflight: Int = 64) raises:
     var fs = _fs(bound, max_inflight=max_inflight)
     var f = fs.open("v/big")
     _check(fs.read_ranges_prefetched(f, _far_ranges()))
+    # An under-filling runner would hang the armed run below (the build's
+    # watchdog ends it); fail here instead if there are fewer workers than K.
+    assert_true(
+        fs.stores_built() >= expect_k,
+        String("only ") + String(fs.stores_built()) + " workers for a bound of " + String(expect_k),
+    )
     _arm(expect_k, _RANGES)
     var out = fs.read_ranges_prefetched(f, _far_ranges())
     _check(out)
@@ -603,6 +615,9 @@ struct _FakeStore[io: MutOrigin, po: MutOrigin, ro: MutOrigin](InflightJobs):
             if self.peak[].compare_exchange(seen, now):
                 break
         if self.wait_for > 1:
+            # (Jobs are claimed in index order, so a round's jobs are the
+            # ones in flight together; a runner that claimed out of order
+            # would split rounds and hang here.)
             # Hold until every job of this round has arrived (the last round
             # may be short); none of the round leaves before then.
             var round = job // self.wait_for
@@ -643,6 +658,12 @@ def test_the_workers() raises:
     assert_equal(inflight_workers(5, 1), 1)
     assert_equal(inflight_workers(5, 0), 1)
     assert_equal(inflight_workers(5, -2), 1)
+    # The runs above hold K requests at once, so each needs K workers (fewer
+    # would hang rather than fail); S3Fs gets its worker count from here.
+    for k in range(1, 5):
+        assert_true(inflight_workers(_RANGES, k) >= k, "prefetch: fewer workers than the bound")
+    for k in range(1, _PARTS + 1):
+        assert_true(inflight_workers(_PARTS, k) >= k, "write: fewer workers than the bound")
 
 
 def test_the_bound_is_kept_in_flight_and_never_passed() raises:

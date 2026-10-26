@@ -50,6 +50,8 @@
 # komira_aws_core first.
 # =============================================================================
 
+from std.memory import ArcPointer
+
 from komira_aws_core import (
     AwsClock,
     AwsConnectorTransport,
@@ -84,8 +86,6 @@ from komira_aws_s3.komira_aws_s3 import (
     parse_upload_part_response,
 )
 from komira_buffer.byte_view import ByteView
-from std.memory import ArcPointer
-
 from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
 from komira_objectstore.coalesce import CoalescePlan, CoalescedRange, plan_coalesce
