@@ -1,0 +1,44 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The mutable data-graph store and its ingest, part 1 (the second of the packages
+# in docs/design/knowledge_graph_port.md): bi-temporal edges (a replaced fact is
+# closed, not erased), entity resolution (name similarity, the dedup cascade and
+# a directed alias map) and the source facet with its tombstone set. It depends
+# on komira_kg_format (for the open-interval marker) and komira_json (for the
+# facet's attrs JSON), and on their closure; it reads no clock and no
+# environment, and calls no model: a judgment is a trait the caller implements.
+#
+# The welded tests: test_bitemporal closes an overlapping edge and keeps its
+# row, and answers "what held at E" and "what was believed at S about E";
+# test_name_similarity pins normalization, entropy and the signature values;
+# test_dedup runs the cascade on stated inputs, with a scripted judge;
+# test_alias_map checks that resolution is stable under reordering;
+# test_source_facet round-trips the facet and keys the tombstone set by source
+# and facet.
+mojo_library(
+    name = "komira_kg",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_host:komira_host",
+        "//src/komira_json:komira_json",
+        "//src/komira_kg_format:komira_kg_format",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_lz4:komira_lz4",
+        "//src/komira_simd:komira_simd",
+        "//src/komira_zlib:komira_zlib",
+    ],
+    test_srcs = [
+        "tests/test_alias_map.mojo",
+        "tests/test_bitemporal.mojo",
+        "tests/test_dedup.mojo",
+        "tests/test_name_similarity.mojo",
+        "tests/test_source_facet.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
