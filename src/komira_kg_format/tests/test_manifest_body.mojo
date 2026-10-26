@@ -13,9 +13,8 @@
 #                was built with; a constructor refuses a dimension of zero or
 #                less; check_embedding_dim accepts the graph's dimension and
 #                refuses any other; a decoded body reports the dimension written.
-#   old format   a version-1 body (no dimension) still decodes, at the default
-#                dimension and with its own version, and re-encodes as version 2.
-#   refusal      an unknown version (0 and 3), every truncation of a valid body,
+#   version      2 is the only layout: versions 0, 1 and 3 are refused.
+#   refusal      a dimension above 2147483647 (the largest, itself, is accepted), every truncation of a valid body,
 #                trailing bytes, a negative count, a negative length, a count
 #                larger than the bytes can hold, a dimension of zero or less and
 #                a name or key that is not UTF-8 are each an error, never a
@@ -35,7 +34,6 @@ from std.testing import (
 from komira_kg_format import (
     DEFAULT_EMBEDDING_DIM,
     KG_SNAPSHOT_FORMAT_VERSION,
-    KG_SNAPSHOT_FORMAT_VERSION_MIN,
     KgManifestBody,
     KgTableEntry,
 )
@@ -127,7 +125,6 @@ def test_header_layout_is_version_dimension_count() raises:
     assert_equal(_read_i64(bytes, 8), 384)
     assert_equal(_read_i64(bytes, 16), 3)
     assert_equal(KG_SNAPSHOT_FORMAT_VERSION, 2)
-    assert_equal(KG_SNAPSHOT_FORMAT_VERSION_MIN, 1)
 
 
 # --- the embedding dimension -------------------------------------------------
@@ -168,53 +165,39 @@ def test_check_embedding_dim_refuses_a_mismatch() raises:
         decoded.check_embedding_dim(1536)
 
 
-# --- the earlier format ------------------------------------------------------
-
-
-def _v1_bytes() -> List[UInt8]:
-    var out = List[UInt8]()
-    _i64(out, 1)  # format version 1: no dimension field
-    _i64(out, 1)  # one table
-    _str(out, "edges")
-    _str(out, "obj/old")
-    _i64(out, 1)
-    _i64(out, 41)
-    return out^
-
-
-def test_version_one_body_decodes_at_the_default_dimension() raises:
-    var decoded = KgManifestBody.decode(_v1_bytes())
-    assert_equal(decoded.format_version, 1)
-    assert_equal(decoded.embedding_dim, DEFAULT_EMBEDDING_DIM)
-    assert_equal(decoded.num_tables(), 1)
-    assert_equal(decoded.tables[0].name, "edges")
-    assert_equal(decoded.tables[0].object_key, "obj/old")
-    assert_equal(decoded.tables[0].row_count, 41)
-
-
-def test_version_one_body_reencodes_as_version_two() raises:
-    var decoded = KgManifestBody.decode(_v1_bytes())
-    var again = KgManifestBody.decode(decoded.encode())
-    assert_equal(again.format_version, 2)
-    assert_equal(again.embedding_dim, DEFAULT_EMBEDDING_DIM)
-    assert_equal(again.tables[0].object_key, "obj/old")
-
-
 # --- corrupt input -----------------------------------------------------------
 
 
-def test_unknown_versions_are_refused() raises:
-    var low = List[UInt8]()
-    _i64(low, 0)
-    _i64(low, 0)
-    with assert_raises(contains="unsupported snapshot format version 0"):
-        _ = KgManifestBody.decode(low)
-    var high = List[UInt8]()
-    _i64(high, 3)
-    _i64(high, 1536)
-    _i64(high, 0)
-    with assert_raises(contains="unsupported snapshot format version 3"):
-        _ = KgManifestBody.decode(high)
+def test_every_version_but_two_is_refused() raises:
+    for v in [0, 1, 3, -1]:
+        var b = List[UInt8]()
+        _i64(b, Int64(v))
+        _i64(b, 1536)
+        _i64(b, 0)
+        with assert_raises(
+            contains="unsupported snapshot format version " + String(v)
+        ):
+            _ = KgManifestBody.decode(b)
+    # A version-1 body (no dimension field) is refused whole.
+    var v1 = List[UInt8]()
+    _i64(v1, 1)
+    _i64(v1, 0)
+    with assert_raises(contains="unsupported snapshot format version 1"):
+        _ = KgManifestBody.decode(v1)
+
+
+def test_the_largest_dimension_is_accepted_and_one_more_refused() raises:
+    var ok = List[UInt8]()
+    _i64(ok, 2)
+    _i64(ok, 2147483647)
+    _i64(ok, 0)
+    assert_equal(KgManifestBody.decode(ok).embedding_dim, 2147483647)
+    var over = List[UInt8]()
+    _i64(over, 2)
+    _i64(over, 2147483648)
+    _i64(over, 0)
+    with assert_raises(contains="invalid embedding dimension 2147483648"):
+        _ = KgManifestBody.decode(over)
 
 
 def test_every_truncation_of_a_valid_body_is_refused() raises:
