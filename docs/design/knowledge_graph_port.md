@@ -1,6 +1,6 @@
 # The knowledge graph port: packages, seams, engine dependencies and PR order
 
-Status: design; PRs 1 to 4 and 13 are in the tree. It decides how the existing data-graph library (a property graph built from
+Status: design; PRs 1 to 5 and 13 are in the tree. It decides how the existing data-graph library (a property graph built from
 documents and records, with a bi-temporal store and a read path) comes into komira as small, separately
 tested packages. Of the packages named here only parts 1 to 5 of [`komira_kg_format`](../../src/komira_kg_format/)
 (its `embedding`, `ingest_types`, `manifest_body`, `schemas`, `cosine`, `query_result`, `delta_body`, `delta_codec`, `source_fingerprint`, `chunk_kind`, `compaction_policy`, `snapshot_view`, `chain_view`, `snapshot_store` and `search` modules) and [`komira_kg_mode`](../../src/komira_kg_mode/) are in the tree yet. The code graph

@@ -19,9 +19,9 @@
 # search reads, under their names, with the types they have in `schemas`.
 # `node_similarity_search` holds the query and every embedding cell to the
 # dimension the manifest records: a cell of another length is an error, not a
-# vector scored on a prefix, and so is a null cell. Columns are found by name, so
-# a table written with more columns, or the same columns in another order, reads
-# the same.
+# vector scored on a prefix, and so is a null cell, which the Parquet reader
+# hands over as an empty one. Columns are found by name, so a table written with
+# more columns, or the same columns in another order, reads the same.
 #
 # TEXT. The Parquet reader returns STRING for a LARGE_STRING column. A cell is
 # always read through its length-based byte span, never through an accessor that
@@ -116,8 +116,8 @@ def node_similarity_search[
     Raises:
         If the query does not have the snapshot's embedding dimension, if the
         table is absent, newer than this build reads, unreadable or lacks the
-        column, or if any embedding cell is null or is not exactly that many
-        packed f32 components.
+        column, or if any embedding cell (a null cell reads as an empty one) is
+        not exactly that many packed f32 components.
     """
     var dim = view.embedding_dim()
     if dim <= 0:
@@ -136,12 +136,6 @@ def node_similarity_search[
     var col = _string_column(batch, TABLE_ENTITIES, _COL_NAME_EMBEDDING)
     var cells = batch.column_as_string(col)
     for r in range(len(cells)):
-        if cells.is_null(r):
-            raise Error(
-                "node_similarity_search: entities row "
-                + String(r)
-                + " has a null embedding"
-            )
         # Held to the dimension; the vector itself is unpacked again by the
         # ranking below.
         _ = unpack_embedding_checked(cells.get_span(r), dim)

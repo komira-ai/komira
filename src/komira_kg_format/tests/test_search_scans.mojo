@@ -8,9 +8,10 @@
 #                the same rows (rows and scores), including cells with zero bytes,
 #                tied rows (lower row first), k beyond the rows and k of zero.
 #   dimension    a query of another length, a cell of another length (shorter,
-#                longer, not a whole number of components) and a null cell are
-#                each refused, and a cell's dimension is held to the manifest's,
-#                not to the query's.
+#                longer, not a whole number of components), an empty cell and a
+#                null cell (which the Parquet reader hands over as an empty
+#                cell) are each refused, and a cell's dimension is held to the
+#                manifest's, not to the query's.
 #   full text    counts on stated rows: case-sensitive, non-overlapping, ranked by
 #                count with ties by lower row, k-limited, an empty term matching
 #                nothing, a fact with a NUL byte and a multi-byte term found whole.
@@ -90,8 +91,14 @@ def _packed(rows: List[List[Float64]]) -> List[String]:
     return out^
 
 
-def _entities(embeddings: List[String]) raises -> RecordBatch:
-    """An entities table (the `schemas` layout) whose rows carry `embeddings`."""
+def _entities(
+    embeddings: List[String], null_rows: List[Int] = List[Int]()
+) raises -> RecordBatch:
+    """An entities table (the `schemas` layout) whose rows carry `embeddings`.
+
+    The embedding cells of `null_rows` are written as nulls (the column is then
+    nullable); every other column is required.
+    """
     var n = len(embeddings)
     var nids = List[Int64](capacity=n)
     var names = List[String](capacity=n)
@@ -103,7 +110,14 @@ def _entities(embeddings: List[String]) raises -> RecordBatch:
     rb.add_column(_strs(names))
     rb.add_column(_strs(_repeat("p", n)))
     rb.add_column(_strs(names))
-    rb.add_column(_strs(embeddings))
+    var valid = List[Bool](capacity=n)
+    for i in range(n):
+        valid.append(i not in null_rows)
+    rb.add_column(
+        Column.from_string(
+            StringArray.from_strings_with_validity(embeddings, valid)
+        )
+    )
     rb.add_column(_strs(_repeat("", n)))
     rb.add_column(_strs(_repeat("{}", n)))
     var sb = SchemaBuilder()
@@ -111,7 +125,9 @@ def _entities(embeddings: List[String]) raises -> RecordBatch:
     sb.add_field(Field("uuid", ArrowType.STRING, False))
     sb.add_field(Field("partition_id", ArrowType.STRING, False))
     sb.add_field(Field("name", ArrowType.STRING, False))
-    sb.add_field(Field("name_embedding", ArrowType.LARGE_STRING, False))
+    sb.add_field(
+        Field("name_embedding", ArrowType.LARGE_STRING, len(null_rows) > 0)
+    )
     sb.add_field(Field("summary", ArrowType.LARGE_STRING, False))
     sb.add_field(Field("attrs", ArrowType.LARGE_STRING, False))
     return rb.build(sb.build())
@@ -315,6 +331,22 @@ def test_an_empty_embedding_cell_is_refused() raises:
     )
     var query: List[Float64] = [1.0, 0.0, 0.0, 0.0]
     with assert_raises(contains="0 bytes"):
+        _ = node_similarity_search(view, query, 3)
+
+
+def test_a_null_embedding_cell_arrives_empty_and_is_refused_as_zero_bytes() raises:
+    var cells = _packed(_mixed_rows())
+    var rows: List[Int] = [3]
+    var view = _write(
+        _one(
+            "entities",
+            _entities(cells, rows),
+            SCHEMA_VERSION_ENTITIES,
+        ),
+        4,
+    )
+    var query: List[Float64] = [1.0, 0.0, 0.0, 0.0]
+    with assert_raises(contains="embedding cell is 0 bytes"):
         _ = node_similarity_search(view, query, 3)
 
 
