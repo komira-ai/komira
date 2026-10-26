@@ -88,6 +88,8 @@ var run_dir: ?[]const u8 = null;
 var ready_r: sys.fd_t = -1;
 var ready_w: sys.fd_t = -1;
 var fake_now: u64 = 0;
+/// The simulated time after which a run that has not ended is ended by the clock.
+const fake_horizon_ms: u64 = 3_600_000;
 var latched = false;
 var group_killed = false;
 var stopped: [64]i32 = undefined;
@@ -205,6 +207,13 @@ fn fakeWait(fds: supervise.WaitFds, ms: u32) void {
         }
         if (p[0].revents != 0 or p[1].revents != 0) return;
         if (latched) {
+            // A gate that is still looping after a simulated hour has lost
+            // its limit (this is the clock's own, not a wall-clock one): end
+            // the run so the test reads a status that is not its own.
+            if (fake_now >= fake_horizon_ms) {
+                sys.writeAll(2, "testkit: the gate was still waiting after a simulated hour\n");
+                posix.exit(251);
+            }
             fake_now += ms;
             return;
         }
@@ -407,8 +416,9 @@ fn appendPid(path: []const u8, pid: i32) void {
 /// whenever the cap kills it mid-touch) and touches `mib` MiB. With `stop`
 /// (MiB, 0: none) it says it is up and holds there, before it has touched the
 /// rest, for `secs` s; otherwise it says it holds them, says it is up, and
-/// sleeps `secs` s.
-fn hold(mib: u64, secs: u64, stop: u64) noreturn {
+/// sleeps `secs` s. `up`: whether it says it is up (a child that the parent
+/// holds a test for does not: the parent says it when both hold their pages).
+fn hold(mib: u64, secs: u64, stop: u64, up: bool) noreturn {
     say("hog touches {d} MiB\n", .{mib});
     // Mapped, not allocated: a safe-mode allocator fills what it returns,
     // which would touch every page before the loop does.
@@ -417,13 +427,13 @@ fn hold(mib: u64, secs: u64, stop: u64) noreturn {
     while (i < mem.len) : (i += 4096) {
         mem[i] = 1;
         if (stop > 0 and (i + 4096) == (stop << 20)) {
-            announceReady();
+            if (up) announceReady();
             sys.sleepMs(secs * 1000);
             posix.exit(0);
         }
     }
     say("hog holds {d} MiB\n", .{mib});
-    announceReady();
+    if (up) announceReady();
     sys.sleepMs(secs * 1000);
     posix.exit(0);
 }
@@ -479,7 +489,7 @@ fn behave(a: std.mem.Allocator, name: []const u8, args: []const []const u8, env:
         sys.sleepMs(num(arg(args, 1), 1) * 1000);
         posix.exit(@intCast(num(arg(args, 2), 0)));
     }
-    if (std.mem.eql(u8, name, "hog")) hold(num(arg(args, 1), 64), num(arg(args, 2), 60), num(arg(args, 3), 0));
+    if (std.mem.eql(u8, name, "hog")) hold(num(arg(args, 1), 64), num(arg(args, 2), 60), num(arg(args, 3), 0), true);
     if (std.mem.eql(u8, name, "termproof")) {
         // Ignores SIGTERM, says it is up, waits for the SIGKILL.
         const ign = posix.Sigaction{ .handler = .{ .handler = posix.SIG.IGN }, .mask = posix.sigemptyset(), .flags = 0 };
@@ -493,7 +503,7 @@ fn behave(a: std.mem.Allocator, name: []const u8, args: []const []const u8, env:
         const kind = arg(args, 2) orelse "sleep";
         const pid = posix.fork() catch posix.exit(99);
         if (pid == 0) {
-            if (std.mem.eql(u8, kind, "hog")) hold(64, 60, 0);
+            if (std.mem.eql(u8, kind, "hog")) hold(64, 60, 0, true);
             sys.sleepMs(3_600_000);
             posix.exit(0);
         }
@@ -516,7 +526,7 @@ fn behave(a: std.mem.Allocator, name: []const u8, args: []const []const u8, env:
     if (std.mem.eql(u8, name, "treehog")) {
         const secs = num(arg(args, 3), 5);
         const pid = posix.fork() catch posix.exit(99);
-        if (pid == 0) hold(num(arg(args, 2), 24), secs, 0);
+        if (pid == 0) hold(num(arg(args, 2), 24), secs, 0, false);
         const mem = std.heap.page_allocator.alloc(u8, num(arg(args, 1), 16) << 20) catch posix.exit(99);
         var k: usize = 0;
         while (k < mem.len) : (k += 4096) mem[k] = 1;

@@ -76,7 +76,7 @@ fn cappedMib(err: []const u8) ?u64 {
 fn capKillsHog(stop: []const u8) !void {
     const e = try Env.init();
     defer e.deinit();
-    const r = try kit.runGate(e.a, e.dir, try e.args("hog", &.{ "--mem-cap-mib", "32", "--arg", "64", "--arg", "3600", "--arg", stop }), .{});
+    const r = try kit.runGate(e.a, e.dir, try e.args("hog", &.{ "--mem-cap-mib", "32", "--arg", "64", "--arg", "3600", "--arg", stop }), .{ .clock = true });
     try std.testing.expectEqual(@as(u8, 137), r.status);
     // The banner, then the log's tail (the hog's first line), then the cap's line.
     try std.testing.expect(before(r.err, banner137, "hog touches 64 MiB\n"));
@@ -124,7 +124,7 @@ test "M3 cap: a test under its cap passes" {
 test "M2 cap: a test whose child pushes the tree's total over the cap is killed (137) with the MEMORY CAP line" {
     const e = try Env.init();
     defer e.deinit();
-    const r = try kit.runGate(e.a, e.dir, try e.args("treehog", &.{ "--mem-cap-mib", "32", "--arg", "16", "--arg", "24", "--arg", "3600" }), .{});
+    const r = try kit.runGate(e.a, e.dir, try e.args("treehog", &.{ "--mem-cap-mib", "32", "--arg", "16", "--arg", "24", "--arg", "3600" }), .{ .clock = true });
     try std.testing.expectEqual(@as(u8, 137), r.status);
     try std.testing.expect(before(r.err, banner137, "MEMORY CAP: killed //x:y at "));
     try std.testing.expect(contains(r.err, " MiB resident, over its cap of 32 MiB\n"));
@@ -165,7 +165,7 @@ test "M3 cap: a test exactly at its cap is not over it" {
             supervise.plat.read_table = tableAtCap;
         }
     }.f;
-    const r2 = try kit.runGate(e.a, e.dir, try e.args("sleep", &.{ "--mem-cap-mib", "32", "--arg", "3600" }), .{ .setup = setup2 });
+    const r2 = try kit.runGate(e.a, e.dir, try e.args("sleep", &.{ "--mem-cap-mib", "32", "--arg", "3600" }), .{ .setup = setup2, .clock = true });
     try std.testing.expectEqual(@as(u8, 137), r2.status);
     try std.testing.expect(contains(r2.err, "MEMORY CAP: killed //x:y at 32 MiB resident, over its cap of 32 MiB\n"));
 }
@@ -232,7 +232,7 @@ test "M4 unreadable: three failed readings kill the group and exit 2; two do not
             supervise.plat.read_table = blindTable;
         }
     }.s;
-    const r3 = try kit.runGate(e.a, e.dir, try e.args("sleep", &.{ "--mem-cap-mib", "512", "--arg", "3600" }), .{ .setup = blind });
+    const r3 = try kit.runGate(e.a, e.dir, try e.args("sleep", &.{ "--mem-cap-mib", "512", "--arg", "3600" }), .{ .setup = blind, .clock = true });
     try std.testing.expectEqual(@as(u8, 2), r3.status);
     try std.testing.expect(contains(r3.err, "mem_cap: cannot read the process tree"));
 }
