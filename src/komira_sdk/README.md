@@ -15,6 +15,7 @@ that strings them into verbs, the sinks, and the package facade come later, so
 | `agg_output_naming` | the output name of an unaliased aggregate, by polars' rule: the leftmost column of its argument, `len` for `count(*)` (`author_polars_agg_names`, `polars_root_name`, `polars_agg_out_name`) |
 | `auto_schema` | `derive_schema[T]()`: a `SchemaDescriptor` derived from a row struct's fields by reflection, and `DerivedSchemaRow`, the trait that gives a row struct that `schema()` |
 | `cte_binding` | `CteScope`: statement-scoped CTE name to `LogicalPlan` bindings |
+| `parquet_footer` | plan-time Parquet footer reads: `read_parquet_row_count`, and `read_parquet_footer` returning a `ParquetFooterSummary` (row count and Arrow schema) from one light parse of the footer, plus cache-backed forms over a `ParquetMetadataCache` (`read_parquet_footer_with_cache`, and `read_parquet_footer_with_cache_via_fs` over any file system). No data page is read |
 | `parquet_read_options` | `ParquetReadOptions`: union by name, empty globs, Hive partitioning and a read-time partition filter |
 | `plan_validator` | `validate_plan` and `validate_plan_report`: column references checked against each node's input schema, with a report of what could not be checked |
 | `table_display` | `format_table`: a `RecordBatch` as an ASCII table |
@@ -91,3 +92,9 @@ assert_equal(polars_agg_out_name(AGG_COUNT, False, String()), String("len"))
 `komira_udf`, whose row UDF types `row_udf_chain` names.
 `komira_op_agg_state` is there for one welded test, which also covers its
 statistical accumulators.
+
+`parquet_footer` needs `komira_parquet` (the file reader, the footer parsers
+and the footer cache), and directly `komira_fs` and `komira_async`; the
+rest of its `deps` are `komira_parquet`'s closure. Its test
+builds its Parquet file byte by byte under the test's scratch directory
+(`komira_runtime_paths`).

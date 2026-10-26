@@ -270,11 +270,13 @@ is recorded in the PR.
 | S2–S6 step | ok, `fail 3`, `timeout 2` with the whole group gone, a run inside its limit, skipped with an empty `-o` file, `-o` kept after success, an infra exit of 124 failing the action, and `@MUT_SCRATCH@` resolved for an absolute, a relative and an unset scratch path | record a timeout as `fail`, or create `-o` outputs after a success |
 | darwin paths | on Linux, with the platform interface forced to "no /proc": the cap is refused with exit 2, and the deadline group-kills and still prints the banner | fall back to running uncapped |
 
-**End-to-end.** The existing planted fixtures `tests//negative/mem_cap` and `tests//negative/test_deadline`
-stay unchanged. They test our tool, not a buck2 built-in, so they are allowed. They must go red with the
-same text as before, and their expected strings (`MEMORY CAP: killed`, `TEST TIME LIMIT: killed … after
-30 s`, `GATED TEST FAILED: … (exit 137)`) do not change. The switch-over PR runs them on the farm and
-records the red result.
+**End-to-end.** The planted fixture `tests//negative/mem_cap` stays unchanged. It tests our tool, not a
+buck2 built-in, so it is allowed. It must go red with the same text as before (`MEMORY CAP: killed`,
+`GATED TEST FAILED: … (exit 137)`). The time limit is not run end to end: no test sleeps past a limit. The
+gate's unit tests move the supervisor's clock themselves (`plat.now_ms`, `wait` and `sleep_ms`, testkit.zig)
+and assert the exact times of the kills and the banner order, and `tests//negative/test_deadline:test_slow`
+is only inspected: the scenario `config_refusals` requires that its `buck2 test` command carries
+`--deadline-s 30 --runner-timeout-s 90` under a test timeout of 90.
 
 **Darwin.** `mojo_test.zig` and `supervise_test.zig` are also built for macOS and run on the macOS
 workers (`mojo_test_darwin`, `supervise_test_darwin`), and `run:gate_darwin` is built behind them: the
