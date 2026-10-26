@@ -55,9 +55,10 @@
 # WHY THE UNMODELED-TAG SKIP STILL EXISTS (it is a skip, not a pass).
 # `plan_validator._validate_plan_node` models only some of the `PLAN_*` tags and
 # `raise`s "validate_plan: unknown plan tag N" on the rest (ASOF_JOIN=11,
-# UNION=12, VIEW_REF=13, CSE_REF=14, CAST_TO_VARCHAR=15). Two of those
-# (VIEW_REF / CSE_REF) are opaque LEAF references whose subtree is not yet
-# spliced in, so an enclosing Project/Filter's column refs cannot be resolved
+# UNION=12, VIEW_REF=13, CSE_REF=14, CAST_TO_VARCHAR=15, and the tags from
+# EXCHANGE=18 up). Two of those (VIEW_REF / CSE_REF) are opaque LEAF
+# references whose subtree is not yet spliced in, so an enclosing
+# Project/Filter's column refs cannot be resolved
 # against a real child schema even in principle before `view_resolution_pass`
 # runs. Turning the validator's own incompleteness into a user-visible hard
 # failure would make a legitimate `with_cte` / `ctx.view` / union / asof / cast
@@ -191,8 +192,8 @@ def _write_plan_tag_name[W: Writer](mut writer: W, tag: UInt8):
 
 def plan_tag_name(tag: UInt8) -> String:
     """The `PLAN_*` constant name for `tag`, for each of the 16 tags 0..15
-    declared in `logical_plan.mojo`. Any other tag comes back as
-    `<unnamed plan tag N>`."""
+    declared in `logical_plan.mojo`. Any other tag, including the later ones
+    (`PLAN_EXCHANGE` and above), comes back as `<unnamed plan tag N>`."""
     var out = String()
     _write_plan_tag_name(out, tag)
     return out^
@@ -242,8 +243,10 @@ def _first_unmodeled_plan_tag(plan: LogicalPlan) -> Int:
         return _first_unmodeled_plan_tag(plan._partition_by.value()[].child[])
     elif plan.tag == PLAN_PARTITION_TOPN:
         return _first_unmodeled_plan_tag(plan._partition_topn.value()[].child[])
-    # ASOF_JOIN / UNION / VIEW_REF / CSE_REF / CAST_TO_VARCHAR (and any tag
-    # added later without a validator arm) land here.
+    # ASOF_JOIN / UNION / VIEW_REF / CSE_REF / CAST_TO_VARCHAR, the tags from
+    # EXCHANGE up (the validator refuses EXCHANGE by name; the gate only reports
+    # it as not validated), and any tag added later without a validator arm,
+    # land here.
     return Int(plan.tag)
 
 
@@ -354,7 +357,7 @@ def plan_validation_outcome(
             + "' is not a row in `plan_validation_routes.plan_validation_routes"
             "()`. Every gate site must declare the route it covers there --"
             " that ledger is what stops the gate claiming coverage it does not"
-            " have (FINDING 1)."
+            " have."
         )
 
     var unmodeled = _first_unmodeled_plan_tag(plan)

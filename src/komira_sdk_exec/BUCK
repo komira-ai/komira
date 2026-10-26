@@ -1,7 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The engine-execution layer of the SDK: nine leaf modules plus the
-# plan gate modules (see README.md). Each module's header says what it is for.
+# The engine-execution layer of the SDK: eleven modules (nine leaves plus the
+# plan gate modules, see README.md). Each module's header says what it is for.
 #
 # The welded tests (each file's header says which defect it catches):
 # - test_plan_cache_full_sink_hash: the sink kind is part of the Layer 2 cache

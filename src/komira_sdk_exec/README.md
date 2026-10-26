@@ -1,10 +1,10 @@
 # komira_sdk_exec
 
-The engine-execution layer of the SDK. This is its early slice: nine leaf
-modules that need nothing from the rest of the package except each other, and
-the plan gates (`plan_validation_gate`, `parquet_glob_options`), which build on
-`komira_sdk`. The engine context that drives a query, the sinks and the frames
-come in later slices; nothing here runs a query.
+The engine-execution layer of the SDK: eleven modules, nine leaves that need
+nothing from the rest of the package except each other, and the plan gates
+(`plan_validation_gate`, `parquet_glob_options`), which build on `komira_sdk`.
+The engine context that drives a query, the sinks and the frames are not in
+this package yet; nothing here runs a query.
 
 | module | does |
 |---|---|
@@ -45,8 +45,8 @@ The tests run when the package is built.
 engine context. The plan validation gate that `plan_validation_routes` is the
 ledger for is `plan_validation_gate`; its call sites (the `@parameter if` and
 switch guards at each route) belong to the engine context, a later slice. No
-ledger row is COVERED yet: the guard tests the
-first-draft rows named are not in this slice, so those rows are WIRED_UNPROVEN
-until their tests arrive, and a test here checks that a COVERED row only names a
-test file this package ships. `deps` in the BUCK file is the full transitive
-closure; a later slice that pulls a new library adds it in the same change.
+ledger row is COVERED yet: the guard tests the first-draft rows named are not
+in this slice, so those rows are WIRED_UNPROVEN until their tests arrive, and a
+test here checks that a COVERED row only names a test file this package ships.
+`deps` in the BUCK file is the full transitive closure; a later slice that
+pulls a new library adds it in the same change.
