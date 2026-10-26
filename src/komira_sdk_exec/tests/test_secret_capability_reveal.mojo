@@ -15,7 +15,10 @@
 #      reveal their own value.
 #   4. A capability for an unbound node (8) raises and the consumer is never
 #      called.
-#   5. A ref removed from the store raises before the consumer is called.
+#   5. A ref removed from the store raises before the consumer is called, and
+#      the store is consulted exactly once.
+#   6. A consumer that raises: the error propagates out of `open_connection_for`
+#      and the consumer was called exactly once.
 #
 # Which case guards which defect: a capability that always resolves the first
 # bound entry fails 3 and 4; a `node_id()` that returns 0 fails 1 and 3; a
@@ -58,6 +61,19 @@ struct _RecordingConsumer(CredentialConsumer, Movable):
         self.seen = List[UInt8]()
         for i in range(len(secret)):
             self.seen.append(secret[i])
+
+
+struct _RaisingConsumer(CredentialConsumer, Movable):
+    """Counts invocations and always raises."""
+
+    var consume_count: Int
+
+    def __init__(out self):
+        self.consume_count = 0
+
+    def consume(mut self, secret: Span[UInt8, _]) raises:
+        self.consume_count += 1
+        raise Error("consumer failed")
 
 
 def _assert_seen(
@@ -161,6 +177,26 @@ def test_removed_ref_raises_before_the_consumer_is_called() raises:
         ](bindings, store^, consumer)
 
     assert_equal(consumer.consume_count, 0, "the consumer was never called")
+    assert_equal(probe.resolve_count(), 1, "the store was consulted once")
+
+
+def test_consumer_error_propagates_after_exactly_one_call() raises:
+    var bindings = _bindings()
+    var consumer = _RaisingConsumer()
+
+    var message = String("")
+    var raised = False
+    try:
+        SecretCapability(_NODE_A).open_connection_for[
+            StaticSecretStore, _RaisingConsumer
+        ](bindings, _store(), consumer)
+    except e:
+        raised = True
+        message = String(e)
+
+    assert_equal(raised, True, "the consumer's error propagated")
+    assert_equal(message, "consumer failed", "the consumer's own error")
+    assert_equal(consumer.consume_count, 1, "the consumer was called once")
 
 
 def main() raises:
