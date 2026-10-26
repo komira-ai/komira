@@ -38,8 +38,8 @@
 # and bytes left over.
 #
 # `delta_object_parquet_bytes` hands back the Parquet file; decoding it is the
-# Parquet reader's job (`decode_parquet_file_from_bytes`), which the snapshot
-# store calls.
+# Parquet reader's job (`decode_parquet_file_from_bytes`), which the reader that
+# merges deltas calls: the snapshot store hands back the bytes, not rows.
 # =============================================================================
 
 from komira_arrow.arrow_types import ArrowType
