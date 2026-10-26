@@ -652,7 +652,7 @@ fn swapGate(ar: std.mem.Allocator, head: []const u8, to: []const u8) ![]const u8
     return std.mem.concat(ar, u8, &.{ head[0..at], to, head[at + PROD_GATE.len + 1 ..] });
 }
 
-test "each defect planted in the prod jobs of the real release.yml is refused with its message" {
+test "each edit of the prod jobs of the real release.yml that breaks the contract is refused with its message" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
