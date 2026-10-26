@@ -1,8 +1,8 @@
 # =============================================================================
 # komira_kg_format -- the values and on-disk formats the data-graph writer and
-#   reader share (parts 1 to 3: embeddings, extraction values, the snapshot
-#   manifest, table schemas, cosine ranking, the query result, the delta layer
-#   and the source fingerprints).
+#   reader share (parts 1 to 4: embeddings, extraction values, the snapshot
+#   manifest, table schemas, cosine ranking, the query result, the delta layer,
+#   the source fingerprints and the snapshot lineage store).
 # =============================================================================
 #
 #   * embedding      -- the packed little-endian f32 embedding cell.
@@ -20,6 +20,14 @@
 #                       more.
 #   * source_fingerprint -- `SourceFingerprintSet` and its lineage store: the
 #                       change gate keyed by partition and source.
+#   * chunk_kind    -- `kg_chunk_kind`: base, chain head or delta, read from a
+#                       chunk's format version.
+#   * compaction_policy -- `CompactionPolicy`: when a chain is worth folding.
+#   * snapshot_view, chain_view -- `SnapshotView` and `ChainView`: a resolved
+#                       base and a resolved chain, with the handle to fetch
+#                       their objects.
+#   * snapshot_store -- `KgSnapshotStore`: the lineage on an object store (bases,
+#                       delta chains, folds, fingerprints), and `KgTable`.
 #
 # Depends on `komira_arrow` (and its closure) and `komira_json`, and reads no clock or environment.
 # =============================================================================
@@ -95,4 +103,19 @@ from .source_fingerprint import (
     content_hash_of,
     content_hash_of_extraction,
     fnv1a64_hex,
+)
+from .chunk_kind import (
+    KG_CHUNK_BASE,
+    KG_CHUNK_CHAIN,
+    KG_CHUNK_DELTA,
+    kg_chunk_kind,
+)
+from .compaction_policy import CompactionPolicy
+from .snapshot_view import SnapshotId, SnapshotView
+from .chain_view import ChainView
+from .snapshot_store import (
+    DEFAULT_MAX_HEAD_ATTEMPTS,
+    PENDING_BASE_RECORD_COUNT,
+    KgSnapshotStore,
+    KgTable,
 )

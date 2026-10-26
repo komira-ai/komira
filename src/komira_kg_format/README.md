@@ -3,12 +3,12 @@
 ## Responsibility
 
 The values and on-disk formats that the data-graph writer and reader share. This
-is parts 1 to 3 of the package described in
+is parts 1 to 4 of the package described in
 [the knowledge graph port](https://github.com/komira-ai/komira/blob/main/docs/design/knowledge_graph_port.md): the
 packed embedding cell, the values an extractor returns, the snapshot manifest
 body, the table schemas, cosine ranking, the structured query result, the delta
-layer over a base snapshot and the fingerprints of ingested sources. Later parts
-add the snapshot lineage store and the exact-scan searches. The code graph
+layer over a base snapshot, the fingerprints of ingested sources and the snapshot
+lineage store. A later part adds the exact-scan searches. The code graph
 [`komira_kg_code`](https://github.com/komira-ai/komira/blob/main/src/komira_kg_code/README.md) is a different thing and is untouched.
 
 - `embedding`: an embedding vector is one string cell holding its components as
@@ -42,12 +42,28 @@ add the snapshot lineage store and the exact-scan searches. The code graph
   `SourceFingerprintStore` keeps it in an append-only lineage next to the
   snapshots, and `content_hash_of` and `content_hash_of_extraction` compute the
   hash.
+- `chunk_kind`: `kg_chunk_kind` tells a base, a chain head and a delta apart by
+  the format version at the start of the chunk body, never by position or size.
+- `snapshot_store`: `KgSnapshotStore`, the lineage of one graph on a
+  conditional-write object store. It writes a base snapshot (one Parquet object
+  per table, named by the hash of its bytes, and a manifest chunk), appends
+  deltas over the head, folds a chain into a fresh base, retires the folded
+  deltas and keeps the fingerprint lineage. A write that loses a
+  compare-and-set race is retried within a bound and the loss is reported. It
+  reads no clock: where time matters the caller passes it. `KgTable` is one
+  table to write.
+- `snapshot_view`, `chain_view`: `SnapshotView` (a resolved base: its manifest
+  body and a handle that fetches its table objects) and `ChainView` (a resolved
+  chain: the base view, the deltas in apply order and their chunk numbers). Both
+  keep reading after the store that made them is gone.
+- `compaction_policy`: `CompactionPolicy`, the count-or-size rule for when a
+  chain is worth folding.
 
 The package depends on `komira_arrow` (for schemas and string columns),
 `komira_json` (for the query result's wire), `komira_hash`,
-`komira_objectstore` (the fingerprint lineage) and `komira_parquet_writer` (the
-Parquet delta objects), reads no clock and no environment, and no pointer
-crosses its API.
+`komira_objectstore` (the snapshot and fingerprint lineages), `komira_collections`
+(the `Slab` a write takes its tables in) and `komira_parquet_writer` (the Parquet
+objects), reads no clock and no environment, and no pointer crosses its API.
 
 ## API
 
@@ -84,6 +100,21 @@ Everything is exported from `komira_kg_format`:
   `SourceFingerprintStore[Store]`, `content_hash_of`,
   `content_hash_of_extraction`, `fnv1a64_hex` and
   `KG_FINGERPRINT_FORMAT_VERSION` (1).
+- Chunk kinds: `kg_chunk_kind` and `KG_CHUNK_BASE`, `KG_CHUNK_CHAIN`,
+  `KG_CHUNK_DELTA`.
+- Lineage store: `KgSnapshotStore[Store]` and `KgTable`; `SnapshotView[Store]`,
+  `ChainView[Store]` and `SnapshotId` (the chunk number, an `Int64`);
+  `CompactionPolicy`; `DEFAULT_MAX_HEAD_ATTEMPTS` (8) and
+  `PENDING_BASE_RECORD_COUNT` (0).
+  - write: `write_snapshot`, `append_delta`, `write_base_tables`,
+    `commit_compacted_head`, `retire_folded_delta`.
+  - read: `open_latest`, `read_snapshot`, `open_latest_chain`, `read_chain`,
+    `read_chain_body`, `read_delta_body`, `resolve_head_chain`,
+    `latest_snapshot_id`, `head_seq`, `head_is_chain`, `chain_total_bytes`,
+    `retired_age_ms`.
+  - races: `lost_races`, `last_write_lost_races`.
+  - change gate: `fingerprint_load`, `fingerprint_lookup`, `fingerprint_save`,
+    `fingerprint_patch_save`.
 
 ## Examples
 
@@ -394,6 +425,141 @@ with assert_raises(contains="refusing to replace"):
     store.save(SourceFingerprintSet())
 ```
 
+The lineage store keeps a graph under a key prefix of a conditional-write store.
+A base is written with the graph's embedding dimension; each delta is appended
+over the head with the exact-name entries it adds, and the head then reads back as
+a chain of the base and the deltas. A compactor folds a chain by writing the
+folded tables as a new base (not the head yet) and committing it with the base
+and deltas it folded; a chain read before the fold keeps reading. The time a
+retired delta is stamped with is the caller's:
+
+```mojo module
+from std.testing import assert_equal, assert_true
+
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Field, SchemaBuilder
+from komira_arrow.string_array import StringArray
+from komira_collections.slab import Slab
+from komira_kg_format import (
+    CompactionPolicy,
+    KgNameIndexBody,
+    KgSnapshotStore,
+    KgTable,
+    delta_object_is_framed,
+)
+from komira_objectstore.shared_in_memory_conditional_store import (
+    SharedInMemoryConditionalStore,
+)
+
+comptime Kg = KgSnapshotStore[SharedInMemoryConditionalStore]
+
+
+def table(first: Int, n: Int) raises -> Slab[KgTable]:
+    var ids = List[Int64]()
+    var names = List[String]()
+    for i in range(n):
+        ids.append(Int64(first + i))
+        names.append("node-" + String(first + i))
+    var sb = SchemaBuilder()
+    sb.add_field(Field("id", ArrowType.INT64, False))
+    sb.add_field(Field("name", ArrowType.STRING, False))
+    var rb = RecordBatchBuilder()
+    rb.add_column(
+        Column.from_primitive[DType.int64](
+            PrimitiveArray[DType.int64].from_list(ids)
+        )
+    )
+    rb.add_column(Column.from_string(StringArray.from_strings(names)))
+    var tables = Slab[KgTable]()
+    tables.append(KgTable("entities", rb.build(sb.build()), 1))
+    return tables^
+
+
+def main() raises:
+    var kg = Kg(SharedInMemoryConditionalStore(), "graph-1")
+    assert_equal(kg.write_snapshot(table(1, 3), 8), 0)  # embedding dimension 8
+
+    var index = KgNameIndexBody()
+    index.add("ada", 11)
+    assert_equal(kg.append_delta(table(10, 2), index^), 2)
+    assert_equal(kg.append_delta(table(20, 1), KgNameIndexBody()), 4)
+
+    var chain = kg.open_latest_chain()
+    assert_equal(chain.num_deltas(), 2)
+    assert_equal(chain.resolve_name_index("ada"), 11)
+    assert_true(delta_object_is_framed(chain.delta_object_bytes(0, "entities")))
+
+    # Two deltas are enough for this policy to ask for a fold.
+    var sizes = kg.chain_total_bytes(kg.resolve_head_chain())
+    var policy = CompactionPolicy(2, 0, 0)
+    assert_true(policy.should_compact(chain.num_deltas(), sizes[1], sizes[0]))
+
+    var base = kg.write_base_tables(table(1, 6), 8)
+    assert_equal(kg.latest_snapshot_id(), 4)  # the new base is not the head yet
+    _ = kg.commit_compacted_head(base, chain.base_id(), chain.delta_seqs.copy())
+    assert_equal(kg.open_latest_chain().num_deltas(), 0)
+    assert_equal(chain.num_deltas(), 2)  # the chain read before the fold stays
+
+    kg.retire_folded_delta(chain.delta_seqs[0], 1000)  # the caller's clock
+    assert_equal(kg.retired_age_ms(chain.delta_seqs[0], 1500), 500)
+```
+
+Two handles on one lineage race for the same slot. The loser retries at the next
+slot and the store says it lost:
+
+```mojo module
+from std.testing import assert_equal
+
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatchBuilder
+from komira_arrow.schema import Field, SchemaBuilder
+from komira_collections.slab import Slab
+from komira_kg_format import KgSnapshotStore, KgTable
+from komira_objectstore.shared_in_memory_conditional_store import (
+    SharedInMemoryConditionalStore,
+)
+
+comptime Kg = KgSnapshotStore[SharedInMemoryConditionalStore]
+
+
+def snapshot() raises -> Slab[KgTable]:
+    var ids: List[Int64] = [1, 2]
+    var sb = SchemaBuilder()
+    sb.add_field(Field("id", ArrowType.INT64, False))
+    var rb = RecordBatchBuilder()
+    rb.add_column(
+        Column.from_primitive[DType.int64](
+            PrimitiveArray[DType.int64].from_list(ids)
+        )
+    )
+    var tables = Slab[KgTable]()
+    tables.append(KgTable("entities", rb.build(sb.build()), 1))
+    return tables^
+
+
+def main() raises:
+    var backend = SharedInMemoryConditionalStore()
+    var a = Kg(backend.clone(), "graph-1")
+    var b = Kg(backend.clone(), "graph-1")
+    assert_equal(a.write_snapshot(snapshot(), 4), 0)
+    assert_equal(b.write_snapshot(snapshot(), 4), 1)  # b takes a's next slot
+    assert_equal(a.write_snapshot(snapshot(), 4), 2)  # a retries and wins
+    assert_equal(a.last_write_lost_races(), 1)
+    assert_equal(b.last_write_lost_races(), 0)
+```
+
+A delta's chain head is the one write that must be built from the head it lands
+after, so `append_delta` and `commit_compacted_head` append it at exactly the
+slot after the tip they read. If another chunk took the slot they read the tip
+again, rebuild the chain from the head they find and try again, up to
+`max_head_attempts` times, so a delta appended meanwhile is on the new chain;
+running out of attempts raises an error that ends "(retryable)".
+
 ## Limits
 
 A manifest decodes in memory: the body is read whole and a table count larger
@@ -427,3 +593,25 @@ differ in one byte always hash differently. The fingerprint lineage keeps one
 whole set per save, so two writers that load the same set, patch different keys
 and save overwrite each other (the later save wins); a host that ingests one
 partition from several processes serializes them.
+
+The lineage store has one head: the newest base or chain-head chunk. A delta
+chunk is written before the chain head that names it, so readers look past a
+delta at the tip, and a delta whose writer stopped before the chain head stays in
+the lineage unreferenced. The base a compactor writes is a base chunk with a
+record count of zero; it is skipped like a delta until `commit_compacted_head`
+names it, so it can never hide the deltas that arrived while the fold ran.
+`commit_compacted_head` is for one compactor at a time: it refuses a fold whose
+base is no longer the one under the head chain.
+
+A handle that has written reads its own latest write from memory; a handle made
+fresh lists the store. To see another handle's commits, read through a fresh
+handle. Finding the head after a cold start lists the lineage and reads each
+chunk, which is a cost that grows with the chunk count, so a host folds chains
+and does not keep millions of chunks.
+
+`retire_folded_delta` only stamps a folded delta's chunk; it deletes nothing. A
+chunk is reclaimable only after the lineage's log start has moved past it, and
+when to do that is the host's retention decision, taken against
+`retired_age_ms` and a clock the host owns. Table objects are named by the
+FNV-1a hash of their bytes, which detects change and is not collision resistant.
+An object written by a failed write that no chunk names stays on the store.
