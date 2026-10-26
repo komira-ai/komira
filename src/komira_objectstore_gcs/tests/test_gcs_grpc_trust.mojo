@@ -127,8 +127,12 @@ def _assert_refused(raised: String) raises:
         > _REFUSED_PREFIX.byte_length() + _REFUSED_SUFFIX.byte_length(),
         "the refusal carries no byte count: " + raised,
     )
-comptime _HANDSHAKE_DEADLINE_US: Int64 = 10_000_000
-comptime _REQUEST_TIMEOUT_US = 10_000_000
+
+
+# Hang guards, not asserted bounds: ten minutes, so a loaded host cannot trip
+# them; no test checks how long a handshake or request took.
+comptime _HANDSHAKE_DEADLINE_US: Int64 = 600_000_000
+comptime _REQUEST_TIMEOUT_US = 600_000_000
 comptime _SERVE_POLL_TIMEOUT_US: Int32 = 5_000
 
 
