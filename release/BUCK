@@ -43,7 +43,7 @@ export_file(
 # //:readme_e2e_complete holds to the src/ packages that have a mopm.toml.
 # release.yml's `mopm-stage` job builds it, stages it, tries the README
 # examples against the staged set and dry-runs the publish on every push to
-# main; `mopm-publish` publishes the set, only when enabled (docs/ci.md).
+# main; the `prod-*` jobs publish the set, only when enabled (docs/ci.md).
 mopm_artifacts(
     name = "mopm_artifacts",
     natives = {"komira_libc": {"komira_libc_posix": "//src/komira_libc:native_komira_libc_posix"}},
