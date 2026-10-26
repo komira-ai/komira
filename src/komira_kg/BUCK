@@ -1,13 +1,14 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The mutable data-graph store and its ingest, parts 1 to 4 (the second of the
+# The mutable data-graph store and its ingest, parts 1 to 5 (the second of the
 # packages in docs/design/knowledge_graph_port.md): bi-temporal edges (a replaced
 # fact is closed, not erased), entity resolution (name similarity, the dedup
 # cascade and a directed alias map), the source facet with its tombstone set, the
 # model seams (Embedder, Extractor, LlmClient, each with a stub), the rule-driven
 # extractor (a rule set is host data), the source cursor store and the
 # in-memory working set that loads a snapshot or a delta chain and writes back a
-# base or a delta. It depends on
+# base or a delta, erasure of a partition, the warm cache, compaction and
+# embedding top-k. It depends on
 # komira_kg_format (for the open-interval marker), komira_json (for the facet's
 # attrs JSON) and komira_objectstore (the cursor store rides its conditional-write
 # trait), and on their closure; it reads no clock and no environment, and calls no
@@ -33,7 +34,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # NUL bytes in the text), pins one consistent set of tables per snapshot and
 # deterministic objects; test_working_set_delta merges a base and deltas to the
 # rows of a full rewrite and checks what a delta carries; test_working_set_refusals
-# refuses a wrong embedding dimension against the manifest and malformed tables.
+# refuses a wrong embedding dimension against the manifest and malformed tables;
+# test_working_set_commit narrows a committed set's vectors to what a reload holds
+# and re-baselines its diff; test_compaction folds a chain to the rows it merged
+# to, keeps a pinned chain and its objects, stamps retired deltas, carries a
+# delta appended meanwhile and refuses a second fold of a replaced head;
+# test_erase removes one partition's rows, edges, closures, names and embeddings
+# from the head and keeps the others; test_warm_cache keys the resident merge by
+# the head; test_embedding_topk ranks by cosine with ties by node id and refuses
+# k <= 0, a wrong query dimension and a wrong cell.
 mojo_library(
     name = "komira_kg",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -74,10 +83,13 @@ mojo_library(
     test_srcs = [
         "tests/test_alias_map.mojo",
         "tests/test_bitemporal.mojo",
+        "tests/test_compaction.mojo",
         "tests/test_cursor_codec.mojo",
         "tests/test_cursor_store.mojo",
         "tests/test_dedup.mojo",
         "tests/test_embedder.mojo",
+        "tests/test_embedding_topk.mojo",
+        "tests/test_erase.mojo",
         "tests/test_extractor.mojo",
         "tests/test_llm_client.mojo",
         "tests/test_name_similarity.mojo",
@@ -85,6 +97,8 @@ mojo_library(
         "tests/test_rule_pattern.mojo",
         "tests/test_rule_scan.mojo",
         "tests/test_source_facet.mojo",
+        "tests/test_warm_cache.mojo",
+        "tests/test_working_set_commit.mojo",
         "tests/test_working_set_delta.mojo",
         "tests/test_working_set_refusals.mojo",
         "tests/test_working_set_roundtrip.mojo",

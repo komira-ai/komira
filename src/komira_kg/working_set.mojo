@@ -39,8 +39,11 @@
 # loaded one), the edges appended since, a tombstone for each loaded edge whose
 # end times changed, and the episodes appended since. It reads the rows by
 # position, so the first `len(edges)` loaded edges and episodes must still be
-# where they were: it refuses a set that has shrunk below its load (write a
-# full snapshot with `to_tables` instead).
+# where they were: it refuses a set that has shrunk below its load, and a set
+# from which a loaded entity was removed, because a delta cannot say a removal
+# (write a full snapshot with `to_tables` instead). A writer that keeps its set
+# after appending its own delta calls `mark_committed`, which makes the set's
+# current state the new loaded state.
 #
 # No clock and no environment are read: every time is a field of a row the
 # caller supplies. Nothing here touches a file system.
@@ -60,6 +63,7 @@ from komira_kg_format import (
     SnapshotView,
     TS_OPEN_SENTINEL,
     pack_embedding,
+    unpack_embedding_checked,
 )
 from komira_objectstore.store import CloneableConditionalWriteStore
 
@@ -470,6 +474,32 @@ struct SnapshotWorkingSet(Movable):
             return True
         return len(self.tombstone_edge_indices()) > 0
 
+    def mark_committed(mut self) raises:
+        """Declare that the set's current state is now what the store holds, so
+        the next `delta_tables` is relative to it.
+
+        A resident set that keeps going after its own delta was appended calls
+        this. The embeddings of the entities added or edited since the load are
+        first narrowed to f32 exactly as the table cell stores them, so the
+        resident vectors equal the ones a reload would give. The node-id
+        high-water mark is kept (it never goes down).
+
+        Raises:
+            If an embedding is not `embedding_dim` finite components.
+        """
+        var changed = self._changed_entity_indices()
+        for k in range(len(changed)):
+            ref e = self.entities[changed[k]]
+            check_embedding(e.name_embedding, self.embedding_dim, "mark_committed")
+            var packed = pack_embedding(e.name_embedding)
+            e.name_embedding = unpack_embedding_checked(
+                packed.as_bytes(), self.embedding_dim
+            )
+        var kept = self._high_water
+        self._finish_load()
+        if kept > self._high_water:
+            self._high_water = kept
+
     def name_index_delta(self) raises -> KgNameIndexBody:
         """The `{normalize_name(name) -> nid}` entries for the entities added or
         edited since the load; they ride the same delta append, so the next
@@ -562,6 +592,21 @@ struct SnapshotWorkingSet(Movable):
                 " close; write a full base with to_tables instead"
             )
 
+    def _check_no_loaded_entity_dropped(self) raises:
+        # A delta adds and changes entities but cannot remove one, so a set that
+        # lost a loaded entity (an erasure) would get it back on reload.
+        var present = Dict[Int64, Bool]()
+        for i in range(len(self.entities)):
+            present[self.entities[i].nid] = True
+        for nid in self._base_entities.keys():
+            if nid not in present:
+                raise Error(
+                    "SnapshotWorkingSet.delta_tables: loaded entity "
+                    + String(nid)
+                    + " was removed since the load, which a delta cannot say;"
+                    " write a full snapshot with to_tables instead"
+                )
+
     def to_tables(self) raises -> Slab[KgTable]:
         """The whole graph as tables for `write_snapshot`. Only non-empty tables
         are emitted. The dimension to record in the manifest is
@@ -639,6 +684,7 @@ struct SnapshotWorkingSet(Movable):
                 + " since the load; write a full snapshot"
             )
         self._check_unique_nids()
+        self._check_no_loaded_entity_dropped()
         var tables = Slab[KgTable]()
         var changed = self._changed_entity_indices()
         if len(changed) > 0:
