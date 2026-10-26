@@ -1,7 +1,7 @@
 # komira_sdk_exec
 
 The engine-execution layer of the SDK. This is its first two slices: ten leaf
-modules, none of which needs more of the package than the others in this list. The
+modules that need nothing from the rest of the package except each other. The
 engine context that drives a query, the sinks and the frames come in later
 slices; nothing here runs a query.
 

@@ -17,6 +17,10 @@
 #      called.
 #   5. A ref removed from the store raises before the consumer is called.
 #
+# Which case guards which defect: a capability that always resolves the first
+# bound entry fails 3 and 4; a `node_id()` that returns 0 fails 1 and 3; a
+# deleted `reveal_for` call fails 2; a swallowed error fails 4 and 5.
+#
 # Offline and in-process: no sockets, no files, no cloud.
 # =============================================================================
 
