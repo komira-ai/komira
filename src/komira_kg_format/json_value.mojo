@@ -100,7 +100,7 @@ struct JsonDoc(Movable):
     Build with `JsonDoc.parse(text)`. Navigate with `root()` then the
     `JsonValue` accessors (`get`, `at`, `len`, `as_string`, `as_bool`,
     `as_int`, `as_float`). All navigation is by node index into this doc's
-    arena, so there is no self-referential ownership (gap6-safe).
+    arena, so there is no self-referential ownership.
     """
 
     var _nodes: List[_JsonNode]

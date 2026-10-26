@@ -11,6 +11,7 @@
 #                for byte; \u escapes make code points, a surrogate pair makes
 #                one astral code point.
 #   numbers      the RFC 8259 number forms parse and read back as Int or Float64.
+#   utf8         a raw byte string or key that is not UTF-8 is refused.
 #   refusal      each malformed text is an error: a missing value, a missing
 #                colon, a trailing comma, a bad literal, text after the root,
 #                an unterminated string, a raw control character in a string, a
@@ -190,6 +191,27 @@ def test_unicode_escapes_make_code_points() raises:
     assert_equal(doc.root().as_string(), "é|日|A|😀")
     var nul = JsonDoc.parse(String('"a\\u0000b"'))
     assert_equal(nul.root().as_string().byte_length(), 3)
+
+
+def test_a_decoded_string_or_key_that_is_not_utf8_is_refused() raises:
+    # Raw bytes that no UTF-8 text holds, built unchecked on purpose.
+    var bad_value = List[UInt8]()
+    bad_value.append(UInt8(ord('"')))
+    bad_value.append(UInt8(0xFF))
+    bad_value.append(UInt8(ord('"')))
+    assert_true(_refused(String(unsafe_from_utf8=Span(bad_value))))
+    var bad_key = List[UInt8]()
+    for c in [ord("{"), ord('"'), 0xC3, ord('"'), ord(":"), ord("1"), ord("}")]:
+        bad_key.append(UInt8(c))
+    assert_true(_refused(String(unsafe_from_utf8=Span(bad_key))))
+    # The same bytes made valid (C3 A9) parse, so the refusal is the bytes.
+    var good_key = List[UInt8]()
+    for c in [
+        ord("{"), ord('"'), 0xC3, 0xA9, ord('"'), ord(":"), ord("1"), ord("}")
+    ]:
+        good_key.append(UInt8(c))
+    var doc = JsonDoc.parse(String(unsafe_from_utf8=Span(good_key)))
+    assert_true(doc.root().has("é"))
 
 
 # --- numbers -----------------------------------------------------------------

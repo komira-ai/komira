@@ -14,7 +14,8 @@
 #                ignores a trailing partial component.
 #   dimension    unpack_embedding_checked returns a cell of exactly the stated
 #                dimension, and refuses a short cell, a long cell, a trailing
-#                partial component and a dimension of zero or less.
+#                partial component, a dimension of zero or less, and a
+#                dimension so large that dim * 4 overflows (1 << 62).
 # No test reads a clock or the environment.
 # =============================================================================
 
@@ -158,9 +159,9 @@ def test_checked_accepts_exactly_the_stated_dimension() raises:
 def test_checked_refuses_a_wrong_length_cell() raises:
     var v: List[Float32] = [1.0, 2.0, 3.0]
     var cell = pack_embedding_f32(v)
-    with assert_raises(contains="needs 16"):
+    with assert_raises(contains="not a dimension of 4"):
         _ = unpack_embedding_checked(cell.as_bytes(), 4)
-    with assert_raises(contains="needs 8"):
+    with assert_raises(contains="not a dimension of 2"):
         _ = unpack_embedding_checked(cell.as_bytes(), 2)
     var ragged = List[UInt8]()
     for b in cell.as_bytes():
@@ -168,6 +169,22 @@ def test_checked_refuses_a_wrong_length_cell() raises:
     ragged.append(UInt8(1))
     with assert_raises(contains="13 bytes"):
         _ = unpack_embedding_checked(Span(ragged), 3)
+
+
+def test_checked_refuses_a_dimension_whose_byte_size_overflows() raises:
+    # 1 << 62 times 4 wraps to 0, which an empty cell would have matched.
+    var empty = List[UInt8]()
+    with assert_raises(contains="not a dimension of"):
+        _ = unpack_embedding_checked(Span(empty), 1 << 62)
+    with assert_raises(contains="not a dimension of"):
+        _ = unpack_embedding_checked(Span(empty), (1 << 61) + 1)
+    with assert_raises(contains="not a dimension of"):
+        _ = unpack_embedding_checked(Span(empty), Int.MAX)
+    var four = List[UInt8]()
+    for _ in range(4):
+        four.append(UInt8(0))
+    with assert_raises(contains="not a dimension of"):
+        _ = unpack_embedding_checked(Span(four), (1 << 62) + 1)
 
 
 def test_checked_refuses_a_non_positive_dimension() raises:

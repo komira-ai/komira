@@ -37,8 +37,8 @@ Everything is exported from `komira_kg_format`:
 - JSON: `JsonDoc.parse` and `JsonDoc.root`, the handle `JsonValue`, the kind
   tags `JSON_NULL`, `JSON_BOOL`, `JSON_NUMBER`, `JSON_STRING`, `JSON_ARRAY`,
   `JSON_OBJECT`, and `JSON_MAX_DEPTH` (128).
-- Manifest: `KgManifestBody`, `KgTableEntry`, `KG_SNAPSHOT_FORMAT_VERSION` (2)
-  and `KG_SNAPSHOT_FORMAT_VERSION_MIN` (1).
+- Manifest: `KgManifestBody`, `KgTableEntry`, `KG_SNAPSHOT_FORMAT_VERSION` (2,
+  the only layout the decoder accepts).
 
 ## Examples
 
@@ -80,7 +80,7 @@ from komira_kg_format import pack_embedding_f32, unpack_embedding_checked
 var v: List[Float32] = [1.0, 2.0, 3.0]
 var cell = pack_embedding_f32(v)
 assert_equal(len(unpack_embedding_checked(cell.as_bytes(), 3)), 3)
-with assert_raises(contains="needs 16"):
+with assert_raises(contains="not a dimension of 4"):
     _ = unpack_embedding_checked(cell.as_bytes(), 4)
 ```
 
@@ -169,5 +169,7 @@ assert_equal(extraction.triples[0].predicate, "wrote")
 A manifest decodes in memory: the body is read whole and a table count larger
 than the bytes can hold is refused before anything is allocated. The JSON reader
 copies its input, accepts nesting up to 128 levels and is meant for kilobyte
-bodies, not streams. Embeddings are stored as f32 whatever precision the caller
+bodies, not streams. `as_float` refuses a number of 22 or more significant
+digits, and a number such as `1e400` reads back as infinity. When an object
+repeats a key, `get` and `has` see the first. Embeddings are stored as f32 whatever precision the caller
 computes in.

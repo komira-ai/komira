@@ -37,7 +37,6 @@ from .json_value import (
 )
 from .manifest_body import (
     KG_SNAPSHOT_FORMAT_VERSION,
-    KG_SNAPSHOT_FORMAT_VERSION_MIN,
     KgManifestBody,
     KgTableEntry,
 )

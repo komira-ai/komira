@@ -150,14 +150,14 @@ def unpack_embedding_checked[
             "unpack_embedding_checked: dimension must be positive, got "
             + String(dim)
         )
-    var want = dim * EMB_F32_BYTES
-    if len(packed) != want:
+    # Compared by division so a huge `dim` cannot overflow `dim * 4` and wrap
+    # to a length an empty cell would match.
+    if len(packed) % EMB_F32_BYTES != 0 or len(packed) // EMB_F32_BYTES != dim:
         raise Error(
             "unpack_embedding_checked: embedding cell is "
             + String(len(packed))
-            + " bytes, a dimension of "
+            + " bytes, which is not a dimension of "
             + String(dim)
-            + " needs "
-            + String(want)
+            + " (4 bytes per component)"
         )
     return unpack_embedding_bytes(packed)

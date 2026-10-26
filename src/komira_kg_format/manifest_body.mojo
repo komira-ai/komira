@@ -20,10 +20,7 @@
 #     [ schema_version: i64 ]
 #     [ row_count: i64 ]
 #
-# Format version 1 had no `embedding_dim` field (the dimension was fixed at
-# 1536 by the schemas). The decoder still reads it and reports the default
-# dimension, so a lineage written before the dimension was recorded stays
-# readable; the encoder writes version 2 only.
+# Version 2 is the only layout: the decoder refuses every other version.
 #
 # Decoding is strict: a truncated body, an unknown version, a negative count or
 # length, a non-positive dimension, a name or key that is not UTF-8, and bytes
@@ -36,12 +33,9 @@ from .embedding import DEFAULT_EMBEDDING_DIM
 from .utf8_check import bytes_are_utf8
 
 
-# The format version the encoder writes and the decoder reads. Bumping it is a
-# manifest-body format change.
+# The only format version: the encoder writes it and the decoder accepts nothing
+# else. Bumping it is a manifest-body format change.
 comptime KG_SNAPSHOT_FORMAT_VERSION: Int64 = 2
-
-# The oldest format version the decoder still reads (no embedding dimension).
-comptime KG_SNAPSHOT_FORMAT_VERSION_MIN: Int64 = 1
 
 
 @always_inline
@@ -111,8 +105,7 @@ struct KgManifestBody(Movable):
     """A decoded snapshot manifest body: the embedding dimension and, per table
     present, `{object_key, schema_version, row_count}`.
 
-    `format_version` is the version the body was read at (a fresh body carries
-    `KG_SNAPSHOT_FORMAT_VERSION`); `encode` always writes the current version.
+    `format_version` is always `KG_SNAPSHOT_FORMAT_VERSION`.
     `embedding_dim` is the number of components of every embedding in the graph;
     a writer checks each vector against it (`check_embedding_dim`) and a reader
     unpacks cells with it (`unpack_embedding_checked`). `tables` holds one entry
@@ -219,34 +212,30 @@ struct KgManifestBody(Movable):
 
     @staticmethod
     def decode(bytes: List[UInt8]) raises -> KgManifestBody:
-        """Decode the wire form of format version 1 or 2.
+        """Decode the wire form (format version 2 only).
 
         Raises on a truncated body, an unknown version, a negative count or
         length, a non-positive dimension, a name or key that is not UTF-8, or
         bytes left after the last table.
         """
         var fmt = _get_i64_le(bytes, 0)
-        if fmt < KG_SNAPSHOT_FORMAT_VERSION_MIN or fmt > KG_SNAPSHOT_FORMAT_VERSION:
+        if fmt != KG_SNAPSHOT_FORMAT_VERSION:
             raise Error(
                 "KgManifestBody.decode: unsupported snapshot format version "
                 + String(fmt)
                 + " (this build understands "
-                + String(KG_SNAPSHOT_FORMAT_VERSION_MIN)
-                + " to "
                 + String(KG_SNAPSHOT_FORMAT_VERSION)
                 + ")"
             )
         var off = 8
-        var dim = DEFAULT_EMBEDDING_DIM
-        if fmt >= 2:
-            var d = _get_i64_le(bytes, off)
-            off += 8
-            if d <= 0 or d > Int64(2147483647):
-                raise Error(
-                    "KgManifestBody.decode: invalid embedding dimension "
-                    + String(d)
-                )
-            dim = Int(d)
+        var d = _get_i64_le(bytes, off)
+        off += 8
+        if d <= 0 or d > Int64(2147483647):
+            raise Error(
+                "KgManifestBody.decode: invalid embedding dimension "
+                + String(d)
+            )
+        var dim = Int(d)
         var table_count = Int(_get_i64_le(bytes, off))
         off += 8
         if table_count < 0:
@@ -276,6 +265,4 @@ struct KgManifestBody(Movable):
                 + String(len(bytes) - off)
                 + " trailing bytes after the last table"
             )
-        var body = KgManifestBody(dim, tables^)
-        body.format_version = fmt
-        return body^
+        return KgManifestBody(dim, tables^)
