@@ -1,6 +1,6 @@
 # komira_sdk_exec
 
-The engine-execution layer of the SDK: eleven modules, nine leaves that need
+The engine-execution layer of the SDK: twelve modules, ten leaves that need
 nothing from the rest of the package except each other, and the plan gates
 (`plan_validation_gate`, `parquet_glob_options`), which build on `komira_sdk`.
 The engine context that drives a query, the sinks and the frames are not in
@@ -18,6 +18,7 @@ this package yet; nothing here runs a query.
 | `paginated_result` | `PaginatedResult` (the value a caller holds) and `PaginatedState` (the context-side pre-chunked result, cursor and cache pin) for a result that is materialized eagerly and handed out in pages, and the cap on open results |
 | `view_handle` | `ViewHandle`: a registered view's name plus a generation, with no context back-reference, so a re-registered name invalidates old handles |
 | `materialized_view_handle` | `MaterializedViewHandle`: the same shape for a view whose result is stored |
+| `secret_capability` | `SecretCapability`: the handle a plan holds for a secret-bearing node, carrying only the node id (never the value, never the secret ref); `open_connection_for` lifts the plan's `SecretBindings` into a `SecretRegistry` over the supplied store and reveals that node's secret to a `CredentialConsumer` inside the call, so the value never escapes |
 | `session_stats` | `SessionStats`: a plain snapshot of the worker counts |
 
 ## Tests
@@ -38,6 +39,10 @@ The tests run when the package is built.
 - `test_plan_validation_routes_ledger`: the ledger's self check and lookups,
   and the wiring's refusal of an unregistered token and of a handle from
   another epoch.
+- `test_secret_capability_reveal`: a capability reveals exactly the secret
+  bound to its own node id, once and after one store resolve; two capabilities
+  over one bindings table each reveal their own value; an unbound node or a
+  removed ref raises before the consumer is called.
 
 ## Limits
 
