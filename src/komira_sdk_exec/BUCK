@@ -1,7 +1,8 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The engine-execution layer of the SDK: twelve modules (ten leaves plus the
-# plan gate modules, see README.md). Each module's header says what it is for.
+# The engine-execution layer of the SDK: fourteen modules (ten leaves, the
+# plan gate modules and the two file-source modules, see README.md). Each
+# module's header says what it is for.
 #
 # The welded tests (each file's header says which defect it catches):
 # - test_plan_cache_full_sink_hash: the sink kind is part of the Layer 2 cache
@@ -13,6 +14,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # - test_plan_validation_routes_ledger: the route ledger's self check, token
 #   lookup and status names, and the scan-binding wiring refusing an
 #   unregistered token and a handle from another epoch.
+# - test_file_source_jsonl_arm: FileSource[Jsonl] delegates to JsonSource
+#   (schema, row estimate, fingerprint, pushdown, source view) and the Parquet
+#   arm is not displaced.
 # - test_plan_validation_gate_direct: the gate's outcome for a scan, a union
 #   under a join, and a filter on a missing column; the ledger check on the
 #   entry token; the tag names; the glob-options mapping; the switch default.
@@ -53,8 +57,10 @@ mojo_library(
         "//src/komira_log:komira_log",
         "//src/komira_lz4:komira_lz4",
         "//src/komira_metrics:komira_metrics",
+        "//src/komira_morsel:komira_morsel",
         "//src/komira_name_registry:komira_name_registry",
         "//src/komira_op_agg_state:komira_op_agg_state",
+        "//src/komira_op_sources:komira_op_sources",
         "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_plan_ir:komira_plan_ir",
         "//src/komira_plan_proto:komira_plan_proto",
@@ -75,12 +81,14 @@ mojo_library(
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
+        "tests/test_file_source_jsonl_arm.mojo",
         "tests/test_plan_cache_full_sink_hash.mojo",
         "tests/test_plan_validation_gate_direct.mojo",
         "tests/test_plan_validation_routes_ledger.mojo",
         "tests/test_resolved_cache_lru_eviction_stress.mojo",
         "tests/test_resolved_cache_pin_count.mojo",
         "tests/test_secret_capability_reveal.mojo",
+        "tests/test_source_factories_routing.mojo",
     ],
     visibility = ["PUBLIC"],
 )

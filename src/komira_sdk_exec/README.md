@@ -1,8 +1,9 @@
 # komira_sdk_exec
 
-The engine-execution layer of the SDK: twelve modules, ten leaves that need
-nothing from the rest of the package except each other, and the plan gates
-(`plan_validation_gate`, `parquet_glob_options`), which build on `komira_sdk`.
+The engine-execution layer of the SDK: fourteen modules, ten leaves that need
+nothing from the rest of the package except each other, the plan gates
+(`plan_validation_gate`, `parquet_glob_options`), which build on `komira_sdk`,
+and the file sources (`file_source`, `source_factories`).
 The engine context that drives a query, the sinks and the frames are not in
 this package yet; nothing here runs a query.
 
@@ -20,6 +21,8 @@ this package yet; nothing here runs a query.
 | `materialized_view_handle` | `MaterializedViewHandle`: the same shape for a view whose result is stored |
 | `secret_capability` | `SecretCapability`: the handle a plan holds for a secret-bearing node, carrying only the node id (never the value, never the secret ref); `open_connection_for` lifts the plan's `SecretBindings` into a `SecretRegistry` over the supplied store and reveals that node's secret to a `CredentialConsumer` inside the call, so the value never escapes |
 | `session_stats` | `SessionStats`: a plain snapshot of the worker counts |
+| `file_source` | `FileSource[F: SerdeFormat]`: a file-read source parametric on the serde format. The five Parquet codecs wrap a `ParquetSource` (the per-page codec comes from the footer, so every Parquet arm behaves the same), `Jsonl` wraps a `JsonSource` built from the caller's schema, and any other format holds no source (empty schema, -1 rows, fingerprint 0, no pushdown; nothing raises). `FileSource[...].from_path` reads the Parquet footer once and returns a `SourceVariant` |
+| `source_factories` | `file_source(path)`: picks the `SourceVariant` arm from the lower-cased extension. Parquet extensions read the footer for the schema; `.arrow`, `.arrows` and `.feather` read the Arrow IPC File footer (magic checked at both ends) for the schema; `.csv` gives a `CsvSource` with an empty schema; JSON extensions and unknown ones raise |
 
 ## Tests
 
@@ -43,6 +46,15 @@ The tests run when the package is built.
   bound to its own node id, once and after one store resolve; two capabilities
   over one bindings table each reveal their own value; an unbound node or a
   removed ref raises before the consumer is called.
+
+- `test_file_source_jsonl_arm`: `FileSource[Jsonl]` answers the caller's schema,
+  -1 rows, a stable non-zero fingerprint, no pushdown and a JSON source view;
+  the Parquet arm is not displaced.
+- `test_source_factories_routing`: `file_source(path)` routes every Parquet,
+  Arrow, CSV and JSON extension to its arm or its error, a bad Parquet footer
+  and four malformed Arrow files raise with the message naming the check, and
+  each Parquet codec of `FileSource` answers schema, fingerprint, copy and
+  pushdown.
 
 ## Limits
 
