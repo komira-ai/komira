@@ -274,7 +274,7 @@ test "comments and the text after a // outside a string are not read; a // insid
     try testing.expectEqual(@as(usize, 0), total(scan("// " ++ sp ++ "1)\n")));
     try testing.expectEqual(@as(usize, 0), total(scan("    /// uses " ++ sp ++ "1)\n")));
     try testing.expectEqual(@as(usize, 0), total(scan("f(); // then " ++ sp ++ "1)\n")));
-    try testing.expectEqual(@as(usize, 1), total(scan("f(\"http://x\"); " ++ sp ++ "1);\n")));
+    try testing.expectEqual(@as(usize, 1), total(scan("f(\"a//b\"); " ++ sp ++ "1);\n")));
     try testing.expectEqual(@as(usize, 1), total(scan("f(\"a\\\"//\"); " ++ sp ++ "1);\n")));
 }
 
