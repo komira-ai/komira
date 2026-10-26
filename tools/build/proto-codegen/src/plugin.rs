@@ -102,11 +102,43 @@ impl CodeGeneratorResponse {
         }
     }
 
-    /// Encode this response to the protobuf-binary bytes for stdout.
+    /// Every generated `.mojo` file that reaches the line limit
+    /// ([`crate::split::MAX_FILE_LINES`]) as the facade that keeps its name
+    /// and the parts beside it ([`crate::split::split_file`]); every other
+    /// file as it is. A file that cannot be split makes the whole response
+    /// an error that names it: a generated file over the limit is never
+    /// written.
+    pub fn split_oversized(self) -> Self {
+        if self.error.is_some() {
+            return self;
+        }
+        let mut files = Vec::with_capacity(self.file.len());
+        for f in self.file {
+            let name = f.name.clone().unwrap_or_default();
+            if !name.ends_with(".mojo") {
+                files.push(f);
+                continue;
+            }
+            let content = f.content.as_deref().unwrap_or_default();
+            match crate::split::split_file(&name, content) {
+                Ok(split) => files.extend(split.into_iter().map(|e| code_generator_response::File {
+                    name: Some(e.path),
+                    content: Some(e.text),
+                })),
+                Err(e) => return Self::with_error(format!("{name}: {e}")),
+            }
+        }
+        Self { error: None, supported_features: self.supported_features, file: files }
+    }
+
+    /// Encode this response to the protobuf-binary bytes for stdout, after
+    /// [`Self::split_oversized`]: every protoc plugin of this crate writes
+    /// its response through here, so none writes a file over the limit.
     pub fn to_stdout_bytes(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(self.encoded_len());
+        let response = self.clone().split_oversized();
+        let mut out = Vec::with_capacity(response.encoded_len());
         // `encode` to a `Vec` is infallible (the buffer grows).
-        self.encode(&mut out).expect("CodeGeneratorResponse encode");
+        response.encode(&mut out).expect("CodeGeneratorResponse encode");
         out
     }
 }
@@ -267,6 +299,85 @@ mod tests {
     struct Raw {
         #[prost(bytes = "vec", repeated, tag = "15")]
         proto_file: Vec<Vec<u8>>,
+    }
+
+    /// A generated module of `structs` structs of `fields` fields each.
+    fn module_text(structs: usize, fields: usize) -> String {
+        let mut s = crate::header::render("protoc-gen-mojo", "1", &[]);
+        for i in 0..structs {
+            s.push_str(&format!("\n\nstruct S{i}:\n"));
+            for k in 0..fields {
+                s.push_str(&format!("    var f{k}: Int\n"));
+            }
+        }
+        s
+    }
+
+    fn mojo(name: &str, content: String) -> code_generator_response::File {
+        code_generator_response::File { name: Some(name.to_string()), content: Some(content) }
+    }
+
+    fn written(resp: &CodeGeneratorResponse) -> CodeGeneratorResponse {
+        CodeGeneratorResponse::decode(resp.to_stdout_bytes().as_slice()).expect("a response")
+    }
+
+    #[test]
+    fn a_module_over_the_line_limit_is_written_as_a_facade_and_its_parts() {
+        let big = module_text(40, 60);
+        assert!(big.lines().count() > crate::split::MAX_FILE_LINES);
+        let small = module_text(2, 3);
+        let resp = CodeGeneratorResponse {
+            error: None,
+            supported_features: Some(crate::FEATURE_PROTO3_OPTIONAL),
+            file: vec![
+                mojo("wide.mojo", big),
+                mojo("small.mojo", small.clone()),
+                mojo("notes.txt", "x\n".repeat(2000)),
+            ],
+        };
+        let out = written(&resp);
+        assert_eq!(out.error, None);
+        assert_eq!(out.supported_features, Some(crate::FEATURE_PROTO3_OPTIONAL));
+        let names: Vec<&str> = out.file.iter().map(|f| f.name()).collect();
+        assert_eq!(names[0], "wide.mojo");
+        assert!(names[1].starts_with("_parts/wide_p01"), "{names:?}");
+        assert_eq!(names[names.len() - 2], "small.mojo");
+        assert_eq!(names[names.len() - 1], "notes.txt");
+        for f in &out.file {
+            if f.name().ends_with(".mojo") {
+                assert!(
+                    f.content().lines().count() < crate::split::MAX_FILE_LINES,
+                    "{} has {} lines",
+                    f.name(),
+                    f.content().lines().count()
+                );
+            }
+        }
+        // What is under the limit, and what is not Mojo, is written as it is.
+        assert_eq!(out.file[names.len() - 2].content(), small);
+        assert_eq!(out.file[names.len() - 1].content(), "x\n".repeat(2000));
+    }
+
+    #[test]
+    fn a_module_that_cannot_be_split_makes_the_response_an_error_naming_it() {
+        let mut text = module_text(40, 60);
+        text.push_str("print(\"not a declaration\")\n");
+        let resp = CodeGeneratorResponse {
+            error: None,
+            supported_features: None,
+            file: vec![mojo("small.mojo", module_text(1, 1)), mojo("wide.mojo", text)],
+        };
+        let out = written(&resp);
+        let error = out.error.expect("an error");
+        assert!(error.starts_with("wide.mojo: "), "{error}");
+        assert!(error.contains("neither an import nor a declaration"), "{error}");
+        assert!(out.file.is_empty(), "no file is written beside the error");
+    }
+
+    #[test]
+    fn a_response_that_is_already_an_error_is_written_as_it_is() {
+        let resp = CodeGeneratorResponse::with_error("boom");
+        assert_eq!(written(&resp), resp);
     }
 
     #[test]

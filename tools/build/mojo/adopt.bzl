@@ -39,13 +39,40 @@ request check builds). The pull request's coverage job (`coverage.yml`) selects 
 packages as well as `mojo_library` targets and reads `:coverage[reports]` and `:coverage[branches]`: line and branch coverage, the
 per-line annotations and the `line` and `branch` entries of `coverage_held`.
 
-A library that has deps or native code is not adopted by this rule: it has no `deps` or `native`
-attribute, so a BUCK file that needs them stops at the attribute, not at a wrong `MojoInfo`.
+A package that opens a system library at run time (`OwnedDLHandle`; `[native-dependencies]` with `mode = "load"`
+in its `mopm.toml`, which `:conda` records as a conda requirement) declares the sonames in `dlopen`, as
+`mojo_library` does (`dlopen.bzl`): `MojoInfo.dlopen` and the conda refusal are the same, so
+`conda_package(lib = ...)` over the adopted label requires the conda package `system_libs.bzl` names for
+each soname, and the packer holds the declaration to the sources.
+
+A library that has Mojo deps is not adopted by this rule: it has no `deps` attribute, so a BUCK file
+that needs it stops at the attribute, not at a wrong `MojoInfo`.
+
+A package that builds C of its own (`[native.<id>]` in its `mopm.toml`, a static library
+`lib<id>.a`) hands it to its dependents here. buildrules gives its `:lib` `MojoNativeArchiveInfo`: the
+archives the library links, in the graph's link order. This rule makes them `MojoInfo.c_link` (a
+`MergedLinkInfo` over those archives, in that order), so a `mojo_library`, `mojo_binary` or
+`mojo_test` that lists the adopted label in `deps` links them with no edit to its own BUCK file, and
+the README examples are linked with them. A package with none has `c_link = None`, as before.
+
+The older packaging of such a library (`native = ":<name>_native"`, its own shared library in the
+release set, tools/build/native/README.md) still names C libraries by label. `c_deps` lists them,
+and `native` names the shared library: they give `MojoInfo.native` the facts `mojo_library` gives
+(`c_direct`, `linked`, `shipped`, the SONAME), so `conda_package(lib = ..., native = ...)` and the
+shared library's `callers` take the adopted label. `c_deps` are not linked (the archives of
+`MojoNativeArchiveInfo` are the link): they are the labels the shared library is built from, so each
+C symbol is still defined once in any link.
 """
 
+load("@buildrules//rules/mojo:providers.bzl", "MojoNativeArchiveInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env")
-load(":defs.bzl", "adopt_readme_test")
+load("@prelude//cxx:cxx_toolchain_types.bzl", "CxxToolchainInfo")
+load("@prelude//linking:link_info.bzl", "Archive", "ArchiveLinkable", "LibOutputStyle", "LinkInfo", "LinkInfos", "MergedLinkInfo", "create_merged_link_info")
+load("@prelude//linking:types.bzl", "Linkage")
+load(":defs.bzl", "adopt_link_tail", "adopt_readme_test")
+load(":dlopen.bzl", "DLOPEN_ATTRS", "dlopen_refusal", "dlopen_rows")
+load(":native_facts.bzl", "native_facts")
 load(":opt_level.bzl", "TEST_OPT_LEVEL")
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoToolchainInfo", "welded_tests_info")
 load(":readme.bzl", "readme_gate")
@@ -73,6 +100,33 @@ def _package_root(ctx, srcs):
     shallowest = sorted(inits, key = lambda p: (p.count("/"), p))[0]
     return shallowest[:-len("__init__.mojo")].rstrip("/")
 
+def _native_link(ctx):
+    """The C closure of the package's own native archives, as the `MergedLinkInfo` komira's rules link.
+
+    buildrules hands every library target `MojoNativeArchiveInfo`: the static libraries the unit
+    links (`lib<id>.a` of the package's own `[native.<id>]` and of the members and registry packages
+    it needs), in the graph's link order, a library before every library it needs. A dependent that
+    links through komira's rules takes them from `MojoInfo.c_link`, in that order, as it takes the
+    archive of a `cxx_library` in `deps`. Returns None for a package with none."""
+    natives = ctx.attrs.lib.get(MojoNativeArchiveInfo)
+    if natives == None or not natives.sonames:
+        return None
+    if ctx.attrs.cxx_toolchain == None:
+        fail("{}: {} links native libraries ({}); set `c_deps` (the macro then sets `cxx_toolchain`)".format(ctx.label, ctx.attrs.lib.label, ", ".join(natives.sonames)))
+    toolchain = ctx.attrs.cxx_toolchain[CxxToolchainInfo]
+    linkables = []
+    for soname in natives.sonames:
+        if not soname.endswith(".a"):
+            fail("{}: native library {} is not a static archive; only `lib<id>.a` can be taken into a dependent's link".format(ctx.label, soname))
+        linkables.append(ArchiveLinkable(archive = Archive(artifact = natives.archives[soname]), linker_type = toolchain.linker_info.type))
+    infos = LinkInfos(default = LinkInfo(name = str(ctx.label.raw_target()), linkables = linkables))
+    return create_merged_link_info(
+        ctx,
+        toolchain.pic_behavior,
+        {LibOutputStyle("archive"): infos, LibOutputStyle("pic_archive"): infos},
+        preferred_linkage = Linkage("static"),
+    )
+
 def _impl(ctx):
     import_name = ctx.attrs.import_name or ctx.label.name
     made = ctx.attrs.lib[DefaultInfo].default_outputs
@@ -97,7 +151,9 @@ def _impl(ctx):
 
     # The README gate, as a mojo_library's (readme.bzl, readme_gate): compiled against `lib`, with no C
     # closure; the README ships in the conda package, so a relative link in it is refused.
-    gate = readme_gate(ctx, ctx.attrs.toolchain[MojoToolchainInfo], import_name, pkgs, None, [], True, adopt_readme_test, rerun = rerun_env(ctx))
+    c_link = _native_link(ctx)
+    native = native_facts(ctx, import_name, ctx.attrs.c_deps) if ctx.attrs.c_deps or ctx.attrs.native else _NO_NATIVE
+    gate = readme_gate(ctx, ctx.attrs.toolchain[MojoToolchainInfo], import_name, pkgs, adopt_link_tail(c_link), [], True, adopt_readme_test, owner = bool(native.c_direct), rerun = rerun_env(ctx))
     test_subtargets = {}
     if gate != None:
         markers = markers + [gate[0]]
@@ -119,14 +175,14 @@ def _impl(ctx):
             },
         ),
         MojoInfo(
-            c_link = None,
+            c_link = c_link,
             conda_name = ctx.attrs.conda_name or import_name,
-            conda_refusal = None,
-            dlopen = [],
+            conda_refusal = dlopen_refusal(ctx),
+            dlopen = dlopen_rows(ctx),
             direct = [],
             direct_conda = {},
             import_name = import_name,
-            native = _NO_NATIVE,
+            native = native,
             pkgs = pkgs,
             pkgs_def = MojoPkgTSet,
             readme = ctx.attrs.readme,
@@ -137,9 +193,12 @@ def _impl(ctx):
 _adopted = rule(
     impl = _impl,
     attrs = {
+        "c_deps": attrs.list(attrs.dep(providers = [MergedLinkInfo]), default = []),
         "conda_name": attrs.option(attrs.string(), default = None),
+        "cxx_toolchain": attrs.option(attrs.toolchain_dep(providers = [CxxToolchainInfo]), default = None),
         "import_name": attrs.option(attrs.string(), default = None),
         "lib": attrs.dep(),
+        "native": attrs.option(attrs.label(), default = None),
         "readme": attrs.option(attrs.source(), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
         "srcs": attrs.list(attrs.source()),
@@ -147,10 +206,15 @@ _adopted = rule(
         "test_srcs": attrs.list(attrs.source()),
         "test_runs": attrs.dep(),
         "toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
-    } | RERUN_ATTRS,
+    } | DLOPEN_ATTRS | RERUN_ATTRS,
 )
 
 def _mojo_adopted_library(**kwargs):
+    # A package that links its own C needs the C toolchain's link facts for `c_link`.
+    if kwargs.get("c_deps"):
+        if "cxx_toolchain" in kwargs:
+            fail("{}: `cxx_toolchain` is set by mojo_adopted_library with `c_deps`; do not pass it".format(kwargs.get("name", "mojo_adopted_library")))
+        kwargs["cxx_toolchain"] = "toolchains//:cxx"
     if kwargs.get("readme") != None:
         if "readme_tool" in kwargs:
             fail("{}: `readme_tool` is set by mojo_adopted_library with the README; do not pass it".format(kwargs.get("name", "mojo_adopted_library")))

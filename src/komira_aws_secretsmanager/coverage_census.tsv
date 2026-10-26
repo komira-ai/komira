@@ -1,3 +1,5 @@
 # What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
 census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
 komira//src/komira_aws_secretsmanager:komira_aws_secretsmanager	src/komira_aws_secretsmanager	library	OK	0	0	-	-	no	conda	-	-
+generated	src/komira_aws_secretsmanager/generated/komira_aws_secretsmanager/__init__.mojo
+generated	src/komira_aws_secretsmanager/generated/komira_aws_secretsmanager/komira_aws_secretsmanager.mojo

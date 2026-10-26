@@ -73,7 +73,7 @@ mojo_gcp_client(
     test_data = {
         "tests/test_no_env_reads.mojo": {
             "gen/" + f: ":komira_gcp_storage_gen[{}]".format(f)
-            for f in _GENERATED
+            for f in _GENERATED + ["_parts"]
         },
     },
     test_srcs = [

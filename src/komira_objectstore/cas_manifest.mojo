@@ -3747,11 +3747,10 @@ def _is_not_found(msg: String) -> Bool:
     is `<prefix>/manifest/<chunk_seq:020d>.chunk`, so chunk sequence 404 IS
     `.../manifest/00000000000000000404.chunk`, and so are 1404, 4040, 40400, …
     — a fixed, dense, entirely predictable set every partition eventually
-    reaches and then keeps colliding on forever. (`komira_telemetry_read`
-    narrowed the identical predicate because 16 random hex characters contain
-    `404` "one in a few dozen runs".) The `<prefix>` is caller-supplied on top of
-    that, so a topic carrying `404` collides on `_HEAD`, `_LOG_START`,
-    `_CATALOG` and every tombstone as well.
+    reaches and then keeps colliding on forever. (A key carrying 16 random hex
+    characters spells `404` about once in a few dozen keys.) The `<prefix>` is
+    caller-supplied on top of that, so a topic carrying `404` collides on
+    `_HEAD`, `_LOG_START`, `_CATALOG` and every tombstone as well.
 
     THE COST AT THIS FUNCTION'S OWN CALL SITES: `read_log_start` answers
     `LogStart.zero()` ("never truncated"), `read_catalog_sidecar` answers
@@ -3759,11 +3758,6 @@ def _is_not_found(msg: String) -> Bool:
     tombstoned", and the recovery scan treats a live chunk as missing. The next
     writer then CREATEs with `If-None-Match` over state that exists.
 
-    ⚠ THIS IS NOT NEW POLICY — IT IS THE THIRD COPY BEING BROUGHT INTO LINE.
-    `komira_telemetry_read.scan_plan._is_not_found` and
-    `src/cmd/cp_telemetry_validator/cp_telem_lib._store_error_says_not_found`
-    already carry exactly this needle set, and the latter's docstring names THIS
-    FUNCTION as one of the two in-tree copies that still matched a bare `404`.
     Every needle below is one a key CANNOT contain: the key alphabet admits no
     `[`, `]` or `=`, and the canonical taxonomy token is uppercase.
 

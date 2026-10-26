@@ -75,8 +75,10 @@
 #     A mojo_package's `:coverage` is built as `<label>[reports]`, and with
 #     `<label>[branches]` after it when the package has branch records: its
 #     entry's `*.cobertura.xml` paths are one kcov report per test, in
-#     repository paths, and its `__info__/*.info` paths are one branch record
-#     file per test (one per report, as for a library), and SUCCESS is
+#     repository paths, plus `__coverage__/uncompiled.cobertura.xml` (the lines and
+#     branches of the functions no test compiled, which are counted as not hit), and its
+#     `__info__/*.info` paths are one branch record file per test with
+#     `__coverage__/uncompiled.branches.info` (one per report, as for a library), and SUCCESS is
 #     measured (any FAIL, a source in no report included, a branch record the
 #     classifier refused included, leaves it NOT MEASURED, lines too: the
 #     entry is one). The reports also record each test's own tests/ source;
@@ -419,6 +421,9 @@ if [ -s "$PUB/libraries.txt" ]; then
                 x = $0; sub(/^ *"/, "", x); sub(/",?$/, "", x); print lab " info " x
             }
             /^ *"buck-out\/[^"]*\/__[^"\/]*__info__\/[^"\/]*\.info",?$/ {
+                x = $0; sub(/^ *"/, "", x); sub(/",?$/, "", x); print lab " info " x
+            }
+            /^ *"buck-out\/[^"]*\/__coverage__\/uncompiled\.branches\.info",?$/ {
                 x = $0; sub(/^ *"/, "", x); sub(/",?$/, "", x); print lab " info " x
             }
         ' "$br" >"$OUT/verdicts.txt"

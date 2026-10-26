@@ -289,6 +289,39 @@ def _real_cases(ctx):
         out.append("real: render of targets.bzl: {}".format(rendered[-8:]))
     return out
 
+# ---- roots and the execution-platform registration -------------------------
+
+def _fake(label, kind, deps = []):
+    return struct(label = struct(raw_target = lambda: label), rule_type = kind, deps = lambda: [struct(label = struct(raw_target = lambda: d)) for d in deps])
+
+def _roots_cases():
+    """roots() ignores what an execution-platform registration depends on: the
+    registration names a macOS platform only in a checkout whose `[komira_re]`
+    names a macOS worker, and the list must not depend on that (the row of
+    `platforms:darwin-arm64` was lost on regeneration)."""
+    out = []
+    reg = "komira//tools/build/platforms/defs.bzl:remote_execution_platforms"
+    local = "komira//tools/build/platforms/defs.bzl:local_execution_platforms"
+    plat = "prelude//platform.bzl:platform"
+    wrap = "komira//tools/build/platforms/with_buildrules.bzl:execution_platforms_plus"
+    for name, kind in [("remote", reg), ("local", local)]:
+        named = {
+            "k//p:darwin": _fake("k//p:darwin", plat),
+            "k//p:linux": _fake("k//p:linux", plat),
+            "k//p:reg": _fake("k//p:reg", kind, ["k//p:linux", "k//p:darwin"]),
+            "k//p:wrap": _fake("k//p:wrap", wrap, ["k//p:reg"]),
+        }
+        got = roots(named)
+        if got != ["k//p:darwin", "k//p:linux", "k//p:wrap"]:
+            out.append("roots: a {} registration's platforms stay roots, its own dependent is not: got {}".format(name, got))
+    plain = {
+        "k//p:leaf": _fake("k//p:leaf", plat),
+        "k//p:top": _fake("k//p:top", wrap, ["k//p:leaf"]),
+    }
+    if roots(plain) != ["k//p:top"]:
+        out.append("roots: an ordinary dependent still removes its dependency from the roots: got {}".format(roots(plain)))
+    return out
+
 # ---- the Python guard ------------------------------------------------------
 
 _PYTEST = "komira//tools/build/python/defs.bzl:_py_test"
@@ -399,7 +432,7 @@ def _shipped_rules_cases():
     return out
 
 def _run(ctx):
-    table = _table_cases() + _held_cases() + _python_cases(ctx) + _shipped_rules_cases()
+    table = _table_cases() + _held_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases()
     real = _real_cases(ctx)
     failures = table + real
     if failures:
