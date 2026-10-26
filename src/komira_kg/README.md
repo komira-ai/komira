@@ -327,7 +327,7 @@ rules.append(Rule.email("handle"))
 var extractor = RuleExtractor(rules^, List[String](), "co_occurs_with", 12)
 
 var found = List[EntityMention]()
-var ex = extractor.extract("alpha uses #red; mail ann@x.example", found)
+var ex = extractor.extract("alpha uses #red; note ann@x.example", found)
 assert_equal(ex.num_entities(), 3)
 assert_equal(ex.entities[0].name, "#red")
 assert_equal(ex.entities[0].entity_type, "tag")
@@ -339,7 +339,7 @@ assert_equal(ex.triples[0].fact, "#red co_occurs_with alpha")
 # Given what the first pass found, a second pass finds nothing new.
 for i in range(ex.num_entities()):
     found.append(ex.entities[i].copy())
-assert_equal(extractor.extract("alpha uses #red; mail ann@x.example", found).num_entities(), 0)
+assert_equal(extractor.extract("alpha uses #red; note ann@x.example", found).num_entities(), 0)
 ```
 
 A token pattern is a small whole-token language: literals, `.`, classes such as
@@ -361,10 +361,10 @@ rules.append(Rule.token_pattern("ref", "[A-Z]+-\\d+"))
 rules.append(Rule.verb_prefix("action", verbs))
 rules.append(Rule.delimited("span", "<<", ">>"))
 var extractor = RuleExtractor(rules^, List[String](), "", 0)
-var ex = extractor.extract("open ticket AB-12 and <<two words>>", List[EntityMention]())
+var ex = extractor.extract("open note AB-12 and <<two words>>", List[EntityMention]())
 assert_equal(ex.num_entities(), 3)
 assert_equal(ex.entities[0].name, "AB-12")
-assert_equal(ex.entities[1].name, "open ticket")
+assert_equal(ex.entities[1].name, "open note")
 assert_equal(ex.entities[2].name, "two words")
 assert_equal(ex.num_triples(), 0)
 ```

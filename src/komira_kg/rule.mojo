@@ -19,11 +19,16 @@
 #
 # A token is a run of non-whitespace bytes with the brackets, quotes and
 # sentence punctuation named in `rule_scan` trimmed off both ends. Constructors
-# refuse a rule that can never match, so a mistake in a rule set shows when the
+# refuse a rule that can never match (a word or pattern a token cannot hold), so a mistake in a rule set shows when the
 # rule is built and not as a silent miss.
 # =============================================================================
 
-from .rule_pattern import Pattern
+from .rule_pattern import (
+    Pattern,
+    is_leading_trim_byte,
+    is_space_byte,
+    is_trailing_trim_byte,
+)
 
 comptime RULE_WORD_LIST: Int = 0
 comptime RULE_VERB_PREFIX: Int = 1
@@ -58,14 +63,29 @@ def _lowered_words(words: List[String], who: String) raises -> List[String]:
         if len(b) == 0:
             raise Error(who + ": word " + String(i) + " is empty")
         for k in range(len(b)):
-            var c = Int(b[k])
-            if c == 32 or c == 9 or c == 10 or c == 13:
+            if is_space_byte(Int(b[k])):
                 raise Error(
                     who
                     + ": word "
                     + String(i)
                     + " holds whitespace, and a token never does"
                 )
+        if is_leading_trim_byte(Int(b[0])):
+            raise Error(
+                who
+                + ": word "
+                + String(i)
+                + " starts with a byte a token loses from its start, so it"
+                " never matches"
+            )
+        if is_trailing_trim_byte(Int(b[len(b) - 1])):
+            raise Error(
+                who
+                + ": word "
+                + String(i)
+                + " ends with a byte a token loses from its end, so it never"
+                " matches"
+            )
         out.append(ascii_lower(words[i]))
     return out^
 
@@ -112,7 +132,9 @@ struct Rule(Copyable, Movable):
         """A rule for tokens equal (ignoring ASCII case) to one of `words`.
 
         Raises:
-            If `words` is empty, or a word is empty or holds whitespace.
+            If `words` is empty, or a word is empty, holds whitespace, starts
+            with one of `( [ { " '` or ends with one of `. , ; : ! ? ) ] } " '`
+            (a token never does, so the word could not match).
         """
         return Rule(
             entity_type^,
@@ -130,7 +152,8 @@ struct Rule(Copyable, Movable):
         """A rule for a verb token and the word after it, as one entity.
 
         Raises:
-            If `verbs` is empty, or a verb is empty or holds whitespace.
+            If `verbs` is empty, or a verb is empty, holds whitespace, starts
+            with one of `( [ { " '` or ends with one of `. , ; : ! ? ) ] } " '`.
         """
         return Rule(
             entity_type^,
@@ -148,7 +171,8 @@ struct Rule(Copyable, Movable):
         """A rule for tokens a pattern matches whole.
 
         Raises:
-            If the pattern does not compile (see `Pattern.compile`).
+            If the pattern does not compile or can match no token (see
+            `Pattern.compile`).
         """
         var patterns = List[Pattern]()
         patterns.append(Pattern.compile(pattern))

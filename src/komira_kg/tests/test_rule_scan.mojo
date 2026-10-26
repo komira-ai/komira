@@ -112,8 +112,8 @@ def test_delimited_text_keeps_multibyte_characters_whole() raises:
 def test_an_email_rule_accepts_addresses_and_refuses_lookalikes() raises:
     var r = Rule.email("addr")
     assert_equal(
-        _names(r, "write to ann.lee+tag@mail.example.org, or bo_b@x-y.io."),
-        "ann.lee+tag@mail.example.org|bo_b@x-y.io",
+        _names(r, "write to ann.lee+tag@host.example.org, or bo_b@x-y.io."),
+        "ann.lee+tag@host.example.org|bo_b@x-y.io",
     )
     assert_equal(_names(r, "a@b"), "")
     assert_equal(_names(r, "a@b."), "")
@@ -121,7 +121,7 @@ def test_an_email_rule_accepts_addresses_and_refuses_lookalikes() raises:
     assert_equal(_names(r, "a@b..c"), "")
     assert_equal(_names(r, "@b.c"), "")
     assert_equal(_names(r, "a@-b.c"), "")
-    assert_equal(_names(r, "mail me at ..a@b.cc"), "a@b.cc")
+    assert_equal(_names(r, "write me at ..a@b.cc"), "a@b.cc")
     assert_equal(_names(r, "x@y.zz."), "x@y.zz")
 
 
@@ -154,6 +154,27 @@ def test_rules_that_can_never_match_are_refused() raises:
         _ = Rule.delimited("t", "<\n", ">")
     with assert_raises(contains="unterminated class"):
         _ = Rule.token_pattern("t", "[ab")
+    with assert_raises(contains="ends with a byte a token loses"):
+        _ = Rule.word_list("t", _words("foo."))
+    with assert_raises(contains="starts with a byte a token loses"):
+        _ = Rule.word_list("t", _words("ok", "(foo"))
+    with assert_raises(contains="ends with a byte a token loses"):
+        _ = Rule.verb_prefix("t", _words("open,"))
+    with assert_raises(contains="starts with a byte a token loses"):
+        _ = Rule.verb_prefix("t", _words("'open"))
+    with assert_raises(contains="holds whitespace"):
+        _ = Rule.verb_prefix("t", _words("two words"))
+    with assert_raises(contains="can only match whitespace"):
+        _ = Rule.token_pattern("t", "a b")
+    with assert_raises(contains="trimmed from the end"):
+        _ = Rule.token_pattern("t", "[a-z]+\\.")
+
+
+def test_a_word_with_trimmed_punctuation_inside_still_matches() raises:
+    # Only the ends are trimmed, so a word may start with a closing mark and end
+    # with an opening one, and may hold any of them inside.
+    var r = Rule.word_list("w", _words(".x", "y(", "a.b"))
+    assert_equal(_names(r, "see .x and y( or a.b."), ".x|y(|a.b")
 
 
 def main() raises:

@@ -26,6 +26,11 @@ from .rule import (
     Rule,
     ascii_lower,
 )
+from .rule_pattern import (
+    is_leading_trim_byte,
+    is_space_byte,
+    is_trailing_trim_byte,
+)
 
 
 def _slice(text: String, lo: Int, hi: Int) -> String:
@@ -41,7 +46,7 @@ def _slice(text: String, lo: Int, hi: Int) -> String:
 
 
 def _is_ws(c: Int) -> Bool:
-    return c == 32 or c == 9 or c == 10 or c == 13
+    return is_space_byte(c)
 
 
 def _is_alpha(c: Int) -> Bool:
@@ -53,23 +58,11 @@ def _is_alnum(c: Int) -> Bool:
 
 
 def _is_leading_punct(c: Int) -> Bool:
-    return c == 40 or c == 91 or c == 123 or c == 34 or c == 39
+    return is_leading_trim_byte(c)
 
 
 def _is_trailing_punct(c: Int) -> Bool:
-    return (
-        c == 46
-        or c == 44
-        or c == 59
-        or c == 58
-        or c == 33
-        or c == 63
-        or c == 41
-        or c == 93
-        or c == 125
-        or c == 34
-        or c == 39
-    )
+    return is_trailing_trim_byte(c)
 
 
 def tokens_of(text: String) -> List[String]:

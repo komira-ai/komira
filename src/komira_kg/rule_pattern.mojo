@@ -16,6 +16,20 @@
 #
 # Groups, alternation, counted repetition and anchors are not supported and are
 # refused when the pattern is compiled (escape the byte to use it literally).
+#
+# A pattern is also refused when it can never match a token, which is a run of
+# non-whitespace bytes with `( [ { " '` trimmed off its start and
+# `. , ; : ! ? ) ] } " '` off its end (see rule_scan). Three cases are decided,
+# each from the atoms alone:
+#   * an atom whose bytes are all whitespace (`a b`, `[ \t]+`);
+#   * the leading atoms, up to and including the first one that must match at
+#     least once, can together match only leading-trimmed bytes (`\(a`);
+#   * the trailing atoms, from the last one that must match at least once back
+#     to the end, can together match only trailing-trimmed bytes (`[a-z]+\.`).
+# A pattern whose every atom may match nothing is not checked at the ends. A
+# pattern that can match a trimmed byte as well as another byte (`[a-z.]+`, `.`)
+# is accepted: it may still match some tokens. Whether a particular token ever
+# reaches the pattern is not decided.
 # Matching is over bytes, so `.` and a negated class each stand for one byte of
 # a multi-byte character.
 #
@@ -81,6 +95,98 @@ def _refuse(pattern: String, at: Int, why: String) raises:
     )
 
 
+def is_space_byte(c: Int) -> Bool:
+    """True for the bytes that separate tokens: space, tab, newline, return."""
+    return c == 32 or c == 9 or c == 10 or c == 13
+
+
+def is_leading_trim_byte(c: Int) -> Bool:
+    """True for the bytes a token loses from its start: `( [ { " '`."""
+    return c == 40 or c == 91 or c == 123 or c == 34 or c == 39
+
+
+def is_trailing_trim_byte(c: Int) -> Bool:
+    """True for the bytes a token loses from its end: `. , ; : ! ? ) ] } " '`."""
+    return (
+        c == 46
+        or c == 44
+        or c == 59
+        or c == 58
+        or c == 33
+        or c == 63
+        or c == 41
+        or c == 93
+        or c == 125
+        or c == 34
+        or c == 39
+    )
+
+
+def _only_within(members: List[Bool], leading: Bool, space: Bool) -> Bool:
+    """True iff every byte in `members` is a whitespace byte (`space`), a
+    leading-trimmed byte (`leading`) or a trailing-trimmed byte."""
+    for c in range(256):
+        if not members[c]:
+            continue
+        if space:
+            if not is_space_byte(c):
+                return False
+        elif leading:
+            if not is_leading_trim_byte(c):
+                return False
+        elif not is_trailing_trim_byte(c):
+            return False
+    return True
+
+
+def _refuse_dead_atoms(pattern: String, atoms: List[_Atom], starts: List[Int]) raises:
+    """Refuse a pattern no token can match (see the file header)."""
+    var m = len(atoms)
+    for a in range(m):
+        if _only_within(atoms[a].members, False, True):
+            _refuse(
+                pattern,
+                starts[a],
+                "an atom that can only match whitespace, and a token never"
+                " holds whitespace",
+            )
+    # Leading atoms: up to and including the first that must match once.
+    var first_required = -1
+    for a in range(m):
+        if atoms[a].quant == _Q_ONE or atoms[a].quant == _Q_PLUS:
+            first_required = a
+            break
+    if first_required < 0:
+        return
+    var lead_ok = False
+    for a in range(first_required + 1):
+        for c in range(256):
+            if atoms[a].members[c] and not is_leading_trim_byte(c):
+                lead_ok = True
+    if not lead_ok:
+        _refuse(
+            pattern,
+            starts[0],
+            "a start that can only match bytes trimmed from the start of a"
+            " token",
+        )
+    var last_required = first_required
+    for a in range(m):
+        if atoms[a].quant == _Q_ONE or atoms[a].quant == _Q_PLUS:
+            last_required = a
+    var trail_ok = False
+    for a in range(last_required, m):
+        for c in range(256):
+            if atoms[a].members[c] and not is_trailing_trim_byte(c):
+                trail_ok = True
+    if not trail_ok:
+        _refuse(
+            pattern,
+            starts[last_required],
+            "an end that can only match bytes trimmed from the end of a token",
+        )
+
+
 struct Pattern(Copyable, Movable):
     """A compiled whole-token byte pattern (see the file header for the syntax).
     """
@@ -102,8 +208,9 @@ struct Pattern(Copyable, Movable):
 
         Raises:
             If the pattern is empty, too long, or malformed: an unterminated
-            class or escape, an empty class, a descending range, a quantifier
-            with nothing to repeat, or an unsupported operator.
+            class or escape, an empty class, a descending range, an escape as
+            a range bound, a quantifier with nothing to repeat, an unsupported
+            operator, or a shape no token can match (see the file header).
         """
         var b = pattern.as_bytes()
         var n = len(b)
@@ -117,9 +224,11 @@ struct Pattern(Copyable, Movable):
                 + String(PATTERN_MAX_BYTES)
             )
         var atoms = List[_Atom]()
+        var starts = List[Int]()
         var i = 0
         while i < n:
             var c = Int(b[i])
+            starts.append(i)
             var members = _empty_set()
             if c == 0x2A or c == 0x2B or c == 0x3F:  # * + ?
                 _refuse(pattern, i, "a quantifier with nothing to repeat")
@@ -176,18 +285,14 @@ struct Pattern(Copyable, Movable):
                     # `lo-hi` is a range unless the dash is the last byte.
                     if n - i >= 2 and Int(b[i]) == 0x2D and Int(b[i + 1]) != 0x5D:
                         var hi = Int(b[i + 1])
-                        var skip = 2
                         if hi == 0x5C:
-                            if n - i < 3:
-                                _refuse(
-                                    pattern, i, "an escape with nothing after it"
-                                )
-                            hi = Int(b[i + 2])
-                            skip = 3
+                            _refuse(
+                                pattern, i + 1, "an escape as the end of a range"
+                            )
                         if hi < lo:
                             _refuse(pattern, i, "a descending range")
                         _add_range(members, lo, hi)
-                        i += skip
+                        i += 2
                     else:
                         members[lo] = True
                     count += 1
@@ -214,6 +319,7 @@ struct Pattern(Copyable, Movable):
                     quant = _Q_PLUS
                     i += 1
             atoms.append(_Atom(members^, quant))
+        _refuse_dead_atoms(pattern, atoms, starts)
         return Pattern(atoms^)
 
     def num_atoms(self) -> Int:

@@ -34,7 +34,10 @@
 # hash (FNV-1a-64, 16 hex digits) is of the partition id and source key with the
 # length of the partition id in front, so the key is safe on any store. The hash
 # is not trusted to be unique: the object records both strings and a read that
-# finds different ones raises, and a write refuses to replace such an object.
+# finds different ones raises. `save` reads before it writes, so it refuses to
+# replace such an object too. A bare `try_save` with an empty version does not
+# read: it loses to any existing object (a colliding one included) and returns
+# False, and with a quoted version it writes over whatever holds that version.
 # The object body is
 #     u8 format version (1)
 #     u32 length, partition id bytes

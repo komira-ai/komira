@@ -53,8 +53,8 @@ def _set_b() raises -> RuleExtractor:
     return RuleExtractor(rules^, List[String](), String("mentions"), 12)
 
 
-comptime TEXT_A = "Note: alpha uses #red and #blue, mail ann@x.example about beta. #red again"
-comptime TEXT_AB = "open ticket AB-1 then mail ann@x.example about #red alpha"
+comptime TEXT_A = "Note: alpha uses #red and #blue, note ann@x.example about beta. #red again"
+comptime TEXT_AB = "open note AB-1 then note ann@x.example about #red alpha"
 
 
 def _count_summaries_empty(ex: Extraction) -> Bool:
@@ -113,13 +113,13 @@ def test_two_rule_sets_give_two_vocabularies_from_the_same_code() raises:
     assert_equal(b.num_entities(), 2)
     assert_equal(b.entities[0].name, "AB-1")
     assert_equal(b.entities[0].entity_type, "ref")
-    assert_equal(b.entities[1].name, "open ticket")
+    assert_equal(b.entities[1].name, "open note")
     assert_equal(b.entities[1].entity_type, "action")
     assert_equal(b.num_triples(), 1)
     assert_equal(b.triples[0].subject_name, "AB-1")
     assert_equal(b.triples[0].predicate, "mentions")
-    assert_equal(b.triples[0].object_name, "open ticket")
-    assert_equal(b.triples[0].fact, "AB-1 mentions open ticket")
+    assert_equal(b.triples[0].object_name, "open note")
+    assert_equal(b.triples[0].fact, "AB-1 mentions open note")
 
 
 def test_the_empty_rule_set_finds_nothing() raises:

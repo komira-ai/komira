@@ -9,8 +9,11 @@
 #                inside a longer token is not a match.
 #   linear       a pattern built to make a backtracking engine explode answers
 #                false on a long token (a backtracking matcher would not return).
-#   refusals     each malformed or unsupported pattern is refused by name, and an
-#                escaped operator is accepted as a literal.
+#   refusals     each malformed or unsupported pattern is refused by name, an
+#                escape is refused as the end of a range, a pattern no token can
+#                match (whitespace, a start that is only trimmed, an end that is
+#                only trimmed) is refused, and an escaped operator is accepted
+#                as a literal.
 # No test reads a clock or the environment.
 # =============================================================================
 
@@ -95,11 +98,11 @@ def test_a_pattern_cannot_be_made_exponential() raises:
 
 
 def test_an_escaped_operator_is_a_literal() raises:
-    assert_true(_m("\\(a\\)", "(a)"))
+    assert_true(_m("a\\(b\\)c", "a(b)c"))
     assert_true(_m("a\\|b", "a|b"))
-    assert_true(_m("\\^\\$\\{\\}\\*\\+\\?", "^${}*+?"))
-    assert_true(_m("\\.", "."))
-    assert_false(_m("\\.", "x"))
+    assert_true(_m("\\^\\$\\{\\}\\*\\+\\?x", "^${}*+?x"))
+    assert_true(_m("a\\.b", "a.b"))
+    assert_false(_m("a\\.b", "axb"))
 
 
 def test_malformed_patterns_are_refused() raises:
@@ -123,6 +126,43 @@ def test_malformed_patterns_are_refused() raises:
         _ = Pattern.compile("a\\")
     with assert_raises(contains="escape with nothing after it"):
         _ = Pattern.compile("[a\\")
+
+
+def test_an_escape_cannot_end_a_range() raises:
+    with assert_raises(contains="escape as the end of a range"):
+        _ = Pattern.compile("[a-\\d]")
+    with assert_raises(contains="escape as the end of a range"):
+        _ = Pattern.compile("[a-\\]]")
+    # An escaped member that is not a range bound still works.
+    assert_true(_m("[\\]x]+", "x]"))
+    assert_true(_m("[a-c\\d]+", "a9c"))
+
+
+def test_a_pattern_no_token_can_match_is_refused() raises:
+    # A token never holds whitespace.
+    with assert_raises(contains="can only match whitespace"):
+        _ = Pattern.compile("a b")
+    with assert_raises(contains="can only match whitespace"):
+        _ = Pattern.compile("a[ \t]+b")
+    # A token loses `. , ; : ! ? ) ] } " '` from its end.
+    with assert_raises(contains="trimmed from the end"):
+        _ = Pattern.compile("[a-z]+\\.")
+    with assert_raises(contains="trimmed from the end"):
+        _ = Pattern.compile("a[.,;]?[.,;]")
+    with assert_raises(contains="trimmed from the end"):
+        _ = Pattern.compile("a\\)*\\)+")
+    # A token loses `( [ { " '` from its start.
+    with assert_raises(contains="trimmed from the start"):
+        _ = Pattern.compile("\\(a")
+    with assert_raises(contains="trimmed from the start"):
+        _ = Pattern.compile("\\(*[\\[\\{]a")
+    # A shape that can match something else as well is accepted.
+    assert_true(_m("[a-z]+\\.?", "ab"))
+    assert_true(_m("[a-z.]+", "a.b"))
+    assert_true(_m("\\.a", ".a"))
+    assert_true(_m("a\\(", "a("))
+    assert_true(_m("a.", "ab"))
+    assert_true(_m("a*", ""))
 
 
 def test_unsupported_operators_are_refused() raises:
