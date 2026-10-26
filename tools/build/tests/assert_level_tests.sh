@@ -27,11 +27,12 @@
 #      256 MiB test under a 192 MiB cap are killed by the cap
 #      (tests//negative/mem_cap), as a library's gated test and under
 #      `buck2 test`. The time limit of a mojo_test under `buck2 test`:
-#      the gate (its cases are its unit tests, on linux and on macOS); a
-#      mojo_test sleeping past it, with the test runner's timeout at 90 s, is
-#      killed at 30 s and says so (tests//negative/test_deadline). (A
-#      komira.test_timeout_s that is not a whole number, or is not over the
-#      60 s margin, is refused: //tools/build/selftest:config_refusals.)
+#      the gate (its cases are its unit tests, on linux and on macOS, on a clock
+#      they move themselves); that `buck2 test` hands it the limit (`--deadline-s
+#      30 --runner-timeout-s 90` under a test_timeout_s of 90) is read from the
+#      command of tests//negative/test_deadline:test_slow, which is not run.
+#      (A komira.test_timeout_s that is not a whole number, or is not over the
+#      60 s margin, is refused: both in //tools/build/selftest:config_refusals.)
 
 if BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/assert_level.sh" "$LOG" > "$LOG/assert_level.log" 2>&1; then
     pass "$(grep -o 'PASS  assert level: .*' "$LOG/assert_level.log" | cut -c 7-)"
@@ -77,17 +78,4 @@ elif ! grep -qF "MEMORY CAP: killed $M:test_unbounded at " "$LOG/mem_cap_test_un
     fail "mem_cap_test_unbounded: failed without the cap's line (see $LOG/mem_cap_test_unbounded.log)"
 else
     pass "mem_cap_test_unbounded: buck2 test of a mojo_test that allocates without bound is killed by its cap"
-fi
-
-# The time limit of a mojo_test under `buck2 test` (`gate mojo --deadline-s`,
-# test_limit.bzl).
-TD=tests//negative/test_deadline:test_slow
-if timeout 900 "$BUCK2" test -c komira.test_timeout_s=90 "$TD" -- --timeout 90 > "$LOG/test_deadline_slow.log" 2>&1; then
-    fail "test_deadline_slow: buck2 test $TD passed, but its time limit must kill it"
-elif ! grep -qF "TEST TIME LIMIT: killed $TD after 30 s, under the test runner's timeout of 90 s (komira.test_timeout_s)" "$LOG/test_deadline_slow.log" ||
-    ! grep -qF "GATED TEST FAILED: $TD (exit 137)" "$LOG/test_deadline_slow.log" ||
-    ! grep -qF "TEST_DEADLINE_FIXTURE start" "$LOG/test_deadline_slow.log"; then
-    fail "test_deadline_slow: failed without the limit's line, the runner's report or the test's output (see $LOG/test_deadline_slow.log)"
-else
-    pass "test_deadline_slow: a mojo_test past its limit is killed 60 s before the test runner's timeout, and says so"
 fi
