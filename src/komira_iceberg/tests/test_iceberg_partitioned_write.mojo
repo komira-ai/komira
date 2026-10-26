@@ -339,9 +339,41 @@ def test_manifest_carries_partition_values() raises:
     assert_true(seen_west, "us-west partition value recovered")
 
 
+def test_a_second_commit_under_another_spec_id_is_refused() raises:
+    """The same partition fields under a different spec id are a different
+    spec: the table keeps one, so the second commit raises its own error."""
+    var location = String("warehouse/pw2/spec_id")
+    var schema = _people_schema()
+    var spec = _region_spec()
+    var store = InMemoryConditionalStore()
+    var writer = IcebergTableWriter[InMemoryConditionalStore](
+        store^, location, schema.copy(), gen_table_uuid()
+    )
+    _ = writer.commit_with_spec(
+        List[DataFileInfo](), List[DataFileInfo](), spec.copy()
+    )
+    var other = PartitionSpec(1)
+    other.add_identity(2, String("region"))
+    var raised = False
+    try:
+        _ = writer.commit_with_spec(
+            List[DataFileInfo](), List[DataFileInfo](), other^
+        )
+    except e:
+        raised = True
+        var msg = String(e)
+        assert_true(
+            msg.find("the partition spec of '" + location + "' cannot change")
+            >= 0,
+            msg,
+        )
+    assert_true(raised, "a different spec id must be refused")
+
+
 def main() raises:
     test_route_rows_to_partitions()
     test_partitioned_table_reads_back_every_row()
     test_equality_delete_masks_across_partitions()
     test_manifest_carries_partition_values()
+    test_a_second_commit_under_another_spec_id_is_refused()
     print("test_iceberg_partitioned_write: ALL PASS")
