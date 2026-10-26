@@ -709,9 +709,11 @@ struct SnapshotWorkingSet(Movable):
             return self._base_edge_invalid[i] == TS_OPEN_SENTINEL
         return self.edges[i].is_open()
 
-    def _check_closures_unambiguous(self, closed: List[Int]) raises:
+    def _ambiguous_closure(self, closed: List[Int]) raises -> Int:
+        # The first edge in `closed` that the loader could not tell from another
+        # edge of its key when the tombstone applies, or -1.
         if len(closed) == 0:
-            return
+            return -1
         var group = Dict[String, List[Int]]()
         for j in range(len(self.edges)):
             ref ed = self.edges[j]
@@ -733,18 +735,43 @@ struct SnapshotWorkingSet(Movable):
                     open_count += 1
             if open_count == 1 and self._is_open_when_delta_applies(i):
                 continue
-            raise Error(
-                "SnapshotWorkingSet.delta_tables: edge ("
-                + String(ed.src_nid)
-                + ", "
-                + String(ed.dst_nid)
-                + ", "
-                + String(ed.created_at)
-                + ") shares its key with "
-                + String(len(members) - 1)
-                + " other edge(s), so a tombstone cannot say which one to"
-                " close; write a full base with to_tables instead"
-            )
+            return i
+        return -1
+
+    def delta_cannot_say_closures(self) raises -> Bool:
+        """True iff an edge closed since the load shares its
+        `(src_nid, dst_nid, created_at)` key with another edge that a tombstone
+        could not tell it from, so `delta_tables` would refuse for that reason
+        and only a full base can carry the set. It says nothing about any other
+        reason `delta_tables` refuses (a shrunk list, a dropped entity, a bad
+        embedding); those are errors, not a case for a base."""
+        return self._ambiguous_closure(self.tombstone_edge_indices()) >= 0
+
+    def _check_closures_unambiguous(self, closed: List[Int]) raises:
+        var i = self._ambiguous_closure(closed)
+        if i < 0:
+            return
+        ref ed = self.edges[i]
+        var shared = 0
+        for j in range(len(self.edges)):
+            if (
+                self.edges[j].src_nid == ed.src_nid
+                and self.edges[j].dst_nid == ed.dst_nid
+                and self.edges[j].created_at == ed.created_at
+            ):
+                shared += 1
+        raise Error(
+            "SnapshotWorkingSet.delta_tables: edge ("
+            + String(ed.src_nid)
+            + ", "
+            + String(ed.dst_nid)
+            + ", "
+            + String(ed.created_at)
+            + ") shares its key with "
+            + String(shared - 1)
+            + " other edge(s), so a tombstone cannot say which one to"
+            " close; write a full base with to_tables instead"
+        )
 
     def _check_no_loaded_entity_dropped(self) raises:
         # A delta adds and changes entities but cannot remove one, so a set that

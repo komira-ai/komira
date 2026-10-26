@@ -9,6 +9,8 @@
 # No clock is read: an episode carries the times it is stamped with.
 # =============================================================================
 
+from std.math import isfinite
+
 
 @fieldwise_init
 struct IngestConfig(Copyable, Movable):
@@ -20,11 +22,11 @@ struct IngestConfig(Copyable, Movable):
         cosine_k: How many existing entities, nearest first by name embedding,
             are tried as candidates for each mention. At least 1.
         jaccard_merge: The Jaccard floor above which a fuzzy name match merges
-            without a judgment.
+            without a judgment; a finite number in [0, 1].
         jaccard_escalate: The Jaccard floor above which a fuzzy match is put to
-            the `LlmClient`'s `judge_same_entity`.
+            the `LlmClient`'s `judge_same_entity`; a finite number in [0, 1].
         min_entropy: The Shannon-entropy floor, in bits, under which a name is
-            too generic to merge on similarity.
+            too generic to merge on similarity; finite and at least 0.
         match_predicate: Whether a contradiction candidate must also share the
             new edge's predicate (the default is the node pair alone). The
             `edges` table stores no predicate, so an edge read back from a
@@ -57,7 +59,9 @@ struct IngestConfig(Copyable, Movable):
         """Refuse a knob no ingest can run with.
 
         Raises:
-            If `max_gleanings` is negative or `cosine_k` is below 1.
+            If `max_gleanings` is negative, `cosine_k` is below 1,
+            `jaccard_merge` or `jaccard_escalate` is not a finite number in
+            [0, 1], or `min_entropy` is not a finite number of at least 0.
         """
         if self.max_gleanings < 0:
             raise Error(
@@ -68,6 +72,28 @@ struct IngestConfig(Copyable, Movable):
             raise Error(
                 "IngestConfig: cosine_k must be at least 1, got "
                 + String(self.cosine_k)
+            )
+        if not isfinite(self.jaccard_merge) or not (
+            0.0 <= self.jaccard_merge <= 1.0
+        ):
+            raise Error(
+                "IngestConfig: jaccard_merge must be a finite number in [0, 1],"
+                " got "
+                + String(self.jaccard_merge)
+            )
+        if not isfinite(self.jaccard_escalate) or not (
+            0.0 <= self.jaccard_escalate <= 1.0
+        ):
+            raise Error(
+                "IngestConfig: jaccard_escalate must be a finite number in"
+                " [0, 1], got "
+                + String(self.jaccard_escalate)
+            )
+        if not isfinite(self.min_entropy) or self.min_entropy < 0.0:
+            raise Error(
+                "IngestConfig: min_entropy must be a finite number of at least"
+                " 0, got "
+                + String(self.min_entropy)
             )
 
 

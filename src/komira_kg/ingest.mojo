@@ -21,15 +21,21 @@
 # alone. If the delta cannot say what changed (two open edges share the key a
 # tombstone closes by; see `SnapshotWorkingSet`), the whole set is written as a
 # new base, followed by the index bootstrap a base lacks, provided the head is
-# still the one the set was started from.
+# still the one at the start of this call (the set may have been loaded from an
+# older head; ingest of a lineage is single-writer, see the README's Limits). Any
+# other reason a delta cannot be written (a shrunk edge or episode list, a dropped
+# loaded entity, duplicate node ids, an embedding of the wrong width) is an error,
+# not a base.
 #
 # FAILURE. Every refusal and every error from the embedder or the model happens
 # before the first store write, so the store is unchanged; the working set may be
 # half-edited, and the caller discards it (`ingest_episode` does, since it loads
-# its own). The one write that can follow another is the change gate's hash,
-# saved after the snapshot: if that save fails the episode is stored and the next
-# call re-ingests it (entities resolve to themselves and a repeated live edge is
-# not added again; only the episode row repeats).
+# its own). Two writes can follow another. A full base is written, then its
+# index bootstrap: if the bootstrap fails the base is the head without an index
+# (`repair_missing_bootstrap` finishes it). And the change gate's hash is saved
+# after the snapshot: if that save fails the episode is stored and the next call
+# re-ingests it (entities resolve to themselves and a repeated live edge is not
+# added again; only the episode row repeats).
 #
 # The caller supplies the clock (`EpisodeInput.ts`) and every model; nothing here
 # reads the environment or calls a network.
@@ -163,8 +169,11 @@ def write_extraction[
 
     Raises:
         As described in the file header: before any store write, if the
-        embedder or model raises or an embedding is not the graph's dimension;
-        if the head moved while a full base was needed.
+        embedder or model raises, an embedding is not the graph's dimension, or
+        the set cannot be written as a delta for a reason other than closure
+        ambiguity; if the head moved since the start of this call while a full
+        base was needed. A full base can fail after its snapshot, when the index
+        bootstrap fails.
     """
     var head_id = store.latest_snapshot_id()
     var aliases = AliasMap()
@@ -214,13 +223,13 @@ def write_extraction[
     else:
         # The episode row was just appended, so the set always has a delta; a
         # delta_tables refusal means the delta cannot say it (see the header).
-        var delta = Optional[Slab[KgTable]]()
-        try:
-            delta = Optional[Slab[KgTable]](ws.delta_tables())
-        except:
-            pass
-        if delta:
-            new_head = store.append_delta(delta.take(), ws.name_index_delta())
+        # Only the closure ambiguity sends the set to a base; any other
+        # delta_tables refusal (a shrunk list, a dropped entity, a bad
+        # embedding) is an error and writes nothing.
+        if not ws.delta_cannot_say_closures():
+            new_head = store.append_delta(
+                ws.delta_tables(), ws.name_index_delta()
+            )
         else:
             if store.latest_snapshot_id() != head_id:
                 raise Error(
@@ -277,7 +286,7 @@ def ingest_episode_into[
     Raises:
         If `cfg` is invalid, the embedder's dimension is not the set's, the
         model or embedder raises, an embedding is not the graph's dimension, or
-        the store fails. See the file header for what is left unchanged.
+        the store fails. See the file header for what an error leaves behind.
     """
     cfg.check()
     if emb.dimension() != ws.embedding_dim:
@@ -352,7 +361,9 @@ def ingest_episode[
 
     Raises:
         As `ingest_episode_into`, and if the head cannot be loaded. After an
-        error the store is unchanged (the working set is this call's own).
+        error the store is unchanged, except that a full base whose index
+        bootstrap failed is the head without an index (the working set is this
+        call's own).
     """
     if store.latest_snapshot_id() < Int64(0):
         var empty = SnapshotWorkingSet(emb.dimension())

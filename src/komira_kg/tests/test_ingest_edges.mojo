@@ -153,14 +153,14 @@ def test_an_unknown_endpoint_is_minted_so_the_edge_never_dangles() raises:
     apply_edges(
         ws, _one(_t("A", "Zed", "A rel Zed")), _mentions(), _mention_nids(),
         llm, emb, "p1", NOW, EPISODE_AT, aliases, IngestConfig.default(),
-        "", "chat", "src-1",
+        "", "note", "src-1",
     )
     assert_equal(ws.num_entities(), 4)
     assert_equal(ws.edges[0].dst_nid, Int64(3))
     ref z = ws.entities[3]
     assert_equal(z.name, "Zed")
     assert_equal(z.partition_id, "p1")
-    assert_equal(z.attrs, facet_attrs_json("chat", "src-1"))
+    assert_equal(z.attrs, facet_attrs_json("note", "src-1"))
     assert_equal(len(z.name_embedding), DIM)
 
 

@@ -130,10 +130,13 @@ deleted, so "what did we believe at time T" stays answerable.
   for a repeat of a live edge, and mints an entity for an endpoint nothing named;
   `write_extraction` appends the episode row and writes a base on an empty
   lineage (with the index a base lacks) or the delta since the load, or, when a
-  delta cannot say the closure, a new base. Then the body's hash is recorded.
+  delta cannot say the closure, a new base (any other reason a delta cannot be
+  written is an error). Then the body's hash is recorded.
   The embedder's dimension must be the graph's; a wrong one, an error from the
   model or the embedder, and a knob no ingest can run with (`IngestConfig.check`)
-  all end the ingest before the first write.
+  all end the ingest before the first write; a full base can still fail after
+  its snapshot, when its index bootstrap fails, and `repair_missing_bootstrap`
+  finishes it.
 
 A facet, a source, a predicate and an entity name are opaque strings the host
 supplies: the package fixes no vocabulary. Prompts are values the caller passes
@@ -643,7 +646,7 @@ var embedder = StubEmbedder(8)
 var store = KgSnapshotStore[SharedInMemoryConditionalStore](
     SharedInMemoryConditionalStore(), "graph"
 )
-var episode = EpisodeInput("note-1", "workspace-a", text, 1000, 900, "note", "notes")
+var episode = EpisodeInput("note-1", "partition-a", text, 1000, 900, "note", "notes")
 var head = ingest_episode(store, episode, llm, embedder, IngestConfig.default())
 assert_equal(store.latest_snapshot_id(), head)
 

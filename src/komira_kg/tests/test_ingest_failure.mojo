@@ -8,12 +8,18 @@
 #              before the model is asked; so is one that reports the right
 #              dimension and returns vectors of another length, or ones that are
 #              not finite.
-#   config     a knob no ingest can run with is refused.
+#   config     a knob no ingest can run with is refused, including a similarity
+#              floor or an entropy floor that is not a finite number in range.
+#   delta      a set that cannot be written as a delta for a reason other than a
+#              closure ambiguity (a shrunk edge or episode list, a dropped loaded
+#              entity, an embedding beyond f32) is an error and writes nothing,
+#              not a new base.
 #   failure    an extractor, a same-entity judge, a contradiction judge or an
 #              embedder that raises leaves the head, the graph and the change
 #              gate's hash as they were, on a new lineage and on an existing one.
 # =============================================================================
 
+from std.math import inf, nan
 from std.testing import (
     TestSuite,
     assert_equal,
@@ -49,6 +55,7 @@ comptime DIM = 4
 
 comptime TEXT1 = "Ada Lovelace works at Acme Labs."
 comptime TEXT2 = "Ada Lovelace now mentors Acme Labs."
+comptime TEXT3 = "Ada Lovelace gave a talk."
 comptime ADA = "Ada Lovelace"
 comptime ACME = "Acme Labs"
 
@@ -218,7 +225,7 @@ def test_a_write_to_an_empty_set_of_another_dimension_is_refused() raises:
     _assert_unchanged(kg, Int64(-1), 0, 0, 0)
 
 
-def test_vectors_of_another_length_or_not_finite_are_refused() raises:
+def test_vectors_of_another_length_are_refused() raises:
     var kg = _seeded()
     var head = kg.latest_snapshot_id()
     with assert_raises(contains="3 components but the graph's dimension is 4"):
@@ -234,6 +241,128 @@ def test_vectors_of_another_length_or_not_finite_are_refused() raises:
             IngestConfig.default(),
         )
     _assert_unchanged(fresh, Int64(-1), 0, 0, 0)
+
+
+def _seeded_twice() raises -> Kg:
+    var kg = _seeded()
+    _ = ingest_episode(
+        kg, _ep("ep-2", TEXT2, Int64(2000)), _llm(), _emb(), IngestConfig.default()
+    )
+    return kg^
+
+
+def _quiet_llm() -> StubLlmClient:
+    # A third text that names a known entity and relates nothing.
+    var llm = _llm()
+    var ms = List[EntityMention]()
+    ms.append(EntityMention(ADA, "", ""))
+    llm.add_extraction_any_context(TEXT3, Extraction(ms^, List[Triple]()))
+    return llm^
+
+
+def _assert_untouched(kg: Kg, head: Int64) raises:
+    assert_equal(kg.latest_snapshot_id(), head)
+    assert_equal(kg.fingerprint_lookup("p1", "ep-3"), "")
+    var ws = SnapshotWorkingSet.load_latest(kg)
+    assert_equal(ws.num_edges(), 2)
+    assert_equal(ws.num_episodes(), 2)
+    assert_equal(ws.num_entities(), 2)
+
+
+def test_a_set_whose_episode_list_shrank_is_an_error_and_writes_nothing() raises:
+    var kg = _seeded_twice()
+    var head = kg.latest_snapshot_id()
+    var ws = SnapshotWorkingSet.load_latest(kg)
+    _ = ws.episodes.pop()
+    _ = ws.episodes.pop()
+    with assert_raises(contains="the episode list shrank"):
+        _ = ingest_episode_into(
+            kg, ws, _ep("ep-3", TEXT3, Int64(3000)), _quiet_llm(), _emb(),
+            IngestConfig.default(),
+        )
+    _assert_untouched(kg, head)
+
+
+def test_a_set_whose_edge_list_shrank_is_an_error_and_writes_nothing() raises:
+    var kg = _seeded_twice()
+    var head = kg.latest_snapshot_id()
+    var ws = SnapshotWorkingSet.load_latest(kg)
+    _ = ws.edges.pop()
+    with assert_raises(contains="the edge list shrank"):
+        _ = ingest_episode_into(
+            kg, ws, _ep("ep-3", TEXT3, Int64(3000)), _quiet_llm(), _emb(),
+            IngestConfig.default(),
+        )
+    _assert_untouched(kg, head)
+
+
+def test_a_set_that_lost_a_loaded_entity_is_an_error_and_writes_nothing() raises:
+    var kg = _seeded_twice()
+    var head = kg.latest_snapshot_id()
+    var ws = SnapshotWorkingSet.load_latest(kg)
+    _ = ws.entities.pop()
+    with assert_raises(contains="was removed since the load"):
+        _ = ingest_episode_into(
+            kg, ws, _ep("ep-3", TEXT3, Int64(3000)), _quiet_llm(), _emb(),
+            IngestConfig.default(),
+        )
+    _assert_untouched(kg, head)
+
+
+def test_a_vector_beyond_f32_is_an_error_and_writes_nothing() raises:
+    var kg = _seeded_twice()
+    var head = kg.latest_snapshot_id()
+    # A name nothing in the graph matches, so a new entity gets the vector.
+    var llm = _llm()
+    var ms = List[EntityMention]()
+    ms.append(EntityMention("Zed Quill", "", ""))
+    llm.add_extraction_any_context(TEXT3, Extraction(ms^, List[Triple]()))
+    with assert_raises(contains="is not a finite f32"):
+        _ = ingest_episode(
+            kg, _ep("ep-3", TEXT3, Int64(3000)), llm, BrokenEmbedder(2),
+            IngestConfig.default(),
+        )
+    _assert_untouched(kg, head)
+
+
+def test_a_knob_that_is_not_a_finite_number_in_range_is_refused() raises:
+    var kg = _seeded()
+    var head = kg.latest_snapshot_id()
+    var not_a_number = nan[DType.float64]()
+    var infinity = inf[DType.float64]()
+    var bad_merge = List[Float64]()
+    bad_merge.append(not_a_number)
+    bad_merge.append(infinity)
+    bad_merge.append(-0.1)
+    bad_merge.append(1.5)
+    for i in range(len(bad_merge)):
+        var cfg = IngestConfig.default()
+        cfg.jaccard_merge = bad_merge[i]
+        with assert_raises(contains="jaccard_merge must be a finite number"):
+            cfg.check()
+        cfg = IngestConfig.default()
+        cfg.jaccard_escalate = bad_merge[i]
+        with assert_raises(contains="jaccard_escalate must be a finite number"):
+            cfg.check()
+    var bad_entropy = List[Float64]()
+    bad_entropy.append(not_a_number)
+    bad_entropy.append(infinity)
+    bad_entropy.append(-0.5)
+    for i in range(len(bad_entropy)):
+        var cfg = IngestConfig.default()
+        cfg.min_entropy = bad_entropy[i]
+        with assert_raises(contains="min_entropy must be a finite number"):
+            cfg.check()
+    var edge = IngestConfig.default()
+    edge.jaccard_merge = 1.0
+    edge.jaccard_escalate = 0.0
+    edge.min_entropy = 0.0
+    edge.check()
+    var cfg = IngestConfig.default()
+    cfg.jaccard_merge = not_a_number
+    with assert_raises(contains="jaccard_merge must be a finite number"):
+        _ = ingest_episode(kg, _ep("ep-2", TEXT2, Int64(2000)), _llm(), _emb(), cfg)
+    _assert_unchanged(kg, head, 1, 1, 2)
 
 
 def test_a_knob_no_ingest_can_run_with_is_refused() raises:

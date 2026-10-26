@@ -224,7 +224,7 @@ def test_a_new_entity_carries_its_row_facet_and_embedding() raises:
         emb,
         "p1",
         IngestConfig.default(),
-        "chat",
+        "note",
         "src-1",
     )
     ref e = ws.entities[ws.entity_index_of_nid(got[0])]
@@ -233,8 +233,8 @@ def test_a_new_entity_carries_its_row_facet_and_embedding() raises:
     assert_equal(e.partition_id, "p1")
     assert_equal(e.name, "Gamma Quarry")
     assert_equal(e.summary, "a summary")
-    assert_equal(e.attrs, facet_attrs_json("chat", "src-1"))
-    assert_equal(facet_from_attrs(e.attrs), "chat")
+    assert_equal(e.attrs, facet_attrs_json("note", "src-1"))
+    assert_equal(facet_from_attrs(e.attrs), "note")
     assert_equal(facet_source_from_attrs(e.attrs), "src-1")
     assert_equal(len(e.name_embedding), DIM)
     assert_equal(e.name_embedding[2], 1.0)

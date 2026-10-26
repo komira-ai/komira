@@ -124,7 +124,7 @@ def _cfg() -> IngestConfig:
 
 def test_an_episode_produces_its_nodes_edges_and_provenance() raises:
     var kg = Kg(Backend(), "g")
-    var ep = EpisodeInput("ep-1", "p1", TEXT1, Int64(1000), Int64(500), "chat", "src-1")
+    var ep = EpisodeInput("ep-1", "p1", TEXT1, Int64(1000), Int64(500), "note", "src-1")
     var head = ingest_episode(kg, ep, _llm(), _emb(), _cfg())
     assert_true(head >= 0)
     assert_equal(kg.latest_snapshot_id(), head)
@@ -138,7 +138,7 @@ def test_an_episode_produces_its_nodes_edges_and_provenance() raises:
     assert_equal(ada.partition_id, "p1")
     assert_equal(ada.name, ADA)
     assert_equal(ada.summary, "an analyst")
-    assert_equal(ada.attrs, facet_attrs_json("chat", "src-1"))
+    assert_equal(ada.attrs, facet_attrs_json("note", "src-1"))
     assert_equal(ada.name_embedding[0], 1.0)
     assert_equal(len(ada.name_embedding), DIM)
     ref acme = ws.entities[1]
@@ -166,7 +166,7 @@ def test_an_episode_produces_its_nodes_edges_and_provenance() raises:
     assert_equal(row.body, TEXT1)
     assert_equal(row.ts, Int64(1000))
     assert_equal(row.valid_at, Int64(500))
-    assert_equal(row.facet, "chat")
+    assert_equal(row.facet, "note")
 
     assert_equal(kg.fingerprint_lookup("p1", "ep-1"), content_hash_of(TEXT1))
 

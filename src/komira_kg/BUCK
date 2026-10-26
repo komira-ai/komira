@@ -55,8 +55,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # no repeat of a live one; test_ingest_episode ingests an episode to its nodes,
 # edges and provenance, skips an unchanged body, appends deltas from a resident
 # set and writes a full base when a delta cannot say a closure; test_ingest_failure
-# refuses a wrong embedding dimension and leaves the store unchanged when the
-# model or the embedder fails.
+# refuses a wrong embedding dimension, a knob out of range and a set a delta
+# cannot carry, and leaves the store unchanged when the model or the embedder
+# fails.
 mojo_library(
     name = "komira_kg",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
