@@ -30,6 +30,18 @@
 //!    the download and check against the plan (`--stage beta`, the beta index,
 //!    `--out release/beta_set`, nothing else names that directory), then the e2e of
 //!    every package on that set at this run's version, every farm step asserted remote.
+//!  - the prod publish, five jobs under one gate (`prod-stage`, `prod-test`,
+//!    `prod-commit`, `prod-abort`, `prod-smoke`; checkProd says what each must hold):
+//!    each job's `needs`, its exact `if:` (the push-to-main and `MOPM_PUBLISH_ENABLED`
+//!    gate; the abort job's `failure() || cancelled()` condition with the gate and
+//!    `needs.prod-stage.result != 'skipped'`), its environment (`prod` for the three
+//!    that talk to the registry, `build` for the test, none for the smoke), its exact
+//!    permissions (`id-token: write` only where a registry identity is exchanged, or
+//!    for farm-connect in the test), no secret anywhere in the file, the commands (the
+//!    stage with `--oidc --no-commit`, the commit with `--oidc` and neither `--no-commit`
+//!    nor `--abort`, the abort with `--abort`, the verify and the e2e on the verified
+//!    set in the test, the smoke), the order of the test's steps, and that the test and
+//!    the smoke never name a registry-writing verb or the OIDC exchange.
 //! The reader's own cases are workflow texts written here: each defect above
 //! is planted in the real text and must be refused with its message.
 
@@ -37,7 +49,7 @@ const std = @import("std");
 const t = std.testing;
 
 const JOB = "mopm-publish-beta";
-const PROD_JOB = "mopm-publish";
+const OLD_PROD_JOB = "mopm-publish";
 const STAGE_JOB = "mopm-stage-beta";
 const PROD_STAGE_JOB = "mopm-stage";
 const TOOL = "release_beta_version";
@@ -48,6 +60,18 @@ const REWRITE_ENV = "          RUN_NUMBER: ${{ github.run_number }}";
 const STAGE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage --workspace-root src --artifacts \"$RUNNER_TEMP/mopm-publish/artifacts\" --compiler 1.0.0 --out \"$RUNNER_TEMP/mopm-publish/staged_beta\" --registry beta'";
 const GATE = "    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_BETA_PUBLISH_ENABLED == 'true'";
 const E2E_JOB = "mopm-e2e-beta";
+const PROD_GATE = "    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true'";
+const ABORT_IF = "    if: (failure() || cancelled()) && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true' && needs.prod-stage.result != 'skipped'";
+const PROD_STAGE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-publish/staged\" --registry prod --oidc --no-commit'";
+const PROD_COMMIT_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-prod/staged\" --registry prod --oidc'";
+const PROD_ABORT_CMD = "            \"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-prod/staged\" --registry prod --oidc --abort";
+const PROD_STAGED_ARTIFACT = "          name: mopm-prod-staged-${{ github.sha }}";
+const PROD_BUILD_VERIFY = "          args: build //tools/build/ci:release_staged_verify --out ${{ runner.temp }}/prod-test/release_staged_verify";
+const PROD_VERIFY_RUN = "        run: '\"$RUNNER_TEMP/prod-test/release_staged_verify\" verify --staged \"$RUNNER_TEMP/prod-test/staged\" --out release/staged_set'";
+const PROD_E2E_RUN = "          args: build -c komira_release.staged=stage //release/readme_e2e/verify:all";
+const PROD_SMOKE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged_verify\" smoke --staged \"$RUNNER_TEMP/prod-smoke/committed\" --config-url https://api.mopm.dev/index/config.json --attempts 5 --delay 30'";
+const STAGE_BUILD_VERIFY = "          args: build //tools/build/ci:release_staged_verify --out ${{ runner.temp }}/mopm-publish/release_staged_verify";
+const STAGE_UPLOAD_VERIFY = "            ${{ runner.temp }}/mopm-publish/release_staged_verify";
 const E2E_DOWNLOAD_NAME = "          name: mopm-staged-beta-${{ github.sha }}";
 const E2E_FARM_CONNECT = "      - uses: ./.github/actions/farm-connect";
 const E2E_BUILD_FETCH = "          args: build //tools/build/ci:release_beta_fetch --out ${{ runner.temp }}/mopm-e2e-beta/release_beta_fetch";
@@ -238,13 +262,8 @@ fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     if (builds != 1) return "mopm-stage does not build release_beta_version once for the beta job";
     if (lineAt(prod_stage, UPLOAD_TOOL_LINE) == null) return "mopm-stage does not hand release_beta_version to the beta job";
 
-    var pn: usize = 0;
-    const prod = (try jobLines(ar, text, PROD_JOB, &pn)) orelse return "no job mopm-publish";
-    if (pn != 1) return "mopm-publish is defined more than once";
-    if (!mentions(prod, "MOPM_TOKEN: ${{ secrets.MOPM_TOKEN }}")) return "the prod job lost its token";
-    if (mentions(prod, "id-token")) return "the prod job gained id-token";
-
     if (try checkE2e(ar, text)) |why| return why;
+    if (try checkProd(ar, text, prod_stage)) |why| return why;
 
     // top-level permissions and the triggers
     var tp: usize = 0;
@@ -267,6 +286,175 @@ fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
         return "on: is not exactly push and workflow_dispatch";
     if (!has(on, "    branches: [main]")) return "on: push is not branches: [main]";
     if (mentions(on, "pull_request")) return "on: names a pull_request trigger";
+    return null;
+}
+
+
+/// The five jobs of the prod publish. What each must hold is below; `prod_stage` is the job `mopm-stage`
+/// (it builds the verify tool and hands it on in its artifact).
+const ProdJob = struct {
+    name: []const u8,
+    needs: []const u8,
+    gate: []const u8,
+    /// The exact `environment:` line, or null: the job holds none.
+    environment: ?[]const u8,
+    /// Whether the job holds `id-token: write` besides `contents: read`.
+    id_token: bool,
+};
+
+const prod_jobs = [_]ProdJob{
+    .{ .name = "prod-stage", .needs = "    needs: [release, mopm-stage]", .gate = PROD_GATE, .environment = "    environment: prod", .id_token = true },
+    .{ .name = "prod-test", .needs = "    needs: prod-stage", .gate = PROD_GATE, .environment = "    environment: build", .id_token = true },
+    .{ .name = "prod-commit", .needs = "    needs: prod-test", .gate = PROD_GATE, .environment = "    environment: prod", .id_token = true },
+    .{ .name = "prod-abort", .needs = "    needs: [prod-stage, prod-test, prod-commit]", .gate = ABORT_IF, .environment = "    environment: prod", .id_token = true },
+    .{ .name = "prod-smoke", .needs = "    needs: prod-commit", .gate = PROD_GATE, .environment = null, .id_token = false },
+};
+
+/// What none of the lines of the test and smoke jobs may contain: they send nothing to a registry and
+/// ask for no identity (a mopm verb that writes, the OIDC exchange, a hand-made PUT or POST).
+const prod_readonly_forbidden = [_][]const u8{ "mopm publish", "--oidc", "--abort", "--no-commit", "yank", "login", "curl", "wget", "-X PUT", "-X POST", "--request", "--data", "--upload-file" };
+
+fn countPerms(job: []const []const u8) usize {
+    var perms: usize = 0;
+    for (job) |l| {
+        if (std.mem.startsWith(u8, l, "      ") and !std.mem.startsWith(u8, l, "       ") and
+            (std.mem.indexOf(u8, l, ": read") != null or std.mem.indexOf(u8, l, ": write") != null)) perms += 1;
+    }
+    return perms;
+}
+
+/// Null if the prod publish holds its contract, else the refusal.
+fn checkProd(ar: std.mem.Allocator, text: []const u8, stage_job: []const []const u8) !?[]const u8 {
+    // the token path is gone: no job reads a secret, and the old job is not there
+    var old: usize = 0;
+    if ((try jobLines(ar, text, OLD_PROD_JOB, &old)) != null) return "the job mopm-publish (the registry token) is still there";
+    var lit = std.mem.splitScalar(u8, text, '\n');
+    while (lit.next()) |l| {
+        const trimmed = std.mem.trim(u8, l, " ");
+        if (trimmed.len > 0 and trimmed[0] == '#') continue;
+        if (std.ascii.indexOfIgnoreCase(l, "secrets") != null or std.mem.indexOf(u8, l, "MOPM_TOKEN") != null) return "release.yml reads a secret";
+    }
+    // mopm-stage builds the verify tool once and hands it on
+    var builds: usize = 0;
+    for (stage_job) |l| if (std.mem.eql(u8, l, STAGE_BUILD_VERIFY)) {
+        builds += 1;
+    };
+    if (builds != 1) return "mopm-stage does not build release_staged_verify once for the prod jobs";
+    if (lineAt(stage_job, STAGE_UPLOAD_VERIFY) == null) return "mopm-stage does not hand release_staged_verify to the prod jobs";
+
+    for (prod_jobs) |spec| {
+        var n: usize = 0;
+        const job = (try jobLines(ar, text, spec.name, &n)) orelse return try std.fmt.allocPrint(ar, "no job {s}", .{spec.name});
+        if (n != 1) return try std.fmt.allocPrint(ar, "{s} is defined more than once", .{spec.name});
+        if (!has(job, spec.needs)) return try std.fmt.allocPrint(ar, "{s}: needs is not exactly `{s}`", .{ spec.name, std.mem.trim(u8, spec.needs, " ") });
+        if (!has(job, spec.gate)) return try std.fmt.allocPrint(ar, "{s}: the if is not the expected gate", .{spec.name});
+        var ifs: usize = 0;
+        for (job) |l| if (std.mem.startsWith(u8, l, "    if:")) {
+            ifs += 1;
+        };
+        if (ifs != 1) return try std.fmt.allocPrint(ar, "{s}: the if is not exactly one line", .{spec.name});
+        if (spec.environment) |env| {
+            if (!has(job, env)) return try std.fmt.allocPrint(ar, "{s}: environment is not `{s}`", .{ spec.name, std.mem.trim(u8, env, " ") });
+            var envs: usize = 0;
+            for (job) |l| if (std.mem.startsWith(u8, l, "    environment:")) {
+                envs += 1;
+            };
+            if (envs != 1) return try std.fmt.allocPrint(ar, "{s}: holds more than one environment", .{spec.name});
+        } else if (mentions(job, "environment:")) {
+            return try std.fmt.allocPrint(ar, "{s} holds an environment", .{spec.name});
+        }
+        if (!has(job, "    permissions:") or !has(job, "      contents: read")) return try std.fmt.allocPrint(ar, "{s}: permissions are not contents: read", .{spec.name});
+        if (has(job, "      id-token: write") != spec.id_token) return try std.fmt.allocPrint(ar, "{s}: id-token: write is {s}", .{ spec.name, if (spec.id_token) "missing" else "held" });
+        if (countPerms(job) != (if (spec.id_token) @as(usize, 2) else 1)) return try std.fmt.allocPrint(ar, "{s}: permissions hold more than they should", .{spec.name});
+        if (mentions(job, "continue-on-error")) return try std.fmt.allocPrint(ar, "{s} ignores a failure", .{spec.name});
+        for (job) |l| {
+            if (std.mem.indexOf(u8, l, "|| true") != null and !std.mem.eql(u8, l, "        run: ./buck2 kill || true")) return try std.fmt.allocPrint(ar, "{s} ignores a failure", .{spec.name});
+        }
+    }
+
+    var scratch: usize = 0;
+    const stage = (try jobLines(ar, text, "prod-stage", &scratch)).?;
+    if (mentions(stage, "farm") or mentions(stage, "buck2")) return "prod-stage joins the farm or runs buck2";
+    const stage_at = lineAt(stage, PROD_STAGE_RUN) orelse return "prod-stage does not run publish --staged --registry prod --oidc --no-commit";
+    if (mentions(stage, "--dry-run") or mentions(stage, "--abort")) return "prod-stage publishes with --dry-run or --abort";
+    var stage_runs: usize = 0;
+    for (stage) |l| if (std.mem.indexOf(u8, l, "mopm\" publish") != null) {
+        stage_runs += 1;
+    };
+    if (stage_runs != 1) return "prod-stage runs mopm publish more than once";
+    // the directory is kept even when the step failed, so the abort job can end a group
+    const keep_at = lineAt(stage, PROD_STAGED_ARTIFACT) orelse return "prod-stage does not keep the staged directory (mopm-prod-staged)";
+    if (!(stage_at < keep_at)) return "prod-stage keeps the directory before it stages";
+    if (keep_at < 3 or !std.mem.eql(u8, stage[keep_at - 3], "      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1") or !std.mem.eql(u8, stage[keep_at - 2], "        if: always()"))
+        return "prod-stage keeps the directory only when the stage succeeded (the artifact step needs if: always())";
+
+    const tst = (try jobLines(ar, text, "prod-test", &scratch)).?;
+    for (tst) |l| {
+        if (std.mem.eql(u8, l, "    needs: prod-stage") or std.mem.eql(u8, l, PROD_GATE)) continue;
+        for (prod_readonly_forbidden) |w| {
+            if (std.ascii.indexOfIgnoreCase(l, w) != null) return "prod-test publishes, yanks, logs in or exchanges an identity";
+        }
+    }
+    // the files under test are the ones prod-stage kept, never the set mopm-stage made
+    if (mentions(tst, "mopm-staged-")) return "prod-test takes the set of mopm-stage, not the one prod-stage uploaded";
+    const download_at = lineAt(tst, PROD_STAGED_ARTIFACT) orelse return "prod-test does not download the set prod-stage uploaded";
+    const connect_at = lineAt(tst, E2E_FARM_CONNECT) orelse return "prod-test does not join the farm";
+    const tool_at = lineAt(tst, PROD_BUILD_VERIFY) orelse return "prod-test does not build release_staged_verify";
+    const verify_at = lineAt(tst, PROD_VERIFY_RUN) orelse return "prod-test does not verify the staged files against the plan (release_staged_verify verify --out release/staged_set)";
+    const e2e_at = lineAt(tst, PROD_E2E_RUN) orelse return "prod-test does not run the e2e on the verified set (staged=stage)";
+    if (!(connect_at < tool_at and tool_at < verify_at)) return "prod-test verifies before the farm is joined and the tool built";
+    if (!(download_at < verify_at)) return "prod-test verifies before it has the files";
+    if (!(verify_at < e2e_at)) return "prod-test runs the e2e before the verification";
+    // nothing else may write the directory the e2e reads
+    var writers: usize = 0;
+    for (tst) |l| if (std.mem.indexOf(u8, l, "staged_set") != null) {
+        writers += 1;
+    };
+    if (writers != 1) return "prod-test names release/staged_set other than in the one verify step";
+    var verify_runs: usize = 0;
+    for (tst) |l| if (std.mem.indexOf(u8, l, "release_staged_verify\"") != null and std.mem.startsWith(u8, l, "        run:")) {
+        verify_runs += 1;
+    };
+    if (verify_runs != 1) return "prod-test runs release_staged_verify more than once";
+    var asserted: usize = 0;
+    for (tst) |l| if (std.mem.eql(u8, l, E2E_ASSERT)) {
+        asserted += 1;
+    };
+    if (asserted != 2) return "prod-test has a farm step that is not asserted remote";
+
+    const commit = (try jobLines(ar, text, "prod-commit", &scratch)).?;
+    if (mentions(commit, "farm") or mentions(commit, "buck2")) return "prod-commit joins the farm or runs buck2";
+    const commit_at = lineAt(commit, PROD_COMMIT_RUN) orelse return "prod-commit does not run publish --staged --registry prod --oidc on the directory prod-stage kept";
+    if (mentions(commit, "--no-commit") or mentions(commit, "--abort") or mentions(commit, "--dry-run")) return "prod-commit does not commit: it names --no-commit, --abort or --dry-run";
+    const commit_dl = lineAt(commit, PROD_STAGED_ARTIFACT) orelse return "prod-commit does not download the directory prod-stage kept (with its state.json)";
+    if (!(commit_dl < commit_at)) return "prod-commit publishes before it has the directory";
+    var commit_runs: usize = 0;
+    for (commit) |l| if (std.mem.indexOf(u8, l, "mopm\" publish") != null) {
+        commit_runs += 1;
+    };
+    if (commit_runs != 1) return "prod-commit runs mopm publish more than once";
+
+    const abort = (try jobLines(ar, text, "prod-abort", &scratch)).?;
+    if (mentions(abort, "farm") or mentions(abort, "buck2")) return "prod-abort joins the farm or runs buck2";
+    if (!has(abort, PROD_ABORT_CMD)) return "prod-abort does not run publish --staged --registry prod --oidc --abort";
+    if (mentions(abort, "--no-commit") or mentions(abort, "--dry-run") or mentions(abort, "yank")) return "prod-abort stages, dry-runs or yanks";
+    if (lineAt(abort, PROD_STAGED_ARTIFACT) == null) return "prod-abort does not download the directory prod-stage kept (the state.json names the group)";
+    var abort_runs: usize = 0;
+    for (abort) |l| if (std.mem.indexOf(u8, l, "mopm\" publish") != null) {
+        abort_runs += 1;
+    };
+    if (abort_runs != 1) return "prod-abort runs mopm publish more than once";
+
+    const smoke = (try jobLines(ar, text, "prod-smoke", &scratch)).?;
+    for (smoke) |l| {
+        if (std.mem.eql(u8, l, "    needs: prod-commit") or std.mem.eql(u8, l, PROD_GATE)) continue;
+        for (prod_readonly_forbidden) |w| {
+            if (std.ascii.indexOfIgnoreCase(l, w) != null) return "prod-smoke yanks, publishes or exchanges an identity: it only reads";
+        }
+    }
+    if (mentions(smoke, "farm") or mentions(smoke, "buck2")) return "prod-smoke joins the farm or runs buck2";
+    if (!has(smoke, PROD_SMOKE_RUN)) return "prod-smoke does not run release_staged_verify smoke against the prod index with the committed directory";
+    if (lineAt(smoke, "          name: mopm-prod-committed-${{ github.sha }}") == null) return "prod-smoke does not download the committed directory";
     return null;
 }
 
@@ -318,7 +506,7 @@ fn replaced(ar: std.mem.Allocator, text: []const u8, from: []const u8, to: []con
     return std.mem.replaceOwned(u8, ar, text, from, to);
 }
 
-test "release.yml holds the contract of mopm-publish-beta" {
+test "release.yml holds the contract of the beta and prod publish jobs" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
@@ -390,8 +578,6 @@ test "each defect planted in the real release.yml is refused with its message" {
     try expectRefused(ar, try replaced(ar, text, "\n  workflow_dispatch:\n", "\n  pull_request_target:\n  workflow_dispatch:\n"), "on: is not exactly");
     try expectRefused(ar, try replaced(ar, text, "\n  workflow_dispatch:\n", "\n  workflow_dispatch:\n  schedule:\n    - cron: '0 0 * * *'\n"), "on: is not exactly");
     try expectRefused(ar, try replaced(ar, text, "    branches: [main]\n", "    branches: [main, 'release/**']\n"), "branches");
-    // the prod job
-    try expectRefused(ar, try replaced(ar, text, "          MOPM_TOKEN: ${{ secrets.MOPM_TOKEN }}\n", ""), "lost its token");
 }
 
 test "each defect planted in the mopm-e2e-beta job of the real release.yml is refused with its message" {
@@ -458,6 +644,129 @@ test "each defect planted in the mopm-e2e-beta job of the real release.yml is re
     try expectRefused(ar, try replaced(ar, text, E2E_RUN ++ "\n" ++ E2E_ASSERT ++ "\n", E2E_RUN ++ "\n"), "not asserted remote");
     try expectRefused(ar, try replaced(ar, text, E2E_RUN ++ "\n" ++ E2E_ASSERT ++ "\n", E2E_RUN ++ "\n" ++ E2E_ASSERT ++ "\n        continue-on-error: true\n"), "ignores a failure");
     try expectRefused(ar, try replaced(ar, text, E2E_BUILD_FETCH ++ "\n" ++ E2E_ASSERT ++ "\n", E2E_BUILD_FETCH ++ "\n"), "not asserted remote");
+}
+
+/// `head` with its prod gate line replaced by `to` (a whole line with its newline, or nothing).
+fn swapGate(ar: std.mem.Allocator, head: []const u8, to: []const u8) ![]const u8 {
+    const at = std.mem.indexOf(u8, head, PROD_GATE).?;
+    return std.mem.concat(ar, u8, &.{ head[0..at], to, head[at + PROD_GATE.len + 1 ..] });
+}
+
+test "each edit of the prod jobs of the real release.yml that breaks the contract is refused with its message" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const text = try readWorkflow(ar);
+    const runs = "    runs-on: ubuntu-24.04\n";
+    const nl = "\n";
+    const stage_head = "    needs: [release, mopm-stage]\n" ++ PROD_GATE ++ nl ++ runs ++ "    environment: prod\n";
+    const test_head = "    needs: prod-stage\n" ++ PROD_GATE ++ nl ++ runs ++ "    environment: build\n";
+    const commit_head = "    needs: prod-test\n" ++ PROD_GATE ++ nl ++ runs ++ "    environment: prod\n";
+    const smoke_head = "    needs: prod-commit\n" ++ PROD_GATE ++ nl ++ runs ++ "    timeout-minutes: 30\n";
+    const abort_head = "    needs: [prod-stage, prod-test, prod-commit]\n" ++ ABORT_IF ++ nl ++ runs ++ "    environment: prod\n";
+
+    // the old token job is not back, and no job reads a secret
+    try expectRefused(ar, try replaced(ar, text, "  mopm-stage-beta:\n", "  mopm-publish:\n    runs-on: ubuntu-24.04\n\n  mopm-stage-beta:\n"), "still there");
+    try expectRefused(ar, try replaced(ar, text, PROD_STAGE_RUN ++ nl, "        env:\n          MOPM_TOKEN: x\n" ++ PROD_STAGE_RUN ++ nl), "reads a secret");
+    try expectRefused(ar, try replaced(ar, text, PROD_VERIFY_RUN ++ nl, "        env:\n          X: ${{ secrets.OTHER }}\n" ++ PROD_VERIFY_RUN ++ nl), "reads a secret");
+    // the verify tool is built once by mopm-stage and handed on
+    try expectRefused(ar, try replaced(ar, text, STAGE_BUILD_VERIFY ++ nl, ""), "build release_staged_verify once");
+    try expectRefused(ar, try replaced(ar, text, STAGE_UPLOAD_VERIFY ++ nl, ""), "hand release_staged_verify");
+
+    // the gate of each job, and the whole if
+    const gates = [_][]const u8{ stage_head, test_head, commit_head, smoke_head };
+    for (gates) |head| {
+        const wrong = [_][]const u8{
+            "    if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n",
+            "    if: github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true'\n",
+            "    if: always()\n",
+            "",
+        };
+        for (wrong) |w| try expectRefused(ar, try replaced(ar, text, head, try swapGate(ar, head, w)), "the if is not the expected gate");
+    }
+    // the dependencies: the chain, and the abort sees all three jobs that can fail
+    try expectRefused(ar, try replaced(ar, text, test_head, "    needs: [prod-stage, release]\n" ++ test_head["    needs: prod-stage\n".len..]), "prod-test: needs");
+    try expectRefused(ar, try replaced(ar, text, commit_head, "    needs: prod-stage\n" ++ commit_head["    needs: prod-test\n".len..]), "prod-commit: needs");
+    try expectRefused(ar, try replaced(ar, text, smoke_head, "    needs: prod-test\n" ++ smoke_head["    needs: prod-commit\n".len..]), "prod-smoke: needs");
+    try expectRefused(ar, try replaced(ar, text, abort_head, "    needs: prod-stage\n" ++ abort_head["    needs: [prod-stage, prod-test, prod-commit]\n".len..]), "prod-abort: needs");
+    try expectRefused(ar, try replaced(ar, text, abort_head, "    needs: [prod-stage, prod-commit]\n" ++ abort_head["    needs: [prod-stage, prod-test, prod-commit]\n".len..]), "prod-abort: needs");
+    // the abort condition: a failure or a cancel, the gate, and a stage that ran
+    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true' && needs.prod-stage.result != 'skipped'\n"), "prod-abort: the if");
+    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true' && needs.prod-stage.result != 'skipped'\n"), "prod-abort: the if");
+    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: (failure() || cancelled()) && vars.MOPM_PUBLISH_ENABLED == 'true' && needs.prod-stage.result != 'skipped'\n"), "prod-abort: the if");
+    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: (failure() || cancelled()) && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true'\n"), "prod-abort: the if");
+    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true' && needs.prod-stage.result != 'skipped'\n"), "prod-abort: the if");
+
+    // the environments: prod for the registry, build for the test, none for the smoke
+    try expectRefused(ar, try replaced(ar, text, stage_head, stage_head[0 .. stage_head.len - "    environment: prod\n".len] ++ "    environment: beta\n"), "prod-stage: environment");
+    try expectRefused(ar, try replaced(ar, text, commit_head, commit_head[0 .. commit_head.len - "    environment: prod\n".len]), "prod-commit: environment");
+    try expectRefused(ar, try replaced(ar, text, abort_head, abort_head[0 .. abort_head.len - "    environment: prod\n".len] ++ "    environment: build\n"), "prod-abort: environment");
+    try expectRefused(ar, try replaced(ar, text, test_head, test_head[0 .. test_head.len - "    environment: build\n".len] ++ "    environment: prod\n"), "prod-test: environment");
+    try expectRefused(ar, try replaced(ar, text, test_head, test_head[0 .. test_head.len - "    environment: build\n".len]), "prod-test: environment");
+    try expectRefused(ar, try replaced(ar, text, smoke_head, smoke_head[0 .. smoke_head.len - "    timeout-minutes: 30\n".len] ++ "    environment: prod\n    timeout-minutes: 30\n"), "prod-smoke holds an environment");
+
+    // the permissions: id-token where an identity is exchanged, nothing more anywhere
+    const perms_commit = "    timeout-minutes: 60\n    permissions:\n      contents: read\n      id-token: write\n";
+    try expectRefused(ar, try replaced(ar, text, perms_commit, "    timeout-minutes: 60\n    permissions:\n      contents: read\n"), "prod-commit: id-token: write is missing");
+    try expectRefused(ar, try replaced(ar, text, perms_commit, perms_commit ++ "      packages: write\n"), "prod-commit: permissions hold more");
+    const perms_smoke = "    timeout-minutes: 30\n    permissions:\n      contents: read\n    steps:\n      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1\n        with:\n          name: mopm-staged-${{ github.sha }}\n          path: ${{ runner.temp }}/mopm-publish\n      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1\n        with:\n          name: mopm-prod-committed";
+    try expectRefused(ar, try replaced(ar, text, perms_smoke, "    timeout-minutes: 30\n    permissions:\n      contents: read\n      id-token: write\n" ++ perms_smoke["    timeout-minutes: 30\n    permissions:\n      contents: read\n".len..]), "prod-smoke: id-token: write is held");
+    const perms_stage = "    timeout-minutes: 30\n    permissions:\n      contents: read\n      id-token: write\n    steps:\n      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1\n        with:\n          name: mopm-staged-${{ github.sha }}\n          path: ${{ runner.temp }}/mopm-publish\n      - name: mopm is executable\n        run: chmod +x \"$RUNNER_TEMP/mopm-publish/mopm\"\n      - name: mopm publish --staged --oidc --no-commit";
+    try expectRefused(ar, try replaced(ar, text, perms_stage, "    timeout-minutes: 30\n    permissions:\n      contents: read\n    steps:" ++ perms_stage["    timeout-minutes: 30\n    permissions:\n      contents: read\n      id-token: write\n    steps:".len..]), "prod-stage: id-token: write is missing");
+    try expectRefused(ar, try replaced(ar, text, perms_stage, "    timeout-minutes: 30\n    permissions:\n      contents: write\n      id-token: write\n    steps:" ++ perms_stage["    timeout-minutes: 30\n    permissions:\n      contents: read\n      id-token: write\n    steps:".len..]), "prod-stage: permissions are not contents: read");
+
+    // the stage: --oidc --no-commit, once, no farm, and the directory kept even on a failed step
+    try expectRefused(ar, try replaced(ar, text, " --registry prod --oidc --no-commit'\n", " --registry prod --oidc'\n"), "prod-stage does not run");
+    try expectRefused(ar, try replaced(ar, text, " --registry prod --oidc --no-commit'\n", " --registry prod --no-commit'\n"), "prod-stage does not run");
+    try expectRefused(ar, try replaced(ar, text, " --registry prod --oidc --no-commit'\n", " --registry beta --oidc --no-commit'\n"), "prod-stage does not run");
+    try expectRefused(ar, try replaced(ar, text, PROD_STAGE_RUN ++ nl, PROD_STAGE_RUN ++ nl ++ "      - run: ./buck2 build //x\n"), "prod-stage joins the farm");
+    try expectRefused(ar, try replaced(ar, text, PROD_STAGE_RUN ++ nl, PROD_STAGE_RUN ++ nl ++ "      - run: \"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged x --registry prod --oidc --no-commit\n"), "more than once");
+    try expectRefused(ar, try replaced(ar, text, "        if: always()\n        with:\n" ++ PROD_STAGED_ARTIFACT, "        with:\n" ++ PROD_STAGED_ARTIFACT), "needs if: always()");
+    try expectRefused(ar, try replaced(ar, text, "        if: always()\n        with:\n" ++ PROD_STAGED_ARTIFACT, "        if: success()\n        with:\n" ++ PROD_STAGED_ARTIFACT), "needs if: always()");
+
+    // the test: the files prod-stage kept, verified, then the e2e on what was verified; no identity
+    const tst_download = "      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1\n        with:\n" ++ PROD_STAGED_ARTIFACT ++ "\n          path: ${{ runner.temp }}/prod-test/staged\n";
+    const tool_step = "      - name: build the staged-set verify tool\n        uses: ./.github/actions/buck2-farm\n        with:\n" ++ PROD_BUILD_VERIFY ++ nl ++ E2E_ASSERT ++ nl;
+    const verify_step = "      - name: check the staged files against the plan\n" ++ PROD_VERIFY_RUN ++ nl;
+    const e2e_step = "      - name: the README e2e against the staged files\n        uses: ./.github/actions/buck2-farm\n        with:\n" ++ PROD_E2E_RUN ++ nl ++ E2E_ASSERT ++ nl;
+    try expectRefused(ar, try replaced(ar, text, tst_download, ""), "does not download the set prod-stage uploaded");
+    try expectRefused(ar, try replaced(ar, text, tst_download, "      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1\n        with:\n          name: mopm-staged-${{ github.sha }}\n          path: ${{ runner.temp }}/prod-test/staged\n"), "not the one prod-stage uploaded");
+    const without_download = try replaced(ar, text, tst_download, "");
+    try expectRefused(ar, try replaced(ar, without_download, verify_step, verify_step ++ tst_download), "before it has the files");
+    try expectRefused(ar, try replaced(ar, text, verify_step, ""), "does not verify the staged files");
+    try expectRefused(ar, try replaced(ar, text, PROD_VERIFY_RUN, "        run: '\"$RUNNER_TEMP/prod-test/release_staged_verify\" verify --staged \"$RUNNER_TEMP/prod-test/staged\" --out release/elsewhere'"), "does not verify the staged files");
+    try expectRefused(ar, try replaced(ar, text, PROD_VERIFY_RUN, "        run: '\"$RUNNER_TEMP/prod-test/release_staged_verify\" verify --staged \"$RUNNER_TEMP/prod-test/staged\" --out release/staged_set || true'"), "prod-test ignores a failure");
+    try expectRefused(ar, try replaced(ar, text, tool_step ++ verify_step, verify_step ++ tool_step), "verifies before the farm is joined and the tool built");
+    try expectRefused(ar, try replaced(ar, text, verify_step ++ e2e_step, e2e_step ++ verify_step), "runs the e2e before the verification");
+    try expectRefused(ar, try replaced(ar, text, "-c komira_release.staged=stage //release/readme_e2e/verify:all\n", "//release/readme_e2e/verify:all\n"), "does not run the e2e on the verified set");
+    try expectRefused(ar, try replaced(ar, text, "-c komira_release.staged=stage //release/readme_e2e/verify:all\n", "-c komira_release.staged=beta //release/readme_e2e/verify:all\n"), "does not run the e2e on the verified set");
+    try expectRefused(ar, try replaced(ar, text, verify_step, verify_step ++ "      - run: cp x release/staged_set/y\n"), "other than in the one verify step");
+    try expectRefused(ar, try replaced(ar, text, verify_step, verify_step ++ verify_step), "other than in the one verify step");
+    try expectRefused(ar, try replaced(ar, text, PROD_E2E_RUN ++ nl ++ E2E_ASSERT ++ nl, PROD_E2E_RUN ++ nl), "not asserted remote");
+    try expectRefused(ar, try replaced(ar, text, PROD_BUILD_VERIFY ++ nl ++ E2E_ASSERT ++ nl, PROD_BUILD_VERIFY ++ nl), "not asserted remote");
+    try expectRefused(ar, try replaced(ar, text, e2e_step, e2e_step ++ "        continue-on-error: true\n"), "prod-test ignores a failure");
+    const writers = [_][]const u8{ "mopm publish --staged x --registry prod", "mopm yank komira_hash 0.1.1", "mopm login --registry prod", "curl -X PUT https://x.test/y", "curl --request POST https://x.test/y", "wget --post-data=x https://x.test/y", "mopm-x --oidc" };
+    inline for (writers) |cmd| try expectRefused(ar, try replaced(ar, text, e2e_step, "      - run: " ++ cmd ++ "\n" ++ e2e_step), "prod-test publishes, yanks");
+
+    // the commit: the same command without --no-commit, on the directory prod-stage kept, with an identity of its own
+    try expectRefused(ar, try replaced(ar, text, PROD_COMMIT_RUN, "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-prod/staged\" --registry prod --oidc --no-commit'"), "prod-commit does not run");
+    try expectRefused(ar, try replaced(ar, text, PROD_COMMIT_RUN, "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-prod/staged\" --registry prod'"), "prod-commit does not run");
+    try expectRefused(ar, try replaced(ar, text, PROD_COMMIT_RUN, "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-publish/staged\" --registry prod --oidc'"), "prod-commit does not run");
+    try expectRefused(ar, try replaced(ar, text, PROD_COMMIT_RUN, PROD_COMMIT_RUN ++ nl ++ "      - run: \"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged x --registry prod --oidc --abort"), "prod-commit does not commit");
+    try expectRefused(ar, try replaced(ar, text, "          name: mopm-prod-staged-${{ github.sha }}\n          path: ${{ runner.temp }}/mopm-prod/staged\n      - name: mopm is executable\n        run: chmod +x \"$RUNNER_TEMP/mopm-publish/mopm\"\n      - name: mopm publish --staged --oidc\n", "          name: mopm-prod-nothing-${{ github.sha }}\n          path: ${{ runner.temp }}/mopm-prod/staged\n      - name: mopm is executable\n        run: chmod +x \"$RUNNER_TEMP/mopm-publish/mopm\"\n      - name: mopm publish --staged --oidc\n"), "prod-commit does not download the directory");
+    try expectRefused(ar, try replaced(ar, text, PROD_COMMIT_RUN, PROD_COMMIT_RUN ++ nl ++ "      - run: ./buck2 build //x"), "prod-commit joins the farm");
+
+    // the abort: --abort, on the directory with the state, once
+    try expectRefused(ar, try replaced(ar, text, PROD_ABORT_CMD, "            \"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-prod/staged\" --registry prod --oidc"), "prod-abort does not run");
+    try expectRefused(ar, try replaced(ar, text, PROD_ABORT_CMD, "            \"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-prod/staged\" --registry prod --oidc --abort --no-commit"), "prod-abort does not run");
+    try expectRefused(ar, try replaced(ar, text, PROD_ABORT_CMD, PROD_ABORT_CMD ++ "\n            mopm yank --group g --registry prod --reason x"), "stages, dry-runs or yanks");
+
+    // the smoke: reads the committed directory and the prod index, and only reads
+    try expectRefused(ar, try replaced(ar, text, PROD_SMOKE_RUN, "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged_verify\" smoke --staged \"$RUNNER_TEMP/prod-smoke/committed\" --config-url https://api.beta.mopm.dev/index/config.json --attempts 5 --delay 30'"), "prod-smoke does not run");
+    try expectRefused(ar, try replaced(ar, text, PROD_SMOKE_RUN, "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged_verify\" smoke --staged \"$RUNNER_TEMP/prod-smoke/committed\" --config-url https://api.mopm.dev/index/config.json --attempts 5 --delay 30 || true'"), "prod-smoke ignores a failure");
+    try expectRefused(ar, try replaced(ar, text, PROD_SMOKE_RUN, PROD_SMOKE_RUN ++ "\n      - run: mopm yank --group g --registry prod --reason x"), "only reads");
+    try expectRefused(ar, try replaced(ar, text, PROD_SMOKE_RUN, PROD_SMOKE_RUN ++ "\n      - run: ./mopm publish --staged x --registry prod --oidc"), "only reads");
+    try expectRefused(ar, try replaced(ar, text, PROD_SMOKE_RUN, PROD_SMOKE_RUN ++ "\n      - uses: ./.github/actions/farm-connect"), "prod-smoke joins the farm");
 }
 
 test "a comment naming MOPM_TOKEN does not count, a line does" {
