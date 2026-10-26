@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-The mutable data-graph store and its ingest. This is parts 1 to 5 of the package
+The mutable data-graph store and its ingest. This is parts 1 to 6 of the package
 described in
 [the knowledge graph port](https://github.com/komira-ai/komira/blob/main/docs/design/knowledge_graph_port.md):
 bi-temporal edges, entity resolution and the source facet, the three seams
@@ -10,8 +10,9 @@ through which a host supplies a model (`Embedder`, `LlmClient`, `Extractor`),
 each with a stub for tests, an extractor driven by rules the host supplies, and
 the cursor that records how far an incremental read of a source got. The
 working set loads and rewrites snapshots, and erasure of a partition, the warm
-cache, compaction and embedding top-k work on a snapshot store; a later part adds
-ingest.
+cache, compaction and embedding top-k work on a snapshot store. Ingest takes one
+episode of source text through extraction, entity resolution and bi-temporal
+edges to a new snapshot; a later part adds the structured path.
 
 The graph keeps every fact on two time axes: event time (when it held in the
 world) and system time (when the graph learned it and when it learned it no
@@ -112,6 +113,27 @@ deleted, so "what did we believe at time T" stays answerable.
   id, keeping the best k in a bounded heap. It refuses `k <= 0`, a query of
   another dimension than the graph's and a query with a non-finite component; a
   stored row with a non-finite component is skipped, never ranked.
+- `ingest_config`, `ingest_gleaning`, `ingest_resolve`, `ingest_edges`, `ingest`:
+  the episode path. `ingest_episode` (or `ingest_episode_into`, for a working set
+  the caller keeps) takes an `EpisodeInput` (a source id, a partition id, the
+  text, the system time, the event time and an optional opaque facet and facet
+  source) and an `IngestConfig`. First the change gate: a body whose hash equals
+  the one stored for its `(partition_id, uuid)` is skipped, the head returned and
+  no model called. Otherwise `run_gleaning` extracts with the `LlmClient`, asking
+  again (up to `max_gleanings` times, with the entities found so far) until a
+  pass adds nothing; `resolve_entities` embeds each mention and resolves it
+  against the `cosine_k` nearest entities of its partition by the dedup cascade
+  (an exact or fuzzy match is the existing entity, a borderline one goes to
+  `judge_same_entity`, anything else is a new entity that keeps its name
+  embedding); `apply_edges` turns each triple into an open edge, puts the edges it
+  overlaps to `judge_contradiction` and closes the confirmed ones, adds nothing
+  for a repeat of a live edge, and mints an entity for an endpoint nothing named;
+  `write_extraction` appends the episode row and writes a base on an empty
+  lineage (with the index a base lacks) or the delta since the load, or, when a
+  delta cannot say the closure, a new base. Then the body's hash is recorded.
+  The embedder's dimension must be the graph's; a wrong one, an error from the
+  model or the embedder, and a knob no ingest can run with (`IngestConfig.check`)
+  all end the ingest before the first write.
 
 A facet, a source, a predicate and an entity name are opaque strings the host
 supplies: the package fixes no vocabulary. Prompts are values the caller passes
@@ -578,6 +600,68 @@ assert_equal(near[0].nid, 1)
 assert_equal(near[1].nid, 0)
 ```
 
+One episode through the whole path. The model and the embedder are stubs; a host
+passes its own conformers of `LlmClient` and `Embedder`. The episode time (here
+1000) is the caller's clock, and the second call, with the same source id and the
+same text, is skipped:
+
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+-->
+```mojo
+from komira_kg import (
+    EpisodeInput,
+    IngestConfig,
+    SnapshotWorkingSet,
+    StubEmbedder,
+    StubLlmClient,
+    ingest_episode,
+)
+from komira_kg_format import (
+    EntityMention,
+    Extraction,
+    KgSnapshotStore,
+    TS_OPEN_SENTINEL,
+    Triple,
+)
+from komira_objectstore.shared_in_memory_conditional_store import (
+    SharedInMemoryConditionalStore,
+)
+
+var text = "Ada Lovelace works at Acme Labs."
+var mentions = List[EntityMention]()
+mentions.append(EntityMention("Ada Lovelace", "person", ""))
+mentions.append(EntityMention("Acme Labs", "org", ""))
+var triples = List[Triple]()
+triples.append(
+    Triple("Ada Lovelace", "works_at", "Acme Labs", "Ada works at Acme", 100, TS_OPEN_SENTINEL)
+)
+var llm = StubLlmClient()
+llm.add_extraction_any_context(text, Extraction(mentions^, triples^))
+var embedder = StubEmbedder(8)
+
+var store = KgSnapshotStore[SharedInMemoryConditionalStore](
+    SharedInMemoryConditionalStore(), "graph"
+)
+var episode = EpisodeInput("note-1", "workspace-a", text, 1000, 900, "note", "notes")
+var head = ingest_episode(store, episode, llm, embedder, IngestConfig.default())
+assert_equal(store.latest_snapshot_id(), head)
+
+var graph = SnapshotWorkingSet.load_latest(store)
+assert_equal(len(graph.entities), 2)
+assert_equal(graph.entities[0].name, "Ada Lovelace")
+assert_equal(len(graph.edges), 1)
+assert_equal(graph.edges[0].created_at, 1000)
+assert_equal(graph.edges[0].reference_time, 900)
+assert_equal(graph.episodes[0].facet, "note")
+
+# The same source id and text: nothing changed, no model is asked.
+var again = ingest_episode(
+    store, episode, StubLlmClient(), embedder, IngestConfig.default()
+)
+assert_equal(again, head)
+```
+
 ## Limits
 
 `dedup_resolve` is pure and stateless: it tests the candidates it is given, so
@@ -645,3 +729,18 @@ A cursor's object key is a 64-bit hash of its partition id and source key. The
 object records both strings and a read that finds different ones raises, so a
 collision is an error and never a wrong cursor. `CursorStore.list_cursors` reads
 every cursor object under the prefix; it is for small sets of sources.
+
+An ingest assumes one writer per lineage. `ingest_episode_into` expects the
+working set to be the head's state; when the delta cannot say a closure it
+writes the whole set as a new base, which would not carry a delta another writer
+appended in between (it refuses if the head moved during the call, not if the
+set was already stale). After an error the working set may be half edited and is
+to be discarded. The change gate's hash is saved after the snapshot, so a failure
+of that one save leaves the episode stored and ingested again on the next call;
+its entities resolve to themselves and a repeated live edge is not added again,
+and only the episode row repeats. The `edges` table stores no predicate, so a
+stored edge reads back with "" and a live repeat is recognized by its endpoints,
+fact and source alone; `match_predicate` therefore helps only within the run that
+built the edges. A triple's own end time is not read: a new edge is open until a
+later fact closes it. Candidate generation scans every entity of the working set
+for each mention, O(entities) per mention.

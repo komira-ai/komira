@@ -1,8 +1,9 @@
 # =============================================================================
-# komira_kg -- the mutable data-graph store and its ingest (parts 1 to 5:
+# komira_kg -- the mutable data-graph store and its ingest (parts 1 to 6:
 #   bi-temporal edges, entity resolution, the source facet, the model seams, the
 #   rule-driven extractor, the source cursor store and the in-memory working
-#   set, erasure, the warm cache, compaction and embedding top-k).
+#   set, erasure, the warm cache, compaction, embedding top-k and the episode
+#   ingest path).
 # =============================================================================
 #
 #   * bitemporal       -- `WorkingEdge`, `open_edge`,
@@ -51,6 +52,14 @@
 #                         (`compact_commit_at` holds the fold open).
 #   * embedding_topk   -- `resolve_embedding_topk`: the nearest entities to a
 #                         vector, from the deltas' embedding projection.
+#   * ingest_config    -- `IngestConfig` (the knobs of one ingest) and
+#                         `EpisodeInput` (one source text with its provenance).
+#   * ingest_gleaning  -- `run_gleaning`: the bounded extraction loop.
+#   * ingest_resolve   -- `resolve_entities`, `existing_nid_for_name`,
+#                         `mint_entity`: mentions to entities of the working set.
+#   * ingest_edges     -- `apply_edges`: triples to bi-temporal edges.
+#   * ingest           -- `ingest_episode`, `ingest_episode_into`,
+#                         `write_extraction`: extract, resolve, apply, store.
 #
 # Depends on `komira_kg_format`, `komira_json` and `komira_objectstore` and their
 # closure (the snapshot store, the schemas, the delta codec and the Parquet reader). Reads no
@@ -157,3 +166,13 @@ from .compaction import (
     maybe_compact_chain,
 )
 from .embedding_topk import EmbeddingCandidate, resolve_embedding_topk
+from .ingest_config import EpisodeInput, IngestConfig
+from .ingest_gleaning import run_gleaning
+from .ingest_resolve import existing_nid_for_name, mint_entity, resolve_entities
+from .ingest_edges import apply_edges
+from .ingest import (
+    CROSS_UNIT_CONTEXT_MAX,
+    ingest_episode,
+    ingest_episode_into,
+    write_extraction,
+)

@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The mutable data-graph store and its ingest, parts 1 to 5 (the second of the
+# The mutable data-graph store and its ingest, parts 1 to 6 (the second of the
 # packages in docs/design/knowledge_graph_port.md): bi-temporal edges (a replaced
 # fact is closed, not erased), entity resolution (name similarity, the dedup
 # cascade and a directed alias map), the source facet with its tombstone set, the
@@ -8,7 +8,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # extractor (a rule set is host data), the source cursor store and the
 # in-memory working set that loads a snapshot or a delta chain and writes back a
 # base or a delta, erasure of a partition, the warm cache, compaction and
-# embedding top-k. It depends on
+# embedding top-k and the episode ingest path (extract with a bounded gleaning
+# loop, resolve entities, apply bi-temporal edges, store a base or a delta). It depends on
 # komira_kg_format (for the open-interval marker), komira_json (for the facet's
 # attrs JSON) and komira_objectstore (the cursor store rides its conditional-write
 # trait), and on their closure; it reads no clock and no environment, and calls no
@@ -46,7 +47,16 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # writer's delta before the bootstrap; test_warm_cache keys the resident merge by
 # the head and lends it read-only; test_embedding_topk ranks by cosine with ties
 # by node id (against a full sort), skips a non-finite stored row and refuses
-# k <= 0, a wrong or non-finite query and a wrong cell.
+# k <= 0, a wrong or non-finite query and a wrong cell; test_ingest_gleaning folds
+# gleaning passes, stops on a pass with nothing new and seeds the model with the
+# known entities; test_ingest_resolve resolves mentions to existing, judged or new
+# entities, per partition and within the candidate count; test_ingest_edges
+# resolves endpoints, dates undated triples, closes a contradicted edge and adds
+# no repeat of a live one; test_ingest_episode ingests an episode to its nodes,
+# edges and provenance, skips an unchanged body, appends deltas from a resident
+# set and writes a full base when a delta cannot say a closure; test_ingest_failure
+# refuses a wrong embedding dimension and leaves the store unchanged when the
+# model or the embedder fails.
 mojo_library(
     name = "komira_kg",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -96,6 +106,11 @@ mojo_library(
         "tests/test_erase.mojo",
         "tests/test_erase_race.mojo",
         "tests/test_extractor.mojo",
+        "tests/test_ingest_edges.mojo",
+        "tests/test_ingest_episode.mojo",
+        "tests/test_ingest_failure.mojo",
+        "tests/test_ingest_gleaning.mojo",
+        "tests/test_ingest_resolve.mojo",
         "tests/test_llm_client.mojo",
         "tests/test_name_similarity.mojo",
         "tests/test_rewrite_repair.mojo",
