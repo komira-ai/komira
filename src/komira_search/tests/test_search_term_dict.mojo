@@ -440,7 +440,7 @@ def _read_u64(imm buf: List[UInt8], pos: Int) -> UInt64:
 # -----------------------------------------------------------------------------
 
 
-def _uleb_byte_count(v: Int) -> Int:
+def _uleb_byte_count(v: Int) raises -> Int:
     var out = List[UInt8]()
     write_uleb128(v, out)
     return len(out)

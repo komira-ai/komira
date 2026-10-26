@@ -104,7 +104,19 @@ struct ThriftCompactWriter(Movable):
 
     @always_inline
     def write_varint(mut self, value: Int):
-        """Write unsigned variable-length integer (ULEB128)."""
+        """Write unsigned variable-length integer (ULEB128).
+
+        Total: it ends for every input. A negative `value` is written as the
+        ten-byte varint of its 64-bit pattern; no caller passes a length or a
+        count that is negative (they come from `len()`).
+
+        This body is kept as it was, not routed through
+        `komira_buffer.write_uleb128_u64`: that routing wrote ten bytes for
+        the i32 field whose zig-zag image is 4294967295 (a CRC of 0x80000000),
+        so the page CRC tests in test_advanced_writer_roundtrip.mojo read a
+        malformed varint, while `write_uleb128` encodes 4294967295 in five
+        bytes (test_write_uleb128.mojo). The cause was not found.
+        """
         var v = value
         if v < 0:
             var uv = UInt64(v)
