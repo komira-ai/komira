@@ -1,10 +1,8 @@
 # The knowledge graph port: packages, seams, engine dependencies and PR order
 
-Status: design; PRs 1 to 8, 13, 14 and 18 are in the tree. It decides how the existing data-graph library (a property graph built from
+Status: design. It decides how the existing data-graph library (a property graph built from
 documents and records, with a bi-temporal store and a read path) comes into komira as small, separately
-tested packages. Of the packages named here only parts 1 to 5 of [`komira_kg_format`](../../src/komira_kg_format/)
-(its `embedding`, `ingest_types`, `manifest_body`, `schemas`, `cosine`, `query_result`, `delta_body`, `delta_codec`, `source_fingerprint`, `chunk_kind`, `compaction_policy`, `snapshot_view`, `chain_view`, `snapshot_store` and `search` modules) and parts 1 to 3 of
-[`komira_kg`](../../src/komira_kg/) (`bitemporal`, `name_similarity`, `dedup`, `alias_map`, `source_facet`, `embedder`, `extractor`, `llm_client`, `rule`, `rule_pattern`, `rule_scan`, `rule_extractor` and `cursor_store`), [`komira_kg_mode`](../../src/komira_kg_mode/), [`komira_kg_spec`](../../src/komira_kg_spec/) and [`komira_kg_enrich`](../../src/komira_kg_enrich/) are in the tree yet. The code graph
+tested packages. [architecture.md](../architecture.md) is the record of which of these packages are in the tree. The code graph
 [`komira_kg_code`](../../src/komira_kg_code/) is a different thing and is untouched (see
 [knowledge_graph.md](../knowledge_graph.md)).
 
@@ -100,12 +98,14 @@ exact scans, the out-degree count and rank fusion) read parquet bytes and score 
 - JSON payloads use `komira_json`; this package has no JSON reader of its own.
 - `schemas`: `episodes_schema`, `entities_schema`, `edges_schema`, `edges_tombstone_schema`,
   `entities_embedding_schema`, `communities_schema`, the community-report schema and the schema-version
-  constants. There is no fixed embedding dimension: the writer takes the dimension as an argument and the
-  manifest records it. The episode table carries an opaque `facet` string column (not an enumerated
+  constants. There is no fixed embedding dimension and it is not a schema argument: an embedding is a
+  variable-length run of packed f32 bytes in a LARGE_STRING cell, and a reader checks its length against the
+  dimension the manifest records (`unpack_embedding_checked`). The episode table carries an opaque `facet` string column (not an enumerated
   vocabulary), and the partition of a row is a `partition_id`. Nothing is published yet, so the schema
   versions are pinned fresh in PR 2.
 - `manifest_body`: `KgManifestBody` (with the embedding dimension), `KgTableEntry`,
-  `KG_SNAPSHOT_FORMAT_VERSION`.
+  `KG_SNAPSHOT_FORMAT_VERSION`. The manifest format version is 2, the only layout; a body of any other
+  version is refused. The writer supplies the embedding dimension and there is no default.
 - `delta_body`, `delta_codec`: `encode_delta_table_object`, `delta_object_is_framed`,
   `delta_object_parquet_bytes`, `decode_framed_delta_to_batch`. `delta_body` also holds the chunk bodies `KgDeltaBody`,
   `KgChainBody` and `KgNameIndexBody` and `kg_chunk_is_chain_head`; each chunk kind has its own format
@@ -167,7 +167,7 @@ store never reads a wall clock itself; see the testing plan.
   id and an optional owner id, plain strings) with two ranks, shared and owner, described as scope
   containment and not as authorization. Inference bindings keep the transport label, endpoint and model id
   as opaque values; the rule that an endpoint must belong to the graph's organisation becomes an injected
-  `EndpointPolicy` that allows everything by default. A source binding names an opaque source id. The
+  `EndpointPolicy` that allows everything by default. A source binding names an opaque source id, and an injected `SourcePolicy` (beside `EndpointPolicy`, allowing everything by default) decides which sources a graph may be built from. The
   host's resource-type registration is not ported. Depends on `komira_kg_mode`.
 - `komira_kg_llm`: `ChatTransport` and `EmbedTransport` (post a body, return the body; the address, the
   request path, the timeout value and an optional `AuthHeaderProvider` are configuration values),
@@ -244,6 +244,7 @@ ported names):
 | time | an `Int64` milliseconds argument, or the module's existing clock parameter | the caller; `komira_clock` in production, a constant in tests |
 | `EnrichmentSender` | trait: deliver one enrichment item | `FakeEnrichmentSender` (tests), a host |
 | `EndpointPolicy` | trait: may this inference endpoint be bound; allows everything by default | a host |
+| `SourcePolicy` | trait: may a graph in this scope be built from this source; allows everything by default | a host |
 
 ## What does each package need from the engine?
 
@@ -288,15 +289,15 @@ that brings it, at the seams named. A package's `deps` is stated in its first PR
 
 | PR | contents | lines | deps | tests that come with it |
 |---|---|---:|---|---|
-| 0 | `komira_parquet`: a public from-bytes function that decodes a whole in-memory Parquet file to one batch (the footer, each row group, concatenated in file order). It only adds the API; three private test copies of the same function (two in `komira_telemetry_store` tests, one in `komira_log_index` tests) may be migrated to it later | 150 | `komira_parquet` | round trip through the writer for every column type the graph schemas use; truncated file; empty file; a bad magic |
+| 0 | `komira_parquet`: a public from-bytes function that decodes a whole in-memory Parquet file to one batch (the footer, each row group, concatenated in file order; it refuses malformed input cleanly). The reader returns STRING for a LARGE_STRING column, and the writer writes every column type the graph uses (STRING, LARGE_STRING, INT64, FLOAT64) but no BINARY or nested types, which is why embeddings are packed bytes in LARGE_STRING cells. It only adds the API; three private test copies of the same function (two in `komira_telemetry_store` tests, one in `komira_log_index` tests) may be migrated to it later | 150 | `komira_parquet` | round trip through the writer for every column type the graph schemas use; truncated file; empty file; a bad magic |
 | 1 | `komira_kg_format` part 1: `embedding`, `ingest_types`, `manifest_body` | 1,100 | none (standard library only) | pack and unpack are inverses for f32 and f64; a corrupt manifest is refused; manifest encode and decode round trip with the format version (2, the only layout) and carry the embedding dimension |
-| 2 | `komira_kg_format` part 2: `schemas`, `cosine`, `query_result` | 1,030 | part 1, `komira_arrow` and `komira_json` with their closure | every schema field and version is pinned by name; the embedding column takes its width from the dimension argument (two widths tested); the facet column holds any string; cosine of equal, orthogonal and zero vectors; top-k ties are ordered; result round trip with an arbitrary annotation kind and anchor |
+| 2 | `komira_kg_format` part 2: `schemas`, `cosine`, `query_result` | 1,030 | part 1, `komira_arrow` and `komira_json` with their closure | every schema field and version is pinned by name; embeddings are variable-length packed f32 bytes in LARGE_STRING cells, checked on read against the manifest dimension (two dimensions tested); the facet column holds any string; cosine of equal, orthogonal and zero vectors; top-k ties are ordered; result round trip with an arbitrary annotation kind and anchor |
 | 3 | `komira_kg_format` part 3: `delta_body`, `delta_codec`, `source_fingerprint` | 1,280 | parts 1-2, parquet writer, objectstore | framed and parquet delta objects both decode; a fingerprint changes when one byte of content changes |
 | 4 | `komira_kg_format` part 4: `snapshot_store` (974 lines; split into store, view and chain) | 980 | parts 1-3, objectstore | base then delta chain read back; a lost compare-and-set race is retried and reported; compaction folds and keeps the reader's pinned snapshot readable |
 | 5 | `komira_kg_format` part 5: `search` (the two exact scans, `edge_out_degree`, `rrf_fuse`) | 350 | parts 2 and 4, PR 0 | similarity top-k equals `cosine_topk` over the same rows; full-text counts on stated rows; `rrf_fuse` on stated ranks; an empty table |
 | 6 | `komira_kg` part 1: `bitemporal`, `alias_map`, `dedup`, source-facet helpers | 1,300 | `komira_kg_format` | an invalidation closes the overlapping edge and keeps the old system-time row; dedup matches, creates, or asks for judgment on stated inputs; alias resolution is stable under reordering; a tombstone for one source and facet leaves other facets of that source alone |
 | 7 | `komira_kg` part 2: `Embedder`, `LlmClient`, `Extractor`, the stubs | 700 | part 1 | the stubs are deterministic and report their dimension; the stub extractor satisfies the trait |
-| 8 | `komira_kg` part 3: `RuleExtractor`, `CursorStore` | 1,000 | PRs 6 and 7 | a rule set on fixed text yields fixed triples; a rule set is data (two sets give two vocabularies from the same code); a cursor survives a write-read and a conflicting writer |
+| 8 | `komira_kg` part 3: `RuleExtractor`, `CursorStore` | 1,000 | PRs 6 and 7 | a rule set on fixed text yields fixed triples; a rule set is data (two sets give two vocabularies from the same code); a cursor survives a write-read and a conflicting writer. `RuleExtractor` rules are caller data, and `CursorStore` is written over a `ConditionalWriteStore`, so the package needs `komira_objectstore` |
 | 9 | `komira_kg` part 4: `snapshot_mut` values and working set (the 2,045-line file is split here and in PR 10: values plus the working set, then erase, warm cache, compaction and embedding top-k) | 1,300 | PRs 4 and 6, PR 0 | a mutation reads back identically; a snapshot read sees one consistent set of tables |
 | 10 | `komira_kg` part 5: erase, warm cache, compaction, embedding top-k | 620 | PR 9 | a mutation then compaction reads back identically before and after; compaction never deletes an object a pinned snapshot names; erasure of a partition removes every row and every embedding of it |
 | 11 | `komira_kg` part 6: `ingest` episode path and entity resolution (the 1,717-line file is split here and in PR 12) | 900 | PRs 8 and 10 | one episode produces the expected nodes, edges and provenance; a write with the wrong embedding dimension is refused |
@@ -393,8 +394,8 @@ Each question carries the recommended answer; the maintainers decide.
    [data_graph_storage.md](data_graph_storage.md) withdraws that for durable data in favour of Iceberg
    tables with a delta tail, and withdraws the sentinel for an open interval (`TS_OPEN_SENTINEL` today, a
    null there). Recommended: port the working lineage unchanged as the delta-tail layer (it is the part
-   that document keeps), keep schema version 1 with the sentinel, and add the Iceberg table writer and the
-   null-bound schema as schema version 2 in a later series once `komira_iceberg` lands (its four parts are open as PRs 1785, 1788, 1789 and 1790). Do not rewrite
+   that document keeps), keep the open-interval sentinel, `TS_OPEN_SENTINEL` (`Int64.MAX`, compared only through the constant and never as a literal), and add the Iceberg table writer and the
+   null-bound schema as a later schema version in a later series once `komira_iceberg` lands (its four parts are open as PRs 1785, 1788, 1789 and 1790). Do not rewrite
    storage and port in one step.
 2. **One package or two for the read side?** Recommended: two. `komira_kg_format` (no engine) and
    `komira_kg_read` (engine), because only three functions of the source read file run a plan on the engine and the rest is shared with the writer.
@@ -433,5 +434,5 @@ dedup scheme (MinHash with banded LSH) is tuned for names and short strings, not
 
 ## Where is the code?
 
-Parts 1 to 5 of `komira_kg_format` are in [`src/komira_kg_format/`](../../src/komira_kg_format/), parts 1 to 3 of `komira_kg` are in [`src/komira_kg/`](../../src/komira_kg/), `komira_kg_mode` is in [`src/komira_kg_mode/`](../../src/komira_kg_mode/), `komira_kg_spec` is in [`src/komira_kg_spec/`](../../src/komira_kg_spec/) and `komira_kg_enrich` is in [`src/komira_kg_enrich/`](../../src/komira_kg_enrich/); every other location above is the one the package will have. Source sizes quoted are measured on the
+[architecture.md](../architecture.md) is the record of what is in the tree and where; every other location above is the one the package will have. Source sizes quoted are measured on the
 source implementation; re-measure each before its PR, because a count carried in a design drifts.
