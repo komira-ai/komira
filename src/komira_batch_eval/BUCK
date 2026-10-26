@@ -37,6 +37,7 @@ mojo_library(
         "tests/test_evaluate_entry.mojo",
         "tests/test_filter_narrowed_batch_sizes.mojo",
         "tests/test_filter_null_collapse_semantics.mojo",
+        "tests/test_filter_null_literal_alias_is_null.mojo",
         "tests/test_float_class_projection_arm.mojo",
         "tests/test_in_list_null_contract.mojo",
         "tests/test_in_list_offset_honoring.mojo",

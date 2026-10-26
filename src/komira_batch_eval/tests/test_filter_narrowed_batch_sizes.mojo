@@ -53,6 +53,38 @@ def _check_size(n_rows: Int) raises:
             k += 1
 
 
+def _check_two_conjuncts(n_rows: Int) raises:
+    """`c0 >= 25 AND c1 < 103` narrows in two stages: the second conjunct is
+    evaluated only on the first one's survivors."""
+    var batch = _make_int_batch(n_rows)
+    var sel = evaluate_filter_narrowed(
+        batch, (col("c0") >= 25) & (col("c1") < 103)
+    )
+    var expected = 0
+    for i in range(n_rows):
+        if i % 50 >= 25 and i % 7 < 3:
+            expected += 1
+    assert_equal(sel.length(), expected)
+    var ptr = sel.indices._typed_ptr_mut()
+    var k = 0
+    for i in range(n_rows):
+        if i % 50 >= 25 and i % 7 < 3:
+            assert_equal(Int(ptr[k]), i)
+            k += 1
+
+
+def test_filter_narrowed_two_conjuncts_2048_rows() raises:
+    _check_two_conjuncts(2048)
+
+
+def test_filter_narrowed_two_conjuncts_30000_rows() raises:
+    _check_two_conjuncts(30000)
+
+
+def test_filter_narrowed_two_conjuncts_odd_size() raises:
+    _check_two_conjuncts(1237)
+
+
 def test_filter_narrowed_2048_rows() raises:
     _check_size(2048)
 
