@@ -175,7 +175,14 @@ def _make_batches(
         var rbb = RecordBatchBuilder.with_capacity(2)
         var sb = SchemaBuilder()
         if b == plain_batch:
-            rbb.add_column(Column.from_string(StringArray.from_strings(fx.vals)))
+            var valid = List[Bool](capacity=n)
+            for r in range(n):
+                valid.append(not fx.nulls[r])
+            rbb.add_column(
+                Column.from_string(
+                    StringArray.from_strings_with_validity(fx.vals, valid)
+                )
+            )
             sb.add_field(Field("k", ArrowType.STRING, nullable))
         else:
             rbb.add_column(fx.dict_col.share())
@@ -325,6 +332,16 @@ def test_unify_keeps_every_value_and_every_null() raises:
 # =============================================================================
 # §4 — MIXED DICTIONARY / PLAIN: DENSIFIED, EVERY VALUE RIGHT
 # =============================================================================
+
+
+def test_mixed_nullable_dictionary_and_plain_keeps_every_null() raises:
+    reset_concat_dict_unify_counters()
+    var vals = List[String]()
+    var nulls = List[Bool]()
+    var out = _drive(_make_batches(True, 21, vals, nulls))
+    assert_equal(concat_dict_densified_count(), 1, "ROUTE: densified")
+    assert_true(out.column_at(0).arrow_type == ArrowType.STRING, "STRING out")
+    _assert_values(out, vals, nulls, "mixed nullable")
 
 
 def test_mixed_dictionary_and_plain_is_densified() raises:

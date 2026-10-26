@@ -2,9 +2,8 @@
 # ConcatOptions -- the concat's route switches and diagnostics, as a VALUE
 # =============================================================================
 #
-# Every field is a switch that was once read from the process environment, once
-# per concat CALL. They are arguments now: the caller decides, and nothing in
-# this package reads the environment. The defaults are the shipped behaviour, so
+# Every field is a switch the caller passes per concat CALL; nothing in this
+# package reads the environment. The defaults are the shipped behaviour, so
 # a caller that passes nothing gets the shipped route.
 #
 # The first four are KILL SWITCHES and A/B arms, not feature flags: turning one
