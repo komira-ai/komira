@@ -12,8 +12,9 @@
 #   * `wait_on_address` returns at once when the word already differs from
 #     `expected`, returns after its timeout when it does not, and
 #     `wake_all_by_address` with no waiter wakes nobody: a wait that ignores
-#     `expected` or `timeout_ns` hangs this test (the build's test deadline
-#     turns that red).
+#     `expected` or `timeout_ns` returns a non-negative status here. The
+#     primitives are the ones `komira_async` defines; this package does not
+#     carry its own copy.
 # =============================================================================
 
 from std.sys.info import CompilationTarget
@@ -26,7 +27,7 @@ from komira_engine_runtime.spill.fnv1a import (
     fnv1a_64_over_span,
     fnv1a_64_partition_fingerprint,
 )
-from komira_engine_runtime.wake_primitives import (
+from komira_async.runtime.wake_primitives import (
     wait_on_address,
     wake_all_by_address,
 )

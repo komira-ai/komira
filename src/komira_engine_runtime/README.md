@@ -19,8 +19,7 @@ operator or a sink consumes but does not implement belongs here.
   predicate (`l1_chunk_sizing`) and grain geometry (`grain_geometry`).
 - The run and segment execution context (`run_context`, `segment_execution`):
   no optimizer, and one path for bounded and unbounded input.
-- Wake primitives (`wake_primitives`: wait on and wake an address, with an
-  optional timeout), counters, the FNV-1a hash (`spill.fnv1a`), and the small
+- Counters, the FNV-1a hash (`spill.fnv1a`), and the small
   shared row and column helpers (`row`, `group_ref`, `scan_source`,
   `streaming_morsel`, `dynamic_filter`, `band_sink`).
 

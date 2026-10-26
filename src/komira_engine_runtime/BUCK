@@ -4,7 +4,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # (measured once per host), hardware and topology detection and the async
 # runtime built from them, morsel sizing as a pure function of the host profile
 # and the segment (recorded in the physical plan), the dispatch-time fan-out
-# grain, the run and segment execution context, wake primitives, counters, and
+# grain, the run and segment execution context, counters, and
 # the small shared row and column helpers. It depends on no engine package
 # above it.
 mojo_library(
