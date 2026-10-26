@@ -21,10 +21,22 @@
 #   projection    full_embedding_projection holds one row per entity.
 #   high water    the node ids minted after a reload continue past the largest.
 #   edge keys     two edges between the same nodes created at different times are
-#                 closed independently.
+#                 closed independently. Two edges that share (src, dst, created_at)
+#                 cannot be told apart by a tombstone: a delta that would close one
+#                 of two open ones is refused (write a base instead), a base keeps
+#                 both closures exactly, and a delta can close the one open edge of
+#                 a shared key.
+#   diff views    added_entity_indices names the entities not loaded and
+#                 edited_entity_indices the loaded ones whose row changed.
 # =============================================================================
 
-from std.testing import TestSuite, assert_equal, assert_false, assert_true
+from std.testing import (
+    TestSuite,
+    assert_equal,
+    assert_false,
+    assert_raises,
+    assert_true,
+)
 
 from komira_kg import (
     SnapshotWorkingSet,
@@ -262,6 +274,97 @@ def test_edges_between_the_same_nodes_close_independently() raises:
     assert_equal(back.edges[0].invalid_at, TS_OPEN_SENTINEL)
     assert_equal(back.edges[1].invalid_at, 90)
     assert_equal(back.edges[1].expired_at, 100)
+
+
+def _twin_set() raises -> SnapshotWorkingSet:
+    """Two entities and two edges that share the key (0, 1, 10)."""
+    var ws = SnapshotWorkingSet(DIM)
+    ws.add_entity(_ent(ws.next_nid(), "alpha", 1))
+    ws.add_entity(_ent(ws.next_nid(), "beta", 2))
+    ws.add_edge(open_edge(0, 1, "", "twin one", 10, 10, 10))
+    ws.add_edge(open_edge(0, 1, "", "twin two", 20, 10, 20))
+    return ws^
+
+
+def test_two_open_edges_with_one_key_cannot_be_closed_by_a_delta() raises:
+    var kg = Kg(Backend(), "g")
+    _ = kg.write_snapshot(_twin_set().to_tables(), DIM)
+    var ws = SnapshotWorkingSet.load_latest(kg)
+    ws.edges[1].invalid_at = 30
+    ws.edges[1].expired_at = 40
+    with assert_raises(contains="to_tables"):
+        _ = ws.delta_tables()
+    # The same change as a full base is exact.
+    var kg2 = Kg(Backend(), "g")
+    _ = kg2.write_snapshot(ws.to_tables(), DIM)
+    var back = SnapshotWorkingSet.load_latest(kg2)
+    assert_equal(back.edges[0].invalid_at, TS_OPEN_SENTINEL)
+    assert_equal(back.edges[1].invalid_at, 30)
+    assert_equal(back.edges[1].expired_at, 40)
+
+
+def test_full_rewrite_keeps_two_same_key_closures_at_different_times() raises:
+    var ws = _twin_set()
+    ws.edges[0].invalid_at = 50
+    ws.edges[0].expired_at = 60
+    ws.edges[1].invalid_at = 70
+    ws.edges[1].expired_at = 80
+    var kg = Kg(Backend(), "g")
+    _ = kg.write_snapshot(ws.to_tables(), DIM)
+    var back = SnapshotWorkingSet.load_latest(kg)
+    _same(ws, back)
+    assert_equal(back.edges[0].fact, "twin one")
+    assert_equal(back.edges[0].invalid_at, 50)
+    assert_equal(back.edges[0].expired_at, 60)
+    assert_equal(back.edges[1].fact, "twin two")
+    assert_equal(back.edges[1].invalid_at, 70)
+    assert_equal(back.edges[1].expired_at, 80)
+
+
+def test_a_delta_closes_the_one_open_edge_of_a_shared_key() raises:
+    var base = _twin_set()
+    base.edges[0].invalid_at = 15
+    base.edges[0].expired_at = 16
+    var kg = Kg(Backend(), "g")
+    _ = kg.write_snapshot(base.to_tables(), DIM)
+    var ws = SnapshotWorkingSet.load_latest(kg)
+    ws.edges[1].invalid_at = 30
+    ws.edges[1].expired_at = 40
+    _append(kg, ws)
+    var back = SnapshotWorkingSet.load_latest(kg)
+    _same(ws, back)
+    assert_equal(back.edges[0].invalid_at, 15)
+    assert_equal(back.edges[0].expired_at, 16)
+    assert_equal(back.edges[1].invalid_at, 30)
+    assert_equal(back.edges[1].expired_at, 40)
+
+
+def test_added_and_edited_entity_indices() raises:
+    var kg = Kg(Backend(), "g")
+    _ = kg.write_snapshot(_base_set().to_tables(), DIM)
+    var ws = SnapshotWorkingSet.load_latest(kg)
+    assert_equal(len(ws.added_entity_indices()), 0)
+    assert_equal(len(ws.edited_entity_indices()), 0)
+
+    ws.entities[1].summary = "beta, edited"
+    ws.add_entity(_ent(ws.next_nid(), "gamma", 3))
+    ws.add_entity(_ent(ws.next_nid(), "delta", 4))
+    var added = ws.added_entity_indices()
+    assert_equal(len(added), 2)
+    assert_equal(added[0], 2)
+    assert_equal(added[1], 3)
+    var edited = ws.edited_entity_indices()
+    assert_equal(len(edited), 1)
+    assert_equal(edited[0], 1)
+
+    # An edit changed back to the loaded value is no edit.
+    ws.entities[1].summary = ""
+    assert_equal(len(ws.edited_entity_indices()), 0)
+    # An embedding edit counts.
+    ws.entities[0].name_embedding = _vec(6)
+    var again = ws.edited_entity_indices()
+    assert_equal(len(again), 1)
+    assert_equal(again[0], 0)
 
 
 def main() raises:

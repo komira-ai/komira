@@ -23,8 +23,16 @@
 # full rewrite of the same facts would hold. The merge appends a delta's
 # episodes, upserts its entities by node id (the later delta wins), appends its
 # edges, and stamps the end times of its tombstoned edges onto the matching
-# earlier edge (matched by `(src_nid, dst_nid, created_at)`, the first match).
-# A tombstone that matches no edge is an error.
+# earlier edge, matched by `(src_nid, dst_nid, created_at)`. A tombstone that
+# matches no edge is an error. If several edges share that key, the tombstone
+# applies to the one that is still open, and is refused as ambiguous unless
+# exactly one is.
+#
+# THE KEY LIMIT. A tombstone carries no more than that key, so a delta cannot
+# close one of two open edges that share `(src_nid, dst_nid, created_at)`:
+# `delta_tables` refuses such a set, and the writer writes a base with
+# `to_tables` instead (a base carries every edge's end times in its own row, so
+# it is exact for any set).
 #
 # THE DIFF. A load records the loaded state. `delta_tables` then emits the
 # entities that are new (node id not loaded) or changed (the row differs from the
@@ -50,8 +58,8 @@ from komira_kg_format import (
     SCHEMA_VERSION_ENTITIES_EMBEDDING,
     SCHEMA_VERSION_EPISODES,
     SnapshotView,
+    TS_OPEN_SENTINEL,
     pack_embedding,
-    unpack_embedding_bytes,
 )
 from komira_objectstore.store import CloneableConditionalWriteStore
 
@@ -267,29 +275,54 @@ struct SnapshotWorkingSet(Movable):
     def _apply_closures(
         mut self, closures: List[EdgeClosure], di: Int
     ) raises:
-        # The first edge of each key, by position.
-        var first = Dict[String, Int]()
-        for j in range(len(self.edges)):
-            ref ed = self.edges[j]
-            var key = _edge_key(ed.src_nid, ed.dst_nid, ed.created_at)
-            if key not in first:
-                first[key] = j
+        # Closures apply in order, and each sees the end times the earlier ones
+        # set, so a key is looked up afresh for every closure.
         for r in range(len(closures)):
             ref c = closures[r]
-            var key = _edge_key(c.src_nid, c.dst_nid, c.created_at)
-            if key not in first:
-                raise Error(
-                    "delta "
-                    + String(di)
-                    + ": tombstone for edge ("
-                    + String(c.src_nid)
-                    + ", "
-                    + String(c.dst_nid)
-                    + ", "
-                    + String(c.created_at)
-                    + ") matches no edge"
-                )
-            ref ed = self.edges[first[key]]
+            var found = -1
+            var count = 0
+            var open_found = -1
+            var open_count = 0
+            for j in range(len(self.edges)):
+                ref ed = self.edges[j]
+                if (
+                    ed.src_nid != c.src_nid
+                    or ed.dst_nid != c.dst_nid
+                    or ed.created_at != c.created_at
+                ):
+                    continue
+                count += 1
+                found = j
+                if ed.is_open():
+                    open_count += 1
+                    open_found = j
+            var label = (
+                "delta "
+                + String(di)
+                + ": tombstone for edge ("
+                + String(c.src_nid)
+                + ", "
+                + String(c.dst_nid)
+                + ", "
+                + String(c.created_at)
+            )
+            if count == 0:
+                raise Error(label + ") matches no edge")
+            var target = found
+            if count > 1:
+                # Several edges share the key: the tombstone is only
+                # unambiguous when exactly one of them is still open.
+                if open_count != 1:
+                    raise Error(
+                        label
+                        + ") is ambiguous: "
+                        + String(count)
+                        + " edges share the key and "
+                        + String(open_count)
+                        + " are open"
+                    )
+                target = open_found
+            ref ed = self.edges[target]
             ed.invalid_at = c.invalid_at
             ed.expired_at = c.expired_at
 
@@ -376,17 +409,6 @@ struct SnapshotWorkingSet(Movable):
             if self.entities[i].nid == nid:
                 return i
         return -1
-
-    def f32_normalize_new_embeddings(mut self):
-        """Round-trip the embeddings of the entities added since the load
-        through f32, as a reload would, so a resident set and a reloaded one
-        hold the same bits and decide the same near-duplicates. Idempotent."""
-        for i in range(len(self.entities)):
-            if self.entities[i].nid in self._base_entities:
-                continue
-            ref e = self.entities[i]
-            var packed = pack_embedding(e.name_embedding)
-            e.name_embedding = unpack_embedding_bytes(packed.as_bytes())
 
     # -------------------------------------------------------------------------
     # The diff against the load.
@@ -496,6 +518,50 @@ struct SnapshotWorkingSet(Movable):
                 )
             seen[nid] = True
 
+    def _is_open_when_delta_applies(self, i: Int) -> Bool:
+        # A loaded edge is as it was loaded; an edge appended since is written
+        # in its current state by the same delta, before the tombstones apply.
+        if i < self._base_edge_count and i < len(self._base_edge_invalid):
+            return self._base_edge_invalid[i] == TS_OPEN_SENTINEL
+        return self.edges[i].is_open()
+
+    def _check_closures_unambiguous(self, closed: List[Int]) raises:
+        if len(closed) == 0:
+            return
+        var group = Dict[String, List[Int]]()
+        for j in range(len(self.edges)):
+            ref ed = self.edges[j]
+            var key = _edge_key(ed.src_nid, ed.dst_nid, ed.created_at)
+            if key not in group:
+                group[key] = List[Int]()
+            group[key].append(j)
+        for k in range(len(closed)):
+            var i = closed[k]
+            ref ed = self.edges[i]
+            ref members = group[_edge_key(ed.src_nid, ed.dst_nid, ed.created_at)]
+            if len(members) == 1:
+                continue
+            # The loader applies the tombstone to the one open edge of the key;
+            # that must be this edge.
+            var open_count = 0
+            for m in range(len(members)):
+                if self._is_open_when_delta_applies(members[m]):
+                    open_count += 1
+            if open_count == 1 and self._is_open_when_delta_applies(i):
+                continue
+            raise Error(
+                "SnapshotWorkingSet.delta_tables: edge ("
+                + String(ed.src_nid)
+                + ", "
+                + String(ed.dst_nid)
+                + ", "
+                + String(ed.created_at)
+                + ") shares its key with "
+                + String(len(members) - 1)
+                + " other edge(s), so a tombstone cannot say which one to"
+                " close; write a full base with to_tables instead"
+            )
+
     def to_tables(self) raises -> Slab[KgTable]:
         """The whole graph as tables for `write_snapshot`. Only non-empty tables
         are emitted. The dimension to record in the manifest is
@@ -551,8 +617,10 @@ struct SnapshotWorkingSet(Movable):
 
         Raises:
             If the edges or episodes shrank below their loaded count, two
-            entities share a node id, or an embedding is not `embedding_dim`
-            finite components.
+            entities share a node id, an embedding is not `embedding_dim`
+            finite components, or an edge to be closed shares its
+            `(src_nid, dst_nid, created_at)` key with another edge that a
+            tombstone could not tell it from (write a base with `to_tables`).
         """
         if len(self.edges) < self._base_edge_count:
             raise Error(
@@ -604,6 +672,7 @@ struct SnapshotWorkingSet(Movable):
                 )
             )
         var closed = self.tombstone_edge_indices()
+        self._check_closures_unambiguous(closed)
         if len(closed) > 0:
             tables.append(
                 KgTable(

@@ -67,7 +67,11 @@ deleted, so "what did we believe at time T" stays answerable.
   read. Tables come back through the Parquet reader and the delta codec from
   bytes, and what is read from storage is checked: the schema version, the
   columns and their types, null cells, UTF-8, the node-id range and repeats, and
-  a tombstone that matches no edge.
+  a tombstone that matches no edge or that cannot tell its edge from another.
+  A tombstone names an edge by `(src, dst, created_at)`, so a delta cannot close
+  one of two open edges that share that key: `delta_tables` refuses it, and the
+  writer writes a base with `to_tables` instead, which keeps every edge's end
+  times in its own row.
 
 A facet, a source, a predicate and an entity name are opaque strings the host
 supplies: the package fixes no vocabulary. Prompts are values the caller passes

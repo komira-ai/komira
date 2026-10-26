@@ -20,7 +20,8 @@
 #   storage       a table stamped with a schema version newer than this build is
 #                 refused; a table with too few columns, or a column of the wrong
 #                 type, is refused; a delta tombstone that matches no edge is
-#                 refused.
+#                 refused, and so is one that matches two open edges (a delta
+#                 cannot say which to close).
 #   cells         a text cell that is not UTF-8 and a null cell in a required
 #                 column are refused, and the same table with a real value loads;
 #                 a delta table stamped newer than this build is refused.
@@ -48,7 +49,9 @@ from komira_kg_format import (
     KgNameIndexBody,
     KgSnapshotStore,
     KgTable,
+    SCHEMA_VERSION_EDGES,
     SCHEMA_VERSION_ENTITIES,
+    edges_tombstone_schema,
     entities_schema,
     pack_embedding,
 )
@@ -84,6 +87,12 @@ def _i64(values: List[Int64]) -> Column[HeapRegion]:
     return Column.from_primitive[DType.int64](
         PrimitiveArray[DType.int64].from_list(values)
     )
+
+
+def _one(v: Int64) -> List[Int64]:
+    var out = List[Int64]()
+    out.append(v)
+    return out^
 
 
 def _strs(values: List[String]) raises -> Column[HeapRegion]:
@@ -354,6 +363,32 @@ def test_tombstone_without_an_edge_is_refused() raises:
     ws.edges[0].created_at = 999
     _ = kg.append_delta(ws.delta_tables(), KgNameIndexBody())
     with assert_raises(contains="matches no edge"):
+        _ = SnapshotWorkingSet.load_latest(kg)
+
+
+def test_tombstone_matching_two_open_edges_is_refused_on_load() raises:
+    var kg = Kg(Backend(), "g")
+    var base = _set(2)
+    # A second edge with the same (src, dst, created_at) as the first.
+    base.add_edge(open_edge(0, 1, "", "a twin fact", 5, 2, 1))
+    _ = kg.write_snapshot(base.to_tables(), 2)
+    # The delta is built by hand: the working set refuses to write it.
+    var rb = RecordBatchBuilder()
+    rb.add_column(_i64(_one(0)))
+    rb.add_column(_i64(_one(1)))
+    rb.add_column(_i64(_one(2)))
+    rb.add_column(_i64(_one(50)))
+    rb.add_column(_i64(_one(60)))
+    var tables = Slab[KgTable]()
+    tables.append(
+        KgTable(
+            "edges_tombstone",
+            rb.build(edges_tombstone_schema()),
+            SCHEMA_VERSION_EDGES,
+        )
+    )
+    _ = kg.append_delta(tables^, KgNameIndexBody())
+    with assert_raises(contains="ambiguous"):
         _ = SnapshotWorkingSet.load_latest(kg)
 
 
