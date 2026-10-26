@@ -1,13 +1,101 @@
 # komira_smtp_server
 
-The socket-free core of an SMTP server that receives mail (RFC 5321, with
-STARTTLS, RFC 3207, and AUTH, RFC 4954). It holds the connection table, the
-line framing, the command state machine, the DATA phase and the seam to
-whatever stores the mail. It opens no socket and reads no clock: a serving loop
-reads bytes, hands them to `SmtpRegistry.feed`, writes the replies it queued,
-and owns TLS. The package is a library, not a server: nothing here listens.
+An SMTP server that receives mail (RFC 5321, with STARTTLS, RFC 3207, and AUTH,
+RFC 4954): the connection table, the line framing, the command state machine,
+the DATA phase, the seam to whatever stores the mail, the serve loop over
+non-blocking sockets, and a delivery into local mailboxes. `SmtpRegistry`
+opens no socket and reads no clock; `serve_one_iteration` is the loop that
+owns the sockets and TLS.
 
-## How a serving loop uses it
+**The serve loop is caller-polled.** `serve_one_iteration` never blocks and
+never waits for readiness: it does what the sockets allow now and returns. Until
+a binary has a readiness driver (epoll or a timer in a program of its own), the
+caller must poll it in a loop, and a bare loop spins; the caller also passes the
+clock as `now_ms`, which is how idle and session deadlines work. The package
+is a library: nothing here starts a thread or a process. A readiness driver
+(epoll) must not wait on the descriptor alone for a TLS connection: bytes
+already decrypted or buffered inside TLS do not make the descriptor readable
+again, and one iteration reads a bounded amount per connection, so the driver
+has to call the loop again while any TLS connection may hold data.
+
+**Version 1 is an unauthenticated MX.** It takes mail for the domains in
+`LocalDomains` from anyone, and checks no SPF, DKIM or DMARC: every stored
+message says `Authentication-Results: <host>; none`. It is not a relay (a
+recipient outside `LocalDomains` is refused 550 5.1.1 at RCPT) and it does no
+spam or abuse filtering beyond the limits below.
+
+## Serving
+
+```text
+var listener = bind_smtp_listener(inet_any_be(), UInt16(25))   # port 0 for a test
+var reg = SmtpRegistry()
+var tls = MailTlsTable.from_cert_pem(cert_pem, key_pem)        # or MailTlsTable(TlsConfig()) with
+                                                               # no certificate and offer_starttls False
+while running:
+    serve_one_iteration(reg, listener, tls, verifier, delivery, config, now_ms)
+```
+
+One call, in order: accepts waiting connections (at `max_conns` the peer gets
+`421 4.3.2` and the socket is closed); for each connection advances a STARTTLS
+handshake or reads (the socket, or `MailTlsTable.recv` once on TLS), feeds the
+registry, and writes the queued replies (`try_send`, or `MailTlsTable.send`,
+offering the unwritten rest again after a short write); starts the TLS upgrade
+after the `220` is written; closes what is finished or whose peer is gone; and
+answers `421 4.4.2` and closes what `expired_ids` names. The plaintext and the
+TLS connection are one code path. Accepted sockets are non-blocking.
+
+- STARTTLS: the `220` is written and flushed first. If the client sent bytes
+  behind STARTTLS in the clear (`pending_after_starttls`), the connection is
+  closed and none of them runs (RFC 3207, 4.2); `begin_upgrade` also refuses
+  a connection with buffered plaintext, so the rule holds at two layers. Then
+  `MailTlsTable.begin_upgrade` and one `drive_handshake_burst` per iteration
+  until done, then `mark_tls_active`.
+- No certificate: build the table with `MailTlsTable(TlsConfig())` and set
+  `offer_starttls` False in the config. STARTTLS is then neither offered nor
+  accepted (`502`).
+- A socket or TLS error drops only the connection it happened on. The loop does
+  not raise.
+- `SmtpServeOutcome` counts what one call did.
+- The listener is a `ListenSocket`: it owns its descriptor and closes it when
+  it is destroyed. `local_port()` reads back the port after binding port 0.
+
+## Local delivery
+
+`LocalMailboxDelivery[S, H]` implements `MailDelivery` over a
+`komira_mail_store` (any `ConditionalWriteStore`) and a `MailReceiveHook`.
+
+- RCPT: `postmaster` (any case, no domain) is accepted and means
+  `postmaster@<first local domain>`; `local@domain` is accepted when the
+  domain is in `LocalDomains` (compared without regard to case or a trailing
+  dot; address literals are normalised the same way); anything else is `550
+  5.1.1`. With an empty list nothing is accepted.
+- DATA: one copy per distinct mailbox (mailboxes compare without regard to
+  case), each with the trace headers `Return-Path`, `Received` (the EHLO name,
+  the peer address, the protocol ESMTP, ESMTPS or, for a verified user, ESMTPSA
+  with the user as a quoted string, a queue id, the recipient and the date of
+  `now_ms`) and `Authentication-Results: <host>; none`. The queue id holds a
+  per-delivery counter, so two deliveries of identical mail are two messages.
+  A `Return-Path` or `Authentication-Results` field the sender put in its own
+  header is renamed `X-Original-...` (any case; folded lines go with it; the
+  body is untouched), so the first of each in a stored message is the one the
+  server wrote and it is the only one of each. A reader of stored mail should
+  still use the first. Paths in `Return-Path` and `for` are reduced to
+  characters that cannot close the angle brackets, end the clause or open a
+  comment or a quote.
+  Everything the peer chose (EHLO name, peer text, user, sender, recipient)
+  is reduced to safe characters or quoted before it is written, so it cannot
+  add a header line or close a quote or a comment.
+- All or nothing: if a copy cannot be stored, the copies this delivery already
+  wrote are deleted (best effort), the answer is `451`, and the hook does not
+  run. The delivery never raises.
+- The hook runs after every copy is durable, once per recipient stored, with the
+  mailbox and the stored bytes. It is fail-soft: what it raises is swallowed
+  and the answer stays 250.
+
+## How a serving loop uses the registry
+
+`serve_one_iteration` does all of this; it is the reference for a loop of
+your own.
 
 ```text
 accept a socket        id = registry.accept(fd, config, now_ms, peer)
@@ -104,7 +192,19 @@ are in the package for tests of this server and of the loop that serves it.
 
 ## Limits
 
-- No socket, TLS, listener or clock here; those belong to the serving loop.
+- `SmtpRegistry` has no socket, TLS or clock; `serve_one_iteration` has the
+  sockets and TLS and takes the clock as a parameter.
+- IPv4 listeners only; the peer text in a trace header is the dotted address
+  (`unknown` for any other address family).
+- A TLS connection is closed with a plain TCP close, without a TLS
+  `close_notify`, also after the `221` for QUIT: a client may report a
+  truncated stream after a complete session.
+- While a message is delivered, each recipient's copy is built twice, one at a
+  time (to store it, then for the hook) and freed in between, so a delivery
+  needs about one extra `max_message_bytes` beyond the message itself, not one
+  per recipient.
+- Several recipients in one message are stored one after another, not in one
+  transaction: the rollback after a failure is best effort.
 - The receive-line cap for AUTH is 512 bytes when the initial response is on
   the AUTH line, so a very long initial response needs the two-step form; a
   continuation answer may be 12288 bytes.
@@ -112,7 +212,14 @@ are in the package for tests of this server and of the loop that serves it.
   twice that while the buffer grows, about 12 KB of receive buffer and
   `max_tx_bytes` of replies) and not over the table: the serving loop must size
   `max_conns` so that `max_conns * (max_message_bytes + max_tx_bytes)` fits the
-  machine. The refusal reply when `accept` returns None, and the timers, are the
-  loop's.
+  machine.
 - The connection lookup by id is linear.
 - Source routes, SMTPUTF8, DSN parameters, BDAT and CHUNKING are not supported.
+
+## Tests
+
+The welded tests include `test_smtp_starttls` and `test_serve_loop`, which run
+over real loopback sockets with the `Peer` client of `komira_mail_test_support`
+(a small library meant for a future IMAP server's STARTTLS tests too). They wait for
+progress (a reply, a finished handshake, the end of a connection) and never
+for a time; deadlines are tested by passing `now_ms`.

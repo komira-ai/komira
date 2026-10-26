@@ -394,6 +394,7 @@ TARGETS = [
     "komira//src/tests/e2e/komira_tls_interop_e2e:test_komira_client_refuses_bssl_server",
     "komira//src/tests/e2e/komira_tls_interop_e2e:test_komira_client_vs_bssl_server",
     "komira//src/tests/helpers/kci_gcp_emulator:kci_gcp_emulator_conda",
+    "komira//src/tests/helpers/komira_mail_test_support:komira_mail_test_support_conda",
     "komira//src/tests/helpers/komira_test_bucket:komira_test_bucket_conda",
     "komira//src/tests/helpers/komira_test_issuer:komira_test_issuer",
     "komira//src/tests/helpers/komira_test_minio:farm_capability_probe",

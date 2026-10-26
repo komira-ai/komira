@@ -209,6 +209,25 @@ struct SmtpRegistry(Movable):
         conn.reset_for_tls()
         conn.clear_rx()
 
+    def starttls_pending_of(self, conn_id: Int) -> Bool:
+        """True from the 220 of a STARTTLS until `mark_tls_active`: the
+        serving loop owes this connection a handshake."""
+        var idx = self._index_of(conn_id)
+        if idx < 0:
+            return False
+        return self._conns[idx][].starttls_pending
+
+    def close_after_flush(mut self, conn_id: Int):
+        """The serving loop decided to close (a refused STARTTLS, an expired
+        connection): no more input is run and the connection is dropped once
+        the replies queued so far are written."""
+        var idx = self._index_of(conn_id)
+        if idx < 0:
+            return
+        ref conn = self._conns[idx][]
+        conn.mark_closing()
+        conn.clear_rx()
+
     def pending_rx_bytes(self, conn_id: Int) -> Int:
         """Received bytes not yet run as commands."""
         var idx = self._index_of(conn_id)
