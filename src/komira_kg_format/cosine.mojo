@@ -152,6 +152,11 @@ def cosine_topk[
     `unpack_embedding_bytes` and scored against `query` with `cosine`. A null
     cell has no vector and scores 0.0.
 
+    The caller must check the graph's embedding dimension against the manifest
+    first (`KgManifestBody.check_embedding_dim`, and `unpack_embedding_checked`
+    for a cell): a row of another length is scored on the overlapping prefix and
+    not refused.
+
     Parameters:
         K: The array's memory region (inferred).
 

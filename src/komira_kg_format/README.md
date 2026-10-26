@@ -149,12 +149,12 @@ The extraction values hold names, not node ids; the ingest step resolves them:
 from std.testing import assert_equal
 -->
 ```mojo
-from komira_kg_format import EntityMention, Extraction, Triple
+from komira_kg_format import EntityMention, Extraction, TS_OPEN_SENTINEL, Triple
 
 var entities = List[EntityMention]()
 entities.append(EntityMention("Ada", "person", ""))
 var triples = List[Triple]()
-triples.append(Triple("Ada", "wrote", "notes", "Ada wrote notes", 0, 9223372036854775807))
+triples.append(Triple("Ada", "wrote", "notes", "Ada wrote notes", 0, TS_OPEN_SENTINEL))
 var extraction = Extraction(entities^, triples^)
 assert_equal(extraction.num_entities(), 1)
 assert_equal(extraction.triples[0].predicate, "wrote")

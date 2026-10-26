@@ -200,7 +200,7 @@ def test_open_sentinel_value() raises:
 
 
 def test_open_sentinel_is_above_a_current_time_in_every_unit() raises:
-    # 2026-10-26 00:00:00 UTC is 1793000000 seconds after the epoch.
+    # 1_793_000_000 seconds after the epoch is a time in late October 2026.
     var seconds = Int64(1_793_000_000)
     var millis = seconds * 1_000
     var micros = seconds * 1_000_000

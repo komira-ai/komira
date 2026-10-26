@@ -17,6 +17,9 @@
 #               the version-1 key names are not read.
 #   tolerance   a missing collection reads as empty, a missing answer as "", and
 #               a repeated provenance source_id keeps the first.
+#   wrong kind  a known key holding the wrong kind of value (a collection that
+#               is not an array, an answer that is not a string, a version that
+#               is not a number) and a repeated object key are refused.
 #   refusals    malformed JSON, a root that is not an object, a missing mode or
 #               query_label, and a record missing a field, each raise.
 # No test reads a clock or the environment.
@@ -150,6 +153,35 @@ def test_repeated_provenance_source_id_keeps_the_first() raises:
     )
     assert_equal(len(r.provenance), 1)
     assert_equal(r.provenance[0].source, "one")
+
+
+def test_a_wrong_kind_of_value_for_a_known_key_is_refused() raises:
+    var head = '{"v":2,"mode":"m","query_label":"l",'
+    for key in ["nodes", "edges", "annotations", "provenance", "loci", "scores"]:
+        for bad in ["5", "null", "{}", '"x"']:
+            with assert_raises(contains="'" + key + "' is not an array"):
+                _ = KgQueryResult.deserialize(head + '"' + key + '":' + bad + "}")
+        # An empty array is the right kind and reads as empty.
+        _ = KgQueryResult.deserialize(head + '"' + key + '":[]}')
+    for bad in ["5", "null", "[]", "{}", "true"]:
+        with assert_raises(contains="'answer' is not a string"):
+            _ = KgQueryResult.deserialize(head + '"answer":' + bad + "}")
+    with assert_raises(contains="'v' is not a number"):
+        _ = KgQueryResult.deserialize('{"v":"2","mode":"m","query_label":"l"}')
+    with assert_raises(contains="'v' is not a number"):
+        _ = KgQueryResult.deserialize('{"v":null,"mode":"m","query_label":"l"}')
+
+
+def test_a_repeated_key_is_refused() raises:
+    with assert_raises(contains="duplicate object key 'mode'"):
+        _ = KgQueryResult.deserialize(
+            '{"v":2,"mode":"m","mode":"n","query_label":"l"}'
+        )
+    with assert_raises(contains="duplicate object key 'id'"):
+        _ = KgQueryResult.deserialize(
+            '{"v":2,"mode":"m","query_label":"l","nodes":[{"id":1,"id":2,'
+            '"label":"a","type":"t","score":0}]}'
+        )
 
 
 def test_refusals() raises:

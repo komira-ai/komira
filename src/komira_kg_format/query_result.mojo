@@ -30,13 +30,15 @@
 #   * Numbers ride as JSON numbers; a Float64 is written in its shortest
 #     round-trip form. JSON has no NaN or infinity, so a non-finite score or
 #     value is written as 0.0.
-#   * A missing sub-collection key reads as an empty list, and a missing
+#   * A key repeated in an object, and a known key holding the wrong kind of
+#     value (`nodes: 5`, `answer: null`), are refused. A missing
+#     sub-collection key reads as an empty list, and a missing
 #     `answer` as "". `provenance` keeps the first entry for each `source_id`.
 # =============================================================================
 
 from std.math import isfinite
 
-from komira_json import JsonValue, parse_json_value
+from komira_json import JsonValue, parse_json_value, refuse_duplicate_keys
 
 
 # The wire format version `serialize` stamps and `deserialize` requires.
@@ -307,14 +309,18 @@ struct KgQueryResult(Copyable, Movable):
         Raises:
             On malformed JSON, a root that is not an object, a missing `mode` or
             `query_label`, a version other than `KG_QUERY_RESULT_FORMAT_VERSION`,
-            or an element of a sub-collection that lacks a field or holds the
-            wrong kind of value.
+            an object that names a key twice, a known key (`v`, `answer` or a
+            sub-collection) holding the wrong kind of value, or an element of a
+            sub-collection that lacks a field or holds the wrong kind of value.
         """
         var root = parse_json_value(wire)
+        refuse_duplicate_keys(root)
         if not root.is_object():
             raise Error("KgQueryResult.deserialize: root is not a JSON object")
 
         if root.has("v"):
+            if not root.get("v").is_number():
+                raise Error("KgQueryResult.deserialize: 'v' is not a number")
             var ver = Int(root.get("v").as_int64())
             if ver > KG_QUERY_RESULT_FORMAT_VERSION:
                 raise Error(
@@ -339,11 +345,12 @@ struct KgQueryResult(Copyable, Movable):
 
         if root.has("answer"):
             var a = root.get("answer")
-            if a.is_string():
-                out.set_answer(a.as_string())
+            if not a.is_string():
+                raise Error("KgQueryResult.deserialize: 'answer' is not a string")
+            out.set_answer(a.as_string())
 
         if root.has("nodes"):
-            var arr = root.get("nodes")
+            var arr = _array(root, "nodes")
             for i in range(arr.array_len()):
                 var n = arr.element_at(i)
                 out.add_node(
@@ -356,7 +363,7 @@ struct KgQueryResult(Copyable, Movable):
                 )
 
         if root.has("edges"):
-            var arr = root.get("edges")
+            var arr = _array(root, "edges")
             for i in range(arr.array_len()):
                 var e = arr.element_at(i)
                 out.add_edge(
@@ -370,7 +377,7 @@ struct KgQueryResult(Copyable, Movable):
                 )
 
         if root.has("annotations"):
-            var arr = root.get("annotations")
+            var arr = _array(root, "annotations")
             for i in range(arr.array_len()):
                 var a = arr.element_at(i)
                 out.add_annotation(
@@ -383,7 +390,7 @@ struct KgQueryResult(Copyable, Movable):
                 )
 
         if root.has("provenance"):
-            var arr = root.get("provenance")
+            var arr = _array(root, "provenance")
             for i in range(arr.array_len()):
                 var p = arr.element_at(i)
                 out.add_provenance(
@@ -394,7 +401,7 @@ struct KgQueryResult(Copyable, Movable):
                 )
 
         if root.has("loci"):
-            var arr = root.get("loci")
+            var arr = _array(root, "loci")
             for i in range(arr.array_len()):
                 var l = arr.element_at(i)
                 out.add_locus(
@@ -406,7 +413,7 @@ struct KgQueryResult(Copyable, Movable):
                 )
 
         if root.has("scores"):
-            var arr = root.get("scores")
+            var arr = _array(root, "scores")
             for i in range(arr.array_len()):
                 var s = arr.element_at(i)
                 out.add_score(
@@ -418,6 +425,14 @@ struct KgQueryResult(Copyable, Movable):
                 )
 
         return out^
+
+
+def _array(root: JsonValue, key: String) raises -> JsonValue:
+    """The array under `key`; any other kind of value is refused."""
+    var v = root.get(key)
+    if not v.is_array():
+        raise Error("KgQueryResult.deserialize: '" + key + "' is not an array")
+    return v^
 
 
 def _number(v: JsonValue) raises -> Float64:
