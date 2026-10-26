@@ -251,7 +251,8 @@ And it reads a file's rows:
   `dictionary_page_offset` of 0 is refused as outside the data region (some
   writers use 0 for "absent"; the Parquet footer says absent by omitting it).
   A column chunk's `num_values` must equal the values its data page headers
-  declare: the footer's count never sizes a buffer alone.
+  declare: the footer's count never sizes a buffer alone. A chunk whose pages
+  hold fewer values than the footer says is refused (a change for corrupt files only).
 - Every column chunk these decode is counted
   (`komira_counters.parquet_column_chunks_decoded`), so a test can see which
   columns a scan read.

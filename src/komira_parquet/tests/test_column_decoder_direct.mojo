@@ -702,7 +702,7 @@ def test_malformed_chunks_are_refused() raises:
         _ = _decode(rle, ParquetType.INT64, 1, False)
 
 
-def test_a_footer_count_above_the_pages_is_refused_before_sizing_a_buffer() raises:
+def test_a_footer_count_above_the_pages_is_refused() raises:
     # The footer's count never sizes a buffer alone: 2^36 INT64 values would
     # be a 512 GiB buffer, and the one page here holds two.
     var chunk = List[UInt8]()

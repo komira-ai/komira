@@ -159,12 +159,12 @@ def decode_column_pages(
             against).
 
     Returns:
-        A Column of `num_values` rows (fewer only for a chunk whose pages
-        stop early), nulls in its validity.
+        A Column of `num_values` rows, nulls in its validity.
 
     Raises:
-        Error on an out-of-range value count, a page header that does not
-        parse or claims more bytes or values than the chunk has, a CRC
+        Error on an out-of-range value count, a count above the values the
+        chunk's data page headers declare (the chunk stops short of the count),
+        a page header that does not parse or claims more bytes or values than the chunk has, a CRC
         mismatch, and anything the page and value decoders refuse.
     """
     if num_values < 0 or num_values > _MAX_CHUNK_VALUES:
@@ -175,14 +175,14 @@ def decode_column_pages(
             + String(_MAX_CHUNK_VALUES)
             + "]"
         )
-    # The footer's count is untrusted: it sizes the accumulators, so it never
-    # sizes them alone. A chunk whose pages all parse holds exactly the
-    # values its data page headers declare; a footer count above that is
-    # refused (a smaller one was already refused page by page), and the decode
-    # is sized by the pages (a chunk whose headers
-    # do not parse is refused by the walk below, by name).
+    # The footer's count is untrusted and sizes the accumulators, so it never
+    # sizes them alone. A chunk whose pages all parse holds the values its
+    # data page headers declare: a footer count above that is refused (a
+    # smaller one is refused page by page below), and the accumulators are
+    # sized by the smaller count. A chunk with no data page header that
+    # parses is refused by name in the walk below.
     var declared = _declared_page_values(data)
-    if declared.clean and declared.values > 0 and num_values > declared.values:
+    if declared.values > 0 and num_values > declared.values:
         raise Error(_count_mismatch(num_values, declared.values))
     var sized_values = min(num_values, declared.values)
     var is_decimal = converted_type == CONVERTED_TYPE_DECIMAL and (
