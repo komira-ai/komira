@@ -2,8 +2,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Helpers for tests of mail servers over real loopback sockets: a non-blocking
 # plaintext-then-TLS client, the TLS test certificates and the run's scratch
-# directory. komira_smtp_server and the IMAP server's STARTTLS tests use it, so
-# the harness is written once. See __init__.mojo.
+# directory. komira_smtp_server's tests use it, and so will a future IMAP server's
+# STARTTLS tests, so the harness is written once. See __init__.mojo.
 #
 # The welded test (its header says which defects it catches):
 # - test_peer: bytes both ways in order, take_through, end of stream, scratch.

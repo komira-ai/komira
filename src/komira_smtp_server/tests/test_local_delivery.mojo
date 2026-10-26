@@ -19,6 +19,10 @@
 # - the trace headers are exact: Return-Path (also the null path), Received
 #   with ESMTP, ESMTPS and ESMTPSA, the date from now_ms, the queue id, and
 #   Authentication-Results;
+# - a path cannot leave its brackets (`>` `;` `(` `)` `"` `\\` and space);
+# - a sender's own Return-Path and Authentication-Results header fields are
+#   renamed X-Original-... (any case, folded lines kept), the body untouched,
+#   so ours is the only one of each (a delivery that only prepends fails);
 # - header escaping: CR, LF, quotes and parentheses in the EHLO name, the peer
 #   text, the verified user and the sender cannot add a header line or end a
 #   quoted string or a comment.
@@ -418,7 +422,71 @@ def test_peer_text_cannot_add_a_header() raises:
     assert_true(head.find("from evil??Bcc:?x?y (") >= 0)
     assert_true(head.find('(authenticated as "al\\"ice??X-Inject: 1")') >= 0)
     assert_true(head.find("(1.2.3.4? ??X: y?)") >= 0)
-    assert_true(head.find("Return-Path: <a@b>??X-Sender: 1>") >= 0)
+    assert_true(head.find("Return-Path: <a@b???X-Sender:?1>") >= 0)
+
+
+def test_a_path_cannot_leave_its_brackets() raises:
+    # `>`, `;`, parentheses, quotes, backslash and space would close the
+    # angle brackets, end the `for` clause or open a comment or a string.
+    var h = trace_headers(
+        String('a@b> (x;"y\\ z'),
+        String("c.test"),
+        String("192.0.2.1"),
+        String(""),
+        False,
+        String("mx.example.com"),
+        String("q1"),
+        String("r@h>; Mon, 1 Jan 2001"),
+        _NOW,
+    )
+    assert_true(h.startswith("Return-Path: <a@b???x??y??z>\r\n"), h)
+    assert_true(h.find("\tfor <r@h???Mon,?1?Jan?2001>; Mon, 21 Sep 2026") >= 0, h)
+
+
+def test_inbound_trace_fields_are_renamed() raises:
+    var store = SharedInMemoryConditionalStore()
+    var view = store.clone()
+    var d = _delivery(store.clone(), store.clone())
+    var rcpts = List[String]()
+    rcpts.append("bob@example.com")
+    var msg = _bytes(
+        "Subject: s\r\n"
+        "Authentication-Results: mx.example.com; spf=pass\r\n"
+        " dkim=pass\r\n"
+        "return-path: <boss@elsewhere.test>\r\n"
+        "AUTHENTICATION-RESULTS : mx.example.com; dmarc=pass\r\n"
+        "X-Return-Path: <keep@elsewhere.test>\r\n"
+        "\r\n"
+        "Return-Path: <in-the-body>\r\n"
+        "Authentication-Results: in the body\r\n"
+    )
+    var r = d.deliver(_session(), String("a@b.test"), rcpts, Span(msg), _NOW)
+    assert_equal(r.code, 250)
+    var text = _only_message(view, "bob@example.com")
+    var cut = text.find("Subject: s")
+    assert_true(cut > 0)
+    var tail = String(unsafe_from_utf8=text.as_bytes()[cut:])
+    assert_equal(
+        tail,
+        String(
+            "Subject: s\r\n"
+            "X-Original-Authentication-Results: mx.example.com; spf=pass\r\n"
+            " dkim=pass\r\n"
+            "X-Original-return-path: <boss@elsewhere.test>\r\n"
+            "X-Original-AUTHENTICATION-RESULTS : mx.example.com; dmarc=pass\r\n"
+            "X-Return-Path: <keep@elsewhere.test>\r\n"
+            "\r\n"
+            "Return-Path: <in-the-body>\r\n"
+            "Authentication-Results: in the body\r\n"
+        ),
+    )
+    # Ours is the only unrenamed Return-Path and Authentication-Results in the
+    # header: the first lines, and each exactly once before the blank line.
+    var head_end = text.find("\r\n\r\n")
+    var head = String(unsafe_from_utf8=text.as_bytes()[0:head_end])
+    assert_true(head.startswith("Return-Path: <a@b.test>\r\n"))
+    assert_equal(len(head.split("\r\nReturn-Path:")), 1)
+    assert_equal(len(head.split("\r\nAuthentication-Results:")), 2)
 
 
 def main() raises:
@@ -431,4 +499,6 @@ def main() raises:
     test_the_hook_fires_for_exactly_the_recipients_stored()
     test_trace_headers_are_exact()
     test_peer_text_cannot_add_a_header()
+    test_a_path_cannot_leave_its_brackets()
+    test_inbound_trace_fields_are_renamed()
     print("test_local_delivery: OK")

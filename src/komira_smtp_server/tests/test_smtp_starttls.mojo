@@ -9,10 +9,11 @@
 #   the stored bytes are the trace headers (ESMTPSA, the user quoted) followed
 #   by the body exactly (a handshake that never finishes, an AUTH that is not
 #   offered after TLS, a message stored without its headers or cut short fails);
-# - "STARTTLS\r\nMAIL FROM:<..>\r\n" in one write: the 220 is written, the
-#   connection is closed, and the MAIL never runs (no 250 reaches the client,
-#   the connection is gone) (a loop that upgrades anyway, or runs the pipelined
-#   line before or after the upgrade, fails);
+# - "STARTTLS" followed in the same write by a whole transaction (MAIL, RCPT,
+#   DATA, a message, the dot): the 220 is written, the connection is closed, and
+#   none of it runs: the mailbox stays empty and no delivery was made, which
+#   holds whatever was or was not flushed to the client (a loop that upgrades anyway, or runs the pipelined lines
+#   before or after the upgrade, fails);
 # - AUTH on a clear connection is 538 and the user stays unverified (a loop
 #   that lets credentials cross in the clear fails).
 
@@ -166,7 +167,11 @@ def test_starttls_auth_and_a_message() raises:
     assert_true(_command(rig, peer, String("DATA")).startswith("354"))
     var done = _command(rig, peer, String("Subject: t\r\n\r\nline one\r\n."))
     assert_true(done.startswith("250"), done)
-    assert_true(done.find("queued as q") >= 0, done)
+    var marker = String("queued as ")
+    var at = done.find(marker)
+    assert_true(at >= 0, done)
+    var id = String(unsafe_from_utf8=done.as_bytes()[at + marker.byte_length() :]).strip()
+    assert_true(id.byte_length() > 0, done)
 
     var entries = list_folder(rig.view, String("bob@example.com"), String("INBOX"))
     assert_equal(len(entries), 1)
@@ -177,8 +182,8 @@ def test_starttls_auth_and_a_message() raises:
     var head = String(
         "Return-Path: <a@sender.test>\r\n"
         "Received: from client.test (127.0.0.1)\r\n"
-        '\tby mx.example.com with ESMTPSA (authenticated as "alice") id q'
-    )
+        '\tby mx.example.com with ESMTPSA (authenticated as "alice") id '
+    ) + id + "\r\n"
     assert_true(text.startswith(head), text)
     assert_true(text.endswith("Authentication-Results: mx.example.com; none\r\nSubject: t\r\n\r\nline one\r\n"), text)
 
@@ -196,7 +201,12 @@ def test_pipelined_command_after_starttls_closes_the_connection() raises:
     var peer = Peer.connect(rig.listener.local_port())
     _ = _reply(rig, peer)
     _ = _command(rig, peer, String("EHLO client.test"))
-    peer.send(String("STARTTLS\r\nMAIL FROM:<a@sender.test>\r\n"))
+    peer.send(
+        String(
+            "STARTTLS\r\nMAIL FROM:<a@sender.test>\r\nRCPT TO:<bob@example.com>\r\n"
+            "DATA\r\nSubject: smuggled\r\n\r\nbody\r\n.\r\n"
+        )
+    )
     var first = _reply(rig, peer)
     assert_true(first.startswith("220 "), first)
     # The step that wrote the 220 decided: the connection is already gone and
@@ -208,10 +218,15 @@ def test_pipelined_command_after_starttls_closes_the_connection() raises:
         rig.step()
         _ = peer.poll()
         yield_cpu()
-    # Nothing but the 220 was ever written: the MAIL did not run.
+    # Nothing but the 220 was ever written to the client ...
     assert_equal(peer.text(), "")
     assert_equal(rig.reg.conn_count(), 0)
+    # ... and, on the server's side, the pipelined transaction never ran: no
+    # delivery was made and nothing is stored. (Had the lines run, the message
+    # would be in the mailbox whatever happened to the replies.)
+    assert_equal(rig.delivery.deliveries, 0)
     assert_equal(len(list_folder(rig.view, String("bob@example.com"), String("INBOX"))), 0)
+    assert_equal(len(list_folder(rig.view, String("postmaster@example.com"), String("INBOX"))), 0)
     peer.close()
 
 

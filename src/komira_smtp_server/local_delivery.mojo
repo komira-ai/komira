@@ -6,7 +6,7 @@ from komira_objectstore.path import Path
 from komira_objectstore.store import ConditionalWriteStore
 
 from .delivery import DeliveryResult, MailDelivery, RcptDecision, SessionInfo
-from .trace import trace_headers
+from .trace import append_renamed_trace_fields, trace_headers
 
 
 trait MailReceiveHook(Movable, Deinitable):
@@ -203,7 +203,10 @@ struct LocalMailboxDelivery[S: ConditionalWriteStore, H: MailReceiveHook](
         message: Span[UInt8, _],
         now_ms: Int,
     ) -> List[UInt8]:
-        """The bytes stored for one recipient: trace headers, then the message."""
+        """The bytes stored for one recipient: trace headers, then the message
+        with any `Return-Path` or `Authentication-Results` field the sender put
+        in its header renamed to `X-Original-...`, so the first of each in the
+        stored bytes is ours and only ours."""
         var head = trace_headers(
             mail_from,
             session.helo,
@@ -215,9 +218,9 @@ struct LocalMailboxDelivery[S: ConditionalWriteStore, H: MailReceiveHook](
             rcpt,
             now_ms,
         )
-        var out = List[UInt8](capacity=head.byte_length() + len(message))
+        var out = List[UInt8](capacity=head.byte_length() + len(message) + 64)
         out.extend(head.as_bytes())
-        out.extend(message)
+        append_renamed_trace_fields(out, message)
         return out^
 
     def _undo(mut self, keys: List[String]):

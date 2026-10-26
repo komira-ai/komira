@@ -21,11 +21,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # - test_local_delivery: LocalMailboxDelivery against an in-memory store (the
 #   RCPT rule, store before hook, a raising hook, a store error as 451, two
 #   identical deliveries, the hook per stored recipient, exact trace headers,
-#   header escaping).
+#   header escaping, a path kept inside its brackets, a sender's own
+#   Return-Path and Authentication-Results renamed).
 # - test_smtp_starttls: STARTTLS, AUTH and a message over loopback sockets;
 #   the pipelined line after STARTTLS; AUTH in the clear.
-# - test_serve_loop: max_conns, expiry by now_ms, a reset, a bad TLS hello,
-#   no certificate, short writes, over loopback sockets.
+# - test_serve_loop: max_conns, expiry by now_ms and its exact boundaries, a
+#   full send window at expiry, a reset, a bad TLS hello, a peer that leaves
+#   mid-handshake, no certificate, short writes, over loopback sockets.
 mojo_library(
     name = "komira_smtp_server",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -60,6 +62,7 @@ mojo_library(
         "tests/test_serve_loop.mojo": {
             "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
             "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+            "src/komira_http_core/tests/fixtures/tls/root_ca.pem": "//src/komira_http_core:tests/fixtures/tls/root_ca.pem",
         },
         "tests/test_smtp_starttls.mojo": {
             "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",

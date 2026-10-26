@@ -98,8 +98,11 @@ def header_quoted(text: String, max_len: Int) -> String:
 
 
 def header_path(text: String) -> String:
-    """`text` (an address as the server parsed it) with every control byte and
-    every byte above 0x7E replaced by `?`, at most 320 bytes."""
+    """`text` (an address as the server parsed it) made safe inside the angle
+    brackets of `Return-Path: <...>` and `for <...>;`: every control byte, every
+    byte above 0x7E and each of `< > ; ( ) " \\` and the space becomes `?`, so
+    the path cannot close the brackets, end the clause or open a comment or a
+    quote. At most 320 bytes."""
     var bytes = text.as_bytes()
     var n = len(bytes)
     if n > _MAX_PATH:
@@ -107,11 +110,90 @@ def header_path(text: String) -> String:
     var out = List[UInt8](capacity=n)
     for i in range(n):
         var c = bytes[i]
-        if c < 0x20 or c > 0x7E:
+        if (
+            c <= 0x20
+            or c > 0x7E
+            or c == 0x3C
+            or c == 0x3E
+            or c == 0x3B
+            or c == 0x28
+            or c == 0x29
+            or c == 0x22
+            or c == 0x5C
+        ):
             out.append(_QUESTION)
         else:
             out.append(c)
     return _to_string(out)
+
+
+def _lower_byte(c: UInt8) -> UInt8:
+    if c >= 0x41 and c <= 0x5A:
+        return c + 32
+    return c
+
+
+def _is_trace_field(line: Span[UInt8, _]) -> Bool:
+    """Whether `line` starts a `Return-Path` or `Authentication-Results`
+    field (any case, white space allowed before the colon)."""
+    var end = 0
+    while end < len(line) and line[end] != 0x3A:
+        end += 1
+    if end >= len(line):
+        return False
+    while end > 0 and (line[end - 1] == 0x20 or line[end - 1] == 0x09):
+        end -= 1
+    var name = String("")
+    if end == 11:
+        name = String("return-path")
+    elif end == 22:
+        name = String("authentication-results")
+    else:
+        return False
+    var want = name.as_bytes()
+    for i in range(end):
+        if _lower_byte(line[i]) != want[i]:
+            return False
+    return True
+
+
+def rename_inbound_trace_fields(message: Span[UInt8, _]) -> List[UInt8]:
+    """`message` after `append_renamed_trace_fields`, as a new list."""
+    var out = List[UInt8](capacity=len(message) + 32)
+    append_renamed_trace_fields(out, message)
+    return out^
+
+
+def append_renamed_trace_fields(mut out: List[UInt8], message: Span[UInt8, _]):
+    """Append `message` to `out` with every `Return-Path` and
+    `Authentication-Results` field of its header renamed with an `X-Original-`
+    prefix (RFC 5321 section 4.4: only the delivery agent writes Return-Path;
+    RFC 8601 section 5: a border MTA must not let a sender's results pass for
+    its own). The header ends at the first empty line; folded continuation
+    lines stay with their field; the body is copied as it is."""
+    var prefix_text = String("X-Original-")
+    var prefix = prefix_text.as_bytes()
+    var i = 0
+    var in_head = True
+    var n = len(message)
+    while i < n:
+        var j = i
+        while j < n and message[j] != 0x0A:
+            j += 1
+        var stop = j + 1
+        if stop > n:
+            stop = n
+        var line = message[i:stop]
+        if in_head:
+            var blank = len(line) == 2 and line[0] == 0x0D and line[1] == 0x0A
+            if blank or (len(line) == 1 and line[0] == 0x0A):
+                in_head = False
+            elif (
+                line[0] != 0x20 and line[0] != 0x09 and _is_trace_field(line)
+            ):
+                out.extend(prefix)
+        out.extend(line)
+        i = stop
 
 
 def trace_date(now_ms: Int) -> String:

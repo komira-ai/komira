@@ -120,7 +120,11 @@ def _accept_pending(
         if not r.is_ready():
             return
         var fd = Int32(Int(r.value()))
-        _set_nonblocking(fd)
+        if not _set_nonblocking(fd):
+            # A blocking descriptor would stall the whole caller-polled loop.
+            _refuse(fd)
+            out.refused += 1
+            continue
         var id = reg.accept(fd, config, now_ms, _peer_text(fd))
         if not id:
             _refuse(fd)
@@ -129,12 +133,13 @@ def _accept_pending(
         out.accepted += 1
 
 
-def _set_nonblocking(fd: Int32):
-    # FFI-BOUNDARY: `komira_fcntl_set_nonblock` is the C shim linked in by
-    # komira_async; it takes a descriptor and returns a status. `fd` stays
-    # owned by the caller. A failure leaves the socket as it was; accept4
-    # already made it non-blocking on Linux, so the result is not needed.
-    _ = external_call["komira_fcntl_set_nonblock", Int32](fd)
+def _set_nonblocking(fd: Int32) -> Bool:
+    """Make `fd` non-blocking; False when that failed."""
+    # FFI-BOUNDARY: `komira_fcntl_set_nonblock` is the C shim defined in
+    # komira_libc (native/komira_libc_posix.c), which komira_async links; it
+    # takes a descriptor and returns 0 or -1. `fd` stays owned by the caller,
+    # who closes it when this returns False.
+    return external_call["komira_fcntl_set_nonblock", Int32](fd) >= Int32(0)
 
 
 def _peer_text(fd: Int32) -> String:
@@ -149,6 +154,12 @@ def _peer_text(fd: Int32) -> String:
         fd, sa.unsafe_ptr(), len_buf.unsafe_ptr()
     )
     if rc < Int32(0):
+        return String("unknown")
+    # sockaddr_in: the family is AF_INET (2) in the first two bytes on Linux,
+    # or a length byte then the family on the BSDs. Anything else is not an
+    # IPv4 address and its bytes 4..7 mean something else.
+    var inet = (sa[0] == 2 and sa[1] == 0) or (sa[0] == 16 and sa[1] == 2)
+    if not inet:
         return String("unknown")
     return (
         String(Int(sa[4]))
@@ -186,7 +197,10 @@ def _expire(
     if not reg.has(cid):
         return
     if reg.is_closing(cid):
-        # It already had one iteration to take its last replies.
+        # It already had one iteration to take its last replies. Under
+        # back-pressure (the peer's receive window full) that 421 may never be
+        # written: the deadline wins over the reply, so a peer that does not
+        # read cannot hold the slot.
         _drop(reg, tls, cid, out)
         return
     out.expired += 1
@@ -335,8 +349,12 @@ def _flush(
 ) -> Bool:
     """Write queued replies until the queue is empty or the socket is full.
     False when the connection failed. A short write consumes only what went
-    out; the rest is offered again from the front of the queue, which is also
-    what a TLS connection needs after a short write."""
+    out (`tx_consume`); the next call offers the queue from its front again.
+    On TLS a call that wrote nothing (`BLOCKED_ON_WRITE`, 0 bytes accepted)
+    leaves the queue as it was; the retry begins with the same bytes and may
+    carry more behind them, because replies are only ever appended to the
+    queue. s2n counts nothing consumed after a 0-byte block, so a longer
+    buffer satisfies its size check."""
     var on_tls = tls.is_tls(cid)
     for _ in range(_MAX_WRITES):
         if reg.tx_len(cid) == 0:

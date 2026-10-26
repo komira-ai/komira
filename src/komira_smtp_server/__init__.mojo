@@ -65,4 +65,4 @@ from .local_delivery import (
 )
 from .serve import SmtpServeOutcome, serve_one_iteration
 from .session import FeedOutcome, SmtpRegistry
-from .trace import trace_headers
+from .trace import rename_inbound_trace_fields, trace_headers

@@ -12,7 +12,11 @@ never waits for readiness: it does what the sockets allow now and returns. Until
 a binary has a readiness driver (epoll or a timer in a program of its own), the
 caller must poll it in a loop, and a bare loop spins; the caller also passes the
 clock as `now_ms`, which is how idle and session deadlines work. The package
-is a library: nothing here starts a thread or a process.
+is a library: nothing here starts a thread or a process. A readiness driver
+(epoll) must not wait on the descriptor alone for a TLS connection: bytes
+already decrypted or buffered inside TLS do not make the descriptor readable
+again, and one iteration reads a bounded amount per connection, so the driver
+has to call the loop again while any TLS connection may hold data.
 
 **Version 1 is an unauthenticated MX.** It takes mail for the domains in
 `LocalDomains` from anyone, and checks no SPF, DKIM or DMARC: every stored
@@ -71,6 +75,13 @@ TLS connection are one code path. Accepted sockets are non-blocking.
   with the user as a quoted string, a queue id, the recipient and the date of
   `now_ms`) and `Authentication-Results: <host>; none`. The queue id holds a
   per-delivery counter, so two deliveries of identical mail are two messages.
+  A `Return-Path` or `Authentication-Results` field the sender put in its own
+  header is renamed `X-Original-...` (any case; folded lines go with it; the
+  body is untouched), so the first of each in a stored message is the one the
+  server wrote and it is the only one of each. A reader of stored mail should
+  still use the first. Paths in `Return-Path` and `for` are reduced to
+  characters that cannot close the angle brackets, end the clause or open a
+  comment or a quote.
   Everything the peer chose (EHLO name, peer text, user, sender, recipient)
   is reduced to safe characters or quoted before it is written, so it cannot
   add a header line or close a quote or a comment.
@@ -183,7 +194,15 @@ are in the package for tests of this server and of the loop that serves it.
 
 - `SmtpRegistry` has no socket, TLS or clock; `serve_one_iteration` has the
   sockets and TLS and takes the clock as a parameter.
-- IPv4 listeners only; the peer text in a trace header is the dotted address.
+- IPv4 listeners only; the peer text in a trace header is the dotted address
+  (`unknown` for any other address family).
+- A TLS connection is closed with a plain TCP close, without a TLS
+  `close_notify`, also after the `221` for QUIT: a client may report a
+  truncated stream after a complete session.
+- While a message is delivered, each recipient's copy is built twice, one at a
+  time (to store it, then for the hook) and freed in between, so a delivery
+  needs about one extra `max_message_bytes` beyond the message itself, not one
+  per recipient.
 - Several recipients in one message are stored one after another, not in one
   transaction: the rollback after a failure is best effort.
 - The receive-line cap for AUTH is 512 bytes when the initial response is on
@@ -201,6 +220,6 @@ are in the package for tests of this server and of the loop that serves it.
 
 The welded tests include `test_smtp_starttls` and `test_serve_loop`, which run
 over real loopback sockets with the `Peer` client of `komira_mail_test_support`
-(a small library the IMAP server's STARTTLS test uses too). They wait for
+(a small library meant for a future IMAP server's STARTTLS tests too). They wait for
 progress (a reply, a finished handshake, the end of a connection) and never
 for a time; deadlines are tested by passing `now_ms`.
