@@ -11,12 +11,14 @@
 #     the file, a footer of 0xFF bytes, a file with no row group (a table of
 #     no rows from this writer), and a column chunk that names bytes outside
 #     the data region.
+#   - ByteRange.contains refuses a length that wraps when added to an offset.
 # komira_parquet_writer's tests cover the files that writer produces.
 
 from std.testing import TestSuite, assert_equal, assert_raises, assert_true
 
 from komira_arrow.record_batch import RecordBatch
 from komira_buffer.byte_view import ByteView
+from komira_parquet.bytes_decode import ByteRange
 from komira_parquet.file_decode import decode_parquet_file_from_bytes
 from komira_parquet.morsel_reader import ColumnProjection
 from komira_test_parquet_file import TestColumn, TestFileLayout, parquet_file_bytes
@@ -237,6 +239,19 @@ def test_a_chunk_outside_the_data_region_is_refused() raises:
         cut.append(file[i])
     with assert_raises(contains="outside the data region"):
         _ = _decode(cut)
+
+
+def test_a_byte_range_never_contains_a_length_that_wraps() raises:
+    var r = ByteRange(4, 100)
+    assert_true(r.contains(4, 96))
+    assert_true(r.contains(100, 0))
+    assert_true(not r.contains(4, 97))
+    assert_true(not r.contains(3, 10))
+    assert_true(not r.contains(50, -1))
+    assert_true(not r.contains(101, 0))
+    assert_true(not r.contains(50, Int.MAX))
+    assert_true(not r.contains(4, Int.MAX - 2))
+    assert_true(not r.contains(Int.MAX, 10))
 
 
 def main() raises:

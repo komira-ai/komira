@@ -23,6 +23,7 @@ from komira_arrow.concat import concat_record_batches_nway
 from komira_arrow.record_batch import RecordBatch
 from komira_buffer.byte_view import ByteView
 from komira_collections.slab import Slab
+from komira_parquet_api.metadata import RowGroup
 
 from .bytes_decode import decode_row_group_from_bytes, row_group_byte_range
 from .metadata_parser import parse_full_metadata
@@ -41,6 +42,40 @@ def _magic_at(file: ByteView[_], offset: Int) -> Bool:
         and file.read_u8_at(offset + 2) == 0x52
         and file.read_u8_at(offset + 3) == 0x31
     )
+
+
+def _check_chunks_in_data_region(
+    g: Int, rg: RowGroup, footer_start: Int
+) raises:
+    """Every chunk of `rg` lies inside `[PAR1, footer_start)`, and every page
+    offset it names does too. The footer's offsets and sizes are untrusted
+    i64 values, so the checks never add two of them."""
+    for c in range(len(rg.columns)):
+        ref meta = rg.columns[c].meta_data
+        var lo = meta.data_page_offset
+        var bad = lo < _MAGIC_LEN or lo > footer_start
+        if meta.dictionary_page_offset:
+            var d = meta.dictionary_page_offset.value()
+            bad = bad or d < _MAGIC_LEN or d > footer_start
+            if d < lo:
+                lo = d
+        var size = meta.total_compressed_size
+        if bad or size < 0 or size > footer_start - lo:
+            raise Error(
+                "decode_parquet_file_from_bytes: row group "
+                + String(g)
+                + " column "
+                + String(c)
+                + " (offset "
+                + String(lo)
+                + ", size "
+                + String(size)
+                + ") is outside the data region ["
+                + String(_MAGIC_LEN)
+                + ", "
+                + String(footer_start)
+                + ")"
+            )
 
 
 def decode_parquet_file_from_bytes(
@@ -102,25 +137,8 @@ def decode_parquet_file_from_bytes(
     var groups = Slab[RecordBatch](capacity=len(md.row_groups))
     for g in range(len(md.row_groups)):
         ref rg = md.row_groups[g]
+        _check_chunks_in_data_region(g, rg, footer_start)
         var br = row_group_byte_range(rg)
-        if len(rg.columns) > 0 and (
-            br.start < _MAGIC_LEN
-            or br.end < br.start
-            or br.end > footer_start
-        ):
-            raise Error(
-                "decode_parquet_file_from_bytes: row group "
-                + String(g)
-                + " names bytes ["
-                + String(br.start)
-                + ", "
-                + String(br.end)
-                + ") outside the data region ["
-                + String(_MAGIC_LEN)
-                + ", "
-                + String(footer_start)
-                + ")"
-            )
         groups.append(
             decode_row_group_from_bytes(
                 file.sub(br.start, br.length()),

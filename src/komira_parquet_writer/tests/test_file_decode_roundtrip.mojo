@@ -7,7 +7,10 @@
 #   - a projection returns only the listed columns, in the listed order;
 #   - a table of zero rows decodes to zero rows with its schema;
 #   - refusals built by rewriting a real file's footer: no row group, a nested
-#     column, and a chunk that names bytes outside the data region.
+#     column, and a chunk that names bytes outside the data region: a size
+#     near the Int maximum (which wraps when added to an offset), a negative
+#     size or offset, a page offset past the footer, one byte past the footer;
+#     and a chunk ending exactly at the footer is accepted.
 # This package has no BINARY or fixed-size-list encoder, so those two shapes
 # are not here.
 
@@ -278,6 +281,92 @@ def test_a_chunk_outside_the_data_region_is_refused() raises:
     var md2 = _footer_of(file)
     md2.row_groups[0].columns[0].meta_data.dictionary_page_offset = None
     md2.row_groups[0].columns[0].meta_data.data_page_offset = 0
+    with assert_raises(contains="outside the data region"):
+        _ = _decode(_with_footer(file, md2))
+
+
+def _data_end(file: List[UInt8]) -> Int:
+    """Where the footer starts: the end of the data region."""
+    var n = len(file)
+    var flen = 0
+    for k in range(4):
+        flen |= Int(file[n - 8 + k]) << (8 * k)
+    return n - 8 - flen
+
+
+def test_a_chunk_size_near_the_int_maximum_is_refused() raises:
+    # The first column stays valid. A size this large added to its offset
+    # wraps negative; it must be refused, not passed as in range.
+    var file = write_record_batch_to_parquet_bytes(_batch(0, 10))
+    # The footer's zigzag varints reach Int.MAX // 2 at most; larger values
+    # are refused by the footer parser (the footer-parser test below).
+    var sizes = [Int.MAX // 2, Int.MAX // 2 - 1, Int.MAX // 2 - 100, 1 << 40]
+    for size in sizes:
+        var md = _footer_of(file)
+        md.row_groups[0].columns[1].meta_data.total_compressed_size = size
+        with assert_raises(contains="outside the data region"):
+            _ = _decode(_with_footer(file, md))
+
+
+def test_the_footer_parser_refuses_values_past_the_int_range_of_a_varint() raises:
+    # Sizes and offsets of 2^62 and more do not fit the footer's signed
+    # varints: the parser refuses the footer before any range is computed.
+    var file = write_record_batch_to_parquet_bytes(_batch(0, 10))
+    var md = _footer_of(file)
+    md.row_groups[0].columns[1].meta_data.total_compressed_size = Int.MAX
+    with assert_raises(contains="malformed varint"):
+        _ = _decode(_with_footer(file, md))
+    var md2 = _footer_of(file)
+    md2.row_groups[0].columns[1].meta_data.data_page_offset = Int.MIN
+    with assert_raises(contains="malformed varint"):
+        _ = _decode(_with_footer(file, md2))
+
+
+def test_a_negative_chunk_size_or_offset_is_refused() raises:
+    var file = write_record_batch_to_parquet_bytes(_batch(0, 10))
+    var md = _footer_of(file)
+    md.row_groups[0].columns[1].meta_data.total_compressed_size = -1
+    with assert_raises(contains="outside the data region"):
+        _ = _decode(_with_footer(file, md))
+    var md2 = _footer_of(file)
+    md2.row_groups[0].columns[2].meta_data.dictionary_page_offset = None
+    md2.row_groups[0].columns[2].meta_data.data_page_offset = -4
+    with assert_raises(contains="outside the data region"):
+        _ = _decode(_with_footer(file, md2))
+    var md3 = _footer_of(file)
+    md3.row_groups[0].columns[2].meta_data.dictionary_page_offset = -(Int.MAX // 2)
+    with assert_raises(contains="outside the data region"):
+        _ = _decode(_with_footer(file, md3))
+
+
+def test_a_page_offset_past_the_data_region_is_refused() raises:
+    var file = write_record_batch_to_parquet_bytes(_batch(0, 10))
+    var end = _data_end(file)
+    var md = _footer_of(file)
+    md.row_groups[0].columns[1].meta_data.dictionary_page_offset = None
+    md.row_groups[0].columns[1].meta_data.data_page_offset = Int.MAX // 2
+    with assert_raises(contains="outside the data region"):
+        _ = _decode(_with_footer(file, md))
+    var md2 = _footer_of(file)
+    md2.row_groups[0].columns[1].meta_data.dictionary_page_offset = None
+    md2.row_groups[0].columns[1].meta_data.data_page_offset = end + 1
+    with assert_raises(contains="outside the data region"):
+        _ = _decode(_with_footer(file, md2))
+
+
+def test_a_chunk_that_ends_exactly_at_the_footer_is_accepted() raises:
+    var file = write_record_batch_to_parquet_bytes(_batch(0, 10))
+    var end = _data_end(file)
+    var md = _footer_of(file)
+    ref meta = md.row_groups[0].columns[6].meta_data
+    var lo = meta.data_page_offset
+    if meta.dictionary_page_offset:
+        lo = min(lo, meta.dictionary_page_offset.value())
+    meta.total_compressed_size = end - lo
+    _check_rows(_decode(_with_footer(file, md)), 0, 10)
+    var md2 = _footer_of(file)
+    ref meta2 = md2.row_groups[0].columns[6].meta_data
+    meta2.total_compressed_size = end - lo + 1
     with assert_raises(contains="outside the data region"):
         _ = _decode(_with_footer(file, md2))
 
