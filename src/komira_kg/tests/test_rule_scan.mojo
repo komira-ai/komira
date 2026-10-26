@@ -112,8 +112,8 @@ def test_delimited_text_keeps_multibyte_characters_whole() raises:
 def test_an_email_rule_accepts_addresses_and_refuses_lookalikes() raises:
     var r = Rule.email("addr")
     assert_equal(
-        _names(r, "write to ann.lee+tag@host.example.org, or bo_b@x-y.io."),
-        "ann.lee+tag@host.example.org|bo_b@x-y.io",
+        _names(r, "write to ann.lee+tag@host.example.org, or bo_b@x-y.example."),
+        "ann.lee+tag@host.example.org|bo_b@x-y.example",
     )
     assert_equal(_names(r, "a@b"), "")
     assert_equal(_names(r, "a@b."), "")
@@ -121,17 +121,17 @@ def test_an_email_rule_accepts_addresses_and_refuses_lookalikes() raises:
     assert_equal(_names(r, "a@b..c"), "")
     assert_equal(_names(r, "@b.c"), "")
     assert_equal(_names(r, "a@-b.c"), "")
-    assert_equal(_names(r, "write me at ..a@b.cc"), "a@b.cc")
-    assert_equal(_names(r, "x@y.zz."), "x@y.zz")
+    assert_equal(_names(r, "write me at ..a@b.example"), "a@b.example")
+    assert_equal(_names(r, "x@y.example."), "x@y.example")
 
 
 def test_a_url_rule_wants_a_scheme_and_something_after_it() raises:
     var r = Rule.url("link")
     assert_equal(
-        _names(r, "go to https://host.example/p?q=1, or ftp://h/x. and (git+ssh://a)"),
-        "https://host.example/p?q=1|ftp://h/x|git+ssh://a",
+        _names(r, "go to https://host.example/p?q=1, or ftp://localhost/x. and (git+ssh://a)"),
+        "https://host.example/p?q=1|ftp://localhost/x|git+ssh://a",
     )
-    assert_equal(_names(r, "http:// ://x mailto:a 1http://x"), "")
+    assert_equal(_names(r, "http:// ://x mailto:a 1http://localhost"), "")
 
 
 def test_rules_that_can_never_match_are_refused() raises:
