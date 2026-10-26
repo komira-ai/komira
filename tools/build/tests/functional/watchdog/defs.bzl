@@ -15,7 +15,7 @@ def _impl(ctx):
 
     report = ctx.actions.declare_output("watchdog_cases.txt")
     ctx.actions.run(
-        cmd_args(exe(ctx.attrs.runner), exe(ctx.attrs.wrapper), exe(ctx.attrs.standin), report.as_output()),
+        cmd_args(exe(ctx.attrs.runner), exe(ctx.attrs.wrapper), exe(ctx.attrs.wrapper_ticked), exe(ctx.attrs.standin), report.as_output()),
         env = rerun_env(ctx),
         category = "mojo_watchdog_cases",
     )
@@ -30,5 +30,7 @@ mojo_watchdog_cases = rule(
         "standin": attrs.exec_dep(),
         # The wrapper under test: the Linux one unless a target names another.
         "wrapper": attrs.exec_dep(default = "komira//tools/build/mojo:mojo_compile"),
+        # The same wrapper with its watchdog's ticks supplied by the runner.
+        "wrapper_ticked": attrs.exec_dep(default = "komira//tools/build/mojo:mojo_compile_ticked"),
     },
 )
