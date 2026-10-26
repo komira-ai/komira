@@ -1,8 +1,8 @@
 # =============================================================================
 # komira_kg_format -- the values and on-disk formats the data-graph writer and
-#   reader share (parts 1 to 4: embeddings, extraction values, the snapshot
+#   reader share (parts 1 to 5: embeddings, extraction values, the snapshot
 #   manifest, table schemas, cosine ranking, the query result, the delta layer,
-#   the source fingerprints and the snapshot lineage store).
+#   the source fingerprints, the snapshot lineage store and the exact searches).
 # =============================================================================
 #
 #   * embedding      -- the packed little-endian f32 embedding cell.
@@ -26,6 +26,9 @@
 #   * snapshot_view, chain_view -- `SnapshotView` and `ChainView`: a resolved
 #                       base and a resolved chain, with the handle to fetch
 #                       their objects.
+#   * search        -- `node_similarity_search`, `edge_fulltext_search`,
+#                       `edge_out_degree` and `rrf_fuse`: exact scans over a
+#                       snapshot's tables, and rank fusion.
 #   * snapshot_store -- `KgSnapshotStore`: the lineage on an object store (bases,
 #                       delta chains, folds, fingerprints), and `KgTable`.
 #
@@ -118,4 +121,10 @@ from .snapshot_store import (
     PENDING_BASE_RECORD_COUNT,
     KgSnapshotStore,
     KgTable,
+)
+from .search import (
+    edge_fulltext_search,
+    edge_out_degree,
+    node_similarity_search,
+    rrf_fuse,
 )

@@ -3,12 +3,12 @@
 ## Responsibility
 
 The values and on-disk formats that the data-graph writer and reader share. This
-is parts 1 to 4 of the package described in
+is parts 1 to 5 of the package described in
 [the knowledge graph port](https://github.com/komira-ai/komira/blob/main/docs/design/knowledge_graph_port.md): the
 packed embedding cell, the values an extractor returns, the snapshot manifest
 body, the table schemas, cosine ranking, the structured query result, the delta
 layer over a base snapshot, the fingerprints of ingested sources and the snapshot
-lineage store. A later part adds the exact-scan searches. The code graph
+lineage store, and the exact searches over a snapshot's tables. The code graph
 [`komira_kg_code`](https://github.com/komira-ai/komira/blob/main/src/komira_kg_code/README.md) is a different thing and is untouched.
 
 - `embedding`: an embedding vector is one string cell holding its components as
@@ -58,12 +58,20 @@ lineage store. A later part adds the exact-scan searches. The code graph
   keep reading after the store that made them is gone.
 - `compaction_policy`: `CompactionPolicy`, the count-or-size rule for when a
   chain is worth folding.
+- `search`: exact scans over a `SnapshotView`, each reading one table's Parquet
+  bytes through the Parquet reader and scoring in Mojo, with no engine and no
+  index. `node_similarity_search` ranks entities by cosine similarity of
+  `name_embedding`, holding the query and every cell to the manifest's
+  dimension. `edge_fulltext_search` ranks edges by how often a term occurs in
+  `fact`. `edge_out_degree` counts the edges leaving a node. `rrf_fuse` fuses two
+  ranked lists by reciprocal rank. Each scan checks the table's schema version
+  before it decodes anything, and finds its columns by name.
 
 The package depends on `komira_arrow` (for schemas and string columns),
 `komira_json` (for the query result's wire), `komira_hash`,
 `komira_objectstore` (the snapshot and fingerprint lineages), `komira_collections`
-(the `Slab` a write takes its tables in) and `komira_parquet_writer` (the Parquet
-objects), reads no clock and no environment, and no pointer crosses its API.
+(the `Slab` a write takes its tables in), `komira_parquet_writer` (the Parquet
+objects) and `komira_parquet` (the searches read a table back), reads no clock and no environment, and no pointer crosses its API.
 
 ## API
 
@@ -115,6 +123,10 @@ Everything is exported from `komira_kg_format`:
   - races: `lost_races`, `last_write_lost_races`.
   - change gate: `fingerprint_load`, `fingerprint_lookup`, `fingerprint_save`,
     `fingerprint_patch_save`.
+- Searches: `node_similarity_search(view, query, k)`,
+  `edge_fulltext_search(view, term, k)` (both return `List[Hit]`, `Hit.row` the
+  row of the table read), `edge_out_degree(view, src_nid)` and
+  `rrf_fuse(list_a, list_b, k_const)`.
 
 ## Examples
 
@@ -628,3 +640,106 @@ when to do that is the host's retention decision, taken against
 `retired_age_ms` and a clock the host owns. Table objects are named by the
 FNV-1a hash of their bytes, which detects change and is not collision resistant.
 An object written by a failed write that no chunk names stays on the store.
+
+A search reads a snapshot's table straight from its object. The similarity
+search is `cosine_topk` over the entities table's embeddings, after holding the
+query and every cell to the dimension the manifest records. The full-text search
+counts a term's occurrences in each edge's `fact`, and the out-degree counts the
+edges leaving a node. A table needs only the columns a search reads, found by
+name:
+
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_raises
+-->
+```mojo
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Field, SchemaBuilder
+from komira_arrow.string_array import StringArray
+from komira_collections.slab import Slab
+from komira_kg_format import (
+    KgSnapshotStore,
+    KgTable,
+    edge_fulltext_search,
+    edge_out_degree,
+    node_similarity_search,
+    pack_embedding,
+)
+from komira_objectstore.shared_in_memory_conditional_store import (
+    SharedInMemoryConditionalStore,
+)
+
+def entities(cells: List[String]) raises -> RecordBatch:
+    var sb = SchemaBuilder()
+    sb.add_field(Field("name_embedding", ArrowType.LARGE_STRING, False))
+    var rb = RecordBatchBuilder()
+    rb.add_column(Column.from_string(StringArray.from_strings(cells)))
+    return rb.build(sb.build())
+
+def edges(src: List[Int64], facts: List[String]) raises -> RecordBatch:
+    var sb = SchemaBuilder()
+    sb.add_field(Field("src_nid", ArrowType.INT64, False))
+    sb.add_field(Field("fact", ArrowType.LARGE_STRING, False))
+    var rb = RecordBatchBuilder()
+    rb.add_column(
+        Column.from_primitive[DType.int64](PrimitiveArray[DType.int64].from_list(src))
+    )
+    rb.add_column(Column.from_string(StringArray.from_strings(facts)))
+    return rb.build(sb.build())
+
+var cells = List[String]()
+cells.append(pack_embedding([0.0, 1.0]))
+cells.append(pack_embedding([1.0, 0.0]))
+cells.append(pack_embedding([1.0, 1.0]))
+var src: List[Int64] = [4, 4, 9]
+var facts: List[String] = ["go go", "stop", "go"]
+
+var tables = Slab[KgTable]()
+tables.append(KgTable("entities", entities(cells), 1))
+tables.append(KgTable("edges", edges(src, facts), 1))
+var kg = KgSnapshotStore[SharedInMemoryConditionalStore](
+    SharedInMemoryConditionalStore(), "kg"
+)
+_ = kg.write_snapshot(tables^, 2)  # the graph's embedding dimension
+var view = kg.open_latest()
+
+var query: List[Float64] = [1.0, 0.0]
+var nearest = node_similarity_search(view, query, 2)
+assert_equal(nearest[0].row, 1)
+assert_equal(nearest[1].row, 2)
+
+var hits = edge_fulltext_search(view, "go", 5)
+assert_equal(len(hits), 2)
+assert_equal(hits[0].row, 0)  # two occurrences
+assert_equal(hits[0].score, 2.0)
+assert_equal(edge_out_degree(view, 4), 2)
+
+var wrong: List[Float64] = [1.0, 0.0, 0.0]
+with assert_raises(contains="embedding dimension is 2"):
+    _ = node_similarity_search(view, wrong, 2)
+```
+
+Two ranked lists in one id space fuse by reciprocal rank, `1 / (k_const + rank)`
+summed over the lists an id is in; equal scores come back lower id first:
+
+<!-- mojo-hidden
+from std.testing import assert_equal
+-->
+```mojo
+from komira_kg_format import Hit, rrf_fuse
+
+var by_text = List[Hit]()
+by_text.append(Hit(10, 0.0))
+by_text.append(Hit(20, 0.0))
+var by_vector = List[Hit]()
+by_vector.append(Hit(20, 0.0))
+by_vector.append(Hit(30, 0.0))
+
+var fused = rrf_fuse(by_text, by_vector, 60.0)
+assert_equal(len(fused), 3)
+assert_equal(fused[0].row, 20)  # in both lists
+assert_equal(fused[1].row, 10)  # ties with 30 on one share: lower id first
+assert_equal(fused[2].row, 30)
+```
