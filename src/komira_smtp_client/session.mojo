@@ -233,6 +233,15 @@ struct SmtpSession[S: IoStream, H: WaitHook](Movable):
         self._shut()
         return Error("SmtpProtocol: " + stage + ": " + what)
 
+    def _deadline_after(self, budget_us: Int) -> Int:
+        """The deadline `budget_us` from now. The sum saturates: a budget near
+        the top of `Int` means "very long", never a wrapped negative deadline
+        that has already passed."""
+        var now = self._clock.now_us()
+        if budget_us > 0 and now > 0 and budget_us > Int.MAX - now:
+            return Int.MAX
+        return now + budget_us
+
     def _check_deadline(mut self, stage: String, deadline_us: Int) raises:
         if self._clock.now_us() >= deadline_us:
             self._shut()
@@ -313,7 +322,20 @@ struct SmtpSession[S: IoStream, H: WaitHook](Movable):
             else:
                 self._wait(r.pending_token(), True, deadline_us)
 
+    def _refuse_unsolicited(mut self, stage: String) raises:
+        """No command or body is written while a reply is still buffered: the
+        client never pipelines, so such bytes answer nothing it asked, and
+        taking them for the answer to the next command would desynchronise the
+        conversation (or let an injected line stand in for a STARTTLS or AUTH
+        reply)."""
+        if len(self._rbuf) > 0:
+            raise self._protocol(
+                stage,
+                String("unsolicited bytes from the server before the command"),
+            )
+
     def _send_line(mut self, line: String, stage: String, deadline_us: Int) raises:
+        self._refuse_unsolicited(stage)
         var b = line.as_bytes()
         for i in range(len(b)):
             if b[i] == 0x0D or b[i] == 0x0A:
@@ -391,7 +413,7 @@ struct SmtpSession[S: IoStream, H: WaitHook](Movable):
 
     def _exchange(mut self, line: String, stage: String) raises -> SmtpReply:
         self._check_open()
-        var deadline = self._clock.now_us() + self._command_us
+        var deadline = self._deadline_after(self._command_us)
         self._send_line(line, stage, deadline)
         return self._read_reply(stage, deadline)
 
@@ -401,7 +423,7 @@ struct SmtpSession[S: IoStream, H: WaitHook](Movable):
         """Read the server's greeting. 220 means ready; anything else (554 is
         a refusal, 421 a closing server) is returned for the caller to act on."""
         self._check_open()
-        var deadline = self._clock.now_us() + self._command_us
+        var deadline = self._deadline_after(self._command_us)
         return self._read_reply(String("greeting"), deadline)
 
     def ehlo(mut self) raises -> SmtpReply:
@@ -478,16 +500,18 @@ struct SmtpSession[S: IoStream, H: WaitHook](Movable):
                 " the connection was closed"
             )
         if server_name.byte_length() == 0:
+            self._shut()
             raise Error(
                 "SmtpSecurity: TLS: no server name to check the certificate against"
             )
         var fd = self._stream.value().fd()
         if fd < Int32(0):
+            self._shut()
             raise Error(
                 "SmtpSecurity: TLS: this stream has no descriptor to run TLS on"
             )
         var conn = self._open_conn(trust_pem, server_name, fd)
-        var deadline = self._clock.now_us() + self._command_us
+        var deadline = self._deadline_after(self._command_us)
         while True:
             var outcome = conn.handshake()
             if outcome == TLS_OUTCOME_DONE:
@@ -539,7 +563,13 @@ struct SmtpSession[S: IoStream, H: WaitHook](Movable):
         (RFC 4954). Refused with `SmtpSecurity` on a connection that is not TLS
         unless `allow_clear`; with `SmtpAuth` when the server offers neither
         mechanism. The reply is returned (235 on success); its text has the
-        password, and its base64 forms, replaced by `***`."""
+        password, and its base64 forms, replaced by `***`. That is best effort: only
+        an exact occurrence inside one reply line is replaced. A password split
+        over two lines, in other letter case, with its base64 text in other
+        case, or with non-ASCII bytes the reply text sanitising changed, is not
+        found; and a very short password also replaces its letters inside other
+        words. Do not treat the reply text of a failed AUTH as free of the
+        password: do not log it."""
         self._check_open()
         if not self._ehlo_done:
             raise Error("SmtpProtocol: AUTH before a successful EHLO")
@@ -733,7 +763,8 @@ struct SmtpSession[S: IoStream, H: WaitHook](Movable):
             return self._failed(String("data"), dr, results^)
         var normalized = normalize_line_endings(message)
         var wire = dot_stuff_and_terminate(Span(normalized))
-        var deadline = self._clock.now_us() + self._data_us
+        var deadline = self._deadline_after(self._data_us)
+        self._refuse_unsolicited(String("DATA body"))
         self._write_all(Span(wire), String("DATA body"), deadline)
         var fr = self._read_final(deadline)
         self._dirty = True
