@@ -22,19 +22,19 @@ pub const Ctx = struct {
     checked: usize = 0,
 
     pub fn init(alloc: Alloc, stage: []const u8, scratch: []const u8) Ctx {
-        return .{ .alloc = alloc, .stage = stage, .scratch = scratch, .report = std.ArrayList(u8).init(alloc) };
+        return .{ .alloc = alloc, .stage = stage, .scratch = scratch, .report = std.ArrayList(u8).empty };
     }
 
     /// Adds one finding line.
     pub fn finding(c: *Ctx, comptime fmt: []const u8, args: anytype) !void {
-        try c.report.writer().print(fmt ++ "\n", args);
+        try c.report.writer(c.alloc).print(fmt ++ "\n", args);
     }
 
     /// Adds what a tool printed, as lines.
     pub fn appendOutput(c: *Ctx, bytes: []const u8) !void {
         if (bytes.len == 0) return;
-        try c.report.appendSlice(bytes);
-        if (bytes[bytes.len - 1] != '\n') try c.report.append('\n');
+        try c.report.appendSlice(c.alloc, bytes);
+        if (bytes[bytes.len - 1] != '\n') try c.report.append(c.alloc, '\n');
     }
 
     /// `p`, made absolute against the working directory.
@@ -118,16 +118,16 @@ pub fn sortStrings(items: [][]const u8) void {
 
 /// Sorts the lines of `text` (each ending in a newline) and returns them so.
 pub fn sortLines(alloc: Alloc, text: []const u8) ![]u8 {
-    var list = std.ArrayList([]const u8).init(alloc);
+    var list = std.ArrayList([]const u8).empty;
     var l = Lines.init(text);
-    while (l.next()) |line| try list.append(line);
+    while (l.next()) |line| try list.append(alloc, line);
     sortStrings(list.items);
-    var out = std.ArrayList(u8).init(alloc);
+    var out = std.ArrayList(u8).empty;
     for (list.items) |line| {
-        try out.appendSlice(line);
-        try out.append('\n');
+        try out.appendSlice(alloc, line);
+        try out.append(alloc, '\n');
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 /// Every file and symbolic link under `dir_path`, as paths relative to it,
@@ -140,13 +140,13 @@ pub fn listFiles(alloc: Alloc, dir_path: []const u8) ![][]const u8 {
     defer dir.close();
     var walker = try dir.walk(alloc);
     defer walker.deinit();
-    var out = std.ArrayList([]const u8).init(alloc);
+    var out = std.ArrayList([]const u8).empty;
     while (try walker.next()) |e| {
         if (e.kind != .file and e.kind != .sym_link) continue;
-        try out.append(try alloc.dupe(u8, e.path));
+        try out.append(alloc, try alloc.dupe(u8, e.path));
     }
     sortStrings(out.items);
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 /// Copies every file under `src_path` to the same path under `dest_path`,
@@ -173,7 +173,7 @@ pub const Ran = struct {
 
 /// Runs `argv` in `cwd` (null: the working directory) and returns what it did.
 pub fn runTool(alloc: Alloc, argv: []const []const u8, cwd: ?[]const u8) !Ran {
-    const r = std.ChildProcess.run(.{
+    const r = std.process.Child.run(.{
         .allocator = alloc,
         .argv = argv,
         .cwd = cwd,
@@ -198,20 +198,20 @@ pub const max_message_lines = 200;
 /// `prefix` + its path in the stage instead. A run that checked nothing is a
 /// finding.
 pub fn result(alloc: Alloc, kind: []const u8, stage: []const u8, prefix: []const u8, report: []const u8, checked: usize) ![]u8 {
-    var text = std.ArrayList(u8).init(alloc);
+    var text = std.ArrayList(u8).empty;
     if (report.len > 0) {
         const from = try std.mem.concat(alloc, u8, &.{ stage, "/" });
         const n = std.mem.replacementSize(u8, report, from, prefix);
-        try text.resize(n);
+        try text.resize(alloc, n);
         _ = std.mem.replace(u8, report, from, prefix, text.items);
     }
-    if (checked == 0) try text.writer().print("{s}: checked nothing (no inputs, or no lines to check)\n", .{kind});
+    if (checked == 0) try text.writer(alloc).print("{s}: checked nothing (no inputs, or no lines to check)\n", .{kind});
 
-    var out = std.ArrayList(u8).init(alloc);
-    const w = out.writer();
+    var out = std.ArrayList(u8).empty;
+    const w = out.writer(alloc);
     if (text.items.len == 0) {
         try w.print("{{\"version\": 1, \"data\": {{\"status\": \"success\", \"message\": \"{s}: {d} checked\"}}}}\n", .{ kind, checked });
-        return out.toOwnedSlice();
+        return out.toOwnedSlice(alloc);
     }
     try w.print("{{\"version\": 1, \"data\": {{\"status\": \"failure\", \"message\": \"{s}: {d} finding line(s)\\n", .{ kind, countLines(text.items) });
     var lines = Lines.init(text.items);
@@ -227,5 +227,5 @@ pub fn result(alloc: Alloc, kind: []const u8, stage: []const u8, prefix: []const
         try w.writeAll("\\n");
     }
     try w.writeAll("\"}}\n");
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }

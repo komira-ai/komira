@@ -12,7 +12,8 @@
 #      copied out of that buffer; any other chunk copies the codes into a
 #      buffer of its own and goes on;
 #   2. a BYTE_ARRAY chunk that is not all dictionary pages: its string runs
-#      joined, spread over its nulls;
+#      (dictionary pages already resolved to runs) joined, spread over its
+#      nulls;
 #   3. a numeric chunk whose dictionary pages are followed by PLAIN pages:
 #      the codes resolved, the PLAIN values appended, spread over the nulls;
 #   4. a chunk of dictionary codes: kept as codes for the fused count
@@ -44,7 +45,6 @@ from .column_decoder_strings import (
     _concat_two_primitive,
     _dict_to_string_array,
     _expand_binary_with_nulls,
-    _resolve_codes_to_strings,
 )
 from .decimal_decode import (
     decode_int32_buf_to_decimal128,
@@ -141,16 +141,9 @@ def _assemble(
 
     # 2. A BYTE_ARRAY chunk of string runs.
     if acc.string_pages_mode and ptype == ParquetType.BYTE_ARRAY:
-        if acc.has_dict and acc.dict_idx_count > acc.codes_flushed:
-            acc.string_pages.append(
-                _resolve_codes_to_strings(
-                    acc.dict_decoder,
-                    acc.dict_idx_buf.value(),
-                    acc.codes_flushed,
-                    acc.dict_idx_count,
-                )
-            )
-            acc.codes_flushed = acc.dict_idx_count
+        # No codes are pending here: in string-run mode every page of codes
+        # was resolved to a run when it was decoded (column_decoder_values),
+        # so the runs already hold every row in page order.
         var joined = _concat_string_arrays(acc.string_pages)
         if acc.has_nulls():
             var dv = acc.def_level_buf.value().view_mut()

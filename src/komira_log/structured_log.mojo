@@ -333,8 +333,9 @@ def _redact_keyed_secrets(text: String) -> String:
                     break
         if matched_len > 0:
             # Emit the key + separator verbatim, then swallow the value token.
-            for c in range(i, i + matched_len):
-                out += String(chr(Int(src[c])))
+            out += String(
+                StringSlice(unsafe_from_utf8=src[i : i + matched_len])
+            )
             var v = i + matched_len
             var vs = v
             while v < n and not _is_value_delim(src[v]):
@@ -369,8 +370,16 @@ def _redact_keyed_secrets(text: String) -> String:
                     out += String(REDACTED)
             i = v
             continue
-        out += String(chr(Int(src[i])))
+        # BYTE-EXACT copy of the byte at `i` plus the non-ASCII bytes after
+        # it. Every key and scheme word is ASCII, so no match can start on a
+        # byte >= 0x80, and the run ends on a code-point boundary. A per-byte
+        # `chr(Int(byte))` copy re-encodes each byte >= 0x80 as a two-byte
+        # code point (komira-ai/komira#1142).
+        var run_start = i
         i = i + 1
+        while i < n and src[i] >= UInt8(128):
+            i = i + 1
+        out += String(StringSlice(unsafe_from_utf8=src[run_start:i]))
     return out^
 
 
@@ -455,8 +464,14 @@ def _redact_emails(text: String) -> String:
                 out += String(REDACTED_EMAIL)
                 i = e
                 continue
-        out += String(chr(Int(b[i])))
+        # BYTE-EXACT copy of the byte at `i` plus the non-ASCII bytes after
+        # it: an address starts at an ASCII `@`, so no match is skipped, and
+        # the run ends on a code-point boundary (komira-ai/komira#1142).
+        var run_start = i
         i = i + 1
+        while i < n and b[i] >= UInt8(128):
+            i = i + 1
+        out += String(StringSlice(unsafe_from_utf8=b[run_start:i]))
     return out^
 
 

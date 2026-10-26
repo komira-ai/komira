@@ -9,9 +9,9 @@ test runs from, and the data, environment and arguments it is given.
 #     root/bin/<test>        the test binary (a copy, so /proc/self/exe is here)
 #     root/share/<dest>      each declared data file
 #
-# gate_runner.sh starts the test with root/share as its current directory, so
+# The gate (`gate mojo`, tools/build/run) starts the test with root/share as its current directory, so
 # a relative path to a declared file opens and any other relative path names
-# nothing. komira//tools/build/mojo/runtime_paths finds root/share from the
+# nothing. komira//src/komira_runtime_paths finds root/share from the
 # executable, the same way a bundle finds its share/.
 
 # Names the runner sets itself; a test may not override them through env.
@@ -56,12 +56,10 @@ def env_args(where, env):
         args += ["--env", "{}={}".format(name, env[name])]
     return args
 
-# The prefix of every artifact path in a mojo_test's `args`: gate_runner.sh
+# The prefix of every artifact path in a mojo_test's `args`: the gate
 # replaces it with the action's directory, because the test runs from its
-# share/, where a path relative to the action's directory reaches nothing.
-# gate_runner.sh's comment names this constant by its name before it moved
-# here from defs.bzl (`_ACTION_DIR_TOKEN`); the runner stays byte for byte as
-# it was until a change that may touch it corrects that.
+# share/, where a path relative to the action's directory reaches nothing
+# (tools/build/run/mojo.zig, `action_dir_token`).
 ACTION_DIR_TOKEN = "@KOMIRA_ACTION_DIR@"
 
 def arg_args(args):
@@ -81,3 +79,28 @@ def test_root(ctx, path, exe, data):
         files["share/" + dest] = a
     root = ctx.actions.copied_dir(path, files)
     return root, root.project("bin/" + name)
+
+def gate_mojo(tc, label, test, marker, flags = [], tail = []):
+    """The command that runs one gated test: `gate mojo` (tools/build/run,
+    README.md) of `test` (the binary inside a test_root) as `label`, writing
+    `PASS <label>` to `marker` when it passes. `flags` are its limits (the
+    memory cap, cap_flags in defines.bzl; the time limit, deadline_flags in
+    test_limit.bzl); `tail` its `--env` and `--arg` options, which come
+    last. `tc.gate` is the execution platform's build of the gate (linux:
+    run:gate, darwin-arm64: run:gate_darwin)."""
+    return cmd_args(
+        tc.gate,
+        "mojo",
+        "--busybox",
+        tc.busybox,
+        "--runtime-lib",
+        cmd_args(tc.compiler, format = "{}/lib"),
+        "--label",
+        label,
+        "--test",
+        test,
+        "--marker",
+        marker,
+        flags,
+        tail,
+    )

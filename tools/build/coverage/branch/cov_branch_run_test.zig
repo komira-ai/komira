@@ -1,6 +1,6 @@
 //! Unit tests of `cov_branch run` (cov_branch_run.zig), run by `zig test`
 //! as a build action (`:cov_branch_unit`). Each process step is a stand-in
-//! (`Fake`, a Runner) that writes what the real program would (gate_runner's
+//! (`Fake`, a Runner) that writes what the real program would (the gate's
 //! stderr and the raw profiles, llvm-profdata's log and output), so every
 //! decision of the subcommand is reached without a test binary or LLVM. What
 //! a real run does end to end is test 47's (tools/build/tests/coverage_runs.md).
@@ -36,7 +36,7 @@ const Fake = struct {
     calls: std.ArrayList(br.Spec),
 
     fn init(alloc: std.mem.Allocator) Fake {
-        return .{ .alloc = alloc, .calls = std.ArrayList(br.Spec).init(alloc) };
+        return .{ .alloc = alloc, .calls = std.ArrayList(br.Spec).empty };
     }
 
     fn runner(self: *Fake) r.Runner {
@@ -55,9 +55,9 @@ const Fake = struct {
         var copy = spec;
         copy.argv = try alloc.dupe([]const u8, spec.argv);
         copy.env = try alloc.dupe([]const u8, spec.env);
-        try self.calls.append(copy);
+        try self.calls.append(alloc, copy);
         var status: br.Status = .{ .exited = 0 };
-        if (spec.argv.len > 1 and std.mem.eql(u8, spec.argv[1], "sh")) {
+        if (spec.argv.len > 1 and std.mem.eql(u8, spec.argv[1], "mojo")) {
             try write(spec.stderr_path.?, self.gate_err);
             // Where LLVM_PROFILE_FILE points: <dir>/%p.profraw.
             const last = spec.argv[spec.argv.len - 1];
@@ -112,7 +112,7 @@ const Case = struct {
     fn args(_: *Case) r.Args {
         return .{
             .busybox = "tc/busybox",
-            .gate_runner = "mojo/gate_runner.sh",
+            .gate = "run/gate",
             .compiler = "tc/compiler",
             .label = "//p:lib:tests/test_one.mojo [branch coverage]",
             .profdata = "run/llvm/bin/llvm-profdata",
@@ -125,7 +125,7 @@ const Case = struct {
 
     /// Runs the subcommand against `fake`; its exit status.
     fn go(self: *Case, fake: *Fake) !u8 {
-        self.err = std.ArrayList(u8).init(self.a());
+        self.err = std.ArrayList(u8).empty;
         try self.tmp.dir.makePath("out");
         return r.runAll(self.a(), self.args(), try self.where(), fake.runner(), &self.err);
     }
@@ -162,13 +162,16 @@ test "a passing run: the gate's command line, the environments, the merge of eve
             return std.fmt.allocPrint(cc.a(), "{s}/{s}", .{ cc.root, p }) catch unreachable;
         }
     }.f;
-    // 1. gate_runner, as the release gate runs it, then LLVM_PROFILE_FILE.
+    // 1. `gate mojo`, as the release gate runs it (no limit flag), then
+    // LLVM_PROFILE_FILE.
     const gate = fake.calls.items[0];
     const want = [_][]const u8{
-        ab(&c, "tc/busybox"),                                                         "sh",
-        ab(&c, "mojo/gate_runner.sh"),                                                ab(&c, "tc/busybox"),
-        "tc/compiler",                                                                "//p:lib:tests/test_one.mojo [branch coverage]",
-        ab(&c, "root/bin/test_one"),                                                  try std.fmt.allocPrint(c.a(), "{s}/gate.passed", .{k}),
+        ab(&c, "run/gate"),                                                           "mojo",
+        "--busybox",                                                                  ab(&c, "tc/busybox"),
+        "--runtime-lib",                                                              ab(&c, "tc/compiler/lib"),
+        "--label",                                                                    "//p:lib:tests/test_one.mojo [branch coverage]",
+        "--test",                                                                     ab(&c, "root/bin/test_one"),
+        "--marker",                                                                   try std.fmt.allocPrint(c.a(), "{s}/gate.passed", .{k}),
         "--env",                                                                      "A=1",
         "--env",                                                                      "B=two words",
         "--env",                                                                      try std.fmt.allocPrint(c.a(), "LLVM_PROFILE_FILE={s}/prof/%p.profraw", .{k}),
@@ -204,7 +207,7 @@ test "a passing run: the gate's command line, the environments, the merge of eve
     try testing.expectError(error.FileNotFound, std.fs.cwd().access(k, .{}));
 }
 
-test "a failing test: its exit status, its output without gate_runner's banner, this run's message" {
+test "a failing test: its exit status, its output without the gate's banner, this run's message" {
     var c = try Case.init();
     defer c.deinit();
     var fake = Fake.init(c.a());
@@ -237,7 +240,7 @@ test "the banner is dropped once, and only as its pair of lines" {
     const a = testing.allocator;
     var arena = std.heap.ArenaAllocator.init(a);
     defer arena.deinit();
-    var out = std.ArrayList(u8).init(arena.allocator());
+    var out = std.ArrayList(u8).empty;
     const h = "GATED TEST FAILED: L (exit 2)";
     const p = "The library's package is not produced until this test passes.";
     try r.gateFailure(arena.allocator(), &out, "L", 2, h ++ "\nnot the second line\n" ++ h ++ "\n" ++ p ++ "\n" ++ h ++ "\n" ++ p ++ "\n");
@@ -266,9 +269,9 @@ test "raw profiles are found at any depth, and only *.profraw files" {
     defer c.deinit();
     try c.tmp.dir.makePath("p/sub");
     try c.tmp.dir.makePath("p/d.profraw");
-    try c.tmp.dir.writeFile("p/b.profraw", "");
-    try c.tmp.dir.writeFile("p/sub/a.profraw", "");
-    try c.tmp.dir.writeFile("p/c.profraw.tmp", "");
+    try c.tmp.dir.writeFile(.{ .sub_path = "p/b.profraw", .data = "" });
+    try c.tmp.dir.writeFile(.{ .sub_path = "p/sub/a.profraw", .data = "" });
+    try c.tmp.dir.writeFile(.{ .sub_path = "p/c.profraw.tmp", .data = "" });
     const p = try std.fs.path.join(c.a(), &.{ c.root, "p" });
     const got = try r.listRaws(c.a(), p);
     try testing.expectEqual(@as(usize, 2), got.len);
@@ -406,7 +409,7 @@ fn usage(argv: []const []const u8) ![]const u8 {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    var err = std.ArrayList(u8).init(a);
+    var err = std.ArrayList(u8).empty;
     const where = r.Where{ .cwd = "/nowhere", .k = "/nowhere/k", .env = &.{} };
     var fake = Fake.init(a);
     const code = try r.cli(a, argv, where, fake.runner(), &err);
@@ -424,7 +427,7 @@ fn expectUsage(argv: []const []const u8, text: []const u8) !void {
     }
 }
 
-const full = [_][]const u8{ "--busybox", "b", "--gate-runner", "g", "--compiler", "c", "--label", "l", "--profdata", "/nonexistent/llvm-profdata", "--raw-version", "11", "--binary", "x", "--out", "o" };
+const full = [_][]const u8{ "--busybox", "b", "--gate", "g", "--compiler", "c", "--label", "l", "--profdata", "/nonexistent/llvm-profdata", "--raw-version", "11", "--binary", "x", "--out", "o" };
 
 test "usage errors: a missing, repeated, empty or unknown flag, a bad version, a missing llvm-profdata" {
     try expectUsage(full[0..14], "usage error: --out is missing");

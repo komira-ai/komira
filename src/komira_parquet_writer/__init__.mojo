@@ -15,9 +15,19 @@ BYTE_ARRAY, BOOLEAN, and the definition levels), DELTA_BINARY_PACKED
 (`writer_dict`, `writer_dict_numeric`) and Decimal128 as
 FIXED_LEN_BYTE_ARRAY(16) (`decimal_encode`).
 
-It writes no file: the writer that assembles column chunks into a file and
-returns the file's metadata is a later part of this package. It reads no
-Parquet file either, and does not depend on the reader (`komira_parquet`).
+The file writer (`writer`: `ParquetFileWriter`) takes whole columns, encodes
+each as one page or dictionary chunk, and `close_to_bytes` returns the file:
+magic, column chunks, footer, footer length, magic (`file_assembly` builds the
+chunk entries and the footer, `encoded_column` is the column-parallel hand-off).
+Several arrays encode as one column chunk without an Arrow concat
+(`writer_multi_batch`), and `writer_multi_batch_stats` folds a column's
+statistics across batches. `writer_advanced` (`AdvancedParquetWriter`) adds row groups, the page index,
+bloom filters (`writer_bloom`) and page CRCs (`page_crc`). `write_record_batch_to_parquet_bytes` and `write_record_batches_to_parquet_bytes`
+(`record_batch_writer`) turn Arrow RecordBatches into a whole file: the schema
+from the batches, each column encoded by its Arrow type, row groups cut at a
+row count. It opens no file: where the bytes go is the caller's decision. It reads no
+Parquet file either, and does not depend on the reader (`komira_parquet`);
+its tests do, through `test_deps`, to prove the bytes decode.
 """
 
 from .thrift_writer import ThriftCompactWriter, serialize_file_metadata
@@ -33,6 +43,7 @@ from .stats import (
     compute_statistics_int32,
     compute_statistics_int64,
     compute_statistics_string,
+    IntStatsAccumulator,
 )
 from .writer_float_stats import (
     FloatMinMax,
@@ -99,4 +110,45 @@ from .decimal_encode import (
     decimal128_schema_element,
     encode_decimal128_column_page,
     patch_decimal_schema_elements,
+)
+from .file_assembly import (
+    PARQUET_CREATED_BY,
+    append_magic,
+    column_chunk_for_page,
+    finish_file,
+    row_group_for_chunks,
+)
+from .writer import ParquetFileWriter
+from .encoded_column import (
+    EncodedColumn,
+    encode_column_to_buffer,
+    write_batch_parallel_homogeneous,
+    write_parquet_file_from_encoded,
+)
+from .writer_multi_batch import (
+    encode_n_primitives,
+    encode_two_primitives,
+    encode_two_strings,
+    encode_two_to_buffer,
+)
+from .writer_bloom import (
+    serialize_bloom_filter,
+    serialize_bloom_filter_header,
+)
+from .page_crc import page_with_crc
+from .writer_advanced import (
+    AdvancedParquetWriter,
+    RowGroupState,
+    SerializedBloomFilter,
+    WriterConfig,
+)
+from .record_batch_schema import (
+    arrow_type_to_parquet_type,
+    patch_date32_schema_elements,
+    schema_elements_for,
+)
+from .record_batch_writer import (
+    DEFAULT_MAX_ROWS_PER_RG,
+    write_record_batch_to_parquet_bytes,
+    write_record_batches_to_parquet_bytes,
 )

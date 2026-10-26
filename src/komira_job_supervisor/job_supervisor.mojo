@@ -129,22 +129,14 @@ from komira_log import ArgStr
 # =============================================================================
 # §1: stderr ring helpers.
 # =============================================================================
-def _split_lines(text: String) -> List[String]:
-    """Split captured stderr text into lines (on '\\n'), dropping a trailing
-    empty line. The supervisor keeps the last N for failure forensics."""
-    var lines = List[String]()
-    var cur = String("")
-    var bytes = text.as_bytes()
-    for i in range(len(bytes)):
-        var c = bytes[i]
-        if c == UInt8(0x0A):  # newline
-            lines.append(cur)
-            cur = String("")
-        else:
-            cur += chr(Int(c))
-    if cur.byte_length() > 0:
-        lines.append(cur)
-    return lines^
+def _line_text(bytes: List[UInt8]) -> String:
+    """One captured line as a String, made once from its bytes. Valid UTF-8
+    keeps its bytes; a sequence that is not UTF-8 becomes U+FFFD, so every
+    line, and so the line text in logs.txt, the heartbeat and
+    crash_report.json, is valid UTF-8. The streamed chunks keep the job's exact bytes. A per-byte
+    `chr(Int(byte))` would re-encode each byte >= 0x80 as its own two-byte
+    code point (`é`, C3 A9, became C3 83 C2 A9; komira-ai/komira#1393)."""
+    return String(from_utf8_lossy=Span(bytes))
 
 
 def _detect_panic(lines: List[String]) -> Optional[String]:
@@ -202,9 +194,11 @@ struct JobSupervisor[
 
     # Non-blocking reads arrive in chunks that do not align on lines, so each
     # stream keeps a partial-line accumulator. The stdout byte budget bounds
-    # the in-memory capture and flags truncation.
-    var stdout_partial: String
-    var stderr_partial: String
+    # the in-memory capture and flags truncation. The accumulators hold
+    # bytes: a read can end inside a multi-byte character, so a line is
+    # decoded only once it is whole (`_line_text`).
+    var stdout_partial: List[UInt8]
+    var stderr_partial: List[UInt8]
     var stdout_bytes: Int
     var stdout_truncated: Bool
     var capture_nonblocking: Bool
@@ -237,8 +231,8 @@ struct JobSupervisor[
         self.child_exited = False
         self.exit_info = ExitInfo(Int32(-1), Int32(-1), Int32(-1))
         self.spawned_at_ns = UInt64(0)
-        self.stdout_partial = String("")
-        self.stderr_partial = String("")
+        self.stdout_partial = List[UInt8]()
+        self.stderr_partial = List[UInt8]()
         self.stdout_bytes = 0
         self.stdout_truncated = False
         self.capture_nonblocking = False
@@ -505,13 +499,13 @@ struct JobSupervisor[
             if t.byte_length() > 0:
                 self._absorb(t, is_stdout=False)
         # Flush any trailing unterminated partial line into the rings.
-        if self.stdout_partial.byte_length() > 0:
-            var so = self.stdout_partial
-            self.stdout_partial = String("")
+        if len(self.stdout_partial) > 0:
+            var so = _line_text(self.stdout_partial)
+            self.stdout_partial.clear()
             self._push_stdout_line(so^)
-        if self.stderr_partial.byte_length() > 0:
-            var se = self.stderr_partial
-            self.stderr_partial = String("")
+        if len(self.stderr_partial) > 0:
+            var se = _line_text(self.stderr_partial)
+            self.stderr_partial.clear()
             self._push_stderr_line(se^)
 
     def _absorb(mut self, text: String, is_stdout: Bool):
@@ -528,22 +522,28 @@ struct JobSupervisor[
             ref st = self.log_store.value()
             self.log_sink.feed_stdout[Self.S](text, st)
         var bytes = text.as_bytes()
-        for i in range(len(bytes)):
-            var c = bytes[i]
-            if c == UInt8(0x0A):  # newline -> a complete line
-                if is_stdout:
-                    var line = self.stdout_partial
-                    self.stdout_partial = String("")
-                    self._push_stdout_line(line^)
-                else:
-                    var line = self.stderr_partial
-                    self.stderr_partial = String("")
-                    self._push_stderr_line(line^)
+        var n = len(bytes)
+        var start = 0  # the first byte not yet in an accumulator
+        for i in range(n):
+            if bytes[i] != UInt8(0x0A):
+                continue
+            # A newline: the accumulator plus bytes[start:i] is a whole line.
+            if is_stdout:
+                self.stdout_partial.extend(bytes[start:i])
+                var line = _line_text(self.stdout_partial)
+                self.stdout_partial.clear()
+                self._push_stdout_line(line^)
             else:
-                if is_stdout:
-                    self.stdout_partial += chr(Int(c))
-                else:
-                    self.stderr_partial += chr(Int(c))
+                self.stderr_partial.extend(bytes[start:i])
+                var line = _line_text(self.stderr_partial)
+                self.stderr_partial.clear()
+                self._push_stderr_line(line^)
+            start = i + 1
+        if start < n:
+            if is_stdout:
+                self.stdout_partial.extend(bytes[start:n])
+            else:
+                self.stderr_partial.extend(bytes[start:n])
 
     def _push_stdout_line(mut self, var line: String):
         """Append one stdout line to the stdout ring, enforcing the byte budget

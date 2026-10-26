@@ -1,4 +1,0 @@
-call buck2 "cquery" "//... + tests//functional/..."
-exit 0
-stdout "tests//functional/z:z (prelude//platforms:default#abcdef0123456789)\ntests//functional/a:a (prelude//platforms:default#abcdef0123456789)\nkomira//zeta/x:x (prelude//platforms:default#abcdef0123456789)\nkomira//src/q:q (prelude//platforms:default#abcdef0123456789)\n"
-stdout "komira//src/b:b (prelude//platforms:default#abcdef0123456789)\nkomira//alpha:a (prelude//platforms:default#abcdef0123456789)\nkomira//src/a_b:c (prelude//platforms:default#abcdef0123456789)\nkomira//src/a:a (prelude//platforms:default#abcdef0123456789)\nkomira//src/a/x:ax (prelude//platforms:default#abcdef0123456789)\n"

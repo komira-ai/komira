@@ -1,7 +1,7 @@
 """The verdict of each mutant, from the statuses of its build steps, and the
 report: covcheck's mutants file and a Markdown summary.
 
-A step's status file is written by `mut_step.sh`; its first line is one of
+A step's status file is written by `gate step` (tools/build/run); its first line is one of
 
     ok              the command exited 0
     fail <status>   it exited <status>, not 0
