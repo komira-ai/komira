@@ -526,3 +526,17 @@ test "the process table of this platform: a child's pages count toward its paren
     try std.testing.expectEqual(@as(i64, me), seen[1]);
     try std.testing.expectEqual(@as(?u8, 137), sys.waitpid(pid, false));
 }
+
+test "the gate's default clock never goes back, and a zero sleep returns" {
+    // Not a duration check: only that the defaults the production gate runs on
+    // read a clock that does not run backward and a sleep that comes back.
+    var last = sys.monotonicMs().?;
+    var i: usize = 0;
+    while (i < 1000) : (i += 1) {
+        const now = sys.monotonicMs().?;
+        try std.testing.expect(now >= last);
+        last = now;
+    }
+    sys.sleepMs(0);
+    try std.testing.expect(sys.monotonicMs().? >= last);
+}

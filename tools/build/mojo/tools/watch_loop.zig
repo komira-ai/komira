@@ -53,6 +53,8 @@ fn rawRead(fd: posix.fd_t, buf: []u8) isize {
 /// A tick: `sleep_one_second` normally; in a ticked executable one byte from
 /// `tick_fd` (and the sleep once that descriptor is at end of file, so a
 /// closed source does not spin). A signal that interrupts the wait returns.
+/// Any other read error (fd 3 not passed) returns at once and so spins: only
+/// the test wrappers are ticked, and a spin there is loud, not silent.
 pub fn waitTick(sleep_one_second: *const fn () void) void {
     if (comptime !ticked()) return sleep_one_second();
     var b: [1]u8 = undefined;

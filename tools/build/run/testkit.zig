@@ -88,7 +88,9 @@ var run_dir: ?[]const u8 = null;
 var ready_r: sys.fd_t = -1;
 var ready_w: sys.fd_t = -1;
 var fake_now: u64 = 0;
-/// The simulated time after which a run that has not ended is ended by the clock.
+/// The simulated time after which a run that has not ended is ended by the clock
+/// (exit 251, which no test accepts as an outcome). A fixture that never calls
+/// announceReady blocks with no clock to move; only the build's own watchdog ends it.
 const fake_horizon_ms: u64 = 3_600_000;
 var latched = false;
 var group_killed = false;

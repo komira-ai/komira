@@ -25,8 +25,7 @@
 //! Waiting: with no limit, a blocking wait for the command alone (like the
 //! shell's `wait`): processes it left running are not waited for, and not
 //! killed. With a limit, the command is polled; once `limit_ms` has passed
-//! the group is sent SIGKILL (or SIGTERM, then after `term_grace_ms`, or as
-//! soon as the command has exited, SIGKILL)
+//! the group is sent SIGKILL (or SIGTERM, then after `term_grace_ms`, SIGKILL)
 //! and the command is reaped. With `check_survivors`, the group's members
 //! that are not zombies are then listed from /proc, polled every 100 ms for
 //! up to `survivor_wait_ms` (SIGKILL is delivered when a process next runs).
@@ -128,9 +127,6 @@ pub const Error = error{
     Unexpected,
 } || std.mem.Allocator.Error || posix.OpenError || posix.ForkError;
 
-/// The nap of the SIGTERM grace period.
-const grace_nap_ms = 10;
-
 fn sysErr(rc: usize) linux.E {
     return linux.E.init(rc);
 }
@@ -208,14 +204,9 @@ pub fn run(alloc: std.mem.Allocator, spec: Spec) Error!Outcome {
     if (spec.term_grace_ms) |grace| {
         clock.kill(clock.ctx, -pid, linux.SIG.TERM);
         clock.kill(clock.ctx, pid, linux.SIG.TERM);
-        // The grace period, in naps, ends early when the leader has exited
-        // (the group is killed next either way).
-        var waited: u64 = 0;
-        while (waited < grace and !exitedNoReap(pid, false)) {
-            const step: u64 = @min(grace - waited, @as(u64, grace_nap_ms));
-            clock.sleep_ns(clock.ctx, step * std.time.ns_per_ms);
-            waited += step;
-        }
+        // The whole grace period, as it always was: members of the group
+        // other than the leader may need it after the leader has left.
+        clock.sleep_ns(clock.ctx, grace * std.time.ns_per_ms);
     }
     clock.kill(clock.ctx, -pid, linux.SIG.KILL);
     clock.kill(clock.ctx, pid, linux.SIG.KILL);
@@ -404,8 +395,8 @@ const Fake = struct {
     /// Time never moves; a nap only yields (for a command that must finish
     /// by itself before any limit could be reached).
     frozen: bool = false,
-    /// After a SIGTERM to the group, a nap waits for the leader's exit
-    /// instead of moving time.
+    /// After a SIGTERM to the group, a nap first waits for the leader's exit
+    /// (so a trap has run before the SIGKILL), then moves time.
     term_waits_for_exit: bool = false,
     /// After a SIGKILL to the group, a nap waits for the group's running
     /// members under `root` to be gone before time moves: the kill cannot
@@ -468,7 +459,6 @@ const Fake = struct {
         }
         if (f.termed and !f.killed and f.term_waits_for_exit) {
             _ = exitedNoReap(f.leader, true);
-            return;
         }
         if (f.killed) if (f.settle_root) |root| {
             var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -740,7 +730,7 @@ test "a command that ends within its limit is not timed out" {
     try testing.expectEqual(Status{ .exited = 5 }, o.status);
 }
 
-test "a term grace sends SIGTERM first: a command that traps it exits its own way, with no grace spent" {
+test "a term grace sends SIGTERM first: a command that traps it exits its own way, and the grace is still waited out" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -757,11 +747,10 @@ test "a term grace sends SIGTERM first: a command that traps it exits its own wa
     try testing.expect(o.timed_out);
     try testing.expectEqual(Status{ .exited = 7 }, o.status);
     // The group is sent SIGTERM at the limit, and the SIGKILL that follows
-    // (for whatever else is left in the group) comes with the clock where
-    // it was: the grace period was not waited out.
+    // (for whatever else is left in the group) comes after the whole grace.
     const termed = fake.killTime(-o.pgid.?, linux.SIG.TERM).?;
     try testing.expect(termed >= 300 * std.time.ns_per_ms);
-    try testing.expectEqual(@as(?u64, termed), fake.killTime(-o.pgid.?, linux.SIG.KILL));
+    try testing.expectEqual(@as(?u64, termed + 1000 * std.time.ns_per_ms), fake.killTime(-o.pgid.?, linux.SIG.KILL));
 }
 
 test "a term grace is waited out for a command that ignores SIGTERM, then the group is sent SIGKILL" {
