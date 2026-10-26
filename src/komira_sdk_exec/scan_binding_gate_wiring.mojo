@@ -47,7 +47,7 @@
 #
 #   | binding                                   | with Unbound    | with a registry  |
 #   |-------------------------------------------|-----------------|------------------|
-#   | UNBOUND (a legacy source arm)             | passes          | passes           |
+#   | UNBOUND (a source arm not tracked)         | passes          | passes           |
 #   | handle from THIS context's registry       | EPOCH_MISMATCH  | PASSES           |
 #   | handle from a dead / foreign registry     | EPOCH_MISMATCH  | EPOCH_MISMATCH   |
 #   | handle from this registry, slot evicted   | EPOCH_MISMATCH  | HANDLE_NOT_BOUND |
@@ -74,7 +74,7 @@ def check_scan_bindings_at_entry[
     `resolver` — the registry the executing context OWNS (mechanism 3).
 
     Returns the number of binding-backed scan leaves inspected — 0 is the
-    correct and expected answer for a plan over legacy (unmigrated) source arms,
+    correct and expected answer for a plan over source arms the resolver does not track,
     and returning it rather than nothing is what lets a test tell "checked,
     clean" apart from "walked nothing".
 
@@ -97,7 +97,7 @@ def check_scan_bindings_at_entry[
             + String(entry)
             + String("'. Every wiring site must declare which terminal")
             + String(" execution route it covers by adding a row to")
-            + String(" komira_sdk_exec/plan_validation_routes.mojo. An")
+            + String(" src/komira_sdk_exec/plan_validation_routes.mojo. An")
             + String(" undeclared site is coverage nobody can audit, the")
             + String(" exact claim a review found to be false when it was")
             + String(" assumed rather than enumerated.")

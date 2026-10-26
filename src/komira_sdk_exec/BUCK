@@ -17,6 +17,7 @@ mojo_library(
     name = "komira_sdk_exec",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     # The full transitive closure of the Mojo libraries this package builds on.
+    # A later slice that pulls in a new library adds it here in the same change.
     deps = [
         "//src/komira_arrow:komira_arrow",
         "//src/komira_arrow_ipc:komira_arrow_ipc",

@@ -35,4 +35,8 @@ The tests run when the package is built.
 
 `post_rewrite_gate` is a free-standing check; its call sites belong to the
 engine context. The plan validation gate that `plan_validation_routes` is the
-ledger for is a later slice, and so is the guard test some ledger rows name.
+ledger for is a later slice. No ledger row is COVERED yet: the guard tests the
+first-draft rows named are not in this slice, so those rows are WIRED_UNPROVEN
+until their tests arrive, and a test here checks that a COVERED row only names a
+test file this package ships. `deps` in the BUCK file is the full transitive
+closure; a later slice that pulls a new library adds it in the same change.

@@ -31,10 +31,9 @@
 # cycle).
 #
 # Prior art:
-#   * DuckDB `StreamQueryResult`: holds a `shared_ptr<ClientContext>` +
-#     `BufferedData`; `FetchInternal()` returns the next `DataChunk` or
-#     `nullptr` at end-of-stream; `Close()` releases. The cursor lives
-#     ctx-side. Here that maps onto `ctx.advance_paginated(p) ->
+#   * DuckDB `StreamQueryResult`: holds a shared client context and a
+#     buffered result; its fetch returns the next data chunk or null at
+#     end-of-stream, and close releases. The cursor lives ctx-side. Here that maps onto `ctx.advance_paginated(p) ->
 #     Optional[RecordBatch]` with page-state ctx-side and
 #     `close_paginated`/exhaustion releasing the pin.
 #   * DataFusion `SendableRecordBatchStream`: a `Stream<Item =
@@ -73,7 +72,7 @@ without exhausting it / calling `close_paginated`).
 
 @fieldwise_init
 struct PaginatedResult(Movable, Copyable, Deinitable):
-    """Handle to an in-flight paginated materialization .
+    """Handle to an in-flight paginated materialization.
 
     Caller-managed iteration,
     NO ctx back-reference. Carries only an opaque `_stream_id` (the slab
@@ -82,7 +81,7 @@ struct PaginatedResult(Movable, Copyable, Deinitable):
 
     User invokes `ctx.advance_paginated(p)` per batch — the cursor
     advances on the ctx side because `ctx` is `mut self` at the call site
-    (matches DuckDB `StreamQueryResult::FetchInternal` which locks the
+    (matches DuckDB's `StreamQueryResult` fetch, which locks the
     ClientContext to fetch the next chunk).
 
     `_exhausted` is a non-authoritative HINT: it is only ever set on the

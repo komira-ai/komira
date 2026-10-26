@@ -82,8 +82,8 @@ WHY NOT "MAKE THE REWRITES REFUSE TO PRODUCE SUCH A LITERAL"
 That alternative is a check inside each rewrite. This file IS its invariant;
 what it rejects is its SITE:
 
-  1. THE SITE IS A LIST OF THE OPTIMIZER'S PASSES (36 distinct passes when this
-     was written), and the list was never audited. The door's REWRITE ledger
+  1. THE SITE IS A LIST OF THE OPTIMIZER'S PASSES (the optimizer has many
+     passes), and the list was never audited. The door's REWRITE ledger
      names THREE and says that nobody has enumerated the rest. Of the three
      named, two were measured producing silently wrong answers. A per-pass
      check covers the passes someone thought of; this covers all of them and

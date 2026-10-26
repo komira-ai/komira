@@ -49,9 +49,9 @@
 # Prose is not an accountability mechanism: nothing goes red when a door is
 # added or when a sentence here becomes false, and a reader who believed it
 # stopped looking. The scan-binding door universe is therefore not enumerated
-# here; it is meant to be derived from source (the property that matters is THE
-# BODY RUNS THE BIND PASS, not "is a method on `EngineContext`", which is the
-# framing that hid rows 15 and 16). This file is the ledger of what the plan
+# here; deriving it from source is not part of this package. The property
+# that matters is THE BODY RUNS THE BIND PASS, not "is a method on
+# `EngineContext`", which is the framing that hid rows 15 and 16. This file is the ledger of what the plan
 # VALIDATION gate covers.
 #
 # Routes 10 and 11 both pass their RAW plan through `optimize_query` ->
@@ -204,11 +204,12 @@ def plan_validation_routes() -> List[PlanValidationRoute]:
                    " materialize_column_carrier local+CTE arms, and both"
                    " breaker-frame doors)"),
             String(PV_ENTRY_PREPARE_PLAN),
-            PV_ROUTE_COVERED,
+            PV_ROUTE_WIRED_UNPROVEN,
             String("The chokepoint. Covers the five routes that reach"
-                   " it, on the RAW plan, before optimize."),
-            String("test_plan_validation_wiring."
-                   "test_bad_column_ref_raises_at_materialize_entry_when_flag_on"),
+                   " it, on the RAW plan, before optimize. No test in this"
+                   " package drives this entry with the validator yet; the"
+                   " guard arrives with the slice that holds the context."),
+            String(""),
         )
     )
     rows.append(
@@ -321,7 +322,7 @@ def plan_validation_routes() -> List[PlanValidationRoute]:
                    " IN-MEM terminal (ScanFrame[InMemSource], io_surface's"
                    " in-mem write leg, scan_frame_view)"),
             String(PV_ENTRY_INMEM_PLAN),
-            PV_ROUTE_COVERED,
+            PV_ROUTE_WIRED_UNPROVEN,
             String("This route opens `optimize_for_breaker`"
                    " and NEVER reaches `_prepare_plan` or `optimize_full`, so"
                    " it ran the entry-time BIND with no gate in front of it --"
@@ -330,9 +331,9 @@ def plan_validation_routes() -> List[PlanValidationRoute]:
                    " context's handle was therefore LAUNDERED here and REFUSED"
                    " at every other door: the same plan, two answers, decided"
                    " by which terminal it entered. The gate now runs at the top,"
-                   " BEFORE the bind."),
-            String("test_inmem_terminals_refuse_a_foreign_handle."
-                   "test_materialize_inmem_plan_refuses_a_foreign_handle_by_name"),
+                   " BEFORE the bind. No test in this package drives this"
+                   " door yet; the guard arrives with the slice that holds it."),
+            String(""),
         )
     )
     rows.append(
@@ -341,13 +342,13 @@ def plan_validation_routes() -> List[PlanValidationRoute]:
                    " IN-MEM grouped-agg terminal (InMemAggFrame, agg_frame's"
                    " in-mem arm)"),
             String(PV_ENTRY_INMEM_AGG_PLAN),
-            PV_ROUTE_COVERED,
+            PV_ROUTE_WIRED_UNPROVEN,
             String("Same defect as the row above and a"
                    " SEPARATE function body -- which is the point: the refusal"
                    " was ROUTE-DEPENDENT, so one falsifier cannot show it. This"
-                   " row's guard drives THIS door."),
-            String("test_inmem_terminals_refuse_a_foreign_handle."
-                   "test_materialize_inmem_agg_plan_refuses_a_foreign_handle_by_name"),
+                   " row's guard will drive THIS door; no test in this"
+                   " package does yet."),
+            String(""),
         )
     )
     rows.append(

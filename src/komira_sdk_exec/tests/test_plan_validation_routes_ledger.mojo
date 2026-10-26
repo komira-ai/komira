@@ -225,7 +225,8 @@ def test_every_wired_token_finds_its_own_distinct_row() raises:
 def test_unknown_empty_and_retired_tokens_find_no_row() raises:
     assert_equal(route_index_for_entry(String("no-such-route")), -1)
     assert_equal(route_index_for_entry(String("")), -1)
-    # A route the ledger does not carry: its token must not resolve.
+    # A route this ledger does not carry yet (the cloud-plan route and its row
+    # arrive with the registry-backed cloud leaf): its token must not resolve.
     assert_equal(
         route_index_for_entry(String("EngineContext.materialize_cloud_plan")),
         -1,
@@ -249,6 +250,33 @@ def test_an_uncovered_row_has_no_token_and_says_what_closes_it() raises:
         if rows[i].status == PV_ROUTE_COVERED:
             assert_true(rows[i].guard.byte_length() > 0)
     assert_true(uncovered > 0)
+
+
+def test_every_covered_row_names_a_test_that_ships_in_this_package() raises:
+    # A guard is "<test file stem>.<test name>"; the stem must be one of the
+    # test files this package welds, so a row cannot claim a proof that does
+    # not exist. Keep this list equal to `test_srcs` in the BUCK file.
+    var shipped = List[String]()
+    shipped.append(String("test_plan_cache_full_sink_hash"))
+    shipped.append(String("test_plan_validation_routes_ledger"))
+    shipped.append(String("test_resolved_cache_lru_eviction_stress"))
+    shipped.append(String("test_resolved_cache_pin_count"))
+    var rows = plan_validation_routes()
+    for i in range(len(rows)):
+        if rows[i].status != PV_ROUTE_COVERED:
+            continue
+        var dot = rows[i].guard.find(String("."))
+        assert_true(dot > 0, "guard has no '<file>.<test>' form: " + rows[i].entry)
+        var stem = String(rows[i].guard[byte=0:dot])
+        var found = False
+        for j in range(len(shipped)):
+            if shipped[j] == stem:
+                found = True
+        assert_true(
+            found,
+            "COVERED row " + rows[i].entry + " names a test not in this"
+            " package: " + stem,
+        )
 
 
 def test_status_names() raises:
