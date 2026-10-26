@@ -536,25 +536,59 @@ struct ByteBuffer(Movable):
 # =============================================================================
 
 
-def write_uleb128(value: Int, mut out: List[UInt8]):
-    """Append the unsigned LEB128 (ULEB128) encoding of `value` (>= 0) to `out`.
+def write_uleb128_u64(value: UInt64, mut out: List[UInt8]):
+    """Append the unsigned LEB128 (ULEB128) encoding of an unsigned 64-bit
+    `value` to `out`, in at most 10 bytes.
 
-    The symmetric encoder for `ByteBuffer.read_uleb128` — a value written by
+    Total: the shift is logical, so the loop ends after at most ten
+    iterations for every input, including values with the top bit set. Use this
+    where the quantity is unsigned by construction (a zig-zag image, a hash,
+    a bit pattern); use `write_uleb128` for a signed `Int` length or count.
+
+    Args:
+        value: The unsigned integer to encode.
+        out:   The byte list to append the encoding to (grown in place).
+    """
+    # PERF-CRITICAL: the continuation test is the only per-byte branch; the
+    # one-byte case (value < 0x80) leaves the loop without a shift.
+    var v = value
+    while v >= UInt64(0x80):
+        out.append(UInt8(v & UInt64(0x7F)) | UInt8(0x80))
+        v = v >> UInt64(7)
+    out.append(UInt8(v))
+
+
+@no_inline
+def _raise_negative_uleb128(value: Int) raises:
+    """The refusal of `write_uleb128`, kept out of line (`@no_inline`) so the
+    raise path is not copied into every caller."""
+    raise Error(
+        "write_uleb128: negative value "
+        + String(value)
+        + " has no unsigned LEB128 encoding"
+    )
+
+
+@always_inline
+def write_uleb128(value: Int, mut out: List[UInt8]) raises:
+    """Append the unsigned LEB128 (ULEB128) encoding of the non-negative
+    `value` to `out`.
+
+    The symmetric encoder for `ByteBuffer.read_uleb128`: a value written by
     `write_uleb128` and read back by `read_uleb128` round-trips byte-for-byte.
-    This is UNSIGNED ULEB128 (NOT zigzag): callers pass only non-negative
-    lengths. Negative `value` would loop on the arithmetic shift; callers must
-    not pass one (term/length fields are always >= 0 by construction).
+    This is UNSIGNED ULEB128 (NOT zigzag). A negative `value` has no unsigned
+    encoding and raises (an arithmetic shift of a negative number never reaches
+    zero, and a cast to unsigned would write a wrong ten-byte varint); nothing
+    is appended to `out` in that case.
 
     Args:
         value: The non-negative integer to encode.
         out:   The byte list to append the encoding to (grown in place).
+
+    Raises:
+        Error: `value` is negative.
     """
-    var v = value
-    while True:
-        var byte = UInt8(v & 0x7F)
-        v = v >> 7
-        if v != 0:
-            out.append(byte | 0x80)
-        else:
-            out.append(byte)
-            break
+    # One comparison, outside the per-byte loop in write_uleb128_u64.
+    if value < 0:
+        _raise_negative_uleb128(value)
+    write_uleb128_u64(UInt64(value), out)
