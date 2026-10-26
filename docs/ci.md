@@ -364,8 +364,11 @@ steps:
 
 | job | when | what it does |
 |---|---|---|
-| `mopm-stage` | every push to `main`, and a manual run (which sends nothing either) | on the farm (environment `build`, the farm's tailnet token only; it reads no registry token). **Build:** the one mopm the README e2e installs with (`toolchains//:mopm_0_0_40`, `MOPM` of `packages.bzl`) and `//release:mopm_artifacts`. **Stage:** `mopm stage --workspace-root src --artifacts <built> --compiler 1.0.0 --out release/staged_set --registry prod` packs every member from its built `.mojoc`, asks the registry (a read, no token) which versions it holds and writes the staged set S (`plan.json`, each `.conda`, each README: mopm's `spec/staged-set.md`). A version the registry holds with other bytes, or has yanked, fails the step. **Try:** `./buck2 build -c komira_release.staged=stage //release/readme_e2e/verify:all` on the farm: every package's README examples are compiled and run as a user of the `.conda` files of S (see the e2e's [README](../tools/build/readme_e2e/README.md)). Then `mopm publish --staged S --registry prod --dry-run`: the plan is validated and every file hashed against it, nothing is sent and no token is read. It uploads S and that mopm as a workflow artifact (a day) for the next job. |
+| `mopm-stage` | every push to `main`, and a manual run (which sends nothing either) | on the farm (environment `build`, the farm's tailnet token only; it reads no registry token). **Build:** the one mopm the README e2e installs with (`toolchains//:mopm_0_0_57`, `MOPM` of `packages.bzl`) and `//release:mopm_artifacts`. **Stage:** `mopm stage --workspace-root src --artifacts <built> --compiler 1.0.0 --out release/staged_set --registry prod` packs every member from its built `.mojoc`, asks the registry (a read, no token) which versions it holds and writes the staged set S (`plan.json`, each `.conda`, each README: mopm's `spec/staged-set.md`). A version the registry holds with other bytes, or has yanked, fails the step. **Try:** `./buck2 build -c komira_release.staged=stage //release/readme_e2e/verify:all` on the farm: every package's README examples are compiled and run as a user of the `.conda` files of S (see the e2e's [README](../tools/build/readme_e2e/README.md)). Then `mopm publish --staged S --registry prod --dry-run`: the plan is validated and every file hashed against it, nothing is sent and no token is read. It uploads S and that mopm as a workflow artifact (a day) for the next job. |
 | `mopm-publish` | after `release` and `mopm-stage`, **only on a push to `main` when the repository variable `MOPM_PUBLISH_ENABLED` is `true`** (unset today: the job is skipped before it starts) | in the environment `prod`, with `contents: read` and no farm: it joins no tailnet, runs no `buck2` and checks nothing out. It downloads the artifact and runs `mopm publish --staged S --registry prod` with `MOPM_TOKEN` from the environment's secret, the one place the token is read. The registry makes the group visible all together or not at all; a rerun of a failed run resumes the same group and sends only what the registry does not hold. A version is never replaced. |
+| `mopm-stage-beta` | after `mopm-stage`, under the same gate as `mopm-publish-beta` (skipped while the variable is unset) | `mopm-stage` plans its set against prod, so a member prod already holds is skipped in it and a prod yank refuses it: the wrong plan for beta. This job checks out the commit, takes the packages, the mopm and the version tool `mopm-stage` built (two workflow artifacts; no farm, no `buck2`), gives every member of its checkout the version `0.1.<run number>` (`release_beta_version`, below), and runs `mopm stage --workspace-root src --artifacts <built> --compiler 1.0.0 --out <dir> --registry beta`, then `mopm publish --staged <dir> --registry beta --dry-run`, and keeps the set as an artifact. It holds no environment, no `id-token` and no secret: staging reads the registry with no token. The README e2e ran on the prod-planned set of the same packages. |
+| `mopm-publish-beta` | after `mopm-stage-beta`, **only on a push to `main` when the repository variable `MOPM_BETA_PUBLISH_ENABLED` is `true`** (unset today: the job is skipped before it starts) | in the environment `beta`, with `contents: read` and `id-token: write`, no farm and no secret: it joins no tailnet, runs no `buck2` and checks nothing out. It downloads the set `mopm-stage-beta` staged against beta and runs `mopm publish --staged S --oidc --registry beta`: mopm asks the runner for the job's ID token (which is what `id-token: write` allows) and exchanges it with the registry for a short-lived token. The registry trusts this repository's `release.yml`, run on `main` from a push, in the environment `beta`, as a publisher that can create, own and publish new packages on `beta`; `gamma` and `prod` do not know it. A manual run publishes nothing (the job's `if` needs a push). The job never names `MOPM_TOKEN` (`//:release_workflow_cases` holds the gate, the permission and that absence). |
+| `mopm-e2e-beta` | after `mopm-publish-beta`, under the same gate (a push to `main` and `MOPM_BETA_PUBLISH_ENABLED` equal to `true`; skipped while it is unset) | verifies what `mopm-publish-beta` sent (below, "Verifying the beta publish"). In the environment `build` (the farm's; a job holds one environment, so it cannot be `mopm-publish-beta`, which is in `beta`), with `contents: read` and `id-token: write` for the tailnet join only. It publishes nothing and reads no secret. |
 
 **Why `mopm stage` is a step of the job and not a build action.** It asks the
 registry which versions exist, and an action is offline. So the farm takes the
@@ -409,6 +412,117 @@ human's, outside this repository:
 Until step 4 the job `mopm-publish` is skipped on every run (its `if` is false
 before the job starts), so the token of step 2 is not read, and the dry run of
 `mopm-stage` exercises everything up to the request for the group.
+
+#### The beta version of every push
+
+A registry creates a (name, version) pair once, and a mopm version is exactly `MAJOR.MINOR.PATCH`:
+`+b123`, `-b123`, `.post123` and `.dev123` are not versions. So every push to `main` that publishes
+to `beta` needs a number the registry has not seen, and `mopm-stage-beta` (only that job) gives each
+member of its checkout the version `0.1.<github.run_number>` before `mopm stage`. The number stays
+inside the `>=0.1,<0.2` the packages ask of each other, sorts above `0.1.0`, and the newest push is
+the newest version. `mopm-stage` (prod) never runs this: it keeps the versions the checkout has. Nothing is
+committed or pushed back: the rewritten files exist only on the job's runner.
+
+[`release_beta_version`](../tools/build/ci/release_beta_version/release_beta_version.zig)
+(`//tools/build/ci:release_beta_version`, built by `mopm-stage` and handed on in its artifact, as
+`mopm-stage-beta` has no farm) takes `--workspace-root <dir> --version 0.1.<n>`. `mopm stage` reads
+each version from `mopm.toml` when it runs, and the `.mojoc` files the build made carry none, so the
+rewrite before the stage is all the packages need: the artifacts are not rebuilt. It edits the text of
+each member's manifest (found the way `mopm stage` finds them) and keeps every other byte:
+
+- `[package] version` becomes the new version;
+- in `[dependencies]` and `[dev-dependencies]`, a requirement on another member with an exact
+  comparator `=X.Y.Z` (a string, an inline table's `version`, or `[dependencies.<name>]`'s `version`)
+  gets the new number, because `mopm stage` checks each requirement against the member's version.
+  Every other comparator (`^0.1`, `>=0.1, <0.2`, `~0.1.0`, `0.1`, `*`, `=0.1`) accepts every `0.1.x`
+  and is kept; `mopm stage` itself refuses a range that does not accept the new version.
+
+It writes nothing and fails when the version is not `0.1.<PATCH>` (digits, no leading zeros, no
+suffix), a member's version is not in `0.1.x`, two members share a name, a requirement on a member is
+not comparators it can read or pins a number the member does not have, or a manifest holds a
+multi-line string or a dependency line it cannot read. Running it again with the same version changes
+nothing. Its cases (`//tools/build/ci:release_beta_version_unit`) run on scratch workspaces, and
+`//:release_workflow_cases` holds the placement: the rewrite is in `mopm-stage-beta`, before the
+stage, with the run number, and no step of `mopm-stage` runs it.
+
+#### Verifying the beta publish
+
+`mopm-e2e-beta` runs after `mopm-publish-beta` and answers one question: **are the files the beta
+registry serves the bytes that were staged, and do the README examples of the packages in the staged plan run on them?**
+`mopm-e2e-beta` makes only GET requests and holds no credential. It runs three steps, in this order
+(`//:release_workflow_cases` holds the order, the gate, the environment and the permissions):
+
+1. **The plan.** It downloads the artifact `mopm-stage-beta` kept (`plan.json` and each member's
+   README). The `.conda` files in that artifact are never read.
+2. **Download and check.**
+   [`release_beta_fetch`](../tools/build/ci/release_beta_fetch/release_beta_fetch.zig)
+   (`//tools/build/ci:release_beta_fetch`, built on the farm by this job and run on the runner,
+   because it makes requests; mopm 0.0.57 has no verb that fetches a file) reads the beta index
+   (`api.beta.mopm.dev/index/config.json`), requires its `stage` to be `beta`, requires its
+   `channel_url` to be exactly `https://conda.beta.mopm.dev/` (a constant of the tool; any other URL is refused), and downloads `<channel_url><subdir>/<filename>` for every file of the plan, with the
+   exact name and version the plan names, following no redirect and speaking only https. It compares
+   each file's **sha256 and size** with the plan and **fails the job, naming every file that differs**
+   (a package that was not published, another size, another hash). Only when every file matches does
+   it write into `release/beta_set` (its checked-in `BUCK` stays there; the tool refuses any other file already in the directory): the plan, the READMEs, and the downloaded files, a staged
+   set made of the published bytes.
+3. **The README e2e on the downloaded set.** `./buck2 build -c komira_release.staged=beta -c
+   komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all`, on the farm. The
+   `beta` choice of [`staged_choice.bzl`](../release/readme_e2e/staged_choice.bzl) points the targets of
+   `//release/readme_e2e/verify` at `//release/beta_set:set` and expects the version of this run
+   (`0.1.<run number>`, the one `mopm-stage-beta` gave every member) instead of the one in
+   `packages.bzl`. Each package is installed from that directory into a fresh project by the pinned
+   mopm, and the README examples are compiled and run against the installed copy
+   ([`tools/build/readme_e2e`](../tools/build/readme_e2e/README.md)).
+
+**What this proves.** Exactly this is compared: each published file of the staged plan (the files
+the plan lists, by subdirectory and file name), as the beta channel served it at the end of the run,
+against the sha256 and the size the staged plan holds for it. The plan is what `mopm-stage-beta` staged
+and `mopm-publish-beta` sent, so a match means the registry serves the staged bytes for every file in
+the staged plan. Then the README examples (the `readme`, `compile` and `run` phases) of the packages in
+that plan pass on those downloaded bytes.
+
+**What it does not prove.**
+- A package's own unit tests are not in the `.conda` and do not run here: they ran when its `.mojoc`
+  was built (`//release:mopm_artifacts`), before staging. This job does not claim the downloaded
+  package's tests ran.
+- The READMEs are the staged ones, not downloaded: the registry's copy of a README is not compared.
+- `mopm add <package> --registry beta` from a clean machine (the registry's index and lock path) is
+  not exercised: the e2e installs offline from the directory with `--overlay`.
+- Only the files of the plan are checked: a file the registry holds that the plan does not name is
+  not looked for.
+
+`release_beta_fetch` refuses a plan it cannot check (no member, a member that is not an `upload`, a
+path that leaves its directory, a malformed sha256, a file above 64 MiB, a name listed twice, two
+paths of the set that collide, in any letter case) before it makes a request, and leaves no `--out`
+unless every file matched and every write succeeded (it writes next to `--out` and moves the members into place, beside the `BUCK`; a failed move takes back what it moved). A file is capped at 64 MiB whatever size the plan declares. Its cases
+(`//tools/build/ci:release_beta_fetch_unit`) run against a registry in memory and a socket on
+loopback, and cover a changed byte, another size, a missing package, an index of another stage, and
+a redirect, and that the staged `.conda` files are never what is written.
+
+#### Enabling the mopm beta publish
+
+`mopm-stage-beta`, `mopm-publish-beta` and `mopm-e2e-beta` ship off (one variable gates all three) and are separate from the prod publish above: it
+uses no secret, so nothing but the variable and the registry's trust gates it.
+It is off because the registry's group publish for this identity on `beta` is
+not live yet: until it is, `mopm publish --staged` (a group) is refused on
+`beta` for the CI identity, and only a single package can be published. Enabling
+it is a maintainers' step, in this order:
+
+1. The registry's group publish for the CI identity on `beta` is live.
+2. The maintainers decide to publish komira's packages to `beta`.
+3. The GitHub environment `beta` restricts deployments to the `main` branch
+   (selected branches, `main` only). The OIDC subject the registry sees names
+   the environment, and a workflow on any branch can declare the same
+   environment, so the environment's branch rule is what keeps a branch out;
+   the job's `if` is a second lock, and `==` on `github.ref` compares ignoring
+   case. The registry's trust should also match the ref, the `job_workflow_ref`
+   (this repository's `release.yml` on `main`) and the event (`push`), not the
+   environment alone.
+4. Set the variable:
+   `gh variable set MOPM_BETA_PUBLISH_ENABLED --body true --repo komira-ai/komira`.
+   Deleting the variable (or any value but `true`) disables the job again.
+
+Until then the job is skipped on every run, before it starts.
 
 > **Removed: publishing.** The rest of this page, from "Continuous
 > auto-promotion" to "GitHub settings the release relies on", describes the

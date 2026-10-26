@@ -1,9 +1,11 @@
 //! tests_act's checks over `aws-client-gen`: `aws-gen` generates a module,
 //! `aws-refuse` runs the generator on inputs it must refuse, and `aws-cmp`
-//! compares a generated module with its golden.
+//! compares a generated module (and, when the generator split it, its parts)
+//! with its golden.
 
 const std = @import("std");
 const diff = @import("unified_diff");
+const proto_checks = @import("proto_checks.zig");
 const A = std.mem.Allocator;
 
 fn fail(comptime fmt: []const u8, args: anytype) noreturn {
@@ -119,13 +121,40 @@ fn head60(a: A, text: []const u8) ![]u8 {
     return out.toOwnedSlice(a);
 }
 
-/// aws-cmp <stamp> <gen dir> <module> <golden> <golden probe|-> [<must contain>...]
+/// The generated module as `must_contain` reads it: the module file (the facade,
+/// when the generator split it) and then each part, by name.
+fn moduleText(a: A, module_path: []const u8, parts_path: []const u8) ![]u8 {
+    const cwd = std.fs.cwd();
+    var out = std.ArrayList(u8).empty;
+    try out.appendSlice(a, try cwd.readFileAlloc(a, module_path, 1 << 28));
+    var parts = cwd.openDir(parts_path, .{ .iterate = true }) catch return out.toOwnedSlice(a);
+    defer parts.close();
+    var names = std.ArrayList([]const u8).empty;
+    var it = parts.iterate();
+    while (try it.next()) |e| try names.append(a, try a.dupe(u8, e.name));
+    std.mem.sort([]const u8, names.items, {}, struct {
+        fn lt(_: void, x: []const u8, y: []const u8) bool {
+            return std.mem.lessThan(u8, x, y);
+        }
+    }.lt);
+    for (names.items) |n| try out.appendSlice(a, try parts.readFileAlloc(a, n, 1 << 28));
+    return out.toOwnedSlice(a);
+}
+
+/// aws-cmp <stamp> <gen dir> <module> <golden> <golden probe|-> <golden parts dir|-> [<must contain>...]
+///
+/// The module, and the probe, are byte for byte their goldens. When the generator
+/// split the module (a facade and the files of <gen dir>/_parts), <golden parts
+/// dir> holds the parts' goldens, file for file; with `-` the module must not
+/// have been split. No generated file reaches the line limit. The must-contain
+/// strings are read in the module and its parts together.
 pub fn cmp(a: A, args: []const []const u8) !void {
-    if (args.len < 5) return error.Usage;
+    if (args.len < 6) return error.Usage;
     const cwd = std.fs.cwd();
     var bad = false;
     const module_path = try std.fmt.allocPrint(a, "{s}/{s}.mojo", .{ args[1], args[2] });
     const probe_path = try std.fmt.allocPrint(a, "{s}/_layout_probe.mojo", .{args[1]});
+    const parts_path = try std.fmt.allocPrint(a, "{s}/_parts", .{args[1]});
     const pairs = [_][2][]const u8{.{ module_path, args[3] }};
     for (pairs) |p| try check(a, p[0], p[1], &bad);
     if (!std.mem.eql(u8, args[4], "-")) {
@@ -134,15 +163,40 @@ pub fn cmp(a: A, args: []const []const u8) !void {
         std.debug.print("aws_codegen: a probe was generated and no golden names it\n", .{});
         bad = true;
     } else |_| {}
-    const module = try cwd.readFileAlloc(a, module_path, 1 << 28);
-    for (args[5..]) |want| {
+    const parts_made = if (cwd.access(parts_path, .{})) |_| true else |_| false;
+    if (!std.mem.eql(u8, args[5], "-")) {
+        if (!parts_made) {
+            std.debug.print("aws_codegen: the module was not split, and {s} holds the goldens of its parts\n", .{args[5]});
+            bad = true;
+        } else {
+            var g = try cwd.openDir(args[5], .{ .iterate = true });
+            defer g.close();
+            var got = try cwd.openDir(parts_path, .{ .iterate = true });
+            defer got.close();
+            if (try proto_checks.treeDiff(a, g, args[5], got, parts_path)) |d| {
+                std.debug.print("aws_codegen: the parts differ from their goldens:\n{s}", .{try head60(a, d)});
+                bad = true;
+            }
+        }
+    } else if (parts_made) {
+        std.debug.print("aws_codegen: the module was split into parts and no golden names them\n", .{});
+        bad = true;
+    }
+    var gen_dir = try cwd.openDir(args[1], .{ .iterate = true });
+    defer gen_dir.close();
+    if (try proto_checks.tooLong(a, gen_dir)) |f| {
+        std.debug.print("aws_codegen: the generated file {s} reaches {d} lines, the limit of a source file; the generator must split it\n", .{ f, proto_checks.max_lines });
+        bad = true;
+    }
+    const module = try moduleText(a, module_path, parts_path);
+    for (args[6..]) |want| {
         if (!try holds(a, module, want)) {
             std.debug.print("aws_codegen: {s}.mojo does not contain:\n{s}\n", .{ args[2], want });
             bad = true;
         }
     }
     if (bad) std.process.exit(1);
-    try writeFile(args[0], try std.fmt.allocPrint(a, "equal to the golden, and {d} must_contain held: {s}.mojo\n", .{ args[5..].len, args[2] }));
+    try writeFile(args[0], try std.fmt.allocPrint(a, "equal to the golden, and {d} must_contain held: {s}.mojo\n", .{ args[6..].len, args[2] }));
 }
 
 fn check(a: A, generated: []const u8, golden: []const u8, bad: *bool) !void {

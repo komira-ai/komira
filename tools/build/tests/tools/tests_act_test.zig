@@ -184,6 +184,26 @@ test "treeDiff: null when the trees are the same; names a changed, a missing and
     try t.expect(std.mem.indexOf(u8, d, "Only in o: extra.mojo\n") != null);
 }
 
+test "lineCount and tooLong: a last line without a newline counts; only .mojo files of 1000 lines or more are named" {
+    try t.expectEqual(@as(usize, 0), proto_checks.lineCount(""));
+    try t.expectEqual(@as(usize, 1), proto_checks.lineCount("a"));
+    try t.expectEqual(@as(usize, 1), proto_checks.lineCount("a\n"));
+    try t.expectEqual(@as(usize, 2), proto_checks.lineCount("a\nb"));
+    try t.expectEqual(@as(usize, 3), proto_checks.lineCount("a\n\nb\n"));
+    var ar = std.heap.ArenaAllocator.init(t.allocator);
+    defer ar.deinit();
+    const a = ar.allocator();
+    var tmp = t.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    const line = "x\n";
+    try tmp.dir.makePath("sub");
+    try tmp.dir.writeFile(.{ .sub_path = "ok.mojo", .data = line ** 999 });
+    try tmp.dir.writeFile(.{ .sub_path = "long.txt", .data = line ** 2000 });
+    try t.expect((try proto_checks.tooLong(a, tmp.dir)) == null);
+    try tmp.dir.writeFile(.{ .sub_path = "sub/big.mojo", .data = line ** 1000 });
+    try t.expectEqualStrings("sub/big.mojo (1000 lines)", (try proto_checks.tooLong(a, tmp.dir)).?);
+}
+
 const aws_checks = @import("aws_checks.zig");
 const parity = @import("parity.zig");
 

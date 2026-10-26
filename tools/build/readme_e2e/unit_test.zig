@@ -8,6 +8,7 @@ const plan = @import("plan.zig");
 const cli = @import("cli.zig");
 const verify = @import("verify.zig");
 const offline = @import("offline.zig");
+const native = @import("native.zig");
 const fix = @import("fixture.zig");
 
 fn arena() std.heap.ArenaAllocator {
@@ -301,4 +302,106 @@ test "a package's index is asked for at <aa>/<bb>/<name>, short names padded wit
 
 test "a registry that is not a loopback URL is not asked" {
     try std.testing.expectError(error.NotLoopback, offline.get(std.heap.page_allocator, "https://api.mopm.dev", "/index/config.json"));
+}
+
+// ---- native.zig ---------------------------------------------------------------
+
+fn words(a: std.mem.Allocator, line: []const u8) ![]const []const u8 {
+    return native.shellWords(a, line);
+}
+
+test "shell words: bare, single-quoted, and a quote inside a word" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const got = try words(a, "MODULAR_HOME=/p/share/max /p/bin/mojo build 'a b' x'y z'w 'it'\\''s' ''\n");
+    try std.testing.expectEqual(@as(usize, 7), got.len);
+    try std.testing.expectEqualStrings("MODULAR_HOME=/p/share/max", got[0]);
+    try std.testing.expectEqualStrings("a b", got[3]);
+    try std.testing.expectEqualStrings("xy zw", got[4]);
+    try std.testing.expectEqualStrings("it's", got[5]);
+    try std.testing.expectEqualStrings("", got[6]);
+}
+
+test "shell words: an unterminated quote is refused" {
+    var ar = arena();
+    defer ar.deinit();
+    try std.testing.expectError(error.Unterminated, words(ar.allocator(), "mojo 'build"));
+}
+
+test "link words: what stands between build and -o" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const got = native.linkWords(try words(a, "MODULAR_HOME=/p/share/max /p/bin/mojo build -Xlinker /p/lib/libx.a -Xlinker -rpath -Xlinker /p/lib -o out m.mojo")).?;
+    try std.testing.expectEqual(@as(usize, 6), got.len);
+    try std.testing.expectEqualStrings("-Xlinker", got[0]);
+    try std.testing.expectEqualStrings("/p/lib/libx.a", got[1]);
+    try std.testing.expectEqualStrings("/p/lib", got[5]);
+    // Not a build command, or no -o: nothing to take.
+    try std.testing.expect(native.linkWords(try words(a, "/p/bin/mojo run m.mojo")) == null);
+    try std.testing.expect(native.linkWords(try words(a, "/p/bin/mojo build m.mojo")) == null);
+}
+
+test "unlinked: a static archive by path, a shared library by -l, and the one left out" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const natives = [_]native.Native{
+        .{ .package = "p", .soname = "libx.a", .kind = "static" },
+        .{ .package = "p", .soname = "liby.so.1" },
+        .{ .package = "q", .soname = "libz.a", .kind = "static" },
+    };
+    const left = try native.unlinked(a, &natives, &.{ "-Xlinker", "/e/lib/mojo/../libx.a", "-Ly", "-ly" });
+    try std.testing.expectEqual(@as(usize, 1), left.len);
+    try std.testing.expectEqualStrings("q ships the native library libz.a (static) and mopm's link command does not link it", left[0]);
+    // A longer name that merely ends the same way is not the library.
+    const decoy = try native.unlinked(a, natives[0..1], &.{ "/e/lib/libxx.a", "/e/lib/otherlibx.a", "-lxx" });
+    try std.testing.expectEqual(@as(usize, 1), decoy.len);
+}
+
+test "collect: the declarations of a lock entry and of metadata, once each" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    var why: []const u8 = "";
+    const meta = try plan.parseMetadata(a, "{\"name\":\"p\",\"native\":[{\"id\":\"x\",\"soname\":\"libx.a\",\"kind\":\"static\",\"static_file\":\"../libx.a\"}]}", &why);
+    var out: std.ArrayList(native.Native) = .empty;
+    try native.collect(a, "p", meta.native, &out, &why);
+    try native.collect(a, "p", meta.native, &out, &why);
+    try std.testing.expectEqual(@as(usize, 1), out.items.len);
+    try std.testing.expectEqualStrings("static", out.items[0].kind);
+    const bad = try plan.parseMetadata(a, "{\"name\":\"p\",\"native\":[{\"id\":\"x\"}]}", &why);
+    try std.testing.expectError(error.Invalid, native.collect(a, "p", bad.native, &out, &why));
+    try std.testing.expect(std.mem.indexOf(u8, why, "names no soname") != null);
+}
+
+test "a package with a static native holds its archive at lib/<soname>, declared by the metadata" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const bytes = try fix.packageWith(a, "nat", "1.0.0", "mojo1.0.0_0", "mojoc", &.{}, &.{.{ .soname = "libnat_c.a", .bytes = "archive" }});
+    var why: []const u8 = "";
+    const files = try conda.read(a, bytes, &why);
+    try std.testing.expectEqualStrings("archive", conda.find(files, "lib/libnat_c.a").?);
+    const meta = try plan.parseMetadata(a, conda.find(files, "lib/mojo/nat.mopm.json").?, &why);
+    try std.testing.expectEqual(@as(usize, 1), meta.native.len);
+    // declared and not shipped: the metadata names it, the package lacks the file
+    const bare = try fix.packageWith(a, "nat", "1.0.0", "mojo1.0.0_0", "mojoc", &.{}, &.{.{ .soname = "libnat_c.a", .bytes = "archive", .ship = false }});
+    const bare_files = try conda.read(a, bare, &why);
+    try std.testing.expect(conda.find(bare_files, "lib/libnat_c.a") == null);
+    try std.testing.expect(conda.find(bare_files, "lib/mojo/nat.mopm.json") != null);
+}
+
+test "for the toolchain's linker: the push-state and pop-state pairs go, every other argument stays in order" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const got = try native.forZigLinker(a, &.{ "-Xlinker", "--push-state", "-Xlinker", "--no-as-needed", "-Xlinker", "/p/lib/libx.a", "-Xlinker", "--pop-state", "-Xlinker", "-rpath", "-Xlinker", "/p/lib" });
+    const want = [_][]const u8{ "-Xlinker", "--no-as-needed", "-Xlinker", "/p/lib/libx.a", "-Xlinker", "-rpath", "-Xlinker", "/p/lib" };
+    try std.testing.expectEqual(want.len, got.len);
+    for (want, got) |w, g| try std.testing.expectEqualStrings(w, g);
+    // an archive that happens to be named like the option is not dropped
+    const kept = try native.forZigLinker(a, &.{ "/p/lib/--pop-state", "-Xlinker" });
+    try std.testing.expectEqual(@as(usize, 2), kept.len);
 }

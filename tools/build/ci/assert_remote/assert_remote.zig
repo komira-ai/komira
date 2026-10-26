@@ -12,13 +12,21 @@
 //!   * a run that executed any action ends with
 //!     `Commands: N (cached: N, remote: N, local: N)`, for `build` and for
 //!     `bxl` alike;
-//!   * a run that executed NO action (everything cached, or a query-only
-//!     script) prints no `Commands:` line, only `Network: up 0B  down 0B`;
+//!   * `Cache hits: N%` is printed beside `Commands:`, and only then: both
+//!     count build actions, and a cache hit is one;
+//!   * a run that touched NO build action (everything already built, or a
+//!     query-only script) prints neither line. A build or bxl run of that
+//!     kind prints `Network: up 0B  down 0B`. A test run of that kind can
+//!     still move bytes, because it looks its test results up in the farm's
+//!     cache, and it ends with `Tests finished:`. Test executions themselves
+//!     are never counted in `Commands:`;
 //!   * `BUILD FAILED` / `BXL FAILED` end a failed run.
-//! So a missing summary is accepted only when the zero-network line says no
-//! action ran. A missing summary beside network traffic means buck2's output
-//! changed shape, and that is a failure: the check must not pass by not
-//! finding what it looks for.
+//! So a missing summary is accepted only when the log shows that no build
+//! action was touched: the zero-network line, or a finished test run with no
+//! `Cache hits:` line. A missing summary beside network traffic in any other
+//! log, or beside a `Cache hits:` line, means buck2's output changed shape,
+//! and that is a failure: the check must not pass by not finding what it
+//! looks for.
 const std = @import("std");
 
 pub const Verdict = union(enum) {
@@ -27,7 +35,8 @@ pub const Verdict = union(enum) {
     local_execution: u64,
     /// A `Commands:` line with no readable `local: N`.
     unreadable_summary,
-    /// No `Commands:` line and the run moved bytes over the network.
+    /// No `Commands:` line, and the log does not show that no build action
+    /// was touched.
     missing_summary,
     /// buck2 said the run failed.
     run_failed,
@@ -63,6 +72,8 @@ fn isZeroNetwork(c: []const u8) bool {
 pub fn verdict(log: []const u8) Verdict {
     var summaries: usize = 0;
     var zero_network = false;
+    var cache_hits_line = false;
+    var tests_finished = false;
     var failed = false;
     var local: u64 = 0;
     var unreadable = false;
@@ -78,6 +89,10 @@ pub fn verdict(log: []const u8) Verdict {
             }
         } else if (isZeroNetwork(c)) {
             zero_network = true;
+        } else if (std.mem.startsWith(u8, c, "Cache hits: ")) {
+            cache_hits_line = true;
+        } else if (std.mem.startsWith(u8, c, "Tests finished: ")) {
+            tests_finished = true;
         } else if (std.mem.eql(u8, c, "BUILD FAILED") or std.mem.eql(u8, c, "BXL FAILED")) {
             failed = true;
         }
@@ -85,7 +100,10 @@ pub fn verdict(log: []const u8) Verdict {
     if (failed) return .run_failed;
     if (unreadable) return .unreadable_summary;
     if (local != 0) return .{ .local_execution = local };
-    if (summaries == 0 and !zero_network) return .missing_summary;
+    if (summaries == 0) {
+        const no_build_action = zero_network or (tests_finished and !cache_hits_line);
+        if (!no_build_action) return .missing_summary;
+    }
     return .ok;
 }
 
@@ -94,7 +112,7 @@ pub fn describe(v: Verdict, w: *std.Io.Writer) std.Io.Writer.Error!void {
         .ok => try w.writeAll("assert_remote: ok (no local execution)\n"),
         .local_execution => |n| try w.print("assert_remote: FAILED: {d} action(s) ran locally (`local: {d}` in the Commands summary); builds go through the farm\n", .{ n, n }),
         .unreadable_summary => try w.writeAll("assert_remote: FAILED: a `Commands:` line has no `local: N` field; buck2's summary changed shape\n"),
-        .missing_summary => try w.writeAll("assert_remote: FAILED: no `Commands:` summary line, and the run used the network; cannot show it was remote\n"),
+        .missing_summary => try w.writeAll("assert_remote: FAILED: no `Commands:` summary line, and the log does not show that no build action ran; cannot show it was remote\n"),
         .run_failed => try w.writeAll("assert_remote: FAILED: the log ends a failed buck2 run (BUILD FAILED / BXL FAILED)\n"),
     }
 }

@@ -170,6 +170,36 @@ pub fn listNames(a: std.mem.Allocator, dir: std.fs.Dir) ![][]const u8 {
     return items;
 }
 
+/// The directory, beside a generated module, that holds the parts of one that
+/// is too large for a file (`komira_proto_codegen::split`). A generated package
+/// always has it: the rules name a package's sources before the generator
+/// has run, so the directory is a fixed name, and the action that runs the
+/// generator writes its `__init__.mojo`.
+pub const parts_dir = "_parts";
+
+/// The first entry of the parts directory `dir` that is not a non-empty `.mojo`
+/// file, as the text to refuse the package with, or null when every entry is
+/// one (an empty directory is fine). The generator writes only `.mojo` files
+/// there: any other entry would not be compiled, or is a silent failure.
+pub fn partsProblem(a: std.mem.Allocator, dir: std.fs.Dir) !?[]u8 {
+    var it = dir.iterate();
+    var first: ?[]u8 = null;
+    while (try it.next()) |e| {
+        const bad: ?[]const u8 = blk: {
+            if (e.kind != .file) break :blk "is not a file";
+            if (!std.mem.endsWith(u8, e.name, ".mojo")) break :blk "is not a .mojo file";
+            const st = try dir.statFile(e.name);
+            if (st.size == 0) break :blk "is empty";
+            break :blk null;
+        };
+        if (bad) |why| {
+            const line = try std.fmt.allocPrint(a, "{s}/{s} {s}", .{ parts_dir, e.name, why });
+            if (first == null or std.mem.lessThan(u8, line, first.?)) first = line;
+        }
+    }
+    return first;
+}
+
 /// `names` as `ls -A | tr '\n' ' '` shows them: each followed by a space.
 pub fn spaced(a: std.mem.Allocator, names: []const []const u8) ![]u8 {
     var b = std.ArrayList(u8).empty;
