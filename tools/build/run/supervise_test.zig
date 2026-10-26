@@ -66,18 +66,18 @@ fn cappedMib(err: []const u8) ?u64 {
     return std.fmt.parseInt(u64, rest[0..sp], 10) catch null;
 }
 
-// M3 for a hog of 64 MiB under a cap of 32 MiB, touching its pages at
-// `pause_ms` per MiB. The cap may kill the hog at any tick once it is over
-// 32 MiB, which may be before it has touched all 64 (a loaded host makes
-// the touching slow), so the only line of the hog's that the test relies on
-// is the one it prints before it touches anything. The hog holds its pages
-// for 30 s: only the cap ends it within the run's limit.
-fn capKillsHog(pause_ms: []const u8) !void {
+// M3 for a hog of 64 MiB under a cap of 32 MiB. With `stop` (MiB) the hog
+// says it is up after that many MiB and holds there, so the cap's kill
+// comes while it is still touching and it never reaches "hog holds"; the
+// run must read the same as one whose hog has finished growing. Without it
+// the cap may kill the hog at any tick once it is over 32 MiB, so the only
+// line of the hog's that the test relies on is the one it prints before it
+// touches anything. The hog holds for an hour: only the cap ends it.
+fn capKillsHog(stop: []const u8) !void {
     const e = try Env.init();
     defer e.deinit();
-    const r = try kit.runGate(e.a, e.dir, try e.args("hog", &.{ "--mem-cap-mib", "32", "--arg", "64", "--arg", "30", "--arg", pause_ms }), .{});
+    const r = try kit.runGate(e.a, e.dir, try e.args("hog", &.{ "--mem-cap-mib", "32", "--arg", "64", "--arg", "3600", "--arg", stop }), .{});
     try std.testing.expectEqual(@as(u8, 137), r.status);
-    try std.testing.expect(r.ms < 30_000);
     // The banner, then the log's tail (the hog's first line), then the cap's line.
     try std.testing.expect(before(r.err, banner137, "hog touches 64 MiB\n"));
     try std.testing.expect(before(r.err, "hog touches 64 MiB\n", "MEMORY CAP: killed //x:y at "));
@@ -85,6 +85,11 @@ fn capKillsHog(pause_ms: []const u8) !void {
     // The reading is the hog's own memory: over the cap, as resident.
     const mib = cappedMib(r.err) orelse return error.NoCapReading;
     try std.testing.expect(mib >= 32);
+    if (!std.mem.eql(u8, stop, "0")) {
+        // Held at 40 MiB: the reading is below the 64 of a finished hog.
+        try std.testing.expect(mib < 64);
+        try std.testing.expect(!contains(r.err, "hog holds"));
+    }
     try std.testing.expect(!kit.exists(try e.pidFile("passed")));
 }
 
@@ -96,13 +101,12 @@ test "M3 cap: a hog over its cap is killed (137), the banner first, then the MEM
     try capKillsHog("0");
 }
 
-// M3 on a loaded host: the hog's pages come slowly (20 ms per MiB), so the
-// cap kills it in the middle of its touching, long before it could print
-// "hog holds". The run must read the same as when the hog is quick. Defect
-// caught: a test (or a supervisor) that only works when the hog has finished
-// growing before the first tick over the cap. Mutants: those of the test above.
+// M3 with the hog held part-way: the cap kills it in the middle of its
+// touching, long before it could print "hog holds". Defect caught: a test
+// (or a supervisor) that only works when the hog has finished growing before
+// the first tick over the cap. Mutants: those of the test above.
 test "M3 cap: a hog killed while its pages are still being touched reads the same" {
-    try capKillsHog("20");
+    try capKillsHog("40");
 }
 
 test "M3 cap: a test under its cap passes" {
@@ -120,11 +124,10 @@ test "M3 cap: a test under its cap passes" {
 test "M2 cap: a test whose child pushes the tree's total over the cap is killed (137) with the MEMORY CAP line" {
     const e = try Env.init();
     defer e.deinit();
-    const r = try kit.runGate(e.a, e.dir, try e.args("treehog", &.{ "--mem-cap-mib", "32", "--arg", "16", "--arg", "24", "--arg", "5" }), .{});
+    const r = try kit.runGate(e.a, e.dir, try e.args("treehog", &.{ "--mem-cap-mib", "32", "--arg", "16", "--arg", "24", "--arg", "3600" }), .{});
     try std.testing.expectEqual(@as(u8, 137), r.status);
     try std.testing.expect(before(r.err, banner137, "MEMORY CAP: killed //x:y at "));
     try std.testing.expect(contains(r.err, " MiB resident, over its cap of 32 MiB\n"));
-    try std.testing.expect(r.ms < 5000);
     try std.testing.expect(!kit.exists(try e.pidFile("passed")));
 }
 
@@ -162,7 +165,7 @@ test "M3 cap: a test exactly at its cap is not over it" {
             supervise.plat.read_table = tableAtCap;
         }
     }.f;
-    const r2 = try kit.runGate(e.a, e.dir, try e.args("sleep", &.{ "--mem-cap-mib", "32", "--arg", "5" }), .{ .setup = setup2 });
+    const r2 = try kit.runGate(e.a, e.dir, try e.args("sleep", &.{ "--mem-cap-mib", "32", "--arg", "3600" }), .{ .setup = setup2 });
     try std.testing.expectEqual(@as(u8, 137), r2.status);
     try std.testing.expect(contains(r2.err, "MEMORY CAP: killed //x:y at 32 MiB resident, over its cap of 32 MiB\n"));
 }
@@ -176,7 +179,7 @@ test "M5 a child left in the group by a passing test is killed when the test exi
     const r = try kit.runGate(e.a, e.dir, try e.args("daemon", &.{ "--mem-cap-mib", "512", "--arg", f, "--arg", "hog" }), .{});
     try std.testing.expectEqual(@as(u8, 0), r.status);
     const pids = try kit.pidsFrom(e.a, f, 1);
-    try std.testing.expect(kit.goneWithin(pids, 5000));
+    kit.waitGone(pids);
 }
 
 var fail_reads: u32 = 0;
@@ -207,11 +210,13 @@ test "M4 unreadable: three failed readings kill the group and exit 2; two do not
             supervise.plat.read_table = flakyTable;
         }
     }.s;
-    const r = try kit.runGate(e.a, e.dir, try e.args("pid", &.{ "--mem-cap-mib", "512", "--arg", f, "--arg", "sleep", "--arg", "30" }), .{ .setup = three });
+    const r = try kit.runGate(e.a, e.dir, try e.args("pid", &.{ "--mem-cap-mib", "512", "--arg", f, "--arg", "sleep", "--arg", "3600" }), .{ .setup = three, .clock = true });
     try std.testing.expectEqual(@as(u8, 2), r.status);
     try std.testing.expect(contains(r.err, "mem_cap: cannot read the process tree of //x:y from /proc; killed it rather than run it uncapped\n"));
-    try std.testing.expect(r.ms < 10_000);
-    try std.testing.expect(kit.goneWithin(try kit.pidsFrom(e.a, f, 1), 2000));
+    // The third unreadable tick (3 x 100 ms on the test's clock) kills the group.
+    try std.testing.expect(kit.hasEvents(r.events, &.{"t=300 KILL -C"}));
+    try std.testing.expectEqual(@as(?u64, 300), kit.firstTime(r.events, " KILL -C"));
+    kit.waitGone(try kit.pidsFrom(e.a, f, 1));
 
     const two = struct {
         fn s() void {
@@ -227,18 +232,22 @@ test "M4 unreadable: three failed readings kill the group and exit 2; two do not
             supervise.plat.read_table = blindTable;
         }
     }.s;
-    const r3 = try kit.runGate(e.a, e.dir, try e.args("sleep", &.{ "--mem-cap-mib", "512", "--arg", "30" }), .{ .setup = blind });
+    const r3 = try kit.runGate(e.a, e.dir, try e.args("sleep", &.{ "--mem-cap-mib", "512", "--arg", "3600" }), .{ .setup = blind });
     try std.testing.expectEqual(@as(u8, 2), r3.status);
     try std.testing.expect(contains(r3.err, "mem_cap: cannot read the process tree"));
 }
 
 // D2. Mutant: wait for the limit before returning the status.
-test "D2 prompt exit: exit 7 under a 30 s limit returns at once" {
+test "D2 prompt exit: exit 7 under a 30 s limit returns at once, with no decision made at the limit" {
     const e = try Env.init();
     defer e.deinit();
-    const r = try kit.runGate(e.a, e.dir, try e.args("exit", &.{ "--deadline-s", "30", "--runner-timeout-s", "90", "--arg", "7" }), .{});
+    const r = try kit.runGate(e.a, e.dir, try e.args("exit", &.{ "--deadline-s", "30", "--runner-timeout-s", "90", "--arg", "7" }), .{ .clock = true });
     try std.testing.expectEqual(@as(u8, 7), r.status);
-    try std.testing.expect(r.ms < 2000);
+    // The test's clock never moved: every kill is the end-of-run cleanup at t=0.
+    try std.testing.expectEqual(@as(usize, 0), kit.countEvents(r.events, "STOP"));
+    try std.testing.expectEqual(@as(usize, 0), kit.countEvents(r.events, "sleep"));
+    var lines = std.mem.splitScalar(u8, r.events, '\n');
+    while (lines.next()) |l| try std.testing.expect(l.len == 0 or std.mem.startsWith(u8, l, "t=0 "));
     try std.testing.expect(!contains(r.err, "TEST TIME LIMIT"));
 }
 
@@ -248,11 +257,13 @@ test "D3 deadline: a sleeper past its limit is killed (137), the banner, then th
     const e = try Env.init();
     defer e.deinit();
     const f = try e.pidFile("d3.pids");
-    const r = try kit.runGate(e.a, e.dir, try e.args("spawnwait", &.{ "--deadline-s", "2", "--runner-timeout-s", "62", "--arg", f }), .{});
+    const r = try kit.runGate(e.a, e.dir, try e.args("spawnwait", &.{ "--deadline-s", "2", "--runner-timeout-s", "62", "--arg", f }), .{ .clock = true });
     try std.testing.expectEqual(@as(u8, 137), r.status);
+    // At 2000 ms on the test's clock: the tree is stopped (C, then its child)
+    // and then killed, C included, and the group after.
+    try std.testing.expect(kit.hasEvents(r.events, &.{ "t=2000 STOP C", "t=2000 STOP M1", "t=2000 KILL C", "t=2000 KILL M1", "t=2000 KILL -C" }));
     try std.testing.expect(before(r.err, banner137, "TEST TIME LIMIT: killed //x:y after 2 s, under the test runner's timeout of 62 s (komira.test_timeout_s)\n"));
-    try std.testing.expect(r.ms < 6000);
-    try std.testing.expect(kit.goneWithin(try kit.pidsFrom(e.a, f, 2), 2000));
+    kit.waitGone(try kit.pidsFrom(e.a, f, 2));
 }
 
 var c_pid: i32 = 0;
@@ -263,7 +274,7 @@ fn sparingKill(pid: sys.pid_t, sig: u8) void {
         if (c_pid == 0) c_pid = pid;
         if (pid == c_pid) return;
     }
-    sys.kill(pid, sig);
+    kit.killRecorded(pid, sig);
 }
 
 // D4. Mutant: omit the 10 s group-kill fallback (the run never ends; the
@@ -277,9 +288,11 @@ test "D4 deadline: a test the tree kill misses dies by the group kill 10 s later
             supervise.plat.kill = sparingKill;
         }
     }.s;
-    const r = try kit.runGate(e.a, e.dir, try e.args("sleep", &.{ "--deadline-s", "1", "--runner-timeout-s", "61", "--arg", "60" }), .{ .setup = setup, .timeout_ms = 25_000 });
+    const r = try kit.runGate(e.a, e.dir, try e.args("sleep", &.{ "--deadline-s", "1", "--runner-timeout-s", "61", "--arg", "3600" }), .{ .setup = setup, .clock = true });
     try std.testing.expectEqual(@as(u8, 137), r.status);
-    try std.testing.expect(r.ms >= 10_000 and r.ms < 14_000);
+    // The tree kill at 1000 ms never reached C; the group kill comes
+    // exactly deadline_grace (10 s) later.
+    try std.testing.expectEqual(@as(?u64, 11_000), kit.firstTime(r.events, " KILL -C"));
     try std.testing.expect(before(r.err, banner137, "TEST TIME LIMIT: killed //x:y after 1 s"));
 }
 
@@ -304,7 +317,7 @@ test "D5 timer: a clock that fails gives exit 2 and the D5 message" {
             supervise.plat.now_ms = failingClock;
         }
     }.s;
-    const r = try kit.runGate(e.a, e.dir, try e.args("sleep", &.{ "--deadline-s", "30", "--runner-timeout-s", "90", "--arg", "2" }), .{ .setup = later });
+    const r = try kit.runGate(e.a, e.dir, try e.args("sleep", &.{ "--deadline-s", "30", "--runner-timeout-s", "90", "--arg", "3600" }), .{ .setup = later });
     try std.testing.expectEqual(@as(u8, 2), r.status);
     try std.testing.expectEqualStrings("test_deadline: the timer of //x:y failed, so the test ran without its limit of 30 s\n", r.err);
     const at_start = struct {
@@ -322,22 +335,22 @@ test "M5 D6 signals: SIGTERM and SIGINT kill the session and exit 143 and 130" {
     defer e.deinit();
     for ([_][2]u8{ .{ posix.SIG.TERM, 143 }, .{ posix.SIG.INT, 130 }, .{ posix.SIG.HUP, 129 } }) |sr| {
         const f = try std.fmt.allocPrint(e.a, "{s}/sig{d}.pids", .{ e.dir, sr[0] });
-        const r = try kit.runGate(e.a, e.dir, try e.args("spawnwait", &.{ "--mem-cap-mib", "512", "--arg", f }), .{ .signal = .{ .sig = sr[0], .after_ms = 1000 } });
+        const r = try kit.runGate(e.a, e.dir, try e.args("spawnwait", &.{ "--mem-cap-mib", "512", "--arg", f }), .{ .signal = sr[0] });
         try std.testing.expectEqual(sr[1], r.status);
-        try std.testing.expect(kit.goneWithin(try kit.pidsFrom(e.a, f, 2), 5000));
+        kit.waitGone(try kit.pidsFrom(e.a, f, 2));
         try std.testing.expect(!kit.exists(try e.pidFile("passed")));
     }
 }
 
 // M6. Mutant: the tether inside C's session (the tree kill or the group
 // kill reaches it), or no tether.
-test "M6 tether: SIGKILL to the tool ends the session within 5 s" {
+test "M6 tether: SIGKILL to the tool ends the session" {
     const e = try Env.init();
     defer e.deinit();
     const f = try e.pidFile("m6.pids");
-    const r = kit.runGate(e.a, e.dir, try e.args("spawnwait", &.{ "--arg", f }), .{ .signal = .{ .sig = posix.SIG.KILL, .after_ms = 1000 } });
+    const r = kit.runGate(e.a, e.dir, try e.args("spawnwait", &.{ "--arg", f }), .{ .signal = posix.SIG.KILL });
     try std.testing.expectEqual(@as(u8, 137), (try r).status);
-    try std.testing.expect(kit.goneWithin(try kit.pidsFrom(e.a, f, 2), 5000));
+    kit.waitGone(try kit.pidsFrom(e.a, f, 2));
 }
 
 var zombie_seen: u8 = 0;
@@ -355,7 +368,7 @@ fn recordingKill(pid: sys.pid_t, sig: u8) void {
         const out = std.fmt.bufPrint(&buf, "group kill: C was {c}\n", .{zombie_seen}) catch "";
         sys.writeAll(2, out);
     }
-    sys.kill(pid, sig);
+    kit.killRecorded(pid, sig);
 }
 
 // 2.1 step 4. Mutant: reap C before its group is killed (its /proc entry is
@@ -383,13 +396,17 @@ test "C1 coverage limit: the whole group is killed, exit 1, the log tail and the
     const e = try Env.init();
     defer e.deinit();
     const f = try e.pidFile("c1.pids");
-    const r = try kit.runGate(e.a, e.dir, try e.args("spawnwait", &.{ "--limit-s", "2", "--limit-report", "coverage", "--arg", f }), .{});
+    const r = try kit.runGate(e.a, e.dir, try e.args("spawnwait", &.{ "--limit-s", "2", "--limit-report", "coverage", "--arg", f }), .{ .clock = true });
     try std.testing.expectEqual(@as(u8, 1), r.status);
+    // The whole group is killed at the limit, and the scan, which waits for
+    // the killed members to be gone, finds none and never has to nap.
+    try std.testing.expect(kit.hasEvents(r.events, &.{"t=2000 KILL -C"}));
+    try std.testing.expectEqual(@as(usize, 0), kit.countEvents(r.events, "sleep"));
     try std.testing.expect(!contains(r.err, "survived the kill"));
     try std.testing.expect(contains(r.err, "------------------------------------------------------------------ output (last 200 lines)\n"));
     try std.testing.expect(contains(r.err, "==================================================================\nCOVERAGE RUN FAILED: //x:y\nThe test left processes running or did not finish within 2 s under kcov, and every process of the run was killed: kcov waits for every process the test started, where the release gate waits for the test alone. A test must wait for (or kill) every child it starts.\n==================================================================\n"));
     try std.testing.expect(!contains(r.err, "GATED TEST FAILED"));
-    try std.testing.expect(kit.goneWithin(try kit.pidsFrom(e.a, f, 2), 2000));
+    kit.waitGone(try kit.pidsFrom(e.a, f, 2));
 }
 
 fn fakeSurvivor(alloc: std.mem.Allocator, pgid: i32) ?[]proctab.Member {
@@ -410,16 +427,20 @@ test "C1 coverage limit: a survivor of the kill and a blind /proc are each refus
             supervise.plat.group_members = fakeSurvivor;
         }
     }.s;
-    const r = try kit.runGate(e.a, e.dir, try e.args("sleep", &.{ "--limit-s", "1", "--limit-report", "coverage", "--arg", "30" }), .{ .setup = surv, .timeout_ms = 30_000 });
+    const r = try kit.runGate(e.a, e.dir, try e.args("sleep", &.{ "--limit-s", "1", "--limit-report", "coverage", "--arg", "3600" }), .{ .setup = surv, .clock = true });
     try std.testing.expectEqual(@as(u8, 1), r.status);
     try std.testing.expect(contains(r.err, "After the time limit (1 s), processes of the coverage run survived the kill of its process group "));
     try std.testing.expect(contains(r.err, "(pid state comm: 4242 S stuck;)"));
+    // The scan waited survivor_wait (10 s) in 1 s naps on the test's clock,
+    // from the group kill at 1000 ms, before it gave the member up.
+    try std.testing.expectEqual(@as(usize, 10), kit.countEvents(r.events, " sleep 1000"));
+    try std.testing.expect(kit.hasEvents(r.events, &.{ "t=1000 KILL -C", "t=1000 sleep 1000", "t=10000 sleep 1000" }));
     const blind = struct {
         fn s() void {
             supervise.plat.self_seen = blindSelf;
         }
     }.s;
-    const r2 = try kit.runGate(e.a, e.dir, try e.args("sleep", &.{ "--limit-s", "1", "--limit-report", "coverage", "--arg", "30" }), .{ .setup = blind });
+    const r2 = try kit.runGate(e.a, e.dir, try e.args("sleep", &.{ "--limit-s", "1", "--limit-report", "coverage", "--arg", "3600" }), .{ .setup = blind, .clock = true });
     try std.testing.expectEqual(@as(u8, 1), r2.status);
     try std.testing.expect(contains(r2.err, "/proc is not readable as this run's own"));
 }
@@ -446,11 +467,13 @@ test "no process table: a cap is refused with exit 2; the deadline group-kills a
     try std.testing.expectEqualStrings("mem_cap: REFUSING: no /proc here to read resident memory from; //x:y would run uncapped\n", r.err);
     try std.testing.expect(!kit.exists(try e.pidFile("passed")));
     const f = try e.pidFile("noproc.pids");
-    const r2 = try kit.runGate(e.a, e.dir, try e.args("spawnwait", &.{ "--deadline-s", "1", "--runner-timeout-s", "61", "--arg", f }), .{ .setup = setup });
+    const r2 = try kit.runGate(e.a, e.dir, try e.args("spawnwait", &.{ "--deadline-s", "1", "--runner-timeout-s", "61", "--arg", f }), .{ .setup = setup, .clock = true });
     try std.testing.expectEqual(@as(u8, 137), r2.status);
-    try std.testing.expect(r2.ms < 5000);
+    // No table: the group is killed at the limit, with no stop of the tree.
+    try std.testing.expectEqual(@as(?u64, 1000), kit.firstTime(r2.events, " KILL -C"));
+    try std.testing.expectEqual(@as(usize, 0), kit.countEvents(r2.events, "STOP"));
     try std.testing.expect(before(r2.err, banner137, "TEST TIME LIMIT: killed //x:y after 1 s"));
-    try std.testing.expect(kit.goneWithin(try kit.pidsFrom(e.a, f, 2), 2000));
+    kit.waitGone(try kit.pidsFrom(e.a, f, 2));
 }
 
 // The real table of this platform (/proc on Linux, libproc on macOS), read
@@ -472,7 +495,7 @@ test "the process table of this platform: a child's pages count toward its paren
         var i: usize = 0;
         while (i < mem.len) : (i += 4096) mem[i] = 1;
         sys.writeAll(go[1], "r");
-        sys.sleepMs(30_000);
+        sys.sleepMs(3_600_000);
         posix.exit(0);
     }
     posix.close(go[1]);
@@ -492,13 +515,9 @@ test "the process table of this platform: a child's pages count toward its paren
     try std.testing.expect(kit.alive(pid));
 
     sys.kill(pid, posix.SIG.KILL);
-    var gone = false;
-    var k: u32 = 0;
-    while (k < 200 and !gone) : (k += 1) {
-        sys.sleepMs(10);
-        const t2 = proctab.read(a).?;
-        gone = if (t2.find(pid)) |p| p.state == 'Z' else true;
-    }
+    kit.waitExit(pid);
+    const t2 = proctab.read(a).?;
+    const gone = if (t2.find(pid)) |p| p.state == 'Z' else true;
     try std.testing.expect(gone);
     try std.testing.expect(!kit.alive(pid));
     try std.testing.expectEqual(@as(?[]i32, null), proctab.read(a).?.tree(a, pid));
