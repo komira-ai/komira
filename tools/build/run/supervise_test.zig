@@ -300,7 +300,7 @@ var clock_calls: u32 = 0;
 fn failingClock() ?u64 {
     clock_calls += 1;
     if (clock_calls > 1) return null;
-    return sys.monotonicMs();
+    return 0;
 }
 fn deadClock() ?u64 {
     return null;

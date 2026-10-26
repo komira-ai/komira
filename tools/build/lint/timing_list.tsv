@@ -1,0 +1,22 @@
+# The wall-clock ledger (tools/build/lint/timing.bzl, read by //tools/build/lint:timing).
+# Rows of exactly five tab-separated fields: use, path, token, count, reason.
+# A Zig file's sites of a clock read or a sleep (src/rules.zig names the tokens) must equal its
+# row. A new site fails the build; a removed one fails until the row is lowered or removed.
+# A test never asserts on elapsed time and never waits on a deadline that fails it: the gate's
+# tests move the clock they run on (tools/build/run/testkit.zig), and a wait for a process or an
+# event blocks on that process or event. A row in a test file is only a fixture that blocks
+# until it is killed, or a value used as a nonce.
+use	release/ci/main_red/gh.zig	Thread.sleep	1	production: the backoff between a gh command's attempts
+use	tools/build/bisect/main.zig	milliTimestamp	1	production: the bisect tool's default rerun nonce
+use	tools/build/bisect/probe.zig	milliTimestamp	6	production: the bisect tool's probe has a time limit of its own, and measures its seconds
+use	tools/build/bisect/probe.zig	Thread.sleep	1	production: the poll of the probe's time limit
+use	tools/build/coverage/branch/bounded_run.zig	Thread.sleep	1	production: the default Clock's nap (a test gives the Clock its own)
+use	tools/build/mojo/tools/mojo_compile.zig	nanosleep	1	production: the watchdog's one-second tick (the ticked build takes its ticks from the process that runs it)
+use	tools/build/mojo/tools/mojo_compile_macos.zig	nanosleep	1	production: the watchdog's one-second tick, as on Linux
+use	tools/build/run/supervise_test.zig	sleepMs	1	fixture: a forked child that holds memory until the test kills it
+use	tools/build/run/sys.zig	sleepMs	1	production: the sleep the gate's platform interface defaults to
+use	tools/build/run/sys.zig	nanosleep	1	production: the sleep the gate's platform interface defaults to
+use	tools/build/run/sys.zig	monotonicMs	2	production: the clock the gate's platform interface defaults to
+use	tools/build/run/testkit.zig	sleepMs	7	fixtures: programs that block until the gate kills them (or hold for the seconds they are given); the test's own waits never sleep
+use	tools/build/selftest/rerun.zig	nanoTimestamp	1	a value used as a nonce, not waited on
+use	tools/build/tests/functional/watchdog/standin.zig	Thread.sleep	1	fixture: the stand-in compiler blocks until the watchdog or the tether kills it
