@@ -48,11 +48,13 @@ struct MailTlsConn(Movable, Deinitable):
         return outcome
 
     def recv(mut self, mut into: List[UInt8], max_bytes: Int) -> Tuple[UInt8, Int]:
+        if max_bytes <= 0:
+            # No room: an empty span would let s2n answer (DONE, 0), which the
+            # caller reads as the peer's close_notify.
+            return (TLS_OUTCOME_ERROR, -1)
         var cap = max_bytes
         if cap > _RECV_CHUNK:
             cap = _RECV_CHUNK
-        if cap < 0:
-            cap = 0
         # Decrypt straight into the tail of `into`, then cut it back to what
         # arrived. The span lives only for this call; s2n does not keep it.
         var start = len(into)
@@ -158,14 +160,31 @@ struct MailTlsTable(Movable, Deinitable):
         the caller closes the connection. An empty buffer also means the
         handshake's first bytes never append to stale input.
 
-        s2n reads and writes `fd` itself (no IO callbacks); the caller keeps
-        `fd` open until `drop` and closes it. A second call for an id that
-        already has an entry changes nothing."""
+        s2n reads and writes `fd` itself (no IO callbacks), so `fd` MUST be
+        non-blocking: on a blocking socket `drive_handshake_burst`, `recv`
+        and `send` wait inside s2n and stall the whole poll loop. The table
+        cannot check it (there is no flags shim to read them with); the
+        caller sets `O_NONBLOCK` when it accepts the connection. The caller
+        must also have flushed every plaintext reply (the `220`) before this
+        call: handshake bytes written ahead of an unsent reply would
+        interleave with it. The table cannot see the server's write queue.
+
+        The caller keeps `fd` open until `drop` and closes it. A second call
+        for an id that already has an entry with the same `fd` changes
+        nothing; with a different `fd` it raises, because TLS would otherwise
+        keep running over a descriptor the server has closed and may have
+        reused. Drop the id first."""
         if pending_plaintext_bytes != 0:
             raise Error(
                 "MailTlsTable.begin_upgrade: plaintext is buffered after STARTTLS"
             )
-        if self._index_of(conn_id) >= 0:
+        var existing = self._index_of(conn_id)
+        if existing >= 0:
+            if self._conns[existing][]._conn.fd() != fd:
+                raise Error(
+                    "MailTlsTable.begin_upgrade: the id already has TLS state"
+                    " on another socket"
+                )
             return
         var conn = TlsConnection(self._config)
         conn.bind_fd(fd)
@@ -192,7 +211,8 @@ struct MailTlsTable(Movable, Deinitable):
         """Decrypt up to `max_bytes` (at most 16 KiB) of plaintext from
         `conn_id`, appending to `into`. Returns `(outcome, n)`: `DONE` with `n`
         bytes appended (`n == 0` is the peer's close_notify), a `BLOCKED_ON_*`
-        with nothing appended, or `ERROR`. Call after `handshake_done`; an id
+        with nothing appended, or `ERROR` (also `(ERROR, -1)` when `max_bytes` is
+        not positive). Call after `handshake_done`; an id
         with no entry is `(ERROR, -1)`."""
         var idx = self._index_of(conn_id)
         if idx < 0:
@@ -204,8 +224,7 @@ struct MailTlsTable(Movable, Deinitable):
         `len(data)`; the caller sends the rest later. When the socket is full
         s2n holds the record it could not write and flushes it at the start of
         the next non-empty `send`, so the rest must be offered again (an empty
-        `data` does nothing). Call after
-        `handshake_done`; an id with no entry is `(ERROR, -1)`."""
+        `data` does nothing). Call after `handshake_done`; an id with no entry is `(ERROR, -1)`."""
         var idx = self._index_of(conn_id)
         if idx < 0:
             return (TLS_OUTCOME_ERROR, -1)
@@ -213,7 +232,10 @@ struct MailTlsTable(Movable, Deinitable):
 
     def drop(mut self, conn_id: Int):
         """Free `conn_id`'s TLS state when its connection closes. The socket
-        is not closed here. An id with no entry is a no-op."""
+        is not closed here. An id with no entry is a no-op. No close_notify is
+        sent: a server that wants a TLS goodbye must not assume one from
+        `drop` (an SMTP `QUIT` reply is sent with `send` before the drop, and
+        the close that follows is a plain TCP close)."""
         var idx = self._index_of(conn_id)
         if idx < 0:
             return

@@ -13,6 +13,11 @@
 # - pending plaintext at begin_upgrade is refused with no entry created (the
 #   STARTTLS command-injection guard), and a repeated begin_upgrade for one id
 #   makes one entry;
+# - an id that is reused without a drop, with a different socket, is refused
+#   and the entry keeps its first socket (TLS bytes must never go to a recycled
+#   descriptor);
+# - recv with a zero or negative byte limit is an error, never a
+#   (DONE, 0) that would read as the peer's close_notify;
 # - a bad key raises without echoing the key text.
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -170,6 +175,40 @@ def test_pending_plaintext_refused_and_duplicate_ignored() raises:
     close_fd(fd)
 
 
+def test_reused_id_with_another_fd_is_refused() raises:
+    var table = _table()
+    var created0 = tls_entries_created()
+    table.begin_upgrade(1, Int32(500), 0)
+    var refused = False
+    try:
+        table.begin_upgrade(1, Int32(501), 0)
+    except:
+        refused = True
+    assert_true(refused)
+    assert_equal(Int(table.conn_fd(1)), 500)
+    assert_equal(table.tls_conn_count(), 1)
+    assert_equal(tls_entries_created() - created0, 1)
+    table.begin_upgrade(1, Int32(500), 0)  # the same socket: still a no-op
+    assert_equal(tls_entries_created() - created0, 1)
+    table.drop(1)
+    # After a drop the id may take a new socket.
+    table.begin_upgrade(1, Int32(501), 0)
+    assert_equal(Int(table.conn_fd(1)), 501)
+    table.drop(1)
+
+
+def test_recv_with_no_room_is_an_error() raises:
+    var table = _table()
+    table.begin_upgrade(1, Int32(500), 0)
+    var into = List[UInt8]()
+    for limit in [0, -5]:
+        var r = table.recv(1, into, limit)
+        assert_equal(Int(r[0]), Int(TLS_OUTCOME_ERROR))
+        assert_equal(r[1], -1)
+        assert_equal(len(into), 0)
+    table.drop(1)
+
+
 def test_bad_key_raises_without_echo() raises:
     var bad_key = String("this is not a private key")
     var raised = False
@@ -189,5 +228,7 @@ def main() raises:
     test_destroyed_table_frees_live_entries()
     test_unknown_id_touches_nothing()
     test_pending_plaintext_refused_and_duplicate_ignored()
+    test_reused_id_with_another_fd_is_refused()
+    test_recv_with_no_room_is_an_error()
     test_bad_key_raises_without_echo()
     print("test_entry_lifetime: OK")

@@ -13,7 +13,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 mojo_library(
     name = "komira_mail_tls",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
-    # The full transitive closure of the Mojo libraries this package builds on.
+    # Direct dependencies: the rule adds each one's own closure to the compiler.
     deps = [
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_collections:komira_collections",

@@ -6,6 +6,13 @@
 # `freed` past `created`. They are counted, not logged; nothing reads them in a
 # server.
 #
+# TEST-HOOK: the tallies are exported only so tests can read them; a server
+# never does. They count `MailTlsConn.__deinit__`, so they prove each
+# `OwnedPointer[MailTlsConn]` is destroyed once; the s2n connection handle
+# inside is freed by the field destructor that runs right after, which no
+# counter here observes (komira_http_core owns that free). Tests read deltas,
+# because the tallies are shared by every table in the process.
+#
 # Mechanism: a name-keyed, init-once process slot (`_Global`), the idiom the
 # engine's route counters use, because Mojo has no global variables. Single
 # relaxed atomic adds, one per entry created and one per entry freed.

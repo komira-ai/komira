@@ -54,7 +54,7 @@ def _read(name: String) raises -> String:
 
 def _pause():
     """Give the kernel time to move bytes between the two ends. Loopback
-    delivery is not instantaneous on every host (on the farm a spin without a
+    delivery is not instantaneous on every host (on a loaded CI host a spin without a
     pause ran out before the second half of a 40000-byte write arrived), so
     every wait loop pauses between tries; each loop is also bounded."""
     _ = external_call["usleep", Int32](UInt32(500))

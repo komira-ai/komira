@@ -16,7 +16,7 @@ socket. The server's own connection table is not touched: the loop asks
 | `recv`, `send` | decrypt into a buffer, encrypt from a span |
 | `conn_fd` | the socket a connection's TLS state is bound to |
 | `drop` | free a connection's TLS state when it closes (the socket stays the caller's) |
-| `tls_entries_created`, `tls_entries_freed` | process-wide tallies that let a test see every entry freed exactly once |
+| `tls_entries_created`, `tls_entries_freed` | TEST-HOOK: process-wide tallies that let a test see every entry freed exactly once |
 """
 
 from .ledger import tls_entries_created, tls_entries_freed
