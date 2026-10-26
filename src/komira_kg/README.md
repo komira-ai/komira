@@ -2,11 +2,13 @@
 
 ## Responsibility
 
-The mutable data-graph store and its ingest. This is part 1 of the package
+The mutable data-graph store and its ingest. This is parts 1 and 2 of the package
 described in
 [the knowledge graph port](https://github.com/komira-ai/komira/blob/main/docs/design/knowledge_graph_port.md):
-bi-temporal edges, entity resolution and the source facet. Later parts add the
-embedder, model and extractor seams, the working set and compaction, and ingest.
+bi-temporal edges, entity resolution and the source facet, and the three seams
+through which a host supplies a model (`Embedder`, `LlmClient`, `Extractor`),
+each with a stub for tests. Later parts add the rule-driven extractor, the
+working set and compaction, and ingest.
 
 The graph keeps every fact on two time axes: event time (when it held in the
 world) and system time (when the graph learned it and when it learned it no
@@ -29,9 +31,19 @@ deleted, so "what did we believe at time T" stays answerable.
 - `source_facet`: the facet an entity carries in its `attrs` JSON
   (`facet_attrs_json`, `facet_from_attrs`, `facet_source_from_attrs`) and
   `FacetTombstoneSet`, the (source, facet) pairs a query excludes.
+- `embedder`: the `Embedder` trait (`dimension`, `embed`, `embed_batch`) and
+  `StubEmbedder`. An embedder reports its dimension; there is no default, and
+  every vector it returns has exactly that many components.
+- `extractor`: the `Extractor` trait (text and the entities already found to an
+  `Extraction`, without inference), `StubExtractor` and `copy_extraction`.
+- `llm_client`: the `LlmClient` trait (`extract`, `judge_contradiction`,
+  `judge_same_entity`, and optional `has_synthesis` and `synthesize`) and
+  `StubLlmClient`.
 
 A facet, a source, a predicate and an entity name are opaque strings the host
-supplies: the package fixes no vocabulary. It calls no model, reads no clock
+supplies: the package fixes no vocabulary. Prompts are values the caller passes
+in. It names no model, vendor or server and holds no network code: a model is a
+trait a host (or a transport package) implements. It calls no model, reads no clock
 and reads no environment; a time is always an argument, in whatever unit the
 graph stamps. It depends on `komira_kg_format` (the open-interval marker) and
 `komira_json` (the facet's `attrs` JSON), and no pointer crosses its API.
@@ -220,6 +232,64 @@ tombstones.disable("", "kind-b")
 assert_true(tombstones.is_disabled("src-2", "kind-b"))
 ```
 
+An embedder reports its dimension, and a graph's manifest records the dimension
+its columns were written with, so a vector is checked against that number where
+it is read. `StubEmbedder(dimension)` is deterministic (the same text gives the
+same vector) and texts with similar characters give a high cosine, so the dedup
+read can be tested without a model:
+
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+-->
+```mojo
+from komira_kg import StubEmbedder
+from komira_kg_format import cosine, pack_embedding, unpack_embedding_checked
+
+var embedder = StubEmbedder(28)
+assert_equal(embedder.dimension(), 28)
+
+var name = embedder.embed("Alpha Corporation")
+assert_equal(len(name), embedder.dimension())
+var cell = pack_embedding(name)
+assert_equal(len(unpack_embedding_checked(cell.as_bytes(), 28)), 28)
+
+var near = embedder.embed("Alpha Corporaton")
+var far = embedder.embed("Zenith Logistics Group")
+assert_true(cosine(name, near) > cosine(name, far))
+```
+
+A test of ingest registers what the "model" says. `StubExtractor` answers by the
+text and by how many entities are already found, so a gleaning loop sees a first
+pass, then a delta, then nothing; `StubLlmClient` does the same for `extract` and
+adds verdicts for the two judgments:
+
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false, assert_true
+-->
+```mojo
+from komira_kg import StubExtractor, StubLlmClient
+from komira_kg_format import EntityMention, Extraction, Triple
+
+var first = List[EntityMention]()
+first.append(EntityMention("Service A", "component", ""))
+var extractor = StubExtractor()
+extractor.add_extraction("text", 0, Extraction(first^, List[Triple]()))
+
+var found = List[EntityMention]()
+var pass_one = extractor.extract("text", found)
+assert_equal(pass_one.num_entities(), 1)
+found.append(pass_one.entities[0].copy())
+assert_equal(extractor.extract("text", found).num_entities(), 0)
+
+var llm = StubLlmClient()
+llm.add_contradiction("method B", "method A", True)
+llm.add_same_entity("Alpha Corp", "Alpha Corporation", True)
+assert_true(llm.judge_contradiction("method B", "method A"))
+assert_false(llm.judge_contradiction("method A", "method B"))
+assert_true(llm.judge_same_entity("Alpha Corp", "", "Alpha Corporation", ""))
+assert_false(llm.has_synthesis())
+```
+
 ## Limits
 
 `dedup_resolve` is pure and stateless: it tests the candidates it is given, so
@@ -239,3 +309,11 @@ the first system time an edge expired at, so applying a verdict twice is
 harmless; it still must be called only for edges the caller confirmed.
 `FacetTombstoneSet` shapes results; it does not delete rows and is not access
 control. A host that must withhold data enforces that where it authenticates.
+
+The stubs look rows up by a linear scan: they are for the handful of rows a test
+registers. `StubEmbedder`'s fallback vector counts 28 character classes (ASCII
+letters, digits, anything else) and folds them into the dimension it was given,
+so a very small dimension discriminates less; it is a test vector, not a model.
+`LlmClient` and `Extractor` both have an `extract` of the same shape; neither
+trait extends the other, so a host that implements both writes it once and
+passes whichever the caller asks for.
