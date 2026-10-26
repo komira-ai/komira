@@ -429,5 +429,5 @@ dedup scheme (MinHash with banded LSH) is tuned for names and short strings, not
 
 ## Where is the code?
 
-Parts 1 and 2 of `komira_kg_format` are in [`src/komira_kg_format/`](../../src/komira_kg_format/); every other location above is the one the package will have. Source sizes quoted are measured on the
+Parts 1 and 2 of `komira_kg_format` are in [`src/komira_kg_format/`](../../src/komira_kg_format/) and `komira_kg_mode` is in [`src/komira_kg_mode/`](../../src/komira_kg_mode/); every other location above is the one the package will have. Source sizes quoted are measured on the
 source implementation; re-measure each before its PR, because a count carried in a design drifts.
