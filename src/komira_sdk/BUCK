@@ -11,6 +11,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # row UDF types) included; komira_op_agg_state and what it needs
 # (komira_agg, komira_expr, komira_hash, komira_kernels) are there for the
 # welded test_display_stats only, which tests its statistical accumulators.
+# komira_runtime_paths is likewise for tests only (the scratch directory).
 mojo_library(
     name = "komira_sdk",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),

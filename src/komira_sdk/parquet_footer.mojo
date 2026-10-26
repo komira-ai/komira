@@ -55,7 +55,7 @@ def read_parquet_row_count(path: String) raises -> Int:
         path: Path to the Parquet file.
 
     Returns:
-        Total row count from the footer. Always >= 0.
+        Total row count as the footer records it.
 
     Raises:
         Error if the file cannot be opened, the magic bytes are invalid,
@@ -131,7 +131,7 @@ def read_parquet_footer(path: String) raises -> ParquetFooterSummary:
         path: Path to the Parquet file.
 
     Returns:
-        A `ParquetFooterSummary` with `row_count` (Int >= 0) and an
+        A `ParquetFooterSummary` with `row_count` (the footer's `num_rows`) and an
         embedded Arrow `Schema` (moved out via `.take_schema()`).
 
     Raises:
@@ -185,7 +185,7 @@ def read_parquet_footer_with_cache(
         cache: A `mut` borrow of the session's footer cache.
 
     Returns:
-        A `ParquetFooterSummary` with `row_count` (Int >= 0) and an
+        A `ParquetFooterSummary` with `row_count` (the footer's `num_rows`) and an
         embedded Arrow `Schema` (moved out via `.take_schema()`).
 
     Raises:

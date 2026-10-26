@@ -94,7 +94,7 @@ assert_equal(polars_agg_out_name(AGG_COUNT, False, String()), String("len"))
 statistical accumulators.
 
 `parquet_footer` needs `komira_parquet` (the file reader, the footer parsers
-and the footer cache) and, through it, `komira_fs`, `komira_async`,
-`komira_parquet_api`, `komira_parquet_codec` and `komira_sync`. Its test
+and the footer cache), and directly `komira_fs` and `komira_async`; the
+rest of its `deps` are `komira_parquet`'s closure. Its test
 builds its Parquet file byte by byte under the test's scratch directory
 (`komira_runtime_paths`).

@@ -20,6 +20,10 @@
 #     magic check skipped);
 #   * a footer length larger than the file raises on both (the length not
 #     checked against the file);
+#   * a file shorter than the minimum size (`PAR1` plus four bytes) raises on
+#     both (the size check skipped);
+#   * a valid trailer over a truncated or garbage Thrift body raises on both
+#     (a short or malformed footer accepted as an empty one);
 #   * a path that is not a file raises;
 #   * the cached read returns the same count and schema as the uncached read,
 #     keeps two files apart (a count or schema of one served for the other),
@@ -123,6 +127,21 @@ def _file_bytes(
     return out^
 
 
+def _framed(body: List[UInt8]) -> List[UInt8]:
+    """`PAR1`, padding, `body` as the footer, its length and `PAR1`."""
+    var out: List[UInt8] = [0x50, 0x41, 0x52, 0x31]
+    for i in range(24):
+        out.append(UInt8(i * 7 % 251))
+    for i in range(len(body)):
+        out.append(body[i])
+    var n = len(body)
+    for k in range(4):
+        out.append(UInt8((n >> (8 * k)) & 0xFF))
+    for b in "PAR1".as_bytes():
+        out.append(b)
+    return out^
+
+
 def _write(file_name: String, data: List[UInt8]) raises -> String:
     var path = test_tmpdir() + "/" + file_name
     var fh = open(path, "w")
@@ -163,6 +182,38 @@ def test_oversized_footer_length_raises() raises:
     with assert_raises(contains="invalid metadata length"):
         _ = read_parquet_row_count(path)
     with assert_raises(contains="invalid metadata length"):
+        _ = read_parquet_footer(path)
+
+
+def test_file_shorter_than_minimum_raises() raises:
+    var tiny: List[UInt8] = [0x50, 0x41, 0x52, 0x31, 1, 2, 3, 4]
+    var path = _write("pf_tiny.parquet", tiny)
+    with assert_raises():
+        _ = read_parquet_row_count(path)
+    with assert_raises():
+        _ = read_parquet_footer(path)
+
+
+def test_truncated_thrift_body_raises() raises:
+    var whole = _footer(42, "s")
+    var cut = List[UInt8]()
+    for i in range(20):  # ends inside the schema list
+        cut.append(whole[i])
+    var path = _write("pf_cut.parquet", _framed(cut))
+    with assert_raises():
+        _ = read_parquet_row_count(path)
+    with assert_raises():
+        _ = read_parquet_footer(path)
+
+
+def test_garbage_thrift_body_raises() raises:
+    var junk = List[UInt8]()
+    for _ in range(16):
+        junk.append(0xFF)
+    var path = _write("pf_junk.parquet", _framed(junk))
+    with assert_raises():
+        _ = read_parquet_row_count(path)
+    with assert_raises():
         _ = read_parquet_footer(path)
 
 
