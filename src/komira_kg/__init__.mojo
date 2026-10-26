@@ -1,6 +1,6 @@
 # =============================================================================
-# komira_kg -- the mutable data-graph store and its ingest (part 1: bi-temporal
-#   edges, entity resolution and the source facet).
+# komira_kg -- the mutable data-graph store and its ingest (parts 1 and 2:
+#   bi-temporal edges, entity resolution, the source facet and the model seams).
 # =============================================================================
 #
 #   * bitemporal       -- `WorkingEdge`, `open_edge`,
@@ -15,6 +15,12 @@
 #   * alias_map        -- `AliasMap`, a directed union-find over node ids.
 #   * source_facet     -- the facet an entity carries in its `attrs`, and
 #                         `FacetTombstoneSet`, keyed by source and facet.
+#   * embedder         -- the `Embedder` trait (text to a vector of a reported
+#                         dimension) and `StubEmbedder`.
+#   * extractor        -- the `Extractor` trait (text to an `Extraction`
+#                         without inference), `StubExtractor`, `copy_extraction`.
+#   * llm_client       -- the `LlmClient` trait (extraction, two judgments,
+#                         optional synthesis) and `StubLlmClient`.
 #
 # Depends on `komira_kg_format` and `komira_json` and their closure. Reads no
 # clock and no environment; a time is always an argument.
@@ -59,3 +65,6 @@ from .source_facet import (
     facet_from_attrs,
     facet_source_from_attrs,
 )
+from .embedder import STUB_CHAR_CLASSES, Embedder, StubEmbedder
+from .extractor import Extractor, StubExtractor, copy_extraction
+from .llm_client import LlmClient, StubLlmClient
