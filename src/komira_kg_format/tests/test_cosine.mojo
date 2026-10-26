@@ -10,8 +10,7 @@
 #   non-finite  a NaN or infinite component, and squares that overflow f64, score
 #               0.0 rather than NaN.
 #   width       the SIMD body and the scalar tail agree with a plain scalar
-#               reference for every length 1 to 40 and for 1536 (the default
-#               dimension), 1537 and 1535.
+#               reference for every length 1 to 40 and for 999, 1000 and 1001.
 #   prefix      vectors of different lengths are compared over the shorter one.
 # No test reads a clock or the environment.
 # =============================================================================
@@ -19,7 +18,10 @@
 from std.math import inf, nan, sqrt
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_kg_format import DEFAULT_EMBEDDING_DIM, cosine
+from komira_kg_format import cosine
+
+# A width that is not a multiple of any SIMD lane count.
+comptime _DIM = 1000
 
 
 def _ramp(n: Int, seed: Int) -> List[Float64]:
@@ -133,11 +135,11 @@ def test_simd_body_and_tail_match_the_scalar_reference() raises:
         )
 
 
-def test_default_dimension_and_neighbours() raises:
+def test_wide_vectors_and_neighbours() raises:
     var dims: List[Int] = [
-        DEFAULT_EMBEDDING_DIM - 1,
-        DEFAULT_EMBEDDING_DIM,
-        DEFAULT_EMBEDDING_DIM + 1,
+        _DIM - 1,
+        _DIM,
+        _DIM + 1,
     ]
     for d in range(len(dims)):
         var a = _ramp(dims[d], 3)

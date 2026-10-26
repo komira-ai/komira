@@ -13,7 +13,7 @@
 #               is scored in full, not cut at the first 0x00.
 #   nulls       a null cell scores 0.0 and ranks after every positive score.
 #   non-finite  a row holding a NaN never ranks above an honest row.
-#   scale       a column of the default dimension ranks the same rows.
+#   scale       a 1000-dimension column ranks the same rows.
 # No test reads a clock or the environment.
 # =============================================================================
 
@@ -23,12 +23,14 @@ from std.testing import TestSuite, assert_equal, assert_true
 from komira_arrow.string_array import StringArray
 from komira_buffer.heap_region import HeapRegion
 from komira_kg_format import (
-    DEFAULT_EMBEDDING_DIM,
     Hit,
     cosine_topk,
     pack_embedding,
     pack_embedding_f32,
 )
+
+
+comptime _DIM = 1000
 
 
 def _column(rows: List[List[Float64]]) raises -> StringArray[HeapRegion]:
@@ -192,15 +194,15 @@ def test_a_nan_row_does_not_outrank_honest_rows() raises:
     assert_equal(hits[2].row, 0)
 
 
-def test_default_dimension_column() raises:
+def test_wide_column() raises:
     var rows = List[List[Float64]]()
     for r in range(6):
-        var v = List[Float64](capacity=DEFAULT_EMBEDDING_DIM)
-        for i in range(DEFAULT_EMBEDDING_DIM):
+        var v = List[Float64](capacity=_DIM)
+        for i in range(_DIM):
             v.append(1.0 if i == r else 0.0)
         rows.append(v^)
-    var query = List[Float64](capacity=DEFAULT_EMBEDDING_DIM)
-    for i in range(DEFAULT_EMBEDDING_DIM):
+    var query = List[Float64](capacity=_DIM)
+    for i in range(_DIM):
         query.append(1.0 if i == 4 else 0.0)
     var hits = cosine_topk(_column(rows), query, 2)
     assert_equal(hits[0].row, 4)

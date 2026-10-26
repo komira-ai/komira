@@ -10,8 +10,8 @@
 # EMBEDDING SHAPE: an embedding is one packed-bytes column carried as
 # `LARGE_STRING` (the Parquet writer round-trips a string column and no other
 # variable-length-bytes column). The cell is `dim * 4` little-endian f32 bytes
-# (see `embedding`). `EMB_DIM` is the default dimension, an alias of
-# `DEFAULT_EMBEDDING_DIM`; a graph's own dimension is in its manifest.
+# (see `embedding`). The schemas fix no dimension: the writer takes it as an
+# argument and the snapshot manifest records it (`KgManifestBody.embedding_dim`).
 #
 # NULLABILITY AND SENTINELS: no column is nullable. Keys and the dense adjacency
 # ids are always present. The bi-temporal end columns (`invalid_at`,
@@ -24,12 +24,6 @@
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, Schema, SchemaBuilder
 
-from .embedding import DEFAULT_EMBEDDING_DIM
-
-
-# The default packed embedding dimension: the same constant as
-# `DEFAULT_EMBEDDING_DIM`, not a second one.
-comptime EMB_DIM: Int = DEFAULT_EMBEDDING_DIM
 
 # The value of an open end column (`invalid_at`, `expired_at`): 999_999_999_999.
 # The value is part of the stored data, so it is pinned here and not changed. It
@@ -39,11 +33,9 @@ comptime EMB_DIM: Int = DEFAULT_EMBEDDING_DIM
 # sentinel itself.
 comptime TS_OPEN_SENTINEL: Int64 = 9999_9999_9999
 
-# Per-table schema versions. `episodes` is at 2: version 2 added the sixth
-# column, `capability`. A reader of the version-1 five-column layout folds a
-# missing `capability` column to "" (unfiltered), so a version-1 snapshot stays
-# readable.
-comptime SCHEMA_VERSION_EPISODES: Int64 = 2
+# Per-table schema versions. Every table starts at version 1: a reader refuses
+# a version it does not know.
+comptime SCHEMA_VERSION_EPISODES: Int64 = 1
 comptime SCHEMA_VERSION_ENTITIES: Int64 = 1
 comptime SCHEMA_VERSION_EDGES: Int64 = 1
 comptime SCHEMA_VERSION_COMMUNITIES: Int64 = 1
@@ -53,18 +45,19 @@ comptime SCHEMA_VERSION_ENTITIES_EMBEDDING: Int64 = 1
 
 def episodes_schema() -> Schema:
     """The `episodes` table: raw provenance, append-only. A new snapshot grows
-    the table; a row is never rewritten. `body` is the raw episode text.
+    the table; a row is never rewritten. `body` is the raw episode text, and
+    `facet` is an opaque string the host sets ("" for none).
 
     Returns:
         The six-column schema, version `SCHEMA_VERSION_EPISODES`.
     """
     var sb = SchemaBuilder()
     sb.add_field(Field("uuid", ArrowType.STRING, False))  # stable external id
-    sb.add_field(Field("group_id", ArrowType.STRING, False))  # partition
+    sb.add_field(Field("partition_id", ArrowType.STRING, False))  # opaque partition id
     sb.add_field(Field("body", ArrowType.LARGE_STRING, False))  # raw text
     sb.add_field(Field("ts", ArrowType.INT64, False))  # ingest time
     sb.add_field(Field("valid_at", ArrowType.INT64, False))  # event time
-    sb.add_field(Field("capability", ArrowType.STRING, False))  # "" = unfiltered
+    sb.add_field(Field("facet", ArrowType.STRING, False))  # opaque; "" = none
     return sb.build()
 
 
@@ -78,7 +71,7 @@ def entities_schema() -> Schema:
     var sb = SchemaBuilder()
     sb.add_field(Field("nid", ArrowType.INT64, False))  # dense adjacency id
     sb.add_field(Field("uuid", ArrowType.STRING, False))  # stable external id
-    sb.add_field(Field("group_id", ArrowType.STRING, False))
+    sb.add_field(Field("partition_id", ArrowType.STRING, False))
     sb.add_field(Field("name", ArrowType.STRING, False))
     sb.add_field(Field("name_embedding", ArrowType.LARGE_STRING, False))
     sb.add_field(Field("summary", ArrowType.LARGE_STRING, False))

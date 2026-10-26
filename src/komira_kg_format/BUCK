@@ -7,7 +7,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # carries the graph's embedding dimension), the table schemas, cosine ranking of
 # a packed-embedding column and the structured query result with its JSON wire.
 # It depends on komira_arrow (schemas, string columns) and that package's
-# closure, and reads no clock and no environment.
+# closure, and on komira_json (the result's wire), and reads no clock and no environment.
 #
 # The welded tests: test_embedding packs and unpacks f32 and f64 vectors and
 # holds a cell to a dimension; test_json_value parses valid text and refuses
@@ -30,6 +30,7 @@ mojo_library(
         "//src/komira_compression:komira_compression",
         "//src/komira_counters:komira_counters",
         "//src/komira_host:komira_host",
+        "//src/komira_json:komira_json",
         "//src/komira_libc:komira_libc",
         "//src/komira_lz4:komira_lz4",
         "//src/komira_simd:komira_simd",

@@ -24,13 +24,17 @@ the exact-scan searches. The code graph
 - `schemas`: the Arrow schema of each graph table (`episodes`, `entities`,
   `edges`, the delta-only `edges_tombstone` and `entities_embedding`,
   `communities`, `community_reports`), each table's schema version, and the
-  open-interval sentinel for the bi-temporal end columns.
+  open-interval sentinel for the bi-temporal end columns. A row's partition is
+  an opaque `partition_id` and an episode carries an opaque `facet` string. No
+  schema fixes an embedding dimension: the writer chooses it and the manifest
+  records it.
 - `cosine`: `cosine` of two vectors and `cosine_topk`, the exact top-k of a
   packed-embedding string column against a query vector.
-- `query_result`: `KgQueryResult`, the subgraph, findings, provenance, loci and
-  scores a query returns, with a JSON wire (`serialize`, `deserialize`).
+- `query_result`: `KgQueryResult`, the subgraph, annotations, provenance, loci
+  and scores a query returns, with a JSON wire (`serialize`, `deserialize`).
 
-The package depends on `komira_arrow` (for schemas and string columns), reads no
+The package depends on `komira_arrow` (for schemas and string columns) and
+`komira_json` (for the query result's wire), reads no
 clock and no environment, and no pointer crosses its API.
 
 ## API
@@ -51,13 +55,12 @@ Everything is exported from `komira_kg_format`:
 
 - Schemas: `episodes_schema`, `entities_schema`, `edges_schema`,
   `edges_tombstone_schema`, `entities_embedding_schema`, `communities_schema`,
-  `community_reports_schema`; the `SCHEMA_VERSION_*` constants (episodes is 2,
-  the others 1); `EMB_DIM` (the same constant as `DEFAULT_EMBEDDING_DIM`) and
+  `community_reports_schema`; the `SCHEMA_VERSION_*` constants (all 1) and
   `TS_OPEN_SENTINEL`.
 - Cosine: `cosine`, `cosine_topk` and the `Hit` it returns.
-- Query result: `KgQueryResult`, `ResultNode`, `ResultEdge`, `ResultFinding`,
-  `ProvenanceEntry`, `Locus`, `ScoreEntry`, `SEV_INFO`, `SEV_WARN`, `SEV_ERROR`
-  and `KG_QUERY_RESULT_FORMAT_VERSION` (1).
+- Query result: `KgQueryResult`, `ResultNode`, `ResultEdge`,
+  `ResultAnnotation`, `ProvenanceEntry`, `Locus`, `ScoreEntry` and
+  `KG_QUERY_RESULT_FORMAT_VERSION` (2).
 
 ## Examples
 
@@ -192,8 +195,6 @@ from std.testing import assert_equal, assert_true
 ```mojo
 from komira_arrow.arrow_types import ArrowType
 from komira_kg_format import (
-    DEFAULT_EMBEDDING_DIM,
-    EMB_DIM,
     SCHEMA_VERSION_EPISODES,
     edges_schema,
     entities_schema,
@@ -204,8 +205,7 @@ assert_equal(e.num_columns(), 7)
 assert_equal(e.field_name(4), "name_embedding")
 assert_true(e.field_arrow_type(4) == ArrowType.LARGE_STRING)
 assert_equal(edges_schema().num_columns(), 12)
-assert_equal(SCHEMA_VERSION_EPISODES, Int64(2))
-assert_equal(EMB_DIM, DEFAULT_EMBEDDING_DIM)
+assert_equal(SCHEMA_VERSION_EPISODES, Int64(1))
 ```
 
 `cosine` scores two vectors in [-1, 1]; a zero vector, or a result that is not
@@ -235,7 +235,7 @@ assert_equal(hits[1].row, 2)
 ```
 
 A query result serializes to one JSON object and reads back to the same values;
-a version the reader does not know is refused:
+a version other than the reader's is refused:
 
 <!-- mojo-hidden
 from std.testing import assert_equal, assert_raises, assert_true
@@ -247,19 +247,19 @@ from komira_kg_format import (
     ScoreEntry,
 )
 
-var r = KgQueryResult("retain_and_query", "who knows Ada?")
-r.add_node(ResultNode(7, "Ada", "person", 0.5))
+var r = KgQueryResult("mode-a", "which nodes match?")
+r.add_node(ResultNode(7, "One", "kind-x", 0.5))
 r.add_score(ScoreEntry("cosine", 7, 0.5))
 assert_true(r.is_non_trivial())
 
 var back = KgQueryResult.deserialize(r.serialize())
-assert_equal(back.nodes[0].label, "Ada")
+assert_equal(back.nodes[0].label, "One")
 assert_equal(back.scores[0].value, 0.5)
 assert_equal(back.serialize(), r.serialize())
 
-with assert_raises(contains="> reader-supported 1"):
+with assert_raises(contains="> reader-supported 2"):
     _ = KgQueryResult.deserialize(
-        '{"v":2,"mode":"m","query_label":"l"}'
+        '{"v":3,"mode":"m","query_label":"l"}'
     )
 ```
 

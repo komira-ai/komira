@@ -15,7 +15,7 @@
 #                       packed-embedding column.
 #   * query_result   -- `KgQueryResult` and its record types, with a JSON wire.
 #
-# Depends on `komira_arrow` (and its closure), and reads no clock or environment.
+# Depends on `komira_arrow` (and its closure) and `komira_json`, and reads no clock or environment.
 # =============================================================================
 
 from .embedding import (
@@ -45,7 +45,6 @@ from .manifest_body import (
     KgTableEntry,
 )
 from .schemas import (
-    EMB_DIM,
     SCHEMA_VERSION_COMMUNITIES,
     SCHEMA_VERSION_COMMUNITY_REPORTS,
     SCHEMA_VERSION_EDGES,
@@ -68,10 +67,7 @@ from .query_result import (
     Locus,
     ProvenanceEntry,
     ResultEdge,
-    ResultFinding,
+    ResultAnnotation,
     ResultNode,
-    SEV_ERROR,
-    SEV_INFO,
-    SEV_WARN,
     ScoreEntry,
 )

@@ -7,10 +7,9 @@
 #               edges (12), edges_tombstone (5), entities_embedding (2),
 #               communities (4), community_reports (6).
 #   nullability no column of any table is nullable.
-#   versions    every SCHEMA_VERSION_* constant has its stated value (episodes is
-#               2, the rest 1), and each is a value a manifest entry can carry.
-#   constants   EMB_DIM is DEFAULT_EMBEDDING_DIM (one constant, not a second),
-#               and TS_OPEN_SENTINEL is the stated open-interval value.
+#   versions    every SCHEMA_VERSION_* constant is 1, and is a value a manifest
+#               entry can carry.
+#   constants   TS_OPEN_SENTINEL is the stated open-interval value.
 #   shared      the embedding columns are LARGE_STRING in every table that has
 #               one, and a delta-only projection repeats the entities columns it
 #               projects with the same type.
@@ -22,8 +21,6 @@ from std.testing import TestSuite, assert_equal, assert_true
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Schema
 from komira_kg_format import (
-    DEFAULT_EMBEDDING_DIM,
-    EMB_DIM,
     KgTableEntry,
     SCHEMA_VERSION_COMMUNITIES,
     SCHEMA_VERSION_COMMUNITY_REPORTS,
@@ -63,7 +60,7 @@ def test_episodes_columns() raises:
     _expect(
         episodes_schema(),
         "episodes",
-        ["uuid", "group_id", "body", "ts", "valid_at", "capability"],
+        ["uuid", "partition_id", "body", "ts", "valid_at", "facet"],
         [
             ArrowType.STRING,
             ArrowType.STRING,
@@ -79,7 +76,7 @@ def test_entities_columns() raises:
     _expect(
         entities_schema(),
         "entities",
-        ["nid", "uuid", "group_id", "name", "name_embedding", "summary", "attrs"],
+        ["nid", "uuid", "partition_id", "name", "name_embedding", "summary", "attrs"],
         [
             ArrowType.INT64,
             ArrowType.STRING,
@@ -182,7 +179,7 @@ def test_community_reports_columns() raises:
 
 
 def test_schema_versions_pinned() raises:
-    assert_equal(SCHEMA_VERSION_EPISODES, Int64(2))
+    assert_equal(SCHEMA_VERSION_EPISODES, Int64(1))
     assert_equal(SCHEMA_VERSION_ENTITIES, Int64(1))
     assert_equal(SCHEMA_VERSION_EDGES, Int64(1))
     assert_equal(SCHEMA_VERSION_COMMUNITIES, Int64(1))
@@ -193,12 +190,7 @@ def test_schema_versions_pinned() raises:
 def test_version_is_carried_by_a_manifest_entry() raises:
     # The version a schema constant names is the one a manifest entry stores.
     var e = KgTableEntry("episodes", "objects/a", SCHEMA_VERSION_EPISODES, 3)
-    assert_equal(e.schema_version, Int64(2))
-
-
-def test_emb_dim_is_the_default_dimension() raises:
-    assert_equal(EMB_DIM, DEFAULT_EMBEDDING_DIM)
-    assert_equal(EMB_DIM, 1536)
+    assert_equal(e.schema_version, Int64(1))
 
 
 def test_open_sentinel_value() raises:

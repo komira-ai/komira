@@ -4,17 +4,19 @@
 #
 #   layout      a result serializes to exactly the stated text: the version
 #               stamp first, then mode, query_label, answer and the six
-#               collections in order, each record with its fields in order.
-#   escapes     the short escapes for quote, backslash, newline, return and tab;
-#               every other byte below 0x20 as \u00XX; multi-byte UTF-8 raw. Each
+#               collections (nodes, edges, annotations, provenance, loci,
+#               scores) in order, each record with its fields in order.
+#   escapes     the short escapes for quote, backslash, newline, return, tab, backspace and
+#               form feed; every other byte below 0x20 as \u00XX; multi-byte UTF-8 raw. Each
 #               control character survives a round trip (a raw one would make
 #               the text unreadable).
 #   non-finite  a NaN or infinite score or value is written as 0.0, so the text
 #               stays valid JSON and reads back.
-#   version     a version above the reader's, zero and a negative one are
-#               refused; a missing version reads as 1.
+#   version     a version above the reader's, the previous one, zero and a
+#               negative one are refused; a missing version reads as current;
+#               the version-1 key names are not read.
 #   tolerance   a missing collection reads as empty, a missing answer as "", and
-#               a repeated provenance doc_id keeps the first.
+#               a repeated provenance source_id keeps the first.
 #   refusals    malformed JSON, a root that is not an object, a missing mode or
 #               query_label, and a record missing a field, each raise.
 # No test reads a clock or the environment.
@@ -28,30 +30,30 @@ from komira_kg_format import (
     Locus,
     ProvenanceEntry,
     ResultEdge,
-    ResultFinding,
+    ResultAnnotation,
     ResultNode,
     ScoreEntry,
 )
 
 
 def test_exact_text_of_a_small_result() raises:
-    var r = KgQueryResult("analyze", "q1")
+    var r = KgQueryResult("mode-a", "q1")
     r.set_answer("a")
-    r.add_node(ResultNode(7, "Ada", "person", 0.5))
+    r.add_node(ResultNode(7, "One", "kind-x", 0.5))
     r.add_edge(ResultEdge(7, 8, "knows", 100, "d1"))
-    r.add_finding(ResultFinding("s1", 2, "dangling_xref", "why"))
+    r.add_annotation(ResultAnnotation("s1", 2, "kind-a", "why"))
     r.add_provenance(ProvenanceEntry("d1", "notes"))
     r.add_locus(Locus("d1", "s1", -1))
     r.add_score(ScoreEntry("cosine", 7, 0.25))
     var want = String(
-        '{"v":1,"mode":"analyze","query_label":"q1","answer":"a",'
-        '"nodes":[{"id":7,"label":"Ada","type":"person","score":0.5}],'
+        '{"v":2,"mode":"mode-a","query_label":"q1","answer":"a",'
+        '"nodes":[{"id":7,"label":"One","type":"kind-x","score":0.5}],'
         '"edges":[{"src":7,"dst":8,"predicate":"knows","valid_at":100,'
-        '"doc_id":"d1"}],'
-        '"findings":[{"locus":"s1","severity":2,"kind":"dangling_xref",'
+        '"source_id":"d1"}],'
+        '"annotations":[{"locus":"s1","severity":2,"kind":"kind-a",'
         '"rationale":"why"}],'
-        '"provenance":[{"doc_id":"d1","source":"notes"}],'
-        '"loci":[{"doc_id":"d1","section":"s1","offset":-1}],'
+        '"provenance":[{"source_id":"d1","source":"notes"}],'
+        '"loci":[{"source_id":"d1","anchor":"s1","offset":-1}],'
         '"scores":[{"name":"cosine","target_id":7,"value":0.25}]}'
     )
     assert_equal(r.serialize(), want)
@@ -62,8 +64,8 @@ def test_empty_result_text() raises:
     assert_equal(
         r.serialize(),
         String(
-            '{"v":1,"mode":"m","query_label":"l","answer":"",'
-            '"nodes":[],"edges":[],"findings":[],"provenance":[],'
+            '{"v":2,"mode":"m","query_label":"l","answer":"",'
+            '"nodes":[],"edges":[],"annotations":[],"provenance":[],'
             '"loci":[],"scores":[]}'
         ),
     )
@@ -90,7 +92,8 @@ def test_control_characters_are_escaped_and_survive() raises:
         )
     assert_true(text.find(String("\\u0001")) >= 0)
     assert_true(text.find(String("\\u001f")) >= 0)
-    assert_true(text.find(String("\\u0008")) >= 0)
+    assert_true(text.find(String("\\b")) >= 0)
+    assert_true(text.find(String("\\f")) >= 0)
     var back = KgQueryResult.deserialize(text)
     assert_equal(back.query_label, label)
     assert_equal(back.serialize(), text)
@@ -110,28 +113,40 @@ def test_non_finite_scores_are_written_as_zero() raises:
 
 def test_version_gate() raises:
     var tail = ',"mode":"m","query_label":"l"}'
-    with assert_raises(contains="version 2 > reader-supported 1"):
-        _ = KgQueryResult.deserialize('{"v":2' + tail)
-    with assert_raises(contains="version 0 is not a version"):
+    with assert_raises(contains="version 3 > reader-supported 2"):
+        _ = KgQueryResult.deserialize('{"v":3' + tail)
+    with assert_raises(contains="version 1 < 2"):
+        _ = KgQueryResult.deserialize('{"v":1' + tail)
+    with assert_raises(contains="version 0 < 2"):
         _ = KgQueryResult.deserialize('{"v":0' + tail)
-    with assert_raises(contains="version -1 is not a version"):
+    with assert_raises(contains="version -1 < 2"):
         _ = KgQueryResult.deserialize('{"v":-1' + tail)
-    # A missing version reads as 1; version 1 reads.
+    # A missing version reads as the current one; the current one reads.
     assert_equal(KgQueryResult.deserialize('{"mode":"m","query_label":"l"}').mode, "m")
-    assert_equal(KgQueryResult.deserialize('{"v":1' + tail).query_label, "l")
+    assert_equal(KgQueryResult.deserialize('{"v":2' + tail).query_label, "l")
+
+
+def test_old_key_names_are_not_read() raises:
+    # The version-1 layout named these keys differently; a version 2 reader
+    # does not take them for the current ones.
+    with assert_raises(contains="no key 'source_id'"):
+        _ = KgQueryResult.deserialize(
+            '{"v":2,"mode":"m","query_label":"l","edges":['
+            '{"src":1,"dst":2,"predicate":"p","valid_at":0,"doc_id":"d"}]}'
+        )
 
 
 def test_missing_collections_and_answer_read_as_empty() raises:
-    var r = KgQueryResult.deserialize('{"v":1,"mode":"m","query_label":"l"}')
+    var r = KgQueryResult.deserialize('{"v":2,"mode":"m","query_label":"l"}')
     assert_equal(r.answer, "")
     assert_equal(len(r.nodes), 0)
     assert_equal(len(r.scores), 0)
 
 
-def test_repeated_provenance_doc_id_keeps_the_first() raises:
+def test_repeated_provenance_source_id_keeps_the_first() raises:
     var r = KgQueryResult.deserialize(
-        '{"v":1,"mode":"m","query_label":"l","provenance":['
-        '{"doc_id":"d","source":"one"},{"doc_id":"d","source":"two"}]}'
+        '{"v":2,"mode":"m","query_label":"l","provenance":['
+        '{"source_id":"d","source":"one"},{"source_id":"d","source":"two"}]}'
     )
     assert_equal(len(r.provenance), 1)
     assert_equal(r.provenance[0].source, "one")
@@ -141,18 +156,18 @@ def test_refusals() raises:
     with assert_raises():
         _ = KgQueryResult.deserialize("")
     with assert_raises():
-        _ = KgQueryResult.deserialize('{"v":1,')
+        _ = KgQueryResult.deserialize('{"v":2,')
     with assert_raises(contains="root is not a JSON object"):
         _ = KgQueryResult.deserialize("[1,2]")
-    with assert_raises(contains="missing key 'mode'"):
-        _ = KgQueryResult.deserialize('{"v":1,"query_label":"l"}')
-    with assert_raises(contains="missing key 'query_label'"):
-        _ = KgQueryResult.deserialize('{"v":1,"mode":"m"}')
-    with assert_raises(contains="missing key 'label'"):
+    with assert_raises(contains="no key 'mode'"):
+        _ = KgQueryResult.deserialize('{"v":2,"query_label":"l"}')
+    with assert_raises(contains="no key 'query_label'"):
+        _ = KgQueryResult.deserialize('{"v":2,"mode":"m"}')
+    with assert_raises(contains="no key 'label'"):
         _ = KgQueryResult.deserialize(
             '{"mode":"m","query_label":"l","nodes":[{"id":1,"type":"t","score":0}]}'
         )
-    with assert_raises(contains="not a number"):
+    with assert_raises(contains="expected a number"):
         _ = KgQueryResult.deserialize(
             '{"mode":"m","query_label":"l","scores":[{"name":"n","target_id":1,"value":"x"}]}'
         )
