@@ -11,9 +11,9 @@ What the package emits (format-version 2):
     per-file statistics (record count, lower and upper bounds, null counts).
   * the version-hint.text pointer to the latest metadata version.
 
-This part holds the table model: types and schema, single-value bound
-serialization, partition transforms and the typed row cell codec. The
-metadata.json emitter, the manifests, the reader and the table writer follow.
+This part holds the metadata layer: the metadata.json emitter, the Avro
+manifest encoders and decoders, the current-version lookup and the snapshot
+summary reader, on top of the table model. The table reader and writer follow.
 """
 
 from .iceberg_types import (
@@ -70,6 +70,62 @@ from .iceberg_partition import (
     route_rows_to_partitions,
 )
 
+from .iceberg_metadata_json import (
+    SnapshotInfo,
+    SummaryKV,
+    schema_json,
+    unpartitioned_spec_json,
+    partition_spec_json,
+    partition_spec_fields_json,
+    delete_spec_of,
+    unsorted_order_json,
+    name_mapping_json,
+    snapshot_json,
+    build_table_metadata_json,
+)
+
+from .iceberg_summary import (
+    read_current_snapshot_summary,
+    summary_value_for,
+    parse_summary_object,
+)
+
+from .iceberg_version import (
+    metadata_dir,
+    pointer_key,
+    metadata_json_key,
+    read_hint_version,
+    version_exists,
+    current_version,
+)
+
+from .iceberg_avro_manifest import (
+    ICE_CONTENT_DATA,
+    ICE_CONTENT_POSITION_DELETES,
+    ICE_CONTENT_EQUALITY_DELETES,
+    ICE_MANIFEST_CONTENT_DATA,
+    ICE_MANIFEST_CONTENT_DELETES,
+    ICE_STATUS_EXISTING,
+    ICE_STATUS_ADDED,
+    ICE_STATUS_DELETED,
+    ICE_FILE_FORMAT_PARQUET,
+    ICE_FILE_FORMAT_AVRO,
+    manifest_entry_schema_json,
+    manifest_file_schema_json,
+    ManifestFileEntry,
+    encode_manifest_entry,
+    encode_manifest_file_record,
+    build_manifest_file,
+    avro_field_name,
+    build_manifest_list,
+)
+
+from .iceberg_avro_manifest_read import (
+    ManifestEntry,
+    read_manifest_list,
+    read_manifest_entries,
+)
+
 from .iceberg_row_value import (
     RowCell,
     make_boolean_cell,
@@ -89,4 +145,5 @@ from .iceberg_row_value import (
     col_types_of,
     build_data_file,
     read_data_file,
+    read_checked_string,
 )

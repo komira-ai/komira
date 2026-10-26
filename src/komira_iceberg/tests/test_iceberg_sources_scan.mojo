@@ -34,10 +34,16 @@ def _read(name: String) raises -> String:
 
 comptime _FILES: List[String] = [
     "__init__.mojo",
+    "iceberg_avro_manifest.mojo",
+    "iceberg_avro_manifest_read.mojo",
     "iceberg_bounds.mojo",
+    "iceberg_json_scan.mojo",
+    "iceberg_metadata_json.mojo",
     "iceberg_partition.mojo",
     "iceberg_row_value.mojo",
+    "iceberg_summary.mojo",
     "iceberg_types.mojo",
+    "iceberg_version.mojo",
 ]
 
 
@@ -131,7 +137,7 @@ def test_no_raw_pointer_in_a_public_signature() raises:
                 files[i] + ": a public signature names a raw pointer:\n" + sigs[j],
             )
     # Not vacuous: the public surface was found.
-    assert_true(seen >= 30, "found only " + String(seen) + " public signatures")
+    assert_true(seen >= 60, "found only " + String(seen) + " public signatures")
 
 
 def test_no_address_from_an_integer() raises:
@@ -182,6 +188,7 @@ def test_imports_only_its_deps() raises:
         "komira_avro",
         "komira_buffer",
         "komira_iceberg",
+        "komira_objectstore",
         "komira_rowcell",
     ]
     var files = materialize[_FILES]()
@@ -198,8 +205,8 @@ def test_imports_only_its_deps() raises:
                 if root == allowed[j]:
                     ok = True
             assert_true(ok, files[i] + " imports " + root + ", not a dep")
-    # Not vacuous: the row codec imports komira_avro, the bounds komira_arrow.
-    assert_true(seen >= 8, "found only " + String(seen) + " komira imports")
+    # Not vacuous: the encoders import komira_avro, the bounds komira_arrow.
+    assert_true(seen >= 15, "found only " + String(seen) + " komira imports")
 
 
 def test_the_scan_saw_the_package() raises:
@@ -217,9 +224,9 @@ def test_the_scan_saw_the_package() raises:
     # Not vacuous: each file is the package's, whole.
     assert_equal(_count(_read("iceberg_types.mojo"), "\ndef json_escape_string("), 1)
     assert_equal(_count(_read("iceberg_partition.mojo"), "\ndef murmur3_x86_32("), 1)
-    assert_equal(_count(_read("iceberg_bounds.mojo"), "\ndef bound_bytes("), 1)
-    assert_equal(_count(_read("iceberg_row_value.mojo"), "\ndef reconcile_cell_type("), 1)
-    assert_true(_read("iceberg_types.mojo").byte_length() > 10000)
+    assert_equal(_count(_read("iceberg_avro_manifest.mojo"), "\ndef build_manifest_list("), 1)
+    assert_equal(_count(_read("iceberg_avro_manifest_read.mojo"), "\ndef read_manifest_entries("), 1)
+    assert_true(_read("iceberg_avro_manifest.mojo").byte_length() > 10000)
 
 
 def main() raises:
