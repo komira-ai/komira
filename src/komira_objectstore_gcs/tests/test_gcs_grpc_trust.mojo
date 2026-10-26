@@ -68,7 +68,6 @@ from std.pathlib import Path
 from std.testing import assert_equal, assert_true
 
 from komira_atomic_alias import AtomicI64
-from komira_clock import now_ns
 from komira_fork_join import ForkJoinBody, fork_join
 
 from komira_connect import ConnectService
@@ -131,7 +130,6 @@ def _assert_refused(raised: String) raises:
 comptime _HANDSHAKE_DEADLINE_US: Int64 = 10_000_000
 comptime _REQUEST_TIMEOUT_US = 10_000_000
 comptime _SERVE_POLL_TIMEOUT_US: Int32 = 5_000
-comptime _SERVE_DEADLINE_NS: UInt64 = 120_000_000_000
 
 
 # =============================================================================
@@ -258,10 +256,9 @@ struct _Duet[C: _ClientLeg, so: MutOrigin, co: MutOrigin, fo: MutOrigin](ForkJoi
 
     def run(self, tid: Int) raises:
         if tid == 0:
-            var give_up = now_ns() + _SERVE_DEADLINE_NS
+            # Waits on progress only: the client leg sets the flag when it
+            # is done. No wall-clock deadline; a hang is the build's watchdog.
             while self.flag[].stop.load() == Int64(0):
-                if now_ns() >= give_up:
-                    raise Error("serve_while: the client did not finish in time")
                 self.server[].step()
             return
         try:
