@@ -20,8 +20,16 @@
 #     magic check skipped);
 #   * a footer length larger than the file raises on both (the length not
 #     checked against the file);
-#   * a file shorter than the minimum size (`PAR1` plus four bytes) raises on
-#     both (the size check skipped);
+#   * a file shorter than the minimum size (12 bytes: leading magic, length and
+#     trailing magic) raises on both, at 8 and at 11 bytes (the size check
+#     skipped or off by one);
+#   * a footer with no schema (a 12-byte file whose footer is one garbage byte,
+#     a footer holding only a version, a footer with an empty schema list)
+#     raises on all entry points (garbage read as an empty file);
+#   * a negative `num_rows` raises (a row count below zero returned);
+#   * a footer whose schema holds a group, or a repeated leaf, raises on every
+#     schema-reading entry (a group read as a string column with its children
+#     hoisted, a repeated leaf read as a plain column);
 #   * a valid trailer over a truncated or garbage Thrift body raises on both
 #     (a short or malformed footer accepted as an empty one);
 #   * a path that is not a file raises;
@@ -142,6 +150,40 @@ def _framed(body: List[UInt8]) -> List[UInt8]:
     return out^
 
 
+def _leaf(mut f: List[UInt8], type_code: Int, repetition: Int, name: String):
+    f.append(0x15)
+    _zz(f, type_code)
+    f.append(0x25)
+    _zz(f, repetition)
+    _name(f, 0x18, name)
+    f.append(0x00)
+
+
+def _group(mut f: List[UInt8], repetition: Int, name: String, children: Int):
+    f.append(0x35)
+    _zz(f, repetition)
+    _name(f, 0x18, name)
+    f.append(0x15)
+    _zz(f, children)
+    f.append(0x00)
+
+
+def _footer_with(elements: List[UInt8], count: Int, num_rows: Int) -> List[UInt8]:
+    """FileMetaData whose schema list is `count` already-encoded `elements`."""
+    var f: List[UInt8] = [0x15]
+    _zz(f, 2)
+    f.append(0x19)
+    f.append(UInt8((count << 4) | 0x0C))
+    for i in range(len(elements)):
+        f.append(elements[i])
+    f.append(0x16)
+    _zz(f, num_rows)
+    f.append(0x19)
+    f.append(0x0C)
+    f.append(0x00)
+    return f^
+
+
 def _write(file_name: String, data: List[UInt8]) raises -> String:
     var path = test_tmpdir() + "/" + file_name
     var fh = open(path, "w")
@@ -192,6 +234,98 @@ def test_file_shorter_than_minimum_raises() raises:
         _ = read_parquet_row_count(path)
     with assert_raises():
         _ = read_parquet_footer(path)
+
+
+def test_eleven_byte_file_raises() raises:
+    var eleven: List[UInt8] = [0x50, 0x41, 0x52, 0x31, 1, 0, 0, 0, 0x50, 0x41, 0x52]
+    var path = _write("pf_eleven.parquet", eleven)
+    with assert_raises(contains="file too small"):
+        _ = read_parquet_row_count(path)
+    with assert_raises(contains="file too small"):
+        _ = read_parquet_footer(path)
+    var cache = ParquetMetadataCache()
+    with assert_raises(contains="file too small"):
+        _ = read_parquet_footer_with_cache(path, cache)
+
+
+def _assert_no_schema_everywhere(path: String) raises:
+    with assert_raises(contains="no schema"):
+        _ = read_parquet_row_count(path)
+    with assert_raises(contains="no schema"):
+        _ = read_parquet_footer(path)
+    var cache = ParquetMetadataCache()
+    with assert_raises(contains="no schema"):
+        _ = read_parquet_footer_with_cache(path, cache)
+    var fs = _Fs.new()
+    with assert_raises(contains="no schema"):
+        _ = read_parquet_footer_with_cache_via_fs(path, fs, cache)
+
+
+def test_twelve_byte_file_with_garbage_footer_raises() raises:
+    # PAR1, length 1, PAR1: the one footer byte is the leading magic's `1`.
+    var twelve: List[UInt8] = [0x50, 0x41, 0x52, 0x31, 1, 0, 0, 0, 0x50, 0x41, 0x52, 0x31]
+    _assert_no_schema_everywhere(_write("pf_twelve.parquet", twelve))
+    _assert_no_schema_everywhere(_write("pf_one_byte.parquet", _framed([0x31])))
+
+
+def test_footer_without_schema_raises() raises:
+    var only_version: List[UInt8] = [0x15]
+    _zz(only_version, 2)
+    only_version.append(0x00)
+    _assert_no_schema_everywhere(_write("pf_noschema.parquet", _framed(only_version)))
+    var empty = List[UInt8]()
+    _assert_no_schema_everywhere(
+        _write("pf_emptyschema.parquet", _framed(_footer_with(empty, 0, 5)))
+    )
+
+
+def test_negative_num_rows_raises() raises:
+    var path = _write("pf_neg.parquet", _file_bytes(-5, "s"))
+    with assert_raises(contains="negative num_rows"):
+        _ = read_parquet_row_count(path)
+    with assert_raises(contains="negative num_rows"):
+        _ = read_parquet_footer(path)
+    var cache = ParquetMetadataCache()
+    with assert_raises(contains="negative num_rows"):
+        _ = read_parquet_footer_with_cache(path, cache)
+    var fs = _Fs.new()
+    with assert_raises(contains="negative num_rows"):
+        _ = read_parquet_footer_with_cache_via_fs(path, fs, cache)
+
+
+def _assert_not_flat(path: String, column: String) raises:
+    with assert_raises(contains="only flat files"):
+        _ = read_parquet_footer(path)
+    var cache = ParquetMetadataCache()
+    with assert_raises(contains=column):
+        _ = read_parquet_footer_with_cache(path, cache)
+    var fs = _Fs.new()
+    with assert_raises(contains="only flat files"):
+        _ = read_parquet_footer_with_cache_via_fs(path, fs, cache)
+
+
+def test_nested_group_schema_raises() raises:
+    var e = List[UInt8]()
+    _name(e, 0x48, "schema")
+    e.append(0x15)
+    _zz(e, 1)
+    e.append(0x00)
+    _group(e, 0, "g", 2)
+    _leaf(e, 1, 0, "x")
+    _leaf(e, 2, 0, "y")
+    var path = _write("pf_group.parquet", _framed(_footer_with(e, 4, 3)))
+    _assert_not_flat(path, "g")
+
+
+def test_repeated_leaf_schema_raises() raises:
+    var e = List[UInt8]()
+    _name(e, 0x48, "schema")
+    e.append(0x15)
+    _zz(e, 1)
+    e.append(0x00)
+    _leaf(e, 1, 2, "r")
+    var path = _write("pf_repeated.parquet", _framed(_footer_with(e, 2, 3)))
+    _assert_not_flat(path, "r")
 
 
 def test_truncated_thrift_body_raises() raises:

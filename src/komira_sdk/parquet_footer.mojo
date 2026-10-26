@@ -15,6 +15,12 @@
 #     summary, served from a session's `ParquetMetadataCache`; the second reads
 #     a cache miss through the given file system (an object store).
 #
+# Flat files only: a schema holding a group (nested) column or a repeated
+# column is refused, never read as a flat one. A footer with no schema, or with
+# a negative `num_rows`, is refused too. A footer that omits `num_rows` but
+# has a schema reads as 0 rows: the light parse cannot tell an absent field
+# from a zero.
+#
 # `ParquetFooterSummary` carries the pair. `Schema` is move-only, so the
 # summary holds it in an `Optional` and `take_schema()` moves it out.
 # =============================================================================
@@ -29,6 +35,34 @@ from komira_parquet.footer_header import parse_metadata_header_and_schema
 from komira_parquet.parquet_source_helpers import _build_schema_from_elements
 from komira_parquet.runtime_footer_cache import ParquetMetadataCache
 from komira_parquet.thrift_compact import parse_metadata_summary
+from komira_parquet_api.metadata import SchemaElement
+from komira_parquet_api.types import FieldRepetitionType
+
+
+def _check_footer(row_count: Int, schema_elements: List[SchemaElement]) raises:
+    """Refuse a footer this module cannot read as a flat file: no schema, a
+    negative `num_rows`, or (after the root) a group or repeated element."""
+    if len(schema_elements) == 0:
+        raise Error("parquet footer: no schema in the footer")
+    _check_row_count(row_count)
+    for c in range(1, len(schema_elements)):
+        ref e = schema_elements[c]
+        var repeated = False
+        if e.repetition_type:
+            repeated = e.repetition_type.value() == FieldRepetitionType.REPEATED
+        if e.num_children > 0 or repeated:
+            raise Error(
+                "parquet footer: column '"
+                + e.name
+                + "' is nested or repeated; only flat files are read"
+            )
+
+
+def _check_row_count(row_count: Int) raises:
+    if row_count < 0:
+        raise Error(
+            "parquet footer: negative num_rows (" + String(row_count) + ")"
+        )
 
 
 # =============================================================================
@@ -65,6 +99,9 @@ def read_parquet_row_count(path: String) raises -> Int:
     var summary = parse_metadata_summary(
         reader.metadata_bytes.view_range_ro(0, reader.metadata_length)
     )
+    if summary.num_schema_elements == 0:
+        raise Error("parquet footer: no schema in the footer")
+    _check_row_count(summary.num_rows)
     return summary.num_rows
 
 
@@ -134,15 +171,23 @@ def read_parquet_footer(path: String) raises -> ParquetFooterSummary:
         A `ParquetFooterSummary` with `row_count` (the footer's `num_rows`) and an
         embedded Arrow `Schema` (moved out via `.take_schema()`).
 
+    Flat files only: a schema with a group (nested) or repeated column is
+    refused. The light parse stops before `row_groups`, so a garbage
+    `row_groups` body does not fail here although the cached entry points
+    (which parse the whole footer) raise on the same file.
+
     Raises:
         Error if the file cannot be opened, the magic bytes are invalid,
-        the metadata length is malformed, or Thrift parsing fails.
+        the metadata length is malformed, Thrift parsing fails, the footer has
+        no schema, `num_rows` is negative, or the schema is nested or
+        repeated. A footer without a `num_rows` field reads as 0 rows.
     """
     var reader = ParquetFileReader[LocalFs[NoopSink]].open_metadata_only(path)
     var hs = parse_metadata_header_and_schema(
         reader.metadata_bytes.view_range_ro(0, reader.metadata_length)
     )
     var row_count = hs.num_rows
+    _check_footer(row_count, hs.schema_elements)
     var schema = _build_schema_from_elements(hs.schema_elements)
     return ParquetFooterSummary(row_count, schema^)
 
@@ -180,6 +225,13 @@ def read_parquet_footer_with_cache(
     row group's every column's `Statistics`) that `get_or_parse(path)`
     would deep-copy. A hit and a miss count the same as a full lookup.
 
+    A hit never re-checks the file: a file rewritten under a live cache is
+    served stale (the old row count and schema) until `cache.invalidate(path)`.
+    A miss parses the whole footer, so a garbage `row_groups` body raises here
+    although the uncached `read_parquet_footer` (light parse) succeeds. Flat
+    files only, as `read_parquet_footer`; a footer refused by that check may
+    already sit in the cache and is refused again on every read.
+
     Args:
         path: Path to the Parquet file.
         cache: A `mut` borrow of the session's footer cache.
@@ -192,12 +244,12 @@ def read_parquet_footer_with_cache(
         Error from the cache's lookup (file open / magic-byte / Thrift-parse
         errors). Mirrors `read_parquet_footer`'s contract.
     """
-    from komira_parquet_api.metadata import SchemaElement
     var fs = LocalFs[NoopSink].new()
     var schema_elements = List[SchemaElement]()
     var row_count = cache.get_or_parse_summary_via_fs[LocalFs[NoopSink]](
         path, fs, schema_elements
     )
+    _check_footer(row_count, schema_elements)
     var schema = _build_schema_from_elements(schema_elements)
     return ParquetFooterSummary(row_count, schema^)
 
@@ -215,11 +267,16 @@ def read_parquet_footer_with_cache_via_fs[FS: FileSystem](
     Same `(row_count, schema)` summary contract and same cache hit/miss
     semantics as the local-file `read_parquet_footer_with_cache`; the only
     difference is the byte source for the cache-miss footer fetch.
+
+    A hit never re-checks the file: a file rewritten under a live cache is
+    served stale until `cache.invalidate(path)`. A miss parses the whole
+    footer, so a garbage `row_groups` body raises here although the uncached
+    `read_parquet_footer` succeeds. Flat files only.
     """
-    from komira_parquet_api.metadata import SchemaElement
     var schema_elements = List[SchemaElement]()
     var row_count = cache.get_or_parse_summary_via_fs[FS](
         path, fs, schema_elements
     )
+    _check_footer(row_count, schema_elements)
     var schema = _build_schema_from_elements(schema_elements)
     return ParquetFooterSummary(row_count, schema^)

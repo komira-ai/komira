@@ -434,6 +434,53 @@ def decode_edge_closures(batch: RecordBatch) raises -> List[EdgeClosure]:
     return out^
 
 
+struct ProjectionRows(Movable):
+    """The rows of an `entities_embedding` delta batch: node ids and their
+    vectors, in row order."""
+
+    var nids: List[Int64]
+    var vectors: List[List[Float64]]
+
+    def __init__(out self):
+        self.nids = List[Int64]()
+        self.vectors = List[List[Float64]]()
+
+
+def decode_embedding_projection(
+    batch: RecordBatch, embedding_dim: Int
+) raises -> ProjectionRows:
+    """The rows of an `entities_embedding` delta batch.
+
+    Args:
+        batch: The decoded table.
+        embedding_dim: The graph's dimension; every cell must be exactly this
+            many components.
+
+    Raises:
+        On a missing or mistyped column, a null cell, a node id outside
+        `[0, Int64.MAX)`, or a cell of another length.
+    """
+    var t = TABLE_ENTITIES_EMBEDDING
+    var texts = List[Int]()
+    texts.append(1)
+    var ints = List[Int]()
+    ints.append(0)
+    _expect_columns(batch, t, texts, ints, 2)
+    var nid_col = batch.column_as_primitive_int64(0)
+    var emb_col = batch.column_as_string(1)
+    var out = ProjectionRows()
+    for r in range(batch.num_rows()):
+        var nid = _int(nid_col, r, t)
+        _check_nid(nid, t)
+        if emb_col.is_null(r):
+            raise Error("table " + t + ": null embedding cell, row " + String(r))
+        out.vectors.append(
+            unpack_embedding_checked(emb_col.get_span(r), embedding_dim)
+        )
+        out.nids.append(nid)
+    return out^
+
+
 # -----------------------------------------------------------------------------
 # Rows to batches.
 # -----------------------------------------------------------------------------

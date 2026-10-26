@@ -1,8 +1,8 @@
 # =============================================================================
-# komira_kg -- the mutable data-graph store and its ingest (parts 1 to 4:
+# komira_kg -- the mutable data-graph store and its ingest (parts 1 to 5:
 #   bi-temporal edges, entity resolution, the source facet, the model seams, the
 #   rule-driven extractor, the source cursor store and the in-memory working
-#   set).
+#   set, erasure, the warm cache, compaction and embedding top-k).
 # =============================================================================
 #
 #   * bitemporal       -- `WorkingEdge`, `open_edge`,
@@ -37,6 +37,20 @@
 #                         the snapshot's table batches and working rows.
 #   * working_set      -- `SnapshotWorkingSet`: load a snapshot or a delta chain,
 #                         apply changes, write back a base or only the delta.
+#   * rewrite          -- `base_tables_of`, `append_index_bootstrap`,
+#                         `finish_rewrite`, `repair_missing_bootstrap`: the
+#                         base and the index delta a rewrite of a whole graph
+#                         writes, and finishing or repairing one.
+#   * erase            -- `erase_partition`, `erase_kg_partition`: remove one
+#                         partition's rows and embeddings (`erase_kg_partition_at`
+#                         and `erase_commit_at` hold the erasure open).
+#   * warm_cache       -- `WarmMergedCache`: the merged graph kept in memory,
+#                         keyed by the head; lent read-only.
+#   * compaction       -- `compact_chain`, `compact_chain_at`,
+#                         `maybe_compact_chain`: fold a delta chain into a base
+#                         (`compact_commit_at` holds the fold open).
+#   * embedding_topk   -- `resolve_embedding_topk`: the nearest entities to a
+#                         vector, from the deltas' embedding projection.
 #
 # Depends on `komira_kg_format`, `komira_json` and `komira_objectstore` and their
 # closure (the snapshot store, the schemas, the delta codec and the Parquet reader). Reads no
@@ -118,3 +132,28 @@ from .working_codec import (
     check_embedding,
 )
 from .working_set import SnapshotWorkingSet
+from .working_codec import ProjectionRows, decode_embedding_projection
+from .rewrite import (
+    CommittedRewrite,
+    append_index_bootstrap,
+    base_tables_of,
+    finish_rewrite,
+    repair_missing_bootstrap,
+)
+from .erase import (
+    ErasureReport,
+    MAX_ERASE_ROUNDS,
+    erase_commit_at,
+    erase_kg_partition,
+    erase_kg_partition_at,
+    erase_partition,
+)
+from .warm_cache import WarmMergedCache
+from .compaction import (
+    CompactionResult,
+    compact_chain,
+    compact_chain_at,
+    compact_commit_at,
+    maybe_compact_chain,
+)
+from .embedding_topk import EmbeddingCandidate, resolve_embedding_topk
