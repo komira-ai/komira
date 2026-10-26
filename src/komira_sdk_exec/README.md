@@ -52,7 +52,7 @@ The tests run when the package is built.
   the Parquet arm is not displaced.
 - `test_source_factories_routing`: `file_source(path)` routes every Parquet,
   Arrow, CSV and JSON extension to its arm or its error, a bad Parquet footer
-  and four malformed Arrow files raise with the message naming the check, and
+  and malformed Arrow files raise with the message naming the check, and
   each Parquet codec of `FileSource` answers schema, fingerprint, copy and
   pushdown.
 
