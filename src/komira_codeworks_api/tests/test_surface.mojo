@@ -212,7 +212,7 @@ def test_undeclared_paths_are_unknown_and_unclaimed() raises:
     unknown.append("/")
     unknown.append("")
     unknown.append("/admin")
-    unknown.append("/v1/devices")
+    unknown.append("/v1/other")
     unknown.append("/workspaces/w1")  # a bare workspace is not review
     unknown.append("/workspaces")
     unknown.append("/review-policy")  # only under /workspaces/
