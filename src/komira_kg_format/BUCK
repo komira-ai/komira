@@ -1,13 +1,15 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The values and on-disk formats the data-graph writer and reader share, parts 1
-# to 3 (the first of the packages in docs/design/knowledge_graph_port.md): the
+# to 4 (the first of the packages in docs/design/knowledge_graph_port.md): the
 # packed f32 embedding cell, the extraction values (`Triple`, `EntityMention`,
 # `Extraction`), the snapshot manifest body (which
 # carries the graph's embedding dimension), the table schemas, cosine ranking of
 # a packed-embedding column, the structured query result with its JSON wire, the
 # delta layer over a base snapshot (chunk bodies and delta objects) and the
-# change gate's source fingerprints with their lineage on an object store.
+# change gate's source fingerprints with their lineage on an object store, and
+# the snapshot lineage store itself: bases, delta chains, folds and retired
+# deltas on a conditional-write object store.
 # It depends on komira_arrow (schemas, string columns) and that package's
 # closure, on komira_json (the result's wire), on komira_hash (the fingerprints),
 # on komira_objectstore (their lineage) and on komira_parquet_writer (Parquet delta
@@ -28,7 +30,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # object without allocating what its header claims; test_source_fingerprint pins
 # the hash values, that one changed byte changes the hash, and the set keyed by
 # partition and source; test_source_fingerprint_store runs the lineage on an
-# in-memory store.
+# in-memory store; test_snapshot_store writes, reads back and refuses base
+# snapshots; test_snapshot_store_chain appends deltas and reads the chain back,
+# refusing a corrupt one; test_snapshot_store_races loses compare-and-set races
+# to a rival and checks they are retried, reported and bounded;
+# test_snapshot_store_compaction folds a chain, carries forward the deltas that
+# arrive meanwhile and retires the folded ones; test_compaction_policy pins the
+# fold trigger.
 mojo_library(
     name = "komira_kg_format",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -77,6 +85,11 @@ mojo_library(
         "tests/test_query_result.mojo",
         "tests/test_query_result_wire.mojo",
         "tests/test_schemas.mojo",
+        "tests/test_compaction_policy.mojo",
+        "tests/test_snapshot_store.mojo",
+        "tests/test_snapshot_store_chain.mojo",
+        "tests/test_snapshot_store_compaction.mojo",
+        "tests/test_snapshot_store_races.mojo",
         "tests/test_source_fingerprint.mojo",
         "tests/test_source_fingerprint_store.mojo",
         "tests/test_utf8_check.mojo",
