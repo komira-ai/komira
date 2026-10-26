@@ -9,8 +9,9 @@
 #
 # `schedule` is idempotent on `dedup_key`: arming again while the earlier call is
 # still pending returns the earlier task id and records nothing new, so a burst
-# of failures arms one retry per partition. Once a task has fired or been
-# cancelled the key is free again.
+# of failures arms one retry per partition. A task is pending until it fires: once
+# it has been handed to its callback or cancelled the key is free again, so a
+# `schedule` made while the callback runs arms a new task.
 #
 # `FakeRetryScheduler` is the in-process conformer: it reads time from a counter
 # the test advances (`advance`), never from a clock, and `take_due` returns the
@@ -31,7 +32,10 @@ trait RetryScheduler(Movable, Deinitable):
     ) raises -> String:
         """Arm one POST of `payload_json` to `callback_path` at now +
         `delay_seconds`. While a task with `dedup_key` is pending, return its id
-        without arming another. Returns the task id."""
+        without arming another. A task counts as pending until it fires: once it
+        has been handed to its callback (or cancelled) it no longer does, so a
+        `schedule` made from inside that callback, or after it, arms a new task.
+        Returns the task id."""
         ...
 
     def cancel(mut self, task_id: String) raises:
@@ -168,14 +172,19 @@ struct FakeRetryScheduler(RetryScheduler):
                 n += 1
         return n
 
+    def _last(self) raises -> Int:
+        if len(self.calls) == 0:
+            raise Error("no call has been armed")
+        return len(self.calls) - 1
+
     def last_delay(self) raises -> Int64:
-        return self.calls[len(self.calls) - 1].delay_seconds
+        return self.calls[self._last()].delay_seconds
 
     def last_due_at(self) raises -> Int64:
-        return self.calls[len(self.calls) - 1].due_at_seconds
+        return self.calls[self._last()].due_at_seconds
 
     def last_payload(self) raises -> String:
-        return self.calls[len(self.calls) - 1].payload_json.copy()
+        return self.calls[self._last()].payload_json.copy()
 
     def last_callback_path(self) raises -> String:
-        return self.calls[len(self.calls) - 1].callback_path.copy()
+        return self.calls[self._last()].callback_path.copy()

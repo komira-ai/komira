@@ -27,6 +27,7 @@ from .cas_enrichment_queue import CasEnrichmentQueue
 from .enrichment_sender import EnrichmentSender, FakeEnrichmentSender
 from .retry_scheduler import DueRetry, FakeRetryScheduler, RetryScheduler
 from .drain_lease import DrainLease, LeaseGrant
+from .lease_clock import FakeLeaseClock, FixedLeaseClock, LeaseClock
 from .drain_worker import (
     DrainOutcome,
     EnrichmentDrainWorker,

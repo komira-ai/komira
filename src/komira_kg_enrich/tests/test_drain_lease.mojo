@@ -20,6 +20,18 @@
 #                takeover fail, whether the change lands between the two reads
 #                or after them; the stale reader is not granted a lease it never
 #                saw.
+#   overflow     a time and ttl whose sum does not fit in an Int64 are refused by
+#                acquire, renew and take_over_malformed, and nothing is stored;
+#                a sum of exactly Int64.MAX is allowed.
+#   renew        keeps the epoch and extends the expiry (an excluded holder is
+#                excluded until the new expiry); a grant at or past its expiry,
+#                a grant whose lease was taken over, and a grant that was
+#                already renewed (an old etag) are lost (None); a renewed grant
+#                releases the lease.
+#   malformed    a stored record that does not decode is reported by acquire; take_over_malformed replaces it (epoch one more than a
+#                numeric epoch line, else 1, also for a record that is not
+#                UTF-8) and the taker then excludes others; it never takes a
+#                valid lease, held or expired, and takes nothing when absent.
 #   refusal      a ttl of zero or less, a negative time, an unsafe partition id
 #                or holder token, a prefix that is empty or ends in '/', and a
 #                lease object that is not three lines are errors.
@@ -302,6 +314,153 @@ def test_malformed_lease_object_is_an_error() raises:
     _ = store.put(Path.parse("locks/p.lease"), _bytes("h\nnot-a-number\n5"))
     with assert_raises(contains="not a decimal number"):
         _ = lease.try_acquire("p", "w", Int64(0), TTL)
+
+
+# ---- overflow ----
+
+
+def test_an_expiry_that_overflows_is_refused_and_stores_nothing() raises:
+    var store = Store()
+    var lease = DrainLease[Store](store.clone(), "locks")
+    var now = Int64(9223372036854775800)
+    with assert_raises(contains="does not fit"):
+        _ = lease.try_acquire("p", "w", now, Int64(100))
+    with assert_raises(contains="does not fit"):
+        _ = lease.try_acquire("p", "w", now, Int64.MAX)
+    # Nothing was stored: the partition is free, with epoch 1.
+    var ok = lease.try_acquire("p", "w", Int64(0), TTL)
+    assert_equal(ok.value().epoch, Int64(1))
+    with assert_raises(contains="does not fit"):
+        _ = lease.renew(ok.value(), now, Int64(100))
+    with assert_raises(contains="does not fit"):
+        _ = lease.take_over_malformed("p", "w", now, Int64(100))
+
+
+def test_an_expiry_of_exactly_int64_max_is_allowed_and_stays_decodable() raises:
+    var lease = _lease()
+    var now = Int64(9223372036854775707)
+    var g = lease.try_acquire("p", "w", now, Int64(100))
+    assert_equal(g.value().expires_at_micros, Int64.MAX)
+    # The stored record decodes: another holder reads it as held.
+    assert_false(Bool(lease.try_acquire("p", "x", now + Int64(1), Int64(1))))
+
+
+# ---- renew ----
+
+
+def test_renew_keeps_the_epoch_and_extends_the_expiry() raises:
+    var lease = _lease()
+    var g = lease.try_acquire("p", "a", Int64(0), TTL)
+    var r = lease.renew(g.value(), Int64(900), TTL)
+    assert_true(Bool(r))
+    assert_equal(r.value().epoch, Int64(1))
+    assert_equal(r.value().expires_at_micros, Int64(1900))
+    # The old expiry (1000) no longer frees the lease; the new one (1900) does.
+    assert_false(Bool(lease.try_acquire("p", "b", Int64(1000), TTL)))
+    assert_false(Bool(lease.try_acquire("p", "b", Int64(1899), TTL)))
+    var b = lease.try_acquire("p", "b", Int64(1900), TTL)
+    assert_equal(b.value().epoch, Int64(2))
+
+
+def test_renew_is_lost_at_or_past_expiry() raises:
+    var lease = _lease()
+    var g = lease.try_acquire("p", "a", Int64(0), TTL)
+    assert_false(Bool(lease.renew(g.value(), Int64(1000), TTL)))
+    assert_false(Bool(lease.renew(g.value(), Int64(5000), TTL)))
+    # Not renewed: the lease still ends at its first expiry.
+    assert_true(Bool(lease.try_acquire("p", "b", Int64(1000), TTL)))
+
+
+def test_renew_is_lost_after_a_takeover_and_after_an_earlier_renewal() raises:
+    var lease = _lease()
+    var g = lease.try_acquire("p", "a", Int64(0), TTL)
+    var r = lease.renew(g.value(), Int64(10), TTL)
+    assert_true(Bool(r))
+    # The first grant's etag is stale now.
+    assert_false(Bool(lease.renew(g.value(), Int64(20), TTL)))
+    # The renewed grant works, then is lost to a takeover.
+    var r2 = lease.renew(r.value(), Int64(20), TTL)
+    assert_true(Bool(r2))
+    # The same holder token takes the lease again (epoch 2) before expiry; the
+    # grant it held is stale although it has not expired.
+    var again = lease.try_acquire("p", "a", Int64(30), TTL)
+    assert_equal(again.value().epoch, Int64(2))
+    assert_false(Bool(lease.renew(r2.value(), Int64(31), TTL)))
+    assert_true(Bool(lease.renew(again.value(), Int64(31), TTL)))
+
+
+def test_a_renewed_grant_releases_the_lease() raises:
+    var lease = _lease()
+    var g = lease.try_acquire("p", "a", Int64(0), TTL)
+    var r = lease.renew(g.value(), Int64(10), TTL)
+    # The first grant's etag is stale: releasing it changes nothing.
+    lease.release(g.value())
+    assert_false(Bool(lease.try_acquire("p", "b", Int64(11), TTL)))
+    lease.release(r.value())
+    assert_true(Bool(lease.try_acquire("p", "b", Int64(12), TTL)))
+
+
+# ---- malformed records ----
+
+
+def test_take_over_malformed_replaces_only_a_record_that_does_not_decode() raises:
+    var store = Store()
+    var lease = DrainLease[Store](store.clone(), "locks")
+    var key = Path.parse("locks/p.lease")
+
+    # Absent: nothing to take over.
+    assert_false(Bool(lease.take_over_malformed("p", "w", Int64(0), TTL)))
+
+    # A record with a numeric epoch line: epoch is one more.
+    _ = store.put(key, _bytes("h\n7\nsoon"))
+    with assert_raises(contains="lease expiry of"):
+        _ = lease.try_acquire("p", "w", Int64(0), TTL)
+    var g = lease.take_over_malformed("p", "w", Int64(0), TTL)
+    assert_true(Bool(g))
+    assert_equal(g.value().epoch, Int64(8))
+    assert_false(Bool(lease.try_acquire("p", "x", Int64(1), TTL)))
+    # The taker's lease is a valid lease now: it cannot be taken over this way.
+    assert_false(Bool(lease.take_over_malformed("p", "x", Int64(2000), TTL)))
+
+    # No numeric epoch line: epoch 1.
+    _ = store.put(key, _bytes("only one line"))
+    assert_equal(
+        lease.take_over_malformed("p", "w", Int64(0), TTL).value().epoch,
+        Int64(1),
+    )
+
+
+def test_take_over_malformed_handles_a_record_that_is_not_utf8() raises:
+    var store = Store()
+    var lease = DrainLease[Store](store.clone(), "locks")
+    var raw = _bytes("h\n3\n")
+    raw.append(UInt8(0xFF))
+    _ = store.put(Path.parse("locks/p.lease"), raw)
+    with assert_raises():
+        _ = lease.try_acquire("p", "w", Int64(0), TTL)
+    var g = lease.take_over_malformed("p", "w", Int64(0), TTL)
+    assert_equal(g.value().epoch, Int64(4))
+
+
+def test_take_over_malformed_never_takes_a_valid_lease() raises:
+    var lease = _lease()
+    var g = lease.try_acquire("p", "a", Int64(0), TTL)
+    # Held and valid.
+    assert_false(Bool(lease.take_over_malformed("p", "b", Int64(1), TTL)))
+    # Expired and valid: still not this path's to take.
+    assert_false(Bool(lease.take_over_malformed("p", "b", Int64(5000), TTL)))
+    # a's lease was left alone.
+    assert_true(Bool(lease.renew(g.value(), Int64(2), TTL)))
+
+
+def test_an_epoch_line_too_large_to_add_one_to_restarts_at_one() raises:
+    var store = Store()
+    var lease = DrainLease[Store](store.clone(), "locks")
+    _ = store.put(
+        Path.parse("locks/p.lease"), _bytes("h\n9223372036854775807\nx")
+    )
+    var g = lease.take_over_malformed("p", "w", Int64(0), TTL)
+    assert_equal(g.value().epoch, Int64(1))
 
 
 def main() raises:

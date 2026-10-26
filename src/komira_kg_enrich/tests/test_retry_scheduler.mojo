@@ -15,6 +15,11 @@
 #                fired task is not an error.
 #   boot         ensure_ready is counted, and may be called any number of times.
 #   refusal      a negative delay is an error.
+#   accessors    last_delay, last_due_at, last_payload and last_callback_path
+#                raise "no call has been armed" before any call, and answer the
+#                latest call after one.
+#   firing       a task that has fired no longer counts as pending for its dedup
+#                key: arming the key again (as a callback would) arms a new task.
 # =============================================================================
 
 from std.testing import (
@@ -132,6 +137,36 @@ def test_negative_delay_is_an_error() raises:
     with assert_raises(contains="delay_seconds must not be negative"):
         _ = s.schedule(Int64(-1), "/d", "p", "k")
     assert_equal(s.schedule_count(), 0)
+
+
+def test_last_accessors_on_an_empty_scheduler_are_errors() raises:
+    var s = FakeRetryScheduler()
+    with assert_raises(contains="no call has been armed"):
+        _ = s.last_delay()
+    with assert_raises(contains="no call has been armed"):
+        _ = s.last_due_at()
+    with assert_raises(contains="no call has been armed"):
+        _ = s.last_payload()
+    with assert_raises(contains="no call has been armed"):
+        _ = s.last_callback_path()
+    _ = s.schedule(Int64(4), "/d", "pl", "k")
+    assert_equal(s.last_delay(), Int64(4))
+    assert_equal(s.last_due_at(), Int64(4))
+    assert_equal(s.last_payload(), "pl")
+    assert_equal(s.last_callback_path(), "/d")
+
+
+def test_a_task_that_has_fired_is_not_pending_for_its_key() raises:
+    var s = FakeRetryScheduler()
+    var first = s.schedule(Int64(5), "/d", "p", "k")
+    s.advance(Int64(5))
+    var due = s.take_due()
+    assert_equal(len(due), 1)
+    # Inside the callback of the fired task: the key is free, a new task is armed.
+    var again = s.schedule(Int64(5), "/d", "p", "k")
+    assert_true(again != first)
+    assert_equal(s.pending_count(), 1)
+    assert_equal(s.last_due_at(), Int64(10))
 
 
 def main() raises:

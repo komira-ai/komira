@@ -6,7 +6,7 @@
 # or a sender that raises, the scheduler a FakeRetryScheduler whose clock the
 # test advances, the lease time an argument. Nothing waits.
 #
-#   delivery     an item is delivered once and acked: a second pass delivers
+#   delivery     an item is delivered and acked: a second pass delivers
 #                nothing and attempts nothing (on the Fake queue and on the
 #                object-store queue); items are delivered oldest first whatever
 #                order they were enqueued in; a pass over one partition leaves
@@ -31,6 +31,18 @@
 #                releases the lease when it ends, also when the sender raises;
 #                two workers sharing one queue and one lease deliver an item
 #                once.
+#   fencing      before each delivery the pass renews its lease at the time of an
+#                injected clock: a pass whose lease expires mid-pass stops before
+#                the next delivery (that item and the rest stay pending, the
+#                delivered one stays acked, a retry is armed, lease_lost is
+#                set) and a second worker then delivers exactly the rest; a pass
+#                that outlasts one ttl in total but not between deliveries keeps
+#                its lease by renewing; a lost lease is not released over the
+#                next holder.
+#   queue fault  a queue whose ack or listing fails ends the pass with the error
+#                and arms no retry; an item delivered whose ack failed stays
+#                pending and is delivered again by the next pass; the lease is
+#                released on those exits.
 #   arguments    a zero or negative backoff, an empty callback path and an unsafe
 #                partition id are errors; the dedup key and the payload have the
 #                stated shape.
@@ -55,6 +67,7 @@ from komira_kg_enrich import (
     EnrichmentSender,
     FakeEnrichmentQueue,
     FakeEnrichmentSender,
+    FakeLeaseClock,
     FakeRetryScheduler,
     drain_dedup_key,
     drain_payload,
@@ -421,6 +434,203 @@ def test_two_workers_on_one_queue_and_lease_deliver_an_item_once() raises:
     assert_equal(out1.acked, 0)
     assert_equal(s1.attempt_count(), 0)
     assert_equal(s2.delivered_count(), 1)
+
+
+# ---- fencing ----
+
+
+struct _ClockMovingSender(EnrichmentSender):
+    """Delivers every item and, after delivering `slow_item_id` (or every item
+    when it is "*"), moves the shared clock forward by `by` microseconds."""
+
+    var clock: FakeLeaseClock
+    var slow_item_id: String
+    var by: Int64
+    var delivered: List[String]
+
+    def __init__(
+        out self, var clock: FakeLeaseClock, slow_item_id: String, by: Int64
+    ):
+        self.clock = clock^
+        self.slow_item_id = slow_item_id.copy()
+        self.by = by
+        self.delivered = List[String]()
+
+    def deliver(mut self, item: EnrichmentItem) raises -> Bool:
+        self.delivered.append(item.item_id.copy())
+        if self.slow_item_id == "*" or item.item_id == self.slow_item_id:
+            self.clock.advance(self.by)
+        return True
+
+
+def test_a_pass_whose_lease_expires_mid_pass_stops_and_a_second_worker_finishes() raises:
+    var store = Store()
+    var q = FakeEnrichmentQueue()
+    var sched = FakeRetryScheduler()
+    var l1 = DrainLease[Store](store.clone(), "locks")
+    var l2 = DrainLease[Store](store.clone(), "locks")
+    var clock = FakeLeaseClock(Int64(10))
+    var slow = _ClockMovingSender(clock.clone(), "a", Int64(5000))
+    q.enqueue(_item("a", "s1", Int64(1)))
+    q.enqueue(_item("b", "s2", Int64(2)))
+    q.enqueue(_item("c", "s3", Int64(3)))
+
+    # Delivering "a" takes longer than the lease lives.
+    var out = _worker().drain_partition_fenced(
+        q, slow, sched, l1, clock, "p", "worker-1", TTL
+    )
+    assert_true(out.lease_lost)
+    assert_false(out.lease_held_elsewhere)
+    assert_true(out.retry_armed)
+    assert_equal(out.acked, 1)
+    assert_equal(len(slow.delivered), 1)
+    assert_equal(slow.delivered[0], "a")
+    var pending = q.list_pending("p")
+    assert_equal(len(pending), 2)
+    assert_equal(pending[0].item_id, "b")
+    assert_equal(pending[1].item_id, "c")
+    assert_equal(sched.pending_count(), 1)
+
+    # A second worker takes the expired lease and delivers exactly the rest.
+    var fast = FakeEnrichmentSender()
+    var out2 = _worker().drain_partition_fenced(
+        q, fast, sched, l2, clock, "p", "worker-2", TTL
+    )
+    assert_false(out2.lease_lost)
+    assert_equal(out2.acked, 2)
+    assert_equal(fast.delivered_item_ids[0], "b")
+    assert_equal(fast.delivered_item_ids[1], "c")
+    assert_equal(len(q.list_pending("p")), 0)
+    # Across both workers every item was delivered once.
+    assert_equal(len(slow.delivered) + fast.delivered_count(), 3)
+
+
+def test_a_pass_that_is_slow_between_deliveries_but_renews_keeps_its_lease() raises:
+    var store = Store()
+    var q = FakeEnrichmentQueue()
+    var sched = FakeRetryScheduler()
+    var lease = DrainLease[Store](store.clone(), "locks")
+    var clock = FakeLeaseClock(Int64(10))
+    # Each delivery takes 900 of a 1000 lease: three deliveries span 2700.
+    var sender = _ClockMovingSender(clock.clone(), "*", Int64(900))
+    q.enqueue(_item("a", "s1", Int64(1)))
+    q.enqueue(_item("b", "s2", Int64(2)))
+    q.enqueue(_item("c", "s3", Int64(3)))
+    var out = _worker().drain_partition_fenced(
+        q, sender, sched, lease, clock, "p", "worker-1", TTL
+    )
+    assert_false(out.lease_lost)
+    assert_equal(out.acked, 3)
+    assert_false(out.retry_armed)
+    # The lease was released at the end: another worker takes it at once.
+    var other = DrainLease[Store](store.clone(), "locks")
+    assert_true(Bool(other.try_acquire("p", "worker-2", clock.now_micros(), TTL)))
+
+
+def test_a_lost_lease_is_not_released_over_the_next_holder() raises:
+    var store = Store()
+    var q = FakeEnrichmentQueue()
+    var sched = FakeRetryScheduler()
+    var l1 = DrainLease[Store](store.clone(), "locks")
+    var l2 = DrainLease[Store](store.clone(), "locks")
+    var clock = FakeLeaseClock(Int64(10))
+    var slow = _ClockMovingSender(clock.clone(), "a", Int64(5000))
+    q.enqueue(_item("a", "s1", Int64(1)))
+    q.enqueue(_item("b", "s2", Int64(2)))
+    _ = _worker().drain_partition_fenced(
+        q, slow, sched, l1, clock, "p", "worker-1", TTL
+    )
+    # worker-2 holds the lease (epoch 2); worker-1 cannot take it back.
+    var g = l2.try_acquire("p", "worker-2", clock.now_micros(), TTL)
+    assert_equal(g.value().epoch, Int64(2))
+    assert_false(Bool(l1.try_acquire("p", "worker-1", clock.now_micros(), TTL)))
+
+
+# ---- queue faults ----
+
+
+struct _FaultyQueue(EnrichmentQueue):
+    """A FakeEnrichmentQueue whose ack, or listing, fails while flagged."""
+
+    var inner: FakeEnrichmentQueue
+    var fail_ack: Bool
+    var fail_list: Bool
+
+    def __init__(out self):
+        self.inner = FakeEnrichmentQueue()
+        self.fail_ack = False
+        self.fail_list = False
+
+    def __init__(out self, *, var inner: FakeEnrichmentQueue, fail_ack: Bool, fail_list: Bool):
+        self.inner = inner^
+        self.fail_ack = fail_ack
+        self.fail_list = fail_list
+
+    def clone(self) -> Self:
+        return Self(
+            inner=self.inner.clone(),
+            fail_ack=self.fail_ack,
+            fail_list=self.fail_list,
+        )
+
+    def enqueue(mut self, item: EnrichmentItem) raises:
+        self.inner.enqueue(item)
+
+    def list_pending(self, partition_id: String) raises -> List[EnrichmentItem]:
+        if self.fail_list:
+            raise Error("list fault")
+        return self.inner.list_pending(partition_id)
+
+    def ack(mut self, queue_key: String) raises:
+        if self.fail_ack:
+            raise Error("ack fault")
+        self.inner.ack(queue_key)
+
+
+def test_a_failing_ack_ends_the_pass_without_a_retry_and_the_item_is_redelivered() raises:
+    var store = Store()
+    var q = _FaultyQueue()
+    var sender = FakeEnrichmentSender()
+    var sched = FakeRetryScheduler()
+    var lease = DrainLease[Store](store.clone(), "locks")
+    var other = DrainLease[Store](store.clone(), "locks")
+    q.enqueue(_item("a", "s1", Int64(1)))
+    q.enqueue(_item("b", "s2", Int64(2)))
+    q.fail_ack = True
+    with assert_raises(contains="ack fault"):
+        _ = _worker().drain_partition_with_lease(
+            q, sender, sched, lease, "p", "worker-1", Int64(10), TTL
+        )
+    assert_equal(sender.attempt_count(), 1)
+    assert_equal(sched.schedule_count(), 0)
+    assert_equal(len(q.list_pending("p")), 2)
+    # The lease was released on that exit.
+    assert_true(Bool(other.try_acquire("p", "worker-2", Int64(11), TTL)))
+
+    # The next pass delivers "a" again (at-least-once) and then "b".
+    q.fail_ack = False
+    var next = _worker().drain_partition(q, sender, sched, "p")
+    assert_equal(next.acked, 2)
+    assert_equal(sender.attempt_count(), 3)
+    assert_equal(sender.attempted_item_ids[1], "a")
+
+
+def test_a_failing_listing_ends_the_pass_without_a_retry_and_releases_the_lease() raises:
+    var store = Store()
+    var q = _FaultyQueue()
+    var sender = FakeEnrichmentSender()
+    var sched = FakeRetryScheduler()
+    var lease = DrainLease[Store](store.clone(), "locks")
+    var other = DrainLease[Store](store.clone(), "locks")
+    q.enqueue(_item("a", "s1", Int64(1)))
+    q.fail_list = True
+    with assert_raises(contains="list fault"):
+        _ = _worker().drain_partition_with_lease(
+            q, sender, sched, lease, "p", "worker-1", Int64(10), TTL
+        )
+    assert_equal(sender.attempt_count(), 0)
+    assert_equal(sched.schedule_count(), 0)
+    assert_true(Bool(other.try_acquire("p", "worker-2", Int64(11), TTL)))
 
 
 # ---- arguments ----

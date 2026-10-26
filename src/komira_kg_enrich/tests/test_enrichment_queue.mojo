@@ -19,8 +19,12 @@
 #                object it names is kept; an object that is not a queue item,
 #                or is not UTF-8, makes the listing an error naming it; an empty
 #                prefix is refused; two prefixes on one store are two queues.
+#   concurrent   an object acked by another worker between the listing and the
+#                read is skipped, the rest of the partition is still returned;
+#                a read fault that is not "not found" is raised.
 # =============================================================================
 
+from std.memory import ArcPointer
 from std.testing import (
     TestSuite,
     assert_equal,
@@ -29,8 +33,15 @@ from std.testing import (
 )
 
 from komira_objectstore import (
+    CloneableConditionalWriteStore,
+    CoalescePolicy,
+    ConditionalWriteStore,
     DelimiterFaithfulConditionalStore,
+    ListResult,
+    ObjectMeta,
+    ObjectStore,
     Path,
+    WritePrecondition,
 )
 
 from komira_kg_enrich import (
@@ -259,6 +270,97 @@ def test_cas_queue_two_prefixes_are_two_queues() raises:
     a.enqueue(_item("i", "p", "s", "in a", Int64(1)))
     assert_equal(len(a.list_pending("p")), 1)
     assert_equal(len(b.list_pending("p")), 0)
+
+
+struct _Fault(Movable):
+    """What `_FlakyStore` does right after its next listing: delete `vanish`
+    (another worker's ack) or make every `get` raise `get_error`."""
+
+    var vanish: String
+    var get_error: String
+
+    def __init__(out self):
+        self.vanish = String("")
+        self.get_error = String("")
+
+
+struct _FlakyStore(CloneableConditionalWriteStore, ConditionalWriteStore, ObjectStore, Movable):
+    var inner: DelimiterFaithfulConditionalStore
+    var fault: ArcPointer[_Fault]
+
+    def __init__(out self):
+        self.inner = DelimiterFaithfulConditionalStore()
+        self.fault = ArcPointer[_Fault](_Fault())
+
+    def __init__(out self, *, var inner: DelimiterFaithfulConditionalStore, var fault: ArcPointer[_Fault]):
+        self.inner = inner^
+        self.fault = fault^
+
+    def clone(self) -> Self:
+        return Self(inner=self.inner.clone(), fault=self.fault.copy())
+
+    def head(self, path: Path) raises -> ObjectMeta:
+        return self.inner.head(path)
+
+    def get(self, path: Path) raises -> List[UInt8]:
+        if len(self.fault[].get_error.as_bytes()) > 0:
+            raise Error(self.fault[].get_error.copy())
+        return self.inner.get(path)
+
+    def list_with_delimiter(self, prefix: Path) raises -> ListResult:
+        var listing = self.inner.list_with_delimiter(prefix)
+        if len(self.fault[].vanish.as_bytes()) > 0:
+            self.inner.delete(Path.parse(self.fault[].vanish.copy()))
+            self.fault[].vanish = String("")
+        return listing^
+
+    def coalesce_policy(self) -> CoalescePolicy:
+        return self.inner.coalesce_policy()
+
+    def conditional_put(
+        self, path: Path, bytes: List[UInt8], precond: WritePrecondition
+    ) raises -> ObjectMeta:
+        return self.inner.conditional_put(path, bytes, precond)
+
+    def compare_and_swap(
+        self, path: Path, bytes: List[UInt8], expected_version: String
+    ) raises -> ObjectMeta:
+        return self.inner.compare_and_swap(path, bytes, expected_version)
+
+    def put(self, path: Path, bytes: List[UInt8]) raises -> ObjectMeta:
+        return self.inner.put(path, bytes)
+
+    def get_range(
+        self, path: Path, start: Int64, length: Int64
+    ) raises -> List[UInt8]:
+        return self.inner.get_range(path, start, length)
+
+    def delete(self, path: Path) raises -> None:
+        self.inner.delete(path)
+
+
+def test_cas_queue_skips_an_object_acked_between_the_listing_and_the_read() raises:
+    var store = _FlakyStore()
+    var q = CasEnrichmentQueue[_FlakyStore](store.clone(), "queue")
+    q.enqueue(_item("a", "p", "s1", "first", Int64(1)))
+    q.enqueue(_item("b", "p", "s2", "second", Int64(2)))
+    q.enqueue(_item("c", "p", "s3", "third", Int64(3)))
+    # Another worker acks "b" right after this worker lists the partition.
+    store.fault[].vanish = String("queue/p/00000000000000000002-b")
+    var pending = q.list_pending("p")
+    assert_equal(len(pending), 2)
+    assert_equal(pending[0].item_id, "a")
+    assert_equal(pending[1].item_id, "c")
+    assert_equal(len(q.list_pending("p")), 2)
+
+
+def test_cas_queue_raises_a_read_fault_that_is_not_not_found() raises:
+    var store = _FlakyStore()
+    var q = CasEnrichmentQueue[_FlakyStore](store.clone(), "queue")
+    q.enqueue(_item("a", "p", "s1", "first", Int64(1)))
+    store.fault[].get_error = String("connection reset")
+    with assert_raises(contains="connection reset"):
+        _ = q.list_pending("p")
 
 
 def main() raises:

@@ -17,6 +17,10 @@
 # time) then the body, verbatim, as the rest of the object. The body is the
 # remainder, so it may hold newlines and is never re-encoded.
 #
+# `list_pending` lists, then reads each object. An object that is gone by the time
+# it is read was acked by another worker meanwhile; it is skipped, not an error.
+# Any other read fault is raised.
+#
 # `enqueue` is one unconditional put; the key is a function of the item, so
 # enqueueing an item again rewrites the same object. `ack` is a delete, which is
 # idempotent. A queue key that is not under this queue's prefix is refused, so an
@@ -24,6 +28,7 @@
 # give the queue and the lease different prefixes).
 # =============================================================================
 
+from komira_objectstore.cas_manifest import is_not_found
 from komira_objectstore.path import Path
 from komira_objectstore.store import CloneableConditionalWriteStore
 
@@ -83,7 +88,15 @@ struct CasEnrichmentQueue[S: CloneableConditionalWriteStore](
         sort_strings(keys)
         var out = List[EnrichmentItem]()
         for i in range(len(keys)):
-            var bytes = self._store.get(Path.parse(keys[i].copy()))
+            var bytes: List[UInt8]
+            try:
+                bytes = self._store.get(Path.parse(keys[i].copy()))
+            except e:
+                # Another worker acked the object between the listing and this
+                # read: it is no longer pending.
+                if is_not_found(String(e)):
+                    continue
+                raise e^
             var raw = String(StringSlice(from_utf8=Span(bytes)))
             out.append(_unframe(raw, keys[i].copy()))
         return out^

@@ -13,7 +13,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # object-store queue and pins the object-store key layout and refusals;
 # test_drain_lease pins exclusion, expiry, epochs, release and the changed-under-me
 # race; test_retry_scheduler pins the fake scheduler's due times and dedup;
-# test_enrichment_sender pins the fake sender; test_drain_worker pins delivery once,
+# test_enrichment_sender pins the fake sender; test_drain_worker pins delivery and ack, fencing,
 # the retry schedule, per-source order, sender faults and the lease behaviour.
 mojo_library(
     name = "komira_kg_enrich",
