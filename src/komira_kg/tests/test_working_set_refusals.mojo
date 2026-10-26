@@ -25,6 +25,13 @@
 #   cells         a text cell that is not UTF-8 and a null cell in a required
 #                 column are refused, and the same table with a real value loads;
 #                 a delta table stamped newer than this build is refused.
+#   decode        a text column holding integers, a null integer cell and a null
+#                 embedding cell are refused; a delta index outside the chain
+#                 is refused; a delta whose entities table repeats a node id is
+#                 refused on load.
+#   id space      a mint at Int64.MAX is refused, and refused again.
+#   shrunk set    tombstone_edge_indices of a set with fewer edges than loaded
+#                 reports only the edges still held.
 #   delta guard   a set whose edges or episodes shrank below their loaded count
 #                 cannot write a delta.
 # =============================================================================
@@ -44,6 +51,12 @@ from komira_kg import (
     WorkingEntity,
     WorkingEpisode,
     open_edge,
+)
+from komira_kg.working_codec import (
+    decode_edge_closures,
+    decode_entities,
+    decode_episodes,
+    read_delta_table,
 )
 from komira_kg_format import (
     KgNameIndexBody,
@@ -405,6 +418,134 @@ def test_delta_of_a_shrunk_set_is_refused() raises:
         _ = ws2.delta_tables()
     # A full snapshot of the shrunk set is still writable.
     assert_true(len(ws2.to_tables()) > 0)
+
+
+def test_text_column_holding_integers_is_refused() raises:
+    # An episodes table whose uuid column (a text column) holds integers.
+    var sb = SchemaBuilder()
+    sb.add_field(Field("uuid", ArrowType.INT64, False))
+    sb.add_field(Field("partition_id", ArrowType.STRING, False))
+    sb.add_field(Field("body", ArrowType.STRING, False))
+    sb.add_field(Field("ts", ArrowType.INT64, False))
+    sb.add_field(Field("valid_at", ArrowType.INT64, False))
+    sb.add_field(Field("facet", ArrowType.STRING, False))
+    var one = List[String]()
+    one.append("x")
+    var rb = RecordBatchBuilder()
+    rb.add_column(_i64(_one(7)))
+    rb.add_column(_strs(one))
+    rb.add_column(_strs(one))
+    rb.add_column(_i64(_one(1)))
+    rb.add_column(_i64(_one(1)))
+    rb.add_column(_strs(one))
+    with assert_raises(
+        contains="table episodes: column 0 is not a string column"
+    ):
+        _ = decode_episodes(rb.build(sb.build()))
+
+
+def test_null_integer_cell_is_refused() raises:
+    # A tombstone batch whose created_at cell is null.
+    var created = PrimitiveArray[DType.int64].allocate_nullable(1)
+    created.set(0, 5)
+    created._set_null(0)
+    var rb = RecordBatchBuilder()
+    rb.add_column(_i64(_one(0)))
+    rb.add_column(_i64(_one(1)))
+    rb.add_column(Column.from_primitive[DType.int64](created^))
+    rb.add_column(_i64(_one(50)))
+    rb.add_column(_i64(_one(60)))
+    with assert_raises(
+        contains="table edges_tombstone: null cell in a required column, row 0"
+    ):
+        _ = decode_edge_closures(rb.build(edges_tombstone_schema()))
+    # The same row with every cell present decodes.
+    var ok = RecordBatchBuilder()
+    ok.add_column(_i64(_one(0)))
+    ok.add_column(_i64(_one(1)))
+    ok.add_column(_i64(_one(5)))
+    ok.add_column(_i64(_one(50)))
+    ok.add_column(_i64(_one(60)))
+    var rows = decode_edge_closures(ok.build(edges_tombstone_schema()))
+    assert_equal(len(rows), 1)
+    assert_equal(rows[0].created_at, 5)
+
+
+def test_null_embedding_cell_is_refused() raises:
+    var one = List[String]()
+    one.append("x")
+    var cells = List[String]()
+    cells.append(pack_embedding(_vec(2)))
+    var valid = List[Bool]()
+    valid.append(False)
+    var sb = SchemaBuilder()
+    sb.add_field(Field("nid", ArrowType.INT64, False))
+    sb.add_field(Field("uuid", ArrowType.STRING, False))
+    sb.add_field(Field("partition_id", ArrowType.STRING, False))
+    sb.add_field(Field("name", ArrowType.STRING, False))
+    sb.add_field(Field("name_embedding", ArrowType.STRING, True))
+    sb.add_field(Field("summary", ArrowType.STRING, False))
+    sb.add_field(Field("attrs", ArrowType.STRING, False))
+    var rb = RecordBatchBuilder()
+    rb.add_column(_i64(_one(0)))
+    rb.add_column(_strs(one))
+    rb.add_column(_strs(one))
+    rb.add_column(_strs(one))
+    rb.add_column(
+        Column.from_string(StringArray.from_strings_with_validity(cells, valid))
+    )
+    rb.add_column(_strs(one))
+    rb.add_column(_strs(one))
+    with assert_raises(contains="table entities: null embedding cell, row 0"):
+        _ = decode_entities(rb.build(sb.build()), 2)
+
+
+def test_delta_index_out_of_range_is_refused() raises:
+    var kg = Kg(Backend(), "g")
+    _ = kg.write_snapshot(_set(2).to_tables(), 2)
+    var chain = kg.open_latest_chain()
+    # A base alone has no delta 0, and no negative one.
+    with assert_raises(contains="delta index 0 out of range"):
+        _ = read_delta_table(chain, 0, "episodes", 1)
+    with assert_raises(contains="delta index -1 out of range"):
+        _ = read_delta_table(chain, -1, "episodes", 1)
+
+
+def test_delta_repeating_a_node_id_is_refused() raises:
+    var kg = Kg(Backend(), "g")
+    _ = kg.write_snapshot(_set(2).to_tables(), 2)
+    _ = kg.append_delta(_entities_table([7, 7], 2), KgNameIndexBody())
+    with assert_raises(
+        contains="delta 0: entities table repeats node id 7"
+    ):
+        _ = SnapshotWorkingSet.load_latest(kg)
+
+
+def test_node_ids_can_run_out() raises:
+    var ws = SnapshotWorkingSet(2)
+    ws._high_water = Int64.MAX
+    with assert_raises(contains="node ids exhausted"):
+        _ = ws.next_nid()
+    # The refusal mints nothing: the same call refuses again.
+    with assert_raises(contains="node ids exhausted"):
+        _ = ws.next_nid()
+
+
+def test_a_shrunk_set_reports_only_the_edges_it_still_holds() raises:
+    var kg = Kg(Backend(), "g")
+    var base = _set(2)
+    base.add_edge(open_edge(0, 1, "", "second fact", 3, 4, 3))
+    _ = kg.write_snapshot(base.to_tables(), 2)
+    var ws = SnapshotWorkingSet.load_latest(kg)
+    ws.edges[0].invalid_at = 9
+    ws.edges[0].expired_at = 10
+    _ = ws.edges.pop()
+    var closed = ws.tombstone_edge_indices()
+    assert_equal(len(closed), 1)
+    assert_equal(closed[0], 0)
+    # With every loaded edge gone there is nothing left to report.
+    _ = ws.edges.pop()
+    assert_equal(len(ws.tombstone_edge_indices()), 0)
 
 
 def main() raises:

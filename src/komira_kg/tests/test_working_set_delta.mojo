@@ -26,6 +26,10 @@
 #                 of two open ones is refused (write a base instead), a base keeps
 #                 both closures exactly, and a delta can close the one open edge of
 #                 a shared key.
+#   twins         a delta cannot close an edge when an open twin of its key is
+#                 appended by the same delta; a later delta can close the
+#                 twin of an edge an earlier delta closed, and the chain equals
+#                 the full rewrite.
 #   diff views    added_entity_indices names the entities not loaded and
 #                 edited_entity_indices the loaded ones whose row changed.
 # =============================================================================
@@ -365,6 +369,75 @@ def test_added_and_edited_entity_indices() raises:
     var again = ws.edited_entity_indices()
     assert_equal(len(again), 1)
     assert_equal(again[0], 0)
+
+
+def test_a_set_with_an_appended_edge_has_a_delta() raises:
+    var kg = Kg(Backend(), "g")
+    _ = kg.write_snapshot(_base_set().to_tables(), DIM)
+    var ws = SnapshotWorkingSet.load_latest(kg)
+    assert_false(ws.has_delta())
+    ws.add_edge(open_edge(0, 1, "", "alpha beta v3", 50, 60, 50))
+    assert_true(ws.has_delta())
+    assert_equal(len(ws.tombstone_edge_indices()), 0)
+
+
+def test_an_edge_closed_and_an_open_twin_appended_needs_a_base() raises:
+    var kg = Kg(Backend(), "g")
+    _ = kg.write_snapshot(_base_set().to_tables(), DIM)
+    var ws = SnapshotWorkingSet.load_latest(kg)
+    # Edge 0 has the key (0, 1, 20). Close it and append an open twin of it:
+    # when the delta applies, both would be open under that key.
+    ws.edges[0].invalid_at = 50
+    ws.edges[0].expired_at = 60
+    ws.add_edge(open_edge(0, 1, "", "alpha beta twin", 55, 20, 55))
+    with assert_raises(contains="shares its key with 1 other edge(s)"):
+        _ = ws.delta_tables()
+    # The full rewrite keeps all three edges exactly.
+    var kg2 = Kg(Backend(), "g")
+    _ = kg2.write_snapshot(ws.to_tables(), DIM)
+    var back = SnapshotWorkingSet.load_latest(kg2)
+    _same(ws, back)
+    assert_equal(back.edges[0].invalid_at, 50)
+    assert_equal(back.edges[2].invalid_at, TS_OPEN_SENTINEL)
+
+
+def test_a_later_delta_may_close_a_twin_of_a_closed_edge() raises:
+    # Base: one edge. Delta 1 closes it. Delta 2 adds an open twin with the
+    # same key. Delta 3 closes the twin.
+    var kg = Kg(Backend(), "g")
+    var base = SnapshotWorkingSet(DIM)
+    base.add_entity(_ent(base.next_nid(), "alpha", 1))
+    base.add_entity(_ent(base.next_nid(), "beta", 2))
+    base.add_edge(open_edge(0, 1, "", "first", 10, 10, 10))
+    _ = kg.write_snapshot(base.to_tables(), DIM)
+
+    var d1 = SnapshotWorkingSet.load_latest(kg)
+    d1.edges[0].invalid_at = 15
+    d1.edges[0].expired_at = 16
+    _append(kg, d1)
+
+    var d2 = SnapshotWorkingSet.load_latest(kg)
+    d2.add_edge(open_edge(0, 1, "", "twin", 20, 10, 20))
+    _append(kg, d2)
+
+    var d3 = SnapshotWorkingSet.load_latest(kg)
+    d3.edges[1].invalid_at = 30
+    d3.edges[1].expired_at = 40
+    _append(kg, d3)
+
+    var chain = SnapshotWorkingSet.load_latest(kg)
+    # The same graph written as one full rewrite.
+    var kg2 = Kg(Backend(), "g")
+    _ = kg2.write_snapshot(d3.to_tables(), DIM)
+    var full = SnapshotWorkingSet.load_latest(kg2)
+    _same(chain, full)
+    assert_equal(len(chain.edges), 2)
+    assert_equal(chain.edges[0].fact, "first")
+    assert_equal(chain.edges[0].invalid_at, 15)
+    assert_equal(chain.edges[0].expired_at, 16)
+    assert_equal(chain.edges[1].fact, "twin")
+    assert_equal(chain.edges[1].invalid_at, 30)
+    assert_equal(chain.edges[1].expired_at, 40)
 
 
 def main() raises:
