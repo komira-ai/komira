@@ -1,9 +1,9 @@
 # The knowledge graph port: packages, seams, engine dependencies and PR order
 
-Status: design; PRs 1, 2, 6, 7, 13, 14 and 18 are in the tree. It decides how the existing data-graph library (a property graph built from
+Status: design; PRs 1 to 3, 6, 7, 13, 14 and 18 are in the tree. It decides how the existing data-graph library (a property graph built from
 documents and records, with a bi-temporal store and a read path) comes into komira as small, separately
-tested packages. Of the packages named here only parts 1 and 2 of [`komira_kg_format`](../../src/komira_kg_format/)
-(its `embedding`, `ingest_types`, `manifest_body`, `schemas`, `cosine` and `query_result` modules) and parts 1 and 2 of
+tested packages. Of the packages named here only parts 1 to 3 of [`komira_kg_format`](../../src/komira_kg_format/)
+(its `embedding`, `ingest_types`, `manifest_body`, `schemas`, `cosine`, `query_result`, `delta_body`, `delta_codec` and `source_fingerprint` modules) and parts 1 and 2 of
 [`komira_kg`](../../src/komira_kg/) (`bitemporal`, `name_similarity`, `dedup`, `alias_map`, `source_facet`, `embedder`, `extractor` and `llm_client`), [`komira_kg_mode`](../../src/komira_kg_mode/), [`komira_kg_spec`](../../src/komira_kg_spec/) and [`komira_kg_enrich`](../../src/komira_kg_enrich/) are in the tree yet. The code graph
 [`komira_kg_code`](../../src/komira_kg_code/) is a different thing and is untouched (see
 [knowledge_graph.md](../knowledge_graph.md)).
@@ -107,7 +107,10 @@ exact scans, the out-degree count and rank fusion) read parquet bytes and score 
 - `manifest_body`: `KgManifestBody` (with the embedding dimension), `KgTableEntry`,
   `KG_SNAPSHOT_FORMAT_VERSION`.
 - `delta_body`, `delta_codec`: `encode_delta_table_object`, `delta_object_is_framed`,
-  `delta_object_parquet_bytes`, `decode_framed_delta_to_batch`.
+  `delta_object_parquet_bytes`, `decode_framed_delta_to_batch`. `delta_body` also holds the chunk bodies `KgDeltaBody`,
+  `KgChainBody` and `KgNameIndexBody` and `kg_chunk_is_chain_head`; each chunk kind has its own format
+  version (manifest 2, chain 3, delta 4), so the first eight bytes say which kind a body is and no body of one kind
+  decodes as another. A delta whose framed form would exceed the framed decoder's limit is written as Parquet.
 - `source_fingerprint`: `SourceFingerprint`, `SourceFingerprintSet`, `SourceFingerprintStore`,
   `content_hash_of`, `content_hash_of_extraction`, `fnv1a64_hex`. Keyed by partition id and an opaque source
   key.
@@ -430,5 +433,5 @@ dedup scheme (MinHash with banded LSH) is tuned for names and short strings, not
 
 ## Where is the code?
 
-Parts 1 and 2 of `komira_kg_format` are in [`src/komira_kg_format/`](../../src/komira_kg_format/), parts 1 and 2 of `komira_kg` are in [`src/komira_kg/`](../../src/komira_kg/), `komira_kg_mode` is in [`src/komira_kg_mode/`](../../src/komira_kg_mode/), `komira_kg_spec` is in [`src/komira_kg_spec/`](../../src/komira_kg_spec/) and `komira_kg_enrich` is in [`src/komira_kg_enrich/`](../../src/komira_kg_enrich/); every other location above is the one the package will have. Source sizes quoted are measured on the
+Parts 1 to 3 of `komira_kg_format` are in [`src/komira_kg_format/`](../../src/komira_kg_format/), parts 1 and 2 of `komira_kg` are in [`src/komira_kg/`](../../src/komira_kg/), `komira_kg_mode` is in [`src/komira_kg_mode/`](../../src/komira_kg_mode/), `komira_kg_spec` is in [`src/komira_kg_spec/`](../../src/komira_kg_spec/) and `komira_kg_enrich` is in [`src/komira_kg_enrich/`](../../src/komira_kg_enrich/); every other location above is the one the package will have. Source sizes quoted are measured on the
 source implementation; re-measure each before its PR, because a count carried in a design drifts.
