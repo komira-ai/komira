@@ -51,6 +51,22 @@ LINUX_X86_64 = constraints("linux-x86_64")
 
 DARWIN_ARM64 = constraints("darwin-arm64")
 
+# Constraint values buildrules' Mojo rules select on, added to the target platform of a row that is not
+# linux x86_64. buildrules chooses a package's unit graph, toolchain and execution platform by
+# `buildrules//platforms:is_<os>_<cpu>`, and a platform without its constraints (komira's own are the
+# prelude's) matches none and is taken for linux x86_64. A macOS arm64 target needs both values to be built
+# on a macOS worker with the osx-arm64 graph. Linux x86_64 is the default of every such `select`, so its
+# platform stays as it was (and its configuration hash, and every action key). A row's `constraints` in
+# table.bzl stay the prelude's: they are what a tool's `exec_compatible_with` names, and they are checked
+# against the row's os and cpu.
+BUILDRULES_CONSTRAINTS = {
+    "darwin-arm64": ["buildrules//platforms:macos", "buildrules//platforms:aarch64"],
+}
+
+def target_constraints(name):
+    """The `constraint_values` of the target platform `name`: the row's, plus buildrules' where it needs them."""
+    return constraints(name) + BUILDRULES_CONSTRAINTS.get(name, [])
+
 def re_properties(key, required = True):
     """Parse `[komira_re] <key>` into a dict.
 

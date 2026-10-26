@@ -34,6 +34,16 @@ A row states, all required:
 | `oci_base`, `bundles` | the container base (its manifest, and its blobs' digests and sizes), and whether bundles, OCI images and the launcher are products of this platform (Linux server artifacts) |
 | `registered` | `True`: a build key. `False`: reserved |
 
+**The `darwin-arm64` target platform also carries buildrules' `macos` and `aarch64` constraint values**
+([`defs.bzl`](defs.bzl), `BUILDRULES_CONSTRAINTS`), not a column of the table: buildrules' Mojo rules choose a
+package's unit graph, toolchain and execution platform by those values, and a platform that lacks them is
+built as linux x86_64. `linux-x86_64` is the default of every such choice and keeps its platform, its
+configuration hash and its action keys. The macOS execution platform of buildrules
+(`buildrules//platforms:macos_aarch64`) is registered beside komira's own with komira's macOS worker property set
+([`with_buildrules.bzl`](with_buildrules.bzl)); buildrules learns that it exists from `[buildrules_re]
+macos_aarch64_properties` in the committed `.buckconfig`, which holds no value, only a pointer to `[komira_re]
+darwin_arm64_properties`.
+
 **The table checks itself when it loads**: a row missing a field or a pin, a
 pin that is not an https URL with a 64-digit lowercase sha256 and a positive
 `size`, a `pending` pin

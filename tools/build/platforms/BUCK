@@ -1,5 +1,5 @@
-load(":defs.bzl", "komira_host_platform")
-load(":table.bzl", "constraints", "registered_names")
+load(":defs.bzl", "komira_host_platform", "target_constraints")
+load(":table.bzl", "registered_names")
 
 # Platforms only. Nothing here names a service or a worker property set: the
 # execution platforms that use these configurations are declared in
@@ -26,7 +26,7 @@ load(":table.bzl", "constraints", "registered_names")
 [
     platform(
         name = name,
-        constraint_values = constraints(name),
+        constraint_values = target_constraints(name),
         visibility = ["PUBLIC"],
     )
     for name in registered_names()

@@ -499,7 +499,7 @@ PLATFORMS = {
         ],
         "cpu": "arm64",
         "features": ["kqueue", "neon", "ulock"],
-        "golden_config_hash": "7fd7ccfd5d5f8024",
+        "golden_config_hash": "dd984ce04f8114a4",
         "host": {"arch": "aarch64", "os": "macos"},
         "object_format": "macho",
         "oci_base": none("OCI images are a Linux product"),
