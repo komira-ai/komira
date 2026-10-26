@@ -16,6 +16,9 @@
 #                 candidates.
 #   refusals      k of zero or less, a query shorter or longer than the graph's
 #                 dimension, and a projection cell of another dimension.
+#   decode        a projection batch decodes to its ids and vectors; a null
+#                 cell, an id out of range and a column of the wrong type are
+#                 refused.
 # =============================================================================
 
 from std.testing import (
@@ -26,6 +29,12 @@ from std.testing import (
     assert_true,
 )
 
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Field, SchemaBuilder
+from komira_arrow.string_array import StringArray
 from komira_collections.slab import Slab
 from komira_kg import (
     SnapshotWorkingSet,
@@ -36,6 +45,7 @@ from komira_kg import (
 from komira_kg.working_codec import (
     TABLE_ENTITIES_EMBEDDING,
     build_embedding_projection_batch,
+    decode_embedding_projection,
 )
 from komira_kg_format import (
     KgNameIndexBody,
@@ -43,6 +53,7 @@ from komira_kg_format import (
     KgTable,
     SCHEMA_VERSION_ENTITIES_EMBEDDING,
     cosine,
+    pack_embedding,
 )
 from komira_objectstore.shared_in_memory_conditional_store import (
     SharedInMemoryConditionalStore,
@@ -226,6 +237,48 @@ def test_a_projection_cell_of_another_dimension_is_refused() raises:
     _ = kg.append_delta(tables^, KgNameIndexBody())
     with assert_raises(contains="which is not a dimension of 2"):
         _ = resolve_embedding_topk(kg.open_latest_chain(), _vec(1.0, 0.0), 3)
+
+
+def _projection(nid: Int64, null_cell: Bool, nid_as_text: Bool) raises -> RecordBatch:
+    """A one-row projection batch: a null embedding cell, or a node id column of
+    the wrong type, on request."""
+    var cells = List[String]()
+    cells.append(pack_embedding(_vec(1.0, 0.0)))
+    var valid = List[Bool]()
+    valid.append(not null_cell)
+    var sb = SchemaBuilder()
+    var rb = RecordBatchBuilder()
+    if nid_as_text:
+        sb.add_field(Field("nid", ArrowType.STRING, False))
+        var ids = List[String]()
+        ids.append("0")
+        rb.add_column(Column.from_string(StringArray.from_strings(ids)))
+    else:
+        sb.add_field(Field("nid", ArrowType.INT64, False))
+        var ids = List[Int64]()
+        ids.append(nid)
+        rb.add_column(
+            Column.from_primitive[DType.int64](PrimitiveArray[DType.int64].from_list(ids))
+        )
+    sb.add_field(Field("name_embedding", ArrowType.STRING, True))
+    rb.add_column(
+        Column.from_string(StringArray.from_strings_with_validity(cells, valid))
+    )
+    return rb.build(sb.build())
+
+
+def test_a_projection_batch_decodes_and_a_malformed_one_is_refused() raises:
+    var rows = decode_embedding_projection(_projection(7, False, False), DIM)
+    assert_equal(len(rows.nids), 1)
+    assert_equal(rows.nids[0], 7)
+    assert_equal(rows.vectors[0][0], 1.0)
+    assert_equal(rows.vectors[0][1], 0.0)
+    with assert_raises(contains="null embedding cell, row 0"):
+        _ = decode_embedding_projection(_projection(7, True, False), DIM)
+    with assert_raises(contains="node id -1 is out of range"):
+        _ = decode_embedding_projection(_projection(-1, False, False), DIM)
+    with assert_raises(contains="column 0 is not INT64"):
+        _ = decode_embedding_projection(_projection(0, False, True), DIM)
 
 
 def main() raises:

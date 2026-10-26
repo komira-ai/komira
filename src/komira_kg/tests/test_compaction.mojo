@@ -18,6 +18,8 @@
 #   carry         a delta appended after the head that is folded stays on the new
 #                 head, is not retired, and wins over the bootstrap index for
 #                 the names and node ids it speaks for.
+#   covered       a carried delta that speaks for every name and node id leaves
+#                 nothing for the bootstrap: no index delta is appended.
 #   second fold   a fold of a head whose base another fold already replaced is
 #                 refused and changes nothing.
 #   policy        maybe_compact_chain folds only when the count leg trips.
@@ -303,6 +305,35 @@ def test_a_delta_appended_after_the_folded_head_is_carried_and_wins() raises:
         if all[i].nid == 0:
             seen += 1
     assert_equal(seen, 1)
+
+
+def test_a_carried_delta_that_covers_every_entity_leaves_no_bootstrap() raises:
+    var kg = Kg(Backend(), "g")
+    var ws = SnapshotWorkingSet(DIM)
+    ws.add_entity(_ent(ws.next_nid(), "alpha", "p1", 1.0, 0.0))
+    _ = kg.write_snapshot(ws.to_tables(), DIM)
+    var first = SnapshotWorkingSet.load_latest(kg)
+    first.add_entity(_ent(first.next_nid(), "beta", "p1", 0.0, 1.0))
+    _append(kg, first)
+    var head = kg.head_seq()
+
+    # After that head, both entities are edited: the delta names and embeds both.
+    var late = SnapshotWorkingSet.load_latest(kg)
+    late.entities[0].summary = "edited 0"
+    late.entities[1].summary = "edited 1"
+    _append(kg, late)
+
+    var result = compact_chain_at(kg, head, 9000)
+    assert_true(result.compacted)
+    assert_equal(result.num_carried, 1)
+    var chain = kg.open_latest_chain()
+    assert_equal(chain.num_deltas(), 1)  # the carried delta, and no bootstrap
+    assert_equal(result.new_head_seq, kg.head_seq())
+    var live = SnapshotWorkingSet.load_latest(kg)
+    assert_equal(len(live.entities), 2)
+    assert_equal(live.entities[0].summary, "edited 0")
+    assert_equal(live.entities[1].summary, "edited 1")
+    assert_equal(chain.resolve_name_index("beta"), 1)
 
 
 def test_a_fold_of_a_head_another_fold_replaced_is_refused() raises:
