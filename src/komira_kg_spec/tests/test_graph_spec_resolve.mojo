@@ -11,6 +11,9 @@
 #              trigger, an empty id, a policy that refuses the extract or the
 #              synthesis endpoint); each change makes validation raise and the
 #              resolution land on rules.
+#   source     a source policy that refuses a named source makes validation raise
+#              and the resolution land on rules; the default allows it and a
+#              policy that refuses another source leaves the model mode.
 #   describe   the described name is the resolved mode's, "model" or "rules", so
 #              it differs from the configured mode exactly when the fail-safe
 #              fired.
@@ -21,12 +24,14 @@ from std.testing import TestSuite, assert_equal, assert_raises, assert_true
 
 from komira_kg_mode import EXTRACT_MODE_MODEL, EXTRACT_MODE_RULES
 from komira_kg_spec import (
+    AllowAllEndpoints,
     EndpointPolicy,
     ExtractConfig,
     GraphScopeRef,
     InferenceBinding,
     KnowledgeGraphSpec,
     SourceBinding,
+    SourcePolicy,
     TriggerConfig,
     describe_resolved_mode,
     resolve_extract_mode,
@@ -44,6 +49,16 @@ struct _Refuse(EndpointPolicy):
         return endpoint != self.endpoint
 
 
+struct _RefuseSource(SourcePolicy):
+    var source_id: String
+
+    def __init__(out self, source_id: String):
+        self.source_id = source_id
+
+    def allows(self, source: SourceBinding, graph: GraphScopeRef) -> Bool:
+        return source.source_id != self.source_id
+
+
 def _graph() -> GraphScopeRef:
     return GraphScopeRef.owned("s1", "owner-a")
 
@@ -55,8 +70,8 @@ def _valid_model_spec() -> KnowledgeGraphSpec:
     )
     return KnowledgeGraphSpec(
         sources^,
-        ExtractConfig.model(InferenceBinding("chat", "ep-extract", "m")),
-        Optional[InferenceBinding](InferenceBinding("chat", "ep-synth", "m")),
+        ExtractConfig.model(InferenceBinding("transport-a", "ep-extract", "m")),
+        Optional[InferenceBinding](InferenceBinding("transport-a", "ep-synth", "m")),
         TriggerConfig.manual(),
     )
 
@@ -151,6 +166,39 @@ def test_a_refused_endpoint_fails_safe() raises:
     )
     with assert_raises():
         validate_graph_spec(spec, _graph(), _Refuse("ep-synth"))
+
+
+def test_a_refused_source_fails_safe() raises:
+    var spec = _valid_model_spec()
+    assert_equal(resolve_extract_mode(spec, _graph()), EXTRACT_MODE_MODEL)
+    assert_equal(
+        resolve_extract_mode(
+            spec, _graph(), AllowAllEndpoints(), _RefuseSource("src-0")
+        ),
+        EXTRACT_MODE_RULES,
+    )
+    assert_equal(
+        describe_resolved_mode(
+            spec, _graph(), AllowAllEndpoints(), _RefuseSource("src-0")
+        ),
+        "rules",
+    )
+    with assert_raises(contains="source 0 is refused by the source policy"):
+        validate_graph_spec(
+            spec, _graph(), AllowAllEndpoints(), _RefuseSource("src-0")
+        )
+
+
+def test_a_source_policy_that_refuses_another_source_keeps_model() raises:
+    assert_equal(
+        resolve_extract_mode(
+            _valid_model_spec(),
+            _graph(),
+            AllowAllEndpoints(),
+            _RefuseSource("src-9"),
+        ),
+        EXTRACT_MODE_MODEL,
+    )
 
 
 def main() raises:

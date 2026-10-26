@@ -4,8 +4,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the spec value (sources, extract config, synthesis binding, trigger), the scope
 # reference it compares (a scope id and an optional owner id, plain strings), its
 # validation, and the fail-safe resolution of its extract mode. Which inference
-# endpoints a graph may bind is an EndpointPolicy the host injects; the default
-# allows every endpoint. It decides nothing about authorization. It depends on
+# endpoints a graph may bind is an EndpointPolicy, and which sources it may be
+# built from is a SourcePolicy; the host injects both and the defaults allow
+# everything. It decides nothing about authorization. It depends on
 # komira_kg_mode only, and reads no clock and no environment.
 #
 # The welded tests: test_graph_spec_validation checks that each defect is refused

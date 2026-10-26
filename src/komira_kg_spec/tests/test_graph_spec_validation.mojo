@@ -17,6 +17,10 @@
 #   endpoint   the default policy allows every endpoint; an injected policy that
 #              refuses raises, naming the extract or the synthesis binding; the
 #              policy sees the binding's endpoint string and the graph's scope.
+#   source     the default policy allows every source; an injected policy that
+#              refuses a named source raises with a message of its own naming
+#              that source's index and lets the others through; the policy sees
+#              the binding as written and the graph's scope.
 #   opaque     an arbitrary selector, transport label, model id and source id
 #              give the same outcome as an ordinary one.
 # No test reads a clock or the environment.
@@ -38,12 +42,14 @@ from komira_kg_spec import (
     TRIGGER_ON_SOURCE_VERSION_CHANGE,
     TRIGGER_SCHEDULED,
     AllowAllEndpoints,
+    AllowAllSources,
     EndpointPolicy,
     ExtractConfig,
     GraphScopeRef,
     InferenceBinding,
     KnowledgeGraphSpec,
     SourceBinding,
+    SourcePolicy,
     TriggerConfig,
     is_known_trigger,
     scope_rank,
@@ -52,7 +58,7 @@ from komira_kg_spec import (
 
 
 def _binding(endpoint: String) -> InferenceBinding:
-    return InferenceBinding("chat", endpoint, "model-a")
+    return InferenceBinding("transport-a", endpoint, "model-a")
 
 
 def _shared(scope: String) -> GraphScopeRef:
@@ -137,7 +143,7 @@ def test_a_valid_spec_keeps_every_field_it_was_built_with() raises:
     assert_false(copy.sources[0].scope.has_owner())
     assert_equal(copy.sources[0].selector, "sel")
     assert_equal(copy.extract.mode, EXTRACT_MODE_MODEL)
-    assert_equal(copy.extract.inference.value().transport, "chat")
+    assert_equal(copy.extract.inference.value().transport, "transport-a")
     assert_equal(copy.extract.inference.value().endpoint, "ep-extract")
     assert_equal(copy.extract.inference.value().model_id, "model-a")
     assert_true(copy.has_synthesis())
@@ -359,6 +365,118 @@ def test_a_binding_in_rules_mode_is_still_held_to_the_policy() raises:
     validate_graph_spec(spec, _shared("s1"))
     with assert_raises(contains="the extract inference endpoint is refused"):
         validate_graph_spec(spec, _shared("s1"), _RefuseEndpoint("ep-extract"))
+
+
+# --------------------------------------------------------------- source ----
+
+
+struct _RefuseSource(SourcePolicy):
+    """Refuses the source with one id, for every graph."""
+
+    var source_id: String
+
+    def __init__(out self, source_id: String):
+        self.source_id = source_id
+
+    def allows(self, source: SourceBinding, graph: GraphScopeRef) -> Bool:
+        return source.source_id != self.source_id
+
+
+struct _RefuseSourceInScope(SourcePolicy):
+    """Refuses every source when the graph is in one scope, and every source
+    that claims one scope when it is not."""
+
+    var graph_scope: String
+    var claimed_scope: String
+
+    def __init__(out self, graph_scope: String, claimed_scope: String):
+        self.graph_scope = graph_scope
+        self.claimed_scope = claimed_scope
+
+    def allows(self, source: SourceBinding, graph: GraphScopeRef) -> Bool:
+        if graph.scope_id == self.graph_scope:
+            return False
+        return source.scope.scope_id != self.claimed_scope
+
+
+def _two_source_spec() -> KnowledgeGraphSpec:
+    var sources = List[SourceBinding]()
+    sources.append(SourceBinding("src-0", _shared("s1"), ""))
+    sources.append(SourceBinding("src-1", _shared("s1"), ""))
+    return _spec_over(
+        sources^,
+        ExtractConfig.rules(),
+        Optional[InferenceBinding](),
+        TriggerConfig.manual(),
+    )
+
+
+def test_the_default_policy_allows_every_source() raises:
+    var src = SourceBinding("anything", _owned("s1", "owner-a"), "")
+    assert_true(AllowAllSources().allows(src, _shared("s9")))
+    validate_graph_spec(_two_source_spec(), _shared("s1"))
+    validate_graph_spec(
+        _two_source_spec(), _shared("s1"), AllowAllEndpoints(), AllowAllSources()
+    )
+
+
+def test_an_injected_policy_that_refuses_a_named_source_raises() raises:
+    with assert_raises(
+        contains="source 1 is refused by the source policy for this graph"
+    ):
+        validate_graph_spec(
+            _two_source_spec(),
+            _shared("s1"),
+            AllowAllEndpoints(),
+            _RefuseSource("src-1"),
+        )
+
+
+def test_a_source_policy_that_refuses_no_listed_source_accepts() raises:
+    validate_graph_spec(
+        _two_source_spec(),
+        _shared("s1"),
+        AllowAllEndpoints(),
+        _RefuseSource("not-listed"),
+    )
+
+
+def test_the_source_policy_sees_the_binding_and_the_graph_scope() raises:
+    # Refuses graphs in s9; and sources claiming scope s1 in any other graph.
+    var policy = _RefuseSourceInScope("s9", "s1")
+    with assert_raises(contains="refused by the source policy"):
+        validate_graph_spec(
+            _two_source_spec(), _shared("s1"), AllowAllEndpoints(), policy
+        )
+    var sources = List[SourceBinding]()
+    sources.append(SourceBinding("src-0", _shared("s9"), ""))
+    var spec = _spec_over(
+        sources^,
+        ExtractConfig.rules(),
+        Optional[InferenceBinding](),
+        TriggerConfig.manual(),
+    )
+    with assert_raises(contains="refused by the source policy"):
+        validate_graph_spec(spec, _shared("s9"), AllowAllEndpoints(), policy)
+    var other = List[SourceBinding]()
+    other.append(SourceBinding("src-0", _shared("s2"), ""))
+    var ok = _spec_over(
+        other^,
+        ExtractConfig.rules(),
+        Optional[InferenceBinding](),
+        TriggerConfig.manual(),
+    )
+    validate_graph_spec(ok, _shared("s2"), AllowAllEndpoints(), policy)
+
+
+def test_a_scope_defect_is_reported_before_the_source_policy() raises:
+    with assert_raises(contains="different scope"):
+        validate_graph_spec(
+            _two_source_spec(),
+            _shared("s2"),
+            AllowAllEndpoints(),
+            _RefuseSource("src-0"),
+        )
 
 
 # --------------------------------------------------------------- opaque ----

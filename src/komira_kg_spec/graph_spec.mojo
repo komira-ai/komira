@@ -17,6 +17,13 @@
 #     same scope id, no looser tier, and for an owner-tier source the same
 #     owner. This is containment of two plain values, not authorization; who
 #     may read which graph is the host's decision.
+#   * Host contract for sources. `SourceBinding.scope` is a claim written in the
+#     spec. Nothing in this package ties it to `source_id`: the host must check
+#     each source's real scope and owner against its own records before it
+#     calls `validate_graph_spec`, or a spec can name another owner's source
+#     with the graph's own scope and validate. A `SourcePolicy` the host injects
+#     can also refuse a source the caller may not read, and a stored spec then
+#     fails safe to rules on resolve. The default allows every source.
 #   * Endpoints. Whether an inference endpoint may be bound to a graph is an
 #     `EndpointPolicy` the host injects. The default allows every endpoint.
 #   * Opaque values. `SourceBinding.selector`, `InferenceBinding.transport`,
@@ -170,6 +177,13 @@ struct SourceBinding(Copyable, Movable):
     `source_id` names the source; `scope` says where it lives, for the
     containment checks; `selector` says which part of it. All three are opaque
     to the checks except `scope`, which is compared field by field.
+
+    `scope` is a claim written in the spec. Nothing in this package ties it to
+    `source_id`: the host must check each source's real scope and owner against
+    its own records before calling `validate_graph_spec`, or a spec can name
+    another owner's source with the graph's own scope and validate. A
+    `SourcePolicy` is where the host can refuse a source it knows the caller may
+    not read.
     """
 
     var source_id: String
@@ -185,6 +199,28 @@ struct SourceBinding(Copyable, Movable):
         self.source_id = source_id^
         self.scope = scope^
         self.selector = selector^
+
+
+# =============================================================================
+# The source policy the host injects.
+# =============================================================================
+trait SourcePolicy(Movable, Deinitable):
+    """The host's rule for which sources a graph may be built from."""
+
+    def allows(self, source: SourceBinding, graph: GraphScopeRef) -> Bool:
+        """True when a graph in scope `graph` may be built from `source`. The
+        binding is passed through as written, including its claimed scope."""
+        ...
+
+
+struct AllowAllSources(SourcePolicy):
+    """The default policy: every source is allowed."""
+
+    def __init__(out self):
+        pass
+
+    def allows(self, source: SourceBinding, graph: GraphScopeRef) -> Bool:
+        return True
 
 
 comptime TRIGGER_ON_SOURCE_VERSION_CHANGE: Int = 0
@@ -263,14 +299,27 @@ struct KnowledgeGraphSpec(Copyable, Movable):
 def validate_graph_spec(
     spec: KnowledgeGraphSpec, graph: GraphScopeRef
 ) raises:
-    """`validate_graph_spec` with the default policy, which allows every
-    endpoint."""
-    validate_graph_spec(spec, graph, AllowAllEndpoints())
+    """`validate_graph_spec` with the default policies, which allow every
+    endpoint and every source."""
+    validate_graph_spec(spec, graph, AllowAllEndpoints(), AllowAllSources())
 
 
 def validate_graph_spec[
     P: EndpointPolicy
 ](spec: KnowledgeGraphSpec, graph: GraphScopeRef, policy: P) raises:
+    """`validate_graph_spec` with an endpoint policy and the default source
+    policy, which allows every source."""
+    validate_graph_spec(spec, graph, policy, AllowAllSources())
+
+
+def validate_graph_spec[
+    P: EndpointPolicy, S: SourcePolicy
+](
+    spec: KnowledgeGraphSpec,
+    graph: GraphScopeRef,
+    policy: P,
+    sources: S,
+) raises:
     """Check a graph's build configuration; raise on the first defect.
 
     The checks, in this order:
@@ -278,12 +327,18 @@ def validate_graph_spec[
     1. the graph's scope id and owner id, when present, are not empty;
     2. for each source: its id and scope id are not empty, its scope id is the
        graph's, the graph is no looser than it, and an owner-tier source has the
-       graph's owner;
+       graph's owner, and `sources` allows it;
     3. each inference binding present (extract, then synthesis) is allowed by
        `policy`;
     4. the extract mode is a declared ordinal;
     5. the model mode has an inference binding;
     6. the trigger kind is a declared ordinal.
+
+    Host contract: `SourceBinding.scope` is a claim written in the spec, and
+    nothing here ties it to `source_id`. The host must check each source's real
+    scope and owner against its own records before calling this, or a spec can
+    name another owner's source with the graph's own scope and validate.
+    `sources` is where the host refuses a source the caller may not read.
 
     Nothing here parses a selector, reads a transport label or branches on a
     source id, so a new kind of source or transport needs no change.
@@ -292,6 +347,7 @@ def validate_graph_spec[
         spec: The configuration to check.
         graph: Where the graph lives.
         policy: Which endpoints the graph may bind.
+        sources: Which sources the graph may be built from.
 
     Raises:
         An error naming the first defect.
@@ -343,6 +399,12 @@ def validate_graph_spec[
                     " tiers are not equal scopes: the graph's owner would"
                     " receive a derivative of data that was never theirs."
                 )
+        if not sources.allows(src, graph):
+            raise Error(
+                String("graph_spec: source ")
+                + String(i)
+                + " is refused by the source policy for this graph"
+            )
 
     if spec.extract.inference:
         _require_endpoint_allowed(
@@ -402,24 +464,39 @@ def _require_endpoint_allowed[
 def resolve_extract_mode(
     spec: KnowledgeGraphSpec, graph: GraphScopeRef
 ) -> KgExtractMode:
-    """`resolve_extract_mode` with the default policy."""
-    return resolve_extract_mode(spec, graph, AllowAllEndpoints())
+    """`resolve_extract_mode` with the default policies."""
+    return resolve_extract_mode(
+        spec, graph, AllowAllEndpoints(), AllowAllSources()
+    )
 
 
 def resolve_extract_mode[
     P: EndpointPolicy
 ](spec: KnowledgeGraphSpec, graph: GraphScopeRef, policy: P) -> KgExtractMode:
+    """`resolve_extract_mode` with an endpoint policy and the default source
+    policy."""
+    return resolve_extract_mode(spec, graph, policy, AllowAllSources())
+
+
+def resolve_extract_mode[
+    P: EndpointPolicy, S: SourcePolicy
+](
+    spec: KnowledgeGraphSpec,
+    graph: GraphScopeRef,
+    policy: P,
+    sources: S,
+) -> KgExtractMode:
     """The mode the spec actually runs at.
 
     A spec that fails `validate_graph_spec` resolves to rules, never to model,
     and this function cannot raise. It is for a spec already stored, which may
     have stopped validating since it was written (a source moved, a policy
-    changed, a newer writer stored an ordinal this build does not know); the
+    changed, a source the caller may no longer read, a newer writer stored an ordinal this build does not know); the
     only safe answer there is the mode that sends nothing to a model. A valid
     spec resolves to its own mode.
     """
     try:
-        validate_graph_spec(spec, graph, policy)
+        validate_graph_spec(spec, graph, policy, sources)
     except:
         return EXTRACT_MODE_RULES
     return normalize_extract_mode(spec.extract.mode)
@@ -428,14 +505,29 @@ def resolve_extract_mode[
 def describe_resolved_mode(
     spec: KnowledgeGraphSpec, graph: GraphScopeRef
 ) -> String:
-    """`describe_resolved_mode` with the default policy."""
-    return describe_resolved_mode(spec, graph, AllowAllEndpoints())
+    """`describe_resolved_mode` with the default policies."""
+    return describe_resolved_mode(
+        spec, graph, AllowAllEndpoints(), AllowAllSources()
+    )
 
 
 def describe_resolved_mode[
     P: EndpointPolicy
 ](spec: KnowledgeGraphSpec, graph: GraphScopeRef, policy: P) -> String:
+    """`describe_resolved_mode` with an endpoint policy and the default source
+    policy."""
+    return describe_resolved_mode(spec, graph, policy, AllowAllSources())
+
+
+def describe_resolved_mode[
+    P: EndpointPolicy, S: SourcePolicy
+](
+    spec: KnowledgeGraphSpec,
+    graph: GraphScopeRef,
+    policy: P,
+    sources: S,
+) -> String:
     """The canonical name of the resolved mode, for a build record that must say
     which mode ran and not which was configured. The two differ exactly when
     the fail-safe fired."""
-    return String(extract_mode_name(resolve_extract_mode(spec, graph, policy)))
+    return String(extract_mode_name(resolve_extract_mode(spec, graph, policy, sources)))

@@ -32,7 +32,15 @@ resolves to rules, never to model.
 
 The host decides which inference endpoints a graph may bind by implementing
 `EndpointPolicy`; `AllowAllEndpoints` is the default. Whether the caller may read
-a source is also the host's decision, made before it declares a spec. The
+a source is also the host's decision, made before it declares a spec.
+
+Host contract: `SourceBinding.scope` is a claim written in the spec. Nothing in
+this package ties it to `source_id`. The host must check each source's real
+scope and owner against its own records before calling `validate_graph_spec`;
+otherwise a spec can name another owner's source with the graph's own scope and
+validate. A `SourcePolicy` the host injects (`AllowAllSources` is the default)
+is where it refuses a source it knows the caller may not read; a stored spec
+that names such a source then fails safe to rules on `resolve_extract_mode`. The
 transport label, endpoint, model id, source id and selector are never parsed or
 branched on here. The package reads no clock and no environment, depends on
 `komira_kg_mode` only, and no pointer crosses its API.
@@ -63,7 +71,7 @@ var sources = List[SourceBinding]()
 sources.append(SourceBinding("source-1", GraphScopeRef.shared("team-a"), "any/selector"))
 var spec = KnowledgeGraphSpec(
     sources^,
-    ExtractConfig.model(InferenceBinding("chat", "endpoint-1", "model-1")),
+    ExtractConfig.model(InferenceBinding("transport-a", "endpoint-1", "model-1")),
     Optional[InferenceBinding](),
     TriggerConfig.manual(),
 )
@@ -133,10 +141,59 @@ struct NoEndpointOne(EndpointPolicy):
 def main() raises:
     var spec = KnowledgeGraphSpec(
         List[SourceBinding](),
-        ExtractConfig.model(InferenceBinding("chat", "endpoint-1", "model-1")),
+        ExtractConfig.model(InferenceBinding("transport-a", "endpoint-1", "model-1")),
         Optional[InferenceBinding](),
         TriggerConfig.manual(),
     )
     with assert_raises(contains="refused by the endpoint policy"):
         validate_graph_spec(spec, GraphScopeRef.shared("team-a"), NoEndpointOne())
+```
+
+A source policy the host injects can refuse a source it knows the caller may not
+read, and the stored spec then resolves to rules:
+
+```mojo module
+from std.testing import assert_equal, assert_raises
+from komira_kg_mode import EXTRACT_MODE_RULES
+from komira_kg_spec import (
+    AllowAllEndpoints,
+    ExtractConfig,
+    GraphScopeRef,
+    InferenceBinding,
+    KnowledgeGraphSpec,
+    SourceBinding,
+    SourcePolicy,
+    TriggerConfig,
+    resolve_extract_mode,
+    validate_graph_spec,
+)
+
+
+struct NoSourceOne(SourcePolicy):
+    def __init__(out self):
+        pass
+
+    def allows(self, source: SourceBinding, graph: GraphScopeRef) -> Bool:
+        # A real host looks the source up in its own records here.
+        return source.source_id != "source-1"
+
+
+def main() raises:
+    var sources = List[SourceBinding]()
+    sources.append(
+        SourceBinding("source-1", GraphScopeRef.shared("team-a"), "")
+    )
+    var spec = KnowledgeGraphSpec(
+        sources^,
+        ExtractConfig.model(InferenceBinding("transport-a", "endpoint-1", "model-1")),
+        Optional[InferenceBinding](),
+        TriggerConfig.manual(),
+    )
+    var graph = GraphScopeRef.shared("team-a")
+    with assert_raises(contains="refused by the source policy"):
+        validate_graph_spec(spec, graph, AllowAllEndpoints(), NoSourceOne())
+    assert_equal(
+        resolve_extract_mode(spec, graph, AllowAllEndpoints(), NoSourceOne()),
+        EXTRACT_MODE_RULES,
+    )
 ```
