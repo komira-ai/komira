@@ -185,6 +185,7 @@ TARGETS = [
     "komira//src/komira_mail_address:table",
     "komira//src/komira_mail_auth:komira_mail_auth_conda",
     "komira//src/komira_mail_store:komira_mail_store_conda",
+    "komira//src/komira_mail_tls:komira_mail_tls_conda",
     "komira//src/komira_metrics_reader:komira_metrics_reader_conda",
     "komira//src/komira_morsel:komira_morsel_conda",
     "komira//src/komira_oauth:komira_oauth_conda",
