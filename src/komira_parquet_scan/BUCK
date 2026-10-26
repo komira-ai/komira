@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The Parquet scan's engine side, part 1: the per-file reader the scan's
+# The Parquet scan's engine side: the per-file reader the scan's
 # morsel source drives (parquet_reader, its page-index-pruned decodes in
 # parquet_reader_prune, the footer offset-width refinement in
 # arrow_hint_refine, the read-ahead hint in prefetch), its factory
