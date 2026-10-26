@@ -325,6 +325,7 @@ TARGETS = [
     "komira//src/komira_scan_planning:komira_scan_planning_conda",
     "komira//src/komira_scan_resolver:komira_scan_resolver_conda",
     "komira//src/komira_sdk:komira_sdk_conda",
+    "komira//src/komira_sdk_exec:komira_sdk_exec_conda",
     "komira//src/komira_search:komira_search_conda",
     "komira//src/komira_search_catalog:komira_search_catalog_conda",
     "komira//src/komira_search_compaction:komira_search_compaction_conda",
