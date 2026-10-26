@@ -241,6 +241,18 @@ And it reads a file's rows:
   `decode_column_chunk_from_bytes`, and `decode_numeric_dict_codes_from_bytes`
   (an INT32 / INT64 dictionary chunk as codes and entries, for a count that
   never gathers the values). A chunk outside the given range is refused.
+- `file_decode`: `decode_parquet_file_from_bytes(file, projection)`, a whole
+  in-memory file (a `ByteView`) to one `RecordBatch`: the trailer and footer
+  are checked and parsed, each row group is decoded from its own range with
+  `bytes_decode` and the row groups are concatenated in file order. An empty
+  or short buffer, a missing `PAR1` magic, a footer length that does not fit,
+  a footer that does not parse, a file with no row group, a nested column and
+  a chunk outside the data region are each refused with an `Error`. A
+  `dictionary_page_offset` of 0 is refused as outside the data region (some
+  writers use 0 for "absent"; the Parquet footer says absent by omitting it).
+  A column chunk's `num_values` must equal the values its data page headers
+  declare: the footer's count never sizes a buffer alone. A chunk whose pages
+  hold fewer values than the footer says is refused (a change for corrupt files only).
 - Every column chunk these decode is counted
   (`komira_counters.parquet_column_chunks_decoded`), so a test can see which
   columns a scan read.

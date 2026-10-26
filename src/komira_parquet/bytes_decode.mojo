@@ -60,11 +60,13 @@ struct ByteRange(Copyable, Movable):
 
     def contains(self, abs_offset: Int, abs_length: Int) -> Bool:
         """`[abs_offset, abs_offset + abs_length)` lies inside this range
-        (a negative offset or length never does)."""
+        (a negative offset or length never does). Written without adding
+        the two, so a length near the Int maximum cannot wrap."""
         return (
             abs_offset >= self.start
             and abs_length >= 0
-            and abs_offset + abs_length <= self.end
+            and abs_offset <= self.end
+            and abs_length <= self.end - abs_offset
         )
 
 

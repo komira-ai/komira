@@ -58,6 +58,7 @@ comptime _FILES: List[String] = [
     "dict_mat_counter.mojo",
     "dictionary.mojo",
     "dictionary_resolve.mojo",
+    "file_decode.mojo",
     "file_reader.mojo",
     "footer_header.mojo",
     "footer_pin_budget.mojo",

@@ -42,6 +42,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   and numeric dictionary chunks, sliced nullable numeric columns.
 # - test_decimal_encode_direct: big-endian FLBA(16) values, signed-order
 #   statistics, the schema element, invalid precision/scale refused.
+# - test_file_decode_roundtrip: komira_parquet's whole-file decode
+#   (decode_parquet_file_from_bytes) on this package's record-batch files:
+#   every type under each codec, row groups in file order, a projection, zero
+#   rows, and footers rewritten to have no row group, a nested column and a
+#   chunk outside the data region.
 # - test_file_writer_roundtrip: ParquetFileWriter's bytes decoded by
 #   komira_parquet's reader (a separate implementation): every type and
 #   null, four codecs, the footer's offsets and sizes, schema-order chunks,
@@ -105,6 +110,7 @@ mojo_library(
         "tests/test_decimal_encode_direct.mojo",
         "tests/test_dict_encoder_direct.mojo",
         "tests/test_encoded_column.mojo",
+        "tests/test_file_decode_roundtrip.mojo",
         "tests/test_file_writer_errors.mojo",
         "tests/test_file_writer_roundtrip.mojo",
         "tests/test_multi_batch_direct.mojo",
