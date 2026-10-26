@@ -51,8 +51,8 @@ Out of scope here:
   models or derivations over the graph. They live outside komira and use the seams below.
 - The durable table format. That is [data_graph_storage.md](data_graph_storage.md); this port brings the
   lineage layer that exists today and keeps it behind the seam in the open questions.
-- Authorization of who may read which graph. The spec names a resource reference from
-  [`komira_authz_api`](../../src/komira_authz_api/) and decides nothing about policy.
+- Authorization of who may read which graph. The spec defines its own `GraphScopeRef` (a scope id plus an optional owner id) and decides nothing about
+  policy; open question 7 says why it does not reuse an authorization type.
 - Connectors to external services (OAuth, sync, fetchers) and the source adapters that read them are not
   part of komira and are not scheduled by this document.
 
@@ -60,8 +60,7 @@ Out of scope here:
 
 All new packages start as `mojo_library` (the rule every sibling port uses today) and move to
 `mojo_package` with the rest of the family. Directory, import name and target name are the same, as for
-every package. Sizes are the source implementation's line counts before splitting; every file over 1000
-lines is split during the port, because the repository's file limit applies.
+every package. Every file over 1000 lines is split during the port, because the repository's file limit applies.
 
 | package | what it is | lines (estimate after the changes below) | engine |
 |---|---|---:|---|
@@ -178,8 +177,8 @@ store never reads a wall clock itself; see the testing plan.
 - `komira_kg_capture`: the capture server and its query surface. Routes: capture (dispatched to a registered
   `SurfaceAdapter` by a surface tag in the request), structured ingest, query, federated query and health.
   Everything a host would add (routes over a loaded working set) goes through `CaptureRoutes`. The
-  synthesis prompt and the default partition are constructor arguments; the capability filter is a plain
-  string compared for equality. Depends on `komira_kg`, `komira_kg_format`, `komira_objectstore`,
+  synthesis prompt (a neutral text by default) and the default partition are constructor arguments; the facet filter is a plain
+  string compared for equality. Depends on `komira_kg`, `komira_kg_format`, `komira_kg_sources`, `komira_objectstore`,
   `komira_async`, `komira_http_server`.
 - `komira_kg_enrich`: `EnrichmentItem` (a partition id, an opaque source key and an opaque body),
   `EnrichmentQueue` (trait), `CasEnrichmentQueue`, `DrainLease`, `RetryScheduler`, the drain worker, the
@@ -187,7 +186,7 @@ store never reads a wall clock itself; see the testing plan.
   network or identity service is the host's. Depends on `komira_objectstore`.
 - `komira_kg_sources`: `RawStore[Store]` (a content-hash-keyed record store over the conditional-write
   store trait, with the surface as an opaque tag on each record), `PartitionBindingStore` (a partition binds
-  one raw store and one lineage; provider, source kind and capability are opaque strings, validated against
+  one raw store and one lineage; source system, source kind and facet are opaque strings, validated against
   a set the host passes in), `AdapterRegistry` (a surface tag to a `SurfaceAdapter`) and `BIndex` (cosine
   over embeddings, top-k, raw key to episode, through the registry). No adapter for a particular document
   kind or service ships; those are conformers of `SurfaceAdapter` outside komira. Depends on `komira_kg`
@@ -206,12 +205,12 @@ derivations that live outside komira".
 | the root re-export file and the 12 shim files | dropped; importers name the real module | none |
 | domain models and derivations over the graph (typed node and edge models, derived business objects, query helpers and writeback for them, incremental and push derivers) | outside komira; they are consumers of the public graph | `Extractor`, `SurfaceAdapter`, `CaptureRoutes`, the working set and ingest API |
 | the domain routes inside the capture server | split out of `capture_node` and kept outside | `CaptureRoutes` |
-| adapters for particular document kinds or services (mail, chat, calendar, meetings, files, task trackers) and their raw-store, binding and index glue | outside komira; each is a conformer of `SurfaceAdapter` | `SurfaceAdapter`, `AdapterRegistry` |
+| adapters for particular document kinds or services (each reads one kind of document or one service) and their raw-store, binding and index glue | outside komira; each is a conformer of `SurfaceAdapter` | `SurfaceAdapter`, `AdapterRegistry` |
 | the push-capture adapter for one terminal-session format, and its conformer | outside komira; a host lowers its own capture format | `SurfaceAdapter` |
 | the typed-pattern extractor whose entity vocabulary and verb list are fixed in code | outside komira; the machinery is public as `RuleExtractor`, the rule set is host data | `Extractor` |
 | application-bound providers and connectors that store into an application database | dropped | none |
 | application-specific importers | dropped | none |
-| hooks into a host's mail, chat and DAV servers, and structural routers for them | outside komira | `SurfaceAdapter` |
+| hooks into a host's own servers, and structural routers for them | outside komira | `SurfaceAdapter` |
 | the connector framework, sync driver and OAuth flows | outside komira; not scheduled | none |
 | the enrichment sender (it authenticates to a cloud identity service) | outside komira; the host supplies it | `EnrichmentSender`, `AuthHeaderProvider` |
 | inference-backend re-exports and process-spawning backends for particular servers | dropped; a host supplies an `LlmClient` or an `Embedder`. A generic start/stop/base-address backend trait is a later question | `LlmClient`, `Embedder` |
@@ -300,15 +299,15 @@ that brings it, at the seams named. A package's `deps` is stated in its first PR
 | 13 | `komira_kg_mode` | 140 | none | each mode name round trips; an unknown name falls back to rules; normalisation never yields model unless asked |
 | 14 | `komira_kg_spec` (`graph_spec` and `GraphScopeRef`; the host resource-type registration is not ported) | 540 | PR 13 | each invalid spec is refused with its own message; a valid spec round trips; a scope of another owner is refused; the default endpoint policy allows and an injected one refuses |
 | 15 | `komira_kg_llm`: transports, `EmbeddingsWireEmbedder`, `ChatCompletionsLlmClient` with `ExtractionPrompt`, `KgExtractClient` | 1,700 | PRs 7, 12 and 13, async, http client | against an in-process server: request shape, a non-200, a truncated body, the configured path and auth header; a response of the wrong dimension is refused; two different prompts reach the wire unchanged; the request-timeout value reaches the connector (the transport takes a timeout value, not a clock, so no test waits) |
-| 16 | `komira_kg_sources`: `RawStore`, `PartitionBindingStore`, `AdapterRegistry`, `BIndex` | 1,300 | PR 12 | a raw record is stored once per content hash whatever its surface tag; a partition binds one store and one lineage; an unknown provider is refused against the host's set; the index returns the same top-k as a plain scan through two registered test adapters |
+| 16 | `komira_kg_sources`: `RawStore`, `PartitionBindingStore`, `AdapterRegistry`, `BIndex` | 1,300 | PR 12 | a raw record is stored once per content hash whatever its surface tag; a partition binds one store and one lineage; an unknown source system is refused against the host's set; the index returns the same top-k as a plain scan through two registered test adapters |
 | 17 | `komira_kg_capture`: server and `CaptureRoutes` (the domain routes are split out of the server first) | 2,000 (two PRs) | PR 12 and PR 16, http server | a push to a registered surface becomes an episode and an unregistered surface is refused; the query surface answers from the warm cache and from the snapshot alike; extra routes are only reachable if registered; the server takes its clock as an argument |
 | 18 | `komira_kg_enrich` with the `EnrichmentSender` trait | 1,150 | objectstore | an item is delivered once; a failed delivery is retried by the scheduler's stated schedule; a second worker cannot drain while a lease is held |
 
 That is 19 PRs for about 18,500 lines in this wave. PRs 1 to 4 are a chain; 5 needs PRs 2 and 4; 6 needs
 PR 2; 13 needs nothing. After PR 2 the chain from 6 to 12 and the branches 13 and 18 run in parallel. The
 core to land first is PRs 0 to 12 (format, store and ingest with their seams); the model clients, the
-sources glue and the server follow. PRs 9, 11 and 16 have the largest source files; the file split is real
-work inside the PR and is the reason for the larger sizes.
+sources glue and the server follow. PRs 9, 11 and 17 have the largest source files (the capture server is 2,646 lines in the source, which is
+why PR 17 is two PRs); the file split is real work inside the PR and is the reason for the larger sizes.
 
 ### Wave 1: the engine
 
