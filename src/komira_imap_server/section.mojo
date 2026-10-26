@@ -280,21 +280,44 @@ struct Located(Copyable, Movable):
         self.owned = List[UInt8]()
 
 
-def ensure_top(bytes: List[UInt8], mut messages: List[Message]) raises:
+def ensure_top(
+    bytes: List[UInt8], mut messages: List[Message], mut links: List[Int]
+) raises:
+    """`messages[0]` is the parse of `bytes`; `links[i]` says where
+    `messages[i]` came from: `parent * 2^32 + part` for a nested message
+    (see `nested`), -1 for the top one."""
     if len(messages) == 0:
         messages.append(parse_message(Span(bytes)))
+        links.append(-1)
+
+
+def nested(
+    mut messages: List[Message], mut links: List[Int], parent: Int, part: Int
+) raises -> Int:
+    """The index in `messages` of the `message/rfc822` `part` of
+    `messages[parent]`, opened on the first ask and found again after, so a
+    FETCH of many items opens (copies and parses) each nested message once."""
+    var key = parent * 4_294_967_296 + part
+    for i in range(1, len(links)):
+        if links[i] == key:
+            return i
+    var opened = messages[parent].open_rfc822(part)
+    messages.append(opened^)
+    links.append(key)
+    return len(messages) - 1
 
 
 def _walk(
     spec: SectionSpec,
     bytes: List[UInt8],
     mut messages: List[Message],
+    mut links: List[Int],
     mut m: Int,
     mut p: Int,
 ) raises -> Bool:
     """Follow the numbers of the path; `m` is the message the last number
     ended in and `p` the part. False when the path names no part."""
-    ensure_top(bytes, messages)
+    ensure_top(bytes, messages, links)
     m = 0
     var seg = String("")
     p = 0
@@ -308,18 +331,20 @@ def _walk(
             return False
         p = found.value()
         if i < k - 1 and messages[m].part(p).media_type() == "message/rfc822":
-            var nested = messages[m].open_rfc822(p)
-            messages.append(nested^)
-            m = len(messages) - 1
+            m = nested(messages, links, m, p)
             seg = String("")
     return True
 
 
 def locate(
-    spec: SectionSpec, bytes: List[UInt8], mut messages: List[Message]
+    spec: SectionSpec,
+    bytes: List[UInt8],
+    mut messages: List[Message],
+    mut links: List[Int],
 ) raises -> Located:
     """Where the section's bytes are, before the partial. `messages[0]`, once
-    present, is the parse of `bytes`; nested messages are appended after it."""
+    present, is the parse of `bytes`; nested messages are appended after it,
+    each once (`links`)."""
     var loc = Located()
     var n = len(bytes)
     if len(spec.path) == 0:
@@ -342,7 +367,7 @@ def locate(
         return loc^
     var m = 0
     var p = 0
-    if not _walk(spec, bytes, messages, m, p):
+    if not _walk(spec, bytes, messages, links, m, p):
         return loc^
     if spec.suffix == SEC_NONE or spec.suffix == SEC_MIME:
         loc.mode = LOC_BODY if spec.suffix == SEC_NONE else LOC_HEADER
@@ -355,9 +380,7 @@ def locate(
         return loc^
     if messages[m].part(p).media_type() != "message/rfc822":
         return loc^
-    var nested = messages[m].open_rfc822(p)
-    messages.append(nested^)
-    var q = len(messages) - 1
+    var q = nested(messages, links, m, p)
     loc.src = q
     loc.part = 0
     if spec.suffix == SEC_HEADER:

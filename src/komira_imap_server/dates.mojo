@@ -5,9 +5,10 @@
 # if that is missing or not a date, the time of its `Date` field; if neither
 # is a date, the Unix epoch (zero milliseconds). It is written in UTC
 # (`+0000`): the zone of the field is not kept. SEARCH compares dates by the
-# UTC calendar day, and the sent date (`SENTBEFORE`, `SENTON`, `SENTSINCE`) is
-# the `Date` field the same way, with no fallback: a message without a
-# readable `Date` matches none of the three.
+# UTC calendar day of INTERNALDATE; the sent date (`SENTBEFORE`, `SENTON`,
+# `SENTSINCE`) is the calendar day written in the `Date` field, in its own
+# zone, with no fallback: a message without a readable `Date` matches none of
+# the three.
 
 from komira_datetime import civil_from_days, days_from_civil, days_in_month
 from komira_mail_message import parse_date_time
@@ -51,8 +52,72 @@ def sent_ms(fields: List[HdrField]) -> Optional[Int]:
     return _date_of(fields[at].value)
 
 
+def _zone_minutes(v: List[UInt8]) -> Int:
+    """The zone of a `Date` value, in minutes east of UTC: its last word,
+    `+hhmm`, `-hhmm` or one of the RFC 5322 names `parse_date_time` knows;
+    zero for anything else (a trailing `(comment)` is skipped)."""
+    var end = len(v)
+    # Skip a trailing parenthesised comment and blanks.
+    while end > 0:
+        var c = v[end - 1]
+        if c == 0x20 or c == 0x09 or c == 0x0D or c == 0x0A:
+            end -= 1
+        elif c == 0x29:
+            var depth = 0
+            while end > 0:
+                var d = v[end - 1]
+                end -= 1
+                if d == 0x29:
+                    depth += 1
+                elif d == 0x28:
+                    depth -= 1
+                    if depth == 0:
+                        break
+        else:
+            break
+    var start = end
+    while start > 0 and v[start - 1] != 0x20 and v[start - 1] != 0x09:
+        start -= 1
+    var n = end - start
+    if n == 5 and (v[start] == 0x2B or v[start] == 0x2D):
+        var val = 0
+        for k in range(1, 5):
+            if not _is_digit(v[start + k]):
+                return 0
+            val = val * 10 + Int(v[start + k] - 0x30)
+        var mins = (val // 100) * 60 + val % 100
+        return mins if v[start] == 0x2B else -mins
+    if n == 3:
+        var w = String(unsafe_from_utf8=Span(v)[start:end]).lower()
+        if w == "est":
+            return -300
+        if w == "edt" or w == "cst":
+            return -240 if w == "edt" else -360
+        if w == "cdt" or w == "mst":
+            return -300 if w == "cdt" else -420
+        if w == "mdt" or w == "pst":
+            return -360 if w == "mdt" else -480
+        if w == "pdt":
+            return -420
+    return 0
+
+
+def sent_local_ms(fields: List[HdrField]) -> Optional[Int]:
+    """The `Date` field as the wall-clock time written in it (its own zone
+    added back to the UTC time), so that `day_of_ms` of it is the date the
+    sender wrote: RFC 3501 compares `SENT*` "disregarding time and
+    timezone"."""
+    var at = find_field(fields, String("date"))
+    if at < 0:
+        return None
+    var utc = _date_of(fields[at].value)
+    if not utc:
+        return None
+    return Optional[Int](utc.value() + _zone_minutes(fields[at].value) * 60_000)
+
+
 def internal_date_ms(fields: List[HdrField]) -> Int:
-    """The INTERNALDATE of a message, in milliseconds since 1970."""
+    """The INTERNALDATE of a message, in milliseconds since the Unix epoch."""
     var r = received_ms(fields)
     if r:
         return r.value()
@@ -63,7 +128,7 @@ def internal_date_ms(fields: List[HdrField]) -> Int:
 
 
 def day_of_ms(ms: Int) -> Int:
-    """The UTC calendar day (days since 1970) of a time."""
+    """The UTC calendar day (days since the Unix epoch) of a time."""
     return ms // MS_PER_DAY
 
 
@@ -98,7 +163,7 @@ def _is_digit(c: UInt8) -> Bool:
 def parse_search_date(text: String) -> Optional[Int]:
     """A search date, `d-Mon-yyyy` or `dd-Mon-yyyy` (RFC 3501 `date-text`;
     the month in any letter case, the year four digits from 1900), as a day
-    count since 1970. None for anything else, a day the month does not
+    count since the Unix epoch. None for anything else, a day the month does not
     have included."""
     var b = text.as_bytes()
     var n = len(b)

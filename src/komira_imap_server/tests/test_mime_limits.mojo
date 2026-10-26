@@ -12,8 +12,9 @@
 # - a multipart without a boundary and a header line without a colon are the
 #   same: BODYSTRUCTURE is `NO [UNAVAILABLE]` while ENVELOPE and the header
 #   are served;
-# - a nested message with a transfer encoding cannot be opened: its structure
-#   and the sections inside it are `NO [UNAVAILABLE]`, its own bytes are not;
+# - a nested message with a transfer encoding cannot be opened: the sections
+#   inside it are `NO [UNAVAILABLE]` and its structure is a plain leaf, its own
+#   bytes are served;
 # - one message that cannot be read among others: the others are answered,
 #   the command ends `NO [UNAVAILABLE]`, and the message that was refused is
 #   not marked \Seen while the others are;
@@ -280,9 +281,16 @@ def test_a_nested_message_with_a_transfer_encoding_cannot_be_opened() raises:
             "U3ViamVjdDogeA0KDQp0ZXh0\r\n--o--\r\n"
         )
     )
-    # The structure needs the nested message's envelope, the section inside it
-    # needs the message: both are unavailable. The part's own bytes are not.
-    assert_equal(r.item(String("BODYSTRUCTURE")), UNAVAILABLE)
+    # A section inside it needs the message: it is unavailable. The structure
+    # describes it as a plain leaf (no envelope to give), and the part's own
+    # bytes are served.
+    var structure = r.item(String("BODYSTRUCTURE"))
+    assert_true(
+        structure.find('("MESSAGE" "RFC822" NIL NIL NIL "BASE64" 24 NIL NIL NIL NIL)')
+        > 0,
+        structure,
+    )
+    assert_true(structure.endswith(OK), structure)
     assert_equal(r.item(String("BODY.PEEK[1.TEXT]")), UNAVAILABLE)
     assert_equal(
         r.item(String("BODY.PEEK[1]")),
@@ -351,6 +359,29 @@ def test_the_scan_limit_refuses_before_reading() raises:
     assert_true(sizes.find("RFC822.SIZE " + String(big.byte_length())) > 0, sizes)
 
 
+def test_the_scan_limit_counts_items_that_scan_again() raises:
+    # "Subject: small\r\n\r\nx\r\n" is 21 octets. The limit lets the message
+    # be read twice and not three times: one ENVELOPE (read and scanned)
+    # fits, two do not, and neither do structure items. Sections are not
+    # re-scanned (a nested message is opened once), so they are counted once.
+    var limits = ImapLimits()
+    limits.max_scan_bytes = 50
+    var r = _Rig(limits^)
+    r.add(String("Subject: small\r\n\r\nx\r\n"))
+    r.open()
+    var refused = String(
+        "f1 NO [LIMIT] Too many message bytes to read; fetch fewer messages\r\n"
+    )
+    assert_true(r.item(String("ENVELOPE")).endswith(OK))
+    assert_equal(r.item(String("(ENVELOPE ENVELOPE)")), refused)
+    assert_equal(r.item(String("(ENVELOPE INTERNALDATE)")), refused)
+    assert_equal(r.item(String("(BODYSTRUCTURE BODY)")), refused)
+    assert_true(r.item(String("BODYSTRUCTURE")).endswith(OK))
+    assert_true(
+        r.item(String("(BODY.PEEK[1] BODY.PEEK[1] BODY.PEEK[TEXT])")).endswith(OK)
+    )
+
+
 def main() raises:
     test_depth_and_part_limits_are_unavailable_and_never_a_crash()
     test_mail_inside_the_limits_is_answered()
@@ -360,4 +391,5 @@ def main() raises:
     test_a_nested_message_with_a_transfer_encoding_cannot_be_opened()
     test_the_fetch_limit_counts_a_partial_by_its_length()
     test_the_scan_limit_refuses_before_reading()
+    test_the_scan_limit_counts_items_that_scan_again()
     print("test_mime_limits: OK")

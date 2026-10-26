@@ -2,9 +2,9 @@
 #
 # CAPABILITY, NOOP, LOGOUT, STARTTLS and LOGIN are here; SELECT, EXAMINE,
 # LIST and CLOSE are in mailbox.mojo, FETCH in fetch.mojo, SEARCH in
-# search.mojo, STORE and EXPUNGE in search_store.mojo. A command this server does not implement is answered
-# `NO [CANNOT]` (a real IMAP4rev1 command) or `BAD` (not a command), never
-# with a dropped connection. No socket, no clock: the time is a parameter, the
+# search.mojo, STORE and EXPUNGE in search_store.mojo. A command this server
+# does not implement is answered `NO [CANNOT]` (a real IMAP4rev1 command) or
+# `BAD` (not a command), never with a dropped connection. No socket, no clock: the time is a parameter, the
 # connection is a value.
 
 from komira_mail_auth import MailAuthVerifier

@@ -18,6 +18,8 @@
 #   time, with the epoch for a message with no date, and the SENT keys the
 #   Date field: a Date a day before the Received time, and a message with no
 #   Date that none of the three finds (and NOT finds);
+#   The SENT keys use the day written in the field's own zone (a Date late
+#   in the evening at -0700 is that day, though it is the next in UTC);
 # - LARGER and SMALLER against the sizes of the stored messages, exactly at
 #   each size;
 # - sequence sets and UID sets with ranges and `*`; the result of UID SEARCH
@@ -306,6 +308,23 @@ def test_sent_date_keys() raises:
     _check(r, String("ON 2-Sep-2026 SENTON 1-Sep-2026"), String("B"))
 
 
+def test_sent_date_keys_use_the_day_written_in_the_date_field() raises:
+    # A: 5 Oct 23:30 at -0700 (6 Oct in UTC); B: 6 Oct 00:30 at +0900 (5 Oct
+    # in UTC); C: a named zone, 5 Oct 22:00 EST (6 Oct in UTC), with a comment
+    # after the zone. The day is the one the sender wrote, not the UTC day.
+    var r = _Rig()
+    r.add(String("Date: Mon, 05 Oct 2026 23:30:00 -0700\r\nSubject: a\r\n\r\nx\r\n"))
+    r.add(String("Date: Tue, 06 Oct 2026 00:30:00 +0900\r\nSubject: b\r\n\r\nx\r\n"))
+    r.add(String("Date: Mon, 05 Oct 2026 22:00:00 EST (east)\r\nSubject: c\r\n\r\nx\r\n"))
+    r.id = r.s.connect()
+    _ = r.s.login(r.id, String("bob@example.com"), String("pw"))
+    _ = r.s.send(r.id, String("s1 SELECT INBOX\r\n"))
+    _check(r, String("SENTON 5-Oct-2026"), String("AC"))
+    _check(r, String("SENTON 6-Oct-2026"), String("B"))
+    _check(r, String("SENTBEFORE 6-Oct-2026"), String("AC"))
+    _check(r, String("SENTSINCE 6-Oct-2026"), String("B"))
+
+
 def test_size_keys_are_exact() raises:
     var r = _rig()
     var sizes = List[Int]()
@@ -432,6 +451,7 @@ def main() raises:
     test_a_needle_that_nearly_matches_a_long_run_is_decided()
     test_internal_date_keys()
     test_sent_date_keys()
+    test_sent_date_keys_use_the_day_written_in_the_date_field()
     test_size_keys_are_exact()
     test_sequence_and_uid_sets()
     test_uid_search_answers_uids()

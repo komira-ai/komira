@@ -73,21 +73,35 @@ def _append_mailbox(
 
 
 def _append_address(mut out: List[UInt8], a: Address):
+    # Built aside and appended whole, so a failure part-way leaves `out` as it
+    # was.
+    var piece = List[UInt8]()
     try:
         if a.is_group():
             var g = a.group()
-            out.extend(String("(NIL NIL ").as_bytes())
-            append_string(out, g.name().as_bytes())
-            out.extend(String(" NIL)").as_bytes())
+            piece.extend(String("(NIL NIL ").as_bytes())
+            append_string(piece, g.name().as_bytes())
+            piece.extend(String(" NIL)").as_bytes())
             var members = g.members()
             for i in range(len(members)):
-                _append_mailbox(out, members[i].display_name(), members[i].addr_spec().local_part(), members[i].addr_spec().domain())
-            out.extend(String("(NIL NIL NIL NIL)").as_bytes())
+                _append_mailbox(
+                    piece,
+                    members[i].display_name(),
+                    members[i].addr_spec().local_part(),
+                    members[i].addr_spec().domain(),
+                )
+            piece.extend(String("(NIL NIL NIL NIL)").as_bytes())
         else:
             var m = a.mailbox()
-            _append_mailbox(out, m.display_name(), m.addr_spec().local_part(), m.addr_spec().domain())
+            _append_mailbox(
+                piece,
+                m.display_name(),
+                m.addr_spec().local_part(),
+                m.addr_spec().domain(),
+            )
     except:
-        pass
+        return
+    out.extend(Span(piece))
 
 
 def _address_field(value: Optional[List[UInt8]]) -> List[UInt8]:
@@ -308,6 +322,13 @@ def _append_body(
         return
     var is_text = _bytes_equal_text(media[0], String("text"))
     var is_message = part.media_type() == "message/rfc822"
+    if is_message:
+        # A message/rfc822 with a transfer encoding (RFC 2046 forbids it, mail
+        # has it) cannot be opened: describe it as a plain leaf, with no
+        # envelope. A parse limit still refuses the whole structure.
+        var cte = part.transfer_encoding().lower()
+        if cte != "7bit" and cte != "8bit" and cte != "binary" and cte != "":
+            is_message = False
     out.append(0x28)
     append_upper_string(out, Span(media[0]))
     out.append(0x20)

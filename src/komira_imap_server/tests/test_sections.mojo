@@ -13,7 +13,7 @@
 #   end or past it (an empty literal), a partial of a header section, of a
 #   built field subset and of a missing section; `<0.0>` and malformed
 #   partials are BAD;
-# - \Seen: BODY[...] of any section (partial too) sets it, BODY.PEEK[...] and
+# - \Seen: a BODY[...] that names no part (NIL) does not set it; BODY[...] of any section (partial too) sets it, BODY.PEEK[...] and
 #   RFC822.HEADER do not, RFC822.TEXT does, and EXAMINE sets nothing;
 # - UID FETCH adds the UID after a section;
 # - INTERNALDATE: the first Received field's time, else the Date field's, else
@@ -290,6 +290,31 @@ def test_numbered_parts_and_their_mime() raises:
     )
 
 
+def test_several_items_through_one_nested_message_in_one_fetch() raises:
+    # The nested message is opened once for the whole FETCH, and each item
+    # still reads its own bytes from it.
+    var r = _one(_fixture())
+    assert_equal(
+        r.item(
+            String(
+                "(BODY.PEEK[2.2.TEXT] BODY.PEEK[2.2.HEADER.FIELDS (X-A)]"
+                " BODY.PEEK[2.2.1]<0.4> BODY.PEEK[2.2.TEXT]<5.4>)"
+            )
+        ),
+        _reply(
+            _lit(String("BODY[2.2.TEXT]"), String("deep body"))
+            + " "
+            + _lit(
+                String("BODY[2.2.HEADER.FIELDS (X-A)]"), String("X-A: 1\r\n\r\n")
+            )
+            + " "
+            + _lit(String("BODY[2.2.1]<0>"), String("deep"))
+            + " "
+            + _lit(String("BODY[2.2.TEXT]<5>"), String("body"))
+        ),
+    )
+
+
 def test_a_nested_message_is_reached_by_path() raises:
     var r = _one(_fixture())
     # 2.2 is the nested message's bytes as the outer message holds them.
@@ -484,6 +509,21 @@ def test_which_items_set_seen() raises:
     assert_equal(_flags(ro), unseen)
 
 
+def test_a_section_that_names_no_part_does_not_set_seen() raises:
+    var unseen = String("* 1 FETCH (FLAGS ())\r\ng1 OK FETCH completed\r\n")
+    var r = _one(_fixture())
+    assert_equal(
+        r.item(String("BODY[4]")), _reply(String("BODY[4] NIL"))
+    )
+    assert_equal(_flags(r), unseen)
+    # Next to a section that exists the message is marked, once.
+    assert_true(r.item(String("(BODY[4] BODY[1])")).find("\\Seen") > 0)
+    assert_equal(
+        _flags(r),
+        String("* 1 FETCH (FLAGS (\\Seen))\r\ng1 OK FETCH completed\r\n"),
+    )
+
+
 def test_a_section_that_sets_seen_adds_flags_to_the_answer() raises:
     var r = _one(_fixture())
     assert_equal(
@@ -611,11 +651,13 @@ def main() raises:
     test_whole_message_header_and_text()
     test_header_fields_and_the_fields_not()
     test_numbered_parts_and_their_mime()
+    test_several_items_through_one_nested_message_in_one_fetch()
     test_a_nested_message_is_reached_by_path()
     test_a_section_that_does_not_exist_is_nil()
     test_partial_edges()
     test_a_partial_with_a_zero_length_is_not_imap()
     test_which_items_set_seen()
+    test_a_section_that_names_no_part_does_not_set_seen()
     test_a_section_that_sets_seen_adds_flags_to_the_answer()
     test_uid_fetch_adds_the_uid_after_a_section()
     test_internaldate_comes_from_received_then_date_then_the_epoch()

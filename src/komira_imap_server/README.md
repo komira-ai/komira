@@ -90,9 +90,12 @@ destroyed), so a binary that serves both protocols holds one kind of listener.
 That dependency is temporary: it makes an IMAP-only binary carry the SMTP
 library, and `ListenSocket` belongs in a package both servers import.
 **Every store call blocks the whole loop.** SELECT lists up to `max_messages`
-objects, FETCH reads up to `max_fetch_bytes`, and every flag command folds a
-log, all synchronously inside `serve_one_iteration`: one slow command, or a slow
-store, stalls every other connection and their deadlines.
+objects, a FETCH or a SEARCH reads up to `max_scan_bytes` of messages (256 MiB
+by default, a FETCH returns at most `max_fetch_bytes` of them), and every flag
+command folds a log, all synchronously inside `serve_one_iteration`: one slow
+command, or a slow store, stalls every other connection and their deadlines. A
+driver that serves many connections from one thread should set a lower
+`max_scan_bytes`.
 
 - STARTTLS: the OK is written and flushed first. If the client sent bytes behind
   STARTTLS in the clear (`pending_after_starttls`), the connection is closed and
@@ -135,7 +138,8 @@ IMAP4rev1 only; RFC 9051 is out of scope.
   `\Seen` on a folder opened read-write, durably, and the answer carries
   `FLAGS` when the flag changed; `BODY.PEEK[...]` and `RFC822.HEADER` do not,
   and nothing does after EXAMINE. A message that is answered `NO
-  [UNAVAILABLE]` is not marked. The message bytes go out exactly as stored.
+  [UNAVAILABLE]` is not marked, and neither is one whose `BODY[section]`
+  names no part (that is `NIL`: no bytes were returned). The message bytes go out exactly as stored.
 - A set is `n`, `a:b`, `*` and lists of them (`*` is the largest sequence
   number, or the largest UID for the UID forms); numbers past the end are
   skipped; a 0, an empty item or more than 1024 ranges is `BAD`. A range as
@@ -144,7 +148,8 @@ IMAP4rev1 only; RFC 9051 is out of scope.
   `\Recent` and keywords are `NO [CANNOT]`, and a command that names one of
   them changes nothing.
 - A message another connection deleted since SELECT is skipped, and the FETCH
-  ends `NO [EXPUNGEISSUED]`. A FETCH whose message bytes would pass
+  ends `NO [EXPUNGEISSUED]` (when the same FETCH also had a message the MIME
+  limits refused, only `EXPUNGEISSUED` is reported). A FETCH whose message bytes would pass
   `max_fetch_bytes` is `NO [LIMIT]` before any is read (a section with a
   partial counts as its length at most), and so is one that would read more
   than `max_scan_bytes` of messages.
@@ -184,7 +189,15 @@ numbered section. The whole message, its header and text, a field subset,
 `ENVELOPE`, `INTERNALDATE` and `RFC822.SIZE` read the header block with a
 lenient scanner (a line without a colon is skipped, nothing raises), so they
 work on mail a MIME parser refuses. The section bytes go to the reply queue
-from a borrowed view of the parsed message: one copy per item.
+from a borrowed view of the parsed message into the reply queue (one copy of
+the item, and none made for the view). A message that is parsed is held twice
+while its reply is built: the stored bytes and the parse's own copy, plus one
+copy of each nested `message/rfc822` that a structure or section opens (each
+opened once per message and FETCH, however many items name it), and then the
+reply queue. A FETCH of many items scans the header block again for each
+`ENVELOPE` and `INTERNALDATE` and opens the nested messages again for each
+`BODYSTRUCTURE` and `BODY`; `max_scan_bytes` counts the message once more for
+each such item.
 
 **MIME limits.** `komira_mail_message` reads at most 8 nested multiparts and
 128 parts. A message over them, a multipart without a boundary and a header
@@ -193,15 +206,22 @@ line without a colon make `BODYSTRUCTURE`, `BODY` and the numbered sections
 `\Seen`, the other messages of the command are answered, and the connection
 goes on. A nested `message/rfc822` is opened with the parent's depth and part
 budget (a chain of 9 nested messages is over it), and one with a transfer
-encoding other than 7bit, 8bit or binary cannot be opened: the structure of a
-message that holds it is `NO [UNAVAILABLE]` too.
+encoding other than 7bit, 8bit or binary cannot be opened: in a structure it
+is described as a plain leaf (`"MESSAGE" "RFC822"` with its octet count and no
+envelope), and a section inside it is `NO [UNAVAILABLE]`. The parse limits are
+the library's defaults; `ImapServerConfig` has no setting for them.
+
+`UNAVAILABLE` is the response code RFC 5530 gives to a temporary failure of a
+subsystem; here it means a permanent refusal of that message by the parse
+limits (retrying gives the same answer). `CANNOT` and `LIMIT` are used for
+STORE and the size limits.
 
 ### INTERNALDATE
 
 The time of the first `Received` field (what follows its last `;`: the trace
 header the SMTP side adds on delivery, so when the mail arrived); if there is
 none or it is not a date, the time of the `Date` field; if neither is a date,
-the Unix epoch (`" 1-Jan-1970 00:00:00 +0000"`). It is written in UTC with a
+the Unix epoch (zero milliseconds; the tests give the text). It is written in UTC with a
 space-padded day: a zone in the field is converted, not kept.
 
 ### ENVELOPE
@@ -256,8 +276,10 @@ onward).
 - `BEFORE`, `ON`, `SINCE`: the INTERNALDATE; `SENTBEFORE`, `SENTON`,
   `SENTSINCE`: the `Date` field, with no fallback (a message without a
   readable `Date` is found by none of the three, and by `NOT` of them). A date
-  is `d-Mon-yyyy` or `dd-Mon-yyyy` (from 1900, the day must exist) and days
-  are UTC calendar days: the zone of a `Date` field is not kept.
+  is `d-Mon-yyyy` or `dd-Mon-yyyy` (from 1900, the day must exist). The
+  INTERNALDATE keys compare UTC calendar days (INTERNALDATE is written in
+  UTC); the SENT keys compare the calendar day written in the `Date` field,
+  in its own zone, as RFC 3501 says ("disregarding time and timezone").
 - `LARGER n`, `SMALLER n`: the stored size in octets.
 - a sequence set, `UID set`, `NOT key`, `OR key key`, `( key ... )`.
 
@@ -272,6 +294,26 @@ message. A search with a key that reads messages is `NO [LIMIT]` before any
 is read when the folder's messages together are over `max_scan_bytes`. A
 message another connection deleted since SELECT is found only by keys that
 read nothing.
+
+## Deviations from the previous implementation
+
+The expected strings in `tests/test_bodystructure.mojo` were written from the
+RFC 3501 grammar and compared with what the implementation this replaces
+produced; these differences are intended:
+
+- The octet count of a part inside a multipart excludes the line break before
+  the next boundary (RFC 2046 makes it part of the delimiter); the old count
+  included it, two octets more with CRLF. A text part with no `Content-Type`
+  is described with the default `CHARSET` `US-ASCII` parameter.
+- Nesting is read to any depth up to the MIME limits; the old reader looked
+  one multipart level deep and gave a nested multipart as an opaque leaf. A
+  nested `message/rfc822` gets its own envelope and structure.
+- `BODY[HEADER.FIELDS (...)]` returns the fields as written, a folded field
+  keeping its fold; the old code unfolded them.
+- A header-derived value with a byte over 0x7F, a CR, an LF or a NUL is sent
+  as a literal (the old code only quoted); `"` and `\` are escaped in quoted
+  strings in both.
+- The sent-date keys use the day written in the `Date` field.
 
 ## Input rules
 

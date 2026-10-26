@@ -22,7 +22,7 @@ from komira_mail_store import FetchOutcome, fetch_message
 from komira_objectstore.store import CloneableConditionalWriteStore
 
 from .connection import ImapConnection
-from .dates import day_of_ms, internal_date_ms, sent_ms
+from .dates import day_of_ms, internal_date_ms, sent_local_ms
 from .fetch import star_value
 from .flags import FlagSnapshot, MailboxFlagStore
 from .headers import HdrField, header_len, lower_byte, scan_fields
@@ -222,7 +222,7 @@ def eval_node(
     if kind == N_IDATE:
         return 1 if _date_matches(nodes[idx], internal_date_ms(m.fields)) else 0
     if kind == N_SDATE:
-        var sent = sent_ms(m.fields)
+        var sent = sent_local_ms(m.fields)
         if not sent:
             return 0
         return 1 if _date_matches(nodes[idx], sent.value()) else 0

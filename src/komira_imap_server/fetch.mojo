@@ -12,8 +12,10 @@
 # `NO [UNAVAILABLE]` after the others; `emit_item` then queues the answers,
 # which cannot fail. The message is read from the store once, parsed at most
 # once (and only for BODYSTRUCTURE, BODY and a numbered section), and the
-# section bytes go to the reply queue from a borrowed view of those bytes: one
-# copy, no copy per item.
+# section bytes go to the reply queue from a borrowed view of the stored or
+# parsed bytes: no copy is made for the view, and the item is copied once, into
+# the queue. A parsed message is held twice (the stored bytes and the parse's
+# copy), and each nested message a section opens is opened once per message.
 #
 # Mail that a MIME parse refuses (no multipart boundary, too many parts, too
 # deep) can still be read whole, by its header and its text, and ENVELOPE and
@@ -21,7 +23,9 @@
 # numbered section need the parse.
 #
 # \Seen is set by BODY[...] (not BODY.PEEK), RFC822 and RFC822.TEXT on a
-# folder opened read-write, durably, and only for a message that is answered.
+# folder opened read-write, durably, and only for a message that is answered
+# and for which the item returned bytes (a BODY[section] that names no part
+# answers NIL and marks nothing).
 
 from komira_mail_message import Message
 from komira_mail_store import FetchOutcome, fetch_message
@@ -59,6 +63,10 @@ from .section import (
 )
 from .sets import match_set, parse_id_set
 
+# To add an item: give it an ITEM_* here, name it in `_item_of`, answer it in
+# `_resolve` and `emit_item`, and decide in `_reads_message` (does it need the
+# message), `_returned_bytes` (does it return message bytes), `_scan_cost`
+# (does it scan the message again) and `sets_seen` in `_emit_messages`.
 comptime ITEM_FLAGS: Int = 0
 comptime ITEM_UID: Int = 1
 comptime ITEM_BODY: Int = 2  # BODY[<section>]<partial>: sets \Seen
@@ -206,22 +214,50 @@ def _reads_message(items: List[FetchItem]) -> Bool:
 
 def _returned_bytes(items: List[FetchItem], size: Int) -> Int:
     """The most message bytes the items return for a message of `size`: a
-    section is bounded by the message (and by its partial length)."""
+    section is bounded by the message (and by its partial length). Every item
+    counts as returning the message except the ones known to return a small,
+    fixed amount, so an item added later is bounded unless it is listed here.
+    ENVELOPE, BODYSTRUCTURE and BODY are not counted: each is formatted from
+    the header or structure and is far smaller than the message, and a count
+    by message size would refuse the usual `FETCH 1:* (ENVELOPE)` of a large
+    folder; the work they cost is bounded by `_scan_cost`."""
     var total = 0
     for i in range(len(items)):
         var k = items[i].kind
         if (
-            k == ITEM_BODY
-            or k == ITEM_BODY_PEEK
-            or k == ITEM_RFC822
-            or k == ITEM_RFC822_HEADER
-            or k == ITEM_RFC822_TEXT
+            k == ITEM_FLAGS
+            or k == ITEM_UID
+            or k == ITEM_RFC822_SIZE
+            or k == ITEM_INTERNALDATE
+            or k == ITEM_ENVELOPE
+            or k == ITEM_BODYSTRUCTURE
+            or k == ITEM_BODY_SHORT
         ):
-            var part = size
-            if k == ITEM_BODY or k == ITEM_BODY_PEEK:
-                if items[i].sec.has_partial and items[i].sec.length < part:
-                    part = items[i].sec.length
-            total += part
+            continue
+        var part = size
+        if k == ITEM_BODY or k == ITEM_BODY_PEEK:
+            if items[i].sec.has_partial and items[i].sec.length < part:
+                part = items[i].sec.length
+        total += part
+    return total
+
+
+def _scan_cost(items: List[FetchItem], size: Int) -> Int:
+    """The message bytes the items read or parse for a message of `size`:
+    the message once to read it, and once more for each item that scans it
+    again (ENVELOPE, INTERNALDATE, and BODYSTRUCTURE or BODY, which open
+    each nested message again). A numbered section opens a nested message
+    once per message, not per item."""
+    var total = size
+    for i in range(len(items)):
+        var k = items[i].kind
+        if (
+            k == ITEM_ENVELOPE
+            or k == ITEM_INTERNALDATE
+            or k == ITEM_BODYSTRUCTURE
+            or k == ITEM_BODY_SHORT
+        ):
+            total += size
     return total
 
 
@@ -282,7 +318,7 @@ def handle_fetch[
         var scanned = 0
         for k in range(len(picked)):
             var size = conn.view[picked[k]].size
-            scanned += size
+            scanned += _scan_cost(items, size)
             returned += _returned_bytes(items, size)
         if returned > config.limits.max_fetch_bytes:
             tagged_no_code(
@@ -372,6 +408,7 @@ def _resolve(
     bytes: List[UInt8],
     size: Int,
     mut messages: List[Message],
+    mut links: List[Int],
 ) raises -> Resolved:
     """Work out one item of a message whose stored bytes are `bytes`. Raises
     when a parse or the opening of a nested message is refused."""
@@ -390,7 +427,7 @@ def _resolve(
             + '"',
         )
     elif k == ITEM_BODYSTRUCTURE or k == ITEM_BODY_SHORT:
-        ensure_top(bytes, messages)
+        ensure_top(bytes, messages, links)
         if k == ITEM_BODYSTRUCTURE:
             append_text(r.head, String("BODYSTRUCTURE "))
         else:
@@ -407,7 +444,7 @@ def _resolve(
         or k == ITEM_BODY_PEEK
     ):
         var spec = _spec_of(item)
-        var loc = locate(spec, bytes, messages)
+        var loc = locate(spec, bytes, messages, links)
         apply_partial(loc, spec)
         var name = _name_of(item)
         if loc.mode == LOC_NIL:
@@ -500,18 +537,31 @@ def _emit_messages[
                 outcome = outcome | _MISSING
                 continue
         var messages = List[Message]()
+        var links = List[Int]()
         var resolved = List[Resolved]()
         var refused = False
         try:
             for i in range(len(items)):
-                resolved.append(_resolve(items[i], got.bytes, size, messages))
+                resolved.append(_resolve(items[i], got.bytes, size, messages, links))
         except:
             refused = True
         if refused:
             outcome = outcome | _UNAVAILABLE
             continue
+        # \Seen follows bytes that were returned: a BODY[section] that names
+        # no part is NIL and marks nothing.
+        var marks = False
+        if sets_seen:
+            for i in range(len(items)):
+                var kind = items[i].kind
+                if (
+                    kind == ITEM_BODY
+                    or kind == ITEM_RFC822
+                    or kind == ITEM_RFC822_TEXT
+                ) and resolved[i].loc.mode != LOC_NIL:
+                    marks = True
         var changed = False
-        if sets_seen and (bits & FLAG_SEEN) == 0:
+        if marks and (bits & FLAG_SEEN) == 0:
             bits = bits | FLAG_SEEN
             fstore.set_flags(leaf, bits)
             changed = True
