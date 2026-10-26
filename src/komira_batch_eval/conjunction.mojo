@@ -447,23 +447,23 @@ def evaluate_conjunction_select(
 
     for i in range(num_conjuncts):
         if surviving_count == 0:
-            # Short-circuit: no rows left. Matches eval.rs:1063-1065.
+            # Short-circuit: no rows left.
             return SelectionVector(PrimitiveArray[DType.int32].allocate(0))
 
         var mask = evaluate_predicate_selected(batch, conjuncts[i], current_sel)
         var pass_count = mask.true_count()
 
         if pass_count == 0:
-            # Every surviving row rejected by this conjunct. eval.rs:1071-1073.
+            # Every surviving row rejected by this conjunct.
             return SelectionVector(PrimitiveArray[DType.int32].allocate(0))
 
         if pass_count == surviving_count:
-            # Full-pass fast path: no narrowing needed. eval.rs:1075-1078.
+            # Full-pass fast path: no narrowing needed.
             continue
 
         # Narrow: mask has `surviving_count` bits, one per current survivor.
         # `compose_mask` copies the subset of current_sel.indices where the
-        # corresponding mask bit is True. eval.rs:1081-1091.
+        # corresponding mask bit is True.
         current_sel = current_sel.compose_mask(mask)
         surviving_count = pass_count
 
