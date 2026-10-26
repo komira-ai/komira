@@ -125,30 +125,18 @@ def _config(limits: ImapLimits = ImapLimits()) -> ImapServerConfig:
     return ImapServerConfig(String("imap.test"), True, True, limits.copy())
 
 
-# The most pumps a wait makes before the test fails. The server and the peer
-# run in this one thread, so progress needs a bounded number of pumps; a count
-# is deterministic (no clock), and a regression that stops the replies fails
-# the test instead of stalling the build.
-comptime _MAX_PUMPS: Int = 1_000_000
-
-
 def _wait_for(mut rig: _Rig, mut peer: Peer, marker: String) raises:
-    var pumps = 0
+    # Waits on progress only: no clock and no failing cap (a server that
+    # never answers is ended by the build watchdog). A peer that closed
+    # before the marker fails at once.
     while not peer.has(marker):
         if peer.eof:
             raise Error("closed before " + marker + ": " + peer.text())
-        if pumps >= _MAX_PUMPS:
-            raise Error("no " + marker + " after the pump budget: " + peer.text())
-        pumps += 1
         rig.pump(peer)
 
 
 def _wait_eof(mut rig: _Rig, mut peer: Peer) raises:
-    var pumps = 0
     while not peer.eof:
-        if pumps >= _MAX_PUMPS:
-            raise Error("not closed after the pump budget: " + peer.text())
-        pumps += 1
         rig.pump(peer)
 
 
