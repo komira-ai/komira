@@ -70,10 +70,27 @@ def check_nodes(ctx, scope, excluded, left_out = []):
     nodes = ctx.cquery().eval("set({})".format(" ".join(labels))) if labels else []
     return {str(n.label.raw_target()): n for n in nodes if n.rule_type not in SOURCE_KINDS}
 
+# The rules that register execution platforms (tools/build/platforms/defs.bzl).
+# They depend on a platform target only when `[komira_re]` or the host names a
+# worker for it, so the edge is configuration of the checkout, not of the
+# check set: `roots` does not follow it (a platform is a root whichever
+# checkout generates the list).
+REGISTRATION_KINDS = ["local_execution_platforms", "remote_execution_platforms"]
+
+def is_registration(node):
+    """Whether `node` is an execution-platform registration."""
+    return node.rule_type.split(":")[-1] in REGISTRATION_KINDS
+
 def roots(nodes):
-    """The sorted labels of the checks no other check depends on."""
+    """The sorted labels of the checks no other check depends on, not counting
+    the edges of an execution-platform registration (REGISTRATION_KINDS): which
+    platforms it names depends on the checkout's `[komira_re]`, and a list that
+    depended on it would lose the platform row of a checkout that names a macOS
+    worker, which the check of a checkout that names none still builds."""
     depended = {}
     for node in nodes.values():
+        if is_registration(node):
+            continue
         for d in node.deps():
             depended[str(d.label.raw_target())] = True
     return sorted([l for l in nodes.keys() if l not in depended])

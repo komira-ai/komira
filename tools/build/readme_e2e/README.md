@@ -20,9 +20,10 @@ One build action per package, on the farm, hermetic and offline
 | phase | what it does | what fails it |
 |---|---|---|
 | `staged` | reads the staged set's `plan.json`: the package is an `upload` member at the release's version and names its README, which is there | a package the set lacks, a `skip` or `refuse` member, another version, no README |
-| `install` | a fresh project (a `mopm.toml` of its own, nothing else) runs `mopm add <package>@=<version> --overlay <staged set>`. The lock it writes names the closure; each locked file must be the staged file byte for byte (sha256 and size, and the plan's) and is unpacked into the project's prefix, `lib/mojo/<name>.mojoc` | mopm refusing the command, a closure the set does not hold, a file that is not the pinned one, a package built for another compiler, one that ships a native library (the e2e links none) |
+| `install` | a fresh project (a `mopm.toml` of its own, nothing else) runs `mopm add <package>@=<version> --overlay <staged set>`. The lock it writes names the closure; each locked file must be the staged file byte for byte (sha256 and size, and the plan's) and is unpacked into the project's prefix, `lib/mojo/<name>.mojoc` | mopm refusing the command, a closure the set does not hold, a file that is not the pinned one, a package built for another compiler |
+| `link` | only when a package of the closure declares a native library (in its `.mopm.json` or its lock entry): `mopm build --print-cmd --prefix <the unpacked closure>` prints the `mojo build` command mopm would run, and the linker words between `build` and `-o` are added to every compile below, less the `--push-state` and `--pop-state` pairs that bracket mopm's `--no-as-needed` (the toolchain's linker driver is zig's, which refuses them; a stock `mojo build` links through the system C driver). The e2e decides nothing about which library is linked or how: that is mopm's link plan. It only checks that the plan names every library the packages declare | mopm refusing the closure (a library the metadata names is not on disk: `refused (missing_file)`; two owners of one library), a command that is not a `mojo build ... -o` line, a declared library the command leaves out |
 | `readme` | the README *the staged set holds* is cut into one program per example by the README examples tool ([`readme_examples`](../readme_examples/BUCK)), with relative links refused as for a README that ships in its package | a refused README, a README with no ```` ```mojo ```` example (it would test nothing) |
-| `compile` | each program is built by the pinned Mojo compiler against the prefix's `lib/mojo` and nothing else | an example that does not compile |
+| `compile` | each program is built by the pinned Mojo compiler against the prefix's `lib/mojo` and nothing else (and, for a closure with native libraries, linked with the words of `link`) | an example that does not compile or link (an undefined native symbol) |
 | `run` | each program is run through the gate that runs every welded test | an example that fails when run |
 
 The target's output is a marker, written only after every phase passed, so a package
@@ -116,7 +117,7 @@ lacks, fails the build: the e2e installs offline, so the set holds the whole clo
 
 `readme_e2e` takes any target whose output is a directory in that layout as its
 `staged`. `mopm stage` writes the same directory, and the release flow hands the e2e
-that set, the one it publishes, and nothing else changes. There are two sources of
+that set, the one it publishes, and nothing else changes. There are three sources of
 `staged` in the release's targets, and which one a build uses is
 `-c komira_release.staged=<which>` ([`verify/BUCK`](../../../release/readme_e2e/verify/BUCK)):
 
@@ -130,8 +131,16 @@ that set, the one it publishes, and nothing else changes. There are two sources 
   that `publish --staged` will publish. The files are an input of the build (uploaded to
   the farm) and are not in the repository, so the target is empty in a checkout. The e2e
   then runs on the farm against the real set; against the empty target it fails at
-  phase `staged` (no `plan.json`), so a release that did not stage fails. Any other
-  value of the option is an error.
+  phase `staged` (no `plan.json`), so a release that did not stage fails.
+* **`beta`**: `//release/beta_set:set`, the files of the beta channel as the release workflow's job
+  `mopm-e2e-beta` downloaded them after `mopm-publish-beta` (`release_beta_fetch`, which checked each
+  file's sha256 and size against the staged plan and wrote the plan, the READMEs and the downloaded
+  `.conda` files there; see `docs/ci.md`, "Verifying the beta publish"). The packages carry the version
+  of that run, not the one of `packages.bzl`, so `-c komira_release.beta_version=0.1.<n>` is required
+  with it. The e2e proves the README examples run on the published bytes; a package's own tests are
+  not in its `.conda` and do not run.
+
+Any other value of the option is an error.
 
 The assembled set stays for the pull request check because it is the only one with no
 network and no registry state in it: it tests, on every change, that the packages
@@ -165,7 +174,9 @@ read; a link, a path outside `lib/`, a name twice, a deflated member, a missing 
 truncated payload and garbage are each refused), the plan and lock readers and writers
 (round trip; version, duplicate, action and url refusals), the command line, the
 source root the compile gets, and the offline registry (it serves its configuration,
-refuses and remembers every other request, and answers for no other host).
+refuses and remembers every other request, and answers for no other host), and the native-library helpers
+([`native.zig`](native.zig)): the shell words of mopm's printed command, the linker words in it, and the check that a plan
+names every library the packages declare (a longer name that merely ends the same way is not the library).
 
 [`scenario.zig`](scenario.zig) runs one scenario per target (`:passes`, ...): it builds
 made-up packages ([`fixture.zig`](fixture.zig)), stages them with the real `assemble`,
@@ -193,7 +204,23 @@ line and what was and was not written.
 | `no_example` | a README with no example fails `readme` (it would test nothing) |
 | `refused_readme`, `relative_link` | a README the examples tool refuses, and one with a relative link, fail `readme` naming the line |
 | `assemble_missing_dependency`, `assemble_cycle`, `assemble_wrong_package`, `assemble_link` | the set is not written for a member that needs a package the set lacks, for a cycle, for a file that holds another package, for a package whose payload is a link |
+| `native` | a package that ships a static native library: the README calls a symbol only that archive defines, and it compiles and runs, because the compile took the archive from the command `mopm build --print-cmd` printed |
+| `native_dependency` | the same when the native belongs to a package the README's package needs |
+| `native_missing_archive` | the metadata declares a library and the package lacks the file: `link` fails with mopm's `refused (missing_file)` naming the archive; no example is compiled, no marker |
+| `native_unlinked` | a mopm whose command leaves the shipped library out: `link` fails naming the package and the library, before any example is compiled |
+| `native_undefined_symbol` | a README that calls a symbol the shipped archive does not define fails `compile` with the linker's message |
 | `usage` | a command line that is not one exits 2 with the usage |
+
+The fake mopm answers `build --print-cmd` for static natives only, in mopm's wording and shape; the fake
+compiler takes `-Xlinker <archive>` and refuses a `# NATIVE_CALL <symbol>` no linked archive defines. They are
+stand-ins of the printing, not of the plan: the plan is mopm's, and the target below runs it.
+
+The tests cell's `//functional/readme_e2e:fixture_native_e2e` runs the whole path with the real things: a
+Mojo package that calls a C function (`fixture_native`), the static archive of that function built by the
+C toolchain, both packed by the pinned `mopm pack --native`,
+installed by the pinned mopm, linked with the command that mopm's
+`build --print-cmd` prints, compiled by the pinned compiler and run by the gate. The example calls the C
+function, so it passes only if the archive was linked.
 
 The fake compiler accepts a program only if every package it imports is a
 `<module>.mojoc` in an `-I` directory, so `passes` and `dependency` also prove that the

@@ -347,7 +347,7 @@ and the result JSON splits them:
 |---|---|---|---|
 | `plain` | neither below | `unrecorded_functions` | evidence no test reaches it; the class a census counts |
 | `always_inline` | a decorator line right above it starts with `@always_inline` | `unrecorded_functions_unreliable` | none: the body is inlined into its callers and what is left may be attributed to the caller's lines or folded away |
-| `comptime_if` | its body (a nested function's lines included) holds a `comptime if` or `@parameter` line, wherever: one such line moves the whole function, and a closure holding one moves the function around it | `unrecorded_functions_unreliable` | none: a body folded to a constant, or wholly in an arm dropped on this platform or build, emits no line though tests call it |
+| `comptime_if` | its own lines (a nested function's left out: a closure is a function of its own) hold a `comptime if`, `comptime elif` or `comptime else` line, or a `@parameter` over a statement (not over a nested `def`, which is a closure), with the plain `elif` / `else` blocks that continue the chain at the same indent: the lines of those arms are its `arms` | `unrecorded_functions_unreliable` | none: a body folded to a constant, or wholly in an arm dropped on this platform or build, emits no line though tests call it |
 
 Known false positives, all seen on real reports: an `@always_inline` body
 whose code the compiler attributed to the caller (a test calls it, its
@@ -381,6 +381,72 @@ have no named `DW_TAG_subprogram` at all, only a compile unit named
 `<unknown>` with a line table, and a line-tables-only subprogram carries no
 `decl_file` or `decl_line` anyway; the line rows are the one place a
 library function shows up.
+
+## The code no test compiled (buildrules' uncompiled report)
+
+A mojo_package's `:coverage` ends its reports with `__coverage__/uncompiled.cobertura.xml` and
+its branch records with `__coverage__/uncompiled.branches.info` (buildrules, `docs/contract.md`,
+"uncompiled"): the executable lines of every function none of whose lines has a record, as found
+and not hit, and the arms of their decision words, as not taken. Those two files, told by their
+names and by the directory `__coverage__/` they sit in (a file of the same name elsewhere is a
+test's report), are read after every other report, and counted like any report **except** for the
+shapes that look like an uncalled function without being one:
+
+- an `@always_inline` function (class `always_inline` above) whose name a **hit line outside it
+  calls**: all its own lines and arms are left out;
+- a function with compile-time arms (class `comptime_if`) whose name a hit line calls: the lines
+  and arms **inside its arms** (`comptime if`/`elif`/`else` blocks, a `@parameter` statement) are left
+  out; its lines outside the arms are counted;
+- nothing else: a plain function, an inlined or gated function no hit line calls, and a nested
+  closure under its own class (the outer function keeps its own) are counted, as is every line of a
+  file no test compiled (above).
+
+The evidence is **textual and per package**, and counts when in doubt. It is a line of a test's report (its
+test source included) with a hit, in the function's own package (a call in another package is none), whose
+code (not its comment or strings, nor the interior of a multi-line string) holds a call: the name followed by
+`(` or `[`. A declaration line is no call. Which call is evidence for which function:
+- a **method** (a declaration that is indented, in a `struct T`): only a call that names the declaring type
+  as the receiver, `T(x).m(` or `T.m(`. Any other receiver, a variable or an unknown one included, is no
+  evidence, whether or not the package declares the name twice (`a != b` is no call of `__ne__`: write
+  `T(a).__ne__(b)`);
+- a **free function**: only a hit `f(` in the same file, or in a file that imports the module
+  (`from pkg.module import ...`, `import pkg.module`) or the name; a hit call from any other file is none. A free
+  function whose name the package declares more than once has none.
+A call that this cannot place counts the function as uncovered: no call graph is built, no type is inferred.
+
+**Platform-gated functions** (`covcheck/platform_gate.mojo`). A function of the uncompiled report is also
+left out when it is platform-gated: it has at least one use (its own body not counted) and **every** use is
+dropped on the measured target. This direction hides code, so a use is anything that could be one: any
+occurrence of the function's name as an identifier in the code of its package (tests included): a call
+`name(`, `x.name(` or `mod.name(`, a function passed as a value, a method reference. Comments, strings (a
+multi-line string's interior too), import lines and the name a declaration gives are not uses; an alias
+(`from x import name as z`) makes every use of `z` a use of `name`; a function of the same name elsewhere in
+the package that is used live keeps it counted, and a name the package declares more than once is never gated (it is
+counted, as the call evidence counts it). A use is dropped when it is in a function the reports show
+compiled (one of its own lines has a record), inside one of that function's compile-time arms
+(`comptime if`/`elif`/`else`, `@parameter`, and the plain `elif`/`else` continuing such a chain), **and no
+line of that arm has a record**: a line without a record in an arm that has others is a continuation line or
+a line the compiler attributed elsewhere, and the arm was compiled. A use on the line of the `comptime if`
+condition is live: the condition runs whichever arm is compiled. A use inside a platform-gated function is
+dropped too, so a chain of them is gated as a whole (a fixpoint). The target is the one the reports were made
+for: nothing here names x86 or arm64. Everything else counts: no use (an uncalled function), one live use
+(outside every arm, in an arm that has a record, in a function no report shows compiled that is not itself
+gated). Functions that use only each other, reachable only from a dropped arm, stay counted: the fixpoint
+starts from nothing gated, and each function needs a dropped use. A function the call evidence already leaves
+out is not reported as gated as well. The gated functions are listed with their line counts: `platform_gated`
+(`package`, `path`, `function`, `line`, `lines`), `platform_gated_functions`, `platform_gated_lines` and
+`platform_gated_arms` in the result JSON, and all named in the summary's "Set aside", apart from
+`excluded_lines`. A package's line hold then reads: every counted line is hit, and what was left out is listed.
+
+What is left out is reported, not hidden: `excluded_lines`, `excluded_arms` and `excluded_files`
+(`package`, `path`, `lines`, `arms`) in the result JSON, and a line in the summary's "Set aside"
+when any is left out. The functions stay in `unrecorded_functions_unreliable` only when no line of
+theirs has a record in any report. A file the uncompiled report leaves nothing of counts the same
+as one that no report names: from its source, without the lines that were left out.
+
+So a `line` hold of a package built with `mojo_package` means: every counted line is hit, and a line
+left out is one of an inlined or gated function a test was seen to call. The package's
+`coverage_floor.txt` is buildrules' own figure, which leaves nothing out.
 
 ## Exemptions
 
@@ -841,7 +907,8 @@ run at 20 requests (1 POST and 19 PATCHes).
 `mode`, `target_bp`, `total`, `diff`, `touched_packages`, `packages`,
 `findings`, `exemptions`, `unrecorded_functions` and
 `unrecorded_functions_unreliable` (report only: see "Functions with no
-recorded line") and the set-aside counts; `gate` writes `package`
+recorded line"), `excluded_lines`, `excluded_arms` and `excluded_files` (see
+"The code no test compiled") and the set-aside counts; `gate` writes `package`
 in place of `total`, `diff`, `touched_packages` and `packages`. A percentage
 that does not apply is `null`; a package's `held_line` and `held_branch`
 say what it holds. A package's `files` counts every

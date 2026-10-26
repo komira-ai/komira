@@ -798,6 +798,15 @@ cp "$out/komira_aws_logs.mojo" tools/build/tests/functional/aws_codegen/golden/l
 cp "$out/_layout_probe.mojo" tools/build/tests/functional/aws_codegen/golden/logs_client_probe.mojo
 ```
 
+A module the generator splits (1000 lines or more, which no generated file may
+reach) is a facade, whose golden is the module's, and parts, `_parts/<module>_pNN.mojo`,
+whose goldens are the `golden_parts` of the case, one file each under its own
+name (`golden/query_client_parts/`): copy `$out/_parts/*.mojo` there. The check
+refuses a split module with no `golden_parts`, `golden_parts` for a module that
+was not split, a part that differs, and any generated file of 1000 lines or more.
+`must_contain` reads the facade and the parts together. The proto goldens do the
+same: a part's golden is a `<name>.mojo.golden` in a directory named `_parts`.
+
 ## 35. Rust tests are part of the build
 
 `rust_test` ([`../rust/README.md`](../rust/README.md#tests-are-part-of-the-build))

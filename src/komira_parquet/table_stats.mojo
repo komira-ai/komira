@@ -324,10 +324,6 @@ struct ParquetStatsProvider(StatsProvider, Movable):
         """The parsed footer."""
         return self._metadata
 
-    def cached_schema(ref self) -> ref [self._schema] Schema:
-        """The schema the provider was made with."""
-        return self._schema
-
     def _kind(self, rg: RowGroup, c: Int, name: String) -> Int:
         """The decode kind of chunk `c` of `rg`, the top-level leaf `name`."""
         var el = _top_level_leaf(self._metadata, name)

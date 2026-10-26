@@ -151,17 +151,9 @@ def decode_column_pages(
         var hdr_res = _parse_page_header(data[offset:data_len])
         offset += hdr_res.bytes_consumed
         ref hdr = hdr_res.header
+        # `_parse_page_header` has refused negative page sizes and value
+        # counts, and level sections larger than the page.
         var cps = hdr.compressed_page_size
-        var ups = hdr.uncompressed_page_size
-        if cps < 0 or ups < 0:
-            raise Error(
-                "parquet: corrupt page header: negative page size"
-                " (compressed="
-                + String(cps)
-                + " uncompressed="
-                + String(ups)
-                + ")"
-            )
         if cps > data_len - offset:
             raise Error(
                 "parquet: corrupt page header: compressed_page_size "
@@ -181,11 +173,6 @@ def decode_column_pages(
             or hdr.type == PageType.DATA_PAGE_V2
         ):
             var page_nv = hdr.num_values
-            if page_nv < 0:
-                raise Error(
-                    "parquet: corrupt data page header: negative num_values "
-                    + String(page_nv)
-                )
             if page_nv > num_values - acc.total_decoded:
                 raise Error(
                     "parquet: corrupt data page header: page declares "
