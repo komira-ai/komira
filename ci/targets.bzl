@@ -174,6 +174,7 @@ TARGETS = [
     "komira//src/komira_kg_code:komira_kg_code_conda",
     "komira//src/komira_kg_enrich:komira_kg_enrich_conda",
     "komira//src/komira_kg_format:komira_kg_format_conda",
+    "komira//src/komira_kg_mode:komira_kg_mode_conda",
     "komira//src/komira_libc:ci",
     "komira//src/komira_libc:conda_holds",
     "komira//src/komira_libc:coverage_floor",
