@@ -32,8 +32,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 pub const max_config_bytes: usize = 64 * 1024;
-const max_plan_bytes: usize = 4 * 1024 * 1024;
-const max_readme_bytes: usize = 4 * 1024 * 1024;
+pub const max_plan_bytes: usize = 4 * 1024 * 1024;
+pub const max_readme_bytes: usize = 4 * 1024 * 1024;
 
 /// No file of the plan may be larger than this, whatever size the plan declares: the body is held in
 /// memory, and a plan that asks for more is not a plan of this set.
@@ -277,7 +277,7 @@ pub fn checkFiles(a: Allocator, plan: Plan, fetcher: Fetcher, channel: []const u
     return .{ .checked = ok.items, .failures = bad.items, .failed_files = failed };
 }
 
-fn readFileIn(a: Allocator, why: *[]const u8, dir: []const u8, rel: []const u8, max: usize) Error![]u8 {
+pub fn readFileIn(a: Allocator, why: *[]const u8, dir: []const u8, rel: []const u8, max: usize) Error![]u8 {
     const path = try std.fs.path.join(a, &.{ dir, rel });
     return std.fs.cwd().readFileAlloc(a, path, max) catch |e|
         return refuse(a, why, "cannot read {s}: {s}", .{ path, @errorName(e) });
@@ -290,7 +290,7 @@ fn writeIn(a: Allocator, out: []const u8, rel: []const u8, data: []const u8) !vo
 }
 
 /// `out` is a directory that does not exist or is empty.
-fn outIsFree(why: *[]const u8, a: Allocator, out: []const u8) Error!void {
+pub fn outIsFree(why: *[]const u8, a: Allocator, out: []const u8) Error!void {
     var dir = std.fs.cwd().openDir(out, .{ .iterate = true }) catch |e| switch (e) {
         error.FileNotFound => return,
         else => return refuse(a, why, "cannot open --out {s}: {s}", .{ out, @errorName(e) }),
