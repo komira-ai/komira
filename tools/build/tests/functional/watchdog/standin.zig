@@ -10,14 +10,24 @@
 //!
 //! Compiler behaviours (a deadlock is a process tree using no CPU, which a
 //! sleep is):
-//!   hang        sleep 600 s
-//!   hangpid     write compiler.pid, start a child sleeping 600 s (child.pid), wait
-//!   treehang    start a child sleeping 600 s (child.pid), wait
-//!   orphan      a child starts a grandchild sleeping 600 s (child.pid) and
-//!               exits, so the grandchild leaves the tree by parent; sleep 600 s
-//!   orphanspin  the same with a grandchild that spins 7 s; sleep 8 s
-//!   spin        spin 7 s;   childspin  a child spins 7 s, wait
+//!   hang        sleep (an hour: only the watchdog ends it)
+//!   hangpid     write compiler.pid, start a child sleeping (child.pid), wait
+//!   treehang    start a child sleeping (child.pid), wait
+//!   orphan      a child starts a grandchild sleeping (child.pid) and
+//!               exits, so the grandchild leaves the tree by parent; sleep
+//!   orphanspin  the same with a grandchild that burns CPU on command; the
+//!               root waits for the grandchild to end
+//!   spin        burn CPU on command;   childspin  a child burns it, wait
+//!   wait        use no CPU until told to end
 //!   nap2, nap5  sleep 2 s, 5 s;   fail  exit 7
+//!
+//! The behaviours that run under a ticked wrapper (mojo_compile_ticked) are
+//! driven by the process that runs the cases, through two FIFOs in the
+//! working directory, both opened only if they exist: `up` (a byte for each
+//! thing the driver waits for: `u` the behaviour is set up, `d` a burn is
+//! done) and `cmd` (`b` burn 50 ms of CPU time, `q` end the behaviour). The burn ends on
+//! the CPU time the process has used, not on a clock: it takes however long
+//! 50 ms of CPU takes.
 //!   selfkill    die of SIGUSR1 (10), its default action restored first
 //!   envdump     write the environment, one NAME=value per line, to env.txt
 //!   sigstate    write sigstate.txt: whether stdin is /dev/null, SIGINT's and
@@ -66,12 +76,41 @@ fn sleepSecs(s: u64) void {
     std.Thread.sleep(s * std.time.ns_per_s);
 }
 
-fn spin(s: i64) void {
-    const end = std.time.milliTimestamp() + s * 1000;
+fn cpuNs() u64 {
+    const ts = posix.clock_gettime(.PROCESS_CPUTIME_ID) catch return 0;
+    return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
+}
+
+/// Uses `ms` of this process's CPU time.
+fn burn(ms: u64) void {
+    const start = cpuNs();
     var x: u64 = 0;
-    while (std.time.milliTimestamp() < end) {
+    while (cpuNs() -| start < ms * std.time.ns_per_ms) {
         x +%= 1;
         std.mem.doNotOptimizeAway(x);
+    }
+}
+
+/// Says `byte` on the `up` FIFO, when the case has one.
+fn say(byte: u8) void {
+    const f = std.fs.cwd().openFile("up", .{ .mode = .write_only }) catch return;
+    defer f.close();
+    f.writeAll(&.{byte}) catch {};
+}
+
+/// Sets up (`u`), then serves the `cmd` FIFO: `b` burns 50 ms of CPU time and
+/// says `d`; `q` (or the end of the FIFO) ends the process.
+fn serve() void {
+    say('u');
+    const cmd = std.fs.cwd().openFile("cmd", .{}) catch return;
+    var b: [1]u8 = undefined;
+    while (true) {
+        const n = cmd.read(&b) catch 0;
+        if (n == 0 or b[0] == 'q') return;
+        if (b[0] == 'b') {
+            burn(50);
+            say('d');
+        }
     }
 }
 
@@ -210,50 +249,79 @@ pub fn main() void {
         }
     }.f;
     if (eql(mode, "hang")) {
-        sleepSecs(600);
+        say('u');
+        sleepSecs(3600);
     } else if (eql(mode, "hangpid")) {
         writePid("compiler.pid", myPid());
         const c = fork();
         if (c == 0) {
-            sleepSecs(600);
+            sleepSecs(3600);
             std.process.exit(0);
         }
         writePid("child.pid", c);
+        say('u');
         waitAll();
     } else if (eql(mode, "treehang")) {
         const c = fork();
         if (c == 0) {
-            sleepSecs(600);
+            sleepSecs(3600);
             std.process.exit(0);
         }
         writePid("child.pid", c);
+        say('u');
         waitAll();
-    } else if (eql(mode, "orphan") or eql(mode, "orphanspin")) {
-        const spinning = eql(mode, "orphanspin");
+    } else if (eql(mode, "orphan")) {
         const a = fork();
         if (a == 0) {
             const b = fork();
             if (b == 0) {
-                if (spinning) spin(7) else sleepSecs(600);
+                sleepSecs(3600);
                 std.process.exit(0);
             }
             writePid("child.pid", b);
             std.process.exit(0);
         }
         _ = posix.waitpid(a, 0);
-        sleepSecs(if (spinning) 8 else 600);
+        say('u');
+        sleepSecs(3600);
+    } else if (eql(mode, "orphanspin")) {
+        writePid("compiler.pid", myPid());
+        // The grandchild holds the only write end of `alive`: the root's read
+        // ends when the grandchild does.
+        const alive_pipe = posix.pipe() catch die("cannot make a pipe", .{});
+        const a = fork();
+        if (a == 0) {
+            const b = fork();
+            if (b == 0) {
+                posix.close(alive_pipe[0]);
+                serve();
+                std.process.exit(0);
+            }
+            writePid("child.pid", b);
+            std.process.exit(0);
+        }
+        posix.close(alive_pipe[1]);
+        _ = posix.waitpid(a, 0);
+        var sink: [1]u8 = undefined;
+        _ = posix.read(alive_pipe[0], &sink) catch {};
     } else if (eql(mode, "spin")) {
-        spin(7);
+        writePid("compiler.pid", myPid());
+        serve();
+    } else if (eql(mode, "wait")) {
+        writePid("compiler.pid", myPid());
+        serve();
     } else if (eql(mode, "childspin")) {
+        writePid("compiler.pid", myPid());
         const c = fork();
         if (c == 0) {
-            spin(7);
+            serve();
             std.process.exit(0);
         }
         waitAll();
     } else if (eql(mode, "nap2")) {
         sleepSecs(2);
     } else if (eql(mode, "nap5")) {
+        say('u');
         sleepSecs(5);
     } else if (eql(mode, "fail")) {
         std.process.exit(7);
