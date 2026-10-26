@@ -2,13 +2,14 @@
 
 ## Responsibility
 
-The mutable data-graph store and its ingest. This is parts 1 and 2 of the package
+The mutable data-graph store and its ingest. This is parts 1 to 3 of the package
 described in
 [the knowledge graph port](https://github.com/komira-ai/komira/blob/main/docs/design/knowledge_graph_port.md):
-bi-temporal edges, entity resolution and the source facet, and the three seams
+bi-temporal edges, entity resolution and the source facet, the three seams
 through which a host supplies a model (`Embedder`, `LlmClient`, `Extractor`),
-each with a stub for tests. Later parts add the rule-driven extractor, the
-working set and compaction, and ingest.
+each with a stub for tests, an extractor driven by rules the host supplies, and
+the cursor that records how far an incremental read of a source got. Later
+parts add the working set and compaction, and ingest.
 
 The graph keeps every fact on two time axes: event time (when it held in the
 world) and system time (when the graph learned it and when it learned it no
@@ -39,14 +40,27 @@ deleted, so "what did we believe at time T" stays answerable.
 - `llm_client`: the `LlmClient` trait (`extract`, `judge_contradiction`,
   `judge_same_entity`, and optional `has_synthesis` and `synthesize`) and
   `StubLlmClient`.
+- `rule`, `rule_pattern`, `rule_scan`, `rule_extractor`: `RuleExtractor`, an
+  `Extractor` with no model. Its rule set is data the host passes in: each `Rule`
+  is a type label (an opaque string) and a matcher: a word list, a verb prefix
+  (a listed verb and the word after it), a token `Pattern`, a delimited span,
+  an email address or a URL. The extractor also takes the names to refuse and
+  the predicate of its co-occurrence edges. The package ships no rule set.
+- `cursor_store`: `SurfaceCursor` (an opaque token, a watermark and the time of
+  the last advance, for one source of one partition) and `CursorStore`, which
+  keeps one cursor object per partition id and source key on a
+  `ConditionalWriteStore` and writes it with compare-and-set. A writer that loses
+  a race is reported (`try_save` returns False), `save` retries a bounded number
+  of times, and a stored cursor that does not decode is refused.
 
 A facet, a source, a predicate and an entity name are opaque strings the host
 supplies: the package fixes no vocabulary. Prompts are values the caller passes
 in. It names no model, vendor or server and holds no network code: a model is a
 trait a host (or a transport package) implements. It calls no model, reads no clock
 and reads no environment; a time is always an argument, in whatever unit the
-graph stamps. It depends on `komira_kg_format` (the open-interval marker) and
-`komira_json` (the facet's `attrs` JSON), and no pointer crosses its API.
+graph stamps. It depends on `komira_kg_format` (the open-interval marker),
+`komira_json` (the facet's `attrs` JSON) and `komira_objectstore` (the cursor
+store), and no pointer crosses its API.
 
 ## Examples
 
@@ -290,6 +304,99 @@ assert_true(llm.judge_same_entity("Alpha Corp", "", "Alpha Corporation", ""))
 assert_false(llm.has_synthesis())
 ```
 
+A rule set is data. This one reads tags, code words and email addresses; the
+type labels and the predicate are whatever the host chose, and a different rule
+set over the same code gives a different vocabulary. An entity is returned once,
+under the first rule that found it, and a pair of entities in one text gets an
+edge:
+
+<!-- mojo-hidden
+from std.testing import assert_equal
+-->
+```mojo
+from komira_kg import Rule, RuleExtractor
+from komira_kg_format import EntityMention
+
+var words = List[String]()
+words.append("alpha")
+words.append("beta")
+var rules = List[Rule]()
+rules.append(Rule.token_pattern("tag", "#[a-z]+"))
+rules.append(Rule.word_list("code", words))
+rules.append(Rule.email("handle"))
+var extractor = RuleExtractor(rules^, List[String](), "co_occurs_with", 12)
+
+var found = List[EntityMention]()
+var ex = extractor.extract("alpha uses #red; note ann@x.example", found)
+assert_equal(ex.num_entities(), 3)
+assert_equal(ex.entities[0].name, "#red")
+assert_equal(ex.entities[0].entity_type, "tag")
+assert_equal(ex.entities[1].name, "alpha")
+assert_equal(ex.entities[2].entity_type, "handle")
+assert_equal(ex.num_triples(), 3)
+assert_equal(ex.triples[0].fact, "#red co_occurs_with alpha")
+
+# Given what the first pass found, a second pass finds nothing new.
+for i in range(ex.num_entities()):
+    found.append(ex.entities[i].copy())
+assert_equal(extractor.extract("alpha uses #red; note ann@x.example", found).num_entities(), 0)
+```
+
+A token pattern is a small whole-token language: literals, `.`, classes such as
+`[A-Z0-9]`, the escapes `\d` and `\w`, and the quantifiers `?`, `*` and `+`. A
+delimited rule takes the text between two strings on one line, and a verb-prefix
+rule takes a listed verb with the word after it:
+
+<!-- mojo-hidden
+from std.testing import assert_equal
+-->
+```mojo
+from komira_kg import Rule, RuleExtractor
+from komira_kg_format import EntityMention
+
+var verbs = List[String]()
+verbs.append("open")
+var rules = List[Rule]()
+rules.append(Rule.token_pattern("ref", "[A-Z]+-\\d+"))
+rules.append(Rule.verb_prefix("action", verbs))
+rules.append(Rule.delimited("span", "<<", ">>"))
+var extractor = RuleExtractor(rules^, List[String](), "", 0)
+var ex = extractor.extract("open note AB-12 and <<two words>>", List[EntityMention]())
+assert_equal(ex.num_entities(), 3)
+assert_equal(ex.entities[0].name, "AB-12")
+assert_equal(ex.entities[1].name, "open note")
+assert_equal(ex.entities[2].name, "two words")
+assert_equal(ex.num_triples(), 0)
+```
+
+A cursor records where an incremental read of one source of one partition
+stopped. `try_save` is one compare-and-set against the version `read` returned,
+so of two writers that read the same version only the first lands; the other is
+told it lost and can read again:
+
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false, assert_true
+-->
+```mojo
+from komira_kg import CursorStore, SurfaceCursor
+from komira_objectstore.shared_in_memory_conditional_store import (
+    SharedInMemoryConditionalStore,
+)
+
+var data = SharedInMemoryConditionalStore()
+var a = CursorStore[SharedInMemoryConditionalStore](data.clone(), "state")
+var b = CursorStore[SharedInMemoryConditionalStore](data.clone(), "state")
+
+assert_false(a.load("part-1", "feed").is_seeded())
+a.save(SurfaceCursor("part-1", "feed", "page-1", 100, 110), 3)
+
+var seen_by_a = a.read("part-1", "feed")
+var seen_by_b = b.read("part-1", "feed")
+assert_true(a.try_save(SurfaceCursor("part-1", "feed", "page-2", 200, 210), seen_by_a.version))
+assert_false(b.try_save(SurfaceCursor("part-1", "feed", "other", 300, 310), seen_by_b.version))
+assert_equal(b.load("part-1", "feed").token, "page-2")
+```
+
 ## Limits
 
 `dedup_resolve` is pure and stateless: it tests the candidates it is given, so
@@ -317,3 +424,17 @@ so a very small dimension discriminates less; it is a test vector, not a model.
 `LlmClient` and `Extractor` both have an `extract` of the same shape; neither
 trait extends the other, so a host that implements both writes it once and
 passes whichever the caller asks for.
+
+`RuleExtractor` matches ASCII case only, and a token pattern works on bytes, so
+`.` stands for one byte of a multi-byte character. A token is a run of
+non-whitespace with a fixed set of brackets, quotes and sentence marks trimmed
+from its ends, so a rule for a shape that starts or ends with one of those marks
+should use a delimited span. A name is kept once per text under its first rule,
+and edges are limited to the first `max_cooccurrence_entities` findings. It
+deduplicates names within one text only; resolving them against the graph is the
+dedup step's job.
+
+A cursor's object key is a 64-bit hash of its partition id and source key. The
+object records both strings and a read that finds different ones raises, so a
+collision is an error and never a wrong cursor. `CursorStore.list_cursors` reads
+every cursor object under the prefix; it is for small sets of sources.
