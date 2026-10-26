@@ -72,7 +72,7 @@ def test_authority_omits_default_port_for_https() raises:
 
 
 def test_caller_set_host_overrides() raises:
-    var url = Url.parse(String("http://10.0.0.1/x"))
+    var url = Url.parse(String("http://192.0.2.1/x"))
     var hdrs = HeaderMap()
     hdrs.insert(String("Host"), String("real-host.example.com"))
     var out = List[UInt8]()
@@ -83,7 +83,7 @@ def test_caller_set_host_overrides() raises:
     # canonical form (HTTP is case-insensitive on the wire).
     assert_true(wire.find(String("host: real-host.example.com\r\n")) >= 0)
     # And we must NOT have a separate Host line with the URL's host.
-    assert_true(wire.find(String("10.0.0.1")) < 0)
+    assert_true(wire.find(String("192.0.2.1")) < 0)
 
 
 def test_caller_set_user_agent_overrides() raises:

@@ -9,6 +9,7 @@ runs FROM. The build writes it as files; nothing is pushed.
 | `/bin/sh` | a shell | the pinned static busybox the build's actions use |
 | `/komira/bin/supervisor` | the supervisor, the image's ENTRYPOINT | a `mojo_bundle` at `/komira/` |
 | `/opt/kci/bin/kci` | kci | the `komira//bin/kci:kci` bundle at `/opt/kci/` |
+| `/opt/kci/bin/readme_examples` | the README examples tool kci runs on an installed README | kci's `helpers`, in the same bundle |
 
 The supervisor is a stand-in today ([`supervisor_stub.mojo`](supervisor_stub.mojo)):
 it supervises nothing, prints that, and exits 2. The job supervisor's binary
@@ -37,7 +38,7 @@ sub-targets fails if one fails.
 | check | where | catches |
 |---|---|---|
 | the config's Entrypoint is exactly `["/komira/bin/supervisor"]` | `oci_image_check` ([`komira_oci check`](../../../tools/build/package/oci/README.md)) | an image whose entrypoint was dropped or changed |
-| `/komira/bin/supervisor`, `/bin/sh` and `/opt/kci/bin/kci` are regular files with mode 0755 in the image's filesystem (layers applied in order; a whiteout hides its path and everything under it, an opaque one its directory's children below; symlinks followed) | the same | a program missing, or packed without its exec bit |
+| `/komira/bin/supervisor`, `/bin/sh`, `/opt/kci/bin/kci` and `/opt/kci/bin/readme_examples` are regular files with mode 0755 in the image's filesystem (layers applied in order; a whiteout hides its path and everything under it, an opaque one its directory's children below; symlinks followed) | the same | a program missing, or packed without its exec bit |
 | `/etc/ssl/certs/ca-certificates.crt` is a non-empty regular file there | the same | CA certificates removed or hidden by a later layer |
 | `[layers]` is the manifest's layers, in order | the same | a layer list that does not describe the image (reordered, short) |
 | the added layer changes the type of no base entry | the same | a directory over a base symlink, hiding what the link reaches |

@@ -1,4 +1,5 @@
-"""The time limit of a `mojo_test` under `buck2 test` (test_deadline.sh).
+"""The time limit of a `mojo_test` under `buck2 test` (`gate mojo --deadline-s`,
+tools/build/run).
 
 buck2 runs a test that gives ExternalRunnerTestInfo (every test rule here)
 through its test runner, which gives each test a timeout: the runner's
@@ -7,9 +8,8 @@ buck2 sends it to the executor as the action's timeout (buck2's `[test]
 timeout_default_s` is the timeout of InternalRunnerTestInfo tests, and does not
 reach these). A remote executor stops the action there, and buck2 then reports
 an ordinary failure, with no word of the timeout; the test's output, which its
-runner holds until the test exits, is lost with it. So a mojo_test runs under
-test_deadline.sh, which kills the test TEST_LIMIT_MARGIN_S seconds earlier and
-says so (`TEST TIME LIMIT: killed <label> after <n> s, ...`).
+runner holds until the test exits, is lost with it. So the gate kills a
+mojo_test TEST_LIMIT_MARGIN_S seconds earlier and says so (`TEST TIME LIMIT: killed <label> after <n> s, ...`).
 
 The runner's `--timeout` is a command-line argument, which no rule can read,
 so the root cell's `[komira] test_timeout_s` states it (600, buck2's default,
@@ -24,9 +24,9 @@ limits").
 # The `--timeout` of buck2's test runner when `buck2 test` passes none.
 BUCK2_TEST_RUNNER_TIMEOUT_S = 600
 
-# How long before the runner's timeout test_deadline.sh kills the test: the
-# time the action spends around the test itself (staging its tree,
-# gate_runner.sh's report, the kill's 10 s grace), with room to spare.
+# How long before the runner's timeout the gate kills the test: the time the
+# action spends around the test itself (staging its tree, the gate's report,
+# the kill's 10 s grace), with room to spare.
 TEST_LIMIT_MARGIN_S = 60
 
 def test_timeout_s():
@@ -53,13 +53,12 @@ def with_test_limit(test_rule):
 TEST_LIMIT_ATTRS = {
     # Set by the mojo_test macro; see with_test_limit.
     "test_timeout_s": attrs.int(),
-    "_test_deadline": attrs.dep(default = "komira//tools/build/mojo:test_deadline.sh"),
 }
 
-def deadline_prefix(ctx, busybox, label):
-    """The words that run a test command under test_deadline.sh."""
+def deadline_flags(ctx, label):
+    """The gate's flags for the time limit (`gate mojo --deadline-s
+    --runner-timeout-s`)."""
     timeout = ctx.attrs.test_timeout_s
     if timeout <= TEST_LIMIT_MARGIN_S:
         fail("{}: test_timeout_s = {} must be over {} s".format(label, timeout, TEST_LIMIT_MARGIN_S))
-    script = ctx.attrs._test_deadline[DefaultInfo].default_outputs[0]
-    return [busybox, "sh", script, busybox, str(timeout - TEST_LIMIT_MARGIN_S), str(timeout), label, "--"]
+    return ["--deadline-s", str(timeout - TEST_LIMIT_MARGIN_S), "--runner-timeout-s", str(timeout)]

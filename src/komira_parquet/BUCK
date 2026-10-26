@@ -34,6 +34,47 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # page headers, decompresses the selected pages (komira_parquet_codec) and
 # gathers their selected rows.
 #
+# It also decodes column chunks a chunk of rows at a time into a reused
+# buffer (subrg_column_cursor, with its page helpers in subrg_cursor_pages and
+# its counters in subrg_dbp_trace and subrg_scan_route_trace), holds a
+# worker's reusable decode buffers (column_decode_context), decodes a nested
+# leaf with its levels (nested_decoder) and reads one PLAIN page from a file
+# range (column_reader).
+#
+# And it decodes a whole flat column chunk into one column (column_decoder,
+# its steps in column_decoder_state, _pages, _values, _assemble, _finish and
+# _strings, and the dense-string rebuild counter in dict_mat_counter). The
+# page CRC is the standard CRC-32, from komira_zlib.
+#
+# It decides from a footer what a scan needs to read: the row-group pruner on
+# min/max statistics and its all-match dual (rg_pruner), row selections and
+# their page clip (row_selection), the row groups a table-scale row window
+# overlaps (row_window) and the Arrow types an `ARROW:schema` footer key
+# names (arrow_schema_hint); and it reads a column chunk as stored for a
+# pass-through write (bypass).
+#
+# It keeps a session's parsed footers, by path, with their preambles and a
+# pinned whole-file mapping, revalidated by stat on each shared hit
+# (runtime_footer_cache, within the pin budget of footer_pin_budget), and
+# serves a footer's statistics as TableStats and as a StatsProvider
+# (table_stats).
+#
+# It reads a local file a row group or a morsel at a time
+# (morsel_reader, its morsel windows in morsel_slice, the data-page count of
+# the one-pass selection decode in data_page_count), and decodes a row group
+# from bytes the caller already holds, with no I/O (bytes_decode), or a whole
+# in-memory file to one batch (file_decode). Each
+# column chunk decoded there is counted (komira_counters).
+#
+# It skips pages: a column chunk's page index parsed (page_index_parser) and
+# kept per file, row group and column (page_index_cache, locked with
+# komira_sync), the pages a filter can skip (page_pruner, INT64 columns),
+# and the chosen pages read as one column (page_index). A scan source's
+# row-group reads build on all of it: by index or by name across files
+# (parquet_source_helpers), the typed-null and partition-constant columns
+# (parquet_source_constants), and reads through chosen pages
+# (parquet_source_page_picks).
+#
 # The welded tests:
 # - test_rle_simd, test_rle_simd_bw_small: bit-packed runs at every bit width
 #   the SIMD kernels specialize, and the dedicated bw=1/2/4 byte paths, at
@@ -82,6 +123,107 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   annotation), with page headers written from parquet.thrift.
 # - test_gather_column_fallbacks_direct: the chunks it hands back (None) and
 #   the refusals it raises.
+# - test_subrg_cursor_dict_direct: ResumableColumnCursor on dictionary chunks:
+#   codes in fills of every size equal the codes written, exactly
+#   min(max_rows, rows left) per call, a long RLE run split across calls,
+#   numeric and string dictionaries, OPTIONAL pages with and without a null,
+#   a bit-width-0 page, seek_to_row ranges, the data-pages-only open, and the
+#   chunks refused at open (counted) or mid-decode.
+# - test_subrg_cursor_flat_direct: the cursor on flat chunks: PLAIN values
+#   copied in fills or read in place by grains that stop at page ends,
+#   DELTA_BINARY_PACKED values carried across fills of every size, row-range
+#   seeks by byte offset and by decode-skip, the DBP counters, and refusals
+#   (V2, BYTE_STREAM_SPLIT, a short PLAIN page, a small buffer).
+# - test_subrg_admit_all_pages_direct: the cursor's whole-chunk page header
+#   walk, one test per refusal case against an admitted control.
+# - test_subrg_traces_direct: the DBP and scan route counters, grains, the
+#   power-of-two milestones and the print gate.
+# - test_column_decode_context_direct: the reusable buffers grow and never
+#   shrink, band slots and row-group dictionaries, the band resolve refusing
+#   a code outside its dictionary, band cursors and the in-place grain view.
+# - test_nested_decoder_direct: decode_column_with_levels: list<int32>
+#   levels and values over V1 and V2 pages, every codec and type, dictionary
+#   codes at their bit width, strings across pages, a numeric dictionary
+#   spill, and the malformed chunks it refuses.
+# - test_column_reader_local: PLAIN pages read from a local file, stored and
+#   SNAPPY, and the reader's refusals.
+# - test_column_decoder_direct: decode_column_pages on hand-encoded chunks:
+#   the single PLAIN page moved or copied (and a DECIMAL one as Decimal128),
+#   nullable V1 pages, V2 pages with bare RLE definition levels, BOOLEAN,
+#   INT96, FIXED_LEN_BYTE_ARRAY with nulls, DELTA_BINARY_PACKED (and a short
+#   page refused), both BYTE_STREAM_SPLIT arms and their counters,
+#   DELTA_LENGTH_BYTE_ARRAY and DELTA_BYTE_ARRAY pages all kept, the page
+#   CRC-32 (a flipped byte and a CRC-32C refused), and malformed chunks.
+# - test_column_decoder_dict_direct: dictionary chunks: strings kept or
+#   rebuilt dense (dict_mat_counter), numbers resolved, kept, or decoded into
+#   the reused codes buffer across chunks, checked codes for the fused count,
+#   dictionary-to-PLAIN switches (kept in order, or refused), the all-null
+#   dictionary chunk, and the dictionaries refused.
+# - test_column_decoder_pyarrow: every chunk of five pyarrow-written files
+#   (komira_parquet_codec's fixtures, staged at parquet/): ZSTD V2 pages with
+#   CRCs and nulls, dictionaries over several SNAPPY pages, GZIP PLAIN,
+#   INT96, zero rows; and a flipped byte refused by a real page's CRC.
+# - test_rg_pruner_direct: the min/max pruner and its all-match dual on
+#   footers built as structs: every operator on both sides, signed and
+#   unsigned integers, floats (no prune on !=), byte arrays, AND and OR,
+#   names resolved among the top-level leaves after a group, DECIMAL and the
+#   other conservative cases, the null trap and the file-level count.
+# - test_row_selection_direct: RowSelection operations against a per-row
+#   bitmap over generated selections, nulls in a mask, selects_all and the
+#   cursor's phases.
+# - test_row_window_direct: the row-group window, hand cases and a sweep
+#   against a brute-force answer.
+# - test_arrow_schema_hint_direct: ARROW:schema values made by the IPC
+#   encoder, both framings, unreadable values, the key lookup and the guard.
+# - test_bypass_direct: a chunk's bytes read as stored, its start at a
+#   leading dictionary page, its leaf name after a group, and the refusals.
+# - test_runtime_footer_cache_direct: the footer cache on files written by
+#   the test: parse once, shared footers and one pin, revalidation of a
+#   rewritten or freshly written file, the pin budget, invalidate, the
+#   row-count memo, the stripped footer and summary, a file system that is
+#   not mmap-backed, and the budget policy.
+# - test_table_stats_direct: the eager fold and the provider: bounds decoded
+#   by type (unsigned, UINT_64 past Int64.MAX, DECIMAL), top-level leaves,
+#   HLL register merge against one sketch over the union, the path entry
+#   points.
+# - test_morsel_reader_direct: ParquetMorselReader on files written by
+#   komira_test_parquet_file: morsels per row group and cut across row groups
+#   and pages at unaligned rows (validity rebased), one-row morsels, reset,
+#   a file of no rows, a kept dictionary through morsel windows, projections
+#   and the decode census (one count per row group and column, never per
+#   morsel), the shared decodes with and without the buffer move, the
+#   one-pass selection decode, raw chunks against the file's bytes, the
+#   footer cache, and the refusals.
+# - test_bytes_decode_direct: the I/O-free entry points on the same kind of
+#   file: the row group's byte range exactly its chunks, every row group
+#   decoded from its own bytes (projection, kept dictionary, census), one
+#   chunk out of the whole file, INT64 and nullable INT32 dictionary codes
+#   mapped back to the rows (PLAIN and BYTE_ARRAY chunks get None), and the
+#   refusals.
+# - test_page_index_direct: page row counts exact to the last page, run
+#   coalescing, and chosen pages of PLAIN, nullable and dictionary chunks
+#   read against the rows written.
+# - test_page_index_parser_direct: hand-encoded ColumnIndex and OffsetIndex
+#   blobs, a page without bounds marked alone, and the malformed blobs
+#   refused.
+# - test_page_index_cache_direct: parse once per chunk, copies, invalidate
+#   by path, and a refused lookup releasing the lock.
+# - test_page_pruner_direct: every comparison, AND / OR, all-null pages and
+#   pages without bounds, extreme literals; the cache layer on a file and
+#   the columns it leaves whole (UINT_64, DECIMAL, INT32, no page index).
+# - test_parquet_source_constants_direct: typed null columns, partition
+#   constants of every type, and partition text refused.
+# - test_parquet_source_helpers_direct: the schema, the per-chunk subset
+#   decode with fresh and reused contexts, dictionary codes of one chunk,
+#   names, union by name, and the by-name decode with a missing column.
+# - test_parquet_source_page_picks_direct: row ranges and page cover with
+#   two page sizes, the per-column page decode, and the columns whose pages
+#   cover different rows refused.
+# - test_file_decode_direct: a whole in-memory file to one batch, on files
+#   written by komira_test_parquet_file: row groups and pages concatenated in
+#   file order, a projection, and the refusals (empty, short, truncated, bad
+#   magic at either end, footer length, garbage footer, no row group, a chunk
+#   outside the data region).
 # - test_no_env_reads: the package's sources read no environment, import no
 #   komira package outside the deps below (and never komira_core), hold no
 #   raw pointer in a public signature, rebuild no address from an integer
@@ -89,33 +231,76 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   so a module the scan does not read fails it.
 _SRCS = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"])
 
+_PYARROW_FIXTURES = [
+    "pyarrow_gzip_plain.parquet",
+    "pyarrow_int96_ts.parquet",
+    "pyarrow_multi_dict_page.parquet",
+    "pyarrow_page_crc_zstd_v2.parquet",
+    "pyarrow_zero_row.parquet",
+]
+
 mojo_library(
     name = "komira_parquet",
     srcs = _SRCS,
     deps = [
         "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
         "//src/komira_async:komira_async",
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
+        "//src/komira_counters:komira_counters",
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_fs:komira_fs",
+        "//src/komira_host:komira_host",
         "//src/komira_parquet_api:komira_parquet_api",
         "//src/komira_parquet_codec:komira_parquet_codec",
         "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_stats:komira_plan_stats",
         "//src/komira_simd:komira_simd",
+        "//src/komira_sync:komira_sync",
+        "//src/komira_zlib:komira_zlib",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_data = {
+        "tests/test_column_decoder_pyarrow.mojo": {
+            "parquet/" + f: "//src/komira_parquet_codec:" + f
+            for f in _PYARROW_FIXTURES
+        },
         "tests/test_no_env_reads.mojo": {
             "src/" + f: f
             for f in _SRCS
         },
     },
     test_srcs = [
+        "tests/test_arrow_schema_hint_direct.mojo",
+        "tests/test_arrow_schema_hint_framing_and_type_tags.mojo",
         "tests/test_bloom_pruner_direct.mojo",
         "tests/test_bloom_reader_direct.mojo",
         "tests/test_bss_direct.mojo",
+        "tests/test_bypass_direct.mojo",
+        "tests/test_data_page_count_truncated_chunk.mojo",
+        "tests/test_bypass_leaf_name.mojo",
+        "tests/test_column_reader_negative_page_sizes.mojo",
+        "tests/test_inlined_helpers_at_runtime_widths_and_types.mojo",
+        "tests/test_bytes_decode_direct.mojo",
+        "tests/test_bytes_decode_schema_annotations.mojo",
+        "tests/test_column_decode_context_direct.mojo",
+        "tests/test_column_decoder_dict_direct.mojo",
+        "tests/test_column_decoder_direct.mojo",
+        "tests/test_column_decoder_value_and_page_refusals.mojo",
+        "tests/test_column_decoder_internals_direct.mojo",
+        "tests/test_column_decoder_pyarrow.mojo",
+        "tests/test_column_reader_local.mojo",
+        "tests/test_cov_g3_cursor_dict_short_and_malformed_pages.mojo",
+        "tests/test_cov_g3_cursor_flat_short_and_malformed_pages.mojo",
+        "tests/test_cov_g3_decode_context_and_row_selection_edges.mojo",
+        "tests/test_cov_g3_footer_cache_pin_that_cannot_map.mojo",
+        "tests/test_cov_g3_morsel_reader_timestamps_and_empty_row_groups.mojo",
+        "tests/test_cov_g3_morsel_slice_bool_string_and_bounds.mojo",
+        "tests/test_cov_g3_rg_pruner_tables_and_refusals.mojo",
+        "tests/test_cov_g3_subrg_cursor_pages_codecs_and_dicts.mojo",
+        "tests/test_cov_g3_table_stats_folds_and_refusals.mojo",
         "tests/test_decimal_decode_direct.mojo",
         "tests/test_decode_arm_trace_direct.mojo",
         "tests/test_decode_helpers_direct.mojo",
@@ -132,6 +317,7 @@ mojo_library(
         "tests/test_dictionary_resolve_int32_simd_parity.mojo",
         "tests/test_dictionary_resolve_int64_simd_parity.mojo",
         "tests/test_dictionary_strings_flba_direct.mojo",
+        "tests/test_file_decode_direct.mojo",
         "tests/test_file_reader_local.mojo",
         "tests/test_file_reader_object_store.mojo",
         "tests/test_flat_read_types_are_never_nested.mojo",
@@ -148,29 +334,53 @@ mojo_library(
         "tests/test_gather_fixed_width_non_null.mojo",
         "tests/test_int96_decode.mojo",
         "tests/test_metadata_parser_direct.mojo",
+        "tests/test_morsel_reader_direct.mojo",
         "tests/test_neon_bss_decode.mojo",
+        "tests/test_nested_decoder_direct.mojo",
+        "tests/test_nested_decoder_leaf_types_and_refusals.mojo",
         "tests/test_nested_direct.mojo",
         "tests/test_nested_types.mojo",
         "tests/test_no_env_reads.mojo",
         "tests/test_null_expand_direct.mojo",
         "tests/test_num_rows_cache_direct.mojo",
         "tests/test_page_header_parser_direct.mojo",
+        "tests/test_page_index_cache_direct.mojo",
+        "tests/test_page_index_direct.mojo",
+        "tests/test_page_index_parser_direct.mojo",
+        "tests/test_page_pruner_direct.mojo",
         "tests/test_parquet_encoding.mojo",
+        "tests/test_parquet_source_constants_direct.mojo",
+        "tests/test_parquet_source_helpers_direct.mojo",
+        "tests/test_parquet_source_page_picks_direct.mojo",
         "tests/test_partition_pred_bridge_roundtrip.mojo",
         "tests/test_plain_ba_fused_byte_equiv.mojo",
         "tests/test_plain_ba_raise_outlined.mojo",
         "tests/test_plain_direct.mojo",
         "tests/test_plain_flba_direct.mojo",
+        "tests/test_rg_pruner_direct.mojo",
         "tests/test_rle_bitunpack_sweep.mojo",
         "tests/test_rle_decoder_direct.mojo",
         "tests/test_rle_simd.mojo",
         "tests/test_rle_simd_bw_small.mojo",
+        "tests/test_row_selection_direct.mojo",
+        "tests/test_row_window_direct.mojo",
+        "tests/test_runtime_footer_cache_direct.mojo",
         "tests/test_scan_copy_trace_direct.mojo",
         "tests/test_scan_trace_leaves_direct.mojo",
         "tests/test_selection_interval.mojo",
         "tests/test_selection_vector_direct.mojo",
         "tests/test_string_share_byte_equiv.mojo",
+        "tests/test_subrg_admit_all_pages_direct.mojo",
+        "tests/test_subrg_cursor_dict_direct.mojo",
+        "tests/test_subrg_cursor_flat_direct.mojo",
+        "tests/test_subrg_traces_direct.mojo",
+        "tests/test_table_stats_direct.mojo",
         "tests/test_thrift_compact_direct.mojo",
+        "tests/test_cov_g1_column_assembly_and_finishing_dictionary_shapes.mojo",
+        "tests/test_cov_g1_column_assembly_and_finishing_plain_and_empty_chunks.mojo",
+    ],
+    test_deps = [
+        "//src/tests/helpers/komira_test_parquet_file:komira_test_parquet_file",
     ],
     visibility = ["PUBLIC"],
 )

@@ -752,6 +752,8 @@ def _arm_of(e: WireExpr) -> String:
         out.append("string_fn_n")
     if len(e.udf_call) > 0:
         out.append("udf_call")
+    if len(e.udf_apply) > 0:
+        out.append("udf_apply")
     var joined = String("")
     for i in range(len(out)):
         joined += (String(",") if i > 0 else String("")) + out[i]
@@ -759,13 +761,13 @@ def _arm_of(e: WireExpr) -> String:
 
 
 def test_expr_arms(mut L: _Ledger) raises:
-    """oneof node { 2 col_ref .. 26 udf_call } (1 is reserved): each arm,
+    """oneof node { 2 col_ref .. 27 udf_apply } (1 is reserved): each arm,
     written under its ledger number, decodes as that arm by name."""
     var arms = _names(
         "col_ref col_idx literal binary_op unary_op alias in_list cast"
         + " correlated_subquery when agg_fn extract math_fn math_fn2 substring"
         + " string_op regexp struct_field struct_field_idx map_get json_extract"
-        + " window_fn string_fn string_fn_n udf_call"
+        + " window_fn string_fn string_fn_n udf_call udf_apply"
     )
     for k in range(len(arms)):
         var q = "WireExpr." + arms[k]
@@ -947,6 +949,7 @@ WireExpr.window_fn 23
 WireExpr.string_fn 24
 WireExpr.string_fn_n 25
 WireExpr.udf_call 26
+WireExpr.udf_apply 27
 WireAggExpr.func 1
 WireAggExpr.has_child0 2
 WireAggExpr.child0 3

@@ -106,8 +106,9 @@ service-account ID tokens. It checks each token in this order:
     bounds the TLS handshake and the request separately. The TCP connect adds
     up to 5 s, and DNS resolution has no bound, so a fetch takes the DNS time
     plus at most 5 s + 2 x the fetch timeout.
-- **Signature**, checked by `komira_crypto`'s `verify_rs256_jws`. This package
-  adds no RS256 verifier of its own.
+- **Signature**, checked by `komira_jose`'s `JwsVerifier` pinned to RS256, with
+  `typ` pinned to JWT and `kid` required. A token `komira_jose` refuses is
+  refused as `signature_invalid`. This package adds no verifier of its own.
 - **Claims**:
   - `iss` must match exactly. So `https://accounts.google.com` does not
     accept the bare `accounts.google.com` form some Google tokens carry;

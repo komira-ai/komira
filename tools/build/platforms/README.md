@@ -30,7 +30,7 @@ A row states, all required:
 | `cache_line_bytes`, `page_bytes`, `features`, `applets` | the cache line and page size of the platform, what it has that tests select on (`epoll`, `erms`, `futex`, `kqueue`, `neon`, `thp`, `ulock`, `x86_simd`), and the utilities a wrapper script may call (a list, or `none(reason)` where a pinned busybox carries them) |
 | `golden_config_hash`, `zig_exe_sha256` | the configuration hash of the row's platform (what every output path and action key carries; `pending` for a row with no platform), and the sha256 of the `zig` executable inside the zig archive, which the bootstrap checks after unpacking |
 | `object_format`, `runtime_libs`, `os_floor` | `elf` or `macho`; what a built binary loads from the toolchain's `lib/`; the oldest OS it runs on |
-| `assets` | every pinned download, by role (`zig`, `mojo_compiler`, `pixi`, `rustc`, `rust_std`, `protoc`, `shellcheck`, `actionlint`, `busybox`, the conda runtime libraries `libgcc`, `libstdcxx`, `libzlib`, and kcov's source and static libraries `kcov_src`, `kcov_elfutils`, `kcov_zlib`, `kcov_bzip2`, `kcov_lzma`, `kcov_zstd`, [linux-x86_64 only](../toolchains/kcov/README.md), and branch coverage's LLVM 23 packages `llvm_branch_tools`, `llvm_branch_libllvm`, `llvm_branch_libxml2`, `llvm_branch_libiconv`, `llvm_branch_zstd`, `llvm_branch_rt`, [linux-x86_64 only](../toolchains/llvm_branch/README.md)): the name of its `pinned_file`, URL, sha256 and size in bytes, or `none(reason)` where a platform needs nothing |
+| `assets` | every pinned download, by role (`zig`, `zig_next` (0.15.2, the release the build tools are moving to; its archive unpacks into `zig-<arch>-<os>-0.15.2`, the arch first), `mojo_compiler`, `pixi`, `rustc`, `rust_std`, `protoc`, `shellcheck`, `actionlint`, `busybox`, the conda runtime libraries `libgcc`, `libstdcxx`, `libzlib`, the run-time-opened `liblz4` (darwin-arm64 only: macOS ships none), and kcov's source and static libraries `kcov_src`, `kcov_elfutils`, `kcov_zlib`, `kcov_bzip2`, `kcov_lzma`, `kcov_zstd`, [linux-x86_64 only](../toolchains/kcov/README.md), and branch coverage's LLVM 23 packages `llvm_branch_tools`, `llvm_branch_libllvm`, `llvm_branch_libxml2`, `llvm_branch_libiconv`, `llvm_branch_zstd`, `llvm_branch_rt`, [linux-x86_64 only](../toolchains/llvm_branch/README.md)): the name of its `pinned_file`, URL, sha256 and size in bytes, or `none(reason)` where a platform needs nothing |
 | `oci_base`, `bundles` | the container base (its manifest, and its blobs' digests and sizes), and whether bundles, OCI images and the launcher are products of this platform (Linux server artifacts) |
 | `registered` | `True`: a build key. `False`: reserved |
 
@@ -40,7 +40,9 @@ pin that is not an https URL with a 64-digit lowercase sha256 and a positive
 in a registered row, two rows sharing a key or a host, an executable pin (`busybox`, `pixi`)
 not pinned `executable = True`, or `pixi` pinned at two releases across rows, fail every package that
 reads the table, naming the row and the pin. [`tests//functional/platform_table`](../tests/functional/platform_table/BUCK)
-holds the cases, each a table with one defect, and
+holds the cases, each a table with one defect (the self-test scenario
+[`analysis_refusals_platform_table`](../selftest/analysis_refusals_platform_table.zig)
+loads them), and
 [`check.sh`](../tests/functional/platform_table/check.sh) is test 37 of
 `run_tests.sh`. It also checks that each registered row's `golden_config_hash`
 is the hash buck2 gives the platform, and that the macOS row's `applets` are
@@ -55,10 +57,13 @@ and `link_driver` (PR 3).
 Every place the build says it builds for one platform only is a **limit**:
 a `target_compatible_with` or a refusal. Each is declared at its site by a
 `komira-limit:<id>` marker and listed in [`limits.tsv`](limits.tsv) with the
-PR that deletes it. [`limits_retired.sh`](../tests/functional/platform_table/limits_retired.sh)
-refuses a `target_compatible_with` with no marker, a marker with no row, a row
-with no marker, and a row whose retiring PR has merged (a commit subject on
-main contains `[native-pr:<n>]`) while its marker is still there. A PR that
+PR that deletes it. The validation `//:limits` (the Zig tool
+[`limits_check`](limits/src/limits.zig), so `./buck2 build //...` and the
+pull request's check run it) refuses a malformed row, a
+`target_compatible_with` with no marker, a marker with no row, and a row with
+no marker. The platform table's check (test 37) runs the same tool over the
+commit subjects of main and refuses a row whose retiring PR has merged (a
+subject contains `native-pr:<n>`), which no build action can read. A PR that
 deletes a limit deletes its marker and its row; `never` is only for product
 statements (images are a Linux product), including a test whose subject is
 one OS's features (the farm capability probe tests the Linux kernel features

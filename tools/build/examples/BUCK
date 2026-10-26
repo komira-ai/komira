@@ -1,6 +1,8 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
 load("@komira//tools/build/mojo:doc.bzl", "mojo_doc_json")
-load("//tools/build/package:defs.bzl", "bundle_tarball", "mojo_bundle", "oci_image")
+load("@komira//tools/build/mojo:opt_level.bzl", "mojo_opt_level_check")
+load("@komira//tools/build/mojo:run_check.bzl", "run_check_wired")
+load("//tools/build/package:defs.bzl", "bundle_tarball", "mojo_bundle", "oci_image", "oci_tree")
 
 # A binary with no dependencies. `[run_check]` runs it remotely and compares
 # its stdout byte for byte.
@@ -30,11 +32,32 @@ bundle_tarball(
 )
 
 # An OCI image: distroless base plus the bundle at /opt/hello/, entrypoint
-# /opt/hello/bin/hello. `[docker_archive]` is for `docker load`.
+# /opt/hello/bin/hello. `[docker_archive]` is for `docker load`. kci_release_set's
+# welded test reads `[release]` (the layout and its artifact manifest) with
+# `verify_member`, and `[digest]` to check the set hash carries that digest.
 oci_image(
     name = "hello_image",
     bundle = ":hello_bundle",
     repository = "komira/hello",
+    visibility = ["//src/kci_release_set:"],
+)
+
+# The same bundle as an image of a tree (oci_tree, at /app/): kci_release_set's
+# welded test reads its `[release]` too, whose member name is `hello_root`,
+# the last segment of the repository, not the tree's name. The tree and
+# repository names differ on purpose, so the test tells which one was used.
+oci_tree(
+    name = "hello_layer",
+    bundles = {"app/": ":hello_bundle"},
+    version = "0.1.0",
+)
+
+oci_image(
+    name = "hello_root_image",
+    tree = ":hello_layer",
+    entrypoint = "/app/bin/hello",
+    repository = "komira/hello_root",
+    visibility = ["//src/kci_release_set:"],
 )
 
 # A package: `buck2 build` produces hellopkg.mojoc.
@@ -64,9 +87,36 @@ mojo_binary(
     expected_stdout = "hello from hellopkg\n",
 )
 
+# Each mojo_binary above with `expected_stdout` returns its run check as a
+# validation: a mojo_binary rule that stopped returning it would build them
+# green with no run check run, and fails this target's analysis instead.
+run_check_wired(
+    name = "run_check_wired",
+    binaries = [
+        ":hello",
+        ":hello_pkg_user",
+    ],
+)
+
 # A standalone test target: `buck2 test //tools/build/examples:test_hellopkg`.
 mojo_test(
     name = "test_hellopkg",
     srcs = ["test_hellopkg.mojo"],
     deps = [":hellopkg"],
+)
+
+# The rules' default optimization levels, read at analysis from the level
+# each compile puts on its `mojo build` command line (mojo/opt_level.bzl):
+# a mojo_test and a library's welded tests at -O1; a binary and its
+# `[shared]` (the library hello_bundle ships) at -O3. Building this target
+# is the check: a row that does not hold fails analysis.
+mojo_opt_level_check(
+    name = "opt_levels",
+    rows = [
+        (":test_hellopkg", "mojo_build_test", "1"),
+        ("//tools/build/examples/libgate_ok:libgate_ok", "mojo_build_test", "1"),
+        (":hello", "mojo_build", "3"),
+        (":hello", "mojo_build_shared", "3"),
+        (":hello_pkg_user", "mojo_build", "3"),
+    ],
 )

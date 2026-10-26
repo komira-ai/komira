@@ -1,0 +1,34 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The names-only secret catalog and the write side of the secret-store seam:
+# `SecretManager` (the catalog row, every column a name),
+# `SecretManagerStore[DB]` over komira_db's backend-neutral `Database` with its
+# `secret_migrations` chain, the `SecretWriteStore` trait with
+# `InMemorySecretWriteStore`, and `SharedMemorySecretStore`, an in-memory store
+# that is both a `SecretStore` and a `SecretWriteStore`.
+#
+# The welded tests: test_secret_manager_custody reads the row's schema and DDL
+# for a value-bearing column and pins the ordinal wire tokens;
+# test_secret_manager_store runs the migration chain and every store call on an
+# in-memory SQLite database (komira_db_sqlite is a `test_deps` package, so a
+# consumer does not link it); test_write_and_shared_stores covers the two
+# in-memory stores. No test touches a secret service.
+mojo_library(
+    name = "komira_secrets",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_db:komira_db",
+        "//src/komira_secret_store:komira_secret_store",
+    ],
+    test_deps = [
+        "//src/komira_db_sqlite:komira_db_sqlite",
+    ],
+    test_srcs = [
+        "tests/test_secret_manager_custody.mojo",
+        "tests/test_secret_manager_store.mojo",
+        "tests/test_write_and_shared_stores.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

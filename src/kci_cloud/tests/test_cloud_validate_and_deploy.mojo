@@ -15,7 +15,8 @@
 #    `lower`, so nothing can be created; plan, apply and destroy alike.
 # 4. THE LOWERING CONTRACT is enforced on every run: a node whose id or owner
 #    does not name its resource is refused.
-# 5. A plan groups under the authored resources.
+# 5. A plan groups under the authored resources; an action with no owner
+#    under `(no owner)`.
 # 6. A cloud that is not built in is a wiring defect, raised, not a finding.
 # 7. THE V1.3 GRAPH RULES: the id grammar, the image platform (OS + CPU,
 #    `<os>/<cpu>` in the graph; deployable or not by the cloud's
@@ -38,6 +39,11 @@
 #    encoded role is over 63 bytes refuses the whole graph with a GRAPH
 #    finding naming the node, its byte count and its segment lengths, before
 #    any node is realized or created; a 63-byte role is applied.
+# 15. VALIDATE AT ITS EDGES: an expansion finding is the whole answer; an
+#    expanded list for a cloud not built in raises; a resource with no type,
+#    or a type outside the catalog, is a graph finding only; a type no
+#    adapter of the cloud hosts names every built-in cloud that does; a node
+#    whose id does not start with its owner is measured whole.
 # =============================================================================
 
 from std.memory import ArcPointer
@@ -66,6 +72,7 @@ from kci_reconciler import (
 from kci_resource_proto.resource import Resource, ResourceList
 
 from kci_cloud import (
+    RegistryLogin,
     GrantEdge,
     CloudAdapter,
     Absence,
@@ -112,7 +119,11 @@ from kci_cloud import (
     plan_resources,
     refusal_text,
     validate_for,
+    validate_expanded,
+    node_role,
+    CloudEntry,
 )
+from kci_resource_proto.composite import CompositeDefinition
 
 
 def _has(haystack: String, needle: String) -> Bool:
@@ -343,7 +354,7 @@ struct _Stub(CloudAdapter, Movable):
         return l^
 
     def required_artifact(self, r: Resource) -> ArtifactNeed:
-        return ArtifactNeed(String("oci-image"), String("linux/amd64"))
+        return ArtifactNeed(String("OCI"), String("linux/amd64"))
 
     def lower(self, r: Resource, edges: List[GrantEdge], feeds: List[Feed], firings: List[Firing]) raises -> List[LoweredNode]:
         var owner = r.id.copy()
@@ -423,6 +434,12 @@ struct _Stub(CloudAdapter, Movable):
                 Finding(FINDING_CELL, String("(cell)"), String("trust"), creds.token + String(" is not deployer"))
             )
         return l^
+
+    def image_registry(self, ctx: CellContext) -> String:
+        return String("")
+
+    def registry_login(mut self, creds: Creds) raises -> RegistryLogin:
+        return RegistryLogin(String(""), String(""))
 
 
 def _ctx() -> CellContext:
@@ -606,6 +623,12 @@ def test_plan_groups_by_resource_and_unregistered_raises() raises:
     var plan = plan_resources(reg, full, _ctx(), _list(_good()), Creds.none(), pst)
     var grouped = group_plan(plan)
     assert_equal(grouped, "api: create api/run, create api/edge\nbatch: create batch/run")
+    # An action with no owner groups under "(no owner)", wherever it falls.
+    var loose = List[ChangeAction]()
+    loose.append(ChangeAction(String("x/run"), VERB_CREATE, String(""), RETAIN_DELETE))
+    loose.append(ChangeAction(String("y/run"), VERB_NOOP, String(""), RETAIN_DELETE, String("y")))
+    loose.append(ChangeAction(String("x/two"), VERB_CREATE, String(""), RETAIN_DELETE))
+    assert_equal(group_plan(loose), "(no owner): create x/run, create x/two\ny: noop y/run")
 
     var stray = _Stub(String("stray"), True)
     var raised = False
@@ -693,7 +716,7 @@ def test_id_grammar_platform_and_secret_rules() raises:
         _has(
             pt,
             'mac|service.image.platform|platform "darwin/arm64" is not deployable on cloud'
-            ' "full": it runs oci-image for linux/amd64',
+            ' "full": it runs OCI for linux/amd64',
         ),
         pt,
     )
@@ -828,7 +851,7 @@ def test_the_adapter_interface_and_the_label_rule() raises:
     var tf = full.trust_check(Creds(String("intruder")), scope)
     assert_equal(len(tf), 1)
     assert_equal(tf[0].kind, FINDING_CELL)
-    assert_equal(full.required_artifact(_list(_good())[0]).kind, "oci-image")
+    assert_equal(full.required_artifact(_list(_good())[0]).kind, "OCI")
 
     # the standard label rule: born with the object, decoded exactly
     var store = InMemoryStateStore()
@@ -922,6 +945,37 @@ def test_a_role_over_the_label_budget_is_refused_before_apply() raises:
     print("  test_a_role_over_the_label_budget_is_refused_before_apply: PASS")
 
 
+def test_validate_at_its_edges() raises:
+    var reg = _clouds(_Stub(String("lite"), False), _Stub(String("full"), True))
+    var lite = _Stub(String("lite"), False)
+    var inst = _list(String('{"resource":[{"id":"o","composite":{"definition":"acme.none","version":"1"}}]}'))
+    var f = validate_for(reg, lite, inst)
+    assert_equal(len(f), 1, _all_text(f))
+    assert_equal(f[0].resource_id, "o")
+    var why = String("")
+    try:
+        _ = validate_expanded(reg, _Stub(String("stray"), True), _list(_good()), List[String]())
+    except e:
+        why = String(e)
+    assert_true(_has(why, 'kci: "stray" is not a cloud built into this kci (built in: lite, full)'), why)
+    f = validate_for(reg, lite, _list(String('{"resource":[{"id":"bare"}]}')))
+    assert_equal(len(f), 1, _all_text(f))
+    assert_equal(f[0].field_path, "body")
+    var bare = Clouds(Catalog())
+    bare.add(CloudEntry(CloudId(String("lite")), True, List[Int](), List[Absence]()))
+    f = validate_for(bare, lite, _list(String('{"resource":[{"id":"b","bucket":{}}]}')))
+    assert_equal(_all_text(f), "b|body|type field 14 is not in the catalog\n")
+    var three = _clouds(_Stub(String("lite"), False), _Stub(String("full"), True))
+    three.add(describe(_Stub(String("also"), True)))
+    f = validate_for(three, lite, _list(String('{"resource":[{"id":"b","bucket":{}}]}')))
+    assert_equal(len(f), 1, _all_text(f))
+    assert_true(_has(f[0].reason, "clouds built into this kci that implement it: full, also"), f[0].reason)
+    assert_equal(node_role(LoweredNode(String("x/run"), String("y"), String("k"))), "x/run")
+    assert_equal(node_role(LoweredNode(String("y/a/run"), String("y"), String("k"))), "a/run")
+    assert_equal(node_role(LoweredNode(String("/run"), String(""), String("k"))), "/run")  # no owner: whole
+    print("  test_validate_at_its_edges: PASS")
+
+
 def main() raises:
     print("test_cloud_validate_and_deploy")
     test_every_graph_finding_in_one_pass()
@@ -934,4 +988,5 @@ def main() raises:
     test_the_cell_is_configured_and_validated_first()
     test_the_adapter_interface_and_the_label_rule()
     test_a_role_over_the_label_budget_is_refused_before_apply()
+    test_validate_at_its_edges()
     print("ALL kci_cloud VALIDATE AND DEPLOY TESTS PASSED")

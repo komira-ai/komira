@@ -37,45 +37,37 @@
 #      tests//negative/coverage: branchfail, branchannotate,
 #      branchnoprof and branchversion build green (their release gates),
 #      and branchfail[coverage][branch][test_profile_env] is red (a test
-#      failing only instrumented: the run's message, without gate_runner's
-#      banner), branchnoprof[...] red (a cov_branch_run.sh copy whose test
+#      failing only instrumented: the run's message, without the gate's
+#      banner), branchnoprof[...] red (a copy of `cov_branch run` whose test
 #      gets no LLVM_PROFILE_FILE: no .profraw), branchversion[...] red (a
-#      copy raising each raw profile's version to 12: refused as version 12,
+#      copy reading each raw profile's version as 12: refused as version 12,
 #      not 11), branchannotate[coverage][branch_ir][test_one] red (a
-#      cov_branch_annotate.sh copy changing the control flow before the
+#      copy of `cov_branch annotate` changing the control flow before the
 #      profile is applied: LLVM's hash mismatch warning, refused),
-#      branchmissing[...][branch_ir] red (a cov_branch_run.sh copy merging
+#      branchmissing[...][branch_ir] red (a `cov_branch run` copy merging
 #      without the test's main: a function the binary links that the
 #      profile lacks, refused), branchinternal[...][branch_ir] red (a copy
 #      internalizing the bitcode before the profile is applied: a function
-#      of the profile the bitcode does not hold, refused), branchwide's
-#      [branch_ir] green (a copy padding the section-name pipeline with
-#      1 MB: its reader takes all of it, so no writer dies of SIGPIPE),
+#      of the profile the bitcode does not hold, refused),
 #      branchweights[...][branch_ir] red (a copy annotating a bitcode that
 #      already holds branch weights), branchentry[...][branch_ir] red (that
 #      copy with the weights check off: the entry counts refused), branchnodebug[...][branch_info] red
 #      (a nodebug helper's decision at its call),
-#      branchenv red at analysis (a test_env setting
-#      LLVM_PROFILE_FILE), branchlinkline red (a cov_branch_link.sh copy
-#      without -lm: not the release link). The actions exist only with the
+#      branchenv refused at analysis (a test_env setting
+#      LLVM_PROFILE_FILE: //tools/build/selftest:analysis_refusals_coverage), branchlinkline red (a `cov_branch link` copy
+#      without -lm: not the release link), branchnonatomic red (a `cov_branch
+#      link` copy without atomic counter updates: test_threads's eight
+#      threads lose increments, so quarter's counters are not exact). The actions exist only with the
 #      switch on: coverage_keys.sh (test 41).
+#      The greens named below build in the pull-request check, not here:
+#      tests//functional/... is built, its sub-targets through
+#      tests//functional/coverage:greens, and the greens of tests//negative
+#      and tests//src through komira//:tests_greens. What stays here is
+#      what must go red.
 
-expect_green coverage_branch tests//functional/coverage:branch_counts tests//functional/coverage:link_line \
-    tests//functional/coverage:branchlib 'tests//functional/coverage:branchlib[coverage][branch][test_gate_env]' \
-    tests//functional/coverage:branchc 'tests//functional/coverage:branchc[coverage][branch]' \
-    tests//functional/coverage:branchtd 'tests//functional/coverage:branchtd[coverage][branch]' \
-    tests//functional/coverage:reproducible_branch tests//functional/coverage:reproducible_pgo_bin \
-    tests//functional/coverage:branch_info \
-    tests//negative/coverage:branchfail tests//negative/coverage:branchannotate \
-    tests//negative/coverage:branchnoprof tests//negative/coverage:branchversion \
-    tests//negative/coverage:branchmissing tests//negative/coverage:branchweights \
-    tests//negative/coverage:branchinternal tests//negative/coverage:branchwide \
-    tests//negative/coverage:branchentry \
-    'tests//negative/coverage:branchwide[coverage][branch_ir][test_one]' \
-    tests//negative/coverage:branchnodebug
 expect_red coverage_branch_test_fails "The test failed instrumented for branch coverage (exit 1)" \
     'tests//negative/coverage:branchfail[coverage][branch][test_profile_env]'
-# The failing run's message is a branch coverage run's: not gate_runner's
+# The failing run's message is a branch coverage run's: not the gate's
 # banner, which would say the release gate's test failed (it passed).
 # A missing log is a failure, not a pass (grep's exit 2 is not "absent").
 if [ ! -f "$LOG/coverage_branch_test_fails.log" ]; then
@@ -101,7 +93,7 @@ expect_red coverage_branch_static_entry_counts "already holds function entry cou
     'tests//negative/coverage:branchentry[coverage][branch_ir][test_one]'
 expect_red coverage_branch_nodebug "may be a decision of count_down" \
     'tests//negative/coverage:branchnodebug[coverage][branch_info][test_nodebug]'
-expect_red coverage_branch_test_env "test_env sets LLVM_PROFILE_FILE, which a branch coverage run sets itself" \
-    tests//negative/coverage:branchenv
 expect_red coverage_branch_link_line "the branch coverage link is not the release link plus the profile runtime" \
     tests//negative/coverage:branchlinkline
+expect_red coverage_branch_nonatomic "the counters of quarter are" \
+    tests//negative/coverage:branchnonatomic

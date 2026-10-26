@@ -1,0 +1,23 @@
+# The staged set of the release, for the README e2e (tools/build/readme_e2e/README.md).
+load("@komira//tools/build/readme_e2e:defs.bzl", "readme_e2e_staged")
+load(":packages.bzl", "MOJO", "PACKAGES")
+
+# Every package moved to mopm, as `mopm stage` writes the set (it cannot run as a build
+# action: it asks the registry, see //release/staged_set): plan.json, each
+# package's `.conda` (`:conda` of its package, built only once its tests passed) and
+# its README (the one the package's README gate runs). The targets of
+# //release/readme_e2e/verify install from it. Built by the pull request check: the
+# packages assemble, and each one is the name and version its entry says.
+readme_e2e_staged(
+    name = "staged",
+    members = {
+        name: (
+            version,
+            "//src/{}:conda".format(name),
+            "//src/{}:{}[tests][readme][file]".format(name, name),
+        )
+        for name, version in PACKAGES.items()
+    },
+    mojo = MOJO,
+    visibility = ["//ci:", "//release/readme_e2e/verify:"],
+)

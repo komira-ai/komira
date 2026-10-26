@@ -5,7 +5,7 @@
 # =============================================================================
 #
 # THE WIRE, MEASURED (uv publish against a loopback recorder,
-# `tests/fidelity/capture_uv_publish.py`):
+# `uv_fidelity`, `tests/fidelity/main.zig`):
 #
 #   POST <upload path>
 #   Content-Type: multipart/form-data; boundary=<16hex>-<16hex>-<16hex>-<16hex>

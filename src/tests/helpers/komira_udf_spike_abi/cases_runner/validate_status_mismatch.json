@@ -1,0 +1,12 @@
+{
+ "name": "validate_status_mismatch",
+ "defect": "a deliberate mismatch: the runner must fail this case",
+ "run": "validate",
+ "entry": "identity",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "descriptor": {"entry": "other"},
+ "expect": {"status": "OK"},
+ "runner_fails_with": "expected OK"
+}

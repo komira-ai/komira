@@ -102,10 +102,14 @@ def fuse_filters_inplace(mut plan: LogicalPlan) raises:
         # path takes a deep copy of the grandchild (legacy cost), but
         # only fires when fusion is actually possible.
         #
-        # The UDF-aware fusion guard was removed.
-        # FilterData no longer carries a `udf` slot — Filter-of-Filter fusion
-        # is now always safe (no UDF semantics to drop).
-        if plan._filter.value()[].child[].tag == PLAN_FILTER:
+        # A UDF Filter on either side is not fused: fusion keeps the outer
+        # node and deletes the inner one, so it would drop an inner UDF, or
+        # put the inner predicate under an outer UDF that ignores it.
+        if (
+            plan._filter.value()[].child[].tag == PLAN_FILTER
+            and not plan.has_udf()
+            and not plan._filter.value()[].child[].has_udf()
+        ):
             var inner_pred = plan._filter.value()[].child[]._filter.value()[].predicate.copy()
             var outer_pred = plan._filter.value()[].predicate.copy()
             var fused = Expr.binary(BIN_AND, inner_pred^, outer_pred^)
@@ -440,6 +444,9 @@ def push_predicates_down(var plan: LogicalPlan) raises -> LogicalPlan:
             # reset it to its default, `SOURCE_KIND_UNSET`, and the rewritten
             # scan would lose its source-decode annotation.
             var src_kind = child._scan.value()[].source_kind
+            # And its boundedness: a stated property of the source, which the
+            # rebuild would otherwise reset to BOUNDED.
+            var bounded = child._scan.value()[].boundedness
             var new_scan = LogicalPlan.scan_from_source(
                 src_copy^,
                 _copy_schema(child.output_schema),
@@ -448,6 +455,7 @@ def push_predicates_down(var plan: LogicalPlan) raises -> LogicalPlan:
                 rc_opt^,
                 ts_opt^,
                 src_kind,
+                boundedness=bounded,
             )
             if len(kept) == 0:
                 return new_scan^
@@ -475,6 +483,10 @@ def push_predicates_down(var plan: LogicalPlan) raises -> LogicalPlan:
         # above the inner Filter and stop.
         elif child.tag == PLAN_FILTER:
             var new_child = push_predicates_down(child^)
+            # A UDF Filter below is a barrier: `pred` stays above it, and the
+            # swap below would rebuild it with the non-UDF factory.
+            if new_child.has_udf():
+                return LogicalPlan.filter(pred^, new_child^)
             if new_child.tag == PLAN_FILTER:
                 # `new_child` = Filter(inner_pred, gc): inner_pred is parked
                 # above a node it can't descend (a both-sides Join / Aggregate).

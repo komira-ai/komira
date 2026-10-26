@@ -82,7 +82,12 @@ from komira_column_kernels.string_comparison import like_match_string
 # of ONE SQL op, so they share one named kernel rather than four spellings that
 # can drift; the full measurement lives on `libm_pow`.
 from komira_column_kernels.scalar_math import libm_pow, _apply_unary
-from komira_scalar_arithmetic.int_overflow import checked_add, checked_sub, checked_mul
+from komira_scalar_arithmetic.int_overflow import (
+    checked_add,
+    checked_sub,
+    checked_mul,
+    int_overflow_message,
+)
 from komira_kernels.runtime_expr import (
     EXPR_ADD_DECIMAL128,
     EXPR_ADD_F64,
@@ -259,11 +264,27 @@ def _ee_div_trunc[dt: DType](a: Scalar[dt], b: Scalar[dt]) -> Scalar[dt]:
     (docs/design/query_semantics.md §5.1, DuckDB's `//`: `-7 // 2` is -3).
     Mojo's `//` floors (-4), so the floor quotient moves one step toward zero
     when the division is inexact and the operands' signs differ. The caller
-    has refused a zero divisor."""
+    has refused a zero divisor and the MIN / -1 pair (`_ee_div_overflows`)."""
     var q = a // b
     if q * b != a and ((a < 0) != (b < 0)):
         q += 1
     return q
+
+
+@always_inline
+def _ee_div_overflows[dt: DType](a: Scalar[dt], b: Scalar[dt]) -> Bool:
+    """Whether `a / b` is the signed MIN / -1 pair, whose quotient `dt` cannot
+    hold (query_semantics.md §5.4: an error). The pair must not reach `//`:
+    the divide instruction traps (SIGFPE) on x86-64."""
+    return a == Scalar[dt].MIN and b == Scalar[dt](-1)
+
+
+def _ee_div_overflow_error[dt: DType]() -> Error:
+    """The §5.4 refusal of MIN / -1, in the integer-overflow wording
+    (`is_int_overflow_error` recognises it)."""
+    return Error(
+        int_overflow_message[dt]("division", Scalar[dt].MIN, "/", Scalar[dt](-1))
+    )
 
 
 @always_inline
@@ -683,6 +704,11 @@ struct ExpressionExecutor(Movable, Deinitable):
     # slab-safe.
     var regex_pool: List[RegexProgram]
 
+    # Whether the pool holds an integer division. A NULL quotient (a zero
+    # divisor, §5.3) can then appear on a source with no NULL cell, so the
+    # per-cell filter takes its three-valued path for it.
+    var has_int_division: Bool
+
     def __init__(
         out self,
         var pool: List[RuntimeExpr],
@@ -724,6 +750,10 @@ struct ExpressionExecutor(Movable, Deinitable):
             root_idx >= 0 and root_idx < len(pool),
             "ExpressionExecutor.__init__: root_idx out of pool bounds",
         )
+        self.has_int_division = False
+        for i in range(len(pool)):
+            if pool[i].kind == EXPR_DIV_I64 or pool[i].kind == EXPR_DIV_I32:
+                self.has_int_division = True
         self.expression_pool = pool^
         self.root_idx = root_idx
         self.column_names = column_names^
@@ -2079,24 +2109,36 @@ struct ExpressionExecutor(Movable, Deinitable):
                 batch, node, idx, input_sel, output_sel
             )
 
-        # Disjunction combinator. Evaluate both children
-        # separately against `input_sel`, then merge their true-sels
-        # via a two-pointer union (both sels are sorted ascending —
-        # the per-child filter kernels preserve input order, so a
-        # linear-time merge suffices). Closes TPC-H Q7's nation-pair
+        # Disjunction combinator. The left child runs over `input_sel`; the
+        # right child runs only over the rows the left did not keep, so an
+        # error in the right side (an overflow, MIN / -1) fires only on rows
+        # whose answer depends on it, as in DuckDB. The two true-sels are
+        # disjoint and each keeps `input_sel`'s order, so a two-pointer union
+        # of ascending sels merges them. Closes TPC-H Q7's nation-pair
         # filter `(n1='FRANCE' AND n2='GERMANY') OR
         # (n1='GERMANY' AND n2='FRANCE')`.
         if kind == EXPR_OR:
             var n_sel = input_sel.len()
-            # Per-child true-sel scratch.
-            var left_true = RowSelectionVector(n_sel if n_sel > 0 else 1)
-            var right_true = RowSelectionVector(n_sel if n_sel > 0 else 1)
+            var n_rows = batch.num_rows()
+            # A child's SIMD fast path can write up to `n_rows` survivors
+            # (see the EXPR_AND arm), so each scratch holds that many.
+            var cap = n_rows if n_rows > n_sel else n_sel
+            var left_true = RowSelectionVector(cap if cap > 0 else 1)
+            var right_true = RowSelectionVector(cap if cap > 0 else 1)
             _ = self._eval_bool_from_view[bo](
                 batch, node.left, input_sel, left_true, temp_false
             )
-            _ = self._eval_bool_from_view[bo](
-                batch, node.right, input_sel, right_true, temp_false
-            )
+            var kept = List[Bool](length=n_rows, fill=False)
+            for j in range(left_true.len()):
+                kept[Int(left_true.get(j))] = True
+            var rest = RowSelectionVector(n_sel if n_sel > 0 else 1)
+            for k in range(n_sel):
+                if not kept[Int(input_sel.get(k))]:
+                    rest.append(input_sel.get(k))
+            if rest.len() > 0:
+                _ = self._eval_bool_from_view[bo](
+                    batch, node.right, rest, right_true, temp_false
+                )
             # Two-pointer union. Both inputs are sorted ascending.
             output_sel.set_len(0)
             var i_l = 0
@@ -2347,11 +2389,26 @@ struct ExpressionExecutor(Movable, Deinitable):
 
         if kind == EXPR_AND or kind == EXPR_OR:
             var l = List[UInt8](capacity=n_sel)
-            var r = List[UInt8](capacity=n_sel)
             self._eval_kleene_from_view[bo](batch, node.left, sel, l, temp_false)
-            self._eval_kleene_from_view[bo](
-                batch, node.right, sel, r, temp_false
-            )
+            # The right side runs only over the rows the left leaves open
+            # (not FALSE under AND, not TRUE under OR), so an error in it
+            # fires only on rows whose answer depends on it, as in DuckDB.
+            # A decided row keeps `decided` on the right, which the Kleene
+            # table ignores there.
+            var decided = _KLEENE_FALSE if kind == EXPR_AND else _KLEENE_TRUE
+            var open_pos = List[Int](capacity=n_sel)
+            for k in range(n_sel):
+                if l[k] != decided:
+                    open_pos.append(k)
+            var r = List[UInt8](length=n_sel, fill=decided)
+            if len(open_pos) > 0:
+                var open_sel = _sel_at(sel, open_pos)
+                var r_open = List[UInt8](capacity=len(open_pos))
+                self._eval_kleene_from_view[bo](
+                    batch, node.right, open_sel, r_open, temp_false
+                )
+                for j in range(len(open_pos)):
+                    r[open_pos[j]] = r_open[j]
             for k in range(n_sel):
                 if kind == EXPR_AND:
                     out.append(_kleene_and(l[k], r[k]))
@@ -2438,6 +2495,7 @@ struct ExpressionExecutor(Movable, Deinitable):
         idx: Int,
         ref sel: RowSelectionVector,
         mut null_at: List[Bool],
+        f64_ctx: Bool = True,
     ) raises:
         """Set `null_at[k]` (sized `sel.len()`) where the value sub-tree at
         `idx` is SQL NULL for row `sel[k]`; other positions are left as they
@@ -2445,9 +2503,16 @@ struct ExpressionExecutor(Movable, Deinitable):
 
         A column leaf is NULL where its cell is; EXPR_NULL everywhere; a
         literal nowhere. Arithmetic, casts and the math functions are NULL
-        where an operand is. A CASE is NULL where the branch it takes is,
+        where an operand is. An integer division is also NULL where its
+        divisor is zero (query_semantics.md §5.3); the value walkers hold the
+        placeholder 0 there. A CASE is NULL where the branch it takes is,
         chosen as `eval_to_list_{i64,f64}_from_view` choose it. Any other kind
         raises (the value walkers do not serve it either).
+
+        `f64_ctx` names the walker that evaluates the sub-tree: True for
+        `eval_to_list_f64_from_view`, False for the Int64 walker. An
+        EXPR_DIV_I64 re-reads its divisor through that walker, so the zero
+        test sees the divisor the quotient was computed from.
         """
         var node = self.expression_pool[idx]
         var kind = node.kind
@@ -2497,53 +2562,57 @@ struct ExpressionExecutor(Movable, Deinitable):
             or kind == EXPR_ATAN2_F64
             or kind == EXPR_POW_F64
         ):
-            self._mark_value_nulls_from_view[bo](batch, node.left, sel, null_at)
             self._mark_value_nulls_from_view[bo](
-                batch, node.right, sel, null_at
+                batch, node.left, sel, null_at, f64_ctx
+            )
+            self._mark_value_nulls_from_view[bo](
+                batch, node.right, sel, null_at, f64_ctx
+            )
+            if kind == EXPR_DIV_I64 or kind == EXPR_DIV_I32:
+                self._mark_zero_divisors_from_view[bo](
+                    batch, node, sel, null_at, f64_ctx
+                )
+            return
+        if kind == EXPR_F64_TO_I64 or kind == EXPR_I64_TO_F64:
+            # The cast's child is evaluated by the other walker.
+            self._mark_value_nulls_from_view[bo](
+                batch, node.left, sel, null_at, kind == EXPR_F64_TO_I64
             )
             return
         if (
-            kind == EXPR_F64_TO_I64
-            or kind == EXPR_I64_TO_F64
-            or kind == EXPR_SQRT_F64
+            kind == EXPR_SQRT_F64
             or kind == EXPR_SIN_F64
             or kind == EXPR_COS_F64
             or kind == EXPR_ASIN_F64
             or kind == EXPR_RADIANS_F64
             or kind == EXPR_MATH_UNARY_F64
         ):
-            self._mark_value_nulls_from_view[bo](batch, node.left, sel, null_at)
+            self._mark_value_nulls_from_view[bo](
+                batch, node.left, sel, null_at, f64_ctx
+            )
             return
         if kind == EXPR_CASE_I64 or kind == EXPR_CASE_F64:
             ref slots = self.when_pool[node.col_idx]
-            var n_pairs = (len(slots) - 1) // 2
-            var n_rows = batch.num_rows()
-            # `taken[k]` = the WHEN index whose condition first holds, or
-            # `n_pairs` for the ELSE.
-            var taken = List[Int](length=n_sel, fill=n_pairs)
-            for c in range(n_pairs):
-                var cond_mask = List[Scalar[DType.bool]](capacity=n_rows)
-                for _r in range(n_rows):
-                    cond_mask.append(Scalar[DType.bool](False))
-                self._eval_case_cond_mask_from_view[bo](
-                    batch, slots[2 * c], sel, cond_mask
-                )
-                for k in range(n_sel):
-                    if taken[k] == n_pairs and Bool(
-                        cond_mask[Int(sel.get(k))]
-                    ):
-                        taken[k] = c
-            for b in range(n_pairs + 1):
-                var slot = slots[2 * b + 1] if b < n_pairs else slots[
-                    len(slots) - 1
-                ]
-                var branch_null = List[Bool](length=n_sel, fill=False)
+            var n_branches = (len(slots) - 1) // 2 + 1
+            # Each branch's NULLs are read over the rows that take it only,
+            # as the value walkers evaluate it.
+            var taken = self._case_taken_from_view[bo](batch, slots, sel)
+            for b in range(n_branches):
+                var pos = _positions_of(taken, b)
+                if len(pos) == 0:
+                    continue
+                var branch_sel = _sel_at(sel, pos)
+                var branch_null = List[Bool](length=len(pos), fill=False)
                 self._mark_value_nulls_from_view[bo](
-                    batch, slot, sel, branch_null
+                    batch,
+                    _case_branch_slot(slots, b),
+                    branch_sel,
+                    branch_null,
+                    kind == EXPR_CASE_F64,
                 )
-                for k in range(n_sel):
-                    if taken[k] == b and branch_null[k]:
-                        null_at[k] = True
+                for j in range(len(pos)):
+                    if branch_null[j]:
+                        null_at[pos[j]] = True
             return
         raise Error(
             "ExpressionExecutor._mark_value_nulls_from_view: unsupported"
@@ -2552,6 +2621,63 @@ struct ExpressionExecutor(Movable, Deinitable):
             + " at pool slot "
             + String(idx)
         )
+
+    def _mark_zero_divisors_from_view[
+        bo: Origin[mut=False],
+    ](
+        imm self,
+        ref [bo] batch: RecordBatch,
+        node: RuntimeExpr,
+        ref sel: RowSelectionVector,
+        mut null_at: List[Bool],
+        f64_ctx: Bool,
+    ) raises:
+        """Set `null_at[k]` where the divisor of the integer division `node`
+        is zero (§5.3), read through the walker that divides: the Int32
+        walker for EXPR_DIV_I32, else the Float64 one under `f64_ctx` and the
+        Int64 one otherwise. A nonzero integer widens to a nonzero Float64,
+        so the Float64 read finds the same zeros."""
+        var bv = batch_view_over(batch)
+        var n_sel = sel.len()
+        if node.kind == EXPR_DIV_I32:
+            var d32 = List[Scalar[DType.int32]](capacity=n_sel)
+            self.eval_to_list_i32_from_view[bo](bv, node.right, sel, d32)
+            for k in range(n_sel):
+                if d32[k] == 0:
+                    null_at[k] = True
+        elif f64_ctx:
+            var df = List[Scalar[DType.float64]](capacity=n_sel)
+            self.eval_to_list_f64_from_view[bo](bv, node.right, sel, df)
+            for k in range(n_sel):
+                if df[k] == 0.0:
+                    null_at[k] = True
+        else:
+            var d64 = List[Scalar[DType.int64]](capacity=n_sel)
+            self.eval_to_list_i64_from_view[bo](bv, node.right, sel, d64)
+            for k in range(n_sel):
+                if d64[k] == 0:
+                    null_at[k] = True
+
+    def _operand_nulls_from_view[
+        bo: Origin[mut=False],
+    ](
+        imm self,
+        ref [bo] batch: RecordBatch,
+        node: RuntimeExpr,
+        ref sel: RowSelectionVector,
+        f64_ctx: Bool,
+    ) raises -> List[Bool]:
+        """Per position of `sel`: whether an operand of the binary `node` is
+        NULL. A division asks before it refuses MIN / -1, since a NULL
+        operand makes the row NULL, not an overflow (§5.0)."""
+        var null_at = List[Bool](length=sel.len(), fill=False)
+        self._mark_value_nulls_from_view[bo](
+            batch, node.left, sel, null_at, f64_ctx
+        )
+        self._mark_value_nulls_from_view[bo](
+            batch, node.right, sel, null_at, f64_ctx
+        )
+        return null_at^
 
     # =========================================================================
     # EXPR_IN_LIST per-row membership probe.
@@ -2841,9 +2967,10 @@ struct ExpressionExecutor(Movable, Deinitable):
     # ELSE 0)`) lowers through the COLUMN view-walkers, which raised on
     # EXPR_CASE_*. This helper produces, for one in-subset condition sub-tree,
     # a per-row Bool membership mask sized to `batch.num_rows()` (mask[row] is
-    # True iff the condition holds for that row). The CASE arm in each column
-    # value-walker then selects the first matching THEN branch (or the ELSE)
-    # per position.
+    # True iff the condition holds for that row). `_case_taken_from_view`
+    # asks it for each WHEN over the rows no earlier WHEN took, and the CASE
+    # arm in each column value-walker evaluates each branch over the rows
+    # that take it.
     #
     # Implementation: `_eval_bool_from_view` filters an input sel into an
     # output sel of surviving ROW indices. We seed it with the CASE's `sel`
@@ -2882,6 +3009,48 @@ struct ExpressionExecutor(Movable, Deinitable):
         while j < n_surv:
             mask[Int(surv.get(j))] = Scalar[DType.bool](True)
             j = j + 1
+
+    def _case_taken_from_view[
+        bo: Origin[mut=False],
+    ](
+        imm self,
+        ref [bo] batch: RecordBatch,
+        ref slots: List[Int],
+        ref sel: RowSelectionVector,
+    ) raises -> List[Int]:
+        """Per position of `sel`, the branch a CASE (`slots`, its `when_pool`
+        entry) takes: the index of the first WHEN whose condition holds, or
+        the number of WHEN pairs for the ELSE. Each condition is evaluated
+        only over the rows no earlier WHEN took, and the caller evaluates
+        each branch only over the rows that take it, so an error in a
+        condition or branch (an overflow, MIN / -1) fires only on rows that
+        reach it, as in DuckDB."""
+        var n_pairs = (len(slots) - 1) // 2
+        var n_sel = sel.len()
+        var n_rows = batch.num_rows()
+        var taken = List[Int](length=n_sel, fill=n_pairs)
+        var open_pos = List[Int](capacity=n_sel)
+        for k in range(n_sel):
+            open_pos.append(k)
+        for c in range(n_pairs):
+            if len(open_pos) == 0:
+                break
+            var open_sel = _sel_at(sel, open_pos)
+            var cond_mask = List[Scalar[DType.bool]](capacity=n_rows)
+            for _r in range(n_rows):
+                cond_mask.append(Scalar[DType.bool](False))
+            self._eval_case_cond_mask_from_view[bo](
+                batch, slots[2 * c], open_sel, cond_mask
+            )
+            var still_open = List[Int](capacity=len(open_pos))
+            for j in range(len(open_pos)):
+                var p = open_pos[j]
+                if Bool(cond_mask[Int(sel.get(p))]):
+                    taken[p] = c
+                else:
+                    still_open.append(p)
+            open_pos = still_open^
+        return taken^
 
     def eval_to_list_i64_from_view[
         bo: Origin[mut=False],
@@ -2927,6 +3096,8 @@ struct ExpressionExecutor(Movable, Deinitable):
             Error on Int64 DType mismatch when the EXPR_COL operand
             resolves to a non-Int64 column (surfaced from the typed
             accessor `column_as_primitive_int64`).
+            Error on an integer division of MIN / -1 with no NULL operand
+            (§5.4). A zero divisor is NULL (§5.3), not an error.
         """
         # Deref BatchView -> ref [bo] RecordBatch. Same sub-origin pattern as
         # `select_expression_from_view`.
@@ -3075,18 +3246,26 @@ struct ExpressionExecutor(Movable, Deinitable):
             self.eval_to_list_i64_from_view[bo](
                 batch_view, node.right, sel, rhs_vals
             )
+            # A zero divisor answers NULL (§5.3): the row holds the
+            # placeholder 0 and `_mark_value_nulls_from_view` reports it.
+            # MIN / -1 raises (§5.4) unless an operand is NULL.
+            var operand_nulls = List[Bool]()
             var k = 0
             while k < n_sel:
-                # Div-by-zero raises (Int has no Inf representation; matches
-                # DuckDB's integer-divide semantics).
-                if rhs_vals[k] == Int64(0):
-                    raise Error(
-                        "ExpressionExecutor.eval_to_list_i64_from_view:"
-                        " EXPR_DIV_I64 division by zero at sel index "
-                        + String(k)
-                    )
-                # Truncates toward zero (-7 / 2 = -3), not Mojo's floor.
-                out.append(_ee_div_trunc(lhs_vals[k], rhs_vals[k]))
+                var d = rhs_vals[k]
+                if d == Int64(0):
+                    out.append(Int64(0))
+                elif _ee_div_overflows(lhs_vals[k], d):
+                    if len(operand_nulls) == 0:
+                        operand_nulls = self._operand_nulls_from_view[bo](
+                            batch, node, sel, False
+                        )
+                    if not operand_nulls[k]:
+                        raise _ee_div_overflow_error[DType.int64]()
+                    out.append(Int64(0))
+                else:
+                    # Truncates toward zero (-7 / 2 = -3), not Mojo's floor.
+                    out.append(_ee_div_trunc(lhs_vals[k], d))
                 k = k + 1
             return
 
@@ -3115,45 +3294,31 @@ struct ExpressionExecutor(Movable, Deinitable):
         # thenK-1, elseSlot]`. Per row (position k in `sel`) the result is the
         # first THEN whose condition holds, else the ELSE value. THEN/ELSE
         # branches are themselves Int64 value sub-trees evaluated through this
-        # same walker; conditions are in-subset Bool sub-trees evaluated via
-        # `_eval_case_cond_mask_from_view`. Mirrors the per-cell
-        # `_eval_i64_from_source` EXPR_CASE_I64 arm's first-match semantics.
+        # same walker, each over only the rows that take it; conditions are
+        # in-subset Bool sub-trees evaluated via `_case_taken_from_view`.
+        # Mirrors the per-cell `_eval_i64_from_source` EXPR_CASE_I64 arm's
+        # first-match semantics.
         if kind == EXPR_CASE_I64:
             ref slots = self.when_pool[node.col_idx]
-            var n_pairs = (len(slots) - 1) // 2
+            var n_branches = (len(slots) - 1) // 2 + 1
             var n_sel = sel.len()
-            var n_rows = batch.num_rows()
-            # branch_vals[c] holds the THEN list for case c; the last entry is
-            # the ELSE list. Each is one Int64 per position in `sel`.
-            var then_lists = List[List[Scalar[DType.int64]]]()
-            var masks = List[List[Scalar[DType.bool]]]()
-            for c in range(n_pairs):
-                var cond_mask = List[Scalar[DType.bool]](capacity=n_rows)
-                for _r in range(n_rows):
-                    cond_mask.append(Scalar[DType.bool](False))
-                self._eval_case_cond_mask_from_view[bo](
-                    batch, slots[2 * c], sel, cond_mask
-                )
-                masks.append(cond_mask^)
-                var then_vals = List[Scalar[DType.int64]](capacity=n_sel)
+            var taken = self._case_taken_from_view[bo](batch, slots, sel)
+            # Each branch runs over the rows that take it only.
+            var vals = List[Scalar[DType.int64]](length=n_sel, fill=Int64(0))
+            for b in range(n_branches):
+                var pos = _positions_of(taken, b)
+                if len(pos) == 0:
+                    continue
+                var branch_sel = _sel_at(sel, pos)
+                var branch_vals = List[Scalar[DType.int64]](capacity=len(pos))
                 self.eval_to_list_i64_from_view[bo](
-                    batch_view, slots[2 * c + 1], sel, then_vals
+                    batch_view, _case_branch_slot(slots, b), branch_sel,
+                    branch_vals,
                 )
-                then_lists.append(then_vals^)
-            var else_vals = List[Scalar[DType.int64]](capacity=n_sel)
-            self.eval_to_list_i64_from_view[bo](
-                batch_view, slots[len(slots) - 1], sel, else_vals
-            )
-            var k = 0
-            while k < n_sel:
-                var row = Int(sel.get(k))
-                var picked = else_vals[k]
-                for c in range(n_pairs):
-                    if Bool(masks[c][row]):
-                        picked = then_lists[c][k]
-                        break
-                out.append(picked)
-                k = k + 1
+                for j in range(len(pos)):
+                    vals[pos[j]] = branch_vals[j]
+            for k in range(n_sel):
+                out.append(vals[k])
             return
 
         # Unsupported kind.
@@ -3192,6 +3357,8 @@ struct ExpressionExecutor(Movable, Deinitable):
             Error on unsupported Expr kind.
             Error on Float64 DType mismatch when the EXPR_COL operand
             resolves to a non-Float64 column.
+            Error on an integer division of MIN / -1 with no NULL operand
+            (§5.4). A zero divisor is NULL (§5.3), not an error.
         """
         ref batch = batch_view._batch[]
         var node = self.expression_pool[expr_idx]
@@ -3502,14 +3669,56 @@ struct ExpressionExecutor(Movable, Deinitable):
             self.eval_to_list_f64_from_view[bo](
                 batch_view, node.right, sel, rhs_vals
             )
+            # A zero divisor answers NULL (§5.3): the row holds the
+            # placeholder 0.0 and `_mark_value_nulls_from_view` reports it.
+            # MIN / -1 raises (§5.4) unless an operand is NULL. CASE branches
+            # and the right side of an AND / OR run only over the rows that
+            # use them, so `sel` holds only rows whose quotient is used. Every
+            # Int64 from MIN to MIN + 2^9 widens to -2^63, so a row whose
+            # dividend does over a -1 divisor is flagged, and only MIN itself
+            # raises: (MIN + 1) / -1 is MAX, which fits. Only -1 widens to
+            # -1.0, so the divisor test is exact. The flagged rows whose
+            # operands are all valid are re-read through the Int64 walker as
+            # their own sub-selection: that walker raises on overflow in any
+            # row it reads, so it must read neither a NULL row nor a row
+            # outside the flagged set.
+            var flagged = List[Int]()
+            for f in range(n_sel):
+                if rhs_vals[f] == -1.0 and lhs_vals[f] == Float64(Int64.MIN):
+                    flagged.append(f)
+            if len(flagged) > 0:
+                var flagged_sel = _sel_at(sel, flagged)
+                var operand_nulls = self._operand_nulls_from_view[bo](
+                    batch, node, flagged_sel, True
+                )
+                var valid = List[Int]()
+                for j in range(len(flagged)):
+                    if not operand_nulls[j]:
+                        valid.append(flagged[j])
+                if len(valid) > 0:
+                    var reread_sel = _sel_at(sel, valid)
+                    var lhs_i64 = List[Scalar[DType.int64]](
+                        capacity=len(valid)
+                    )
+                    self.eval_to_list_i64_from_view[bo](
+                        batch_view, node.left, reread_sel, lhs_i64
+                    )
+                    for j in range(len(lhs_i64)):
+                        if lhs_i64[j] == Int64.MIN:
+                            raise _ee_div_overflow_error[DType.int64]()
             var k = 0
             while k < n_sel:
+                var d = rhs_vals[k]
+                if d == 0.0:
+                    out.append(0.0)
+                    k = k + 1
+                    continue
                 # Integer division truncates toward zero (query_semantics.md
                 # §5.1), so the widened quotient is truncated: 7 / 2 is 3.0,
                 # not 3.5. Exact while both operands are below 2^53. `+ 0.0`
                 # turns the -0.0 of a truncated -0.35 into the integer 0's
-                # +0.0. A zero divisor gives +-Inf or NaN here, no raise.
-                var q = lhs_vals[k] / rhs_vals[k]
+                # +0.0.
+                var q = lhs_vals[k] / d
                 if q >= 0.0:
                     q = floor(q)
                 else:
@@ -3548,45 +3757,34 @@ struct ExpressionExecutor(Movable, Deinitable):
         # Float64
         # CASE/WHEN (mirror of the EXPR_CASE_I64 arm in
         # `eval_to_list_i64_from_view`). First matching THEN per row, else the
-        # ELSE value; conditions via `_eval_case_cond_mask_from_view`,
-        # THEN/ELSE branches via this same F64 walker (which auto-widens i64
-        # leaves — so `ELSE 0` lowered as EXPR_LIT_I64 widens to 0.0). Unblocks
-        # q8's `sum(CASE WHEN s_nationkey=2 THEN l_disc_price ELSE 0)` bridged
+        # ELSE value; conditions via `_case_taken_from_view`, THEN/ELSE
+        # branches via this same F64 walker over the rows that take them
+        # (it auto-widens i64 leaves, so `ELSE 0` lowered as EXPR_LIT_I64
+        # widens to 0.0). Unblocks q8's `sum(CASE WHEN s_nationkey=2 THEN l_disc_price ELSE 0)` bridged
         # agg tail.
         if kind == EXPR_CASE_F64:
             ref slots = self.when_pool[node.col_idx]
-            var n_pairs = (len(slots) - 1) // 2
+            var n_branches = (len(slots) - 1) // 2 + 1
             var n_sel = sel.len()
-            var n_rows = batch.num_rows()
-            var then_lists = List[List[Scalar[DType.float64]]]()
-            var masks = List[List[Scalar[DType.bool]]]()
-            for c in range(n_pairs):
-                var cond_mask = List[Scalar[DType.bool]](capacity=n_rows)
-                for _r in range(n_rows):
-                    cond_mask.append(Scalar[DType.bool](False))
-                self._eval_case_cond_mask_from_view[bo](
-                    batch, slots[2 * c], sel, cond_mask
+            var taken = self._case_taken_from_view[bo](batch, slots, sel)
+            # Each branch runs over the rows that take it only.
+            var vals = List[Scalar[DType.float64]](length=n_sel, fill=0.0)
+            for b in range(n_branches):
+                var pos = _positions_of(taken, b)
+                if len(pos) == 0:
+                    continue
+                var branch_sel = _sel_at(sel, pos)
+                var branch_vals = List[Scalar[DType.float64]](
+                    capacity=len(pos)
                 )
-                masks.append(cond_mask^)
-                var then_vals = List[Scalar[DType.float64]](capacity=n_sel)
                 self.eval_to_list_f64_from_view[bo](
-                    batch_view, slots[2 * c + 1], sel, then_vals
+                    batch_view, _case_branch_slot(slots, b), branch_sel,
+                    branch_vals,
                 )
-                then_lists.append(then_vals^)
-            var else_vals = List[Scalar[DType.float64]](capacity=n_sel)
-            self.eval_to_list_f64_from_view[bo](
-                batch_view, slots[len(slots) - 1], sel, else_vals
-            )
-            var k = 0
-            while k < n_sel:
-                var row = Int(sel.get(k))
-                var picked = else_vals[k]
-                for c in range(n_pairs):
-                    if Bool(masks[c][row]):
-                        picked = then_lists[c][k]
-                        break
-                out.append(picked)
-                k = k + 1
+                for j in range(len(pos)):
+                    vals[pos[j]] = branch_vals[j]
+            for k in range(n_sel):
+                out.append(vals[k])
             return
 
         raise Error(
@@ -3657,6 +3855,8 @@ struct ExpressionExecutor(Movable, Deinitable):
             Error on Int32 DType mismatch when the EXPR_COL operand
             resolves to a non-Int32 column (surfaced from the typed
             accessor `column_as_primitive_int32`).
+            Error on an integer division of MIN / -1 with no NULL operand
+            (§5.4). A zero divisor is NULL (§5.3), not an error.
         """
         ref batch = batch_view._batch[]
         var node = self.expression_pool[expr_idx]
@@ -3746,16 +3946,19 @@ struct ExpressionExecutor(Movable, Deinitable):
                 var rhs = self._eval_scalar_i32_from_view[bo](
                     batch_view, node.right, row
                 )
-                # Div-by-zero raises (Int32 has no Inf representation;
-                # matches I64 + DuckDB integer-divide semantics).
+                # A zero divisor answers NULL (§5.3): the placeholder 0,
+                # reported by `_mark_value_nulls_from_view`; MIN / -1 raises
+                # (§5.4) unless an operand is NULL.
                 if rhs == Int32(0):
-                    raise Error(
-                        "ExpressionExecutor.eval_to_list_i32_from_view:"
-                        " EXPR_DIV_I32 division by zero at row "
-                        + String(row)
-                    )
-                # Truncates toward zero (-7 / 2 = -3), not Mojo's floor.
-                out.append(_ee_div_trunc(lhs, rhs))
+                    out.append(Int32(0))
+                elif _ee_div_overflows(lhs, rhs):
+                    if self._div_operand_null_at_row[bo](batch_view, node, row):
+                        out.append(Int32(0))
+                    else:
+                        raise _ee_div_overflow_error[DType.int32]()
+                else:
+                    # Truncates toward zero (-7 / 2 = -3), not Mojo's floor.
+                    out.append(_ee_div_trunc(lhs, rhs))
                 k = k + 1
             return
 
@@ -3888,6 +4091,18 @@ struct ExpressionExecutor(Movable, Deinitable):
             " EXPR_IN_LIST)"
         )
 
+    def _div_operand_null_at_row[
+        bo: Origin[mut=False],
+    ](
+        imm self, batch_view: BatchView[bo], node: RuntimeExpr, row: Int
+    ) raises -> Bool:
+        """Whether an operand of the Int32 division `node` is NULL at `row`
+        (asked only for a MIN / -1 pair, so the cost is off the hot path)."""
+        var one = RowSelectionVector(1)
+        one.append(UInt32(row))
+        ref batch = batch_view._batch[]
+        return self._operand_nulls_from_view[bo](batch, node, one, False)[0]
+
     def _eval_scalar_i32_from_view[
         bo: Origin[mut=False],
     ](
@@ -3912,7 +4127,8 @@ struct ExpressionExecutor(Movable, Deinitable):
         Raises:
             Error on unsupported kind (supports EXPR_COL + EXPR_LIT_I32 +
             EXPR_{ADD,SUB,MUL,DIV}_I32).
-            Error on EXPR_DIV_I32 division by zero.
+            Error on EXPR_DIV_I32 of MIN / -1 with no NULL operand (§5.4).
+            A zero divisor answers the NULL placeholder 0 (§5.3).
         """
         ref batch = batch_view._batch[]
         var node = self.expression_pool[expr_idx]
@@ -3962,11 +4178,11 @@ struct ExpressionExecutor(Movable, Deinitable):
                 batch_view, node.right, row
             )
             if rhs == Int32(0):
-                raise Error(
-                    "ExpressionExecutor._eval_scalar_i32_from_view:"
-                    " EXPR_DIV_I32 division by zero at row "
-                    + String(row)
-                )
+                return Int32(0)
+            if _ee_div_overflows(lhs, rhs):
+                if self._div_operand_null_at_row[bo](batch_view, node, row):
+                    return Int32(0)
+                raise _ee_div_overflow_error[DType.int32]()
             return _ee_div_trunc(lhs, rhs)
 
         raise Error(
@@ -4886,11 +5102,24 @@ struct ExpressionExecutor(Movable, Deinitable):
         `_eval_kleene_from_source`, which reads a predicate whose value operand
         is NULL as UNKNOWN and combines AND / OR / NOT by Kleene's tables. A
         non-nullable layout has no NULL cell, so it runs the two-valued
-        `_eval_bool_present_from_source` and never consults validity.
+        `_eval_bool_present_from_source` and never consults validity, unless
+        the predicate holds an integer division (`has_int_division`), whose
+        zero divisor answers NULL.
         """
         var n = src.num_rows()
         var out = RowSelectionVector(n if n > 0 else 1)
-        var nullable = src.has_validity()
+        # On a source without validity a division takes the three-valued
+        # path, which evaluates an AND's right side when its left is UNKNOWN
+        # (and an OR's when its left is UNKNOWN), so an UNKNOWN that the
+        # two-valued path read as a value could expose a raise in the right
+        # side on a row the two-valued path answered. On such a source the
+        # three-valued path therefore reads EXPR_NULL as the two-valued path
+        # does, as the placeholder 0 (`_value_has_null_input_from_source`):
+        # its only UNKNOWN is a zero divisor, on a row where the two-valued
+        # path raised. Short-circuiting AND on an UNKNOWN left instead would
+        # be wrong under NOT, and would turn EXPR_NULL into UNKNOWN on this
+        # path only, changing answers the two-valued path gives.
+        var nullable = src.has_validity() or self.has_int_division
         var row = 0
         while row < n:
             var keep: Bool
@@ -4915,10 +5144,10 @@ struct ExpressionExecutor(Movable, Deinitable):
         three-valued logic (FALSE and UNKNOWN both answer False). The CASE
         arms of the value walkers use it for their WHEN conditions.
 
-        On a nullable source this is `_eval_kleene_from_source == TRUE`; on a
-        non-nullable one every cell is present and the two-valued
-        `_eval_bool_present_from_source` answers directly."""
-        if src.has_validity():
+        On a nullable source, or under an integer division, this is
+        `_eval_kleene_from_source == TRUE`; otherwise every value is present
+        and the two-valued `_eval_bool_present_from_source` answers directly."""
+        if src.has_validity() or self.has_int_division:
             return (
                 self._eval_kleene_from_source[CS](src, idx, row) == _KLEENE_TRUE
             )
@@ -5159,10 +5388,20 @@ struct ExpressionExecutor(Movable, Deinitable):
         FALSE left side and OR at a TRUE one, since the right side cannot
         change the answer. IS NULL / IS NOT NULL are never UNKNOWN. A
         comparison, LIKE or REGEXP leaf is UNKNOWN when one of its value
-        operands is NULL (`_value_is_null_from_source`); otherwise its operands
-        are present and `_eval_bool_present_from_source` gives its value. A
-        leaf with a NULL operand is not evaluated, so arithmetic over a NULL
-        cell's stored bytes (a zero divisor, say) never runs."""
+        operands is NULL; otherwise its operands are present and
+        `_eval_bool_present_from_source` gives its value.
+
+        A leaf decides NULL in two steps. First, for every operand, whether a
+        NULL cell or EXPR_NULL reaches it (`_value_has_null_input_from_source`),
+        which evaluates nothing but CASE conditions. Only when no operand has
+        one does it evaluate the divisors of the operands' integer divisions
+        (`_value_has_zero_divisor_from_source`, §5.3). Evaluating a divisor can
+        raise (an overflow in it, or MIN / -1); without the first step it would
+        raise on a row whose other operand is NULL, which is UNKNOWN. With it,
+        a divisor is evaluated only on rows whose leaf the two-valued walker
+        evaluates too, so the check raises only where that evaluation raises.
+        A leaf with a NULL operand is not evaluated, so arithmetic over a NULL
+        cell's stored bytes never runs."""
         var node = self.expression_pool[idx]
         var kind = node.kind
 
@@ -5191,9 +5430,19 @@ struct ExpressionExecutor(Movable, Deinitable):
             if self._value_is_null_from_source[CS](src, node.left, row):
                 return _KLEENE_NULL
         elif _is_binary_bool_leaf(kind):
-            if self._value_is_null_from_source[CS](
+            # Both operands' NULL inputs before either operand's divisors:
+            # see the docstring.
+            if self._value_has_null_input_from_source[CS](
                 src, node.left, row
-            ) or self._value_is_null_from_source[CS](src, node.right, row):
+            ) or self._value_has_null_input_from_source[CS](
+                src, node.right, row
+            ):
+                return _KLEENE_NULL
+            if self._value_has_zero_divisor_from_source[CS](
+                src, node.left, row
+            ) or self._value_has_zero_divisor_from_source[CS](
+                src, node.right, row
+            ):
                 return _KLEENE_NULL
         # IS NULL / IS NOT NULL read validity and are never UNKNOWN; any other
         # kind reaches `_eval_bool_present_from_source`, which raises on a kind
@@ -5205,15 +5454,33 @@ struct ExpressionExecutor(Movable, Deinitable):
     def _value_is_null_from_source[
         CS: CellSource
     ](imm self, src: CS, idx: Int, row: Int) raises -> Bool:
-        """True iff the value sub-tree at `idx` is SQL NULL for `row`.
+        """True iff the value sub-tree at `idx` is SQL NULL for `row`: a NULL
+        input reaches it (`_value_has_null_input_from_source`), or, with none,
+        one of its integer divisions has a zero divisor (§5.3,
+        `_value_has_zero_divisor_from_source`). The first test runs to the end
+        before the second evaluates any divisor."""
+        return self._value_has_null_input_from_source[CS](
+            src, idx, row
+        ) or self._value_has_zero_divisor_from_source[CS](src, idx, row)
+
+    def _value_has_null_input_from_source[
+        CS: CellSource
+    ](imm self, src: CS, idx: Int, row: Int) raises -> Bool:
+        """True iff a NULL input reaches the value sub-tree at `idx` for
+        `row`. Evaluates no value, only the WHEN conditions of a CASE.
 
         A column leaf (EXPR_COL / EXPR_COL_STRING / EXPR_COL_DECIMAL128) is
-        NULL when its cell is; EXPR_NULL always is; a literal never is.
-        Arithmetic, casts, EXTRACT, date_trunc and the math functions are NULL
-        when an operand is. A CASE is NULL when the branch it takes is: the
-        first WHEN that is TRUE (`_eval_bool_from_source`), else the ELSE.
-        Kinds outside this list answer False; the value walkers raise on
-        them."""
+        NULL when its cell is (never on a source without validity). EXPR_NULL
+        is NULL on a source with validity; on one without, it answers False,
+        and the value walkers read it as the placeholder 0, as the two-valued
+        walker `select_filter_from_source` ran there before integer division
+        could yield NULL. So an integer division in the pool, which sends such
+        a source down the three-valued path, changes no answer other than a
+        zero divisor's. A literal is never NULL. Arithmetic (integer division
+        included), casts, EXTRACT, date_trunc and the math functions are NULL
+        when an operand is. A CASE is when the branch it takes is: the first
+        WHEN that is TRUE (`_eval_bool_from_source`), else the ELSE. Kinds
+        outside this list answer False; the value walkers raise on them."""
         var node = self.expression_pool[idx]
         var kind = node.kind
         if (
@@ -5221,9 +5488,9 @@ struct ExpressionExecutor(Movable, Deinitable):
             or kind == EXPR_COL_STRING
             or kind == EXPR_COL_DECIMAL128
         ):
-            return src.is_null(row, node.col_idx)
+            return src.has_validity() and src.is_null(row, node.col_idx)
         if kind == EXPR_NULL:
-            return True
+            return src.has_validity()
         if (
             kind == EXPR_ADD_I64
             or kind == EXPR_SUB_I64
@@ -5236,34 +5503,81 @@ struct ExpressionExecutor(Movable, Deinitable):
             or kind == EXPR_ATAN2_F64
             or kind == EXPR_POW_F64
         ):
-            return self._value_is_null_from_source[CS](
+            return self._value_has_null_input_from_source[CS](
                 src, node.left, row
-            ) or self._value_is_null_from_source[CS](src, node.right, row)
-        if (
-            kind == EXPR_F64_TO_I64
-            or kind == EXPR_I64_TO_F64
-            or kind == EXPR_EXTRACT_I64
-            or kind == EXPR_DATE_TRUNC_I64
-            or kind == EXPR_SQRT_F64
-            or kind == EXPR_SIN_F64
-            or kind == EXPR_COS_F64
-            or kind == EXPR_ASIN_F64
-            or kind == EXPR_RADIANS_F64
-            or kind == EXPR_MATH_UNARY_F64
-        ):
-            return self._value_is_null_from_source[CS](src, node.left, row)
+            ) or self._value_has_null_input_from_source[CS](
+                src, node.right, row
+            )
+        if _is_unary_value_kind(kind):
+            return self._value_has_null_input_from_source[CS](
+                src, node.left, row
+            )
         if kind == EXPR_CASE_I64 or kind == EXPR_CASE_F64:
-            ref slots = self.when_pool[node.col_idx]
-            var n_pairs = (len(slots) - 1) // 2
-            for c in range(n_pairs):
-                if self._eval_bool_from_source[CS](src, slots[2 * c], row):
-                    return self._value_is_null_from_source[CS](
-                        src, slots[2 * c + 1], row
-                    )
-            return self._value_is_null_from_source[CS](
-                src, slots[len(slots) - 1], row
+            return self._value_has_null_input_from_source[CS](
+                src, self._case_branch_from_source[CS](src, node, row), row
             )
         return False
+
+    def _value_has_zero_divisor_from_source[
+        CS: CellSource
+    ](imm self, src: CS, idx: Int, row: Int) raises -> Bool:
+        """True iff an EXPR_DIV_I64 that the value sub-tree at `idx` evaluates
+        for `row` has a zero divisor (§5.3: its quotient is NULL). Walks the
+        kinds `_value_has_null_input_from_source` walks, and only the branch a
+        CASE takes. Evaluates each divisor through the Int64 walker.
+
+        Callers first check that no NULL input reaches the sub-tree; the
+        divisors evaluated here are then ones the value walker evaluates for
+        the same row."""
+        var node = self.expression_pool[idx]
+        var kind = node.kind
+        if kind == EXPR_DIV_I64:
+            return (
+                self._value_has_zero_divisor_from_source[CS](
+                    src, node.left, row
+                )
+                or self._value_has_zero_divisor_from_source[CS](
+                    src, node.right, row
+                )
+                or self._eval_i64_from_source[CS](src, node.right, row) == 0
+            )
+        if (
+            kind == EXPR_ADD_I64
+            or kind == EXPR_SUB_I64
+            or kind == EXPR_MUL_I64
+            or kind == EXPR_ADD_F64
+            or kind == EXPR_SUB_F64
+            or kind == EXPR_MUL_F64
+            or kind == EXPR_DIV_F64
+            or kind == EXPR_ATAN2_F64
+            or kind == EXPR_POW_F64
+        ):
+            return self._value_has_zero_divisor_from_source[CS](
+                src, node.left, row
+            ) or self._value_has_zero_divisor_from_source[CS](
+                src, node.right, row
+            )
+        if _is_unary_value_kind(kind):
+            return self._value_has_zero_divisor_from_source[CS](
+                src, node.left, row
+            )
+        if kind == EXPR_CASE_I64 or kind == EXPR_CASE_F64:
+            return self._value_has_zero_divisor_from_source[CS](
+                src, self._case_branch_from_source[CS](src, node, row), row
+            )
+        return False
+
+    def _case_branch_from_source[
+        CS: CellSource
+    ](imm self, src: CS, node: RuntimeExpr, row: Int) raises -> Int:
+        """The pool slot of the branch the CASE `node` takes for `row`: the
+        THEN of the first WHEN that is TRUE, else the ELSE."""
+        ref slots = self.when_pool[node.col_idx]
+        var n_pairs = (len(slots) - 1) // 2
+        for c in range(n_pairs):
+            if self._eval_bool_from_source[CS](src, slots[2 * c], row):
+                return slots[2 * c + 1]
+        return slots[len(slots) - 1]
 
     def _eval_string_from_source[
         CS: CellSource
@@ -5530,16 +5844,21 @@ struct ExpressionExecutor(Movable, Deinitable):
                 self._eval_i64_from_source[CS](src, node.left, row),
                 self._eval_i64_from_source[CS](src, node.right, row),
             )
+        # A zero divisor answers NULL (§5.3): the placeholder 0, reported by
+        # `_value_is_null_from_source`. MIN / -1 raises (§5.4) unless an
+        # operand is NULL.
         if kind == EXPR_DIV_I64:
             var rhs = self._eval_i64_from_source[CS](src, node.right, row)
             if rhs == Int64(0):
-                raise Error(
-                    "ExpressionExecutor._eval_i64_from_source: EXPR_DIV_I64"
-                    " division by zero at row " + String(row)
-                )
-            return _ee_div_trunc(
-                self._eval_i64_from_source[CS](src, node.left, row), rhs
-            )
+                return Int64(0)
+            var lhs = self._eval_i64_from_source[CS](src, node.left, row)
+            if _ee_div_overflows(lhs, rhs):
+                if self._value_is_null_from_source[CS](
+                    src, node.left, row
+                ) or self._value_is_null_from_source[CS](src, node.right, row):
+                    return Int64(0)
+                raise _ee_div_overflow_error[DType.int64]()
+            return _ee_div_trunc(lhs, rhs)
 
         raise Error(
             "ExpressionExecutor._eval_i64_from_source: unsupported node kind "
@@ -5758,6 +6077,37 @@ struct ExpressionExecutor(Movable, Deinitable):
         return self.expression_pool[slot].kind == EXPR_NULL
 
 
+def _sel_at(
+    ref sel: RowSelectionVector, positions: List[Int]
+) -> RowSelectionVector:
+    """The rows of `sel` at `positions`, in that order: the sub-selection a
+    CASE branch or the right side of an AND / OR is evaluated over, so that
+    it runs only on the rows that use it."""
+    var n = len(positions)
+    var out = RowSelectionVector(n if n > 0 else 1)
+    for j in range(n):
+        out.append(sel.get(positions[j]))
+    return out^
+
+
+def _positions_of(taken: List[Int], branch: Int) -> List[Int]:
+    """The positions `k` with `taken[k] == branch`, ascending."""
+    var out = List[Int]()
+    for k in range(len(taken)):
+        if taken[k] == branch:
+            out.append(k)
+    return out^
+
+
+def _case_branch_slot(slots: List[Int], branch: Int) -> Int:
+    """The pool slot of a CASE's THEN `branch`, or of its ELSE when `branch`
+    is the number of WHEN pairs. `slots` is the `when_pool` entry
+    `[cond0, then0, ..., condK-1, thenK-1, else]`."""
+    var n_pairs = (len(slots) - 1) // 2
+    if branch < n_pairs:
+        return slots[2 * branch + 1]
+    return slots[len(slots) - 1]
+
 
 # -----------------------------------------------------------------------------
 # SQL three-valued logic (Kleene) values and tables.
@@ -5799,6 +6149,24 @@ def _kleene_not(a: UInt8) -> UInt8:
     if a == _KLEENE_FALSE:
         return _KLEENE_TRUE
     return _KLEENE_NULL
+
+
+def _is_unary_value_kind(kind: Int) -> Bool:
+    """Whether `kind` is a one-operand value kind (operand in `left`) whose
+    value is NULL when its operand is: a cast, EXTRACT, date_trunc or a math
+    function."""
+    return (
+        kind == EXPR_F64_TO_I64
+        or kind == EXPR_I64_TO_F64
+        or kind == EXPR_EXTRACT_I64
+        or kind == EXPR_DATE_TRUNC_I64
+        or kind == EXPR_SQRT_F64
+        or kind == EXPR_SIN_F64
+        or kind == EXPR_COS_F64
+        or kind == EXPR_ASIN_F64
+        or kind == EXPR_RADIANS_F64
+        or kind == EXPR_MATH_UNARY_F64
+    )
 
 
 def _is_binary_bool_leaf(kind: Int) -> Bool:

@@ -2,9 +2,9 @@
 # komira_crypto/tests/test_sha384_kat.mojo — boundary KAT
 # =============================================================================
 #
-# KAT corpus. Each vector is independently
-# cross-verified against Python `hashlib.sha384(msg).hexdigest()` (the
-# canonical reference impl using OpenSSL libcrypto under the hood).
+# KAT corpus. Each vector is SHA-384 (FIPS 180-4) of the stated bytes and is
+# independently cross-verified against GNU coreutils `sha384sum` over a file
+# of those bytes.
 #
 # Boundary coverage:
 #   * 1-byte / single-block (1, 127, 128, 129 bytes 'a')

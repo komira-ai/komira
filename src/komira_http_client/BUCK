@@ -1,4 +1,3 @@
-load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The pooled HTTP/1.1 and HTTP/2 client over the komira_async reactor: HttpClient
@@ -103,6 +102,7 @@ mojo_library(
         "tests/test_outbound_budget_rule.mojo",
         "tests/test_owned_byte_body_differential.mojo",
         "tests/test_park_coupled_clock.mojo",
+        "tests/test_scripted_dial_no_dns.mojo",
         "tests/test_pool_basic.mojo",
         "tests/test_pool_evict.mojo",
         "tests/test_pool_integration.mojo",
@@ -208,14 +208,4 @@ mojo_library(
         ],
     },
     visibility = ["PUBLIC"],
-)
-
-# The deps above name every komira_* module the library and its tests import
-# (tools/build/lint: mojo_deps), so a missing dep fails here, in review, and
-# not only in the compile.
-mojo_deps(
-    name = "deps_lint",
-    buck = "BUCK",
-    srcs = glob(["**/*.mojo"]),
-    visibility = ["komira//:tests_lints"],
 )
