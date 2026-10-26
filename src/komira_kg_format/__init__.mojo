@@ -1,7 +1,8 @@
 # =============================================================================
 # komira_kg_format -- the values and on-disk formats the data-graph writer and
-#   reader share (parts 1 and 2: embeddings, extraction values, the snapshot
-#   manifest, table schemas, cosine ranking and the query result).
+#   reader share (parts 1 to 3: embeddings, extraction values, the snapshot
+#   manifest, table schemas, cosine ranking, the query result, the delta layer
+#   and the source fingerprints).
 # =============================================================================
 #
 #   * embedding      -- the packed little-endian f32 embedding cell.
@@ -13,6 +14,12 @@
 #   * cosine         -- `cosine` and `cosine_topk`, exact cosine ranking over a
 #                       packed-embedding column.
 #   * query_result   -- `KgQueryResult` and its record types, with a JSON wire.
+#   * delta_body    -- `KgDeltaBody`, `KgChainBody`, `KgNameIndexBody`: the chunk
+#                       bodies of the delta layer over a base snapshot.
+#   * delta_codec   -- the delta object, framed for a few rows and Parquet for
+#                       more.
+#   * source_fingerprint -- `SourceFingerprintSet` and its lineage store: the
+#                       change gate keyed by partition and source.
 #
 # Depends on `komira_arrow` (and its closure) and `komira_json`, and reads no clock or environment.
 # =============================================================================
@@ -57,4 +64,35 @@ from .query_result import (
     ResultAnnotation,
     ResultNode,
     ScoreEntry,
+)
+from .delta_body import (
+    KG_CHAIN_FORMAT_VERSION,
+    KG_DELTA_FORMAT_VERSION,
+    KgChainBody,
+    KgDeltaBody,
+    KgDeltaTableEntry,
+    KgNameIndexBody,
+    KgNameIndexEntry,
+    kg_chunk_is_chain_head,
+)
+from .delta_codec import (
+    FRAME_TAG_FRAMED,
+    FRAME_TAG_PARQUET,
+    FRAMED_CODEC_VERSION,
+    FRAMED_MAX_ROWS,
+    decode_framed_delta_to_batch,
+    delta_object_is_framed,
+    delta_object_parquet_bytes,
+    encode_delta_table_object,
+    framed_object_size,
+    framed_size_is_decodable,
+)
+from .source_fingerprint import (
+    KG_FINGERPRINT_FORMAT_VERSION,
+    SourceFingerprint,
+    SourceFingerprintSet,
+    SourceFingerprintStore,
+    content_hash_of,
+    content_hash_of_extraction,
+    fnv1a64_hex,
 )
