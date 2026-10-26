@@ -3,15 +3,14 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The values and on-disk formats the data-graph writer and reader share, parts 1
 # and 2 (the first of the packages in docs/design/knowledge_graph_port.md): the
 # packed f32 embedding cell, the extraction values (`Triple`, `EntityMention`,
-# `Extraction`), a strict JSON value tree, the snapshot manifest body (which
+# `Extraction`), the snapshot manifest body (which
 # carries the graph's embedding dimension), the table schemas, cosine ranking of
 # a packed-embedding column and the structured query result with its JSON wire.
 # It depends on komira_arrow (schemas, string columns) and that package's
 # closure, and on komira_json (the result's wire), and reads no clock and no environment.
 #
 # The welded tests: test_embedding packs and unpacks f32 and f64 vectors and
-# holds a cell to a dimension; test_json_value parses valid text and refuses
-# each malformed form; test_manifest_body round-trips the manifest and refuses
+# holds a cell to a dimension; test_manifest_body round-trips the manifest and refuses
 # each corrupt body; test_ingest_types pins the extraction values;
 # test_utf8_check pins the validator every decoded string passes through;
 # test_schemas pins every table's columns, types and version; test_cosine scores
@@ -41,7 +40,6 @@ mojo_library(
         "tests/test_cosine_topk.mojo",
         "tests/test_embedding.mojo",
         "tests/test_ingest_types.mojo",
-        "tests/test_json_value.mojo",
         "tests/test_manifest_body.mojo",
         "tests/test_query_result.mojo",
         "tests/test_query_result_wire.mojo",

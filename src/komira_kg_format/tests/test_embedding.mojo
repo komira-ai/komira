@@ -22,7 +22,6 @@
 from std.testing import TestSuite, assert_equal, assert_raises, assert_true
 
 from komira_kg_format import (
-    DEFAULT_EMBEDDING_DIM,
     EMB_F32_BYTES,
     pack_embedding,
     pack_embedding_f32,
@@ -79,7 +78,6 @@ def test_f64_roundtrip_non_default_dimension() raises:
         v.append(Float64(i) - 3.0)
     _assert_close_roundtrip(v, "dim7")
     assert_equal(len(pack_embedding(v).as_bytes()), 7 * EMB_F32_BYTES)
-    assert_true(7 != DEFAULT_EMBEDDING_DIM)
 
 
 def test_f32_roundtrip_is_exact() raises:

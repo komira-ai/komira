@@ -4,7 +4,7 @@
 #
 # `String(unsafe_from_utf8=...)` trusts its argument. Where this package builds
 # a String that is meant to be text from bytes it did not write itself (a decoded
-# manifest name or key, a decoded JSON string), it checks the bytes here first,
+# manifest name or key), it checks the bytes here first,
 # so a corrupt input is refused instead of becoming a String that holds invalid
 # UTF-8. The one deliberate exception is `pack_embedding_f32`, whose String is a
 # byte carrier for packed floats and is never read as text.

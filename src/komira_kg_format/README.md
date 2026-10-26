@@ -5,19 +5,17 @@
 The values and on-disk formats that the data-graph writer and reader share. This
 is parts 1 and 2 of the package described in
 [the knowledge graph port](https://github.com/komira-ai/komira/blob/main/docs/design/knowledge_graph_port.md): the
-packed embedding cell, the values an extractor returns, a strict JSON reader,
-the snapshot manifest body, the table schemas, cosine ranking and the structured
-query result. Later parts add the delta codec, the snapshot lineage store and
-the exact-scan searches. The code graph
+packed embedding cell, the values an extractor returns, the snapshot manifest
+body, the table schemas, cosine ranking and the structured query result. Later
+parts add the delta codec, the snapshot lineage store and the exact-scan
+searches. The code graph
 [`komira_kg_code`](https://github.com/komira-ai/komira/blob/main/src/komira_kg_code/README.md) is a different thing and is untouched.
 
 - `embedding`: an embedding vector is one string cell holding its components as
   little-endian f32, `dim * 4` bytes with no header. The dimension lives in the
-  manifest, not in the cell.
+  manifest, not in the cell, and the writer supplies it: there is no default.
 - `ingest_types`: `Triple`, `EntityMention` and `Extraction`, what an extractor
   returns for one episode, with names not yet resolved to node ids.
-- `json_value`: `JsonDoc` and `JsonValue`, a small RFC 8259 reader for a model's
-  response envelope and the payload inside it.
 - `manifest_body`: `KgManifestBody`, the payload of one snapshot manifest chunk:
   the graph's embedding dimension and, for each table present, its object key,
   schema version and row count.
@@ -44,12 +42,8 @@ Everything is exported from `komira_kg_format`:
 - Embeddings: `pack_embedding` (f64 in, narrowed to f32), `pack_embedding_f32`
   (bit-exact), `unpack_embedding` (a `String` cell), `unpack_embedding_bytes` (a
   byte view, for a cell read off a column), `unpack_embedding_checked` (a cell
-  that must hold exactly `dim` components), `EMB_F32_BYTES` and
-  `DEFAULT_EMBEDDING_DIM` (1536).
+  that must hold exactly `dim` components), and the byte width `EMB_F32_BYTES`.
 - Extraction values: `Triple`, `EntityMention`, `Extraction`.
-- JSON: `JsonDoc.parse` and `JsonDoc.root`, the handle `JsonValue`, the kind
-  tags `JSON_NULL`, `JSON_BOOL`, `JSON_NUMBER`, `JSON_STRING`, `JSON_ARRAY`,
-  `JSON_OBJECT`, and `JSON_MAX_DEPTH` (128).
 - Manifest: `KgManifestBody`, `KgTableEntry`, `KG_SNAPSHOT_FORMAT_VERSION` (2,
   the only layout the decoder accepts).
 
@@ -120,15 +114,15 @@ from komira_kg_format import (
     KgTableEntry,
 )
 
-var body = KgManifestBody(768, List[KgTableEntry]())
+var body = KgManifestBody(3, List[KgTableEntry]())
 body.add_table("edges", "objects/1f3a", 1, 40)
-body.check_embedding_dim(768)
-with assert_raises(contains="does not match the graph's 768"):
-    body.check_embedding_dim(1536)
+body.check_embedding_dim(3)
+with assert_raises(contains="does not match the graph's 3"):
+    body.check_embedding_dim(5)
 
 var decoded = KgManifestBody.decode(body.encode())
 assert_equal(decoded.format_version, KG_SNAPSHOT_FORMAT_VERSION)
-assert_equal(decoded.embedding_dim, 768)
+assert_equal(decoded.embedding_dim, 3)
 assert_true(decoded.has_table("edges"))
 assert_false(decoded.has_table("episodes"))
 assert_equal(decoded.resolve("edges").row_count, 40)
@@ -143,30 +137,10 @@ from std.testing import assert_raises
 ```mojo
 from komira_kg_format import KgManifestBody
 
-var bytes = KgManifestBody().encode()
+var bytes = KgManifestBody(3).encode()
 bytes.append(0)
 with assert_raises(contains="trailing bytes"):
     _ = KgManifestBody.decode(bytes)
-```
-
-JSON is parsed once and navigated by key and index. A malformed text is an
-error:
-
-<!-- mojo-hidden
-from std.testing import assert_equal, assert_raises, assert_true
--->
-```mojo
-from komira_kg_format import JsonDoc
-
-var doc = JsonDoc.parse('{"entities":[{"name":"Ada","score":0.5}],"ok":true}')
-var root = doc.root()
-assert_true(root.get("ok").as_bool())
-var first = root.get("entities").at(0)
-assert_equal(first.get("name").as_string(), "Ada")
-assert_equal(first.get("score").as_float(), 0.5)
-
-with assert_raises(contains="unexpected char"):
-    _ = JsonDoc.parse('{"a":}')
 ```
 
 The extraction values hold names, not node ids; the ingest step resolves them:
@@ -266,20 +240,18 @@ with assert_raises(contains="> reader-supported 2"):
 ## Limits
 
 A manifest decodes in memory: the body is read whole and a table count larger
-than the bytes can hold is refused before anything is allocated. The JSON reader
-copies its input, accepts nesting up to 128 levels and is meant for kilobyte
-bodies, not streams. `as_float` refuses a number of 22 or more significant
-digits, and a number such as `1e400` reads back as infinity. When an object
-repeats a key, `get` and `has` see the first. Embeddings are stored as f32 whatever precision the caller
-computes in.
+than the bytes can hold is refused before anything is allocated. Embeddings are
+stored as f32 whatever precision the caller computes in. For JSON, use
+[`komira_json`](https://github.com/komira-ai/komira/blob/main/src/komira_json/README.md);
+this package has no JSON reader of its own.
 
 `cosine_topk` is a brute-force scan: O(rows) to score and O(rows * k) to select,
 with no index, so it is for columns of thousands of rows, not millions. It
 compares the overlapping prefix of the query and a row, so a row of another
 dimension is scored on its first components and not refused; a caller that
-needs equal dimensions checks the manifest's first. The schemas' open-interval
-sentinel, `TS_OPEN_SENTINEL`, is 999999999999: above any epoch-second time, but
-a date in 2001 when read as milliseconds or microseconds, so a writer that
-stamps in those units tests for the sentinel instead of relying on
-`invalid_at > T`. A query result's wire writes a non-finite score as 0.0 because
-JSON has no NaN or infinity.
+needs equal dimensions checks the manifest's first. An open interval is marked
+by `TS_OPEN_SENTINEL`, which is `Int64.MAX`: no timestamp in seconds,
+milliseconds or microseconds reaches it, so `invalid_at > T` keeps an open edge
+whatever unit a writer stamps in. Code that tests for an open interval compares
+against the constant, never a literal. A query result's wire writes a
+non-finite score as 0.0 because JSON has no NaN or infinity.
