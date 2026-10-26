@@ -35,10 +35,6 @@ from std.memory import bitcast
 # The byte width of one packed component: f32 is 4 bytes.
 comptime EMB_F32_BYTES: Int = 4
 
-# The dimension a graph has when its manifest does not say (a manifest written
-# before the dimension was recorded) and the default for a new one.
-comptime DEFAULT_EMBEDDING_DIM: Int = 1536
-
 
 def pack_embedding(v: List[Float64]) -> String:
     """Pack a float vector into a packed-f32 `String`.
@@ -132,7 +128,7 @@ def unpack_embedding_checked[
     """Unpack a cell and refuse it unless it holds exactly `dim` components.
 
     This is the reader for a cell of a graph whose manifest says its dimension
-    is `dim`: a cell of any other length is a vector from another model or a
+    is `dim`: a cell of any other length is a vector from another embedder or a
     truncated cell, and is an error rather than a vector of the wrong size.
 
     Parameters:

@@ -9,8 +9,8 @@
 #                deterministic.
 #   layout       the encoded header is [version 2][dimension][table count], each
 #                a little-endian i64.
-#   dimension    a new body has the default dimension; a body carries the one it
-#                was built with; a constructor refuses a dimension of zero or
+#   dimension    there is no default dimension: a body carries the one it
+#                was built with and the writer must supply it; a constructor refuses a dimension of zero or
 #                less; check_embedding_dim accepts the graph's dimension and
 #                refuses any other; a decoded body reports the dimension written.
 #   version      2 is the only layout: versions 0, 1 and 3 are refused.
@@ -32,7 +32,6 @@ from std.testing import (
 )
 
 from komira_kg_format import (
-    DEFAULT_EMBEDDING_DIM,
     KG_SNAPSHOT_FORMAT_VERSION,
     KgManifestBody,
     KgTableEntry,
@@ -82,10 +81,10 @@ def _assert_same(a: KgManifestBody, b: KgManifestBody) raises:
 
 
 def test_roundtrip_keeps_version_dimension_and_tables() raises:
-    var body = _sample(768)
+    var body = _sample(5)
     var decoded = KgManifestBody.decode(body.encode())
     assert_equal(decoded.format_version, KG_SNAPSHOT_FORMAT_VERSION)
-    assert_equal(decoded.embedding_dim, 768)
+    assert_equal(decoded.embedding_dim, 5)
     assert_equal(decoded.num_tables(), 3)
     _assert_same(body, decoded)
     assert_equal(decoded.tables[2].name, "entities")
@@ -94,14 +93,14 @@ def test_roundtrip_keeps_version_dimension_and_tables() raises:
 
 
 def test_roundtrip_empty_body() raises:
-    var decoded = KgManifestBody.decode(KgManifestBody().encode())
+    var decoded = KgManifestBody.decode(KgManifestBody(8).encode())
     assert_equal(decoded.num_tables(), 0)
-    assert_equal(decoded.embedding_dim, DEFAULT_EMBEDDING_DIM)
+    assert_equal(decoded.embedding_dim, 8)
     assert_equal(decoded.format_version, KG_SNAPSHOT_FORMAT_VERSION)
 
 
 def test_roundtrip_non_ascii_names_byte_for_byte() raises:
-    var body = KgManifestBody()
+    var body = KgManifestBody(3)
     body.add_table(String("épisodes-§-日本"), String("objets/ü/é"), 1, 3)
     var decoded = KgManifestBody.decode(body.encode())
     assert_equal(decoded.tables[0].name, "épisodes-§-日本")
@@ -112,8 +111,8 @@ def test_roundtrip_non_ascii_names_byte_for_byte() raises:
 
 
 def test_encoding_is_deterministic() raises:
-    var a = _sample(1536).encode()
-    var b = _sample(1536).encode()
+    var a = _sample(8).encode()
+    var b = _sample(8).encode()
     assert_equal(len(a), len(b))
     for i in range(len(a)):
         assert_equal(a[i], b[i])
@@ -130,15 +129,21 @@ def test_header_layout_is_version_dimension_count() raises:
 # --- the embedding dimension -------------------------------------------------
 
 
-def test_default_dimension_is_1536() raises:
-    var body = KgManifestBody()
-    assert_equal(body.embedding_dim, 1536)
-    assert_equal(KgManifestBody(List[KgTableEntry]()).embedding_dim, 1536)
-    assert_equal(DEFAULT_EMBEDDING_DIM, 1536)
+def test_there_is_no_default_dimension() raises:
+    # A body is built with the dimension the writer's embedder produces; the
+    # one-argument form makes an empty body of that dimension.
+    var empty = KgManifestBody(3)
+    assert_equal(empty.embedding_dim, 3)
+    assert_equal(empty.num_tables(), 0)
+    assert_equal(empty.format_version, KG_SNAPSHOT_FORMAT_VERSION)
+    with assert_raises(contains="must be positive"):
+        _ = KgManifestBody(0)
+    with assert_raises(contains="must be positive"):
+        _ = KgManifestBody(-3)
 
 
 def test_body_carries_the_dimension_it_was_built_with() raises:
-    for d in [1, 3, 384, 768, 3072]:
+    for d in [1, 3, 8, 384, 3072]:
         var body = KgManifestBody(d, List[KgTableEntry]())
         assert_equal(body.embedding_dim, d)
         assert_equal(KgManifestBody.decode(body.encode()).embedding_dim, d)
@@ -148,21 +153,21 @@ def test_constructor_refuses_a_non_positive_dimension() raises:
     with assert_raises(contains="must be positive"):
         _ = KgManifestBody(0, List[KgTableEntry]())
     with assert_raises(contains="must be positive"):
-        _ = KgManifestBody(-768, List[KgTableEntry]())
+        _ = KgManifestBody(-5, List[KgTableEntry]())
 
 
 def test_check_embedding_dim_refuses_a_mismatch() raises:
-    var body = _sample(768)
-    body.check_embedding_dim(768)
-    with assert_raises(contains="does not match the graph's 768"):
-        body.check_embedding_dim(1536)
-    with assert_raises(contains="does not match the graph's 768"):
-        body.check_embedding_dim(767)
+    var body = _sample(5)
+    body.check_embedding_dim(5)
+    with assert_raises(contains="does not match the graph's 5"):
+        body.check_embedding_dim(9)
+    with assert_raises(contains="does not match the graph's 5"):
+        body.check_embedding_dim(4)
     # The check follows the decoded dimension, not the default.
     var decoded = KgManifestBody.decode(body.encode())
-    decoded.check_embedding_dim(768)
+    decoded.check_embedding_dim(5)
     with assert_raises(contains="does not match"):
-        decoded.check_embedding_dim(1536)
+        decoded.check_embedding_dim(9)
 
 
 # --- corrupt input -----------------------------------------------------------
@@ -172,7 +177,7 @@ def test_every_version_but_two_is_refused() raises:
     for v in [0, 1, 3, -1]:
         var b = List[UInt8]()
         _i64(b, Int64(v))
-        _i64(b, 1536)
+        _i64(b, 8)
         _i64(b, 0)
         with assert_raises(
             contains="unsupported snapshot format version " + String(v)
@@ -201,7 +206,7 @@ def test_the_largest_dimension_is_accepted_and_one_more_refused() raises:
 
 
 def test_every_truncation_of_a_valid_body_is_refused() raises:
-    var full = _sample(768).encode()
+    var full = _sample(5).encode()
     for n in range(len(full)):
         var cut = List[UInt8](capacity=n)
         for i in range(n):
@@ -216,7 +221,7 @@ def test_every_truncation_of_a_valid_body_is_refused() raises:
 
 
 def test_trailing_bytes_are_refused() raises:
-    var bytes = _sample(768).encode()
+    var bytes = _sample(5).encode()
     bytes.append(UInt8(0))
     with assert_raises(contains="1 trailing bytes"):
         _ = KgManifestBody.decode(bytes)
@@ -225,7 +230,7 @@ def test_trailing_bytes_are_refused() raises:
 def test_negative_table_count_is_refused() raises:
     var b = List[UInt8]()
     _i64(b, 2)
-    _i64(b, 768)
+    _i64(b, 5)
     _i64(b, -1)
     with assert_raises(contains="negative table_count"):
         _ = KgManifestBody.decode(b)
@@ -234,7 +239,7 @@ def test_negative_table_count_is_refused() raises:
 def test_table_count_beyond_the_bytes_is_refused() raises:
     var b = List[UInt8]()
     _i64(b, 2)
-    _i64(b, 768)
+    _i64(b, 5)
     _i64(b, 1000000000)
     with assert_raises(contains="truncated table list"):
         _ = KgManifestBody.decode(b)
@@ -243,7 +248,7 @@ def test_table_count_beyond_the_bytes_is_refused() raises:
 def test_negative_and_oversized_string_lengths_are_refused() raises:
     var neg = List[UInt8]()
     _i64(neg, 2)
-    _i64(neg, 768)
+    _i64(neg, 5)
     _i64(neg, 1)
     _i64(neg, -5)  # name_len
     for _ in range(40):
@@ -252,7 +257,7 @@ def test_negative_and_oversized_string_lengths_are_refused() raises:
         _ = KgManifestBody.decode(neg)
     var big = List[UInt8]()
     _i64(big, 2)
-    _i64(big, 768)
+    _i64(big, 5)
     _i64(big, 1)
     _i64(big, 9000000000000)
     for _ in range(40):
@@ -274,7 +279,7 @@ def test_non_positive_dimension_in_a_body_is_refused() raises:
 def test_name_or_key_that_is_not_utf8_is_refused() raises:
     var name = List[UInt8]()
     _i64(name, 2)
-    _i64(name, 768)
+    _i64(name, 5)
     _i64(name, 1)
     _i64(name, 2)
     name.append(UInt8(0xC3))  # a lead byte with no continuation
@@ -286,7 +291,7 @@ def test_name_or_key_that_is_not_utf8_is_refused() raises:
         _ = KgManifestBody.decode(name)
     var key = List[UInt8]()
     _i64(key, 2)
-    _i64(key, 768)
+    _i64(key, 5)
     _i64(key, 1)
     _str(key, "n")
     _i64(key, 1)
@@ -301,7 +306,7 @@ def test_name_or_key_that_is_not_utf8_is_refused() raises:
 
 
 def test_resolve_and_has_table() raises:
-    var body = _sample(768)
+    var body = _sample(5)
     assert_true(body.has_table("edges"))
     assert_false(body.has_table("communities"))
     var e = body.resolve("entities")

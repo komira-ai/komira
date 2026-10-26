@@ -3,13 +3,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The values and on-disk formats the data-graph writer and reader share, part 1
 # (the first of the packages in docs/design/knowledge_graph_port.md): the packed
 # f32 embedding cell, the extraction values (`Triple`, `EntityMention`,
-# `Extraction`), a strict JSON value tree and the snapshot manifest body, which
-# carries the graph's embedding dimension. It has no dependencies, reads no
+# `Extraction`) and the snapshot manifest body, which carries the graph's
+# embedding dimension (the writer supplies it; there is no default). It has no dependencies, reads no
 # clock and no environment.
 #
 # The welded tests: test_embedding packs and unpacks f32 and f64 vectors and
-# holds a cell to a dimension; test_json_value parses valid text and refuses
-# each malformed form; test_manifest_body round-trips the manifest and refuses
+# holds a cell to a dimension; test_manifest_body round-trips the manifest and refuses
 # each corrupt body; test_ingest_types pins the extraction values;
 # test_utf8_check pins the validator every decoded string passes through.
 mojo_library(
@@ -18,7 +17,6 @@ mojo_library(
     test_srcs = [
         "tests/test_embedding.mojo",
         "tests/test_ingest_types.mojo",
-        "tests/test_json_value.mojo",
         "tests/test_manifest_body.mojo",
         "tests/test_utf8_check.mojo",
     ],

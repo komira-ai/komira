@@ -29,7 +29,6 @@
 # Encode and decode are pure value transforms; no pointer appears anywhere.
 # =============================================================================
 
-from .embedding import DEFAULT_EMBEDDING_DIM
 from .utf8_check import bytes_are_utf8
 
 
@@ -116,17 +115,23 @@ struct KgManifestBody(Movable):
     var embedding_dim: Int
     var tables: List[KgTableEntry]
 
-    def __init__(out self):
-        """An empty body at the current format and the default dimension."""
-        self.format_version = KG_SNAPSHOT_FORMAT_VERSION
-        self.embedding_dim = DEFAULT_EMBEDDING_DIM
-        self.tables = List[KgTableEntry]()
+    def __init__(out self, embedding_dim: Int) raises:
+        """An empty body for a graph of `embedding_dim`-component embeddings.
 
-    def __init__(out self, var tables: List[KgTableEntry]):
-        """A body at the default dimension holding `tables`."""
+        There is no default dimension: the writer says which one its embedder
+        produces.
+
+        Args:
+            embedding_dim: Components per embedding; must be more than zero.
+        """
+        if embedding_dim <= 0:
+            raise Error(
+                "KgManifestBody: embedding dimension must be positive, got "
+                + String(embedding_dim)
+            )
         self.format_version = KG_SNAPSHOT_FORMAT_VERSION
-        self.embedding_dim = DEFAULT_EMBEDDING_DIM
-        self.tables = tables^
+        self.embedding_dim = embedding_dim
+        self.tables = List[KgTableEntry]()
 
     def __init__(
         out self, embedding_dim: Int, var tables: List[KgTableEntry]

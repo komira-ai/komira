@@ -3,7 +3,7 @@
 Status: design; PR 1 is in the tree. It decides how the existing data-graph library (a property graph built from
 documents and records, with a bi-temporal store and a read path) comes into komira as small, separately
 tested packages. Of the packages named here only part 1 of [`komira_kg_format`](../../src/komira_kg_format/)
-(its `embedding`, `ingest_types`, `json_value` and `manifest_body` modules) is in the tree yet. The code graph
+(its `embedding`, `ingest_types` and `manifest_body` modules) is in the tree yet. The code graph
 [`komira_kg_code`](../../src/komira_kg_code/) is a different thing and is untouched (see
 [knowledge_graph.md](../knowledge_graph.md)).
 
@@ -47,7 +47,7 @@ lines is split during the port, because the repository's file limit applies.
 
 | package | what it is | source lines | engine |
 |---|---|---:|---|
-| `komira_kg_format` | everything below the engine line that the writer and the reader share: the values and on-disk formats (embedding, JSON value tree, triples, schemas, manifest, delta codec, fingerprints, query result, cosine), the snapshot lineage store, and the exact-scan searches and rank fusion over a snapshot | about 5,100 | none |
+| `komira_kg_format` | everything below the engine line that the writer and the reader share: the values and on-disk formats (embedding, triples, schemas, manifest, delta codec, fingerprints, query result, cosine), the snapshot lineage store, and the exact-scan searches and rank fusion over a snapshot | about 5,100 | none |
 | `komira_kg` | the mutable store and ingest: bi-temporal edges, alias map, dedup, working set, compaction, ingest, extractors, cursor store, the embedder and LLM seams, the push-capture adapter | about 8,000 | none |
 | `komira_kg_mode` | the extraction-mode vocabulary the spec and the extractor selection share | about 170 | none |
 | `komira_kg_spec` | the graph spec and its validation (tiers, modes) | about 540 | none |
@@ -72,10 +72,10 @@ exact scans, the out-degree count and rank fusion) read parquet bytes and score 
 `komira_kg_format` as a `search` module; only the three engine functions stay in `komira_kg_read`.
 
 - `embedding`: `pack_embedding`, `pack_embedding_f32`, `unpack_embedding`, `unpack_embedding_bytes`,
-  `unpack_embedding_checked`, `DEFAULT_EMBEDDING_DIM`.
+  `unpack_embedding_checked`.
 - `cosine`: `Hit`, `cosine`, `cosine_topk`.
 - `ingest_types`: `Triple`, `EntityMention`, `Extraction`.
-- `json_value`: the JSON value tree used for payloads.
+- JSON payloads use `komira_json`; this package has no JSON reader of its own.
 - `schemas`: `episodes_schema`, `entities_schema`, `edges_schema`, `edges_tombstone_schema`,
   `entities_embedding_schema`, `communities_schema`, the community-report schema, the schema-version
   constants and `EMB_DIM`.
@@ -232,7 +232,7 @@ that brings it, at the seams named. A package's `deps` is stated in its first PR
 | PR | contents | lines | deps | tests that come with it |
 |---|---|---:|---|---|
 | 0 | `komira_parquet`: a public from-bytes function that decodes a whole in-memory Parquet file to one batch (the footer, each row group, concatenated in file order). It only adds the API; three private test copies of the same function (two in `komira_telemetry_store` tests, one in `komira_log_index` tests) may be migrated to it later | 150 | `komira_parquet` | round trip through the writer for every column type the graph schemas use; truncated file; empty file; a bad magic |
-| 1 | `komira_kg_format` part 1: `embedding`, `ingest_types`, `json_value`, `manifest_body` | 1,100 | none (standard library only) | pack and unpack are inverses for f32 and f64; a malformed JSON value is refused; manifest encode and decode round trip with the format version (2, the only layout) and carry the embedding dimension |
+| 1 | `komira_kg_format` part 1: `embedding`, `ingest_types`, `manifest_body` | 1,100 | none (standard library only) | pack and unpack are inverses for f32 and f64; a corrupt manifest is refused; manifest encode and decode round trip with the format version (2, the only layout) and carry the embedding dimension |
 | 2 | `komira_kg_format` part 2: `schemas`, `cosine`, `query_result` | 1,030 | part 1 | every schema field and version is pinned by name; cosine of equal, orthogonal and zero vectors; top-k ties are ordered; result round trip |
 | 3 | `komira_kg_format` part 3: `delta_body`, `delta_codec`, `source_fingerprint` | 1,280 | parts 1-2, parquet writer, objectstore | framed and parquet delta objects both decode; a fingerprint changes when one byte of content changes |
 | 4 | `komira_kg_format` part 4: `snapshot_store` (974 lines; split into store, view and chain) | 980 | parts 1-3, objectstore | base then delta chain read back; a lost compare-and-set race is retried and reported; compaction folds and keeps the reader's pinned snapshot readable |
