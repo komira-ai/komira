@@ -18,14 +18,17 @@
 #   refusals      a commit is refused, and writes nothing, for a chunk that is
 #                 not a pending base, a base that is not the one the head chain
 #                 sits on (another compaction committed first), and a folded
-#                 delta that is not on the head chain.
+#                 delta that is not on the head chain, or a base written before
+#                 a delta it says it folded.
 #   chain of one  a base alone is folded into a fresh base with no deltas.
 #   policy        the size a chain reports, with the policy, decides a fold
 #                 before it and not after.
 #   retire        a folded delta is stamped with the time the caller passes, its
 #                 age is measured against the time the caller passes, and its
 #                 chunk and objects stay readable; a delta still on the head
-#                 chain, a base and a delta never retired are refused.
+#                 chain, a base and a delta never retired are refused, and a
+#                 handle holding an old tail cannot retire a delta that another
+#                 handle's chain head names.
 # =============================================================================
 
 from std.testing import (
@@ -445,6 +448,40 @@ def test_retiring_a_live_delta_a_base_or_a_never_retired_one_is_refused() raises
         _ = kg.retired_age_ms(1, 1000)
     # None of the refusals left a marker.
     assert_equal(len(Raw(backend.clone(), "kg/manifest").tombstone_seqs()), 0)
+
+
+def test_a_stale_handle_cannot_retire_a_delta_the_head_still_names() raises:
+    var backend = Backend()
+    var a = Kg(backend.clone(), "kg")
+    var b = Kg(backend.clone(), "kg")
+    assert_equal(a.write_snapshot(_two(), 4), 0)
+    # Another handle appends a delta (chunk 1); the head is chunk 2.
+    assert_equal(
+        b.append_delta(_one("entities", _batch(10, 2, "d")), _index("a", 10)), 2
+    )
+    # Handle a still holds the tail it wrote (chunk 0), where no delta is live.
+    with assert_raises(contains="delta 1 is still on the head chain"):
+        a.retire_folded_delta(1, 5)
+    assert_equal(len(Raw(backend.clone(), "kg/manifest").tombstone_seqs()), 0)
+
+
+def test_a_base_written_before_a_folded_delta_cannot_commit() raises:
+    var backend = Backend()
+    var kg = Kg(backend.clone(), "kg")
+    assert_equal(kg.write_snapshot(_two(), 4), 0)
+    var early = kg.write_base_tables(_one("entities", _batch(1, 3, "f")), 4)
+    assert_equal(early, 1)
+    # Delta 2 and its chain head 3 arrive after the pending base was written.
+    assert_equal(
+        kg.append_delta(_one("entities", _batch(10, 2, "d")), _index("a", 10)), 3
+    )
+    with assert_raises(contains="base 1 was written before folded delta 2"):
+        _ = kg.commit_compacted_head(early, 0, [Int64(2)])
+    var raw = Raw(backend.clone(), "kg/manifest")
+    assert_equal(raw.read_head_authoritative().chunk_seq, 3)
+    var chain = kg.resolve_head_chain()
+    assert_equal(chain.base_seq, 0)
+    assert_equal(chain.num_deltas(), 1)
 
 
 def main() raises:

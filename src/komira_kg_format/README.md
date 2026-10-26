@@ -601,7 +601,18 @@ the lineage unreferenced. The base a compactor writes is a base chunk with a
 record count of zero; it is skipped like a delta until `commit_compacted_head`
 names it, so it can never hide the deltas that arrived while the fold ran.
 `commit_compacted_head` is for one compactor at a time: it refuses a fold whose
-base is no longer the one under the head chain.
+base is no longer the one under the head chain. It cannot see what the pending
+base holds: it checks only that the base was written after every delta it says
+was folded, and that each of those is on the head chain, so folding the deltas it
+names is the compactor's duty. Reading a head also checks that a chain head's
+base is a base chunk and each delta a delta chunk (one chunk read apiece), so a
+corrupt chain is refused and never carried into a new head.
+
+The deltas of a chain are in the order their chain heads landed, not the order
+they were ingested. If one writer wrote delta 5 and another delta 6, and the
+second one's chain head took its slot first, the chain is [6, 5] and the name
+index's "later wins" follows that order, so delta 5's entry wins. No delta is
+lost; the apply order between concurrent writers is decided by the race.
 
 A handle that has written reads its own latest write from memory; a handle made
 fresh lists the store. To see another handle's commits, read through a fresh
@@ -609,7 +620,9 @@ handle. Finding the head after a cold start lists the lineage and reads each
 chunk, which is a cost that grows with the chunk count, so a host folds chains
 and does not keep millions of chunks.
 
-`retire_folded_delta` only stamps a folded delta's chunk; it deletes nothing. A
+`retire_folded_delta` decides whether a delta is still on the head chain from
+the store's own head, not the handle's cached tail, so a stale handle cannot
+retire a delta another handle's head still names. It only stamps a folded delta's chunk; it deletes nothing. A
 chunk is reclaimable only after the lineage's log start has moved past it, and
 when to do that is the host's retention decision, taken against
 `retired_age_ms` and a clock the host owns. Table objects are named by the

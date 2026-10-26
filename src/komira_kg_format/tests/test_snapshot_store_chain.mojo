@@ -21,10 +21,14 @@
 #                 reader keeps the head below it and the next delta is chained
 #                 without it.
 #   corrupt       a chain head that names a chunk not before it, or a base or
-#                 chain head as a delta, is refused on read.
+#                 chain head as a delta, is refused on read; a forward-consistent
+#                 chain that names a non-delta as a delta, or a non-base as its
+#                 base, is refused when a head is resolved, so no writer builds
+#                 on it.
 #   refusals      a delta onto an empty lineage, an invalid delta table and a
 #                 delta index out of range are refused, and a refused delta
-#                 writes no chunk.
+#                 writes no chunk and no delta object (the checks come before the
+#                 first put).
 #   index only    a delta with no table, only name-index entries, is a delta.
 #   sizes         chain_total_bytes is the sum of the sizes of the base objects
 #                 and of the delta objects.
@@ -430,20 +434,59 @@ def test_a_delta_onto_an_empty_lineage_is_refused_and_writes_nothing() raises:
     assert_true(_nothing_under(backend, "kg/"))
 
 
-def test_an_invalid_delta_table_is_refused_and_writes_no_chunk() raises:
+def test_an_invalid_delta_table_is_refused_and_writes_no_chunk_or_object() raises:
     var backend = Backend()
     var kg = Kg(backend.clone(), "kg")
     _ = kg.write_snapshot(_one("entities", _batch(1, 2)), 4)
+    # The valid table is last, so it is the first one a write would put.
     var twice = _one("entities", _batch(5, 1))
     twice.append(KgTable("entities", _batch(6, 1), 1))
+    twice.append(KgTable("edges", _batch(7, 1), 1))
     with assert_raises(contains="table named twice: entities"):
         _ = kg.append_delta(twice^, KgNameIndexBody())
+    var negative = _one("entities", _batch(5, 1), -2)
+    negative.append(KgTable("edges", _batch(7, 1), 1))
     with assert_raises(contains="negative schema_version -2"):
-        _ = kg.append_delta(
-            _one("entities", _batch(5, 1), -2), KgNameIndexBody()
-        )
+        _ = kg.append_delta(negative^, KgNameIndexBody())
+    assert_true(_nothing_under(backend, "kg/deltas/"))
     assert_equal(kg.latest_snapshot_id(), 0)
     assert_equal(Raw(backend.clone(), "kg/manifest").read_head_authoritative().chunk_seq, 0)
+
+
+def test_a_chain_naming_a_non_delta_is_not_carried_into_a_new_head() raises:
+    var backend = Backend()
+    var kg = Kg(backend.clone(), "kg")
+    _ = kg.write_snapshot(_one("entities", _batch(1, 2)), 4)
+    var raw = Raw(backend.clone(), "kg/manifest")
+    # Chunk 1 is before-consistent but names the base chunk 0 as a delta.
+    assert_equal(raw.append(KgChainBody(0, [Int64(0)]).encode(), 1).chunk_seq, 1)
+    with assert_raises(contains="chunk 0 as a delta, which is not a delta"):
+        _ = kg.append_delta(_one("entities", _batch(9, 1)), KgNameIndexBody())
+    var reader = Kg(backend.clone(), "kg")
+    with assert_raises(contains="which is not a delta"):
+        _ = reader.latest_snapshot_id()
+    var pending = kg.write_base_tables(_one("entities", _batch(1, 2)), 4)
+    assert_equal(pending, 2)
+    with assert_raises(contains="which is not a delta"):
+        _ = kg.commit_compacted_head(pending, 0, List[Int64]())
+    # Nothing was built on the corrupt head: the newest chunk is the pending base.
+    assert_equal(raw.read_head_authoritative().chunk_seq, 2)
+
+
+def test_a_chain_naming_a_non_base_as_its_base_is_refused() raises:
+    var backend = Backend()
+    var kg = Kg(backend.clone(), "kg")
+    _ = kg.write_snapshot(_one("entities", _batch(1, 2)), 4)
+    var raw = Raw(backend.clone(), "kg/manifest")
+    # Chunk 1 is a delta; chunk 2 names it as its base.
+    assert_equal(raw.append(KgDeltaBody().encode(), 0).chunk_seq, 1)
+    assert_equal(raw.append(KgChainBody(1).encode(), 0).chunk_seq, 2)
+    var reader = Kg(backend.clone(), "kg")
+    with assert_raises(contains="chunk 1 as its base, which is not a base"):
+        _ = reader.latest_snapshot_id()
+    with assert_raises(contains="which is not a base"):
+        _ = kg.append_delta(_one("entities", _batch(9, 1)), KgNameIndexBody())
+    assert_equal(raw.read_head_authoritative().chunk_seq, 2)
 
 
 def test_a_delta_with_only_name_index_entries_is_a_delta() raises:

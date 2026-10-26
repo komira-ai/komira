@@ -56,6 +56,15 @@
 # (`lost_races`, `last_write_lost_races`); running out of attempts raises an
 # error that ends "(retryable)".
 #
+# Chain order
+# -----------
+# The deltas of a chain are in the order their chain heads landed, which is not
+# always the order they were ingested: if writer W1 wrote delta 5 and writer W2
+# delta 6, and W2's chain head took its slot first, the chain is [6, 5] and the
+# name index's "later wins" follows that order, so W1's entry wins. Each head is
+# built over the one before it, so no delta is lost, only the apply order
+# between concurrent writers is decided by the race.
+#
 # Reads
 # -----
 # Reads take the head from a warm handle's own committed tail or, on a fresh
@@ -492,7 +501,9 @@ struct KgSnapshotStore[Store: CloneableConditionalWriteStore](Movable):
                 (`ChainView.delta_seqs`).
 
         Raises:
-            If `new_base_seq` is not a pending base, the head's base is no longer
+            If `new_base_seq` is not a pending base or is not after every
+            folded delta (a base cannot have folded a delta written after it),
+            the head's base is no longer
             `folded_base_seq` (another compaction committed first: fold the new
             chain instead), a folded delta is not on the head chain, or the
             chain head still loses the race after `max_head_attempts` attempts
@@ -540,6 +551,17 @@ struct KgSnapshotStore[Store: CloneableConditionalWriteStore](Movable):
                         "KgSnapshotStore.commit_compacted_head: folded delta "
                         + String(folded_delta_seqs[j])
                         + " is not on the head chain"
+                    )
+                # A base written before a delta cannot have folded it. The
+                # store cannot see what the pending base holds, so this is the
+                # one check it has.
+                if folded_delta_seqs[j] >= new_base_seq:
+                    raise Error(
+                        "KgSnapshotStore.commit_compacted_head: base "
+                        + String(new_base_seq)
+                        + " was written before folded delta "
+                        + String(folded_delta_seqs[j])
+                        + " and cannot have folded it"
                     )
             var carry = List[Int64]()
             for i in range(head.chain.num_deltas()):
@@ -606,7 +628,16 @@ struct KgSnapshotStore[Store: CloneableConditionalWriteStore](Movable):
                 + String(delta_seq)
                 + " is not a delta"
             )
-        var chain = self.resolve_head_chain()
+        # The head is read from the store, not from this handle's warm tail: a
+        # handle that has not seen another handle's chain head must not retire
+        # a delta that head still names.
+        var tip = self._manifest.read_head_authoritative()
+        var found = self._committed_head(tip.chunk_seq)
+        if not found:
+            raise Error(
+                "KgSnapshotStore.retire_folded_delta: the lineage has no head"
+            )
+        var chain = found.take().chain.copy()
         for i in range(chain.num_deltas()):
             if chain.delta_seqs[i] == delta_seq:
                 raise Error(
@@ -650,11 +681,39 @@ struct KgSnapshotStore[Store: CloneableConditionalWriteStore](Movable):
             if kind == KG_CHUNK_CHAIN:
                 var chain = KgChainBody.decode(raw)
                 _check_chain_refs(chain, seq)
+                self._check_chain_kinds(chain, seq)
                 return Optional[_CommittedHead](
                     _CommittedHead(seq, True, chain^)
                 )
             seq -= 1
         return None
+
+    def _check_chain_kinds(self, chain: KgChainBody, seq: Int64) raises:
+        """A chain head names a base and deltas, by chunk kind; a corrupt
+        chain that names anything else (and is forward-consistent) is refused
+        here, so no writer carries it into a new head. Costs one chunk read
+        for the base and one per delta."""
+        if (
+            kg_chunk_kind(self._manifest.read_chunk(chain.base_seq))
+            != KG_CHUNK_BASE
+        ):
+            raise Error(
+                "KgSnapshotStore: chain head "
+                + String(seq)
+                + " names chunk "
+                + String(chain.base_seq)
+                + " as its base, which is not a base"
+            )
+        for i in range(chain.num_deltas()):
+            var d = chain.delta_seqs[i]
+            if kg_chunk_kind(self._manifest.read_chunk(d)) != KG_CHUNK_DELTA:
+                raise Error(
+                    "KgSnapshotStore: chain head "
+                    + String(seq)
+                    + " names chunk "
+                    + String(d)
+                    + " as a delta, which is not a delta"
+                )
 
     def _head(self, who: String) raises -> _CommittedHead:
         var tip = self._manifest.read_head_fresh()

@@ -12,6 +12,10 @@
 #   lost head     an append_delta whose chain head was beaten to its slot by a
 #                 rival chain head is retried from the new tip, builds its chain
 #                 over the rival's head, and the head names both deltas.
+#   head order    two writers' chain heads land in the opposite order to their
+#                 deltas: the chain lists the deltas in the order the heads
+#                 landed, no delta is lost, and the name index's later entry wins
+#                 by that order.
 #   carry         a commit_compacted_head beaten the same way carries the
 #                 rival's delta onto the new base instead of dropping it.
 #   bounded       a base write that loses every slot stops after the retry
@@ -76,6 +80,8 @@ struct _Rival(Movable):
 
     var armed_key: String
     var envelope: List[UInt8]
+    var second_key: String
+    var second_envelope: List[UInt8]
     var always: Bool
     var skip: Int
     var chunk_puts: Int
@@ -84,6 +90,8 @@ struct _Rival(Movable):
     def __init__(out self):
         self.armed_key = String("")
         self.envelope = List[UInt8]()
+        self.second_key = String("")
+        self.second_envelope = List[UInt8]()
         self.always = False
         self.skip = 0
         self.chunk_puts = 0
@@ -127,6 +135,10 @@ struct _Contended(CloneableConditionalWriteStore, Movable):
             if r.armed_key == key:
                 steal = True
                 r.armed_key = String("")
+            elif r.second_key == key:
+                r.second_key = String("")
+                r.stolen += 1
+                _ = self.inner.put(path, r.second_envelope.copy())
             elif r.always:
                 if r.skip > 0:
                     r.skip -= 1
@@ -269,6 +281,34 @@ def test_a_chain_head_beaten_to_its_slot_is_rebuilt_over_the_rivals() raises:
     assert_equal(chain.delta_seqs[1], 2)
     assert_equal(chain.resolve_name_index("rival"), 7)
     assert_equal(chain.resolve_name_index("mine"), 8)
+
+
+def test_the_chain_follows_the_order_the_heads_land_not_the_ingest_order() raises:
+    var backend = Backend()
+    var rival = ArcPointer[_Rival](_Rival())
+    var a = _contended(backend, rival)
+    assert_equal(a.write_snapshot(_one(1, 2), 4), 0)
+
+    # a's delta (name "k" -> 5) is chunk 1. The rival's delta (name "k" -> 6) takes
+    # a's chain-head slot 2, so a is behind it; then the rival's chain head,
+    # which names only its own delta, takes slot 3 before a's head can.
+    var rival_delta = KgDeltaBody()
+    rival_delta.add_index_entry("k", 6)
+    rival[].armed_key = _slot(2)
+    rival[].envelope = encode_chunk(rival_delta.encode(), 0)
+    rival[].second_key = _slot(3)
+    rival[].second_envelope = encode_chunk(KgChainBody(0, [Int64(2)]).encode(), 1)
+
+    assert_equal(a.append_delta(_one(10, 1), _index("k", 5)), 4)
+    assert_equal(rival[].stolen, 2)
+
+    var chain = a.open_latest_chain()
+    assert_equal(chain.num_deltas(), 2)
+    # The rival's delta was ingested second and sits first; nothing is lost.
+    assert_equal(chain.delta_seqs[0], 2)
+    assert_equal(chain.delta_seqs[1], 1)
+    # "Later wins" follows the chain, so the entry ingested first wins.
+    assert_equal(chain.resolve_name_index("k"), 5)
 
 
 def test_a_compaction_beaten_to_its_slot_carries_the_rivals_delta() raises:
