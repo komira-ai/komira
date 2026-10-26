@@ -3,15 +3,15 @@
 #   in-memory object store; no network, no wall clock, no environment).
 # =============================================================================
 #
-#   cold          a new cache is not warm and has no key; reading an empty
-#                 lineage is refused.
-#   hit           a second get at an unchanged head lends the resident set (an
-#                 edit made through the first borrow is still there), keyed at
-#                 the head.
+#   cold          a new cache is not warm and has no key; refreshing it on an empty
+#                 lineage is refused, and so is lending a set it does not hold.
+#   hit           a refresh at an unchanged head keeps the resident set (an
+#                 unpersisted edit a single writer committed into it is still
+#                 there), keyed at the head; get lends it read-only.
 #   miss          the head moving by a delta from another handle (read through a
 #                 fresh handle), by a fold and
-#                 by an erasure each make the next get merge again: the edit is
-#                 gone and the new rows are there. invalidate does the same.
+#                 by an erasure each make the next refresh merge again: the edit
+#                 is gone and the new rows are there. invalidate does the same.
 #   single writer take_current on a cold cache merges the head; after commit the
 #                 next take_current returns the resident set (with an unpersisted
 #                 edit that a reload would not have), and its embeddings are the
@@ -65,6 +65,14 @@ def _seed(mut kg: Kg) raises:
     _ = kg.write_snapshot(ws.to_tables(), DIM)
 
 
+def _resident_edit(mut cache: Cache, kg: Kg) raises:
+    """Put an edit the store does not hold into the resident set, the way a
+    single writer does: take it, change it, commit it back at the head."""
+    var ws = cache.take_current(kg, DIM)
+    ws.entities[0].summary = "resident edit"
+    cache.commit(ws^, kg.head_seq())
+
+
 def _add(mut kg: Kg, name: String, part: String) raises -> Int64:
     var ws = SnapshotWorkingSet.load_latest(kg)
     ws.add_entity(_ent(ws.next_nid(), name, part, 1.0, 1.0))
@@ -78,56 +86,63 @@ def test_a_new_cache_is_cold_and_an_empty_lineage_is_refused() raises:
     assert_equal(cache.cached_head_seq(), -1)
     var kg = Kg(Backend(), "g")
     with assert_raises(contains="empty lineage"):
-        _ = cache.get(kg).num_entities()
+        cache.refresh(kg)
     assert_false(cache.is_warm())
+    with assert_raises(contains="cache is cold"):
+        _ = cache.get().num_entities()
 
 
-def test_a_get_at_an_unchanged_head_lends_the_resident_set() raises:
+def test_a_refresh_at_an_unchanged_head_keeps_the_resident_set() raises:
     var kg = Kg(Backend(), "g")
     _seed(kg)
     var cache = Cache()
-    assert_equal(cache.get(kg).num_entities(), 2)
+    cache.refresh(kg)
+    assert_equal(cache.get().num_entities(), 2)
     assert_true(cache.is_warm())
     assert_equal(cache.cached_head_seq(), kg.head_seq())
-    cache.get(kg).entities[0].summary = "resident edit"
-    assert_equal(cache.get(kg).entities[0].summary, "resident edit")
+    _resident_edit(cache, kg)
+    cache.refresh(kg)
+    assert_equal(cache.get().entities[0].summary, "resident edit")
     assert_equal(SnapshotWorkingSet.load_latest(kg).entities[0].summary, "")
 
 
-def test_a_foreign_delta_makes_the_next_get_merge_again() raises:
+def test_a_foreign_delta_makes_the_next_refresh_merge_again() raises:
     var backend = Backend()
     var kg = Kg(backend.clone(), "g")
     _seed(kg)
     var cache = Cache()
-    cache.get(kg).entities[0].summary = "resident edit"
+    _resident_edit(cache, kg)
 
     var other = Kg(backend.clone(), "g")
     var head = _add(other, "gamma", "p1")
     # A handle that has not read the head before lists it; a handle that has
     # may only see its own commits (see the cache's header).
     var reader = Kg(backend.clone(), "g")
-    assert_equal(cache.get(reader).num_entities(), 3)
-    assert_equal(cache.get(reader).entities[0].summary, "")
+    cache.refresh(reader)
+    assert_equal(cache.get().num_entities(), 3)
+    assert_equal(cache.get().entities[0].summary, "")
     assert_equal(cache.cached_head_seq(), head)
 
 
-def test_a_fold_and_an_erasure_make_the_next_get_merge_again() raises:
+def test_a_fold_and_an_erasure_make_the_next_refresh_merge_again() raises:
     var kg = Kg(Backend(), "g")
     _seed(kg)
     _ = _add(kg, "gamma", "p1")
     var cache = Cache()
-    cache.get(kg).entities[0].summary = "resident edit"
+    _resident_edit(cache, kg)
     var before = cache.cached_head_seq()
 
     _ = compact_chain(kg, 1000)
-    assert_equal(cache.get(kg).entities[0].summary, "")
-    assert_equal(cache.get(kg).num_entities(), 3)
+    cache.refresh(kg)
+    assert_equal(cache.get().entities[0].summary, "")
+    assert_equal(cache.get().num_entities(), 3)
     assert_true(cache.cached_head_seq() > before)
 
-    cache.get(kg).entities[0].summary = "resident edit"
+    _resident_edit(cache, kg)
     _ = erase_kg_partition(kg, "p1", 2000)
-    assert_equal(cache.get(kg).num_entities(), 1)
-    assert_equal(cache.get(kg).entities[0].name, "beta")
+    cache.refresh(kg)
+    assert_equal(cache.get().num_entities(), 1)
+    assert_equal(cache.get().entities[0].name, "beta")
     assert_equal(cache.cached_head_seq(), kg.head_seq())
 
 
@@ -135,11 +150,12 @@ def test_invalidate_drops_the_resident_set() raises:
     var kg = Kg(Backend(), "g")
     _seed(kg)
     var cache = Cache()
-    cache.get(kg).entities[0].summary = "resident edit"
+    _resident_edit(cache, kg)
     cache.invalidate()
     assert_false(cache.is_warm())
     assert_equal(cache.cached_head_seq(), -1)
-    assert_equal(cache.get(kg).entities[0].summary, "")
+    cache.refresh(kg)
+    assert_equal(cache.get().entities[0].summary, "")
 
 
 def test_a_single_writer_commits_and_takes_its_own_set_back() raises:

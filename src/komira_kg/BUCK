@@ -40,9 +40,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # to, keeps a pinned chain and its objects, stamps retired deltas, carries a
 # delta appended meanwhile and refuses a second fold of a replaced head;
 # test_erase removes one partition's rows, edges, closures, names and embeddings
-# from the head and keeps the others; test_warm_cache keys the resident merge by
-# the head; test_embedding_topk ranks by cosine with ties by node id and refuses
-# k <= 0, a wrong query dimension and a wrong cell.
+# from the head and keeps the others; test_erase_race erases the rows a writer
+# slipped in during the erasure and keeps its other rows; test_rewrite_repair
+# finishes a fold or an erasure that stopped after its commit and orders a
+# writer's delta before the bootstrap; test_warm_cache keys the resident merge by
+# the head and lends it read-only; test_embedding_topk ranks by cosine with ties
+# by node id (against a full sort), skips a non-finite stored row and refuses
+# k <= 0, a wrong or non-finite query and a wrong cell.
 mojo_library(
     name = "komira_kg",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -90,9 +94,11 @@ mojo_library(
         "tests/test_embedder.mojo",
         "tests/test_embedding_topk.mojo",
         "tests/test_erase.mojo",
+        "tests/test_erase_race.mojo",
         "tests/test_extractor.mojo",
         "tests/test_llm_client.mojo",
         "tests/test_name_similarity.mojo",
+        "tests/test_rewrite_repair.mojo",
         "tests/test_rule_extractor.mojo",
         "tests/test_rule_pattern.mojo",
         "tests/test_rule_scan.mojo",

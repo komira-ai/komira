@@ -82,21 +82,36 @@ deleted, so "what did we believe at time T" stays answerable.
   and writes the rest as a new base, never a delta, followed by an index delta
   of the surviving entities only; the head then holds no row, embedding or
   name-index entry of the partition. Other partitions are untouched, and
-  erasing an absent partition writes nothing.
+  erasing an absent partition writes no base (it appends a missing index delta,
+  as `compact_chain` does). A delta a writer appended meanwhile is carried onto
+  the new head and examined: if it holds rows, edges, tombstones, names or
+  projection rows of the partition the head is folded again, up to
+  `MAX_ERASE_ROUNDS` commits, and a writer that keeps adding them makes the call
+  raise, naming the partition and the count of rows left. `erase_kg_partition_at`
+  and `erase_commit_at` hold an erasure open for a test.
 - `compaction`: `compact_chain` folds the head chain into a new base,
   `compact_chain_at` folds a stated head (a delta appended since is carried onto
   the new head, never lost) and `maybe_compact_chain` does so when a
   `CompactionPolicy` trips. The new base is written as a pending base, made the
   head by `commit_compacted_head`, followed by an index delta, and only then are
   the folded deltas retired: stamped with the caller's `now_ms`. Nothing is
-  deleted, so a reader that pinned an earlier head keeps reading it.
+  deleted, so a reader that pinned an earlier head keeps reading it. A head whose
+  base has no index delta (a fold stopped after the commit, or a base written by
+  `write_snapshot`) gets one when `compact_chain` runs, so a retry finishes the
+  fold; the deltas the stopped fold had not retired stay unmarked. The index
+  delta leaves out the names and node ids of the deltas on the chain when it is
+  appended; a delta whose head lands between that read and the append is still
+  overridden for a name or node id both speak for (the store has no
+  append-if-head verb).
 - `warm_cache`: `WarmMergedCache` keeps the merged graph in memory keyed by the
-  head chunk, read fresh on every call; `get` lends it, `take_current` and
-  `commit` are the single writer's loop.
+  head chunk, read fresh by `refresh`; `get` lends the resident set as an
+  immutable `ref`, `take_current` and `commit` are the single writer's loop.
 - `embedding_topk`: `resolve_embedding_topk` ranks the entities of a chain's
   `entities_embedding` projections (later rows replace earlier ones by node id)
   by cosine against a query: score descending, equal scores by ascending node
-  id. It refuses `k <= 0` and a query of another dimension than the graph's.
+  id, keeping the best k in a bounded heap. It refuses `k <= 0`, a query of
+  another dimension than the graph's and a query with a non-finite component; a
+  stored row with a non-finite component is skipped, never ranked.
 
 A facet, a source, a predicate and an entity name are opaque strings the host
 supplies: the package fixes no vocabulary. Prompts are values the caller passes
@@ -591,12 +606,15 @@ and one with more is read as the layout.
 
 `erase_kg_partition` and `compact_chain` rewrite the whole graph in memory and
 expect the lineage's ingest to be quiet; a delta a writer appends while they run
-is carried onto the new head, not folded. Erasure removes the partition from the
-head only: earlier chunks and objects stay (the store has no delete verb), the old
-chain's deltas are retired for the host's retention policy, and the change gate's
-fingerprints are not touched. The node ids of an erased partition may be minted
-again once the graph is reloaded, because the high-water mark is not stored.
-`resolve_embedding_topk` scans every projection row, O(rows * k); a chain whose
+is carried onto the new head, not folded (erasure then examines it, see above).
+Erasure removes the partition from the head only: earlier chunks and objects stay
+(the store has no delete verb), so the erased rows remain in those objects until
+the host reaps them; the old chain's deltas are retired for the host's retention
+policy, and the change gate's fingerprints are not touched. The node ids of an
+erased partition may be minted again once the graph is reloaded, because the
+high-water mark is not stored. Between the commit that carries a tombstone of an
+erased edge and the fold that drops it, a reader that merges the head fails.
+`resolve_embedding_topk` scans every projection row, O(rows log k); a chain whose
 deltas carry no projection (a base alone) gives no candidates, and the caller
 scans the base's entities.
 

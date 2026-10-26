@@ -34,7 +34,17 @@
 # not yet marked.
 #
 # IDEMPOTENT. A base alone, and a chain whose only deltas are bootstrap deltas
-# (no graph table), are already compact: nothing is written.
+# (no graph table), are already compact: no base is written. If such a head
+# carries no name-index entry and no projection at all (a fold that stopped after
+# step 4, or a base written by `write_snapshot`), the call appends the bootstrap
+# of its base and writes nothing else (`rewrite.repair_missing_bootstrap`). So a
+# retry after a crash between steps 4 and 5 finishes the fold. The deltas that
+# fold had not yet retired stay unmarked: see `rewrite` for why a retry cannot
+# retire them.
+#
+# THE SEAM. `compact_commit_at` runs steps 1 to 4 and `finish_rewrite` steps 5 and
+# 6; `compact_chain_at` is the two in a row. A test holds the fold open between
+# them to let a writer append or to stop where a crash would.
 #
 # The store reads no clock: `now_ms` is the host's.
 # =============================================================================
@@ -47,7 +57,11 @@ from komira_kg_format import (
 )
 from komira_objectstore.store import CloneableConditionalWriteStore
 
-from .rewrite import append_index_bootstrap, base_tables_of
+from .rewrite import (
+    CommittedRewrite,
+    base_tables_of,
+    finish_rewrite,
+)
 from .working_codec import (
     TABLE_EDGES,
     TABLE_EDGES_TOMBSTONE,
@@ -137,15 +151,39 @@ def compact_chain_at[
         unreadable. After the head has moved, an error from retiring a delta
         leaves the fold done and the delta unmarked.
     """
+    var committed = compact_commit_at(store, head)
+    var folded = len(committed.folded)
+    var carried = committed.carried
+    var new_base = committed.base_seq
+    var wrote = committed.wrote()
+    var new_head = finish_rewrite(store, committed^, now_ms)
+    if not wrote:
+        return _nothing_to_fold(new_head)
+    return CompactionResult(True, new_head, new_base, folded, carried)
+
+
+def compact_commit_at[
+    Store: CloneableConditionalWriteStore
+](
+    mut store: KgSnapshotStore[Store], head: SnapshotId
+) raises -> CommittedRewrite:
+    """Steps 1 to 4 of the fold (see the file header): fold the chain headed at
+    `head` into a pending base and commit it. Nothing is written, and the result
+    says so (`wrote()` is False), for a base alone and for a chain with no
+    graph data. The bootstrap and the retirements are `finish_rewrite`'s.
+
+    Raises:
+        As `compact_chain_at`, except for the retirements.
+    """
     var chain = store.read_chain(head)
     if chain.num_deltas() == 0:
-        return _nothing_to_fold(head)
+        return CommittedRewrite(head)
     var has_data = False
     for i in range(chain.num_deltas()):
         if _has_graph_data(chain.deltas[i]):
             has_data = True
     if not has_data:
-        return _nothing_to_fold(head)
+        return CommittedRewrite(head)
     var folded_base = chain.base_id()
     var folded = chain.delta_seqs.copy()
 
@@ -155,10 +193,7 @@ def compact_chain_at[
         new_base, folded_base, folded.copy()
     )
     var carried = store.read_chain_body(committed).num_deltas()
-    var new_head = append_index_bootstrap(store, ws, committed)
-    for i in range(len(folded)):
-        store.retire_folded_delta(folded[i], now_ms)
-    return CompactionResult(True, new_head, new_base, len(folded), carried)
+    return CommittedRewrite(ws^, committed, new_base, folded^, carried)
 
 
 def maybe_compact_chain[
@@ -170,7 +205,8 @@ def maybe_compact_chain[
 ) raises -> CompactionResult:
     """Fold the head chain if `policy` says it is worth it: the host calls it
     after an append. No fold runs on an empty lineage, a base alone, a chain the
-    policy does not trip on, or a chain that is already compact.
+    policy does not trip on, or a chain that is already compact (this call never
+    repairs a missing bootstrap; `compact_chain` does).
 
     Args:
         store: The snapshot store.

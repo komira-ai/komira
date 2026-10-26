@@ -15,12 +15,21 @@
 #   nothing       a base alone, and deltas that carry no projection, give no
 #                 candidates.
 #   refusals      k of zero or less, a query shorter or longer than the graph's
-#                 dimension, and a projection cell of another dimension.
+#                 dimension, a query with a NaN or infinite component, and a
+#                 projection cell of another dimension.
+#   non-finite    a stored row with a NaN or infinite component (written past the
+#                 working set) is skipped, never ranked, whether it is the
+#                 entity's only row or replaces a finite one.
+#   heap          on 24 entities whose scores are only 1, 0 and -1 (so almost
+#                 every pair ties) the answer equals a full sort by score
+#                 descending, node id ascending, for k below, at and above the
+#                 number of rows.
 #   decode        a projection batch decodes to its ids and vectors; a null
 #                 cell, an id out of range and a column of the wrong type are
 #                 refused.
 # =============================================================================
 
+from std.math import inf, nan
 from std.testing import (
     TestSuite,
     assert_almost_equal,
@@ -237,6 +246,151 @@ def test_a_projection_cell_of_another_dimension_is_refused() raises:
     _ = kg.append_delta(tables^, KgNameIndexBody())
     with assert_raises(contains="which is not a dimension of 2"):
         _ = resolve_embedding_topk(kg.open_latest_chain(), _vec(1.0, 0.0), 3)
+
+
+def _raw_projection(nids: List[Int64], vectors: List[List[Float64]]) raises -> RecordBatch:
+    """A projection batch written past the working set, which refuses a vector
+    that is not finite."""
+    var cells = List[String]()
+    for i in range(len(vectors)):
+        cells.append(pack_embedding(vectors[i]))
+    var sb = SchemaBuilder()
+    sb.add_field(Field("nid", ArrowType.INT64, False))
+    sb.add_field(Field("name_embedding", ArrowType.STRING, True))
+    var rb = RecordBatchBuilder()
+    rb.add_column(
+        Column.from_primitive[DType.int64](PrimitiveArray[DType.int64].from_list(nids))
+    )
+    rb.add_column(Column.from_string(StringArray.from_strings(cells)))
+    return rb.build(sb.build())
+
+
+def _append_raw(mut kg: Kg, nids: List[Int64], vectors: List[List[Float64]]) raises:
+    var tables = Slab[KgTable]()
+    tables.append(
+        KgTable(
+            String(TABLE_ENTITIES_EMBEDDING),
+            _raw_projection(nids, vectors),
+            SCHEMA_VERSION_ENTITIES_EMBEDDING,
+        )
+    )
+    _ = kg.append_delta(tables^, KgNameIndexBody())
+
+
+def test_a_query_with_a_non_finite_component_is_refused() raises:
+    var kg = _store()
+    var chain = kg.open_latest_chain()
+    with assert_raises(contains="query component 0 is not finite"):
+        _ = resolve_embedding_topk(chain, _vec(nan[DType.float64](), 0.0), 3)
+    with assert_raises(contains="query component 1 is not finite"):
+        _ = resolve_embedding_topk(chain, _vec(1.0, inf[DType.float64]()), 3)
+    with assert_raises(contains="query component 1 is not finite"):
+        _ = resolve_embedding_topk(chain, _vec(1.0, -inf[DType.float64]()), 3)
+
+
+def test_a_stored_row_with_a_non_finite_component_is_skipped() raises:
+    var kg = _store()
+    var nids = List[Int64]()
+    var vectors = List[List[Float64]]()
+    nids.append(20)  # a new entity with a NaN
+    vectors.append(_vec(nan[DType.float64](), 0.0))
+    nids.append(21)  # a new entity with an infinity
+    vectors.append(_vec(1.0, inf[DType.float64]()))
+    nids.append(7)  # replaces the finite row of 7 (1, 0), which scored 1.0
+    vectors.append(_vec(nan[DType.float64](), nan[DType.float64]()))
+    _append_raw(kg, nids, vectors)
+
+    # cosine scores such rows 0.0, level with the genuine orthogonal ones; they
+    # are not ranked at all, so only the four other finite rows remain.
+    var all = resolve_embedding_topk(kg.open_latest_chain(), _vec(1.0, 0.0), 10)
+    assert_equal(len(all), 4)
+    var expected = List[Int64]()
+    expected.append(10)  # 1.0
+    expected.append(8)  # 0.7071...
+    expected.append(3)  # 0.0
+    expected.append(5)  # -1.0
+    for i in range(4):
+        assert_equal(all[i].nid, expected[i])
+    var zero = resolve_embedding_topk(kg.open_latest_chain(), _vec(0.0, 0.0), 10)
+    assert_equal(len(zero), 4)
+
+
+def _dataset_store() raises -> Kg:
+    """24 entities with node ids in a scrambled order. Their vectors lie on the
+    axes, so each scores exactly 1, 0 or -1 against (1, 0) and most pairs tie;
+    four are diagonal and one is zero."""
+    var kg = Kg(Backend(), "g")
+    var base = SnapshotWorkingSet(DIM)
+    base.add_entity(_ent(base.next_nid(), "base", 0.0, 1.0))
+    _ = kg.write_snapshot(base.to_tables(), DIM)
+    var ws = SnapshotWorkingSet.load_latest(kg)
+    for i in range(24):
+        var nid = Int64(100 + (i * 7) % 24)
+        var kind = i % 6
+        var scale = Float64(1 + i % 3)
+        if kind == 0:
+            ws.add_entity(_ent(nid, "e" + String(i), scale, 0.0))
+        elif kind == 1:
+            ws.add_entity(_ent(nid, "e" + String(i), 0.0, scale))
+        elif kind == 2:
+            ws.add_entity(_ent(nid, "e" + String(i), -scale, 0.0))
+        elif kind == 3:
+            ws.add_entity(_ent(nid, "e" + String(i), scale, scale))
+        elif kind == 4:
+            ws.add_entity(_ent(nid, "e" + String(i), 0.0, -scale))
+        else:
+            ws.add_entity(_ent(nid, "e" + String(i), 0.0, 0.0))
+    _append(kg, ws)
+    return kg^
+
+
+def test_the_heap_agrees_with_a_full_sort_on_ties_for_every_k() raises:
+    var kg = _dataset_store()
+    var chain = kg.open_latest_chain()
+    var q = _vec(1.0, 0.0)
+    var ws = SnapshotWorkingSet.load_latest(kg)
+    # The projection holds the 24 delta entities, not the base one.
+    var nids = List[Int64]()
+    var scores = List[Float64]()
+    for i in range(len(ws.entities)):
+        if ws.entities[i].nid >= 100:
+            nids.append(ws.entities[i].nid)
+            scores.append(cosine(q, ws.entities[i].name_embedding))
+    assert_equal(len(nids), 24)
+    # Brute force: selection sort by score descending, node id ascending.
+    var order = List[Int]()
+    for i in range(24):
+        order.append(i)
+    for i in range(24):
+        var best = i
+        for j in range(i + 1, 24):
+            var a = order[j]
+            var b = order[best]
+            if scores[a] > scores[b] or (scores[a] == scores[b] and nids[a] < nids[b]):
+                best = j
+        var held = order[i]
+        order[i] = order[best]
+        order[best] = held
+
+    var ks = List[Int]()
+    ks.append(1)
+    ks.append(2)
+    ks.append(3)
+    ks.append(5)
+    ks.append(8)
+    ks.append(13)
+    ks.append(23)
+    ks.append(24)
+    ks.append(25)
+    ks.append(500)
+    for t in range(len(ks)):
+        var k = ks[t]
+        var got = resolve_embedding_topk(chain, q, k)
+        var want = min(k, 24)
+        assert_equal(len(got), want)
+        for i in range(want):
+            assert_equal(got[i].nid, nids[order[i]])
+            assert_equal(got[i].score, scores[order[i]])
 
 
 def _projection(nid: Int64, null_cell: Bool, nid_as_text: Bool) raises -> RecordBatch:

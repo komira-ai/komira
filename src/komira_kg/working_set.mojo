@@ -113,6 +113,33 @@ def _entity_signature(e: WorkingEntity) -> String:
     return out^
 
 
+struct PartitionDrop(Copyable, Movable):
+    """What `SnapshotWorkingSet.load_merged_without_partition` left out.
+
+    Fields:
+        entities: Distinct node ids of the partition's entities.
+        edges: Edges with one of those entities as an endpoint.
+        episodes: Episodes of the partition.
+        tombstones: Tombstones of such edges.
+    """
+
+    var entities: Int
+    var edges: Int
+    var episodes: Int
+    var tombstones: Int
+
+    def __init__(out self):
+        """Nothing left out."""
+        self.entities = 0
+        self.edges = 0
+        self.episodes = 0
+        self.tombstones = 0
+
+    def total(self) -> Int:
+        """Every row left out, tombstones included."""
+        return self.entities + self.edges + self.episodes + self.tombstones
+
+
 struct SnapshotWorkingSet(Movable):
     """The in-memory mutable graph state for one ingest.
 
@@ -200,8 +227,79 @@ struct SnapshotWorkingSet(Movable):
             As `load_from`, and if a delta's table is malformed, repeats a node
             id in its entities, or a tombstone matches no edge.
         """
+        var gone = Dict[Int64, Bool]()
+        var dropped = PartitionDrop()
+        return SnapshotWorkingSet._merge_chain(chain, False, String(), gone, dropped)
+
+    @staticmethod
+    def load_merged_without_partition[
+        Store: CloneableConditionalWriteStore
+    ](
+        chain: ChainView[Store],
+        partition_id: String,
+        mut gone: Dict[Int64, Bool],
+        mut dropped: PartitionDrop,
+    ) raises -> SnapshotWorkingSet:
+        """`load_merged`, leaving out every row of `partition_id`, wherever the
+        chain holds it: its entities (base or delta), its episodes, every edge
+        with one of its entities as an endpoint, and every tombstone for such
+        an edge (a tombstone of an edge that is not loaded is not an error
+        here). The result is what `erase_partition` leaves of the merged set,
+        but it is built from a chain whose deltas may speak of rows the base no
+        longer holds, which `load_merged` refuses.
+
+        Args:
+            chain: The resolved chain.
+            partition_id: The partition to leave out.
+            gone: Node ids already known to be erased (a node id the chain
+                still speaks of is dropped); the partition's node ids found
+                here are added.
+            dropped: Counts what was left out; added to, not reset.
+
+        Raises:
+            As `load_merged`, except for the tombstones left out.
+        """
+        return SnapshotWorkingSet._merge_chain(
+            chain, True, partition_id, gone, dropped
+        )
+
+    @staticmethod
+    def _merge_chain[
+        Store: CloneableConditionalWriteStore
+    ](
+        chain: ChainView[Store],
+        drop: Bool,
+        partition_id: String,
+        mut gone: Dict[Int64, Bool],
+        mut dropped: PartitionDrop,
+    ) raises -> SnapshotWorkingSet:
         var ws = SnapshotWorkingSet(chain.base.embedding_dim())
         ws._load_base(chain.base)
+        # The entities of every delta, decoded once: with a partition to leave
+        # out, its node ids must be known before any edge is applied.
+        var delta_entities = List[List[WorkingEntity]]()
+        for di in range(chain.num_deltas()):
+            var rows = List[WorkingEntity]()
+            if chain.deltas[di].has_table(TABLE_ENTITIES):
+                rows = decode_entities(
+                    read_delta_table(
+                        chain, di, TABLE_ENTITIES, SCHEMA_VERSION_ENTITIES
+                    ),
+                    ws.embedding_dim,
+                )
+            delta_entities.append(rows^)
+        # A node id counts once in `dropped.entities`, however often the chain
+        # speaks of it.
+        var counted = Dict[Int64, Bool]()
+        if drop:
+            for i in range(len(ws.entities)):
+                if ws.entities[i].partition_id == partition_id:
+                    gone[ws.entities[i].nid] = True
+            for di in range(len(delta_entities)):
+                for i in range(len(delta_entities[di])):
+                    if delta_entities[di][i].partition_id == partition_id:
+                        gone[delta_entities[di][i].nid] = True
+            ws._drop_base_rows(partition_id, gone, counted, dropped)
         # Node id -> position in `entities`, kept while deltas are applied.
         var at = Dict[Int64, Int]()
         for i in range(len(ws.entities)):
@@ -214,42 +312,98 @@ struct SnapshotWorkingSet(Movable):
                 )
                 var rows = decode_episodes(batch)
                 for i in range(len(rows)):
-                    ws.episodes.append(rows[i].copy())
-            if dbody.has_table(TABLE_ENTITIES):
-                var batch = read_delta_table(
-                    chain, di, TABLE_ENTITIES, SCHEMA_VERSION_ENTITIES
-                )
-                var rows = decode_entities(batch, ws.embedding_dim)
-                var seen = Dict[Int64, Bool]()
-                for i in range(len(rows)):
-                    var nid = rows[i].nid
-                    if nid in seen:
-                        raise Error(
-                            "delta "
-                            + String(di)
-                            + ": entities table repeats node id "
-                            + String(nid)
-                        )
-                    seen[nid] = True
-                    if nid in at:
-                        ws.entities[at[nid]] = rows[i].copy()
+                    if drop and rows[i].partition_id == partition_id:
+                        dropped.episodes += 1
                     else:
-                        at[nid] = len(ws.entities)
-                        ws.entities.append(rows[i].copy())
+                        ws.episodes.append(rows[i].copy())
+            var seen = Dict[Int64, Bool]()
+            ref erows = delta_entities[di]
+            for i in range(len(erows)):
+                var nid = erows[i].nid
+                if nid in seen:
+                    raise Error(
+                        "delta "
+                        + String(di)
+                        + ": entities table repeats node id "
+                        + String(nid)
+                    )
+                seen[nid] = True
+                if drop and nid in gone:
+                    if nid not in counted:
+                        counted[nid] = True
+                        dropped.entities += 1
+                    continue
+                if nid in at:
+                    ws.entities[at[nid]] = erows[i].copy()
+                else:
+                    at[nid] = len(ws.entities)
+                    ws.entities.append(erows[i].copy())
             if dbody.has_table(TABLE_EDGES):
                 var batch = read_delta_table(
                     chain, di, TABLE_EDGES, SCHEMA_VERSION_EDGES
                 )
                 var rows = decode_edges(batch)
                 for i in range(len(rows)):
-                    ws.edges.append(rows[i].copy())
+                    if drop and (
+                        rows[i].src_nid in gone or rows[i].dst_nid in gone
+                    ):
+                        dropped.edges += 1
+                    else:
+                        ws.edges.append(rows[i].copy())
             if dbody.has_table(TABLE_EDGES_TOMBSTONE):
                 var batch = read_delta_table(
                     chain, di, TABLE_EDGES_TOMBSTONE, SCHEMA_VERSION_EDGES
                 )
-                ws._apply_closures(decode_edge_closures(batch), di)
+                var closures = decode_edge_closures(batch)
+                if drop:
+                    var kept = List[EdgeClosure]()
+                    for r in range(len(closures)):
+                        if (
+                            closures[r].src_nid in gone
+                            or closures[r].dst_nid in gone
+                        ):
+                            dropped.tombstones += 1
+                        else:
+                            kept.append(closures[r].copy())
+                    closures = kept^
+                ws._apply_closures(closures, di)
         ws._finish_load()
         return ws^
+
+    def _drop_base_rows(
+        mut self,
+        partition_id: String,
+        gone: Dict[Int64, Bool],
+        mut counted: Dict[Int64, Bool],
+        mut dropped: PartitionDrop,
+    ):
+        """Leave the base rows of the partition (and of the node ids in `gone`)
+        out of the set."""
+        var entities = List[WorkingEntity]()
+        for i in range(len(self.entities)):
+            var nid = self.entities[i].nid
+            if nid in gone:
+                if nid not in counted:
+                    counted[nid] = True
+                    dropped.entities += 1
+            else:
+                entities.append(self.entities[i].copy())
+        var edges = List[WorkingEdge]()
+        for i in range(len(self.edges)):
+            ref e = self.edges[i]
+            if e.src_nid in gone or e.dst_nid in gone:
+                dropped.edges += 1
+            else:
+                edges.append(e.copy())
+        var episodes = List[WorkingEpisode]()
+        for i in range(len(self.episodes)):
+            if self.episodes[i].partition_id == partition_id:
+                dropped.episodes += 1
+            else:
+                episodes.append(self.episodes[i].copy())
+        self.entities = entities^
+        self.edges = edges^
+        self.episodes = episodes^
 
     def _load_base[
         Store: CloneableConditionalWriteStore

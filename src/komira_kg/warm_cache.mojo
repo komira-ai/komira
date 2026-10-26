@@ -24,7 +24,9 @@
 # writer; a head moved by another writer is only noticed through a fresh handle.
 #
 # TWO WAYS TO USE IT.
-#   * `get`: a read-only borrow of the merged set. A hit costs one head read.
+#   * `refresh` and `get`: a read-only borrow of the merged set. `refresh` makes
+#     the resident set current (a hit costs one head read) and `get` lends it as
+#     an immutable `ref`, so a reader cannot change what the next reader sees.
 #   * `take_current` and `commit`: the single writer's loop. `take_current` moves
 #     the resident set out (merging again if the head moved), the writer mutates
 #     it and appends its own delta, and `commit` puts it back keyed at the new
@@ -66,22 +68,17 @@ struct WarmMergedCache[Store: CloneableConditionalWriteStore](Movable):
         """The head the resident set is keyed at; -1 if cold."""
         return self._head
 
-    def get(
-        mut self, store: KgSnapshotStore[Self.Store]
-    ) raises -> ref [self._merged._value] SnapshotWorkingSet:
-        """The live merged set: the resident one if the head has not moved, else
-        a fresh merge, which then becomes resident. The borrow is of the cache's
-        own set and ends at the next call on the cache.
+    def refresh(mut self, store: KgSnapshotStore[Self.Store]) raises:
+        """Make the resident set current: keep it if the head has not moved,
+        else merge the head afresh, which then becomes resident. `get` lends it.
 
         Raises:
             If the lineage is empty, or a table is unreadable.
         """
-        # The return origin names the Optional's storage, which is what
-        # `Optional.value()` borrows from; `ref [self._merged]` is refused.
         var head = store.latest_snapshot_id()
         if head < SnapshotId(0):
             raise Error(
-                "WarmMergedCache.get: empty lineage (write a base snapshot"
+                "WarmMergedCache.refresh: empty lineage (write a base snapshot"
                 " before reading the merged view)"
             )
         if not self._merged or self._head != head:
@@ -90,6 +87,19 @@ struct WarmMergedCache[Store: CloneableConditionalWriteStore](Movable):
                 SnapshotWorkingSet.load_latest(store)
             )
             self._head = head
+
+    def get(self) raises -> ref [self._merged._value] SnapshotWorkingSet:
+        """The resident merged set, read-only: the borrow is immutable because
+        `self` is, so a caller cannot edit what the next call lends. It ends at
+        the next call on the cache.
+
+        Raises:
+            If the cache is cold (call `refresh` first).
+        """
+        # The return origin names the Optional's storage, which is what
+        # `Optional.value()` borrows from; `ref [self._merged]` is refused.
+        if not self._merged:
+            raise Error("WarmMergedCache.get: the cache is cold (refresh it)")
         return self._merged.value()
 
     def invalidate(mut self):

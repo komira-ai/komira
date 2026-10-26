@@ -12,8 +12,9 @@
 #                 objects) is still in the store: a fold deletes nothing.
 #   retirement    each folded delta is stamped with the caller's time and no
 #                 other chunk is; a delta carried over is not.
-#   idempotent    folding a compact chain writes nothing, and neither does a
-#                 base alone; an empty lineage is refused. A second fold after
+#   idempotent    folding a compact chain writes nothing; a base alone writes
+#                 only the index delta it lacks, once; an empty lineage is
+#                 refused. A second fold after
 #                 more deltas works and retires the first bootstrap delta.
 #   carry         a delta appended after the head that is folded stays on the new
 #                 head, is not retired, and wins over the bootstrap index for
@@ -223,14 +224,22 @@ def test_a_compact_chain_and_a_base_alone_are_not_folded_again() raises:
     assert_equal(again.num_folded, 0)
     assert_equal(kg.head_seq(), head)
 
+    # A base alone has no delta to fold. One written by `write_snapshot` has no
+    # index either, so the call appends the bootstrap of its base, once.
     var alone = Kg(Backend(), "h")
     var ws = SnapshotWorkingSet(DIM)
     ws.add_entity(_ent(ws.next_nid(), "alpha", "p1", 1.0, 0.0))
     var base = alone.write_snapshot(ws.to_tables(), DIM)
     var none = compact_chain(alone, 9000)
     assert_false(none.compacted)
-    assert_equal(none.new_head_seq, base)
-    assert_equal(alone.head_seq(), base)
+    assert_equal(none.new_base_seq, -1)
+    assert_true(none.new_head_seq > base)
+    assert_equal(alone.head_seq(), none.new_head_seq)
+    assert_equal(alone.open_latest_chain().resolve_name_index("alpha"), 0)
+    var settled = compact_chain(alone, 9100)
+    assert_false(settled.compacted)
+    assert_equal(settled.new_head_seq, none.new_head_seq)
+    assert_equal(alone.head_seq(), none.new_head_seq)
 
     var empty = Kg(Backend(), "e")
     with assert_raises(contains="empty lineage"):

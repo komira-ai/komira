@@ -37,15 +37,18 @@
 #                         the snapshot's table batches and working rows.
 #   * working_set      -- `SnapshotWorkingSet`: load a snapshot or a delta chain,
 #                         apply changes, write back a base or only the delta.
-#   * rewrite          -- `base_tables_of` and `append_index_bootstrap`: the
+#   * rewrite          -- `base_tables_of`, `append_index_bootstrap`,
+#                         `finish_rewrite`, `repair_missing_bootstrap`: the
 #                         base and the index delta a rewrite of a whole graph
-#                         writes.
+#                         writes, and finishing or repairing one.
 #   * erase            -- `erase_partition`, `erase_kg_partition`: remove one
-#                         partition's rows and embeddings.
+#                         partition's rows and embeddings (`erase_kg_partition_at`
+#                         and `erase_commit_at` hold the erasure open).
 #   * warm_cache       -- `WarmMergedCache`: the merged graph kept in memory,
-#                         keyed by the head.
+#                         keyed by the head; lent read-only.
 #   * compaction       -- `compact_chain`, `compact_chain_at`,
-#                         `maybe_compact_chain`: fold a delta chain into a base.
+#                         `maybe_compact_chain`: fold a delta chain into a base
+#                         (`compact_commit_at` holds the fold open).
 #   * embedding_topk   -- `resolve_embedding_topk`: the nearest entities to a
 #                         vector, from the deltas' embedding projection.
 #
@@ -130,13 +133,27 @@ from .working_codec import (
 )
 from .working_set import SnapshotWorkingSet
 from .working_codec import ProjectionRows, decode_embedding_projection
-from .rewrite import append_index_bootstrap, base_tables_of
-from .erase import ErasureReport, erase_kg_partition, erase_partition
+from .rewrite import (
+    CommittedRewrite,
+    append_index_bootstrap,
+    base_tables_of,
+    finish_rewrite,
+    repair_missing_bootstrap,
+)
+from .erase import (
+    ErasureReport,
+    MAX_ERASE_ROUNDS,
+    erase_commit_at,
+    erase_kg_partition,
+    erase_kg_partition_at,
+    erase_partition,
+)
 from .warm_cache import WarmMergedCache
 from .compaction import (
     CompactionResult,
     compact_chain,
     compact_chain_at,
+    compact_commit_at,
     maybe_compact_chain,
 )
 from .embedding_topk import EmbeddingCandidate, resolve_embedding_topk
