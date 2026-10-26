@@ -1,5 +1,5 @@
 # =============================================================================
-# test_fnv1a_and_wake -- the FNV-1a hash and the address wait/wake primitives
+# test_fnv1a_and_async_wake -- the FNV-1a hash and the address wait/wake primitives
 # =============================================================================
 #
 # What each test proves, and the defect it catches:
@@ -12,8 +12,9 @@
 #   * `wait_on_address` returns at once when the word already differs from
 #     `expected`, returns after its timeout when it does not, and
 #     `wake_all_by_address` with no waiter wakes nobody: a wait that ignores
-#     `expected` or `timeout_ns` hangs this test (the build's test deadline
-#     turns that red).
+#     `expected` or `timeout_ns` returns a non-negative status here. The
+#     primitives are the ones `komira_async` defines; this package does not
+#     carry its own copy.
 # =============================================================================
 
 from std.sys.info import CompilationTarget
@@ -26,7 +27,7 @@ from komira_engine_runtime.spill.fnv1a import (
     fnv1a_64_over_span,
     fnv1a_64_partition_fingerprint,
 )
-from komira_engine_runtime.wake_primitives import (
+from komira_async.runtime.wake_primitives import (
     wait_on_address,
     wake_all_by_address,
 )
@@ -54,7 +55,7 @@ def test_fnv1a_span_matches_list() raises:
 def test_partition_fingerprint_layout() raises:
     var tags: List[UInt8] = [3, 1, 4]
     var expect = List[UInt8]()
-    var stride = 40
+    var stride = 0x0102030405060708
     for i in range(8):
         expect.append(UInt8((stride >> (8 * i)) & 0xFF))
     for i in range(len(tags)):
@@ -63,6 +64,11 @@ def test_partition_fingerprint_layout() raises:
     assert_true(
         fnv1a_64_partition_fingerprint(48, tags)
         != fnv1a_64_partition_fingerprint(40, tags)
+    )
+    # A stride differing only in a high byte still changes the fingerprint.
+    assert_true(
+        fnv1a_64_partition_fingerprint(stride, tags)
+        != fnv1a_64_partition_fingerprint(stride + (1 << 56), tags)
     )
 
 

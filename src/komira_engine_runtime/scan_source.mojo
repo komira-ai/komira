@@ -2,15 +2,9 @@
 # RecordBatchScanSource -- Produces morsels from a RecordBatch
 # =============================================================================
 #
-# A scan source that splits a RecordBatch into morsels and yields them one
-# at a time. This is the simplest source implementation: it reads the entire
-# dataset into memory, then splits into cache-friendly chunks.
-#
-# For production use, this would be replaced by a Parquet scan source that
-# reads row groups on demand (true streaming). This version is sufficient
-# for in-memory pipelines and testing.
-#
-# Reference: Rust morsel_sources.rs (VecMorselSource)
+# A scan source that splits a RecordBatch into morsels and yields them one at a
+# time. It holds the whole dataset in memory and hands out cache-friendly
+# chunks; each yielded morsel owns fresh copies of its column data.
 # =============================================================================
 
 from std.memory import unsafe_memcpy
@@ -81,21 +75,14 @@ struct RecordBatchScanSource(Movable):
         var builder = RecordBatchBuilder()
         var sb = SchemaBuilder()
         for c in range(num_cols):
-            # AGG-SCHEMA-METADATA-PROPAGATION-V0.4: preserve metadata.
+            # The field (name, type, nullability, metadata) is carried over.
             sb.add_field(self._morsels[idx].batch.schema.field_at(c))
             ref col_ptr = self._morsels[idx].batch.column_at(c)
             var at = col_ptr.arrow_type
             var data_buf: OwnedAlignedBuffer
             if at == ArrowType.BOOL:
-                # ELEMENT-SIZE WIDTH GUARD: BOOL IS BIT-PACKED
-                # and had NO arm here. `_elem_size(BOOL)` hit its
-                # `else: return 8`, so this asked for `num_rows * 8` bytes out
-                # of a buffer holding `(num_rows + 7) >> 3` — a 64x overread —
-                # and computed `src_byte_offset = col_ptr._offset * 8` from
-                # what is a BIT index, ignoring the sub-byte position outright.
-                # `copy_bits_aligned_buffer` is the same primitive
-                # `arrow/copy_column_ref.mojo` has used for its BOOL arm since
-                # the SIMD sprint.
+                # BOOL is bit-packed: copy `num_rows` bits starting at the
+                # column's bit offset, not `num_rows * width` bytes.
                 var bm_bytes = (num_rows + 7) >> 3
                 data_buf = OwnedAlignedBuffer(max(bm_bytes, 1))
                 data_buf.zero()
@@ -115,7 +102,6 @@ struct RecordBatchScanSource(Movable):
                         col_ptr._data.view_range_ro(src_byte_offset, byte_len),
                     )
                 data_buf.set_length(Int64(byte_len))
-
 
             var validity = Optional[Bitmap[HeapRegion]](None)
             var null_count = 0
@@ -165,20 +151,9 @@ struct RecordBatchScanSource(Movable):
 
 @always_inline
 def _elem_size(arrow_type: ArrowType) raises -> Int:
-    """Return byte width for a fixed-BYTE-width ArrowType; raise otherwise.
+    """Return the byte width of a fixed-byte-width ArrowType; raise otherwise.
 
-    ⚠ THIS USED TO BE ITS OWN LADDER (collapsed onto the canonical table
-) — the SEVENTH of seven independently maintained copies, and
-    tied for the most incomplete. It listed the ten base numerics and nothing
-    else, so `else: return 8` was the answer for DECIMAL128 (half its row
-    width), DECIMAL256 (a quarter), INTERVAL_MONTH_DAY_NANO (half), and the
-    entire temporal family including DATE32 (double). BOTH arms the
-    "Bug I" round added at `compiler_helpers.element_size` were absent here.
-
-    Its one caller — `ScanSource.next_morsel` — has NO variable-length,
-    dictionary or nested branch at all, so every layout went through the same
-    `num_rows * width` slab copy. That is why the BOOL arm below is at the
-    CALL SITE and not in this table: BOOL is bit-packed and no width is right
-    for it.
+    BOOL is bit-packed, so it has no byte width and is handled separately at
+    the call site in `next_morsel`.
     """
     return arrow_fixed_byte_width(arrow_type)
