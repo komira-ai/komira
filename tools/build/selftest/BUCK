@@ -94,6 +94,8 @@ selftest_scenario(name = "analysis_refusals_platform_table")
 
 selftest_scenario(name = "analysis_refusals_mojo")
 
+selftest_scenario(name = "analysis_refusals_mopm_artifacts")
+
 selftest_scenario(name = "analysis_refusals_aws_client")
 
 selftest_scenario(name = "analysis_refusals_gcp_client")
