@@ -66,6 +66,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # in-memory file to one batch (file_decode). Each
 # column chunk decoded there is counted (komira_counters).
 #
+# It skips pages: a column chunk's page index parsed (page_index_parser) and
+# kept per file, row group and column (page_index_cache, locked with
+# komira_sync), the pages a filter can skip (page_pruner, INT64 columns),
+# and the chosen pages read as one column (page_index). A scan source's
+# row-group reads build on all of it: by index or by name across files
+# (parquet_source_helpers), the typed-null and partition-constant columns
+# (parquet_source_constants), and reads through chosen pages
+# (parquet_source_page_picks).
+#
 # The welded tests:
 # - test_rle_simd, test_rle_simd_bw_small: bit-packed runs at every bit width
 #   the SIMD kernels specialize, and the dedicated bw=1/2/4 byte paths, at
@@ -191,6 +200,25 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   chunk out of the whole file, INT64 and nullable INT32 dictionary codes
 #   mapped back to the rows (PLAIN and BYTE_ARRAY chunks get None), and the
 #   refusals.
+# - test_page_index_direct: page row counts exact to the last page, run
+#   coalescing, and chosen pages of PLAIN, nullable and dictionary chunks
+#   read against the rows written.
+# - test_page_index_parser_direct: hand-encoded ColumnIndex and OffsetIndex
+#   blobs, a page without bounds marked alone, and the malformed blobs
+#   refused.
+# - test_page_index_cache_direct: parse once per chunk, copies, invalidate
+#   by path, and a refused lookup releasing the lock.
+# - test_page_pruner_direct: every comparison, AND / OR, all-null pages and
+#   pages without bounds, extreme literals; the cache layer on a file and
+#   the columns it leaves whole (UINT_64, DECIMAL, INT32, no page index).
+# - test_parquet_source_constants_direct: typed null columns, partition
+#   constants of every type, and partition text refused.
+# - test_parquet_source_helpers_direct: the schema, the per-chunk subset
+#   decode with fresh and reused contexts, dictionary codes of one chunk,
+#   names, union by name, and the by-name decode with a missing column.
+# - test_parquet_source_page_picks_direct: row ranges and page cover with
+#   two page sizes, the per-column page decode, and the columns whose pages
+#   cover different rows refused.
 # - test_file_decode_direct: a whole in-memory file to one batch, on files
 #   written by komira_test_parquet_file: row groups and pages concatenated in
 #   file order, a projection, and the refusals (empty, short, truncated, bad
@@ -230,6 +258,7 @@ mojo_library(
         "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_plan_stats:komira_plan_stats",
         "//src/komira_simd:komira_simd",
+        "//src/komira_sync:komira_sync",
         "//src/komira_zlib:komira_zlib",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
@@ -315,7 +344,14 @@ mojo_library(
         "tests/test_null_expand_direct.mojo",
         "tests/test_num_rows_cache_direct.mojo",
         "tests/test_page_header_parser_direct.mojo",
+        "tests/test_page_index_cache_direct.mojo",
+        "tests/test_page_index_direct.mojo",
+        "tests/test_page_index_parser_direct.mojo",
+        "tests/test_page_pruner_direct.mojo",
         "tests/test_parquet_encoding.mojo",
+        "tests/test_parquet_source_constants_direct.mojo",
+        "tests/test_parquet_source_helpers_direct.mojo",
+        "tests/test_parquet_source_page_picks_direct.mojo",
         "tests/test_partition_pred_bridge_roundtrip.mojo",
         "tests/test_plain_ba_fused_byte_equiv.mojo",
         "tests/test_plain_ba_raise_outlined.mojo",
@@ -326,9 +362,9 @@ mojo_library(
         "tests/test_rle_decoder_direct.mojo",
         "tests/test_rle_simd.mojo",
         "tests/test_rle_simd_bw_small.mojo",
-        "tests/test_runtime_footer_cache_direct.mojo",
         "tests/test_row_selection_direct.mojo",
         "tests/test_row_window_direct.mojo",
+        "tests/test_runtime_footer_cache_direct.mojo",
         "tests/test_scan_copy_trace_direct.mojo",
         "tests/test_scan_trace_leaves_direct.mojo",
         "tests/test_selection_interval.mojo",
