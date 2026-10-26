@@ -173,6 +173,7 @@ TARGETS = [
     "komira//src/komira_kg:komira_kg_conda",
     "komira//src/komira_kg_code/tests/fixtures/repo:kgfix_dot_test",
     "komira//src/komira_kg_code:komira_kg_code_conda",
+    "komira//src/komira_kg_enrich:komira_kg_enrich_conda",
     "komira//src/komira_kg_format:komira_kg_format_conda",
     "komira//src/komira_kg_mode:komira_kg_mode_conda",
     "komira//src/komira_kg_spec:komira_kg_spec_conda",
