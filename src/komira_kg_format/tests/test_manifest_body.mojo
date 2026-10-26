@@ -15,7 +15,8 @@
 #                refuses any other; a decoded body reports the dimension written.
 #   version      2 is the only layout: versions 0, 1 and 3 are refused.
 #   refusal      a dimension above 2147483647 (the largest, itself, is accepted), every truncation of a valid body,
-#                trailing bytes, a negative count, a negative length, a count
+#                trailing bytes, a negative count, a negative length, a negative schema
+#                version or row count (also refused by add_table), a count
 #                larger than the bytes can hold, a dimension of zero or less and
 #                a name or key that is not UTF-8 are each an error, never a
 #                partial body.
@@ -234,6 +235,38 @@ def test_negative_table_count_is_refused() raises:
     _i64(b, -1)
     with assert_raises(contains="negative table_count"):
         _ = KgManifestBody.decode(b)
+
+
+def _one_table_body(schema_version: Int64, row_count: Int64) -> List[UInt8]:
+    var b = List[UInt8]()
+    _i64(b, 2)
+    _i64(b, 5)
+    _i64(b, 1)
+    _str(b, "t")
+    _str(b, "k")
+    _i64(b, schema_version)
+    _i64(b, row_count)
+    return b^
+
+
+def test_negative_schema_version_and_row_count_are_refused() raises:
+    # A well-formed single-table body decodes; each negative field is refused.
+    var ok = KgManifestBody.decode(_one_table_body(1, 0))
+    assert_equal(ok.resolve("t").schema_version, Int64(1))
+    assert_equal(ok.resolve("t").row_count, Int64(0))
+    with assert_raises(contains="negative schema_version -1"):
+        _ = KgManifestBody.decode(_one_table_body(-1, 0))
+    with assert_raises(contains="negative row_count -7"):
+        _ = KgManifestBody.decode(_one_table_body(1, -7))
+
+
+def test_add_table_refuses_a_negative_version_or_row_count() raises:
+    var body = KgManifestBody(5, List[KgTableEntry]())
+    with assert_raises(contains="negative schema_version"):
+        body.add_table("t", "k", -1, 0)
+    with assert_raises(contains="negative row_count"):
+        body.add_table("t", "k", 1, -1)
+    assert_equal(body.num_tables(), 0)
 
 
 def test_table_count_beyond_the_bytes_is_refused() raises:

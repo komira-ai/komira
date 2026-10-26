@@ -162,8 +162,22 @@ struct KgManifestBody(Movable):
         var object_key: String,
         schema_version: Int64,
         row_count: Int64,
-    ):
-        """Append one table reference (write side)."""
+    ) raises:
+        """Append one table reference (write side).
+
+        Raises:
+            If `schema_version` or `row_count` is negative.
+        """
+        if schema_version < 0:
+            raise Error(
+                "KgManifestBody.add_table: negative schema_version "
+                + String(schema_version)
+            )
+        if row_count < 0:
+            raise Error(
+                "KgManifestBody.add_table: negative row_count "
+                + String(row_count)
+            )
         self.tables.append(
             KgTableEntry(name^, object_key^, schema_version, row_count)
         )
@@ -261,6 +275,16 @@ struct KgManifestBody(Movable):
             off += 8
             var row_count = _get_i64_le(bytes, off)
             off += 8
+            if schema_version < 0:
+                raise Error(
+                    "KgManifestBody.decode: negative schema_version "
+                    + String(schema_version)
+                )
+            if row_count < 0:
+                raise Error(
+                    "KgManifestBody.decode: negative row_count "
+                    + String(row_count)
+                )
             tables.append(
                 KgTableEntry(name^, key^, schema_version, row_count)
             )

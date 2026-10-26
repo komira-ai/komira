@@ -1,23 +1,49 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The values and on-disk formats the data-graph writer and reader share, part 1
-# (the first of the packages in docs/design/knowledge_graph_port.md): the packed
-# f32 embedding cell, the extraction values (`Triple`, `EntityMention`,
-# `Extraction`) and the snapshot manifest body, which carries the graph's
-# embedding dimension (the writer supplies it; there is no default). It has no dependencies, reads no
-# clock and no environment.
+# The values and on-disk formats the data-graph writer and reader share, parts 1
+# and 2 (the first of the packages in docs/design/knowledge_graph_port.md): the
+# packed f32 embedding cell, the extraction values (`Triple`, `EntityMention`,
+# `Extraction`), the snapshot manifest body (which
+# carries the graph's embedding dimension), the table schemas, cosine ranking of
+# a packed-embedding column and the structured query result with its JSON wire.
+# It depends on komira_arrow (schemas, string columns) and that package's
+# closure, and on komira_json (the result's wire), and reads no clock and no environment.
 #
 # The welded tests: test_embedding packs and unpacks f32 and f64 vectors and
 # holds a cell to a dimension; test_manifest_body round-trips the manifest and refuses
 # each corrupt body; test_ingest_types pins the extraction values;
-# test_utf8_check pins the validator every decoded string passes through.
+# test_utf8_check pins the validator every decoded string passes through;
+# test_schemas pins every table's columns, types and version; test_cosine scores
+# vector pairs (equal, opposite, orthogonal, zero, non-finite, every SIMD tail);
+# test_cosine_topk ranks a column with ties, null cells and out-of-range k;
+# test_query_result builds and round-trips a result; test_query_result_wire
+# pins the JSON text, the escapes and the version gate.
 mojo_library(
     name = "komira_kg_format",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_host:komira_host",
+        "//src/komira_json:komira_json",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_lz4:komira_lz4",
+        "//src/komira_simd:komira_simd",
+        "//src/komira_zlib:komira_zlib",
+    ],
     test_srcs = [
+        "tests/test_cosine.mojo",
+        "tests/test_cosine_topk.mojo",
         "tests/test_embedding.mojo",
         "tests/test_ingest_types.mojo",
         "tests/test_manifest_body.mojo",
+        "tests/test_query_result.mojo",
+        "tests/test_query_result_wire.mojo",
+        "tests/test_schemas.mojo",
         "tests/test_utf8_check.mojo",
     ],
     visibility = ["PUBLIC"],
