@@ -3,12 +3,12 @@
 ## Responsibility
 
 The values and on-disk formats that the data-graph writer and reader share. This
-is parts 1 and 2 of the package described in
+is parts 1 to 3 of the package described in
 [the knowledge graph port](https://github.com/komira-ai/komira/blob/main/docs/design/knowledge_graph_port.md): the
 packed embedding cell, the values an extractor returns, the snapshot manifest
-body, the table schemas, cosine ranking and the structured query result. Later
-parts add the delta codec, the snapshot lineage store and the exact-scan
-searches. The code graph
+body, the table schemas, cosine ranking, the structured query result, the delta
+layer over a base snapshot and the fingerprints of ingested sources. Later parts
+add the snapshot lineage store and the exact-scan searches. The code graph
 [`komira_kg_code`](https://github.com/komira-ai/komira/blob/main/src/komira_kg_code/README.md) is a different thing and is untouched.
 
 - `embedding`: an embedding vector is one string cell holding its components as
@@ -30,10 +30,24 @@ searches. The code graph
   packed-embedding string column against a query vector.
 - `query_result`: `KgQueryResult`, the subgraph, annotations, provenance, loci
   and scores a query returns, with a JSON wire (`serialize`, `deserialize`).
+- `delta_body`: the chunk bodies of the delta layer: `KgDeltaBody` (one ingest's
+  diff: the delta object of each changed table and the exact-name index entries
+  it adds), `KgChainBody` (the head: the base's chunk and the delta chunks in
+  apply order) and `kg_chunk_is_chain_head`.
+- `delta_codec`: the delta object, the rows one table gained in one ingest. A
+  few rows are a compact framed blob, more are a Parquet file; a tag byte says
+  which, and both decode.
+- `source_fingerprint`: the change gate. `SourceFingerprintSet` holds the hash of
+  what was last ingested from each `(partition_id, source)`,
+  `SourceFingerprintStore` keeps it in an append-only lineage next to the
+  snapshots, and `content_hash_of` and `content_hash_of_extraction` compute the
+  hash.
 
-The package depends on `komira_arrow` (for schemas and string columns) and
-`komira_json` (for the query result's wire), reads no
-clock and no environment, and no pointer crosses its API.
+The package depends on `komira_arrow` (for schemas and string columns),
+`komira_json` (for the query result's wire), `komira_hash`,
+`komira_objectstore` (the fingerprint lineage) and `komira_parquet_writer` (the
+Parquet delta objects), reads no clock and no environment, and no pointer
+crosses its API.
 
 ## API
 
@@ -55,6 +69,21 @@ Everything is exported from `komira_kg_format`:
 - Query result: `KgQueryResult`, `ResultNode`, `ResultEdge`,
   `ResultAnnotation`, `ProvenanceEntry`, `Locus`, `ScoreEntry` and
   `KG_QUERY_RESULT_FORMAT_VERSION` (2).
+- Delta layer: `KgDeltaBody`, `KgDeltaTableEntry`, `KgNameIndexBody`,
+  `KgNameIndexEntry`, `KgChainBody`, `kg_chunk_is_chain_head` and
+  `KG_CHAIN_FORMAT_VERSION` (3) and `KG_DELTA_FORMAT_VERSION` (4); with the
+  manifest's 2 every chunk kind has its own version, so the first eight bytes
+  tell the three apart and no body of one kind decodes as another.
+- Delta objects: `encode_delta_table_object`, `delta_object_is_framed`,
+  `delta_object_parquet_bytes`, `decode_framed_delta_to_batch`, `framed_object_size`,
+  `framed_size_is_decodable` (a delta whose framed form would exceed what the
+  decoder accepts is written as Parquet) and the constants
+  `FRAMED_MAX_ROWS`, `FRAME_TAG_FRAMED`, `FRAME_TAG_PARQUET`,
+  `FRAMED_CODEC_VERSION`.
+- Fingerprints: `SourceFingerprint`, `SourceFingerprintSet`,
+  `SourceFingerprintStore[Store]`, `content_hash_of`,
+  `content_hash_of_extraction`, `fnv1a64_hex` and
+  `KG_FINGERPRINT_FORMAT_VERSION` (1).
 
 ## Examples
 
@@ -237,6 +266,134 @@ with assert_raises(contains="> reader-supported 2"):
     )
 ```
 
+A delta body names, for each table an ingest changed, the delta object that
+holds the rows it added, and the exact-name index entries it adds. A chain head
+names the base chunk and the delta chunks in apply order, and a chunk's kind is
+read from its version:
+
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false, assert_raises, assert_true
+-->
+```mojo
+from komira_kg_format import (
+    KgChainBody,
+    KgDeltaBody,
+    KgManifestBody,
+    kg_chunk_is_chain_head,
+)
+
+var delta = KgDeltaBody()
+delta.add_table("edges", "d/9f2c.parquet", 1, 3)
+delta.add_index_entry("ada", 7)
+var back = KgDeltaBody.decode(delta.encode())
+assert_equal(back.resolve("edges").object_key, "d/9f2c.parquet")
+assert_false(back.has_table("episodes"))
+assert_equal(back.name_index.entries[0].nid, 7)
+
+var deltas: List[Int64] = [4, 5]
+var head = KgChainBody(1, deltas^).encode()
+assert_true(kg_chunk_is_chain_head(head))
+assert_false(kg_chunk_is_chain_head(KgManifestBody(3).encode()))
+assert_equal(KgChainBody.decode(head).delta_seqs[1], 5)
+```
+
+A delta object is a framed blob for a few rows and a Parquet file for more. The
+first byte says which. A framed object decodes to a batch of int64 and string
+columns; a Parquet object is read with the Parquet reader. A framed object that
+is cut short, or whose header claims more than its bytes hold, is refused:
+
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false, assert_raises, assert_true
+-->
+```mojo
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatchBuilder
+from komira_arrow.schema import Field, SchemaBuilder
+from komira_arrow.string_array import StringArray
+from komira_kg_format import (
+    decode_framed_delta_to_batch,
+    delta_object_is_framed,
+    encode_delta_table_object,
+)
+
+var ids: List[Int64] = [10, 20]
+var names: List[String] = ["ada", "grace"]
+var rb = RecordBatchBuilder()
+rb.add_column(
+    Column.from_primitive[DType.int64](PrimitiveArray[DType.int64].from_list(ids^))
+)
+rb.add_column(Column.from_string(StringArray.from_strings(names^)))
+var sb = SchemaBuilder()
+sb.add_field(Field("id", ArrowType.INT64, False))
+sb.add_field(Field("name", ArrowType.STRING, False))
+
+var object = encode_delta_table_object(rb.build(sb.build()))
+assert_true(delta_object_is_framed(object))
+var batch = decode_framed_delta_to_batch(object)
+assert_equal(batch.column_as_primitive_int64(0).get(1), 20)
+assert_equal(batch.column_as_string(1).get(0), "ada")
+
+var cut = List[UInt8]()
+for i in range(len(object) - 1):
+    cut.append(object[i])
+with assert_raises(contains="truncated"):
+    _ = decode_framed_delta_to_batch(cut)
+```
+
+The change gate compares the hash of incoming content with the one stored for
+its partition and source. A source never seen has no hash, which counts as
+changed; the same source in another partition is a different key:
+
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_not_equal
+-->
+```mojo
+from komira_kg_format import (
+    SourceFingerprintSet,
+    content_hash_of,
+    fnv1a64_hex,
+)
+
+assert_equal(fnv1a64_hex("a".as_bytes()), "af63dc4c8601ec8c")
+
+var seen = SourceFingerprintSet()
+seen.patch("partition-1", "doc-1", content_hash_of("first body"), "")
+
+assert_equal(seen.lookup("partition-1", "doc-1"), content_hash_of("first body"))
+assert_not_equal(seen.lookup("partition-1", "doc-1"), content_hash_of("first bodz"))
+assert_equal(seen.lookup("partition-2", "doc-1"), "")  # unknown: changed
+assert_equal(SourceFingerprintSet.decode(seen.encode()).num_entries(), 1)
+```
+
+The set is kept in a lineage of its own on the store that holds the snapshots. A
+change loads the whole set, patches one key and saves the whole set; saving an
+empty set over a stored one is refused:
+
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_raises
+-->
+```mojo
+from komira_kg_format import SourceFingerprintSet, SourceFingerprintStore
+from komira_objectstore.shared_in_memory_conditional_store import (
+    SharedInMemoryConditionalStore,
+)
+
+var backend = SharedInMemoryConditionalStore()
+var store = SourceFingerprintStore[SharedInMemoryConditionalStore](
+    backend.clone(), "graph-1"
+)
+var fps = store.load()  # empty on a fresh lineage
+fps.patch("partition-1", "doc-1", "0123456789abcdef", "")
+store.save(fps^)
+
+var again = store.load()
+assert_equal(again.lookup("partition-1", "doc-1"), "0123456789abcdef")
+with assert_raises(contains="refusing to replace"):
+    store.save(SourceFingerprintSet())
+```
+
 ## Limits
 
 A manifest decodes in memory: the body is read whole and a table count larger
@@ -255,3 +412,18 @@ milliseconds or microseconds reaches it, so `invalid_at > T` keeps an open edge
 whatever unit a writer stamps in. Code that tests for an open interval compares
 against the constant, never a literal. A query result's wire writes a
 non-finite score as 0.0 because JSON has no NaN or infinity.
+
+A framed delta object holds int64 and string columns with no null; a delta with
+any other column, with a null, or of `FRAMED_MAX_ROWS` rows or more is written
+as Parquet. `decode_framed_delta_to_batch` names the columns `c0`, `c1`, ... and
+returns a LARGE_STRING column as STRING, as the Parquet reader does, so a reader
+finds columns by position. A string cell is stored and returned byte for byte
+and is not checked for UTF-8, because an embedding cell is packed floats. The
+chunk bodies check every string they decode for UTF-8.
+
+A content hash is a change detector, not a cryptographic digest: it does not
+resist someone who chooses colliding content. Two inputs of equal length that
+differ in one byte always hash differently. The fingerprint lineage keeps one
+whole set per save, so two writers that load the same set, patch different keys
+and save overwrite each other (the later save wins); a host that ingests one
+partition from several processes serializes them.
