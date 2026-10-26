@@ -1,13 +1,15 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The mutable data-graph store and its ingest, parts 1 and 2 (the second of the
+# The mutable data-graph store and its ingest, parts 1 to 3 (the second of the
 # packages in docs/design/knowledge_graph_port.md): bi-temporal edges (a replaced
 # fact is closed, not erased), entity resolution (name similarity, the dedup
-# cascade and a directed alias map), the source facet with its tombstone set, and
-# the model seams (Embedder, Extractor, LlmClient, each with a stub). It depends
-# on komira_kg_format (for the open-interval marker) and komira_json (for the
-# facet's attrs JSON), and on their closure; it reads no clock and no
-# environment, and calls no model: a judgment is a trait the caller implements.
+# cascade and a directed alias map), the source facet with its tombstone set, the
+# model seams (Embedder, Extractor, LlmClient, each with a stub), the rule-driven
+# extractor (a rule set is host data) and the source cursor store. It depends on
+# komira_kg_format (for the open-interval marker), komira_json (for the facet's
+# attrs JSON) and komira_objectstore (the cursor store rides its conditional-write
+# trait), and on their closure; it reads no clock and no environment, and calls no
+# model: a judgment is a trait the caller implements.
 #
 # The welded tests: test_bitemporal closes an overlapping edge and keeps its
 # row, and answers "what held at E" and "what was believed at S about E";
@@ -18,33 +20,53 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # and facet; test_embedder pins the reported dimension, the vector width against
 # unpack_embedding_checked and the stub's stated components; test_extractor and
 # test_llm_client check that the stubs satisfy their traits, answer from their
-# tables, and end a gleaning loop.
+# tables, and end a gleaning loop; test_rule_pattern pins the whole-token pattern
+# language and its refusals, test_rule_scan what each kind of rule finds,
+# test_rule_extractor fixed entities and triples for stated rule sets (two sets
+# give two vocabularies) and the gleaning contract; test_cursor_codec the stored
+# form of a cursor and the truncated, trailing, oversize and non-UTF-8 bodies it
+# refuses; test_cursor_store write-read, a conflicting writer, bounded retries
+# and store failures.
 mojo_library(
     name = "komira_kg",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_buffer:komira_buffer",
+        "//src/komira_clock:komira_clock",
         "//src/komira_collections:komira_collections",
         "//src/komira_compression:komira_compression",
         "//src/komira_counters:komira_counters",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_hash:komira_hash",
         "//src/komira_host:komira_host",
         "//src/komira_json:komira_json",
         "//src/komira_kg_format:komira_kg_format",
         "//src/komira_libc:komira_libc",
         "//src/komira_lz4:komira_lz4",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_objectstore:komira_objectstore_posix",
         "//src/komira_simd:komira_simd",
         "//src/komira_zlib:komira_zlib",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
         "tests/test_alias_map.mojo",
         "tests/test_bitemporal.mojo",
+        "tests/test_cursor_codec.mojo",
+        "tests/test_cursor_store.mojo",
         "tests/test_dedup.mojo",
         "tests/test_embedder.mojo",
         "tests/test_extractor.mojo",
         "tests/test_llm_client.mojo",
         "tests/test_name_similarity.mojo",
+        "tests/test_rule_extractor.mojo",
+        "tests/test_rule_pattern.mojo",
+        "tests/test_rule_scan.mojo",
         "tests/test_source_facet.mojo",
     ],
     visibility = ["PUBLIC"],
