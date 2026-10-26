@@ -322,6 +322,33 @@ def _roots_cases():
         out.append("roots: an ordinary dependent still removes its dependency from the roots: got {}".format(roots(plain)))
     return out
 
+def _registration_cases(ctx):
+    """The execution platforms the checkout registers (`platforms/default:default`): whichever worker sets this
+    checkout's configuration names, komira's linux platform stays first; buildrules' linux platform is registered;
+    buildrules' macOS platform is registered exactly when komira's own macOS platform is, after it, with the
+    executor of komira's macOS platform and not the one of komira's linux platform."""
+    out = []
+    plats = ctx.analysis(ctx.configured_targets("komira//tools/build/platforms/default:default")).providers()[ExecutionPlatformRegistrationInfo].platforms
+    got = [str(p.label) for p in plats]
+    by_label = {str(p.label): p for p in plats}
+    if not got or got[0] != "komira//tools/build/platforms:linux-x86_64":
+        out.append("registration: komira's linux-x86_64 platform must stay first, got {}".format(got))
+    if "buildrules//platforms:linux_x86_64" not in got:
+        out.append("registration: buildrules' linux_x86_64 platform is missing: {}".format(got))
+    komira_mac = "komira//tools/build/platforms:darwin-arm64" in got
+    rules_mac = "buildrules//platforms:macos_aarch64" in got
+    if komira_mac != rules_mac:
+        out.append("registration: buildrules' macos_aarch64 platform must be registered exactly when komira's darwin-arm64 is (komira's: {}, buildrules': {}): {}".format(komira_mac, rules_mac, got))
+    if komira_mac and rules_mac:
+        if got.index("buildrules//platforms:macos_aarch64") < got.index("komira//tools/build/platforms:darwin-arm64"):
+            out.append("registration: buildrules' macos_aarch64 platform must come after komira's darwin-arm64: {}".format(got))
+        rules_exec = str(by_label["buildrules//platforms:macos_aarch64"].executor_config)
+        if rules_exec != str(by_label["komira//tools/build/platforms:darwin-arm64"].executor_config):
+            out.append("registration: buildrules' macos_aarch64 platform must run on komira's macOS workers (the executor of komira's darwin-arm64), but its executor differs")
+        if rules_exec == str(by_label["komira//tools/build/platforms:linux-x86_64"].executor_config):
+            out.append("registration: buildrules' macos_aarch64 platform has the executor of komira's linux-x86_64 platform")
+    return out
+
 # ---- the Python guard ------------------------------------------------------
 
 _PYTEST = "komira//tools/build/python/defs.bzl:_py_test"
@@ -432,7 +459,7 @@ def _shipped_rules_cases():
     return out
 
 def _run(ctx):
-    table = _table_cases() + _held_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases()
+    table = _table_cases() + _held_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases() + _registration_cases(ctx)
     real = _real_cases(ctx)
     failures = table + real
     if failures:
