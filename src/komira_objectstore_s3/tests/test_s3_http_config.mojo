@@ -11,8 +11,11 @@
 # same answer, through S3Store, through S3Fs and its clone, and through
 # S3ConditionalStore and its clone; and a 150 ms request budget against a
 # server that takes the connection and never answers ends the read of an
-# S3Fs, and of its clone, with the client's request deadline error, well
-# inside 30 s (the defaults' budget is 600 s). Every connector is a
+# S3Fs, and of its clone, with the client's request deadline error once the
+# manual clock the stuck server drives has passed 150 ms (the defaults' budget
+# is 600 s). No row reads a real clock: the stuck server moves a manual clock
+# a fixed step on every read it leaves pending, and the S3Fs reads its
+# deadline from that clock (`S3Fs.set_test_clock`). Every connector is a
 # ScriptedConnector: no socket.
 #
 # The 206 here is chunked, though S3 answers GetObject with Content-Length.
@@ -26,7 +29,8 @@
 # every verb through the client's `<op>_with` sends over its own transport,
 # so only the transport's copy is used; these rows observe that one.
 from std.testing import assert_equal, assert_raises, assert_true
-from std.time import perf_counter_ns
+from std.ffi import _Global
+from std.memory import ArcPointer
 
 from komira_aws_core import AwsCredential, FixedClock, StaticCredsSource
 from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
@@ -51,9 +55,12 @@ comptime _Cond = S3ConditionalStore[ScriptedConnector, StaticCredsSource, FixedC
 comptime _STUCK_BUDGET_US: Int = 150_000
 """The request budget of the stuck-server row (150 ms)."""
 
-comptime _STUCK_WALL_LIMIT_NS: Int = 30_000_000_000
-"""How long a stuck read may take (30 s): far over the 150 ms budget, far
-under the defaults' 600 s."""
+comptime _STUCK_STEP_US: Int = 10_000
+"""How far the manual clock moves on each read the stuck server leaves
+pending (10 ms)."""
+
+comptime _CLOCK_START_US: Int = 1_000_000_000
+"""Where the manual clock stands when a stuck read begins."""
 
 comptime _REQUEST_DEADLINE = "HttpError[TIMEOUT]: request deadline exceeded"
 
@@ -117,16 +124,32 @@ def _mk_one_range() raises -> ScriptedConnector:
     )
 
 
-def _stuck_stream() -> ScriptedStream:
+def _new_clock_cell() -> ArcPointer[Int]:
+    return ArcPointer[Int](_CLOCK_START_US)
+
+
+comptime _StuckClock = _Global["komira_objectstore_s3_test_http_config_clock", _new_clock_cell]
+"""The manual clock of the stuck-server row, in microseconds. A connector
+factory is a thin function that keeps no state, so the one cell the stuck
+streams advance and the S3Fs reads lives in the process, where both reach it."""
+
+
+def _clock() raises -> ArcPointer[Int]:
+    return _StuckClock.get_or_create_ptr()[].copy()
+
+
+def _stuck_stream() raises -> ScriptedStream:
     var s = ScriptedStream.empty()
     s.queue_read_pending(50_000_000)
+    s.advance_clock_on_read(_clock(), _STUCK_STEP_US)
     return s^
 
 
 def _mk_stuck() raises -> ScriptedConnector:
     """A server that takes the connection and does not answer: its first
     50,000,000 reads are Pending, far longer than the 150 ms budget, so the
-    budget ends the attempt. Past them it closes, which a client without the
+    budget ends the attempt (each Pending read moves the manual clock
+    `_STUCK_STEP_US`). Past them it closes, which a client without the
     budget meets as a transport error, not the deadline error."""
     return ScriptedConnector.with_stream(_stuck_stream())
 
@@ -181,28 +204,36 @@ def test_s3_conditional_store_and_its_clone_read_through_the_callers_body_cap() 
 
 def _assert_ends_at_the_budget(fs: _Fs, who: String) raises:
     """A read through `fs` against the stuck server raises the request
-    deadline error, and within `_STUCK_WALL_LIMIT_NS`."""
+    deadline error, and the manual clock stands at the budget: not before it
+    (the read did not give up early) and not a step past it (the budget is
+    what ended the read)."""
+    var clock = _clock()
+    clock[] = _CLOCK_START_US
     var file = fs.open("data/a.parquet")
     var raised = String("")
-    var t0 = Int(perf_counter_ns())
     try:
         _ = fs.read_at(file, 0, 4)
     except e:
         raised = String(e)
-    var elapsed_ns = Int(perf_counter_ns()) - t0
+    var elapsed_us = clock[] - _CLOCK_START_US
     assert_true(raised.find(_REQUEST_DEADLINE) >= 0, who + " got: " + raised)
     assert_true(
-        elapsed_ns < _STUCK_WALL_LIMIT_NS,
-        who + " took " + String(elapsed_ns) + " ns",
+        elapsed_us >= _STUCK_BUDGET_US,
+        who + " ended after " + String(elapsed_us) + " us of manual time",
+    )
+    assert_true(
+        elapsed_us <= _STUCK_BUDGET_US + _STUCK_STEP_US,
+        who + " ended after " + String(elapsed_us) + " us of manual time",
     )
 
 
 def test_s3fs_and_its_clone_end_a_stuck_read_at_the_callers_budget() raises:
     # The defaults' budget is 600 s, so a read that ends with the deadline
-    # error here ended at the 150 ms the caller configured.
+    # error at 150 ms of manual time ended at the budget the caller configured.
     var cfg = HttpClientConfig.defaults()
     cfg.request_timeout_us = _STUCK_BUDGET_US
     var fs = _Fs("lake", _config(), _mk_stuck, cfg, _creds(), FixedClock(1790000000))
+    fs.set_test_clock(_clock())
     var clone_fs = fs.clone()
     _assert_ends_at_the_budget(fs, "the original")
     _assert_ends_at_the_budget(clone_fs, "the clone")

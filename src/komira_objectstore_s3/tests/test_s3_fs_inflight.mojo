@@ -1,23 +1,26 @@
 # S3Fs keeps up to its in-flight bound of requests in flight, and never more.
 #
-# Over S3Fs, with a fake S3 whose every ranged GET and UploadPart is held
-# for _DELAY_MS: a prefetch of _RANGES ranges too far apart to coalesce, with
-# `prefetch_max_inflight` K, has every one of its requests in flight together
-# with K - 1 others and never with more (the fake counts, below); with
-# `prefetch_max_inflight` 0 (every range) and S3Config's `max_inflight` 2,
-# likewise with K = 2; a write of _PARTS parts with `upload_max_inflight` K
-# likewise.
+# Over S3Fs, with a fake S3 that holds every ranged GET and UploadPart of an
+# armed run until the whole round it belongs to has arrived: a prefetch of
+# _RANGES ranges too far apart to coalesce, with `prefetch_max_inflight` K, has
+# every one of its requests in flight together with K - 1 others and never
+# with more (the fake counts, below); with `prefetch_max_inflight` 0 (every
+# range) and S3Config's `max_inflight` 2, likewise with K = 2; a write of
+# _PARTS parts with `upload_max_inflight` K likewise.
 #
-# HOW THE FAKE COUNTS. While a timed run is armed with its bound K (`_arm`),
-# each slow request adds itself to a process-wide in-flight count
+# HOW THE FAKE COUNTS. While a run is armed with its bound K (`_arm`), each
+# slow request adds itself to a process-wide in-flight count
 # (komira_counters' GlobalCounterTable: the fakes are reached from a thin
 # connector factory and keep no state of their own, but a name-keyed global
-# is the process's, not theirs), waits until K are in flight (or
-# _GATHER_GUARD_MS pass, once per run), holds _DELAY_MS, and leaves. It
-# records whether it saw K in flight and any moment it saw more. "K at a time"
-# is then a count, not a duration: no test here reads a clock. The only
-# wait is the fake's gather loop, capped by _GATHER_GUARD_MS, which exists to
-# end a run that never reaches its bound instead of hanging.
+# is the process's, not theirs). Requests come in rounds of K, by their
+# position in the run (range or part number, divided by K); a request waits,
+# on progress and without a clock, until every request of its round is in
+# flight, then records that its round was in flight together, and leaves. A
+# request that finds more than K in flight records it. "K at a time" is then a
+# count, not a duration: no test here reads a clock, sleeps or waits against a
+# deadline. A runner that keeps fewer than K in flight never completes a
+# round, so the run does not finish (the build's watchdog ends it); one that
+# keeps more is counted.
 # Every request of a prefetch carries the handle's ETag, whichever worker's
 # store sends it: under `ver/` the fake answers a ranged GET by its
 # precondition (If-Match "v1": version 1; none, past offset 0: version 2,
@@ -74,31 +77,28 @@ from komira_retry import Backoff, Jitter, RetryPolicy
 comptime _SIZE = 16 * 1024 * 1024
 comptime _SPACING = 1_200_000  # past the 1 MiB coalescing gap
 comptime _RANGES = 8
-comptime _DELAY_MS = 200
 comptime _PART = 5 * 1024 * 1024
 comptime _PARTS = 6
 comptime _LAST = 1000  # the last part's bytes
-comptime _GATHER_GUARD_MS = 30_000
-"""How long an armed request waits for its bound's worth of requests to be in
-flight before it stops waiting (and the run is recorded as never having
-reached it). Paid once per run, and only by a runner that does not keep its
-bound in flight; a runner that does reaches K as soon as its K threads have
-built their requests."""
-
 # The fake's counters (see the header). Slots of `_Counts`:
-comptime _Counts = GlobalCounterTable["komira_objectstore_s3_test_inflight_fake", 6]
-comptime _ARMED_K = 0  # the bound a timed run expects; 0: not counting
+comptime _Counts = GlobalCounterTable["komira_objectstore_s3_test_inflight_fake", 16]
+comptime _ARMED_K = 0  # the bound a run expects; 0: not counting
 comptime _IN_FLIGHT = 1  # armed requests inside the fake now
 comptime _SERVED = 2  # armed requests served
-comptime _REACHED = 3  # armed requests that saw K in flight
+comptime _REACHED = 3  # armed requests whose whole round was in flight together
 comptime _OVER = 4  # moments an armed request saw more than K in flight
-comptime _GAVE_UP = 5  # 1 once a request waited out _GATHER_GUARD_MS
+comptime _ROUND0 = 5  # slot of round r: _ROUND0 + r, the requests of it that arrived
+
+
+def _yield():
+    """Give up the CPU while waiting on another thread's progress."""
+    _ = external_call["sched_yield", Int32]()
 
 
 def _arm(k: Int, n: Int) raises:
     """Count the next run's `n` slow requests against the bound `k`. `n` must
-    be a multiple of `k`: a last round of fewer than `k` would wait out
-    _GATHER_GUARD_MS and read as a runner that does not keep its bound."""
+    be a multiple of `k`: a last round of fewer than `k` would never complete.
+    """
     assert_true(k > 0 and n % k == 0, String(n) + " requests are not whole rounds of " + String(k))
     _Counts.reset()
     _Counts.add(_ARMED_K, k)
@@ -108,32 +108,23 @@ def _disarm() raises:
     _Counts.reset_slot(_ARMED_K)
 
 
-def _slow_request() raises:
-    """The delay of a slow request; counted while a run is armed."""
+def _slow_request(position: Int) raises:
+    """The hold of a slow request, `position` being its place in the run
+    (range number, part number - 1); counted while a run is armed. It leaves
+    once every request of its round (`position // K`) is in flight."""
     var k = _Counts.read(_ARMED_K)
     if k <= 0:
-        _ = external_call["usleep", Int32](UInt32(_DELAY_MS * 1000))
         return
     _Counts.incr(_IN_FLIGHT)
-    var reached = False
-    var waited_ms = 0
-    while True:
-        var now = _Counts.read(_IN_FLIGHT)
-        if now > k:
-            _Counts.incr(_OVER)
-        if now >= k:
-            reached = True
-            break
-        if _Counts.read(_GAVE_UP) > 0:
-            break
-        if waited_ms >= _GATHER_GUARD_MS:
-            _Counts.add(_GAVE_UP, 1)
-            break
-        _ = external_call["usleep", Int32](UInt32(1000))
-        waited_ms += 1
-    if reached:
-        _Counts.incr(_REACHED)
-    _ = external_call["usleep", Int32](UInt32(_DELAY_MS * 1000))
+    if _Counts.read(_IN_FLIGHT) > k:
+        _Counts.incr(_OVER)
+    var round = _ROUND0 + position // k
+    _Counts.incr(round)
+    while _Counts.read(round) < k:
+        _yield()
+    # No request of this round leaves before all of it has arrived, so all
+    # K were in flight together.
+    _Counts.incr(_REACHED)
     if _Counts.read(_IN_FLIGHT) > k:
         _Counts.incr(_OVER)
     _Counts.add(_IN_FLIGHT, -1)
@@ -287,13 +278,13 @@ def _serve(written: List[UInt8]) raises -> List[UInt8]:
     # Objects under `fast/` are answered without the delay.
     var slow = target.find("/fast/") < 0
     if method == "PUT" and target.find("uploadId=up-0") >= 0:
-        if slow:
-            _slow_request()
         var at = target.find("partNumber=")
         var stop = at + 11
         while stop < target.byte_length() and target.as_bytes()[stop] >= 48 and target.as_bytes()[stop] <= 57:
             stop += 1
         var number = Int(_sub(target, at + 11, stop))
+        if slow:
+            _slow_request(number - 1)
         var sum = 0
         for i in range(end + 4, n):
             sum += Int(written[i])
@@ -311,12 +302,12 @@ def _serve(written: List[UInt8]) raises -> List[UInt8]:
             if_match = String(_sub(line, colon + 1, line.byte_length()).strip())
     if range_.byte_length() == 0:
         raise Error("the fake S3 answers ranged GETs only")
-    if slow:
-        _slow_request()
     var spec = _sub(range_, 6, range_.byte_length())
     var dash = spec.find("-")
     var first = Int(_sub(spec, 0, dash))
     var last = min(Int(_sub(spec, dash + 1, spec.byte_length())), _SIZE - 1)
+    if slow:
+        _slow_request(first // _SPACING)
     # An object under `ver/` answers by its request's precondition (the
     # test of every request carrying the handle's ETag, below).
     var version = 1
@@ -571,9 +562,14 @@ def test_a_write_bound_of_one_is_one_part_at_a_time() raises:
 #
 # `_FakeStore` is what each job "sends" to: it counts the requests in flight
 # (an atomic the jobs share), keeps the highest count it saw, and holds each
-# request until either the bound's worth are in flight or 300 ms pass, so a
+# request until every job of its round (`job // wait_for`) is in flight, so a
 # runner that keeps the bound in flight reaches it every time and one that
-# keeps more is seen at once. Each job records the worker it ran on.
+# keeps more is seen at once; the wait is on the other jobs' arrival, with no
+# clock. Each job records the worker it ran on.
+
+
+comptime _RunnerRounds = GlobalCounterTable["komira_objectstore_s3_test_inflight_runner", 32]
+"""Per round of jobs, how many have arrived (a round is `job // wait_for`)."""
 
 
 struct _FakeStore[io: MutOrigin, po: MutOrigin, ro: MutOrigin](InflightJobs):
@@ -582,6 +578,7 @@ struct _FakeStore[io: MutOrigin, po: MutOrigin, ro: MutOrigin](InflightJobs):
     var ran_on: Pointer[List[Int], Self.ro]
     var wait_for: Int
     var fail_job: Int
+    var n_jobs: Int
 
     def __init__(
         out self,
@@ -589,6 +586,7 @@ struct _FakeStore[io: MutOrigin, po: MutOrigin, ro: MutOrigin](InflightJobs):
         peak: Pointer[AtomicI64, Self.po],
         ran_on: Pointer[List[Int], Self.ro],
         wait_for: Int,
+        n_jobs: Int,
         fail_job: Int = -1,
     ):
         self.in_flight = in_flight
@@ -596,6 +594,7 @@ struct _FakeStore[io: MutOrigin, po: MutOrigin, ro: MutOrigin](InflightJobs):
         self.ran_on = ran_on
         self.wait_for = wait_for
         self.fail_job = fail_job
+        self.n_jobs = n_jobs
 
     def run_job(self, worker: Int, job: Int) raises:
         var now = self.in_flight[].fetch_add(1) + 1
@@ -603,11 +602,14 @@ struct _FakeStore[io: MutOrigin, po: MutOrigin, ro: MutOrigin](InflightJobs):
         while now > seen:
             if self.peak[].compare_exchange(seen, now):
                 break
-        var waited = 0
-        while self.in_flight[].load() < Int64(self.wait_for) and waited < 300:
-            _ = external_call["usleep", Int32](UInt32(1000))
-            waited += 1
-        _ = external_call["usleep", Int32](UInt32(2000))
+        if self.wait_for > 1:
+            # Hold until every job of this round has arrived (the last round
+            # may be short); none of the round leaves before then.
+            var round = job // self.wait_for
+            var size = min(self.wait_for, self.n_jobs - round * self.wait_for)
+            _RunnerRounds.incr(round)
+            while _RunnerRounds.read(round) < size:
+                _yield()
         _ = self.in_flight[].fetch_sub(1)
         if self.ran_on[][job] != -1:
             raise Error(String("job ") + String(job) + " ran twice")
@@ -621,11 +623,13 @@ def _run(n_jobs: Int, bound: Int, fail_job: Int = -1) raises -> Tuple[Int, List[
     var in_flight = AtomicI64(0)
     var peak = AtomicI64(0)
     var ran_on = List[Int](length=n_jobs, fill=-1)
+    _RunnerRounds.reset()
     var store = _FakeStore(
         Pointer(to=in_flight),
         Pointer(to=peak),
         Pointer(to=ran_on),
         inflight_workers(n_jobs, bound),
+        n_jobs,
         fail_job,
     )
     run_bounded_inflight(store, n_jobs, bound)
@@ -664,7 +668,7 @@ def test_a_failed_job_is_raised_and_stops_new_jobs() raises:
     var in_flight = AtomicI64(0)
     var peak = AtomicI64(0)
     var ran_on = List[Int](length=40, fill=-1)
-    var store = _FakeStore(Pointer(to=in_flight), Pointer(to=peak), Pointer(to=ran_on), 1, 0)
+    var store = _FakeStore(Pointer(to=in_flight), Pointer(to=peak), Pointer(to=ran_on), 1, 40, 0)
     with assert_raises(contains="job 0 failed"):
         run_bounded_inflight(store, 40, 2)
     var ran = 0

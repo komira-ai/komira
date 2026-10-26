@@ -84,6 +84,8 @@ from komira_aws_s3.komira_aws_s3 import (
     parse_upload_part_response,
 )
 from komira_buffer.byte_view import ByteView
+from std.memory import ArcPointer
+
 from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
 from komira_objectstore.coalesce import CoalescePlan, CoalescedRange, plan_coalesce
@@ -262,6 +264,12 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
 
     def config(self) -> S3Config:
         return self._config.copy()
+
+    def set_test_clock(mut self, clock_cell: ArcPointer[Int]):
+        """Drive the request deadline of this store's HTTP client from
+        `clock_cell` (microseconds) instead of the system clock. Production
+        code never calls this."""
+        self._transport.set_test_clock(clock_cell)
 
     def _fail(self, op: String, bucket: String, key: String, res: HttpResult) -> Error:
         var status = res.status
