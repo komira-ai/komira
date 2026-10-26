@@ -553,6 +553,7 @@ TARGETS = [
     "komira//tools/build/selftest:analysis_refusals_gcp_client",
     "komira//tools/build/selftest:analysis_refusals_lint",
     "komira//tools/build/selftest:analysis_refusals_mojo",
+    "komira//tools/build/selftest:analysis_refusals_mopm_artifacts",
     "komira//tools/build/selftest:analysis_refusals_node",
     "komira//tools/build/selftest:analysis_refusals_platform_table",
     "komira//tools/build/selftest:analysis_refusals_proto",

@@ -19,6 +19,11 @@ to `--native`, so the archive staged is the one that was linked into the tests a
 `.conda`. `mopm stage` refuses a package whose manifest names a native that this directory does not
 hold ("has no archive for linux-64: expected ...").
 
+The attribute is held to the packages' manifests at analysis, in both directions (mopm_native_ids.bzl
+reads the ids from each package's unit graph): an id that is no `[native.<id>]` of that package is
+refused, and so is a declared native with no entry, each naming the package and the ids it declares. So
+a mistyped id no longer builds green and fails only in the release workflow's `mopm stage`.
+
 The list is the one of //release/readme_e2e:packages.bzl (every `src/<name>`
 that has a `mopm.toml`), which //:readme_e2e_complete holds to the files of the
 checkout in both directions. `mopm stage` itself refuses a member of the
@@ -26,6 +31,8 @@ workspace that has no `.mojoc` here, so the two cannot disagree unseen.
 
 Nothing here runs buck2 or sends anything: the targets are dependencies.
 """
+
+load(":mopm_native_ids.bzl", "NATIVE_IDS")
 
 def _impl(ctx):
     tree = {}
@@ -45,17 +52,46 @@ _mopm_artifacts = rule(
     },
 )
 
+def check_natives(name, packages, natives, declared = NATIVE_IDS):
+    """Refuses `natives` unless it is, for every package of `packages`, exactly the `[native.<id>]` its manifest declares (`declared`, `{package: [id]}`)."""
+    for package in packages:
+        if package not in declared:
+            fail("{}: {} has no row in release/mopm_native_ids.bzl (add its load and its row there)".format(name, package))
+    for package in natives:
+        if package not in packages:
+            fail("{}: natives names {}, which is not in packages".format(name, package))
+    for package in packages:
+        ids = declared[package]
+        given = natives.get(package, {})
+        for native_id in sorted(given):
+            if native_id not in ids:
+                fail("{}: natives names {}.{}, but the mopm.toml of {} declares no [native.{}] (it declares: {})".format(
+                    name,
+                    package,
+                    native_id,
+                    package,
+                    native_id,
+                    ", ".join(ids) if ids else "none",
+                ))
+        for native_id in ids:
+            if native_id not in given:
+                fail("{}: {} declares [native.{}] in its mopm.toml, and natives has no entry for it: add `{{\"{}\": {{\"{}\": <the archive target>}}}}`".format(
+                    name,
+                    package,
+                    native_id,
+                    package,
+                    native_id,
+                ))
+
 def mopm_artifacts(name, packages, natives = {}, **kwargs):
     """See the module documentation. `packages` are directory names under src/; `natives` is `{package: {id: archive target}}`."""
     if not packages:
         fail("{}: no package".format(name))
-    for package in natives:
-        if package not in packages:
-            fail("{}: natives names {}, which is not in packages".format(name, package))
+    check_natives(name, packages, natives)
     _mopm_artifacts(
         name = name,
         names = packages,
-        libs = ["//src/{}:lib".format(p) for p in packages],
+        libs = ["komira//src/{}:lib".format(p) for p in packages],
         natives = natives,
         **kwargs
     )
