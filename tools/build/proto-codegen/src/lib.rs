@@ -27,6 +27,7 @@ pub mod routing_options;
 pub mod service_config;
 pub mod service_options;
 pub mod sha256;
+pub mod split;
 pub mod xml_equiv;
 pub mod yaml_subset;
 

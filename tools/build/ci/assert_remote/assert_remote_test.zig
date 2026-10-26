@@ -13,6 +13,7 @@ const bxl_remote = @embedFile("fixtures/bxl_remote.log");
 const bxl_cached = @embedFile("fixtures/bxl_cached.log");
 const build_unknown_target = @embedFile("fixtures/build_failed_unknown_target.log");
 const test_none_ran = @embedFile("fixtures/test_none_ran.log");
+const test_cached_remote = @embedFile("fixtures/test_cached_remote.log");
 
 fn edit(a: std.mem.Allocator, log: []const u8, from: []const u8, to: []const u8) ![]u8 {
     try t.expect(std.mem.indexOf(u8, log, from) != null); // the recorded log has the line the case changes
@@ -56,6 +57,35 @@ test "a fully cached bxl run prints no summary and passes on its zero-byte netwo
 
 test "a test run with nothing to execute passes: no action, no summary" {
     try t.expectEqual(ar.Verdict.ok, ar.verdict(test_none_ran));
+}
+
+test "a test run whose results all came from the farm's cache passes: no build action, no summary, bytes moved" {
+    try t.expect(std.mem.indexOf(u8, test_cached_remote, "Commands:") == null);
+    try t.expect(std.mem.indexOf(u8, test_cached_remote, "Cache hits:") == null);
+    try t.expect(std.mem.indexOf(u8, test_cached_remote, "Network: up 0B") == null);
+    try t.expectEqual(ar.Verdict.ok, ar.verdict(test_cached_remote));
+}
+
+test "a test run with a cache-hits line but no summary fails: a build action ran and its summary is missing" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const log = try edit(arena.allocator(), test_cached_remote, "Network: up 11KiB", "Cache hits: 100%\nNetwork: up 11KiB");
+    try t.expectEqual(ar.Verdict.missing_summary, ar.verdict(log));
+}
+
+test "a test run whose summary counts a local action fails" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const log = try edit(arena.allocator(), test_cached_remote, "Network: up 11KiB", "Cache hits: 0%\nCommands: 2 (cached: 0, remote: 0, local: 2)\nNetwork: up 11KiB");
+    try t.expectEqual(ar.Verdict{ .local_execution = 2 }, ar.verdict(log));
+}
+
+test "a build with no summary and bytes moved fails even without a cache-hits line" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const log = try drop(a, try drop(a, build_remote, "Commands:"), "Cache hits:");
+    try t.expectEqual(ar.Verdict.missing_summary, ar.verdict(log));
 }
 
 test "local: 3 fails and names the count" {

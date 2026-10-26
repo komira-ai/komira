@@ -37,7 +37,8 @@ export_file(
 )
 
 # The build artifacts of the libraries moved to mopm (mopm_artifacts.bzl): each
-# package's `:lib`, as `linux-64/<name>.mojoc`, the directory `mopm stage
+# package's `:lib`, as `linux-64/<name>.mojoc`, and each package's native archive as
+# `linux-64/<name>.native/lib<id>.a`, the directory `mopm stage
 # --artifacts` packs. The list is //release/readme_e2e:packages.bzl's, which
 # //:readme_e2e_complete holds to the src/ packages that have a mopm.toml.
 # release.yml's `mopm-stage` job builds it, stages it, tries the README
@@ -45,6 +46,7 @@ export_file(
 # main; `mopm-publish` publishes the set, only when enabled (docs/ci.md).
 mopm_artifacts(
     name = "mopm_artifacts",
+    natives = {"komira_libc": {"komira_libc_posix": "//src/komira_libc:native_komira_libc_posix"}},
     packages = sorted(README_E2E_PACKAGES.keys()),
     visibility = ["PUBLIC"],
 )
@@ -121,7 +123,6 @@ release_set(
         "//src/komira_managed_mail_proto:komira_managed_mail_proto_conda",
         "//src/komira_calendar_proto:komira_calendar_proto_conda",
         "//src/komira_snapshotter:komira_snapshotter_conda",
-        "//src/komira_mail_message:komira_mail_message_conda",
         "//src/komira_vcard:komira_vcard_conda",
         "//src/komira_trace:komira_trace_conda",
         "//src/komira_calendar:komira_calendar_conda",
@@ -135,6 +136,7 @@ release_set(
         "//src/komira_zlib:komira_zlib_conda",
         "//src/komira_async_api:komira_async_api_conda",
         "//src/komira_buffer:komira_buffer_conda",
+        "//src/komira_mail_message:komira_mail_message_conda",
         "//src/komira_compression:komira_compression_conda",
         "//src/komira_crypto:komira_crypto_conda",
         "//src/komira_arrow:komira_arrow_conda",

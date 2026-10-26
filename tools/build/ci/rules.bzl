@@ -49,11 +49,16 @@ UNIVERSE = [
 ]
 
 # The rule kinds that only name a source file or a group of them: building
-# one builds nothing, so the aggregate `//ci:pr` need not hold it and the
+# one (or a marker with no action) builds nothing, so the aggregate `//ci:pr` need not hold it and the
 # completeness guard does not ask for it. Every other kind is a check.
 SOURCE_KINDS = [
     "prelude//rules.bzl:export_file",
     "prelude//rules.bzl:filegroup",
+    # `<name>_unmigrated`, the marker of a generated library still in the transition
+    # ledger (tools/build/gen/defs.bzl): it has no action and builds nothing.
+    "komira//tools/build/gen/defs.bzl:gen_unmigrated",
+    # The same rule as the tests cell loads it (its kind carries the loading cell).
+    "komira//tools/build/gen/defs.bzl@tests:gen_unmigrated",
 ]
 
 # The aggregate every pull request check builds, and its package.

@@ -39,6 +39,13 @@ mojo_library(
 - **`gen`** (optional) names the target that generated `srcs`; its
   DefaultInfo, sub-targets included, is re-exported as the `[gen]`
   sub-target, so a reader or an IDE finds the generated code (see [mojo_gcp_client](#generated-google-cloud-clients-mojo_gcp_client)).
+  Only a library still in the generated-source transition has it.
+- **`fresh_gate`** (optional) names the freshness check of a library built from
+  committed generated sources (`<name>_fresh`, see
+  [`../gen/README.md`](../gen/README.md)). Its marker is the library's first
+  gate: a hidden input of the compile and of the join that makes the public
+  package, so nothing is compiled, no test is built, and no `.mojoc` exists
+  while the committed sources are not what the generator writes now.
 - **`deps`** carries the full transitive closure of packages to the compiler,
   one `-I` directory per package, each holding exactly one `.mojoc`, so a
   staged source directory can never shadow a package. A package reaches the
@@ -552,7 +559,20 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 `mojo_proto_library(name, srcs, deps, proto_deps, import_prefix, bundle_proto_deps, test_srcs)`
 runs protoc with the `protoc-gen-mojo` plugin over `srcs` (`.proto` files)
 and precompiles the generated directory, one `<stem>.mojo` per `.proto` plus
-an `__init__.mojo`, into `<name>.mojoc`. Other Mojo targets name it in `deps`
+an `__init__.mojo`, into `<name>.mojoc`.
+
+**Committed generated sources.** A library of `mojo_proto_library`,
+`mojo_db_proto_library`, `mojo_gcp_client` or `mojo_aws_client` that has a
+committed directory `generated/<name>/` in its package is built from those files
+and from nothing else (the paragraphs below describe the form still built from
+the generator, which a library of the transition ledger
+[`../gen/transition.bzl`](../gen/transition.bzl) keeps until it is migrated).
+`<name>_gen` is then only the input of `<name>_fresh`, which regenerates,
+compares with the committed directory and fails with
+`./buck2 run komira//tools/build/gen:regen -- <target>`, the command that
+rewrites it; `<name>_fresh` is the library's first gate, whatever `test_srcs`
+say. The welded form then also takes `bundle_proto_deps` and `bundle_only`.
+Reference: [`../gen/README.md`](../gen/README.md). Other Mojo targets name it in `deps`
 like a `mojo_library`. `deps` are the Mojo libraries the generated code
 imports (its runtime). A `.proto` is imported by other `.proto` files at
 `import_prefix` joined with its path in the package; `proto_deps` names the
@@ -721,7 +741,8 @@ methods, messages_only, proto_deps, import_prefix, protocol, test_srcs,
 **kwargs)`
 (`kwargs`: `test_data`, `test_env`, passed to the
 `mojo_library`) generates a Google Cloud client at build
-time; no generated code is checked in. It is the generation half of the rules
+time (a library migrated to committed generated sources is built from
+`generated/<name>/`, see above). It is the generation half of the rules
 above (`<name>_gen`: protoc-gen-mojo writes the package and its layout probe,
 nothing is compiled) plus an ordinary `mojo_library` over the generated
 files, so the client is welded like any library: the generated
@@ -743,13 +764,48 @@ referenced googleapis files (monitored_resource, logging/type, rpc/status,
 nothing is added to the runtime the caller names, and they may be anything
 `mojo_library.deps` takes. Every refusal is at analysis. `<name>[gen]` is
 the generated directory, with `[gen][<file>]` one generated file and
-`[gen][proto]` the staged `.proto` inputs (`mojo_library`'s optional `gen`
+`[gen][proto]` the staged `.proto` inputs and `[gen][_parts]` the directory
+of the parts of a module the generator split (see below; `mojo_library`'s
+optional `gen`
 attribute re-exports a generating target whole, sub-targets included, as
 that sub-target; nothing checks that `srcs` come from it). The module
 docstring of
 [`../cloud/gcp.bzl`](../cloud/gcp.bzl) has the details;
 [`tests//functional/mojo_gcp_client`](../tests/functional/mojo_gcp_client/BUCK) and
 [`tests//negative/mojo_gcp_client`](../tests/negative/mojo_gcp_client/BUCK) exercise it.
+
+### Generated files under 1000 lines
+
+A source file is held to fewer than 1000 lines (Mojo hangs on very large
+files), and a generated one has no exemption (the hand-written files over
+the limit are tracked separately). The generators therefore
+split what they write: a module of 1000 lines or more is written as a
+FACADE, the file it always had (`compute.mojo`, `<name>.mojo`), holding the
+module's documentation and, imported from its parts, every name the module
+declares, and its PARTS, `_parts/<stem>_p01.mojo`, `_p02`, ..., holding
+the declarations in the order the emitter wrote them. A declaration is
+never cut, a part carries the module's `# @generated` header and imports
+what it uses (from the module's own imports, and from the parts that
+declare it: Mojo modules may import one another in a cycle), and every file
+is under the limit. `from <package>.<stem> import <name>` names what it
+named before the split. Code that reads a generated module as text (a
+scan, a count) reads the facade and then the parts.
+
+The split is `split_file` of
+[`proto-codegen/src/split.rs`](../proto-codegen/src/split.rs), applied to every
+`.mojo` file of every plugin (`CodeGeneratorResponse::split_oversized`, from
+`to_stdout_bytes`) and to `aws-client-gen`'s module. It depends on nothing
+but the module's text, so the same input gives the same file set, byte for
+byte. It refuses (naming why) a declaration that does not fit a file by
+itself, a top-level statement that is neither an import nor a declaration,
+a name declared twice, and a module whose facade would reach the limit (about
+four thousand names).
+
+`_parts/` is in every generated package, split or not, because the rules
+name a library's sources before the generator has run: its `__init__.mojo`
+is written by the generation action (`proto_gen`, `aws_act`), which also
+refuses anything in it but non-empty `.mojo` files. A library lists it as
+one more source (`<name>_gen[_parts]`).
 
 ### Generated AWS clients: mojo_aws_client
 
@@ -761,10 +817,12 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 `mojo_aws_client(name, model, model_sha256, operations, deps, mode, service,
 endpoint_rules, partitions, overrides, hand_srcs, test_srcs, **kwargs)` (`kwargs`: `test_data`,
 `test_env`, passed to the `mojo_library`) generates an AWS client from one
-botocore service model at build time; no generated code is checked in.
+botocore service model (a library migrated to committed generated sources is
+built from `generated/<name>/`: see [Protobuf](#protobuf-mojo_proto_library)).
 `<name>_gen` runs `komira//tools/build/proto-codegen:aws-client-gen`, which
 writes the package `<name>`: `__init__.mojo`, the module `<name>.mojo`
-(imported as `<name>.<name>`) and `_layout_probe.mojo`; `<name>` is an
+(imported as `<name>.<name>`), `_layout_probe.mojo` and the parts directory
+`_parts/` (see "Generated files under 1000 lines" below); `<name>` is an
 ordinary `mojo_library` over them, welded like mojo_gcp_client's: the probe is
 its first `test_srcs` entry, then `_no_env_reads.mojo`, an environment scan
 written for the client at analysis (every file of the package is its data;
