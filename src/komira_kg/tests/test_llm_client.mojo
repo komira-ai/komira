@@ -110,7 +110,7 @@ def test_a_same_entity_verdict_ignores_summaries_and_has_an_ordered_key() raises
     l.add_same_entity("Alpha Corp", "Alpha Corporation", True)
     l.add_same_entity("Alpha Corp", "Beta Inc", False)
     assert_true(
-        l.judge_same_entity("Alpha Corp", "", "Alpha Corporation", "a vendor")
+        l.judge_same_entity("Alpha Corp", "", "Alpha Corporation", "a group")
     )
     assert_true(
         l.judge_same_entity(
@@ -182,11 +182,11 @@ struct _LlmJudge[L: LlmClient](SameEntityJudge):
 
 def test_a_caller_bridges_the_client_to_the_dedup_judge() raises:
     var llm = StubLlmClient()
-    llm.add_same_entity("Acme Incorporated", "Acme Inc", True)
+    llm.add_same_entity("Alpha Incorporated", "Alpha Inc", True)
     var judge = _LlmJudge[StubLlmClient](llm^)
     var near = List[DedupCandidate]()
-    near.append(DedupCandidate(13, "Acme Inc", "a company"))
-    var res = dedup_resolve_judged("Acme Incorporated", near, 0.7, 0.25, 2.6, judge)
+    near.append(DedupCandidate(13, "Alpha Inc", "a group"))
+    var res = dedup_resolve_judged("Alpha Incorporated", near, 0.7, 0.25, 2.6, judge)
     assert_true(res.is_matched())
     assert_equal(res.nid, 13)
     assert_equal(judge.asked, 1)

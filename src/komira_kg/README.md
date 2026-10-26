@@ -112,15 +112,15 @@ from std.testing import assert_equal, assert_true
 from komira_kg import DedupCandidate, dedup_resolve
 
 var cands = List[DedupCandidate]()
-cands.append(DedupCandidate(42, "acme inc ", "a company"))
-var exact = dedup_resolve("Acme, Inc.", cands, 0.7, 0.25, 2.6)
+cands.append(DedupCandidate(42, "alpha inc ", "a group"))
+var exact = dedup_resolve("Alpha, Inc.", cands, 0.7, 0.25, 2.6)
 assert_true(exact.is_matched())
 assert_equal(exact.tier, 1)
 assert_equal(exact.nid, 42)
 
 var fuzzy_cands = List[DedupCandidate]()
-fuzzy_cands.append(DedupCandidate(7, "Acme Catalog Model", ""))
-var fuzzy = dedup_resolve("Acme Catalog Models", fuzzy_cands, 0.7, 0.25, 2.6)
+fuzzy_cands.append(DedupCandidate(7, "Alpha Catalog Model", ""))
+var fuzzy = dedup_resolve("Alpha Catalog Models", fuzzy_cands, 0.7, 0.25, 2.6)
 assert_true(fuzzy.is_matched())
 assert_equal(fuzzy.tier, 2)
 assert_equal(fuzzy.nid, 7)
@@ -140,8 +140,8 @@ specific.append(DedupCandidate(99, "Catalog Tier Change", ""))
 assert_true(dedup_resolve("Catalog", specific, 0.7, 0.25, 2.6).is_new())
 
 var near = List[DedupCandidate]()
-near.append(DedupCandidate(13, "Acme Inc", "a company"))
-var res = dedup_resolve("Acme Incorporated", near, 0.7, 0.25, 2.6)
+near.append(DedupCandidate(13, "Alpha Inc", "a group"))
+var res = dedup_resolve("Alpha Incorporated", near, 0.7, 0.25, 2.6)
 assert_true(res.is_needs_judgment())
 assert_equal(res.candidate_index, 0)
 assert_equal(res.nid, 13)
@@ -173,10 +173,10 @@ struct AlwaysSame(SameEntityJudge):
 
 def main() raises:
     var near = List[DedupCandidate]()
-    near.append(DedupCandidate(13, "Acme Inc", "a company"))
+    near.append(DedupCandidate(13, "Alpha Inc", "a group"))
     var judge = AlwaysSame()
     var res = dedup_resolve_judged(
-        "Acme Incorporated", near, 0.7, 0.25, 2.6, judge
+        "Alpha Incorporated", near, 0.7, 0.25, 2.6, judge
     )
     assert_true(res.is_matched())
     assert_equal(res.tier, 3)

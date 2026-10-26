@@ -53,7 +53,7 @@ def test_the_stub_reports_the_dimension_it_was_built_with() raises:
     assert_equal(StubEmbedder(1).dimension(), 1)
     assert_equal(StubEmbedder(4).dimension(), 4)
     assert_equal(StubEmbedder(28).dimension(), 28)
-    assert_equal(StubEmbedder(1536).dimension(), 1536)
+    assert_equal(StubEmbedder(1000).dimension(), 1000)
 
 
 def test_a_dimension_that_is_not_positive_is_refused() raises:

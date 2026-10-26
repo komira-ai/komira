@@ -27,8 +27,8 @@ def normalize_name(name: String) -> String:
 
     ASCII letters are lowercased and kept, ASCII digits are kept, every run of
     whitespace or ASCII punctuation becomes one space, and leading and trailing
-    separators are dropped, so "Acme, Inc." and "  ACME  inc " both give
-    "acme inc". Bytes of a multi-byte UTF-8 character are kept as they are
+    separators are dropped, so "Alpha, Inc." and "  ALPHA  inc " both give
+    "alpha inc". Bytes of a multi-byte UTF-8 character are kept as they are
     (they are not case-folded), so a name in any script keeps its letters and
     two different such names do not normalize alike. Unicode punctuation is
     therefore kept, not dropped.
