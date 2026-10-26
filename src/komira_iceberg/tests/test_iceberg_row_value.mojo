@@ -226,7 +226,7 @@ def test_a_data_file_cannot_claim_more_records_than_it_has_bytes() raises:
     # 3 bytes, 3 records: fine.
     assert_equal(len(read_data_file(_ocf_with(3, payload), _long_types())), 3)
     # 3 bytes cannot hold 1,000,000 records.
-    with assert_raises():
+    with assert_raises(contains="block claims 1000000 records in 3 payload"):
         _ = read_data_file(_ocf_with(1000000, payload), _long_types())
     # Bytes left over after the last record are refused.
     with assert_raises():
