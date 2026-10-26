@@ -35,9 +35,9 @@ GRAPH_JSON = r'''{
       "srcs": [
         {"path": "src/komira_kafka_server/src/komira_kafka_server/__init__.mojo", "sha256": "8eaaf4fb2df6c95951ab79a4ce1889dba16f626e1b8702dd78f16387830b146c"},
         {"path": "src/komira_kafka_server/src/komira_kafka_server/produce_error.mojo", "sha256": "78479179c5446b457ccfd4223a4f3b2a36b30a1e7737b486f91ef6f318a31ddf"},
-        {"path": "src/komira_kafka_server/src/komira_kafka_server/wire/__init__.mojo", "sha256": "99f4faedcfa8427a9fe3715bf765e54adc4a222b1b8970d89c2e84a986491a9a"},
+        {"path": "src/komira_kafka_server/src/komira_kafka_server/wire/__init__.mojo", "sha256": "12beb0f54d8cffa4707d9fb40259a656a703f53517c99e25ef38b59fb7791843"},
         {"path": "src/komira_kafka_server/src/komira_kafka_server/wire/consumer_group.mojo", "sha256": "a888ca8618b432d885ea5dfc93755427a934885873dd62a72bae0a7b2eaf20cb"},
-        {"path": "src/komira_kafka_server/src/komira_kafka_server/wire/crc32c.mojo", "sha256": "3dee247907bfa12a75e1051e85efab541ce69689e6279ea7cff37bf3e270f426"},
+        {"path": "src/komira_kafka_server/src/komira_kafka_server/wire/crc32c.mojo", "sha256": "8e74ebf59e987673127db5960ae4a6c3963779dc55f37a4d357d5cddcff9c201"},
         {"path": "src/komira_kafka_server/src/komira_kafka_server/wire/create_topics.mojo", "sha256": "6730b448c74f190fc5f956559b1a040f51c73d20b2dc257f5f8e73967f5d43d5"},
         {"path": "src/komira_kafka_server/src/komira_kafka_server/wire/init_producer_id.mojo", "sha256": "bed2d75c23c8b80ad1d57b0cbec793e16270dff4c6e5a463def495cbca6a3a80"},
         {"path": "src/komira_kafka_server/src/komira_kafka_server/wire/messages.mojo", "sha256": "923a670a12714f2a0f569e65b4be466c0cf7647f55dcf0bb1ee14d85f6675232"},
@@ -50,7 +50,21 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["komira_kafka_server.mojoc"],
-      "key": "26b476812cf4d3f307fb7c4c99002cb47f8627f93ba570281d8498f380385224"
+      "key": "f0e18df24bc9c4ae00203d3a2af11aa1f20755dd366ac3adb65fb2efaf3c7a95"
+    },
+    {
+      "id": "komira_kafka_server@0.1.0#mojo1.0.0/test:src/komira_kafka_server/tests/test_kafka_crc32c_portable.mojo",
+      "package": "komira_kafka_server",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_kafka_server/tests/test_kafka_crc32c_portable.mojo", "sha256": "6e2d6b44e223a3751702cdd1c009555e4b0625402bb68f812fce6d3c66171d83"}
+      ],
+      "deps": ["komira_kafka_server@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_kafka_crc32c_portable.pass"],
+      "key": "1447085338e94a6499a7c20753b8c070b42247fff354fbfec3a1ba869af986c5"
     },
     {
       "id": "komira_kafka_server@0.1.0#mojo1.0.0/test:src/komira_kafka_server/tests/test_kafka_golden_consumer_protocol.mojo",
@@ -64,7 +78,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_kafka_golden_consumer_protocol.pass"],
-      "key": "e983b14bcd16c8209347a5f0560199089dde347d398373d798dd9658b3cbfa7c"
+      "key": "5e6ce110e3c09180b5e1cd40e14cba8a615be0ef178c0da26ee8912c42610965"
     },
     {
       "id": "komira_kafka_server@0.1.0#mojo1.0.0/test:src/komira_kafka_server/tests/test_kafka_golden_create_topics.mojo",
@@ -78,7 +92,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_kafka_golden_create_topics.pass"],
-      "key": "48c724f20d25fd32f65131e79daee18a012c796af0a992eafe35587c71b1f46c"
+      "key": "ab0e85e1f733b6c05e5953e1f06038c61099f5f1cfac4cf78c2688b019418ff5"
     },
     {
       "id": "komira_kafka_server@0.1.0#mojo1.0.0/test:src/komira_kafka_server/tests/test_kafka_golden_data_path.mojo",
@@ -92,7 +106,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_kafka_golden_data_path.pass"],
-      "key": "c7b62429883a0e58e5c818b43bba52863129c0da8ac779a36417046cdfe3736b"
+      "key": "f12c03df1337071ffa44150d2e47704fee47d6f0bcb22daf3cdf8a05e3f6c9a5"
     },
     {
       "id": "komira_kafka_server@0.1.0#mojo1.0.0/test:src/komira_kafka_server/tests/test_kafka_golden_group_apis.mojo",
@@ -106,7 +120,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_kafka_golden_group_apis.pass"],
-      "key": "d56624d10679c2d060b5a73f3ba9f3b086b2402e0f67e3737b7db3c385a4edff"
+      "key": "65eb56e94b6fbf0623a02c7ff9693c0ee9905324b2eacbadbabedd1e8cd90211"
     },
     {
       "id": "komira_kafka_server@0.1.0#mojo1.0.0/test:src/komira_kafka_server/tests/test_kafka_golden_init_producer_id.mojo",
@@ -120,7 +134,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_kafka_golden_init_producer_id.pass"],
-      "key": "ab25d7561437330abc1c042b9a01427e99c64ecc235cbf712d50551550274d80"
+      "key": "6077ee72da3a6986aea420483d04efea2d32bfdcf5bcc6cf74acee5b71b91758"
     },
     {
       "id": "komira_kafka_server@0.1.0#mojo1.0.0/test:src/komira_kafka_server/tests/test_kafka_golden_metadata.mojo",
@@ -134,7 +148,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_kafka_golden_metadata.pass"],
-      "key": "63fea3acff8dcbdc73ee9807161e0eb7025721a866f8479ebc786241eaff5fa9"
+      "key": "3c2725c778d14f6d3ce700b8f40a4d0cf5a8863306df49b501d49b2f67fc6c59"
     },
     {
       "id": "komira_kafka_server@0.1.0#mojo1.0.0/test:src/komira_kafka_server/tests/test_kafka_golden_offset_apis.mojo",
@@ -148,7 +162,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_kafka_golden_offset_apis.pass"],
-      "key": "698515590219877ec012931952c5da6f6980bb6a20e6e37f22f231fc85a84ba4"
+      "key": "4f249b3f6cc2d3e8a2e5401c37ccc9ebb62bc2f2f1787b61e292448cd548bd9e"
     },
     {
       "id": "komira_kafka_server@0.1.0#mojo1.0.0/test:src/komira_kafka_server/tests/test_kafka_golden_transaction.mojo",
@@ -162,7 +176,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_kafka_golden_transaction.pass"],
-      "key": "6f7ef6b5a3f57a0c2f4702521eddab44645937dd8c8e2697fa5d713f543caef7"
+      "key": "6d59fb77e26dee22ba99149efdc01fb66631d4ee8f9eea42ad8038f1791f5c5f"
     },
     {
       "id": "komira_kafka_server@0.1.0#mojo1.0.0/test:src/komira_kafka_server/tests/test_kafka_record_batch_edges.mojo",
@@ -176,7 +190,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_kafka_record_batch_edges.pass"],
-      "key": "87485b855a5c3c130e1cf30b924be9748d8d9cf4fd46fbb1d3b58eea57174a82"
+      "key": "caf1aa3f904d5c98360b54b07e7b738c1a688297e58723399eb89ed192b82a40"
     },
     {
       "id": "komira_kafka_server@0.1.0#mojo1.0.0/test:src/komira_kafka_server/tests/test_kafka_record_batch_hostile.mojo",
@@ -190,7 +204,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_kafka_record_batch_hostile.pass"],
-      "key": "4d7ba637b11df4dfb61eba8ae962ef542a1aa257017f8ffcac7ca15519c726fc"
+      "key": "a4bd5b039872fd082566b699e94ae7736722475107e78d4296c5b5f07bfe8763"
     },
     {
       "id": "komira_kafka_server@0.1.0#mojo1.0.0/test:src/komira_kafka_server/tests/test_kafka_record_batch_v2.mojo",
@@ -204,7 +218,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_kafka_record_batch_v2.pass"],
-      "key": "8ea1183a0117556f1b747736b732c53a5a725efec24f4e8701547e63def6d562"
+      "key": "cf35a46ca9dec1e345a213ae4218cd4801da72c2e75337dadf9f0a9f1b72a7bb"
     },
     {
       "id": "komira_kafka_server@0.1.0#mojo1.0.0/test:src/komira_kafka_server/tests/test_kafka_wire_codec.mojo",
@@ -218,7 +232,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_kafka_wire_codec.pass"],
-      "key": "b83bda2aefd1fc95a6926a93d3e89ab56b7df7f92d16e7b83d9de90d39816d78"
+      "key": "39cc1b0385c3c22ca33f336d4544f10b4d254ab376ab2a7cd7d9a94228a3b179"
     },
     {
       "id": "komira_kafka_server@0.1.0#mojo1.0.0/test:src/komira_kafka_server/tests/test_kafka_wire_primitive_edges.mojo",
@@ -232,7 +246,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_kafka_wire_primitive_edges.pass"],
-      "key": "1d48748a6387c07674c5ba7adba439848fdab015e2bb3e00be144a83349b147e"
+      "key": "96f8b944aa142cbd2e9b633c20b632a317acf797fd678c12139d95a0d553faf0"
     },
     {
       "id": "komira_kafka_server@0.1.0#mojo1.0.0/test:src/komira_kafka_server/tests/test_produce_error_for.mojo",
@@ -246,7 +260,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_produce_error_for.pass"],
-      "key": "38907d2bf7d51a05e53ae8a0325a89c646a15bba041eee7ca1883d1527244b1e"
+      "key": "23e154628399e2f5b637ed68bb5c83eafb36a2a609b534bc06a070299a5be453"
     }
   ]
 }
