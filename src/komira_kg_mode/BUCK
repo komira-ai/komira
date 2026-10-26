@@ -1,0 +1,18 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The extraction-mode vocabulary the graph spec and the extractor selection
+# share (docs/design/knowledge_graph_port.md): two modes, rules (the default) and
+# model, a parse of a name that falls back to rules, and a normalisation of a
+# stored integer that never yields model unless the integer is model. It has no
+# dependencies and reads no clock and no environment.
+#
+# The welded test: test_extract_mode_vocab pins the ordinal values, the name
+# round trip, the fallback of the parse and of the normalisation.
+mojo_library(
+    name = "komira_kg_mode",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = [
+        "tests/test_extract_mode_vocab.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
