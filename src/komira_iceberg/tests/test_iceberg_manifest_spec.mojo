@@ -305,6 +305,25 @@ def test_entries_round_trip_partitioned() raises:
         _ = read_manifest_entries(bytes, bad)
 
 
+def test_colliding_avro_field_names_are_refused() raises:
+    # `a-b` sanitises to `a_x2Db`, which is also a legal literal name.
+    assert_equal(avro_field_name(String("a-b")), String("a_x2Db"))
+    assert_equal(avro_field_name(String("a_x2Db")), String("a_x2Db"))
+    var spec = PartitionSpec(0)
+    spec.add_identity(1, String("a-b"))
+    spec.add_identity(2, String("a_x2Db"))
+    var types = List[Int]()
+    types.append(ICE_T_INT)
+    types.append(ICE_T_INT)
+    with assert_raises(contains="collide"):
+        _ = manifest_entry_schema_json(spec, types)
+    # Distinct sanitised names are accepted.
+    var ok = PartitionSpec(0)
+    ok.add_identity(1, String("a-b"))
+    ok.add_identity(2, String("a_b"))
+    _ = manifest_entry_schema_json(ok, types)
+
+
 def test_manifest_list_round_trip_and_carry_forward() raises:
     var entries = List[ManifestFileEntry]()
     # Carried forward from snapshot 10, written under spec 3, delete manifest.
@@ -491,6 +510,7 @@ def main() raises:
     test_manifest_list_round_trip_and_carry_forward()
     test_empty_manifest_list_and_garbage()
     test_avro_field_names_follow_the_iceberg_rule()
+    test_colliding_avro_field_names_are_refused()
     test_a_manifest_with_free_text_partition_names_is_valid_avro()
     test_non_ascii_partition_values_and_paths_round_trip()
     test_a_path_that_is_not_utf8_is_refused()

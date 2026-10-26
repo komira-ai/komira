@@ -205,7 +205,12 @@ def avro_field_name(name: String) -> String:
     its code point in upper-case hex, and a leading digit gets a `_` in front.
     A legal name is returned unchanged. Partition field names are free text
     (`my-region`, a name in any script) and become Avro record field names in
-    the manifest schema; an illegal one would make the manifest invalid Avro."""
+    the manifest schema; an illegal one would make the manifest invalid Avro.
+
+    The mapping is not injective: `a-b` and a literal `a_x2Db` both become
+    `a_x2Db`. `manifest_entry_schema_json` refuses a partition spec whose
+    sanitised names collide, because two record fields with one name are
+    invalid Avro."""
     var bs = name.as_bytes()
     var n = len(bs)
     var out = String("")
@@ -257,6 +262,17 @@ def manifest_entry_schema_json(
     # `"logicalType":"map"` (the array-of-key_value form). `_ice_map_type`
     # builds that schema fragment with the spec's key-id / value-id pairs.
     var partition_schema = String('{"type":"record","name":"r102","fields":[')
+    var seen = List[String]()
+    for i in range(len(spec.fields)):
+        var safe_name = avro_field_name(spec.fields[i].name)
+        for j in range(len(seen)):
+            if seen[j] == safe_name:
+                raise Error(
+                    "iceberg: partition field names collide as Avro field"
+                    " names: '" + spec.fields[i].name + "' becomes '"
+                    + safe_name + "', already taken by another field"
+                )
+        seen.append(safe_name^)
     for i in range(len(spec.fields)):
         ref pf = spec.fields[i]
         if i > 0:

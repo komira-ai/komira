@@ -2,14 +2,15 @@
 
 ## Responsibility
 
-The mutable data-graph store and its ingest. This is parts 1 to 4 of the package
+The mutable data-graph store and its ingest. This is parts 1 to 5 of the package
 described in
 [the knowledge graph port](https://github.com/komira-ai/komira/blob/main/docs/design/knowledge_graph_port.md):
 bi-temporal edges, entity resolution and the source facet, the three seams
 through which a host supplies a model (`Embedder`, `LlmClient`, `Extractor`),
 each with a stub for tests, an extractor driven by rules the host supplies, and
 the cursor that records how far an incremental read of a source got. The
-working set loads and rewrites snapshots; later parts add erasure, compaction and
+working set loads and rewrites snapshots, and erasure of a partition, the warm
+cache, compaction and embedding top-k work on a snapshot store; a later part adds
 ingest.
 
 The graph keeps every fact on two time axes: event time (when it held in the
@@ -71,7 +72,46 @@ deleted, so "what did we believe at time T" stays answerable.
   A tombstone names an edge by `(src, dst, created_at)`, so a delta cannot close
   one of two open edges that share that key: `delta_tables` refuses it, and the
   writer writes a base with `to_tables` instead, which keeps every edge's end
-  times in its own row.
+  times in its own row. `mark_committed` declares the set's state persisted (a
+  writer that keeps its set after appending its own delta calls it), narrowing
+  the new embeddings to f32 as the table stores them, so the resident vectors
+  equal a reload's.
+- `erase`: `erase_partition` removes a partition's entities and episodes from a
+  working set, and every edge with one of those entities as an endpoint (an edge
+  has no partition column). `erase_kg_partition` does it to a store's live graph
+  and writes the rest as a new base, never a delta, followed by an index delta
+  of the surviving entities only; the head then holds no row, embedding or
+  name-index entry of the partition. Other partitions are untouched, and
+  erasing an absent partition writes no base (it appends a missing index delta,
+  as `compact_chain` does). A delta a writer appended meanwhile is carried onto
+  the new head and examined: if it holds rows, edges, tombstones, names or
+  projection rows of the partition the head is folded again, up to
+  `MAX_ERASE_ROUNDS` commits, and a writer that keeps adding them makes the call
+  raise, naming the partition and the count of rows left. `erase_kg_partition_at`
+  and `erase_commit_at` hold an erasure open for a test.
+- `compaction`: `compact_chain` folds the head chain into a new base,
+  `compact_chain_at` folds a stated head (a delta appended since is carried onto
+  the new head, never lost) and `maybe_compact_chain` does so when a
+  `CompactionPolicy` trips. The new base is written as a pending base, made the
+  head by `commit_compacted_head`, followed by an index delta, and only then are
+  the folded deltas retired: stamped with the caller's `now_ms`. Nothing is
+  deleted, so a reader that pinned an earlier head keeps reading it. A head whose
+  base has no index delta (a fold stopped after the commit, or a base written by
+  `write_snapshot`) gets one when `compact_chain` runs, so a retry finishes the
+  fold; the deltas the stopped fold had not retired stay unmarked. The index
+  delta leaves out the names and node ids of the deltas on the chain when it is
+  appended; a delta whose head lands between that read and the append is still
+  overridden for a name or node id both speak for (the store has no
+  append-if-head verb).
+- `warm_cache`: `WarmMergedCache` keeps the merged graph in memory keyed by the
+  head chunk, read fresh by `refresh`; `get` lends the resident set as an
+  immutable `ref`, `take_current` and `commit` are the single writer's loop.
+- `embedding_topk`: `resolve_embedding_topk` ranks the entities of a chain's
+  `entities_embedding` projections (later rows replace earlier ones by node id)
+  by cosine against a query: score descending, equal scores by ascending node
+  id, keeping the best k in a bounded heap. It refuses `k <= 0`, a query of
+  another dimension than the graph's and a query with a non-finite component; a
+  stored row with a non-finite component is skipped, never ranked.
 
 A facet, a source, a predicate and an entity name are opaque strings the host
 supplies: the package fixes no vocabulary. Prompts are values the caller passes
@@ -475,6 +515,69 @@ except:
 assert_true(refused)
 ```
 
+A compaction folds a chain into a base, reads back the same graph, and leaves
+the old chain readable to whoever pinned it. An erasure removes a partition from
+the head. Top-k then ranks what is left. The times (5000, 7000) are the caller's
+clock, passed in:
+
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false, assert_true
+-->
+```mojo
+from komira_kg import (
+    SnapshotWorkingSet,
+    WorkingEntity,
+    compact_chain,
+    erase_kg_partition,
+    resolve_embedding_topk,
+)
+from komira_kg_format import KgSnapshotStore
+from komira_objectstore.shared_in_memory_conditional_store import (
+    SharedInMemoryConditionalStore,
+)
+
+var store = KgSnapshotStore[SharedInMemoryConditionalStore](
+    SharedInMemoryConditionalStore(), "graph"
+)
+
+var along_x = List[Float64]()
+along_x.append(1.0)
+along_x.append(0.0)
+var along_y = List[Float64]()
+along_y.append(0.0)
+along_y.append(1.0)
+
+var first = SnapshotWorkingSet(2)
+first.add_entity(WorkingEntity(first.next_nid(), "e0", "part-1", "alpha", along_x.copy(), "", "{}"))
+_ = store.write_snapshot(first.to_tables(), first.embedding_dim)
+
+# Two deltas: a second entity of part-1 and one of part-2.
+for i in range(2):
+    var ws = SnapshotWorkingSet.load_latest(store)
+    var part = String("part-1")
+    if i == 1:
+        part = String("part-2")
+    ws.add_entity(WorkingEntity(ws.next_nid(), "e" + String(i + 1), part, "name " + String(i), along_y.copy(), "", "{}"))
+    _ = store.append_delta(ws.delta_tables(), ws.name_index_delta())
+assert_equal(store.open_latest_chain().num_deltas(), 2)
+
+var pinned = store.open_latest_chain()
+var result = compact_chain(store, 5000)
+assert_true(result.compacted)
+assert_equal(result.num_folded, 2)
+assert_equal(len(SnapshotWorkingSet.load_latest(store).entities), 3)
+assert_equal(len(SnapshotWorkingSet.load_merged(pinned).entities), 3)  # still readable
+assert_equal(store.retired_age_ms(1, 6500), 1500)
+
+# part-2 is erased; its entity is no longer a candidate.
+var report = erase_kg_partition(store, "part-2", 7000)
+assert_equal(report.entities, 1)
+var near = resolve_embedding_topk(store.open_latest_chain(), along_y.copy(), 5)
+assert_equal(len(near), 2)
+assert_equal(near[0].nid, 1)
+assert_equal(near[1].nid, 0)
+```
+
 ## Limits
 
 `dedup_resolve` is pure and stateless: it tests the candidates it is given, so
@@ -500,6 +603,20 @@ written empty. Row counts recorded in manifests are diagnostics and are not
 checked against the objects. The table layouts are those of
 `komira_kg_format.schemas` at version 1; a table with fewer columns is refused,
 and one with more is read as the layout.
+
+`erase_kg_partition` and `compact_chain` rewrite the whole graph in memory and
+expect the lineage's ingest to be quiet; a delta a writer appends while they run
+is carried onto the new head, not folded (erasure then examines it, see above).
+Erasure removes the partition from the head only: earlier chunks and objects stay
+(the store has no delete verb), so the erased rows remain in those objects until
+the host reaps them; the old chain's deltas are retired for the host's retention
+policy, and the change gate's fingerprints are not touched. The node ids of an
+erased partition may be minted again once the graph is reloaded, because the
+high-water mark is not stored. Between the commit that carries a tombstone of an
+erased edge and the fold that drops it, a reader that merges the head fails.
+`resolve_embedding_topk` scans every projection row, O(rows log k); a chain whose
+deltas carry no projection (a base alone) gives no candidates, and the caller
+scans the base's entities.
 
 `apply_invalidation` only shortens an interval (never below its start) and keeps
 the first system time an edge expired at, so applying a verdict twice is

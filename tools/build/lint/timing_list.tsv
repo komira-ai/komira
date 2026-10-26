@@ -12,6 +12,7 @@ use	release/ci/main_red/gh.zig	Thread.sleep	1	production: the backoff between a 
 use	tools/build/bisect/main.zig	milliTimestamp	1	production: the bisect tool's default rerun nonce
 use	tools/build/bisect/probe.zig	milliTimestamp	6	production: the bisect tool's probe has a time limit of its own, and measures its seconds
 use	tools/build/bisect/probe.zig	Thread.sleep	1	production: the poll of the probe's time limit
+use	tools/build/ci/release_beta_fetch/release_staged_verify.zig	Thread.sleep	1	production: the pause between prod smoke passes while the channel catches up (tests pass a delay of 0)
 use	tools/build/coverage/branch/bounded_run.zig	Thread.sleep	1	production: the default Clock's nap (a test gives the Clock its own)
 use	tools/build/mojo/tools/mojo_compile.zig	nanosleep	1	production: the watchdog's one-second tick (the ticked build takes its ticks from the process that runs it)
 use	tools/build/mojo/tools/mojo_compile_macos.zig	nanosleep	1	production: the watchdog's one-second tick, as on Linux

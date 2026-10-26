@@ -14,7 +14,14 @@
 #   (3) Both files are valid Avro OCF (magic "Obj\x01").
 # =============================================================================
 
-from std.testing import assert_true, assert_equal
+from std.testing import assert_true, assert_equal, assert_raises
+
+from komira_avro.ocf_block_emit import (
+    generate_sync_marker,
+    emit_ocf_header_kv,
+    emit_ocf_block,
+)
+from komira_avro.ocf_header import AVRO_CODEC_NULL
 
 from komira_iceberg import (
     ICE_T_LONG,
@@ -112,8 +119,69 @@ def test_position_delete_file_roundtrip() raises:
     assert_equal(decoded[1].pos, Int64(4), "entry 1 pos == 4")
 
 
+def _ocf_claiming(
+    schema_json: String, count: Int, payload: List[UInt8]
+) raises -> List[UInt8]:
+    """A file whose single block CLAIMS `count` records over `payload`: the
+    header and framing are real, the count is the lie."""
+    var sync = generate_sync_marker()
+    var out = List[UInt8]()
+    emit_ocf_header_kv(
+        schema_json, AVRO_CODEC_NULL, sync, List[String](), List[String](), out
+    )
+    emit_ocf_block(Span(payload), count, AVRO_CODEC_NULL, sync, out)
+    return out^
+
+
+def test_an_equality_delete_block_cannot_claim_more_rows_than_bytes() raises:
+    """One long column, a 2-byte payload: at most 2 rows. A block that claims
+    3 is refused by the count bound itself, and a block that claims exactly 2
+    is read."""
+    var schema = String(
+        '{"type":"record","name":"d","fields":[{"name":"id","type":"long",'
+        '"field-id":1}]}'
+    )
+    var types = List[Int]()
+    types.append(ICE_T_LONG)
+    var payload = List[UInt8]()
+    payload.append(2)
+    payload.append(4)
+    assert_equal(
+        len(read_equality_delete_file(_ocf_claiming(schema, 2, payload), types)),
+        2,
+    )
+    with assert_raises(contains="block claims 3 rows in 2 payload bytes"):
+        _ = read_equality_delete_file(_ocf_claiming(schema, 3, payload), types)
+    with assert_raises(contains="block claims 1000000 rows in 2 payload"):
+        _ = read_equality_delete_file(
+            _ocf_claiming(schema, 1000000, payload), types
+        )
+
+
+def test_a_position_delete_block_cannot_claim_more_rows_than_bytes() raises:
+    """A position-delete row is at least 2 bytes (an empty path and a long), so
+    a 4-byte payload holds at most 2 rows. A block that claims 3 is refused by
+    the count bound itself, and a block that claims exactly 2 is read."""
+    var schema = String(
+        '{"type":"record","name":"d","fields":[{"name":"file_path",'
+        '"type":"string","field-id":2147483546},{"name":"pos","type":"long",'
+        '"field-id":2147483545}]}'
+    )
+    var payload = List[UInt8]()
+    for _ in range(4):
+        payload.append(0)
+    var two = read_position_delete_file(_ocf_claiming(schema, 2, payload))
+    assert_equal(len(two), 2)
+    with assert_raises(contains="block claims 3 rows in 4 payload bytes"):
+        _ = read_position_delete_file(_ocf_claiming(schema, 3, payload))
+    with assert_raises(contains="block claims 1000000 rows in 4 payload"):
+        _ = read_position_delete_file(_ocf_claiming(schema, 1000000, payload))
+
+
 def main() raises:
     test_equality_delete_file_roundtrip()
     test_equality_delete_file_two_column_key()
     test_position_delete_file_roundtrip()
+    test_an_equality_delete_block_cannot_claim_more_rows_than_bytes()
+    test_a_position_delete_block_cannot_claim_more_rows_than_bytes()
     print("test_iceberg_delete_writer: ALL PASS")
