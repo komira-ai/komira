@@ -6,7 +6,10 @@
   any `komira_fs` file system; `local_disk`: `LocalDiskSpillStorage`, that
   storage over the local file system, which creates its root directory.
 - `fnv1a`: the FNV-1a 64 hash and the partition schema fingerprint the spill
-  formats record.
+  formats record and checksum with.
+- `thsplc` and `thsplc_header`: the THSPLC column codec for a RecordBatch.
+- `column_native_shims`: the bridges between RecordBatch and
+  ColumnNativeBatch.
 
 Whether a breaker may spill, and to which tiers, is decided by the host
 profile (`HostProfile.spill_tiers_for`) and recorded in the physical plan."""
