@@ -1445,6 +1445,35 @@ def test_azurefs_list_page_cap_defaults_to_the_production_cap() raises:
 # -----------------------------------------------------------------------------
 
 
+def test_azurefs_set_list_max_pages_refuses_a_cap_below_one() raises:
+    """A cap below 1 would refuse every listing at its first page (0, -1)
+    and S3Config refuses it too: the setter raises and leaves the cap as it
+    was; 1 is the smallest cap it accepts and a clone keeps it."""
+    var calls = ArcPointer[Int](0)
+    var client = AzureClient[LoopingListConnector](
+        account=String("devstoreaccount1"),
+        key_b64=String(
+            "VGhpcyBpcyBhIGZha2Uga2V5IGZvciB0ZXN0aW5nIDEyMzQ1Njc4OTAxMjMK"
+        ),
+        connector=LoopingListConnector(ArcPointer[Int](0), 0, String(""), 1),
+        call_connector=LoopingListConnector(calls, 0, String(""), 1),
+        config=_azurite_config(),
+    )
+    var fs = AzureFs[LoopingListConnector](
+        container=String("c"),
+        client=client^,
+        spec=_looping_spec_unused(),
+    )
+    with assert_raises(contains="list_max_pages must be >= 1, got 0"):
+        fs.set_list_max_pages(0)
+    with assert_raises(contains="list_max_pages must be >= 1, got -1"):
+        fs.set_list_max_pages(-1)
+    assert_equal(fs.list_max_pages(), AZURE_LIST_MAX_PAGES)
+    fs.set_list_max_pages(1)
+    assert_equal(fs.list_max_pages(), 1)
+    assert_equal(fs.clone().list_max_pages(), 1)
+
+
 def main() raises:
     test_blob_url_real_azure()
     test_blob_url_azurite_path_style()
@@ -1472,6 +1501,7 @@ def main() raises:
     test_azurefs_list_page_cap_refuses_a_looping_marker()
     test_azurefs_list_dir_shallow_page_cap_refuses_a_looping_marker()
     test_azurefs_list_page_cap_defaults_to_the_production_cap()
+    test_azurefs_set_list_max_pages_refuses_a_cap_below_one()
     test_azurefs_read_verbs_reach_the_transport()
     test_azurefs_write_verbs_refused_read_only()
     test_azurefs_delete_is_the_trait_default()

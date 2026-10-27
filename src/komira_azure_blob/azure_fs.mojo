@@ -220,10 +220,24 @@ struct AzureFs[C: Connector](FileSystem, Movable, Deinitable):
             _list_max_pages=self._list_max_pages,
         )
 
-    def set_list_max_pages(mut self, max_pages: Int):
+    def set_list_max_pages(mut self, max_pages: Int) raises:
         """Lower (or restore) the page cap of `list` and `list_dir_shallow`,
         which starts at `AZURE_LIST_MAX_PAGES`. For tests that exercise the cap
-        without serving 100_000 pages; a clone keeps the value."""
+        without serving 100_000 pages; a clone keeps the value.
+
+        Args:
+            max_pages: The pages one listing may read before it is refused.
+                Must be at least 1: a smaller cap would refuse every listing
+                at its first page.
+
+        Raises:
+            If `max_pages` is below 1; the cap is left as it was.
+        """
+        if max_pages < 1:
+            raise Error(
+                String("AzureFs: list_max_pages must be >= 1, got ")
+                + String(max_pages)
+            )
         self._list_max_pages = max_pages
 
     def list_max_pages(self) -> Int:

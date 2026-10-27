@@ -942,10 +942,11 @@ struct H2ClientConnectionState(Movable, Deinitable):
         if n >= sz:
             self.pending_out = List[UInt8]()
             return
-        # One slice copy of the tail (a block copy, not a push per byte): a
-        # peer that accepts a byte per write (the short-write test's clamp of
-        # 1) consumes the buffer once per byte, so a per-byte rebuild made
-        # that drive quadratic in interpreted-speed builds.
+        # One slice copy of the tail (a block copy, not a push per byte). It
+        # still copies the whole tail on every call, so a peer that accepts a
+        # byte per write (the short-write test's clamp of 1) is O(n^2) bytes
+        # copied in total; the block copy only cuts the constant, which kept
+        # that drive inside its deadline in interpreted-speed builds.
         var new_buf = List[UInt8](self.pending_out[n:])
         swap(self.pending_out, new_buf)
 
