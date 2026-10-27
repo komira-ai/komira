@@ -1,34 +1,30 @@
 # =============================================================================
 # routed_grow.mojo: a breaker's grow that spills one of its own partitions
-# when its reservation denies.
+# when its reservation refuses.
 # =============================================================================
 #
-# `try_grow_intra_op_routed` joins two layers:
+# `try_grow_intra_op_routed` joins two layers: the breaker's
+# `MemoryReservation.try_grow` and its `IntraOpSlabArbitrator`.
 #
-#   1. `MemoryReservation.try_grow`: the breaker's own budget.
-#   2. `IntraOpSlabArbitrator.pressure_check_and_arbitrate`: picks the
-#      oldest spillable partition in the breaker's slab and spills it.
+#   1. Ask the reservation. If it grants, return True; the arbitrator is not
+#      touched.
+#   2. If it refuses a request that spilling cannot satisfy, return False and
+#      change nothing but the reservation's denied-grow count (the first ask
+#      was counted): a negative `want_bytes` (a grow cannot free memory), or
+#      a `want_bytes` above the whole budget (it would not fit even with
+#      nothing held). No partition is spilled for such a request.
+#   3. Otherwise ask the arbitrator to spill one of the caller's partitions.
+#      If that frees nothing (no pressure, or no partition can spill), return
+#      False; the reservation is unchanged.
+#   4. The spilled partition's bytes were counted in this reservation, so
+#      release them (never more than it holds) and try the grow once more.
+#      The retry can still refuse. Then the reservation is lower than before
+#      by the bytes the spill freed (that memory really was freed) and the
+#      result is False.
 #
-# The behaviour:
-#
-#   1. Try the reservation. On True, return True: no arbitrator traffic on
-#      the happy path.
-#   2. On a denial, ask the arbitrator to spill one partition of the
-#      caller's slab. If it frees nothing (no pressure, or no partition can
-#      spill), return False: the caller falls back to its own path.
-#   3. The spilled partition belonged to this breaker, so the bytes it freed
-#      are released from the reservation (never more than it holds), and the
-#      grow is retried once.
-#
-# Step 3's release is what lets the retry succeed: without it the
-# reservation is unchanged and the retry gives the same denial.
-#
-# There is no inter-operator form here. A cross-operator spill frees another
-# operator's memory, which this breaker's reservation does not account for,
-# so retrying the local grow after it could not change the answer.
-#
-# Lifetime: `reservation`, `arbitrator` and `slab` are borrowed from the
-# caller for the call only; nothing is retained.
+# `reservation`, `arbitrator` and `slab` are borrowed for the call only.
+# A spill of another operator's partitions is not routed here: it frees memory
+# this reservation does not count.
 # =============================================================================
 
 from komira_collections.slab import Slab
@@ -49,7 +45,7 @@ def try_grow_intra_op_routed[
     want_bytes: Int,
 ) raises -> Bool:
     """Grow `reservation` by `want_bytes`, spilling one of the caller's own
-    partitions first if the reservation denies.
+    partitions first if the reservation refuses.
 
     Args:
         reservation: The breaker's reservation.
@@ -61,13 +57,22 @@ def try_grow_intra_op_routed[
 
     Returns:
         True if the grow succeeded, on the first try or after one spill.
+        False if it was refused and not retried (negative or above the
+        budget, or the spill freed nothing: the held bytes are unchanged), or
+        refused again after a spill (the held bytes fell by the freed bytes,
+        so a caller must not read False as "nothing changed").
 
     Raises:
         What the arbitrator raises: the victim's `spill_to_storage`, or a
-        policy that is not implemented.
+        policy that is not implemented. The raise comes before any release,
+        so the held bytes are unchanged.
     """
     if reservation.try_grow(want_bytes):
         return True
+    if want_bytes < 0:
+        return False
+    if reservation.has_budget() and want_bytes > reservation.budget_bytes():
+        return False
     var freed = arbitrator.pressure_check_and_arbitrate(
         slab, slab_len, Int64(want_bytes)
     )

@@ -85,14 +85,13 @@ def _concat_tiled(
         tiles_in: Tiles per splittable column, DECIDED BY THE CALLER (which is
             also where the admission test lives — `tiles_in >= 2` IS that test,
             so this function cannot be entered on a declined shape). Passing it
-            in rather than recomputing it here is what keeps the route decision
-            and the fan a single expression; the earlier shape computed the tile
-            count in this function and the entry gate in the caller, and the two
-            could disagree.
-        string_tiles: LEVER A. When True, STRING/BINARY columns are ALSO cut
-            into row-range tiles (kind 3 + the kind-2 validity item). When False
-            they take the whole-column kind-1 route byte-for-byte as before —
-            the `ConcatOptions.string_tiling=False` arm and the differential oracle.
+            in rather than recomputing it here keeps the route decision and the
+            fan a single expression.
+        string_tiles: When True, STRING/BINARY columns are ALSO cut into
+            row-range tiles (kind 3 + the kind-2 validity item). When False
+            they take the whole-column kind-1 route: the
+            `ConcatOptions.string_tiling=False` arm and the differential
+            oracle.
 
     Preconditions (enforced by the caller): num_batches >= 2, no BOOL/DICTIONARY
     column, every column either fixed-width or STRING/BINARY, at least one
@@ -100,15 +99,14 @@ def _concat_tiled(
     """
     var owned_input = input_slab^
 
-    # TRACK-B POST-BARRIER BRACKET. The site table's
-    # `inter_ns` charges a serial window to the site of the PRECEDING fork, so
-    # `concat_parallel = 23.4% of worker wall` named the fork before the window,
-    # not the code in it — a MEDIUM-confidence attribution. These two brackets
-    # decide it: SETUP is entry -> fork (buffer pre-alloc + work-item build, which
-    # lands in the PREVIOUS site's inter-gap because it precedes concat's own
-    # fork) and ASSEMBLE is barrier -> return (the serial per-column validity /
-    # null-count / RecordBatch build, which lands in SITE_CONCAT's own inter-gap).
-    # Zero cost when tracing is off: one cached Bool branch, no external_call.
+    # SCHEDULER-TRACE BRACKETS. The site table's `inter_ns` charges a serial
+    # window to the site of the PRECEDING fork, so these two brackets say which
+    # code the window is: SETUP is entry -> fork (buffer pre-alloc + work-item
+    # build, which lands in the PREVIOUS site's inter-gap because it precedes
+    # concat's own fork) and ASSEMBLE is barrier -> return (the serial
+    # per-column wrap and RecordBatch build, which lands in SITE_CONCAT's own
+    # inter-gap). Zero cost when tracing is off: one cached Bool branch, no
+    # external_call.
     var _tb_on = sched_trace_enabled()
     var _tb_t0 = UInt64(0)
     var _tb_f0 = UInt64(0)
@@ -193,8 +191,8 @@ def _concat_tiled(
         var w = col_width[c]
         if w == 0 and not string_tiles:
             # STRING/BINARY, WHOLE-COLUMN ROUTE (`ConcatOptions.string_tiling=False`).
-            # Byte-for-byte the pre-LEVER-A shape: length-0 placeholders and one
-            # kind-1 task that builds the entire Column itself.
+            # Length-0 placeholders and one kind-1 task that builds the entire
+            # Column itself.
             var ph = OwnedAlignedBuffer(1)
             ph.set_length(0)
             fixed_bufs.append(ph^)
@@ -204,23 +202,20 @@ def _concat_tiled(
             str_byte_prefix.append(List[Int]())
             work_items.append(_ConcatWork(Int32(c), UInt8(1), 0, 0))
         elif w == 0:
-            # STRING/BINARY ROW-RANGE TILES (LEVER A). The per-batch byte prefix
-            # is O(num_batches) — two Int32 loads per batch — and its last entry
+            # STRING/BINARY ROW-RANGE TILES. The per-batch byte prefix is
+            # O(num_batches) — two Int32 loads per batch — and its last entry
             # is the column's total payload size, which is what sizes the
             # destination. `OwnedAlignedBuffer` does NOT zero-fill, so the
-            # payload pages are first-touched by the TILES, in parallel; on the
-            # c5hc shape that distributes ~273k page faults as a side effect.
+            # payload pages are first-touched by the TILES, in parallel.
             var prefix = _string_batch_byte_prefix(setup_ptr, num_batches, c)
             var total_bytes = prefix[num_batches]
-            # ★ THE TILE BOUNDS ARE BYTE-BALANCED (2026-09-24, cbq05). Equal ROW
-            # ranges are equal work for a fixed-width column and NOT for this
-            # one: a tile moves its rows' payload plus 4 B of offset per row,
-            # and payload length is data. On cbq05's `search_phrase` the 20
-            # equal-row tiles carried 32.7..151.1 MB against a 56.8 MB mean.
-            # `string_tile_row_bounds` cuts by that cost instead; the tiles
-            # still PARTITION [0, total_rows), which is all the disjointness
-            # contract below rests on. `ConcatOptions.string_bytebal=False`
-            # restores the equal-row cut (the A/B's other arm).
+            # THE TILE BOUNDS ARE BYTE-BALANCED. Equal ROW ranges are equal
+            # work for a fixed-width column and NOT for this one: a tile moves
+            # its rows' payload plus 4 B of offset per row, and payload length
+            # is data. `string_tile_row_bounds` cuts by that cost instead; the
+            # tiles still PARTITION [0, total_rows), which is all the
+            # disjointness contract below rests on.
+            # `ConcatOptions.string_bytebal=False` selects the equal-row cut.
             var sbounds = List[Int]()
             if string_bytebal:
                 sbounds = string_tile_row_bounds(
@@ -243,6 +238,7 @@ def _concat_tiled(
                 "streaming concat(n-way, row-range tiled)",
                 total_bytes,
                 total_rows,
+                promote_at=options.offset_promote_at,
             )
             var dbuf = OwnedAlignedBuffer(max(total_bytes, 1))
             dbuf.set_length(Int64(total_bytes))
@@ -325,10 +321,7 @@ def _concat_tiled(
     )
 
     # PARALLELIZE-BOUNDARY: row-range tiled RecordBatch concat.
-    # ⚠ REWRITTEN FOR LEVER A, NOT APPENDED TO: kind 1 is no longer
-    # what a STRING column takes by default, so a disjointness argument phrased
-    # around "a kind-1 STRING task writes out_columns[col]" no longer describes
-    # the shipped path. FOUR kinds now, and each names the container it owns:
+    # Four kinds of work item, and each names the container it owns:
     # Disjointness:
     #   * kind 0 (fixed tile)  writes ONLY the destination byte slice
     #     [row_start*width, row_end*width) of `fixed_bufs[][col]`;
@@ -346,14 +339,13 @@ def _concat_tiled(
     #   A column takes kind 0+2, or kind 3+2, or kind 1 — never a mixture — so
     #   the four kinds write four DISJOINT containers and, within each, one slot
     #   per column. Input is read-only across the window, shared by every task.
-    #   ⚠ THE BITMAP BOUNDARY-BYTE RACE IS AVOIDED BY OWNERSHIP, NOT BY
-    #   SERIALIZATION. Exactly ONE task per column writes that column's validity
+    #   The bitmap boundary-byte race is avoided by ownership, not by
+    #   serialization. Exactly ONE task per column writes that column's validity
     #   bitmap and it writes the whole of it, so no two threads share a bitmap
-    #   byte. (Splitting validity BY ROW RANGE is what would need 8-row-aligned
-    #   tiles; that is deliberately not done — a whole-column bitmap is ~1/64th
-    #   of the value payload, so it does not need its own fan.) THIS IS ALSO WHY
-    #   LEVER A NEEDED NO NEW VALIDITY DESIGN: kind 2 already owned the whole
-    #   bitmap and its helpers are layout-agnostic.
+    #   byte. (Splitting validity BY ROW RANGE would need 8-row-aligned tiles;
+    #   that is deliberately not done: a whole-column bitmap is ~1/64th of the
+    #   value payload, so it does not need its own fan.) Kind 2 serves STRING
+    #   columns the same way because its helpers are layout-agnostic.
     # Liveness: State owns the input slab, output Column slab, destination value
     #   buffers, string offsets buffers, validity slab and null-count slab via
     #   OwnedPointer; the driver's `var state` slot holds the State alive across
@@ -425,9 +417,8 @@ def _concat_tiled(
     # Every per-column BUFFER is now built: values by the kind-0 tiles, validity
     # and null count by the kind-2 items, STRING Columns whole by the kind-1
     # items. This loop only WRAPS them, so it is O(num_cols) pointer moves and
-    # carries no per-row or per-batch work. It used to run the validity bitmap
-    # build and the null-count scan here — see `_ConcatWork`'s kind-2 note for
-    # what that measured.
+    # carries no per-row or per-batch work. The validity bitmap build and the
+    # null-count scan run in the fork as kind-2 items (see `_ConcatWork`).
     var owned_cols = done_columns^
     var owned_bufs = done_bufs^
     var owned_str_offs = done_str_offs^
@@ -451,7 +442,7 @@ def _concat_tiled(
             var ph_val = owned_validity.take_slot_unchecked(c)
             _ = ph_val^
         elif w == 0:
-            # STRING/BINARY, TILED (LEVER A). Payload + offsets were filled by
+            # STRING/BINARY, TILED. Payload + offsets were filled by
             # the kind-3 tiles, validity + null count by the kind-2 item; this
             # only WRAPS them. `arrow_type` comes from the schema batch, exactly
             # as the fixed-width arm below does — STRING vs BINARY is carried,
@@ -491,18 +482,13 @@ def _concat_tiled(
                 offset=0,
             )
             # DECIMAL (p, s) IS PER-COLUMN, NOT PART OF THE ArrowType.
-            #
-            # P0-4: before that fix a DECIMAL128
-            # could NEVER arrive here — `_arrow_type_byte_width` reported width
-            # 0 for it, which set `any_untiled_type` and declined tiling
-            # outright (see the gate that comment sits on). Widening that
-            # ladder onto the canonical `arrow_fixed_byte_width` table opens
-            # this arm to decimals, so the metadata carry its whole-column
-            # sibling does (`_concat_fixed_columns_multi`) has to happen here
-            # too, or the tiled and whole-column paths stop being
-            # byte-identical — the invariant this function is built around.
-            # Without it a scale-2 decimal comes back scale-0: `312.50` reads
-            # as `31250`, with no raise and no warning.
+            # `_arrow_type_byte_width` gives DECIMAL128 a width of 16, so a
+            # decimal column reaches this arm, and the metadata carry its
+            # whole-column sibling does (`_concat_fixed_columns_multi`) has to
+            # happen here too, or the tiled and whole-column paths stop being
+            # byte-identical. Without it a scale-2 decimal comes back scale-0:
+            # `312.50` reads as `31250`, with no raise and no warning.
+            # `tests/test_concat_byte_equivalence.mojo` pins the carry.
             out_col._decimal_p = src_col._decimal_p
             out_col._decimal_s = src_col._decimal_s
             builder.add_column(out_col^)
@@ -515,14 +501,9 @@ def _concat_tiled(
     owned_validity.set_len_unchecked(0)
     _ = owned_validity^
 
-    # THE TEARDOWN WAVE (site 49) — the SAME one the column-parallel path takes,
-    # for the same reason and with the same three decline conditions. It was
-    # missing here, so the tiled path destroyed N RecordBatches on the DRIVER
-    # with every worker rejoined and parked; `concat_cols_assemble` reads
-    # `fork_ns` ~= its whole wall because of this wave, while
-    # `concat_tiled_assemble` read `fork_ns=0`. That difference was a second,
-    # independent contributor to this path's measured regression — independent of
-    # the validity serialization, and equally invisible to an output oracle.
+    # THE TEARDOWN WAVE: the same one the column-parallel path takes, for the
+    # same reason. Without it the tiled path would destroy N RecordBatches on
+    # the DRIVER with every worker rejoined and parked.
     var drained_input = _take_slab(state.input_batches[])
     if _on_pool_dispatch_active():
         _ = release_token^

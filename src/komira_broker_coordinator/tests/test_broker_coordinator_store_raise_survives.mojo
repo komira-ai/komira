@@ -114,7 +114,30 @@ def _send_all(fd: Int32, bytes: List[UInt8]) raises:
         sent = sent + Int(rc)
 
 
+comptime _RECV_WAIT_MS: Int32 = 10_000
+
+
+def _wait_readable(fd: Int32) raises:
+    """Bound every read: the serve loop runs only inside `run_for`, so a
+    reply that is not in the socket buffer by now never arrives, and a
+    blocking recv() would wait forever. poll() for POLLIN (1 on Linux and
+    macOS) with a 10 s bound; `struct pollfd` is {int fd; short events;
+    short revents} on both, so events sits in the low half of the second
+    Int32 (little-endian)."""
+    var pfd = Array[Int32, 2](fill=Int32(0))
+    pfd[0] = fd
+    pfd[1] = Int32(1)  # events = POLLIN, revents = 0
+    var rc = external_call["poll", Int32](
+        UnsafePointer(to=pfd).bitcast[UInt8](), UInt64(1), _RECV_WAIT_MS
+    )
+    if rc < Int32(0):
+        raise Error("test: poll() failed")
+    if rc == Int32(0):
+        raise Error("test: no reply within 10 s: the serve loop did not answer")
+
+
 def _recv_some(fd: Int32, max_bytes: Int) raises -> List[UInt8]:
+    _wait_readable(fd)
     var buf = List[UInt8]()
     buf.resize(unsafe_uninit_length=max_bytes)
     var raw = buf.unsafe_ptr()

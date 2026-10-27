@@ -89,6 +89,7 @@ from komira_scan_source.source_variant import SourceVariant
 from komira_scan_source.in_memory_source import InMemorySource
 from komira_plan_ir.plan_helpers import _copy_plan, _copy_schema
 from .optimizer_scalar_deps import ScalarDepTable, DEP_SCALAR_BROADCAST
+from .optimizer_udf_carry import filter_like
 
 
 # =============================================================================
@@ -447,7 +448,7 @@ def _rewrite_scalar_broadcast_sites(
             child^, sites, scalars, cache_names, cache_schemas, cache_sources, next_idx
         )
         var pred = plan.filter_data_ref().predicate.copy()
-        return LogicalPlan.filter(pred^, rewritten_child^)
+        return filter_like(plan._filter.value()[], pred^, rewritten_child^)
 
     if plan.tag == PLAN_SORT:
         var child = _copy_plan(plan._sort.value()[].child[])
@@ -479,7 +480,7 @@ def _rewrite_scalar_broadcast_sites(
             child^, sites, scalars, cache_names, cache_schemas, cache_sources, next_idx
         )
         var pred = plan._filter.value()[].predicate.copy()
-        return LogicalPlan.filter(pred^, rewritten_child^)
+        return filter_like(plan._filter.value()[], pred^, rewritten_child^)
 
     # Other shapes: pass through unchanged.
     return plan^

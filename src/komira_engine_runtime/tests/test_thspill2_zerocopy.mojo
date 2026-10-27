@@ -2,22 +2,24 @@
 # test_thspill2_zerocopy.mojo — THSPILL2 row codec copy + 0-copy restore.
 # =============================================================================
 #
-# SPILL-ROW-0COPY-FOLLOWUP / Task #7. Exercises `THSpill2Encoder.encode` +
-# `THSpill2Decoder.decode_copy` / `.decode_zerocopy`
-# (an internal module) for:
+# Exercises `THSpill2Encoder.encode` and `THSpill2Decoder.decode_copy` /
+# `.decode_zerocopy` for:
 #   (a) fixed-width rows (32-byte stride flat block)
 #   (b) var-width rows (fixed prefix + trailing offsets/var-data region)
-#   (c) empty body (0 rows) — both paths
+#   (c) empty body (0 rows)
+#   (d) lifetime: a zero-copy restore stays valid after the read handle is
+#       gone, after the storage releases the chunk and after the storage is
+#       destroyed
 #
-# Both restore paths must reproduce logical (byte) equality. The 0-copy
-# path's body buffer must ALIAS the source chunk bytes (the restored body
-# pointer falls inside the storage chunk's SAB byte range — no payload
-# allocation), whereas the copy path's body pointer must fall OUTSIDE it.
+# Both restore paths must reproduce byte equality. The zero-copy body must
+# alias the source chunk (its address falls inside the chunk's byte range, no
+# payload allocation); the copy body must fall outside it.
 #
 # This is the row-grain mirror of test_thsplc_roundtrip.mojo (column codec).
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
+from std.time import perf_counter_ns
 
 from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
@@ -25,12 +27,23 @@ from komira_collections.slab import Slab
 from komira_buffer.byte_view import ByteView
 from komira_buffer.heap_region import HeapRegion
 
+from komira_engine_runtime.spill.local_disk import LocalDiskSpillStorage
 from komira_engine_runtime.spill.spill_storage import ChunkId, SpillStorage
+from komira_libc.posix import _read_env
 from komira_engine_runtime.spill.thspill2 import (
     Spillable,
     THSpill2Encoder,
     THSpill2Decoder,
 )
+
+
+def _scratch_dir() raises -> String:
+    var d = _read_env("TEST_TMPDIR")
+    if d.byte_length() == 0:
+        d = _read_env("TMPDIR")
+    if d.byte_length() == 0:
+        raise Error("neither TEST_TMPDIR nor TMPDIR is set")
+    return d
 
 
 # =============================================================================
@@ -362,6 +375,43 @@ def test_row_zerocopy_keepalive() raises:
     _ = storage^
 
 
+def test_row_zerocopy_outlives_storage() raises:
+    # Destroy the storage (which owns the chunk) BEFORE reading the restored
+    # block. The body must hold its own reference to the chunk's buffer.
+    comptime N = 32
+    var src_ref = _build_row_fixed(N)
+    var storage = _MemSpillStorage()
+    var cid = THSpill2Encoder[_RowBlock].encode(storage, _build_row_fixed(N))
+    var restored = THSpill2Decoder[_RowBlock].decode_zerocopy(storage, cid)
+    _ = storage^
+    assert_true(
+        _row_bytes_equal(src_ref, restored),
+        "0-copy body must stay valid after its storage is destroyed",
+    )
+
+
+def test_row_zerocopy_survives_disk_release() raises:
+    # On the local-disk storage the chunk is read into a heap buffer; releasing
+    # the chunk (unlinking its file) and cleaning up the root must not
+    # invalidate a zero-copy restore.
+    comptime N = 32
+    var src_ref = _build_row_fixed(N)
+    var storage = LocalDiskSpillStorage.with_unlimited(
+        _scratch_dir()
+        + String("/komira_spill_test_zc_")
+        + String(Int(perf_counter_ns()))
+    )
+    var cid = THSpill2Encoder[_RowBlock].encode(storage, _build_row_fixed(N))
+    var restored = THSpill2Decoder[_RowBlock].decode_zerocopy(storage, cid)
+    storage.release_chunk(cid)
+    storage.cleanup()
+    _ = storage^
+    assert_true(
+        _row_bytes_equal(src_ref, restored),
+        "0-copy body must stay valid after the chunk file is released",
+    )
+
+
 def main() raises:
     test_row_fixed_copy_and_zerocopy()
     print("test_row_fixed_copy_and_zerocopy PASSED")
@@ -371,4 +421,8 @@ def main() raises:
     print("test_row_empty_copy_and_zerocopy PASSED")
     test_row_zerocopy_keepalive()
     print("test_row_zerocopy_keepalive PASSED")
+    test_row_zerocopy_outlives_storage()
+    print("test_row_zerocopy_outlives_storage PASSED")
+    test_row_zerocopy_survives_disk_release()
+    print("test_row_zerocopy_survives_disk_release PASSED")
     print("ALL THSPILL2 ZEROCOPY TESTS PASSED")

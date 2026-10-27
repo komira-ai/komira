@@ -84,6 +84,25 @@ def test_mock_clock_drives_start_ns() raises:
     print("  test_mock_clock_drives_start_ns PASS")
 
 
+def test_mock_clock_orders_end_after_start() raises:
+    """Each stamp is read when its packet is emitted: end follows start by
+    exactly the ticks between the two calls."""
+    var t = Tracer(num_workers=1)
+    var clock = MockClock(start_ns=UInt64(100))
+    t.install_mock_clock(clock)
+    t.install_mock_ids(trace_seed=UInt64(1), span_seed=UInt64(1))
+
+    var sid = t.start_span["test"](worker_id=0)
+    t._mock_clock.value().tick(UInt64(50))
+    t.end_span(sid, worker_id=0)
+    var exp = CapturingExporter()
+    t.drain_into_capture(exp)
+    ref rec = exp.captured_spans[0]
+    assert_equal(rec.start_ns, UInt64(100), "start read before the tick")
+    assert_equal(rec.end_ns, UInt64(150), "end read after the tick")
+    print("  test_mock_clock_orders_end_after_start PASS")
+
+
 def test_name_registry_populated_on_first_emit() raises:
     """First emit of a name registers it in the per-process registry."""
     var t = Tracer(num_workers=1)
@@ -214,6 +233,7 @@ def main() raises:
     test_start_end_balanced()
     test_nested_spans()
     test_mock_clock_drives_start_ns()
+    test_mock_clock_orders_end_after_start()
     test_name_registry_populated_on_first_emit()
     test_root_flag_set_on_zero_parent()
     test_explicit_parent_id_clears_root_flag()

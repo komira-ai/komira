@@ -1,15 +1,14 @@
 # =============================================================================
-# test_spill_codec_boundary.mojo — THSPLC / THSPILL2 / FileSystemSpillStorage
-# boundary cases flagged by the review gate (SPILL-FU-BOUNDARY-TESTS / Task #12).
+# test_spill_codec_boundary.mojo — THSPLC / FileSystemSpillStorage
+# boundary cases of the THSPLC codec and the spill storage.
 # =============================================================================
-#
-# Extends the happy-path + corruption coverage in test_thsplc_roundtrip.mojo,
-# test_thspill2_zerocopy.mojo, test_filesystem_spill_storage.mojo with the
-# boundary cases the review gate called out:
+# Extends the happy-path and corruption coverage in test_thsplc_roundtrip.mojo,
+# test_filesystem_spill_storage.mojo and test_spill_thsplc_robustness.mojo with
+# these boundary cases:
 #
 #   (1) SLICED-INPUT (the real correctness case — spill-after-filter/limit):
 #       a fixed-width column with `_offset != 0`, exercising the
-#       `thsplc.mojo:466-472` `src_byte_off = col._offset * w` branch that NO
+#       `src_byte_off = col._offset * w` branch in thsplc.mojo that NO
 #       happy-path test reaches (all those columns are built fresh with
 #       `_offset == 0`). Both decode paths must restore the SLICED logical
 #       values — not the underlying full buffer's offset-prefix bytes.
@@ -145,7 +144,7 @@ def _temp_root(tag: String) raises -> String:
 
 
 # =============================================================================
-# (1) SLICED-INPUT — exercises thsplc.mojo:466-472 (src_byte_off = offset * w).
+# (1) SLICED-INPUT — exercises the src_byte_off = offset * w branch of thsplc.mojo.
 #
 # `PrimitiveArray.slice(start, length)` produces an array whose `offset` is
 # nonzero and whose underlying data buffer still holds the `[0, offset)`

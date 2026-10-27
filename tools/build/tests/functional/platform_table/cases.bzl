@@ -90,7 +90,7 @@ _TABLE_CASES = [
     ("a pool that names no pool", _edit("linux-x86_64", field = "pool", value = "mojo-sized"), "row linux-x86_64: `pool` must be `pool=<name>`"),
     ("two rows sharing a pool", _edit("linux-arm64", field = "pool", value = "pool=mojo-sized"), "`pool` `pool=mojo-sized` is also row"),
     ("a zig digest that is not 64 hex digits", _edit("darwin-arm64", field = "zig_exe_sha256", value = "abc"), "row darwin-arm64: `zig_exe_sha256` is not 64 lowercase hex digits"),
-    ("an applet list that is not sorted", _edit("darwin-arm64", field = "applets", value = ["sh", "cat"]), "row darwin-arm64: `applets` must be a non-empty sorted list"),
+    ("an applet list that is not sorted", _edit("darwin-arm64", field = "applets", value = ["tr", "cat"]), "row darwin-arm64: `applets` must be a non-empty sorted list"),
     ("a pending applet list in a registered row", _edit("darwin-arm64", field = "applets", value = pending("later")), "row darwin-arm64: `applets` is pending, but the row is registered"),
     ("the pixi pin missing from the macOS row", _edit("darwin-arm64", drop_role = "pixi"), "row darwin-arm64: missing pin `pixi`"),
     ("the pixi pin missing from the linux row", _edit("linux-x86_64", drop_role = "pixi"), "row linux-x86_64: missing pin `pixi`"),

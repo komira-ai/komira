@@ -2,15 +2,14 @@
 # Counters -- OS-level performance counters
 # =============================================================================
 #
-# Port of `komira-engine/src/counters.rs` (v0.3). Captures OS-level
-# performance metrics via getrusage(RUSAGE_SELF) for profiling pipeline
-# phases:
+# Captures OS-level performance metrics via getrusage(RUSAGE_SELF) for
+# profiling pipeline phases:
 #   * Voluntary / involuntary context switches
 #   * Major page faults
 #   * Peak RSS (resident set size)
 #   * User / system CPU time
 #
-# Usage pattern (matches v0.3):
+# Usage pattern:
 #   var before = Counters.now()
 #   # ... pipeline phase ...
 #   var after = Counters.now()
@@ -18,19 +17,14 @@
 #   print(delta)
 #
 # Platform support:
-#   * macOS: getrusage + mach task_info for peak RSS (v0.3 uses
-#     mach_task_basic_info; this port uses ru_maxrss from getrusage which
-#     on macOS already reports bytes, not pages).
-#   * Linux: getrusage works identically. `ru_maxrss` reports KB on Linux
-#     (not bytes), so we multiply by 1024 after the syscall under
-#     `comptime if CompilationTarget.is_linux()`. Both branches type-check
-#     and only the host's branch enters codegen (maintainer platform-selection
-# guardrail, Workstream C).
+#   * macOS: `ru_maxrss` from getrusage already reports bytes.
+#   * Linux: `ru_maxrss` reports KB, so it is multiplied by 1024 under
+#     `comptime if CompilationTarget.is_linux()`. Both branches type-check and
+#     only the host's branch enters codegen.
 #
-# Field offsets (`OFF_MAXRSS=32`, `OFF_NVCSW=128`, `OFF_NIVCSW=136`) match
-# Linux glibc x86_64 LP64 too — only the unit conversion differs.
-#
-# v0.3 source: `komira-engine/src/counters.rs` (lines 1-101)
+# Field offsets (`OFF_MAXRSS=32`, `OFF_NVCSW=128`, `OFF_NIVCSW=136`) are the
+# same on Linux glibc x86_64 LP64 and macOS LP64; only the unit conversion
+# differs.
 # =============================================================================
 
 from std.sys.info import CompilationTarget
@@ -80,10 +74,7 @@ comptime OFF_NIVCSW: Int = 136
 # =============================================================================
 
 struct Counters(Copyable, Movable, Writable):
-    """Snapshot of OS-level performance counters.
-
-    v0.3 parity: field-for-field with `Counters` (counters.rs:7-13).
-    """
+    """Snapshot of OS-level performance counters."""
 
     var voluntary_ctx_switches: Int
     var involuntary_ctx_switches: Int
@@ -124,8 +115,6 @@ struct Counters(Copyable, Movable, Writable):
     @staticmethod
     def now() -> Counters:
         """Capture current OS counters via getrusage(RUSAGE_SELF).
-
-        v0.3 parity: Counters::now() (counters.rs:18-27).
 
         SAFETY:
           `ru_buf` is a heap-allocated 144-byte buffer passed to getrusage.
@@ -171,8 +160,7 @@ struct Counters(Copyable, Movable, Writable):
     def delta_from(self, before: Counters) -> Counters:
         """Compute delta from a previous snapshot.
 
-        Peak RSS is absolute (not delta) -- matches v0.3 behavior.
-        v0.3 parity: Counters::delta_from() (counters.rs:31-41).
+        Peak RSS is absolute (the later snapshot's value), not a difference.
         """
         return Counters(
             self.voluntary_ctx_switches - before.voluntary_ctx_switches,

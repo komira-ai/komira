@@ -4,7 +4,7 @@
 #
 # The primitives (`_parse_decimal_int`, `_find_substring_bytes`,
 # `_parent_cgroup_path`) are pure and are asserted from literals. The reader is
-# asserted against files written under `TEST_TMPDIR`: missing, empty, a lone
+# asserted against files written under a fresh temporary directory: missing, empty, a lone
 # newline, the trailing-newline strip, and both sides of the 4 KiB cap. The
 # basis rule (`_min_of_readable`) is pure and asserted from literals. The probe
 # itself reads this host's `/proc/meminfo` and cgroup files, whose
@@ -12,7 +12,7 @@
 # on every read: never above the cgroup cap, positive on Linux.
 # =============================================================================
 
-from std.os import getenv
+from std.tempfile import mkdtemp
 from std.sys.info import CompilationTarget
 from std.testing import TestSuite, assert_equal, assert_true
 
@@ -30,10 +30,9 @@ from komira_host.proc_probe import (
 
 
 def _scratch(name: String) raises -> String:
-    var base = getenv("TEST_TMPDIR")
-    if base.byte_length() == 0:
-        raise Error("TEST_TMPDIR is not set")
-    return base + String("/") + name
+    # A fresh directory of this call's own (`mkdtemp`: under `TMPDIR`, else `/tmp`), so no runner has to
+    # name a scratch directory and two runs of this test never share a path.
+    return mkdtemp(prefix="komira_host_") + String("/") + name
 
 
 def _write(path: String, text: String) raises:

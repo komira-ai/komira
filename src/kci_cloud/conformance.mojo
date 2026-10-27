@@ -269,7 +269,7 @@ def _verb_of_applied(applied: List[AppliedNode], lid: String) -> Int:
     for i in range(len(applied)):
         if applied[i].logical_id == lid:
             return applied[i].verb
-    return -1
+    return -1  # cov: unreachable called only with pid, the primary node of a named resource of adopting: lower_data refuses a lowering without it, so every apply lists it
 
 
 def _action_of(actions: List[ChangeAction], lid: String) -> Optional[ChangeAction]:

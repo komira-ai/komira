@@ -1,4 +1,5 @@
 load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
+load("@komira//tools/build/gen:defs.bzl", "committed_data")
 
 # Cloud Logging v2: a REST/JSON client generated at build time from the
 # googleapis protos //tools/vendor/googleapis:logging_v2 extracts from its
@@ -24,8 +25,8 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # The library is gated by its layout probe and these tests, hand-written
 # against the Cloud Logging v2 REST reference (no upstream test body is
 # copied), each sending through the generated client over komira_http_core's
-# ScriptedConnector (no socket; a send to the default host resolves
-# logging.googleapis.com first, so those tests need a resolver):
+# ScriptedConnector (no socket, and no name resolved: the connector never
+# reads the dial address):
 # test_logging_default_host (a fresh client starts at
 # logging.googleapis.com, read without sending; `set_rest_host` replaces it,
 # and the replacement is what is dialled and named in the Host header),
@@ -64,7 +65,7 @@ mojo_gcp_client(
     test_data = {
         # The whole generated package, so the scan covers every file the
         # generator writes with no second list of them to drift.
-        "tests/test_no_env_reads.mojo": {"gen": ":komira_gcp_logging_gen"},
+        "tests/test_no_env_reads.mojo": committed_data("komira_gcp_logging"),
     },
     test_srcs = [
         "tests/test_logging_default_host.mojo",
