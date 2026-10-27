@@ -337,12 +337,12 @@ def test_ntile_bucket_sizes_and_more_buckets_than_rows() raises:
         assert_equal(_get(out, 3, r), 1)
 
 def test_sliding_int_sum_over_empty_and_null_frames() raises:
-    # ROWS 2 PRECEDING .. 1 PRECEDING over v = 10, NULL, 30, 40: the first
-    # frame is empty (SUM NULL, COUNT 0); a frame holding only NULLs also
-    # has no SUM.
+    # ROWS 2 PRECEDING .. 1 PRECEDING over v = 10, NULL, NULL, 40: the first
+    # frame is empty (SUM NULL, COUNT 0); the last frame holds only NULLs and
+    # also has no SUM and a COUNT of 0.
     var o: List[Int64] = [1, 2, 3, 4]
-    var v: List[Int64] = [10, 0, 30, 40]
-    var vv: List[Bool] = [True, False, True, True]
+    var v: List[Int64] = [10, 0, 0, 40]
+    var vv: List[Bool] = [True, False, False, True]
     var cols = List[Column[HeapRegion]]()
     cols.append(_plain_i64(o))
     cols.append(_i64(v, vv))
@@ -358,12 +358,14 @@ def test_sliding_int_sum_over_empty_and_null_frames() raises:
     var out = _run(_batch(names, cols^), List[String](), ok, exprs^)
     assert_true(_null(out, 2, 0))
     assert_equal(_get(out, 3, 0), 0)
-    var want_sum: List[Int64] = [0, 10, 10, 30]
-    var want_count: List[Int64] = [0, 1, 1, 1]
-    for r in range(1, 4):
+    var want_sum: List[Int64] = [0, 10, 10, 0]
+    var want_count: List[Int64] = [0, 1, 1, 0]
+    for r in range(1, 3):
         assert_false(_null(out, 2, r))
         assert_equal(_get(out, 2, r), want_sum[r])
         assert_equal(_get(out, 3, r), want_count[r])
+    assert_true(_null(out, 2, 3))
+    assert_equal(_get(out, 3, 3), 0)
 
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
