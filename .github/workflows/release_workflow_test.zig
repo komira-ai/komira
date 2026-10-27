@@ -55,6 +55,10 @@
 //!    nor `--abort`, the abort with `--abort`, the verify and the e2e on the verified
 //!    set in the test, the smoke), the order of the test's steps, and that the test and
 //!    the smoke never name a registry-writing verb or the OIDC exchange.
+//!  - one mopm: every `build toolchains//:mopm_*` label of release.yml and every such label of
+//!    docs/ci.md equals `MOPM` of release/readme_e2e/packages.bzl (the mopm the README e2e installs
+//!    with is the one the release stages and publishes with), so a bump of one that forgets
+//!    the other, or the prose, is red.
 //! The reader's own cases are workflow texts written here: each defect above
 //! is planted in the real text and must be refused with its message.
 
@@ -887,4 +891,67 @@ test "a comment naming MOPM_TOKEN does not count, a line does" {
     try t.expect(mentions(b, "MOPM_TOKEN"));
     n = 0;
     try t.expect((try jobLines(ar, "jobs:\n  a:\n    x: 1\n", "c", &n)) == null);
+}
+
+const MOPM_PREFIX = "toolchains//:mopm_";
+
+/// The label `MOPM = "..."` of packages.bzl, or null.
+fn mopmPin(bzl: []const u8) ?[]const u8 {
+    var it = std.mem.splitScalar(u8, bzl, '\n');
+    while (it.next()) |line| {
+        if (!std.mem.startsWith(u8, line, "MOPM = \"")) continue;
+        const rest = line["MOPM = \"".len..];
+        const end = std.mem.indexOfScalar(u8, rest, '"') orelse return null;
+        return rest[0..end];
+    }
+    return null;
+}
+
+/// Null when every `toolchains//:mopm_<version>` mention of `text` (a label of `what`) is the pin
+/// and there is at least one; else a message. A mention is the prefix and the run of
+/// digits and underscores after it.
+fn mopmDrift(text: []const u8, pin: []const u8, what: []const u8, out: *[160]u8) !?[]const u8 {
+    var from: usize = 0;
+    var seen: usize = 0;
+    while (std.mem.indexOfPos(u8, text, from, MOPM_PREFIX)) |at| {
+        var end = at + MOPM_PREFIX.len;
+        while (end < text.len and (std.ascii.isDigit(text[end]) or text[end] == '_')) end += 1;
+        const label = text[at..end];
+        if (!std.mem.eql(u8, label, pin)) return try std.fmt.bufPrint(out, "{s} names {s} but MOPM of packages.bzl is {s}", .{ what, label, pin });
+        seen += 1;
+        from = end;
+    }
+    if (seen == 0) return try std.fmt.bufPrint(out, "{s} names no mopm toolchain label", .{what});
+    return null;
+}
+
+test "the mopm release.yml builds and docs/ci.md names is the MOPM of packages.bzl" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const work = try std.process.getEnvVarOwned(ar, "KOMIRA_TEST_WORK");
+    const bzl = try std.fs.cwd().readFileAlloc(ar, try std.fs.path.join(ar, &.{ work, "packages.bzl" }), 1 << 20);
+    const doc = try std.fs.cwd().readFileAlloc(ar, try std.fs.path.join(ar, &.{ work, "ci.md" }), 1 << 22);
+    const pin = mopmPin(bzl) orelse return error.NoPin;
+    var buf: [160]u8 = undefined;
+    if (try mopmDrift(try readWorkflow(ar), pin, "release.yml", &buf)) |why| {
+        std.debug.print("{s}\n", .{why});
+        return error.Drift;
+    }
+    if (try mopmDrift(doc, pin, "docs/ci.md", &buf)) |why| {
+        std.debug.print("{s}\n", .{why});
+        return error.Drift;
+    }
+}
+
+test "a mopm label that differs from the pin, or none, is refused" {
+    var buf: [160]u8 = undefined;
+    const pin = "toolchains//:mopm_0_0_81";
+    try t.expect((try mopmDrift("args: build toolchains//:mopm_0_0_81 --out x", pin, "w", &buf)) == null);
+    try t.expect((try mopmDrift("a toolchains//:mopm_0_0_81, b toolchains//:mopm_0_0_81.", pin, "w", &buf)) == null);
+    try t.expect((try mopmDrift("args: build toolchains//:mopm_0_0_73 --out x", pin, "w", &buf)) != null);
+    try t.expect((try mopmDrift("toolchains//:mopm_0_0_81 then toolchains//:mopm_0_0_8", pin, "w", &buf)) != null);
+    try t.expect((try mopmDrift("no label here", pin, "w", &buf)) != null);
+    try t.expectEqualStrings("toolchains//:mopm_0_0_81", mopmPin("X = 1\nMOPM = \"toolchains//:mopm_0_0_81\"\n").?);
+    try t.expect(mopmPin("# MOPM = \"x\"\n") == null);
 }

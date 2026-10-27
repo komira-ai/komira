@@ -10,9 +10,9 @@ built says another.
 MOJO = "1.0.0"
 
 # The pinned mopm the e2e installs with. It must have `mopm add --overlay`; one that lacks it fails every
-# target of //release/readme_e2e/verify at its install step, naming the option. It is a row of
-# buildrules' own pins (rules/mopm/pins.bzl), so buildrules-pins.toml holds no row for it.
-MOPM = "toolchains//:mopm_0_0_73"
+# target of //release/readme_e2e/verify at its install step, naming the option. buildrules does not pin
+# it yet, so it is the `[mopm."0.0.81"]` row of buildrules-pins.toml (linux x86_64 only).
+MOPM = "toolchains//:mopm_0_0_81"
 
 # The first mopm that has `mopm add --overlay`, as a label like MOPM, or None while no release
 # has it. `readme_e2e_complete` (root BUCK) compares it with MOPM: the row of EXCLUDED in
