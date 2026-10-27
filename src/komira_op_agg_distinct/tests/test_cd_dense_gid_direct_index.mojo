@@ -253,12 +253,12 @@ def _assert_conservation(
 
 
 # =============================================================================
-# §1 THE cb10 SHAPE — a small dense domain, which is the case being bought
+# §1 A SMALL DENSE KEY DOMAIN — the case being bought
 # =============================================================================
 
 
 def test_dense_domain_agrees_with_the_dict_and_takes_the_dense_route() raises:
-    """91 groups over 4000 rows — cb10's shape at test scale.
+    """91 groups over 4000 rows — the small-dense-domain shape at test scale.
 
     Both halves matter: the arms agree (byte-equivalence) AND every row went
     through the dense table (the change actually applies here). Either one
@@ -270,7 +270,7 @@ def test_dense_domain_agrees_with_the_dict_and_takes_the_dense_route() raises:
 
     var d = _run(f, dense=True)
     var m = _run(f, dense=False)
-    _assert_states_identical(d, m, "cb10 shape (91 groups)")
+    _assert_states_identical(d, m, "small dense domain (91 groups)")
     assert_equal(len(d.group_keys), 91, "the fixture must produce 91 groups")
 
     assert_equal(
@@ -409,6 +409,40 @@ def test_keys_at_the_extremes_of_the_int64_axis() raises:
         " densely — if this is 0 the case is only testing the Dict",
     )
     _assert_conservation(d, f, "extreme-key dense arm")
+
+
+def test_a_dense_window_anchored_at_the_bottom_of_the_axis() raises:
+    """Three adjacent keys at `Int64.MIN` — a domain 3 wide that sits on the
+    very bottom of the Int64 axis.
+
+    The window must still be built (the domain is dense) and must agree with
+    the Dict arm. Its slack cannot be placed below `Int64.MIN`, so the
+    `_CD_DENSE_GID_KEY_FLOOR` guard puts all of it above: the window base is
+    exactly `Int64.MIN` rather than a base that has wrapped past `Int64.MAX`."""
+    var keys = List[Int64]()
+    for r in range(4):
+        keys.append(Int64.MIN)
+        keys.append(Int64.MIN + Int64(1))
+        keys.append(Int64.MIN + Int64(2))
+    var f = _fx(keys^)
+
+    var d = _run(f, dense=True)
+    var m = _run(f, dense=False)
+    _assert_states_identical(d, m, "keys at the bottom of the axis")
+    assert_equal(len(d.group_keys), 3, "three distinct keys, three groups")
+    assert_equal(
+        d.dense_lo, Int(Int64.MIN),
+        "the window base must sit at Int64.MIN, with all slack above it",
+    )
+    assert_false(
+        d.dense_frozen, "a 3-wide domain must not freeze the window"
+    )
+    assert_equal(
+        d.stat_gid_dense, f.n_non_null_keys(),
+        "every row must be served by the dense window",
+    )
+    assert_equal(d.stat_gid_dict, 0, "no row may fall back to the Dict")
+    _assert_conservation(d, f, "bottom-of-axis dense arm")
 
 
 # =============================================================================

@@ -9,6 +9,12 @@
 # `_cd_fx_fold_batch` is that column-major fold. The two live in their own
 # module only to keep each file under 1,000 lines; the mechanisms are
 # described in `streaming_agg_count_distinct`'s header.
+#
+# Both functions are package-internal: they are called only from
+# `streaming_agg_count_distinct`, and the leading underscore of
+# `_cd_fx_fold_batch` marks that. It takes lists of column pointers with
+# concrete origins, so it is not part of the package's API and nothing outside
+# the package may call it.
 # =============================================================================
 
 from std.memory import UnsafePointer
@@ -288,7 +294,7 @@ def _cd_consume_grouped[
             # wraps past Int64.MAX are all handled by the same compare and
             # none of them can overflow), one L1 load. What it replaces is
             # a two-round mulx hash fold plus TWO SwissTable group walks —
-            # 35.9 cycles/row measured on cb10, 17.73% of that query.
+            # 35.9 cycles/row measured on a small dense int64 key domain, 17.73% of that query.
             var du = (Int64(key) - Int64(st.dense_lo)).cast[
                 DType.uint64
             ]()
@@ -372,14 +378,15 @@ def _cd_consume_grouped[
         # window hit (or a Dict probe); the fold rides it for free.
         # Compiled OUT of the all-CD instantiation (`has_fixed=False`).
         #
-        # With `fxcol_on = False` the per-row fold below runs instead: NULL inputs are
-        # SKIPPED; `n` counts CONTRIBUTING rows; `n == 1` SEEDS MIN/MAX;
-        # SUM and MEAN share one accumulator and MEAN divides at emit —
-        # `agg_mixed_cd_fold`'s semantics, which is this lane's ORACLE.
         comptime if has_fixed:
             if fxcol:
                 fx_gids.append(Int32(gid))
             else:
+                # With `fxcol_on = False` this per-row fold runs instead: NULL
+                # inputs are SKIPPED; `n` counts CONTRIBUTING rows; `n == 1`
+                # SEEDS MIN/MAX; SUM and MEAN share one accumulator and MEAN
+                # divides at emit — `agg_mixed_cd_fold`'s semantics, which is
+                # this lane's ORACLE.
                 for f in range(n_fixed):
                     ref cell = st.fx_cells[f][gid]
                     var ch = fx_chan[f]
@@ -432,15 +439,15 @@ def _cd_consume_grouped[
                         if afn == AGG_SUM or afn == AGG_MEAN:
                             cell.f_acc += fv
                         elif afn == AGG_MIN:
-                            # ⛔ QUOTIENT ORDER, NOT a bare `<` / `>`: IEEE compares false against
-                            # a NaN, so `max{0.1, NaN}` would answer 0.1; DuckDB answers NaN
-                            # (NaN sorts above +inf).
+                            # QUOTIENT ORDER, NOT a bare `<` / `>`: IEEE compares false against
+                            # a NaN, so `max{0.1, NaN}` would answer 0.1, while the reference
+                            # answer is NaN (NaN sorts above +inf). Every float MIN/MAX in this
+                            # file compares through `float_quotient_lt_f64` / `_gt_f64` for that
+                            # reason.
                             if cell.n == Int64(1) or float_quotient_lt_f64(fv, cell.f_acc):
                                 cell.f_acc = fv
                         else:
-                            # ⛔ QUOTIENT ORDER, NOT a bare `<` / `>`: IEEE compares false against
-                            # a NaN, so `max{0.1, NaN}` would answer 0.1; DuckDB answers NaN
-                            # (NaN sorts above +inf).
+                            # Quotient order, as above.
                             if cell.n == Int64(1) or float_quotient_gt_f64(fv, cell.f_acc):
                                 cell.f_acc = fv
 
@@ -579,15 +586,11 @@ def _cd_fx_fold_batch[bo: Origin](
                 if is_sum:
                     fcell.f_acc += fv
                 elif is_min:
-                    # ⛔ QUOTIENT ORDER, NOT a bare `<` / `>`: IEEE compares false against
-                    # a NaN, so `max{0.1, NaN}` would answer 0.1; DuckDB answers NaN
-                    # (NaN sorts above +inf).
+                    # Quotient order, as above.
                     if fcell.n == Int64(1) or float_quotient_lt_f64(fv, fcell.f_acc):
                         fcell.f_acc = fv
                 else:
-                    # ⛔ QUOTIENT ORDER, NOT a bare `<` / `>`: IEEE compares false against
-                    # a NaN, so `max{0.1, NaN}` would answer 0.1; DuckDB answers NaN
-                    # (NaN sorts above +inf).
+                    # Quotient order, as above.
                     if fcell.n == Int64(1) or float_quotient_gt_f64(fv, fcell.f_acc):
                         fcell.f_acc = fv
 

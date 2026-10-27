@@ -323,7 +323,7 @@ struct WorkerCDState(Copyable, Movable):
     # the SAME gid the CD lane resolved, which is the whole point.
     #
     # ⚠ EMPTY ON EVERY ALL-COUNT(DISTINCT) QUERY — and that alone did NOT make
-    # the lane free (see the MIXEDFUSE header: cb13 +4.32%). What makes it free
+    # the lane free (see the MIXEDFUSE header: +4.32% on an all-COUNT(DISTINCT) query). What makes it free
     # is that the all-CD route runs the `has_fixed=False` instantiation, which
     # never names these fields at all.
     var fx_func: List[UInt8]
@@ -603,16 +603,17 @@ struct WorkerCDState(Copyable, Movable):
         The `_CD_DENSE_GID_MAX_GID` guard can only fire if the freeze invariant
         above is ever broken — before the freeze the only groups that exist come
         from this method (at most `_CD_DENSE_GID_DOMAIN_CAP` of them) and from
-        the single NULL group. It is here so that argument is enforced rather
-        than merely written down: rather than truncate a gid into `Int32`, fall
-        back to the Dict.
+        the single NULL group, so it is unreachable today. It is here so that
+        argument is enforced rather than merely written down: rather than
+        truncate a gid into `Int32`, or hand the same in-window key a second
+        gid, it raises.
         """
         var gid = self._append_group[has_fixed](key, False)
         if gid >= _CD_DENSE_GID_MAX_GID:
-            self.dense_frozen = True
-            self.group_map[key] = gid
-            self.stat_gid_dict += 1
-            return gid
+            raise Error(
+                "WorkerCDState: the dense group id space is exhausted; the"
+                " freeze invariant was broken."
+            )
         self.dense_idx[slot] = Int32(gid + 1)
         # Widen the OCCUPIED range. A key first seen through the HOT path is
         # inside the window but can still be outside `[key_lo, key_hi]`, and the
@@ -635,7 +636,7 @@ struct WorkerCDState(Copyable, Movable):
 
         ⭐ Instantiates `has_fixed=False`: the passenger lane is compiled OUT,
         not skipped. The first MIXEDFUSE landing forwarded an EMPTY fixed list
-        into the fused body instead and cost cb13 +4.32% (see the MIXEDFUSE
+        into the fused body instead and cost +4.32% on an all-COUNT(DISTINCT) query (see the MIXEDFUSE
         header). An ARMED state (`num_fixed > 0`) is REFUSED rather than fed
         through an instantiation that cannot fold its fixed cells."""
         var no_fixed = List[Int]()
@@ -808,8 +809,8 @@ struct WorkerCDState(Copyable, Movable):
         # So each lane is classified ONCE per batch and a lane that is not
         # int64-storage gets its per-row Int64 DISTINCT KEY materialised at its
         # OWN width (`cd_distinct_keys_for_column`, offset-aware). The
-        # `CDK_RAW_I64` lane keeps the pointer read byte for byte — cb04/cb05/
-        # cb13 are int64 aggregands and must not pay for this.
+        # `CDK_RAW_I64` lane keeps the pointer read byte for byte — all-int64
+        # aggregands must not pay for this.
         #
         # An UNSUPPORTED type never reaches here: `cd_value_type_supported`
         # gates both detectors that build this sink's `AggSinkData`. If one ever
