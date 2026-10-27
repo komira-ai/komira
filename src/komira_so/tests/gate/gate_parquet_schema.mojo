@@ -6,7 +6,8 @@
 # past them; a NULL context is -1 and writes nothing; a NULL path or NULL
 # out_len is -2 with a last error; a missing file and a file that is not
 # Parquet are -3 with the reader's message as the last error; a good call after
-# a refusal leaves no error.
+# a refusal leaves no error. A path that is not valid UTF-8 (bytes 0xFF 0xFE) is
+# refused as -3 with a last error that says UTF-8, and does not crash.
 #
 # A gate driver of //src/komira_so:libkomira. It has no dependency: it opens
 # the library with dlopen (RTLD_NOW, through OwnedDLHandle) and calls the
@@ -223,6 +224,22 @@ def main() raises:
     _expect(rc == -3, "a non-Parquet file returned " + String(rc) + ", want -3")
     _expect(len(_last_error(lib, ctx)) > 0, "a non-Parquet file stored no error")
     out_len.free()
+    # A path with bytes that are not UTF-8 is refused, with a message.
+    # SAFETY: allocated here and freed below; NUL-terminated, read to the NUL.
+    var bad_utf8 = alloc[UInt8](4)
+    bad_utf8[0] = UInt8(0xFF)
+    bad_utf8[1] = UInt8(0xFE)
+    bad_utf8[2] = UInt8(ord("x"))
+    bad_utf8[3] = UInt8(0)
+    var out_len2 = alloc[UInt64](1)
+    rc = _call(lib, ctx, Int(bad_utf8), UInt64(0), 0, UInt64(0), Int(out_len2))
+    _expect(rc == -3, "a non-UTF-8 path returned " + String(rc) + ", want -3")
+    _expect(
+        _contains(_last_error(lib, ctx), String("UTF-8")),
+        "a non-UTF-8 path's last error does not say UTF-8",
+    )
+    bad_utf8.free()
+    out_len2.free()
     _ = _check_protocol(lib, ctx, good_c, UInt64(0), String("i64"))
     lib.call["komira_ctx_free", NoneType](ctx)
     print("ok")

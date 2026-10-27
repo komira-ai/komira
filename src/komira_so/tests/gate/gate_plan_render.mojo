@@ -8,6 +8,10 @@
 # or NULL out_len is -2 with a last error; bytes that are not a plan are -3
 # with the decoder's message as the last error; a good call after a refusal
 # leaves no error. The plan's length is an argument: the plan holds NUL bytes.
+# The length is bounded at 64 MiB: 64 MiB plus one and UINT64_MAX (the unsigned
+# image of -1) are -5 with a last error, nothing written and the plan unread
+# (the pointer is a 3-byte buffer); exactly 64 MiB is read in full, and being
+# garbage is -3, not -5.
 #
 # A gate driver of //src/komira_so:libkomira. It has no dependency: it opens
 # the library with dlopen (RTLD_NOW, through OwnedDLHandle) and calls the
@@ -209,6 +213,34 @@ def _check_refusals(
     out_len.free()
 
 
+comptime MAX_INPUT = 64 * 1024 * 1024
+
+
+def _check_cap(lib: OwnedDLHandle, ctx: Int, plan: Int) raises:
+    # SAFETY: allocated here and freed below. `plan` holds 3 bytes; the
+    # over-cap calls must not read it past that (the library refuses first),
+    # and the exact-cap call gets its own MAX_INPUT-byte buffer.
+    var out_len = alloc[UInt64](1)
+    var buf = alloc[UInt8](CAP)
+    buf[0] = UInt8(5)
+    for k in range(2):
+        var n = UInt64(MAX_INPUT + 1) if k == 0 else UInt64.MAX
+        out_len[0] = UInt64(77)
+        var rc = _call(lib, ctx, plan, n, Int(buf), UInt64(CAP), Int(out_len))
+        _expect(rc == -5, "an over-cap length returned " + String(rc) + ", want -5")
+        _expect(out_len[0] == 77 and buf[0] == 5, "an over-cap call wrote")
+        _expect(len(_last_error(lib, ctx)) > 0, "an over-cap call stored no error")
+
+    var big = alloc[UInt8](MAX_INPUT)
+    for i in range(MAX_INPUT):
+        big[i] = UInt8(0xFF)
+    var rc = _call(lib, ctx, Int(big), UInt64(MAX_INPUT), Int(buf), UInt64(CAP), Int(out_len))
+    _expect(rc == -3, "an exactly-64-MiB garbage plan returned " + String(rc) + ", want -3")
+    big.free()
+    buf.free()
+    out_len.free()
+
+
 def main() raises:
     var lib = OwnedDLHandle(LIB)
     var plan = _from_hex(String(SCAN_PLAN_HEX))
@@ -223,6 +255,7 @@ def main() raises:
     var ctx = lib.call["komira_ctx_new", Int]()
     _expect(ctx != 0, "komira_ctx_new returned NULL")
     _check_refusals(lib, ctx, Int(plan_p), UInt64(len(plan)), Int(garbage_p), UInt64(3))
+    _check_cap(lib, ctx, Int(garbage_p))
     var text = _check_protocol(lib, ctx, Int(plan_p), UInt64(len(plan)), String("path=/data/orders.orc"))
     _expect(_contains(text, String('Scan(path="orders"')), "the text does not start with the scan")
     _expect(text[0] == UInt8(ord("S")), "the text does not start with the scan")

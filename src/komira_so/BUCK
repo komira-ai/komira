@@ -6,7 +6,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 # Mojo with no pointer in it; `_c_abi.mojo`, the one file that holds pointers,
 # is not part of it but the source of the `libkomira` target below.
 #
-# test_status holds the five codes, the version scheme (major * 1000 + minor)
+# test_status holds the six codes, the input-length bound, the version scheme (major * 1000 + minor)
 # and buffer_status, the two-call protocol's capacity test; test_session holds
 # the last-error text of a Session (fresh, set, replaced, cleared, moved);
 # test_sources holds the operations on values: a Parquet file registered and
@@ -95,10 +95,17 @@ mojo_library(
 #   gate_register_parquet  a Parquet file is registered by name; NULL ctx -1,
 #                      NULL name or path -2, a missing or non-Parquet file -3
 #                      with the reader's message as the last error;
+#   gate_native_owners the library's DT_NEEDED entries (ELF dynamic section)
+#                      name each native_owners SONAME; an owner dropped from
+#                      the list is embedded silently and fails here;
 #   gate_parquet_schema, gate_csv_binding, gate_json_binding, gate_plan_render
 #                      a good input through the two-call protocol, NULL ctx -1,
 #                      NULL input or out_len -2, a bad file or plan -3 with a
 #                      last error, and a good call afterwards leaves no error.
+#   gate_plan_render also: plan_len 64 MiB plus one and UINT64_MAX are -5 with
+#                      nothing written and no read of the plan; exactly 64 MiB
+#                      is read (garbage, so -3). gate_parquet_schema also: a
+#                      path that is not UTF-8 is -3 with a last error.
 mojo_shared_lib(
     name = "libkomira",
     srcs = ["_c_abi.mojo"],
@@ -119,6 +126,7 @@ mojo_shared_lib(
         "tests/gate/gate_fresh_error.mojo",
         "tests/gate/gate_new_free.mojo",
         "tests/gate/gate_no_extra_exports.mojo",
+        "tests/gate/gate_native_owners.mojo",
         "tests/gate/gate_null_ctx.mojo",
         "tests/gate/gate_null_out_len.mojo",
         "tests/gate/gate_csv_binding.mojo",

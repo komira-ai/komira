@@ -8,7 +8,7 @@ the last-error call) and the source and render calls: registering a Parquet
 file, the schema and scan bindings of Parquet, CSV and JSON files, and a plan
 rendered as text. No call runs a query yet.
 
-- `status.mojo`: the five status codes, `abi_version`, `buffer_status`.
+- `status.mojo`: the six status codes, `KOMIRA_MAX_INPUT_BYTES`, `abi_version`, `buffer_status`, `input_length_status`.
 - `session.mojo`: `Session`, the state a context handle stands for: the last
   error and the catalog of registered tables.
 - `sources.mojo`: what the source and render calls do on values (a path or the
@@ -43,8 +43,9 @@ int32_t  komira_plan_render(void *ctx, const uint8_t *plan, uint64_t plan_len,
 **Status codes.** Every fallible call returns one: `KOMIRA_OK` (0),
 `KOMIRA_ERR_NULL_CTX` (-1, the context is NULL), `KOMIRA_ERR_NULL_ARG` (-2, a
 required pointer other than the context is NULL), `KOMIRA_ERR_ENGINE` (-3, the
-engine refused; the context's last error says why) and
-`KOMIRA_ERR_BUFFER_TOO_SMALL` (-4, below).
+engine refused; the context's last error says why),
+`KOMIRA_ERR_BUFFER_TOO_SMALL` (-4, below) and `KOMIRA_ERR_TOO_LARGE` (-5, a byte
+input is longer than `KOMIRA_MAX_INPUT_BYTES`, 64 MiB; see `komira_plan_render`).
 
 A caller tells the codes apart by value alone: success is zero, every failure
 is negative.
@@ -55,7 +56,10 @@ from komira_so import (
     KOMIRA_ERR_ENGINE,
     KOMIRA_ERR_NULL_ARG,
     KOMIRA_ERR_NULL_CTX,
+    KOMIRA_ERR_TOO_LARGE,
+    KOMIRA_MAX_INPUT_BYTES,
     KOMIRA_OK,
+    input_length_status,
 )
 from std.testing import assert_equal, assert_true
 
@@ -64,6 +68,13 @@ assert_equal(KOMIRA_ERR_NULL_CTX, Int32(-1))
 assert_equal(KOMIRA_ERR_NULL_ARG, Int32(-2))
 assert_equal(KOMIRA_ERR_ENGINE, Int32(-3))
 assert_equal(KOMIRA_ERR_BUFFER_TOO_SMALL, Int32(-4))
+assert_equal(KOMIRA_ERR_TOO_LARGE, Int32(-5))
+assert_equal(KOMIRA_MAX_INPUT_BYTES, UInt64(64 * 1024 * 1024))
+assert_equal(input_length_status(KOMIRA_MAX_INPUT_BYTES), KOMIRA_OK)
+assert_equal(
+    input_length_status(KOMIRA_MAX_INPUT_BYTES + UInt64(1)),
+    KOMIRA_ERR_TOO_LARGE,
+)
 assert_true(KOMIRA_ERR_ENGINE < KOMIRA_OK)
 ```
 
@@ -129,7 +140,8 @@ text the next call returns.
 status code; on `KOMIRA_ERR_ENGINE` the context's last error holds the engine's
 message. Every one of them clears the previous last error when it starts, so
 after a success the error is empty. A `const char *` is a NUL-terminated UTF-8
-string the caller keeps alive for the call.
+string the caller keeps alive for the call; one that is not valid UTF-8 is
+refused (-3, with a last error) before it is used.
 
 | call | what it does | refusals |
 |---|---|---|
@@ -137,7 +149,7 @@ string the caller keeps alive for the call.
 | `komira_parquet_schema(ctx, path, out_buf, out_cap, out_len)` | the file's Arrow schema as `komira.plan.v1` `WireSchema` bytes, for a plan author to splice into a Parquet scan | NULL `path` or `out_len`: -2. A file that cannot be read: -3 |
 | `komira_csv_binding(ctx, path, delimiter, has_header, all_varchar, out_buf, out_cap, out_len)` | the whole `WireScanBinding` of a CSV file, schema inferred from a bounded prefix of an uncompressed file (a compressed file is read whole). `has_header` and `all_varchar` are `int32_t`; any non-zero value is true | as `komira_parquet_schema` |
 | `komira_json_binding(ctx, path, out_buf, out_cap, out_len)` | the same for a newline-delimited JSON file; the schema comes from the leading records | as `komira_parquet_schema` |
-| `komira_plan_render(ctx, plan, plan_len, out_buf, out_cap, out_len)` | decodes the serialized plan `plan[0..plan_len]` (a `WirePlanEnvelope`) and writes its text as authored, before any optimizer rule; the plan is not run | NULL `plan` or `out_len`: -2. Bytes that are not an admissible plan: -3 |
+| `komira_plan_render(ctx, plan, plan_len, out_buf, out_cap, out_len)` | decodes the serialized plan `plan[0..plan_len]` (a `WirePlanEnvelope`) and writes its text as authored, before any optimizer rule; the plan is not run | NULL `plan` or `out_len`: -2. `plan_len` above 64 MiB (`KOMIRA_MAX_INPUT_BYTES`): -5, checked before the plan is read or anything is allocated; exactly 64 MiB is accepted. Bytes that are not an admissible plan: -3 |
 
 The four calls with an `out_buf` follow the two-call protocol above. The
 binding and schema bytes are what a plan author splices into a scan leaf: the
@@ -152,7 +164,7 @@ computed by the caller. A NULL `ctx` is -1 for all five.
 ```
 
 The library is published only if the gate passes: the exports check, then
-twelve drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a
+thirteen drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a
 foreign host would. Seven cover the skeleton: the version (1001, which is 1.1),
 create and free (distinct handles, separate sessions), no symbol beyond the
 nine, a fresh session's empty error, the two-call protocol (zero capacity, one
@@ -164,7 +176,13 @@ two-call protocol; a good call after a refusal leaves no error.
 `exports_exact` makes the nine names above the whole dynamic symbol table.
 The seven C owners in the library's closure (async, async_api, compression, fs,
 libc, metrics, scan_source) are linked as their own shared libraries
-(`native_owners`), not embedded.
+(`native_owners`), not embedded. The thirteenth driver, `gate_native_owners`,
+reads the `DT_NEEDED` entries of the library's ELF dynamic section and requires
+the SONAME of each of the seven (`libkomira_<owner>_native.so.1`); an owner
+dropped from `native_owners` leaves its C embedded, and that driver fails.
+The plan driver also refuses a `plan_len` of 64 MiB plus one and of
+`UINT64_MAX` (-5, nothing written), and accepts exactly 64 MiB as a length;
+`gate_parquet_schema` passes a path that is not valid UTF-8 and requires -3.
 
 Like every Mojo library, `libkomira` has `DT_NEEDED libKGENCompilerRTShared.so`
 and finds the Mojo runtime in `lib/` beside it

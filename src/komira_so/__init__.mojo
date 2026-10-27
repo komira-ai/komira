@@ -1,9 +1,10 @@
 """`komira_so` -- the C ABI of komira's one shared library, `libkomira`.
 
 - `status.mojo`: the status codes every fallible call returns (`KOMIRA_OK`
-  and the four negative `KOMIRA_ERR_*` codes), the ABI version
-  (`abi_version`, `ABI_MAJOR`, `ABI_MINOR`) and `buffer_status`, the test the
-  two-call output protocol applies to a caller's buffer.
+  and the five negative `KOMIRA_ERR_*` codes), the ABI version
+  (`abi_version`, `ABI_MAJOR`, `ABI_MINOR`), `buffer_status`, the test the
+  two-call output protocol applies to a caller's buffer, and
+  `input_length_status`, the bound on a byte input (`KOMIRA_MAX_INPUT_BYTES`).
 - `session.mojo`: `Session`, the state behind a context handle: the text of
   the last error and the catalog of registered tables.
 - `sources.mojo`: what the source and render exports do on values:
@@ -31,7 +32,10 @@ from .status import (
     KOMIRA_ERR_ENGINE,
     KOMIRA_ERR_NULL_ARG,
     KOMIRA_ERR_NULL_CTX,
+    KOMIRA_ERR_TOO_LARGE,
+    KOMIRA_MAX_INPUT_BYTES,
     KOMIRA_OK,
     abi_version,
     buffer_status,
+    input_length_status,
 )
