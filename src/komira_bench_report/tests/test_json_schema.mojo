@@ -24,6 +24,14 @@
 #   differs from the recomputed one by far less than 1e-9 is read, a larger
 #   difference is refused, and so is a headline whose geomean figure belongs
 #   to neither value.
+# - test_reader_compares_the_rest_of_the_headline: a stored headline whose
+#   PASS count differs from the cells' is refused although its geomean figure
+#   is right.
+# - test_compared_cells_need_a_run_of_mode_both: a run of mode duckdb refuses
+#   a cell whose values were compared and accepts the same cell unverified.
+# - test_control_characters_are_refused_in_free_text: a control character in
+#   the operating system text or in the detail of an UNSUPPORTED or an
+#   UNVERIFIED cell is refused.
 # - test_details_refuse_paths: the construct of UNSUPPORTED and the cause of
 #   UNVERIFIED are text about the cell, never a place on a machine.
 
@@ -368,6 +376,50 @@ def test_reader_tolerates_the_last_digits_of_the_geomean() raises:
     assert_true(_refused(_altered(good, String("geomean 0.91x"), String("geomean 0.92x"))))
 
 
+def test_reader_compares_the_rest_of_the_headline() raises:
+    var good = write_result_json(_sample())
+    assert_true(not _refused(good))
+    assert_true(_refused(_altered(good, String("PASS 2/5"), String("PASS 3/5"))))
+    assert_true(_refused(_altered(good, String("<= 1.05x"), String("<= 1.50x"))))
+
+
+def test_compared_cells_need_a_run_of_mode_both() raises:
+    var r = _sample()
+    r.run.mode = String("duckdb")
+    var cells = List[Cell]()
+    cells.append(_cell(String("tpch/q02"), String("tpch"), StageOutcome.exec_ok(),
+        _side(10, 2.0, 2.0), _side(10, 2.0, 2.0), ValueVerdict.identical()))
+    r.cells = cells^
+    assert_true(_write_refused(r))
+    r.cells[0] = _cell(String("tpch/q02"), String("tpch"), StageOutcome.exec_ok(),
+        _side(10, 2.0, 2.0), _side(10, 2.0, 2.0), ValueVerdict.divergent())
+    assert_true(_write_refused(r))
+    r.cells[0] = _cell(String("tpch/q02"), String("tpch"), StageOutcome.exec_ok(),
+        _side(10, 2.0, 2.0), _side(10, 2.0, 2.0), ValueVerdict.unverified(String("not compared")))
+    assert_true(not _write_refused(r))
+
+
+def test_control_characters_are_refused_in_free_text() raises:
+    var r = _sample()
+    r.env.os = String("Linux\n6.1")
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.env.cpu_model = String("Example\tCPU")
+    assert_true(_write_refused(r))
+    var raised = False
+    try:
+        _ = StageOutcome.unsupported(String("window\nframe"))
+    except:
+        raised = True
+    assert_true(raised)
+    raised = False
+    try:
+        _ = ValueVerdict.unverified(String("no\treference"))
+    except:
+        raised = True
+    assert_true(raised)
+
+
 def main() raises:
     var failed = String("")
     try:
@@ -406,6 +458,18 @@ def main() raises:
         test_reader_tolerates_the_last_digits_of_the_geomean()
     except e:
         failed += "\n  test_reader_tolerates_the_last_digits_of_the_geomean: " + String(e)
+    try:
+        test_reader_compares_the_rest_of_the_headline()
+    except e:
+        failed += "\n  test_reader_compares_the_rest_of_the_headline: " + String(e)
+    try:
+        test_compared_cells_need_a_run_of_mode_both()
+    except e:
+        failed += "\n  test_compared_cells_need_a_run_of_mode_both: " + String(e)
+    try:
+        test_control_characters_are_refused_in_free_text()
+    except e:
+        failed += "\n  test_control_characters_are_refused_in_free_text: " + String(e)
     if failed.byte_length() > 0:
         raise Error("test_json_schema: FAILED" + failed)
     print("test_json_schema: OK")

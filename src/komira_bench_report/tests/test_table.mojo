@@ -159,6 +159,9 @@ def test_format_fixed() raises:
     # Beyond what an integer can hold the text saturates instead of wrapping.
     assert_equal(format_fixed(1e300, 2), String(">=1e15"))
     assert_equal(format_fixed(-1e300, 2), String("<=-1e15"))
+    assert_equal(format_fixed(1e15, 0), String(">=1e15"))
+    assert_equal(format_fixed(-1e15, 0), String("<=-1e15"))
+    assert_equal(format_fixed(999999999999999.0, 0), String("999999999999999"))
     assert_equal(format_fixed(123456789012.5, 2), String("123456789012.50"))
 
 
