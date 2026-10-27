@@ -49,6 +49,7 @@ from komira_kafka_server.wire.consumer_group import (
     encode_consumer_assignment,
     decode_consumer_assignment,
     CONSUMER_PROTOCOL_VERSION,
+    ERROR_ILLEGAL_GENERATION,
     ERROR_REBALANCE_IN_PROGRESS,
     ERROR_UNKNOWN_MEMBER_ID,
 )
@@ -263,7 +264,7 @@ def test_sync_leader_stores_then_member_reads() raises:
     print("PASS test_sync_leader_stores_then_member_reads")
 
 
-def test_heartbeat_none_when_stable_then_rebalance_on_leave() raises:
+def test_heartbeat_none_when_stable_then_illegal_generation() raises:
     var c = _new_coordinator()
     var topics = List[String]()
     topics.append(String("t1"))
@@ -292,15 +293,16 @@ def test_heartbeat_none_when_stable_then_rebalance_on_leave() raises:
     # Heartbeat with the right generation -> NONE.
     var hb = c.heartbeat(String("g1"), r.member_id.copy(), r.generation_id)
     _check(hb == Int16(0), "heartbeat: NONE when stable")
-    # Heartbeat with a stale (wrong) generation -> REBALANCE_IN_PROGRESS.
+    # Heartbeat with a stale (wrong) generation on a Stable group ->
+    # ILLEGAL_GENERATION.
     var hb_stale = c.heartbeat(
         String("g1"), r.member_id.copy(), r.generation_id - Int32(1)
     )
     _check(
-        hb_stale == ERROR_REBALANCE_IN_PROGRESS,
-        "heartbeat: stale gen -> rebalance",
+        hb_stale == ERROR_ILLEGAL_GENERATION,
+        "heartbeat: stale gen -> illegal generation",
     )
-    print("PASS test_heartbeat_none_when_stable_then_rebalance_on_leave")
+    print("PASS test_heartbeat_none_when_stable_then_illegal_generation")
 
 
 def test_heartbeat_codes_and_liveness_stamp() raises:
@@ -965,7 +967,7 @@ def main() raises:
     test_join_mints_member_id_and_first_generation()
     test_state_transitions_to_completing_after_join()
     test_sync_leader_stores_then_member_reads()
-    test_heartbeat_none_when_stable_then_rebalance_on_leave()
+    test_heartbeat_none_when_stable_then_illegal_generation()
     test_heartbeat_codes_and_liveness_stamp()
     test_leave_bumps_generation_and_preparing()
     test_leave_last_member_goes_empty()

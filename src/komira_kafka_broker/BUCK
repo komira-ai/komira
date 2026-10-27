@@ -41,6 +41,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # - test_kafka_rebalance_convergence_race: a stale member id is reaped at the
 #   close, and a SyncGroup with a ghost slice, a double assign or a gap is
 #   rejected while a correct split completes.
+# - test_kafka_rebalance_faults: the coordinator over a store that fails: state.json
+#   text with quotes and control characters and a client id written to forge the
+#   state, a 403 that names "404" read as an absent group, the state key of a
+#   group id holding "/" or empty, lost swaps retried and exhausted in join,
+#   sync, leave and heartbeat, a 503 naming "412" not retried, the error codes of
+#   SyncGroup, LeaveGroup and Heartbeat, and a follower's assignment ignored.
 # - test_kafka_rebalance_leapfrog_race: a leader's stale SyncGroup is rejected
 #   when a member joined the same generation, and the rejoin converges.
 # - test_envelope_bridge: records to the envelope and back, exactly, with null
@@ -67,6 +73,7 @@ mojo_library(
         "tests/test_kafka_rebalance.mojo",
         "tests/test_kafka_rebalance_convergence_race.mojo",
         "tests/test_kafka_rebalance_deadline_race.mojo",
+        "tests/test_kafka_rebalance_faults.mojo",
         "tests/test_kafka_rebalance_leapfrog_race.mojo",
         "tests/test_kafka_rebalance_wire.mojo",
     ],

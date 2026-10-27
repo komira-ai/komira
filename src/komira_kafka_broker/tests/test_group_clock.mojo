@@ -62,8 +62,8 @@ def test_manual_clock_sleep_of_nothing_moves_nothing() raises:
 
 def test_system_clock_reads_unix_epoch_milliseconds() raises:
     var c = SystemGroupClock()
-    # 2023-11-14 in epoch milliseconds: any real wall clock is past it, and a
-    # clock in seconds or microseconds is not in this range.
+    # Epoch milliseconds are above 1.7e12 and below 1e14; a clock in seconds or
+    # in microseconds is outside this range.
     var now = c.now_ms()
     assert_true(now > Int64(1_700_000_000_000))
     assert_true(now < Int64(100_000_000_000_000))

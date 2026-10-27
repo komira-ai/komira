@@ -6,7 +6,10 @@
 # This module holds its in-memory model (GroupMember, GroupState), the group
 # lifecycle state names, the timing constants the state carries, and the JSON
 # encoder and decoder for the object. The JSON is hand-written: bytes in, bytes
-# out, with the member blobs hex-encoded so the body stays text.
+# out, with the member blobs hex-encoded so the body stays text. Strings that
+# come from the wire (member ids, the leader, protocol names) are JSON-escaped on
+# the way out and unescaped on the way in, so a quote, a backslash or a control
+# character in an id cannot end the string it sits in.
 #
 #   {"generation_id":N,"leader":"<id>","protocol":"range",
 #    "protocol_type":"consumer","state":"Stable","rebalance_deadline":N,
@@ -61,13 +64,13 @@ struct GroupMember(Copyable, Movable, Deinitable):
     equals the group's current generation.
     `last_active_ms` is the wall-clock (ms) of this member's last LIVENESS
     signal — refreshed on EVERY JoinGroup AND EVERY Heartbeat. A member is
-    SESSION-ALIVE iff `now - last_active_ms < session_timeout_ms`. The rebalance
-    deadline-close path keeps a session-alive incumbent that has not yet
-    rejoined at the new generation (re-anchoring it to the current generation
-    and carrying its prior subscription) instead of silently dropping it —
-    a still-alive member is NEVER evicted on the rebalance deadline, only on
-    genuine session expiry. This keeps a member alive across
-    the rebalance deadline."""
+    SESSION-ALIVE iff `now - last_active_ms < session_timeout_ms`. When a round
+    closes, a session-alive incumbent that has not yet rejoined at the new
+    generation is kept (re-anchored to the current generation, carrying its
+    prior subscription) instead of being dropped on the rebalance deadline; an
+    older-generation member whose session has expired is dropped. The check
+    runs only when a round closes: nothing sweeps a member out of a Stable
+    group."""
 
     var member_id: String
     var subscription: List[UInt8]
@@ -108,24 +111,24 @@ struct GroupState(Movable, Deinitable):
     var protocol_type: String  # "consumer"
     var state: String  # one of GROUP_STATE_*
     var rebalance_deadline_ms: Int64
-    # The session timeout (ms) the group's members negotiated — a member that
-    # has not heartbeat-or-joined within this window is evicted; one still
-    # within it is SESSION-ALIVE and is never dropped on the rebalance deadline.
-    # Carried in state.json so every broker driving the group reads the same
-    # session bound.
+    # The session timeout (ms) the group's members negotiated. When a round
+    # closes, an older-generation member that has not heartbeat-or-joined within
+    # this window is dropped; one still within it is SESSION-ALIVE and is kept.
+    # Nothing evicts a member outside a closing round. Carried in state.json so
+    # every broker driving the group reads the same session bound.
     var session_timeout_ms: Int64
     # The wall-clock (ms) at which the CURRENT rebalance round OPENED (the join
     # that bumped the generation / re-prepared a Stable group). Used to reap a
     # GHOST member: an old-generation member is only carried forward on the
-    # session-aware close if it ACTIVELY re-confirmed (join or heartbeat) since
-    # the round opened (last_active_ms >= round_opened_ms). A stale id whose
-    # last_active predates the round (a consumer that reconnected under a NEW
+    # session-aware close if it was active (join or heartbeat) no earlier than
+    # GHOST_STALE_GRACE_MS before the round opened
+    # (last_active_ms >= round_opened_ms - GHOST_STALE_GRACE_MS). A stale id
+    # whose last_active predates that (a consumer that reconnected under a NEW
     # member_id, leaving its OLD id behind, or a member that has gone silent) is
-    # dropped even when nominally inside the session window — that is what keeps
-    # a ghost from inflating the leader's split into an N-way over-split (the
-    # "A flaps to [2,3], B never converges" convergence race). Stamped in
-    # state.json so every broker reads the same round-open instant. Additive
-    # trailing scalar (absent => 0, which keeps the legacy session-only rule).
+    # dropped even when nominally inside the session window, so a ghost cannot
+    # widen the leader's split. Stamped in state.json so every broker reads the
+    # same round-open instant. A state.json without the field reads as 0, and 0
+    # skips the round-open test (only the session test applies).
     var round_opened_ms: Int64
     var members: List[GroupMember]
     # The etag from the store (empty when not yet persisted) — carried so a
@@ -167,11 +170,8 @@ struct GroupState(Movable, Deinitable):
 # JSON encode and parse of state.json.
 # =============================================================================
 #
-# Shape (members + their blobs hex-encoded so the JSON stays text-clean):
-# {"generation_id":N,"leader":"<id>","protocol":"range",
-#  "protocol_type":"consumer","state":"Stable","rebalance_deadline":N,
-#  "members":[{"member_id":"<id>","subscription":"<hex>","assignment":"<hex>",
-#              "join_generation":N}, ...]}
+# The shape is the one in the header: members and their blobs are hex-encoded so
+# the JSON stays text-clean.
 
 
 def _hex_encode(data: List[UInt8]) -> String:
@@ -208,18 +208,39 @@ def _hex_decode(s: String) -> List[UInt8]:
     return out^
 
 
+def _json_escape(s: String) -> String:
+    """`s` as the inside of a JSON string: `"` and `\\` get a backslash and a
+    control character below 0x20 becomes `\\u00XX`."""
+    var digit_chars = String("0123456789abcdef")
+    var digits = digit_chars.as_bytes()
+    var out = List[UInt8]()
+    var bs = s.as_bytes()
+    for i in range(len(bs)):
+        var c = bs[i]
+        if c == UInt8(ord('"')) or c == UInt8(ord("\\")):
+            out.append(UInt8(ord("\\")))
+            out.append(c)
+        elif c < UInt8(0x20):
+            out.extend(String("\\u00").as_bytes())
+            out.append(digits[Int(c >> 4)])
+            out.append(digits[Int(c & 0xF)])
+        else:
+            out.append(c)
+    return String(StringSlice(unsafe_from_utf8=Span(out)))
+
+
 def encode_group_state_json(st: GroupState) -> List[UInt8]:
     """Serialize a GroupState to the state.json body bytes."""
     var s = String('{"generation_id":')
     s += String(st.generation_id)
     s += String(',"leader":"')
-    s += st.leader_member_id
+    s += _json_escape(st.leader_member_id)
     s += String('","protocol":"')
-    s += st.protocol
+    s += _json_escape(st.protocol)
     s += String('","protocol_type":"')
-    s += st.protocol_type
+    s += _json_escape(st.protocol_type)
     s += String('","state":"')
-    s += st.state
+    s += _json_escape(st.state)
     s += String('","rebalance_deadline":')
     s += String(st.rebalance_deadline_ms)
     s += String(',"session_timeout":')
@@ -232,7 +253,7 @@ def encode_group_state_json(st: GroupState) -> List[UInt8]:
         if i > 0:
             s += String(",")
         s += String('{"member_id":"')
-        s += m.member_id
+        s += _json_escape(m.member_id)
         s += String('","subscription":"')
         s += _hex_encode(m.subscription)
         s += String('","assignment":"')
@@ -276,20 +297,67 @@ def _parse_int64_at(s: String, pos: Int) -> Int64:
     return -v if neg else v
 
 
+def _hex4(bs: Span[UInt8, _], at: Int) -> Int:
+    """The value of the four hex digits at `at`, or -1 if they are not there."""
+    if at + 4 > len(bs):
+        return -1
+    var v = 0
+    for k in range(4):
+        var c = bs[at + k]
+        var is_hex = (
+            (c >= UInt8(ord("0")) and c <= UInt8(ord("9")))
+            or (c >= UInt8(ord("a")) and c <= UInt8(ord("f")))
+            or (c >= UInt8(ord("A")) and c <= UInt8(ord("F")))
+        )
+        if not is_hex:
+            return -1
+        v = (v << 4) | _hex_nibble(c)
+    return v
+
+
 def _parse_string_at(s: String, pos: Int) -> String:
-    """Parse a JSON string value at `pos` (must point at the opening `"`).
-    Group ids / member ids / hex blobs contain no escape chars, so this is a
-    plain quote-to-quote scan."""
+    """Parse a JSON string value at `pos` (must point at the opening `"`),
+    undoing the escapes `_json_escape` writes (and the other single-character
+    escapes of JSON). The string ends at the first `"` that no backslash
+    escapes."""
     var bs = s.as_bytes()
     var i = pos
     var n = len(bs)
     if i >= n or bs[i] != UInt8(ord('"')):
         return String("")
     i += 1
-    var start = i
+    var out = List[UInt8]()
     while i < n and bs[i] != UInt8(ord('"')):
-        i += 1
-    return String(StringSlice(unsafe_from_utf8=bs[start:i]))
+        var c = bs[i]
+        if c != UInt8(ord("\\")) or i + 1 >= n:
+            out.append(c)
+            i += 1
+            continue
+        var e = bs[i + 1]
+        i += 2
+        if e == UInt8(ord("n")):
+            out.append(UInt8(10))
+        elif e == UInt8(ord("t")):
+            out.append(UInt8(9))
+        elif e == UInt8(ord("r")):
+            out.append(UInt8(13))
+        elif e == UInt8(ord("b")):
+            out.append(UInt8(8))
+        elif e == UInt8(ord("f")):
+            out.append(UInt8(12))
+        elif e == UInt8(ord("u")):
+            var code = _hex4(bs, i)
+            if code < 0:
+                out.append(e)
+            else:
+                i += 4
+                if code < 0x80:
+                    out.append(UInt8(code))
+                else:
+                    out.extend(chr(code).as_bytes())
+        else:
+            out.append(e)  # `"`, `\\`, `/`
+    return String(StringSlice(unsafe_from_utf8=Span(out)))
 
 
 def decode_group_state_json(
@@ -327,15 +395,13 @@ def decode_group_state_json(
     var dp = _find_key(s, String("rebalance_deadline"), 0)
     if dp >= 0:
         deadline = _parse_int64_at(s, dp)
-    # `session_timeout` is an additive trailing scalar (absent in older
-    # state.json) — default to DEFAULT_SESSION_TIMEOUT_MS when missing.
+    # `session_timeout` reads as DEFAULT_SESSION_TIMEOUT_MS when missing.
     var session_timeout = DEFAULT_SESSION_TIMEOUT_MS
     var stp = _find_key(s, String("session_timeout"), 0)
     if stp >= 0:
         session_timeout = _parse_int64_at(s, stp)
-    # `round_opened` is an additive trailing scalar (absent in older
-    # state.json) — default to 0, which keeps the legacy session-only carry rule
-    # (no member is reaped on the round-open test when the field is missing).
+    # `round_opened` reads as 0 when missing, and 0 skips the round-open test
+    # (no member is reaped on it).
     var round_opened = Int64(0)
     var rop = _find_key(s, String("round_opened"), 0)
     if rop >= 0:
@@ -363,11 +429,10 @@ def decode_group_state_json(
             var jg = Int32(0)
             if jgp >= 0:
                 jg = Int32(Int(_parse_int64_at(s, jgp)))
-            # `last_active` is the per-member additive trailing scalar; parse it
-            # after join_generation (still inside THIS member object — the next
-            # member's member_id key is further along). Absent in older
-            # state.json => 0 (treated as long-idle, but the deadline path stamps
-            # it on the next join, and heartbeat refreshes it).
+            # `last_active` follows join_generation inside THIS member object
+            # (the next member's member_id key is further along). Missing
+            # reads as 0, a long-idle member; the next join or heartbeat stamps
+            # it.
             var lap = _find_key(s, String("last_active"), jgp) if jgp >= 0 else -1
             var la = Int64(0)
             if lap >= 0:

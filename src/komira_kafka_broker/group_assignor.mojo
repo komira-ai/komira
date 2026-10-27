@@ -40,22 +40,6 @@ def range_assign(
     return out^
 
 
-def _sort_strings_ascending(var xs: List[String]) -> List[String]:
-    """Insertion sort (member counts are tiny). Deterministic ascending order —
-    the RangeAssignor + leader election both depend on it."""
-    var n = len(xs)
-    for i in range(1, n):
-        var j = i
-        while j > 0 and xs[j - 1] > xs[j]:
-            var tmp = xs[j - 1].copy()
-            xs[j - 1] = xs[j].copy()
-            xs[j] = tmp^
-            j -= 1
-    return xs^
-
-
-
-
 def pick_protocol_name(protocols_names: List[String]) -> String:
     """Pick the assignor the group will use. We prefer "range" (the Kafka
     default + what we implement); if the member did not offer "range" we take

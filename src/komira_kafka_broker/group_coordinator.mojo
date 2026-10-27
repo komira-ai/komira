@@ -37,6 +37,10 @@
 # Time is read and waited on through the coordinator's GroupClock, so a test
 # passes a ManualGroupClock and no test waits in real time.
 #
+# Session expiry happens only when a round closes (reconcile_members drops an
+# expired older-generation member then). No handler sweeps a silent member out
+# of a Stable group, and none starts a rebalance for it.
+#
 # No pointer type appears in any signature; the store is owned by value and
 # used through its typed API (conditional_put, compare_and_swap, get, head).
 # =============================================================================
@@ -47,6 +51,7 @@ from komira_objectstore.types import WritePrecondition
 
 from komira_kafka_server.wire.consumer_group import (
     JoinGroupResponseMember,
+    ERROR_ILLEGAL_GENERATION,
     ERROR_REBALANCE_IN_PROGRESS,
     ERROR_UNKNOWN_MEMBER_ID,
 )
@@ -54,6 +59,7 @@ from komira_kafka_server.wire.consumer_group import (
 from .group_assignor import pick_protocol_name
 from .group_clock import GroupClock
 from .group_membership import assignment_is_valid, reconcile_members
+from .store_support import group_path_segment, is_lost_cas, is_not_found
 from .group_state import (
     GroupMember,
     GroupState,
@@ -68,7 +74,10 @@ from .group_state import (
 
 # The poll interval (ms) of the join and sync barriers, and a cap on poll
 # iterations so a wedged store cannot hang a handler. The deadline is the
-# request's rebalance_timeout_ms; these bound the polling.
+# request's rebalance_timeout_ms; these bound the polling. The product is a
+# 40 second ceiling on one wait: a rebalance_timeout_ms above it closes the
+# JoinGroup wait at the ceiling, and a SyncGroup follower whose leader has not
+# synced by then is answered REBALANCE_IN_PROGRESS.
 comptime JOIN_POLL_INTERVAL_MS: Int64 = 20
 comptime JOIN_POLL_MAX_ITERS: Int = 2000
 
@@ -147,14 +156,17 @@ struct GroupCoordinator[
     def _now(mut self) -> Int64:
         return self.clock.now_ms()
 
-
     # -- key + member-id helpers ---------------------------------------------
 
-    def _state_key(self, group_id: String) -> String:
+    def _state_key(self, group_id: String) raises -> String:
+        """`<cluster>/_meta/groups/<group>/state.json`, with the group id
+        encoded as the offset store encodes it. An empty id has no key."""
+        if group_id.byte_length() == 0:
+            raise Error("group_coordinator: empty group id")
         return (
             self._cluster
             + String("/_meta/groups/")
-            + group_id
+            + group_path_segment(group_id)
             + String("/state.json")
         )
 
@@ -168,7 +180,9 @@ struct GroupCoordinator[
         splits. The token is omitted on the single-broker / offline path (no
         cross-broker collision is possible there)."""
         self._member_seq += Int64(1)
-        var cid = client_id if client_id.byte_length() > 0 else String("consumer")
+        var cid = client_id.copy()
+        if cid.byte_length() == 0:
+            cid = String("consumer")
         var out = cid + String("-")
         if self._node_token.byte_length() > 0:
             out += self._node_token + String("-")
@@ -185,7 +199,7 @@ struct GroupCoordinator[
             return Optional(decode_group_state_json(body^, meta.etag.copy()))
         except e:
             var msg = String(e)
-            if msg.find("not_found") >= 0 or msg.find("404") >= 0:
+            if is_not_found(msg):
                 return Optional[GroupState]()
             raise Error(msg)
 
@@ -205,16 +219,6 @@ struct GroupCoordinator[
             return meta.etag.copy()
         var meta = self._store.compare_and_swap(path, body^, st.etag)
         return meta.etag.copy()
-
-    @staticmethod
-    def _is_precondition_failure(msg: String) -> Bool:
-        """A lost CAS surfaces as a 412 / precondition Error from the store."""
-        return (
-            msg.find("412") >= 0
-            or msg.find("precondition") >= 0
-            or msg.find("If-Match") >= 0
-            or msg.find("If-None-Match") >= 0
-        )
 
     # -- JoinGroup -----------------------------------------------------------
 
@@ -240,6 +244,7 @@ struct GroupCoordinator[
         # --- phase 1: CAS-register the member (retry on lost CAS) ------------
         var my_member_id = String("")
         var my_generation = Int32(0)
+        var registered = False
         for _attempt in range(256):
             var loaded = self._load(group_id)
             var member_id = member_id_in.copy()
@@ -357,12 +362,23 @@ struct GroupCoordinator[
                 my_generation = Int32(1)
             try:
                 _ = self._cas_store(group_id, st)
+                registered = True
                 break
             except e:
                 var msg = String(e)
-                if Self._is_precondition_failure(msg):
+                if is_lost_cas(msg):
                     continue  # lost CAS — re-read + retry
                 raise Error(msg)
+        if not registered:
+            # Every swap lost: the member was never stored.
+            return JoinResult(
+                member_id_in.copy(),
+                Int32(0),
+                String(""),
+                protocol^,
+                List[JoinGroupResponseMember](),
+                ERROR_REBALANCE_IN_PROGRESS,
+            )
 
         # --- phase 2: poll until the rebalance window closes -----------------
         # The window closes when now >= rebalance_deadline. (In the
@@ -422,12 +438,15 @@ struct GroupCoordinator[
         #     momentarily missing a peer cannot elect a different leader).
         # Every JoinGroup response then ECHOES the persisted leader read back
         # from the final state — so all members agree.
+        var closed = False
         for _attempt in range(256):
             var loaded = self._load(group_id)
             if not loaded:
+                closed = True
                 break
             var st = loaded.take()
             if st.generation_id != current_gen:
+                closed = True
                 break  # a newer rebalance superseded us — leave it alone
 
             # SESSION-AWARE WINDOW CLOSE (a still-alive incumbent is never dropped on the deadline). The
@@ -486,12 +505,23 @@ struct GroupCoordinator[
                 st.state = String(GROUP_STATE_COMPLETING)
             try:
                 _ = self._cas_store(group_id, st)
+                closed = True
                 break
             except e:
                 var msg = String(e)
-                if Self._is_precondition_failure(msg):
+                if is_lost_cas(msg):
                     continue
                 raise Error(msg)
+        if not closed:
+            # Every swap lost: the round was not moved to CompletingRebalance.
+            return JoinResult(
+                my_member_id^,
+                current_gen,
+                String(""),
+                protocol^,
+                List[JoinGroupResponseMember](),
+                ERROR_REBALANCE_IN_PROGRESS,
+            )
 
         # Re-read the final state so the response echoes the PERSISTED leader +
         # the full member set at this generation (consistent across all members).
@@ -534,16 +564,18 @@ struct GroupCoordinator[
         leader_assignments_member_ids: List[String],
         leader_assignments_blobs: List[List[UInt8]],
     ) raises -> Tuple[List[UInt8], Int16]:
-        """If THIS member is the leader (it sent assignments), CAS-store every
-        member's assignment blob into state.json + transition to Stable. Then
-        (leader or follower) poll until Stable and return THIS member's stored
-        assignment blob.
+        """If THIS member is the group's leader and sent assignments, CAS-store
+        every member's assignment blob into state.json + transition to Stable.
+        Assignments sent by any other member are ignored, as Kafka ignores them.
+        Then (leader or follower) poll until Stable and return THIS member's
+        stored assignment blob.
 
         Returns (assignment_blob, error_code).
         """
         # --- phase 1 (leader): store assignments + go Stable -----------------
         var has_assignments = len(leader_assignments_member_ids) > 0
         if has_assignments:
+            var stored = False
             for _attempt in range(256):
                 var loaded = self._load(group_id)
                 if not loaded:
@@ -552,6 +584,11 @@ struct GroupCoordinator[
                 if st.generation_id != generation_id:
                     # A newer rebalance started — tell the leader to rejoin.
                     return (List[UInt8](), ERROR_REBALANCE_IN_PROGRESS)
+                if st.leader_member_id != member_id:
+                    # Not the leader: its assignments are ignored; it waits for
+                    # the leader's like a follower.
+                    stored = True
+                    break
                 if not assignment_is_valid(
                     st,
                     generation_id,
@@ -570,12 +607,15 @@ struct GroupCoordinator[
                 st.state = String(GROUP_STATE_STABLE)
                 try:
                     _ = self._cas_store(group_id, st)
+                    stored = True
                     break
                 except e:
                     var msg = String(e)
-                    if Self._is_precondition_failure(msg):
+                    if is_lost_cas(msg):
                         continue
                     raise Error(msg)
+            if not stored:
+                return (List[UInt8](), ERROR_REBALANCE_IN_PROGRESS)
 
         # --- phase 2: poll until Stable, then read this member's assignment --
         for _poll in range(JOIN_POLL_MAX_ITERS):
@@ -604,10 +644,9 @@ struct GroupCoordinator[
     ) raises -> Int16:
         """Return NONE(0) when the group is Stable + the member's generation
         matches. Return REBALANCE_IN_PROGRESS(27) when a rebalance is underway
-        (the group is not Stable, or the generation moved past the member's) so
-        the member rejoins. UNKNOWN_MEMBER_ID(25) if the member is not in the
-        group. ILLEGAL_GENERATION(22) if the generation is older than the
-        group's current generation but the group is Stable.
+        (the group is not Stable) so the member rejoins. UNKNOWN_MEMBER_ID(25)
+        if the member is not in the group. ILLEGAL_GENERATION(22) if the group
+        is Stable and the generation is not the group's, older or newer.
 
         A heartbeat is ALSO a LIVENESS signal — it refreshes the member's
         `last_active_ms` via a best-effort CAS so a still-alive incumbent that
@@ -632,9 +671,8 @@ struct GroupCoordinator[
             # member to rejoin.
             code = ERROR_REBALANCE_IN_PROGRESS
         elif generation_id != st.generation_id:
-            # Stable but the member is on a stale generation: a rebalance
-            # completed without it -> rejoin.
-            code = ERROR_REBALANCE_IN_PROGRESS
+            # Stable but the member is on another generation: it must rejoin.
+            code = ERROR_ILLEGAL_GENERATION
 
         # Best-effort liveness refresh (only when the etag is concrete — a freshly
         # decoded state always carries one). Stamp last_active_ms + re-store via
@@ -646,7 +684,7 @@ struct GroupCoordinator[
                 _ = self._cas_store(group_id, st)
             except e:
                 var msg = String(e)
-                if not Self._is_precondition_failure(msg):
+                if not is_lost_cas(msg):
                     raise Error(msg)
                 # lost CAS — fine, liveness will be re-stamped next heartbeat.
         return code
@@ -659,7 +697,12 @@ struct GroupCoordinator[
         """Remove the member, bump the generation, and move the group to
         PreparingRebalance (so the remaining members rebalance on their next
         heartbeat -> rejoin). If the member was the last one, the group goes
-        Empty. CAS-retry on a lost write."""
+        Empty. CAS-retry on a lost write; after 256 lost swaps the answer is
+        REBALANCE_IN_PROGRESS and the member is still stored.
+
+        The leave does not reset `rebalance_deadline_ms`: a group that was
+        Stable keeps the deadline of its last round, so the next join into the
+        Preparing round finds its window already closed."""
         for _attempt in range(256):
             var loaded = self._load(group_id)
             if not loaded:
@@ -685,7 +728,7 @@ struct GroupCoordinator[
                 return Int16(0)
             except e:
                 var msg = String(e)
-                if Self._is_precondition_failure(msg):
+                if is_lost_cas(msg):
                     continue
                 raise Error(msg)
         return ERROR_REBALANCE_IN_PROGRESS
@@ -695,5 +738,3 @@ struct GroupCoordinator[
     def load_state(mut self, group_id: String) raises -> Optional[GroupState]:
         """Read the persisted GroupState (test helper)."""
         return self._load(group_id)
-
-
