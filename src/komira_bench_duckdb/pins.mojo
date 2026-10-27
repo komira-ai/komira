@@ -1,4 +1,4 @@
-# The DuckDB versions the board accepts as its opponent, and the check of a
+# The DuckDB versions the benchmarks accept as its opponent, and the check of a
 # user-supplied file against them. DuckDB is never shipped or downloaded by
 # this package: the user passes the path of a binary they obtained themselves,
 # and a run goes ahead only when the file's SHA-256 is the pinned one for the

@@ -3,20 +3,30 @@
 # result sets with the same rows in any order have the same signature, so
 # engines that return rows in different orders can be compared without sorting.
 #
-# Integer columns also keep their sums as 64-bit integers. The sum stays exact
-# while every partial sum of absolute values stays below 2^53 (the largest
-# range a double holds exactly), and the sum of squares likewise; past that the
-# field is compared with the relative tolerance instead (see compare.mojo). The
-# minimum and maximum of an integer column are always exact. Text columns keep
-# the byte length of all cells, and the smallest and largest cell by byte
-# order.
+# Integer columns also keep their sum and sum of squares modulo 2^64 (the
+# 64-bit wrapping sum): those are exact for any integers, however large, and
+# do not depend on the order the rows are added in. The minimum and maximum of
+# an integer column are exact too. The double sums are kept for every numeric
+# column and are what the comparison uses when the other side is not an integer
+# column. Text columns keep the byte length of all cells, the smallest and
+# largest cell by byte order, and the sum modulo 2^64 of a hash of each cell,
+# so a change to any one cell shows even when the length and the extremes do
+# not.
 
 from std.math import isnan
 
 from .cells import Cell, KIND_FLOAT, KIND_INT, KIND_NULL, KIND_TEXT, ResultSet
 
-comptime EXACT_LIMIT: Float64 = 9007199254740992.0
-"""2^53: below it every integer is a double, so sums of integers are exact."""
+
+def cell_hash(s: String) -> Int64:
+    """A 64-bit hash of the bytes of `s` (FNV-1a, then a bit mixer)."""
+    var h = UInt64(0xCBF29CE484222325)
+    for c in s.as_bytes():
+        h = (h ^ UInt64(c)) * UInt64(0x100000001B3)
+    h = (h ^ (h >> UInt64(30))) * UInt64(0xBF58476D1CE4E5B9)
+    h = (h ^ (h >> UInt64(27))) * UInt64(0x94D049BB133111EB)
+    h = h ^ (h >> UInt64(31))
+    return h.cast[DType.int64]()
 
 
 def _bytes_less(a: String, b: String) -> Bool:
@@ -41,18 +51,16 @@ struct ColumnSignature(Copyable, Movable):
     var has_numeric: Bool
     var has_text: Bool
     var all_int: Bool
-    var sum_exact: Bool
-    var sumsq_exact: Bool
     var sum: Float64
     var sumsq: Float64
     var min_v: Float64
     var max_v: Float64
-    var abs_sum: Float64
     var isum: Int64
     var isumsq: Int64
     var imin: Int64
     var imax: Int64
     var text_bytes: Int
+    var text_hash: Int64
     var text_min: String
     var text_max: String
 
@@ -63,18 +71,16 @@ struct ColumnSignature(Copyable, Movable):
         self.has_numeric = False
         self.has_text = False
         self.all_int = True
-        self.sum_exact = True
-        self.sumsq_exact = True
         self.sum = Float64(0)
         self.sumsq = Float64(0)
         self.min_v = Float64(0)
         self.max_v = Float64(0)
-        self.abs_sum = Float64(0)
         self.isum = Int64(0)
         self.isumsq = Int64(0)
         self.imin = Int64(0)
         self.imax = Int64(0)
         self.text_bytes = 0
+        self.text_hash = Int64(0)
         self.text_min = String("")
         self.text_max = String("")
 
@@ -117,6 +123,7 @@ struct ColumnSignature(Copyable, Movable):
         self.has_text = True
         self.count += 1
         self.text_bytes += s.byte_length()
+        self.text_hash += cell_hash(s)
 
     def _add_number(mut self, cell: Cell, v: Float64):
         var first = self.count == 0
@@ -128,16 +135,9 @@ struct ColumnSignature(Copyable, Movable):
         self.sumsq += v * v
         self.has_numeric = True
         if cell.kind == KIND_INT:
-            var av = abs(v)
-            self.abs_sum += av
-            if av >= EXACT_LIMIT or self.abs_sum >= EXACT_LIMIT:
-                self.sum_exact = False
-            if av >= EXACT_LIMIT or self.sumsq >= EXACT_LIMIT:
-                self.sumsq_exact = False
-            if self.sum_exact:
-                self.isum += cell.i
-            if self.sumsq_exact:
-                self.isumsq += cell.i * cell.i
+            # The sums wrap modulo 2^64 on purpose: that is the signature.
+            self.isum += cell.i
+            self.isumsq += cell.i * cell.i
             if first or cell.i < self.imin:
                 self.imin = cell.i
             if first or cell.i > self.imax:

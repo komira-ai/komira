@@ -3,18 +3,22 @@
 #
 # Rules:
 # - row counts, column counts, per-column kinds, non-null counts, null counts
-#   and NaN counts are equal;
-# - integer columns compare their minimum and maximum exactly; their sum and
-#   their sum of squares exactly while both sides stayed below 2^53 (mode
-#   `exact`), and with the tolerance otherwise (mode `tolerance`);
+#   and NaN counts are equal; when both results have no rows the columns are
+#   not compared (a result with no rows carries no column names);
+# - integer columns compare their minimum and maximum, their sum and their sum
+#   of squares exactly (the sums modulo 2^64, mode `exact`);
+# - a numeric column that is integers on one side and doubles on the other
+#   (engines return SUM, COUNT or AVG as different types) compares as numbers,
+#   with the tolerance (mode `tolerance`);
 # - other numeric columns compare with the tolerance: two numbers are equal
-#   when they differ by at most the larger of the absolute floor and the
-#   relative tolerance times the larger magnitude;
+#   when they are the same value (infinities included) or differ by at most
+#   the larger of the absolute floor and the relative tolerance times the
+#   larger magnitude;
 # - text columns compare the byte length of all cells, the smallest and the
-#   largest cell exactly.
+#   largest cell, and the sum of a hash of each cell, exactly.
 # Column names are not compared: engines name computed columns differently.
 
-from .cells import KIND_INT, KIND_NULL, KIND_TEXT
+from .cells import KIND_FLOAT, KIND_INT, KIND_NULL, KIND_TEXT
 from .signature import ColumnSignature, ResultSignature
 
 comptime REL_TOL: Float64 = 1e-9
@@ -22,7 +26,13 @@ comptime ABS_FLOOR: Float64 = 1e-6
 
 
 def numbers_close(a: Float64, b: Float64, rel_tol: Float64, abs_floor: Float64) -> Bool:
-    """Whether `a` and `b` are equal under the tolerance."""
+    """Whether `a` and `b` are equal under the tolerance. The same value is
+    always close (two infinities of one sign included); NaN is close to
+    nothing."""
+    if a == b:
+        return True
+    if a - a != Float64(0) or b - b != Float64(0):
+        return False  # a NaN or an infinity that is not the other value
     var d = abs(a - b)
     var scale = abs(a)
     if abs(b) > scale:
@@ -34,6 +44,8 @@ def numbers_close(a: Float64, b: Float64, rel_tol: Float64, abs_floor: Float64) 
 
 
 def _relative_difference(a: Float64, b: Float64) -> Float64:
+    if a == b:
+        return Float64(0)
     var d = abs(a - b)
     var scale = abs(a)
     if abs(b) > scale:
@@ -88,28 +100,6 @@ def _check_exact_int(mut v: ValueVerdict, where: String, a: Int64, b: Int64):
         v.fail(where + String(" differs: ") + String(a) + String(" against ") + String(b))
 
 
-def _check_field(
-    mut v: ValueVerdict,
-    col: String,
-    field: String,
-    exact: Bool,
-    ia: Int64,
-    ib: Int64,
-    fa: Float64,
-    fb: Float64,
-    rel_tol: Float64,
-    abs_floor: Float64,
-):
-    """One field of an integer column: exactly when both sides kept it exact,
-    with the tolerance otherwise. The mode used is recorded."""
-    if exact:
-        _check_exact_int(v, col + String(" ") + field, ia, ib)
-        v.modes.append(col + String(".") + field + String("=exact"))
-    else:
-        _check_number(v, col + String(" ") + field, fa, fb, rel_tol, abs_floor)
-        v.modes.append(col + String(".") + field + String("=tolerance"))
-
-
 def _compare_column(
     mut v: ValueVerdict,
     c: Int,
@@ -122,7 +112,11 @@ def _compare_column(
     if a.mixed() or b.mixed():
         v.fail(col + String(" mixes numbers and texts"))
         return
-    if a.kind() != b.kind():
+    var numeric_mix = (
+        (a.kind() == KIND_INT and b.kind() == KIND_FLOAT)
+        or (a.kind() == KIND_FLOAT and b.kind() == KIND_INT)
+    )
+    if a.kind() != b.kind() and not numeric_mix:
         v.fail(col + String(" has kind ") + String(a.kind()) + String(" against ") + String(b.kind()))
         return
     if a.count != b.count:
@@ -141,13 +135,16 @@ def _compare_column(
             v.fail(col + String(" smallest text differs"))
         if a.text_max != b.text_max:
             v.fail(col + String(" largest text differs"))
+        if a.text_hash != b.text_hash:
+            v.fail(col + String(" texts differ (the hash sum of the cells)"))
         v.modes.append(col + String(".text=exact"))
         return
-    if kind == KIND_INT:
-        _check_field(v, col, String("sum"), a.sum_exact and b.sum_exact, a.isum, b.isum, a.sum, b.sum, rel_tol, abs_floor)
-        _check_field(v, col, String("sumsq"), a.sumsq_exact and b.sumsq_exact, a.isumsq, b.isumsq, a.sumsq, b.sumsq, rel_tol, abs_floor)
-        _check_field(v, col, String("min"), True, a.imin, b.imin, a.min_v, b.min_v, rel_tol, abs_floor)
-        _check_field(v, col, String("max"), True, a.imax, b.imax, a.max_v, b.max_v, rel_tol, abs_floor)
+    if kind == KIND_INT and not numeric_mix:
+        _check_exact_int(v, col + String(" sum"), a.isum, b.isum)
+        _check_exact_int(v, col + String(" sum of squares"), a.isumsq, b.isumsq)
+        _check_exact_int(v, col + String(" minimum"), a.imin, b.imin)
+        _check_exact_int(v, col + String(" maximum"), a.imax, b.imax)
+        v.modes.append(col + String(".sum=exact"))
         return
     _check_number(v, col + String(" sum"), a.sum, b.sum, rel_tol, abs_floor)
     _check_number(v, col + String(" sum of squares"), a.sumsq, b.sumsq, rel_tol, abs_floor)
@@ -166,6 +163,8 @@ def compare_signatures(
     var v = ValueVerdict()
     if actual.rows != expected.rows:
         v.fail(String("row count differs: ") + String(actual.rows) + String(" against ") + String(expected.rows))
+    if actual.rows == 0 and expected.rows == 0:
+        return v^
     if len(actual.columns) != len(expected.columns):
         v.fail(String("column count differs: ") + String(len(actual.columns)) + String(" against ") + String(len(expected.columns)))
         return v^

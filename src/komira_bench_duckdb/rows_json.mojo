@@ -1,10 +1,15 @@
 # DuckDB's JSON output mode (`.mode json`) as a result set: one array of
 # objects, one object per row, keys in column order, numbers unquoted, texts
 # quoted, `null` for NULL. Booleans become the integers 1 and 0. A nested value
-# (a list or a struct) is refused: the board's queries return scalars.
+# (a list or a struct) is refused: the benchmark queries return scalars.
 #
-# An integer that does not fit 64 bits becomes a double. An empty output (no
-# rows) is an empty result set with no column names.
+# An integer that does not fit 64 bits (above 9223372036854775807 or below
+# -9223372036854775808) becomes a double. The bare words NaN, Infinity and
+# -Infinity (and nan, inf, -inf) are doubles; a quoted one is a text. A number
+# that is not written as JSON writes it (`1.2.3`, `12x`, `1e`) is refused. An
+# empty output (no rows) is an empty result set with no column names.
+
+from std.math import inf, nan
 
 from .cells import Cell, ResultSet
 
@@ -141,20 +146,63 @@ def _read_word(mut r: _Reader) -> String:
     return String(unsafe_from_utf8=Span[UInt8](out))
 
 
-def _digits_to_float(w: String) raises -> Float64:
-    """An integer too long for 64 bits, read digit by digit as a double."""
+def _digit_run(b: Span[UInt8, _], mut i: Int) -> Int:
+    """Skip decimal digits from `i`; return how many there were."""
+    var n = 0
+    while i < len(b) and b[i] >= UInt8(48) and b[i] <= UInt8(57):
+        i += 1
+        n += 1
+    return n
+
+
+def _is_json_number(w: String) -> Bool:
+    """Whether `w` is written as a JSON number: an optional minus, digits, an
+    optional fraction and an optional exponent."""
     var b = w.as_bytes()
-    var neg = len(b) > 0 and b[0] == UInt8(45)
-    var v = Float64(0)
-    var seen = False
-    for i in range(1 if neg else 0, len(b)):
-        if b[i] < UInt8(48) or b[i] > UInt8(57):
-            raise Error(String("JSON output: not a number: ") + w)
-        v = v * Float64(10) + Float64(Int(b[i]) - 48)
-        seen = True
-    if not seen:
-        raise Error(String("JSON output: not a number: ") + w)
-    return -v if neg else v
+    var i = 0
+    if i < len(b) and b[i] == UInt8(45):
+        i += 1
+    if _digit_run(b, i) == 0:
+        return False
+    if i < len(b) and b[i] == UInt8(46):
+        i += 1
+        if _digit_run(b, i) == 0:
+            return False
+    if i < len(b) and (b[i] == UInt8(101) or b[i] == UInt8(69)):
+        i += 1
+        if i < len(b) and (b[i] == UInt8(43) or b[i] == UInt8(45)):
+            i += 1
+        if _digit_run(b, i) == 0:
+            return False
+    return i == len(b)
+
+
+def _integer_cell(w: String) raises -> Cell:
+    """An integer written as digits: an `Int64` when it fits, else a double."""
+    var b = w.as_bytes()
+    var neg = b[0] == UInt8(45)
+    # 2^63 is the magnitude limit of a negative value, 2^63 - 1 of a positive.
+    var limit = UInt64(9223372036854775807)
+    if neg:
+        limit += UInt64(1)
+    var mag = UInt64(0)
+    var fits = True
+    var as_double = Float64(0)
+    for k in range(1 if neg else 0, len(b)):
+        var d = UInt64(Int(b[k]) - 48)
+        as_double = as_double * Float64(10) + Float64(Int(d))
+        if fits:
+            if mag > (limit - d) // UInt64(10):
+                fits = False
+            else:
+                mag = mag * UInt64(10) + d
+    if not fits:
+        return Cell.real(-as_double if neg else as_double)
+    if neg:
+        if mag == limit:
+            return Cell.integer(Int64(-9223372036854775807) - Int64(1))
+        return Cell.integer(-Int64(mag))
+    return Cell.integer(Int64(mag))
 
 
 def _read_value(mut r: _Reader) raises -> Cell:
@@ -173,19 +221,21 @@ def _read_value(mut r: _Reader) raises -> Cell:
         return Cell.integer(Int64(0))
     if w.byte_length() == 0:
         raise Error(String("JSON output: a value is missing at byte ") + String(r.pos))
+    if w == "NaN" or w == "nan":
+        return Cell.real(nan[DType.float64]())
+    if w == "Infinity" or w == "inf":
+        return Cell.real(inf[DType.float64]())
+    if w == "-Infinity" or w == "-inf":
+        return Cell.real(-inf[DType.float64]())
+    if not _is_json_number(w):
+        raise Error(String("JSON output: not a number: ") + w)
     var is_float = False
     for b in w.as_bytes():
         if b == UInt8(46) or b == UInt8(101) or b == UInt8(69):
             is_float = True
     if not is_float:
-        try:
-            return Cell.integer(Int64(atol(w)))
-        except:
-            return Cell.real(_digits_to_float(w))
-    try:
-        return Cell.real(atof(w))
-    except:
-        raise Error(String("JSON output: not a number: ") + w)
+        return _integer_cell(w)
+    return Cell.real(atof(w))
 
 
 def parse_json_rows(text: String) raises -> ResultSet:

@@ -7,14 +7,18 @@
 #     query <id>
 #     rows <n>
 #     order <column>:<a|d>:<f|l>[,...]          optional: the ORDER BY keys
-#     column <kind> <count> <nulls> <nans> <exact> <isum> <isumsq> <imin> <imax> <sum> <sumsq> <min> <max> <text-bytes> <x-hex-min> <x-hex-max>
+#     column <kind> <count> <nulls> <nans> <isum> <isumsq> <imin> <imax> <sum> <sumsq> <min> <max> <text-bytes> <text-hash> <x-hex-min> <x-hex-max>
 #     ...                                        one line per column
 #     end
 #
-# `kind` is 0 (no value), 1 (integers), 2 (doubles) or 3 (texts); `exact` is 1
-# when the integer sum is exact, plus 2 when the sum of squares is. Blank lines and lines starting with `#`
-# between records are ignored. A column that mixes numbers and texts has no
+# `kind` is 0 (no value), 1 (integers), 2 (doubles) or 3 (texts); `isum` and
+# `isumsq` are the integer sum and sum of squares modulo 2^64 (as a signed
+# 64-bit number) and `text-hash` is the sum of the cell hashes, likewise. A
+# double that is not finite is written as `inf`, `-inf` or `nan`. Blank lines
+# and lines starting with `#` between records are ignored. A column that mixes numbers and texts has no
 # recorded form.
+
+from std.math import inf, nan
 
 from komira_crypto import hex_lower
 
@@ -77,9 +81,23 @@ def _unhex(token: String) raises -> String:
     return String(unsafe_from_utf8=Span[UInt8](bytes))
 
 
-def _finite(v: Float64, what: String) raises:
-    if v != v or v - v != Float64(0):
-        raise Error(String("a recorded ") + what + String(" is not finite"))
+def _float_text(v: Float64) -> String:
+    """A double as text that `_parse_float` reads back to the same value."""
+    if v != v:
+        return String("nan")
+    if v - v != Float64(0):
+        return String("inf") if v > Float64(0) else String("-inf")
+    return String(v)
+
+
+def _parse_float(token: String) raises -> Float64:
+    if token == "nan":
+        return nan[DType.float64]()
+    if token == "inf":
+        return inf[DType.float64]()
+    if token == "-inf":
+        return -inf[DType.float64]()
+    return atof(token)
 
 
 def format_reference(ans: ReferenceAnswer) raises -> String:
@@ -98,16 +116,13 @@ def format_reference(ans: ReferenceAnswer) raises -> String:
         var col = ans.signature.columns[c].copy()
         if col.mixed():
             raise Error(String("column ") + String(c) + String(" mixes numbers and texts"))
-        _finite(col.sum, "sum")
-        _finite(col.sumsq, "sum of squares")
         out += String("column ") + String(col.kind()) + String(" ") + String(col.count)
         out += String(" ") + String(col.nulls) + String(" ") + String(col.nans)
-        out += String(" ") + String((1 if col.sum_exact else 0) + (2 if col.sumsq_exact else 0))
         out += String(" ") + String(col.isum) + String(" ") + String(col.isumsq)
         out += String(" ") + String(col.imin) + String(" ") + String(col.imax)
-        out += String(" ") + String(col.sum) + String(" ") + String(col.sumsq)
-        out += String(" ") + String(col.min_v) + String(" ") + String(col.max_v)
-        out += String(" ") + String(col.text_bytes)
+        out += String(" ") + _float_text(col.sum) + String(" ") + _float_text(col.sumsq)
+        out += String(" ") + _float_text(col.min_v) + String(" ") + _float_text(col.max_v)
+        out += String(" ") + String(col.text_bytes) + String(" ") + String(col.text_hash)
         out += String(" ") + _hex_of(col.text_min) + String(" ") + _hex_of(col.text_max)
         out += String("\n")
     out += String("end\n")
@@ -167,18 +182,16 @@ def _parse_column(tokens: List[String]) raises -> ColumnSignature:
     col.count = atol(tokens[2])
     col.nulls = atol(tokens[3])
     col.nans = atol(tokens[4])
-    var exact = atol(tokens[5])
-    col.sum_exact = exact % 2 == 1
-    col.sumsq_exact = exact >= 2
-    col.isum = Int64(atol(tokens[6]))
-    col.isumsq = Int64(atol(tokens[7]))
-    col.imin = Int64(atol(tokens[8]))
-    col.imax = Int64(atol(tokens[9]))
-    col.sum = atof(tokens[10])
-    col.sumsq = atof(tokens[11])
-    col.min_v = atof(tokens[12])
-    col.max_v = atof(tokens[13])
-    col.text_bytes = atol(tokens[14])
+    col.isum = Int64(atol(tokens[5]))
+    col.isumsq = Int64(atol(tokens[6]))
+    col.imin = Int64(atol(tokens[7]))
+    col.imax = Int64(atol(tokens[8]))
+    col.sum = _parse_float(tokens[9])
+    col.sumsq = _parse_float(tokens[10])
+    col.min_v = _parse_float(tokens[11])
+    col.max_v = _parse_float(tokens[12])
+    col.text_bytes = atol(tokens[13])
+    col.text_hash = Int64(atol(tokens[14]))
     col.text_min = _unhex(tokens[15])
     col.text_max = _unhex(tokens[16])
     return col^

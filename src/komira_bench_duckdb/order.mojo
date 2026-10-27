@@ -3,9 +3,10 @@
 # purpose, so this check is separate.
 #
 # NULLs sort after every other value in both directions (DuckDB's default),
-# unless a key says otherwise.
+# unless a key says otherwise. Two integers compare as integers (exactly, past
+# 2^53 too); NaN sorts after every number and ties with NaN, as DuckDB sorts it.
 
-from .cells import Cell, KIND_NULL, KIND_TEXT, ResultSet
+from .cells import Cell, KIND_INT, KIND_NULL, KIND_TEXT, ResultSet
 
 
 struct OrderKey(Copyable, Movable):
@@ -56,8 +57,16 @@ def _compare_cells(a: Cell, b: Cell) raises -> Int:
         if len(x) == len(y):
             return 0
         return -1 if len(x) < len(y) else 1
+    if a.kind == KIND_INT and b.kind == KIND_INT:
+        if a.i < b.i:
+            return -1
+        return 1 if a.i > b.i else 0
     var p = a.as_float()
     var q = b.as_float()
+    if p != p or q != q:
+        if p != p and q != q:
+            return 0
+        return 1 if p != p else -1
     if p < q:
         return -1
     if p > q:

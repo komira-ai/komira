@@ -20,6 +20,10 @@
 # - test_a_file_is_read_whole_and_hashed: a file written by the test comes
 #   back with the SHA-256 and size of its bytes against the real table
 #   (MISMATCH), and a path that does not exist raises.
+# - test_open_pinned_refuses_a_file_that_is_not_the_pinned_binary: the one
+#   entry point that checks and then starts raises with the pin check's
+#   message (not a start failure) for a file with other bytes, and for a
+#   version with no pin, and for a path that does not exist.
 
 from std.os import getenv, makedirs
 from std.pathlib import Path
@@ -37,6 +41,7 @@ from komira_bench_duckdb import (
     check_duckdb_file,
     duckdb_pins,
     find_pin,
+    open_pinned,
 )
 
 
@@ -150,6 +155,31 @@ def test_a_file_is_read_whole_and_hashed() raises:
     except:
         raised = True
     assert_true(raised)
+
+
+def _open_message(path: String, version: String) -> String:
+    try:
+        _ = open_pinned(path, version)
+    except e:
+        return String(e)
+    return String("")
+
+
+def test_open_pinned_refuses_a_file_that_is_not_the_pinned_binary() raises:
+    var base = getenv("TEST_TMPDIR")
+    if base.byte_length() == 0:
+        base = getenv("TMPDIR")
+    if base.byte_length() == 0:
+        raise Error("neither TEST_TMPDIR nor TMPDIR is set")
+    var dir = base + String("/bench_open_pinned")
+    makedirs(dir, exist_ok=True)
+    var path = dir + String("/not_duckdb.bin")
+    Path(path).write_text(String("#!/bin/sh\nexit 0\n"))
+    var other_bytes = _open_message(path, String("1.5.6"))
+    assert_true(other_bytes.find(String("is not the pinned duckdb 1.5.6 binary")) >= 0)
+    var unpinned = _open_message(path, String("8.8.8"))
+    assert_true(unpinned.find(String("no pin for duckdb 8.8.8")) >= 0)
+    assert_true(_open_message(dir + String("/missing.bin"), String("1.5.6")).byte_length() > 0)
 
 
 def main() raises:
