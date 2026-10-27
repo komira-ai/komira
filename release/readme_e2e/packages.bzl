@@ -38,6 +38,7 @@ PACKAGES = {
     "komira_mail_address": "0.1.0",
     "komira_parquet_api": "0.1.0",
     "komira_protobuf": "0.1.0",
+    "komira_resources": "0.1.0",
     "komira_retry": "0.1.0",
     "komira_rowcell": "0.1.0",
     "komira_runtime_paths": "0.1.0",

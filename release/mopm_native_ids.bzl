@@ -25,6 +25,7 @@ load("//src/komira_lz4:buildrules.mojo.lock.bzl", komira_lz4 = "GRAPH")
 load("//src/komira_mail_address:buildrules.mojo.lock.bzl", komira_mail_address = "GRAPH")
 load("//src/komira_parquet_api:buildrules.mojo.lock.bzl", komira_parquet_api = "GRAPH")
 load("//src/komira_protobuf:buildrules.mojo.lock.bzl", komira_protobuf = "GRAPH")
+load("//src/komira_resources:buildrules.mojo.lock.bzl", komira_resources = "GRAPH")
 load("//src/komira_retry:buildrules.mojo.lock.bzl", komira_retry = "GRAPH")
 load("//src/komira_rowcell:buildrules.mojo.lock.bzl", komira_rowcell = "GRAPH")
 load("//src/komira_runtime_paths:buildrules.mojo.lock.bzl", komira_runtime_paths = "GRAPH")
@@ -62,6 +63,7 @@ _GRAPHS = {
     "komira_mail_address": komira_mail_address,
     "komira_parquet_api": komira_parquet_api,
     "komira_protobuf": komira_protobuf,
+    "komira_resources": komira_resources,
     "komira_retry": komira_retry,
     "komira_rowcell": komira_rowcell,
     "komira_runtime_paths": komira_runtime_paths,
