@@ -10,7 +10,8 @@ Nothing is compiled on the runner.
 
 | event | runs |
 |---|---|
-| push to `main` | [`release.yml`](#releaseyml-the-release); when that run ends, [`main_red.yml`](#main_redyml-the-main-red-alert) |
+| push to `main` | [`release.yml`](#releaseyml-the-release), which publishes to the beta registry; when that run ends, [`main_red.yml`](#main_redyml-the-main-red-alert) |
+| nightly (schedule, 03:17 UTC) | [`release.yml`](#releaseyml-the-release) on `main`: the beta publish and, after its e2e, the prod publish |
 | pull request from a branch of this repository | `pr / check`; and `coverage`, informational, not required ([below](#coverageyml-the-pull-requests-coverage-not-a-gate)) |
 | pull request from a fork | nothing: no farm job runs ([below](#pull-requests-from-forks)) |
 | manual (`workflow_dispatch`) | [`release.yml`](#releaseyml-the-release), on the chosen ref, with a reason |
@@ -312,8 +313,8 @@ with Buck2 targets on the farm. It runs no kci. It is written by hand.
 **The release set itself publishes to no channel**: the job `release` builds the
 set, so a push to `main` still proves the release builds, keeps what it built as
 a workflow artifact, and holds no publishing credential and no channel. The
-libraries moved to mopm are published by mopm's own jobs, on every push to `main`
-([below](#the-mopm-jobs); see [releases](releases.md)). Its job
+libraries moved to mopm are published by mopm's own jobs: to beta on every push to `main`
+and nightly, to prod nightly ([below](#the-mopm-jobs); see [releases](releases.md)). Its job
 `release` (the mopm jobs, for the packages moved to mopm, are
 [below](#the-mopm-jobs)) is on a GitHub-hosted runner (`ubuntu-24.04`) joined to the farm by
 [`farm-connect`](#how-it-reaches-the-farm), in the environment `build`, with
@@ -335,16 +336,20 @@ runner; the programs those builds made are then run as binaries, never through
 
 | step | what it does |
 |---|---|
-| the guard, [`//release/ci:check_release_ref`](../release/ci/check_release_ref.zig) | decides from the run's facts (flags, never environment variables) and two answers of git whether the run builds a release: a push to `main` of a commit on `main`'s history (`refs/remotes/origin/main`), or a manual run; the checkout's HEAD is the commit the run started on; the ref is not `main` in another case; a manual run (break-glass) has a reason of 1 to 200 bytes on one line, which is the first line of the job summary (`BREAK-GLASS: <ref> <commit> by <actor>: <reason>`); a push of a commit without `release/artifacts.textproto` has nothing to release and is skipped (a warning and a summary line, `release=false`, the later steps do not run), a manual run of one is refused. A manual run releases the commit it was started on: there is no revision input. Cases: [`//release/ci/tests:test_release`](../release/ci/tests/test_release.zig), run as a build action of the program. |
+| the guard, [`//release/ci:check_release_ref`](../release/ci/check_release_ref.zig) | decides from the run's facts (flags, never environment variables) and two answers of git whether the run builds a release: a push to `main` or a nightly (schedule) run of `main`, of a commit on `main`'s history (`refs/remotes/origin/main`), or a manual run; the checkout's HEAD is the commit the run started on; the ref is not `main` in another case; a manual run (break-glass) has a reason of 1 to 200 bytes on one line, which is the first line of the job summary (`BREAK-GLASS: <ref> <commit> by <actor>: <reason>`); a push of a commit without `release/artifacts.textproto` has nothing to release and is skipped (a warning and a summary line, `release=false`, the later steps do not run), a manual run of one is refused. A manual run releases the commit it was started on: there is no revision input. Cases: [`//release/ci/tests:test_release`](../release/ci/tests/test_release.zig), run as a build action of the program. |
 | the stamp, `release_json stamp` | the build number (the first-parent commit count of the stamp's commit), the stamp's commit (the newest first-parent commit that touches more than `docs`, `*.md` and `.github`) and its commit time in milliseconds, from git in the full-history checkout; refused for a shallow clone, a HEAD that is not the revision and modified tracked files. The rule is `tools/build/package/release_version.sh`'s. |
 | the release set, [`//release:release_set`](../release/release_set.bzl) built with the stamp (`-c komira.package_stamp`, `komira.package_commit`, `komira.package_timestamp_ms`) and the revision and run (`komira.release_revision`, `komira.release_run_id`, `komira.release_attempt`) | every package the artifacts file declares (`<lib>_conda[release]`), the metapackage `komira_all` over them (the packer's `conda-meta`, as an action of the farm), and `release.json` and `set_hash.txt`. One build action holds the set to the artifacts file (the library names, their order, the metapackage's arguments), and `release_json write` checks every package (a directory of exactly the manifest, the package and its metadata, no symlink; the manifest's name, platform, subdir and sha256; the metadata's agreement, size and `stamped`) before it writes `release.json` (format `kci.release_set` major 2, byte-compatible with what kci's build stage wrote: the revision, the platform, `produced_by`, the members and the set hash, whose text is [`set_json.zig`](../release/ci/release_lib/set_json.zig)'s header). Built without a stamp (the pull request's check builds `//release:release_set` as part of `//ci:pr`), the same checks run over the unstamped packages, minus `stamped`, and no release directory is produced. |
 | the artifact | the release directory (the packages, `release.json`, `set_hash.txt`) leaves the job as one workflow artifact named `release-<commit>`, kept 14 days; the job summary has one line with the set hash. |
 
-One release at a time: a push to `main` is in the concurrency group
+One release at a time: a push to `main` and the nightly run are in the same concurrency group
 `release-main` with `cancel-in-progress: false`, so a running release is never
-cancelled, and a newer push replaces only a pending run, which never started
+cancelled and a push run and a nightly run never publish at once (both stage
+against the registries' current state), and a newer run replaces only a pending run, which never started
 (the newest pushed revision wins; main moves forward only, so it carries the
-older one's changes). A manual run is in `release-ref-<ref name>`. The run that
+older one's changes). One consequence: a nightly run that is pending behind a
+running release when a push arrives is replaced by the push's run, and that night
+has no prod publish (nothing started, nothing half-done; the next night's run
+publishes the then-current `main`). A manual run is in `release-ref-<ref name>`. The run that
 ends is what [`main_red.yml`](#main_redyml-the-main-red-alert) watches.
 
 The release machine file, [`release/machine.textproto`](../release/machine.textproto),
@@ -367,15 +372,15 @@ steps:
 
 | job | when | what it does |
 |---|---|---|
-| `mopm-stage` | every push to `main`, and a manual run (which sends nothing either) | on the farm (environment `build`, the farm's tailnet token only; it reads no registry token). **Build:** the one mopm the README e2e installs with (`toolchains//:mopm_0_0_73`, `MOPM` of `packages.bzl`) and `//release:mopm_artifacts`. **Version:** `release_beta_version --workspace-root src --version 0.1.<run number>` gives every member the version of this run (below, "The version of every release"). **Stage:** `mopm stage --workspace-root src --artifacts <built> --compiler 1.0.0 --out release/staged_set --registry prod` packs every member from its built `.mojoc`, asks the registry (a read, no token) which versions it holds and writes the staged set S (`plan.json`, each `.conda`, each README: mopm's `spec/staged-set.md`). A version the registry holds with other bytes, or has yanked, fails the step. **Try:** `./buck2 build -c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm: every package's README examples are compiled and run as a user of the `.conda` files of S (see the e2e's [README](../tools/build/readme_e2e/README.md)). Then `mopm publish --staged S --registry prod --dry-run`: the plan is validated and every file hashed against it, nothing is sent and no token is read. It uploads S and that mopm as a workflow artifact (a day) for the next job. |
-| `prod-stage` | after `release`, `mopm-stage` and `mopm-e2e-beta`, **only on a push to `main`** (a manual run skips all five prod jobs before they start; there is no other switch) | in the environment `prod`, with `contents: read` and `id-token: write`, no farm and no secret. It downloads the set `mopm-stage` kept and runs `mopm publish --staged S --registry prod --oidc --no-commit`: the registry opens a group, holds every file in quarantine, and nothing is visible. It keeps the directory, now with `state.json` (the group), as the artifact `mopm-prod-staged-<sha>`, even when the step failed. |
-| `prod-test` | after `prod-stage`, on a push to `main` | in the environment `build` (the farm's; `id-token: write` for the tailnet join only), with **no registry identity and no secret**. It downloads the directory `prod-stage` kept, checks every file against `plan.json` (`release_staged_verify verify`: sha256 and size), writes `release/staged_set` from the files that matched and from nothing else, and runs `-c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm. |
-| `prod-commit` | after `prod-test`, on a push to `main` | in the environment `prod`, with `contents: read` and `id-token: write`. The same command without `--no-commit`, on the same directory with its `state.json`, after a fresh OIDC exchange: the same group is committed and the job waits until it is visible. It keeps `plan.json`, `state.json` and `report.json` as `mopm-prod-committed-<sha>`. |
-| `prod-abort` | after `prod-stage`, `prod-test` and `prod-commit`, when one of them failed or the run was cancelled, on a push to `main` and with a `prod-stage` that was not skipped | in the environment `prod`, same permissions: `mopm publish --staged S --registry prod --oidc --abort` ends the open group and gives its place back. |
-| `prod-smoke` | after `prod-commit`, on a push to `main` | no environment, no identity, no secret, no farm: `release_staged_verify smoke` downloads the published files from the prod channel and compares each with the plan. On a difference it prints the `mopm yank --group <id> ...` command for a human and fails; it yanks nothing. |
-| `mopm-stage-beta` | after `mopm-stage`, on a push to `main` | `mopm-stage` plans its set against prod, so a member prod already holds is skipped in it and a prod yank refuses it: the wrong plan for beta. This job checks out the commit, takes the packages, the mopm and the version tool `mopm-stage` built (two workflow artifacts; no farm, no `buck2`), gives every member of its checkout the version `0.1.<run number>`, as `mopm-stage` did (`release_beta_version`, below), and runs `mopm stage --workspace-root src --artifacts <built> --compiler 1.0.0 --out <dir> --registry beta`, then `mopm publish --staged <dir> --registry beta --dry-run`, and keeps the set as an artifact. It holds no environment, no `id-token` and no secret: staging reads the registry with no token. The README e2e ran on the prod-planned set of the same packages. |
-| `mopm-publish-beta` | after `mopm-stage-beta`, **only on a push to `main`** | in the environment `beta`, with `contents: read` and `id-token: write`, no farm and no secret: it joins no tailnet, runs no `buck2` and checks nothing out. It downloads the set `mopm-stage-beta` staged against beta and runs `mopm publish --staged S --oidc --registry beta`: mopm asks the runner for the job's ID token (which is what `id-token: write` allows) and exchanges it with the registry for a short-lived token. The registry trusts this repository's `release.yml`, run on `main` from a push, in the environment `beta`, as a publisher that can create, own and publish new packages on `beta`; `gamma` and `prod` do not know it. A manual run publishes nothing (the job's `if` needs a push). The job never names `MOPM_TOKEN` (`//:release_workflow_cases` holds the gate, the permission and that absence). |
-| `mopm-e2e-beta` | after `mopm-publish-beta`, on a push to `main`; `prod-stage` needs it | verifies what `mopm-publish-beta` sent (below, "Verifying the beta publish"). In the environment `build` (the farm's; a job holds one environment, so it cannot be `mopm-publish-beta`, which is in `beta`), with `contents: read` and `id-token: write` for the tailnet join only. It publishes nothing and reads no secret. |
+| `mopm-stage` | every push to `main`, every nightly run, and a manual run (which sends nothing either) | on the farm (environment `build`, the farm's tailnet token only; it reads no registry token). **Build:** the one mopm the README e2e installs with (`toolchains//:mopm_0_0_73`, `MOPM` of `packages.bzl`) and `//release:mopm_artifacts`. **Version:** `release_beta_version --workspace-root src --version 0.1.<run number>` gives every member the version of this run (below, "The version of every release"). **Stage:** `mopm stage --workspace-root src --artifacts <built> --compiler 1.0.0 --out release/staged_set --registry prod` packs every member from its built `.mojoc`, asks the registry (a read, no token) which versions it holds and writes the staged set S (`plan.json`, each `.conda`, each README: mopm's `spec/staged-set.md`). A version the registry holds with other bytes, or has yanked, fails the step. **Try:** `./buck2 build -c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm: every package's README examples are compiled and run as a user of the `.conda` files of S (see the e2e's [README](../tools/build/readme_e2e/README.md)). Then `mopm publish --staged S --registry prod --dry-run`: the plan is validated and every file hashed against it, nothing is sent and no token is read. It uploads S and that mopm as a workflow artifact (a day) for the next job. |
+| `prod-stage` | after `release`, `mopm-stage` and `mopm-e2e-beta`, **only on the nightly run of `main`** (a push and a manual run skip all five prod jobs before they start; there is no other switch) | in the environment `prod`, with `contents: read` and `id-token: write`, no farm and no secret. It downloads the set `mopm-stage` kept and runs `mopm publish --staged S --registry prod --oidc --no-commit`: the registry opens a group, holds every file in quarantine, and nothing is visible. It keeps the directory, now with `state.json` (the group), as the artifact `mopm-prod-staged-<sha>`, even when the step failed. |
+| `prod-test` | after `prod-stage`, on the nightly run of `main` | in the environment `build` (the farm's; `id-token: write` for the tailnet join only), with **no registry identity and no secret**. It downloads the directory `prod-stage` kept, checks every file against `plan.json` (`release_staged_verify verify`: sha256 and size), writes `release/staged_set` from the files that matched and from nothing else, and runs `-c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm. |
+| `prod-commit` | after `prod-test`, on the nightly run of `main` | in the environment `prod`, with `contents: read` and `id-token: write`. The same command without `--no-commit`, on the same directory with its `state.json`, after a fresh OIDC exchange: the same group is committed and the job waits until it is visible. It keeps `plan.json`, `state.json` and `report.json` as `mopm-prod-committed-<sha>`. |
+| `prod-abort` | after `prod-stage`, `prod-test` and `prod-commit`, when one of them failed or the run was cancelled, on the nightly run of `main` and with a `prod-stage` that was not skipped | in the environment `prod`, same permissions: `mopm publish --staged S --registry prod --oidc --abort` ends the open group and gives its place back. |
+| `prod-smoke` | after `prod-commit`, on the nightly run of `main` | no environment, no identity, no secret, no farm: `release_staged_verify smoke` downloads the published files from the prod channel and compares each with the plan. On a difference it prints the `mopm yank --group <id> ...` command for a human and fails; it yanks nothing. |
+| `mopm-stage-beta` | after `mopm-stage`, on a push to `main` and on the nightly run | `mopm-stage` plans its set against prod, so a member prod already holds is skipped in it and a prod yank refuses it: the wrong plan for beta. This job checks out the commit, takes the packages, the mopm and the version tool `mopm-stage` built (two workflow artifacts; no farm, no `buck2`), gives every member of its checkout the version `0.1.<run number>`, as `mopm-stage` did (`release_beta_version`, below), and runs `mopm stage --workspace-root src --artifacts <built> --compiler 1.0.0 --out <dir> --registry beta`, then `mopm publish --staged <dir> --registry beta --dry-run`, and keeps the set as an artifact. It holds no environment, no `id-token` and no secret: staging reads the registry with no token. The README e2e ran on the prod-planned set of the same packages. |
+| `mopm-publish-beta` | after `mopm-stage-beta`, **only on a push to `main` or the nightly run** | in the environment `beta`, with `contents: read` and `id-token: write`, no farm and no secret: it joins no tailnet, runs no `buck2` and checks nothing out. It downloads the set `mopm-stage-beta` staged against beta and runs `mopm publish --staged S --oidc --registry beta`: mopm asks the runner for the job's ID token (which is what `id-token: write` allows) and exchanges it with the registry for a short-lived token. The registry trusts this repository's `release.yml`, run on `main` from a push or the nightly run, in the environment `beta`, as a publisher that can create, own and publish new packages on `beta`; `gamma` and `prod` do not know it. A manual run publishes nothing (the job's `if` needs a push or the nightly run). The job never names `MOPM_TOKEN` (`//:release_workflow_cases` holds the gate, the permission and that absence). |
+| `mopm-e2e-beta` | after `mopm-publish-beta`, on a push to `main` and on the nightly run; `prod-stage` needs it | verifies what `mopm-publish-beta` sent (below, "Verifying the beta publish"). In the environment `build` (the farm's; a job holds one environment, so it cannot be `mopm-publish-beta`, which is in `beta`), with `contents: read` and `id-token: write` for the tailnet join only. It publishes nothing and reads no secret. |
 
 **Why `mopm stage` is a step of the job and not a build action.** It asks the
 registry which versions exist, and an action is offline. So the farm takes the
@@ -396,8 +401,8 @@ completeness of the list.
 
 #### The prod publish
 
-The five `prod-*` jobs publish the set `mopm-stage` tried to the prod registry as one group, on every push to
-`main` and with no switch, in three steps that the registry keeps apart: **stage** (upload, nothing visible), **test** (on the bytes the registry holds),
+The five `prod-*` jobs publish the set `mopm-stage` tried to the prod registry as one group, on the nightly run of
+`main` (not on a push) and with no switch, in three steps that the registry keeps apart: **stage** (upload, nothing visible), **test** (on the bytes the registry holds),
 **commit** (visible all at once). `prod-stage` also waits for `mopm-e2e-beta`: the set it stages is the one
 the beta registry served and the README e2e passed on, at the same versions (below). A failed beta job
 therefore stops the release before anything is staged in prod. `//:release_workflow_cases` holds the job graph, the gates, the
@@ -438,7 +443,7 @@ environments, the permissions, the commands and the order of the test's steps.
 
 **The identity.** No job holds a registry token and the environment `prod` holds no secret. The three jobs
 that talk to the registry run in the environment `prod` and exchange the job's GitHub OIDC token; the
-registry trusts this repository's `release.yml`, run on `main` from a push, in the environment `prod`, and
+registry trusts this repository's `release.yml`, run on `main` from the nightly schedule, in the environment `prod`, and
 lets that identity act for the owner of the packages (the names are owned by the maintainers' account, not
 by the repository). `prod-test` is in the environment `build`, whose identity the registry does not trust,
 and runs nothing that reads a token.
@@ -468,7 +473,8 @@ the pin must keep them, in the same change as the toolchain entry the job builds
 
 #### Before the first release
 
-Every push to `main` runs the beta and prod publish; there is no variable that turns it on or off. A push
+Every push to `main` runs the beta publish and every nightly run the beta and the prod publish; there is no
+variable that turns either on or off. A run
 before the registry is ready fails at the first request that is refused and changes nothing, but it must not
 be the way this is found out, so a maintainer does all of this once, in this order. Each step is outside this
 repository:
@@ -478,10 +484,10 @@ repository:
    [`packages.bzl`](../release/readme_e2e/packages.bzl) (every `src/` directory with a `mopm.toml`), on `beta`
    and on `prod`. Ownership is a registry record, not something `mopm.toml` can express.
 2. The registry's group publish is live on `beta` and on `prod` for that account, and the registry trusts this
-   repository's `release.yml`, run on `main` from a push, as a CI publisher of the owner: in the environment
+   repository's `release.yml`, run on `main` from a push (beta) or the nightly schedule (prod and beta), as a CI publisher of the owner: in the environment
    `beta` for the beta registry and in the environment `prod` for the prod registry. Without it the exchange is
    refused (`oidc_not_trusted`) and nothing is created. The registry's trust should match the ref, the
-   `job_workflow_ref` and the event (`push`), not the environment alone.
+   `job_workflow_ref` and the event (`push` or `schedule`), not the environment alone.
 3. The GitHub environments `beta` and `prod` deploy only from `main` (selected branches, `main` only). The
    OIDC subject the registry sees names the environment, and a workflow on any branch can declare the same
    environment, so the environment's branch rule is what keeps a branch out; each job's `if` is a second lock,
@@ -490,7 +496,9 @@ repository:
 5. The versions: nothing to set. Each release carries the versions `0.1.<run number>` (next section), so no
    version has to be reserved.
 
-The jobs start only on a push to `main`: a manual run builds and stages and publishes nothing.
+The beta jobs start only on a push to `main` or the nightly run, the prod jobs only on the nightly run: a manual run builds and stages and publishes nothing.
+
+**Prod off the nightly cycle: not supported.** A push never publishes to prod and a manual run never reaches the environment `prod` (it is break-glass and publishes nothing), so the next scheduled run is the only way a prod publish starts. A maintainer who needs a release sooner changes the cron in `release.yml` through a pull request (the workflow's cases pin it to one cron). The nightly run is on the latest commit of `main`, and its version is its run number, so nothing is reserved.
 
 #### The version of every release
 
@@ -498,7 +506,7 @@ A registry creates a (name, version) pair once, and a mopm version is exactly `M
 `+b123`, `-b123`, `.post123` and `.dev123` are not versions. A registry that holds a version with other
 bytes refuses the set (`mopm stage` fails, and the README e2e refuses a plan member that is not an
 `upload`), so a fixed version in `mopm.toml` would let only the first release through. So every push to
-`main` gives each member of the checkout of `mopm-stage` and of `mopm-stage-beta` the version
+`main` and every nightly run gives each member of the checkout of `mopm-stage` and of `mopm-stage-beta` the version
 `0.1.<github.run_number>` before `mopm stage`. Both jobs use the same tool and the same number, so prod
 stages exactly the versions beta published and the beta e2e proved. The number stays inside the
 `>=0.1,<0.2` the packages ask of each other, sorts above `0.1.0`, and the newest push is the newest
@@ -531,7 +539,7 @@ before the stage, with the run number, and the e2e of each job is given the same
 
 #### Verifying the beta publish
 
-`mopm-e2e-beta` runs after `mopm-publish-beta`, on every push to `main`, and answers one question: **are the files the beta
+`mopm-e2e-beta` runs after `mopm-publish-beta`, on every push to `main` and every nightly run, and answers one question: **are the files the beta
 registry serves the bytes that were staged, and do the README examples of the packages in the staged plan run on them?**
 `mopm-e2e-beta` makes only GET requests and holds no credential. It runs three steps, in this order
 (`//:release_workflow_cases` holds the order, the gate, the environment and the permissions):

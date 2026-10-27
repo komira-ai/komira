@@ -2,13 +2,19 @@
 //! a `zig_test` run as a build action. The workflow's own bytes are the subject
 //! (the zig_test's `data`, under KOMIRA_TEST_WORK/workflows/release.yml).
 //!
-//! The beta and prod publish run on every push to main and there is no switch:
+//! The beta publish runs on every push to main and on the nightly schedule, the prod publish only
+//! on the nightly schedule from main, and there is no switch:
 //! no line of the file, comment or not, names the variable `MOPM_PUBLISH_ENABLED` or
 //! `MOPM_BETA_PUBLISH_ENABLED`. `mopm-publish-beta` publishes to the beta registry with the
 //! job's GitHub OIDC identity and no secret. What the cases catch:
-//!  - the gate: `needs: mopm-stage`, the `if:` with a push to main and nothing
-//!    else, so a job that loses a part of its gate (and publishes from a manual run
-//!    or another ref) is red, and so is a job that gains a condition of a repository variable;
+//!  - the gate: `needs: mopm-stage`, the `if:` with a push or a nightly run, of main, and nothing
+//!    else, so a beta job that loses a part of its gate (and publishes from a manual run
+//!    or another ref), or loses the nightly (prod would have no beta e2e at its version) or the
+//!    push (no beta per push), is red, and so is a job that gains a condition of a repository variable;
+//!  - the prod jobs' gate is the nightly run of main alone: a prod job that also runs on a push
+//!    or a manual run is red;
+//!  - the triggers and the concurrency: `on:` is the one nightly cron, a push to main and a manual
+//!    run; a push run and a nightly run share the group `release-main` and none is cancelled;
 //!  - the versions: `mopm-stage` (which stages the set prod publishes) and `mopm-stage-beta`
 //!    give every member the version 0.1.<run number> with the same tool, before the stage, from
 //!    `github.run_number`, and the README e2e of `mopm-stage`, `prod-test` and `mopm-e2e-beta` is
@@ -27,7 +33,7 @@
 //!    environment, no `id-token`, no secret and no farm, and `mopm-publish-beta`
 //!    needs it and publishes the set it staged;
 //!  - the workflow's top-level `permissions` is `{}` (a job holds only what it
-//!    names) and its `on:` is a push to main and a manual run, nothing else (a
+//!    names) and its `on:` is the nightly schedule, a push to main and a manual run, nothing else (a
 //!    `pull_request_target` or a second branch would reach the jobs).
 //!  - the job `mopm-e2e-beta` verifies what the beta publish sent: it needs
 //!    `mopm-publish-beta`, has the same gate, runs in the environment `build` (the
@@ -39,7 +45,7 @@
 //!    every package on that set at this run's version, every farm step asserted remote.
 //!  - the prod publish, five jobs under one gate (`prod-stage`, `prod-test`,
 //!    `prod-commit`, `prod-abort`, `prod-smoke`; checkProd says what each must hold):
-//!    each job's `needs`, its exact `if:` (the push-to-main gate; the abort job's
+//!    each job's `needs`, its exact `if:` (the nightly-on-main gate; the abort job's
 //!    `failure() || cancelled()` condition with the gate and
 //!    `needs.prod-stage.result != 'skipped'`), its environment (`prod` for the three
 //!    that talk to the registry, `build` for the test, none for the smoke), its exact
@@ -66,10 +72,13 @@ const REWRITE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/release_beta_vers
 const REWRITE_ENV = "          RUN_NUMBER: ${{ github.run_number }}";
 const PROD_REWRITE_RUN = REWRITE_RUN;
 const STAGE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage --workspace-root src --artifacts \"$RUNNER_TEMP/mopm-publish/artifacts\" --compiler 1.0.0 --out \"$RUNNER_TEMP/mopm-publish/staged_beta\" --registry beta'";
-const GATE = "    if: github.event_name == 'push' && github.ref == 'refs/heads/main'";
+// the beta jobs run on a push to main and on the nightly run; the prod jobs on the nightly run only
+const GATE = "    if: (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main'";
 const E2E_JOB = "mopm-e2e-beta";
-const PROD_GATE = GATE;
-const ABORT_IF = "    if: (failure() || cancelled()) && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.prod-stage.result != 'skipped'";
+const PROD_GATE = "    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'";
+const CRON = "    - cron: '17 3 * * *'";
+const CONCURRENCY_GROUP = "  group: release-${{ (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && 'main' || format('ref-{0}', github.ref_name) }}";
+const ABORT_IF = "    if: (failure() || cancelled()) && github.event_name == 'schedule' && github.ref == 'refs/heads/main' && needs.prod-stage.result != 'skipped'";
 const PROD_STAGE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-publish/staged\" --registry prod --oidc --no-commit'";
 const PROD_COMMIT_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-prod/staged\" --registry prod --oidc'";
 const PROD_ABORT_CMD = "            \"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-prod/staged\" --registry prod --oidc --abort";
@@ -149,7 +158,7 @@ fn checkE2e(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     const job = (try jobLines(ar, text, E2E_JOB, &n)) orelse return "no job mopm-e2e-beta";
     if (n != 1) return "mopm-e2e-beta is defined more than once";
     if (!has(job, "    needs: mopm-publish-beta")) return "e2e-beta needs is not exactly mopm-publish-beta";
-    if (!has(job, GATE)) return "e2e-beta: the if is not the push-to-main gate";
+    if (!has(job, GATE)) return "e2e-beta: the if is not the beta gate (push or nightly, on main)";
     if (!has(job, "    environment: build")) return "e2e-beta environment is not build (the farm's)";
     if (!has(job, "    permissions:") or !has(job, "      contents: read") or !has(job, "      id-token: write"))
         return "e2e-beta permissions are not contents: read and id-token: write";
@@ -208,7 +217,7 @@ fn checkE2e(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
 
 /// Null if the workflow text holds the contract, else the refusal.
 fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
-    // no switch: the beta and prod publish run on every push to main. The names are refused
+    // no switch: the beta publish runs per push and nightly, the prod publish nightly. The names are refused
     // anywhere in the file, in a comment too, so the file cannot describe a switch that is not there.
     if (std.mem.indexOf(u8, text, "MOPM_PUBLISH_ENABLED") != null) return "release.yml names MOPM_PUBLISH_ENABLED: the prod publish has no switch";
     if (std.mem.indexOf(u8, text, "MOPM_BETA_PUBLISH_ENABLED") != null) return "release.yml names MOPM_BETA_PUBLISH_ENABLED: the beta publish has no switch";
@@ -217,7 +226,7 @@ fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     if (n != 1) return "mopm-publish-beta is defined more than once";
     if (!has(job, "    needs: mopm-stage-beta")) return "needs is not exactly mopm-stage-beta";
     if (!has(job, GATE))
-        return "the if is not the push-to-main gate";
+        return "the if is not the beta gate (push or nightly, on main)";
     if (!has(job, "    environment: beta")) return "environment is not beta";
     if (!has(job, "    permissions:") or !has(job, "      contents: read") or !has(job, "      id-token: write"))
         return "permissions are not contents: read and id-token: write";
@@ -238,7 +247,7 @@ fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     const stage = (try jobLines(ar, text, STAGE_JOB, &sn)) orelse return "no job mopm-stage-beta";
     if (sn != 1) return "mopm-stage-beta is defined more than once";
     if (!has(stage, "    needs: mopm-stage")) return "stage-beta needs is not exactly mopm-stage";
-    if (!has(stage, GATE)) return "stage-beta: the if is not the push-to-main gate";
+    if (!has(stage, GATE)) return "stage-beta: the if is not the beta gate (push or nightly, on main)";
     if (mentions(stage, "environment:")) return "stage-beta holds an environment";
     if (mentions(stage, "id-token")) return "stage-beta holds id-token";
     if (!has(stage, "    permissions:") or !has(stage, "      contents: read")) return "stage-beta permissions are not contents: read";
@@ -313,8 +322,22 @@ fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     for (on) |l| {
         if (l.len > 2 and l[0] == ' ' and l[1] == ' ' and l[2] != ' ') try keys.append(ar, std.mem.trim(u8, l, " "));
     }
-    if (keys.items.len != 2 or !std.mem.eql(u8, keys.items[0], "push:") or !std.mem.eql(u8, keys.items[1], "workflow_dispatch:"))
-        return "on: is not exactly push and workflow_dispatch";
+    // the keys, not the comments between them
+    var real = std.ArrayList([]const u8).empty;
+    for (keys.items) |k| if (k[0] != '#') try real.append(ar, k);
+    if (real.items.len != 3 or !std.mem.eql(u8, real.items[0], "schedule:") or !std.mem.eql(u8, real.items[1], "push:") or !std.mem.eql(u8, real.items[2], "workflow_dispatch:"))
+        return "on: is not exactly schedule, push and workflow_dispatch";
+    // one nightly cron, and nothing else under schedule
+    var crons: usize = 0;
+    for (on) |l| if (std.mem.indexOf(u8, l, "cron:") != null and std.mem.trim(u8, l, " ")[0] != '#') {
+        crons += 1;
+    };
+    if (crons != 1 or !has(on, CRON)) return "on: schedule is not the one nightly cron";
+    // a nightly run and a push run share one concurrency group and none is cancelled by another
+    var gn: usize = 0;
+    const conc = (try topLines(ar, text, "concurrency:", &gn)) orelse return "no concurrency block";
+    if (gn != 1 or !has(conc, CONCURRENCY_GROUP)) return "concurrency: a push and a nightly run are not in one release-main group";
+    if (!has(conc, "  cancel-in-progress: false")) return "concurrency: a running release is cancelled";
     if (!has(on, "    branches: [main]")) return "on: push is not branches: [main]";
     if (mentions(on, "pull_request")) return "on: names a pull_request trigger";
     return null;
@@ -560,12 +583,21 @@ test "each defect planted in the real release.yml is refused with its message" {
     // or that got another condition
     try expectRefused(ar, try replaced(ar, text, gate, "    if: github.event_name == 'push'\n"), "gate");
     try expectRefused(ar, try replaced(ar, text, gate, "    if: github.ref == 'refs/heads/main'\n"), "gate");
-    try expectRefused(ar, try replaced(ar, text, gate, "    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.actor != ''\n"), "gate");
+    try expectRefused(ar, try replaced(ar, text, gate, "    if: (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && github.actor != ''\n"), "gate");
+    // the beta jobs run on a push AND on the nightly run: push only (no beta for the nightly set, so prod
+    // would have no beta e2e at its version), nightly only (no beta per push), or a manual run too
+    try expectRefused(ar, try replaced(ar, text, gate, "    if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n"), "gate");
+    try expectRefused(ar, try replaced(ar, text, gate, "    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'\n"), "gate");
+    try expectRefused(ar, try replaced(ar, text, gate, "    if: (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'\n"), "gate");
+    try expectRefused(ar, try replaced(ar, text, gate, "    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'\n"), "gate");
+    // one beta job at a time carrying another job's gate: the beta publish gated like prod, or the stage ungated
+    try expectRefused(ar, try replaced(ar, text, "    needs: mopm-stage-beta\n" ++ gate, "    needs: mopm-stage-beta\n" ++ PROD_GATE ++ "\n"), "the if is not the beta gate");
+    try expectRefused(ar, try replaced(ar, text, "    needs: mopm-stage\n" ++ gate, "    needs: mopm-stage\n" ++ PROD_GATE ++ "\n"), "stage-beta: the if");
     try expectRefused(ar, try replaced(ar, text, gate, "    if: always()\n"), "gate");
     try expectRefused(ar, try replaced(ar, text, gate, ""), "gate");
     // no switch: a variable condition, a comment that names one, either spelling, is refused
-    try expectRefused(ar, try replaced(ar, text, gate, "    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_BETA_PUBLISH_ENABLED == 'true'\n"), "MOPM_BETA_PUBLISH_ENABLED");
-    try expectRefused(ar, try replaced(ar, text, gate, "    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true'\n"), "MOPM_PUBLISH_ENABLED");
+    try expectRefused(ar, try replaced(ar, text, gate, "    if: (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && vars.MOPM_BETA_PUBLISH_ENABLED == 'true'\n"), "MOPM_BETA_PUBLISH_ENABLED");
+    try expectRefused(ar, try replaced(ar, text, gate, "    if: (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true'\n"), "MOPM_PUBLISH_ENABLED");
     try expectRefused(ar, try replaced(ar, text, "name: release\n", "name: release\n# gated on MOPM_PUBLISH_ENABLED\n"), "MOPM_PUBLISH_ENABLED");
     try expectRefused(ar, try replaced(ar, text, "name: release\n", "name: release\n# gated on MOPM_BETA_PUBLISH_ENABLED\n"), "MOPM_BETA_PUBLISH_ENABLED");
     // the stage dependency
@@ -626,7 +658,17 @@ test "each defect planted in the real release.yml is refused with its message" {
     try expectRefused(ar, try replaced(ar, text, "\npermissions: {}\n", "\npermissions:\n  contents: write\n"), "top-level permissions is not");
     try expectRefused(ar, try replaced(ar, text, "\npermissions: {}\n", "\n"), "exactly once");
     try expectRefused(ar, try replaced(ar, text, "\n  workflow_dispatch:\n", "\n  pull_request_target:\n  workflow_dispatch:\n"), "on: is not exactly");
-    try expectRefused(ar, try replaced(ar, text, "\n  workflow_dispatch:\n", "\n  workflow_dispatch:\n  schedule:\n    - cron: '0 0 * * *'\n"), "on: is not exactly");
+    try expectRefused(ar, try replaced(ar, text, "\n  workflow_dispatch:\n", "\n  workflow_dispatch:\n  workflow_call:\n"), "on: is not exactly");
+    // the nightly schedule: it is there, once, and is the one cron
+    try expectRefused(ar, try replaced(ar, text, "  schedule:\n" ++ CRON ++ "\n", ""), "on: is not exactly");
+    try expectRefused(ar, try replaced(ar, text, CRON ++ "\n", CRON ++ "\n    - cron: '17 15 * * *'\n"), "one nightly cron");
+    try expectRefused(ar, try replaced(ar, text, CRON ++ "\n", "    - cron: '17 3 * * 1'\n"), "one nightly cron");
+    try expectRefused(ar, try replaced(ar, text, CRON ++ "\n", ""), "one nightly cron");
+    // a manual run never publishes: no manual run is in the release group, and a push or nightly run
+    // is in one group that no other run cancels
+    try expectRefused(ar, try replaced(ar, text, CONCURRENCY_GROUP, "  group: release-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || format('ref-{0}', github.ref_name) }}"), "concurrency");
+    try expectRefused(ar, try replaced(ar, text, CONCURRENCY_GROUP, "  group: release-${{ github.ref == 'refs/heads/main' && 'main' || format('ref-{0}', github.ref_name) }}"), "concurrency");
+    try expectRefused(ar, try replaced(ar, text, "  cancel-in-progress: false\n", "  cancel-in-progress: true\n"), "concurrency");
     try expectRefused(ar, try replaced(ar, text, "    branches: [main]\n", "    branches: [main, 'release/**']\n"), "branches");
 }
 
@@ -728,7 +770,12 @@ test "each edit of the prod jobs of the real release.yml that breaks the contrac
     for (gates) |head| {
         const wrong = [_][]const u8{
             "    if: github.event_name == 'push'\n",
+            "    if: github.event_name == 'schedule'\n",
             "    if: github.ref == 'refs/heads/main'\n",
+            // prod on a push too (every push would publish to prod), or on a manual run
+            "    if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n",
+            "    if: (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main'\n",
+            "    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'\n",
             "    if: always()\n",
             "",
         };
@@ -744,11 +791,12 @@ test "each edit of the prod jobs of the real release.yml that breaks the contrac
     try expectRefused(ar, try replaced(ar, text, abort_head, "    needs: prod-stage\n" ++ abort_head["    needs: [prod-stage, prod-test, prod-commit]\n".len..]), "prod-abort: needs");
     try expectRefused(ar, try replaced(ar, text, abort_head, "    needs: [prod-stage, prod-commit]\n" ++ abort_head["    needs: [prod-stage, prod-test, prod-commit]\n".len..]), "prod-abort: needs");
     // the abort condition: a failure or a cancel, the gate, and a stage that ran
-    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.prod-stage.result != 'skipped'\n"), "prod-abort: the if");
-    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.prod-stage.result != 'skipped'\n"), "prod-abort: the if");
+    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main' && needs.prod-stage.result != 'skipped'\n"), "prod-abort: the if");
+    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: always() && github.event_name == 'schedule' && github.ref == 'refs/heads/main' && needs.prod-stage.result != 'skipped'\n"), "prod-abort: the if");
     try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: (failure() || cancelled()) && needs.prod-stage.result != 'skipped'\n"), "prod-abort: the if");
-    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: (failure() || cancelled()) && github.event_name == 'push' && github.ref == 'refs/heads/main'\n"), "prod-abort: the if");
-    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.prod-stage.result != 'skipped'\n"), "prod-abort: the if");
+    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: (failure() || cancelled()) && github.event_name == 'schedule' && github.ref == 'refs/heads/main'\n"), "prod-abort: the if");
+    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: failure() && github.event_name == 'schedule' && github.ref == 'refs/heads/main' && needs.prod-stage.result != 'skipped'\n"), "prod-abort: the if");
+    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: (failure() || cancelled()) && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.prod-stage.result != 'skipped'\n"), "prod-abort: the if");
     try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, ABORT_IF ++ " && vars.MOPM_PUBLISH_ENABLED == 'true'\n"), "MOPM_PUBLISH_ENABLED");
 
     // the environments: prod for the registry, build for the test, none for the smoke
