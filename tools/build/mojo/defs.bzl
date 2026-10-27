@@ -31,6 +31,7 @@ load(":test_deps.bzl", "check_test_deps", "test_c_link", "test_closure")
 load(":mutation.bzl", "MUTATION_ATTRS", "mutation_kwargs", "mutation_sub_targets")
 load(":test_runtime.bzl", _arg_args = "arg_args", _data_map = "data_map", _env_args = "env_args", _test_root = "test_root", gate_mojo = "gate_mojo")
 load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "cap_flags", "define_args", "memory_cap")
+load("@komira//tools/build/native:shared.bzl", "NativeSharedInfo")
 load(":native_facts.bzl", "NATIVE_ATTRS", "native_facts", "native_refusal")
 load(":native_reach.bzl", "NATIVE_REACH_ATTRS", "native_reach", "native_reach_kwargs")
 load(":opt_level.bzl", "MojoOptLevelInfo", "SHIPPED_OPT_LEVEL", "TEST_OPT_LEVEL", "opt_level_args")
@@ -220,7 +221,7 @@ def komira_main(
     return __wrap_and_execute_raising_main[_komira_program_main](argc, argv)
 """
 
-def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False, abi_lib = False, link_extra = None, debug_link = None, defines = [], levels = None, emit_object = False):
+def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False, abi_lib = False, link_extra = None, debug_link = None, defines = [], levels = None, emit_object = False, link_head = None):
     """`mojo build` of `main` (one of `srcs`) against the packages in closure_tsets, linking c_link.
 
     Reads only `ctx.actions` and `ctx.label`, so a dynamic action passes
@@ -235,7 +236,10 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
     DT_SONAME is the output's file name (the caller names it, with no `lib`
     prefix forced) and the run path is the default `$ORIGIN/lib`.
     `link_extra` is appended to the link tail after the C libraries (the
-    force-loaded archives of mojo_shared_lib).
+    force-loaded archives of mojo_shared_lib). `link_head` is put before
+    them (the owners' shared libraries of mojo_shared_lib: a symbol one of
+    them defines is bound there, so the archive that also holds it is not
+    pulled in).
 
     With `debug_link` (a coverage build's link directory, coverage.bzl), the
     compile keeps line tables (`--debug-level line-tables`) and links through
@@ -295,6 +299,8 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
             ("@rpath/" + exe.basename) if tc.os == "darwin" else exe.basename,
         ]
     tail = _link_tail(c_link)
+    if link_head:
+        tail = cmd_args(link_head, tail) if tail else cmd_args(link_head)
     if link_extra:
         tail = cmd_args(tail, link_extra) if tail else cmd_args(link_extra)
     if emit_object:
@@ -909,6 +915,21 @@ def _shared_lib_impl(ctx):
             limit = cmd_args(script, format = "-Wl,--version-script={}")
         link_extra = cmd_args(link_extra, limit) if link_extra else cmd_args(limit)
 
+    # The owners' shared libraries (`native_owners`): linked ahead of the C
+    # archives, so the library is NEEDED on each owner's SONAME and the
+    # symbols the owner defines are bound to it. The gate stages each owner
+    # and everything it NEEDs in lib/ beside the library, where its run path
+    # (`$ORIGIN/lib`) finds them.
+    link_head = None
+    owner_files = {}
+    if ctx.attrs.native_owners:
+        if darwin:
+            fail("{}: `native_owners` is ELF only (a library's shared library is Linux only; Mach-O is a later design)".format(ctx.label))
+        link_head = cmd_args([o[NativeSharedInfo].so for o in ctx.attrs.native_owners])
+        for o in ctx.attrs.native_owners:
+            for soname, so in o[NativeSharedInfo].closure.items():
+                owner_files["lib/" + soname] = so
+
     so_file = out_name + (".dylib" if darwin else ".so")
     ungated = _build_executable(
         ctx,
@@ -923,6 +944,7 @@ def _shared_lib_impl(ctx):
         _c_link(ctx),
         abi_lib = True,
         link_extra = link_extra,
+        link_head = link_head,
     )
 
     # The gate: each driver is a Mojo program with no dependencies that
@@ -960,7 +982,7 @@ def _shared_lib_impl(ctx):
     for stem in sorted(drivers.keys()):
         src = drivers[stem]
         exe = _build_executable(ctx, tc, "gate/{}/{}".format(stem, stem), [src], src, [], ctx.attrs.driver_optimization_level, "mojo_build_gate_driver", stem, None)
-        root, staged = _test_root(ctx, "gate/{}/root".format(stem), exe, {so_file: ungated})
+        root, staged = _test_root(ctx, "gate/{}/root".format(stem), exe, {so_file: ungated} | owner_files)
         marker = ctx.actions.declare_output("gate/{}.passed".format(stem))
         ctx.actions.run(
             cmd_args(
@@ -999,6 +1021,7 @@ mojo_shared_lib_rule = rule(
         "force_load": attrs.list(attrs.dep(), default = []),
         "gate_srcs": attrs.list(attrs.source(), default = []),
         "main": attrs.option(attrs.source(), default = None),
+        "native_owners": attrs.list(attrs.dep(providers = [NativeSharedInfo]), default = []),
         "optimization_level": attrs.string(default = SHIPPED_OPT_LEVEL),
         "out_name": attrs.option(attrs.string(), default = None),
         "unlisted_exports": attrs.list(attrs.string(), default = []),

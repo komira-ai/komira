@@ -473,7 +473,7 @@ EXAMPLES=(
     //tools/build/examples/cshim:add //tools/build/examples/cshim:cadd
     //tools/build/examples/cshim:cadd_user //tools/build/examples/cshim:test_add_direct
     //third_party/snappy:snappy //tools/build/examples/snappy:test_snappy
-    //tools/build/examples/shared_lib:spike //tools/build/examples/shared_lib:spike_exact //tools/build/examples/shared_lib:plain //tools/build/examples/shared_lib:plain_exact //tools/build/examples/shared_lib_mid:mid
+    //tools/build/examples/shared_lib:spike //tools/build/examples/shared_lib:spike_exact //tools/build/examples/shared_lib:plain //tools/build/examples/shared_lib:plain_exact //tools/build/examples/shared_lib_mid:mid //tools/build/examples/shared_lib_native:spike_native
 )
 # The run checks, for test 5's scan (each is also a validation of its binary,
 # so the build of the binary runs it). Sub-targets are built in their own
@@ -524,7 +524,7 @@ expect_green gate_ungated_green "tests//negative/libgate_bad:libgate_bad[ungated
 expect_red gate_consumer_red "GATED TEST FAILED" tests//negative/libgate_bad:gated_consumer
 
 # 2 (mojo_shared_lib): the gate refuses to publish a library whose compile is green
-for t in missing_export unresolved_symbol failing_driver forced_not_loaded leaks_by_default plain_leaks exports_not_exported exports_not_listed unlisted_not_exported; do
+for t in missing_export unresolved_symbol failing_driver forced_not_loaded leaks_by_default plain_leaks exports_not_exported exports_not_listed unlisted_not_exported owner_embedded; do
     expect_green "sharedlib_${t}_ungated" "tests//negative/shared_lib:${t}[ungated]"
 done
 expect_red sharedlib_missing_export_red "MISSING EXPORT: neg_missing" tests//negative/shared_lib:missing_export
@@ -542,6 +542,7 @@ expect_red_either sharedlib_exports_not_exported_red "MISSING EXPORT: neg_ghost"
 expect_red sharedlib_exports_not_listed_red "(or \`unlisted_exports\`): neg_sub" tests//negative/shared_lib:exports_not_listed
 expect_red sharedlib_unlisted_not_exported_red "in \`unlisted_exports\`, but" tests//negative/shared_lib:unlisted_not_exported
 expect_red sharedlib_unlisted_not_exported_name_red "function of that name: neg_ghost" tests//negative/shared_lib:unlisted_not_exported
+expect_red sharedlib_owner_embedded_red "libkomira_libc_native.so.1: cannot open shared object file" tests//negative/shared_lib:owner_embedded
 
 # 3
 # Its red depends on the executor staging only declared inputs. A local action
