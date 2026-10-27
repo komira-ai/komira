@@ -270,12 +270,10 @@ its unit graph (`system_libs`), and buildrules gives its own tests the pinned fi
 directories of the pinned files on (`MojoSystemLibsInfo`), the adopted label turns them into `MojoInfo.system_libs`
 ([`system_libs.bzl`](system_libs.bzl)), and a `mojo_library`, `mojo_test` or adopted package that depends on it carries them on, through `deps`
 and, for the welded tests only, `test_deps`. Every test run that loads the package is then given them: the welded tests, the README examples, the kcov and
-branch coverage runs, the mutation runs and a `mojo_test` get `--lib-dir <directory>` arguments of the gate (`tools/build/run`), which appends them to
+branch coverage runs, the mutation runs, a `mojo_test` and a `mojo_shared_lib`'s drivers get `--lib-dir <directory>` arguments of the gate (`tools/build/run`), which appends them to
 `LD_LIBRARY_PATH` after the compiler's lib on Linux and puts them first in `DYLD_FALLBACK_LIBRARY_PATH` on macOS. The directories are unpacked from
 the sha256-pinned packages of the graph, so a run finds the pinned file and nothing of the worker's; a compile is never given them, a `mojo_binary`'s
-run check is not (it runs with no library path at all), and a package that pins nothing changes no command. The proof is
-`tests//negative/adopt_system_libs` and the scenario `planted_red_builds_adopt_system_libs`: the same dependent passes with the pins and fails each run
-kind (welded test, kcov run, branch run, `mojo_test`) with the loader's refusal without them.
+run check is not (it runs with no library path at all), and a package that pins nothing changes no command. The proof is `tests//negative/adopt_system_libs`: its positive targets are ordinary builds (a library's welded test, its kcov run `[coverage][tests]` and branch run `[coverage][branch]`, a `mojo_test` under `buck2 test`, and a `mojo_shared_lib` whose driver calls an export that opens the library; a `mojo_shared_lib`'s gate and coverage drivers are given the directories of its `deps` too), and the scenario `planted_red_builds_adopt_system_libs` asserts that the same dependent of a `:lib` that forgot its pins fails its welded test and its `mojo_test` with the loader's refusal. The kcov, branch and shared-library runs are not asserted red.
 
 ## Binaries and tests
 

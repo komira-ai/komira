@@ -15,3 +15,4 @@ def test_the_consumer_still_works() raises:
 
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
+# A farm worker has none of these libraries; the pinned run finds them.

@@ -1,21 +1,38 @@
-"""The cases of tests//negative/adopt_system_libs (its BUCK file says what each must do)."""
+"""The targets of tests//negative/adopt_system_libs (its BUCK file says what each must do)."""
 
 load("@buildrules//rules/core:pinned_file.bzl", "pinned_file")
 load("@buildrules//rules/core:platform.bzl", "LINUX_X86_64")
 load("@buildrules//rules/mojo:system_libs.bzl", "mojo_system_lib_rule")
 load("@komira//tools/build/lint:doc_tree.bzl", "package_docs")
 load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "mojo_test")
 load(":fixture.bzl", "pinned_lib")
+
+def _dependents(suffix, adopted):
+    """The old-rule dependents of the adopted label `adopted`, named with `suffix`: a library whose welded test calls the codec, a `mojo_test` and a shared library
+    whose driver calls into it. The library has a kcov and a branch coverage build whatever the switch says (`coverage_debug`)."""
+    mojo_library(
+        name = "consumer" + suffix,
+        srcs = ["syslib_consumer/__init__.mojo"],
+        test_srcs = ["tests/test_consumer.mojo"],
+        deps = [adopted],
+        import_name = "syslib_consumer",
+        conda = False,
+        readme = False,
+        coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    )
+
+    # `buck2 test` runs it through the gate.
+    mojo_test(
+        name = "program_test" + suffix,
+        main = "tests/test_program.mojo",
+        srcs = ["tests/test_program.mojo"],
+        deps = [adopted],
+    )
 
 def adopt_system_libs_case():
     # Every package declares its doc_tree (tests//:doc_tree collects it), with or without a case.
     package_docs()
-    case = read_config("adopt_system_libs", "case", "")
-    if case not in ["pinned", "unpinned"]:
-        if case:
-            fail("adopt_system_libs.case: unknown case `{}`".format(case))
-        return
 
     # The files conda-forge ships for SQLite and the library it needs, sha256-pinned as buildrules' own stand-in pins them.
     pinned_file(
@@ -43,13 +60,8 @@ def adopt_system_libs_case():
         readme = False,
     )
 
-    # What the gated `:lib` of a package that pins the two libraries is: the library's file and, in the `pinned` case, the directories. The `unpinned` case is
-    # the same package whose `:lib` forgot its pins.
-    pinned_lib(
-        name = "codec_lib",
-        lib = ":codec",
-        system_libs = [":libsqlite", ":libzlib"] if case == "pinned" else [],
-    )
+    # What the gated `:lib` of a package that pins the two libraries is: the library's file and the directories.
+    pinned_lib(name = "codec_lib", lib = ":codec", system_libs = [":libsqlite", ":libzlib"])
     mojo_adopted_library(
         name = "adopted",
         import_name = "syslib_codec",
@@ -58,22 +70,35 @@ def adopt_system_libs_case():
         test_runs = ":codec[tests]",
         test_srcs = ["tests/test_codec.mojo"],
     )
+    _dependents("", ":adopted")
 
-    # The old-rule dependent: its welded test calls the codec, so its run (and its coverage runs) must find libsqlite3.so.0.
-    mojo_library(
-        name = "consumer",
-        srcs = ["syslib_consumer/__init__.mojo"],
-        test_srcs = ["tests/test_consumer.mojo"],
-        deps = [":adopted"],
-        import_name = "syslib_consumer",
-        conda = False,
-        readme = False,
-    )
-
-    # A `mojo_test` that depends on the adopted package: `buck2 test` runs it through the gate, which is given the same directories.
-    mojo_test(
-        name = "program_test",
-        main = "tests/test_program.mojo",
-        srcs = ["tests/test_program.mojo"],
+    # A shared library over the adopted label: its driver loads it, and its export opens SQLite.
+    mojo_shared_lib(
+        name = "probe",
+        srcs = ["shared_probe.mojo"],
+        exports = ["probe_sqlite"],
+        out_name = "syslib_probe",
+        gate_srcs = ["shared_driver.mojo"],
         deps = [":adopted"],
     )
+
+    # The defect: the same package whose `:lib` forgot its pins, `-c adopt_system_libs.case=unpinned`.
+    if read_config("adopt_system_libs", "case", "") == "unpinned":
+        pinned_lib(name = "codec_lib_unpinned", lib = ":codec")
+        mojo_adopted_library(
+            name = "adopted_unpinned",
+            import_name = "syslib_codec",
+            lib = ":codec_lib_unpinned",
+            srcs = ["syslib_codec/__init__.mojo"],
+            test_runs = ":codec[tests]",
+            test_srcs = ["tests/test_codec.mojo"],
+        )
+        _dependents("_unpinned", ":adopted_unpinned")
+        mojo_shared_lib(
+            name = "probe_unpinned",
+            srcs = ["shared_probe.mojo"],
+            exports = ["probe_sqlite"],
+            out_name = "syslib_probe",
+            gate_srcs = ["shared_driver.mojo"],
+            deps = [":adopted_unpinned"],
+        )

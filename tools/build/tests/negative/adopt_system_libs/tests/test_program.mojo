@@ -9,3 +9,4 @@ def test_the_pinned_library_is_found_by_its_bare_name() raises:
 
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
+# Same call as the consumer's, from a test binary.
