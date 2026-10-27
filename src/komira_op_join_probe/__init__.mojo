@@ -2,9 +2,12 @@
 
 The composite-key hash join: `MultiKeyHashJoinBuilder`
 (`join_multi_key_builder`) with its INNER and LEFT probes, the key slots,
-hashes and equality arms it uses (`join_multi_key`), and the extraction of a
-batch's join-key columns into key slots (`join_key_extract`). Float keys
-follow the query semantics' float model. Nothing here reads the environment.
+hashes and equality arms it uses (`join_multi_key`), the parallel INNER probe
+over the engine's dispatcher (`join_multi_key_parallel`,
+`join_multi_key_parallel_task`), and the extraction of a batch's join-key
+columns into key slots (`join_key_extract`). Float keys follow the query
+semantics' float model. Settings are set once per process from flags
+(`join_probe_settings`); nothing here reads the environment.
 
 Public API: import directly from sub-modules. No facade.
 """

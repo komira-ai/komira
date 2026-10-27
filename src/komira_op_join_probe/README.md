@@ -10,6 +10,15 @@ import from the modules.
   (`probe_inner_into`) and LEFT (`probe_left_into`) probes. Matches come back
   as parallel lists of build and probe row indices; LEFT marks an unmatched
   probe row with build index -1.
+- `komira_op_join_probe.join_multi_key_parallel`:
+  `parallel_multi_key_inner_probe_into`, the INNER probe fanned over the
+  engine's dispatcher: workers claim probe morsels and walk a batch of rows'
+  chains together (`join_multi_key_parallel_task`), then one more fanned wave
+  concatenates their matches. The same pairs as the serial probe, grouped by
+  worker.
+- `komira_op_join_probe.join_probe_settings`: the probe's process settings,
+  set once from flags: the batched walk's width (0 is the row-at-a-time walk),
+  the probe morsel, and the retile.
 - `komira_op_join_probe.join_key_extract`: `extract_join_key_columns_typed`
   (and `extract_join_key_columns_serial`, without a dispatcher) renders a
   batch's key columns into one Int64 key slot per row and key
