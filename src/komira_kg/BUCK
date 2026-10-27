@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The mutable data-graph store and its ingest, parts 1 to 6 (the second of the
+# The mutable data-graph store and its ingest, parts 1 to 7 (the second of the
 # packages in docs/design/knowledge_graph_port.md): bi-temporal edges (a replaced
 # fact is closed, not erased), entity resolution (name similarity, the dedup
 # cascade and a directed alias map), the source facet with its tombstone set, the
@@ -9,7 +9,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # in-memory working set that loads a snapshot or a delta chain and writes back a
 # base or a delta, erasure of a partition, the warm cache, compaction and
 # embedding top-k and the episode ingest path (extract with a bounded gleaning
-# loop, resolve entities, apply bi-temporal edges, store a base or a delta). It depends on
+# loop, resolve entities, apply bi-temporal edges, store a base or a delta), the
+# structured path (known facts without extraction, a source that replaces its
+# facts, an ended fact) and the SurfaceAdapter seam. It depends on
 # komira_kg_format (for the open-interval marker), komira_json (for the facet's
 # attrs JSON) and komira_objectstore (the cursor store rides its conditional-write
 # trait), and on their closure; it reads no clock and no environment, and calls no
@@ -57,7 +59,14 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # set and writes a full base when a delta cannot say a closure; test_ingest_failure
 # refuses a wrong embedding dimension, a knob out of range and a set a delta
 # cannot carry, and leaves the store unchanged when the model or the embedder
-# fails.
+# fails; test_ingest_structured ingests known facts without the extractor, skips
+# an unchanged extraction by its fingerprint, supersedes a judged contradiction,
+# stores an end time and refuses an empty interval, and leaves the store unchanged
+# when the embedder or a judge fails; test_ingest_source_diff closes exactly the
+# edges a source no longer states (not another source's, partition's or untagged
+# ingest's), applies only the changed facts of a re-ingest and keeps an ended
+# fact's end; test_surface_adapter lowers made-up records to the expected
+# episodes with their text verbatim.
 mojo_library(
     name = "komira_kg",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -112,6 +121,8 @@ mojo_library(
         "tests/test_ingest_failure.mojo",
         "tests/test_ingest_gleaning.mojo",
         "tests/test_ingest_resolve.mojo",
+        "tests/test_ingest_source_diff.mojo",
+        "tests/test_ingest_structured.mojo",
         "tests/test_llm_client.mojo",
         "tests/test_name_similarity.mojo",
         "tests/test_rewrite_repair.mojo",
@@ -119,6 +130,7 @@ mojo_library(
         "tests/test_rule_pattern.mojo",
         "tests/test_rule_scan.mojo",
         "tests/test_source_facet.mojo",
+        "tests/test_surface_adapter.mojo",
         "tests/test_warm_cache.mojo",
         "tests/test_working_set_commit.mojo",
         "tests/test_working_set_delta.mojo",

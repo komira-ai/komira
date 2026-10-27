@@ -1,2 +1,19 @@
-"""`komira_engine_runtime.spill`: the spill layer. Today it holds only `fnv1a`,
-the 64-bit FNV-1a hash the spill file formats checksum with."""
+"""`komira_engine_runtime.spill`: the spill layer.
+
+- `spill_storage`: the `SpillStorage` trait (write a chunk, read it back,
+  release it) and `ChunkId`.
+- `filesystem_spill_storage`: `FileSystemSpillStorage[FS]`, the storage over
+  any `komira_fs` file system; `local_disk`: `LocalDiskSpillStorage`, that
+  storage over the local file system, which creates its root directory.
+- `fnv1a`: the FNV-1a 64 hash and the partition schema fingerprint the spill
+  formats record and checksum with.
+- `thsplc` and `thsplc_header`: the THSPLC column codec for a RecordBatch.
+- `column_native_shims`: the bridges between RecordBatch and
+  ColumnNativeBatch.
+- `thspill2_header` / `thspill2`: the opaque-body spill format for breaker
+  state (`Spillable`) and its codec.
+- `native_spill`: a writer and reader of record-batch runs (column format) and
+  row bodies (row format) over local-disk spill storage.
+
+Whether a breaker may spill, and to which tiers, is decided by the host
+profile (`HostProfile.spill_tiers_for`) and recorded in the physical plan."""

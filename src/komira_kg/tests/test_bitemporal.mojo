@@ -7,6 +7,9 @@
 #                that ended before or exactly when the new one starts, and an
 #                empty interval are not; the predicate counts only on request;
 #                indices come back in order.
+#   ended edge   a new edge that is already ended is tested over its own
+#                interval: an existing edge that begins at or after its end is
+#                not a candidate, one inside it is.
 #   invalidation a confirmed supersession ends the old edge's event time at the
 #                new edge's start and stamps the system time it was learned,
 #                keeps the row and every other field, and reproduces both
@@ -135,6 +138,28 @@ def test_an_edge_still_open_at_the_new_start_overlaps_when_closed_later() raises
         WorkingEdge(_A, _B, "", "ends later", 100, 301, 301, 100, 100, "")
     )
     assert_equal(len(overlapping_contradiction_candidates(_new_open(), existing)), 1)
+
+
+def test_a_new_edge_that_is_already_ended_is_tested_over_its_own_interval() raises:
+    var new_edge = _new_open()  # holds from 300
+    new_edge.invalid_at = 400  # and ended at 400
+    var existing = List[WorkingEdge]()
+    existing.append(
+        open_edge(_A, _B, "", "starts at the end", valid_at=400, now=100, reference_time=400)
+    )
+    existing.append(
+        open_edge(_A, _B, "", "starts after the end", valid_at=450, now=100, reference_time=450)
+    )
+    existing.append(
+        open_edge(_A, _B, "", "starts inside", valid_at=350, now=100, reference_time=350)
+    )
+    existing.append(_old_open())  # open from 100: holds through the whole interval
+    var cands = overlapping_contradiction_candidates(new_edge, existing)
+    assert_equal(len(cands), 2)
+    assert_equal(cands[0], 2)
+    assert_equal(cands[1], 3)
+    # The same edge, open, reaches all four.
+    assert_equal(len(overlapping_contradiction_candidates(_new_open(), existing)), 4)
 
 
 def test_predicate_counts_only_when_asked() raises:
