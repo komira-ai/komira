@@ -49,9 +49,12 @@ from .proc_ffi import (
     proc_environ_at,
     proc_environ_count,
     proc_spawn,
+    proc_spawn_stdin,
     proc_spawn_detached,
+    proc_write,
     proc_read,
     proc_read_avail,
+    proc_wait_readable,
     proc_set_nonblocking,
     proc_close,
     proc_kill,
@@ -365,6 +368,7 @@ struct ChildSpec(Movable):
     var rlimits: List[RLimit] # opt-in; accepted but not applied yet
     var own_process_group: Bool  # see set_own_process_group
     var default_signals: Bool    # see set_default_signals
+    var stdin_pipe: Bool         # see set_stdin_pipe
 
     def __init__(out self, path: String):
         self.path = path
@@ -376,6 +380,7 @@ struct ChildSpec(Movable):
         self.rlimits = List[RLimit]()
         self.own_process_group = False
         self.default_signals = False
+        self.stdin_pipe = False
 
     @staticmethod
     def shell(cmd: String) -> ChildSpec:
@@ -431,6 +436,12 @@ struct ChildSpec(Movable):
         and the mask, so without this a child inherits, for example, the
         SIGPIPE this process ignores once it has made a TLS connection."""
         self.default_signals = True
+
+    def set_stdin_pipe(mut self):
+        """The child's stdin is a pipe this process writes: `Supervisor.write_stdin`
+        sends bytes and `close_stdin` gives the child end of file. Without
+        this the child inherits this process's stdin."""
+        self.stdin_pipe = True
 
     def spawn_flags(self) -> Int32:
         """The shim's spawn flags for this spec."""
@@ -508,6 +519,7 @@ struct Supervisor(Movable):
     var _pgid: Int32           # the child's own process group, or -1
     var _stdout_fd: Int32
     var _stderr_fd: Int32
+    var _stdin_fd: Int32       # write end of the child's stdin, or -1
     var _exited: Bool          # cached terminal state (idempotency)
     var _cached_exit: ExitInfo # valid once _exited
 
@@ -516,6 +528,7 @@ struct Supervisor(Movable):
         self._pgid = Int32(-1)
         self._stdout_fd = Int32(-1)
         self._stderr_fd = Int32(-1)
+        self._stdin_fd = Int32(-1)
         self._exited = False
         self._cached_exit = ExitInfo(Int32(-1), Int32(-1), Int32(-1))
 
@@ -547,17 +560,30 @@ struct Supervisor(Movable):
 
         var sout = Int32(-1)
         var serr = Int32(-1)
+        var sin = Int32(-1)
         var pid = Int32(-1)
-        var rc = proc_spawn(
-            spec.path,
-            argv_blob, argc,
-            env_blob, envc,
-            spec.cwd, spec.has_cwd,
-            spec.spawn_flags(),
-            sout, serr, pid,
-        )
+        var rc: Int32
+        if spec.stdin_pipe:
+            rc = proc_spawn_stdin(
+                spec.path,
+                argv_blob, argc,
+                env_blob, envc,
+                spec.cwd, spec.has_cwd,
+                spec.spawn_flags(),
+                sout, serr, sin, pid,
+            )
+        else:
+            rc = proc_spawn(
+                spec.path,
+                argv_blob, argc,
+                env_blob, envc,
+                spec.cwd, spec.has_cwd,
+                spec.spawn_flags(),
+                sout, serr, pid,
+            )
         if rc != Int32(0):
             return rc  # -errno
+        self._stdin_fd = sin
         self._pid = pid
         # POSIX_SPAWN_SETPGROUP with pgroup 0: the group's id is the pid, set
         # in the child before exec, so it exists by the time spawn returns.
@@ -579,6 +605,52 @@ struct Supervisor(Movable):
 
     def stderr_fd(self) -> Int32:
         return self._stderr_fd
+
+    def stdin_fd(self) -> Int32:
+        """The write end of the child's stdin, or -1 (the spec did not ask for
+        a pipe, or `close_stdin` ran)."""
+        return self._stdin_fd
+
+    def write_stdin(mut self, text: String) -> Int:
+        """Write every byte of `text` to the child's stdin. Returns the byte
+        count, or a negative errno (-EBADF with no stdin pipe, -EPIPE when the
+        child has closed its stdin and SIGPIPE does not kill this process).
+        It blocks while the pipe is full and the child is not reading."""
+        if self._stdin_fd < Int32(0):
+            return -9  # EBADF
+        return proc_write(self._stdin_fd, text.as_bytes())
+
+    def close_stdin(mut self):
+        """Close the write end of the child's stdin: the child reads end of
+        file. Idempotent."""
+        if self._stdin_fd >= Int32(0):
+            proc_close(self._stdin_fd)
+            self._stdin_fd = Int32(-1)
+
+    def wait_readable(self, fd: Int32, timeout_ms: Int) -> Int:
+        """Wait up to `timeout_ms` (negative: without limit) until a read of
+        the capture pipe `fd` would not block: 1 when data, end of file or an
+        error is waiting, 0 on timeout, a negative errno on failure."""
+        return proc_wait_readable(fd, timeout_ms)
+
+    def read_blocking(mut self, fd: Int32) -> ReadChunk:
+        """ONE blocking read of a capture pipe: wait for at least one byte and
+        return what the read gives. eof=True when every writer has closed the
+        pipe, error=True on a read error. Like `read_available`, it decodes
+        nothing: the bytes come back as they were."""
+        comptime CHUNK = 65536
+        if fd < Int32(0):
+            return ReadChunk(String(""), eof=True, would_block=False, error=False)
+        var buf = List[UInt8]()
+        for _ in range(CHUNK):
+            buf.append(UInt8(0))
+        var n = proc_read(fd, buf, CHUNK)
+        if n > 0:
+            return ReadChunk(
+                String(unsafe_from_utf8=Span[UInt8](buf)[0 : n]),
+                eof=False, would_block=False, error=False,
+            )
+        return ReadChunk(String(""), eof=(n == 0), would_block=False, error=(n < 0))
 
     # --- capture -------------------------------------------------------------
 
@@ -910,6 +982,7 @@ struct Supervisor(Movable):
         """Close any open capture-pipe fds (idempotent). Does NOT reap — call
         wait_exit / terminate for that. Production also deregisters the reactor
         exit-monitor fd (pidfd) here."""
+        self.close_stdin()
         if self._stdout_fd >= Int32(0):
             proc_close(self._stdout_fd)
             self._stdout_fd = Int32(-1)

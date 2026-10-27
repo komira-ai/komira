@@ -38,6 +38,7 @@ mojo_library(
         "tests/test_child_probe.mojo",
         "tests/test_pid1.mojo",
         "tests/test_process_group.mojo",
+        "tests/test_stdin_pipe.mojo",
         "tests/test_supervisor_edges.mojo",
         "tests/test_supervisor_scenarios.mojo",
     ],
