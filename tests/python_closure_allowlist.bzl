@@ -21,6 +21,9 @@ PYTHON_SURFACE = [
 ]
 
 PYTHON_CEILING = [
+    # The pull-request set builds the binding tests of the surface.
+    "target komira//ci:pr",
+
     # The hermetic-Python rules, their runner scripts and their refusal fixture.
     "file tools/build/python/oracle_run.py",
     "file tools/build/python/pyrun.py",
