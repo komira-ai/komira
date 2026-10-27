@@ -154,6 +154,22 @@ file system and a wall-clock nonce only for its temp-file dance; with the from-b
 go, so `komira_async` and `komira_clock` are not dependencies (re-checked from the imports in PR 9). The
 store never reads a wall clock itself; see the testing plan.
 
+### Decided during the port
+
+What the ports decided that the design above did not say:
+
+- Gleaning and edge application moved to part 6 from part 7, because an episode cannot extract without them.
+- Only the closure ambiguity (two open edges sharing the key a tombstone closes by) falls back to writing a
+  full base; every other reason a delta cannot be written propagates as an error.
+- Edges store no predicate, so edges that differ only in predicate collapse after a reload. A predicate column
+  is an open question.
+- A triple's own `invalid_at` is ignored on the episode path: a new edge is always open. The structured path
+  is decided in part 7.
+- The cross-unit context takes only the entities whose partition equals the episode's (an empty partition id
+  matches only entities with an empty one), while entity resolution with an empty partition id matches across
+  partitions. The asymmetry is kept from the source.
+- Embedding top-k skips a stored row with a non-finite component and refuses a query with one.
+
 ### What do the other packages export?
 
 - `komira_kg_mode`: the extraction-mode vocabulary (`extract_mode_vocab`), zero dependencies. Two modes:
@@ -299,7 +315,7 @@ that brings it, at the seams named. A package's `deps` is stated in its first PR
 | 7 | `komira_kg` part 2: `Embedder`, `LlmClient`, `Extractor`, the stubs | 700 | part 1 | the stubs are deterministic and report their dimension; the stub extractor satisfies the trait |
 | 8 | `komira_kg` part 3: `RuleExtractor`, `CursorStore` | 1,000 | PRs 6 and 7 | a rule set on fixed text yields fixed triples; a rule set is data (two sets give two vocabularies from the same code); a cursor survives a write-read and a conflicting writer. `RuleExtractor` rules are caller data, and `CursorStore` is written over a `ConditionalWriteStore`, so the package needs `komira_objectstore` |
 | 9 | `komira_kg` part 4: `snapshot_mut` values and working set (the 2,045-line file is split here and in PR 10: values plus the working set, then erase, warm cache, compaction and embedding top-k) | 1,300 | PRs 4 and 6, PR 0 | a mutation reads back identically; a snapshot read sees one consistent set of tables |
-| 10 | `komira_kg` part 5: erase, warm cache, compaction, embedding top-k | 620 | PR 9 | a mutation then compaction reads back identically before and after; compaction never deletes an object a pinned snapshot names; erasure of a partition removes every row and every embedding of it |
+| 10 | `komira_kg` part 5: erase, warm cache, compaction, embedding top-k | 620 | PR 9 | a mutation then compaction reads back identically before and after; compaction never deletes an object a pinned snapshot names; erasure of a partition removes it from the head (repeated until a racing writer's rows are gone) while the old chunks and objects stay until retire and the change gate's fingerprints are kept |
 | 11 | `komira_kg` part 6: `ingest` episode path and entity resolution (the 1,717-line file is split here and in PR 12) | 900 | PRs 8 and 10 | one episode produces the expected nodes, edges and provenance; a write with the wrong embedding dimension is refused |
 | 12 | `komira_kg` part 7: `ingest` structured path, gleaning, edge application, and the `SurfaceAdapter` trait | 900 | PR 11 | re-ingest of an unchanged source is a no-op by fingerprint; a contradiction supersedes; a test adapter for a made-up record type lowers to the expected episodes |
 | 13 | `komira_kg_mode` | 140 | none | each mode name round trips; an unknown name falls back to rules; normalisation never yields model unless asked |
@@ -395,7 +411,7 @@ Each question carries the recommended answer; the maintainers decide.
    tables with a delta tail, and withdraws the sentinel for an open interval (`TS_OPEN_SENTINEL` today, a
    null there). Recommended: port the working lineage unchanged as the delta-tail layer (it is the part
    that document keeps), keep the open-interval sentinel, `TS_OPEN_SENTINEL` (`Int64.MAX`, compared only through the constant and never as a literal), and add the Iceberg table writer and the
-   null-bound schema as a later schema version in a later series once `komira_iceberg` lands (its four parts are open as PRs 1785, 1788, 1789 and 1790). Do not rewrite
+   null-bound schema as a later schema version in a later series, once `komira_iceberg` lands. Do not rewrite
    storage and port in one step.
 2. **One package or two for the read side?** Recommended: two. `komira_kg_format` (no engine) and
    `komira_kg_read` (engine), because only three functions of the source read file run a plan on the engine and the rest is shared with the writer.
