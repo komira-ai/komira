@@ -101,7 +101,27 @@ test "the checkout must be the commit the run started on" {
     try refusal(try guard.decide(ar.allocator(), push(true), FakeGit{ .steps = &.{none} }), "failed (128)");
 }
 
-test "only a push to main and a manual run build a release" {
+test "a nightly run of main is a release like a push to main, on main's history only" {
+    var ar = arena();
+    defer ar.deinit();
+    var in = push(true);
+    in.event = "schedule";
+    const o = try guard.decide(ar.allocator(), in, FakeGit{ .steps = &.{ HEAD_OK, ON_MAIN } });
+    try t.expect(o == .release);
+    try t.expect(o.release == null);
+    const off = Step{ .cmd = ON_MAIN.cmd, .code = 1 };
+    try refusal(try guard.decide(ar.allocator(), in, FakeGit{ .steps = &.{ HEAD_OK, off } }), "is not on main's history");
+    // a schedule is never a run of another ref
+    in.ref = "refs/heads/other";
+    try refusal(try guard.decide(ar.allocator(), in, FakeGit{ .steps = &.{ HEAD_OK, ON_MAIN } }), "a schedule of refs/heads/other");
+    // nor does a nightly run need a reason: it is not break-glass
+    in = push(false);
+    in.event = "schedule";
+    const sk = try guard.decide(ar.allocator(), in, FakeGit{ .steps = &.{ HEAD_OK, ON_MAIN } });
+    try t.expect(sk == .skip);
+}
+
+test "only a push to main, a nightly run of main and a manual run build a release" {
     var ar = arena();
     defer ar.deinit();
     const git = FakeGit{ .steps = &.{ HEAD_OK, ON_MAIN } };
@@ -112,8 +132,8 @@ test "only a push to main and a manual run build a release" {
     in.ref = "refs/heads/other";
     try refusal(try guard.decide(ar.allocator(), in, git), "a push of refs/heads/other");
     in = push(true);
-    in.event = "schedule";
-    try refusal(try guard.decide(ar.allocator(), in, git), "a schedule of");
+    in.event = "repository_dispatch";
+    try refusal(try guard.decide(ar.allocator(), in, git), "a repository_dispatch of");
 }
 
 test "a ref that is main in another case is refused for every event" {
