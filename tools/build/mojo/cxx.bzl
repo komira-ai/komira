@@ -19,6 +19,13 @@ zig's clang targets `target` (a glibc-versioned triple) and `target_cpu`
 whatever worker runs it, and compiles with `-g0` by default: debug info would
 record the action's working directory. The C++ standard library is zig's
 libc++, linked statically (see `komira//tools/build/toolchains:libcxx`).
+
+For a macOS arm64 target platform (the `macos` attribute, set by a `select` on
+the target platform in `komira_cxx_toolchains`) it targets `macos_target`
+(`aarch64-macos`) at zig's generic arm64 CPU instead: the same zig, on the same
+linux x86_64 execution platform, writes the object files and the static archive
+of a library's C. No executable or shared library is linked for macOS: the
+linker is a refusal, because a link would write a linux program.
 """
 
 load(
@@ -63,8 +70,12 @@ def _zig_cxx_toolchain_impl(ctx):
     cc = _zig_tool(launcher, zig, "cc")
     cxx = _zig_tool(launcher, zig, "c++")
 
-    # Flags every compile gets, before the target's own.
-    base = ["-target", ctx.attrs.target, "-mcpu=" + ctx.attrs.target_cpu.replace("-", "_"), "-fPIC", "-g0"]
+    # Flags every compile gets, before the target's own. A macOS arm64 target (`macos`)
+    # compiles for `macos_target` at zig's generic arm64 CPU; every other target is the
+    # linux one, as it was.
+    target = ctx.attrs.macos_target if ctx.attrs.macos else ctx.attrs.target
+    cpu = "generic" if ctx.attrs.macos else ctx.attrs.target_cpu.replace("-", "_")
+    base = ["-target", target, "-mcpu=" + cpu, "-fPIC", "-g0"]
     c_info = CCompilerInfo(
         compiler = cc,
         compiler_type = "clang",
@@ -101,8 +112,9 @@ def _zig_cxx_toolchain_impl(ctx):
         link_libraries_locally = False,
         link_style = LinkStyle("static_pic"),
         link_weight = 1,
-        linker = cxx,
-        linker_flags = cmd_args("-target", ctx.attrs.target),
+        # A macOS arm64 target gets no linker: the toolchain compiles and archives for it.
+        linker = _refusal(act, "a linker for macOS") if ctx.attrs.macos else cxx,
+        linker_flags = cmd_args("-target", target),
         object_file_extension = "o",
         shlib_interfaces = ShlibInterfacesMode("disabled"),
         shared_dep_runtime_ld_flags = [],
@@ -172,6 +184,12 @@ zig_cxx_toolchain = rule(
         "cxx_compiler_flags": attrs.list(attrs.string(), default = []),
         # A `zig_exe` of mojo/tools/zig_cc_launcher.zig.
         "launcher": attrs.exec_dep(),
+        # True when the target platform is macOS arm64 (a `select` in `komira_cxx_toolchains`):
+        # the compile then targets `macos_target`, and `target` and `target_cpu` are not used.
+        "macos": attrs.bool(default = False),
+        # zig target triple of a macOS arm64 target: its C is cross-compiled by the pinned zig
+        # on the (linux) execution platform of this toolchain.
+        "macos_target": attrs.string(default = "aarch64-macos"),
         # zig target triple, with the glibc floor, e.g. x86_64-linux-gnu.2.34.
         "target": attrs.string(),
         # e.g. x86-64-v3; passed to zig as -mcpu.
