@@ -283,6 +283,24 @@ def _stalled_head_on(clock: ArcPointer[Int]) -> ScriptedConnector:
     return ScriptedConnector.with_stream(s^)
 
 
+def _clocked_refusing(clock: ArcPointer[Int]) raises -> ScriptedConnector:
+    raise Error("clocked connector setup failed")
+
+
+def test_clocked_connector_factory_failure_propagates() raises:
+    var clock = ArcPointer[Int](_CLOCK_START_US)
+    var tr = HttpIcebergRestTransport[ScriptedConnector].with_test_clock(
+        _clocked_refusing, clock, request_timeout_us=_BUDGET_US
+    )
+    var msg = String("")
+    try:
+        var _r = tr.get(_request(String("/v1/config"), 8181))
+    except e:
+        msg = String(e)
+    assert_equal(msg, String("clocked connector setup failed"))
+    assert_equal(clock[], _CLOCK_START_US)
+
+
 def test_request_timeout_bounds_a_stalled_peer() raises:
     # ScriptedStream.advance_clock_on_read adds the step only on reads that
     # answer Pending (data_step_us defaults to 0; EOF and errors add nothing).
@@ -303,6 +321,9 @@ def test_request_timeout_bounds_a_stalled_peer() raises:
     assert_true(_has(msg, String("TIMEOUT")), msg)
     var elapsed = clock[] - _CLOCK_START_US
     assert_true(elapsed >= _BUDGET_US, String(elapsed))
+    # The client checks its deadline once per Pending read, so the timeout
+    # lands within a step or two of the budget; five steps leaves slack and is
+    # still far below the 200k-read stall that a dropped budget would reach.
     assert_true(elapsed < _BUDGET_US + 5 * _PENDING_STEP_US, String(elapsed))
 
 
@@ -312,5 +333,6 @@ def main() raises:
     test_non_200_is_returned_not_raised()
     test_each_call_dials_a_fresh_connector()
     test_connector_factory_failure_propagates()
+    test_clocked_connector_factory_failure_propagates()
     test_request_timeout_bounds_a_stalled_peer()
     print("test_iceberg_rest_http_transport: ALL PASS")
