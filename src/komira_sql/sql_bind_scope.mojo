@@ -33,7 +33,7 @@ from komira_sql.sql_tvf_bind import (
 
 
 struct CteScope(Movable):
-    """The per-query scope `bind_statement` builds: each `WITH` definition's
+    """The per-query scope the statement binder builds: each `WITH` definition's
     (and each derived table's) name -> its already-bound `LogicalPlan`
     subtree, and the parquet facts read before binding. When a FROM relation
     names a CTE, the binder inlines a fresh `.copy()` of that subplan (a named
@@ -89,6 +89,9 @@ def _date_to_days(s: String) raises -> Int32:
     var b = s.as_bytes()
     if len(b) != 10 or b[4] != UInt8(ord("-")) or b[7] != UInt8(ord("-")):
         raise Error("SQL bind error: malformed date literal '" + s + "' (want YYYY-MM-DD)")
+    for i in range(10):
+        if i != 4 and i != 7 and (b[i] < UInt8(ord("0")) or b[i] > UInt8(ord("9"))):
+            raise Error("SQL bind error: malformed date literal '" + s + "' (want YYYY-MM-DD)")
     var y: Int = 0
     for i in range(4):
         y = y * 10 + Int(b[i] - UInt8(ord("0")))
@@ -274,7 +277,7 @@ def _ambiguous_qualifier_error(q: String, name: String) -> String:
 
 struct BindScope(Movable):
     """Qualifier-aware column-resolution scope for one SELECT's FROM, built
-    once per `_bind_select` from the FROM relations in join order.
+    once per SELECT from the FROM relations in join order.
 
     `out_schema` is the combined binding schema: each relation's
     `_relation_schema` columns concatenated, renamed on collision
@@ -621,11 +624,11 @@ def _resolve_col(sx: SqlExpr, schema: Schema, scope: BindScope) raises -> String
     """Resolve an SX_COLUMN reference to its name in the (join OUTPUT) `schema`.
     A qualified `q.c` resolves via the scope (mapping to the `_right`-renamed out
     name on a collision); an unqualified `c` binds by bare name (must exist in the
-    output schema). Single-table / disjoint FROMs return the name unchanged."""
+    output schema, and comes back as the schema spells it). Single-table / disjoint FROMs return the name unchanged."""
     if sx.qualifier != "":
         return scope.resolve_qualified(sx.qualifier, sx.text)
     if not _schema_has_col(schema, sx.text):
         raise Error("SQL bind error: unknown column '" + sx.text + "'")
-    return String(sx.text)
+    return _schema_col_spelling(schema, sx.text)
 
 

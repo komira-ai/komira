@@ -354,7 +354,7 @@ def test_unaliased_derived_tables_are_named_per_level() raises:
     assert_equal(nested.query.from_tables[0].name, "unnamed_subquery#1")
     assert_equal(nested.query.from_tables[1].rel_alias, "unnamed_subquery2")
     # A relation that answers to the synthetic name too parses: a qualified
-    # column is bound per reference (test_sql_bind_dup_qualifiers).
+    # column is bound per reference (test_sql_bind_scope_direct).
     var clash = _parse("SELECT * FROM (SELECT 1 AS a), unnamed_subquery")
     assert_equal(clash.query.from_tables[0].rel_alias, "unnamed_subquery")
     assert_equal(clash.query.from_tables[1].name, "unnamed_subquery")

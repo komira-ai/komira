@@ -17,7 +17,7 @@
 #   written ONCE per lowering rather than once per name.
 #
 # The table is DATA ONLY — it names no `Expr`, calls no binder, and imports
-# nothing from `sql_binder`, the `sql_bind_*` modules or `sql_ast`. That lets a
+# nothing from the binder modules or `sql_ast`. That lets a
 # contributor add a function without opening the binder at all, and it keeps
 # the dependency edge acyclic (`sql_bind_*` -> `sql_fn_table`, never back).
 #
@@ -67,9 +67,8 @@
 #     NOTHING in the `sql_bind_*` modules.
 #   * it is a pure binder DESUGAR (the route most functions not yet served
 #     will take) -> ONE LINE here naming a new `DSG_*`, plus one new `_bind_*`
-#     helper function APPENDED to `sql_bind_fn_args.mojo` or
-#     `sql_bind_fn_nested.mojo` (the modules that hold the desugar helpers)
-#     and one line in the `FNK_DESUGAR` switch of `sql_bind_call.mojo`'s
+#     helper function APPENDED to the desugar helper modules
+#     and one line in the `FNK_DESUGAR` switch of the scalar-call binder's
 #     `_bind_scalar_call`. Two changes adding two desugars append two
 #     DIFFERENT functions and two DIFFERENT rows; they do not collide.
 #   * it is a real DuckDB function this engine deliberately does NOT serve, or
@@ -436,7 +435,7 @@ asked for, reachable by anyone who guessed it and impossible to withdraw later
 without breaking whoever did.
 
 ⚠ IT IS DECLARED HERE, NOT IN THE PARSER, so the producer (`sql_parser`) and
-the consumer (`sql_scalar_fn_spec` + `sql_bind_call`) read ONE token. A desugar
+the consumer (`sql_scalar_fn_spec` and the scalar-call binder) read ONE token. A desugar
 name written down twice is a desugar that silently stops resolving the day one
 copy is edited — and its failure mode is the generic unknown-function refusal,
 which reads exactly like the feature never having existed.
@@ -2011,7 +2010,7 @@ comptime _R_LISTCTOR: String = (
     "`plan_wire_codec`/`plan_wire_values` (serialization), "
     "`compiler_eval_column` (the evaluator), `expr_walk` (the output Field — "
     "this is where `Field.list_of` gets its caller) and "
-    "`sql_bind_call`/`sql_fn_table`; the other ten are one-arm walkers. "
+    "the scalar-call binder and `sql_fn_table`; the other ten are one-arm walkers. "
     "⛔ AND DO NOT FORGET THE ASYMMETRY THAT IS EASIEST TO MISS: a new "
     "tag ALSO needs an `_is_*_output` arm in "
     "`komira_dispatch_project/compute_project`, or it executes over PARQUET "
@@ -4420,7 +4419,7 @@ def sql_date_part_desugar(name: String) -> Optional[UInt8]:
     `EXPR_WHEN` root runs and an `EXPR_EXTRACT` under arithmetic does not.
     `era` is `EXPR_WHEN`-rooted; so are `century`/`millennium` (DuckDB's
     century numbering skips zero, so the BC arm needs a branch —
-    `sql_bind_fn_args._year_derived_over`), and `decade` is a bare `BIN_DIV` and
+    the year-derived helper), and `decade` is a bare `BIN_DIV` and
     bind-level there. Over a PARQUET scan all four run. This route neither
     creates nor widens that limit.
 

@@ -231,7 +231,7 @@ struct _Parser(Movable):
             # ⚠ APPENDED **AFTER** THE BRANCH IS PARSED, so a nested subquery
             # inside the branch takes a LOWER index than the branch itself —
             # the same inner-before-outer ordering every other producer here
-            # maintains, which is what lets `_bind_query` pre-bind by index.
+            # maintains, which is what lets the query binder pre-bind by index.
             var idx = len(self.subqueries)
             self.subqueries.append(SubqueryDef(rhs^, SUBQ_UNION_ALL, String(""), String("")))
             if last < 0:
@@ -1325,7 +1325,7 @@ struct _Parser(Movable):
         the re-entrant `_parse_select_stmt` (so it gets the entire grammar). It is
         parked in the subquery side-table with kind `SUBQ_DERIVED`, its relation
         key (`<alias>#<subquery index>`, below), and any column-list rename; the
-        parser emits a `named(key, alias)` relation, and `_bind_query` binds the
+        parser emits a `named(key, alias)` relation, and the query binder binds the
         body into the CTE scope under the key (applying the column-list rename to
         its output columns) so it resolves through the named-derived-relation
         path a CTE uses."""
@@ -3256,7 +3256,7 @@ def _and_into(var acc: Optional[SqlExpr], var p: SqlExpr) -> Optional[SqlExpr]:
 
 def _select_star_from(name: String) raises -> SelectStmt:
     """Synthesize the `SELECT * FROM <name>` source for a bare-table `COPY <table>
-    TO ...` — so a COPY of a catalog/CTAS table binds through the SAME `_bind_select`
+    TO ...` — so a COPY of a catalog/CTAS table binds through the SAME select binder
     path a `COPY (SELECT * FROM <table>) TO ...` subquery source would."""
     var stmt = SelectStmt()
     stmt.select_items.append(SelectItem(SqlExpr.star(), Optional[String](), True))

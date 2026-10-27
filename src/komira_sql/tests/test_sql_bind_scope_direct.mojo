@@ -5,6 +5,10 @@
 # Statements are parsed and the FROM scope is built over a catalog of small
 # tables, so every answer is read off a scope the binder itself would build.
 # Tables: K(k, a), M(k, b), U(u).
+#  11. A derived table's synthetic alias and a catalog table of the same name
+#      are told apart per column; an unaliased `read_parquet` answers to its
+#      function name; `_relation_scan` takes a CTE copy, a catalog scan, a
+#      parquet scan over the footer schema, and refuses a `#`-keyed name.
 #   1. CteScope resolves names case-insensitively, the first definition of a
 #      name wins over a later one, and a CTE name shadows the same-named
 #      catalog table when a relation's schema is looked up.
@@ -24,7 +28,8 @@
 #      `_dedupe_join_right` projects a right column to that name only when
 #      the join node's own rename would not give it.
 #   8. `_resolve_col` maps a qualified reference through the scope and checks
-#      an unqualified one against the schema, case-insensitively.
+#      an unqualified one against the schema, case-insensitively, returning the
+#      schema's own spelling.
 #   9. The result names: `*` and a qualified column go back to their source
 #      spelling, an aliased item keeps its alias, and no rename Project is
 #      built when no name changes or the lengths disagree.
@@ -46,6 +51,7 @@ from komira_sql.sql_bind_scope import (
     _date_to_days,
     _dedupe_join_right,
     _join_out_name,
+    _relation_scan,
     _relation_schema,
     _resolve_col,
     _result_display_names,
@@ -129,7 +135,7 @@ def test_date_to_days() raises:
     assert_equal(Int(_date_to_days("2000-02-29")), 11016)
     assert_equal(Int(_date_to_days("2000-03-01")), 11017)
     assert_equal(Int(_date_to_days("2020-02-29")), 18321)
-    for bad in ["2021-02-30", "2100-02-29", "2021-04-31", "2021-13-01", "2021-00-10", "2021-1-01", "20210101"]:
+    for bad in ["2021-02-30", "2100-02-29", "2021-04-31", "2021-13-01", "2021-00-10", "2021-1-01", "20210101", "20x1-01-01", "2021-0a-01", "2021-01-1/", "+021-01-01"]:
         var raised = False
         try:
             _ = _date_to_days(String(bad))
@@ -155,6 +161,81 @@ def test_collision_renames_and_resolution() raises:
     assert_false(s.answers_to("u"))
     assert_true(_raises_with(s, "m", "zz", "unknown column 'm.zz'"))
     assert_true(_raises_with(s, "u", "u", "unknown column 'u.u'"))
+
+
+def _clash_catalog(extra: String) -> SqlCatalog:
+    var cat = _catalog()
+    cat.add_parquet("unnamed_subquery", "us.parquet", _cols("x", extra))
+    return cat^
+
+
+def test_synthetic_name_collision_is_per_column() raises:
+    # `FROM (SELECT ...), unnamed_subquery`: the derived table's synthetic alias
+    # and a catalog table of that name answer to one qualifier; each column
+    # resolves to the relation that has it.
+    var st = parse_sql(tokenize("SELECT * FROM (SELECT 1 AS u), unnamed_subquery"))
+    var cat = _clash_catalog("y")
+    var cte = CteScope(ParquetFacts())
+    cte.add(st.query.from_tables[0].name, cat.build_scan("u"))
+    var s = _build_bind_scope(st.query.from_tables, st.query.joins, cat, cte^)
+    assert_true(s.answers_to("unnamed_subquery"))
+    assert_equal(s.resolve_qualified("unnamed_subquery", "u"), "u")
+    assert_equal(s.resolve_qualified("unnamed_subquery", "x"), "x")
+    assert_equal(s.resolve_qualified("unnamed_subquery", "y"), "y")
+    # A column both have is the one case that is ambiguous.
+    var both = _clash_catalog("u")
+    var cte2 = CteScope(ParquetFacts())
+    cte2.add(st.query.from_tables[0].name, both.build_scan("u"))
+    var s2 = _build_bind_scope(st.query.from_tables, st.query.joins, both, cte2^)
+    assert_true(_raises_with(s2, "unnamed_subquery", "u", "ambiguous reference to table `unnamed_subquery`"))
+    assert_equal(s2.resolve_qualified("unnamed_subquery", "x"), "x")
+
+
+def test_unaliased_table_function_answers_to_its_function_name() raises:
+    var facts = ParquetFacts()
+    facts.add_schema("p.parquet", _cols("x", "y"))
+    var st = parse_sql(tokenize("SELECT * FROM read_parquet('p.parquet')"))
+    var s = _build_bind_scope(st.query.from_tables, st.query.joins, _catalog(), CteScope(facts^))
+    assert_true(s.answers_to("read_parquet"))
+    assert_false(s.answers_to("p"))
+    assert_equal(s.resolve_qualified("read_parquet", "y"), "y")
+    assert_equal(_out_names(s), "x,y")
+
+
+def test_relation_scan_sources() raises:
+    var cat = _catalog()
+    var cte = CteScope(ParquetFacts())
+    # A CTE named like a catalog table is inlined in place of the table.
+    cte.add("k", cat.build_scan("u"))
+    var hit = _relation_scan(FromRelation.named("K"), cat, cte)
+    assert_true(hit.is_scan())
+    assert_equal(hit.output_schema.num_columns(), 1)
+    assert_equal(hit.output_schema.field_name(0), "u")
+    # A catalog name with no CTE is the catalog's own scan.
+    var plain = _relation_scan(FromRelation.named("M"), cat, cte)
+    assert_equal(plain.output_schema.num_columns(), 2)
+    # A parquet table function scans over its footer schema.
+    var facts = ParquetFacts()
+    facts.add_schema("p.parquet", _cols("x", "y"))
+    var pq = CteScope(facts^)
+    var rel = parse_sql(tokenize("SELECT * FROM read_parquet('p.parquet')")).query.from_tables[0].copy()
+    var scan = _relation_scan(rel, cat, pq)
+    assert_true(scan.is_scan())
+    assert_equal(scan.output_schema.field_name(1), "y")
+    # A table function whose footer was never read refuses by path.
+    var missing = String("")
+    try:
+        _ = _relation_scan(rel, cat, CteScope(ParquetFacts()))
+    except e:
+        missing = String(e)
+    assert_true(missing.find("no parquet footer was read for 'p.parquet'") >= 0)
+    # A `#`-keyed derived relation with no scope entry is refused by alias.
+    var raised = String("")
+    try:
+        _ = _relation_scan(FromRelation.named("d#3", "d"), cat, cte)
+    except e:
+        raised = String(e)
+    assert_true(raised.find("a derived table `(SELECT ...) AS d` inside a CTE body") >= 0)
 
 
 def test_alias_hides_the_table_name() raises:
@@ -249,8 +330,8 @@ def test_resolve_col() raises:
     ref items = st.query.select_items
     assert_equal(_resolve_col(items[0].expr, s.out_schema, s), "k_right")
     assert_equal(_resolve_col(items[1].expr, s.out_schema, s), "a")
-    # A name is checked case-insensitively and returned as written.
-    assert_equal(_resolve_col(SqlExpr.column(String("A")), s.out_schema, s), "A")
+    # A name is checked case-insensitively and returned as the schema spells it.
+    assert_equal(_resolve_col(SqlExpr.column(String("A")), s.out_schema, s), "a")
     var unqualified = String("")
     try:
         _ = _resolve_col(items[2].expr, s.out_schema, s)

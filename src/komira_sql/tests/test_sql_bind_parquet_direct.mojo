@@ -19,7 +19,9 @@
 #      IN, and none without it.
 #   6. A CSV relation never reaches the footer reader; relations inside a CTE
 #      body and a subquery body are collected too.
-#   7. NoParquetFooters refuses a `read_parquet` relation by name and reports
+#   7. A NOT IN inside a CTE body turns counts on for the whole statement; a
+#      catalog table whose path is a glob gets no counts.
+#   8. NoParquetFooters refuses a `read_parquet` relation by name and reports
 #      every null count as unknown.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -172,6 +174,38 @@ def test_csv_is_skipped_and_nested_bodies_are_walked() raises:
     )
     assert_true(f.has_schema("c.parquet"))
     assert_true(f.has_schema("s.parquet"))
+
+
+def test_not_in_inside_a_cte_body_collects_counts() raises:
+    var f = _facts(
+        "WITH c AS (SELECT a FROM read_parquet('p.parquet') "
+        "WHERE a NOT IN (SELECT a FROM read_parquet('q.parquet'))) "
+        "SELECT a FROM c",
+        SqlCatalog(),
+    )
+    assert_equal(f.null_count("p.parquet", "b").value(), 7)
+    assert_equal(f.null_count("q.parquet", "a").value(), 0)
+    # The NOT IN sits in the CTE body, not the top-level SELECT, and still
+    # makes the counts of a relation outside it collected.
+    var outer = _facts(
+        "WITH c AS (SELECT a FROM read_parquet('p.parquet') "
+        "WHERE a NOT IN (SELECT a FROM read_parquet('q.parquet'))) "
+        "SELECT a FROM c, read_parquet('o.parquet')",
+        SqlCatalog(),
+    )
+    assert_equal(outer.null_count("o.parquet", "b").value(), 7)
+
+
+def test_glob_catalog_table_gets_no_counts() raises:
+    var cat = SqlCatalog()
+    cat.add_parquet("gt", "d/*.parquet", _schema())
+    cat.add_parquet("pt", "t1.parquet", _schema())
+    var f = _facts(
+        "SELECT a FROM gt WHERE a NOT IN (SELECT a FROM pt)", cat
+    )
+    assert_false(f.has_null_count("d/*.parquet", "a"))
+    assert_false(f.has_null_count("d/*.parquet", "b"))
+    assert_equal(f.null_count("t1.parquet", "b").value(), 7)
 
 
 def test_no_footers_reader_refuses_by_name() raises:
