@@ -335,9 +335,11 @@ the library's `:conda` (buildrules' `mojo_conda` over `:lib`), so it too exists 
     actions keep their keys). `tests//negative/mojo_hang:lib_never_ends` is the
     planted hang, and `//tools/build/selftest:planted_red_builds_mojo_hang`
     requires its line and the default and override on the commands.
-  - This limit is the hang guard: a test does not arm an `alarm()` (SIGALRM)
-    of its own to end a hang. A test that needs a limit shorter than 1800 s
-    for a real reason sets `test_hang_limit_s` on its target.
+  - This limit is the hang guard: a new test does not arm an `alarm()`
+    (SIGALRM) of its own to end a hang. One helper still does
+    (`src/tests/helpers/komira_udf_spike_node_worker/watchdog.mojo`, 240 s,
+    used by the udf spike tests). A test that needs a limit shorter than
+    1800 s for a real reason sets `test_hang_limit_s` on its target.
 
 ### Outputs and the runnable directory
 
