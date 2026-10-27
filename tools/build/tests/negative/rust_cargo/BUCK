@@ -1,0 +1,189 @@
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+
+# Planted defects for the Cargo-driven attributes of the Rust rules
+# (tools/build/tests/README.md, test 36). Each target is the green of
+# ../../functional/rust_cargo with the one attribute under test removed or
+# broken, over the same sources, and must fail naming its cause
+# (rust_tests.sh). The refusals at analysis (`refuse_*`) are the scenario
+# tools/build/selftest/analysis_refusals_rust.zig.
+
+F = "//functional/rust_cargo:"
+
+# env removed: `env!("CARGO_PKG_NAME")` is not defined at compile time.
+rust_binary(
+    name = "env_missing",
+    srcs = [F + "src/env_pkg.rs"],
+    crate_root = "src/env_pkg.rs",
+    crate_name = "env_pkg",
+)
+
+# env wrong: it compiles and runs, and the run check sees 9.9.9, not 1.2.3.
+rust_binary(
+    name = "env_wrong",
+    srcs = [F + "src/env_pkg.rs"],
+    crate_root = "src/env_pkg.rs",
+    env = {
+        "CARGO_PKG_NAME": "demo",
+        "CARGO_PKG_VERSION": "9.9.9",
+    },
+    expected_stdout = "demo 1.2.3\n",
+)
+
+rust_library(
+    name = "shared_one",
+    srcs = [F + "src/shared_one.rs"],
+    crate_root = "src/shared_one.rs",
+    crate_name = "shared",
+)
+
+rust_library(
+    name = "shared_two",
+    srcs = [F + "src/shared_two.rs"],
+    crate_root = "src/shared_two.rs",
+    crate_name = "shared",
+)
+
+# The second crate is in `deps`, not `renamed_deps`: two crates named
+# `shared` are on one --extern name, and `shared_two` is not a crate.
+rust_binary(
+    name = "renamed_missing",
+    srcs = [F + "src/renamed.rs"],
+    crate_root = "src/renamed.rs",
+    deps = [":shared_one", ":shared_two"],
+)
+
+staged_files(
+    name = "c_files",
+    srcs = ["c/add.c"],
+)
+
+cxx_library(
+    name = "c_add",
+    srcs = [":c_files[c/add.c]"],
+)
+
+# native_deps removed: the C symbol is undefined at the link.
+rust_binary(
+    name = "native_missing",
+    srcs = [F + "src/native.rs"],
+    crate_root = "src/native.rs",
+)
+
+# The library carries the archive; the same library without it leaves the
+# binary that depends on it with an undefined symbol.
+rust_library(
+    name = "native_lib_missing",
+    srcs = [F + "src/native_lib.rs"],
+    crate_root = "src/native_lib.rs",
+    crate_name = "native_lib",
+)
+
+rust_binary(
+    name = "native_via_lib_missing",
+    srcs = [F + "src/native_via_lib.rs"],
+    crate_root = "src/native_via_lib.rs",
+    deps = [":native_lib_missing"],
+)
+
+rust_test(
+    name = "native_test_missing",
+    srcs = [F + "src/native_test.rs"],
+    crate_root = "src/native_test.rs",
+)
+
+# No patch at all: OUT_DIR is not defined.
+rust_library(
+    name = "out_dir_unpatched",
+    srcs = [F + "src/out_dir.rs"],
+    crate_root = "src/out_dir.rs",
+    crate_name = "out_dir",
+)
+
+# The include is rewritten and nothing generates the file.
+rust_library(
+    name = "out_dir_no_add",
+    srcs = [F + "src/out_dir.rs"],
+    crate_root = "src/out_dir.rs",
+    crate_name = "out_dir",
+    patch = {"sub": [{
+        "file": "src/out_dir.rs",
+        "from": "concat!(env!(\"OUT_DIR\"), \"/generated.rs\")",
+        "to": "\"generated.rs\"",
+    }]},
+)
+
+# The text is there once; the patch says twice: a substitution that stops
+# matching (a crate upgrade) fails the build.
+rust_library(
+    name = "out_dir_count",
+    srcs = [F + "src/out_dir.rs"],
+    crate_root = "src/out_dir.rs",
+    crate_name = "out_dir",
+    patch = {
+        "sub": [{
+            "file": "src/out_dir.rs",
+            "from": "concat!(env!(\"OUT_DIR\"), \"/generated.rs\")",
+            "to": "\"generated.rs\"",
+            "count": 2,
+        }],
+        "add": [{
+            "file": "src/generated.rs",
+            "content": "const GREETING: &str = \"hello\";\nconst LUCKY: u32 = 7;\n",
+        }],
+    },
+)
+
+# The proc-macro crate without proc_macro_extern: `proc_macro` is not a crate
+# it can name.
+rust_library(
+    name = "pm_no_extern",
+    srcs = [F + "src/pm.rs"],
+    crate_root = "src/pm.rs",
+    crate_name = "pm",
+    proc_macro = True,
+)
+
+rust_binary(
+    name = "pm_consumer",
+    srcs = [F + "src/pm_main.rs"],
+    crate_root = "src/pm_main.rs",
+    deps = [":pm_no_extern"],
+)
+
+# ---- refusals at analysis ----------------------------------------------------
+
+rust_binary(
+    name = "refuse_env_reserved",
+    srcs = [F + "src/env_pkg.rs"],
+    crate_root = "src/env_pkg.rs",
+    env = {"PATH": "/usr/bin"},
+)
+
+rust_binary(
+    name = "refuse_env_name",
+    srcs = [F + "src/env_pkg.rs"],
+    crate_root = "src/env_pkg.rs",
+    env = {"A-B": "x"},
+)
+
+rust_library(
+    name = "refuse_patch_key",
+    srcs = [F + "src/out_dir.rs"],
+    crate_root = "src/out_dir.rs",
+    patch = {"subs": []},
+)
+
+rust_library(
+    name = "refuse_patch_sub",
+    srcs = [F + "src/out_dir.rs"],
+    crate_root = "src/out_dir.rs",
+    patch = {"sub": [{"file": "src/out_dir.rs", "from": "a"}]},
+)
+
+rust_library(
+    name = "refuse_extern_not_proc_macro",
+    srcs = [F + "src/shared_one.rs"],
+    crate_root = "src/shared_one.rs",
+    proc_macro_extern = True,
+)

@@ -19,6 +19,8 @@ this package's API in follow-up changes.
   writes past `len(dst)`), `snappy_uncompressed_length`,
   `snappy_max_compressed_length`.
 - `zstd_frame`: `zstd_compress_into`, `zstd_decompress_into`,
+  `zstd_decompress_once` (libzstd's error code handed back, for a
+  grow-and-retry caller),
   `zstd_compress_bound`, `zstd_frame_content_size` and its two sentinels.
 - `bzip2_buffer`: `bzip2_compress_into`, `bzip2_decompress_into` (None when
   the destination is too small).

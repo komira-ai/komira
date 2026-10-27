@@ -1,0 +1,13 @@
+{
+ "name": "instance_lost_on_agg_open",
+ "defect": "a failed agg_open that lost its context is treated as harmless, or the aggregate is opened again: the run must fail with UDF_WORKER_CRASHED, and only the instance and the context be closed (design 4.5, no retry after a loss)",
+ "run": "agg_split",
+ "entry": "lost_on_agg_open",
+ "shape": "AGG_MERGEABLE",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "state": [{"type": "int64", "nullable": true}],
+ "partials": [{"input": {"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]}, "group_ids": [0, 0], "n_groups": 1}],
+ "n_groups": 1,
+ "expect": {"status": "ERR_INSTANCE_LOST", "run_error": "UDF_WORKER_CRASHED", "message": "nonempty"}
+}

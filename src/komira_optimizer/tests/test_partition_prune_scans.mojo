@@ -26,7 +26,9 @@ from komira_plan_expr.expr import (
     BIN_AND,
 )
 from komira_plan_expr.scalar_value import ScalarValue
-from komira_plan_ir.logical_plan import LogicalPlan, PLAN_SCAN, PLAN_FILTER
+from komira_plan_ir.logical_plan import (
+    LogicalPlan, PLAN_SCAN, PLAN_FILTER, SCAN_UNBOUNDED,
+)
 from komira_scan_source.parquet_source import ParquetSource
 from komira_scan_source.source_variant import SourceVariant
 from komira_optimizer.partition_prune_scans import partition_prune_scans
@@ -291,6 +293,19 @@ def test_non_partitioned_scan_unchanged() raises:
     assert_equal(_pruned_path_count(out), 1)
 
 
+def test_prune_keeps_an_unbounded_mark() raises:
+    """`year == 2024` over an UNBOUNDED year-partitioned scan: the pruned scan
+    is still UNBOUNDED. Catches the reseat building its fresh ScanData with
+    the default (BOUNDED) mark, which would turn a streaming plan into a batch
+    plan."""
+    var scan = _make_year_scan()
+    scan._scan.value()[].boundedness = SCAN_UNBOUNDED
+    var out = partition_prune_scans(LogicalPlan.filter(_eq_year(2024), scan^))
+    assert_true(out.tag == PLAN_SCAN)
+    assert_equal(_pruned_path_count(out), 1)
+    assert_equal(Int(out._scan.value()[].boundedness), Int(SCAN_UNBOUNDED))
+
+
 def test_idempotent() raises:
     """Running the rule twice = running it once (no further pruning)."""
     var scan = _make_year_scan()
@@ -361,6 +376,7 @@ def main() raises:
     suite.test[test_prune_all_files_pruned]()
     suite.test[test_no_prunable_conjunct_unchanged]()
     suite.test[test_non_partitioned_scan_unchanged]()
+    suite.test[test_prune_keeps_an_unbounded_mark]()
     suite.test[test_idempotent]()
     suite.test[test_undecidable_conjunct_stays_on_the_filter]()
     suite^.run()

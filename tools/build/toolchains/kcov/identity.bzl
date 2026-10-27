@@ -8,13 +8,13 @@ package build builds kcov or waits on it.
 
 `:kcov_identity` gates `:kcov`: it fails when the built `bin/kcov` has
 another sha256 or does not hold the line, and its message says which constant
-to update. A change of a kcov pin, of kcov_build.sh or of the pinned zig that
+to update. A change of a kcov pin, of kcov_build or of the pinned zig that
 changes kcov's bytes therefore fails the kcov build until KCOV_BIN_SHA256 is
 updated here.
 
 The constants live here, not in the platform table: the table holds the
 sha256 of each download by role, with a schema its cases check, and this
-sha256 is of a build output, which moves with kcov_build.sh and the compiler
+sha256 is of a build output, which moves with kcov_build and the compiler
 as well as with the pins. This file loads nothing, so the package rules load
 it without loading kcov's rules.
 """

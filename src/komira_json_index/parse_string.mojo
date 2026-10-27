@@ -41,17 +41,16 @@
 from komira_json_index.utf8_check import check_utf8
 
 
-def _string_from_bytes(b: List[UInt8]) raises -> String:
-    """Construct a String from a List[UInt8]. Appends a NUL terminator
-    (`String` ctor consumes a NUL-terminated buffer)."""
-    var scratch = List[UInt8](capacity=len(b) + 1)
-    for i in range(len(b)):
-        scratch.append(b[i])
-    scratch.append(UInt8(0))
-    # SAFETY: `scratch` is alive through the ctor call; the ptr it
-    # passes is a NUL-terminated buffer that String copies out
-    # immediately. Mirrors `StringArray.get` in the core packages.
-    return String(unsafe_from_utf8_ptr=scratch.unsafe_ptr())
+def _string_from_bytes(b: List[UInt8]) -> String:
+    """Construct a String holding exactly the bytes of `b`.
+
+    The String is built from the span's length, not from a NUL-terminated
+    pointer, so a 0x00 byte (the decoded escape of U+0000, RFC 8259 §7) is
+    kept with every byte after it. Every caller passes bytes already known
+    to be well-formed UTF-8 (`check_utf8` on the raw range; each decoded
+    escape appends a complete sequence), which `unsafe_from_utf8` assumes.
+    """
+    return String(unsafe_from_utf8=Span(b))
 
 
 def parse_string_raw(bytes: Span[UInt8, _], start: Int, end: Int) raises -> String:

@@ -3747,11 +3747,10 @@ def _is_not_found(msg: String) -> Bool:
     is `<prefix>/manifest/<chunk_seq:020d>.chunk`, so chunk sequence 404 IS
     `.../manifest/00000000000000000404.chunk`, and so are 1404, 4040, 40400, …
     — a fixed, dense, entirely predictable set every partition eventually
-    reaches and then keeps colliding on forever. (`komira_telemetry_read`
-    narrowed the identical predicate because 16 random hex characters contain
-    `404` "one in a few dozen runs".) The `<prefix>` is caller-supplied on top of
-    that, so a topic carrying `404` collides on `_HEAD`, `_LOG_START`,
-    `_CATALOG` and every tombstone as well.
+    reaches and then keeps colliding on forever. (A key carrying 16 random hex
+    characters spells `404` about once in a few dozen keys.) The `<prefix>` is
+    caller-supplied on top of that, so a topic carrying `404` collides on
+    `_HEAD`, `_LOG_START`, `_CATALOG` and every tombstone as well.
 
     THE COST AT THIS FUNCTION'S OWN CALL SITES: `read_log_start` answers
     `LogStart.zero()` ("never truncated"), `read_catalog_sidecar` answers
@@ -3759,11 +3758,6 @@ def _is_not_found(msg: String) -> Bool:
     tombstoned", and the recovery scan treats a live chunk as missing. The next
     writer then CREATEs with `If-None-Match` over state that exists.
 
-    ⚠ THIS IS NOT NEW POLICY — IT IS THE THIRD COPY BEING BROUGHT INTO LINE.
-    `komira_telemetry_read.scan_plan._is_not_found` and
-    `src/cmd/cp_telemetry_validator/cp_telem_lib._store_error_says_not_found`
-    already carry exactly this needle set, and the latter's docstring names THIS
-    FUNCTION as one of the two in-tree copies that still matched a bare `404`.
     Every needle below is one a key CANNOT contain: the key alphabet admits no
     `[`, `]` or `=`, and the canonical taxonomy token is uppercase.
 
@@ -3778,13 +3772,8 @@ def _is_not_found(msg: String) -> Bool:
     site can newly swallow a real failure. Falsifier:
     `tests/test_cas_manifest_absence_is_anchored.mojo`.
 
-    ⚠ `_is_precondition` BELOW STILL CARRIES THE SAME DEFECT WITH `412`, AND IS
-    DELIBERATELY NOT CHANGED HERE. Chunk sequence 412 spells `412` in its key by
-    the identical arithmetic, so a 403 on it reads as a lost CAS race — but that
-    arm drives the append RETRY LOOP, i.e. a liveness path, and narrowing it
-    needs its own falsifier per call site rather than a ride-along on this one.
-    It is stated here so the omission is a recorded decision and not the silence
-    that produced this defect."""
+    `_is_precondition` below is narrowed the same way: `status=412`, never a
+    bare `412`."""
     return (
         msg.find("StoreError[NOT_FOUND]") >= 0
         or msg.find("status=404") >= 0
@@ -3796,10 +3785,18 @@ def _is_not_found(msg: String) -> Bool:
 
 @always_inline
 def _is_precondition(msg: String) -> Bool:
+    """True iff a raised store Error is a lost conditional write.
+
+    `status=412`, not a bare `412`: store errors carry keys, roots and random
+    temp suffixes, and any of them can spell `412` (chunk sequence 412 does,
+    by `chunk_key`'s arithmetic). The cloud conformers append `status=<http>`
+    to `StoreError[<KIND>] ...`; the in-tree conformers say
+    `precondition (412)`. Falsifier: `tests/test_precondition_is_anchored.mojo`
+    (komira-ai/komira#1275)."""
     return (
         msg.find("precondition") >= 0
         or msg.find("Precondition") >= 0
-        or msg.find("412") >= 0
+        or msg.find("status=412") >= 0
         or msg.find("PreconditionFailed") >= 0
     )
 

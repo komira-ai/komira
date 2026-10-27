@@ -58,6 +58,7 @@ comptime _FILES: List[String] = [
     "dict_mat_counter.mojo",
     "dictionary.mojo",
     "dictionary_resolve.mojo",
+    "file_decode.mojo",
     "file_reader.mojo",
     "footer_header.mojo",
     "footer_pin_budget.mojo",
@@ -92,6 +93,13 @@ comptime _FILES: List[String] = [
     "subrg_scan_route_trace.mojo",
     "table_stats.mojo",
     "thrift_compact.mojo",
+    "page_index.mojo",
+    "page_index_cache.mojo",
+    "page_index_parser.mojo",
+    "page_pruner.mojo",
+    "parquet_source_constants.mojo",
+    "parquet_source_helpers.mojo",
+    "parquet_source_page_picks.mojo",
 ]
 
 
@@ -238,6 +246,7 @@ def test_imports_only_its_deps() raises:
         "komira_plan_expr",
         "komira_plan_stats",
         "komira_simd",
+        "komira_sync",
         "komira_zlib",
     ]
     var banned: List[String] = ["komira_obs", "komira_serde", "komira_" + "core"]

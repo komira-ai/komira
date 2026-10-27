@@ -21,6 +21,7 @@ mojo_library(
         "tests/test_sab_borrow_mmap_range_check.mojo",
         "tests/test_sab_borrowed_view_mmap_keepalive.mojo",
         "tests/test_sab_share_range_window.mojo",
+        "tests/test_write_uleb128.mojo",
     ],
     visibility = ["PUBLIC"],
 )

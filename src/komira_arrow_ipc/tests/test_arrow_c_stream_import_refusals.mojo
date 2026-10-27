@@ -22,19 +22,22 @@
 # structure is random: every case names the member it breaks and the message
 # the importer must give, and each has a well-formed twin that imports.
 #
-#   * `_import_column`: a buffer count for another type; a NULL `buffers` array;
+#   * `_import_column`: a buffer count for another type; a NULL `buffers` array
+#     (Mandatory in the spec);
 #     the validity bitmap's padding bits (left set by the producer) and an
 #     empty bitmap; a dictionary without its value array or the value array's
 #     buffers; and, for LIST / STRUCT / MAP / UNION, a missing schema, a child
 #     count that disagrees, NULL children arrays, a NULL child on either side,
-#     a NULL child format, and the default child names.
+#     a NULL child format, and the default child names; a union's type ids
+#     and a MAP's keys-sorted flag come from the column's own schema.
 #   * `_read_root_schema`: a NULL schema or format, NULL children, a NULL
-#     child, the dictionary index types (signed only) and value type (STRING).
+#     child, the dictionary index types (any integer) and value type (STRING).
 #   * `_import_record_batch`: a NULL array, a child count that disagrees with
 #     the schema, a NULL child, a nested column with no schema to recurse into.
-#   * Decimal (precision, scale): the values handed in, and the defaults that
-#     replace a missing or out-of-range one; `_parse_decimal_format`'s bit
-#     widths and the formats it reads with defaults instead of refusing.
+#   * Decimal (precision, scale): the values handed in, the default for a
+#     missing precision, and the refusal of an out-of-range one;
+#     `_parse_decimal_format`'s bit widths (the formats it refuses are in
+#     `test_arrow_c_data_format_params.mojo`).
 #   * Partial schema info (a parameter list missing, or one of a pair): the
 #     schema falls back to Field defaults and the batch import to precision 0
 #     and no declared union ids.
@@ -48,6 +51,7 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.column import Column
 from komira_arrow.schema import Field
+from komira_arrow_ipc.c_data_interface import ARROW_FLAG_MAP_KEYS_SORTED
 from komira_arrow_ipc.c_data_stream import (
     CArrowArray,
     CArrowArrayStream,
@@ -169,24 +173,19 @@ def test_import_refuses_a_buffer_count_for_another_type() raises:
     )
 
 
-def test_import_reads_a_null_buffers_array_as_null_buffers() raises:
-    # `buffers` is Mandatory in the spec; this importer reads a NULL array as
-    # every buffer NULL and applies the per-buffer rule, so an empty column
-    # imports and a non-empty one is refused for its missing data.
-    var a = _arr(0, 2)
-    a.buffers = _null_ptr[_VP, MutUntrackedOrigin]()
-    var c = _import_column(a, ArrowType.INT64)
-    assert_equal(c.length(), 0)
-    assert_equal(c._data.len(), 0)
-    assert_false(c.has_validity_buffer())
-    var b = _arr(2, 2)
-    b.buffers = _null_ptr[_VP, MutUntrackedOrigin]()
-    assert_true(
-        _import_error(b, ArrowType.INT64, _null_s()).startswith(
-            "from_arrow_c_stream: array of type 'int64' has a NULL data buffer, but that"
-            " buffer's size would be 16 bytes"
+def test_import_refuses_a_null_buffers_array() raises:
+    # `buffers` is Mandatory in the spec, at every length: an empty column is
+    # refused as well as a non-empty one.
+    for n in [0, 2]:
+        var a = _arr(n, 2)
+        a.buffers = _null_ptr[_VP, MutUntrackedOrigin]()
+        assert_equal(
+            _import_error(a, ArrowType.INT64, _null_s()),
+            _p(
+                "array of type 'int64' has a NULL buffers array; the Arrow C"
+                " Data Interface makes it mandatory"
+            ),
         )
-    )
 
 
 def test_import_clears_the_padding_bits_of_the_validity_bitmap() raises:
@@ -395,22 +394,27 @@ def test_import_nested_defaults_with_null_child_names() raises:
     uk.name = _null_c()
     _skids(us, [_hs(uk^)])
     var usp = _hs(us^)
-    var u = _import_column(ua, ArrowType.UNION_SPARSE, 0, 0, usp, False, [4])
+    var u = _import_column(ua, ArrowType.UNION_SPARSE, 0, 0, usp)
     assert_equal(u.field_name(0), String("f0"))
     assert_equal(u.type_ids()[0], 4, "declared ids, one per child")
-    var u2 = _import_column(ua, ArrowType.UNION_SPARSE, 0, 0, usp, False, [4, 5])
-    assert_equal(u2.type_ids()[0], 0, "a count that disagrees falls back to 0..n-1")
+    usp[].format = _copy_string_to_c_int8(String("+us:4,5"))
+    assert_equal(
+        _import_error(ua, ArrowType.UNION_SPARSE, usp),
+        _p("union format '+us:4,5' declares 2 type ids for 1 children"),
+        "a count that disagrees is refused",
+    )
 
     var ma = _arr(0, 2)
     var e = _arr(0, 1)
     _akids(e, [_ha(_arr(0, 3)), _ha(_arr(0, 2))])
     _akids(ma, [_ha(e^)])
     var ms = _sch("+m")
+    ms.flags = ARROW_FLAG_MAP_KEYS_SORTED
     var es = _sch("+s", "entries")
     _skids(es, [_hs(_sch("u", "key")), _hs(_sch("l", "value"))])
     _skids(ms, [_hs(es^)])
-    var m = _import_column(ma, ArrowType.MAP, 0, 0, _hs(ms^), True)
-    assert_true(m.keys_sorted())
+    var m = _import_column(ma, ArrowType.MAP, 0, 0, _hs(ms^))
+    assert_true(m.keys_sorted(), "the MAP's own schema flag")
     assert_equal(m.field_name(0), String("entries"))
     assert_equal(Int(m._offsets.value().read_i32_le_at(0)), 0)
     assert_equal(m.child_at(0).field_name(1), String("value"))
@@ -454,8 +458,8 @@ def test_read_root_schema_refusals() raises:
     kf.format = _null_c()
     assert_equal(_root_error(_root(kf^)), _unrecognized(""))
     assert_equal(
-        _root_error(_root(_dict_kid("I", "u"))),
-        _p("dictionary index type must be signed int (INT8/16/32/64), got 'I'"),
+        _root_error(_root(_dict_kid("f", "u"))),
+        _p("dictionary index type must be an integer (c s i l C S I L), got 'f'"),
     )
     assert_equal(
         _root_error(_root(_dict_kid("i", "l"))),
@@ -476,9 +480,14 @@ def test_read_root_schema_defaults_and_index_types() raises:
     assert_equal(info.names[0], String("f0"))
     assert_true(info.arrow_types[0] == ArrowType.INT64)
     assert_false(info.nullables[0])
-    var fmts: List[String] = ["c", "s", "i", "l"]
-    var want = [ArrowType.INT8, ArrowType.INT16, ArrowType.INT32, ArrowType.INT64]
-    for i in range(4):
+    # The index type the producer declared; the Field and the Column store
+    # it as INT32 or INT64 (`test_arrow_c_data_dictionary_indices.mojo`).
+    var fmts: List[String] = ["c", "s", "i", "l", "C", "S", "I", "L"]
+    var want = [
+        ArrowType.INT8, ArrowType.INT16, ArrowType.INT32, ArrowType.INT64,
+        ArrowType.UINT8, ArrowType.UINT16, ArrowType.UINT32, ArrowType.UINT64,
+    ]
+    for i in range(8):
         var di = _read_root_schema(_root(_dict_kid(fmts[i], "u")))
         assert_true(di.arrow_types[0] == ArrowType.DICTIONARY)
         assert_true(di.dict_index_types[0] == want[i], fmts[i])
@@ -528,11 +537,11 @@ def test_import_record_batch_refusals() raises:
 
 def test_format_strings_the_import_accepts() raises:
     var fmts: List[String] = [
-        "n", "b", "i", "g", "u", "z", "U", "Z", "tdD", "tdm", "tsn:", "d:5,2",
+        "b", "i", "g", "u", "z", "U", "Z", "tdD", "tdm", "tsn:", "d:5,2",
         "d:5,2,256", "tts", "tDs", "tiM", "+l", "+s", "+m", "+us:1", "+ud:1",
     ]
     var want = [
-        ArrowType.NULL, ArrowType.BOOL, ArrowType.INT32, ArrowType.FLOAT64,
+        ArrowType.BOOL, ArrowType.INT32, ArrowType.FLOAT64,
         ArrowType.STRING, ArrowType.BINARY, ArrowType.LARGE_STRING,
         ArrowType.LARGE_BINARY, ArrowType.DATE32, ArrowType.DATE64,
         ArrowType.TIMESTAMP_NS, ArrowType.DECIMAL128, ArrowType.DECIMAL256,
@@ -556,6 +565,16 @@ def test_format_strings_the_import_refuses() raises:
         except e:
             msg = String(e)
         assert_equal(msg, _unrecognized(fmt))
+    # The Null type is recognized and refused: it has no buffers to import.
+    var msg = String("")
+    try:
+        _ = _format_string_to_arrow_type("n")
+    except e:
+        msg = String(e)
+    assert_equal(
+        msg,
+        String("UnsupportedArrowCABIType: the Null type ('n') is not in the supported drain subset"),
+    )
 
 
 def test_decimal_format_bit_widths() raises:
@@ -681,13 +700,10 @@ def _dec_array(width: Int) -> CArrowArray:
 
 
 def test_import_decimal_precision_and_scale_defaults() raises:
-    # (precision, scale) handed in by the caller; out of range they fall back
-    # to the bit width's default precision and scale 0.
-    # The last two rows pin a KNOWN CORRUPTION, not expected behaviour: Arrow
-    # allows a negative scale and a scale greater than the precision, yet
-    # `scale -1 -> 0` and `scale 11 > precision 10 -> 0` silently rewrite the
-    # value's meaning (komira-ai/komira#904 item 5). A fix for #904 flips
-    # these two asserts on purpose; update them with that fix.
+    # (precision, scale) handed in by the caller; a missing precision (0)
+    # takes the bit width's default and scale 0. A precision outside the
+    # width's range, a negative scale or a scale above the precision is
+    # refused: a default in its place would change the value's meaning.
     for w in [16, 32]:
         var t = ArrowType.DECIMAL128 if w == 16 else ArrowType.DECIMAL256
         var dflt = 38 if w == 16 else 76
@@ -699,23 +715,32 @@ def test_import_decimal_precision_and_scale_defaults() raises:
         var d = _import_column(a, t)
         assert_equal(d.decimal_precision(), dflt, "no precision: the default")
         assert_equal(d.decimal_scale(), 0)
-        assert_equal(_import_column(a, t, 10, -1).decimal_scale(), 0, "scale below 0")
-        assert_equal(_import_column(a, t, 10, 11).decimal_scale(), 0, "scale above precision")
+        var sfx = String("") if w == 16 else String(",256")
+        assert_equal(
+            _dec_error(a, t, 10, -1),
+            "UnsupportedArrowCABIType: decimal format 'd:10,-1" + sfx
+            + "': scale -1 is negative; negative scales are not supported",
+        )
+        assert_equal(
+            _dec_error(a, t, 10, 11),
+            "UnsupportedArrowCABIType: decimal format 'd:10,11" + sfx
+            + "': scale 11 exceeds precision 10; such scales are not supported",
+        )
+        var over = dflt + 1
+        assert_equal(
+            _dec_error(a, t, over, 0),
+            "from_arrow_c_stream: decimal format 'd:" + String(over) + ",0" + sfx
+            + "': precision " + String(over) + " is outside [1, " + String(dflt)
+            + "] for a " + String(w * 8) + "-bit decimal",
+        )
 
 
-def test_decimal_format_defaults() raises:
-    # `_parse_decimal_format` keeps a format it cannot honour rather than
-    # refusing it: precision 0 or above the width's bound becomes the bound,
-    # a scale above the precision becomes the precision, and a malformed
-    # `d:` string (which `extract_decimal_params` reads as width 0) is
-    # Decimal128(38, 0). The C Data Interface gives none of these a default.
-    var cases: List[String] = ["d:0,2", "d:40,2", "d:5,7", "d:80,2,256", "d:x,2"]
-    var want_p = [38, 38, 5, 76, 38]
-    var want_s = [2, 2, 5, 2, 0]
-    for i in range(len(cases)):
-        var ps = _parse_decimal_format(cases[i])
-        assert_equal(ps[0], want_p[i], cases[i])
-        assert_equal(ps[1], want_s[i], cases[i])
+def _dec_error(ref a: CArrowArray, t: ArrowType, p: Int, s: Int) -> String:
+    try:
+        _ = _import_column(a, t, p, s)
+    except e:
+        return String(e)
+    return String("(imported)")
 
 
 def _partial_info() -> _ImportedSchemaInfo:

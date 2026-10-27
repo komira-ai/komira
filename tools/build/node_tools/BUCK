@@ -1,0 +1,93 @@
+# node_tools (README.md): the program the node_modules rules run
+# (tools/build/node/modules.bzl): node_modules from a package-lock.json and
+# pinned tarballs, and a program of node_modules run by the pinned node over a
+# copy of a source tree. A Zig tool, as every build tool under tools/build is;
+# built behind its unit tests.
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_module", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+
+_SRCS = [
+    "layout.zig",
+    "main.zig",
+    "platform.zig",
+    "runner.zig",
+    "sri.zig",
+    "unpack.zig",
+]
+
+_SUPPORT = ["tartest.zig"]
+
+[
+    zig_test(
+        name = name + "_unit",
+        exec_compatible_with = LINUX_X86_64,
+        src = name + "_test.zig",
+        imports = _SRCS + _SUPPORT,
+        busybox = "komira//tools/build/toolchains:busybox",
+        zig = _ZIG,
+    )
+    for name in [
+        "layout",
+        "platform",
+        "runner",
+        "sri",
+        "unpack",
+    ]
+]
+
+zig_exe(
+    name = "node_tools",
+    exec_compatible_with = LINUX_X86_64,
+    src = "main.zig",
+    imports = _SRCS,
+    unit_tests = [
+        ":layout_unit",
+        ":platform_unit",
+        ":runner_unit",
+        ":sri_unit",
+        ":unpack_unit",
+        _ZIG_VERSION,
+        "komira//tools/build/toolchains:zig_next_version",
+    ],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+    visibility = ["PUBLIC"],
+)
+
+# node_act (node_act.zig): the actions of the node rules (tools/build/node/
+# defs.bzl) in place of their busybox scripts: the Node.js distribution, the
+# npm package, the node test and the esbuild bundle. Built behind its unit
+# tests; its process cases are tests//functional/node_act. tartest.zig is also
+# a module, so the tar extraction tests (act_util) and that driver test can
+# build archives.
+zig_test(
+    name = "node_act_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "node_act_test.zig",
+    imports = ["node_act.zig"],
+    deps = ["//tools/build/act_util:act_util"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "node_act",
+    exec_compatible_with = LINUX_X86_64,
+    src = "node_act.zig",
+    deps = ["//tools/build/act_util:act_util"],
+    unit_tests = [":node_act_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+zig_module(
+    name = "node_tartest",
+    src = "tartest.zig",
+    visibility = ["PUBLIC"],
+)
