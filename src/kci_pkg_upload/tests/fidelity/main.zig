@@ -13,8 +13,8 @@
 //! stderr, and nothing else; 2 bad usage; 3 cannot measure, a reason on
 //! stderr: the recorder could not listen or its bound address is not
 //! loopback (`fid.isLoopback`), the scratch directory, the probe wheel or
-//! the recorder thread could not be made, uv could not be started, failed
-//! or timed out, the recorder failed or saw not exactly one request, the
+//! the recorder thread could not be made, uv could not be started or failed,
+//! the recorder failed or saw not exactly one request, the
 //! request is not the expected shape, or any other error (reading the
 //! committed fixtures, writing the output). A fixture the capture writes but
 //! that is not committed is DIFFERENT (1). A check that did not measure is
@@ -39,7 +39,6 @@ const Allocator = std.mem.Allocator;
 const EXIT_DIFFERENT: u8 = 1;
 const EXIT_USAGE: u8 = 2;
 const EXIT_CANNOT_MEASURE: u8 = 3;
-const UV_TIMEOUT_S: i64 = 120;
 
 fn stderr() std.fs.File.DeprecatedWriter {
     return std.fs.File.stderr().deprecatedWriter();
@@ -111,27 +110,10 @@ const Recorder = struct {
 
 // ---- Running uv -------------------------------------------------------------
 
-const Watch = struct {
-    pid: std.posix.pid_t,
-    deadline_ms: i64,
-    done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    fired: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-
-    fn loop(w: *Watch) void {
-        while (!w.done.load(.acquire)) {
-            if (std.time.milliTimestamp() >= w.deadline_ms) {
-                w.fired.store(true, .release);
-                std.posix.kill(w.pid, std.posix.SIG.KILL) catch {};
-                return;
-            }
-            std.Thread.sleep(100 * std.time.ns_per_ms);
-        }
-    }
-};
-
 const Ran = struct { ok: bool, why: []const u8, stdout: []const u8, stderr: []const u8 };
 
-/// Runs argv with exactly `env`, killed at UV_TIMEOUT_S.
+/// Runs argv with exactly `env`. It has no time limit of its own: a uv that
+/// does not end is ended by the limit of the action that runs this.
 fn run(a: Allocator, argv: []const []const u8, env: *const std.process.EnvMap) !Ran {
     var child = std.process.Child.init(argv, a);
     child.env_map = env;
@@ -139,17 +121,12 @@ fn run(a: Allocator, argv: []const []const u8, env: *const std.process.EnvMap) !
     child.stdout_behavior = .Pipe;
     child.stderr_behavior = .Pipe;
     try child.spawn();
-    var watch = Watch{ .pid = child.id, .deadline_ms = std.time.milliTimestamp() + UV_TIMEOUT_S * 1000 };
-    const thread = try std.Thread.spawn(.{}, Watch.loop, .{&watch});
     var out = std.ArrayList(u8).empty;
     var err = std.ArrayList(u8).empty;
     const collected = child.collectOutput(a, &out, &err, 1 << 24);
     const term = child.wait();
-    watch.done.store(true, .release);
-    thread.join();
     try collected;
     const t = try term;
-    if (watch.fired.load(.acquire)) return .{ .ok = false, .why = "timed out", .stdout = out.items, .stderr = err.items };
     return switch (t) {
         .Exited => |c| .{
             .ok = c == 0,

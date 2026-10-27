@@ -101,6 +101,10 @@ test "G1 usage: every bad command line exits 2 with its runner's message, and no
         .{ .argv = try e.args("exit", &.{ "--limit-s", "2" }), .msg = "gate_runner: usage error" },
         .{ .argv = try e.args("exit", &.{ "--limit-s", "02", "--limit-report", "coverage" }), .msg = "cov_run: the limit '02' is not a positive whole number of seconds" },
         .{ .argv = try e.args("exit", &.{ "--limit-s", "2", "--limit-report", "other" }), .msg = "gate_runner: --limit-report other: the only report is coverage" },
+        .{ .argv = try e.args("exit", &.{ "--hang-limit-s", "0" }), .msg = "hang_limit: REFUSING: the limit '0' is not a positive whole number of seconds" },
+        .{ .argv = try e.args("exit", &.{ "--hang-limit-s", "1800s" }), .msg = "hang_limit: REFUSING: the limit '1800s' is not a positive whole number of seconds" },
+        .{ .argv = try e.args("exit", &.{ "--hang-limit-s", "5", "--deadline-s", "30", "--runner-timeout-s", "90" }), .msg = "gate_runner: usage error: --hang-limit-s is a limit of its own" },
+        .{ .argv = try e.args("exit", &.{ "--hang-limit-s", "5", "--limit-s", "30", "--limit-report", "coverage" }), .msg = "gate_runner: usage error: --hang-limit-s is a limit of its own" },
         .{ .argv = &.{ "mojo", "--busybox", e.bb, "--runtime-lib", "l", "--label", label, "--test", "root/x", "--marker", "passed" }, .msg = "gate_runner: " },
     };
     for (cases) |c| {

@@ -26,20 +26,26 @@
 #       A SIGTERM taken after the job exited ends the loop (True) but the job
 #       stays COMPLETED, with no stop message.
 #   test_the_stream_timer_flushes_a_quiet_chunk
-#       Buffered stdout under the chunk size is written by the timer once the
-#       flush interval has passed, and not before.
+#       On a manual clock: buffered stdout under the chunk size is not written
+#       by the timer at the start nor 999 ms into a 1 s flush interval, and is
+#       written once the clock reaches the interval.
 #   test_a_failed_spawn_raises_and_marks_nothing_spawned
 #       A job binary that does not exist: the spawn raises naming the job,
 #       and the supervisor does not count the job as spawned; the run loop
 #       raises the same, after its first RUNNING beat.
 #   test_a_terminal_beat_with_no_delay_is_retried_at_once
 #       `finalize_heartbeat_within` with a first delay of 0 against a reporter
-#       that always answers 503: exactly `max_attempts` (8) sends and the last
-#       outcome returned, in less than 9.5 s: a retry that slept the default
-#       schedule instead of the caller's 0 (250 ms doubling to 2 s) would add
-#       9.75 s between the eight sends. Ten zero sleeps return in less than
-#       9.5 s too, where ten that slept even 1 s would take 10 s. A 404 is
-#       sent once.
+#       that always answers 503, on a manual clock: exactly `max_attempts` (8)
+#       sends and the last outcome returned, and the clock has not moved: the
+#       retries waited 0 ms. CONTROL: the default first delay moves the clock
+#       by exactly 9750 ms (250, 500, 1000, then 2000 four times), so a retry
+#       that slept the default schedule instead of the caller's 0 fails the
+#       first arm. A 404 is sent once.
+#   test_the_loop_clocks_wait_exactly_what_they_are_asked
+#       `ManualLoopClock` moves its cell by exactly each wait (nothing for 0)
+#       and records it; the wait helper moves nothing for 0 or less and reads
+#       the cell; `SystemLoopClock` hands out no cell, reads a clock that never
+#       goes back, and a wait of 0 s returns at once.
 #   test_a_failure_report_copy_keeps_the_panic_line
 #       `FailureReport.copy()` carries the panic line over.
 # =============================================================================
@@ -48,7 +54,6 @@ from std.ffi import external_call
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_clock import now_ns
 from komira_objectstore import InMemoryConditionalStore, SharedInMemoryConditionalStore
 from komira_objectstore.path import Path
 from komira_supervisor import ChildSpec, install_stop_signal_handler
@@ -60,15 +65,17 @@ from komira_job_supervisor import (
     HeartbeatReporter,
     JobSupervisor,
     JobSupervisorConfig,
+    ManualLoopClock,
     SupervisorHeartbeat,
+    SystemLoopClock,
     run_job_supervisor,
 )
+from komira_job_supervisor.loop_clock import clock_now_ns, clock_sleep_ms
 from komira_job_supervisor.job_supervisor import (
     TERMINAL_BEAT_FIRST_DELAY_MS,
     TERMINAL_BEAT_MAX_ATTEMPTS,
     TERMINAL_BEAT_MAX_DELAY_MS,
     _detect_panic,
-    _sleep_secs,
 )
 from komira_job_supervisor.job_supervisor_state import (
     FailureReport,
@@ -93,6 +100,8 @@ struct Recorder(HeartbeatReporter):
 
 
 comptime Steps = JobSupervisor[Recorder, InMemoryConditionalStore]
+comptime _CLOCK_START_NS: Int = 5_000_000_000
+"""Where a manual clock stands when a test starts it."""
 
 
 def _sleep_ms(ms: Int):
@@ -126,12 +135,10 @@ def _lines(*xs: String) -> List[String]:
 
 
 def _wait_collected(mut js: Steps) raises:
-    """Wait for the job's exit through try_wait only (no drain)."""
-    for _ in range(2000):
-        if js.supervisor.try_wait().collected:
-            return
+    """Wait for the job's exit through try_wait only (no drain); the exit is
+    the event, so the wait has no bound of its own."""
+    while not js.supervisor.try_wait().collected:
         _sleep_ms(5)
-    raise Error("the job did not exit within 10 s")
 
 
 def test_the_panic_line_is_the_first_match_in_any_case() raises:
@@ -202,10 +209,8 @@ def test_a_cancel_needs_a_request_and_a_running_job() raises:
     # A request that comes after the job exited: its result stands.
     var done = _steps(_config(String("/bin/true")))
     done.spawn_child()
-    for _ in range(2000):
+    while not done.child_exited:
         done.poll_and_drain()
-        if done.child_exited:
-            break
         _sleep_ms(5)
     assert_true(done.child_exited, "/bin/true exited")
     done.state.cancel_requested = True
@@ -238,10 +243,8 @@ def test_a_stop_after_the_job_ended_keeps_its_result() raises:
     _ = take_stop_signal()  # nothing left over from before
     var js = _steps(_config(String("/bin/true")))
     js.spawn_child()
-    for _ in range(2000):
+    while not js.child_exited:
         js.poll_and_drain()
-        if js.child_exited:
-            break
         _sleep_ms(5)
     assert_true(js.child_exited, "/bin/true exited")
     _ = proc_kill(external_call["getpid", Int32](), SIGTERM)
@@ -267,6 +270,8 @@ def test_the_stream_timer_flushes_a_quiet_chunk() raises:
         Recorder(ArcPointer[List[String]](List[String]())),
         Optional[SharedInMemoryConditionalStore](store^),
     )
+    var clock = ArcPointer[Int](_CLOCK_START_NS)
+    js.set_test_clock(clock)
     var key = Path.parse(String("logs/quiet/chunks/0.log"))
     js._absorb(String("quiet\n"), True)
     js._tick_stream_timer()
@@ -277,7 +282,16 @@ def test_the_stream_timer_flushes_a_quiet_chunk() raises:
     except:
         early = False
     assert_false(early, "under the size and inside the interval: not written yet")
-    _sleep_ms(1100)
+    clock[] += 999 * 1_000_000  # 1 ms short of the 1 s flush interval
+    js._tick_stream_timer()
+    var short = True
+    try:
+        _ = view.get(key)
+        short = True
+    except:
+        short = False
+    assert_false(short, "999 ms into a 1 s interval: not written yet")
+    clock[] += 1_000_000  # the interval has passed
     js._tick_stream_timer()
     var got = view.get(key)
     assert_equal(String(unsafe_from_utf8=Span(got)), String("quiet\n"))
@@ -333,29 +347,39 @@ def test_a_terminal_beat_with_no_delay_is_retried_at_once() raises:
     var js = JobSupervisor[Answering, InMemoryConditionalStore](
         _config(String("/bin/true")), Answering(503, sends), None
     )
-    # A retry that ignored the caller's first delay and slept the default
-    # schedule would sleep after each of the first seven sends: 250, 500,
-    # 1000, then 2000 four times, 9750 ms. The bound is just under that, so a
-    # slow or instrumented send has seconds to spare and only such a delay
-    # fails it.
-    var broken_ms = 0
-    var d = TERMINAL_BEAT_FIRST_DELAY_MS
-    for _ in range(TERMINAL_BEAT_MAX_ATTEMPTS - 1):
-        broken_ms += d
-        d = min(d * 2, TERMINAL_BEAT_MAX_DELAY_MS)
-    assert_equal(broken_ms, 9750, "the default schedule this bound sits under")
-    var t0 = now_ns()
+    var clock = ArcPointer[Int](_CLOCK_START_NS)
+    js.set_test_clock(clock)
     var out = js.finalize_heartbeat_within(60_000, 0, TERMINAL_BEAT_MAX_ATTEMPTS)
-    var took_ms = Int((now_ns() - t0) // 1_000_000)
     assert_equal(sends[], TERMINAL_BEAT_MAX_ATTEMPTS, "max_attempts sends")
     assert_equal(out.status, 503, "the last outcome")
-    assert_true(took_ms < 9500, "no delay between them: " + String(took_ms))
-    # Ten zero sleeps: ten that slept even 1 s would take 10 000 ms.
-    var t1 = now_ns()
-    for _ in range(10):
-        _sleep_secs(0)
-    var slept_ms = Int((now_ns() - t1) // 1_000_000)
-    assert_true(slept_ms < 9500, "a zero sleep returns: " + String(slept_ms))
+    assert_equal(
+        clock[], _CLOCK_START_NS, "a first delay of 0 waits 0 ms between sends"
+    )
+    # CONTROL: the default schedule waits after each of the first seven
+    # sends: 250, 500, 1000, then 2000 four times, 9750 ms in all. The clock
+    # moves by exactly what the retries waited, so a retry that ignored the
+    # caller's first delay and slept this schedule instead would move it too.
+    var expected_ms = 0
+    var d = TERMINAL_BEAT_FIRST_DELAY_MS
+    for _ in range(TERMINAL_BEAT_MAX_ATTEMPTS - 1):
+        expected_ms += d
+        d = min(d * 2, TERMINAL_BEAT_MAX_DELAY_MS)
+    assert_equal(expected_ms, 9750, "the default schedule")
+    var scheduled_sends = ArcPointer[Int](0)
+    var scheduled = JobSupervisor[Answering, InMemoryConditionalStore](
+        _config(String("/bin/true")), Answering(503, scheduled_sends), None
+    )
+    var scheduled_clock = ArcPointer[Int](_CLOCK_START_NS)
+    scheduled.set_test_clock(scheduled_clock)
+    _ = scheduled.finalize_heartbeat_within(
+        60_000, TERMINAL_BEAT_FIRST_DELAY_MS, TERMINAL_BEAT_MAX_ATTEMPTS
+    )
+    assert_equal(scheduled_sends[], TERMINAL_BEAT_MAX_ATTEMPTS)
+    assert_equal(
+        scheduled_clock[] - _CLOCK_START_NS,
+        expected_ms * 1_000_000,
+        "the default schedule waits 250, 500, 1000, then 2000 ms",
+    )
     # CONTROL: a 404 cannot change by repeating: one send.
     var once = ArcPointer[Int](0)
     var js404 = JobSupervisor[Answering, InMemoryConditionalStore](
@@ -364,6 +388,38 @@ def test_a_terminal_beat_with_no_delay_is_retried_at_once() raises:
     _ = js404.finalize_heartbeat_within(60_000, 0, 3)
     assert_equal(once[], 1, "a 404 is sent once")
     print("  test_a_terminal_beat_with_no_delay_is_retried_at_once: PASS")
+
+
+def test_the_loop_clocks_wait_exactly_what_they_are_asked() raises:
+    # A manual clock moves by what is waited, records it, and moves by nothing
+    # for a wait of 0 or less.
+    var cell = ArcPointer[Int](_CLOCK_START_NS)
+    var manual = ManualLoopClock(cell)
+    assert_equal(manual.now_ns(), UInt64(_CLOCK_START_NS))
+    manual.sleep_secs(2)
+    manual.sleep_secs(0)
+    assert_equal(cell[], _CLOCK_START_NS + 2_000_000_000, "2 s waited, 0 s not")
+    assert_equal(len(manual.slept_ms), 2)
+    assert_equal(manual.slept_ms[0], 2000)
+    assert_equal(manual.slept_ms[1], 0)
+    assert_equal(manual.now_ns(), UInt64(cell[]), "it reads the cell")
+    assert_true(Bool(manual.test_clock()), "it hands its cell to the supervisor")
+    # A helper wait of 0 ms or less moves the cell by nothing, and a reading
+    # is the cell's.
+    clock_sleep_ms(Optional[ArcPointer[Int]](cell), 0)
+    clock_sleep_ms(Optional[ArcPointer[Int]](cell), -5)
+    assert_equal(cell[], _CLOCK_START_NS + 2_000_000_000, "no wait, no move")
+    clock_sleep_ms(Optional[ArcPointer[Int]](cell), 250)
+    assert_equal(clock_now_ns(Optional[ArcPointer[Int]](cell)), UInt64(cell[]))
+    assert_equal(cell[], _CLOCK_START_NS + 2_250_000_000, "250 ms waited")
+    # The system clock has no cell to hand over, never reads backwards, and a
+    # wait of 0 s returns at once.
+    var system = SystemLoopClock()
+    var first = system.now_ns()
+    system.sleep_secs(0)
+    assert_true(system.now_ns() >= first, "the monotonic clock never goes back")
+    assert_false(Bool(system.test_clock()), "no cell: the supervisor uses the system")
+    print("  test_the_loop_clocks_wait_exactly_what_they_are_asked: PASS")
 
 
 def test_a_failure_report_copy_keeps_the_panic_line() raises:
@@ -392,5 +448,6 @@ def main() raises:
     test_the_stream_timer_flushes_a_quiet_chunk()
     test_a_failed_spawn_raises_and_marks_nothing_spawned()
     test_a_terminal_beat_with_no_delay_is_retried_at_once()
+    test_the_loop_clocks_wait_exactly_what_they_are_asked()
     test_a_failure_report_copy_keeps_the_panic_line()
     print("test_job_supervisor_steps: ALL PASS")

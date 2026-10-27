@@ -18,6 +18,7 @@
 # ci_graph.bzl or the fixture turns a named case red (see the PR that added
 # this file for the mutants tried).
 
+load("@prelude//cxx:cxx_toolchain_types.bzl", "CxxToolchainInfo")
 load(":affected.bzl", "AFFECTED", "EMPTY", "VACUOUS", "WIDENED", "held_refusals", "is_held_file", "is_inert", "parse_held_lines", "pattern_matches", "select", "widen_reason")
 load(":rules.bzl", "EXCLUDED", "INERT", "WIDEN")
 load(":ci_graph.bzl", "check_nodes", "closure", "findings", "make_graph", "python_findings", "python_nodes", "render", "roots", "sdk_own_deps", "without_left_out")
@@ -322,6 +323,33 @@ def _roots_cases():
         out.append("roots: an ordinary dependent still removes its dependency from the roots: got {}".format(roots(plain)))
     return out
 
+def _registration_cases(ctx):
+    """The execution platforms the checkout registers (`platforms/default:default`): whichever worker sets this
+    checkout's configuration names, komira's linux platform stays first; buildrules' linux platform is registered;
+    buildrules' macOS platform is registered exactly when komira's own macOS platform is, after it, with the
+    executor of komira's macOS platform and not the one of komira's linux platform."""
+    out = []
+    plats = ctx.analysis(ctx.configured_targets("komira//tools/build/platforms/default:default")).providers()[ExecutionPlatformRegistrationInfo].platforms
+    got = [str(p.label) for p in plats]
+    by_label = {str(p.label): p for p in plats}
+    if not got or got[0] != "komira//tools/build/platforms:linux-x86_64":
+        out.append("registration: komira's linux-x86_64 platform must stay first, got {}".format(got))
+    if "buildrules//platforms:linux_x86_64" not in got:
+        out.append("registration: buildrules' linux_x86_64 platform is missing: {}".format(got))
+    komira_mac = "komira//tools/build/platforms:darwin-arm64" in got
+    rules_mac = "buildrules//platforms:macos_aarch64" in got
+    if komira_mac != rules_mac:
+        out.append("registration: buildrules' macos_aarch64 platform must be registered exactly when komira's darwin-arm64 is (komira's: {}, buildrules': {}): {}".format(komira_mac, rules_mac, got))
+    if komira_mac and rules_mac:
+        if got.index("buildrules//platforms:macos_aarch64") < got.index("komira//tools/build/platforms:darwin-arm64"):
+            out.append("registration: buildrules' macos_aarch64 platform must come after komira's darwin-arm64: {}".format(got))
+        rules_exec = str(by_label["buildrules//platforms:macos_aarch64"].executor_config)
+        if rules_exec != str(by_label["komira//tools/build/platforms:darwin-arm64"].executor_config):
+            out.append("registration: buildrules' macos_aarch64 platform must run on komira's macOS workers (the executor of komira's darwin-arm64), but its executor differs")
+        if rules_exec == str(by_label["komira//tools/build/platforms:linux-x86_64"].executor_config):
+            out.append("registration: buildrules' macos_aarch64 platform has the executor of komira's linux-x86_64 platform")
+    return out
+
 # ---- the Python guard ------------------------------------------------------
 
 _PYTEST = "komira//tools/build/python/defs.bzl:_py_test"
@@ -431,8 +459,57 @@ def _shipped_rules_cases():
             out.append("shipped rules: '{}' builds something and must not be inert".format(p))
     return out
 
+# ---- the C/C++ toolchain per target platform ---------------------------------
+#
+# `toolchains//:cxx` (komira_cxx_toolchains) configured for each target platform, read off
+# the analysed toolchain: macOS arm64 compiles and archives for `aarch64-macos` at zig's
+# generic arm64 CPU and its linker is a refusal; linux x86_64 compiles for the glibc triple
+# and its linker is zig's; a platform that is macOS on another CPU, or arm64 on another OS,
+# is incompatible (the toolchain admits macOS AND arm64 together, never one of them).
+
+_CXX = "toolchains//:cxx"
+_FIXTURE_PLATFORMS = "komira//tools/build/ci/fixture/platforms"
+
+# (target platform, the triple the C is compiled for, the CPU it is compiled at, what must not be on the compile line)
+_CXX_ADMITTED = [
+    ("komira//tools/build/platforms:darwin-arm64", "aarch64-macos", "-mcpu=generic", ["x86_64-linux-gnu", "x86_64_v3"]),
+    ("komira//tools/build/platforms:linux-x86_64", "x86_64-linux-gnu", "-mcpu=x86_64_v3", ["aarch64-macos", "-mcpu=generic"]),
+]
+_CXX_REFUSED = [
+    _FIXTURE_PLATFORMS + ":macos_x86_64",
+    _FIXTURE_PLATFORMS + ":linux_arm64",
+]
+
+def _cxx_toolchain_cases(ctx):
+    out = []
+    for platform, triple, cpu, absent in _CXX_ADMITTED:
+        who = "{} on {}".format(_CXX, platform)
+        node = ctx.configured_targets(_CXX, target_platform = platform)
+        if node == None:
+            out.append("cxx toolchain: {}: incompatible, but the platform is one it must admit".format(who))
+            continue
+        info = ctx.analysis(node).providers()[CxxToolchainInfo]
+        flags = str(info.c_compiler_info.compiler_flags)
+        if triple not in flags:
+            out.append("cxx toolchain: {}: the C compile is not for {}: {}".format(who, triple, flags))
+        if cpu not in flags:
+            out.append("cxx toolchain: {}: the C compile is not at {}: {}".format(who, cpu, flags))
+        for a in absent:
+            if a in flags:
+                out.append("cxx toolchain: {}: the C compile carries {}, which belongs to the other platform: {}".format(who, a, flags))
+        macos = triple.startswith("aarch64-macos")
+        refused = "is not provided" in str(info.linker_info.linker)
+        if refused != macos:
+            out.append("cxx toolchain: {}: the linker is {}, and must be {}".format(who, "a refusal" if refused else "a real one", "a refusal (compile and archive only)" if macos else "a real one"))
+        if "ar" not in str(info.linker_info.archiver):
+            out.append("cxx toolchain: {}: no archiver: {}".format(who, info.linker_info.archiver))
+    for platform in _CXX_REFUSED:
+        if ctx.configured_targets(_CXX, target_platform = platform) != None:
+            out.append("cxx toolchain: {} on {}: compatible, but the toolchain admits macOS arm64 and linux x86_64 only".format(_CXX, platform))
+    return out
+
 def _run(ctx):
-    table = _table_cases() + _held_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases()
+    table = _table_cases() + _held_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases() + _registration_cases(ctx) + _cxx_toolchain_cases(ctx)
     real = _real_cases(ctx)
     failures = table + real
     if failures:
