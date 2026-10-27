@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-The mutable data-graph store and its ingest. This is parts 1 to 6 of the package
+The mutable data-graph store and its ingest. This is parts 1 to 7 of the package
 described in
 [the knowledge graph port](https://github.com/komira-ai/komira/blob/main/docs/design/knowledge_graph_port.md):
 bi-temporal edges, entity resolution and the source facet, the three seams
@@ -12,7 +12,9 @@ the cursor that records how far an incremental read of a source got. The
 working set loads and rewrites snapshots, and erasure of a partition, the warm
 cache, compaction and embedding top-k work on a snapshot store. Ingest takes one
 episode of source text through extraction, entity resolution and bi-temporal
-edges to a new snapshot; a later part adds the structured path.
+edges to a new snapshot; the structured path ingests facts a caller already
+knows, and `SurfaceAdapter` is the seam through which a host turns its own
+records into episodes.
 
 The graph keeps every fact on two time axes: event time (when it held in the
 world) and system time (when the graph learned it and when it learned it no
@@ -137,6 +139,29 @@ deleted, so "what did we believe at time T" stays answerable.
   all end the ingest before the first write; a full base can still fail after
   its snapshot, when its index bootstrap fails, and `repair_missing_bootstrap`
   finishes it.
+- `ingest_structured`, `ingest_source_diff`, `ingest_edges`: the structured path.
+  A `StructuredEpisode` is an `Extraction` the caller built (entities and triples
+  it knows) with the envelope of an `EpisodeInput` and no text to read.
+  `ingest_structured` (or `ingest_structured_into`) never calls the extractor; the
+  embedder still names each new entity, and the same-entity and contradiction
+  judgments are still the `LlmClient`'s. The change gate is keyed by the `source`
+  when there is one, else the `uuid`, and hashes the extraction alone, so the same
+  facts again are a no-op that embeds and asks nothing whatever the envelope says.
+  A triple's own `invalid_at` is stored (`apply_edges_recording`): the edge is
+  ended and the graph still believes it, it is a repeat only of an edge with the
+  same start and end, and it is judged for contradiction over its own interval; an
+  end at or before the start is an error. (`apply_edges` on the episode path still
+  ignores `invalid_at`: a model's end time is a guess.) A non-empty `source`
+  makes the ingest a replacement of what that source holds in the partition: only
+  the facts that changed are resolved and applied (a fact whose edge the source
+  already holds, between entities that exist, is left alone and its entities are
+  not embedded again), and each edge the source held that no triple states is
+  closed at the ingest's time with its row kept. Another source's identical edge,
+  an untagged ingest's edges and the entities are never touched, and a source id
+  means one source per partition. `SurfaceAdapter` is a trait with an associated
+  `Source` type and `lower(source, partition_id)` returning the `EpisodeInput`s
+  for one record, whose text must reach each `body` verbatim; the package ships
+  no adapter and does not choose one for a request.
 
 A facet, a source, a predicate and an entity name are opaque strings the host
 supplies: the package fixes no vocabulary. Prompts are values the caller passes
@@ -663,6 +688,92 @@ var again = ingest_episode(
     store, episode, StubLlmClient(), embedder, IngestConfig.default()
 )
 assert_equal(again, head)
+```
+
+Known facts, and a source that replaces them. No extractor is involved; the
+second ingest of `doc-1` states one fact fewer, so that source's other edge is
+closed while the edge another source states stays open:
+
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+-->
+```mojo
+from komira_kg import (
+    IngestConfig,
+    SnapshotWorkingSet,
+    StructuredEpisode,
+    StubEmbedder,
+    StubLlmClient,
+    ingest_structured,
+)
+from komira_kg_format import (
+    EntityMention,
+    Extraction,
+    KgSnapshotStore,
+    TS_OPEN_SENTINEL,
+    Triple,
+)
+from komira_objectstore.shared_in_memory_conditional_store import (
+    SharedInMemoryConditionalStore,
+)
+
+def facts(first: Bool, second: Bool) -> Extraction:
+    var mentions = List[EntityMention]()
+    var triples = List[Triple]()
+    if first:
+        triples.append(Triple("Alder", "borders", "Birch", "Alder borders Birch", 10, TS_OPEN_SENTINEL))
+        mentions.append(EntityMention("Alder", "", ""))
+        mentions.append(EntityMention("Birch", "", ""))
+    if second:
+        triples.append(Triple("Alder", "near", "Cedar", "Alder is near Cedar", 10, 90))
+        mentions.append(EntityMention("Cedar", "", ""))
+    return Extraction(mentions^, triples^)
+
+
+def main() raises:
+    var store = KgSnapshotStore[SharedInMemoryConditionalStore](
+        SharedInMemoryConditionalStore(), "graph"
+    )
+    var llm = StubLlmClient()
+    var embedder = StubEmbedder(8)
+    var cfg = IngestConfig.default()
+
+    _ = ingest_structured(
+        store,
+        StructuredEpisode("e1", "partition-a", facts(True, True), 1000, 900, "", "doc-1"),
+        llm, embedder, cfg,
+    )
+    _ = ingest_structured(
+        store,
+        StructuredEpisode("e2", "partition-a", facts(True, False), 1500, 1400, "", "doc-2"),
+        llm, embedder, cfg,
+    )
+    # doc-1 now states only the second fact; the first stays doc-2's.
+    var head = ingest_structured(
+        store,
+        StructuredEpisode("e3", "partition-a", facts(False, True), 2000, 1900, "", "doc-1"),
+        llm, embedder, cfg,
+    )
+    assert_equal(store.latest_snapshot_id(), head)
+    # The same facts again: nothing to do.
+    assert_equal(
+        ingest_structured(
+            store,
+            StructuredEpisode("e4", "partition-a", facts(False, True), 3000, 2900, "", "doc-1"),
+            llm, embedder, cfg,
+        ),
+        head,
+    )
+
+    var graph = SnapshotWorkingSet.load_latest(store)
+    assert_equal(len(graph.edges), 3)
+    assert_equal(graph.edges[0].source, "doc-1")
+    assert_equal(graph.edges[0].invalid_at, 2000)  # dropped by doc-1: closed
+    assert_equal(graph.edges[0].expired_at, 2000)
+    assert_equal(graph.edges[1].invalid_at, 90)  # stated with an end time
+    assert_equal(graph.edges[1].expired_at, TS_OPEN_SENTINEL)  # and believed
+    assert_equal(graph.edges[2].source, "doc-2")
+    assert_equal(graph.edges[2].invalid_at, TS_OPEN_SENTINEL)  # doc-2's own, open
 ```
 
 ## Limits
