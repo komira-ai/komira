@@ -271,7 +271,7 @@ def run_subrg_agg[FS: FileSystem, SINK: ScanChunkSink](
 ) raises -> Slab[RecordBatch]:
     """Fold every row group of `reader` into `sink` on `num_workers` workers,
     combine the workers' accumulators and drain them. `chunk_schema` is
-    `subrg_agg_build_chunk_schema(plan)`. Returns an empty slab when the file
+    `subrg_agg_build_chunk_schema(reader, plan)`. Returns an empty slab when the file
     has no row group or the run was abandoned (the caller's serial route then
     answers).
 

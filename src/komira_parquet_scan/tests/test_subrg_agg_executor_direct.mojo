@@ -759,8 +759,7 @@ def test_a_footer_count_the_chunks_disagree_with_is_decoded_whole() raises:
     var reader = ParquetReader[_FS](_file=ParquetFileReader[_FS].open(path), _meta=ArcPointer[FileMetaData](meta^))
     var names: List[String] = ["k", "v"]
     var res = _run_on(rt, reader^, names, 1, None)
-    assert_equal(len(res), 1)
-    assert_equal(_lines(res)[0], "#chunks=4 type_errors=0")
+    _check(res, _expected(names, 1, _all_rows(), -1), "#chunks=4 type_errors=0")
     # A STRING key declined that way abandons the run, as any refusal does.
     var meta2 = _reader(path)._meta[].copy()
     meta2.row_groups[0].columns[3].meta_data.num_values = 39_999

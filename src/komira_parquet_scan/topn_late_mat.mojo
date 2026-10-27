@@ -18,8 +18,10 @@
 # that passes the filter; phase 2 runs the same comparator over a subset S of
 # those rows that contains W, and the top-n of any S with W in S is W: no row
 # of S beats W's n-th (it would have beaten it in the whole), and W is in S.
-# Ties resolve in file order on both phases (the top-N sink orders by
-# `(partition_id, origin_hint)`), so the rows W won its ties with are also the
+# Ties resolve in file order on both phases (this relies on the top-N sink,
+# which lives outside this package, ordering by `(partition_id, origin_hint)`
+# and placing a NULL key the same way in both phases; the tests here model
+# that rule, they do not run the sink), so the rows W won its ties with are also the
 # earliest tied rows in S. DuckDB's late materialization rewrites the same
 # query into a semi join on the row id; one-page column chunks make the row
 # group the finest grain a Parquet scan can fetch at.
@@ -54,8 +56,11 @@ that has a column of this name."""
 struct TopNRowGroupStampOp(MorselOperatorImpl):
     """Appends `TOPN_LATE_MAT_RG_COLUMN` (INT64, non-null): the flat row group
     each morsel was decoded from, recovered from its partition id
-    (`rg_index_of_partition_id`, the inverse of every emit site of
-    `ParquetSource`), so the number is the one `claim_units` takes.
+    (`rg_index_of_partition_id`), so the number is the one `claim_units` takes.
+    That holds when every morsel comes from one row group: the whole-row-group
+    and one-morsel-per-unit emits. A coarse row-range emit concatenates units
+    across row groups under the first unit's id; the driver must not take two
+    phases then (`topn_stamp_is_exact`).
 
     The column has the batch's physical row count, so a batch that still
     carries a deferred selection mask stays consistent: the mask gathers the

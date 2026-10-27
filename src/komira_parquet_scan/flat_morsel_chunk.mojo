@@ -103,6 +103,12 @@ struct FlatMorselChunk(Movable, Deinitable):
         """Column `col`'s row count in the row group."""
         return self._cursors[col].num_values()
 
+    def rows_emitted(self, col: Int) -> Int:
+        """The rows column `col` has exposed so far. A pull that returns 0
+        with `supported()` and `rows_emitted(col) < num_values(col)` is a
+        chunk whose bytes ended early, not a drained one."""
+        return self._cursors[col].rows_emitted()
+
     def fill_next_grain(mut self) raises -> Int:
         """Expose the next row-aligned grain of every column and return its
         rows; 0, advancing no column, once any column is drained or refused.
@@ -113,6 +119,7 @@ struct FlatMorselChunk(Movable, Deinitable):
         for c in range(self._ncols):
             var avail = self._cursors[c].ensure_plain_page()
             if avail <= 0:
+                self.generation += 1
                 self._cur_n = 0
                 return 0
             n = min(n, avail)

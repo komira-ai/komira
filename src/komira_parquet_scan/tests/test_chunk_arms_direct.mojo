@@ -13,6 +13,9 @@
 #     page decoded once, read through a fold written over MorselView; a
 #     dictionary column or an actual null is refused;
 #   - a view goes stale on the next pull or `set_grain_n` (all three arms);
+#   - a drained chunk has emitted all its footer values and a truncated one
+#     fewer (FlatViewChunk, FlatMorselChunk); a morsel view held across the
+#     pull that returns 0 is stale;
 #   - over a footer with a timestamp-only LogicalType, UINT_32 / UINT_64
 #     annotations and a zero dictionary offset: every arm declines the
 #     relabelled columns with no grain out, and a zero-offset PLAIN column
@@ -282,6 +285,65 @@ def test_views_go_stale_on_the_next_pull() raises:
     assert_equal(m0.generation(), m.gen())
     assert_true(m.fill_next_grain() > 0)
     assert_false(m0.is_valid())
+
+
+def test_a_drained_chunk_is_told_from_a_truncated_one() raises:
+    var whole = _reader()
+    var cut_meta = whole._meta[].copy()
+    cut_meta.row_groups[0].columns[0].meta_data.total_compressed_size //= 2
+    var cut = ParquetReader[_FS](
+        _file=ParquetFileReader[_FS].open(test_tmpdir() + "/chunk_arms.parquet"),
+        _meta=ArcPointer[FileMetaData](cut_meta^),
+    )
+    var v = FlatViewChunk(_cursor(whole, 0, "a"), 512)
+    while v.fill_next_grain() > 0:
+        pass
+    assert_equal(v.rows_emitted(), v.num_values())
+    assert_equal(v.num_values(), _rgs()[0])
+    var vc = FlatViewChunk(_cursor(cut, 0, "a"), 512)
+    while vc.fill_next_grain() > 0:
+        pass
+    assert_equal(vc.num_values(), _rgs()[0])
+    assert_true(vc.rows_emitted() < vc.num_values())
+    var cols = Slab[ResumableColumnCursor].create(2)
+    cols.append(_cursor(whole, 0, "a"))
+    cols.append(_cursor(whole, 0, "b"))
+    var m = FlatMorselChunk(cols^, 512)
+    while m.fill_next_grain() > 0:
+        pass
+    assert_equal(m.rows_emitted(0), m.num_values(0))
+    assert_equal(m.rows_emitted(1), m.num_values(1))
+    var cols2 = Slab[ResumableColumnCursor].create(2)
+    cols2.append(_cursor(cut, 0, "a"))
+    cols2.append(_cursor(whole, 0, "b"))
+    var mc = FlatMorselChunk(cols2^, 512)
+    while mc.fill_next_grain() > 0:
+        pass
+    assert_true(mc.rows_emitted(0) < mc.num_values(0))
+
+
+def test_a_morsel_view_taken_before_a_zero_pull_goes_stale() raises:
+    var reader = _reader()
+    var cols = Slab[ResumableColumnCursor].create(1)
+    cols.append(_cursor(reader, 0, "a"))
+    var m = FlatMorselChunk(cols^, 4_096)
+    var last = flat_morsel_view_over(m)
+    while True:
+        var n = m.fill_next_grain()
+        if n == 0:
+            break
+        last = flat_morsel_view_over(m)
+    assert_false(last.is_valid())
+    var cols2 = Slab[ResumableColumnCursor].create(1)
+    cols2.append(_cursor(reader, 0, "a"))
+    var m2 = FlatMorselChunk(cols2^, 100_000)
+    assert_true(m2.fill_next_grain() > 0)
+    var held = flat_morsel_view_over(m2)
+    assert_true(held.is_valid())
+    while m2.fill_next_grain() > 0:
+        pass
+    assert_false(held.is_valid())
+    assert_equal(held.n_rows(), 0)
 
 
 def _patched() raises -> ParquetReader[_FS]:

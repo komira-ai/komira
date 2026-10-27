@@ -34,7 +34,7 @@ from komira_fs.file_system import FileSystem
 
 from .parquet_reader import ParquetReader
 from .subrg_agg_plan import SubrgAggPlan
-from .subrg_cursor_feed import _chunk_is_nullable
+from .subrg_cursor_feed import chunk_is_nullable
 
 
 def subrg_agg_chunk_arrow_type(footer_at: ArrowType, is_key: Bool) -> ArrowType:
@@ -61,7 +61,7 @@ def subrg_agg_build_chunk_schema[FS: FileSystem](reader: ParquetReader[FS], plan
     ref footer = reader._meta[].schema
     for ci in range(len(plan.proj_names)):
         var leaf = plan.reader_col_idx[ci] + 1
-        var nullable = True if leaf <= 0 or leaf >= len(footer) else _chunk_is_nullable(footer[leaf])
+        var nullable = True if leaf <= 0 or leaf >= len(footer) else chunk_is_nullable(footer[leaf])
         sb.add_field(
             Field(
                 plan.proj_names[ci],

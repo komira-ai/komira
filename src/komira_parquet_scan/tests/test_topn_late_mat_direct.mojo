@@ -11,7 +11,11 @@
 #     alone and stamps, phase 2 claims only the winners' row groups with the
 #     full projection, and each answer is exactly the first n rows of a full
 #     sort by (key, file order), for an n inside one row group's ties and an
-#     n across two.
+#     n across two;
+#   - the stamp names each row's own row group when every morsel holds one
+#     unit, and `topn_stamp_is_exact` is false exactly when a coarse row-range
+#     emit puts several row groups' rows under one stamp. The comparator the
+#     tests sort by models the top-N sink's tie rule; the sink is not run.
 
 from std.memory import Pointer
 from std.testing import TestSuite, assert_equal, assert_raises, assert_true
@@ -31,7 +35,13 @@ from komira_morsel.morsel import Morsel
 from komira_parquet.runtime_footer_cache import ParquetMetadataCache
 from komira_parquet_scan.parquet_reader_factory import ParquetReaderFactory
 from komira_parquet_scan.parquet_source import ParquetSource
-from komira_parquet_scan.parquet_source_options import SUB_SLOT_STRIDE, rg_partition_id, unit_partition_id
+from komira_parquet_scan.parquet_source_options import (
+    SUB_SLOT_STRIDE,
+    ParquetScanOptions,
+    rg_partition_id,
+    topn_stamp_is_exact,
+    unit_partition_id,
+)
 from komira_plan_expr.expr_pool import ExprPool
 from komira_runtime_paths import test_tmpdir
 from komira_test_parquet_file import TestColumn, TestFileLayout, write_parquet_file
@@ -130,14 +140,20 @@ struct _Collected(Movable):
         self.units = 0
 
 
-def _collect(path: String, var cols: ColumnSet, var claim: Optional[List[Int]], stamp: Bool) raises -> _Collected:
+def _collect(
+    path: String,
+    var cols: ColumnSet,
+    var claim: Optional[List[Int]],
+    stamp: Bool,
+    var options: ParquetScanOptions = ParquetScanOptions.default(),
+) raises -> _Collected:
     var cache = ParquetMetadataCache()
     var pool = ExprPool()
     var nf = 0  # the origin of an absent dynamic filter
     var src = ParquetSource[_FS, EagerGlobDiscovery, origin_of(cache), origin_of(pool), origin_of(nf)](
         _FS.new(), path, ParquetReaderFactory[origin_of(cache), _FS].new(Pointer(to=cache)), cols^,
         Optional(Pointer(to=pool)), Optional[Pointer[DynamicJoinFilter, origin_of(nf)]](None), _NW,
-        claim_units=claim^,
+        options=options^, claim_units=claim^,
     )
     var out = _Collected()
     out.units = src.claimable_units()
@@ -179,7 +195,7 @@ def _collect(path: String, var cols: ColumnSet, var claim: Optional[List[Int]], 
         var key = bt.column_at(0).as_primitive[DType.int64]()
         for r in range(bt.num_rows()):
             out.key.append(Int(key.get(r)))
-            if bt.num_columns() > 1 and not stamp:
+            if bt.num_columns() > (2 if stamp else 1):
                 out.a.append(Int(bt.column_at(1).as_primitive[DType.int64]().get(r)))
             if stamp:
                 out.stamp.append(Int(bt.column_as_primitive[DType.int64](bt.num_columns() - 1).get(r)))
@@ -259,6 +275,30 @@ def test_two_phases_return_the_rows_of_a_full_sort_ties_included() raises:
         for i in range(n):
             assert_equal(p2.a[top2[i]], want[i], "n=" + String(n) + " row " + String(i))
             assert_equal(p2.key[top2[i]], _key_of(want[i]))
+
+
+def test_the_stamp_is_exact_unless_row_ranges_are_emitted_coarse() raises:
+    var path = _file()
+    for coarse in [False, True]:
+        var opts = ParquetScanOptions.default()
+        opts.subrg_mode = 2
+        opts.subrg_units_per_rg = 2
+        opts.subrg_emit_coarse = coarse
+        opts.subrg_emit_rows = 1000
+        assert_equal(topn_stamp_is_exact(opts), not coarse)
+        var c = _collect(path, ColumnSet.all(), None, True, opts^)
+        assert_equal(len(c.a), _ROWS)
+        var wrong = 0
+        for i in range(len(c.a)):
+            if c.stamp[i] != c.a[i] // _RG_ROWS:
+                wrong += 1
+        # One unit per morsel stamps every row with its own row group; a
+        # coarse morsel (all 200 rows fit in 1,000) takes its first unit's.
+        if coarse:
+            assert_true(wrong > 0)
+        else:
+            assert_equal(wrong, 0)
+    assert_true(topn_stamp_is_exact(ParquetScanOptions.default()))
 
 
 def test_the_route_counters() raises:

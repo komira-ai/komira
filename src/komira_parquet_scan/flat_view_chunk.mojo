@@ -71,6 +71,16 @@ struct FlatViewChunk(Movable, Deinitable):
         """False once the cursor refused the chunk or a page."""
         return self._cursor[].supported()
 
+    def num_values(self) -> Int:
+        """The column's row count the footer gives this chunk."""
+        return self._cursor[].num_values()
+
+    def rows_emitted(self) -> Int:
+        """The rows exposed so far. A pull that returns 0 with `supported()`
+        and `rows_emitted() < num_values()` is a chunk whose bytes ended
+        early, not a drained one."""
+        return self._cursor[].rows_emitted()
+
     def page_decompress_count(self) -> Int:
         """Pages the cursor decoded so far: one per page, not per grain."""
         return self._cursor[].page_decompress_count()

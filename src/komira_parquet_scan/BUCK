@@ -116,7 +116,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   grain with a lockstep key, the multi-column grain ending at every page
 #   boundary and read through MorselView, the refusals.
 # - test_topn_late_mat_direct: the row-group stamp, the winners' row groups
-#   and their refusals, the route counters.
+#   and their refusals, the route counters, the two phases against a full
+#   sort, and the stamp under a coarse row-range emit.
 mojo_library(
     name = "komira_parquet_scan",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
