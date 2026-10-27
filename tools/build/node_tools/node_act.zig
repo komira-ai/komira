@@ -13,6 +13,10 @@
 //!       executable named checks that it prints the version.
 //!   node_act node-test --node <dir> --libs <dir> --out <file> --dir <dir>
 //!       --script <path> --expect <pass|fail> --error <text> -- <args>...
+//!   node_act binding-test --node <dir> --libs <dir> --out <file> --dir <dir>
+//!       -- <test file>...
+//!       Runs `node --test` (TAP reporter) over the files in <dir>; passes only
+//!       if the summary reports tests, all passed, none skipped.
 //!   node_act esbuild-bundle --esbuild <exe> --dir <dir> --entry <path>
 //!       --out <file> --format <cjs|esm>
 //!
@@ -265,6 +269,91 @@ fn cmdTest(a: std.mem.Allocator, args: []const []const u8) u8 {
     return 0;
 }
 
+// ---- binding-test -------------------------------------------------------------
+
+/// The number of a TAP summary line `# <key> <n>` (the last such line), or null.
+pub fn tapCount(out: []const u8, key: []const u8) ?u64 {
+    var found: ?u64 = null;
+    var lines = std.mem.splitScalar(u8, out, '\n');
+    while (lines.next()) |line| {
+        if (!std.mem.startsWith(u8, line, "# ")) continue;
+        const rest = line[2..];
+        if (!std.mem.startsWith(u8, rest, key)) continue;
+        if (rest.len <= key.len or rest[key.len] != ' ') continue;
+        found = std.fmt.parseInt(u64, std.mem.trim(u8, rest[key.len + 1 ..], " \r"), 10) catch continue;
+    }
+    return found;
+}
+
+/// Why a `node --test` run that exited 0 still does not count, or null. A run
+/// of zero tests (a file that registers none), a test skipped or left todo
+/// pass node's exit status and prove nothing.
+pub fn tapRefusal(out: []const u8) ?[]const u8 {
+    const tests = tapCount(out, "tests") orelse return "its TAP summary has no \"# tests\" line";
+    if (tests == 0) return "it ran no test";
+    if ((tapCount(out, "fail") orelse 1) != 0 or (tapCount(out, "cancelled") orelse 1) != 0) return "a test failed or was cancelled";
+    if ((tapCount(out, "skipped") orelse 1) != 0 or (tapCount(out, "todo") orelse 1) != 0) return "a test was skipped or left todo";
+    if ((tapCount(out, "pass") orelse 0) != tests) return "not every test passed";
+    return null;
+}
+
+/// Whether the TAP output reports `path` as a test of its own
+/// (`# Subtest: <path>`). node does that for a file that registers no test:
+/// the file itself is the one test, and it passes by exiting 0.
+pub fn fileIsTheTest(out: []const u8, path: []const u8) bool {
+    var lines = std.mem.splitScalar(u8, out, '\n');
+    while (lines.next()) |line| {
+        if (std.mem.startsWith(u8, line, "# Subtest: ") and std.mem.eql(u8, std.mem.trimRight(u8, line["# Subtest: ".len..], "\r"), path)) return true;
+    }
+    return false;
+}
+
+fn cmdBinding(a: std.mem.Allocator, args: []const []const u8) u8 {
+    const spec = [_]U.Spec{ .{ .name = "node" }, .{ .name = "libs" }, .{ .name = "out" }, .{ .name = "dir" } };
+    var bad: []const u8 = "";
+    const f = U.parseFlags(a, args, &spec, &bad) catch |e| return usage("binding-test: {s}: {s}", .{ @errorName(e), bad });
+    const node = f.need("node") catch return usage("binding-test needs --node", .{});
+    const libs = f.need("libs") catch return usage("binding-test needs --libs", .{});
+    const out = f.need("out") catch return usage("binding-test needs --out", .{});
+    const dir = f.need("dir") catch return usage("binding-test needs --dir", .{});
+    if (f.rest.len == 0) return usage("binding-test: no test file", .{});
+
+    const cwd = std.fs.cwd().realpathAlloc(a, ".") catch return usage("cannot resolve the working directory", .{});
+    const scratch = U.scratchRoot(a, cwd, std.posix.getenv("BUCK_SCRATCH_PATH")) catch return 2;
+    std.fs.cwd().makePath(std.fs.path.join(a, &.{ scratch, "home" }) catch return 2) catch return 2;
+    std.fs.cwd().makePath(std.fs.path.join(a, &.{ scratch, "tmp" }) catch return 2) catch return 2;
+    defer std.fs.cwd().deleteTree(scratch) catch {};
+
+    const node_abs = U.abs(a, cwd, node) catch return 2;
+    const libs_abs = U.abs(a, cwd, libs) catch return 2;
+    const dir_abs = U.abs(a, cwd, dir) catch return 2;
+    const env = testEnv(a, scratch, libs_abs) catch return 2;
+    var argv = std.ArrayList([]const u8).empty;
+    argv.append(a, std.fmt.allocPrint(a, "{s}/bin/node", .{node_abs}) catch return 2) catch return 2;
+    argv.append(a, "--test") catch return 2;
+    argv.append(a, "--test-reporter=tap") catch return 2;
+    for (f.rest) |t| argv.append(a, std.fs.path.join(a, &.{ dir_abs, t }) catch return 2) catch return 2;
+
+    const r = U.runCapture(a, argv.items, &env, dir_abs) catch |e| return usage("cannot run node: {s}", .{@errorName(e)});
+    if (r.code != 0) {
+        std.debug.print("{s}{s}binding_test: node --test exited {d}\n", .{ r.stdout, r.stderr, r.code });
+        return r.code;
+    }
+    if (tapRefusal(r.stdout)) |why| {
+        std.debug.print("{s}{s}binding_test: node --test exited 0, but {s}\n", .{ r.stdout, r.stderr, why });
+        return 1;
+    }
+    for (argv.items[3..]) |p| {
+        if (fileIsTheTest(r.stdout, p)) {
+            std.debug.print("{s}{s}binding_test: node --test exited 0, but {s} registers no test of its own\n", .{ r.stdout, r.stderr, p });
+            return 1;
+        }
+    }
+    std.fs.File.stdout().writeAll(r.stdout) catch {};
+    U.writeAll(std.fs.cwd(), out, "") catch |e| return usage("cannot write {s}: {s}", .{ out, @errorName(e) });
+    return 0;
+}
+
 // ---- esbuild-bundle -----------------------------------------------------------
 
 fn cmdBundle(a: std.mem.Allocator, args: []const []const u8) u8 {
@@ -297,7 +386,7 @@ pub fn main() void {
     var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const a = arena_state.allocator();
     const argv = std.process.argsAlloc(a) catch std.process.exit(2);
-    if (argv.len < 2) std.process.exit(usage("usage: node_act (dist|npm-package|node-test|esbuild-bundle) ...", .{}));
+    if (argv.len < 2) std.process.exit(usage("usage: node_act (dist|npm-package|node-test|binding-test|esbuild-bundle) ...", .{}));
     const plain = a.alloc([]const u8, argv.len - 2) catch std.process.exit(2);
     for (argv[2..], 0..) |s, i| plain[i] = s;
     const sub = argv[1];
@@ -307,6 +396,8 @@ pub fn main() void {
         cmdNpm(a, plain)
     else if (std.mem.eql(u8, sub, "node-test"))
         cmdTest(a, plain)
+    else if (std.mem.eql(u8, sub, "binding-test"))
+        cmdBinding(a, plain)
     else if (std.mem.eql(u8, sub, "esbuild-bundle"))
         cmdBundle(a, plain)
     else

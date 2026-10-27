@@ -1,5 +1,5 @@
 load("@komira//third_party/node:pins.bzl", "NODE")
-load("@komira//tools/build/node:defs.bzl", "c_shared_lib", "esbuild_bundle", "node_test")
+load("@komira//tools/build/node:defs.bzl", "c_shared_lib", "esbuild_bundle", "node_addon", "node_binding_test", "node_test")
 
 # The tests of the hermetic Node.js (third_party/node, tools/build/node): each
 # node_test runs its script with the pinned node as a build action, so building
@@ -94,4 +94,26 @@ node_test(
     name = "addon_exports",
     src = "addon/exports_test.js",
     data = {"addon/addon.node": ":addon"},
+)
+
+# ---- node_binding_test: a binding tested with node's own runner --------------
+
+# The smallest `node --test` file.
+node_binding_test(
+    name = "binding_hello",
+    srcs = ["binding/hello.test.mjs"],
+)
+
+# A Node-API addon in C, built with the pinned zig against the headers of the
+# pinned node, with one function that returns a number.
+node_addon(
+    name = "answer",
+    srcs = ["binding/answer.c"],
+)
+
+# The addon loaded with require() in a node --test file that asserts the value.
+node_binding_test(
+    name = "binding_addon",
+    srcs = ["binding/answer.test.mjs"],
+    data = {"binding/answer.node": ":answer"},
 )

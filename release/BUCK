@@ -179,6 +179,7 @@ release_set(
         "//src/komira_parquet_codec:komira_parquet_codec_conda",
         "//src/komira_parquet_writer:komira_parquet_writer_conda",
         "//src/komira_bench_data:komira_bench_data_conda",
+        "//src/komira_bench_report:komira_bench_report_conda",
     ],
     visibility = ["PUBLIC"],
 )

@@ -77,14 +77,19 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
-# The cases of the beta and prod jobs of release.yml
-# (.github/workflows/release_workflow_test.zig says what each catches): its gate,
-# its OIDC permission, no secret, and its publish command. A build action.
+# The cases of the mopm jobs of release.yml: the continuous prod publish (each prod job's
+# gate, needs, environment and permissions, the commands), no beta job, no schedule, the
+# release-main concurrency group, no secret and the version of every run
+# (.github/workflows/release_workflow_test.zig says what each catches). A build action.
 zig_test(
     name = "release_workflow_cases",
     exec_compatible_with = LINUX_X86_64,
     src = ".github/workflows/release_workflow_test.zig",
-    data = {"workflows/release.yml": ".github/workflows/release.yml"},
+    data = {
+        "workflows/release.yml": ".github/workflows/release.yml",
+        "packages.bzl": "//release/readme_e2e:packages.bzl",
+        "ci.md": "docs/ci.md",
+    },
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
 )

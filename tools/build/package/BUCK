@@ -292,6 +292,7 @@ conda_release_set_check(
         "//src/komira_parquet_codec:komira_parquet_codec",
         "//src/komira_parquet_writer:komira_parquet_writer",
         "//src/komira_bench_data:komira_bench_data",
+        "//src/komira_bench_report:komira_bench_report",
     ],
     # The `native` of each library above whose mojo_library declares one (the
     # same target its `<lib>_conda` is given; release_set.bzl).
