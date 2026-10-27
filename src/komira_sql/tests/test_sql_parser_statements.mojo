@@ -34,9 +34,13 @@
 #      refused by name. (catches: an OFFSET-before-LIMIT order refused; the
 #      wrapped bits of a big literal used as the limit)
 #  11. Unaliased derived tables are named `unnamed_subquery`,
-#      `unnamed_subquery2`, ... per SELECT level, keyed apart by subquery
-#      index, and a collision with another relation's name or alias is
-#      refused. (catches: the count not restarted in a nested SELECT)
+#      `unnamed_subquery2`, ... per SELECT level; every derived table, aliased
+#      or not, is keyed apart by subquery index (`<qualifier>#<index>`), also
+#      when another relation of the same FROM answers to the same qualifier
+#      (the binder resolves each qualified column). Two same-alias derived
+#      tables at two levels get two keys. (catches: the count not restarted
+#      in a nested SELECT; an aliased derived table keyed by its bare alias
+#      or by index 0)
 #  12. A derived table's column-list rename and its malformed spellings.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -335,7 +339,7 @@ def test_unaliased_derived_tables_are_named_per_level() raises:
     assert_equal(st.query.subqueries[1].derived_alias, "unnamed_subquery2#1")
     # Only the unaliased ones count.
     var mixed = _parse("SELECT * FROM (SELECT 1 AS a) x, (SELECT 2 AS b)")
-    assert_equal(mixed.query.from_tables[0].name, "x")
+    assert_equal(mixed.query.from_tables[0].name, "x#0")
     assert_equal(mixed.query.from_tables[0].rel_alias, "x")
     assert_equal(mixed.query.from_tables[1].rel_alias, "unnamed_subquery")
     # The count restarts in a nested SELECT and resumes after it.
@@ -349,17 +353,51 @@ def test_unaliased_derived_tables_are_named_per_level() raises:
     assert_equal(nested.query.from_tables[0].rel_alias, "unnamed_subquery")
     assert_equal(nested.query.from_tables[0].name, "unnamed_subquery#1")
     assert_equal(nested.query.from_tables[1].rel_alias, "unnamed_subquery2")
-    _refuses("SELECT * FROM (SELECT 1 AS a), unnamed_subquery", "is named `unnamed_subquery`")
-    _refuses("SELECT * FROM t AS Unnamed_Subquery, (SELECT 1 AS a)", "another relation in the same FROM clause")
+    # A relation that answers to the synthetic name too parses: a qualified
+    # column is bound per reference (test_sql_bind_dup_qualifiers).
+    var clash = _parse("SELECT * FROM (SELECT 1 AS a), unnamed_subquery")
+    assert_equal(clash.query.from_tables[0].rel_alias, "unnamed_subquery")
+    assert_equal(clash.query.from_tables[1].name, "unnamed_subquery")
+
+
+def test_aliased_derived_tables_are_keyed_by_subquery_index() raises:
+    # The alias is the qualifier; the relation key adds `#<index>`, so a
+    # derived `t` in an IN body is not the top FROM's catalog t.
+    var st = _parse("SELECT k FROM t WHERE k IN (SELECT k FROM (SELECT b AS k FROM mm) AS t)")
+    assert_equal(st.query.from_tables[0].name, "t")
+    assert_equal(st.query.from_tables[0].rel_alias, "")
+    assert_equal(st.query.subqueries[1].body.from_tables[0].name, "t#0")
+    assert_equal(st.query.subqueries[1].body.from_tables[0].rel_alias, "t")
+    assert_equal(st.query.subqueries[0].derived_alias, "t#0")
+    # Two relations of one FROM may answer to the same qualifier; the parser
+    # keeps both, keyed apart, and the binder resolves each qualified column.
+    var dup = _parse("SELECT * FROM t, (SELECT 1 AS a) AS t")
+    assert_equal(dup.query.from_tables[0].name, "t")
+    assert_equal(dup.query.from_tables[1].name, "t#0")
+    assert_equal(dup.query.from_tables[1].rel_alias, "t")
+
+
+def test_same_alias_derived_tables_at_two_levels_get_two_keys() raises:
+    # subqueries[0] is the inner body's derived table (index 0), the top
+    # FROM's is index 1, so the outer `d` and the inner `d` have different
+    # keys.
+    var st = _parse("SELECT * FROM (SELECT a + 1 AS a FROM (SELECT 1 AS a) AS d) AS d")
+    assert_equal(st.query.subqueries[1].body.from_tables[0].name, "d#0")
+    assert_equal(st.query.subqueries[1].body.from_tables[0].rel_alias, "d")
+    assert_equal(st.query.from_tables[0].name, "d#1")
+    assert_equal(st.query.from_tables[0].rel_alias, "d")
+    assert_equal(st.query.subqueries[0].derived_alias, "d#0")
+    assert_equal(st.query.subqueries[1].derived_alias, "d#1")
 
 
 def test_derived_table_column_list() raises:
     var st = _parse("SELECT x FROM (SELECT 1, 2) AS d (x, y)")
-    assert_equal(st.query.from_tables[0].name, "d")
+    assert_equal(st.query.from_tables[0].name, "d#0")
+    assert_equal(st.query.from_tables[0].rel_alias, "d")
     assert_equal(len(st.query.subqueries[0].col_names), 2)
     assert_equal(st.query.subqueries[0].col_names[0], "x")
     assert_equal(st.query.subqueries[0].col_names[1], "y")
-    assert_equal(st.query.subqueries[0].derived_alias, "d")
+    assert_equal(st.query.subqueries[0].derived_alias, "d#0")
     # No column list after an unaliased one: the `(` is a trailing token.
     _refuses("SELECT * FROM (SELECT 1) (x)", "unexpected trailing tokens after query")
     _refuses("SELECT * FROM (SELECT 1) d (5)", "expected column name in a derived-table column list")
