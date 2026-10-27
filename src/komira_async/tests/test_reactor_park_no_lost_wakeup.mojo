@@ -25,7 +25,7 @@
 # Reactor.register_read / poll_completions / deregister trio over a REAL
 # loopback socketpair fd, MANY sequential cycles, with a counter of
 # parks that wake, each with an infinite timeout — so a missed wakeup is
-# OBSERVED (the park hangs; the hang limit armed in main fails it), not assumed.
+# OBSERVED (the park hangs; the build gate's hang limit fails it), not assumed.
 #
 # THE INVARIANT THIS FALSIFIES: when a byte is ALREADY readable on the fd at
 # register time, a LEVEL-triggered registration MUST report readiness on the
@@ -130,7 +130,7 @@ def _park_until_completion(mut reactor: Reactor[NoopSink]) raises -> Int:
     """Parks with an INFINITE timeout until the reactor reports a completion,
     and returns how many it reported. There is no deadline to lose a race to: a
     readiness wakeup the reactor drops leaves this call blocked forever, which
-    the hang limit armed in main kills as a hang. A return with no completion
+    the build gate's hang limit kills as a hang. A return with no completion
     (a spurious wake) parks again."""
     while True:
         var drained = reactor.poll_completions(Int32(-1))
@@ -347,7 +347,7 @@ def test_park_byte_arrives_during_blocked_wait_wakes_promptly() raises:
 
     Each park has an infinite timeout and no clock is read: the byte's arrival
     must end the wait, and a wait that never ends is a lost wakeup that the
-    hang limit armed in main kills.
+    build gate's hang limit kills.
 
     Also alternates a WRITE-readiness park (which a socketpair is always
     write-ready for, so it returns instantly) BEFORE the read park — the exact
@@ -413,21 +413,7 @@ def test_park_byte_arrives_during_blocked_wait_wakes_promptly() raises:
     print("    [OK] all", cycles, "delivered-during-wait parks woke promptly")
 
 
-# Hang limit. A library's tests run as build actions, which have no timeout, and
-# the waits in this file have no deadline of their own (they wait on an event,
-# not on a clock). A regression that loses the event would hold a worker with
-# no verdict, so the process arms SIGALRM once, far above any run: its default
-# action kills the process (exit 142) and the build action fails. No test reads
-# this limit; a run that completes never meets it.
-comptime _HANG_LIMIT_S: Int = 600
-
-
-def _arm_hang_limit():
-    _ = external_call["alarm", UInt32](UInt32(_HANG_LIMIT_S))
-
-
 def main() raises:
-    _arm_hang_limit()
     print("=== ROOT-CAUSE: reactor park must not lose fd-readiness wakeups ===")
     test_park_byte_present_never_times_out()
     test_park_byte_arrives_before_register_never_times_out()

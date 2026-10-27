@@ -42,7 +42,6 @@
 # timer without docker / a live Postgres.
 # =============================================================================
 
-from std.ffi import external_call
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
 from std.sys.info import CompilationTarget
@@ -392,8 +391,8 @@ def test_real_timer_deadline_fires() raises:
     _ = n0
 
     # Blocking run_once with no timeout: it returns when the 5 ms timer fires,
-    # and a timer that never fires hangs here (the hang limit armed in `main`
-    # kills the run). The completion routes through the SAME demux as a read:
+    # and a timer that never fires hangs here (the build gate's hang limit
+    # stops the run). The completion routes through the SAME demux as a read:
     # marks the slot ready + fires the sink.
     var n1 = r.run_once(timeout_us=Int32(-1))
     assert_true(n1 >= 1)
@@ -466,7 +465,7 @@ def test_full_lifecycle_real_timer() raises:
 
     # Block in the reactor until the deadline fires. No attempt cap and no
     # timeout: the timer's expiry wakes the poll; a timer that never fires is a
-    # hang, which the hang limit armed in main fails.
+    # hang, which the build gate's hang limit fails.
     while not r.is_ready(parked_op):
         _ = r.run_once(timeout_us=Int32(-1))
     assert_true(r.is_ready(parked_op))
@@ -584,21 +583,7 @@ def test_abandoned_frame_mid_burst() raises:
     assert_equal(pool[].in_use_count(), 0)
 
 
-# Hang limit. A library's tests run as build actions, which have no timeout, and
-# the waits in this file have no deadline of their own (they wait on an event,
-# not on a clock). A regression that loses the event would hold a worker with
-# no verdict, so the process arms SIGALRM once, far above any run: its default
-# action kills the process (exit 142) and the build action fails. No test reads
-# this limit; a run that completes never meets it.
-comptime _HANG_LIMIT_S: Int = 600
-
-
-def _arm_hang_limit():
-    _ = external_call["alarm", UInt32](UInt32(_HANG_LIMIT_S))
-
-
 def main() raises:
-    _arm_hang_limit()
     test_register_timer_op_id_is_biased()
     test_register_timer_monotone_biased()
     test_real_timer_deadline_fires()

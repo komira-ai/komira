@@ -82,7 +82,6 @@
 # instead: a shard whose dispatch generation has closed must not run.
 # =============================================================================
 
-from std.ffi import external_call
 from std.memory import OwnedPointer, alloc
 from komira_atomic_alias import AtomicI64
 from std.testing import assert_equal, assert_true
@@ -160,7 +159,7 @@ struct _LedgerSegment(Segment, Deinitable):
     re-run it after the barrier closes."""
 
     # True: task 0 waits (no deadline) for the pseudo-worker's shard. A shard
-    # that never arrives hangs the dispatch; the hang limit armed in main fails it.
+    # that never arrives hangs the dispatch; the build gate's hang limit fails it.
     var rescue: Bool
 
     def execute[S: KeepAlive](
@@ -362,21 +361,7 @@ def test_invariant_no_barrier_violations_on_healthy_dispatches() raises:
     _ = rt^
 
 
-# Hang limit. A library's tests run as build actions, which have no timeout, and
-# the waits in this file have no deadline of their own (they wait on an event,
-# not on a clock). A regression that loses the event would hold a worker with
-# no verdict, so the process arms SIGALRM once, far above any run: its default
-# action kills the process (exit 142) and the build action fails. No test reads
-# this limit; a run that completes never meets it.
-comptime _HANG_LIMIT_S: Int = 600
-
-
-def _arm_hang_limit():
-    _ = external_call["alarm", UInt32](UInt32(_HANG_LIMIT_S))
-
-
 def main() raises:
-    _arm_hang_limit()
     test_bug4_shard_run_after_barrier_must_not_touch_stale_ctx()
     test_invariant_no_barrier_violations_on_healthy_dispatches()
     print("OK test_local_dispatcher_stale_shard_generation")
