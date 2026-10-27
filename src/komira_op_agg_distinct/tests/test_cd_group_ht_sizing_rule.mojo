@@ -7,9 +7,10 @@
 # dictionary sizes, each plus one for NULL, capped at the row count; unknown
 # for a key with no dictionary), instead of from the rows a worker holds.
 #
-# What each test kills:
+# What each test proves:
 #   * the bound: `+1` per key for NULL, an INT key (no dictionary) makes it
-#     unknown, zero keys is one group, and the product saturates at the row
+#     unknown, an empty dictionary (all-NULL key) is one group, zero keys is
+#     one group, and the product saturates at the row
 #     count instead of overflowing;
 #   * the first capacity: a power of two from the per-worker group bound,
 #     the floor for few groups or an unknown bound, and clamped at
@@ -62,13 +63,18 @@ def test_the_bound_is_the_product_of_dictionary_sizes_capped_at_rows() raises:
     """`+1` per key is NULL slack; an INT key (negative entry) makes the bound
     unknown; zero keys is one group; the product saturates at the row count."""
     var one: List[Int] = [165]
-    assert_equal(cd_groups_upper_bound(one, 5_563_212), 166, "cbq10's key")
+    assert_equal(cd_groups_upper_bound(one, 5_563_212), 166, "one 165-entry key")
     var two: List[Int] = [10, 20]
     assert_equal(cd_groups_upper_bound(two, 1_000_000), 11 * 21, "two keys")
     var mixed: List[Int] = [165, -1]
     assert_equal(
         cd_groups_upper_bound(mixed, 5_563_212), -1,
-        "cbq11's shape: an INT key has no dictionary, so there is no bound",
+        "an INT key has no dictionary, so there is no bound",
+    )
+    var empty_dict: List[Int] = [0]
+    assert_equal(
+        cd_groups_upper_bound(empty_dict, 1_000), 1,
+        "an empty dictionary (an all-NULL key) is a known bound: one NULL group",
     )
     var nokeys = List[Int]()
     assert_equal(cd_groups_upper_bound(nokeys, 70_000), 1, "ungrouped")
@@ -80,13 +86,13 @@ def test_the_bound_is_the_product_of_dictionary_sizes_capped_at_rows() raises:
 
 
 def test_the_first_capacity_is_a_function_of_groups_not_rows() raises:
-    """The two corpus cells this was built for, derived by hand:
-    cbq10: bound 166 over K=20 -> 9 per worker -> the 4,096 floor.
-    cbq13: bound 6,019,103 over K=20 -> 300,956 (+1/8 +64 = 338,639) ->
+    """Two shapes, derived by hand:
+    a 166-group bound over K=20 -> 9 per worker -> the 4,096 floor.
+    a 6,019,103-group bound over K=20 -> 300,956 (+1/8 +64 = 338,639) ->
     2x = 677,278 -> 1,048,576, the same first size as before (and now
     allocated by the worker, not the driver)."""
-    assert_equal(cd_group_ht_initial_cap(166, 20), CD_GROUP_HT_MIN_CAP, "cbq10")
-    assert_equal(cd_group_ht_initial_cap(6_019_103, 20), 1_048_576, "cbq13")
+    assert_equal(cd_group_ht_initial_cap(166, 20), CD_GROUP_HT_MIN_CAP, "small bound")
+    assert_equal(cd_group_ht_initial_cap(6_019_103, 20), 1_048_576, "large bound")
     assert_equal(
         cd_group_ht_initial_cap(-1, 20), CD_GROUP_HT_MIN_CAP,
         "unknown bound: start small, the worker grows it",

@@ -4,7 +4,7 @@
 # =============================================================================
 #
 # The emit turns each output group's dict id into that id's bytes. What each
-# test kills:
+# test proves:
 #   * full emit: a group emitted with another id's bytes, or in another order
 #     (the oracle is computed here from the raw values);
 #   * prefetch on vs off: the software prefetch changes the emitted column
