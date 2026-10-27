@@ -47,7 +47,7 @@ struct MultiKeyHashJoinBuilder(Movable):
     (`_CHAIN_END` ends a chain). The entry space is ROW-INDEXED: entry i IS
     build row i, for every row, so a chain walk reads the build keys at the
     entry index directly and `num_rows()` (`len(_next_chain)`) is the full
-    build extent the RIGHT / FULL unmatched sweep must cover. A row with a
+    build extent an unmatched-build sweep (a later slice) must cover. A row with a
     NULL key still takes its entry but is linked from no bucket, so it matches
     nothing. `_bloom` holds the composite hash of every inserted row;
     `_num_inserted` counts them (the chain-reachable rows), for output sizing.
@@ -93,7 +93,7 @@ struct MultiKeyHashJoinBuilder(Movable):
         Capacity is the power of two at or above 1.4 x rows (at least 16);
         insertion is LIFO (a new row becomes its bucket's chain head). Raises
         if the entry space is not row-indexed at the end, rather than let a
-        RIGHT / FULL join drop preserved rows.
+        later unmatched-build sweep miss rows.
 
         Args:
             keys: N parallel build-side key columns (Slab — non-Copyable
@@ -196,7 +196,7 @@ struct MultiKeyHashJoinBuilder(Movable):
                 + String(len(next_chain))
                 + ", build rows="
                 + String(n)
-                + ") — RIGHT/FULL would silently drop preserved-side rows"
+                + ")"
             )
 
         _ = ht
