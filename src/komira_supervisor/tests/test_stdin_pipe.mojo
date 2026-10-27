@@ -30,11 +30,23 @@
 #       child B is spawned while child A's stdin pipe is open; closing A's
 #       write end still ends A's input. The write end is close-on-exec, so B
 #       does not carry a copy.
+#   test_a_write_to_a_child_that_has_exited_fails_and_we_live
+#       a write to a child that is gone returns -EPIPE (not the byte count),
+#       twice in a row, and this process is still running afterwards: the
+#       default SIGPIPE action does not end it.
+#   test_wait_readable_reports_silence_data_and_end_of_file
+#       0 for a child that has printed nothing, 1 once it has printed, 1 at end
+#       of file; the wait does not consume the data.
+#   test_spawn_wiring_survives_a_closed_standard_descriptor
+#       with this process's fd 1 closed, so the stdout pipe's read end is handed
+#       fd 1, the child still writes its stdout into the pipe and exits 0.
 #
 # Every child is reaped on every path.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
+
+from std.ffi import external_call
 
 from komira_supervisor import ChildSpec, Supervisor
 
@@ -183,6 +195,58 @@ def test_a_later_child_does_not_hold_an_earlier_childs_stdin_open() raises:
     _ = b.drain_pipe(b.stderr_fd())
     assert_equal(b.wait_exit().exit_code, 0)
     b.close()
+
+
+def test_a_write_to_a_child_that_has_exited_fails_and_we_live() raises:
+    var spec = ChildSpec.shell("exit 0")
+    spec.set_stdin_pipe()
+    var sup = Supervisor()
+    _spawned(sup.spawn(spec))
+    _ = sup.drain_pipe(sup.stdout_fd())
+    _ = sup.drain_pipe(sup.stderr_fd())
+    assert_equal(sup.wait_exit().exit_code, 0)
+    assert_equal(sup.write_stdin(String("late\n")), -32)
+    assert_equal(sup.write_stdin(String("later\n")), -32)
+    sup.close()
+
+
+def test_wait_readable_reports_silence_data_and_end_of_file() raises:
+    var spec = ChildSpec.shell("cat")
+    spec.set_stdin_pipe()
+    var sup = Supervisor()
+    _spawned(sup.spawn(spec))
+    assert_equal(sup.wait_readable(sup.stdout_fd(), 0), 0)
+    assert_true(sup.write_stdin(String("ping\n")) > 0)
+    assert_equal(sup.wait_readable(sup.stdout_fd(), -1), 1)
+    assert_equal(sup.wait_readable(sup.stdout_fd(), -1), 1)
+    assert_equal(_read_until(sup, String("ping\n")), String("ping\n"))
+    sup.close_stdin()
+    assert_equal(sup.wait_readable(sup.stdout_fd(), -1), 1)
+    assert_true(sup.read_blocking(sup.stdout_fd()).eof)
+    _ = sup.drain_pipe(sup.stderr_fd())
+    _ = sup.wait_exit()
+    sup.close()
+
+
+def test_spawn_wiring_survives_a_closed_standard_descriptor() raises:
+    var saved = external_call["dup", Int32](Int32(1))
+    _ = external_call["close", Int32](Int32(1))
+    var spec = ChildSpec.shell("echo hello")
+    spec.set_stdin_pipe()
+    var sup = Supervisor()
+    var pid = sup.spawn(spec)
+    var out = String("")
+    var code = -1
+    if pid > Int32(0):
+        out = sup.drain_pipe(sup.stdout_fd())
+        _ = sup.drain_pipe(sup.stderr_fd())
+        code = Int(sup.wait_exit().exit_code)
+    sup.close()
+    _ = external_call["dup2", Int32](saved, Int32(1))
+    _ = external_call["close", Int32](saved)
+    _spawned(pid)
+    assert_equal(out, String("hello\n"))
+    assert_equal(code, 0)
 
 
 def main() raises:

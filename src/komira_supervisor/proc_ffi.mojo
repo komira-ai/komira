@@ -327,6 +327,13 @@ def proc_read(fd: Int32, mut buf: List[UInt8], cap: Int) -> Int:
     return Int(n)
 
 
+def proc_wait_readable(fd: Int32, timeout_ms: Int) -> Int:
+    """Wait up to `timeout_ms` (negative: without limit) until a read of `fd`
+    would not block. 1 when it would not (data, end of file or an error is
+    waiting), 0 on timeout, a negative errno on failure."""
+    return Int(external_call["komira_proc_wait_readable", Int32](fd, Int32(timeout_ms)))
+
+
 def proc_set_nonblocking(fd: Int32) -> Int32:
     """Set O_NONBLOCK on `fd` (fcntl F_GETFL|F_SETFL). Returns 0 / -errno. The
     caller makes the capture-pipe read ends non-blocking so the incremental drain

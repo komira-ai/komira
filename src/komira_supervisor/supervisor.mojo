@@ -54,6 +54,7 @@ from .proc_ffi import (
     proc_write,
     proc_read,
     proc_read_avail,
+    proc_wait_readable,
     proc_set_nonblocking,
     proc_close,
     proc_kill,
@@ -624,6 +625,12 @@ struct Supervisor(Movable):
         if self._stdin_fd >= Int32(0):
             proc_close(self._stdin_fd)
             self._stdin_fd = Int32(-1)
+
+    def wait_readable(self, fd: Int32, timeout_ms: Int) -> Int:
+        """Wait up to `timeout_ms` (negative: without limit) until a read of
+        the capture pipe `fd` would not block: 1 when data, end of file or an
+        error is waiting, 0 on timeout, a negative errno on failure."""
+        return proc_wait_readable(fd, timeout_ms)
 
     def read_blocking(mut self, fd: Int32) -> ReadChunk:
         """ONE blocking read of a capture pipe: wait for at least one byte and
