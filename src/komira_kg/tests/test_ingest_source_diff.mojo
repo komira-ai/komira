@@ -430,5 +430,26 @@ def test_a_fact_restated_under_a_judged_variant_name_is_kept_not_closed() raises
     assert_equal(ws.edges[0].expired_at, OPEN)
 
 
+def test_a_fact_stated_open_and_ended_is_two_edges_and_both_stay_on_a_repeat() raises:
+    var kg = Kg(Backend(), "g")
+    var both = _ext(_of(0))
+    both.triples.append(
+        Triple(_subject(0), "rel", _object(0), _fact(0), Int64(10), Int64(90))
+    )
+    var again = _ext(_of(0))
+    again.triples.append(
+        Triple(_subject(0), "rel", _object(0), _fact(0), Int64(10), Int64(90))
+    )
+    _ingest(kg, _ep("u1", "doc-1", both^, Int64(1000)))
+    var ws = SnapshotWorkingSet.load_latest(kg)
+    assert_equal(ws.num_edges(), 2)
+    # The same two assertions again: nothing is added, nothing is closed.
+    _ingest(kg, _ep("u2", "doc-1", again^, Int64(2000)))
+    var after = SnapshotWorkingSet.load_latest(kg)
+    assert_equal(after.num_edges(), 2)
+    assert_equal(after.edges[0].expired_at, OPEN)
+    assert_equal(after.edges[1].expired_at, OPEN)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
