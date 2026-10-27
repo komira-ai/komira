@@ -13,6 +13,14 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # (rg_prune_counter); flat_schema is the footer-shape test the leaf-to-schema
 # mapping of all of them rests on.
 #
+# Sub-row-group layer: column cursors over a chunk (subrg_cursor_feed), the
+# flat columns built from their buffers (subrg_columns), a predicate over a
+# decoded batch (batch_filter), the collect sink (scan_chunk_sink), the
+# sub-row-group scan (subrg_scan_executor), row-range decodes
+# (subrg_split_decode), the aggregate read plan (subrg_agg_plan) and the
+# cursor-grain route (cursor_grain_feed, with its split in
+# cursor_grain_split_emit and its move arm in grain_decode_move).
+#
 # Welded tests (each against files written by komira_test_parquet_file, or
 # hand-built values):
 # - test_staged_filter_direct: conjunct split order, the lead / deferred
@@ -44,18 +52,36 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   at once; every morsel id taken exactly once.
 # - test_rg_prune_counter_direct: each of the four counters moves alone, and
 #   the reset.
+# - test_scan_chunk_sink_direct: drain order across flushes and merged
+#   workers, retraction of one row group, dictionary string chunks built on
+#   the drain, a refused codes column (the drain stays sound after it).
+# - test_subrg_columns_direct: scan builders keep INT32 / FLOAT32, aggregate
+#   builders widen, out-of-range codes and the tail on both resolve arms, the
+#   batch filter's three-valued result.
+# - test_subrg_scan_executor_direct: file order and types, a predicate with
+#   the statistics prune, a dictionary string column (and the abort with a
+#   predicate), a null past the first chunk retracted and decoded whole, two
+#   units in one fork, columns in the requested order after a declined
+#   selective decode, a UINT_32 dictionary chunk.
+# - test_subrg_split_decode_direct: the plan probe, page boundaries, row
+#   ranges alone and over shared dictionaries, refusals.
+# - test_cursor_grain_feed_direct: the grain formula, every row once grain by
+#   grain on the copy and the move arm with their byte counters crossing, the
+#   refusal of strings and of a column that may hold a null, the gates.
 mojo_library(
     name = "komira_parquet_scan",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_arrow:komira_arrow",
         "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_batch_eval:komira_batch_eval",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
         "//src/komira_column_kernels:komira_column_kernels",
         "//src/komira_counters:komira_counters",
+        "//src/komira_engine_runtime:komira_engine_runtime",
         "//src/komira_fs:komira_fs",
         "//src/komira_morsel:komira_morsel",
         "//src/komira_parquet:komira_parquet",
@@ -65,17 +91,21 @@ mojo_library(
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
+        "tests/test_cursor_grain_feed_direct.mojo",
         "tests/test_parked_morsel_share_concurrent.mojo",
         "tests/test_parked_morsel_share_direct.mojo",
         "tests/test_parquet_reader_direct.mojo",
         "tests/test_parquet_reader_factory_direct.mojo",
         "tests/test_rg_prune_counter_direct.mojo",
+        "tests/test_scan_chunk_sink_direct.mojo",
         "tests/test_staged_filter_direct.mojo",
+        "tests/test_subrg_columns_direct.mojo",
         "tests/test_subrg_filter_gather_direct.mojo",
+        "tests/test_subrg_scan_executor_direct.mojo",
+        "tests/test_subrg_split_decode_direct.mojo",
         "tests/test_topn_rg_bounds_direct.mojo",
     ],
     test_deps = [
-        "//src/komira_async_api:komira_async_api",
         "//src/tests/helpers/komira_test_parquet_file:komira_test_parquet_file",
     ],
     visibility = ["PUBLIC"],
