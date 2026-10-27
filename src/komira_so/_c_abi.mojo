@@ -2,13 +2,28 @@
 # FFI-BOUNDARY: the C ABI of libkomira, the one file of komira_so that holds
 # pointers.
 # =============================================================================
-# Four `@export abi("C")` functions are the library's whole surface today:
+# Nine `@export abi("C")` functions are the library's whole surface today:
 #
 #   int32_t  komira_abi_version(void);
 #   void    *komira_ctx_new(void);
 #   void     komira_ctx_free(void *ctx);
 #   int32_t  komira_last_error(void *ctx, uint8_t *out_buf, uint64_t out_cap,
 #                              uint64_t *out_len);
+#   int32_t  komira_register_parquet(void *ctx, const char *name,
+#                                    const char *path);
+#   int32_t  komira_parquet_schema(void *ctx, const char *path,
+#                                  uint8_t *out_buf, uint64_t out_cap,
+#                                  uint64_t *out_len);
+#   int32_t  komira_csv_binding(void *ctx, const char *path, uint8_t delimiter,
+#                               int32_t has_header, int32_t all_varchar,
+#                               uint8_t *out_buf, uint64_t out_cap,
+#                               uint64_t *out_len);
+#   int32_t  komira_json_binding(void *ctx, const char *path,
+#                                uint8_t *out_buf, uint64_t out_cap,
+#                                uint64_t *out_len);
+#   int32_t  komira_plan_render(void *ctx, const uint8_t *plan,
+#                               uint64_t plan_len, uint8_t *out_buf,
+#                               uint64_t out_cap, uint64_t *out_len);
 #
 # Ownership. `komira_ctx_new` creates a `Session` in an `OwnedPointer`,
 # relinquishes the pointer's own free (`unsafe_leak`) and hands the address to
@@ -22,7 +37,15 @@
 # Errors. A call returns `KOMIRA_OK` (0) or a negative `KOMIRA_ERR_*` code
 # (status.mojo). A call refused with `KOMIRA_ERR_NULL_ARG` on a live context
 # stores its refusal as the context's last error; `KOMIRA_ERR_BUFFER_TOO_SMALL`
-# stores nothing.
+# stores nothing. Every source and render call first clears the context's last
+# error, and stores the engine's message when it returns `KOMIRA_ERR_ENGINE`.
+# `komira_last_error` does not clear what it reads.
+#
+# Strings and byte inputs. A `const char *` is NUL-terminated UTF-8 that the
+# caller keeps alive for the call; the library copies it before using it. The
+# plan bytes of `komira_plan_render` are `plan[0..plan_len]`, with the length an
+# argument because a serialized plan holds NUL bytes; they are copied in full
+# before anything is decoded.
 #
 # The two-call output protocol (`komira_last_error`). The text is not
 # NUL-terminated; `*out_len` is its byte count. `*out_len` is stored before the
@@ -39,7 +62,15 @@
 from std.memory import OwnedPointer, unsafe_memcpy
 
 from komira_so.session import Session
+from komira_so.sources import (
+    csv_binding_bytes,
+    json_binding_bytes,
+    parquet_schema_bytes,
+    plan_render_text,
+    register_parquet,
+)
 from komira_so.status import (
+    KOMIRA_ERR_ENGINE,
     KOMIRA_ERR_NULL_ARG,
     KOMIRA_ERR_NULL_CTX,
     KOMIRA_OK,
@@ -54,6 +85,9 @@ comptime _Handle = UnsafePointer[NoneType, MutUntrackedOrigin]
 comptime _Bytes = UnsafePointer[UInt8, MutUntrackedOrigin]
 # SAFETY: `uint64_t *`, one caller-owned output slot.
 comptime _Len = UnsafePointer[UInt64, MutUntrackedOrigin]
+# SAFETY: `const char *`, a NUL-terminated string the caller keeps alive for
+# the call; it is copied into a `String` before any use.
+comptime _CStr = UnsafePointer[UInt8, MutUntrackedOrigin]
 
 
 @always_inline
@@ -134,3 +168,213 @@ def komira_last_error(
     # copy and does not overlap the caller's buffer.
     unsafe_memcpy(dest=out_buf, src=text.unsafe_ptr(), count=n)
     return KOMIRA_OK
+
+
+def _c_string(text: _CStr) -> String:
+    """A copy of the NUL-terminated string at `text`.
+
+    # SAFETY: `text` is non-NULL (every caller tests first) and points at a
+    # NUL-terminated string the caller keeps alive for the call; the bytes are
+    # copied and no reference to them outlives this function.
+    """
+    return String(unsafe_from_utf8_ptr=text)
+
+
+def _copy_in(plan: _Bytes, plan_len: UInt64) -> List[UInt8]:
+    """A copy of `plan[0..plan_len]`.
+
+    # SAFETY: `plan` is non-NULL (every caller tests first) and holds at least
+    # `plan_len` readable bytes by the caller's contract; the copy owns its
+    # bytes, so nothing downstream borrows caller memory.
+    """
+    var n = Int(plan_len)
+    var bytes = List[UInt8](length=n, fill=0)
+    if n > 0:
+        unsafe_memcpy(dest=bytes.unsafe_ptr(), src=plan, count=n)
+    return bytes^
+
+
+def _emit(
+    session: UnsafePointer[Session, MutUntrackedOrigin],
+    data: Span[UInt8, _],
+    out_buf: _Bytes,
+    out_cap: UInt64,
+    out_len: _Len,
+) -> Int32:
+    """The write half of the two-call protocol for the source and render calls.
+
+    Stores the byte count in `*out_len` first, then returns
+    `KOMIRA_ERR_BUFFER_TOO_SMALL` (writing nothing) when `out_cap` is below it.
+    A NULL `out_buf` is refused only when there are bytes to write.
+
+    # SAFETY: `out_len` is non-NULL (every caller tests first) and a
+    # caller-owned slot; `out_buf` holds at least `out_cap >= len(data)` bytes
+    # by the caller's contract, just tested by `buffer_status`; `data` is alive
+    # for the copy and does not overlap the caller's buffer.
+    """
+    var n = len(data)
+    out_len[0] = UInt64(n)
+    var status = buffer_status(n, out_cap)
+    if status != KOMIRA_OK:
+        return status
+    if n == 0:
+        return KOMIRA_OK
+    if Int(out_buf) == 0:
+        session[].set_error(String("out_buf is NULL"))
+        return KOMIRA_ERR_NULL_ARG
+    unsafe_memcpy(dest=out_buf, src=data.unsafe_ptr(), count=n)
+    return KOMIRA_OK
+
+
+@export
+def komira_register_parquet(
+    ctx: _Handle, name: _CStr, path: _CStr
+) abi("C") -> Int32:
+    """Register the Parquet file at `path` in the session under `name`.
+
+    The footer is read at registration, so a missing or unreadable file is
+    `KOMIRA_ERR_ENGINE` here, with the reader's message as the last error.
+    Returns `KOMIRA_ERR_NULL_CTX` for a NULL `ctx` and `KOMIRA_ERR_NULL_ARG`
+    for a NULL `name` or `path`.
+    """
+    if Int(ctx) == 0:
+        return KOMIRA_ERR_NULL_CTX
+    var session = _session(ctx)
+    session[].clear_error()
+    if Int(name) == 0 or Int(path) == 0:
+        session[].set_error(
+            String("komira_register_parquet: name or path is NULL")
+        )
+        return KOMIRA_ERR_NULL_ARG
+    try:
+        register_parquet(session[], _c_string(name), _c_string(path))
+        return KOMIRA_OK
+    except e:
+        session[].set_error(String(e))
+        return KOMIRA_ERR_ENGINE
+
+
+@export
+def komira_parquet_schema(
+    ctx: _Handle, path: _CStr, out_buf: _Bytes, out_cap: UInt64, out_len: _Len
+) abi("C") -> Int32:
+    """Write the Arrow schema of the Parquet file at `path` as `WireSchema`
+    bytes (two-call protocol).
+
+    The bytes are what a plan author splices into a Parquet scan. Returns
+    `KOMIRA_ERR_NULL_CTX` for a NULL `ctx`, `KOMIRA_ERR_NULL_ARG` for a NULL
+    `path` or `out_len`, `KOMIRA_ERR_ENGINE` for a file that cannot be read,
+    and `KOMIRA_ERR_BUFFER_TOO_SMALL` with `*out_len` set when `out_cap` is
+    below the length.
+    """
+    if Int(ctx) == 0:
+        return KOMIRA_ERR_NULL_CTX
+    var session = _session(ctx)
+    session[].clear_error()
+    if Int(path) == 0 or Int(out_len) == 0:
+        session[].set_error(
+            String("komira_parquet_schema: path or out_len is NULL")
+        )
+        return KOMIRA_ERR_NULL_ARG
+    try:
+        var bytes = parquet_schema_bytes(_c_string(path))
+        return _emit(session, Span(bytes), out_buf, out_cap, out_len)
+    except e:
+        session[].set_error(String(e))
+        return KOMIRA_ERR_ENGINE
+
+
+@export
+def komira_csv_binding(
+    ctx: _Handle,
+    path: _CStr,
+    delimiter: UInt8,
+    has_header: Int32,
+    all_varchar: Int32,
+    out_buf: _Bytes,
+    out_cap: UInt64,
+    out_len: _Len,
+) abi("C") -> Int32:
+    """Write the `WireScanBinding` of the CSV file at `path` (two-call
+    protocol).
+
+    The schema is inferred from a bounded prefix of an uncompressed file; a
+    compressed file is read whole. `has_header` and `all_varchar` are
+    `int32_t` and any non-zero value is true. Errors are those of
+    `komira_parquet_schema`.
+    """
+    if Int(ctx) == 0:
+        return KOMIRA_ERR_NULL_CTX
+    var session = _session(ctx)
+    session[].clear_error()
+    if Int(path) == 0 or Int(out_len) == 0:
+        session[].set_error(
+            String("komira_csv_binding: path or out_len is NULL")
+        )
+        return KOMIRA_ERR_NULL_ARG
+    try:
+        var bytes = csv_binding_bytes(
+            _c_string(path), delimiter, Int(has_header) != 0, Int(all_varchar) != 0
+        )
+        return _emit(session, Span(bytes), out_buf, out_cap, out_len)
+    except e:
+        session[].set_error(String(e))
+        return KOMIRA_ERR_ENGINE
+
+
+@export
+def komira_json_binding(
+    ctx: _Handle, path: _CStr, out_buf: _Bytes, out_cap: UInt64, out_len: _Len
+) abi("C") -> Int32:
+    """Write the `WireScanBinding` of the newline-delimited JSON file at
+    `path` (two-call protocol). Errors are those of `komira_parquet_schema`.
+    """
+    if Int(ctx) == 0:
+        return KOMIRA_ERR_NULL_CTX
+    var session = _session(ctx)
+    session[].clear_error()
+    if Int(path) == 0 or Int(out_len) == 0:
+        session[].set_error(
+            String("komira_json_binding: path or out_len is NULL")
+        )
+        return KOMIRA_ERR_NULL_ARG
+    try:
+        var bytes = json_binding_bytes(_c_string(path))
+        return _emit(session, Span(bytes), out_buf, out_cap, out_len)
+    except e:
+        session[].set_error(String(e))
+        return KOMIRA_ERR_ENGINE
+
+
+@export
+def komira_plan_render(
+    ctx: _Handle,
+    plan: _Bytes,
+    plan_len: UInt64,
+    out_buf: _Bytes,
+    out_cap: UInt64,
+    out_len: _Len,
+) abi("C") -> Int32:
+    """Decode the serialized plan `plan[0..plan_len]` and write its text
+    (two-call protocol). The plan is not run.
+
+    The text is UTF-8, not NUL-terminated, and is the plan as authored, before
+    any optimizer rule. A malformed or hostile plan is refused by the decoder
+    as `KOMIRA_ERR_ENGINE`. Returns `KOMIRA_ERR_NULL_CTX` for a NULL `ctx` and
+    `KOMIRA_ERR_NULL_ARG` for a NULL `plan` or `out_len`.
+    """
+    if Int(ctx) == 0:
+        return KOMIRA_ERR_NULL_CTX
+    var session = _session(ctx)
+    session[].clear_error()
+    if Int(plan) == 0 or Int(out_len) == 0:
+        session[].set_error(
+            String("komira_plan_render: plan or out_len is NULL")
+        )
+        return KOMIRA_ERR_NULL_ARG
+    try:
+        var text = plan_render_text(_copy_in(plan, plan_len))
+        return _emit(session, text.as_bytes(), out_buf, out_cap, out_len)
+    except e:
+        session[].set_error(String(e))
+        return KOMIRA_ERR_ENGINE

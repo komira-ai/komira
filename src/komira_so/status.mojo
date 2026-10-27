@@ -22,7 +22,7 @@ been written to the buffer."""
 # below 1000 so that the integer decodes uniquely.
 comptime ABI_MAJOR: Int32 = 1
 """The major version: raised by a change that breaks an existing caller."""
-comptime ABI_MINOR: Int32 = 0
+comptime ABI_MINOR: Int32 = 1
 """The minor version: raised by an addition that breaks no caller."""
 comptime _ABI_MINOR_LIMIT: Int32 = 1000
 
