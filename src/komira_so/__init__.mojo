@@ -1,0 +1,27 @@
+"""`komira_so` -- the C ABI of komira's one shared library, `libkomira`.
+
+- `status.mojo`: the status codes every fallible call returns (`KOMIRA_OK`
+  and the four negative `KOMIRA_ERR_*` codes), the ABI version
+  (`abi_version`, `ABI_MAJOR`, `ABI_MINOR`) and `buffer_status`, the test the
+  two-call output protocol applies to a caller's buffer.
+- `session.mojo`: `Session`, the state behind a context handle: the text of
+  the last error.
+
+`_c_abi.mojo` is the library's C surface (`komira_abi_version`,
+`komira_ctx_new`, `komira_ctx_free`, `komira_last_error`). It is the one file
+that holds pointers and is not part of this Mojo package; `libkomira` is
+built from it by the `libkomira` target.
+"""
+
+from .session import Session
+from .status import (
+    ABI_MAJOR,
+    ABI_MINOR,
+    KOMIRA_ERR_BUFFER_TOO_SMALL,
+    KOMIRA_ERR_ENGINE,
+    KOMIRA_ERR_NULL_ARG,
+    KOMIRA_ERR_NULL_CTX,
+    KOMIRA_OK,
+    abi_version,
+    buffer_status,
+)

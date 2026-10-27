@@ -1,0 +1,43 @@
+load("@komira//tools/build/mojo:abi_golden.bzl", "komira_abi_golden")
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_shared_lib")
+
+# The golden of the C ABI in abi.mojo, checked against it, and the header made
+# from it. It builds only while the @export abi("C") functions of abi.mojo are
+# exactly the rows of abi.tsv, with the same types. The negative cases are
+# tests//negative/abi_golden.
+komira_abi_golden(
+    name = "abi_header",
+    src = "abi.mojo",
+    golden = "abi.tsv",
+    header_name = "example.h",
+)
+
+staged_files(
+    name = "driver_files",
+    srcs = ["header_driver.c"],
+)
+
+# A C driver that includes the generated header and defines each function it
+# declares: it compiles only if the header is valid C and says what the
+# definitions say.
+cxx_library(
+    name = "header_driver",
+    srcs = [":driver_files[header_driver.c]"],
+    exported_headers = {"example.h": ":abi_header"},
+    header_namespace = "",
+    visibility = ["PUBLIC"],
+)
+
+# The library the golden describes, built from the same file.
+mojo_shared_lib(
+    name = "abi_lib",
+    srcs = ["abi.mojo"],
+    exports = [
+        "abi_add",
+        "abi_sum_bytes",
+        "abi_fill",
+        "abi_scale",
+        "abi_touch",
+    ],
+)
