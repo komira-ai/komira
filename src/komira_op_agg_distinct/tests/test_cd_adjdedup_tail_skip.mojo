@@ -8,7 +8,7 @@
 #   1. VALUE IDENTITY. Per group, the distinct SET of what the cell holds is the
 #      same with the lever ON and OFF (and equal to a linear-scan oracle over the
 #      raw arrays). The finalize counts the distinct union of a group's runs, so
-#      an equal set per group IS an equal answer downstream. A mutant that compared
+#      an equal set per group IS an equal answer downstream. A defect that compared
 #      against the tail of a DIFFERENT cell, or that skipped on a NULL row's data
 #      word, changes a set here.
 #   2. THE LEVER RAN. `stat_adj_skipped` equals an INDEPENDENT oracle count (rows
