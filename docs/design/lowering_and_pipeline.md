@@ -20,8 +20,8 @@ package exists, and the evaluators and rewrite passes that name once covered liv
 `komira_optimizer`. This document replaces that name with the two packages below.
 
 Two claims of the traits are not what the code does today (§3.3): `Morsel` carries a morsel id and a partition id, but
-every source on `main` assigns the id from an arrival counter (`fetch_add` at seven sites in four files of
-`komira_parquet_scan`, and in `komira_morsel.vtable_source`), so the id is claim order, not source position; and
+every source on `main` assigns the id from an arrival counter (`fetch_add` on `morsel_counter` at eight sites in four files of
+`komira_parquet_scan`, in `komira_morsel.vtable_source`, and in `komira_op_sources.batch_morsel_source`), so the id is claim order, not source position; and
 `MorselSourceImpl.next_morsel` claims one morsel at a time, not a group. Both matter only for reproducible float sums,
 which no MVP query needs (§7.1), so both are built with the first float sink (step 9 of §7.3), not before.
 
@@ -85,7 +85,7 @@ only step that opens a file or starts a thread.
 ```mojo
 def lower(
     plan: LogicalPlan,
-    host_profile: HostProfile,       # komira_engine_runtime.host_profile
+    host_profile: HostProfile,       # komira_host_profile.host_profile
     inputs: LoweringInputs,          # the resolved inputs of plan_models §4.2
 ) raises -> LoweredPlan
 ```
@@ -399,10 +399,14 @@ and **two of the four are changes to code on `main`**, not something the driver 
   `(unit position, sub-morsel index)`, packed to one ordered integer (unit position in the high bits, sub-morsel index in
   the low 20). The unit position is the claimed unit's ordinal in the flattened (file, row group, chunk) sequence the
   footers give; the sub-morsel index counts the morsels cut from that unit. Today the id is a `fetch_add` on an arrival
-  counter at seven sites in four files (`parquet_source`, `parquet_source_emit`, `parquet_source_grain`,
-  `parquet_source_subrg`); the emit helpers mint several ids for one claim (`mid0`, `mid_k`). The change gives each
+  counter at eight sites in four files (`parquet_source` 1, `parquet_source_emit` 4, `parquet_source_grain` 1,
+  `parquet_source_subrg` 2); the emit helpers mint several ids for one claim (`mid0`, `mid_k`). The change gives each
   emit helper the claimed unit's position and a local sub-index, mints nothing from a counter, and removes the counter.
-  The type-erased `vtable_source` is deleted, not changed (slice 2c). Step 9a has a test that two schedules over one file
+  The type-erased `vtable_source` is deleted, not changed (slice 2c). `komira_op_sources.batch_morsel_source`
+  (`SOURCE_BATCH`, an MVP source) also mints its id from an arrival counter (`morsel_counter.fetch_add` per claimed slot
+  in `next_morsel`). Step 9a changes it too: its unit position is the slot index `c` it already claims (the partition id is
+  already `c`), the sub-morsel index is 0 (one morsel per slot), and its counter is removed. Until then `SOURCE_BATCH`
+  is not in a float class (§3.3). Step 9a has a test that two schedules over one file
   give the same id for the same morsel, and that ids are distinct and ordered.
 - **The source claim (new capability, additive).** `MorselSourceImpl.next_morsel` claims one morsel. The unit of a float
   fold is a **grain**: a fixed run of consecutive morsel positions that does not depend on the worker count, so that one
@@ -451,8 +455,10 @@ A query is never answered from a part of its input.
 ### 3.5 Runtime dispatch without function pointers
 
 The source, operator and sink traits of `komira_morsel` are monomorphized at compile time. `komira_morsel` also ships a
-type-erased source, `vtable_source` with `scan_resolver_c_box`, which has a `MutExternalOrigin` widening at a private
-field. **`SourceVariant` replaces it for the engine's plans and does not reuse it**: the erased source is the
+type-erased source, `vtable_source`, which has a `MutExternalOrigin` widening at a private field. (`scan_resolver_c_box`
+is a different thing and stays: it is the one place an erased scan resolver crosses `komira.so`'s C ABI, for the scan
+kinds consumers register through `register_scan_kind`, with its own test and its entries in the pointer-lint holds; the
+engine's plans do not use it and slice 2c does not touch it.) **`SourceVariant` replaces it for the engine's plans and does not reuse it**: the erased source is the
 pointer-rule exception the closed variant exists to avoid (D3), and a second source dispatch beside it would be a
 second way to do one thing. Replacing it is a migration with an owner (a search of `src` finds no user of it outside
 `komira_morsel` and its tests, so slice 2c deletes it with those tests in one change, right after slice 2b makes `SourceVariant` the only source dispatch
@@ -568,8 +574,8 @@ input is NULL and a `COUNT` is zero, with one output row for the ungrouped sink 
 | `(SINK_AGG, NONE, COLUMNAR)` | none | one accumulator array per worker (exact folds); per grain for a float fold (step 9) | merge in the segment's order |
 | `(SINK_AGG, I64, COLUMNAR)`, `I32` | the key column as `Int64` cells (an `I32` widened) | **dense** (`PerfectHashAggregator`) when the footers' min and max over all pinned row groups give a domain of at most 65,536 keys, else **partitioned** | dense: per-worker (exact) or per-grain (float, under the byte cap of §3.3) arrays merged key by key in the segment's order; partitioned: below |
 | `(SINK_AGG, F32 or F64, COLUMNAR)` | the key by its bit pattern after canonicalizing `-0.0` and NaN | partitioned (a float key has no dense domain) | below |
-| `(SINK_AGG, STRING, DICT_ENCODED)` | dictionary codes of the key column, mapped to an interned id | partitioned, over interned ids | below, after remapping ids by string |
-| `(SINK_AGG, STRING, COLUMNAR)` | the key hashed by value (64-bit hash of the string, compared by bytes on a hit); no dictionary used | partitioned | below |
+| `(SINK_AGG, STRING, DICT_ENCODED)` | dictionary codes of the key column, mapped to an interned id | partitioned; the partition comes from the content hash carried with each interned entry, never from the id | below; the merge keys on string content (see Dictionary string keys) |
+| `(SINK_AGG, STRING, COLUMNAR)` | the key hashed by value (64-bit hash of the string, compared by bytes on a hit); no dictionary used | partitioned; the partition comes from the 64-bit string hash | below |
 
 **Which sink class, and from what.** The class is a function of the row and one footer fact, never of an estimated group
 count. A footer's min and max statistics give an integer key's domain; nothing in a footer gives the distinct count of a
@@ -579,12 +585,13 @@ of `AggSinkData` only sizes the first table when the optimizer recorded one (abs
 chooses nothing. (D7, D8.)
 
 **Partitioned sinks (D8).** Each worker folds into a thread-local table whose rows are routed to one of a fixed number
-of radix partitions by the key's hash (`PartitionedFlatHashAggregator`, `FlatHashPartitionFlush`; the partition count is
+of radix partitions by a **routing hash of the key's content** (`PartitionedFlatHashAggregator`, `FlatHashPartitionFlush`; the partition count is
 a constant of the sink). `finalize` merges one partition per task on `ParallelDispatch`, through the sink trait's
 existing partition hooks (`num_partitions`, `combine_partition`, `prepare_finalize`, `finalize` of
 `komira_operator_api.morsel_sink`), taking the workers' fragments of that partition in worker id order and emitting
-partitions in partition id order. Partition id is a function of the key hash alone, so the output order does not
-depend on the schedule. **That is all it fixes.** An exact fold (integer, `DECIMAL`, count, min, max) is bit-identical on
+partitions in partition id order. The routing hash is a function of the key's content alone: the cell bits of a fixed-width key, the bytes of a string, never a
+worker-local id or address. So a group lands in the same partition in every worker, on every schedule and with any worker
+count, and the partitions come out in a fixed order. (Order of groups inside one partition follows the merge order and is not a promise; a plan that needs an order sorts.) **That is all it fixes.** An exact fold (integer, `DECIMAL`, count, min, max) is bit-identical on
 every schedule. A float fold is not: which morsels a worker's table saw depends on dynamic claiming, so a float sum
 inside a group varies in its last bits, and partition-id order does not change that. Float aggregates of a partitioned
 sink are therefore within the tolerance of D7, never bit-identical, and the dense rows are the only grouped rows that
@@ -593,16 +600,28 @@ on a 10-million-group query; the dense rows pay it, bounded by W x 65,536 cells.
 
 **Dictionary string keys.** A Parquet dictionary is per row group, so a code is meaningful only inside one chunk.
 The `DICT_ENCODED` sink keeps, per worker, a table from `(dictionary identity, code)` to an interned id and a
-sink-owned string table that holds each distinct string once; the `Int64` key the table sees is the interned id.
+sink-owned string table that holds each distinct string once, with a **64-bit content hash of the string's bytes computed
+once per entry, when the entry is interned**, and stored beside it. The `Int64` key the worker's table probes is the
+interned id (cheap, worker-local); the id is never hashed for routing, because each worker numbers strings in its own
+order.
 Decoding happens once per distinct string per dictionary, not once per row, and the output column is built from the
 string table. A multi-column key (two dictionary strings, as TPC-H Q1 has) packs the interned ids into one composite
-key through the table's composite key mode. This is the part of the design with the most uncertainty, and a spike on the farm (§7.2, slice 4) measures
+key through the table's composite key mode for the worker-local probe, and its **routing hash** is the existing
+multi-key mix (`_fib_hash_n`) over the per-column content hashes in column order, gathered per row from the entries; the
+partition is that hash's top bits, passed to the table as a per-row partition id (`commit_batch_partitioned` already takes
+one). **Fragment merge.** A partition's fragments from different workers carry keys as worker-local ids, so the merge
+resolves each fragment entry through its worker's string table to the content hashes and bytes, and probes a
+partition-local merge table keyed by the composite content hash and compared by bytes on a hit (the `COLUMNAR` row's
+method). No string is re-hashed at merge, since the hash travels with the entry; the merge pays one byte compare per entry on a hit. The same
+string interned as id 3 in one worker and id 9 in another therefore lands in one partition and merges to one group; a
+test forces different intern orders in two workers to prove it. This is the part of the design with the most uncertainty, and a spike on the farm (§7.2, slice 4) measures
 the interning cost before the string sinks of slice 6 fix their table layout.
 
-Two costs the spike must settle. (1) Per-worker string tables each have their own interned-id space, so "remap ids by
-string, then merge" hashes every distinct string W times at the end; the alternatives are a shared concurrent intern
-table, or keying on the 64-bit hash of the entry plus the string compare within a row group (the `COLUMNAR` row's
-method). Q1 has four groups and any of them is cheap; the acceptance set therefore includes a high-cardinality
+Two costs the spike must settle. (1) The carried-hash design above against its alternatives: a shared concurrent intern
+table (one id space, so routing could use the id), and the `COLUMNAR` method for the dictionary column too (hash every
+row). The spike measures the hashing cost per distinct string at intern time against per-row hashing, the merge's
+byte-compare and probe cost per fragment entry as the group count grows, and the fragment memory of W string tables
+(each worker holds a copy of every string it saw). Q1 has four groups and any of them is cheap; the acceptance set therefore includes a high-cardinality
 dictionary query that is not Q1. (2) A column chunk that fell back to plain encoding has no dictionary: a plan whose
 inputs say any chunk is plain is lowered to `(STRING, COLUMNAR)` (§4.2), and a fixture with a fallback row group
 tests that the answer equals the dictionary row's.
@@ -670,7 +689,7 @@ The context owns:
 
 | Field | What | From |
 |---|---|---|
-| host profile | the engine build, workers, memory budget, spill tiers | `komira_engine_runtime.detect_host_profile`, overridden by `EngineOptions` |
+| host profile | the engine build, workers, memory budget, spill tiers | `komira_engine_runtime.host_detect`, overridden by `EngineOptions` |
 | worker pool | the dispatcher the driver forks onto | `komira_engine_runtime.engine_runtime_build` |
 | memory | the root reservation, sized from the host profile | `MemoryReservation.for_host` |
 | catalog | table names to schemas and scans | `komira_sql.SqlCatalog` |
@@ -792,11 +811,11 @@ split at the line named in its row, not merged into a larger pull request.
 | 1b | `komira_lowering` for the MVP node set (scan, filter, project, limit, aggregate, sort, root): cutter, edges, `LoweredPlan`, `ParamTable`, render, admission, refusals (a join, union or window is refused by name); the shared refused-deps function, its negative fixture and `selftest` row (§8) | 2.5 to 3.5k; if over, render and admission go to a slice 1c | 1a |
 | 2a | `komira_pipeline_exec` core over fakes: `run_plan` as a ready-set scheduler, `run_segment`, the closed variants, cancel and first-error handling, the driver-over-fakes tests | 2.5 to 3.3k | 1b; `komira_morsel`, `komira_operator_api` on `main` |
 | 2b | the real members: `SOURCE_PARQUET` (the builder from `SourceSpecPod`), `SOURCE_BATCH`, `SOURCE_SINK_OUTPUT`; `OP_FILTER`, `OP_PROJECT` (over the selection mask, §3.2), `OP_LIMIT`; `SINK_COLLECT`; the hand-built-plan harness | 2.8 to 3.5k; if over, the harness is its own slice | 2a; `komira_parquet_scan` on `main` |
-| 2c | delete `komira_morsel.vtable_source` and its three test files | about 0.2k added, 2.6k deleted | 2b |
+| 2c | delete `komira_morsel.vtable_source` and its three test files (`test_vtable_source_parity`, `test_vtable_source_failure_paths`, `test_vtable_seam_cost`); remove those three from `test_srcs` in `komira_morsel/BUCK`; edit the `vtable_source` mention in `komira_morsel/README.md`; drop the `vtable_source.mojo` and `test_vtable_source_parity.mojo` rows from `tests/pointer_lint_holds.tsv` and the failure-paths row from `tests/pointer_lint_ffi.tsv`; `scan_resolver_c_box.mojo`, `test_scan_resolver_c_box.mojo` and their rows stay | about 0.2k added, 2.6k deleted | 2b |
 | 3 | the atomic segment pool (D10); the ungrouped aggregation sink over `komira_op_agg_state` kernels with exact folds (integer, `DECIMAL`; NULL, overflow and empty-input rules) and the `DOUBLE` `AVG`; Q6 from a hand-built plan | 2.2 to 3.2k | 2b |
-| 4 | the farm spike (a Buck target) that measures dictionary interning against a by-value string row, with a high-cardinality dictionary query in its acceptance set; the in-memory `SINK_SORT` | 1.6 to 2.4k | 3 |
+| 4 | the farm spike (a Buck target) that measures dictionary interning against a by-value string row, with a high-cardinality dictionary query in its acceptance set, and that reports the three costs of §4.3 (content hash per interned entry, fragment merge per entry, string-table memory per worker); the in-memory `SINK_SORT` | 1.6 to 2.4k | 3 |
 | 5 | the grouped aggregation sink over fixed-width keys: the dense row and the radix-partitioned row with parallel finalize through the trait's partition hooks (§4.3) | 2.5 to 3.5k | 3 |
-| 6 | the `DICT_ENCODED` and `COLUMNAR` string grouped sinks, output typing, the plain-fallback fixture; Q1 from a hand-built plan | 2.5 to 3.5k | 4, 5 |
+| 6 | the `DICT_ENCODED` string sink (content hash carried per interned entry, composite routing hash, string-keyed fragment merge as §4.3 says) and the `COLUMNAR` string sink, output typing, the two-worker different-intern-order test, the plain-fallback fixture; Q1 from a hand-built plan | 2.5 to 3.5k | 4, 5 |
 | 7 | `EngineContext`, `EngineOptions`, `run_plan` over the context | 2.0 to 3.0k | 1b, 2b, 6 |
 | 8 | `run_sql`, `ParquetFooters`, the end-to-end tests for Q1 and Q6 and their fixtures; the footer-answered `COUNT(*)` and `MIN`/`MAX` | 2.5 to 3.5k | 7 and the binder, komira#1216 |
 
