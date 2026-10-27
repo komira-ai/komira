@@ -27,7 +27,6 @@ _GATE_DIR = "komira//tools/build/coverage:cov_gate"
 _CEILING = [
     "komira//src/komira_json:komira_json",
     "komira//tools/build/coverage:covcheck",
-    "komira//tools/build/readme_examples:readme_examples",
 ]
 
 def _check_impl(ctx):

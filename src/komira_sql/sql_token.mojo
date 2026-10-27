@@ -58,7 +58,7 @@ is unexpected when the only unexpected thing is that there is one of it."""
 # operators DuckDB v1.5.3 has and this lexer refused as an "unexpected
 # character" — a syntax error that named nothing. Each is ONE more token; what
 # each MEANS is the parser's and the binder's (`sql_parser._parse_op` /
-# `_parse_pow` / `_parse_unary`, `sql_binder._bind_sql_operator`).
+# `_parse_pow` / `_parse_unary`, `sql_bind_ops._bind_sql_operator`).
 comptime TK_CARET: UInt8 = 23  # ^  — power, `pow()` (DOUBLE); binds tighter than `*`
 comptime TK_CARET_AT: UInt8 = 24  # ^@ — starts-with, `starts_with()`
 comptime TK_AT: UInt8 = 25  # @  — PREFIX absolute value, `abs()`

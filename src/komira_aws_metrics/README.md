@@ -58,6 +58,10 @@ assert_equal(
 
 What is refused before anything is sent:
 
+<!-- mojo-hidden
+from std.testing import assert_false, assert_raises, assert_true
+from komira_aws_metrics import CloudWatchMetricStat, build_get_metric_data_body, ecs_service_dimensions
+-->
 ```mojo
 from komira_aws_metrics import CloudWatchDimension, cloudwatch_period_ok
 
@@ -76,6 +80,7 @@ with assert_raises(contains="a period of 90 s"):
 
 Decode a page of results; a mismatched pair of arrays is refused:
 
+<!-- mojo-hidden from std.testing import assert_equal, assert_raises -->
 ```mojo
 from komira_aws_metrics import parse_get_metric_data_response
 
@@ -99,6 +104,7 @@ with assert_raises(contains="has 2 timestamps and 1 values"):
 
 The regional endpoint the reader is pointed at:
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from komira_aws_metrics import cloudwatch_endpoint
 

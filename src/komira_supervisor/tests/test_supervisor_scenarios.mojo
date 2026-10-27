@@ -133,6 +133,24 @@ def test_sigterm_stops_a_long_running_child() raises:
         )
 
 
+def _await_line(mut sup: Supervisor, want: String) raises:
+    """Read the child's stdout, without waiting for EOF, until it has sent
+    `want`. No cap and no deadline: the line is the event waited for. Raises
+    if the output ends first."""
+    _ = sup.set_nonblocking(sup.stdout_fd())
+    var acc = String("")
+    while True:
+        var c = sup.read_available(sup.stdout_fd())
+        if c.text.byte_length() > 0:
+            acc += c.text
+            if acc.find(want) >= 0:
+                return
+            continue
+        if c.eof or c.error:
+            raise Error(String("the child's output ended before ") + want + "; read: " + acc)
+        sleep(Float64(0.005))
+
+
 # -----------------------------------------------------------------------------
 # Child traps/ignores SIGTERM -> escalate to SIGKILL -> dies.
 # -----------------------------------------------------------------------------
@@ -141,13 +159,15 @@ def test_sigterm_ignoring_child_escalates_to_sigkill() raises:
     _spawned(
         sup.spawn(
             ChildSpec.shell(
-                String("trap '' TERM; while true; do sleep 1; done")
+                String("trap '' TERM; echo ready; while true; do sleep 1; done")
             )
         )
     )
-    # Let the shell install `trap '' TERM` before we signal — otherwise the
-    # SIGTERM can race in before the trap is registered and kill the shell.
-    sleep(0.15)
+    # The shell prints "ready" only after it installed `trap '' TERM`; read it
+    # before signalling, otherwise the SIGTERM can race in before the trap is
+    # registered and kill the shell. The read ends on the event (the line), no
+    # fixed pause and no deadline.
+    _await_line(sup, String("ready\n"))
     var info = sup.terminate(800)  # 800ms grace, then SIGKILL
     sup.close()
     # SIGKILL -> 128 + 9 = 137

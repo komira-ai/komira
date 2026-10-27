@@ -15,7 +15,8 @@
 # here; anything else raises rather than comparing as "equal".
 #
 # The comparator reads values, not validity: the router keeps a STRING key
-# that carries NULLs away from the heap.
+# that carries NULLs away from the heap. A numeric key is compared by its
+# stored value on the heap and on the full-sort routes alike.
 #
 # The key columns are read through `KeyColumnView`s whose origin is the
 # batch's, so the compiler holds the batch alive for every read and no

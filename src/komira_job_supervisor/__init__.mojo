@@ -39,7 +39,8 @@ PUBLIC SURFACE:
   EntrypointConfig, LogLocation, parse_log_location, resolve_job_binary,
     gcs_log_store, entrypoint_flag_names, start_and_run, run_entrypoint,
     exit_status_of, EntrypointGcsBackend
-  JobSupervisor[R, S], run_job_supervisor
+  JobSupervisor[R, S], run_job_supervisor, run_job_supervisor_with_clock
+  LoopClock, SystemLoopClock, ManualLoopClock
   download_binary, expected_sha_from_key
   upload_logs, upload_crash_report, build_crash_report_json
   LogStreamSink
@@ -80,7 +81,12 @@ from .heartbeat_client import (
     build_heartbeat_request,
     parse_heartbeat_url,
 )
-from .job_supervisor import JobSupervisor, run_job_supervisor
+from .job_supervisor import (
+    JobSupervisor,
+    run_job_supervisor,
+    run_job_supervisor_with_clock,
+)
+from .loop_clock import LoopClock, ManualLoopClock, SystemLoopClock
 from .bearer_auth import BearerHeartbeatAuth, bearer_token_length
 from .entrypoint import (
     EntrypointConfig,

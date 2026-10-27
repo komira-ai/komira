@@ -5,7 +5,7 @@ from komira_json import parse_json_value
 from covcheck.analyze import FORMAT_LCOV, Analysis, Input, Options, Sources, analyze
 from covcheck.decls import KIND_ALWAYS_INLINE, KIND_COMPTIME_IF, KIND_PLAIN, FnDecl, declared_functions, unrecorded_functions
 from covcheck.paths import repo_files_of
-from covcheck.ratchet import Ratchet
+from covcheck.held import Held
 from covcheck.result import gate_json, report_json
 from covcheck.annotate import DiffCoverage
 
@@ -199,12 +199,12 @@ def test_analyze_lists_unrecorded_functions_and_changes_no_number() raises:
     s.texts[String("src/p/m.mojo")] = String(THREE + "@always_inline\ndef d():\n    w()  # cov: unreachable why\n")
     var r = List[Input]()
     r.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String("SF:src/p/m.mojo\nDA:1,1\nDA:2,1\nend_of_record\n")))
-    var a = analyze(r, List[Input](), repo_files_of(files), Ratchet(), s, Options())
+    var a = analyze(r, List[Input](), repo_files_of(files), Held(), s, Options())
     # The numbers and findings are those of the same report over a source
     # holding only the compiled function: the list changes none of them.
     var only_a = Sources(String(""))
     only_a.texts[String("src/p/m.mojo")] = String("def a():\n    pass\n")
-    var base = analyze(r, List[Input](), repo_files_of(files), Ratchet(), only_a, Options())
+    var base = analyze(r, List[Input](), repo_files_of(files), Held(), only_a, Options())
     assert_equal(len(base.unrecorded_functions), 0)
     assert_equal(a.packages[0].line_found, 2)
     assert_equal(a.packages[0].line_hit, 2)
@@ -251,7 +251,7 @@ def test_a_marker_without_a_reason_leaves_the_count() raises:
     s.texts[String("src/p/m.mojo")] = String("def a():\n    pass\n\ndef b():\n    x()  # cov: unreachable\n")
     var r = List[Input]()
     r.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String("SF:src/p/m.mojo\nDA:1,1\nend_of_record\n")))
-    var a = analyze(r, List[Input](), repo_files_of(files), Ratchet(), s, Options())
+    var a = analyze(r, List[Input](), repo_files_of(files), Held(), s, Options())
     assert_equal(len(a.unrecorded_functions), 1)
     assert_equal(a.unrecorded_functions[0].lines, 2)
 
@@ -266,7 +266,7 @@ def test_a_file_with_branch_records_only_lists_no_function() raises:
     s.texts[String("src/p/m.mojo")] = String(THREE)
     var r = List[Input]()
     r.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String("SF:src/p/m.mojo\nBRDA:5,0,0,1\nBRDA:5,0,1,0\nend_of_record\n")))
-    var a = analyze(r, List[Input](), repo_files_of(files), Ratchet(), s, Options())
+    var a = analyze(r, List[Input](), repo_files_of(files), Held(), s, Options())
     assert_equal(a.packages[0].branch_found, 2)
     assert_equal(len(a.unrecorded_functions), 0)
 
@@ -317,6 +317,59 @@ def test_the_class_of_a_function() raises:
     assert_equal(u[2].kind, KIND_COMPTIME_IF)
 
 
+def _arms(fns: List[FnDecl]) -> String:
+    """`name=kind:arm,arm;` per function."""
+    var s = String("")
+    for i in range(len(fns)):
+        s += fns[i].name + "=" + fns[i].kind + ":"
+        for k in range(len(fns[i].arms)):
+            if k > 0:
+                s += ","
+            s += String(fns[i].arms[k])
+        s += ";"
+    return s^
+
+
+def test_a_gated_function_has_arms_and_a_closure_is_a_function_of_its_own() raises:
+    var src = String(
+        "def a(x: Int) -> Int:\n"        # 1
+        "    var y = x\n"                # 2
+        "    comptime if X:\n"           # 3
+        "        y = 1\n"                # 4
+        "    comptime else:\n"           # 5
+        "        y = 2\n"                # 6
+        "    return y\n"                 # 7
+        "def outer() -> Int:\n"          # 8
+        "    @parameter\n"               # 9
+        "    def inner() -> Int:\n"      # 10
+        "        comptime if X:\n"       # 11
+        "            return 1\n"         # 12
+        "        return 2\n"             # 13
+        "    return inner()\n"           # 14
+        "def c() -> Int:\n"              # 15
+        "    @parameter\n"               # 16
+        "    for i in range(3):\n"       # 17
+        "        pass\n"                 # 18
+        "    return 0\n"                 # 19
+        "def d() -> Int:\n"              # 20
+        "    comptime if A:\n"           # 21
+        "        return 1\n"             # 22
+        "    elif B:\n"                  # 23
+        "        return 2\n"             # 24
+        "    else:\n"                    # 25
+        "        return 3\n"             # 26
+    )
+    # The arms are the own lines of the `comptime if` / `else` blocks, gate lines included; the lines
+    # outside them (2, 7) are no arm. `outer` is plain: a closure's `comptime if` does not make the
+    # function around it gated, and the `@parameter` over the closure's `def` is no arm; the closure is
+    # `comptime_if` on its own lines (11, 12). `@parameter` over a `for` opens an arm. A plain `elif` or `else` at the gate's indent continues the chain: its block is an arm.
+    assert_equal(
+        _arms(declared_functions(src)),
+        String("a=") + KIND_COMPTIME_IF + ":3,4,5,6;outer=" + KIND_PLAIN + ":;inner=" + KIND_COMPTIME_IF
+        + ":11,12;c=" + KIND_COMPTIME_IF + ":16,17,18;d=" + KIND_COMPTIME_IF + ":21,22,23,24,25,26;",
+    )
+
+
 def test_scanner_edges() raises:
     # A nested one-line def on the outer function's last line.
     assert_equal(
@@ -348,7 +401,7 @@ def test_a_file_no_test_compiled_lists_no_function() raises:
     s.texts[String("src/p/n.mojo")] = String(THREE)
     var r = List[Input]()
     r.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String("SF:src/p/m.mojo\nDA:1,1\nend_of_record\n")))
-    var a = analyze(r, List[Input](), repo_files_of(files), Ratchet(), s, Options())
+    var a = analyze(r, List[Input](), repo_files_of(files), Held(), s, Options())
     assert_equal(len(a.unrecorded_functions), 0)
     assert_true(a.packages[0].unmeasured_files == 1)
 
@@ -367,6 +420,7 @@ def main() raises:
     test_a_marker_without_a_reason_leaves_the_count()
     test_a_file_with_branch_records_only_lists_no_function()
     test_the_class_of_a_function()
+    test_a_gated_function_has_arms_and_a_closure_is_a_function_of_its_own()
     test_scanner_edges()
     test_a_file_no_test_compiled_lists_no_function()
     print("test_decls: PASS")

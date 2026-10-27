@@ -13,6 +13,19 @@
 # `mojo_toolchain`); to keep your own C/C++ toolchain, `omit = ["cxx"]`.
 # Keeping the call as it is gives the same action digests as a standalone
 # checkout, so builds share its remote cache entries.
+load("@buildrules//rules/mojo:toolchain.bzl", "mojo_toolchains")
+load("@buildrules//rules/mopm:toolchain.bzl", "mopm_toolchains")
 load("@komira//tools/build/toolchains:defs.bzl", "komira_toolchains")
+load(":mojo_pins.bzl", "MOJO_TOOLCHAINS")
+load(":mopm_pins.bzl", "EXTRA_MOPM_VERSIONS")
 
 komira_toolchains()
+
+# The toolchains of the libraries built with buildrules' `mojo_package` (src/komira_json is the
+# first): the pinned mopm, and the Mojo toolchain mopm's unit graph names. The names
+# (`mopm_<v>`, `mojo_<v>`, ...) are the ones the buildrules rules look up in `toolchains//`, and
+# none of them is a name komira_toolchains() declares. mojo_pins.bzl and mopm_pins.bzl are
+# written by `buildrules mojo sync` (see src/komira_json/README.md, "Build files"); do not edit.
+mopm_toolchains(extra = EXTRA_MOPM_VERSIONS)
+
+mojo_toolchains(MOJO_TOOLCHAINS)

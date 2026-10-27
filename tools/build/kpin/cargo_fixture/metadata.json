@@ -1,0 +1,404 @@
+{
+ "filter_platform": "x86_64-unknown-linux-gnu",
+ "packages": [
+  {
+   "name": "app",
+   "version": "0.1.0",
+   "source": null,
+   "edition": "2021",
+   "id": "path+file:///m/app-0.1.0#app@0.1.0",
+   "manifest_path": "/m/app-0.1.0/Cargo.toml",
+   "targets": []
+  },
+  {
+   "name": "serde",
+   "version": "1.0.100",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.100",
+   "manifest_path": "/m/serde-1.0.100/Cargo.toml",
+   "targets": [
+    {
+     "name": "serde",
+     "kind": [
+      "lib"
+     ],
+     "src_path": "/m/serde-1.0.100/src/lib.rs"
+    },
+    {
+     "name": "build-script-build",
+     "kind": [
+      "custom-build"
+     ],
+     "src_path": "/m/serde-1.0.100/build.rs"
+    }
+   ]
+  },
+  {
+   "name": "http",
+   "version": "1.1.0",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#http@1.1.0",
+   "manifest_path": "/m/http-1.1.0/Cargo.toml",
+   "targets": [
+    {
+     "name": "http",
+     "kind": [
+      "lib"
+     ],
+     "src_path": "/m/http-1.1.0/src/lib.rs"
+    }
+   ]
+  },
+  {
+   "name": "my-derive",
+   "version": "0.3.0",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#my-derive@0.3.0",
+   "manifest_path": "/m/my-derive-0.3.0/Cargo.toml",
+   "targets": [
+    {
+     "name": "my_derive",
+     "kind": [
+      "proc-macro"
+     ],
+     "src_path": "/m/my-derive-0.3.0/src/lib.rs"
+    }
+   ]
+  },
+  {
+   "name": "tempfile",
+   "version": "3.0.0",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#tempfile@3.0.0",
+   "manifest_path": "/m/tempfile-3.0.0/Cargo.toml",
+   "targets": [
+    {
+     "name": "tempfile",
+     "kind": [
+      "lib"
+     ],
+     "src_path": "/m/tempfile-3.0.0/src/lib.rs"
+    }
+   ]
+  },
+  {
+   "name": "libc",
+   "version": "0.2.150",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#libc@0.2.150",
+   "manifest_path": "/m/libc-0.2.150/Cargo.toml",
+   "targets": [
+    {
+     "name": "libc",
+     "kind": [
+      "lib"
+     ],
+     "src_path": "/m/libc-0.2.150/src/lib.rs"
+    },
+    {
+     "name": "build-script-build",
+     "kind": [
+      "custom-build"
+     ],
+     "src_path": "/m/libc-0.2.150/build.rs"
+    }
+   ]
+  },
+  {
+   "name": "foo-bar",
+   "version": "1.0.0",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2018",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#foo-bar@1.0.0",
+   "manifest_path": "/m/foo-bar-1.0.0/Cargo.toml",
+   "targets": [
+    {
+     "name": "foo_baz",
+     "kind": [
+      "lib"
+     ],
+     "src_path": "/m/foo-bar-1.0.0/src/foo.rs"
+    }
+   ]
+  },
+  {
+   "name": "lzma-sys",
+   "version": "0.1.0",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#lzma-sys@0.1.0",
+   "manifest_path": "/m/lzma-sys-0.1.0/Cargo.toml",
+   "targets": [
+    {
+     "name": "lzma_sys",
+     "kind": [
+      "lib"
+     ],
+     "src_path": "/m/lzma-sys-0.1.0/src/lib.rs"
+    },
+    {
+     "name": "build-script-build",
+     "kind": [
+      "custom-build"
+     ],
+     "src_path": "/m/lzma-sys-0.1.0/build.rs"
+    }
+   ]
+  },
+  {
+   "name": "http",
+   "version": "0.2.12",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#http@0.2.12",
+   "manifest_path": "/m/http-0.2.12/Cargo.toml",
+   "targets": [
+    {
+     "name": "http",
+     "kind": [
+      "lib"
+     ],
+     "src_path": "/m/http-0.2.12/src/lib.rs"
+    }
+   ]
+  },
+  {
+   "name": "cc",
+   "version": "1.0.0",
+   "source": "registry+https://github.com/rust-lang/crates.io-index",
+   "edition": "2021",
+   "id": "registry+https://github.com/rust-lang/crates.io-index#cc@1.0.0",
+   "manifest_path": "/m/cc-1.0.0/Cargo.toml",
+   "targets": [
+    {
+     "name": "cc",
+     "kind": [
+      "lib"
+     ],
+     "src_path": "/m/cc-1.0.0/src/lib.rs"
+    }
+   ]
+  }
+ ],
+ "workspace_members": [
+  "path+file:///m/app-0.1.0#app@0.1.0"
+ ],
+ "resolve": {
+  "nodes": [
+   {
+    "id": "path+file:///m/app-0.1.0#app@0.1.0",
+    "features": [],
+    "deps": [
+     {
+      "name": "serde",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.100",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "http",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#http@0.2.12",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "http_1x",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#http@1.1.0",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "my_derive",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#my-derive@0.3.0",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "foo_baz",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#foo-bar@1.0.0",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "lzma_sys",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#lzma-sys@0.1.0",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "tempfile",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#tempfile@3.0.0",
+      "dep_kinds": [
+       {
+        "kind": "dev",
+        "target": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.100",
+    "features": [
+     "default",
+     "std"
+    ],
+    "deps": [
+     {
+      "name": "my_derive",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#my-derive@0.3.0",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "libc",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#libc@0.2.150",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       },
+       {
+        "kind": "build",
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "cc",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#cc@1.0.0",
+      "dep_kinds": [
+       {
+        "kind": "build",
+        "target": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#http@1.1.0",
+    "features": [
+     "std"
+    ],
+    "deps": []
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#http@0.2.12",
+    "features": [],
+    "deps": []
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#my-derive@0.3.0",
+    "features": [],
+    "deps": []
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#tempfile@3.0.0",
+    "features": [],
+    "deps": []
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#libc@0.2.150",
+    "features": [
+     "default",
+     "extra_traits",
+     "std"
+    ],
+    "deps": []
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#foo-bar@1.0.0",
+    "features": [
+     "alloc"
+    ],
+    "deps": [
+     {
+      "name": "libc",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#libc@0.2.150",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "http",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#http@0.2.12",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     },
+     {
+      "name": "http_1x",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#http@1.1.0",
+      "dep_kinds": [
+       {
+        "kind": null,
+        "target": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#lzma-sys@0.1.0",
+    "features": [],
+    "deps": [
+     {
+      "name": "cc",
+      "pkg": "registry+https://github.com/rust-lang/crates.io-index#cc@1.0.0",
+      "dep_kinds": [
+       {
+        "kind": "build",
+        "target": null
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "registry+https://github.com/rust-lang/crates.io-index#cc@1.0.0",
+    "features": [],
+    "deps": []
+   }
+  ]
+ }
+}
