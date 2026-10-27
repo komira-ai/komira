@@ -232,6 +232,8 @@ struct HeartbeatReceiver(RequestDispatcher):
     # The pid probe (see the module header): -1 when not probed.
     var probed_pid: Int
     var probed_alive: Bool
+    # How many times the probe looked at the file (0 when not probed).
+    var pid_polls_made: Int
 
     # The first-beat probe (see the module header).
     var first_beat_children: Int
@@ -256,6 +258,7 @@ struct HeartbeatReceiver(RequestDispatcher):
         self.pid_file = pid_file^
         self.first_beat_gate = first_beat_gate^
         self.pid_wait_polls = pid_wait_polls
+        self.pid_polls_made = 0
         self.state = RECEIVER_ASSIGNED
         self.history = List[Int]()
         self.history.append(RECEIVER_ASSIGNED)
@@ -303,6 +306,7 @@ struct HeartbeatReceiver(RequestDispatcher):
         var polls = 0
         while polls < self.pid_wait_polls:
             polls += 1
+            self.pid_polls_made = polls
             try:
                 var text = Path(self.pid_file).read_text()
                 if text.byte_length() > 0:

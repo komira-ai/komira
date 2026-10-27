@@ -229,6 +229,7 @@ def test_a_missing_pid_file_is_a_violation() raises:
     _ = r.receive(_running())
     assert_equal(r.receive(_running()), _CANCEL, "CANCEL is still sent")
     _one_violation(r, String("pid probe"))
+    assert_equal(r.pid_polls_made, 1, "a missing directory is decided at once")
     assert_equal(r.probed_pid, -1, "no pid invented")
     print("  test_a_missing_pid_file_is_a_violation: PASS")
 
@@ -276,6 +277,7 @@ def test_a_half_written_pid_file_is_a_violation() raises:
     _ = r.receive(_running())
     assert_equal(r.receive(_running()), _CANCEL, "CANCEL is still sent")
     _one_violation(r, String("no complete pid line"))
+    assert_equal(r.pid_polls_made, 1, "a partial line is decided at once")
     assert_equal(r.probed_pid, -1, "no pid read from a partial line")
     print("  test_a_half_written_pid_file_is_a_violation: PASS")
 
@@ -296,6 +298,7 @@ def test_a_pid_file_that_never_appears_is_a_violation_after_its_polls() raises:
     _ = r.receive(_running())
     assert_equal(r.receive(_running()), _CANCEL, "CANCEL is still sent")
     _one_violation(r, String("after 3 polls"))
+    assert_equal(r.pid_polls_made, 3, "the file was looked at 3 times")
     assert_equal(r.probed_pid, -1, "no pid read from an absent file")
     print("  test_a_pid_file_that_never_appears_is_a_violation_after_its_polls: PASS")
 
