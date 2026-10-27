@@ -1,6 +1,6 @@
 # =============================================================================
-# ⭐ CD-SCAN (2026-09-25, cbq10 / cbq11) — UNIFY every batch's STRING dictionary
-#   BEFORE the concat, so a dictionary column concatenates as INT32 codes
+# concat_dict_unify: UNIFY every batch's STRING dictionary BEFORE the concat,
+#   so a dictionary column concatenates as INT32 codes
 # =============================================================================
 #
 # `concat_record_batches_column_parallel` joins the per-row-group batches a
@@ -9,8 +9,8 @@
 # True)`, the grouped COUNT(DISTINCT) resident route) hands it one PRIVATE
 # dictionary per batch. The concat's DICTIONARY arm was a PAIR-WISE fold
 # (`_concat_slow_column_pairwise` -> `_concat_columns`): every step copies the
-# ACCUMULATED codes again, O(N^2) in the batch count — ~9 GB of copies for
-# cbq10's 814 row groups — and it runs as ONE task.
+# ACCUMULATED codes again, O(N^2) in the batch count (gigabytes of copies for
+# a few hundred row groups) — and it runs as ONE task.
 #
 # WHAT THIS DOES INSTEAD, per string-dictionary column:
 #   1. (parallel, T tasks over contiguous BATCH ranges) each task interns its
@@ -30,10 +30,10 @@
 # seeds from the first batch's dictionary (`seed_append`, so a repeated entry
 # keeps its ordinal) and then `find_or_insert`s every later entry in (batch,
 # entry) order: the merged order is FIRST-SEEN over that sequence. Steps 1-2
-# produce the same order by the argument CDP-ROWDICT's header makes for rows:
-# the merge meets task t's local entries in their first-seen order within t's
-# batch range, and every entry of task t precedes every entry of task t+1 in
-# the sequence. `test_concat_dict_unify_equals_pairwise_fold` holds it.
+# produce the same order: the merge meets task t's local entries in their
+# first-seen order within t's batch range, and every entry of task t precedes
+# every entry of task t+1 in the sequence.
+# `test_unify_equals_the_pairwise_fold_buffer_for_buffer` holds it.
 #
 # Two things the fold did that this does NOT, both defects of the fold:
 #   * its identical-dictionary fast path dropped the VALIDITY bitmap;
@@ -68,6 +68,10 @@ from komira_arrow.arrow_types import ArrowType
 from komira_arrow.bitmap import Bitmap
 from komira_arrow.column import Column
 from komira_arrow.dict_interner import DictInterner, dict_merge_probe_add
+from komira_arrow.offset_overflow import (
+    ARROW_INT32_OFFSET_MAX,
+    check_emittable_int32_offsets,
+)
 from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 from komira_arrow.schema import (
     Field,
@@ -87,6 +91,7 @@ from komira_async.cancellation.token import CancellationToken
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.local_dispatcher import LocalDispatcher
 from komira_async.runtime.sched_trace import SITE_CONCAT
+from komira_engine_runtime.concat_fan_plan import _on_pool_dispatch_active
 
 
 # Batches per task below which another task is not worth a fork slot.
@@ -378,7 +383,10 @@ def _remap_task(mut st: _UnifyState, t: Int) raises:
         var in_view = c._data.view_ro()
         var codes = in_view._unsafe_ptr().bitcast[Int32]() + c._offset
         var gptr = gmap.unsafe_ptr()
-        var has_nulls = c._null_count > 0 and Bool(c._validity)
+        # Gated on the bitmap alone: a column whose `_null_count` is zero or
+        # unknown can still carry cleared bits, and a NULL row's code is
+        # meaningless.
+        var has_nulls = Bool(c._validity)
         if not has_nulls:
             for r in range(n):
                 # SAFETY: `r` < n == the column's window length; `codes` is
@@ -457,11 +465,15 @@ def _window_validity(c: Column[HeapRegion]) -> Optional[Bitmap[HeapRegion]]:
 # =============================================================================
 
 
-def _densify(c: Column[HeapRegion]) raises -> Column[HeapRegion]:
+def _densify(
+    c: Column[HeapRegion], offset_promote_at: Int = ARROW_INT32_OFFSET_MAX
+) raises -> Column[HeapRegion]:
     """Resolve every row of a STRING dictionary column to its bytes. A NULL
     row becomes a zero-length value with its validity bit clear (its code is
     never dereferenced) — the layout `_dict_to_string_array` + its null
-    expansion produce on the `preserve_dict=False` decode."""
+    expansion produce on the `preserve_dict=False` decode. Raises before
+    allocating when the expanded bytes would not fit Int32 offsets (past
+    `offset_promote_at`)."""
     var n = c._length
     var d_size = c._dict_size
     var offs_view = c._offsets.value().view_ro()
@@ -470,7 +482,7 @@ def _densify(c: Column[HeapRegion]) raises -> Column[HeapRegion]:
     var dd = dd_view._unsafe_ptr()
     var in_view = c._data.view_ro()
     var codes = in_view._unsafe_ptr().bitcast[Int32]() + c._offset
-    var has_nulls = c._null_count > 0 and Bool(c._validity)
+    var has_nulls = Bool(c._validity)
     var total = 0
     for r in range(n):
         if has_nulls and not c._validity.value().test(c._offset + r):
@@ -482,6 +494,11 @@ def _densify(c: Column[HeapRegion]) raises -> Column[HeapRegion]:
                 " batch's dictionary (size " + String(d_size) + ")"
             )
         total += Int((offs + code + 1)[]) - Int((offs + code)[])
+    # Densifying repeats an entry's bytes once per row, so the expanded total
+    # can pass what the Int32 offsets below can address.
+    check_emittable_int32_offsets(
+        "concat dictionary densify", total, n, promote_at=offset_promote_at
+    )
     var out_offs = OwnedAlignedBuffer((n + 1) * 4)
     out_offs.set_length(Int64((n + 1) * 4))
     var oo_view = out_offs.view_mut()
@@ -519,7 +536,9 @@ def _densify(c: Column[HeapRegion]) raises -> Column[HeapRegion]:
     )
 
 
-def densify_string_dict_columns(var batch: RecordBatch) raises -> RecordBatch:
+def densify_string_dict_columns(
+    var batch: RecordBatch, offset_promote_at: Int = ARROW_INT32_OFFSET_MAX
+) raises -> RecordBatch:
     """`batch` with every STRING-dictionary column resolved to a plain STRING
     column (and its schema field to STRING). Numeric dictionaries and every
     other column are left untouched; a batch with no string dictionary is
@@ -529,7 +548,7 @@ def densify_string_dict_columns(var batch: RecordBatch) raises -> RecordBatch:
     for ci in range(out.num_columns()):
         if not out.column_at(ci).is_string_dict():
             continue
-        var dense = _densify(out.column_at(ci))
+        var dense = _densify(out.column_at(ci), offset_promote_at)
         var fld = out.schema.field_at(ci)
         out = _replace_column(
             out^, ci, dense^, Field(fld.name, ArrowType.STRING, fld.nullable)
@@ -588,6 +607,7 @@ def unify_string_dict_columns(
     mut dispatcher: LocalDispatcher[NoopSink],
     enabled: Bool = True,
     trace: Bool = False,
+    offset_promote_at: Int = ARROW_INT32_OFFSET_MAX,
 ) raises -> DictUnifyPlan:
     """Unify (or, for a mixed column, densify) every STRING-dictionary column
     of `batches` IN PLACE so the concat can treat it as INT32 codes. Returns
@@ -601,6 +621,19 @@ def unify_string_dict_columns(
             pair-wise fold: the byte-equivalence oracle this module's test
             compares against.
         trace: Print the unify phase timings.
+        offset_promote_at: Int32-offset trip point for densifying a mixed
+            column (`ConcatOptions.offset_promote_at`).
+
+    Raises:
+        Error: a dictionary code outside its batch's dictionary, or a
+            densified column too large for Int32 offsets. On a raise the
+            batches are consumed: the caller's slab is not guaranteed to hold
+            them, and `_concat_with_dict_unify` drops them with the error.
+
+    A dictionary column that is not mixed is left to the pair-wise fold (no
+    unify, no fork) while a pool dispatch is live in this process: both unify
+    passes fork, and a fork from inside a pool task raises "nested dispatch
+    detected". A mixed column is densified on the calling thread either way.
     """
     var plan = DictUnifyPlan()
     var nb = len(batches)
@@ -647,12 +680,17 @@ def unify_string_dict_columns(
             )
             for i in range(nb):
                 if batches[i].column_at(ci).arrow_type == ArrowType.DICTIONARY:
-                    var dense = _densify(batches[i].column_at(ci))
+                    var dense = _densify(
+                        batches[i].column_at(ci), offset_promote_at
+                    )
                     var bi = batches.replace(i, RecordBatch())
                     batches[i] = _replace_column_with_schema(
                         bi^, ci, dense^, sschema.copy()
                     )
             _note(True)
+            continue
+
+        if _on_pool_dispatch_active():
             continue
 
         var _t0 = Int(perf_counter_ns()) if _trace else 0
@@ -738,10 +776,9 @@ def unify_string_dict_columns(
         # concat routes every kernel on the COLUMN's arrow_type and reads the
         # input schema only to CAPTURE the output fields, and
         # `rewrap_unified_dict_columns` turns the concatenated INT32 column
-        # back into the DICTIONARY that field describes. (Rebuilding 814
-        # batches through `RecordBatchBuilder.build` + a Schema copy each cost
-        # 5-7 ms of serial driver time on cbq10 — the benchmark host probe, CONCATDICT
-        # remap_ms.)
+        # back into the DICTIONARY that field describes. (Rebuilding every
+        # batch through `RecordBatchBuilder.build` + a Schema copy each would
+        # be serial driver time proportional to the batch count.)
         for i in range(nb):
             batches[i]._columns[ci] = state.out_cols[].replace(
                 i, Column[HeapRegion]()
@@ -754,7 +791,7 @@ def unify_string_dict_columns(
         if _trace:
             var _t3 = Int(perf_counter_ns())
             print(
-                "CONCATDICT col=", ci, " batches=", nb, " T=", T,
+                "[CONCAT-DICT-UNIFY] col=", ci, " batches=", nb, " T=", T,
                 " merged=", global_i.size(),
                 " intern_ms=", Float64(_t1 - _t0) / 1.0e6,
                 " merge_ms=", Float64(_t2 - _t1) / 1.0e6,

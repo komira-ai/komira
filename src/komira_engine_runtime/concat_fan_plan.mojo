@@ -136,9 +136,9 @@ def _concat_fan_plan(
     decision here NET-REMOVES branches from `_concat_impl` rather than adding
     any, which is the only safe direction.
 
-    LEVER A is the `string_tiles` half. STRING/BINARY columns move
-    from `n_unsplittable` to `n_splittable`, and `widest_unit_bytes` becomes the
-    max over ALL splittable units — for a (STRING, INT64) join side that is the
+    `string_tiles` is the string half. When STRING/BINARY columns tile they
+    count as splittable rather than unsplittable, and `widest_unit_bytes` is
+    the max over ALL splittable units: for a (STRING, INT64) pair that is the
     string PAYLOAD, not `total_rows * 8`.
 
     Returns:
@@ -162,10 +162,9 @@ def _concat_fan_plan(
     var n_splittable = num_fixed + (num_string if str_on else 0)
     var n_unsplittable = 0 if str_on else num_string
     if n_splittable < 1:
-        # No splittable unit at all: nothing for a row-range fan to cut. Before
-        # LEVER A this was spelled `num_fixed >= 1`, which declined an
-        # all-STRING batch outright; with strings splittable the honest test is
-        # whether ANY unit can be split.
+        # No splittable unit at all: nothing for a row-range fan to cut. With
+        # strings splittable the test is whether ANY unit can be split, not
+        # only a fixed-width one.
         return plan
 
     var widest_unit_bytes = total_rows * max_fixed_width
@@ -186,10 +185,9 @@ def _concat_fan_plan(
         # satisfied by clearing only one of the two.
         tiles = 3
     elif total_rows >= _TILE_ENTRY_MIN_ROWS:
-        # ENTRY, HELD at the value it shipped at. Nothing has measured a tiled
-        # concat below 131,072 rows and I4 says an unmeasured widening is a
-        # regression risk, so the byte floor inside `parallel_copy_tiles` is a
-        # SECOND gate below this one, never a replacement for it.
+        # ENTRY: the row floor for the rule. The byte floor inside
+        # `parallel_copy_tiles` is a SECOND gate below this one, never a
+        # replacement for it.
         tiles = parallel_copy_tiles(
             widest_unit_bytes, n_splittable, n_unsplittable, worker_count
         )
@@ -198,13 +196,10 @@ def _concat_fan_plan(
 
     if options.trace:
         # Diagnostic (opt-in, one line per concat CALL): the shape, the bytes,
-        # and the fan that shape produced. It exists because the previous A/B of
-        # this path could not distinguish "engaged, no win" from "never
-        # engaged", and because a task count is the only falsifier a fan change
-        # can have. Zero cost when unset. `tasks` counts the kind-2 validity
-        # item per splittable column, which `parallel_copy_tiles` does not
-        # price — that omission predates LEVER A and is left visible here
-        # rather than silently corrected in the policy.
+        # and the fan that shape produced, so "engaged, no win" can be told
+        # from "never engaged". Zero cost when unset. `tasks` counts the kind-2
+        # validity item per splittable column, which `parallel_copy_tiles` does
+        # not price.
         print(
             "[CONCAT-TRACE] num_batches=", num_batches,
             "num_cols=", num_cols, "num_fixed=", num_fixed,
@@ -241,23 +236,19 @@ def _concat_route_plan(
     `_concat_impl` segfaults the local Mojo compile in the SLP vectorizer, so
     the admission test lives here and `_concat_impl` reads one Bool.
 
-    ★ THE ONE-COLUMN ADMISSION (2026-09-24,, cbq05). The
-    gate used to be `num_cols >= 2 and total_rows >= 1024`, checked BEFORE the
-    fan plan, so a one-column concat never reached the row-range TILED route —
-    which has cut a single column across the pool since LEVER A.
-    cbq05 (`count(DISTINCT search_phrase)`) collects exactly ONE STRING column,
-    99,997,497 rows / 740 MB of payload, and that concat ran on the DRIVER for
-    ~295 of a ~620 ms warm rep while twenty workers idled (the benchmark host diagnosis
-    hold, 2026-09-24).
+    THE ONE-COLUMN ADMISSION. A gate of `num_cols >= 2 and total_rows >= 1024`
+    checked before the fan plan would keep a one-column concat off the
+    row-range TILED route, which cuts a single column across the pool. A
+    one-column STRING collect of tens of millions of rows would then run on the
+    driver while the pool idled.
 
-    What `num_cols >= 2` got RIGHT is kept: the incumbent one-task-per-COLUMN
-    fan is a single task at one column — pure dispatch overhead. So a
-    one-column concat is admitted ONLY when the tiling rule itself says the
-    column is worth cutting (`tiles >= 2`: above `_TILE_ENTRY_MIN_ROWS`, above
-    the byte floor, a pool of >= 2, no BOOL/DICTIONARY/untiled type, and the
-    `ConcatOptions.tiling` kill switch ON). Every other one-column input stays
-    `_concat_serial` byte-for-byte, and `ConcatOptions.tiling=False` restores the old
-    route for ALL of them — it is this admission's kill switch too.
+    The one-task-per-COLUMN fan is a single task at one column, which is pure
+    dispatch overhead. So a one-column concat is admitted ONLY when the tiling
+    rule itself says the column is worth cutting (`tiles >= 2`: above
+    `_TILE_ENTRY_MIN_ROWS`, above the byte floor, a pool of >= 2, no
+    BOOL/DICTIONARY/untiled type, and the `ConcatOptions.tiling` switch ON).
+    Every other one-column input stays `_concat_serial`, and
+    `ConcatOptions.tiling=False` restores that route for ALL of them.
 
     It declines under a live pool dispatch: a one-column concat reached from
     inside a pool task runs serially, because a fork from there would raise

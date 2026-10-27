@@ -24,7 +24,9 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_cb20_morsel_count_mechanism.mojo",
+        "tests/test_concat_byte_equivalence.mojo",
         "tests/test_concat_dict_unify.mojo",
+        "tests/test_concat_guards.mojo",
         "tests/test_concat_one_column_parallel.mojo",
         "tests/test_concat_release_state.mojo",
         "tests/test_counters.mojo",

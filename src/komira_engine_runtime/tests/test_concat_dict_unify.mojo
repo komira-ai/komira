@@ -1,10 +1,9 @@
 # =============================================================================
-# CD-SCAN (2026-09-25, cbq10 / cbq11) — the concat UNIFIES per-batch string
-# dictionaries in O(total) and emits the pair-wise fold's dictionary, byte for
-# byte
+# The concat UNIFIES per-batch string dictionaries in O(total) and emits the
+# pair-wise fold's dictionary, byte for byte
 # =============================================================================
 #
-# `concat_record_batches_column_parallel` now runs
+# `concat_record_batches_column_parallel` runs
 # `concat_dict_unify.unify_string_dict_columns` before `_concat_impl`: every
 # batch's STRING dictionary is merged (parallel local interning over batch
 # ranges + a serial in-order merge), each batch's codes are rewritten to the
@@ -24,7 +23,11 @@
 #       dictionary batch is densified and the column comes back STRING, with
 #       every value right;
 #   §5  the ROUTE: the unify / densify witness counters move, and do NOT move
-#       with the kill switch off.
+#       with the kill switch off;
+#   §6  a null row whose cached null count is 0 while its bitmap says null;
+#   §7  densifying past the Int32 offset ceiling;
+#   §8  no unify fork while a pool dispatch is live;
+#   §9  ten fresh pools in a row (destroy-recreate).
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -46,6 +49,7 @@ from komira_buffer.heap_region import HeapRegion
 from komira_async.cancellation.token import CancellationToken
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_MOCK
+from komira_async.runtime.local_dispatcher import _OnPoolDispatchGuard
 from komira_async.runtime.runtime import PLACEMENT_FIXED, PerCoreAsyncRuntime
 
 from komira_engine_runtime.concat_dict_unify import (
@@ -100,7 +104,7 @@ struct _Batch(Movable):
     var nulls: List[Bool]
     var dict_col: Column[HeapRegion]
 
-    def __init__(out self, b: Int, nullable: Bool) raises:
+    def __init__(out self, b: Int, nullable: Bool, lie: Bool = False) raises:
         var n = _batch_rows(b)
         var vals = List[String](capacity=n)
         var nulls = List[Bool](capacity=n)
@@ -151,6 +155,9 @@ struct _Batch(Movable):
             idx^, StringArray.from_strings(dv)
         )
         self.dict_col = Column.from_dictionary(sda)
+        if lie:
+            # The validity bitmap is right and the cached null count is not.
+            self.dict_col._null_count = 0
         self.vals = vals^
         self.nulls = nulls^
 
@@ -160,13 +167,14 @@ def _make_batches(
     plain_batch: Int,
     mut all_vals: List[String],
     mut all_nulls: List[Bool],
+    lie: Bool = False,
 ) raises -> Slab[RecordBatch]:
     """40 batches of (k: DICTIONARY, v: INT64). `plain_batch >= 0` makes that
     batch's k a plain STRING column (a PLAIN-fallback chunk)."""
     var out = Slab[RecordBatch].create(_N_BATCHES)
     var vbase = 0
     for b in range(_N_BATCHES):
-        var fx = _Batch(b, nullable)
+        var fx = _Batch(b, nullable, lie)
         var n = len(fx.vals)
         var ints = List[Int64](capacity=n)
         for r in range(n):
@@ -353,6 +361,119 @@ def test_mixed_dictionary_and_plain_is_densified() raises:
     assert_equal(concat_dict_unified_count(), 0, "and not unified")
     assert_true(out.column_at(0).arrow_type == ArrowType.STRING, "STRING out")
     _assert_values(out, vals, nulls, "mixed")
+
+
+# =============================================================================
+# §6 — A NULL ROW'S CODE IS NEVER READ, WHATEVER THE CACHED NULL COUNT SAYS
+# =============================================================================
+#
+# The nullable fixtures put code 9,999 (outside every dictionary) under each
+# null row. A column whose validity bitmap is right but whose cached null count
+# is 0 must still skip those rows, on both the unify remap and the densify.
+
+
+def test_unify_skips_null_rows_when_the_null_count_is_unknown() raises:
+    reset_concat_dict_unify_counters()
+    var vals = List[String]()
+    var nulls = List[Bool]()
+    var out = _drive(_make_batches(True, -1, vals, nulls, True))
+    assert_equal(concat_dict_unified_count(), 1, "ROUTE: one column unified")
+    _assert_values(out, vals, nulls, "unify, null count 0")
+
+
+def test_densify_skips_null_rows_when_the_null_count_is_unknown() raises:
+    reset_concat_dict_unify_counters()
+    var vals = List[String]()
+    var nulls = List[Bool]()
+    var out = _drive(_make_batches(True, 21, vals, nulls, True))
+    assert_equal(concat_dict_densified_count(), 1, "ROUTE: densified")
+    _assert_values(out, vals, nulls, "densify, null count 0")
+
+
+# =============================================================================
+# §7 — DENSIFYING PAST THE INT32 OFFSET CEILING IS REFUSED
+# =============================================================================
+#
+# Densifying writes one copy of an entry's bytes per row, so a mixed column can
+# need more bytes than any single batch holds. The fixture's expanded column is
+# tens of kilobytes; a 1,000-byte trip point stands in for 2 GiB.
+
+
+def test_densify_past_the_offset_ceiling_is_refused() raises:
+    var vals = List[String]()
+    var nulls = List[Bool]()
+    var message = String("")
+    var raised = False
+    try:
+        var out = _drive(
+            _make_batches(False, 21, vals, nulls),
+            ConcatOptions(offset_promote_at=1000),
+        )
+        _ = out^
+    except e:
+        raised = True
+        message = String(e)
+    if not raised:
+        raise Error("a densified column past the ceiling was accepted")
+    assert_true(
+        "ArrowOffsetOverflow" in message, "refused for another reason: " + message
+    )
+
+
+# =============================================================================
+# §8 — NO UNIFY FORK UNDER A LIVE POOL DISPATCH
+# =============================================================================
+#
+# Both unify passes fork. From inside a pool task that raises "nested dispatch
+# detected", so the unify stands down and the pair-wise fold runs. The test
+# holds the dispatcher's on-pool guard (the process-global depth a pool task
+# runs under); `test_unify_equals_the_pairwise_fold_buffer_for_buffer` is the
+# control that the same input unifies without it.
+
+
+def test_unify_stands_down_under_a_pool_dispatch() raises:
+    reset_concat_dict_unify_counters()
+    var vals = List[String]()
+    var nulls = List[Bool]()
+    var batches = _make_batches(False, -1, vals, nulls)
+    var runtime = PerCoreAsyncRuntime[NoopSink](
+        num_workers=_WORKERS,
+        sink_factory=_noop_sink_factory,
+        backend=BACKEND_MOCK,
+        placement=PLACEMENT_FIXED,
+    )
+    var ct = CancellationToken.new()
+    ref disp = runtime.dispatcher()
+    var guard = _OnPoolDispatchGuard()
+    var out = concat_record_batches_column_parallel(batches^, disp, ct^)
+    guard.keepalive()
+    assert_equal(concat_dict_unified_count(), 0, "no unify fork under the guard")
+    assert_true(
+        out.column_at(0).arrow_type == ArrowType.DICTIONARY, "DICTIONARY out"
+    )
+    _assert_values(out, vals, nulls, "fold under a pool dispatch")
+    _ = runtime^
+
+
+# =============================================================================
+# §9 — DESTROY-RECREATE
+# =============================================================================
+
+
+def test_unify_destroy_recreate_soak() raises:
+    """Ten fresh pools in a row, each torn down after a unified concat; the
+    nullable fixture alternates with the mixed one."""
+    for it in range(10):
+        reset_concat_dict_unify_counters()
+        var vals = List[String]()
+        var nulls = List[Bool]()
+        var mixed = it % 2 == 1
+        var out = _drive(_make_batches(True, 21 if mixed else -1, vals, nulls))
+        if mixed:
+            assert_equal(concat_dict_densified_count(), 1, "iteration " + String(it))
+        else:
+            assert_equal(concat_dict_unified_count(), 1, "iteration " + String(it))
+        _assert_values(out, vals, nulls, "soak iteration " + String(it))
 
 
 def main() raises:
