@@ -1,0 +1,39 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The compaction adapter over the object-store broker: it transcodes live
+# Arrow-IPC segments into Parquet objects, runs the log-cleaner and
+# partition-maintenance drivers that need Arrow-IPC decode and Parquet encode
+# (which the broker core does not depend on), and serves the dual-tier
+# consume: compacted Parquet objects plus the live segment tail, with the same
+# decode-time filter and projection on both tiers. See __init__.mojo.
+mojo_library(
+    name = "komira_broker_compaction",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # Direct dependencies: the rule adds each one's own closure to the compiler.
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_broker:komira_broker",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_engine_runtime:komira_engine_runtime",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_op_sources:komira_op_sources",
+        "//src/komira_parquet:komira_parquet",
+        "//src/komira_parquet_api:komira_parquet_api",
+        "//src/komira_parquet_writer:komira_parquet_writer",
+        "//src/komira_plan_expr:komira_plan_expr",
+    ],
+    test_srcs = [
+        "tests/test_broker_compacted_pushdown_offline.mojo",
+        "tests/test_broker_compaction_transcode_offline.mojo",
+        "tests/test_broker_consume_pushdown_decode.mojo",
+        "tests/test_broker_dual_tier_pushdown_offline.mojo",
+        "tests/test_broker_log_compaction_e2e.mojo",
+        "tests/test_broker_log_compaction_zero_survivor.mojo",
+        "tests/test_broker_maintenance_driver.mojo",
+        "tests/test_broker_sublineage_consume.mojo",
+        "tests/test_sublineage_maintenance_fold.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

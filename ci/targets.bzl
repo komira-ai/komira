@@ -87,6 +87,7 @@ TARGETS = [
     "komira//src/komira_azure_core:komira_azure_core_conda",
     "komira//src/komira_batch_eval:komira_batch_eval_conda",
     "komira//src/komira_broker:komira_broker_conda",
+    "komira//src/komira_broker_compaction:komira_broker_compaction_conda",
     "komira//src/komira_broker_coordinator:komira_broker_coordinator_conda",
     "komira//src/komira_bump_arena:komira_bump_arena_conda",
     "komira//src/komira_calendar_store:komira_calendar_store_conda",
