@@ -1,3 +1,4 @@
+# FFI-BOUNDARY: this file exports a C ABI. It owns nothing: every pointer is borrowed from the C caller for one call and is neither freed nor kept.
 @export
 def abi_add(a: Int32, b: Int32) abi("C") -> Int32:
     return a + b
