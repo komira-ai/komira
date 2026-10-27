@@ -18,7 +18,7 @@ where to read the environment the compiler sees) and
 | `mojo_library(srcs, deps, test_srcs, import_name, test_optimization_level, readme)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run, and so are the ```` ```mojo ```` examples of the package's `README.md` (see [README examples](#readme-examples)); the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. | [`hellopkg`](../examples/BUCK), [`libgate_ok`](../examples/libgate_ok/BUCK) |
 | `mojo_binary(srcs, deps, main, optimization_level, expected_stdout, helpers)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries and its `helpers` (programs it runs, beside it: [helpers.bzl](helpers.bzl)). `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
 | `mojo_test(srcs, deps, main, optimization_level, data, env, args, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
-| `mojo_shared_lib(srcs, main, deps, out_name, exports, exports_exact, gate_srcs, force_load, optimization_level)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK) |
+| `mojo_shared_lib(srcs, main, deps, out_name, exports, c_exports, unlisted_exports, exports_exact, gate_srcs, force_load, optimization_level)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK) |
 | `mojo_doc_json(lib, golden, symbols)` ([`doc.bzl`](doc.bzl)) | `<name>.json`: the `mojo doc` JSON of the `mojo_library` `lib`, optionally checked against a golden file and for named declarations (see [API JSON](doc.md)). | [`hellopkg_doc`](../examples/BUCK) |
 
 ## Libraries and the `test_srcs` gate
@@ -921,9 +921,21 @@ generated entry file and no `komira_main`; that is `mojo_binary[shared]`.
   Mojo main, which `dlopen`s `./<out_name>.so` and calls into it. The published `<name>/<out_name>.so`
   is a copy that takes every driver's PASS marker as an input, so it exists only if they all passed.
   `exports` may not be empty. `[ungated]` is files only, for diagnosis.
+- **The exports check.** **`exports`** must be exactly the functions declared `@export` with
+  `abi("C")` in the main source (`srcs`' one entry, or `main`), less **`unlisted_exports`**. The check
+  (`tools/so_exports.zig`, an action of the gate) reads the file's declarations, not the compiled library,
+  and fails the build naming every difference: a listed name with no such function, and an `@export`
+  function the list omits. Comments and docstrings do not declare anything; an `@export` that takes
+  arguments is refused. Only the main source is read, so an `@export` in another file of `srcs` is
+  not in the set. **`c_exports`** lists symbols that C libraries of `deps` or `force_load` define: they
+  are not in the source, the gate's `dlopen` check expects them, and `exports_exact` keeps them visible.
+  **`unlisted_exports`** names `@export` functions that stay out of the ABI on purpose (they must exist in
+  the source and not be in `exports`); with `exports_exact` they are local to the library, which is what
+  the twin pairs below show. The cases are `tests//negative/shared_lib:exports_not_exported`,
+  `exports_not_listed` and `unlisted_not_exported`.
 - **`exports_exact`** (default off). Off, the dynamic symbol table also carries the symbols of static C
   dependencies (a C function a Mojo export calls is visible to every consumer). On, a version script makes
-  `exports` the whole table. A twin pair shows both: `examples/shared_lib:spike_exact` passes its driver and
+  `exports` and `c_exports` the whole table. A twin pair shows both: `examples/shared_lib:spike_exact` passes its driver and
   `tests//negative/shared_lib:leaks_by_default` goes red on the same driver.
 - **Not self-contained.** The `.so` has `DT_NEEDED libKGENCompilerRTShared.so`, the Mojo runtime (async runtime,
   allocator, globals), which the compiler's link adds to every Mojo binary and shared library; it is not linked

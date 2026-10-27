@@ -10,7 +10,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_shared_lib")
 mojo_shared_lib(
     name = "missing_export",
     srcs = ["good.mojo"],
-    exports = ["neg_add", "neg_missing"],
+    exports = ["neg_add"],
+    c_exports = ["neg_missing"],
 )
 
 # The library references a symbol nothing defines: dlopen refuses it.
@@ -43,7 +44,8 @@ mojo_shared_lib(
 mojo_shared_lib(
     name = "forced_not_loaded",
     srcs = ["good.mojo"],
-    exports = ["neg_add", "komira_spike_forced"],
+    exports = ["neg_add"],
+    c_exports = ["komira_spike_forced"],
     deps = ["komira//tools/build/examples/shared_lib:forced"],
 )
 
@@ -66,6 +68,7 @@ mojo_shared_lib(
     srcs = ["plain_hidden_abi.mojo"],
     exports = ["plain_add"],
     gate_srcs = ["plain_leaks_driver.mojo"],
+    unlisted_exports = ["plain_hidden"],
     out_name = "plain_leaks",
 )
 
@@ -95,6 +98,32 @@ cxx_library(
 mojo_shared_lib(
     name = "duplicate_definition",
     srcs = ["good.mojo"],
-    exports = ["neg_add", "komira_neg_dup"],
+    exports = ["neg_add"],
+    c_exports = ["komira_neg_dup"],
     force_load = [":dup_a", ":dup_b"],
+)
+
+# The exports check, in both directions. Each library builds ungated; the red
+# is the check, which names the differing symbols.
+#
+# `exports` lists `neg_ghost`, which good.mojo does not declare.
+mojo_shared_lib(
+    name = "exports_not_exported",
+    srcs = ["good.mojo"],
+    exports = ["neg_add", "neg_ghost"],
+)
+
+# two_exports.mojo declares `neg_sub` with @export, which `exports` omits.
+mojo_shared_lib(
+    name = "exports_not_listed",
+    srcs = ["two_exports.mojo"],
+    exports = ["neg_add"],
+)
+
+# `unlisted_exports` names a function the source does not declare.
+mojo_shared_lib(
+    name = "unlisted_not_exported",
+    srcs = ["good.mojo"],
+    exports = ["neg_add"],
+    unlisted_exports = ["neg_ghost"],
 )
