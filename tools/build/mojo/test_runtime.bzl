@@ -11,7 +11,7 @@ test runs from, and the data, environment and arguments it is given.
 #
 # The gate (`gate mojo`, tools/build/run) starts the test with root/share as its current directory, so
 # a relative path to a declared file opens and any other relative path names
-# nothing. komira//tools/build/mojo/runtime_paths finds root/share from the
+# nothing. komira//src/komira_runtime_paths finds root/share from the
 # executable, the same way a bundle finds its share/.
 
 # Names the runner sets itself; a test may not override them through env.

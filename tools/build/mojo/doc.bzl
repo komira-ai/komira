@@ -26,58 +26,7 @@ with `_` (a struct's dunder methods excepted).
 
 load(":defs.bzl", "mojo_compile_cmd")
 load(":providers.bzl", "MojoInfo", "MojoToolchainInfo")
-load(":toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
-
-# $1 busybox, $2 JSON, $3 golden or "-", $4 inspect run dir or "-", $5 output,
-# $6 the target's label, then the symbols.
-_CHECK = """
-BB=$1 json=$2 golden=$3 inspect=$4 out=$5 label=$6
-shift 6
-bad=0
-if [ "$golden" != - ] && ! "$BB" cmp -s "$golden" "$json"; then
-    echo "mojo_doc_json: $label: the JSON differs from its golden $golden (first differences, golden first):" >&2
-    "$BB" diff "$golden" "$json" | "$BB" head -n 40 >&2 || true
-    bad=1
-fi
-if [ "$#" -gt 0 ]; then
-    flat="$out.flat"
-    "$inspect/inspect" json "$json" > "$flat"
-    # One line per declaration: its dotted path in the package. An object
-    # under packages/modules/functions/structs/traits/aliases at index k is
-    # one step; its name is the leaf `<prefix>\tname\t<value>`.
-    "$BB" awk -F '\\t' '
-        $(NF - 1) == "name" {
-            obj = $1
-            for (i = 2; i < NF - 1; i++) obj = obj "\\t" $i
-            name[obj] = $NF
-            objs[++m] = obj
-        }
-        END {
-            for (o = 1; o <= m; o++) {
-                c = split(objs[o], f, "\\t")
-                if (f[1] != "decl") continue
-                key = "decl"; path = ""; ok = 1
-                for (i = 2; i <= c; i += 2) {
-                    if (f[i] !~ /^(packages|modules|functions|structs|traits|aliases)$/ || f[i + 1] !~ /^[0-9]+$/) { ok = 0; break }
-                    key = key "\\t" f[i] "\\t" f[i + 1]
-                    if (!(key in name)) { ok = 0; break }
-                    path = path (path == "" ? "" : ".") name[key]
-                }
-                if (ok && path != "") print path
-            }
-        }' "$flat" | "$BB" sort -u > "$out.symbols"
-    for s in "$@"; do
-        if ! "$BB" grep -qxF -- "$s" "$out.symbols"; then
-            echo "mojo_doc_json: $label: the JSON declares no \\`$s\\`" >&2
-            bad=1
-        fi
-    done
-    "$BB" rm -f "$flat" "$out.symbols"
-fi
-[ "$bad" = 0 ] || exit 1
-"$BB" cp "$json" "$out"
-"""
 
 def _impl(ctx):
     tc = ctx.attrs.toolchain[MojoToolchainInfo]
@@ -109,10 +58,10 @@ def _impl(ctx):
         return [DefaultInfo(default_output = raw)]
     out = ctx.actions.declare_output(name)
     inspect = ctx.attrs._inspect[DefaultInfo].default_outputs[0] if ctx.attrs.symbols else "-"
+    # The checks (golden, symbols) and the copy are tools/build/mojo/tools/doc_check.zig.
     ctx.actions.run(
-        busybox_sh(
-            tc.busybox,
-            _CHECK,
+        cmd_args(
+            ctx.attrs._doc_check[RunInfo],
             raw,
             ctx.attrs.golden or "-",
             inspect,
@@ -132,6 +81,7 @@ mojo_doc_json_rule = rule(
         "lib": attrs.dep(providers = [MojoInfo]),
         "symbols": attrs.list(attrs.string(), default = []),
         "toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
+        "_doc_check": attrs.exec_dep(default = "komira//tools/build/mojo:doc_check"),
         "_inspect": attrs.exec_dep(default = "komira//tools/build/inspect:inspect[runnable]"),
     },
 )

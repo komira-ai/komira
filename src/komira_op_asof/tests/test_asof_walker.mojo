@@ -232,9 +232,6 @@ def test_compare_keys_null_equi_key_ordering() raises:
 def test_compare_equi_keys_null_never_matches() raises:
     """The match half: `NULL = NULL` is UNKNOWN, never a match; two equal
     real keys still match; one NULL is UNKNOWN too.
-
-    Mutant: `_cmp_one_column` returning `equal_and_matched()` for two NULLs
-    fails the first `assert_false`.
     """
     var b_null2 = _batch_i64_1_nullable("k", [0], [0])
     var b_null = _batch_i64_1_nullable("k", [0, 42], [0])
@@ -248,8 +245,8 @@ def test_compare_equi_keys_null_never_matches() raises:
     )
     assert_false(
         both_null.matched,
-        "⛔ NULL = NULL is UNKNOWN, never a join match -- this is the whole"
-        " defect. The DATA slots under both cleared validity bits hold 0, so"
+        "⛔ NULL = NULL is UNKNOWN, never a join match -- the DATA"
+        " slots under both cleared validity bits hold 0, so"
         " a comparator reading the value instead of the bit sees equality",
     )
 
@@ -301,12 +298,6 @@ def test_walker_null_equi_key_never_joins_a_null_group() raises:
 
     Every left row is emitted once either way, so the wrong answer is a value
     (a right row where NULL belongs), not a row count.
-
-    Mutant: matching two NULLs in `_cmp_one_column` and dropping the
-    walker's NULL-key skip joins left row 0 to right row 0, and `rb[0]`
-    reads 0 instead of -1 (either change alone is caught elsewhere: the first
-    by test_compare_equi_keys_null_never_matches, the second by
-    test_sink_null_left_key_matches_nothing).
     """
     #   left : k=[NULL, 7], ts=[15, 15]
     #   right: k=[NULL, 7], ts=[10, 10]

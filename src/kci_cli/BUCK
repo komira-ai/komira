@@ -101,6 +101,9 @@ mojo_library(
         # the same on a faulty FakeCloud: trust_check, a presence read,
         # a broken lowering contract and realize, each raising
         "tests/test_kci_deploy_faults.mojo",
+        # a DEPLOY step's load: a resource list or definitions file that is
+        # not JSON, a definitions file redefining a shipped definition, a new one
+        "tests/test_kci_deploy_load.mojo",
         # a failed DEPLOY step stops the run: a PUBLISH into cell a, then
         # DEPLOY steps into a and b, one FakeCloud each; a fault in a or b,
         # or a failed PUBLISH into a, set_hash emptied, --rollback-on-failure
@@ -139,6 +142,10 @@ mojo_library(
             for d in ["kci.app", "kci.job"]
         },
         "tests/test_kci_deploy_stop.mojo": {
+            "src/kci_composites/definitions/{}.json".format(d): "//src/kci_composites:{}.json".format(d)
+            for d in ["kci.app", "kci.job"]
+        },
+        "tests/test_kci_deploy_load.mojo": {
             "src/kci_composites/definitions/{}.json".format(d): "//src/kci_composites:{}.json".format(d)
             for d in ["kci.app", "kci.job"]
         },

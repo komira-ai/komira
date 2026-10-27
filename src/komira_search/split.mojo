@@ -40,7 +40,11 @@
 #     surface.
 # =============================================================================
 
-from komira_buffer.byte_buffer import ByteBuffer, write_uleb128
+from komira_buffer.byte_buffer import (
+    ByteBuffer,
+    write_uleb128,
+    write_uleb128_u64,
+)
 from komira_compression.lz4 import lz4_compress, lz4_decompress
 
 from .inverted import FinalizedIndex
@@ -307,7 +311,7 @@ def _encode_posting_list(
             raise Error(
                 "_encode_posting_list: negative doc_id at index " + String(pos)
             )
-        write_uleb128(first_doc, out)
+        write_uleb128_u64(UInt64(first_doc), out)  # first_doc >= 0, checked above
 
         var deltas = List[Int]()
         var max_delta = 0
@@ -423,7 +427,7 @@ def _encode_posting_list_with_blockmeta(
                 "_encode_posting_list_with_blockmeta: negative doc_id at index "
                 + String(pos)
             )
-        write_uleb128(first_doc, out)
+        write_uleb128_u64(UInt64(first_doc), out)  # first_doc >= 0, checked above
 
         var deltas = List[Int]()
         var max_delta = 0
@@ -1235,22 +1239,22 @@ def _serialize_blockmax_region(
         var v = bm_block_byte_offset[b]
         if v < 0:
             raise Error("_serialize_blockmax_region: negative block_byte_offset")
-        write_uleb128(v, out)
+        write_uleb128_u64(UInt64(v), out)  # v >= 0, checked above
     for b in range(total_blocks):
         var v = bm_block_last_docid[b]
         if v < 0:
             raise Error("_serialize_blockmax_region: negative block_last_docid")
-        write_uleb128(v, out)
+        write_uleb128_u64(UInt64(v), out)  # v >= 0, checked above
     for b in range(total_blocks):
         var v = bm_block_max_tf[b]
         if v < 0:
             raise Error("_serialize_blockmax_region: negative block_max_tf")
-        write_uleb128(v, out)
+        write_uleb128_u64(UInt64(v), out)  # v >= 0, checked above
     for b in range(total_blocks):
         var v = bm_block_min_dl[b]
         if v < 0:
             raise Error("_serialize_blockmax_region: negative block_min_dl")
-        write_uleb128(v, out)
+        write_uleb128_u64(UInt64(v), out)  # v >= 0, checked above
 
 
 # =============================================================================

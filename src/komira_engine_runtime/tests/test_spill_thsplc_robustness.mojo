@@ -2,16 +2,16 @@
 # test_spill_thsplc_robustness.mojo — THSPLC column codec REJECTS bad chunks.
 # =============================================================================
 #
-# SPILL-FU-DECODE-ROBUSTNESS / Task #10. The happy-path round-trip lives in
+# The happy-path round-trip lives in
 # test_thsplc_roundtrip.mojo; THIS suite proves the decoder REJECTS truncated /
 # corrupt chunks with a typed `raise` (NOT a debug_assert that elides in
 # release, NOT a silent out-of-bounds read) on BOTH decode_copy AND
 # decode_zerocopy.
 #
-# Bug-fix protocol: every case here would have mis-decoded / OOB'd / passed
-# WITHOUT the release-build guards added to thsplc.mojo
-# (_parse_header n_cols/total-length sanity, _validate_descriptor per-column
-# bounds, _check_fingerprint). Each case asserts the SPECIFIC typed error.
+# Every case here would mis-decode, read out of bounds, or pass without the
+# release-build guards in thsplc.mojo (_parse_header n_cols/total-length
+# sanity, _validate_descriptor per-column bounds, _check_fingerprint). Each
+# case asserts the SPECIFIC typed error.
 #
 # Corruption matrix (each proven-rejected on both decode paths):
 #   * truncation: mid-header, mid-descriptor-table, mid-body, off-by-one short
@@ -25,7 +25,6 @@
 #   * dict-in-zerocopy raises; encode-dict raises
 #   * ENCODE side: a `validity_len` / `offsets_len` that does not fit its
 #     UInt32 wire field is REFUSED in pass 1, before the chunk is allocated
-#     (VARHEAP-OFFSET-CEILING's spill-format sibling, 2026-09-23)
 #
 # The descriptor-OOB cases are the load-bearing UAF-prevention proof: the
 # decoder MUST raise BEFORE from_borrowed_view builds a view aliasing past the
@@ -354,7 +353,7 @@ def test_encode_dictionary_raises() raises:
 
 
 # =============================================================================
-# ENCODE-side: the two UInt32 descriptor fields (2026-09-23)
+# ENCODE-side: the two UInt32 descriptor fields
 # =============================================================================
 #
 # `validity_len` and `offsets_len` are the only 32-bit lengths in a descriptor

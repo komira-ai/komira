@@ -121,7 +121,7 @@ pub fn readAll(alloc: std.mem.Allocator) ![]proc_tree.Proc {
         }
         cap *= 2;
     }
-    var out = std.ArrayList(proc_tree.Proc).init(alloc);
+    var out = std.ArrayList(proc_tree.Proc).empty;
     for (pids) |pid| {
         var bsd: ProcBsdInfo = undefined;
         if (proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &bsd, @sizeOf(ProcBsdInfo)) != @sizeOf(ProcBsdInfo)) continue;
@@ -130,7 +130,7 @@ pub fn readAll(alloc: std.mem.Allocator) ![]proc_tree.Proc {
             ticksOf(task.pti_total_user +| task.pti_total_system, tb)
         else
             0;
-        try out.append(.{
+        try out.append(alloc, .{
             .pid = pid,
             .state = if (bsd.pbi_status == SZOMB) 'Z' else 'S',
             .ppid = @bitCast(bsd.pbi_ppid),
@@ -138,7 +138,7 @@ pub fn readAll(alloc: std.mem.Allocator) ![]proc_tree.Proc {
             .ticks = ticks,
         });
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 /// The killable pids of `root`'s tree now (empty when root is gone).

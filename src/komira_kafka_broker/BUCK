@@ -1,0 +1,94 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The broker half of the Kafka server, above the wire codec of
+# komira_kafka_server: the decompression of a Produce batch's records blob and
+# the compression of a Fetch batch's (gzip, snappy in the xerial framing, lz4
+# frame, zstd, over komira_compression), the committed consumer-group offsets
+# as objects in a komira_objectstore conditional-write store, and the bridge
+# between Kafka records and an Arrow RecordBatch with the fixed envelope schema.
+# komira_kafka_server stays dependency-free; this package carries the
+# dependencies the broker needs.
+#
+# The welded tests (each file's header says which defects it catches):
+# - test_kafka_compression: every codec's records blob decodes, through
+#   decompress_kafka_records and through whole batches (with a correct CRC), a
+#   blob larger than the first output buffer, xerial framing edges, the
+#   preamble ceiling, truncated and corrupt blobs, gzip members concatenated,
+#   the output ceiling for gzip, lz4 and zstd, an unknown codec refused, and
+#   the per-batch producer identity.
+# - test_kafka_fetch_compress: compress_kafka_records round-trips every codec,
+#   writes each codec's framing, and builds a compressed batch a decoder reads.
+# - test_group_offsets: commit and fetch over the in-memory store, unknown
+#   group, topic and partition, overwrite, repeated commit, isolation, listing,
+#   the JSON body (multibyte UTF-8 metadata included), group ids holding "/",
+#   and a store that fails (a name spelling a not-found marker is not "not found").
+# - test_group_clock: the manual clock holds still, sets, advances and moves by a
+#   sleep; the system clock reads the epoch in milliseconds.
+# - test_group_membership: reconcile_members (kept, carried, expired, ghost, the
+#   grace and session boundaries) and assignment_is_valid (a clean cover passes;
+#   a reopened round, an uncovered member, a ghost slice, a double assign and a
+#   gap fail), called directly.
+# - test_kafka_rebalance: the range assignor, the coordinator's states and
+#   transitions over the store (join, sync, heartbeat, leave, a two-member split
+#   and a leave), a join into an open round keeping its generation, the join
+#   decision under a CAS retry, a sole member closing without a wait, a join
+#   waiting on the manual clock to its deadline, and the state.json round trip.
+# - test_kafka_rebalance_wire: the JoinGroup, SyncGroup, Heartbeat and LeaveGroup
+#   wire round trips and the consumer-protocol blobs.
+# - test_kafka_rebalance_deadline_race: a session-alive member is carried through
+#   the rebalance deadline, an expired one is dropped, and two coordinators over
+#   one store converge on one leader and a disjoint split.
+# - test_kafka_rebalance_convergence_race: a stale member id is reaped at the
+#   close, and a SyncGroup with a ghost slice, a double assign or a gap is
+#   rejected while a correct split completes.
+# - test_kafka_rebalance_faults: the coordinator over a store that fails: state.json
+#   text with quotes and control characters and a client id written to forge the
+#   state, a 403 that names "404" read as an absent group, the state key of a
+#   group id holding "/" or empty, lost swaps retried and exhausted in join,
+#   sync, leave and heartbeat, a 503 naming "412" not retried, the error codes of
+#   SyncGroup, LeaveGroup and Heartbeat, and a follower's assignment ignored.
+# - test_kafka_rebalance_heartbeat: Heartbeat in every group state as Apache Kafka
+#   answers it: 25 for an unknown member, 22 for another generation, 27 for the
+#   right generation in PreparingRebalance, 0 in CompletingRebalance and Stable.
+# - test_kafka_rebalance_rival: a rival's write lands on the swap that fails, and
+#   the retry in join (register and close), sync and leave re-reads it and
+#   decides again, keeping the rival.
+# - test_group_state_decode: state.json decodes strictly (empty, truncated,
+#   garbage, missing or repeated fields, bad escapes, a lone surrogate, bytes
+#   that are not UTF-8 are errors), and the coordinator raises over an
+#   unreadable object and leaves it as it was.
+# - test_kafka_rebalance_leapfrog_race: a leader's stale SyncGroup is rejected
+#   when a member joined the same generation, and the rejoin converges.
+# - test_envelope_bridge: records to the envelope and back, exactly, with null
+#   and empty keys and values and headers.
+mojo_library(
+    name = "komira_kafka_broker",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # Direct dependencies: the rule adds each one's own closure to the compiler.
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_kafka_server:komira_kafka_server",
+        "//src/komira_objectstore:komira_objectstore",
+    ],
+    test_srcs = [
+        "tests/test_envelope_bridge.mojo",
+        "tests/test_group_clock.mojo",
+        "tests/test_group_membership.mojo",
+        "tests/test_group_offsets.mojo",
+        "tests/test_kafka_compression.mojo",
+        "tests/test_kafka_fetch_compress.mojo",
+        "tests/test_kafka_rebalance.mojo",
+        "tests/test_kafka_rebalance_convergence_race.mojo",
+        "tests/test_kafka_rebalance_deadline_race.mojo",
+        "tests/test_kafka_rebalance_faults.mojo",
+        "tests/test_kafka_rebalance_heartbeat.mojo",
+        "tests/test_kafka_rebalance_leapfrog_race.mojo",
+        "tests/test_kafka_rebalance_rival.mojo",
+        "tests/test_kafka_rebalance_wire.mojo",
+        "tests/test_group_state_decode.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

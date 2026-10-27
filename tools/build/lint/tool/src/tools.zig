@@ -31,11 +31,11 @@ pub fn shellcheck(c: *Ctx, tools: []const []const u8, args: []const []const u8) 
         const f = args[i];
         const codes = args[i + 1];
         c.checked += 1;
-        var argv = std.ArrayList([]const u8).init(c.alloc);
-        try argv.appendSlice(&.{ sc, "-S", "warning", "-f", "gcc" });
-        if (!std.mem.eql(u8, codes, "-")) try argv.appendSlice(&.{ "-e", codes });
-        if (!namesShell(try lint.readFile(c.alloc, f))) try argv.appendSlice(&.{ "-s", "busybox" });
-        try argv.append(f);
+        var argv = std.ArrayList([]const u8).empty;
+        try argv.appendSlice(c.alloc, &.{ sc, "-S", "warning", "-f", "gcc" });
+        if (!std.mem.eql(u8, codes, "-")) try argv.appendSlice(c.alloc, &.{ "-e", codes });
+        if (!namesShell(try lint.readFile(c.alloc, f))) try argv.appendSlice(c.alloc, &.{ "-s", "busybox" });
+        try argv.append(c.alloc, f);
         const r = try lint.runTool(c.alloc, argv.items, null);
         try c.appendOutput(r.stdout);
         try c.appendOutput(r.stderr);
@@ -48,9 +48,9 @@ pub fn shellcheck(c: *Ctx, tools: []const []const u8, args: []const []const u8) 
 pub fn actionlint(c: *Ctx, tools: []const []const u8, args: []const []const u8) !void {
     if (tools.len != 3) return error.Usage;
     c.checked = args.len;
-    var argv = std.ArrayList([]const u8).init(c.alloc);
-    try argv.appendSlice(&.{ try c.abs(tools[0]), "-no-color", "-config-file", tools[2], "-shellcheck", try c.abs(tools[1]) });
-    try argv.appendSlice(args);
+    var argv = std.ArrayList([]const u8).empty;
+    try argv.appendSlice(c.alloc, &.{ try c.abs(tools[0]), "-no-color", "-config-file", tools[2], "-shellcheck", try c.abs(tools[1]) });
+    try argv.appendSlice(c.alloc, args);
     const r = try lint.runTool(c.alloc, argv.items, null);
     try c.appendOutput(r.stdout);
     try c.appendOutput(r.stderr);
@@ -95,14 +95,14 @@ pub fn docLinks(c: *Ctx, tools: []const []const u8, args: []const []const u8) !v
     }
     // Every file staged under the tree, as `git ls-files -z` lists a
     // checkout: the Markdown reader checks each .md among them.
-    var list = std.ArrayList(u8).init(c.alloc);
+    var list = std.ArrayList(u8).empty;
     for (try lint.listFiles(c.alloc, tree)) |p| {
         if (skip.contains(p)) continue;
-        try list.appendSlice(p);
-        try list.append(0);
+        try list.appendSlice(c.alloc, p);
+        try list.append(c.alloc, 0);
     }
     const list_path = try c.scratchPath("tree.list");
-    try std.fs.cwd().writeFile(list_path, list.items);
+    try std.fs.cwd().writeFile(.{ .sub_path = list_path, .data = list.items });
 
     const r = try lint.runTool(c.alloc, &.{ inspect, "doc-links", tree, list_path }, null);
     const out = try std.mem.concat(c.alloc, u8, &.{ r.stdout, r.stderr });

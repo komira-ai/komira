@@ -33,23 +33,23 @@ pub fn renderChecked(alloc: std.mem.Allocator, text: []const u8, root: []const u
 /// guessed at.
 pub fn macosSharedLibs(alloc: std.mem.Allocator, rendered: []const u8, compiler: []const u8) !?[]u8 {
     const want = try std.fmt.allocPrint(alloc, "shared_libs = -Xlinker,-rpath,-Xlinker,{s}/lib;", .{compiler});
-    var out = std.ArrayList(u8).init(alloc);
+    var out = std.ArrayList(u8).empty;
     var found: usize = 0;
     var it = std.mem.splitScalar(u8, rendered, '\n');
     var first = true;
     while (it.next()) |line| {
-        if (!first) try out.append('\n');
+        if (!first) try out.append(alloc, '\n');
         first = false;
         if (std.mem.startsWith(u8, line, shared_libs_prefix)) {
             found += 1;
             if (!std.mem.eql(u8, line, want)) return null;
-            try out.appendSlice(macos_shared_libs);
+            try out.appendSlice(alloc, macos_shared_libs);
         } else {
-            try out.appendSlice(line);
+            try out.appendSlice(alloc, line);
         }
     }
     if (found != 1) return null;
-    return try out.toOwnedSlice();
+    return try out.toOwnedSlice(alloc);
 }
 
 pub const shared_libs_prefix = "shared_libs = ";

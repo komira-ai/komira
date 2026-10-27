@@ -320,6 +320,73 @@ def test_walker_dict_equi_key_backward() raises:
     assert_equal(rr[2], 2)
 
 
+def _string_key_match_rows(
+    lk: List[String], lt: List[Int], rk: List[String], rt: List[Int]
+) raises -> List[Int]:
+    """Right row matched by each left row (-1 = none), BACKWARD / INT64."""
+    var left_b = Slab[RecordBatch]()
+    left_b.append(_batch_str_key_i64_ts(lk, lt))
+    var right_b = Slab[RecordBatch]()
+    right_b.append(_batch_str_key_i64_ts(rk, rt))
+    var lkc: List[Int] = [0]
+    var rkc: List[Int] = [0]
+    var lb = List[Int]()
+    var lr = List[Int]()
+    var rb = List[Int]()
+    var rr = List[Int]()
+    asof_merge_into[ASOF_BACKWARD, DType.int64](
+        left_b, right_b, lkc, rkc, 1, 1,
+        AsofTolerance.none(), lb, lr, rb, rr,
+    )
+    return rr^
+
+
+def test_walker_string_key_prefix_is_not_equal() raises:
+    """A string key that is a prefix of another is a different key."""
+    var short: List[String] = ["ab"]
+    var long: List[String] = ["abc"]
+    var l_t: List[Int] = [10]
+    var r_t: List[Int] = [5]
+    var short_vs_long = _string_key_match_rows(short, l_t, long, r_t)
+    assert_equal(short_vs_long[0], -1, "ab does not join abc")
+    var long_vs_short = _string_key_match_rows(long, l_t, short, r_t)
+    assert_equal(long_vs_short[0], -1, "abc does not join ab")
+    var both: List[String] = ["ab", "abc"]
+    var both_t: List[Int] = [5, 6]
+    var short_vs_both = _string_key_match_rows(short, l_t, both, both_t)
+    assert_equal(short_vs_both[0], 0, "ab joins its own group only")
+    var long_vs_both = _string_key_match_rows(long, l_t, both, both_t)
+    assert_equal(long_vs_both[0], 1, "abc joins its own group only")
+
+
+def test_walker_dict_index_out_of_range_raises() raises:
+    """A dictionary index past the dictionary is an error, not a read."""
+    var uniq: List[String] = ["AAPL", "MSFT"]
+    var l_idx: List[Int] = [0]
+    var l_ts: List[Int] = [10]
+    var r_idx: List[Int] = [2]
+    var r_ts: List[Int] = [5]
+    var left_b = Slab[RecordBatch]()
+    left_b.append(_batch_dict_key_i64_ts(uniq.copy(), l_idx, l_ts))
+    var right_b = Slab[RecordBatch]()
+    right_b.append(_batch_dict_key_i64_ts(uniq.copy(), r_idx, r_ts))
+    var lkc: List[Int] = [0]
+    var rkc: List[Int] = [0]
+    var lb = List[Int]()
+    var lr = List[Int]()
+    var rb = List[Int]()
+    var rr = List[Int]()
+    var raised = False
+    try:
+        asof_merge_into[ASOF_BACKWARD, DType.int64](
+            left_b, right_b, lkc, rkc, 1, 1,
+            AsofTolerance.none(), lb, lr, rb, rr,
+        )
+    except e:
+        raised = String(e).find("out of range") >= 0
+    assert_true(raised, "out-of-range dictionary index must raise")
+
+
 def test_walker_mixed_string_dict_equi_key() raises:
     """Mixed STRING (left) <-> DICTIONARY (right) equi-key.
 
@@ -389,9 +456,7 @@ def test_walker_right_null_key_inside_run_is_stepped_over() raises:
     """Right, as the sort leaves it: k=[0, NULL(slot 0), 0], ts=[1, 2, 3].
     Left: k=0, ts=10. BACKWARD: the last 0-keyed row at or before 10 is
     ts=3 (right row 2).
-
-    Mutant: ending the group at the NULL-keyed row (a `break` where the
-    walker steps over it) leaves the group [ts=1] and answers right row 0."""
+    """
     var right = _batch_i64_2_nullable_key("k", [0, 0, 0], [1], "ts", [1, 2, 3])
     var left = _batch_i64_2("k", [0], "ts", [10])
     var rr = List[Int]()
@@ -404,10 +469,7 @@ def test_walker_left_null_key_inside_run_keeps_the_group() raises:
     """Left, as the sort leaves it: k=[0, NULL(slot 0), 0], ts=[10, 15, 20].
     Right: k=0, ts=5. The two 0-keyed left rows both match right row 0; the
     NULL-keyed one matches nothing.
-
-    Mutant: sending the NULL-keyed left row through the group search (no
-    early skip) drops the cached group and leaves the cursor past it, so the
-    third left row finds no group: `rb[2]` reads -1."""
+    """
     var left = _batch_i64_2_nullable_key("k", [0, 0, 0], [1], "ts", [10, 15, 20])
     var right = _batch_i64_2("k", [0], "ts", [5])
     var rr = List[Int]()
@@ -445,10 +507,7 @@ def test_walker_null_keys_on_both_sides_inside_runs() raises:
 def test_walker_float_key_nan_matches_only_nan() raises:
     """Left k=[1.0, NaN] ts=[10, 10]; right (sorted, NaN last) k=[1.0, NaN]
     ts=[5, 6]. 1.0 matches only the 1.0 row; NaN only the NaN row.
-
-    Mutant: comparing keys with the IEEE operators (`a < b`, `a > b`, else
-    equal) makes NaN equal to 1.0, so the 1.0 group takes in the NaN row and
-    left row 0 answers ts=6 (right row 1)."""
+    """
     var left = _batch_f64_2("k", [1.0, nan[DType.float64]()], "ts", [10.0, 10.0])
     var right = _batch_f64_2("k", [1.0, nan[DType.float64]()], "ts", [5.0, 6.0])
     var left_b = Slab[RecordBatch]()

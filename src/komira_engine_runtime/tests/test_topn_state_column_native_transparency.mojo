@@ -1,17 +1,17 @@
 # =============================================================================
 # test_topn_state_column_native_transparency.mojo
 #
-# P-2.B.2a transparency gate for the TopNState column-native breaker migration.
-# The migrated `TopNState.drain_to_record_batch` produces a ColumnNativeBatch
-# internally and bridges to RecordBatch at the breaker output via the P-2.A shim
-# (column_native_from_record_batch -> record_batch_from_column_native). Because
-# the ColumnNativeBatch body IS a THSPLC chunk, the lift+lower is byte-identical
-# to a spill/restore round-trip, so the migrated drain is byte-identical to the
-# prior direct RecordBatch drain.
+# Bridge round-trip gate for the output shape of the topn_state breaker. It builds
+# a RecordBatch shaped like that breaker's output by hand (no operator state is
+# reached: this package depends on no operator), moves it through
+# column_native_from_record_batch and record_batch_from_column_native, and
+# asserts the result is byte-equal to the input. It proves the bridge keeps
+# values, validity, offsets and schema flags for this shape; it does not prove
+# that an operator's column-native result equals its RecordBatch result.
 #
 # TopNState drains a fixed 2-col (key Int64, payload Int64) batch in sorted
-# order. The bridge transparency below proves the lift+lower the migration
-# inserts is byte-identical for that output shape.
+# order. The tests below check the bridge round-trip is byte-identical for that
+# output shape.
 # =============================================================================
 
 from std.testing import TestSuite, assert_true

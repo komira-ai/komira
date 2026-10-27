@@ -1,3 +1,0 @@
-affected: --json and --units-file are two answers; give one
-usage: affected (--base <rev> | --files <file> [--base <rev>]) [--units-file <file>] [--json] [--rules <file>]
-                [--buckconfig <file>] [--buck2 <path>] [--isolation-dir <name>] [--buck2-arg <arg>]

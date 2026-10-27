@@ -1,5 +1,0 @@
-# A cquery line that is \x1f alone: strip() leaves it (it strips \x1c-\x1e),
-# so it is a label no group pattern matches, and the answer cannot be made.
-arg "{units_file}"
-input units_file "lib_a\t//src/a:a\n"
-exit 1

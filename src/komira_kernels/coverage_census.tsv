@@ -1,0 +1,3 @@
+# What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
+census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
+komira//src/komira_kernels:komira_kernels	src/komira_kernels	library	OK	1366	2592	-	-	no	conda	src/komira_kernels/builtin_binary_fns.mojo,src/komira_kernels/builtin_hash_fns.mojo,src/komira_kernels/builtin_string_hash_fns.mojo,src/komira_kernels/eval_chunks.mojo,src/komira_kernels/join_key_envelope.mojo,src/komira_kernels/runtime_expr.mojo	-

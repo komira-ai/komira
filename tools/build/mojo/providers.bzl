@@ -85,8 +85,10 @@ MojoToolchainInfo = provider(fields = {
     # built by zig_exe behind its unit tests: run:gate on linux (static),
     # run:gate_darwin on darwin-arm64 (libSystem, as every macOS program).
     "gate": provider_field(typing.Any, default = None),
-    "run_check": provider_field(typing.Any),
-    "launcher": provider_field(typing.Any),
+    # tools/build/mojo:act: copies the gated artifact, joins markers, runs the
+    # run check of a binary and starts a built binary from outside its runnable
+    # directory (`launch`) (act.zig).
+    "act": provider_field(typing.Any),
     # Directory: only the shared libraries a built binary loads (a
     # `mojo_runtime`). A runnable binary carries a copy of it as lib/.
     "runtime": provider_field(typing.Any),
@@ -95,6 +97,15 @@ MojoToolchainInfo = provider(fields = {
     # flags that name and limit its symbols) read it here, so the target
     # platform is decided by the toolchain, never by a second attribute.
     "os": provider_field(str, default = "linux"),
+})
+
+# What a `zig_exe` was built for: zig's -target triple of the executable
+# (`x86_64-linux-musl`, `aarch64-macos.11.0`). A rule that runs the
+# executable in an action reads it to refuse, at analysis, one built for
+# another operating system than the action's execution platform
+# (readme.bzl, readme_gate).
+ZigExeInfo = provider(fields = {
+    "target": provider_field(str),
 })
 
 # A built binary that starts on its own: `run_dir` holds the binary and lib/,

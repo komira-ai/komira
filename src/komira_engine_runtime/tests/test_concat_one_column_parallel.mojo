@@ -2,16 +2,14 @@
 # ONE-COLUMN CONCAT ADMISSION — routing falsifier + independent value oracle
 # =============================================================================
 #
-# (cbq05). THE DEFECT, stated structurally:
+# THE DEFECT, stated structurally:
 #
 #   `streaming_concat_parallel._concat_impl` gated its whole parallel branch on
 #   `num_cols >= _MIN_COLS_FOR_PARALLEL (2)`. A ONE-column resident collect
-#   therefore returned `_concat_serial` before the row-range TILED route --
-# which has split a single column across the pool since LEVER A
-#   -- was ever consulted. cbq05 (`count(DISTINCT search_phrase)`) collects
-#   exactly one STRING column of 99,997,497 rows / 740 MB of payload, and that
-#   concat ran on the DRIVER thread for ~295 of a ~620 ms warm rep while all
-#   twenty workers idled (the benchmark host, 2026-09-24 diagnosis hold).
+#   therefore returned `_concat_serial` before the row-range TILED route -- which
+#   splits a single column across the pool -- was ever consulted. A one-column
+#   STRING collect of tens of millions of rows (a `count(DISTINCT col)` over a
+#   wide table) then ran on the DRIVER thread while the whole pool idled.
 #
 # The column count was never the right question for a one-column concat. The
 # incumbent one-task-per-COLUMN fan really is pure overhead at one column, so
@@ -47,19 +45,19 @@
 # instrument that can only answer "forked" proves nothing by answering it.
 #
 # ⚠ R6 IS THE DESTROY-RECREATE LEG. A fresh runtime per iteration, the same
-# one-column fork each time: the gap6/gap7 class only manifests across
-# teardown/re-create of the pool the tiled State is dispatched on.
+# one-column fork each time: use-after-free classes in the dispatch State only
+# show across teardown and re-creation of the pool the tiled State runs on.
+# `test_concat_byte_equivalence.mojo` adds a multi-column soak.
 #
-# ⚠ R7 IS THE SECOND DEFECT THE FIRST FIX EXPOSED. Admitted, cbq05's concat
-# forked 20 equal-ROW tiles whose payload-plus-offsets cost ranged 32.7..151.1
-# MB against a 56.8 MB mean, so the fork ran at occupancy 0.49-0.63. R7 pins
+# ⚠ R7 COVERS THE TILE BOUNDS. Admitted, a skewed STRING column cut into
+# equal-ROW tiles gives tiles of very unequal payload-plus-offsets cost, so the
+# fork runs at low occupancy. R7 pins
 # `concat_string_tile_bounds.string_tile_row_bounds` to a ONE-ROW balance bound
 # computed from the generator alone, and proves the fixture is skewed enough
-# that an equal-row cut breaks it. It FAILED against an equal-row stub of the
-# same signature before the byte-balanced body landed.
+# that an equal-row cut breaks it.
 #
 # FIXTURES: ragged batch sizes (zero-row and one-row batches included) so tile
-# boundaries land strictly inside batches, and cbq05's own value shape -- most
+# boundaries land strictly inside batches, and a skewed value shape -- most
 # rows EMPTY, the rest variable-length and carrying their row number, so a
 # mis-strided offset cannot reproduce a plausible value -- plus a BYTE-HEAVY
 # row band, so R1/R2/R6 also drive byte-balanced bounds that fall far from the
@@ -121,12 +119,11 @@ def _noop_sink_factory() -> NoopSink:
 
 comptime _HEAVY_LO: Int = 60_000
 comptime _HEAVY_HI: Int = 70_000
-"""A BYTE-HEAVY row band, so the fixture is skewed the way cbq05's column is
-(its 20 equal-ROW tiles ranged 32.7..151.1 MB against a 56.8 MB mean)."""
+"""A BYTE-HEAVY row band, so equal-ROW tiles carry very unequal payload."""
 
 
 def _phrase(i: Int) -> String:
-    """cbq05's shape: three rows in four are EMPTY; the rest vary in length and
+    """Skewed shape: three rows in four are EMPTY; the rest vary in length and
     carry their own row number, so no two non-empty rows share a byte extent.
     Rows in [_HEAVY_LO, _HEAVY_HI) carry a ~300-byte tail, so equal ROW ranges
     are very unequal BYTE ranges (R7 asserts the fixture is that skewed)."""
@@ -297,7 +294,7 @@ def _assert_non_vacuous(label: String, total_rows: Int) raises:
 # between the oracle and the bytes under test.
 #
 # ⚠ AND THE MULTISET SORTS UNIQUE KEYS. Three rows in four are "" by design
-# (cbq05's shape), so the sorted oracle is spelled as (a) the EMPTY count and
+# (the skewed shape), so the sorted oracle is spelled as (a) the EMPTY count and
 # (b) the sorted FNV-1a fingerprints of the NON-empty values -- every non-empty
 # value embeds its row number, so those keys are unique and the sort never sees
 # a long duplicate run. Equal as multisets iff (a) and (b) are equal (a 64-bit
@@ -448,8 +445,8 @@ def _assert_ints_match(label: String, imm out: RecordBatch, total: Int) raises:
 
 
 def test_r1_one_string_column_forks_tiled() raises:
-    """THE cbq05 SHAPE. One non-null STRING column, mostly empty rows, ragged
-    batches, 4 workers. Pre-change: calls=0 (serial on the driver)."""
+    """THE SKEWED SHAPE. One non-null STRING column, mostly empty rows, ragged
+    batches, 4 workers. A serial route would record calls=0."""
     var label = String("R1 one STRING column")
     var sizes = _ragged_sizes(160_000)
     var total = _total(sizes)
@@ -538,9 +535,9 @@ def test_r6_destroy_recreate_pool_soak() raises:
 # R7 -- STRING tile bounds are BYTE-balanced, not ROW-balanced
 # =============================================================================
 #
-# The concat's wall is its LARGEST tile. On cbq05 the 20 equal-ROW string tiles
-# carried 32.7..151.1 MB of payload-plus-offsets against a 56.8 MB mean, and the
-# fork ran at occupancy 0.49-0.63. `string_tile_row_bounds` cuts by COST
+# The concat's wall is its LARGEST tile. Equal-ROW string tiles of a skewed
+# column carry very unequal payload-plus-offsets. `string_tile_row_bounds` cuts
+# by COST
 # (payload bytes + 4 B/row). The oracle below is computed from the generator
 # alone -- no concat code -- and the bound is ONE ROW: a tile cannot split a
 # row, so each tile may exceed `ceil(total_cost / tiles)` by at most the

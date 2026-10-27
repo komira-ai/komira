@@ -8,9 +8,10 @@
 # without a probe row (the probe's `table_slots`, derived from sizeof, then
 # differs from its count of `slot` rows).
 # Mutant planted: CUdfCapabilities' `udf_class` and `features` swapped in the
-# Mojo mirror: red ("offsetof komira_udf_capabilities.features: C 52, Mojo
-# 56"); the conformance tests go red with it, reading the class from the
-# wrong word.
+# Mojo mirror: red ("offsetof komira_udf_capabilities.features: C 36, Mojo
+# 40"); the conformance tests go red with it, reading the class from the
+# wrong word. A field the design removed (section 4.2: threading, hosting,
+# ...) left in the Mojo mirror only: red on the offsets of every later field.
 
 from std.sys import size_of
 from std.testing import assert_equal, assert_true
@@ -147,14 +148,9 @@ def _udf_rows(mut r: Rows):
     r.add("offsetof komira_udf_capabilities.runtime_abi", Int(UnsafePointer(to=c[].runtime_abi)) - cb)
     r.add("offsetof komira_udf_capabilities.max_descriptor_version", Int(UnsafePointer(to=c[].max_descriptor_version)) - cb)
     r.add("offsetof komira_udf_capabilities.shapes", Int(UnsafePointer(to=c[].shapes)) - cb)
-    r.add("offsetof komira_udf_capabilities.threading", Int(UnsafePointer(to=c[].threading)) - cb)
-    r.add("offsetof komira_udf_capabilities.thread_affine", Int(UnsafePointer(to=c[].thread_affine)) - cb)
-    r.add("offsetof komira_udf_capabilities.transports", Int(UnsafePointer(to=c[].transports)) - cb)
-    r.add("offsetof komira_udf_capabilities.hosting", Int(UnsafePointer(to=c[].hosting)) - cb)
     r.add("offsetof komira_udf_capabilities.devices", Int(UnsafePointer(to=c[].devices)) - cb)
     r.add("offsetof komira_udf_capabilities.features", Int(UnsafePointer(to=c[].features)) - cb)
     r.add("offsetof komira_udf_capabilities.udf_class", Int(UnsafePointer(to=c[].udf_class)) - cb)
-    r.add("offsetof komira_udf_capabilities.global_lock", Int(UnsafePointer(to=c[].global_lock)) - cb)
     free_zeroed(c.bitcast[NoneType]())
 
 
@@ -246,18 +242,12 @@ def _const_rows(mut r: Rows):
     r.add("const KOMIRA_UDF_SHAPE_AGG_PLAIN", Int(SHAPE_AGG_PLAIN))
     r.add("const KOMIRA_UDF_SHAPE_AGG_MERGEABLE", Int(SHAPE_AGG_MERGEABLE))
     r.add("const KOMIRA_UDF_SHAPE_STEP", Int(SHAPE_STEP))
-    r.add("const KOMIRA_UDF_THREAD_SAFE", Int(THREAD_SAFE))
-    r.add("const KOMIRA_UDF_CONTEXT_PER_THREAD", Int(CONTEXT_PER_THREAD))
-    r.add("const KOMIRA_UDF_SINGLE_THREAD", Int(SINGLE_THREAD))
-    r.add("const KOMIRA_UDF_TRANSPORT_IN_PROCESS", Int(TRANSPORT_IN_PROCESS))
-    r.add("const KOMIRA_UDF_TRANSPORT_WORKER", Int(TRANSPORT_WORKER))
-    r.add("const KOMIRA_UDF_HOSTING_NONE", Int(HOSTING_NONE))
-    r.add("const KOMIRA_UDF_HOSTING_EMBEDDED", Int(HOSTING_EMBEDDED))
-    r.add("const KOMIRA_UDF_HOSTING_HOST_INTERPRETER", Int(HOSTING_HOST_INTERPRETER))
     r.add("const KOMIRA_UDF_CLASS_NATIVE", Int(CLASS_NATIVE))
     r.add("const KOMIRA_UDF_CLASS_MANAGED", Int(CLASS_MANAGED))
     r.add("const KOMIRA_UDF_DEVICE_CPU", Int(DEVICE_CPU))
     r.add("const KOMIRA_UDF_FEATURE_MEMORY_REPORT", Int(FEATURE_MEMORY_REPORT))
+    r.add("const KOMIRA_UDF_FEATURE_CONTAINS_CRASHES", Int(FEATURE_CONTAINS_CRASHES))
+    r.add("const KOMIRA_UDF_FEATURE_FORCED_STOP", Int(FEATURE_FORCED_STOP))
     r.add("const KOMIRA_UDF_FORM_PACKAGE", Int(FORM_PACKAGE))
     r.add("const KOMIRA_UDF_FORM_BUNDLE", Int(FORM_BUNDLE))
     r.add("const KOMIRA_UDF_FORM_VALUE", Int(FORM_VALUE))

@@ -1,53 +1,22 @@
 # =============================================================================
 # test_shuffle_stream_combine.mojo
-#   Phase B3 tests for `stream_combine_segment` — the producer STREAM-COMBINE
-#   (distributed-shuffle).
+#   Tests of `stream_combine_segment` (the unspilled streaming combine).
 # =============================================================================
 #
-# B3 replaces Phase A's one-shot SegWriter PUT with a STREAMING multipart write
-# (open_write once -> per-partition append_bytes->take->write_at -> dense trailer
-# -> close_write) whose peak RAM is bounded to ~one partition encode-buffer + one
-# multipart part (NOT the whole producer output). It DRIVES the B2
-# `ShuffleCombineBuffer` as the per-partition encode accumulator and REUSES the
-# objectstore `.seg` dense-trailer codec.
+# Each test names what it proves:
 #
-# Three tests, in falsifying order of importance:
+#   1. byte identity: the combined `.seg` equals the one `SegWriter` builds for
+#      the same slices (an empty middle partition included).
+#   2. rows exactly once: slices of 8-byte row ids, read back partition by
+#      partition through `SegReader`, hold every input id exactly once, and the
+#      slots' row counts match the rows read.
+#   3. staged-byte count: the combine's own staged bytes are the largest single
+#      slice, never the sum of the slices.
+#   4. failure is reported: a source that raises mid-way surfaces its message to
+#      the caller and leaves no partial `.seg` behind.
 #
-#   1. BYTE-IDENTITY vs SegWriter (THE load-bearing contract) — stream-combine R
-#      partitions over the LocalFs FileSystem (multipart write path) -> read the
-#      whole `.seg` bytes back; build the SAME `.seg` via Phase A's `write_segment`
-#      -> assert the two byte blobs are BYTE-FOR-BYTE IDENTICAL. This is the
-#      contract that lets `read_shuffle_partition`/`SegReader` consume a
-#      stream-combined `.seg` UNCHANGED. Any drift in body order, dense-slot
-#      accounting, or trailer/footer bytes fails this.
-#
-#   2. ROUND-TRIP via SegReader — stream-combine -> for each p, read partition p
-#      back via SegReader (the resolve/get_range path) -> assert == the input
-#      slice. Includes an EMPTY MIDDLE partition (zero-length slot) and asserts it
-#      reads ZERO bytes AND that its non-empty neighbors read correctly (no slice
-#      shift from the empty middle's dense slot).
-#
-#   3. BOUNDED RAM (the B3 guarantee) — drive R partitions of B bytes each through
-#      the combine; assert the `ShuffleCombineBuffer.high_water()` stays ~one
-#      partition slice (the LARGEST single partition), NOT the R×B sum. Peak
-#      bounded by the largest single partition is the B3 property. (Scoping note:
-#      the FULL 2 GB single-oversized-partition spill is B4; the bounded-RAM GATE
-#      is B5. B3 proves the per-partition encode buffer never accumulates the sum.)
-#
-# Determinism: LocalFs ONLY (multipart write surface) + LocalFsConditionalStore
-# (the SegReader read-back). NO wall-clock / network.
-#
-# COVERAGE GAP (flagged for the cloud path): this suite is LocalFs-ONLY, so the
-# S3 ">= 1 uploaded part" corner is NOT exercised here. On S3, `close_write`
-# raises "no parts uploaded" if zero parts were issued (s3_fs.mojo); the
-# stream-combine relies on the ALWAYS-non-empty dense trailer (24*R + 16 bytes)
-# becoming the trailing remainder part so an all-empty producer (every partition
-# zero-length) still uploads >= 1 part. LocalFs has no such requirement, so that
-# invariant is unguarded by this suite — it needs an S3Fs (or all-empty-producer)
-# test on the cloud path.
+# LocalFs only; nothing here depends on time or on threads.
 # =============================================================================
-
-from std.time import perf_counter_ns
 
 from std.testing import assert_equal, assert_true
 
@@ -58,29 +27,18 @@ from komira_objectstore.local_fs_conditional_store import (
     LocalFsConditionalStore,
 )
 from komira_objectstore.path import Path
-from komira_shuffle.entry import PartitionSlot
-from komira_shuffle.segment import (
-    SegWriter,
-    SegReader,
-    write_segment,
-)
+from komira_shuffle.segment import SegWriter, SegReader, write_segment
 
 from komira_engine_runtime.spill.shuffle_stream_combine import (
     ListPartitionSource,
+    PartitionSliceSource,
     stream_combine_segment,
-    stream_combine_segment_instrumented,
 )
 from komira_libc.posix import _read_env
 
 
-# ---------------------------------------------------------------------------
-# Scratch files go under $TEST_TMPDIR (set by the test runner, unique per
-# action), else $TMPDIR; a fixed path would be shared by concurrent runs of
-# this test. `_read_env` rather than `std.os.getenv`: komira_libc.posix owns
-# the one `getenv` declaration in the link.
-# ---------------------------------------------------------------------------
+# Scratch files go under $TEST_TMPDIR (unique per test action), else $TMPDIR.
 def _scratch_dir() raises -> String:
-    """The directory THIS execution may write scratch files into."""
     var d = _read_env("TEST_TMPDIR")
     if d.byte_length() == 0:
         d = _read_env("TMPDIR")
@@ -89,23 +47,12 @@ def _scratch_dir() raises -> String:
     return d
 
 
-# -----------------------------------------------------------------------------
-# Scratch root + byte helpers (mirrors the Phase-A harness shape).
-# -----------------------------------------------------------------------------
 def _scratch_root(tag: String) raises -> String:
-    var t = UInt64(perf_counter_ns())
-    return (
-        (_scratch_dir() + String("/komira_shuffle_streamcombine_"))
-        + tag
-        + String("_")
-        + String(t)
-    )
+    return _scratch_dir() + String("/komira_stream_combine_") + tag
 
 
 def _make_payload(n: Int, marker: UInt32) -> List[UInt8]:
-    """Deterministic n-byte payload seeded by `marker`; distinct markers produce
-    distinct content at every position (a stale/shifted byte surfaces as a
-    mismatch)."""
+    """Deterministic n-byte payload seeded by `marker`."""
     var out = List[UInt8]()
     out.reserve(n)
     for i in range(n):
@@ -124,11 +71,8 @@ def _bytes_eq(a: List[UInt8], b: List[UInt8]) -> Bool:
 
 
 def _ensure_root(root: String) raises:
-    """Create the scratch root directory. The LocalFs FileSystem writes to a RAW
-    path and does NOT create parent dirs (RawWriteFd.open_truncate fails on a
-    missing dir); LocalFsConditionalStore's ctor mkdir's its root, so
-    constructing one creates the dir. We do this BEFORE the FS write so the
-    stream-combine's open_write succeeds, then read back via the same store."""
+    """LocalFs does not create parent directories; the store's constructor
+    creates its root."""
     var store = LocalFsConditionalStore(root.copy())
     _ = store^
 
@@ -144,31 +88,29 @@ def _cleanup(root: String):
         pass
 
 
-# Build R deterministic partition slices + their row counts. `empty_partitions`
-# marks which partitions are zero-length (empty). Non-empty partition p gets
-# `base_len` bytes seeded by a per-partition marker, row_count = `base_rows`.
 def _make_partitions(
-    r: Int, base_len: Int, base_rows: Int64, empty: List[Bool]
+    lens: List[Int], rows: Int64
 ) -> Tuple[List[List[UInt8]], List[Int64]]:
+    """Partition p holds `lens[p]` bytes (0 = empty), seeded by p."""
     var slices = List[List[UInt8]]()
     var row_counts = List[Int64]()
-    for p in range(r):
-        if empty[p]:
-            slices.append(List[UInt8]())  # zero-length body
+    for p in range(len(lens)):
+        if lens[p] == 0:
+            slices.append(List[UInt8]())
             row_counts.append(Int64(0))
         else:
-            var marker = UInt32(p + 1) * UInt32(2654435761 & 0xFFFF)
-            slices.append(_make_payload(base_len, marker))
-            row_counts.append(base_rows)
+            slices.append(_make_payload(lens[p], UInt32(p + 1) * UInt32(40503)))
+            row_counts.append(rows)
     return (slices^, row_counts^)
 
 
-# Build the same `.seg` via Phase A's SegWriter/write_segment over the SAME R
-# slices (the byte-identity oracle). The key is chosen with NO percent-encoded
-# bytes so LocalFsConditionalStore._path_for_key(key) == root + "/" + key.
-def _write_segwriter_seg(
-    root: String, key: String, slices: List[List[UInt8]], row_counts: List[Int64]
+def _segwriter_bytes(
+    root: String,
+    key: String,
+    slices: List[List[UInt8]],
+    row_counts: List[Int64],
 ) raises -> List[UInt8]:
+    """The `.seg` bytes `SegWriter` builds for the same slices."""
     var store = LocalFsConditionalStore(root.copy())
     var w = SegWriter()
     for p in range(len(slices)):
@@ -179,234 +121,228 @@ def _write_segwriter_seg(
     return whole^
 
 
+def _read_back(root: String, key: String) raises -> List[UInt8]:
+    var store = LocalFsConditionalStore(root.copy())
+    var whole = store.get(Path.parse(key))
+    _ = store^
+    return whole^
+
+
 # -----------------------------------------------------------------------------
-# Test 1 — BYTE-IDENTITY vs SegWriter (THE load-bearing contract).
+# 1. byte identity with SegWriter
 # -----------------------------------------------------------------------------
-def test_stream_combine_byte_identical_to_segwriter() raises:
-    print("[test_stream_combine_byte_identical_to_segwriter] starting...")
+def test_byte_identical_to_segwriter() raises:
     var root = _scratch_root(String("identity"))
     _ensure_root(root)
-    var r = 4
-    var base_len = 7000  # non-trivial body size (and not a part multiple)
-
-    # Partitions: pid 1 is an EMPTY MIDDLE partition (zero-length slot). The rest
-    # are non-empty with distinct content + a non-trivial row count.
-    var empty = List[Bool]()
-    empty.append(False)  # pid 0 non-empty
-    empty.append(True)   # pid 1 EMPTY (middle)
-    empty.append(False)  # pid 2 non-empty
-    empty.append(False)  # pid 3 non-empty
-    var parts = _make_partitions(r, base_len, Int64(13), empty)
+    var lens = List[Int]()
+    lens.append(7000)
+    lens.append(0)  # empty middle partition
+    lens.append(7000)
+    lens.append(123)
+    var parts = _make_partitions(lens, Int64(13))
     var slices = parts[0].copy()
     var row_counts = parts[1].copy()
 
-    # ---- (A) STREAM-COMBINE via the LocalFs FileSystem (multipart write path).
-    # Key with no percent-encoded bytes so the FS raw path == the store's
-    # flat-encoded path for the same key (so SegReader/get reads the same file).
-    var sc_key = String("streamcombine_p0.seg")
-    var sc_path = root + "/" + sc_key
     var fs = LocalFs[NoopSink].new()
     var src = ListPartitionSource(slices.copy(), row_counts.copy())
-    var slots = stream_combine_segment(fs, sc_path, src^)
-    assert_equal(len(slots), r, "stream-combine returns R dense slots")
+    var res = stream_combine_segment(fs, root + "/combined.seg", src^)
+    assert_equal(len(res.slots), len(lens), "one dense slot per partition")
+    assert_equal(res.chunks_spilled, 0, "the unspilled combine spills nothing")
 
-    # Read the stream-combined `.seg` whole bytes back (via the store -> the
-    # same file the FS wrote).
-    var store = LocalFsConditionalStore(root.copy())
-    var sc_bytes = store.get(Path.parse(sc_key))
-    _ = store^
-
-    # ---- (B) The Phase-A SegWriter `.seg` over the SAME R slices (the oracle).
-    var sw_bytes = _write_segwriter_seg(
-        root, String("segwriter_oracle.seg"), slices, row_counts
-    )
-
-    # ---- THE CONTRACT: byte-for-byte identical.
-    assert_equal(
-        len(sc_bytes),
-        len(sw_bytes),
-        "stream-combine `.seg` length == SegWriter `.seg` length",
-    )
+    var combined = _read_back(root, String("combined.seg"))
+    var oracle = _segwriter_bytes(root, String("oracle.seg"), slices, row_counts)
+    assert_equal(len(combined), len(oracle), "same length as the SegWriter seg")
     assert_true(
-        _bytes_eq(sc_bytes, sw_bytes),
-        "stream-combine `.seg` is BYTE-IDENTICAL to SegWriter `.seg`",
+        _bytes_eq(combined, oracle), "bytes equal the SegWriter seg"
     )
-    print(
-        "  byte-identity: ",
-        len(sc_bytes),
-        " bytes, IDENTICAL to SegWriter",
+    assert_equal(Int(res.slots[1].length), 0, "the empty slot has length 0")
+    assert_equal(
+        Int(res.slots[2].offset),
+        Int(res.slots[1].offset),
+        "the empty slot leaves the running offset unchanged",
     )
-    _ = slices^
-    _ = row_counts^
     _cleanup(root)
-    print("[test_stream_combine_byte_identical_to_segwriter] PASS")
 
 
 # -----------------------------------------------------------------------------
-# Test 2 — ROUND-TRIP via SegReader (incl. empty middle partition).
+# 2. every row exactly once
 # -----------------------------------------------------------------------------
-def test_stream_combine_round_trip_via_segreader() raises:
-    print("[test_stream_combine_round_trip_via_segreader] starting...")
-    var root = _scratch_root(String("roundtrip"))
-    _ensure_root(root)
-    var r = 4
-    var base_len = 5000
+def _row_partition(id: Int) -> Int:
+    """The partition row `id` belongs to: skewed (70% in partition 2), with
+    partition 4 left empty."""
+    var m = id % 10
+    if m < 7:
+        return 2
+    if m == 7:
+        return 0
+    if m == 8:
+        return 3
+    return 1
 
-    # pid 2 is the EMPTY MIDDLE partition this time (zero-length slot between two
-    # non-empty neighbors pid 1 and pid 3).
-    var empty = List[Bool]()
-    empty.append(False)
-    empty.append(False)
-    empty.append(True)   # pid 2 EMPTY (middle)
-    empty.append(False)
-    var parts = _make_partitions(r, base_len, Int64(9), empty)
-    var slices = parts[0].copy()
-    var row_counts = parts[1].copy()
 
-    var sc_key = String("roundtrip_p0.seg")
-    var sc_path = root + "/" + sc_key
-    var fs = LocalFs[NoopSink].new()
-    var src = ListPartitionSource(slices.copy(), row_counts.copy())
-    var _slots = stream_combine_segment(fs, sc_path, src^)
+def _make_row_partitions(
+    n_rows: Int, r: Int
+) -> Tuple[List[List[UInt8]], List[Int64]]:
+    """Slices of 8-byte little-endian row ids 0..n_rows-1, routed by
+    `_row_partition`."""
+    var slices = List[List[UInt8]]()
+    var counts = List[Int64]()
+    for _ in range(r):
+        slices.append(List[UInt8]())
+        counts.append(Int64(0))
+    for id in range(n_rows):
+        var p = _row_partition(id)
+        for b in range(8):
+            slices[p].append(UInt8((id >> (8 * b)) & 0xFF))
+        counts[p] += 1
+    return (slices^, counts^)
 
-    # Read EACH partition back via SegReader (the resolve/get_range path) and
-    # assert byte-equal to the input slice. The empty middle reads ZERO bytes.
+
+def _count_rows_once(
+    root: String, key: String, n_rows: Int, r: Int, slots_rows: List[Int64]
+) raises:
+    """Read every partition back and assert each id in 0..n_rows-1 appears in
+    exactly one partition, exactly once, and that each slot's row count equals
+    the rows read from its partition."""
+    var seen = List[Int](length=n_rows, fill=0)
     var store = LocalFsConditionalStore(root.copy())
-    var reader = SegReader[LocalFsConditionalStore](store.clone(), Path.parse(sc_key))
-
+    var reader = SegReader[LocalFsConditionalStore](
+        store.clone(), Path.parse(key)
+    )
+    var total = 0
     for p in range(r):
         var back = reader.read_partition(p)
-        if empty[p]:
-            assert_equal(
-                len(back),
-                0,
-                "empty MIDDLE partition " + String(p) + " reads ZERO bytes",
-            )
-        else:
-            assert_true(
-                _bytes_eq(back, slices[p]),
-                "partition " + String(p) + " round-trips byte-identical",
-            )
+        assert_equal(len(back) % 8, 0, "partition bytes are whole rows")
+        var rows_here = len(back) // 8
+        assert_equal(
+            Int(slots_rows[p]), rows_here, "slot row count == rows read back"
+        )
+        for i in range(rows_here):
+            var id = 0
+            for b in range(8):
+                id |= Int(back[i * 8 + b]) << (8 * b)
+            assert_true(id >= 0 and id < n_rows, "row id in range")
+            seen[id] += 1
+            assert_equal(_row_partition(id), p, "row landed in its partition")
+        total += rows_here
+    for id in range(n_rows):
+        assert_equal(seen[id], 1, "row " + String(id) + " appears exactly once")
+    assert_equal(total, n_rows, "total rows read == rows in")
     _ = reader^
     _ = store^
-    _ = slices^
-    _ = row_counts^
+
+
+def test_every_row_exactly_once() raises:
+    var root = _scratch_root(String("rows"))
+    _ensure_root(root)
+    var n_rows = 20000
+    var r = 5
+    var parts = _make_row_partitions(n_rows, r)
+    var fs = LocalFs[NoopSink].new()
+    var src = ListPartitionSource(parts[0].copy(), parts[1].copy())
+    var res = stream_combine_segment(fs, root + "/rows.seg", src^)
+    var slot_rows = List[Int64]()
+    for p in range(r):
+        slot_rows.append(res.slots[p].row_count)
+    assert_equal(Int(slot_rows[4]), 0, "partition 4 is empty")
+    _count_rows_once(root, String("rows.seg"), n_rows, r, slot_rows)
     _cleanup(root)
-    print("[test_stream_combine_round_trip_via_segreader] PASS")
 
 
 # -----------------------------------------------------------------------------
-# Test 3 — BOUNDED RAM (the B3 guarantee).
+# 3. staged-byte count
 # -----------------------------------------------------------------------------
-def test_stream_combine_bounded_ram() raises:
-    print("[test_stream_combine_bounded_ram] starting...")
-    var root = _scratch_root(String("bounded"))
+def test_staged_bytes_are_one_slice_not_the_sum() raises:
+    var root = _scratch_root(String("staged"))
     _ensure_root(root)
 
-    # Drive R partitions of B bytes each through the combine. The B2 combine
-    # buffer's high_water() must stay bounded to ~ONE partition slice (B), NOT
-    # the R×B sum — `take()` frees the slice at each partition boundary so the
-    # per-partition encode buffer never accumulates.
-    #
-    # SCOPING NOTE (in-test): peak bounded by the LARGEST single partition is the
-    # B3 property. The FULL 2 GB single-oversized-partition SPILL is B4; the
-    # bounded-RAM GATE (the 2 GB hot-partition assertion) is B5. B3 proves the
-    # buffer never holds the sum — a uniform-then-skewed pair pins that.
-    var r = 32
-    var per_partition = 8192  # bytes per uniform partition slice
-
-    var empty = List[Bool]()
-    for _p in range(r):
-        empty.append(False)
-    var parts = _make_partitions(r, per_partition, Int64(1), empty)
-    var slices = parts[0].copy()
-    var row_counts = parts[1].copy()
-
-    var sc_key = String("bounded_p0.seg")
-    var sc_path = root + "/" + sc_key
+    var lens = List[Int]()
+    for _ in range(32):
+        lens.append(8192)
+    var parts = _make_partitions(lens, Int64(1))
     var fs = LocalFs[NoopSink].new()
-    var src = ListPartitionSource(slices.copy(), row_counts.copy())
-    var res = stream_combine_segment_instrumented(fs, sc_path, src^)
+    var src = ListPartitionSource(parts[0].copy(), parts[1].copy())
+    var res = stream_combine_segment(fs, root + "/uniform.seg", src^)
+    assert_equal(res.peak_staged_bytes, 8192, "uniform: one slice staged")
+    assert_equal(res.high_water, 8192, "uniform: buffer peak is one slice")
+    assert_true(res.peak_staged_bytes < 32 * 8192, "far below the sum")
 
-    var sum_all = r * per_partition  # what hw would be if take() never freed
-    print("  R x B uniform: high_water()=", res.high_water, " bytes")
-    print("    (sum of all R partitions would be ", sum_all, " bytes)")
-    assert_equal(
-        res.high_water,
-        per_partition,
-        "uniform: high_water == ONE partition slice (NOT the R×B sum)",
+    # One hot partition: the count follows the largest slice.
+    var skew = List[Int]()
+    for p in range(32):
+        skew.append(65536 if p == 16 else 256)
+    var sparts = _make_partitions(skew, Int64(1))
+    var sfs = LocalFs[NoopSink].new()
+    var ssrc = ListPartitionSource(sparts[0].copy(), sparts[1].copy())
+    var sres = stream_combine_segment(sfs, root + "/skew.seg", ssrc^)
+    assert_equal(sres.peak_staged_bytes, 65536, "skewed: the hot slice")
+    assert_equal(sres.high_water, 65536, "skewed: buffer peak is the hot slice")
+    var oracle = _segwriter_bytes(
+        root, String("skew_oracle.seg"), sparts[0], sparts[1]
     )
     assert_true(
-        res.high_water < sum_all,
-        "uniform: high_water bounded below the R×B sum (take() freed each slice)",
+        _bytes_eq(_read_back(root, String("skew.seg")), oracle),
+        "skewed combine equals SegWriter",
     )
-
-    # SKEWED: one HOT partition larger than the rest. The high-water must track
-    # the single largest slice (the hot one), still bounded — never the sum.
-    var hot_idx = r // 2
-    var hot_len = per_partition * 8  # the hot partition
-    var cold_len = 256
-    var skew_slices = List[List[UInt8]]()
-    var skew_rcs = List[Int64]()
-    var skew_total = 0
-    for p in range(r):
-        var ln = hot_len if p == hot_idx else cold_len
-        var marker = UInt32(p + 7) * UInt32(53)
-        skew_slices.append(_make_payload(ln, marker))
-        skew_rcs.append(Int64(1))
-        skew_total += ln
-
-    var sc_key2 = String("bounded_skew_p0.seg")
-    var sc_path2 = root + "/" + sc_key2
-    var fs2 = LocalFs[NoopSink].new()
-    var src2 = ListPartitionSource(skew_slices.copy(), skew_rcs.copy())
-    var res2 = stream_combine_segment_instrumented(fs2, sc_path2, src2^)
-
-    print("  skewed: hot=", hot_len, " bytes; high_water()=", res2.high_water)
-    print("    (sum of all skewed partitions would be ", skew_total, " bytes)")
-    assert_equal(
-        res2.high_water,
-        hot_len,
-        "skewed: high_water == the single HOT slice (NOT the sum)",
-    )
-    assert_true(
-        res2.high_water < skew_total,
-        "skewed: high_water bounded below the sum (peak = largest single slice)",
-    )
-
-    # Byte-identity STILL holds under the skewed drive (sanity: the instrumented
-    # form produces the same `.seg` as SegWriter).
-    var store = LocalFsConditionalStore(root.copy())
-    var sc2_bytes = store.get(Path.parse(sc_key2))
-    _ = store^
-    var sw2_bytes = _write_segwriter_seg(
-        root, String("bounded_skew_oracle.seg"), skew_slices, skew_rcs
-    )
-    assert_true(
-        _bytes_eq(sc2_bytes, sw2_bytes),
-        "skewed stream-combine `.seg` is BYTE-IDENTICAL to SegWriter",
-    )
-
-    _ = slices^
-    _ = row_counts^
-    _ = skew_slices^
-    _ = skew_rcs^
     _cleanup(root)
-    print("[test_stream_combine_bounded_ram] PASS")
+
+
+# -----------------------------------------------------------------------------
+# 4. a failure is reported, and no partial seg is left
+# -----------------------------------------------------------------------------
+struct _FailingSource(PartitionSliceSource, Movable, Deinitable):
+    """Serves `ok` good partitions of 1000 bytes, then raises."""
+
+    var ok: Int
+    var r: Int
+
+    def __init__(out self, ok: Int, r: Int):
+        self.ok = ok
+        self.r = r
+
+    def partition_count(self) -> Int:
+        return self.r
+
+    def slice_bytes(mut self, p: Int) raises -> List[UInt8]:
+        if p >= self.ok:
+            raise Error("source exploded at partition " + String(p))
+        return _make_payload(1000, UInt32(p + 1))
+
+    def slice_row_count(self, p: Int) -> Int64:
+        return Int64(1)
+
+
+def test_source_failure_is_reported_and_seg_aborted() raises:
+    var root = _scratch_root(String("failure"))
+    _ensure_root(root)
+    var fs = LocalFs[NoopSink].new()
+    var raised = False
+    var message = String("")
+    try:
+        _ = stream_combine_segment(
+            fs, root + "/failed.seg", _FailingSource(2, 4)
+        )
+    except e:
+        raised = True
+        message = String(e)
+    assert_true(raised, "a source failure must raise")
+    assert_true(
+        "source exploded at partition 2" in message,
+        "the raised error carries the source's message: " + message,
+    )
+
+    var left_behind = True
+    try:
+        _ = _read_back(root, String("failed.seg"))
+    except:
+        left_behind = False
+    assert_true(not left_behind, "the aborted write leaves no seg behind")
+    _cleanup(root)
 
 
 def main() raises:
-    print("====================================================")
-    print(" stream_combine_segment — Phase B3 tests")
-    print("   (streaming multipart `.seg` write; byte-identical")
-    print("    to SegWriter; bounded per-partition RAM via B2)")
-    print("====================================================")
-    print()
-    test_stream_combine_byte_identical_to_segwriter()
-    test_stream_combine_round_trip_via_segreader()
-    test_stream_combine_bounded_ram()
-    print()
-    print(
-        "[test_shuffle_stream_combine] all 3 tests (byte-identity + round-trip"
-        " + bounded-RAM) PASS"
-    )
+    test_byte_identical_to_segwriter()
+    test_every_row_exactly_once()
+    test_staged_bytes_are_one_slice_not_the_sum()
+    test_source_failure_is_reported_and_seg_aborted()
+    print("test_shuffle_stream_combine: all 4 tests PASS")

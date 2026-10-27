@@ -174,8 +174,8 @@ struct LocalDiskSpillStorage(SpillStorage):
         return self._impl.nbytes_in_use()
 
     def sync(mut self) raises:
-        """Delegate to the composed conformer (LocalFs flushes per-chunk at
-        write time; this is a no-op until a FileSystem sync surface lands)."""
+        """Delegate to the composed conformer, which fsyncs each live chunk
+        file and then the spill directory."""
         self._impl.sync()
 
     # -------------------------------------------------------------------------

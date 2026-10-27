@@ -169,11 +169,15 @@ def test_udf_with_an_empty_read_set_takes_zero_columns_from_its_child() raises:
 
     The UDF reads no column, so the Project below it supplies zero columns:
     it is pruned to zero exprs (a zero-column output whose rows still carry
-    the row count). The scan keeps `*`: a scan cannot express a zero-column
-    read (a source reads an empty projection as every column).
+    the row count). The scan reads one column, `a`: a scan cannot express a
+    zero-column read (a source reads an empty projection as every column),
+    so it keeps the narrowest. The same holds with the UDF straight over the
+    scan.
 
     Catches: an empty `needed` set treated as keep-every-column (the inner
-    Project keeps a, b, so an empty read set cannot be expressed)."""
+    Project keeps a, b, so an empty read set cannot be expressed); the scan
+    left unprojected (`*`, every column read) below or right under the
+    UDF."""
     var placeholder = ExprArray()
     placeholder.append(Expr.alias(Expr.literal(ScalarValue.from_int(1)), "y"))
     var plan = LogicalPlan.project_with_udf(
@@ -185,7 +189,14 @@ def test_udf_with_an_empty_read_set_takes_zero_columns_from_its_child() raises:
     assert_equal(below.tag, PLAN_PROJECT)
     assert_equal(len(below._project.value()[].exprs), 0, "the empty read set kept columns")
     assert_equal(below.output_schema.num_columns(), 0)
-    assert_equal(_proj(below._project.value()[].child[]), String("*"))
+    assert_equal(_proj(below._project.value()[].child[]), String("a"))
+    var direct_placeholder = ExprArray()
+    direct_placeholder.append(Expr.alias(Expr.literal(ScalarValue.from_int(1)), "y"))
+    var direct = push_projections_down(
+        LogicalPlan.project_with_udf(direct_placeholder^, _scan("a,b,c"), _udf(UDF_KIND_MAP))
+    )
+    assert_equal(_count_udfs(direct), 1)
+    assert_equal(_proj(direct._project.value()[].child[]), String("a"))
 
 
 def test_narrowed_project_keeps_its_cse_flag() raises:

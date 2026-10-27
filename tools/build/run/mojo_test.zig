@@ -35,11 +35,11 @@ const Env = struct {
 
     /// `gate mojo` of the fixture behaviour `what`, then `extra`.
     fn args(e: *Env, what: []const u8, extra: []const []const u8) ![]const []const u8 {
-        var l = std.ArrayList([]const u8).init(e.a);
-        try l.appendSlice(&.{ "mojo", "--busybox", e.bb, "--runtime-lib", "rt/lib", "--label", label, "--test" });
-        try l.append(try std.fmt.allocPrint(e.a, "root/bin/{s}", .{what}));
-        try l.appendSlice(&.{ "--marker", "passed" });
-        try l.appendSlice(extra);
+        var l = std.ArrayList([]const u8).empty;
+        try l.appendSlice(e.a, &.{ "mojo", "--busybox", e.bb, "--runtime-lib", "rt/lib", "--label", label, "--test" });
+        try l.append(e.a, try std.fmt.allocPrint(e.a, "root/bin/{s}", .{what}));
+        try l.appendSlice(e.a, &.{ "--marker", "passed" });
+        try l.appendSlice(e.a, extra);
         return l.items;
     }
 
@@ -101,12 +101,16 @@ test "G1 usage: every bad command line exits 2 with its runner's message, and no
         .{ .argv = try e.args("exit", &.{ "--limit-s", "2" }), .msg = "gate_runner: usage error" },
         .{ .argv = try e.args("exit", &.{ "--limit-s", "02", "--limit-report", "coverage" }), .msg = "cov_run: the limit '02' is not a positive whole number of seconds" },
         .{ .argv = try e.args("exit", &.{ "--limit-s", "2", "--limit-report", "other" }), .msg = "gate_runner: --limit-report other: the only report is coverage" },
+        .{ .argv = try e.args("exit", &.{ "--hang-limit-s", "0" }), .msg = "hang_limit: REFUSING: the limit '0' is not a positive whole number of seconds" },
+        .{ .argv = try e.args("exit", &.{ "--hang-limit-s", "1800s" }), .msg = "hang_limit: REFUSING: the limit '1800s' is not a positive whole number of seconds" },
+        .{ .argv = try e.args("exit", &.{ "--hang-limit-s", "5", "--deadline-s", "30", "--runner-timeout-s", "90" }), .msg = "gate_runner: usage error: --hang-limit-s is a limit of its own" },
+        .{ .argv = try e.args("exit", &.{ "--hang-limit-s", "5", "--limit-s", "30", "--limit-report", "coverage" }), .msg = "gate_runner: usage error: --hang-limit-s is a limit of its own" },
         .{ .argv = &.{ "mojo", "--busybox", e.bb, "--runtime-lib", "l", "--label", label, "--test", "root/x", "--marker", "passed" }, .msg = "gate_runner: " },
     };
     for (cases) |c| {
         const r = try e.run(c.argv, .{});
         if (r.status != 2 or !std.mem.startsWith(u8, r.err, c.msg)) {
-            std.debug.print("argv {s}: exit {d}, stderr {s}\n", .{ c.argv, r.status, r.err });
+            std.debug.print("argv {s}: exit {d}, stderr {s}\n", .{ std.mem.join(std.heap.page_allocator, " ", c.argv) catch "", r.status, r.err });
             return error.TestUnexpectedResult;
         }
         try std.testing.expect(!kit.exists(try e.path("passed")));
@@ -241,8 +245,8 @@ test "G8 working directory: <root>/share when it exists, else an empty one; neve
     try std.testing.expectEqualStrings(try std.fmt.allocPrint(e.a, "{s}/root/share", .{e.real}), lineWith(output(r2.err), "cwd ").?);
     // G2: the root is cut at the LAST /bin/.
     try std.fs.cwd().makePath(try e.path("deep/bin/x/share"));
-    var l = std.ArrayList([]const u8).init(e.a);
-    for (try e.args("where", &.{})) |x| try l.append(if (std.mem.eql(u8, x, "root/bin/where")) "deep/bin/x/bin/where" else x);
+    var l = std.ArrayList([]const u8).empty;
+    for (try e.args("where", &.{})) |x| try l.append(e.a, if (std.mem.eql(u8, x, "root/bin/where")) "deep/bin/x/bin/where" else x);
     const r3 = try e.run(l.items, .{});
     try std.testing.expectEqualStrings(try std.fmt.allocPrint(e.a, "{s}/deep/bin/x/share", .{e.real}), lineWith(output(r3.err), "cwd ").?);
 }
@@ -253,8 +257,8 @@ test "G9 marker: exactly `PASS <label>\\n` on exit 0, nothing printed; nothing w
     const e = try Env.init();
     defer e.deinit();
     var argv = try e.args("exit", &.{ "--arg", "0" });
-    var l = std.ArrayList([]const u8).init(e.a);
-    for (argv) |x| try l.append(if (std.mem.eql(u8, x, "passed")) "out/m.passed" else x);
+    var l = std.ArrayList([]const u8).empty;
+    for (argv) |x| try l.append(e.a, if (std.mem.eql(u8, x, "passed")) "out/m.passed" else x);
     try std.fs.cwd().makePath(try e.path("out"));
     const r = try e.run(l.items, .{});
     try std.testing.expectEqual(@as(u8, 0), r.status);
@@ -266,8 +270,8 @@ test "G9 marker: exactly `PASS <label>\\n` on exit 0, nothing printed; nothing w
     try std.testing.expectEqual(@as(u8, 4), red.status);
     try std.testing.expect(!kit.exists(try e.path("passed")));
     // /dev/null is a marker.
-    var n = std.ArrayList([]const u8).init(e.a);
-    for (try e.args("exit", &.{ "--arg", "0" })) |x| try n.append(if (std.mem.eql(u8, x, "passed")) "/dev/null" else x);
+    var n = std.ArrayList([]const u8).empty;
+    for (try e.args("exit", &.{ "--arg", "0" })) |x| try n.append(e.a, if (std.mem.eql(u8, x, "passed")) "/dev/null" else x);
     try std.testing.expectEqual(@as(u8, 0), (try e.run(n.items, .{})).status);
 }
 

@@ -46,7 +46,7 @@ from komira_plan_ir.logical_plan import (
     ExprArray, LogicalPlan, PLAN_PROJECT, PLAN_FILTER, PLAN_AGGREGATE,
     PLAN_JOIN, PLAN_SORT, PLAN_LIMIT, PLAN_DISTINCT, PLAN_TOPN,
     PLAN_PARTITION_BY, PLAN_PARTITION_TOPN, PLAN_ASOF_JOIN, PLAN_UNION,
-    PLAN_CAST_TO_VARCHAR,
+    PLAN_CAST_TO_VARCHAR, PLAN_EXCHANGE,
 )
 from komira_plan_expr.col_expr_bind import over_refusal
 
@@ -171,6 +171,16 @@ def _is_refusal(plan: LogicalPlan) -> Bool:
     return n.startswith("filter(): ") or n.startswith("select(): ")
 
 
+comptime SDK_PLAN_EXCHANGE_REFUSED: StaticString = (
+    "PLAN_EXCHANGE: an optimizer-placed exchange has no lowering in the SDK"
+    " and cannot run here"
+)
+"""The reason carried for a `PLAN_EXCHANGE` node. ⛔ An exchange is refused,
+not walked through: a walk that descended into its child would hand the run a
+plan whose redistribution nothing performs, and a walk that fell through would
+silently answer "no refusal" for a node it never looked at."""
+
+
 def _innermost_refusal(plan: LogicalPlan) -> Optional[LogicalPlan]:
     """A copy of the INNERMOST carried refusal in `plan` (the customer's
     first error; a join's left side first), or None. Walks every plan node
@@ -210,6 +220,14 @@ def _innermost_refusal(plan: LogicalPlan) -> Optional[LogicalPlan]:
             inner = _innermost_refusal(kids[i][])
             if inner:
                 break
+    elif plan.tag == PLAN_EXCHANGE:
+        # REFUSED BY NAME, as a carried refusal (this walk cannot raise).
+        return Optional[LogicalPlan](
+            refused_plan(
+                String("select(): "), String(SDK_PLAN_EXCHANGE_REFUSED),
+                plan.copy(),
+            )
+        )
     if inner:
         return inner^
     if _is_refusal(plan):

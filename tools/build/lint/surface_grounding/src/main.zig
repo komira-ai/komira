@@ -47,12 +47,12 @@ fn read(alloc: std.mem.Allocator, dir: std.fs.Dir, path: []const u8) []const u8 
 
 /// The lines of a TSV input, each split at its first tab.
 fn pairs(alloc: std.mem.Allocator, text: []const u8, what: []const u8) [][2][]const u8 {
-    var list = std.ArrayList([2][]const u8).init(alloc);
+    var list = std.ArrayList([2][]const u8).empty;
     var it = std.mem.splitScalar(u8, text, '\n');
     while (it.next()) |line| {
         if (line.len == 0) continue;
         const tab = std.mem.indexOfScalar(u8, line, '\t') orelse fail("{s}: a line with no tab: {s}", .{ what, line });
-        list.append(.{ line[0..tab], line[tab + 1 ..] }) catch fail("out of memory", .{});
+        list.append(alloc, .{ line[0..tab], line[tab + 1 ..] }) catch fail("out of memory", .{});
     }
     return list.items;
 }
@@ -68,9 +68,9 @@ pub fn main() void {
     var named_path: ?[]const u8 = null;
     var totals: ?[]const u8 = null;
     var out: ?[]const u8 = null;
-    var got = std.ArrayList([]const u8).init(alloc);
-    var want = std.ArrayList([]const u8).init(alloc);
-    var want_name = std.ArrayList([]const u8).init(alloc);
+    var got = std.ArrayList([]const u8).empty;
+    var want = std.ArrayList([]const u8).empty;
+    var want_name = std.ArrayList([]const u8).empty;
     var i: usize = 1;
     while (i < argv.len) : (i += 2) {
         if (i + 1 >= argv.len) usageFail("{s} needs a value", .{argv[i]});
@@ -87,11 +87,11 @@ pub fn main() void {
         } else if (std.mem.eql(u8, a, "--out")) {
             out = v;
         } else if (std.mem.eql(u8, a, "--got")) {
-            got.append(v) catch fail("out of memory", .{});
+            got.append(alloc, v) catch fail("out of memory", .{});
         } else if (std.mem.eql(u8, a, "--want")) {
-            want.append(v) catch fail("out of memory", .{});
+            want.append(alloc, v) catch fail("out of memory", .{});
         } else if (std.mem.eql(u8, a, "--want-name")) {
-            want_name.append(v) catch fail("out of memory", .{});
+            want_name.append(alloc, v) catch fail("out of memory", .{});
         } else usageFail("unknown argument {s}", .{a});
     }
     const ground_path = grounding orelse usageFail("--grounding is required", .{});
@@ -110,10 +110,10 @@ pub fn main() void {
     const fam_rows = pairs(alloc, read(alloc, cwd, fam_path), fam_path);
     const families = alloc.alloc(g.Family, fam_rows.len) catch fail("out of memory", .{});
     for (fam_rows, 0..) |r, k| {
-        var prefixes = std.ArrayList([]const u8).init(alloc);
+        var prefixes = std.ArrayList([]const u8).empty;
         if (!std.mem.eql(u8, r[1], "-")) {
             var it = std.mem.splitScalar(u8, r[1], ',');
-            while (it.next()) |p| prefixes.append(p) catch fail("out of memory", .{});
+            while (it.next()) |p| prefixes.append(alloc, p) catch fail("out of memory", .{});
         }
         families[k] = .{ .path = r[0], .prefixes = prefixes.items, .data = read(alloc, ground, r[0]) };
     }
@@ -121,14 +121,14 @@ pub fn main() void {
     const named = alloc.alloc(g.Named, nam_rows.len) catch fail("out of memory", .{});
     for (nam_rows, 0..) |r, k| named[k] = .{ .what = r[0], .id = r[1] };
 
-    var report = std.ArrayList(u8).init(alloc);
+    var report = std.ArrayList(u8).empty;
     var count = g.check(alloc, families, named, &report) catch fail("out of memory", .{});
     for (got.items, want.items, want_name.items) |gp, wp, wn| {
         count += g.compare(alloc, read(alloc, cwd, gp), read(alloc, cwd, wp), wn, &report) catch fail("out of memory", .{});
     }
 
-    var message = std.ArrayList(u8).init(alloc);
-    const mw = message.writer();
+    var message = std.ArrayList(u8).empty;
+    const mw = message.writer(alloc);
     const status = if (count > 0) "failure" else "success";
     if (count > 0) {
         mw.print("surface_capability_matrix: {d} finding line(s)\n", .{count}) catch fail("out of memory", .{});
@@ -141,12 +141,12 @@ pub fn main() void {
     } else {
         mw.print("surface_capability_matrix: {s}", .{totals_line}) catch fail("out of memory", .{});
     }
-    var json = std.ArrayList(u8).init(alloc);
-    const jw = json.writer();
+    var json = std.Io.Writer.Allocating.init(alloc);
+    const jw = &json.writer;
     jw.print("{{\"version\": 1, \"data\": {{\"status\": \"{s}\", \"message\": ", .{status}) catch fail("out of memory", .{});
-    std.json.encodeJsonString(message.items, .{}, jw) catch fail("out of memory", .{});
+    std.json.Stringify.encodeJsonString(message.items, .{}, jw) catch fail("out of memory", .{});
     jw.writeAll("}}\n") catch fail("out of memory", .{});
-    cwd.writeFile(out_path, json.items) catch |err|
+    cwd.writeFile(.{ .sub_path = out_path, .data = json.written() }) catch |err|
         fail("cannot write {s}: {s}", .{ out_path, @errorName(err) });
     if (count > 0) std.debug.print("{s}", .{message.items});
 }

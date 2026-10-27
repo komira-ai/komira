@@ -3,14 +3,20 @@
 //! Writes one line per case to <report> ("ok <case>" or "BAD <case>: <why>")
 //! and exits 1 if any case is BAD or fewer cases than its floor say ok.
 //!
-//! usage: cases <mojo_compile> <standin> <report>
+//! usage: cases <mojo_compile> <mojo_compile_ticked> <standin> <report>
 //!
 //! Each case runs the wrapper in a directory of its own, with an
 //! environment of exactly PWD, BUCK_SCRATCH_PATH=<case>/bsp, PATH=/nonexistent
-//! and a variable the compiler must not see, under a deadline of its own, so
-//! a watchdog that never fires is a BAD case, not a hung action. After every
-//! case but the SIGKILL one the scratch directory (<case>/bsp/komira) must be
-//! gone, and a child the stand-in recorded (child.pid) must not be alive.
+//! and a variable the compiler must not see. No case has a time limit: a
+//! watchdog that never fires is a case that does not end, which the action's
+//! own limit ends. The cases that depend on the watchdog's ticks run the
+//! ticked wrapper (mojo_compile_ticked.zig), which takes a tick from
+//! descriptor 3 where the shipped wrapper sleeps a second and writes one
+//! byte to descriptor 4 when it has dealt with it: the case sends the ticks,
+//! so it knows how many the watchdog has seen when it acts, and a compiler
+//! that must use CPU is told, through a FIFO, when to (standin.zig). After
+//! every case but the SIGKILL one the scratch directory (<case>/bsp/komira)
+//! must be gone, and a child the stand-in recorded (child.pid) must be dead.
 //!
 //! Built for macOS (tests//functional/watchdog:cases_darwin) it runs the
 //! macOS wrapper (mojo_compile_macos.zig) on a macOS worker: every case but
@@ -47,6 +53,7 @@ fn kill(pid: i32, sig: u6) void {
 var arena: std.mem.Allocator = undefined;
 var root: []const u8 = undefined; // <cwd>/.komira_watchdog_cases
 var wrapper: [:0]const u8 = undefined;
+var wrapper_ticked: [:0]const u8 = undefined;
 var report: std.ArrayList(u8) = undefined;
 var bad = false;
 
@@ -60,11 +67,11 @@ fn str(comptime f: []const u8, args: anytype) []const u8 {
 }
 
 fn strZ(comptime f: []const u8, args: anytype) [:0]const u8 {
-    return std.fmt.allocPrintZ(arena, f, args) catch die("out of memory", .{});
+    return std.fmt.allocPrintSentinel(arena, f, args, 0) catch die("out of memory", .{});
 }
 
 fn writeFile(path: []const u8, data: []const u8) void {
-    std.fs.cwd().writeFile(path, data) catch |e| die("cannot write {s}: {s}", .{ path, @errorName(e) });
+    std.fs.cwd().writeFile(.{ .sub_path = path, .data = data }) catch |e| die("cannot write {s}: {s}", .{ path, @errorName(e) });
 }
 
 fn readFile(path: []const u8) ?[]const u8 {
@@ -106,11 +113,28 @@ fn hostIdentity() []const u8 {
 }
 
 const Run = struct {
-    /// The wrapper's status (128+N when signal N killed it), or null when it
-    /// outlived its deadline (then it was killed).
-    rc: ?u8,
+    /// The wrapper's status (128+N when signal N killed it).
+    rc: u8,
     dir: []const u8,
     log: []const u8,
+    /// Ticks sent to a ticked wrapper before it ended.
+    ticks: u32 = 0,
+    /// Why a driven case could not be carried out, if it could not.
+    problem: ?[]const u8 = null,
+};
+
+/// How a case on the ticked wrapper is driven.
+const Drive = enum {
+    /// The shipped wrapper, which ticks on its own.
+    none,
+    /// Ticks until the wrapper ends.
+    until_exit,
+    /// The compiler burns CPU before each of `rounds` ticks, then ends.
+    burn,
+    /// `nap_ticks` ticks of a compiler that uses none, then it ends.
+    nap,
+    /// The wrapper is sent `sig` once the compiler is up, then ticks until it ends.
+    signal,
 };
 
 const Spec = struct {
@@ -121,6 +145,24 @@ const Spec = struct {
     /// A file in the case directory to give the wrapper as stdin (else
     /// /dev/null). Every wrapper starts with default dispositions.
     stdin_file: ?[]const u8 = null,
+    drive: Drive = .none,
+    /// until_exit: the fewest ticks the watchdog may have seen when it kills.
+    min_ticks: u32 = 0,
+    rounds: u32 = 8,
+    nap_ticks: u32 = 2,
+    sig: u6 = 0,
+};
+
+/// A ticked wrapper as the case sees it: the ends of its two pipes and the
+/// two FIFOs it shares with the stand-in.
+const Ticked = struct {
+    pid: i32,
+    dir: []const u8,
+    tick_w: posix.fd_t,
+    ack_r: posix.fd_t,
+    up: posix.fd_t,
+    cmd: posix.fd_t,
+    sent: u32 = 0,
 };
 
 fn caseDir(name: []const u8) []const u8 {
@@ -131,23 +173,61 @@ fn scratchOf(dir: []const u8) []const u8 {
     return str("{s}/bsp/komira", .{dir});
 }
 
-fn spawn(s: Spec) struct { pid: i32, dir: []const u8 } {
+extern "c" fn mkfifo(path: [*:0]const u8, mode: u16) c_int;
+
+fn makeFifo(path: [:0]const u8) void {
+    if (macos) {
+        if (mkfifo(path, 0o600) != 0) die("cannot make the FIFO {s}", .{path});
+    } else if (posix.errno(linux.mknodat(linux.AT.FDCWD, path, linux.S.IFIFO | 0o600, 0)) != .SUCCESS) {
+        die("cannot make the FIFO {s}", .{path});
+    }
+}
+
+fn openRw(path: [:0]const u8) posix.fd_t {
+    return posix.openZ(path, .{ .ACCMODE = .RDWR, .CLOEXEC = true }, 0) catch |e| die("cannot open {s}: {s}", .{ path, @errorName(e) });
+}
+
+fn spawnTicked(s: Spec) Ticked {
+    const tick = posix.pipe2(.{ .CLOEXEC = true }) catch die("cannot make a pipe", .{});
+    const ack = posix.pipe2(.{ .CLOEXEC = true }) catch die("cannot make a pipe", .{});
     const dir = caseDir(s.name);
     std.fs.cwd().makePath(str("{s}/bsp", .{dir})) catch die("cannot make {s}", .{dir});
-    var argv = std.ArrayList(?[*:0]const u8).init(arena);
-    argv.append(wrapper) catch unreachable;
-    argv.append(strZ("--compiler={s}/{s}", .{ root, s.tc })) catch unreachable;
+    const up_path = strZ("{s}/up", .{dir});
+    const cmd_path = strZ("{s}/cmd", .{dir});
+    makeFifo(up_path);
+    makeFifo(cmd_path);
+    // Open before the stand-in does: it only opens them if they exist.
+    const up = openRw(up_path);
+    const cmd = openRw(cmd_path);
+    const sp = spawnWith(s, wrapper_ticked, tick[0], ack[1]);
+    posix.close(tick[0]);
+    posix.close(ack[1]);
+    return .{ .pid = sp.pid, .dir = dir, .tick_w = tick[1], .ack_r = ack[0], .up = up, .cmd = cmd };
+}
+
+const Spawned = struct { pid: i32, dir: []const u8 };
+
+fn spawn(s: Spec) Spawned {
+    return spawnWith(s, wrapper, -1, -1);
+}
+
+fn spawnWith(s: Spec, exe: [:0]const u8, tick_r: posix.fd_t, ack_w: posix.fd_t) Spawned {
+    const dir = caseDir(s.name);
+    std.fs.cwd().makePath(str("{s}/bsp", .{dir})) catch die("cannot make {s}", .{dir});
+    var argv = std.ArrayList(?[*:0]const u8).empty;
+    argv.append(arena, exe) catch unreachable;
+    argv.append(arena, strZ("--compiler={s}/{s}", .{ root, s.tc })) catch unreachable;
     if (macos) {
-        argv.append("--deployment-target=11.0") catch unreachable;
-        if (host_flag.len > 0) argv.append(host_flag) catch unreachable;
+        argv.append(arena, "--deployment-target=11.0") catch unreachable;
+        if (host_flag.len > 0) argv.append(arena, host_flag) catch unreachable;
     } else {
-        argv.append(strZ("--zig={s}/zig", .{root})) catch unreachable;
-        argv.append("--cc-target=x86_64-linux-gnu") catch unreachable;
+        argv.append(arena, strZ("--zig={s}/zig", .{root})) catch unreachable;
+        argv.append(arena, "--cc-target=x86_64-linux-gnu") catch unreachable;
     }
-    for (s.flags) |f| argv.append(strZ("{s}", .{f})) catch unreachable;
-    argv.append("--") catch unreachable;
-    for (s.mojo) |a| argv.append(strZ("{s}", .{a})) catch unreachable;
-    argv.append(null) catch unreachable;
+    for (s.flags) |f| argv.append(arena, strZ("{s}", .{f})) catch unreachable;
+    argv.append(arena, "--") catch unreachable;
+    for (s.mojo) |a| argv.append(arena, strZ("{s}", .{a})) catch unreachable;
+    argv.append(arena, null) catch unreachable;
     const envp = [_:null]?[*:0]const u8{
         strZ("PWD={s}", .{dir}),
         strZ("BUCK_SCRATCH_PATH={s}/bsp", .{dir}),
@@ -160,7 +240,15 @@ fn spawn(s: Spec) struct { pid: i32, dir: []const u8 } {
     const pid = posix.fork() catch die("cannot fork", .{});
     if (pid == 0) {
         const av: Argv = @ptrCast(argv.items.ptr);
-        if (macos) childMacos(dir_z, log_z, in_z, av, &envp) else childLinux(dir_z, log_z, in_z, av, &envp);
+        // A ticked wrapper gets its tick source on 3 and its acknowledgements
+        // on 4. Moved above the target numbers first: the pipes' own may be 3 or 4.
+        if (tick_r >= 0) {
+            const t: posix.fd_t = @intCast(posix.fcntl(tick_r, posix.F.DUPFD, 10) catch posix.exit(124));
+            const a: posix.fd_t = @intCast(posix.fcntl(ack_w, posix.F.DUPFD, 10) catch posix.exit(124));
+            posix.dup2(t, 3) catch posix.exit(124);
+            posix.dup2(a, 4) catch posix.exit(124);
+        }
+        if (macos) childMacos(dir_z, log_z, in_z, av, &envp, exe) else childLinux(dir_z, log_z, in_z, av, &envp, exe);
     }
     return .{ .pid = pid, .dir = dir };
 }
@@ -169,7 +257,7 @@ const Argv = [*:null]const ?[*:0]const u8;
 
 /// In the forked child: the case directory, the log on stdout and stderr,
 /// the case's stdin, default dispositions, then the wrapper.
-fn childLinux(dir_z: [*:0]const u8, log_z: [*:0]const u8, in_z: [*:0]const u8, argv: Argv, envp: Argv) noreturn {
+fn childLinux(dir_z: [*:0]const u8, log_z: [*:0]const u8, in_z: [*:0]const u8, argv: Argv, envp: Argv, exe: [*:0]const u8) noreturn {
     if (posix.errno(linux.chdir(dir_z)) != .SUCCESS) linux.exit_group(120);
     const log = linux.open(log_z, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
     if (posix.errno(log) != .SUCCESS) linux.exit_group(121);
@@ -178,15 +266,15 @@ fn childLinux(dir_z: [*:0]const u8, log_z: [*:0]const u8, in_z: [*:0]const u8, a
     const in = linux.open(in_z, .{ .ACCMODE = .RDONLY }, 0);
     if (posix.errno(in) != .SUCCESS) linux.exit_group(122);
     _ = linux.dup2(@intCast(in), 0);
-    for ([_]u6{ SIG.HUP, SIG.INT, SIG.QUIT, SIG.TERM }) |sig| {
-        const sa = linux.Sigaction{ .handler = .{ .handler = SIG.DFL }, .mask = linux.empty_sigset, .flags = 0 };
+    for ([_]u6{ SIG.HUP, SIG.INT, SIG.QUIT, SIG.TERM, SIG.PIPE }) |sig| {
+        const sa = linux.Sigaction{ .handler = .{ .handler = SIG.DFL }, .mask = linux.sigemptyset(), .flags = 0 };
         _ = linux.sigaction(sig, &sa, null);
     }
-    _ = linux.execve(wrapper, argv, envp);
+    _ = linux.execve(exe, argv, envp);
     linux.exit_group(123);
 }
 
-fn childMacos(dir_z: [*:0]const u8, log_z: [*:0]const u8, in_z: [*:0]const u8, argv: Argv, envp: Argv) noreturn {
+fn childMacos(dir_z: [*:0]const u8, log_z: [*:0]const u8, in_z: [*:0]const u8, argv: Argv, envp: Argv, exe: [*:0]const u8) noreturn {
     const c = std.c;
     if (c.chdir(dir_z) != 0) c._exit(120);
     const log = c.open(log_z, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, @as(c_uint, 0o644));
@@ -196,11 +284,11 @@ fn childMacos(dir_z: [*:0]const u8, log_z: [*:0]const u8, in_z: [*:0]const u8, a
     const in = c.open(in_z, .{ .ACCMODE = .RDONLY });
     if (in < 0) c._exit(122);
     _ = c.dup2(in, 0);
-    for ([_]u6{ SIG.HUP, SIG.INT, SIG.QUIT, SIG.TERM }) |sig| {
+    for ([_]u6{ SIG.HUP, SIG.INT, SIG.QUIT, SIG.TERM, SIG.PIPE }) |sig| {
         const sa = posix.Sigaction{ .handler = .{ .handler = SIG.DFL }, .mask = 0, .flags = 0 };
-        posix.sigaction(sig, &sa, null) catch {};
+        posix.sigaction(sig, &sa, null);
     }
-    _ = c.execve(wrapper, argv, envp);
+    _ = c.execve(exe, argv, envp);
     c._exit(123);
 }
 
@@ -209,23 +297,123 @@ fn statusOf(st: u32) u8 {
     return @intCast(128 + (W.TERMSIG(st) & 0x7f));
 }
 
-/// Waits for `pid` up to `secs`; kills it and returns null past that.
-fn waitFor(pid: i32, secs: u64) ?u8 {
-    const end = std.time.milliTimestamp() + @as(i64, @intCast(secs * 1000));
-    while (std.time.milliTimestamp() < end) {
-        const r = posix.waitpid(pid, W.NOHANG);
+/// Waits for `pid` to end. There is no limit of its own: a wrapper that
+/// never ends is ended by the action's.
+fn waitFor(pid: i32) u8 {
+    while (true) {
+        const r = posix.waitpid(pid, 0);
         if (r.pid == pid) return statusOf(r.status);
-        std.time.sleep(50 * std.time.ns_per_ms);
     }
-    kill(pid, SIG.KILL);
-    _ = posix.waitpid(pid, 0);
+}
+
+/// Blocks until `pid` (any process) has exited: pidfd on Linux, kqueue on
+/// macOS. A pid that is already gone returns at once.
+fn waitExit(pid: i32) void {
+    if (macos) {
+        const kq = posix.kqueue() catch return;
+        defer posix.close(kq);
+        var change = [1]posix.Kevent{.{
+            .ident = @intCast(pid),
+            .filter = std.c.EVFILT.PROC,
+            .flags = std.c.EV.ADD | std.c.EV.ONESHOT,
+            .fflags = std.c.NOTE.EXIT,
+            .data = 0,
+            .udata = 0,
+        }};
+        var got: [1]posix.Kevent = undefined;
+        _ = posix.kevent(kq, &change, &got, null) catch return;
+        return;
+    }
+    const rc = linux.pidfd_open(pid, 0);
+    if (posix.errno(rc) != .SUCCESS) return;
+    const fd: posix.fd_t = @intCast(rc);
+    defer posix.close(fd);
+    var p = [1]posix.pollfd{.{ .fd = fd, .events = posix.POLL.IN, .revents = 0 }};
+    while (true) {
+        const n = posix.poll(&p, -1) catch continue;
+        if (n > 0) return;
+    }
+}
+
+/// Sends one tick; true when the wrapper acknowledged it, false when it has
+/// ended (its descriptors are closed).
+fn tickOnce(t: *Ticked) bool {
+    t.sent += 1;
+    _ = posix.write(t.tick_w, "t") catch return false;
+    var b: [1]u8 = undefined;
+    const n = posix.read(t.ack_r, &b) catch return false;
+    return n == 1;
+}
+
+/// Waits for the stand-in to say `want` on the `up` FIFO.
+fn waitByte(t: *Ticked, want: u8) void {
+    var b: [1]u8 = undefined;
+    while (true) {
+        const n = posix.read(t.up, &b) catch continue;
+        if (n == 1 and b[0] == want) return;
+    }
+}
+
+fn command(t: *Ticked, byte: u8) void {
+    _ = posix.write(t.cmd, &.{byte}) catch {};
+}
+
+/// Tells the compiler to end, waits for it to have ended, and ticks until
+/// the wrapper has: a tick after the compiler's exit finds it exited.
+fn endCompiler(t: *Ticked) ?[]const u8 {
+    const cp = pidIn(t.dir, "compiler.pid") orelse return "the stand-in wrote no compiler.pid";
+    command(t, 'q');
+    waitExit(cp);
+    while (tickOnce(t)) {}
+    return null;
+}
+
+/// Carries out `s.drive` on a started ticked wrapper; why it could not, if so.
+fn drive(s: Spec, t: *Ticked) ?[]const u8 {
+    waitByte(t, 'u');
+    switch (s.drive) {
+        .none => unreachable,
+        .until_exit => while (tickOnce(t)) {},
+        .signal => {
+            kill(t.pid, s.sig);
+            // A signal that arrived before the wrapper waited for a tick is
+            // seen at the tick that wakes it.
+            while (tickOnce(t)) {}
+        },
+        .burn => {
+            var r: u32 = 0;
+            while (r < s.rounds) : (r += 1) {
+                command(t, 'b');
+                waitByte(t, 'd');
+                if (!tickOnce(t)) return str("the wrapper ended at tick {d} while the compiler's tree was using CPU", .{t.sent});
+            }
+            return endCompiler(t);
+        },
+        .nap => {
+            var r: u32 = 0;
+            while (r < s.nap_ticks) : (r += 1) {
+                if (!tickOnce(t)) return str("the wrapper ended at tick {d}, before the compiler's idle time was over", .{t.sent});
+            }
+            return endCompiler(t);
+        },
+    }
     return null;
 }
 
 fn run(s: Spec) Run {
-    const sp = spawn(s);
-    const rc = waitFor(sp.pid, 60);
-    return .{ .rc = rc, .dir = sp.dir, .log = readFile(str("{s}/log", .{sp.dir})) orelse "" };
+    if (s.drive == .none) {
+        const sp = spawn(s);
+        const rc = waitFor(sp.pid);
+        return .{ .rc = rc, .dir = sp.dir, .log = readFile(str("{s}/log", .{sp.dir})) orelse "" };
+    }
+    var t = spawnTicked(s);
+    const problem = drive(s, &t);
+    posix.close(t.tick_w);
+    posix.close(t.ack_r);
+    posix.close(t.up);
+    posix.close(t.cmd);
+    const rc = waitFor(t.pid);
+    return .{ .rc = rc, .dir = t.dir, .log = readFile(str("{s}/log", .{t.dir})) orelse "", .ticks = t.sent, .problem = problem };
 }
 
 /// Running, stopped or sleeping: not a zombie, and not gone.
@@ -275,10 +463,10 @@ fn verdict(name: []const u8, why: ?[]const u8, log: []const u8) void {
     if (why) |w| {
         const line = str("BAD {s}: {s}: {s}\n", .{ name, w, lastLines(log) });
         std.debug.print("{s}", .{line});
-        report.appendSlice(line) catch unreachable;
+        report.appendSlice(arena, line) catch unreachable;
         bad = true;
     } else {
-        report.appendSlice(str("ok {s}\n", .{name})) catch unreachable;
+        report.appendSlice(arena, str("ok {s}\n", .{name})) catch unreachable;
     }
 }
 
@@ -297,14 +485,18 @@ fn check(s: Spec, want: u8, text: ?[]const u8) ?[]const u8 {
     const r = run(s);
     defer killLeftovers(r.dir);
     const why: ?[]const u8 = blk: {
-        const rc = r.rc orelse break :blk "outlived its 60 s deadline";
+        const rc = r.rc;
+        if (r.problem) |p| break :blk p;
         if (rc != want) break :blk str("exit {d}, want {d}", .{ rc, want });
+        if (want == 124 and r.ticks < s.min_ticks) break :blk str("killed after {d} ticks, before the {d} the idle time takes", .{ r.ticks, s.min_ticks });
+        if (want != 124 and std.mem.indexOf(u8, r.log, "killed deadlocked compiler") != null) break :blk "killed a compiler that was not deadlocked";
         if (text) |t| {
             if (std.mem.indexOf(u8, r.log, t) == null) break :blk str("no '{s}' in its output", .{t});
         }
         if (pidIn(r.dir, "child.pid")) |c| {
-            // A killed child whose parent died too may linger as a zombie
-            // until a reaper collects it; only a live state outlived the kill.
+            // The kill is on its way to the child when the wrapper exits: wait
+            // for it to have died (a zombie has), with no limit of its own.
+            if (want == 124) waitExit(c);
             if (alive(c)) break :blk str("the compiler's child {d} outlived the kill", .{c});
         }
         if (exists(scratchOf(r.dir))) break :blk str("the scratch directory {s} was left", .{scratchOf(r.dir)});
@@ -319,57 +511,44 @@ fn expect(s: Spec, want: u8, text: ?[]const u8) void {
     if (why) |w| {
         const line = str("BAD {s}: {s}\n", .{ s.name, w });
         std.debug.print("{s}", .{line});
-        report.appendSlice(line) catch unreachable;
+        report.appendSlice(arena, line) catch unreachable;
         bad = true;
     } else {
-        report.appendSlice(str("ok {s}\n", .{s.name})) catch unreachable;
+        report.appendSlice(arena, str("ok {s}\n", .{s.name})) catch unreachable;
     }
 }
 
 /// The wrapper is signalled while its compiler (and the compiler's child)
-/// hang with the watchdog far from firing. Within 5 s of the signal both
-/// must be gone: a caught signal kills the tree before the wrapper exits
-/// (128 + signal, scratch removed); SIGKILL cannot be caught, and the tether
-/// in the compiler's session must kill it (137).
+/// hang with the watchdog far from firing (idle 600 s, and no tick sent
+/// before the signal). Both must then be gone: a caught signal kills the tree
+/// before the wrapper exits (128 + signal, scratch removed); SIGKILL cannot
+/// be caught, and the tether in the compiler's session must kill it (137).
 fn killed(name: []const u8, sig: u6, want: u8) void {
     std.debug.print("watchdog case: {s}\n", .{name});
-    const sp = spawn(.{ .name = name, .flags = &.{ "--watchdog-idle-secs=600", "--watchdog-sample-secs=1" }, .mojo = &.{ "hangpid", "-o", "out.mojoc" } });
-    defer killLeftovers(sp.dir);
-    var n: usize = 0;
-    while (n < 200 and (pidIn(sp.dir, "child.pid") == null or pidIn(sp.dir, "compiler.pid") == null)) : (n += 1) {
-        std.time.sleep(100 * std.time.ns_per_ms);
-    }
+    var t = spawnTicked(.{ .name = name, .flags = &.{ "--watchdog-idle-secs=600", "--watchdog-sample-secs=1" }, .mojo = &.{ "hangpid", "-o", "out.mojoc" }, .drive = .signal, .sig = sig });
+    defer killLeftovers(t.dir);
+    _ = drive(.{ .name = name, .mojo = &.{}, .drive = .signal, .sig = sig }, &t);
+    posix.close(t.tick_w);
+    posix.close(t.ack_r);
+    const rc = waitFor(t.pid);
     const why: ?[]const u8 = blk: {
-        const child = pidIn(sp.dir, "child.pid") orelse {
-            kill(sp.pid, SIG.KILL);
-            _ = posix.waitpid(sp.pid, 0);
-            break :blk "the stand-in compiler did not start";
-        };
-        const compiler = pidIn(sp.dir, "compiler.pid").?;
-        kill(sp.pid, sig);
-        const rc = waitFor(sp.pid, 30) orelse break :blk "the wrapper outlived the signal by 30 s";
         if (rc != want) break :blk str("the wrapper exited {d}, want {d}", .{ rc, want });
-        var left: []const u8 = "";
-        var k: usize = 0;
-        while (k < 50) : (k += 1) {
-            left = "";
-            if (alive(compiler)) left = str("{s} {d}", .{ left, compiler });
-            if (alive(child)) left = str("{s} {d}", .{ left, child });
-            if (left.len == 0) break;
-            std.time.sleep(100 * std.time.ns_per_ms);
-        }
-        if (left.len > 0) break :blk str("still alive 5 s after signal {d} to the wrapper:{s}", .{ sig, left });
-        if (sig != SIG.KILL and exists(scratchOf(sp.dir))) break :blk "the scratch directory was left";
+        // Both pid files were written before the stand-in said it was up.
+        const compiler = pidIn(t.dir, "compiler.pid") orelse break :blk "the stand-in compiler wrote no compiler.pid";
+        const child = pidIn(t.dir, "child.pid") orelse break :blk "the stand-in compiler wrote no child.pid";
+        waitExit(compiler);
+        waitExit(child);
+        if (sig != SIG.KILL and exists(scratchOf(t.dir))) break :blk "the scratch directory was left";
         break :blk null;
     };
-    verdict(name, why, readFile(str("{s}/log", .{sp.dir})) orelse "");
+    verdict(name, why, readFile(str("{s}/log", .{t.dir})) orelse "");
 }
 
 fn lines(text: []const u8) [][]const u8 {
-    var out = std.ArrayList([]const u8).init(arena);
+    var out = std.ArrayList([]const u8).empty;
     var it = std.mem.splitScalar(u8, std.mem.trimRight(u8, text, "\n"), '\n');
-    while (it.next()) |l| out.append(l) catch unreachable;
-    return out.toOwnedSlice() catch unreachable;
+    while (it.next()) |l| out.append(arena, l) catch unreachable;
+    return out.toOwnedSlice(arena) catch unreachable;
 }
 
 fn lessThan(_: void, a: []const u8, b: []const u8) bool {
@@ -403,9 +582,9 @@ fn expectFile(s: Spec, file: []const u8, want: []const []const u8, sort: bool) v
 pub fn main() void {
     var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     arena = arena_state.allocator();
-    report = std.ArrayList(u8).init(arena);
+    report = std.ArrayList(u8).empty;
     const argv = std.process.argsAlloc(arena) catch die("out of memory", .{});
-    if (argv.len != 4) die("usage: cases <mojo_compile> <standin> <report>", .{});
+    if (argv.len != 5) die("usage: cases <mojo_compile> <mojo_compile_ticked> <standin> <report>", .{});
     const cwd = std.process.getCwdAlloc(arena) catch die("cannot read the working directory", .{});
     const abs = struct {
         fn f(c: []const u8, p: []const u8) []const u8 {
@@ -413,7 +592,11 @@ pub fn main() void {
         }
     }.f;
     wrapper = strZ("{s}", .{abs(cwd, argv[1])});
-    const standin_path = abs(cwd, argv[2]);
+    wrapper_ticked = strZ("{s}", .{abs(cwd, argv[2])});
+    const standin_path = abs(cwd, argv[3]);
+    // A write to a wrapper that has ended is an error to see, not a signal.
+    const ign = posix.Sigaction{ .handler = .{ .handler = SIG.IGN }, .mask = if (macos) 0 else posix.sigemptyset(), .flags = 0 };
+    posix.sigaction(SIG.PIPE, &ign, null);
     root = str("{s}/.komira_watchdog_cases", .{cwd});
     std.fs.deleteTreeAbsolute(root) catch {};
     std.fs.cwd().makePath(str("{s}/zig", .{root})) catch die("cannot make {s}", .{root});
@@ -432,23 +615,27 @@ pub fn main() void {
     const killed_text = "mojo-watchdog: killed deadlocked compiler";
     const o = [_][]const u8{ "-o", "out.mojoc" };
 
-    // The verdicts of the compile watchdog.
-    expect(.{ .name = "hang", .flags = knobs, .mojo = &([_][]const u8{"hang"} ++ o) }, 124, killed_text);
-    expect(.{ .name = "treehang", .flags = knobs, .mojo = &([_][]const u8{"treehang"} ++ o) }, 124, killed_text);
-    expect(.{ .name = "orphan", .flags = knobs, .mojo = &([_][]const u8{"orphan"} ++ o) }, 124, killed_text);
+    // The verdicts of the compile watchdog, on the ticked wrapper: with a
+    // zero-CPU tree (the stand-ins sleep) it must kill at the third tick of
+    // 1 s samples, not before; a tree that uses CPU is never killed, wherever
+    // in the session it does; and a compiler that is idle for less than the
+    // limit, then ends, is not.
+    expect(.{ .name = "hang", .flags = knobs, .mojo = &([_][]const u8{"hang"} ++ o), .drive = .until_exit, .min_ticks = 3 }, 124, killed_text);
+    expect(.{ .name = "treehang", .flags = knobs, .mojo = &([_][]const u8{"treehang"} ++ o), .drive = .until_exit, .min_ticks = 3 }, 124, killed_text);
+    expect(.{ .name = "orphan", .flags = knobs, .mojo = &([_][]const u8{"orphan"} ++ o), .drive = .until_exit, .min_ticks = 3 }, 124, killed_text);
     // The root sleeps while an orphaned member of its session does the work:
     // CPU anywhere in the session counts, so it is not killed.
-    expect(.{ .name = "orphanspin", .flags = knobs, .mojo = &([_][]const u8{"orphanspin"} ++ o) }, 0, null);
-    expect(.{ .name = "spin", .flags = knobs, .mojo = &([_][]const u8{"spin"} ++ o) }, 0, null);
-    expect(.{ .name = "childspin", .flags = knobs, .mojo = &([_][]const u8{"childspin"} ++ o) }, 0, null);
-    expect(.{ .name = "short_nap", .flags = knobs, .mojo = &([_][]const u8{"nap2"} ++ o) }, 0, null);
+    expect(.{ .name = "orphanspin", .flags = knobs, .mojo = &([_][]const u8{"orphanspin"} ++ o), .drive = .burn }, 0, null);
+    expect(.{ .name = "spin", .flags = knobs, .mojo = &([_][]const u8{"spin"} ++ o), .drive = .burn }, 0, null);
+    expect(.{ .name = "childspin", .flags = knobs, .mojo = &([_][]const u8{"childspin"} ++ o), .drive = .burn }, 0, null);
+    expect(.{ .name = "short_nap", .flags = knobs, .mojo = &([_][]const u8{"wait"} ++ o), .drive = .nap, .nap_ticks = 2 }, 0, null);
     expect(.{ .name = "compiler_error", .flags = knobs, .mojo = &([_][]const u8{"fail"} ++ o) }, 7, null);
     // A compiler killed by signal N gives 128+N (design item 30), through
     // the watchdog's wait and through the plain wait of idle 0.
     expect(.{ .name = "compiler_signalled", .flags = knobs, .mojo = &([_][]const u8{"selfkill"} ++ o) }, 128 + @as(u8, SIG.USR1), null);
     expect(.{ .name = "compiler_signalled_plain", .flags = &.{"--watchdog-idle-secs=0"}, .mojo = &([_][]const u8{"selfkill"} ++ o) }, 128 + @as(u8, SIG.USR1), null);
     expect(.{ .name = "disabled", .flags = &.{ "--watchdog-idle-secs=0", "--watchdog-sample-secs=1" }, .mojo = &([_][]const u8{"nap5"} ++ o) }, 0, null);
-    expect(.{ .name = "enabled", .flags = &.{ "--watchdog-idle-secs=2", "--watchdog-sample-secs=1" }, .mojo = &([_][]const u8{"nap5"} ++ o) }, 124, killed_text);
+    expect(.{ .name = "enabled", .flags = &.{ "--watchdog-idle-secs=2", "--watchdog-sample-secs=1" }, .mojo = &([_][]const u8{"nap5"} ++ o), .drive = .until_exit, .min_ticks = 2 }, 124, killed_text);
     expect(.{ .name = "default_knobs", .mojo = &([_][]const u8{"nap2"} ++ o) }, 0, null);
     expect(.{ .name = "bad_sample", .flags = &.{"--watchdog-sample-secs=0"}, .mojo = &([_][]const u8{"nap2"} ++ o) }, 2, "watchdog-sample-secs must be at least 1");
     expect(.{ .name = "bad_idle", .flags = &.{"--watchdog-idle-secs=5m"}, .mojo = &([_][]const u8{"nap2"} ++ o) }, 2, "whole numbers");
@@ -509,12 +696,12 @@ pub fn main() void {
     // stand-in replaces; its line is cc_shim.zig's unit tests, and a real
     // link on the macOS workers is the build of any darwin Mojo binary.
     if (!macos) {
-        var want = std.ArrayList([]const u8).init(arena);
-        want.appendSlice(&.{
+        var want = std.ArrayList([]const u8).empty;
+        want.appendSlice(arena, &.{
             str("{s}/zig/zig", .{root}), "cc",                     "-target",              "x86_64-linux-gnu",
             "-Wl,--strip-debug",         "-Wl,--enable-new-dtags", "-Wl,-rpath,$ORIGIN/x",
         }) catch unreachable;
-        want.appendSlice(&.{
+        want.appendSlice(arena, &.{
             "-L/d",   "-lfoo",    "-Wl,--gc-sections", "-Xlinker", "-soname",   "-Xlinker", "libx.so",
             "-Xlinker", "-z",     "keep.o",            "-Xlinker", "now",       "bare.o",   "-L/f",
             "-lg",    "-o",       "out.mojoc",         "-Xlinker", "libtail.a", "-lc++",
@@ -577,11 +764,11 @@ pub fn main() void {
     if (ok_lines < floor) {
         const line = str("BAD floor: {d} ok case(s), fewer than the {d} cases of this runner\n", .{ ok_lines, floor });
         std.debug.print("{s}", .{line});
-        report.appendSlice(line) catch unreachable;
+        report.appendSlice(arena, line) catch unreachable;
         bad = true;
     }
 
-    writeFile(argv[3], report.items);
+    writeFile(argv[4], report.items);
     std.fs.deleteTreeAbsolute(root) catch {};
     std.process.exit(if (bad) 1 else 0);
 }

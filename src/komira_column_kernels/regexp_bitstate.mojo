@@ -95,12 +95,16 @@ struct BitStateScratch(Movable):
     var jobs: List[Int]         # (id, p) pairs; id < 0 = undo SAVE of slot -id-1
     var caps: List[Int]         # the ONE live capture vector
     var searches: Int           # witness: BitState searches run on this scratch
+    var seeds: Int              # witness: start positions tried (`_bitstate_try` calls)
+    var visits: Int             # witness: (pc, position) states first-visited
 
     def __init__(out self):
         self.visited = List[UInt64]()
         self.jobs = List[Int]()
         self.caps = List[Int]()
         self.searches = 0
+        self.seeds = 0
+        self.visits = 0
 
 
 def bitstate_search(
@@ -151,6 +155,7 @@ def bitstate_search(
             # ⭐ `caps` needs no reset between start positions: a FAILED try
             # pops every job it pushed, and every SAVE pushed its own undo, so
             # the vector is back to all -1.  A successful try ends the search.
+            bs.seeds += 1
             if _bitstate_try(prog, subject, n, min_start, nslots, p0, bs, match_slots, hi):
                 matched = True
                 break
@@ -180,6 +185,9 @@ def _bitstate_try(
     reached, with its slots in `match_slots`.  `base` is the text position
     of bitmap row 0."""
     var L = len(prog.prog)
+    # Witness: states first-visited by this try, folded into `bs.visits` at
+    # every exit so the loop below pays a register increment only.
+    var visits = 0
     bs.jobs.clear()
     bs.jobs.append(0)
     bs.jobs.append(p0)
@@ -199,6 +207,7 @@ def _bitstate_try(
             if (word & bit) != 0:
                 break
             bs.visited[w] = word | bit
+            visits += 1
             var ins = prog.prog[id]
             var op = ins.op
             if op == OP_CHAR:
@@ -249,6 +258,7 @@ def _bitstate_try(
             elif op == OP_MATCH:
                 for j in range(nslots):
                     match_slots[j] = bs.caps[j]
+                bs.visits += visits
                 return True
             elif op == OP_TAIL_MATCH:
                 # ⭐ The fused `.*` + `\z` tail, executed exactly as the Pike
@@ -271,8 +281,10 @@ def _bitstate_try(
                             tpc += 1
                         else:
                             break        # OP_MATCH
+                    bs.visits += visits
                     return True
                 break
             else:
                 break
+    bs.visits += visits
     return False
