@@ -8,6 +8,3 @@
 # A private list of words the public boundary lint refuses (root BUCK,
 # public_boundary): kept by the repository that passes it, never here.
 /.public_boundary_deny
-# The beta set the job `mopm-e2e-beta` downloads (release/beta_set/BUCK).
-/release/beta_set/*
-!/release/beta_set/BUCK
