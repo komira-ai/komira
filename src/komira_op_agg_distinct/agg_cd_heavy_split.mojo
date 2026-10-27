@@ -2,7 +2,7 @@
 # CDP-HEAVYSPLIT — a HEAVY group's distinct pairs are spread across workers
 # =============================================================================
 #
-# ★ THE DEFECT. The grouped COUNT(DISTINCT) driver (added by a later part)
+# ★ THE PROBLEM. The grouped COUNT(DISTINCT) driver (added by a later part)
 # hash-partitions rows by GROUP, so one group is one worker. When ONE group
 # holds 91.8% of the rows (a second at 79.2% in another shape), ONE worker runs
 # that group's whole `CdDistinctSet` probe stream — about 1.09M distinct pairs
