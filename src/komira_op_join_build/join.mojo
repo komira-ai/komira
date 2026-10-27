@@ -19,8 +19,8 @@
 # column in word 2 (`komira_join_assembly.join_payload_inline`).
 #
 # SQL KEY SEMANTICS: a NULL key matches nothing. A NULL build key is recorded
-# (so an unmatched-build sweep can emit it) but never linked into
-# a bucket; a NULL probe key skips the walk.
+# but never linked into a bucket, so it matches nothing; a NULL probe key
+# skips the walk.
 #
 # The INNER probe kernels live in their own modules (`join_probe_inner`,
 # `join_probe_inner_ps`) as free functions over a borrowed builder; the
@@ -175,7 +175,7 @@ struct HashJoinBuilder(Movable):
     # carrying both would double the build's write traffic and make the lever's
     # own A/B measure its instrumentation.
     var key_next: List[Int64]
-    # The build ROW COUNT, valid on BOTH layouts. ⚠ `len(self.build_keys)` was
+    # The build ROW COUNT, valid on BOTH layouts. WARNING: `len(self.build_keys)` was
     # this quantity at 14 sites and is NOT it under the fused layout, where that
     # list is empty. Read this field.
     var num_build: Int
@@ -189,18 +189,18 @@ struct HashJoinBuilder(Movable):
     # build-side column so the probe's existing chain touch yields it and the
     # per-output-row random gather out of that column is deleted outright.
     #
-    # ⚠ IMPLIES `_fused`. There is no payload layout over the split
+    # WARNING: IMPLIES `_fused`. There is no payload layout over the split
     # `build_keys` + `next_chain` pair: the whole mechanism is that the payload
     # shares a cache line with the key the walk has already loaded.
     #
-    # ⚠ THE PAD WORD IS THE LEVER, NOT WASTE. A 24 B entry holds exactly the
+    # WARNING: THE PAD WORD IS THE LEVER, NOT WASTE. A 24 B entry holds exactly the
     # same information and is 25% WORSE -- 2 of every 8 records then straddle a
     # 64 B line, so a quarter of the chain visits become two line touches. At 32 B the walk touches the SAME number of lines it does at
     # 16 B, so the extra 16 bytes are free. Table: `join_payload_inline`.
     var _pay_inline: Bool
     # Which BUILD-BATCH column `key_next[4i + 2]` is a copy of, or -1.
     #
-    # ⛔ IT IS CARRIED ON THE BUILDER ON PURPOSE. The consumers that must know
+    # NOTE: IT IS CARRIED ON THE BUILDER ON PURPOSE. The consumers that must know
     # (the probe operator's staged and deferred arms) already hold the builder,
     # so identifying the payload here reaches both without a new constructor
     # parameter -- and, more importantly, keeps "which column is inlined" in
@@ -256,7 +256,7 @@ struct HashJoinBuilder(Movable):
         self.num_build = n_rows
         self._bi_elided = bi_elided
         self._fused = fused
-        # ⚠ REFUSED, NOT CLAMPED. A payload layout over the split
+        # WARNING: REFUSED, NOT CLAMPED. A payload layout over the split
         # `build_keys` + `next_chain` pair would read `key_next` (which is
         # EMPTY there) at stride 4 and return garbage keys -- a wrong answer,
         # not a slow path. The constructor is the one place every producer
@@ -276,7 +276,7 @@ struct HashJoinBuilder(Movable):
     # -------------------------------------------------------------------------
     # LAYOUT-TOLERANT ACCESSORS
     #
-    # ⚠ THESE ARE FOR THE COLD CONSUMERS ONLY, AND DELIBERATELY SO. They carry a
+    # WARNING: THESE ARE FOR THE COLD CONSUMERS ONLY, AND DELIBERATELY SO. They carry a
     # RUNTIME branch on a field, which is correct everywhere and free nowhere; the
     # hot probe loops instead take a COMPTIME-specialised body (`_probe_*[fused,
     # nobi]`) so the default arm compiles to byte-for-byte the pre-lever loop and
@@ -300,7 +300,7 @@ struct HashJoinBuilder(Movable):
     def kn_stride(self) -> Int:
         """Words per fused chain entry: 2 shipped, 4 under payload-inline.
 
-        ⚠ EVERY READER OF `key_next` MUST MULTIPLY BY THIS AND NOT BY 2. A site
+        WARNING: EVERY READER OF `key_next` MUST MULTIPLY BY THIS AND NOT BY 2. A site
         that keeps the literal reads entry 2i where it meant entry i -- keys
         belonging to other rows and links into the middle of the array -- which
         surfaces as a join that silently loses and invents matches, not as a
@@ -326,7 +326,7 @@ struct HashJoinBuilder(Movable):
     def chain_pay_at(self, chain_idx: Int) raises -> Int64:
         """The INLINED build payload for chain entry `chain_idx`.
 
-        ⛔ ONLY MEANINGFUL UNDER `_pay_inline`, AND IT RAISES OTHERWISE. On the
+        NOTE: ONLY MEANINGFUL UNDER `_pay_inline`, AND IT RAISES OTHERWISE. On the
         shipped layout the word this would return is the NEXT ENTRY'S KEY -- a
         wrong answer of the right type, in a column the caller is about to
         emit. There is no plausible default here, so there is no default.
@@ -353,7 +353,7 @@ struct HashJoinBuilder(Movable):
     def uses_bloom(self) -> Bool:
         """Will a probe of this index consult the bloom filter?
 
-        ⭐ THIS IS BLOOML1'S "TOOK EFFECT" OBSERVABLE, AND IT IS STRUCTURAL
+        NOTE: THIS IS BLOOML1'S "TOOK EFFECT" OBSERVABLE, AND IT IS STRUCTURAL
         RATHER THAN A COUNTER ON PURPOSE. Declining a bloom is value-invariant,
         so no answer-comparing test can see the difference, and a counter can
         only say the predicate DECIDED — a build that notched the decline and
@@ -366,7 +366,7 @@ struct HashJoinBuilder(Movable):
     def _refuse_pay_inline(self, kernel: StaticString) raises:
         """Guard for a kernel that hoists `key_next` at the SHIPPED stride.
 
-        ⛔ NOT DEFENSIVE PROGRAMMING -- THE ALTERNATIVE TO A SILENT WRONG
+        NOTE: NOT DEFENSIVE PROGRAMMING -- THE ALTERNATIVE TO A SILENT WRONG
         ANSWER. A kernel that hoists `key_next` onto a raw pointer indexes it
         `2 * chain_idx`. Exactly THREE were taught the wide stride -- the two
         chunked INNER probes and their shared row-at-a-time tail -- because
@@ -375,7 +375,7 @@ struct HashJoinBuilder(Movable):
         keys belonging to other rows, links into the middle of the array -- and
         produce a join result with a plausible row count and wrong contents.
 
-        ⚠ `count_inner_matches` is NOT in either list and needs no guard: it
+        WARNING: `count_inner_matches` is NOT in either list and needs no guard: it
         walks through `chain_key_at` / `chain_next_at`, which are
         stride-aware, so it is already CORRECT under the wide layout (merely
         not accelerated by it).

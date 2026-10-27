@@ -57,8 +57,8 @@ struct PerfectHashJoin(Movable):
 
         SAFETY: Two-step cast widens the immutable-origin pointer
         `self._entries.unsafe_ptr()` returns on a borrowed `self` to a
-        concrete mutable origin tied to `self` (no wildcard origin, no
-        address laundering). Takes `mut self` so `origin_of(self)` is a
+        concrete mutable origin tied to `self` (the origin is
+        tied to `self`, not widened). Takes `mut self` so `origin_of(self)` is a
         concrete mutable origin. Invalidated by any List realloc.
         """
         return self._entries.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[
@@ -92,8 +92,7 @@ struct PerfectHashJoin(Movable):
             return None
 
         # Origin-tied view of the key buffer (`view_ro`), bitcast to Int64.
-        # `key_view` keepalive replaces the `_ = keys` keepalive at the end
-        # (kept here too for explicit symmetry with the original AOT-fence).
+        # `key_view` keeps the key buffer alive until the loop below ends.
         var key_view = keys.view_ro()
         var key_ptr = key_view._unsafe_ptr().bitcast[Scalar[DType.int64]]()
         var mn = Int((key_ptr + 0)[])
@@ -116,8 +115,7 @@ struct PerfectHashJoin(Movable):
 
         # Check uniqueness during insertion.
         # SAFETY: Mutable raw pointer into the local `entries` List.
-        # Origin stays tied to `entries` via `origin_of(entries)` — no
-        # wildcard widening. Identical codegen.
+        # The pointer's origin is tied to `entries` via `origin_of(entries)`.
         var ent_ptr = entries.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[
             origin_of(entries)
         ]()
@@ -143,9 +141,8 @@ struct PerfectHashJoin(Movable):
         != EMPTY, appends (build_idx, probe_idx).
 
         `mut self` is required by `_entries_mut_ptr()` (origin_of(self)
-        yields a concrete MutableOrigin only on mut self; see capability
-        matrix repro 5). No mutation to self occurs — this is purely a
-        read-only probe.
+        yields a concrete MutableOrigin only on mut self). No mutation
+        to self occurs; this is purely a read-only probe.
 
         `raises` because the NULL guard below consults
         `PrimitiveArray.is_null`, whose out-of-range arm raises — the same
@@ -157,7 +154,7 @@ struct PerfectHashJoin(Movable):
         # NULL keys: a NULL probe key matches NOTHING, so an
         # INNER probe emits no pair for it.
         #
-        # ⛔ THIS IS NOT A DEFENSIVE CHECK — IT IS THE SAME ARGUMENT `try_build`
+        # NOTE: THIS IS NOT A DEFENSIVE CHECK — IT IS THE SAME ARGUMENT `try_build`
         # ALREADY MAKES ON THE OTHER SIDE. This table is indexed by the KEY
         # VALUE (`entries[key - min_key]`) and an Arrow NULL carries a DType-zero
         # value under its cleared validity bit, so an unguarded probe maps EVERY
