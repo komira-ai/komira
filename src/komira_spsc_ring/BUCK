@@ -1,6 +1,5 @@
 load("@buildrules//rules/mojo:pack.bzl", "mojo_conda", "mojo_conda_holds")
 load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
-load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":buildrules.mojo.bzl", "mojo_package")
 
@@ -82,15 +81,4 @@ conda_package(
     lib = ":komira_spsc_ring",
     summary = "The `komira_spsc_ring` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],
-)
-
-# Microbenchmark (not a gated test); see the header of the file. `[targets] bins` of mopm.toml
-# builds it as `:bin_spsc_ring_bench`; this is the target ci/targets.bzl names.
-mojo_binary(
-    name = "spsc_ring_bench",
-    srcs = ["tests/bench_spsc_ring.mojo"],
-    deps = [
-        ":komira_spsc_ring",
-        "//src/komira_atomic_alias:komira_atomic_alias",
-    ],
 )
