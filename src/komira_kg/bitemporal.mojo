@@ -134,12 +134,13 @@ def overlapping_contradiction_candidates(
 
     An edge is a candidate when it has the same subject (same node pair, and
     the same predicate when `match_predicate`) and its interval overlaps the
-    new edge's [valid_at, open). An edge of another subject, an edge that ended
+    new edge's [valid_at, invalid_at), which is [valid_at, open) for an open
+    edge. An edge of another subject, an edge that ended
     at or before the new one starts, and an empty interval are not candidates.
     This decides nothing about meaning; the caller judges each index.
 
     Args:
-        new_edge: The edge being added (open).
+        new_edge: The edge being added (open, or ended at its `invalid_at`).
         existing_edges: The edges to test; any list is safe, the subject is
             re-checked per edge.
         match_predicate: Require equal predicates as well as equal node pairs.
@@ -153,7 +154,7 @@ def overlapping_contradiction_candidates(
         if not _same_subject(old, new_edge, match_predicate):
             continue
         if _intervals_overlap(
-            old.valid_at, old.invalid_at, new_edge.valid_at, TS_OPEN_SENTINEL
+            old.valid_at, old.invalid_at, new_edge.valid_at, new_edge.invalid_at
         ):
             out.append(i)
     return out^

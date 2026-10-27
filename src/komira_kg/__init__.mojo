@@ -1,9 +1,9 @@
 # =============================================================================
-# komira_kg -- the mutable data-graph store and its ingest (parts 1 to 6:
+# komira_kg -- the mutable data-graph store and its ingest (parts 1 to 7:
 #   bi-temporal edges, entity resolution, the source facet, the model seams, the
 #   rule-driven extractor, the source cursor store and the in-memory working
 #   set, erasure, the warm cache, compaction, embedding top-k and the episode
-#   ingest path).
+#   ingest path and the structured ingest).
 # =============================================================================
 #
 #   * bitemporal       -- `WorkingEdge`, `open_edge`,
@@ -57,7 +57,14 @@
 #   * ingest_gleaning  -- `run_gleaning`: the bounded extraction loop.
 #   * ingest_resolve   -- `resolve_entities`, `existing_nid_for_name`,
 #                         `mint_entity`: mentions to entities of the working set.
-#   * ingest_edges     -- `apply_edges`: triples to bi-temporal edges.
+#   * ingest_edges     -- `apply_edges`, `apply_edges_recording` (honours a
+#                         triple's end time; reports `AssertedEdge`s): triples
+#                         to bi-temporal edges.
+#   * ingest_source_diff -- the per-symbol diff and the removal of what a source
+#                         no longer states.
+#   * ingest_structured -- `StructuredEpisode`, `ingest_structured`,
+#                         `ingest_structured_into`: known facts, no extraction.
+#   * surface_adapter  -- `SurfaceAdapter`: one source record to episodes.
 #   * ingest           -- `ingest_episode`, `ingest_episode_into`,
 #                         `write_extraction`: extract, resolve, apply, store.
 #
@@ -169,10 +176,16 @@ from .embedding_topk import EmbeddingCandidate, resolve_embedding_topk
 from .ingest_config import EpisodeInput, IngestConfig
 from .ingest_gleaning import run_gleaning
 from .ingest_resolve import existing_nid_for_name, mint_entity, resolve_entities
-from .ingest_edges import apply_edges
+from .ingest_edges import AssertedEdge, apply_edges, apply_edges_recording
+from .surface_adapter import SurfaceAdapter
 from .ingest import (
     CROSS_UNIT_CONTEXT_MAX,
     ingest_episode,
     ingest_episode_into,
     write_extraction,
+)
+from .ingest_structured import (
+    StructuredEpisode,
+    ingest_structured,
+    ingest_structured_into,
 )
