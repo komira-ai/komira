@@ -34,6 +34,8 @@ One child per `Supervisor`. It does not restart a child, does not time one out
 by itself, and accepts resource limits (`RLimit`) without applying them yet.
 `spawn` returns the pid, or a negative errno when nothing was started.
 
+A spec with `set_stdin_pipe()` gives the child a stdin pipe: `write_stdin` writes every byte of a string (it returns the count or a negative errno), `close_stdin` ends the child's input, and `read_blocking(fd)` is one blocking read of a capture pipe (`eof` when every writer has closed it). The write end is close-on-exec, so a child spawned later does not hold it open.
+
 ## Examples
 
 Capture both streams separately and read the exit code:
@@ -99,5 +101,25 @@ from komira_supervisor import ChildSpec, Supervisor
 var sup = Supervisor()
 var rc = sup.spawn(ChildSpec("/nonexistent/komira-readme-binary"))
 assert_true(rc < 0)  # -errno
+sup.close()
+```
+
+Write to the child's stdin and read its answers as they come:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from komira_supervisor import ChildSpec, Supervisor
+
+var spec = ChildSpec.shell("while IFS= read -r l; do echo \"echo $l\"; done")
+spec.set_stdin_pipe()
+var sup = Supervisor()
+assert_true(sup.spawn(spec) > 0)
+assert_true(sup.write_stdin("ping\n") > 0)
+var chunk = sup.read_blocking(sup.stdout_fd())  # one blocking read
+assert_equal(chunk.text, "echo ping\n")
+sup.close_stdin()  # the child reads end of file and exits
+assert_equal(sup.drain_pipe(sup.stdout_fd()), "")
+_ = sup.drain_pipe(sup.stderr_fd())
+assert_equal(sup.wait_exit().exit_code, 0)
 sup.close()
 ```

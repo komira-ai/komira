@@ -172,14 +172,18 @@ fail:
     return rc;
 }
 
-int komira_proc_spawn(const char *path,
-                       const char *argv_blob, int argc,
-                       const char *env_blob, int envc,
-                       const char *cwd, int has_cwd,
-                       int flags,
-                       int *out_stdout_fd,
-                       int *out_stderr_fd,
-                       int *out_pid) {
+// The body of komira_proc_spawn and komira_proc_spawn_stdin. A non-NULL
+// `out_stdin_fd` also gives the child a third pipe as its fd 0 and returns the
+// write end there (close-on-exec in the parent); NULL leaves fd 0 inherited.
+static int _spawn_pipes(const char *path,
+                        const char *argv_blob, int argc,
+                        const char *env_blob, int envc,
+                        const char *cwd, int has_cwd,
+                        int flags,
+                        int *out_stdout_fd,
+                        int *out_stderr_fd,
+                        int *out_stdin_fd,
+                        int *out_pid) {
     char **argv = _split_blob(argv_blob, argc);
     if (argv == NULL) return -ENOMEM;
     char **envp = NULL;
@@ -280,11 +284,37 @@ int komira_proc_spawn(const char *path,
         attrp = &attr;
     }
 
+    // The stdin pipe is made last, so every failure above needs no cleanup of
+    // it: fd 0 <- read end; the child closes both original ends.
+    int in_pipe[2] = {-1, -1};
+    if (out_stdin_fd != NULL) {
+        int e = 0;
+        if (pipe(in_pipe) != 0) {
+            e = errno;
+        } else if (fcntl(in_pipe[1], F_SETFD, FD_CLOEXEC) != 0) {
+            e = errno;
+            close(in_pipe[0]); close(in_pipe[1]);
+        } else {
+            posix_spawn_file_actions_adddup2(&fa, in_pipe[0], 0);
+            posix_spawn_file_actions_addclose(&fa, in_pipe[0]);
+            posix_spawn_file_actions_addclose(&fa, in_pipe[1]);
+        }
+        if (e != 0) {
+            posix_spawn_file_actions_destroy(&fa);
+            if (attrp != NULL) posix_spawnattr_destroy(attrp);
+            close(out_pipe[0]); close(out_pipe[1]);
+            close(err_pipe[0]); close(err_pipe[1]);
+            free(argv); free(envp);
+            return -e;
+        }
+    }
+
     pid_t pid = 0;
     // posix_spawnp, NOT posix_spawn -- see the "WHY posix_spawnp" block above.
     int rc = posix_spawnp(&pid, path, &fa, attrp, argv_c, envp_c);
     posix_spawn_file_actions_destroy(&fa);
     if (attrp != NULL) posix_spawnattr_destroy(attrp);
+    if (in_pipe[0] >= 0) close(in_pipe[0]);
 
     // posix_spawn copies argv/envp string bytes into the child synchronously
     // before returning, so the split vectors (which only point INTO the
@@ -302,13 +332,67 @@ int komira_proc_spawn(const char *path,
     if (rc != 0) {
         close(out_pipe[0]);
         close(err_pipe[0]);
+        if (in_pipe[1] >= 0) close(in_pipe[1]);
         return -rc;  // posix_spawn returns the errno value directly
     }
 
     *out_stdout_fd = out_pipe[0];
     *out_stderr_fd = err_pipe[0];
+    if (out_stdin_fd != NULL) *out_stdin_fd = in_pipe[1];
     *out_pid = (int)pid;
     return 0;
+}
+
+int komira_proc_spawn(const char *path,
+                       const char *argv_blob, int argc,
+                       const char *env_blob, int envc,
+                       const char *cwd, int has_cwd,
+                       int flags,
+                       int *out_stdout_fd,
+                       int *out_stderr_fd,
+                       int *out_pid) {
+    return _spawn_pipes(path, argv_blob, argc, env_blob, envc, cwd, has_cwd,
+                        flags, out_stdout_fd, out_stderr_fd, NULL, out_pid);
+}
+
+// -----------------------------------------------------------------------------
+// komira_proc_spawn_stdin
+//   komira_proc_spawn, and the child's stdin (fd 0) is a pipe too: the write
+//   end comes back in *out_stdin_fd. The parent closes it to give the child
+//   end of file. The write end is close-on-exec, so no other child spawned
+//   later holds it open.
+// -----------------------------------------------------------------------------
+int komira_proc_spawn_stdin(const char *path,
+                            const char *argv_blob, int argc,
+                            const char *env_blob, int envc,
+                            const char *cwd, int has_cwd,
+                            int flags,
+                            int *out_stdout_fd,
+                            int *out_stderr_fd,
+                            int *out_stdin_fd,
+                            int *out_pid) {
+    return _spawn_pipes(path, argv_blob, argc, env_blob, envc, cwd, has_cwd,
+                        flags, out_stdout_fd, out_stderr_fd, out_stdin_fd,
+                        out_pid);
+}
+
+// -----------------------------------------------------------------------------
+// komira_proc_write  --  write() all of `len` bytes (EINTR retried, a short
+//   write continued). Returns `len`, or -errno. A write to a pipe whose reader
+//   has gone fails with -EPIPE when SIGPIPE is ignored or blocked; otherwise
+//   the signal's default action applies.
+// -----------------------------------------------------------------------------
+long komira_proc_write(int fd, const uint8_t *buf, long len) {
+    long done = 0;
+    while (done < len) {
+        ssize_t n = write(fd, buf + done, (size_t)(len - done));
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return -errno;
+        }
+        done += (long)n;
+    }
+    return done;
 }
 
 // -----------------------------------------------------------------------------
