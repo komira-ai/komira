@@ -97,7 +97,8 @@ struct CaptureConfig(Copyable, Movable):
         token: The bearer token every route but health requires.
         default_partition: The partition a request that names none writes to.
         max_body_bytes: The largest request body accepted; a larger one is
-            refused with 413 before it is read.
+            refused with 413, checked after authentication and before any
+            parsing.
         compact_after_deltas: Fold the delta chain into a new base once it holds
             this many deltas (at least 1).
         ingest: The knobs of one ingest.
