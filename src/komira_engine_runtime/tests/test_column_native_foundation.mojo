@@ -1,12 +1,9 @@
 # =============================================================================
-# test_column_native_foundation.mojo — P-2.A column-native foundation tests.
+# test_column_native_foundation.mojo: ColumnNativeBatch and its bridges.
 # =============================================================================
 #
-# Validates the P-2.A foundation (plan p2_column_native_phased_plan
-# §II):
-#   (a) round-trip ColumnNativeBatch <-> RecordBatch byte-identical via the
-#       shim (numeric int64 + string columns) — the body IS a THSPLC chunk so
-#       a decode reproduces the source batch byte-for-byte.
+#   (a) round-trip ColumnNativeBatch <-> RecordBatch through the shims is
+#       byte-identical (numeric int64 + string columns).
 #   (b) UnifiedColumnFormat[T] typed reads are correct (numeric int64 + the
 #       string-column descriptor surface).
 #   (c) the ListColumnFormat / StructColumnFormat refinement traits compile +

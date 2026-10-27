@@ -1,0 +1,3 @@
+# What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
+census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
+komira//src/komira_http_client:komira_http_client	src/komira_http_client	library	RUN_FAILED	-	-	-	-	no	conda	-	not built in this census: test_body_drain_deadline fails intermittently under kcov, a 150 ms wall-clock budget (komira-ai/komira#1246)

@@ -1,0 +1,14 @@
+load("@komira//tools/build/gen:defs.bzl", "gen_fresh")
+
+# A `<name>_fresh` whose committed directory climbs out of its package must be
+# refused at analysis, so that `regen` (which writes and deletes in that directory)
+# can never touch a file outside the package: "is not a path inside the package".
+# Build it as an expect_red: `./buck2 build tests//negative/gen_commit:escaping`.
+filegroup(name = "stand_in_gen", srcs = [])
+
+gen_fresh(
+    name = "escaping",
+    committed_dir = "generated/../../../../outside",
+    gen = ":stand_in_gen",
+    target = "tests//negative/gen_commit:escaping",
+)

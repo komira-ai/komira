@@ -64,12 +64,12 @@ const OTHER_ONLY = [_][]const u8{
 };
 
 fn resolution(c: *lib.Ctx) !void {
-    var words = std.ArrayList([]const u8).init(c.a);
-    try words.appendSlice(&.{ "audit", "execution-platform-resolution" });
-    var want = std.ArrayList([]const u8).init(c.a);
+    var words = std.ArrayList([]const u8).empty;
+    try words.appendSlice(c.a, &.{ "audit", "execution-platform-resolution" });
+    var want = std.ArrayList([]const u8).empty;
     for (RESOLUTION) |row| {
-        try words.append(row[0]);
-        try want.append(try std.fmt.allocPrint(c.a, "{s} {s}", .{ row[0], row[1] }));
+        try words.append(c.a, row[0]);
+        try want.append(c.a, try std.fmt.allocPrint(c.a, "{s} {s}", .{ row[0], row[1] }));
     }
     const res = try c.run(words.items, .{});
     if (!res.ok()) {
@@ -83,16 +83,16 @@ fn resolution(c: *lib.Ctx) !void {
         c.pass("resolution: all {d} Mojo, toolchain, third_party_srcs and C/C++ targets resolve to {s}", .{ want.items.len, LINUX });
         return;
     }
-    var diff = std.ArrayList(u8).init(c.a);
+    var diff = std.ArrayList(u8).empty;
     for (want.items) |w| {
         var found = false;
         for (got) |g| found = found or std.mem.eql(u8, g, w);
-        if (!found) try diff.writer().print("\n  want {s}", .{w});
+        if (!found) try diff.writer(c.a).print("\n  want {s}", .{w});
     }
     for (got) |g| {
         var found = false;
         for (want.items) |w| found = found or std.mem.eql(u8, g, w);
-        if (!found) try diff.writer().print("\n  got  {s}", .{g});
+        if (!found) try diff.writer(c.a).print("\n  got  {s}", .{g});
     }
     c.fail("resolution differs (see {s}):{s}", .{ res.log, diff.items });
 }

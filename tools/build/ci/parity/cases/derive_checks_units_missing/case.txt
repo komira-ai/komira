@@ -1,3 +1,0 @@
-# A units file that is not there: the answer cannot be made, exit 1.
-arg "no-such-units-file"
-exit 1

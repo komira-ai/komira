@@ -103,10 +103,10 @@ fn hasPrefix(id: []const u8, prefixes: []const []const u8) bool {
 
 /// Findings 1 to 3, one line each to `out`; returns their count.
 pub fn check(alloc: Alloc, families: []const Family, named: []const Named, out: *std.ArrayList(u8)) !usize {
-    const w = out.writer();
+    const w = out.writer(alloc);
     var findings: usize = 0;
     var declared = std.StringHashMap(void).init(alloc);
-    var family_tags = std.ArrayList(Tag).init(alloc);
+    var family_tags = std.ArrayList(Tag).empty;
     for (families) |f| {
         var lines = std.mem.splitScalar(u8, f.data, '\n');
         var n: usize = 0;
@@ -122,7 +122,7 @@ pub fn check(alloc: Alloc, families: []const Family, named: []const Named, out: 
                 continue;
             }
             try declared.put(d.id, {});
-            if (fam) try family_tags.append(.{ .id = d.id, .path = f.path, .line = n });
+            if (fam) try family_tags.append(alloc, .{ .id = d.id, .path = f.path, .line = n });
         }
     }
     var is_named = std.StringHashMap(void).init(alloc);
@@ -145,9 +145,9 @@ pub fn check(alloc: Alloc, families: []const Family, named: []const Named, out: 
 pub const max_diff_lines = 60;
 
 fn splitLines(alloc: Alloc, s: []const u8) ![]const []const u8 {
-    var list = std.ArrayList([]const u8).init(alloc);
+    var list = std.ArrayList([]const u8).empty;
     var it = std.mem.splitScalar(u8, s, '\n');
-    while (it.next()) |l| try list.append(l);
+    while (it.next()) |l| try list.append(alloc, l);
     return list.items;
 }
 
@@ -156,7 +156,7 @@ fn splitLines(alloc: Alloc, s: []const u8) ![]const []const u8 {
 /// at most `max_diff_lines`) to `out`; returns the count of lines written.
 pub fn compare(alloc: Alloc, got: []const u8, want: []const u8, name: []const u8, out: *std.ArrayList(u8)) !usize {
     if (std.mem.eql(u8, got, want)) return 0;
-    const w = out.writer();
+    const w = out.writer(alloc);
     try w.print("the census differs from {s} (- expected, + got):\n", .{name});
     var written: usize = 1;
     const g = try splitLines(alloc, got);

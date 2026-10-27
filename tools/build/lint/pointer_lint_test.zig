@@ -13,8 +13,8 @@ const testing = std.testing;
 fn sitesOf(arena: *std.heap.ArenaAllocator, path: []const u8, src: []const u8) ![]const []const u8 {
     const a = arena.allocator();
     const res = try pl.readFile(a, path, src, "src/");
-    var out = std.ArrayList([]const u8).init(a);
-    for (res.sites) |s| try out.append(try std.fmt.allocPrint(a, "{d}: {s}: {s}", .{ s.line, @tagName(s.rule), s.text }));
+    var out = std.ArrayList([]const u8).empty;
+    for (res.sites) |s| try out.append(a, try std.fmt.allocPrint(a, "{d}: {s}: {s}", .{ s.line, @tagName(s.rule), s.text }));
     return out.items;
 }
 

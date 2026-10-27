@@ -27,9 +27,12 @@
 #   fine failure mode, a wrong count is not.
 #
 # ⚠ FLOAT IS NOT A BITCAST. `-0.0 == +0.0` in IEEE, so the two must not count as
-#   two distinct values; `cd_f64_distinct_key` folds the sign of zero before
-#   taking the bit pattern. FLOAT32 widens to FLOAT64 FIRST, which is injective
-#   (every f32 has a distinct f64 image), so one key function serves both.
+#   two distinct values, and every NaN (either sign, any payload) is one value
+#   in DuckDB; `cd_f64_distinct_key` takes the bits of the float model's
+#   canonical form (`komira_udf.float_quotient_order.canonical_bits_f64`).
+#   FLOAT32 widens to FLOAT64 FIRST, which is injective (every f32 has a
+#   distinct f64 image, and a NaN widens to a NaN), so one key function serves
+#   both.
 #   The mixed-aggregate fold delegates here too — the mixed arm and the all-CD
 #   sink must agree on a float CD, so the normalisation rule has one copy.
 # =============================================================================
@@ -38,6 +41,7 @@ from std.collections import List
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.record_batch import RecordBatch
+from komira_udf.float_quotient_order import canonical_bits_f64
 
 
 # The read CHANNEL for one agg input column. `CDK_RAW_I64` is the ONLY one the
@@ -138,17 +142,13 @@ def cd_key_column_type_supported(at: ArrowType) -> Bool:
 
 
 def cd_f64_distinct_key(v: Float64) -> Int64:
-    """The EXACT distinct key for a FLOAT COUNT(DISTINCT) input: the IEEE-754
-    bit pattern, with `-0.0` folded onto `+0.0` first because the two compare
-    EQUAL in IEEE and must not count as two distinct values.
-
-    ⚠ NaN is left as its literal bit pattern, so two NaNs with different
-    payloads count as two, on both the mixed arm and the all-CD sink. This
-    is a known divergence from DuckDB (which treats all NaNs as one)."""
-    var x = v
-    if x == Float64(0.0):
-        x = Float64(0.0)
-    return UInt64(x.to_bits()).cast[DType.int64]()
+    """The EXACT distinct key for a FLOAT COUNT(DISTINCT) input: the bit
+    pattern of the value's canonical form under the float model
+    (`komira_udf.float_quotient_order.canonical_bits_f64`), which folds `-0.0`
+    onto `+0.0` and every NaN, of either sign and any payload, onto the one
+    canonical NaN. So `count(DISTINCT x)` counts the zeros as one value and
+    the NaNs as one value, as DuckDB does."""
+    return canonical_bits_f64(v).cast[DType.int64]()
 
 
 def cd_distinct_keys_for_column(

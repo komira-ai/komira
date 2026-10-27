@@ -245,6 +245,7 @@ The TLS layer is [s2n-tls](https://github.com/aws/s2n-tls), built by `third_part
 | `src/komira_http_server/server.mojo` | The server and its serve loops | `HttpServer`, `HttpServerConfig`, `serve_one_iteration_dispatch` |
 | `src/komira_http_server/dispatch.mojo` | Dispatch rounds, body accumulation | `RequestDispatcher`, `CtxRequestDispatcher`, `SuspendableDispatcher`, `serve_read_round_dispatch` |
 | `src/komira_http_server/accept_loop.mojo` | Accept, TLS handshake and canned rounds | `accept_one_and_register`, `drive_tls_handshake`, `resume_pending_write` |
+| `src/komira_http_server/round_write.mojo` | Write helpers the h1 rounds share: park a tail, carry requests, refuse a head | `carry_or_refuse_head`, `HEAD_KEPT` |
 | `src/komira_http_server/serve_h2.mojo` | HTTP/2 serve round | `serve_read_round_h2`, `build_initial_server_settings` |
 | `src/komira_http_core/transport/grpc_emit.mojo` | gRPC seam and emitters | `GrpcDispatch`, `GrpcStreamDispatch`, `NoopGrpcDispatch`, `emit_grpc_response` |
 | `src/komira_http_core/transport/io_stream.mojo`, `kernel_tcp.mojo`, `scripted.mojo` | Stream and connector traits and conformers | `IoStream`, `Connector`, `KernelTcpConnector`, `ScriptedConnector` |

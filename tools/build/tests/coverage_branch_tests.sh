@@ -37,7 +37,7 @@
 #      tests//negative/coverage: branchfail, branchannotate,
 #      branchnoprof and branchversion build green (their release gates),
 #      and branchfail[coverage][branch][test_profile_env] is red (a test
-#      failing only instrumented: the run's message, without gate_runner's
+#      failing only instrumented: the run's message, without the gate's
 #      banner), branchnoprof[...] red (a copy of `cov_branch run` whose test
 #      gets no LLVM_PROFILE_FILE: no .profraw), branchversion[...] red (a
 #      copy reading each raw profile's version as 12: refused as version 12,
@@ -55,7 +55,9 @@
 #      (a nodebug helper's decision at its call),
 #      branchenv refused at analysis (a test_env setting
 #      LLVM_PROFILE_FILE: //tools/build/selftest:analysis_refusals_coverage), branchlinkline red (a `cov_branch link` copy
-#      without -lm: not the release link). The actions exist only with the
+#      without -lm: not the release link), branchnonatomic red (a `cov_branch
+#      link` copy without atomic counter updates: test_threads's eight
+#      threads lose increments, so quarter's counters are not exact). The actions exist only with the
 #      switch on: coverage_keys.sh (test 41).
 #      The greens named below build in the pull-request check, not here:
 #      tests//functional/... is built, its sub-targets through
@@ -65,7 +67,7 @@
 
 expect_red coverage_branch_test_fails "The test failed instrumented for branch coverage (exit 1)" \
     'tests//negative/coverage:branchfail[coverage][branch][test_profile_env]'
-# The failing run's message is a branch coverage run's: not gate_runner's
+# The failing run's message is a branch coverage run's: not the gate's
 # banner, which would say the release gate's test failed (it passed).
 # A missing log is a failure, not a pass (grep's exit 2 is not "absent").
 if [ ! -f "$LOG/coverage_branch_test_fails.log" ]; then
@@ -93,3 +95,5 @@ expect_red coverage_branch_nodebug "may be a decision of count_down" \
     'tests//negative/coverage:branchnodebug[coverage][branch_info][test_nodebug]'
 expect_red coverage_branch_link_line "the branch coverage link is not the release link plus the profile runtime" \
     tests//negative/coverage:branchlinkline
+expect_red coverage_branch_nonatomic "the counters of quarter are" \
+    tests//negative/coverage:branchnonatomic

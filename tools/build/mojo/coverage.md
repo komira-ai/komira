@@ -13,7 +13,7 @@ it feeds is [The build gate](../coverage/README.md#the-build-gate).
   `[coverage][bin][<test>]` (`cov/tests/<test>/<test>`, action category
   `mojo_build_cov_test`);
 - one run of that binary under kcov, with the gated test's environment and
-  data (it goes through the same `gate_runner.sh`), whose Cobertura report
+  data (it goes through the same gate (`gate mojo`, [tools/build/run](../run/README.md))), whose Cobertura report
   in repository paths is `[coverage][tests][<test>]` (`cov/tests/<test>.xml`
   and the marker `cov/tests/<test>.passed`, action category `mojo_cov_run`;
   [cov_run](../coverage/kcov/README.md#cov_run)). What differs: the test is
@@ -30,10 +30,10 @@ it feeds is [The build gate](../coverage/README.md#the-build-gate).
   that does not pass `coverage_branch_gate = False`), and nothing waits
   for otherwise: the test emitted as
   LLVM bitcode at `-O0` with line tables (`[coverage][bc][<test>]`,
-  `mojo_emit_cov_bc`, through the same `mojo_wrapper.sh`), instrumented
+  `mojo_emit_cov_bc`, through the same `mojo_compile`), instrumented
   with IR profile counters by the Mojo package's lld and linked with the
   LLVM profile runtime (`[coverage][pgo_bin][<test>]`, `mojo_cov_pgo_link`),
-  and run through the same `gate_runner.sh` with `LLVM_PROFILE_FILE` set,
+  and run through the same gate (`gate mojo`, [tools/build/run](../run/README.md)) with `LLVM_PROFILE_FILE` set,
   whose merged profile is `[coverage][branch][<test>]` (`cov/branch/<test>.profdata`,
   `mojo_cov_branch_run`), that profile applied to the bitcode by the same
   lld as IR text (`[coverage][branch_ir][<test>]`, `mojo_cov_branch_annotate`),
@@ -95,11 +95,12 @@ gate's outputs; the branch coverage files are only its sub-targets `[bc]`,
 The switch is read in the `mojo_library` macro ([`coverage.bzl`](coverage.bzl))
 and does one thing: it sets the attributes `coverage_debug` to
 `komira//tools/build/coverage/kcov:cov_link`, `coverage_run` to
-`komira//tools/build/coverage/kcov:cov_run` (cov_run.sh, kcov and
+`komira//tools/build/coverage/kcov:cov_run` (cov_run, kcov and
 cov_normalize), `coverage_branch` to
 `komira//tools/build/coverage/branch:cov_branch` (the branch coverage
 scripts and the LLVM pieces), `coverage_gate` to `komira//tools/build/coverage:cov_gate`
-(cov_gate.sh, covcheck and the ratchet) and `coverage_mode` to the policy's
+(cov_gate and covcheck), `coverage_held` to the package's
+`coverage_held` when it has one, and `coverage_mode` to the policy's
 (for a library of the ledger or naming `coverage_tests`: no gate; its
 `<name>_cov_gate` is declared), and a `mojo_test`'s `coverage_debug`; with it
 off, `coverage_tests` is dropped. A buckconfig
@@ -122,7 +123,7 @@ cell only: in a repository that mounts komira as the cell `komira`, setting it
 in the root cell's file leaves komira's libraries without `[coverage]`
 ("unknown subtarget").
 
-A coverage build runs the same `mojo_wrapper.sh` as every compile, byte for
+A coverage build runs the same `mojo_compile` as every compile, byte for
 byte, with one argument changed: its link directory (`<zig_dir>`) is
 `cov_link` instead of the toolchain's zig. That directory holds the
 toolchain's zig as `real/` and, as `zig`, `cov_zig`
@@ -131,7 +132,7 @@ toolchain's zig as `real/` and, as `zig`, `cov_zig`
 and after the link overwrites the action's directory with a placeholder of
 the same length, with `debug_relocate`. The pinned Mojo records no
 compilation directory and names its sources by relative paths (`tests/...`,
-the staged library sources under `buck-out/`, the standard library under
+the library's by its import name, `<import>/...`, the standard library under
 `oss/modular/`); the directory overwritten is the one zig's C runtime units
 record ([names in a coverage binary](../coverage/kcov/README.md#names-in-a-coverage-binary)).
 The wrapper's own check, that no output holds the action's working directory
@@ -157,9 +158,9 @@ Scope, for now:
   kcov, nor one whose main is generated, and the library's generated
   sources are not measured.
 - A `mojo_shared_lib`'s drivers (below).
-- A test's data may not be staged at its own source's path or under
-  `buck-out/`: a coverage run stages the sources there (analysis fails,
-  naming the destination).
+- A test's data may not be staged at its own source's path or under the
+  library's import name (`<import>/`): a coverage run stages the sources
+  there (analysis fails, naming the destination).
 - Branch coverage only where the gate reads the branch records
   (`coverage_branch_gate`, above): kcov gives no branch data, so for any
   other library the gate's branch is `not measured` and never passes in
