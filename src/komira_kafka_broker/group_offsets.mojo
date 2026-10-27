@@ -29,6 +29,8 @@ from komira_objectstore.shared_in_memory_conditional_store import (
     SharedInMemoryConditionalStore,
 )
 
+from .store_support import group_path_segment, is_not_found
+
 
 # =============================================================================
 # §1 — The committed-offset record (typed view of the JSON body).
@@ -198,29 +200,13 @@ def decode_offset_json(body: List[UInt8]) raises -> CommittedOffset:
 # =============================================================================
 
 
-def _group_path_segment(group_id: String) -> String:
-    """The group id as one path segment: `%` and `/` are percent-encoded, so a
-    group id holding `/` cannot name another group's subtree."""
-    var out = List[UInt8]()
-    var bs = group_id.as_bytes()
-    for i in range(len(bs)):
-        var c = bs[i]
-        if c == UInt8(ord("%")):
-            out.extend(String("%25").as_bytes())
-        elif c == UInt8(ord("/")):
-            out.extend(String("%2F").as_bytes())
-        else:
-            out.append(c)
-    return String(StringSlice(unsafe_from_utf8=Span(out)))
-
-
 def _group_offsets_prefix(cluster: String, group_id: String) -> String:
     """`<cluster>/_meta/groups/<group_id>/offsets/` — the directory prefix for
     a group's committed offsets (used by the LIST-all-topics path)."""
     return (
         cluster
         + String("/_meta/groups/")
-        + _group_path_segment(group_id)
+        + group_path_segment(group_id)
         + String("/offsets/")
     )
 
@@ -291,46 +277,6 @@ def _parse_topic_partition_from_key(
             return (String(""), Int32(0), False)
         part = part * Int32(10) + Int32(Int(c) - ord("0"))
     return (topic^, part, True)
-
-
-def _is_method_prefix_byte(c: UInt8) -> Bool:
-    return (
-        (c >= UInt8(ord("a")) and c <= UInt8(ord("z")))
-        or (c >= UInt8(ord("A")) and c <= UInt8(ord("Z")))
-        or (c >= UInt8(ord("0")) and c <= UInt8(ord("9")))
-        or c == UInt8(ord("_"))
-        or c == UInt8(ord("."))
-    )
-
-
-def _is_not_found(msg: String) -> Bool:
-    """True iff a store error says the object is absent, decided by where the
-    marker sits and never by whether the text holds it. Store errors name the
-    object key, and the key holds a group id and a topic, which are free text
-    (only `/` and `%` are encoded), so any marker may appear inside the key of
-    an unrelated 403 or 5xx and turn it into "never committed". Two forms are
-    accepted:
-      * the message starts with `StoreError[NOT_FOUND]`, the cloud stores'
-        canonical kind token (the key comes after it);
-      * the message starts with the in-tree stores' own method prefix (letters,
-        digits, `_` and `.` only, for example `InMemoryConditionalStore.get`)
-        followed by `: not_found (404)`. The prefix cannot hold a space or a
-        bracket, so key text cannot stand in for it."""
-    if msg.startswith("StoreError[NOT_FOUND]"):
-        return True
-    var bs = msg.as_bytes()
-    var i = 0
-    while i < len(bs) and _is_method_prefix_byte(bs[i]):
-        i += 1
-    if i == 0:
-        return False
-    var marker = String(": not_found (404)").as_bytes()
-    if len(bs) - i < len(marker):
-        return False
-    for k in range(len(marker)):
-        if bs[i + k] != marker[k]:
-            return False
-    return True
 
 
 # =============================================================================
@@ -407,7 +353,7 @@ struct GroupOffsetStore[
             return Optional(decode_offset_json(body^))
         except e:
             var msg = String(e)
-            if _is_not_found(msg):
+            if is_not_found(msg):
                 return Optional[CommittedOffset]()
             raise Error(msg)
 

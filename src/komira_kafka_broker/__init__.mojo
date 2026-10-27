@@ -13,6 +13,12 @@ into broker state:
     conditional-write object store.
   * envelope_bridge.mojo: Kafka records to and from an Arrow RecordBatch with
     the fixed five-column envelope schema.
+  * group_coordinator.mojo: the consumer-group rebalance state machine
+    (JoinGroup, SyncGroup, Heartbeat, LeaveGroup) over a conditional-write
+    store. Its parts: group_state.mojo (the persisted group state and its JSON),
+    group_membership.mojo (which members a round carries, whether an assignment
+    is valid), group_assignor.mojo (the range assignor) and group_clock.mojo
+    (the clock the coordinator reads and waits on).
 
 No pointer type appears in any public signature.
 """
@@ -56,4 +62,30 @@ from .envelope_bridge import (
     envelope_schema,
     kafka_records_to_envelope,
     envelope_to_kafka_records,
+)
+
+from .group_clock import GroupClock, SystemGroupClock, ManualGroupClock
+
+from .group_state import (
+    GroupMember,
+    GroupState,
+    GROUP_STATE_EMPTY,
+    GROUP_STATE_PREPARING,
+    GROUP_STATE_COMPLETING,
+    GROUP_STATE_STABLE,
+    DEFAULT_SESSION_TIMEOUT_MS,
+    GHOST_STALE_GRACE_MS,
+    encode_group_state_json,
+    decode_group_state_json,
+)
+
+from .group_assignor import range_assign, pick_protocol_name
+
+from .group_membership import reconcile_members, assignment_is_valid
+
+from .group_coordinator import (
+    GroupCoordinator,
+    JoinResult,
+    JOIN_POLL_INTERVAL_MS,
+    JOIN_POLL_MAX_ITERS,
 )
