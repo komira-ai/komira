@@ -244,6 +244,9 @@ def _fold_one_rg_band[FS: FileSystem, SINK: BandSink](
 ) raises -> Bool:
     """Fold row group `rg_idx` band by band; False when the cursors refuse
     it (before a band was folded, or after: the caller aborts either way)."""
+    # The checks below layer: the footer test, the cursors' own refusals (the
+    # `supported` and row-count tests), and the lockstep short-fill and
+    # `rows_emitted` tests each stop a row group the earlier ones missed.
     if not band_rg_metadata_supported[FS](reader, rg_idx, plan):
         return False
     var n_cols = len(plan.proj_names)
@@ -414,10 +417,18 @@ def run_band_agg[FS: FileSystem, SINK: BandSink](
     refused (the caller runs its default route) or there is no row group.
 
     Raises:
-        If the plan's group keys are not dictionary string columns.
+        If the plan's group keys are not dictionary string columns, or the
+        filter column is not a non-key INT32 projection column.
     """
     if not plan.has_string_key or len(plan.key_proj_idx) == 0:
         raise Error("band producer: the plan's group keys must be dictionary string columns")
+    if filter_col_idx >= 0:
+        if (
+            filter_col_idx >= len(plan.proj_names)
+            or plan.is_key_proj(filter_col_idx)
+            or plan.col_arrow_types[filter_col_idx] != ArrowType.INT32
+        ):
+            raise Error("band producer: the filter column must be a non-key INT32 projection column")
     var n_rgs = len(reader._meta[].row_groups)
     if n_rgs == 0:
         _ = cancel_token^
