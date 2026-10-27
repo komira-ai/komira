@@ -253,7 +253,7 @@ def _check(
     """Run one fixture through BOTH arms at one chunk capacity and compare.
 
     ⚠ THE BUILDER IS REBUILT PER ARM AND THAT IS DELIBERATE. Reusing one would
-    be faster and would also let a phase-split defect that MUTATED the index
+    be faster and would also let a phase-split walk that modified the index
     (it holds `self` by borrow and must not) pass unnoticed, because the
     control arm would then be probing an index the treatment arm had already
     touched.

@@ -11,9 +11,9 @@
 # dirtied first so a fresh zero page cannot pass for a filled one, and the
 # 16-slot grain tiles the 8,192-slot table into 512 morsels.
 #
-# Mutant run: the fill writing `M - 1` slots per morsel instead of `M` turns
-# this file red (and hangs the probe-driven suites on the cycles it creates,
-# which is why this check has a file of its own).
+# A fill that wrote `M - 1` slots per morsel instead of `M` would fail this
+# file (and would hang the probe-driven suites on the cycles it creates, which
+# is why this check has a file of its own).
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false

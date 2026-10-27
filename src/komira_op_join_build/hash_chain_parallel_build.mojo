@@ -384,8 +384,8 @@ def chain_build_parallel(
     # and every downstream fact -- the allocation, the comptime stride the tasks
     # burn in, and the flag `take_buffers` infers -- is derived from this one
     # value. A second literal anywhere would be a write/read stride that agrees
-    # only by coincidence; that exact defect was found by mutation testing in
-    # the serial builder and cost keys from other rows.
+    # only by coincidence; such a disagreement in the serial builder once
+    # read keys that belonged to other rows.
     var pay = fused and len(pay_values) > 0
     if len(pay_values) > 0:
         if not fused:

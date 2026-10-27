@@ -373,7 +373,7 @@ struct HashJoinBuilder(Movable):
         only say the predicate DECIDED — a build that notched the decline and
         then populated the filter anyway moves every counter correctly. This
         field is what the probe actually reads, so asserting it is the only
-        assertion a mutant of that shape cannot satisfy.
+        assertion a build of that shape cannot satisfy.
         """
         return self._use_bloom
 

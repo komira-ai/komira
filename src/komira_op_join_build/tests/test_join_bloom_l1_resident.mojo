@@ -34,25 +34,22 @@
 #   5. VALUE INVARIANCE: the declined index and a force-built one emit
 #      byte-identical match sets over the same probe column.
 #
-# MUTANT LOG — predicted, then RUN. Every line is the leg that goes red.
+# WHAT EACH LEG HOLDS FIXED
 #
-#   M1  `bloom_l1_should_decline` uses `<` instead of `<=`
-#         -> RED, leg 2's exact-boundary assertion (16,384 must decline).
-#   M2  `bloom_l1_should_decline` returns True on `budget <= 0`
-#         -> RED, leg 2's OFF-arm assertion AND leg 3's unconfigured assertion.
-#   M3  `bloom_l1_index_bytes` counts `build_keys`/`next_chain` under `fused`
-#         -> RED, leg 1: the shipped-layout figure becomes 3,648 + 1,600.
-#   M4  `bloom_l1_index_bytes` drops the hash table and counts entries only
-#         -> RED, leg 1 (1,600 != 3,648) and leg 4's boundary build.
-#   M5  `build` notches `declined` but still passes `use_bloom=True`
-#         -> RED, leg 4's `uses_bloom()` assertion, and ONLY that one. Every
-#            counter still moves correctly and the answer is value-invariant,
-#            which is exactly why the structural observable exists.
-#   M6  the decline is applied to EVERY build, budget ignored
-#         -> RED, leg 4's LARGE-build assertion (`uses_bloom()` must stay True).
-#   M7  `build` consults the predicate but ignores `build_bloom=False`
-#         -> RED, leg 4's "never reached" assertion: the counters must not move
-#            for a caller that already declined.
+#   * `bloom_l1_should_decline` declines at the exact boundary (16,384 must
+#     decline), never on `budget <= 0` (leg 2's OFF arm, and leg 3's
+#     unconfigured case).
+#   * `bloom_l1_index_bytes` counts the hash table and the entries once each,
+#     and counts `build_keys`/`next_chain` only when not fused (leg 1: the
+#     shipped-layout figure is 3,648 + 1,600, and leg 4's boundary build).
+#   * `build` that notches `declined` also builds the index without the bloom,
+#     and only `uses_bloom()` shows it: every counter moves correctly and the
+#     answer is value-invariant either way, which is why the structural
+#     observable exists (leg 4).
+#   * The decline is applied by budget, not to every build (leg 4's large
+#     build keeps `uses_bloom()` True).
+#   * `build` that already declined the bloom never reaches the predicate: the
+#     counters must not move (leg 4's "never reached" assertion).
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true

@@ -430,8 +430,7 @@ def hash_join_build(
                 # OUT. A literal here would make the WRITE stride and the
                 # READ stride (`_KNW` in the three probe kernels, also
                 # `JOIN_KN_WORDS_PAY`) two independent facts that agree only
-                # by coincidence -- and mutation testing showed exactly
-                # that: narrowing the constant to 3 words changed every
+                # by coincidence: narrowing the constant to 3 words changed every
                 # reader and left the writer emitting 4, so the walk read
                 # entry i at offset 3i of a 4-wide array. Keys belonging to
                 # other rows, with the layout constant looking correct in
@@ -472,8 +471,8 @@ def hash_join_build(
     # O(1), off every hot path, and it is the only thing standing between a
     # layout-constant change and a probe walk that reads entry i at the
     # wrong offset -- which produces keys from other rows rather than a
-    # crash. Mutation testing put this here: the pad used to be a literal
-    # and this check did not exist.
+    # crash. The pad count is derived from `kn_words`, and this check keeps
+    # it so.
     if fused and len(key_next) != kn_words * n:
         raise Error(
             "hash_join_build: chain-entry array is "
