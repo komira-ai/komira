@@ -276,6 +276,42 @@ def test_decimal_literal_refusals() raises:
     )
 
 
+def _decimal_refusal(text: String, ty: String, width: Int) raises:
+    _check(
+        "SELECT CAST('" + text + "' AS " + ty + ") FROM t",
+        "ERR: SQL bind error: could not convert string '" + text + "' to "
+        + ty + " — the value needs more than " + String(width)
+        + " decimal digits. DuckDB v1.5.3 raises a Conversion Error on the"
+        " same input"
+    )
+
+
+def test_decimal_literal_guards_refuse_wrapped_values() raises:
+    # Fraction digits past the target scale: integer part and fraction both
+    # fill all 38 digits.
+    _decimal_refusal(
+        "99999999999999999999999999999999999999.99999999999999999999999999999999999999",
+        "DECIMAL(38,38)", 38,
+    )
+    _decimal_refusal(
+        "12345678901234567890123456789012345678.12345678901234567890123456789012345678",
+        "DECIMAL(38,38)", 38,
+    )
+    # Padding the fraction to the target scale pushes the value past 38 digits.
+    _decimal_refusal(
+        "99999999999999999999999999999999999999", "DECIMAL(38,1)", 38
+    )
+    _decimal_refusal(
+        "1234567890123456789012345678901234", "DECIMAL(38,20)", 38
+    )
+    # Control: the widest value that fits still binds exactly.
+    _check(
+        "SELECT CAST('99999999999999999999999999999999999999' AS DECIMAL(38,0)) AS a FROM t",
+        "Project(exprs=[Alias(Literal(ScalarValue(decimal128(38,0), hi=5421010862427522170, lo=687399551400673279)), \"a\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+
+
 def test_make_timestamp() raises:
     _check(
         "SELECT make_timestamp(1) AS a, make_timestamp_ms(k) AS b, make_timestamp_ns(i32) AS c FROM t",
