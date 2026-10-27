@@ -47,6 +47,16 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   group id holding "/" or empty, lost swaps retried and exhausted in join,
 #   sync, leave and heartbeat, a 503 naming "412" not retried, the error codes of
 #   SyncGroup, LeaveGroup and Heartbeat, and a follower's assignment ignored.
+# - test_kafka_rebalance_heartbeat: Heartbeat in every group state as Apache Kafka
+#   answers it: 25 for an unknown member, 22 for another generation, 27 for the
+#   right generation in PreparingRebalance, 0 in CompletingRebalance and Stable.
+# - test_kafka_rebalance_rival: a rival's write lands on the swap that fails, and
+#   the retry in join (register and close), sync and leave re-reads it and
+#   decides again, keeping the rival.
+# - test_group_state_decode: state.json decodes strictly (empty, truncated,
+#   garbage, missing or repeated fields, bad escapes, a lone surrogate, bytes
+#   that are not UTF-8 are errors), and the coordinator raises over an
+#   unreadable object and leaves it as it was.
 # - test_kafka_rebalance_leapfrog_race: a leader's stale SyncGroup is rejected
 #   when a member joined the same generation, and the rejoin converges.
 # - test_envelope_bridge: records to the envelope and back, exactly, with null
@@ -74,8 +84,11 @@ mojo_library(
         "tests/test_kafka_rebalance_convergence_race.mojo",
         "tests/test_kafka_rebalance_deadline_race.mojo",
         "tests/test_kafka_rebalance_faults.mojo",
+        "tests/test_kafka_rebalance_heartbeat.mojo",
         "tests/test_kafka_rebalance_leapfrog_race.mojo",
+        "tests/test_kafka_rebalance_rival.mojo",
         "tests/test_kafka_rebalance_wire.mojo",
+        "tests/test_group_state_decode.mojo",
     ],
     visibility = ["PUBLIC"],
 )

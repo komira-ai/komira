@@ -306,7 +306,8 @@ def test_heartbeat_none_when_stable_then_illegal_generation() raises:
 
 
 def test_heartbeat_codes_and_liveness_stamp() raises:
-    # A heartbeat during a rebalance answers REBALANCE_IN_PROGRESS, a member or
+    # A heartbeat in a CompletingRebalance group at its generation answers NONE
+    # (the states are covered in test_kafka_rebalance_heartbeat), a member or
     # group the store does not know answers UNKNOWN_MEMBER_ID, and a heartbeat
     # stamps the member's last_active_ms with the clock's now.
     var c = _new_coordinator()
@@ -314,8 +315,8 @@ def test_heartbeat_codes_and_liveness_stamp() raises:
     var r = _join_with_window(c, String(""), String("cli"), Int32(0))
     _check(
         c.heartbeat(String("g1"), r.member_id.copy(), r.generation_id)
-        == ERROR_REBALANCE_IN_PROGRESS,
-        "hb: Completing -> rebalance in progress",
+        == Int16(0),
+        "hb: Completing at its generation -> none",
     )
     _check(
         c.heartbeat(String("g1"), String("nobody"), r.generation_id)
@@ -390,8 +391,12 @@ def test_leave_bumps_generation_and_preparing() raises:
     )
     _check(len(st.members) == 1, "leave: 1 member remains")
     _check(st.members[0].member_id == r2.member_id, "leave: r2 remains")
-    # A heartbeat from the remaining member during Preparing -> rebalance.
+    # The leave bumped the generation: a heartbeat from the remaining member
+    # at the generation it joined is ILLEGAL_GENERATION, and one at the new
+    # generation sees the rebalance.
     var hb = c.heartbeat(String("g1"), r2.member_id.copy(), r2.generation_id)
+    _check(hb == Int16(22), "leave: remaining member at its old generation")
+    hb = c.heartbeat(String("g1"), r2.member_id.copy(), st.generation_id)
     _check(
         hb == ERROR_REBALANCE_IN_PROGRESS,
         "leave: remaining member sees rebalance",

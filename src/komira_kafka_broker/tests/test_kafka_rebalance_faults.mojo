@@ -358,7 +358,7 @@ def test_client_id_cannot_forge_the_group_state() raises:
     _check(st.members[0].member_id == r.member_id, "member id intact")
     _check(
         rig.coord.heartbeat(String("g"), r.member_id.copy(), r.generation_id)
-        == ERROR_REBALANCE_IN_PROGRESS,
+        == Int16(0),
         "the member is found again",
     )
     print("PASS test_client_id_cannot_forge_the_group_state")
@@ -581,7 +581,7 @@ def test_heartbeat_ignores_a_lost_swap_and_raises_on_other_failures() raises:
     rig.coord.clock.set(Int64(5000))
     rig.plan[].arm(1, 1, _KIND_LOST_CAS_LOCAL)
     var code = rig.coord.heartbeat(String("g"), r.member_id.copy(), r.generation_id)
-    _check(code == ERROR_REBALANCE_IN_PROGRESS, "the answer is unchanged")
+    _check(code == Int16(0), "the answer is unchanged")
     _check(
         _state(rig.coord, String("g")).members[0].last_active_ms == Int64(1000),
         "the lost swap stamped nothing",

@@ -193,15 +193,28 @@ struct GroupCoordinator[
 
     def _load(mut self, group_id: String) raises -> Optional[GroupState]:
         var path = Path.parse(self._state_key(group_id))
+        var etag = String("")
+        var body = List[UInt8]()
         try:
             var meta = self._store.head(path)
-            var body = self._store.get(path)
-            return Optional(decode_group_state_json(body^, meta.etag.copy()))
+            body = self._store.get(path)
+            etag = meta.etag.copy()
         except e:
             var msg = String(e)
             if is_not_found(msg):
                 return Optional[GroupState]()
             raise Error(msg)
+        # A stored object that does not decode is never an absent group: the
+        # error goes to the caller, and nothing is written over the object.
+        try:
+            return Optional(decode_group_state_json(body^, etag^))
+        except e:
+            raise Error(
+                String("group_coordinator: stored state of group '")
+                + group_id
+                + String("' is unreadable: ")
+                + String(e)
+            )
 
     # -- CAS-store: create-if-absent (etag empty) or If-Match -----------------
 
@@ -642,11 +655,12 @@ struct GroupCoordinator[
         member_id: String,
         generation_id: Int32,
     ) raises -> Int16:
-        """Return NONE(0) when the group is Stable + the member's generation
-        matches. Return REBALANCE_IN_PROGRESS(27) when a rebalance is underway
-        (the group is not Stable) so the member rejoins. UNKNOWN_MEMBER_ID(25)
-        if the member is not in the group. ILLEGAL_GENERATION(22) if the group
-        is Stable and the generation is not the group's, older or newer.
+        """UNKNOWN_MEMBER_ID(25) if the group is absent or the member is not
+        in it. ILLEGAL_GENERATION(22) if the generation is not the group's,
+        older or newer, in any state. At the group's generation:
+        REBALANCE_IN_PROGRESS(27) while the group is PreparingRebalance (the
+        member rejoins), NONE(0) while it is CompletingRebalance or Stable (a
+        member between JoinGroup and SyncGroup is not told to rejoin).
 
         A heartbeat is ALSO a LIVENESS signal — it refreshes the member's
         `last_active_ms` via a best-effort CAS so a still-alive incumbent that
@@ -664,15 +678,15 @@ struct GroupCoordinator[
         if midx < 0:
             return ERROR_UNKNOWN_MEMBER_ID
 
-        # Compute the response code FIRST (semantics unchanged).
+        # The answer, as Apache Kafka's handleHeartbeat gives it: another
+        # generation is ILLEGAL_GENERATION in any state; at the group's
+        # generation a PreparingRebalance group answers REBALANCE_IN_PROGRESS
+        # and a CompletingRebalance or Stable group answers NONE.
         var code = Int16(0)
-        if st.state != String(GROUP_STATE_STABLE):
-            # A rebalance is in progress (Preparing / Completing). Tell the
-            # member to rejoin.
-            code = ERROR_REBALANCE_IN_PROGRESS
-        elif generation_id != st.generation_id:
-            # Stable but the member is on another generation: it must rejoin.
+        if generation_id != st.generation_id:
             code = ERROR_ILLEGAL_GENERATION
+        elif st.state == String(GROUP_STATE_PREPARING):
+            code = ERROR_REBALANCE_IN_PROGRESS
 
         # Best-effort liveness refresh (only when the etag is concrete — a freshly
         # decoded state always carries one). Stamp last_active_ms + re-store via

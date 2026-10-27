@@ -186,26 +186,14 @@ def _hex_encode(data: List[UInt8]) -> String:
 
 
 def _hex_nibble(c: UInt8) -> Int:
+    """The value of one hex digit, or -1 if `c` is not one."""
     if c >= UInt8(ord("0")) and c <= UInt8(ord("9")):
         return Int(c) - ord("0")
     if c >= UInt8(ord("a")) and c <= UInt8(ord("f")):
         return Int(c) - ord("a") + 10
     if c >= UInt8(ord("A")) and c <= UInt8(ord("F")):
         return Int(c) - ord("A") + 10
-    return 0
-
-
-def _hex_decode(s: String) -> List[UInt8]:
-    var bs = s.as_bytes()
-    var out = List[UInt8]()
-    var i = 0
-    var n = len(bs)
-    while i + 1 < n:
-        var hi = _hex_nibble(bs[i])
-        var lo = _hex_nibble(bs[i + 1])
-        out.append(UInt8((hi << 4) | lo))
-        i += 2
-    return out^
+    return -1
 
 
 def _json_escape(s: String) -> String:
@@ -270,33 +258,6 @@ def encode_group_state_json(st: GroupState) -> List[UInt8]:
         out.append(b[i])
     return out^
 
-
-def _find_key(s: String, key: String, start: Int) -> Int:
-    var needle = String('"') + key + String('":')
-    var idx = s.find(needle, start)
-    if idx < 0:
-        return -1
-    return idx + len(needle.as_bytes())
-
-
-def _parse_int64_at(s: String, pos: Int) -> Int64:
-    var bs = s.as_bytes()
-    var i = pos
-    var n = len(bs)
-    var neg = False
-    if i < n and bs[i] == UInt8(ord("-")):
-        neg = True
-        i += 1
-    var v = Int64(0)
-    while i < n:
-        var c = bs[i]
-        if c < UInt8(ord("0")) or c > UInt8(ord("9")):
-            break
-        v = v * Int64(10) + Int64(Int(c) - ord("0"))
-        i += 1
-    return -v if neg else v
-
-
 def _hex4(bs: Span[UInt8, _], at: Int) -> Int:
     """The value of the four hex digits at `at`, or -1 if they are not there."""
     if at + 4 > len(bs):
@@ -315,133 +276,362 @@ def _hex4(bs: Span[UInt8, _], at: Int) -> Int:
     return v
 
 
-def _parse_string_at(s: String, pos: Int) -> String:
-    """Parse a JSON string value at `pos` (must point at the opening `"`),
-    undoing the escapes `_json_escape` writes (and the other single-character
-    escapes of JSON). The string ends at the first `"` that no backslash
-    escapes."""
-    var bs = s.as_bytes()
-    var i = pos
-    var n = len(bs)
-    if i >= n or bs[i] != UInt8(ord('"')):
-        return String("")
-    i += 1
-    var out = List[UInt8]()
-    while i < n and bs[i] != UInt8(ord('"')):
-        var c = bs[i]
-        if c != UInt8(ord("\\")) or i + 1 >= n:
-            out.append(c)
-            i += 1
-            continue
-        var e = bs[i + 1]
-        i += 2
-        if e == UInt8(ord("n")):
-            out.append(UInt8(10))
-        elif e == UInt8(ord("t")):
-            out.append(UInt8(9))
-        elif e == UInt8(ord("r")):
-            out.append(UInt8(13))
-        elif e == UInt8(ord("b")):
-            out.append(UInt8(8))
-        elif e == UInt8(ord("f")):
-            out.append(UInt8(12))
-        elif e == UInt8(ord("u")):
-            var code = _hex4(bs, i)
-            if code < 0:
-                out.append(e)
+
+# -- strict decoding -----------------------------------------------------------
+#
+# The decoder reads the body as the JSON the encoder writes, token by token. It
+# raises, naming the byte offset, on anything else: an empty or truncated body,
+# text after the closing brace, a missing or repeated key, a key it does not
+# know, a number that is not an integer in range, a string with a raw control
+# character or an unknown or malformed escape (a lone UTF-16 surrogate included),
+# bytes that are not UTF-8, hex that is odd or not hex, and a group state that
+# is not one of the four names. Required: generation_id, leader, protocol,
+# state, members, and in each member member_id, subscription, assignment and
+# join_generation. Optional, with the default named: protocol_type ("consumer"),
+# rebalance_deadline (0), session_timeout (DEFAULT_SESSION_TIMEOUT_MS) and
+# round_opened (0) at the top, last_active (0) in a member.
+
+
+struct _Reader(Movable):
+    var bs: List[UInt8]
+    var i: Int
+
+    def __init__(out self, var bs: List[UInt8]):
+        self.bs = bs^
+        self.i = 0
+
+    def err(self, what: String) -> Error:
+        return Error(
+            String("state.json: ") + what + String(" at byte ") + String(self.i)
+        )
+
+    def peek(self) -> Int:
+        if self.i >= len(self.bs):
+            return -1
+        return Int(self.bs[self.i])
+
+    def skip_ws(mut self):
+        while self.i < len(self.bs):
+            var c = self.bs[self.i]
+            if (
+                c == UInt8(0x20)
+                or c == UInt8(0x09)
+                or c == UInt8(0x0A)
+                or c == UInt8(0x0D)
+            ):
+                self.i += 1
             else:
-                i += 4
+                break
+
+    def expect(mut self, c: String) raises:
+        self.skip_ws()
+        if self.peek() != ord(c):
+            if self.peek() < 0:
+                raise self.err(String("truncated, expected ") + c)
+            raise self.err(String("expected ") + c)
+        self.i += 1
+
+    def read_string(mut self) raises -> String:
+        self.skip_ws()
+        if self.peek() < 0:
+            raise self.err(String("truncated, expected a string"))
+        if self.peek() != ord('"'):
+            raise self.err(String("expected a string"))
+        self.i += 1
+        var out = List[UInt8]()
+        while True:
+            if self.i >= len(self.bs):
+                raise self.err(String("truncated inside a string"))
+            var c = self.bs[self.i]
+            if c == UInt8(ord('"')):
+                self.i += 1
+                break
+            if c < UInt8(0x20):
+                raise self.err(String("control character inside a string"))
+            if c != UInt8(ord("\\")):
+                out.append(c)
+                self.i += 1
+                continue
+            self.i += 1
+            if self.i >= len(self.bs):
+                raise self.err(String("truncated escape"))
+            var e = self.bs[self.i]
+            self.i += 1
+            if e == UInt8(ord("n")):
+                out.append(UInt8(10))
+            elif e == UInt8(ord("t")):
+                out.append(UInt8(9))
+            elif e == UInt8(ord("r")):
+                out.append(UInt8(13))
+            elif e == UInt8(ord("b")):
+                out.append(UInt8(8))
+            elif e == UInt8(ord("f")):
+                out.append(UInt8(12))
+            elif (
+                e == UInt8(ord('"'))
+                or e == UInt8(ord("\\"))
+                or e == UInt8(ord("/"))
+            ):
+                out.append(e)
+            elif e == UInt8(ord("u")):
+                var code = _hex4(self.bs, self.i)
+                if code < 0:
+                    raise self.err(String("malformed \\u escape"))
+                self.i += 4
+                if code >= 0xDC00 and code <= 0xDFFF:
+                    raise self.err(String("lone low surrogate in \\u escape"))
+                if code >= 0xD800 and code <= 0xDBFF:
+                    if (
+                        self.i + 1 >= len(self.bs)
+                        or self.bs[self.i] != UInt8(ord("\\"))
+                        or self.bs[self.i + 1] != UInt8(ord("u"))
+                    ):
+                        raise self.err(
+                            String("lone high surrogate in \\u escape")
+                        )
+                    var low = _hex4(self.bs, self.i + 2)
+                    if low < 0xDC00 or low > 0xDFFF:
+                        raise self.err(
+                            String("high surrogate not followed by a low one")
+                        )
+                    self.i += 6
+                    code = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00)
                 if code < 0x80:
                     out.append(UInt8(code))
                 else:
                     out.extend(chr(code).as_bytes())
+            else:
+                raise self.err(String("unknown escape"))
+        try:
+            return String(StringSlice(from_utf8=Span(out)))
+        except:
+            raise self.err(String("string is not valid UTF-8"))
+
+    def read_int(mut self) raises -> Int64:
+        self.skip_ws()
+        var neg = False
+        if self.peek() == ord("-"):
+            neg = True
+            self.i += 1
+        var start = self.i
+        var v = Int64(0)
+        var limit = Int64(9223372036854775807)
+        while self.i < len(self.bs):
+            var c = self.bs[self.i]
+            if c < UInt8(ord("0")) or c > UInt8(ord("9")):
+                break
+            var d = Int64(Int(c) - ord("0"))
+            if v > (limit - d) // Int64(10):
+                raise self.err(String("integer out of range"))
+            v = v * Int64(10) + d
+            self.i += 1
+        if self.i == start:
+            raise self.err(String("expected an integer"))
+        if self.bs[start] == UInt8(ord("0")) and self.i - start > 1:
+            raise self.err(String("integer with a leading zero"))
+        return -v if neg else v
+
+    def read_int32(mut self) raises -> Int32:
+        var v = self.read_int()
+        if v < Int64(-2147483648) or v > Int64(2147483647):
+            raise self.err(String("integer out of the 32-bit range"))
+        return Int32(Int(v))
+
+    def read_hex(mut self) raises -> List[UInt8]:
+        var s = self.read_string()
+        var bs = s.as_bytes()
+        if len(bs) % 2 != 0:
+            raise self.err(String("hex string of odd length"))
+        var out = List[UInt8]()
+        var k = 0
+        while k < len(bs):
+            var hi = _hex_nibble(bs[k])
+            var lo = _hex_nibble(bs[k + 1])
+            if hi < 0 or lo < 0:
+                raise self.err(String("hex string with a non-hex digit"))
+            out.append(UInt8((hi << 4) | lo))
+            k += 2
+        return out^
+
+    def after_value(mut self, close: String) raises -> Bool:
+        """After a value inside an object or array: True for a comma (another
+        entry follows), False for the closing character."""
+        self.skip_ws()
+        var c = self.peek()
+        if c < 0:
+            raise self.err(String("truncated, expected , or ") + close)
+        if c == ord(","):
+            self.i += 1
+            return True
+        if c == ord(close):
+            self.i += 1
+            return False
+        raise self.err(String("expected , or ") + close)
+
+
+def _read_member(mut r: _Reader) raises -> GroupMember:
+    r.expect(String("{"))
+    var mid = String("")
+    var sub = List[UInt8]()
+    var asg = List[UInt8]()
+    var jg = Int32(0)
+    var la = Int64(0)
+    var seen_mid = False
+    var seen_sub = False
+    var seen_asg = False
+    var seen_jg = False
+    var seen_la = False
+    while True:
+        var key = r.read_string()
+        r.expect(String(":"))
+        if key == String("member_id"):
+            if seen_mid:
+                raise r.err(String("member_id repeated"))
+            seen_mid = True
+            mid = r.read_string()
+        elif key == String("subscription"):
+            if seen_sub:
+                raise r.err(String("subscription repeated"))
+            seen_sub = True
+            sub = r.read_hex()
+        elif key == String("assignment"):
+            if seen_asg:
+                raise r.err(String("assignment repeated"))
+            seen_asg = True
+            asg = r.read_hex()
+        elif key == String("join_generation"):
+            if seen_jg:
+                raise r.err(String("join_generation repeated"))
+            seen_jg = True
+            jg = r.read_int32()
+        elif key == String("last_active"):
+            if seen_la:
+                raise r.err(String("last_active repeated"))
+            seen_la = True
+            la = r.read_int()
         else:
-            out.append(e)  # `"`, `\\`, `/`
-    return String(StringSlice(unsafe_from_utf8=Span(out)))
+            raise r.err(String("unknown member field ") + key)
+        if not r.after_value(String("}")):
+            break
+    if not seen_mid:
+        raise r.err(String("member without member_id"))
+    if not seen_sub:
+        raise r.err(String("member without subscription"))
+    if not seen_asg:
+        raise r.err(String("member without assignment"))
+    if not seen_jg:
+        raise r.err(String("member without join_generation"))
+    return GroupMember(mid^, sub^, asg^, jg, la)
 
 
 def decode_group_state_json(
     body: List[UInt8], var etag: String
 ) raises -> GroupState:
     """Parse the state.json body bytes back to a GroupState (carrying `etag` so
-    a later read-modify-write can CAS with If-Match). Tolerant of field order
-    for the scalar fields; the members array is parsed positionally object by
-    object."""
-    var s = String(StringSlice(unsafe_from_utf8=Span(body)))
+    a later read-modify-write can CAS with If-Match). Strict: raises an Error
+    naming the problem and the byte offset for a body that is empty, truncated,
+    not the JSON `encode_group_state_json` writes, or missing a required field
+    (see the block above). Never aborts the process, whatever the bytes."""
+    var r = _Reader(body.copy())
+    r.expect(String("{"))
     var gen = Int32(0)
-    var gp = _find_key(s, String("generation_id"), 0)
-    if gp >= 0:
-        gen = Int32(Int(_parse_int64_at(s, gp)))
     var leader = String("")
-    var lp = _find_key(s, String("leader"), 0)
-    if lp >= 0:
-        leader = _parse_string_at(s, lp)
     var protocol = String("")
-    var pp = _find_key(s, String("protocol"), 0)
-    # Note: "protocol" is a prefix of "protocol_type" — but _find_key matches
-    # `"protocol":` exactly (the closing quote+colon), so "protocol_type" (which
-    # is `"protocol_type":`) does not collide.
-    if pp >= 0:
-        protocol = _parse_string_at(s, pp)
     var ptype = String("consumer")
-    var ptp = _find_key(s, String("protocol_type"), 0)
-    if ptp >= 0:
-        ptype = _parse_string_at(s, ptp)
-    var state = String(GROUP_STATE_EMPTY)
-    var sp = _find_key(s, String("state"), 0)
-    if sp >= 0:
-        state = _parse_string_at(s, sp)
+    var state = String("")
     var deadline = Int64(0)
-    var dp = _find_key(s, String("rebalance_deadline"), 0)
-    if dp >= 0:
-        deadline = _parse_int64_at(s, dp)
-    # `session_timeout` reads as DEFAULT_SESSION_TIMEOUT_MS when missing.
     var session_timeout = DEFAULT_SESSION_TIMEOUT_MS
-    var stp = _find_key(s, String("session_timeout"), 0)
-    if stp >= 0:
-        session_timeout = _parse_int64_at(s, stp)
-    # `round_opened` reads as 0 when missing, and 0 skips the round-open test
-    # (no member is reaped on it).
     var round_opened = Int64(0)
-    var rop = _find_key(s, String("round_opened"), 0)
-    if rop >= 0:
-        round_opened = _parse_int64_at(s, rop)
-
-    # Parse the members array.
     var members = List[GroupMember]()
-    var mstart = _find_key(s, String("members"), 0)
-    if mstart >= 0:
-        var cursor = mstart
-        while True:
-            var midp = _find_key(s, String("member_id"), cursor)
-            if midp < 0:
-                break
-            var mid = _parse_string_at(s, midp)
-            var subp = _find_key(s, String("subscription"), midp)
-            var sub = List[UInt8]()
-            if subp >= 0:
-                sub = _hex_decode(_parse_string_at(s, subp))
-            var asgp = _find_key(s, String("assignment"), midp)
-            var asg = List[UInt8]()
-            if asgp >= 0:
-                asg = _hex_decode(_parse_string_at(s, asgp))
-            var jgp = _find_key(s, String("join_generation"), midp)
-            var jg = Int32(0)
-            if jgp >= 0:
-                jg = Int32(Int(_parse_int64_at(s, jgp)))
-            # `last_active` follows join_generation inside THIS member object
-            # (the next member's member_id key is further along). Missing
-            # reads as 0, a long-idle member; the next join or heartbeat stamps
-            # it.
-            var lap = _find_key(s, String("last_active"), jgp) if jgp >= 0 else -1
-            var la = Int64(0)
-            if lap >= 0:
-                la = _parse_int64_at(s, lap)
-            members.append(GroupMember(mid^, sub^, asg^, jg, la))
-            # Advance past this member object's last fields so the next
-            # _find_key("member_id") finds the NEXT member.
-            var advance = lap if lap >= 0 else (jgp if jgp >= 0 else midp + 1)
-            cursor = advance
+    var seen_gen = False
+    var seen_leader = False
+    var seen_protocol = False
+    var seen_state = False
+    var seen_members = False
+    var seen_ptype = False
+    var seen_deadline = False
+    var seen_session = False
+    var seen_round = False
+    while True:
+        var key = r.read_string()
+        r.expect(String(":"))
+        if key == String("generation_id"):
+            if seen_gen:
+                raise r.err(String("generation_id repeated"))
+            seen_gen = True
+            gen = r.read_int32()
+        elif key == String("leader"):
+            if seen_leader:
+                raise r.err(String("leader repeated"))
+            seen_leader = True
+            leader = r.read_string()
+        elif key == String("protocol"):
+            if seen_protocol:
+                raise r.err(String("protocol repeated"))
+            seen_protocol = True
+            protocol = r.read_string()
+        elif key == String("protocol_type"):
+            if seen_ptype:
+                raise r.err(String("protocol_type repeated"))
+            seen_ptype = True
+            ptype = r.read_string()
+        elif key == String("state"):
+            if seen_state:
+                raise r.err(String("state repeated"))
+            seen_state = True
+            state = r.read_string()
+            if (
+                state != String(GROUP_STATE_EMPTY)
+                and state != String(GROUP_STATE_PREPARING)
+                and state != String(GROUP_STATE_COMPLETING)
+                and state != String(GROUP_STATE_STABLE)
+            ):
+                raise r.err(String("unknown group state ") + state)
+        elif key == String("rebalance_deadline"):
+            if seen_deadline:
+                raise r.err(String("rebalance_deadline repeated"))
+            seen_deadline = True
+            deadline = r.read_int()
+        elif key == String("session_timeout"):
+            if seen_session:
+                raise r.err(String("session_timeout repeated"))
+            seen_session = True
+            session_timeout = r.read_int()
+        elif key == String("round_opened"):
+            if seen_round:
+                raise r.err(String("round_opened repeated"))
+            seen_round = True
+            round_opened = r.read_int()
+        elif key == String("members"):
+            if seen_members:
+                raise r.err(String("members repeated"))
+            seen_members = True
+            r.expect(String("["))
+            r.skip_ws()
+            if r.peek() == ord("]"):
+                r.i += 1
+            else:
+                while True:
+                    members.append(_read_member(r))
+                    if not r.after_value(String("]")):
+                        break
+        else:
+            raise r.err(String("unknown field ") + key)
+        if not r.after_value(String("}")):
+            break
+    r.skip_ws()
+    if r.i != len(r.bs):
+        raise r.err(String("text after the closing brace"))
+    if not seen_gen:
+        raise r.err(String("missing generation_id"))
+    if not seen_leader:
+        raise r.err(String("missing leader"))
+    if not seen_protocol:
+        raise r.err(String("missing protocol"))
+    if not seen_state:
+        raise r.err(String("missing state"))
+    if not seen_members:
+        raise r.err(String("missing members"))
     return GroupState(
         gen,
         leader^,
@@ -454,5 +644,3 @@ def decode_group_state_json(
         session_timeout,
         round_opened,
     )
-
-
