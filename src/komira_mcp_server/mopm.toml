@@ -1,0 +1,16 @@
+[package]
+name = "komira_mcp_server"
+version = "0.1.0"
+description = "A Model Context Protocol (MCP) server library: JSON-RPC 2.0 framing, the session lifecycle, ping, tools and resources behind two provider traits. It does no I/O."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[dependencies]
+komira_encoding = { path = "../komira_encoding", version = "0.1" }
+komira_json = { path = "../komira_json", version = "0.1" }
+
+[targets]
+lib = { path = "src/komira_mcp_server" }
+tests = ["tests"]
