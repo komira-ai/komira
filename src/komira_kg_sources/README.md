@@ -53,6 +53,18 @@ Everything is exported from `komira_kg_sources`:
   content is a repeat, other content is an error (a hash collision for a raw
   record, another binding for a partition). A read of a raw record recomputes the
   hash and refuses a payload that does not hash to its name.
+- **The content key is not collision-resistant.** It is a 64-bit FNV-1a hash.
+  Two different payloads can collide, and an attacker can construct them. A
+  collision is refused, not merged: `put` reads back the stored record under the
+  key and `check_same_payload` raises when the bytes differ, so the second payload
+  is never silently mapped onto the first. The cost of a collision is therefore a
+  refused put, which means a host must not let untrusted parties choose payloads
+  stored in the same raw store, or they can deny service by colliding with a
+  payload they want refused.
+- **Cost of listings.** `list_bindings` and the sort that puts keys in order
+  (`sort_strings`, an insertion sort) are quadratic in the number of bindings or
+  records. That is fine for the sizes a host keeps per partition; a host that
+  keeps very many records under one prefix should not list them in one call.
 - **One binding per partition.** A partition binds one raw store and one lineage
   for good; the two prefixes must differ and neither may lie under the other. An
   identical second bind is a no-op. A different one is an error that names what
