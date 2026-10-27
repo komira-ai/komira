@@ -66,6 +66,7 @@ review.
 | [`komira_name_registry`](../src/komira_name_registry/) | interned names: a compile-time FNV-1a id for a string literal (and the same id computed at run time), and a fixed-capacity table that maps an id back to its name. |
 | [`komira_spsc_ring`](../src/komira_spsc_ring/) | one bounded single-producer / single-consumer ring, `SpscRing[T]`. |
 | [`komira_fork_join`](../src/komira_fork_join/) | run one body on `n` real threads and return only after every thread has exited. |
+| [`komira_so`](../src/komira_so/) | the C ABI of komira's one shared library, `libkomira`: the status codes, the ABI version (`major * 1000 + minor`), the context handle's `Session` (the last error text) and the exports `komira_abi_version`, `komira_ctx_new`, `komira_ctx_free` and `komira_last_error`, which returns its text through a two-call buffer protocol. The skeleton: no engine, source or plan call is exported yet. Depends on nothing outside the package. |
 
 ### Engine
 
@@ -566,12 +567,12 @@ family's design doc arrives with its libraries
 | Parquet files | a reader and a writer of Parquet files. `komira_parquet_api` (the footer's types), `komira_parquet_codec` (page compression), `komira_parquet` (the encodings' value decoders, the footer and page-header readers) and `komira_parquet_writer` (the footer serializer, statistics, encoders, page builders and the file writers, RecordBatch writers included) are here; the column reader and the scan wiring are still being ported, so `komira_scan_source`'s Parquet source and `komira_sdk`'s Parquet read options have no reader behind them yet. |
 | Iceberg tables | `komira_iceberg` writes and reads a file-based Iceberg v2 table (metadata, manifests, Parquet data files, Avro delete files, merge-on-read) over `komira_objectstore`; it has no catalog. `komira_iceberg_catalog` resolves a table name to its metadata location and stops there. Not here: types beyond boolean, int, long, float, double and string, the `truncate` and temporal transforms, Parquet delete files, a scan engine that prunes by partition or bounds. |
 | execution | the engine that runs a plan: pipeline execution and the join, sort, top-N and window operators. The layers under it are here ([Engine](#engine)). |
-| planning | lowering a logical plan to a physical one (komira_compiler). The plan types, their wire codecs, `komira_optimizer`'s rewrite rules (each a function of one plan) and its driver that runs them in a fixed order (`optimizer_driver.optimize`), and the first host lowering rule (`komira_lowering_rules`) are here. |
+| planning | lowering a logical plan to a physical one, designed in [lowering and pipeline](design/lowering_and_pipeline.md) as the proposed `komira_lowering` and `komira_pipeline_exec`. The plan types, their wire codecs, `komira_optimizer`'s rewrite rules (each a function of one plan) and its driver that runs them in a fixed order (`optimizer_driver.optimize`), and the first host lowering rule (`komira_lowering_rules`) are here. |
 | SQL and the SDK | the SQL parser and binder (`komira_sql` holds the tokenizer and the AST); the carrier that strings `komira_sdk`'s modules into verbs, its sinks and its facade; the Python package. |
 | agents | MCP and local models (komira_mcp_server, komira_localmodel). |
 | deploy | the DEPLOY step (`kci_release_machine` refuses it today) and kci's adapters for real clouds (the clouds in `src/` are the fakes). |
 | message broker | the Kafka server's connection handling and request dispatch (`komira_kafka_server` holds the wire codec). |
-| packaging | the shared-library ABI (komira_so). The packaging rules ([tools/build/package](../tools/build/package/README.md)) and the release machine ([release/](../release/)) are here. |
+| packaging | the rest of the shared-library ABI: `komira_so` holds only its skeleton (version, context, last error). The packaging rules ([tools/build/package](../tools/build/package/README.md)) and the release machine ([release/](../release/)) are here. |
 
 ## Conventions
 

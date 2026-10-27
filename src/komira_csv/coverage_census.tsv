@@ -1,3 +1,3 @@
 # What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
-census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
-komira//src/komira_csv:komira_csv	src/komira_csv	library	RUN_FAILED	-	-	-	-	no	conda	-	not built in this census: test_csv_parallel_reader and test_csv_phase_4_column_parallel_concat take about 450 s under kcov, the run limit (sharding them is pending)
+census	2026-10-27	-	-
+komira//src/komira_csv:komira_csv	src/komira_csv	library	OK	4213	5062	-	-	no	conda	-	-
