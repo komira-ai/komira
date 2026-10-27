@@ -855,6 +855,17 @@ its entities resolve to themselves and a repeated live edge is not added again,
 and only the episode row repeats. The `edges` table stores no predicate, so a
 stored edge reads back with "" and a live repeat is recognized by its endpoints,
 fact and source alone; `match_predicate` therefore helps only within the run that
-built the edges. A triple's own end time is not read: a new edge is open until a
-later fact closes it. Candidate generation scans every entity of the working set
+built the edges. Storing it needs a design decision, a format version and a
+migration note; the question is open in `docs/design/knowledge_graph_port.md`,
+section "Decided during the port".
+
+A triple's own end time is read on the structured path only: the episode path
+ignores it, so a new edge there is open until a later fact closes it, while the
+structured path stores it. A removal (a source that stops stating a fact) ends the
+edge at the ingest's system time, not at a time the source states. A future-dated
+fact retired before it starts gets an empty interval (`valid_at == invalid_at`).
+Erasing a partition does not clear the change gate's fingerprints, so sending an
+identical source again after an erase is a no-op: vary the key or clear it.
+
+Candidate generation scans every entity of the working set
 for each mention, O(entities) per mention.

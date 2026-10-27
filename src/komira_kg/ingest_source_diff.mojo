@@ -110,8 +110,9 @@ def split_incremental(
     lookup (endpoints and fact), not a scan of `prior`. Cost: each triple's two
     name lookups scan the partition's entities (`existing_nid_for_name`), and
     the names a changed triple needs are searched in a list, so the bound is
-    O(triples * (entities + changed triples)) plus O(prior). The returned extraction holds the changed triples, and the
-    mentions that a changed triple names or that name no existing entity.
+    O(triples * (entities + changed triples)) plus O(prior). The returned
+    extraction holds the changed triples, and the mentions that a changed triple
+    names or that name no existing entity.
 
     Args:
         ws: The working set.
@@ -198,7 +199,9 @@ def retire_absent(
         if ws.edges[at].expired_at != TS_OPEN_SENTINEL:
             continue
         var stated = False
-        var ek = _key(ws.edges[at].src_nid, ws.edges[at].dst_nid, ws.edges[at].fact)
+        var ek = _key(
+            ws.edges[at].src_nid, ws.edges[at].dst_nid, ws.edges[at].fact
+        )
         var in_asserted = asserted_by_key.get(ek)
         if in_asserted:
             ref hits = in_asserted.value()
