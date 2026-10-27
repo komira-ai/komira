@@ -167,13 +167,14 @@ comptime _CDSTR_ROW_COST_BYTES: Int = 16
 
 
 # =============================================================================
-# §1b — ⭐ THE ROUTE WITNESS. No value assertion can see which arm answered.
+# §1b — Test witness: which route answered
 # =============================================================================
 #
-# A caller that routes `count(DISTINCT <string>)` here and one that runs the
-# serial `SELECT DISTINCT` walk return the same number, so no value oracle can
-# tell which route answered; this process-wide counter can (a `_Global` atomic,
-# incremented once per answer this kernel serves).
+# A route that sends `count(DISTINCT <string>)` here and one that runs a serial
+# walk return the same number, so no value assertion can tell which answered.
+# This process-wide counter (a `_Global` atomic, incremented once per answer
+# this kernel serves) lets a test see it. The three accessors below exist for
+# tests; production code does not read the counter.
 
 
 def _init_cdstr_kernel_taken() -> OwnedPointer[AtomicI64]:
@@ -189,24 +190,24 @@ comptime _CDSTR_KERNEL_TAKEN = _Global[
 
 @always_inline
 def cd_string_kernel_taken_incr() raises:
-    """Record one `count(DISTINCT <string>)` answered by THIS kernel."""
-    # SAFETY: §6 FFI carve-out — `get_or_create_ptr` targets KGEN-runtime static
-    # storage (process-lifetime); the wildcard is the stdlib `_Global` API's own
-    # return type, confined to this helper.
+    """Record one `count(DISTINCT <string>)` answered by this kernel (the
+    kernel calls it itself; it is public only so the witness is one unit)."""
+    # SAFETY: `get_or_create_ptr` points at process-lifetime static storage
+    # owned by the `_Global`; the pointer does not escape this function.
     var gp = _CDSTR_KERNEL_TAKEN.get_or_create_ptr()
     _ = gp[][].fetch_add(Int64(1))
 
 
 def cd_string_kernel_taken_count() raises -> Int:
-    """Read the process-wide count of answers served by this kernel."""
-    # SAFETY: §6 FFI carve-out (see `cd_string_kernel_taken_incr`).
+    """Test accessor: the process-wide count of answers served by this kernel."""
+    # SAFETY: see `cd_string_kernel_taken_incr`.
     var gp = _CDSTR_KERNEL_TAKEN.get_or_create_ptr()
     return Int(gp[][].load())
 
 
 def reset_cd_string_kernel_counter() raises:
-    """Reset the process-wide counter to 0 (test setup)."""
-    # SAFETY: §6 FFI carve-out (see `cd_string_kernel_taken_incr`).
+    """Test accessor: reset the process-wide counter to 0."""
+    # SAFETY: see `cd_string_kernel_taken_incr`.
     var gp = _CDSTR_KERNEL_TAKEN.get_or_create_ptr()
     gp[][].store(Scalar[DType.int64](0))
 
@@ -825,7 +826,7 @@ def count_distinct_string_column(
             + String(n_rows)
             + " rows, above the 32-bit row ordinal this kernel packs"
         )
-    # ⭐ THE ROUTE WITNESS. Incremented only once both refusals are past, so a
+    # Route witness: incremented only once both refusals are past, so a
     # REFUSED call is never counted as an answer this kernel served.
     cd_string_kernel_taken_incr()
     if at == ArrowType.LARGE_STRING:

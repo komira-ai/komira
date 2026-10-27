@@ -5,7 +5,7 @@
 #
 # The typed-stage COUNT(DISTINCT) buffers every fed value per group and counts
 # the distinct ones at finalize. A serial dedup of one large buffer is the whole
-# wall of a scalar `count(DISTINCT user_id)` over 100M rows. This primitive
+# wall of a scalar `count(DISTINCT <integer column>)` over a very large column. This primitive
 # partitions the values by a value HASH into P disjoint partitions, dedups each
 # partition in PARALLEL (`run_with_state`, one task per partition) and SUMS the
 # per-partition distinct counts. Equal values hash identically, so they land in
