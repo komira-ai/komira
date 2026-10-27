@@ -111,11 +111,20 @@ from .proc_ffi import (
 # from either nanosleep decl, so it sidesteps the conflict entirely. Resolution
 # is ~10ms-tick-grade, which is exactly what the grace poll needs.
 # -----------------------------------------------------------------------------
+def _usleep_micros(ms: Int) -> UInt32:
+    """The microseconds `_sleep_ms(ms)` passes to usleep: 0 (no sleep) for
+    `ms <= 0`, else `ms * 1000`."""
+    if ms <= 0:
+        return UInt32(0)
+    return UInt32(ms * 1000)
+
+
 def _sleep_ms(ms: Int):
     """Sleep `ms` milliseconds via usleep (microsecond granularity)."""
-    if ms <= 0:
+    var us = _usleep_micros(ms)
+    if us == UInt32(0):
         return
-    _ = external_call["usleep", Int32](UInt32(ms * 1000))
+    _ = external_call["usleep", Int32](us)
 
 
 # -----------------------------------------------------------------------------
@@ -285,7 +294,7 @@ def process_environ() -> List[String]:
         if r.bytes < 0:
             # Out of range: `environ` shrank between the count and this read.
             # Stop rather than emit a partial entry.
-            break
+            break  # cov: unreachable environ changes between count and read only under a concurrent setenv/unsetenv
         # ⛔ BYTE-PRESERVING (see `_BYTES_NOT_CODEPOINTS` above). An environment
         # VALUE is arbitrary bytes — a UTF-8 path, a display name, a locale
         # string — and these entries are handed straight back to

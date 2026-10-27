@@ -2,14 +2,13 @@
 # CDP-HEAVYSPLIT — a HEAVY group's distinct pairs are spread across workers
 # =============================================================================
 #
-# ★ THE DEFECT. `_execute_count_distinct_agg_parallel` hash-partitions rows by
-# GROUP (`_cd_partition_bucket`), so one group is one worker. On cbq10 ONE group
-# holds 91.8% of the rows (cbq11: 79.2%), so ONE worker runs that group's whole
-# `CdDistinctSet` probe stream — 1.09M distinct pairs in a 2^21-slot, 32 MB
-# table that misses cache on every probe — while the other 19 finish their scan
-# and idle. Measured at K=20 (perf per thread per rep): the hot worker runs
-# 272-307 ms against 89 ms for every other worker, so `dispatch` is ~68% skew
-# on both cells. `dispatch` is FLAT in K from K=2 to K=20 for the same reason.
+# ★ THE DEFECT. The grouped COUNT(DISTINCT) driver (added by a later part)
+# hash-partitions rows by GROUP, so one group is one worker. When ONE group
+# holds 91.8% of the rows (a second at 79.2% in another shape), ONE worker runs
+# that group's whole `CdDistinctSet` probe stream — about 1.09M distinct pairs
+# in a 2^21-slot, 32 MB table that misses cache on every probe — while the
+# other 19 finish their scan and idle, so the dispatch is mostly skew and does
+# not get faster as K grows from 2 to 20.
 #
 # ★ THE FIX, AND WHY IT IS CORRECT. A group whose SAMPLED share of rows exceeds
 # 2/K is HEAVY. A heavy group's (row, aggregate) is owned by
@@ -24,10 +23,9 @@
 #     row by adding those counts (`_execute_count_distinct_agg_parallel`).
 # A group that is NOT heavy is owned by its group hash exactly as before, so
 # its partial is the whole group and the merge stays a CONCAT for it. This is
-# DuckDB's level-1 shape applied to the groups that need it: their distinct
-# table is partitioned on the hash of (groups ∪ argument)
-# (`distinct_aggregate_data.cpp:81-107`), which is what lets a heavy group
-# spread across threads there.
+# a level-1 distinct table partitioned on the hash of (groups ∪ argument), as
+# DuckDB does, applied only to the groups that need it, which is what lets a
+# heavy group spread across workers.
 #
 # ⛔ CORRECTNESS DOES NOT DEPEND ON THE SAMPLE. Which groups are heavy decides
 #   only WHERE pairs are counted. Any set — empty, wrong, or a hash collision
@@ -63,8 +61,9 @@ from std.memory import OwnedPointer, alloc
 
 
 # Rows sampled to find heavy groups: evenly strided, so a group's share of the
-# sample estimates its share of the input. 4,096 composite hashes is ~0.1 ms of
-# serial driver time, against a heavy group costing cbq10 ~190 ms.
+# sample estimates its share of the input. 4,096 composite hashes is negligible
+# serial driver time, against the skewed worker's pair-set work for a heavy
+# group.
 comptime CD_HEAVY_SAMPLE_ROWS: Int = 4096
 
 # At most this many heavy groups. A group the driver SPLITS has share > 1/(4K)
@@ -112,25 +111,22 @@ def cd_split_groups(sample_hashes: List[Int], num_workers: Int) -> List[Int]:
     """The composite group hashes the general driver SPLITS by pair: sampled
     share above 1/(4K) (vs `cd_heavy_groups`' 2/K).
 
-    ⭐ CD-SCAN LEVER 2 (2026-09-25). The driver used `cd_heavy_groups` (2/K,
-    "more than twice a balanced worker's rows"), which left cbq10's SECOND
-    group — `iPhone`, 229,128 rows = 4.1%, 0.82 x N/K at K=20 — owned WHOLE by
-    one worker on top of that worker's balanced share of everything else: the
-    hot worker ran 29.7 ms against an 18.0 ms median in `dispatch` (K=20,
-    kept-codes route). A
-    split costs one partial row per (split group, worker), folded at the merge
-    by integer addition, and one more entry in the row loop's unrolled hash
-    compare; an unsplit group of share p costs its owner p x N extra rows —
-    p x K balanced workers' worth. At 1/(4K) the worst unsplit group adds a
-    QUARTER of a balanced worker's load. 1/(2K) was measured first and left
-    cbq11's third group (`(6, iPad)`, 2.27%, 126,118 rows) whole: hot worker
-    31.5 ms vs a 20.7 ms median. The list is still capped at `CD_HEAVY_MAX`
-    (the row loop's unrolled compare), heaviest first.
+    The driver used `cd_heavy_groups` (2/K, "more than twice a balanced
+    worker's rows"), which left a SECOND group of 4.1% of the rows (0.82 x N/K
+    at K=20) owned WHOLE by one worker on top of that worker's balanced share
+    of everything else. A split costs one partial row per (split group,
+    worker), folded at the merge by integer addition, and one more entry in
+    the row loop's unrolled hash compare; an unsplit group of share p costs
+    its owner p x N extra rows — p x K balanced workers' worth. At 1/(4K) the
+    worst unsplit group adds a QUARTER of a balanced worker's load. 1/(2K)
+    still left a 2.27% group (a third group) whole. The
+    list is still capped at `CD_HEAVY_MAX` (the row loop's unrolled compare),
+    heaviest first.
 
     ⛔ The fused string-key route keeps `cd_heavy_groups` (2/K) for its
-    DECLINE test on purpose: a lower bar there would hand cbq13's
-    `search_phrase` back to the general driver, which is the 2-3x slower route
-    for that shape.
+    DECLINE test on purpose: a lower bar there would hand a
+    high-cardinality string key back to the general driver, which is the
+    slower route for that shape.
     """
     return _groups_above_share(sample_hashes, num_workers, True)
 

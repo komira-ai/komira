@@ -43,6 +43,7 @@ from kci_pkg_upload import PkgResponse, ScriptedPkgTransport, content_identity_o
 from kci_publish import NoWaitSleeper
 from kci_publish.release_fixture import ExampleRelease, write_example_inputs, write_text_file
 from kci_release_machine import StageValidation
+from kci_release_set.conda_metadata import LibFile
 from kci_validate import (
     ContainerHost,
     ValidateRequest,
@@ -643,6 +644,37 @@ def test_a_pull_that_fails_fails() raises:
     var row = _run(runner, t, sl, fx)
     _assert_fails_with(row, String("image: docker pull: exit 1: manifest unknown"))
     assert_equal(len(runner.calls), 1)
+
+
+def test_install_pins_carry_lib_files_and_depends() raises:
+    # the native install checks read a pin's lib_files, has_lib_files and
+    # depends; a pin that dropped them would skip every native check
+    var fx = Fixture(String("pins_lib_files"))
+    var rel = load_validated_release(fx.req)
+    var found = False
+    for m in range(len(rel.loaded.members)):
+        if rel.loaded.members[m].has_conda and rel.loaded.members[m].conda.name == String("komira_alpha"):
+            var f = LibFile()
+            f.kind = String("shared")
+            f.path = String("lib/libkomira_alpha_native.so.1")
+            f.sha256_hex = _rep(String("ab"), 32)
+            rel.loaded.members[m].conda.lib_files.append(f^)
+            rel.loaded.members[m].conda.has_lib_files = True
+            rel.loaded.members[m].conda.depends.append(String("__glibc >=2.34"))
+            found = True
+    assert_true(found, "the example release has no komira_alpha library member")
+    var pins = install_pins(rel.loaded, fx.req.validation.installs)
+    var seen = False
+    for i in range(len(pins)):
+        if pins[i].name == String("komira_alpha"):
+            seen = True
+            assert_true(pins[i].has_lib_files)
+            assert_equal(len(pins[i].lib_files), 1)
+            assert_equal(pins[i].lib_files[0].path, String("lib/libkomira_alpha_native.so.1"))
+            assert_equal(pins[i].depends[len(pins[i].depends) - 1], String("__glibc >=2.34"))
+        else:
+            assert_false(pins[i].has_lib_files, pins[i].name)
+    assert_true(seen)
 
 
 def test_a_run_that_fails_fails() raises:

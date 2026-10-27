@@ -2,12 +2,12 @@
 # join_payload_narrow_exec -- the DELIVERY half of join payload narrowing
 # =============================================================================
 #
-# The decision half is an optimizer rule: it proves, off folded parquet footer
+# The decision half is a host lowering rule (`komira_lowering_rules`'
+# `derive_payload_narrow`): it proves, off verified parquet footer
 # statistics, that a join's non-key INT64 payload column fits in 1/2/4
-# unsigned bytes with a frame-of-reference `base`, and stamps a
-# `PayloadNarrowSpec` on the scan
-# (`ScanData.payload_narrow` -> `ParquetSourceData.payload_narrow`). This
-# file is the reader.
+# unsigned bytes with a frame-of-reference `base`, and gives a
+# `PayloadNarrowSpec` for the scan, carried on
+# `ParquetSourceData.payload_narrow`. This file is the reader.
 #
 # ⛔ WHY THE LEAF OWNS BOTH HALVES, AND WHY THERE IS NO PLAN REWRITE.
 # DuckDB's `compressed_materialization/compress_comparison_join.cpp` spells the
@@ -147,7 +147,7 @@ def join_payload_narrow_all_sizes() raises -> Bool:
     DEFAULT-OFF, set with `configure_join_payload_narrow`, and inert unless the
     lever above is on. It exists so that "the source-size gate earns its place"
     is a MEASUREMENT taken with one binary and two run-time arms, rather than
-    an argument: with it set, every column the optimizer stamped is narrowed
+    an argument: with it set, every column a spec names is narrowed
     whatever its source size, so the cells the gate declines can be priced
     both ways in one sweep.
     """
@@ -613,7 +613,7 @@ def narrow_build_batch[
     Args:
         build_batch: The resident build batch, CONSUMED. Returned unchanged
             (moved through) on every refusal.
-        specs: The optimizer's per-column instructions, by column NAME.
+        specs: The per-column instructions, by column NAME.
         probe_ncols: The join output's probe-side column count -- build column
             `j` becomes output column `probe_ncols + j`.
         lever_precheck: `PNL_ADMIT`, or the refusal the CALLER already proved
@@ -651,7 +651,7 @@ def narrow_build_batch[
         var si = find_narrow_spec(specs, name)
         if si < 0:
             continue
-        # Only columns the optimizer NAMED are reported: a witness listing
+        # Only columns a spec NAMES are reported: a witness listing
         # every column of every join would drown the ones under test.
         plan.col_names.append(name.copy())
         ref sp = specs[si]
@@ -667,7 +667,7 @@ def narrow_build_batch[
             # A narrowed column keeps its validity bitmap, but the value under
             # a NULL slot is not covered by [min, max]; `v - base` on it can
             # wrap and the widen would reconstruct a DIFFERENT garbage value.
-            # The optimizer already refuses a nullable column; this is the
+            # The lowering rule already refuses a nullable column; this is the
             # PHYSICAL re-check, because the batch is what arrives.
             plan.col_codes.append(PN_NULLABLE)
             plan.col_bytes.append(UInt8(0))

@@ -26,6 +26,11 @@
 #   T12 escaped doubled-quote at chunk boundary — pair straddling chunk edge.
 #   T13 escape byte (Posix) inside quoted region inside chunk.
 #   T14 quote-heavy data — verify candidate-bitmask filtering pays off.
+#   T15 Posix escaped quote inside a 64-byte chunk (komira-ai/komira#1129):
+#       row count and cells match phase 1 for the List[Row] and flat-cell
+#       phase-3 scanners.
+#   T16 Posix escape at byte 63 escaping the quote at byte 64 (the escape
+#       carried across the chunk boundary).
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -38,6 +43,7 @@ from komira_csv import (
     scan_csv_phase1,
     scan_csv_phase2_movemask,
     scan_csv_phase3_pclmulqdq,
+    scan_csv_phase3_pclmulqdq_into_cells,
 )
 
 
@@ -424,6 +430,85 @@ def test_quote_heavy_data() raises:
         c = c + 1
 
 
+def _assert_posix_scanners_agree(
+    buf: List[UInt8], expected_rows: Int, label: String
+) raises:
+    """Run one Posix input through phases 1, 2 and 3 (List[Row]) and the
+    phase-3 flat-cell scanner; every one must emit phase 1's rows."""
+    var rows1 = scan_csv_phase1[Posix](
+        Span(buf), UInt8(ord(",")), UInt8(ord('"'))
+    )
+    assert_equal(len(rows1), expected_rows, label + ": phase 1 row count")
+    var rows2 = scan_csv_phase2_movemask[Posix](
+        Span(buf), UInt8(ord(",")), UInt8(ord('"'))
+    )
+    _assert_rows_equal(rows1, rows2, label + " phase 2")
+    var rows3 = scan_csv_phase3_pclmulqdq[Posix](
+        Span(buf), UInt8(ord(",")), UInt8(ord('"'))
+    )
+    _assert_rows_equal(rows1, rows3, label + " phase 3")
+    var cells = scan_csv_phase3_pclmulqdq_into_cells[Posix](
+        Span(buf), UInt8(ord(",")), UInt8(ord('"'))
+    )
+    assert_equal(cells.num_rows(), len(rows1), label + ": flat row count")
+    var r = 0
+    while r < len(rows1):
+        assert_equal(
+            cells.num_cells_in_row(r),
+            len(rows1[r].cells),
+            label + ": flat row " + String(r) + " cell count",
+        )
+        var c = 0
+        while c < len(rows1[r].cells):
+            var flat = cells.cell(r, c)
+            assert_equal(flat.start, rows1[r].cells[c].start, label + ": flat start")
+            assert_equal(flat.end, rows1[r].cells[c].end, label + ": flat end")
+            assert_equal(
+                flat.needs_unescape,
+                rows1[r].cells[c].needs_unescape,
+                label + ": flat needs_unescape",
+            )
+            c = c + 1
+        r = r + 1
+
+
+def test_posix_escaped_quote_inside_chunk() raises:
+    """T15 (komira-ai/komira#1129): `\\"` inside a quoted field in the first
+    64-byte chunk. Before the fix the escaped quote flipped the prefix-XOR
+    quote region, every later newline read as quoted, and phase 3 emitted
+    11 of 42 rows. Row 2 ends its quoted field with an escaped backslash
+    (`\\\\"`), so a fix that drops every quote after a backslash fails too."""
+    var sbuf = String('"a\\"b",c\n"d\\\\",e\n')
+    var i = 0
+    while i < 40:
+        sbuf = sbuf + String("x,y\n")
+        i = i + 1
+    var buf = _bytes(sbuf)
+    _assert_posix_scanners_agree(buf, 42, "T15 posix_escaped_quote_inside_chunk")
+
+
+def test_posix_escape_carried_across_chunk_boundary() raises:
+    """T16: the escape is byte 63 and the quote it escapes is byte 64, the
+    first byte of the next chunk. Without the carried escape the next chunk
+    reads byte 64 as a closing quote and inverts its quote region."""
+    var sbuf = String('"')
+    var i = 0
+    while i < 62:
+        sbuf = sbuf + String("a")
+        i = i + 1
+    sbuf = sbuf + String('\\"b",c\n')  # byte 63 = `\`, byte 64 = `"`
+    var j = 0
+    while j < 40:
+        sbuf = sbuf + String("x,y\n")
+        j = j + 1
+    var buf = _bytes(sbuf)
+    assert_equal(buf[63], UInt8(ord("\\")), "escape at byte 63")
+    assert_equal(buf[64], UInt8(ord('"')), "escaped quote at byte 64")
+    _assert_posix_scanners_agree(
+        buf, 41, "T16 posix_escape_carried_across_chunk_boundary"
+    )
+
+
 def main() raises:
     test_basic_skip()
     test_dense_specials()
@@ -439,4 +524,6 @@ def main() raises:
     test_doubled_quote_at_chunk_boundary()
     test_posix_escape_in_quoted_region()
     test_quote_heavy_data()
-    print("test_csv_scanner_phase3_pclmulqdq: 14/14 PASS")
+    test_posix_escaped_quote_inside_chunk()
+    test_posix_escape_carried_across_chunk_boundary()
+    print("test_csv_scanner_phase3_pclmulqdq: 16/16 PASS")

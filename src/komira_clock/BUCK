@@ -8,5 +8,8 @@ mojo_library(
     name = "komira_clock",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     test_srcs = ["tests/test_clock.mojo"],
+    # The thread-CPU test blocks in a join while a second thread works; the
+    # thread helper reaches the tests only, never a consumer of the clock.
+    test_deps = ["//src/komira_fork_join:komira_fork_join"],
     visibility = ["PUBLIC"],
 )

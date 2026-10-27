@@ -1,0 +1,40 @@
+# Runs one `./buck2` command (build, test or bxl) and fails the step unless the
+# run was on the farm: buck2 must succeed, and `assert_remote`
+# (//tools/build/ci:assert_remote, which says what it accepts) must find no
+# local execution in the run's output.
+#
+# The logic is in that tool, not here. This file is two lines of invocation:
+# buck2's output is tee'd to a file (the step's shell is bash, so a pipeline
+# fails when buck2 does), and the tool reads the file. The caller builds the
+# tool first and passes its path; the cases of this file, run against recorded
+# buck2 output, are //:buck2_farm_cases.
+#
+# `args` is split on spaces by the shell and is never a shell script: a
+# pattern is `//path:name`, a list of them is `@file` or `$(cat file)` made
+# by the caller before this step. It reaches the step through `env:` only.
+name: buck2-farm
+description: Run one ./buck2 command and fail unless buck2 succeeded and no action ran locally.
+
+inputs:
+  args:
+    description: The buck2 subcommand and its arguments, such as `build //tools/build/ci:assert_remote`.
+    required: true
+  assert-remote:
+    description: Path of the built //tools/build/ci:assert_remote executable.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: buck2
+      shell: bash
+      env:
+        BUCK2_ARGS: ${{ inputs.args }}
+        BUCK2_LOG: ${{ runner.temp }}/buck2-farm.log
+      run: ./buck2 $BUCK2_ARGS 2>&1 | tee "$BUCK2_LOG"
+    - name: assert the run was remote
+      shell: bash
+      env:
+        ASSERT_REMOTE: ${{ inputs.assert-remote }}
+        BUCK2_LOG: ${{ runner.temp }}/buck2-farm.log
+      run: '"$ASSERT_REMOTE" "$BUCK2_LOG"'

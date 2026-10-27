@@ -5,7 +5,7 @@
 # `parallel_group_finalize_column` finalizes each occupied group's state and
 # appends one output column, fanning the groups out over the workers when
 # there are at least `_MEDIAN_PARALLEL_MIN_GROUPS` of them. The answer must not
-# depend on which way it ran. What each test kills:
+# depend on which way it ran. What each test proves:
 #   * a finalize that writes group `si`'s answer into another row, skips a
 #     slice, or reads `states[si]` instead of `states[slots[si]]` (the slots
 #     here are a permutation over a larger state list, so both shapes differ);

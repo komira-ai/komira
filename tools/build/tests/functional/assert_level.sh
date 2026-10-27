@@ -20,21 +20,21 @@ out="$LOG/assert_level.aquery.txt"
 # none may match. A listed target must have at least one such action.
 EXPECT='
 tests//functional/assert_level:lib_none mojo_build_test , -D, ASSERT=none,
-tests//functional/assert_level:lib_none mojo_gated_test ^\[[^,]*/busybox, sh, [^,]*/mem_cap\.sh, [^,]*/busybox, 4096, tests//functional/assert_level:lib_none:tests/test_quiet_at_none\.mojo, --, [^,]*/busybox, sh, [^,]*/gate_runner\.sh,
+tests//functional/assert_level:lib_none mojo_gated_test ^\[[^,]*/gate, mojo, --busybox, [^,]*/busybox, --runtime-lib, [^,]*/lib, --label, tests//functional/assert_level:lib_none:tests/test_quiet_at_none\.mojo, --test, [^,]*, --marker, [^,]*, --mem-cap-mib, 4096, --hang-limit-s, 1800\]
 tests//functional/assert_level:lib_none_uncapped mojo_build_test , -D, ASSERT=none,
-tests//functional/assert_level:lib_none_uncapped mojo_gated_test !mem_cap
+tests//functional/assert_level:lib_none_uncapped mojo_gated_test !--mem-cap-mib
 tests//functional/assert_level:lib_default mojo_build_test !, -D,
-tests//functional/assert_level:lib_default mojo_gated_test !mem_cap
+tests//functional/assert_level:lib_default mojo_gated_test !--mem-cap-mib
 tests//functional/assert_level:lib_defines mojo_build_test --target-cpu, [^,]*, -D, KOMIRA_PROBE_DEFINE=on,
-tests//functional/assert_level:lib_defines mojo_gated_test !mem_cap
+tests//functional/assert_level:lib_defines mojo_gated_test !--mem-cap-mib
 tests//functional/assert_level:lib_level_and_defines mojo_build_test --target-cpu, [^,]*, -D, ASSERT=none, -D, KOMIRA_PROBE_DEFINE=on, -D, KOMIRA_PROBE_SECOND=2, -I
 tests//functional/assert_level:bin_none mojo_build , -D, ASSERT=none,
 tests//functional/assert_level:bin_none mojo_build_shared , -D, ASSERT=none,
 tests//functional/assert_level:test_none mojo_build_test , -D, ASSERT=none,
-tests//functional/mem_cap:lib_under_cap mojo_gated_test ^\[[^,]*/busybox, sh, [^,]*/mem_cap\.sh, [^,]*/busybox, 1024,
+tests//functional/mem_cap:lib_under_cap mojo_gated_test ^\[[^,]*/gate, mojo, .*, --mem-cap-mib, 1024, --hang-limit-s, 1800\]
 tests//functional/mem_cap:lib_under_cap mojo_build_test !, -D,
 komira//tools/build/examples/libgate_ok:libgate_ok mojo_build_test !, -D,
-komira//tools/build/examples/libgate_ok:libgate_ok mojo_gated_test !mem_cap
+komira//tools/build/examples/libgate_ok:libgate_ok mojo_gated_test !--mem-cap-mib
 komira//tools/build/examples:hello mojo_build !, -D,
 komira//tools/build/examples:test_hellopkg mojo_build_test !, -D,
 '
@@ -59,9 +59,9 @@ tests//functional/assert_level:lib_level_and_defines mojo_emit_cov_bc --target-c
 # ExternalRunnerTestInfo, each artifact written as its short path), as
 # EXPECT's `want`.
 TEST_EXPECT='
-tests//functional/assert_level:test_none ^busybox, "sh", test_deadline\.sh, busybox, "[0-9]+", "[0-9]+", "tests//functional/assert_level:test_none", "--", busybox, "sh", mem_cap\.sh, busybox, "4096", "tests//functional/assert_level:test_none", "--", busybox, "sh", gate_runner\.sh,
-tests//negative/assert_level:test_default ^busybox, "sh", test_deadline\.sh, busybox, "[0-9]+", "[0-9]+", "tests//negative/assert_level:test_default", "--", busybox, "sh", gate_runner\.sh,
-komira//tools/build/examples:test_hellopkg !mem_cap
+tests//functional/assert_level:test_none ^cmd_args\( gate, "mojo", "--busybox", busybox, "--runtime-lib", cmd_args\( compiler, format="\{\}/lib" \), "--label", "tests//functional/assert_level:test_none", "--test", [^,]*, "--marker", "/dev/null", "--deadline-s", "[0-9]+", "--runner-timeout-s", "[0-9]+", "--mem-cap-mib", "4096" \)
+tests//negative/assert_level:test_default ^cmd_args\( gate, "mojo", "--busybox", busybox, "--runtime-lib", cmd_args\( compiler, format="\{\}/lib" \), "--label", "tests//negative/assert_level:test_default", "--test", [^,]*, "--marker", "/dev/null", "--deadline-s", "[0-9]+", "--runner-timeout-s", "[0-9]+" \)
+komira//tools/build/examples:test_hellopkg !--mem-cap-mib
 '
 
 bad=""

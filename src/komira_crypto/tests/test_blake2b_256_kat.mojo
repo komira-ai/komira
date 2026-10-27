@@ -20,10 +20,10 @@
 #       same input (the parameter block, not a truncation, selects the length:
 #       BLAKE2b-256 is NOT the first half of BLAKE2b-512).
 #
-# PROVENANCE OF EVERY EXPECTED VALUE: each agrees with CPython's
-# `hashlib.blake2b(data, digest_size=32)` AND coreutils `b2sum -l 256` — two
-# implementations independent of AWS-LC. Row (5)'s BLAKE2b-512("abc") is RFC
-# 7693 Appendix A.
+# PROVENANCE OF EVERY EXPECTED VALUE: each is BLAKE2b with a 32-byte output
+# (RFC 7693) and agrees with GNU coreutils `b2sum -l 256` over the same bytes,
+# an implementation independent of AWS-LC. Row (5)'s BLAKE2b-512("abc") prefix
+# is RFC 7693 Appendix A.
 #
 # Hermetic: no file, no network, no clock.
 # =============================================================================
