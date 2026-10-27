@@ -12,6 +12,14 @@
 # `spawn_join` returns only after every thread has exited. If bodies raise, the
 # error of the lowest tid is rethrown; if `pthread_create` fails after `k`
 # threads started, those `k` are joined and `spawn_join` raises.
+#
+# Fault seam: `spawn_join_with_fault` takes a `SpawnFault`, whose `fail_rc(i)`
+# is asked before thread `i` is started. 0 means "start it with pthread_create";
+# nonzero means "do not call pthread_create, treat that value as its return
+# code". `spawn_join` passes `_NoFault`, a zero-sized type whose answer is the
+# constant 0, so the check folds away. The seam carries no pointer and no
+# global state, so tests make the k-th start fail without touching memory
+# limits, load or CPU placement.
 # =============================================================================
 
 from std.ffi import external_call
@@ -69,6 +77,26 @@ trait SpawnJoinBody(Movable):
         ...
 
 
+trait SpawnFault(Movable):
+    """Decides, per thread index, whether its start is made to fail."""
+
+    def fail_rc(self, index: Int) -> Int32:
+        """0: start thread `index` for real. Nonzero: skip pthread_create and
+        report this value as its return code."""
+        ...
+
+
+struct _NoFault(SpawnFault):
+    """The production answer: every thread is started for real."""
+
+    def __init__(out self):
+        pass
+
+    @always_inline
+    def fail_rc(self, index: Int) -> Int32:
+        return Int32(0)
+
+
 struct _Slot[B: SpawnJoinBody, o: Origin](Movable):
     """One thread's private record. Only that thread writes it while it runs."""
 
@@ -110,6 +138,14 @@ def spawn_join[
     Raises for `n < 0`, for a failed thread start (after joining the threads
     that did start), or with the lowest-tid error if a body raised.
     """
+    spawn_join_with_fault(body, n, _NoFault())
+
+
+def spawn_join_with_fault[
+    B: SpawnJoinBody, o: Origin, F: SpawnFault
+](ref [o] body: B, n: Int, fault: F) raises:
+    """`spawn_join` with a fault seam: before starting thread `i`, a nonzero
+    `fault.fail_rc(i)` stands in for a failing `pthread_create`."""
     if n < 0:
         raise Error("spawn_join: n must be >= 0, got " + String(n))
     if n == 0:
@@ -132,7 +168,9 @@ def spawn_join[
             .unsafe_mut_cast[False]()
             .unsafe_origin_cast[FFI_ORIGIN]()
         )
-        rc = pthread_create_thread(tids[i], entry, arg)
+        rc = fault.fail_rc(i)
+        if rc == Int32(0):
+            rc = pthread_create_thread(tids[i], entry, arg)
         if rc != Int32(0):
             break
         started += 1

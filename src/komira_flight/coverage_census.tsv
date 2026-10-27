@@ -1,0 +1,3 @@
+# What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
+census	2026-10-24	-	-
+komira//src/komira_flight:komira_flight	src/komira_flight	library	OK	299	299	-	-	no	conda	-	-

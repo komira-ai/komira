@@ -11,7 +11,7 @@ use prost_types::{DescriptorProto, FileDescriptorProto};
 use komira_proto_codegen::http_options::HttpRuleTable;
 use komira_proto_codegen::lower;
 use komira_proto_codegen::plugin::{
-    code_generator_response, CodeGeneratorRequest, CodeGeneratorResponse,
+    code_generator_response, CodeGeneratorRequest, CodeGeneratorResponse, InputPins,
 };
 use komira_proto_codegen::{PluginParameters, FEATURE_PROTO3_OPTIONAL};
 
@@ -49,12 +49,13 @@ fn respond(request: &CodeGeneratorRequest, request_bytes: &[u8]) -> Result<Vec<(
     let params = PluginParameters::parse(request.parameter.as_deref().unwrap_or(""))?;
     params.require_only_package_prefix("protoc-gen-mojo-routes")?;
     let rules = HttpRuleTable::from_request_bytes(request_bytes)?;
-    let model = lower::lower_with_http_rules(
+    let mut model = lower::lower_with_http_rules(
         &request.proto_file,
         &files_to_lower(request),
         &params.package_prefix,
         rules,
     )?;
+    InputPins::from_request_bytes(request, request_bytes).apply(&mut model);
     routes::emit_routes(&model, &request.file_to_generate)
 }
 

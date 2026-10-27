@@ -45,8 +45,8 @@ parsing and validation helpers and the reason codes stay importable by module
 path (`komira_http_auth.reasons` and so on).
 
 No pointer type in any public signature; configuration comes from flags,
-never from the environment. RS256 verification is komira_crypto's
-`verify_rs256_jws`; this package adds no second verifier.
+never from the environment. RS256 signatures are checked by komira_jose's
+`JwsVerifier`; this package adds no verifier of its own.
 """
 
 from .clock import AuthClock, FixedAuthClock, SystemAuthClock

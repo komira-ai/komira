@@ -1,0 +1,12 @@
+{
+ "name": "cancel_set_during_call",
+ "defect": "the cancel flag is read only before the call, or not at all (design 4.7: the runtime checks it between rows). The host sets the flag inside the call at the runtime's first read of host->now_ns, so this case requires a runtime whose slow_loop reads the host's clock during row 0; one that never reads it cannot be cancelled here (a spec gap: no callback the runtime must make during a call)",
+ "run": "call_batch",
+ "entry": "slow_loop",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "options": {"cancel_during_call": true},
+ "input": {"length": 5, "columns": [{"type": "int64", "values": [0], "repeat": 5}]},
+ "expect": {"status": "ERR_CANCELLED", "run_error": "UDF_CANCELLED", "row": 1}
+}

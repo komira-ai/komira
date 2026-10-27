@@ -9,6 +9,17 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 
 _LOGS = botocore_model("logs")
 
+# The model of the fixtures that fail late, in the build, not at analysis
+# (caller_test_red and the env_read_* targets): one tiny model they share,
+# not the botocore model. Each of them is built from a committed
+# generated/<name>/ directory, so the model decides how much text each commits.
+# It is a CloudWatch Logs model of the one operation they name (GetLogEvents:
+# a required logStreamName in, a nextForwardToken out), so the names the hand
+# modules and the caller's test import are the ones the botocore model gives.
+_TINY_MODEL = "tiny_model/logs/2014-03-28/service-2.json"
+
+_TINY_SHA256 = "d8fc1433f12bf41f81936b0bb51e03b1e9047a116d9f54ce9080a3da27585383"
+
 _RUNTIME = [
     "//functional/mojo_aws_client:komira_aws_core",
     "//functional/mojo_aws_client:komira_json",
@@ -43,24 +54,14 @@ mojo_aws_client(
     deps = [],
 )
 
-# "GetLogEvent", in the build: an operation the model does not declare is
-# refused by the generator (the analysis check only reads the name's shape).
-mojo_aws_client(
-    name = "unknown_operation",
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
-    operations = ["GetLogEvent"],
-    deps = _RUNTIME,
-)
-
 # "GATED TEST FAILED: tests//negative/mojo_aws_client:caller_test_red:
 # test_logs_deliberate_failure.mojo": a failing caller `test_srcs` entry
 # blocks the client like any library's test, next to the generated layout
 # probe (which passes, so the red is the caller's test and no other).
 mojo_aws_client(
     name = "caller_test_red",
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     test_srcs = ["test_logs_deliberate_failure.mojo"],
     deps = _RUNTIME,
@@ -171,8 +172,8 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_hand",
     hand_srcs = ["hand/env_reader.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_reader.json",
     deps = _RUNTIME,
@@ -185,8 +186,8 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_home",
     hand_srcs = ["hand/env_home.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_home.json",
     deps = _RUNTIME,
@@ -198,8 +199,8 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_std_os",
     hand_srcs = ["hand/env_std_os.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_std_os.json",
     deps = _RUNTIME,
@@ -211,8 +212,8 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_semicolon",
     hand_srcs = ["hand/env_semicolon.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_semicolon.json",
     deps = _RUNTIME,
@@ -224,8 +225,8 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_import_as",
     hand_srcs = ["hand/env_import_as.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_import_as.json",
     deps = _RUNTIME,
@@ -237,8 +238,8 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_indented",
     hand_srcs = ["hand/env_indented.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_indented.json",
     deps = _RUNTIME,
@@ -250,8 +251,8 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_compound",
     hand_srcs = ["hand/env_compound.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_compound.json",
     deps = _RUNTIME,
@@ -264,8 +265,8 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_backtick_quote",
     hand_srcs = ["hand/env_backtick_quote.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_backtick_quote.json",
     deps = _RUNTIME,
@@ -278,8 +279,8 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_backtick_hash",
     hand_srcs = ["hand/env_backtick_hash.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_backtick_hash.json",
     deps = _RUNTIME,
@@ -292,8 +293,8 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_backtick_triple",
     hand_srcs = ["hand/env_backtick_triple.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_backtick_triple.json",
     deps = _RUNTIME,
@@ -306,8 +307,8 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_escaped_quote",
     hand_srcs = ["hand/env_escaped_quote.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_escaped_quote.json",
     deps = _RUNTIME,
@@ -320,8 +321,8 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_raw_quote",
     hand_srcs = ["hand/env_raw_quote.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_raw_quote.json",
     deps = _RUNTIME,
@@ -334,8 +335,8 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_continuation",
     hand_srcs = ["hand/env_continuation.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_continuation.json",
     deps = _RUNTIME,
@@ -347,8 +348,8 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_t_string",
     hand_srcs = ["hand/env_t_string.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_t_string.json",
     deps = _RUNTIME,
@@ -361,8 +362,8 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_t_upper",
     hand_srcs = ["hand/env_t_upper.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_t_upper.json",
     deps = _RUNTIME,
@@ -375,8 +376,8 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_t_tr",
     hand_srcs = ["hand/env_t_tr.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_t_tr.json",
     deps = _RUNTIME,
@@ -389,8 +390,8 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_t_rt",
     hand_srcs = ["hand/env_t_rt.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_t_rt.json",
     deps = _RUNTIME,
@@ -404,8 +405,8 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_triple_escape",
     hand_srcs = ["hand/env_triple_escape.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_triple_escape.json",
     deps = _RUNTIME,
@@ -417,8 +418,8 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_cr",
     hand_srcs = ["hand/env_cr.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_cr.json",
     deps = _RUNTIME,
@@ -430,8 +431,8 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_crlf_continuation",
     hand_srcs = ["hand/env_crlf_continuation.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_crlf_continuation.json",
     deps = _RUNTIME,
@@ -443,8 +444,8 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_ff",
     hand_srcs = ["hand/env_ff.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_ff.json",
     deps = _RUNTIME,
@@ -456,20 +457,20 @@ mojo_aws_client(
 mojo_aws_client(
     name = "env_read_vt",
     hand_srcs = ["hand/env_vt.mojo"],
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
+    model = _TINY_MODEL,
+    model_sha256 = _TINY_SHA256,
     operations = ["GetLogEvents"],
     overrides = "hand/env_vt.json",
     deps = _RUNTIME,
 )
 
-# "`test_data` has an entry for `tests/_no_env_reads.mojo`", at analysis:
+# "`test_data` has an entry for `_generated_tests/_no_env_reads.mojo`", at analysis:
 # the scan's data is the package, staged by the rule.
 mojo_aws_client(
     name = "env_scan_data_given",
     model = _LOGS.model,
     model_sha256 = _LOGS.sha256,
     operations = ["GetLogEvents"],
-    test_data = {"tests/_no_env_reads.mojo": ["hand/notes.txt"]},
+    test_data = {"_generated_tests/_no_env_reads.mojo": ["hand/notes.txt"]},
     deps = _RUNTIME,
 )

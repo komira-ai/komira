@@ -20,6 +20,14 @@ The embedding binary supplies:
   `ConditionalWriteStore`. `make_s3_store` and `run_job_supervisor_on_s3`
   build S3 or S3-compatible ones from flags.
 
+`run_job_supervisor` reads the monotonic clock and waits a second between
+its checks on the system clock. `run_job_supervisor_with_clock` takes any
+`LoopClock` instead: `ManualLoopClock` moves only when the loop waits, by the
+time waited, so a test counts the loop's waits and instants and a run of any
+length takes no time. `JobSupervisor.set_test_clock` puts the supervisor's own
+readings (the spawn instant, the stream's flush interval, the terminal beat's
+retry budget and waits) on the same manual clock.
+
 A fetched binary is checked against a SHA-256 digest only when one is known:
 the `--binary-sha256` flag when given, otherwise the first segment of the
 object key that is 64 lowercase hex characters (a content-addressed layout
@@ -99,10 +107,53 @@ Run a short job to its end, with a reporter that records each heartbeat's
 phase and an in-memory log store:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true -->
-```mojo
+```mojo module
 from std.memory import ArcPointer
 from komira_job_supervisor import HeartbeatOutcome, HeartbeatReporter, JobSupervisorConfig
 from komira_job_supervisor import JobSupervisorPhase, SupervisorHeartbeat, run_job_supervisor
+from komira_objectstore import Path, SharedInMemoryConditionalStore
+
+
+struct RecordingReporter(HeartbeatReporter):
+    var phases: ArcPointer[List[String]]
+
+    def __init__(out self, phases: ArcPointer[List[String]]):
+        self.phases = phases
+
+    def report(mut self, hb: SupervisorHeartbeat) -> HeartbeatOutcome:
+        self.phases[].append(String(hb.phase.wire_str()))
+        return HeartbeatOutcome(True, False, 200)  # delivered, no cancel
+
+
+def text_of(store: SharedInMemoryConditionalStore, key: String) raises -> String:
+    return String(unsafe_from_utf8=Span(store.get(Path.parse(key))))
+
+
+def main() raises:
+    var job_argv: List[String] = ["-c", "echo working; echo done; exit 0"]
+    var config = JobSupervisorConfig(
+        "readme-job", "instance-1", "/bin/sh", job_argv^,
+        "https://heartbeat.example.com/beat", log_prefix="logs/readme-job",
+    )
+    var phases = ArcPointer[List[String]](List[String]())
+    var logs = SharedInMemoryConditionalStore()
+    var reader = logs.clone()  # a clone shares the objects
+    var phase = run_job_supervisor[RecordingReporter, SharedInMemoryConditionalStore](
+        config^, RecordingReporter(phases), None, Optional(logs^)
+    )
+    assert_true(phase == JobSupervisorPhase.completed())
+    assert_equal(phases[][0], "RUNNING")
+    assert_equal(phases[][len(phases[]) - 1], "COMPLETED")
+    assert_true("working\ndone" in text_of(reader, "logs/readme-job/logs.txt"))
+```
+
+A job that exits non-zero is FAILED, and its crash report is written next to
+its logs (`RecordingReporter` and `text_of` are the ones declared above):
+
+<!-- mojo-hidden
+from std.testing import assert_true
+from std.memory import ArcPointer
+from komira_job_supervisor import HeartbeatOutcome, HeartbeatReporter, SupervisorHeartbeat
 from komira_objectstore import Path, SharedInMemoryConditionalStore
 
 struct RecordingReporter(HeartbeatReporter):
@@ -117,47 +168,28 @@ struct RecordingReporter(HeartbeatReporter):
 
 def text_of(store: SharedInMemoryConditionalStore, key: String) raises -> String:
     return String(unsafe_from_utf8=Span(store.get(Path.parse(key))))
-
-var job_argv: List[String] = ["-c", "echo working; echo done; exit 0"]
-var config = JobSupervisorConfig(
-    "readme-job", "instance-1", "/bin/sh", job_argv^,
-    "https://heartbeat.example.com/beat", log_prefix="logs/readme-job",
-)
-var phases = ArcPointer[List[String]](List[String]())
-var logs = SharedInMemoryConditionalStore()
-var reader = logs.clone()  # a clone shares the objects
-var phase = run_job_supervisor[RecordingReporter, SharedInMemoryConditionalStore](
-    config^, RecordingReporter(phases), None, Optional(logs^)
-)
-assert_true(phase == JobSupervisorPhase.completed())
-assert_equal(phases[][0], "RUNNING")
-assert_equal(phases[][len(phases[]) - 1], "COMPLETED")
-assert_true("working\ndone" in text_of(reader, "logs/readme-job/logs.txt"))
-```
-
-A job that exits non-zero is FAILED, and its crash report is written next to
-its logs (`RecordingReporter` and `text_of` are the ones declared above):
-
-<!-- mojo-hidden from std.testing import assert_true -->
-```mojo
+-->
+```mojo module
 from std.memory import ArcPointer
 from komira_job_supervisor import JobSupervisorConfig, JobSupervisorPhase, run_job_supervisor
 from komira_objectstore import SharedInMemoryConditionalStore
 
-var job_argv: List[String] = ["-c", "echo boom >&2; exit 3"]
-var config = JobSupervisorConfig(
-    "failing-job", "instance-1", "/bin/sh", job_argv^,
-    "https://heartbeat.example.com/beat", log_prefix="logs/failing-job",
-)
-var logs = SharedInMemoryConditionalStore()
-var reader = logs.clone()
-var phase = run_job_supervisor[RecordingReporter, SharedInMemoryConditionalStore](
-    config^, RecordingReporter(ArcPointer[List[String]](List[String]())), None, Optional(logs^)
-)
-assert_true(phase == JobSupervisorPhase.failed())
-var report = text_of(reader, "logs/failing-job/crash_report.json")
-assert_true('"exit_code":3' in report)
-assert_true("boom" in report)
+
+def main() raises:
+    var job_argv: List[String] = ["-c", "echo boom >&2; exit 3"]
+    var config = JobSupervisorConfig(
+        "failing-job", "instance-1", "/bin/sh", job_argv^,
+        "https://heartbeat.example.com/beat", log_prefix="logs/failing-job",
+    )
+    var logs = SharedInMemoryConditionalStore()
+    var reader = logs.clone()
+    var phase = run_job_supervisor[RecordingReporter, SharedInMemoryConditionalStore](
+        config^, RecordingReporter(ArcPointer[List[String]](List[String]())), None, Optional(logs^)
+    )
+    assert_true(phase == JobSupervisorPhase.failed())
+    var report = text_of(reader, "logs/failing-job/crash_report.json")
+    assert_true('"exit_code":3' in report)
+    assert_true("boom" in report)
 ```
 
 The entrypoint's flags: the log prefix names the bucket and the key prefix,

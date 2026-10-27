@@ -144,8 +144,10 @@ tool that writes them is itself a pinned build output.
 [`release/machine.textproto`](../../release/machine.textproto) (format
 `kci.machine`, read by `src/kci_release_machine`) is komira's own release machine:
 its stages in order, and the steps of each. `kci run --stage <S>` runs one
-stage. Three stages today: `build` (one BUILD step), `gamma` and `prod` (one
-PUBLISH step each, to prefix.dev `komira-ai/gamma` and `komira-ai/prod`). Three
+stage. One stage today: `build` (one BUILD step). komira publishes to no
+channel for now: the `beta` and `prod` stages (one PUBLISH step each) were
+removed, and publishing will move to mopm; the fields below still describe
+what kci accepts for a publishing stage. Three
 fields of a stage carry what the CI workflow must agree with:
 
 | field | meaning |
@@ -154,9 +156,11 @@ fields of a stage carry what the CI workflow must agree with:
 | `stage.farm_connected` | the stage's job joins the build farm's tailnet (the `farm-connect` action), which needs the job's ID token. A farm-connected stage may not publish: the job that holds a farm network node never holds a publishing token. |
 | `step.validation` | a check of what a PUBLISH step published, by kind (`CONDA_INSTALL_SMOKE`: `image` pinned by digest, `install` (repeated), `compiler_channel`, `extra_channel`, `program` under `release/`, `wait_for_index_seconds`). A FULL run runs it after its step; `--only validation:<name>` runs it alone against what is published; `--only step:<name>` runs the step without it. A failure is exit 7, never a skip. |
 
-The workflow that runs the stages, `.github/workflows/kci.yml`, is held to this
-file by `kci run` itself at start-up under GitHub Actions and by a welded test
-([docs/ci.md](../ci.md#kciyml-the-release)).
+No workflow of this repository runs the stages now: the release workflow
+(`.github/workflows/release.yml`, [docs/ci.md](../ci.md#releaseyml-the-release))
+builds Buck2 targets and runs no kci. A workflow that did run them, the retired
+`kci.yml`, was held to this file by `kci run` itself at start-up under GitHub
+Actions and by a welded test.
 
 A second validation kind, `CONDA_INSTALL_ENV`, runs on the machine that runs
 kci, with no container. It takes the same fields as `CONDA_INSTALL_SMOKE`
@@ -167,7 +171,7 @@ metapackage is checked member by member: kci reads the members from the built
 metapackage's own requirements (each at the release's version and build, the
 list equal to the release's libraries, never empty) while `pixi.toml` names
 only the metapackage. `kci run` then takes `--pixi` and `--pixi-sha256`, the
-pinned pixi and its sha256. gamma's two validations are of this kind:
+pinned pixi and its sha256. beta's two validations are of this kind:
 `install-komira-encoding` (the library alone) and `install-set` (`komira_all`
 alone). Before anything is published, `--channel file:///<dir>` points such a
 run at a local channel that `komira_pack conda-index` wrote from the release

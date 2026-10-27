@@ -1,4 +1,5 @@
 load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
+load("@komira//tools/build/gen:defs.bzl", "committed_data")
 
 # Compute Engine v1: a REST/JSON client generated at build time from the
 # googleapis proto //tools/vendor/googleapis:compute_v1 extracts from its
@@ -151,7 +152,7 @@ mojo_gcp_client(
     test_data = {
         # The whole generated package, so the scan covers every file the
         # generator writes with no second list of them to drift.
-        "tests/test_no_env_reads.mojo": {"gen": ":komira_gcp_compute_gen"},
+        "tests/test_no_env_reads.mojo": committed_data("komira_gcp_compute"),
     },
     test_srcs = [
         "tests/test_compute_default_host.mojo",

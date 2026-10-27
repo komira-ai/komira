@@ -29,6 +29,10 @@ cxx_library(
 
 mojo_library(
     name = "komira_log",
+    # The holder is per-library state (one engine per image), so it ships as
+    # a static archive, lib/libkomira_log_holder.a, never a shared library
+    # (docs/design/native_packaging.md, "Per-library state").
+    native_static = True,
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         ":komira_log_holder",
@@ -44,6 +48,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_env_filter_bytes_non_ascii.mojo",
+        "tests/test_log_anchor_refresh_and_uncalled_helpers.mojo",
         "tests/test_log_bytes_non_ascii.mojo",
         "tests/test_log_config_first_init.mojo",
         "tests/test_log_config_init_from_spec.mojo",

@@ -1,0 +1,11 @@
+{
+ "name": "validate_wrong_signature",
+ "defect": "validate accepts declared types the function was not captured with: the spec's argument is float64, the descriptor records int64 (design 3.1: ERR_DESCRIPTOR naming the field and both types)",
+ "run": "validate",
+ "entry": "double",
+ "shape": "SCALAR",
+ "args": [{"type": "float64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "descriptor": {"args": [{"name": "c0", "type": "int64"}]},
+ "expect": {"status": "ERR_DESCRIPTOR", "run_error": "OPTIMIZED_UDF_DESCRIPTOR_INVALID", "message_contains": "arg_types[0]: the spec says float64, the descriptor int64"}
+}

@@ -1,0 +1,31 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# The call half of mojo_library's native-reach check (README.md,
+# tools/build/mojo/native_reach.bzl): reads a library's sources for the
+# prefixed C names of an owner outside its Mojo deps closure. Zig, as every
+# build tool under tools/build is.
+
+_SRCS = ["native_reach.zig", "native_reach_test.zig"]
+
+# The scanner's cases (native_reach_test.zig), run as a build action.
+zig_test(
+    name = "native_reach_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "native_reach.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# Built behind its unit tests: no library's check runs it unless they pass.
+zig_exe(
+    name = "native_reach",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "native_reach.zig",
+    unit_tests = [":native_reach_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)

@@ -14,12 +14,14 @@ capability through that surface. The goal is every cell filled: **100%**.
 It is not line or branch coverage, which are separate metrics, and it is not
 [README API coverage](readme_api_coverage.md), which counts public symbols.
 
-The lint is [`surface_capability_matrix`](../tools/build/lint/surface_capability_matrix.bzl)
-(its action, [`surface_capability_matrix.sh`](../tools/build/lint/surface_capability_matrix.sh),
-states the same rules), declared once in the root [`BUCK`](../BUCK) as
-`//:surface_capability_matrix`. Its ledger is
+The lint is [`surface_capability_matrix`](../tools/build/lint/surface_capability_matrix.bzl),
+declared once in the root [`BUCK`](../BUCK) as
+`//:surface_capability_matrix`. Its analysis refuses a malformed or lying row
+before any action runs (a `fail()` naming every finding), and its validation,
+the Zig tool [`surface_grounding`](../tools/build/lint/surface_grounding/src/grounding.zig),
+reads the grounding files. Its ledger is
 [`tests/surface_capability_matrix.bzl`](../tests/surface_capability_matrix.bzl).
-It is a validation that runs on the farm like the other lints; its tests are
+It runs on the farm like the other lints; its tests are
 [test 53](../tools/build/tests/lint_tests.md#53-the-surface-capability-matrix).
 
 ```sh
@@ -131,7 +133,11 @@ The constants that are no capability:
 |---|---|
 | `PLAN_CSE_REF` | made only by the optimizer's common-subexpression rewrite; no surface builds it |
 | `PLAN_CAST_TO_VARCHAR` | inserted above a text sink by a rewrite; no surface builds it |
+| `PLAN_EXCHANGE` | an optimized plan's data exchange between hosts; no surface builds it, and nothing in this tree places or lowers it yet |
+| `PLAN_MAP_BATCHES` | a user function over batches or groups of its child, named by its `UdfRef`; made only by the plan-wire decoder, so no surface builds it, and nothing in this tree lowers or runs it yet |
+| `PLAN_STEP` | a user function as a childless source run once per run, named by its `UdfRef`; made only by the plan-wire decoder, so no surface builds it, and nothing in this tree lowers or runs it yet |
 | `EXPR_AGG_FN` | an aggregate inside an expression, made and consumed by the optimizer's scalar-broadcast rewrite; a surface's aggregates are the aggregate and group_by capabilities |
+| `EXPR_UDF_APPLY` | any runtime's user function inside an expression, keyed by content (`UdfRef`), not the registered Mojo function of `udf_map`; made only by the plan-wire decoder, so no surface builds it, and nothing in this tree evaluates it yet |
 | `SOURCE_BINDING` | the open arm: a source kind named by its binding, not by this enum; a kind gets a capability when a surface reaches it |
 | `SOURCE_KIND_COLUMNAR`, `SOURCE_KIND_ROW`, `SOURCE_KIND_UNSET` | the layout a source format derives, which picks a reader; not something a query asks for |
 | `JOIN_ALGO_AUTO`, `JOIN_ALGO_HASH`, `JOIN_ALGO_SORT_MERGE` | the join algorithm, a physical choice with the same result |

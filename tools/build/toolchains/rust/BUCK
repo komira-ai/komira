@@ -2,11 +2,13 @@ load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "conda_libs")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/rust:defs.bzl", "rust_sysroot")
+load(":version_check.bzl", "rust_version_check")
 
 # ---- Pinned inputs (linux x86_64 execution platform) -----------------------
 
-# The Rust 1.85.0 release: the compiler, and the standard library for the
+# The Rust 1.99.0 release: the compiler, and the standard library for the
 # one target it builds for.
 pinned_file(**pinned_kwargs("linux-x86_64", "rustc"))
 
@@ -33,14 +35,42 @@ conda_libs(
 )
 
 rust_sysroot(
+    name = "unchecked_sysroot",
+    exec_compatible_with = LINUX_X86_64,
+    libs = ":rustc_libs",
+    rust_std = ":rust-std-1.99.0-x86_64-unknown-linux-gnu.tar.gz",
+    rustc = ":rustc-1.99.0-x86_64-unknown-linux-gnu.tar.gz",
+    triple = "x86_64-unknown-linux-gnu",
+    version = "1.99.0",
+)
+
+# The version gate: `rustc --version` must print the pinned line (the
+# `rustc` field of the release's channel manifest), or every Rust target
+# fails. A new pin states its line here.
+zig_test(
+    name = "version_check_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "version_check_test.zig",
+    imports = ["version_check.zig"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "version_check",
+    exec_compatible_with = LINUX_X86_64,
+    src = "version_check.zig",
+    unit_tests = [":version_check_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+rust_version_check(
     name = "sysroot",
     exec_compatible_with = LINUX_X86_64,
-    busybox = "komira//tools/build/toolchains:busybox",
-    libs = ":rustc_libs",
-    rust_std = ":rust-std-1.85.0-x86_64-unknown-linux-gnu.tar.xz",
-    rustc = ":rustc-1.85.0-x86_64-unknown-linux-gnu.tar.xz",
-    triple = "x86_64-unknown-linux-gnu",
-    version = "1.85.0",
+    checker = ":version_check",
+    expected = "rustc 1.99.0 (b940084d7 2026-09-28)",
+    sysroot = ":unchecked_sysroot",
     visibility = ["PUBLIC"],
 )
 
