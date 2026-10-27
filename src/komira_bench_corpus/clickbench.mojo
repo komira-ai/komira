@@ -3,8 +3,10 @@
 # (datasets.mojo). The ids are the benchmark's numbers: `q0` is `select count(*)
 # from hits`.
 #
-# ClickBench is published by ClickHouse, Inc. under the MIT licence (see
-# README.md). The dates in the text are the benchmark's own filter values.
+# The text is taken from the ClickBench repository's `duckdb/queries.sql`,
+# published under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0
+# International licence (see README.md). The dates in the text are the
+# benchmark's own filter values.
 
 from .datasets import DATASET_CLICKBENCH
 from .query import Query, Suite

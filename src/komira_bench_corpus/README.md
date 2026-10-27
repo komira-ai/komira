@@ -7,7 +7,7 @@ The SQL of three published benchmark suites, as Mojo data, with a content hash o
 | suite | queries | dataset | text |
 |---|---|---|---|
 | `tpch` | `q1` .. `q22` | `tpch`: the eight TPC-H tables, 61 columns, with the types of the specification (`DECIMAL(15,2)`, `DATE`) | the specification's text with the validation-run parameters |
-| `clickbench` | `q0` .. `q42` | `clickbench`: the `hits` table, 105 columns | the benchmark's query list for DuckDB and ClickHouse |
+| `clickbench` | `q0` .. `q42` | `clickbench`: the `hits` table, 105 columns | the benchmark's query list for DuckDB, with `length` where that list writes `STRLEN` (q27, q28) |
 | `h2o` | `q1` .. `q10` (groupby), `j1` .. `j5` (join) | `h2o_groupby`: table `x`; `h2o_join`: tables `x`, `small`, `medium`, `big` | the benchmark's DuckDB script, with the table name `x` |
 
 ```mojo
@@ -87,21 +87,37 @@ The text is the specification's, with the parameters of its validation run (quer
 - the row limits the specification states in prose (queries 2, 3, 10, 18, 21) are `limit` clauses;
 - query 11's fraction is the specification's 0.0001 divided by the scale factor; the text holds it for scale factor 1, and `tpch_q11_at_scale(sf)` gives the text for another whole scale factor (the fraction to ten decimals, truncated).
 
+Query 1 is the specification's with the interval written `interval '90' day` where the specification writes `day (3)` (the precision of the interval field is dropped).
+
 ### ClickBench
 
 The query list is the benchmark's, numbered from 0, over the `hits` table with the logical types of the benchmark's DuckDB table (`EventDate` is a `DATE`, `EventTime` a `TIMESTAMP`, the strings are `VARCHAR`). The file `hits.parquet` stores a date as a day count and a time as an integer, and its strings as bytes: presenting the table with these names and types is the loader's business, and the dataset here says what the queries expect.
 
+Queries 27 and 28 write `length(...)` where the benchmark's DuckDB list writes `STRLEN(...)` (the two are the same function in DuckDB, and `length` is the form every engine reads). The column types of the `hits` table are those of the benchmark's DuckDB `create.sql` (`TEXT` is written `VARCHAR`, `Date` is `DATE`).
+
 ### h2o
 
-The groupby queries read one table `x`; the join queries read `x` and one of `small`, `medium`, `big`. The benchmark names its tables per data size (`G1_1e7_1e2_0_0`, `J1_1e7_NA_0_0` and so on); this corpus names them `x`, `small`, `medium` and `big` and leaves the size to the data.
+The groupby queries read one table `x`; the join queries read `x` and one of `small`, `medium`, `big`. The benchmark names its tables per data size (`G1_1e7_1e2_0_0`, `J1_1e7_NA_0_0` and so on); this corpus names them `x`, `small`, `medium` and `big` and leaves the size to the data. Four queries differ from the DuckDB script in form only: q6 writes `median(v3)` where the script writes `quantile_cont(v3, 0.5)` (the same function), j1, j2, j4 and j5 write `inner join` where the script writes `join` (the same join), and q8 writes `as sub_query`.
+
+### Checked against the sources
+
+Every query was compared mechanically with the upstream file named above after normalising whitespace (and, for TPC-H, the date arithmetic that the DuckDB copy of the specification's queries folds into literals; every folded date was recomputed and agrees). The only differences are the ones this section lists. The 105 column names and types of `hits` match `create.sql` pair for pair, and the h2o column types match the data generators.
+
+## Cost of a lookup
+
+`suites()`, `suite()` and `find_query()` build the queries on each call and copy the text; a lookup copies the matching `Query`. For 80 short statements that is cheap, but a harness that loops over every key should call `suites()` once and walk the result instead of calling `find_query()` per key.
+
+## The digest
+
+`sha256.mojo` is a small SHA-256 inside the package, on purpose: the package has no dependencies, so a harness can take it without taking `komira_crypto`. `tests/test_sha256.mojo` checks it against the published vectors and, at every length up to 200 bytes and at 100 000 bytes, against `komira_crypto`.
 
 ## Licence notes
 
-This package is Apache-2.0 like the rest of komira, but the query text is not komira's own work, and each suite keeps the terms it was published under:
+This package is Apache-2.0 like the rest of komira, but the query text is not komira's own work, and each suite keeps the terms it was published under. The terms below were read from the upstream sources (the TPC-H specification revision 3.0.1, and the `LICENSE` file at the root of each benchmark repository):
 
-- **TPC-H.** TPC-H is a benchmark of the Transaction Processing Performance Council, which owns the specification and the trademark. The queries here are derived from the specification under the TPC's fair-use terms: a result produced with them must not be called a TPC-H result or compared with published TPC-H results, and must say it is derived from TPC-H. The sentence above is that statement. TPC's own tools (`dbgen`, `qgen`) are not used or included.
-- **ClickBench.** ClickBench is published by ClickHouse, Inc. under the MIT licence. The query list is reproduced from it, and the copyright and permission notice of the ClickBench repository applies to that text.
-- **h2o.** The h2o database-like ops benchmark is published by H2O.ai under the Mozilla Public Licence 2.0. Only query text (one statement per query) is reproduced, with the table names changed; the licence of the benchmark repository applies to that text.
+- **TPC-H.** TPC-H is a benchmark of the Transaction Processing Performance Council, which owns the specification and the trademarks (TPC Benchmark, TPC-H, QphH). The specification's copyright statement grants permission to copy and distribute its material to any party without fee when the primary purpose is to disseminate TPC material, the TPC copyright notice, the title of the publication and its date appear, and notice is given that copying is by permission of the TPC; it asks for the TPC's written permission to incorporate TPC material in a non-TPC document. The queries here are the specification's queries (TPC Benchmark H Standard Specification, Revision 3.0.1) with the validation-run parameters. A result produced with them must not be called a TPC-H result or compared with published TPC-H results, and must say it is derived from TPC-H; the sentence above is that statement. TPC's own tools (`dbgen`, `qgen`) are not used or included.
+- **ClickBench.** ClickBench is published by ClickHouse (repository `ClickHouse/ClickBench`). Its `LICENSE` file is the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International Public License (CC BY-NC-SA 4.0), and the file names no copyright holder or year. The query list is reproduced from the repository's `duckdb/queries.sql` and the table definition from `duckdb/create.sql`, and that licence applies to this text: attribution to the ClickBench project, no commercial use of the licensed text, and adapted text shared under the same licence.
+- **h2o.** The h2o database-like ops benchmark is published by H2O.ai (repository `h2oai/db-benchmark`) under the Mozilla Public License 2.0 (`LICENSE` file at the repository root). The groupby and join query text is reproduced from its `duckdb/groupby-duckdb.R` and `duckdb/join-duckdb.R`, with the table names changed, and `h2o.mojo` is therefore offered under the MPL-2.0 for that text (its header carries the MPL notice). The column types come from the benchmark's data generators `_data/groupby-datagen.R` and `_data/join-datagen.R`.
 
 Datasets are not part of the package and are never downloaded by it: each suite's data comes from its owner, under the owner's terms.
 

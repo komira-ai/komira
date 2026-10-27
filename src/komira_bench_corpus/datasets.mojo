@@ -76,7 +76,7 @@ comptime _HITS = (
     "IsDownload SMALLINT; IsNotBounce SMALLINT; FUniqID BIGINT; "
     "OriginalURL VARCHAR; HID INTEGER; IsOldCounter SMALLINT; "
     "IsEvent SMALLINT; IsParameter SMALLINT; DontCountHits SMALLINT; "
-    "WithHash SMALLINT; HitColor CHAR(1); LocalEventTime TIMESTAMP; "
+    "WithHash SMALLINT; HitColor CHAR; LocalEventTime TIMESTAMP; "
     "Age SMALLINT; Sex SMALLINT; Income SMALLINT; Interests SMALLINT; "
     "Robotness SMALLINT; RemoteIP INTEGER; WindowName INTEGER; "
     "OpenerName INTEGER; HistoryLength SMALLINT; BrowserLanguage VARCHAR; "

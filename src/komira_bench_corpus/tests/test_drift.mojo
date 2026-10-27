@@ -13,10 +13,22 @@
 #   removed without a pin fails).
 # - test_every_suite_is_pinned: each suite's digest equals the pinned one.
 # - test_every_dataset_is_pinned: each dataset's digest equals the pinned one.
+# - test_suite_title_and_notice_are_pinned: each suite's title and notice equal
+#   the text written here, character for character (the suite digest does not
+#   cover them), so the "not a TPC result" wording cannot change unnoticed.
+# - test_every_query_reads_its_pinned_dataset: each query names the dataset
+#   written here (the query digest covers the text only): tpch queries read
+#   `tpch`, clickbench queries `clickbench`, h2o groupby q1..q10
+#   `h2o_groupby` and join j1..j5 `h2o_join`.
 
 from std.testing import assert_equal
 
-from komira_bench_corpus import dataset, dataset_names, suites
+from komira_bench_corpus import (
+    TPCH_NOTICE,
+    dataset,
+    dataset_names,
+    suites,
+)
 
 def _query_pins() -> List[String]:
     var pins = List[String]()
@@ -114,7 +126,7 @@ def _suite_pins() -> List[String]:
 def _dataset_pins() -> List[String]:
     var pins = List[String]()
     pins.append("tpch a795a8e5598fc06fe9b6bf37eafa0e9fd2bd612f7b05dc64fb5443ee548f74ae")
-    pins.append("clickbench 0e0a89bfdfa2b769224f3a45f42f119babba960f9f37ad23206fdcbe8221c902")
+    pins.append("clickbench 95a162751d3512e980449e206b39b2874507eda8761bbf945cd8e12c36de2437")
     pins.append("h2o_groupby 6bbb14483e6c002cf6c1db7b08102f56418d6fd51f25acc44714be69197b65cf")
     pins.append("h2o_join 710f2d77ca52ba9dc32a88c2f455089f809b1a2f1b3cc18550582191844b394d")
     return pins^
@@ -161,8 +173,52 @@ def test_every_dataset_is_pinned() raises:
         )
 
 
+def test_suite_title_and_notice_are_pinned() raises:
+    var all_suites = suites()
+    assert_equal(len(all_suites), 3)
+    assert_equal(all_suites[0].id, "tpch")
+    assert_equal(
+        all_suites[0].title, "TPC-H, 22 queries, validation parameters"
+    )
+    assert_equal(
+        all_suites[0].notice,
+        (
+            "Derived from TPC-H; not a TPC result. TPC-H is a benchmark of the"
+            " Transaction Processing Performance Council; a result of this"
+            " suite is not comparable to a published TPC-H result."
+        ),
+    )
+    assert_equal(all_suites[0].notice, TPCH_NOTICE)
+    assert_equal(all_suites[1].id, "clickbench")
+    assert_equal(
+        all_suites[1].title, "ClickBench, 43 queries over the hits table"
+    )
+    assert_equal(all_suites[1].notice, "")
+    assert_equal(all_suites[2].id, "h2o")
+    assert_equal(all_suites[2].title, "h2o groupby q1-q10 and join j1-j5")
+    assert_equal(all_suites[2].notice, "")
+
+
+def test_every_query_reads_its_pinned_dataset() raises:
+    var all_suites = suites()
+    for s in all_suites:
+        for q in s.queries:
+            var want = String("")
+            if s.id == "tpch":
+                want = "tpch"
+            elif s.id == "clickbench":
+                want = "clickbench"
+            elif q.id.startswith("j"):
+                want = "h2o_join"
+            else:
+                want = "h2o_groupby"
+            assert_equal(q.dataset, want, "dataset of " + q.key())
+
+
 def main() raises:
     test_every_query_is_pinned()
     test_every_suite_is_pinned()
     test_every_dataset_is_pinned()
+    test_suite_title_and_notice_are_pinned()
+    test_every_query_reads_its_pinned_dataset()
     print("all drift tests passed")

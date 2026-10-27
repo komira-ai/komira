@@ -3,8 +3,11 @@
 # join data (datasets.mojo), in the text of the benchmark's DuckDB script with
 # the table name `x` in place of the per-run table names.
 #
-# The h2o benchmark is published under the Mozilla Public Licence 2.0 (see
-# README.md). This package holds the query text only.
+# The query text is taken from the h2o benchmark's `duckdb/groupby-duckdb.R` and
+# `duckdb/join-duckdb.R`, published under the Mozilla Public License 2.0 (see
+# README.md). This Source Code Form is subject to the terms of the Mozilla
+# Public License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at the Mozilla Foundation's MPL 2.0 page.
 
 from .datasets import DATASET_H2O_GROUPBY, DATASET_H2O_JOIN
 from .query import Query, Suite

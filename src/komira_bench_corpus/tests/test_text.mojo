@@ -9,8 +9,10 @@
 #   text, so stray whitespace would be pinned unnoticed).
 # - test_every_identifier_is_known: in every query each word is an SQL word, a
 #   column or table of the query's dataset (spelled exactly as the schema spells
-#   it), or an alias the query defines. A misspelt column, a column of another
-#   table, or a pre-computed column the standard schema lacks fails.
+#   it), or an alias the query defines. The check is closed-world over the whole
+#   dataset: a misspelt column, or a pre-computed column the standard schema
+#   lacks, fails; a column that exists in the dataset but in another table of it
+#   passes.
 # - test_tpch_validation_parameters: the substitution values of the TPC-H
 #   validation run are in the text (query 1 interval of 90 days, query 2 size 15
 #   and BRASS, query 3 BUILDING and 1995-03-15, ... query 22 country codes), and
