@@ -93,6 +93,22 @@ _NO_NATIVE = struct(
     statics = {},
 )
 
+CxxLinkFacts = provider(fields = ["linker_type", "pic_behavior"])
+
+def _cxx_link_facts_impl(ctx):
+    toolchain = ctx.attrs.toolchain[CxxToolchainInfo]
+    return [DefaultInfo(), CxxLinkFacts(linker_type = toolchain.linker_info.type, pic_behavior = toolchain.pic_behavior)]
+
+# The two facts of the C/C++ toolchain a dependent's link needs (the linker type and the PIC behaviour),
+# held by a rule of their own. A toolchain_dep of `mojo_adopted_library` itself would restrict its
+# execution platform to the C toolchain's (a linux one), while its README gate compiles Mojo on the
+# platform the target is built for; a target that depends on this rule through a plain dep leaves its own
+# execution platform to the Mojo toolchain, and this rule runs on the C toolchain's.
+cxx_link_facts = rule(
+    impl = _cxx_link_facts_impl,
+    attrs = {"toolchain": attrs.toolchain_dep(default = "toolchains//:cxx", providers = [CxxToolchainInfo])},
+)
+
 def _package_root(ctx, srcs):
     """The package-relative directory of the shallowest `__init__.mojo` (as defs.bzl's `_package_root`)."""
     inits = [s.short_path for s in srcs if s.basename == "__init__.mojo"]
@@ -114,16 +130,16 @@ def _native_link(ctx):
         return None
     if ctx.attrs.cxx_toolchain == None:
         fail("{}: {} links native libraries ({}); set `c_deps` (the macro then sets `cxx_toolchain`)".format(ctx.label, ctx.attrs.lib.label, ", ".join(natives.sonames)))
-    toolchain = ctx.attrs.cxx_toolchain[CxxToolchainInfo]
+    facts = ctx.attrs.cxx_toolchain[CxxLinkFacts]
     linkables = []
     for soname in natives.sonames:
         if not soname.endswith(".a"):
             fail("{}: native library {} is not a static archive; only `lib<id>.a` can be taken into a dependent's link".format(ctx.label, soname))
-        linkables.append(ArchiveLinkable(archive = Archive(artifact = natives.archives[soname]), linker_type = toolchain.linker_info.type))
+        linkables.append(ArchiveLinkable(archive = Archive(artifact = natives.archives[soname]), linker_type = facts.linker_type))
     infos = LinkInfos(default = LinkInfo(name = str(ctx.label.raw_target()), linkables = linkables))
     return create_merged_link_info(
         ctx,
-        toolchain.pic_behavior,
+        facts.pic_behavior,
         {LibOutputStyle("archive"): infos, LibOutputStyle("pic_archive"): infos},
         preferred_linkage = Linkage("static"),
     )
@@ -196,7 +212,7 @@ _adopted = rule(
     attrs = {
         "c_deps": attrs.list(attrs.dep(providers = [MergedLinkInfo]), default = []),
         "conda_name": attrs.option(attrs.string(), default = None),
-        "cxx_toolchain": attrs.option(attrs.toolchain_dep(providers = [CxxToolchainInfo]), default = None),
+        "cxx_toolchain": attrs.option(attrs.dep(providers = [CxxLinkFacts]), default = None),
         "import_name": attrs.option(attrs.string(), default = None),
         "lib": attrs.dep(),
         "native": attrs.option(attrs.label(), default = None),
@@ -215,7 +231,7 @@ def _mojo_adopted_library(**kwargs):
     if kwargs.get("c_deps"):
         if "cxx_toolchain" in kwargs:
             fail("{}: `cxx_toolchain` is set by mojo_adopted_library with `c_deps`; do not pass it".format(kwargs.get("name", "mojo_adopted_library")))
-        kwargs["cxx_toolchain"] = "toolchains//:cxx"
+        kwargs["cxx_toolchain"] = "komira//tools/build/mojo:adopt_cxx_link_facts"
     if kwargs.get("readme") != None:
         if "readme_tool" in kwargs:
             fail("{}: `readme_tool` is set by mojo_adopted_library with the README; do not pass it".format(kwargs.get("name", "mojo_adopted_library")))
