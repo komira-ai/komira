@@ -31,11 +31,11 @@ do:
   exit status); [`lint_weld.sh`](negative/lint_weld.sh) plants its defects
   in a snapshot of the tree. A fixture that fails to analyse, to compile
   or to pass its gate is fine as an ordinary package: the CI's
-  reverse-dependency query (`//tools/build/ci:affected`, a `cquery` over
-  `tests//...`) configures every target but analyses none. Only a
+  reverse-dependency query (`tools/build/ci/affected.bxl`, over
+  `tests//functional/...`) configures every target but analyses none. Only a
   configuration failure breaks it: a target with an unknown or invisible
   dependency makes the query fail for every change, and any failure of
-  that query answers BROKEN (with buck2's error, which names the target)
+  that query fails the selector (with buck2's error, which names the target)
   and fails the check, never a widening. Such a fixture must not
   be loadable: it is a `<case>.BUCK` file that the driver copies to
   `<case>/BUCK` for its one build and deletes, its directory gitignored, as
@@ -583,7 +583,7 @@ by the runner's own unit tests (below); mapping the runner's status to a
 verdict is Buck2's. The `bad_*` targets and the `test_deps` refusals at
 analysis are the scenario
 [`analysis_refusals_mojo`](../selftest/analysis_refusals_mojo.zig). The gate test
-of `komira//tools/build/mojo/runtime_paths:komira_runtime_paths` (built with
+of `komira//src/komira_runtime_paths:komira_runtime_paths` (built with
 the examples) covers the executable-relative helpers.
 The runner's unit tests ([`tools/build/run/mojo_test.zig`](../run/mojo_test.zig),
 welded to the runner, so a pull request that builds any test runs them) run
@@ -797,6 +797,15 @@ out=$(buck2 build 'tests//functional/aws_codegen:logs_client[gen]' --show-full-s
 cp "$out/komira_aws_logs.mojo" tools/build/tests/functional/aws_codegen/golden/logs_client.mojo
 cp "$out/_layout_probe.mojo" tools/build/tests/functional/aws_codegen/golden/logs_client_probe.mojo
 ```
+
+A module the generator splits (1000 lines or more, which no generated file may
+reach) is a facade, whose golden is the module's, and parts, `_parts/<module>_pNN.mojo`,
+whose goldens are the `golden_parts` of the case, one file each under its own
+name (`golden/query_client_parts/`): copy `$out/_parts/*.mojo` there. The check
+refuses a split module with no `golden_parts`, `golden_parts` for a module that
+was not split, a part that differs, and any generated file of 1000 lines or more.
+`must_contain` reads the facade and the parts together. The proto goldens do the
+same: a part's golden is a `<name>.mojo.golden` in a directory named `_parts`.
 
 ## 35. Rust tests are part of the build
 

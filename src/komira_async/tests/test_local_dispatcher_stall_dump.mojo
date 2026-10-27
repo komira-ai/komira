@@ -30,16 +30,15 @@
 #   * Dispatch 3 is healthy and finds no leftover charge.
 #
 # Each scenario takes about ten seconds: the dump's threshold. Nothing sleeps;
-# every wait is on a condition. The test's own waits are bounded (task 0's wait
-# for a pseudo shard to be posted: 120 s; its read of the dump: 300 s; the read
-# to end of stream after the dispatch: 300 s), so a dump that never comes fails
-# the test. The driver's barrier wait inside `run_with_state` has no bound: a
-# regression that leaves a charge unreleased and unrefused hangs this test.
+# every wait is on a condition and none has a deadline: the wait for a pseudo
+# shard to be posted, the read of the dump and the read to end of stream after
+# the dispatch each block until their event. A dump that never comes, like a
+# regression that leaves a charge unreleased and unrefused in the driver's
+# barrier wait, hangs this test, and the build gate's hang limit fails it.
 # =============================================================================
 
 from std.ffi import external_call
 from std.memory import OwnedPointer, alloc
-from std.time import perf_counter_ns
 from komira_atomic_alias import AtomicI64
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -70,9 +69,6 @@ from komira_async_api.worker_pool_traits import KeepAlive, Segment
 from komira_collections.slab import Slab
 
 
-# Bounds that only turn a regression into a failure instead of a hang.
-comptime _PULL_GIVE_UP_NS: Int64 = 120_000_000_000
-comptime _DUMP_GIVE_UP_NS: Int64 = 300_000_000_000
 comptime _AF_UNIX: Int32 = 1
 comptime _SOCK_STREAM: Int32 = 1
 
@@ -124,39 +120,35 @@ def _last_dump_line(n_pseudo: Int) -> String:
     return "[BARRIER-STALL]   worker " + String(n_pseudo) + " queue_depth= 1\n"
 
 
-def _read_to_eof(fd: Int32, mut buf: List[UInt8]) -> Bool:
-    """Append the socket's remaining bytes until end of stream (bounded)."""
+def _read_to_eof(fd: Int32, mut buf: List[UInt8]):
+    """Append the socket's remaining bytes until end of stream."""
     var chunk = List[UInt8](capacity=4096)
     for _ in range(4096):
         chunk.append(UInt8(0))
-    var deadline = Int64(perf_counter_ns()) + _DUMP_GIVE_UP_NS
-    while Int64(perf_counter_ns()) < deadline:
-        if not _poll_readable(fd, Int32(1000)):
+    while True:
+        if not _poll_readable(fd, Int32(-1)):
             continue
         var n = try_recv(fd, Span(chunk))
         if n == Int64(0):
-            return True
+            return
         for i in range(Int(n)):
             buf.append(chunk[i])
-    return False
 
 
-def _read_dump(fd: Int32, n_pseudo: Int, mut buf: List[UInt8]) -> Bool:
-    """Read the socket until the dump's last line has arrived (bounded)."""
+def _read_dump(fd: Int32, n_pseudo: Int, mut buf: List[UInt8]):
+    """Read the socket until the dump's last line has arrived."""
     var chunk = List[UInt8](capacity=4096)
     for _ in range(4096):
         chunk.append(UInt8(0))
-    var deadline = Int64(perf_counter_ns()) + _DUMP_GIVE_UP_NS
     var last = _last_dump_line(n_pseudo)
-    while Int64(perf_counter_ns()) < deadline:
-        if not _poll_readable(fd, Int32(1000)):
+    while True:
+        if not _poll_readable(fd, Int32(-1)):
             continue
         var n = try_recv(fd, Span(chunk))
         for i in range(Int(n)):
             buf.append(chunk[i])
         if String(unsafe_from_utf8=Span(buf)).find(last) >= 0:
-            return True
-    return False
+            return
 
 
 struct _Replay(ErasableWork, Movable, Deinitable):
@@ -187,7 +179,6 @@ struct _StallState(KeepAlive, Movable, Deinitable):
     var phase: Int
     var dump_fd: Int32
     var dump: List[UInt8]
-    var dump_ok: Bool
 
     def __init__(out self):
         self.ran = _new_counter()
@@ -201,30 +192,23 @@ struct _StallState(KeepAlive, Movable, Deinitable):
         self.phase = 0
         self.dump_fd = Int32(-1)
         self.dump = List[UInt8]()
-        self.dump_ok = False
 
     def __keep_alive(mut self):
         pass
 
 
-def _pull(mut st: _StallState, k: Int) -> Optional[ErasedHandle]:
-    var deadline = Int64(perf_counter_ns()) + _PULL_GIVE_UP_NS
-    while Int64(perf_counter_ns()) < deadline:
+def _pull(mut st: _StallState, k: Int) -> ErasedHandle:
+    while True:
         var oc = st.pseudo[k].try_recv()
         if oc.status == TRY_RECV_OK:
-            return Optional[ErasedHandle](oc.take_value())
+            return oc.take_value()
         cpu_pause()
-    _ = st.missed[].fetch_add(Int64(1))
-    return Optional[ErasedHandle](None)
 
 
 def _setup_consumer(mut st: _StallState) raises:
     """Dispatch 1: run every pseudo shard; keep wid 1's and the last wid's."""
     for k in range(st.n_pseudo):
-        var h = _pull(st, k)
-        if not h:
-            continue
-        var handle = h.take()
+        var handle = _pull(st, k)
         handle.run()
         if k == 0:
             st.kept_first = Optional[ErasedHandle](handle^)
@@ -242,13 +226,11 @@ def _stall_consumer(mut st: _StallState) raises:
     var old_first = st.kept_first.take()
     old_first.run()
     _ = old_first^
-    st.dump_ok = _read_dump(st.dump_fd, st.n_pseudo, st.dump)
+    _read_dump(st.dump_fd, st.n_pseudo, st.dump)
     for k in range(1, st.n_pseudo - 1):
-        var h = _pull(st, k)
-        if h:
-            var handle = h.take()
-            handle.run()
-            _ = handle^
+        var handle = _pull(st, k)
+        handle.run()
+        _ = handle^
     # The last wid's shard is lost too; dispatch 1's runs on the real worker once
     # this shard has finished, as the dispatch's last event.
     var lost_last = _pull(st, st.n_pseudo - 1)
@@ -355,12 +337,10 @@ def _stall_scenario(n_pseudo: Int, bands: Int) raises:
     _ = external_call["close", Int32](sv[1])
     # Every write end is closed now, so what is left on the socket is all the
     # dispatch printed after the dump's last line; read it to end of stream.
-    var eof = _read_to_eof(sv[0], st.dump)
+    _read_to_eof(sv[0], st.dump)
     _ = external_call["close", Int32](sv[0])
-    assert_true(eof, "the captured stderr did not reach end of stream")
 
     assert_equal(st.missed[].load(), Int64(0))
-    assert_true(st.dump_ok, "no [BARRIER-STALL] dump arrived")
     assert_true(
         msg.startswith(
             "LocalDispatcher.run_with_state: 2 shard(s) refused by the"

@@ -232,12 +232,12 @@ test "unifiedDiff: added and removed lines, and two hunks far apart" {
     try t.expect(std.mem.indexOf(u8, add, "@@ -1,2 +1,3 @@\n") != null);
     const rm = (try F.unifiedDiff(a, "a", "b", "1\n2\n3\n", "1\n3\n")).?;
     try t.expect(std.mem.indexOf(u8, rm, "-2\n") != null);
-    var left = std.ArrayList(u8).init(a);
-    var right = std.ArrayList(u8).init(a);
+    var left = std.ArrayList(u8).empty;
+    var right = std.ArrayList(u8).empty;
     var i: usize = 0;
     while (i < 30) : (i += 1) {
-        try left.writer().print("line {d}\n", .{i});
-        try right.writer().print("line {d}\n", .{i});
+        try left.writer(a).print("line {d}\n", .{i});
+        try right.writer(a).print("line {d}\n", .{i});
     }
     // Change line 2 and line 27.
     const l = try std.mem.replaceOwned(u8, a, left.items, "line 2\n", "two\n");

@@ -1,2 +1,0 @@
-# No argument: usage, exit 2.
-exit 2

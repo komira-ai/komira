@@ -29,14 +29,7 @@ load("@komira//tools/build/package:conda.bzl", "conda_package")
 load(":coverage.bzl", "COVERAGE_ATTRS", "COVERAGE_SHARED_LIB_ATTRS", "COVERAGE_TEST_ATTRS", "coverage_gate", "coverage_kwargs", "coverage_link_dir", "coverage_readme", "coverage_run", "coverage_branch_of", "coverage_shared_lib", "coverage_shared_lib_macro", "coverage_sub_targets", "coverage_test", "coverage_test_kwargs")
 load(":test_deps.bzl", "check_test_deps", "test_c_link", "test_closure")
 load(":mutation.bzl", "MUTATION_ATTRS", "mutation_kwargs", "mutation_sub_targets")
-load(
-    ":test_runtime.bzl",
-    _arg_args = "arg_args",
-    _data_map = "data_map",
-    _env_args = "env_args",
-    _test_root = "test_root",
-    gate_mojo = "gate_mojo",
-)
+load(":test_runtime.bzl", _arg_args = "arg_args", _data_map = "data_map", _env_args = "env_args", _test_root = "test_root", gate_mojo = "gate_mojo")
 load(":defines.bzl", "BINARY_DEFINE_ATTRS", "LIBRARY_DEFINE_ATTRS", "TEST_DEFINE_ATTRS", "cap_flags", "define_args", "memory_cap")
 load(":native_facts.bzl", "NATIVE_ATTRS", "native_facts", "native_refusal")
 load(":native_reach.bzl", "NATIVE_REACH_ATTRS", "native_reach", "native_reach_kwargs")
@@ -45,7 +38,7 @@ load(":dlopen.bzl", "DLOPEN_ATTRS", "dlopen_refusal", "dlopen_rows")
 load(":helpers.bzl", "HELPER_ATTRS", "helper_files")
 load(":readme.bzl", "readme_gate", "readme_kwargs")
 load(":run_check.bzl", "run_check_validation")
-load(":test_limit.bzl", "TEST_LIMIT_ATTRS", "deadline_flags", "with_test_limit")
+load(":test_limit.bzl", "HANG_LIMIT_ATTRS", "TEST_LIMIT_ATTRS", "deadline_flags", "hang_limit_flags", "with_test_limit")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 def _toolchain(ctx):
@@ -400,8 +393,14 @@ def _library_impl(ctx):
     ungated = ctx.actions.declare_output("ungated/" + import_name + ".mojoc")
     dep_closure = ctx.actions.tset(MojoPkgTSet, children = deps)
     _check_closure_excludes(ctx, dep_closure)
+
+    # The first gate of a generated library (tools/build/gen/defs.bzl): the
+    # committed sources are what the generator writes now. A hidden input of
+    # the compile, so nothing is compiled, no test is built, and no package
+    # exists while it is red.
+    first = [ctx.attrs.fresh_gate[DefaultInfo].default_outputs[0]] if ctx.attrs.fresh_gate else []
     ctx.actions.run(
-        mojo_precompile_cmd(tc, dep_closure.project_as_args("include"), src_dir, ungated.as_output()),
+        cmd_args(mojo_precompile_cmd(tc, dep_closure.project_as_args("include"), src_dir, ungated.as_output()), hidden = first),
         category = "mojo_precompile",
     )
     ungated_tset = ctx.actions.tset(MojoPkgTSet, value = ungated, children = deps)
@@ -414,6 +413,7 @@ def _library_impl(ctx):
     where = str(ctx.label.raw_target())
     test_defines = define_args(where, "test_assert_level", ctx.attrs.test_assert_level, "test_defines", ctx.attrs.test_defines)
     cap = memory_cap(where, "test_memory_cap_mib", ctx.attrs.test_memory_cap_mib, ctx.attrs.test_assert_level)
+    hang = hang_limit_flags(where, ctx.attrs.test_hang_limit_s)
 
     # The gate: one build + one run per test, against the UNGATED package.
     markers = []
@@ -447,7 +447,7 @@ def _library_impl(ctx):
         test_dir, staged = _test_root(ctx, "tests/{}/root".format(stem), exe, test_data.get(key, {}))
         ctx.actions.run(
             cmd_args(
-                gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), t.short_path), staged, marker.as_output(), cap_flags(cap), env_args),
+                gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), t.short_path), staged, marker.as_output(), cap_flags(cap) + hang, env_args),
                 hidden = test_dir,
             ),
             env = rerun_env(ctx),
@@ -487,7 +487,7 @@ def _library_impl(ctx):
     cov_gate, cov_providers = coverage_gate(ctx, tc, cov_runs, cov_branch, src_dir, import_name, root) if cov_link else (None, [])
     reach = native_reach(ctx, src_dir, deps)  # native_reach.bzl: (providers, sub-targets)
     mutation = mutation_sub_targets(ctx, tc, mojo_compile_cmd, src_dir, root, deps, tests_closure[1:], _link_tail(tests_c_link), test_data, env_args, test_defines, cap)  # mutation.bzl
-    if markers:
+    if markers or first:
         public = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
         ctx.actions.run(
             cmd_args(
@@ -495,7 +495,7 @@ def _library_impl(ctx):
                 "copy",
                 ungated,
                 public.as_output(),
-                hidden = markers,
+                hidden = first + markers,
             ),
             category = "mojo_gate_join",
         )
@@ -543,7 +543,7 @@ def _library_impl(ctx):
 # dynamic action, which compiles and runs each example (the convention and
 # the gate are described there).
 
-def _readme_test_impl(actions, label, gate_label, examples, package, src, marker, objects, owner, tc, closure, opt_level, link_tail, env_args, rerun):
+def _readme_test_impl(actions, label, gate_label, examples, package, src, marker, objects, owner, tc, closure, opt_level, link_tail, env_args, rerun, hang_flags):
     lines = [x.strip() for x in examples.read_string().split("\n") if x.strip()]
     if not lines:
         actions.write(marker, "NO EXAMPLE {}: no ```mojo example, so nothing was compiled or run\n".format(gate_label))
@@ -562,7 +562,7 @@ def _readme_test_impl(actions, label, gate_label, examples, package, src, marker
         m = actions.declare_output("tests/readme/{}.passed".format(line))
         actions.run(
             cmd_args(
-                gate_mojo(tc, "{}:{}".format(gate_label, line), staged, m.as_output(), [], env_args),
+                gate_mojo(tc, "{}:{}".format(gate_label, line), staged, m.as_output(), hang_flags, env_args),
                 hidden = root,
             ),
             env = rerun,
@@ -584,6 +584,7 @@ _readme_test = dynamic_actions(
         "env_args": dynattrs.value(list[str]),
         "examples": dynattrs.artifact_value(),
         "gate_label": dynattrs.value(str),
+        "hang_flags": dynattrs.value(list[str]),
         "label": dynattrs.value(Label),
         "link_tail": dynattrs.value(typing.Any),
         "marker": dynattrs.output(),
@@ -621,6 +622,11 @@ mojo_library_rule = rule(
         # from); nothing else reads it. Unchecked: nothing verifies that `srcs`
         # come from this target, which is acceptable for a reader-only view.
         "gen": attrs.option(attrs.dep(), default = None),
+        # Optional: the freshness check of a library built from committed
+        # generated sources (`<name>_fresh`, tools/build/gen/defs.bzl). Its
+        # marker is the library's first gate: an input of the compile and of
+        # the join that makes the public package.
+        "fresh_gate": attrs.option(attrs.dep(), default = None),
         "import_name": attrs.option(attrs.string(), default = None),
         "srcs": attrs.list(attrs.source()),
         "test_optimization_level": attrs.string(default = TEST_OPT_LEVEL),
@@ -637,7 +643,7 @@ mojo_library_rule = rule(
         # itself built from a mojo_library, so a default would be a cycle.
         "readme": attrs.option(attrs.source(), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
-    } | COVERAGE_ATTRS | DLOPEN_ATTRS | MUTATION_ATTRS | NATIVE_ATTRS | NATIVE_REACH_ATTRS | LIBRARY_DEFINE_ATTRS | RERUN_ATTRS | _TOOLCHAIN_ATTR,
+    } | COVERAGE_ATTRS | DLOPEN_ATTRS | MUTATION_ATTRS | NATIVE_ATTRS | NATIVE_REACH_ATTRS | LIBRARY_DEFINE_ATTRS | HANG_LIMIT_ATTRS | RERUN_ATTRS | _TOOLCHAIN_ATTR,
 )
 
 # ---- mojo_binary / mojo_test ----------------------------------------------
@@ -931,7 +937,7 @@ def _shared_lib_impl(ctx):
         marker = ctx.actions.declare_output("gate/{}.passed".format(stem))
         ctx.actions.run(
             cmd_args(
-                gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), stem), staged, marker.as_output()),
+                gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), stem), staged, marker.as_output(), hang_limit_flags(str(ctx.label.raw_target()), ctx.attrs.test_hang_limit_s)),
                 hidden = root,
             ),
             env = rerun_env(ctx),
@@ -968,7 +974,7 @@ mojo_shared_lib_rule = rule(
         "optimization_level": attrs.string(default = SHIPPED_OPT_LEVEL),
         "out_name": attrs.option(attrs.string(), default = None),
         "srcs": attrs.list(attrs.source()),
-    } | _TOOLCHAIN_ATTR | COVERAGE_SHARED_LIB_ATTRS | RERUN_ATTRS,
+    } | _TOOLCHAIN_ATTR | COVERAGE_SHARED_LIB_ATTRS | HANG_LIMIT_ATTRS | RERUN_ATTRS,
 )
 
 def _mojo_library(**kwargs):
@@ -1000,6 +1006,7 @@ def _mojo_library(**kwargs):
 
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
+adopt_readme_test, adopt_link_tail = _readme_test, _link_tail  # the README gate's action and the link arguments of a C closure, for adopt.bzl
 mojo_binary = declares_docs(mojo_binary_rule)
 mojo_library = declares_docs(_mojo_library)
 mojo_shared_lib = declares_docs(coverage_shared_lib_macro(mojo_shared_lib_rule))

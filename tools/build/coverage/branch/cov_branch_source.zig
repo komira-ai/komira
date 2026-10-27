@@ -101,7 +101,9 @@ pub fn placeFile(alloc: Alloc, o: *const Opts, name: []const u8) File {
     if (std.mem.startsWith(u8, name, o.prefix)) {
         const rel = name[o.prefix.len..];
         for (o.gens) |g| {
-            if (std.mem.eql(u8, g, rel)) {
+            // A --gen that names a directory (the parts of a split generated
+            // module) leaves out every file under it.
+            if (std.mem.eql(u8, g, rel) or (rel.len > g.len and std.mem.startsWith(u8, rel, g) and rel[g.len] == '/')) {
                 f.where = .excluded;
                 return f;
             }

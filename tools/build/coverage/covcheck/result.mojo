@@ -8,7 +8,8 @@
      "findings": [<finding>...], "exemptions": [<exemption>...],
      "unrecorded_functions": [<function>...],
      "unrecorded_functions_unreliable": [<function>...], "ignored_files",
-     "excluded_test_files", "ignored_mutants", "excluded_test_mutants",
+     "excluded_test_files", "generated_files", "generated_paths" (the left-out
+     generated sources, generated.mojo), "ignored_mutants", "excluded_test_mutants",
      "info_packages": [...], "info_findings": [<finding>...]}
 
 `covcheck gate`: `{"conclusion", "mode", "target_bp", "package": <package>,
@@ -37,6 +38,12 @@ marker with a reason. `unrecorded_functions` holds the `plain` ones, the
 class a census can count; `unrecorded_functions_unreliable` the
 `always_inline` and `comptime_if` ones, which a test may call all the same
 (decls.mojo). Both are reported only: no number or finding counts them.
+`excluded_lines` and `excluded_arms` are the line records and branch arms of buildrules'
+uncompiled report that the numbers leave out (uncompiled.mojo), `excluded_files` each file's
+`{"package", "path", "lines", "arms"}`; all zero when no such report is given.
+`platform_gated` lists the functions left out because every call to them is in a compile-time arm this
+target did not compile (platform_gate.mojo), each `{"package", "path", "function", "line", "lines"}`, with
+`platform_gated_functions`, `platform_gated_lines` and `platform_gated_arms` their totals.
 """
 
 from covcheck.analyze import Analysis
@@ -138,8 +145,45 @@ def _tail(mut j: JsonOut, a: Analysis):
     j.end_array()
     _unrecorded(j, a, String("unrecorded_functions"), True)
     _unrecorded(j, a, String("unrecorded_functions_unreliable"), False)
+    j.field_int(String("excluded_lines"), a.excluded_lines())
+    j.field_int(String("excluded_arms"), a.excluded_arms())
+    j.key(String("excluded_files"))
+    j.begin_array()
+    for i in range(len(a.excluded)):
+        ref x = a.excluded[i]
+        j.item()
+        j.begin_object()
+        j.field_str(String("package"), x.package)
+        j.field_str(String("path"), x.path)
+        j.field_int(String("lines"), x.lines)
+        j.field_int(String("arms"), x.arms)
+        j.end_object()
+    j.end_array()
+    j.field_int(String("platform_gated_functions"), len(a.platform_gated))
+    j.field_int(String("platform_gated_lines"), a.platform_gated_lines())
+    j.field_int(String("platform_gated_arms"), a.platform_gated_arms)
+    j.key(String("platform_gated"))
+    j.begin_array()
+    for i in range(len(a.platform_gated)):
+        ref x = a.platform_gated[i]
+        j.item()
+        j.begin_object()
+        j.field_str(String("package"), x.package)
+        j.field_str(String("path"), x.path)
+        j.field_str(String("function"), x.name)
+        j.field_int(String("line"), x.line)
+        j.field_int(String("lines"), x.lines)
+        j.end_object()
+    j.end_array()
     j.field_int(String("ignored_files"), a.ignored_files)
     j.field_int(String("excluded_test_files"), a.excluded_test_files)
+    j.field_int(String("generated_files"), len(a.generated_paths))
+    j.key(String("generated_paths"))
+    j.begin_array()
+    for i in range(len(a.generated_paths)):
+        j.item()
+        j.str_value(a.generated_paths[i])
+    j.end_array()
     j.field_int(String("ignored_mutants"), a.ignored_mutants)
     j.field_int(String("excluded_test_mutants"), a.excluded_test_mutants)
     j.key(String("info_packages"))

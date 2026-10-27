@@ -13,6 +13,11 @@ pub struct IrModel {
 #[derive(Clone, Debug, PartialEq)]
 pub struct IrFile {
     pub proto_path: String,
+    /// The sha256 (64 lowercase hex digits) of the input this file was
+    /// lowered from, recorded in the header of the Mojo generated from it
+    /// ([`crate::header`]). Empty when the input is not pinned (hand-built
+    /// IR in a test).
+    pub source_sha256: String,
     /// The proto `package` declaration, e.g. `komira.cp.v1`.
     pub proto_package: String,
     /// The generated Mojo package namespace (the `package_prefix` opt).

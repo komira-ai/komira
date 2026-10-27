@@ -1,3 +1,0 @@
-# --help: where the documentation is, exit 0.
-arg "--help"
-exit 0

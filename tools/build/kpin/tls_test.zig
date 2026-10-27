@@ -67,6 +67,25 @@ const Server = struct {
         return .{ .child = child, .port = port };
     }
 
+    /// Returns once the server accepts connections. A refused connection is
+    /// retried (after a yield) for as long as the server process is alive,
+    /// with no count or clock of its own: if the server never listens, it is
+    /// the one that ends, and then this fails. A probe connection is closed
+    /// at once; `s_server -loop` serves the next one.
+    fn waitListening(self: *Server) !void {
+        while (true) {
+            if (std.net.tcpConnectToHost(a, "localhost", self.port)) |conn| {
+                conn.close();
+                return;
+            } else |e| {
+                if (e != error.ConnectionRefused) return e;
+            }
+            const w = std.posix.waitpid(self.child.id, std.posix.W.NOHANG);
+            if (w.pid != 0) return error.ServerExited;
+            std.Thread.yield() catch {};
+        }
+    }
+
     fn stop(self: *Server) void {
         _ = self.child.kill() catch {};
     }
@@ -76,19 +95,13 @@ const Server = struct {
     }
 };
 
-/// One GET of `/`, retried while the server is still starting.
-fn getWhenUp(f: *fetch.HttpFetcher, url: []const u8) ![]u8 {
-    var tries: usize = 0;
-    while (true) : (tries += 1) {
-        var c = fetch.Collect{ .a = a, .max = 1 << 20 };
-        if (f.fetcher().get(url, c.sink())) |_| {
-            return c.buf.toOwnedSlice(a);
-        } else |e| {
-            c.buf.deinit(a);
-            if (e != error.ConnectionRefused or tries >= 100) return e;
-            std.Thread.sleep(100 * std.time.ns_per_ms);
-        }
-    }
+/// One GET of `/`. The server is listening by then (`Server.waitListening`),
+/// so a refused or failed connection is the client's, not the start-up's.
+fn get(f: *fetch.HttpFetcher, url: []const u8) ![]u8 {
+    var c = fetch.Collect{ .a = a, .max = 1 << 20 };
+    errdefer c.buf.deinit(a);
+    try f.fetcher().get(url, c.sink());
+    return c.buf.toOwnedSlice(a);
 }
 
 fn trusting(ca: []const u8) fetch.HttpFetcher {
@@ -103,7 +116,8 @@ test "a TLS 1.2-only server is reached: the negotiated version is 1.2" {
     const url = try srv.url();
     defer a.free(url);
     var f = trusting(ca);
-    const body = try getWhenUp(&f, url);
+    try srv.waitListening();
+    const body = try get(&f, url);
     defer a.free(body);
     try std.testing.expect(std.mem.indexOf(u8, body, "Version: TLSv1.2") != null);
     try std.testing.expect(std.mem.indexOf(u8, body, "TLSv1.3") == null);
@@ -117,7 +131,8 @@ test "a TLS 1.3-only server is reached: the negotiated version is 1.3" {
     const url = try srv.url();
     defer a.free(url);
     var f = trusting(ca);
-    const body = try getWhenUp(&f, url);
+    try srv.waitListening();
+    const body = try get(&f, url);
     defer a.free(body);
     try std.testing.expect(std.mem.indexOf(u8, body, "Version: TLSv1.3") != null);
 }
@@ -130,9 +145,10 @@ test "a certificate that does not chain to the trusted roots is refused, on TLS 
         defer a.free(good);
         const url = try srv.url();
         defer a.free(url);
-        // The server is up once a client that trusts its root gets through.
+        // The server is up once it accepts; a client that trusts its root gets through.
         var ok = trusting(good);
-        a.free(try getWhenUp(&ok, url));
+        try srv.waitListening();
+        a.free(try get(&ok, url));
         // The same server, a client whose only root is another certificate.
         const other = try work("fixtures/smoke_cert.pem");
         defer a.free(other);

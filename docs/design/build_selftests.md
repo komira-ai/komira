@@ -8,6 +8,12 @@ tests are Zig too. The script is not ported as one runner with a table of cases.
 check moves to the cheapest place that can still fail. This doc lists every check, says where it goes and
 which planted defect proves it can go red. The conversion then lands in slices (the last section).
 
+Historical note: this design was written when the pull request's check was kci's per-change stage. Its
+`derive_checks`, `build_targets.sh`, `affected` units and `--plan` are gone: `pr.yml` selects with
+[`affected.bxl`](../../tools/build/ci/affected.bxl), builds the aggregate `//ci:pr` or the targets named,
+and runs the graph checks and the `test_weld` lints itself ([ci.md](../ci.md#pryml-the-pull-requests-check)).
+Read those names below as the mechanism of their time.
+
 Status: slices 1 to 3 have landed; the rest is design. Today the script runs on a schedule in the build-system
 self-test workflow ([ci.md](../ci.md#build-system-self-tests)) and is not the gate. When the conversion is done, every
 check runs in `pr / check`, and nothing runs on a schedule.
@@ -451,7 +457,7 @@ filters them. The one change to `build_targets.sh` is for the graph checks, not 
   only on its Zig binary, the helper library, the pinned buck2 and tools from `tools/build` and the
   toolchains cell. It names every target its inner builds build as a string argument, never as a
   dependency or as `data`. So no file outside those reaches it. A change to `tools/build/**` answers
-  `WIDENED` ([`rules.txt`](../../tools/build/ci/rules.txt)): every unit, `build_selftests` included,
+  `WIDENED` (`rules.txt`, since replaced by [`rules.bzl`](../../tools/build/ci/rules.bzl)): every unit, `build_selftests` included,
   and the scenarios' own code is under `tools/build`, so changing a scenario runs the scenarios. The
   same rules widen on `.buckconfig`, the buck2 pin and wrapper, `prelude/**` and `third_party/**`, so
   those changes run the scenarios too.

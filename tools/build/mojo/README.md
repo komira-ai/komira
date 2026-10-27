@@ -39,6 +39,13 @@ mojo_library(
 - **`gen`** (optional) names the target that generated `srcs`; its
   DefaultInfo, sub-targets included, is re-exported as the `[gen]`
   sub-target, so a reader or an IDE finds the generated code (see [mojo_gcp_client](#generated-google-cloud-clients-mojo_gcp_client)).
+  Only a library still in the generated-source transition has it.
+- **`fresh_gate`** (optional) names the freshness check of a library built from
+  committed generated sources (`<name>_fresh`, see
+  [`../gen/README.md`](../gen/README.md)). Its marker is the library's first
+  gate: a hidden input of the compile and of the join that makes the public
+  package, so nothing is compiled, no test is built, and no `.mojoc` exists
+  while the committed sources are not what the generator writes now.
 - **`deps`** carries the full transitive closure of packages to the compiler,
   one `-I` directory per package, each holding exactly one `.mojoc`, so a
   staged source directory can never shadow a package. A package reaches the
@@ -221,6 +228,31 @@ no longer counts there, since macOS keeps no CPU time of reaped children
 ([`tests/functional/watchdog`](../tests/functional/watchdog/cases.zig):
 `cases` on Linux, `cases_darwin` on a macOS worker).
 
+## Libraries built with buildrules
+
+[`src/komira_json`](../../../src/komira_json/) is built with buildrules' `mojo_package`, from a `mopm.toml`, and
+not with `mojo_library`. The `buildrules` cell is a git external cell pinned in
+[`.buckconfig`](../../../.buckconfig) to a release commit; the `toolchains` cell holds its pinned mopm and Mojo
+toolchains (`tools/build/cells/toolchains/mopm_pins.bzl`, `mojo_pins.bzl`, written by `buildrules mojo sync`),
+and `tools/build/platforms/default` registers the one execution platform its rules need
+([`with_buildrules.bzl`](../platforms/with_buildrules.bzl)). Its rules are loaded from that cell only.
+
+The package's `:lib` is the library file, made only after every test run passed. `mojo_adopted_library`
+([`adopt.bzl`](adopt.bzl)) is the target the dependents name (`//src/komira_json:komira_json`): it gives komira's own rules the
+`MojoInfo` they require of a dependency over that same file, and runs and compiles nothing. A dependent therefore
+builds only once the library's tests have passed. With a `readme` it carries the README-example gate of a `mojo_library`
+(`[tests][readme]`, with `[file]`, `[generated]` and `[objects]`; the same `readme_gate`, compiled against `:lib`, so the
+package's tests are not run a second time). It carries no branch coverage gate of a `mojo_library` and no mutation sub-targets. Its
+coverage is the package's own: `:coverage` (line and branch counts per file), `:coverage[reports]` (one kcov report per test, in
+repository paths), `:coverage[branches]` (one lcov file per test, the branch records from the compiler's IR) and, when
+`coverage_floor.txt` (`lines NN.NN`, and `branches NN.NN` when the package has branches) sits beside the BUCK file,
+`:coverage_floor`, which is a minimum: the build fails when the line or the branch coverage falls below its figure; above it, it passes and prints a hint to raise
+the floor (the pull request check builds it). `coverage.yml` selects these packages as well as `mojo_library` targets, and feeds their reports and branch records to `covcheck`, which
+counts the library's sources only, for lines and for branches (the tests' own sources are in the reports and left out); a `branch` line of the
+package's `coverage_held` is checked against those branch records. `conda_package` takes the adopted library as it takes a
+`mojo_library`, so the conda packages of the libraries that depend on it still name it. The mopm package's `.conda` is
+the library's `:conda` (buildrules' `mojo_conda` over `:lib`), so it too exists only after the tests passed.
+
 ## Binaries and tests
 
 - **`main`**: the file holding `main()`. It defaults to the only file in
@@ -271,11 +303,43 @@ no longer counts there, since macOS keeps no CPU time of reaped children
   default): with `-- --timeout <s>`, pass `-c komira.test_timeout_s=<s>`
   too. The `mojo_test` macro reads the key when the BUCK file loads; a value
   that is not a whole number, or not over 60, is refused.
-- **A library's `test_srcs`** run as build actions, and buck2 gives a build
-  action no timeout: neither the runner's timeout nor the limit above
-  applies, only the executor's own default for an action that names none. A
-  gated test that hangs holds its worker until then, and fails as the
-  executor reports it.
+- **A library's `test_srcs`** (and its README's examples and a shared
+  library's gate drivers) run as build actions, and buck2 gives a build
+  action no timeout: neither the runner's timeout nor the limit above applies.
+  A test never asserts on time or waits on a deadline (it waits on events), so
+  one that loses an event would hold its worker until the executor's own
+  default, if it has one. Each of these actions therefore runs under a **hang
+  limit**: `gate mojo --hang-limit-s <N>` ([`run/mojo.zig`](../run/mojo.zig)),
+  with `N` the target's `test_hang_limit_s`, 1800 s (30 minutes) unless the
+  target sets another. A positive whole number; the same attribute is on
+  `mojo_library`, `mojo_shared_lib` and `mojo_adopted_library`, and one value
+  covers every test of the target. There is no buckconfig default: the
+  attribute's default is the default.
+  - Past the limit the test and every process below it are stopped, and its
+    whole session if it is still alive 10 s later (the supervisor of the
+    time limit above). The action fails with the gate's banner (`GATED TEST
+    FAILED: <label> (exit 137)` and the test's last 200 lines of output), then
+    the line `hang limit: <label> did not finish within <N> s and was stopped;
+    a test never waits on time, so this means it hung (an event that never
+    came)`, and exits **125**. A test's own status passes through the gate
+    unchanged, so the line, not the status, is the verdict (a test that exits
+    125 by itself prints no such line); 125 only keeps a hang apart from the
+    compile watchdog's 124, which is retried. A hang is not retried: it is a
+    lost event.
+  - The limit is infrastructure, not an assertion. A test never lowers it to
+    pass; a test that is slow and not hung raises it on its target. It is not
+    the test timeout of `buck2 test` above: that one is the runner's, and
+    `gate mojo` takes `--hang-limit-s` and `--deadline-s` only one at a time.
+  - Setting it changes the command of every welded test action, so the first
+    build after it lands re-runs every library's tests once (the compile
+    actions keep their keys). `tests//negative/mojo_hang:lib_never_ends` is the
+    planted hang, and `//tools/build/selftest:planted_red_builds_mojo_hang`
+    requires its line and the default and override on the commands.
+  - This limit is the hang guard: a new test does not arm an `alarm()`
+    (SIGALRM) of its own to end a hang. One helper still does
+    (`src/tests/helpers/komira_udf_spike_node_worker/watchdog.mojo`, 240 s,
+    used by the udf spike tests). A test that needs a limit shorter than
+    1800 s for a real reason sets `test_hang_limit_s` on its target.
 
 ### Outputs and the runnable directory
 
@@ -497,7 +561,8 @@ mojo_test(
   directories the runner makes for this run inside the action's working
   directory, so no two runs share them, and they are removed afterwards.
 - **Finding data from the executable.**
-  [`komira//tools/build/mojo/runtime_paths:komira_runtime_paths`](runtime_paths/__init__.mojo)
+  [`komira//src/komira_runtime_paths:komira_runtime_paths`](../../../src/komira_runtime_paths/src/komira_runtime_paths/__init__.mojo)
+  (the old label `komira//tools/build/mojo/runtime_paths:komira_runtime_paths` is an alias of it)
   gives `executable_path()`, `install_root()` (the parent of the binary's
   directory), `share_dir()`, `data_path(rel)`, `read_data(rel)` and
   `test_tmpdir()` (which raises rather than fall back to `/tmp`). A bundle
@@ -526,7 +591,20 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 `mojo_proto_library(name, srcs, deps, proto_deps, import_prefix, bundle_proto_deps, test_srcs)`
 runs protoc with the `protoc-gen-mojo` plugin over `srcs` (`.proto` files)
 and precompiles the generated directory, one `<stem>.mojo` per `.proto` plus
-an `__init__.mojo`, into `<name>.mojoc`. Other Mojo targets name it in `deps`
+an `__init__.mojo`, into `<name>.mojoc`.
+
+**Committed generated sources.** A library of `mojo_proto_library`,
+`mojo_db_proto_library`, `mojo_gcp_client` or `mojo_aws_client` that has a
+committed directory `generated/<name>/` in its package is built from those files
+and from nothing else (the paragraphs below describe the form still built from
+the generator, which a library of the transition ledger
+[`../gen/transition.bzl`](../gen/transition.bzl) keeps until it is migrated).
+`<name>_gen` is then only the input of `<name>_fresh`, which regenerates,
+compares with the committed directory and fails with
+`./buck2 run komira//tools/build/gen:regen -- <target>`, the command that
+rewrites it; `<name>_fresh` is the library's first gate, whatever `test_srcs`
+say. The welded form then also takes `bundle_proto_deps` and `bundle_only`.
+Reference: [`../gen/README.md`](../gen/README.md). Other Mojo targets name it in `deps`
 like a `mojo_library`. `deps` are the Mojo libraries the generated code
 imports (its runtime). A `.proto` is imported by other `.proto` files at
 `import_prefix` joined with its path in the package; `proto_deps` names the
@@ -695,7 +773,8 @@ methods, messages_only, proto_deps, import_prefix, protocol, test_srcs,
 **kwargs)`
 (`kwargs`: `test_data`, `test_env`, passed to the
 `mojo_library`) generates a Google Cloud client at build
-time; no generated code is checked in. It is the generation half of the rules
+time (a library migrated to committed generated sources is built from
+`generated/<name>/`, see above). It is the generation half of the rules
 above (`<name>_gen`: protoc-gen-mojo writes the package and its layout probe,
 nothing is compiled) plus an ordinary `mojo_library` over the generated
 files, so the client is welded like any library: the generated
@@ -717,13 +796,48 @@ referenced googleapis files (monitored_resource, logging/type, rpc/status,
 nothing is added to the runtime the caller names, and they may be anything
 `mojo_library.deps` takes. Every refusal is at analysis. `<name>[gen]` is
 the generated directory, with `[gen][<file>]` one generated file and
-`[gen][proto]` the staged `.proto` inputs (`mojo_library`'s optional `gen`
+`[gen][proto]` the staged `.proto` inputs and `[gen][_parts]` the directory
+of the parts of a module the generator split (see below; `mojo_library`'s
+optional `gen`
 attribute re-exports a generating target whole, sub-targets included, as
 that sub-target; nothing checks that `srcs` come from it). The module
 docstring of
 [`../cloud/gcp.bzl`](../cloud/gcp.bzl) has the details;
 [`tests//functional/mojo_gcp_client`](../tests/functional/mojo_gcp_client/BUCK) and
 [`tests//negative/mojo_gcp_client`](../tests/negative/mojo_gcp_client/BUCK) exercise it.
+
+### Generated files under 1000 lines
+
+A source file is held to fewer than 1000 lines (Mojo hangs on very large
+files), and a generated one has no exemption (the hand-written files over
+the limit are tracked separately). The generators therefore
+split what they write: a module of 1000 lines or more is written as a
+FACADE, the file it always had (`compute.mojo`, `<name>.mojo`), holding the
+module's documentation and, imported from its parts, every name the module
+declares, and its PARTS, `_parts/<stem>_p01.mojo`, `_p02`, ..., holding
+the declarations in the order the emitter wrote them. A declaration is
+never cut, a part carries the module's `# @generated` header and imports
+what it uses (from the module's own imports, and from the parts that
+declare it: Mojo modules may import one another in a cycle), and every file
+is under the limit. `from <package>.<stem> import <name>` names what it
+named before the split. Code that reads a generated module as text (a
+scan, a count) reads the facade and then the parts.
+
+The split is `split_file` of
+[`proto-codegen/src/split.rs`](../proto-codegen/src/split.rs), applied to every
+`.mojo` file of every plugin (`CodeGeneratorResponse::split_oversized`, from
+`to_stdout_bytes`) and to `aws-client-gen`'s module. It depends on nothing
+but the module's text, so the same input gives the same file set, byte for
+byte. It refuses (naming why) a declaration that does not fit a file by
+itself, a top-level statement that is neither an import nor a declaration,
+a name declared twice, and a module whose facade would reach the limit (about
+four thousand names).
+
+`_parts/` is in every generated package, split or not, because the rules
+name a library's sources before the generator has run: its `__init__.mojo`
+is written by the generation action (`proto_gen`, `aws_act`), which also
+refuses anything in it but non-empty `.mojo` files. A library lists it as
+one more source (`<name>_gen[_parts]`).
 
 ### Generated AWS clients: mojo_aws_client
 
@@ -735,10 +849,12 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 `mojo_aws_client(name, model, model_sha256, operations, deps, mode, service,
 endpoint_rules, partitions, overrides, hand_srcs, test_srcs, **kwargs)` (`kwargs`: `test_data`,
 `test_env`, passed to the `mojo_library`) generates an AWS client from one
-botocore service model at build time; no generated code is checked in.
+botocore service model (a library migrated to committed generated sources is
+built from `generated/<name>/`: see [Protobuf](#protobuf-mojo_proto_library)).
 `<name>_gen` runs `komira//tools/build/proto-codegen:aws-client-gen`, which
 writes the package `<name>`: `__init__.mojo`, the module `<name>.mojo`
-(imported as `<name>.<name>`) and `_layout_probe.mojo`; `<name>` is an
+(imported as `<name>.<name>`), `_layout_probe.mojo` and the parts directory
+`_parts/` (see "Generated files under 1000 lines" below); `<name>` is an
 ordinary `mojo_library` over them, welded like mojo_gcp_client's: the probe is
 its first `test_srcs` entry, then `_no_env_reads.mojo`, an environment scan
 written for the client at analysis (every file of the package is its data;
@@ -985,6 +1101,8 @@ rules, sub-targets, scope and fixtures are in [coverage.md](coverage.md).
 | ``<target>: test_defines sets ASSERT; set `test_assert_level` instead`` (or `defines`, `assert_level`) | [`defines.bzl`](defines.bzl) | the assert level is its own attribute |
 | `<target>: defines entry "<e>" is not NAME or NAME=VALUE with NAME an identifier`, `... sets <NAME> twice` | [`defines.bzl`](defines.bzl) | a define the compiler would misread, or two values for one name |
 | `<target>: test_memory_cap_mib is <n>; it must be a number of MiB, or 0 for no cap` | [`defines.bzl`](defines.bzl) | a negative cap |
+| `<target>: test_hang_limit_s = <n> must be a positive number of seconds` | [`test_limit.bzl`](test_limit.bzl) | a hang limit of 0 or less |
+| `hang limit: <label> did not finish within <n> s and was stopped; a test never waits on time, so this means it hung (an event that never came)` | [`gate mojo --hang-limit-s`](../run/README.md) | a welded test (`test_srcs`, a README example, a shared library's gate driver) ran past its `test_hang_limit_s` (default 1800) and was stopped, exit 125 (after `GATED TEST FAILED: <label> (exit 137)`); see [Time limits](#time-limits) |
 | `MEMORY CAP: killed <label> at <n> MiB resident, over its cap of <cap> MiB` | [`gate mojo --mem-cap-mib`](../run/README.md) | the test's resident memory passed its memory cap and it was killed (after `GATED TEST FAILED: <label> (exit 137)`) |
 | `TEST TIME LIMIT: killed <label> after <n> s, under the test runner's timeout of <m> s (komira.test_timeout_s)` | [`gate mojo --deadline-s`](../run/README.md) | `buck2 test` of a `mojo_test` ran to 60 s short of the test runner's timeout and was killed (after `GATED TEST FAILED: <label> (exit 137)`); see [Time limits](#time-limits) |
 | `[komira] test_timeout_s = <v> is not a whole number of seconds` / `must be over 60 s` | [`test_limit.bzl`](test_limit.bzl) | the root `.buckconfig` (or `-c`) states a test timeout a `mojo_test` cannot be limited under |

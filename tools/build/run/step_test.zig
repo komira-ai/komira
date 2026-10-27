@@ -35,7 +35,7 @@ const Env = struct {
         try l.appendSlice(e.a, opts);
         try l.append(e.a, "--");
         try l.appendSlice(e.a, cmd);
-        return kit.runGate(e.a, e.dir, l.items, .{ .env = env, .timeout_ms = 30_000 });
+        return kit.runGate(e.a, e.dir, l.items, .{ .env = env, .clock = true });
     }
 
     fn status(e: *Env) ![]const u8 {
@@ -89,11 +89,14 @@ test "S4 results: ok, fail <n>, and timeout <n> with the whole group gone; each 
     r = try e.step(&.{ "--limit-s", "2", "--infra-exit", "143" }, &.{ "x/spawnwait", f }, &no_scratch);
     try std.testing.expectEqual(@as(u8, 0), r.status);
     try std.testing.expectEqualStrings("timeout 2\n", try e.status());
-    try std.testing.expect(r.ms >= 2000 and r.ms < 7000);
-    try std.testing.expect(kit.goneWithin(try kit.pidsFrom(e.a, f, 2), 2000));
-    // Inside its limit, a run that takes 1 s is ok.
-    r = try e.step(&.{ "--limit-s", "5" }, &.{ "x/sleep", "1" }, &no_scratch);
-    try std.testing.expectEqualStrings("ok\n", try e.status());
+    // SIGTERM to the group at the limit on the test's clock; the group dies of it.
+    try std.testing.expect(kit.hasEvents(r.events, &.{"t=2000 TERM -C"}));
+    kit.waitGone(try kit.pidsFrom(e.a, f, 2));
+    // A command that ignores SIGTERM gets the 2 s grace, then SIGKILL to the group.
+    r = try e.step(&.{ "--limit-s", "2", "--infra-exit", "143" }, &.{"x/termproof"}, &no_scratch);
+    try std.testing.expectEqualStrings("timeout 2\n", try e.status());
+    try std.testing.expect(kit.hasEvents(r.events, &.{"t=2000 TERM -C"}));
+    try std.testing.expectEqual(@as(?u64, 4000), kit.firstTime(r.events, " KILL -C"));
 }
 
 // S2, S6. Mutant: create the `-o` outputs after a success (a step's own

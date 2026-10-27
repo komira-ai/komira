@@ -41,13 +41,17 @@ inputs:
   execution-concurrency-limit:
     description: How many actions this client lets run on the farm at once.
     required: false
-    default: "32"
+    default: "256"
   darwin-properties:
     description: The macOS arm64 worker property set. Given together with darwin-macos-hosts or not at all, and different from farm-properties. Left out, no macOS platform is configured.
     required: false
     default: ""
   darwin-macos-hosts:
     description: The host identities of the macOS workers, separated by spaces (what `mojo_compile_darwin host-identity` prints on each; tools/build/toolchains/README.md, "macOS"). Given together with darwin-properties.
+    required: false
+    default: ""
+  macos-library-dirs:
+    description: Absolute directories, separated by `:` or spaces, that a macOS test run searches for a library it opens by its bare name, before /usr/local/lib:/usr/lib (buildrules' `macos_library_dirs`). Only with darwin-properties; left out, dyld's own defaults apply.
     required: false
     default: ""
   tls:
@@ -75,6 +79,7 @@ runs:
         FARM_PROPERTIES: ${{ inputs.farm-properties }}
         DARWIN_PROPERTIES: ${{ inputs.darwin-properties }}
         DARWIN_MACOS_HOSTS: ${{ inputs.darwin-macos-hosts }}
+        MACOS_LIBRARY_DIRS: ${{ inputs.macos-library-dirs }}
         TLS: ${{ inputs.tls }}
         TLS_CA_CERTS: ${{ inputs.tls-ca-certs }}
       run: |
@@ -101,7 +106,7 @@ runs:
         nl='
         '
         cr=$(printf '\r')
-        for v in "$FARM_ADDRESS" "$FARM_INSTANCE" "$FARM_PROPERTIES" "$DARWIN_PROPERTIES" "$DARWIN_MACOS_HOSTS" "$TLS" "$TLS_CA_CERTS"; do
+        for v in "$FARM_ADDRESS" "$FARM_INSTANCE" "$FARM_PROPERTIES" "$DARWIN_PROPERTIES" "$DARWIN_MACOS_HOSTS" "$MACOS_LIBRARY_DIRS" "$TLS" "$TLS_CA_CERTS"; do
           case "$v" in
             *"$nl"* | *"$cr"*) refuse "an input holds a line break; each value must be one line of the buckconfig" ;;
           esac
@@ -116,6 +121,25 @@ runs:
         fi
         if [ -n "$DARWIN_PROPERTIES" ] && [ "$DARWIN_PROPERTIES" = "$FARM_PROPERTIES" ]; then
           refuse "darwin-properties equals farm-properties: a macOS action would match a linux worker"
+        fi
+        # The directories only mean something to a macOS test run, and each must be
+        # absolute (buildrules refuses a relative one at analysis, which would fail
+        # every macOS target of the job).
+        if [ -n "$MACOS_LIBRARY_DIRS" ]; then
+          [ -n "$DARWIN_PROPERTIES" ] || refuse "macos-library-dirs is set but darwin-properties is empty"
+          case "$MACOS_LIBRARY_DIRS" in
+            *'$'*) refuse "macos-library-dirs holds a \$" ;;
+          esac
+          n=0
+          set -f
+          for d in $(printf '%s' "$MACOS_LIBRARY_DIRS" | tr ':' ' '); do
+            case "$d" in
+              /*) n=$((n + 1)) ;;
+              *) refuse "macos-library-dirs holds '$d', which is not an absolute directory" ;;
+            esac
+          done
+          set +f
+          [ "$n" -gt 0 ] || refuse "macos-library-dirs is set but names no directory"
         fi
         case "$TLS" in
           true | false) ;;
@@ -178,6 +202,7 @@ runs:
         CONCURRENCY: ${{ inputs.execution-concurrency-limit }}
         DARWIN_PROPERTIES: ${{ inputs.darwin-properties }}
         DARWIN_MACOS_HOSTS: ${{ inputs.darwin-macos-hosts }}
+        MACOS_LIBRARY_DIRS: ${{ inputs.macos-library-dirs }}
         TLS: ${{ inputs.tls }}
         TLS_CA_CERTS: ${{ inputs.tls-ca-certs }}
       run: |
@@ -203,6 +228,9 @@ runs:
           if [ -n "$DARWIN_PROPERTIES" ]; then
             echo "  darwin_arm64_properties = $DARWIN_PROPERTIES"
             echo "  darwin_macos_hosts = $DARWIN_MACOS_HOSTS"
+            if [ -n "$MACOS_LIBRARY_DIRS" ]; then
+              echo "  macos_library_dirs = $MACOS_LIBRARY_DIRS"
+            fi
           fi
         } > "$dir/farm.buckconfig"
         echo "wrote the farm's machine buckconfig ($dir/farm.buckconfig)"

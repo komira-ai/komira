@@ -3,7 +3,7 @@
 # anything.
 load("@komira//tools/build/coverage:census.bzl", "coverage_census")
 load("@komira//tools/build/coverage:defs.bzl", "coverage_ci_cases")
-load("@komira//tools/build/lint:doc_tree.bzl", "doc_tree")
+load("@komira//tools/build/lint:doc_tree.bzl", "doc_tree", "docs_checked")
 load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "pointer_lint", "public_boundary", "retired_names", "shell_lint", "src_layout", "target_suite", "workflow_lint")
 load("@komira//tools/build/lint:readme_api_coverage.bzl", "readme_api_coverage")
 load("@komira//tools/build/lint:surface_capability_matrix.bzl", "surface_capability_matrix")
@@ -11,28 +11,15 @@ load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms/limits:limits.bzl", "limits")
+load("@komira//tools/build/readme_e2e:defs.bzl", "readme_e2e_complete")
 load("@komira//tools/build/selftest:defs.bzl", "graph_check")
+load("@komira//tools/build/ci:rules.bzl", "EXCLUDED")
+load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES", README_E2E_MOPM = "MOPM", README_E2E_FIRST_MOPM_WITH_OVERLAY = "FIRST_MOPM_WITH_OVERLAY")
 load("//tests:python_closure_allowlist.bzl", "PYTHON_CEILING", "PYTHON_SURFACE")
 load("//tests:surface_capability_matrix.bzl", "CAPABILITIES", "MATRIX", "NOT_CAPABILITIES", "SURFACES")
 
 # The licence text every published package carries (tools/build/package/conda.bzl).
 export_file(name = "LICENSE", visibility = ["PUBLIC"])
-
-# The release workflow, read by kci_workflow_check's welded test, which holds it to
-# release/machine.textproto with the check `kci run` makes at start-up, so a
-# drift fails `./buck2 build //...`.
-export_file(
-    name = "kci.yml",
-    src = ".github/workflows/kci.yml",
-    visibility = ["//src/kci_workflow_check:"],
-)
-
-# The pull request's check, held to the same machine file by the same welded test.
-export_file(
-    name = "pr.yml",
-    src = ".github/workflows/pr.yml",
-    visibility = ["//src/kci_workflow_check:"],
-)
 
 # The files under .github/, which the root doc_tree's glob skips, at their
 # paths, for the interpreter list (//tools/build/lint:interpreter_budget).
@@ -42,6 +29,7 @@ doc_tree(
     visibility = [
         "//tools/build/lint:interpreter_budget",
         "//tools/build/lint:no_shell",
+        "//tools/build/lint:timing",
     ],
 )
 
@@ -89,6 +77,37 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
+# The cases of the job `mopm-publish-beta` of release.yml
+# (.github/workflows/release_workflow_test.zig says what each catches): its gate,
+# its OIDC permission, no secret, and its publish command. A build action.
+zig_test(
+    name = "release_workflow_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = ".github/workflows/release_workflow_test.zig",
+    data = {"workflows/release.yml": ".github/workflows/release.yml"},
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# The cases of the buck2-farm action (.github/actions/buck2-farm/action_test.zig
+# says what each catches): action.yml's shape, and its two run lines run
+# end to end over recorded buck2 output with the real //tools/build/ci:assert_remote.
+zig_test(
+    name = "buck2_farm_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = ".github/actions/buck2-farm/action_test.zig",
+    data = {
+        "action.yml": ".github/actions/buck2-farm/action.yml",
+        "fixtures": "//tools/build/ci:assert_remote_fixtures",
+    },
+    exec_tools = {
+        "ASSERT_REMOTE": "//tools/build/ci:assert_remote",
+        "STAND_IN_BUCK2": "//tools/build/ci:stand_in_buck2",
+    },
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
 # The local actions the workflows call (.github/actions/<name>/action.yml): not
 # workflows, so actionlint does not read them, but the pins and the endpoint
 # lints do.
@@ -113,6 +132,21 @@ no_endpoint(
     gitignore = ".gitignore",
     srcs = [".buckconfig.local.example"] + WORKFLOWS + ACTIONS,
 )
+
+# The README e2e covers every package moved to mopm (tools/build/readme_e2e/README.md):
+# a `src/<name>/mopm.toml` with no target in //release/readme_e2e/verify fails this
+# target's analysis, naming the package, and so does a target for a package that has
+# none. The paths are those of the cell's root doc_tree, which holds every file.
+# Analysed and never built: the e2e targets it names are not built here.
+[readme_e2e_complete(
+    name = "readme_e2e_complete",
+    covered = sorted(README_E2E_PACKAGES.keys()),
+    excluded = [p for p, _ in EXCLUDED],
+    first_mopm_with_overlay = README_E2E_FIRST_MOPM_WITH_OVERLAY,
+    mopm = README_E2E_MOPM,
+    targets = ["//release/readme_e2e/verify:" + name for name in sorted(README_E2E_PACKAGES.keys())],
+    tree = ":doc_tree",
+) for _ in [1] if docs_checked()]
 
 # The layout of src/ (tools/build/lint/defs.bzl, src_layout): src/<name> holds
 # what komira ships; a package that exists only to test others is
@@ -156,9 +190,9 @@ _TESTS_LINTS = [
     lints = _TESTS_LINTS,
 ) for _ in _TESTS_LINTS[:1]]
 
-# The greens of the tests cell that no derived unit builds: the pull-request
-# check builds `//...` and `tests//functional/...` (//tools/build/ci:derive_checks),
-# so a target of tests//negative or tests//src that must build, beside the
+# The greens of the tests cell that the aggregate `//ci:pr` does not hold: it
+# holds the checks of this cell and of `tests//functional/...` (rules.bzl
+# UNIVERSE in tools/build/ci), so a target of tests//negative or tests//src that must build, beside the
 # planted defects it serves, is named here, through its package's
 # target_suite (a package's sub-targets need one too, and a suite in the same
 # package names them with no visibility to grant). Not declared where there
@@ -233,7 +267,7 @@ _TESTS_LINTS = [
 # and the `main` of every mojo_test under src/, as the rules received them.
 # Building this target checks nothing: `./buck2 bxl
 # //tools/build/lint/test_weld.bxl:check -- --lint //:test_weld` checks it, and
-# the pull request's check runs that (release/ci/build_targets.sh).
+# the pull request's check runs that (.github/workflows/pr.yml).
 [test_weld(
     name = "test_weld",
     known_untested = "tests/known_untested.tsv",
@@ -384,9 +418,9 @@ limits(
 # dependency) holds a target under third_party/python/ or
 # tools/build/python/, a Python rule or a `.py` source; no `.py` file in the
 # repository; no kci textproto or GitHub workflow that runs Python. Building
-# it checks nothing: release/ci/build_targets.sh runs `./buck2 bxl
+# it checks nothing: .github/workflows/pr.yml runs `./buck2 bxl
 # //tools/build/selftest/graph/checks.bxl:check -- --check //:python_closure`,
-# as it does for every graph_check of a batch.
+# as it does for every graph_check.
 #
 # The allowlist, tests/python_closure_allowlist.bzl: the Python surface
 # (empty today) and the ceiling, every finding allowed today, which only

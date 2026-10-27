@@ -111,3 +111,40 @@ except e:
     write_error = String(e)
 assert_true(write_error.startswith("demo: write(2) returned -1 for a 4-byte call"))
 ```
+
+## Files
+
+| file | what it holds |
+|---|---|
+| `posix.mojo` | the one `getenv` and `unsetenv`, the `access(2)` probes and `_thread_self` |
+| `posix_io.mojo` | `RawWriteFd` and the path helpers `fsync_path`, `fsync_dir`, `prefetch_file_into_page_cache` |
+| `fd_write_all.mojo` | `write_all_fd` |
+| `chunked_write.mojo` | `write_chunked` and `write_chunked_string` |
+| `owned_fd.mojo` | `OwnedFd` |
+| `native/komira_libc_posix.c` | the C shim: the `komira_*` wrappers and the two memory-map counters |
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_libc`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_libc/` (the Mojo files of the table above), its tests are `tests/`.
+The C shim is a native library of the package, `[native.komira_libc_posix]` in `mopm.toml`: `mojo_package`
+compiles it into `libkomira_libc_posix.a`, links it into the tests of this package and of every package that
+depends on it, and packs it into the package under `lib/`. A program that imports `komira_libc` from the
+installed package links that archive. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the native library, where the library and its tests are |
+| `mopm.lock` | what `mopm lock` writes (with no registry reachable); the package has no dependencies, so it pins the toolchain only |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a
+source, a test, the C file, `mopm.toml`, `mopm.lock` or `mopm-toolchain.toml`, run `buildrules mojo sync`,
+commit what it writes, and build `komira//src/komira_libc:lib` on the farm.
+
+`:conda` is the `.conda` of the mopm package (`mojo-komira_libc-0.1.0-mojo1.0.0_0.conda`): the `.mojoc` and
+`lib/libkomira_libc_posix.a`. `:komira_libc` is `:lib` as komira's Mojo rules take it
+(`mojo_adopted_library`): a package that lists it in `deps` links the same archive. It also compiles and runs
+the README's examples above (`[tests][readme]`) against `:lib` and the archive. The shared library
+`libkomira_libc_native.so.1` (`:komira_libc_native`) is the release set's packaging of the same C file.

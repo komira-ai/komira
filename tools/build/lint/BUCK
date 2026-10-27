@@ -9,6 +9,7 @@ load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs")
 load(":defs.bzl", "tar_member")
 load(":interpreter_budget.bzl", "interpreter_budget")
 load(":no_shell.bzl", "no_shell")
+load(":timing.bzl", "timing")
 
 # Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
 # that the pin is that release.
@@ -141,5 +142,17 @@ no_shell(
     cells = {"tools/build/tests": "tests//:doc_tree"},
     dotfiles = ["//:github_tree"],
     list = "tools/build/lint/no_shell_list.tsv",
+    tree = "//:doc_tree",
+)
+
+# The wall-clock ledger (timing.bzl): the Zig files that read a clock or sleep,
+# counted per token against timing_list.tsv, so that no test asserts on elapsed
+# time or waits on a deadline that fails it, and the list only shrinks. The same
+# trees as the no-shell list.
+timing(
+    name = "timing",
+    cells = {"tools/build/tests": "tests//:doc_tree"},
+    dotfiles = ["//:github_tree"],
+    list = "tools/build/lint/timing_list.tsv",
     tree = "//:doc_tree",
 )

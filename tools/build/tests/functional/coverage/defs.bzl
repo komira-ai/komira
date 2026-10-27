@@ -147,6 +147,19 @@ cov_plant = rule(
     },
 )
 
+def _dir_impl(ctx):
+    return [DefaultInfo(default_output = ctx.actions.copied_dir(ctx.attrs.path, ctx.attrs.files))]
+
+# A directory of `files` (name -> source, a generated one among them) at
+# `path` in the package: a generated source that is a directory (covparts).
+cov_dir = rule(
+    impl = _dir_impl,
+    attrs = {
+        "files": attrs.dict(attrs.string(), attrs.source()),
+        "path": attrs.string(),
+    },
+)
+
 def _zig_tree_impl(ctx):
     out = ctx.actions.copied_dir(ctx.label.name, ctx.attrs.files)
     return [DefaultInfo(default_output = out, sub_targets = {

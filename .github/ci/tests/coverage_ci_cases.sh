@@ -427,6 +427,7 @@ case "\$1" in
     uquery)
         [ ! -f "$W/uquery_fail" ] || { echo "uquery: a BUCK file failed to load" >&2; exit 3; }
         case "\$*" in *attrregexfilter*) if [ -f "$W/cov_tests_out" ]; then cat "$W/cov_tests_out"; fi; exit 0 ;; esac
+        case "\$*" in *mojo_cov_summary_rule*) if [ -f "$W/package_out" ]; then cat "$W/package_out"; fi; exit 0 ;; esac
         if [ -f "$W/uquery_raw" ]; then cat "$W/uquery_raw"; exit 0; fi
         printf '{\n'
         n=0
@@ -447,10 +448,10 @@ case "\$1" in
                 --build-report) br=\$2; shift 2 ;;
                 -c) shift 2 ;;
                 -*) shift ;;
-                *"[coverage][tests]" | *"[coverage][branch_info]" | *"_cov_gate[tests]")
+                *"[coverage][tests]" | *"[coverage][branch_info]" | *"_cov_gate[tests]" | *"[reports]" | *"[branches]")
                     lib=\${1%%\[*}
                     case " \$libs " in *" \$lib "*) ;; *) libs="\$libs \$lib" ;; esac
-                    case "\$1" in *branch_info]) bi="\$bi\$lib " ;; esac
+                    case "\$1" in *branch_info] | *"[branches]") bi="\$bi\$lib " ;; esac
                     shift ;;
                 *) echo "buck2 stand-in: target \$1 is not a coverage sub-target" >&2; exit 9 ;;
             esac
@@ -566,6 +567,7 @@ printf 'komira//src/alpha:alpha\nkomira//src/beta:beta\nkomira//src/gamma:gamma\
 # gamma's), docs/ (the root package), and files of the two other cells.
 printf 'src/alpha/sub/deep.mojo\nsrc/alpha/alpha.mojo\nsrc/beta/beta.mojo\nsrc/gamma/gone.mojo\ndocs/notes.md\ntools/build/tests/functional/x/x.mojo\ntools/build/cells/toolchains/BUCK\n' >"$W/git_names"
 QUERY="kind('^mojo_library_rule\$', set( //: //src/alpha: //src/beta: //src/gamma: ))"
+PQUERY="kind('^mojo_cov_summary_rule\$', set( //: //src/alpha: //src/beta: //src/gamma: ))"
 
 measure() { # <case>: a fresh out dir, fresh call records
     O="$W/o_$1"
@@ -593,6 +595,7 @@ measure M1
 [ "$RC" -eq 0 ] || red "M1: a failed coverage build, and the script exited $RC (it must exit 0)"
 {
     echo "uquery -c komira.coverage=true $QUERY --output-attribute ^coverage_branch_gate\$"
+    echo "uquery -c komira.coverage=true $PQUERY --output-attribute ^branches\$"
     echo "uquery -c komira.coverage=true attrregexfilter(coverage_tests, '.', $QUERY)"
     echo "build -c komira.coverage=true --keep-going --build-report $O/logs/build_report.json komira//src/alpha:alpha[coverage][tests] komira//src/beta:beta[coverage][tests] komira//src/gamma:gamma[coverage][tests]"
 } >"$W/want_buck2"
@@ -746,6 +749,7 @@ printf 'komira//src/alpha:alpha\n' >"$W/branch_gate"
 printf 'src/alpha/alpha.mojo\nsrc/beta/beta.mojo\n' >"$W/git_names"
 printf 'komira//src/alpha:alpha\nkomira//src/beta:beta\n' >"$W/uquery_out"
 QUERY2="kind('^mojo_library_rule\$', set( //src/alpha: //src/beta: ))"
+PQUERY2="kind('^mojo_cov_summary_rule\$', set( //src/alpha: //src/beta: ))"
 
 # B1. alpha (listed) and beta (not) both build. ONE build call: alpha's
 # tests and branch records, beta's tests alone; covcheck reads alpha's
@@ -759,6 +763,7 @@ measure B1
 [ "$RC" -eq 0 ] || red "B1: exited $RC"
 {
     echo "uquery -c komira.coverage=true $QUERY2 --output-attribute ^coverage_branch_gate\$"
+    echo "uquery -c komira.coverage=true $PQUERY2 --output-attribute ^branches\$"
     echo "uquery -c komira.coverage=true attrregexfilter(coverage_tests, '.', $QUERY2)"
     echo "build -c komira.coverage=true --keep-going --build-report $O/logs/build_report.json komira//src/alpha:alpha[coverage][tests] komira//src/alpha:alpha[coverage][branch_info] komira//src/beta:beta[coverage][tests]"
 } >"$W/want_buck2"
@@ -984,6 +989,41 @@ grep -q '"findings":\[{"kind":"BelowTarget","package":"src/alpha",' "$O/publish/
 pass
 cp "$W/policy.keep" "$M/tools/build/coverage/policy.bzl"
 cp "$W/git_diff_alpha" "$W/git_diff"
+
+# U1. A mojo_package's `:coverage` (buildrules 0.0.43): its `[reports]` are one kcov
+# report per test and `__coverage__/uncompiled.cobertura.xml` (the lines of the
+# functions no test compiled, hit 0), its `[branches]` one record file per test and
+# `__coverage__/uncompiled.branches.info`. The pairing of reports and records
+# counts the uncompiled ones as a pair, and covcheck reads both: 2 reports and 2
+# records, so the package's numbers are the test's and the uncompiled
+# lines' (alpha.mojo line 1 found, not hit, and the one line of sub/deep.mojo that no
+# report names: 2 of 5 lines hit; the records' 1 of 4 branches). Red when the
+# uncompiled record is not taken from the build report (the script stops: 1 record
+# for 2 reports) or when it is taken without its report.
+PK="buck-out/v2/art/komira/0123/src/alpha"
+UT="$PK/__test_a__cov__/test_a__cov.cobertura.xml"
+UU="$PK/__coverage__/uncompiled.cobertura.xml"
+BT="$PK/__test_a__info__/test_a__info.info"
+BU="$PK/__coverage__/uncompiled.branches.info"
+mkdir -p "$M/$PK/__test_a__cov__" "$M/$PK/__coverage__" "$M/$PK/__test_a__info__"
+cp "$M/$XA" "$M/$UT"
+printf '<?xml version="1.0" ?>\n<coverage>\n<packages>\n<package name="">\n<classes>\n<class name="alpha_mojo" filename="src/alpha/alpha.mojo">\n<lines>\n<line number="1" hits="0"/>\n</lines>\n</class>\n</classes>\n</package>\n</packages>\n</coverage>\n' >"$M/$UU"
+cp "$M/$IA" "$M/$BT"
+printf 'SF:src/alpha/alpha.mojo\nBRDA:1,7:br:0/1,0,0\nBRDA:1,7:br:0/1,1,0\nend_of_record\n' >"$M/$BU"
+printf 'src/alpha/alpha.mojo\n' >"$W/git_names"
+: >"$W/uquery_out"
+rm -f "$W/branch_gate"
+printf '{\n  "komira//src/alpha:coverage": {\n    "branches": [\n      "komira//src/alpha:coverage[branches]"\n    ]\n  }\n}\n' >"$W/package_out"
+printf 'komira//src/alpha:coverage SUCCESS - %s %s %s %s\n' "$UT" "$UU" "$BT" "$BU" >"$W/build_table"
+measure U1
+rm -f "$W/package_out"
+[ "$RC" -eq 0 ] || red "U1: a package with an uncompiled report and record, and the script exited $RC"
+[ "$(grep -c -x -- --cobertura "$W/covcheck_argv")" -eq 2 ] && grep -qx "$UU" "$W/covcheck_argv" || red "U1: covcheck did not read the test's report and the uncompiled one"
+[ "$(grep -c -x -- --branch-lcov "$W/covcheck_argv")" -eq 2 ] && grep -qx "$BU" "$W/covcheck_argv" || red "U1: covcheck did not read the test's record and the uncompiled one"
+grep -F '| `src/alpha` (touched) |' "$O/publish/summary.md" | grep -qF '| 40.00% (2/5) | 25.00% (1/4) |' ||
+    red "U1: the summary's alpha row is not the test's and the uncompiled lines and branches: $(grep -F '`src/alpha` (touched)' "$O/publish/summary.md")"
+[ ! -s "$O/publish/branch_not_measured.txt" ] || red "U1: branch_not_measured.txt is not empty"
+pass
 
 cd /
 rm -rf "$T"
