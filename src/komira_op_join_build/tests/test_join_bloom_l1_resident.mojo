@@ -1,5 +1,5 @@
 # =============================================================================
-# test_join_bloom_l1_resident — BLOOML1's falsifier
+# test_join_bloom_l1_resident -- BLOOML1 guard
 # =============================================================================
 #
 # NOTE: THE VACUITY THIS FILE EXISTS TO CLOSE, STATED FIRST. Declining a bloom
@@ -8,22 +8,22 @@
 # walks a chain whose compares all fail. The ON and OFF arms therefore emit
 # identical pairs in identical order, and EVERY value oracle in the tree is
 # satisfied by an arm THAT NEVER RAN. A test that only checks "the join still
-# returns the right answer" is vacuous TWICE over — once because the answer
+# returns the right answer" is vacuous TWICE over -- once because the answer
 # cannot move, and once because it is equally green with the lever unreachable.
 #
-# WARNING: AND THIS LEVER IS NOT PURELY SUBTRACTIVE — IT ADDS AN ARMING PREDICATE — so
-# "the bloom was declined" is only half a result. The other half is that a
-# build ABOVE the budget still BUILDS one. Both directions are asserted on the
-# same fixture shape in leg 3, and neither assertion alone is sufficient:
-# a predicate stuck at True passes the first, a predicate stuck at False passes
-# the second.
+# WARNING: AND THIS LEVER IS NOT PURELY SUBTRACTIVE -- IT ADDS AN ARMING
+# PREDICATE -- so "the bloom was declined" is only half a result. The other
+# half is that a build ABOVE the budget still BUILDS one. Both directions are
+# asserted on the same fixture shape in leg 3, and neither assertion alone is
+# sufficient: a predicate stuck at True passes the first, a predicate stuck at
+# False passes the second.
 #
 # FIVE THINGS ARE UNDER TEST, and they are separable on purpose:
 #
-#   1. `bloom_l1_index_bytes` — a PURE arithmetic function. Tested directly,
+#   1. `bloom_l1_index_bytes` -- a PURE arithmetic function. Tested directly,
 #      with no join and no fixture, against the j1 geometry re-derived by hand
 #      and against both OFF layouts.
-#   2. `bloom_l1_should_decline` — a PURE predicate, both boundary directions
+#   2. `bloom_l1_should_decline` -- a PURE predicate, both boundary directions
 #      and the `budget <= 0` fail-towards-the-incumbent rule.
 #   3. the SETTING's contract: unconfigured, 0 and negative are OFF, which is
 #      the half no value assertion can reach: with the lever off by accident
@@ -74,7 +74,7 @@ def _clear_env() raises:
 
 
 def _dense_keys(n: Int) -> PrimitiveArray[I64]:
-    """`n` distinct keys, 0..n-1 — j1's build side in shape: every probe key
+    """`n` distinct keys, 0..n-1 -- j1's build side in shape: every probe key
     will match, so the bloom rejects nothing."""
     var arr = PrimitiveArray[I64].allocate(n)
     var p = arr._typed_ptr_mut()
@@ -110,7 +110,7 @@ def _encode_pairs(imm bm: List[Int], imm pm: List[Int]) -> List[Int]:
 
 
 # -----------------------------------------------------------------------------
-# Leg 1 — the PURE byte arithmetic
+# Leg 1 -- the PURE byte arithmetic
 # -----------------------------------------------------------------------------
 
 
@@ -127,7 +127,7 @@ def test_index_bytes_arithmetic() raises:
         "j1 geometry: 256*8 + 2*100*8",
     )
 
-    # The OFF layout — `build_keys` + `next_chain` at 8 B each, plus
+    # The OFF layout -- `build_keys` + `next_chain` at 8 B each, plus
     # `build_indices` when `nobi` is False. Still reachable; it is this tree's
     # differential join oracle.
     assert_equal(
@@ -165,12 +165,12 @@ def test_index_bytes_arithmetic() raises:
 
 
 # -----------------------------------------------------------------------------
-# Leg 2 — the PURE predicate, both boundaries and the OFF arm
+# Leg 2 -- the PURE predicate, both boundaries and the OFF arm
 # -----------------------------------------------------------------------------
 
 
 def test_should_decline_predicate() raises:
-    # j1: 3,648 B against the derived default of 16,384. Inside by 4.5x — this
+    # j1: 3,648 B against the derived default of 16,384. Inside by 4.5x -- this
     # cell's verdict does not depend on where in [3,648, 32,768] the line falls.
     assert_true(
         bloom_l1_should_decline(
@@ -183,7 +183,7 @@ def test_should_decline_predicate() raises:
         "j1's 3,648 B index is inside the benchmark host's whole L1d",
     )
 
-    # THE EXACT BOUNDARY. `<=`, not `<` — an index that exactly fills the
+    # THE EXACT BOUNDARY. `<=`, not `<` -- an index that exactly fills the
     # budget is resident, so it declines. M1 is the off-by-one.
     assert_true(
         bloom_l1_should_decline(16_384, 16_384), "exactly at budget declines"
@@ -211,7 +211,7 @@ def test_should_decline_predicate() raises:
     )
 
     # THE OFF ARM. A zero or negative budget is the lever being off, and it
-    # must fail towards the incumbent — never "decline everything", which is
+    # must fail towards the incumbent -- never "decline everything", which is
     # what an operator would spell by typo. M2 is this direction inverted.
     assert_false(bloom_l1_should_decline(8, 0), "budget 0 is OFF")
     assert_false(bloom_l1_should_decline(8, -1), "negative budget is OFF")
@@ -222,7 +222,7 @@ def test_should_decline_predicate() raises:
 
 
 # -----------------------------------------------------------------------------
-# Leg 3 — the gate's parsing contract
+# Leg 3 -- the gate's parsing contract
 # -----------------------------------------------------------------------------
 
 
@@ -250,7 +250,7 @@ def test_gate_parsing_contract() raises:
 
 
 # -----------------------------------------------------------------------------
-# Leg 4 — ARMING and NON-VACUITY through the real builder
+# Leg 4 -- ARMING and NON-VACUITY through the real builder
 # -----------------------------------------------------------------------------
 
 
@@ -270,7 +270,7 @@ def test_decline_arms_on_small_and_not_on_large() raises:
     )
     assert_true(
         bloom_l1_kept_count() > 0,
-        "the predicate was REACHED on the OFF arm — kept=0 declined=0 would"
+        "the predicate was REACHED on the OFF arm -- kept=0 declined=0 would"
         " mean unreachable, which is a different fact",
     )
     _ = off^
@@ -279,8 +279,8 @@ def test_decline_arms_on_small_and_not_on_large() raises:
     bloom_l1_configure(16_384)
     reset_bloom_l1_counters()
     var small = HashJoinBuilder.build(_dense_keys(_J1_BUILD_ROWS))
-    # THE STRUCTURAL OBSERVABLE. M5 — notch the counter, build the filter
-    # anyway — is green on every other assertion in this file.
+    # THE STRUCTURAL OBSERVABLE. A build that notches the counter but builds
+    # the filter anyway is green on every other assertion in this file.
     assert_false(
         small.uses_bloom(),
         "a 3,648 B index must return an index the probe will not ask",
@@ -302,7 +302,7 @@ def test_decline_arms_on_small_and_not_on_large() raises:
     assert_equal(
         bloom_l1_index_bytes(4_096, 8_192, JOIN_KN_WORDS, True, True),
         131_072,
-        "4,096 rows is 131,072 B — re-derived, not assumed",
+        "4,096 rows is 131,072 B -- re-derived, not assumed",
     )
     assert_true(
         large.uses_bloom(),
@@ -335,13 +335,13 @@ def test_decline_arms_on_small_and_not_on_large() raises:
 
 
 # -----------------------------------------------------------------------------
-# Leg 5 — VALUE INVARIANCE
+# Leg 5 -- VALUE INVARIANCE
 # -----------------------------------------------------------------------------
 
 
 def test_decline_is_value_invariant() raises:
     """The declined index and a bloom-carrying one over the same keys emit the
-    same pairs. Necessary, and on its own worth nothing — see the header."""
+    same pairs. Necessary, and on its own worth nothing -- see the header."""
     _clear_env()
     var probe = _probe_keys(4_000, _J1_BUILD_ROWS)
 
@@ -363,8 +363,8 @@ def test_decline_is_value_invariant() raises:
     _ = trt^
 
     # j1's shape: EVERY probe row matches exactly one build row, so the bloom
-    # in the control arm rejected nothing at all — the cell's defining property,
-    # asserted rather than described.
+    # in the control arm rejected nothing at all -- the cell's defining
+    # property, asserted rather than described.
     assert_equal(len(ctl_bm), 4_000, "every probe row matches on this fixture")
     var ctl_enc = _encode_pairs(ctl_bm, ctl_pm)
     var trt_enc = _encode_pairs(trt_bm, trt_pm)
