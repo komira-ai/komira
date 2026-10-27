@@ -23,7 +23,10 @@ mojo_library(
 # gate driver passes, each of which dlopens it with RTLD_NOW and calls it as a
 # foreign host would:
 #   gate_version       the version is 1000 (1.0);
-#   gate_new_free      handles are non-NULL and distinct, freeing NULL is a no-op;
+#   gate_new_free      handles are non-NULL, distinct and hold separate sessions,
+#                      freeing NULL is a no-op;
+#   gate_no_extra_exports  the linker's section markers and the Mojo helpers
+#                      are not in the symbol table;
 #   gate_fresh_error   a fresh session's error is empty, with or without a buffer;
 #   gate_two_call      capacity 0 and one byte short give -4 and the length, an
 #                      exact and a larger buffer give the text, nothing past it;
@@ -43,6 +46,7 @@ mojo_shared_lib(
     gate_srcs = [
         "tests/gate/gate_fresh_error.mojo",
         "tests/gate/gate_new_free.mojo",
+        "tests/gate/gate_no_extra_exports.mojo",
         "tests/gate/gate_null_ctx.mojo",
         "tests/gate/gate_null_out_len.mojo",
         "tests/gate/gate_two_call.mojo",

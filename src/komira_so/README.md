@@ -113,9 +113,10 @@ text the next call returns.
 ./buck2 build komira//src/komira_so:libkomira       # the shared library, behind its gate
 ```
 
-The library is published only if the gate passes: the exports check, then six
+The library is published only if the gate passes: the exports check, then seven
 drivers (`tests/gate/`) that open it with `RTLD_NOW` and call it as a foreign
-host would: the version, create and free, a fresh session's empty error, the
+host would: the version, create and free (distinct handles, separate sessions), no
+symbol beyond the four, a fresh session's empty error, the
 two-call protocol (zero capacity, one byte short, exact, larger), a NULL
 context, and a NULL `out_len`. `exports_exact` makes the four names above the
 whole dynamic symbol table.
