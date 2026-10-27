@@ -8,14 +8,16 @@ core half: a `komira_http_server` dispatcher over one snapshot store that takes
 records from a push and writes them to the graph. It knows no kind of record,
 service or vocabulary: which adapter reads a record is chosen by an opaque
 surface tag the caller sends, and anything beyond the routes below is a
-`CaptureRoutes` conformer the host supplies. The query routes are the next part
-and are not here.
+`CaptureRoutes` conformer the host supplies. Reading the graph back is the query
+routes below.
 
 | route | what it does |
 |---|---|
 | `GET /health` | open; `{"status":"ok"}`, no store access |
 | `POST /capture?surface=<tag>[&partition=<id>]` | the body is one raw record; the adapter registered under `<tag>` parses and lowers it, each episode is ingested; a tag nobody registered is 422 and no adapter runs |
 | `POST /ingest-structured[?partition=<id>]` | known entities and edges as JSON (format in `structured.mojo`); ingested with no extraction |
+| `POST /query[?partition=<id>][&facet=<f>]` | the subgraph around what a text matches in one partition, with the model's answer when the server has a model; body `{"q": "...", "k"?, "as_of"?, "partition"?, "facet"?, "synthesize"?}` |
+| `POST /query-federated[?partitions=a,b,c]` | the same over a list of partitions, merged and ranked together; each node carries its partition as provenance; body as above with `"partitions": [...]` |
 | a host's | whatever a `CaptureRoutes` conformer claims, over the loaded working set |
 
 Every route except health needs `Authorization: Bearer <token>`, the token the
@@ -34,6 +36,12 @@ Everything is exported from `komira_kg_capture`:
 - `CaptureConfig(token, default_partition, max_body_bytes, compact_after_deltas,
   ingest)`: nothing has a default; each argument is checked.
 - `CaptureClock` (trait), `FixedClock`, `StepClock`.
+- `QueryConfig(synthesis_prompt, default_k, max_k, max_query_bytes, max_partitions,
+  per_partition_cap, similarity_floor)` and `QueryConfig.default()`: the host's
+  synthesis prompt (`DEFAULT_SYNTHESIS_PROMPT` is the neutral default) and the
+  query limits; the dispatcher takes it as its last, optional argument.
+- `build_query_result`, `QuerySpec`, `parse_query_request`: the read, a pure
+  function of a working set; `evidence_pack`, `synthesize_answer`: the model step.
 - `CaptureRoutes` (trait), `NoRoutes`.
 - `parse_structured_request`, `StructuredRequest`.
 - `json_response`, `error_response`, `query_value`, `bearer_matches`,
@@ -57,6 +65,31 @@ Everything is exported from `komira_kg_capture`:
   process. A malformed structured body is described, because the description is
   about the caller's own bytes. A failed ingest is 500 (the server cannot tell
   bad input from a failed store).
+- **A query reads what it names.** A query that names no partition reads the
+  server's default partition (the one the write routes use); a federated query
+  that names none reads it too. Asking for "everything" means listing the
+  partitions. Nothing outside the named partitions is returned: not a seed, and
+  not a neighbour across an edge from one (a federated query naming only `p1`
+  gets no `p2` node and no edge into `p2`). A federated query names at most
+  `max_partitions` distinct partitions; a longer list is refused while it is
+  read, and each name is checked as it is read. The facet is a plain string compared for equality with the
+  entity's stored facet; an entity with no facet never passes a non-empty filter.
+- **Seeds and order.** An entity seeds a query when the cosine of its name
+  embedding with the embedded query is at least `similarity_floor`, or when its
+  name contains the query text (ASCII case folded). Semantic seeds come first,
+  strongest first (equal scores by node id), then text-only seeds, then their
+  neighbours in the named partitions, up to `k`. A federated result does not depend on the order the
+  partitions are listed in. If the embedder fails or returns a wrong-sized or
+  non-finite vector, the text match still answers.
+- **Warm and cold agree.** The read is a function of the merged graph at the
+  head, so the warm set, a cold server over the same store and a set loaded by
+  hand give the same bytes. A query writes nothing and reads no clock.
+- **The model.** `LlmClient.synthesize` gets the host's prompt unchanged as the
+  system text and an evidence pack (the question, up to 32 entities and 48
+  relations) as the user text. A model failure is 502 with a fixed message;
+  `"synthesize": false` skips the model, `true` on a server with none is 501.
+  The query text is limited to `max_query_bytes` (413) and the body to
+  `max_body_bytes` (413).
 - **Host routes** are asked only after authentication and the size check, and
   only for a path the server does not serve itself (`/health`, `/capture` and
   `/ingest-structured` stay the server's). A route is lent the working set merged
@@ -142,6 +175,97 @@ def main() raises:
     anonymous.body.extend("remember this too".as_bytes())
     var refused = server.dispatch[BlockingRuntime[NoopSink]](reactor, anonymous^)
     assert_equal(Int(refused.status), 401)
+```
+
+A query over what was written, answered by a model:
+
+```mojo module
+from std.sys.info import CompilationTarget
+from std.testing import assert_equal
+
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.reactor.reactor import BACKEND_EPOLL, BACKEND_KQUEUE, Reactor
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_http_core.codec import HttpMethod, HttpRequest
+from komira_json import parse_json_bytes
+from komira_kg import IngestConfig, StubEmbedder, StubLlmClient
+from komira_kg_capture import (
+    CaptureConfig,
+    CaptureDispatcher,
+    DEFAULT_SYNTHESIS_PROMPT,
+    FixedClock,
+    NoRoutes,
+    QueryConfig,
+)
+from komira_kg_format import KgSnapshotStore
+from komira_kg_sources import EmptyAdapterRegistry
+from komira_objectstore.shared_in_memory_conditional_store import SharedInMemoryConditionalStore
+
+
+def backend() -> UInt8:
+    comptime if CompilationTarget.is_linux():
+        return BACKEND_EPOLL
+    return BACKEND_KQUEUE
+
+
+def post(path: String, body: String) -> HttpRequest:
+    var r = HttpRequest(HttpMethod.post(), path)
+    r.headers["authorization"] = "Bearer a-long-random-token"
+    r.body.extend(body.as_bytes())
+    return r^
+
+
+def vec(a: Float64, b: Float64) -> List[Float64]:
+    var v = List[Float64]()
+    v.append(a)
+    v.append(b)
+    v.append(0.0)
+    v.append(0.0)
+    return v^
+
+
+def main() raises:
+    var emb = StubEmbedder(4)
+    emb.add_vector("Ada Lovelace", vec(1.0, 0.0))
+    emb.add_vector("Acme Labs", vec(0.0, 1.0))
+    emb.add_vector("Ada", vec(1.0, 0.0))
+    var llm = StubLlmClient()
+    llm.add_synthesis(
+        DEFAULT_SYNTHESIS_PROMPT,
+        "QUESTION: Ada\n\nEVIDENCE PACK\nEntities:\n- Ada Lovelace (entity)\n"
+        "- Acme Labs (entity)\nRelations:\n"
+        "- Ada Lovelace -> Acme Labs: Ada Lovelace works_at Acme Labs\n",
+        "Ada works at Acme Labs.",
+    )
+    var server = CaptureDispatcher(
+        KgSnapshotStore[SharedInMemoryConditionalStore](SharedInMemoryConditionalStore(), "graph"),
+        llm^,
+        emb^,
+        EmptyAdapterRegistry(),
+        NoRoutes(),
+        FixedClock(Int64(1_000)),
+        CaptureConfig("a-long-random-token", "default", 4096, 32, IngestConfig.default()),
+        QueryConfig.default(),
+    )
+    var reactor = Reactor[NoopSink](NoopSink(_placeholder=UInt8(0)), backend())
+
+    var written = server.dispatch[BlockingRuntime[NoopSink]](
+        reactor,
+        post(
+            "/ingest-structured",
+            '{"entities":[{"name":"Ada Lovelace"},{"name":"Acme Labs"}],'
+            '"edges":[{"subject":"Ada Lovelace","predicate":"works_at","object":"Acme Labs"}]}',
+        ),
+    )
+    assert_equal(Int(written.status), 200)
+
+    # The partition is the server's default; "Ada" is found in an entity's name.
+    var found = server.dispatch[BlockingRuntime[NoopSink]](reactor, post("/query", '{"q":"Ada"}'))
+    assert_equal(Int(found.status), 200)
+    var doc = parse_json_bytes(found.body)
+    assert_equal(doc.get("answer").as_string(), "Ada works at Acme Labs.")
+    assert_equal(doc.get("nodes").array_len(), 2)
+    assert_equal(doc.get("edges").array_len(), 1)
 ```
 
 A host's route over the loaded working set:

@@ -5,8 +5,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # route that hands a pushed record to the adapter registered under its surface tag and ingests
 # the episodes, a structured-ingest route, and a CaptureRoutes seam for a host's own routes.
 # Every route but health needs a bearer token the host passes in, bodies are limited, and the
-# server takes its clock as an argument; it reads no environment. The query routes are the
-# next part. No kind of record, service or vocabulary is named here.
+# server takes its clock as an argument; it reads no environment. The query half adds a query
+# route and a federated query route over the same warm merged graph, with the host's synthesis
+# prompt and limits in a QueryConfig. No kind of record, service or vocabulary is named here.
 #
 # The welded tests: test_http_util pins the query-string, bearer-token and label checks and the
 # JSON writers (multi-byte text and control bytes unchanged); test_structured the structured
@@ -16,7 +17,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # tag refused, the clock stamping, folding the chain); test_structured_route the structured
 # route; test_auth_limits an unauthenticated request to every route but health refused, the
 # body limit and the methods; test_extra_routes a host route reachable only when registered;
-# test_loopback the same server on a loopback port.
+# test_loopback the same server on a loopback port; test_query_build the subgraph a query
+# matches (ranking, partition scope, the exact facet filter, as-of, the caps, an embedder that
+# fails); test_query_parts the query configuration, request and evidence pack; test_query_route
+# the query routes (the warm set and a cold server answering alike, federated merge order,
+# synthesis prompt delivery, a model error, the limits); test_query_loopback the same over a
+# loopback port.
 mojo_library(
     name = "komira_kg_capture",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -84,6 +90,10 @@ mojo_library(
         "tests/test_extra_routes.mojo",
         "tests/test_http_util.mojo",
         "tests/test_loopback.mojo",
+        "tests/test_query_build.mojo",
+        "tests/test_query_loopback.mojo",
+        "tests/test_query_parts.mojo",
+        "tests/test_query_route.mojo",
         "tests/test_structured.mojo",
         "tests/test_structured_route.mojo",
     ],
