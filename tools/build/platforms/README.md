@@ -246,7 +246,8 @@ needs `darwin_macos_hosts` too, since a macOS host's SDK and tools are not
 inputs of the action. Setting up the workers is in
 [the toolchain README](../toolchains/README.md), "macOS".
 
-buildrules' Mojo rules read two more keys from the root cell's `[buildrules_re]` section, and the committed
+buildrules reads every `[buildrules_re]` key from the root cell's configuration (komira's own `.buckconfig` when
+komira is built standalone), and besides `macos_aarch64_properties` its Mojo rules read two more keys; the committed
 `.buckconfig` points both at `[komira_re]` (`$(config ...)`, no value committed): `darwin_macos_hosts` (the hosts
 a macOS Mojo compile may run on; a macOS Mojo target fails analysis without it) and `macos_library_dirs` (the
 directories a macOS test run searches, before `/usr/local/lib:/usr/lib`, for a library it opens by its bare name,
