@@ -6,7 +6,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # and the segment (recorded in the physical plan), the dispatch-time fan-out
 # grain, the run and segment execution context, the parallel RecordBatch concat,
 # the memory reservation a breaker grows against the host budget, the spill
-# storage, the shuffle combine buffer and retention policy, counters, the small
+# storage and its arbitration (which breaker or partition spills under memory
+# pressure), the shuffle combine buffer and retention policy, counters, the small
 # shared row and column helpers, the THSPLC column codec with the RecordBatch <->
 # ColumnNativeBatch bridges, and filter-by-predicate over either batch form. It
 # depends on no engine package above it.
@@ -70,6 +71,8 @@ mojo_library(
         "tests/test_segment_execution.mojo",
         "tests/test_shuffle_combine_buffer.mojo",
         "tests/test_shuffle_retention_policy.mojo",
+        "tests/test_spill_arbitration.mojo",
+        "tests/test_spill_arbitrator_mixed_column_row_grains.mojo",
         "tests/test_spill_codec_boundary.mojo",
         "tests/test_spill_prefetch_seam.mojo",
         "tests/test_spill_thspill2_robustness.mojo",
