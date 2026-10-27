@@ -48,6 +48,15 @@ operator or a sink consumes but does not implement belongs here.
   encode scratch with a bounded high-water) and the driver-side retention
   policy (`shuffle_retention_policy`: reaps sealed epochs below the slowest
   durable consumer cursor, at a cadence, fail-safe).
+- The shuffle producer's streaming combine (`spill.shuffle_stream_combine`):
+  writes a producer's R partition slices into one `.seg` object through a
+  streaming write, byte-identical to what `komira_shuffle`'s `SegWriter` builds.
+  With a byte budget, a partition above the budget is staged in a
+  `SpillStorage` in chunks of at most the budget and streamed back, and the
+  result reports the most bytes the combine itself staged at once, never above the
+  budget. A failure from the source, the spill storage or the file system is
+  raised to the caller after the spilled chunks are released and the partial
+  write is aborted.
 - Counters, the FNV-1a hash (`spill.fnv1a`), and the small
   shared row and column helpers (`row`, `group_ref`, `scan_source`,
   `streaming_morsel`, `dynamic_filter`, `band_sink`).

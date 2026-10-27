@@ -1,98 +1,61 @@
 # =============================================================================
 # test_shuffle_combine_bounded_ram.mojo
-#   Phase B5 — THE bounded-RAM GATE for the producer stream-combine. Proves the
-#   B4 incremental-spill route (`stream_combine_segment_spilling`) bounds peak
-#   RAM to ~the configured threshold `T` even when a SINGLE partition is many×
-#   larger than `T`, while staying BYTE-IDENTICAL to the no-spill B3 path / the
-#   Phase-A SegWriter.
+#   Tests of `stream_combine_segment_spilling`: the combine under a byte budget.
 # =============================================================================
 #
-# # The chunk-keyed spill REFRAME (NOT a Partitioner)
+# The budget T is a few KiB to a few hundred KiB so that a partition many times
+# T is cheap to build. Every bound below is a count (bytes the combine reports
+# holding, chunks written), not a measurement of time or memory.
 #
-# The spill substrate is CHUNK-KEYED: `SpillStorage.write_chunk(bytes) ->
-# ChunkId`, `read_chunk(id)`, `release_chunk(id)`. There is NO Partitioner in
-# the spill path. B4 wires the bounded route as: over-threshold flush ->
-# `storage.write_chunk(buf.take()) -> ChunkId` (record); at partition finalize ->
-# `read_chunk(id)` -> chunked `write_at` -> `release_chunk(id)` (free). This test
-# drives a real `FileSystemSpillStorage[LocalFs]` (the one generic conformer) as
-# the spill storage and asserts the chunks are created AND freed (no leak).
+#   1. bounded count: a partition many times T is staged in chunks, so
+#      `peak_staged_bytes` is exactly T (a full chunk) and never above it, the
+#      number of chunks written is ceil(len / T), and the spill storage is empty
+#      at the end.
+#   2. the same result: the spilled `.seg` equals both the unspilled combine's
+#      and `SegWriter`'s for the same slices.
+#   3. the budget boundary: a partition of exactly T bytes is not spilled; one of
+#      T + 1 bytes is, in two chunks.
+#   4. rows exactly once: slices of 8-byte row ids, spilled and restored, hold
+#      every input id exactly once across the partitions, and the slots' row
+#      counts match the rows read.
+#   5. a spill failure is reported: a storage whose `write_chunk` (or
+#      `read_chunk`) fails makes the combine raise with the storage's message,
+#      releases the chunks already written and leaves no partial `.seg`.
 #
-# # The PROXY-THRESHOLD note (in-test, honest)
-#
-# This gate uses a SMALL configurable threshold `T` (256 KiB, with a partition
-# several× larger ~2-8 MiB) as a PROXY for the real RAM budget so the test runs
-# fast — NOT a literal 2 GB. The gate measures the B2 combine-BUFFER bound
-# (`high_water()`), which B4 makes faithful (capped at ~`T`). The real-S3 K×part
-# in-flight PUT window + the FS-side `_coalesce` copy are SEPARATE terms (per the
-# B3 perf review) and are NOT in `high_water()`; a true-RSS gate is a cloud-path
-# concern. Here we prove the BUFFER never accumulates the whole partition — that
-# is the lever B4 adds over B3.
-#
-# Five assertions, in falsifying order of importance:
-#
-#   1. BOUNDED PEAK (THE gate) — drive a partition many× larger than `T`; assert
-#      `high_water()` <= `T` + slack (NOT the whole partition size). The
-#      partition is several× the peak. If the buffer accumulated the whole
-#      partition (no spill flush), high_water would be ~the partition size and
-#      this fails.
-#
-#   2. SPILL ENGAGED + FREED — assert spill chunks were actually CREATED for the
-#      over-threshold partition (the spill path ran), and that they're all FREED
-#      at the end (nbytes_in_use == 0, num_live_chunks == 0 — no leak).
-#
-#   3. BYTE-IDENTITY UNDER SPILL (the load-bearing re-check) — the spilled `.seg`
-#      == the SegWriter / B3 no-spill `.seg` for the SAME input. Spill is
-#      intermediate staging; write_at coalesces the restreamed chunks into the
-#      same FIFO byte stream. ANY drift here is a hard FAIL (HALT condition).
-#
-#   4. COMMON CASE NO-SPILL — a partition < `T` produces ZERO spill chunks and
-#      is byte-identical (no behavior change; the B4 route degenerates to B3).
-#
-#   5. ROUND-TRIP — read every partition back via SegReader == the input slice
-#      (incl. the over-threshold one, restreamed from its spill chunks).
-#
-# Determinism: LocalFs ONLY (multipart write surface) + FileSystemSpillStorage
-# [LocalFs] (the spill backend) + LocalFsConditionalStore (the SegReader
-# read-back). NO wall-clock / network.
+# LocalFs only; nothing here depends on time or on threads.
 # =============================================================================
-
-from std.time import perf_counter_ns
 
 from std.testing import assert_equal, assert_true
 
 from komira_fs.local_fs import LocalFs
 from komira_async.ops.waker_sink import NoopSink
+from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
+from komira_buffer.heap_region import HeapRegion
 
 from komira_objectstore.local_fs_conditional_store import (
     LocalFsConditionalStore,
 )
 from komira_objectstore.path import Path
-from komira_shuffle.entry import PartitionSlot
-from komira_shuffle.segment import (
-    SegWriter,
-    SegReader,
-    write_segment,
-)
+from komira_shuffle.segment import SegWriter, SegReader, write_segment
 
 from komira_engine_runtime.spill.filesystem_spill_storage import (
     FileSystemSpillStorage,
 )
+from komira_engine_runtime.spill.spill_storage import ChunkId, SpillStorage
 from komira_engine_runtime.spill.shuffle_stream_combine import (
     ListPartitionSource,
+    stream_combine_segment,
     stream_combine_segment_spilling,
-    stream_combine_segment_spilling_instrumented,
 )
 from komira_libc.posix import _read_env
 
 
-# ---------------------------------------------------------------------------
-# Scratch files go under $TEST_TMPDIR (set by the test runner, unique per
-# action), else $TMPDIR; a fixed path would be shared by concurrent runs of
-# this test. `_read_env` rather than `std.os.getenv`: komira_libc.posix owns
-# the one `getenv` declaration in the link.
-# ---------------------------------------------------------------------------
+comptime _Fs = LocalFs[NoopSink]
+comptime _Storage = FileSystemSpillStorage[_Fs]
+
+
+# Scratch files go under $TEST_TMPDIR (unique per test action), else $TMPDIR.
 def _scratch_dir() raises -> String:
-    """The directory THIS execution may write scratch files into."""
     var d = _read_env("TEST_TMPDIR")
     if d.byte_length() == 0:
         d = _read_env("TMPDIR")
@@ -101,27 +64,12 @@ def _scratch_dir() raises -> String:
     return d
 
 
-comptime _SpillFs = LocalFs[NoopSink]
-comptime _Storage = FileSystemSpillStorage[_SpillFs]
-
-
-# -----------------------------------------------------------------------------
-# Scratch root + byte helpers (mirrors the B3 stream-combine harness shape).
-# -----------------------------------------------------------------------------
 def _scratch_root(tag: String) raises -> String:
-    var t = UInt64(perf_counter_ns())
-    return (
-        (_scratch_dir() + String("/komira_shuffle_boundedram_"))
-        + tag
-        + String("_")
-        + String(t)
-    )
+    return _scratch_dir() + String("/komira_combine_bounded_") + tag
 
 
 def _make_payload(n: Int, marker: UInt32) -> List[UInt8]:
-    """Deterministic n-byte payload seeded by `marker`; distinct markers produce
-    distinct content at every position (a stale/shifted byte surfaces as a
-    mismatch)."""
+    """Deterministic n-byte payload seeded by `marker`."""
     var out = List[UInt8]()
     out.reserve(n)
     for i in range(n):
@@ -140,8 +88,8 @@ def _bytes_eq(a: List[UInt8], b: List[UInt8]) -> Bool:
 
 
 def _ensure_root(root: String) raises:
-    """Create the scratch root directory (the LocalFs FS writes a raw path and
-    does NOT mkdir parents; LocalFsConditionalStore's ctor mkdir's its root)."""
+    """LocalFs does not create parent directories; the store's constructor
+    creates its root."""
     var store = LocalFsConditionalStore(root.copy())
     _ = store^
 
@@ -157,30 +105,27 @@ def _cleanup(root: String):
         pass
 
 
-# Build R deterministic partition slices + their row counts; `lens[p]` is
-# partition p's byte length (0 = empty), each seeded by a distinct marker.
-def _make_partitions_with_lens(
-    lens: List[Int], base_rows: Int64
+def _make_partitions(
+    lens: List[Int], rows: Int64
 ) -> Tuple[List[List[UInt8]], List[Int64]]:
+    """Partition p holds `lens[p]` bytes (0 = empty), seeded by p."""
     var slices = List[List[UInt8]]()
     var row_counts = List[Int64]()
     for p in range(len(lens)):
-        var ln = lens[p]
-        if ln == 0:
+        if lens[p] == 0:
             slices.append(List[UInt8]())
             row_counts.append(Int64(0))
         else:
-            var marker = UInt32(p + 1) * UInt32(2654435761 & 0xFFFF)
-            slices.append(_make_payload(ln, marker))
-            row_counts.append(base_rows)
+            slices.append(_make_payload(lens[p], UInt32(p + 1) * UInt32(40503)))
+            row_counts.append(rows)
     return (slices^, row_counts^)
 
 
-# Build the SegWriter `.seg` over the SAME R slices (the byte-identity oracle).
-# Key chosen with NO percent-encoded bytes so the store's flat-key path == the
-# FS raw path for the same key.
-def _write_segwriter_seg(
-    root: String, key: String, slices: List[List[UInt8]], row_counts: List[Int64]
+def _segwriter_bytes(
+    root: String,
+    key: String,
+    slices: List[List[UInt8]],
+    row_counts: List[Int64],
 ) raises -> List[UInt8]:
     var store = LocalFsConditionalStore(root.copy())
     var w = SegWriter()
@@ -192,266 +137,321 @@ def _write_segwriter_seg(
     return whole^
 
 
+def _read_back(root: String, key: String) raises -> List[UInt8]:
+    var store = LocalFsConditionalStore(root.copy())
+    var whole = store.get(Path.parse(key))
+    _ = store^
+    return whole^
+
+
 def _new_storage(root: String) raises -> _Storage:
-    var fs = _SpillFs.new()
+    _ensure_root(root)
+    var fs = _Fs.new()
     return _Storage.with_unlimited(fs^, root)
 
 
+def _ceil_div(a: Int, b: Int) -> Int:
+    return (a + b - 1) // b
+
+
 # -----------------------------------------------------------------------------
-# Test 1 + 2 + 3 — BOUNDED PEAK + SPILL ENGAGED/FREED + BYTE-IDENTITY UNDER SPILL
+# 1 + 2. the staged count is bounded by T; the result equals the unspilled one
 # -----------------------------------------------------------------------------
-def test_bounded_peak_under_oversized_partition() raises:
-    print("[test_bounded_peak_under_oversized_partition] starting...")
+def test_staged_bytes_never_exceed_budget() raises:
     var root = _scratch_root(String("bounded"))
     _ensure_root(root)
+    var threshold = 32 * 1024
+    var hot = 40 * threshold + 777  # 40.02 T: 41 chunks, the last one short
 
-    # SMALL threshold proxy (256 KiB) with a partition MANY× larger (~4 MiB).
-    var threshold = Int64(256 * 1024)
-    var hot_len = 4 * 1024 * 1024  # the over-threshold partition (16× T)
-
-    # R partitions: a few small (< T, never spill) + ONE hot (>> T, spills).
     var lens = List[Int]()
-    lens.append(1000)        # pid 0 small (< T)
-    lens.append(0)           # pid 1 EMPTY (zero-length slot)
-    lens.append(hot_len)     # pid 2 HOT (>> T — forces multiple spill flushes)
-    lens.append(50000)       # pid 3 small (< T)
-    var parts = _make_partitions_with_lens(lens, Int64(13))
+    lens.append(1000)
+    lens.append(0)
+    lens.append(hot)
+    lens.append(threshold - 1)
+    var parts = _make_partitions(lens, Int64(13))
     var slices = parts[0].copy()
     var row_counts = parts[1].copy()
-    var r = len(lens)
 
-    # ---- (A) SPILLING STREAM-COMBINE via the LocalFs FS + a real
-    # FileSystemSpillStorage[LocalFs] (the spill backend in its own dir).
-    var spill_root = root + "/spill"
-    _ensure_root(spill_root)
-    var storage = _new_storage(spill_root)
-
-    var sc_key = String("spilling_p0.seg")
-    var sc_path = root + "/" + sc_key
-    var fs = _SpillFs.new()
+    var storage = _new_storage(root + "/spill")
+    var fs = _Fs.new()
     var src = ListPartitionSource(slices.copy(), row_counts.copy())
-    var res = stream_combine_segment_spilling_instrumented(
-        fs, sc_path, src^, storage, threshold
-    )
-    assert_equal(len(res.slots), r, "spilling combine returns R dense slots")
-
-    # ---- ASSERTION 1: BOUNDED PEAK (THE gate). The buffer high-water must stay
-    # ~<= threshold + slack — NOT the whole hot-partition size. A non-spilling
-    # buffer would reach ~hot_len here. Slack accounts for the exact-fill corner
-    # (the buffer fills to exactly `threshold` before the flush trips).
-    var slack = Int64(64 * 1024)
-    print("  high_water()=", res.high_water, " bytes; threshold=", threshold)
-    print("    (hot partition is ", hot_len, " bytes = ", hot_len // Int(threshold), "x T)")
-    assert_true(
-        Int64(res.high_water) <= threshold + slack,
-        "BOUNDED PEAK: high_water <= T + slack (NOT the whole partition)",
-    )
-    assert_true(
-        Int64(res.high_water) < Int64(hot_len),
-        "BOUNDED PEAK: high_water far below the hot-partition size",
+    var res = stream_combine_segment_spilling(
+        fs, root + "/spilled.seg", src^, storage, Int64(threshold)
     )
 
-    # ---- ASSERTION 2: SPILL ENGAGED + FREED. The over-threshold partition must
-    # have created spill chunks (the spill path RAN), and every one must be
-    # FREED at the end (no leak): nbytes_in_use == 0, num_live_chunks == 0.
-    # `_next_chunk_id` starts at 1 and only advances on write_chunk, so checking
-    # that some chunks were minted requires observing the live set during the
-    # run; here we assert the END state (all freed) plus that the byte-identity
-    # below could ONLY hold if the hot partition was restreamed from spill
-    # (high_water proves it never sat whole in RAM).
     assert_equal(
-        Int(storage.nbytes_in_use()),
-        0,
-        "SPILL FREED: nbytes_in_use == 0 (every spill chunk released)",
+        res.peak_staged_bytes,
+        threshold,
+        "the combine held exactly one full chunk at most, never more than T",
     )
+    assert_true(res.peak_staged_bytes < hot, "far below the hot partition")
     assert_equal(
-        storage.num_live_chunks(),
-        0,
-        "SPILL FREED: num_live_chunks == 0 (no leak)",
+        res.chunks_spilled,
+        _ceil_div(hot, threshold),
+        "only the hot partition was spilled, in ceil(len / T) chunks",
     )
+    assert_equal(len(res.slots), len(lens), "one dense slot per partition")
+    assert_equal(storage.num_live_chunks(), 0, "every chunk was released")
+    assert_equal(Int(storage.nbytes_in_use()), 0, "no spilled bytes left")
 
-    # ---- ASSERTION 3: BYTE-IDENTITY UNDER SPILL (the load-bearing re-check).
-    # The spilled `.seg` == the SegWriter `.seg` for the SAME input.
-    var store = LocalFsConditionalStore(root.copy())
-    var sc_bytes = store.get(Path.parse(sc_key))
-    _ = store^
-    var sw_bytes = _write_segwriter_seg(
-        root, String("segwriter_oracle.seg"), slices, row_counts
+    # The same result as the unspilled combine and as SegWriter.
+    var fs2 = _Fs.new()
+    var src2 = ListPartitionSource(slices.copy(), row_counts.copy())
+    var plain = stream_combine_segment(fs2, root + "/plain.seg", src2^)
+    assert_equal(plain.chunks_spilled, 0, "the unspilled run spilled nothing")
+    assert_equal(plain.peak_staged_bytes, hot, "the unspilled run stages it all")
+    var spilled_bytes = _read_back(root, String("spilled.seg"))
+    var plain_bytes = _read_back(root, String("plain.seg"))
+    var oracle = _segwriter_bytes(
+        root, String("oracle.seg"), slices, row_counts
     )
-    assert_equal(
-        len(sc_bytes),
-        len(sw_bytes),
-        "spilled `.seg` length == SegWriter `.seg` length",
-    )
+    assert_equal(len(spilled_bytes), len(plain_bytes), "same length as unspilled")
     assert_true(
-        _bytes_eq(sc_bytes, sw_bytes),
-        "BYTE-IDENTITY UNDER SPILL: spilled `.seg` == SegWriter `.seg`",
+        _bytes_eq(spilled_bytes, plain_bytes), "spilled seg == unspilled seg"
     )
-    print(
-        "  byte-identity UNDER SPILL: ",
-        len(sc_bytes),
-        " bytes, IDENTICAL to SegWriter",
-    )
-
+    assert_true(_bytes_eq(spilled_bytes, oracle), "spilled seg == SegWriter seg")
+    for p in range(len(lens)):
+        assert_equal(
+            Int(res.slots[p].length), Int(plain.slots[p].length), "slot length"
+        )
+        assert_equal(
+            Int(res.slots[p].offset), Int(plain.slots[p].offset), "slot offset"
+        )
     _ = storage^
-    _ = slices^
-    _ = row_counts^
     _cleanup(root)
-    print("[test_bounded_peak_under_oversized_partition] PASS")
 
 
 # -----------------------------------------------------------------------------
-# Test 4 — COMMON CASE NO-SPILL (partition < T -> ZERO spill chunks, byte-id).
+# 3. the budget boundary
 # -----------------------------------------------------------------------------
-def test_common_case_no_spill() raises:
-    print("[test_common_case_no_spill] starting...")
-    var root = _scratch_root(String("nospill"))
+def test_budget_boundary() raises:
+    var root = _scratch_root(String("boundary"))
     _ensure_root(root)
+    var threshold = 4096
 
-    # All partitions well BELOW the threshold -> the B4 route degenerates to B3:
-    # ZERO spill chunks, byte-identical to SegWriter.
-    var threshold = Int64(1 * 1024 * 1024)  # 1 MiB
     var lens = List[Int]()
-    lens.append(7000)
-    lens.append(5000)
-    lens.append(0)       # empty middle
-    lens.append(9000)
-    var parts = _make_partitions_with_lens(lens, Int64(9))
-    var slices = parts[0].copy()
-    var row_counts = parts[1].copy()
-
-    var spill_root = root + "/spill"
-    _ensure_root(spill_root)
-    var storage = _new_storage(spill_root)
-
-    var sc_key = String("nospill_p0.seg")
-    var sc_path = root + "/" + sc_key
-    var fs = _SpillFs.new()
-    var src = ListPartitionSource(slices.copy(), row_counts.copy())
-    var res = stream_combine_segment_spilling_instrumented(
-        fs, sc_path, src^, storage, threshold
+    lens.append(threshold)  # exactly T: staged in the buffer
+    var parts = _make_partitions(lens, Int64(1))
+    var storage = _new_storage(root + "/spill")
+    var fs = _Fs.new()
+    var src = ListPartitionSource(parts[0].copy(), parts[1].copy())
+    var at = stream_combine_segment_spilling(
+        fs, root + "/at.seg", src^, storage, Int64(threshold)
     )
+    assert_equal(at.chunks_spilled, 0, "a partition of exactly T is not spilled")
+    assert_equal(at.peak_staged_bytes, threshold, "it is staged whole")
 
-    # ---- NO SPILL: the storage was NEVER written to (zero chunks, ever). The
-    # FileSystemSpillStorage mints monotonic ids from 1; if no write_chunk ran,
-    # nbytes_in_use stayed 0 the whole time AND num_live_chunks is 0. The
-    # high-water is the LARGEST single slice (the 9000-byte partition), bounded.
+    var over = List[Int]()
+    over.append(threshold + 1)
+    var oparts = _make_partitions(over, Int64(1))
+    var ofs = _Fs.new()
+    var osrc = ListPartitionSource(oparts[0].copy(), oparts[1].copy())
+    var above = stream_combine_segment_spilling(
+        ofs, root + "/above.seg", osrc^, storage, Int64(threshold)
+    )
+    assert_equal(above.chunks_spilled, 2, "T + 1 bytes spill as T then 1")
     assert_equal(
-        Int(storage.nbytes_in_use()),
-        0,
-        "NO SPILL: nbytes_in_use == 0 (never spilled)",
+        above.peak_staged_bytes, threshold, "the larger chunk is T bytes"
     )
-    assert_equal(
-        storage.num_live_chunks(),
-        0,
-        "NO SPILL: num_live_chunks == 0 (never spilled)",
-    )
-    print("  high_water()=", res.high_water, " (largest single slice, no spill)")
-    assert_equal(
-        res.high_water,
-        9000,
-        "NO SPILL: high_water == the largest single slice (the 9000-byte one)",
-    )
-
-    # ---- Byte-identity in the no-spill case (degenerates to B3 == SegWriter).
-    var store = LocalFsConditionalStore(root.copy())
-    var sc_bytes = store.get(Path.parse(sc_key))
-    _ = store^
-    var sw_bytes = _write_segwriter_seg(
-        root, String("nospill_oracle.seg"), slices, row_counts
+    assert_equal(storage.num_live_chunks(), 0, "all released")
+    var oracle = _segwriter_bytes(
+        root, String("above_oracle.seg"), oparts[0], oparts[1]
     )
     assert_true(
-        _bytes_eq(sc_bytes, sw_bytes),
-        "NO SPILL: `.seg` byte-identical to SegWriter (B4 degenerates to B3)",
+        _bytes_eq(_read_back(root, String("above.seg")), oracle),
+        "the T + 1 partition round-trips through spill",
     )
-
     _ = storage^
-    _ = slices^
-    _ = row_counts^
     _cleanup(root)
-    print("[test_common_case_no_spill] PASS")
 
 
 # -----------------------------------------------------------------------------
-# Test 5 — ROUND-TRIP via SegReader (incl. the over-threshold spilled partition).
+# 4. every row exactly once, across spills and restores
 # -----------------------------------------------------------------------------
-def test_round_trip_under_spill() raises:
-    print("[test_round_trip_under_spill] starting...")
-    var root = _scratch_root(String("roundtrip"))
+def _row_partition(id: Int) -> Int:
+    """Skewed: 70% of rows in partition 2, partition 4 left empty."""
+    var m = id % 10
+    if m < 7:
+        return 2
+    if m == 7:
+        return 0
+    if m == 8:
+        return 3
+    return 1
+
+
+def _make_row_partitions(
+    n_rows: Int, r: Int
+) -> Tuple[List[List[UInt8]], List[Int64]]:
+    var slices = List[List[UInt8]]()
+    var counts = List[Int64]()
+    for _ in range(r):
+        slices.append(List[UInt8]())
+        counts.append(Int64(0))
+    for id in range(n_rows):
+        var p = _row_partition(id)
+        for b in range(8):
+            slices[p].append(UInt8((id >> (8 * b)) & 0xFF))
+        counts[p] += 1
+    return (slices^, counts^)
+
+
+def test_every_row_exactly_once_across_spills() raises:
+    var root = _scratch_root(String("rows"))
     _ensure_root(root)
+    var n_rows = 50000
+    var r = 5
+    var threshold = 16 * 1024 + 3  # not a multiple of the 8-byte row width
+    var parts = _make_row_partitions(n_rows, r)
 
-    var threshold = Int64(256 * 1024)
-    var hot_len = 2 * 1024 * 1024 + 12345  # >> T, NOT a clean multiple of T
-
-    var lens = List[Int]()
-    lens.append(hot_len)   # pid 0 HOT (spills) — first partition this time
-    lens.append(3000)      # pid 1 small
-    lens.append(0)         # pid 2 empty middle
-    lens.append(hot_len)   # pid 3 HOT again (two spilled partitions in one seg)
-    var parts = _make_partitions_with_lens(lens, Int64(5))
-    var slices = parts[0].copy()
-    var row_counts = parts[1].copy()
-    var r = len(lens)
-
-    var spill_root = root + "/spill"
-    _ensure_root(spill_root)
-    var storage = _new_storage(spill_root)
-
-    var sc_key = String("roundtrip_p0.seg")
-    var sc_path = root + "/" + sc_key
-    var fs = _SpillFs.new()
-    var src = ListPartitionSource(slices.copy(), row_counts.copy())
-    var _slots = stream_combine_segment_spilling(
-        fs, sc_path, src^, storage, threshold
+    var storage = _new_storage(root + "/spill")
+    var fs = _Fs.new()
+    var src = ListPartitionSource(parts[0].copy(), parts[1].copy())
+    var res = stream_combine_segment_spilling(
+        fs, root + "/rows.seg", src^, storage, Int64(threshold)
     )
+    assert_true(res.chunks_spilled > 4, "several chunks were spilled")
+    assert_true(res.peak_staged_bytes <= threshold, "count within the budget")
+    assert_equal(storage.num_live_chunks(), 0, "every chunk was released")
 
-    # All spill chunks freed at the end (no leak across two spilled partitions).
-    assert_equal(
-        storage.num_live_chunks(), 0, "round-trip: all spill chunks freed"
-    )
-
-    # Read EACH partition back via SegReader and assert byte-equal to input.
+    var seen = List[Int](length=n_rows, fill=0)
     var store = LocalFsConditionalStore(root.copy())
     var reader = SegReader[LocalFsConditionalStore](
-        store.clone(), Path.parse(sc_key)
+        store.clone(), Path.parse(String("rows.seg"))
     )
+    var total = 0
     for p in range(r):
         var back = reader.read_partition(p)
-        if lens[p] == 0:
-            assert_equal(
-                len(back),
-                0,
-                "empty MIDDLE partition " + String(p) + " reads ZERO bytes",
-            )
-        else:
-            assert_true(
-                _bytes_eq(back, slices[p]),
-                "partition " + String(p) + " round-trips byte-identical"
-                " (restreamed from spill if HOT)",
-            )
+        assert_equal(len(back) % 8, 0, "partition bytes are whole rows")
+        var rows_here = len(back) // 8
+        assert_equal(
+            Int(res.slots[p].row_count), rows_here, "slot row count == read"
+        )
+        for i in range(rows_here):
+            var id = 0
+            for b in range(8):
+                id |= Int(back[i * 8 + b]) << (8 * b)
+            assert_true(id >= 0 and id < n_rows, "row id in range")
+            seen[id] += 1
+            assert_equal(_row_partition(id), p, "row landed in its partition")
+        total += rows_here
+    for id in range(n_rows):
+        assert_equal(seen[id], 1, "row " + String(id) + " appears exactly once")
+    assert_equal(total, n_rows, "total rows read == rows in")
+    assert_equal(Int(res.slots[4].length), 0, "partition 4 stayed empty")
     _ = reader^
     _ = store^
     _ = storage^
-    _ = slices^
-    _ = row_counts^
     _cleanup(root)
-    print("[test_round_trip_under_spill] PASS")
+
+
+# -----------------------------------------------------------------------------
+# 5. a spill failure is reported
+# -----------------------------------------------------------------------------
+struct _FlakyStorage(SpillStorage, Movable, Deinitable):
+    """A real spill storage that fails the `fail_write_at`-th `write_chunk`
+    (1-based; 0 = never) or every `read_chunk` when `fail_reads` is set."""
+
+    var inner: _Storage
+    var fail_write_at: Int
+    var fail_reads: Bool
+    var writes: Int
+
+    def __init__(
+        out self, var inner: _Storage, fail_write_at: Int, fail_reads: Bool
+    ):
+        self.inner = inner^
+        self.fail_write_at = fail_write_at
+        self.fail_reads = fail_reads
+        self.writes = 0
+
+    def write_chunk(
+        mut self, var bytes: SharedAlignedBuffer[HeapRegion]
+    ) raises -> ChunkId:
+        self.writes += 1
+        if self.writes == self.fail_write_at:
+            _ = bytes^
+            raise Error("disk full while spilling")
+        return self.inner.write_chunk(bytes^)
+
+    def read_chunk(
+        self, chunk_id: ChunkId
+    ) raises -> SharedAlignedBuffer[HeapRegion]:
+        if self.fail_reads:
+            raise Error("EIO while restoring")
+        return self.inner.read_chunk(chunk_id)
+
+    def release_chunk(mut self, chunk_id: ChunkId) raises:
+        self.inner.release_chunk(chunk_id)
+
+    def nbytes_in_use(self) -> Int64:
+        return self.inner.nbytes_in_use()
+
+    def sync(mut self) raises:
+        self.inner.sync()
+
+
+def _expect_failure(
+    root: String,
+    tag: String,
+    fail_write_at: Int,
+    fail_reads: Bool,
+    expected: String,
+) raises:
+    var threshold = 4096
+    var lens = List[Int]()
+    lens.append(500)
+    lens.append(10 * threshold)  # ten full chunks
+    var parts = _make_partitions(lens, Int64(1))
+    var inner = _new_storage(root + "/spill_" + tag)
+    var storage = _FlakyStorage(inner^, fail_write_at, fail_reads)
+    var fs = _Fs.new()
+    var src = ListPartitionSource(parts[0].copy(), parts[1].copy())
+    var raised = False
+    var message = String("")
+    try:
+        _ = stream_combine_segment_spilling(
+            fs, root + "/" + tag + ".seg", src^, storage, Int64(threshold)
+        )
+    except e:
+        raised = True
+        message = String(e)
+    assert_true(raised, tag + ": the failure must not be swallowed")
+    assert_true(
+        expected in message,
+        tag + ": the error carries the storage's message, got: " + message,
+    )
+    assert_equal(
+        storage.inner.num_live_chunks(),
+        0,
+        tag + ": chunks already written were released",
+    )
+    var left_behind = True
+    try:
+        _ = _read_back(root, tag + ".seg")
+    except:
+        left_behind = False
+    assert_true(not left_behind, tag + ": no partial seg left behind")
+    _ = storage^
+
+
+def test_spill_failure_is_reported() raises:
+    var root = _scratch_root(String("failure"))
+    _ensure_root(root)
+    # The 4th chunk write fails, after three chunks are already on storage.
+    _expect_failure(
+        root, String("write"), 4, False, String("disk full while spilling")
+    )
+    # Every restore fails; all ten chunks were written first.
+    _expect_failure(
+        root, String("read"), 0, True, String("EIO while restoring")
+    )
+    _cleanup(root)
 
 
 def main() raises:
-    print("====================================================")
-    print(" stream_combine_segment_spilling — Phase B5 gate")
-    print("   (B4 incremental spill: bounded peak RAM for a")
-    print("    SINGLE oversized partition; byte-identical to")
-    print("    SegWriter under spill; spill chunks freed)")
-    print("====================================================")
-    print()
-    test_bounded_peak_under_oversized_partition()
-    test_common_case_no_spill()
-    test_round_trip_under_spill()
-    print()
-    print(
-        "[test_shuffle_combine_bounded_ram] all 3 tests (bounded-peak +"
-        " spill-engaged/freed + byte-identity-under-spill + no-spill-common-case"
-        " + round-trip) PASS"
-    )
+    test_staged_bytes_never_exceed_budget()
+    test_budget_boundary()
+    test_every_row_exactly_once_across_spills()
+    test_spill_failure_is_reported()
+    print("test_shuffle_combine_bounded_ram: all 4 tests PASS")
