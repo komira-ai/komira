@@ -64,8 +64,10 @@ def filter_column_native_via_predicate(
 
     Bridges the batch to a RecordBatch, evaluates the predicate with
     `evaluate_filter_narrowed`, and keeps the surviving rows with
-    `gather_batch`. When every row survives, the batch is returned without a
-    gather.
+    `gather_batch`. When every row survives, the rows are returned without a
+    gather, so a contiguous-body (THSPLC) input comes back as a WRAPPED
+    batch whose columns are slices that keep the body alive; a gathered result
+    is always wrapped.
 
     Args:
         batch: The input column-native batch (consumed). Must be dense (no
@@ -83,6 +85,9 @@ def filter_column_native_via_predicate(
         # Every row survived: a gather would rebuild the same buffers.
         return column_native_from_record_batch(rb^)
 
+    # PERF: `gather_batch` takes a `List[Int]`, so the selection is copied
+    # once per filter; a gather that reads the SelectionVector directly would
+    # remove this O(surviving) allocation.
     var surviving = sv.length()
     var indices = List[Int](capacity=surviving)
     for i in range(surviving):

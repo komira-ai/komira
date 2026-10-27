@@ -25,8 +25,21 @@
 #   * test_string_dictionary_is_refused_by_name: a string DICTIONARY column is
 #     refused with an error naming the column. Catches a silent misread of the
 #     codes as values.
+#   * test_nested_column_is_refused_by_name: a LIST column is refused by the
+#     bridge with an error naming the column. Catches a bridge that wraps a
+#     nested column THSPLC has no layout for.
 #   * test_column_native_entry_point: the ColumnNativeBatch entry point returns
 #     a dense batch (no selection vector) of the surviving rows.
+#   * test_nullable_columns_gathered_at_scattered_rows: nullable string and
+#     float64 columns and a boolean column, none of them the predicate column,
+#     are gathered at non-contiguous surviving rows with values and NULL
+#     positions intact. Catches a gather that drops or shifts a validity bit
+#     or a string offset when survivors are not a prefix or a run.
+#   * test_sliced_input_is_filtered_by_logical_rows: columns that are zero-copy
+#     slices (non-zero offset) filter on their logical rows. Catches a gather
+#     that reads from the buffer start instead of the slice offset.
+#   * test_all_pass_native_batch_keeps_nulls: the all-survive result of the
+#     ColumnNativeBatch entry point keeps the validity of its columns.
 # =============================================================================
 
 from std.sys import size_of
@@ -34,7 +47,9 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_raises, as
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.bitmap import Bitmap
+from komira_arrow.boolean_array import BooleanArray
 from komira_arrow.column import Column
+from komira_arrow.list_array import ListArray
 from komira_arrow.dictionary_array import StringDictionaryArray
 from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.record_batch import RecordBatch
@@ -225,6 +240,21 @@ def test_string_dictionary_is_refused_by_name() raises:
         _ = filter_record_batch_via_predicate(batch^, col("a") > 1)
 
 
+def test_nested_column_is_refused_by_name() raises:
+    var lists = List[List[Int]]()
+    lists.append([1])
+    lists.append([2, 3])
+    lists.append([])
+    var cols = Slab[Column[HeapRegion]].create(2)
+    cols.append(Column.from_primitive[DType.int64](_i64([1, 2, 3])))
+    cols.append(Column.from_list(ListArray.from_int_lists(lists)))
+    var batch = RecordBatch.from_typed_columns_slab(
+        _schema(["a", "l"], [ArrowType.INT64, ArrowType.LIST], False), cols^
+    )
+    with assert_raises(contains="column 1 has type"):
+        _ = column_native_from_record_batch(batch^)
+
+
 def test_column_native_entry_point() raises:
     var native = column_native_from_record_batch(_int_string_batch())
     var filtered = filter_column_native_via_predicate(native^, col("a") <= 2)
@@ -235,6 +265,137 @@ def test_column_native_entry_point() raises:
     _assert_strings(_strings_of(back, 1), ["r0", "r1"], "s")
 
 
+def _f64(values: List[Float64]) -> PrimitiveArray[DType.float64]:
+    var l = List[Scalar[DType.float64]]()
+    for i in range(len(values)):
+        l.append(values[i])
+    return PrimitiveArray[DType.float64].from_list(l)
+
+
+def _nullable_f64(
+    values: List[Float64], null_rows: List[Int]
+) raises -> PrimitiveArray[DType.float64]:
+    var n = len(values)
+    var buf = OwnedAlignedBuffer(max(n * size_of[Float64](), 1))
+    var p = buf.view_typed_ro[DType.float64]()
+    for i in range(n):
+        p[i] = values[i]
+    buf.set_length(Int64(n * size_of[Float64]()))
+    var bm = Bitmap.create_all_valid(n)
+    for k in range(len(null_rows)):
+        bm.clear(null_rows[k])
+    return PrimitiveArray[DType.float64](buf^, n, Optional(bm^), len(null_rows), 0)
+
+
+def _bools(values: List[Bool]) raises -> BooleanArray:
+    var bm = Bitmap.create_all_valid(len(values))
+    for i in range(len(values)):
+        if not values[i]:
+            bm.clear(i)
+    return BooleanArray.from_bitmap(bm^)
+
+
+def _mixed_batch() raises -> RecordBatch:
+    """a: int64 [5,1,7,2,9,3,8,4]; s: nullable string "s0".."s7" with NULL at
+    rows 2, 3, 6; f: nullable float64 0.5.. with NULL at rows 0, 4; b: bool
+    [T,F,F,T,T,F,F,T]."""
+    var names = List[String]()
+    var valid = List[Bool]()
+    for i in range(8):
+        names.append("s" + String(i))
+        valid.append(not (i == 2 or i == 3 or i == 6))
+    var fv = List[Float64]()
+    for i in range(8):
+        fv.append(Float64(i) + 0.5)
+    var cols = Slab[Column[HeapRegion]].create(4)
+    cols.append(Column.from_primitive[DType.int64](_i64([5, 1, 7, 2, 9, 3, 8, 4])))
+    cols.append(Column.from_string(StringArray.from_strings_with_validity(names, valid)))
+    cols.append(Column.from_primitive[DType.float64](_nullable_f64(fv, [0, 4])))
+    cols.append(
+        Column.from_boolean(
+            _bools([True, False, False, True, True, False, False, True])
+        )
+    )
+    return RecordBatch.from_typed_columns_slab(
+        _schema(
+            ["a", "s", "f", "b"],
+            [ArrowType.INT64, ArrowType.STRING, ArrowType.FLOAT64, ArrowType.BOOL],
+            True,
+        ),
+        cols^,
+    )
+
+
+def _assert_mixed_survivors(got: RecordBatch) raises:
+    """Rows 0, 2, 4, 6 of `_mixed_batch` (a > 4)."""
+    assert_equal(got.num_rows(), 4)
+    _assert_ints(_ints_of(got, 0), [5, 7, 9, 8], "a")
+    ref s = got.column_at(1)
+    var s_arr = s.as_string()
+    assert_false(s.is_null_at(0))
+    assert_true(s.is_null_at(1))
+    assert_false(s.is_null_at(2))
+    assert_true(s.is_null_at(3))
+    assert_equal(s_arr.get(0), "s0")
+    assert_equal(s_arr.get(2), "s4")
+    ref f = got.column_at(2)
+    var f_arr = f.as_primitive[DType.float64]()
+    assert_true(f.is_null_at(0))
+    assert_false(f.is_null_at(1))
+    assert_true(f.is_null_at(2))
+    assert_false(f.is_null_at(3))
+    assert_equal(f_arr.get(1), 2.5)
+    assert_equal(f_arr.get(3), 6.5)
+    var b = got.column_at(3).as_boolean()
+    assert_true(b.get(0))
+    assert_false(b.get(1))
+    assert_true(b.get(2))
+    assert_false(b.get(3))
+
+
+def test_nullable_columns_gathered_at_scattered_rows() raises:
+    var out = filter_record_batch_via_predicate(_mixed_batch(), col("a") > 4)
+    _assert_mixed_survivors(out)
+
+
+def test_sliced_input_is_filtered_by_logical_rows() raises:
+    # Logical rows are 2..6 of each column: a = [7,2,9,3,8], f = [12..16];
+    # a > 4 keeps logical rows 0, 2, 4. (Only fixed-width columns slice
+    # zero-copy; Column.slice refuses string and boolean.)
+    var fv = List[Float64]()
+    for i in range(8):
+        fv.append(Float64(10 + i))
+    var cols = Slab[Column[HeapRegion]].create(2)
+    cols.append(
+        Column.from_primitive[DType.int64](_i64([5, 1, 7, 2, 9, 3, 8, 4])).slice(2, 5)
+    )
+    cols.append(Column.from_primitive[DType.float64](_f64(fv)).slice(2, 5))
+    var batch = RecordBatch.from_typed_columns_slab(
+        _schema(
+            ["a", "f"], [ArrowType.INT64, ArrowType.FLOAT64], False,
+        ),
+        cols^,
+    )
+    var out = filter_record_batch_via_predicate(batch^, col("a") > 4)
+    assert_equal(out.num_rows(), 3)
+    _assert_ints(_ints_of(out, 0), [7, 9, 8], "a")
+    var f_arr = out.column_at(1).as_primitive[DType.float64]()
+    assert_equal(f_arr.get(0), 12.0)
+    assert_equal(f_arr.get(1), 14.0)
+    assert_equal(f_arr.get(2), 16.0)
+
+
+def test_all_pass_native_batch_keeps_nulls() raises:
+    var native = column_native_from_record_batch(_mixed_batch())
+    var filtered = filter_column_native_via_predicate(native^, col("a") >= 1)
+    var back = record_batch_from_column_native(filtered^)
+    assert_equal(back.num_rows(), 8)
+    assert_equal(back.column_at(1).null_count(), 3)
+    assert_equal(back.column_at(2).null_count(), 2)
+    assert_true(back.column_at(1).is_null_at(2))
+    assert_true(back.column_at(2).is_null_at(4))
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_keeps_matching_rows_in_order]()
@@ -243,5 +404,9 @@ def main() raises:
     suite.test[test_null_rows_are_dropped]()
     suite.test[test_numeric_dictionary_is_resolved]()
     suite.test[test_string_dictionary_is_refused_by_name]()
+    suite.test[test_nested_column_is_refused_by_name]()
     suite.test[test_column_native_entry_point]()
+    suite.test[test_nullable_columns_gathered_at_scattered_rows]()
+    suite.test[test_sliced_input_is_filtered_by_logical_rows]()
+    suite.test[test_all_pass_native_batch_keeps_nulls]()
     suite^.run()

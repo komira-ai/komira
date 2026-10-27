@@ -38,6 +38,6 @@ operator or a sink consumes but does not implement belongs here.
 
 It depends on `komira_arrow`, `komira_async`, `komira_batch_eval`,
 `komira_host`, `komira_morsel`, `komira_physical_plan` and the other packages
-listed in `BUCK`, and on no operator package. Import from the defining module, for example
-`from komira_engine_runtime.morsel_sizing_policy import ...`; the package has
-no facade.
+listed in `BUCK`, and on no operator package. Import from the defining
+module, for example `from komira_engine_runtime.morsel_sizing_policy import ...`;
+the package has no facade.

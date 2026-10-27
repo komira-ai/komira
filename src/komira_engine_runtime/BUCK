@@ -53,6 +53,7 @@ mojo_library(
         "tests/test_spill_thsplc_robustness.mojo",
         "tests/test_streaming_microbench.mojo",
         "tests/test_thsplc_roundtrip.mojo",
+        "tests/test_thsplc_wire_layout.mojo",
         "tests/test_wave_uaf_batch_shape.mojo",
         "tests/test_wave_uaf_candidate_c.mojo",
     ],
