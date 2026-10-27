@@ -29,8 +29,9 @@
 #   * every emit reached the ring and was drained: records drained over the
 #     measured loop == emits made, and no ring dropped one. An emit that reached
 #     the ring returned before the cold render block (the only place that builds
-#     Strings and Lists), so the steady-state emit builds no String and boxes no
-#     argument. A drop, or the synchronous fallback arm, changes the count.
+#     Strings and Lists). A drop, or the synchronous fallback arm, changes the
+#     count; allocations are not counted, so an emit that also built a String
+#     before pushing would still pass (a known gap).
 #   * site registration does not repeat: the SiteDictionary has one entry for
 #     the one site, and its length is the same after the measured loop as after
 #     the warm-up. A registration that re-ran per emit would grow it (and

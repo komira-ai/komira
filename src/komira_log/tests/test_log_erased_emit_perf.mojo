@@ -36,9 +36,9 @@
 #   * every ENABLED emit reached the ring: the records drained after each arm
 #     equal the emits made, and no ring dropped a record. An emit that reached
 #     the ring returned before the cold render block (the one place that builds
-#     Strings and Lists), so this is the proof that the steady-state emit builds
-#     no String and boxes no argument; an emit that took the synchronous
-#     fallback, or lost its record, would make the counts differ.
+#     Strings and Lists); the counts show there was no synchronous fallback and
+#     no lost record. They do not count allocations: an emit that pushed its
+#     record and also built a String first would still pass (a known gap).
 #   * site registration does not repeat: after the warm-up the SiteDictionary
 #     holds exactly the sites the arms use, and its length is the same after
 #     every measured round. A registration that re-runs per emit appends (and

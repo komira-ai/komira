@@ -46,7 +46,7 @@
 # `ea_disarm()` move the very same flag, read back through `komira_ea_armed`.
 # A flag kept anywhere else cannot satisfy all three.
 #
-# What this does NOT prove: an `ea_armed()` that did a registry lookup AND then
+# The former cost bound is dropped, not proven. What this does NOT prove: an `ea_armed()` that did a registry lookup AND then
 # still read the C flag would pass; there is no counter on the lookup and none
 # is added, because a counter on a read every breaker passes through would
 # cost more than the claim allows. The cost of the shipped path is still

@@ -174,14 +174,10 @@ def main() raises:
     # loop makes both arms ~0ns, and `typed < ambient` stays a 50/50 coin flip
     # over noise while measuring NOTHING. A drained count cannot.
     # =========================================================================
-    # ⚠ `>= 2 * TOTAL`, NOT `> 0`. Each measure fn is called TWICE and emits
-    # TOTAL each time, so this asserts EVERY emit was captured, not merely that
-    # some were — `> 0` is satisfied by a path that drops 99.99% of its records,
-    # which would invalidate the ns/emit above while reading green. The count is
-    # exactly 2*TOTAL plus what the warm-up swept, with zero drops and no
-    # run-to-run variation: a DETERMINISTIC arm, which is the property the
-    # comparison lacks. If it ever fails, the log engine is dropping records — a
-    # real defect, and one that silently voids every number this test prints.
+    # Every emit must be captured, not merely some: `> 0` is satisfied by a
+    # path that drops 99.99% of its records, which would invalidate the ns/emit
+    # above while reading green. If this fails, the log engine is dropping
+    # records.
     #
     # NOW EXACT. Each arm is measured twice; one measurement emits whole chunks
     # until it reaches TOTAL, so it makes `_emits_per_call` emits and every one
@@ -205,8 +201,8 @@ def main() raises:
     #     still holds the two warm-up sites (one per arm's fmt).
     # An emit that reached the ring returned before the cold render block (the
     # only place that builds Strings and Lists), so the steady-state emit on
-    # either reach builds no String. The toolchain has no process-wide
-    # allocation counter, so this is the observable form of "no allocation".
+    # either reach is consistent with building no String. The toolchain has no
+    # process-wide allocation counter, so allocations are not counted.
     assert_equal(eng.overflow_dropped_count(), Int64(0), "no ring dropped")
     assert_equal(eng.unknown_kind_dropped_count(), Int64(0), "no refused kind")
     assert_equal(
