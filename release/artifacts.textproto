@@ -1033,6 +1033,33 @@ artifacts {
 }
 
 artifacts {
+  name: "komira_parquet_codec"
+  build_system: "buck2"
+  args: "//src/komira_parquet_codec:komira_parquet_codec_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_parquet_codec:komira_parquet_codec_conda"
+}
+
+artifacts {
+  name: "komira_parquet_writer"
+  build_system: "buck2"
+  args: "//src/komira_parquet_writer:komira_parquet_writer_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_parquet_writer:komira_parquet_writer_conda"
+}
+
+artifacts {
+  name: "komira_bench_data"
+  build_system: "buck2"
+  args: "//src/komira_bench_data:komira_bench_data_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_bench_data:komira_bench_data_conda"
+}
+
+artifacts {
   name: "komira_all"
   build_system: "komira_pack"
   args: "conda-meta"
@@ -1250,6 +1277,12 @@ artifacts {
   args: "{release_dir}/kci_cloud_gcp/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_kafka_broker/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_parquet_codec/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_parquet_writer/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_bench_data/manifest.json"
   args: "--license"
   args: "Apache-2.0"
   args: "--summary"

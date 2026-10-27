@@ -170,6 +170,9 @@ def test_the_declared_names_in_release_order() raises:
     want.append(String("komira_gcp_wif"))
     want.append(String("kci_cloud_gcp"))
     want.append(String("komira_kafka_broker"))
+    want.append(String("komira_parquet_codec"))
+    want.append(String("komira_parquet_writer"))
+    want.append(String("komira_bench_data"))
     want.append(String("komira_all"))
     assert_equal(len(d.artifacts), len(want))
     for i in range(len(want)):

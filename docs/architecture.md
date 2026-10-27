@@ -392,6 +392,14 @@ validate) comes first, then the deploy side.
 | [`kci_validator_rows`](../src/kci_validator_rows/) | the positional row-accounting model every app validator shares, so a run that emitted only a prefix of its rows cannot report PASS. |
 | [`komira_validation_run`](../src/komira_validation_run/) | the validation-run correlator: the tag key under which a validation run stamps its identity on every billable cloud resource it creates, so cleanup acts only on what it can prove that run made. |
 
+### Benchmarks
+
+Packages the published benchmarks are made of. Datasets are never committed or shipped: they live in a cache directory the caller names.
+
+| module | what it is |
+|---|---|
+| [`komira_bench_data`](../src/komira_bench_data/) | the datasets of the benchmarks: a manifest type (name, scale, files with expected size, sha256 and row count, each optional until a first verified run records it) and a manifest for each supported dataset (TPC-H sf1, sf10, sf100, ClickBench `hits`, generated h2o-style group-by and join tables); `verify_dataset`, which checks a cache directory against a manifest (present, size, sha256); the lock file that records the fingerprint of the dataset a run used; and a seeded generator of the h2o-style tables that writes the same Parquet bytes for the same seed and size through `komira_parquet_writer`. It ships and downloads no data and generates no TPC-H |
+
 ### Test infrastructure
 
 Libraries a test uses to run against real infrastructure and prove it

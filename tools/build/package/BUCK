@@ -289,6 +289,9 @@ conda_release_set_check(
         "//src/komira_gcp_wif:komira_gcp_wif",
         "//src/kci_cloud_gcp:kci_cloud_gcp",
         "//src/komira_kafka_broker:komira_kafka_broker",
+        "//src/komira_parquet_codec:komira_parquet_codec",
+        "//src/komira_parquet_writer:komira_parquet_writer",
+        "//src/komira_bench_data:komira_bench_data",
     ],
     # The `native` of each library above whose mojo_library declares one (the
     # same target its `<lib>_conda` is given; release_set.bzl).
@@ -304,6 +307,7 @@ conda_release_set_check(
         "//src/komira_http_core:komira_http_core": "//src/komira_http_core:komira_http_core_native",
         "//src/komira_supervisor:komira_supervisor": "//src/komira_supervisor:komira_supervisor_native",
         "//src/komira_objectstore:komira_objectstore": "//src/komira_objectstore:komira_objectstore_native",
+        "//src/komira_parquet_codec:komira_parquet_codec": "//src/komira_parquet_codec:komira_parquet_codec_native",
     },
     release_set = "release_set.txt",
     order_tests = [
