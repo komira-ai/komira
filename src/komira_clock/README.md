@@ -11,7 +11,8 @@ The process clocks, each read as a plain integer:
 
 Every read is a direct `clock_gettime` call (on macOS, `now_ns` is
 `clock_gettime_nsec_np`). The package has no C shim and depends on nothing
-but the standard library, so any package can import it. A read the platform
+but the standard library (its tests also use `komira_fork_join`), so any
+package can import it. A read the platform
 refuses returns 0; neither kernel documents that as possible for these
 clocks.
 

@@ -274,6 +274,12 @@ def test_bad_capacity_raises() raises:
 
 
 comptime _POLLS_BEFORE_FIRST_PUSH = 1000
+# How many looks the consumer takes at the blocked counter before it stops
+# waiting for the producer to block (a count of loop turns, not a duration).
+# Past it the consumer drains, which releases a producer spinning on a full
+# ring, and the caller's assertion on the blocked count fails with its own
+# message. An event no turn count can cover is left to the gate's hang limit.
+comptime _BLOCKED_LOOKS = 1_000_000_000
 
 
 struct _Shared(Movable):
@@ -350,13 +356,16 @@ struct _RingBody[ro: MutOrigin, so: MutOrigin](SpawnJoinBody):
 
     def _consume(self) raises:
         if self.wait_for == 1:
-            # A producer that never blocks finishes instead, and the caller's
-            # assertion on the blocked count fails; drain either way.
+            # A producer that never blocks finishes instead, or the looks run
+            # out, and the caller's assertion on the blocked count fails;
+            # drain either way.
+            var looks = 0
             while (
                 self.ring[].overflow_blocked_count() == Int64(0)
                 and self.shared[].producer_done.load() == Int64(0)
+                and looks < _BLOCKED_LOOKS
             ):
-                pass
+                looks += 1
         elif self.wait_for == 2:
             while self.shared[].producer_done.load() == Int64(0):
                 pass
