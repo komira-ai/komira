@@ -30,6 +30,18 @@ def split_tag(text: String) -> List[String]:
     return out^
 
 
+def _refuse_place(text: String, what: String) raises:
+    """The detail of a verdict is text about a cell, never a place on a
+    machine: a slash, a backslash or a control character is refused."""
+    var b = text.as_bytes()
+    for i in range(len(b)):
+        var c = b[i]
+        if c == 0x2F or c == 0x5C or c < 0x20:
+            raise Error(
+                what + " detail looks like a path or holds a control character"
+            )
+
+
 def _joined(tag: String, detail: String) -> String:
     if detail.byte_length() == 0:
         return tag.copy()
@@ -59,6 +71,7 @@ struct StageOutcome(Copyable, Movable):
                 raise Error("unknown stage '" + self.kind + "'")
             if self.detail.byte_length() == 0:
                 raise Error("stage UNSUPPORTED must name the construct")
+            _refuse_place(self.detail, String("stage UNSUPPORTED"))
 
     @staticmethod
     def exec_ok() raises -> StageOutcome:
@@ -112,6 +125,7 @@ struct ValueVerdict(Copyable, Movable):
                 raise Error("unknown value verdict '" + self.kind + "'")
             if self.detail.byte_length() == 0:
                 raise Error("value verdict UNVERIFIED must name the cause")
+            _refuse_place(self.detail, String("value verdict UNVERIFIED"))
 
     @staticmethod
     def identical() raises -> ValueVerdict:

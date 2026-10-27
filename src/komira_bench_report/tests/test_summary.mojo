@@ -2,7 +2,7 @@
 # hand: five cells in two suites (komira 3 ms / duckdb 2 ms, 2/2, 1/4 with
 # divergent values, a refused one, 1/2).
 #
-# What each case catches:
+# What each case proves:
 # - test_ratio_only_for_verified_cells: a divergent cell and a cell komira
 #   refused have no ratio, though both have times; the three verified ones do.
 # - test_threshold_is_a_parameter: the same 1.5 ratio is PASS at 1.5 (the

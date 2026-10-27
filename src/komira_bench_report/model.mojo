@@ -51,14 +51,15 @@ def _is_sha256(s: String) -> Bool:
 
 def _refuse_path_like(text: String, field: String) raises:
     """A field of the environment is text about the machine, never a place on
-    it: a slash or a backslash is refused, and so is a control character."""
+    it or an account on it: a slash, a backslash, an at sign or a control
+    character is refused."""
     var b = text.as_bytes()
     for i in range(len(b)):
         var c = b[i]
-        if c == 0x2F or c == 0x5C or c < 0x20:
+        if c == 0x2F or c == 0x5C or c == 0x40 or c < 0x20:
             raise Error(
-                "environment." + field + " looks like a path or holds a"
-                " control character"
+                "environment." + field + " looks like a path or an address or"
+                " holds a control character"
             )
 
 
@@ -73,7 +74,6 @@ def _is_class_label(s: String) -> Bool:
             or (c >= 0x30 and c <= 0x39)
             or c == 0x2D
             or c == 0x5F
-            or c == 0x2E
         )
         if not ok:
             return False
@@ -334,7 +334,7 @@ def _validate_env(env: Environment) raises:
     if not _is_class_label(env.hostclass):
         raise Error(
             "environment.hostclass must be an opaque class label of"
-            " lower-case letters, digits, '-', '_' and '.'"
+            " lower-case letters, digits, '-' and '_'"
         )
     if env.cpu_model.byte_length() == 0 or env.os.byte_length() == 0:
         raise Error("environment.cpu_model and environment.os are required")
@@ -371,8 +371,10 @@ def _validate_side(side: Side, sweeps: Int, who: String) raises:
 def validate_cell(cell: Cell, run: RunInfo) raises:
     """Check one cell against the run: its id names its suite, it has the
     run's reps and sweeps, a komira side exists exactly for EXEC_OK, a
-    comparison happened only if komira ran, and the ratio and verdict are
-    the derived ones."""
+    comparison happened only if komira ran, in a run of mode both, against a
+    duckdb side (with the same row count when the values are IDENTICAL), the
+    sides present agree with the mode, and the ratio and verdict are the
+    derived ones."""
     if cell.suite.byte_length() == 0:
         raise Error("a cell needs a suite")
     var prefix = cell.suite + String("/")
@@ -380,12 +382,33 @@ def validate_cell(cell: Cell, run: RunInfo) raises:
         raise Error("cell id '" + cell.id + "' must be '" + prefix + "<name>'")
     if cell.reps != run.reps:
         raise Error("cell " + cell.id + " has reps " + String(cell.reps) + ", the run has " + String(run.reps))
+    var id_bytes = cell.id.as_bytes()
+    for i in range(len(id_bytes)):
+        if id_bytes[i] < 0x20:
+            raise Error("a cell id holds a control character")
     if cell.stage.is_ok() != Bool(cell.komira):
         raise Error("cell " + cell.id + ": a komira side exists exactly when the stage is EXEC_OK")
     if not cell.stage.is_ok() and (
         cell.value.kind != String("UNVERIFIED")
     ):
         raise Error("cell " + cell.id + ": values cannot be compared when komira did not run")
+    var compared = (
+        cell.value.kind == String("IDENTICAL")
+        or cell.value.kind == String("DIVERGENT")
+    )
+    if compared and run.mode != String("both"):
+        raise Error("cell " + cell.id + ": values are compared only in a run of mode both")
+    if compared and not cell.duckdb:
+        raise Error("cell " + cell.id + ": values cannot be compared without a duckdb side")
+    if (
+        cell.value.kind == String("IDENTICAL")
+        and cell.komira.value().rows != cell.duckdb.value().rows
+    ):
+        raise Error("cell " + cell.id + ": IDENTICAL values need equal row counts")
+    if run.mode == String("komira") and cell.duckdb:
+        raise Error("cell " + cell.id + ": a run of mode komira has no duckdb side")
+    if run.mode == String("both") and cell.stage.is_ok() and not cell.duckdb:
+        raise Error("cell " + cell.id + ": a run of mode both measures duckdb for every cell komira ran")
     if cell.komira:
         _validate_side(cell.komira.value(), run.sweeps, cell.id + String(" komira"))
     if cell.duckdb:

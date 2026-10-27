@@ -127,7 +127,8 @@ def summarize(result: BenchResult) raises -> Summary:
 
 def exit_code(summary: Summary) -> Int:
     """0 only when every cell ran and its values were verified; 1 otherwise.
-    A cell that fails the ratio threshold does not change it."""
+    A cell that fails the ratio threshold does not change it. A run of mode
+    `komira` or `duckdb` verifies no values, so it gives 1."""
     if (
         summary.overall.n_ran == summary.overall.n_cells
         and summary.overall.n_verified == summary.overall.n_cells

@@ -6,7 +6,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # (schema komira-bench-result/1), the counts and geomean per suite, and the
 # human table. Pure data and text: it runs no engine and reads no file.
 #
-# The welded tests (each file's header says which defects it catches):
+# The welded tests (each file's header says which behaviour it proves):
 # - test_stats: exact medians, the sweep statistic, geomean and ratio on fixed
 #   inputs, and the inputs they refuse.
 # - test_summary: when a cell has a ratio, the verdict against a threshold that

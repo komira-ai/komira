@@ -112,7 +112,9 @@ def spread_pct(values: List[Float64]) raises -> Float64:
 
 def geomean(values: List[Float64]) raises -> Float64:
     """The geometric mean of `values`, each of which must be finite and
-    positive. Raises on no values."""
+    positive. Raises on no values. It is the mean of logs through the
+    platform's `log` and `exp`, so it is accurate to about 1e-9 relative and
+    not bit-exact across platforms."""
     if len(values) == 0:
         raise Error("geomean: no values")
     var total = 0.0

@@ -1,7 +1,7 @@
 # The schema of result.json: what the writer writes, what the reader accepts,
 # and each way the reader refuses a document.
 #
-# What each case catches:
+# What each case proves:
 # - test_round_trip: write, read, write gives the same text, and every field
 #   comes back (a refused cell keeps its stage and has no komira side, a
 #   divergent cell has no ratio, the DuckDB pin and dataset lock survive).
@@ -16,9 +16,20 @@
 # - test_writer_refuses: a result the schema forbids is not written: a path
 #   or a host-like name in the fingerprint, a PINNED duckdb without a digest, an
 #   UNPINNED one without a reason, a repeated cell id, a komira side on a cell
-#   whose run was refused, a side whose time is not the least of its sweeps.
+#   whose run was refused, a side whose time is not the least of its sweeps,
+#   a comparison with no DuckDB side or with unequal row counts, a mode that
+#   disagrees with the sides present, a control character in a cell id, and a
+#   path or an address in any free-text field of the fingerprint.
+# - test_reader_tolerates_the_last_digits_of_the_geomean: a geomean that
+#   differs from the recomputed one by far less than 1e-9 is read, a larger
+#   difference is refused, and so is a headline whose geomean figure belongs
+#   to neither value.
+# - test_details_refuse_paths: the construct of UNSUPPORTED and the cause of
+#   UNVERIFIED are text about the cell, never a place on a machine.
 
 from std.testing import assert_equal, assert_true
+
+from komira_json import JsonValue, parse_json_value
 
 from komira_bench_report import (
     BenchResult,
@@ -232,6 +243,131 @@ def test_writer_refuses() raises:
     assert_true(raised)
 
 
+def _no_ref_cell(value: ValueVerdict) raises -> Cell:
+    return _cell(String("tpch/q09"), String("tpch"), StageOutcome.exec_ok(),
+        _side(5, 1.0, 1.0), Optional[Side](), value)
+
+
+def test_writer_refuses_contradictory_cells() raises:
+    var r = _sample()
+    r.cells[1] = _no_ref_cell(ValueVerdict.identical())
+    r.cells[1].id = String("tpch/q02")
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.cells[1] = _no_ref_cell(ValueVerdict.divergent())
+    r.cells[1].id = String("tpch/q02")
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.cells[1] = _cell(String("tpch/q02"), String("tpch"), StageOutcome.exec_ok(),
+        _side(10, 2.0, 2.0), _side(11, 2.0, 2.0), ValueVerdict.identical())
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.cells[1] = _cell(String("tpch/q02"), String("tpch"), StageOutcome.exec_ok(),
+        _side(10, 2.0, 2.0), _side(11, 2.0, 2.0), ValueVerdict.divergent())
+    assert_true(not _write_refused(r))
+    # mode both: a cell komira ran needs the reference side.
+    r = _sample()
+    r.cells[1] = _no_ref_cell(ValueVerdict.unverified(String("no reference")))
+    r.cells[1].id = String("tpch/q02")
+    assert_true(_write_refused(r))
+    # mode komira: no DuckDB side anywhere and nothing compared is allowed.
+    r = _sample()
+    r.run.mode = String("komira")
+    assert_true(_write_refused(r))
+    var cells = List[Cell]()
+    cells.append(_no_ref_cell(ValueVerdict.unverified(String("komira only"))))
+    r.cells = cells^
+    assert_true(not _write_refused(r))
+    r.cells[0].duckdb = _side(5, 1.0, 1.0)
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.cells[1].id = String("tpch/q\n02")
+    assert_true(_write_refused(r))
+
+
+def test_writer_refuses_host_identifying_text() raises:
+    var r = _sample()
+    r.env.hostclass = String("buildbox7.corp.example.com")
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.env.hostclass = String("192.0.2.7")
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.env.hostclass = String("c7i-4xlarge")
+    assert_true(not _write_refused(r))
+    r = _sample()
+    r.env.cpu_model = String("user@host Example CPU")
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.env.os = String("Linux /usr/lib")
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.env.os = String("Linux box@lab 6.1")
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.env.komira_version = String("1.2.3 at /srv")
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.env.duckdb.version = String("v1.5.6 \\build")
+    assert_true(_write_refused(r))
+    r = _sample()
+    r.env.duckdb.pin = String("UNPINNED:built in /opt")
+    r.env.duckdb.sha256 = String("")
+    assert_true(_write_refused(r))
+
+
+def test_details_refuse_paths() raises:
+    var raised = False
+    try:
+        _ = StageOutcome.unsupported(String("window at /src/x.cc:3"))
+    except:
+        raised = True
+    assert_true(raised)
+    raised = False
+    try:
+        _ = ValueVerdict.unverified(String("read C:\\data\\x"))
+    except:
+        raised = True
+    assert_true(raised)
+    assert_equal(
+        StageOutcome.unsupported(String("window frame")).text(),
+        String("UNSUPPORTED:window frame"),
+    )
+
+
+def _with_number(text: String, key: String, start_at: Int, new: Float64) raises -> String:
+    """`text` with the number after the first `key` at or past `start_at`
+    replaced by `new`."""
+    var at = text.find(key, start_at)
+    assert_true(at >= 0)
+    var from_at = at + key.byte_length()
+    var to_at = from_at
+    var b = text.as_bytes()
+    while b[to_at] != 0x2C and b[to_at] != 0x7D:
+        to_at += 1
+    return (
+        String(text[byte=0:from_at])
+        + JsonValue.from_f64(new).serialize()
+        + String(text[byte=to_at : text.byte_length()])
+    )
+
+
+def test_reader_tolerates_the_last_digits_of_the_geomean() raises:
+    var good = write_result_json(_sample())
+    var key = String('"geomean_ratio_verified":')
+    var summary_at = good.find(String('"summary":{'))
+    var at = good.find(key, summary_at) + key.byte_length()
+    var to_at = at
+    var b = good.as_bytes()
+    while b[to_at] != 0x2C:
+        to_at += 1
+    var g = parse_json_value(String(good[byte=at:to_at])).as_float64()
+    assert_true(not _refused(_with_number(good, key, summary_at, g * (1.0 + 1e-12))))
+    assert_true(_refused(_with_number(good, key, summary_at, g * 1.01)))
+    # The headline shows the geomean to two places: 0.91 is the figure.
+    assert_true(_refused(_altered(good, String("geomean 0.91x"), String("geomean 0.92x"))))
+
+
 def main() raises:
     var failed = String("")
     try:
@@ -254,6 +390,22 @@ def main() raises:
         test_writer_refuses()
     except e:
         failed += "\n  test_writer_refuses: " + String(e)
+    try:
+        test_writer_refuses_contradictory_cells()
+    except e:
+        failed += "\n  test_writer_refuses_contradictory_cells: " + String(e)
+    try:
+        test_writer_refuses_host_identifying_text()
+    except e:
+        failed += "\n  test_writer_refuses_host_identifying_text: " + String(e)
+    try:
+        test_details_refuse_paths()
+    except e:
+        failed += "\n  test_details_refuse_paths: " + String(e)
+    try:
+        test_reader_tolerates_the_last_digits_of_the_geomean()
+    except e:
+        failed += "\n  test_reader_tolerates_the_last_digits_of_the_geomean: " + String(e)
     if failed.byte_length() > 0:
         raise Error("test_json_schema: FAILED" + failed)
     print("test_json_schema: OK")

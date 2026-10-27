@@ -1,14 +1,16 @@
 # The strict reader of result.json. It accepts exactly what `write_result_json`
 # writes: the schema string `komira-bench-result/1`, every member present and
 # no other, the right kind of value in each, no object naming a member twice,
-# and a summary equal to the one recomputed from the cells. A document that
-# fails raises `BenchResultError: <where>: <what>`.
+# and a summary equal to the one recomputed from the cells (counts and text
+# exactly, the floats to 1e-9). A document that fails raises
+# `BenchResultError: <where>: <what>`.
 
 from komira_json import JsonValue, parse_json_value, refuse_duplicate_keys
 
 from .model import (
     BenchResult,
     Cell,
+    _close,
     DuckDbPin,
     Environment,
     RESULT_SCHEMA,
@@ -16,6 +18,7 @@ from .model import (
     Side,
     validate_result,
 )
+from .format import format_fixed
 from .json_write import summary_json
 from .verdict import StageOutcome, ValueVerdict
 from std.math import isfinite
@@ -54,6 +57,83 @@ def _object(v: JsonValue, where: String, members: String) raises -> JsonValue:
         if not known:
             _fail(where, "unknown member '" + key + "'")
     return v.copy()
+
+
+def _same(a: JsonValue, b: JsonValue, skip: String) raises -> Bool:
+    """Whether two summaries agree: members, strings and integers exactly, and
+    a number written with a fraction to within the 1e-9 the geomean is
+    accurate to. The member named `skip` is left to the caller."""
+    if a.is_object():
+        if not b.is_object() or a.num_members() != b.num_members():
+            return False
+        for i in range(a.num_members()):
+            if a.key_at(i) != b.key_at(i):
+                return False
+            if a.key_at(i) == skip:
+                continue
+            if not _same(a.value_at(i), b.value_at(i), skip):
+                return False
+        return True
+    if a.is_array():
+        if not b.is_array() or a.array_len() != b.array_len():
+            return False
+        for i in range(a.array_len()):
+            if not _same(a.element_at(i), b.element_at(i), skip):
+                return False
+        return True
+    if a.is_number():
+        if not b.is_number():
+            return False
+        if a.is_integral_number() or b.is_integral_number():
+            return (
+                a.is_integral_number()
+                and b.is_integral_number()
+                and a.as_int64() == b.as_int64()
+            )
+        return _close(a.as_float64(), b.as_float64())
+    return a.serialize() == b.serialize()
+
+
+comptime _GEOMEAN_AT = "| geomean "
+comptime _GEOMEAN_END = "x over "
+
+
+def _geomean_figure(headline: String) -> String:
+    """The figure the headline gives for the geomean, or empty."""
+    var from_at = headline.find(String(_GEOMEAN_AT))
+    if from_at < 0:
+        return String("")
+    from_at += String(_GEOMEAN_AT).byte_length()
+    var to_at = headline.find(String(_GEOMEAN_END), from_at)
+    if to_at < 0:
+        return String("")
+    return String(headline[byte=from_at:to_at])
+
+
+def _without_geomean_figure(headline: String) -> String:
+    var fig = _geomean_figure(headline)
+    if fig.byte_length() == 0:
+        return headline.copy()
+    return headline.replace(String(_GEOMEAN_AT) + fig, String(_GEOMEAN_AT))
+
+
+def _check_summary(stored: JsonValue, result: BenchResult) raises:
+    """The stored summary must be the cells' summary: counts exactly, floats
+    to 1e-9, and a headline equal to the recomputed one except that its
+    geomean figure may be the rounding of either the recomputed geomean or
+    the stored one."""
+    var want = summary_json(result)
+    if not _same(stored, want, String("headline")):
+        _fail(String("summary"), String("does not match the summary of the cells"))
+    var got_line = _text(stored.get(String("headline")), String("summary.headline"))
+    var want_line = _text(want.get(String("headline")), String("summary.headline"))
+    if _without_geomean_figure(got_line) != _without_geomean_figure(want_line):
+        _fail(String("summary.headline"), String("does not match the summary of the cells"))
+    var figure = _geomean_figure(got_line)
+    if figure != _geomean_figure(want_line):
+        var member = stored.get(String("geomean_ratio_verified"))
+        if not member.is_number() or figure != format_fixed(member.as_float64(), 2):
+            _fail(String("summary.headline"), String("its geomean is not the geomean of the summary"))
 
 
 def _text(v: JsonValue, where: String) raises -> String:
@@ -198,6 +278,5 @@ def parse_result_json(text: String) raises -> BenchResult:
         cells.append(_read_cell(arr.element_at(i), "cells[" + String(i) + "]"))
     var result = BenchResult(run^, env^, cells^)
     validate_result(result)
-    if top.get(String("summary")).serialize() != summary_json(result).serialize():
-        _fail(String("summary"), String("does not match the summary of the cells"))
+    _check_summary(top.get(String("summary")), result)
     return result^

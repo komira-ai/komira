@@ -3,11 +3,17 @@
 
 
 def format_fixed(x: Float64, decimals: Int) -> String:
-    """`x` rounded half up to `decimals` places, always with that many."""
+    """`x` rounded half up to `decimals` places, always with that many. A
+    magnitude of 1e15 or more is printed as `>=1e15` (`<=-1e15` below zero)
+    instead of being rounded, because the digits would not fit an integer."""
     var negative = x < 0.0
     var a = x
     if negative:
         a = -x
+    if a >= 1e15:
+        if negative:
+            return String("<=-1e15")
+        return String(">=1e15")
     var scale = 1
     for _ in range(decimals):
         scale *= 10

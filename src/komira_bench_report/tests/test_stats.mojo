@@ -1,6 +1,6 @@
 # The statistics of a cell on fixed inputs, with exact expected numbers.
 #
-# What each case catches:
+# What each case proves:
 # - test_median: the middle of an odd count, the mean of the middle two of an
 #   even count, an unsorted input, one value; an input that is not sorted
 #   first, or an even count that takes one middle value, gives another number.

@@ -110,7 +110,7 @@ def render_table(result: BenchResult) raises -> String:
         + String(" ")
         + pad_left(String("duckdb ms"), 10)
         + String(" ")
-        + pad_left(String("ratio"), 6)
+        + pad_left(String("ratio"), 7)
         + String(" ")
         + pad_left(String("rows"), 10)
         + String("  ")
@@ -121,7 +121,7 @@ def render_table(result: BenchResult) raises -> String:
         var c = result.cells[i].copy()
         var ratio = String("-")
         if c.ratio:
-            ratio = format_fixed(c.ratio.value(), 2)
+            ratio = format_fixed(c.ratio.value(), 3)
         out += (
             String(" ")
             + pad_right(c.id, idw)
@@ -130,7 +130,7 @@ def render_table(result: BenchResult) raises -> String:
             + String(" ")
             + pad_left(_ms(c.duckdb), 10)
             + String(" ")
-            + pad_left(ratio, 6)
+            + pad_left(ratio, 7)
             + String(" ")
             + pad_left(_rows(c), 10)
             + String("  ")

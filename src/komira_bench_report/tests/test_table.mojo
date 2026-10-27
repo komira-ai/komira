@@ -1,19 +1,21 @@
 # The human table of a fixed result, byte for byte, and the number formatting
 # under it.
 #
-# What each case catches:
+# What each case proves:
 # - test_table_of_the_sample: the banner (suites, scale, threads, DuckDB version
 #   and pin, komira version, the first eight digits of the dataset lock), a row
 #   per cell, a dash for the ratio of a divergent cell and of a refused cell
 #   (which keep their row), the threshold in FAIL(...), the reason in NO_RATIO,
 #   and a footer per suite and for the run that carries the PASS count with
 #   its denominator, the threshold and the pin.
+# - test_ratio_is_shown_to_three_places: a ratio just above the threshold is
+#   not rounded onto it: 1.504 against 1.5 reads FAIL, and shows 1.504.
 # - test_table_of_an_unpinned_scale_in_rows: a rows scale and an unpinned DuckDB
 #   print as such.
 # - test_format_fixed: rounding half up, zero padding, no minus sign on a
 #   negative that rounds to zero, no decimals.
 
-from std.testing import assert_equal
+from std.testing import assert_equal, assert_true
 
 from komira_bench_report import (
     BenchResult,
@@ -105,17 +107,31 @@ def _sample() raises -> BenchResult:
 def test_table_of_the_sample() raises:
     var want = (
         String("komira-bench  tpch,clickbench SF10  threads=20  duckdb v1.5.6 (PINNED)  komira 1.2.3  dataset a1b2c3d4\n")
-        + String(" cell            komira ms  duckdb ms  ratio       rows  values  verdict\n")
-        + String(" tpch/q01             3.00       2.00   1.50          4  IDENT   FAIL(1.05)\n")
-        + String(" tpch/q02             2.00       2.00   1.00         10  IDENT   PASS\n")
-        + String(" tpch/q03             1.00       4.00      -          7  DIVERG  NO_RATIO(DIVERGENT)\n")
-        + String(" clickbench/q01          -       8.00      -        100  UNVER   NO_RATIO(UNSUPPORTED:window frame)\n")
-        + String(" clickbench/q02       1.00       2.00   0.50         43  IDENT   PASS\n")
+        + String(" cell            komira ms  duckdb ms   ratio       rows  values  verdict\n")
+        + String(" tpch/q01             3.00       2.00   1.500          4  IDENT   FAIL(1.05)\n")
+        + String(" tpch/q02             2.00       2.00   1.000         10  IDENT   PASS\n")
+        + String(" tpch/q03             1.00       4.00       -          7  DIVERG  NO_RATIO(DIVERGENT)\n")
+        + String(" clickbench/q01          -       8.00       -        100  UNVER   NO_RATIO(UNSUPPORTED:window frame)\n")
+        + String(" clickbench/q02       1.00       2.00   0.500         43  IDENT   PASS\n")
         + String(" tpch: PASS 1/3 at <= 1.05x vs duckdb v1.5.6 (PINNED) | geomean 1.22x over 2/3 value-verified | median 1.25x\n")
         + String(" clickbench: PASS 1/2 at <= 1.05x vs duckdb v1.5.6 (PINNED) | geomean 0.50x over 1/2 value-verified | median 0.50x\n")
         + String(" all: PASS 2/5 at <= 1.05x vs duckdb v1.5.6 (PINNED) | geomean 0.91x over 3/5 value-verified | median 1.00x\n")
     )
     assert_equal(render_table(_sample()), want)
+
+
+def test_ratio_is_shown_to_three_places() raises:
+    var r = _sample()
+    var cells = List[Cell]()
+    cells.append(_cell(String("tpch/q01"), String("tpch"), StageOutcome.exec_ok(),
+        _side(4, 1.504, 1.504), _side(4, 1.0, 1.0), ValueVerdict.identical()))
+    r.cells = cells^
+    r.run.pass_max = 1.5
+    r.cells[0] = Cell.build(String("tpch/q01"), String("tpch"), 4, StageOutcome.exec_ok(),
+        _side(4, 1.504, 1.504), _side(4, 1.0, 1.0), ValueVerdict.identical(), 1.5)
+    var text = render_table(r)
+    assert_true(text.find(String(" 1.504 ")) >= 0)
+    assert_true(text.find(String("FAIL(1.5)")) >= 0)
 
 
 def test_table_of_an_unpinned_scale_in_rows() raises:
@@ -140,6 +156,10 @@ def test_format_fixed() raises:
     assert_equal(format_fixed(-1.25, 1), String("-1.3"))
     assert_equal(format_fixed(9.999, 2), String("10.00"))
     assert_equal(format_fixed(0.05, 2), String("0.05"))
+    # Beyond what an integer can hold the text saturates instead of wrapping.
+    assert_equal(format_fixed(1e300, 2), String(">=1e15"))
+    assert_equal(format_fixed(-1e300, 2), String("<=-1e15"))
+    assert_equal(format_fixed(123456789012.5, 2), String("123456789012.50"))
 
 
 def main() raises:
@@ -148,6 +168,10 @@ def main() raises:
         test_table_of_the_sample()
     except e:
         failed += "\n  test_table_of_the_sample: " + String(e)
+    try:
+        test_ratio_is_shown_to_three_places()
+    except e:
+        failed += "\n  test_ratio_is_shown_to_three_places: " + String(e)
     try:
         test_table_of_an_unpinned_scale_in_rows()
     except e:
