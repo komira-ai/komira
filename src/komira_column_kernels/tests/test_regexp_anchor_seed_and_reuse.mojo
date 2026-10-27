@@ -420,13 +420,16 @@ def _bitstate_counts(pattern: String, flags: String, subject: List[UInt8]) raise
 
 
 def test_anchored_no_match_seeds_one_thread_unanchored_seeds_every_byte() raises:
-    # ⛔ THE RED FOR FIX B.  Before the doomed-seed elision an anchored program
+    # ⛔ A RED FOR FIX B.  Before the doomed-seed elision an anchored program
     # was seeded at every byte position and only discovered `^` could not hold
     # one epsilon-step later, so a non-matching anchored search cost as much as
     # an unanchored one.  After it, the anchored search seeds ONLY where the
     # anchor can hold.  Counted on both engines, at two subject lengths: the
     # anchored counts are the same at 1,024 and 32,768 bytes (O(1)), the
-    # unanchored ones are exactly one seed per byte position (O(n)).
+    # unanchored ones are exactly one seed per byte position (O(n)).  On the
+    # Pike VM the one-seed count is the seed guard AND the skip-ahead that
+    # already stops an anchored program after its first position, so the Pike
+    # numbers pin them together; BitState's seed count pins its own guard alone.
     var small = _letters(1024, 23)
     var big = _letters(32768, 23)
     var anch = "^ZQXJ://[^/]+/"
@@ -456,6 +459,20 @@ def test_anchored_no_match_seeds_one_thread_unanchored_seeds_every_byte() raises
     var bu = _bitstate_counts(unanch, "", big)
     assert_equal(bu.seeds, 32768 + 1, "unanchored BitState tries every start position")
     assert_true(bu.steps >= 32768, String("unanchored BitState visited only ", bu.steps, " states"))
+
+
+def test_single_literal_search_steps_an_exact_number_of_threads() raises:
+    # An absolute pin, so the step counter itself is accountable: a counter
+    # that double-counts or never moves cannot pass a flatness comparison alone.
+    var prog = RegexProgram.compile("a", "")
+    var sc = RegexScratch()
+    var subj = List[UInt8]()
+    subj.append(UInt8(ord("a")))
+    var m = prog.find_from_with_engine(Span(subj), 0, sc, REGEX_ENGINE_PIKE)
+    assert_true(m.matched)
+    assert_equal(sc.vm_seeds(), 2, "seeded at 0 and at 1 (no match yet when position 1 is seeded)")
+    assert_equal(sc.vm_positions(), 2, "positions 0 and 1")
+    assert_equal(sc.vm_steps(), 2, "threads stepped for `a` on `a`")
 
 
 def test_multiline_caret_seeds_once_per_line_start() raises:
@@ -526,7 +543,9 @@ def test_epsilon_closure_alternation_does_not_allocate_per_step() raises:
     # closure stacks on every call, and the `seen` set was memset per byte.
     # Each of those shows up here: a list that grows or is rebuilt bumps the
     # grow witness, and a memset in place of the generation bump leaves the
-    # generation still.
+    # generation still.  The witness reads the capacities of the VM's own
+    # lists; a temporary list made and freed inside the closure is not one of
+    # them and is not seen.
     _assert_epsilon_closure_is_allocation_free("(?:a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p)zz", 16)
 
 

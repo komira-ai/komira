@@ -13,7 +13,8 @@
 #           `len(subject)` instead of stepping the remaining bytes one at a
 #           time, because `$` has already pinned the match end there.
 #
-# WHY IT IS WORTH A DEDICATED FILE.  MEASURED on 20,000 REAL ClickBench
+# WHY IT IS WORTH A DEDICATED FILE.  HISTORICAL figures (a one-off measurement
+# of the rewrite; no test in this file asserts any of them).  MEASURED on 20,000 REAL ClickBench
 # `referer` values (non-empty, mean 81.89 B), `find` with captures, arms as
 # SEPARATE BINARIES, 3 interleaved repetitions of min-of-5:
 #
@@ -449,7 +450,10 @@ def test_the_group_key_is_a_real_subslice_of_its_own_input() raises:
 # ---------------------------------------------------------------------------
 # 4. COST.  A FLATNESS test by counting: the fused tail must make the work stop
 #    depending on the tail length.  The `\n` scan (`_tail_has_newline`) is not a
-#    VM step and is the only thing that still touches the tail.
+#    VM step and is the only thing that still touches the tail: its COST is
+#    deliberately outside this proof (it is one forward pass over the tail, a
+#    single bounded loop); its RESULT is pinned by
+#    `test_a_newline_anywhere_in_the_tail_kills_the_match_at_every_offset`.
 # ---------------------------------------------------------------------------
 
 
