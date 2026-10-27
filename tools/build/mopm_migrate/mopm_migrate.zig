@@ -20,6 +20,9 @@ pub const RunOptions = struct {
     dry_run: bool,
     /// Moves with `git mv` and stages the new files; false renames only (the tests).
     use_git: bool,
+    /// The tracked files, when `use_git` is false and the check is wanted (the tests); with
+    /// `use_git` the tool asks `git ls-files`.
+    tracked: ?[]const []const u8 = null,
 };
 
 const text_exts = [_][]const u8{ ".mojo", ".md", ".toml", ".bzl", ".tsv", ".lock", ".txt", ".textproto", ".bxl", ".zig" };
@@ -62,7 +65,7 @@ pub fn load(a: Allocator, repo: std.fs.Dir, package: []const u8) !std.ArrayList(
             try addFile(a, repo, &files, path);
         }
     }
-    for ([_][]const u8{ "release/readme_e2e/packages.bzl", "release/mopm_native_ids.bzl", "ci/targets.bzl", "release/BUCK", "release/artifacts.textproto" }) |p| {
+    for ([_][]const u8{ "release/readme_e2e/packages.bzl", "release/mopm_native_ids.bzl", "ci/targets/shard_0.bzl", "release/BUCK", "release/artifacts.textproto" }) |p| {
         repo.access(p, .{}) catch continue;
         try addFile(a, repo, &files, p);
     }
@@ -110,9 +113,40 @@ fn followUps(a: Allocator, repo: std.fs.Dir, out: *std.Io.Writer, package: []con
     }
 }
 
+/// Every path `git ls-files` lists under `src/<package>`.
+fn gitTracked(a: Allocator, repo: std.fs.Dir, package: []const u8) ![]const []const u8 {
+    const res = std.process.Child.run(.{
+        .allocator = a,
+        .argv = &.{ "git", "ls-files", "-z", "--", try std.fmt.allocPrint(a, "src/{s}", .{package}) },
+        .cwd_dir = repo,
+        .max_output_bytes = 16 << 20,
+    }) catch return error.GitFailed;
+    switch (res.term) {
+        .Exited => |code| if (code != 0) return error.GitFailed,
+        else => return error.GitFailed,
+    }
+    var out = std.ArrayList([]const u8).empty;
+    var it = std.mem.splitScalar(u8, res.stdout, 0);
+    while (it.next()) |p| if (p.len > 0) try out.append(a, p);
+    return out.toOwnedSlice(a);
+}
+
+/// Refuses when a file to move is not in `tracked`: `git mv` would fail partway through, after
+/// some files had moved.
+pub fn requireTracked(c: *plan_mod.Ctx, moves: []const plan_mod.Move, tracked: []const []const u8) plan_mod.Error!void {
+    for (moves) |m| {
+        var found = false;
+        for (tracked) |t| found = found or std.mem.eql(u8, t, m.from);
+        if (!found) return c.refuse("{s} is not tracked by git: `git mv` cannot move it, and the run would stop partway through. `git add` it (or delete it) and run again", .{m.from});
+    }
+}
+
 pub fn run(a: Allocator, c: *plan_mod.Ctx, repo: std.fs.Dir, ro: RunOptions, out: *std.Io.Writer) !void {
     const files = try load(a, repo, ro.plan.package);
     const p = try plan_mod.plan(c, files.items, ro.plan);
+    if (ro.use_git) {
+        try requireTracked(c, p.moves, try gitTracked(a, repo, ro.plan.package));
+    } else if (ro.tracked) |tr| try requireTracked(c, p.moves, tr);
     try out.print("mopm_migrate: plan for src/{s}{s}\n\n", .{ ro.plan.package, if (ro.dry_run) " (dry run: nothing is written)" else "" });
     try out.print("move {d} file(s) into src/{s}/src/{s}/:\n", .{ p.moves.len, ro.plan.package, ro.plan.package });
     for (p.moves) |m| try out.print("  git mv {s} {s}\n", .{ m.from, m.to });

@@ -14,8 +14,8 @@
 //!    `--dev-dependencies`, a package that has a `src/` or `generated/` directory already.
 //!
 //! What it leaves to the farm (`Plan.farm`): `buildrules.mojo.bzl` and `buildrules.mojo.lock.bzl`
-//! (`buildrules mojo sync`), `coverage_floor.txt` (a measure), and the check that `ci/targets.bzl`
-//! equals what its generator writes.
+//! (`buildrules mojo sync`), `coverage_floor.txt` (a measure) and the regeneration of the `ci/targets`
+//! rows (generated, so the tool does not edit them).
 const std = @import("std");
 const sl = @import("starlark.zig");
 const imp = @import("mojo_imports.zig");
@@ -302,6 +302,15 @@ fn fixBinary(c: *Ctx, repo: Repo, buck: []const u8, st: sl.Stmt) Error![]const u
     return out.toOwnedSlice(c.a);
 }
 
+/// Whether a comment says, in so many words, that the package has no dependencies.
+fn claimsNoDependencies(comment: []const u8) bool {
+    const phrases = [_][]const u8{ "no dependenc", "no deps", "no dependency", "dependency-free", "dependency free", "without dependenc", "zero dependenc", "no other dependenc", "no external dependenc" };
+    var buf: [4096]u8 = undefined;
+    const lower = std.ascii.lowerString(&buf, comment[0..@min(comment.len, buf.len)]);
+    for (phrases) |ph| if (std.mem.indexOf(u8, lower, ph) != null) return true;
+    return false;
+}
+
 pub fn plan(c: *Ctx, files: []const File, o: Options) Error!Plan {
     const repo = Repo{ .files = files };
     const n = o.package;
@@ -430,6 +439,7 @@ pub fn plan(c: *Ctx, files: []const File, o: Options) Error!Plan {
     for (groups) |g| {
         for (g.paths) |p| {
             const src = repo.text(p) orelse return c.refuse("{s} was not read: its imports are unknown", .{p});
+            if (imp.findDlopen(src)) |ln| return c.refuse("{s}:{d}: uses DLHandle: a library loaded at run time is native code that no BUCK attribute declares; not a plain migration (recipe step 0)", .{ p, ln });
             var found = std.ArrayList([]const u8).empty;
             var bad = imp.Bad{};
             imp.scan(c.a, src, &found, &bad) catch |e| switch (e) {
@@ -573,26 +583,19 @@ pub fn plan(c: *Ctx, files: []const File, o: Options) Error!Plan {
         .shown = try fmt(c, "+ {s}\n+ {s}", .{ load_line, row_line }),
         .replaces = true,
     });
-    const tg_path = "ci/targets.bzl";
-    var tg = try requireText(c, repo, tg_path);
-    var tg_shown = std.ArrayList(u8).empty;
-    const rows = [_][]const u8{ "ci", "conda_holds", "coverage_floor", "table" };
-    for (rows) |r| {
-        if (std.mem.eql(u8, r, "conda_holds") and direct.items.len == 0) continue;
-        const row = try fmt(c, "komira//src/{s}:{s}", .{ n, r });
-        tg = try insertSorted(c, tg, .{ .open = "TARGETS = [", .close = "]" }, keyTarget, try fmt(c, "    \"{s}\",", .{row}), row, tg_path);
-        try tg_shown.appendSlice(c.a, try fmt(c, "+     \"{s}\",\n", .{row}));
-    }
-    try writes.append(c.a, .{ .path = tg_path, .text = tg, .shown = tg_shown.items, .replaces = true });
-
     var notes = std.ArrayList([]const u8).empty;
     if (direct_dev.items.len > 0) try notes.append(c.a, "dev-dependencies are written to mopm.toml and mopm.lock, but no migrated package has one: the sync decides whether they are accepted.");
+    if (deps_sorted.len > 0 and claimsNoDependencies(ml.comment)) try notes.append(c.a, "the comment above the old mojo_library says the package has no dependencies, and it has some: it is kept as written, so edit it.");
     if (closure.items.len > 1) try notes.append(c.a, "the dependency closure has more than one package: only a one-level dependency has been built by hand; if `members` of the closure is refused, see the chain form in the recipe.");
     try notes.append(c.a, "the comment above the old mojo_library is kept as written: a path in it (a library file now under src/<name>/src/<name>/) is not rewritten.");
     var farm = std.ArrayList([]const u8).empty;
     try farm.append(c.a, try fmt(c, "generate the tables: `buildrules mojo sync` for src/{s} on the farm (recipe step 4); copy buildrules.mojo.bzl and buildrules.mojo.lock.bzl into src/{s}", .{ n, n }));
     try farm.append(c.a, try fmt(c, "measure: ./buck2 build //src/{s}:coverage --show-full-output, write coverage_floor.txt ('lines NN.NN', 'branches NN.NN'), then build //src/{s}:coverage_floor", .{ n, n }));
-    try farm.append(c.a, "check: ./buck2 bxl komira//tools/build/ci/targets.bxl:generate > ci/targets.bzl leaves the rows this plan wrote unchanged");
+    if (repo.has("ci/targets/shard_0.bzl")) {
+        try farm.append(c.a, "regenerate the check roots (ci/targets.bzl and its shards are generated; the tool does not edit them): cp -rL --no-preserve=mode \"$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate)\"/. ci/ ; then ./buck2 bxl komira//tools/build/ci/guard.bxl:check");
+    } else {
+        try farm.append(c.a, "regenerate the check roots (ci/targets.bzl is generated; the tool does not edit it): ./buck2 bxl komira//tools/build/ci/targets.bxl:generate > ci/targets.bzl ; then ./buck2 bxl komira//tools/build/ci/guard.bxl:check");
+    }
     try farm.append(c.a, try fmt(c, "build: //src/{s}:lib //src/{s}:{s} \"//src/{s}:{s}[tests]\" //src/{s}:{s}_conda //src/{s}:conda //src/{s}:table //src/{s}:ci (all `local: 0`), then one dependent of the old label", .{ n, n, n, n, n, n, n, n, n, n }));
     return .{ .moves = moves.items, .writes = writes.items, .notes = notes.items, .farm = farm.items };
 }
