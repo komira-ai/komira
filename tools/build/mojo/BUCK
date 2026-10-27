@@ -158,6 +158,28 @@ zig_exe(
     visibility = ["PUBLIC"],
 )
 
+# abi_golden (tools/abi_golden.zig): the checks and the C header of
+# komira_abi_golden (abi_golden.bzl). Built behind its unit tests; the cases are
+# tests//negative/abi_golden and the example //tools/build/examples/abi_golden.
+zig_test(
+    name = "abi_golden_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/abi_golden.zig"],
+    src = "tools/abi_golden_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "abi_golden",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/abi_golden.zig",
+    unit_tests = [":abi_golden_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
 # archive_files (tools/archive_files.zig): the `archive_files` rule's action
 # (archive.bzl): files out of a pinned archive, copied or with substitutions.
 # Built behind its unit tests; its cases are the archive_files targets of

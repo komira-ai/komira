@@ -19,6 +19,7 @@ where to read the environment the compiler sees) and
 | `mojo_binary(srcs, deps, main, optimization_level, expected_stdout, helpers)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries and its `helpers` (programs it runs, beside it: [helpers.bzl](helpers.bzl)). `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
 | `mojo_test(srcs, deps, main, optimization_level, data, env, args, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
 | `mojo_shared_lib(srcs, main, deps, out_name, exports, exports_exact, gate_srcs, force_load, optimization_level)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK) |
+| `komira_abi_golden(src, golden, header_name)` ([`abi_golden.bzl`](abi_golden.bzl)) | `<header_name>` (default `<name>.h`): the C header of a golden list of C-ABI symbols, built only if the `@export abi("C")` functions of `src` are exactly its rows, with the same types (see [The ABI golden and the C header](#the-abi-golden-and-the-c-header)). | [`abi_header`](../examples/abi_golden/BUCK) |
 | `mojo_doc_json(lib, golden, symbols)` ([`doc.bzl`](doc.bzl)) | `<name>.json`: the `mojo doc` JSON of the `mojo_library` `lib`, optionally checked against a golden file and for named declarations (see [API JSON](doc.md)). | [`hellopkg_doc`](../examples/BUCK) |
 
 ## Libraries and the `test_srcs` gate
@@ -942,6 +943,45 @@ generated entry file and no `komira_main`; that is `mojo_binary[shared]`.
 - **Run path.** `$ORIGIN/lib`, where a packaged copy puts the runtime libraries.
 - **Not yet:** consuming a `.so` from a `deps` edge (a consumer linking it, or generating its `@extern` declarations).
 
+### The ABI golden and the C header
+
+`komira_abi_golden(name, src, golden, header_name)` ([`abi_golden.bzl`](abi_golden.bzl)) keeps the C ABI of a
+`mojo_shared_lib` written down once. The golden is a tab-separated file: a first line
+`version<TAB><major>.<minor>`, then one row per symbol, `symbol<TAB>return<TAB>arguments<TAB>since`. Arguments are
+types joined by `,` (`-` for none); a function returning nothing returns `None`; `since` is the version that added the
+row. Lines starting with `#` and blank lines are skipped after the first.
+
+```
+version	1.1
+abi_add	Int32	Int32,Int32	1.0
+abi_fill	None	UnsafePointer[UInt8],Int,UInt8	1.0
+abi_touch	Int32	OpaquePointer	1.1
+```
+
+- **The check.** [`abi_golden`](tools/abi_golden.zig) reads the `@export ... abi("C")` functions of `src` (a function
+  that is `@export` alone is a Mojo-ABI export and not part of the C ABI) and fails, naming every finding, on a
+  symbol the golden lists and the source lacks, a symbol the source has and the golden lacks, a changed return or
+  argument type, a row whose `since` is above the golden version, a symbol listed twice, and a type outside the
+  type map. A signature it cannot read (a generic function, a convention, a default value, `raises`) is a finding,
+  never skipped.
+- **Types** are compared as written, without blanks, with an origin dropped: `UnsafePointer[UInt8, MutExternalOrigin]`
+  is `UnsafePointer[UInt8]`, and `OpaquePointer[...]` or `UnsafePointer[NoneType, ...]` is `OpaquePointer`.
+  The type map: `Int8` to `Int64` and `UInt8` to `UInt64` (`int8_t` to `uint64_t`), `Int` (`ptrdiff_t`), `UInt`
+  (`size_t`), `Float32` (`float`), `Float64` (`double`), `OpaquePointer` (`void *`), `Handle` (`komira_handle`, an
+  alias the source declares for the opaque handle; the tool trusts the name) and `UnsafePointer[T]` of those
+  (`T *`). Anything else, `Bool` and an alias such as `comptime Ptr = ...` included, is refused. Pointers are
+  emitted without `const`.
+- **The header** is the target's one output, `<header_name>` (default `<name>.h`): an include guard from the file
+  name, `<stddef.h>` and `<stdint.h>`, `extern "C"` for C++, `KOMIRA_ABI_VERSION_MAJOR` and
+  `KOMIRA_ABI_VERSION_MINOR`, `typedef struct komira_handle_s *komira_handle;`, and one prototype per row in the
+  golden's order, each after a `since` comment. Parameters are unnamed: the golden holds types only.
+  The header is made only when the check has no finding.
+- **The example** ([`examples/abi_golden`](../examples/abi_golden/BUCK)) has the golden, a C driver that includes
+  the generated header and defines each function it declares (so a prototype that is not C, or one that
+  disagrees with its definition, fails the compile), and the `mojo_shared_lib` of the same source.
+- **Not checked here:** that the golden version was raised when a row changed. That compares with the previous
+  release, and one build holds only the current tree; a release check must supply the previous golden.
+
 ## C and C++
 
 C and C++ code is built with the prelude's own `cxx_library` rule, using
@@ -1118,6 +1158,9 @@ rules, sub-targets, scope and fixtures are in [coverage.md](coverage.md).
 | `[komira] test_timeout_s = <v> is not a whole number of seconds` / `must be over 60 s` | [`test_limit.bzl`](test_limit.bzl) | the root `.buckconfig` (or `-c`) states a test timeout a `mojo_test` cannot be limited under |
 | `<target>: dep <dep> provides neither MojoInfo (a Mojo package) nor MergedLinkInfo (a C/C++ library)` | [`defs.bzl`](defs.bzl) | a `deps` entry is neither a `mojo_library` nor a C/C++ library |
 | `cxx toolchain: <tool> is not provided` | [`cxx.bzl`](cxx.bzl) | a `cxx_library` reached a prelude feature that needs a host tool the toolchain does not provide |
+| ``komira_abi_golden: <target>: missing symbol `<name>` `` / ``extra symbol `<name>` `` | [`abi_golden.bzl`](abi_golden.bzl) | the golden lists a symbol the source no longer exports, or the source exports one the golden does not list |
+| ``komira_abi_golden: <target>: `<name>`: the return type changed`` / ``the argument types changed`` | [`abi_golden.bzl`](abi_golden.bzl) | a signature in the source differs from its golden row; if on purpose, change the row and the golden version |
+| ``komira_abi_golden: <target>: ... is not in the type map`` / ``since <v> is above the golden version <w>`` | [`abi_golden.bzl`](abi_golden.bzl) | a type with no C spelling, or a row newer than the golden |
 | `mojo_doc_json: <target>: the JSON differs from its golden <file>` | [`doc.bzl`](doc.bzl) | the library's `mojo doc` JSON changed; if on purpose, replace the golden with `[raw]` |
 | ``mojo_doc_json: <target>: the JSON declares no `<path>` `` | [`doc.bzl`](doc.bzl) | a `symbols` entry names no declaration of the JSON (or a private one, which `mojo doc` leaves out) |
 | `unable to locate module '<pkg>'` | the compiler | the importing target does not list that package in `deps` |

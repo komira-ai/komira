@@ -1,0 +1,40 @@
+load("@komira//tools/build/mojo:abi_golden.bzl", "komira_abi_golden")
+
+# Every komira_abi_golden below must FAIL to build, each for one defect against
+# the sources of tests//functional/abi_golden:ok (good.mojo and good.tsv, which
+# build). run_tests.sh requires each to fail naming its finding.
+
+# The golden says neg_add returns Int64; the source returns Int32.
+komira_abi_golden(
+    name = "drift",
+    src = "good.mojo",
+    golden = "drift.tsv",
+)
+
+# The golden lists neg_fill; the source no longer exports it.
+komira_abi_golden(
+    name = "removed",
+    src = "removed.mojo",
+    golden = "good.tsv",
+)
+
+# The source exports neg_extra; the golden has no row for it.
+komira_abi_golden(
+    name = "added",
+    src = "added.mojo",
+    golden = "good.tsv",
+)
+
+# Source and golden agree on a type, Bool, that the type map does not have.
+komira_abi_golden(
+    name = "unknown_type",
+    src = "unknown.mojo",
+    golden = "unknown.tsv",
+)
+
+# A row says it was added in 1.2; the golden is version 1.1.
+komira_abi_golden(
+    name = "since_above_version",
+    src = "good.mojo",
+    golden = "since.tsv",
+)

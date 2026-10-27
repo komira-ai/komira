@@ -1059,6 +1059,7 @@ With coverage, a library's conda package (what ships), not the library, waits fo
 ## 52. [API JSON: mojo_doc_json](../mojo/doc.md)
 ## 53. [Surface capability matrix](lint_tests.md#53-the-surface-capability-matrix)
 ## 54. [Hermetic Node.js: planted defects](../node/README.md#planted-defects) (self-test scenarios)
+## 55. [The ABI golden and the C header](../mojo/README.md#the-abi-golden-and-the-c-header): [`abi_golden_tests.sh`](abi_golden_tests.sh)
 
 ## 49. Assert level, defines and memory cap
 
