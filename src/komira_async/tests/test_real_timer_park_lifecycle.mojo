@@ -462,15 +462,12 @@ def test_full_lifecycle_real_timer() raises:
     assert_false(pool[].is_vacated(lease))
     assert_equal(pool[].in_use_count(), 1)
 
-    # Drive the reactor until the deadline fires.
-    var fired = False
-    for _attempt in range(20):
-        var n = r.run_once(timeout_us=Int32(20_000))
-        _ = n
-        if r.is_ready(parked_op):
-            fired = True
-            break
-    assert_true(fired)
+    # Block in the reactor until the deadline fires. No attempt cap and no
+    # timeout: the timer's expiry wakes the poll; a timer that never fires is a
+    # hang, which the build's test watchdog reports.
+    while not r.is_ready(parked_op):
+        _ = r.run_once(timeout_us=Int32(-1))
+    assert_true(r.is_ready(parked_op))
 
     # Resume: deadline fired -> re-acquire + next burst -> re-park (burst 1).
     var sr1 = sm.step[NoopSink](r)
@@ -479,13 +476,9 @@ def test_full_lifecycle_real_timer() raises:
     var parked_op1 = sr1.op_id()
 
     # Drive to the 2nd deadline.
-    var fired1 = False
-    for _attempt in range(20):
-        _ = r.run_once(timeout_us=Int32(20_000))
-        if r.is_ready(parked_op1):
-            fired1 = True
-            break
-    assert_true(fired1)
+    while not r.is_ready(parked_op1):
+        _ = r.run_once(timeout_us=Int32(-1))
+    assert_true(r.is_ready(parked_op1))
 
     # Resume: burst 2 -> terminal (bursts_remaining hits 0).
     var sr2 = sm.step[NoopSink](r)

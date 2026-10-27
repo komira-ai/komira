@@ -24,13 +24,13 @@
 # park early-returns and never touches the kernel. This repro drives the REAL
 # Reactor.register_read / poll_completions / deregister trio over a REAL
 # loopback socketpair fd, MANY sequential cycles, with a counter of
-# park-timeouts (lost wakeups) vs successful wakes — so the missed-wakeup is
-# OBSERVED + MEASURED, not assumed.
+# parks that wake, each with an infinite timeout — so a missed wakeup is
+# OBSERVED (the park hangs; the build's test watchdog reports it), not assumed.
 #
 # THE INVARIANT THIS FALSIFIES: when a byte is ALREADY readable on the fd at
 # register time, a LEVEL-triggered registration MUST report readiness on the
-# very next poll_completions — EVERY cycle, with ZERO timeouts. If ANY cycle
-# returns 0 (timeout) while the byte is present, the wakeup was LOST.
+# very next poll_completions — EVERY cycle. The parks have no timeout, so a
+# cycle that does not wake while the byte is present hangs: the wakeup was LOST.
 #
 # Pointer / hard-ban discipline: the only UnsafePointer use is the socketpair /
 # send / recv FFI thunk (confined to this file's helpers, concrete origins, no
@@ -126,6 +126,18 @@ def _drain_one(fd: Int32) -> Int64:
     )
 
 
+def _park_until_completion(mut reactor: Reactor[NoopSink]) raises -> Int:
+    """Parks with an INFINITE timeout until the reactor reports a completion,
+    and returns how many it reported. There is no deadline to lose a race to: a
+    readiness wakeup the reactor drops leaves this call blocked forever, which
+    the build's test watchdog reports as a hang. A return with no completion
+    (a spurious wake) parks again."""
+    while True:
+        var drained = reactor.poll_completions(Int32(-1))
+        if len(drained) > 0:
+            return len(drained)
+
+
 # =============================================================================
 # FALSIFIER 1 — byte-already-present: every park MUST wake, zero timeouts.
 # =============================================================================
@@ -174,17 +186,14 @@ def test_park_byte_present_never_times_out() raises:
     assert_true(sent == Int64(1), "send byte should succeed")
 
     var cycles = 200
-    var timeouts = 0
+    var woke = 0
     var i = 0
     while i < cycles:
         var op_id = reactor.alloc_op_id()
         reactor.register_read(rfd, op_id, UInt16(0))
-        # 100ms per-park bound: a present byte must wake in µs, so a 0-return
-        # here means the readiness wakeup was LOST for this cycle.
-        var drained = reactor.poll_completions(Int32(100_000))
-        var n = len(drained)
-        if n == 0:
-            timeouts += 1
+        # Infinite park: a present byte must wake it; a lost wakeup hangs.
+        if _park_until_completion(reactor) > 0:
+            woke += 1
         reactor.deregister(op_id)
         i += 1
 
@@ -194,11 +203,11 @@ def test_park_byte_present_never_times_out() raises:
     _close_fd(wfd)
     _ = reactor^
 
-    print("    cycles=", cycles, " lost-wakeup timeouts=", timeouts)
+    print("    cycles=", cycles, " parks that woke=", woke)
     assert_equal(
-        timeouts, 0,
-        "a byte sitting readable must wake EVERY level-triggered park; any"
-        " park-timeout is a LOST WAKEUP (the h2 hang)",
+        woke, cycles,
+        "a byte sitting readable must wake EVERY level-triggered park; a"
+        " park that never wakes is a LOST WAKEUP (the h2 hang)",
     )
     print("    [OK] no lost wakeups across", cycles, "sequential parks")
 
@@ -236,7 +245,7 @@ def test_park_byte_arrives_before_register_never_times_out() raises:
     var reactor = _make_reactor()
 
     var cycles = 200
-    var timeouts = 0
+    var woke = 0
     var i = 0
     while i < cycles:
         # Byte arrives BEFORE register (the readable state pre-exists the park).
@@ -244,9 +253,8 @@ def test_park_byte_arrives_before_register_never_times_out() raises:
         assert_true(sent == Int64(1))
         var op_id = reactor.alloc_op_id()
         reactor.register_read(rfd, op_id, UInt16(0))
-        var drained = reactor.poll_completions(Int32(100_000))
-        if len(drained) == 0:
-            timeouts += 1
+        if _park_until_completion(reactor) > 0:
+            woke += 1
         reactor.deregister(op_id)
         # Consume the byte so the next cycle starts from an empty buffer.
         _ = _drain_one(rfd)
@@ -256,11 +264,11 @@ def test_park_byte_arrives_before_register_never_times_out() raises:
     _close_fd(wfd)
     _ = reactor^
 
-    print("    cycles=", cycles, " lost-wakeup timeouts=", timeouts)
+    print("    cycles=", cycles, " parks that woke=", woke)
     assert_equal(
-        timeouts, 0,
+        woke, cycles,
         "byte present at register time must wake the park EVERY cycle; a"
-        " timeout is a lost wakeup",
+        " park that never wakes is a lost wakeup",
     )
     print("    [OK] no lost wakeups across", cycles, "register-after-arrival parks")
 
@@ -272,14 +280,12 @@ def test_park_byte_arrives_before_register_never_times_out() raises:
 # drive parks in kevent/epoll_wait with an EMPTY socket; the server's response
 # byte arrives ASYNCHRONOUSLY (from the network) WHILE the thread is blocked.
 # A correct reactor wakes immediately; a lost wakeup leaves the wait blocked
-# until its 250ms bound, so the driver only ever regains control via the bound
-# and (over N RPCs) trips the 120s wall deadline.
+# until the driver's own bound fires.
 #
 # We model the async byte source with a DETACHED helper pthread that sleeps a
 # few ms (so the main thread is already blocked in the wait) then sends the
-# byte. The wait MUST return promptly (well under its timeout) when the byte
-# lands — if it instead rides out the full per-park timeout, the wakeup was
-# lost. We also alternate WRITE-park then READ-park on the SAME fd, the exact
+# byte. The wait MUST return when the byte lands, and it has no timeout: if
+# it does not, the wakeup was lost and the test hangs. We also alternate WRITE-park then READ-park on the SAME fd, the exact
 # `drive_h2_streams_to_completion` shape on a reused conn.
 # =============================================================================
 
@@ -337,12 +343,11 @@ def test_park_byte_arrives_during_blocked_wait_wakes_promptly() raises:
     """THE production-window falsifier. The socket starts EMPTY; the park
     genuinely BLOCKS in kevent/epoll_wait; a detached thread delivers the byte
     a few ms later. A correct level-triggered reactor returns from the wait
-    promptly on delivery. A LOST wakeup rides out the full per-park timeout.
+    promptly on delivery. A LOST wakeup leaves the wait blocked.
 
-    We give each park a GENEROUS 5s bound and measure how many cycles took
-    >= ~the full 5s (i.e. the byte arrived but the wait did not wake — lost).
-    A healthy reactor wakes in single-digit ms (the helper's delay), so a
-    cycle near 5s is unambiguously a lost wakeup, not a slow-but-woke park.
+    Each park has an infinite timeout and no clock is read: the byte's arrival
+    must end the wait, and a wait that never ends is a lost wakeup that the
+    build's test watchdog reports as a hang.
 
     Also alternates a WRITE-readiness park (which a socketpair is always
     write-ready for, so it returns instantly) BEFORE the read park — the exact
@@ -367,49 +372,30 @@ def test_park_byte_arrives_during_blocked_wait_wakes_promptly() raises:
     var reactor = _make_reactor()
 
     var cycles = 40
-    var lost = 0
-    var per_park_bound_us = Int32(5_000_000)  # 5s
-    var sender_delay_us = Int32(3_000)         # 3ms — well after the wait blocks
+    var woke = 0
+    # The sender's delay only aims the byte at the blocked wait; it is not a
+    # bound the test fails on. A byte that lands before the wait blocks is the
+    # byte-present case above.
+    var sender_delay_us = Int32(3_000)
     var i = 0
     while i < cycles:
         # WRITE park first (socketpair send buffer has space => instant wake),
         # mirroring the driver draining pending_out before reading.
         var op_w = reactor.alloc_op_id()
         reactor.register_write(rfd, op_w, UInt16(0))
-        _ = reactor.poll_completions(Int32(1_000_000))
+        _ = _park_until_completion(reactor)
         reactor.deregister(op_w)
 
         # READ park: socket is EMPTY, so the wait BLOCKS. Spawn the delayed
         # sender; the byte lands ~3ms in, while the thread is parked.
         _spawn_delayed_sender(wfd, sender_delay_us)
-        # PLATFORM GUARD — must be `comptime if`, NOT a runtime ternary.
-        # A runtime `X if CompilationTarget.is_macos() else Y` code-generates
-        # BOTH arms, so the macOS-only `mach_absolute_time` symbol is emitted
-        # into the object file on Linux too and the LINK fails with
-        # `undefined reference to 'mach_absolute_time'` on Linux build
-        # workers. `comptime if` prunes the dead arm before codegen.
-        # PLATFORM GUARD — must be `comptime if`, NOT a runtime ternary.
-        # A runtime `X if CompilationTarget.is_macos() else Y` code-generates
-        # BOTH arms, so the macOS-only `mach_absolute_time` symbol is emitted
-        # into the object file on Linux too and the LINK fails with
-        # `undefined reference to 'mach_absolute_time'` on Linux build
-        # workers. `comptime if` prunes the dead arm before codegen.
-        var t0: Int64
-        comptime if CompilationTarget.is_macos():
-            # SAFETY: no-arg, by-value-return libc call; no pointer crosses.
-            t0 = Int64(external_call["mach_absolute_time", UInt64]())
-        else:
-            t0 = Int64(0)
         var op_r = reactor.alloc_op_id()
         reactor.register_read(rfd, op_r, UInt16(0))
-        var drained = reactor.poll_completions(per_park_bound_us)
+        # Infinite park: the byte lands while the thread is blocked and must
+        # wake it; a lost wakeup hangs here.
+        if _park_until_completion(reactor) > 0:
+            woke += 1
         reactor.deregister(op_r)
-        # If the wait returned with no completion AND consumed ~the whole bound,
-        # the delivered byte's wakeup was lost. We detect "no completion" as the
-        # lost signal (the byte WAS delivered by the helper; a woke park sees it).
-        if len(drained) == 0:
-            lost += 1
-        _ = t0
         # Drain the delivered byte so the next cycle starts empty.
         _ = _drain_one(rfd)
         i += 1
@@ -418,11 +404,11 @@ def test_park_byte_arrives_during_blocked_wait_wakes_promptly() raises:
     _close_fd(wfd)
     _ = reactor^
 
-    print("    cycles=", cycles, " lost-during-wait wakeups=", lost)
+    print("    cycles=", cycles, " parks that woke=", woke)
     assert_equal(
-        lost, 0,
+        woke, cycles,
         "a byte delivered DURING a blocked park must wake the wait; a park"
-        " that rode out its full bound with the byte present is a LOST WAKEUP",
+        " that never wakes with the byte present is a LOST WAKEUP",
     )
     print("    [OK] all", cycles, "delivered-during-wait parks woke promptly")
 

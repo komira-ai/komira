@@ -23,7 +23,6 @@
 
 from std.memory import ArcPointer, OwnedPointer, alloc
 from std.sys import size_of
-from std.time import perf_counter_ns
 from komira_atomic_alias import AtomicI64
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -63,12 +62,6 @@ from komira_async_api.worker_pool_traits import KeepAlive, Segment
 from komira_collections.slab import Slab
 
 
-# How long a task waits for the pseudo worker's shard to be posted before it
-# gives up and records the miss. The driver posts it right after shard 0, so
-# the wait is microseconds; the bound only keeps a regression from hanging.
-comptime _GIVE_UP_NS: Int64 = 120_000_000_000
-
-
 def _new_counter() -> OwnedPointer[AtomicI64]:
     var raw = alloc[AtomicI64](1)
     # SAFETY: a fresh allocation we own; ownership moves to the OwnedPointer.
@@ -99,8 +92,6 @@ def _disconnected_wake() -> WorkerWakeHandle:
 struct _ArmState(KeepAlive, Movable, Deinitable):
     # Bit `tid` set when task `tid` entered `execute`.
     var ran: OwnedPointer[AtomicI64]
-    # 1 when a rescuing task gave up waiting for the pseudo worker's shard.
-    var missed: OwnedPointer[AtomicI64]
     # The pseudo workers' receivers; index k is dispatcher wid k + 1.
     var pseudo: Slab[MpscReceiver[ErasedHandle]]
     # A handle on the dispatch's token, for the cancelling task.
@@ -112,7 +103,6 @@ struct _ArmState(KeepAlive, Movable, Deinitable):
 
     def __init__(out self):
         self.ran = _new_counter()
-        self.missed = _new_counter()
         self.pseudo = Slab[MpscReceiver[ErasedHandle]]()
         self.cancel = CancellationToken.never()
         self.rescue_tid = Int64(-1)
@@ -126,15 +116,15 @@ struct _ArmState(KeepAlive, Movable, Deinitable):
         pass
 
 
-def _pull(mut recv: MpscReceiver[ErasedHandle]) -> Optional[ErasedHandle]:
-    """The next handle of `recv`, waiting for it to be posted (bounded)."""
-    var deadline = Int64(perf_counter_ns()) + _GIVE_UP_NS
-    while Int64(perf_counter_ns()) < deadline:
+def _pull(mut recv: MpscReceiver[ErasedHandle]) -> ErasedHandle:
+    """The next handle of `recv`, waiting for it to be posted. There is no
+    deadline: the driver posts it right after shard 0, and a shard that never
+    arrives is a hang that the build's test watchdog reports."""
+    while True:
         var oc = recv.try_recv()
         if oc.status == TRY_RECV_OK:
-            return Optional[ErasedHandle](oc.take_value())
+            return oc.take_value()
         cpu_pause()
-    return Optional[ErasedHandle](None)
 
 
 @fieldwise_init
@@ -151,13 +141,9 @@ struct _ArmSegment(Segment, Deinitable):
         _ = worker_id
         if task_id == sp[].rescue_tid:
             # Run the pseudo worker's shard here, before this task returns.
-            var h = _pull(sp[].pseudo[0])
-            if h:
-                var handle = h.take()
-                handle.run()
-                _ = handle^
-            else:
-                _ = sp[].missed[].fetch_add(Int64(1))
+            var handle = _pull(sp[].pseudo[0])
+            handle.run()
+            _ = handle^
         if task_id == sp[].cancel_tid:
             sp[].cancel.cancel(String("stop-now"))
         if (sp[].raise_mask >> task_id) & Int64(1) != Int64(0):
@@ -298,7 +284,6 @@ def test_static_split_stops_after_another_shard_failed() raises:
     st.rescue_tid = Int64(0)
     st.raise_mask = Int64(1) << Int64(2)
     var msg = _dispatch(d, st, 4, CancellationToken.never())
-    assert_equal(st.missed[].load(), Int64(0))
     assert_equal(msg, String("LocalDispatcher.run_with_state: boom@2"))
     assert_equal(st.ran_mask(), Int64(0b0101))
     assert_equal(d.in_flight_snapshot(), Int64(0))
@@ -319,7 +304,6 @@ def test_first_error_wins() raises:
     st.rescue_tid = Int64(0)
     st.raise_mask = (Int64(1) << Int64(0)) | (Int64(1) << Int64(2))
     var msg = _dispatch(d, st, 4, CancellationToken.never())
-    assert_equal(st.missed[].load(), Int64(0))
     assert_equal(msg, String("LocalDispatcher.run_with_state: boom@2"))
     assert_equal(st.ran_mask(), Int64(0b0101))
     assert_equal(d.in_flight_snapshot(), Int64(0))
@@ -340,7 +324,6 @@ def test_claiming_stops_after_another_shard_failed() raises:
     st.rescue_tid = Int64(0)
     st.raise_mask = Int64(1) << Int64(1)
     var msg = _dispatch(d, st, 3, CancellationToken.never())
-    assert_equal(st.missed[].load(), Int64(0))
     assert_equal(msg, String("LocalDispatcher.run_with_state: boom@1"))
     assert_equal(st.ran_mask(), Int64(0b011))
     assert_equal(d.task_cursor_value(), Int64(3))

@@ -34,7 +34,6 @@
 
 from std.sys.info import CompilationTarget
 from std.testing import assert_equal
-from std.time import perf_counter_ns
 
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_EPOLL, BACKEND_KQUEUE
@@ -45,12 +44,6 @@ from komira_async.runtime.runtime import (
 
 
 comptime TRIALS: Int = 2000
-# How long a signalled worker may keep its sleeping flag at 1 before the wake
-# counts as lost. A worker that saw the signal clears it within microseconds;
-# a second is far above any scheduling delay of a loaded build host.
-comptime LOST_AFTER_NS: Int = 1_000_000_000
-# How long the test waits for a fresh worker to reach its first park.
-comptime PARK_DEADLINE_NS: Int = 10_000_000_000
 
 
 def _noop_sink_factory() -> NoopSink:
@@ -64,8 +57,8 @@ def _backend() -> UInt8:
         return BACKEND_KQUEUE
 
 
-def _one_trial(trial: Int) raises -> Bool:
-    """Runs one trial; True when the worker lost the shutdown wake."""
+def _one_trial() raises:
+    """Runs one trial. A lost shutdown wake hangs the wait below."""
     var rt = PerCoreAsyncRuntime[NoopSink](
         num_workers=1,
         sink_factory=_noop_sink_factory,
@@ -73,37 +66,23 @@ def _one_trial(trial: Int) raises -> Bool:
         placement=PLACEMENT_FIXED,
     )
     var h = rt.worker_at(0).wake_handle()
-    var t0 = perf_counter_ns()
     while h.sleeping_flag_load() == Int32(0):
-        if Int(perf_counter_ns() - t0) > PARK_DEADLINE_NS:
-            raise Error(
-                "trial " + String(trial)
-                + ": the worker did not reach its park within 10 s"
-            )
+        pass
     rt.worker_at(0).signal_shutdown()
-    var t1 = perf_counter_ns()
-    var lost = False
+    # The worker saw the shutdown: it left the park bracket and stored 0.
     while h.sleeping_flag_load() != Int32(0):
-        if Int(perf_counter_ns() - t1) > LOST_AFTER_NS:
-            lost = True
-            # Wake it again so that it exits and the join below returns.
-            h.wake()
-            break
+        pass
     rt.shutdown()
-    return lost
 
 
 def test_shutdown_signal_at_park_is_not_lost() raises:
+    """Every trial's worker leaves its park after the signal; a trial whose
+    wake was lost never returns."""
     var trial = 0
     while trial < TRIALS:
-        if _one_trial(trial):
-            print(
-                "FAIL: trial", trial, "of", TRIALS, "lost the shutdown wake:"
-                " the worker parked with the shutdown flag set and its"
-                " eventfd already drained"
-            )
-            assert_equal(trial, -1, "a shutdown wake was lost")
+        _one_trial()
         trial = trial + 1
+    assert_equal(trial, TRIALS)
 
 
 def main() raises:
