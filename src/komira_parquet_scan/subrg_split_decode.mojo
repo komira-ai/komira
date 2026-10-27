@@ -46,7 +46,7 @@ from komira_parquet_api.types import CompressionCodec, PageType, ParquetType
 from .parquet_reader import ParquetReader
 from .subrg_agg_plan import resolve_reader_col_idx
 from .subrg_columns import build_one_scan_col
-from .subrg_cursor_feed import _chunk_is_nullable, open_subrg_cursor, read_column_chunk_bytes
+from .subrg_cursor_feed import _chunk_is_nullable, chunk_start_offset, open_subrg_cursor, read_column_chunk_bytes
 from .subrg_scan_executor import SubrgScanPlan
 
 
@@ -303,9 +303,7 @@ def build_shared_col_dict[FS: FileSystem](
     dictionary."""
     ref rg = reader._meta[].row_groups[rg_idx]
     ref col_meta = rg.columns[col_idx].meta_data
-    var start_offset = col_meta.data_page_offset
-    if col_meta.dictionary_page_offset:
-        start_offset = min(start_offset, col_meta.dictionary_page_offset.value())
+    var start_offset = chunk_start_offset(col_meta)
     var cur = open_subrg_cursor(reader._file, rg, meta_schema, col_idx)
     if not cur.supported() or cur.is_string_dict():
         return SharedColDict(False)

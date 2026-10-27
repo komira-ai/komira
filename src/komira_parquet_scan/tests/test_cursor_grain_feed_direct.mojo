@@ -11,6 +11,8 @@
 #     reading on would lose the row group's remaining rows);
 #   - open refuses an unsigned dictionary or PLAIN column, a DATE column and a
 #     nested footer, and still takes the plain INT32 beside them;
+#   - open refuses an INT64 column that carries only the LogicalType TIMESTAMP,
+#     and takes a PLAIN chunk whose footer stores dictionary offset 0;
 #   - the split arithmetic and the gates' defaults and setters.
 
 from std.memory import ArcPointer
@@ -69,6 +71,10 @@ def test_the_grain_formula() raises:
     assert_equal(cursor_grain_rows(1, 1, 0, 1 << 30), 65_536)
     # A non-positive L3 means the default (8 MiB): 8 MiB / 2 / 4 / (8 * 2.5).
     assert_equal(cursor_grain_rows(8, 4, 0, 0), cursor_grain_rows(8, 4, 0, 8 * _MIB))
+
+
+def _test_path(name: String) raises -> String:
+    return test_tmpdir() + "/" + name + ".parquet"
 
 
 def _file(name: String, nulls_in_rg1: Bool) raises -> String:
@@ -243,6 +249,38 @@ def test_open_refuses_annotated_columns_and_a_nested_footer() raises:
     assert_false(
         cursor_grain_open(nested, 0, 0, _plan(nested, ["b"], [ArrowType.INT32]), nested._meta[].schema, st)
     )
+
+
+def test_open_refuses_a_timestamp_and_reads_past_a_zero_dictionary_offset() raises:
+    var base = _reader(_file("grain_patched", False))
+    var meta = base.meta_copy()
+    # a is INT64 (schema element 1); b is INT32 PLAIN (column 1).
+    meta.schema[1].logical_timestamp_unit = Optional[Int](2)
+    meta.row_groups[0].columns[1].meta_data.dictionary_page_offset = Optional[Int](0)
+    var r = ParquetReader[_FS](
+        _file=ParquetFileReader[_FS].open(_test_path("grain_patched")), _meta=ArcPointer[FileMetaData](meta^)
+    )
+    var st = CursorGrainRg()
+    var ts: List[String] = ["b", "a"]
+    var ts_types: List[ArrowType] = [ArrowType.INT32, ArrowType.INT64]
+    assert_false(cursor_grain_open(r, 0, 0, _plan(r, ts, ts_types), r._meta[].schema, st))
+    assert_false(st.active())
+    var names: List[String] = ["b", "f"]
+    var types: List[ArrowType] = [ArrowType.INT32, ArrowType.FLOAT64]
+    var plan = _plan(r, names, types)
+    assert_true(cursor_grain_open(r, 0, 0, plan, r._meta[].schema, st))
+    var ctx = ColumnDecodeContext()
+    var k = 0
+    while True:
+        var bt = cursor_grain_next(st, plan, _schema(names, types), ctx, 16)
+        if not bt:
+            break
+        ref b = bt.value()
+        for j in range(b.num_rows()):
+            assert_equal(Int(b.column_at(0).as_primitive[DType.int32]().get(j)), k)
+            assert_equal(Float64(b.column_at(1).as_primitive[DType.float64]().get(j)), Float64(k) / 2.0)
+            k += 1
+    assert_equal(k, 50)
 
 
 def test_split_arithmetic_and_gates() raises:

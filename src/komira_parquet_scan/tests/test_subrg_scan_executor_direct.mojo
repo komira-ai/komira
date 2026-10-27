@@ -377,6 +377,82 @@ def test_a_dictionary_column_with_nulls_comes_back_flat() raises:
     rt.shutdown()
 
 
+def _patched_reader(name: String) raises -> ParquetReader[_FS]:
+    """The `_file()` reader with column b's footer dictionary offset set to 0
+    (b is PLAIN: no dictionary page) and column a (INT64) carrying only the
+    LogicalType TIMESTAMP, microseconds."""
+    var path = _file(name, [_RG, _RG], -1)
+    var meta = _reader(path)._meta[].copy()
+    meta.schema[1].logical_timestamp_unit = Optional[Int](2)
+    meta.row_groups[0].columns[1].meta_data.dictionary_page_offset = Optional[Int](0)
+    meta.row_groups[1].columns[1].meta_data.dictionary_page_offset = Optional[Int](0)
+    return ParquetReader[_FS](_file=ParquetFileReader[_FS].open(path), _meta=ArcPointer[FileMetaData](meta^))
+
+
+def test_a_zero_dictionary_offset_streams_and_a_timestamp_is_decoded_whole() raises:
+    var rt = _runtime()
+    # b and f alone: the zero offset must not stop the cursors taking them.
+    var reader = _patched_reader("patched1")
+    var names: List[String] = ["b", "f"]
+    var types: List[ArrowType] = [ArrowType.INT32, ArrowType.FLOAT64]
+    var plan = _plan(reader, names, types)
+    var fb0 = scan_fallback_count()
+    var out = run_subrg_scan[_FS](
+        rt.dispatcher(), CancellationToken.never(), ScanCollectChunkSink(SCAN_FLUSH_BUDGET_BYTES), reader^, plan^,
+        _schema(names, types), False, None, 4,
+    )
+    assert_equal(scan_fallback_count() - fb0, 0)
+    assert_equal(_rows(out), 2 * _RG)
+    var k = 0
+    for i in range(len(out)):
+        ref bt = out[i]
+        for j in range(bt.num_rows()):
+            assert_equal(Int(bt.column_at(0).as_primitive[DType.int32]().get(j)), k)
+            assert_equal(Float64(bt.column_at(1).as_primitive[DType.float64]().get(j)), Float64(k) / 4.0)
+            k += 1
+    # With the timestamp column a, every row group is decoded whole, and every
+    # batch carries the Timestamp type the whole decode gives.
+    var reader2 = _patched_reader("patched2")
+    var names2: List[String] = ["a", "b"]
+    var types2: List[ArrowType] = [ArrowType.TIMESTAMP_US, ArrowType.INT32]
+    var plan2 = _plan(reader2, names2, types2)
+    var fb1 = scan_fallback_count()
+    var out2 = run_subrg_scan[_FS](
+        rt.dispatcher(), CancellationToken.never(), ScanCollectChunkSink(SCAN_FLUSH_BUDGET_BYTES), reader2^, plan2^,
+        _schema(names2, types2), False, None, 4,
+    )
+    assert_equal(scan_fallback_count() - fb1, 2)
+    assert_equal(_rows(out2), 2 * _RG)
+    k = 0
+    for i in range(len(out2)):
+        ref bt = out2[i]
+        assert_true(bt.column_at(0).arrow_type == ArrowType.TIMESTAMP_US)
+        for j in range(bt.num_rows()):
+            assert_equal(Int(bt.column_at(0).as_primitive[DType.int64]().get(j)), k % 7)
+            assert_equal(Int(bt.column_at(1).as_primitive[DType.int32]().get(j)), k)
+            k += 1
+    rt.shutdown()
+
+
+def test_a_row_count_the_footer_disagrees_with_is_decoded_whole() raises:
+    var rt = _runtime()
+    var path = _file("rowcount", [_RG], -1)
+    var meta = _reader(path)._meta[].copy()
+    meta.row_groups[0].num_rows = _RG - 1
+    var reader = ParquetReader[_FS](_file=ParquetFileReader[_FS].open(path), _meta=ArcPointer[FileMetaData](meta^))
+    var nt = _abf()
+    var plan = _plan(reader, nt[0], nt[1])
+    var fb0 = scan_fallback_count()
+    var streamed0 = scan_rows_streamed_count()
+    _ = run_subrg_scan[_FS](
+        rt.dispatcher(), CancellationToken.never(), ScanCollectChunkSink(SCAN_FLUSH_BUDGET_BYTES), reader^, plan^,
+        _schema(nt[0], nt[1]), False, None, 4,
+    )
+    assert_equal(scan_fallback_count() - fb0, 1)
+    assert_equal(scan_rows_streamed_count() - streamed0, 0)
+    rt.shutdown()
+
+
 def test_two_units_in_one_fork() raises:
     var rt = _runtime()
     var nt = _abf()
