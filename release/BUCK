@@ -176,6 +176,7 @@ release_set(
         "//src/komira_gcp_wif:komira_gcp_wif_conda",
         "//src/kci_cloud_gcp:kci_cloud_gcp_conda",
         "//src/komira_kafka_broker:komira_kafka_broker_conda",
+        "//src/komira_bench_corpus:komira_bench_corpus_conda",
     ],
     visibility = ["PUBLIC"],
 )

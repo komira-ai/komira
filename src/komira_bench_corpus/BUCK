@@ -1,0 +1,31 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The SQL of three published benchmark suites as Mojo data: TPC-H q1-q22 with
+# the validation parameters on the standard schema, ClickBench q0-q42 on the
+# 105-column hits table, h2o groupby q1-q10 and join j1-j5; the dataset each
+# suite expects; and a SHA-256 of every query and every suite. No
+# dependencies: the digest is in the package. See __init__.mojo.
+#
+# The welded tests (each file's header says what each case proves):
+# - test_sha256: the digest against the FIPS vectors and, for every length up to
+#   200 bytes and for 100 000 bytes, against komira_crypto.
+# - test_text: the ids of each suite, the shape of the text, a closed-world
+#   check of every word of every query against its dataset, the TPC-H
+#   validation parameters, the ClickBench special texts.
+# - test_api: the lookups and their refusals, the hash functions, query 11 at a
+#   scale factor, the dataset DDL.
+# - test_drift: every query, suite and dataset digest pinned.
+mojo_library(
+    name = "komira_bench_corpus",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = [
+        "tests/test_api.mojo",
+        "tests/test_drift.mojo",
+        "tests/test_sha256.mojo",
+        "tests/test_text.mojo",
+    ],
+    test_deps = [
+        "//src/komira_crypto:komira_crypto",
+    ],
+    visibility = ["PUBLIC"],
+)
