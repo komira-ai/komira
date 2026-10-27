@@ -46,6 +46,15 @@ depends on no operator package.
   row group's parked sub-morsels, each exactly once, for a consumer that
   opts in.
 - `rg_prune_counter`: counters of the row-group statistics prune.
+- `flat_schema`: whether a footer is flat.
+
+The leaf-to-schema mapping (`schema[c + 1]` is leaf `c`) holds only for a
+flat footer, which is the planner's contract for a flat read; the decisions
+this package makes for itself (the selection class, the row-selective decode,
+the dictionary-codes paths) decline on a footer that is not flat. The
+dictionary-codes paths also decline for UINT_32 and UINT_64 chunks (their
+entries would be sign-extended) and, in the codes feed, for a key with a
+null (its codes are not row aligned).
 
 The package root re-exports nothing; import from the modules.
 

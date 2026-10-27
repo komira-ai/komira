@@ -10,7 +10,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # arms of the sub-row-group aggregate (subrg_filter_gather), the top-N
 # row-group bounds and claim order (topn_rg_bounds), the parked sub-morsel
 # pool (parked_morsel_share) and the row-group prune counters
-# (rg_prune_counter).
+# (rg_prune_counter); flat_schema is the footer-shape test the leaf-to-schema
+# mapping of all of them rests on.
 #
 # Welded tests (each against files written by komira_test_parquet_file, or
 # hand-built values):
@@ -18,7 +19,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   plan, definite-TRUE masks (an UNKNOWN row with a set data bit is
 #   dropped), survivor composition, and the staged decode against the
 #   one-shot predicate on a file (selective lead, declined lead handed off,
-#   NULLs), with the emitted projection's rows and column order.
+#   NULLs), with the emitted projection's rows and column order; a declined
+#   selective decode keeping `cols` order; a lead keeping exactly half; a
+#   second row group.
 # - test_subrg_filter_gather_direct: the dict-select shapes, the dictionary
 #   keep-table, the codes compaction (uniform and mixed 16-code blocks, a
 #   tail, an out-of-range code, an empty dictionary, short buffers), the
@@ -28,13 +31,19 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   the rows written (subset, by name, selected rows, fused dictionary count
 #   and survivors, the codes feed, the hash-aggregate decode, the page-pruned
 #   decodes and their row alignment), the offset-width refinement and the
-#   read-ahead hint's advised bytes per mode.
+#   read-ahead hint's advised bytes per mode and its range (a dictionary
+#   offset of 0 is no page); UINT_32 / UINT_64 dictionary chunks and a key
+#   with a null kept off the fused and codes paths; a nested footer declined.
 # - test_parquet_reader_factory_direct: the footer shared by every worker's
 #   reader, the mapping shared by clones, the footer-only reader.
 # - test_topn_rg_bounds_direct: the claim order both ways with ties, each
 #   decline, and UINT_32 bounds zero-extended.
 # - test_parked_morsel_share_direct: the admission table, and publish / take
 #   / wait exactly once, with the foreign witness.
+# - test_parked_morsel_share_concurrent: four workers publishing and draining
+#   at once; every morsel id taken exactly once.
+# - test_rg_prune_counter_direct: each of the four counters moves alone, and
+#   the reset.
 mojo_library(
     name = "komira_parquet_scan",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -56,14 +65,17 @@ mojo_library(
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
+        "tests/test_parked_morsel_share_concurrent.mojo",
         "tests/test_parked_morsel_share_direct.mojo",
         "tests/test_parquet_reader_direct.mojo",
         "tests/test_parquet_reader_factory_direct.mojo",
+        "tests/test_rg_prune_counter_direct.mojo",
         "tests/test_staged_filter_direct.mojo",
         "tests/test_subrg_filter_gather_direct.mojo",
         "tests/test_topn_rg_bounds_direct.mojo",
     ],
     test_deps = [
+        "//src/komira_async_api:komira_async_api",
         "//src/tests/helpers/komira_test_parquet_file:komira_test_parquet_file",
     ],
     visibility = ["PUBLIC"],

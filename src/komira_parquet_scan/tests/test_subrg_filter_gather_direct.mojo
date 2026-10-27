@@ -120,6 +120,21 @@ def test_codes_outside_the_dictionary() raises:
     assert_equal(compact_codes_by_lut(_codes(neg), 2, lut, out), -1)
     var empty: List[UInt8] = [0]
     assert_equal(compact_codes_by_lut(_codes([0, 0]), 2, empty, out), -1)
+    # No table at all (not even the dictionary's one-slot form): -1, no read.
+    var no_table = List[UInt8]()
+    assert_equal(compact_codes_by_lut(_codes([0, 0]), 2, no_table, out), -1)
+    assert_equal(compact_codes_by_lut(_codes([0, 0]), 0, no_table, out), 0)
+    # Out-of-range codes inside 16-code blocks: a uniform block, and a mixed one.
+    var big_out = _out(32)
+    var uniform = List[Int]()
+    for _ in range(16):
+        uniform.append(7)
+    assert_equal(compact_codes_by_lut(_codes(uniform), 16, lut, big_out), -1)
+    var mixed = List[Int]()
+    for i in range(16):
+        mixed.append(i % 2)
+    mixed[9] = 7
+    assert_equal(compact_codes_by_lut(_codes(mixed), 16, lut, big_out), -1)
     with assert_raises(contains="buffers too small"):
         _ = compact_codes_by_lut(_codes([0, 0]), 3, lut, out)
     with assert_raises(contains="buffers too small"):

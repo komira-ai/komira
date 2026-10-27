@@ -30,6 +30,8 @@ from komira_parquet.selection_vector import SelectionInterval, intervals_total_s
 from komira_parquet_api.metadata import RowGroup, SchemaElement
 from komira_parquet_api.types import FieldRepetitionType
 
+from .flat_schema import schema_is_flat
+
 
 def decode_columns_subset_selected_per_chunk[FS: FileSystem](
     reader: ParquetFileReader[FS],
@@ -63,6 +65,8 @@ def decode_columns_subset_selected_per_chunk[FS: FileSystem](
     comptime if not FS.IS_MMAP_BACKED:
         return None
     else:
+        if not schema_is_flat(schema):
+            return None
         var intervals = SelectionInterval.from_bool_mask(mask)
         var num_selected = Int(intervals_total_selected(Span(intervals)))
         var sb = SchemaBuilder()

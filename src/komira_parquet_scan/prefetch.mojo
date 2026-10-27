@@ -18,13 +18,22 @@
 # =============================================================================
 
 from komira_fs.file_system import FileSystem
+from komira_buffer.mmap_region import ADVICE_NOT_ISSUED
+from komira_parquet.bytes_decode import _chunk_lo
 from komira_parquet.file_reader import ParquetFileReader
 from komira_parquet.scan_copy_trace import (
     PREFETCH_MODE_LEGACY,
     PREFETCH_MODE_NONE,
     incr_prefetch_advise,
 )
-from komira_parquet_api.metadata import FileMetaData
+from komira_parquet_api.metadata import ColumnChunk, FileMetaData
+
+
+def prefetch_range_of(chunk: ColumnChunk) -> Tuple[Int, Int]:
+    """The `(offset, length)` the hint advises for `chunk`: its first byte
+    (the dictionary page when one comes first; an offset of 0 is no page) and
+    its compressed size."""
+    return (_chunk_lo(chunk), Int(chunk.meta_data.total_compressed_size))
 
 
 def advise_prefetch_columns[FS: FileSystem](
@@ -36,7 +45,9 @@ def advise_prefetch_columns[FS: FileSystem](
 ):
     """Advise the chunks of `col_indices` (file leaf indices) in row group
     `next_rg_idx` under `mode`. An out-of-range row group or column, an empty
-    chunk and a declined advice are skipped: the hint never fails a scan."""
+    chunk and an advice that was not issued (no mapping, a range outside the
+    file) are skipped and not counted; a failed syscall is counted as issued.
+    The hint never fails a scan."""
     if mode == PREFETCH_MODE_NONE:
         return
     if next_rg_idx < 0 or next_rg_idx >= len(meta.row_groups):
@@ -53,16 +64,12 @@ def advise_prefetch_columns[FS: FileSystem](
         var ci = advise_set[i]
         if ci < 0 or ci >= n_cols:
             continue
-        ref m = next_rg.columns[ci].meta_data
-        var off = m.data_page_offset
-        if m.dictionary_page_offset:
-            var d = m.dictionary_page_offset.value()
-            if d < off:
-                off = d
-        var n_bytes = Int(m.total_compressed_size)
+        var span = prefetch_range_of(next_rg.columns[ci])
+        var n_bytes = span[1]
         if n_bytes <= 0:
             continue
-        _ = file.advise_prefetch(Int(off), n_bytes)
+        if file.advise_prefetch(span[0], n_bytes) == ADVICE_NOT_ISSUED:
+            continue
         try:
             incr_prefetch_advise(n_bytes)
         except:

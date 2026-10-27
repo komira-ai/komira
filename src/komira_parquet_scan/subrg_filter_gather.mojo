@@ -150,6 +150,8 @@ def compact_codes_by_lut(
     """
     if n <= 0:
         return 0
+    if len(lut) == 0:
+        return -1
     var d = len(lut) - 1
     if codes.len() < n * 4 or out.len() < (n + 1) * 4:
         raise Error("compact_codes_by_lut: buffers too small for " + String(n) + " codes")
@@ -220,7 +222,9 @@ def _init_counter() -> OwnedPointer[AtomicI64]:
     var raw = alloc[AtomicI64](1)
     # SAFETY: `raw` is the one fresh allocation above; the scalar is written
     # in place before `OwnedPointer` takes ownership, and `raw` never leaves
-    # this function.
+    # this function. The write relies on `AtomicI64` holding exactly one
+    # int64 at offset 0 (the same layout as `Scalar[DType.int64]`), which its
+    # one-field definition in `komira_atomic_alias` fixes.
     raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
     return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
 
