@@ -8,11 +8,10 @@
 # 2^62 or more (a TIMESTAMP_NS cell for any date after the year 2116, or a
 # value near Int64 min/max) came out negative, and the unsigned varint writer
 # looped forever appending bytes until the process ran out of memory. Each case
-# arms a SIGALRM watchdog, so that defect ends the process in seconds instead of
-# hanging the build, and also asserts the encoded size is small.
+# runs under the build gate's hang limit, which stops that defect instead of
+# letting it hang the build, and also asserts the encoded size is small.
 # =============================================================================
 
-from std.ffi import external_call
 from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_arrow.arrow_types import ArrowType
@@ -33,7 +32,6 @@ from komira_search.fast_fields import (
     serialize_fastfields_region,
 )
 
-comptime _WATCHDOG_S = 60
 comptime _MAX_I64: Int = 9223372036854775807
 comptime _MIN_I64: Int = -9223372036854775807 - 1
 
@@ -86,9 +84,7 @@ def _split(var ff: List[UInt8], n: Int) raises -> List[UInt8]:
 
 
 def _round_trip(label: String, values: List[Int]) raises:
-    _ = external_call["alarm", UInt32](UInt32(_WATCHDOG_S))
     var ff = _ff_region(ArrowType.TIMESTAMP_NS, values)
-    _ = external_call["alarm", UInt32](UInt32(0))
     assert_true(
         len(ff) < 512,
         label + ": the encoded region is a few hundred bytes at most",

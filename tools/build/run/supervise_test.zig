@@ -266,6 +266,55 @@ test "D3 deadline: a sleeper past its limit is killed (137), the banner, then th
     kit.waitGone(try kit.pidsFrom(e.a, f, 2));
 }
 
+const hang_line = "hang limit: //x:y did not finish within 2 s and was stopped; a test never waits on time, so this means it hung (an event that never came)\n";
+
+// H1. Mutants: print the line before the banner; exit the test's 137 instead
+// of 125; spare the child (the pid file's processes must be gone).
+test "H1 hang limit: a test that never ends is killed with its children, the banner, then the hang line, exit 125" {
+    const e = try Env.init();
+    defer e.deinit();
+    const f = try e.pidFile("h1.pids");
+    const r = try kit.runGate(e.a, e.dir, try e.args("spawnwait", &.{ "--hang-limit-s", "2", "--arg", f }), .{ .clock = true });
+    try std.testing.expectEqual(@as(u8, 125), r.status);
+    try std.testing.expect(kit.hasEvents(r.events, &.{ "t=2000 STOP C", "t=2000 KILL C", "t=2000 KILL M1", "t=2000 KILL -C" }));
+    try std.testing.expect(before(r.err, banner137, hang_line));
+    try std.testing.expect(std.mem.endsWith(u8, r.err, hang_line));
+    try std.testing.expect(!contains(r.err, "TEST TIME LIMIT"));
+    try std.testing.expect(!kit.exists(try e.pidFile("passed")));
+    kit.waitGone(try kit.pidsFrom(e.a, f, 2));
+}
+
+// H2. Mutants: decide at the limit instead of at the test's exit; write no
+// marker for a pass; report a hang for any non-zero status.
+test "H2 hang limit: a test that ends before it is unchanged: exit 0 passes, exit 7 and exit 125 keep their status and print no hang line" {
+    const e = try Env.init();
+    defer e.deinit();
+    const ok = try kit.runGate(e.a, e.dir, try e.args("exit", &.{ "--hang-limit-s", "2", "--arg", "0" }), .{ .clock = true });
+    try std.testing.expectEqual(@as(u8, 0), ok.status);
+    try std.testing.expect(kit.exists(try e.pidFile("passed")));
+    try std.testing.expectEqual(@as(usize, 0), kit.countEvents(ok.events, "STOP"));
+    for ([_][]const u8{ "7", "125" }) |code| {
+        const r = try kit.runGate(e.a, e.dir, try e.args("exit", &.{ "--hang-limit-s", "2", "--arg", code }), .{ .clock = true });
+        try std.testing.expectEqual(try std.fmt.parseInt(u8, code, 10), r.status);
+        try std.testing.expect(!contains(r.err, "hang limit"));
+        try std.testing.expect(contains(r.err, "GATED TEST FAILED: //x:y (exit "));
+    }
+}
+
+// H3. Mutant: a failed clock runs the test unlimited without saying so.
+test "H3 hang limit: a clock that cannot be read kills the test and exits 2, naming the limit" {
+    const e = try Env.init();
+    defer e.deinit();
+    const dead = struct {
+        fn s() void {
+            supervise.plat.now_ms = deadClock;
+        }
+    }.s;
+    const r = try kit.runGate(e.a, e.dir, try e.args("exit", &.{ "--hang-limit-s", "30", "--arg", "0" }), .{ .setup = dead });
+    try std.testing.expectEqual(@as(u8, 2), r.status);
+    try std.testing.expectEqualStrings("test_deadline: the timer of //x:y failed, so the test ran without its limit of 30 s\n", r.err);
+}
+
 var c_pid: i32 = 0;
 fn sparingKill(pid: sys.pid_t, sig: u8) void {
     // The tree kill's signals to C itself are lost (as if C were stopped
