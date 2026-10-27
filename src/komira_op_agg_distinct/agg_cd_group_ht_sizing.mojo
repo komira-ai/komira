@@ -2,7 +2,7 @@
 # CDHTSIZE — size the grouped COUNT(DISTINCT) GROUP table from GROUPS, not ROWS
 # =============================================================================
 #
-# ★ THE DEFECT THIS FILE EXISTS TO REMOVE, derived from the source rather than
+# ★ THE PROBLEM THIS FILE EXISTS TO REMOVE, derived from the source rather than
 #   from any timer:
 #
 #     per_worker_rows = ceil(5,563,212 / 20)          = 278,161
@@ -39,8 +39,6 @@
 # ⛔ CORRECTNESS DOES NOT DEPEND ON THE BOUND. The bound picks only the FIRST
 #   capacity; the worker's load-0.5 doubling (`_PerWorkerCDState.grow_ht`) is
 #   what guarantees the table never fills, for any bound, including a wrong one.
-#   `tests/test_cd_group_ht_sized_from_groups.mojo` forces several doublings
-#   per worker and value-compares every group.
 #
 # ⛔ AND IT DOES NOT TOUCH THE PARTITION. Growth is a per-worker rehash on
 #   `hash & new_mask`; which worker owns a row is `_cd_partition_bucket(hash,
@@ -55,7 +53,7 @@
 #
 # Route witness (for tests): the two process-wide
 # counters below. Same blessed `_Global` + `Atomic` idiom as
-# `unified/agg/cd_passenger_lane_counter.mojo`; folded ONCE PER QUERY by the
+# `cd_passenger_lane_counter.mojo`; folded ONCE PER QUERY by the
 # driver after the dispatch, never on the row path. No env var.
 # =============================================================================
 
