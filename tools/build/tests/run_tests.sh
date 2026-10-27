@@ -505,6 +505,19 @@ check_executor() { # name
 }
 
 
+# Like expect_red, for a build with two failing actions whose reports buck2
+# shows in no fixed order: either text proves the build is red for its reason.
+expect_red_either() { # name, text, other text, target
+    local name=$1 text=$2 other=$3 target=$4
+    if "$BUCK2" build "$target" > "$LOG/$name.log" 2>&1; then
+        fail "$name: $target built, but it must fail"
+    elif grep -qF -- "$text" "$LOG/$name.log" || grep -qF -- "$other" "$LOG/$name.log"; then
+        pass "$name"
+    else
+        fail "$name: failed without '$text' or '$other' (see $LOG/$name.log)"
+    fi
+}
+
 # 2
 expect_red gate_red "GATED TEST FAILED" tests//negative/libgate_bad:libgate_bad
 expect_green gate_ungated_green "tests//negative/libgate_bad:libgate_bad[ungated]"
@@ -523,9 +536,9 @@ expect_red sharedlib_plain_leaks_red "plain_hidden leaked into the dynamic symbo
 expect_red sharedlib_duplicate_definition_red "duplicate symbol: komira_neg_dup" tests//negative/shared_lib:duplicate_definition
 # The exports check names the differing symbols. exports_not_listed and
 # unlisted_not_exported are red only because of that check: their dlopen gate
-# passes. exports_not_exported is also caught by the dlopen gate, which reports
-# first.
-expect_red sharedlib_exports_not_exported_red "MISSING EXPORT: neg_ghost" tests//negative/shared_lib:exports_not_exported
+# passes. exports_not_exported fails two actions, the dlopen gate and the exports
+# check, and buck2 reports either one (not in a fixed order): accept either text.
+expect_red_either sharedlib_exports_not_exported_red "MISSING EXPORT: neg_ghost" "function of that name: neg_ghost" tests//negative/shared_lib:exports_not_exported
 expect_red sharedlib_exports_not_listed_red "(or \`unlisted_exports\`): neg_sub" tests//negative/shared_lib:exports_not_listed
 expect_red sharedlib_unlisted_not_exported_red "in \`unlisted_exports\`, but" tests//negative/shared_lib:unlisted_not_exported
 expect_red sharedlib_unlisted_not_exported_name_red "function of that name: neg_ghost" tests//negative/shared_lib:unlisted_not_exported

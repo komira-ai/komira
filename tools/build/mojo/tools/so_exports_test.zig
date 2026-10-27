@@ -125,3 +125,13 @@ test "differences: unlisted exports leave the list, and must be exported" {
     try t.expect((try E.differences(a, "l", "f", exported, &.{"a"}, &.{"nope"})) != null);
     try t.expect((try E.differences(a, "l", "f", exported, &.{ "a", "hidden" }, &.{"hidden"})) != null);
 }
+
+test "differences: an unlisted name with no such function is named under unlisted_exports" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const exported: []const []const u8 = &.{ "a", "hidden" };
+    const r = (try E.differences(a, "l", "f.mojo", exported, &.{"a"}, &.{ "hidden", "nope" })).?;
+    try t.expect(std.mem.indexOf(u8, r, "in `unlisted_exports`, but f.mojo has no @export abi(\"C\") function of that name: nope") != null);
+    try t.expect(std.mem.indexOf(u8, r, "hidden\n") == null);
+}
