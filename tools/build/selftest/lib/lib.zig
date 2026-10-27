@@ -64,7 +64,7 @@ pub const Ctx = struct {
             c.rep.fail("scratch tree: {s}", .{if (why.len > 0) why else @errorName(e)});
             return error.Scratch;
         };
-        try c.trees.append(t);
+        try c.trees.append(c.a, t);
         c.rep.pass("scratch tree {s} ({d} files) is its own project root", .{ t.root, t.files });
         return t;
     }
@@ -73,8 +73,8 @@ pub const Ctx = struct {
 const refusals_run = refusals.run;
 const reds_run = reds.run;
 
-fn stderr() std.fs.File.Writer {
-    return std.io.getStdErr().writer();
+fn stderr() std.fs.File.DeprecatedWriter {
+    return std.fs.File.stderr().deprecatedWriter();
 }
 
 /// Where the scenario's logs and scratch trees go:
@@ -99,8 +99,8 @@ pub fn main(comptime body: fn (*Ctx) anyerror!void) u8 {
     defer arena.deinit();
     const a = arena.allocator();
     const argv = std.process.argsAlloc(a) catch return 2;
-    var sargs = std.ArrayList([]const u8).init(a);
-    for (argv[1..]) |x| sargs.append(x) catch return 2;
+    var sargs = std.ArrayList([]const u8).empty;
+    for (argv[1..]) |x| sargs.append(a, x) catch return 2;
     const p = args.parse(sargs.items) catch |e| {
         stderr().print("selftest: bad command line: {s}\n", .{@errorName(e)}) catch {};
         return 2;
@@ -133,9 +133,9 @@ pub fn main(comptime body: fn (*Ctx) anyerror!void) u8 {
         .r = runner.Runner.init(a, p.buck2, p.scenario, log_dir) catch return 2,
         .rep = expect.Report.init(a, p.scenario),
         .tmp = tmp,
-        .trees = std.ArrayList(scratch.Tree).init(a),
+        .trees = std.ArrayList(scratch.Tree).empty,
     };
-    std.io.getStdOut().writer().print("{s}: buck2 {s}, logs in {s}\n", .{ p.scenario, p.buck2, log_dir }) catch {};
+    std.fs.File.stdout().deprecatedWriter().print("{s}: buck2 {s}, logs in {s}\n", .{ p.scenario, p.buck2, log_dir }) catch {};
 
     checkPlatforms(&c) catch |e| c.rep.fail("guard: {s}", .{@errorName(e)});
     if (c.rep.fails == 0) {
@@ -179,5 +179,5 @@ fn checkPlatforms(c: *Ctx) !void {
     }
     // Not an assertion of the scenario: a guard that passes counts nothing,
     // so a scenario whose body asserts nothing is still red.
-    std.io.getStdOut().writer().print("guard: {d} {s} execution platform(s) from {s}\n", .{ e.platforms, @tagName(c.args.expect), ep }) catch {};
+    std.fs.File.stdout().deprecatedWriter().print("guard: {d} {s} execution platform(s) from {s}\n", .{ e.platforms, @tagName(c.args.expect), ep }) catch {};
 }

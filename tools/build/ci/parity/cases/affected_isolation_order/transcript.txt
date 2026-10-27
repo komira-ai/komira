@@ -1,6 +1,0 @@
-call buck2 "--no-buckd" "--isolation-dir" "ci" "--verbose=2" "uquery" "--output-format" "json" "owner(%s)" "src/a/a.mojo"
-exit 0
-stdout "{\"src/a/a.mojo\": [\"komira//src/a:a\"]}\n"
-call buck2 "--no-buckd" "--isolation-dir" "ci" "--verbose=2" "cquery" "rdeps(//... + tests//..., set(komira//src/a:a komira//src/b:))"
-exit 0
-stdout "komira//src/a:a (prelude//platforms:default#abcdef0123456789)\nkomira//src/b:b (prelude//platforms:default#abcdef0123456789)\n"

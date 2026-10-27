@@ -308,18 +308,23 @@ markdown_docs_rule = rule(
     },
 )
 def _tar_member_impl(ctx):
-    out = ctx.actions.declare_output(ctx.label.name)
     bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
+    # The member extracts to its own path below the directory the busybox tar
+    # applet (no shell) is given, so the output is declared at that path: its
+    # parents are made by Buck2 and the applet is run on the directory above
+    # the member's top component. The pinned archives hold the executable
+    # bit (tar keeps it).
+    parts = ctx.attrs.member.split("/")
+    out = ctx.actions.declare_output(ctx.attrs.member)
     ctx.actions.run(
         cmd_args(
             bb,
-            "sh",
-            "-euc",
-            'd="$3.x"; "$1" mkdir -p "$d"; "$1" tar -x -f "$2" -C "$d" "$4"; "$1" mv "$d/$4" "$3"; "$1" rm -rf "$d"; "$1" chmod +x "$3"',
-            "sh",
-            bb,
+            "tar",
+            "-x",
+            "-f",
             ctx.attrs.archive[DefaultInfo].default_outputs[0],
-            out.as_output(),
+            "-C",
+            cmd_args(out.as_output(), parent = len(parts)),
             ctx.attrs.member,
         ),
         category = "tar_member",

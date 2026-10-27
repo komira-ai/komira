@@ -5,13 +5,11 @@ operator. The package root re-exports nothing; import from the modules.
 
 - `komira_op_join_build.join`: `HashJoinBuilder`, the single-INT64-key hash
   join with separate chaining (so 1:N and N:M keys keep every match), and its
-  probes as methods: INNER (`probe_inner`, `probe_inner_into`, the resumable
-  `probe_inner_chunk` into caller spans, `count_inner_matches`), SEMI and ANTI
-  (with COUNT fast paths), LEFT, RIGHT and FULL. A NULL key matches nothing; a
-  NULL build row is still emitted by the RIGHT/FULL unmatched-build sweep. The
-  build (`join_build_serial`) and the probe kernels (`join_probe_inner`,
-  `join_probe_inner_ps`, `join_probe_semi_anti`, `join_probe_outer`) are
-  modules of their own.
+  INNER probes as methods (`probe_inner`, `probe_inner_into`, the resumable
+  `probe_inner_chunk` into caller spans, `count_inner_matches`). A NULL key
+  matches nothing; a NULL build row is recorded but never linked into a
+  bucket. The build (`join_build_serial`) and the INNER probe kernels
+  (`join_probe_inner`, `join_probe_inner_ps`) are modules of their own.
 - `komira_op_join_build.join_sort_merge`: the merge phase of a sort-merge
   INNER join over pre-sorted keys, and `cross_join_indices`.
 - `komira_op_join_build.join_perfect_hash`: `PerfectHashJoin`, a direct-indexed
@@ -53,8 +51,8 @@ from komira_op_join_build.hash_directory import HashDirectory, SLOT_EMPTY
 from komira_op_join_build.join_blocking import BinBlocking
 from komira_op_join_build.join_bloom_l1_resident import BLOOM_L1_DEFAULT_BUDGET_BYTES, bloom_l1_index_bytes, bloom_l1_should_decline
 
-# An INNER, a SEMI and a LEFT join of probe keys [2, 4, 9] against build keys
-# [2, 9, 2]: key 2 matches build rows 0 and 2.
+# An INNER join of probe keys [2, 4, 9] against build keys [2, 9, 2]: key 2
+# matches build rows 0 and 2.
 var bk: List[Int64] = [2, 9, 2]
 var pk: List[Int64] = [2, 4, 9]
 var build = PrimitiveArray[DType.int64].from_list(bk)
@@ -62,12 +60,6 @@ var probe = PrimitiveArray[DType.int64].from_list(pk)
 var b = HashJoinBuilder.build(build)
 var inner = b.probe_inner(probe)
 assert_equal(len(inner[0]), 3)
-var semi = b.probe_semi(probe)
-assert_equal(len(semi), 2)
-assert_equal(semi[0], 0)
-assert_equal(semi[1], 2)
-var left = b.probe_left(probe)
-assert_equal(len(left[0]), 4)  # the unmatched probe row 1 once, with -1
 
 # A band join on `value` in bins of width 10: the range [5, 35] can match a
 # point in any of bins 0..3.

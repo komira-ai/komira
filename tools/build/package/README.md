@@ -199,8 +199,8 @@ the greeting ([formats.sh](../tests/functional/formats.sh)).
 kcov ([`toolchains/kcov`](../toolchains/kcov/README.md)) is GPL-2.0 and a
 build-only tool (the licence decision is recorded in [kcov's
 README](../toolchains/kcov/README.md#licences)), so no published artifact may
-hold it. Every package format runs [`kcov_guard.sh`](kcov_guard.sh) over what
-it packs, as a build action whose output its published files depend on
+hold it. Every package format runs `pkg_act kcov-guard`
+([`act/kcov_guard.zig`](act/kcov_guard.zig)) over what it packs, as a build action whose output its published files depend on
 ([`kcov_guard.bzl`](kcov_guard.bzl)). The guard refuses a file whose sha256 is
 `KCOV_BIN_SHA256` or whose bytes contain `KCOV_USAGE_LINE`, `Usage: kcov
 [OPTIONS] out-dir in-file [args...]`, the two constants of
@@ -242,10 +242,10 @@ The sha256 is that of the one kcov komira builds (its pin, for
 linux-x86_64); a kcov built otherwise (another version or CPU, patched or
 stripped) is refused by the usage line alone.
 
-`:kcov_guard` (the script) is gated by the validation `:kcov_guard_cases`, so
+`:kcov_guard` (`pkg_act`) is gated by the validation `:kcov_guard_cases`, so
 any build that packs anything also runs the guard on known inputs (15 cases),
 and fails if one gets the wrong answer. The cases need no kcov: a fixture
-file stands for `bin/kcov`, and its sha256, written into the script, is the
+file stands for `bin/kcov`, and its sha256, written into the tool, is the
 one they pass. Refused: a sha256 one digit short or in upper case, and an
 empty line, before any file is read; the fixture renamed (by its sha256, as a
 directory's file, as a file and under a destination path; the fixture holds
@@ -330,8 +330,11 @@ release set ([`release_set.txt`](release_set.txt)) with the fixed test stamp of
 `conda_package_test_stamped` in [`conda.bzl`](conda.bzl): build number 999999999,
 a made-up source commit whose first 8 hex are `7e57c0de` (no 8-hex slice of it
 repeats another or is `00000000`), commit time 86400000 ms. No release carries
-it. The target builds each package's `[release]` (so its `[release_check]` runs)
-and runs `komira_pack conda-meta --name komira_all` over those manifests. It
+it. A library whose `mojo_library` declares `native` is given that same target
+in the check's `native` dict (library label to `native` target), as the macro
+gives it to `<lib>_conda`; the package rule refuses a native library missing
+from the dict, and the macro refuses a key not in `libs`. The target builds
+each package's `[release]` (so its `[release_check]` runs) and runs `komira_pack conda-meta --name komira_all` over those manifests. It
 fails the build in these cases:
 
 - a member or the metapackage does not carry build string `h7e57c0de_999999999`
@@ -343,6 +346,12 @@ fails the build in these cases:
   member listed after it; the message names both. The `release_order_*`
   targets in [`BUCK`](BUCK) run this check over the fixtures in
   `release_order/` and must pass first;
+- a member packages no README, or its README holds no example (a ```` ```mojo ````
+  or ```` ```mojo module ```` fence, as the README examples tool's `generate --links refuse`
+  reads it; the check is that tool's `release-check`). kci's install validation
+  refuses both, but only after the release is published; the message names the
+  member and quotes kci. The `release_readme_*` targets in [`BUCK`](BUCK) run this
+  check over the fixtures in `release_readme/` and must pass first;
 - `komira_pack conda-check --kind metapackage --require-stamped true` refuses the
   metapackage;
 - its `libs`, its metapackage name, or the `--license`, `--summary` and `--home`

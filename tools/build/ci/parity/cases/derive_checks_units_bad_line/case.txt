@@ -1,4 +1,0 @@
-# A units file line that is not <unit><TAB><target>: exit 1.
-arg "{units_file}"
-input units_file "lib_a //src/a:a\n"
-exit 1

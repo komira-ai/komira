@@ -64,14 +64,14 @@ pub fn firstEmpty(values: []const []const u8) ?usize {
 
 /// The `name=value` lines the digest covers, each ended by a newline.
 pub fn text(alloc: std.mem.Allocator, values: [fields.len][]const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(alloc);
+    var out = std.ArrayList(u8).empty;
     for (fields, values) |f, v| {
-        try out.appendSlice(f.name);
-        try out.append('=');
-        try out.appendSlice(v);
-        try out.append('\n');
+        try out.appendSlice(alloc, f.name);
+        try out.append(alloc, '=');
+        try out.appendSlice(alloc, v);
+        try out.append(alloc, '\n');
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 /// `<sdk version>-<first 16 hex digits of md5(text)>`.

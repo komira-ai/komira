@@ -4,6 +4,7 @@
 //!
 //!   gate mojo --busybox B --runtime-lib DIR --label L --test ROOT/bin/NAME --marker M
 //!             [--mem-cap-mib N] [--deadline-s L --runner-timeout-s T]
+//!             [--hang-limit-s N]
 //!             [--limit-s N --limit-report coverage]
 //!             [--env NAME=VALUE]... [--arg VALUE]...
 //!
@@ -11,7 +12,7 @@
 //! exit 0. Otherwise the banner (`GATED TEST FAILED: <label> (exit <rc>)`,
 //! the last 200 lines of the test's output) and the test's own status. The
 //! marker bytes and the banner lines are contracts (G9, G11): a package
-//! action takes every marker as an input, release/ci/main_red.py matches the
+//! action takes every marker as an input, release/ci/main_red matches the
 //! banner, and the coverage runs remove two of its lines by exact text.
 
 const std = @import("std");
@@ -38,6 +39,7 @@ pub const Args = struct {
     cap_mib: ?u64 = null,
     deadline_s: ?[]const u8 = null,
     runner_timeout_s: ?[]const u8 = null,
+    hang_limit_s: ?u64 = null,
     limit_s: ?u64 = null,
     limit_report: ?[]const u8 = null,
     env: std.ArrayList([]const u8) = undefined,
@@ -51,11 +53,11 @@ fn usage(comptime fmt: []const u8, a: anytype) u8 {
 
 /// Parses argv after `mojo`; an exit status on a refusal.
 pub fn parse(alloc: std.mem.Allocator, argv: []const []const u8, a: *Args) ?u8 {
-    a.env = std.ArrayList([]const u8).init(alloc);
-    a.args = std.ArrayList([]const u8).init(alloc);
+    a.env = std.ArrayList([]const u8).empty;
+    a.args = std.ArrayList([]const u8).empty;
     var i: usize = 0;
-    var have = [_]bool{false} ** 10;
-    const names = [_][]const u8{ "--busybox", "--runtime-lib", "--label", "--test", "--marker", "--mem-cap-mib", "--deadline-s", "--runner-timeout-s", "--limit-s", "--limit-report" };
+    var have = [_]bool{false} ** 11;
+    const names = [_][]const u8{ "--busybox", "--runtime-lib", "--label", "--test", "--marker", "--mem-cap-mib", "--deadline-s", "--runner-timeout-s", "--limit-s", "--limit-report", "--hang-limit-s" };
     while (i < argv.len) : (i += 2) {
         const flag = argv[i];
         if (std.mem.eql(u8, flag, "--env")) {
@@ -68,12 +70,12 @@ pub fn parse(alloc: std.mem.Allocator, argv: []const []const u8, a: *Args) ?u8 {
             for (reserved) |r| {
                 if (std.mem.eql(u8, name, r)) return usage("--env may not set {s}; the runner sets it", .{name});
             }
-            a.env.append(kv) catch return 2;
+            a.env.append(alloc, kv) catch return 2;
             continue;
         }
         if (std.mem.eql(u8, flag, "--arg")) {
             if (i + 1 >= argv.len) return usage("--arg needs a value", .{});
-            a.args.append(argv[i + 1]) catch return 2;
+            a.args.append(alloc, argv[i + 1]) catch return 2;
             continue;
         }
         const k = for (names, 0..) |n, j| {
@@ -101,6 +103,10 @@ pub fn parse(alloc: std.mem.Allocator, argv: []const []const u8, a: *Args) ?u8 {
                 return 2;
             },
             9 => a.limit_report = v,
+            10 => a.hang_limit_s = util.positiveStrict(v) orelse {
+                util.err("hang_limit: REFUSING: the limit '{s}' is not a positive whole number of seconds\n", .{v});
+                return 2;
+            },
             else => unreachable,
         }
     }
@@ -124,6 +130,9 @@ pub fn parse(alloc: std.mem.Allocator, argv: []const []const u8, a: *Args) ?u8 {
         if (!std.mem.eql(u8, r, "coverage")) return usage("--limit-report {s}: the only report is coverage", .{r});
         if (a.deadline_s != null) return usage("usage error: --limit-s and --deadline-s are two limits", .{});
     }
+    if (a.hang_limit_s != null and (a.deadline_s != null or a.limit_report != null)) {
+        return usage("usage error: --hang-limit-s is a limit of its own; --deadline-s and --limit-s are two others", .{});
+    }
     return null;
 }
 
@@ -145,37 +154,37 @@ fn envName(kv: []const u8) []const u8 {
 /// (and on macOS DYLD_LIBRARY_PATH), TMPDIR, TEST_TMPDIR, HOME and PWD set
 /// by the runner, then each --env in order (a later one of a name wins).
 pub fn buildEnv(alloc: std.mem.Allocator, inherited: []const []const u8, run: []const u8, lib: []const u8, cwd: []const u8, extra: []const []const u8) ![]const []const u8 {
-    var fixed = std.ArrayList([]const u8).init(alloc);
-    try fixed.append(try std.fmt.allocPrint(alloc, "PATH={s}/bin", .{run}));
-    try fixed.append(try std.fmt.allocPrint(alloc, "LD_LIBRARY_PATH={s}", .{lib}));
-    if (sys.is_darwin) try fixed.append(try std.fmt.allocPrint(alloc, "DYLD_LIBRARY_PATH={s}", .{lib}));
-    try fixed.append(try std.fmt.allocPrint(alloc, "TMPDIR={s}/tmp", .{run}));
-    try fixed.append(try std.fmt.allocPrint(alloc, "TEST_TMPDIR={s}/tmp", .{run}));
-    try fixed.append(try std.fmt.allocPrint(alloc, "HOME={s}/home", .{run}));
-    try fixed.append(try std.fmt.allocPrint(alloc, "PWD={s}", .{cwd}));
-    var all = std.ArrayList([]const u8).init(alloc);
+    var fixed = std.ArrayList([]const u8).empty;
+    try fixed.append(alloc, try std.fmt.allocPrint(alloc, "PATH={s}/bin", .{run}));
+    try fixed.append(alloc, try std.fmt.allocPrint(alloc, "LD_LIBRARY_PATH={s}", .{lib}));
+    if (sys.is_darwin) try fixed.append(alloc, try std.fmt.allocPrint(alloc, "DYLD_LIBRARY_PATH={s}", .{lib}));
+    try fixed.append(alloc, try std.fmt.allocPrint(alloc, "TMPDIR={s}/tmp", .{run}));
+    try fixed.append(alloc, try std.fmt.allocPrint(alloc, "TEST_TMPDIR={s}/tmp", .{run}));
+    try fixed.append(alloc, try std.fmt.allocPrint(alloc, "HOME={s}/home", .{run}));
+    try fixed.append(alloc, try std.fmt.allocPrint(alloc, "PWD={s}", .{cwd}));
+    var all = std.ArrayList([]const u8).empty;
     outer: for (inherited) |kv| {
         const n = envName(kv);
         for (fixed.items) |f| if (std.mem.eql(u8, envName(f), n)) continue :outer;
         for (extra) |f| if (std.mem.eql(u8, envName(f), n)) continue :outer;
-        try all.append(kv);
+        try all.append(alloc, kv);
     }
-    try all.appendSlice(fixed.items);
+    try all.appendSlice(alloc, fixed.items);
     for (extra, 0..) |kv, i| {
         // A later --env of the same name replaces this one.
         var later = false;
         for (extra[i + 1 ..]) |k2| {
             if (std.mem.eql(u8, envName(k2), envName(kv))) later = true;
         }
-        if (!later) try all.append(kv);
+        if (!later) try all.append(alloc, kv);
     }
     return all.items;
 }
 
 /// The action's environment, as the test inherits it.
 pub fn inheritedEnv(alloc: std.mem.Allocator) ![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
-    for (std.os.environ) |e| try out.append(std.mem.span(e));
+    var out = std.ArrayList([]const u8).empty;
+    for (std.os.environ) |e| try out.append(alloc, std.mem.span(e));
     return out.items;
 }
 
@@ -203,9 +212,9 @@ fn runParsed(alloc: std.mem.Allocator, a: *Args) !u8 {
     };
     const root = bin[0..cut];
 
-    var expanded = std.ArrayList([]const u8).init(alloc);
-    try expanded.append(bin);
-    for (a.args.items) |v| try expanded.append(try util.replaceAll(alloc, v, action_dir_token, here));
+    var expanded = std.ArrayList([]const u8).empty;
+    try expanded.append(alloc, bin);
+    for (a.args.items) |v| try expanded.append(alloc, try util.replaceAll(alloc, v, action_dir_token, here));
 
     const run = try util.makeTempDir(alloc, here, ".komira_test.");
     defer util.removeTree(run);
@@ -226,6 +235,7 @@ fn runParsed(alloc: std.mem.Allocator, a: *Args) !u8 {
     var limit: supervise.Limit = .none;
     if (a.deadline_s) |d| limit = .{ .deadline_ms = util.positiveStrict(d).? * 1000 };
     if (a.limit_s) |l| limit = .{ .group_ms = l * 1000 };
+    if (a.hang_limit_s) |h| limit = .{ .deadline_ms = h * 1000 };
     const outcome = try supervise.run(alloc, .{
         .path = (try alloc.dupeZ(u8, bin)).ptr,
         .argv = (try util.zList(alloc, expanded.items)).ptr,
@@ -240,7 +250,8 @@ fn runParsed(alloc: std.mem.Allocator, a: *Args) !u8 {
 
     if (outcome.signal != 0) return 128 +| outcome.signal;
     if (outcome.timer_failed) {
-        const what = a.deadline_s orelse "the coverage run's";
+        var what_buf: [32]u8 = undefined;
+        const what = a.deadline_s orelse if (a.hang_limit_s) |h| try std.fmt.bufPrint(&what_buf, "{d}", .{h}) else "the coverage run's";
         util.err("test_deadline: the timer of {s} failed, so the test ran without its limit of {s} s\n", .{ a.label, what });
         return 2;
     }
@@ -268,7 +279,24 @@ fn runParsed(alloc: std.mem.Allocator, a: *Args) !u8 {
     if (a.deadline_s != null and outcome.limit_hit) {
         util.err("TEST TIME LIMIT: killed {s} after {s} s, under the test runner's timeout of {s} s (komira.test_timeout_s)\n", .{ a.label, a.deadline_s.?, a.runner_timeout_s.? });
     }
+    if (a.hang_limit_s) |h| {
+        if (outcome.limit_hit and rc != 0) {
+            util.err("{s}\n", .{hangLine(alloc, a.label, h) catch return hang_exit});
+            return hang_exit;
+        }
+    }
     return rc;
+}
+
+/// The exit status of a test stopped by its hang limit. The test's own
+/// statuses pass through the gate, so the line `hangLine` prints is the
+/// verdict; the status only keeps the action's failure apart from the
+/// compile watchdog's 124 (retried) and a signal's 128+N.
+pub const hang_exit: u8 = 125;
+
+/// The one line of a hung test.
+pub fn hangLine(alloc: std.mem.Allocator, label: []const u8, limit_s: u64) ![]const u8 {
+    return std.fmt.allocPrint(alloc, "hang limit: {s} did not finish within {d} s and was stopped; a test never waits on time, so this means it hung (an event that never came)", .{ label, limit_s });
 }
 
 /// G10: the banner of a red test, to stderr.
@@ -291,8 +319,8 @@ fn coverageExpired(alloc: std.mem.Allocator, a: *Args, o: supervise.Outcome, log
         return red(a.label, "cov_run: /proc is not readable as this run's own: /proc/{d}/stat and /proc/self/stat must both start with this process's pid {d}, and start with '{d}' and '{d}'. So whether the time limit's kill reached every process of the run cannot be checked.", .{ me, me, seen[0], seen[1] });
     }
     if (o.survivors.len > 0) {
-        var list = std.ArrayList(u8).init(alloc);
-        for (o.survivors) |m| list.writer().print("{d} {c} {s};", .{ m.pid, m.state, m.comm }) catch {};
+        var list = std.ArrayList(u8).empty;
+        for (o.survivors) |m| list.writer(alloc).print("{d} {c} {s};", .{ m.pid, m.state, m.comm }) catch {};
         return red(a.label, "After the time limit ({d} s), processes of the coverage run survived the kill of its process group {d} (pid state comm: {s}). The limit must kill the whole group, kcov, the test and every child it left; they are killed now.", .{ a.limit_s.?, o.pid, list.items });
     }
     util.err("------------------------------------------------------------------ output (last 200 lines)\n", .{});

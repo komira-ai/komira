@@ -55,7 +55,9 @@
 #      (a nodebug helper's decision at its call),
 #      branchenv refused at analysis (a test_env setting
 #      LLVM_PROFILE_FILE: //tools/build/selftest:analysis_refusals_coverage), branchlinkline red (a `cov_branch link` copy
-#      without -lm: not the release link). The actions exist only with the
+#      without -lm: not the release link), branchnonatomic red (a `cov_branch
+#      link` copy without atomic counter updates: test_threads's eight
+#      threads lose increments, so quarter's counters are not exact). The actions exist only with the
 #      switch on: coverage_keys.sh (test 41).
 #      The greens named below build in the pull-request check, not here:
 #      tests//functional/... is built, its sub-targets through
@@ -93,3 +95,5 @@ expect_red coverage_branch_nodebug "may be a decision of count_down" \
     'tests//negative/coverage:branchnodebug[coverage][branch_info][test_nodebug]'
 expect_red coverage_branch_link_line "the branch coverage link is not the release link plus the profile runtime" \
     tests//negative/coverage:branchlinkline
+expect_red coverage_branch_nonatomic "the counters of quarter are" \
+    tests//negative/coverage:branchnonatomic

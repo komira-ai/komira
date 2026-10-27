@@ -9,23 +9,69 @@ operator or a sink consumes but does not implement belongs here.
   `hardware_detect.detect_hardware_profile`) and then passed by value;
   `reference_host_profile` is a constant profile for comparing lowered plans
   across machines.
-- Hardware (`hardware`, `hardware_detect`, `l2_share`): the profile value, its
-  pure sizing accessors, and the one place that probes the machine.
-- Topology (`hardware_topology`, `machine_topology`) and the async runtime
-  construction derived from it (`engine_runtime_build`).
+- Hardware and topology (`hardware`, `hardware_detect`, `hardware_topology`,
+  `machine_topology`, `l2_share`) and the async runtime construction derived
+  from them (`engine_runtime_build`).
 - Morsel sizing: `morsel_sizing_policy` is a pure function of
   `(host_profile, segment, schema)`; the host records its answer in the
   physical plan (`SegmentDescPod.morsel_rows`, `record_segment_morsel_rows`).
-  `l1_chunk_sizing` holds the L1-chunk admission predicate it uses. The fork
-  grain and the fan-out cap are decided at dispatch time from exact facts
-  (`fan_out_grain`), and `grain_geometry` records what a fork chose.
-- `run_context` and `segment_execution`: what a run of a physical plan reads
-  from its host (the host profile and the worker count) and the per-segment
-  dispatch and timing. No optimizer, and one path for bounded and unbounded
-  input.
+  Dispatch-time fan-out and fork grain (`fan_out_grain`), the L1-chunk
+  predicate (`l1_chunk_sizing`) and grain geometry (`grain_geometry`).
+- The run and segment execution context (`run_context`, `segment_execution`):
+  no optimizer, and one path for bounded and unbounded input.
+- Memory and spill: `memory.reservation.MemoryReservation` is the tally a
+  breaker grows before it buffers more input; its budget comes from the host
+  profile (`MemoryReservation.for_host`), and a denied grow is the breaker's
+  cue to spill. The spill layer (`spill`) holds the `SpillStorage` trait and
+  its storage over any `komira_fs` file system (`filesystem_spill_storage`,
+  and `local_disk` for the local disk), the row spill format (`thspill2`,
+  `thspill2_header`) with its codec, and the native spill run writer and reader
+  (`native_spill`). Whether a breaker may spill, and to
+  which tiers, is `HostProfile.spill_tiers_for`, recorded in the physical
+  plan.
+- Spill arbitration (`spill.spillable_op`, `spill.policies`,
+  `spill.spill_arbitrator`, `spill.intra_op_slab_arbitrator`,
+  `spill.op_coordinator`, `spill.routed_grow`): when a grow would pass a byte
+  budget, the arbitrator spills the oldest spillable op (or, within one
+  operator, partition) and reports the bytes freed. A breaker's grow that its
+  `MemoryReservation` refuses spills one of its own partitions and retries
+  once (if that retry is refused too, the freed bytes stay released and the
+  result is False); a negative grow, or one above the whole budget, is
+  refused without spilling. Only the oldest-first policy is implemented.
+- The parallel RecordBatch concat (`streaming_concat_parallel`, the public
+  entry points; `concat_fan_plan` decides the route and the fan from the bytes
+  moved and the pool's worker count; `concat_tasks`, `concat_tiled`,
+  `concat_release`; `concat_dict_unify` unifies STRING dictionaries first;
+  `concat_options` holds the route switches as a value; `concat_schema_check`
+  refuses input batches whose columns differ).
+- The shuffle combine buffer (`spill.shuffle_combine_buffer`: per-partition
+  encode scratch with a bounded high-water) and the driver-side retention
+  policy (`shuffle_retention_policy`: reaps sealed epochs below the slowest
+  durable consumer cursor, at a cadence, fail-safe).
+- The shuffle producer's streaming combine (`spill.shuffle_stream_combine`):
+  writes a producer's R partition slices into one `.seg` object through a
+  streaming write, byte-identical to what `komira_shuffle`'s `SegWriter` builds.
+  With a byte budget, a partition above the budget is staged in a
+  `SpillStorage` in chunks of at most the budget and streamed back, and the
+  result reports the most bytes the combine itself staged at once, never above
+  the budget. That bounds the combine's own staging, not process memory: the
+  slice the source hands over for a partition is outside it. A failure from the source, the spill storage or the file system is
+  raised to the caller after the spilled chunks are released and the partial
+  write is aborted.
+- Counters, the FNV-1a hash (`spill.fnv1a`), and the small
+  shared row and column helpers (`row`, `group_ref`, `scan_source`,
+  `streaming_morsel`, `dynamic_filter`, `band_sink`).
+- The THSPLC column codec (`spill.thsplc`, `spill.thsplc_header`): a
+  RecordBatch to one contiguous chunk and back, with a zero-copy restore; and
+  the RecordBatch <-> ColumnNativeBatch bridges (`spill.column_native_shims`).
+- Filter by predicate (`column_filter_predicate`): a RecordBatch or a
+  ColumnNativeBatch filtered by a predicate `Expr` with the evaluator a FILTER
+  operator uses (`komira_batch_eval.conjunction.evaluate_filter_narrowed`), so
+  a scan can filter without depending on an operator package.
 
-It depends on `komira_arrow`, `komira_async`, `komira_host`, `komira_morsel`,
-`komira_physical_plan` and the other core packages listed in `BUCK`, and on no
-operator package. Import from the defining
-module, for example `from komira_engine_runtime.morsel_sizing_policy import
-...`; the package has no facade.
+It depends on `komira_arrow`, `komira_async`, `komira_batch_eval`, `komira_fs`,
+`komira_host`, `komira_morsel`, `komira_physical_plan`, `komira_objectstore`,
+`komira_shuffle` and the other core packages listed in `BUCK`, and on no
+operator package. Import from the defining module, for example
+`from komira_engine_runtime.morsel_sizing_policy import ...`; the package has
+no facade.

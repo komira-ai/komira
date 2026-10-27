@@ -70,14 +70,14 @@ test "collect reads every file but the excluded, Markdown and binary data" {
     };
     for (files) |f| {
         if (std.fs.path.dirname(f[0])) |d| try tmp.dir.makePath(d);
-        try tmp.dir.writeFile(f[0], f[1]);
+        try tmp.dir.writeFile(.{ .sub_path = f[0], .data = f[1] });
     }
     const got = try limits.collect(a, tmp.dir, &.{ "tools/limits.tsv", "tools/check/" });
     // Sorted by path; `tools/checker` is not under the excluded directory.
     try std.testing.expectEqual(@as(usize, 2), got.len);
     try std.testing.expectEqualStrings("pkg/BUCK", got[0].path);
     try std.testing.expectEqualStrings("tools/checker", got[1].path);
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     const r = try limits.checkTree(a, "tools/limits.tsv", tsv, got, &out);
     try std.testing.expectEqual(@as(usize, 1), r.findings);
     try std.testing.expect(std.mem.indexOf(u8, out.items, "tools/checker:1") != null);

@@ -12,6 +12,11 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "LIB_SRCS", "selftest_scenario", "unzst")
 
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+
 # ---- The recursion guard ----------------------------------------------------
 # Every inner command passes `-c komira_selftest.inner=true`; under it every
 # scenario is incompatible (`never` is a constraint no platform has) and is
@@ -47,16 +52,16 @@ zig_test(
     exec_compatible_with = LINUX_X86_64,
     src = "unzst.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 zig_exe(
     name = "unzst",
     exec_compatible_with = LINUX_X86_64,
     src = "unzst.zig",
-    unit_tests = [":unzst_unit"],
+    unit_tests = [":unzst_unit", _ZIG_VERSION],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 unzst(
@@ -76,7 +81,7 @@ zig_test(
     src = "lib/lib_test.zig",
     imports = LIB_SRCS,
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 # ---- Scenarios ---------------------------------------------------------------
@@ -88,6 +93,10 @@ selftest_scenario(name = "uquery_select_branches")
 selftest_scenario(name = "analysis_refusals_platform_table")
 
 selftest_scenario(name = "analysis_refusals_mojo")
+
+selftest_scenario(name = "analysis_refusals_mopm_artifacts")
+
+selftest_scenario(name = "analysis_refusals_adopt_deps")
 
 selftest_scenario(name = "analysis_refusals_aws_client")
 
@@ -105,11 +114,23 @@ selftest_scenario(name = "analysis_refusals_node")
 
 selftest_scenario(name = "planted_red_builds_node")
 
+selftest_scenario(name = "planted_red_builds_npm_modules")
+
+selftest_scenario(name = "analysis_refusals_zig_rules")
+
+selftest_scenario(name = "planted_red_builds_zig_rules")
+
+selftest_scenario(name = "planted_red_builds_mojo_hang")
+
+selftest_scenario(name = "planted_red_builds_abi_golden")
+
 selftest_scenario(name = "analysis_refusals_rust")
 
 selftest_scenario(name = "analysis_refusals_coverage")
 
 selftest_scenario(name = "config_refusals")
+
+selftest_scenario(name = "rerun")
 
 selftest_scenario(name = "graph_check_refusals")
 

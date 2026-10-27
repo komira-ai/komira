@@ -8,6 +8,12 @@ tests are Zig too. The script is not ported as one runner with a table of cases.
 check moves to the cheapest place that can still fail. This doc lists every check, says where it goes and
 which planted defect proves it can go red. The conversion then lands in slices (the last section).
 
+Historical note: this design was written when the pull request's check was kci's per-change stage. Its
+`derive_checks`, `build_targets.sh`, `affected` units and `--plan` are gone: `pr.yml` selects with
+[`affected.bxl`](../../tools/build/ci/affected.bxl), builds the aggregate `//ci:pr` or the targets named,
+and runs the graph checks and the `test_weld` lints itself ([ci.md](../ci.md#pryml-the-pull-requests-check)).
+Read those names below as the mechanism of their time.
+
 Status: slices 1 to 3 have landed; the rest is design. Today the script runs on a schedule in the build-system
 self-test workflow ([ci.md](../ci.md#build-system-self-tests)) and is not the gate. When the conversion is done, every
 check runs in `pr / check`, and nothing runs on a schedule.
@@ -312,15 +318,15 @@ goes with the last row that uses it.
 | 43 tracer, parent_fails, killed, banner, lostdir, refused, longarg, lingers, generated | cov_run decisions | 2 | cov_run (Zig port) unit tests with stand-ins | report the last child's status | 7 |
 | 43 proc | `lingerproc`: `/proc is not readable as this run's own` | 2 + 3 | cov_run unit test with an injected process-table root it cannot read; `coverage_gate_reds` keeps the real fixture, since only a real kernel proves the read | treat an unreadable `/proc` as no survivors | 7 |
 | 43 lost, shared_lib_skip | unmapped source; `--must-contain` | del + 3 | existing cov_normalize cases; `coverage_analysis` row for the `--map` prefixes | ignore `--must-contain` | 5 |
-| 43 data_clash, data_buckout | analysis refusals | 3 | `analysis_refusals_coverage` | delete the buck-out check | 3 |
+| 43 data_clash, data_import | analysis refusals | 3 | `analysis_refusals_coverage` | delete the import-name check | 3 |
 | 43 shared_lib_switch, 46 switch_*, published | builds under the switch | 3 | `coverage_switch` | no version script at `-O0` | 5 |
 | 46 enforce reds | enforce gates exit 3 with the banner; the conda package, not the library or a dependent, is blocked | 2 + 3 | gate step unit test; `coverage_gate_reds` (each enforce fixture red with the banner, `covlow_user` and the libraries green) | always census mode; the conda join skips the gate | 7 |
 | 46 shared_lib_run | a shared library's driver fails under kcov (`COVERAGE RUN FAILED`) while its published file builds | 3 | `coverage_gate_reds` (the published file green, then the driver's run red with the message) | cov_run exits 0 when the driver fails under kcov | 4 |
 | 46 finding texts | each red names its own finding (BelowTarget line/branch with the percent, BranchNotMeasured, NotMeasured, UnmeasuredFile, `### Findings (1)`) | 3 | `coverage_gate_reds`: each red's expected text is its finding line. covcheck's `test_cli.mojo` and the e2e `summary.md` golden already cover the rendering; they do not cover which finding a real fixture under kcov yields | count a try arm as taken | 4 |
 | 46 not_test_only | `src/testsuite` is not test-only | 3 | `coverage_analysis` | prefix match without a segment boundary | 5 |
 | 46 census_malformed | exit 1 fails in every mode | 2 | gate step unit test | exit 1 treated like 3 | 7 |
-| 46 floor | a Regression is red in census mode; its conda package red; `covfloor_held` green | 2 + 3 | covcheck ratchet test plus gate unit test; `coverage_gate_reds` (census-mode red with the Regression line) | census mode ignores regressions | 7 |
-| 46 census_doc_edited, floor_lowered, pin_no_reason | census check reds | 2 | census tool (Zig port) unit tests | compare only line counts | 7 |
+| 46 held | a held metric below the target is a Regression, red in census mode; its conda package red; `covnotheld` green | 2 + 3 | covcheck held test plus gate unit test; `coverage_gate_reds` (census-mode red with the Regression line) | census mode ignores regressions | 7 |
+| 46 census_doc_edited, reached_not_held, held_malformed | census check reds | 2 | census tool (Zig port) unit tests | compare only line counts | 7 |
 | 46 mojo_test_conda | the conda waits for a named mojo_test's run | 3 | `coverage_keys` row | drop coverage_tests runs from the join | 5 |
 | 46 mojo_test refusals, test_path, shared_lib_enforce | analysis refusals | 3 | `analysis_refusals_coverage` | delete the no-args check | 3 |
 | 46 codegen, coverage_tests_analysis, no_gate | gate counts under the switch; ledger | 3 | `coverage_analysis` | add a gate to a coverage_tests library | 5 |
@@ -451,7 +457,7 @@ filters them. The one change to `build_targets.sh` is for the graph checks, not 
   only on its Zig binary, the helper library, the pinned buck2 and tools from `tools/build` and the
   toolchains cell. It names every target its inner builds build as a string argument, never as a
   dependency or as `data`. So no file outside those reaches it. A change to `tools/build/**` answers
-  `WIDENED` ([`rules.txt`](../../tools/build/ci/rules.txt)): every unit, `build_selftests` included,
+  `WIDENED` (`rules.txt`, since replaced by [`rules.bzl`](../../tools/build/ci/rules.bzl)): every unit, `build_selftests` included,
   and the scenarios' own code is under `tools/build`, so changing a scenario runs the scenarios. The
   same rules widen on `.buckconfig`, the buck2 pin and wrapper, `prelude/**` and `third_party/**`, so
   those changes run the scenarios too.
