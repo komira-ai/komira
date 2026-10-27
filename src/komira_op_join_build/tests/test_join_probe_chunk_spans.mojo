@@ -18,6 +18,9 @@
 #     a NULL probe row walking a chain, in `probe_inner_into`,
 #     `count_inner_matches` and the chunked probe. NULL rows carry the value 0
 #     and the other side holds a real 0, so a missed skip emits a pair.
+#   * `test_build_with_bloom_null_keys_match_nothing`: the prefilled-bloom
+#     build linking a NULL build key (value 0) so that a real 0 probe row
+#     pairs with it.
 #   * `test_phase_split_resumes_mid_chain`: the phase-split walk cutting a
 #     chain at the end of a chunk and resuming it in the next call, which
 #     would lose or repeat the pairs of the cut chain.
@@ -26,7 +29,13 @@
 from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_arrow.primitive_array import PrimitiveArray
-from komira_op_join_build.join import HashJoinBuilder, ProbeInnerState
+from komira_dynamic_filter.bloom_filter import BloomFilter
+from komira_op_join_build.join import (
+    HashJoinBuilder,
+    ProbeInnerState,
+    _hash_join_key,
+    _join_bloom_hash_family,
+)
 from komira_op_join_build.join_probe_phase_split import (
     JOIN_PS_BATCH,
     JOIN_PS_MIN_HEADROOM,
@@ -216,10 +225,42 @@ def test_null_keys_match_nothing() raises:
     assert_equal(len(bm2), 0, "all-NULL build")
 
 
+def test_build_with_bloom_null_keys_match_nothing() raises:
+    # Build rows: 0 (real), 0 (NULL, value 0), 5, 5 (NULL), 5 (real).
+    var bv: List[Int] = [0, 0, 5, 5, 5]
+    var bn: List[Bool] = [False, True, False, True, False]
+    var keys = _nullable_keys(bv, bn)
+    var bloom = BloomFilter.with_ndv_fpp(
+        len(bv), 0.01, _join_bloom_hash_family()
+    )
+    for i in range(len(bv)):
+        var k = Int64(bv[i])
+        bloom.insert_join_key(k, _hash_join_key(k))
+    var b = HashJoinBuilder.build_with_bloom(keys, bloom^)
+    # Probe rows: 0 (real), 0 (NULL), 5 (real), 5 (NULL), 9 (absent).
+    var pv: List[Int] = [0, 0, 5, 5, 9]
+    var pn: List[Bool] = [False, True, False, True, False]
+    var probe = _nullable_keys(pv, pn)
+    var bm = List[Int]()
+    var pm = List[Int]()
+    b.probe_inner_into(probe, bm, pm)
+    var want_b: List[Int] = [0, 4, 2]
+    var want_p: List[Int] = [0, 2, 2]
+    assert_equal(len(bm), 3, "only the real pairs")
+    var seen = 0
+    for i in range(len(bm)):
+        for j in range(3):
+            if bm[i] == want_b[j] and pm[i] == want_p[j]:
+                seen += 1
+    assert_equal(seen, 3, "exactly the real pairs")
+    assert_equal(b.count_inner_matches(probe), 3, "count_inner_matches")
+
+
 def test_phase_split_resumes_mid_chain() raises:
     # 64 distinct keys, eight build rows each, plus one key with 1500 build
-    # rows; 600 probe rows over 80 keys so some miss. The chunk capacity is the smallest the phase-split walk
-    # accepts, far below the pair total, so chains are cut at chunk ends.
+    # rows; 600 probe rows over 80 keys so some miss. The chunk capacity is
+    # the smallest the phase-split walk accepts, far below the pair total,
+    # so chains are cut at chunk ends.
     var bv = List[Int]()
     for k in range(64):
         for _ in range(8):
