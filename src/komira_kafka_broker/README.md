@@ -9,6 +9,11 @@ The broker half of the Kafka server. `komira_kafka_server` holds the Kafka wire 
 | `kafka_compression` | `decompress_kafka_records` (a records blob by codec id), `decode_record_batches_decompressing` (a message set to a flat record list), `decode_producer_batches_decompressing` (a message set to one `DecodedProducerBatch` per batch, with its producer id, epoch, sequence range and transactional bit) |
 | `kafka_fetch_compress` | `compress_kafka_records` (the inverse), `fetch_compression_codec_name` |
 | `group_offsets` | `GroupOffsetStore`, committed offsets as objects in a `komira_objectstore` conditional-write store |
+| `group_coordinator` | `GroupCoordinator`, the JoinGroup / SyncGroup / Heartbeat / LeaveGroup state machine over a conditional-write store; `JoinResult` |
+| `group_state` | `GroupState`, `GroupMember`, the `GROUP_STATE_*` names, `encode_group_state_json`, `decode_group_state_json` |
+| `group_membership` | `reconcile_members` (which members a closing round carries), `assignment_is_valid` (whether a leader's SyncGroup may complete the round) |
+| `group_assignor` | `range_assign`, `pick_protocol_name` |
+| `group_clock` | `GroupClock`, `SystemGroupClock`, `ManualGroupClock` |
 | `envelope_bridge` | `kafka_records_to_envelope`, `envelope_to_kafka_records`, `envelope_schema` |
 
 ## Compression
@@ -128,6 +133,76 @@ assert_equal(all[0].topic, "orders")
 
 var body = encode_offset_json(CommittedOffset(Int64(5), String("x"), Int64(3)))
 assert_equal(decode_offset_json(body).offset, Int64(5))
+```
+
+## Consumer-group coordinator
+
+`GroupCoordinator` runs the consumer-group rebalance for `subscribe()` consumers with no process holding the group. A group is one object, `<cluster>/_meta/groups/<group>/state.json` (`GroupState`: generation, leader, protocol, state, rebalance deadline, session timeout, the instant the round opened, and the members with their subscription and assignment blobs). Every change is a compare-and-swap on that object (`If-None-Match` for the first writer, `If-Match` after), and a lost swap re-reads and decides again, so two coordinators over one store serialize.
+
+The states are `Empty`, `PreparingRebalance`, `CompletingRebalance` and `Stable`. A `join_group` that finds the group `Stable` or `Empty` opens a round: generation plus one, a deadline of the clock's now plus `rebalance_timeout_ms`, and `round_opened_ms` stamped. A join that finds a round open (`Preparing` or `Completing`) joins it at its generation, and drops a `Completing` round back to `Preparing`, so members joining at different coordinators converge on one generation. It then polls the stored state and waits on the clock between polls (`JOIN_POLL_INTERVAL_MS`) until every member has rejoined at the generation or the deadline has passed.
+
+When the window closes, `reconcile_members` fixes the member set. A member at the current generation stays. A member at an older generation is carried into the new one only if its session is alive (`now - last_active_ms < session_timeout_ms`) and it was active within `GHOST_STALE_GRACE_MS` of the instant the round opened; otherwise it is dropped, so a stale id left by a consumer that reconnected under a new member id cannot widen the leader's split. The leader is the smallest member id at the generation and is stored once per generation, so every member's response names the same leader. The leader's response lists the members and their subscriptions; a follower's list is empty.
+
+`sync_group` from the leader checks the assignment with `assignment_is_valid` before it stores it and moves the group to `Stable`. The leader is told to rejoin (`REBALANCE_IN_PROGRESS`) if the round was reopened, a member at the generation is not in the assignment, a partition goes to a member not at the generation, a partition is assigned twice, or the assigned partitions are not the contiguous range `0..max`. A follower polls until `Stable` and reads back its own blob. `heartbeat` answers `NONE` for a `Stable` group at the member's generation, `REBALANCE_IN_PROGRESS` otherwise, `UNKNOWN_MEMBER_ID` for a member not in the group, and refreshes the member's `last_active_ms` with a best-effort swap; `leave_group` removes the member, bumps the generation and returns the group to `Preparing`, or to `Empty` when it was the last member. `range_assign` is Kafka's range assignor.
+
+Every timestamp and every wait goes through the coordinator's `GroupClock`. `SystemGroupClock` reads the Unix wall clock and sleeps; `ManualGroupClock` moves only through `set`, `advance` and `sleep_ms` (which moves it by the wait), so a session timeout fires when the test moves the clock past it and a deadline wait ends without a real wait.
+
+```mojo
+from std.testing import assert_equal
+from komira_kafka_broker import (
+    GroupCoordinator,
+    GROUP_STATE_COMPLETING,
+    GROUP_STATE_EMPTY,
+    GROUP_STATE_STABLE,
+    ManualGroupClock,
+    range_assign,
+)
+from komira_kafka_server.wire import KafkaEncoder
+from komira_kafka_server.wire.consumer_group import (
+    CONSUMER_PROTOCOL_VERSION,
+    decode_consumer_assignment,
+    encode_consumer_assignment,
+)
+from komira_objectstore.shared_in_memory_conditional_store import (
+    SharedInMemoryConditionalStore,
+)
+
+var coordinator = GroupCoordinator[SharedInMemoryConditionalStore, ManualGroupClock](
+    SharedInMemoryConditionalStore(), String("cluster-1"), ManualGroupClock(Int64(1000))
+)
+
+var enc = KafkaEncoder()
+enc.put_int16(CONSUMER_PROTOCOL_VERSION)
+enc.put_array_len(1)
+enc.put_string(String("orders"))
+enc.put_int32(Int32(-1))
+var subscription = enc.take_bytes()
+
+var protocols = List[String]()
+protocols.append(String("range"))
+var joined = coordinator.join_group(
+    String("g"), String(""), String("client"), protocols, subscription, Int32(0)
+)
+assert_equal(joined.generation_id, Int32(1))
+assert_equal(joined.leader_id, joined.member_id)
+assert_equal(len(joined.members), 1)
+assert_equal(coordinator.load_state(String("g")).value().state, String(GROUP_STATE_COMPLETING))
+
+var members = List[String]()
+members.append(joined.member_id.copy())
+var split = range_assign(members, String("orders"), 4)
+var ids = List[String]()
+ids.append(joined.member_id.copy())
+var blobs = List[List[UInt8]]()
+blobs.append(encode_consumer_assignment(split))
+var synced = coordinator.sync_group(String("g"), joined.member_id.copy(), joined.generation_id, ids, blobs)
+assert_equal(synced[1], Int16(0))
+assert_equal(len(decode_consumer_assignment(synced[0])[0].partitions), 4)
+assert_equal(coordinator.load_state(String("g")).value().state, String(GROUP_STATE_STABLE))
+assert_equal(coordinator.heartbeat(String("g"), joined.member_id.copy(), Int32(1)), Int16(0))
+
+assert_equal(coordinator.leave_group(String("g"), joined.member_id.copy()), Int16(0))
+assert_equal(coordinator.load_state(String("g")).value().state, String(GROUP_STATE_EMPTY))
 ```
 
 ## The envelope
