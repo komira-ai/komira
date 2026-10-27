@@ -1,6 +1,7 @@
 //! komira_pack: the `conda-install` command (a package unpacked into a clean prefix).
 //!
 //! usage: komira_pack conda-install --dir D --prefix P [--runtime-lib NAME=FILE]...
+//!                                  [--require-depend "NAME ==VERSION"]...
 //!
 //! D holds one `.conda`. Its pkg tar is written under P as an installer does:
 //! every member at its path, a regular file with its mode, a symbolic link as
@@ -15,6 +16,11 @@
 //! runtime of the `mojo-compiler` requirement), which this command cannot
 //! resolve; the caller names them. A name the package already ships is
 //! refused, as two packages owning one path are.
+//!
+//! Each `--require-depend R` demands that `depends` of the package's
+//! info/index.json hold the requirement R verbatim (`mojo-compiler ==<pin>`):
+//! the runtime libraries are taken from the toolchain, so only this shows the
+//! package itself asks for the compiler that provides them.
 //!
 //! Nothing is searched, downloaded or run: the prefix holds what the package
 //! and the named files hold, so a program loading from it shows what an
@@ -127,6 +133,17 @@ pub fn addRuntime(alloc: Alloc, root: std.fs.Dir, name: []const u8, data: []cons
     return refuse(alloc, "runtime library {s} would overwrite lib/{s}, which the package ships", .{ name, name });
 }
 
+/// Refuses unless `depends` of `index` (info/index.json, parsed) holds `want`.
+pub fn requireDepend(alloc: Alloc, index: json.Value, want: []const u8) Error!void {
+    if (index != .object) return refuse(alloc, "info/index.json is not an object", .{});
+    const deps = index.object.get("depends") orelse return refuse(alloc, "info/index.json has no `depends`", .{});
+    if (deps != .array) return refuse(alloc, "info/index.json `depends` is not a list", .{});
+    for (deps.array.items) |d| {
+        if (d == .string and std.mem.eql(u8, d.string, want)) return;
+    }
+    return refuse(alloc, "info/index.json `depends` does not hold `{s}`", .{want});
+}
+
 fn theConda(alloc: Alloc, dir_path: []const u8) ![]const u8 {
     var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch |err|
         fail("cannot open {s}: {s}", .{ dir_path, @errorName(err) });
@@ -142,11 +159,19 @@ fn theConda(alloc: Alloc, dir_path: []const u8) ![]const u8 {
 }
 
 pub fn cmdCondaInstall(alloc: Alloc, a: Args) !void {
-    allow(a, &.{ "--dir", "--runtime-lib" });
+    allow(a, &.{ "--dir", "--runtime-lib", "--require-depend" });
     const bytes = readAll(alloc, try theConda(alloc, need(one(a, "--dir"), "--dir")));
     const parts = try pack_conda_check.readParts(alloc, bytes);
     const paths_tar = pack_conda.findTar(parts.info, "info/paths.json") orelse fail("package: no info/paths.json", .{});
     const paths = try json.parseFromSliceLeaky(json.Value, alloc, paths_tar.data, .{});
+    const index_tar = pack_conda.findTar(parts.info, "info/index.json") orelse fail("package: no info/index.json", .{});
+    const index = try json.parseFromSliceLeaky(json.Value, alloc, index_tar.data, .{});
+    for (try all(alloc, a, "--require-depend")) |want| {
+        requireDepend(alloc, index, want) catch |err| switch (err) {
+            error.Refused => fail("{s}", .{why}),
+            else => return err,
+        };
+    }
     const prefix = need(a.prefix, "--prefix");
     try std.fs.cwd().makePath(prefix);
     var root = try std.fs.cwd().openDir(prefix, .{});
@@ -275,4 +300,27 @@ test "a runtime library beside the package, and one that would overwrite it" {
     try testing.expect(std.mem.indexOf(u8, why, "would overwrite lib/libx.so") != null);
     try testing.expectError(error.Refused, addRuntime(alloc, tmp.dir, "sub/libx.so", "x"));
     try testing.expectError(error.Refused, addRuntime(alloc, tmp.dir, "libempty.so", ""));
+}
+
+fn indexDoc(alloc: Alloc, deps: []const []const u8) !json.Value {
+    var list = pack_common.newArray(alloc);
+    for (deps) |d| try list.array.append(pack_common.str(d));
+    var doc = pack_common.newObject(alloc);
+    try doc.object.put("depends", list);
+    return doc;
+}
+
+test "a package that does not depend on the pinned compiler is refused" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const with = try indexDoc(alloc, &.{ "__linux", "__glibc >=2.34", "mojo-compiler ==1.0.0" });
+    try requireDepend(alloc, with, "mojo-compiler ==1.0.0");
+    const without = try indexDoc(alloc, &.{ "__linux", "__glibc >=2.34" });
+    try testing.expectError(error.Refused, requireDepend(alloc, without, "mojo-compiler ==1.0.0"));
+    try testing.expect(std.mem.indexOf(u8, why, "does not hold `mojo-compiler ==1.0.0`") != null);
+    // Another pin is not the pin.
+    const other = try indexDoc(alloc, &.{"mojo-compiler ==0.9.0"});
+    try testing.expectError(error.Refused, requireDepend(alloc, other, "mojo-compiler ==1.0.0"));
+    try testing.expectError(error.Refused, requireDepend(alloc, pack_common.newObject(alloc), "x"));
 }

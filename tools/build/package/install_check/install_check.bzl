@@ -12,7 +12,9 @@ shared library loaded from there.
 
 Two actions, in two processes:
 
-  1. `komira_pack conda-install` writes the package's files into an empty
+  1. `komira_pack conda-install` first refuses a package whose info/index.json
+     `depends` lacks `mojo-compiler ==<pin>` (the runtime comes from the
+     toolchain, so only this shows the package asks for it). It then writes the package's files into an empty
      directory, as an installer does, held to the package's own
      info/paths.json (hashes, sizes, links). Then the libraries the package's
      requirements install beside it are written to the same lib/: the Mojo
@@ -33,6 +35,7 @@ files with a package manager and runs the same load again (docs/design/native_pa
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
+load("@komira//tools/build/package:conda.bzl", "MOJO_COMPILER_VERSION")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "row")
 
@@ -52,6 +55,8 @@ def _impl(ctx):
             package,
             "--prefix",
             prefix.as_output(),
+            "--require-depend",
+            "mojo-compiler ==" + MOJO_COMPILER_VERSION,
             [cmd_args("--runtime-lib", cmd_args(tc.compiler.project("lib/" + n), format = n + "={}")) for n in runtime],
         ),
         category = "conda_install",
