@@ -234,7 +234,8 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
     With `abi_lib`, emits a shared library straight from `main`, a file of
     `@export` C-ABI functions: no generated entry and no `komira_main`.
     DT_SONAME is the output's file name (the caller names it, with no `lib`
-    prefix forced) and the run path is the default `$ORIGIN/lib`.
+    prefix forced) and the run path is the default `$ORIGIN/lib`
+    (`mojo_shared_lib` adds `$ORIGIN` on Linux through `link_extra`).
     `link_extra` is appended to the link tail after the C libraries (the
     force-loaded archives of mojo_shared_lib). `link_head` is put before
     them (the owners' shared libraries of mojo_shared_lib: a symbol one of
@@ -914,6 +915,14 @@ def _shared_lib_impl(ctx):
             )
             limit = cmd_args(script, format = "-Wl,--version-script={}")
         link_extra = cmd_args(link_extra, limit) if link_extra else cmd_args(limit)
+
+    if not darwin:
+        # The run path also names the library's own directory: an installed
+        # package puts the library in `<prefix>/lib`, where the Mojo
+        # runtime it is NEEDED on is installed beside it, so `$ORIGIN/lib`
+        # (the `lib/` the gate stages) alone finds nothing there. lld joins
+        # the two `-rpath` into one DT_RUNPATH.
+        link_extra = cmd_args(link_extra, "-Wl,-rpath,$ORIGIN") if link_extra else cmd_args("-Wl,-rpath,$ORIGIN")
 
     # The owners' shared libraries (`native_owners`): linked ahead of the C
     # archives, so the library is NEEDED on each owner's SONAME and the

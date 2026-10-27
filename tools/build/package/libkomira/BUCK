@@ -1,0 +1,38 @@
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load("@komira//tools/build/package/install_check:install_check.bzl", "conda_install_check")
+
+# libkomira as a conda package. The package is komira_so's own: the library's
+# `.mojoc` and `lib/libkomira.so` (the one shared library every SDK loads),
+# with a `lib_files` row for the library in its metadata. Its requirements are
+# the Mojo compiler pin (the package whose `lib/` holds the Mojo runtime the
+# library is NEEDED on, libKGENCompilerRTShared.so and what that loads), the
+# glibc floor of the platform table, and komira_so's Mojo dependencies, all at
+# the release's version and build. The plain `komira_so_conda` of the library
+# is the same package without the shared library: a release declares one of
+# the two.
+conda_package(
+    name = "komira_so_libkomira_conda",
+    lib = "//src/komira_so:komira_so",
+    shared_lib = "//src/komira_so:libkomira",
+    summary = "libkomira, the shared library with komira's flat C API, and the Mojo library it is built from.",
+    visibility = ["PUBLIC"],
+)
+
+# The package installed into an empty prefix, with the Mojo runtime its
+# requirements install beside it, and the library loaded from there with
+# RTLD_NOW: the four exports resolve, the version is at least 1.0, and every
+# runtime library the loader maps is the prefix's.
+conda_install_check(
+    name = "libkomira_install",
+    lib = "libkomira.so",
+    min_version = 1000,
+    package = ":komira_so_libkomira_conda",
+    symbols = [
+        "komira_abi_version",
+        "komira_ctx_free",
+        "komira_ctx_new",
+        "komira_last_error",
+    ],
+    version_symbol = "komira_abi_version",
+    visibility = ["PUBLIC"],
+)
