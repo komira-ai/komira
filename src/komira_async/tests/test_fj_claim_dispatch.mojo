@@ -31,7 +31,8 @@
 #      {0, 1} and can never reach tid 1 while it is blocked inside tid 0, so
 #      one task never runs and the blocked task waits for it forever. Under
 #      fork-join claiming the other workers drain the queue and it completes. The
-#      deadline exists only so a RED costs seconds instead of hanging the lane.
+#      blocked task spins with no deadline: a static split makes this case hang,
+#      which the hang limit armed in main ends.
 #
 # MUTANTS THESE CASES CATCH (each RED on its own case(s), the rest GREEN):
 #   * `fetch_add(0)` for `fetch_add(1)` in the claim loop
@@ -47,9 +48,9 @@
 # so "the cases went red" is distinguishable from "the fixture is broken".
 # =============================================================================
 
+from std.ffi import external_call
 from komira_atomic_alias import AtomicI64
 from std.memory import OwnedPointer, UnsafePointer, alloc
-from std.time import perf_counter_ns
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_async.cancellation.token import CancellationToken
@@ -130,30 +131,21 @@ struct _MarkSegment(Segment, Deinitable):
 struct _BlockState(KeepAlive, Movable, Deinitable):
     """Task 0 blocks until `done` reaches `need`; every other task bumps `done`.
 
-    `timed_out` is set by the blocking task if the deadline passes — the RED
-    signal, so a static-split arm reports a failure in bounded time instead of
-    hanging the lane."""
+    The blocking task spins until `done` reaches `need`, with no deadline: a
+    static-split arm never completes, and the hang limit armed in main ends
+    the hang."""
 
     var done: OwnedPointer[AtomicI64]
-    var timed_out: OwnedPointer[AtomicI64]
     var need: Int64
-    var deadline_ns: Int64
 
-    def __init__(out self, need: Int64, deadline_ns: Int64):
+    def __init__(out self, need: Int64):
         var d = alloc[AtomicI64](1)
         # SAFETY: fresh allocation we own.
         d[] = AtomicI64(Int64(0))
         self.done = OwnedPointer[AtomicI64](
             unsafe_from_raw_pointer=d,
         )
-        var t = alloc[AtomicI64](1)
-        # SAFETY: fresh allocation we own.
-        t[] = AtomicI64(Int64(0))
-        self.timed_out = OwnedPointer[AtomicI64](
-            unsafe_from_raw_pointer=t,
-        )
         self.need = need
-        self.deadline_ns = deadline_ns
 
 
 @fieldwise_init
@@ -171,11 +163,8 @@ struct _BlockSegment(Segment, Deinitable):
         if task_id != Int64(0):
             _ = sp[].done[].fetch_add(Int64(1))
             return
-        var t0 = perf_counter_ns()
         while sp[].done[].load() < sp[].need:
-            if Int64(perf_counter_ns() - t0) > sp[].deadline_ns:
-                _ = sp[].timed_out[].fetch_add(Int64(1))
-                return
+            pass
 
 
 # -----------------------------------------------------------------------------
@@ -294,29 +283,42 @@ def test_claim_absorbs_a_task_the_static_split_would_strand() raises:
 
     Static split: worker 0 owns {0, 1} and runs them IN ORDER, so tid 1 cannot
     start until tid 0 returns and tid 0 cannot return until tid 1 has run —
-    `done` tops out at n-2 and the deadline fires. Claiming: the other workers
+    `done` tops out at n-2 and task 0 never returns. Claiming: the other workers
     drain every id, `done` reaches n-1, tid 0 returns immediately.
 
-    The assertion is `timed_out == 0` EXACTLY. Flipping the gate default to OFF
-    is the mutant, and it reds here after the deadline rather than hanging."""
+    The dispatch returning at all is the property (a static split hangs here);
+    `done` is then asserted exactly."""
     var w = 4
     var n = 2 * w
     var rt = _make_started_runtime(w)
     ref d = rt.dispatcher()
     assert_true(d.claim_enabled())
     assert_true(d.worker_count() >= 2)
-    var s = _BlockState(Int64(n - 1), Int64(4_000_000_000))
+    var s = _BlockState(Int64(n - 1))
     var seg = _BlockSegment(_pad=0)
     var back = d.run_with_state[_BlockState, _BlockSegment](
         s, seg^, n, CancellationToken.never(),
     )
     _ = back^
-    assert_equal(s.timed_out[].load(), Int64(0))
     assert_equal(s.done[].load(), Int64(n - 1))
     rt.shutdown()
 
 
+# Hang limit. A library's tests run as build actions, which have no timeout, and
+# the waits in this file have no deadline of their own (they wait on an event,
+# not on a clock). A regression that loses the event would hold a worker with
+# no verdict, so the process arms SIGALRM once, far above any run: its default
+# action kills the process (exit 142) and the build action fails. No test reads
+# this limit; a run that completes never meets it.
+comptime _HANG_LIMIT_S: Int = 600
+
+
+def _arm_hang_limit():
+    _ = external_call["alarm", UInt32](UInt32(_HANG_LIMIT_S))
+
+
 def main() raises:
+    _arm_hang_limit()
     test_conservation_holds_in_both_arms()
     test_claim_setting_selects_the_arm()
     test_off_arm_runs_the_static_range()

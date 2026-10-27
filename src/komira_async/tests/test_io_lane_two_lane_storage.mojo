@@ -26,11 +26,10 @@
 # — MOCK has no such ceiling.
 # =============================================================================
 
-from komira_atomic_alias import AtomicI64
 from std.ffi import external_call
+from komira_atomic_alias import AtomicI64
 from std.memory import alloc, ArcPointer, OwnedPointer
 from std.testing import assert_equal, assert_true
-from std.time import perf_counter_ns
 from std.sys.info import CompilationTarget
 
 from komira_async.ops.waker_sink import NoopSink
@@ -101,18 +100,17 @@ struct _IoHitWork(ErasableWork):
         return STEP_DONE
 
 
-def _spin_until_hit(flag: ArcPointer[_HitFlag], want: Int64, budget_ms: Int) -> Bool:
-    """Bounded wait for the IO lane to run `want` posted tasks. True iff it did
-    within the budget. Deliberately a BOUNDED wait, not a `shutdown()` — the
-    whole point is to prove the work runs while the runtime is LIVE."""
-    var deadline = UInt64(perf_counter_ns()) + UInt64(budget_ms) * UInt64(
-        1_000_000
-    )
-    while UInt64(perf_counter_ns()) < deadline:
-        if flag[].load() >= want:
-            return True
-        _ = external_call["usleep", Int32](UInt32(1_000))
-    return flag[].load() >= want
+# Consecutive reads of an IO worker's sleeping flag that count it as parked.
+comptime _PARKED_READS: Int = 10_000_000
+
+
+def _wait_until_hit(flag: ArcPointer[_HitFlag], want: Int64):
+    """Waits for the IO lane to run `want` posted tasks, with no deadline: a
+    post that is never run is a hang, which the hang limit armed in main kills the run.
+    Deliberately not a `shutdown()` — the whole point is to prove the work runs
+    while the runtime is LIVE."""
+    while flag[].load() < want:
+        pass
 
 
 # -----------------------------------------------------------------------------
@@ -269,10 +267,10 @@ def test_io_lane_post_runs_on_a_parked_io_worker() raises:
     posted task sat in the queue until `shutdown()`'s final drain ran it at
     TEARDOWN. The counters said `posts > 0` and the lane looked wired.
 
-    FAILS ON CURRENT CODE (pre-fix): after the 120 ms settle below, the single IO
+    FAILS ON CURRENT CODE (pre-fix): after the settle below, the single IO
     worker has spun out its window and parked indefinitely. `post_to_io_lane`
-    pushes and does not wake, so `_spin_until_hit` exhausts its budget with the
-    flag still 0 and the `assert_true` fails. The assertion is deliberately made
+    pushes and does not wake, so the wait for the flag never ends
+    (the hang limit armed in main kills the run). The assertion is deliberately made
     BEFORE `shutdown()`, because a post-shutdown assertion would pass even on the
     broken code (the final drain runs it) — that is exactly how the bug hid.
 
@@ -285,10 +283,23 @@ def test_io_lane_post_runs_on_a_parked_io_worker() raises:
     rt.attach_io_workers(1, _noop_sink_factory, BACKEND_EPOLL)
     rt.start()
 
-    # SETTLE: let the IO worker exhaust its spin window and PARK. Without this
-    # the pre-fix code could pass spuriously by draining the post while still
-    # spinning — the guard would then not falsify the bug it exists for.
-    _ = external_call["usleep", Int32](UInt32(120_000))
+    # SETTLE: wait for the IO worker to exhaust its spin window and PARK, which
+    # it announces by storing its sleeping flag. The flag is also 1 for the
+    # worker's last few instructions before the blocking poll (it re-checks its
+    # queue after storing it), and a post landing in that window is picked up
+    # without a wake: the guard would then pass spuriously and not falsify the
+    # bug it exists for. So the flag must read 1 on a long unbroken run of
+    # reads (a count of reads, not a time): a worker still in that window
+    # cannot hold it for ten million reads, a parked one holds it indefinitely.
+    # The IO worker sits after the compute workers in the slab.
+    var io_idx = rt.worker_count()
+    var io_handle = rt.worker_at(io_idx).wake_handle()
+    var parked_reads = 0
+    while parked_reads < _PARKED_READS:
+        if io_handle.sleeping_flag_load() == Int32(0):
+            parked_reads = 0
+        else:
+            parked_reads = parked_reads + 1
 
     var flag = ArcPointer[_HitFlag](_HitFlag())
     assert_equal(flag[].load(), Int64(0))
@@ -299,7 +310,7 @@ def test_io_lane_post_runs_on_a_parked_io_worker() raises:
     assert_true(accepted)
 
     # THE ASSERTION THAT MATTERS — the work ran while the runtime was LIVE.
-    assert_true(_spin_until_hit(flag, Int64(1), 3000))
+    _wait_until_hit(flag, Int64(1))
     assert_equal(flag[].load(), Int64(1))
 
     rt.shutdown()
@@ -377,7 +388,21 @@ def test_spill_prefetcher_carries_a_wake_handle_per_sender() raises:
     rt.shutdown()
 
 
+# Hang limit. A library's tests run as build actions, which have no timeout, and
+# the waits in this file have no deadline of their own (they wait on an event,
+# not on a clock). A regression that loses the event would hold a worker with
+# no verdict, so the process arms SIGALRM once, far above any run: its default
+# action kills the process (exit 142) and the build action fails. No test reads
+# this limit; a run that completes never meets it.
+comptime _HANG_LIMIT_S: Int = 600
+
+
+def _arm_hang_limit():
+    _ = external_call["alarm", UInt32](UInt32(_HANG_LIMIT_S))
+
+
 def main() raises:
+    _arm_hang_limit()
     test_io_lane_attach_keeps_worker_count_compute_only()
     test_io_lane_zero_is_noop_non_smt_path()
     test_no_io_lane_worker_count_identical_to_single_lane()
