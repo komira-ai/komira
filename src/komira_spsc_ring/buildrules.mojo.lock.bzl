@@ -58,7 +58,7 @@ GRAPH_JSON = r'''{
       "root": "src/komira_spsc_ring/src/komira_spsc_ring",
       "srcs": [
         {"path": "src/komira_spsc_ring/src/komira_spsc_ring/__init__.mojo", "sha256": "6fb32bef9c058db14a75eac780e4a7200782f83156abb7d07150f4137b8eeec1"},
-        {"path": "src/komira_spsc_ring/src/komira_spsc_ring/_test_threads.mojo", "sha256": "d56fa58d58d02c222c2a19d8cc32e84dd83fd777853158990f770ee74d8c8c6f"},
+        {"path": "src/komira_spsc_ring/src/komira_spsc_ring/_test_threads.mojo", "sha256": "497e8a468a2625e7c934b2d7f2ec8c5c8bfa7af6f9892d8ad304669d8d8ba25c"},
         {"path": "src/komira_spsc_ring/src/komira_spsc_ring/spsc_ring.mojo", "sha256": "9b56b9d498298178e91644ec5f459485399f1c57a0f5641affcab7f3ff39e641"}
       ],
       "deps": ["komira_atomic_alias@0.1.0#mojo1.0.0/lib", "komira_collections@0.1.0#mojo1.0.0/lib"],
@@ -169,7 +169,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "root": "src/komira_spsc_ring/src/komira_spsc_ring",
       "srcs": [
         {"path": "src/komira_spsc_ring/src/komira_spsc_ring/__init__.mojo", "sha256": "6fb32bef9c058db14a75eac780e4a7200782f83156abb7d07150f4137b8eeec1"},
-        {"path": "src/komira_spsc_ring/src/komira_spsc_ring/_test_threads.mojo", "sha256": "d56fa58d58d02c222c2a19d8cc32e84dd83fd777853158990f770ee74d8c8c6f"},
+        {"path": "src/komira_spsc_ring/src/komira_spsc_ring/_test_threads.mojo", "sha256": "497e8a468a2625e7c934b2d7f2ec8c5c8bfa7af6f9892d8ad304669d8d8ba25c"},
         {"path": "src/komira_spsc_ring/src/komira_spsc_ring/spsc_ring.mojo", "sha256": "9b56b9d498298178e91644ec5f459485399f1c57a0f5641affcab7f3ff39e641"}
       ],
       "deps": ["komira_atomic_alias@0.1.0#mojo1.0.0/lib", "komira_collections@0.1.0#mojo1.0.0/lib"],
@@ -277,7 +277,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "root": "src/komira_spsc_ring/src/komira_spsc_ring",
       "srcs": [
         {"path": "src/komira_spsc_ring/src/komira_spsc_ring/__init__.mojo", "sha256": "6fb32bef9c058db14a75eac780e4a7200782f83156abb7d07150f4137b8eeec1"},
-        {"path": "src/komira_spsc_ring/src/komira_spsc_ring/_test_threads.mojo", "sha256": "d56fa58d58d02c222c2a19d8cc32e84dd83fd777853158990f770ee74d8c8c6f"},
+        {"path": "src/komira_spsc_ring/src/komira_spsc_ring/_test_threads.mojo", "sha256": "497e8a468a2625e7c934b2d7f2ec8c5c8bfa7af6f9892d8ad304669d8d8ba25c"},
         {"path": "src/komira_spsc_ring/src/komira_spsc_ring/spsc_ring.mojo", "sha256": "9b56b9d498298178e91644ec5f459485399f1c57a0f5641affcab7f3ff39e641"}
       ],
       "deps": ["komira_atomic_alias@0.1.0#mojo1.0.0/lib", "komira_collections@0.1.0#mojo1.0.0/lib"],

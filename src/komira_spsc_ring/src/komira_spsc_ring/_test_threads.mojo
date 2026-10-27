@@ -92,7 +92,6 @@ struct _NoFault(SpawnFault):
     def __init__(out self):
         pass
 
-    @always_inline
     def fail_rc(self, index: Int) -> Int32:
         return Int32(0)
 
