@@ -20,10 +20,9 @@
 # //src/komira_job_supervisor:komira_job_supervisor.
 #
 # FAIL-FIRST: with the pre-fix post-exit-only drain, the poll loop below would
-# spin until `spins` is exhausted WITHOUT the child ever being collected (the
-# child is wedged on write()), so `child_exited` stays False and the COMPLETED
-# assert fails (and in the real prod loop it would hang). The bounded spin cap
-# turns the would-be hang into a deterministic FAIL.
+# spin WITHOUT the child ever being collected (the child is wedged on
+# write()): the loop waits for the exit, which never comes, and the build
+# gate's hang limit ends the run (in the real prod loop it would hang).
 #
 # PASS-AFTER: the incremental drain keeps the pipe empty; the child writes all
 # >128 KiB, exits 0, the job supervisor reaps it (child_exited), captures EVERY line
@@ -115,18 +114,13 @@ def test_chatty_child_no_deadlock_full_capture() raises:
 
     # Drive the poll loop. With the incremental drain each poll_and_drain reads
     # whatever stdout is ready, so the child never blocks and exits promptly.
-    # The bounded spin cap turns a would-be hang (pre-fix) into a deterministic
-    # FAIL rather than an actual hang.
-    var spins = 0
-    while not job_supervisor.child_exited and spins < 2000:
+    # The exit is the event waited for: the wait has no bound of its own.
+    while not job_supervisor.child_exited:
         job_supervisor.poll_and_drain()
-        if job_supervisor.child_exited:
-            break
         _sleep_ms(2)
-        spins += 1
 
-    # FAIL-FIRST evidence: pre-fix this assert fails — the child is wedged on
-    # write() and is never collected, so child_exited stays False.
+    # FAIL-FIRST evidence: pre-fix the loop above never ends — the child is
+    # wedged on write() and is never collected.
     assert_true(
         job_supervisor.child_exited,
         "chatty child was reaped (no deadlock — the incremental drain kept the"
@@ -190,13 +184,9 @@ def test_chatty_child_stdout_budget_truncation() raises:
     )
     job_supervisor.spawn_child_spec(ChildSpec.shell(cmd))
 
-    var spins = 0
-    while not job_supervisor.child_exited and spins < 2000:
+    while not job_supervisor.child_exited:
         job_supervisor.poll_and_drain()
-        if job_supervisor.child_exited:
-            break
         _sleep_ms(2)
-        spins += 1
 
     # The child still finishes + is reaped (the drain still empties the pipe;
     # only the in-memory CAPTURE is bounded — the child's writes still succeed).
