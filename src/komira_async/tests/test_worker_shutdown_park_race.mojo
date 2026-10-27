@@ -20,7 +20,7 @@
 # saw the shutdown leaves the park bracket and stores 0; a worker that lost
 # the wake keeps 1 forever. The test waits for the flag to read 0 with no
 # deadline, so a worker that lost the wake leaves that wait (and the test)
-# hanging: the hang limit armed in `main` (SIGALRM) kills the process and the
+# hanging: the build gate's hang limit stops the process and the
 # build action fails. A lost wake is therefore a failure, not a verdict the
 # test names; the trial number is not reported.
 #
@@ -34,7 +34,6 @@
 # in `Worker.run_until_shutdown`.
 # =============================================================================
 
-from std.ffi import external_call
 from std.sys.info import CompilationTarget
 from std.testing import assert_equal
 
@@ -88,20 +87,6 @@ def test_shutdown_signal_at_park_is_not_lost() raises:
     assert_equal(trial, TRIALS)
 
 
-# Hang limit. A library's tests run as build actions, which have no timeout, and
-# the waits in this file have no deadline of their own (they wait on an event,
-# not on a clock). A regression that loses the event would hold a worker with
-# no verdict, so the process arms SIGALRM once, far above any run: its default
-# action kills the process (exit 142) and the build action fails. No test reads
-# this limit; a run that completes never meets it.
-comptime _HANG_LIMIT_S: Int = 600
-
-
-def _arm_hang_limit():
-    _ = external_call["alarm", UInt32](UInt32(_HANG_LIMIT_S))
-
-
 def main() raises:
-    _arm_hang_limit()
     test_shutdown_signal_at_park_is_not_lost()
     print("PASS komira_async.runtime worker shutdown at park is not lost")
