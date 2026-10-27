@@ -1,39 +1,31 @@
 # =============================================================================
-# native_spill.mojo — thin Native spill writer/reader over THSPILL2 / THSPLC.
+# native_spill.mojo: spill run writers and readers over THSPLC and THSPILL2.
 # =============================================================================
 #
-# The codecs (`thspill2.mojo` THSPILL2 row, `thsplc.mojo` THSPLC column) and the
-# `SpillStorage` substrate (`filesystem_spill_storage.mojo` /
-# `local_disk.mojo`) are DONE. This file is the thin layer the LIVE spill
-# consumers call: it takes a `RecordBatch` (column grain) or a row body, runs
-# the codec, and writes/reads through a `SpillStorage`-backed file.
+# This file sits on the codecs (`thsplc.mojo` column, `thspill2.mojo` row) and
+# the spill storage (`local_disk.mojo`): it takes a `RecordBatch` (column
+# grain) or a row body, runs the codec, and writes and reads chunks through a
+# `LocalDiskSpillStorage`.
 #
 # # Two grains
 #
-#   * `NativeColumnSpillWriter` / `NativeColumnSpillReader` — RecordBatch (SoA)
-#     via THSPLC. Used by `sort_external._spill_current_run` (external-sort run
-#     spill) and the run-merge read side. Each spilled run is one THSPLC chunk
-#     per batch on a per-run `LocalDiskSpillStorage`.
+#   * `NativeColumnSpillWriter` / `NativeColumnSpillReader`: RecordBatch via
+#     THSPLC, one chunk per batch on a per-run `LocalDiskSpillStorage`.
 #
-#   * `NativeRowSpillWriter` / `NativeRowSpillReader` — opaque row body via
-#     THSPILL2. Used where the operator already owns a fixed-stride row image
-#     (the hash-agg partition `row_data`). The body bytes are byte-identical to
-#     the in-memory row image; restore is a `decode_zerocopy` view + cast.
+#   * `NativeRowSpillWriter` / `NativeRowSpillReader`: an opaque fixed-stride
+#     row image (`NativeRowBlock`) via THSPILL2, one chunk per block. The body
+#     bytes are the in-memory row image.
 #
 # # Why a writer/reader pair (not just the raw codec)
 #
-# The codec produces/consumes a single `SharedAlignedBuffer[HeapRegion]` and the
-# storage moves opaque bytes. Consumers want a batch-stream shape ("write N
-# batches to one run, read them back in order"). This file owns that
-# multi-chunk-per-run bookkeeping (`Slab[ChunkId]`) so the consumers stay
-# small.
+# The codec produces and consumes one buffer and the storage moves opaque
+# bytes. A consumer wants a stream: write N batches to one run, read them back
+# in order. This file keeps the chunk-id bookkeeping (`Slab[ChunkId]`) for that.
 #
 # # Encapsulation rule
 #
-# NO `UnsafePointer` on any public surface. Bytes flow via
-# `SharedAlignedBuffer[HeapRegion]` (inside the codec) and `RecordBatch` /
-# `Schema` at the public boundary. The storage owns all FFI / file I/O. No
-# wildcard origins on any field.
+# No `UnsafePointer` on any public surface. The public boundary carries
+# `RecordBatch`, `Schema` and `NativeRowBlock`; the storage owns the file I/O.
 # =============================================================================
 
 from komira_arrow.record_batch import RecordBatch
@@ -155,14 +147,11 @@ struct NativeColumnSpillReader(Movable):
     starts at 1).
 
     The caller supplies its expected `Schema` per `read_batch` (the operator
-    knows its output shape — THSPLC restore needs it for the 0-copy column
-    rebuild + fingerprint check). The sort path captures the schema and
-    rebuilds it via `_rebuild_schema()`.
+    knows its output shape; THSPLC restore needs it to rebuild the columns and
+    check the fingerprint).
 
-    Restore path: `decode_copy` (the honest, storage-independent baseline). The
-    sort merge holds many runs' batches alive simultaneously and then deletes
-    the spill files, so a 0-copy restore (which would pin the storage) is not
-    the right default here — `decode_copy` produces fully-independent batches.
+    Restore path: `decode_copy`, so each restored batch is independent of the
+    storage and stays valid after the run files are deleted.
 
     Fields:
         _storage:     The owned per-run LocalDiskSpillStorage, re-opened.
@@ -244,12 +233,10 @@ struct NativeColumnSpillReader(Movable):
 # Shared-storage helpers — write/read THSPLC chunks into a CALLER-OWNED storage.
 # =============================================================================
 #
-# PERF: the owned-storage writer/reader above mint ONE storage (one directory)
-# PER spill run; on a multi-run external sort the per-run directory setup cost
-# more than the THSPLC codec. The shared-storage helpers below let a multi-run
-# operator (ExternalSorter) construct ONE storage for the WHOLE sort (one
-# mkdir) and append every run's batches as chunks into it — no per-run
-# directory, no per-run mkdir, no reopen-stat. The operator records the
+# The owned-storage writer and reader above create one storage (one directory)
+# per run. The helpers below let a multi-run operator create one storage for
+# all its runs and append every run's batches as chunks into it: no per-run
+# directory and no reopen. The operator records the
 # `(first_chunk_id, n_batches)` span per run and reads each back by id from the
 # SAME live storage (the ChunkId -> length map is already populated, so no
 # `reopen_chunk` stat is needed).
@@ -298,7 +285,7 @@ struct NativeRowBlock(Spillable):
     re-stride the rows.
 
     Fields:
-        _bytes:       The row image bytes (SAB-backed; gap6-safe POD handle).
+        _bytes:       The row image bytes (shared-buffer backed).
         _row_count:   Logical row count.
         _fingerprint: Schema identity (entry_stride + agg-tag fold).
     """
@@ -338,6 +325,30 @@ struct NativeRowBlock(Spillable):
         row_count: Int64,
         schema_fingerprint: UInt64,
     ) raises -> Self:
+        """Rehydrate a block from decoded bytes. Refuses a negative row count,
+        a nonempty body with no rows and a body whose length is not a whole
+        number of rows. The fingerprint is not checked: this type has no
+        expected schema of its own; the operator compares
+        `schema_fingerprint()` with its own."""
+        var n = Int(bytes.length())
+        if row_count < 0:
+            raise Error(
+                "NativeRowBlock.from_bytes: negative row_count "
+                + String(row_count)
+            )
+        if row_count == 0 and n != 0:
+            raise Error(
+                "NativeRowBlock.from_bytes: "
+                + String(n)
+                + " body bytes but row_count is 0"
+            )
+        if row_count > 0 and n % Int(row_count) != 0:
+            raise Error(
+                "NativeRowBlock.from_bytes: body length "
+                + String(n)
+                + " is not a multiple of row_count "
+                + String(row_count)
+            )
         return Self(bytes^, row_count, schema_fingerprint)
 
     def entry_stride(self) raises -> Int:

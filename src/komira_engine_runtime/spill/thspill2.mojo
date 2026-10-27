@@ -1,69 +1,25 @@
 # =============================================================================
-# thspill2.mojo — THSPILL2 engine encoder + decoder + `Spillable` trait.
+# thspill2.mojo: the THSPILL2 encoder, decoder and the `Spillable` trait.
 # =============================================================================
 #
-# The engine-side substrate every `SpillableOp.spill_to_storage` /
-# `SpillableOp.restore_from_storage` call routes through. The header
-# format lives in `thspill2_header.mojo` (96-byte fixed header).
+# The row-grain spill codec. A `Spillable` exposes its row count, its body
+# bytes and a schema fingerprint; `THSpill2Encoder` writes them as one chunk
+# (a 96-byte header from `thspill2_header.mojo` plus the body) through a
+# `SpillStorage`, and `THSpill2Decoder` reads one back. The codec moves bytes;
+# the conformer owns the body shape.
 #
-# # P-1.B substrate
+# Encode: read `row_count`, `nbytes` and `schema_fingerprint`, allocate one
+# buffer of `96 + nbytes`, pack the header, copy the body, hand the buffer to
+# `storage.write_chunk`.
 #
-# Encoder/decoder + `Spillable` trait. The trait surface lets ANY
-# `Movable + Deinitable` body produce/consume opaque bytes
-# under the THSPILL2 envelope. v0.4 P-1.D wires HashAggUntyped's
-# RowBlock partition as the FIRST production conformer; P-1.E adds
-# SortBuffer's external-run blocks + JoinBuildUntyped's build-side
-# partitions. The codec moves bytes; the operator owns the body shape.
+# Decode: `storage.read_chunk`, parse the header, validate every header field
+# against the chunk, hand the body to `T.from_bytes`. A chunk read from
+# storage is untrusted input: a truncated chunk, a bad magic or version, a
+# negative or oversize length or count, unknown flag bits and a compressed
+# body all raise before the body is touched.
 #
-# # Encoder lifecycle (CALLED BY `SpillableOp.spill_to_storage`)
-#
-#   var encoder = THSpill2Encoder[T]()
-#   var chunk_id = encoder.encode(storage, my_row_block)
-#
-# Internally:
-#   1. Read `src.row_count()` + `src.nbytes()` + `src.schema_fingerprint()`.
-#   2. Allocate ONE OAB of `(96 + body_len)` bytes.
-#   3. Pack header into bytes [0..96) via `pack_header(...)`.
-#   4. Memcpy body bytes into [96..) from `src.as_byte_view()`.
-#   5. Promote OAB → SAB via `from_owned`.
-#   6. Hand SAB to `storage.write_chunk(...)`.
-#   7. Return the resulting `ChunkId`.
-#
-# # Decoder lifecycle (CALLED BY `SpillableOp.restore_from_storage`)
-#
-#   var t = THSpill2Decoder[T].decode(storage, chunk_id)
-#
-# Internally:
-#   1. `storage.read_chunk(chunk_id)` — returns SAB[HeapRegion].
-#   2. Parse 96-byte header via `parse_header(...)`.
-#   3. Validate `buf.length() >= 96 + header.body_length`.
-#   4. Slice body bytes [96..96+body_length).
-#   5. Hand body bytes + row_count + schema_fingerprint to `T.from_bytes`.
-#   6. Return the rehydrated T.
-#
-# # The Spillable trait
-#
-# Today's contract (v0.4 P-1.B): conformers expose row_count, nbytes,
-# schema_fingerprint, and an `as_byte_view()` that yields the bytes the
-# encoder copies into the chunk body. `from_bytes` builds a T from
-# decoded bytes + the header's row_count + schema_fingerprint.
-#
-# Two production conformers in P-1.D / P-1.E:
-#   * HashAggUntyped's RowBlock (P-1.D).
-#   * SortBuffer's RowBlock (P-1.E).
-#
-# Test conformers ship in `tests/engine/test_thspill2_codec.mojo` —
-# `_TestRowBlock` (heap-bytes wrapper just rich enough to exercise
-# the round-trip).
-#
-# # Encapsulation rule
-#
-# - NO `UnsafePointer` on any public surface of `Spillable`,
-#   `THSpill2Encoder`, `THSpill2Decoder`. Bytes flow via
-#   `SharedAlignedBuffer[HeapRegion]` and `ByteView[origin]`.
-# - NO wildcard origins on any struct field.
-# - The internal `memcpy` into the destination OAB is confined to one
-#   site with a `# SAFETY:` block.
+# No pointer type appears on a public surface; the one memcpy into the
+# destination buffer is confined to `copy_from_view_at`.
 # =============================================================================
 
 from std.memory import unsafe_memcpy
@@ -75,6 +31,8 @@ from komira_buffer.heap_region import HeapRegion
 
 from .spill_storage import ChunkId, SpillStorage
 from .thspill2_header import (
+    THSPILL2_FLAG_COMPRESSED_LZ4,
+    THSPILL2_FLAG_KNOWN_MASK,
     THSPILL2_HEADER_SIZE,
     THSpill2Header,
     pack_header,
@@ -88,46 +46,21 @@ from .thspill2_header import (
 
 
 trait Spillable(Movable, Deinitable):
-    """Anything THSPILL2 can serialize.
+    """Anything THSPILL2 can serialize. The body is opaque bytes to the codec.
 
-    P-1.B today serializes row blocks; P-2 layers a parallel
-    `Spillable` conformance over column batches for THSPLC. The trait
-    is identical between row + column conformers — only the body shape
-    differs, and the body is opaque from the codec's perspective.
+    Methods:
+      * `row_count`: logical rows in the chunk, stored in the header.
+      * `nbytes`: body byte length; the encoder allocates exactly
+        `THSPILL2_HEADER_SIZE + nbytes`.
+      * `schema_fingerprint`: the caller's schema identity.
+      * `as_byte_view`: the body bytes the encoder copies, borrowed for the
+        duration of the call; the encoder does not retain the view.
+      * `from_bytes`: static constructor from decoded body bytes plus the
+        header's row count and fingerprint. Ownership of the body buffer
+        transfers to the new value.
 
-    # Methods
-      * `row_count` — logical rows in this chunk. Stored in the header
-        for restore-side O(1) capacity sizing.
-      * `nbytes` — body byte length. The encoder allocates exactly
-        `THSPILL2_HEADER_SIZE + nbytes` bytes for the chunk.
-      * `schema_fingerprint` — caller's schema identity. Restore checks
-        the fingerprint against the operator's expected shape and
-        raises on mismatch (cross-version restore safety).
-      * `as_byte_view` — origin-tracked byte view over the body bytes.
-        The encoder memcpys these bytes into the chunk body. The view
-        is alive for the duration of the call (receiver borrow); the
-        encoder must NOT retain it past the memcpy.
-      * `from_bytes` — static constructor from decoded body bytes +
-        per-header metadata. The body buffer ownership transfers to
-        the new T (typically by moving the SAB onto a `var _bytes`
-        field, or copying into the operator's own storage and
-        dropping the SAB).
-
-    # Lifetime contract for `as_byte_view`
-    Receiver `ref [origin] self`. Returned `ByteView[origin]` is alive
-    for the receiver's borrow lifetime — the encoder uses the view
-    inside `encode(...)` and does NOT retain it. The conformer's body
-    bytes MUST be addressable (heap-resident; SAB-backed; List-backed)
-    so the view is byte-accurate.
-
-    # `from_bytes` and the K parameter
-    `from_bytes` takes `SharedAlignedBuffer[HeapRegion]` (NOT
-    K-parametric). There is room for a K-parametric
-    decode against an mmap-backed restore (`SharedAlignedBuffer
-    [MmapRegion]`), but P-1.A's `SpillStorage.read_chunk` always
-    returns `SharedAlignedBuffer[HeapRegion]`. Conformers that want
-    zero-copy mmap restore land alongside the K-parametric
-    `read_chunk` extension in a follow-up sub-slot.
+    `from_bytes` takes a `SharedAlignedBuffer[HeapRegion]`, which is what
+    `SpillStorage.read_chunk` returns.
     """
 
     def row_count(self) -> Int64:
@@ -139,14 +72,8 @@ trait Spillable(Movable, Deinitable):
         ...
 
     def schema_fingerprint(self) -> UInt64:
-        """Caller's schema identity. Restore checks for mismatch.
-
-        A UInt64 (header version 0x02), to unify with
-        the production FNV-1a-64 fold over the canonical input
-        `entry_stride_le_8B || agg_tag_list_bytes`. See
-        `komira_engine_runtime.spill.fnv1a.fnv1a_64_partition_fingerprint`
-        for the canonical helper.
-        """
+        """The caller's schema identity: a UInt64, canonically the FNV-1a 64
+        fold from `komira_engine_runtime.spill.fnv1a`."""
         ...
 
     def as_byte_view[
@@ -166,17 +93,12 @@ trait Spillable(Movable, Deinitable):
         """Rehydrate from decoded body bytes + header metadata.
         Ownership of `bytes` transfers to the new Self.
 
-        FINGERPRINT CONTRACT (SPILL-FU-DECODE-ROBUSTNESS): a PRODUCTION
-        conformer MUST raise when `schema_fingerprint` does not match its own
-        expected schema identity — the codec is body-opaque and cannot
-        enforce this (it has no expected fingerprint to compare against; see
-        the `THSpill2Decoder` "Fingerprint enforcement" docstring). The codec
-        delivers the header's `schema_fingerprint` here unchanged; enforcing
-        the match is THIS layer's responsibility.
-
-        Conformers SHOULD also raise if `bytes.length()` is inconsistent with
-        the conformer-specific layout for `row_count`, or if the body bytes
-        are otherwise malformed.
+        A conformer must raise when `schema_fingerprint` does not match its
+        own expected schema identity: the codec is body-opaque, has no
+        expected fingerprint to compare against, and delivers the header's
+        value unchanged. A conformer should also raise when `bytes.length()`
+        is inconsistent with its layout for `row_count`, or when the body is
+        otherwise malformed.
         """
         ...
 
@@ -187,59 +109,27 @@ trait Spillable(Movable, Deinitable):
 
 
 struct THSpill2Encoder[T: Spillable]:
-    """Engine-side encoder for THSPILL2 chunks containing a Spillable T.
-
-    The encoder is value-shaped (no fields). The `encode` method is
-    `@staticmethod` — callers do NOT instantiate the encoder; they
-    write `THSpill2Encoder[MyRowBlock].encode(storage, src)`.
-
-    Why static-not-stateful: the encoder has no inter-call state to retain. The
-    method is one allocation + one header pack + one body memcpy +
-    one `write_chunk` — keeping it static lets callers avoid the
-    init/finalize ceremony.
-    """
+    """Encoder for THSPILL2 chunks holding a Spillable T. It has no state;
+    call `THSpill2Encoder[MyRowBlock].encode(storage, src)`."""
 
     @staticmethod
     def encode[
         S: SpillStorage
     ](mut storage: S, var src: Self.T) raises -> ChunkId:
-        """Serialize `src` into a fresh chunk on `storage`. Returns the
-        ChunkId of the written chunk.
-
-        Body shape: `[0..96): THSPILL2 header; [96..96+body_len): body
-        bytes from src.as_byte_view()`.
-
-        Memory: ONE allocation of `(96 + body_len)` bytes. Header is
-        written via `pack_header(...)`. Body is memcpy'd from
-        `src.as_byte_view()`. The OAB is promoted to SAB and handed to
-        `storage.write_chunk` (which consumes the SAB).
-
-        `src` is consumed — after `encode` returns, the source body is
-        no longer accessible (the encoder takes ownership and drops
-        the source's heap allocation after the body memcpy completes).
-
-        Args:
-            storage: The SpillStorage backend to write the chunk to.
-            src:     The Spillable body to serialize. Consumed.
-
-        Returns:
-            ChunkId of the written chunk on `storage`.
+        """Serialize `src` into a fresh chunk on `storage` and return its
+        ChunkId. The chunk is `[0..96)` the header and `[96..96+nbytes)` the
+        body, built in one allocation. `src` is consumed and released after
+        the body copy, before the write.
 
         Raises:
-            * From the body's `as_byte_view()` (conformer-specific).
-            * From `storage.write_chunk(...)` (e.g. budget exceeded,
-              EIO).
-            * From `pack_header(...)` (only if `body_length` would
-              overflow the allocation — defensive; should not fire in
-              practice).
+            If `src.nbytes()` is negative, or from `storage.write_chunk`
+            (budget exceeded, I/O error).
         """
         var body_len = Int(src.nbytes())
         var row_count = src.row_count()
         var fingerprint = src.schema_fingerprint()
 
-        # Defensive check: catch negative nbytes() from a misbehaving
-        # conformer at the codec boundary rather than letting it
-        # propagate into the OAB ctor.
+        # A negative nbytes() from a misbehaving conformer is refused here.
         if body_len < 0:
             raise Error(
                 "THSpill2Encoder.encode: body length is negative ("
@@ -249,50 +139,29 @@ struct THSpill2Encoder[T: Spillable]:
 
         var total = THSPILL2_HEADER_SIZE + body_len
 
-        # Allocate ONE OAB sized exactly for header + body. The OAB
-        # post-condition is `_length == _capacity == total` (padded up
-        # to next 64B boundary internally; `_length == total` for the
-        # logical-write window). Subsequent `write_*_le_at` /
-        # `copy_from_view_at` calls bound on `_length`/`_capacity`
-        # accordingly.
+        # One buffer sized for header + body.
         var oab = OwnedAlignedBuffer(capacity=total)
 
-        # Pack the header into bytes [0..96).
-        # SAFETY: `oab.view_range_mut(0, 96)` returns a Span-flavored
-        # ByteView whose origin is tied to the local `oab`. The
-        # encoder holds `oab` alive across the `pack_header` call;
-        # the span does not escape this scope. `into_span()` derives
-        # a `Span[Byte, view.origin]` for the helper.
+        # Pack the header into bytes [0..96). The span is tied to the local
+        # `oab`, which stays alive across the call.
         var header = THSpill2Header.for_uncompressed(
             body_length=UInt64(body_len),
             row_count=UInt64(row_count),
             schema_fingerprint=fingerprint,
         )
-        # pack_header writes into the first 96 bytes. We pass a
-        # view over the FULL OAB (length=total), not a sub-range, so
-        # the destination span starts at offset 0; pack_header
-        # bounds-checks `dst.len() >= 96` itself.
         var hdr_span = oab.view_mut().into_span()
         pack_header(header, hdr_span)
 
         # Body memcpy [96..96+body_len). Skipped for empty bodies.
         if body_len > 0:
-            # `src.as_byte_view()` returns a ByteView tied to `src`'s
-            # borrow. `src` is held alive across the memcpy by the
-            # encoder's stack frame; `body_view` does NOT escape.
+            # `body_view` borrows `src` and does not escape this block.
             var body_view = src.as_byte_view()
-            # OAB's `copy_from_view_at(dst_offset, src_view)` does a
-            # bounded memcpy. Bound is `_capacity` (>= total), so
-            # offset 96 + body_len fits.
             oab.copy_from_view_at(THSPILL2_HEADER_SIZE, body_view)
-            # `body_view` drops here (does NOT escape).
 
-        # `src` is now consumed — drop it explicitly so its bytes are
-        # released BEFORE we hand `oab` off (cuts peak memory by 1×
-        # body_len).
+        # Release the source before the write to cut peak memory.
         _ = src^
 
-        # Promote OAB → SAB and hand to storage.
+        # Promote to a shared buffer and hand it to storage.
         var sab = SharedAlignedBuffer[HeapRegion].from_owned(oab^)
         return storage.write_chunk(sab^)
 
@@ -303,120 +172,87 @@ struct THSpill2Encoder[T: Spillable]:
 
 
 struct THSpill2Decoder[T: Spillable]:
-    """Engine-side decoder for THSPILL2 chunks holding a Spillable T.
+    """Decoder for THSPILL2 chunks holding a Spillable T. It has no state.
 
-    Symmetric to `THSpill2Encoder`: static, no per-call state. Two
-    restore paths (mirrors `THSPLCDecoder`'s column-side copy / 0-copy
-    split):
+    Two restore paths:
 
-      * `decode_copy(storage, chunk_id)` — memcpy the body bytes into a
-        fresh `OwnedAlignedBuffer` and hand the owning SAB to
-        `T.from_bytes`. The honest baseline: the restored T is fully
-        independent of the storage chunk (which drops at end of call).
-      * `decode_zerocopy(storage, chunk_id)` — hand `T.from_bytes` a
-        `SharedAlignedBuffer.from_borrowed_view(raw, 96, body_len)`
-        Arc-clone slice over the storage chunk's bytes. NO body memcpy;
-        the restored T keeps the source storage pinned via the cloned
-        Arc refcount on `raw`.
+      * `decode_copy(storage, chunk_id)` copies the body into a fresh buffer
+        and hands it to `T.from_bytes`; the restored T is independent of the
+        storage chunk. `decode` is an alias.
+      * `decode_zerocopy(storage, chunk_id)` hands `T.from_bytes` a borrowed
+        slice of the chunk's buffer: no body copy, and the slice holds a
+        reference to the chunk's buffer, so the restored T stays valid after
+        the storage releases the chunk or is destroyed.
 
-    `decode` is retained as an alias for `decode_copy` (the original
-    P-1.B contract) so existing call sites do not churn.
+    Both paths read the chunk, parse the header, validate it against the
+    chunk's length (see `_parse_and_validate`), then call `T.from_bytes`.
 
-    Both paths:
-      1. Call `storage.read_chunk(chunk_id)` to fetch the raw bytes.
-      2. Parse the 96-byte header.
-      3. Validate the SAB's length covers `96 + header.body_length`.
-      4. Build the body SAB (fresh OAB-copy for copy; borrowed-view
-         slice for 0-copy).
-      5. Hand the body SAB + row_count + schema_fingerprint to
-         `T.from_bytes(...)`.
+    The body begins at byte 96 and the chunk's base is 64-byte aligned, so
+    the body is at least 16-byte aligned: enough for typed row-field loads. A
+    conformer that needs a 64-byte-aligned body uses `decode_copy` or
+    `realign_to[64]()` on the body buffer.
 
-    # 0-copy row restore — eligibility (be honest)
-
-    The body starts at byte offset 96 in the chunk. The encoder writes
-    the body as a byte-identical copy of `src.as_byte_view()` — i.e. the
-    operator's IN-MEMORY row image. So the borrowed-view slice IS the
-    in-memory row block, restored with no payload allocation. This is the
-    "spill bytes == in-memory bytes, restore = view+cast" thesis applied
-    to the row grain.
-
-    ALL THSPILL2 row shapes are 0-copy-eligible at the codec layer,
-    because the body is OPAQUE BYTES from the codec's perspective and the
-    conformer's `from_bytes` already owns the body shape. There is no
-    AoS<->SoA transpose and no per-field value transform.
-
-    Alignment: `THSPILL2_HEADER_SIZE == 96`, and `96 % 16 == 0` (the
-    header was sized so the body inherits 16-byte alignment relative to
-    the chunk base — see `thspill2_header.mojo` §96-byte layout). The
-    chunk's own base pointer is 64-aligned (OAB allocates 64-aligned;
-    `from_owned` preserves it), so the body slice base is at least
-    16-aligned — enough for any 8/16-byte-wide typed row-field load the
-    operator performs (matches THSPLC's column-side eligibility stance:
-    element-by-element typed loads, no whole-buffer 64B-SIMD demand at
-    the codec layer).
-
-    A conformer that genuinely needs the body 64-byte aligned for a
-    whole-block SIMD pass (none in v0.4's row-restore consumers) should
-    call `decode_copy` or `realign_to[64]()` on the body SAB itself —
-    that is the documented copy-fallback. No row shape forces a copy for
-    correctness today.
-
-    # Fingerprint enforcement — WHICH LAYER (SPILL-FU-DECODE-ROBUSTNESS)
-
-    Unlike THSPLC (whose decoder owns the caller's expected `Schema` and so
-    can recompute + compare the fingerprint itself), the THSPILL2 codec is
-    body-OPAQUE: it knows only the fingerprint the encoder WROTE (carried in
-    the header), NOT the fingerprint the restoring operator EXPECTS. The
-    expected schema identity lives with the conformer (`T.from_bytes`), so
-    fingerprint enforcement MUST happen there — the codec cannot compare
-    against a value it does not possess.
-
-    What the codec guarantees: it faithfully DELIVERS `header.row_count` and
-    `header.schema_fingerprint` (exactly as written, after release-build
-    length/magic/version validation) to `T.from_bytes`. A conforming
-    `from_bytes` MUST raise when `schema_fingerprint` does not match its own
-    expected shape (the trait docstring's "Conformers MAY raise ... if
-    schema_fingerprint does not match" is hereby the REQUIRED contract for any
-    production conformer). v0.4 ships no production THSPILL2 row conformer;
-    the robustness test suite drives a conformer that enforces the
-    fingerprint and proves the codec delivers the (possibly-corrupt) header
-    fingerprint through to it unchanged.
+    The codec cannot check the fingerprint: it knows the one the encoder
+    wrote, not the one the restoring operator expects. It delivers the
+    header's `row_count` and `schema_fingerprint` unchanged and the
+    conformer's `from_bytes` enforces the fingerprint.
     """
 
     @staticmethod
     def _parse_and_validate(
         raw: SharedAlignedBuffer[HeapRegion],
     ) raises -> THSpill2Header:
-        """Shared prologue for both decode paths: parse + validate the
-        header against `raw`'s length. Returns the parsed header; the
-        caller owns `raw` and decides copy-vs-borrow on the body."""
-        # Parse the header from the leading 96 bytes.
-        # `raw.as_view()` returns ByteView[origin] over the full SAB
-        # bytes. `into_span()` gives a Span we can pass to
-        # `parse_header`. parse_header itself bounds-checks `>= 96` and
-        # raises on bad magic / unknown version.
+        """Parse the header of `raw` and validate each field against it.
+
+        Raises on: a buffer shorter than a header, a bad magic or version
+        (from `parse_header`); a `row_count` or `body_length` of 2^63 or more;
+        flag bits this reader does not know; the compressed flag (the codec
+        writes and restores uncompressed bodies only); an
+        `uncompressed_body_length` that differs from `body_length`; and a
+        `96 + body_length` larger than the buffer. Every check precedes any
+        allocation or slice of the body.
+        """
         var raw_view = raw.as_view()
         var raw_span = raw_view.into_span()
         var header = parse_header(raw_span)
 
-        # RELEASE-BUILD body-length sanity. `body_length` is UInt64 on the
-        # wire; a corrupt chunk can declare an absurd value. Reject anything
-        # whose Int64 reinterpretation is negative (>= 2^63) BEFORE it feeds
-        # the `declared_total` comparison — otherwise the negative would make
-        # `raw.length() < declared_total` falsely pass and the body slice
-        # (decode_copy `view_range_ro` / decode_zerocopy `from_borrowed_view`,
-        # both debug_assert-only) would read past the chunk in release.
+        # The wire fields are UInt64; a value of 2^63 or more reads as a
+        # negative Int64 and would pass a `length < declared_total` check.
         var body_length_i64 = Int64(header.body_length)
         if body_length_i64 < 0:
             raise Error(
                 "THSpill2Decoder.decode: header.body_length="
                 + String(header.body_length)
-                + " is absurd (>= 2^63) — corrupt chunk"
+                + " is absurd (>= 2^63) - corrupt chunk"
+            )
+        if Int64(header.row_count) < 0:
+            raise Error(
+                "THSpill2Decoder.decode: header.row_count="
+                + String(header.row_count)
+                + " is absurd (>= 2^63) - corrupt chunk"
+            )
+        if (header.flags & ~THSPILL2_FLAG_KNOWN_MASK) != 0:
+            raise Error(
+                "THSpill2Decoder.decode: header.flags="
+                + String(Int(header.flags))
+                + " has unknown bits set - corrupt chunk"
+            )
+        if (header.flags & THSPILL2_FLAG_COMPRESSED_LZ4) != 0:
+            raise Error(
+                "THSpill2Decoder.decode: compressed bodies are not"
+                " supported"
+            )
+        if header.uncompressed_body_length != header.body_length:
+            raise Error(
+                "THSpill2Decoder.decode: uncompressed_body_length="
+                + String(header.uncompressed_body_length)
+                + " differs from body_length="
+                + String(header.body_length)
+                + " on an uncompressed chunk - corrupt chunk"
             )
 
-        # Verify the SAB covers header + body.
         var declared_total = Int64(THSPILL2_HEADER_SIZE) + body_length_i64
-        if raw.length() < declared_total:
+        if declared_total < 0 or raw.length() < declared_total:
             raise Error(
                 "THSpill2Decoder.decode: storage returned "
                 + String(Int(raw.length()))
@@ -432,49 +268,27 @@ struct THSpill2Decoder[T: Spillable]:
     def decode_copy[
         S: SpillStorage
     ](storage: S, chunk_id: ChunkId) raises -> Self.T:
-        """Read + parse + rehydrate, memcpy-ing the body into a fresh
-        owning OAB. The restored T is fully independent of the storage
-        chunk. This is the honest baseline restore path.
+        """Read, validate and rehydrate, copying the body into a fresh
+        buffer. The restored T is independent of the storage chunk.
 
-        Raises if:
-          * `storage.read_chunk` raises (e.g. invalid chunk_id, EIO).
-          * `parse_header` raises (bad magic / unknown version).
-          * The chunk buffer is shorter than `96 + body_length`
-            declared by the header.
-          * `T.from_bytes` raises (conformer-specific).
-
-        Args:
-            storage:  SpillStorage backend the chunk lives on.
-            chunk_id: Handle minted by a prior `THSpill2Encoder.encode`
-                      on the same storage.
-
-        Returns:
-            Rehydrated T (independent of the storage chunk).
+        Raises if `storage.read_chunk` raises, if `_parse_and_validate`
+        refuses the chunk, or if `T.from_bytes` raises.
         """
         var raw = storage.read_chunk(chunk_id)
         var header = Self._parse_and_validate(raw)
         var body_len = Int(header.body_length)
 
-        # Copy body bytes into a fresh OAB and promote to SAB.
         var body_oab = OwnedAlignedBuffer(capacity=body_len)
         if body_len > 0:
-            # SAFETY: slice off the first 96 bytes via
-            # `raw.view_range_ro(96, body_len)` and memcpy into the
-            # fresh OAB. Both source + dest pointers carry valid
-            # origins; the memcpy is bounded by body_len which is
-            # `<= raw.length() - 96` (verified in _read_and_validate).
+            # `_parse_and_validate` proved 96 + body_len <= raw.length().
             var body_src_view = raw.view_range_ro(
                 THSPILL2_HEADER_SIZE, body_len
             )
             body_oab.copy_from_view(body_src_view)
 
-        # Drop `raw` here — body bytes now owned by body_oab. The
-        # storage's SAB Arc refcount decrements as the caller's scope ends.
         _ = raw^
 
-        var body_sab = SharedAlignedBuffer[HeapRegion].from_owned(
-            body_oab^
-        )
+        var body_sab = SharedAlignedBuffer[HeapRegion].from_owned(body_oab^)
 
         return Self.T.from_bytes(
             body_sab^,
@@ -486,55 +300,24 @@ struct THSpill2Decoder[T: Spillable]:
     def decode_zerocopy[
         S: SpillStorage
     ](storage: S, chunk_id: ChunkId) raises -> Self.T:
-        """Read + parse + rehydrate with NO body memcpy. `T.from_bytes`
-        receives a `SharedAlignedBuffer.from_borrowed_view(raw, 96,
-        body_len)` Arc-clone slice over the storage chunk's bytes — the
-        restored T aliases the in-memory row image and keeps the source
-        storage pinned via the cloned Arc refcount.
+        """Read, validate and rehydrate with no body copy. `T.from_bytes`
+        receives a borrowed slice `[96, 96 + body_length)` of the chunk's
+        buffer. The slice holds a reference to the buffer, so the restored T
+        remains valid after this call returns, after the storage releases the
+        chunk and after the storage is destroyed.
 
-        SAFETY / lifetime: the borrowed body SAB clones `raw`'s
-        ArcPointer (refcount++), so the source chunk's bytes stay alive
-        for as long as the restored T (and therefore its body SAB) is
-        alive — even after `raw` itself drops at the end of this call.
-        This is exactly the THSPLC column 0-copy contract, applied to the
-        opaque row body.
-
-        Eligibility: all THSPILL2 row shapes (see the struct docstring's
-        "0-copy row restore" section). The body is opaque bytes; the
-        16-byte body alignment (96 % 16 == 0; 64-aligned chunk base)
-        satisfies the operator's typed row-field loads.
-
-        Raises if:
-          * `storage.read_chunk` raises (e.g. invalid chunk_id, EIO).
-          * `parse_header` raises (bad magic / unknown version).
-          * The chunk buffer is shorter than `96 + body_length`
-            declared by the header.
-          * `T.from_bytes` raises (conformer-specific).
-
-        Args:
-            storage:  SpillStorage backend the chunk lives on.
-            chunk_id: Handle minted by a prior `THSpill2Encoder.encode`
-                      on the same storage.
-
-        Returns:
-            Rehydrated T aliasing the chunk's resident bytes.
+        Raises if `storage.read_chunk` raises, if `_parse_and_validate`
+        refuses the chunk, or if `T.from_bytes` raises.
         """
         var raw = storage.read_chunk(chunk_id)
         var header = Self._parse_and_validate(raw)
         var body_len = Int(header.body_length)
 
-        # Build a borrowed-view body SAB over [96, 96+body_len) of `raw`.
-        # The borrow Arc-clones `raw`'s region (refcount++), so the source
-        # bytes stay pinned for the restored T's lifetime — no payload
-        # memcpy. For an empty body, an offset-0 zero-length borrow is
-        # still well-formed (from_borrowed_view bounds-checks
-        # offset+length <= owner._length).
+        # An empty body is a well-formed zero-length borrow at offset 96.
         var body_sab = SharedAlignedBuffer[HeapRegion].from_borrowed_view(
             raw, Int64(THSPILL2_HEADER_SIZE), Int64(body_len)
         )
 
-        # Drop `raw` here — the body SAB holds its own Arc clone of the
-        # source region, so the storage bytes remain pinned.
         _ = raw^
 
         return Self.T.from_bytes(
@@ -547,8 +330,5 @@ struct THSpill2Decoder[T: Spillable]:
     def decode[
         S: SpillStorage
     ](storage: S, chunk_id: ChunkId) raises -> Self.T:
-        """Back-compat alias for `decode_copy` (the original P-1.B
-        contract). Existing call sites keep working unchanged; new
-        callers that want the 0-copy restore call `decode_zerocopy`.
-        """
+        """Alias for `decode_copy`."""
         return Self.decode_copy(storage, chunk_id)
