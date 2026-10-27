@@ -5,8 +5,8 @@ files becomes a table any Iceberg engine reads by pointing at the object store;
 there is no catalog service. A commit is a create-if-absent write of the next
 metadata file, so concurrent writers never overwrite each other.
 
-This part holds the metadata layer on top of the table model. The data-file and
-delete-file writers, the reader and the table writer follow in later parts.
+This part holds the Parquet data leg, the delete files and the reader on top of
+the metadata layer and the table model. The table writer follows in a later part.
 
 ## What it holds
 
@@ -17,6 +17,9 @@ delete-file writers, the reader and the table writer follow in later parts.
 | `iceberg_partition` | `PartitionSpec` with the `identity` and `bucket[N]` transforms, the murmur3 bucket hash, per-row partition values, a path-safe partition key, routing rows to partitions |
 | `iceberg_metadata_json` | the table `metadata.json`, the schema and partition-spec documents, snapshot objects and the `schema.name-mapping.default` property |
 | `iceberg_avro_manifest`, `iceberg_avro_manifest_read` | the manifest list and manifest file (Avro) encoders with the spec's field ids, and decoders for the manifests this package writes |
+| `iceberg_parquet_data` | typed rows to a Parquet data file (bytes in memory, no file opened) and back, in file-absolute row order |
+| `iceberg_delete_writer` | the equality-delete and position-delete files (Avro) and their decoders |
+| `iceberg_reader` | the merge-on-read reader: current metadata version -> manifest list -> manifests -> data and delete files, equality deletes by key and position deletes by (path, position) honoring sequence numbers |
 | `iceberg_row_value` | the Avro row form of a typed cell, and the encode-boundary type check |
 | `iceberg_summary` | reading the current snapshot's `summary` map back |
 | `iceberg_version` | which metadata version is current: the `version-hint.text` number, then every higher `v<N>.metadata.json` that exists |
@@ -67,6 +70,19 @@ Where it does not follow the spec, or does less:
   (and what a caller stamps); the cumulative delete totals (`total-delete-files`,
   `total-position-deletes`, `total-equality-deletes`) and `total-files-size` are
   not written.
+- Delete files are Avro (the spec allows any file format). The position-delete
+  schema is the spec's (`file_path` id 2147483546, `pos` id 2147483545), but an
+  engine that reads only Parquet delete files will not apply them. Equality
+  delete files carry the table's field ids with the column named `f<id>`.
+- Data files carry no `PARQUET:field_id` column metadata: a reader binds the
+  columns to field ids through the `schema.name-mapping.default` table
+  property.
+- Equality deletes on a nullable column are refused by the writer (null
+  equality-key semantics are not implemented in the merge predicate).
+- The reader honors the sequence-number rules (equality: strictly lower data
+  sequence; position: data sequence <= delete sequence) but loads every data
+  file and compares each row with every delete key: it is a reference reader,
+  not a scan engine, and does not prune by partition or bounds.
 - The manifest decoders read the manifests this package writes, positionally.
   They do not resolve another writer's schema, and they do not skip entries
   whose status is DELETED (this package never writes one).

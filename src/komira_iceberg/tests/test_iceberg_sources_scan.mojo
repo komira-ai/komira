@@ -37,9 +37,12 @@ comptime _FILES: List[String] = [
     "iceberg_avro_manifest.mojo",
     "iceberg_avro_manifest_read.mojo",
     "iceberg_bounds.mojo",
+    "iceberg_delete_writer.mojo",
     "iceberg_json_scan.mojo",
     "iceberg_metadata_json.mojo",
+    "iceberg_parquet_data.mojo",
     "iceberg_partition.mojo",
+    "iceberg_reader.mojo",
     "iceberg_row_value.mojo",
     "iceberg_summary.mojo",
     "iceberg_types.mojo",
@@ -189,6 +192,9 @@ def test_imports_only_its_deps() raises:
         "komira_buffer",
         "komira_iceberg",
         "komira_objectstore",
+        "komira_parquet",
+        "komira_parquet_api",
+        "komira_parquet_writer",
         "komira_rowcell",
     ]
     var files = materialize[_FILES]()
