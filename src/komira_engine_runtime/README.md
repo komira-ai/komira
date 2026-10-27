@@ -3,20 +3,20 @@
 The engine's execution primitives. **No algorithm logic**: anything an
 operator or a sink consumes but does not implement belongs here.
 
-- The host profile (`host_profile`): the engine build, hardware shape, worker
-  threads, memory budget and spill tiers a host lowers under. It is measured
-  once per host process (`detect_host_profile`, which calls
-  `hardware_detect.detect_hardware_profile`) and then passed by value;
-  `reference_host_profile` is a constant profile for comparing lowered plans
-  across machines.
-- Hardware and topology (`hardware`, `hardware_detect`, `hardware_topology`,
+- Detection of the host profile: `host_detect.detect_host_profile` measures
+  the host once per host process (it calls
+  `hardware_detect.detect_hardware_profile`) and returns the
+  `komira_host_profile.host_profile.HostProfile` value, which is then passed
+  by value. `hardware_detect.default_hardware_profile` is the fallback profile
+  a failed probe returns. The value types, the morsel sizing policy and the
+  L1-chunk predicate live in `komira_host_profile`, which depends on no file
+  system, object store or async runtime package.
+- Hardware and topology detection (`hardware_detect`, `hardware_topology`,
   `machine_topology`, `l2_share`) and the async runtime construction derived
   from them (`engine_runtime_build`).
-- Morsel sizing: `morsel_sizing_policy` is a pure function of
-  `(host_profile, segment, schema)`; the host records its answer in the
-  physical plan (`SegmentDescPod.morsel_rows`, `record_segment_morsel_rows`).
-  Dispatch-time fan-out and fork grain (`fan_out_grain`), the L1-chunk
-  predicate (`l1_chunk_sizing`) and grain geometry (`grain_geometry`).
+- Dispatch-time fan-out and fork grain (`fan_out_grain`) and grain geometry
+  (`grain_geometry`); the morsel size itself is recorded by the host when it
+  lowers (`komira_host_profile.morsel_sizing_policy`).
 - The run and segment execution context (`run_context`, `segment_execution`):
   no optimizer, and one path for bounded and unbounded input.
 - Memory and spill: `memory.reservation.MemoryReservation` is the tally a
@@ -70,8 +70,8 @@ operator or a sink consumes but does not implement belongs here.
   a scan can filter without depending on an operator package.
 
 It depends on `komira_arrow`, `komira_async`, `komira_batch_eval`, `komira_fs`,
-`komira_host`, `komira_morsel`, `komira_physical_plan`, `komira_objectstore`,
+`komira_host`, `komira_host_profile`, `komira_morsel`, `komira_physical_plan`, `komira_objectstore`,
 `komira_shuffle` and the other core packages listed in `BUCK`, and on no
 operator package. Import from the defining module, for example
-`from komira_engine_runtime.morsel_sizing_policy import ...`; the package has
+`from komira_engine_runtime.host_detect import ...`; the package has
 no facade.

@@ -286,19 +286,27 @@ leaf. **The HostProfile value is split from detection instead.** The move list (
   `host_profile.mojo` (`HostProfile`, `reference_host_profile`, the spill-tier helpers, without `detect_host_profile`) and
   `morsel_sizing_policy.mojo` (without `from_defaults`; imports `komira_physical_plan`). The four modules are about 1,700
   lines, and their four test files about 1,300, which move with them.
-- **Stays in `komira_engine_runtime`:** `hardware_detect`, `hardware_topology`, `machine_topology`, `l2_share`, and a
-  new module `host_detect` holding `detect_host_profile` and `default_hardware_profile()` (the body of the former
-  `defaults()`, the one reader of the core-count snapshot). The three `HardwareProfile.defaults()` calls of
-  `hardware_detect` call it; `MorselSizingPolicy.from_defaults` had one user, `test_inmem_source` (two calls), which uses
-  `for_host(reference_host_profile(...))`; the tests of `test_hardware_profile` that call `defaults()` (five calls) split off, stay in `komira_engine_runtime` and call
-  `default_hardware_profile()`.
+- **Stays in `komira_engine_runtime`:** `hardware_detect`, `hardware_topology`, `machine_topology`, `l2_share`, a
+  new module `host_detect` holding `detect_host_profile`, and `default_hardware_profile()` (the body of the former
+  `defaults()`, the one reader of the core-count snapshot), which is in `hardware_detect` and not in `host_detect`:
+  `host_detect` imports `hardware_detect`, and the three former `HardwareProfile.defaults()` calls of `hardware_detect`
+  call `default_hardware_profile()`, so a home in `host_detect` would be an import cycle.
+  `MorselSizingPolicy.from_defaults` had one user, `test_inmem_source` (two calls), which uses
+  `for_host(reference_host_profile(...))`. The tests that called `defaults()` or `detect_host_profile` (the document
+  counted five calls in `test_hardware_profile`; there were eight there, and more in `test_host_profile`,
+  `test_morsel_sizing_policy`, `test_hardware_profile_detect` and `test_hw_ecore_l2_morsel_sizing`) split off or stay in
+  `komira_engine_runtime`: `test_host_detect` (the fallback profile, the probe and `detect_host_profile`),
+  `test_run_context` and `test_fan_out_grain` are new files there, and the leaf's formula tests build their fallback-shaped
+  profile from the `DEFAULT_*` constants.
 - **The leaf's closure** is the closure of `komira_arrow` and `komira_physical_plan`, read from their `BUCK` `deps`: 20
   packages (`komira_arrow`, `komira_arrow_ipc`, `komira_async_api`, `komira_atomic_alias`, `komira_buffer`,
   `komira_collections`, `komira_compression`, `komira_counters`, `komira_dynamic_filter`, `komira_host`, `komira_libc`,
   `komira_lz4`, `komira_physical_plan`, `komira_plan_expr`, `komira_plan_ir`, `komira_plan_stats`,
   `komira_scalar_arithmetic`, `komira_scan_source`, `komira_simd`, `komira_zlib`). It adds nothing to the closure
   `komira_lowering` already has, imports `komira_host` nowhere itself, and holds none of `komira_fs`,
-  `komira_objectstore`, `komira_async` or `komira_shuffle`.
+  `komira_objectstore`, `komira_async` or `komira_shuffle`. The leaf's `BUCK` file holds this with `closure_excludes`
+  (exact import names, checked at analysis over the whole closure), and
+  `tests//negative/closure_excludes` with `analysis_refusals_mojo` shows that each of the four is refused.
 - **Callers:** 26 files name the old module paths (a `git grep` of the four module names under `src`: 15 inside
   `komira_engine_runtime`, 3 in `komira_parquet_scan`, 4 in `komira_op_typed_source_api`, 2 in `komira_dispatch_sources`,
   one each in `komira_morsel` and `komira_physical_plan`); slice 1a rewrites them in the same change, with no re-export

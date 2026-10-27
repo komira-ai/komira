@@ -154,6 +154,7 @@ TARGETS = [
     "komira//src/komira_host:ci",
     "komira//src/komira_host:coverage_floor",
     "komira//src/komira_host:table",
+    "komira//src/komira_host_profile:komira_host_profile_conda",
     "komira//src/komira_http_auth:komira_http_auth_conda",
     "komira//src/komira_http_server:komira_http_server_conda",
     "komira//src/komira_iceberg:komira_iceberg_conda",
