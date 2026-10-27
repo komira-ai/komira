@@ -132,6 +132,9 @@ that set, the one it publishes, and nothing else changes. There are three source
   the farm) and are not in the repository, so the target is empty in a checkout. The e2e
   then runs on the farm against the real set; against the empty target it fails at
   phase `staged` (no `plan.json`), so a release that did not stage fails.
+  The release workflow gives every package the version of its run before it stages, so it
+  passes `-c komira_release.beta_version=0.1.<n>` with this set too (optional here: without it
+  the e2e expects the version of `packages.bzl`).
 * **`beta`**: `//release/beta_set:set`, the files of the beta channel as the release workflow's job
   `mopm-e2e-beta` downloaded them after `mopm-publish-beta` (`release_beta_fetch`, which checked each
   file's sha256 and size against the staged plan and wrote the plan, the READMEs and the downloaded
