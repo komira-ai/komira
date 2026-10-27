@@ -22,12 +22,26 @@
 #     nothing and returns False (but counts as a pass that reached a floor).
 #   * cadence: with `reap_every_n_rounds = 3` the first two calls skip and the
 #     third reaps. Catches a cadence counter that is not reset or not ticked.
+#   * mixed sentinel: cursors {Int64.MAX, 2} reap epochs 0 and 1 only. Catches a
+#     min that lets the no-floor sentinel pin the floor (nothing reaped) or
+#     drops the real cursor.
+#   * raising reaper: a plan-fixed producer set that is not covered by the
+#     epoch's seal makes the pass raise. Nothing is deleted, `lowest_live_epoch`
+#     and the totals stay put, and the very next call retries (it raises again)
+#     instead of waiting out another cadence period. Catches a cadence counter
+#     that is reset before the reap runs.
 #   * constructor clamps: a cadence <= 0 means every round and a negative
 #     start epoch means 0.
 # =============================================================================
 
 from std.time import perf_counter_ns
-from std.testing import TestSuite, assert_equal, assert_false, assert_true
+from std.testing import (
+    TestSuite,
+    assert_equal,
+    assert_false,
+    assert_raises,
+    assert_true,
+)
 
 from komira_objectstore.local_fs_conditional_store import (
     LocalFsConditionalStore,
@@ -228,6 +242,41 @@ def test_cadence_skips_then_reaps() raises:
     assert_true(policy.maybe_reap(_cursors(Int64(3))))
     _assert_gone(store, 2, "epoch 2")
     assert_equal(policy.reap_passes(), Int64(2))
+
+
+def test_sentinel_does_not_pin_the_floor() raises:
+    var store = _seeded_store("mixed")
+    var policy = ShuffleRetentionPolicy(store.clone(), _SID, _producers())
+    assert_true(policy.maybe_reap(_cursors(Int64.MAX, Int64(2))))
+    _assert_gone(store, 0, "epoch 0")
+    _assert_gone(store, 1, "epoch 1")
+    _assert_live(store, 2, "epoch 2 (the real cursor's)")
+    _assert_live(store, 3, "epoch 3")
+    assert_equal(policy.last_floor(), Int64(2))
+    assert_equal(policy.total_epochs_reaped(), Int64(2))
+
+
+def test_raising_reaper_leaves_state_and_retries_next_call() raises:
+    var store = _seeded_store("raise")
+    # Epochs are sealed with producers {0, 1}; a policy expecting {0, 1, 2}
+    # fails the seal read in the first epoch it reaps.
+    var wrong = _producers()
+    wrong.append(Int64(2))
+    var policy = ShuffleRetentionPolicy(
+        store.clone(), _SID, wrong^, reap_every_n_rounds=2
+    )
+    assert_false(policy.maybe_reap(_cursors(Int64(2))))  # cadence skip
+    with assert_raises(contains="committed"):
+        _ = policy.maybe_reap(_cursors(Int64(2)))
+    for e in range(_EPOCHS):
+        _assert_live(store, e, "epoch " + String(e) + " after the failure")
+    assert_equal(policy.lowest_live_epoch(), Int64(0))
+    assert_equal(policy.total_epochs_reaped(), Int64(0))
+    assert_equal(policy.reap_passes(), Int64(0))
+    assert_false(policy.last_pass_reaped())
+    # The next call is a retry, not a fresh cadence period.
+    with assert_raises(contains="committed"):
+        _ = policy.maybe_reap(_cursors(Int64(2)))
 
 
 def test_constructor_clamps() raises:

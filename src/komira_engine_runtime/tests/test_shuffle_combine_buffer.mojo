@@ -13,6 +13,13 @@
 #      not the sum. A `take()`/`reset()` that kept the live slice would grow
 #      it to the sum and fail.
 #   3. Round trip: append bytes -> take -> byte-identical to the input.
+#   4. Single bytes, capacity and re-baselining: `append_byte` feeds the live
+#      length and the high-water; the capacity constructor reserves; `take()`
+#      reserves the handed-out slice's length for the next one (a loop of
+#      similar slices does not regrow from empty); `clear_retaining_capacity`
+#      keeps the allocation, empties the slice and keeps the peak; `reset()`
+#      empties and keeps the peak; `reset_high_water` re-baselines the peak to
+#      the live length.
 # =============================================================================
 
 from std.time import perf_counter_ns
@@ -330,6 +337,78 @@ def _test_round_trip() raises -> Int:
     return failures
 
 
+def _feed(mut buf: ShuffleCombineBuffer, n: Int, marker: UInt32):
+    var payload = _make_payload(n, marker)
+    buf.append_bytes(Span(payload))
+
+
+def _check(cond: Bool, label: String, mut failures: Int):
+    if not cond:
+        failures += 1
+        print("  FAIL: ", label)
+
+
+def _test_bytes_capacity_and_rebaseline() raises -> Int:
+    var failures = 0
+
+    # append_byte: live length and high-water follow single-byte appends.
+    var a = ShuffleCombineBuffer()
+    for i in range(5):
+        a.append_byte(UInt8(i + 1))
+    _check(a.len() == 5, "append_byte len", failures)
+    _check(a.high_water() == 5, "append_byte high_water", failures)
+    var got = a.take()
+    _check(len(got) == 5 and got[0] == 1 and got[4] == 5, "append_byte content", failures)
+    _check(a.is_empty() and a.high_water() == 5, "take keeps peak", failures)
+
+    # Capacity constructor reserves; a non-positive one does not.
+    var big = ShuffleCombineBuffer(4096)
+    _check(big.capacity() >= 4096, "ctor reserves capacity", failures)
+    _check(big.is_empty() and big.high_water() == 0, "ctor starts empty", failures)
+    var none = ShuffleCombineBuffer(-3)
+    _check(none.capacity() == 0, "negative capacity reserves nothing", failures)
+
+    # take() reserves the handed-out slice's length for the next slice.
+    var t = ShuffleCombineBuffer()
+    _feed(t, 1000, UInt32(3))
+    var first = t.take()
+    _check(len(first) == 1000, "take returns the slice", failures)
+    _check(t.is_empty(), "take empties", failures)
+    _check(t.capacity() >= 1000, "take reserves the previous length", failures)
+
+    # clear_retaining_capacity: empty, same allocation size, peak kept.
+    var c = ShuffleCombineBuffer()
+    _feed(c, 800, UInt32(5))
+    var cap_before = c.capacity()
+    c.clear_retaining_capacity()
+    _check(c.is_empty(), "clear empties", failures)
+    _check(c.capacity() == cap_before and cap_before >= 800, "clear keeps capacity", failures)
+    _check(c.high_water() == 800, "clear keeps peak", failures)
+
+    # reset(): empty, peak kept, allocation released.
+    var r = ShuffleCombineBuffer(2048)
+    _feed(r, 300, UInt32(7))
+    r.reset()
+    _check(r.is_empty() and r.high_water() == 300, "reset keeps peak", failures)
+    _check(r.capacity() == 0, "reset releases capacity", failures)
+
+    # reset_high_water re-baselines to the live length.
+    var h = ShuffleCombineBuffer()
+    _feed(h, 500, UInt32(9))
+    var slice = h.take()
+    _feed(h, 40, UInt32(11))
+    _check(h.high_water() == 500, "peak before re-baseline", failures)
+    h.reset_high_water()
+    _check(h.high_water() == 40, "re-baseline to live length", failures)
+    _feed(h, 10, UInt32(13))
+    _check(h.high_water() == 50, "peak grows after re-baseline", failures)
+    _ = slice^
+
+    if failures == 0:
+        print("  PASS: bytes, capacity and re-baseline")
+    return failures
+
+
 def union_seed() -> UInt32:
     """Small fixed seed for the round-trip marker mixing (kept out of the
     hot helper so the marker for size 0 is still distinct)."""
@@ -357,6 +436,8 @@ def main() raises:
     total_failures += _test_bounded_high_water()
     print()
     total_failures += _test_round_trip()
+    print()
+    total_failures += _test_bytes_capacity_and_rebaseline()
     print()
 
     var elapsed_ms = (perf_counter_ns() - t0) // 1_000_000

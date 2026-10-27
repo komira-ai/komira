@@ -12,9 +12,10 @@
 #
 # `take()` hands the slice out and resets the buffer, so the resident bytes
 # stay bounded by the largest single partition slice, not the sum of all R.
-# `high_water()` reports that peak; it is what a caller compares against a
-# spill threshold to route a slice that alone is too large to the spill
-# storage instead (that routing is not in this module).
+# `high_water()` reports that length peak (allocation capacity can be up to
+# about 2x it); a caller can compare it against a spill threshold to route a
+# slice that alone is too large to spill storage instead (that routing is not
+# in this module).
 #
 # The buffer is built per map task, dropped at step end and rebuilt the next
 # step. Its storage is an `OwnedPointer[List[UInt8]]`: a concrete-origin owned
@@ -29,9 +30,9 @@ from std.memory import OwnedPointer
 struct ShuffleCombineBuffer(Movable, Deinitable):
     """Per-partition encode buffer for the distributed-shuffle producer
     combine. Accumulates the encoded bytes for ONE partition slice at a time,
-    with a BOUNDED memory high-water — `take()`/`reset()` releases the slice at
-    the partition boundary so peak RAM is ~one partition-slice encode buffer,
-    NOT the sum of all R partitions.
+    with a bounded memory high-water: `take()`/`reset()` releases the slice at
+    the partition boundary, so peak RAM is about one partition-slice encode
+    buffer, not the sum of all R partitions.
 
     Lifecycle (per map task, per step):
 
@@ -42,15 +43,13 @@ struct ShuffleCombineBuffer(Movable, Deinitable):
             segment.write_at(slice)               # stream into multipart
         # buf dropped at step end; reconstructed next step.
 
-    Movable + Deinitable (it owns heap via the OwnedPointer field
-    → NOT trivially Copyable; that is correct — copying a combine buffer would
-    be a bug, the buffer is single-owner scratch).
+    Movable + Deinitable; it owns heap through the OwnedPointer field, so it is
+    not Copyable (the buffer is single-owner scratch).
 
     Fields:
-        _bytes:      `OwnedPointer[List[UInt8]]` — the owning byte storage.
-                     CONCRETE-ORIGIN owned heap allocation with a stable
-                     address . NEVER a
-                     wildcard-origin field, NEVER an owning UnsafePointer.
+        _bytes:      `OwnedPointer[List[UInt8]]`, the owning byte storage: a
+                     concrete-origin owned heap allocation with a stable
+                     address.
         _high_water: deterministic peak number of resident accumulated bytes
                      observed since construction (a bounded-RAM check reads this via
                      `high_water()`). Records the MAX single-partition-slice
@@ -64,10 +63,8 @@ struct ShuffleCombineBuffer(Movable, Deinitable):
 
     # SAFETY: `OwnedPointer[List[UInt8]]` holds the heap allocation behind a
     # stable address. `List[UInt8]` is the compiler-tracked heap owner; the
-    # OwnedPointer's drop runs the List's drop which frees the buffer. This is
-    # the concrete-origin owning field — NOT a wildcard-origin pointer,
-    # NOT an owning UnsafePointer. ASAP-destruction tracking relates this
-    # field's lifetime to the struct's destructor.
+    # OwnedPointer's drop runs the List's drop which frees the buffer. The
+    # field's lifetime is tied to the struct's destructor.
     var _bytes: OwnedPointer[List[UInt8]]
     var _high_water: Int
 
@@ -83,9 +80,9 @@ struct ShuffleCombineBuffer(Movable, Deinitable):
     def __init__(out self, capacity: Int):
         """Construct an empty combine buffer with `capacity` bytes reserved.
 
-        Pre-reserving the typical partition-slice encode size avoids per-append
-        re-allocations on the combine hot path. `capacity <= 0` is treated as
-        no pre-reservation.
+        Reserves `capacity` bytes for the first slice. `take()` then reserves
+        the size of the slice it hands out for the next one. `capacity <= 0`
+        means no pre-reservation.
 
         Args:
             capacity: Number of bytes to pre-reserve in the backing buffer.
@@ -97,9 +94,7 @@ struct ShuffleCombineBuffer(Movable, Deinitable):
         self._high_water = 0
 
     # `__del__` is auto-synthesized: the OwnedPointer's drop runs the
-    # List[UInt8]'s drop which frees the heap buffer. No hand-written
-    # destructor (and no wildcard pointer to manually free) — that is the
-    # destroy-recreate-safe shape.
+    # List[UInt8]'s drop which frees the heap buffer.
 
     # =========================================================================
     # Accumulate — the per-partition encode hot path
@@ -115,8 +110,8 @@ struct ShuffleCombineBuffer(Movable, Deinitable):
         UnsafePointer).
 
         Args:
-            data: The encoded bytes to accumulate (e.g. one THSPLC/THSPILL2
-                  sub-table chunk).
+            data: The encoded bytes to accumulate (e.g. one encoded sub-table
+                  chunk).
         """
         self._bytes[].extend(data)
         var live = len(self._bytes[])
@@ -148,25 +143,26 @@ struct ShuffleCombineBuffer(Movable, Deinitable):
 
     @always_inline
     def high_water(self) -> Int:
-        """Deterministic peak number of resident accumulated bytes observed
-        since construction (a bounded-RAM check reads this).
+        """Peak number of accumulated bytes (the maximum `len()`) observed
+        since construction.
 
-        This is the high-WATER mark: a monotonic peak that does NOT reset on
-        `take()`/`reset()`. Because the LIVE byte count (`len()`) drops to 0 at
-        each partition boundary, the peak stays bounded to ~one
-        partition-slice encode buffer as long as the caller drains per
-        partition — that is the bounded-transient property a bounded-RAM check
-        asserts (peak ≈ one sub-table, NOT the sum of all R partitions).
+        This is a monotonic peak that does not reset on `take()`/`reset()`.
+        Because the live byte count (`len()`) drops to 0 at each partition
+        boundary, the peak stays at about one partition slice as long as the
+        caller drains per partition.
 
-        CAVEAT (a bounded-RAM check must account for this): `high_water` observes ONLY THIS
-        buffer's live accumulated bytes. It does NOT include the downstream
-        FileSystem-side transients of the B3 stream-combine — the S3 conformer's
-        `_coalesce` copy (bounded to ~one part by the chunked write) or the
-        K-deep × part in-flight PUT window. The true process peak during a
-        stream-combine is `high_water` + ~(1 + K)×part, so a bounded-RAM
-        gate must measure real RSS or add those FS-side terms rather than read
-        the peak off `high_water()` alone."""
+        It is a length peak, not a capacity peak: `List` growth can leave the
+        allocation up to about 2x the bytes held, so resident memory can reach
+        about twice this value. It also counts only this buffer's bytes, not
+        downstream writer transients (copies or in-flight upload parts), so a
+        caller comparing it with a spill threshold must allow for both."""
         return self._high_water
+
+    @always_inline
+    def capacity(self) -> Int:
+        """Bytes the live slice's backing allocation can hold without
+        growing."""
+        return self._bytes[].capacity()
 
     @always_inline
     def is_empty(self) -> Bool:
@@ -181,11 +177,12 @@ struct ShuffleCombineBuffer(Movable, Deinitable):
         """Finalize the current partition slice: return the accumulated bytes
         and reset the buffer to empty for the NEXT partition.
 
-        This is the per-partition boundary and the spill seam: the returned
-        `List[UInt8]` is handed to the segment writer's `write_at` (common
-        case) or to `FileSystemSpillStorage.write_chunk` (hot-partition case).
-        The buffer's live byte count drops back to 0 — releasing the slice's
-        RAM — so the high-water stays bounded to one partition slice.
+        This is the per-partition boundary and the spill seam: the caller
+        decides whether the returned `List[UInt8]` goes to the segment writer
+        or to spill storage. The buffer's live byte count drops back to 0, so
+        the high-water stays bounded to one partition slice. The fresh list
+        reserves the handed-out slice's length, so a loop over similar-sized
+        partitions does not regrow it from empty each time.
 
         The high-water mark is PRESERVED across `take()` (it is the monotonic
         peak, not the live count).
@@ -194,12 +191,13 @@ struct ShuffleCombineBuffer(Movable, Deinitable):
             The accumulated bytes of the finalized partition slice (owned;
             the caller takes ownership). The internal buffer is left empty.
         """
-        # Swap the owned List out behind a fresh empty one — leaves `self` in a
-        # valid empty state (the canonical OwnedPointer swap-and-take idiom,
-        # the safe move-out primitive, mirrors
-        # `WhenBuilder.otherwise`'s `self._cases^` swap). NO partial-move via
-        # UnsafePointer.
-        var fresh = OwnedPointer(List[UInt8]())
+        # Swap the owned List out behind a fresh one, leaving `self` valid
+        # and empty. No partial move through a pointer.
+        var out_len = len(self._bytes[])
+        var next = List[UInt8]()
+        if out_len > 0:
+            next.reserve(out_len)
+        var fresh = OwnedPointer(next^)
         var owned = self._bytes^
         self._bytes = fresh^
         return owned^.into_inner()
@@ -209,10 +207,8 @@ struct ShuffleCombineBuffer(Movable, Deinitable):
         (drops the accumulated bytes). Use after a `take()` that handed the
         slice elsewhere, or to discard a partially-encoded slice on error.
 
-        The high-water mark is PRESERVED (monotonic peak). The backing
-        allocation's capacity is RELEASED (a fresh empty List) so the live
-        byte count drops to 0 and peak RAM stays bounded — symmetric with
-        `take()`.
+        The high-water mark is preserved. The backing allocation is released
+        (a fresh empty List) and the live byte count drops to 0.
         """
         var fresh = OwnedPointer(List[UInt8]())
         self._bytes = fresh^
@@ -222,11 +218,8 @@ struct ShuffleCombineBuffer(Movable, Deinitable):
         capacity (avoids a re-alloc when the next partition is a similar
         size). The high-water mark is preserved.
 
-        This is an optimization variant of `reset()` for the common case where
-        the caller drains per partition into a same-process segment writer (no
-        spill) and wants to reuse the allocation. The live byte count still
-        drops to 0, so peak RAM is unchanged — `clear()` frees no pages but the
-        high-water already captured the peak.
+        Unlike `reset()`, the allocation stays resident; the live byte count
+        drops to 0.
         """
         self._bytes[].clear()
 

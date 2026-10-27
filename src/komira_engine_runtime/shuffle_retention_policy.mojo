@@ -100,7 +100,9 @@ struct ShuffleRetentionPolicy[S: CloneableConditionalWriteStore](
       var _reap_every_n_rounds: Int — the cadence: reap once every N rounds
         (1 == every round; the test default). A reap pass issues LIST/DELETE
         calls, so a >1 cadence amortizes that cost.
-      var _rounds_since_reap: Int  — the cadence counter (reset to 0 on a reap).
+      var _rounds_since_reap: Int  — the cadence counter (reset to 0 once a pass
+        completes without raising; a raising pass keeps it, so the next call
+        retries).
       var _last_floor: Int64       — the last reclaim floor used (observability).
       var _total_epochs_reaped: Int64 — cumulative whole epochs reclaimed.
       var _total_objects_deleted: Int64 — cumulative DELETE calls issued.
@@ -132,7 +134,7 @@ struct ShuffleRetentionPolicy[S: CloneableConditionalWriteStore](
 
         `store` is the durable shuffle store (cloned from the same backing the
         sink / read source use); `shuffle_id` is the cut's namespace;
-        `expected_producers` is the plan-fixed producer set ; `reap_every_n_rounds` is the cadence (1 ==
+        `expected_producers` is the plan-fixed producer set; `reap_every_n_rounds` is the cadence (1 ==
         every round — the test default; >1 amortizes the LIST/DELETE cost);
         `start_lowest_live_epoch` is the lower bound of still-live epochs (0 on a
         fresh job, or a recovered value on restart)."""
@@ -166,13 +168,14 @@ struct ShuffleRetentionPolicy[S: CloneableConditionalWriteStore](
         THE FAIL-SAFE GATES (in order):
           1. CADENCE — tick the counter; only proceed once every
              `_reap_every_n_rounds` calls. A cadence skip returns False (retain).
-          2. NO CONSUMER PINS A FLOOR — if every cursor is the `Int64.MAX`
-             no-floor sentinel (no segment consumes a shuffle), the floor is
-             `Int64.MAX`; we RETAIN everything (a stream with no shuffle consumer
-             has nothing to reclaim against). Returns False.
-          3. EMPTY CURSOR SET — `reclaim_floor` RAISES on an empty set (a missing
-             consumer must NOT permit reclamation). We treat that as RETAIN
-             (re-raise nothing): an empty set is the same fail-safe as #2.
+          2. NO CONSUMER PINS A FLOOR — if the cursor list is empty or every
+             cursor is the `Int64.MAX` no-floor sentinel (no segment consumes a
+             shuffle), the floor is `Int64.MAX`; we RETAIN everything (nothing
+             to reclaim against). Returns False. `reclaim_floor` raises on an
+             empty set, so an empty list is decided here and never reaches it.
+
+        If the reaper raises, `lowest_live_epoch` and the cadence counter are
+        left as they were, so the next call retries the pass.
 
         On a real floor: drive `reap_epochs_below(store, shuffle_id, floor,
         lowest_live_epoch, expected_producers)` — reaps `[lowest_live_epoch,
@@ -186,7 +189,6 @@ struct ShuffleRetentionPolicy[S: CloneableConditionalWriteStore](
         self._last_pass_reaped = False
         if self._rounds_since_reap < self._reap_every_n_rounds:
             return False
-        self._rounds_since_reap = 0
 
         # GATE 2 — no consumer pins a floor (all sentinels / empty). Compute the
         # min directly so the all-MAX case is a clean RETAIN (and an empty set is
@@ -194,13 +196,11 @@ struct ShuffleRetentionPolicy[S: CloneableConditionalWriteStore](
         var floor = self._min_cursor(consumer_cursors)
         if floor >= Int64.MAX:
             # No consumer pins a floor — RETAIN everything (fail-safe).
+            self._rounds_since_reap = 0
             return False
 
-        # The floor is a real consumer cursor. Cross-check it via the mechanism's
-        # own `reclaim_floor` (which RAISES on an empty set — GATE 3 fail-safe);
-        # an empty set cannot reach here (it would have yielded Int64.MAX from
-        # `_min_cursor`), but we route through `reclaim_floor` so the strict
-        # min-across-consumers contract is the SINGLE source of truth.
+        # The floor is a real consumer cursor. Take it from the mechanism's own
+        # `reclaim_floor` so the min-across-consumers contract has one source.
         floor = reclaim_floor(consumer_cursors)
 
         # Nothing to reap below the floor yet — the lowest live epoch already
@@ -209,6 +209,7 @@ struct ShuffleRetentionPolicy[S: CloneableConditionalWriteStore](
         if self._lowest_live_epoch >= floor:
             self._last_floor = floor
             self._reap_passes += Int64(1)
+            self._rounds_since_reap = 0
             return False
 
         # Drive the cross-epoch reaper: reap [lowest_live_epoch, floor), STRICTLY
@@ -225,6 +226,7 @@ struct ShuffleRetentionPolicy[S: CloneableConditionalWriteStore](
 
         # PERSIST the floor as the new lowest-live-epoch so successive passes
         # skip the just-reaped epochs. Fold the stats into the counters.
+        self._rounds_since_reap = 0
         self._lowest_live_epoch = floor
         self._last_floor = floor
         self._total_epochs_reaped += stats.epochs_reaped
@@ -236,10 +238,8 @@ struct ShuffleRetentionPolicy[S: CloneableConditionalWriteStore](
     @always_inline
     def _min_cursor(self, cursors: List[Int64]) -> Int64:
         """The MIN cursor across the list, or `Int64.MAX` for an empty list (the
-        no-floor sentinel — same as "no consumer pins a floor"). A plain, raise-
-        free min so GATE 2 can decide RETAIN without leaning on `reclaim_floor`'s
-        raise (GATE 3 still routes through `reclaim_floor` for the real-floor
-        contract)."""
+        no-floor sentinel). Raise-free, so GATE 2 can decide RETAIN without
+        `reclaim_floor`'s raise on an empty set."""
         var m = Int64.MAX
         for i in range(len(cursors)):
             if cursors[i] < m:
@@ -247,7 +247,7 @@ struct ShuffleRetentionPolicy[S: CloneableConditionalWriteStore](
         return m
 
     # =========================================================================
-    # Observability .
+    # Observability
     # =========================================================================
 
     @always_inline
