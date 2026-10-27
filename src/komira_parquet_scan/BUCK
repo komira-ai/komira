@@ -109,7 +109,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   INT64, INT32, composite and STRING keys with the chunk types checked, the
 #   whole-row-group decode (PLAIN key, early NULL), the abandoned run (late
 #   NULL, STRING-key refusal), every filter arm, the statistics prune, the
-#   chunk type rule, refused plans.
+#   chunk type rule with the footer's nullability, OPTIONAL columns without a
+#   NULL, columns the cursors refuse (a timestamp-only annotation, an unsigned
+#   key, a footer count the chunks disagree with), refused plans.
 # - test_chunk_arms_direct: the in-place PLAIN grain, the dictionary codes
 #   grain with a lockstep key, the multi-column grain ending at every page
 #   boundary and read through MorselView, the refusals.

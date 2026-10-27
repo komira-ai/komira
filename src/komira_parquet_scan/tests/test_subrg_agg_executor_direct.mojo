@@ -15,12 +15,16 @@
 #     filter for other shapes, the statistics prune (an all-pruned file is an
 #     answer with no group), and a STRING key's all / none / partial chunks,
 #     with an arithmetic predicate on a numeric key beside the STRING key;
-#   - the chunk type rule, and plans the route refuses.
+#   - the chunk type rule (types and the footer's nullability), an OPTIONAL
+#     column without a NULL staying on the cursors, columns the cursors refuse
+#     (a timestamp-only annotation, an unsigned key) and a footer count the
+#     chunks disagree with decoded whole with the same answer, a zero
+#     dictionary offset on a PLAIN column, and plans the route refuses.
 
 from std.collections import Dict
 from std.math import isnan
 from std.memory import ArcPointer, Pointer
-from std.testing import TestSuite, assert_equal, assert_raises, assert_true
+from std.testing import TestSuite, assert_equal, assert_false, assert_raises, assert_true
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.column import Column
@@ -209,6 +213,14 @@ def _values(col: Column[HeapRegion], n: Int) raises -> List[Float64]:
         var a = col.as_primitive[DType.int32]()
         for r in range(n):
             out.append(0.0 if col.is_null_at(r) else Float64(a.get(r)))
+    elif col.arrow_type == ArrowType.UINT32:
+        var a = col.as_primitive[DType.uint32]()
+        for r in range(n):
+            out.append(0.0 if col.is_null_at(r) else Float64(a.get(r)))
+    elif col.arrow_type == ArrowType.TIMESTAMP_US:
+        var a = col.as_primitive[DType.int64]()
+        for r in range(n):
+            out.append(0.0 if col.is_null_at(r) else Float64(a.get(r)))
     elif col.arrow_type == ArrowType.FLOAT64:
         var a = col.as_primitive[DType.float64]()
         for r in range(n):
@@ -242,6 +254,15 @@ struct _GroupSink(ScanChunkSink, Movable, Deinitable):
             ref col = batch.column_at(c)
             if not col.is_dictionary() and not col.is_string_dict() and col.arrow_type != batch.schema.field_at(c).arrow_type:
                 local.type_errors += 1
+            # The footer's nullability (kn and sn are OPTIONAL, the rest
+            # REQUIRED), and no NULL under a field that says it holds none.
+            var fname = batch.schema.field_name(c)
+            if batch.schema.field_nullable(c) != (fname == "kn" or fname == "sn"):
+                local.type_errors += 1
+            if not batch.schema.field_nullable(c):
+                for r in range(n):
+                    if col.is_null_at(r):
+                        local.type_errors += 1
         var key_cols = List[List[String]]()
         for k in range(len(self.keys)):
             key_cols.append(_key_strings(batch.column_at(self.keys[k]), n))
@@ -442,9 +463,18 @@ def _out_schema() -> Schema:
 def _run(
     mut rt: PerCoreAsyncRuntime[NoopSink], path: String, names: List[String], n_keys: Int, var pred: Optional[Expr]
 ) raises -> Slab[RecordBatch]:
-    var reader = _reader(path)
+    return _run_on(rt, _reader(path), names, n_keys, pred^)
+
+
+def _run_on(
+    mut rt: PerCoreAsyncRuntime[NoopSink],
+    var reader: ParquetReader[_FS],
+    names: List[String],
+    n_keys: Int,
+    var pred: Optional[Expr],
+) raises -> Slab[RecordBatch]:
     var plan = _plan(reader, names, n_keys)
-    var schema = subrg_agg_build_chunk_schema(plan)
+    var schema = subrg_agg_build_chunk_schema(reader, plan)
     var has_pred = pred.__bool__()
     var keys = List[Int]()
     for i in range(n_keys):
@@ -516,12 +546,22 @@ def test_the_chunk_type_rule() raises:
     assert_true(subrg_agg_chunk_arrow_type(ArrowType.STRING, False) == ArrowType.STRING)
     assert_true(subrg_agg_chunk_arrow_type(ArrowType.INT32, True) == ArrowType.INT32)
     assert_true(subrg_agg_chunk_arrow_type(ArrowType.STRING, True) == ArrowType.STRING)
-    var plan = SubrgAggPlan(["k32", "v", "f"], [1, 3, 5], [ArrowType.INT32, ArrowType.INT32, ArrowType.FLOAT64], [0])
-    var schema = subrg_agg_build_chunk_schema(plan)
+    var reader = _reader(_file("sagg_rule", [1_000], -1))
+    var names: List[String] = ["k32", "v", "f"]
+    var schema = subrg_agg_build_chunk_schema(reader, _plan(reader, names, 1))
     assert_true(schema.field_at(0).arrow_type == ArrowType.INT32)
     assert_true(schema.field_at(1).arrow_type == ArrowType.INT64)
     assert_true(schema.field_at(2).arrow_type == ArrowType.FLOAT64)
     assert_equal(schema.field_at(1).name, "v")
+    # Nullability is the footer's: REQUIRED columns are not nullable, an
+    # OPTIONAL key and an OPTIONAL value are, whether or not they hold a null.
+    for i in range(3):
+        assert_false(schema.field_at(i).nullable)
+    var opt_names: List[String] = ["kn", "k32", "sn"]
+    var opt = subrg_agg_build_chunk_schema(reader, _plan(reader, opt_names, 1))
+    assert_true(opt.field_at(0).nullable)
+    assert_false(opt.field_at(1).nullable)
+    assert_true(opt.field_at(2).nullable)
 
 
 def test_plain_key_and_early_null_take_the_whole_row_group() raises:
@@ -642,6 +682,91 @@ def test_a_string_and_numeric_key_chunk_evaluates_arithmetic_on_the_numeric_key(
     _check(_run(rt, path, names, 2, none_pass^), List[String](), "#chunks=0 type_errors=0")
     var partial = Expr.binary(BIN_GE, k_plus^, _lit(102))
     assert_equal(len(_run(rt, path, names, 2, partial^)), 0)
+    rt.shutdown()
+
+
+def test_an_optional_column_without_a_null_stays_on_the_cursors() raises:
+    # kn and sn are OPTIONAL but hold no NULL: the cursors take them (five
+    # chunks), the aggregate equals the rows written, and every chunk's field
+    # is nullable as the footer says (the sink counts a mismatch).
+    var rt = _runtime()
+    var path = _file("sagg_optional", _rgs(), -1)
+    var knames: List[String] = ["kn", "v", "fd"]
+    _check(_run(rt, path, knames, 1, None), _expected(knames, 1, _all_rows(), -1), "#chunks=5 type_errors=0")
+    var snames: List[String] = ["sn", "v", "f"]
+    _check(_run(rt, path, snames, 1, None), _expected(snames, 1, _all_rows(), -1), "#chunks=5 type_errors=0")
+    var filtered = Expr.binary(BIN_GE, Expr.col_ref("kn"), _lit(102))
+    var fnames: List[String] = ["kn", "v"]
+    _check(
+        _run(rt, path, fnames, 1, filtered^), _expected(fnames, 1, _keep(102, 1000), -1), "#chunks=5 type_errors=0"
+    )
+    rt.shutdown()
+
+
+def _patched(name: String) raises -> ParquetReader[_FS]:
+    """The `_file()` footer (columns k, k32, s, v, w, f, fd, kn, kp, sn =
+    schema elements 1 to 10) with w carrying only the LogicalType TIMESTAMP,
+    k32 annotated UINT_32 and v (it is PLAIN) storing dictionary offset 0."""
+    var path = _file(name, _rgs(), -1)
+    var meta = _reader(path)._meta[].copy()
+    meta.schema[5].logical_timestamp_unit = Optional[Int](2)
+    meta.schema[2].converted_type = Optional[Int](13)
+    for rg in range(3):
+        meta.row_groups[rg].columns[3].meta_data.dictionary_page_offset = Optional[Int](0)
+    return ParquetReader[_FS](_file=ParquetFileReader[_FS].open(path), _meta=ArcPointer[FileMetaData](meta^))
+
+
+def test_what_the_cursors_refuse_is_decoded_whole_with_the_same_answer() raises:
+    var rt = _runtime()
+    # v with a zero dictionary offset stays on the cursors (five chunks).
+    var vnames: List[String] = ["k", "v", "f"]
+    _check(
+        _run_on(rt, _patched("sagg_p1"), vnames, 1, None), _expected(vnames, 1, _all_rows(), -1),
+        "#chunks=5 type_errors=0",
+    )
+    # A timestamp-only annotation on a value column: every row group is
+    # decoded whole (three chunks), and the sums are those of the rows.
+    var wnames: List[String] = ["k", "w", "v"]
+    _check(
+        _run_on(rt, _patched("sagg_p2"), wnames, 1, None), _expected(wnames, 1, _all_rows(), -1),
+        "#chunks=3 type_errors=0",
+    )
+    # An unsigned INT32 key: the same.
+    var knames: List[String] = ["k32", "v"]
+    _check(
+        _run_on(rt, _patched("sagg_p3"), knames, 1, None), _expected(knames, 1, _all_rows(), -1),
+        "#chunks=3 type_errors=0",
+    )
+    # With a filter on top of the relabelled column.
+    var w_lt = Expr.binary(BIN_LT, Expr.col_ref("w"), _lit(40))
+    var keep = List[Bool](capacity=_ROWS)
+    for r in range(_ROWS):
+        keep.append((r % 7) * 10 < 40)
+    _check(
+        _run_on(rt, _patched("sagg_p4"), wnames, 1, w_lt^), _expected(wnames, 1, keep, -1), "#chunks=3 type_errors=0"
+    )
+    rt.shutdown()
+
+
+def test_a_footer_count_the_chunks_disagree_with_is_decoded_whole() raises:
+    var rt = _runtime()
+    # Row group 0 claims one row fewer than its chunks hold: it is declined
+    # before any chunk is folded and decoded whole (one chunk), the other two
+    # row groups take the cursors (two and one).
+    var path = _file("sagg_count", _rgs(), -1)
+    var meta = _reader(path)._meta[].copy()
+    meta.row_groups[0].num_rows = 39_999
+    var reader = ParquetReader[_FS](_file=ParquetFileReader[_FS].open(path), _meta=ArcPointer[FileMetaData](meta^))
+    var names: List[String] = ["k", "v"]
+    var res = _run_on(rt, reader^, names, 1, None)
+    assert_equal(len(res), 1)
+    assert_equal(_lines(res)[0], "#chunks=4 type_errors=0")
+    # A STRING key declined that way abandons the run, as any refusal does.
+    var meta2 = _reader(path)._meta[].copy()
+    meta2.row_groups[0].columns[3].meta_data.num_values = 39_999
+    var reader2 = ParquetReader[_FS](_file=ParquetFileReader[_FS].open(path), _meta=ArcPointer[FileMetaData](meta2^))
+    var snames: List[String] = ["s", "v"]
+    assert_equal(len(_run_on(rt, reader2^, snames, 1, None)), 0)
     rt.shutdown()
 
 

@@ -19,6 +19,10 @@
 #     dictionary values have the key's own width (`subrg_agg_fold`);
 #   * a STRING column keeps STRING.
 #
+# Every field is nullable unless the footer says REQUIRED, as the whole-row-
+# group decode types its fields, so a chunk and a whole-decoded row group
+# agree on it.
+#
 # The scan side takes the opposite rule (every column keeps its own type,
 # `subrg_split_decode.subrg_build_chunk_schema`), because a scan's output is
 # the collected rows themselves.
@@ -26,8 +30,11 @@
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, Schema, SchemaBuilder
+from komira_fs.file_system import FileSystem
 
+from .parquet_reader import ParquetReader
 from .subrg_agg_plan import SubrgAggPlan
+from .subrg_cursor_feed import _chunk_is_nullable
 
 
 def subrg_agg_chunk_arrow_type(footer_at: ArrowType, is_key: Bool) -> ArrowType:
@@ -44,17 +51,22 @@ def subrg_agg_chunk_arrow_type(footer_at: ArrowType, is_key: Bool) -> ArrowType:
     return ArrowType.INT64
 
 
-def subrg_agg_build_chunk_schema(plan: SubrgAggPlan) raises -> Schema:
+def subrg_agg_build_chunk_schema[FS: FileSystem](reader: ParquetReader[FS], plan: SubrgAggPlan) raises -> Schema:
     """The chunk batch schema of `plan`, in projection order, each field typed
-    by `subrg_agg_chunk_arrow_type` and non-nullable (a cursor refuses a chunk
-    holding a null)."""
+    by `subrg_agg_chunk_arrow_type` and nullable unless the footer's column is
+    REQUIRED: the nullability of the whole-row-group decode's fields, so a
+    chunk and a whole-decoded row group agree on it. A cursor refuses a chunk
+    holding a null, so a nullable field here carries none."""
     var sb = SchemaBuilder()
+    ref footer = reader._meta[].schema
     for ci in range(len(plan.proj_names)):
+        var leaf = plan.reader_col_idx[ci] + 1
+        var nullable = True if leaf <= 0 or leaf >= len(footer) else _chunk_is_nullable(footer[leaf])
         sb.add_field(
             Field(
                 plan.proj_names[ci],
                 subrg_agg_chunk_arrow_type(plan.col_arrow_types[ci], plan.is_key_proj(ci)),
-                False,
+                nullable,
             )
         )
     return sb.build()

@@ -11,7 +11,12 @@
 #   - FlatMorselChunk: three columns with different page boundaries come out
 #     row aligned, each grain ending at the next boundary of any column, each
 #     page decoded once, read through a fold written over MorselView; a
-#     dictionary column or an actual null is refused.
+#     dictionary column or an actual null is refused;
+#   - a view goes stale on the next pull or `set_grain_n` (all three arms);
+#   - over a footer with a timestamp-only LogicalType, UINT_32 / UINT_64
+#     annotations and a zero dictionary offset: every arm declines the
+#     relabelled columns with no grain out, and a zero-offset PLAIN column
+#     streams every row.
 
 from std.memory import ArcPointer
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -249,6 +254,86 @@ def test_flat_morsel_refuses_a_dictionary_column_and_an_actual_null() raises:
     var empty = FlatMorselChunk(Slab[ResumableColumnCursor](), 512)
     assert_false(empty.supported())
     assert_equal(empty.fill_next_grain(), 0)
+
+
+def test_views_go_stale_on_the_next_pull() raises:
+    var reader = _reader()
+    var driver = CodeViewChunk(_cursor(reader, 0, "d"), 500)
+    var other = CodeViewChunk(_cursor(reader, 0, "e"), 500)
+    var n = driver.open_next_codes_grain()
+    assert_true(n > 0)
+    var d0 = code_view_over(driver)
+    assert_true(d0.is_valid())
+    assert_equal(other.fill_codes_at(n, 0), n)
+    var e0 = code_view_over(other)
+    other.set_grain_n(n)
+    # The view taken before `set_grain_n` is stale, the one taken after is not.
+    assert_false(e0.is_valid())
+    assert_true(code_view_over(other).is_valid())
+    _ = driver.open_next_codes_grain()
+    assert_false(d0.is_valid())
+    var cols = Slab[ResumableColumnCursor].create(2)
+    cols.append(_cursor(reader, 0, "a"))
+    cols.append(_cursor(reader, 0, "b"))
+    var m = FlatMorselChunk(cols^, 512)
+    assert_true(m.fill_next_grain() > 0)
+    var m0 = flat_morsel_view_over(m)
+    assert_true(m0.is_valid())
+    assert_equal(m0.generation(), m.gen())
+    assert_true(m.fill_next_grain() > 0)
+    assert_false(m0.is_valid())
+
+
+def _patched() raises -> ParquetReader[_FS]:
+    """The `_reader()` footer with a (schema 1) carrying only the LogicalType
+    TIMESTAMP, c (schema 3) annotated UINT_32, d (schema 4) UINT_64 and b's
+    chunks storing dictionary offset 0."""
+    var base = _reader()
+    var meta = base._meta[].copy()
+    meta.schema[1].logical_timestamp_unit = Optional[Int](2)
+    meta.schema[3].converted_type = Optional[Int](13)
+    meta.schema[4].converted_type = Optional[Int](14)
+    for rg in range(2):
+        meta.row_groups[rg].columns[1].meta_data.dictionary_page_offset = Optional[Int](0)
+    return ParquetReader[_FS](
+        _file=ParquetFileReader[_FS].open(test_tmpdir() + "/chunk_arms.parquet"), _meta=ArcPointer[FileMetaData](meta^)
+    )
+
+
+def test_every_arm_declines_what_the_cursors_refuse() raises:
+    var reader = _patched()
+    # A timestamp, an unsigned INT32 and an unsigned dictionary are refused
+    # by every arm, with no grain out.
+    var ts = FlatViewChunk(_cursor(reader, 0, "a"), 256)
+    assert_false(ts.supported())
+    assert_equal(ts.fill_next_grain(), 0)
+    var u32 = FlatViewChunk(_cursor(reader, 0, "c"), 256)
+    assert_equal(u32.fill_next_grain(), 0)
+    var u64 = CodeViewChunk(_cursor(reader, 0, "d"), 256)
+    assert_false(u64.supported())
+    assert_equal(u64.open_next_codes_grain(), 0)
+    var cols = Slab[ResumableColumnCursor].create(2)
+    cols.append(_cursor(reader, 0, "b"))
+    cols.append(_cursor(reader, 0, "a"))
+    var m = FlatMorselChunk(cols^, 256)
+    assert_false(m.supported())
+    assert_equal(m.fill_next_grain(), 0)
+    # A zero dictionary offset is no dictionary page: b streams every row.
+    var b = FlatViewChunk(_cursor(reader, 0, "b"), 1_000)
+    var seen = 0
+    while True:
+        var n = b.fill_next_grain()
+        if n == 0:
+            break
+        var v = flat_view_over(b)
+        for i in range(n):
+            assert_equal(v.load_f64(i), Float64(seen + i) / 4.0)
+        seen += n
+    assert_equal(seen, _rgs()[0])
+    # The column the footer leaves alone still streams beside them.
+    var e = CodeViewChunk(_cursor(reader, 0, "e"), 1_000)
+    assert_true(e.supported())
+    assert_equal(e.open_next_codes_grain(), 1_000)
 
 
 def main() raises:

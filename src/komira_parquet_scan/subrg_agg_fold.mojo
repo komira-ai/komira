@@ -164,6 +164,13 @@ def fold_one_rg_subrg[FS: FileSystem, SINK: ScanChunkSink](
     for ci in range(n_cols):
         if not cursors[ci].supported():
             return FOLD_DECLINED_CLEAN
+    # A column chunk whose value count is not the row group's footer row count
+    # cannot be folded row for row (a short one would be padded, a long one
+    # dropped): decode the row group whole.
+    var rg_rows = Int(rg.num_rows)
+    for ci in range(n_cols):
+        if cursors[ci].num_values() != rg_rows:
+            return FOLD_DECLINED_CLEAN
     # Every key must be dictionary encoded; a string dictionary only when the
     # plan says so (`is_dict()` is also True for a string dictionary, so the
     # string test comes first).

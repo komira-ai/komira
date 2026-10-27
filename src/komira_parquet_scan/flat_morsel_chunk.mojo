@@ -24,8 +24,13 @@
 # Scope: the columns `supported()` admits. A dictionary chunk, a
 # DELTA_BINARY_PACKED or other non-PLAIN chunk and an actual null are
 # refused by the cursor (`supported()` turns False, the pull returns 0); the
-# caller decodes such a row group another way. A view carries no selection
-# mask and no NULL.
+# caller decodes such a row group another way. A null is met only in the page
+# that holds it, so the grains of the pages before it have been exposed by
+# then: a caller that cannot retract them checks the column's statistics
+# first. The cursors a caller opens through `open_subrg_cursor` already refuse
+# a timestamp and any annotation that relabels the type, and a caller checks
+# `num_values(col)` against the row group's footer row count. A view carries
+# no selection mask and no NULL.
 #
 # A fold must read column `idx` at its physical type (`col_dtype`): the page
 # bytes are reinterpreted at whatever width the read names.
