@@ -1,5 +1,6 @@
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "row")
+load(":adopt.bzl", "cxx_link_facts")
 load(":toolchain.bzl", "zig_bootstrap_exe", "zig_exe", "zig_module", "zig_test")
 
 # Scripts and tool sources used by the Mojo rules.
@@ -255,3 +256,9 @@ export_file(name = "zig_cc_launcher.zig", src = "tools/zig_cc_launcher.zig", vis
 # workflow's cases (the root BUCK's coverage_ci_cases), which hold
 # .github/ci/coverage_measure.sh's list of their categories equal to its.
 export_file(name = "coverage_branch.bzl", visibility = ["PUBLIC"])
+
+# The C toolchain's link facts for `mojo_adopted_library` (adopt.bzl, `cxx_link_facts`).
+cxx_link_facts(
+    name = "adopt_cxx_link_facts",
+    visibility = ["PUBLIC"],
+)

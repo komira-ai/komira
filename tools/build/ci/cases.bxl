@@ -508,8 +508,52 @@ def _cxx_toolchain_cases(ctx):
             out.append("cxx toolchain: {} on {}: compatible, but the toolchain admits macOS arm64 and linux x86_64 only".format(_CXX, platform))
     return out
 
+# ---- adopted libraries on macOS arm64 ------------------------------------------
+#
+# A target configured for darwin-arm64 compiles its Mojo on macOS, and the C toolchain
+# (`toolchains//:cxx`) runs on a linux execution platform. A rule that takes the C toolchain
+# as a toolchain dep next to the Mojo one has no execution platform, and its
+# `readme_examples:tool` exec dep fails analysis ("no execution platform was resolved").
+# So `mojo_adopted_library` reaches the C toolchain through `adopt_cxx_link_facts`, a rule
+# of its own.
+#
+# Two reads, neither needing a macOS worker (a checkout without the worker properties
+# registers no macOS execution platform, so no adopted library can be configured there):
+#   - the declared graph: every adopted library's `cxx_toolchain` is a `cxx_link_facts`
+#     target, never a toolchain rule; and the library files of the package that links C
+#     (komira_libc) and the one that does not (komira_lz4) configure for darwin-arm64;
+#   - when the macOS execution platform is registered (the farm's checkouts), every
+#     adopted library is configured for darwin-arm64, which resolves its execution
+#     platform and its exec dependencies.
+
+_DARWIN = "komira//tools/build/platforms:darwin-arm64"
+_ADOPTED_LIBS = ["komira//src/komira_libc:lib", "komira//src/komira_lz4:lib"]
+_ADOPTED_WITH_C = "komira//src/komira_libc:komira_libc"
+
+def _adopted_darwin_cases(ctx):
+    out = []
+    for lib in _ADOPTED_LIBS:
+        if ctx.configured_targets(lib, target_platform = _DARWIN) == None:
+            out.append("adopted darwin: {} is incompatible with {}, but it builds there".format(lib, _DARWIN))
+    adopted = list(ctx.uquery().kind("^_adopted$", "komira//src/..."))
+    labels = [str(t.label) for t in adopted]
+    if _ADOPTED_WITH_C not in labels:
+        out.append("adopted darwin: the query for adopted libraries did not find {}, so this check proves nothing".format(_ADOPTED_WITH_C))
+    for t in adopted:
+        tc = t.get_attr("cxx_toolchain")
+        if tc == None:
+            continue
+        rule = [str(ctx.unconfigured_targets(str(tc)).rule_type)]
+        if len(rule) != 1 or not rule[0].endswith(":cxx_link_facts"):
+            out.append("adopted darwin: {} takes `cxx_toolchain` = {} ({}); a toolchain rule there leaves it no execution platform on {} (use //tools/build/mojo:adopt_cxx_link_facts)".format(t.label, tc, rule, _DARWIN))
+    platforms = ctx.analysis(ctx.configured_targets("komira//tools/build/platforms/default:default")).providers()[ExecutionPlatformRegistrationInfo].platforms
+    if _DARWIN in [str(p.label) for p in platforms]:
+        for t in adopted:
+            ctx.configured_targets(t.label, target_platform = _DARWIN)
+    return out
+
 def _run(ctx):
-    table = _table_cases() + _held_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases() + _registration_cases(ctx) + _cxx_toolchain_cases(ctx)
+    table = _table_cases() + _held_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases() + _registration_cases(ctx) + _cxx_toolchain_cases(ctx) + _adopted_darwin_cases(ctx)
     real = _real_cases(ctx)
     failures = table + real
     if failures:
