@@ -540,6 +540,7 @@ TARGETS = [
     "komira//tools/build/package/install_check:dlopen_probe_unit",
     "komira//tools/build/package/libkomira:komira_so_libkomira_conda",
     "komira//tools/build/package/libkomira:libkomira_install",
+    "komira//tools/build/package/libkomira:libkomira_install_unpinned",
     "komira//tools/build/package/manifest_probe:conda_manifest_kci",
     "komira//tools/build/package/manifest_probe:conda_ships_readme",
     "komira//tools/build/package/oci:control",

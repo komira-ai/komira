@@ -2,6 +2,7 @@
 //!
 //! usage: komira_pack conda-install --dir D --prefix P [--runtime-lib NAME=FILE]...
 //!                                  [--require-depend "NAME ==VERSION"]...
+//!                                  [--expect-red TEXT]
 //!
 //! D holds one `.conda`. Its pkg tar is written under P as an installer does:
 //! every member at its path, a regular file with its mode, a symbolic link as
@@ -21,6 +22,11 @@
 //! info/index.json hold the requirement R verbatim (`mojo-compiler ==<pin>`):
 //! the runtime libraries are taken from the toolchain, so only this shows the
 //! package itself asks for the compiler that provides them.
+//!
+//! With `--expect-red TEXT` the command is a negative case: it succeeds (and
+//! creates P, empty) only if the install is refused with a reason containing
+//! TEXT, and fails if the install goes through or is refused for another
+//! reason. The first refusal ends it, so the case states one defect.
 //!
 //! Nothing is searched, downloaded or run: the prefix holds what the package
 //! and the named files hold, so a program loading from it shows what an
@@ -158,8 +164,29 @@ fn theConda(alloc: Alloc, dir_path: []const u8) ![]const u8 {
     return found orelse fail("{s} holds no .conda file", .{dir_path});
 }
 
+/// What a refusal means to the command: with `expect` (--expect-red) the
+/// refusal must contain it and the command ends ok; without, the refusal is
+/// the failure.
+pub fn refusalOutcome(why_text: []const u8, expect: ?[]const u8) enum { ends_ok, wrong_reason, fails } {
+    const want = expect orelse return .fails;
+    return if (std.mem.indexOf(u8, why_text, want) != null) .ends_ok else .wrong_reason;
+}
+
+fn refused(a: Args, expect: ?[]const u8) !void {
+    switch (refusalOutcome(why, expect)) {
+        .fails => fail("{s}", .{why}),
+        .wrong_reason => fail("refused for `{s}`, which lacks the expected `{s}`", .{ why, expect.? }),
+        .ends_ok => {
+            try std.fs.cwd().makePath(need(a.prefix, "--prefix"));
+            std.debug.print("komira_pack conda-install: refused as expected: {s}\n", .{why});
+            std.process.exit(0);
+        },
+    }
+}
+
 pub fn cmdCondaInstall(alloc: Alloc, a: Args) !void {
-    allow(a, &.{ "--dir", "--runtime-lib", "--require-depend" });
+    allow(a, &.{ "--dir", "--runtime-lib", "--require-depend", "--expect-red" });
+    const expect = one(a, "--expect-red");
     const bytes = readAll(alloc, try theConda(alloc, need(one(a, "--dir"), "--dir")));
     const parts = try pack_conda_check.readParts(alloc, bytes);
     const paths_tar = pack_conda.findTar(parts.info, "info/paths.json") orelse fail("package: no info/paths.json", .{});
@@ -168,7 +195,7 @@ pub fn cmdCondaInstall(alloc: Alloc, a: Args) !void {
     const index = try json.parseFromSliceLeaky(json.Value, alloc, index_tar.data, .{});
     for (try all(alloc, a, "--require-depend")) |want| {
         requireDepend(alloc, index, want) catch |err| switch (err) {
-            error.Refused => fail("{s}", .{why}),
+            error.Refused => try refused(a, expect),
             else => return err,
         };
     }
@@ -177,16 +204,17 @@ pub fn cmdCondaInstall(alloc: Alloc, a: Args) !void {
     var root = try std.fs.cwd().openDir(prefix, .{});
     defer root.close();
     installInto(alloc, root, parts.pkg, paths) catch |err| switch (err) {
-        error.Refused => fail("{s}", .{why}),
+        error.Refused => try refused(a, expect),
         else => return err,
     };
     for (try all(alloc, a, "--runtime-lib")) |v| {
         const eq = std.mem.indexOfScalar(u8, v, '=') orelse fail("--runtime-lib `{s}` is not <file name>=<file>", .{v});
         addRuntime(alloc, root, v[0..eq], readAll(alloc, v[eq + 1 ..])) catch |err| switch (err) {
-            error.Refused => fail("{s}", .{why}),
+            error.Refused => try refused(a, expect),
             else => return err,
         };
     }
+    if (expect) |text| fail("expected a refusal containing `{s}`, but the package installed", .{text});
     std.debug.print("komira_pack conda-install: {d} members into {s} ok\n", .{ parts.pkg.len, prefix });
 }
 
@@ -239,6 +267,12 @@ test "a package is written as it is: bytes, mode and a link" {
     try testing.expectEqual(@as(u32, 0o755), @as(u32, @intCast(st.mode & 0o777)));
     var buf: [64]u8 = undefined;
     try testing.expectEqualStrings("libx.so", try tmp.dir.readLink("lib/libx.so.1", &buf));
+}
+
+test "an expected refusal ends ok only when its reason holds the text" {
+    try testing.expectEqual(.ends_ok, refusalOutcome("`depends` does not hold `x`", "does not hold"));
+    try testing.expectEqual(.wrong_reason, refusalOutcome("a hash differs", "does not hold"));
+    try testing.expectEqual(.fails, refusalOutcome("a hash differs", null));
 }
 
 test "a member whose bytes differ from the row's sha256 is refused" {

@@ -27,6 +27,11 @@ Two actions, in two processes:
      runtime library must come from the prefix. `LD_LIBRARY_PATH` is empty for
      the action and the probe refuses it set.
 
+With `expect_red = "<text>"` the target is a negative case: it builds only
+while `komira_pack conda-install` refuses the package with a reason containing
+the text, and nothing is loaded. `depend_pin` then names a pin the package
+does not hold (the check's own `--require-depend` is what must refuse it).
+
 The output is the probe's marker (what it loaded). `[prefix]` is the install.
 It checks a package on the farm; beta's `beta_validate` installs the published
 files with a package manager and runs the same load again (docs/design/native_packaging.md,
@@ -56,11 +61,16 @@ def _impl(ctx):
             "--prefix",
             prefix.as_output(),
             "--require-depend",
-            "mojo-compiler ==" + MOJO_COMPILER_VERSION,
+            "mojo-compiler ==" + ctx.attrs.depend_pin,
+            ["--expect-red", ctx.attrs.expect_red] if ctx.attrs.expect_red != None else [],
             [cmd_args("--runtime-lib", cmd_args(tc.compiler.project("lib/" + n), format = n + "={}")) for n in runtime],
         ),
         category = "conda_install",
     )
+    if ctx.attrs.expect_red != None:
+        # A negative case: the install is refused for the stated reason and
+        # nothing is loaded.
+        return [DefaultInfo(default_output = prefix)]
     marker = ctx.actions.declare_output(ctx.label.name + ".loaded")
     ctx.actions.run(
         cmd_args(
@@ -84,6 +94,12 @@ def _impl(ctx):
 _conda_install_check = rule(
     impl = _impl,
     attrs = {
+        # The `mojo-compiler` pin the package must depend on. Only a negative
+        # case sets it (see `expect_red`): to a pin the package does not hold.
+        "depend_pin": attrs.string(default = MOJO_COMPILER_VERSION),
+        # A reason the install must be refused with: the target is a negative
+        # case, built only while the check is red naming that defect.
+        "expect_red": attrs.option(attrs.string(), default = None),
         "lib": attrs.string(),
         "min_version": attrs.int(default = 0),
         "package": attrs.dep(),

@@ -36,3 +36,17 @@ conda_install_check(
     version_symbol = "komira_abi_version",
     visibility = ["PUBLIC"],
 )
+
+# The negative of the `mojo-compiler` requirement. The same package is asked
+# for a pin its `depends` does not hold (a package built without the compiler
+# pin is the same defect: the runtime installed beside it would come from a
+# compiler it never asked for). The target builds only while the check refuses
+# with "depends does not hold". If `install_check.bzl` stopped passing
+# `--require-depend`, the install would go through and this target would go red.
+conda_install_check(
+    name = "libkomira_install_unpinned",
+    depend_pin = "0.0.0",
+    expect_red = "does not hold `mojo-compiler ==0.0.0`",
+    lib = "libkomira.so",
+    package = ":komira_so_libkomira_conda",
+)
