@@ -1,5 +1,5 @@
-//! The cases of release_beta_fetch (release_beta_fetch.zig). Each test is a defect the job
-//! `mopm-e2e-beta` would otherwise let through: a registry that serves other bytes than were
+//! The cases of release_beta_fetch (release_beta_fetch.zig). Each test is a defect the
+//! download-and-check that the prod publish shares with this file would otherwise let through: a registry that serves other bytes than were
 //! staged, a package that was never published, a plan that cannot be checked, a check that
 //! read the staged bytes instead of the published ones, a half-written set, or a client that
 //! follows a redirect or talks plain http to the world.
@@ -667,7 +667,7 @@ test "the summary counts files, not lines: one file with a wrong size and hash i
     try refusedWith(&why, runScene(a, &s, &fake, &why), "1 of 2 file(s) are not what the plan staged");
 }
 
-// ---- the checkout state of release/beta_set: --out exists and holds its BUCK ------------------
+// ---- the checkout state of release/staged_set: --out exists and holds its BUCK ------------------
 
 test "an --out that holds only its BUCK is written beside it, and the BUCK is kept" {
     var ar = arena();
