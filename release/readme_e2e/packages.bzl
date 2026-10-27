@@ -25,7 +25,6 @@ PACKAGES = {
     "komira_anomaly": "0.1.0",
     "komira_atomic_alias": "0.1.0",
     "komira_clock": "0.1.0",
-    "komira_codeworks_api": "0.1.0",
     "komira_collections": "0.1.0",
     "komira_content_line": "0.1.0",
     "komira_datetime": "0.1.0",
