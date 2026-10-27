@@ -271,5 +271,99 @@ def test_sliding_float_sum_after_infinity_leaves() raises:
     assert_equal(_getf(out, 2, 2), 3.0)
     assert_equal(_getf(out, 2, 3), 5.0)
 
+# =============================================================================
+# Several partitions, NTILE sizing and frames that are empty or hold NULLs
+# =============================================================================
+
+def test_ranking_and_running_aggregates_restart_per_partition() raises:
+    var g: List[Int64] = [1, 1, 1, 2, 2]
+    var o: List[Int64] = [1, 1, 2, 1, 2]
+    var v: List[Int64] = [10, 99, 30, 5, 5]
+    var vv: List[Bool] = [True, False, True, True, True]
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_plain_i64(g))
+    cols.append(_plain_i64(o))
+    cols.append(_i64(v, vv))
+    var names: List[String] = ["g", "o", "v"]
+    var exprs = List[PartitionExpr]()
+    exprs.append(PartitionExpr.row_number())
+    exprs.append(PartitionExpr.rank())
+    exprs.append(PartitionExpr.dense_rank())
+    exprs.append(PartitionExpr.cume_dist())
+    exprs.append(PartitionExpr.ntile(2))
+    exprs.append(PartitionExpr.running_sum("v"))
+    exprs.append(PartitionExpr.running_count("v"))
+    exprs.append(PartitionExpr.running_avg("v"))
+    exprs.append(PartitionExpr.running_count())
+    var pk: List[String] = ["g"]
+    var ok: List[String] = ["o"]
+    var out = _run(_batch(names, cols^), pk, ok, exprs^)
+    var row_number: List[Int64] = [1, 2, 3, 1, 2]
+    var rank: List[Int64] = [1, 1, 3, 1, 2]
+    var dense: List[Int64] = [1, 1, 2, 1, 2]
+    var cume: List[Float64] = [2.0 / 3.0, 2.0 / 3.0, 1.0, 0.5, 1.0]
+    var ntile: List[Int64] = [1, 1, 2, 1, 2]
+    var sum: List[Int64] = [10, 10, 40, 5, 10]
+    var count: List[Int64] = [1, 1, 2, 1, 2]
+    var avg: List[Float64] = [10.0, 10.0, 20.0, 5.0, 5.0]
+    var count_star: List[Int64] = [1, 2, 3, 1, 2]
+    for r in range(5):
+        assert_equal(_get(out, 3, r), row_number[r])
+        assert_equal(_get(out, 4, r), rank[r])
+        assert_equal(_get(out, 5, r), dense[r])
+        assert_equal(_getf(out, 6, r), cume[r])
+        assert_equal(_get(out, 7, r), ntile[r])
+        assert_equal(_get(out, 8, r), sum[r])
+        assert_equal(_get(out, 9, r), count[r])
+        assert_equal(_getf(out, 10, r), avg[r])
+        assert_equal(_get(out, 11, r), count_star[r])
+
+def test_ntile_bucket_sizes_and_more_buckets_than_rows() raises:
+    # 7 rows: 3 buckets are 3, 2, 2 rows; 10 buckets give one row each; 1 bucket holds all.
+    var o: List[Int64] = [1, 2, 3, 4, 5, 6, 7]
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_plain_i64(o))
+    var names: List[String] = ["o"]
+    var exprs = List[PartitionExpr]()
+    exprs.append(PartitionExpr.ntile(3))
+    exprs.append(PartitionExpr.ntile(10))
+    exprs.append(PartitionExpr.ntile(1))
+    var ok: List[String] = ["o"]
+    var out = _run(_batch(names, cols^), List[String](), ok, exprs^)
+    var want3: List[Int64] = [1, 1, 1, 2, 2, 3, 3]
+    for r in range(7):
+        assert_equal(_get(out, 1, r), want3[r])
+        assert_equal(_get(out, 2, r), Int64(r + 1))
+        assert_equal(_get(out, 3, r), 1)
+
+def test_sliding_int_sum_over_empty_and_null_frames() raises:
+    # ROWS 2 PRECEDING .. 1 PRECEDING over v = 10, NULL, 30, 40: the first
+    # frame is empty (SUM NULL, COUNT 0); a frame holding only NULLs also
+    # has no SUM.
+    var o: List[Int64] = [1, 2, 3, 4]
+    var v: List[Int64] = [10, 0, 30, 40]
+    var vv: List[Bool] = [True, False, True, True]
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_plain_i64(o))
+    cols.append(_i64(v, vv))
+    var names: List[String] = ["o", "v"]
+    var exprs = List[PartitionExpr]()
+    exprs.append(
+        PartitionExpr.agg_with_frame(PF_SUM, "v", _rows(FRAME_BOUND_PRECEDING, 2, FRAME_BOUND_PRECEDING, 1))
+    )
+    exprs.append(
+        PartitionExpr.agg_with_frame(PF_COUNT, "v", _rows(FRAME_BOUND_PRECEDING, 2, FRAME_BOUND_PRECEDING, 1))
+    )
+    var ok: List[String] = ["o"]
+    var out = _run(_batch(names, cols^), List[String](), ok, exprs^)
+    assert_true(_null(out, 2, 0))
+    assert_equal(_get(out, 3, 0), 0)
+    var want_sum: List[Int64] = [0, 10, 10, 30]
+    var want_count: List[Int64] = [0, 1, 1, 1]
+    for r in range(1, 4):
+        assert_false(_null(out, 2, r))
+        assert_equal(_get(out, 2, r), want_sum[r])
+        assert_equal(_get(out, 3, r), want_count[r])
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
