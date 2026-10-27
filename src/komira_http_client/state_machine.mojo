@@ -43,7 +43,7 @@
 from komira_async.cancellation.token import CancellationToken
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
-from komira_clock import now_ns as _system_now_ns
+from std.memory import ArcPointer
 from komira_http_client.body import EmptyBody, RequestBody
 from komira_http_client.error import HttpError
 from komira_http_client.header_map import HeaderMap
@@ -51,6 +51,7 @@ from komira_http_client.response_body import (
     BufferedResponseBody,
     RecvRingBody,
     ResponseBody,
+    _clock_now_us,
     collect_body,
 )
 from komira_http_client.response_parser import (
@@ -479,6 +480,11 @@ struct OutboundDriver(Movable, Deinitable):
     on an iteration count (the prior cap busy-spun and killed healthy but
     slow servers, e.g. multi-second local-LLM generations)."""
 
+    var _clock_cell: Optional[ArcPointer[Int]]
+    """None in production: every deadline read is the system clock. A test
+    shares a cell here and the head loop, the deadline arming and the body this
+    driver builds all read that scripted time instead (`_clock_now_us`)."""
+
     var _deadline_us: Int
     """The ABSOLUTE monotonic
     deadline (microseconds) for THIS ENTIRE REQUEST -- head AND body -- or 0
@@ -558,6 +564,7 @@ struct OutboundDriver(Movable, Deinitable):
         self._interim_responses_seen = 0
         self._request_timeout_us = 0
         self._deadline_us = 0
+        self._clock_cell = None
 
     @staticmethod
     def new(var req_bytes: List[UInt8]) -> OutboundDriver:
@@ -566,6 +573,12 @@ struct OutboundDriver(Movable, Deinitable):
     def set_max_response_body_bytes(mut self, n: Int):
         """Override the default 100 MiB body cap. Used by tests."""
         self._max_response_body_bytes = n
+
+    def set_test_clock(mut self, var clock_cell: Optional[ArcPointer[Int]]):
+        """Read time from `clock_cell` instead of the system clock (None keeps
+        the system clock). Call before the first drive; the body this driver
+        builds inherits it."""
+        self._clock_cell = clock_cell^
 
     def set_request_timeout_us(mut self, us: Int):
         """Set the wall-clock
@@ -622,7 +635,7 @@ struct OutboundDriver(Movable, Deinitable):
         the first `step_send_head_nonblocking`."""
         if self._deadline_us != 0:
             return
-        var started_us = Int(_system_now_ns() // UInt64(1000))
+        var started_us = _clock_now_us(self._clock_cell)
         self._deadline_us = self._effective_deadline_us(started_us)
 
     def deadline_us(self) -> Int:
@@ -806,6 +819,7 @@ struct OutboundDriver(Movable, Deinitable):
         # the bound across the head/body seam. `set_deadline_us` is a
         # no-op for an unarmed driver (0) and only ever TIGHTENS.
         resp_body.set_deadline_us(self._deadline_us)
+        resp_body.set_test_clock(self._clock_cell.copy())
         var resp = ClientResponse[RecvRingBody[S]](resp_body^)
         resp.status = self._final_status
         var reason_tmp = String()
@@ -1016,6 +1030,7 @@ struct OutboundDriver(Movable, Deinitable):
         # the bound across the head/body seam. `set_deadline_us` is a
         # no-op for an unarmed driver (0) and only ever TIGHTENS.
         resp_body.set_deadline_us(self._deadline_us)
+        resp_body.set_test_clock(self._clock_cell.copy())
         var resp = ClientResponse[RecvRingBody[S]](resp_body^)
         resp.status = self._final_status
         var reason_tmp = String()
@@ -1399,6 +1414,7 @@ struct OutboundDriver(Movable, Deinitable):
         # the bound across the head/body seam. `set_deadline_us` is a
         # no-op for an unarmed driver (0) and only ever TIGHTENS.
         resp_body.set_deadline_us(self._deadline_us)
+        resp_body.set_test_clock(self._clock_cell.copy())
         var resp = ClientResponse[RecvRingBody[S]](resp_body^)
         resp.status = self._final_status
         var reason_tmp = String()
@@ -1603,7 +1619,7 @@ struct OutboundDriver(Movable, Deinitable):
         a peer that keeps the connection fed with bytes it never finishes a
         response with is precisely the case the budget exists to bound, and it
         is the one case the counter-gated check could not see."""
-        var now_us = Int(_system_now_ns() // UInt64(1000))
+        var now_us = _clock_now_us(self._clock_cell)
         if now_us >= deadline_us:
             self._state = OUTBOUND_STATE_ERROR
             raise Error(
@@ -1655,7 +1671,7 @@ struct OutboundDriver(Movable, Deinitable):
             # Re-check the deadline after parking. A park can block up to
             # _HEAD_DRIVE_PARK_TIMEOUT_US, so the deadline is honored to
             # within one park interval.
-            var now_us = Int(_system_now_ns() // UInt64(1000))
+            var now_us = _clock_now_us(self._clock_cell)
             if now_us >= deadline_us:
                 self._state = OUTBOUND_STATE_ERROR
                 raise Error(

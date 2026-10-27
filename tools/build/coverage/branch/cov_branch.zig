@@ -20,13 +20,13 @@ pub const USAGE = "usage: cov_branch link ... (" ++ link_cmd.USAGE ++ ")\n      
 /// `argv` without the program's name. Messages go to `err`.
 pub fn dispatch(alloc: std.mem.Allocator, argv: []const []const u8, where: run_cmd.Where, runner: run_cmd.Runner, err: *std.ArrayList(u8)) !u8 {
     if (argv.len == 0) {
-        try err.writer().print("cov_branch: no subcommand\n{s}\n", .{USAGE});
+        try err.writer(alloc).print("cov_branch: no subcommand\n{s}\n", .{USAGE});
         return 2;
     }
     if (std.mem.eql(u8, argv[0], "link")) return link_cmd.cli(alloc, argv[1..], where, runner, err);
     if (std.mem.eql(u8, argv[0], "run")) return run_cmd.cli(alloc, argv[1..], where, runner, err);
     if (std.mem.eql(u8, argv[0], "annotate")) return annotate_cmd.cli(alloc, argv[1..], where, runner, err);
-    try err.writer().print("cov_branch: unknown subcommand {s}\n{s}\n", .{ argv[0], USAGE });
+    try err.writer(alloc).print("cov_branch: unknown subcommand {s}\n{s}\n", .{ argv[0], USAGE });
     return 2;
 }
 
@@ -34,7 +34,7 @@ pub fn main() void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const alloc = arena.allocator();
     const code = mainIn(alloc) catch |e| blk: {
-        std.io.getStdErr().writer().print("cov_branch: {s}\n", .{@errorName(e)}) catch {};
+        std.fs.File.stderr().deprecatedWriter().print("cov_branch: {s}\n", .{@errorName(e)}) catch {};
         break :blk 2;
     };
     std.process.exit(code);
@@ -61,12 +61,12 @@ fn mainIn(alloc: std.mem.Allocator) !u8 {
             try run_cmd.scratchDir(alloc, cwd, scratch),
         .env = try br.envFromMap(alloc, &env_map),
     };
-    var err = std.ArrayList(u8).init(alloc);
+    var err = std.ArrayList(u8).empty;
     const code = dispatch(alloc, argv, where, run_cmd.real_runner, &err) catch |e| blk: {
-        try err.writer().print("cov_branch: {s}\n", .{@errorName(e)});
+        try err.writer(alloc).print("cov_branch: {s}\n", .{@errorName(e)});
         break :blk 2;
     };
-    std.io.getStdErr().writeAll(err.items) catch {};
+    std.fs.File.stderr().writeAll(err.items) catch {};
     return code;
 }
 
@@ -86,7 +86,7 @@ test "no subcommand, or an unknown one, is a usage error" {
     defer arena.deinit();
     const a = arena.allocator();
     const where = run_cmd.Where{ .cwd = "/nowhere", .k = "/nowhere/k", .env = &.{} };
-    var err = std.ArrayList(u8).init(a);
+    var err = std.ArrayList(u8).empty;
     try std.testing.expectEqual(@as(u8, 2), try dispatch(a, &.{}, where, run_cmd.real_runner, &err));
     // The whole message: the reason, then the usage of every subcommand.
     try std.testing.expectEqualStrings("cov_branch: no subcommand\n" ++ USAGE ++ "\n", err.items);

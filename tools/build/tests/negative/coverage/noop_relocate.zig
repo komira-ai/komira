@@ -10,6 +10,6 @@ const std = @import("std");
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const argv = try std.process.argsAlloc(arena.allocator());
-    const out = std.io.getStdOut().writer();
+    const out = std.fs.File.stdout().deprecatedWriter();
     for (argv[2..]) |d| try out.print("1 {s}\n", .{d});
 }

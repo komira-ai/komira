@@ -1,0 +1,12 @@
+# The aggregate of the pull request check: one target that builds every check
+# (tools/build/ci/aggregate.bzl). `./buck2 build //ci:pr` builds the check
+# set and `./buck2 test //ci:pr` runs its standalone tests. The lists are
+# generated (targets.bzl) and held complete by tools/build/ci/guard.bxl.
+load("@komira//tools/build/ci:aggregate.bzl", "ci_aggregate")
+load(":targets.bzl", "TARGETS", "TESTS")
+
+ci_aggregate(
+    name = "pr",
+    deps = TARGETS,
+    tests = TESTS,
+)

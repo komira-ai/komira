@@ -3,8 +3,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The typed hash join of the engine's stage pipelines: the build table
 # `JoinBuildTable[KB, *Payload]` (a key block of any arity, a pack of payload
 # columns, open addressing with linear probing, one slot per build row), its
-# key and payload columns and key model, its free functions over typed keys,
-# and the JOIN_BUILD and JOIN_PROBE breaker states.
+# key and payload columns and key model, its free functions over typed keys.
 mojo_library(
     name = "komira_op_join_stage",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -39,9 +38,8 @@ mojo_library(
         "//src/komira_udf:komira_udf",
     ],
     test_srcs = [
-        "tests/test_join_build_state.mojo",
+        "tests/test_join_hash_spread.mojo",
         "tests/test_join_key_dtype_exact.mojo",
-        "tests/test_join_probe_state.mojo",
         "tests/test_join_stage_key_model.mojo",
         "tests/test_key_bundle_var.mojo",
     ],

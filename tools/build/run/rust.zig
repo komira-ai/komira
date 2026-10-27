@@ -78,9 +78,9 @@ const Run = struct {
 };
 
 fn harness(alloc: std.mem.Allocator, bin: []const u8, run_dir: []const u8, extra: []const []const u8, out_fd: sys.fd_t, err_fd: sys.fd_t, timeout_s: u64) !Run {
-    var argv = std.ArrayList([]const u8).init(alloc);
-    try argv.append(bin);
-    try argv.appendSlice(extra);
+    var argv = std.ArrayList([]const u8).empty;
+    try argv.append(alloc, bin);
+    try argv.appendSlice(alloc, extra);
     const env = [_][]const u8{
         try std.fmt.allocPrint(alloc, "PATH={s}/bin", .{run_dir}),
         try std.fmt.allocPrint(alloc, "TMPDIR={s}/tmp", .{run_dir}),
@@ -90,7 +90,7 @@ fn harness(alloc: std.mem.Allocator, bin: []const u8, run_dir: []const u8, extra
         .path = (try alloc.dupeZ(u8, bin)).ptr,
         .argv = (try util.zList(alloc, argv.items)).ptr,
         .envp = (try util.zList(alloc, &env)).ptr,
-        .cwd = (try std.fmt.allocPrintZ(alloc, "{s}/cwd", .{run_dir})).ptr,
+        .cwd = (try std.fmt.allocPrintSentinel(alloc, "{s}/cwd", .{run_dir}, 0)).ptr,
         .stdout_fd = out_fd,
         .stderr_fd = err_fd,
         .limit = .{ .alarm_ms = timeout_s * 1000 },

@@ -221,7 +221,7 @@ def _is_lost_slot_412(msg: String) -> Bool:
     classify_append_error`) does the same create-CAS and calls this function,
     so both paths agree on what a lost slot is."""
     return (
-        msg.find("412") >= 0
+        msg.find("status=412") >= 0
         or msg.find("precondition") >= 0
         or msg.find("If-None-Match") >= 0
     )

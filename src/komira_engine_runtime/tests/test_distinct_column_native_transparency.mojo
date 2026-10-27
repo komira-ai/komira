@@ -1,17 +1,15 @@
 # =============================================================================
 # test_distinct_column_native_transparency.mojo
 #
-# P-2.B.2a transparency gate for the DistinctState column-native breaker
-# migration. The migrated `DistinctState.drain_to_record_batch` produces a
-# ColumnNativeBatch internally (the native column-batch product) and bridges to
-# RecordBatch at the breaker output via the P-2.A shim
-# (column_native_from_record_batch -> record_batch_from_column_native). Because
-# the ColumnNativeBatch body IS a THSPLC chunk, the lift+lower is byte-identical
-# to a spill/restore round-trip, so the migrated drain is byte-identical to the
-# prior direct RecordBatch drain.
+# Bridge round-trip gate for the output shape of the distinct breaker. It builds
+# a RecordBatch shaped like that breaker's output by hand (no operator state is
+# reached: this package depends on no operator), moves it through
+# column_native_from_record_batch and record_batch_from_column_native, and
+# asserts the result is byte-equal to the input. It proves the bridge keeps
+# values, validity, offsets and schema flags for this shape; it does not prove
+# that an operator's column-native result equals its RecordBatch result.
 #
-# Mirror of test_hash_agg_column_native_transparency: the lift+lower transform
-# the migration inserts is byte-identical for distinct-output shapes (single
+# The bridge round-trip is checked for distinct-output shapes (single
 # Int64 key; composite (Int64, Int64) keys; + a STRING key to exercise the
 # var-width path the distinct breaker carries as a key column).
 # =============================================================================
@@ -76,7 +74,7 @@ def _distinct_composite_key(
 
 
 # =============================================================================
-# §2 — BRIDGE TRANSPARENCY (byte-identity of the lift+lower the migration adds)
+# §2 — BRIDGE TRANSPARENCY (byte-identity of the bridge round-trip adds)
 # =============================================================================
 
 

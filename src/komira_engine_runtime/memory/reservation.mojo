@@ -26,7 +26,7 @@ from komira_engine_runtime.host_profile import HostProfile
 comptime _BUDGET_UNSET: Int = -1
 
 
-struct MemoryReservation(Movable, Deinitable):
+struct MemoryReservation(Movable):
     """A breaker's memory accountant.
 
     `try_grow(n)` adds `n` to the held tally and returns True when the tally
@@ -74,13 +74,18 @@ struct MemoryReservation(Movable, Deinitable):
 
         Returns True and adds `n_bytes` when there is no budget or when
         `held_bytes() + n_bytes <= budget_bytes()`. Otherwise returns False,
-        leaves the tally unchanged and counts the denial. Call per batch, not
-        per row.
+        leaves the tally unchanged and counts the denial. A negative
+        `n_bytes` is refused the same way (a grow cannot free memory; use
+        `release`). The budget test is `n_bytes > budget - held`, which
+        cannot wrap. Call per batch, not per row.
         """
+        if n_bytes < 0:
+            self._try_grow_denied_count += 1
+            return False
         if self._budget_bytes == _BUDGET_UNSET:
             self._held_bytes += n_bytes
             return True
-        if self._held_bytes + n_bytes > self._budget_bytes:
+        if n_bytes > self._budget_bytes - self._held_bytes:
             self._try_grow_denied_count += 1
             return False
         self._held_bytes += n_bytes
@@ -107,8 +112,3 @@ struct MemoryReservation(Movable, Deinitable):
     def has_budget(self) -> Bool:
         """True when a budget is set."""
         return self._budget_bytes != _BUDGET_UNSET
-
-    def __deinit__(deinit self):
-        """Dropping a reservation releases nothing elsewhere: it is a tally
-        only."""
-        _ = self._held_bytes

@@ -98,10 +98,10 @@ const Dir = struct {
     /// working directory.
     fn run(self: *Dir, exe: []const u8, args: []const []const u8) !Run {
         const a = self.arena.allocator();
-        var argv = std.ArrayList([]const u8).init(a);
-        try argv.append(try self.path(exe));
-        try argv.appendSlice(args);
-        const r = try std.ChildProcess.run(.{
+        var argv = std.ArrayList([]const u8).empty;
+        try argv.append(a, try self.path(exe));
+        try argv.appendSlice(a, args);
+        const r = try std.process.Child.run(.{
             .allocator = a,
             .argv = argv.items,
             .cwd_dir = self.wd,
@@ -127,8 +127,8 @@ const Dir = struct {
     fn fixture(self: *Dir, payload: []const u8, tail: []const u8) !void {
         const a = self.arena.allocator();
         const p = try std.mem.concat(a, u8, &.{ payload, "\x00" });
-        try self.tmp.dir.writeFile("fx", try std.mem.concat(a, u8, &.{ try elf(a, ".debug_line", 0, p), tail }));
-        try self.tmp.dir.writeFile("link/real/stub_out", try self.path("fx"));
+        try self.tmp.dir.writeFile(.{ .sub_path = "fx", .data = try std.mem.concat(a, u8, &.{ try elf(a, ".debug_line", 0, p), tail }) });
+        try self.tmp.dir.writeFile(.{ .sub_path = "link/real/stub_out", .data = try self.path("fx") });
     }
 
     /// `name`, a symbolic link to the working directory, as an absolute path
@@ -171,14 +171,14 @@ test "15, 16. pinned zig: the link keeps .debug_line, relocated; zig alone strip
     var d = try Dir.init(.zig);
     defer d.deinit();
     const a = d.arena.allocator();
-    try d.wd.writeFile("hello.c", HELLO);
+    try d.wd.writeFile(.{ .sub_path = "hello.c", .data = HELLO });
     try expect("pinned zig, compile", try d.run("link/zig", &.{ "cc", "-target", TGT, "-g", "-c", "hello.c", "-o", "hello.o" }), 0, "");
     try expect("pinned zig, link", try d.run("link/zig", &.{ "cc", "-target", TGT, "-Wl,--strip-debug", "-Wl,--enable-new-dtags", "hello.o", "-o", "hello" }), 0, "");
     const hello = try d.file("hello");
     try std.testing.expect(has(hello, ".debug_line"));
     try std.testing.expect(has(hello, try placeholder(a, d.cwd)));
     try std.testing.expect(!has(hello, d.cwd));
-    try d.wd.writeFile("hello.copy", hello);
+    try d.wd.writeFile(.{ .sub_path = "hello.copy", .data = hello });
     const copy = try d.run("link/debug_relocate", &.{ "hello.copy", "/nonexistent/directory/name" });
     if (copy.code != 0) {
         std.debug.print("pinned zig: debug_relocate refused the binary (a compressed section?), exit {d}; stderr:\n{s}\n", .{ copy.code, copy.stderr });

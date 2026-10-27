@@ -5,15 +5,14 @@
 #
 # Drives `KeyBundleVar.build_insert_row` / `probe_batch_row_first` directly
 # off a `BatchView` with non-INT64 keys and checks that:
-#   (a) keys match exactly, fractional FLOAT64 keys included: a path that read
-#       the key through `col_i64` and a numeric cast would hash 4.2, 4.7 and
-#       4.0 alike and store garbage, so `test_f64_key_fractional_match_exact`
-#       and `test_f64_key_distinct_buckets_not_collapsed` go red on it;
+#   (a) keys match exactly, fractional FLOAT64 keys included: 4.2, 4.7 and
+#       4.0 are three distinct keys with their own buckets
+#       (`test_f64_key_fractional_match_exact` and
+#       `test_f64_key_distinct_buckets_not_collapsed`);
 #   (b) the build-key emit channel (`key_bits_at_slot` + `key_from_bits`)
 #       gives back the exact stored value;
-#   (c) a narrow INT16 key is read as two bytes (an eight-byte read of a
-#       two-byte column folds the neighbouring cells into the key, red in
-#       `test_i16_narrow_key_match_exact`).
+#   (c) a narrow INT16 key is read as two bytes, so the neighbouring cells do
+#       not enter the key (`test_i16_narrow_key_match_exact`).
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
@@ -93,9 +92,8 @@ def _i16_batch(vals: List[Int16]) raises -> RecordBatch:
 
 
 def test_f64_key_fractional_match_exact() raises:
-    """An F64 join key with FRACTIONAL values matches correctly. Through an
-    `Int64(key)` channel 4.2, 4.7 and 4.0 all hash as 4 and the numeric cast
-    corrupts the stored value; this test fails on such a path."""
+    """An F64 join key with FRACTIONAL values matches correctly: 4.2, 4.7
+    and 4.0 hash and store as their own values, not as the integer 4."""
     comptime F64 = DType.float64
     var bundle = make_key_bundle_1[F64](64)
 

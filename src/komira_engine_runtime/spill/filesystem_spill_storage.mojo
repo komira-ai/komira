@@ -38,8 +38,8 @@
 #     its response bytes).
 #
 #   * `release_chunk(id)` →
-#       fs.delete(path)                                      (U-0 extension)
-#     `FileSystem.delete` is ENOENT-tolerant (U-0). Until/unless a given FS
+#       fs.delete(path)
+#     `FileSystem.delete` is ENOENT-tolerant. Until/unless a given FS
 #     conformer implements delete (today only LocalFs does; S3Fs/GcsFs/AzureFs
 #     inherit the trait's raising default), `release_chunk` surfaces the
 #     raise — and the chunk is reclaimed at process-exit by the conformer's
@@ -156,7 +156,7 @@ struct FileSystemSpillStorage[FS: FileSystem](SpillStorage):
     self-mkdir'ing convenience ctor that preserves the old call shape).
 
     `budget_bytes` caps `nbytes_in_use()`; `write_chunk` raises rather than
-    exceeding it. `budget_bytes == -1` disables the limit.
+    exceeding it. Any negative `budget_bytes` disables the limit.
 
     # Threading
 
@@ -187,7 +187,7 @@ struct FileSystemSpillStorage[FS: FileSystem](SpillStorage):
         _live_chunks:   Maps the raw ChunkId value -> on-disk byte length.
                         Drives `nbytes_in_use` accounting + the existence
                         check for `read_chunk` / `release_chunk`.
-        _budget_bytes:  Max `nbytes_in_use()`; -1 = no limit.
+        _budget_bytes:  Max `nbytes_in_use()`; any negative = no limit.
         _nbytes_in_use: Sum of live chunk payload lengths.
         _fsync_calls:   Count of fsync invocations issued by `sync()` (one
                         per live chunk file + one for the directory). Drives
@@ -224,7 +224,7 @@ struct FileSystemSpillStorage[FS: FileSystem](SpillStorage):
             fs: The composed FileSystem (consumed via `^`). All byte I/O +
                 delete delegates to this.
             root_prefix: Namespace for minted `chunk_*.bin` paths.
-            budget_bytes: Cap on `nbytes_in_use()`; -1 disables.
+            budget_bytes: Cap on `nbytes_in_use()`; any negative disables.
         """
         self._fs = fs^
         self._root_prefix = root_prefix
@@ -260,7 +260,7 @@ struct FileSystemSpillStorage[FS: FileSystem](SpillStorage):
         """
         var n = bytes.length()
         if self._budget_bytes >= 0:
-            if self._nbytes_in_use + n > self._budget_bytes:
+            if n > self._budget_bytes - self._nbytes_in_use:
                 raise Error(
                     "FileSystemSpillStorage.write_chunk: budget exceeded"
                     " (in_use="
@@ -275,10 +275,11 @@ struct FileSystemSpillStorage[FS: FileSystem](SpillStorage):
         var value = self._next_chunk_id
         var path = _chunk_path(self._root_prefix, value)
 
-        # open_write → write_at → close_write. On failure, best-effort
+        # open_write → write_at → close_write. On failure (open_write
+        # included, which may create the file before failing), best-effort
         # delete the partial path and re-raise.
-        var wfile = self._fs.open_write(path, WriteMode.create_truncate())
         try:
+            var wfile = self._fs.open_write(path, WriteMode.create_truncate())
             if n > 0:
                 # SAFETY: `bytes.as_view()` returns a ByteView tied to the
                 # local `bytes` (the SharedAlignedBuffer's Arc pins the
@@ -342,7 +343,7 @@ struct FileSystemSpillStorage[FS: FileSystem](SpillStorage):
     def release_chunk(mut self, chunk_id: ChunkId) raises:
         """Release the chunk: drop the live entry + delete the backing path.
 
-        Maps to `fs.delete(path)` (U-0, ENOENT-tolerant). Idempotent: a
+        Maps to `fs.delete(path)` (ENOENT-tolerant). Idempotent: a
         second release of the same `chunk_id` is a no-op (entry already
         absent → return without touching the FileSystem).
 
@@ -352,8 +353,8 @@ struct FileSystemSpillStorage[FS: FileSystem](SpillStorage):
         live-chunk entry is then NOT dropped, and the chunk's bytes are
         reclaimed at process-exit by the conformer's teardown OR a
         next-session directory/prefix sweep (documented process-exit-sweep
-        fallback per the brief). Callers on cloud-FS today should treat
-        release as best-effort until OBJECTSTORE-V04 wires delete.
+        fallback). Callers on a cloud FS should treat release as best-effort
+        while that FS has no delete.
         """
         var value = chunk_id._unsafe_value()
         var maybe_len = self._live_chunks.find(value)
@@ -493,6 +494,9 @@ struct FileSystemSpillStorage[FS: FileSystem](SpillStorage):
         var existing = self._live_chunks.find(value)
         if existing:
             self._nbytes_in_use -= existing.value()
+        # Recovery path: re-registering a chunk that already exists on disk is
+        # not budget-checked, so this can take `nbytes_in_use()` past the
+        # budget.
         self._live_chunks[value] = n
         self._nbytes_in_use += n
         # Keep the mint counter ahead of any re-registered id so a later

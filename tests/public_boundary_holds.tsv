@@ -70,7 +70,7 @@ host	src/komira_aws_core/tests/test_endpoint_resolution.mojo	3	malformed, IPv6 a
 host	src/komira_aws_core/tests/test_endpoint_rules_library.mojo	8	malformed, IPv6 and single-label hosts the endpoint rules must handle (test input)
 host	src/komira_aws_lambda/tests/test_lambda_responses.mojo	3	a made-up Lambda function URL (test data)
 host	src/komira_column_kernels/tests/test_regexp_bitstate_differential.mojo	5	URLs as regular-expression test input
-host	src/komira_column_kernels/tests/test_regexp_dotstar_eos_tail.mojo	14	URLs as regular-expression test input
+host	src/komira_column_kernels/tests/test_regexp_dotstar_eos_tail.mojo	13	URLs as regular-expression test input
 host	src/komira_column_kernels/tests/test_regexp_replace_memo_duplicates.mojo	16	URLs as regular-expression test input
 host	src/komira_column_kernels/tests/test_regexp_scratch_reuse_and_span_subject.mojo	6	URLs as regular-expression test input
 host	src/komira_jose/tests/test_rs256_third_party.mojo	1	a made-up registry host (test data)
@@ -113,8 +113,6 @@ ip	src/komira_db/tests/test_h1_keepalive_pooled_conn.mojo	7	a private address as
 ip	src/komira_db_postgres/wire/tests/test_dns_resolve_pg_host.mojo	1	a private address as test input
 ip	src/komira_gcp_compute/tests/test_compute_instances.mojo	2	an instance's internal address in a recorded API response (test data)
 ip	src/komira_gcp_compute/tests/test_compute_network.mojo	5	VPC subnet ranges in recorded API responses (test data)
-ip	src/komira_http_client/tests/test_http_client_h1_keepalive_reuse.mojo	1	a private address as test input
-ip	src/komira_http_client/tests/test_request_writer.mojo	2	a private address as test input
 ip	src/komira_log/tests/test_log_ring_bounded_drain_arena.mojo	1	a private address as test input
 ip	src/komira_net/tests/test_dns_addrinfo_offsets.mojo	1	a private address as test input
 ip	src/komira_net/tests/test_dns_literal.mojo	2	a private address as test input

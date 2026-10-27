@@ -33,6 +33,7 @@ from komira_operator_api.breaker_state_trait import (
 
 from komira_op_join_stage.join_key_slot import (
     JOIN_BUILD_DEFAULT_CAP,
+    key_home,
     round_up_pow2,
 )
 from komira_op_join_stage.join_key_bundle import KeyBundle
@@ -59,8 +60,9 @@ struct JoinBuildTable[
 
     As a `BreakerState` it is the build primitive, not a pipeline state:
     `feed_row`, `drain_to_record_batch`, `probe_batch` and `probe_asof_batch`
-    raise (`JoinBuildState` and `JoinProbeState` are the states). Its
-    `combine` is the cross-worker merge those states use."""
+    raise: a pipeline drives the table through the join's build and probe
+    states, not through these methods. Its `combine` is the cross-worker
+    merge those states use."""
 
     var keys: Self.KB
     var payload: Tuple[*Self.Payload]
@@ -115,13 +117,13 @@ struct JoinBuildTable[
     ) raises:
         raise Error(
             "JoinBuildTable.feed_row: the table is a build primitive; feed"
-            " rows through JoinBuildState"
+            " rows through the join's build state"
         )
 
     def drain_to_record_batch(self) raises -> Optional[RecordBatch]:
         raise Error(
             "JoinBuildTable.drain_to_record_batch: the table is a build"
-            " primitive; probe it through JoinProbeState"
+            " primitive; probe it through the join's probe state"
         )
 
     def probe_batch[bo: Origin[mut=False], join_t: Int](
@@ -129,7 +131,7 @@ struct JoinBuildTable[
     ) raises -> Optional[RecordBatch]:
         raise Error(
             "JoinBuildTable.probe_batch: the table is a build primitive; probe"
-            " it through JoinProbeState"
+            " it through the join's probe state"
         )
 
     def probe_asof_batch[bo: Origin[mut=False]](
@@ -205,7 +207,7 @@ struct JoinBuildTable[
                 remap.append(-1)
             else:
                 var h = self.keys.slot_hash(old_slot)
-                var new_slot = Int(h & UInt64(new_mask))
+                var new_slot = key_home(h, new_mask)
                 while occupied[new_slot]:
                     new_slot = (new_slot + 1) & new_mask
                 occupied[new_slot] = True

@@ -1,0 +1,75 @@
+# The targets a change affects, as one label per line on stdout.
+#
+#   ./buck2 bxl komira//tools/build/ci/affected.bxl:affected \
+#       @tools/build/ci/affected_changed.args @changed.txt \
+#       @tools/build/ci/affected_held.args @held.txt
+#
+# `changed.txt` is `git diff --name-only <base>...HEAD`; `held.txt` is
+# `git grep -n '' <base> HEAD -- '*coverage_held'` (both written by the
+# workflow, one line each). A BXL script reads no file: Buck2's client expands
+# `@file` before the subcommand, one argument per line, and the two small
+# `.args` files spell the `--` and the option that take the lines that follow.
+# After `--` the client does not expand `@file`, which is why the arguments
+# are placed before it.
+#
+# Prints the targets to build and test: the owners of the changed files and
+# everything that depends on them in the check set; or `komira//ci:pr`, the
+# whole check set, when a changed file cannot be mapped (affected.bzl lists
+# the rules, rules.bzl the data). It FAILS, naming why, when:
+#   - the change drops a coverage hold (a hold is never dropped),
+#   - the change names no file (EMPTY),
+#   - the files reach no target (VACUOUS: only inert files),
+#   - a query of the graph fails (Buck2's own error).
+# The reasons for a widening and the warnings go to the log, not stdout.
+#
+# Options: --scope <patterns> (default: UNIVERSE of rules.bzl), --head <rev>
+# (the revision `git grep` printed for the head, default HEAD), --aggregate
+# <label> (default: AGGREGATE of rules.bzl).
+
+load(":affected.bzl", "AFFECTED", "EMPTY", "VACUOUS", "WIDENED", "held_refusals", "label_package", "parse_held_lines", "select")
+load(":ci_graph.bzl", "make_graph", "without_left_out")
+load(":rules.bzl", "AGGREGATE", "EXCLUDED", "INERT", "UNIVERSE", "WIDEN")
+
+def _impl(ctx):
+    scope = ctx.cli_args.scope or UNIVERSE
+    aggregate = ctx.cli_args.aggregate or AGGREGATE
+    package = label_package(aggregate)
+    g = make_graph(ctx, scope, aggregate.split(":")[0] + ":")
+    changed = [c for c in ctx.cli_args.changed if c]
+    base, head = parse_held_lines([l for l in ctx.cli_args.held if l], ctx.cli_args.head)
+    dropped = held_refusals(changed, base, head, g)
+    if dropped:
+        fail("BROKEN: a coverage hold was dropped (a package that reached the target stays held; tools/build/coverage/README.md): " + "; ".join(dropped))
+    rules = struct(widen = WIDEN, inert = INERT)
+    verdict = select(rules, changed, g, package)
+    for w in verdict.warnings:
+        print("affected: warning: " + w)
+    if verdict.kind == EMPTY:
+        fail("EMPTY: " + verdict.reason)
+    if verdict.kind == VACUOUS:
+        fail("VACUOUS: " + verdict.reason)
+    if verdict.kind == WIDENED:
+        print("affected: WIDENED: " + verdict.reason)
+        ctx.output.print(aggregate)
+        return
+    targets = without_left_out(ctx, verdict.targets, [p for p, _ in EXCLUDED])
+    if not targets:
+        # Every target the change reaches is left out of the aggregate on purpose: nothing to build
+        # but the aggregate itself, which holds the rest of the check set.
+        print("affected: WIDENED: every target reached is left out of the aggregate (rules.bzl EXCLUDED)")
+        ctx.output.print(aggregate)
+        return
+    print("affected: AFFECTED: {} file(s), {} target(s), {} left out (EXCLUDED)".format(verdict.files, len(targets), len(verdict.targets) - len(targets)))
+    for t in targets:
+        ctx.output.print(t)
+
+affected = bxl_main(
+    impl = _impl,
+    cli_args = {
+        "aggregate": cli_args.string(default = ""),
+        "changed": cli_args.list(cli_args.string(), default = []),
+        "head": cli_args.string(default = "HEAD"),
+        "held": cli_args.list(cli_args.string(), default = []),
+        "scope": cli_args.list(cli_args.string(), default = []),
+    },
+)

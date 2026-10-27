@@ -7,30 +7,22 @@
 # the table grows and across `combine`.
 # =============================================================================
 #
-# What each test catches (each was run against the defect it names, red):
-#   * `test_minus_one_is_a_key`: a table that marks an empty slot with the
-#     key value -1 makes a -1 build row invisible (a probe of -1 stops at the
-#     "empty" slot) and a second -1 lands on the same slot. Planting the
-#     sentinel back (`slot_is_empty` as `c[slot] == -1`) reds it.
-#   * `test_unsigned_max_and_bool_true_are_keys`: the same sentinel is
-#     UInt64.MAX for an unsigned key and True for a BOOL key.
-#   * `test_f64_nan_keys_match` / `test_f32_nan_keys_match`: IEEE `==` never
-#     matches a NaN, and a hash of the raw bits splits NaNs of different sign
-#     or payload. Planting `==` in `key_eq` reds both.
-#   * `test_signed_zero_keys_match`: an equality over raw bits keeps -0.0 and
-#     +0.0 apart; planting `key_bits_of` for `key_canonical_bits` reds it
-#     (and the NaN tests).
+# What each test proves:
+#   * `test_minus_one_is_a_key`: a -1 build row is found by a probe of -1, and
+#     a second -1 takes its own slot (no key value stands for an empty slot).
+#   * `test_unsigned_max_and_bool_true_are_keys`: the same holds for
+#     UInt64.MAX as an unsigned key and True as a BOOL key.
+#   * `test_f64_nan_keys_match` / `test_f32_nan_keys_match`: NaNs of different
+#     sign or payload are one key.
+#   * `test_signed_zero_keys_match`: -0.0 and +0.0 are one key.
 #   * `test_null_probe_key_matches_nothing`: a NULL probe cell carries value
-#     bits (0 here); reading them as a key matches the build key 0.
-#   * `test_free_functions_and_batch_path_share_the_hash`: free functions
-#     that hash `Int64(key)` (4.25 and 4.75 both as 4) while the batch path
-#     and the rehash hash the bits: after the table grows the free-function
-#     probe misses, and a batch-path probe of a free-function insert misses.
-#     Planting the `Int64(key)` hash in the free functions reds it.
-#   * `test_combine_merges_equal_nan_keys`: `combine` decides "duplicate" with
-#     the stored-vs-stored equality; IEEE `==` there leaves
-#     `has_duplicate_keys` False for two NaN rows, so a first-match probe
-#     returns one of them. Planting `==` in `KeySlot.slot_eq_loaded` reds it.
+#     bits (0 here) that do not match the build key 0.
+#   * `test_free_functions_and_batch_path_share_the_hash`: the free functions
+#     and the batch-row path hash a key the same way: 4.25 and 4.75 stay
+#     distinct, a free-function probe finds its rows after the table grows,
+#     and a batch-path probe finds a free-function insert.
+#   * `test_combine_merges_equal_nan_keys`: `combine` sets
+#     `has_duplicate_keys` for two NaN rows, so a probe walks every match.
 # =============================================================================
 
 from std.memory import bitcast

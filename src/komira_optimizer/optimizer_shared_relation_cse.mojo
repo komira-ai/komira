@@ -79,6 +79,7 @@ from komira_plan_ir.logical_plan import (
     PLAN_UNION,
 )
 from komira_plan_expr.expr import Expr, EXPR_COL_REF
+from komira_plan_expr.udf_data import UdfData
 from komira_arrow.schema import Schema
 from komira_scan_source.in_memory_source import InMemorySource
 
@@ -112,7 +113,8 @@ def _copy_aggs(arr: AggExprArray) -> AggExprArray:
 # content/path identity `structural_hash` keys scans on) AND the Project level
 # (a PURE-SELECT project of bare col-refs is skipped; a computation-bearing
 # project's non-col-ref exprs ARE hashed). It DOES hash filters, join
-# type/keys/residual, and aggregate group_by/aggs. So two relations that differ
+# type/keys/residual, aggregate group_by/aggs, and the UDF a Filter, Project or
+# Aggregate carries (`_fold_udf`). So two relations that differ
 # ONLY in which columns they project (the q11 differential-prune shape)
 # fingerprint EQUAL, while relations differing in a filter, a join, a source, or
 # a computed column fingerprint DIFFERENT -- a fold can never merge two relations
@@ -165,6 +167,23 @@ def _fold_order(
     return acc
 
 
+def _fold_udf(h: UInt64, udf: Optional[OwnedPointer[UdfData]]) -> UInt64:
+    """Fold the UDF a Filter, Project or Aggregate carries; a node with none
+    folds nothing, so a plan without UDFs keeps its fingerprint. A UDF node's
+    exprs are placeholders (a UDF Filter's predicate is `lit(true)`, a UDF
+    Project's exprs are bare col-refs this fingerprint skips), so the UDF is
+    the only field that says what the node computes. `UdfData.structural_hash`
+    covers the description and the call site (factory id and salt); the
+    registered handle is folded beside it because that hash leaves it out."""
+    if not udf:
+        return h
+    ref u = udf.value()[]
+    var acc = _fnv_u64(h, u.structural_hash())
+    if u.registered_handle_id:
+        acc = _fnv_u64(acc, UInt64(u.registered_handle_id.value()))
+    return acc
+
+
 def _fp_accumulate(plan: LogicalPlan, h: UInt64) raises -> UInt64:
     var acc = _fnv_u64(h, UInt64(Int(plan.tag)))
     if plan.tag == PLAN_SCAN:
@@ -178,9 +197,11 @@ def _fp_accumulate(plan: LogicalPlan, h: UInt64) raises -> UInt64:
         return acc
     elif plan.tag == PLAN_FILTER:
         acc = _fnv_str(acc, String(plan._filter.value()[].predicate))
+        acc = _fold_udf(acc, plan._filter.value()[].udf)
         return _fp_accumulate(plan._filter.value()[].child[], acc)
     elif plan.tag == PLAN_PROJECT:
         ref pj = plan._project.value()[]
+        acc = _fold_udf(acc, pj.udf)
         # Skip a PURE SELECT (all bare col-refs -> projection only); a
         # computed expr IS hashed (a derived column changes the rows).
         for i in range(len(pj.exprs)):
@@ -201,6 +222,7 @@ def _fp_accumulate(plan: LogicalPlan, h: UInt64) raises -> UInt64:
         return _fp_accumulate(jd.right[], acc)
     elif plan.tag == PLAN_AGGREGATE:
         ref ad = plan._aggregate.value()[]
+        acc = _fold_udf(acc, ad.udf)
         acc = _fnv_u64(acc, UInt64(len(ad.group_by)))
         for i in range(len(ad.group_by)):
             acc = _fnv_str(acc, String(ad.group_by[i]))

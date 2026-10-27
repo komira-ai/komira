@@ -30,4 +30,8 @@
   # tools/build/toolchains/README.md, "macOS".
   # darwin_arm64_properties = pool=darwin-sized
   # darwin_macos_hosts = 26.5-0123456789abcdef 26.5-fedcba9876543210
+  # Optional: directories (absolute, separated by ':' or spaces) a macOS test
+  # run searches for a library it opens by its bare name, before
+  # /usr/local/lib:/usr/lib.
+  # macos_library_dirs = /opt/homebrew/lib
   # linux_arm64_properties is reserved: the platform is declared, not built yet.

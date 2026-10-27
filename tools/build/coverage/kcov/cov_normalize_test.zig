@@ -76,8 +76,8 @@ const Case = struct {
             error.FileNotFound => {},
             else => return e,
         };
-        var err = std.ArrayList(u8).init(a);
-        const status = N.entry(a, self.tmp.dir, args, err.writer());
+        var err = std.ArrayList(u8).empty;
+        const status = N.entry(a, self.tmp.dir, args, err.writer(a));
         const out = self.tmp.dir.readFileAlloc(a, OUT, 1 << 20) catch |e| switch (e) {
             error.FileNotFound => null,
             else => return e,
@@ -111,8 +111,8 @@ const Case = struct {
     }
 
     fn cat(self: *Case, parts: []const Args) Args {
-        var all = std.ArrayList([]const u8).init(self.alloc());
-        for (parts) |p| all.appendSlice(p) catch @panic("out of memory");
+        var all = std.ArrayList([]const u8).empty;
+        for (parts) |p| all.appendSlice(self.alloc(), p) catch @panic("out of memory");
         return all.items;
     }
 };
@@ -144,16 +144,16 @@ fn setAttr(a: std.mem.Allocator, text: []const u8, comptime attr: []const u8, va
 
 /// `text` with whatever lies between each `open` and the next `close` set to `value`.
 fn setBetween(a: std.mem.Allocator, text: []const u8, open: []const u8, close: []const u8, value: []const u8) ![]const u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var i: usize = 0;
     while (std.mem.indexOfPos(u8, text, i, open)) |o| {
         const v0 = o + open.len;
         const v1 = std.mem.indexOfPos(u8, text, v0, close) orelse return error.TestUnexpectedResult;
-        try out.appendSlice(text[i..v0]);
-        try out.appendSlice(value);
+        try out.appendSlice(a, text[i..v0]);
+        try out.appendSlice(a, value);
         i = v1;
     }
-    try out.appendSlice(text[i..]);
+    try out.appendSlice(a, text[i..]);
     return out.items;
 }
 
@@ -359,8 +359,8 @@ test "failed write: a write cut short leaves the output's directory empty" {
     const posix = std.posix;
     const ign = posix.Sigaction{ .handler = .{ .handler = posix.SIG.IGN }, .mask = std.mem.zeroes(posix.sigset_t), .flags = 0 };
     var old_act: posix.Sigaction = undefined;
-    try posix.sigaction(posix.SIG.XFSZ, &ign, &old_act);
-    defer posix.sigaction(posix.SIG.XFSZ, &old_act, null) catch {};
+    posix.sigaction(posix.SIG.XFSZ, &ign, &old_act);
+    defer posix.sigaction(posix.SIG.XFSZ, &old_act, null);
     const old = try posix.getrlimit(.FSIZE);
     try posix.setrlimit(.FSIZE, .{ .cur = 512, .max = old.max });
     var restored = false;
@@ -377,8 +377,8 @@ test "failed write: a write cut short leaves the output's directory empty" {
         try std.testing.expect((try f.getEndPos()) < 2 * golden.len);
     }
 
-    var err = std.ArrayList(u8).init(c.alloc());
-    const status = N.entry(c.alloc(), c.tmp.dir, &([_][]const u8{ "--in", FX, "--out", "o/out.xml" } ++ M1 ++ M2 ++ M3 ++ EX ++ MUST), err.writer());
+    var err = std.ArrayList(u8).empty;
+    const status = N.entry(c.alloc(), c.tmp.dir, &([_][]const u8{ "--in", FX, "--out", "o/out.xml" } ++ M1 ++ M2 ++ M3 ++ EX ++ MUST), err.writer(c.alloc()));
     try posix.setrlimit(.FSIZE, old);
     restored = true;
     if (status != 1) {

@@ -1,11 +1,12 @@
 # =============================================================================
 # join_key_bundle -- the key block of the stage join build table: the
 # `KeyBundle` trait, its one conformer `KeyBundleVar[*Keys]` (one key column
-# per pack element, any arity), the `KeyBundle1`..`KeyBundle4` aliases and
+# per pack element, any arity; the batch-row entry points read up to four),
+# the `KeyBundle1`..`KeyBundle4` aliases and
 # their factories
 # =============================================================================
 #
-# A composite key hashes to the XOR of its columns' `key_hash`es and is equal
+# A composite key hashes to the `key_combine` fold of its columns' `key_hash`es and is equal
 # to another when every column is (each under the key model of
 # join_key_slot). The table is open addressing with linear probing and does
 # not deduplicate: every build row takes its own slot, so a probe that walks
@@ -24,6 +25,8 @@ from komira_op_join_stage.join_key_slot import (
     KeyBlockWrap,
     KeyScalarTrait,
     KeySlot,
+    key_combine,
+    key_home,
     key_slot,
 )
 
@@ -202,7 +205,7 @@ struct KeyBundleVar[*Keys: KeyScalarTrait](KeyBundle):
     def slot_hash(self, slot: Int) -> UInt64:
         var h: UInt64 = 0
         comptime for k in range(Self.Keys.__len__()):
-            h = h ^ self.cols[k].hash_slot(slot)
+            h = key_combine(h, self.cols[k].hash_slot(slot))
         return h
 
     @always_inline
@@ -263,7 +266,7 @@ struct KeyBundleVar[*Keys: KeyScalarTrait](KeyBundle):
     def _bits_hash(self, bits: SIMD[DType.uint64, 4]) -> UInt64:
         var h: UInt64 = 0
         comptime for k in range(Self.Keys.__len__()):
-            h = h ^ self.cols[k].hash_bits(bits[k])
+            h = key_combine(h, self.cols[k].hash_bits(bits[k]))
         return h
 
     @always_inline
@@ -303,7 +306,7 @@ struct KeyBundleVar[*Keys: KeyScalarTrait](KeyBundle):
         var bits = self._row_bits[
             bo, probe_col0, probe_col1, probe_col2, probe_col3
         ](batch, row)
-        var slot = Int(self._bits_hash(bits) & UInt64(capacity_mask))
+        var slot = key_home(self._bits_hash(bits), capacity_mask)
         var first = slot
         while True:
             if self.cols[0].slot_is_empty(slot):
@@ -334,7 +337,7 @@ struct KeyBundleVar[*Keys: KeyScalarTrait](KeyBundle):
         var bits = self._row_bits[
             bo, probe_col0, probe_col1, probe_col2, probe_col3
         ](batch, row)
-        var slot = Int(self._bits_hash(bits) & UInt64(capacity_mask))
+        var slot = key_home(self._bits_hash(bits), capacity_mask)
         var probe_count = 0
         while probe_count <= capacity_mask:
             if self.cols[0].slot_is_empty(slot):
@@ -362,7 +365,7 @@ struct KeyBundleVar[*Keys: KeyScalarTrait](KeyBundle):
         var bits = self._row_bits[bo, key_col0, key_col1, key_col2, key_col3](
             batch, row
         )
-        var slot = Int(self._bits_hash(bits) & UInt64(capacity_mask))
+        var slot = key_home(self._bits_hash(bits), capacity_mask)
         while not self.cols[0].slot_is_empty(slot):
             if self._slot_eq_bits(slot, bits):
                 saw_duplicate = True
@@ -380,7 +383,7 @@ struct KeyBundleVar[*Keys: KeyScalarTrait](KeyBundle):
         capacity_mask: Int,
         mut saw_duplicate: Bool,
     ) -> Int:
-        var slot = Int(src.slot_hash(src_slot) & UInt64(capacity_mask))
+        var slot = key_home(src.slot_hash(src_slot), capacity_mask)
         while not self.cols[0].slot_is_empty(slot):
             if self.slot_eq_loaded(slot, src, src_slot):
                 saw_duplicate = True

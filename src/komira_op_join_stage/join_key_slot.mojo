@@ -18,8 +18,8 @@
 # one value and `-0.0` equals `+0.0` (`canonical_bits_*` of komira_udf). The
 # stored value keeps its own bits, so a build key read back out of the table
 # is the value that went in. NULL is not a key value: the callers skip a NULL
-# build key and a NULL probe key (`KeyBundleVar.probe_batch_row` and
-# `JoinBuildState.feed_row`).
+# build key and a NULL probe key (`KeyBundleVar.build_insert_row` and
+# `KeyBundleVar.probe_batch_row`).
 #
 # The variadic bodies of `KeyBundleVar` cannot name a pack element's `K`, so
 # every batch read, compare and store goes through this trait in the
@@ -27,6 +27,7 @@
 # which knows `K`, does the DType-exact work.
 # =============================================================================
 
+from std.bit import pop_count
 from std.memory import bitcast
 from std.sys import size_of
 from std.sys.intrinsics import prefetch, PrefetchOptions
@@ -110,9 +111,33 @@ def key_canonical_bits[K: DType](value: Scalar[K]) -> UInt64:
 @always_inline
 def key_hash[K: DType](value: Scalar[K]) -> UInt64:
     """The hash of one key column: Knuth's multiplicative scrambler over the
-    canonical bits. A composite key hashes to the XOR of its columns' hashes.
-    For an INT64 key this is `UInt64(key) * 0x9E3779B97F4A7C15`."""
+    canonical bits. A composite key combines its columns' hashes with
+    `key_combine`; the home slot is `key_home` of the result. For an INT64
+    key this is `UInt64(key) * 0x9E3779B97F4A7C15`."""
     return key_canonical_bits[K](value) * _KNUTH
+
+
+@always_inline
+def key_combine(acc: UInt64, col_hash: UInt64) -> UInt64:
+    """Fold one more column's hash into a composite hash: `acc` rotated left
+    by 5 bits, XOR `col_hash`. The rotation makes the result depend on column
+    order and keeps a pair of equal columns from cancelling. A composite hash
+    starts from 0 and folds the columns in order."""
+    return ((acc << 5) | (acc >> 59)) ^ col_hash
+
+
+@always_inline
+def key_home(h: UInt64, capacity_mask: Int) -> Int:
+    """The home slot of a hash in a table with `capacity_mask + 1` slots (a
+    power of two): the top `log2(capacity)` bits of `h`. The multiplicative
+    scrambler's low bits depend only on the key's low bits, so a float key
+    with a short mantissa, or an integer key that is a multiple of a power
+    of two, would share one home slot if the low bits were taken; its top
+    bits depend on every bit of the key."""
+    if capacity_mask <= 0:
+        return 0
+    var width = Int(pop_count(UInt64(capacity_mask)))
+    return Int(h >> UInt64(64 - width))
 
 
 @always_inline
@@ -194,7 +219,8 @@ trait KeyScalarTrait(Defaultable, Movable, Deinitable):
 
     def eq_slot_to_bits(self, slot: Int, bits: UInt64) -> Bool:
         """True iff the key at `slot` equals the key whose bits are `bits`,
-        under the key model."""
+        under the key model. It does not check that `slot` is occupied: call
+        it only after `slot_is_empty` returned False."""
         ...
 
     def write_bits_to_slot(mut self, slot: Int, bits: UInt64):
