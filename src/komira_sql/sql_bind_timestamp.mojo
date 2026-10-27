@@ -273,6 +273,13 @@ def _timestamp_literal_micros(text: String, aware: Bool) raises -> Int64:
             var acc = Int64(0)
             while i < hi and b[i] >= UInt8(ord("0")) and b[i] <= UInt8(ord("9")):
                 acc = acc * Int64(10) + Int64(Int(b[i] - UInt8(ord("0"))))
+                # No time-of-day field is above 59, so a field past 999 is
+                # out of range already and stops here rather than wrapping.
+                if acc > Int64(999):
+                    raise Error(
+                        "SQL bind error: timestamp literal '" + text + "' has"
+                        " a time-of-day field out of range"
+                    )
                 digits += 1
                 i += 1
             if digits == 0:
@@ -286,6 +293,12 @@ def _timestamp_literal_micros(text: String, aware: Bool) raises -> Int64:
                 i += 1
             else:
                 break
+        if nparts < 2:
+            raise Error(
+                "SQL bind error: malformed timestamp literal '" + text
+                + "': expected HH:MM[:SS[.ffffff]] after the date, got an"
+                " hour alone"
+            )
         if parts[0] > 23 or parts[1] > 59 or parts[2] > 59:
             raise Error(
                 "SQL bind error: timestamp literal '" + text + "' has a"
@@ -294,7 +307,7 @@ def _timestamp_literal_micros(text: String, aware: Bool) raises -> Int64:
         micros += parts[0] * Int64(3600000000)
         micros += parts[1] * Int64(60000000)
         micros += parts[2] * Int64(1000000)
-        if i < hi and b[i] == UInt8(ord(".")):
+        if nparts == 3 and i < hi and b[i] == UInt8(ord(".")):
             i += 1
             var kept = 0
             var frac = Int64(0)

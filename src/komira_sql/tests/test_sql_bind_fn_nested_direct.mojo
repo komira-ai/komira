@@ -184,7 +184,7 @@ def test_date_diff_and_date_sub() raises:
     )
     _check(
         "SELECT date_sub('month', d, d) FROM t",
-        "ERR: SQL not supported: only date_sub('day', ...) is supported. date_sub counts COMPLETE periods and date_diff counts boundaries CROSSED — in DuckDB v1.5.3 they differ for every unit above 'day' (1 vs 2 over 2021-01-31 -> 2021-03-01), so the"
+        "ERR: SQL not supported: only date_sub('day', ...) is supported. date_sub counts COMPLETE periods and date_diff counts boundaries CROSSED — in DuckDB v1.5.3 they differ for every unit above 'day' (1 vs 2 over 2021-01-31 -> 2021-03-01), so the other units are not the neighbouring function's to answer"
     )
     _check(
         "SELECT date_sub('day', d) FROM t",

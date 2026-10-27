@@ -414,6 +414,25 @@ def test_case_typing() raises:
     )
 
 
+def test_case_without_else_over_non_numeric_arms() raises:
+    _check(
+        "SELECT CASE WHEN k > 1 THEN s END AS c FROM t",
+        "ERR: SQL not supported: a CASE with no ELSE whose THEN arms are neither INT64 nor FLOAT64 (a string, a date, a boolean or a narrower integer). The omitted ELSE is a NULL of the arms' type, the typed NULL values this engine's plan can carry are INT64 and FLOAT64 only, and every CASE arm must share one type. Write an explicit ELSE of the same type."
+    )
+    _check(
+        "SELECT CASE WHEN k > 1 THEN i32 END AS c FROM t",
+        "ERR: SQL not supported: a CASE with no ELSE whose THEN arms are neither INT64 nor FLOAT64 (a string, a date, a boolean or a narrower integer). The omitted ELSE is a NULL of the arms' type, the typed NULL values this engine's plan can carry are INT64 and FLOAT64 only, and every CASE arm must share one type. Write an explicit ELSE of the same type."
+    )
+    _check(
+        "SELECT CASE WHEN k > 1 THEN d END AS c FROM t",
+        "ERR: SQL not supported: a CASE with no ELSE whose THEN arms are neither INT64 nor FLOAT64 (a string, a date, a boolean or a narrower integer). The omitted ELSE is a NULL of the arms' type, the typed NULL values this engine's plan can carry are INT64 and FLOAT64 only, and every CASE arm must share one type. Write an explicit ELSE of the same type."
+    )
+    _check(
+        "SELECT CASE WHEN k > 1 THEN 1 WHEN k > 2 THEN i32 END AS c FROM t",
+        "ERR: SQL not supported: a CASE with no ELSE whose THEN arms are neither INT64 nor FLOAT64 (a string, a date, a boolean or a narrower integer). The omitted ELSE is a NULL of the arms' type, the typed NULL values this engine's plan can carry are INT64 and FLOAT64 only, and every CASE arm must share one type. Write an explicit ELSE of the same type."
+    )
+
+
 def test_scalar_position_refusals() raises:
     _check(
         "SELECT rank() OVER (ORDER BY k) + 1 FROM t",

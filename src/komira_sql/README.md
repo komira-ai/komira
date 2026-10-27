@@ -63,12 +63,14 @@ The expression binder (`sql_bind_expr`, `sql_bind_call`, `sql_bind_cast`,
 binds literals, columns, operators, `CASE` and a scalar subquery by index into
 the bodies the caller bound first; `sql_bind_call` resolves a function call
 through `sql_fn_table` (a declared UDF fills in for a name no row lowers) and
-enforces each row's arity; the other four hold the desugars: `CAST` and
+enforces the arity of each row that does not check its own; the other four hold the desugars: `CAST` and
 `DECIMAL` literals, the argument-shape functions (`greatest`, `coalesce`,
 `date_part`, `left`, `substring` and the like), the nested-value and
 date-arithmetic functions, and `TIMESTAMP` literals and `make_timestamp`. A
-shape the engine cannot answer exactly raises an `Error` that starts with
-`SQL not supported` and names it.
+shape the engine cannot answer exactly raises an `Error` that names it:
+`SQL not supported` for an unsupported shape, `SQL bind error` for malformed
+input (an arity mismatch, a DECIMAL that does not fit), `SQL internal` for a
+table row the binder has no arm for.
 
 ## Examples
 

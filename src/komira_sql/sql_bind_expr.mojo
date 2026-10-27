@@ -129,6 +129,21 @@ def _bind_case(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCatalo
         if any_float:
             default_expr = Expr.literal(ScalarValue.null(DType.float64))
         else:
+            # The default NULL is INT64, so every written THEN must be INT64
+            # too (a NULL arm is retyped below and is not a sibling here).
+            for i in range(len(results)):
+                if null_arm[i]:
+                    continue
+                if not _case_arm_is_int64(results[i], schema):
+                    raise Error(
+                        "SQL not supported: a CASE with no ELSE whose THEN"
+                        " arms are neither INT64 nor FLOAT64 (a string, a"
+                        " date, a boolean or a narrower integer). The omitted"
+                        " ELSE is a NULL of the arms' type, the typed NULL"
+                        " values this engine's plan can carry are INT64 and"
+                        " FLOAT64 only, and every CASE arm must share one"
+                        " type. Write an explicit ELSE of the same type."
+                    )
             default_expr = Expr.literal(ScalarValue.null(DType.int64))
 
     var any_null_arm = False

@@ -51,17 +51,12 @@ def _date_diff_days(sx: SqlExpr) raises -> Int64:
     ref d0 = args[1]
     ref d1 = args[2]
     if d0.tag != SX_DATE or d1.tag != SX_DATE:
-        # The one caller that reaches this line is the
-        # correlated-subquery predicate binder, which has no `BindScope` and so
-        # can only constant-fold: `_bind_date_diff` routes two DATE literals
-        # here and everything else to `_bind_date_delta`.
+        # Called only with two DATE literals (`_bind_date_diff` routes
+        # everything else to `_bind_date_delta`); any other shape is refused.
         raise Error(
             "SQL not supported: date_diff('day', a, b) requires constant DATE"
-            + " literal operands INSIDE A CORRELATED SUBQUERY PREDICATE."
-            + " THIS IS A LIMIT OF THIS POSITION, NOT OF date_diff: in an"
-            + " ordinary projection or filter it reads DATE columns."
-            + " The correlated-predicate binder binds no column operand here"
-            + " and can only constant-fold"
+            + " literal operands here. This function only constant-folds two"
+            + " DATE literals and binds no column operand."
         )
     return Int64(Int(_date_to_days(d1.text)) - Int(_date_to_days(d0.text)))
 
@@ -223,8 +218,8 @@ def _fn_arity_msg(name: String, kind: UInt8, n: Int) -> String:
 
     THE `pow()` LITERAL IS A PRESERVED QUIRK, NOT AN OVERSIGHT. The pre-table
     binder hard-coded `pow()` in this message, so `power(1)` has always been
-    told about `pow()`, and it says so under both spellings and at BOTH call
-    sites (`_bind_scalar_call` and the post-aggregate path). Fixing it is a
+    told about `pow()`, and it says so under both spellings and at every call
+    site. Fixing it is a
     one-word edit and a DIFFERENT commit from the one that moved it.
     """
     if kind == FNK_MATH_FN2:
@@ -423,6 +418,11 @@ def _bind_left_right(sx: SqlExpr, dsg: UInt8, schema: Schema, scope: BindScope, 
             " literal"
         )
     var lr_n = Int(lr_n_e.literal_value().int_val)
+    if lr_n < -2147483648:
+        # `lr_n - 1` and `1 - lr_n` below must not wrap at the extreme Int.
+        raise Error(
+            "SQL not supported: " + sx.text + "() count below -2147483648"
+        )
     if dsg == DSG_LEFT:
         if lr_n < 0:
             # `left(s, -n)` = "all but the last |n| characters" (DuckDB
@@ -471,7 +471,6 @@ def _bind_substring(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlC
         if length < 0:
             raise Error("SQL bind error: substring() length must be non-negative")
     return Expr.substring(s_child^, start, length)
-
 
 
 def _bind_year_derived(sx: SqlExpr, dsg: UInt8, schema: Schema, scope: BindScope, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]) raises -> Expr:
@@ -552,7 +551,6 @@ def _year_derived_over(dsg: UInt8, var child: Expr) raises -> Expr:
     return year_derived_of(which, child^)
 
 
-
 def _bind_nanosecond(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]) raises -> Expr:
     """`nanosecond(x)` -> `EXPR_EXTRACT(EXTRACT_MICROSECOND, x) * 1000`.
 
@@ -574,7 +572,6 @@ def _bind_nanosecond(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: Sql
     return nanosecond_of(
         _bind_scalar(nargs[0], schema, scope, catalog, cte_scope, prebound)
     )
-
 
 
 def _bind_float_class(sx: SqlExpr, dsg: UInt8, schema: Schema, scope: BindScope, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]) raises -> Expr:
@@ -626,7 +623,6 @@ def _bind_float_class(sx: SqlExpr, dsg: UInt8, schema: Schema, scope: BindScope,
     if dsg == DSG_ISINF:
         return float_class_of(FLOAT_CLASS_INFINITE, cx^)
     return float_class_of(FLOAT_CLASS_NAN, cx^)
-
 
 
 def _bind_string_split(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCatalog, cte_scope: CteScope, prebound: List[Expr]) raises -> Expr:

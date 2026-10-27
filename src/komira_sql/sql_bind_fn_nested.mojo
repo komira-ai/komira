@@ -405,6 +405,7 @@ def _bind_date_sub(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCa
             " date_sub counts COMPLETE periods and date_diff counts"
             " boundaries CROSSED — in DuckDB v1.5.3 they differ for every"
             " unit above 'day' (1 vs 2 over 2021-01-31 -> 2021-03-01), so the"
+            " other units are not the neighbouring function's to answer"
         )
     if args[1].tag == SX_DATE and args[2].tag == SX_DATE:
         return Expr.literal(ScalarValue.from_int64(_date_sub_days(sx)))
@@ -433,7 +434,6 @@ def _bind_even(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: SqlCatalo
     return even_of(
         _bind_scalar(eargs[0], schema, scope, catalog, cte_scope, prebound)
     )
-
 
 
 
@@ -536,6 +536,5 @@ def _bind_days_in_month(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: 
     return days_in_month_of(
         _bind_scalar(dargs[0], schema, scope, catalog, cte_scope, prebound)
     )
-
 
 

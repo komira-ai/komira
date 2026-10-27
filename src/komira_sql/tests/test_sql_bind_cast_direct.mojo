@@ -191,10 +191,39 @@ def test_decimal_literal_casts() raises:
     )
 
 
+def test_decimal_literal_width_edges() raises:
+    _check(
+        "SELECT CAST('000000000000000000000000000000000000000001' AS DECIMAL(38,0)) AS a FROM t",
+        "Project(exprs=[Alias(Literal(ScalarValue(decimal128(38,0), hi=0, lo=1)), \"a\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+    _check(
+        "SELECT CAST('0.00000000000000000000000000000000000001' AS DECIMAL(38,38)) AS a FROM t",
+        "Project(exprs=[Alias(Literal(ScalarValue(decimal128(38,38), hi=0, lo=1)), \"a\")])\n"
+        "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+    )
+
+
 def test_decimal_literal_refusals() raises:
     _check(
         "SELECT CAST('9999999999.995' AS DECIMAL(12,2)) FROM t",
         "ERR: SQL bind error: could not convert string '9999999999.995' to DECIMAL(12,2) — the value needs more than 12 decimal digits. DuckDB v1.5.3 raises a Conversion Error on the same input"
+    )
+    _check(
+        "SELECT CAST('340282366920938463463374607431768211456' AS DECIMAL(38,0)) FROM t",
+        "ERR: SQL bind error: could not convert string '340282366920938463463374607431768211456' to DECIMAL(38,0) — the value needs more than 38 decimal digits. DuckDB v1.5.3 raises a Conversion Error on the same input"
+    )
+    _check(
+        "SELECT CAST('1000000000000000000000000000000000000000' AS DECIMAL(38,0)) FROM t",
+        "ERR: SQL bind error: could not convert string '1000000000000000000000000000000000000000' to DECIMAL(38,0) — the value needs more than 38 decimal digits. DuckDB v1.5.3 raises a Conversion Error on the same input"
+    )
+    _check(
+        "SELECT CAST('5' AS DECIMAL(38,38)) FROM t",
+        "ERR: SQL bind error: could not convert string '5' to DECIMAL(38,38) — the value needs more than 38 decimal digits. DuckDB v1.5.3 raises a Conversion Error on the same input"
+    )
+    _check(
+        "SELECT CAST('1.5' AS DECIMAL(38,38)) FROM t",
+        "ERR: SQL bind error: could not convert string '1.5' to DECIMAL(38,38) — the value needs more than 38 decimal digits. DuckDB v1.5.3 raises a Conversion Error on the same input"
     )
     _check(
         "SELECT CAST('1e2' AS DECIMAL(12,2)) FROM t",
@@ -379,9 +408,43 @@ def test_timestamp_literal_refusals() raises:
     )
     _check(
         "SELECT k FROM t WHERE ts = TIMESTAMP '2021-01-01 03'",
-        "Project(exprs=[ColRef(k)])\n"
-        "  Filter(predicate=BinaryOp(EQ, ColRef(ts), Literal(ScalarValue(timestamp[us], 1609470000000000))))\n"
-        "    Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
+        "ERR: SQL bind error: malformed timestamp literal '2021-01-01 03': expected HH:MM[:SS[.ffffff]] after the date, got an hour alone"
+    )
+    _check(
+        "SELECT k FROM t WHERE ts = TIMESTAMP '2021-01-01 03.5'",
+        "ERR: SQL bind error: malformed timestamp literal '2021-01-01 03.5': expected HH:MM[:SS[.ffffff]] after the date, got an hour alone"
+    )
+    _check(
+        "SELECT k FROM t WHERE ts = TIMESTAMP '2021-01-01 03:30.5'",
+        "ERR: SQL bind error: malformed timestamp literal '2021-01-01 03:30.5': unexpected trailing text '.5'"
+    )
+    _check(
+        "SELECT k FROM t WHERE ts = TIMESTAMP '2021-01-01 24:00:00'",
+        "ERR: SQL bind error: timestamp literal '2021-01-01 24:00:00' has a time-of-day field out of range"
+    )
+    _check(
+        "SELECT k FROM t WHERE ts = TIMESTAMP '2021-01-01 03:60:00'",
+        "ERR: SQL bind error: timestamp literal '2021-01-01 03:60:00' has a time-of-day field out of range"
+    )
+    _check(
+        "SELECT k FROM t WHERE ts = TIMESTAMP '2021-01-01 03:30:60'",
+        "ERR: SQL bind error: timestamp literal '2021-01-01 03:30:60' has a time-of-day field out of range"
+    )
+    _check(
+        "SELECT k FROM t WHERE ts = TIMESTAMP '2021-01-01 18446744073709551632:00:00'",
+        "ERR: SQL bind error: timestamp literal '2021-01-01 18446744073709551632:00:00' has a time-of-day field out of range"
+    )
+    _check(
+        "SELECT k FROM t WHERE ts = TIMESTAMP '2021-01-01 00:18446744073709551616:00'",
+        "ERR: SQL bind error: timestamp literal '2021-01-01 00:18446744073709551616:00' has a time-of-day field out of range"
+    )
+    _check(
+        "SELECT k FROM t WHERE ts = TIMESTAMP '2021-01-01 00:00:18446744073709551616'",
+        "ERR: SQL bind error: timestamp literal '2021-01-01 00:00:18446744073709551616' has a time-of-day field out of range"
+    )
+    _check(
+        "SELECT k FROM t WHERE ts = TIMESTAMP '2021-01-01 1000:00:00'",
+        "ERR: SQL bind error: timestamp literal '2021-01-01 1000:00:00' has a time-of-day field out of range"
     )
     _check(
         "SELECT k FROM t WHERE ts = TIMESTAMP '2021-01-01 03:30:15.'",

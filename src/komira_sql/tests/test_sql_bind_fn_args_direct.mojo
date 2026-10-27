@@ -186,6 +186,14 @@ def test_left_right_substring() raises:
         "  Scan(path=\"t.parquet\", type=PARQUET, source_kind=COLUMNAR)\n"
     )
     _check(
+        "SELECT left(s, -2147483649) FROM t",
+        "ERR: SQL not supported: left() count below -2147483648"
+    )
+    _check(
+        "SELECT right(s, -2147483649) FROM t",
+        "ERR: SQL not supported: right() count below -2147483648"
+    )
+    _check(
         "SELECT left(s) FROM t",
         "ERR: SQL bind error: left() expects exactly 2 arguments (string, count) — got 1"
     )

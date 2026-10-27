@@ -41,7 +41,7 @@ from komira_sql.sql_fn_table import (
     DSG_JSON_EXTRACT_TEXT, DSG_LEAST, DSG_LEFT, DSG_MAKE_TS_MS, DSG_MAKE_TS_NS,
     DSG_MAKE_TS_US, DSG_MAP_EXTRACT_VALUE, DSG_MILLENNIUM, DSG_NANOSECOND, DSG_NULLIF,
     DSG_PI, DSG_RIGHT, DSG_STRING_SPLIT, DSG_STRUCT_EXTRACT, DSG_STRUCT_EXTRACT_AT,
-    DSG_SUBSTRING, DSG_TRY_CAST, FNK_BINARY_OP, FNK_CONST, FNK_EXTRACT_FIELD,
+    DSG_SUBSTRING, DSG_TRY_CAST, FNK_BINARY_OP, FNK_CONST, FNK_DESUGAR, FNK_EXTRACT_FIELD,
     FNK_MATH_FN, FNK_MATH_FN2, FNK_REFUSED, FNK_REGEXP, FNK_STRING_FN, FNK_STRING_FN_N,
     FNK_STRING_PRED, FNK_UNARY_NUM, sql_scalar_fn_spec,
 )
@@ -318,39 +318,44 @@ def _bind_scalar_call(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: Sq
     # FNK_DESUGAR: each of these builds, from existing nodes, the expression
     # the function means.
     # ---------------------------------------------------------------------
-    if spec.op == DSG_DATE_DIFF:
+    # The desugar ladder reads a selector only when the row IS a desugar: the
+    # `op` byte of any other kind lives in a different vocabulary and must not
+    # match a DSG_* constant. 255 matches none, so a stray kind reaches the
+    # internal-error fallthrough below.
+    var dsg_op = spec.op if spec.kind == FNK_DESUGAR else UInt8(255)
+    if dsg_op == DSG_DATE_DIFF:
         # Not part of the temporal family: its output is an INT64 day count,
         # not an EXPR_EXTRACT. Two DATE literals fold to an INT64 at bind
         # time; anything else lowers to a day subtraction over DATE32 columns.
         return _bind_date_diff(sx, schema, scope, catalog, cte_scope, prebound)
-    if spec.op == DSG_COALESCE or spec.op == DSG_IFNULL:
-        return _bind_coalesce(sx, spec.op, schema, scope, catalog, cte_scope, prebound)
-    if spec.op == DSG_GREATEST or spec.op == DSG_LEAST:
-        return _bind_greatest_least(sx, spec.op, schema, scope, catalog, cte_scope, prebound)
-    if spec.op == DSG_DATE_PART:
+    if dsg_op == DSG_COALESCE or dsg_op == DSG_IFNULL:
+        return _bind_coalesce(sx, dsg_op, schema, scope, catalog, cte_scope, prebound)
+    if dsg_op == DSG_GREATEST or dsg_op == DSG_LEAST:
+        return _bind_greatest_least(sx, dsg_op, schema, scope, catalog, cte_scope, prebound)
+    if dsg_op == DSG_DATE_PART:
         return _bind_date_part(sx, schema, scope, catalog, cte_scope, prebound)
-    if spec.op == DSG_DATE_TRUNC:
+    if dsg_op == DSG_DATE_TRUNC:
         return _bind_date_trunc(sx, schema, scope, catalog, cte_scope, prebound)
-    if spec.op == DSG_LEFT or spec.op == DSG_RIGHT:
-        return _bind_left_right(sx, spec.op, schema, scope, catalog, cte_scope, prebound)
-    if spec.op == DSG_SUBSTRING:
+    if dsg_op == DSG_LEFT or dsg_op == DSG_RIGHT:
+        return _bind_left_right(sx, dsg_op, schema, scope, catalog, cte_scope, prebound)
+    if dsg_op == DSG_SUBSTRING:
         return _bind_substring(sx, schema, scope, catalog, cte_scope, prebound)
     if (
-        spec.op == DSG_CENTURY
-        or spec.op == DSG_DECADE
-        or spec.op == DSG_MILLENNIUM
-        or spec.op == DSG_ERA
+        dsg_op == DSG_CENTURY
+        or dsg_op == DSG_DECADE
+        or dsg_op == DSG_MILLENNIUM
+        or dsg_op == DSG_ERA
     ):
-        return _bind_year_derived(sx, spec.op, schema, scope, catalog, cte_scope, prebound)
+        return _bind_year_derived(sx, dsg_op, schema, scope, catalog, cte_scope, prebound)
     if (
-        spec.op == DSG_ISFINITE
-        or spec.op == DSG_ISINF
-        or spec.op == DSG_ISNAN
+        dsg_op == DSG_ISFINITE
+        or dsg_op == DSG_ISINF
+        or dsg_op == DSG_ISNAN
     ):
-        return _bind_float_class(sx, spec.op, schema, scope, catalog, cte_scope, prebound)
-    if spec.op == DSG_STRING_SPLIT:
+        return _bind_float_class(sx, dsg_op, schema, scope, catalog, cte_scope, prebound)
+    if dsg_op == DSG_STRING_SPLIT:
         return _bind_string_split(sx, schema, scope, catalog, cte_scope, prebound)
-    if spec.op == DSG_JSON_EXTRACT or spec.op == DSG_JSON_EXTRACT_TEXT:
+    if dsg_op == DSG_JSON_EXTRACT or dsg_op == DSG_JSON_EXTRACT_TEXT:
         # ONE ARM, TWO SELECTORS, AND THE BOOL IS THE WHOLE DIFFERENCE.
         # `as_text` is `EXPR_JSON_EXTRACT`'s `preserve_extension_metadata`
         # INVERTED — the tag spells the flag from the `->` side and SQL names
@@ -358,51 +363,51 @@ def _bind_scalar_call(sx: SqlExpr, schema: Schema, scope: BindScope, catalog: Sq
         # that builds the node (`_bind_json_extract`'s return) rather than
         # being restated per row.
         return _bind_json_extract(
-            sx, spec.op == DSG_JSON_EXTRACT_TEXT,
+            sx, dsg_op == DSG_JSON_EXTRACT_TEXT,
             schema, scope, catalog, cte_scope, prebound,
         )
-    if spec.op == DSG_STRUCT_EXTRACT or spec.op == DSG_STRUCT_EXTRACT_AT:
+    if dsg_op == DSG_STRUCT_EXTRACT or dsg_op == DSG_STRUCT_EXTRACT_AT:
         # ONE ARM, TWO SELECTORS — the by-NAME and by-INDEX variants are
         # two TAGS (`EXPR_STRUCT_FIELD` / `EXPR_STRUCT_FIELD_IDX`), and the
         # 1-based -> 0-based subtraction the index spelling needs lives at the
         # ONE call site that builds the node. See `_bind_struct_extract`.
         return _bind_struct_extract(
-            sx, spec.op == DSG_STRUCT_EXTRACT_AT,
+            sx, dsg_op == DSG_STRUCT_EXTRACT_AT,
             schema, scope, catalog, cte_scope, prebound,
         )
-    if spec.op == DSG_MAP_EXTRACT_VALUE:
+    if dsg_op == DSG_MAP_EXTRACT_VALUE:
         return _bind_map_get(sx, schema, scope, catalog, cte_scope, prebound)
-    if spec.op == DSG_DATE_SUB:
+    if dsg_op == DSG_DATE_SUB:
         # ITS OWN FOLD AND ITS OWN UNIT CHECK, NOT `DSG_DATE_DIFF`'s. The two
         # functions agree only for the 'day' unit this engine serves; sharing
         # either would make a future widening of one silently widen the other.
         # See `_date_sub_days`. (The 'day' COLUMN lowering IS shared, and
         # `_date_delta_days_over_columns` states why that one is safe.)
         return _bind_date_sub(sx, schema, scope, catalog, cte_scope, prebound)
-    if spec.op == DSG_FDIV or spec.op == DSG_FMOD:
-        return _bind_fdiv_fmod(sx, spec.op, schema, scope, catalog, cte_scope, prebound)
-    if spec.op == DSG_NULLIF:
+    if dsg_op == DSG_FDIV or dsg_op == DSG_FMOD:
+        return _bind_fdiv_fmod(sx, dsg_op, schema, scope, catalog, cte_scope, prebound)
+    if dsg_op == DSG_NULLIF:
         return _bind_nullif(sx, schema, scope, catalog, cte_scope, prebound)
-    if spec.op == DSG_DAYS_IN_MONTH:
+    if dsg_op == DSG_DAYS_IN_MONTH:
         return _bind_days_in_month(sx, schema, scope, catalog, cte_scope, prebound)
-    if spec.op == DSG_CAST or spec.op == DSG_TRY_CAST:
-        return _bind_cast(sx, spec.op == DSG_TRY_CAST, schema, scope, catalog, cte_scope, prebound)
+    if dsg_op == DSG_CAST or dsg_op == DSG_TRY_CAST:
+        return _bind_cast(sx, dsg_op == DSG_TRY_CAST, schema, scope, catalog, cte_scope, prebound)
     if (
-        spec.op == DSG_MAKE_TS_US
-        or spec.op == DSG_MAKE_TS_MS
-        or spec.op == DSG_MAKE_TS_NS
+        dsg_op == DSG_MAKE_TS_US
+        or dsg_op == DSG_MAKE_TS_MS
+        or dsg_op == DSG_MAKE_TS_NS
     ):
         # ONE ARM, THREE SELECTORS — they share an argument shape and a
         # refusal, and differ only in the UNIT the count is in and the unit the
         # answer carries. See `_bind_make_timestamp_epoch`.
         return _bind_make_timestamp_epoch(
-            sx, spec.op, schema, scope, catalog, cte_scope, prebound,
+            sx, dsg_op, schema, scope, catalog, cte_scope, prebound,
         )
-    if spec.op == DSG_EVEN:
+    if dsg_op == DSG_EVEN:
         return _bind_even(sx, schema, scope, catalog, cte_scope, prebound)
-    if spec.op == DSG_NANOSECOND:
+    if dsg_op == DSG_NANOSECOND:
         return _bind_nanosecond(sx, schema, scope, catalog, cte_scope, prebound)
-    if spec.op == DSG_PI:
+    if dsg_op == DSG_PI:
         # THE ONLY ZERO-ARGUMENT LOWERING, AND IT READS NO COLUMN. `pi()`
         # folds to a FLOAT64 literal at BIND time, so nothing downstream —
         # optimizer, wire, evaluator — learns a new node shape.

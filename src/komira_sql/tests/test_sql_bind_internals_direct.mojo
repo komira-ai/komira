@@ -271,7 +271,8 @@ def test_date_diff_fold_refuses_other_units_and_operands() raises:
         assert_true(
             String(e).startswith(
                 "SQL not supported: date_diff('day', a, b) requires constant"
-                " DATE literal operands INSIDE A CORRELATED SUBQUERY PREDICATE."
+                " DATE literal operands here. This function only constant-folds two"
+                " DATE literals and binds no column operand."
             ),
             String(e),
         )

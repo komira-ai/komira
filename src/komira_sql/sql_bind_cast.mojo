@@ -88,6 +88,15 @@ def _sql_decimal_type_ps(ty: String) raises -> Tuple[Int, Int]:
     return Tuple[Int, Int](precision, scale)
 
 
+def _decimal_overflow_msg(text: String, ty: String, precision: Int) -> String:
+    return (
+        "SQL bind error: could not convert string '" + text + "' to "
+        + ty.upper() + " — the value needs more than " + String(precision)
+        + " decimal digits. DuckDB v1.5.3 raises a Conversion Error on the"
+        " same input"
+    )
+
+
 def _decimal_digits_to_i128(
     text: String, precision: Int, scale: Int, ty: String
 ) raises -> SIMD[DType.int128, 1]:
@@ -129,10 +138,19 @@ def _decimal_digits_to_i128(
         negative = b[i] == UInt8(ord("-"))
         i += 1
     var int_digits = 0
+    # Significant digits accumulated so far (leading zeros do not count). The
+    # magnitude is held in an int128, so the width check runs BEFORE each
+    # multiply: a value past `precision` digits can never reach the wrap.
+    var sig = 0
     var mag = SIMD[DType.int128, 1](0)
     var ten = SIMD[DType.int128, 1](10)
     while i < n and b[i] >= UInt8(ord("0")) and b[i] <= UInt8(ord("9")):
-        mag = mag * ten + SIMD[DType.int128, 1](Int(b[i] - UInt8(ord("0"))))
+        var d0 = Int(b[i] - UInt8(ord("0")))
+        if sig > 0 or d0 != 0:
+            sig += 1
+        if sig > precision:
+            raise Error(_decimal_overflow_msg(text, ty, precision))
+        mag = mag * ten + SIMD[DType.int128, 1](d0)
         int_digits += 1
         i += 1
     var frac_digits = 0
@@ -143,6 +161,10 @@ def _decimal_digits_to_i128(
         while i < n and b[i] >= UInt8(ord("0")) and b[i] <= UInt8(ord("9")):
             var d = Int(b[i] - UInt8(ord("0")))
             if kept < scale:
+                if sig > 0 or d != 0:
+                    sig += 1
+                if sig > precision:
+                    raise Error(_decimal_overflow_msg(text, ty, precision))
                 mag = mag * ten + SIMD[DType.int128, 1](d)
                 kept += 1
             elif kept == scale and frac_digits == scale:
@@ -173,6 +195,10 @@ def _decimal_digits_to_i128(
     # Pad the fraction out to the target scale (`'30.7' AS DECIMAL(12,2)` is
     # 30.70 there, i.e. unscaled 3070).
     while kept < scale:
+        if mag != SIMD[DType.int128, 1](0):
+            sig += 1
+            if sig > precision:
+                raise Error(_decimal_overflow_msg(text, ty, precision))
         mag = mag * ten
         kept += 1
     if round_up:
@@ -184,12 +210,7 @@ def _decimal_digits_to_i128(
     for _p in range(precision):
         limit = limit * ten
     if mag >= limit:
-        raise Error(
-            "SQL bind error: could not convert string '" + text + "' to "
-            + ty.upper() + " — the value needs more than " + String(precision)
-            + " decimal digits. DuckDB v1.5.3 raises a Conversion Error on the"
-            " same input"
-        )
+        raise Error(_decimal_overflow_msg(text, ty, precision))
     if negative:
         return -mag
     return mag
@@ -299,7 +320,7 @@ def _bind_cast(sx: SqlExpr, is_try: Bool, schema: Schema, scope: BindScope, cata
     ):
         # CAST to VARCHAR from an INTEGER / BIGINT / VARCHAR operand: this arm
         # binds the operand and reads its type (which `_sql_cast_target_arrow`
-        # cannot). An integer prints as plain decimal, DuckDB 1.5.3's spelling;
+        # cannot). An integer prints as plain decimal, DuckDB v1.5.3's spelling;
         # a VARCHAR operand is the identity. Every other source keeps the
         # refusal below (float formatting is not graded against DuckDB).
         var vchild = _bind_scalar(cargs[0], schema, scope, catalog, cte_scope, prebound)
