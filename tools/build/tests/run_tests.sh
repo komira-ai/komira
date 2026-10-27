@@ -370,6 +370,8 @@
 #  54. (The hermetic Node.js rules' planted defects are
 #      //tools/build/selftest:planted_red_builds_node and
 #      //tools/build/selftest:analysis_refusals_node.)
+#  55. The ABI golden and the C header (tools/build/mojo/abi_golden.bzl):
+#      //tools/build/selftest:planted_red_builds_abi_golden.
 set -uo pipefail
 
 umbrella=1
