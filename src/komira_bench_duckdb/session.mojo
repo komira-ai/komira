@@ -1,0 +1,290 @@
+# One persistent DuckDB session, driven over stdin and stdout.
+#
+# Every query is wrapped in two marker lines the host sends itself:
+#
+#     .print @@S <n>
+#     <the query>
+#     .print @@E <n>
+#
+# and the host stamps each marker line with its own clock when the line arrives
+# on the stdout pipe. A timed query's duration is the stamp of its end marker
+# minus the stamp of its start marker; DuckDB's own timer is not used. A timed
+# query runs with `.mode trash`, so no result is rendered. A fetched query runs
+# with `.mode json` and its rows come back as a `ResultSet`.
+#
+# Both arms of a comparison run with the same thread count and the same memory
+# limit (`start` sets and reads back both on the DuckDB side; the other arm is
+# configured from the same two numbers). A DuckDB error is the text the process
+# wrote to stderr between the two markers; it is returned with the query, not
+# raised, so one failing query does not end the run.
+
+from .cells import Cell, KIND_FLOAT, KIND_INT, KIND_TEXT, ResultSet
+from .clock import BenchClock
+from .pins import DEFAULT_DUCKDB_VERSION, find_pin, duckdb_pins
+from .rows_json import parse_json_rows
+from .text import slice_bytes
+from .transport import DuckDbTransport, StdoutChunk
+
+comptime START_MARKER: String = "@@S"
+comptime END_MARKER: String = "@@E"
+
+
+struct StampedLine(Copyable, Movable):
+    """One stdout line and the clock reading when it arrived."""
+
+    var text: String
+    var stamp: Int
+
+    def __init__(out self, var text: String, stamp: Int):
+        self.text = text^
+        self.stamp = stamp
+
+
+struct QueryTiming(Copyable, Movable):
+    """The timing of one query: the host-side time from its start marker to
+    its end marker in nanoseconds, and DuckDB's error text if it had one."""
+
+    var id: Int
+    var elapsed_ns: Int
+    var error: String
+
+    def __init__(out self, id: Int, elapsed_ns: Int, var error: String):
+        self.id = id
+        self.elapsed_ns = elapsed_ns
+        self.error = error^
+
+    def ok(self) -> Bool:
+        return self.error.byte_length() == 0
+
+
+struct FetchResult(Copyable, Movable):
+    """The rows of a fetched query, or DuckDB's error text."""
+
+    var rows: ResultSet
+    var error: String
+
+    def __init__(out self):
+        self.rows = ResultSet()
+        self.error = String("")
+
+    def ok(self) -> Bool:
+        return self.error.byte_length() == 0
+
+
+struct FairnessSettings(Copyable, Movable):
+    """What the session was asked for and what DuckDB read back."""
+
+    var threads: Int
+    var memory_limit_bytes: Int
+    var threads_readback: String
+    var memory_limit_readback: String
+    var version: String
+    var source_id: String
+    var extra_names: List[String]
+    var extra_readbacks: List[String]
+
+    def __init__(out self, threads: Int, memory_limit_bytes: Int):
+        self.threads = threads
+        self.memory_limit_bytes = memory_limit_bytes
+        self.threads_readback = String("")
+        self.memory_limit_readback = String("")
+        self.version = String("")
+        self.source_id = String("")
+        self.extra_names = List[String]()
+        self.extra_readbacks = List[String]()
+
+
+def _terminated(sql: String) -> String:
+    """`sql` followed by a line that ends the statement. A query that already
+    ends with a semicolon is sent as it is."""
+    var b = sql.as_bytes()
+    var n = len(b)
+    while n > 0 and (b[n - 1] == UInt8(32) or b[n - 1] == UInt8(10) or b[n - 1] == UInt8(13) or b[n - 1] == UInt8(9)):
+        n -= 1
+    var body = String(sql[byte=0:n])
+    if n > 0 and b[n - 1] == UInt8(59):
+        return body + String("\n")
+    return body + String("\n;\n")
+
+
+def _single_quoted(s: String) raises -> String:
+    for c in s.as_bytes():
+        if c == UInt8(39) or c == UInt8(10) or c == UInt8(0):
+            raise Error(String("not usable inside a SQL literal: ") + s)
+    return String("'") + s + String("'")
+
+
+def _as_text(c: Cell) -> String:
+    """A read-back cell as text (a number is written out)."""
+    if c.kind == KIND_TEXT:
+        return c.s.copy()
+    if c.kind == KIND_INT:
+        return String(c.i)
+    if c.kind == KIND_FLOAT:
+        return String(c.f)
+    return String("")
+
+
+struct DuckDbSession[T: DuckDbTransport](Movable):
+    """A DuckDB process and the conversation with it."""
+
+    var _t: Self.T
+    var _clock: BenchClock
+    var _lines: List[StampedLine]
+    var _next: Int
+    var _partial: String
+    var _eof: Bool
+    var _query_id: Int
+
+    def __init__(out self, var transport: Self.T, var clock: BenchClock):
+        self._t = transport^
+        self._clock = clock^
+        self._lines = List[StampedLine]()
+        self._next = 0
+        self._partial = String("")
+        self._eof = False
+        self._query_id = 0
+
+    # --- reading -------------------------------------------------------------
+
+    def _fill(mut self) raises:
+        """Read once and queue the complete lines it finished, each with the
+        clock reading taken right after the read returned."""
+        if self._eof:
+            raise Error("duckdb closed its output")
+        var chunk = self._t.read_stdout()
+        var stamp = self._clock.now()
+        if chunk.eof:
+            self._eof = True
+            return
+        self._partial += chunk.text
+        while True:
+            var nl = self._partial.find(String("\n"))
+            if nl < 0:
+                return
+            var line = String(self._partial[byte=0:nl])
+            self._partial = slice_bytes(self._partial, nl + 1, self._partial.byte_length())
+            if line.endswith(String("\r")):
+                line = slice_bytes(line, 0, line.byte_length() - 1)
+            self._lines.append(StampedLine(line^, stamp))
+
+    def _next_line(mut self) raises -> StampedLine:
+        while self._next >= len(self._lines):
+            self._fill()
+        var l = self._lines[self._next].copy()
+        self._next += 1
+        return l^
+
+    def _marker(self, kind: String, id: Int) -> String:
+        return kind + String(" ") + String(id)
+
+    def _run(mut self, mode: String, sql: String) raises -> Tuple[Int, String, String]:
+        """Send one marked query and wait for its end marker. Returns the
+        elapsed nanoseconds between the markers, the text between them and the
+        error text."""
+        self._query_id += 1
+        var id = self._query_id
+        var start = self._marker(String(START_MARKER), id)
+        var end = self._marker(String(END_MARKER), id)
+        self._t.send(
+            String(".mode ") + mode + String("\n.print ") + start + String("\n")
+            + _terminated(sql) + String(".print ") + end + String("\n")
+        )
+        var started = False
+        var t0 = 0
+        var body = String("")
+        while True:
+            var l = self._next_line()
+            if not started:
+                if l.text == start:
+                    started = True
+                    t0 = l.stamp
+                continue
+            if l.text == end:
+                var err = self._t.take_stderr()
+                return (l.stamp - t0, body^, err^)
+            body += l.text + String("\n")
+
+    # --- queries -------------------------------------------------------------
+
+    def run_timed(mut self, sql: String) raises -> QueryTiming:
+        """Run `sql` with no result rendered and return the marker-to-marker
+        time. The id of the timing is the query's number in this session."""
+        var r = self._run(String("trash"), sql)
+        return QueryTiming(self._query_id, r[0], r[2].copy())
+
+    def fetch(mut self, sql: String) raises -> FetchResult:
+        """Run `sql` in JSON mode and parse its rows."""
+        var r = self._run(String("json"), sql)
+        var out = FetchResult()
+        if r[2].byte_length() > 0:
+            out.error = r[2].copy()
+            return out^
+        out.rows = parse_json_rows(r[1])
+        return out^
+
+    # --- setup ---------------------------------------------------------------
+
+    def start(
+        mut self,
+        threads: Int,
+        memory_limit_bytes: Int,
+        version: String = String(DEFAULT_DUCKDB_VERSION),
+        extra_settings: List[Tuple[String, String]] = List[Tuple[String, String]](),
+    ) raises -> FairnessSettings:
+        """Set the thread count, the memory limit and any extra settings
+        (name and value pairs, applied in order), read them back, and check
+        that the process is the DuckDB release `version`. Raises on a refused
+        setting, a thread count that did not take or another version. The
+        memory limit must be a whole number of KiB."""
+        if threads < 1:
+            raise Error("threads must be at least 1")
+        if memory_limit_bytes < 1024 or memory_limit_bytes % 1024 != 0:
+            raise Error("the memory limit must be a whole number of KiB")
+        var at = find_pin(version)
+        if at < 0:
+            raise Error(String("no pin for duckdb ") + version)
+        var pin = duckdb_pins()[at].copy()
+        var settings = FairnessSettings(threads, memory_limit_bytes)
+        var script = String("SET threads=") + String(threads) + String(";\n")
+        script += String("SET memory_limit=") + _single_quoted(String(memory_limit_bytes // 1024) + String("KiB")) + String(";\n")
+        for i in range(len(extra_settings)):
+            var name = extra_settings[i][0]
+            for c in name.as_bytes():
+                var ok = (c >= UInt8(97) and c <= UInt8(122)) or (c >= UInt8(48) and c <= UInt8(57)) or c == UInt8(95)
+                if not ok:
+                    raise Error(String("not a setting name: ") + name)
+            script += String("SET ") + name + String("=") + _single_quoted(extra_settings[i][1]) + String(";\n")
+        var set = self.fetch(script + String("SELECT 1 AS ready"))
+        if not set.ok():
+            raise Error(String("duckdb refused a setting: ") + set.error)
+        var query = String(
+            "SELECT current_setting('threads') AS threads, current_setting('memory_limit') AS memory_limit,"
+            " (SELECT library_version FROM pragma_version()) AS version,"
+            " (SELECT source_id FROM pragma_version()) AS source_id"
+        )
+        for i in range(len(extra_settings)):
+            query += String(", current_setting('") + extra_settings[i][0] + String("')::VARCHAR AS extra_") + String(i)
+        var got = self.fetch(query)
+        if not got.ok():
+            raise Error(String("duckdb cannot read its settings back: ") + got.error)
+        if got.rows.row_count() != 1 or got.rows.column_count() != 4 + len(extra_settings):
+            raise Error("the settings read-back has an unexpected shape")
+        settings.threads_readback = _as_text(got.rows.rows[0][0])
+        settings.memory_limit_readback = _as_text(got.rows.rows[0][1])
+        settings.version = _as_text(got.rows.rows[0][2])
+        settings.source_id = _as_text(got.rows.rows[0][3])
+        for i in range(len(extra_settings)):
+            settings.extra_names.append(extra_settings[i][0])
+            settings.extra_readbacks.append(_as_text(got.rows.rows[0][4 + i]))
+        if settings.threads_readback != String(threads):
+            raise Error(String("duckdb runs ") + settings.threads_readback + String(" threads, not ") + String(threads))
+        if settings.version != String("v") + version:
+            raise Error(String("duckdb reports ") + settings.version + String(", not v") + version)
+        if settings.source_id.byte_length() == 0 or not pin.commit.startswith(settings.source_id):
+            raise Error(String("duckdb was built from ") + settings.source_id + String(", not the pinned commit"))
+        return settings^
+
+    def close(mut self) raises -> Int:
+        """End the session and return the process's exit code."""
+        return self._t.finish()
