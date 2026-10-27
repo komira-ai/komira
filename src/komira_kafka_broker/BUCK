@@ -1,0 +1,43 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The broker half of the Kafka server, above the wire codec of
+# komira_kafka_server: the decompression of a Produce batch's records blob and
+# the compression of a Fetch batch's (gzip, snappy in the xerial framing, lz4
+# frame, zstd, over komira_compression), the committed consumer-group offsets
+# as objects in a komira_objectstore conditional-write store, and the bridge
+# between Kafka records and an Arrow RecordBatch with the fixed envelope schema.
+# komira_kafka_server stays dependency-free; this package carries the
+# dependencies the broker needs.
+#
+# The welded tests (each file's header says which defects it catches):
+# - test_kafka_compression: every codec's records blob decodes, through
+#   decompress_kafka_records and through whole batches (with a correct CRC), a
+#   blob larger than the first output buffer, xerial framing edges, the
+#   preamble ceiling, truncated and corrupt blobs, an unknown codec refused, and
+#   the per-batch producer identity.
+# - test_kafka_fetch_compress: compress_kafka_records round-trips every codec,
+#   writes each codec's framing, and builds a compressed batch a decoder reads.
+# - test_group_offsets: commit and fetch over the in-memory store, unknown
+#   group, topic and partition, overwrite, repeated commit, isolation, listing,
+#   the JSON body, and a store that fails.
+# - test_envelope_bridge: records to the envelope and back, exactly, with null
+#   and empty keys and values and headers.
+mojo_library(
+    name = "komira_kafka_broker",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # Direct dependencies: the rule adds each one's own closure to the compiler.
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_kafka_server:komira_kafka_server",
+        "//src/komira_objectstore:komira_objectstore",
+    ],
+    test_srcs = [
+        "tests/test_envelope_bridge.mojo",
+        "tests/test_group_offsets.mojo",
+        "tests/test_kafka_compression.mojo",
+        "tests/test_kafka_fetch_compress.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

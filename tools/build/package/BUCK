@@ -288,6 +288,7 @@ conda_release_set_check(
         "//src/komira_gcp_run:komira_gcp_run",
         "//src/komira_gcp_wif:komira_gcp_wif",
         "//src/kci_cloud_gcp:kci_cloud_gcp",
+        "//src/komira_kafka_broker:komira_kafka_broker",
     ],
     # The `native` of each library above whose mojo_library declares one (the
     # same target its `<lib>_conda` is given; release_set.bzl).
