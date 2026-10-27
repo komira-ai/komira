@@ -242,7 +242,7 @@ The package's `:lib` is the library file, made only after every test run passed.
 `MojoInfo` they require of a dependency over that same file, and runs and compiles nothing. A dependent therefore
 builds only once the library's tests have passed. With a `readme` it carries the README-example gate of a `mojo_library`
 (`[tests][readme]`, with `[file]`, `[generated]` and `[objects]`; the same `readme_gate`, compiled against `:lib`, so the
-package's tests are not run a second time). It carries no branch coverage gate of a `mojo_library` and no mutation sub-targets. Its
+package's tests are not run a second time). On a darwin-arm64 target the Mojo compile runs on macOS and the C toolchain on linux, so the rule takes the C toolchain's link facts through `//tools/build/mojo:adopt_cxx_link_facts` and not as a toolchain dependency of its own (`tools/build/ci/cases.bxl` reads that off the graph). It carries no branch coverage gate of a `mojo_library` and no mutation sub-targets. Its
 coverage is the package's own: `:coverage` (line and branch counts per file), `:coverage[reports]` (one kcov report per test, in
 repository paths), `:coverage[branches]` (one lcov file per test, the branch records from the compiler's IR) and, when
 `coverage_floor.txt` (`lines NN.NN`, and `branches NN.NN` when the package has branches) sits beside the BUCK file,
