@@ -35,6 +35,7 @@ PACKAGES = {
     "komira_host": "0.1.0",
     "komira_json": "0.1.0",
     "komira_kafka_server": "0.1.0",
+    "komira_kg_mode": "0.1.0",
     "komira_libc": "0.1.0",
     "komira_lz4": "0.1.0",
     "komira_mail_address": "0.1.0",

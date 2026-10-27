@@ -74,3 +74,27 @@ assert_equal(normalize_extract_mode(-1), EXTRACT_MODE_RULES)
 assert_false(is_known_extract_mode(2))
 assert_true(is_known_extract_mode(0))
 ```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_kg_mode`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_kg_mode/` (`extract_mode_vocab.mojo`, and the `__init__.mojo` that re-exports it), its tests are `tests/`
+(`test_extract_mode_vocab.mojo`). The package has no dependencies, no native archive and calls no foreign
+function. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, where the library and its tests are |
+| `mopm.lock` | what `mopm lock` writes (with no registry reachable); the package has no dependencies, so it pins the toolchain only |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a
+source, a test, `mopm.toml`, `mopm.lock` or `mopm-toolchain.toml`, run `buildrules mojo sync`, commit what it
+writes, and build `komira//src/komira_kg_mode:lib` on the farm. A test file that `buildrules mojo sync` has not
+listed is not run: run the sync after adding one.
+
+`:conda` is the `.conda` of the mopm package (`mojo-komira_kg_mode-0.1.0-mojo1.0.0_0.conda`): the `.mojoc`, which
+exists only once the tests have passed. `:komira_kg_mode` is `:lib` as komira's Mojo rules take it
+(`mojo_adopted_library`); it also compiles and runs the README's examples above (`[tests][readme]`) against
+`:lib`, which `:lib` does not do.

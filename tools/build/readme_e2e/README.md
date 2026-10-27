@@ -131,20 +131,17 @@ that set, the one it publishes, and nothing else changes. There are three source
   offline, so the real stage cannot run inside the build.
 * **`stage`**: `//release/staged_set:set`, the files of the directory of that package,
   where the release workflow's job `mopm-stage` has had `mopm stage --out` write the set
-  that `publish --staged` will publish. The files are an input of the build (uploaded to
+  that `publish --staged` will publish, or where `prod-test` has written the files it checked
+  against the plan (the ones the registry holds in quarantine). The files are an input of the build (uploaded to
   the farm) and are not in the repository, so the target is empty in a checkout. The e2e
   then runs on the farm against the real set; against the empty target it fails at
   phase `staged` (no `plan.json`), so a release that did not stage fails.
   The release workflow gives every package the version of its run before it stages, so it
   passes `-c komira_release.beta_version=0.1.<n>` with this set too (optional here: without it
   the e2e expects the version of `packages.bzl`).
-* **`beta`**: `//release/beta_set:set`, the files of the beta channel as the release workflow's job
-  `mopm-e2e-beta` downloaded them after `mopm-publish-beta` (`release_beta_fetch`, which checked each
-  file's sha256 and size against the staged plan and wrote the plan, the READMEs and the downloaded
-  `.conda` files there; see `docs/ci.md`, "Verifying the beta publish"). The packages carry the version
-  of that run, not the one of `packages.bzl`, so `-c komira_release.beta_version=0.1.<n>` is required
-  with it. The e2e proves the README examples run on the published bytes; a package's own tests are
-  not in its `.conda` and do not run.
+
+The e2e proves the README examples run on the packages' bytes; a package's own tests are not in
+its `.conda` and do not run.
 
 Any other value of the option is an error.
 
