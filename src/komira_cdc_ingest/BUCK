@@ -1,0 +1,37 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Change-data-capture ingest into an Iceberg table: `apply_batch` turns one
+# `ChangeBatch` into one atomic commit (appends plus an equality delete per
+# touched key) and stamps the per-shard stream position into the snapshot
+# summary; `ShardPositions` and `derive_positions_from_table` read that position
+# back as the resume point; `run_ingest_pass` and `run_ingest_loop` tail every
+# shard of a `MultiShardChangeStreamListener`. See __init__.mojo.
+#
+# It names no provider client: a provider's listener depends on the seam in
+# komira_snapshotter and conforms to it.
+#
+# The welded tests (each file's header says what it proves):
+# - test_cdc_ingest_exactly_once: apply correctness, replay after a crash is a
+#   no-op, a batch that never committed is re-applied, and independent shards.
+# - test_cdc_over_int64_key_no_silent_zero: an over-Int64 key is refused at the
+#   encode boundary, an in-range key and a genuine NULL still write.
+# - test_cdc_seq_gt_realistic: sequence-number ordering across digit widths.
+mojo_library(
+    name = "komira_cdc_ingest",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_iceberg:komira_iceberg",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_snapshotter:komira_snapshotter",
+    ],
+    test_srcs = [
+        "tests/test_cdc_ingest_exactly_once.mojo",
+        "tests/test_cdc_over_int64_key_no_silent_zero.mojo",
+        "tests/test_cdc_seq_gt_realistic.mojo",
+    ],
+    test_deps = [
+        "//src/komira_libc:komira_libc",
+        "//src/komira_rowcell:komira_rowcell",
+    ],
+    visibility = ["PUBLIC"],
+)
