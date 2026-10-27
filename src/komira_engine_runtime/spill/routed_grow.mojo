@@ -9,7 +9,8 @@
 #   1. Ask the reservation. If it grants, return True; the arbitrator is not
 #      touched.
 #   2. If it refuses a request that spilling cannot satisfy, return False and
-#      change nothing: a negative `want_bytes` (a grow cannot free memory), or
+#      change nothing but the reservation's denied-grow count (the first ask
+#      was counted): a negative `want_bytes` (a grow cannot free memory), or
 #      a `want_bytes` above the whole budget (it would not fit even with
 #      nothing held). No partition is spilled for such a request.
 #   3. Otherwise ask the arbitrator to spill one of the caller's partitions.
@@ -57,12 +58,14 @@ def try_grow_intra_op_routed[
     Returns:
         True if the grow succeeded, on the first try or after one spill.
         False if it was refused and not retried (negative or above the
-        budget, or the spill freed nothing: the reservation is unchanged), or
-        refused again after a spill (the reservation fell by the freed bytes).
+        budget, or the spill freed nothing: the held bytes are unchanged), or
+        refused again after a spill (the held bytes fell by the freed bytes,
+        so a caller must not read False as "nothing changed").
 
     Raises:
         What the arbitrator raises: the victim's `spill_to_storage`, or a
-        policy that is not implemented.
+        policy that is not implemented. The raise comes before any release,
+        so the held bytes are unchanged.
     """
     if reservation.try_grow(want_bytes):
         return True

@@ -35,8 +35,9 @@ operator or a sink consumes but does not implement belongs here.
   budget, the arbitrator spills the oldest spillable op (or, within one
   operator, partition) and reports the bytes freed. A breaker's grow that its
   `MemoryReservation` refuses spills one of its own partitions and retries
-  once; a negative grow, or one above the whole budget, is refused without
-  spilling. Only the oldest-first policy is implemented.
+  once (if that retry is refused too, the freed bytes stay released and the
+  result is False); a negative grow, or one above the whole budget, is
+  refused without spilling. Only the oldest-first policy is implemented.
 - The parallel RecordBatch concat (`streaming_concat_parallel`, the public
   entry points; `concat_fan_plan` decides the route and the fan from the bytes
   moved and the pool's worker count; `concat_tasks`, `concat_tiled`,

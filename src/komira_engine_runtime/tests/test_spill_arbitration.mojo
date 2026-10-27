@@ -32,7 +32,7 @@
 #      call, honours `set_can_spill`, and refuses a direct restore.
 #   8. test_policy_tags: the three policy constructors are distinct and
 #      the default is OLDEST_FIRST.
-#   9. test_routed_grow_sequence_spills_oldest_first_and_stays_in_budget: a
+#   9. test_routed_grow_sequence_oldest_first_in_budget: a
 #      scripted run of grows spills partitions in age order, one per denied
 #      grow, and the reservation never passes its budget after a grant.
 #  10. test_refused_grow_leaves_reservation_unchanged: a negative grow, a grow
@@ -42,19 +42,31 @@
 #  11. test_retry_refused_after_spill_keeps_the_released_bytes: when the spill
 #      cannot make room, the freed bytes stay released and the result is
 #      False.
-#  12. test_release_and_regrant: released bytes can be granted again, exactly
-#      to the budget and no further.
+#  12. test_release_and_regrant_through_the_routed_grow: a granted grow is
+#      released, the spilled partition restored and charged again, and a
+#      second routed grow spills it once more within the budget.
 #  13. test_restored_partition_can_spill_again: a restored partition is
 #      resident again and is a victim again; a spilled one is not picked twice.
 #  14. test_huge_grow_is_pressure_not_wrap: Int64.MAX of growth is pressure
 #      (a wrapped sum would read as none); the budget test cannot wrap.
-#  15. test_two_level_arbitration_spills_oldest_partition_of_oldest_operator:
+#  15. test_two_level_spills_oldest_partition_of_oldest_operator:
 #      an outer arbitrator over two coordinators spills the operator with the
 #      smaller age, then that operator's oldest partition; a closed gate
 #      moves the choice to the other operator.
 #      A coordinator with no spillable partition left reports it cannot spill.
 #  16. test_coordinator_spills_even_with_an_unbounded_budget: the forced spill
 #      does not depend on the inner budget, including Int64.MAX.
+#  17. test_grow_of_exactly_the_whole_budget_spills_then_grants: a grow equal
+#      to the budget is not refused up front. Catches `>` turned into `>=`.
+#  18. test_equal_ages_spill_the_lowest_index: a tie goes to the lowest
+#      index. Catches a victim pick that takes the last equal-age slot.
+#  19. test_a_raising_arbitration_leaves_the_reservation_unchanged: an
+#      unimplemented policy and a victim whose spill raises both propagate
+#      with the tally, the partition and the storage untouched.
+#  20. test_zero_budget_arbitrators: budget 0 with nothing resident is not
+#      pressure for a zero grow; with nothing spillable it counts no victim.
+#  21. test_outer_arbitrator_with_nothing_spillable_frees_nothing: every
+#      operator gated off yields 0 and writes no chunk.
 # =============================================================================
 
 from std.ffi import external_call
@@ -120,8 +132,16 @@ struct _Part(SpillableOp):
     var _age: UInt64
     var _spillable: Bool
     var _spilled: Bool
+    var _fails: Bool
 
-    def __init__(out self, resident: Int64, age: UInt64, spillable: Bool):
+    def __init__(
+        out self,
+        resident: Int64,
+        age: UInt64,
+        spillable: Bool,
+        fails: Bool = False,
+    ):
+        self._fails = fails
         self._resident = resident
         self._full = resident
         self._age = age
@@ -140,9 +160,13 @@ struct _Part(SpillableOp):
     def spill_to_storage[
         S: SpillStorage
     ](mut self, mut storage: S) raises -> Int64:
+        if self._fails:
+            raise Error("_Part: scripted spill failure")
         var oab = OwnedAlignedBuffer(capacity=1)
         oab.view_mut().write_u8_at(0, UInt8(1))
-        _ = storage.write_chunk(SharedAlignedBuffer[HeapRegion].from_owned(oab^))
+        _ = storage.write_chunk(
+            SharedAlignedBuffer[HeapRegion].from_owned(oab^)
+        )
         var freed = self._resident
         self._resident = 0
         self._spilled = True
@@ -160,6 +184,12 @@ struct _Part(SpillableOp):
 
 
 comptime _Arb = IntraOpSlabArbitrator[_Part, LocalDiskSpillStorage]
+
+
+def _failing_slab(resident: Int, age: Int) -> Slab[_Part]:
+    var slab = Slab[_Part].with_capacity(1)
+    slab.append(_Part(Int64(resident), UInt64(age), True, True))
+    return slab^
 
 
 def _slab(*parts: Tuple[Int, Int, Bool]) -> Slab[_Part]:
@@ -245,7 +275,9 @@ def test_routed_grow_happy_path_and_no_victim() raises:
     var slab = _slab((60, 1, False))
     var r = MemoryReservation.with_budget(100)
     assert_true(try_grow_intra_op_routed(r, arb, slab, 1, 30))
-    assert_equal(Int(arb.no_victim_count()), 0, "a fit never asks the arbitrator")
+    assert_equal(
+        Int(arb.no_victim_count()), 0, "a fit never asks the arbitrator"
+    )
     # Held 30; 80 more is denied and nothing can spill.
     assert_false(try_grow_intra_op_routed(r, arb, slab, 1, 80))
     assert_equal(Int(arb.no_victim_count()), 1)
@@ -284,14 +316,13 @@ def test_policy_tags() raises:
     var d = ArbitratorPolicy()
     assert_true(d.is_oldest_first())
     assert_true(ArbitratorPolicy.largest_first().is_largest_first())
-    assert_true(
-        ArbitratorPolicy.proportional_reservation().is_proportional_reservation()
-    )
+    var prop = ArbitratorPolicy.proportional_reservation()
+    assert_true(prop.is_proportional_reservation())
     assert_true(ArbitratorPolicy.oldest_first() == d)
     assert_true(ArbitratorPolicy.largest_first() != d)
 
 
-def test_routed_grow_sequence_spills_oldest_first_and_stays_in_budget() raises:
+def test_routed_grow_sequence_oldest_first_in_budget() raises:
     # Budget 0: any denied grow of the reservation is pressure for the slab.
     var arb = _Arb(_storage("sequence"), Int64(0))
     # Ages 1, 2, 3: slot 0 is the oldest. All 100 bytes are held.
@@ -386,22 +417,6 @@ def test_retry_refused_after_spill_keeps_the_released_bytes() raises:
     arb2.storage_mut().cleanup()
 
 
-def test_release_and_regrant() raises:
-    var r = MemoryReservation.with_budget(100)
-    assert_true(r.try_grow(60))
-    assert_false(r.try_grow(41), "60 + 41 passes the budget")
-    assert_equal(r.held_bytes(), 60)
-    r.release(60)
-    assert_equal(r.held_bytes(), 0)
-    assert_true(r.try_grow(100), "the released bytes can be granted again")
-    assert_false(r.try_grow(1), "and no more than the budget")
-    assert_equal(r.held_bytes(), 100)
-    r.release(30)
-    assert_true(r.try_grow(30))
-    assert_false(r.try_grow(1))
-    assert_equal(r.held_bytes(), 100)
-
-
 def test_restored_partition_can_spill_again() raises:
     var arb = _Arb(_storage("restore"), Int64(10))
     var slab = _slab((50, 1, True), (20, 2, True))
@@ -446,12 +461,16 @@ def _coord(
     return _Coord(_Arb(_storage(tag), budget), slab^, n, UInt64(age_base))
 
 
-def test_two_level_arbitration_spills_oldest_partition_of_oldest_operator() raises:
+def test_two_level_spills_oldest_partition_of_oldest_operator() raises:
     # Operator A is older (age 3) than B (age 8). A's partitions have ages
     # 9 and 6; B's have ages 1 and 2: the oldest partition overall is in B,
     # but the operator is chosen first.
-    var a = _coord("two-a", 3, Int64(1000), _slab((10, 9, True), (20, 6, True)), 2)
-    var b = _coord("two-b", 8, Int64(1000), _slab((30, 1, True), (40, 2, True)), 2)
+    var a = _coord(
+        "two-a", 3, Int64(1000), _slab((10, 9, True), (20, 6, True)), 2
+    )
+    var b = _coord(
+        "two-b", 8, Int64(1000), _slab((30, 1, True), (40, 2, True)), 2
+    )
     var outer = SpillArbitrator[LocalDiskSpillStorage, _Coord, _Coord](
         _storage("two-outer"),
         Int64(1),
@@ -476,7 +495,9 @@ def test_two_level_arbitration_spills_oldest_partition_of_oldest_operator() rais
 
 def test_two_level_closed_gate_moves_choice_to_the_other_operator() raises:
     var a = _coord("gate-a", 3, Int64(1000), _slab((10, 9, True)), 1)
-    var b = _coord("gate-b", 8, Int64(1000), _slab((30, 1, True), (40, 2, True)), 2)
+    var b = _coord(
+        "gate-b", 8, Int64(1000), _slab((30, 1, True), (40, 2, True)), 2
+    )
     a.set_can_spill(False)
     var outer = SpillArbitrator[LocalDiskSpillStorage, _Coord, _Coord](
         _storage("gate-outer"),
@@ -493,13 +514,124 @@ def test_two_level_closed_gate_moves_choice_to_the_other_operator() raises:
 
 
 def test_coordinator_spills_even_with_an_unbounded_budget() raises:
-    var c = _coord("unbounded", 1, Int64.MAX, _slab((10, 1, True), (20, 2, True)), 2)
+    var c = _coord(
+        "unbounded", 1, Int64.MAX, _slab((10, 1, True), (20, 2, True)), 2
+    )
     var outer = _storage("unbounded-outer")
     assert_equal(Int(c.spill_to_storage(outer)), 10)
     assert_equal(Int(c.spill_to_storage(outer)), 20)
     assert_equal(Int(c.spill_to_storage(outer)), 0)
     c.arbitrator_mut().storage_mut().cleanup()
     outer.cleanup()
+
+
+def test_release_and_regrant_through_the_routed_grow() raises:
+    var arb = _Arb(_storage("regrant"), Int64(0))
+    var slab = _slab((60, 1, True), (40, 2, True))
+    var r = MemoryReservation.with_budget(100)
+    assert_true(r.try_grow(100))
+    # First grow: slot 0 spills (60 B released), 40 + 50 is granted.
+    assert_true(try_grow_intra_op_routed(r, arb, slab, 2, 50))
+    assert_true(slab[0].spilled())
+    assert_equal(r.held_bytes(), 90)
+    # The caller gives the grant back and restores slot 0; its 60 B count
+    # against the reservation again.
+    r.release(50)
+    assert_equal(r.held_bytes(), 40)
+    slab[0].restore_from_storage(arb.storage_mut())
+    assert_false(slab[0].spilled())
+    assert_true(r.try_grow(60))
+    assert_equal(r.held_bytes(), 100)
+    # Second grow: slot 0 is the oldest spillable partition again.
+    assert_true(try_grow_intra_op_routed(r, arb, slab, 2, 50))
+    assert_true(slab[0].spilled())
+    assert_false(slab[1].spilled())
+    assert_equal(r.held_bytes(), 90)
+    assert_true(r.held_bytes() <= r.budget_bytes())
+    assert_equal(Int(arb.spill_event_count()), 2)
+    assert_equal(arb.storage_ref().num_live_chunks(), 2)
+    arb.storage_mut().cleanup()
+
+
+def test_grow_of_exactly_the_whole_budget_spills_then_grants() raises:
+    var arb = _Arb(_storage("wholebudget"), Int64(0))
+    var slab = _slab((100, 1, True))
+    var r = MemoryReservation.with_budget(100)
+    assert_true(r.try_grow(100))
+    # 100 is not above the budget, so it is not refused up front: the
+    # partition spills, its 100 B are released and the grow is granted.
+    assert_true(try_grow_intra_op_routed(r, arb, slab, 1, 100))
+    assert_true(slab[0].spilled())
+    assert_equal(r.held_bytes(), 100)
+    assert_equal(Int(arb.spill_event_count()), 1)
+    arb.storage_mut().cleanup()
+
+
+def test_equal_ages_spill_the_lowest_index() raises:
+    var arb = _Arb(_storage("tie"), Int64(0))
+    var slab = _slab((10, 5, True), (20, 5, True), (30, 5, True))
+    assert_equal(Int(arb.pressure_check_and_arbitrate(slab, 3, Int64(1))), 10)
+    assert_true(slab[0].spilled())
+    assert_false(slab[1].spilled())
+    assert_false(slab[2].spilled())
+    assert_equal(Int(arb.pressure_check_and_arbitrate(slab, 3, Int64(1))), 20)
+    assert_true(slab[1].spilled())
+    arb.storage_mut().cleanup()
+
+
+def test_a_raising_arbitration_leaves_the_reservation_unchanged() raises:
+    # A policy that is not implemented.
+    var largest = _Arb(
+        _storage("raise-policy"), Int64(0), ArbitratorPolicy.largest_first()
+    )
+    var slab = _slab((60, 1, True))
+    var r = MemoryReservation.with_budget(100)
+    assert_true(r.try_grow(100))
+    with assert_raises(contains="LARGEST_FIRST"):
+        _ = try_grow_intra_op_routed(r, largest, slab, 1, 10)
+    assert_equal(r.held_bytes(), 100)
+    assert_false(slab[0].spilled())
+    assert_equal(largest.storage_ref().num_live_chunks(), 0)
+    # A victim whose spill raises.
+    var arb = _Arb(_storage("raise-spill"), Int64(0))
+    var bad = _failing_slab(60, 1)
+    with assert_raises(contains="scripted spill failure"):
+        _ = try_grow_intra_op_routed(r, arb, bad, 1, 10)
+    assert_equal(r.held_bytes(), 100)
+    assert_false(bad[0].spilled())
+    assert_equal(arb.storage_ref().num_live_chunks(), 0)
+    largest.storage_mut().cleanup()
+    arb.storage_mut().cleanup()
+
+
+def test_zero_budget_arbitrators() raises:
+    # Budget 0 with nothing resident: a zero grow is not pressure.
+    var arb = _Arb(_storage("zero"), Int64(0))
+    var slab = _slab((10, 1, True))
+    _ = slab[0].spill_to_storage(arb.storage_mut())
+    assert_equal(Int(arb.pressure_check_and_arbitrate(slab, 1, Int64(0))), 0)
+    assert_equal(Int(arb.no_victim_count()), 0)
+    # Anything more is pressure, but the one partition is already spilled.
+    assert_equal(Int(arb.pressure_check_and_arbitrate(slab, 1, Int64(1))), 0)
+    assert_equal(Int(arb.no_victim_count()), 1)
+    arb.storage_mut().cleanup()
+
+
+def test_outer_arbitrator_with_nothing_spillable_frees_nothing() raises:
+    var a = _coord("none-a", 3, Int64(1000), _slab((10, 9, True)), 1)
+    var b = _coord("none-b", 8, Int64(1000), _slab((30, 1, True)), 1)
+    a.set_can_spill(False)
+    b.set_can_spill(False)
+    var outer = SpillArbitrator[LocalDiskSpillStorage, _Coord, _Coord](
+        _storage("none-outer"),
+        Int64(0),
+        SpillableOpBlock[_Coord, _Coord](a^, b^),
+    )
+    assert_equal(Int(outer.pressure_check_and_arbitrate(Int64(1))), 0)
+    assert_equal(Int(outer.op_memory_usage_bytes[0]()), 10)
+    assert_equal(Int(outer.op_memory_usage_bytes[1]()), 30)
+    assert_equal(outer.storage_ref().num_live_chunks(), 0)
+    outer.storage_mut().cleanup()
 
 
 def main() raises:
@@ -512,15 +644,20 @@ def main() raises:
     suite.test[test_routed_grow_happy_path_and_no_victim]()
     suite.test[test_coordinator_spills_oldest_partition_and_gates]()
     suite.test[test_policy_tags]()
-    suite.test[test_routed_grow_sequence_spills_oldest_first_and_stays_in_budget]()
+    suite.test[test_routed_grow_sequence_oldest_first_in_budget]()
     suite.test[test_refused_grow_leaves_reservation_unchanged]()
     suite.test[test_retry_refused_after_spill_keeps_the_released_bytes]()
-    suite.test[test_release_and_regrant]()
+    suite.test[test_release_and_regrant_through_the_routed_grow]()
     suite.test[test_restored_partition_can_spill_again]()
     suite.test[test_huge_grow_is_pressure_not_wrap]()
     suite.test[
-        test_two_level_arbitration_spills_oldest_partition_of_oldest_operator
+        test_two_level_spills_oldest_partition_of_oldest_operator
     ]()
     suite.test[test_two_level_closed_gate_moves_choice_to_the_other_operator]()
     suite.test[test_coordinator_spills_even_with_an_unbounded_budget]()
+    suite.test[test_grow_of_exactly_the_whole_budget_spills_then_grants]()
+    suite.test[test_equal_ages_spill_the_lowest_index]()
+    suite.test[test_a_raising_arbitration_leaves_the_reservation_unchanged]()
+    suite.test[test_zero_budget_arbitrators]()
+    suite.test[test_outer_arbitrator_with_nothing_spillable_frees_nothing]()
     suite^.run()
