@@ -5,8 +5,9 @@
 # `_infer_runtime_dtype` answers which `RUNTIME_DTYPE_*` family a plan
 # expression evaluates in, the way the translator in `lower_untyped_expr`
 # will lower it. The translator uses it to pick a node per operand family and
-# a CASE's output family; `compute_project` uses it to pick the walker
-# channel of a computed column.
+# a CASE's output family; a caller can use it to pick the walker
+# channel of a computed column, but only for an expression the translator
+# accepts (see the arithmetic note below).
 # =============================================================================
 
 from std.collections import Dict
@@ -70,7 +71,11 @@ def _infer_runtime_dtype(
     * EXPR_BINARY_OP: a comparison or AND / OR is BOOL. An arithmetic
       operator is F64 when either operand is F64, else the left operand's
       family (so I64 / I64 division is I64: the walker's I64 division widens
-      inside the node and writes the I64 channel). MOD is UNSUPPORTED.
+      inside the node and writes the I64 channel). MOD is UNSUPPORTED. The
+      answer is not a validity check: two operands of one non-F64 family, or
+      a mixed pair such as STRING + I64, still answer the left family. The
+      translator refuses a family mismatch and an UNSUPPORTED family, so a
+      caller must translate before trusting the answer.
     * EXPR_UNARY_OP: NOT and the null tests are BOOL; every other op is
       UNSUPPORTED.
     * EXPR_STRING_OP: BOOL. EXPR_MATH_FN and EXPR_MATH_FN2: F64.
@@ -78,7 +83,9 @@ def _infer_runtime_dtype(
     * EXPR_CAST: F64 for a FLOAT64 target over an I64 or F64 operand, the one
       cast the translator lowers; UNSUPPORTED otherwise, so this answer and
       the translator agree on every cast.
-    * EXPR_WHEN: F64 when any THEN or the ELSE is F64, else I64.
+    * EXPR_WHEN: F64 when any THEN or the ELSE is F64, else I64, whatever
+      the other branches are; the translator refuses a branch outside the I64
+      and F64 families.
     * Any other tag: UNSUPPORTED.
 
     Declared `raises` for the Dict accessor; every read is guarded by a

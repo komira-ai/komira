@@ -10,7 +10,8 @@
 #
 # A shape outside the translator's subset RAISES an error whose message starts
 # with `UnsupportedByLowerUntypedExpr:`. The caller decides what a raise means
-# (`compute_project` turns it into a decline).
+# (the computed-projection evaluator, a later slice of this package, turns
+# it into a decline).
 #
 # Column resolution is the caller's: `col_name_to_idx` maps a column name to
 # the position the walker reads, and `col_name_to_dtype` maps it to a
@@ -111,7 +112,7 @@ from .lower_untyped_expr_ops import (
 # `_infer_runtime_dtype`.
 #
 # Tags 0 to 5 are the families the translator reads and emits. Tags 6 to 23
-# name narrower physical types; the mapper in `compute_project` emits only
+# name narrower physical types; the caller's dtype mapper is expected to emit only
 # RUNTIME_DTYPE_I32 of them, and the translator treats the rest like an
 # unknown family. RUNTIME_DTYPE_BINARY and RUNTIME_DTYPE_DICTIONARY select a
 # column leaf kind.
@@ -485,12 +486,20 @@ def _translate_when_branch(
 ) raises -> Int:
     """Translate one CASE THEN/ELSE branch at the CASE's output family.
 
-    When the CASE is F64 and the branch is an I64-family sub-tree, the branch
+    A branch outside the I64 and F64 families is refused. When the CASE is
+    F64 and the branch is an I64-family sub-tree, the branch
     slot is wrapped in EXPR_I64_TO_F64 so the F64 walker reads a Float64 from
     every branch. (The F64 walker also widens a bare I64 leaf on its own; the
     wrap is the general form and gives the same value for those leaves.)
     """
     var branch_family = _infer_runtime_dtype(e, col_name_to_dtype)
+    if branch_family != RUNTIME_DTYPE_I64 and branch_family != RUNTIME_DTYPE_F64:
+        raise Error(
+            "UnsupportedByLowerUntypedExpr: EXPR_WHEN branch is not in the"
+            + " I64 or F64 family (family tag "
+            + String(branch_family)
+            + "); the CASE nodes carry integer and float branches only."
+        )
     var slot = _translate_node(
         e,
         pool,

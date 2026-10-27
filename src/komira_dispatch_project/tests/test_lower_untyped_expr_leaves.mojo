@@ -56,6 +56,7 @@ from komira_plan_expr.expr import (
     WhenCaseData,
     BIN_AND,
     BIN_GT,
+    BIN_MOD,
     MATH_GAMMA,
     MATH_LN,
     MATH2_ATAN2,
@@ -487,6 +488,25 @@ def test_a_case_with_no_when_is_refused() raises:
     _assert_refused(
         Expr.when(List[WhenCaseData](), _li(0)), "EXPR_WHEN with zero cases"
     )
+
+
+def test_a_case_branch_outside_the_integer_and_float_families_is_refused() raises:
+    """A string ELSE, a bool THEN, a decimal THEN and an unsupported (MOD)
+    THEN are each refused with the family reason, not lowered into an
+    EXPR_CASE_I64 over a non-integer node. Mutant: the family check in
+    `_translate_when_branch` removed (the string, bool and decimal CASEs then
+    lower)."""
+    var why = "branch is not in the I64 or F64"
+    var str_lit = Expr.literal(ScalarValue.from_string(String("x")))
+    _assert_refused(_case(_c("i"), str_lit^), why)
+    var bool_lit = Expr.literal(ScalarValue.from_bool(True))
+    _assert_refused(_case(bool_lit^, _li(0)), why)
+    var dec_lit = Expr.literal(
+        ScalarValue.decimal128(Int64(0), Int64(1250), 10, 2)
+    )
+    _assert_refused(_case(dec_lit^, _li(0)), why)
+    _assert_refused(_case(_c("s"), _li(0)), why)
+    _assert_refused(_case(Expr.binary(BIN_MOD, _c("i"), _li(2)), _li(0)), why)
 
 
 def test_the_overload_without_a_when_pool_refuses_a_case() raises:
