@@ -486,6 +486,7 @@ TARGETS = [
     "komira//tools/build/examples/shared_lib:spike",
     "komira//tools/build/examples/shared_lib:spike_exact",
     "komira//tools/build/examples/shared_lib_mid:mid",
+    "komira//tools/build/examples/shared_lib_native:spike_native",
     "komira//tools/build/examples/snappy:test_snappy",
     "komira//tools/build/examples:hello_tarball",
     "komira//tools/build/examples:hellopkg_conda",
