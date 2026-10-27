@@ -1,0 +1,11 @@
+load(":cases.bzl", "adopt_deps_case")
+
+# `mojo_adopted_library` holds its `deps` to the closure of its `lib` (the packages `[dependencies]` of the
+# package's mopm.toml brings, here komira_resources' one sibling, komira_runtime_paths), one case per
+# `-c adopt_deps.case=<case>`:
+#   missing  deps = []                              Must FAIL: `lib` is built from komira_runtime_paths, `deps` does not bring it
+#   extra    deps = [runtime_paths, komira_json]    Must FAIL: `deps` brings komira_json, `lib` is not built from it
+#   agree    deps = [runtime_paths]                 Must BUILD: the control, so the two refusals are about the lists
+# With no case set the package declares only its doc_tree, so loading it never fails by accident. The
+# scenario is tools/build/selftest:analysis_refusals_adopt_deps.
+adopt_deps_case()
