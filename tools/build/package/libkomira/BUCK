@@ -26,6 +26,29 @@ conda_install_check(
     name = "libkomira_install",
     lib = "libkomira.so",
     min_version = 1000,
+    # The packages libkomira's `depends` name for its NEEDED shared libraries:
+    # each native owner's own package (Q13: libkomira bundles none), installed
+    # beside it, and each owner's library must be loaded from the prefix.
+    owner_libs = [
+        "libkomira_async_native.so.1",
+        "libkomira_async_api_native.so.1",
+        "libkomira_compression_native.so.1",
+        "libkomira_fs_native.so.1",
+        "libkomira_libc_native.so.1",
+        "libkomira_metrics_native.so.1",
+        "libkomira_scan_source_native.so.1",
+        "libkomira_parquet_codec_native.so.1",
+    ],
+    owners = [
+        "//src/komira_async:komira_async_conda",
+        "//src/komira_async_api:komira_async_api_conda",
+        "//src/komira_compression:komira_compression_conda",
+        "//src/komira_fs:komira_fs_conda",
+        "//src/komira_libc:komira_libc_conda",
+        "//src/komira_metrics:komira_metrics_conda",
+        "//src/komira_scan_source:komira_scan_source_conda",
+        "//src/komira_parquet_codec:komira_parquet_codec_conda",
+    ],
     package = ":komira_so_libkomira_conda",
     symbols = [
         "komira_abi_version",

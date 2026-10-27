@@ -1,6 +1,6 @@
 //! komira_pack: the `conda-install` command (a package unpacked into a clean prefix).
 //!
-//! usage: komira_pack conda-install --dir D --prefix P [--runtime-lib NAME=FILE]...
+//! usage: komira_pack conda-install --dir D --prefix P [--also-dir D2]... [--runtime-lib NAME=FILE]...
 //!                                  [--require-depend "NAME ==VERSION"]...
 //!                                  [--expect-red TEXT]
 //!
@@ -11,6 +11,11 @@
 //! row's path type matches the member (a link is a `softlink`). A path may be
 //! written once; an absolute path, a `.` or `..` component, or a link target
 //! with a directory part is refused.
+//!
+//! Each `--also-dir D2` is another package (one `.conda`) installed into the
+//! same prefix first, held to its own info/paths.json the same way: the
+//! packages the first one's `depends` name (the owner packages whose shared
+//! libraries it is NEEDED on). A path two packages write is refused.
 //!
 //! Each `--runtime-lib NAME=FILE` is then written to `lib/NAME` (mode 0755):
 //! the libraries the package's own requirements install beside it (the Mojo
@@ -185,7 +190,7 @@ fn refused(a: Args, expect: ?[]const u8) !void {
 }
 
 pub fn cmdCondaInstall(alloc: Alloc, a: Args) !void {
-    allow(a, &.{ "--dir", "--runtime-lib", "--require-depend", "--expect-red" });
+    allow(a, &.{ "--dir", "--also-dir", "--runtime-lib", "--require-depend", "--expect-red" });
     const expect = one(a, "--expect-red");
     const bytes = readAll(alloc, try theConda(alloc, need(one(a, "--dir"), "--dir")));
     const parts = try pack_conda_check.readParts(alloc, bytes);
@@ -203,6 +208,15 @@ pub fn cmdCondaInstall(alloc: Alloc, a: Args) !void {
     try std.fs.cwd().makePath(prefix);
     var root = try std.fs.cwd().openDir(prefix, .{});
     defer root.close();
+    for (try all(alloc, a, "--also-dir")) |d| {
+        const other = try pack_conda_check.readParts(alloc, readAll(alloc, try theConda(alloc, d)));
+        const other_paths_tar = pack_conda.findTar(other.info, "info/paths.json") orelse fail("{s}: no info/paths.json", .{d});
+        const other_paths = try json.parseFromSliceLeaky(json.Value, alloc, other_paths_tar.data, .{});
+        installInto(alloc, root, other.pkg, other_paths) catch |err| switch (err) {
+            error.Refused => try refused(a, expect),
+            else => return err,
+        };
+    }
     installInto(alloc, root, parts.pkg, paths) catch |err| switch (err) {
         error.Refused => try refused(a, expect),
         else => return err,

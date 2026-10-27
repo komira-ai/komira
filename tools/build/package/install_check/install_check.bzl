@@ -63,6 +63,7 @@ def _impl(ctx):
             "--require-depend",
             "mojo-compiler ==" + ctx.attrs.depend_pin,
             ["--expect-red", ctx.attrs.expect_red] if ctx.attrs.expect_red != None else [],
+            [cmd_args("--also-dir", o[DefaultInfo].default_outputs[0]) for o in ctx.attrs.owners],
             [cmd_args("--runtime-lib", cmd_args(tc.compiler.project("lib/" + n), format = n + "={}")) for n in runtime],
         ),
         category = "conda_install",
@@ -82,7 +83,7 @@ def _impl(ctx):
             [cmd_args("--symbol", s) for s in ctx.attrs.symbols],
             ["--version-symbol", ctx.attrs.version_symbol, "--min-version", str(ctx.attrs.min_version)] if ctx.attrs.version_symbol else [],
             [cmd_args("--runtime", n) for n in runtime],
-            [cmd_args("--require", n) for n in [ctx.attrs.lib] + ctx.attrs.require],
+            [cmd_args("--require", n) for n in [ctx.attrs.lib] + ctx.attrs.require + ctx.attrs.owner_libs],
             "--out",
             marker.as_output(),
         ),
@@ -102,6 +103,12 @@ _conda_install_check = rule(
         "expect_red": attrs.option(attrs.string(), default = None),
         "lib": attrs.string(),
         "min_version": attrs.int(default = 0),
+        # The packages the package's `depends` name for the shared libraries
+        # it is NEEDED on (the native owners'): installed into the same prefix,
+        # as an installer resolving `depends` would, and `owner_libs` (their
+        # sonames) must be mapped from the prefix.
+        "owner_libs": attrs.list(attrs.string(), default = []),
+        "owners": attrs.list(attrs.dep(), default = []),
         "package": attrs.dep(),
         # Runtime libraries (of the platform row's `runtime_libs`) that must be
         # mapped from the prefix, besides `lib` itself.
