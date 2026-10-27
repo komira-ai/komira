@@ -54,11 +54,25 @@ test "a native library at lib/<soname> is a payload path" {
     try std.testing.expectEqualStrings("archive", conda.find(files, "lib/libnative.a").?);
 }
 
-test "a path outside lib/mojo/<file> and lib/<file> is refused" {
+test "the source of a shipped program at lib/mojo/<package>.bins/<program>.mojo is a payload path" {
     var ar = arena();
     defer ar.deinit();
     const a = ar.allocator();
-    const bad = [_][]const u8{ "bin/tool", "etc/passwd", "lib/mojo/../../x", "lib/a/b/c", "lib/.hidden", "lib/", "/lib/x", "lib/x\\y", "libx/y", "lib/other/x.mojoc" };
+    const tar = try fix.tarOf(a, &.{
+        .{ .name = "lib/mojo/good.bins/run_2.mojo", .bytes = "def main(): pass" },
+        .{ .name = "lib/mojo/good.mojoc", .bytes = "the mojoc" },
+    });
+    const bytes = try fix.condaOf(a, "mojo-good-1.0.0-mojo1.0.0_0", tar);
+    var why: []const u8 = "";
+    const files = try conda.read(a, bytes, &why);
+    try std.testing.expectEqualStrings("def main(): pass", conda.find(files, "lib/mojo/good.bins/run_2.mojo").?);
+}
+
+test "a path outside lib/mojo/<file>, a program source and lib/<file> is refused" {
+    var ar = arena();
+    defer ar.deinit();
+    const a = ar.allocator();
+    const bad = [_][]const u8{ "bin/tool", "etc/passwd", "lib/mojo/../../x", "lib/a/b/c", "lib/.hidden", "lib/", "/lib/x", "lib/x\\y", "libx/y", "lib/other/x.mojoc" } ++ [_][]const u8{ "lib/mojo/x.bins/Run.mojo", "lib/mojo/x.bins/a-b.mojo", "lib/mojo/x.bins/run.sh", "lib/mojo/x.bins/.mojo", "lib/mojo/.bins/run.mojo", "lib/mojo/x/run.mojo", "lib/other/x.bins/run.mojo", "lib/mojo/x.bins/a/run.mojo", "lib/x.bins/run.mojo", "lib/mojo/x.bins/run.mojo/y" };
     for (bad) |name| {
         const tar = try fix.tarOf(a, &.{.{ .name = name, .bytes = "x" }});
         const bytes = try fix.condaOf(a, "mojo-good-1.0.0-mojo1.0.0_0", tar);
