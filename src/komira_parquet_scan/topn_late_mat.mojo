@@ -45,7 +45,7 @@ from komira_exec_types.exec_result import ExecResult, NEED_MORE_INPUT
 from komira_morsel.morsel import Morsel
 from komira_morsel.morsel_operator import MorselOperatorImpl
 
-from .parquet_source_options import rg_index_of_partition_id
+from .parquet_source_options import ParquetScanOptions, rg_index_of_partition_id, topn_stamp_is_exact
 
 
 comptime TOPN_LATE_MAT_RG_COLUMN: StaticString = "__komira_topn_late_mat_rg"
@@ -59,15 +59,23 @@ struct TopNRowGroupStampOp(MorselOperatorImpl):
     (`rg_index_of_partition_id`), so the number is the one `claim_units` takes.
     That holds when every morsel comes from one row group: the whole-row-group
     and one-morsel-per-unit emits. A coarse row-range emit concatenates units
-    across row groups under the first unit's id; the driver must not take two
-    phases then (`topn_stamp_is_exact`).
+    across row groups under the first unit's id, so the constructor takes the
+    scan's options and raises when `topn_stamp_is_exact` is false for them.
 
     The column has the batch's physical row count, so a batch that still
     carries a deferred selection mask stays consistent: the mask gathers the
     stamp with every other column. Stateless; one per worker."""
 
-    def __init__(out self):
-        pass
+    def __init__(out self, options: ParquetScanOptions) raises:
+        """Raises:
+            If `options` emits coarse row-range morsels, whose partition id
+            does not name the row group of every row.
+        """
+        if not topn_stamp_is_exact(options):
+            raise Error(
+                "TopNRowGroupStampOp: a coarse row-range emit (subrg_emit_coarse) concatenates "
+                "row groups under one partition id, so the row-group stamp is not exact"
+            )
 
     def execute(mut self, mut morsel: Morsel) raises -> ExecResult:
         var n = morsel.batch.num_rows()

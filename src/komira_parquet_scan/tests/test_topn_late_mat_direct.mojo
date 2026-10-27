@@ -71,7 +71,7 @@ def _batch(name: String, values: List[Int64]) raises -> RecordBatch:
 
 
 def test_the_stamp_is_the_row_group_of_the_partition_id() raises:
-    var op = TopNRowGroupStampOp()
+    var op = TopNRowGroupStampOp(ParquetScanOptions.default())
     for which in range(3):
         var rg = 7 if which < 2 else 0
         var pid = rg_partition_id(rg) if which != 1 else unit_partition_id(rg, SUB_SLOT_STRIDE - 1)
@@ -147,6 +147,9 @@ def _collect(
     stamp: Bool,
     var options: ParquetScanOptions = ParquetScanOptions.default(),
 ) raises -> _Collected:
+    var op = Optional[TopNRowGroupStampOp](None)
+    if stamp:
+        op = Optional(TopNRowGroupStampOp(options))
     var cache = ParquetMetadataCache()
     var pool = ExprPool()
     var nf = 0  # the origin of an absent dynamic filter
@@ -158,7 +161,6 @@ def _collect(
     var out = _Collected()
     out.units = src.claimable_units()
     var morsels = Slab[Morsel]()
-    var op = TopNRowGroupStampOp()
     var live = List[Bool](length=_NW, fill=True)
     var n_live = _NW
     while n_live > 0:
@@ -169,7 +171,7 @@ def _collect(
             if m:
                 var mm = m.take()
                 if stamp:
-                    _ = op.execute(mm)
+                    _ = op.value().execute(mm)
                 morsels.append(mm^)
             else:
                 live[w] = False
@@ -277,28 +279,41 @@ def test_two_phases_return_the_rows_of_a_full_sort_ties_included() raises:
             assert_equal(p2.key[top2[i]], _key_of(want[i]))
 
 
-def test_the_stamp_is_exact_unless_row_ranges_are_emitted_coarse() raises:
+def test_the_stamp_is_refused_under_a_coarse_row_range_emit() raises:
     var path = _file()
-    for coarse in [False, True]:
-        var opts = ParquetScanOptions.default()
-        opts.subrg_mode = 2
-        opts.subrg_units_per_rg = 2
-        opts.subrg_emit_coarse = coarse
-        opts.subrg_emit_rows = 1000
-        assert_equal(topn_stamp_is_exact(opts), not coarse)
-        var c = _collect(path, ColumnSet.all(), None, True, opts^)
-        assert_equal(len(c.a), _ROWS)
-        var wrong = 0
-        for i in range(len(c.a)):
-            if c.stamp[i] != c.a[i] // _RG_ROWS:
-                wrong += 1
-        # One unit per morsel stamps every row with its own row group; a
-        # coarse morsel (all 200 rows fit in 1,000) takes its first unit's.
-        if coarse:
-            assert_true(wrong > 0)
-        else:
-            assert_equal(wrong, 0)
+    var opts = ParquetScanOptions.default()
+    opts.subrg_mode = 2
+    opts.subrg_units_per_rg = 2
+    opts.subrg_emit_rows = 1000
+    # One unit per morsel: the stamp is exact, and a source reads every row.
+    assert_true(topn_stamp_is_exact(opts))
+    var fine = _collect(path, ColumnSet.all(), None, True, opts.copy())
+    assert_equal(len(fine.a), _ROWS)
+    for i in range(len(fine.a)):
+        assert_equal(fine.stamp[i], fine.a[i] // _RG_ROWS)
+    opts.subrg_emit_coarse = True
+    assert_true(not topn_stamp_is_exact(opts))
+    with assert_raises(contains="row-group stamp is not exact"):
+        _ = TopNRowGroupStampOp(opts)
+    with assert_raises(contains="row-group stamp is not exact"):
+        _ = _collect(path, ColumnSet.all(), None, True, opts.copy())
+    # Without the stamp a coarse scan is still a plain scan.
+    assert_equal(len(_collect(path, ColumnSet.all(), None, False, opts^).a), _ROWS)
+    _ = TopNRowGroupStampOp(ParquetScanOptions.default())
     assert_true(topn_stamp_is_exact(ParquetScanOptions.default()))
+
+
+def test_claim_units_is_refused_on_the_row_range_route() raises:
+    var path = _file()
+    var opts = ParquetScanOptions.default()
+    opts.subrg_mode = 2
+    opts.subrg_units_per_rg = 2
+    with assert_raises(contains="claim_units is not honoured by the row-range split"):
+        _ = _collect(path, ColumnSet.all(), Optional(List[Int]([0])), False, opts^)
+    # Without the split the same list restricts the claim to that row group.
+    var c = _collect(path, ColumnSet.all(), Optional(List[Int]([0])), False)
+    assert_equal(c.units, 1)
+    assert_equal(len(c.a), _RG_ROWS)
 
 
 def test_the_route_counters() raises:

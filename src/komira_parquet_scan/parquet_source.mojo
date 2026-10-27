@@ -218,7 +218,9 @@ struct ParquetSource[
             options: The source's switches.
             topn_boundary: A running top-N cut-off, with `topn_prune` its
                 per-row-group key bounds (both, or neither, is used).
-            claim_units: Claim only these flat row groups.
+            claim_units: Claim only these flat row groups. Raises when the
+                row-range split is on for this scan (it claims row-range
+                units and would ignore the list).
             claim_order: Claim in this order (a permutation).
             share_parked: The consumer accepts parked sub-morsels from other
                 workers; `share_parked_ragged` also in the last round.
@@ -326,6 +328,11 @@ struct ParquetSource[
         self._maybe_enable_cursor_grain()
         self._maybe_enable_rg_prune()
         if claim_units:
+            if self._subrg.enabled:
+                raise Error(
+                    "ParquetSource: claim_units is not honoured by the row-range split "
+                    "(it claims row-range units, not row groups); turn the split off or drop claim_units"
+                )
             self._restrict_claim_units(claim_units.take())
         # The top-N order is only walked when nothing else rewrote the claim
         # space, and is claimed one row group at a time so the boundary

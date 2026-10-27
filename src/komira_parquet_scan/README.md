@@ -140,7 +140,9 @@ The morsel source:
   sort keys only, and `TopNRowGroupStampOp` stamps each row with its row
   group; phase 2 decodes the full projection over just the row groups the
   answer came from (`topn_late_mat_winner_row_groups`, given to
-  `claim_units`) and returns the same rows.
+  `claim_units`) and returns the same rows. `TopNRowGroupStampOp` takes the
+  scan's options and raises under a coarse row-range emit, and `ParquetSource`
+  raises when `claim_units` is given while the row-range split is on.
 
 The worker count is the caller's (its host profile's), so the source probes
 no machine. Every switch is a constructor or call argument or a process setter
