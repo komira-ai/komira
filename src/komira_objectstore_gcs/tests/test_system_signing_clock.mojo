@@ -7,9 +7,12 @@
 #
 #   1  a read is a plausible current instant: after 2026-09-01T00:00:00Z
 #      (a fixed instant before this code existed) and before 2100-01-01.
-#   2  a GcsV4Signer mints at one reading of its clock: over a FixedSigningClock
-#      the URL's X-Goog-Date is the stamp of that instant, the expiry is that
-#      instant plus the TTL, and X-Goog-Expires is the TTL, all exact.
+#   2  a GcsV4Signer mints from its clock: over a FixedSigningClock the URL's
+#      X-Goog-Date is the stamp of that instant, the expiry is that instant
+#      plus the TTL, and X-Goog-Expires is the TTL, all exact.
+#   3  a GcsV4Signer wired to SystemSigningClock mints at a real instant: the
+#      expiry minus the TTL lies between the fixed bounds of test 1 and
+#      X-Goog-Date is the stamp of that same instant.
 #
 # The key is Google's published inactive dummy service account, read from the
 # pinned conformance archive staged at conformance/.
@@ -73,7 +76,7 @@ def test_reads_a_plausible_now() raises:
     )
 
 
-def test_signer_mints_at_one_reading_of_the_clock() raises:
+def test_signer_mints_from_its_clock() raises:
     var signer = GcsV4Signer(
         _account(), String("repo-bucket"), FixedSigningClock(_FIXED_NOW)
     )
@@ -88,7 +91,23 @@ def test_signer_mints_at_one_reading_of_the_clock() raises:
     assert_equal(_query_value(url.url, "X-Goog-Expires"), String(_TTL))
 
 
+def test_system_clock_signer_mints_at_a_real_instant() raises:
+    var signer = GcsV4Signer(
+        _account(), String("repo-bucket"), SystemSigningClock()
+    )
+    var url = signer.presign_download(String("a/b"), _TTL)
+    var minted = Int(url.expires_unix_seconds) - _TTL
+    assert_true(minted > _AFTER, "minted at " + String(minted) + ", too early")
+    assert_true(minted < _BEFORE, "minted at " + String(minted) + ", too late")
+    assert_equal(
+        _query_value(url.url, "X-Goog-Date"),
+        gcs_v4_stamps_from_unix_seconds(Int64(minted)).datetime_z,
+    )
+    assert_equal(_query_value(url.url, "X-Goog-Expires"), String(_TTL))
+
+
 def main() raises:
     test_reads_a_plausible_now()
-    test_signer_mints_at_one_reading_of_the_clock()
+    test_signer_mints_from_its_clock()
+    test_system_clock_signer_mints_at_a_real_instant()
     print("OK")

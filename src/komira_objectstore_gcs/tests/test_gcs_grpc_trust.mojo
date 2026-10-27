@@ -261,7 +261,9 @@ struct _Duet[C: _ClientLeg, so: MutOrigin, co: MutOrigin, fo: MutOrigin](ForkJoi
     def run(self, tid: Int) raises:
         if tid == 0:
             # Waits on progress only: the client leg sets the flag when it
-            # is done. No wall-clock deadline; a hang is the build's watchdog.
+            # is done. No wall-clock deadline: a hung client is bounded by the
+            # handshake and request guards, a wedged server step only by the
+            # build's own action limit.
             while self.flag[].stop.load() == Int64(0):
                 self.server[].step()
             return
