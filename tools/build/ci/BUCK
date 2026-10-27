@@ -137,3 +137,25 @@ zig_exe(
     zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
+
+# lock_graphs: the action of lock_graphs.bxl, which holds the graphs a package's
+# buildrules.mojo.lock.bzl commits (one per platform subdir) to the subdirs its
+# mopm.lock records. Built behind its unit tests.
+zig_test(
+    name = "lock_graphs_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "lock_graphs_test.zig",
+    imports = ["lock_graphs.zig"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "lock_graphs",
+    exec_compatible_with = LINUX_X86_64,
+    src = "lock_graphs.zig",
+    unit_tests = [":lock_graphs_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)

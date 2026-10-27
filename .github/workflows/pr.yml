@@ -151,6 +151,14 @@ jobs:
         with:
           args: bxl komira//tools/build/ci/python_guard.bxl:check
           assert-remote: ${{ steps.assert.outputs.path }}
+      # A package's buildrules.mojo.lock.bzl holds a unit graph per platform subdir; the
+      # subdirs its mopm.lock records are the ones it must hold, and `:table` compares
+      # only the ones the table has. This holds the two lists equal on linux.
+      - name: every package holds the graphs its lock records
+        uses: ./.github/actions/buck2-farm
+        with:
+          args: bxl komira//tools/build/ci/lock_graphs.bxl:check
+          assert-remote: ${{ steps.assert.outputs.path }}
       - name: the selector and guard cases
         uses: ./.github/actions/buck2-farm
         with:
