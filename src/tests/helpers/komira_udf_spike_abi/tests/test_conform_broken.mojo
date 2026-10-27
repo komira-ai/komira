@@ -1,13 +1,13 @@
 # The conformance suite against echo_broken.so
 # (the :echo_broken target): echo's source
-# with seven planted defects (echo_runtime.c lists them). The suite must fail
+# with eight planted defects (echo_runtime.c lists them). The suite must fail
 # on exactly the cases that name those defects, each for the reason it
 # names, and pass every other case.
 #
 # What it proves: the suite can fail. Each planted defect is caught by a case:
 #   1. args not released when the fixture raises      raise_on_row_3, fault_out_set_on_error,
 #                                                      scalar_propagate_error_row,
-#                                                      column_propagate_error_no_row and the three
+#                                                      column_propagate_error_no_row, the bisect cases and the three
 #                                                      fault_error_row_* cases (the release ledger)
 #   2. int64 bits in a float64 result                  column_float_result
 #   3. the cancel flag never read                      cancel_set_before_call, cancel_set_during_call,
@@ -16,6 +16,13 @@
 #   5. the input offset ignored                        sliced_input_offset
 #   6. a per-instance call counter in the result       split_across_contexts
 #   7. a caught undeclared ROW read not reported       row_caught_violation
+#   8. a call on a context with a call in progress    nested_scalar_in_pull, nested_two_levels,
+#      refused                                        nested_scalar_raises_while_frame_waits
+# Defects 1, 3, 4 and 6 also fail the new cases that raise from call_batch
+# (bisect_finds_row_5, volatile_not_bisected), set the cancel while a pull
+# is held (cancel_set_while_pull_returns_batch), merge partials
+# (agg_mergeable_100000_groups) and call double on several contexts
+# (two_contexts_in_parallel).
 # and no other case fails, so a harness that fails everything cannot pass.
 #
 # Mutant planted: conform.mojo's _ledger_check returning "" first (no
@@ -33,11 +40,15 @@ def _expected() -> List[String]:
     """`<case>|<a fragment of its failure reason>`, in case-name order (the
     order run_suite reports them)."""
     return [
+        "agg_mergeable_100000_groups|row 0",
         "agg_mergeable_sum|row 0",
         "agg_partials_differ_in_groups|row 0",
         "agg_partials_on_own_instances|row 0",
+        "bisect_finds_row_5|released",
+        "bisect_half_reports_row|released",
         "cancel_set_before_call|expected ERR_CANCELLED",
         "cancel_set_during_call|expected ERR_CANCELLED",
+        "cancel_set_while_pull_returns_batch|expected ERR_CANCELLED",
         "column_float_result|row 0",
         "column_float_rounding|row 0",
         "column_propagate_error_no_row|released",
@@ -49,23 +60,32 @@ def _expected() -> List[String]:
         "fault_error_row_past_batch_propagate|released",
         "fault_out_set_on_error|released",
         "frame_cancelled_at_open|expected ERR_CANCELLED",
+        "nested_frame_input_error_caught|a call on a context that has a call in progress",
+        "nested_scalar_bisected|a call on a context that has a call in progress",
+        "nested_scalar_in_pull|a call on a context that has a call in progress",
+        "nested_scalar_raises_while_frame_waits|a call on a context that has a call in progress",
+        "nested_scalar_short_by_one|a call on a context that has a call in progress",
+        "nested_two_levels|a call on a context that has a call in progress",
+        "nested_two_levels_scalar_raises|a call on a context that has a call in progress",
         "raise_on_row_3|released",
         "row_caught_violation|expected ERR_FIELD_NOT_DECLARED",
         "scalar_propagate_error_row|released",
         "sliced_input_offset|row 0",
         "sliced_input_offset_first_null|row 0",
-        "split_across_contexts|two batches on a second instance",
+        "split_across_contexts|on a second instance",
+        "two_contexts_in_parallel|outputs were wrong",
+        "volatile_not_bisected|released",
     ]
 
 
 def main() raises:
     var cases = load_cases(CASES)
-    assert_equal(len(cases), 121, "cases loaded from " + CASES)
+    assert_equal(len(cases), 164, "cases loaded from " + CASES)
     var report = run_suite("./echo_broken.so", cases)
     print(report)
     assert_equal(report.runtime_id, "komira-test/echo-broken")
     assert_equal(report.result("capabilities").verdict, "PASS")
-    assert_equal(report.count("SKIP"), 0)
+    assert_equal(report.count("SKIP"), 1)
     var want = _expected()
     var failed = List[String]()
     for i in range(len(report.results)):

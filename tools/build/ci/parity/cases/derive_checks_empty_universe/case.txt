@@ -1,4 +1,0 @@
-# A universe query that answers no target: the answer cannot be made, exit 1.
-arg "{units_file}"
-input units_file "lib_a\t//src/a:a\n"
-exit 1

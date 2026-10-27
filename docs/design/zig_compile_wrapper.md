@@ -25,8 +25,8 @@ and the order of the pull requests.
 
 **Scope, stated exactly.** `busybox.sh` and `dyld_prelude.sh` are not the compile wrapper's alone:
 
-- `dyld_prelude.sh` is prepended to `gate_runner.sh` and `launch.sh` (the `dyld_script` rule in
-  `darwin.bzl`); the compile never reads it. It goes when the Zig gate runner and launcher take a
+- `dyld_prelude.sh` is prepended to `launch.sh` (the `dyld_script` rule in `darwin.bzl`; it was
+  prepended to `gate_runner.sh` too until the macOS gate replaced that); the compile never reads it. It goes when the Zig gate runner and launcher take a
   loader-variable flag (`--library-path-var=DYLD_LIBRARY_PATH`), which is the gate-runner port, not this one.
 - `busybox.sh` is the darwin toolchain's `busybox` field, run by every darwin action that starts
   `tc.busybox`: the compile today, and also the gate runner, `run_check.sh`, the memory cap and deadline
@@ -51,7 +51,11 @@ Every item is something the shell does today, with the test (see "Tests") that p
 4. The output is the value after the last `-o` in the compiler's arguments; none is exit 2.
 5. `--source-root=<dir>`: only when the subcommand is `build`, `-strip-file-prefix=<abs dir>/` is inserted
    right after the subcommand. The absolute path is `$PWD/<dir>` for a relative dir, spelled exactly as
-   the shell spells it (not canonicalised), because the compiler matches the prefix as a string.
+   the shell spells it (not canonicalised), because the compiler matches the prefix as a string. When the
+   subcommand is `precompile` (which ignores `-strip-file-prefix`), the compiler instead runs from the
+   root's parent, the argument naming the root becomes its basename, and `-o` and relative `-I` are made
+   absolute: the `.mojoc` records `<name>/<file>.mojo` under any isolation directory
+   (`compile_args.runDir`; `tests//functional/mojoc_path:same_bytes`).
 6. Input paths (compiler dir, link dir) are made absolute the same way, `$PWD/<path>`.
 7. macOS only: an argument `shared-lib` without an argument `-install_name` is exit 2 (bundles are
    Linux only; a C-ABI library names itself for dyld).
@@ -383,16 +387,18 @@ Each pull request deletes its shell in the same change, and none re-runs a build
 pull-request check builds the affected targets, and the macOS proof is the one farm build the check cannot
 make.
 
-## Follow-on: `rustc_wrapper.sh`
+## Follow-on: `rustc_launch`
 
-`tools/build/rust/rustc_wrapper.sh` (88 lines) is the same shape without the watchdog: a closure check
-(`bin/rustc`, `zig`), private scratch, a generated `cc` shim (`zig cc -target <t> -Wl,--strip-debug`, no
-rewriting) handed to rustc as `-C linker=`, an environment of `HOME`, `TMPDIR`, `XDG_CACHE_HOME` and the
-zig caches with `LD_LIBRARY_PATH`, `LD_PRELOAD`, `RUSTFLAGS` and `RUSTC_BOOTSTRAP` unset,
-`--remap-path-prefix=$PWD=.`, and the same exit 3 and 4 checks. It becomes a second `main`
-(`rustc_compile.zig`) over the shared modules: scratch, exact environment, the shim's exec, and the output
-checks move into a `compile_common.zig` that both import. It is its own pull request after the Linux one,
-because it invalidates every Rust compile once and nothing in the Mojo port depends on it.
+The Rust compile has the same shape without the watchdog, and it was a shell script
+(`rustc_wrapper.sh`). It is now `tools/build/rust/rustc_launch.zig`, its own program: a closure check
+(`bin/rustc`, `zig`), private scratch, a `cc` shim (`zig cc -target <t> -Wl,--strip-debug`, no rewriting;
+the program itself under the name `cc`, with its configuration beside it) handed to rustc as `-C linker=`,
+an environment of `HOME`, `TMPDIR`, `XDG_CACHE_HOME` and the zig caches with `LD_LIBRARY_PATH`,
+`LD_PRELOAD`, `RUSTFLAGS` and `RUSTC_BOOTSTRAP` unset, `--remap-path-prefix=<cwd>=.`, `-C
+linker-features=-lld`, and the same exit 3 and 4 checks. It keeps the wrapper's command line, so the argv
+of every rustc action is the old one without the `busybox sh rustc_wrapper.sh` prefix. It does not share
+modules with `mojo_compile`: the two differ in their environment and in what they check, and the shared
+part is a few lines (scratch placement, an exit status).
 
 ## Risks and open questions
 

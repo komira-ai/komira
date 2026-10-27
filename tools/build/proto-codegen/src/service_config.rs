@@ -378,6 +378,7 @@ http:
         IrModel {
             files: vec![IrFile {
                 proto_path: "example/ops/v1/ops.proto".into(),
+                source_sha256: String::new(),
                 proto_package: package.into(),
                 mojo_package: "komira_test".into(),
                 messages: vec![],

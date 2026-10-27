@@ -1,0 +1,13 @@
+{
+ "name": "skip_one_of_two_features",
+ "defect": "a case needing two feature bits runs on a runtime that reports only one of them (the reference runtime reports MEMORY_REPORT, not FORCED_STOP)",
+ "run": "call_batch",
+ "entry": "identity",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "needs_features": ["MEMORY_REPORT", "FORCED_STOP"],
+ "input": {"length": 1, "columns": [{"type": "int64", "values": [1]}]},
+ "expect": {"status": "ERR_KILLED"},
+ "runner_fails_with": "SKIP"
+}

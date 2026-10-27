@@ -589,6 +589,7 @@ mod tests {
         IrModel {
             files: vec![IrFile {
                 proto_path: "t.proto".into(),
+                source_sha256: String::new(),
                 proto_package: "t.v1".into(),
                 mojo_package: "t".into(),
                 messages: vec![IrMessage {

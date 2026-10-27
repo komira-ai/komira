@@ -10,8 +10,9 @@
 # supervisor reads an empty envp as "inherit". Its stdout and stderr are drained concurrently
 # into the two files named by the spec, so neither pipe can fill and stall
 # it. Past `timeout_s` it is stopped (SIGTERM, then SIGKILL after
-# `grace_ms`) and the result says `timed_out`. Its clock (`now_ns`) is the
-# ProcessRunner default, CLOCK_MONOTONIC.
+# `grace_ms`) and the result says `timed_out`. The timeout is read on a
+# `RunClock`: `run` passes `MonotonicClock`, `run_on` takes another (a test's).
+# Its `now_ns` is the ProcessRunner default, CLOCK_MONOTONIC.
 #
 # After the child exits, the pipes are read until both reach EOF, or until
 # nothing has arrived for `_LINGER_TICKS` ticks: a grandchild that inherited a
@@ -24,13 +25,14 @@
 # =============================================================================
 
 from std.ffi import external_call
-from std.time import perf_counter_ns
 
 from komira_supervisor import ChildSpec, Supervisor
 
 from kci_build.runner import (
     STDERR_TAIL_BYTES,
+    MonotonicClock,
     ProcessRunner,
+    RunClock,
     RunResult,
     RunSpec,
     check_child_env,
@@ -69,6 +71,14 @@ struct SupervisorRunner(ProcessRunner):
         self.grace_ms = grace_ms
 
     def run(mut self, spec: RunSpec) raises -> RunResult:
+        var clock = MonotonicClock()
+        return self.run_on(spec, clock)
+
+    def run_on[C: RunClock](mut self, spec: RunSpec, mut clock: C) raises -> RunResult:
+        """`run`, with the timeout read against `clock`: the deadline is
+        `clock`'s reading when the child has started plus `timeout_s`, and the
+        child is stopped at the first reading past it. `run` passes
+        `MonotonicClock`; a test passes a clock it moves."""
         var child = ChildSpec(spec.path)
         for i in range(len(spec.argv)):
             child.with_arg(spec.argv[i])
@@ -98,7 +108,7 @@ struct SupervisorRunner(ProcessRunner):
         _ = sup.set_nonblocking(out_fd)
         _ = sup.set_nonblocking(err_fd)
         var tail = String("")
-        var deadline = Int(perf_counter_ns()) + spec.timeout_s * 1_000_000_000
+        var deadline = clock.now_ns() + spec.timeout_s * 1_000_000_000
         var exited = False
         var timed_out = False
         var idle_after_exit = 0
@@ -125,7 +135,7 @@ struct SupervisorRunner(ProcessRunner):
                 var r = sup.try_wait()
                 if r.collected:
                     exited = True
-                elif Int(perf_counter_ns()) > deadline:
+                elif clock.now_ns() > deadline:
                     _ = sup.terminate(self.grace_ms)
                     exited = True
                     timed_out = True
