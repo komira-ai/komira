@@ -23,8 +23,8 @@ mojo_shared_lib(
         "spike_add",
         "spike_sum_squares",
         "spike_c_add",
-        "komira_spike_forced",
     ],
+    c_exports = ["komira_spike_forced"],
     gate_srcs = ["call_driver.mojo"],
     deps = ["//tools/build/examples/cshim:add"],
     force_load = [":forced"],
@@ -39,6 +39,7 @@ mojo_shared_lib(
     srcs = ["abi.mojo"],
     exports = ["spike_add", "spike_c_add"],
     exports_exact = True,
+    unlisted_exports = ["spike_sum_squares"],
     gate_srcs = ["hidden_driver.mojo"],
     deps = ["//tools/build/examples/cshim:add"],
 )
@@ -50,6 +51,7 @@ mojo_shared_lib(
     name = "plain",
     srcs = ["plain_abi.mojo"],
     exports = ["plain_add", "plain_sum_squares"],
+    unlisted_exports = ["plain_hidden"],
     gate_srcs = ["plain_driver.mojo"],
 )
 
@@ -61,5 +63,6 @@ mojo_shared_lib(
     srcs = ["plain_abi.mojo"],
     exports = ["plain_add", "plain_sum_squares"],
     exports_exact = True,
+    unlisted_exports = ["plain_hidden"],
     gate_srcs = ["plain_exact_driver.mojo"],
 )
