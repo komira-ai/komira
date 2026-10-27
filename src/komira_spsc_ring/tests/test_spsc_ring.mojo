@@ -42,7 +42,6 @@
 from std.memory import OwnedPointer, Pointer
 from std.sys.info import size_of
 from std.testing import assert_equal, assert_true, assert_false
-from std.time import perf_counter_ns
 
 from komira_atomic_alias import AtomicI64
 
@@ -274,7 +273,13 @@ def test_bad_capacity_raises() raises:
     print("  test_bad_capacity_raises PASS")
 
 
-comptime _WAIT_NS = 20_000_000_000  # a stuck handshake fails, never hangs
+comptime _POLLS_BEFORE_FIRST_PUSH = 1000
+# How many looks the consumer takes at the blocked counter before it stops
+# waiting for the producer to block (a count of loop turns, not a duration).
+# Past it the consumer drains, which releases a producer spinning on a full
+# ring, and the caller's assertion on the blocked count fails with its own
+# message. An event no turn count can cover is left to the gate's hang limit.
+comptime _BLOCKED_LOOKS = 1_000_000_000
 
 
 struct _Shared(Movable):
@@ -285,6 +290,7 @@ struct _Shared(Movable):
     var delivered: AtomicI64  # records the consumer popped
     var out_of_order: AtomicI64
     var consumer_polling: AtomicI64
+    var polls: AtomicI64  # consumer loop iterations, empty or not
 
     def __init__(out self):
         self.producer_done = AtomicI64(Int64(0))
@@ -292,6 +298,7 @@ struct _Shared(Movable):
         self.delivered = AtomicI64(Int64(0))
         self.out_of_order = AtomicI64(Int64(0))
         self.consumer_polling = AtomicI64(Int64(0))
+        self.polls = AtomicI64(Int64(0))
 
 
 struct _RingBody[ro: MutOrigin, so: MutOrigin](SpawnJoinBody):
@@ -301,8 +308,9 @@ struct _RingBody[ro: MutOrigin, so: MutOrigin](SpawnJoinBody):
     made the producer block (BLOCK rings); 2 = consume only after the producer
     finished (saturates a DROP ring); 3 = consume immediately, and the
     producer holds its first push until the consumer is already polling the
-    still-empty ring and then waits a further 2 ms (the consumer's polling loop
-    is running before the slot store exists). A wait that does not end raises.
+    still-empty ring and has gone round its polling loop a further
+    `_POLLS_BEFORE_FIRST_PUSH` times (the loop is running before the slot
+    store exists). Every wait is on a progress counter the other thread moves.
     """
 
     var ring: Pointer[SpscRing[Rec], Self.ro]
@@ -333,12 +341,13 @@ struct _RingBody[ro: MutOrigin, so: MutOrigin](SpawnJoinBody):
 
     def _produce(self) raises:
         if self.wait_for == 3:
-            var t0 = perf_counter_ns()
             while self.shared[].consumer_polling.load() == Int64(0):
-                if Int(perf_counter_ns() - t0) > _WAIT_NS:
-                    raise Error("the consumer never started polling")
-            var t1 = perf_counter_ns()
-            while Int(perf_counter_ns() - t1) < 2_000_000:
+                pass
+            var seen = self.shared[].polls.load()
+            while (
+                self.shared[].polls.load() - seen
+                < Int64(_POLLS_BEFORE_FIRST_PUSH)
+            ):
                 pass
         for i in range(self.pushes):
             if self.ring[].try_push(Rec(i)):
@@ -346,19 +355,20 @@ struct _RingBody[ro: MutOrigin, so: MutOrigin](SpawnJoinBody):
         _ = self.shared[].producer_done.fetch_add(Int64(1))
 
     def _consume(self) raises:
-        var t0 = perf_counter_ns()
         if self.wait_for == 1:
-            # A producer that never blocks fails the caller's assertion on
-            # the blocked count. Drain anyway: raising here would leave a
-            # blocked producer spinning and the join would never return.
-            while self.ring[].overflow_blocked_count() == Int64(0):
-                if Int(perf_counter_ns() - t0) > _WAIT_NS:
-                    break
+            # A producer that never blocks finishes instead, or the looks run
+            # out, and the caller's assertion on the blocked count fails;
+            # drain either way.
+            var looks = 0
+            while (
+                self.ring[].overflow_blocked_count() == Int64(0)
+                and self.shared[].producer_done.load() == Int64(0)
+                and looks < _BLOCKED_LOOKS
+            ):
+                looks += 1
         elif self.wait_for == 2:
             while self.shared[].producer_done.load() == Int64(0):
-                if Int(perf_counter_ns() - t0) > _WAIT_NS:
-                    raise Error("the producer never finished")
-        t0 = perf_counter_ns()
+                pass
         var last = -1
         var announced = False
         while True:
@@ -368,6 +378,7 @@ struct _RingBody[ro: MutOrigin, so: MutOrigin](SpawnJoinBody):
             # Read `done` BEFORE popping: every push happened before the flag,
             # so an empty pop after seeing it set means the ring is drained.
             var done = self.shared[].producer_done.load() != Int64(0)
+            _ = self.shared[].polls.fetch_add(Int64(1))
             var r = self.ring[].try_pop()
             if r:
                 var id = Int(r.value().id)
@@ -377,8 +388,6 @@ struct _RingBody[ro: MutOrigin, so: MutOrigin](SpawnJoinBody):
                 _ = self.shared[].delivered.fetch_add(Int64(1))
             elif done:
                 break
-            elif Int(perf_counter_ns() - t0) > _WAIT_NS:
-                raise Error("consumer starved")
 
 
 def test_block_producer_really_blocks_and_nothing_is_lost() raises:
