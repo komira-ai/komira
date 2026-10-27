@@ -33,6 +33,10 @@ mojo_library(
         "tests/test_compute_project_routes.mojo",
         "tests/test_compute_project_column_arms.mojo",
         "tests/test_compute_project_walker_arms.mojo",
+        # the dense FLOAT64 evaluator against the walker, bit for bit, serial and pooled
+        "tests/test_project_dense_f64_differential.mojo",
+        # every shape outside the dense subset is declined, none is evaluated
+        "tests/test_project_dense_f64_admission.mojo",
         # the refusal census
         "tests/test_format_project_decline_census.mojo",
     ],
