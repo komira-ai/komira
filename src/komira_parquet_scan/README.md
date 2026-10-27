@@ -91,7 +91,8 @@ The morsel source:
   late-materialized decode); otherwise the row group is decoded whole (by
   name across files, a filter column a file lacks read as NULL), through the
   cursor-grain route (`parquet_source_grain`), or as row ranges
-  (`parquet_source_subrg`). Morsels larger than `morsel_rows` are cut
+  (`parquet_source_subrg`; a range a cursor refuses is cut from the whole
+  decode of its row group). Morsels larger than `morsel_rows` are cut
   (`parquet_source_emit`) and their partition ids sort into file order.
 - `parquet_source_options`: `ParquetScanOptions`, the source's switches, and
   its pure decisions (claim stride, selection-pipeline deferral, partition

@@ -87,6 +87,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   decode, the staged filter, a dynamic join filter, a top-N boundary,
 #   parked sub-morsels, the cursor-grain route, the row-range split (fine and
 #   coarse) and the hash-aggregate payload.
+# - test_parquet_source_whole_decode_direct: every row, name, type and cell
+#   of the plain, cursor-grain and row-range routes equal to the whole
+#   decode (NULL-bearing, unsigned, TIMESTAMP-annotated and zero-dictionary-
+#   offset columns), coarse row-range morsels with no row lost or repeated,
+#   unsigned dictionary columns under a pushed count and filter, and a
+#   selective filter over a reordered projection under every gate.
 # - test_cursor_grain_feed_direct: the grain formula, every row once grain by
 #   grain on the copy and the move arm with their byte counters crossing, the
 #   refusal of strings and of a column that may hold a null, the gates.
@@ -125,6 +131,7 @@ mojo_library(
         "tests/test_parquet_source_arms_direct.mojo",
         "tests/test_parquet_source_direct.mojo",
         "tests/test_parquet_source_options_direct.mojo",
+        "tests/test_parquet_source_whole_decode_direct.mojo",
         "tests/test_rg_prune_counter_direct.mojo",
         "tests/test_scan_chunk_sink_direct.mojo",
         "tests/test_staged_filter_direct.mojo",

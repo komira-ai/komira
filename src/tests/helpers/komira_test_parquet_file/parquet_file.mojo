@@ -14,7 +14,9 @@
 #   - flat columns of INT32, INT64, DOUBLE or BYTE_ARRAY (UTF8 by default),
 #     REQUIRED, or OPTIONAL with any rows null;
 #   - PLAIN data pages (DataPage V1, uncompressed), or a PLAIN dictionary
-#     page followed by RLE_DICTIONARY data pages;
+#     page followed by RLE_DICTIONARY data pages; a PLAIN chunk may store a
+#     dictionary_page_offset of 0; an INT64 column may carry a TIMESTAMP
+#     LogicalType;
 #   - any number of row groups (none for a file of no rows, unless the
 #     layout names them), and data pages of at most `page_rows` rows (per
 #     column, when a column sets its own);
@@ -61,6 +63,8 @@ struct TestColumn(Copyable, Movable):
     var ptype: Int
     var optional: Bool
     var dictionary: Bool
+    var zero_dict_offset: Bool
+    var timestamp_unit: Int
     var converted_type: Int
     var page_rows: Int
     var ints: List[Int]
@@ -73,6 +77,8 @@ struct TestColumn(Copyable, Movable):
         self.ptype = ptype
         self.optional = False
         self.dictionary = False
+        self.zero_dict_offset = False
+        self.timestamp_unit = 0
         self.converted_type = converted_type
         self.page_rows = 0
         self.ints = List[Int]()
@@ -120,6 +126,20 @@ struct TestColumn(Copyable, Movable):
         """This column, written as a dictionary page and RLE_DICTIONARY
         data pages."""
         self.dictionary = True
+        return self^
+
+    def with_zero_dictionary_offset(var self) -> TestColumn:
+        """This column's chunks, which must be PLAIN, carrying a stored
+        dictionary_page_offset of 0 (some writers store 0 for a chunk with no
+        dictionary page)."""
+        self.zero_dict_offset = True
+        return self^
+
+    def with_timestamp_logical_type(var self, unit: Int) -> TestColumn:
+        """This INT64 column annotated, by the LogicalType union alone (no
+        ConvertedType), as a TIMESTAMP adjusted to UTC; `unit` is 1 (millis),
+        2 (micros) or 3 (nanos)."""
+        self.timestamp_unit = unit
         return self^
 
     def with_page_rows(var self, page_rows: Int) -> TestColumn:
@@ -542,6 +562,8 @@ def _column_chunk(mut t: _Thrift, c: TestColumn, ch: _Chunk, lo: Int, hi: Int, p
     t.i64(9, ch.data_page_offset)
     if ch.dict_page_offset >= 0:
         t.i64(11, ch.dict_page_offset)
+    elif c.zero_dict_offset:
+        t.i64(11, 0)
     var b = _Bounds(c, lo, hi)
     t.begin_struct(12)
     t.i64(3, b.nulls)
@@ -632,6 +654,16 @@ def parquet_file_bytes(
         t.binary(4, name)
         if c.converted_type >= 0:
             t.i32(6, c.converted_type)
+        if c.timestamp_unit > 0:
+            t.begin_struct(10)  # LogicalType
+            t.begin_struct(8)  # TIMESTAMP
+            t.field(1, _T_TRUE)  # isAdjustedToUTC
+            t.begin_struct(2)  # unit
+            t.begin_struct(c.timestamp_unit)  # MILLIS / MICROS / NANOS
+            t.end_struct()
+            t.end_struct()
+            t.end_struct()
+            t.end_struct()
         t.end_struct()
     t.i64(3, rows)
     t.list_header(4, _T_STRUCT, len(rg_rows))

@@ -16,8 +16,9 @@
 # morsel, or several units of a worker are concatenated into morsels of about
 # `subrg_emit_rows` rows (`subrg_emit_coarse`). Partition ids are
 # `rg * SUB_SLOT_STRIDE + row_lo`, so morsels sort into file order. A unit
-# refused after the plan probe raises: its row group's encodings are not
-# uniform, and nothing can be declined to by then.
+# a cursor refuses after the plan probe passed (a column with an actual null,
+# an encoding row group 0 does not use) is cut from the whole decode of its
+# row group instead.
 # =============================================================================
 
 from komira_arrow.concat import concat_record_batches_nway
@@ -25,6 +26,7 @@ from komira_arrow.record_batch import RecordBatch
 from komira_arrow.schema import Schema
 from komira_atomic_alias import AtomicI64
 from komira_collections.slab import Slab
+from komira_column_kernels.compiler_helpers import gather_batch
 from komira_fs.file_system import FileSystem
 from komira_morsel.morsel import Morsel
 from komira_parquet.column_decode_context import ColumnDecodeContext
@@ -203,12 +205,31 @@ struct SubrgSplitScan(Movable):
         while Int(latch.done.load()) == 0:
             pass
 
+    def _range_of_whole_decode[FS: FileSystem](
+        self, reader: ParquetReader[FS], plan: SubrgScanPlan, rg: Int, row_lo: Int, row_hi: Int
+    ) raises -> RecordBatch:
+        """Rows `[row_lo, row_hi)` of the whole decode of row group `rg`.
+
+        Raises:
+            If the whole decode has fewer than `row_hi` rows.
+        """
+        var whole = reader.decode_columns_subset(rg, plan.reader_col_idx.copy(), False)
+        if whole.num_rows() < row_hi:
+            raise Error(
+                "parquet source: row group " + String(rg) + " decoded to " + String(whole.num_rows())
+                + " rows, short of the row range [" + String(row_lo) + ", " + String(row_hi) + ")"
+            )
+        var rows = List[Int](capacity=row_hi - row_lo)
+        for r in range(row_lo, row_hi):
+            rows.append(r)
+        return gather_batch(whole, rows)
+
     def _decode_one[FS: FileSystem](self, reader: ParquetReader[FS], worker_id: Int, mut out_rg: Int, mut out_lo: Int) raises -> Optional[RecordBatch]:
         """The next claimed unit with rows, decoded; None when the units are
         exhausted.
 
         Raises:
-            If a unit is refused after the plan probe.
+            If the whole decode of a refused unit's row group is short.
         """
         ref c = self.counter.get_mut_interior(0)
         ref plan = self.plan.value()
@@ -234,10 +255,12 @@ struct SubrgSplitScan(Movable):
                     self.max_unit_rows,
                 )
             if not maybe:
-                raise Error(
-                    "parquet source: row range [" + String(row_lo) + ", " + String(row_hi) + ") of row group "
-                    + String(rg) + " was refused after the plan probe (its encodings differ from row group 0's)"
-                )
+                # A cursor refused the range after the plan probe passed (a
+                # column with an actual null, an encoding row group 0 does not
+                # use, a short fill): the range's rows are cut from the whole
+                # decode of its row group, with the whole decode's column
+                # types.
+                maybe = Optional(self._range_of_whole_decode(reader, plan, rg, row_lo, row_hi))
             var batch = maybe.take()
             if batch.num_rows() == 0:
                 continue
