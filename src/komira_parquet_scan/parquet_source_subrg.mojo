@@ -22,7 +22,8 @@
 # the plan probe passed (a column with an actual null, an encoding row group
 # 0 does not use) is cut from the whole decode of its row group instead; each
 # worker keeps the last whole decode it made, so its consecutive refused
-# units of one row group decode it once. Every unit batch, cursor or whole
+# units of one row group decode it once (each decode counts in
+# `whole_decode_calls`), and drops it when it finds no more units. Every unit batch, cursor or whole
 # decode, carries the field nullability of the whole decode (OPTIONAL columns
 # nullable), so a coarse morsel's schema agrees with all its columns.
 # =============================================================================
@@ -37,6 +38,7 @@ from komira_fs.file_system import FileSystem
 from komira_morsel.morsel import Morsel
 from komira_parquet.column_decode_context import ColumnDecodeContext
 
+from .cursor_grain_feed import note_whole_rg_decode
 from .parquet_reader import ParquetReader
 from .parquet_source_options import SUB_SLOT_STRIDE, ParquetScanOptions, unit_partition_id
 from .subrg_cursor_feed import chunk_is_nullable
@@ -269,6 +271,7 @@ struct SubrgSplitScan(Movable):
             slot.batch = None
             slot.rg = -1
             slot.batch = Optional(reader.decode_columns_subset(rg, plan.reader_col_idx.copy(), False))
+            note_whole_rg_decode(slot.batch.value().num_rows())
             slot.rg = rg
         ref whole = slot.batch.value()
         if whole.num_rows() < row_hi:
@@ -293,6 +296,10 @@ struct SubrgSplitScan(Movable):
         while True:
             var claim = Int(c.next.fetch_add(Int64(1)))
             if claim >= len(self.units.rg):
+                # No more units: this worker's last whole decode is not needed.
+                ref slot = self.whole.get_mut_interior(worker_id)
+                slot.batch = None
+                slot.rg = -1
                 return None
             var rg = self.units.rg[claim]
             var row_lo = self.units.lo[claim]

@@ -121,7 +121,8 @@ The morsel source:
   cursor-grain route (`parquet_source_grain`), or as row ranges
   (`parquet_source_subrg`; a range a cursor refuses is cut from the whole
   decode of its row group, which the worker keeps for its next range of that
-  row group, so a worker holds at most one whole decode; a row group that
+  row group and drops when it finds no more ranges, so a worker holds at most
+  one whole decode; a row group that
   would need more than `SUB_SLOT_STRIDE` ranges is not split). Morsels
   larger than `morsel_rows` are cut (`parquet_source_emit`) and their
   partition ids sort into file order; a coarse range-split morsel takes the

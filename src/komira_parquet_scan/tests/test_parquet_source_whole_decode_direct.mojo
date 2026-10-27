@@ -61,6 +61,7 @@ from komira_parquet_scan.cursor_grain_feed import (
     cursor_grain_rg_count,
     reset_cursor_grain_counts,
     set_cursor_grain_enabled,
+    whole_decode_calls,
 )
 from komira_parquet_scan.parquet_reader import ParquetReader
 from komira_parquet_scan.parquet_reader_factory import ParquetReaderFactory
@@ -358,7 +359,13 @@ def test_the_cursor_grain_route_and_the_columns_it_leaves_to_the_whole_decode() 
     reset_cursor_grain_counts()
     _plain(path, [A, TSC], False, opts.copy(), "grain tsc")
     var tsc_by_cursor = cursor_grain_rg_count()
+    # An OPTIONAL column the cursors read in the row groups without NULLs:
+    # the cursor chunks carry the whole decode's nullability.
+    reset_cursor_grain_counts()
+    _plain(path, [A, M], False, opts.copy(), "grain a m")
+    var optional_by_cursor = cursor_grain_rg_count()
     set_cursor_grain_enabled(False)
+    assert_true(optional_by_cursor > 0, "the cursors read the optional column in some row group")
     assert_equal(by_cursor, 3)
     assert_equal(tsc_by_cursor, 3)
     assert_equal(ts_by_cursor, 0)
@@ -397,6 +404,44 @@ def test_the_row_range_route_gives_the_whole_decode() raises:
                     except e:
                         failures += label + ": " + String(e) + "\n"
     assert_equal(failures, "")
+
+
+def test_a_worker_decodes_a_row_group_once_for_its_refused_ranges_and_then_drops_it() raises:
+    # Column n holds NULLs in every row group, so every range is refused by
+    # the cursors and cut from the whole decode of its row group. One worker
+    # claims all nine ranges (three per row group) before the others start:
+    # three whole decodes, one per row group, and no whole decode kept at the
+    # end.
+    var path = _file()
+    var opts = ParquetScanOptions.default()
+    opts.subrg_mode = 2
+    opts.subrg_units_per_rg = 3
+    var pool = ExprPool()
+    var cache = ParquetMetadataCache()
+    var nf = 0
+    var proj: List[Int] = [A, N]
+    var src = _Src[origin_of(cache), origin_of(pool), origin_of(nf)](
+        _FS.new(), path, ParquetReaderFactory[origin_of(cache), _FS].new(Pointer(to=cache)),
+        ColumnSet.columns(proj.copy()), Optional(Pointer(to=pool)),
+        Optional[Pointer[DynamicJoinFilter, origin_of(nf)]](None), _NW,
+        options=opts^,
+    )
+    assert_true(src._subrg.enabled, "the row-range split is on")
+    reset_cursor_grain_counts()
+    var morsels = Slab[Morsel]()
+    for w in range(_NW):
+        while True:
+            var m = src.next_morsel(w)
+            if not m:
+                break
+            morsels.append(m.take())
+            if w == 0 and len(morsels) == 1:
+                assert_equal(whole_decode_calls(), 1, "the first range decodes its row group")
+    assert_equal(len(morsels), 9)
+    assert_equal(whole_decode_calls(), 3, "one whole decode per row group")
+    for w in range(_NW):
+        assert_false(Bool(src._subrg.whole.get_mut_interior(w).batch), "worker " + String(w) + " holds no decode")
+    _check_against(morsels, _Oracle(path, proj, False), _all_rows(), "decode once")
 
 
 def test_coarse_row_range_morsels_lose_and_repeat_no_row() raises:
