@@ -10,6 +10,10 @@
 - `thsplc` and `thsplc_header`: the THSPLC column codec for a RecordBatch.
 - `column_native_shims`: the bridges between RecordBatch and
   ColumnNativeBatch.
+- `thspill2_header` / `thspill2`: the opaque-body spill format for breaker
+  state (`Spillable`) and its codec.
+- `native_spill`: a writer and reader of record-batch runs (column format) and
+  row bodies (row format) over local-disk spill storage.
 
 Whether a breaker may spill, and to which tiers, is decided by the host
 profile (`HostProfile.spill_tiers_for`) and recorded in the physical plan."""
