@@ -51,6 +51,7 @@ PACKAGES = {
     "komira_scalar_arithmetic": "0.1.0",
     "komira_simd": "0.1.0",
     "komira_snapshotter": "0.1.0",
+    "komira_spsc_ring": "0.1.0",
     "komira_sync": "0.1.0",
     "komira_test_run_id": "0.1.0",
     "komira_test_verdict": "0.1.0",

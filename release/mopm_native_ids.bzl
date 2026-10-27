@@ -38,6 +38,7 @@ load("//src/komira_runtime_paths:buildrules.mojo.lock.bzl", komira_runtime_paths
 load("//src/komira_scalar_arithmetic:buildrules.mojo.lock.bzl", komira_scalar_arithmetic = "GRAPH")
 load("//src/komira_simd:buildrules.mojo.lock.bzl", komira_simd = "GRAPH")
 load("//src/komira_snapshotter:buildrules.mojo.lock.bzl", komira_snapshotter = "GRAPH")
+load("//src/komira_spsc_ring:buildrules.mojo.lock.bzl", komira_spsc_ring = "GRAPH")
 load("//src/komira_sync:buildrules.mojo.lock.bzl", komira_sync = "GRAPH")
 load("//src/komira_test_run_id:buildrules.mojo.lock.bzl", komira_test_run_id = "GRAPH")
 load("//src/komira_test_verdict:buildrules.mojo.lock.bzl", komira_test_verdict = "GRAPH")
@@ -86,6 +87,7 @@ _GRAPHS = {
     "komira_scalar_arithmetic": komira_scalar_arithmetic,
     "komira_simd": komira_simd,
     "komira_snapshotter": komira_snapshotter,
+    "komira_spsc_ring": komira_spsc_ring,
     "komira_sync": komira_sync,
     "komira_test_run_id": komira_test_run_id,
     "komira_test_verdict": komira_test_verdict,
