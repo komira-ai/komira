@@ -46,6 +46,8 @@ comptime _FILES: List[String] = [
     "iceberg_row_value.mojo",
     "iceberg_summary.mojo",
     "iceberg_types.mojo",
+    "iceberg_writer.mojo",
+    "iceberg_writer_state.mojo",
     "iceberg_version.mojo",
 ]
 
@@ -188,6 +190,7 @@ def test_imports_only_its_deps() raises:
     var allowed: List[String] = [
         "std",
         "komira_arrow",
+        "komira_clock",
         "komira_avro",
         "komira_buffer",
         "komira_iceberg",
@@ -196,6 +199,7 @@ def test_imports_only_its_deps() raises:
         "komira_parquet_api",
         "komira_parquet_writer",
         "komira_rowcell",
+        "komira_uuid",
     ]
     var files = materialize[_FILES]()
     var seen = 0
