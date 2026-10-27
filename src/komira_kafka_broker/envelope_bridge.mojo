@@ -126,6 +126,16 @@ def _deserialize_headers(data: List[UInt8]) raises -> List[KafkaHeader]:
 # -----------------------------------------------------------------------------
 
 
+def _check_int32_offset(data_len: Int) raises:
+    """The offsets of a BINARY column are Int32: a data buffer past 2 GiB would
+    wrap them. Split out so a test can reach the limit without building 2 GiB."""
+    if data_len > Int(Int32.MAX):
+        raise Error(
+            "envelope_bridge: a binary column larger than 2 GiB does not"
+            " fit Int32 offsets"
+        )
+
+
 def _build_binary_column(values: List[Optional[List[UInt8]]]) raises -> Column[HeapRegion]:
     """Build a nullable BINARY Column. Null entries get a 0-length slice + a
     cleared validity bit; non-null entries are appended to the data buffer with
@@ -143,12 +153,7 @@ def _build_binary_column(values: List[Optional[List[UInt8]]]) raises -> Column[H
                 data.append(b[j])
         else:
             any_null = True
-        # The offsets are Int32: a column past 2 GiB would wrap them.
-        if len(data) > Int(Int32.MAX):
-            raise Error(
-                "envelope_bridge: a binary column larger than 2 GiB does not"
-                " fit Int32 offsets"
-            )
+        _check_int32_offset(len(data))
         offsets.append(Int32(len(data)))
 
     if not any_null:

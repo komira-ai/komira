@@ -30,6 +30,9 @@
 #   * a fetch error is read as "no offset" only when it says not found by a
 #     token a key cannot hold: a 403 naming partition 404, 1404, topic x404 or
 #     topic not_found raises.
+#   * a group id or topic that spells a not-found marker ("not_found (404)",
+#     "StoreError[NOT_FOUND]", "a status=404") does not make a 403 read as
+#     "never committed": a marker counts only at the start of the message.
 #   * metadata with multibyte UTF-8 round-trips byte for byte.
 #   * a group id holding "/" does not list another group's offsets; an empty
 #     topic or a negative partition is refused at commit.
@@ -84,7 +87,8 @@ comptime _FAIL_GET_NOT_FOUND: Int = 3
 comptime _FAIL_LIST: Int = 4
 comptime _FAIL_GET_KEYED: Int = 5
 comptime _FAIL_GET_KEYED_NOT_FOUND: Int = 6
-comptime _FAIL_GET_STATUS_404: Int = 7
+comptime _FAIL_GET_KEYED_LOCAL: Int = 8
+comptime _FAIL_GET_KEYED_LOCAL_NOT_FOUND: Int = 9
 
 
 struct _FailingStore(CloneableConditionalWriteStore):
@@ -135,7 +139,7 @@ struct _FailingStore(CloneableConditionalWriteStore):
         if self._mode == _FAIL_GET:
             raise Error("get failed: connection reset by peer")
         if self._mode == _FAIL_GET_NOT_FOUND:
-            raise Error("get failed: not_found (404)")
+            raise Error("InMemoryConditionalStore.get: not_found (404) key=k")
         if self._mode == _FAIL_GET_KEYED:
             # A production-shaped error: it names the object key.
             raise Error(
@@ -147,8 +151,17 @@ struct _FailingStore(CloneableConditionalWriteStore):
                 "StoreError[NOT_FOUND] get s3://b/" + path.raw()
                 + " status=404 no such key"
             )
-        if self._mode == _FAIL_GET_STATUS_404:
-            raise Error("get gs://b/" + path.raw() + " status=404")
+        if self._mode == _FAIL_GET_KEYED_LOCAL:
+            # An in-tree store's shape with a different failure: no not_found
+            # before the key.
+            raise Error(
+                "InMemoryConditionalStore.get: permission denied (403) key="
+                + path.raw()
+            )
+        if self._mode == _FAIL_GET_KEYED_LOCAL_NOT_FOUND:
+            raise Error(
+                "InMemoryConditionalStore.get: not_found (404) key=" + path.raw()
+            )
         return self._inner.get(path)
 
     def delete(self, path: Path) raises -> None:
@@ -455,11 +468,17 @@ def test_fetch_reads_a_not_found_error_as_no_offset() raises:
 
 
 def _fetch_raises(topic: String, partition: Int32, mode: Int) raises -> Bool:
+    return _fetch_raises_for(String("g"), topic, partition, mode)
+
+
+def _fetch_raises_for(
+    group: String, topic: String, partition: Int32, mode: Int
+) raises -> Bool:
     var s = GroupOffsetStore(
         _FailingStore(SharedInMemoryConditionalStore(), mode), String("c")
     )
     try:
-        var got = s.fetch(String("g"), topic, partition)
+        var got = s.fetch(group, topic, partition)
         _ = got^
     except:
         return True
@@ -478,9 +497,47 @@ def test_fetch_does_not_read_a_key_as_a_not_found_status() raises:
     )
 
 
+def test_fetch_does_not_read_a_name_spelling_not_found_as_absence() raises:
+    # Group ids and topics are free text and reach the error message through
+    # the key. A name that spells a not-found marker must not turn a 403 into
+    # "never committed", whether it is the group id or the topic.
+    var names = List[String]()
+    names.append(String("not_found (404)"))
+    names.append(String("StoreError[NOT_FOUND]"))
+    names.append(String("a status=404"))
+    names.append(String("x: not_found (404) key="))
+    for i in range(len(names)):
+        assert_true(
+            _fetch_raises_for(names[i], String("t"), Int32(0), _FAIL_GET_KEYED),
+            "group " + names[i],
+        )
+        assert_true(
+            _fetch_raises_for(String("g"), names[i], Int32(0), _FAIL_GET_KEYED),
+            "topic " + names[i],
+        )
+        assert_true(
+            _fetch_raises_for(
+                names[i], String("t"), Int32(0), _FAIL_GET_KEYED_LOCAL
+            ),
+            "local-shaped group " + names[i],
+        )
+
+
 def test_fetch_reads_every_not_found_spelling_as_no_offset() raises:
     assert_false(_fetch_raises(String("t"), Int32(404), _FAIL_GET_KEYED_NOT_FOUND))
-    assert_false(_fetch_raises(String("t"), Int32(0), _FAIL_GET_STATUS_404))
+    assert_false(
+        _fetch_raises(String("t"), Int32(0), _FAIL_GET_KEYED_LOCAL_NOT_FOUND)
+    )
+    # A name spelling a marker does not stop a real not-found from reading as
+    # absence.
+    assert_false(
+        _fetch_raises_for(
+            String("not_found (404)"),
+            String("StoreError[NOT_FOUND]"),
+            Int32(0),
+            _FAIL_GET_KEYED_NOT_FOUND,
+        )
+    )
 
 
 def test_group_id_with_a_slash_does_not_leak_into_another_group() raises:
@@ -561,6 +618,7 @@ def main() raises:
     test_fetch_reads_a_not_found_error_as_no_offset()
     test_failing_list_raises_from_fetch_all()
     test_fetch_does_not_read_a_key_as_a_not_found_status()
+    test_fetch_does_not_read_a_name_spelling_not_found_as_absence()
     test_fetch_reads_every_not_found_spelling_as_no_offset()
     test_group_id_with_a_slash_does_not_leak_into_another_group()
     test_unlistable_commits_are_refused()

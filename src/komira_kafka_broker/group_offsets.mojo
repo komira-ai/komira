@@ -293,19 +293,44 @@ def _parse_topic_partition_from_key(
     return (topic^, part, True)
 
 
-def _is_not_found(msg: String) -> Bool:
-    """True iff a store error says the object is absent. Store errors name the
-    object key, and this key holds a topic name and a partition number, so a
-    bare `404` or `not_found` would match a key (partition 404, topic
-    `not_found`) and turn a 403 or 5xx into "never committed". The needles are
-    ones a key cannot hold: the canonical `StoreError[NOT_FOUND]` token, the
-    `status=404` projection, and the in-memory and local-file stores'
-    `not_found (404)`."""
+def _is_method_prefix_byte(c: UInt8) -> Bool:
     return (
-        msg.find("StoreError[NOT_FOUND]") >= 0
-        or msg.find("status=404") >= 0
-        or msg.find("not_found (404)") >= 0
+        (c >= UInt8(ord("a")) and c <= UInt8(ord("z")))
+        or (c >= UInt8(ord("A")) and c <= UInt8(ord("Z")))
+        or (c >= UInt8(ord("0")) and c <= UInt8(ord("9")))
+        or c == UInt8(ord("_"))
+        or c == UInt8(ord("."))
     )
+
+
+def _is_not_found(msg: String) -> Bool:
+    """True iff a store error says the object is absent, decided by where the
+    marker sits and never by whether the text holds it. Store errors name the
+    object key, and the key holds a group id and a topic, which are free text
+    (only `/` and `%` are encoded), so any marker may appear inside the key of
+    an unrelated 403 or 5xx and turn it into "never committed". Two forms are
+    accepted:
+      * the message starts with `StoreError[NOT_FOUND]`, the cloud stores'
+        canonical kind token (the key comes after it);
+      * the message starts with the in-tree stores' own method prefix (letters,
+        digits, `_` and `.` only, for example `InMemoryConditionalStore.get`)
+        followed by `: not_found (404)`. The prefix cannot hold a space or a
+        bracket, so key text cannot stand in for it."""
+    if msg.startswith("StoreError[NOT_FOUND]"):
+        return True
+    var bs = msg.as_bytes()
+    var i = 0
+    while i < len(bs) and _is_method_prefix_byte(bs[i]):
+        i += 1
+    if i == 0:
+        return False
+    var marker = String(": not_found (404)").as_bytes()
+    if len(bs) - i < len(marker):
+        return False
+    for k in range(len(marker)):
+        if bs[i + k] != marker[k]:
+            return False
+    return True
 
 
 # =============================================================================

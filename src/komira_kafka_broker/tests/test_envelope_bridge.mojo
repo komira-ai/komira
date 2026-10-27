@@ -33,6 +33,7 @@ from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
 from komira_buffer.heap_region import HeapRegion
 from komira_kafka_broker.envelope_bridge import (
+    _check_int32_offset,
     ENVELOPE_HEADERS,
     ENVELOPE_KEY,
     ENVELOPE_OFFSET,
@@ -325,6 +326,21 @@ def test_many_headers_roundtrip() raises:
     _assert_record_eq(back[0], recs[0], "200 headers")
 
 
+def test_binary_column_offsets_stop_at_the_int32_limit() raises:
+    # The guard _build_binary_column calls before it narrows a length to Int32.
+    _check_int32_offset(0)
+    _check_int32_offset(Int(Int32.MAX))
+    var message = String("")
+    var raised = False
+    try:
+        _check_int32_offset(Int(Int32.MAX) + 1)
+    except e:
+        raised = True
+        message = String(e)
+    assert_true(raised, "a length past Int32 was accepted")
+    assert_true(message.find("2 GiB") >= 0, message)
+
+
 def main() raises:
     test_schema_is_the_five_fixed_columns()
     test_batch_has_the_envelope_schema_and_row_count()
@@ -336,4 +352,5 @@ def main() raises:
     test_zero_records_make_an_empty_batch()
     test_null_or_empty_headers_cell_reads_as_no_headers()
     test_many_headers_roundtrip()
+    test_binary_column_offsets_stop_at_the_int32_limit()
     print("test_envelope_bridge: ALL PASS")

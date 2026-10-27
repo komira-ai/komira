@@ -461,6 +461,18 @@ def test_gzip_members_concatenate() raises:
     _assert_bytes_eq(got, want, "three gzip members")
 
 
+def test_gzip_ceiling_is_shared_across_members() raises:
+    # Two members of 200 MiB each: each is under the 256 MiB ceiling, the sum
+    # is over it. The ceiling bounds the whole blob, not each member.
+    var member = _compress(
+        KAFKA_COMPRESSION_GZIP,
+        List[UInt8](length=200 * 1024 * 1024, fill=UInt8(0)),
+    )
+    var blob = member.copy()
+    blob.extend(Span(member))
+    _assert_refused(KAFKA_COMPRESSION_GZIP, blob, "-byte ceiling")
+
+
 def test_gzip_member_followed_by_garbage_is_refused() raises:
     var blob = _compress(KAFKA_COMPRESSION_GZIP, _patterned(500))
     blob.extend(Span(_bytes("not a gzip member")))
@@ -691,6 +703,7 @@ def main() raises:
     test_truncated_blob_is_refused()
     test_truncated_gzip_is_refused_as_truncated_not_as_too_large()
     test_gzip_members_concatenate()
+    test_gzip_ceiling_is_shared_across_members()
     test_gzip_member_followed_by_garbage_is_refused()
     test_snappy_trailing_bytes_after_the_last_block_are_refused()
     test_output_ceiling_refuses_a_decompression_bomb()

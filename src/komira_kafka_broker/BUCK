@@ -21,7 +21,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # - test_group_offsets: commit and fetch over the in-memory store, unknown
 #   group, topic and partition, overwrite, repeated commit, isolation, listing,
 #   the JSON body (multibyte UTF-8 metadata included), group ids holding "/",
-#   and a store that fails (a key naming 404 is not "not found").
+#   and a store that fails (a name spelling a not-found marker is not "not found").
 # - test_envelope_bridge: records to the envelope and back, exactly, with null
 #   and empty keys and values and headers.
 mojo_library(
