@@ -85,7 +85,11 @@ zig_test(
     name = "release_workflow_cases",
     exec_compatible_with = LINUX_X86_64,
     src = ".github/workflows/release_workflow_test.zig",
-    data = {"workflows/release.yml": ".github/workflows/release.yml"},
+    data = {
+        "workflows/release.yml": ".github/workflows/release.yml",
+        "packages.bzl": "//release/readme_e2e:packages.bzl",
+        "ci.md": "docs/ci.md",
+    },
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
 )
