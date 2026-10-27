@@ -37,7 +37,7 @@ Modules:
 
 from .wire import KafkaEncoder, KafkaDecoder, TaggedField
 
-from .crc32c import crc32c_span, crc32c_list
+from .crc32c import crc32c_span, crc32c_span_portable, crc32c_list
 
 from .record_batch_v2 import (
     KafkaHeader,
