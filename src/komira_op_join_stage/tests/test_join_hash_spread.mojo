@@ -19,6 +19,9 @@
 #     nothing, through `probe_batch_row_first` and `probe_batch_row` (with and
 #     without the duplicate-key walk), on a full table so that every probe
 #     visits every slot.
+#   * `test_batch_row_hash_agrees_with_slot_hash`: the hash a batch-row probe
+#     computes equals the stored-slot hash a table growth rehashes from, at
+#     arity 2 and 3.
 # The spread bound is a count of occupied slots, not a time.
 # =============================================================================
 
@@ -294,6 +297,47 @@ def test_batch_probe_compares_every_key_column_arity3() raises:
         assert_equal(_hits3(bundle, pv, r), 0)
     assert_true(_first3(bundle, pv, 3) >= 0)
     assert_equal(_hits3(bundle, pv, 3), 1)
+
+
+def _bits2[
+    bo: Origin[mut=False]
+](
+    bundle: KeyBundle2[I64, I64], bv: BatchView[bo], row: Int
+) raises -> SIMD[DType.uint64, 4]:
+    return bundle._row_bits[bo, 0, 1, 0, 0](bv, row)
+
+
+def _bits3[
+    bo: Origin[mut=False]
+](
+    bundle: KeyBundle3[I64, I64, I64], bv: BatchView[bo], row: Int
+) raises -> SIMD[DType.uint64, 4]:
+    return bundle._row_bits[bo, 0, 1, 2, 0](bv, row)
+
+
+def test_batch_row_hash_agrees_with_slot_hash() raises:
+    # A row inserted through the batch-row path lands in a slot whose stored
+    # hash (the one a table growth rehashes from) equals the hash the
+    # batch-row probe computes for that row, at arity 2 and 3.
+    var build2 = _batch2([1, 2, 3, 4], [10, 20, 30, 40])
+    var bv2 = batch_view_over(build2)
+    var b2 = make_key_bundle_2[I64, I64](4)
+    _ = _insert2(b2, bv2)
+    for r in range(4):
+        var slot = _first2(b2, bv2, r)
+        assert_true(slot >= 0)
+        var bits = _bits2(b2, bv2, r)
+        assert_equal(b2.slot_hash(slot), b2._bits_hash(bits))
+
+    var build3 = _batch3([1, 2, 3, 4], [10, 20, 30, 40], [100, 200, 300, 400])
+    var bv3 = batch_view_over(build3)
+    var b3 = make_key_bundle_3[I64, I64, I64](4)
+    _insert3(b3, bv3)
+    for r in range(4):
+        var slot = _first3(b3, bv3, r)
+        assert_true(slot >= 0)
+        var bits = _bits3(b3, bv3, r)
+        assert_equal(b3.slot_hash(slot), b3._bits_hash(bits))
 
 
 def main() raises:
