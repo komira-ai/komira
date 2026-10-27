@@ -437,7 +437,7 @@ _MUST_WIDEN = [
 
 _ORDINARY = [
     "src/komira_collections/BUCK",
-    "src/komira_collections/slab.mojo",
+    "src/komira_collections/src/komira_collections/slab.mojo",
     "docs/ci.md",
     "release/artifacts.textproto",
     ".github/workflows/pr.yml",
