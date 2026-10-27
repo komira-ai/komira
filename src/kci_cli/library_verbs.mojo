@@ -27,6 +27,8 @@
 #                     transport, sleeper and poll log; pixi (--pixi, checked against
 #                     --pixi-sha256) gets an environment built from nothing,
 #                     and pixi's system config directory is /etc/pixi;
+#                     the README examples tool is the one kci ships beside
+#                     its executable (dispatch.mojo, `shipped_readme_tool`);
 #                     the transport is `FileChannelTransport` over the
 #                     HTTPS one, so a --channel file:/// directory is read
 #                     from the disk and every host over HTTPS.
@@ -128,6 +130,7 @@ from kci_publish import (
 )
 
 from .args import SecretStoreChoice
+from .deploy_step import NoCloudBuilt
 from .dispatch import kci_main_with, recorder_for
 from .seam import StageSteps, StepEnd
 from .recorder import CliRecorder
@@ -563,7 +566,10 @@ struct LibrarySteps(StageSteps, Movable):
 
 
 def kci_main(args: List[String]) -> Int:
-    """The kci binary: `args` is argv without the program name."""
+    """The kci binary: `args` is argv without the program name. It is built
+    with no cloud adapter, so every DEPLOY step it runs is REFUSED, "this
+    kci was not built with that cloud" (deploy_step.mojo `NoCloudBuilt`)."""
     var steps = LibrarySteps()
+    var deploys = NoCloudBuilt()
     var recorder = recorder_for(args)
-    return kci_main_with(args, steps, recorder)
+    return kci_main_with(args, steps, deploys, recorder)

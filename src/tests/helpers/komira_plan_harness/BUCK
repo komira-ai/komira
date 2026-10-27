@@ -1,4 +1,3 @@
-load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 
 # Test-only: the canonical result text of a query result, for conformance
@@ -15,6 +14,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 # checks its ABI version and runs plan bytes through Door A (an Arrow C
 # stream) and Door B (Arrow IPC bytes, probe then fill), returning a Table
 # or a named error; door_ipc.mojo reads Door B's IPC stream.
+#
+# duckdb_tsv.mojo reads an expected result as the oracle's DuckDB writes it
+# (komira_test_oracle) and converts it by value to canonical text under a
+# given schema and policy.
 #
 # The welded tests, and the defect each one catches:
 #   test_render       a cell spelling per type; NULL taken from validity for
@@ -54,6 +57,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 #                     canonical text; a dictionary field and an unclaimed
 #                     type are refused by name; a truncated stream and bytes
 #                     after the end-of-stream marker are MALFORMED.
+#   test_duckdb_tsv   DuckDB's TSV form: "" against NULL, doubled quotes,
+#                     cells across lines, and each malformed form refused;
+#                     names and nullability held to the schema; integers in
+#                     range, decimals at their scale, floats read by value to
+#                     the exact neighbour (-0.0 kept, nan/-nan any NaN), so
+#                     `1.50` equals `1.5`; an unread type refused by name.
 mojo_library(
     name = "komira_plan_harness",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -68,6 +77,7 @@ mojo_library(
         "tests/test_compare.mojo",
         "tests/test_door_ipc.mojo",
         "tests/test_door_stub.mojo",
+        "tests/test_duckdb_tsv.mojo",
         "tests/test_float.mojo",
         "tests/test_render.mojo",
         "tests/test_round_trip.mojo",
@@ -141,13 +151,6 @@ mojo_shared_lib(
         "komira_plan_stream",
     ],
     exports_exact = True,
-)
-
-# The deps above name every komira_* module the library and its tests import
-# (tools/build/lint: mojo_deps).
-mojo_deps(
-    name = "deps_lint",
-    buck = "BUCK",
-    srcs = glob(["**/*.mojo"]),
-    visibility = ["komira//:tests_lints"],
+    # In the source, left out of the library: the door a host may find missing.
+    unlisted_exports = ["komira_plan_bytes"],
 )

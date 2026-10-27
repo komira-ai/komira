@@ -8,6 +8,8 @@
 #     fallback)
 #   - register_long_lived(fd, interest_set) -> RegistrationHandle
 #   - modify(reg_handle, new_interest_set)
+#   - interest_set(reg_handle) -> UInt8 (the reactor's record of the armed
+#     mask; test_reactor_records_the_armed_mask_per_fd)
 #   - poll_completions(timeout_us) -> List[Completion]
 #   - wake_self() (already exercised by eventfd tests; smoke-included
 #     here for completeness)
@@ -95,15 +97,8 @@ def test_completion_queue_pod_types_compile() raises:
     assert_equal(comp.err_code, Int32(0))
     assert_false(comp.hangup)
 
-    var reg = RegistrationHandle(
-        _fd=Int32(5),
-        _interest_set=INTEREST_READ | INTEREST_WRITE,
-    )
+    var reg = RegistrationHandle(_fd=Int32(5))
     assert_equal(reg.fd(), Int32(5))
-    assert_equal(
-        Int(reg.interest_set()),
-        Int(INTEREST_READ | INTEREST_WRITE),
-    )
 
 
 def test_submit_mock_backend_pending() raises:
@@ -227,10 +222,10 @@ def test_register_long_lived_epoll_smoke() raises:
     Steps:
       1. Create a socketpair.
       2. register_long_lived(sv[0], INTEREST_READ) — EPOLL_CTL_ADD.
-      3. Assert RegistrationHandle holds the fd + interest set.
+      3. Assert the handle names the fd and the reactor records READ.
       4. modify(reg, INTEREST_READ | INTEREST_WRITE) — EPOLL_CTL_MOD.
-      5. _deregister_long_lived(sv[0]) — EPOLL_CTL_DEL (normally done by
-         RegistrationHandle.__del__; called directly here).
+      5. _deregister_long_lived(sv[0]) — EPOLL_CTL_DEL (TcpStream's drop
+         does the kernel half of this; called directly here).
     """
     comptime if CompilationTarget.is_linux():
         var sv = _socketpair_unix_stream()
@@ -240,16 +235,75 @@ def test_register_long_lived_epoll_smoke() raises:
 
         var reg = r.register_long_lived(sv[0], INTEREST_READ)
         assert_equal(reg.fd(), sv[0])
-        assert_equal(Int(reg.interest_set()), Int(INTEREST_READ))
+        assert_equal(Int(r.interest_set(reg)), Int(INTEREST_READ))
 
         # No-op fast path: same interest set → no syscall.
         r.modify(reg, INTEREST_READ)
         # Real MOD: switch to read+write.
         r.modify(reg, INTEREST_READ | INTEREST_WRITE)
 
-        # Manual deregister (RegistrationHandle.__del__ normally does this).
-        r._deregister_long_lived(sv[0])
+        assert_equal(r.interest_set(reg), INTEREST_READ | INTEREST_WRITE)
 
+        r._deregister_long_lived(sv[0])
+        assert_equal(r.interest_set(reg), UInt8(0), "deregister clears it")
+
+        _close_fd(sv[0])
+        _close_fd(sv[1])
+
+
+def test_reactor_records_the_armed_mask_per_fd() raises:
+    """The armed mask is the reactor's record, keyed by fd: every handle
+    naming the fd (the registered one, a copy, one rebuilt from the fd) reads
+    the same mask, and a switch through any of them is seen by all
+    (komira-ai/komira#1406). Catches the mask kept on a handle (a copy reads
+    stale), not recorded on the mock backend, recorded although the syscall
+    raised, or left behind by `_deregister_long_lived`."""
+    var mock = Reactor[NoopSink](NoopSink(_placeholder=UInt8(0)), BACKEND_MOCK)
+    var m = mock.register_long_lived(Int32(7), INTEREST_READ)
+    assert_equal(mock.interest_set(m), INTEREST_READ, "mock: registered")
+    var m_copy = m
+    mock.modify(m_copy, INTEREST_WRITE)
+    assert_equal(mock.interest_set(m), INTEREST_WRITE, "mock: via a copy")
+    mock.modify(m, INTEREST_READ)
+    assert_equal(mock.interest_set(m_copy), INTEREST_READ, "mock: back")
+    assert_equal(
+        mock.interest_set(RegistrationHandle(_fd=Int32(7))), INTEREST_READ
+    )
+    assert_equal(mock.interest_set(RegistrationHandle(_fd=Int32(8))), UInt8(0))
+    # A negative fd has no record and does not index the table.
+    var none = RegistrationHandle(_fd=Int32(-1))
+    mock.modify(none, INTEREST_WRITE)
+    assert_equal(mock.interest_set(none), UInt8(0), "negative fd recorded")
+    mock._deregister_long_lived(Int32(7))
+    assert_equal(mock.interest_set(m), UInt8(0), "mock: deregistered")
+
+    comptime if CompilationTarget.is_linux():
+        var sv = _socketpair_unix_stream()
+        var r = Reactor[NoopSink](
+            NoopSink(_placeholder=UInt8(0)), BACKEND_EPOLL,
+        )
+        var reg = r.register_long_lived(sv[0], INTEREST_READ)
+        var copy = reg
+        r.modify(copy, INTEREST_WRITE)
+        assert_equal(r.interest_set(reg), INTEREST_WRITE, "READ -> WRITE")
+        r.modify(reg, INTEREST_READ)
+        assert_equal(r.interest_set(copy), INTEREST_READ, "WRITE -> READ")
+        r.modify(copy, INTEREST_READ | INTEREST_WRITE)
+        assert_equal(
+            r.interest_set(reg), INTEREST_READ | INTEREST_WRITE, "-> both"
+        )
+        # sv[1] was never added to the epoll set: EPOLL_CTL_MOD fails with
+        # ENOENT, and the record stays what it was (none).
+        var unregistered = RegistrationHandle(_fd=sv[1])
+        var raised = False
+        try:
+            r.modify(unregistered, INTEREST_WRITE)
+        except e:
+            raised = "epoll_ctl(MOD) failed" in String(e)
+        assert_true(raised, "EPOLL_CTL_MOD on an fd not in the set")
+        assert_equal(r.interest_set(unregistered), UInt8(0))
+        r._deregister_long_lived(sv[0])
+        assert_equal(r.interest_set(reg), UInt8(0), "epoll: deregistered")
         _close_fd(sv[0])
         _close_fd(sv[1])
 
@@ -271,5 +325,6 @@ def main() raises:
     test_submit_epoll_fast_path_ready()
     test_submit_epoll_slow_path_pending()
     test_register_long_lived_epoll_smoke()
+    test_reactor_records_the_armed_mask_per_fd()
     test_poll_completions_mock_returns_empty()
     print("PASS komira_async.reactor completion-queue smoke")

@@ -174,8 +174,7 @@ def test_client_emulator_is_plaintext_host_port() raises:
     var client = FirestoreClient[ScriptedConnector](
         script.take_connector(), String("p"), String("(default)"), String("")
     )
-    # An IP literal: a plaintext dial resolves its host before connecting, and
-    # the test has no resolver.
+    # An IP literal, the host:port of a local emulator.
     client.set_endpoint(parse_firestore_endpoint(String("127.0.0.1:8080"), True))
     _ = client.get_document(String("c"), String("id"))
     assert_equal(script.call_host(0), String("127.0.0.1:8080"))

@@ -11,7 +11,8 @@ The process clocks, each read as a plain integer:
 
 Every read is a direct `clock_gettime` call (on macOS, `now_ns` is
 `clock_gettime_nsec_np`). The package has no C shim and depends on nothing
-but the standard library, so any package can import it. A read the platform
+but the standard library (its tests also use `komira_fork_join`), so any
+package can import it. A read the platform
 refuses returns 0; neither kernel documents that as possible for these
 clocks.
 
@@ -31,14 +32,20 @@ a hot path.
 ```mojo
 from komira_clock import now_ns
 from std.testing import assert_true
-from std.time import sleep
 
 var start = now_ns()
-sleep(0.02)
-var elapsed = now_ns() - start
-assert_true(elapsed >= UInt64(15_000_000))  # slept 20 ms
-assert_true(elapsed < UInt64(2_000_000_000))
+var total = 0
+for i in range(1000):
+    total += i  # the work being measured
+var elapsed = now_ns() - start  # nanoseconds; never negative
+print("summed", total, "in", elapsed, "ns")
+assert_true(total == 499500)
+assert_true(now_ns() >= start)
 ```
+
+The reads are monotonic, so `elapsed` cannot underflow. Its value depends on the
+machine, so report it (a metric, a log line) rather than compare it to a
+constant.
 
 ## Wall-clock time
 
@@ -70,20 +77,17 @@ cost of `now_ns()`, so read it once per region, not per row.
 ```mojo
 from komira_clock import now_ns, thread_cpu_ns
 from std.testing import assert_true
-from std.time import sleep
 
+var wall_start = now_ns()
 var cpu_start = thread_cpu_ns()
 var acc = UInt64(0)
 for i in range(20_000_000):
     acc = acc + UInt64(i) * UInt64(i)
 var cpu_busy = thread_cpu_ns() - cpu_start
+var wall_busy = now_ns() - wall_start
 assert_true(acc != UInt64(1))  # the loop's result is used
 assert_true(cpu_busy > UInt64(0))  # computing burns this thread's CPU
-
-var wall_start = now_ns()
-var cpu_before_sleep = thread_cpu_ns()
-sleep(0.05)
-var slept_cpu = thread_cpu_ns() - cpu_before_sleep
-var slept_wall = now_ns() - wall_start
-assert_true(slept_cpu < slept_wall)  # a sleeping thread burns (almost) none
+# Occupancy is cpu_busy / wall_busy: near 1.0 for a loop that never blocks.
+# It depends on the machine and its load, so report it; do not assert on it.
+print("cpu", cpu_busy, "ns of wall", wall_busy, "ns")
 ```

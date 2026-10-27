@@ -1,11 +1,11 @@
 # kcov v42 built from source with the pinned zig (README.md): the line
 # coverage tool of the Mojo coverage variant. linux-x86_64 only
 # (limits.tsv `coverage-linux-x86-64`).
-load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
-load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs", "row")
+load("@komira//tools/build/toolchains/loader_closure:defs.bzl", "loader_closure_check")
 load(":defs.bzl", "kcov_check", "kcov_check_cases", "kcov_dist", "kcov_identity", "kcov_same", "kcov_tool")
 load(":identity.bzl", "KCOV_BIN_SHA256", "KCOV_USAGE_LINE")
 
@@ -41,7 +41,52 @@ zig_exe(
     busybox = "komira//tools/build/toolchains:busybox",
     # llvm_branch unpacks its conda packages with it too.
     visibility = ["komira//tools/build/toolchains/llvm_branch:"],
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# kcov built from source (kcov_build.zig), behind its unit tests.
+zig_test(
+    name = "kcov_build_unit",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    imports = ["kcov_build.zig"],
+    src = "kcov_build_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "kcov_build",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    src = "kcov_build.zig",
+    unit_tests = [":kcov_build_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# The checks of kcov (kcov_check.zig), behind their unit tests.
+zig_test(
+    name = "kcov_check_unit",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    imports = ["kcov_check.zig", "kcov_check_scan.zig"],
+    src = "kcov_check_test.zig",
+    deps = ["//tools/build/mojo:unified_diff"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "kcov_check_bin",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    imports = ["kcov_check_scan.zig"],
+    src = "kcov_check.zig",
+    deps = ["//tools/build/mojo:unified_diff"],
+    unit_tests = [":kcov_check_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 # DT_RUNPATH -> DT_RPATH, which zig 0.12 cannot link into an executable.
@@ -51,7 +96,7 @@ zig_exe(
     target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
     src = "elf_rpath.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 _DIST = dict(
@@ -69,7 +114,6 @@ _DIST = dict(
         "zlib": _PIN["kcov_zlib"],
         "zstd": _PIN["kcov_zstd"],
     },
-    script = "kcov_build.sh",
     shim = [
         "shim/curl/curl.h",
         "shim/curl_shim.c",
@@ -97,10 +141,10 @@ kcov_dist(
 
 # ---- Checks: build actions; :kcov exists only when they pass -----------------
 
-# The built kcov: its files and licences, glibc floor, unwinder, loader
-# closure under a decoy LD_LIBRARY_PATH, version, the golden Cobertura reports
-# of the fixtures (kcov's defaults, and the coverage variant's path mapping
-# and full paths), the preload library, and the HTML report's data files.
+# The built kcov: its files and licences, unwinder, version, the golden
+# Cobertura reports of the fixtures (kcov's defaults, and the coverage
+# variant's path mapping and full paths), the loader's record of the run, the
+# preload library, and the HTML report's data files.
 kcov_check(
     name = "kcov_check",
     exec_compatible_with = LINUX_X86_64,
@@ -112,12 +156,23 @@ kcov_check(
         "fixtures/cov_fixture_relocated.cobertura.xml",
         "fixtures/cov_part.c",
     ],
-    glibc_floor_minor = _TRIPLE.split(".")[-1],
     kcov = ":kcov_dist",
-    script = "kcov_check.sh",
     strip_prefix = "kcov-42",
     version = "v42",
     zig_triple = _TRIPLE,
+)
+
+# What the loader maps for bin/kcov, read from the ELF files
+# (../loader_closure): its own lib/libgcc_s.so.1 through its DT_RPATH and
+# glibc from the system, nothing else; and no GLIBC_2.<n> above the floor in
+# bin/kcov (with the libraries it embeds) or lib/.
+loader_closure_check(
+    name = "kcov_closure",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
+    glibc_floor_minor = _TRIPLE.split(".")[-1],
+    prefix = ":kcov_dist",
+    roots = ["bin/kcov"],
 )
 
 # The checks of :kcov_check, and elf_rpath and conda_payload, on inputs whose
@@ -129,12 +184,9 @@ kcov_check_cases(
     conda_payload = ":conda_payload",
     elf_rpath = ":elf_rpath",
     fixtures = [
-        "fixtures/glibc_new.c",
         "fixtures/rpath_lib.c",
         "fixtures/rpath_main.c",
     ],
-    glibc_floor_minor = _TRIPLE.split(".")[-1],
-    script = "kcov_check.sh",
     zig_triple = _TRIPLE,
 )
 
@@ -146,7 +198,6 @@ kcov_same(
     target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
     a = ":kcov_dist",
     b = ":kcov_dist_again",
-    script = "kcov_check.sh",
 )
 
 # bin/kcov is what the package guard refuses (tools/build/package/kcov_guard.bzl):
@@ -157,17 +208,8 @@ kcov_identity(
     exec_compatible_with = LINUX_X86_64,
     target_compatible_with = LINUX_X86_64,  # komira-limit:coverage-linux-x86-64
     kcov = ":kcov_dist",
-    script = "kcov_check.sh",
     sha256 = KCOV_BIN_SHA256,
     usage_line = KCOV_USAGE_LINE,
-)
-
-shell_lint(
-    name = "shell_lint",
-    srcs = [
-        "kcov_build.sh",
-        "kcov_check.sh",
-    ],
 )
 
 # ---- What other targets use ----------------------------------------------------
@@ -179,9 +221,9 @@ kcov_tool(
     checks = [
         ":kcov_check",
         ":kcov_check_cases",
+        ":kcov_closure",
         ":kcov_identity",
         ":kcov_reproducible",
-        ":shell_lint",
     ],
     dist = ":kcov_dist",
     visibility = ["PUBLIC"],

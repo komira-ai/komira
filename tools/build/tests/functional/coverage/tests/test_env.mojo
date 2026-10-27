@@ -93,7 +93,7 @@ def main() raises:
     # A declared data file at the name this binary's line tables give a
     # standard library source (relative, as the pinned Mojo writes it): kcov,
     # started in this directory, can open it, and only the run's
-    # --include-path list keeps it out of the report (cov_run.sh).
+    # --include-path list keeps it out of the report (cov_run).
     var decoy = String("")
     with open(String("oss/modular/mojo/stdlib/std/testing/testing.mojo"), "r") as f:
         decoy = f.read()

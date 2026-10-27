@@ -377,6 +377,13 @@ def _field(mut L: _Ledger) raises -> List[UInt8]:
     _u(L, b, "WireField.child_type_ids", 32)
     _u(L, b, "WireField.child_nullables", 1)
     _u(L, b, "WireField.child_nullables", 0)
+    # `children` recurses: a child with a grandchild of its own, then a
+    # second child, so a decoder that read one level, or one element, reads
+    # back short.
+    var kid = _field_named(L, "x")
+    _m(L, kid, "WireField.children", _field_named(L, "y"))
+    _m(L, b, "WireField.children", kid)
+    _m(L, b, "WireField.children", _field_named(L, "z"))
     return b^
 
 
@@ -417,6 +424,11 @@ def test_field(mut L: _Ledger) raises:
     assert_equal(len(m.child_nullables), 2, "WireField: len(m.child_nullables)")
     assert_true(m.child_nullables[0], "WireField: m.child_nullables[0]")
     assert_true(not m.child_nullables[1], "WireField: not m.child_nullables[1]")
+    assert_equal(len(m.children), 2, "WireField: len(m.children)")
+    assert_equal(m.children[0].name, "x", "WireField: m.children[0].name")
+    assert_equal(len(m.children[0].children), 1, "WireField: len(m.children[0].children)")
+    assert_equal(m.children[0].children[0].name, "y", "WireField: the grandchild")
+    assert_equal(m.children[1].name, "z", "WireField: m.children[1].name")
     _same(encode_proto(m), b, "WireField")
 
 
@@ -796,6 +808,7 @@ WireField.metadata_values 12
 WireField.child_names 13
 WireField.child_type_ids 14
 WireField.child_nullables 15
+WireField.children 16
 WireSchema.fields 1
 WireSchema.metadata_keys 2
 WireSchema.metadata_values 3

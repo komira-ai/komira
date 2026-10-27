@@ -10,6 +10,9 @@ mojo_library(
     name = "komira_snapshotter",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = ["//src/komira_rowcell:komira_rowcell"],
-    test_srcs = ["tests/test_change_stream_seam.mojo"],
+    test_srcs = [
+        "tests/test_change_record_validate.mojo",
+        "tests/test_change_stream_seam.mojo",
+    ],
     visibility = ["PUBLIC"],
 )

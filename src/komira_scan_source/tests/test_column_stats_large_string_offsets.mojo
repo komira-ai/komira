@@ -2,7 +2,7 @@
 # LARGE_STRING offsets must not be read at Int32 width in column stats
 # =============================================================================
 #
-# THE HAZARD. If `_ColAccum.__init__` (column_stats.mojo) tags BOTH
+# THE HAZARD. If `_ColAccum.__init__` (column_stats_accum.mojo) tags BOTH
 # `ArrowType.STRING` and `ArrowType.LARGE_STRING` as `_ACC_KIND_STRING`, and
 # `_scan_string_column` then reads that column's offsets with
 # `get_typed[Int32]` unconditionally: `get_typed` is ELEMENT-indexed
@@ -32,7 +32,7 @@
 # =============================================================================
 
 from std.testing import (
-    TestSuite, assert_almost_equal, assert_equal, assert_false
+    TestSuite, assert_almost_equal, assert_equal, assert_false, assert_true
 )
 
 from komira_arrow.arrow_types import ArrowType
@@ -118,16 +118,16 @@ def test_string_column_stats_control() raises:
 # wide the buffer it is about to stride actually is. Those two can disagree,
 # and the disagreement lands squarely in `_scan_string_column`: a DICTIONARY
 # column under a declared STRING / LARGE_STRING field has a NON-NULL
-# `_offsets` (its dict-VALUE offsets), so the "no offsets => nothing to scan"
-# early-out does not catch it, and `carries_offsets(DICTIONARY)` is False.
+# `_offsets` (its dict-VALUE offsets), and `carries_offsets(DICTIONARY)` is
+# False.
 #
 # Routing that through `offset_width_bytes_or_raise` would RAISE — inside
 # `InMemorySource.get_column_stats`, i.e. during OPTIMIZATION, i.e. it fails
 # the query. An Int32-strided read of this shape returns WRONG stats; turning
 # wrong stats into a failed query would be a REGRESSION, not a fix, so the shape
-# takes a degraded arm instead: exact null/value counts, no min/max, NDV 0 —
-# which is byte-for-byte the stats this same column gets when its schema
-# field honestly says DICTIONARY.
+# takes a counting arm instead: exact null count, no min/max, NDV Absent —
+# which is the stats this same column gets when its schema field honestly
+# says DICTIONARY.
 # =============================================================================
 
 
@@ -166,6 +166,10 @@ def test_dict_column_under_string_field_degrades_and_does_not_raise() raises:
     )
     assert_false(
         Bool(s.max.value), "no MAX is claimed for a column we did not scan"
+    )
+    assert_true(
+        s.distinct_count.is_absent(),
+        "no NDV (not Exact 0) is claimed for a column we did not scan",
     )
 
 

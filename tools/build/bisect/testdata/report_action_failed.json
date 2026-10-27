@@ -1,0 +1,56 @@
+{
+  "trace_id": "00000000-0000-0000-0000-000000000000",
+  "success": false,
+  "results": {
+    "komira//tools/build/bisect/capture_tmp:red": {
+      "success": "FAIL",
+      "outputs": {},
+      "other_outputs": {},
+      "configured_graph_size": null,
+      "configured": {
+        "komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be": {
+          "errors": [
+            {
+              "message_content": "17832237889137407432",
+              "action_error": {
+                "name": {
+                  "category": "zig_test",
+                  "identifier": ""
+                },
+                "key": {
+                  "owner": "komira//tools/build/bisect/capture_tmp:red (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)"
+                },
+                "digest": "e3ca8d3523ac14cf52bafad164d03c41c366d25bac5c884e6afe11e9ce9f136d:142",
+                "error_content": "2497671795098395193",
+                "stderr_content": "10993612814088740897",
+                "stdout_content": "3476900567878811119",
+                "error_diagnostics": null
+              },
+              "error_tags": [
+                "ACTION_COMMAND_FAILURE",
+                "ANY_ACTION_EXECUTION"
+              ],
+              "cause_index": 0,
+              "error_category": "USER"
+            }
+          ],
+          "success": "FAIL",
+          "outputs": {},
+          "other_outputs": {},
+          "configured_graph_size": null
+        }
+      },
+      "errors": []
+    }
+  },
+  "failures": {},
+  "project_root": "/repo",
+  "truncated": false,
+  "strings": {
+    "10993612814088740897": "1/1 red.test.planted red... FAIL (TestUnexpectedResult)\n/worker/build/e3ca8d3523ac14cf/root/buck-out/v2/art/komira/tools/build/toolchains/__zig__/adb7ba88c503a469/zig/lib/std/testing.zig:540:14: 0x1038f6f in expect (test)\n    if (!ok) return error.TestUnexpectedResult;\n             ^\n/worker/build/e3ca8d3523ac14cf/root/tools/build/bisect/capture_tmp/red.zig:3:5: 0x1039085 in test.planted red (test)\n    try std.testing.expect(1 == 2);\n    ^\n0 passed; 0 skipped; 1 failed.\nerror: the following test command failed with exit code 1:\n/worker/build/e3ca8d3523ac14cf/root/buck-out/v2/tmp/komira/c6cbe7ff4d41382e/zig_test/komira/zig-local/o/a328cb1bf6a819687aa9c63a88b2906b/test\n",
+    "17832237889137407432": "Action failed: komira//tools/build/bisect/capture_tmp:red (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be) (zig_test)\nRemote command returned non-zero exit code 1\nRemote action digest: 'e3ca8d3523ac14cf52bafad164d03c41c366d25bac5c884e6afe11e9ce9f136d:142'\nStdout: <empty>\nStderr:\n1/1 red.test.planted red... FAIL (TestUnexpectedResult)\n/worker/build/e3ca8d3523ac14cf/root/buck-out/v2/art/komira/tools/build/toolchains/__zig__/adb7ba88c503a469/zig/lib/std/testing.zig:540:14: 0x1038f6f in expect (test)\n    if (!ok) return error.TestUnexpectedResult;\n             ^\n/worker/build/e3ca8d3523ac14cf/root/tools/build/bisect/capture_tmp/red.zig:3:5: 0x1039085 in test.planted red (test)\n    try std.testing.expect(1 == 2);\n    ^\n0 passed; 0 skipped; 1 failed.\nerror: the following test command failed with exit code 1:\n/worker/build/e3ca8d3523ac14cf/root/buck-out/v2/tmp/komira/c6cbe7ff4d41382e/zig_test/komira/zig-local/o/a328cb1bf6a819687aa9c63a88b2906b/test\n",
+    "2497671795098395193": "Remote command returned non-zero exit code 1",
+    "3476900567878811119": ""
+  },
+  "error_category": "USER"
+}

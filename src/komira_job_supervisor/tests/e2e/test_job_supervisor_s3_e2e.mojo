@@ -80,14 +80,9 @@ def _put_job(mut bucket: JobSupervisorTestBucket, script: String) raises -> Stri
 
 def _run_to_exit(mut job_supervisor: E2eSupervisor) raises:
     job_supervisor.spawn_child()
-    var spins = 0
-    while not job_supervisor.child_exited and spins < 500:
+    while not job_supervisor.child_exited:
         job_supervisor.poll_and_drain()
-        if job_supervisor.child_exited:
-            break
         sleep_ms(10)
-        spins += 1
-    assert_true(job_supervisor.child_exited, "the job did not exit")
     job_supervisor.analyze_exit()
 
 

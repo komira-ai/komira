@@ -437,9 +437,9 @@ def proc_probe_children() raises -> ChildProbe:
         return ChildProbe(any_child=True, exited_pid=out_exited_pid)
     if r == Int32(0):
         return ChildProbe(any_child=False, exited_pid=Int32(0))
-    raise Error(
-        String("waitid(P_ALL, WEXITED|WNOHANG|WNOWAIT) failed: errno ")
-        + String(out_errno)
+    raise Error(  # cov: unreachable waitid with fixed arguments fails only with ECHILD or EINTR
+        String("waitid(P_ALL, WEXITED|WNOHANG|WNOWAIT) failed: errno ")  # cov: unreachable see the line above
+        + String(out_errno)  # cov: unreachable see the line above
     )
 
 

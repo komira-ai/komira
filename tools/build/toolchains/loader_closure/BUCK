@@ -1,0 +1,48 @@
+# loader_closure (README.md): what the dynamic loader would map for each
+# program of a toolchain distribution, read from its ELF files. Used by
+# toolchains/kcov, toolchains/llvm_branch and third_party/git. linux-x86_64
+# only: it reads ELF, and runs where the distributions it checks are built.
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+
+# One `zig test` target per scenario (README.md, Tests), each a build action
+# of its own: `<scenario>_test.zig` with the tool and the ELF fixture writer.
+_SCENARIOS = [
+    "glibc_floor",
+    "glibc_named",
+    "green",
+    "interp",
+    "malformed",
+    "missing_needed",
+    "rpath_absolute",
+    "rpath_escape",
+    "runpath",
+]
+
+[zig_test(
+    name = s + "_test",
+    exec_compatible_with = LINUX_X86_64,
+    imports = [
+        "fixture.zig",
+        "loader_closure.zig",
+    ],
+    src = s + "_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+) for s in _SCENARIOS]
+
+# Built only when every scenario passed.
+zig_exe(
+    name = "loader_closure",
+    exec_compatible_with = LINUX_X86_64,
+    src = "loader_closure.zig",
+    unit_tests = [":" + s + "_test" for s in _SCENARIOS] + [_ZIG_VERSION],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+    visibility = ["PUBLIC"],
+)

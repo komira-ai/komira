@@ -20,7 +20,7 @@ from covcheck.checkrun import body_name, checkrun_bodies, valid_sha
 from covcheck.diff import parse_diff
 from covcheck.model import FileCov
 from covcheck.paths import RepoFiles, repo_files_of
-from covcheck.ratchet import Ratchet
+from covcheck.held import Held
 from covcheck.summary import MAX_SUMMARY, truncate_summary
 
 # What the PR check adds: check-run batching, annotations (scope, order,
@@ -201,7 +201,7 @@ def _analysis(mode: String) raises -> Analysis:
     )))
     var o = Options()
     o.mode = mode
-    return analyze(r, m, _repo(), Ratchet(), s, o)
+    return analyze(r, m, _repo(), Held(), s, o)
 
 
 comptime DIFF_Y = "diff --git a/src/a/y.mojo b/src/a/y.mojo\n--- a/src/a/y.mojo\n+++ b/src/a/y.mojo\n@@ -0,0 +1,3 @@\n+1\n+2\n+3\n"
