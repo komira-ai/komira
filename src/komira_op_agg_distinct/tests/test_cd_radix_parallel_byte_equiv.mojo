@@ -156,7 +156,7 @@ def test_radix_distinct_heavy_dup_no_inflation() raises:
 
 
 def test_radix_distinct_empty() raises:
-    """Empty buffer -> 0 (DuckDB COUNT(DISTINCT) of nothing is 0)."""
+    """Empty buffer -> 0 (COUNT(DISTINCT) of nothing is 0)."""
     var vals = List[Int64]()
     assert_equal(_parallel_count(vals), Int64(0))
 
@@ -353,12 +353,11 @@ def test_large_n_multi_disjoint_runs_sum() raises:
     assert_equal(_parallel_count_multi(runs), _cd_dedup_count_serial_multi(runs))
 
 # =============================================================================
-# LEVER CD-DIVFREE: the LEGACY arm's partition map.
+# The LEGACY arm's partition map.
 #
 # The serial scatter (64K <= n < `scatter_min`) maps a value to its partition
 # with `_cd_partition_divfree`, a multiply-shift, instead of
-# `_cd_mix_hash(v) % UInt64(nw)` (a 64-bit HARDWARE DIVISION, measured at 13.1
-# ns/value; still selectable with `CdRadixOptions.divfree = False`).
+# `_cd_mix_hash(v) % UInt64(nw)` (a 64-bit HARDWARE DIVISION; still selectable with `CdRadixOptions.divfree = False`).
 #
 # The map is a PURE FUNCTION and its two load-bearing properties are checkable
 # directly, which is what these guards do. Nothing else about it is observable:
@@ -497,7 +496,7 @@ def test_divfree_disjointness_survives_heavy_dup() raises:
 # below the exact one. The release has two call sites (`_CDDedupTask` on the
 # serial-scatter arm, `_CDDedupMultiTask` on the parallel-scatter arm), so each
 # arm has its own fixture, and the `freepar = False` control must stay green
-# under a mutant in the release path.
+# when the release path is wrong.
 
 
 def test_freepar_serial_scatter_arm_matches_serial_oracle() raises:
@@ -559,8 +558,8 @@ def test_freepar_parallel_arm_multi_run_cross_buffer() raises:
 
 
 def test_freepar_off_is_still_exact_on_both_arms() raises:
-    """THE CONTROL: the same fixtures with `freepar` off. A mutant in the
-    release path cannot reach these, so they must stay green under one."""
+    """THE CONTROL: the same fixtures with `freepar` off. The release path is
+    not exercised here, so these hold whether or not it is correct."""
     var vals = List[Int64](capacity=_NBIG)
     for i in range(_NBIG):
         vals.append(Int64(i % 1_250_000))

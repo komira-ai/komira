@@ -3,16 +3,13 @@
 #                            resident Arrow column
 # =============================================================================
 #
-# THE DEFECT THIS EXISTS FOR (ClickBench Q5, measured 2026-09-19).
-# `count(DISTINCT search_phrase)` over the 100M-row wide fixture routed to
-# `distinct_node_exec._run_scalar_string_cd_over_batch`, which answers the
-# question by running the FULL `SELECT DISTINCT <col>` operator
-# (`DistinctState_Untyped`) and taking the row count of its output. That is
-# three separate categorical costs stacked on one another:
+# THE DEFECT THIS EXISTS FOR. Answering `count(DISTINCT <string column>)` by
+# running the FULL `SELECT DISTINCT <col>` operator and taking the row count of
+# its output stacks three separate costs on one another:
 #
-#   1. the dedup is SERIAL — one thread inserts 99,997,497 rows into one
-#      untyped row-directory while the other 19 workers idle;
-#   2. it MATERIALISES the distinct VALUES — 6,019,103 canonical strings and a
+#   1. the dedup is SERIAL — one thread inserts every row into one
+#      untyped row-directory while the other workers idle;
+#   2. it MATERIALISES the distinct VALUES — every canonical distinct string and a
 #      whole key-only `RecordBatch` (offsets + data + validity) are built and
 #      then thrown away, because the caller wants ONE Int64;
 #   3. it goes through the untyped `ColumnFormatStorage` cell path, which
@@ -41,10 +38,10 @@
 #
 # ★ THE DUPLICATE PRE-FILTER IS NOT AN OPTIMISATION, IT IS WHAT MAKES THE
 #   PARTITIONING VIABLE. Hash-partitioning by VALUE concentrates duplicates:
-#   on ClickBench Q5, 86,825,105 of the 99,997,497 rows are the EMPTY STRING,
-#   so a naive scatter puts 87% of the input into ONE partition and the dedup
-#   phase degenerates to a single-threaded straggler that is SLOWER than the
-#   serial fold it replaced. Each scan task therefore carries a small
+#   in a column where most rows are the EMPTY STRING, a naive scatter puts
+#   most of the input into ONE partition and the dedup
+#   phase degenerates to a single-threaded straggler that is SLOWER than a
+#   serial fold. Each scan task therefore carries a small
 #   direct-mapped "last value seen at this hash slot" cache (`_CDSTR_FILT_SIZE`
 #   entries, L1/L2-resident). A row whose value is PROVEN — by fingerprint AND
 #   byte compare — equal to the cache's occupant is dropped, because that value
@@ -120,8 +117,8 @@ comptime _CDSTR_MIN_ROWS: Int = 65_536
 comptime _CDSTR_TARGET_ROWS_PER_PART: Int = 262_144
 
 # Upper bound on partitions. `np * ns` buffers are allocated, and buffer COUNT
-# (not bytes) is what a teardown costs — measured on the Int64 twin, 31,744
-# buffers cost 17 ms to free against 0.02 ms for 22 holding the same bytes.
+# (not bytes) is what a teardown costs: freeing thousands of small buffers is
+# far slower than freeing a few holding the same bytes.
 comptime _CDSTR_MAX_PARTS: Int = 2048
 
 # Direct-mapped duplicate pre-filter, per scan task. 16,384 * 8 B = 128 KB:
@@ -137,15 +134,14 @@ comptime _CDSTR_MAX_ROWS: Int = 0xFFFF_FFFE
 
 # =============================================================================
 # The scan slices are cut by COST, not by rows, and there are more of them
-# than workers (ClickBench Q5)
+# than workers
 # =============================================================================
 #
 # A row's scan cost is not constant: it hashes the row's BYTES, and a
 # non-empty value also misses the pre-filter and scatters, while an empty or
 # just-seen one costs a fixed handful of ns. With `nw` EQUAL-ROW slices on
-# `search_phrase` (87% empty, the non-empty rows clustered by file region) the
-# slices carried very different work, and the scan fork ran at an occupancy of
-# 0.45-0.50 (~190-208 ms of wall for ~95 ms of 20-thread work).
+# a column that is mostly empty strings with the non-empty rows clustered, the
+# slices carry very different work and the scan fork leaves workers idle.
 #
 # So, by default, `tiles = _CDSTR_TILES_PER_WORKER * nw` slices whose bounds
 # equalise
@@ -525,8 +521,7 @@ struct _CDStrDedupTask[OffsetType: DType, bo: Origin[mut=False]](Segment):
             # been consumed, on THIS worker while the pages are hot, rather
             # than leaving all `ns * np` of them for the driver to free
             # serially. Same index `p`, so the disjointness argument above is
-            # unchanged. (The Int64 twin measured 17 ms of serial teardown for
-            # 31,744 such buffers.)
+            # unchanged. (Freeing many small buffers serially is slow.)
             var dead = List[Int64]()
             swap(sp[].matrix[][s][p], dead)
             _ = dead^
