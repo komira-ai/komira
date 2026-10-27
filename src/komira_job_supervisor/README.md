@@ -20,6 +20,14 @@ The embedding binary supplies:
   `ConditionalWriteStore`. `make_s3_store` and `run_job_supervisor_on_s3`
   build S3 or S3-compatible ones from flags.
 
+`run_job_supervisor` reads the monotonic clock and waits a second between
+its checks on the system clock. `run_job_supervisor_with_clock` takes any
+`LoopClock` instead: `ManualLoopClock` moves only when the loop waits, by the
+time waited, so a test counts the loop's waits and instants and a run of any
+length takes no time. `JobSupervisor.set_test_clock` puts the supervisor's own
+readings (the spawn instant, the stream's flush interval, the terminal beat's
+retry budget and waits) on the same manual clock.
+
 A fetched binary is checked against a SHA-256 digest only when one is known:
 the `--binary-sha256` flag when given, otherwise the first segment of the
 object key that is 64 lowercase hex characters (a content-addressed layout

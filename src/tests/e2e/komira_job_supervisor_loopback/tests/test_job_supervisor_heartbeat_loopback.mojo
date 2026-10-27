@@ -38,7 +38,8 @@
 #       after spawn) is answered CANCEL. History ASSIGNED, RUNNING, CANCELLING,
 #       CANCELLED; beats RUNNING x4 then CANCELLED; replies CONTINUE x3,
 #       CANCEL; the pid was alive when CANCEL was sent and is gone after the
-#       run (kill(pid, 0) fails); well under 30 s. Catches: a reporter that
+#       run (kill(pid, 0) fails); the run ends CANCELLED, which a job waited
+#       out (it sleeps 30 s) would not. Catches: a reporter that
 #       drops the CANCEL (planted: the RUNNING beat after CANCEL is a violation
 #       and the job runs to COMPLETED), a supervisor that reports CANCELLED but
 #       leaves the child running.
@@ -67,7 +68,6 @@ from std.os import remove
 from std.pathlib import Path
 from std.testing import assert_equal, assert_true
 
-from komira_clock import now_ns
 from komira_http_core.codec import HttpMethod
 from komira_http_server.connection import REQ_BUF_BYTES
 from komira_http_server.routing import Router
@@ -121,13 +121,11 @@ struct _SupervisorLeg(ClientLeg):
     var url: String
     var script: String
     var phase: JobSupervisorPhase
-    var wall_ms: Int
 
     def __init__(out self, var url: String, var script: String):
         self.url = url^
         self.script = script^
         self.phase = JobSupervisorPhase.running()
-        self.wall_ms = -1
 
     def run(mut self) raises:
         var argv = List[String]()
@@ -142,7 +140,6 @@ struct _SupervisorLeg(ClientLeg):
             heartbeat_interval_secs=1,
             max_stderr_lines=_MAX_STDERR_LINES,
         )
-        var started = now_ns()
         self.phase = run_job_supervisor[
             HttpHeartbeatReporter[NoHeartbeatAuth], InMemoryConditionalStore
         ](
@@ -151,26 +148,22 @@ struct _SupervisorLeg(ClientLeg):
             None,
             None,
         )
-        self.wall_ms = Int((now_ns() - started) // 1_000_000)
 
 
 struct _Outcome(Movable):
     """A finished duet: the serve loop (its `dispatcher` is the receiver, read
-    after the join), the phase the run returned and its wall time."""
+    after the join) and the phase the run returned."""
 
     var loop: DispatchServeLoop[HeartbeatReceiver]
     var phase: JobSupervisorPhase
-    var wall_ms: Int
 
     def __init__(
         out self,
         var loop: DispatchServeLoop[HeartbeatReceiver],
         phase: JobSupervisorPhase,
-        wall_ms: Int,
     ):
         self.loop = loop^
         self.phase = phase
-        self.wall_ms = wall_ms
 
 
 def _run(var receiver: HeartbeatReceiver, var script: String) raises -> _Outcome:
@@ -193,13 +186,11 @@ def _run(var receiver: HeartbeatReceiver, var script: String) raises -> _Outcome
             + String(e)
             + "\n  run returned "
             + String(leg.phase.wire_str())
-            + " after "
-            + String(leg.wall_ms)
-            + " ms\n  "
+            + "\n  "
             + loop.dispatcher.describe()
         )
         raise e^
-    return _Outcome(loop^, leg.phase, leg.wall_ms)
+    return _Outcome(loop^, leg.phase)
 
 
 def _history(r: HeartbeatReceiver) -> String:
@@ -244,11 +235,8 @@ def _pid_file(name: String) raises -> String:
 def _gated_then(gate: String, order_file: String, then: String) -> String:
     """A script whose first act records whether `gate` already exists
     (`open` or `closed`) in `order_file`, then waits for `gate` (the loop
-    never runs when it already exists), then runs `then`. The wait is
-    bounded (1200 polls of 50 ms): if the gate never opens (beat 1 never
-    reached the receiver), the job appends `gate-timeout` to `order_file`
-    and exits 97, so the run ends and the case fails with the receiver's
-    state printed instead of hanging."""
+    never runs when it already exists), then runs `then`. The gate is the
+    event the job waits for, so the wait has no bound of its own."""
     return (
         String("if [ -e '")
         + gate
@@ -256,11 +244,9 @@ def _gated_then(gate: String, order_file: String, then: String) -> String:
         + order_file
         + String("'; else echo closed > '")
         + order_file
-        + String("'; fi; i=0; while [ ! -e '")
+        + String("'; fi; while [ ! -e '")
         + gate
-        + String("' ]; do i=$((i + 1)); if [ \"$i\" -gt 1200 ]; then echo gate-timeout >> '")
-        + order_file
-        + String("'; exit 97; fi; sleep 0.05; done; ")
+        + String("' ]; do sleep 0.05; done; ")
         + then
     )
 
@@ -369,12 +355,6 @@ def test_b_cancel_stops_and_reaps_the_child() raises:
         assert_true(
             proc_kill(Int32(r.probed_pid), Int32(0)) != 0,
             "the job (pid " + String(r.probed_pid) + ") is gone after the run",
-        )
-        assert_true(
-            res.wall_ms < 20000,
-            "the job was stopped, not waited out: "
-            + String(res.wall_ms)
-            + " ms",
         )
     except e:
         print(

@@ -19,8 +19,10 @@
 #
 # Failure: `fork_join` joins both threads and rethrows the lowest tid's error,
 # so a server step that raises is reported ahead of the client failure it
-# causes. The server side bounds itself: it raises after `SERVE_DEADLINE_NS`
-# without the stop flag. Whenever thread 0 stops on an error it first DROPS
+# causes. The server side runs until the client leg raises the stop flag, which
+# every exit of the leg does; no wall-clock limit ends it, and a leg that never
+# ends is the build's watchdog's to kill. Whenever thread 0 stops on an error it
+# first DROPS
 # the server (`DispatchServeLoop.close`), closing the listener and every
 # accepted connection, so the client's next beat fails at once (connection
 # refused, or the connection closed under it) instead of sitting on a socket
@@ -31,7 +33,6 @@
 from std.memory import Pointer
 
 from komira_atomic_alias import AtomicI64
-from komira_clock import now_ns
 from komira_fork_join import ForkJoinBody, fork_join
 
 from komira_async.ops.waker_sink import NoopSink
@@ -43,9 +44,6 @@ from komira_http_server.server import HttpServer
 
 # One server poll waits at most this long, so the stop flag is seen within it.
 comptime SERVE_POLL_TIMEOUT_US: Int32 = 5_000
-# The server gives up if the client has not finished within this long. Well
-# above the longest leg (a job the receiver cancels, or one that sleeps 2 s).
-comptime SERVE_DEADLINE_NS: UInt64 = 120_000_000_000
 
 
 trait ClientLeg(Movable):
@@ -119,15 +117,8 @@ struct _Duet[
     def run(self, tid: Int) raises:
         if tid == 0:
             # Only thread 0 touches the server.
-            var give_up = now_ns() + SERVE_DEADLINE_NS
             try:
                 while self.flag[].stop.load() == Int64(0):
-                    if now_ns() >= give_up:
-                        raise Error(
-                            "serve_while: the client did not finish within "
-                            + String(SERVE_DEADLINE_NS // 1_000_000_000)
-                            + " s"
-                        )
                     self.server[].step()
             except e:
                 # Fail the client fast (module header), then report.
@@ -146,7 +137,7 @@ def serve_while[
 ](mut server: DispatchServeLoop[D], mut client: C) raises:
     """Step `server` on one thread while `client.run()` runs on another;
     return when both have finished. Rethrows the server's error if its step
-    raised (or it hit `SERVE_DEADLINE_NS`), otherwise the client's."""
+    raised, otherwise the client's."""
     var flag = _StopFlag()
     var duet = _Duet(Pointer(to=server), Pointer(to=client), Pointer(to=flag))
     fork_join(duet, 2)

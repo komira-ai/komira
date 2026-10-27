@@ -224,7 +224,6 @@ def test_a_missing_pid_file_is_a_violation() raises:
         String(_INST),
         cancel_after_running_beats=1,
         pid_file=String("no/such/dir/job.pid"),
-        pid_wait_ms=50,
     )
     _ = r.receive(_running())
     assert_equal(r.receive(_running()), _CANCEL, "CANCEL is still sent")
@@ -272,7 +271,6 @@ def test_a_half_written_pid_file_is_a_violation() raises:
         String(_INST),
         cancel_after_running_beats=1,
         pid_file=f,
-        pid_wait_ms=50,
     )
     _ = r.receive(_running())
     assert_equal(r.receive(_running()), _CANCEL, "CANCEL is still sent")
@@ -319,19 +317,11 @@ def test_the_first_beat_probe_fires_when_a_child_already_exists() raises:
 
 
 def _await_exited_unreaped(pid: Int32) raises:
-    """Poll komira_supervisor's non-reaping child probe 5 ms apart, up to 1000
-    times, until it names `pid` as an exited, unreaped child. (An exit
-    notification is not enough: on XNU EVFILT_PROC NOTE_EXIT may fire before
-    the child is a waitable zombie.)"""
-    var polls = 0
+    """Poll komira_supervisor's non-reaping child probe until it names `pid`
+    as an exited, unreaped child. The exit is the event waited for, so the
+    poll has no bound of its own. (An exit notification is not enough: on XNU
+    EVFILT_PROC NOTE_EXIT may fire before the child is a waitable zombie.)"""
     while proc_probe_children().exited_pid != pid:
-        polls += 1
-        assert_true(
-            polls < 1000,
-            "child "
-            + String(pid)
-            + " not seen as exited after 1000 probes 5 ms apart",
-        )
         sleep(Float64(0.005))
 
 

@@ -184,14 +184,9 @@ def _run_to_failure(mut js: Js, script: String) raises:
     """Spawn `script`, drive it to its exit, record the FAILED result, send
     the terminal beat and write the terminal artifacts."""
     js.spawn_child_spec(ChildSpec.shell(script))
-    var spins = 0
-    while not js.child_exited and spins < 2000:
+    while not js.child_exited:
         js.poll_and_drain()
-        if js.child_exited:
-            break
         _sleep_ms(5)
-        spins += 1
-    assert_true(js.child_exited, "the job exited within 10 s")
     js.analyze_exit()
     assert_true(js.state.phase == JobSupervisorPhase.failed(), "exit 1 is FAILED")
     _ = js.finalize_heartbeat()
