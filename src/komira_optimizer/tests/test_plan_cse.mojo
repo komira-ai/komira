@@ -14,7 +14,7 @@ from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, Schema, SchemaBuilder
-from komira_plan_expr.agg_expr import AggExpr, AGG_COUNT
+from komira_plan_expr.agg_expr import AggExpr, AGG_COUNT, AGG_SUM
 from komira_plan_expr.expr import Expr, BIN_GT
 from komira_plan_expr.partition_expr import PartitionExpr
 from komira_plan_expr.scalar_value import ScalarValue
@@ -46,13 +46,14 @@ from komira_plan_ir.logical_plan import (
     PLAN_TOPN,
     PLAN_UNION,
     SOURCE_PARQUET,
+    CORR_KIND_EXISTS,
 )
 
 from komira_optimizer.plan_cse import (
     plan_cse_eliminate,
     plan_cse_eliminate_forest,
     detect_cse_candidates,
-    count_subtree_occurrences,
+    count_pure_subtree_occurrences,
 )
 from komira_optimizer.subtree_hash_walk import plan_is_pure, plan_has_scan
 
@@ -234,9 +235,9 @@ def test_self_join_keeps_the_build_side_and_references_it() raises:
     side becomes a reference naming its hash and carrying its schema. Pins
     the visit order, one canonical, and the schema snapshot.
 
-    Defects caught: a rewrite that keeps the left occurrence instead of the
-    build side, a reference that names the wrong hash, a reference without
-    the replaced node's schema."""
+    Proves: the right (build) occurrence stays, the left one becomes a
+    reference naming the shared hash, and the reference carries the replaced
+    node's schema."""
     var sub_h = _filt().structural_hash()
     var out = plan_cse_eliminate(_join(_filt(), _filt()))
     var kids = _children(out)
@@ -256,8 +257,8 @@ def test_duplicate_nested_in_the_probe_side_is_referenced() raises:
     the left Project. The build side is canonical; the Project stays and its
     child becomes the reference.
 
-    Defects caught: replacing the whole Project, or keeping the nested copy
-    and referencing the build side from the wrong direction."""
+    Proves: only the nested Filter is replaced; the Project around it stays,
+    and the build side keeps its copy."""
     var out = plan_cse_eliminate(_join(_proj(_filt()), _filt()))
     var kids = _children(out)
     assert_equal(Int(kids[0].tag), Int(PLAN_PROJECT))
@@ -270,7 +271,9 @@ def test_a_whole_duplicated_branch_becomes_one_reference() raises:
     """Join(Project(F), Project(F)): the larger subtree repeats, so the left
     Project is replaced as one node and nothing below it is visited.
 
-    Defects caught: referencing the inner Filter and leaving two Projects."""
+    Proves: the whole Project subtree is the shared unit, so one Project is
+    replaced by one reference and the Filter inside is not referenced
+    separately."""
     var big_h = _proj(_filt()).structural_hash()
     var out = plan_cse_eliminate(_join(_proj(_filt()), _proj(_filt())))
     var kids = _children(out)
@@ -288,9 +291,8 @@ def test_union_branches_first_stays_and_the_rest_reference_it() raises:
     """Union(F, F, F): branches are visited left to right, so the first
     stays and the second and third are references to it.
 
-    Defects caught: a union walk that skips branches, a rewrite that keeps
-    the last occurrence, one reference per group instead of one per extra
-    occurrence."""
+    Proves: the first union branch keeps its copy and every later branch
+    holding the subtree becomes its own reference."""
     var sub_h = _filt().structural_hash()
     var out = plan_cse_eliminate(_union3(_filt(), _filt(), _filt()))
     var kids = _children(out)
@@ -307,8 +309,8 @@ def test_a_duplicate_inside_the_canonical_subtree_is_shared_too() raises:
     """Union(X, X) with X = Join(F, F): the first X stays and, inside it, one
     F stays and the other is a reference; the second X is one reference.
 
-    Defects caught: a walk that stops at the canonical occurrence and leaves
-    its own repeats unshared."""
+    Proves: the walk continues inside the canonical occurrence, so a repeat
+    nested in it is shared as well."""
     var x_h = _join(_filt(), _filt()).structural_hash()
     var out = plan_cse_eliminate(
         _union(_join(_filt(), _filt()), _join(_filt(), _filt()))
@@ -326,8 +328,8 @@ def test_rewriting_twice_changes_nothing_the_second_time() raises:
     """A reference is a leaf with no scan, so a second pass finds no
     candidate and the plan hashes the same.
 
-    Defects caught: a reference counted as a scan-bearing subtree, which
-    would wrap a reference in a reference."""
+    Proves: a reference is not a scan-bearing subtree, so a second rewrite
+    leaves the plan as it is."""
     var once = plan_cse_eliminate(_join(_filt(), _filt()))
     var h = once.structural_hash()
     var twice = plan_cse_eliminate(once^)
@@ -355,7 +357,8 @@ def test_different_predicates_share_only_the_scan() raises:
     differently and both stay; only the identical bare scan below them is
     shared.
 
-    Defects caught: merging two filters whose predicates differ."""
+    Proves: two Filters whose predicates differ are both kept; only the scan
+    below them is shared."""
     var out = plan_cse_eliminate(_join(_filt(10), _filt(50)))
     assert_equal(_count_tag(out, PLAN_FILTER), 2)
     assert_equal(_count_tag(out, PLAN_SCAN), 1)
@@ -370,8 +373,7 @@ def test_udf_nodes_with_identical_text_are_not_shared() raises:
     same call-site salt render identically, and still are not shared; neither
     is the scan under them, because an impure subtree is not walked.
 
-    Defects caught: dropping the `has_udf` check, which would reference one
-    UDF execution from the place of another."""
+    Proves: no UDF execution is referenced from the place of another."""
     var p = _join(_udf_filter(), _udf_filter())
     var h = p.structural_hash()
     assert_equal(detect_cse_candidates(p), 0)
@@ -395,7 +397,7 @@ def test_repeats_with_no_scan_are_not_shared() raises:
     """Two view references have no scan to read twice, so a repeat of them is
     left alone.
 
-    Defects caught: counting scan-free subtrees as candidates."""
+    Proves: a subtree with no scan is never a candidate."""
     var a = LogicalPlan.view_ref(String("vw"), _schema())
     var b = LogicalPlan.view_ref(String("vw"), _schema())
     var p = _join(a^, b^)
@@ -420,8 +422,8 @@ def test_purity_refuses_udf_nodes_wherever_they_sit() raises:
     """Every node kind that holds a child answers from its children, and a
     UDF Filter, Project or Aggregate answers False on its own.
 
-    Defects caught: a join, as-of join or union arm that checks only one
-    side; a UDF kind missing from the classifier."""
+    Proves: a UDF on either side of a join, an as-of join or a union, or on
+    a Filter, Project or Aggregate itself, makes the subtree impure."""
     assert_true(plan_is_pure(_filt()))
     assert_false(plan_is_pure(_udf_filter()))
     assert_false(plan_is_pure(_udf_project()))
@@ -440,7 +442,7 @@ def test_purity_refuses_a_node_kind_it_does_not_know() raises:
     """A tag that is not on the allowlist is not pure, so a kind added later
     is not shared until it is listed.
 
-    Defects caught: a classifier that answers True by default."""
+    Proves: an unlisted node kind is neither pure nor scan-bearing."""
     var unknown = LogicalPlan(UInt8(200), _schema())
     assert_false(plan_is_pure(unknown))
     assert_false(plan_has_scan(unknown))
@@ -456,14 +458,14 @@ def test_detection_counts_groups_and_occurrences() raises:
     scan inside it; the Filter subtree occurs twice, an unrelated hash zero
     times, and the whole Join once.
 
-    Defects caught: counting a subtree once per parent, missing the nested
-    scan group."""
+    Proves: each repeated subtree is counted once per occurrence, including
+    the scan nested in the repeated Filter."""
     var p = _join(_filt(), _filt())
     assert_equal(detect_cse_candidates(p), 2)
-    assert_equal(count_subtree_occurrences(p, _filt().structural_hash()), 2)
-    assert_equal(count_subtree_occurrences(p, _scan().structural_hash()), 2)
-    assert_equal(count_subtree_occurrences(p, p.structural_hash()), 1)
-    assert_equal(count_subtree_occurrences(p, UInt64(12345)), 0)
+    assert_equal(count_pure_subtree_occurrences(p, _filt().structural_hash()), 2)
+    assert_equal(count_pure_subtree_occurrences(p, _scan().structural_hash()), 2)
+    assert_equal(count_pure_subtree_occurrences(p, p.structural_hash()), 1)
+    assert_equal(count_pure_subtree_occurrences(p, UInt64(12345)), 0)
 
 
 # ---------------------------------------------------------------------------
@@ -538,14 +540,14 @@ def test_every_node_kind_is_walked_counted_and_replaced() raises:
     turns the second into one reference naming W(F)'s hash. That takes the
     scan test, the purity test, the count and the rewrite through W.
 
-    Defects caught: a node kind missing from any of those walks, which would
-    leave both copies in place (or, in the count, never see them)."""
+    Proves: for every node kind, the count sees the repeat below it and the
+    rewrite replaces it."""
     for kind in range(N_KINDS):
         var want_h = _wrap(kind, _filt()).structural_hash()
         var p = _union(_wrap(kind, _filt()), _wrap(kind, _filt()))
         assert_true(plan_is_pure(p))
         assert_equal(
-            count_subtree_occurrences(p, want_h),
+            count_pure_subtree_occurrences(p, want_h),
             2,
             msg="occurrences, kind " + String(kind),
         )
@@ -572,7 +574,8 @@ def test_a_repeat_below_each_node_kind_is_shared() raises:
     the bare scan S below each, keeping one and referencing the other. The
     walk therefore descends through W to a repeat below it.
 
-    Defects caught: a rewrite arm that does not descend into W's child."""
+    Proves: the rewrite descends into every node kind's child, so the repeat
+    below each kind is shared."""
     for kind in range(N_KINDS):
         var p = _union(_wrap(kind, _filt(10)), _wrap(kind, _filt(99)))
         var out = plan_cse_eliminate(p^)
@@ -598,8 +601,8 @@ def test_forest_keeps_the_first_plans_occurrence() raises:
     """Plans [F, Project(F)]: the Filter stays in plan 0, and plan 1 keeps its
     Project over a reference to it.
 
-    Defects caught: a claimed set that restarts per plan, which would keep an
-    occurrence in every plan."""
+    Proves: the first plan in the list keeps the canonical occurrence and a
+    later plan holds a reference to it."""
     var plans = List[LogicalPlan]()
     plans.append(_filt())
     plans.append(_proj(_filt()))
@@ -622,6 +625,250 @@ def test_forest_with_no_shared_subtree_is_unchanged() raises:
     assert_equal(plans[0].structural_hash(), h0)
     assert_equal(plans[1].structural_hash(), h1)
     assert_equal(len(_ref_hashes(plans[0])) + len(_ref_hashes(plans[1])), 0)
+
+
+# ---------------------------------------------------------------------------
+# Expressions that must not be shared, identity, and ordering
+# ---------------------------------------------------------------------------
+
+
+def _exists_filter(var inner: LogicalPlan) -> LogicalPlan:
+    """`Filter(EXISTS(inner), Scan)`. The subquery renders as its kind, its
+    outer-reference count and the tag of `inner`, never `inner` itself."""
+    var refs = List[String]()
+    refs.append(String("k"))
+    return LogicalPlan.filter(
+        Expr.correlated_subquery(inner^, refs^, CORR_KIND_EXISTS), _scan()
+    )
+
+
+def _udf_call_expr() -> Expr:
+    return Expr.udf_call(
+        String("f"),
+        Optional[Int](None),
+        ArrowType.INT64,
+        ArrowType.INT64,
+        Expr.col_ref("v"),
+    )
+
+
+def _udf_call_filter() -> LogicalPlan:
+    """A Filter whose predicate calls a registered UDF. The node carries no
+    typed-UDF payload, so only its expression says it is impure."""
+    return LogicalPlan.filter(
+        Expr.binary(
+            BIN_GT, _udf_call_expr(), Expr.literal(ScalarValue.from_int(10))
+        ),
+        _scan(),
+    )
+
+
+def _k_only_schema() -> Schema:
+    var b = SchemaBuilder()
+    b.add_field(Field(String("k"), ArrowType.INT64, False))
+    return b.build()
+
+
+def test_filters_differing_only_in_a_subquery_are_not_shared() raises:
+    """Two Filters over the same scan whose EXISTS subqueries read different
+    inner plans render, and hash, identically. Both are kept.
+
+    Proves: a subtree holding a subquery expression is never replaced by a
+    reference to another one that renders the same."""
+    var a = _exists_filter(_scan("inner_a.parquet"))
+    var b = _exists_filter(_scan("inner_b.parquet"))
+    assert_equal(a.structural_hash(), b.structural_hash())
+    assert_false(plan_is_pure(a))
+    var p = _join(a^, b^)
+    var h = p.structural_hash()
+    assert_equal(detect_cse_candidates(p), 0)
+    var out = plan_cse_eliminate(p^)
+    assert_equal(out.structural_hash(), h)
+    assert_equal(len(_ref_hashes(out)), 0)
+    assert_equal(_count_tag(out, PLAN_FILTER), 2)
+    assert_equal(_count_tag(out, PLAN_SCAN), 2)
+
+
+def test_projects_differing_only_in_a_subquery_are_not_shared() raises:
+    """Proves: the subquery rule holds for Project expressions too."""
+    var refs_a = List[String]()
+    refs_a.append(String("k"))
+    var refs_b = List[String]()
+    refs_b.append(String("k"))
+    var ea = ExprArray()
+    ea.append(
+        Expr.alias(
+            Expr.correlated_subquery(
+                _scan("inner_a.parquet"), refs_a^, CORR_KIND_EXISTS
+            ),
+            String("x"),
+        )
+    )
+    var eb = ExprArray()
+    eb.append(
+        Expr.alias(
+            Expr.correlated_subquery(
+                _scan("inner_b.parquet"), refs_b^, CORR_KIND_EXISTS
+            ),
+            String("x"),
+        )
+    )
+    var a = LogicalPlan.project(ea^, _scan())
+    var b = LogicalPlan.project(eb^, _scan())
+    assert_equal(a.structural_hash(), b.structural_hash())
+    assert_false(plan_is_pure(a))
+    var p = _join(a^, b^)
+    var h = p.structural_hash()
+    var out = plan_cse_eliminate(p^)
+    assert_equal(out.structural_hash(), h)
+    assert_equal(len(_ref_hashes(out)), 0)
+
+
+def test_a_registered_udf_call_in_an_expression_is_not_shared() raises:
+    """A Filter whose predicate calls a registered UDF has no typed-UDF
+    payload, and two of them render alike.
+
+    Proves: a UDF call inside a predicate makes the subtree impure, so the
+    pair is kept and nothing under it is referenced."""
+    assert_false(plan_is_pure(_udf_call_filter()))
+    var p = _join(_udf_call_filter(), _udf_call_filter())
+    var h = p.structural_hash()
+    assert_equal(detect_cse_candidates(p), 0)
+    var out = plan_cse_eliminate(p^)
+    assert_equal(out.structural_hash(), h)
+    assert_equal(len(_ref_hashes(out)), 0)
+    assert_equal(_count_tag(out, PLAN_FILTER), 2)
+
+
+def test_purity_looks_into_every_node_kind_that_holds_an_expression() raises:
+    """Proves: a UDF call in a Project, an Aggregate's group key or input, a
+    scan's pushed-down filter or a join residual makes that node impure, and a
+    plain expression in the same place does not."""
+    var pe = ExprArray()
+    pe.append(_udf_call_expr())
+    assert_false(plan_is_pure(LogicalPlan.project(pe^, _scan())))
+
+    var ge = ExprArray()
+    ge.append(_udf_call_expr())
+    assert_false(
+        plan_is_pure(
+            LogicalPlan.aggregate(ge^, AggExprArray(), _scan())
+        )
+    )
+
+    var aggs = AggExprArray()
+    aggs.append(
+        AggExpr(AGG_SUM, Optional(_udf_call_expr()), Optional(String("s")))
+    )
+    assert_false(
+        plan_is_pure(LogicalPlan.aggregate(ExprArray(), aggs^, _scan()))
+    )
+
+    assert_false(
+        plan_is_pure(
+            LogicalPlan.scan(
+                String("t.parquet"),
+                SOURCE_PARQUET,
+                _schema(),
+                filter=Optional(_udf_call_expr()),
+            )
+        )
+    )
+    assert_true(
+        plan_is_pure(
+            LogicalPlan.scan(
+                String("t.parquet"),
+                SOURCE_PARQUET,
+                _schema(),
+                filter=Optional(_gt(3)),
+            )
+        )
+    )
+
+    var res = Optional[OwnedPointer[Expr]](OwnedPointer(_udf_call_expr()))
+    assert_false(
+        plan_is_pure(
+            LogicalPlan.join(
+                _scan(),
+                _scan(),
+                _one("k"),
+                _one("k"),
+                JOIN_INNER,
+                residual=res^,
+            )
+        )
+    )
+    var plain = Optional[OwnedPointer[Expr]](OwnedPointer(_gt(3)))
+    assert_true(
+        plan_is_pure(
+            LogicalPlan.join(
+                _scan(),
+                _scan(),
+                _one("k"),
+                _one("k"),
+                JOIN_INNER,
+                residual=plain^,
+            )
+        )
+    )
+
+
+def test_same_render_with_a_different_output_schema_is_not_shared() raises:
+    """Two scans of one path with different output schemas render alike.
+
+    Proves: equal hashes are not enough; the occurrence whose schema differs
+    from the canonical one stays, and a later occurrence that matches the
+    canonical one is still referenced."""
+    var narrow = LogicalPlan.scan(
+        String("t.parquet"), SOURCE_PARQUET, _k_only_schema()
+    )
+    assert_equal(narrow.structural_hash(), _scan().structural_hash())
+
+    var p = _join(_scan(), narrow.copy())
+    var h = p.structural_hash()
+    var out = plan_cse_eliminate(p^)
+    assert_equal(out.structural_hash(), h)
+    assert_equal(len(_ref_hashes(out)), 0)
+    assert_equal(_count_tag(out, PLAN_SCAN), 2)
+
+    var q = _join(_join(_scan(), narrow.copy()), _scan())
+    var out2 = plan_cse_eliminate(q^)
+    assert_equal(len(_ref_hashes(out2)), 1)
+    assert_equal(_count_tag(out2, PLAN_SCAN), 2)
+    assert_equal(_ref_hashes(out2)[0], _scan().structural_hash())
+
+
+def test_as_of_join_keeps_the_build_side_and_references_it() raises:
+    """Proves: an as-of join visits `right` first, so the right occurrence
+    stays and the left one becomes the reference, as for a plain join."""
+    var out = plan_cse_eliminate(_asof(_filt(), _filt()))
+    assert_equal(Int(out.tag), Int(PLAN_ASOF_JOIN))
+    var kids = _children(out)
+    assert_equal(Int(kids[0].tag), Int(PLAN_CSE_REF))
+    assert_equal(Int(kids[1].tag), Int(PLAN_FILTER))
+    assert_equal(
+        kids[0]._cse_ref.value()[].canonical_hash, _filt().structural_hash()
+    )
+
+
+def _chain(n: Int) -> LogicalPlan:
+    """`n` Filters stacked over `Filter(v > 0, Scan)`."""
+    var p = _filt(0)
+    for i in range(n):
+        p = LogicalPlan.filter(_gt(i + 1), p^)
+    return p^
+
+
+def test_a_deep_plan_is_shared_whole() raises:
+    """Proves: a deep chain repeated on both sides of a join is replaced by
+    one reference to its root, and the canonical copy keeps every level."""
+    var depth = 60
+    var h = _chain(depth).structural_hash()
+    var out = plan_cse_eliminate(_join(_chain(depth), _chain(depth)))
+    assert_equal(len(_ref_hashes(out)), 1)
+    assert_equal(_ref_hashes(out)[0], h)
+    assert_equal(_count_tag(out, PLAN_FILTER), depth + 1)
+    assert_equal(_count_tag(out, PLAN_SCAN), 1)
 
 
 def main() raises:

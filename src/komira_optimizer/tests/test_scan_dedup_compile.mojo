@@ -19,11 +19,12 @@ from komira_plan_ir.logical_plan import (
     LogicalPlan,
     JOIN_INNER,
     SOURCE_PARQUET,
+    CORR_KIND_EXISTS,
 )
 
 from komira_optimizer.scan_dedup_compile import (
     detect_duplicate_subtree_groups,
-    count_subtree_occurrences,
+    count_all_subtree_occurrences,
 )
 
 
@@ -86,50 +87,47 @@ def _udf_filter() -> LogicalPlan:
 def test_two_identical_scans_are_one_group_of_two() raises:
     """Join(S, S) holds one repeated group, the scan, seen twice.
 
-    Defects caught: a count that skips one join side, or counts the scan once
-    per parent."""
+    Proves: both join sides are counted, one occurrence each."""
     var p = _join(_scan(), _scan())
     assert_equal(detect_duplicate_subtree_groups(p), 1)
-    assert_equal(count_subtree_occurrences(p, _scan().structural_hash()), 2)
+    assert_equal(count_all_subtree_occurrences(p, _scan().structural_hash()), 2)
 
 
 def test_a_repeated_project_over_filter_over_scan_is_three_groups() raises:
     """Join(P(F(S)), P(F(S))) repeats three subtrees: the Project, the Filter
     below it and the scan below that, each exactly twice.
 
-    Defects caught: a walk that stops at the first level, or one that counts a
-    nested subtree more often than it occurs."""
+    Proves: nested subtrees are counted at every level, once per occurrence."""
     var p = _join(_proj(_filt()), _proj(_filt()))
     assert_equal(detect_duplicate_subtree_groups(p), 3)
     assert_equal(
-        count_subtree_occurrences(p, _proj(_filt()).structural_hash()), 2
+        count_all_subtree_occurrences(p, _proj(_filt()).structural_hash()), 2
     )
-    assert_equal(count_subtree_occurrences(p, _filt().structural_hash()), 2)
-    assert_equal(count_subtree_occurrences(p, p.structural_hash()), 1)
+    assert_equal(count_all_subtree_occurrences(p, _filt().structural_hash()), 2)
+    assert_equal(count_all_subtree_occurrences(p, p.structural_hash()), 1)
 
 
 def test_filters_with_different_predicates_are_not_one_group() raises:
     """Filter(v>10, S) and Filter(v>50, S) render differently, so each is
     seen once; only the bare scan under both is a repeat.
 
-    Defects caught: a key that ignores the predicate, which would merge two
-    different row sets."""
+    Proves: two Filters with different predicates are different groups."""
     var p = _join(_filt(10), _filt(50))
-    assert_equal(count_subtree_occurrences(p, _filt(10).structural_hash()), 1)
-    assert_equal(count_subtree_occurrences(p, _filt(50).structural_hash()), 1)
+    assert_equal(count_all_subtree_occurrences(p, _filt(10).structural_hash()), 1)
+    assert_equal(count_all_subtree_occurrences(p, _filt(50).structural_hash()), 1)
     assert_equal(detect_duplicate_subtree_groups(p), 1)
 
 
 def test_scans_of_different_sources_are_no_group() raises:
     var p = _join(_scan("a.parquet"), _scan("b.parquet"))
     assert_equal(detect_duplicate_subtree_groups(p), 0)
-    assert_equal(count_subtree_occurrences(p, UInt64(12345)), 0)
+    assert_equal(count_all_subtree_occurrences(p, UInt64(12345)), 0)
 
 
 def test_union_branches_are_walked() raises:
     """Union(F, F) repeats the Filter and the scan: two groups.
 
-    Defects caught: a walk that does not enter union branches."""
+    Proves: union branches are entered and counted."""
     var p = _union(_filt(), _filt())
     assert_equal(detect_duplicate_subtree_groups(p), 2)
 
@@ -139,8 +137,8 @@ def test_a_repeated_udf_subtree_is_still_reported() raises:
     are one group (and the scan under them a second), unlike the pure-only
     count that `plan_cse` takes.
 
-    Defects caught: detection silently applying the purity filter, which
-    would hide a repeated UDF subtree from the report."""
+    Proves: a repeated UDF subtree is reported, because detection does not
+    apply the purity filter."""
     var p = _join(_udf_filter(), _udf_filter())
     assert_equal(detect_duplicate_subtree_groups(p), 2)
 
@@ -149,12 +147,31 @@ def test_each_call_counts_from_zero() raises:
     """Two calls on two plans each see only their own plan: the second plan
     has no repeat and reports none after the first reported one.
 
-    Defects caught: counts kept between calls."""
+    Proves: counts are not kept between calls."""
     var a = _join(_scan(), _scan())
     var b = _join(_scan("a.parquet"), _scan("b.parquet"))
     assert_equal(detect_duplicate_subtree_groups(a), 1)
     assert_equal(detect_duplicate_subtree_groups(b), 0)
     assert_equal(detect_duplicate_subtree_groups(a), 1)
+
+
+def _exists_filter(var inner: LogicalPlan) -> LogicalPlan:
+    var refs = List[String]()
+    refs.append(String("k"))
+    return LogicalPlan.filter(
+        Expr.correlated_subquery(inner^, refs^, CORR_KIND_EXISTS), _scan()
+    )
+
+
+def test_detection_counts_subquery_filters_by_their_render() raises:
+    """Proves: detection reports by hash alone, so two Filters that differ
+    only in the inner plan of a subquery count as one repeated group (the
+    rewrite in `plan_cse` refuses to share them)."""
+    var a = _exists_filter(_scan("inner_a.parquet"))
+    var b = _exists_filter(_scan("inner_b.parquet"))
+    var h = a.structural_hash()
+    var p = _join(a^, b^)
+    assert_equal(count_all_subtree_occurrences(p, h), 2)
 
 
 def main() raises:
