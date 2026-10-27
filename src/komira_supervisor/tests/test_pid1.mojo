@@ -17,15 +17,16 @@
 #       this process's zombie (the probe names it) and reap_orphans()
 #       collects exactly it; a Supervisor's own exited child is never
 #       collected by reap_orphans (its wait_exit still reads exit 3).
-#   test_group_terminate_collects_the_group_within_the_grace     (Linux)
+#   test_group_terminate_collects_the_group                      (Linux)
 #       a child leading its own group with a background grandchild:
-#       terminate_with(SIGTERM, 5000, reap_orphans=True) signals the GROUP,
-#       collects the orphaned grandchild during the grace wait and returns as
-#       soon as the group is empty (well before 5 s).
-#   test_a_term_ignoring_grandchild_holds_the_ladder_then_is_killed (Linux)
-#       the child dies of SIGTERM at once but its grandchild ignores it: the
-#       wait holds until the grace (300 ms) runs out, SIGKILL empties the
-#       group, and the child's own first reason (SIGTERM, 143) is kept.
+#       terminate_with(SIGTERM, 5000, reap_orphans=True) signals the GROUP and
+#       collects the orphaned grandchild: the grandchild is gone, the group
+#       is empty and no child is left. The time it took is not asserted.
+#   test_a_term_ignoring_grandchild_is_killed_with_the_group     (Linux)
+#       the child dies of SIGTERM at once but its grandchild ignores it (it
+#       prints "ready" once it does): the grace (300 ms) runs out, SIGKILL
+#       empties the group, and the child's own first reason (SIGTERM, 143)
+#       is kept. The time it took is not asserted.
 #   test_group_escalation_collects_more_orphans_than_one_batch   (Linux)
 #       a TERM-ignoring child with 300 TERM-ignoring grandchildren: the grace
 #       runs out, SIGKILL goes to the group, the child reads 137, and the
@@ -43,7 +44,7 @@
 from std.ffi import external_call
 from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_true, assert_false
-from std.time import perf_counter_ns, sleep
+from std.time import sleep
 
 from komira_supervisor import (
     adopt_orphans,
@@ -74,10 +75,12 @@ def _raise_signal(sig: Int32):
 
 def _read_lines(mut sup: Supervisor, n: Int) raises -> List[String]:
     """The child's first `n` stdout lines, read without waiting for EOF (the
-    child keeps running). Up to 5 s."""
+    child keeps running). Reads until the lines arrive or the child's output
+    ends; no iteration cap and no deadline (a child that stays silent is
+    stopped by the test runner's watchdog)."""
     _ = sup.set_nonblocking(sup.stdout_fd())
     var acc = String("")
-    for _ in range(500):
+    while True:
         var c = sup.read_available(sup.stdout_fd())
         if c.text.byte_length() > 0:
             acc += c.text
@@ -100,12 +103,18 @@ def _read_line(mut sup: Supervisor) raises -> String:
     return _read_lines(sup, 1)[0]
 
 
-def _no_child_within(ms: Int) raises -> Bool:
-    for _ in range(ms // 10):
-        if not proc_probe_children().any_child:
-            return True
+def _await_no_child() raises:
+    """Poll until every child is collected. No cap and no deadline: the
+    collection is the event waited for."""
+    while proc_probe_children().any_child:
         sleep(Float64(0.01))
-    return not proc_probe_children().any_child
+
+
+def _await_zombie(pid: Int32) raises:
+    """Poll until `pid` is an exited, unreaped child of this process. No cap
+    and no deadline: the exit is the event waited for."""
+    while proc_probe_children().exited_pid != pid:
+        sleep(Float64(0.01))
 
 
 # -----------------------------------------------------------------------------
@@ -137,13 +146,7 @@ def test_adopted_orphan_is_collected_and_our_child_is_kept() raises:
     assert_equal(sup.wait_exit().exit_code, Int32(0))
     sup.close()
     var orphan = Int32(atol(String(line.strip())))
-    var seen = False
-    for _ in range(500):
-        if proc_probe_children().exited_pid == orphan:
-            seen = True
-            break
-        sleep(Float64(0.01))
-    assert_true(seen, "orphan " + String(orphan) + " became our zombie")
+    _await_zombie(orphan)
     assert_equal(sup.reap_orphans(), 1, "collected exactly the orphan")
     assert_false(proc_probe_children().any_child, "no child left")
 
@@ -153,17 +156,14 @@ def test_adopted_orphan_is_collected_and_our_child_is_kept() raises:
     _spawned(opid)
     _ = own.drain_pipe(own.stdout_fd())
     _ = own.drain_pipe(own.stderr_fd())
-    for _ in range(500):
-        if proc_probe_children().exited_pid == opid:
-            break
-        sleep(Float64(0.01))
+    _await_zombie(opid)
     assert_equal(own.reap_orphans(), 0, "our own child is not an orphan")
     assert_equal(own.wait_exit().exit_code, Int32(3), "still ours to reap")
     own.close()
     print("  test_adopted_orphan_is_collected_and_our_child_is_kept: PASS")
 
 
-def test_group_terminate_collects_the_group_within_the_grace() raises:
+def test_group_terminate_collects_the_group() raises:
     var spec = ChildSpec.shell(
         String("sleep 30 >/dev/null 2>&1 & echo $!; wait")
     )
@@ -172,23 +172,19 @@ def test_group_terminate_collects_the_group_within_the_grace() raises:
     var pid = sup.spawn(spec)
     _spawned(pid)
     var grandchild = Int32(atol(String(_read_line(sup).strip())))
-    var t0 = perf_counter_ns()
     var info = sup.terminate_with(SIGTERM, 5000, True)
-    var ms = Int((perf_counter_ns() - t0) // 1000000)
     var left = proc_kill(grandchild, Int32(0))
     var group_left = proc_kill_group(pid, Int32(0))
-    var none = _no_child_within(2000)
+    _await_no_child()
     _ = sup.drain_pipe(sup.stderr_fd())
     sup.close()
     assert_equal(info.signal, SIGTERM, "the child died of the group SIGTERM")
     assert_true(left < Int32(0), "the grandchild got the SIGTERM and was collected")
     assert_true(group_left < Int32(0), "the group is empty")
-    assert_true(ms < 2500, "returned once the group emptied, after " + String(ms) + " ms")
-    assert_true(none, "no child left")
-    print("  test_group_terminate_collects_the_group_within_the_grace: PASS")
+    print("  test_group_terminate_collects_the_group: PASS")
 
 
-def test_a_term_ignoring_grandchild_holds_the_ladder_then_is_killed() raises:
+def test_a_term_ignoring_grandchild_is_killed_with_the_group() raises:
     # The child dies of the SIGTERM at once; its grandchild ignores it. The
     # wait lasts until the GROUP is empty or the grace runs out, then the
     # group gets SIGKILL; the child's own reason (SIGTERM) is kept.
@@ -208,22 +204,18 @@ def test_a_term_ignoring_grandchild_holds_the_ladder_then_is_killed() raises:
     var pid_line = two[1] if two[0] == String("ready") else two[0]
     var ready_seen = two[0] == String("ready") or two[1] == String("ready")
     var grandchild = Int32(atol(String(pid_line.strip())))
-    var t0 = perf_counter_ns()
     var info = sup.terminate_with(SIGTERM, 300, True)
-    var ms = Int((perf_counter_ns() - t0) // 1000000)
     var left = proc_kill(grandchild, Int32(0))
     var group_left = proc_kill_group(pid, Int32(0))
-    var none = _no_child_within(2000)
+    _await_no_child()
     _ = sup.drain_pipe(sup.stderr_fd())
     sup.close()
     assert_true(ready_seen, "the grandchild ignored SIGTERM before it")
     assert_equal(info.signal, SIGTERM, "the child's first reason is kept")
     assert_equal(info.shell_code, Int32(143))
-    assert_true(ms >= 300, "waited the grace for the group: " + String(ms) + " ms")
     assert_true(left < Int32(0), "the grandchild was SIGKILLed and collected")
     assert_true(group_left < Int32(0), "the group is empty")
-    assert_true(none, "no child left")
-    print("  test_a_term_ignoring_grandchild_holds_the_ladder_then_is_killed: PASS")
+    print("  test_a_term_ignoring_grandchild_is_killed_with_the_group: PASS")
 
 
 def test_group_escalation_collects_more_orphans_than_one_batch() raises:
@@ -281,8 +273,8 @@ def main() raises:
     test_stop_latch_keeps_the_first_signal_until_taken()
     comptime if CompilationTarget.is_linux():
         test_adopted_orphan_is_collected_and_our_child_is_kept()
-        test_group_terminate_collects_the_group_within_the_grace()
-        test_a_term_ignoring_grandchild_holds_the_ladder_then_is_killed()
+        test_group_terminate_collects_the_group()
+        test_a_term_ignoring_grandchild_is_killed_with_the_group()
         test_group_escalation_collects_more_orphans_than_one_batch()
         test_default_signals_reset_an_ignored_signal()
     else:

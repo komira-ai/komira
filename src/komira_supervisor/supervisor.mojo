@@ -111,11 +111,20 @@ from .proc_ffi import (
 # from either nanosleep decl, so it sidesteps the conflict entirely. Resolution
 # is ~10ms-tick-grade, which is exactly what the grace poll needs.
 # -----------------------------------------------------------------------------
+def _usleep_micros(ms: Int) -> UInt32:
+    """The microseconds `_sleep_ms(ms)` passes to usleep: 0 (no sleep) for
+    `ms <= 0`, else `ms * 1000`."""
+    if ms <= 0:
+        return UInt32(0)
+    return UInt32(ms * 1000)
+
+
 def _sleep_ms(ms: Int):
     """Sleep `ms` milliseconds via usleep (microsecond granularity)."""
-    if ms <= 0:
+    var us = _usleep_micros(ms)
+    if us == UInt32(0):
         return
-    _ = external_call["usleep", Int32](UInt32(ms * 1000))
+    _ = external_call["usleep", Int32](us)
 
 
 # -----------------------------------------------------------------------------
