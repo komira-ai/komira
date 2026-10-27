@@ -220,6 +220,7 @@ TARGETS = [
     "komira//src/komira_parquet_api:table",
     "komira//src/komira_parquet_codec:komira_parquet_codec_conda",
     "komira//src/komira_parquet_codec:komira_parquet_codec_native",
+    "komira//src/komira_parquet_scan:komira_parquet_scan_conda",
     "komira//src/komira_parquet_writer:komira_parquet_writer_conda",
     "komira//src/komira_physical_plan:komira_physical_plan_conda",
     "komira//src/komira_plan_proto:optimized_golden_declared_needs_canonical",
