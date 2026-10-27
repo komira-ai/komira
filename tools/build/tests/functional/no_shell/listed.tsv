@@ -1,0 +1,5 @@
+# The no-shell list of the planted cases: x/defs.bzl has one busybox_sh and two sh_argv sites, x/run.sh is a script an action still runs, ci/ is a place for scripts people run.
+use	x/defs.bzl	busybox_sh	1	fixture
+use	x/defs.bzl	sh_argv	2	fixture
+script	x/run.sh	-	-	fixture
+human	ci/	-	-	fixture

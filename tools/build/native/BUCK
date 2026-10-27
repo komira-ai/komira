@@ -3,6 +3,12 @@
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "c_exe")
+load(":shared.bzl", "glibc_floor_test")
+
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
 
 # elfsyms: an archive's symbol table and its members' symbols (elfsyms.c).
 c_exe(
@@ -30,7 +36,7 @@ zig_test(
     imports = _NATIVE_SO,
     src = "native_so.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 # Built behind its unit tests: no shared library is checked unless they pass.
@@ -39,9 +45,9 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     imports = _NATIVE_SO,
     src = "native_so.zig",
-    unit_tests = [":native_so_unit"],
+    unit_tests = [":native_so_unit", _ZIG_VERSION],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
     visibility = ["PUBLIC"],
 )
 
@@ -55,7 +61,7 @@ zig_test(
     imports = _SRCS,
     src = "src/main.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 # prefix_tool (Zig): `header` writes a prefix_header's header, `check` is a
@@ -66,8 +72,16 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     imports = _SRCS,
     src = "src/main.zig",
-    unit_tests = [":prefix_tool_unit"],
+    unit_tests = [":prefix_tool_unit", _ZIG_VERSION],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
     visibility = ["PUBLIC"],
+)
+
+# The glibc floor is read from a platform row: a fixture row with a floor no
+# real row has (glibc 2.17) must give 2.17, so a constant floor is red here.
+glibc_floor_test(
+    name = "glibc_floor_fixture_row",
+    expect = "2.17",
+    os_floor = "glibc-2.17",
 )

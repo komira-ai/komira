@@ -5,9 +5,11 @@ A Mojo library published as a conda package (a `.conda`) installs
 `share/doc/<name>/README.md`. The Mojo compiler's default import
 path is that prefix's `lib/mojo`, where `std.mojoc` already sits, so a program
 that imports the library compiles with no `-I` flag and no activation script.
-The README is the library's documentation and its examples, the same bytes the
+The README is the library's documentation and its examples, the examples the
 library's welded `[tests][readme]` runs, so what a user reads is inside what
-they installed.
+they installed; when the library's closure ships native files, the packer
+appends the link commands a user needs (below, "The link commands in the
+README").
 Nothing here uploads anything: the build produces files; publishing is a
 separate, gated step that belongs to the release tool (kci).
 
@@ -50,7 +52,7 @@ disagree with it ([`conda.bzl`](../../tools/build/package/conda.bzl) lists each)
 | fact | where it comes from |
 |---|---|
 | name | `conda_name` of the library, else its import name (the `.mojoc` basename): lowercase letters, digits, `_`, starting with a letter |
-| run requirements | the platform guard (`__linux`), exactly `mojo-compiler ==<compiler version>`, then each **direct** dependency of the library, by its published name, at the same version **and the same build string** (`name ==<version> <build string>`), sorted. Direct only: every package of a release is built in lockstep, so the solver's closure is the build's, and a second build of a dependency in the channel cannot be chosen. Then the conda-forge requirement of each shared library it declares in `dlopen` (below) |
+| run requirements | the platform guard (`__linux`), for a library shipping native files `__glibc >=<floor>` (below), exactly `mojo-compiler ==<compiler version>`, then each **direct** dependency of the library, by its published name, at the same version **and the same build string** (`name ==<version> <build string>`), sorted. Direct only: every package of a release is built in lockstep, so the solver's closure is the build's, and a second build of a dependency in the channel cannot be chosen. Then the conda-forge requirement of each shared library it declares in `dlopen` (below) |
 | subdir | the target platform's constraints (a `select`), never an attribute. Only `linux-64` is written: a `.mojoc` cannot be cross-compiled, so another subdir needs a build for that platform. On any other target platform the package target still builds, as a refusal saying so |
 | payload | the library's gated `.mojoc`, so the package cannot exist until the library's own welded tests pass |
 | version | **the Mojo compiler version** the library is built with, below |
@@ -91,8 +93,9 @@ compact JSON): `format` (`kci.conda_metadata`), `schema_version`, `kind` (`libra
 `build_number`, `file_name`, `size`, `depends`, `timestamp_ms`,
 `source_commit`, `stamped`, `label`, and for a library `import_name`,
 `mojo_pin`, `payload_path`, `payload_sha256`, `doc_files` (path and sha256
-of each documentation file the package installs, `[]` when none), and
-`dlopen` when the library declares a shared library it opens; for a
+of each documentation file the package installs, `[]` when none),
+`dlopen` when the library declares a shared library it opens, and for a
+library shipping native files `lib_files` (below); for a
 metapackage `members` (name, version, build, sha256 each). The manifest's `version` is the compiler
 version; the build number, build string and source commit are metadata (kci's
 manifest has no key for them).
@@ -118,6 +121,62 @@ from the package rule, so a package rule that stopped passing it is red. A
 README that ships refuses relative links (`readme_examples generate --links
 refuse`): the installed copy has no neighbours. A metapackage ships no doc.
 
+### The link commands in the README
+
+A `.mojoc` holds no machine code, so a program using a library links every
+native library of the library's closure. When the closure ships any (a
+`lib<owner>_native.so.1`, or komira_log's holder archive), the installed
+README is the library's README.md byte for byte, then a section `## Linking`
+that `komira_pack readme-link`
+([`readme_link.zig`](../../tools/build/package/pack/readme_link.zig)) appends,
+ending in a fenced block whose info string is `sh komira-link`:
+
+```text
+mojo run -Xlinker -L$CONDA_PREFIX/lib -Xlinker -l<owner>... prog.mojo
+mojo build -Xlinker -L$CONDA_PREFIX/lib -Xlinker -l<owner>... [-Xlinker -l<static>...] -Xlinker -rpath -Xlinker '$ORIGIN/../lib' prog.mojo -o $CONDA_PREFIX/bin/prog
+```
+
+The owners are every shared library of the closure, dependents first (by the
+number of shared libraries in each owner's own closure, then by name:
+`readme_link_names` in tools/build/mojo/native_facts.bzl); a static archive is
+named on the `mojo build` line only. Appending keeps every line of the source
+at its number, so a report of the installed README run names the line of the
+repository's README; the source never carries the section (the packer refuses
+one holding a fence that names the marker), since it follows from the build graph. Before the
+packer reads the file, the README examples tool's `link-check` must parse the
+block back to exactly the arguments the packer wrote, and kci's install
+validation runs the README with that block's `mojo run` arguments and refuses a
+block that differs from what it computes from the release
+(src/kci_validate/readme_link.mojo). `conda_ships_readme` checks
+komira_encoding, whose closure ships no native file, so its README is the
+source byte for byte.
+
+### A library's native code in its package
+
+A library that owns C ships it in its own package
+(docs/design/native_packaging.md): `mojo_library(native = ":<name>_native")`
+names its shared library (tools/build/native/shared.bzl), which must link
+exactly the library's C `deps`, and the package holds it at
+`lib/lib<name>_native.so.1` (mode 0755) with the link name
+`lib/lib<name>_native.so`, a symbolic link to it. komira_log's holder is
+per-library state, so `native_static = True` ships it as
+`lib/libkomira_log_holder.a`. Each file has one `info/paths.json` row (the
+link a `softlink` with the sha256 and size of what it resolves to) and one
+`lib_files` row `{kind, path, sha256}` of `metadata.json` (`kind` `shared`,
+`link` or `static`), and the package requires `__glibc >=<floor>`, the
+`os_floor` of the platform table's linux-x86_64 row, the floor check 5 holds
+each shared library to; `conda-check` refuses a missing row, a changed byte
+and another floor. A package with no native file has no `lib_files` key and
+no `__glibc` requirement.
+
+A shared library's `NEEDED` may name another komira library's shared library
+only when that library is in the packed library's Mojo deps closure: its
+requirements are its Mojo deps, so an owner outside the closure would not be
+installed with it. `komira_pack conda` refuses such a package
+(komira_http_core depends on komira_crypto for this). The tests:
+`//tools/build/package:komira_pack_unit` (pack/conda_lib.zig) and
+`//tools/build/native/fixtures`.
+
 ### A library that cannot be packaged
 
 It keeps its package target, and the target **builds**: its directory holds one
@@ -126,8 +185,8 @@ file, `REFUSED`, with the reason. Refusing by failing would make
 release (`[release]`, `[release][manifest]`, `[release_check]`), naming the
 reason. The reasons:
 
-- it links native code (a `.mojoc` holds none, so a consumer would fail at its
-  own link);
+- it links native code that no library of its Mojo deps closure ships (a
+  `.mojoc` holds none, so a consumer would fail at its own link);
 - it has no tests (no test would gate its package);
 - it depends on a library with no package (`conda = False`, or itself refused);
 - its name is not a conda name;

@@ -417,9 +417,10 @@ def _sharded_is_not_found(msg: String) -> Bool:
 def shard_id_from_listing_entry(s: String, enum_prefix: String) -> String:
     """Given a LIST entry — EITHER a flat object key `<enum_prefix><shard_id>/...`
     OR a common-prefix `<enum_prefix><shard_id>/` — and the enum prefix, return
-    `<shard_id>` (the segment from the prefix up to the next `/`, or end-of-
-    string). Empty if `s` does not start with `enum_prefix` or has no shard
-    segment.
+    `<shard_id>` (the segment from the prefix up to the next `/`). Empty if `s`
+    does not start with `enum_prefix`, has no shard segment, or has no `/` after
+    it: a key directly under `_lineage/` has no lineage behind it, so it names
+    no shard (the same reading as `sublineage_shard_keys._shard_id_from_key`).
 
     THIS is the convergence point of the REAL-S3 LIST-DELIMITER-TRAP union: ONE
     helper serves BOTH arms, so the in-mem path (flat objects, `/manifest/...`
@@ -444,7 +445,7 @@ def shard_id_from_listing_entry(s: String, enum_prefix: String) -> String:
             break
         seg.append(sb[i])
         i += 1
-    if len(seg) == 0:
+    if len(seg) == 0 or i == len(sb):
         return String("")
     return String(StringSlice(unsafe_from_utf8=Span(seg)))
 

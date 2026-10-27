@@ -10,14 +10,24 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
 #
 #   komira_udf_runtime.h  the C ABI (section 4.3), Arrow structs embedded
 #   komira_udf_wire.h     the worker message header and ops (section 5.2)
+#   komira_udf_spike_descriptor.h
+#                         the spike runtimes' descriptor, version 1 (section 3.1)
 #   native/               the layout probe the tests compare the mirror with,
-#                         and the cancel store (the host's release store of a
-#                         call's cancel flag)
+#                         the cancel store (the host's release store of a
+#                         call's cancel flag), the timed call loops of
+#                         UdfRuntime.time_call_batch, the descriptor decoder
+#                         and validate's comparison, and the producer streams
+#                         of nested calls
 #   _cabi.mojo            the Mojo mirror of both headers
 #   _host.mojo            host side: exported arrays, streams and schemas with
 #                         counted releases; import validation of every output
 #   _table.mojo           dlopen, init, and the table's entries
-#   runtime.mojo          UdfRuntime: the value API, with the post-conditions
+#   _nested.mojo          a frame whose pulls the host answers on its own
+#                         context (section 4.3's one nesting)
+#   descriptor.mojo       the descriptor, encoded as a producer records it
+#   spec.mojo             the values UdfRuntime takes and returns
+#   runtime.mojo          UdfRuntime: the value API, with the post-conditions,
+#                         bisection and lost contexts
 #   wire.mojo             the message header codec and the op table
 #   cases.mojo, conform.mojo, cases/*.json
 #                         the conformance cases and their runner
@@ -86,7 +96,6 @@ mojo_library(
             "src/tests/helpers/komira_udf_spike_abi/cases/deadline_one_ns_ahead.json": "cases/deadline_one_ns_ahead.json",
             "src/tests/helpers/komira_udf_spike_abi/cases/deadline_reached_during_call.json": "cases/deadline_reached_during_call.json",
             "echo.so": ":echo",
-            "echo_global_lock.so": ":echo_global_lock",
             "echo_variant.so": ":echo_variant",
         },
         # The scan reads the harness's sources, both headers and the cases:
@@ -99,14 +108,28 @@ mojo_library(
     visibility = ["PUBLIC"],
 )
 
+# The cases as one directory, for the conformance tests of runtimes built in
+# other packages, which stage it at this package's path
+# (src/tests/helpers/komira_udf_spike_abi/cases, where load_cases reads it).
+filegroup(
+    name = "cases",
+    srcs = glob(["cases/*.json"]),
+    visibility = ["PUBLIC"],
+)
+
 # The C side.
 staged_files(
     name = "c_files",
     srcs = [
         "komira_udf_runtime.h",
+        "komira_udf_spike_descriptor.h",
         "komira_udf_wire.h",
+        "native/bench_loop.c",
         "native/cancel_flag.c",
         "native/layout_probe.c",
+        "native/producer.c",
+        "native/spike_descriptor.c",
+        "refrt/echo_admit.inc",
         "refrt/echo_calls.inc",
         "refrt/echo_frames.inc",
         "refrt/echo_runtime.c",
@@ -114,16 +137,23 @@ staged_files(
     ],
 )
 
-# The two headers, for the reference runtimes; the layout probe the Mojo
-# tests compare the mirror with; the cancel store the host's clock calls.
+# The three headers, for the reference runtimes; the layout probe the Mojo
+# tests compare the mirror with; the cancel store the host's clock calls; the
+# timed call loops the harness starts; the descriptor decoder every C runtime
+# validates with; the producer streams of nested calls.
 cxx_library(
     name = "komira_udf_spike_c",
+    compiler_flags = ["-O2", "-Wall", "-Werror"],
     srcs = [
+        ":c_files[native/bench_loop.c]",
         ":c_files[native/cancel_flag.c]",
         ":c_files[native/layout_probe.c]",
+        ":c_files[native/producer.c]",
+        ":c_files[native/spike_descriptor.c]",
     ],
     exported_headers = {
         "komira_udf_runtime.h": ":c_files[komira_udf_runtime.h]",
+        "komira_udf_spike_descriptor.h": ":c_files[komira_udf_spike_descriptor.h]",
         "komira_udf_wire.h": ":c_files[komira_udf_wire.h]",
     },
     header_namespace = "",
@@ -136,13 +166,9 @@ cxx_library(
 #                   implemented with fixed fixtures chosen by the spec's
 #                   entry. The suite must pass on it (test_conform_echo).
 #   echo_broken.so  komira-test/echo-broken: the same source with
-#                   KOMIRA_UDF_ECHO_BROKEN, seven planted defects (the file
+#                   KOMIRA_UDF_ECHO_BROKEN, eight planted defects (the file
 #                   header lists them). The suite must fail on it, on exactly
 #                   the cases that name those defects (test_conform_broken).
-#   echo_global_lock.so
-#                   echo through its second init: it reports global_lock 1
-#                   beside THREAD_SAFE, which UdfRuntime.open must refuse
-#                   (test_harness).
 #   echo_variant.so echo through its variant init (refrt/echo_variants.inc):
 #                   one thing wrong or at an edge in its table or describe
 #                   answer, named by KOMIRA_UDF_ECHO_VARIANT (test_harness).
@@ -150,9 +176,10 @@ cxx_library(
 # every C library under src/ whole, so two cannot share one), and a
 # one-function Mojo file forwards the ABI's export to one. Each library's gate
 # dlopens it and checks it exports exactly that symbol. echo_runtime.c
-# includes its other three parts (refrt/*.inc): one translation unit, every
+# includes its other four parts (refrt/*.inc): one translation unit, every
 # symbol but the inits static.
 _ECHO_PARTS = {
+    "echo_admit.inc": ":c_files[refrt/echo_admit.inc]",
     "echo_calls.inc": ":c_files[refrt/echo_calls.inc]",
     "echo_frames.inc": ":c_files[refrt/echo_frames.inc]",
     "echo_variants.inc": ":c_files[refrt/echo_variants.inc]",
@@ -160,12 +187,12 @@ _ECHO_PARTS = {
 
 cxx_library(
     name = "komira_udf_echo",
+    compiler_flags = ["-O2", "-Wall", "-Werror"],
     srcs = [":c_files[refrt/echo_runtime.c]"],
     headers = _ECHO_PARTS,
     header_namespace = "",
     preprocessor_flags = [
         "-DECHO_INIT=komira_udf_echo_init_v1",
-        "-DECHO_INIT_GLOBAL_LOCK=komira_udf_echo_global_lock_init_v1",
         "-DECHO_INIT_VARIANT=komira_udf_echo_variant_init_v1",
     ],
     deps = [":komira_udf_spike_c"],
@@ -174,6 +201,7 @@ cxx_library(
 
 cxx_library(
     name = "komira_udf_echo_broken",
+    compiler_flags = ["-O2", "-Wall", "-Werror"],
     srcs = [":c_files[refrt/echo_runtime.c]"],
     headers = _ECHO_PARTS,
     header_namespace = "",
@@ -185,18 +213,26 @@ cxx_library(
     visibility = ["PUBLIC"],
 )
 
-mojo_shared_lib(
-    name = "echo",
-    srcs = ["refrt/echo_so.mojo"],
-    exports = ["komira_udf_runtime_init_v1"],
-    exports_exact = True,
-    deps = [":komira_udf_echo"],
+# echo_runtime.c as a native UDF library (ECHO_NATIVE): the C fixture
+# library the native runtime of src/tests/helpers/komira_udf_spike_native
+# loads. Its shared libraries are built there.
+cxx_library(
+    name = "komira_udf_echo_native",
+    compiler_flags = ["-O2", "-Wall", "-Werror"],
+    srcs = [":c_files[refrt/echo_runtime.c]"],
+    headers = _ECHO_PARTS,
+    header_namespace = "",
+    preprocessor_flags = [
+        "-DECHO_INIT=komira_udf_echo_native_init_v1",
+        "-DECHO_NATIVE=1",
+    ],
+    deps = [":komira_udf_spike_c"],
     visibility = ["PUBLIC"],
 )
 
 mojo_shared_lib(
-    name = "echo_global_lock",
-    srcs = ["refrt/echo_global_lock_so.mojo"],
+    name = "echo",
+    srcs = ["refrt/echo_so.mojo"],
     exports = ["komira_udf_runtime_init_v1"],
     exports_exact = True,
     deps = [":komira_udf_echo"],

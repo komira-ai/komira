@@ -1,0 +1,105 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The values and on-disk formats the data-graph writer and reader share, parts 1
+# to 5 (the first of the packages in docs/design/knowledge_graph_port.md): the
+# packed f32 embedding cell, the extraction values (`Triple`, `EntityMention`,
+# `Extraction`), the snapshot manifest body (which
+# carries the graph's embedding dimension), the table schemas, cosine ranking of
+# a packed-embedding column, the structured query result with its JSON wire, the
+# delta layer over a base snapshot (chunk bodies and delta objects) and the
+# change gate's source fingerprints with their lineage on an object store, and
+# the snapshot lineage store itself: bases, delta chains, folds and retired
+# deltas on a conditional-write object store, and the exact searches over a
+# snapshot's tables (embedding similarity, full-text counts, out-degree) with
+# rank fusion.
+# It depends on komira_arrow (schemas, string columns) and that package's
+# closure, on komira_json (the result's wire), on komira_hash (the fingerprints),
+# on komira_objectstore (their lineage) and on komira_parquet_writer (Parquet delta
+# objects), on komira_parquet (to read a table's Parquet bytes back), and reads
+# no clock and no environment.
+#
+# The welded tests: test_embedding packs and unpacks f32 and f64 vectors and
+# holds a cell to a dimension; test_manifest_body round-trips the manifest and refuses
+# each corrupt body; test_ingest_types pins the extraction values;
+# test_utf8_check pins the validator every decoded string passes through;
+# test_schemas pins every table's columns, types and version; test_cosine scores
+# vector pairs (equal, opposite, orthogonal, zero, non-finite, every SIMD tail);
+# test_cosine_topk ranks a column with ties, null cells and out-of-range k;
+# test_query_result builds and round-trips a result; test_query_result_wire
+# pins the JSON text, the escapes and the version gate;
+# test_delta_body round-trips the delta and chain bodies and refuses each corrupt
+# one; test_delta_codec writes framed and Parquet delta objects and reads both
+# back to the same values; test_delta_codec_refusal refuses every damaged framed
+# object without allocating what its header claims; test_source_fingerprint pins
+# the hash values, that one changed byte changes the hash, and the set keyed by
+# partition and source; test_source_fingerprint_store runs the lineage on an
+# in-memory store; test_snapshot_store writes, reads back and refuses base
+# snapshots; test_snapshot_store_chain appends deltas and reads the chain back,
+# refusing a corrupt one; test_snapshot_store_races loses compare-and-set races
+# to a rival and checks they are retried, reported and bounded;
+# test_snapshot_store_compaction folds a chain, carries forward the deltas that
+# arrive meanwhile and retires the folded ones; test_compaction_policy pins the
+# fold trigger; test_search_scans writes snapshots and holds each scan to stated
+# rows, to cosine_topk, to the manifest's dimension and to the schema gate;
+# test_search_rrf pins the fused scores, the tie order and the refusals.
+mojo_library(
+    name = "komira_kg_format",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_hash:komira_hash",
+        "//src/komira_host:komira_host",
+        "//src/komira_json:komira_json",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_lz4:komira_lz4",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_objectstore:komira_objectstore_posix",
+        "//src/komira_parquet:komira_parquet",
+        "//src/komira_parquet_api:komira_parquet_api",
+        "//src/komira_parquet_codec:komira_parquet_codec",
+        "//src/komira_parquet_writer:komira_parquet_writer",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_stats:komira_plan_stats",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
+        "//src/komira_simd:komira_simd",
+        "//src/komira_zlib:komira_zlib",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_cosine.mojo",
+        "tests/test_cosine_topk.mojo",
+        "tests/test_delta_body.mojo",
+        "tests/test_delta_codec.mojo",
+        "tests/test_delta_codec_refusal.mojo",
+        "tests/test_embedding.mojo",
+        "tests/test_ingest_types.mojo",
+        "tests/test_manifest_body.mojo",
+        "tests/test_query_result.mojo",
+        "tests/test_query_result_wire.mojo",
+        "tests/test_schemas.mojo",
+        "tests/test_search_rrf.mojo",
+        "tests/test_search_scans.mojo",
+        "tests/test_compaction_policy.mojo",
+        "tests/test_snapshot_store.mojo",
+        "tests/test_snapshot_store_chain.mojo",
+        "tests/test_snapshot_store_compaction.mojo",
+        "tests/test_snapshot_store_races.mojo",
+        "tests/test_source_fingerprint.mojo",
+        "tests/test_source_fingerprint_store.mojo",
+        "tests/test_utf8_check.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

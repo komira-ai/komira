@@ -84,10 +84,17 @@ from komira_http_server.middleware.fault_report import (
     trace_header_of,
 )
 from komira_http_server.middleware.middleware import Middleware, RequestContext
-from komira_http_server.accept_loop import _write_all_or_buffer
+from komira_http_server.round_write import (
+    HEAD_KEPT,
+    _write_all_or_buffer,
+    _write_last,
+    carry_or_refuse_head,
+)
 from komira_http_server.connection import (
     ConnEntry,
+    HEAD_READ_BLOCKED,
     REQ_BUF_BYTES,
+    read_after_head_carry,
 )
 
 
@@ -259,10 +266,8 @@ def accumulate_chunked_body(
     client declares no length up front).
 
     PIPELINING: bytes recv'd PAST the terminating chunk are dropped. Neither
-    `git` nor `curl` pipelines a second request behind a chunked body, and this
-    round already declines cross-recv head buffering (`err.is_need_more()` drops
-    the conn), so this does not narrow what the transport supports. The caller
-    marks `body_split` so the in-buffer pipelining scan stops.
+    `git` nor `curl` pipelines a second request behind a chunked body. The
+    caller marks `body_split` so the in-buffer pipelining scan stops.
 
     ENCAPSULATION: `pending` / `out_body` are plain `List[UInt8]` locals owned by
     this frame and the caller's request; the recv lands in a stack `InlineArray`.
@@ -497,14 +502,9 @@ def serve_read_round_dispatch[
     var keep_alive = True
 
     while keep_alive:
-        var read_span = Span[UInt8](io_buf)
-        var rr = try_io_read(fd, read_span)
-        if rr.is_would_block():
+        var got = read_after_head_carry(entry, io_buf)
+        if got == HEAD_READ_BLOCKED:
             break
-        if rr.is_error():
-            keep_alive = False
-            break
-        var got = Int(rr.value())
         if got <= 0:
             keep_alive = False
             break
@@ -515,14 +515,19 @@ def serve_read_round_dispatch[
             var outcome = parse_request_head(parse_span, limits)
 
             if outcome.err.is_need_more():
-                # Partial request: no cross-recv buffering at this layer.
-                keep_alive = False
+                # The head's end has not arrived: keep its start, read on.
+                var hk = carry_or_refuse_head(
+                    entry, Span[UInt8](io_buf)[off:got], bytes_sent
+                )
+                if hk == 1:
+                    return True
+                keep_alive = hk == HEAD_KEPT
                 break
 
             if not outcome.err.is_ok():
                 var err_buf = List[UInt8]()
                 build_error_response_bytes(outcome.err.status, err_buf)
-                var w = _write_all_or_buffer(entry, err_buf, bytes_sent)
+                var w = _write_last(entry, err_buf, bytes_sent)
                 if w == 1:
                     return True
                 keep_alive = False
@@ -532,7 +537,7 @@ def serve_read_round_dispatch[
                 if not enable_expect_continue:
                     var err_buf = List[UInt8]()
                     build_error_response_bytes(UInt16(417), err_buf)
-                    var ew = _write_all_or_buffer(entry, err_buf, bytes_sent)
+                    var ew = _write_last(entry, err_buf, bytes_sent)
                     if ew == 1:
                         return True
                     keep_alive = False
@@ -634,7 +639,7 @@ def serve_read_round_dispatch[
                     # have forced.
                     var cerr_buf = List[UInt8]()
                     build_error_response_bytes(UInt16(400), cerr_buf)
-                    var cw = _write_all_or_buffer(entry, cerr_buf, bytes_sent)
+                    var cw = _write_last(entry, cerr_buf, bytes_sent)
                     if cw == 1:
                         return True
                     keep_alive = False
@@ -732,7 +737,7 @@ def serve_read_round_dispatch[
                     # M-2 accumulation above this branch is unreachable for
                     # content_length > 0, since any shortfall set body_split.)
                     keep_alive = False
-                    break
+                    break  # cov: unreachable a body short of its length in the buffer set body_split above and stopped
 
             off = off + advance
 
@@ -890,14 +895,9 @@ def serve_read_round_dispatch_chained[
     var keep_alive = True
 
     while keep_alive:
-        var read_span = Span[UInt8](io_buf)
-        var rr = try_io_read(fd, read_span)
-        if rr.is_would_block():
+        var got = read_after_head_carry(entry, io_buf)
+        if got == HEAD_READ_BLOCKED:
             break
-        if rr.is_error():
-            keep_alive = False
-            break
-        var got = Int(rr.value())
         if got <= 0:
             keep_alive = False
             break
@@ -908,13 +908,18 @@ def serve_read_round_dispatch_chained[
             var outcome = parse_request_head(parse_span, limits)
 
             if outcome.err.is_need_more():
-                keep_alive = False
+                var hk = carry_or_refuse_head(
+                    entry, Span[UInt8](io_buf)[off:got], bytes_sent
+                )
+                if hk == 1:
+                    return True
+                keep_alive = hk == HEAD_KEPT
                 break
 
             if not outcome.err.is_ok():
                 var err_buf = List[UInt8]()
                 build_error_response_bytes(outcome.err.status, err_buf)
-                var w = _write_all_or_buffer(entry, err_buf, bytes_sent)
+                var w = _write_last(entry, err_buf, bytes_sent)
                 if w == 1:
                     return True
                 keep_alive = False
@@ -924,7 +929,7 @@ def serve_read_round_dispatch_chained[
                 if not enable_expect_continue:
                     var err_buf = List[UInt8]()
                     build_error_response_bytes(UInt16(417), err_buf)
-                    var ew = _write_all_or_buffer(entry, err_buf, bytes_sent)
+                    var ew = _write_last(entry, err_buf, bytes_sent)
                     if ew == 1:
                         return True
                     keep_alive = False
@@ -988,7 +993,7 @@ def serve_read_round_dispatch_chained[
                 if chunk_rc == CHUNKED_BODY_MALFORMED:
                     var cerr_buf = List[UInt8]()
                     build_error_response_bytes(UInt16(400), cerr_buf)
-                    var cw = _write_all_or_buffer(entry, cerr_buf, bytes_sent)
+                    var cw = _write_last(entry, cerr_buf, bytes_sent)
                     if cw == 1:
                         return True
                     keep_alive = False
@@ -1187,13 +1192,9 @@ def serve_read_round_suspendable[
     pipelined-request case is a Stage-6 refinement; un-migrated one-step handlers
     are unaffected because they finish before the next recv)."""
     var fd = entry._fd
-    var read_span = Span[UInt8](io_buf)
-    var rr = try_io_read(fd, read_span)
-    if rr.is_would_block():
+    var got = read_after_head_carry(entry, io_buf)
+    if got == HEAD_READ_BLOCKED:
         return True
-    if rr.is_error():
-        return False
-    var got = Int(rr.value())
     if got <= 0:
         return False
 
@@ -1201,19 +1202,23 @@ def serve_read_round_suspendable[
     var outcome = parse_request_head(parse_span, limits)
 
     if outcome.err.is_need_more():
-        return False
+        # The head's end has not arrived: keep its start for the next read.
+        var hk = carry_or_refuse_head(
+            entry, Span[UInt8](io_buf)[0:got], bytes_sent
+        )
+        return hk == HEAD_KEPT or hk == 1
 
     if not outcome.err.is_ok():
         var err_buf = List[UInt8]()
         build_error_response_bytes(outcome.err.status, err_buf)
-        var w = _write_all_or_buffer(entry, err_buf, bytes_sent)
+        var w = _write_last(entry, err_buf, bytes_sent)
         return w == 1
 
     if outcome.expects_continue:
         if not enable_expect_continue:
             var err_buf = List[UInt8]()
             build_error_response_bytes(UInt16(417), err_buf)
-            var ew = _write_all_or_buffer(entry, err_buf, bytes_sent)
+            var ew = _write_last(entry, err_buf, bytes_sent)
             return ew == 1
         var interim_buf = List[UInt8]()
         build_100_continue_bytes(interim_buf)
@@ -1264,7 +1269,7 @@ def serve_read_round_suspendable[
             # `accumulate_chunked_body` returns a code instead of a Bool.
             var cerr_buf = List[UInt8]()
             build_error_response_bytes(UInt16(400), cerr_buf)
-            var cw = _write_all_or_buffer(entry, cerr_buf, bytes_sent)
+            var cw = _write_last(entry, cerr_buf, bytes_sent)
             return cw == 1
         if chunk_rc == CHUNKED_BODY_TRANSPORT_FAILED:
             return False
@@ -1387,13 +1392,9 @@ def serve_read_round_erased[
     first is parked — same scope limit as the suspendable round)."""
     comptime assert (RT.Sink == ED.Sink), ("serve_read_round_erased: RT.Sink must equal ED.Sink (the server pins " "one runtime sink across the dispatcher driver reactor).")
     var fd = entry._fd
-    var read_span = Span[UInt8](io_buf)
-    var rr = try_io_read(fd, read_span)
-    if rr.is_would_block():
+    var got = read_after_head_carry(entry, io_buf)
+    if got == HEAD_READ_BLOCKED:
         return True
-    if rr.is_error():
-        return False
-    var got = Int(rr.value())
     if got <= 0:
         return False
 
@@ -1401,19 +1402,23 @@ def serve_read_round_erased[
     var outcome = parse_request_head(parse_span, limits)
 
     if outcome.err.is_need_more():
-        return False
+        # The head's end has not arrived: keep its start for the next read.
+        var hk = carry_or_refuse_head(
+            entry, Span[UInt8](io_buf)[0:got], bytes_sent
+        )
+        return hk == HEAD_KEPT or hk == 1
 
     if not outcome.err.is_ok():
         var err_buf = List[UInt8]()
         build_error_response_bytes(outcome.err.status, err_buf)
-        var w = _write_all_or_buffer(entry, err_buf, bytes_sent)
+        var w = _write_last(entry, err_buf, bytes_sent)
         return w == 1
 
     if outcome.expects_continue:
         if not enable_expect_continue:
             var err_buf = List[UInt8]()
             build_error_response_bytes(UInt16(417), err_buf)
-            var ew = _write_all_or_buffer(entry, err_buf, bytes_sent)
+            var ew = _write_last(entry, err_buf, bytes_sent)
             return ew == 1
         var interim_buf = List[UInt8]()
         build_100_continue_bytes(interim_buf)
@@ -1457,7 +1462,7 @@ def serve_read_round_erased[
         if chunk_rc == CHUNKED_BODY_MALFORMED:
             var cerr_buf = List[UInt8]()
             build_error_response_bytes(UInt16(400), cerr_buf)
-            var cw = _write_all_or_buffer(entry, cerr_buf, bytes_sent)
+            var cw = _write_last(entry, cerr_buf, bytes_sent)
             return cw == 1
         if chunk_rc == CHUNKED_BODY_TRANSPORT_FAILED:
             return False

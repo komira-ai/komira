@@ -12,7 +12,7 @@ The design idea is **share-nothing per worker, and suspension as data**. No sche
 
 Terms: a **segment** is a `Segment` (a `komira_async_api` trait) whose `execute(state, worker_id, task_id)` does one unit of work, and a **task id** is an integer in `[0, n)`. A **shard** is one worker's share of one dispatch. A **morsel** is a chunk of input handed to one task. The **I/O lane** is an optional second set of workers that dispatch does not target.
 
-Out of scope: object-store file systems, HTTP framing, and what a segment computes. Those live in the libraries that sit on top of this one. `Segment`, `KeepAlive`, `CancellationToken` and the CPU lists live in `komira_async_api` and `komira_host` (`src/komira_async_api/worker_pool_traits.mojo`, `src/komira_async_api/token.mojo`, `src/komira_host/cpu_topology.mojo`) so that lower libraries can name them without depending on the runtime.
+Out of scope: object-store file systems, HTTP framing, and what a segment computes. Those live in the libraries that sit on top of this one. `Segment`, `KeepAlive`, `CancellationToken` and the CPU lists live in `komira_async_api` and `komira_host` (`src/komira_async_api/worker_pool_traits.mojo`, `src/komira_async_api/token.mojo`, `src/komira_host/src/komira_host/cpu_topology.mojo`) so that lower libraries can name them without depending on the runtime.
 
 ## How does it work?
 
@@ -29,7 +29,7 @@ run_with_state / spawn / SpillPrefetcher ──push──► worker i's queue
 
 `attach_io_workers` appends the I/O lane, so `worker_count()`, the number of dispatch shards, does not change. Its producer is `SpillPrefetcher` (`src/komira_async/runtime/spill_prefetch.mojo`), which `LocalDispatcher.make_spill_prefetcher()` hands out holding clones of the I/O lane's senders; it primes the OS page cache with a file's bytes. With no I/O lane attached the prefetcher is empty and does nothing.
 
-Worker placement is a value, `EnginePlacement` (`src/komira_host/engine_placement.mojo`), passed to the constructor or to `set_engine_placement` before `start()`. Every policy in it (`pin_workers`, `io_lane`, `numa_local`, `reserve_driver_cpu`) defaults to off, so by default the OS places and may migrate worker threads. `derive_io_placement` (`src/komira_host/cpu_topology.mojo`) picks the I/O lane's CPUs: hyperthread siblings if the machine has them, else the last of at least 17 compute CPUs, else a reserved driver CPU.
+Worker placement is a value, `EnginePlacement` (`src/komira_host/src/komira_host/engine_placement.mojo`), passed to the constructor or to `set_engine_placement` before `start()`. Every policy in it (`pin_workers`, `io_lane`, `numa_local`, `reserve_driver_cpu`) defaults to off, so by default the OS places and may migrate worker threads. `derive_io_placement` (`src/komira_host/src/komira_host/cpu_topology.mojo`) picks the I/O lane's CPUs: hyperthread siblings if the machine has them, else the last of at least 17 compute CPUs, else a reserved driver CPU.
 
 ### How does a worker loop?
 

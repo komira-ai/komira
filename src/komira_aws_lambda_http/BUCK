@@ -32,7 +32,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # three answers, two channels, the same drain position),
 # test_eventbridge_tick (the tick converter, the classifying loop and the
 # prefix its API Gateway arm is given, the mirror-image refusals between the
-# tick and API Gateway converters, and the drain position for that loop) and
+# tick and API Gateway converters, and the drain position for that loop),
+# test_apigw_v2_edges (the converter's remaining refusals and field kinds,
+# every verb, and the UTF-8 check behind isBase64Encoded swept over every
+# boundary), test_tick_pump_edges (the classifying loop's dispatcher-raise
+# arm, an init failure whose own channel fails, the tick path's edges),
+# test_ascii_ranges (both ends of every ASCII range a header name, the
+# authorizer prefix and a context key are checked against) and
 # test_no_env_reads (the package's sources read no environment).
 mojo_library(
     name = "komira_aws_lambda_http",
@@ -53,10 +59,13 @@ mojo_library(
     test_srcs = [
         "tests/test_apigw_authorizer.mojo",
         "tests/test_apigw_v2.mojo",
+        "tests/test_apigw_v2_edges.mojo",
+        "tests/test_ascii_ranges.mojo",
         "tests/test_authorizer_pump.mojo",
         "tests/test_eventbridge_tick.mojo",
         "tests/test_no_env_reads.mojo",
         "tests/test_pump_flush_ordering.mojo",
+        "tests/test_tick_pump_edges.mojo",
     ],
     visibility = ["PUBLIC"],
 )

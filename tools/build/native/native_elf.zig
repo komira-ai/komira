@@ -165,28 +165,28 @@ fn readSyms(alloc: Alloc, e: Elf, s: Section, skip_local: bool) ![]Sym {
     const raw = try e.data(s);
     const names = try e.strtab(s);
     if (raw.len % 24 != 0) return bad("a symbol table's size is not a multiple of 24");
-    var out = std.ArrayList(Sym).init(alloc);
+    var out = std.ArrayList(Sym).empty;
     var k: usize = 24;
     while (k < raw.len) : (k += 24) {
         const info = raw[k + 4];
         const bind = bindOf(info);
         if (skip_local and bind == .local) continue;
         const shndx = try rd(u16, raw, k + 6);
-        try out.append(.{
+        try out.append(alloc, .{
             .name = try cstr(names, try rd(u32, raw, k)),
             .defined = shndx != SHN_UNDEF,
             .bind = bind,
             .vis = visOf(raw[k + 5]),
         });
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 /// Every non-local symbol of every member of a static archive (`!<arch>`).
 pub fn readArchive(alloc: Alloc, b: []const u8) ![]Sym {
     if (b.len >= 8 and std.mem.eql(u8, b[0..8], "!<thin>\n")) return bad("a thin archive (its members are not in it)");
     if (b.len < 8 or !std.mem.eql(u8, b[0..8], "!<arch>\n")) return bad("not an ar archive");
-    var out = std.ArrayList(Sym).init(alloc);
+    var out = std.ArrayList(Sym).empty;
     var at: usize = 8;
     var members: usize = 0;
     while (at < b.len) {
@@ -201,13 +201,25 @@ pub fn readArchive(alloc: Alloc, b: []const u8) ![]Sym {
         const special = std.mem.eql(u8, name, "/") or std.mem.eql(u8, name, "/SYM64/") or std.mem.eql(u8, name, "//");
         if (!special) {
             const e = try Elf.open(alloc, b[start .. start + size], &.{ET_REL});
-            if (e.find(SHT_SYMTAB)) |s| try out.appendSlice(try readSyms(alloc, e, s, true));
+            if (e.find(SHT_SYMTAB)) |s| try out.appendSlice(alloc, try readSyms(alloc, e, s, true));
             members += 1;
         }
         at = start + size + (size & 1);
     }
     if (members == 0) return bad("an archive with no members");
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
+}
+
+/// Every symbol of an object's or a linked program's static symbol table
+/// (.symtab), locals included. A README program compiled to an object
+/// (`mojo build --emit object`) has each C function it reaches as an
+/// undefined symbol there. A file without a .symtab (a stripped program;
+/// the programs `mojo build` links are) is an error, never an empty list:
+/// a check that reads nothing cannot fail.
+pub fn readProgram(alloc: Alloc, b: []const u8) ![]Sym {
+    const e = try Elf.open(alloc, b, &.{ ET_REL, ET_EXEC, ET_DYN });
+    const s = e.find(SHT_SYMTAB) orelse return bad("no .symtab (a stripped program): its symbols cannot be read");
+    return readSyms(alloc, e, s, false);
 }
 
 /// A shared object's (or a dynamically linked program's) dynamic section,
@@ -218,34 +230,34 @@ pub fn readShared(alloc: Alloc, b: []const u8) !Shared {
     const dyn = e.find(SHT_DYNAMIC) orelse return bad("no dynamic section");
     const draw = try e.data(dyn);
     const dstr = try e.strtab(dyn);
-    var needed = std.ArrayList([]const u8).init(alloc);
-    var runpath = std.ArrayList([]const u8).init(alloc);
-    var rpath = std.ArrayList([]const u8).init(alloc);
+    var needed = std.ArrayList([]const u8).empty;
+    var runpath = std.ArrayList([]const u8).empty;
+    var rpath = std.ArrayList([]const u8).empty;
     var k: usize = 0;
     while (k + 16 <= draw.len) : (k += 16) {
         const tag = try rd(u64, draw, k);
         const val = try rd(u64, draw, k + 8);
         switch (tag) {
             DT_NULL => break,
-            DT_NEEDED => try needed.append(try cstr(dstr, val)),
+            DT_NEEDED => try needed.append(alloc, try cstr(dstr, val)),
             DT_SONAME => out.soname = try cstr(dstr, val),
-            DT_RUNPATH => try runpath.append(try cstr(dstr, val)),
-            DT_RPATH => try rpath.append(try cstr(dstr, val)),
+            DT_RUNPATH => try runpath.append(alloc, try cstr(dstr, val)),
+            DT_RPATH => try rpath.append(alloc, try cstr(dstr, val)),
             DT_SYMBOLIC => out.symbolic_tag = true,
             DT_FLAGS => out.flags = val,
             DT_FLAGS_1 => out.flags_1 = val,
             else => {},
         }
     }
-    out.needed = try needed.toOwnedSlice();
-    out.runpath = try runpath.toOwnedSlice();
-    out.rpath = try rpath.toOwnedSlice();
+    out.needed = try needed.toOwnedSlice(alloc);
+    out.runpath = try runpath.toOwnedSlice(alloc);
+    out.rpath = try rpath.toOwnedSlice(alloc);
 
     const ds = e.find(SHT_DYNSYM) orelse return bad("no dynamic symbol table");
     const dstrtab = try e.strtab(ds);
     // Version index -> name: needed versions (vna_other), defined ones (vd_ndx).
     var names = std.AutoHashMap(u16, []const u8).init(alloc);
-    var verneed = std.ArrayList(Need).init(alloc);
+    var verneed = std.ArrayList(Need).empty;
     if (e.find(SHT_GNU_VERNEED)) |vn| {
         const v = try e.data(vn);
         const vs = try e.strtab(vn);
@@ -260,7 +272,7 @@ pub fn readShared(alloc: Alloc, b: []const u8) !Shared {
                 const other = try rd(u16, v, aux + 6);
                 const ver = try cstr(vs, try rd(u32, v, aux + 8));
                 try names.put(other & 0x7fff, ver);
-                try verneed.append(.{ .file = file, .version = ver });
+                try verneed.append(alloc, .{ .file = file, .version = ver });
                 const next = try rd(u32, v, aux + 12);
                 if (next == 0) break;
                 aux += next;
@@ -288,7 +300,7 @@ pub fn readShared(alloc: Alloc, b: []const u8) !Shared {
 
     const raw = try e.data(ds);
     if (raw.len % 24 != 0) return bad("the dynamic symbol table's size is not a multiple of 24");
-    var syms = std.ArrayList(Sym).init(alloc);
+    var syms = std.ArrayList(Sym).empty;
     var i: usize = 1;
     while (i * 24 < raw.len) : (i += 1) {
         const at = i * 24;
@@ -305,10 +317,10 @@ pub fn readShared(alloc: Alloc, b: []const u8) !Shared {
             // 0 local, 1 the object's base (unversioned): no version name.
             if (idx >= 2) s.version = names.get(idx) orelse return bad("a symbol's version index names no version");
         }
-        try syms.append(s);
+        try syms.append(alloc, s);
     }
-    out.syms = try syms.toOwnedSlice();
-    out.verneed = try verneed.toOwnedSlice();
+    out.syms = try syms.toOwnedSlice(alloc);
+    out.verneed = try verneed.toOwnedSlice(alloc);
     return out;
 }
 

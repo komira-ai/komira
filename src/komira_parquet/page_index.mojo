@@ -244,7 +244,7 @@ def read_selected_pages_via_runs[FS: FileSystem](
     var dict_off = 0
     if meta.dictionary_page_offset:
         dict_off = meta.dictionary_page_offset.value()
-        if dict_off < meta.data_page_offset:
+        if dict_off > 0 and dict_off < meta.data_page_offset:
             dict_len = meta.data_page_offset - dict_off
     var total_bytes = 0
     var total_rows = 0

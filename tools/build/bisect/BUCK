@@ -6,8 +6,14 @@ load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "bisect_scenario")
 
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+
 _SRCS = [
     "classify.zig",
+    "flake.zig",
     "git.zig",
     "main.zig",
     "probe.zig",
@@ -30,10 +36,11 @@ _FIXTURES = [
         src = name + "_test.zig",
         imports = _SRCS + _FIXTURES,
         busybox = "komira//tools/build/toolchains:busybox",
-        zig = "komira//tools/build/toolchains:zig",
+        zig = _ZIG,
     )
     for name in [
         "classify",
+        "flake",
         "main",
         "report",
         "search",
@@ -42,6 +49,7 @@ _FIXTURES = [
 
 _UNIT = [
     ":classify_unit",
+    ":flake_unit",
     ":main_unit",
     ":report_unit",
     ":search_unit",
@@ -54,9 +62,9 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "main.zig",
     imports = _SRCS,
-    unit_tests = _UNIT,
+    unit_tests = _UNIT + [_ZIG_VERSION],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 # ---- Scenarios (testing/scenario.zig): one build action each -----------------
@@ -66,7 +74,7 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "testing/fake_buck2.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 zig_exe(
@@ -74,7 +82,7 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "testing/scenario.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
 )
 
 _SCENARIOS = [
@@ -82,6 +90,13 @@ _SCENARIOS = [
     "culprit_last",
     "culprit_middle",
     "flake",
+    "flake_check_infra",
+    "flake_fresh_base",
+    "flake_infra",
+    "flake_never",
+    "flake_no_cell",
+    "flake_not_measurable",
+    "flake_rate",
     "good_not_ancestor",
     "infra_boundary",
     "infra_retried",
@@ -109,8 +124,8 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "main.zig",
     imports = _SRCS,
-    unit_tests = _UNIT + [":" + s for s in _SCENARIOS],
+    unit_tests = _UNIT + [":" + s for s in _SCENARIOS] + [_ZIG_VERSION],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = _ZIG,
     visibility = ["PUBLIC"],
 )

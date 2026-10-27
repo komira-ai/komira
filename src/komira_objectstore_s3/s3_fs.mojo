@@ -289,6 +289,8 @@ struct S3Fs[
     var _clock: Self.K
     # Store 0 serves every verb; stores 1.. are the workers' (module header).
     var _stores: ArcPointer[List[S3Store[Self.C, Self.T, Self.K]]]
+    # None in production. See `set_test_clock`.
+    var _test_clock: Optional[ArcPointer[Int]]
 
     def __init__(
         out self,
@@ -324,6 +326,17 @@ struct S3Fs[
         self._stores = ArcPointer[List[S3Store[Self.C, Self.T, Self.K]]](
             List[S3Store[Self.C, Self.T, Self.K]]()
         )
+        self._test_clock = None
+
+    def set_test_clock(mut self, clock_cell: ArcPointer[Int]):
+        """Drive the request deadline of every store this file system builds,
+        and of every clone of it, from `clock_cell` (microseconds) instead of
+        the system clock, so a test decides how much time passes. Production
+        code never calls this; the field stays None."""
+        self._test_clock = Optional[ArcPointer[Int]](clock_cell)
+        ref stores = self._stores[]
+        for i in range(len(stores)):
+            stores[i].set_test_clock(clock_cell)
 
     @staticmethod
     def built(
@@ -349,7 +362,7 @@ struct S3Fs[
     def clone(self) -> Self:
         """A file system on the same bucket, configuration and options with
         its OWN, not yet built, store (a new Arc). Infallible."""
-        return Self(
+        var out = Self(
             self._bucket.copy(),
             self._config.copy(),
             self._mk_connector,
@@ -358,6 +371,8 @@ struct S3Fs[
             self._clock.copy(),
             self._options,
         )
+        out._test_clock = self._test_clock.copy()
+        return out^
 
     def _build_if_absent(self) raises:
         self._ensure_stores(1)
@@ -367,15 +382,16 @@ struct S3Fs[
         own from the factory."""
         ref stores = self._stores[]
         while len(stores) < n:
-            stores.append(
-                S3Store[Self.C, Self.T, Self.K](
-                    self._config.copy(),
-                    self._mk_connector,
-                    self._http_config,
-                    self._creds.copy(),
-                    self._clock.copy(),
-                )
+            var store = S3Store[Self.C, Self.T, Self.K](
+                self._config.copy(),
+                self._mk_connector,
+                self._http_config,
+                self._creds.copy(),
+                self._clock.copy(),
             )
+            if self._test_clock:
+                store.set_test_clock(self._test_clock.value())
+            stores.append(store^)
 
     def stores_built(self) -> Int:
         """The stores this file system has built: 0 before its first verb,

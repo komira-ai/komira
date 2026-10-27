@@ -1,5 +1,0 @@
-# A declared target matching nothing in the graph: UNMATCHED, first, in
-# units-file order.
-arg "{units_file}"
-input units_file "ghost\t//src/ghost:ghost\nlib_a\t//src/a/...\nshadow\ttests//functional/none/...\n"
-exit 0

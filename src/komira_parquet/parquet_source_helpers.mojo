@@ -83,7 +83,7 @@ def _chunk_range(chunk: ColumnChunk) -> Tuple[Int, Int]:
     var start = meta.data_page_offset
     if meta.dictionary_page_offset:
         var d = meta.dictionary_page_offset.value()
-        if d < start:
+        if d > 0 and d < start:
             start = d
     return (start, meta.total_compressed_size)
 

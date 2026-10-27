@@ -30,6 +30,7 @@ from komira_parquet.parquet_source_page_picks import (
 )
 from komira_arrow.record_batch import RecordBatch
 from komira_parquet_api.metadata import FileMetaData
+from komira_parquet_api.types import FieldRepetitionType
 from komira_runtime_paths import test_tmpdir
 from komira_test_parquet_file import TestColumn, TestFileLayout, write_parquet_file
 
@@ -171,6 +172,22 @@ def test_refusals() raises:
     var md2 = _meta(r2)
     with assert_raises(contains="has no page index"):
         _ = _decode_predicate_cols_with_picks(cache, r2, bare, md2, 0, [0], [0], 0, False)
+
+
+def test_a_nested_schema_is_refused() raises:
+    var path = _file("picks_nested.parquet", True)
+    var reader = _Reader.open(path)
+    var cache = ParquetPageIndexCache()
+    var picks = List[List[Int]]()
+    picks.append([0])
+    var grouped = _meta(reader)
+    grouped.schema[1].num_children = 2
+    with assert_raises(contains="is a group"):
+        _ = _decode_columns_with_per_col_picks(cache, reader, path, grouped, 0, [1], picks, False)
+    var repeated = _meta(reader)
+    repeated.schema[1].repetition_type = Optional[FieldRepetitionType](FieldRepetitionType.REPEATED)
+    with assert_raises(contains="is repeated"):
+        _ = _decode_predicate_cols_with_picks(cache, reader, path, repeated, 0, [0], [0], 0, False)
 
 
 def main() raises:

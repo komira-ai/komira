@@ -22,6 +22,7 @@
 #   * seam.mojo           `StageSteps` (the steps and the reads around
 #                         them), `StepEnd`
 #   * dispatch.mojo       `run_stage_with`, `kci_main_with`,
+#                         `kci_main_started_at`,
 #                         `evidence_line_of`
 #   * start_checks.mojo   under GitHub Actions, at start-up: the workflow,
 #                         the ref (main only; break-glass with a reason),
@@ -34,9 +35,13 @@
 #                         `append_summary`
 #   * deploy_step.mojo    a DEPLOY step: `deploy_step[S: CloudAdapter, St:
 #                         StateStore]`, the `CellDeploys` seam with
-#                         `CloudDeploys[S, St]` (one built-in cloud) and
-#                         `NoCloudBuilt` (the kci binary: every DEPLOY step
-#                         refused), `check_deploy_set_hash`, `plan_hash_of`
+#                         `CloudDeploys[S, St, T]` (one built-in cloud and
+#                         its registry client) and `NoCloudBuilt` (the kci
+#                         binary: every step into a cell refused), `check_deploy_set_hash`, `plan_hash_of`
+#   * cell_publish.mojo   a PUBLISH step into a cell: `cell_publish_step[S:
+#                         CloudAdapter, T: OciTransport & Copyable]`, the
+#                         release set's images pushed to the cell's
+#                         registry; `NoRegistryClient`
 #   * library_verbs.mojo  `LibrarySteps` (kci_build, kci_publish), the
 #                         composed secret store, `kci_main`
 #
@@ -80,6 +85,7 @@ from kci_cli.start_checks import (
 )
 from kci_cli.dispatch import (
     evidence_line_of,
+    kci_main_started_at,
     kci_main_with,
     recorder_for,
     run_stage_with,
@@ -93,6 +99,14 @@ from kci_cli.summary import (
     promotion_line,
     run_summary_markdown,
     superseded_line,
+)
+from kci_cli.cell_publish import (
+    CellPublishRequest,
+    NoRegistryClient,
+    cell_publish_request,
+    cell_publish_step,
+    cell_publish_without_cloud,
+    registry_host_and_path,
 )
 from kci_cli.deploy_step import (
     NOT_BUILT_WITH,
