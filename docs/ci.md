@@ -467,7 +467,7 @@ are the plan's.
   run gives the members the version `0.1.<run number>` (below).
 
 **Needs a mopm with `--no-commit` and `--abort`.** The jobs run the mopm that `mopm-stage` built: the pin
-`MOPM` in [`packages.bzl`](../release/readme_e2e/packages.bzl) (`toolchains//:mopm_0_0_73` in the
+`MOPM` in [`packages.bzl`](../release/readme_e2e/packages.bzl) (`toolchains//:mopm_0_0_81` in the
 `mopm-stage` job). The first mopm release with both flags is 0.0.66, so the pin has them; a later move of
 the pin must keep them, in the same change as the toolchain entry the job builds.
 
@@ -549,7 +549,7 @@ registry serves the bytes that were staged, and do the README examples of the pa
 2. **Download and check.**
    [`release_beta_fetch`](../tools/build/ci/release_beta_fetch/release_beta_fetch.zig)
    (`//tools/build/ci:release_beta_fetch`, built on the farm by this job and run on the runner,
-   because it makes requests; mopm 0.0.73 has no verb that fetches a file) reads the beta index
+   because it makes requests; mopm 0.0.81 has no verb that fetches a file) reads the beta index
    (`api.beta.mopm.dev/index/config.json`), requires its `stage` to be `beta`, requires its
    `channel_url` to be exactly `https://conda.beta.mopm.dev/` (a constant of the tool; any other URL is refused), and downloads `<channel_url><subdir>/<filename>` for every file of the plan, with the
    exact name and version the plan names, following no redirect and speaking only https. It compares
