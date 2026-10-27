@@ -38,7 +38,7 @@ load(":dlopen.bzl", "DLOPEN_ATTRS", "dlopen_refusal", "dlopen_rows")
 load(":helpers.bzl", "HELPER_ATTRS", "helper_files")
 load(":readme.bzl", "readme_gate", "readme_kwargs")
 load(":run_check.bzl", "run_check_validation")
-load(":test_limit.bzl", "TEST_LIMIT_ATTRS", "deadline_flags", "with_test_limit")
+load(":test_limit.bzl", "HANG_LIMIT_ATTRS", "TEST_LIMIT_ATTRS", "deadline_flags", "hang_limit_flags", "with_test_limit")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 def _toolchain(ctx):
@@ -413,6 +413,7 @@ def _library_impl(ctx):
     where = str(ctx.label.raw_target())
     test_defines = define_args(where, "test_assert_level", ctx.attrs.test_assert_level, "test_defines", ctx.attrs.test_defines)
     cap = memory_cap(where, "test_memory_cap_mib", ctx.attrs.test_memory_cap_mib, ctx.attrs.test_assert_level)
+    hang = hang_limit_flags(where, ctx.attrs.test_hang_limit_s)
 
     # The gate: one build + one run per test, against the UNGATED package.
     markers = []
@@ -446,7 +447,7 @@ def _library_impl(ctx):
         test_dir, staged = _test_root(ctx, "tests/{}/root".format(stem), exe, test_data.get(key, {}))
         ctx.actions.run(
             cmd_args(
-                gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), t.short_path), staged, marker.as_output(), cap_flags(cap), env_args),
+                gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), t.short_path), staged, marker.as_output(), cap_flags(cap) + hang, env_args),
                 hidden = test_dir,
             ),
             env = rerun_env(ctx),
@@ -542,7 +543,7 @@ def _library_impl(ctx):
 # dynamic action, which compiles and runs each example (the convention and
 # the gate are described there).
 
-def _readme_test_impl(actions, label, gate_label, examples, package, src, marker, objects, owner, tc, closure, opt_level, link_tail, env_args, rerun):
+def _readme_test_impl(actions, label, gate_label, examples, package, src, marker, objects, owner, tc, closure, opt_level, link_tail, env_args, rerun, hang_flags):
     lines = [x.strip() for x in examples.read_string().split("\n") if x.strip()]
     if not lines:
         actions.write(marker, "NO EXAMPLE {}: no ```mojo example, so nothing was compiled or run\n".format(gate_label))
@@ -561,7 +562,7 @@ def _readme_test_impl(actions, label, gate_label, examples, package, src, marker
         m = actions.declare_output("tests/readme/{}.passed".format(line))
         actions.run(
             cmd_args(
-                gate_mojo(tc, "{}:{}".format(gate_label, line), staged, m.as_output(), [], env_args),
+                gate_mojo(tc, "{}:{}".format(gate_label, line), staged, m.as_output(), hang_flags, env_args),
                 hidden = root,
             ),
             env = rerun,
@@ -583,6 +584,7 @@ _readme_test = dynamic_actions(
         "env_args": dynattrs.value(list[str]),
         "examples": dynattrs.artifact_value(),
         "gate_label": dynattrs.value(str),
+        "hang_flags": dynattrs.value(list[str]),
         "label": dynattrs.value(Label),
         "link_tail": dynattrs.value(typing.Any),
         "marker": dynattrs.output(),
@@ -641,7 +643,7 @@ mojo_library_rule = rule(
         # itself built from a mojo_library, so a default would be a cycle.
         "readme": attrs.option(attrs.source(), default = None),
         "readme_tool": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
-    } | COVERAGE_ATTRS | DLOPEN_ATTRS | MUTATION_ATTRS | NATIVE_ATTRS | NATIVE_REACH_ATTRS | LIBRARY_DEFINE_ATTRS | RERUN_ATTRS | _TOOLCHAIN_ATTR,
+    } | COVERAGE_ATTRS | DLOPEN_ATTRS | MUTATION_ATTRS | NATIVE_ATTRS | NATIVE_REACH_ATTRS | LIBRARY_DEFINE_ATTRS | HANG_LIMIT_ATTRS | RERUN_ATTRS | _TOOLCHAIN_ATTR,
 )
 
 # ---- mojo_binary / mojo_test ----------------------------------------------
@@ -935,7 +937,7 @@ def _shared_lib_impl(ctx):
         marker = ctx.actions.declare_output("gate/{}.passed".format(stem))
         ctx.actions.run(
             cmd_args(
-                gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), stem), staged, marker.as_output()),
+                gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), stem), staged, marker.as_output(), hang_limit_flags(str(ctx.label.raw_target()), ctx.attrs.test_hang_limit_s)),
                 hidden = root,
             ),
             env = rerun_env(ctx),
@@ -972,7 +974,7 @@ mojo_shared_lib_rule = rule(
         "optimization_level": attrs.string(default = SHIPPED_OPT_LEVEL),
         "out_name": attrs.option(attrs.string(), default = None),
         "srcs": attrs.list(attrs.source()),
-    } | _TOOLCHAIN_ATTR | COVERAGE_SHARED_LIB_ATTRS | RERUN_ATTRS,
+    } | _TOOLCHAIN_ATTR | COVERAGE_SHARED_LIB_ATTRS | HANG_LIMIT_ATTRS | RERUN_ATTRS,
 )
 
 def _mojo_library(**kwargs):
