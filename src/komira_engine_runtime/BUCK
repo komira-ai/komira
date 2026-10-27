@@ -5,14 +5,17 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # runtime built from them, morsel sizing as a pure function of the host profile
 # and the segment (recorded in the physical plan), the dispatch-time fan-out
 # grain, the run and segment execution context, the parallel RecordBatch concat,
-# counters, the small shared row and column helpers, the THSPLC column codec
-# with the RecordBatch <-> ColumnNativeBatch bridges, and filter-by-predicate
-# over either batch form. It depends on no engine package above it.
+# the memory reservation a breaker grows against the host budget, the spill
+# storage, the shuffle combine buffer and retention policy, counters, the small
+# shared row and column helpers, the THSPLC column codec with the RecordBatch <->
+# ColumnNativeBatch bridges, and filter-by-predicate over either batch form. It
+# depends on no engine package above it.
 mojo_library(
     name = "komira_engine_runtime",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
         "//src/komira_async:komira_async",
         "//src/komira_async_api:komira_async_api",
         "//src/komira_atomic_alias:komira_atomic_alias",
@@ -20,11 +23,17 @@ mojo_library(
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
         "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_counters:komira_counters",
         "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_fs:komira_fs",
         "//src/komira_host:komira_host",
+        "//src/komira_libc:komira_libc",
         "//src/komira_morsel:komira_morsel",
+        "//src/komira_objectstore:komira_objectstore",
         "//src/komira_physical_plan:komira_physical_plan",
         "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_shuffle:komira_shuffle",
     ],
     test_srcs = [
         "tests/test_cb20_morsel_count_mechanism.mojo",
@@ -37,6 +46,8 @@ mojo_library(
         "tests/test_concat_release_state.mojo",
         "tests/test_counters.mojo",
         "tests/test_dynamic_filter_band_sink.mojo",
+        "tests/test_filesystem_spill_fsync.mojo",
+        "tests/test_filesystem_spill_storage.mojo",
         "tests/test_fnv1a_and_async_wake.mojo",
         "tests/test_hardware_profile.mojo",
         "tests/test_hardware_profile_detect.mojo",
@@ -45,11 +56,16 @@ mojo_library(
         "tests/test_hw_ecore_l2_morsel_sizing.mojo",
         "tests/test_join_probe_grain_seam.mojo",
         "tests/test_l1_chunk_sizing.mojo",
+        "tests/test_local_disk_spill_storage.mojo",
         "tests/test_machine_topology.mojo",
+        "tests/test_memory_reservation_budget.mojo",
         "tests/test_morsel_sizing_policy.mojo",
         "tests/test_row_group_ref_borrow.mojo",
         "tests/test_scan_source_streaming_morsel.mojo",
         "tests/test_segment_execution.mojo",
+        "tests/test_shuffle_combine_buffer.mojo",
+        "tests/test_shuffle_retention_policy.mojo",
+        "tests/test_spill_prefetch_seam.mojo",
         "tests/test_spill_thsplc_robustness.mojo",
         "tests/test_streaming_microbench.mojo",
         "tests/test_thsplc_roundtrip.mojo",

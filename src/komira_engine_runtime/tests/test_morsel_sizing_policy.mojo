@@ -6,7 +6,7 @@
 # maintainer-ratified design memo: an internal agent note
 #  ().
 #
-# Test plan (5 cases per slot brief):
+# Test plan (5 cases):
 #   1. Formula correctness — synthetic HardwareProfile (L2-per-worker share
 #      128 KiB -> a 64 KiB budget) + synthetic Schema (Int64-only, 8 bytes/row)
 #      -> expected morsel rows per tier.
