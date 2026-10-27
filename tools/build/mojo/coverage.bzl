@@ -471,7 +471,7 @@ def coverage_readme(ctx, tc, build, readme, closure, link_tail, src_dir, import_
     program beside it and runs them all (with no example it prints that it
     ran nothing), built at -O0 with line tables against `closure` (the
     ungated package, as the README's gated runs are) through `build`
-    (defs.bzl's _build_executable, its link `link_tail` as the gated runs'),
+    (compile.bzl's _build_executable, its link `link_tail` as the gated runs'),
     and run under kcov with the library's `env_args`. Adds them to `bins`
     and `runs` as `readme`. Its report names the programs
     `buck-out/readme/<package>/readme_<import>[_<line>].mojo`: no repository
@@ -508,7 +508,7 @@ def coverage_test(ctx, tc, build, main, closure, c_link, defines, data, env_args
     providers), `[coverage][bin]` and MojoCoverageTestInfo; ({}, [])
     otherwise. The binary is the test's main (`main`, with its other `srcs`)
     built at -O0 with line tables against its `deps` (`closure`, `c_link`)
-    with its `defines`, through `build` (defs.bzl's _build_executable). A
+    with its `defines`, through `build` (compile.bzl's _build_executable). A
     test whose main is generated, or with `args` (a coverage run passes
     none), has no binary, and its MojoCoverageTestInfo says why."""
     link = coverage_link_dir(ctx)
@@ -923,7 +923,7 @@ def _check_shared_tools(ctx):
 def coverage_shared_lib(ctx, tc, build, srcs, main, closure, c_link, link_extra, so_file):
     """The `coverage` sub-target of a mojo_shared_lib with coverage builds
     (`coverage_debug` set), as {"coverage": ...}; {} without. `build` is
-    defs.bzl's _build_executable, and the rest what the release build of
+    compile.bzl's _build_executable, and the rest what the release build of
     the library is given: its sources, `main`, the closure of its Mojo
     dependencies, its C libraries, its extra link arguments and its file
     name.

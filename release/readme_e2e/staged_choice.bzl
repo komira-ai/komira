@@ -8,7 +8,10 @@
   stage                    //release/staged_set:set, the files `mopm stage` wrote in the
                            release workflow (job `mopm-stage`), the set that is published.
                            `mopm stage` asks the registry about each version, so it cannot
-                           run as a build action.
+                           run as a build action. The workflow gives every package the version
+                           of its run first, so the release passes
+                           `-c komira_release.beta_version=0.1.<n>` with it (optional: without
+                           it the version is the one of `packages.bzl`).
   beta                     //release/beta_set:set, the files of the beta channel as the job
                            `mopm-e2e-beta` downloaded them after `mopm-publish-beta`: the plan
                            and READMEs `mopm-stage-beta` staged, the `.conda` files the
@@ -37,10 +40,15 @@ def staged_label():
 
 def staged_version(release_version):
     """The version the e2e expects of each package: `release_version` (the one of packages.bzl), or
-    with the `beta` set the version of the beta run, `-c komira_release.beta_version`."""
-    if _which() != "beta":
+    the version of the run, `-c komira_release.beta_version`: required with the `beta` set, and
+    taken with the `stage` set when given (the release workflow gives every package the version
+    of its run before it stages). The `assembled` set always has `release_version`."""
+    which = _which()
+    if which == "assembled":
         return release_version
     beta = read_config("komira_release", "beta_version", "")
+    if not beta and which == "stage":
+        return release_version
     if not beta:
         fail("komira_release.staged is `beta`: -c komira_release.beta_version=<0.1.n> names the version the beta set holds")
     if beta.count(".") != 2:
