@@ -20,6 +20,7 @@ from std.testing import TestSuite, assert_equal, assert_true
 from komira_compression.codec_libraries import (
     LIBBZ2_SONAME,
     LIBLZMA_SONAME,
+    LIBSNAPPY_SONAME,
     LIBZSTD_SONAME,
     _open_codec_library,
 )
@@ -47,9 +48,24 @@ def _check_missing(soname: StaticString) raises:
 
 
 def test_every_owned_soname_opens() raises:
+    _ = _open_codec_library(LIBSNAPPY_SONAME)
     _ = _open_codec_library(LIBZSTD_SONAME)
     _ = _open_codec_library(LIBBZ2_SONAME)
     _ = _open_codec_library(LIBLZMA_SONAME)
+
+
+def test_a_missing_snappy_library_is_named() raises:
+    _check_missing(LIBSNAPPY_SONAME)
+
+
+def test_the_snappy_c_api_resolves_in_the_opened_library() raises:
+    # The three entry points snappy_block.mojo calls, looked up in the
+    # library the opener returns: a library that opens but is not snappy's C
+    # API (or a renamed symbol) fails here, not at a codec call.
+    var handle = _open_codec_library(LIBSNAPPY_SONAME)
+    assert_true(handle.check_symbol("snappy_compress"))
+    assert_true(handle.check_symbol("snappy_uncompress"))
+    assert_true(handle.check_symbol("snappy_uncompressed_length"))
 
 
 def test_a_missing_zstd_library_is_named() raises:

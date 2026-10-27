@@ -26,13 +26,16 @@ library-only package for lz4 (`liblz4`), zstd (`libzstd`) or bzip2
 (`libbzip2`), so those rows keep `lz4-c`, `zstd` and `bzip2`, which also
 install command-line tools. For `liblzma.so.5` it publishes the library-only
 `liblzma` (from 5.6.3 on linux-64), which `xz` itself now requires; the row
-still says `xz` until its library (komira_compression) declares it.
+still says `xz` until its library (komira_compression) declares it. `snappy`
+ships the library and the C header (`lib/libsnappy.so.1`, linux-64, from 1.1.9
+through the latest build); komira_compression opens it at run time.
 """
 
 SYSTEM_LIBS = {
     "libbz2.so.1.0": "bzip2 >=1.0.8,<2",
     "liblz4.so.1": "lz4-c >=1.9.3,<2",
     "liblzma.so.5": "xz >=5.2.5,<6",
+    "libsnappy.so.1": "snappy >=1.1.9,<2",
     "libz.so.1": "libzlib >=1.2.13,<2",
     "libzstd.so.1": "zstd >=1.5.2,<2",
 }
