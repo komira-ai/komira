@@ -11,21 +11,26 @@
 # THE MOPM JOBS. The libraries moved to mopm (every src/<name> that has a
 # mopm.toml; //release:mopm_artifacts builds them) are published to the mopm
 # registry as one group, apart from the release set, in four steps:
-# build, stage, try, publish.
-#   `mopm-stage`    on every push to main (and on a manual run, which only
+# build, stage, try, publish. The beta publish runs on every push to main; the prod
+# publish runs NIGHTLY (a schedule on main), to start. There is no switch variable.
+#   `mopm-stage`    on every push to main and every nightly run (and on a manual run, which only
 #                   stages): builds the packages and the pinned mopm on the
-#                   farm; `mopm stage` writes the staged set S on the runner (it
+#                   farm; gives every member the version 0.1.<run number> on
+#                   its checkout (a version can be created once on a registry,
+#                   so every release carries new ones; nothing is pushed back);
+#                   `mopm stage` writes the staged set S on the runner (it
 #                   asks the registry which versions exist, so it cannot be a
 #                   build action); the README e2e of every package runs on the
 #                   farm against S (//release/readme_e2e/verify:all, with
-#                   `-c komira_release.staged=stage`); then `mopm publish
-#                   --staged S --registry prod --dry-run`. It sends nothing and
-#                   holds no token.
+#                   `-c komira_release.staged=stage` at that version); then
+#                   `mopm publish --staged S --registry prod --dry-run`. It
+#                   sends nothing and holds no token.
 #   `prod-stage`, `prod-test`, `prod-commit`, `prod-abort`, `prod-smoke`  the
-#                   prod publish, in five jobs, ONLY on a push to main and when
-#                   the repository variable MOPM_PUBLISH_ENABLED is `true` (it is
-#                   unset: every one is skipped, and no job reaches the
-#                   environment `prod`). It stages the set the e2e of `mopm-stage`
+#                   prod publish, in five jobs, ONLY on the nightly schedule from main
+#                   (never on a push, never on a manual run), and
+#                   `prod-stage` only after `mopm-e2e-beta` passed: the set it
+#                   stages is the one, at the same versions, that the beta e2e
+#                   proved. It stages the set the e2e of `mopm-stage`
 #                   passed on, tests the files the registry now holds in
 #                   quarantine, and only then commits:
 #     prod-stage    (environment `prod`, `id-token: write`, no secret) `mopm
@@ -52,19 +57,17 @@
 #                   (0.0.66 and later) and a registry whose prod CI identity may
 #                   act for the package owner; docs/ci.md, "The prod publish".
 #   `mopm-stage-beta`, `mopm-publish-beta`  after `mopm-stage`, ONLY on a push
-#                   to main and when the repository variable
-#                   MOPM_BETA_PUBLISH_ENABLED is `true` (it is unset: both are
-#                   skipped). The first stages the same built packages against
+#                   to main or the nightly run (so the nightly prod set always has a
+#                   beta publish and e2e at its own version). The first stages the same built packages against
 #                   the registry `beta` (the set of `mopm-stage` is planned
 #                   against prod), after giving every member of its checkout
-#                   the version 0.1.<run number> (a version can be created
-#                   once, so each push needs its own; nothing is pushed back);
+#                   the same version 0.1.<run number> as `mopm-stage` did;
 #                   the second publishes that set to `beta`, in
 #                   the environment `beta`, with the job's GitHub OIDC identity
 #                   (`--oidc`) and no secret. What
-#                   must exist before the variable is set is in docs/ci.md,
-#                   "Enabling the mopm beta publish".
-#   `mopm-e2e-beta`  after `mopm-publish-beta`, under its gate, in the environment
+#                   must exist on the registry first is in docs/ci.md,
+#                   "Before the first release".
+#   `mopm-e2e-beta`  after `mopm-publish-beta`, on a push to main or the nightly run, in the environment
 #                   `build` (it joins the farm; a job holds one environment): it
 #                   downloads the files the beta registry serves, checks each one's
 #                   sha256 and size against the staged plan, and runs the README e2e
@@ -76,8 +79,8 @@
 # no action ran on the runner, and then runs the programs those builds made, as
 # binaries. No step runs buck2 around buck2.
 #   1. //release/ci:check_release_ref, the guard (release/ci/release_lib/
-#      ref_guard.zig has the rules): the run is a push to main of a commit on
-#      main's history, or a manual run with a reason; the checkout is that
+#      ref_guard.zig has the rules): the run is a push to main or a nightly
+#      (schedule) run, of a commit on main's history, or a manual run with a reason; the checkout is that
 #      commit; a push of a commit without release/artifacts.textproto has
 #      nothing to release and is skipped, a manual run of one is refused.
 #   2. //release/ci:release_json `stamp`: the build number, source commit and
@@ -90,21 +93,26 @@
 #      release.json: a package whose bytes, name, platform or metadata are not
 #      what its manifest says, or that is not stamped, is a red build.
 #
-# Triggers: a push to main (not one that touches only documentation:
+# Triggers: the NIGHTLY schedule (one cron, 03:17 UTC, a quiet hour; GitHub runs a
+# schedule on the default branch's latest commit, so it is a run of main), a push to
+# main (not one that touches only documentation:
 # `paths-ignore`, the same documentation the stamp does not count) and a
-# manual run, and nothing else. A pull request never starts this workflow (pr.yml
+# manual run, and nothing else (a schedule does not follow `paths-ignore`: the
+# nightly run is on main's head whatever the last push touched). A pull request never starts this workflow (pr.yml
 # answers it), so no environment or release job is reached from a pull
 # request's code.
 #
-# ONE RELEASE AT A TIME (concurrency). A PUSH to main is in the group
+# ONE RELEASE AT A TIME (concurrency). A PUSH to main and the NIGHTLY run are in the group
 # `release-main`: a running release is NEVER cancelled; GitHub keeps at most
 # one PENDING run per group, and a newer one cancels the pending one and takes
 # its place, so the newest pushed revision wins and queued pushes coalesce
 # (main moves forward only, so the newer push carries the older one's
 # changes). A cancelled pending run shows as cancelled with no summary: it
-# never started. A manual run is never in that group: it is in
+# never started. A pending nightly run that a push replaces is lost: prod waits for the
+# next night (nothing half-done, the run never started). A manual run is never in that group: it is in
 # `release-ref-<ref name>`. GitHub compares the group's `github.ref` ignoring
-# case, so a push of a branch `MAIN` would join it too: the guard refuses a
+# case, so a nightly run and a push run never publish at once (they stage against the
+# same registry state), and a push of a branch `MAIN` would join it too: the guard refuses a
 # ref that is main in another case, and the repository ruleset that refuses
 # such branches (docs/ci.md) keeps them out.
 #
@@ -123,6 +131,9 @@
 name: release
 
 on:
+  # the nightly prod publish (and the beta publish with it): 03:17 UTC
+  schedule:
+    - cron: '17 3 * * *'
   push:
     branches: [main]
     # documentation only: no release (the stamp does not count these either)
@@ -139,7 +150,7 @@ on:
 permissions: {}
 
 concurrency:
-  group: release-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || format('ref-{0}', github.ref_name) }}
+  group: release-${{ (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && 'main' || format('ref-{0}', github.ref_name) }}
   cancel-in-progress: false
 
 jobs:
@@ -227,7 +238,7 @@ jobs:
         run: ./buck2 kill || true
 
   # Build, stage and try the mopm packages (see the header). It runs on every
-  # push to main, whether or not publishing is enabled, and on a manual run,
+  # push to main and every nightly run, and on a manual run,
   # which sends nothing either: this job reads no token.
   mopm-stage:
     runs-on: ubuntu-24.04
@@ -270,7 +281,7 @@ jobs:
         with:
           args: build //release:mopm_artifacts --out ${{ runner.temp }}/mopm-publish/artifacts
           assert-remote: ${{ steps.assert.outputs.path }}
-      # Built here, run only by `mopm-stage-beta` (no step of this job runs it): the beta
+      # Built here, run here (the version of this run, below) and by `mopm-stage-beta`: the beta
       # job has no farm and no buck2, so it takes the tool from this job's artifact.
       - name: build the beta version tool
         uses: ./.github/actions/buck2-farm
@@ -284,6 +295,17 @@ jobs:
         with:
           args: build //tools/build/ci:release_staged_verify --out ${{ runner.temp }}/mopm-publish/release_staged_verify
           assert-remote: ${{ steps.assert.outputs.path }}
+      # THE VERSION OF THIS RUN. A (name, version) pair can be created once on a registry, and a
+      # mopm version is exactly MAJOR.MINOR.PATCH, so every release carries new versions: every
+      # member's version is set to 0.1.<run number> on this job's checkout (inside >=0.1,<0.2,
+      # above 0.1.0, and the newest push is the newest version), with the exact pins between
+      # members. `mopm-stage-beta` does the same on its own checkout, so beta and prod stage the
+      # same versions. Nothing is committed or pushed back. `mopm stage` reads each version from
+      # mopm.toml when it runs, and the built packages carry none, so this is all they need.
+      - name: every member gets the version of this run
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: '"$RUNNER_TEMP/mopm-publish/release_beta_version" --workspace-root src --version "0.1.$RUN_NUMBER"'
       # STAGE. Packs each member of src/ from its built `.mojoc` (compiler: MOJO
       # of packages.bzl), asks the registry, without a token, which versions it
       # holds, and writes the staged set: plan.json, each `.conda`, each README.
@@ -298,7 +320,7 @@ jobs:
       - name: the README e2e against the staged set
         uses: ./.github/actions/buck2-farm
         with:
-          args: build -c komira_release.staged=stage //release/readme_e2e/verify:all
+          args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
           assert-remote: ${{ steps.assert.outputs.path }}
       # Reads plan.json and hashes every file; sends nothing and reads no token.
       - name: mopm publish --staged --dry-run
@@ -328,14 +350,14 @@ jobs:
         if: always()
         run: ./buck2 kill || true
 
-  # THE PROD PUBLISH, in five jobs (see the header). DISABLED: every one runs
-  # only on a push to main and when the repository variable MOPM_PUBLISH_ENABLED
-  # is exactly `true`, and nobody has set it (docs/ci.md, "The prod publish",
-  # says what must exist first). While it is unset every job is skipped before it
-  # starts: none is assigned a runner and the environment `prod` is not
-  # reached. No job holds a registry token: the registry trusts the identity
+  # THE PROD PUBLISH, in five jobs (see the header). Every one runs only on the
+  # nightly schedule from main (a push never publishes to prod, and a manual run never
+  # reaches the environment `prod`), and `prod-stage`
+  # also needs `mopm-e2e-beta`, so a set the beta e2e did not pass is never staged
+  # in prod (docs/ci.md, "The prod publish", says what must exist first). No job
+  # holds a registry token: the registry trusts the identity
   # of `prod-stage`, `prod-commit` and `prod-abort` (this repository's
-  # release.yml, run on main from a push, in the environment `prod`) to act for
+  # release.yml, run on main from the nightly schedule, in the environment `prod`) to act for
   # the owner of the packages. A job holds one environment: the three that
   # talk to the registry are in `prod`, the one that needs the farm is in
   # `build`, whose identity the registry does not trust.
@@ -347,8 +369,8 @@ jobs:
   # even when this step fails, so `prod-abort` can end a group a failed run
   # opened. It joins no farm and runs no buck2.
   prod-stage:
-    needs: [release, mopm-stage]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true'
+    needs: [release, mopm-stage, mopm-e2e-beta]
+    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     environment: prod
     timeout-minutes: 30
@@ -384,7 +406,7 @@ jobs:
   # farm-connect only (the token Tailscale trusts), as in `mopm-e2e-beta`.
   prod-test:
     needs: prod-stage
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true'
+    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     environment: build
     timeout-minutes: 120
@@ -425,7 +447,7 @@ jobs:
       - name: the README e2e against the staged files
         uses: ./.github/actions/buck2-farm
         with:
-          args: build -c komira_release.staged=stage //release/readme_e2e/verify:all
+          args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: Stop buck2
         if: always()
@@ -439,7 +461,7 @@ jobs:
   # verified the same files.
   prod-commit:
     needs: prod-test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true'
+    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     environment: prod
     timeout-minutes: 60
@@ -477,14 +499,14 @@ jobs:
   # gives the actor's place back at once (otherwise the registry expires the group after
   # twelve hours). It `needs` all three: `failure()` looks only at the jobs a job depends on,
   # so a test that failed would not reach an abort that needed `prod-stage` alone. It does
-  # not run when the gate is closed or `prod-stage` was skipped (an earlier job failed before
+  # not run when `prod-stage` was skipped (an earlier job failed before
   # the registry was asked: there is no group). A directory without `state.json` means the
   # stage failed before it asked for a group: there is nothing to end, and the step says so. A group
   # that was already committed is not ended: mopm refuses and says to yank it, and this job
   # fails with that message.
   prod-abort:
     needs: [prod-stage, prod-test, prod-commit]
-    if: (failure() || cancelled()) && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true' && needs.prod-stage.result != 'skipped'
+    if: (failure() || cancelled()) && github.event_name == 'schedule' && github.ref == 'refs/heads/main' && needs.prod-stage.result != 'skipped'
     runs-on: ubuntu-24.04
     environment: prod
     timeout-minutes: 15
@@ -519,7 +541,7 @@ jobs:
   # holds no identity, no secret and no farm (GETs only).
   prod-smoke:
     needs: prod-commit
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true'
+    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -542,15 +564,14 @@ jobs:
   # already holds is skipped there and a prod yank refuses the set, so that set
   # is the wrong plan for beta. This job stages the same built packages again,
   # against beta, with the mopm that job built, and `mopm-publish-beta` publishes
-  # this set. It runs under the same gate as `mopm-publish-beta` (skipped while
-  # MOPM_BETA_PUBLISH_ENABLED is unset), needs no farm, holds no environment, no
+  # this set. It runs on a push to main or the nightly run only, needs no farm, holds no environment, no
   # id-token and no secret (staging asks the registry what it holds, a read
   # with no token), and runs no buck2. `==` of a `github.ref` compares ignoring
   # case; the environment `beta` restricting deployments to `main` is the lock
-  # (docs/ci.md, "Enabling the mopm beta publish").
+  # (docs/ci.md, "Before the first release").
   mopm-stage-beta:
     needs: mopm-stage
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_BETA_PUBLISH_ENABLED == 'true'
+    if: (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -570,11 +591,9 @@ jobs:
           path: ${{ runner.temp }}/mopm-publish/artifacts
       - name: mopm is executable
         run: chmod +x "$RUNNER_TEMP/mopm-publish/mopm"
-      # A (name, version) pair can be created once on a registry and a mopm version is exactly
-      # MAJOR.MINOR.PATCH, so each push needs a version of its own: every member's version is
-      # set to 0.1.<run number> on this job's checkout (still inside >=0.1,<0.2, above 0.1.0,
-      # and the newest push is the newest version), with the exact pins between members.
-      # Nothing is committed or pushed back, and `mopm-stage` (prod) never runs this.
+      # The version of this run: every member's version is set to 0.1.<run number> on this job's
+      # checkout, by the same tool and from the same run number as in `mopm-stage`, so beta and
+      # prod stage the same versions. Nothing is committed or pushed back.
       # `mopm stage` reads each version from mopm.toml when it runs, and the built
       # packages carry none, so this is all the packages need.
       - name: the beta version tool is executable
@@ -596,16 +615,14 @@ jobs:
 
   # PUBLISH TO BETA. The set `mopm-stage-beta` staged against beta, with this
   # job's GitHub OIDC identity and no secret: the registry trusts this
-  # repository's release.yml, run on main from a push, in the environment
-  # `beta`, as a publisher. DISABLED: it runs only on a push to main and when
-  # the repository variable MOPM_BETA_PUBLISH_ENABLED is exactly `true`, and
-  # nobody has set it (docs/ci.md, "Enabling the mopm beta publish"). While it
-  # is unset the job is skipped before it starts. It joins no farm, runs no
+  # repository's release.yml, run on main from a push or the nightly run, in the environment
+  # `beta`, as a publisher (docs/ci.md, "Before the first release"). It runs
+  # only on a push to main or the nightly run. It joins no farm, runs no
   # buck2 and checks out nothing. `id-token: write` is what lets mopm ask the
   # runner for the job's ID token; no job reads MOPM_TOKEN here.
   mopm-publish-beta:
     needs: mopm-stage-beta
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_BETA_PUBLISH_ENABLED == 'true'
+    if: (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     environment: beta
     timeout-minutes: 30
@@ -630,7 +647,7 @@ jobs:
   # registry; this job downloads the files the registry now serves, proves they
   # are the bytes that were staged, and runs the README e2e on them. It is its
   # own job because a job holds one environment: `mopm-publish-beta` is in
-  # `beta`, and joining the farm needs `build`. Same gate as the beta jobs, after
+  # `beta`, and joining the farm needs `build`. On a push to main or the nightly run only, after
   # the publish. It publishes nothing and reads no secret: the only requests it
   # makes are GETs of the beta index and channel. `id-token: write` is for
   # farm-connect only (the token Tailscale trusts), as in `mopm-stage`.
@@ -646,7 +663,7 @@ jobs:
   # What it proves is in docs/ci.md, "Verifying the beta publish".
   mopm-e2e-beta:
     needs: mopm-publish-beta
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_BETA_PUBLISH_ENABLED == 'true'
+    if: (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     environment: build
     timeout-minutes: 120
