@@ -20,7 +20,7 @@ out="$LOG/assert_level.aquery.txt"
 # none may match. A listed target must have at least one such action.
 EXPECT='
 tests//functional/assert_level:lib_none mojo_build_test , -D, ASSERT=none,
-tests//functional/assert_level:lib_none mojo_gated_test ^\[[^,]*/gate, mojo, --busybox, [^,]*/busybox, --runtime-lib, [^,]*/lib, --label, tests//functional/assert_level:lib_none:tests/test_quiet_at_none\.mojo, --test, [^,]*, --marker, [^,]*, --mem-cap-mib, 4096\]
+tests//functional/assert_level:lib_none mojo_gated_test ^\[[^,]*/gate, mojo, --busybox, [^,]*/busybox, --runtime-lib, [^,]*/lib, --label, tests//functional/assert_level:lib_none:tests/test_quiet_at_none\.mojo, --test, [^,]*, --marker, [^,]*, --mem-cap-mib, 4096, --hang-limit-s, 1800\]
 tests//functional/assert_level:lib_none_uncapped mojo_build_test , -D, ASSERT=none,
 tests//functional/assert_level:lib_none_uncapped mojo_gated_test !--mem-cap-mib
 tests//functional/assert_level:lib_default mojo_build_test !, -D,
@@ -31,7 +31,7 @@ tests//functional/assert_level:lib_level_and_defines mojo_build_test --target-cp
 tests//functional/assert_level:bin_none mojo_build , -D, ASSERT=none,
 tests//functional/assert_level:bin_none mojo_build_shared , -D, ASSERT=none,
 tests//functional/assert_level:test_none mojo_build_test , -D, ASSERT=none,
-tests//functional/mem_cap:lib_under_cap mojo_gated_test ^\[[^,]*/gate, mojo, .*, --mem-cap-mib, 1024\]
+tests//functional/mem_cap:lib_under_cap mojo_gated_test ^\[[^,]*/gate, mojo, .*, --mem-cap-mib, 1024, --hang-limit-s, 1800\]
 tests//functional/mem_cap:lib_under_cap mojo_build_test !, -D,
 komira//tools/build/examples/libgate_ok:libgate_ok mojo_build_test !, -D,
 komira//tools/build/examples/libgate_ok:libgate_ok mojo_gated_test !--mem-cap-mib
