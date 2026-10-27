@@ -1,0 +1,56 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
+
+# The C ABI of komira's one shared library, libkomira: the status codes, the
+# ABI version, and the session behind a context handle. The library is plain
+# Mojo with no pointer in it; `_c_abi.mojo`, the one file that holds pointers,
+# is not part of it but the source of the `libkomira` target below.
+#
+# test_status holds the five codes, the version scheme (major * 1000 + minor)
+# and buffer_status, the two-call protocol's capacity test; test_session holds
+# the last-error text of a Session (fresh, set, replaced, cleared, moved).
+mojo_library(
+    name = "komira_so",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "_c_abi.mojo"]),
+    test_srcs = [
+        "tests/test_session.mojo",
+        "tests/test_status.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# libkomira.so (libkomira.dylib on macOS arm64): four exports, and nothing else
+# in the dynamic symbol table (`exports_exact`). It is published only if every
+# gate driver passes, each of which dlopens it with RTLD_NOW and calls it as a
+# foreign host would:
+#   gate_version       the version is 1000 (1.0);
+#   gate_new_free      handles are non-NULL, distinct and hold separate sessions,
+#                      freeing NULL is a no-op;
+#   gate_no_extra_exports  the linker's section markers and the Mojo helpers
+#                      are not in the symbol table;
+#   gate_fresh_error   a fresh session's error is empty, with or without a buffer;
+#   gate_two_call      capacity 0 and one byte short give -4 and the length, an
+#                      exact and a larger buffer give the text, nothing past it;
+#   gate_null_ctx      a NULL context is -1 and writes nothing;
+#   gate_null_out_len  a NULL out_len is -2 and writes nothing.
+mojo_shared_lib(
+    name = "libkomira",
+    srcs = ["_c_abi.mojo"],
+    out_name = "libkomira",
+    exports = [
+        "komira_abi_version",
+        "komira_ctx_new",
+        "komira_ctx_free",
+        "komira_last_error",
+    ],
+    exports_exact = True,
+    gate_srcs = [
+        "tests/gate/gate_fresh_error.mojo",
+        "tests/gate/gate_new_free.mojo",
+        "tests/gate/gate_no_extra_exports.mojo",
+        "tests/gate/gate_null_ctx.mojo",
+        "tests/gate/gate_null_out_len.mojo",
+        "tests/gate/gate_two_call.mojo",
+        "tests/gate/gate_version.mojo",
+    ],
+    deps = [":komira_so"],
+)
