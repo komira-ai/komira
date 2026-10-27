@@ -11,6 +11,7 @@ A package of the list needs its `load` below and its row; `mopm_artifacts` refus
 
 load("//src/komira_anomaly:buildrules.mojo.lock.bzl", komira_anomaly = "GRAPH")
 load("//src/komira_atomic_alias:buildrules.mojo.lock.bzl", komira_atomic_alias = "GRAPH")
+load("//src/komira_codeworks_api:buildrules.mojo.lock.bzl", komira_codeworks_api = "GRAPH")
 load("//src/komira_content_line:buildrules.mojo.lock.bzl", komira_content_line = "GRAPH")
 load("//src/komira_datetime:buildrules.mojo.lock.bzl", komira_datetime = "GRAPH")
 load("//src/komira_encoding:buildrules.mojo.lock.bzl", komira_encoding = "GRAPH")
@@ -18,6 +19,7 @@ load("//src/komira_hash:buildrules.mojo.lock.bzl", komira_hash = "GRAPH")
 load("//src/komira_host:buildrules.mojo.lock.bzl", komira_host = "GRAPH")
 load("//src/komira_json:buildrules.mojo.lock.bzl", komira_json = "GRAPH")
 load("//src/komira_kafka_server:buildrules.mojo.lock.bzl", komira_kafka_server = "GRAPH")
+load("//src/komira_kg_mode:buildrules.mojo.lock.bzl", komira_kg_mode = "GRAPH")
 load("//src/komira_libc:buildrules.mojo.lock.bzl", komira_libc = "GRAPH")
 load("//src/komira_lz4:buildrules.mojo.lock.bzl", komira_lz4 = "GRAPH")
 load("//src/komira_mail_address:buildrules.mojo.lock.bzl", komira_mail_address = "GRAPH")
@@ -46,6 +48,7 @@ def declared_natives(graph):
 _GRAPHS = {
     "komira_anomaly": komira_anomaly,
     "komira_atomic_alias": komira_atomic_alias,
+    "komira_codeworks_api": komira_codeworks_api,
     "komira_content_line": komira_content_line,
     "komira_datetime": komira_datetime,
     "komira_encoding": komira_encoding,
@@ -53,6 +56,7 @@ _GRAPHS = {
     "komira_host": komira_host,
     "komira_json": komira_json,
     "komira_kafka_server": komira_kafka_server,
+    "komira_kg_mode": komira_kg_mode,
     "komira_libc": komira_libc,
     "komira_lz4": komira_lz4,
     "komira_mail_address": komira_mail_address,
