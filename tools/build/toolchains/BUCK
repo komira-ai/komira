@@ -180,6 +180,18 @@ mojo_runtime(
 
 # ---- C/C++ -----------------------------------------------------------------
 
+# Selectable form of macOS arm64: the one target platform other than linux x86_64 that the
+# C/C++ toolchain (komira_cxx_toolchains) admits. Both constraints, so that macOS alone, or
+# arm64 alone, is not it.
+config_setting(
+    name = "is_macos_arm64",
+    constraint_values = [
+        "prelude//os/constraints:macos",
+        "prelude//cpu/constraints:arm64",
+    ],
+    visibility = ["PUBLIC"],
+)
+
 # The compiler driver of the C/C++ toolchain (komira_cxx_toolchains in
 # defs.bzl): runs zig's clang, flattening nested response files, which zig
 # refuses.
