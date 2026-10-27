@@ -2,7 +2,7 @@ load("@komira//tools/build/mojo:abi_golden.bzl", "komira_abi_golden")
 
 # Every komira_abi_golden below must FAIL to build, each for one defect against
 # the sources of tests//functional/abi_golden:ok (good.mojo and good.tsv, which
-# build). run_tests.sh requires each to fail naming its finding.
+# build). tools/build/selftest:planted_red_builds_abi_golden requires each to fail naming its finding.
 
 # The golden says neg_add returns Int64; the source returns Int32.
 komira_abi_golden(
@@ -37,4 +37,11 @@ komira_abi_golden(
     name = "since_above_version",
     src = "good.mojo",
     golden = "since.tsv",
+)
+
+# The golden says neg_add takes (Int32, Int64); the source takes (Int32, Int32).
+komira_abi_golden(
+    name = "arg_drift",
+    src = "good.mojo",
+    golden = "arg_drift.tsv",
 )

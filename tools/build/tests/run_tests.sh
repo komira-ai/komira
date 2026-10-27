@@ -371,7 +371,7 @@
 #      //tools/build/selftest:planted_red_builds_node and
 #      //tools/build/selftest:analysis_refusals_node.)
 #  55. The ABI golden and the C header (tools/build/mojo/abi_golden.bzl):
-#      tools/build/tests/abi_golden_tests.sh.
+#      //tools/build/selftest:planted_red_builds_abi_golden.
 set -uo pipefail
 
 umbrella=1
@@ -1223,10 +1223,6 @@ expect_red mojo_doc_json_golden_differs_shown '-            "name": "greetings",
 for want in __init__._hidden shout shapes.Grid.cells; do
     expect_red "mojo_doc_json_missing_$want" "mojo_doc_json: $N:missing_symbol: the JSON declares no \`$want\`" "$N:missing_symbol"
 done
-
-# 55
-# shellcheck source=tools/build/tests/abi_golden_tests.sh
-. "$ROOT/tools/build/tests/abi_golden_tests.sh"
 
 # 53
 expect_green surface_capability_matrix //:surface_capability_matrix tests//functional/surface_capability_matrix:ok
