@@ -379,6 +379,23 @@ def test_a_set_with_an_appended_edge_has_a_delta() raises:
     ws.add_edge(open_edge(0, 1, "", "alpha beta v3", 50, 60, 50))
     assert_true(ws.has_delta())
     assert_equal(len(ws.tombstone_edge_indices()), 0)
+    assert_false(ws.delta_cannot_say_closures())
+
+
+def test_a_closure_of_a_lone_key_is_no_reason_for_a_base() raises:
+    var kg = Kg(Backend(), "g")
+    _ = kg.write_snapshot(_base_set().to_tables(), DIM)
+    var ws = SnapshotWorkingSet.load_latest(kg)
+    ws.edges[0].invalid_at = 50
+    ws.edges[0].expired_at = 60
+    assert_false(ws.delta_cannot_say_closures())
+    _ = ws.delta_tables()
+    # A shrunk list is an error of its own, not a closure ambiguity.
+    var shrunk = SnapshotWorkingSet.load_latest(kg)
+    _ = shrunk.edges.pop()
+    assert_false(shrunk.delta_cannot_say_closures())
+    with assert_raises(contains="the edge list shrank"):
+        _ = shrunk.delta_tables()
 
 
 def test_an_edge_closed_and_an_open_twin_appended_needs_a_base() raises:
@@ -390,6 +407,7 @@ def test_an_edge_closed_and_an_open_twin_appended_needs_a_base() raises:
     ws.edges[0].invalid_at = 50
     ws.edges[0].expired_at = 60
     ws.add_edge(open_edge(0, 1, "", "alpha beta twin", 55, 20, 55))
+    assert_true(ws.delta_cannot_say_closures())
     with assert_raises(contains="shares its key with 1 other edge(s)"):
         _ = ws.delta_tables()
     # The full rewrite keeps all three edges exactly.
