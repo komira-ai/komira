@@ -198,6 +198,30 @@ def test_any_json_refusals() raises:
         _ = Any.read_proto3_json(parse_json_value(String('{"@type":5}')))
 
 
+def test_any_members_need_a_type() raises:
+    """JSON members with no type URL have no type to be read under: the
+    reader refuses them (no `@type`, or an empty one), so the writer must
+    refuse the same value rather than write a document its own reader
+    rejects (komira-ai/komira#989). The same members under a type are
+    written and read back unchanged."""
+    var members = JsonValue.empty_object()
+    members.set_member(String("a"), parse_json_value(String("1")))
+    with assert_raises(contains="has JSON members but no type URL"):
+        _ = encode_json[Any](Any(String(""), List[UInt8](), members.copy()))
+    with assert_raises(contains="members but no '@type' to name them"):
+        _ = Any.read_proto3_json(parse_json_value(String('{"a":1}')))
+    with assert_raises(contains="members but an empty '@type'"):
+        _ = Any.read_proto3_json(
+            parse_json_value(String('{"@type":"","a":1}'))
+        )
+    var typed = Any(String("t/x.Y"), List[UInt8](), members^)
+    var text = encode_json[Any](typed)
+    assert_equal(text, String('{"@type":"t/x.Y","a":1}'))
+    var back = Any.read_proto3_json(parse_json_value(text))
+    assert_equal(back.type_url, String("t/x.Y"))
+    assert_equal(encode_json[Any](back), text)
+
+
 # =============================================================================
 # Empty, FieldMask.
 # =============================================================================
@@ -370,6 +394,7 @@ def main() raises:
     test_any_empty_forms()
     test_any_non_wkt_google_type_writes_bare_type()
     test_any_json_refusals()
+    test_any_members_need_a_type()
     test_empty_json_forms()
     test_field_mask_edges()
     test_value_empty_boxes_and_unset()

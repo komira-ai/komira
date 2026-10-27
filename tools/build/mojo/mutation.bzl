@@ -21,7 +21,7 @@ building it by name runs anything.
    environment and memory cap (`mutation_run_test`). The baseline, the
    library unchanged, takes the same steps under `mut/baseline/`, and
    `mutate score` refuses unless each is ok. Each step runs through
-   mut_step.sh, which records `ok`, `fail <n>`, `timeout <s>` or `skipped`
+   `gate step` (tools/build/run), which records `ok`, `fail <n>`, `timeout <s>` or `skipped`
    and fails the action only on a compile wrapper's own exit status
    (_INFRA_EXITS); `[komira] mutation_compile_timeout_secs` (default 900) bounds
    each compile and `[komira] mutation_run_timeout_secs` (default 120)
@@ -44,9 +44,9 @@ would depend on itself.
 """
 
 load(":coverage.bzl", "coverage_sources")
-load(":defines.bzl", "capped_prefix")
+load(":defines.bzl", "cap_flags")
 load(":providers.bzl", "MojoPkgTSet")
-load(":test_runtime.bzl", "test_root")
+load(":test_runtime.bzl", "gate_mojo", "test_root")
 
 _MUTATION_DIR = "komira//tools/build/coverage/mutate:mut_dir"
 _MUTATE_PACKAGE = "tools/build/coverage/mutate"
@@ -96,7 +96,7 @@ def _stem(src):
     b = src.basename
     return b[:-len(".mojo")] if b.endswith(".mojo") else b
 
-def mutation_sub_targets(ctx, tc, mojo_cmd, src_dir, root, deps, extra_closure, link_tail, test_data, env_args, defines, cap, mem_cap):
+def mutation_sub_targets(ctx, tc, mojo_cmd, src_dir, root, deps, extra_closure, link_tail, test_data, env_args, defines, cap):
     """{"mutation": ...} with the switch on, else {}. The arguments are what
     the library's gated tests are built from (defs.bzl, _library_impl):
     `src_dir` its staged sources ([src]), `root` the package directory they
@@ -104,11 +104,11 @@ def mutation_sub_targets(ctx, tc, mojo_cmd, src_dir, root, deps, extra_closure, 
     `extra_closure` the test_deps packages after the library's, `link_tail`
     the tests' C link tail, `test_data` {test key: {dest: artifact}},
     `env_args` and `defines` the tests' runner and compile arguments, `cap`
-    the tests' memory cap (None for none) and `mem_cap` mem_cap.sh."""
+    the tests' memory cap (None for none)."""
     d = ctx.attrs.mutation_dir
     if d == None:
         return {}
-    step, mdir = d[DefaultInfo].default_outputs
+    mdir = d[DefaultInfo].default_outputs[0]
     import_name = ctx.attrs.import_name or ctx.label.name
     files = {}
     mutable = []
@@ -164,7 +164,6 @@ def mutation_sub_targets(ctx, tc, mojo_cmd, src_dir, root, deps, extra_closure, 
             tc = tc,
             mojo_cmd = mojo_cmd,
             mdir = mdir,
-            step = step,
             files = files,
             mutable = sorted(mutable),
             deps = deps,
@@ -174,7 +173,6 @@ def mutation_sub_targets(ctx, tc, mojo_cmd, src_dir, root, deps, extra_closure, 
             defines = defines,
             opt_level = ctx.attrs.test_optimization_level,
             cap = cap,
-            mem_cap = mem_cap,
             env_args = env_args,
             compile_limit = str(ctx.attrs.mutation_compile_timeout_secs),
             run_limit = str(ctx.attrs.mutation_run_timeout_secs),
@@ -185,14 +183,14 @@ def mutation_sub_targets(ctx, tc, mojo_cmd, src_dir, root, deps, extra_closure, 
     return {"mutation": [DefaultInfo(default_outputs = [tsv, md], sub_targets = {"list": [DefaultInfo(default_output = lst)]})]}
 
 def _step(v, status, limit, after, command, infra_exits):
-    # One mutant step through mut_step.sh (records the outcome; fails the
+    # One mutant step through `gate step` (records the outcome; fails the
     # action only on an `infra_exits` status).
     return cmd_args(
-        v.tc.busybox,
-        "sh",
-        v.step,
-        v.tc.busybox,
+        v.tc.gate,
+        "step",
+        "--status",
         status.as_output(),
+        "--limit-s",
         limit,
         [["--after", a] for a in after],
         [["--infra-exit", e] for e in infra_exits],
@@ -201,8 +199,8 @@ def _step(v, status, limit, after, command, infra_exits):
     )
 
 # The compile wrapper's exit statuses that are a failure of the machine, not
-# of the mutant (mojo_wrapper.sh): a refusal, an output missing or naming the
-# action's directory, the watchdog, a signal. mut_step.sh fails the action on
+# of the mutant (mojo_compile): a refusal, an output missing or naming the
+# action's directory, the watchdog, a signal. `gate step` fails the action on
 # them, so they are never cached as a mutant's result.
 _INFRA_EXITS = ["2", "3", "4", "124", "129", "130", "143"]
 
@@ -258,19 +256,10 @@ def _mutant_actions(actions, v, shim, base, mid, path):
         actions.run(
             _step(v, ran, v.run_limit, [built], cmd_args(
                 # The gate's own run: its memory cap (none when the gate
-                # runs uncapped), runner, environment and data.
-                capped_prefix(tc, v.mem_cap, t.label, v.cap),
-                tc.busybox,
-                "sh",
-                tc.gate_runner,
-                tc.busybox,
-                tc.compiler,
-                t.label,
-                binary,
-                # gate_runner's PASS marker: not an output (the status is),
-                # so it goes to mut_step.sh's private scratch directory.
-                "@MUT_SCRATCH@/passed",
-                v.env_args,
+                # runs uncapped), environment and data. Its PASS marker is
+                # not an output (the status is), so it goes to the step's
+                # private scratch directory.
+                gate_mojo(tc, t.label, binary, "@MUT_SCRATCH@/passed", cap_flags(v.cap), v.env_args),
                 hidden = root_dir,
             ), []),
             category = "mutation_run_test",

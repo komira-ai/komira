@@ -883,7 +883,7 @@ struct HpackDecoder(Movable, Deinitable):
                 self.table.set_max_size(Int(ir.value))
                 i = i + ir.consumed
             else:
-                raise Error("hpack: COMPRESSION_ERROR: unknown prefix")
+                raise Error("hpack: COMPRESSION_ERROR: unknown prefix")  # cov: unreachable the five prefix tests above (1, 01, 001, 0001, 0000) cover every first byte
 
             # ── HEADER-LIST CEILING ──
             # Charged ONCE per representation just decoded, against the

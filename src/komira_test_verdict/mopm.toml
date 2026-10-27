@@ -1,0 +1,12 @@
+[package]
+name = "komira_test_verdict"
+version = "0.1.0"
+description = "The exit-code vocabulary of a test that can do more than pass or fail in Mojo: a Verdict (CLEAN 0, CANNOT_TELL 3, LEAK 6; the worst wins and every reason is kept) and the SKIP (77) and CANNOT_TELL (3) exits, which are never exit 0."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[targets]
+lib = { path = "src/komira_test_verdict" }
+tests = ["tests"]

@@ -50,18 +50,11 @@
 #     "skip it" (bare `return`)           None
 #     no arm    (conservative fallback)   Some(...), cleared at 1, 2, 4, 6
 #
-# ⭐ MEASURED, farm, `--nocache_test_results`, — the neuter runs
-# this file exists to fail, both actually executed against this file:
-#
-#   arm body -> a bare `return`   5 passed / 2 FAILED
-#       test_the_walk_names_the_UDFs_OWN_OUTPUT_COLUMN_and_no_other
-#       test_the_conservative_branch_IS_correct_when_it_is_reached_directly
-#     ⇒ BOTH end-to-end cells stayed GREEN. That is the measurement behind
-#       the paragraph below, not a reading of the kernels.
-#
-#   arm DELETED (conservative)    4 passed / 3 FAILED
-#       the walk cell (bit 2 cleared), and BOTH end-to-end cells
-#       (`[0, 3, 5, 7]` — the original defect's row set, exactly)
+# Replacing the arm body with a bare `return` fails the walk cells
+# (`test_the_walk_names_the_UDFs_OWN_OUTPUT_COLUMN_and_no_other` and
+# `test_the_conservative_branch_IS_correct_when_it_is_reached_directly`) and
+# leaves both end-to-end cells green. Deleting the arm fails the walk cell
+# (bit 2 cleared) and both end-to-end cells (row set `[0, 3, 5, 7]`).
 #
 # ⚠⚠ AND THE END-TO-END ROW SET SEPARATES ONLY **TWO** OF THE THREE, WHICH IS
 # STATED HERE RATHER THAN DISCOVERED BY THE NEXT READER. A computed LHS routes

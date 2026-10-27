@@ -308,10 +308,14 @@ def evaluate_page_filter(filter: Expr, bundle: PageIndexBundle) -> PageSelection
     var any_empty = False
     for i in range(bundle.size()):
         var num_pages = bundle.num_pages_at(i)
+        if num_pages == 0:
+            # No page to judge by: no entry, so the column is read whole
+            # and a chunk whose indexes list no pages never prunes the group.
+            continue
         var name = bundle.name_at(i)
         var col_idx = bundle.col_idx_at(i)
         var picks = _picks_for_column_in_expr(filter, name, i, bundle)
-        if len(picks) == num_pages and num_pages > 0:
+        if len(picks) == num_pages:
             entries.append(PageSelection.all_pass(name, col_idx, num_pages))
         else:
             if len(picks) == 0:

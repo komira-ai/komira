@@ -205,6 +205,7 @@ def parse_offset_index[
 
     Raises:
         Error if the blob is malformed, a location lacks a field, or the
+        first page does not start at row 0 or the
         first rows do not ascend.
     """
     var reader = ThriftCompactReader[origin](view)
@@ -221,6 +222,11 @@ def parse_offset_index[
             var h = _list_size(reader)
             for _ in range(h[0]):
                 var pl = _parse_page_location(reader)
+                if len(firsts) == 0 and pl[2] != 0:
+                    raise Error(
+                        "page_index_parser: the first page of an OffsetIndex"
+                        " does not start at row 0"
+                    )
                 if len(firsts) > 0 and pl[2] < firsts[len(firsts) - 1]:
                     raise Error(
                         "page_index_parser: OffsetIndex first rows do not"

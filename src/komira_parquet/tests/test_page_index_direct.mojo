@@ -196,5 +196,18 @@ def test_index_values() raises:
     assert_equal(Int(copy.max_values_int64[0]), 5)
 
 
+def test_a_dictionary_offset_of_zero_is_no_dictionary() raises:
+    var reader = _Reader.open(_file())
+    var md = _meta(reader)
+    var oi = _oi(reader, md, 0)
+    var runs = coalesce_pages(oi, [1, 2], _ROWS)
+    var chunk = md.row_groups[0].columns[0].copy()
+    chunk.meta_data.dictionary_page_offset = Optional[Int](0)
+    var c = read_selected_pages_via_runs(reader, chunk, md.schema[1], runs)
+    assert_equal(c.length(), 20)
+    for i in range(20):
+        assert_equal(Int(c.as_primitive[DType.int64]().get(i)), _v(10 + i))
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

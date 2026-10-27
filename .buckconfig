@@ -12,6 +12,11 @@
   # The tests of this repository, a cell of their own so that `komira//...`
   # holds no target that fails by design. Not needed by a consuming repository.
   tests = tools/build/tests
+  # buildrules, a git external cell (a git external cell needs no directory): the rules of
+  # libraries built with `mojo_package` (src/komira_json). Pinned below. Its rules are loaded
+  # from this one cell only, never copied or aliased, so a provider they make has one identity
+  # (facebook/buck2#683).
+  buildrules = buildrules-ext
   # `none` has no directory: it is the target of the prelude's unused aliases below.
   none = none
 
@@ -25,6 +30,27 @@
 
 [external_cells]
   prelude = bundled
+  buildrules = git
+
+[external_cell_buildrules]
+  git_origin = https://github.com/komira-ai/buildrules.git
+  # The commit of the buildrules release v0.0.53 (resolved through the annotated tag). A bump is one change: this line, then
+  # `buildrules mojo sync` (the pins in the directory `[cells] toolchains` names, and each package's
+  # buildrules.mojo.lock.bzl) when the release pins another mopm.
+  commit_hash = d7b0b89002f020e4ef92b7c52db25a0e5927471a
+
+# buildrules' Mojo rules read this key to learn whether a macOS arm64 execution platform exists (a package built
+# for macOS arm64 compiles on a macOS worker; absent: the package fails analysis naming the key). Komira's macOS
+# workers are `[komira_re] darwin_arm64_properties`, so the key follows it: set exactly when they are, holding
+# no value of its own (tools/build/platforms/with_buildrules.bzl registers the platform).
+# The two keys after it are read by the same rules from the root cell, and follow `[komira_re]` the same way:
+# `darwin_macos_hosts` is the identities of those workers (a macOS Mojo compile refuses any other host, and a
+# macOS Mojo target fails analysis without it), `macos_library_dirs` the directories a macOS test run searches
+# for a library it opens by its bare name before /usr/local/lib:/usr/lib (optional; empty leaves dyld's defaults).
+[buildrules_re]
+  macos_aarch64_properties = $(config komira_re.darwin_arm64_properties)
+  darwin_macos_hosts = $(config komira_re.darwin_macos_hosts)
+  macos_library_dirs = $(config komira_re.macos_library_dirs)
 
 [buildfile]
   name = BUCK
@@ -34,7 +60,7 @@
   includes = komira//tools/build/lint/includes.bzl
 
 [parser]
-  target_platform_detector_spec = target:komira//...->komira//tools/build/platforms:host target:toolchains//...->komira//tools/build/platforms:host target:tests//...->komira//tools/build/platforms:host
+  target_platform_detector_spec = target:komira//...->komira//tools/build/platforms:host target:toolchains//...->komira//tools/build/platforms:host target:tests//...->komira//tools/build/platforms:host target:buildrules//...->buildrules//platforms:linux_x86_64
 
 [build]
   # Local unless .buckconfig.local names a remote-execution service; see

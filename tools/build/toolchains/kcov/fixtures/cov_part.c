@@ -1,4 +1,4 @@
-/* The second source of the fixture of kcov_check.sh check 8, linked with
+/* The second source of the fixture of kcov_check check 6, linked with
  * cov_fixture.c: two files in one directory, so kcov's Cobertura writer
  * would name each relative to that directory unless it writes full paths.
  * The constructor runs before main and prints nothing. A line marked

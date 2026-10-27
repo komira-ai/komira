@@ -139,6 +139,8 @@ def _scan_one_rg_subrg[FS: FileSystem](
         if not cursors[ci].supported():
             return -1
     var n_total = cursors[0].num_values()
+    if n_total != Int(rg.num_rows):
+        return -1
 
     # Each dictionary column's dictionary, copied once per row group, so a
     # chunk's column owns its values; a string dictionary as byte lists.

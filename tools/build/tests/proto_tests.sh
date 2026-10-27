@@ -20,8 +20,8 @@ else
     fail "proto: generated package tests (see $LOG/proto_tests.log)"
 fi
 check_executor proto_tests
-if ! "$BUCK2" build 'tests//functional/proto:person_proto[person.mojo]' --out "$LOG/person.mojo" > "$LOG/proto_gen.log" 2>&1 ||
-    ! "$BUCK2" build 'tests//negative/proto:person_renamed_proto[person.mojo]' --out "$LOG/person_renamed.mojo" >> "$LOG/proto_gen.log" 2>&1; then
+if ! "$BUCK2" build 'tests//functional/proto:person_proto_gen[person.mojo]' --out "$LOG/person.mojo" > "$LOG/proto_gen.log" 2>&1 ||
+    ! "$BUCK2" build 'tests//negative/proto:person_renamed_proto_gen[person.mojo]' --out "$LOG/person_renamed.mojo" >> "$LOG/proto_gen.log" 2>&1; then
     fail "proto: generating person.mojo (see $LOG/proto_gen.log)"
 elif grep -q 'var id: Int64' "$LOG/person.mojo" && ! grep -q 'var ident:' "$LOG/person.mojo" &&
     grep -q 'var ident: Int64' "$LOG/person_renamed.mojo" && ! grep -q 'var id:' "$LOG/person_renamed.mojo"; then
@@ -36,92 +36,36 @@ expect_red proto_db_undeclared "protoc-gen-mojo_db wrote no code (or an empty fi
 # bundle_only: roster.proto imports person.proto (used) and the db options
 # (annotation only). The selected package holds exactly roster and person
 # and compiles; bundling the whole closure also generates options.mojo, which
-# the package cannot compile; a selection outside the closure is refused.
-if ! "$BUCK2" build tests//functional/proto:roster_proto 'tests//functional/proto:roster_proto[gen]' --show-full-output \
+# the package cannot compile. (A selection outside the closure is refused at
+# analysis: //tools/build/selftest:analysis_refusals_proto.)
+if ! "$BUCK2" build tests//functional/proto:roster_proto tests//functional/proto:roster_proto_gen --show-full-output \
     > "$LOG/proto_select.out" 2> "$LOG/proto_select.log"; then
     fail "proto: bundle_only package roster_proto (see $LOG/proto_select.log)"
-elif got=$(ls -A "$(awk '/\[gen\]/{print $2}' "$LOG/proto_select.out")" | tr '\n' ' ') &&
-    [ "$got" = "__init__.mojo person.mojo roster.mojo " ]; then
+elif got=$(ls -A "$(awk '$1 ~ /roster_proto_gen$/{print $2}' "$LOG/proto_select.out")" | tr '\n' ' ') &&
+    [ "$got" = "__init__.mojo _parts person.mojo roster.mojo " ]; then
     pass "proto: bundle_only generates the selected files only"
 else
     fail "proto: bundle_only package holds: ${got:-nothing} (see $LOG/proto_select.out)"
 fi
 expect_red proto_full_bundle "roster_proto/options.mojo" tests//negative/proto:roster_full_bundle
-expect_red proto_bad_selection "which is not a .proto of the proto_deps closure" tests//negative/proto:roster_bad_selection
 
-# 23, mojo_gcp_client (tools/build/cloud/gcp.bzl). Building the package builds
-# each scoped client, which runs its welded tests (the generated layout probe
-# among them), each gen_check (the generated files, what is absent, what is
-# present) and each tests_check (exactly which welded tests passed). The
-# refusals of the rule, and each check going red, are expect_reds. A
-# `protocol = "grpc"` client with a service, compiled against the real
-# komira_grpc and komira_gcp_core (komira//tools/build/proto-codegen/gcp_grpc),
-# builds only once its welded test of the token hook and the status mapping
-# passes; that client's gen_check and tests_check are in
-# tests//functional/mojo_gcp_client, which is built next. A `protocol = "rest"`
-# client of a service with no `google.api.default_host`
-# (komira//tools/build/proto-codegen/gcp_rest) builds only once its welded test
-# shows it refuses to send, before any dial, until a host is set.
-expect_green gcp_grpc_client //tools/build/proto-codegen/gcp_grpc:
-expect_green gcp_rest_client //tools/build/proto-codegen/gcp_rest:
-if "$BUCK2" build tests//functional/mojo_gcp_client: > "$LOG/mojo_gcp_client.log" 2>&1; then
-    pass "mojo_gcp_client: scoped clients, their welded tests, gen_check and tests_check"
-else
-    fail "mojo_gcp_client: tests//functional/mojo_gcp_client: (see $LOG/mojo_gcp_client.log)"
-fi
-expect_red gcp_client_unscoped 'neither `roots` nor `methods` is set' tests//negative/mojo_gcp_client:unscoped
-expect_red gcp_client_joined_items 'is not a proto name' tests//negative/mojo_gcp_client:joined_items
-expect_red gcp_client_no_runtime '`deps` is empty' tests//negative/mojo_gcp_client:no_runtime
-expect_red gcp_client_whole_closure 'with an empty `bundle_only`' tests//negative/mojo_gcp_client:whole_closure
-expect_red gcp_client_label_in_protos 'is not a source path of a `.proto` file' tests//negative/mojo_gcp_client:label_in_protos
-expect_red gcp_client_omit_unknown_field 'message `.example.shop.v1.Item` has no field `colour`' tests//negative/mojo_gcp_client:omit_unknown_field
-expect_red gcp_client_omit_pruned_field 'omit_fields: `example.shop.v1.ItemTombstone.name` is a field of `.example.shop.v1.ItemTombstone`, which this scope does not generate' tests//negative/mojo_gcp_client:omit_pruned_field
+# 23, mojo_gcp_client (tools/build/cloud/gcp.bzl): each check of
+# tests//functional/mojo_gcp_client going red is an expect_red, and the
+# rule's analysis refusals are
+# //tools/build/selftest:analysis_refusals_gcp_client (the plugin's own
+# refusals of `omit_fields` and of a streaming REST method are unit tests of
+# tools/build/proto-codegen: lower.rs and emit_rest.rs). The clients that build (tests//functional/mojo_gcp_client and
+# komira//tools/build/proto-codegen/gcp_grpc and gcp_rest, each with its
+# welded tests, gen_check and tests_check) are in the gate.
 expect_red gcp_client_caller_test_red 'GATED TEST FAILED' tests//negative/mojo_gcp_client:caller_test_red
 expect_red gcp_client_absence_check 'which must be absent' tests//negative/mojo_gcp_client:absence_check_can_fail
 expect_red gcp_client_tests_check 'expected exactly:' tests//negative/mojo_gcp_client:tests_check_can_fail
-expect_red gcp_client_unknown_protocol '`protocol` `connect` is not one of "rest", "grpc"' tests//negative/mojo_gcp_client:unknown_protocol
 expect_red gcp_client_rest_reaches_plugin 'no `(google.api.http)` annotation' tests//negative/mojo_gcp_client:rest_reaches_plugin
-expect_red gcp_client_rest_streaming_method 'method `WatchItems` is bidirectional-streaming' tests//negative/mojo_gcp_client:rest_streaming_method
-expect_red gcp_client_module_names_stray 'which this target does not generate' tests//negative/mojo_gcp_client:module_names_stray
-expect_red gcp_client_module_names_not_a_module 'is not a Mojo module name the generated package can hold' tests//negative/mojo_gcp_client:module_names_not_a_module
-expect_red gcp_client_module_names_keyword 'gives `example/shop/v1/item.proto` the module `import`, which is not a Mojo module name the generated package can hold' tests//negative/mojo_gcp_client:module_names_keyword
-expect_red gcp_client_module_names_unrenamed 'would be generated as module `thing.min`, which is not a Mojo module name: give it one in `module_names`' tests//negative/mojo_gcp_client:module_names_unrenamed_stem
 
-# 23, protoc-gen-mojo's options and text goldens (tests//functional/proto_codegen):
-# each case runs protoc over a corpus with one option string and holds the
-# output to golden files, or protoc's error to the text the case states; the
-# REST URL helpers of a generated client compile and pass their welded test.
-expect_green proto_codegen tests//functional/proto_codegen:
-
-# 23, proto_fixture_check (tools/build/mojo/proto_fixture.bzl): protoc reads
-# wire fixtures in a build action. The self-test builds (a producer's
-# non-canonical bytes, and proto_encode's output read back), and with it the
-# welded proto_fixture_case targets (tools/build/mojo/proto_fixture_testdata),
-# which the pull-request check runs. Here, end to end and only in this suite,
-# each planted defect fails with the leg that names it.
-expect_green proto_fixture tests//functional/proto_fixture:
-expect_red proto_fixture_hex_odd "hex_odd: FIXTURE: hex_odd.hex holds an odd number of hex digits (3)" \
-    tests//negative/proto_fixture:hex_odd
-expect_red proto_fixture_leg0_duplicate "leg0_duplicate: LEG 0: leg0_duplicate.hex writes a singular field of example.fixture.v1.Sample more than once" \
-    tests//negative/proto_fixture:leg0_duplicate
-expect_red proto_fixture_leg0_duplicate_message "leg0_duplicate_message: LEG 0: leg0_duplicate_message.hex writes a singular field of example.fixture.v1.Sample more than once" \
-    tests//negative/proto_fixture:leg0_duplicate_message
-expect_red proto_fixture_leg0_identical "leg0_identical: LEG 0: leg0_identical.hex is byte for byte leg0_identical.canonical.hex" \
-    tests//negative/proto_fixture:leg0_identical
-expect_red proto_fixture_leg1 "leg1_value: LEG 1: protoc's decode of leg1_value.hex as example.fixture.v1.Sample differs from leg1_value.txtpb" \
-    tests//negative/proto_fixture:leg1_value
-expect_red proto_fixture_leg2 "leg2_unknown: LEG 2: leg2_unknown.hex carries field numbers example.fixture.v1.Sample does not declare" \
-    tests//negative/proto_fixture:leg2_unknown
-expect_red proto_fixture_leg2_nested "leg2_nested: LEG 2: leg2_nested.hex carries field numbers example.fixture.v1.Sample does not declare" \
-    tests//negative/proto_fixture:leg2_nested
-expect_red proto_fixture_leg2_group "leg2_group: LEG 2: leg2_group.hex carries field numbers example.fixture.v1.Sample does not declare" \
-    tests//negative/proto_fixture:leg2_group
-expect_red proto_fixture_leg3 "leg3_noncanonical: LEG 3: leg3_noncanonical.canonical.hex is not protoc's encoding of leg3_noncanonical.txtpb" \
-    tests//negative/proto_fixture:leg3_noncanonical
-expect_red proto_fixture_leg4 "leg4_root: LEG 4: leg4_root.txtpb names example.fixture.v1.Meters on its '# proto-message:' line, but the fixture is checked as example.fixture.v1.Feet" \
-    tests//negative/proto_fixture:leg4_root
-expect_red proto_fixture_leg5 "leg5_enum: LEG 5: leg5_enum.hex carries enum values the schema does not name" \
-    tests//negative/proto_fixture:leg5_enum
+# 23, protoc-gen-mojo's options and text goldens (tests//functional/proto_codegen)
+# and proto_fixture_check (tests//functional/proto_fixture, with the welded
+# proto_fixture_case targets of tools/build/mojo/proto_fixture_testdata, each
+# planted defect a `refuses_*` case) are in the gate.
 
 # 23, determinism. Generation is deterministic: two uncached builds (an
 #     isolated daemon, its buck-out cleaned, --no-remote-cache, so the plugin
@@ -134,7 +78,7 @@ DET=komira_tests_det
 # An action that really ran, not a cache hit: `re(...)` remotely, `local` in a local-only run.
 if [ "${MODE:?set by run_tests.sh}" = local ]; then EXEC_RAN_RE='^local'; else EXEC_RAN_RE='^re\('; fi
 DET_TARGETS=(komira//tools/build/proto-codegen:protoc-gen-mojo komira//tools/build/proto-codegen:protoc-gen-mojo-db
-    'tests//functional/proto:person_proto[gen]' 'tests//functional/proto:team_proto[gen]' 'tests//functional/proto:tasks_db[gen]'
+    'tests//functional/proto:person_proto_gen' 'tests//functional/proto:team_proto_gen' 'tests//functional/proto:tasks_db_gen'
     tests//functional/proto:person_proto tests//functional/proto:tasks_db)
 det_build() { # run number; prints a reason on failure
     if ! "$BUCK2" --isolation-dir "$DET" clean > "$LOG/det_clean$1.log" 2>&1; then

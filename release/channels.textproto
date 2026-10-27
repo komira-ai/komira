@@ -1,6 +1,13 @@
+# NO STAGE NAMES THIS FILE TODAY. komira publishes to no channel for now:
+# release/machine.textproto has the build stage alone, and publishing will move
+# to mopm (docs/releases.md). The file stays only because kci's channels parser
+# refuses a file with no channel and src/kci_release_channel's welded test reads
+# it; it is not a statement that these channels receive releases. The text below
+# describes the channels as they were declared.
+#
 # The release channels (src/kci_release_channel): where a PUBLISH step
 # (`kci run --stage <S>`) may push, and how. release/machine.textproto names
-# this file and, per stage, the channel: stage `gamma` publishes to `gamma`,
+# this file and, per stage, the channel: stage `beta` publishes to `beta`,
 # stage `prod` to `prod`. CODEOWNERS requires the release approver's review for
 # everything under release/.
 #
@@ -8,13 +15,18 @@
 # may read them anonymously). A package name and version published there is
 # permanent: kci never overwrites a file. Which names a release publishes is
 # release/artifacts.textproto's; a publish reports the declared names the
-# channel holds no file of yet (NEW NAMES), and the gamma stage reports prod's
+# channel holds no file of yet (NEW NAMES), and the beta stage reports prod's
 # before the prod approval.
 #
-# The credential is TRUSTED PUBLISHING (OIDC): each channel trusts the GitHub
-# repository komira-ai/komira, the workflow file kci.yml and ONE GitHub
-# environment (gamma, prod); gamma also trusts the break-glass environment
-# gamma-breakglass (`break_glass_push_identity`). The publish job mints the job's ID token
+# No workflow publishes now: kci.yml, the workflow these channels were declared
+# for, is deleted, and .github/workflows/release.yml builds the release set and
+# publishes nothing. The file is kept only because kci's parser needs it.
+#
+# As declared, the credential was TRUSTED PUBLISHING (OIDC): each channel
+# trusted the GitHub repository komira-ai/komira, the workflow file kci.yml and
+# ONE GitHub environment (beta, prod). Neither names a break-glass publisher: both
+# stages run only on a push to main (a manual run builds and stops there,
+# release/machine.textproto). The publish job mints the job's ID token
 # (audience prefix.dev) and exchanges it at prefix.dev's mint endpoint for a
 # short-lived upload token, so no secret exists anywhere, and the channel
 # names none. `push_identity` is the subject claim of that token: the only
@@ -33,16 +45,12 @@
 schema_version: 1
 
 channel {
-  name: "gamma"
+  name: "beta"
   visibility: PUBLIC
   repository {
     artifact_type: CONDA
-    location: "https://prefix.dev/komira-ai/gamma"
-    push_identity: "repo:komira-ai/komira:environment:gamma"
-    # a break-glass run (any manual run) publishes from the environment
-    # gamma-breakglass (required reviewer; machine file
-    # `break_glass_environment`): a second trusted publisher of this channel
-    break_glass_push_identity: "repo:komira-ai/komira:environment:gamma-breakglass"
+    location: "https://prefix.dev/komira-ai/beta"
+    push_identity: "repo:komira-ai/komira:environment:beta"
     credential { kind: OIDC_TRUSTED_PUBLISHING }
   }
 }

@@ -46,7 +46,7 @@ pub fn main() void {
     const argv = C.a().alloc([]const u8, raw.len) catch C.oom();
     for (raw, 0..) |arg, i| argv[i] = arg;
     const o = cli.outcome(argv);
-    std.io.getStdErr().writeAll(o.stderr) catch {};
+    std.fs.File.stderr().writeAll(o.stderr) catch {};
     std.process.exit(o.code);
 }
 

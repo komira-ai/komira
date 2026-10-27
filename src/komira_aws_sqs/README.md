@@ -54,6 +54,7 @@ Decode a ReceiveMessage answer, and read an error the way the client does
 (the code from the `x-amzn-query-error` header, the modeled error shape from
 the body):
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from komira_aws_core import AwsResponse, aws_json_error_info
 from komira_aws_sqs.komira_aws_sqs import SQSQueueDoesNotExist, parse_receive_message_response
@@ -92,6 +93,7 @@ assert_equal(err.message.value(), "The specified queue does not exist.")
 
 Resolve the endpoint a call goes to, through the embedded ruleset:
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from komira_aws_sqs.komira_aws_sqs import SQSEndpointConfig, SQSGetQueueUrlRequest, komira_aws_sqs_endpoint_rules
 from komira_aws_sqs.komira_aws_sqs import resolve_get_queue_url_endpoint
@@ -113,6 +115,7 @@ The client, given a connector. Here it is komira_http_core's
 `ScriptedConnector`, which answers from a canned HTTP response and opens no
 socket; a real program passes a TCP or TLS connector instead:
 
+<!-- mojo-hidden from std.testing import assert_equal -->
 ```mojo
 from komira_aws_core import AwsCredential, StaticCredsSource
 from komira_aws_sqs.komira_aws_sqs import SQSClient, SQSEndpointConfig, SQSGetQueueUrlRequest

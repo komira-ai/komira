@@ -283,7 +283,9 @@ def decode_rows_of[R: Reader](
     if not rest_b:
         return sel_b.take()
     if not sel_b:
-        return rest_b.take()
+        # The declined columns were appended to `rest_cols`, so its batch is
+        # not in `cols` order; take `cols` from it one by one.
+        return pick_share(cols, rest_cols, rest_b, List[Int](), None)
     return pick_share(cols, sel_cols, sel_b, rest_cols, rest_b)
 
 

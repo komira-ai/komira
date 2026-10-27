@@ -46,6 +46,15 @@ depends on no operator package.
   row group's parked sub-morsels, each exactly once, for a consumer that
   opts in.
 - `rg_prune_counter`: counters of the row-group statistics prune.
+- `flat_schema`: whether a footer is flat.
+
+The leaf-to-schema mapping (`schema[c + 1]` is leaf `c`) holds only for a
+flat footer, which is the planner's contract for a flat read; the decisions
+this package makes for itself (the selection class, the row-selective decode,
+the dictionary-codes paths) decline on a footer that is not flat. The
+dictionary-codes paths also decline for UINT_32 and UINT_64 chunks (their
+entries would be sign-extended) and, in the codes feed, for a key with a
+null (its codes are not row aligned).
 
 The sub-row-group layer decodes a row group a chunk at a time into fixed
 per-worker buffers through resumable column cursors (`subrg_cursor_feed`;
@@ -61,6 +70,7 @@ type for a scan and widening for an aggregate):
   it already handed over are retracted.
 - `subrg_split_decode`: one row range of a row group, alone or over
   dictionaries decoded once per (row group, column).
+- `subrg_agg_plan`: the read plan of a grouped aggregate over a reader.
 - `subrg_agg_executor`: `run_subrg_agg`, a grouped aggregate folded chunk by
   chunk into any `ScanChunkSink` (the sink owns the aggregate; this package
   has none). Group keys stay dictionary columns (INT32 / INT64, or STRING
@@ -109,8 +119,19 @@ The morsel source:
   late-materialized decode); otherwise the row group is decoded whole (by
   name across files, a filter column a file lacks read as NULL), through the
   cursor-grain route (`parquet_source_grain`), or as row ranges
-  (`parquet_source_subrg`). Morsels larger than `morsel_rows` are cut
-  (`parquet_source_emit`) and their partition ids sort into file order.
+  (`parquet_source_subrg`; a range a cursor refuses is cut from the whole
+  decode of its row group, which the worker keeps for its next range of that
+  row group, so a worker holds at most one whole decode; a row group that
+  would need more than `SUB_SLOT_STRIDE` ranges is not split). Morsels
+  larger than `morsel_rows` are cut (`parquet_source_emit`) and their
+  partition ids sort into file order; a coarse range-split morsel takes the
+  id of the first range it holds, so coarse morsels are ordered only
+  approximately. `ParquetScanOptions.validate` runs at construction and
+  refuses a `subrg_mode` outside 0..2, `subrg_units_per_rg` below 1 in mode
+  2, and a negative `subrg_emit_rows`. Not covered at the source level: the
+  declined selective decode (`decode_rows_of` returning None) is never
+  reached through the source's routes; the reordered-projection test pins
+  only the projection order of the survivors.
 - `parquet_source_options`: `ParquetScanOptions`, the source's switches, and
   its pure decisions (claim stride, selection-pipeline deferral, partition
   ids, hooks to capabilities, projection names to indices).
