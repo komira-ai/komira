@@ -70,8 +70,8 @@ operator or a sink consumes but does not implement belongs here.
   a scan can filter without depending on an operator package.
 
 It depends on `komira_arrow`, `komira_async`, `komira_batch_eval`, `komira_fs`,
-`komira_host`, `komira_host_profile`, `komira_morsel`, `komira_physical_plan`, `komira_objectstore`,
-`komira_shuffle` and the other core packages listed in `BUCK`, and on no
+`komira_host`, `komira_host_profile`, `komira_morsel`, `komira_physical_plan`,
+`komira_objectstore`, `komira_shuffle` and the other core packages listed in `BUCK`, and on no
 operator package. Import from the defining module, for example
 `from komira_engine_runtime.host_detect import ...`; the package has
 no facade.

@@ -307,7 +307,8 @@ leaf. **The HostProfile value is split from detection instead.** The move list (
   `komira_objectstore`, `komira_async` or `komira_shuffle`. The leaf's `BUCK` file holds this with `closure_excludes`
   (exact import names, checked at analysis over the whole closure), and
   `tests//negative/closure_excludes` with `analysis_refusals_mojo` shows that each of the four is refused.
-- **Callers:** 26 files name the old module paths (a `git grep` of the four module names under `src`: 15 inside
+- **Callers:** 26 files name the old module paths (a `git grep` of the four module names under `src` at the base of
+  this slice: 25 `.mojo` files and the `komira_engine_runtime` README, 15 inside
   `komira_engine_runtime`, 3 in `komira_parquet_scan`, 4 in `komira_op_typed_source_api`, 2 in `komira_dispatch_sources`,
   one each in `komira_morsel` and `komira_physical_plan`); slice 1a rewrites them in the same change, with no re-export
   module left behind.

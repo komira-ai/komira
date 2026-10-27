@@ -3,12 +3,13 @@
 # =============================================================================
 #
 # A `HardwareProfile` is a value: core counts, the L1d/L2/L3 sizes, the cache
-# line, RAM, and the binding L2 instance (`komira_engine_runtime.l2_share`). It
-# is filled once, by `komira_engine_runtime.hardware_detect.
-# detect_hardware_profile()`, when the host profile is built
-# (`komira_engine_runtime.host_detect`), and is then only read. Nothing in this
-# package probes the machine: every accessor below is a pure function of the fields,
-# so two hosts with equal profiles size morsels identically.
+# line, RAM, and the binding L2 instance (`komira_engine_runtime.l2_share`).
+# It is filled once, by
+# `komira_engine_runtime.hardware_detect.detect_hardware_profile()`, when the
+# host profile is built (`komira_engine_runtime.host_detect`), and is then
+# only read. Nothing in this package probes the machine: every accessor below
+# is a pure function of the fields, so two hosts with equal profiles size
+# morsels identically.
 #
 # Formulas:
 #   * `optimal_morsel_rows(schema)`     -- L2-resident batch size (general)
@@ -270,9 +271,9 @@ struct HardwareProfile(Copyable, Movable, Writable):
         Both operands describe the SAME L2 instance (see the field comments):
         on Linux, the instance with the smallest per-worker share in the
         process's allowed CPU set (`komira_engine_runtime.l2_share`); on
-        macOS, the perflevel1 (E-tier) pair. Sizing to the smallest share makes ONE global grain
-        residency-safe on EVERY core, which is the requirement -- there is one
-        grain, not one per tier .
+        macOS, the perflevel1 (E-tier) pair. Sizing to the smallest share
+        makes ONE global grain residency-safe on EVERY core, which is the
+        requirement -- there is one grain, not one per tier.
 
         Worked values:
           * i7-14700K: the E cluster, 4 MiB / 4 physical cores = 1 MiB.

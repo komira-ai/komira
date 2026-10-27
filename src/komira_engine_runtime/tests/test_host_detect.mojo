@@ -41,12 +41,12 @@ def _narrow_i64_schema() -> Schema:
 
 
 # -----------------------------------------------------------------------------
-# Defaults -- mirrors `test_defaults_are_sane` (hardware.rs:735-746).
+# The fallback profile.
 # -----------------------------------------------------------------------------
 
 
 def test_default_profile_exact_values() raises:
-    """Mirrors v0.3 defaults field-for-field (hardware.rs:249-259)."""
+    """The fallback profile carries each DEFAULT_* constant field for field."""
     var hw = default_hardware_profile()
     assert_true(hw.physical_cores >= 1)
     assert_true(hw.logical_cores >= hw.physical_cores)
@@ -112,10 +112,6 @@ def test_policy_of_default_profile_sizes_off_the_fallback_share() raises:
     DEFAULT_E_CORES_PER_L2 = 4 -> 1 MiB per worker -> 512 KiB budget -> base
     65536 at 8 B/row. AGG (1.0x) = 65536; DEFAULT (2.0x) = 131072, which is
     exactly MAX_MORSEL_ROWS_DEFAULT.
-
-    ⚠ Under the deleted L1d formula this same profile answered 2048 / 4096
-    (DEFAULT_L1D_BYTES = 32 KiB), so this test is one of the places a revert
-    would show up.
     """
     var pol = MorselSizingPolicy(default_hardware_profile())
     var s = _narrow_i64_schema()

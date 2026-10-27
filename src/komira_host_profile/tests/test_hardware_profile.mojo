@@ -3,10 +3,10 @@
 # =============================================================================
 #
 # Mirrors the regression cases in `komira-engine-traits/src/hardware.rs`
-# (tests module, lines 729-988). Only the formulas + defaults + width-table
-# are covered here; wiring into materialize_* and bench validation is in
-# the (iii) follow-up. The fallback profile and detection are tested in
-# `komira_engine_runtime` (`test_host_detect`).
+# (tests module, lines 729-988). Only the formulas, fallback-shaped profiles
+# and the width table are covered here; wiring into materialize_* and bench
+# validation is in the (iii) follow-up. The fallback profile and detection
+# are tested in `komira_engine_runtime` (`test_host_detect`).
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -194,7 +194,7 @@ def test_compute_threads_uses_all_cores() raises:
 # -----------------------------------------------------------------------------
 
 
-def test_optimal_morsel_rows_narrow_on_defaults() raises:
+def test_optimal_morsel_rows_narrow_on_fallback_shaped_profile() raises:
     """256KB L2, 8-byte row: 128KB / 8 = 16384 rows (within clamp)."""
     var hw = _fallback_profile()
     var narrow = _narrow_i64_schema()
@@ -231,7 +231,7 @@ def test_optimal_morsel_rows_huge_l2_clamps_max() raises:
 # -----------------------------------------------------------------------------
 
 
-def test_optimal_agg_morsel_rows_defaults_clamp_min() raises:
+def test_optimal_agg_morsel_rows_fallback_shaped_profile_clamp_min() raises:
     """L1d=32KB, 8-byte row: 16KB/8 = 2048 rows (exactly MIN_AGG_MORSEL_ROWS)."""
     var hw = _fallback_profile()
     var narrow = _narrow_i64_schema()
@@ -268,7 +268,7 @@ def test_optimal_agg_morsel_rows_huge_l1d_clamps_max() raises:
 # -----------------------------------------------------------------------------
 
 
-def test_l3_resident_rows_defaults() raises:
+def test_l3_resident_rows_fallback_shaped_profile() raises:
     """8MB L3, 60% = 4.8MB, 64-byte entries = 78643 (v0.3 test case)."""
     var hw = _fallback_profile()
     assert_equal(hw.l3_resident_rows(64), 78643)
