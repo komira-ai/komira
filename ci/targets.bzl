@@ -90,6 +90,7 @@ TARGETS = [
     "komira//src/komira_broker_coordinator:komira_broker_coordinator_conda",
     "komira//src/komira_bump_arena:komira_bump_arena_conda",
     "komira//src/komira_calendar_store:komira_calendar_store_conda",
+    "komira//src/komira_cdc_ingest:komira_cdc_ingest_conda",
     "komira//src/komira_chat_proto:corpus_canonical",
     "komira//src/komira_chat_store:komira_chat_store_conda",
     "komira//src/komira_chunk:komira_chunk_conda",
