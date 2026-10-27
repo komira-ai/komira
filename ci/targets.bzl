@@ -459,6 +459,8 @@ TARGETS = [
     "komira//src/tests/helpers/komira_test_node:addon_loads",
     "komira//src/tests/helpers/komira_test_node:arrow_ipc",
     "komira//src/tests/helpers/komira_test_node:arrow_ipc_node_modules",
+    "komira//src/tests/helpers/komira_test_node:binding_addon",
+    "komira//src/tests/helpers/komira_test_node:binding_hello",
     "komira//src/tests/helpers/komira_test_node:esm",
     "komira//src/tests/helpers/komira_test_node:fails",
     "komira//src/tests/helpers/komira_test_node:fails_dash",
