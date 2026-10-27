@@ -213,6 +213,7 @@ TARGETS = [
     "komira//src/komira_op_agg_state:agg_state_bench",
     "komira//src/komira_op_agg_state:komira_op_agg_state_conda",
     "komira//src/komira_op_join_build:komira_op_join_build_conda",
+    "komira//src/komira_op_join_probe:komira_op_join_probe_conda",
     "komira//src/komira_op_sort:komira_op_sort_conda",
     "komira//src/komira_op_sources:komira_op_sources_conda",
     "komira//src/komira_op_typed_source_api:komira_op_typed_source_api_conda",
