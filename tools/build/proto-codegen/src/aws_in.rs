@@ -673,6 +673,7 @@ pub fn lower_aws_service(
 
     let file = IrFile {
         proto_path: model_path.to_string(),
+        source_sha256: String::new(),
         proto_package: format!("aws.{}", lowerer.meta.service),
         mojo_package: package_prefix.to_string(),
         messages,
@@ -1858,6 +1859,20 @@ mod tests {
     #[test]
     fn the_tiny_model_lowers() {
         lower_tiny(&tiny_model("", "", "Str")).unwrap();
+    }
+
+    #[test]
+    fn an_operation_the_model_lacks_is_refused_by_name() {
+        // With one the model has: a typo must fail the generation, never
+        // generate a smaller client without it.
+        let ops = ["Op".to_string(), "Opp".to_string()];
+        let e = lower_aws_service(&tiny_model("", "", "Str"), "tiny", &ops, "tiny.json", "aws.tiny")
+            .err()
+            .expect("an operation the model lacks lowered");
+        assert!(
+            e.contains("aws front-end: service `tiny` declares no operation(s) [\"Opp\"] (the model has 1 operations)"),
+            "{e}"
+        );
     }
 
     #[test]

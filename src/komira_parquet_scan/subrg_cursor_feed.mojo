@@ -14,8 +14,21 @@ from komira_counters.parquet_read_counter import parquet_note_column_chunk_decod
 from komira_fs.file_system import FileSystem
 from komira_parquet.file_reader import ParquetFileReader
 from komira_parquet.subrg_column_cursor import ResumableColumnCursor
-from komira_parquet_api.metadata import RowGroup, SchemaElement
-from komira_parquet_api.types import FieldRepetitionType, ParquetType
+from komira_parquet_api.metadata import ColumnMetaData, RowGroup, SchemaElement
+from komira_parquet_api.types import (
+    CONVERTED_TYPE_DATE,
+    CONVERTED_TYPE_DECIMAL,
+    CONVERTED_TYPE_INT_16,
+    CONVERTED_TYPE_INT_8,
+    CONVERTED_TYPE_UINT_16,
+    CONVERTED_TYPE_UINT_32,
+    CONVERTED_TYPE_UINT_64,
+    CONVERTED_TYPE_UINT_8,
+    FieldRepetitionType,
+    ParquetType,
+)
+
+from .flat_schema import schema_is_flat
 
 
 def _chunk_is_nullable(schema_elem: SchemaElement) -> Bool:
@@ -26,15 +39,46 @@ def _chunk_is_nullable(schema_elem: SchemaElement) -> Bool:
     return True
 
 
+def _annotation_relabels_the_type(schema_elem: SchemaElement) -> Bool:
+    """True when the whole-row-group decode gives the column a type other than
+    its physical one (an unsigned or narrow integer, a DATE, a DECIMAL, or a
+    timestamp carried by the LogicalType annotation alone): the
+    cursor's values are the physical ones, and an unsigned dictionary entry
+    would be sign-extended."""
+    if schema_elem.logical_timestamp_unit:
+        return True
+    if not schema_elem.converted_type:
+        return False
+    var ct = schema_elem.converted_type.value()
+    return (
+        ct == CONVERTED_TYPE_UINT_8
+        or ct == CONVERTED_TYPE_UINT_16
+        or ct == CONVERTED_TYPE_UINT_32
+        or ct == CONVERTED_TYPE_UINT_64
+        or ct == CONVERTED_TYPE_INT_8
+        or ct == CONVERTED_TYPE_INT_16
+        or ct == CONVERTED_TYPE_DATE
+        or ct == CONVERTED_TYPE_DECIMAL
+    )
+
+
+def chunk_start_offset(col_meta: ColumnMetaData) -> Int:
+    """The file offset of a column chunk's first page: the dictionary page
+    when the footer gives a positive offset below the first data page's. A
+    writer with no dictionary may store offset 0, which is no page."""
+    var start_offset = col_meta.data_page_offset
+    if col_meta.dictionary_page_offset:
+        var dpo = col_meta.dictionary_page_offset.value()
+        if dpo > 0 and dpo < start_offset:
+            start_offset = dpo
+    return start_offset
+
+
 def read_column_chunk_bytes[FS: FileSystem](reader: ParquetFileReader[FS], rg: RowGroup, col_idx: Int) raises -> List[UInt8]:
     """Column `col_idx`'s compressed chunk (dictionary and data pages) as an
     owned list. Counts one chunk decode."""
     ref col_meta = rg.columns[col_idx].meta_data
-    var start_offset = col_meta.data_page_offset
-    if col_meta.dictionary_page_offset:
-        var dpo = col_meta.dictionary_page_offset.value()
-        if dpo < start_offset:
-            start_offset = dpo
+    var start_offset = chunk_start_offset(col_meta)
     var total_size = col_meta.total_compressed_size
     parquet_note_column_chunk_decoded(total_size)
     var raw = reader.read_bytes(start_offset, total_size)
@@ -61,8 +105,15 @@ def open_subrg_cursor[FS: FileSystem](
     """A cursor over column `col_idx` of `rg`, or a refused one
     (`supported() == False`) for a physical type the cursor does not take
     (it takes INT32, INT64, FLOAT, DOUBLE and dictionary BYTE_ARRAY;
-    `try_open` refuses the encodings it does not). The caller checks
-    `supported()`."""
+    `try_open` refuses the encodings it does not). A refused cursor is also
+    returned, before the chunk is read, for a footer that is not flat (leaf
+    `col_idx` is then not `schema[col_idx + 1]`) and for a column whose
+    annotation re-labels its type (see `_annotation_relabels_the_type`); the
+    caller decodes those whole. The caller checks `supported()`."""
+    if col_idx < 0 or col_idx + 1 >= len(schema) or col_idx >= len(rg.columns) or not schema_is_flat(schema):
+        return ResumableColumnCursor()
+    if _annotation_relabels_the_type(schema[col_idx + 1]):
+        return ResumableColumnCursor()
     ref col_meta = rg.columns[col_idx].meta_data
     var ptype = col_meta.type
     if (

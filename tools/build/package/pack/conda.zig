@@ -6,6 +6,8 @@ const json = std.json;
 const Alloc = std.mem.Allocator;
 const pack_common = @import("common.zig");
 const pack_conda_meta = @import("conda_meta.zig");
+const pack_conda_dlopen = @import("conda_dlopen.zig");
+const pack_conda_lib = @import("conda_lib.zig");
 const Args = pack_common.Args;
 const Entry = pack_common.Entry;
 const all = pack_common.all;
@@ -45,46 +47,47 @@ pub const license_member = "info/licenses/LICENSE";
 const zstd_window_byte: u8 = 0x38; // exponent 7, mantissa 0: a 128 KiB window
 const zstd_block_max: usize = 128 * 1024;
 
-fn put16(out: *std.ArrayList(u8), v: u16) !void {
+fn put16(alloc: Alloc, out: *std.ArrayList(u8), v: u16) !void {
     var b: [2]u8 = undefined;
     std.mem.writeInt(u16, &b, v, .little);
-    try out.appendSlice(&b);
+    try out.appendSlice(alloc, &b);
 }
 
-fn put32(out: *std.ArrayList(u8), v: u32) !void {
+fn put32(alloc: Alloc, out: *std.ArrayList(u8), v: u32) !void {
     var b: [4]u8 = undefined;
     std.mem.writeInt(u32, &b, v, .little);
-    try out.appendSlice(&b);
+    try out.appendSlice(alloc, &b);
 }
 
 /// `data` as one zstd frame of raw blocks: no dictionary, no checksum, a
 /// 128 KiB window, the content size stated. Valid zstd that no encoder
 /// version can change.
 fn zstdRaw(alloc: Alloc, data: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(alloc);
-    try out.appendSlice(&[_]u8{ 0x28, 0xB5, 0x2F, 0xFD, 0xC0, zstd_window_byte });
+    var out = std.ArrayList(u8).empty;
+    try out.appendSlice(alloc, &[_]u8{ 0x28, 0xB5, 0x2F, 0xFD, 0xC0, zstd_window_byte });
     var fcs: [8]u8 = undefined;
     std.mem.writeInt(u64, &fcs, data.len, .little);
-    try out.appendSlice(&fcs);
+    try out.appendSlice(alloc, &fcs);
     var at: usize = 0;
     while (true) {
         const n = @min(zstd_block_max, data.len - at);
         const last = at + n == data.len;
         const hdr: u32 = (@as(u32, @intCast(n)) << 3) | @intFromBool(last); // block type 0: Raw
-        try out.appendSlice(&[_]u8{ @truncate(hdr), @truncate(hdr >> 8), @truncate(hdr >> 16) });
-        try out.appendSlice(data[at .. at + n]);
+        try out.appendSlice(alloc, &[_]u8{ @truncate(hdr), @truncate(hdr >> 8), @truncate(hdr >> 16) });
+        try out.appendSlice(alloc, data[at .. at + n]);
         at += n;
         if (last) break;
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 pub fn zstdDecode(alloc: Alloc, data: []const u8, what: []const u8) []u8 {
-    const window = alloc.alloc(u8, 8 * 1024 * 1024) catch fail("out of memory", .{});
-    var fbs = std.io.fixedBufferStream(data);
-    var dz = std.compress.zstd.decompressor(fbs.reader(), .{ .window_buffer = window });
-    return dz.reader().readAllAlloc(alloc, 1 << 31) catch |err|
-        fail("{s}: not a valid zstd stream: {s}", .{ what, @errorName(err) });
+    const window_len: u32 = 8 * 1024 * 1024;
+    const window = alloc.alloc(u8, window_len + std.compress.zstd.block_size_max) catch fail("out of memory", .{});
+    var in: std.Io.Reader = .fixed(data);
+    var dz = std.compress.zstd.Decompress.init(&in, window, .{ .window_len = window_len });
+    return dz.reader.allocRemaining(alloc, .limited(1 << 31)) catch |err|
+        fail("{s}: not a valid zstd stream: {s}", .{ what, @errorName(if (err == error.ReadFailed) (dz.err orelse err) else err) });
 }
 
 const ZipMember = struct { name: []const u8, data: []const u8 };
@@ -94,57 +97,57 @@ const zip_date: u16 = 0x0021; // 1980-01-01, the earliest a zip can say
 /// A zip of stored members in the given order: no extra fields, no comment,
 /// no data descriptors, every date 1980-01-01 00:00:00, mode 0644.
 fn zipStored(alloc: Alloc, members: []const ZipMember) ![]u8 {
-    var out = std.ArrayList(u8).init(alloc);
+    var out = std.ArrayList(u8).empty;
     const offsets = try alloc.alloc(u32, members.len);
     for (members, 0..) |m, i| {
         if (m.data.len >= 0xffff_0000 or out.items.len >= 0xffff_0000)
             fail("{s}: a conda member of 4 GiB or more needs zip64, which this tool does not write", .{m.name});
         offsets[i] = @intCast(out.items.len);
-        try put32(&out, 0x04034b50);
-        try put16(&out, 20);
-        try put16(&out, 0);
-        try put16(&out, 0);
-        try put16(&out, 0);
-        try put16(&out, zip_date);
-        try put32(&out, std.hash.Crc32.hash(m.data));
-        try put32(&out, @intCast(m.data.len));
-        try put32(&out, @intCast(m.data.len));
-        try put16(&out, @intCast(m.name.len));
-        try put16(&out, 0);
-        try out.appendSlice(m.name);
-        try out.appendSlice(m.data);
+        try put32(alloc, &out, 0x04034b50);
+        try put16(alloc, &out, 20);
+        try put16(alloc, &out, 0);
+        try put16(alloc, &out, 0);
+        try put16(alloc, &out, 0);
+        try put16(alloc, &out, zip_date);
+        try put32(alloc, &out, std.hash.Crc32.hash(m.data));
+        try put32(alloc, &out, @intCast(m.data.len));
+        try put32(alloc, &out, @intCast(m.data.len));
+        try put16(alloc, &out, @intCast(m.name.len));
+        try put16(alloc, &out, 0);
+        try out.appendSlice(alloc, m.name);
+        try out.appendSlice(alloc, m.data);
     }
     const cd_at = out.items.len;
     for (members, 0..) |m, i| {
-        try put32(&out, 0x02014b50);
-        try put16(&out, 0x031e); // made by: unix, spec 3.0
-        try put16(&out, 20);
-        try put16(&out, 0);
-        try put16(&out, 0);
-        try put16(&out, 0);
-        try put16(&out, zip_date);
-        try put32(&out, std.hash.Crc32.hash(m.data));
-        try put32(&out, @intCast(m.data.len));
-        try put32(&out, @intCast(m.data.len));
-        try put16(&out, @intCast(m.name.len));
-        try put16(&out, 0);
-        try put16(&out, 0);
-        try put16(&out, 0);
-        try put16(&out, 0);
-        try put32(&out, 0o100644 << 16);
-        try put32(&out, offsets[i]);
-        try out.appendSlice(m.name);
+        try put32(alloc, &out, 0x02014b50);
+        try put16(alloc, &out, 0x031e); // made by: unix, spec 3.0
+        try put16(alloc, &out, 20);
+        try put16(alloc, &out, 0);
+        try put16(alloc, &out, 0);
+        try put16(alloc, &out, 0);
+        try put16(alloc, &out, zip_date);
+        try put32(alloc, &out, std.hash.Crc32.hash(m.data));
+        try put32(alloc, &out, @intCast(m.data.len));
+        try put32(alloc, &out, @intCast(m.data.len));
+        try put16(alloc, &out, @intCast(m.name.len));
+        try put16(alloc, &out, 0);
+        try put16(alloc, &out, 0);
+        try put16(alloc, &out, 0);
+        try put16(alloc, &out, 0);
+        try put32(alloc, &out, 0o100644 << 16);
+        try put32(alloc, &out, offsets[i]);
+        try out.appendSlice(alloc, m.name);
     }
     const cd_len = out.items.len - cd_at;
-    try put32(&out, 0x06054b50);
-    try put16(&out, 0);
-    try put16(&out, 0);
-    try put16(&out, @intCast(members.len));
-    try put16(&out, @intCast(members.len));
-    try put32(&out, @intCast(cd_len));
-    try put32(&out, @intCast(cd_at));
-    try put16(&out, 0);
-    return out.toOwnedSlice();
+    try put32(alloc, &out, 0x06054b50);
+    try put16(alloc, &out, 0);
+    try put16(alloc, &out, 0);
+    try put16(alloc, &out, @intCast(members.len));
+    try put16(alloc, &out, @intCast(members.len));
+    try put32(alloc, &out, @intCast(cd_len));
+    try put32(alloc, &out, @intCast(cd_at));
+    try put16(alloc, &out, 0);
+    return out.toOwnedSlice(alloc);
 }
 
 fn rd16(b: []const u8, at: usize) u16 {
@@ -163,7 +166,7 @@ pub fn readZip(alloc: Alloc, z: []const u8, what: []const u8) ![]ZipMember {
     const n = rd16(z, e + 10);
     if (rd16(z, e + 8) != n or rd16(z, e + 4) != 0 or rd16(z, e + 6) != 0) fail("{s}: a split or inconsistent zip", .{what});
     var at: usize = rd32(z, e + 16);
-    var list = std.ArrayList(ZipMember).init(alloc);
+    var list = std.ArrayList(ZipMember).empty;
     var i: usize = 0;
     while (i < n) : (i += 1) {
         if (at + 46 > z.len or rd32(z, at) != 0x02014b50) fail("{s}: bad central directory entry {d}", .{ what, i });
@@ -188,14 +191,15 @@ pub fn readZip(alloc: Alloc, z: []const u8, what: []const u8) ![]ZipMember {
             fail("{s}: member {s}: local header differs from the central directory", .{ what, name });
         const data = z[off + 30 + lnlen ..][0..csize];
         if (std.hash.Crc32.hash(data) != crc) fail("{s}: member {s}: bad CRC-32", .{ what, name });
-        try list.append(.{ .name = name, .data = data });
+        try list.append(alloc, .{ .name = name, .data = data });
         at += 46 + nlen;
     }
     if (at != e) fail("{s}: bytes between the central directory and its end record", .{what});
-    return list.toOwnedSlice();
+    return list.toOwnedSlice(alloc);
 }
 
-pub const TarFile = struct { name: []const u8, mode: u32, data: []const u8 };
+/// A tar member: a regular file, or a symbolic link (`link` its target, no data).
+pub const TarFile = struct { name: []const u8, mode: u32, data: []const u8, link: []const u8 = "" };
 
 fn octalVal(field: []const u8, what: []const u8) u64 {
     var v: u64 = 0;
@@ -212,17 +216,21 @@ fn allZero(b: []const u8) bool {
     return true;
 }
 
-/// The regular files of a tar written by writeTar, refusing any header that
-/// breaks the determinism rules (mtime, owner, names) or any other entry type.
+/// The regular files and symbolic links of a tar written by writeTar,
+/// refusing any header that breaks the determinism rules (mtime, owner,
+/// names) or any other entry type. Which links a package may hold is the
+/// check's (conda_check.zig): only the link name of its shared library.
 pub fn readTar(alloc: Alloc, t: []const u8, what: []const u8) ![]TarFile {
-    var list = std.ArrayList(TarFile).init(alloc);
+    var list = std.ArrayList(TarFile).empty;
     var at: usize = 0;
     while (true) {
         if (at + 512 > t.len) fail("{s}: truncated tar", .{what});
         const h = t[at .. at + 512];
         if (allZero(h)) break;
         const name = h[0 .. std.mem.indexOfScalar(u8, h[0..100], 0) orelse 100];
-        if (h[156] != '0') fail("{s}: {s}: entry type `{c}`; only regular files belong in a conda package", .{ what, name, h[156] });
+        if (h[156] != '0' and h[156] != '2') fail("{s}: {s}: entry type `{c}`; only regular files and symbolic links belong in a conda package", .{ what, name, h[156] });
+        const link = if (h[156] == '2') h[157 .. 157 + (std.mem.indexOfScalar(u8, h[157..257], 0) orelse 100)] else "";
+        if (h[156] == '2' and link.len == 0) fail("{s}: {s}: a symbolic link with no target", .{ what, name });
         var sum: u64 = 0;
         for (h, 0..) |c, i| sum += if (i >= 148 and i < 156) ' ' else c;
         if (sum != octalVal(h[148..156], what)) fail("{s}: {s}: bad tar header checksum", .{ what, name });
@@ -233,11 +241,12 @@ pub fn readTar(alloc: Alloc, t: []const u8, what: []const u8) ![]TarFile {
         const mode: u32 = @intCast(octalVal(h[100..108], what));
         at += 512;
         if (at + size > t.len) fail("{s}: {s}: truncated tar member", .{ what, name });
-        try list.append(.{ .name = name, .mode = mode, .data = t[at .. at + size] });
+        if (link.len != 0 and size != 0) fail("{s}: {s}: a symbolic link with data", .{ what, name });
+        try list.append(alloc, .{ .name = name, .mode = mode, .data = t[at .. at + size], .link = link });
         at += (size + 511) / 512 * 512;
     }
     if (!allZero(t[at..])) fail("{s}: bytes after the end of the tar", .{what});
-    return list.toOwnedSlice();
+    return list.toOwnedSlice(alloc);
 }
 
 pub fn findTar(files: []const TarFile, name: []const u8) ?TarFile {
@@ -303,29 +312,31 @@ fn guardFor(subdir: []const u8) []const u8 {
 }
 
 /// The run requirements of a library, in the order they are written and
-/// checked: the platform guard, the exact Mojo pin, then each direct
+/// checked: the platform guard, the glibc floor of a package shipping native
+/// files (`__glibc >=V`, conda_lib.zig), the exact Mojo pin, then each direct
 /// dependency at this version AND this build string (`name ==V BUILD`), sorted.
 /// Every package of a release is lockstep, so a dependency's build string is
 /// this package's. Direct dependencies only: the solver's closure is the
 /// build's.
-pub fn runRequirements(alloc: Alloc, subdir: []const u8, pin: []const u8, version: []const u8, build: []const u8, deps: []const []const u8) ![][]const u8 {
-    var list = std.ArrayList([]const u8).init(alloc);
-    try list.append(guardFor(subdir));
-    try list.append(try std.fmt.allocPrint(alloc, "{s} =={s}", .{ mojo_conda_name, pin }));
+pub fn runRequirements(alloc: Alloc, subdir: []const u8, glibc: ?[]const u8, pin: []const u8, version: []const u8, build: []const u8, deps: []const []const u8) ![][]const u8 {
+    var list = std.ArrayList([]const u8).empty;
+    try list.append(alloc, guardFor(subdir));
+    if (glibc) |g| try list.append(alloc, g);
+    try list.append(alloc, try std.fmt.allocPrint(alloc, "{s} =={s}", .{ mojo_conda_name, pin }));
     const sorted = try alloc.dupe([]const u8, deps);
     std.mem.sort([]const u8, sorted, {}, lessStr);
-    for (sorted) |d| try list.append(try std.fmt.allocPrint(alloc, "{s} =={s} {s}", .{ d, version, build }));
-    return list.toOwnedSlice();
+    for (sorted) |d| try list.append(alloc, try std.fmt.allocPrint(alloc, "{s} =={s} {s}", .{ d, version, build }));
+    return list.toOwnedSlice(alloc);
 }
 
 /// The run requirements of the metapackage: the platform guard, then every
 /// member at exactly its version and build string, sorted by name. No compiler
 /// pin: the members carry it.
 pub fn metaRequirements(alloc: Alloc, subdir: []const u8, members: []const Member) ![][]const u8 {
-    var list = std.ArrayList([]const u8).init(alloc);
-    try list.append(guardFor(subdir));
-    for (members) |m| try list.append(try std.fmt.allocPrint(alloc, "{s} =={s} {s}", .{ m.name, m.version, m.build }));
-    return list.toOwnedSlice();
+    var list = std.ArrayList([]const u8).empty;
+    try list.append(alloc, guardFor(subdir));
+    for (members) |m| try list.append(alloc, try std.fmt.allocPrint(alloc, "{s} =={s} {s}", .{ m.name, m.version, m.build }));
+    return list.toOwnedSlice(alloc);
 }
 
 pub fn strArray(alloc: Alloc, items: []const []const u8) !json.Value {
@@ -335,33 +346,10 @@ pub fn strArray(alloc: Alloc, items: []const []const u8) !json.Value {
 }
 
 pub fn jsonLine(alloc: Alloc, v: json.Value) ![]u8 {
-    var out = std.ArrayList(u8).init(alloc);
-    try writeSorted(alloc, v, out.writer());
-    try out.append('\n');
+    var out = std.Io.Writer.Allocating.init(alloc);
+    try writeSorted(alloc, v, &out.writer);
+    try out.writer.writeByte('\n');
     return out.toOwnedSlice();
-}
-
-/// Null if no source under `dir_path` opens a shared library by name at run
-/// time; otherwise why this tool cannot package the library. Such a package
-/// needs the conda package that ships the shared library in its run
-/// requirements, and this tool does not derive that yet, so it says so instead
-/// of publishing a package that fails on a clean machine.
-fn dlopenReason(alloc: Alloc, dir_path: []const u8) !?[]const u8 {
-    var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch |err|
-        fail("cannot open sources {s}: {s}", .{ dir_path, @errorName(err) });
-    defer dir.close();
-    var walker = try dir.walk(alloc);
-    defer walker.deinit();
-    var files: usize = 0;
-    while (try walker.next()) |w| {
-        if (w.kind != .file or !std.mem.endsWith(u8, w.path, ".mojo")) continue;
-        files += 1;
-        const text = try dir.readFileAlloc(alloc, w.path, 1 << 28);
-        if (std.mem.indexOf(u8, text, "OwnedDLHandle") != null)
-            return try std.fmt.allocPrint(alloc, "{s}: opens a shared library at run time (OwnedDLHandle); its conda package must depend on the package shipping that library, which this tool does not derive yet", .{w.path});
-    }
-    if (files == 0) fail("sources {s} hold no .mojo file", .{dir_path});
-    return null;
 }
 
 /// The source commit of a stamp (--commit): empty only for an unstamped build.
@@ -386,7 +374,7 @@ pub fn lessDoc(_: void, x: DocFile, y: DocFile) bool {
 /// tar name (100 bytes), since conda-check reads no extended header. The same
 /// path twice is refused. The bytes are read here; each is installed mode 0644.
 pub fn docFiles(alloc: Alloc, a: Args, name: []const u8) ![]DocFile {
-    var list = std.ArrayList(DocFile).init(alloc);
+    var list = std.ArrayList(DocFile).empty;
     for (try all(alloc, a, "--doc-file")) |df| {
         const eq = std.mem.indexOfScalar(u8, df, '=') orelse fail("--doc-file `{s}` is not <relative path>=<file>", .{df});
         const rel = df[0..eq];
@@ -403,9 +391,9 @@ pub fn docFiles(alloc: Alloc, a: Args, name: []const u8) ![]DocFile {
         const path = try std.fmt.allocPrint(alloc, "{s}{s}/{s}", .{ doc_dir, name, rel });
         if (path.len > 100) fail("--doc-file path `{s}` is {d} bytes; it must fit 100", .{ path, path.len });
         for (list.items) |d| if (std.mem.eql(u8, d.path, path)) fail("--doc-file {s} given twice", .{rel});
-        try list.append(.{ .path = path, .data = readAll(alloc, df[eq + 1 ..]) });
+        try list.append(alloc, .{ .path = path, .data = readAll(alloc, df[eq + 1 ..]) });
     }
-    const docs = try list.toOwnedSlice();
+    const docs = try list.toOwnedSlice(alloc);
     std.mem.sort(DocFile, docs, {}, lessDoc);
     return docs;
 }
@@ -429,7 +417,7 @@ pub fn aboutAndLicense(alloc: Alloc, a: Args, info_entries: *std.ArrayList(Entry
     try about.object.put("home", str(need(one(a, "--home"), "--home")));
     try about.object.put("license", str(need(one(a, "--license"), "--license")));
     try about.object.put("summary", str(summary));
-    try info_entries.append(.{ .path = "info/about.json", .mode = 0o644, .data = try jsonLine(alloc, about) });
+    try info_entries.append(alloc, .{ .path = "info/about.json", .mode = 0o644, .data = try jsonLine(alloc, about) });
     var have_license = false;
     for (try all(alloc, a, "--extra-file")) |ef| {
         const eq = std.mem.indexOfScalar(u8, ef, '=') orelse fail("--extra-file `{s}` is not info/<path>=<file>", .{ef});
@@ -437,7 +425,7 @@ pub fn aboutAndLicense(alloc: Alloc, a: Args, info_entries: *std.ArrayList(Entry
         if (!std.mem.startsWith(u8, dest, "info/licenses/") or std.mem.indexOf(u8, dest, "..") != null or dest.len > 100)
             fail("--extra-file destination `{s}` must be a short path under info/licenses/", .{dest});
         have_license = have_license or std.mem.eql(u8, dest, license_member);
-        try info_entries.append(.{ .path = dest, .mode = 0o644, .data = readAll(alloc, ef[eq + 1 ..]) });
+        try info_entries.append(alloc, .{ .path = dest, .mode = 0o644, .data = readAll(alloc, ef[eq + 1 ..]) });
     }
     if (!have_license) fail("no {s}: Apache-2.0 requires the licence text to accompany a redistributed package", .{license_member});
 }
@@ -490,10 +478,11 @@ pub fn assembleConda(alloc: Alloc, stem: []const u8, pkg_entries: []Entry, info_
 // over a package this tool wrote, so the two cannot drift apart.
 //
 // A library the tool cannot package (native code, no tests, a dependency with
-// no package, a run-time shared library) is written as a directory holding one
-// file, REFUSED, whose text is the reason. That is a value, not an error, so a
-// build of every target in the repository still succeeds; asking for the
-// package's release is what fails (`conda-check --require-stamped`).
+// no package, a run-time shared library its `dlopen` does not declare) is
+// written as a directory holding one file, REFUSED, whose text is the reason.
+// That is a value, not an error, so a build of every target in the repository
+// still succeeds; asking for the package's release is what fails
+// (`conda-check --require-stamped`).
 
 fn openOut(a: Args) std.fs.Dir {
     const p = need(one(a, "--out-dir"), "--out-dir");
@@ -520,15 +509,15 @@ pub fn platformFor(subdir: []const u8) []const u8 {
 }
 
 pub fn contractManifest(alloc: Alloc, name: []const u8, version: []const u8, subdir: []const u8, file: []const u8, sha: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(alloc);
-    const w = out.writer();
+    var out = std.Io.Writer.Allocating.init(alloc);
+    const w = &out.writer;
     try w.writeAll("{\"format\":\"kci.artifact_manifest\",\"schema_version\":1,\"artifact_type\":\"CONDA\"");
     const vals = [_][2][]const u8{ .{ "name", name }, .{ "version", version }, .{ "platform", platformFor(subdir) }, .{ "subdir", subdir }, .{ "file", file }, .{ "sha256", sha }, .{ "metadata", conda_manifest_metadata } };
     for (vals) |kv| {
         try w.writeAll(",\"");
         try w.writeAll(kv[0]);
         try w.writeAll("\":");
-        try json.encodeJsonString(kv[1], .{}, w);
+        try json.Stringify.encodeJsonString(kv[1], .{}, w);
     }
     try w.writeAll("}\n");
     return out.toOwnedSlice();
@@ -556,7 +545,8 @@ pub fn emitPackage(alloc: Alloc, a: Args, stem: []const u8, conda: []const u8, n
 /// komira_pack conda --name N --import-name I --stamp N
 ///     --timestamp-ms T [--commit SHA] --subdir linux-64 --mojo-pin V
 ///     --license SPDX --summary S --home URL --payload F.mojoc [--dep NAME]...
-///     --sources DIR --extra-file info/licenses/LICENSE=FILE --label L
+///     [--dlopen SONAME=REQUIREMENT]... --sources DIR
+///     --extra-file info/licenses/LICENSE=FILE --label L
 ///     [--doc-file REL=FILE]... --out-dir D
 /// komira_pack conda --name N --refuse REASON --out-dir D
 ///
@@ -568,12 +558,25 @@ pub fn emitPackage(alloc: Alloc, a: Args, stem: []const u8, conda: []const u8, n
 /// conda name of a direct dependency. With --refuse, the package is not made
 /// and D holds REFUSED instead.
 ///
+/// Each --dlopen is a shared library the library opens at run time and the
+/// conda requirement of the package shipping it (system_libs.bzl, through
+/// the build). The sources (--sources) must open exactly those sonames
+/// (conda_dlopen.zig), else D holds REFUSED naming both lists; each
+/// requirement is a run requirement after the others, and metadata.json
+/// carries `dlopen` ([{requirement, soname}], written only when there is one).
+///
 /// Each --doc-file is installed at share/doc/N/REL (docFiles): a file in the
 /// pkg tar, one paths.json row, and one `doc_files` row ({path, sha256}) of
 /// metadata.json. A library's README.md is passed as REL README.md
 /// (conda.bzl). metadata.json carries `doc_files` always, [] when none.
+///
+/// A library owning C also gives [--lib-shared SONAME=FILE]
+/// [--lib-static NAME=FILE]... --glibc-floor V [--closure-owner SONAME]...:
+/// its files at lib/, the `__glibc >=V` requirement, and `lib_files` rows in
+/// metadata.json (conda_lib.zig, which also refuses a NEEDED owner outside
+/// the closure). Without them the package has no `lib_files` key.
 pub fn cmdConda(alloc: Alloc, a: Args) !void {
-    allow(a, &.{ "--stamp", "--timestamp-ms", "--subdir", "--mojo-pin", "--license", "--summary", "--home", "--payload", "--dep", "--sources", "--import-name", "--extra-file", "--doc-file", "--label", "--commit", "--refuse", "--out-dir" });
+    allow(a, &.{ "--stamp", "--timestamp-ms", "--subdir", "--mojo-pin", "--license", "--summary", "--home", "--payload", "--dep", "--sources", "--import-name", "--extra-file", "--doc-file", "--label", "--commit", "--refuse", "--out-dir", "--dlopen", "--lib-shared", "--lib-static", "--glibc-floor", "--closure-owner" });
     const name = need(a.name, "--name");
     if (one(a, "--refuse")) |why| {
         try writeRefusal(alloc, a, why);
@@ -606,7 +609,8 @@ pub fn cmdConda(alloc: Alloc, a: Args) !void {
     const commit = commitOf(a, stamp);
     const build = try buildString(alloc, commit, number);
 
-    if (try dlopenReason(alloc, need(one(a, "--sources"), "--sources"))) |why| {
+    const dl = try pack_conda_dlopen.parseDlopens(alloc, try all(alloc, a, "--dlopen"));
+    if (try pack_conda_dlopen.dlopenReasonDir(alloc, need(one(a, "--sources"), "--sources"), dl)) |why| {
         try writeRefusal(alloc, a, why);
         return;
     }
@@ -616,9 +620,13 @@ pub fn cmdConda(alloc: Alloc, a: Args) !void {
     const payload_path = try std.fmt.allocPrint(alloc, "{s}{s}.mojoc", .{ payload_dir, import_name });
     const payload_sha = sha256Hex(payload);
     const docs = try docFiles(alloc, a, name);
+    // The library's native files (conda_lib.zig): refused when a shared
+    // library's NEEDED names a komira owner outside the Mojo closure.
+    const libs = try pack_conda_lib.libFiles(alloc, a);
+    const glibc = try pack_conda_lib.packedGlibc(alloc, a, name, libs);
 
     // info/
-    const depends = try runRequirements(alloc, subdir, pin, version, build, deps);
+    const depends = try pack_conda_dlopen.withSystemRequirements(alloc, try runRequirements(alloc, subdir, glibc, pin, version, build, deps), dl);
     var index = newObject(alloc);
     try index.object.put("arch", str("x86_64"));
     try index.object.put("build", str(build));
@@ -633,20 +641,24 @@ pub fn cmdConda(alloc: Alloc, a: Args) !void {
 
     // pkg/: the payload and the doc files, sorted by path (writeTar sorts
     // the tar the same way), and one paths.json row each in that order.
-    var pkg_list = std.ArrayList(Entry).init(alloc);
-    try pkg_list.append(.{ .path = payload_path, .mode = 0o644, .data = payload });
-    for (docs) |d| try pkg_list.append(.{ .path = d.path, .mode = 0o644, .data = d.data });
-    const pkg_entries = try pkg_list.toOwnedSlice();
+    var pkg_list = std.ArrayList(Entry).empty;
+    try pkg_list.append(alloc, .{ .path = payload_path, .mode = 0o644, .data = payload });
+    for (docs) |d| try pkg_list.append(alloc, .{ .path = d.path, .mode = 0o644, .data = d.data });
+    for (libs) |f| try pkg_list.append(alloc, .{ .path = f.path, .mode = f.mode(), .data = if (f.kind == .link) "" else f.data, .link = f.target });
+    const pkg_entries = try pkg_list.toOwnedSlice(alloc);
     std.mem.sort(Entry, pkg_entries, {}, lessEntry);
     var rows = newArray(alloc);
-    for (pkg_entries) |e| try rows.array.append(try pathRow(alloc, e.path, e.data));
+    for (pkg_entries) |e| {
+        const row = if (pack_conda_lib.find(libs, e.path)) |f| try pack_conda_lib.pathRow(alloc, f) else try pathRow(alloc, e.path, e.data);
+        try rows.array.append(row);
+    }
     var paths = newObject(alloc);
     try paths.object.put("paths", rows);
     try paths.object.put("paths_version", .{ .integer = 1 });
 
-    var info_entries = std.ArrayList(Entry).init(alloc);
-    try info_entries.append(.{ .path = "info/index.json", .mode = 0o644, .data = try jsonLine(alloc, index) });
-    try info_entries.append(.{ .path = "info/paths.json", .mode = 0o644, .data = try jsonLine(alloc, paths) });
+    var info_entries = std.ArrayList(Entry).empty;
+    try info_entries.append(alloc, .{ .path = "info/index.json", .mode = 0o644, .data = try jsonLine(alloc, index) });
+    try info_entries.append(alloc, .{ .path = "info/paths.json", .mode = 0o644, .data = try jsonLine(alloc, paths) });
     try aboutAndLicense(alloc, a, &info_entries);
 
     const stem = try std.fmt.allocPrint(alloc, "{s}-{s}-{s}", .{ name, version, build });
@@ -661,10 +673,12 @@ pub fn cmdConda(alloc: Alloc, a: Args) !void {
     }
     var m = newObject(alloc);
     try m.object.put("depends", try strArray(alloc, depends));
+    if (dl.len != 0) try m.object.put("dlopen", try pack_conda_dlopen.dlopenRows(alloc, dl));
     try m.object.put("doc_files", doc_rows);
     try m.object.put("import_name", str(import_name));
     try m.object.put("kind", str("library"));
     try m.object.put("label", str(need(one(a, "--label"), "--label")));
+    if (libs.len != 0) try m.object.put("lib_files", try pack_conda_lib.metadataRows(alloc, libs));
     try m.object.put("mojo_pin", str(pin));
     try m.object.put("payload_path", str(payload_path));
     try m.object.put("payload_sha256", str(&payload_sha));

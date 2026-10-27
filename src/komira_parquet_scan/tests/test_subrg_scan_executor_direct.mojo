@@ -9,6 +9,12 @@
 #   - a column with an actual null in a row group bigger than one chunk:
 #     the chunks already handed over are retracted, the row group is decoded
 #     whole, and every row (nulls included) comes back exactly once;
+#   - columns requested out of file order come back in the requested order, on
+#     the cursor route and through the whole-row-group fallback;
+#   - UINT_32 / UINT_64 dictionary columns are not read through the cursors
+#     (their entries would be sign-extended): the row group is decoded whole,
+#     every value at or above 2^31 / 2^63 intact;
+#   - a dictionary column with nulls comes back flat, every row, nulls kept;
 #   - two units in one fork each come back as they would alone.
 
 from std.memory import ArcPointer
@@ -44,7 +50,7 @@ from komira_parquet_scan.subrg_scan_executor import (
 from komira_plan_expr.expr import BIN_LT, Expr
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_runtime_paths import test_tmpdir
-from komira_test_parquet_file import TestColumn, TestFileLayout, write_parquet_file
+from komira_test_parquet_file import PT_INT32, PT_INT64, TestColumn, TestFileLayout, write_parquet_file
 
 comptime _FS = LocalFs[NoopSink]
 comptime _RG = 50
@@ -247,6 +253,203 @@ def test_a_null_past_the_first_chunk_is_retracted_and_decoded_whole() raises:
             else:
                 assert_equal(Int(n.get(j)), k)
             k += 1
+    rt.shutdown()
+
+
+def test_requested_order_is_kept_on_both_routes() raises:
+    var rt = _runtime()
+    # Columns n, f, a, b: file order is a, b, f, n. Row 5 of the 50-row row
+    # group is null in n, so the cursors refuse it and the row group is
+    # decoded whole; without a null the cursors take it.
+    var names: List[String] = ["n", "f", "a", "b"]
+    var types: List[ArrowType] = [ArrowType.INT64, ArrowType.FLOAT64, ArrowType.INT64, ArrowType.INT32]
+    for with_null in [False, True]:
+        var reader = _reader(_file("reorder" + String(with_null), [_RG], 5 if with_null else -1))
+        var plan = _plan(reader, names, types)
+        var fb0 = scan_fallback_count()
+        var out = run_subrg_scan[_FS](
+            rt.dispatcher(), CancellationToken.never(), ScanCollectChunkSink(SCAN_FLUSH_BUDGET_BYTES), reader^, plan^,
+            _schema(names, types), False, None, 4,
+        )
+        assert_equal(scan_fallback_count() - fb0, 1 if with_null else 0)
+        assert_equal(_rows(out), _RG)
+        var k = 0
+        for i in range(len(out)):
+            ref bt = out[i]
+            assert_equal(bt.num_columns(), 4)
+            assert_true(bt.column_at(1).arrow_type == ArrowType.FLOAT64)
+            assert_true(bt.column_at(3).arrow_type == ArrowType.INT32)
+            var n = bt.column_at(0).as_primitive[DType.int64]()
+            var f = bt.column_at(1).as_primitive[DType.float64]()
+            var a = bt.column_at(2).as_primitive[DType.int64]()
+            var b = bt.column_at(3).as_primitive[DType.int32]()
+            for j in range(bt.num_rows()):
+                if with_null and k == 5:
+                    assert_true(n.is_null(j))
+                else:
+                    assert_equal(Int(n.get(j)), k)
+                assert_equal(Float64(f.get(j)), Float64(k) / 4.0)
+                assert_equal(Int(a.get(j)), k % 7)
+                assert_equal(Int(b.get(j)), k)
+                k += 1
+    rt.shutdown()
+
+
+def test_unsigned_dictionary_columns_are_decoded_whole() raises:
+    var rt = _runtime()
+    var path = test_tmpdir() + "/uint.parquet"
+    var u32 = List[Int]()
+    var u64 = List[Int]()
+    var b = List[Int]()
+    var lowest = -(1 << 62) - (1 << 62)
+    for r in range(_RG):
+        u32.append((1 << 31) + r % 4)
+        u64.append(lowest + r % 4)
+        b.append(r)
+    var cols = List[TestColumn]()
+    cols.append(TestColumn.int32("b", b^))
+    var c0 = TestColumn("u32", PT_INT32, 13)
+    c0.ints = u32^
+    cols.append(c0^.dict_encoded())
+    var c1 = TestColumn("u64", PT_INT64, 14)
+    c1.ints = u64^
+    cols.append(c1^.dict_encoded())
+    write_parquet_file(path, cols, TestFileLayout([_RG], 0, False))
+    var reader = _reader(path)
+    var names: List[String] = ["b", "u32", "u64"]
+    var types: List[ArrowType] = [ArrowType.INT32, ArrowType.INT32, ArrowType.INT64]
+    var plan = _plan(reader, names, types)
+    var fb0 = scan_fallback_count()
+    var out = run_subrg_scan[_FS](
+        rt.dispatcher(), CancellationToken.never(), ScanCollectChunkSink(SCAN_FLUSH_BUDGET_BYTES), reader^, plan^,
+        _schema(names, types), False, None, 4,
+    )
+    assert_equal(scan_fallback_count() - fb0, 1)
+    assert_equal(_rows(out), _RG)
+    var k = 0
+    for i in range(len(out)):
+        ref bt = out[i]
+        assert_true(bt.column_at(1).arrow_type == ArrowType.UINT32)
+        assert_true(bt.column_at(2).arrow_type == ArrowType.UINT64)
+        var c32 = bt.column_at(1).as_primitive[DType.uint32]()
+        var c64 = bt.column_at(2).as_primitive[DType.uint64]()
+        for j in range(bt.num_rows()):
+            assert_equal(Int(c32.get(j)), (1 << 31) + k % 4)
+            assert_equal(c64.get(j), (UInt64(1) << 63) + UInt64(k % 4))
+            k += 1
+    rt.shutdown()
+
+
+def test_a_dictionary_column_with_nulls_comes_back_flat() raises:
+    var rt = _runtime()
+    var path = test_tmpdir() + "/dict_nulls.parquet"
+    var d = List[Int]()
+    var nn = List[Bool]()
+    var b = List[Int]()
+    for r in range(_RG):
+        d.append(r % 5)
+        nn.append(r % 6 == 0)
+        b.append(r)
+    var cols = List[TestColumn]()
+    cols.append(TestColumn.int32("b", b^))
+    cols.append(TestColumn.int64("dn", d^).with_nulls(nn^).dict_encoded())
+    write_parquet_file(path, cols, TestFileLayout([_RG], 0, False))
+    var reader = _reader(path)
+    var names: List[String] = ["dn", "b"]
+    var types: List[ArrowType] = [ArrowType.INT64, ArrowType.INT32]
+    var plan = _plan(reader, names, types)
+    var out = run_subrg_scan[_FS](
+        rt.dispatcher(), CancellationToken.never(), ScanCollectChunkSink(SCAN_FLUSH_BUDGET_BYTES), reader^, plan^,
+        _schema(names, types), False, None, 4,
+    )
+    assert_equal(_rows(out), _RG)
+    var k = 0
+    for i in range(len(out)):
+        ref bt = out[i]
+        var dn = bt.column_at(0).as_primitive[DType.int64]()
+        var bb = bt.column_at(1).as_primitive[DType.int32]()
+        for j in range(bt.num_rows()):
+            assert_equal(dn.is_null(j), k % 6 == 0, "row " + String(k))
+            if k % 6 != 0:
+                assert_equal(Int(dn.get(j)), k % 5)
+            assert_equal(Int(bb.get(j)), k)
+            k += 1
+    rt.shutdown()
+
+
+def _patched_reader(name: String) raises -> ParquetReader[_FS]:
+    """The `_file()` reader with column b's footer dictionary offset set to 0
+    (b is PLAIN: no dictionary page) and column a (INT64) carrying only the
+    LogicalType TIMESTAMP, microseconds."""
+    var path = _file(name, [_RG, _RG], -1)
+    var meta = _reader(path)._meta[].copy()
+    meta.schema[1].logical_timestamp_unit = Optional[Int](2)
+    meta.row_groups[0].columns[1].meta_data.dictionary_page_offset = Optional[Int](0)
+    meta.row_groups[1].columns[1].meta_data.dictionary_page_offset = Optional[Int](0)
+    return ParquetReader[_FS](_file=ParquetFileReader[_FS].open(path), _meta=ArcPointer[FileMetaData](meta^))
+
+
+def test_a_zero_dictionary_offset_streams_and_a_timestamp_is_decoded_whole() raises:
+    var rt = _runtime()
+    # b and f alone: the zero offset must not stop the cursors taking them.
+    var reader = _patched_reader("patched1")
+    var names: List[String] = ["b", "f"]
+    var types: List[ArrowType] = [ArrowType.INT32, ArrowType.FLOAT64]
+    var plan = _plan(reader, names, types)
+    var fb0 = scan_fallback_count()
+    var out = run_subrg_scan[_FS](
+        rt.dispatcher(), CancellationToken.never(), ScanCollectChunkSink(SCAN_FLUSH_BUDGET_BYTES), reader^, plan^,
+        _schema(names, types), False, None, 4,
+    )
+    assert_equal(scan_fallback_count() - fb0, 0)
+    assert_equal(_rows(out), 2 * _RG)
+    var k = 0
+    for i in range(len(out)):
+        ref bt = out[i]
+        for j in range(bt.num_rows()):
+            assert_equal(Int(bt.column_at(0).as_primitive[DType.int32]().get(j)), k)
+            assert_equal(Float64(bt.column_at(1).as_primitive[DType.float64]().get(j)), Float64(k) / 4.0)
+            k += 1
+    # With the timestamp column a, every row group is decoded whole, and every
+    # batch carries the Timestamp type the whole decode gives.
+    var reader2 = _patched_reader("patched2")
+    var names2: List[String] = ["a", "b"]
+    var types2: List[ArrowType] = [ArrowType.TIMESTAMP_US, ArrowType.INT32]
+    var plan2 = _plan(reader2, names2, types2)
+    var fb1 = scan_fallback_count()
+    var out2 = run_subrg_scan[_FS](
+        rt.dispatcher(), CancellationToken.never(), ScanCollectChunkSink(SCAN_FLUSH_BUDGET_BYTES), reader2^, plan2^,
+        _schema(names2, types2), False, None, 4,
+    )
+    assert_equal(scan_fallback_count() - fb1, 2)
+    assert_equal(_rows(out2), 2 * _RG)
+    k = 0
+    for i in range(len(out2)):
+        ref bt = out2[i]
+        assert_true(bt.column_at(0).arrow_type == ArrowType.TIMESTAMP_US)
+        for j in range(bt.num_rows()):
+            assert_equal(Int(bt.column_at(0).as_primitive[DType.int64]().get(j)), k % 7)
+            assert_equal(Int(bt.column_at(1).as_primitive[DType.int32]().get(j)), k)
+            k += 1
+    rt.shutdown()
+
+
+def test_a_row_count_the_footer_disagrees_with_is_decoded_whole() raises:
+    var rt = _runtime()
+    var path = _file("rowcount", [_RG], -1)
+    var meta = _reader(path)._meta[].copy()
+    meta.row_groups[0].num_rows = _RG - 1
+    var reader = ParquetReader[_FS](_file=ParquetFileReader[_FS].open(path), _meta=ArcPointer[FileMetaData](meta^))
+    var nt = _abf()
+    var plan = _plan(reader, nt[0], nt[1])
+    var fb0 = scan_fallback_count()
+    var streamed0 = scan_rows_streamed_count()
+    _ = run_subrg_scan[_FS](
+        rt.dispatcher(), CancellationToken.never(), ScanCollectChunkSink(SCAN_FLUSH_BUDGET_BYTES), reader^, plan^,
+        _schema(nt[0], nt[1]), False, None, 4,
+    )
+    assert_equal(scan_fallback_count() - fb0, 1)
+    assert_equal(scan_rows_streamed_count() - streamed0, 0)
     rt.shutdown()
 
 

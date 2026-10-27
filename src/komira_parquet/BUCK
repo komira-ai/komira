@@ -62,7 +62,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # It reads a local file a row group or a morsel at a time
 # (morsel_reader, its morsel windows in morsel_slice, the data-page count of
 # the one-pass selection decode in data_page_count), and decodes a row group
-# from bytes the caller already holds, with no I/O (bytes_decode). Each
+# from bytes the caller already holds, with no I/O (bytes_decode), or a whole
+# in-memory file to one batch (file_decode). Each
 # column chunk decoded there is counted (komira_counters).
 #
 # It skips pages: a column chunk's page index parsed (page_index_parser) and
@@ -167,6 +168,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   unsigned integers, floats (no prune on !=), byte arrays, AND and OR,
 #   names resolved among the top-level leaves after a group, DECIMAL and the
 #   other conservative cases, the null trap and the file-level count.
+# - test_rg_pruner_nan_bounds: NaN min/max (either, both, beside signed
+#   zeros, other NaN bit patterns) on DOUBLE and FLOAT keep the row group for
+#   every operator and side; finite bounds still prune; all-match never fires.
 # - test_row_selection_direct: RowSelection operations against a per-row
 #   bitmap over generated selections, nulls in a mask, selects_all and the
 #   cursor's phases.
@@ -185,6 +189,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   by type (unsigned, UINT_64 past Int64.MAX, DECIMAL), top-level leaves,
 #   HLL register merge against one sketch over the union, the path entry
 #   points.
+# - test_table_stats_nan_bounds: a NaN bound leaves the column's folded min
+#   and max unknown (eager fold and provider); finite columns still fold.
 # - test_morsel_reader_direct: ParquetMorselReader on files written by
 #   komira_test_parquet_file: morsels per row group and cut across row groups
 #   and pages at unaligned rows (validity rebased), one-row morsels, reset,
@@ -218,6 +224,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # - test_parquet_source_page_picks_direct: row ranges and page cover with
 #   two page sizes, the per-column page decode, and the columns whose pages
 #   cover different rows refused.
+# - test_file_decode_direct: a whole in-memory file to one batch, on files
+#   written by komira_test_parquet_file: row groups and pages concatenated in
+#   file order, a projection, and the refusals (empty, short, truncated, bad
+#   magic at either end, footer length, garbage footer, no row group, a chunk
+#   outside the data region).
 # - test_no_env_reads: the package's sources read no environment, import no
 #   komira package outside the deps below (and never komira_core), hold no
 #   raw pointer in a public signature, rebuild no address from an integer
@@ -268,16 +279,33 @@ mojo_library(
     },
     test_srcs = [
         "tests/test_arrow_schema_hint_direct.mojo",
+        "tests/test_arrow_schema_hint_framing_and_type_tags.mojo",
         "tests/test_bloom_pruner_direct.mojo",
         "tests/test_bloom_reader_direct.mojo",
         "tests/test_bss_direct.mojo",
         "tests/test_bypass_direct.mojo",
+        "tests/test_data_page_count_truncated_chunk.mojo",
+        "tests/test_bypass_leaf_name.mojo",
+        "tests/test_column_reader_negative_page_sizes.mojo",
+        "tests/test_inlined_helpers_at_runtime_widths_and_types.mojo",
         "tests/test_bytes_decode_direct.mojo",
+        "tests/test_bytes_decode_schema_annotations.mojo",
         "tests/test_column_decode_context_direct.mojo",
         "tests/test_column_decoder_dict_direct.mojo",
         "tests/test_column_decoder_direct.mojo",
+        "tests/test_column_decoder_value_and_page_refusals.mojo",
+        "tests/test_column_decoder_internals_direct.mojo",
         "tests/test_column_decoder_pyarrow.mojo",
         "tests/test_column_reader_local.mojo",
+        "tests/test_cov_g3_cursor_dict_short_and_malformed_pages.mojo",
+        "tests/test_cov_g3_cursor_flat_short_and_malformed_pages.mojo",
+        "tests/test_cov_g3_decode_context_and_row_selection_edges.mojo",
+        "tests/test_cov_g3_footer_cache_pin_that_cannot_map.mojo",
+        "tests/test_cov_g3_morsel_reader_timestamps_and_empty_row_groups.mojo",
+        "tests/test_cov_g3_morsel_slice_bool_string_and_bounds.mojo",
+        "tests/test_cov_g3_rg_pruner_tables_and_refusals.mojo",
+        "tests/test_cov_g3_subrg_cursor_pages_codecs_and_dicts.mojo",
+        "tests/test_cov_g3_table_stats_folds_and_refusals.mojo",
         "tests/test_decimal_decode_direct.mojo",
         "tests/test_decode_arm_trace_direct.mojo",
         "tests/test_decode_helpers_direct.mojo",
@@ -294,6 +322,7 @@ mojo_library(
         "tests/test_dictionary_resolve_int32_simd_parity.mojo",
         "tests/test_dictionary_resolve_int64_simd_parity.mojo",
         "tests/test_dictionary_strings_flba_direct.mojo",
+        "tests/test_file_decode_direct.mojo",
         "tests/test_file_reader_local.mojo",
         "tests/test_file_reader_object_store.mojo",
         "tests/test_flat_read_types_are_never_nested.mojo",
@@ -313,6 +342,7 @@ mojo_library(
         "tests/test_morsel_reader_direct.mojo",
         "tests/test_neon_bss_decode.mojo",
         "tests/test_nested_decoder_direct.mojo",
+        "tests/test_nested_decoder_leaf_types_and_refusals.mojo",
         "tests/test_nested_direct.mojo",
         "tests/test_nested_types.mojo",
         "tests/test_no_env_reads.mojo",
@@ -333,6 +363,7 @@ mojo_library(
         "tests/test_plain_direct.mojo",
         "tests/test_plain_flba_direct.mojo",
         "tests/test_rg_pruner_direct.mojo",
+        "tests/test_rg_pruner_nan_bounds.mojo",
         "tests/test_rle_bitunpack_sweep.mojo",
         "tests/test_rle_decoder_direct.mojo",
         "tests/test_rle_simd.mojo",
@@ -350,7 +381,10 @@ mojo_library(
         "tests/test_subrg_cursor_flat_direct.mojo",
         "tests/test_subrg_traces_direct.mojo",
         "tests/test_table_stats_direct.mojo",
+        "tests/test_table_stats_nan_bounds.mojo",
         "tests/test_thrift_compact_direct.mojo",
+        "tests/test_cov_g1_column_assembly_and_finishing_dictionary_shapes.mojo",
+        "tests/test_cov_g1_column_assembly_and_finishing_plain_and_empty_chunks.mojo",
     ],
     test_deps = [
         "//src/tests/helpers/komira_test_parquet_file:komira_test_parquet_file",

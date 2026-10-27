@@ -20,8 +20,10 @@ runtime it links, from the pinned conda-forge packages) and an environment of
 and nothing else (`env -i`): no `NODE_OPTIONS`, no `NODE_PATH`. esbuild runs
 with an empty environment.
 
-Every action runs under the pinned busybox, on the linux x86_64 execution
-platform (the macros set `exec_compatible_with`). Sources an action reads are
+Every action runs on the linux x86_64 execution platform (the macros set
+`exec_compatible_with`), and none runs a shell: the actions are `node_act`
+(tools/build/node_tools) and, for `c_shared_lib`, the pinned zig through
+`zig_launch`. Sources an action reads are
 copied under buck-out first: a source file's path differs between a standalone
 checkout and a repository mounting komira as a cell, and so would the action's
 digest.
@@ -29,9 +31,9 @@ digest.
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:test_runtime.bzl", "data_map")
-load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "row")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 
 NodeDistInfo = provider(
     doc = "An unpacked Node.js: its root directory (`bin/node`, `include/node`) and the libraries `node` loads beyond glibc.",
@@ -53,22 +55,6 @@ NpmPackageInfo = provider(
     },
 )
 
-# Busybox's applets on PATH, a private scratch directory $T, and `abs`, which
-# makes a path absolute (the scripts `cd` or hand paths to programs that do).
-_PRELUDE = """
-BB="$1"; shift
-case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
-case "${BUCK_SCRATCH_PATH:-}" in
-    "") T="$PWD/.komira_action" ;;
-    /*) T="$BUCK_SCRATCH_PATH/komira" ;;
-    *) T="$PWD/$BUCK_SCRATCH_PATH/komira" ;;
-esac
-"$BB" mkdir -p "$T/bin"
-"$BB" --install -s "$T/bin"
-PATH="$T/bin"; export PATH
-abs() { case "$1" in /*) echo "$1" ;; *) echo "$PWD/$1" ;; esac; }
-"""
-
 def _out(dep):
     return dep[DefaultInfo].default_outputs[0]
 
@@ -84,37 +70,28 @@ def _closure(where, deps):
 
 # ---- node_dist ---------------------------------------------------------------
 
-# Keeps bin/node, include/node and LICENSE of the archive's top directory (npm,
-# npx, corepack and their lib/node_modules are left out: no action installs
-# with them), then runs that node, which must print v<version>.
-_DIST_SCRIPT = _PRELUDE + """
-ARCHIVE="$1"; OUT="$2"; TOP="$3"; WANT="$4"; LIBS=$(abs "$5")
-mkdir -p "$T/x"
-tar -xzf "$ARCHIVE" -C "$T/x"
-if [ ! -x "$T/x/$TOP/bin/node" ] || [ ! -f "$T/x/$TOP/include/node/node_api.h" ]; then
-    echo "node_dist: $ARCHIVE holds no $TOP/bin/node or $TOP/include/node/node_api.h" >&2
-    exit 2
-fi
-mkdir -p "$OUT/bin" "$OUT/include"
-mv "$T/x/$TOP/bin/node" "$OUT/bin/node"
-mv "$T/x/$TOP/include/node" "$OUT/include/node"
-mv "$T/x/$TOP/LICENSE" "$OUT/LICENSE"
-GOT=$(env -i LD_LIBRARY_PATH="$LIBS/lib" "$OUT/bin/node" --version) || {
-    echo "node_dist: $OUT/bin/node does not run" >&2
-    exit 2
-}
-if [ "$GOT" != "v$WANT" ]; then
-    echo "node_dist: the node in $ARCHIVE is $GOT, the pin says v$WANT" >&2
-    exit 2
-fi
-rm -rf "$T"
-"""
+# `node_act dist` keeps bin/node, include/node and LICENSE of the archive's top
+# directory (npm, npx, corepack and their lib/node_modules are left out: no
+# action installs with them), then runs that node, which must print v<version>.
 
 def _node_dist_impl(ctx):
     out = ctx.actions.declare_output("node", dir = True)
     libs = _out(ctx.attrs.native_libs)
     ctx.actions.run(
-        busybox_sh(_out(ctx.attrs._busybox), _DIST_SCRIPT, _out(ctx.attrs.archive), out.as_output(), ctx.attrs.top, ctx.attrs.version, libs),
+        cmd_args(
+            ctx.attrs._node_act[RunInfo],
+            "dist",
+            "--archive",
+            _out(ctx.attrs.archive),
+            "--out",
+            out.as_output(),
+            "--top",
+            ctx.attrs.top,
+            "--version",
+            ctx.attrs.version,
+            "--libs",
+            libs,
+        ),
         category = "node_dist",
     )
     return [
@@ -136,7 +113,7 @@ _node_dist = rule(
         # The archive's single top directory.
         "top": attrs.string(),
         "version": attrs.string(),
-        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+        "_node_act": attrs.exec_dep(default = "komira//tools/build/node_tools:node_act", providers = [RunInfo]),
     },
 )
 
@@ -157,39 +134,11 @@ for (const [key, want] of [['name', name], ['version', version]]) {
 }
 """
 
-# Checks the tarball's sha512 against the integrity, unpacks its `package/`
-# directory, checks the name and version its package.json states (with the
-# pinned node and _PACKAGE_JSON_JS; under `sh -e` its failure fails the
-# action) and, with an executable named, that it runs and prints the version.
-_NPM_SCRIPT = _PRELUDE + """
-TGZ="$1"; OUT="$2"; NAME="$3"; VERSION="$4"; SRI="$5"; EXE="$6"; NODE=$(abs "$7"); LIBS=$(abs "$8"); JS="$9"
-case "$SRI" in
-    sha512-?*) ;;
-    *) echo "npm_package: $NAME: integrity $SRI is not sha512-<base64>" >&2; exit 2 ;;
-esac
-WANT=$(printf '%s' "${SRI#sha512-}" | base64 -d | od -An -v -tx1 | tr -d ' \\n')
-GOT=$(sha512sum "$TGZ" | cut -d ' ' -f 1)
-if [ "$GOT" != "$WANT" ]; then
-    echo "npm_package: $NAME: the sha512 of $TGZ is $GOT; the pinned integrity $SRI is $WANT" >&2
-    exit 2
-fi
-mkdir -p "$T/x"
-tar -xzf "$TGZ" -C "$T/x"
-if [ ! -f "$T/x/package/package.json" ]; then
-    echo "npm_package: $NAME: $TGZ holds no package/package.json" >&2
-    exit 2
-fi
-env -i LD_LIBRARY_PATH="$LIBS/lib" "$NODE/bin/node" -e "$JS" "$T/x/package/package.json" "npm_package: $NAME: package.json of $TGZ" "$NAME" "$VERSION"
-mv "$T/x/package" "$OUT"
-if [ "$EXE" != "-" ]; then
-    GOT=$(env -i "$OUT/$EXE" --version) || { echo "npm_package: $NAME: $EXE does not run" >&2; exit 2; }
-    if [ "$GOT" != "$VERSION" ]; then
-        echo "npm_package: $NAME: $EXE --version prints $GOT, the pin says $VERSION" >&2
-        exit 2
-    fi
-fi
-rm -rf "$T"
-"""
+# `node_act npm-package` checks the tarball's sha512 against the integrity,
+# unpacks its `package/` directory, checks the name and version its
+# package.json states (with the pinned node and _PACKAGE_JSON_JS; the node's
+# failure fails the action) and, with an executable named, that it runs and
+# prints the version.
 
 def _npm_package_impl(ctx):
     if ctx.attrs.exe == "":
@@ -197,17 +146,26 @@ def _npm_package_impl(ctx):
     out = ctx.actions.declare_output("package", dir = True)
     dist = ctx.attrs._node[NodeDistInfo]
     ctx.actions.run(
-        busybox_sh(
-            _out(ctx.attrs._busybox),
-            _NPM_SCRIPT,
+        cmd_args(
+            ctx.attrs._node_act[RunInfo],
+            "npm-package",
+            "--tarball",
             _out(ctx.attrs.tarball),
+            "--out",
             out.as_output(),
+            "--name",
             ctx.attrs.package,
+            "--version",
             ctx.attrs.version,
+            "--integrity",
             ctx.attrs.integrity,
+            "--exe",
             ctx.attrs.exe or "-",
+            "--node",
             dist.root,
+            "--libs",
             dist.native_libs,
+            "--js",
             _PACKAGE_JSON_JS,
         ),
         category = "npm_package",
@@ -234,37 +192,16 @@ _npm_package = rule(
         # A pinned_file holding the `.tgz`.
         "tarball": attrs.dep(),
         "version": attrs.string(),
-        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+        "_node_act": attrs.exec_dep(default = "komira//tools/build/node_tools:node_act", providers = [RunInfo]),
         "_node": attrs.exec_dep(providers = [NodeDistInfo], default = "komira//third_party/node:node"),
     },
 )
 
 # ---- node_test ---------------------------------------------------------------
 
-# Runs node on the staged script. With `expect` "pass" the script must exit
-# 0; with "fail" it must exit non-zero with the expected text on stderr.
-_TEST_SCRIPT = _PRELUDE + """
-NODE=$(abs "$1"); LIBS=$(abs "$2"); OUT=$(abs "$3"); SCRIPT="$(abs "$4")/$5"; EXPECT="$6"; ERROR="$7"; shift 7
-mkdir -p "$T/home" "$T/tmp"
-run() {
-    env -i LC_ALL=C TZ=UTC0 HOME="$T/home" TMPDIR="$T/tmp" LD_LIBRARY_PATH="$LIBS/lib" "$NODE/bin/node" "$SCRIPT" "$@"
-}
-if [ "$EXPECT" = pass ]; then
-    run "$@"
-else
-    if run "$@" 2> "$T/stderr"; then
-        echo "node_test: $SCRIPT exited 0; it was expected to fail with: $ERROR" >&2
-        exit 1
-    fi
-    if ! grep -qF -- "$ERROR" "$T/stderr"; then
-        cat "$T/stderr" >&2
-        echo "node_test: $SCRIPT failed, but its stderr does not hold: $ERROR" >&2
-        exit 1
-    fi
-fi
-: > "$OUT"
-rm -rf "$T"
-"""
+# `node_act node-test` runs node on the staged script. With `expect` "pass"
+# the script must exit 0; with "fail" it must exit non-zero with the expected
+# text on stderr.
 
 def _node_test_impl(ctx):
     dist = ctx.attrs.node[NodeDistInfo]
@@ -287,23 +224,32 @@ def _node_test_impl(ctx):
     root = ctx.actions.copied_dir(ctx.label.name + ".srcs", staged)
     out = ctx.actions.declare_output(ctx.label.name + ".pass")
     ctx.actions.run(
-        busybox_sh(
-            _out(ctx.attrs._busybox),
-            _TEST_SCRIPT,
+        cmd_args(
+            ctx.attrs._node_act[RunInfo],
+            "node-test",
+            "--node",
             dist.root,
+            "--libs",
             dist.native_libs,
+            "--out",
             out.as_output(),
             # The staged directory, not a projection of the script in it: a
             # projection would bring only the script to the worker.
+            "--dir",
             root,
+            "--script",
             ctx.attrs.src.short_path,
+            "--expect",
             "pass" if ctx.attrs.expect_error == None else "fail",
+            "--error",
             ctx.attrs.expect_error if ctx.attrs.expect_error != None else "-",
+            "--",
             ctx.attrs.args,
         ),
+        env = rerun_env(ctx),
         category = "node_test",
     )
-    return [DefaultInfo(default_output = out)]
+    return [DefaultInfo(default_output = out), rerun_info(ctx)]
 
 _node_test = rule(
     impl = _node_test_impl,
@@ -316,20 +262,14 @@ _node_test = rule(
         "node": attrs.exec_dep(providers = [NodeDistInfo], default = "komira//third_party/node:node"),
         "src": attrs.source(),
         "srcs": attrs.list(attrs.source(), default = []),
-        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
-    },
+        "_node_act": attrs.exec_dep(default = "komira//tools/build/node_tools:node_act", providers = [RunInfo]),
+    } | RERUN_ATTRS,
 )
 
 # ---- esbuild_bundle ----------------------------------------------------------
 
-# Runs esbuild from the staged directory, so the bundle's path comments are
-# paths in it (`main.mjs`, `node_modules/<package>/...`).
-_BUNDLE_SCRIPT = _PRELUDE + """
-ESBUILD=$(abs "$1"); DIR=$(abs "$2"); ENTRY="$3"; OUT=$(abs "$4"); FORMAT="$5"
-cd "$DIR"
-env -i "$ESBUILD" "$ENTRY" --bundle --platform=node "--format=$FORMAT" "--outfile=$OUT" --log-level=warning
-rm -rf "$T"
-"""
+# `node_act esbuild-bundle` runs esbuild from the staged directory, so the
+# bundle's path comments are paths in it (`main.mjs`, `node_modules/<package>/...`).
 
 def _esbuild_bundle_impl(ctx):
     where = str(ctx.label.raw_target())
@@ -345,7 +285,20 @@ def _esbuild_bundle_impl(ctx):
     exe = cmd_args(esbuild.closure[esbuild.name][1], format = "{}/bin/esbuild")
     out = ctx.actions.declare_output(ctx.attrs.out or ctx.label.name + ".js")
     ctx.actions.run(
-        busybox_sh(_out(ctx.attrs._busybox), _BUNDLE_SCRIPT, exe, root, ctx.attrs.entry.short_path, out.as_output(), ctx.attrs.format),
+        cmd_args(
+            ctx.attrs._node_act[RunInfo],
+            "esbuild-bundle",
+            "--esbuild",
+            exe,
+            "--dir",
+            root,
+            "--entry",
+            ctx.attrs.entry.short_path,
+            "--out",
+            out.as_output(),
+            "--format",
+            ctx.attrs.format,
+        ),
         category = "esbuild_bundle",
     )
     return [DefaultInfo(default_output = out)]
@@ -360,20 +313,11 @@ _esbuild_bundle = rule(
         "format": attrs.enum(["cjs", "esm"], default = "cjs"),
         "out": attrs.option(attrs.string(), default = None),
         "srcs": attrs.list(attrs.source(), default = []),
-        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+        "_node_act": attrs.exec_dep(default = "komira//tools/build/node_tools:node_act", providers = [RunInfo]),
     },
 )
 
 # ---- c_shared_lib ------------------------------------------------------------
-
-_SHARED_SCRIPT = _PRELUDE + """
-ZIG=$(abs "$1"); OUT=$(abs "$2"); TRIPLE="$3"; shift 3
-mkdir -p "$T/zig-global" "$T/zig-local" "$T/home"
-ZIG_GLOBAL_CACHE_DIR="$T/zig-global"; ZIG_LOCAL_CACHE_DIR="$T/zig-local"; HOME="$T/home"
-export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME
-"$ZIG/zig" cc -target "$TRIPLE" -shared -fPIC -O2 -fvisibility=hidden -Wall -Werror -Wl,-z,undefs -o "$OUT" "$@"
-rm -rf "$T"
-"""
 
 def _c_shared_lib_impl(ctx):
     staged = ctx.actions.copied_dir(ctx.label.name + ".srcs", {s.short_path: s for s in ctx.attrs.srcs + ctx.attrs.headers})
@@ -384,8 +328,31 @@ def _c_shared_lib_impl(ctx):
     args.extend(ctx.attrs.copts)
     for s in ctx.attrs.srcs:
         args.append(staged.project(s.short_path))
+    # zig_launch (no shell) gives zig a scratch directory for its caches and
+    # HOME, and the busybox applets as PATH.
     ctx.actions.run(
-        busybox_sh(_out(ctx.attrs._busybox), _SHARED_SCRIPT, _out(ctx.attrs._zig), out.as_output(), ctx.attrs.zig_triple, args),
+        cmd_args(
+            ctx.attrs._zig_launch[RunInfo],
+            "zig",
+            "--busybox",
+            _out(ctx.attrs._busybox),
+            "--zig",
+            _out(ctx.attrs._zig),
+            "--",
+            "cc",
+            "-target",
+            ctx.attrs.zig_triple,
+            "-shared",
+            "-fPIC",
+            "-O2",
+            "-fvisibility=hidden",
+            "-Wall",
+            "-Werror",
+            "-Wl,-z,undefs",
+            "-o",
+            out.as_output(),
+            args,
+        ),
         category = "c_shared_lib",
     )
     return [DefaultInfo(default_output = out)]
@@ -402,6 +369,7 @@ _c_shared_lib = rule(
         "zig_triple": attrs.string(),
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
         "_zig": attrs.exec_dep(default = "komira//tools/build/toolchains:zig"),
+        "_zig_launch": attrs.exec_dep(default = "komira//tools/build/mojo:zig_launch", providers = [RunInfo]),
     },
 )
 

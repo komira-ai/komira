@@ -9,6 +9,10 @@
 #   - open refuses a string dictionary column and a column that may hold a
 #     null (a null in a later page would be met only after grains are out:
 #     reading on would lose the row group's remaining rows);
+#   - open refuses an unsigned dictionary or PLAIN column, a DATE column and a
+#     nested footer, and still takes the plain INT32 beside them;
+#   - open refuses an INT64 column that carries only the LogicalType TIMESTAMP,
+#     and takes a PLAIN chunk whose footer stores dictionary offset 0;
 #   - the split arithmetic and the gates' defaults and setters.
 
 from std.memory import ArcPointer
@@ -51,7 +55,7 @@ from komira_parquet_scan.parquet_reader import ParquetReader
 from komira_parquet_scan.subrg_agg_plan import resolve_reader_col_idx
 from komira_parquet_scan.subrg_scan_executor import SubrgScanPlan
 from komira_runtime_paths import test_tmpdir
-from komira_test_parquet_file import TestColumn, TestFileLayout, write_parquet_file
+from komira_test_parquet_file import PT_INT32, PT_INT64, TestColumn, TestFileLayout, write_parquet_file
 
 comptime _FS = LocalFs[NoopSink]
 comptime _MIB = 1 << 20
@@ -67,6 +71,10 @@ def test_the_grain_formula() raises:
     assert_equal(cursor_grain_rows(1, 1, 0, 1 << 30), 65_536)
     # A non-positive L3 means the default (8 MiB): 8 MiB / 2 / 4 / (8 * 2.5).
     assert_equal(cursor_grain_rows(8, 4, 0, 0), cursor_grain_rows(8, 4, 0, 8 * _MIB))
+
+
+def _test_path(name: String) raises -> String:
+    return test_tmpdir() + "/" + name + ".parquet"
 
 
 def _file(name: String, nulls_in_rg1: Bool) raises -> String:
@@ -190,6 +198,89 @@ def test_open_refuses_strings_and_possible_nulls() raises:
     assert_false(cursor_grain_open(reader, 1, 1, plan, reader._meta[].schema, st))
     assert_false(st.active())
     assert_false(cursor_grain_open(reader, 2, 2, plan, reader._meta[].schema, st))
+
+
+def _typed_file() raises -> String:
+    """One row group of 50: u32 (UINT_32 dictionary, 2^31 + r % 4), u64
+    (UINT_64 dictionary), p64 (UINT_64 PLAIN), d (DATE PLAIN), b (INT32)."""
+    var path = test_tmpdir() + "/grain_typed.parquet"
+    var u32 = List[Int]()
+    var u64 = List[Int]()
+    var b = List[Int]()
+    var lowest = -(1 << 62) - (1 << 62)
+    for r in range(50):
+        u32.append((1 << 31) + r % 4)
+        u64.append(lowest + r % 4)
+        b.append(r)
+    var cols = List[TestColumn]()
+    var c0 = TestColumn("u32", PT_INT32, 13)
+    c0.ints = u32^
+    cols.append(c0^.dict_encoded())
+    var c1 = TestColumn("u64", PT_INT64, 14)
+    c1.ints = u64.copy()
+    cols.append(c1^.dict_encoded())
+    var c2 = TestColumn("p64", PT_INT64, 14)
+    c2.ints = u64^
+    cols.append(c2^)
+    var c3 = TestColumn("d", PT_INT32, 6)
+    c3.ints = b.copy()
+    cols.append(c3^)
+    cols.append(TestColumn.int32("b", b^))
+    write_parquet_file(path, cols, TestFileLayout.single())
+    return path^
+
+
+def test_open_refuses_annotated_columns_and_a_nested_footer() raises:
+    var reader = _reader(_typed_file())
+    var st = CursorGrainRg()
+    var t32: List[ArrowType] = [ArrowType.INT32, ArrowType.INT32]
+    # b alone is taken; next to any annotated column the row group is
+    # refused (the caller decodes it whole, with the file's types).
+    assert_true(cursor_grain_open(reader, 0, 0, _plan(reader, ["b"], [ArrowType.INT32]), reader._meta[].schema, st))
+    for name in ["u32", "u64", "p64", "d"]:
+        var plan = _plan(reader, ["b", name], t32)
+        assert_false(cursor_grain_open(reader, 0, 0, plan, reader._meta[].schema, st), name)
+        assert_false(st.active())
+    var meta = reader.meta_copy()
+    meta.schema[1].num_children = 1
+    var nested = ParquetReader[_FS](
+        _file=ParquetFileReader[_FS].open(_typed_file()), _meta=ArcPointer[FileMetaData](meta^)
+    )
+    assert_false(
+        cursor_grain_open(nested, 0, 0, _plan(nested, ["b"], [ArrowType.INT32]), nested._meta[].schema, st)
+    )
+
+
+def test_open_refuses_a_timestamp_and_reads_past_a_zero_dictionary_offset() raises:
+    var base = _reader(_file("grain_patched", False))
+    var meta = base.meta_copy()
+    # a is INT64 (schema element 1); b is INT32 PLAIN (column 1).
+    meta.schema[1].logical_timestamp_unit = Optional[Int](2)
+    meta.row_groups[0].columns[1].meta_data.dictionary_page_offset = Optional[Int](0)
+    var r = ParquetReader[_FS](
+        _file=ParquetFileReader[_FS].open(_test_path("grain_patched")), _meta=ArcPointer[FileMetaData](meta^)
+    )
+    var st = CursorGrainRg()
+    var ts: List[String] = ["b", "a"]
+    var ts_types: List[ArrowType] = [ArrowType.INT32, ArrowType.INT64]
+    assert_false(cursor_grain_open(r, 0, 0, _plan(r, ts, ts_types), r._meta[].schema, st))
+    assert_false(st.active())
+    var names: List[String] = ["b", "f"]
+    var types: List[ArrowType] = [ArrowType.INT32, ArrowType.FLOAT64]
+    var plan = _plan(r, names, types)
+    assert_true(cursor_grain_open(r, 0, 0, plan, r._meta[].schema, st))
+    var ctx = ColumnDecodeContext()
+    var k = 0
+    while True:
+        var bt = cursor_grain_next(st, plan, _schema(names, types), ctx, 16)
+        if not bt:
+            break
+        ref b = bt.value()
+        for j in range(b.num_rows()):
+            assert_equal(Int(b.column_at(0).as_primitive[DType.int32]().get(j)), k)
+            assert_equal(Float64(b.column_at(1).as_primitive[DType.float64]().get(j)), Float64(k) / 2.0)
+            k += 1
+    assert_equal(k, 50)
 
 
 def test_split_arithmetic_and_gates() raises:

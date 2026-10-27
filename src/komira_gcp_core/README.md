@@ -16,6 +16,12 @@ service; it holds what every client shares:
   fetcher it chose (metadata server, service-account key, self-signed JWT,
   authorized_user). Workload identity federation's `external_account` files
   are refused by name.
+- **Who a token is.** `token_info_request` builds the POST that asks
+  Google's token-information endpoint who an access token belongs to (the
+  token in the form body, never the URL), `parse_token_info` reads the
+  answer (`TokenInfo.principal()`: the email, else the subject, else the
+  authorized party), and `fetch_token_info` sends it over a
+  `GcpHttpTransport`. No googleapis proto declares the endpoint.
 - **Errors.** `parse_gcp_status` and `gcp_status_error` turn a non-2xx answer
   into an error naming the verb, the method, the HTTP status and the
   canonical `google.rpc.Code`, counting bytes and never quoting the body;
@@ -30,7 +36,8 @@ service; it holds what every client shares:
 
 Only `sources.mojo` (`ProcessEnv`) reads the process environment, and only
 the variables Google's auth libraries read. The only connections the package
-opens are the token fetches, over the connectors its caller gives.
+opens are the token fetches and the token-information read, over the
+connectors its caller gives.
 
 ## Examples
 
@@ -79,7 +86,14 @@ Paging a List method: `with_page_token` adds the token to the next URL,
 `next_page_token` reads it off a page, and `PageCursor` stops at the last
 page (and refuses a server that hands back the token it was sent):
 
-<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+
+def body_bytes(s: String) -> List[UInt8]:
+    var out = List[UInt8]()
+    out.extend(Span(s.as_bytes()))
+    return out^
+-->
 ```mojo
 from komira_gcp_core import PageCursor, next_page_token, with_page_token
 
@@ -111,9 +125,10 @@ fresh, and fetches again once the clock is inside the refresh margin.
 `SystemClock` and one of this package's fetchers:
 
 <!-- mojo-hidden from std.testing import assert_equal -->
-```mojo
+```mojo module
 from komira_gcp_core import AccessToken, AccessTokenFetcher, CachingTokenSource, GcpTokenSource
 from komira_retry import ManualClock
+
 
 struct NumberedFetcher(AccessTokenFetcher, Movable, Deinitable):
     """Issues token-1, token-2, ..., each valid for one hour."""
@@ -126,15 +141,17 @@ struct NumberedFetcher(AccessTokenFetcher, Movable, Deinitable):
         self.issued += 1
         return AccessToken.expiring_in(String("token-") + String(self.issued), now_ms, 3600)
 
-var source = CachingTokenSource[NumberedFetcher, ManualClock](
-    NumberedFetcher(), ManualClock(0), refresh_before_ms=60_000
-)
-assert_equal(source.access_token(), "token-1")
-source.clock().advance(3_000_000)  # 50 minutes: still fresh
-assert_equal(source.access_token(), "token-1")
-source.clock().advance(540_000)  # 59 minutes: inside the one-minute margin
-assert_equal(source.access_token(), "token-2")
-assert_equal(source.fetches(), 2)
+
+def main() raises:
+    var source = CachingTokenSource[NumberedFetcher, ManualClock](
+        NumberedFetcher(), ManualClock(0), refresh_before_ms=60_000
+    )
+    assert_equal(source.access_token(), "token-1")
+    source.clock().advance(3_000_000)  # 50 minutes: still fresh
+    assert_equal(source.access_token(), "token-1")
+    source.clock().advance(540_000)  # 59 minutes: inside the one-minute margin
+    assert_equal(source.access_token(), "token-2")
+    assert_equal(source.fetches(), 2)
 ```
 
 Application Default Credentials over in-memory seams: `MapEnv` records every
@@ -144,8 +161,9 @@ only be asked if no file were found. Here gcloud's well-known file under
 server, the search fails with Google's own text:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true -->
-```mojo
+```mojo module
 from komira_gcp_core import ADC_KIND_AUTHORIZED_USER, ADC_NOT_FOUND, ADC_SOURCE_GCLOUD_FILE, AdcOptions, GcpHttpTransport, MapEnv, MapFiles, TokenHttpRequest, TokenHttpResponse, resolve_adc
+
 
 struct NoMetadataServer(GcpHttpTransport, Movable, Deinitable):
     var asked: Int
@@ -157,28 +175,48 @@ struct NoMetadataServer(GcpHttpTransport, Movable, Deinitable):
         self.asked += 1
         raise Error("HttpError[CONNECT_FAILED]: no route")
 
-var env = MapEnv()
-env.set("HOME", "/var/lib/app")
-var files = MapFiles()
-files.put(
-    "/var/lib/app/.config/gcloud/application_default_credentials.json",
-    '{"type":"authorized_user","client_id":"cid","client_secret":"s","refresh_token":"r"}',
-)
-var probe = NoMetadataServer()
-var found = resolve_adc(env, files, probe, AdcOptions())
-assert_equal(found.source, ADC_SOURCE_GCLOUD_FILE)
-assert_equal(found.kind, ADC_KIND_AUTHORIZED_USER)
-assert_equal(found.origin, "/var/lib/app/.config/gcloud/application_default_credentials.json")
-assert_equal(found.user.value().client_id, "cid")
-assert_equal(probe.asked, 0)
-assert_equal(env.reads[0], "GOOGLE_APPLICATION_CREDENTIALS")
 
-var empty_env = MapEnv()
-var no_files = MapFiles()
-var raised = String()
-try:
-    _ = resolve_adc(empty_env, no_files, probe, AdcOptions())
-except e:
-    raised = String(e)
-assert_equal(raised, String(ADC_NOT_FOUND))
+def main() raises:
+    var env = MapEnv()
+    env.set("HOME", "/var/lib/app")
+    var files = MapFiles()
+    files.put(
+        "/var/lib/app/.config/gcloud/application_default_credentials.json",
+        '{"type":"authorized_user","client_id":"cid","client_secret":"s","refresh_token":"r"}',
+    )
+    var probe = NoMetadataServer()
+    var found = resolve_adc(env, files, probe, AdcOptions())
+    assert_equal(found.source, ADC_SOURCE_GCLOUD_FILE)
+    assert_equal(found.kind, ADC_KIND_AUTHORIZED_USER)
+    assert_equal(found.origin, "/var/lib/app/.config/gcloud/application_default_credentials.json")
+    assert_equal(found.user.value().client_id, "cid")
+    assert_equal(probe.asked, 0)
+    assert_equal(env.reads[0], "GOOGLE_APPLICATION_CREDENTIALS")
+
+    var empty_env = MapEnv()
+    var no_files = MapFiles()
+    var raised = String()
+    try:
+        _ = resolve_adc(empty_env, no_files, probe, AdcOptions())
+    except e:
+        raised = String(e)
+    assert_equal(raised, String(ADC_NOT_FOUND))
+```
+
+Who a token is: the request carries the token in its form body, and the
+answer's principal is its email:
+
+<!-- mojo-hidden from std.testing import assert_equal, assert_true -->
+```mojo
+from komira_gcp_core import TokenHttpResponse, parse_token_info, token_info_request
+
+var req = token_info_request("ya29.a/b")
+assert_equal(req.method, "POST")
+assert_equal(req.target, "/tokeninfo")
+assert_equal(req.body_text(), "access_token=ya29.a%2Fb")
+var body = List[UInt8]()
+body.extend(Span(String('{"email":"deployer@demo-project.example","sub":"42","expires_in":"3599"}').as_bytes()))
+var info = parse_token_info(TokenHttpResponse(200, body^))
+assert_equal(info.principal(), "deployer@demo-project.example")
+assert_equal(info.expires_in, 3599)
 ```

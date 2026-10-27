@@ -38,6 +38,7 @@ from komira_parquet.scan_copy_trace import (
 from komira_parquet_api.metadata import FileMetaData
 from komira_parquet_scan.arrow_hint_refine import refine_batch_by_arrow_hint
 from komira_parquet_scan.parquet_reader import ParquetReader
+from komira_parquet_scan.prefetch import prefetch_range_of
 from komira_plan_expr.expr import BIN_GE, BIN_GT, BIN_LT, Expr
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_runtime_paths import test_tmpdir
@@ -46,7 +47,7 @@ from komira_scan_planning.reader_factory import (
     SELECTION_FIXED_WIDTH,
     SELECTION_VAR_WIDTH,
 )
-from komira_test_parquet_file import TestColumn, TestFileLayout, write_parquet_file
+from komira_test_parquet_file import PT_INT32, PT_INT64, TestColumn, TestFileLayout, write_parquet_file
 
 comptime _FS = LocalFs[NoopSink]
 comptime _ROWS = 60
@@ -95,10 +96,44 @@ def _file() raises -> String:
     return path^
 
 
-def _reader() raises -> ParquetReader[_FS]:
-    var file = ParquetFileReader[_FS].open(_file())
+def _reader_at(path: String) raises -> ParquetReader[_FS]:
+    var file = ParquetFileReader[_FS].open(path)
     var meta = parse_full_metadata(file.metadata_bytes.view_range_ro(0, file.metadata_length))
     return ParquetReader[_FS](_file=file^, _meta=ArcPointer[FileMetaData](meta^))
+
+
+def _reader() raises -> ParquetReader[_FS]:
+    return _reader_at(_file())
+
+
+def _reader_with_meta(var meta: FileMetaData) raises -> ParquetReader[_FS]:
+    """The standard file under an edited copy of its footer."""
+    var file = ParquetFileReader[_FS].open(_file())
+    return ParquetReader[_FS](_file=file^, _meta=ArcPointer[FileMetaData](meta^))
+
+
+comptime _UINT_ROWS = 40
+comptime _U32 = 0  # INT32 annotated UINT_32, dictionary = 2^31 + row % 4
+comptime _U64 = 1  # INT64 annotated UINT_64, dictionary = 2^63 + row % 4 (as the bits)
+
+
+def _uint_file() raises -> String:
+    var path = test_tmpdir() + "/reader_uint.parquet"
+    var u32 = List[Int]()
+    var u64 = List[Int]()
+    var lowest = -(1 << 62) - (1 << 62)
+    for r in range(_UINT_ROWS):
+        u32.append((1 << 31) + r % 4)
+        u64.append(lowest + r % 4)
+    var a = TestColumn(String("u32"), PT_INT32, 13)
+    a.ints = u32^
+    var b = TestColumn(String("u64"), PT_INT64, 14)
+    b.ints = u64^
+    var cols = List[TestColumn]()
+    cols.append(a^.dict_encoded())
+    cols.append(b^.dict_encoded())
+    write_parquet_file(path, cols, TestFileLayout.single())
+    return path^
 
 
 def _cmp(op: UInt8, col: String, v: Int) -> Expr:
@@ -228,6 +263,112 @@ def test_the_codes_feed() raises:
     assert_false(k1.has_codes())
     assert_equal(Int(k1.flat.as_primitive[DType.int64]().get(2)), 32)
     assert_equal(feed.values.num_columns(), 1)
+
+
+def test_unsigned_dictionary_chunks_are_not_fused() raises:
+    # The fused paths widen entries with sign extension, so a UINT_32 value at
+    # or above 2^31 (UINT_64 at or above 2^63) would be negative and compare
+    # wrongly: the count would be 0 here, not the 20 rows with row % 4 >= 2.
+    var r = _reader_at(_uint_file())
+    assert_false(r.fused_dict_count(0, _U32, BIN_GT, Int64((1 << 31) + 1)).__bool__())
+    assert_false(r.fused_dict_count(0, _U64, BIN_GT, 0).__bool__())
+    assert_false(r.fused_dict_survivors(0, _U32, BIN_GT, Int64((1 << 31) + 1)).__bool__())
+    assert_false(r.fused_dict_survivors(0, _U64, BIN_GT, 0).__bool__())
+    # The codes feed delivers both flat, every row.
+    var feed = r.decode_rowgroup_codes_feed(0, [_U32, _U64], List[Int]())
+    assert_equal(feed.n_rows, _UINT_ROWS)
+    for k in range(2):
+        assert_false(feed.keys[k].has_codes())
+        assert_equal(feed.keys[k].flat.length(), _UINT_ROWS)
+    # The flat decode reads every row.
+    var flat = r.decode_columns_subset(0, [_U32], False)
+    assert_equal(flat.num_rows(), _UINT_ROWS)
+
+
+def test_the_codes_feed_delivers_a_key_with_a_null_flat() raises:
+    # dn is a dictionary chunk whose nulls (every 6th row) have no code, so its
+    # codes would not line up with the rows: it is delivered flat, every row.
+    var r = _reader()
+    var feed = r.decode_rowgroup_codes_feed(0, [DN, D], [A])
+    assert_equal(feed.n_rows, 30)
+    ref k0 = feed.keys[0]
+    assert_false(k0.has_codes())
+    assert_equal(k0.flat.length(), 30)
+    assert_equal(k0.flat.null_count(), 5)
+    for row in range(30):
+        assert_equal(k0.flat.is_null_at(row), row % 6 == 0, "row " + String(row))
+        if row % 6 != 0:
+            assert_equal(Int(k0.flat.as_primitive[DType.int64]().get(row)), row % 3)
+    # The key without a null still comes as codes, row aligned.
+    assert_true(feed.keys[1].has_codes())
+    assert_equal(feed.keys[1].codes.codes.length, 30)
+
+
+def test_selected_rows_of_a_column_with_nulls() raises:
+    var r = _reader()
+    var mask = BooleanArray.allocate(30)
+    var keep: List[Int] = [0, 1, 2, 7, 12, 29]
+    for i in range(len(keep)):
+        mask.data.set(keep[i])
+    var got = r.decode_columns_subset_selected(0, [DN], False, mask)
+    assert_true(got.__bool__())
+    ref col = got.value().column_at(0)
+    assert_equal(col.length(), len(keep))
+    for i in range(len(keep)):
+        var null = keep[i] % 6 == 0
+        assert_equal(col.is_null_at(i), null, "row " + String(keep[i]))
+        if not null:
+            assert_equal(Int(col.as_primitive[DType.int64]().get(i)), keep[i] % 3)
+
+
+def test_a_dictionary_offset_of_zero_is_no_dictionary() raises:
+    var base = _reader()
+    var meta = base.meta_copy()
+    # a is PLAIN; some writers store dictionary_page_offset = 0 for a chunk
+    # with no dictionary page.
+    meta.row_groups[1].columns[A].meta_data.dictionary_page_offset = Optional[Int](0)
+    var r = _reader_with_meta(meta^)
+    assert_equal(r.unit_column_selection_class(1, A, True), SELECTION_FIXED_WIDTH)
+    # A real dictionary chunk still declines under preserve_dict.
+    assert_equal(r.unit_column_selection_class(1, D, True), SELECTION_DECLINES)
+    # The read-ahead range starts at the first data page, not at byte 0.
+    var md = r.meta_copy()
+    ref chunk = md.row_groups[1].columns[A]
+    var span = prefetch_range_of(chunk)
+    assert_equal(span[0], chunk.meta_data.data_page_offset)
+    assert_equal(span[1], chunk.meta_data.total_compressed_size)
+    assert_true(span[0] > 0)
+
+
+def test_the_read_ahead_range_starts_at_the_dictionary_page() raises:
+    var md = _reader().meta_copy()
+    ref chunk = md.row_groups[1].columns[T]
+    var span = prefetch_range_of(chunk)
+    var d = chunk.meta_data.dictionary_page_offset.value()
+    assert_true(d < chunk.meta_data.data_page_offset)
+    assert_equal(span[0], d)
+    assert_equal(span[1], chunk.meta_data.total_compressed_size)
+
+
+def test_a_nested_footer_declines_every_decision_it_cannot_make() raises:
+    # Element 1 turned into a group: leaf c is no longer schema[c + 1], so the
+    # selection class, the selected decode and the dictionary-codes paths
+    # decline instead of reading the wrong element.
+    var meta = _reader().meta_copy()
+    meta.schema[1].num_children = 1
+    var r = _reader_with_meta(meta^)
+    assert_equal(r.unit_column_selection_class(0, S, False), SELECTION_DECLINES)
+    assert_equal(r.unit_column_selection_class(0, F, False), SELECTION_DECLINES)
+    var mask = BooleanArray.allocate(30)
+    mask.data.set(3)
+    assert_false(r.decode_columns_subset_selected(0, [S, F], False, mask).__bool__())
+    assert_false(r.fused_dict_count(0, D, BIN_GT, 2).__bool__())
+    assert_false(r.fused_dict_survivors(1, D, BIN_GE, 4).__bool__())
+    var feed = r.decode_rowgroup_codes_feed(1, [D], List[Int]())
+    assert_false(feed.keys[0].has_codes())
+    # The footer of the file as written is flat and keeps its classes.
+    var flat = _reader()
+    assert_equal(flat.unit_column_selection_class(0, S, False), SELECTION_VAR_WIDTH)
 
 
 def test_the_hash_aggregate_decode() raises:

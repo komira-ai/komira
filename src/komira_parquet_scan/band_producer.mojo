@@ -25,7 +25,11 @@
 # another width than its output, an actual null, a short fill) aborts the
 # whole run: there is no worker-side fallback (it would build string arrays on
 # a worker thread), and `run_band_agg` returns an empty slab so the caller
-# runs its default route.
+# runs its default route. The refusals of the cursor route apply: a column
+# whose annotation re-labels its type (a timestamp, an unsigned or narrow
+# integer, a DATE, a DECIMAL), a non-flat footer, a row group with fewer chunks
+# than the schema has leaves, and a footer row count that disagrees with a
+# column's values; a dictionary offset of 0 is no dictionary page.
 #
 # Band width: every worker holds one live band, so the bands of all workers
 # together stay within half the L3 cache; also no wider than the aggregate
@@ -54,7 +58,7 @@ from komira_engine_runtime.morsel_sizing_policy import MorselSizingPolicy
 from komira_fs.file_system import FileSystem
 from komira_parquet.column_decode_context import ColumnDecodeContext
 from komira_parquet.subrg_column_cursor import ResumableColumnCursor, SUBRG_MAX_RUN
-from komira_parquet_api.metadata import SchemaElement
+from komira_parquet_api.metadata import ColumnMetaData, SchemaElement
 from komira_parquet_api.types import ParquetType
 
 from .parquet_reader import ParquetReader
@@ -112,11 +116,23 @@ def compute_band_rows(plan: SubrgAggPlan, num_workers: Int, host: HostProfile) r
     return max(band_rows, BAND_MIN_ROWS)
 
 
+def _has_dictionary_page(cm: ColumnMetaData) -> Bool:
+    """True when the footer places a dictionary page: a positive offset below
+    the first data page's (a writer with no dictionary may store 0)."""
+    if not cm.dictionary_page_offset:
+        return False
+    var dpo = cm.dictionary_page_offset.value()
+    return dpo > 0 and dpo < cm.data_page_offset
+
+
 def band_rg_metadata_supported[FS: FileSystem](reader: ParquetReader[FS], rg_idx: Int, plan: SubrgAggPlan) -> Bool:
-    """From the footer alone: every projected chunk of row group `rg_idx` is
-    of a cursor type, every key a dictionary BYTE_ARRAY chunk, and every
-    PLAIN non-key chunk of its output width."""
+    """From the footer alone: row group `rg_idx` has a chunk for every leaf of
+    the schema, every projected chunk is of a cursor type, every key a
+    dictionary BYTE_ARRAY chunk, and every PLAIN non-key chunk of its output
+    width."""
     ref rg = reader._meta[].row_groups[rg_idx]
+    if len(rg.columns) < len(reader._meta[].schema) - 1:
+        return False
     for c in range(len(plan.proj_names)):
         var reader_ci = plan.reader_col_idx[c]
         if reader_ci < 0 or reader_ci >= len(rg.columns):
@@ -129,9 +145,9 @@ def band_rg_metadata_supported[FS: FileSystem](reader: ParquetReader[FS], rg_idx
         ):
             return False
         if plan.is_key_proj(c):
-            if ptype != ParquetType.BYTE_ARRAY or not cm.dictionary_page_offset:
+            if ptype != ParquetType.BYTE_ARRAY or not _has_dictionary_page(cm):
                 return False
-        elif not cm.dictionary_page_offset:
+        elif not _has_dictionary_page(cm):
             if _ptype_width(ptype) != _band_out_width(plan.col_arrow_types[c]):
                 return False
     return True
@@ -228,6 +244,9 @@ def _fold_one_rg_band[FS: FileSystem, SINK: BandSink](
 ) raises -> Bool:
     """Fold row group `rg_idx` band by band; False when the cursors refuse
     it (before a band was folded, or after: the caller aborts either way)."""
+    # The checks below layer: the footer test, the cursors' own refusals (the
+    # `supported` and row-count tests), and the lockstep short-fill and
+    # `rows_emitted` tests each stop a row group the earlier ones missed.
     if not band_rg_metadata_supported[FS](reader, rg_idx, plan):
         return False
     var n_cols = len(plan.proj_names)
@@ -237,6 +256,11 @@ def _fold_one_rg_band[FS: FileSystem, SINK: BandSink](
         cursors.append(open_subrg_cursor(reader._file, rg, meta_schema, plan.reader_col_idx[ci]))
     for ci in range(n_cols):
         if not cursors[ci].supported():
+            return False
+    for ci in range(n_cols):
+        # A footer row count that disagrees with a column's values is not
+        # streamed.
+        if cursors[ci].num_values() != Int(rg.num_rows):
             return False
     for k in range(len(plan.key_proj_idx)):
         if not cursors[plan.key_proj_idx[k]].is_string_dict():
@@ -393,10 +417,18 @@ def run_band_agg[FS: FileSystem, SINK: BandSink](
     refused (the caller runs its default route) or there is no row group.
 
     Raises:
-        If the plan's group keys are not dictionary string columns.
+        If the plan's group keys are not dictionary string columns, or the
+        filter column is not a non-key INT32 projection column.
     """
     if not plan.has_string_key or len(plan.key_proj_idx) == 0:
         raise Error("band producer: the plan's group keys must be dictionary string columns")
+    if filter_col_idx >= 0:
+        if (
+            filter_col_idx >= len(plan.proj_names)
+            or plan.is_key_proj(filter_col_idx)
+            or plan.col_arrow_types[filter_col_idx] != ArrowType.INT32
+        ):
+            raise Error("band producer: the filter column must be a non-key INT32 projection column")
     var n_rgs = len(reader._meta[].row_groups)
     if n_rgs == 0:
         _ = cancel_token^

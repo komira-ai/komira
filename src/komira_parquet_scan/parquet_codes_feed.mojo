@@ -10,8 +10,10 @@
 # chunk is a numeric dictionary chunk, else as the flat decode; the VALUE
 # columns always flat, through the same per-chunk decode the flat feed uses.
 #
-# Contract: for a key delivered as codes, `dict_values[codes[r]]` for every
-# non-null row is the flat decode of that column. The codes form never
+# Contract: for a key delivered as codes, the chunk has a code for every row
+# (no null, so `codes[r]` is row r) and `dict_values[codes[r]]` is the flat
+# decode of that column at row r; a key with a null, an unsigned 32 / 64-bit
+# annotation or a nested footer is delivered flat. The codes form never
 # crosses the general `RecordBatch` surface.
 # =============================================================================
 
@@ -28,6 +30,9 @@ from komira_parquet.parquet_source_helpers import (
     _decode_numeric_dict_codes_one_col,
 )
 from komira_parquet_api.metadata import RowGroup, SchemaElement
+from komira_parquet_api.types import CONVERTED_TYPE_UINT_32, CONVERTED_TYPE_UINT_64
+
+from .flat_schema import schema_is_flat
 
 
 comptime KEY_FORM_FLAT: UInt8 = 0
@@ -97,6 +102,32 @@ struct RowGroupCodesFeed(Movable):
         return len(self.keys)
 
 
+def numeric_dict_codes_of[FS: FileSystem](
+    reader: ParquetFileReader[FS],
+    rg: RowGroup,
+    schema: List[SchemaElement],
+    col_idx: Int,
+) raises -> Optional[NumericDictCodes]:
+    """Leaf `col_idx` of `rg` as dictionary codes and entries when it is an
+    INT32 / INT64 dictionary chunk of a flat footer; None otherwise, and for a
+    UINT_32 / UINT_64 chunk: the entries are widened with sign extension, so a
+    value at or above 2^31 (2^63) would come back negative and compare
+    wrongly.
+
+    Raises:
+        If `col_idx` is not a leaf of `rg` or the chunk does not decode.
+    """
+    if not schema_is_flat(schema):
+        return None
+    if col_idx >= 0 and col_idx + 1 < len(schema):
+        ref se = schema[col_idx + 1]
+        if se.converted_type:
+            var ct = se.converted_type.value()
+            if ct == CONVERTED_TYPE_UINT_32 or ct == CONVERTED_TYPE_UINT_64:
+                return None
+    return _decode_numeric_dict_codes_one_col(reader, rg, schema, col_idx)
+
+
 def decode_rowgroup_codes_feed[FS: FileSystem](
     reader: ParquetFileReader[FS],
     rg: RowGroup,
@@ -105,7 +136,8 @@ def decode_rowgroup_codes_feed[FS: FileSystem](
     value_col_indices: List[Int],
 ) raises -> RowGroupCodesFeed:
     """Decode one row group into the codes feed: each key column as codes
-    when it is a numeric dictionary chunk, else flat; the value columns flat.
+    when it is a numeric dictionary chunk with a code for every row (see
+    `numeric_dict_codes_of`), else flat; the value columns flat.
 
     Raises:
         If an index is not a leaf of `rg` or a chunk does not decode.
@@ -114,8 +146,10 @@ def decode_rowgroup_codes_feed[FS: FileSystem](
     var n_rows = 0
     for i in range(len(key_col_indices)):
         var col_idx = key_col_indices[i]
-        var codes_opt = _decode_numeric_dict_codes_one_col(reader, rg, schema, col_idx)
-        if codes_opt:
+        var codes_opt = numeric_dict_codes_of(reader, rg, schema, col_idx)
+        # A null drops out of the codes, which would then not line up with the
+        # value columns by row: such a key is delivered flat.
+        if codes_opt and codes_opt.value().codes.length == Int(rg.num_rows):
             keys.append(KeyColumnCodes.with_codes(codes_opt.take()))
         else:
             var batch = _decode_columns_subset_per_chunk(reader, rg, schema, [col_idx], False)

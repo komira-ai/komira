@@ -1,0 +1,12 @@
+{
+ "name": "volatile_not_bisected",
+ "defect": "a VOLATILE batch is bisected, so user code runs it more than once (design 3.4 rule 6): the fixture counts its runs, and a follow-up call asks the count",
+ "run": "call_batch",
+ "entry": "volatile_count_raise",
+ "shape": "MAP_BATCHES_COLUMN",
+ "stability": "VOLATILE",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "input": {"length": 4, "columns": [{"type": "int64", "values": [1, 2, 3, 4]}]},
+ "expect": {"status": "ERR_RAISED", "run_error": "UDF_RAISED", "row": -1, "message": "nonempty", "then": {"input": {"length": 1, "columns": [{"type": "int64", "values": [-1]}]}, "column": {"type": "int64", "values": [1]}}}
+}
