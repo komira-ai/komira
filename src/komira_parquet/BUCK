@@ -168,6 +168,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   unsigned integers, floats (no prune on !=), byte arrays, AND and OR,
 #   names resolved among the top-level leaves after a group, DECIMAL and the
 #   other conservative cases, the null trap and the file-level count.
+# - test_rg_pruner_nan_bounds: NaN min/max (either, both, beside signed
+#   zeros, other NaN bit patterns) on DOUBLE and FLOAT keep the row group for
+#   every operator and side; finite bounds still prune; all-match never fires.
 # - test_row_selection_direct: RowSelection operations against a per-row
 #   bitmap over generated selections, nulls in a mask, selects_all and the
 #   cursor's phases.
@@ -186,6 +189,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   by type (unsigned, UINT_64 past Int64.MAX, DECIMAL), top-level leaves,
 #   HLL register merge against one sketch over the union, the path entry
 #   points.
+# - test_table_stats_nan_bounds: a NaN bound leaves the column's folded min
+#   and max unknown (eager fold and provider); finite columns still fold.
 # - test_morsel_reader_direct: ParquetMorselReader on files written by
 #   komira_test_parquet_file: morsels per row group and cut across row groups
 #   and pages at unaligned rows (validity rebased), one-row morsels, reset,
@@ -358,6 +363,7 @@ mojo_library(
         "tests/test_plain_direct.mojo",
         "tests/test_plain_flba_direct.mojo",
         "tests/test_rg_pruner_direct.mojo",
+        "tests/test_rg_pruner_nan_bounds.mojo",
         "tests/test_rle_bitunpack_sweep.mojo",
         "tests/test_rle_decoder_direct.mojo",
         "tests/test_rle_simd.mojo",
@@ -375,6 +381,7 @@ mojo_library(
         "tests/test_subrg_cursor_flat_direct.mojo",
         "tests/test_subrg_traces_direct.mojo",
         "tests/test_table_stats_direct.mojo",
+        "tests/test_table_stats_nan_bounds.mojo",
         "tests/test_thrift_compact_direct.mojo",
         "tests/test_cov_g1_column_assembly_and_finishing_dictionary_shapes.mojo",
         "tests/test_cov_g1_column_assembly_and_finishing_plain_and_empty_chunks.mojo",
