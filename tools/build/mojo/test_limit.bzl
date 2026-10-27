@@ -17,8 +17,8 @@ when unset); with `-- --timeout <s>`, pass `-c komira.test_timeout_s=<s>`
 too. The `mojo_test` macro reads the key when the BUCK file is loaded (a rule
 cannot read configuration) and passes it as `test_timeout_s`; a BUCK file may
 not set it. A library's `test_srcs` are build actions, not tests: buck2 gives
-them no timeout, and this limit does not apply to them (README.md, "Time
-limits").
+them no timeout, and this limit does not apply to them: their own is the
+hang limit at the end of this file (README.md, "Time limits").
 """
 
 # The `--timeout` of buck2's test runner when `buck2 test` passes none.
@@ -62,3 +62,30 @@ def deadline_flags(ctx, label):
     if timeout <= TEST_LIMIT_MARGIN_S:
         fail("{}: test_timeout_s = {} must be over {} s".format(label, timeout, TEST_LIMIT_MARGIN_S))
     return ["--deadline-s", str(timeout - TEST_LIMIT_MARGIN_S), "--runner-timeout-s", str(timeout)]
+
+# ---- the hang limit of a welded test action ----------------------------------
+#
+# A library's `test_srcs` (and its README's examples, and a shared library's
+# gate drivers) run as build actions, which buck2 gives no timeout. A test
+# never waits on time (it waits on events), so one that loses an event would
+# hold its worker forever. The gate stops it after a hang limit and says it
+# hung. The limit is infrastructure, not a test's assertion: no test may lower
+# it to pass, and a test that is merely slow raises it on its target.
+
+# The default of `test_hang_limit_s`, in seconds.
+DEFAULT_TEST_HANG_LIMIT_S = 1800
+
+# The status of `gate mojo` for a test stopped by its hang limit
+# (tools/build/run/mojo.zig, `hang_exit`).
+TEST_HANG_EXIT = 125
+
+HANG_LIMIT_ATTRS = {
+    "test_hang_limit_s": attrs.int(default = DEFAULT_TEST_HANG_LIMIT_S),
+}
+
+def hang_limit_flags(where, seconds):
+    """The gate's flag for a welded test's hang limit (`gate mojo
+    --hang-limit-s`); `seconds` is `test_hang_limit_s`."""
+    if seconds <= 0:
+        fail("{}: test_hang_limit_s = {} must be a positive number of seconds".format(where, seconds))
+    return ["--hang-limit-s", str(seconds)]

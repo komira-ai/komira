@@ -16,7 +16,6 @@
 # Hermetic: `SharedInMemoryConditionalStore`, no cloud, no thread.
 # =============================================================================
 
-from std.ffi import external_call
 from std.testing import assert_equal, assert_true
 
 from komira_log import LogRecordView
@@ -189,8 +188,7 @@ def test_03_a_corrupt_split_raises_not_an_empty_page() raises:
 
 def test_04_a_far_future_timestamp_is_published_and_found() raises:
     # wall_ms * 1e6 is above 2^62 here, which once made the split writer loop
-    # forever. SIGALRM ends the process if that returns.
-    _ = external_call["alarm", UInt32](UInt32(60))
+    # forever; the build gate's hang limit stops a run that never returns.
     var store = _Store()
     var word = String("farfutureprobeword")
     var far = _BASE_MS * Int64(3)
@@ -200,7 +198,6 @@ def test_04_a_far_future_timestamp_is_published_and_found() raises:
     var page = r.scan(
         ServiceLogQuery(Int64(0), Int64.MAX, word.copy(), 50)
     )
-    _ = external_call["alarm", UInt32](UInt32(0))
     assert_equal(len(page.hits), 2, "4: both records are found")
     assert_equal(
         page.hits[0].timestamp_ns,
