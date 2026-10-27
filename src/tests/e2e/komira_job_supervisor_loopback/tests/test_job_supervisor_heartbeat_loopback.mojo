@@ -235,8 +235,12 @@ def _pid_file(name: String) raises -> String:
 def _gated_then(gate: String, order_file: String, then: String) -> String:
     """A script whose first act records whether `gate` already exists
     (`open` or `closed`) in `order_file`, then waits for `gate` (the loop
-    never runs when it already exists), then runs `then`. The gate is the
-    event the job waits for, so the wait has no bound of its own."""
+    never runs when it already exists), then runs `then`. The wait is
+    counted (1200 polls of 50 ms), not a deadline: if the gate never opens
+    (beat 1 never reached the receiver), the job appends `gate-timeout` to
+    `order_file` and exits 97, so the run ends and the case fails with the
+    receiver's state printed instead of waiting for the build gate's hang
+    limit."""
     return (
         String("if [ -e '")
         + gate
@@ -244,9 +248,11 @@ def _gated_then(gate: String, order_file: String, then: String) -> String:
         + order_file
         + String("'; else echo closed > '")
         + order_file
-        + String("'; fi; while [ ! -e '")
+        + String("'; fi; i=0; while [ ! -e '")
         + gate
-        + String("' ]; do sleep 0.05; done; ")
+        + String("' ]; do i=$((i + 1)); if [ \"$i\" -gt 1200 ]; then echo gate-timeout >> '")
+        + order_file
+        + String("'; exit 97; fi; sleep 0.05; done; ")
         + then
     )
 

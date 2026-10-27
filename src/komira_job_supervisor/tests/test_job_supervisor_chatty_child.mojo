@@ -21,8 +21,8 @@
 #
 # FAIL-FIRST: with the pre-fix post-exit-only drain, the poll loop below would
 # spin WITHOUT the child ever being collected (the child is wedged on
-# write()): the loop waits for the exit, which never comes, and the build's
-# watchdog ends the run (in the real prod loop it would hang).
+# write()): the loop waits for the exit, which never comes, and the build
+# gate's hang limit ends the run (in the real prod loop it would hang).
 #
 # PASS-AFTER: the incremental drain keeps the pipe empty; the child writes all
 # >128 KiB, exits 0, the job supervisor reaps it (child_exited), captures EVERY line

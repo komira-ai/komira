@@ -21,8 +21,8 @@
 # so a server step that raises is reported ahead of the client failure it
 # causes. The server side runs until the client leg raises the stop flag, which
 # every exit of the leg does; no wall-clock limit ends it, and a leg that never
-# ends is the build's watchdog's to kill. Whenever thread 0 stops on an error it
-# first DROPS
+# ends is stopped by the build gate's hang limit. Whenever thread 0 stops on an
+# error it first DROPS
 # the server (`DispatchServeLoop.close`), closing the listener and every
 # accepted connection, so the client's next beat fails at once (connection
 # refused, or the connection closed under it) instead of sitting on a socket

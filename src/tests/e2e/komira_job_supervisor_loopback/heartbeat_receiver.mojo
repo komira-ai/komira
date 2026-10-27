@@ -48,8 +48,9 @@
 # then, so a test's "the child is gone after the run" is not satisfied by a
 # pid that was never alive. The file may be half written when the probe
 # looks, so it waits for a complete line: the file absent or empty is "not
-# yet", polled with no bound (the job writes the pid first thing, so the wait
-# ends with it; a job that never does is the build's watchdog's to kill). The
+# yet", polled up to `pid_wait_polls` times, 10 ms apart (a count of polls, not
+# a deadline; the job writes the pid first thing, so the wait ends with it, and
+# a job that never does fails the probe with its own message). The
 # job writes the line in one write, so text that does not end in a newline is
 # a violation at once, as is a file whose directory does not exist (it can
 # never appear).
@@ -208,6 +209,7 @@ struct HeartbeatReceiver(RequestDispatcher):
     var continue_directive: Int
     var pid_file: String
     var first_beat_gate: String
+    var pid_wait_polls: Int
 
     # The run's state.
     var state: Int
@@ -245,6 +247,7 @@ struct HeartbeatReceiver(RequestDispatcher):
         continue_directive: Int = JobDirective.JOB_DIRECTIVE_CONTINUE,
         var pid_file: String = String(""),
         var first_beat_gate: String = String(""),
+        pid_wait_polls: Int = 200,
     ):
         self.job_id = job_id^
         self.instance_name = instance_name^
@@ -252,6 +255,7 @@ struct HeartbeatReceiver(RequestDispatcher):
         self.continue_directive = continue_directive
         self.pid_file = pid_file^
         self.first_beat_gate = first_beat_gate^
+        self.pid_wait_polls = pid_wait_polls
         self.state = RECEIVER_ASSIGNED
         self.history = List[Int]()
         self.history.append(RECEIVER_ASSIGNED)
@@ -284,9 +288,10 @@ struct HeartbeatReceiver(RequestDispatcher):
 
     def _probe_pid(mut self):
         """Record the job's pid and whether it is alive now (module header).
-        An absent or empty file is waited for; a file whose directory is
-        missing, or whose text is not a whole line, is a violation: the probe
-        was asked for."""
+        An absent or empty file is waited for, up to `pid_wait_polls` polls; a
+        file whose directory is missing, or whose text is not a whole line, is
+        a violation at once, as is a file still absent or empty after the
+        last poll: the probe was asked for."""
         if self.pid_file.byte_length() == 0:
             return
         var slash = self.pid_file.rfind(String("/"))
@@ -295,7 +300,9 @@ struct HeartbeatReceiver(RequestDispatcher):
             directory = String(self.pid_file[byte=0:slash])
             if directory.byte_length() == 0:
                 directory = String("/")
-        while True:
+        var polls = 0
+        while polls < self.pid_wait_polls:
+            polls += 1
             try:
                 var text = Path(self.pid_file).read_text()
                 if text.byte_length() > 0:
@@ -320,6 +327,13 @@ struct HeartbeatReceiver(RequestDispatcher):
                     )
                     return
             sleep(Float64(0.01))
+        self.violations.append(
+            String("pid probe: no complete pid line in ")
+            + self.pid_file
+            + String(" after ")
+            + String(self.pid_wait_polls)
+            + String(" polls")
+        )
 
     def _first_beat_probe(mut self, beat: Int):
         """The first-beat probe (module header): look for a child of this
