@@ -6,13 +6,13 @@
 # =============================================================================
 #
 # For callers that hold a key as `Scalar`s rather than as a batch cell. The
-# hash (XOR of the columns' `key_hash`) and equality (`slot_eq_value`, the
-# key model) are the batch-row path's, so the two paths can build and probe
+# hash (the `key_combine` fold of the columns' `key_hash`) and equality
+# (`slot_eq_value`, the key model) are the batch-row path's, so the two paths can build and probe
 # the same table. A run of occupied slots ends at the first empty slot.
 # =============================================================================
 
 from komira_op_join_stage.join_build_table import JoinBuildTable
-from komira_op_join_stage.join_key_slot import key_hash
+from komira_op_join_stage.join_key_slot import key_hash, key_combine, key_home
 from komira_op_join_stage.join_key_bundle import (
     KeyBundle1,
     KeyBundle2,
@@ -86,7 +86,26 @@ def _eq4[
 
 @always_inline
 def _home(h: UInt64, capacity_mask: Int) -> Int:
-    return Int(h & UInt64(capacity_mask))
+    return key_home(h, capacity_mask)
+
+
+@always_inline
+def _hash2[K0: DType, K1: DType](k0: Scalar[K0], k1: Scalar[K1]) -> UInt64:
+    return key_combine(key_combine(0, key_hash[K0](k0)), key_hash[K1](k1))
+
+
+@always_inline
+def _hash3[
+    K0: DType, K1: DType, K2: DType
+](k0: Scalar[K0], k1: Scalar[K1], k2: Scalar[K2]) -> UInt64:
+    return key_combine(_hash2[K0, K1](k0, k1), key_hash[K2](k2))
+
+
+@always_inline
+def _hash4[
+    K0: DType, K1: DType, K2: DType, K3: DType
+](k0: Scalar[K0], k1: Scalar[K1], k2: Scalar[K2], k3: Scalar[K3]) -> UInt64:
+    return key_combine(_hash3[K0, K1, K2](k0, k1, k2), key_hash[K3](k3))
 
 
 # -----------------------------------------------------------------------------
@@ -122,7 +141,7 @@ def join_build_insert_slot_2[
     """Insert a two-column key; returns its slot."""
     table._maybe_grow()
     var mask = table.capacity_mask
-    var slot = _home(key_hash[K0](k0) ^ key_hash[K1](k1), mask)
+    var slot = _home(_hash2[K0, K1](k0, k1), mask)
     while not table.keys.slot_is_empty(slot):
         if _eq2(table, slot, k0, k1):
             table.has_duplicate_keys = True
@@ -144,7 +163,7 @@ def join_build_insert_slot_3[
     """Insert a three-column key; returns its slot."""
     table._maybe_grow()
     var mask = table.capacity_mask
-    var h = key_hash[K0](k0) ^ key_hash[K1](k1) ^ key_hash[K2](k2)
+    var h = _hash3[K0, K1, K2](k0, k1, k2)
     var slot = _home(h, mask)
     while not table.keys.slot_is_empty(slot):
         if _eq3(table, slot, k0, k1, k2):
@@ -169,9 +188,7 @@ def join_build_insert_slot_4[
     """Insert a four-column key; returns its slot."""
     table._maybe_grow()
     var mask = table.capacity_mask
-    var h = key_hash[K0](k0) ^ key_hash[K1](k1) ^ key_hash[K2](
-        k2
-    ) ^ key_hash[K3](k3)
+    var h = _hash4[K0, K1, K2, K3](k0, k1, k2, k3)
     var slot = _home(h, mask)
     while not table.keys.slot_is_empty(slot):
         if _eq4(table, slot, k0, k1, k2, k3):
@@ -214,7 +231,7 @@ def join_build_probe_2[
 ) -> Int:
     """The first slot whose key equals `(k0, k1)`, or -1."""
     var mask = table.capacity_mask
-    var slot = _home(key_hash[K0](k0) ^ key_hash[K1](k1), mask)
+    var slot = _home(_hash2[K0, K1](k0, k1), mask)
     for _ in range(mask + 1):
         if table.keys.slot_is_empty(slot):
             return -1
@@ -234,7 +251,7 @@ def join_build_probe_3[
 ) -> Int:
     """The first slot whose key equals `(k0, k1, k2)`, or -1."""
     var mask = table.capacity_mask
-    var h = key_hash[K0](k0) ^ key_hash[K1](k1) ^ key_hash[K2](k2)
+    var h = _hash3[K0, K1, K2](k0, k1, k2)
     var slot = _home(h, mask)
     for _ in range(mask + 1):
         if table.keys.slot_is_empty(slot):
@@ -256,9 +273,7 @@ def join_build_probe_4[
 ) -> Int:
     """The first slot whose key equals `(k0, k1, k2, k3)`, or -1."""
     var mask = table.capacity_mask
-    var h = key_hash[K0](k0) ^ key_hash[K1](k1) ^ key_hash[K2](
-        k2
-    ) ^ key_hash[K3](k3)
+    var h = _hash4[K0, K1, K2, K3](k0, k1, k2, k3)
     var slot = _home(h, mask)
     for _ in range(mask + 1):
         if table.keys.slot_is_empty(slot):
@@ -303,7 +318,7 @@ def join_build_probe_all_slots_2[
 ):
     """Append every slot whose key equals `(k0, k1)`."""
     var mask = table.capacity_mask
-    var slot = _home(key_hash[K0](k0) ^ key_hash[K1](k1), mask)
+    var slot = _home(_hash2[K0, K1](k0, k1), mask)
     for _ in range(mask + 1):
         if table.keys.slot_is_empty(slot):
             return
@@ -323,7 +338,7 @@ def join_build_probe_all_slots_3[
 ):
     """Append every slot whose key equals `(k0, k1, k2)`."""
     var mask = table.capacity_mask
-    var h = key_hash[K0](k0) ^ key_hash[K1](k1) ^ key_hash[K2](k2)
+    var h = _hash3[K0, K1, K2](k0, k1, k2)
     var slot = _home(h, mask)
     for _ in range(mask + 1):
         if table.keys.slot_is_empty(slot):
@@ -345,9 +360,7 @@ def join_build_probe_all_slots_4[
 ):
     """Append every slot whose key equals `(k0, k1, k2, k3)`."""
     var mask = table.capacity_mask
-    var h = key_hash[K0](k0) ^ key_hash[K1](k1) ^ key_hash[K2](
-        k2
-    ) ^ key_hash[K3](k3)
+    var h = _hash4[K0, K1, K2, K3](k0, k1, k2, k3)
     var slot = _home(h, mask)
     for _ in range(mask + 1):
         if table.keys.slot_is_empty(slot):
@@ -381,7 +394,7 @@ def join_build_prefetch_key_2[
     k1: Scalar[K1],
 ):
     """Prefetch `(k0, k1)`'s home slot."""
-    var h = key_hash[K0](k0) ^ key_hash[K1](k1)
+    var h = _hash2[K0, K1](k0, k1)
     table.keys.cols[0].prefetch_at(_home(h, table.capacity_mask))
 
 
@@ -395,7 +408,7 @@ def join_build_prefetch_key_3[
     k2: Scalar[K2],
 ):
     """Prefetch `(k0, k1, k2)`'s home slot."""
-    var h = key_hash[K0](k0) ^ key_hash[K1](k1) ^ key_hash[K2](k2)
+    var h = _hash3[K0, K1, K2](k0, k1, k2)
     table.keys.cols[0].prefetch_at(_home(h, table.capacity_mask))
 
 
@@ -410,7 +423,5 @@ def join_build_prefetch_key_4[
     k3: Scalar[K3],
 ):
     """Prefetch `(k0, k1, k2, k3)`'s home slot."""
-    var h = key_hash[K0](k0) ^ key_hash[K1](k1) ^ key_hash[K2](
-        k2
-    ) ^ key_hash[K3](k3)
+    var h = _hash4[K0, K1, K2, K3](k0, k1, k2, k3)
     table.keys.cols[0].prefetch_at(_home(h, table.capacity_mask))

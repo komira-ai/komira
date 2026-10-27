@@ -38,6 +38,7 @@ mojo_library(
         "//src/komira_udf:komira_udf",
     ],
     test_srcs = [
+        "tests/test_join_hash_spread.mojo",
         "tests/test_join_key_dtype_exact.mojo",
         "tests/test_join_stage_key_model.mojo",
         "tests/test_key_bundle_var.mojo",

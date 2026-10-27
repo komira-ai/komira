@@ -10,7 +10,7 @@
 #     differs in any one column misses;
 #   * the duplicate flag and the M:N walk: equal keys each take a slot and
 #     `join_build_probe_all_slots_N` returns all of them;
-#   * the composite hash is the XOR of the columns' `key_hash`;
+#   * the composite hash is the `key_combine` fold of the columns' `key_hash`;
 #   * `rehash_keys_in_place` moves every column of a slot together;
 #   * a table that grows past its first capacity still finds every key;
 #   * prefetch is a hint that runs for present and absent keys;
@@ -53,6 +53,7 @@ from komira_op_join_stage.join_key_bundle import (
 from komira_op_join_stage.join_key_slot import (
     KeyBlockWrap,
     KeySlot,
+    key_combine,
     key_hash,
     key_slot,
 )
@@ -443,13 +444,13 @@ def test_v4_probe_all_slots_chain() raises:
 
 
 # =============================================================================
-# §7 — Composite-hash XOR-fold semantic
+# §7 — Composite-hash combine rule
 # =============================================================================
 
 
-def test_v2_composite_hash_xor_fold_semantic() raises:
-    """Compute the expected composite hash as the XOR-fold of per-key
-    `key_hash` and compare against `KeyBundleVar.slot_hash(s)` when
+def test_v2_composite_hash_combine_rule() raises:
+    """Compute the expected composite hash as the `key_combine` fold of the
+    per-key `key_hash`es (from 0, in column order) and compare against `KeyBundleVar.slot_hash(s)` when
     both columns at slot `s` hold the stored key values."""
     comptime I64 = DType.int64
     var bundle = make_key_bundle_2[I64, I64](64)
@@ -457,34 +458,35 @@ def test_v2_composite_hash_xor_fold_semantic() raises:
     bundle.cols[0].write_value(7, Int64(42))
     bundle.cols[1].write_value(7, Int64(99))
 
-    var expected = (
-        key_hash[I64](Int64(42)) ^ key_hash[I64](Int64(99))
+    var expected = key_combine(
+        key_combine(0, key_hash[I64](Int64(42))), key_hash[I64](Int64(99))
     )
     var got = bundle.slot_hash(7)
     assert_equal(
         Int(got),
         Int(expected),
-        "KeyBundleVar.slot_hash matches XOR-fold of per-key scrambler hashes",
+        "KeyBundleVar.slot_hash matches the combine fold of per-key hashes",
     )
 
 
-def test_v3_composite_hash_xor_fold_semantic() raises:
+def test_v3_composite_hash_combine_rule() raises:
     comptime I64 = DType.int64
     var bundle = make_key_bundle_3[I64, I64, I64](64)
     bundle.cols[0].write_value(3, Int64(11))
     bundle.cols[1].write_value(3, Int64(22))
     bundle.cols[2].write_value(3, Int64(33))
 
-    var expected = (
-        key_hash[I64](Int64(11))
-        ^ key_hash[I64](Int64(22))
-        ^ key_hash[I64](Int64(33))
+    var expected = key_combine(
+        key_combine(
+            key_combine(0, key_hash[I64](Int64(11))), key_hash[I64](Int64(22))
+        ),
+        key_hash[I64](Int64(33)),
     )
     var got = bundle.slot_hash(3)
-    assert_equal(Int(got), Int(expected), "arity-3 XOR-fold matches")
+    assert_equal(Int(got), Int(expected), "arity-3 combine fold matches")
 
 
-def test_v4_composite_hash_xor_fold_semantic() raises:
+def test_v4_composite_hash_combine_rule() raises:
     comptime I64 = DType.int64
     var bundle = make_key_bundle_4[I64, I64, I64, I64](64)
     bundle.cols[0].write_value(5, Int64(7))
@@ -492,14 +494,18 @@ def test_v4_composite_hash_xor_fold_semantic() raises:
     bundle.cols[2].write_value(5, Int64(9))
     bundle.cols[3].write_value(5, Int64(10))
 
-    var expected = (
-        key_hash[I64](Int64(7))
-        ^ key_hash[I64](Int64(8))
-        ^ key_hash[I64](Int64(9))
-        ^ key_hash[I64](Int64(10))
+    var expected = key_combine(
+        key_combine(
+            key_combine(
+                key_combine(0, key_hash[I64](Int64(7))),
+                key_hash[I64](Int64(8)),
+            ),
+            key_hash[I64](Int64(9)),
+        ),
+        key_hash[I64](Int64(10)),
     )
     var got = bundle.slot_hash(5)
-    assert_equal(Int(got), Int(expected), "arity-4 XOR-fold matches")
+    assert_equal(Int(got), Int(expected), "arity-4 combine fold matches")
 
 
 # =============================================================================
@@ -601,7 +607,7 @@ def test_jbt_v2_grow_end_to_end() raises:
 #
 # `prefetch_at` is a non-faulting hint — the test verifies the call compiles
 # + runs without fault. Bit-exact semantics are guaranteed by the formula
-# match (XOR-fold of per-key hashes).
+# match (combine fold of per-key hashes).
 
 
 def test_v1_prefetch_key_smoke() raises:
@@ -759,9 +765,9 @@ def main() raises:
     suite.test[test_v3_probe_all_slots_chain]()
     suite.test[test_v4_probe_all_slots_chain]()
     # §7
-    suite.test[test_v2_composite_hash_xor_fold_semantic]()
-    suite.test[test_v3_composite_hash_xor_fold_semantic]()
-    suite.test[test_v4_composite_hash_xor_fold_semantic]()
+    suite.test[test_v2_composite_hash_combine_rule]()
+    suite.test[test_v3_composite_hash_combine_rule]()
+    suite.test[test_v4_composite_hash_combine_rule]()
     # §9
     suite.test[test_rehash_keys_in_place_n3]()
     # §10
