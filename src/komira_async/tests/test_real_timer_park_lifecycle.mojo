@@ -42,6 +42,7 @@
 # timer without docker / a live Postgres.
 # =============================================================================
 
+from std.ffi import external_call
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
 from std.sys.info import CompilationTarget
@@ -367,8 +368,8 @@ def test_register_timer_monotone_biased() raises:
 
 
 def test_real_timer_deadline_fires() raises:
-    """A short real deadline becomes is_ready() after a blocking run_once whose
-    timeout exceeds it; a timer whose deadline is far away is NOT reported
+    """A short real deadline becomes is_ready() after a blocking run_once with no
+    timeout; a timer whose deadline is far away is NOT reported
     ready by either the non-blocking or the blocking run_once. Linux (timerfd)
     primary; macOS (EVFILT_TIMER) compile-guarded. On a non-timer backend the
     test is skipped (returns early).
@@ -390,10 +391,11 @@ def test_real_timer_deadline_fires() raises:
     assert_false(r.is_ready(far))
     _ = n0
 
-    # Blocking run_once. run_once returns as soon as the 5 ms deadline fires;
-    # the 5 s timeout is only a hang guard. The completion routes through the
-    # SAME demux as a read: marks the slot ready + fires the sink.
-    var n1 = r.run_once(timeout_us=Int32(5_000_000))
+    # Blocking run_once with no timeout: it returns when the 5 ms timer fires,
+    # and a timer that never fires hangs here (the hang limit armed in `main`
+    # kills the run). The completion routes through the SAME demux as a read:
+    # marks the slot ready + fires the sink.
+    var n1 = r.run_once(timeout_us=Int32(-1))
     assert_true(n1 >= 1)
     assert_true(r.is_ready(op))
     # The far deadline is still pending after the near one fired.
@@ -413,9 +415,9 @@ def test_real_timer_two_concurrent_deadlines() raises:
     var short_op = r.register_timer(Int64(3_000_000))           # 3 ms
     var long_op = r.register_timer(Int64(60_000_000_000))       # 60 s
 
-    # Block until the short timer fires (the 5 s timeout is a hang guard): the
-    # short one fires, the long one does not.
-    var n = r.run_once(timeout_us=Int32(5_000_000))
+    # Block (no timeout) until the short timer fires: the short one fires, the
+    # long one does not.
+    var n = r.run_once(timeout_us=Int32(-1))
     assert_true(n >= 1)
     assert_true(r.is_ready(short_op))
     assert_false(r.is_ready(long_op))
@@ -462,15 +464,12 @@ def test_full_lifecycle_real_timer() raises:
     assert_false(pool[].is_vacated(lease))
     assert_equal(pool[].in_use_count(), 1)
 
-    # Drive the reactor until the deadline fires.
-    var fired = False
-    for _attempt in range(20):
-        var n = r.run_once(timeout_us=Int32(20_000))
-        _ = n
-        if r.is_ready(parked_op):
-            fired = True
-            break
-    assert_true(fired)
+    # Block in the reactor until the deadline fires. No attempt cap and no
+    # timeout: the timer's expiry wakes the poll; a timer that never fires is a
+    # hang, which the hang limit armed in main fails.
+    while not r.is_ready(parked_op):
+        _ = r.run_once(timeout_us=Int32(-1))
+    assert_true(r.is_ready(parked_op))
 
     # Resume: deadline fired -> re-acquire + next burst -> re-park (burst 1).
     var sr1 = sm.step[NoopSink](r)
@@ -479,13 +478,9 @@ def test_full_lifecycle_real_timer() raises:
     var parked_op1 = sr1.op_id()
 
     # Drive to the 2nd deadline.
-    var fired1 = False
-    for _attempt in range(20):
-        _ = r.run_once(timeout_us=Int32(20_000))
-        if r.is_ready(parked_op1):
-            fired1 = True
-            break
-    assert_true(fired1)
+    while not r.is_ready(parked_op1):
+        _ = r.run_once(timeout_us=Int32(-1))
+    assert_true(r.is_ready(parked_op1))
 
     # Resume: burst 2 -> terminal (bursts_remaining hits 0).
     var sr2 = sm.step[NoopSink](r)
@@ -589,7 +584,21 @@ def test_abandoned_frame_mid_burst() raises:
     assert_equal(pool[].in_use_count(), 0)
 
 
+# Hang limit. A library's tests run as build actions, which have no timeout, and
+# the waits in this file have no deadline of their own (they wait on an event,
+# not on a clock). A regression that loses the event would hold a worker with
+# no verdict, so the process arms SIGALRM once, far above any run: its default
+# action kills the process (exit 142) and the build action fails. No test reads
+# this limit; a run that completes never meets it.
+comptime _HANG_LIMIT_S: Int = 600
+
+
+def _arm_hang_limit():
+    _ = external_call["alarm", UInt32](UInt32(_HANG_LIMIT_S))
+
+
 def main() raises:
+    _arm_hang_limit()
     test_register_timer_op_id_is_biased()
     test_register_timer_monotone_biased()
     test_real_timer_deadline_fires()

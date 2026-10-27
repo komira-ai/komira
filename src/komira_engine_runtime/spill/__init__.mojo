@@ -14,6 +14,16 @@
   state (`Spillable`) and its codec.
 - `native_spill`: a writer and reader of record-batch runs (column format) and
   row bodies (row format) over local-disk spill storage.
+- `policies`, `spillable_op`, `spill_arbitrator`, `intra_op_slab_arbitrator`,
+  `op_coordinator`, `routed_grow`: which breaker or partition spills under
+  memory pressure. `SpillableOp` is what a breaker exposes (resident bytes,
+  age, whether it may spill, spill, restore). `SpillArbitrator` picks the
+  oldest spillable op from a fixed pack of ops of different types;
+  `IntraOpSlabArbitrator` does so over one operator's partitions in a
+  caller-owned slab; `SpillableOpCoordinator` presents one operator as a
+  single `SpillableOp`; `try_grow_intra_op_routed` grows a
+  `MemoryReservation` and, when it refuses, spills one of the breaker's own
+  partitions and retries once. Only the oldest-first policy runs.
 
 Whether a breaker may spill, and to which tiers, is decided by the host
 profile (`HostProfile.spill_tiers_for`) and recorded in the physical plan."""
