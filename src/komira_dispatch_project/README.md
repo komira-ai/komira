@@ -11,7 +11,7 @@ The computed-projection evaluator of the engine dispatcher. A physical plan's pr
 | `translate_expr(e, pool, ...)` | `lower_untyped_expr` | lowers a plan `Expr` into the `RuntimeExpr` pool `komira_eval.ExpressionExecutor` walks; raises `UnsupportedByLowerUntypedExpr:` on a shape it has no node for |
 | `count_and_conjuncts(pool, root)` | `lower_untyped_expr` | the conjunct count of a translated AND chain |
 | `is_literal_output_expr(e)` | `compute_project_routes` | whether a projected output is a constant (a literal, under any number of aliases) |
-| `try_eval_dense_f64(pool, root, names, batch)`, `try_eval_dense_f64_pooled(...)`, `dense_par_task_rows(n, nw)`, `DENSE_PAR_MIN_ROWS` | `project_dense_f64` | the column-at-a-time evaluator of the FLOAT64 arithmetic subset, bit-identical to the walker |
+| `try_eval_dense_f64(pool, root, names, batch)`, `try_eval_dense_f64_pooled(...)`, `dense_par_task_rows(n, nw)`, `DENSE_PAR_MIN_ROWS` | `project_dense_f64` | the column-at-a-time evaluator of the FLOAT64 arithmetic subset |
 | `format_project_decline_census(in_schema, exprs, out_schema)` | `project_decline_census` | the lines a projection refusal reports |
 
 The output batch matches the declared schema (one column per expression, each of the declared type and of the batch's row count) or the evaluator returns None. An integer overflow raises, as do the errors of the column evaluator.
