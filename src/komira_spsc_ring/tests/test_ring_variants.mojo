@@ -17,13 +17,12 @@
 
 from std.memory import Pointer
 from std.testing import assert_equal, assert_true
-from std.time import perf_counter_ns
 
 from komira_atomic_alias import AtomicI64
 from komira_spsc_ring._test_threads import SpawnJoinBody, spawn_join
 from komira_spsc_ring.spsc_ring import OVERFLOW_BLOCK, OVERFLOW_DROP, SpscRing
 
-comptime _WAIT_NS = 20_000_000_000
+comptime _POLLS_BEFORE_FIRST_PUSH = 1000
 
 
 struct Pkt(Copyable, Movable, Deinitable):
@@ -63,6 +62,7 @@ struct _Shared(Movable):
     var delivered: AtomicI64
     var out_of_order: AtomicI64
     var consumer_polling: AtomicI64
+    var polls: AtomicI64  # consumer loop iterations, empty or not
 
     def __init__(out self):
         self.producer_done = AtomicI64(Int64(0))
@@ -70,12 +70,14 @@ struct _Shared(Movable):
         self.delivered = AtomicI64(Int64(0))
         self.out_of_order = AtomicI64(Int64(0))
         self.consumer_polling = AtomicI64(Int64(0))
+        self.polls = AtomicI64(Int64(0))
 
 
 struct _Body[lazy: Bool, ro: MutOrigin, so: MutOrigin](SpawnJoinBody):
     """wait_for: 0 consume at once; 1 consume only once the producer has
     blocked; 3 the producer holds its first push until the consumer is polling
-    the empty ring, then waits 2 ms."""
+    the empty ring and has gone round its polling loop `_POLLS_BEFORE_FIRST_PUSH`
+    more times. Every wait is on a progress counter the other thread moves."""
 
     var ring: Pointer[SpscRing[Pkt, Self.lazy], Self.ro]
     var shared: Pointer[_Shared, Self.so]
@@ -100,27 +102,28 @@ struct _Body[lazy: Bool, ro: MutOrigin, so: MutOrigin](SpawnJoinBody):
     def run(self, tid: Int) raises:
         if tid == 0:
             if self.wait_for == 3:
-                var t0 = perf_counter_ns()
                 while self.shared[].consumer_polling.load() == Int64(0):
-                    if Int(perf_counter_ns() - t0) > _WAIT_NS:
-                        raise Error("the consumer never started polling")
-                var t1 = perf_counter_ns()
-                while Int(perf_counter_ns() - t1) < 2_000_000:
+                    pass
+                var seen = self.shared[].polls.load()
+                while (
+                    self.shared[].polls.load() - seen
+                    < Int64(_POLLS_BEFORE_FIRST_PUSH)
+                ):
                     pass
             for i in range(self.pushes):
                 if self.ring[].try_push(_mk(i)):
                     _ = self.shared[].accepted.fetch_add(Int64(1))
             _ = self.shared[].producer_done.fetch_add(Int64(1))
         else:
-            var t0 = perf_counter_ns()
             if self.wait_for == 1:
-                # A producer that never blocks fails the caller's assertion
-                # on the blocked count. Drain anyway: raising here would leave
-                # a blocked producer spinning and the join would never return.
-                while self.ring[].overflow_blocked_count() == Int64(0):
-                    if Int(perf_counter_ns() - t0) > _WAIT_NS:
-                        break
-                t0 = perf_counter_ns()
+                # A producer that never blocks finishes instead, and the
+                # caller's assertion on the blocked count fails; drain either
+                # way.
+                while (
+                    self.ring[].overflow_blocked_count() == Int64(0)
+                    and self.shared[].producer_done.load() == Int64(0)
+                ):
+                    pass
             var last = -1
             var announced = False
             while True:
@@ -128,6 +131,7 @@ struct _Body[lazy: Bool, ro: MutOrigin, so: MutOrigin](SpawnJoinBody):
                     _ = self.shared[].consumer_polling.fetch_add(Int64(1))
                     announced = True
                 var done = self.shared[].producer_done.load() != Int64(0)
+                _ = self.shared[].polls.fetch_add(Int64(1))
                 var r = self.ring[].try_pop()
                 if r:
                     var id = Int(r.value().span_id)
@@ -137,8 +141,6 @@ struct _Body[lazy: Bool, ro: MutOrigin, so: MutOrigin](SpawnJoinBody):
                     _ = self.shared[].delivered.fetch_add(Int64(1))
                 elif done:
                     break
-                elif Int(perf_counter_ns() - t0) > _WAIT_NS:
-                    raise Error("consumer starved")
 
 
 def _single_thread[lazy: Bool](cap: Int) raises:

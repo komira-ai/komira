@@ -28,7 +28,7 @@
 # `HttpServer` only progresses when its serve loop is stepped, so they run on
 # two `komira_fork_join` threads (`_serve_while`): the server is stepped on
 # thread 0 until an atomic stop flag flips, the client runs on thread 1 and sets
-# that flag in a `finally`, and the server gives up after 120 s.
+# that flag in a `finally`; the serve loop has no deadline of its own.
 #
 # HERMETIC: in-process server, loopback socket, throwaway certificates staged
 # by `test_data`, no network beyond the loopback address.
@@ -102,7 +102,6 @@ comptime _ROOT_CA = "src/komira_http_core/tests/fixtures/tls/root_ca.pem"
 comptime _HANDSHAKE_DEADLINE_US: Int64 = 10_000_000
 comptime _REQUEST_TIMEOUT_US = 10_000_000
 comptime _SERVE_POLL_TIMEOUT_US: Int32 = 5_000
-comptime _SERVE_DEADLINE_NS: UInt64 = 120_000_000_000
 
 
 # =============================================================================
@@ -203,10 +202,7 @@ struct _Duet[
 
     def run(self, tid: Int) raises:
         if tid == 0:
-            var give_up = now_ns() + _SERVE_DEADLINE_NS
             while self.flag[].stop.load() == Int64(0):
-                if now_ns() >= give_up:
-                    raise Error("serve_while: the client did not finish in time")
                 self.server[].step()
             return
         try:

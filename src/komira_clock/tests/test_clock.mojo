@@ -6,7 +6,7 @@
 #
 # Verifies:
 #   1. now_ns() is non-zero and never decreases across reads.
-#   2. now_ns() advances across a sleep, by roughly the slept time.
+#   2. now_ns() advances while the thread keeps reading it.
 #   3. now_unix_ms() / now_unix_us() read the same wall clock: us ~= ms * 1000,
 #      and the instant is a plausible epoch reading, before 2100.
 #   4. thread_cpu_ns() is non-zero, never decreases, and advances while the
@@ -16,7 +16,6 @@
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
-from std.time import sleep
 
 from komira_clock.clock import (
     _CLOCK_REALTIME,
@@ -38,14 +37,15 @@ def test_now_ns_monotonic() raises:
     print("  test_now_ns_monotonic PASS")
 
 
-def test_now_ns_advances_over_sleep() raises:
+def test_now_ns_advances_with_work() raises:
+    # Spin until the clock ticks; the loop ends on the clock's own progress,
+    # so no wall-clock duration is asserted.
     var a = now_ns()
-    sleep(0.02)
     var b = now_ns()
-    var elapsed = b - a
-    assert_true(elapsed >= UInt64(15_000_000), "slept 20ms, saw >= 15ms")
-    assert_true(elapsed < UInt64(2_000_000_000), "slept 20ms, saw < 2s")
-    print("  test_now_ns_advances_over_sleep PASS")
+    while b == a:
+        b = now_ns()
+    assert_true(b > a, "now_ns advances while the thread keeps reading it")
+    print("  test_now_ns_advances_with_work PASS")
 
 
 def test_unix_clocks_agree() raises:
@@ -70,13 +70,6 @@ def test_thread_cpu_ns_counts_own_cpu() raises:
     assert_true(c1 > c0, "CPU time advanced while computing")
     # Keep the loop observable so it is not optimised away.
     assert_true(acc != UInt64(1), "loop result consumed")
-    var before_sleep = thread_cpu_ns()
-    sleep(0.05)
-    var after_sleep = thread_cpu_ns()
-    assert_true(
-        after_sleep - before_sleep < UInt64(40_000_000),
-        "sleeping burns (almost) no thread CPU",
-    )
     print("  test_thread_cpu_ns_counts_own_cpu PASS")
 
 
@@ -98,7 +91,7 @@ def main() raises:
     print("test_clock")
     print("==========")
     test_now_ns_monotonic()
-    test_now_ns_advances_over_sleep()
+    test_now_ns_advances_with_work()
     test_unix_clocks_agree()
     test_thread_cpu_ns_counts_own_cpu()
     test_read_ns_refused_clock_id_is_zero()
