@@ -39,7 +39,8 @@ package root re-exports nothing; import from the modules.
 - `komira_op_join_stage.join_probe_state`: `JoinProbeState`, the JOIN_PROBE
   breaker state. `probe_batch` emits, per probe batch, the probe key `jkey`
   and every build payload for each matching pair; for LEFT, an unmatched
-  probe row once with NULL payloads.
+  probe row once with NULL payloads. Keys of one or two columns probe; `jkey`
+  is key column 0.
 
 ## Examples
 

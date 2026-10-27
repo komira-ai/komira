@@ -13,20 +13,22 @@
 # gives three rows for INNER (two for key 2, one for key 1) and five for LEFT
 # (also 5 and the NULL key, each once with NULL build columns).
 #
-# What each test catches (each was run against the defect it names, red):
-#   * `test_inner_rows_types_and_nulls`: an emit that reads payloads through
-#     Float64 and casts to Int64 gives 2^53 for 2^53 + 1 and 1 for 1.5 (and
-#     an INT64 p1 column); one that ignores the build payload's NULL gives 0
-#     and "" as values; a probe that stops at the first match gives two rows.
+# What each test proves:
+#   * `test_inner_rows_types_and_nulls`: the payloads come out at their own
+#     types (2^53 + 1 stays exact, 1.5 stays FLOAT64), a NULL build payload
+#     is NULL (not 0 or ""), and a duplicate build key gives both rows.
 #   * `test_left_keeps_unmatched_and_null_keys`: the unmatched rows carry
-#     NULL build columns, and the NULL probe key comes out NULL (an emit that
-#     reads the key cell's value bits as a valid key gives a non-NULL 0).
+#     NULL build columns, and the NULL probe key comes out NULL.
 #   * `test_float_key_column_and_nan_match`: a FLOAT64 key is emitted as a
 #     FLOAT64 column with the probe's own bits, and a NaN probe key matches a
-#     NaN build key of another sign and payload (planting IEEE `==` in
-#     `key_eq` reds it).
-#   * `test_unique_keys_take_the_first_match_path`: with no duplicate key the
-#     state probes first-match only, one output row per matching probe row.
+#     NaN build key of another sign and payload.
+#   * `test_unique_keys_give_one_row_per_matching_probe_row`: with no
+#     duplicate build key each matching probe row gives one output row, in
+#     probe order; a batch without a match emits nothing for INNER.
+#   * `test_two_column_key_needs_both_columns_to_match`: with a two-column key
+#     a match needs both columns, (a, b) and (b, a) are different keys, a
+#     NULL in either probe column matches nothing, a build row with a NULL
+#     second column was never stored, and `jkey` is key column 0.
 #   * `test_stubs`: the accumulate entry points of the breaker trait.
 # =============================================================================
 
@@ -51,7 +53,7 @@ from komira_expr.stage_program import BREAKER_JOIN_PROBE, JOIN_INNER, JOIN_LEFT
 
 from komira_op_join_stage.join_build_state import JoinBuildState
 from komira_op_join_stage.join_build_table import JoinBuildTable
-from komira_op_join_stage.join_key_bundle import KeyBundle1
+from komira_op_join_stage.join_key_bundle import KeyBundle1, KeyBundle2
 from komira_op_join_stage.join_payload_column import (
     PayloadCol_JoinString,
     PayloadSlot,
@@ -248,7 +250,7 @@ def test_float_key_column_and_nan_match() raises:
     assert_equal(rb.column_as_primitive[I64](1).get(1), 20)
 
 
-def test_unique_keys_take_the_first_match_path() raises:
+def test_unique_keys_give_one_row_per_matching_probe_row() raises:
     var st = Build(Table(KeyBundle1[I64]()))
     var sb = SchemaBuilder()
     sb.add_field(Field(String("k"), ArrowType.INT64, True))
@@ -279,6 +281,69 @@ def test_unique_keys_take_the_first_match_path() raises:
     var none = _keys_batch([99], [False])
     var nbv = batch_view_over(none)
     assert_false(Bool(_try[JOIN_INNER](pst, nbv)))
+
+
+comptime P2 = JoinProbeState[0, 1, KeyBundle2[I64, I64], PayloadSlot[I64]]
+
+
+def _run2[
+    join_t: Int, bo: Origin[mut=False]
+](mut st: P2, bv: BatchView[bo]) raises -> RecordBatch:
+    var out = st.probe_batch[bo, join_t](bv)
+    assert_true(Bool(out), "rows were emitted")
+    return out.take()
+
+
+def test_two_column_key_needs_both_columns_to_match() raises:
+    comptime B2 = JoinBuildState[
+        0, 1, 1, KeyBundle2[I64, I64], PayloadSlot[I64]
+    ]
+    var st = B2(JoinBuildTable[KeyBundle2[I64, I64], PayloadSlot[I64]](
+        KeyBundle2[I64, I64]()
+    ))
+    # (4, NULL) is not stored. Keys (1, 2) and (2, 1) are different.
+    var build = RecordBatch.from_typed_columns_3(
+        Schema.from_fields_3(
+            Field("k0", I64, True), Field("k1", I64, True), Field("p", I64, True)
+        ),
+        _col[I64]([3, 1, 2, 4], [False, False, False, False]),
+        _col[I64]([0, 2, 1, 0], [False, False, False, True]),
+        _col[I64]([10, 20, 30, 40], [False, False, False, False]),
+    )
+    var bv = batch_view_over(build)
+    for r in range(bv.n_rows()):
+        st.feed_row(bv, r)
+    var owned = st.take_join_build_table()
+    var pst = P2(owned^.take())
+    # Probe rows: match, NULL second, match, match, NULL first, (4, 0) whose
+    # build row had a NULL second column, and the swapped (0, 3).
+    var probe = RecordBatch.from_typed_columns_2(
+        Schema.from_fields_2(Field("k0", I64, True), Field("k1", I64, True)),
+        _col[I64]([3, 3, 1, 2, 0, 4, 0], [False, False, False, False, True, False, False]),
+        _col[I64]([0, 0, 2, 1, 0, 0, 3], [False, True, False, False, False, False, False]),
+    )
+    var pv = batch_view_over(probe)
+
+    var rb = _run2[JOIN_INNER](pst, pv)
+    assert_equal(rb.num_rows(), 3, "only (3,0), (1,2) and (2,1) match")
+    assert_equal(rb.column_as_primitive[I64](0).get(0), 3)
+    assert_equal(rb.column_as_primitive[I64](1).get(0), 10)
+    assert_equal(rb.column_as_primitive[I64](0).get(1), 1)
+    assert_equal(rb.column_as_primitive[I64](1).get(1), 20)
+    assert_equal(rb.column_as_primitive[I64](0).get(2), 2)
+    assert_equal(rb.column_as_primitive[I64](1).get(2), 30)
+
+    var lb = _run2[JOIN_LEFT](pst, pv)
+    assert_equal(lb.num_rows(), 7, "every probe row once")
+    assert_false(lb.column_at(1).is_null_at(0))
+    assert_true(lb.column_at(1).is_null_at(1), "NULL second column: no match")
+    assert_false(lb.column_at(0).is_null_at(1), "jkey is column 0, still valid")
+    assert_equal(lb.column_as_primitive[I64](0).get(1), 3)
+    assert_true(lb.column_at(0).is_null_at(4), "NULL first column: NULL jkey")
+    assert_true(lb.column_at(1).is_null_at(4))
+    assert_equal(lb.column_as_primitive[I64](0).get(5), 4)
+    assert_true(lb.column_at(1).is_null_at(5), "(4, 0) was never stored")
+    assert_true(lb.column_at(1).is_null_at(6), "(0, 3) is not (3, 0)")
 
 
 def test_stubs() raises:

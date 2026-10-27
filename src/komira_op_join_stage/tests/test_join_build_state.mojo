@@ -5,25 +5,21 @@
 # =============================================================================
 #
 # The build batch is (k INT64, p0 INT64, p1 FLOAT64, p2 INT32, p3 STRING),
-# with NULLs in the key and in payloads. What each test catches (each was run
-# against the defect it names, red):
-#   * `test_feed_stores_payloads_at_their_types`: a feed that writes payloads
-#     through a Float64 channel turns 2^53 + 1 into 2^53; one that reads every
-#     non-FLOAT64 payload with `col_i64` reads eight-byte cells of the INT32
-#     column (row 1's 70000 comes back as another number); one that ignores
-#     the payload NULL stores 0 / "" as a value (planting `nulls[slot] = False` in
-#     `write_slot_from_batch` reds the NULL asserts). A NULL key row is not
-#     inserted (removing the key-NULL skip reds the row count).
-#   * `test_combine_carries_exact_payloads_and_nulls`: a `combine` that copies
-#     payloads through `read_slot_f64` / `write_slot_f64` loses the low bit of
-#     2^53 + 1 and every NULL. Planting that copy reds it.
+# with NULLs in the key and in payloads. What each test proves:
+#   * `test_feed_stores_payloads_at_their_types`: every payload is stored at
+#     its own type: an INT64 payload keeps all 64 bits (2^53 + 1 stays exact),
+#     an INT32 payload is read as INT32, and a NULL payload stays NULL
+#     instead of becoming 0 or "". A row with a NULL key is not inserted.
+#   * `test_combine_carries_exact_payloads_and_nulls`: `combine` carries the
+#     exact payload bits and every NULL of the folded-in side.
 #   * `test_table_grows_and_keeps_rows`: 300 rows from 64 slots; every key
-#     still finds its own payload after the rehashes (a rehash that moves keys
-#     and payloads apart pairs keys with other rows' payloads). Every fifth
-#     row has NULL INT64, FLOAT64, INT32 and STRING payloads, and they are
-#     still NULL after the rehashes (planting `fresh_nulls[dst] = False` in
-#     `PayloadSlot.rehash_in_place` or in `PayloadCol_JoinString.
-#     rehash_in_place` reds it).
+#     still finds its own payload after the rehashes. Every fifth row has
+#     NULL INT64, FLOAT64, INT32 and STRING payloads, and they are still NULL
+#     after the rehashes.
+#   * `test_two_column_key_skips_a_null_in_either_column`: with a two-column
+#     key, a row with a NULL in key column 0 or in key column 1 is not
+#     inserted, so (3, NULL) never matches (3, 0); (1, 2) and (2, 1) are
+#     different keys.
 #   * `test_single_take_and_stubs`: the table moves out once; feeding,
 #     taking or combining after that raises; the drain is None and the probe
 #     entry points raise.
@@ -43,7 +39,7 @@ from komira_arrow.batch_view import BatchView, batch_view_over
 from komira_arrow.column import Column
 from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
-from komira_arrow.schema import Field, SchemaBuilder
+from komira_arrow.schema import Field, Schema, SchemaBuilder
 from komira_arrow.string_array import StringArray
 from komira_buffer.heap_region import HeapRegion
 from komira_expr.stage_program import BREAKER_JOIN_BUILD
@@ -52,9 +48,10 @@ from komira_op_join_stage.join_build_state import JoinBuildState
 from komira_op_join_stage.join_build_table import JoinBuildTable
 from komira_op_join_stage.join_build_table_fns import (
     join_build_probe_1,
+    join_build_probe_2,
     join_build_probe_all_slots_1,
 )
-from komira_op_join_stage.join_key_bundle import KeyBundle1
+from komira_op_join_stage.join_key_bundle import KeyBundle1, KeyBundle2
 from komira_op_join_stage.join_payload_column import (
     PayloadCol_JoinString,
     PayloadSlot,
@@ -309,6 +306,39 @@ def test_table_grows_and_keeps_rows() raises:
         assert_equal(t.payload[1].read_slot(s), Float64(i) + 0.5)
         assert_equal(t.payload[2].read_slot(s), Int32(-i))
         assert_equal(t.payload_str_at[3](s), String(i))
+
+
+def test_two_column_key_skips_a_null_in_either_column() raises:
+    comptime T2 = JoinBuildTable[KeyBundle2[I64, I64], PayloadSlot[I64]]
+    comptime S2 = JoinBuildState[
+        0, 1, 1, KeyBundle2[I64, I64], PayloadSlot[I64]
+    ]
+    var st = S2(T2(KeyBundle2[I64, I64]()))
+    # Rows: (3, NULL) and (NULL, 5) are skipped; the others are kept.
+    var b = RecordBatch.from_typed_columns_3(
+        Schema.from_fields_3(
+            Field("k0", I64, True), Field("k1", I64, True), Field("p", I64, True)
+        ),
+        _col[I64]([3, 3, 1, 2, 0], [False, False, False, False, True]),
+        _col[I64]([0, 0, 2, 1, 5], [True, False, False, False, False]),
+        _col[I64]([100, 101, 102, 103, 104], [False, False, False, False, False]),
+    )
+    var bv = batch_view_over(b)
+    for r in range(bv.n_rows()):
+        st.feed_row(bv, r)
+    var owned = st.take_join_build_table()
+    var t = owned^.take()
+    assert_equal(t.n_rows(), 3, "both NULL-key rows are skipped")
+    assert_false(t.has_duplicate_keys, "(3, NULL) was not stored as (3, 0)")
+    var s30 = join_build_probe_2(t, Int64(3), Int64(0))
+    assert_true(s30 >= 0)
+    assert_equal(t.payload[0].read_slot(s30), Int64(101))
+    var s12 = join_build_probe_2(t, Int64(1), Int64(2))
+    var s21 = join_build_probe_2(t, Int64(2), Int64(1))
+    assert_true(s12 >= 0 and s21 >= 0 and s12 != s21)
+    assert_equal(t.payload[0].read_slot(s12), Int64(102))
+    assert_equal(t.payload[0].read_slot(s21), Int64(103))
+    assert_equal(join_build_probe_2(t, Int64(0), Int64(5)), -1, "NULL k0 skipped")
 
 
 def _probe[bo: Origin[mut=False]](mut st: State, bv: BatchView[bo]) raises:
