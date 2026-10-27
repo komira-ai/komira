@@ -527,6 +527,7 @@ TARGETS = [
     "komira//tools/build/mojo:mojo_compile_darwin",
     "komira//tools/build/mojo:mojo_compile_darwin_ticked",
     "komira//tools/build/mojo:proto_gen",
+    "komira//tools/build/mopm_migrate:mopm_migrate",
     "komira//tools/build/native/fixtures:archive_with_no_owner",
     "komira//tools/build/native/fixtures:crypto_ships",
     "komira//tools/build/native/fixtures:fx_native_owner_conda",
