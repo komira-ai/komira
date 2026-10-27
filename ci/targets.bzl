@@ -210,6 +210,7 @@ TARGETS = [
     "komira//src/komira_op_agg_hash:komira_op_agg_hash_conda",
     "komira//src/komira_op_agg_row_api:komira_op_agg_row_api_conda",
     "komira//src/komira_op_agg_slab:komira_op_agg_slab_conda",
+    "komira//src/komira_op_agg_stage:komira_op_agg_stage_conda",
     "komira//src/komira_op_agg_state:agg_state_bench",
     "komira//src/komira_op_agg_state:komira_op_agg_state_conda",
     "komira//src/komira_op_join_build:komira_op_join_build_conda",

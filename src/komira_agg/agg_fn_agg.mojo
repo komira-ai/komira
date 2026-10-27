@@ -121,6 +121,7 @@
 # =============================================================================
 
 from komira_arrow.batch_view import BatchView
+from komira_arrow.morsel_view import MorselView
 
 from komira_udf.agg_fn import AggFn
 from komira_agg.aggregator import Aggregator
@@ -257,6 +258,15 @@ struct AggFnAgg[F: AggFn, col: Int](Aggregator):
         comptime dt0 = dtag_to_dtype(Self.F.InputSchema.cols[0].dtype)
         var v = batch.col_scalar_nonraising[dt0](Self.col, i)
         self._udf.update_scalar(state, v)
+
+    @always_inline
+    def input_is_null[V: MorselView](self, view: V, i: Int) -> Bool:
+        """A NULL in input column `col` is skipped, as `AggFnAcc` skips it."""
+        return view.col_is_null(Self.col, i)
+
+    comptime EMPTY_IS_NULL: Bool = False
+    """A user-defined aggregate over a group with no non-NULL input answers
+    `finalize(init())`, as the engine's `AggFnAcc` route does."""
 
     @always_inline
     def combine(

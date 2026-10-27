@@ -223,6 +223,35 @@ trait Aggregator(Movable, Copyable, Deinitable):
         """Produce the group's output value from its final state."""
         ...
 
+    # -- The NULL hooks of a grouped drain (`komira_op_agg_stage.AggSlot`).
+    def input_is_null[V: MorselView](self, view: V, i: Int) -> Bool:
+        """REQUIRED — is the aggregand of row `i` SQL NULL? `AggSlot` asks this
+        before every fold: a NULL row goes to `update_null` instead of
+        `update_scalar`, and does not count as a value of its group (see
+        `EMPTY_IS_NULL`). An aggregate that counts rows rather than values
+        (COUNT(*)) answers False for every row. Required, not defaulted: a
+        default of False would fold the data word under a NULL as a value."""
+        ...
+
+    def update_null(self, mut state: Self.StateTy):
+        """Fold a NULL aggregand into `state`. DEFAULT: nothing (SQL aggregates
+        skip NULLs). FIRST / LAST override it: DuckDB's first() and last()
+        return a NULL when the row they pick holds one."""
+        _ = state
+
+    @staticmethod
+    def result_is_null(state: Self.StateTy) -> Bool:
+        """Is this group's result NULL although the group folded a value?
+        DEFAULT False. FIRST / LAST answer True when the picked row was NULL."""
+        _ = state
+        return False
+
+    comptime EMPTY_IS_NULL: Bool = True
+    """The result of a group that folded no non-NULL value: NULL (True, SUM /
+    MIN / MAX / AVG / MEDIAN / STDDEV ... as in DuckDB) or `finalize(init())`
+    (False: COUNT and COUNT(DISTINCT) answer 0, and a user-defined aggregate
+    answers its own identity, as `komira_op_agg_state.AggFnAcc` does)."""
+
     # -- The EXACT INTEGER SUM hooks.
     comptime EXACT_INT_SUM: Bool = False
     """True iff this aggregator is an INTEGER `sum()` whose state is the EXACT
