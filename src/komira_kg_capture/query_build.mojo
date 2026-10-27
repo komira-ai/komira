@@ -23,10 +23,10 @@
 #
 # NODES. The seeds, then their one-hop neighbours (in seed order, then edge
 # order), up to `k`. A seed has score 1.0 and a neighbour 0.5. A neighbour must
-# pass the facet filter; it must also be in a named partition for a single
-# query, while a federated query admits a neighbour of any partition (the graph
-# connects them). A federated node carries a provenance entry
-# {source_id: "<node id>", source: "partition:<id>"}.
+# pass the facet filter; it must also be in a named partition, for a single
+# query and a federated query alike (a neighbour in any other partition is
+# skipped, though the graph connects them). A federated node carries a
+# provenance entry {source_id: "<node id>", source: "partition:<id>"}.
 #
 # EDGES. Every edge between two emitted nodes, its `fact` as the result edge's
 # `predicate` (the stored edge keeps no separate predicate column, so the fact is
