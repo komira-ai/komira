@@ -394,7 +394,6 @@ TARGETS = [
     "komira//src/komira_so:komira_so_conda",
     "komira//src/komira_so:libkomira",
     "komira//src/komira_source_url:komira_source_url_conda",
-    "komira//src/komira_spsc_ring:spsc_ring_bench",
     "komira//src/komira_sql:komira_sql_conda",
     "komira//src/komira_sync:ci",
     "komira//src/komira_sync:conda_holds",
