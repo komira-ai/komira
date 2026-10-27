@@ -69,7 +69,8 @@ def run_bare_multi_batch_in_memory_scan[
     result owns its bytes.
 
     Raises:
-        Whatever `concat_record_batches_nway_ref` raises (chunks whose schemas
-        disagree, an unsupported column type).
+        Whatever `concat_record_batches_nway_ref` raises (chunks whose column
+        types disagree, an unsupported column type). That the chunks share
+        column names and count is the caller's precondition.
     """
     return concat_record_batches_nway_ref(chunks)

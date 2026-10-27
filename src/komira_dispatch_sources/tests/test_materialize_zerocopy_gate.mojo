@@ -176,5 +176,40 @@ def test_the_result_outlives_the_chunks() raises:
     _assert_rows_0_to(_fold_then_drop_the_chunks(), 8)
 
 
+def test_zero_row_chunks_inside_the_fold() raises:
+    var chunks = _chunks([0, 3, 0, 0, 2, 0])
+    _assert_rows_0_to(run_bare_multi_batch_in_memory_scan(chunks), 5)
+    var edges = _chunks([2, 0])
+    _assert_rows_0_to(run_bare_multi_batch_in_memory_scan(edges), 2)
+
+
+def _string_k_chunk() raises -> RecordBatch:
+    """Same column names as `_schema()`, but k is STRING."""
+    var a: List[String] = [String("a")]
+    var b: List[String] = [String("b")]
+    var sb = SchemaBuilder()
+    sb.add_field(Field(String("k"), ArrowType.STRING, False))
+    sb.add_field(Field(String("s"), ArrowType.STRING, False))
+    var rbb = RecordBatchBuilder.with_capacity(2)
+    rbb.add_column(Column.from_string(StringArray.from_strings(a)))
+    rbb.add_column(Column.from_string(StringArray.from_strings(b)))
+    return rbb.build(sb.build())
+
+
+def test_chunks_whose_column_types_disagree_raise() raises:
+    var chunks = Slab[RecordBatch].create(0)
+    chunks.append(_chunk(0, 2))
+    chunks.append(_string_k_chunk())
+    var raised = False
+    try:
+        _ = run_bare_multi_batch_in_memory_scan(chunks)
+    except e:
+        raised = True
+        assert_true(
+            String(e).find("ArrowConcatLayoutDisagreement") >= 0, String(e)
+        )
+    assert_true(raised, "an INT64 chunk against a STRING chunk raises")
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

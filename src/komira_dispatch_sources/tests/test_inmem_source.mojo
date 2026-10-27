@@ -74,6 +74,34 @@ def _no_columns() raises -> RecordBatch:
     return rbb.build(sb.build())
 
 
+def _one_column(start: Int, n: Int) raises -> RecordBatch:
+    """`n` rows of the single column k = start .."""
+    var k = PrimitiveArray[DType.int64].allocate(n)
+    for i in range(n):
+        k.store[1](i, SIMD[DType.int64, 1](Int64(start + i)))
+    var sb = SchemaBuilder()
+    sb.add_field(Field(String("k"), ArrowType.INT64, False))
+    var rbb = RecordBatchBuilder.with_capacity(1)
+    rbb.add_column(Column.from_primitive[DType.int64](k))
+    return rbb.build(sb.build())
+
+
+def _renamed(n: Int) raises -> RecordBatch:
+    """Two INT64 columns named k and w (not k and v)."""
+    var k = PrimitiveArray[DType.int64].allocate(n)
+    var w = PrimitiveArray[DType.int64].allocate(n)
+    for i in range(n):
+        k.store[1](i, SIMD[DType.int64, 1](Int64(i)))
+        w.store[1](i, SIMD[DType.int64, 1](Int64(i)))
+    var sb = SchemaBuilder()
+    sb.add_field(Field(String("k"), ArrowType.INT64, False))
+    sb.add_field(Field(String("w"), ArrowType.INT64, True))
+    var rbb = RecordBatchBuilder.with_capacity(2)
+    rbb.add_column(Column.from_primitive[DType.int64](k))
+    rbb.add_column(Column.from_primitive[DType.int64](w))
+    return rbb.build(sb.build())
+
+
 def _assert_k(b: RecordBatch, start: Int, n: Int) raises:
     assert_equal(b.num_rows(), n)
     var ks = b.column_at(0).as_primitive[DType.int64]()
@@ -114,6 +142,45 @@ def test_take_and_clone() raises:
     var copy = src.clone()
     _assert_k(src.take_batch(), 0, 3)
     _assert_k(copy.take_batch(), 0, 3)
+
+
+def _raises_already_taken(what: String, msg: String) raises:
+    assert_true(msg.find(what) >= 0, msg)
+    assert_true(msg.find("already taken") >= 0, msg)
+
+
+def test_use_after_take_raises() raises:
+    var src = InMemSource(_chunk(0, 2))
+    _ = src.take_batch()
+    var cache = ParquetMetadataCache()
+    var raised = False
+    try:
+        _ = src.clone()
+    except e:
+        raised = True
+        _raises_already_taken(String("clone"), String(e))
+    assert_true(raised, "clone after take_batch raises")
+    raised = False
+    try:
+        _ = src.descriptor()
+    except e:
+        raised = True
+        _raises_already_taken(String("descriptor"), String(e))
+    assert_true(raised, "descriptor after take_batch raises")
+    raised = False
+    try:
+        _ = src.resolve_agg_scan_schema(_pq(), cache)
+    except e:
+        raised = True
+        _raises_already_taken(String("resolve_agg_scan_schema"), String(e))
+    assert_true(raised, "resolve_agg_scan_schema after take_batch raises")
+    raised = False
+    try:
+        _ = src.take_batch()
+    except e:
+        raised = True
+        _raises_already_taken(String("take_batch"), String(e))
+    assert_true(raised, "a second take_batch raises")
 
 
 def test_descriptor() raises:
@@ -189,6 +256,8 @@ def test_build_inmem_scan_plan() raises:
     _assert_k(plan.scan_data_ref().source._in_memory.value().data[][0], 0, 3)
     var bare = build_inmem_scan_plan(_no_columns())
     _assert_inmem_scan(bare, String("__inmem_typed__0"), 1)
+    var one = build_inmem_scan_plan(_one_column(0, 2))
+    _assert_inmem_scan(one, String("__inmem_typed_k_2"), 1)
 
 
 def test_build_inmem_scan_plan_batches() raises:
@@ -210,6 +279,38 @@ def test_build_inmem_scan_plan_batches() raises:
         String("__inmem_typed_batches__0"),
         2,
     )
+
+    var single = Slab[RecordBatch].create(0)
+    single.append(_one_column(0, 2))
+    single.append(_one_column(2, 3))
+    _assert_inmem_scan(
+        build_inmem_scan_plan_batches(single^),
+        String("__inmem_typed_batches_k_5"),
+        2,
+    )
+
+
+def test_batches_with_different_schemas_raise() raises:
+    var renamed = Slab[RecordBatch].create(0)
+    renamed.append(_chunk(0, 2))
+    renamed.append(_renamed(2))
+    var raised = False
+    try:
+        _ = build_inmem_scan_plan_batches(renamed^)
+    except e:
+        raised = True
+        assert_true(String(e).find("schemas disagree") >= 0, String(e))
+    assert_true(raised, "a renamed column raises")
+    var counts = Slab[RecordBatch].create(0)
+    counts.append(_chunk(0, 2))
+    counts.append(_one_column(0, 2))
+    raised = False
+    try:
+        _ = build_inmem_scan_plan_batches(counts^)
+    except e:
+        raised = True
+        assert_true(String(e).find("schemas disagree") >= 0, String(e))
+    assert_true(raised, "a different column count raises")
 
 
 def test_zero_batches_raise() raises:
@@ -233,6 +334,15 @@ def test_table_of_several_chunks_keeps_them() raises:
     _assert_k(data[0], 0, 2)
     _assert_k(data[1], 2, 1)
     _assert_k(data[2], 3, 3)
+
+
+def test_table_of_two_chunks_keeps_them() raises:
+    var chunks: List[RecordBatch] = [_chunk(0, 2), _chunk(2, 3)]
+    var plan = build_inmem_scan_plan_table(Table.from_chunks(chunks^, _schema()))
+    _assert_inmem_scan(plan, String("__inmem_typed_batches_k_5"), 2)
+    ref data = plan.scan_data_ref().source._in_memory.value().data[]
+    _assert_k(data[0], 0, 2)
+    _assert_k(data[1], 2, 3)
 
 
 def test_table_of_one_chunk_is_the_single_batch_plan() raises:

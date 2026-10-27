@@ -107,6 +107,23 @@ def test_the_band_edges() raises:
     )
 
 
+def test_a_caller_floor_below_the_varlen_floor_wins() raises:
+    var at = _batch(1000)
+    var under = _batch(999)
+    assert_true(
+        inmem_filter_rows_admit_fanout(at, _k_gt(), 1000),
+        "a fixed-width predicate at a 1000-row caller floor",
+    )
+    assert_false(
+        inmem_filter_rows_admit_fanout(under, _k_gt(), 1000),
+        "one row under the caller floor",
+    )
+    assert_true(
+        inmem_filter_rows_admit_fanout(at, _like_green(), 1000),
+        "a string predicate at a 1000-row caller floor",
+    )
+
+
 def test_the_off_flag_restores_the_row_only_gate() raises:
     var b = _batch(200_000)
     var big = _batch(_FLOOR)

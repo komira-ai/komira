@@ -131,5 +131,22 @@ def test_every_variable_width_type_counts() raises:
     )
 
 
+def test_an_index_reference_is_not_seen() raises:
+    """The documented limit: a column referenced by index keeps the caller's
+    floor (cost only)."""
+    var b = _all_types_batch()
+    assert_false(
+        predicate_reads_varlen_column(
+            b,
+            Expr.binary(
+                BIN_GT,
+                Expr.col_idx(1),
+                Expr.literal(ScalarValue.from_int64(Int64(0))),
+            ),
+        ),
+        "column 1 is STRING but is referenced by index",
+    )
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

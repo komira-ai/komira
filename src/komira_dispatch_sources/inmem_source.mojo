@@ -63,24 +63,45 @@ struct InMemSource(TypedSource, Movable, Deinitable):
     comptime Fs = LocalFs[NoopSink]
 
     var _batch: Optional[RecordBatch]
-    """The resident batch. Always set from construction until `take_batch`
-    moves it out."""
+    """The resident batch. Set from construction until `take_batch` moves it
+    out; `take_batch`, `clone`, `descriptor` and `resolve_agg_scan_schema`
+    raise once it is gone."""
 
     def __init__(out self, var batch: RecordBatch):
         self._batch = Optional[RecordBatch](batch^)
 
-    def take_batch(mut self) -> RecordBatch:
-        """Move the resident batch out; the source holds none afterwards."""
+    def take_batch(mut self) raises -> RecordBatch:
+        """Move the resident batch out; the source holds none afterwards.
+
+        Raises:
+            When the batch was already taken."""
+        self._require_batch("take_batch")
         return self._batch.take()
+
+    def _require_batch(self, what: StaticString) raises:
+        if not self._batch:
+            raise Error(
+                String("InMemSource.")
+                + String(what)
+                + ": the resident batch was already taken by take_batch"
+            )
 
     def clone(self) raises -> Self:
         """An independent source over a deep copy (`copy_batch`) of the
-        resident batch."""
+        resident batch.
+
+        Raises:
+            When the batch was already taken."""
+        self._require_batch("clone")
         return InMemSource(copy_batch(self._batch.value()))
 
     def descriptor(self) raises -> SourceVariant:
         """The `SOURCE_IN_MEMORY` descriptor: an unnamed `InMemorySource` over
-        a deep copy of the resident batch."""
+        a deep copy of the resident batch.
+
+        Raises:
+            When the batch was already taken."""
+        self._require_batch("descriptor")
         var in_mem = InMemorySource.from_record_batch(
             copy_batch(self._batch.value()), None
         )
@@ -124,7 +145,11 @@ struct InMemSource(TypedSource, Movable, Deinitable):
         pq_data: ParquetSourceData,
         mut footer_cache: ParquetMetadataCache,
     ) raises -> Schema:
-        """The resident batch's schema (there is no footer to read)."""
+        """The resident batch's schema (there is no footer to read).
+
+        Raises:
+            When the batch was already taken."""
+        self._require_batch("resolve_agg_scan_schema")
         _ = pq_data
         _ = footer_cache
         return self._batch.value().schema.copy()
@@ -173,6 +198,37 @@ def _schema_of(imm batch: RecordBatch) -> Schema:
     return sb.build()
 
 
+def _scan_name(
+    prefix: String, imm first: RecordBatch, total_rows: Int
+) -> String:
+    """`<prefix><first column>_<total_rows>`; the first column's name is empty
+    for a batch with no columns."""
+    var suffix = String("")
+    if first.num_columns() > 0:
+        suffix = first.schema.field_name(0)
+    return prefix + suffix + "_" + String(total_rows)
+
+
+def _require_same_fields(imm first: RecordBatch, imm other: RecordBatch) raises:
+    """Raise unless `other` has `first`'s column count, names and types."""
+    var n = first.schema.num_columns()
+    var same = other.schema.num_columns() == n
+    if same:
+        for i in range(n):
+            if (
+                first.schema.field_name(i) != other.schema.field_name(i)
+                or first.schema.field_arrow_type(i)
+                != other.schema.field_arrow_type(i)
+            ):
+                same = False
+                break
+    if not same:
+        raise Error(
+            "build_inmem_scan_plan_batches: the batches' schemas disagree"
+            " (column count, names or types)"
+        )
+
+
 def build_inmem_scan_plan(var batch: RecordBatch) raises -> LogicalPlan:
     """A `SCAN(SOURCE_IN_MEMORY)` plan node carrying `batch` inline, as the
     one batch of an `InMemorySource`.
@@ -182,12 +238,7 @@ def build_inmem_scan_plan(var batch: RecordBatch) raises -> LogicalPlan:
     is empty for a batch with no columns). Plan structure only: nothing is
     read or copied."""
     var schema = _schema_of(batch)
-    var name_suffix = String("")
-    if batch.num_columns() > 0:
-        name_suffix = batch.schema.field_name(0)
-    var name = (
-        String("__inmem_typed_") + name_suffix + "_" + String(batch.num_rows())
-    )
+    var name = _scan_name(String("__inmem_typed_"), batch, batch.num_rows())
     var in_mem = InMemorySource.from_record_batch(
         batch^, Optional[String](name^)
     )
@@ -201,12 +252,13 @@ def build_inmem_scan_plan_batches(
     """A `SCAN(SOURCE_IN_MEMORY)` plan node carrying every batch of `batches`
     inline, in order, as one `InMemorySource`.
 
-    The batches share one schema; the scan's schema is the first batch's
-    fields. The source is named
+    The batches share one schema (column count, names and types); the scan's
+    schema is the first batch's fields. The source is named
     `__inmem_typed_batches_<first column>_<total rows>`. Plan structure only.
 
     Raises:
-        When `batches` is empty (there is no batch to take the schema from).
+        When `batches` is empty (there is no batch to take the schema from),
+        or a batch's column count, names or types differ from the first's.
     """
     if len(batches) == 0:
         raise Error(
@@ -214,17 +266,12 @@ def build_inmem_scan_plan_batches(
             " taken from the first batch"
         )
     var schema = _schema_of(batches[0])
-    var name_suffix = String("")
-    if batches[0].num_columns() > 0:
-        name_suffix = batches[0].schema.field_name(0)
     var total_rows = 0
     for i in range(len(batches)):
+        _require_same_fields(batches[0], batches[i])
         total_rows += batches[i].num_rows()
-    var name = (
-        String("__inmem_typed_batches_")
-        + name_suffix
-        + "_"
-        + String(total_rows)
+    var name = _scan_name(
+        String("__inmem_typed_batches_"), batches[0], total_rows
     )
     var in_mem = InMemorySource.from_record_batches(
         batches^, Optional[String](name^)

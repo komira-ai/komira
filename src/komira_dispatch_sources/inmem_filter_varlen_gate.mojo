@@ -45,7 +45,11 @@ def predicate_reads_varlen_column(
 ) -> Bool:
     """True iff `predicate` references at least one column of `batch` whose
     type is STRING, LARGE_STRING, BINARY or LARGE_BINARY. A column name the
-    batch does not carry is skipped (the evaluator owns that error)."""
+    batch does not carry is skipped (the evaluator owns that error).
+
+    Only columns referenced by name (`EXPR_COL_REF`) are seen: a column
+    referenced by index (`EXPR_COL_IDX`) is not, so such a predicate keeps the
+    caller's floor. That is a cost limit, never a correctness one."""
     var cols = Set[String]()
     _collect_expr_columns(predicate, cols)
     for name in cols:
