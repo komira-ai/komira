@@ -942,11 +942,11 @@ struct H2ClientConnectionState(Movable, Deinitable):
         if n >= sz:
             self.pending_out = List[UInt8]()
             return
-        var new_buf = List[UInt8]()
-        var i = n
-        while i < sz:
-            new_buf.append(self.pending_out[i])
-            i = i + 1
+        # One slice copy of the tail (a block copy, not a push per byte): a
+        # peer that accepts a byte per write (the short-write test's clamp of
+        # 1) consumes the buffer once per byte, so a per-byte rebuild made
+        # that drive quadratic in interpreted-speed builds.
+        var new_buf = List[UInt8](self.pending_out[n:])
         swap(self.pending_out, new_buf)
 
     # ----- Stream allocation + lookup --------------------------------------
