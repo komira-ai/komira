@@ -20,9 +20,10 @@ same worker property set. Without macOS workers komira registers no macOS platfo
 added, as buildrules itself registers none while `[buildrules_re] macos_aarch64_properties` is empty.
 That key is what buildrules reads to decide whether the platform exists; the committed `.buckconfig`
 points it at `[komira_re] darwin_arm64_properties` (`$(config ...)`), so it is set exactly when komira's
-macOS platform is registered and holds no value of its own. (Komira's `darwin-arm64` target platform does
-not carry buildrules' `macos` and `aarch64` constraint values, so no Mojo package of buildrules selects the
-macOS graph or this platform yet; see tools/build/platforms/README.md.)
+macOS platform is registered and holds no value of its own. (Komira's `darwin-arm64` target platform carries
+only the prelude's os and cpu constraints, and no value of buildrules' own: buildrules' Mojo rules choose the
+unit graph, the toolchain and the execution platform from those too, so a package built for `darwin-arm64`
+selects the macOS graph and this platform.)
 """
 
 def _impl(ctx):

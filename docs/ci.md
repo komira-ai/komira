@@ -106,7 +106,9 @@ It does three things, in this order:
    `[komira_re]`. Developers put the same keys in their own gitignored
    `.buckconfig.local` ([DEVELOPMENT.md](../DEVELOPMENT.md)). Optional
    inputs add the rest: `darwin-properties` with `darwin-macos-hosts` (both or
-   neither) write `darwin_arm64_properties` and `darwin_macos_hosts`; `tls`
+   neither) write `darwin_arm64_properties` and `darwin_macos_hosts`;
+   `macos-library-dirs` (only with `darwin-properties`; absolute directories
+   separated by `:` or spaces) writes `macos_library_dirs`; `tls`
    (`false` by default) and `tls-ca-certs`, the absolute path of a PEM CA file
    on the runner, only with `tls: true`, write `tls` and `tls_ca_certs`.
    A user buckconfig is read before the repository's own, so a key the
