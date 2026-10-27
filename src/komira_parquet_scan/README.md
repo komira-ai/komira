@@ -71,6 +71,9 @@ type for a scan and widening for an aggregate):
 - `subrg_split_decode`: one row range of a row group, alone or over
   dictionaries decoded once per (row group, column).
 - `subrg_agg_plan`: the read plan of a grouped aggregate over a reader.
+- `band_producer`: `run_band_agg`, a grouped aggregate with dictionary
+  string keys folded band by band from reused buffers into a `BandSink`
+  (`komira_engine_runtime`), the band width a function of the host profile.
 - `cursor_grain_feed`: a claimed row group decoded one cache-sized grain per
   call, with the grain's split into morsels (`cursor_grain_split_emit`) and a
   move arm for flat columns (`grain_decode_move`).

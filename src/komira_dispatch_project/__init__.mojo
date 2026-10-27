@@ -1,1 +1,1 @@
-"""The plan-expression to runtime-expression translator of the engine dispatcher's computed projection, and the census a projection refusal reports."""
+"""The computed-projection evaluator of the engine dispatcher: the plan-expression to runtime-expression translator, the evaluator that routes each output of a project operator to a column copy, a broadcast literal, the column evaluator or the per-type walkers, the dense FLOAT64 arithmetic evaluator, and the census a projection refusal reports."""

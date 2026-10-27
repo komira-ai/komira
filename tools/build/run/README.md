@@ -20,7 +20,7 @@ replaced, is `docs/design/zig_gate_runner.md`.
 
 ```
 gate mojo --busybox B --runtime-lib DIR --label L --test ROOT/bin/NAME --marker M
-          [--mem-cap-mib N] [--deadline-s L --runner-timeout-s T]
+          [--mem-cap-mib N] [--deadline-s L --runner-timeout-s T] [--hang-limit-s N]
           [--limit-s N --limit-report coverage]
           [--env NAME=VALUE]... [--arg VALUE]...
 ```
@@ -49,6 +49,15 @@ gate mojo --busybox B --runtime-lib DIR --label L --test ROOT/bin/NAME --marker 
   process table cannot be read), and `TEST TIME LIMIT: killed <label> after <n> s, under
   the test runner's timeout of <m> s (komira.test_timeout_s)` follows the
   banner.
+- `--hang-limit-s`: the hang limit of a welded test (a library's `test_srcs`,
+  its README's examples, a shared library's gate drivers: build actions, which
+  buck2 gives no timeout; `test_hang_limit_s`, 1800 s by default). Past the
+  limit the test is stopped as under `--deadline-s`, and `hang limit: <label>
+  did not finish within <N> s and was stopped; a test never waits on time, so
+  this means it hung (an event that never came)` follows the banner; the gate
+  exits 125. A test that exits 125 itself prints no such line. A clock that
+  cannot be read kills the test and exits 2. Not given with `--deadline-s` or
+  `--limit-s` (exit 2).
 - `--limit-s --limit-report coverage`: past the limit the whole session
   (kcov, the test and every child it left) is killed; the gate checks that
   nothing of it survived, prints the output, and exits 1 with `COVERAGE RUN
@@ -94,7 +103,7 @@ SIGTERM kill the group and the gate exits 128+N.
 
 | Mode | 0 | the test's status | 1 | 2 |
 |---|---|---|---|---|
-| mojo | PASS | as given, 128+N for a signal | a coverage run past its limit | usage, a refused `--env`, an unreadable `/proc` under a cap, a failed clock, a cap on a platform with no process table |
+| mojo | PASS | as given, 128+N for a signal; 125 is a hang (`--hang-limit-s`) | a coverage run past its limit | usage, a refused `--env`, an unreadable `/proc` under a cap, a failed clock, a cap on a platform with no process table |
 | rust | PASS | as given; 137 and 142 are NO VERDICT | EMPTY GATE, REFUSED, no summary line | usage |
 | step | the result was recorded | an `--infra-exit` status | an `--after` file that cannot be read | usage |
 

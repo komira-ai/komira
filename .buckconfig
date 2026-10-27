@@ -34,10 +34,10 @@
 
 [external_cell_buildrules]
   git_origin = https://github.com/komira-ai/buildrules.git
-  # The commit of the buildrules release v0.0.52 (resolved through the annotated tag). A bump is one change: this line, then
+  # The commit of the buildrules release v0.0.53 (resolved through the annotated tag). A bump is one change: this line, then
   # `buildrules mojo sync` (the pins in the directory `[cells] toolchains` names, and each package's
   # buildrules.mojo.lock.bzl) when the release pins another mopm.
-  commit_hash = 0235d3e2df9b1a58e69a443ce95a82fae7340d40
+  commit_hash = d7b0b89002f020e4ef92b7c52db25a0e5927471a
 
 # buildrules' Mojo rules read this key to learn whether a macOS arm64 execution platform exists (a package built
 # for macOS arm64 compiles on a macOS worker; absent: the package fails analysis naming the key). Komira's macOS

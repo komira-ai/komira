@@ -8,8 +8,8 @@
 #   - `write_uleb128` shifted arithmetically and stopped only at zero, so a
 #     negative value appended bytes until the process ran out of memory. A
 #     negative value must raise, append nothing and name the value. Each such
-#     call arms a SIGALRM watchdog, so the old behaviour ends the process in
-#     seconds (exit 142) instead of exhausting memory.
+#     call would run until the build gate's hang limit stops it (or memory
+#     runs out), so the old behaviour is a red build, not a pass.
 #   - A "fix" that cast a negative Int to UInt64 would write a ten-byte varint
 #     that decodes to a different number; the raise tests and the exact-bytes
 #     tests together rule that out.
@@ -18,7 +18,6 @@
 #     byte but the last), and they are the same for the Int and UInt64 forms.
 # =============================================================================
 
-from std.ffi import external_call
 from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_buffer.byte_buffer import (
@@ -27,7 +26,6 @@ from komira_buffer.byte_buffer import (
     write_uleb128_u64,
 )
 
-comptime _WATCHDOG_S = 5
 comptime _MAX_I64: Int = 9223372036854775807
 comptime _MIN_I64: Int = -9223372036854775807 - 1
 comptime _MAX_U64: UInt64 = 18446744073709551615
@@ -124,13 +122,11 @@ def _expect_negative_refused(value: Int) raises:
     var out = _b(0x42)
     var refused = False
     var message = String("")
-    _ = external_call["alarm", UInt32](UInt32(_WATCHDOG_S))
     try:
         write_uleb128(value, out)
     except e:
         refused = True
         message = String(e)
-    _ = external_call["alarm", UInt32](UInt32(0))
     assert_true(refused, "write_uleb128(" + String(value) + ") must raise")
     assert_true(
         message.startswith("write_uleb128: negative value " + String(value)),
