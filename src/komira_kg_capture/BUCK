@@ -1,0 +1,91 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The capture server of the knowledge-graph port (docs/design/knowledge_graph_port.md), core
+# half: a komira_http_server dispatcher over a snapshot store with a health route, a capture
+# route that hands a pushed record to the adapter registered under its surface tag and ingests
+# the episodes, a structured-ingest route, and a CaptureRoutes seam for a host's own routes.
+# Every route but health needs a bearer token the host passes in, bodies are limited, and the
+# server takes its clock as an argument; it reads no environment. The query routes are the
+# next part. No kind of record, service or vocabulary is named here.
+#
+# The welded tests: test_http_util pins the query-string, bearer-token and label checks and the
+# JSON writers (multi-byte text and control bytes unchanged); test_structured the structured
+# body (required and defaulted fields, a wrong type refused); test_config_clock the
+# configuration's refusals and the clocks; test_capture_route the capture route over two
+# made-up adapters (the episode a push becomes, the tag choosing the adapter, an unregistered
+# tag refused, the clock stamping, folding the chain); test_structured_route the structured
+# route; test_auth_limits an unauthenticated request to every route but health refused, the
+# body limit and the methods; test_extra_routes a host route reachable only when registered;
+# test_loopback the same server on a loopback port.
+mojo_library(
+    name = "komira_kg_capture",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # The full transitive closure of the Mojo libraries this package and its tests build on.
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_fork_join:komira_fork_join",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_hash:komira_hash",
+        "//src/komira_host:komira_host",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_http_server:komira_http_server",
+        "//src/komira_join_assembly:komira_join_assembly",
+        "//src/komira_json:komira_json",
+        "//src/komira_kg:komira_kg",
+        "//src/komira_kg_format:komira_kg_format",
+        "//src/komira_kg_sources:komira_kg_sources",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_log:komira_log",
+        "//src/komira_lz4:komira_lz4",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_name_registry:komira_name_registry",
+        "//src/komira_net:komira_net",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_objectstore:komira_objectstore_posix",
+        "//src/komira_parquet:komira_parquet",
+        "//src/komira_parquet_api:komira_parquet_api",
+        "//src/komira_parquet_codec:komira_parquet_codec",
+        "//src/komira_parquet_writer:komira_parquet_writer",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
+        "//src/komira_plan_stats:komira_plan_stats",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
+        "//src/komira_scan_source:komira_scan_source",
+        "//src/komira_simd:komira_simd",
+        "//src/komira_spsc_ring:komira_spsc_ring",
+        "//src/komira_sync:komira_sync",
+        "//src/komira_trace:komira_trace",
+        "//src/komira_uuid:komira_uuid",
+        "//src/komira_zlib:komira_zlib",
+        "//third_party/aws-lc:crypto",
+        "//third_party/brotli:brotlidec",
+        "//third_party/s2n-tls:s2n",
+        "//third_party/snappy:snappy",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_auth_limits.mojo",
+        "tests/test_capture_route.mojo",
+        "tests/test_config_clock.mojo",
+        "tests/test_extra_routes.mojo",
+        "tests/test_http_util.mojo",
+        "tests/test_loopback.mojo",
+        "tests/test_structured.mojo",
+        "tests/test_structured_route.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

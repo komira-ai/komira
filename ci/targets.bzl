@@ -174,6 +174,7 @@ TARGETS = [
     "komira//src/komira_kafka_server:table",
     "komira//src/komira_kernels:komira_kernels_conda",
     "komira//src/komira_kg:komira_kg_conda",
+    "komira//src/komira_kg_capture:komira_kg_capture_conda",
     "komira//src/komira_kg_code/tests/fixtures/repo:kgfix_dot_test",
     "komira//src/komira_kg_code:komira_kg_code_conda",
     "komira//src/komira_kg_enrich:komira_kg_enrich_conda",
