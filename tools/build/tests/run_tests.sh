@@ -507,13 +507,26 @@ check_executor() { # name
 }
 
 
+# Like expect_red, for a build with two failing actions whose reports buck2
+# shows in no fixed order: either text proves the build is red for its reason.
+expect_red_either() { # name, text, other text, target
+    local name=$1 text=$2 other=$3 target=$4
+    if "$BUCK2" build "$target" > "$LOG/$name.log" 2>&1; then
+        fail "$name: $target built, but it must fail"
+    elif grep -qF -- "$text" "$LOG/$name.log" || grep -qF -- "$other" "$LOG/$name.log"; then
+        pass "$name"
+    else
+        fail "$name: failed without '$text' or '$other' (see $LOG/$name.log)"
+    fi
+}
+
 # 2
 expect_red gate_red "GATED TEST FAILED" tests//negative/libgate_bad:libgate_bad
 expect_green gate_ungated_green "tests//negative/libgate_bad:libgate_bad[ungated]"
 expect_red gate_consumer_red "GATED TEST FAILED" tests//negative/libgate_bad:gated_consumer
 
 # 2 (mojo_shared_lib): the gate refuses to publish a library whose compile is green
-for t in missing_export unresolved_symbol failing_driver forced_not_loaded leaks_by_default plain_leaks owner_embedded; do
+for t in missing_export unresolved_symbol failing_driver forced_not_loaded leaks_by_default plain_leaks exports_not_exported exports_not_listed unlisted_not_exported owner_embedded; do
     expect_green "sharedlib_${t}_ungated" "tests//negative/shared_lib:${t}[ungated]"
 done
 expect_red sharedlib_missing_export_red "MISSING EXPORT: neg_missing" tests//negative/shared_lib:missing_export
@@ -523,6 +536,14 @@ expect_red sharedlib_force_load_red "MISSING EXPORT: komira_spike_forced" tests/
 expect_red sharedlib_leaks_by_default_red "komira_example_add leaked into the dynamic symbol table" tests//negative/shared_lib:leaks_by_default
 expect_red sharedlib_plain_leaks_red "plain_hidden leaked into the dynamic symbol table" tests//negative/shared_lib:plain_leaks
 expect_red sharedlib_duplicate_definition_red "duplicate symbol: komira_neg_dup" tests//negative/shared_lib:duplicate_definition
+# The exports check names the differing symbols. exports_not_listed and
+# unlisted_not_exported are red only because of that check: their dlopen gate
+# passes. exports_not_exported fails two actions, the dlopen gate and the exports
+# check, and buck2 reports either one (not in a fixed order): accept either text.
+expect_red_either sharedlib_exports_not_exported_red "MISSING EXPORT: neg_ghost" "function of that name: neg_ghost" tests//negative/shared_lib:exports_not_exported
+expect_red sharedlib_exports_not_listed_red "(or \`unlisted_exports\`): neg_sub" tests//negative/shared_lib:exports_not_listed
+expect_red sharedlib_unlisted_not_exported_red "in \`unlisted_exports\`, but" tests//negative/shared_lib:unlisted_not_exported
+expect_red sharedlib_unlisted_not_exported_name_red "function of that name: neg_ghost" tests//negative/shared_lib:unlisted_not_exported
 expect_red sharedlib_owner_embedded_red "libkomira_libc_native.so.1: cannot open shared object file" tests//negative/shared_lib:owner_embedded
 
 # 3
