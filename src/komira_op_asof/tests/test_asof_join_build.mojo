@@ -521,6 +521,92 @@ def test_float_keys_follow_the_sort_order() raises:
     print("test_float_keys_follow_the_sort_order PASS")
 
 
+def test_float_temporal_nan_with_one_key() raises:
+    """One INT64 key, FLOAT64 temporal. Key 1 holds t=[1.0, 2.0, NaN], key 2
+    holds t=[NaN] (ascending in `sort_key_lt` order). Probe (1, 2.5) and
+    (1, NaN) find the NaN row (slot 2); (1, -0.0) finds slot 0; (2, 0.5)
+    finds key 2's NaN row (slot 3). An IEEE `<` sends the NaN probe to a
+    miss or to an earlier row."""
+    var t = AsofJoinBuildTable[AsofKeyBundle1[DType.int64], DType.float64](
+        PayloadBlock[](), 8
+    )
+    var empty = List[Float64]()
+    asof_build_append_1_f64(t, Int64(1), Float64(1.0), empty)
+    asof_build_append_1_f64(t, Int64(1), Float64(2.0), empty)
+    asof_build_append_1_f64(t, Int64(1), nan[DType.float64](), empty)
+    asof_build_append_1_f64(t, Int64(2), nan[DType.float64](), empty)
+    if asof_probe_forward_1(t, Int64(1), Float64(2.5)) != 2:
+        raise Error("1x float temporal: 2.5 -> the NaN row (slot 2)")
+    if asof_probe_forward_1(t, Int64(1), nan[DType.float64]()) != 2:
+        raise Error("1x float temporal: NaN -> the NaN row (slot 2)")
+    if asof_probe_forward_1(t, Int64(1), Float64(-0.0)) != 0:
+        raise Error("1x float temporal: -0.0 -> 1.0 (slot 0)")
+    if asof_probe_forward_1(t, Int64(2), Float64(0.5)) != 3:
+        raise Error("1x float temporal: key 2 -> its NaN row (slot 3)")
+    print("test_float_temporal_nan_with_one_key PASS")
+
+
+def test_float_temporal_nan_with_two_keys() raises:
+    """The one-key case over two keys (INT64, INT32): partition (1, 5) holds
+    t=[1.0, NaN], partition (1, 6) holds t=[2.0]. The key pair selects the
+    partition; NaN and 1.5 both find the NaN row of (1, 5) (slot 1); (1, 6)
+    with NaN finds nothing (its only row is 2.0)."""
+    var t = AsofJoinBuildTable[
+        AsofKeyBundle2[DType.int64, DType.int32], DType.float64
+    ](PayloadBlock[](), 8)
+    var empty = List[Float64]()
+    asof_build_append_2_f64(t, Int64(1), Int32(5), Float64(1.0), empty)
+    asof_build_append_2_f64(t, Int64(1), Int32(5), nan[DType.float64](), empty)
+    asof_build_append_2_f64(t, Int64(1), Int32(6), Float64(2.0), empty)
+    if asof_probe_forward_2(t, Int64(1), Int32(5), Float64(1.5)) != 1:
+        raise Error("2x float temporal: 1.5 -> the NaN row (slot 1)")
+    if asof_probe_forward_2(t, Int64(1), Int32(5), nan[DType.float64]()) != 1:
+        raise Error("2x float temporal: NaN -> the NaN row (slot 1)")
+    if asof_probe_forward_2(t, Int64(1), Int32(6), nan[DType.float64]()) != -1:
+        raise Error("2x float temporal: NaN above (1, 6)'s only row -> miss")
+    if asof_probe_forward_2(t, Int64(1), Int32(6), Float64(1.0)) != 2:
+        raise Error("2x float temporal: (1, 6) at 1.0 -> slot 2")
+    print("test_float_temporal_nan_with_two_keys PASS")
+
+
+def test_equal_temporal_keys_resolve_to_the_earliest_row() raises:
+    """Within one key group, rows with the same temporal key are told apart
+    by their payload; every probe that lands on that temporal key returns
+    the first of them. Zero, one and two keys."""
+    comptime P = PayloadSlot[DType.int64]
+    var t0 = AsofJoinBuildTable[AsofKeyBundle0, DType.int64, P](
+        PayloadBlock[P](payload_slot[DType.int64](8)), 8
+    )
+    var t1 = AsofJoinBuildTable[AsofKeyBundle1[DType.int64], DType.int64, P](
+        PayloadBlock[P](payload_slot[DType.int64](8)), 8
+    )
+    var t2 = AsofJoinBuildTable[
+        AsofKeyBundle2[DType.int64, DType.int64], DType.int64, P
+    ](PayloadBlock[P](payload_slot[DType.int64](8)), 8)
+    # temporal 10, 10, 10, 20 with payloads 1, 2, 3, 4
+    var temps: List[Int64] = [10, 10, 10, 20]
+    for i in range(4):
+        var pv = List[Float64]()
+        pv.append(Float64(i + 1))
+        asof_build_append_0_f64(t0, temps[i], pv)
+        asof_build_append_1_f64(t1, Int64(7), temps[i], pv)
+        asof_build_append_2_f64(t2, Int64(7), Int64(8), temps[i], pv)
+    var probes: List[Int64] = [5, 10]
+    for i in range(2):
+        var s0 = asof_probe_forward_0(t0, probes[i])
+        var s1 = asof_probe_forward_1(t1, Int64(7), probes[i])
+        var s2 = asof_probe_forward_2(t2, Int64(7), Int64(8), probes[i])
+        if s0 != 0 or s1 != 0 or s2 != 0:
+            raise Error("equal temporal keys: the earliest row (slot 0)")
+        if Int(t1.payload_read_f64[0](s1)) != 1:
+            raise Error("equal temporal keys: payload of the earliest row")
+    if asof_probe_forward_1(t1, Int64(7), Int64(11)) != 3:
+        raise Error("1x: 11 -> the 20 row (slot 3)")
+    if asof_probe_forward_2(t2, Int64(7), Int64(8), Int64(11)) != 3:
+        raise Error("2x: 11 -> the 20 row (slot 3)")
+    print("test_equal_temporal_keys_resolve_to_the_earliest_row PASS")
+
+
 def main() raises:
     test_0x_i64_p3_basic()
     test_0x_i64_p0_keyonly()
@@ -535,4 +621,7 @@ def main() raises:
     test_2x_i32_p3_composite()
     test_2x_i64_p4_composite()
     test_float_keys_follow_the_sort_order()
-    print("ALL test_asof_join_build.mojo tests PASS (13/13)")
+    test_float_temporal_nan_with_one_key()
+    test_float_temporal_nan_with_two_keys()
+    test_equal_temporal_keys_resolve_to_the_earliest_row()
+    print("ALL test_asof_join_build.mojo tests PASS (16/16)")

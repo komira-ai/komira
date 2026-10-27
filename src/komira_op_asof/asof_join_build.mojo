@@ -14,13 +14,15 @@
 # STORAGE. Dense append, one slot per stored build row, in lockstep across
 # `keys`, `temporal` and every payload column. The caller appends rows in
 # ascending temporal order (per partition for a keyed table); nothing here
-# sorts.
+# sorts or checks the order.
 #
 # PROBE. FORWARD (DuckDB `probe.t <= build.t`): the first stored row whose
 # temporal key is at or after the probe's, -1 when there is none. Equal
 # temporal keys resolve to the earliest stored row. No key block: a binary
-# lower bound over the whole column. With keys: a linear walk of the rows
-# whose keys equal the probe's.
+# lower bound over the whole column (`probe_binary`; it relies on the
+# ascending order and returns a wrong slot on unsorted rows). With keys: a
+# scan of every stored row, keeping those whose keys equal the probe's, so
+# one probe costs O(n) in the table size.
 #
 # THE KEY MODEL (DuckDB's). Every value of the temporal type is a key; no
 # value stands for "empty" or "NULL". A NULL is not stored as a value: the
@@ -55,7 +57,7 @@ def _key_eq[dt: DType](a: Scalar[dt], b: Scalar[dt]) -> Bool:
     return not sort_key_lt[dt](a, b) and not sort_key_lt[dt](b, a)
 
 
-def _primitive_with_nulls[
+def primitive_with_nulls[
     dt: DType
 ](var values: List[Scalar[dt]], valid: List[Bool]) raises -> Column[HeapRegion]:
     """A primitive column of `values`, with a validity bitmap from `valid`
@@ -120,6 +122,11 @@ trait PayloadColumn(Movable, Copyable, Deinitable):
 
     def length(self) -> Int:
         """The number of appended values."""
+        ...
+
+    def truncate(mut self, n: Int):
+        """Drop the values past the first `n` (a no-op when there are `n` or
+        fewer)."""
         ...
 
 
@@ -188,11 +195,17 @@ struct PayloadSlot[dt: DType](PayloadColumn):
             else:
                 out.append(self.values[s])
                 valid.append(True)
-        return _primitive_with_nulls[Self.dt](out^, valid)
+        return primitive_with_nulls[Self.dt](out^, valid)
 
     @always_inline
     def length(self) -> Int:
         return len(self.values)
+
+    def truncate(mut self, n: Int):
+        while len(self.values) > n:
+            _ = self.values.pop()
+        while len(self.nulls) > n:
+            _ = self.nulls.pop()
 
 
 @always_inline
@@ -366,17 +379,30 @@ struct AsofJoinBuildTable[
         return self.payload[p].slot_is_null(slot)
 
     @always_inline
-    def _append_temporal(mut self, temp: Scalar[Self.TempK]):
+    def append_temporal(mut self, temp: Scalar[Self.TempK]):
         """Store a temporal key at the next slot. The caller appends the keys
         and the payloads of the same row in lockstep."""
         self.temporal.append(temp)
         self.n_used += 1
 
-    def _probe_binary(self, probe_temp: Scalar[Self.TempK]) -> Int:
+    def truncate_rows(mut self, n: Int):
+        """Drop every stored row past the first `n` from the temporal column
+        and every payload column (a no-op when there are `n` or fewer). The
+        equi-key block is not touched: only a table without keys is fed
+        row by row."""
+        while len(self.temporal) > n:
+            _ = self.temporal.pop()
+        self.n_used = len(self.temporal)
+        comptime for p in range(Self.Payload.__len__()):
+            self.payload[p].truncate(n)
+
+    def probe_binary(self, probe_temp: Scalar[Self.TempK]) -> Int:
         """No key block: the first slot whose temporal key is at or after
-        `probe_temp`, or -1."""
+        `probe_temp`, or -1. Precondition: the rows were appended in
+        ascending temporal order (`sort_key_lt` order); on unsorted rows the
+        slot is not meaningful. Nothing checks the order."""
         comptime assert Self.KB.ARITY == 0, (
-            "_probe_binary is the probe of a table without equi keys"
+            "probe_binary is the probe of a table without equi keys"
         )
         var lo = 0
         var hi = self.n_used
@@ -408,7 +434,7 @@ def asof_build_append_0_f64[TempK: DType, *Payload: PayloadColumn](
 ):
     """Append a row to a table without keys: its temporal key and one Float64
     per payload column, in column order."""
-    table._append_temporal(temp)
+    table.append_temporal(temp)
     comptime for p in range(Payload.__len__()):
         table.payload[p].append_f64(payload_vals[p])
 
@@ -419,7 +445,7 @@ def asof_probe_forward_0[TempK: DType, *Payload: PayloadColumn](
     probe_temp: Scalar[TempK],
 ) -> Int:
     """The first row at or after `probe_temp`, or -1."""
-    return table._probe_binary(probe_temp)
+    return table.probe_binary(probe_temp)
 
 
 @always_inline
@@ -431,7 +457,7 @@ def asof_build_append_1_f64[K0: DType, TempK: DType, *Payload: PayloadColumn](
 ):
     """Append a row to a one-key table."""
     table.keys.append_keys(k0)
-    table._append_temporal(temp)
+    table.append_temporal(temp)
     comptime for p in range(Payload.__len__()):
         table.payload[p].append_f64(payload_vals[p])
 
@@ -468,7 +494,7 @@ def asof_build_append_2_f64[
 ):
     """Append a row to a two-key table."""
     table.keys.append_keys(k0, k1)
-    table._append_temporal(temp)
+    table.append_temporal(temp)
     comptime for p in range(Payload.__len__()):
         table.payload[p].append_f64(payload_vals[p])
 

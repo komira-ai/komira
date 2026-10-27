@@ -97,7 +97,8 @@ struct AsofJoinBuildState[
         mut self, batch: BatchView[bo], row: Int
     ) raises:
         """Append build row `row`: its temporal key and its payloads (see the
-        module header). A NULL temporal key: the row is not stored."""
+        module header). A NULL temporal key: the row is not stored. When a
+        read raises, the row leaves no trace in the table."""
         comptime assert Self.KB.ARITY == 0, (
             "AsofJoinBuildState.feed_row: a table without equi keys"
             " (AsofKeyBundle0)"
@@ -109,9 +110,18 @@ struct AsofJoinBuildState[
         if batch.col_is_null(Self.temp_col, row):
             return
         ref table = self.build.value()[]
-        table._append_temporal(batch.col_scalar[Self.TempK](Self.temp_col, row))
-        comptime for p in range(Self.Payload.__len__()):
-            table.payload[p].append_from_batch(batch, Self._pay_col(p), row)
+        var before = table.n_rows()
+        try:
+            table.append_temporal(
+                batch.col_scalar[Self.TempK](Self.temp_col, row)
+            )
+            comptime for p in range(Self.Payload.__len__()):
+                table.payload[p].append_from_batch(batch, Self._pay_col(p), row)
+        except e:
+            # A read failed part way through the row: drop what the row
+            # appended so the columns stay in lockstep.
+            table.truncate_rows(before)
+            raise e^
 
     def drain_to_record_batch(self) raises -> Optional[RecordBatch]:
         """None: the build emits nothing; the table leaves through

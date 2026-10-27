@@ -26,7 +26,12 @@ from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
 from komira_arrow.schema import Field, SchemaBuilder
 from komira_buffer.heap_region import HeapRegion
 from komira_physical_plan.physical_plan import AsofJoinSinkData
-from komira_plan_ir.logical_plan import ASOF_BACKWARD, ASOF_FORWARD, AsofTolerance
+from komira_plan_ir.logical_plan import (
+    ASOF_BACKWARD,
+    ASOF_FORWARD,
+    ASOF_NEAREST,
+    AsofTolerance,
+)
 
 from komira_op_asof.asof_join_sink import AsofJoinSink
 
@@ -82,20 +87,37 @@ def _t_batch[dt: DType](t: List[Scalar[dt]], v_name: String, v: List[Int64]) rai
 
 
 def _spec(
-    keys: List[String], strategy: UInt8, asof_dtype: DType
+    keys: List[String],
+    strategy: UInt8,
+    asof_dtype: DType,
+    tolerance: AsofTolerance = AsofTolerance.none(),
+    left_sorted: Bool = False,
+    right_sorted: Bool = False,
 ) raises -> AsofJoinSinkData:
+    """A spec over the ASOF column `t` of both sides. `left_sorted` /
+    `right_sorted` fill the plan's pre-sort hint for that side."""
     var esb = SchemaBuilder()
+    var left_sort = List[String]()
+    var left_desc = List[Bool]()
+    if left_sorted:
+        left_sort.append(String("t"))
+        left_desc.append(False)
+    var right_sort = List[String]()
+    var right_desc = List[Bool]()
+    if right_sorted:
+        right_sort.append(String("t"))
+        right_desc.append(False)
     return AsofJoinSinkData(
         keys.copy(),
         keys.copy(),
         String("t"),
         String("t"),
         strategy,
-        AsofTolerance.none(),
-        List[String](),
-        List[Bool](),
-        List[String](),
-        List[Bool](),
+        tolerance,
+        left_sort^,
+        left_desc^,
+        right_sort^,
+        right_desc^,
         esb.build(),
         asof_dtype=asof_dtype,
     )
@@ -219,6 +241,112 @@ def test_sink_no_left_rows_and_materialize() raises:
     except e:
         raised = True
     assert_true(raised, "materialize without the right side raises")
+
+
+def test_sink_three_left_batches_come_out_in_sorted_order() raises:
+    """Three left batches (t=30, t=10, t=20) over r t=[5, 15, 25] with
+    v=[50, 150, 250], BACKWARD. The output is one batch in sorted left order:
+    t=10 -> 50, t=20 -> 150, t=30 -> 250."""
+    var sink = AsofJoinSink.new(_spec(List[String](), ASOF_BACKWARD, I64))
+    var l0: List[Int64] = [30]
+    var l1: List[Int64] = [10]
+    var l2: List[Int64] = [20]
+    sink.consume(_t_batch[I64](l0, "lv", [3]))
+    sink.consume(_t_batch[I64](l1, "lv", [1]))
+    sink.consume(_t_batch[I64](l2, "lv", [2]))
+    var r: List[Int64] = [5, 15, 25]
+    var out = sink.materialize_with_right(_t_batch[I64](r, "v", [50, 150, 250]))
+    assert_equal(out.num_rows(), 3)
+    assert_equal(_v_at(out, 0, 0), 10)
+    assert_equal(_v_at(out, 3, 0), 50)
+    assert_equal(_v_at(out, 0, 1), 20)
+    assert_equal(_v_at(out, 3, 1), 150)
+    assert_equal(_v_at(out, 0, 2), 30)
+    assert_equal(_v_at(out, 3, 2), 250)
+
+
+def test_sink_a_side_the_plan_calls_sorted_is_not_reordered() raises:
+    """With the pre-sort hint set on both sides, already sorted input joins
+    as usual (l t=[10, 30] over r t=[5, 25]: 50 and 250). With the hint set
+    on the left only, a left side handed over in descending order (t=30, then
+    t=10) keeps that row order: the sink trusts the plan and does not sort."""
+    var sorted_sink = AsofJoinSink.new(
+        _spec(
+            List[String](),
+            ASOF_BACKWARD,
+            I64,
+            left_sorted=True,
+            right_sorted=True,
+        )
+    )
+    var ls: List[Int64] = [10, 30]
+    sorted_sink.consume(_t_batch[I64](ls, "lv", [1, 3]))
+    var rs: List[Int64] = [5, 25]
+    var out = sorted_sink.materialize_with_right(
+        _t_batch[I64](rs, "v", [50, 250])
+    )
+    assert_equal(out.num_rows(), 2)
+    assert_equal(_v_at(out, 3, 0), 50)
+    assert_equal(_v_at(out, 3, 1), 250)
+
+    var kept = AsofJoinSink.new(
+        _spec(List[String](), ASOF_BACKWARD, I64, left_sorted=True)
+    )
+    var ld: List[Int64] = [30, 10]
+    kept.consume(_t_batch[I64](ld, "lv", [3, 1]))
+    var rk: List[Int64] = [5]
+    var out_kept = kept.materialize_with_right(_t_batch[I64](rk, "v", [50]))
+    assert_equal(out_kept.num_rows(), 2)
+    assert_equal(_v_at(out_kept, 0, 0), 30, "input order kept")
+    assert_equal(_v_at(out_kept, 0, 1), 10, "input order kept")
+
+
+def test_sink_empty_right_batch_gives_null_right_columns() raises:
+    """Every left row survives with NULL right columns when the right batch
+    has no rows."""
+    var sink = AsofJoinSink.new(_spec(List[String](), ASOF_BACKWARD, I64))
+    var l: List[Int64] = [1, 2]
+    sink.consume(_t_batch[I64](l, "lv", [10, 20]))
+    var r = List[Int64]()
+    var out = sink.materialize_with_right(_t_batch[I64](r, "v", List[Int64]()))
+    assert_equal(out.num_rows(), 2)
+    assert_equal(out.num_columns(), 4)
+    for row in range(2):
+        assert_true(out.column_at(2).is_null_at(row), "t_right NULL")
+        assert_true(out.column_at(3).is_null_at(row), "v NULL")
+    assert_equal(_v_at(out, 1, 0), 10)
+    assert_equal(_v_at(out, 1, 1), 20)
+
+
+def test_sink_tolerance_bounds_the_match() raises:
+    """BACKWARD, tolerance 2 (inclusive), r t=[8, 15]: l t=10 is 2 from 8 and
+    matches; l t=20 is 5 from 15 and gets NULL."""
+    var sink = AsofJoinSink.new(
+        _spec(List[String](), ASOF_BACKWARD, I64, AsofTolerance.int64(2))
+    )
+    var l: List[Int64] = [10, 20]
+    sink.consume(_t_batch[I64](l, "lv", [1, 2]))
+    var r: List[Int64] = [8, 15]
+    var out = sink.materialize_with_right(_t_batch[I64](r, "v", [80, 150]))
+    assert_equal(out.num_rows(), 2)
+    assert_equal(_v_at(out, 0, 0), 10)
+    assert_false(out.column_at(3).is_null_at(0))
+    assert_equal(_v_at(out, 3, 0), 80)
+    assert_equal(_v_at(out, 0, 1), 20)
+    assert_true(out.column_at(3).is_null_at(1), "5 away is outside 2")
+
+
+def test_sink_nearest_takes_the_closest_and_ties_go_backward() raises:
+    """NEAREST over r t=[9, 13]: l t=11 is 2 from both, the tie goes to the
+    earlier row (9, v=90); l t=20 is closest to 13 (v=130)."""
+    var sink = AsofJoinSink.new(_spec(List[String](), ASOF_NEAREST, I64))
+    var l: List[Int64] = [11, 20]
+    sink.consume(_t_batch[I64](l, "lv", [1, 2]))
+    var r: List[Int64] = [9, 13]
+    var out = sink.materialize_with_right(_t_batch[I64](r, "v", [90, 130]))
+    assert_equal(out.num_rows(), 2)
+    assert_equal(_v_at(out, 3, 0), 90, "tie -> backward")
+    assert_equal(_v_at(out, 3, 1), 130)
 
 
 def main() raises:

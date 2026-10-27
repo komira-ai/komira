@@ -44,7 +44,7 @@ from komira_op_asof.asof_join_build import (
     AsofJoinBuildTable,
     AsofKeyBundle,
     PayloadColumn,
-    _primitive_with_nulls,
+    primitive_with_nulls,
 )
 
 
@@ -117,7 +117,7 @@ struct AsofJoinProbeState[
             var probe_temp = batch.col_scalar[Self.TempK](
                 Self.probe_temp_col, row
             )
-            var slot = self.build._probe_binary(probe_temp)
+            var slot = self.build.probe_binary(probe_temp)
             if slot >= 0:
                 out_temp.append(probe_temp)
                 out_valid.append(True)
@@ -141,7 +141,7 @@ struct AsofJoinProbeState[
         var schema = sb.build()
 
         var rbb = RecordBatchBuilder.with_capacity(1 + n_pay)
-        rbb.add_column(_primitive_with_nulls[Self.TempK](out_temp^, out_valid))
+        rbb.add_column(primitive_with_nulls[Self.TempK](out_temp^, out_valid))
         comptime for p in range(n_pay):
             rbb.add_column(self.build.payload[p].gather_column(out_slots))
         var built = rbb.build(schema^)

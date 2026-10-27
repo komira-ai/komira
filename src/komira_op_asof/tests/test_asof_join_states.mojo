@@ -16,6 +16,8 @@
 #   * payloads keep their type and NULL: an INT64 of 2^53 + 1 comes back
 #     exactly (not through a Float64) and a NULL payload comes back NULL (not 0);
 #   * FLOAT64 temporal keys order by `sort_key_lt` (NaN above every number).
+#   * a row whose payload read raises leaves no partial row behind, and a
+#     feed after the take raises.
 # =============================================================================
 
 from std.math import nan
@@ -34,6 +36,7 @@ from komira_op_asof.asof_join_build import (
     AsofJoinBuildTable,
     AsofKeyBundle0,
     PayloadBlock,
+    PayloadColumn,
     PayloadSlot,
     payload_slot,
 )
@@ -121,6 +124,49 @@ def _probe[bo: Origin[mut=False]](
     return st.probe_asof_batch[bo](bv)
 
 
+struct RefusingPayload(PayloadColumn):
+    """An INT64 payload column that refuses a negative cell: its
+    `append_from_batch` raises for one, which stands in for a failed read."""
+
+    comptime DT: DType = I64
+
+    var values: List[Int64]
+
+    def __init__(out self, capacity: Int):
+        self.values = List[Int64](capacity=capacity)
+
+    @staticmethod
+    def make(capacity: Int) -> Self:
+        return Self(capacity)
+
+    def append_from_batch[bo: Origin[mut=False]](
+        mut self, batch: BatchView[bo], col: Int, row: Int
+    ) raises:
+        var v = batch.col_scalar[I64](col, row)
+        if v < 0:
+            raise Error("RefusingPayload: negative cell")
+        self.values.append(v)
+
+    def append_f64(mut self, value: Float64):
+        self.values.append(Int64(value))
+
+    def read_slot_f64(self, slot: Int) -> Float64:
+        return Float64(self.values[slot])
+
+    def slot_is_null(self, slot: Int) -> Bool:
+        return False
+
+    def gather_column(self, slots: List[Int]) raises -> Column[HeapRegion]:
+        raise Error("RefusingPayload: not gathered")
+
+    def length(self) -> Int:
+        return len(self.values)
+
+    def truncate(mut self, n: Int):
+        while len(self.values) > n:
+            _ = self.values.pop()
+
+
 def test_state_tags() raises:
     assert_equal(Build.state_tag(), BREAKER_ASOF_JOIN_BUILD)
     assert_equal(Probe.state_tag(), BREAKER_ASOF_JOIN)
@@ -148,6 +194,72 @@ def test_build_skips_a_null_temporal_key() raises:
     except e:
         raised = True
     assert_true(raised, "a second take raises")
+
+
+def test_feed_row_after_the_take_raises() raises:
+    var st = Build(
+        Table(
+            PayloadBlock[PayloadSlot[I64], PayloadSlot[F64]](
+                payload_slot[I64](4), payload_slot[F64](4)
+            )
+        )
+    )
+    var b = _build_batch()
+    var bv = batch_view_over(b)
+    st.feed_row(bv, 0)
+    _ = st.take_asof_build_table()
+    var raised = False
+    try:
+        st.feed_row(bv, 2)
+    except e:
+        raised = True
+    assert_true(raised, "feed_row after the take raises")
+
+
+def test_a_failed_row_read_leaves_no_partial_row() raises:
+    """Rows (t, p0, p1) = (10, 1, 5), (20, 2, -1), (30, 3, 7); p1 refuses a
+    negative cell. Feeding the second row raises after its temporal key and
+    p0 were read; the table keeps rows one and three only, and the temporal
+    column and both payload columns stay the same length."""
+    comptime RTable = AsofJoinBuildTable[
+        AsofKeyBundle0, I64, PayloadSlot[I64], RefusingPayload
+    ]
+    comptime RBuild = AsofJoinBuildState[
+        0, 2, AsofKeyBundle0, I64, PayloadSlot[I64], RefusingPayload
+    ]
+    var st = RBuild(
+        RTable(
+            PayloadBlock[PayloadSlot[I64], RefusingPayload](
+                payload_slot[I64](4), RefusingPayload(4)
+            )
+        )
+    )
+    var sb = SchemaBuilder()
+    sb.add_field(Field(String("t"), ArrowType.INT64, False))
+    sb.add_field(Field(String("p0"), ArrowType.INT64, False))
+    sb.add_field(Field(String("p1"), ArrowType.INT64, False))
+    var rbb = RecordBatchBuilder.with_capacity(3)
+    rbb.add_column(_col[I64]([10, 20, 30], [False, False, False]))
+    rbb.add_column(_col[I64]([1, 2, 3], [False, False, False]))
+    rbb.add_column(_col[I64]([5, -1, 7], [False, False, False]))
+    var b = rbb.build(sb.build())
+    var bv = batch_view_over(b)
+    var failures = 0
+    for r in range(3):
+        try:
+            st.feed_row(bv, r)
+        except e:
+            failures += 1
+    assert_equal(failures, 1, "only the negative cell fails")
+    var owned = st.take_asof_build_table()
+    var t = owned^.take()
+    assert_equal(t.n_rows(), 2)
+    assert_equal(len(t.temporal), 2)
+    assert_equal(t.payload[0].length(), 2)
+    assert_equal(t.payload[1].length(), 2)
+    assert_equal(t.temp_at(1), Int64(30))
+    assert_equal(Int(t.payload_read_f64[0](1)), 3, "p0 of row three")
+    assert_equal(Int(t.payload_read_f64[1](1)), 7, "p1 of row three")
 
 
 def test_probe_rows_types_and_nulls() raises:
