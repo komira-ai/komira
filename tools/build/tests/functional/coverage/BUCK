@@ -1,7 +1,7 @@
 load("@komira//tools/build/lint:defs.bzl", "target_suite")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "mojo_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load(":defs.bzl", "cov_branch_check", "cov_conda_gate_check", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_set_check")
+load(":defs.bzl", "cov_dir", "cov_branch_check", "cov_conda_gate_check", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_set_check")
 
 # Coverage builds and runs (tools/build/mojo/README.md, "Coverage builds";
 # tests 41 and 43 of tools/build/tests/run_tests.sh).
@@ -211,6 +211,45 @@ mojo_library(
     conda = False,
     coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
     test_srcs = ["tests/test_gen.mojo"],
+)
+
+# A library whose generated source is a DIRECTORY, the `_parts` of a split
+# generated module (tools/build/proto-codegen's split): a coverage run takes the
+# directory as one generated source and leaves out every file under it. Its
+# golden report has covparts/plain.mojo and the test, and not _parts/part.mojo.
+cov_plant(
+    name = "covparts_part",
+    expr = "s/@FACTOR@/3/",
+    out = "covparts_part/part.mojo",
+    src = "covparts/part.mojo.in",
+)
+
+cov_dir(
+    name = "covparts_dir",
+    files = {
+        "__init__.mojo": "covparts/parts_init.mojo",
+        "part.mojo": ":covparts_part",
+    },
+    path = "covparts/_parts",
+)
+
+mojo_library(
+    name = "covparts",
+    srcs = [
+        "covparts/__init__.mojo",
+        "covparts/plain.mojo",
+        ":covparts_dir",
+    ],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    test_srcs = ["tests/test_parts.mojo"],
+)
+
+cov_report_check(
+    name = "covparts_report",
+    goldens = ["golden/test_parts.xml"],
+    mode = "golden",
+    reports = [":covparts[coverage][tests][test_parts]"],
 )
 
 # Test 43: a library whose one test is generated (a `test_srcs` entry that is

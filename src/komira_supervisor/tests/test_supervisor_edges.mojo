@@ -8,9 +8,9 @@
 # One claim per `test_` function (TestSuite). What each would catch:
 #
 #   test_sleep_ms_sleeps_only_a_positive_duration
-#       _sleep_ms(30) takes >= 30 ms; _sleep_ms(0) and (-5) return at once.
-#       Mutant: the guard `ms <= 0` widened to `ms <= 30` -> the 30 ms sleep
-#       returns at once.
+#       the microseconds _sleep_ms hands to usleep: 30 ms is 30000, 0 and -5
+#       are 0 (no sleep, never a wrapped negative). A guard `ms <= 0` widened
+#       to `ms <= 30` turns the 30 ms case into 0. No clock is read.
 #   test_negative_and_closed_fds_are_refused_not_read
 #       set_nonblocking(-1) == -1 without a syscall (a syscall gives -EBADF);
 #       read_available(-1) is EOF; a read error on a closed fd is `error`,
@@ -46,7 +46,7 @@
 from std.ffi import external_call
 from std.sys.info import CompilationTarget
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
-from std.time import perf_counter_ns, sleep
+from std.time import sleep
 
 from komira_supervisor.supervisor import (
     ChildSpec,
@@ -56,6 +56,7 @@ from komira_supervisor.supervisor import (
     Supervisor,
     _env_name_of,
     _sleep_ms,
+    _usleep_micros,
     merge_env_overlay,
     process_environ,
     spawn_detached,
@@ -92,10 +93,6 @@ def _spawned(pid: Int32) raises:
         raise Error(String("spawn returned ") + String(pid))
 
 
-def _ms_since(t0: Int) -> Int:
-    return Int((perf_counter_ns() - t0) // 1000000)
-
-
 def _setenv(name: String, value: String):
     # SAFETY: both locals are rebound to `var` so as_c_string_slice() can be
     # called; setenv copies both strings before returning; both are anchored
@@ -127,32 +124,32 @@ def _count(entries: List[String], want: String) -> Int:
 
 
 def _await_detached(child: DetachedChild) raises -> DetachedExit:
-    """Poll a detached child 10 ms apart, up to 5 s, until it is not running."""
-    for _ in range(500):
+    """Poll a detached child until it is not running. No cap and no deadline:
+    the exit is the event waited for (a child that never exits is stopped by
+    the gate hang limit, `test_hang_limit_s`: "Time limits" in
+    tools/build/mojo/README.md)."""
+    while True:
         var e = child.poll_exit()
         if not e.running:
             return e
         sleep(Float64(0.01))
-    _ = child.kill()
-    for _ in range(500):
-        if not child.poll_exit().running:
-            break
-        sleep(Float64(0.01))
-    raise Error(String("detached child ") + String(child.pid()) + " still running after 5 s")
 
 
 # -----------------------------------------------------------------------------
 def test_sleep_ms_sleeps_only_a_positive_duration() raises:
-    var t0 = perf_counter_ns()
-    _sleep_ms(30)
-    var slept = _ms_since(t0)
-    assert_true(slept >= 30, "_sleep_ms(30) slept " + String(slept) + " ms")
-    t0 = perf_counter_ns()
+    # The clamp is a pure function of the argument, so the test reads what
+    # `_sleep_ms` would hand to usleep instead of timing a real sleep.
+    # What it does not check: that `_sleep_ms` passes `_usleep_micros(ms)` on
+    # to usleep, and returns before it for 0. Observing that needs a sleeper
+    # seam or a clock, and a test never waits on or asserts time.
+    assert_equal(_usleep_micros(30), UInt32(30000), "30 ms is 30000 us")
+    assert_equal(_usleep_micros(1), UInt32(1000), "the smallest positive")
+    assert_equal(_usleep_micros(0), UInt32(0), "0 asks for no sleep")
+    # usleep of a wrapped negative would be ~71 minutes.
+    assert_equal(_usleep_micros(-5), UInt32(0), "a negative asks for no sleep")
+    # Both calls return at once with no sleep requested.
     _sleep_ms(0)
     _sleep_ms(-5)
-    var skipped = _ms_since(t0)
-    # usleep of a wrapped negative would be ~71 minutes; 1 s is a wide bound.
-    assert_true(skipped < 1000, "_sleep_ms(0)+(-5) took " + String(skipped) + " ms")
 
 
 def test_negative_and_closed_fds_are_refused_not_read() raises:

@@ -14,6 +14,11 @@ and the findings: the one computation both `covcheck report` and
    sources (`<package>/tests/...`, and each path of `test_sources`: a
    welded test elsewhere in its package, named by the gate) are counted and
    dropped unless `include_tests`.
+3b. A kept `.mojo` file whose first line is the header `# @generated`
+   (generated.mojo) leaves the run here: its report records, its branch
+   records and its mutants are dropped, and step 4 skips it, so it is
+   neither measured nor counted as a file no test compiled, and is in no
+   floor. `Analysis.generated_paths` lists them.
 4. Each kept file's source is read for exemption markers (exempt.mojo).
    Then the full source: a package is measured when a report names a kept
    file in it (with or without records), and the gated package
@@ -101,7 +106,8 @@ the files kept in step 3 only: a file left out counts nowhere.
 
 from covcheck.branch_lcov import DecisionShapes, parse_branch_lcov
 from covcheck.cobertura import parse_cobertura
-from covcheck.decls import declaration_only, unrecorded_functions
+from covcheck.decls import declaration_only, declared_functions, unrecorded_functions
+from covcheck.generated import is_generated
 from covcheck.exempt import STATUS_NO_REASON, STATUS_STALE, Exemption, apply_exemptions, scan_markers
 from covcheck.lcov import parse_lcov
 from covcheck.lexer import executable_lines
@@ -109,6 +115,8 @@ from covcheck.model import FileCov, merge_by_path
 from covcheck.mutants import KILLED, SURVIVED, TIMEOUT, Mutant, parse_mutants
 from covcheck.paths import MAPPED, OUTSIDE, RepoFiles, generated_test_main, is_test_source, map_path, package_of
 from covcheck.held import Held
+from covcheck.platform_gate import Cand, platform_gated
+from covcheck.uncompiled import Evidence, declared_twice, drop_lines, drop_unreliable, is_uncompiled_report, unreliable_lines
 from covcheck.stats import (
     BELOW_TARGET,
     BRANCH_NOT_MEASURED,
@@ -217,6 +225,42 @@ struct UnrecordedFunction(Copyable, Movable):
         self.lines = lines
 
 
+struct ExcludedFile(Copyable, Movable):
+    """What buildrules' report of the code no test compiled gave a file that the numbers leave out
+    (uncompiled.mojo): `lines` line records and `arms` branch arms of functions a test was seen to
+    call (an inlined function's lines, the lines of a gated function's arms)."""
+
+    var package: String
+    var path: String
+    var lines: Int
+    var arms: Int
+
+    def __init__(out self, package: String, path: String):
+        self.package = package
+        self.path = path
+        self.lines = 0
+        self.arms = 0
+
+
+struct GatedFunction(Copyable, Movable):
+    """A function of buildrules' uncompiled report left out of the numbers because every call to it is in a
+    compile-time arm this target did not compile (platform_gate.mojo): its package, file, name, `def` line
+    and the `lines` of it that were left out."""
+
+    var package: String
+    var path: String
+    var name: String
+    var line: Int
+    var lines: Int
+
+    def __init__(out self, package: String, path: String, name: String, line: Int, lines: Int):
+        self.package = package
+        self.path = path
+        self.name = name
+        self.line = line
+        self.lines = lines
+
+
 struct Analysis(Copyable, Movable):
     """What one run measured and found. `files` holds the kept files (with
     exemptions applied), `file_packages` the package of each, `unmeasured`
@@ -241,11 +285,18 @@ struct Analysis(Copyable, Movable):
     var mutant_packages: List[String]
     var findings: List[Finding]
     var unrecorded_functions: List[UnrecordedFunction]
+    # The files the uncompiled report gave lines or arms that are left out of the numbers (path order).
+    var excluded: List[ExcludedFile]
+    # The platform-gated functions (path, line order) and the branch arms left out with them.
+    var platform_gated: List[GatedFunction]
+    var platform_gated_arms: Int
     var info_dirs: List[String]
     var info_packages: List[String]
     var info_findings: List[Finding]
     var ignored_files: Int
     var excluded_test_files: Int
+    # Repository paths of the generated sources left out (generated.mojo), sorted.
+    var generated_paths: List[String]
     var ignored_mutants: Int
     var excluded_test_mutants: Int
     var total: PackageStats
@@ -263,9 +314,13 @@ struct Analysis(Copyable, Movable):
         self.mutant_packages = List[String]()
         self.findings = List[Finding]()
         self.unrecorded_functions = List[UnrecordedFunction]()
+        self.excluded = List[ExcludedFile]()
+        self.platform_gated = List[GatedFunction]()
+        self.platform_gated_arms = 0
         self.info_dirs = List[String]()
         self.info_packages = List[String]()
         self.info_findings = List[Finding]()
+        self.generated_paths = List[String]()
         self.ignored_files = 0
         self.excluded_test_files = 0
         self.ignored_mutants = 0
@@ -278,6 +333,24 @@ struct Analysis(Copyable, Movable):
             if self.packages[i].package == package:
                 return i
         return -1
+
+    def excluded_lines(self) -> Int:
+        var n = 0
+        for i in range(len(self.excluded)):
+            n += self.excluded[i].lines
+        return n
+
+    def platform_gated_lines(self) -> Int:
+        var n = 0
+        for i in range(len(self.platform_gated)):
+            n += self.platform_gated[i].lines
+        return n
+
+    def excluded_arms(self) -> Int:
+        var n = 0
+        for i in range(len(self.excluded)):
+            n += self.excluded[i].arms
+        return n
 
     def file_index(self, path: String) -> Int:
         for i in range(len(self.files)):
@@ -316,6 +389,23 @@ def _keep(package: String, path: String, opts: Options) -> Int:
     return 0
 
 
+def _generated_path(path: String, repo: RepoFiles, sources: Sources, opts: Options, mut seen: Dict[String, Bool]) raises -> Bool:
+    """Whether `path` is a kept file whose source marks itself generated
+    (generated.mojo). A file `_keep` sets aside is not read; a source that
+    cannot be read is not generated here (the step that needs it raises)."""
+    if path in seen:
+        return seen[path]
+    var pkg = _package_or_empty(path, repo)
+    var gen = False
+    if pkg.byte_length() > 0 and path.endswith(".mojo") and _keep(pkg, path, opts) == 0:
+        try:
+            gen = is_generated(sources.read(path))
+        except:
+            gen = False
+    seen[path] = gen
+    return gen
+
+
 def _package_or_empty(path: String, repo: RepoFiles) -> String:
     try:
         return package_of(path, repo)
@@ -334,6 +424,8 @@ def _unmeasured_files(
     sources: Sources,
     opts: Options,
     mut notes: List[Finding],
+    mut skipped: Dict[String, Bool],
+    left_lines: Dict[String, Dict[Int, Bool]],
 ) raises -> List[Finding]:
     """Step 4's full source: counts every file of a `measured` package that
     is not `named` (no line report gives it a record), with the branches
@@ -354,6 +446,9 @@ def _unmeasured_files(
     for i in range(len(paths)):
         var pkg = package_of(paths[i], repo)
         var text = sources.read(paths[i])
+        if is_generated(text):
+            skipped[paths[i]] = True
+            continue
         var f = FileCov(paths[i])
         var exe = executable_lines(text)
         var markers = scan_markers(paths[i], text)
@@ -365,7 +460,11 @@ def _unmeasured_files(
                 len(exe),
             ))
             continue
+        # The lines the uncompiled report left out (uncompiled.mojo) are left out here too: the two
+        # passes count one file the same way.
         for k in range(len(exe)):
+            if paths[i] in left_lines and exe[k] in left_lines[paths[i]]:
+                continue
             f.add_line(exe[k], 0)
         if paths[i] in pending:
             f.absorb(pending[paths[i]])
@@ -422,6 +521,111 @@ def _reached(package: String, metric: String, bp: Int, target: Int) -> Finding:
     )
 
 
+def _package_texts(pkg: String, repo: RepoFiles, sources: Sources) -> Dict[String, String]:
+    """The sources of `pkg` (`.mojo` files of its directory tree, tests included), by path; a file that cannot be
+    read is left out."""
+    var texts = Dict[String, String]()
+    for e in repo.files.items():
+        if not e.key.endswith(".mojo") or _package_or_empty(e.key, repo) != pkg:
+            continue
+        try:
+            texts[e.key] = sources.read(e.key)
+        except:
+            pass
+    return texts^
+
+
+def _platform_gate(
+    reports: List[Input],
+    mapped: List[FileCov],
+    repo: RepoFiles,
+    sources: Sources,
+    opts: Options,
+    mut a: Analysis,
+    mut gated_lines: Dict[String, Dict[Int, Bool]],
+    called: Dict[String, Evidence],
+) raises:
+    """Finds the platform-gated functions among those of the uncompiled line reports (platform_gate.mojo): fills
+    `gated_lines` with their own lines per path and `a.platform_gated` with each, in path and line order."""
+    # The lines each file has in the uncompiled line reports.
+    var unc = Dict[String, Dict[Int, Bool]]()
+    for r in range(len(reports)):
+        if not is_uncompiled_report(reports[r].origin) or reports[r].format == String(FORMAT_BRANCH_LCOV):
+            continue
+        var fs = _parse_report(reports[r])
+        for i in range(len(fs)):
+            var m = map_path(fs[i].path, reports[r].pkgdir, opts.strip_prefixes, repo)
+            if m.kind != MAPPED:
+                continue
+            if m.path not in unc:
+                unc[m.path] = Dict[Int, Bool]()
+            for e in fs[i].hits.items():
+                unc[m.path][e.key] = True
+    if len(unc) == 0:
+        return
+    # The lines the tests' reports give a record, per path.
+    var recorded = Dict[String, Dict[Int, Bool]]()
+    for i in range(len(mapped)):
+        if mapped[i].path not in recorded:
+            recorded[mapped[i].path] = Dict[Int, Bool]()
+        for e in mapped[i].hits.items():
+            recorded[mapped[i].path][e.key] = True
+    # The candidates by package, with each one's own lines (to leave out).
+    var by_pkg = Dict[String, List[Cand]]()
+    var own_of = Dict[String, List[Int]]()
+    var pkg_names = List[String]()
+    var pkg_dups = Dict[String, Dict[String, Bool]]()
+    var unc_paths = List[String]()
+    for e in unc.items():
+        unc_paths.append(e.key)
+    sort_strings(unc_paths)
+    for pi in range(len(unc_paths)):
+        var path = unc_paths[pi]
+        var pkg = _package_or_empty(path, repo)
+        if pkg.byte_length() == 0:
+            continue
+        var src = sources.read(path)
+        var fns = declared_functions(src)
+        # What the call evidence leaves out already is not reported a second time.
+        if pkg not in pkg_dups:
+            pkg_dups[pkg] = declared_twice(_package_texts(pkg, repo, sources))
+        var pcalled = Evidence()
+        if pkg in called:
+            pcalled = called[pkg].copy()
+        var by_evidence = unreliable_lines(src, path, pcalled, pkg_dups[pkg])
+        for k in range(len(fns)):
+            var own = List[Int]()
+            var evidenced = True
+            for q in range(len(fns[k].lines)):
+                if fns[k].lines[q] in unc[path]:
+                    own.append(fns[k].lines[q])
+                    if fns[k].lines[q] not in by_evidence:
+                        evidenced = False
+            if len(own) == 0 or evidenced:
+                continue
+            if pkg not in by_pkg:
+                by_pkg[pkg] = List[Cand]()
+                pkg_names.append(pkg)
+            by_pkg[pkg].append(Cand(path, fns[k].name, fns[k].line, len(own)))
+            own_of[path + String(":") + String(fns[k].line)] = own^
+    sort_strings(pkg_names)
+    for pk in range(len(pkg_names)):
+        var pkg = pkg_names[pk]
+        # The package's sources, tests included: the call sites are searched there.
+        var texts = _package_texts(pkg, repo, sources)
+        var flags = platform_gated(texts, recorded, by_pkg[pkg])
+        for c in range(len(flags)):
+            if not flags[c]:
+                continue
+            ref cand = by_pkg[pkg][c]
+            a.platform_gated.append(GatedFunction(pkg, cand.path, cand.name, cand.line, cand.lines))
+            var own = own_of[cand.path + String(":") + String(cand.line)].copy()
+            if cand.path not in gated_lines:
+                gated_lines[cand.path] = Dict[Int, Bool]()
+            for q in range(len(own)):
+                gated_lines[cand.path][own[q]] = True
+
+
 def analyze(
     reports: List[Input],
     mutant_inputs: List[Input],
@@ -459,7 +663,44 @@ def analyze(
     var line_branches = Dict[String, String]()
     var outside = Dict[String, Bool]()
     var generated = Dict[String, Bool]()
+    # The code no test compiled (uncompiled.mojo) is read after every other report: what it may leave out
+    # needs the evidence the others give (the lines a test hit that call a function).
+    # The calls the hit lines make, per package (a call in another package is no evidence), and the function names
+    # each package declares more than once.
+    var called = Dict[String, Evidence]()
+    var dups_of = Dict[String, Dict[String, Bool]]()
+    # What the uncompiled report left out, per path, and the lines of it (the files-no-test-compiled
+    # pass leaves them out too).
+    var left_lines = Dict[String, Dict[Int, Bool]]()
+    var excluded_at = Dict[String, Int]()
+    var any_uncompiled = False
     for r in range(len(reports)):
+        if is_uncompiled_report(reports[r].origin):
+            any_uncompiled = True
+    for pass_no in range(2 if any_uncompiled else 1):
+      if pass_no == 1:
+        var hit_of = Dict[String, Dict[Int, Bool]]()
+        for i in range(len(mapped)):
+            for e in mapped[i].hits.items():
+                if e.value > 0:
+                    if mapped[i].path not in hit_of:
+                        hit_of[mapped[i].path] = Dict[Int, Bool]()
+                    hit_of[mapped[i].path][e.key] = True
+        for e in hit_of.items():
+            # A hit line of a file whose source is not here (a test's generated main) gives no evidence.
+            try:
+                var cpkg = _package_or_empty(e.key, repo)
+                if cpkg not in called:
+                    called[cpkg] = Evidence()
+                called[cpkg].add(e.key, sources.read(e.key), e.value)
+            except:
+                pass
+      var gated_lines = Dict[String, Dict[Int, Bool]]()
+      if pass_no == 1:
+        _platform_gate(reports, mapped, repo, sources, opts, a, gated_lines, called)
+      for r in range(len(reports)):
+        if is_uncompiled_report(reports[r].origin) != (pass_no == 1):
+            continue
         var fs = _parse_report(reports[r])
         var branch_file = reports[r].format == String(FORMAT_BRANCH_LCOV)
         # The repository paths this branch record file names: two spellings
@@ -470,6 +711,37 @@ def analyze(
             if m.kind == MAPPED:
                 var f = fs[i].copy()
                 f.path = m.path
+                if pass_no == 1:
+                    # Buildrules' report of the code no test compiled: what a test was seen to
+                    # call, and is inlined or dropped on this platform, is left out (uncompiled.mojo).
+                    var dpkg = _package_or_empty(m.path, repo)
+                    if dpkg not in dups_of:
+                        dups_of[dpkg] = declared_twice(_package_texts(dpkg, repo, sources))
+                    var dcalled = Evidence()
+                    if dpkg in called:
+                        dcalled = called[dpkg].copy()
+                    var d = drop_unreliable(f, sources.read(m.path), m.path, dcalled, dups_of[dpkg])
+                    if d.lines > 0 or d.arms > 0:
+                        if m.path not in excluded_at:
+                            excluded_at[m.path] = len(a.excluded)
+                            a.excluded.append(ExcludedFile(_package_or_empty(m.path, repo), m.path))
+                        a.excluded[excluded_at[m.path]].lines += d.lines
+                        a.excluded[excluded_at[m.path]].arms += d.arms
+                    if m.path in gated_lines:
+                        var g = drop_lines(f, gated_lines[m.path])
+                        a.platform_gated_arms += g.arms
+                        if g.lines > 0:
+                            if m.path not in left_lines:
+                                left_lines[m.path] = Dict[Int, Bool]()
+                            for e in g.line_set.items():
+                                left_lines[m.path][e.key] = True
+                    if d.lines > 0:
+                        if m.path not in left_lines:
+                            left_lines[m.path] = Dict[Int, Bool]()
+                        for e in d.line_set.items():
+                            left_lines[m.path][e.key] = True
+                    if f.line_found() == 0 and f.branch_found() == 0:
+                        continue
                 if branch_file:
                     if m.path in once:
                         raise Error(
@@ -513,6 +785,35 @@ def analyze(
                 errors.append(_unmapped(mutant_inputs[r].origin, ms[i].path, m.path))
     if len(errors) > 0:
         raise Error(String("unmapped paths (each names a repository directory but no repository file):\n  ") + join(errors, String("\n  ")))
+
+    # Generated sources (generated.mojo) leave every list: no record of one
+    # is read, whether a test reached it or not.
+    var left_out = Dict[String, Bool]()
+    var seen = Dict[String, Bool]()
+    var line_kept = List[FileCov]()
+    for i in range(len(mapped)):
+        if _generated_path(mapped[i].path, repo, sources, opts, seen):
+            left_out[mapped[i].path] = True
+        else:
+            line_kept.append(mapped[i].copy())
+    mapped = line_kept^
+    var branch_kept = List[FileCov]()
+    var origins_kept = List[String]()
+    for i in range(len(bmapped)):
+        if _generated_path(bmapped[i].path, repo, sources, opts, seen):
+            left_out[bmapped[i].path] = True
+        else:
+            branch_kept.append(bmapped[i].copy())
+            origins_kept.append(borigins[i])
+    bmapped = branch_kept^
+    borigins = origins_kept^
+    var muts_kept = List[Mutant]()
+    for i in range(len(muts)):
+        if _generated_path(muts[i].path, repo, sources, opts, seen):
+            left_out[muts[i].path] = True
+        else:
+            muts_kept.append(muts[i].copy())
+    muts = muts_kept^
 
     # The checks of the branch records, over the files kept (step 3): a
     # file left out counts nowhere, so its records are not checked.
@@ -635,7 +936,12 @@ def analyze(
         a.file_packages.append(pkg)
         a.unmeasured.append(False)
     var decl_notes = List[Finding]()
-    var unmeasured_findings = _unmeasured_files(a, at, exemptions, measured, named, pending, repo, sources, opts, decl_notes)
+    var unmeasured_findings = _unmeasured_files(a, at, exemptions, measured, named, pending, repo, sources, opts, decl_notes, left_out, left_lines)
+    var left_keys = List[String]()
+    for e in left_out.items():
+        left_keys.append(e.key)
+    sort_strings(left_keys)
+    a.generated_paths = left_keys^
     var mut_pkgs = List[String]()
     var kept_muts = List[Mutant]()
     for i in range(len(muts)):
@@ -692,6 +998,22 @@ def analyze(
     var uorder = sort_by_keys(ukeys)
     for i in range(len(uorder)):
         a.unrecorded_functions.append(unrecorded[uorder[i]].copy())
+    var xkeys = List[String]()
+    for i in range(len(a.excluded)):
+        xkeys.append(a.excluded[i].path)
+    var xorder = sort_by_keys(xkeys)
+    var xsorted = List[ExcludedFile]()
+    for i in range(len(xorder)):
+        xsorted.append(a.excluded[xorder[i]].copy())
+    a.excluded = xsorted^
+    var gkeys = List[String]()
+    for i in range(len(a.platform_gated)):
+        gkeys.append(line_key(a.platform_gated[i].path, a.platform_gated[i].line))
+    var gorder = sort_by_keys(gkeys)
+    var gsorted = List[GatedFunction]()
+    for i in range(len(gorder)):
+        gsorted.append(a.platform_gated[gorder[i]].copy())
+    a.platform_gated = gsorted^
 
     # 7: findings.
     var findings = List[Finding]()

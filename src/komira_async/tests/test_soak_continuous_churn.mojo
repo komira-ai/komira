@@ -11,11 +11,15 @@
 #   2. Submit + drain 1000 morsels via MorselPool[Int].
 #   3. Cancel root cancellation token; verify cascade observed.
 #   4. Tear down runtime + pool.
-#   5. Repeat (1)-(4) until duration elapsed.
+#   5. Repeat (1)-(4).
 #
-# Soak duration comes from the `--soak-hours=N` command-line argument:
-#   - Absent / 0 → 60 seconds (the smoke pass the gated test run takes)
-#   - N > 0 → that many hours (a manual long run of the test binary)
+# The run length comes from the `--soak-hours=N` command-line argument:
+#   - Absent / 0 → a fixed number of cycles (SMOKE_CYCLES), the smoke pass the
+#     gated test run takes. No wall-clock value is asserted: the count of
+#     completed cycles is exact, so the result does not depend on how fast
+#     the machine is.
+#   - N > 0 → cycles until that many hours of wall time have elapsed (a
+#     manual long run of the test binary)
 #
 # Metrics captured:
 #   - RSS at start vs end (via getrusage RUSAGE_SELF, ru_maxrss).
@@ -25,7 +29,8 @@
 # Assertions at end:
 #   - RSS delta < 100 MB (configurable via `--soak-rss-budget-mb=N`).
 #   - fd count delta ≤ 4 (libc transient tolerance).
-#   - At least 100 iterations completed in the smoke window.
+#   - In the smoke run, exactly SMOKE_CYCLES cycles completed (each cycle
+#     raises on a morsel-count mismatch, so a completed cycle is a correct one).
 #
 # Pointer discipline: zero new public-API pointers; all FFI
 # is FFI-POD (getrusage, kill, opendir/readdir).
@@ -45,6 +50,11 @@ from komira_async.runtime.runtime import (
     PerCoreAsyncRuntime,
 )
 from komira_collections.slab import Slab
+
+
+# Cycles the gated smoke run performs. Enough for a per-cycle leak of one fd,
+# one thread or a few KB to exceed the fd and RSS budgets below.
+comptime SMOKE_CYCLES = 1_000
 
 
 # -----------------------------------------------------------------------------
@@ -198,19 +208,17 @@ def _soak_iteration() raises:
 
 
 def test_soak_continuous_churn() raises:
-    """continuous-churn soak. Default duration is 60s
-    (smoke); pass `--soak-hours=N` to extend to N hours.
+    """continuous-churn soak. The default (smoke) run does exactly
+    SMOKE_CYCLES cycles; pass `--soak-hours=N` to run for N hours of wall
+    time instead.
 
     cross-platform — Linux uses /proc + getrusage,
     Mac uses Mach proc_pidinfo + task_info via the _posix_shim.c shims.
     It does not silently return on darwin-arm64.
     """
     var hours = _flag_int(String("--soak-hours="), Int64(0))
-    var duration_sec: Int64
-    if hours <= Int64(0):
-        duration_sec = Int64(60)
-    else:
-        duration_sec = hours * Int64(3600)
+    var smoke = hours <= Int64(0)
+    var duration_sec = hours * Int64(3600)
 
     var rss_budget_mb = _flag_int(
         String("--soak-rss-budget-mb="), Int64(100)
@@ -221,8 +229,12 @@ def test_soak_continuous_churn() raises:
     var rss_baseline = _peak_rss_kb()
     var fd_baseline = _fd_count()
 
-    print("SOAK START duration=", duration_sec, "s rss_baseline=",
-          rss_baseline, "KB fd_baseline=", fd_baseline)
+    if smoke:
+        print("SOAK START cycles=", SMOKE_CYCLES, "rss_baseline=",
+              rss_baseline, "KB fd_baseline=", fd_baseline)
+    else:
+        print("SOAK START duration=", duration_sec, "s rss_baseline=",
+              rss_baseline, "KB fd_baseline=", fd_baseline)
 
     # Warm-up: a few iterations to amortize lazy allocations before
     # we capture the real baseline.
@@ -235,7 +247,10 @@ def test_soak_continuous_churn() raises:
     var iter_count = Int64(0)
     var deadline = start_time + duration_sec
 
-    while _wall_seconds() < deadline:
+    # Smoke: a fixed cycle count, no clock read. Long run: until the deadline.
+    while (smoke and iter_count < Int64(SMOKE_CYCLES)) or (
+        not smoke and _wall_seconds() < deadline
+    ):
         _soak_iteration()
         iter_count += 1
         # Every 1000 iterations, print a heartbeat so a hung test is
@@ -254,12 +269,15 @@ def test_soak_continuous_churn() raises:
           "s rss_final=", rss_final, "KB fd_final=", fd_final)
 
     # Assertions.
-    # 1. Did at least 100 iterations in 60 seconds (smoke threshold;
-    #    longer durations trivially exceed this).
-    assert_true(
-        iter_count >= Int64(100),
-        String("soak iters=") + String(iter_count) + String(" < 100"),
-    )
+    # 1. The smoke run completed every cycle. (A cycle that went wrong
+    #    raised inside _soak_iteration, so this count is of correct cycles.)
+    #    A long run is bounded by wall time, so its count is not fixed.
+    if smoke:
+        assert_true(
+            iter_count == Int64(SMOKE_CYCLES),
+            String("soak iters=") + String(iter_count) + String(" != ")
+            + String(SMOKE_CYCLES),
+        )
 
     # 2. RSS growth bounded. Compare against the post-warmup baseline
     #    (avoids spurious failures from one-time allocator arena growth).
@@ -285,7 +303,7 @@ def test_soak_continuous_churn() raises:
         )
 
 
-def test_wall_seconds_advances() raises:
+def test_wall_seconds_is_positive_and_never_goes_back() raises:
     """Regression test for CLOCK_MONOTONIC constant
     drift on Darwin.
 
@@ -296,8 +314,9 @@ def test_wall_seconds_advances() raises:
     never see the deadline advance.
 
     This regression test asserts that `_wall_seconds()` returns a
-    positive monotonically-advancing value after a small `usleep`
-    delay.
+    positive value and that a second read is not earlier than the first.
+    It does not wait for the clock to advance: a wrong clock id shows as 0
+    on the first read.
     """
     var t0 = _wall_seconds()
     assert_true(
@@ -305,12 +324,10 @@ def test_wall_seconds_advances() raises:
         String("CLOCK_MONOTONIC must return a positive value; got ")
         + String(t0),
     )
-    # Sleep 1.5s so even at second-granularity the clock advances.
-    _ = external_call["usleep", Int32](UInt32(1_500_000))
     var t1 = _wall_seconds()
     assert_true(
-        t1 > t0,
-        String("_wall_seconds must advance across usleep(1.5s); t0=")
+        t1 >= t0,
+        String("_wall_seconds went backwards; t0=")
         + String(t0) + String(" t1=") + String(t1),
     )
 
@@ -319,6 +336,6 @@ def main() raises:
     # Run the regression test FIRST — fast, fails-fast on any clock-id
     # drift. The full soak runs for at least 60s; we want to catch the
     # constant bug before paying that cost.
-    test_wall_seconds_advances()
+    test_wall_seconds_is_positive_and_never_goes_back()
     test_soak_continuous_churn()
     print("PASS komira_async.soak.test_soak_continuous_churn")

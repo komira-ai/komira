@@ -4,6 +4,7 @@
 //!
 //!   gate mojo --busybox B --runtime-lib DIR --label L --test ROOT/bin/NAME --marker M
 //!             [--mem-cap-mib N] [--deadline-s L --runner-timeout-s T]
+//!             [--hang-limit-s N]
 //!             [--limit-s N --limit-report coverage]
 //!             [--env NAME=VALUE]... [--arg VALUE]...
 //!
@@ -11,7 +12,7 @@
 //! exit 0. Otherwise the banner (`GATED TEST FAILED: <label> (exit <rc>)`,
 //! the last 200 lines of the test's output) and the test's own status. The
 //! marker bytes and the banner lines are contracts (G9, G11): a package
-//! action takes every marker as an input, release/ci/main_red.py matches the
+//! action takes every marker as an input, release/ci/main_red matches the
 //! banner, and the coverage runs remove two of its lines by exact text.
 
 const std = @import("std");
@@ -38,6 +39,7 @@ pub const Args = struct {
     cap_mib: ?u64 = null,
     deadline_s: ?[]const u8 = null,
     runner_timeout_s: ?[]const u8 = null,
+    hang_limit_s: ?u64 = null,
     limit_s: ?u64 = null,
     limit_report: ?[]const u8 = null,
     env: std.ArrayList([]const u8) = undefined,
@@ -54,8 +56,8 @@ pub fn parse(alloc: std.mem.Allocator, argv: []const []const u8, a: *Args) ?u8 {
     a.env = std.ArrayList([]const u8).empty;
     a.args = std.ArrayList([]const u8).empty;
     var i: usize = 0;
-    var have = [_]bool{false} ** 10;
-    const names = [_][]const u8{ "--busybox", "--runtime-lib", "--label", "--test", "--marker", "--mem-cap-mib", "--deadline-s", "--runner-timeout-s", "--limit-s", "--limit-report" };
+    var have = [_]bool{false} ** 11;
+    const names = [_][]const u8{ "--busybox", "--runtime-lib", "--label", "--test", "--marker", "--mem-cap-mib", "--deadline-s", "--runner-timeout-s", "--limit-s", "--limit-report", "--hang-limit-s" };
     while (i < argv.len) : (i += 2) {
         const flag = argv[i];
         if (std.mem.eql(u8, flag, "--env")) {
@@ -101,6 +103,10 @@ pub fn parse(alloc: std.mem.Allocator, argv: []const []const u8, a: *Args) ?u8 {
                 return 2;
             },
             9 => a.limit_report = v,
+            10 => a.hang_limit_s = util.positiveStrict(v) orelse {
+                util.err("hang_limit: REFUSING: the limit '{s}' is not a positive whole number of seconds\n", .{v});
+                return 2;
+            },
             else => unreachable,
         }
     }
@@ -123,6 +129,9 @@ pub fn parse(alloc: std.mem.Allocator, argv: []const []const u8, a: *Args) ?u8 {
     if (a.limit_report) |r| {
         if (!std.mem.eql(u8, r, "coverage")) return usage("--limit-report {s}: the only report is coverage", .{r});
         if (a.deadline_s != null) return usage("usage error: --limit-s and --deadline-s are two limits", .{});
+    }
+    if (a.hang_limit_s != null and (a.deadline_s != null or a.limit_report != null)) {
+        return usage("usage error: --hang-limit-s is a limit of its own; --deadline-s and --limit-s are two others", .{});
     }
     return null;
 }
@@ -226,6 +235,7 @@ fn runParsed(alloc: std.mem.Allocator, a: *Args) !u8 {
     var limit: supervise.Limit = .none;
     if (a.deadline_s) |d| limit = .{ .deadline_ms = util.positiveStrict(d).? * 1000 };
     if (a.limit_s) |l| limit = .{ .group_ms = l * 1000 };
+    if (a.hang_limit_s) |h| limit = .{ .deadline_ms = h * 1000 };
     const outcome = try supervise.run(alloc, .{
         .path = (try alloc.dupeZ(u8, bin)).ptr,
         .argv = (try util.zList(alloc, expanded.items)).ptr,
@@ -240,7 +250,8 @@ fn runParsed(alloc: std.mem.Allocator, a: *Args) !u8 {
 
     if (outcome.signal != 0) return 128 +| outcome.signal;
     if (outcome.timer_failed) {
-        const what = a.deadline_s orelse "the coverage run's";
+        var what_buf: [32]u8 = undefined;
+        const what = a.deadline_s orelse if (a.hang_limit_s) |h| try std.fmt.bufPrint(&what_buf, "{d}", .{h}) else "the coverage run's";
         util.err("test_deadline: the timer of {s} failed, so the test ran without its limit of {s} s\n", .{ a.label, what });
         return 2;
     }
@@ -268,7 +279,24 @@ fn runParsed(alloc: std.mem.Allocator, a: *Args) !u8 {
     if (a.deadline_s != null and outcome.limit_hit) {
         util.err("TEST TIME LIMIT: killed {s} after {s} s, under the test runner's timeout of {s} s (komira.test_timeout_s)\n", .{ a.label, a.deadline_s.?, a.runner_timeout_s.? });
     }
+    if (a.hang_limit_s) |h| {
+        if (outcome.limit_hit and rc != 0) {
+            util.err("{s}\n", .{hangLine(alloc, a.label, h) catch return hang_exit});
+            return hang_exit;
+        }
+    }
     return rc;
+}
+
+/// The exit status of a test stopped by its hang limit. The test's own
+/// statuses pass through the gate, so the line `hangLine` prints is the
+/// verdict; the status only keeps the action's failure apart from the
+/// compile watchdog's 124 (retried) and a signal's 128+N.
+pub const hang_exit: u8 = 125;
+
+/// The one line of a hung test.
+pub fn hangLine(alloc: std.mem.Allocator, label: []const u8, limit_s: u64) ![]const u8 {
+    return std.fmt.allocPrint(alloc, "hang limit: {s} did not finish within {d} s and was stopped; a test never waits on time, so this means it hung (an event that never came)", .{ label, limit_s });
 }
 
 /// G10: the banner of a red test, to stderr.

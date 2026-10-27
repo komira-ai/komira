@@ -28,7 +28,7 @@ const Env = struct {
 
     fn run(e: *Env, harness: []const u8, timeout: []const u8) !kit.Result {
         const bin = try std.fmt.allocPrint(e.a, "h/{s}", .{harness});
-        return kit.runGate(e.a, e.dir, &.{ "rust", "--busybox", e.bb, "--label", "//r:t", "--test", bin, "--marker", "passed", "--timeout-s", timeout }, .{ .timeout_ms = 30_000 });
+        return kit.runGate(e.a, e.dir, &.{ "rust", "--busybox", e.bb, "--label", "//r:t", "--test", bin, "--marker", "passed", "--timeout-s", timeout }, .{ .clock = true });
     }
 
     fn marker(e: *Env) []const u8 {
@@ -132,7 +132,8 @@ test "R7 NO VERDICT: SIGKILL (137) in either run, and the timeout's SIGALRM (142
     const r3 = try e.run("rust_hangs", "01");
     try std.testing.expectEqual(@as(u8, 142), r3.status);
     try std.testing.expectEqualStrings(rule ++ "NO VERDICT: the tests of //r:t timed out after 01s (exit 142).\n  A hang is not the test's failure; find what it waits on, or raise `test_timeout_s`.\n", r3.err);
-    try std.testing.expect(r3.ms < 5000);
+    // SIGALRM goes to the harness alone, at its timeout on the test's clock.
+    try std.testing.expect(kit.hasEvents(r3.events, &.{"t=1000 ALRM C"}));
     try std.testing.expect(!kit.exists(e.marker()));
 }
 

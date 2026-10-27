@@ -1,33 +1,74 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@buildrules//rules/mojo:pack.bzl", "mojo_conda")
+load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":buildrules.mojo.bzl", "mojo_package")
 
 # The libz FFI shim: one-shot inflate / deflate / deflateBound, a bounded
 # stream skipper and crc32, over libz loaded at RUNTIME via dlopen (`libz.so.1` /
 # `libz.dylib`), so there is no static archive to link and no link deps for
 # consumers.
 #
-# No `deps`, on purpose: this is a foundational FFI leaf. Whatever is added
+# No dependencies, on purpose: this is a foundational FFI leaf. Whatever is added
 # here lands in the build closure of every zlib consumer, including ones that
 # must not depend on the query engine.
 #
-# The welded test, test_zlib_into: the Span API. Its known-answer vector is the
-# zlib 1.3.1 release tarball, a gzip stream, pinned by sha256 in
-# //third_party/zlib and staged at golden/, with three of its members extracted
-# by busybox tar staged at golden/zlib/; plus round trips under each framing,
-# the empty stream, the too-small destination, corrupt and truncated streams,
-# skipping a stream to the next, and zlib_crc32 against the CRC-32 check value
-# and the tarball's own gzip trailer.
-mojo_library(
-    name = "komira_zlib",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+# Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"): `:lib` is the
+# library file and exists only once the test of tests/ has passed. The welded test,
+# test_zlib_into: the Span API. Its known-answer vector is the zlib 1.3.1 release tarball, a gzip
+# stream, pinned by sha256 in //third_party/zlib and staged at golden/, with three of its members
+# extracted by busybox tar staged at golden/zlib/; plus round trips under each framing, the empty
+# stream, the too-small destination, corrupt and truncated streams, skipping a stream to the next,
+# and zlib_crc32 against the CRC-32 check value and the tarball's own gzip trailer.
+mojo_package(
+    path = ".",
     test_data = {
         "tests/test_zlib_into.mojo": {
             "golden/zlib": "//third_party/zlib:files",
             "golden/zlib-1.3.1.tar.gz": "//third_party/zlib:zlib-1.3.1.tar.gz",
         },
     },
-    # Opened at run time (OwnedDLHandle): the conda package requires the
-    # conda-forge package tools/build/package/system_libs.bzl names for it.
+)
+
+# `:komira_zlib`, the target the packages that depend on this library name, is `:lib` as komira's
+# Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds only once the
+# test has passed. `dlopen` is the soname the library opens at run time (OwnedDLHandle): the
+# conda package `komira_zlib_conda` requires the conda-forge package
+# tools/build/package/system_libs.bzl names for it, and `[native-dependencies]` of mopm.toml
+# says the same for `:conda`.
+mojo_adopted_library(
+    name = "komira_zlib",
     dlopen = ["libz.so.1"],
-    test_srcs = ["tests/test_zlib_into.mojo"],
+    lib = ":lib",
+    readme = "README.md",
+    srcs = glob(["src/komira_zlib/**/*.mojo"]),
+    test_srcs = glob(["tests/test_*.mojo"]),
+    test_runs = ":test",
+    visibility = ["PUBLIC"],
+)
+
+# The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
+# (`mojo-komira_zlib-0.1.0-mojo1.0.0_0.conda`), requiring the conda package that ships libz
+# (`[native-dependencies]`, `mode = "load"`). `:lib` exists only once the test passed, so this file
+# exists only then. Publishing it (`mopm publish`) uploads, which is not a build action: it is a
+# step of a CI job that takes this target's output. `mopm` is the one `mojo_package` pins
+# (mopm-toolchain.toml).
+mojo_conda(
+    name = "conda",
+    lib = ":lib",
+    manifest = "mopm.toml",
+    mojo = "1.0.0",
+    mopm = "toolchains//:mopm_0_0_73",
+    package = "komira_zlib",
+    version = "0.1.0",
+    visibility = ["PUBLIC"],
+)
+
+# Kept for the release machine, which still builds it (release/artifacts.textproto): komira's conda
+# packer over `:komira_zlib`. It goes when the release machine takes `:conda`, which is this
+# library's mopm package.
+conda_package(
+    name = "komira_zlib_conda",
+    lib = ":komira_zlib",
+    summary = "The `komira_zlib` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],
 )

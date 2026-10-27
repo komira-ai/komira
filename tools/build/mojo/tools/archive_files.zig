@@ -33,31 +33,31 @@ pub const SubstError = error{BadLine};
 /// The pairs of a substitutions file: `key<TAB>value` per line, in order. A
 /// line with no tab, or an empty key, is refused; empty lines are skipped.
 pub fn parsePairs(a: std.mem.Allocator, text: []const u8) (SubstError || std.mem.Allocator.Error)![]Pair {
-    var out = std.ArrayList(Pair).init(a);
+    var out = std.ArrayList(Pair).empty;
     var lines = std.mem.splitScalar(u8, text, '\n');
     while (lines.next()) |line| {
         if (line.len == 0) continue;
         const tab = std.mem.indexOfScalar(u8, line, '\t') orelse return error.BadLine;
         if (tab == 0) return error.BadLine;
-        try out.append(.{ .key = line[0..tab], .value = line[tab + 1 ..] });
+        try out.append(a, .{ .key = line[0..tab], .value = line[tab + 1 ..] });
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// `text` with every pair applied in order to each line (a `sed` of one `s///g`
 /// per pair); the newlines, and the lack of a final one, are kept.
 pub fn substitute(a: std.mem.Allocator, text: []const u8, pairs: []const Pair) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var lines = std.mem.splitScalar(u8, text, '\n');
     var first = true;
     while (lines.next()) |line| {
-        if (!first) try out.append('\n');
+        if (!first) try out.append(a, '\n');
         first = false;
         var cur = try a.dupe(u8, line);
         for (pairs) |p| cur = try std.mem.replaceOwned(u8, a, cur, p.key, p.value);
-        try out.appendSlice(cur);
+        try out.appendSlice(a, cur);
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 pub const Kind = enum { tar_gz, tar, zip };
@@ -83,10 +83,10 @@ pub fn contained(path: []const u8) bool {
 
 /// Extracts the tar read from `reader` into `dest`: directories, files (with
 /// their executable bit) and symbolic links, as `tar -x` does.
-pub fn extractTar(dest: std.fs.Dir, reader: anytype) !void {
-    var name_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var link_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var it = std.tar.iterator(reader, .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
+pub fn extractTar(dest: std.fs.Dir, reader: *std.Io.Reader) !void {
+    var name_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var link_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var it = std.tar.Iterator.init(reader, .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
     while (try it.next()) |f| {
         const name = std.mem.trimRight(u8, f.name, "/");
         if (name.len == 0 or std.mem.eql(u8, name, ".")) continue;
@@ -98,7 +98,10 @@ pub fn extractTar(dest: std.fs.Dir, reader: anytype) !void {
                 const mode: std.fs.File.Mode = if (f.mode & 0o111 != 0) 0o755 else 0o644;
                 const file = try dest.createFile(name, .{ .mode = mode });
                 defer file.close();
-                try f.writeAll(file);
+                var fbuf: [64 * 1024]u8 = undefined;
+                var fw = file.writer(&fbuf);
+                try it.streamRemaining(f, &fw.interface);
+                try fw.interface.flush();
                 try file.chmod(mode);
             },
             .sym_link => {
@@ -160,13 +163,16 @@ pub fn extractZip(a: std.mem.Allocator, dest: std.fs.Dir, data: []const u8) !voi
         const start = local + 30 + try u16at(data, local + 26) + try u16at(data, local + 28);
         if (start + csize > data.len) return error.BadZip;
         const body = data[start .. start + csize];
-        var content = std.ArrayList(u8).init(a);
-        defer content.deinit();
+        var content = std.ArrayList(u8).empty;
+        defer content.deinit(a);
         switch (method) {
-            0 => try content.appendSlice(body),
+            0 => try content.appendSlice(a, body),
             8 => {
-                var fbs = std.io.fixedBufferStream(body);
-                try std.compress.flate.decompress(fbs.reader(), content.writer());
+                var in: std.Io.Reader = .fixed(body);
+                var dec = std.compress.flate.Decompress.init(&in, .raw, &.{});
+                var plain = std.Io.Writer.Allocating.init(a);
+                _ = dec.reader.streamRemaining(&plain.writer) catch |e| return if (e == error.ReadFailed) (dec.err orelse e) else e;
+                try content.appendSlice(a, plain.written());
             },
             else => return error.Unsupported,
         }
@@ -192,13 +198,20 @@ fn extractArchive(a: std.mem.Allocator, xd: std.fs.Dir, archive: []const u8, kin
     defer file.close();
     switch (kind) {
         .tar_gz => {
-            var br = std.io.bufferedReader(file.reader());
-            var dec = std.compress.gzip.decompressor(br.reader());
-            extractTar(xd, dec.reader()) catch |e| die("cannot extract {s}: {s}", .{ archive, @errorName(e) });
+            // Inflated into memory with no window buffer (the windowed decoder of
+            // this release mishandles a fixed-Huffman match at the end of its window).
+            const gz = file.readToEndAlloc(a, 1 << 31) catch |e| die("cannot read {s}: {s}", .{ archive, @errorName(e) });
+            var gz_in: std.Io.Reader = .fixed(gz);
+            var dec = std.compress.flate.Decompress.init(&gz_in, .gzip, &.{});
+            var tar_bytes = std.Io.Writer.Allocating.init(a);
+            _ = dec.reader.streamRemaining(&tar_bytes.writer) catch |e| die("cannot extract {s}: {s}", .{ archive, @errorName(if (e == error.ReadFailed) (dec.err orelse e) else e) });
+            var tar_in: std.Io.Reader = .fixed(tar_bytes.written());
+            extractTar(xd, &tar_in) catch |e| die("cannot extract {s}: {s}", .{ archive, @errorName(e) });
         },
         .tar => {
-            var br = std.io.bufferedReader(file.reader());
-            extractTar(xd, br.reader()) catch |e| die("cannot extract {s}: {s}", .{ archive, @errorName(e) });
+            var rbuf: [64 * 1024]u8 = undefined;
+            var fr = file.reader(&rbuf);
+            extractTar(xd, &fr.interface) catch |e| die("cannot extract {s}: {s}", .{ archive, @errorName(e) });
         },
         .zip => {
             const bytes = file.readToEndAlloc(a, 1 << 31) catch |e| die("cannot read {s}: {s}", .{ archive, @errorName(e) });

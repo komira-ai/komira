@@ -1,7 +1,8 @@
 """`gen_check` and `tests_check`: what a mojo_gcp_client generated and ran, checked as build actions.
 
-`gen` is a generated directory, here a library's `[gen]` sub-target, so the
-check also proves mojo_library's `gen` attribute re-exports it. The action
+`gen` is a generated directory, here a library's `<name>_gen` target (what the
+generator writes now; the library is built from the committed directory, which
+`<name>_fresh` holds equal to it). The action
 fails unless the directory holds exactly `files`, no file holds a string of
 `absent`, some file holds each string of `present` (which keeps an
 absence check from passing over an empty output), and each file named in

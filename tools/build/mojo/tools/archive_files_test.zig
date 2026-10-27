@@ -32,7 +32,7 @@ fn octal(buf: []u8, v: u64) void {
 }
 
 pub fn tar(a: std.mem.Allocator, entries: []const Entry) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     for (entries) |e| {
         var h = [_]u8{0} ** 512;
         // A name over 100 bytes is split at a `/` into the ustar prefix field and the name.
@@ -63,53 +63,84 @@ pub fn tar(a: std.mem.Allocator, entries: []const Entry) ![]u8 {
         octal(h[148..155], sum);
         h[154] = 0;
         h[155] = ' ';
-        try out.appendSlice(&h);
-        try out.appendSlice(e.data);
+        try out.appendSlice(a, &h);
+        try out.appendSlice(a, e.data);
         const pad = (512 - e.data.len % 512) % 512;
-        try out.appendNTimes(0, pad);
+        try out.appendNTimes(a, 0, pad);
     }
-    try out.appendNTimes(0, 1024);
-    return out.toOwnedSlice();
+    try out.appendNTimes(a, 0, 1024);
+    return out.toOwnedSlice(a);
 }
 
 /// A gzip stream of `bytes` in stored (uncompressed) deflate blocks.
 pub fn gzip(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
-    try out.appendSlice(&.{ 0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3 });
+    var out = std.ArrayList(u8).empty;
+    try out.appendSlice(a, &.{ 0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3 });
     var off: usize = 0;
     while (true) {
         const n = @min(bytes.len - off, 65535);
         const last = off + n == bytes.len;
-        try out.append(if (last) 1 else 0);
-        try out.writer().writeInt(u16, @intCast(n), .little);
-        try out.writer().writeInt(u16, @intCast(~@as(u16, @intCast(n))), .little);
-        try out.appendSlice(bytes[off .. off + n]);
+        try out.append(a, if (last) 1 else 0);
+        try out.writer(a).writeInt(u16, @intCast(n), .little);
+        try out.writer(a).writeInt(u16, @intCast(~@as(u16, @intCast(n))), .little);
+        try out.appendSlice(a, bytes[off .. off + n]);
         off += n;
         if (last) break;
     }
-    try out.writer().writeInt(u32, std.hash.Crc32.hash(bytes), .little);
-    try out.writer().writeInt(u32, @intCast(bytes.len), .little);
-    return out.toOwnedSlice();
+    try out.writer(a).writeInt(u32, std.hash.Crc32.hash(bytes), .little);
+    try out.writer(a).writeInt(u32, @intCast(bytes.len), .little);
+    return out.toOwnedSlice(a);
+}
+
+/// `data` as a raw deflate stream of one fixed-Huffman block holding only literals:
+/// a real Huffman-coded body for the zip reader's inflate path (the standard
+/// library of this release has no compressor to make one).
+fn fixedLiterals(a: std.mem.Allocator, data: []const u8) ![]u8 {
+    var out = std.ArrayList(u8).empty;
+    var acc: u32 = 0;
+    var n: u5 = 0;
+    const Put = struct {
+        fn bits(o: *std.ArrayList(u8), al: std.mem.Allocator, ac: *u32, nn: *u5, v: u32, count: u5) !void {
+            ac.* |= v << nn.*;
+            nn.* += count;
+            while (nn.* >= 8) {
+                try o.append(al, @truncate(ac.*));
+                ac.* >>= 8;
+                nn.* -= 8;
+            }
+        }
+        // A Huffman code is packed most significant bit first.
+        fn code(o: *std.ArrayList(u8), al: std.mem.Allocator, ac: *u32, nn: *u5, v: u32, count: u5) !void {
+            var rev: u32 = 0;
+            var i: u5 = 0;
+            while (i < count) : (i += 1) rev |= ((v >> i) & 1) << (count - 1 - i);
+            try bits(o, al, ac, nn, rev, count);
+        }
+    };
+    try Put.bits(&out, a, &acc, &n, 0b011, 3); // final block, fixed Huffman
+    for (data) |b| {
+        if (b < 144) try Put.code(&out, a, &acc, &n, 0x30 + @as(u32, b), 8) else try Put.code(&out, a, &acc, &n, 0x190 + @as(u32, b) - 144, 9);
+    }
+    try Put.code(&out, a, &acc, &n, 0, 7); // end of block
+    if (n > 0) try out.append(a, @truncate(acc));
+    return out.toOwnedSlice(a);
 }
 
 // A zip of stored entries: (name, data, unix mode).
 const ZipEntry = struct { name: []const u8, data: []const u8 = "", mode: u32 = 0o644, deflate: bool = false };
 
 fn zip(a: std.mem.Allocator, entries: []const ZipEntry) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
-    var offsets = std.ArrayList(u32).init(a);
-    const w = out.writer();
-    var bodies = std.ArrayList([]const u8).init(a);
+    var out = std.ArrayList(u8).empty;
+    var offsets = std.ArrayList(u32).empty;
+    const w = out.writer(a);
+    var bodies = std.ArrayList([]const u8).empty;
     for (entries) |e| {
         if (e.deflate) {
-            var packed_ = std.ArrayList(u8).init(a);
-            var src = std.io.fixedBufferStream(e.data);
-            try std.compress.flate.compress(src.reader(), packed_.writer(), .{});
-            try bodies.append(packed_.items);
-        } else try bodies.append(e.data);
+            try bodies.append(a, try fixedLiterals(a, e.data));
+        } else try bodies.append(a, e.data);
     }
     for (entries, 0..) |e, i| {
-        try offsets.append(@intCast(out.items.len));
+        try offsets.append(a, @intCast(out.items.len));
         const crc = std.hash.Crc32.hash(e.data);
         const body = bodies.items[i];
         const method: u16 = if (e.deflate) 8 else 0;
@@ -124,8 +155,8 @@ fn zip(a: std.mem.Allocator, entries: []const ZipEntry) ![]u8 {
         try w.writeInt(u32, @intCast(e.data.len), .little);
         try w.writeInt(u16, @intCast(e.name.len), .little);
         try w.writeInt(u16, 0, .little);
-        try out.appendSlice(e.name);
-        try out.appendSlice(body);
+        try out.appendSlice(a, e.name);
+        try out.appendSlice(a, body);
     }
     const cd_start: u32 = @intCast(out.items.len);
     for (entries, 0..) |e, i| {
@@ -148,7 +179,7 @@ fn zip(a: std.mem.Allocator, entries: []const ZipEntry) ![]u8 {
         try w.writeInt(u16, 0, .little);
         try w.writeInt(u32, (e.mode << 16) | (if (dir) @as(u32, 0x10) else 0), .little);
         try w.writeInt(u32, offsets.items[i], .little);
-        try out.appendSlice(e.name);
+        try out.appendSlice(a, e.name);
     }
     const cd_size: u32 = @intCast(out.items.len - cd_start);
     try w.writeInt(u32, 0x06054b50, .little);
@@ -159,7 +190,7 @@ fn zip(a: std.mem.Allocator, entries: []const ZipEntry) ![]u8 {
     try w.writeInt(u32, cd_size, .little);
     try w.writeInt(u32, cd_start, .little);
     try w.writeInt(u16, 0, .little);
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 // ---- the tests ---------------------------------------------------------------------
@@ -218,8 +249,8 @@ test "contained: not absolute, no .. component" {
 }
 
 fn extractFrom(dir: std.fs.Dir, bytes: []const u8) !void {
-    var fbs = std.io.fixedBufferStream(bytes);
-    try A.extractTar(dir, fbs.reader());
+    var rd: std.Io.Reader = .fixed(bytes);
+    try A.extractTar(dir, &rd);
 }
 
 test "extractTar: directories, files with the executable bit, links; a prefix directory entry is fine" {
@@ -254,9 +285,11 @@ test "extractTar: a member that escapes is refused, and a gzip stream reads as t
     defer tmp.cleanup();
     try t.expectError(error.PathEscapes, extractFrom(tmp.dir, try tar(a, &.{.{ .name = "p/../../evil", .data = "x" }})));
     const z = try gzip(a, try tar(a, &.{.{ .name = "p/f", .data = "gz" }}));
-    var fbs = std.io.fixedBufferStream(z);
-    var dec = std.compress.gzip.decompressor(fbs.reader());
-    try A.extractTar(tmp.dir, dec.reader());
+    var zin: std.Io.Reader = .fixed(z);
+    var dec = std.compress.flate.Decompress.init(&zin, .gzip, &.{});
+    var plain = std.Io.Writer.Allocating.init(a);
+    _ = try dec.reader.streamRemaining(&plain.writer);
+    try extractFrom(tmp.dir, plain.written());
     var buf: [8]u8 = undefined;
     try t.expectEqualStrings("gz", try tmp.dir.readFile("p/f", &buf));
 }

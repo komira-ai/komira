@@ -19,8 +19,7 @@ incompatibility under the key fails instead of driving buck2.
 
 `graph_check` declares a BXL graph check (graph/checks.bxl): the check's name
 and the targets it queries, as strings, never as dependencies, and its Zig
-checker. release/ci/build_targets.sh runs the BXL for each graph_check of a
-batch; the checker runs over the facts the BXL collected as a build action.
+checker. .github/workflows/pr.yml runs the BXL for each graph_check; the checker runs over the facts the BXL collected as a build action.
 python_closure also reads files (`trees`, doc_tree targets as strings, and
 `srcs`) and takes its allowlist (`surface`, `ceiling`).
 """

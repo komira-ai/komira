@@ -1,8 +1,8 @@
 # The graph checks of the self-test package (docs/design/build_selftests.md,
 # "Graph checks in the gate"). Each `graph_check` names its check and the
-# targets it queries as strings; release/ci/build_targets.sh runs
+# targets it queries as strings; .github/workflows/pr.yml runs
 # `buck2 bxl //tools/build/selftest/graph/checks.bxl:check -- --check <label>`
-# for each one in a batch, and the check's Zig checker runs over the facts
+# for each one, and the check's Zig checker runs over the facts
 # the BXL collected as a build action.
 
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")

@@ -40,12 +40,12 @@ fn isWs(c: u8) bool {
 
 /// The hex digits of `text`: white space removed, A-F lowercased.
 pub fn hexdigits(a: std.mem.Allocator, text: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     for (text) |c| {
         if (isWs(c)) continue;
-        try out.append(if (c >= 'A' and c <= 'F') c + 32 else c);
+        try out.append(a, if (c >= 'A' and c <= 'F') c + 32 else c);
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 pub const Unhex = union(enum) {
@@ -71,20 +71,20 @@ pub fn unhex(a: std.mem.Allocator, text: []const u8) !Unhex {
 /// The hex format proto_encode writes: lowercase, 64 digits a line, each line
 /// ending in a line break (an empty input is one line break).
 pub fn tohex(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     const hex = "0123456789abcdef";
     var col: usize = 0;
     for (bytes) |b| {
         if (col == 64) {
-            try out.append('\n');
+            try out.append(a, '\n');
             col = 0;
         }
-        try out.append(hex[b >> 4]);
-        try out.append(hex[b & 15]);
+        try out.append(a, hex[b >> 4]);
+        try out.append(a, hex[b & 15]);
         col += 2;
     }
-    try out.append('\n');
-    return out.toOwnedSlice();
+    try out.append(a, '\n');
+    return out.toOwnedSlice(a);
 }
 
 /// The root a .txtpb names on its first line (`# proto-message: <root>`, the root
@@ -113,15 +113,15 @@ pub fn dropFirstLine(text: []const u8) []const u8 {
 
 /// Each line of `text` behind eight spaces.
 pub fn indent(a: std.mem.Allocator, text: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var it = std.mem.splitScalar(u8, text, '\n');
     while (it.next()) |l| {
         if (it.peek() == null and l.len == 0) break;
-        try out.appendSlice("        ");
-        try out.appendSlice(l);
-        try out.append('\n');
+        try out.appendSlice(a, "        ");
+        try out.appendSlice(a, l);
+        try out.append(a, '\n');
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// The first `n` lines of `text`.
@@ -156,11 +156,11 @@ pub const Schema = struct {
 };
 
 fn unquote(a: std.mem.Allocator, v: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     for (v) |c| {
-        if (c != '"') try out.append(c);
+        if (c != '"') try out.append(a, c);
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 fn isBlockOpen(line: []const u8) bool {
@@ -176,11 +176,11 @@ fn isBlockOpen(line: []const u8) bool {
 /// google.protobuf.FileDescriptorSet` prints for a descriptor set: `M <message>`
 /// for every message and one `F` row for every field of one.
 pub fn parseSchema(a: std.mem.Allocator, text: []const u8) !Schema {
-    var msgs = std.ArrayList([]const u8).init(a);
-    var fields = std.ArrayList(Field).init(a);
-    var kinds = std.ArrayList([]const u8).init(a); // k[d], 1-based: index d-1
-    var full = std.ArrayList([]const u8).init(a); // full[d], index d (0 is "")
-    try full.append("");
+    var msgs = std.ArrayList([]const u8).empty;
+    var fields = std.ArrayList(Field).empty;
+    var kinds = std.ArrayList([]const u8).empty; // k[d], 1-based: index d-1
+    var full = std.ArrayList([]const u8).empty; // full[d], index d (0 is "")
+    try full.append(a, "");
     var infield: usize = 0;
     var fname: []const u8 = "";
     var fnum: []const u8 = "";
@@ -193,8 +193,8 @@ pub fn parseSchema(a: std.mem.Allocator, text: []const u8) !Schema {
         const d = kinds.items.len;
         if (isBlockOpen(line)) {
             const k = line[0 .. line.len - 2];
-            try kinds.append(k);
-            try full.resize(d + 2);
+            try kinds.append(a, k);
+            try full.resize(a, d + 2);
             full.items[d + 1] = full.items[d];
             if (std.mem.eql(u8, k, "field") and d >= 1 and
                 (std.mem.eql(u8, kinds.items[d - 1], "message_type") or std.mem.eql(u8, kinds.items[d - 1], "nested_type")))
@@ -211,7 +211,7 @@ pub fn parseSchema(a: std.mem.Allocator, text: []const u8) !Schema {
         if (std.mem.eql(u8, line, "}")) {
             if (d == 0) continue;
             if (d == infield) {
-                try fields.append(.{ .msg = full.items[d - 1], .name = fname, .num = fnum, .label = flabel, .typ = ftype, .type_name = ftn });
+                try fields.append(a, .{ .msg = full.items[d - 1], .name = fname, .num = fnum, .label = flabel, .typ = ftype, .type_name = ftn });
                 infield = 0;
             }
             _ = kinds.pop();
@@ -231,7 +231,7 @@ pub fn parseSchema(a: std.mem.Allocator, text: []const u8) !Schema {
             const nm = try unquote(a, val);
             const parent = full.items[d - 1];
             full.items[d] = if (parent.len == 0) nm else try std.fmt.allocPrint(a, "{s}.{s}", .{ parent, nm });
-            try msgs.append(full.items[d]);
+            try msgs.append(a, full.items[d]);
         } else if (d == infield) {
             if (std.mem.eql(u8, key, "name")) {
                 fname = try unquote(a, val);
@@ -247,16 +247,16 @@ pub fn parseSchema(a: std.mem.Allocator, text: []const u8) !Schema {
             }
         }
     }
-    return .{ .messages = try msgs.toOwnedSlice(), .fields = try fields.toOwnedSlice() };
+    return .{ .messages = try msgs.toOwnedSlice(a), .fields = try fields.toOwnedSlice(a) };
 }
 
 /// The table as `M <message>` and `F <message> <field> <number> <label> <type>
 /// <type name or ->` lines, fields after the message they follow in the text.
 pub fn tableText(a: std.mem.Allocator, s: Schema) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
-    for (s.messages) |m| try out.writer().print("M {s}\n", .{m});
-    for (s.fields) |f| try out.writer().print("F {s} {s} {s} {s} {s} {s}\n", .{ f.msg, f.name, f.num, f.label, f.typ, f.type_name });
-    return out.toOwnedSlice();
+    var out = std.ArrayList(u8).empty;
+    for (s.messages) |m| try out.writer(a).print("M {s}\n", .{m});
+    for (s.fields) |f| try out.writer(a).print("F {s} {s} {s} {s} {s} {s}\n", .{ f.msg, f.name, f.num, f.label, f.typ, f.type_name });
+    return out.toOwnedSlice(a);
 }
 
 /// The number of `field {` lines of the descriptor set's text.
@@ -386,30 +386,30 @@ pub fn topTags(a: std.mem.Allocator, bytes: []const u8) ![]Tag {
             e.value_ptr.* += 1;
         }
     }
-    var out = std.ArrayList(Tag).init(a);
+    var out = std.ArrayList(Tag).empty;
     var it = counts.iterator();
-    while (it.next()) |e| try out.append(.{ .num = e.key_ptr.*, .count = e.value_ptr.* });
+    while (it.next()) |e| try out.append(a, .{ .num = e.key_ptr.*, .count = e.value_ptr.* });
     std.mem.sort(Tag, out.items, {}, struct {
         fn lt(_: void, x: Tag, y: Tag) bool {
             return x.num < y.num;
         }
     }.lt);
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 /// Leg 0's duplicate lines: each singular (not repeated) field of `root` the
 /// tags show written more than once.
 pub fn duplicates(a: std.mem.Allocator, s: Schema, root: []const u8, tags: []const Tag) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     for (tags) |t| {
         if (t.count <= 1) continue;
         for (s.fields) |f| {
             if (!std.mem.eql(u8, f.msg, root) or std.mem.eql(u8, f.label, "LABEL_REPEATED")) continue;
             const n = std.fmt.parseInt(u64, f.num, 10) catch continue;
-            if (n == t.num) try out.writer().print("{s} (field {d}) written {d} times\n", .{ f.name, t.num, t.count });
+            if (n == t.num) try out.writer(a).print("{s} (field {d}) written {d} times\n", .{ f.name, t.num, t.count });
         }
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 // ---- leg 2 and 5: protoc's decode -------------------------------------------------
@@ -417,7 +417,7 @@ pub fn duplicates(a: std.mem.Allocator, s: Schema, root: []const u8, tags: []con
 /// Leg 2: the lines of the decode that are a bare field number (`99: 1`, `99 {`),
 /// as `grep -n` prints them, at most 20.
 pub fn unknownFields(a: std.mem.Allocator, decoded: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var lines = std.mem.splitScalar(u8, decoded, '\n');
     var n: usize = 0;
     var shown: usize = 0;
@@ -431,10 +431,10 @@ pub fn unknownFields(a: std.mem.Allocator, decoded: []const u8) ![]u8 {
         const rest = t[i..];
         if (!(std.mem.startsWith(u8, rest, ":") or std.mem.eql(u8, rest, " {") or std.mem.startsWith(u8, rest, " {"))) continue;
         if (shown == 20) break;
-        try out.writer().print("{d}:{s}\n", .{ n, l });
+        try out.writer(a).print("{d}:{s}\n", .{ n, l });
         shown += 1;
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 fn isIdent(s: []const u8) bool {
@@ -457,12 +457,12 @@ pub const Walk = struct {
 /// `root` with the schema; a line that cannot be placed is reported (never
 /// skipped), and so is an enum field printed as a number. Both at most 20 lines.
 pub fn walkEnums(a: std.mem.Allocator, s: Schema, root: []const u8, decoded: []const u8) !Walk {
-    var unplaced = std.ArrayList(u8).init(a);
-    var enums = std.ArrayList(u8).init(a);
+    var unplaced = std.ArrayList(u8).empty;
+    var enums = std.ArrayList(u8).empty;
     var nu: usize = 0;
     var ne: usize = 0;
-    var st = std.ArrayList([]const u8).init(a);
-    try st.append(root);
+    var st = std.ArrayList([]const u8).empty;
+    try st.append(a, root);
     var lines = std.mem.splitScalar(u8, decoded, '\n');
     var fnr: usize = 0;
     while (lines.next()) |raw| {
@@ -477,18 +477,18 @@ pub fn walkEnums(a: std.mem.Allocator, s: Schema, root: []const u8, decoded: []c
         if (std.mem.endsWith(u8, line, " {") and isIdent(line[0 .. line.len - 2])) {
             const f = line[0 .. line.len - 2];
             if (std.mem.eql(u8, top, "?")) {
-                try st.append("?");
+                try st.append(a, "?");
             } else if (groupOrField(s, top, f)) |fd| {
-                try st.append(fd.type_name);
+                try st.append(a, fd.type_name);
             } else {
-                if (nu < 20) try unplaced.writer().print("{d}: `{s}` in {s}\n", .{ fnr, f, top });
+                if (nu < 20) try unplaced.writer(a).print("{d}: `{s}` in {s}\n", .{ fnr, f, top });
                 nu += 1;
-                try st.append("?");
+                try st.append(a, "?");
             }
             continue;
         }
         if (std.mem.endsWith(u8, line, " {")) {
-            try st.append("?");
+            try st.append(a, "?");
             continue;
         }
         if (std.mem.eql(u8, top, "?")) continue;
@@ -500,15 +500,15 @@ pub fn walkEnums(a: std.mem.Allocator, s: Schema, root: []const u8, decoded: []c
             if (std.mem.eql(u8, fd.typ, "TYPE_ENUM") and v.len > 0 and
                 ((v[0] >= '0' and v[0] <= '9') or (v[0] == '-' and v.len > 1 and v[1] >= '0' and v[1] <= '9')))
             {
-                if (ne < 20) try enums.writer().print("{d}: {s}    ({s}.{s}, {s})\n", .{ fnr, raw, top, f, fd.type_name });
+                if (ne < 20) try enums.writer(a).print("{d}: {s}    ({s}.{s}, {s})\n", .{ fnr, raw, top, f, fd.type_name });
                 ne += 1;
             }
         } else {
-            if (nu < 20) try unplaced.writer().print("{d}: `{s}` in {s}\n", .{ fnr, f, top });
+            if (nu < 20) try unplaced.writer(a).print("{d}: `{s}` in {s}\n", .{ fnr, f, top });
             nu += 1;
         }
     }
-    return .{ .unplaced = try unplaced.toOwnedSlice(), .enums = try enums.toOwnedSlice() };
+    return .{ .unplaced = try unplaced.toOwnedSlice(a), .enums = try enums.toOwnedSlice(a) };
 }
 
 /// The field `f` of message `msg`: by its name, or (a group is printed under its
@@ -550,11 +550,11 @@ fn runWith(a: std.mem.Allocator, argv: []const []const u8, env: *const std.proce
         child.stdin.?.close();
         child.stdin = null;
     }
-    var out = std.ArrayList(u8).init(a);
-    var err = std.ArrayList(u8).init(a);
-    try child.collectOutput(&out, &err, 1 << 28);
+    var out = std.ArrayList(u8).empty;
+    var err = std.ArrayList(u8).empty;
+    try child.collectOutput(a, &out, &err, 1 << 28);
     const term = try child.wait();
-    return .{ .code = exitCodeOf(term), .out = try out.toOwnedSlice(), .err = try err.toOwnedSlice() };
+    return .{ .code = exitCodeOf(term), .out = try out.toOwnedSlice(a), .err = try err.toOwnedSlice(a) };
 }
 
 fn die(comptime fmt: []const u8, args: anytype) noreturn {
@@ -578,12 +578,12 @@ const Ctx = struct {
 
     /// protoc over the schema: the proto paths, `extra`, then the files; stdin to stdout.
     fn run(self: *Ctx, extra: []const []const u8, stdin: ?[]const u8) !Run {
-        var argv = std.ArrayList([]const u8).init(self.a);
-        try argv.append(self.protoc);
-        for (self.proto_paths) |p| try argv.append(try std.fmt.allocPrint(self.a, "--proto_path={s}", .{p}));
-        try argv.append(try std.fmt.allocPrint(self.a, "--proto_path={s}/include", .{self.protoc_dir}));
-        try argv.appendSlice(extra);
-        try argv.appendSlice(self.files);
+        var argv = std.ArrayList([]const u8).empty;
+        try argv.append(self.a, self.protoc);
+        for (self.proto_paths) |p| try argv.append(self.a, try std.fmt.allocPrint(self.a, "--proto_path={s}", .{p}));
+        try argv.append(self.a, try std.fmt.allocPrint(self.a, "--proto_path={s}/include", .{self.protoc_dir}));
+        try argv.appendSlice(self.a, extra);
+        try argv.appendSlice(self.a, self.files);
         return runWith(self.a, argv.items, &self.env, stdin);
     }
 
@@ -608,8 +608,8 @@ fn setup(a: std.mem.Allocator, args: []const []const u8, t: []const u8) !struct 
     const n = std.fmt.parseInt(usize, args[i], 10) catch die("usage error: {s} is not a number", .{args[i]});
     i += 1;
     if (i + n >= args.len) die("usage error", .{});
-    var paths = std.ArrayList([]const u8).init(a);
-    for (args[i .. i + n]) |p| try paths.append(try abs(a, cwd, p));
+    var paths = std.ArrayList([]const u8).empty;
+    for (args[i .. i + n]) |p| try paths.append(a, try abs(a, cwd, p));
     i += n;
     const m = std.fmt.parseInt(usize, args[i], 10) catch die("usage error: {s} is not a number", .{args[i]});
     i += 1;
@@ -632,7 +632,7 @@ fn setup(a: std.mem.Allocator, args: []const []const u8, t: []const u8) !struct 
     try env.put("TMPDIR", tmp);
     try env.put("HOME", home);
     return .{
-        .ctx = .{ .a = a, .protoc = try std.fs.path.join(a, &.{ protoc_dir, "bin", "protoc" }), .protoc_dir = protoc_dir, .proto_paths = try paths.toOwnedSlice(), .files = files, .env = env, .t = t },
+        .ctx = .{ .a = a, .protoc = try std.fs.path.join(a, &.{ protoc_dir, "bin", "protoc" }), .protoc_dir = protoc_dir, .proto_paths = try paths.toOwnedSlice(a), .files = files, .env = env, .t = t },
         .rest = args[i..],
     };
 }
@@ -671,19 +671,19 @@ fn check(ctx: *Ctx, out_path: []const u8, rest: []const []const u8) !u8 {
     // The schema, from protoc's own descriptor set.
     const set_path = try std.fs.path.join(a, &.{ ctx.t, "schema.pb" });
     const r1 = try ctx.run(&.{ "--include_imports", try std.fmt.allocPrint(a, "--descriptor_set_out={s}", .{set_path}) }, null);
-    var schema_err = std.ArrayList(u8).init(a);
-    try schema_err.appendSlice(r1.err);
+    var schema_err = std.ArrayList(u8).empty;
+    try schema_err.appendSlice(a, r1.err);
     var ok = r1.code == 0;
     var decoded_set: []const u8 = "";
     if (ok) {
         const set_bytes = readFile(a, set_path);
-        var argv = std.ArrayList([]const u8).init(a);
-        try argv.append(ctx.protoc);
-        try argv.append(try std.fmt.allocPrint(a, "--proto_path={s}/include", .{ctx.protoc_dir}));
-        try argv.append("--decode=google.protobuf.FileDescriptorSet");
-        try argv.append("google/protobuf/descriptor.proto");
+        var argv = std.ArrayList([]const u8).empty;
+        try argv.append(a, ctx.protoc);
+        try argv.append(a, try std.fmt.allocPrint(a, "--proto_path={s}/include", .{ctx.protoc_dir}));
+        try argv.append(a, "--decode=google.protobuf.FileDescriptorSet");
+        try argv.append(a, "google/protobuf/descriptor.proto");
         const r2 = try runWith(a, argv.items, &ctx.env, set_bytes);
-        try schema_err.appendSlice(r2.err);
+        try schema_err.appendSlice(a, r2.err);
         ok = r2.code == 0;
         decoded_set = r2.out;
     }
@@ -699,9 +699,9 @@ fn check(ctx: *Ctx, out_path: []const u8, rest: []const []const u8) !u8 {
         return 1;
     }
 
-    var report = std.ArrayList(u8).init(a);
+    var report = std.ArrayList(u8).empty;
     const ver = (try runWith(a, &.{ ctx.protoc, "--version" }, &ctx.env, null)).out;
-    try report.writer().print("protoc: {s}\n", .{std.mem.trimRight(u8, ver, "\n")});
+    try report.writer(a).print("protoc: {s}\n", .{std.mem.trimRight(u8, ver, "\n")});
 
     var gi: usize = 0;
     while (gi < rest.len) : (gi += 6) {
@@ -797,7 +797,7 @@ fn check(ctx: *Ctx, out_path: []const u8, rest: []const []const u8) !u8 {
         }
 
         if (ctx.nbad == before) {
-            try report.writer().print("PASS {s} {s}: {d} bytes, {d} canonical, {d} lines\n", .{ stem, root, in_bytes.len, canon_bytes.len, countLines(decoded_text) });
+            try report.writer(a).print("PASS {s} {s}: {d} bytes, {d} canonical, {d} lines\n", .{ stem, root, in_bytes.len, canon_bytes.len, countLines(decoded_text) });
         }
     }
     if (ctx.nbad != 0) {
@@ -828,9 +828,9 @@ fn caseMode(a: std.mem.Allocator, args: []const []const u8) !u8 {
     defer std.fs.cwd().deleteTree(t) catch {};
     const report = try std.fs.path.join(a, &.{ t, "report" });
     const self = try std.fs.selfExePathAlloc(a);
-    var argv = std.ArrayList([]const u8).init(a);
-    try argv.appendSlice(&.{ self, "check", args[2], args[3], report });
-    try argv.appendSlice(args[4..]);
+    var argv = std.ArrayList([]const u8).empty;
+    try argv.appendSlice(a, &.{ self, "check", args[2], args[3], report });
+    try argv.appendSlice(a, args[4..]);
     const env = try std.process.getEnvMap(a);
     const r = try runWith(a, argv.items, &env, null);
     const have_report = if (std.fs.cwd().statFile(report)) |_| true else |_| false;
@@ -880,9 +880,9 @@ pub fn main() !void {
     // order was <busybox> <protoc dir> <mode> <out>, so the arguments are
     // reordered to its.
     if (argv.len < 8) die("usage error", .{});
-    var args = std.ArrayList([]const u8).init(a);
-    try args.appendSlice(&.{ argv[2], argv[3], mode });
-    try args.appendSlice(argv[4..]);
+    var args = std.ArrayList([]const u8).empty;
+    try args.appendSlice(a, &.{ argv[2], argv[3], mode });
+    try args.appendSlice(a, argv[4..]);
     const cwd = try std.fs.cwd().realpathAlloc(a, ".");
     const t = try scratch(a, cwd);
     try std.fs.cwd().makePath(t);

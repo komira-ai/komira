@@ -48,11 +48,13 @@ given `--nested`, which the guard refuses.
 | [`analysis_refusals_readme`](analysis_refusals_readme.zig) | no `[readme]` on a base library; the `readme` keyword's load refusals | the bool check removed |
 | [`analysis_refusals_lint`](analysis_refusals_lint.zig) | the five files-xor refusals of the lints; a retired_names `unchecked` entry naming no file; in a scratch tree, a matrix row naming a missing target or an incompatible test | one xor `fail()` deleted; the `unchecked` membership `fail()` deleted; the matrix's deps made soft |
 | [`analysis_refusals_python_oracle`](analysis_refusals_python_oracle.zig) | inputs built outside third_party/ | the owner check dropped |
+| [`analysis_refusals_mopm_artifacts`](analysis_refusals_mopm_artifacts.zig) | `//release:mopm_artifacts`'s `natives` held to each package's `[native.<id>]`: an id the manifest does not declare, and a declared native with no entry | either direction of the check deleted |
 | [`analysis_refusals_node`](analysis_refusals_node.zig) | the Node.js rules' 8 analysis refusals | the staged-twice check deleted |
 | [`planted_red_builds_node`](planted_red_builds_node.zig) | the Node.js rules' 36 planted defects that fail in an action: node_test's verdict, esbuild, npm_package's and node_dist's pins, c_shared_lib's `-Werror` | expect_error matched case-insensitively; `-Werror` dropped |
 | [`planted_red_builds_npm_modules`](planted_red_builds_npm_modules.zig) | the node_modules rules' 14 planted defects: a lockfile package not pinned, a pinned lock or tarball that disagrees with the integrity, a changed package.json, a missing program, a command not given, a failing cdk synth, a type error, a failing and an empty jest run | the tarball sha512 check dropped; `--ci` and the no-test failure dropped |
 | [`analysis_refusals_zig_rules`](analysis_refusals_zig_rules.zig) | the Zig rules' module-closure name clash, unknown `optimize` and bad `target`, and zig_test's bad or runner-owned `exec_tools` names and file-and-directory `data`, each with its message | the name-clash `fail()` deleted |
 | [`planted_red_builds_zig_rules`](planted_red_builds_zig_rules.zig) | a module importing a module it does not declare, an importer reaching a dep's dep, and the red twins of `optimize`, `strip` and `target` | the root module given the whole closure; `optimize` or `strip` ignored |
+| [`planted_red_builds_mojo_hang`](planted_red_builds_mojo_hang.zig) | a welded test that blocks forever, on a target with `test_hang_limit_s = 5`, fails in its action with the banner and the `hang limit:` line (`tests//negative/mojo_hang`); the gated test command carries `--hang-limit-s 1800` by default and `5` where set, and both twins build (`tests//functional/mojo_hang`) | the limit not handed to the gate; the default changed; the override ignored; the verdict not saying the test hung |
 | [`analysis_refusals_rust`](analysis_refusals_rust.zig) | rust_library's test_srcs refusals; the refusals of the Cargo attributes (`env`, `patch`, `proc_macro_extern`) | the `.rs` check deleted; the reserved-name check deleted |
 | [`analysis_refusals_coverage`](analysis_refusals_coverage.zig) | the coverage rules' analysis refusals | the import-name, no-args and LLVM_PROFILE_FILE checks deleted |
 | [`config_refusals`](config_refusals.zig) | `komira.coverage`, `komira.mutation`, `komira.test_timeout_s` values refused at load | any value but true read as false; the margin's `<=` made `<` |
@@ -74,8 +76,8 @@ action, belongs in a refusal table.
 [`graph/`](graph/BUCK): each `graph_check` names a check and the targets it
 queries, as strings. [`graph/checks.bxl`](graph/checks.bxl) collects the
 check's facts and runs its checker, [`graph/graph_checks.zig`](graph/graph_checks.zig),
-over them as a build action; `release/ci/build_targets.sh` runs it for every
-graph_check of a batch. `selftest_closure` fails when the closure of this
+over them as a build action; `.github/workflows/pr.yml` runs it for every
+graph_check. `selftest_closure` fails when the closure of this
 package holds a library under `src/` (a scenario names what it builds as a
 string), so a change to a library does not reach `build_selftests`.
 `python_closure` (declared in the root package, `//:python_closure`) fails on
