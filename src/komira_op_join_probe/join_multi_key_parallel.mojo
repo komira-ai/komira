@@ -44,12 +44,6 @@ from .join_probe_settings import (
 )
 
 
-comptime _MK_PARALLEL_THRESHOLD: Int = 100_000
-"""Below this many probe rows `execute_multi_key_join_probe` probes serially."""
-
-comptime _ENABLE_MULTI_KEY_PARALLEL_PROBE: Bool = True
-
-
 struct _MKMergeSrc(Movable, Deinitable):
     """The wave's shared payload: the per-worker source lists, drained out of the
     probe state's Slabs, plus the per-chunk copied counts.
@@ -169,7 +163,8 @@ def parallel_multi_key_inner_probe_into(
     """Parallel inner-join probe that appends to caller-provided output lists.
 
     The same pairs as `builder.probe_inner_into(probe_keys, ...)`, grouped by
-    worker. Raises if the probe key count or lengths disagree.
+    worker. Raises if the probe key count or lengths disagree. When it raises
+    after the probe, both output lists hold only the rows they held on entry.
 
     Args:
         dispatcher: Caller-owned LocalDispatcher reference.
@@ -309,27 +304,33 @@ def parallel_multi_key_inner_probe_into(
     state.worker_build.set_len_unchecked(0)
     state.worker_probe.set_len_unchecked(0)
 
-    var merged = _run_mk_merge_wave(
-        build_matches.unsafe_ptr() + base_build,
-        probe_matches.unsafe_ptr() + base_probe,
-        dst_off,
-        _MKMergeSrc(src_build^, src_probe^, copied^),
-        num_workers,
-        Pointer(to=dispatcher),
-    )
-
-    var copied_total = 0
-    for w in range(num_workers):
-        copied_total += merged.copied[w]
-    if copied_total != total_matches:
-        raise Error(
-            "parallel_multi_key_inner_probe_into: merge wave copied "
-            + String(copied_total)
-            + " matches but the prefix scan planned "
-            + String(total_matches)
+    try:
+        var merged = _run_mk_merge_wave(
+            build_matches.unsafe_ptr() + base_build,
+            probe_matches.unsafe_ptr() + base_probe,
+            dst_off,
+            _MKMergeSrc(src_build^, src_probe^, copied^),
+            num_workers,
+            Pointer(to=dispatcher),
         )
 
-    _ = merged^
+        var copied_total = 0
+        for w in range(num_workers):
+            copied_total += merged.copied[w]
+        if copied_total != total_matches:
+            raise Error(
+                "parallel_multi_key_inner_probe_into: merge wave copied "
+                + String(copied_total)
+                + " matches but the prefix scan planned "
+                + String(total_matches)
+            )
+        _ = merged^
+    except e:
+        # The lists were grown over uninitialised slots for the wave to fill;
+        # on failure hand them back with only the rows they held on entry.
+        build_matches.resize(unsafe_uninit_length=base_build)
+        probe_matches.resize(unsafe_uninit_length=base_probe)
+        raise e^
 
     _ = builder
     _ = probe_keys

@@ -257,8 +257,8 @@ def test_merge_keeps_every_row_paired_under_skewed_worker_counts() raises:
 
 def test_merge_appends_after_existing_content() raises:
     """The output lists are APPEND targets, and their two pre-existing lengths
-    are not required to match — `reserve(len(x) + total)` allowed them to differ
-    before this change, so the forked merge must too.
+    are not required to match: the merge writes each list after its own
+    length, so the forked merge must too.
     """
     var pk = _probe_keys(_PROBE_ROWS)
     var bk = _build_keys(_PROBE_ROWS)

@@ -31,15 +31,15 @@ from komira_op_join_probe.join_multi_key_parallel import (
 )
 
 
-def _q20_test_sink() -> NoopSink:
+def _test_sink() -> NoopSink:
     return NoopSink(_placeholder=UInt8(0))
 
 
-def _q20_test_runtime() raises -> PerCoreAsyncRuntime[NoopSink]:
+def _test_runtime() raises -> PerCoreAsyncRuntime[NoopSink]:
     """Construct a small mock runtime for parallel-probe dispatch."""
     return PerCoreAsyncRuntime[NoopSink](
         num_workers=4,
-        sink_factory=_q20_test_sink,
+        sink_factory=_test_sink,
         backend=BACKEND_MOCK,
         placement=PLACEMENT_FIXED,
     )
@@ -132,7 +132,7 @@ def _assert_pairs_equal(
         assert_equal(sa[i][1], sb[i][1])
 
 
-def test_parallel_2key_bit_identical_vs_sequential_100k() raises:
+def test_parallel_2key_same_pairs_as_sequential_100k() raises:
     """Parallel multi-key inner probe must produce same matches as sequential."""
     var n = 100_000
 
@@ -160,7 +160,7 @@ def test_parallel_2key_bit_identical_vs_sequential_100k() raises:
         probe_batch_par, ["p_a", "p_b"]
     )
     var builder_par = MultiKeyHashJoinBuilder.build(build_keys_par^)
-    var rt = _q20_test_runtime()
+    var rt = _test_runtime()
     ref dispatcher = rt.dispatcher()
     var par_b = List[Int]()
     var par_p = List[Int]()
@@ -179,7 +179,7 @@ def test_parallel_2key_determinism_3runs() raises:
     """Parallel multi-key inner probe must be deterministic across runs."""
     var n = 100_000
 
-    var rt = _q20_test_runtime()
+    var rt = _test_runtime()
     ref dispatcher = rt.dispatcher()
 
     var bb0 = _build_synthetic_build(n)
@@ -242,7 +242,7 @@ def test_parallel_empty_probe() raises:
     var pk = extract_join_key_columns_serial(probe_batch, ["p_a", "p_b"])
     var builder = MultiKeyHashJoinBuilder.build(bk^)
 
-    var rt = _q20_test_runtime()
+    var rt = _test_runtime()
     ref dispatcher = rt.dispatcher()
     var bm = List[Int]()
     var pm = List[Int]()
@@ -306,7 +306,7 @@ def test_parallel_skew_overflows_presize_values_stay_paired() raises:
     var pk = extract_join_key_columns_serial(probe_batch, ["p_a", "p_b"])
     var builder = MultiKeyHashJoinBuilder.build(bk^)
 
-    var rt = _q20_test_runtime()
+    var rt = _test_runtime()
     ref dispatcher = rt.dispatcher()
     var bm = List[Int]()
     var pm = List[Int]()
@@ -395,7 +395,7 @@ def test_parallel_skew_growth_matches_sequential_kernel() raises:
     var bk_par = extract_join_key_columns_serial(build_par, ["b_a", "b_b"])
     var pk_par = extract_join_key_columns_serial(probe_par, ["p_a", "p_b"])
     var builder_par = MultiKeyHashJoinBuilder.build(bk_par^)
-    var rt = _q20_test_runtime()
+    var rt = _test_runtime()
     ref dispatcher = rt.dispatcher()
     parallel_multi_key_inner_probe_into(
         dispatcher, CancellationToken.never(),
@@ -437,7 +437,7 @@ def test_parallel_skew_growth_matches_sequential_kernel() raises:
 
 def main() raises:
     var suite = TestSuite()
-    suite.test[test_parallel_2key_bit_identical_vs_sequential_100k]()
+    suite.test[test_parallel_2key_same_pairs_as_sequential_100k]()
     suite.test[test_parallel_2key_determinism_3runs]()
     suite.test[test_parallel_empty_probe]()
     suite.test[test_parallel_skew_overflows_presize_values_stay_paired]()
