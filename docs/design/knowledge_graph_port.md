@@ -432,13 +432,6 @@ Limits: the read path scales with the snapshot (an exact scan, no approximate ne
 [data_graph_storage.md](data_graph_storage.md)); the capture server's warm cache is a single process; the
 dedup scheme (MinHash with banded LSH) is tuned for names and short strings, not for long documents.
 
-## Decided during the port
-
-- **Open: a predicate column on the `edges` table.** The table stores no predicate, so a stored edge reads
-  back with an empty predicate and `match_predicate` helps only within the run that built the edges. Storing
-  it is a change of the table schema: it needs a design decision, a format version and a migration note.
-  Until then a live repeat is recognized by endpoints, fact and source alone.
-
 ## Where is the code?
 
 [architecture.md](../architecture.md) is the record of what is in the tree and where; every other location above is the one the package will have. Source sizes quoted are measured on the

@@ -856,8 +856,8 @@ and only the episode row repeats. The `edges` table stores no predicate, so a
 stored edge reads back with "" and a live repeat is recognized by its endpoints,
 fact and source alone; `match_predicate` therefore helps only within the run that
 built the edges. Storing it needs a design decision, a format version and a
-migration note; the question is open in `docs/design/knowledge_graph_port.md`,
-section "Decided during the port".
+migration note; the question is open, and the design doc's "Decided during the
+port" list in `docs/design/knowledge_graph_port.md` records it.
 
 A triple's own end time is read on the structured path only: the episode path
 ignores it, so a new edge there is open until a later fact closes it, while the
