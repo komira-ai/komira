@@ -1,20 +1,38 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The plan-expression to runtime-expression translator of the engine dispatcher's computed projection, and the census a projection refusal reports.
+# The computed-projection evaluator of the engine dispatcher: the plan-expression to runtime-expression translator, the evaluator that routes each output of a project operator to a column copy, a broadcast literal, the column evaluator or the per-type walkers, the dense FLOAT64 arithmetic evaluator, and the census a projection refusal reports.
 mojo_library(
     name = "komira_dispatch_project",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_batch_eval:komira_batch_eval",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_column_kernels:komira_column_kernels",
         "//src/komira_eval:komira_eval",
         "//src/komira_kernels:komira_kernels",
         "//src/komira_plan_expr:komira_plan_expr",
         "//src/komira_plan_ir:komira_plan_ir",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
     ],
     test_srcs = [
+        # integer + - * overflow raises on both routes, never wraps or declines
+        "tests/test_computed_project_int_overflow_raises.mojo",
+        # CAST(<i64> AS DOUBLE) inside and at the root of a projection, the narrowing and non-FLOAT64 boundary, and NULL through the cast
+        "tests/test_computed_project_int_division_cast.mojo",
+        # a literal output of every type the walkers cannot build, its length per batch, and the declines
+        "tests/test_literal_project_output_column.mojo",
+        # a large_string passthrough under a string declaration, both ways, and the width declines
+        "tests/test_promoted_string_passthrough_project.mojo",
         # every arm of the translator and of the family inference
         "tests/test_lower_untyped_expr_leaves.mojo",
         "tests/test_lower_untyped_expr_binary.mojo",
+        # the route predicates and each evaluator arm and decline
+        "tests/test_compute_project_routes.mojo",
+        "tests/test_compute_project_column_arms.mojo",
+        "tests/test_compute_project_walker_arms.mojo",
         # the refusal census
         "tests/test_format_project_decline_census.mojo",
     ],
