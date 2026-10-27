@@ -23,6 +23,7 @@ mojo_library(
         "tests/test_join_multi_key_later_key_collisions.mojo",
         "tests/test_join_multi_key_memcmp_equiv.mojo",
         "tests/test_join_multi_key_null_key.mojo",
+        "tests/test_join_multi_key_null_later_key.mojo",
     ],
     visibility = ["PUBLIC"],
 )
