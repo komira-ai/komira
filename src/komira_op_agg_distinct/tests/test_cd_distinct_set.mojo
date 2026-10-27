@@ -4,10 +4,10 @@
 #
 # `agg_cd_distinct_set.CdDistinctSet` is the per-worker set of (aggregate
 # slot, group, value) pairs the grouped COUNT(DISTINCT) driver probes at
-# insert, keeping a running counter per group (DuckDB's shape: a level-1
-# GROUP BY with no aggregate function, one table row per DISTINCT PAIR).
+# insert, keeping a running counter per group (a level-1 GROUP BY with no
+# aggregate function, one table row per DISTINCT PAIR).
 #
-# What each test kills:
+# What each test proves:
 #   * `admit` must answer True exactly once per distinct pair, and the pair
 #     key carries the aggregate slot (two COUNT(DISTINCT)s over two columns
 #     cannot share a pair);
@@ -118,9 +118,9 @@ def test_stored_pairs_are_strictly_fewer_than_rows_offered() raises:
 
 def test_allocation_is_lazy_until_the_first_admit() raises:
     """`init()` runs in the driver's SERIAL `htinit` loop over K workers
-    (measured 98.7 / 83.1 / 81.3 ms on the cbq10/11/13 family), so
-    `reserve_hint` must allocate nothing. An eager table there would have added
-    that serial phase's cost again to pay for a table filled in parallel."""
+    so `reserve_hint` must allocate nothing. An eager table there
+    would add a serial allocation per worker to pay for a table filled in
+    parallel."""
     var s = CdDistinctSet()
     s.reserve_hint(1_000_000)
     assert_equal(s.capacity(), 0, "reserve_hint must allocate NOTHING")

@@ -35,6 +35,7 @@
 # =============================================================================
 
 from std.builtin.swap import swap
+from std.memory import ArcPointer
 
 from komira_clock import now_ns as _system_now_ns
 
@@ -400,6 +401,19 @@ name. Unbounded, that failure is a 3.5-hour silence; bounded, it is a loud error
 in 400 ms, which is the direction a timeout mechanism must degrade in."""
 
 
+@always_inline
+def _clock_now_us(clock_cell: Optional[ArcPointer[Int]]) -> Int:
+    """Microseconds on the clock the body drain and the outbound driver read.
+
+    `clock_cell` is None in production, and then this is exactly the
+    system-clock read it replaced: one predictable branch on a value that never
+    changes. A test supplies a shared cell it advances itself, so a deadline
+    can be driven by scripted time instead of by how fast the machine runs."""
+    if clock_cell:
+        return clock_cell.value()[]
+    return Int(_system_now_ns() // UInt64(1000))
+
+
 comptime _NO_DEADLINE: Int = 0
 """The
 `_deadline_us` value meaning "no deadline was ever stamped on this body".
@@ -538,6 +552,10 @@ struct RecvRingBody[S: IoStream](
     # body, never recomputed after it. See `set_deadline_us`.
     var _deadline_us: Int
 
+    var _clock_cell: Optional[ArcPointer[Int]]
+    """None in production (system clock). A test shares a cell here so the
+    deadline checks read scripted time; see `_clock_now_us`."""
+
     # ⛔ THE CHUNKED DECODER HAS NO BUFFER OF ITS OWN — THIS IS IT.
     # `decode_block` is INCREMENTAL and states its caller
     # NEED_MORE the caller "should call again with more bytes appended to
@@ -607,6 +625,7 @@ struct RecvRingBody[S: IoStream](
         self._carry = List[UInt8]()
         self._leftover = List[UInt8]()
         self._deadline_us = _NO_DEADLINE
+        self._clock_cell = None
 
     @staticmethod
     def new_empty(var stream: Self.S) -> RecvRingBody[Self.S]:
@@ -741,6 +760,7 @@ struct RecvRingBody[S: IoStream](
         self._carry = List[UInt8]()
         self._leftover = List[UInt8]()
         self._deadline_us = _NO_DEADLINE
+        self._clock_cell = None
 
     @staticmethod
     def from_buffered_bytes(
@@ -826,6 +846,16 @@ struct RecvRingBody[S: IoStream](
         if v < self._deadline_us:
             self._deadline_us = v
 
+    def set_test_clock(mut self, var clock_cell: Optional[ArcPointer[Int]]):
+        """Read time from `clock_cell` instead of the system clock (None keeps
+        the system clock). The OutboundDriver passes its own cell through when
+        it builds a body; a test that builds a body by hand sets it here."""
+        self._clock_cell = clock_cell^
+
+    @always_inline
+    def _now_us(self) -> Int:
+        return _clock_now_us(self._clock_cell)
+
     @always_inline
     def deadline_us(self) -> Int:
         """The absolute deadline stamped on this body, or `_NO_DEADLINE`
@@ -844,7 +874,7 @@ struct RecvRingBody[S: IoStream](
         which the deadline is noticed, it is not the bound."""
         if self._deadline_us == _NO_DEADLINE:
             return -1
-        var now_us = Int(_system_now_ns() // UInt64(1000))
+        var now_us = self._now_us()
         var rem = self._deadline_us - now_us
         if rem < 0:
             return 0
@@ -1132,7 +1162,7 @@ struct RecvRingBody[S: IoStream](
         and stalled"), and states the deadline it was measured against."""
         if self._deadline_us == _NO_DEADLINE:
             return
-        var now_us = Int(_system_now_ns() // UInt64(1000))
+        var now_us = self._now_us()
         if now_us < self._deadline_us:
             return
         var drained = self._emitted_bytes + self._accum.__len__()
@@ -1588,9 +1618,7 @@ def collect_body[RT: Runtime, S: IoStream](
     var unstamped = body.deadline_us() == _NO_DEADLINE
     var backstop_us = 0
     if unstamped:
-        backstop_us = (
-            Int(_system_now_ns() // UInt64(1000)) + _UNSTAMPED_DRAIN_BACKSTOP_US
-        )
+        backstop_us = body._now_us() + _UNSTAMPED_DRAIN_BACKSTOP_US
     # consecutive-Pending counter. A single-body
     # drain that keeps returning Pending is busy-spinning the network RTT;
     # after a small spin budget we park on the body's fd (epoll) until it's
@@ -1601,7 +1629,7 @@ def collect_body[RT: Runtime, S: IoStream](
     var pending_run = 0
     while True:
         if unstamped:
-            var now_us = Int(_system_now_ns() // UInt64(1000))
+            var now_us = body._now_us()
             if now_us >= backstop_us:
                 raise Error(
                     String(
@@ -1743,9 +1771,8 @@ def drain_bodies_round_robin[RT: Runtime, S: IoStream](
     # deadline. A stamped stream raises from its own `poll_frame` at its own
     # deadline, which may differ per stream -- so the test is PER STREAM,
     # evaluated where that stream is polled, and the raise names it.
-    var backstop_us = (
-        Int(_system_now_ns() // UInt64(1000)) + _UNSTAMPED_DRAIN_BACKSTOP_US
-    )
+    # The streams of one drain share one clock: stream 0's.
+    var backstop_us = bodies[0]._now_us() + _UNSTAMPED_DRAIN_BACKSTOP_US
     var remaining = k
     # consecutive-no-progress sweep counter.
     # After _DRAIN_RR_SPIN_BUDGET sweeps where every not-done stream returned
@@ -1760,7 +1787,7 @@ def drain_bodies_round_robin[RT: Runtime, S: IoStream](
         while s < k:
             if not done[s]:
                 if bodies[s].deadline_us() == _NO_DEADLINE:
-                    var now_us = Int(_system_now_ns() // UInt64(1000))
+                    var now_us = bodies[s]._now_us()
                     if now_us >= backstop_us:
                         raise Error(
                             String(

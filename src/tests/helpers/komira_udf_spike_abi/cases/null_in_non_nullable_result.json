@@ -1,0 +1,11 @@
+{
+ "name": "null_in_non_nullable_result",
+ "defect": "a null in a declared non-nullable result is accepted",
+ "run": "call_batch",
+ "entry": "null_out",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": false}],
+ "input": {"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]},
+ "expect": {"status": "OK", "run_error": "UDF_RETURN_TYPE_MISMATCH"}
+}

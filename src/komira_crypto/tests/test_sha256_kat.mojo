@@ -165,8 +165,8 @@ def test_kat_one_million_a() raises:
 #   * len=63: 0x80 alone overflows; zero-pad to 56 over next block. TWO blocks.
 #   * len=64: full block + ENTIRE second padding block.
 #
-# The pre-computed digests come from `python3 -c "import hashlib;
-# print(hashlib.sha256(b'<input>').hexdigest())"`.
+# Each expected digest is SHA-256 (FIPS 180-4) of the stated bytes and agrees
+# with GNU coreutils `sha256sum` over a file of those bytes.
 # -----------------------------------------------------------------------------
 
 

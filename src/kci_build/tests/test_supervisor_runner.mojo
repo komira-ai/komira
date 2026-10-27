@@ -4,7 +4,8 @@
 #   files byte for byte, every exit status comes back as itself (each bit of
 #   the 0..255 range, so a decode that drops or clamps bits fails), the cwd
 #   is applied, a run past its timeout is stopped and reported as timed out,
-#   its clock (`now_ns`) is the monotonic one and moves with a run, and an
+#   its timeout is read against an injectable clock (a moved clock stops
+#   it, a frozen one never does), its `now_ns` is the monotonic clock, and an
 #   explicit environment is exactly what the child sees (None
 #   inherits).
 # =============================================================================
@@ -16,7 +17,7 @@ from std.time import perf_counter_ns
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_build import RunSpec, SupervisorRunner
+from kci_build import RunClock, RunSpec, SupervisorRunner
 
 
 def _dir(tag: String) raises -> String:
@@ -125,32 +126,65 @@ def test_no_env_inherits() raises:
     assert_true(out.find(String("KCI_PROBE=")) < 0)
 
 
+struct _StepClock(RunClock, Movable):
+    """A clock the test moves: each reading returns the current time, then
+    moves it on by `step_ns`. `last` is the latest reading handed out."""
+
+    var at_ns: Int
+    var step_ns: Int
+    var last: Int
+
+    def __init__(out self, step_ns: Int):
+        self.at_ns = 0
+        self.step_ns = step_ns
+        self.last = 0
+
+    def now_ns(mut self) -> Int:
+        self.last = self.at_ns
+        self.at_ns += self.step_ns
+        return self.last
+
+
 def test_a_run_past_its_timeout_is_stopped() raises:
+    # The child sleeps far longer than the test could wait; the clock, not
+    # the wall, carries the run past its 1 s timeout: 0.6 s per reading puts
+    # the deadline at 1.0 s and the second reading after it at 1.8 s.
     var d = _dir(String("timeout"))
     var runner = SupervisorRunner(grace_ms=200)
-    var t0 = perf_counter_ns()
-    var r = runner.run(_sh(d, String("echo started; sleep 30"), timeout_s=1))
-    var waited_ms = Int((perf_counter_ns() - t0) // 1_000_000)
+    var clock = _StepClock(600_000_000)
+    var r = runner.run_on(_sh(d, String("echo started; sleep 30"), timeout_s=1), clock)
     assert_true(r.timed_out)
     assert_false(r.ok())
     assert_equal(r.describe(), String("timed out"))
-    assert_true(waited_ms < 10000)
+    # it was stopped on a reading past the deadline, never on one before it
+    assert_true(clock.last > 1_000_000_000, String(clock.last))
+
+
+def test_a_clock_that_stays_before_the_deadline_never_stops_the_child() raises:
+    var d = _dir(String("frozen"))
+    var runner = SupervisorRunner()
+    var clock = _StepClock(0)
+    var r = runner.run_on(_sh(d, String("echo done"), timeout_s=1), clock)
+    assert_true(r.ok(), r.describe())
+    assert_false(r.timed_out)
+    assert_equal(clock.last, 0)
 
 
 def test_its_clock_is_the_monotonic_clock() raises:
     # now_ns is what the per-change check's budget is read against: it is
-    # perf_counter_ns (CLOCK_MONOTONIC), so a run that sleeps 1 s moves it
-    # by at least 1 s and by no more than the wall time around the call
+    # perf_counter_ns (CLOCK_MONOTONIC). Two readings of the same clock come
+    # in order, and both lie between two readings of perf_counter_ns around
+    # them (the wall clock, a different origin, would not). Nothing here
+    # measures how long anything took.
     var d = _dir(String("clock"))
     var runner = SupervisorRunner()
     var t0 = Int(perf_counter_ns())
     var before = runner.now_ns()
-    var r = runner.run(_sh(d, String("sleep 1")))
+    var r = runner.run(_sh(d, String("true")))
     var after = runner.now_ns()
     var t1 = Int(perf_counter_ns())
     assert_true(r.ok())
-    assert_true(before >= t0 and after <= t1, String(t0) + String(" ") + String(before) + String(" ") + String(after) + String(" ") + String(t1))
-    assert_true(after - before >= 1_000_000_000, String(after - before))
+    assert_true(t0 <= before and before <= after and after <= t1, String(t0) + String(" ") + String(before) + String(" ") + String(after) + String(" ") + String(t1))
 
 
 def test_a_missing_binary_raises() raises:

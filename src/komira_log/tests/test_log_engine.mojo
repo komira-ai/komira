@@ -283,7 +283,9 @@ def test_arena_spill_long_string() raises:
 
 
 def test_microbench_emit() raises:
-    """Informational: emit N records into a pre-allocated ring. Not a gate."""
+    """Emit N records into a pre-allocated ring and print ns/record (information
+    only: no time is asserted). What it asserts is the count: every emit is
+    pushed (none dropped by the ring's DROP policy) and popped."""
     var ring = LogRecordRing(capacity=4096, overflow_policy=OVERFLOW_DROP)
     var N = 100000
     # Warm.
@@ -292,17 +294,20 @@ def test_microbench_emit() raises:
             ring, LEVEL_INFO, UInt64(0), ArgI64(Int64(i))
         )
         _ = ring.try_pop()
+    var popped = 0
     var t0 = perf_counter_ns()
     for i in range(N):
         _ = emit_record["retry {}", "komira_job_supervisor"](
             ring, LEVEL_INFO, UInt64(0), ArgI64(Int64(i))
         )
-        _ = ring.try_pop()  # keep the ring from filling under DROP
+        if ring.try_pop():  # keep the ring from filling under DROP
+            popped += 1
     var t1 = perf_counter_ns()
     var ns_each = Float64(Int(t1 - t0)) / Float64(N)
     print("  BENCH  emit+pop (1xInt, reused ring):", ns_each, "ns/record over", N)
-    # Not a correctness gate — just assert it ran.
-    assert_true(ns_each > 0.0)
+    # The count, not the clock: every emit was pushed, then popped.
+    assert_equal(popped, N)
+    assert_equal(ring.overflow_dropped_count(), Int64(0))
 
 
 def main() raises:

@@ -35,14 +35,13 @@
 # embedder side (EngineContext holds `Optional[OwnedPointer[Tracer]]`).
 # =============================================================================
 
-from std.collections import Dict
-
 from komira_atomic_alias import AtomicU64
 
 from komira_collections.slab import Slab
 
 from komira_clock import now_ns as _platform_now_ns
 
+from komira_trace.span_join_table import SpanJoinTable
 from komira_trace.span_record import (
     SpanRecord,
     SpanLink,
@@ -215,6 +214,9 @@ struct Tracer(Deinitable):
     var _span_counter: AtomicU64
     # Backpressure policy snapshot at construction.
     var _overflow_policy: UInt8
+    # Drain-join work counter: span records examined to resolve CLOSE
+    # packets, summed over every drain of this Tracer (see `join_probes`).
+    var _join_probes: Int
 
     def __init__(
         out self,
@@ -237,6 +239,7 @@ struct Tracer(Deinitable):
         self._trace_counter = AtomicU64(UInt64(1))
         self._span_counter = AtomicU64(UInt64(1))
         self._overflow_policy = overflow_policy
+        self._join_probes = 0
 
     def install_mock_clock(mut self, var clock: MockClock):
         """Test helper. Replace the production timestamp source with a
@@ -409,14 +412,14 @@ struct Tracer(Deinitable):
 
         Off the hot path, but it runs on every drain (`drain_into_jsonl`
         in production), so it is O(packets): the OPEN pass records each
-        span_id's record index in a `Dict`, and each CLOSE is one lookup.
+        span_id's record index in a `SpanJoinTable`, and each CLOSE is one lookup.
 
         Returns one `SpanRecord` per OPEN packet observed; if a matching
         CLOSE was observed in the same drain, `end_ns` is set, otherwise
         it stays 0 (still-open span at drain time). A CLOSE whose OPEN is
         not in this drain matches nothing and is dropped (no record).
         """
-        var records = List[SpanRecord]()
+        var table = SpanJoinTable()
         # First pass: collect all packets across all workers.
         var packets = List[SpanPacket]()
         for w in range(self.num_workers):
@@ -429,14 +432,16 @@ struct Tracer(Deinitable):
 
         # Index OPEN packets first; then walk CLOSE packets and patch
         # end_ns into the matching SpanRecord.
-        # PERF-CRITICAL: the CLOSE pass is one Dict lookup per packet. It
-        # was a linear scan over `records` per CLOSE, O(n^2) per drain:
-        # 10,000 spans cost 5e7 comparisons, which is what the drain
-        # throughput test measured. Do not reintroduce a scan.
-        # `index` keeps the FIRST record per span_id (the old scan's
+        # PERF-CRITICAL: the CLOSE pass is one index lookup per packet
+        # (`SpanJoinTable.close`). It was a linear scan over the records per
+        # CLOSE, O(n^2) per drain: 10,000 spans cost 5e7 comparisons. Do not
+        # reintroduce a scan. `join_probes()` counts inside the table: `close`
+        # is one probe and every record read is one, so a scan written against
+        # the table shows up as a quadratic count in
+        # tests/test_drain_join_scales.mojo.
+        # The table keeps the FIRST record per span_id (the old scan's
         # first-match rule); span ids come from one atomic counter, so a
         # duplicate needs `install_mock_ids` to re-seed mid-window.
-        var index = Dict[UInt64, Int]()
         for i in range(len(packets)):
             var p = packets[i].copy()
             if p.kind == PACKET_OPEN:
@@ -456,20 +461,15 @@ struct Tracer(Deinitable):
                 rec.worker_id = UInt32(p.worker_id)
                 rec.flags = UInt32(p.flags)
                 rec.status = SPAN_STATUS_OPEN
-                if p.span_id not in index:
-                    index[p.span_id] = len(records)
-                records.append(rec^)
+                table.add_open(rec^)
 
         for i in range(len(packets)):
             ref p = packets[i]
             if p.kind == PACKET_CLOSE:
-                var hit = index.get(p.span_id)
-                if hit:
-                    var j = hit.value()
-                    records[j].end_ns = p.ts_ns
-                    records[j].status = SPAN_STATUS_CLOSED
+                table.close(p.span_id, p.ts_ns)
 
-        return records^
+        self._join_probes += table.probes()
+        return table.take_records()
 
     def drain_into_capture(mut self, mut exporter: CapturingExporter):
         """Drain every per-worker ring into a CapturingExporter (test
@@ -487,6 +487,19 @@ struct Tracer(Deinitable):
             exporter.flush_record(records[i], self._name_registry)
 
     @always_inline
+    def join_probes(self) -> Int:
+        """Probes the drain's `SpanJoinTable` made to resolve CLOSE packets,
+        summed over every drain of this Tracer.
+
+        A test observable for the join's complexity. The table counts, not the
+        join: `close` is one probe and each record read (`record_at`) is one,
+        so the indexed join costs one probe per CLOSE packet and a per-CLOSE
+        scan over the records costs one per record compared (quadratic in the
+        span count).
+        """
+        return self._join_probes
+
+    @always_inline
     def name_registry_count(self) -> Int:
         return self._name_registry.count()
 
@@ -494,3 +507,15 @@ struct Tracer(Deinitable):
     def ring_size(self, worker_id: Int) -> Int64:
         ref ring = self._rings.get_mut_interior(worker_id)
         return ring.approximate_size()
+
+    @always_inline
+    def ring_blocked_count(self, worker_id: Int) -> Int64:
+        """Pushes on this worker's ring that found it full and waited."""
+        ref ring = self._rings.get_mut_interior(worker_id)
+        return ring.overflow_blocked_count()
+
+    @always_inline
+    def ring_dropped_count(self, worker_id: Int) -> Int64:
+        """Pushes on this worker's ring refused because it was full."""
+        ref ring = self._rings.get_mut_interior(worker_id)
+        return ring.overflow_dropped_count()

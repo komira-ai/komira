@@ -8,23 +8,14 @@
 #                      per (agg, group), holding EVERY ACCEPTED ROW's value,
 #                      deduped later by a `sort()` + adjacent-difference scan
 #                      running on the DRIVER THREAD.
-#     DuckDB           NO per-group distinct state at all. `distinct_aggregate_
-#                      data.cpp:93-107` builds `grouping_set = {groups} U
-#                      {aggregate children}` and a plain
-#                      `RadixPartitionedHashTable`; `grouped_aggregate_data.cpp
-#                      :46-69 InitializeDistinct` pushes the aggregate's
-#                      children into `groups` / `group_types` / `payload_types`
-#                      and NEVER touches `aggregates` (its one
-#                      `bindings.push_back(&aggr)` is commented out). Their
-#                      level 1 is therefore a GROUP BY with ZERO aggregate
-#                      functions: ONE hash-table row per DISTINCT PAIR, and the
-#                      dedup IS the hash table — parallel by construction.
+#     the shape here  a level-1 GROUP BY over {groups} U {aggregate argument}
+#                      with ZERO aggregate functions: ONE hash-table row per
+#                      DISTINCT PAIR, and the dedup IS the hash table —
+#                      parallel by construction (the same shape DuckDB uses).
 #
-# We stored ROWS; they store DISTINCT PAIRS. Measured at K=20, the ratio
-# rows/pairs was
-# **4.681 / 4.681 / 1.233** on cbq10 / cbq11 / cbq13, and the price of deduping
-# late was a provably SINGLE-THREADED `aggout` phase of **263.3 / 257.0 /
-# 390.2 ms** — 34.8% / 33.5% / 11.4% of each cell's wall.
+# We stored ROWS; this stores DISTINCT PAIRS. When rows repeat a value within a
+# group, the per-row list holds several entries per pair, and deduping late
+# makes a provably SINGLE-THREADED `aggout` phase.
 #
 # `CdDistinctSet` is the missing half: an open-addressed set over the pair
 # (aggregate slot, group id, value), one per WORKER, probed once per accepted
@@ -34,13 +25,12 @@
 #
 # ⛔ WHY THIS IS NOT AN AMDAHL FIX, AND WHY THE AMDAHL FIX WOULD NOT HAVE
 #    WORKED. The obvious alternative — parallelise the existing per-group
-#    `sort()` across groups — is REFUTED by the same measurement that found the
-#    phase: cbq10's TOP GROUP HOLDS 91.80% OF ITS ROWS (cbq11: 79.21%), so the
-#    serial cost is ONE group's sort of one 5.1M-element list and splitting the
-#    group loop across K workers caps out at 1/0.918 = **1.09x**. Dedup at
-#    insert deletes the work instead of spreading it, and it is the only one of
-#    the two shapes that also deletes the per-group `List` headers (6,019,102 of
-#    them on cbq13, whose teardown was a further 437.9 ms).
+#    `sort()` across groups — is refuted when one group holds most of the rows
+#    (a top group with 91.8% of the rows): the serial cost is ONE group's sort
+#    of one very long list, and splitting the group loop across K workers caps
+#    out at 1/0.918 = 1.09x. Dedup at insert deletes the work instead of
+#    spreading it, and it is the only one of the two shapes that also deletes
+#    the per-group `List` headers (one per group).
 #
 # ============================== THE KEY ======================================
 #
@@ -62,8 +52,8 @@
 # Owned BY VALUE as a field of `_PerWorkerCDState`, which lives in the
 # dispatch's `Slab[_PerWorkerCDState]`; worker `wid` is the unique writer to
 # slot `wid`. Growth happens INSIDE the worker and is worker-local — the same
-# property the group HT's own resize already relies on (see the
-# PARALLELIZE-BOUNDARY block in `agg_count_distinct_parallel.mojo`).
+# property the group HT's own resize relies on (the driver that dispatches the
+# workers is added by a later part).
 #
 # ⚠ ALLOCATION IS DELIBERATELY LAZY. `reserve_hint` records a capacity and
 #   allocates NOTHING; the first `admit` allocates. The driver's `init` loop is
@@ -102,8 +92,7 @@ comptime _CD_EMPTY_TAG: Int64 = -1
 # `count * _CD_LOAD_DEN > cap * _CD_LOAD_NUM`, i.e. above 2/3 full. Linear
 # probing degrades past ~3/4; 2/3 keeps the probe chain short while holding the
 # table half the size a 1/2 threshold would have demanded — which is what keeps
-# the skewed worker's table (1.09M distinct pairs on cbq10) at 2^21 slots
-# instead of 2^22.
+# a worker holding ~1.09M distinct pairs at 2^21 slots instead of 2^22.
 comptime _CD_LOAD_NUM: Int = 2
 comptime _CD_LOAD_DEN: Int = 3
 
@@ -190,8 +179,8 @@ struct CdDistinctSet(Movable):
         """Number of distinct pairs admitted so far.
 
         Returns:
-            The route witness: the number of rows DuckDB's level-1 table would
-            hold, strictly below the number of rows offered whenever any value
+            The route witness: the number of rows a level-1 pair table
+            holds, strictly below the number of rows offered whenever any value
             repeats within a group.
         """
         return self._count
@@ -283,20 +272,19 @@ def _cd_distinct_value_at[
     ⭐ ONE FUNCTION, EVERY READER, ON PURPOSE. The general parallel driver
     reads it to ADMIT a pair and, for a heavy group, to decide which worker
     OWNS the pair (`cd_pair_bucket(hash, value, K)`); the fused string-key
-    route (`agg_cd_strkey_fused.mojo`) reads it to admit. Those readings must
+    route (added by a later part) reads it to admit. Those readings must
     be the SAME value: if ownership keyed on a different spelling of the value
     than the one admitted, two copies of one pair could land on two workers and
     be counted twice, and if the two routes keyed differently one query could
-    answer two ways. (Moved here from `agg_count_distinct_parallel.mojo` so
-    the fused route can share it without an import cycle.)
+    answer two ways. (It lives here so both routes share it without an import
+    cycle.)
 
     ★ CD-TYPE-WIDTH -- `Int(f64)` TRUNCATES, so
     `count(DISTINCT price)` over [1.1, 1.9] keyed BOTH rows on 1 and answered
     1. The distinct key for a float is its IEEE bit pattern with -0.0 folded
     onto +0.0 -- the key `agg_mixed_cd_fold` and the streaming sink use.
-    ⚠ REACHABILITY: the one live route in (`_build_grouped_cd_parallel_sink_
-    data`) gates the CD input to INT32/INT64, so the float arm is not
-    reachable today; it is kept correct rather than left as a trap for whoever
+    ⚠ REACHABILITY: the one live route in gates the CD input to INT32/INT64,
+    so the float arm is not reachable today; it is kept correct rather than left as a trap for whoever
     widens that envelope. The SERIAL TWIN carries the identical conversion --
     the two kernels are selected by a ROW-COUNT crossover, so a one-sided fix
     would make the answer depend on the row count.

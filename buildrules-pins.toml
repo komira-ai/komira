@@ -1,0 +1,19 @@
+# mopm versions this repository pins beyond the ones buildrules pins itself (rules/mopm/pins.bzl,
+# with the linux-aarch64 and macos-arm64 tarballs of rules/mopm/hosts.bzl).
+# `buildrules mojo sync` copies this file into tools/build/cells/toolchains/mopm_pins.bzl.
+#
+# buildrules pins mopm 0.0.48 and 0.0.73 itself, for every host a table needs, and a row for a version
+# it pins is refused. A version buildrules does not pin is added as `[mopm."<version>"]` (url, sha256,
+# size; linux x86_64 only, buildrules has no way to pin another host's tarball for it) and named in
+# `mopm-toolchain.toml` of the package that needs it and by `toolchains//:mopm_<version with
+# underscores>` in its `mojo_conda`.
+#
+# mopm 0.0.81 is the mopm of the README e2e (release/readme_e2e/packages.bzl) and of the release's
+# stage and publish steps (.github/workflows/release.yml); those run on linux x86_64. The packages
+# (komira_libc, komira_lz4, komira_zlib, komira_resources) stay on mopm 0.0.73: it is the row that has
+# linux-aarch64 and macos-arm64 tarballs, and a package built for those hosts fails analysis under a
+# mopm with no row for them. Move them when a buildrules release pins 0.0.81 for all three hosts.
+[mopm."0.0.81"]
+url = "https://github.com/komira-ai/mopm/releases/download/v0.0.81/mopm-0.0.81-linux-x86_64.tar.gz"
+sha256 = "7113f0526235e6aa301308da05c3fe1223ae068ae4627d83b0849e465f5a185c"
+size = 1232538

@@ -23,13 +23,13 @@
 #
 #   §1  DIFFERENTIAL. parallel == serial == raw oracle, over a fixture large
 #       enough (>= `_CDSTR_MIN_ROWS`) that the PARALLEL arm is the one running.
-#   §2  ⭐ THE SKEW ARM, and the reason the duplicate pre-filter exists. 95% of
-#       the fixture is ONE value, the ClickBench Q5 shape (86,825,105 of
-#       99,997,497 rows are the empty string). Hash-partitioning by VALUE sends
+#   §2  THE SKEW ARM, and the reason the duplicate pre-filter exists. 95% of
+#       the fixture is ONE value (a mostly-empty-string column
+#       shape). Hash-partitioning by VALUE sends
 #       every copy of that value to ONE partition, so this is the fixture where
 #       a kernel that scatters per-ROW instead of per-VALUE, or whose pre-filter
 #       drops values it has NOT emitted, gives a wrong number.
-#   §3  THE NULL RULE. SQL:2016 / DuckDB: `COUNT(DISTINCT x)` does not count
+#   §3  THE NULL RULE. SQL:2016: `COUNT(DISTINCT x)` does not count
 #       NULL. The fixture carries NULLs AND an EMPTY STRING as a real value, so
 #       an implementation that merged them, or that counted the NULL, differs
 #       from the oracle in a way a null-free fixture cannot see.
@@ -44,30 +44,26 @@
 #       guard exists to protect.
 #   §8  THE TYPE REFUSAL. An INT64 column RAISES rather than striding an
 #       `(offsets, data)` pair that is not there — fail-closed.
-#  §10  ⭐ A REAL FINGERPRINT COLLISION — two DIFFERENT strings whose xxHash64
+#  §10  A REAL FINGERPRINT COLLISION — two DIFFERENT strings whose xxHash64
 #       agrees in the low 32 bits AND in the partition bits. The only arm that
-#       makes the byte-compare confirm load-bearing; without it, deleting the
-#       confirm leaves every other arm GREEN (measured).
+#       makes the byte-compare confirm load-bearing; without it, no other arm
+#       distinguishes a byte-compared match from a fingerprint-only match.
 #   §9  LENGTH AND PREFIX SENSITIVITY. `"ab"`, `"abc"`, `"abcd"`, `"ba"` are
 #       four values, and a fixture of 1-byte-apart neighbours is counted at full
 #       cardinality — the arm a hash that ignored length, or a verify that
 #       compared only the shorter span, would fail.
 #
-# ============================ REVERT-AND-RED =================================
+# ============================ WHAT IS PINNED =================================
 #
 # This file tests the KERNEL, not a caller's route to it: a caller that sends
 # `count(DISTINCT <string>)` elsewhere returns the same Int64, so the route is
 # carried by `cd_string_kernel_taken_count()`, a process-global counter this
-# kernel increments. Inside the kernel: scatter by ROW instead of by HASH ->
-# §1/§2/§4 RED. Verify the pre-filter's occupant against `row` instead of
-# `crow` -> §1/§2 RED (every fingerprint match then "equals itself" and real
-# values are dropped). Drop the null skip -> §3/§5 RED. Verify the fingerprint
-# WITHOUT the byte compare, in either the pre-filter or the dedup table -> §10
-# RED and nothing else (that is what §10 exists for). Replace all three
-# `clen == vlen and bytes_equal(...)` confirms with a bare `clen == vlen` ->
-# §10 RED: the collision pair is fixed-width, and
-# `test_the_collision_pair_still_collides` pins the two lengths EQUAL (with a
-# 6-vs-7-byte pair that mutant passed every case).
+# kernel increments. The arms above pin, respectively: scatter by HASH rather
+# than by ROW (§1/§2/§4); the pre-filter verifies the CACHED entry's row, not
+# the current row (§1/§2); NULL rows are skipped (§3/§5); a fingerprint match
+# is confirmed with the byte compare, in both the pre-filter and the dedup
+# table (§10); and that confirm compares bytes, not only lengths (§10:
+# `test_the_collision_pair_still_collides` pins the two lengths EQUAL).
 #
 # =============================================================================
 
@@ -227,7 +223,7 @@ def test_the_differential_fixture_is_above_the_parallel_threshold() raises:
 
 
 # =============================================================================
-# §2 — THE SKEW ARM (the ClickBench Q5 shape, and the pre-filter's reason)
+# §2 — THE SKEW ARM (a mostly-empty-string column, and the pre-filter's reason)
 # =============================================================================
 
 
@@ -290,8 +286,8 @@ def _null_fixture_vals() raises -> List[String]:
             # A first version of this fixture gave the null rows the EMPTY
             # STRING, which the fixture ALSO carries as a real value — so an
             # implementation that counted the null row added a value that was
-            # already counted and the arm passed. Measured: deleting the null
-            # skip left this test GREEN. The payload has to be a value the
+            # already counted and the arm passed. Counting the null row
+            # must change the answer. The payload has to be a value the
             # correct answer does NOT contain.
             vals.append(String("null-payload-carried-by-no-valid-row"))
         elif bucket == UInt64(1):
@@ -554,16 +550,16 @@ def test_long_values_past_the_hash_stripe_loop_are_distinguished() raises:
 
 
 # =============================================================================
-# §10 — ⭐ A REAL FINGERPRINT COLLISION. The arm that makes the byte compare
+# §10 — A REAL FINGERPRINT COLLISION. The arm that makes the byte compare
 #       load-bearing rather than decorative.
 # =============================================================================
 #
 # The kernel probes on the LOW 32 BITS of the value's xxHash64 and confirms every
 # match with `bytes_equal`. Without a genuine collision, the confirm is dead code
-# in every test: MEASURED, deleting the pre-filter's byte compare (verifying the
-# cached entry against ITSELF) left all 19 other arms GREEN. These two strings
+# in every other test: a byte compare that always succeeded would pass them
+# all. These two strings
 # were found by brute force over the FIXED-WIDTH keyspace `"c%06d"`, with an
-# independent Python reimplementation of the same xxHash64 spec: they are the
+# independent implementation of the same xxHash64 spec: they are the
 # SAME BYTE LENGTH, their hashes agree in the low 32 bits (the fingerprint), in
 # the top 3 bits (the partition at 8 workers) and in the low 14 (the pre-filter
 # slot), and they differ overall. `cd_string_value_hash` re-derives every one of
@@ -587,15 +583,12 @@ def test_the_collision_pair_still_collides() raises:
     var ha = cd_string_value_hash(_COLLIDE_A)
     var hb = cd_string_value_hash(_COLLIDE_B)
     assert_true(_COLLIDE_A != _COLLIDE_B)
-    # ⭐⭐ SAME BYTE LENGTH, AND THIS IS THE HALF THAT MAKES `bytes_equal`
+    # SAME BYTE LENGTH, AND THIS IS THE HALF THAT MAKES `bytes_equal`
     # LOAD-BEARING RATHER THAN THE LENGTH CHECK. Every confirm in this kernel
-    # is spelled `clen == vlen and bytes_equal(...)`. The pair this arm shipped
-    # with on 2026-09-19 was "c85878"/"c133100" — SIX bytes against SEVEN — so
-    # `clen == vlen` alone separated them and the byte compare was STILL dead
-    # code in all 22 cases, including this one. MEASURED by adversarial review:
-    # replacing all three confirms with a bare `clen == vlen` passed 22 of 22.
-    # With an EQUAL-LENGTH pair the length check cannot discriminate and only
-    # the bytes can.
+    # is spelled `clen == vlen and bytes_equal(...)`. A pair of different
+    # lengths would be separated by `clen == vlen` alone and leave the byte
+    # compare untested. With an EQUAL-LENGTH pair the length check cannot
+    # discriminate and only the bytes can.
     assert_equal(_COLLIDE_A.byte_length(), _COLLIDE_B.byte_length())
     # same 32-bit fingerprint (the probe gate) ...
     assert_equal(
@@ -667,7 +660,7 @@ def test_the_collision_pair_survives_beside_other_values() raises:
 
 def _byte_skewed_fixture() raises -> List[String]:
     """Three quarters EMPTY strings, then a quarter of ~200-byte values — the
-    cbq05 shape in miniature: equal-ROW slices put all the bytes in the last
+    a mostly-empty column in miniature: equal-ROW slices put all the bytes in the last
     quarter of the slices."""
     var n = _CDSTR_MIN_ROWS + 4096
     var out = List[String](capacity=n)

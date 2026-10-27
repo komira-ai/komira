@@ -12,8 +12,8 @@
 #       a live `sleep 30` -> any_child True, exited_pid 0, and it is still
 #       alive after the probe.
 #   test_an_exited_child_is_reported_and_left_reapable
-#       a child that exited with 7, awaited by polling the probe until it
-#       names the pid -> any_child True, exited_pid == its pid; then
+#       a child that exited with 7, awaited by polling the probe (no cap, no
+#       deadline) until it names the pid -> any_child True, exited_pid == its pid; then
 #       waitpid(pid, WNOHANG) still collects exit code 7, and a second probe
 #       says no child. Goes red when the shim drops WNOWAIT: the probe that
 #       first sees the exit reaps it, and the waitpid fails with ECHILD.
@@ -41,27 +41,25 @@ def _spawned(pid: Int32) raises:
 
 
 def _await_exited_unreaped(pid: Int32) raises -> String:
-    """Poll the (non-reaping) probe 5 ms apart, up to 1000 times, until it names
-    `pid` as an exited, unreaped child. Returns "" on success, else what went
-    wrong. Polling the waitid state itself, not an exit notification: on XNU
-    EVFILT_PROC NOTE_EXIT may fire before the child is a waitable zombie."""
-    var polls = 0
+    """Poll the (non-reaping) probe until it names `pid` as an exited, unreaped
+    child. Returns "" on success, else what went wrong. There is no iteration
+    cap and no deadline: the poll ends on the event it waits for, or when the
+    probe says the child is gone altogether (reaped by the probe itself, so
+    the exit can never be seen). A child that never exits is stopped by the
+    gate hang limit (`test_hang_limit_s`, "Time limits" in
+    tools/build/mojo/README.md). Polling the waitid state itself, not an exit
+    notification: on XNU EVFILT_PROC NOTE_EXIT may fire before the child is a
+    waitable zombie."""
     while True:
         var p = proc_probe_children()
         if p.exited_pid == pid:
             return String("")
-        polls += 1
-        if polls >= 1000:
+        if not p.any_child:
             return (
                 String("child ")
                 + String(pid)
-                + String(" not seen as exited after 1000 probes 5 ms apart")
-                + String(" (last probe:")
-                + String(" any_child ")
-                + String(p.any_child)
-                + String(", exited_pid ")
-                + String(p.exited_pid)
-                + String(")")
+                + String(" vanished without being seen as exited")
+                + String(" (the probe reaped it, or it was reaped elsewhere)")
             )
         sleep(Float64(0.005))
 

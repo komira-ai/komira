@@ -11,6 +11,10 @@ module runs against them unchanged.
     certificate, no schedule, no event trigger, no network type, no registry, no public ingress); the offline proof that a graph a cloud cannot
     host is refused before anything is created.
 
+The shapes and their lowering are kci_cloud's (`kci_cloud.shape`, shared with
+every built-in adapter); this package re-exports them, realizes the lowered
+nodes and keeps the memory they deploy into.
+
 `FakeCloud` takes a provider shape (`ProviderShape`: generic by default;
 `aws`, `gcp`, `azure` and `onprem` are the shaped fakes), the per-cloud table of roles
 and provider kinds each catalog type lowers to. The built-in clouds are a
@@ -38,7 +42,14 @@ its name. The faulty variant is built from constructor arguments:
 create meet a second apply's object.
 """
 
-from kci_cloud_fake.fake_store import FakeStore, FakeView
+from kci_cloud_fake.fake_store import (
+    CELL_SCOPE,
+    FakeStore,
+    FakeView,
+    OUTSIDE_PREFIX,
+    UNMAPPED_ROLE,
+)
+from kci_cloud_fake.roles import FAKE_ROLE_PREFIX, fake_role, fake_role_table
 from kci_cloud_fake.nodes import (
     FakeNode,
     fake_account_name,
@@ -55,7 +66,11 @@ from kci_cloud_fake.nodes import (
 )
 from kci_cloud_fake.clouds import FakeLimitedCloud, FakeCloud
 from kci_cloud_fake.existing import digest_fields, planted_like, read_existing, release
-from kci_cloud_fake.shapes import (
+from kci_cloud.shape import (
+    GRANTS_DERIVED,
+    GRANTS_LABELLED,
+    lower_shape,
+    shape_limits,
     GPU_REASON_AWS,
     GPU_REASON_UNDECIDED,
     GrantRow,
@@ -79,11 +94,11 @@ from kci_cloud_fake.shapes import (
     helper_role,
     shape_named,
 )
-from kci_cloud_fake.messaging import pull_shape
-from kci_cloud_fake.workloads import lower_run, workload_limits
-from kci_cloud_fake.triggers import folded_fields, folds, lower_trigger, trigger_limits
-from kci_cloud_fake.secrets import SECRET_NAMED, lower_secret, secret_env_fields
-from kci_cloud_fake.network import (
+from kci_cloud.shape import pull_shape
+from kci_cloud.shape import lower_run, workload_limits
+from kci_cloud.shape import folded_fields, folds, lower_trigger, trigger_limits
+from kci_cloud.shape import SECRET_NAMED, lower_secret, secret_env_fields
+from kci_cloud.shape import (
     fake_ip_address,
     fake_network_name,
     fake_subnet_name,
@@ -93,9 +108,9 @@ from kci_cloud_fake.network import (
     network_input,
     network_limits,
 )
-from kci_cloud_fake.registry import fake_registry_address, lower_registry
-from kci_cloud_fake.metadata import MetadataLimits, NameRule, fake_physical_name, metadata_limits
-from kci_cloud_fake.dns import (
+from kci_cloud.shape import fake_registry_address, lower_registry
+from kci_cloud.shape import MetadataLimits, NameRule, fake_physical_name, metadata_limits
+from kci_cloud.shape import (
     dns_limits,
     fake_certificate_name,
     fake_zone_name,

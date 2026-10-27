@@ -5,7 +5,7 @@
 #
 # The typed-stage COUNT(DISTINCT) buffers every fed value per group and counts
 # the distinct ones at finalize. A serial dedup of one large buffer is the whole
-# wall of a scalar `count(DISTINCT user_id)` over 100M rows. This primitive
+# wall of a scalar `count(DISTINCT <integer column>)` over a very large column. This primitive
 # partitions the values by a value HASH into P disjoint partitions, dedups each
 # partition in PARALLEL (`run_with_state`, one task per partition) and SUMS the
 # per-partition distinct counts. Equal values hash identically, so they land in
@@ -71,11 +71,11 @@ comptime _CD_RADIX_TARGET_PART_VALUES: Int = 65536
 # keep each table L2-resident up to ~256M values.
 comptime _CD_RADIX_MAX_PARTITIONS: Int = 4096
 # The default arm threshold: at or above this value count the parallel-scatter
-# arm runs. Measured at 22 workers, the serial scatter costs ~5.4 ns of wall
-# per value on the driver and the parallel one ~0.49 ns per value plus one
-# extra fork wave F, so the break-even is n* = F / 4.91 ns: 20K to 410K values
-# for F from 0.1 to 2 ms. 125,000 sits near the geometric centre of that band,
-# and it keeps the serial-scatter arm reachable (from `_CD_RADIX_MIN_ROWS`).
+# arm runs. The parallel scatter costs one extra fork wave but a much smaller
+# per-value cost than the serial scatter on the driver, so it only pays off
+# above some value count. 125,000 sits in the middle of the plausible
+# break-even band, and it keeps the serial-scatter arm reachable (from
+# `_CD_RADIX_MIN_ROWS`).
 comptime _CD_RADIX_PARALLEL_SCATTER_MIN: Int = 125_000
 
 

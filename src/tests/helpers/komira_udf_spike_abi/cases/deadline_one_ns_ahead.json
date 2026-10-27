@@ -1,0 +1,12 @@
+{
+ "name": "deadline_one_ns_ahead",
+ "defect": "a deadline 1 ns in the future is treated as no deadline (the smallest future deadline the option allows); on the virtual clock it passes at the runtime's second clock read",
+ "run": "call_batch",
+ "entry": "slow_loop",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "options": {"deadline_after_ns": 1},
+ "input": {"length": 3, "columns": [{"type": "int64", "values": [1, 2, 3]}]},
+ "expect": {"status": "ERR_DEADLINE", "run_error": "UDF_DEADLINE_EXCEEDED", "message": "nonempty"}
+}

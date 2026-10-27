@@ -1,13 +1,24 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/native:shared.bzl", "native_shared_library")
 
 # Byte-stream codec trait and the eight codec implementations.
 mojo_library(
     name = "komira_compression",
+    # Its C ships in its package as komira_compression_native below (lib/libkomira_compression_native.so.1).
+    native = ":komira_compression_native",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_lz4:komira_lz4",
         "//src/komira_zlib:komira_zlib",
         "//third_party/snappy:snappy",
+    ],
+    # Opened at run time (OwnedDLHandle, codec_libraries.mojo): the conda
+    # package requires the conda-forge package
+    # tools/build/package/system_libs.bzl names for each.
+    dlopen = [
+        "libbz2.so.1.0",
+        "liblzma.so.5",
+        "libzstd.so.1",
     ],
     test_data = {
         "tests/test_gzip_lz4_frame_conformers.mojo": {
@@ -20,6 +31,30 @@ mojo_library(
         "tests/test_codec_libraries.mojo",
         "tests/test_gzip_lz4_frame_conformers.mojo",
         "tests/test_lz4_raw_conformer_roundtrip.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# libkomira_compression_native.so.1: the C this library owns, as its own
+# shared library exporting the names its callers call
+# (tools/build/native/README.md, "Each library's shared library"). Built and
+# checked here, and packed into the library's conda package (`native`).
+native_shared_library(
+    name = "komira_compression_native",
+    archives = [
+        "//third_party/snappy:snappy",
+    ],
+    callers = [
+        ":komira_compression",
+    ],
+    # snappy is C++: zig's libc++ and libc++abi, static and local.
+    cxx_runtime = True,
+    library = "komira_compression",
+    # Every weak undefined symbol of the library, recorded from its first
+    # green link (checks 3 and 7 hold it to exactly this list):
+    weak_undefined = [
+        # zig's C runtime (crti.o): the profiling hook, absent unless -pg.
+        "__gmon_start__",
     ],
     visibility = ["PUBLIC"],
 )
