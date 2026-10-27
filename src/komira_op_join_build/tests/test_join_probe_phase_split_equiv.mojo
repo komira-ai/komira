@@ -61,7 +61,7 @@
 #                      `_probe_row_walk` resume tail runs.
 #   gate_boundary      the SIZE GATE, driven from BOTH sides over ONE fixture.
 #
-# ⚠ THE FIXTURES ARE TINY AND THE GATE IS PRODUCTION-SIZED (32 MiB of index,
+# WARNING: THE FIXTURES ARE TINY AND THE GATE IS PRODUCTION-SIZED (32 MiB of index,
 # ~1M build rows). Every case therefore moves the THRESHOLD, not the fixture:
 # `join_phase_split_configure(True, 1)` admits everything. Building a 1M-row
 # build side per case would make this file a multi-minute test that still could
@@ -252,8 +252,8 @@ def _check(
 ) raises:
     """Run one fixture through BOTH arms at one chunk capacity and compare.
 
-    ⚠ THE BUILDER IS REBUILT PER ARM AND THAT IS DELIBERATE. Reusing one would
-    be faster and would also let a phase-split defect that MUTATED the index
+    WARNING: THE BUILDER IS REBUILT PER ARM AND THAT IS DELIBERATE. Reusing one would
+    be faster and would also let a phase-split defect that modified the index
     (it holds `self` by borrow and must not) pass unnoticed, because the
     control arm would then be probing an index the treatment arm had already
     touched.
@@ -436,7 +436,7 @@ def test_resume_mid_chain() raises:
     it may start batching, or it would either re-emit the row's earlier matches
     or carry a half-walked row through every phase.
 
-    ⚠ The capacities are PRIME-ish against the fan-out on purpose. A capacity
+    WARNING: The capacities are PRIME-ish against the fan-out on purpose. A capacity
     that is an exact multiple of the per-row match count only ever cuts on a row
     boundary, and this case would then never reach the path it is named for.
     """
@@ -481,7 +481,7 @@ def test_gate_boundary_both_sides() raises:
     (must fire) and one byte ABOVE it (must decline), and the answer is asserted
     identical in both dispositions.
 
-    ⛔ ONE FIXTURE, TWO THRESHOLDS — NOT TWO FIXTURES. A gate test that shows a
+    NOTE: ONE FIXTURE, TWO THRESHOLDS — NOT TWO FIXTURES. A gate test that shows a
     big join firing and a small join declining cannot distinguish a working gate
     from one that keys on something else entirely that happens to correlate with
     size. Holding the fixture FIXED and moving only the threshold makes the
@@ -547,7 +547,7 @@ def test_gate_boundary_both_sides() raises:
 def test_gate_refuses_small_chunk_capacity() raises:
     """A `chunk_capacity` below `JOIN_PS_MIN_HEADROOM` must DECLINE.
 
-    ⛔ THIS IS A CORRECTNESS REFUSAL, NOT A TUNING ONE, AND ITS FAILURE MODE IS
+    NOTE: THIS IS A CORRECTNESS REFUSAL, NOT A TUNING ONE, AND ITS FAILURE MODE IS
     A SILENTLY SHORT JOIN. The phase-split returns a SHORT CHUNK rather than a
     partial batch when the caller's buffer is nearly full, and a zero-length
     chunk is the driver's "probe exhausted" signal. Admitted at a capacity below

@@ -49,8 +49,7 @@ def _probe_semi[
     the hash table fits entirely in L1/L2 cache. In this case, the
     Bloom filter check (FNV-1a hash + 8 block reads per probe) is MORE
     expensive than a direct HT probe (1 hash + 1-2 memory reads). We
-    skip the Bloom filter for small build sides. Measured: CB-20 with
-    478 build entries, 500K probes: bloom-skip path saves ~2.5ms.
+    skip the Bloom filter for small build sides.
 
     Args:
         probe_keys: The probe-side join key column.
@@ -113,8 +112,8 @@ def _probe_semi[
         # mirrors probe_inner_into's two-stage prefetch (stage 1: HT
         # bucket; stage 2: build_keys entry at the chain head). Anti-
         # join with bloom-skip and this same prefetch pattern saw
-        # ~30% speedup on C-4 (1M×1M, near-total overlap); semi-join
-        # with near-total-match gets the same win on C-3.
+        # a large near-total-overlap join saw a ~30% speedup; semi-join
+        # with near-total-match gets the same win.
         # NOT-VECTORIZABLE: HJ probe — chain pointer traversal is
         # data-dependent.
         for probe_idx in range(n):
@@ -213,7 +212,7 @@ def _probe_semi_count[
     excluded identically). Honors NO selection mask — the count-only probe op
     falls back to the `probe_semi` + `_sel_keep_single` + `len` path when a
     selection mask is present (correctness), so this scalar counter is reached
-    only for the no-mask probe (cb20).
+    only for the no-mask probe.
     """
     var n = probe_keys.length
     var count = 0
@@ -286,7 +285,7 @@ def _probe_semi_count[
             if probe_has_nulls and probe_keys.is_null(probe_idx):
                 continue
             # reuse the HT hash for the bloom pre-check
-            # (cb20 semi COUNT(*) hot path — kills the redundant xxHash64).
+            # (the semi COUNT(*) hot path: avoids the redundant xxHash64).
             var h = _hash_join_key(probe_key)
             if b._use_bloom and not b.bloom.might_contain_join_key(
                 probe_key, h
@@ -342,7 +341,7 @@ def _probe_anti[
     rows), stage-1 prefetches the HT bucket _PREFETCH_DISTANCE ahead and
     stage-2 prefetches the build_keys entry the bucket points to. This
     is the same latency-hiding pattern
-    probe_inner_into has had since day 1 (C-4 anti-join previously
+    probe_inner_into has had since day 1 (the anti-join previously
     lacked it). Bloom filter is NOT used for anti-join: when the build
     side is large and the typical anti-join has significant key overlap
     (e.g. 1M × 1M, <20 unmatched rows), bloom.might_contain returns
