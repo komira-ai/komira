@@ -27,6 +27,8 @@ TARGETS = [
     "komira//:workflow_lint",
     "komira//bin/kci:runnable_readme_examples",
     "komira//bin/kci:test_kci_process",
+    "komira//node:load_test",
+    "komira//node:session_test",
     "komira//packaging/images/base:komira_base",
     "komira//release/ci:check_release_ref",
     "komira//release/ci:main_red",

@@ -1,0 +1,68 @@
+load("@komira//tools/build/node:defs.bzl", "c_shared_lib", "node_addon", "node_binding_test")
+
+# The Node-API addon over libkomira, built with the pinned zig against the
+# headers of the pinned node. README.md says what it exposes and why it opens
+# the library with dlopen.
+node_addon(
+    name = "komira_addon",
+    srcs = ["komira_addon.c"],
+)
+
+# libkomira with the Mojo runtime and its native owners in lib/ beside it: the
+# directory the tests hand to load().
+LIBKOMIRA = "komira//src/komira_so:libkomira[runnable]"
+
+# Stand-ins for libkomira that the addon must refuse: a library of ABI major 2,
+# one of major 0 (version 0.999), and one without komira_plan_render.
+c_shared_lib(
+    name = "fake_v2",
+    srcs = ["tests/fake_libkomira.c"],
+    copts = ["-DFAKE_VERSION=2000"],
+    out = "libkomira_fake_v2.so",
+)
+
+c_shared_lib(
+    name = "fake_v0",
+    srcs = ["tests/fake_libkomira.c"],
+    copts = ["-DFAKE_VERSION=999"],
+    out = "libkomira_fake_v0.so",
+)
+
+c_shared_lib(
+    name = "fake_no_render",
+    srcs = ["tests/fake_libkomira.c"],
+    copts = ["-DFAKE_OMIT_PLAN_RENDER"],
+    out = "libkomira_fake_no_render.so",
+)
+
+# The addon before and while the library loads: the refusals of load().
+node_binding_test(
+    name = "load_test",
+    srcs = ["load.test.mjs"],
+    data = {
+        "komira_addon.node": ":komira_addon",
+        "libkomira": LIBKOMIRA,
+        "fake/libkomira_fake_v2.so": ":fake_v2",
+        "fake/libkomira_fake_v0.so": ":fake_v0",
+        "fake/libkomira_fake_no_render.so": ":fake_no_render",
+    },
+)
+
+# An addon of the tests whose external value is not a session.
+node_addon(
+    name = "foreign_external",
+    srcs = ["tests/foreign_external.c"],
+)
+
+# The calls on the real library: the version, an error with its last error,
+# the Parquet schema, the plan text, and the session's lifetime.
+node_binding_test(
+    name = "session_test",
+    srcs = ["session.test.mjs"],
+    data = {
+        "komira_addon.node": ":komira_addon",
+        "libkomira": LIBKOMIRA,
+        "foreign_external.node": ":foreign_external",
+        "two_columns.parquet": "komira//src/komira_so:tests/fixtures/two_columns.parquet",
+    },
+)
