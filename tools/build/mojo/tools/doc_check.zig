@@ -47,35 +47,35 @@ fn isIndex(s: []const u8) bool {
 /// and unique.
 pub fn declarations(a: std.mem.Allocator, flat: []const u8) ![]const []const u8 {
     var names = std.StringHashMap([]const u8).init(a);
-    var objs = std.ArrayList([]const u8).init(a);
+    var objs = std.ArrayList([]const u8).empty;
     var lines = std.mem.splitScalar(u8, flat, '\n');
     while (lines.next()) |line| {
-        var fields = std.ArrayList([]const u8).init(a);
+        var fields = std.ArrayList([]const u8).empty;
         var it = std.mem.splitScalar(u8, line, '\t');
-        while (it.next()) |f| try fields.append(f);
+        while (it.next()) |f| try fields.append(a, f);
         const nf = fields.items.len;
         if (nf < 2 or !std.mem.eql(u8, fields.items[nf - 2], "name")) continue;
         // The object: fields 1 and 2 .. NF-2 (1-based) joined by tabs.
-        var obj = std.ArrayList(u8).init(a);
-        try obj.appendSlice(fields.items[0]);
+        var obj = std.ArrayList(u8).empty;
+        try obj.appendSlice(a, fields.items[0]);
         var i: usize = 1;
         while (i + 2 < nf) : (i += 1) {
-            try obj.append('\t');
-            try obj.appendSlice(fields.items[i]);
+            try obj.append(a, '\t');
+            try obj.appendSlice(a, fields.items[i]);
         }
-        const key = try obj.toOwnedSlice();
+        const key = try obj.toOwnedSlice(a);
         try names.put(key, fields.items[nf - 1]);
-        try objs.append(key);
+        try objs.append(a, key);
     }
-    var out = std.ArrayList([]const u8).init(a);
+    var out = std.ArrayList([]const u8).empty;
     for (objs.items) |o| {
-        var f = std.ArrayList([]const u8).init(a);
+        var f = std.ArrayList([]const u8).empty;
         var it = std.mem.splitScalar(u8, o, '\t');
-        while (it.next()) |x| try f.append(x);
+        while (it.next()) |x| try f.append(a, x);
         if (!std.mem.eql(u8, f.items[0], "decl")) continue;
-        var key = std.ArrayList(u8).init(a);
-        try key.appendSlice("decl");
-        var path = std.ArrayList(u8).init(a);
+        var key = std.ArrayList(u8).empty;
+        try key.appendSlice(a, "decl");
+        var path = std.ArrayList(u8).empty;
         var ok = true;
         var i: usize = 1;
         while (i < f.items.len) : (i += 2) {
@@ -83,54 +83,54 @@ pub fn declarations(a: std.mem.Allocator, flat: []const u8) ![]const []const u8 
                 ok = false;
                 break;
             }
-            try key.append('\t');
-            try key.appendSlice(f.items[i]);
-            try key.append('\t');
-            try key.appendSlice(f.items[i + 1]);
+            try key.append(a, '\t');
+            try key.appendSlice(a, f.items[i]);
+            try key.append(a, '\t');
+            try key.appendSlice(a, f.items[i + 1]);
             const nm = names.get(key.items) orelse {
                 ok = false;
                 break;
             };
-            if (path.items.len > 0) try path.append('.');
-            try path.appendSlice(nm);
+            if (path.items.len > 0) try path.append(a, '.');
+            try path.appendSlice(a, nm);
         }
-        if (ok and path.items.len > 0) try out.append(try path.toOwnedSlice());
+        if (ok and path.items.len > 0) try out.append(a, try path.toOwnedSlice(a));
     }
     std.mem.sort([]const u8, out.items, {}, lessThan);
-    var uniq = std.ArrayList([]const u8).init(a);
+    var uniq = std.ArrayList([]const u8).empty;
     for (out.items) |p| {
-        if (uniq.items.len == 0 or !std.mem.eql(u8, uniq.items[uniq.items.len - 1], p)) try uniq.append(p);
+        if (uniq.items.len == 0 or !std.mem.eql(u8, uniq.items[uniq.items.len - 1], p)) try uniq.append(a, p);
     }
-    return uniq.toOwnedSlice();
+    return uniq.toOwnedSlice(a);
 }
 
 /// The lines in which `golden` and `json` differ, from the first difference to
 /// the last, golden's with `-` and json's with `+`, at most `max` lines.
 pub fn differences(a: std.mem.Allocator, golden: []const u8, json: []const u8, max: usize) ![]u8 {
-    var g = std.ArrayList([]const u8).init(a);
-    var j = std.ArrayList([]const u8).init(a);
+    var g = std.ArrayList([]const u8).empty;
+    var j = std.ArrayList([]const u8).empty;
     var it = std.mem.splitScalar(u8, golden, '\n');
-    while (it.next()) |l| try g.append(l);
+    while (it.next()) |l| try g.append(a, l);
     it = std.mem.splitScalar(u8, json, '\n');
-    while (it.next()) |l| try j.append(l);
+    while (it.next()) |l| try j.append(a, l);
     var head: usize = 0;
     while (head < g.items.len and head < j.items.len and std.mem.eql(u8, g.items[head], j.items[head])) head += 1;
     var tail: usize = 0;
     while (tail < g.items.len - head and tail < j.items.len - head and
         std.mem.eql(u8, g.items[g.items.len - 1 - tail], j.items[j.items.len - 1 - tail])) tail += 1;
-    var out = std.ArrayList(u8).init(a);
+    var out = std.ArrayList(u8).empty;
     var n: usize = 0;
     for (g.items[head .. g.items.len - tail]) |l| {
-        if (n == max) return out.toOwnedSlice();
-        try out.writer().print("-{s}\n", .{l});
+        if (n == max) return out.toOwnedSlice(a);
+        try out.writer(a).print("-{s}\n", .{l});
         n += 1;
     }
     for (j.items[head .. j.items.len - tail]) |l| {
-        if (n == max) return out.toOwnedSlice();
-        try out.writer().print("+{s}\n", .{l});
+        if (n == max) return out.toOwnedSlice(a);
+        try out.writer(a).print("+{s}\n", .{l});
         n += 1;
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(a);
 }
 
 pub fn main() !void {

@@ -60,6 +60,11 @@
 #   published    release, conda or no
 #   unmeasured   the files no test compiles, comma-separated, or -
 #   note         why it is not OK, or -
+# then, when a gate left out generated sources (first line `# @generated`,
+# covcheck/generated.mojo), one line each, sorted, after every row:
+#   generated<TAB><repository path of the file>
+# census_files split writes each into the census file of the package that holds
+# the path, so a file that gains the marker is a diff of that file.
 set -eu
 
 usage() { echo "census.sh: $*" >&2; echo "usage: census.sh run|collect --out <dir> ..." >&2; exit 2; }
@@ -216,4 +221,14 @@ REPORT=$OUT/$(cat "$OUT/last").json
         fi
     done < "$OUT/collected.tsv" | LC_ALL=C "$BB" sort -t "$(printf '\t')" -k1,1
 } > "$OUT/census.tsv"
+# After the rows, one `generated<TAB><path>` line per generated source the
+# gates left out (a gate result's "generated_paths"), sorted, each once:
+# census_files generated reads the JSON (census_files.zig).
+set --
+while IFS="$(printf '\t')" read -r _ _ _ st f _; do
+    if [ "$st" = OK ]; then set -- "$@" "$PWD/$f"; fi
+done < "$OUT/collected.tsv"
+case $OUT in /*) ABS_OUT=$OUT ;; *) ABS_OUT=$PWD/$OUT ;; esac
+./buck2 run //tools/build/coverage:census_files -- generated "$ABS_OUT/generated.tsv" "$@"
+cat "$OUT/generated.tsv" >> "$OUT/census.tsv"
 echo "census.sh: wrote $OUT/census.tsv ($("$BB" grep -c -v '^#' "$OUT/census.tsv") lines)" >&2

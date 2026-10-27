@@ -218,6 +218,28 @@ Each path (`covcheck/paths.mojo`), in this order:
    `--include-tests` too: it has no source). Any other unmapped path stays
    an error.
 
+**Generated sources.** A `.mojo` file whose first line is the generator
+header is left out of coverage: after an optional UTF-8 byte order mark, the
+line starts with exactly `# @generated` (a hash, one space, the token),
+followed by the end of the line or a space or tab. Such a file is neither
+measured nor counted as a file no test compiled (`UnmeasuredFile`), and it is
+in no floor or hold. A test that reaches it changes nothing: its line records,
+its branch records and its mutants are dropped. Nothing else marks a file: not
+the token elsewhere on line 1 (`# not @generated`, `#@generated`), not blanks
+before the hash, not a docstring that opens line 1 with the token, not the
+token on a later line or in a docstring or string literal, and an empty file
+is not generated. A CR before the first line feed (a CRLF file) is no part of
+the match (`covcheck/generated.mojo`, tests `tests/test_generated_marker.mojo`).
+
+The exclusion is visible. The summary's "Set aside" list names the files
+(the first ten, then how many more), and the result JSON holds
+`generated_files` and `generated_paths`. The census writes each package's
+generated paths into its committed `coverage_census.tsv`, one
+`generated<TAB><path>` line after the rows (`census.md`), so a hand-written
+file that gains the header shows as a diff of that file when the census is
+refreshed. A generated source that is not a committed file (a build output)
+is not staged for the gate at all (below).
+
 A file's package is the nearest directory above it holding a `BUCK` file
 (`src/m/x/y.mojo` is in `src/m`); `(root)` when only the top directory holds
 one; an error when none does. Files under `tests/` directly inside a package
@@ -325,7 +347,7 @@ and the result JSON splits them:
 |---|---|---|---|
 | `plain` | neither below | `unrecorded_functions` | evidence no test reaches it; the class a census counts |
 | `always_inline` | a decorator line right above it starts with `@always_inline` | `unrecorded_functions_unreliable` | none: the body is inlined into its callers and what is left may be attributed to the caller's lines or folded away |
-| `comptime_if` | its body (a nested function's lines included) holds a `comptime if` or `@parameter` line, wherever: one such line moves the whole function, and a closure holding one moves the function around it | `unrecorded_functions_unreliable` | none: a body folded to a constant, or wholly in an arm dropped on this platform or build, emits no line though tests call it |
+| `comptime_if` | its own lines (a nested function's left out: a closure is a function of its own) hold a `comptime if`, `comptime elif` or `comptime else` line, or a `@parameter` over a statement (not over a nested `def`, which is a closure), with the plain `elif` / `else` blocks that continue the chain at the same indent: the lines of those arms are its `arms` | `unrecorded_functions_unreliable` | none: a body folded to a constant, or wholly in an arm dropped on this platform or build, emits no line though tests call it |
 
 Known false positives, all seen on real reports: an `@always_inline` body
 whose code the compiler attributed to the caller (a test calls it, its
@@ -359,6 +381,72 @@ have no named `DW_TAG_subprogram` at all, only a compile unit named
 `<unknown>` with a line table, and a line-tables-only subprogram carries no
 `decl_file` or `decl_line` anyway; the line rows are the one place a
 library function shows up.
+
+## The code no test compiled (buildrules' uncompiled report)
+
+A mojo_package's `:coverage` ends its reports with `__coverage__/uncompiled.cobertura.xml` and
+its branch records with `__coverage__/uncompiled.branches.info` (buildrules, `docs/contract.md`,
+"uncompiled"): the executable lines of every function none of whose lines has a record, as found
+and not hit, and the arms of their decision words, as not taken. Those two files, told by their
+names and by the directory `__coverage__/` they sit in (a file of the same name elsewhere is a
+test's report), are read after every other report, and counted like any report **except** for the
+shapes that look like an uncalled function without being one:
+
+- an `@always_inline` function (class `always_inline` above) whose name a **hit line outside it
+  calls**: all its own lines and arms are left out;
+- a function with compile-time arms (class `comptime_if`) whose name a hit line calls: the lines
+  and arms **inside its arms** (`comptime if`/`elif`/`else` blocks, a `@parameter` statement) are left
+  out; its lines outside the arms are counted;
+- nothing else: a plain function, an inlined or gated function no hit line calls, and a nested
+  closure under its own class (the outer function keeps its own) are counted, as is every line of a
+  file no test compiled (above).
+
+The evidence is **textual and per package**, and counts when in doubt. It is a line of a test's report (its
+test source included) with a hit, in the function's own package (a call in another package is none), whose
+code (not its comment or strings, nor the interior of a multi-line string) holds a call: the name followed by
+`(` or `[`. A declaration line is no call. Which call is evidence for which function:
+- a **method** (a declaration that is indented, in a `struct T`): only a call that names the declaring type
+  as the receiver, `T(x).m(` or `T.m(`. Any other receiver, a variable or an unknown one included, is no
+  evidence, whether or not the package declares the name twice (`a != b` is no call of `__ne__`: write
+  `T(a).__ne__(b)`);
+- a **free function**: only a hit `f(` in the same file, or in a file that imports the module
+  (`from pkg.module import ...`, `import pkg.module`) or the name; a hit call from any other file is none. A free
+  function whose name the package declares more than once has none.
+A call that this cannot place counts the function as uncovered: no call graph is built, no type is inferred.
+
+**Platform-gated functions** (`covcheck/platform_gate.mojo`). A function of the uncompiled report is also
+left out when it is platform-gated: it has at least one use (its own body not counted) and **every** use is
+dropped on the measured target. This direction hides code, so a use is anything that could be one: any
+occurrence of the function's name as an identifier in the code of its package (tests included): a call
+`name(`, `x.name(` or `mod.name(`, a function passed as a value, a method reference. Comments, strings (a
+multi-line string's interior too), import lines and the name a declaration gives are not uses; an alias
+(`from x import name as z`) makes every use of `z` a use of `name`; a function of the same name elsewhere in
+the package that is used live keeps it counted, and a name the package declares more than once is never gated (it is
+counted, as the call evidence counts it). A use is dropped when it is in a function the reports show
+compiled (one of its own lines has a record), inside one of that function's compile-time arms
+(`comptime if`/`elif`/`else`, `@parameter`, and the plain `elif`/`else` continuing such a chain), **and no
+line of that arm has a record**: a line without a record in an arm that has others is a continuation line or
+a line the compiler attributed elsewhere, and the arm was compiled. A use on the line of the `comptime if`
+condition is live: the condition runs whichever arm is compiled. A use inside a platform-gated function is
+dropped too, so a chain of them is gated as a whole (a fixpoint). The target is the one the reports were made
+for: nothing here names x86 or arm64. Everything else counts: no use (an uncalled function), one live use
+(outside every arm, in an arm that has a record, in a function no report shows compiled that is not itself
+gated). Functions that use only each other, reachable only from a dropped arm, stay counted: the fixpoint
+starts from nothing gated, and each function needs a dropped use. A function the call evidence already leaves
+out is not reported as gated as well. The gated functions are listed with their line counts: `platform_gated`
+(`package`, `path`, `function`, `line`, `lines`), `platform_gated_functions`, `platform_gated_lines` and
+`platform_gated_arms` in the result JSON, and all named in the summary's "Set aside", apart from
+`excluded_lines`. A package's line hold then reads: every counted line is hit, and what was left out is listed.
+
+What is left out is reported, not hidden: `excluded_lines`, `excluded_arms` and `excluded_files`
+(`package`, `path`, `lines`, `arms`) in the result JSON, and a line in the summary's "Set aside"
+when any is left out. The functions stay in `unrecorded_functions_unreliable` only when no line of
+theirs has a record in any report. A file the uncompiled report leaves nothing of counts the same
+as one that no report names: from its source, without the lines that were left out.
+
+So a `line` hold of a package built with `mojo_package` means: every counted line is hit, and a line
+left out is one of an inlined or gated function a test was seen to call. The package's
+`coverage_floor.txt` is buildrules' own figure, which leaves nothing out.
 
 ## Exemptions
 
@@ -475,7 +563,8 @@ action per library, `mojo_cov_gate` (`cov_gate`, run from
 `:cov_gate`):
 
 1. The library's sources are staged at their repository paths: every
-   `srcs` file that is a source (a generated one is not measured), every
+   `srcs` file that is a source (a generated build output is not staged; a
+   committed source marked `# @generated` is staged and left out by covcheck), every
    test source (a generated one at its output path in the package), and a
    BUCK file at the package's directory, so covcheck's nearest-BUCK rule
    names the package. A tests-cell package is under
@@ -632,7 +721,11 @@ is not a one-line change today:
   `mojo_gcp_client`: its hand-written sources pass through the generator
   too) stages no source, so its gate is `NotMeasured` and fails in enforce
   mode; its hand-written code is never measured. It needs measuring (by
-  its repository path) or a documented exemption.
+  its repository path) or a documented exemption. A library whose
+  generated sources are committed files marked `# @generated` on their first
+  line (see "Generated sources" above) leaves those files out of its
+  numbers; a library with nothing else to measure is `NotMeasured` all the
+  same, and its hand-written files are measured.
 - **Open decision: files only a README or a `coverage_tests` run reaches,
   in a library whose gate reads branch records.** Those runs give line
   coverage only, so such a file has line records and no branch record:
@@ -725,8 +818,8 @@ metric: most packages have no branch measurement (only the libraries of
 alone until its branches are measured at the target.
 
 **A hold is never dropped.** The per-change check refuses a change that
-drops one: `affected --base` (tools/build/ci/affected.mojo, the command the
-pull request check runs) reads each changed `coverage_held` at the change's
+drops one: the selector (tools/build/ci/affected.bxl, which the pull request
+check runs) reads each changed `coverage_held` at the change's
 base and at its head, and answers BROKEN, which fails the check, naming
 each metric the base held that the head does not: a line taken out, or the
 file deleted while its package stays. A new file, a metric added, and a
@@ -814,7 +907,8 @@ run at 20 requests (1 POST and 19 PATCHes).
 `mode`, `target_bp`, `total`, `diff`, `touched_packages`, `packages`,
 `findings`, `exemptions`, `unrecorded_functions` and
 `unrecorded_functions_unreliable` (report only: see "Functions with no
-recorded line") and the set-aside counts; `gate` writes `package`
+recorded line"), `excluded_lines`, `excluded_arms` and `excluded_files` (see
+"The code no test compiled") and the set-aside counts; `gate` writes `package`
 in place of `total`, `diff`, `touched_packages` and `packages`. A percentage
 that does not apply is `null`; a package's `held_line` and `held_branch`
 say what it holds. A package's `files` counts every
@@ -863,7 +957,12 @@ runs `.github/ci/coverage_measure.sh` (its header has the details):
    '^coverage_branch_gate$'`): whether its gate reads its tests' branch
    records. The attribute is what mojo_library sets from
    `COVERAGE_BRANCH_GATE` and the gate reads, so the script's list is the
-   gate's own rather than a second parse of `policy.bzl`;
+   gate's own rather than a second parse of `policy.bzl`. The packages built
+   with buildrules' `mojo_package` are listed too, as the `:coverage` target
+   of each (`kind('^mojo_cov_summary_rule$', ...)` with its `branches`
+   attribute, `--output-attribute '^branches$'`); they have no branch gate and
+   no `coverage_tests`, and have branch records (`:coverage[branches]`) unless
+   the attribute is empty (the package's tests link a native library);
 4. one `buck2 build -c komira.coverage=true --keep-going --build-report F
    '<library>[coverage][tests]'...` of all of them, with
    `'<library>[coverage][branch_info]'` beside each library whose gate reads
@@ -897,7 +996,18 @@ runs `.github/ci/coverage_measure.sh` (its header has the details):
    what its gate reads. When its branch coverage actions failed, or its gate did (which
    reads the same records with covcheck, so `report` could refuse them
    too), none of its records is read and it is listed as `branch not
-   measured`, with the reason, in both summaries; the job stays green;
+   measured`, with the reason, in both summaries; the job stays green. A
+   `mojo_package`'s `:coverage` is built as `<label>[reports]`, with
+   `<label>[branches]` beside it when it has branch records: its entry's
+   `*.cobertura.xml` paths are its reports (one kcov report per test, in
+   repository paths) and its `__info__/*.info` paths its branch records (one
+   lcov file per test, in repository paths, from the compiler's IR; the count
+   is checked like a library's); `SUCCESS` is measured, and any failure, a
+   library source in no report included or a branch record the classifier
+   refused, lists it as not measured (the entry is one, so its lines too). The reports also hold each
+   test's own `tests/` source, which `covcheck` sets aside as a test source, so
+   the package's numbers are its library's sources (the same as `coverage.txt`'s
+   total);
 5. `covcheck report` over the reports of the libraries measured and their
    branch records (`--branch-lcov`), with the
    policy's mode and target, each directory of its
@@ -908,7 +1018,11 @@ runs `.github/ci/coverage_measure.sh` (its header has the details):
    `git ls-files -z` as `--repo-files`, the head
    as `--head-sha`, and the `coverage_held` of each measured library's
    package only, as `--held <package>=<file>` (a held package is in the
-   run, and one not measured here would read as a `Regression`). With no
+   run, and one not measured here would read as a `Regression`). For a
+   `mojo_package`'s package with branch records the file is its `coverage_held`
+   as it is, so a held `branch` is read against the records' figure; for one
+   without (its tests link a native library) it is a copy without the `branch`
+   line, because a held branch with no records is a `Regression`. With no
    report at all (no library touched, none
    measured, none has a test, or the query failed), the script writes the
    summary and a neutral two-body check run itself, in covcheck's shape.

@@ -114,7 +114,7 @@ pub fn parse(alloc: std.mem.Allocator, platform: Platform, pwd: []const u8, args
     var cc_target: ?[]const u8 = null;
     var runpath: []const u8 = default_runpath;
     var source_root: ?[]const u8 = null;
-    var tail = std.ArrayList([]const u8).init(alloc);
+    var tail = std.ArrayList([]const u8).empty;
     var idle_raw: []const u8 = "300";
     var sample_raw: []const u8 = "30";
     var ld_debug: ?[]const u8 = null;
@@ -136,7 +136,7 @@ pub fn parse(alloc: std.mem.Allocator, platform: Platform, pwd: []const u8, args
             source_root = try abspath(alloc, pwd, v);
         } else if (value(a, "--link-tail=")) |v| {
             if (std.mem.indexOfScalar(u8, v, '\n') != null) return refuse(d, alloc, "REFUSING: --link-tail value holds a newline", .{});
-            try tail.append(v);
+            try tail.append(alloc, v);
         } else if (value(a, "--watchdog-idle-secs=")) |v| {
             idle_raw = v;
         } else if (value(a, "--watchdog-sample-secs=")) |v| {
@@ -169,7 +169,7 @@ pub fn parse(alloc: std.mem.Allocator, platform: Platform, pwd: []const u8, args
         .cc_target = cc_target.?,
         .runpath = runpath,
         .source_root = source_root,
-        .link_tail = try tail.toOwnedSlice(),
+        .link_tail = try tail.toOwnedSlice(alloc),
         .idle_secs = idle,
         .sample_secs = sample,
         .ld_debug_output = ld_debug,
@@ -205,28 +205,28 @@ pub fn runDir(o: Options) ?[]const u8 {
 pub fn compilerArgs(alloc: std.mem.Allocator, o: Options) ![]const []const u8 {
     const root = o.source_root orelse return o.mojo_args;
     if (runDir(o) != null) {
-        var out = std.ArrayList([]const u8).init(alloc);
+        var out = std.ArrayList([]const u8).empty;
         var prev: []const u8 = "";
         for (o.mojo_args) |a| {
             if (std.mem.eql(u8, prev, "-o") or std.mem.eql(u8, prev, "-I")) {
-                try out.append(try abspath(alloc, o.pwd, a));
+                try out.append(alloc, try abspath(alloc, o.pwd, a));
             } else if (std.mem.startsWith(u8, a, "-I") and a.len > 2) {
-                try out.append(try std.fmt.allocPrint(alloc, "-I{s}", .{try abspath(alloc, o.pwd, a[2..])}));
+                try out.append(alloc, try std.fmt.allocPrint(alloc, "-I{s}", .{try abspath(alloc, o.pwd, a[2..])}));
             } else if (std.mem.eql(u8, try abspath(alloc, o.pwd, a), root)) {
-                try out.append(std.fs.path.basename(root));
+                try out.append(alloc, std.fs.path.basename(root));
             } else {
-                try out.append(a);
+                try out.append(alloc, a);
             }
             prev = a;
         }
-        return out.toOwnedSlice();
+        return out.toOwnedSlice(alloc);
     }
     if (o.mojo_args.len == 0 or !std.mem.eql(u8, o.mojo_args[0], "build")) return o.mojo_args;
-    var out = std.ArrayList([]const u8).init(alloc);
-    try out.append(o.mojo_args[0]);
-    try out.append(try std.fmt.allocPrint(alloc, "-strip-file-prefix={s}/", .{root}));
-    try out.appendSlice(o.mojo_args[1..]);
-    return out.toOwnedSlice();
+    var out = std.ArrayList([]const u8).empty;
+    try out.append(alloc, o.mojo_args[0]);
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "-strip-file-prefix={s}/", .{root}));
+    try out.appendSlice(alloc, o.mojo_args[1..]);
+    return out.toOwnedSlice(alloc);
 }
 
 // ---- macOS -------------------------------------------------------------------
@@ -282,10 +282,10 @@ pub const MacosOptions = struct {
 pub fn parseMacos(alloc: std.mem.Allocator, pwd: []const u8, args: []const []const u8, d: *Diag) Error!MacosOptions {
     var compiler: ?[]const u8 = null;
     var deployment: ?[]const u8 = null;
-    var hosts = std.ArrayList([]const u8).init(alloc);
+    var hosts = std.ArrayList([]const u8).empty;
     var runpath: []const u8 = default_runpath;
     var source_root: ?[]const u8 = null;
-    var tail = std.ArrayList([]const u8).init(alloc);
+    var tail = std.ArrayList([]const u8).empty;
     var idle_raw: []const u8 = "300";
     var sample_raw: []const u8 = "30";
 
@@ -299,7 +299,7 @@ pub fn parseMacos(alloc: std.mem.Allocator, pwd: []const u8, args: []const []con
             deployment = v;
         } else if (value(a, "--macos-host=")) |v| {
             if (v.len == 0) return refuse(d, alloc, "REFUSING: an empty --macos-host", .{});
-            try hosts.append(v);
+            try hosts.append(alloc, v);
         } else if (value(a, "--runpath=")) |v| {
             if (!runpathOk(v)) return refuse(d, alloc, "REFUSING: --runpath={s} is not $ORIGIN-relative", .{v});
             runpath = v;
@@ -307,7 +307,7 @@ pub fn parseMacos(alloc: std.mem.Allocator, pwd: []const u8, args: []const []con
             source_root = try abspath(alloc, pwd, v);
         } else if (value(a, "--link-tail=")) |v| {
             if (std.mem.indexOfScalar(u8, v, '\n') != null) return refuse(d, alloc, "REFUSING: --link-tail value holds a newline", .{});
-            try tail.append(v);
+            try tail.append(alloc, v);
         } else if (value(a, "--watchdog-idle-secs=")) |v| {
             idle_raw = v;
         } else if (value(a, "--watchdog-sample-secs=")) |v| {
@@ -346,10 +346,10 @@ pub fn parseMacos(alloc: std.mem.Allocator, pwd: []const u8, args: []const []con
     return .{
         .compiler = compiler.?,
         .deployment_target = deployment.?,
-        .macos_hosts = try hosts.toOwnedSlice(),
+        .macos_hosts = try hosts.toOwnedSlice(alloc),
         .runpath = try platformRunpath(alloc, .macos, runpath),
         .source_root = source_root,
-        .link_tail = try tail.toOwnedSlice(),
+        .link_tail = try tail.toOwnedSlice(alloc),
         .idle_secs = idle,
         .sample_secs = sample,
         .pwd = pwd,

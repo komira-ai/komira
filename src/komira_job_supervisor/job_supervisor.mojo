@@ -48,6 +48,11 @@
 # `NoHeartbeatAuth`), and optionally the two object stores S, any
 # komira_objectstore `ConditionalWriteStore` (s3_store.mojo builds S3 ones).
 #
+# TIME: `run_job_supervisor` reads the monotonic clock and waits on the system
+# (loop_clock.mojo). `run_job_supervisor_with_clock` takes a `LoopClock`, and
+# `JobSupervisor.set_test_clock` a manual clock cell, so a test moves the time
+# the loop, the stream's flush interval and the terminal beat's retries see.
+#
 # `JobSupervisor[R, S]` exposes the lifecycle as stepping methods
 # (spawn_child / do_heartbeat / poll_and_drain / analyze_exit /
 # finalize_heartbeat) so a test can drive one step at a time;
@@ -57,9 +62,8 @@
 # scalars and Strings. No pointer type crosses a boundary.
 # =============================================================================
 
-from std.ffi import external_call
+from std.memory import ArcPointer
 
-from komira_clock import now_ns
 from komira_supervisor.supervisor import (
     Supervisor,
     ChildSpec,
@@ -71,26 +75,6 @@ from komira_supervisor.pid1 import (
     take_stop_signal,
 )
 from komira_supervisor.proc_ffi import SIGINT, SIGTERM
-
-
-# =============================================================================
-# §0: _sleep_secs. `usleep`, not std's time.sleep: komira_async's reactor
-# declares its own `nanosleep`, and a second declaration with another
-# signature fails to legalize.
-# =============================================================================
-def _sleep_secs(secs: Int):
-    """Sleep `secs` whole seconds via usleep (microsecond granularity). A
-    caught stop signal ends the sleep early (the handler has no SA_RESTART)."""
-    if secs <= 0:
-        return
-    _ = external_call["usleep", Int32](UInt32(secs * 1_000_000))
-
-
-def _sleep_ms(ms: Int):
-    """Sleep `ms` milliseconds via usleep."""
-    if ms <= 0:
-        return
-    _ = external_call["usleep", Int32](UInt32(ms * 1000))
 
 
 # The terminal beat's retry budget (finalize_heartbeat). A platform that stops
@@ -121,6 +105,12 @@ from komira_job_supervisor.heartbeat_client import (
 )
 from komira_job_supervisor.upload import upload_crash_report, upload_logs
 from komira_job_supervisor.log_streamer import LogStreamSink
+from komira_job_supervisor.loop_clock import (
+    LoopClock,
+    SystemLoopClock,
+    clock_now_ns,
+    clock_sleep_ms,
+)
 
 import komira_log as log
 from komira_log import ArgStr
@@ -191,6 +181,11 @@ struct JobSupervisor[
     # The monotonic instant (komira_clock.now_ns) of the spawn; the maximum
     # runtime counts from here.
     var spawned_at_ns: UInt64
+    # None in production. A manual clock's cell (nanoseconds) that the spawn
+    # instant, the stream's flush interval and the terminal beat's retry
+    # budget read instead of the system clock, and that the terminal beat's
+    # retry waits move. See `set_test_clock`.
+    var test_clock_cell: Optional[ArcPointer[Int]]
 
     # Non-blocking reads arrive in chunks that do not align on lines, so each
     # stream keeps a partial-line accumulator. The stdout byte budget bounds
@@ -231,12 +226,20 @@ struct JobSupervisor[
         self.child_exited = False
         self.exit_info = ExitInfo(Int32(-1), Int32(-1), Int32(-1))
         self.spawned_at_ns = UInt64(0)
+        self.test_clock_cell = None
         self.stdout_partial = List[UInt8]()
         self.stderr_partial = List[UInt8]()
         self.stdout_bytes = 0
         self.stdout_truncated = False
         self.capture_nonblocking = False
         self.log_sink = sink^
+
+    def set_test_clock(mut self, cell: ArcPointer[Int]):
+        """Put this supervisor, its stream and its terminal beat's retries on
+        the manual clock `cell` (nanoseconds) instead of the system clock, so
+        a test decides how much time passes. Production leaves it unset."""
+        self.test_clock_cell = Optional[ArcPointer[Int]](cell)
+        self.log_sink.set_test_clock(cell)
 
     # ---- a heartbeat value from the current state ----
 
@@ -285,7 +288,7 @@ struct JobSupervisor[
                 + String(")")
             )
         self.spawned = True
-        self.spawned_at_ns = now_ns()
+        self.spawned_at_ns = clock_now_ns(self.test_clock_cell)
         # Non-blocking capture pipes, so every loop iteration can drain what
         # is ready without parking the loop. Without this a chatty child fills
         # the ~64 KiB pipe buffer, blocks on write() and never exits.
@@ -640,7 +643,7 @@ struct JobSupervisor[
         beat is not retried, because the next one follows within an
         interval."""
         var hb = self._make_heartbeat(self.state.phase)
-        var start = now_ns()
+        var start = clock_now_ns(self.test_clock_cell)
         var delay = first_delay_ms
         var attempt = 1
         while True:
@@ -649,14 +652,16 @@ struct JobSupervisor[
                 return outcome
             if attempt >= max_attempts:
                 return outcome
-            var elapsed_ms = Int((now_ns() - start) // UInt64(1_000_000))
+            var elapsed_ms = Int(
+                (clock_now_ns(self.test_clock_cell) - start) // UInt64(1_000_000)
+            )
             if elapsed_ms + delay > budget_ms:
                 return outcome
             log.warn[
                 "job supervisor: terminal heartbeat failed (status {}); retry {}",
                 "komira_job_supervisor",
             ](ArgStr(String(outcome.status)), ArgStr(String(attempt)))
-            _sleep_ms(delay)
+            clock_sleep_ms(self.test_clock_cell, delay)
             delay = min(delay * 2, TERMINAL_BEAT_MAX_DELAY_MS)
             attempt += 1
 
@@ -698,7 +703,28 @@ def run_job_supervisor[
     var binary_store: Optional[S],
     var log_store: Optional[S],
 ) raises -> JobSupervisorPhase:
-    """Run one job to its end and return its terminal phase (module header).
+    """Run one job to its end on the system clock and return its terminal
+    phase (`run_job_supervisor_with_clock`)."""
+    var clock = SystemLoopClock()
+    return run_job_supervisor_with_clock[R, S, SystemLoopClock](
+        config^, reporter^, binary_store^, log_store^, clock
+    )
+
+
+def run_job_supervisor_with_clock[
+    R: HeartbeatReporter,
+    S: ConditionalWriteStore,
+    C: LoopClock,
+](
+    var config: JobSupervisorConfig,
+    var reporter: R,
+    var binary_store: Optional[S],
+    var log_store: Optional[S],
+    mut clock: C,
+) raises -> JobSupervisorPhase:
+    """Run one job to its end and return its terminal phase (module header),
+    reading the time and waiting between checks on `clock`: the loop's own
+    waits and instants, and (through `clock.test_clock()`) the supervisor's.
 
     `binary_store` is required iff the config names a --binary-key;
     `log_store` is optional (without it there is no live stream and no
@@ -724,6 +750,9 @@ def run_job_supervisor[
     _ = binary_store^
 
     var job_supervisor = JobSupervisor[R, S](config^, reporter^, log_store^)
+    var manual = clock.test_clock()
+    if manual:
+        job_supervisor.set_test_clock(manual.value())
 
     # 1. initial RUNNING heartbeat.
     _ = job_supervisor.do_heartbeat()
@@ -742,7 +771,7 @@ def run_job_supervisor[
             break
         if job_supervisor.act_on_stop_signal(GRACE_MS):
             break
-        if job_supervisor.enforce_max_runtime(now_ns(), GRACE_MS):
+        if job_supervisor.enforce_max_runtime(clock.now_ns(), GRACE_MS):
             break
         var outcome = job_supervisor.do_heartbeat()
         if outcome.ok and outcome.cancel:
@@ -750,7 +779,7 @@ def run_job_supervisor[
             break
         var slept = 0
         while slept < hb_interval:
-            _sleep_secs(1)
+            clock.sleep_secs(1)
             slept += 1
             # Drain and check for exit every second so a fast child is
             # noticed promptly.
@@ -759,7 +788,7 @@ def run_job_supervisor[
                 break
             if job_supervisor.act_on_stop_signal(GRACE_MS):
                 break
-            if job_supervisor.enforce_max_runtime(now_ns(), GRACE_MS):
+            if job_supervisor.enforce_max_runtime(clock.now_ns(), GRACE_MS):
                 break
             job_supervisor._tick_stream_timer()
         if job_supervisor.child_exited:

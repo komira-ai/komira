@@ -39,7 +39,7 @@ The tables below are the specification. The new tool must keep each row exactly,
 | G8 | The working directory is `<root>/share` if it exists, otherwise the empty `<run>/share`. It is never the action's directory. Stdin is `/dev/null`. Stdout and stderr go together, interleaved, to `<run>/log`. |
 | G9 | **PASS-marker contract.** `<marker>` is used as given; a relative path is resolved from the action's working directory, not from the test's. On exit 0, the tool writes exactly `PASS <label>\n` to `<marker>`, prints nothing, and exits 0. `/dev/null` is a valid marker. The marker bytes must not change: a package action takes every marker as an input, so identical bytes keep the packages cached (section 5). |
 | G10 | On a non-zero status, nothing is written to the marker. The tool prints the banner to stderr: 66 `=`, `GATED TEST FAILED: <label> (exit <rc>)`, `The library's package is not produced until this test passes.`, a 66-column `-` rule ending in ` output`, the last 200 lines of the log, and 66 `=`. Then it exits with the test's own status. A signal death is 128+N (137 for SIGKILL, 134 for SIGABRT). There is no SKIP: 77 is red. |
-| G11 | Banner text is a contract with other code: [release/ci/main_red.py](../../release/ci/main_red.py) matches `^GATED TEST FAILED: (\S+)`, and [cov_run](../../tools/build/coverage/kcov/cov_run.zig) and `cov_branch run` ([cov_branch_run.zig](../../tools/build/coverage/branch/cov_branch_run.zig), `gateFailure`) remove the `GATED TEST FAILED: <label> (exit <rc>)` line and the `The library's package is not produced until this test passes.` line (banner lines 2 and 3) by exact text match, at the first match only, and keep the 66-`=` rule and the `--- output` rule. These lines must stay byte-identical. |
+| G11 | Banner text is a contract with other code: [release/ci/main_red](../../release/ci/main_red/logs.zig) matches `^GATED TEST FAILED: (\S+)`, and [cov_run](../../tools/build/coverage/kcov/cov_run.zig) and `cov_branch run` ([cov_branch_run.zig](../../tools/build/coverage/branch/cov_branch_run.zig), `gateFailure`) remove the `GATED TEST FAILED: <label> (exit <rc>)` line and the `The library's package is not produced until this test passes.` line (banner lines 2 and 3) by exact text match, at the first match only, and keep the 66-`=` rule and the `--- output` rule. These lines must stay byte-identical. |
 | G12 | Darwin: the toolchain prepends `dyld_prelude.sh` (deleted: `act launch` sets the macOS variable), which sets `DYLD_LIBRARY_PATH=<compiler_dir>/lib`. No SIP-protected binary may sit between the runner and the test, because dyld would strip `DYLD_*`. The test must see both `DYLD_LIBRARY_PATH` and `LD_LIBRARY_PATH` at `<compiler_dir>/lib` (case `darwin_loader`). |
 
 ### 1.2 test_runner.sh (Rust)
@@ -270,11 +270,13 @@ is recorded in the PR.
 | S2–S6 step | ok, `fail 3`, `timeout 2` with the whole group gone, a run inside its limit, skipped with an empty `-o` file, `-o` kept after success, an infra exit of 124 failing the action, and `@MUT_SCRATCH@` resolved for an absolute, a relative and an unset scratch path | record a timeout as `fail`, or create `-o` outputs after a success |
 | darwin paths | on Linux, with the platform interface forced to "no /proc": the cap is refused with exit 2, and the deadline group-kills and still prints the banner | fall back to running uncapped |
 
-**End-to-end.** The existing planted fixtures `tests//negative/mem_cap` and `tests//negative/test_deadline`
-stay unchanged. They test our tool, not a buck2 built-in, so they are allowed. They must go red with the
-same text as before, and their expected strings (`MEMORY CAP: killed`, `TEST TIME LIMIT: killed … after
-30 s`, `GATED TEST FAILED: … (exit 137)`) do not change. The switch-over PR runs them on the farm and
-records the red result.
+**End-to-end.** The planted fixture `tests//negative/mem_cap` stays unchanged. It tests our tool, not a
+buck2 built-in, so it is allowed. It must go red with the same text as before (`MEMORY CAP: killed`,
+`GATED TEST FAILED: … (exit 137)`). The time limit is not run end to end: no test sleeps past a limit. The
+gate's unit tests move the supervisor's clock themselves (`plat.now_ms`, `wait` and `sleep_ms`, testkit.zig)
+and assert the exact times of the kills and the banner order, and `tests//negative/test_deadline:test_slow`
+is only inspected: the scenario `config_refusals` requires that its `buck2 test` command carries
+`--deadline-s 30 --runner-timeout-s 90` under a test timeout of 90.
 
 **Darwin.** `mojo_test.zig` and `supervise_test.zig` are also built for macOS and run on the macOS
 workers (`mojo_test_darwin`, `supervise_test_darwin`), and `run:gate_darwin` is built behind them: the
@@ -334,4 +336,4 @@ scripts are updated in the same PRs: [gates_test_welding_and_lints.md](gates_tes
 1. Should the Mojo gate move to `env -i` (section 3, last paragraph)? It costs a second full
    invalidation, so if the answer is yes, it should land together with step 3.
 2. Today a test's exit 2 means the same as a usage error. Should the tool reserve a status that no test
-   can produce? Changing it touches `main_red.py` and the `mut_step` `--infra-exit` list.
+   can produce? Changing it touches `release/ci/main_red/logs.zig` and the `mut_step` `--infra-exit` list.

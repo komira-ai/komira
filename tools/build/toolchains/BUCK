@@ -68,16 +68,16 @@ zig_test(
     imports = ["version_check.zig"],
     src = "version_check_test.zig",
     busybox = ":busybox",
-    zig = ":zig",
+    zig = ":zig_next",
 )
 
 zig_exe(
     name = "version_check",
     exec_compatible_with = LINUX_X86_64,
     src = "version_check.zig",
-    unit_tests = [":version_check_unit"],
+    unit_tests = [":version_check_unit", ":zig_next_version"],
     busybox = ":busybox",
-    zig = ":zig",
+    zig = ":zig_next",
     visibility = ["PUBLIC"],
 )
 
@@ -140,7 +140,7 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "komira//tools/build/mojo:conda_unpack.zig",
     busybox = ":busybox",
-    zig = ":zig",
+    zig = ":zig_next",
     visibility = ["PUBLIC"],
 )
 
@@ -180,6 +180,18 @@ mojo_runtime(
 
 # ---- C/C++ -----------------------------------------------------------------
 
+# Selectable form of macOS arm64: the one target platform other than linux x86_64 that the
+# C/C++ toolchain (komira_cxx_toolchains) admits. Both constraints, so that macOS alone, or
+# arm64 alone, is not it.
+config_setting(
+    name = "is_macos_arm64",
+    constraint_values = [
+        "prelude//os/constraints:macos",
+        "prelude//cpu/constraints:arm64",
+    ],
+    visibility = ["PUBLIC"],
+)
+
 # The compiler driver of the C/C++ toolchain (komira_cxx_toolchains in
 # defs.bzl): runs zig's clang, flattening nested response files, which zig
 # refuses.
@@ -188,7 +200,7 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     src = "komira//tools/build/mojo:zig_cc_launcher.zig",
     busybox = ":busybox",
-    zig = ":zig",
+    zig = ":zig_next",
     visibility = ["PUBLIC"],
 )
 

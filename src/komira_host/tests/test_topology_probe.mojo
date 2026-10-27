@@ -6,12 +6,12 @@
 # =============================================================================
 #
 # The parser, the mask and the cap are pure and asserted from literals. The
-# reader is asserted against files written under `TEST_TMPDIR`. The engine
+# reader is asserted against files written under a fresh temporary directory. The engine
 # policies read this host's topology, so their oracle is the documented
 # composition of the pure derivations over `CpuTopology.detect()`.
 # =============================================================================
 
-from std.os import getenv
+from std.tempfile import mkdtemp
 from std.sys import num_physical_cores
 from std.sys.info import CompilationTarget
 from std.testing import TestSuite, assert_equal, assert_true
@@ -75,10 +75,9 @@ def _same_topology(got: CpuTopology, want: CpuTopology, what: String) raises:
 
 
 def _scratch(name: String) raises -> String:
-    var base = getenv("TEST_TMPDIR")
-    if base.byte_length() == 0:
-        raise Error("TEST_TMPDIR is not set")
-    return base + String("/") + name
+    # A fresh directory of this call's own (`mkdtemp`: under `TMPDIR`, else `/tmp`), so no runner has to
+    # name a scratch directory and two runs of this test never share a path.
+    return mkdtemp(prefix="komira_host_") + String("/") + name
 
 
 def _write(path: String, text: String) raises:

@@ -25,7 +25,9 @@ The package root re-exports nothing; import each name from its module:
   writes), `sub` and `split_at`.
 - `komira_buffer.byte_buffer`: `ByteBuffer`, an owned byte list with a read
   cursor (fixed-width little-endian, ULEB128 and zigzag reads), and
-  `write_uleb128`, its encoder.
+  `write_uleb128` (its encoder for a non-negative `Int`; raises on a negative
+  one) and `write_uleb128_u64` (the total encoder for a `UInt64`, at most 10
+  bytes).
 - `komira_buffer.aligned_buffer_trait`: `AlignedBufferTrait`, the read, write
   and view methods both aligned buffers share.
 - `komira_buffer.file_identity`: `FileIdentity`, what `stat(2)` says about

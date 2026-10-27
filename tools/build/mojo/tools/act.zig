@@ -144,9 +144,9 @@ fn launch(a: std.mem.Allocator, args: []const []const u8) noreturn {
     var env = std.process.getEnvMap(a) catch die("cannot read the environment", .{});
     const path = loaderPath(a, lib, env.get(loader_var)) catch die("out of memory", .{});
     env.put(loader_var, path) catch die("out of memory", .{});
-    var argv = std.ArrayList([]const u8).init(a);
-    argv.append(bin) catch die("out of memory", .{});
-    argv.appendSlice(args[2..]) catch die("out of memory", .{});
+    var argv = std.ArrayList([]const u8).empty;
+    argv.append(a, bin) catch die("out of memory", .{});
+    argv.appendSlice(a, args[2..]) catch die("out of memory", .{});
     const err = std.process.execve(a, argv.items, &env);
     die("cannot run {s}: {s}", .{ bin, @errorName(err) });
 }
@@ -184,9 +184,9 @@ fn runCheck(a: std.mem.Allocator, args: []const []const u8) u8 {
         std.debug.print("run_check: {s} cannot start: {s}\n", .{ args[1], @errorName(e) });
         return 1;
     };
-    var out_buf = std.ArrayList(u8).init(a);
-    var err_buf = std.ArrayList(u8).init(a);
-    child.collectOutput(&out_buf, &err_buf, 1 << 28) catch |e| die("cannot read the output of {s}: {s}", .{ bin, @errorName(e) });
+    var out_buf = std.ArrayList(u8).empty;
+    var err_buf = std.ArrayList(u8).empty;
+    child.collectOutput(a, &out_buf, &err_buf, 1 << 28) catch |e| die("cannot read the output of {s}: {s}", .{ bin, @errorName(e) });
     // (A binary that cannot be executed is reported by wait, not by spawn.)
     const term = child.wait() catch |e| {
         std.debug.print("run_check: {s} cannot start: {s}\n", .{ args[1], @errorName(e) });

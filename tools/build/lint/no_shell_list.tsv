@@ -8,8 +8,6 @@
 #           runners run, never a build or test action. The only places a new script may live.
 # A row is added only with a reason review accepts.
 use	BUCK	sh_script	3	exception: coverage_ci_cases tests the CI shell scripts (.github/ci), so its subject is a shell script, and the shell lint of those scripts names them
-use	release/BUCK	sh_script	1	exception: the shell lint of human-run shell scripts; a lint of scripts that only people and CI run, not an action that runs a shell
-use	src/kci_workflow_check/BUCK	sh_script	2	exception: kci_workflow_check reads release_version.sh (a shell script run by the release workflow) as data to hold kci.yml to it
 use	tools/build/coverage/BUCK	sh_script	1	exception: coverage_ci_cases tests the CI shell scripts (.github/ci), so the subject is a shell script; the shell lint of those scripts
 use	tools/build/coverage/defs.bzl	sh_argv	1	exception: coverage_ci_cases tests the CI shell scripts (.github/ci), so the subject is a shell script; the shell lint of those scripts
 use	tools/build/mojo/darwin/BUCK	sh_script	2	exception: macOS has no static busybox, so the darwin toolchain provides the busybox calling convention through a shell shim (mojo/darwin/busybox.sh)
@@ -31,7 +29,6 @@ use	tools/build/third_party_srcs/BUCK	sh_script	1	exception: the shell lint of h
 use	tools/build/toolchains/darwin/BUCK	sh_script	1	exception: macOS has no static busybox, so the darwin toolchain provides the busybox calling convention through a shell shim (mojo/darwin/busybox.sh)
 use	tools/vendor/googleapis/BUCK	sh_script	1	exception: the shell lint of human-run shell scripts; a lint of scripts that only people and CI run, not an action that runs a shell
 human	.github/ci/	-	-	CI runner scripts of the coverage workflow; run on a hosted runner, never by an action
-human	release/ci/	-	-	CI entry points kci runs on a runner; never an action
 human	buck2	-	-	the wrapper people and CI run to get the pinned buck2; never an action
 human	src/tests/conformance/komira_datetime_conformance/regen_goldens.sh	-	-	client-side driver or fixture regenerator: runs buck2 or a tool from outside, never a build or test action
 script	third_party/git/git_build.sh	-	-	exception: git's own build is make, which needs a shell (git_build.sh); no shell-free way to build git exists

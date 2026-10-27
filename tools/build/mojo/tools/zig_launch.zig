@@ -157,15 +157,15 @@ pub const ManifestError = error{BadLine};
 /// may end without a newline; empty lines are skipped. The right side is
 /// everything after the first tab.
 pub fn manifest(a: std.mem.Allocator, text: []const u8) (ManifestError || std.mem.Allocator.Error)![]Entry {
-    var list = std.ArrayList(Entry).init(a);
+    var list = std.ArrayList(Entry).empty;
     var lines = std.mem.splitScalar(u8, text, '\n');
     while (lines.next()) |line| {
         if (line.len == 0) continue;
         const tab = std.mem.indexOfScalar(u8, line, '\t') orelse return error.BadLine;
         if (tab == 0 or tab + 1 == line.len) return error.BadLine;
-        try list.append(.{ .left = line[0..tab], .right = line[tab + 1 ..] });
+        try list.append(a, .{ .left = line[0..tab], .right = line[tab + 1 ..] });
     }
-    return list.toOwnedSlice();
+    return list.toOwnedSlice(a);
 }
 
 /// What the launcher exits with when a child ended as `term`: the child's own
@@ -317,9 +317,9 @@ pub fn main() !void {
         }
     }
 
-    var zig_argv = std.ArrayList([]const u8).init(a);
-    try zig_argv.append(zig_exe);
-    try zig_argv.appendSlice(plan.zig_args);
+    var zig_argv = std.ArrayList([]const u8).empty;
+    try zig_argv.append(a, zig_exe);
+    try zig_argv.appendSlice(a, plan.zig_args);
     const term = run(a, zig_argv.items, &env) catch |e| die("cannot run {s}: {s}", .{ zig_exe, @errorName(e) });
     const code = exitCodeOf(term);
     if (code != 0) std.process.exit(code);

@@ -13,8 +13,10 @@
 #   measure  contents: read and id-token: write (the farm connection), no
 #            write token: checks out the pull request's HEAD commit and runs
 #            .github/ci/coverage_measure.sh, which builds the coverage reports
-#            of the mojo_library targets the change touches on the farm
-#            (and the branch records of those whose gate reads them) and
+#            of the mojo_library targets and mojo_package packages the change
+#            touches on the farm (and the branch records of the libraries
+#            whose gate reads them, and of the packages with `:coverage[branches]`,
+#            whose `coverage_held` branch line is checked against them) and
 #            runs `covcheck report`; uploads the check run's request bodies
 #            and the summary as an artifact. A library whose coverage build
 #            fails is listed as not measured, one whose branch records fail
@@ -37,8 +39,6 @@
 # retargeted to main and then pushed to: a retarget alone is an `edited`
 # event, which neither this file nor pr.yml listens for), on a GitHub-hosted
 # runner, with every action pinned.
-# It is not held by kci_workflow_check (rule R6 holds pr.yml, which this
-# file leaves as it is).
 name: coverage
 
 on:

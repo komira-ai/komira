@@ -76,7 +76,7 @@ from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 from komira_arrow.column import Column
 from komira_buffer.heap_region import HeapRegion
 from komira_arrow.primitive_array import PrimitiveArray
-from komira_buffer.byte_buffer import write_uleb128
+from komira_buffer.byte_buffer import write_uleb128, write_uleb128_u64
 
 from .analyzer import (
     FIELD_CLASS_KEYWORD,
@@ -227,16 +227,20 @@ def _is_float_dtype(dt: DType) -> Bool:
 
 
 @always_inline
-def _zigzag_encode(v: Int) -> Int:
-    """Map a signed Int to a non-negative Int for ULEB128. 0->0, -1->1, 1->2,
-    -2->3, ... (the standard protobuf zig-zag, in 64-bit)."""
-    return (v << 1) ^ (v >> 63)
+def _zigzag_encode(v: Int) -> UInt64:
+    """Map a signed Int to an unsigned value for ULEB128. 0->0, -1->1, 1->2,
+    -2->3, ... (the standard protobuf zig-zag, in 64-bit). Unsigned because the
+    image of a magnitude of 2^62 or more needs all 64 bits; as a signed Int it
+    would be negative."""
+    return UInt64((v << 1) ^ (v >> 63))
 
 
 @always_inline
 def _zigzag_decode(u: Int) -> Int:
-    """Inverse of _zigzag_encode (treats `u` as the non-negative encoding)."""
-    return (u >> 1) ^ -(u & 1)
+    """Inverse of _zigzag_encode. `u` carries the 64-bit encoding as read by
+    `_read_uleb128_span`, whose top bit may be set."""
+    var w = UInt64(u)
+    return Int((w >> UInt64(1)) ^ (UInt64(0) - (w & UInt64(1))))
 
 
 def _pack_bits_lsb_first_u64(
@@ -551,7 +555,7 @@ struct NumericFastFieldBuilder(Copyable, Movable, Deinitable):
         var bits = _min_bit_width(max_residual)
 
         write_uleb128(n, out)
-        write_uleb128(_zigzag_encode(min_v), out)
+        write_uleb128_u64(_zigzag_encode(min_v), out)
         out.append(UInt8(bits))
         if any_null:
             out.append(1)

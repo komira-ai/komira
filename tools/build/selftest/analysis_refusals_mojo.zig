@@ -98,6 +98,11 @@ const ROWS = [_]lib.Row{
         .text = "tests//negative/assert_level:bad_cap: test_memory_cap_mib is -1; it must be a number of MiB, or 0 for no cap",
     },
     .{
+        .name = "hang_limit_zero",
+        .target = "tests//negative/mojo_hang:bad_limit",
+        .text = "tests//negative/mojo_hang:bad_limit: test_hang_limit_s = 0 must be a positive number of seconds",
+    },
+    .{
         .name = "opt_bad_level",
         .target = "tests//negative/opt_level:bad_level",
         .text = "tests//negative/opt_level:bad_level: optimization level `fast` is not one of 0, 1, 2, 3",

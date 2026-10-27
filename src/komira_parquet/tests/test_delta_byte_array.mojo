@@ -5,6 +5,7 @@
 # Tests the DataPage V2 header parse, DELTA_LENGTH_BYTE_ARRAY and
 # DELTA_BYTE_ARRAY.
 
+from komira_buffer.byte_buffer import write_uleb128, write_uleb128_u64
 from std.testing import TestSuite, assert_equal, assert_true
 from std.memory import alloc, unsafe_memcpy, unsafe_memset
 from std.sys import size_of
@@ -23,23 +24,10 @@ from komira_parquet_api.types import PageType, Encoding
 # =============================================================================
 
 
-def _write_uleb128(mut output: List[UInt8], value: Int):
-    """Write a ULEB128 varint into the output list."""
-    var v = value
-    while True:
-        var byte = v & 0x7F
-        v = v >> 7
-        if v != 0:
-            byte = byte | 0x80
-        output.append(UInt8(byte))
-        if v == 0:
-            break
-
-
 def _write_zigzag_varint(mut output: List[UInt8], value: Int):
     """Write a zigzag-encoded varint into the output list."""
-    var encoded = (value << 1) ^ (value >> 63)
-    _write_uleb128(output, encoded)
+    var encoded = UInt64((value << 1) ^ (value >> 63))
+    write_uleb128_u64(encoded, output)
 
 
 def _bits_needed(max_val: Int) -> Int:
@@ -84,7 +72,7 @@ def _pack_miniblock_values(
     return result^
 
 
-def _encode_delta_binary_packed(values: List[Int64]) -> List[UInt8]:
+def _encode_delta_binary_packed(values: List[Int64]) raises -> List[UInt8]:
     """Encode Int64 values as DELTA_BINARY_PACKED.
 
     Uses block_size=128, miniblock_count=4.
@@ -94,9 +82,9 @@ def _encode_delta_binary_packed(values: List[Int64]) -> List[UInt8]:
     var miniblock_count = 4
     var miniblock_size = block_size // miniblock_count  # 32
 
-    _write_uleb128(output, block_size)
-    _write_uleb128(output, miniblock_count)
-    _write_uleb128(output, len(values))
+    write_uleb128(block_size, output)
+    write_uleb128(miniblock_count, output)
+    write_uleb128(len(values), output)
 
     if len(values) == 0:
         _write_zigzag_varint(output, 0)
@@ -174,7 +162,7 @@ def _encode_delta_binary_packed(values: List[Int64]) -> List[UInt8]:
 # =============================================================================
 
 
-def _encode_delta_length_byte_array(strings: List[String]) -> List[UInt8]:
+def _encode_delta_length_byte_array(strings: List[String]) raises -> List[UInt8]:
     """Encode strings as DELTA_LENGTH_BYTE_ARRAY.
 
     Format: DELTA_BINARY_PACKED lengths + concatenated bytes.
@@ -201,7 +189,7 @@ def _encode_delta_length_byte_array(strings: List[String]) -> List[UInt8]:
 # =============================================================================
 
 
-def _encode_delta_byte_array(strings: List[String]) -> List[UInt8]:
+def _encode_delta_byte_array(strings: List[String]) raises -> List[UInt8]:
     """Encode strings as DELTA_BYTE_ARRAY (prefix-delta encoding).
 
     Format: DELTA_BINARY_PACKED prefix_lengths + DELTA_LENGTH_BYTE_ARRAY suffixes.

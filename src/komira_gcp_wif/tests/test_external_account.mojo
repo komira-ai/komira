@@ -5,9 +5,9 @@
 #
 # Three connectors per fetcher, each with its own write capture: the
 # credential_source URL (plaintext, an IP literal), STS, and IAM Credentials
-# (TLS-reporting; no handshake runs). As in test_wif_mint, the client
-# resolves the two Google host names before it hands the scripted connector
-# a dial. Every claim reads back the
+# (TLS-reporting; no handshake runs). As in test_wif_mint, the two Google
+# host names are named in the requests and resolved by nothing: a
+# ScriptedConnector never reads the dial address. Every claim reads back the
 # exact bytes the client wrote.
 #
 #   §1 a file-sourced subject: the whole STS form against hand-written text
@@ -28,9 +28,7 @@
 # The URL test pins the HOST as well as the path without needing DNS: the
 # file names IP literals (127.0.0.1 for STS, 127.0.0.2 for IAM Credentials),
 # which the client parses instead of resolving, so the Host header and the
-# request line are both the file's. A Google host other than the default
-# would have to resolve on the farm, which this file does not depend on for
-# that claim.
+# request line are both the file's.
 #
 # ⛔ EVERY ABSENCE HAS A POSITIVE CONTROL. "IAM Credentials was not dialed"
 # (no impersonation URL) is paired with the impersonation case of the same
