@@ -13,13 +13,15 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # - test_kafka_compression: every codec's records blob decodes, through
 #   decompress_kafka_records and through whole batches (with a correct CRC), a
 #   blob larger than the first output buffer, xerial framing edges, the
-#   preamble ceiling, truncated and corrupt blobs, an unknown codec refused, and
+#   preamble ceiling, truncated and corrupt blobs, gzip members concatenated,
+#   the output ceiling for gzip, lz4 and zstd, an unknown codec refused, and
 #   the per-batch producer identity.
 # - test_kafka_fetch_compress: compress_kafka_records round-trips every codec,
 #   writes each codec's framing, and builds a compressed batch a decoder reads.
 # - test_group_offsets: commit and fetch over the in-memory store, unknown
 #   group, topic and partition, overwrite, repeated commit, isolation, listing,
-#   the JSON body, and a store that fails.
+#   the JSON body (multibyte UTF-8 metadata included), group ids holding "/",
+#   and a store that fails (a key naming 404 is not "not found").
 # - test_envelope_bridge: records to the envelope and back, exactly, with null
 #   and empty keys and values and headers.
 mojo_library(

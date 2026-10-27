@@ -61,8 +61,8 @@ def envelope_schema() raises -> Schema:
 
 # -----------------------------------------------------------------------------
 # Header (de)serialization — the __headers column carries the Kafka header block
-# as opaque bytes: varint count + each (nameLen varint, name, valueLen varint
-# (-1=null), value). Reuses the same zigzag varint the v2 record codec uses.
+# as opaque bytes: varint count + each (nameLen varint, name, valueLen+1 varint
+# (0=null), value). Uses unsigned varints (`_put_uvarint`).
 # -----------------------------------------------------------------------------
 
 
@@ -143,6 +143,12 @@ def _build_binary_column(values: List[Optional[List[UInt8]]]) raises -> Column[H
                 data.append(b[j])
         else:
             any_null = True
+        # The offsets are Int32: a column past 2 GiB would wrap them.
+        if len(data) > Int(Int32.MAX):
+            raise Error(
+                "envelope_bridge: a binary column larger than 2 GiB does not"
+                " fit Int32 offsets"
+            )
         offsets.append(Int32(len(data)))
 
     if not any_null:

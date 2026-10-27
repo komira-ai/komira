@@ -27,6 +27,12 @@
 #     conditional write) raises and stores nothing, a fetch whose get raises
 #     for any reason but "not found" raises that error rather than answering
 #     None, and a failing list raises from fetch_all_for_group.
+#   * a fetch error is read as "no offset" only when it says not found by a
+#     token a key cannot hold: a 403 naming partition 404, 1404, topic x404 or
+#     topic not_found raises.
+#   * metadata with multibyte UTF-8 round-trips byte for byte.
+#   * a group id holding "/" does not list another group's offsets; an empty
+#     topic or a negative partition is refused at commit.
 #   * two handles over one shared store see each other's commits.
 # =============================================================================
 
@@ -76,6 +82,9 @@ comptime _FAIL_PUT: Int = 1
 comptime _FAIL_GET: Int = 2
 comptime _FAIL_GET_NOT_FOUND: Int = 3
 comptime _FAIL_LIST: Int = 4
+comptime _FAIL_GET_KEYED: Int = 5
+comptime _FAIL_GET_KEYED_NOT_FOUND: Int = 6
+comptime _FAIL_GET_STATUS_404: Int = 7
 
 
 struct _FailingStore(CloneableConditionalWriteStore):
@@ -126,7 +135,20 @@ struct _FailingStore(CloneableConditionalWriteStore):
         if self._mode == _FAIL_GET:
             raise Error("get failed: connection reset by peer")
         if self._mode == _FAIL_GET_NOT_FOUND:
-            raise Error("get failed: not_found")
+            raise Error("get failed: not_found (404)")
+        if self._mode == _FAIL_GET_KEYED:
+            # A production-shaped error: it names the object key.
+            raise Error(
+                "StoreError[PERMISSION_DENIED] get s3://b/" + path.raw()
+                + " status=403 denied"
+            )
+        if self._mode == _FAIL_GET_KEYED_NOT_FOUND:
+            raise Error(
+                "StoreError[NOT_FOUND] get s3://b/" + path.raw()
+                + " status=404 no such key"
+            )
+        if self._mode == _FAIL_GET_STATUS_404:
+            raise Error("get gs://b/" + path.raw() + " status=404")
         return self._inner.get(path)
 
     def delete(self, path: Path) raises -> None:
@@ -321,6 +343,22 @@ def test_json_roundtrip_negative_and_escape() raises:
     assert_equal(back.metadata, 'with"quote\\and-backslash')
 
 
+def test_json_roundtrips_multibyte_utf8_metadata() raises:
+    var meta = String("café 日本\"q\"")
+    var rec = CommittedOffset(Int64(1), meta.copy(), Int64(2))
+    var body = encode_offset_json(rec)
+    var back = decode_offset_json(body)
+    assert_equal(back.metadata, meta)
+    assert_equal(len(back.metadata.as_bytes()), len(meta.as_bytes()))
+    # A second round trip does not grow it.
+    var again = decode_offset_json(encode_offset_json(back))
+    assert_equal(len(again.metadata.as_bytes()), len(meta.as_bytes()))
+    # Through the store.
+    var s = _new_store()
+    s.commit(String("g"), String("t"), Int32(0), rec)
+    assert_equal(s.fetch(String("g"), String("t"), Int32(0)).value().metadata, meta)
+
+
 def test_json_body_layout() raises:
     var body = encode_offset_json(
         CommittedOffset(Int64(42), String("m"), Int64(9))
@@ -416,6 +454,75 @@ def test_fetch_reads_a_not_found_error_as_no_offset() raises:
     assert_false(Bool(s.fetch(String("g"), String("t"), Int32(0))), "not found")
 
 
+def _fetch_raises(topic: String, partition: Int32, mode: Int) raises -> Bool:
+    var s = GroupOffsetStore(
+        _FailingStore(SharedInMemoryConditionalStore(), mode), String("c")
+    )
+    try:
+        var got = s.fetch(String("g"), topic, partition)
+        _ = got^
+    except:
+        return True
+    return False
+
+
+def test_fetch_does_not_read_a_key_as_a_not_found_status() raises:
+    # The error names the object key; a key that spells 404 or not_found must
+    # not make a 403 look like an absent object.
+    assert_true(_fetch_raises(String("t"), Int32(404), _FAIL_GET_KEYED), "404")
+    assert_true(_fetch_raises(String("t"), Int32(1404), _FAIL_GET_KEYED), "1404")
+    assert_true(_fetch_raises(String("x404"), Int32(0), _FAIL_GET_KEYED), "x404")
+    assert_true(
+        _fetch_raises(String("not_found"), Int32(0), _FAIL_GET_KEYED),
+        "not_found",
+    )
+
+
+def test_fetch_reads_every_not_found_spelling_as_no_offset() raises:
+    assert_false(_fetch_raises(String("t"), Int32(404), _FAIL_GET_KEYED_NOT_FOUND))
+    assert_false(_fetch_raises(String("t"), Int32(0), _FAIL_GET_STATUS_404))
+
+
+def test_group_id_with_a_slash_does_not_leak_into_another_group() raises:
+    var s = _new_store()
+    s.commit(String("a"), String("t"), Int32(0), _rec(Int64(1)))
+    s.commit(String("a/offsets/b"), String("t"), Int32(0), _rec(Int64(2)))
+    var all_a = s.fetch_all_for_group(String("a"))
+    assert_equal(len(all_a), 1)
+    assert_equal(all_a[0].record.offset, Int64(1))
+    var all_b = s.fetch_all_for_group(String("a/offsets/b"))
+    assert_equal(len(all_b), 1)
+    assert_equal(all_b[0].record.offset, Int64(2))
+    var got = s.fetch(String("a/offsets/b"), String("t"), Int32(0))
+    assert_equal(got.value().offset, Int64(2))
+    # `%` in a group id does not collide with the encoding of `/`.
+    s.commit(String("p%2Fq"), String("t"), Int32(0), _rec(Int64(3)))
+    s.commit(String("p/q"), String("t"), Int32(0), _rec(Int64(4)))
+    assert_equal(
+        s.fetch(String("p%2Fq"), String("t"), Int32(0)).value().offset,
+        Int64(3),
+    )
+    assert_equal(
+        s.fetch(String("p/q"), String("t"), Int32(0)).value().offset, Int64(4)
+    )
+
+
+def test_unlistable_commits_are_refused() raises:
+    var s = _new_store()
+    var raised = False
+    try:
+        s.commit(String("g"), String(""), Int32(0), _rec(Int64(1)))
+    except e:
+        raised = String(e).find("empty topic") >= 0
+    assert_true(raised, "empty topic")
+    raised = False
+    try:
+        s.commit(String("g"), String("t"), Int32(-1), _rec(Int64(1)))
+    except e:
+        raised = String(e).find("negative partition") >= 0
+    assert_true(raised, "negative partition")
+
+
 def test_failing_list_raises_from_fetch_all() raises:
     var s = GroupOffsetStore(
         _FailingStore(SharedInMemoryConditionalStore(), _FAIL_LIST), String("c")
@@ -453,4 +560,9 @@ def main() raises:
     test_fetch_raises_a_store_error_that_is_not_not_found()
     test_fetch_reads_a_not_found_error_as_no_offset()
     test_failing_list_raises_from_fetch_all()
+    test_fetch_does_not_read_a_key_as_a_not_found_status()
+    test_fetch_reads_every_not_found_spelling_as_no_offset()
+    test_group_id_with_a_slash_does_not_leak_into_another_group()
+    test_unlistable_commits_are_refused()
+    test_json_roundtrips_multibyte_utf8_metadata()
     print("test_group_offsets: ALL PASS")

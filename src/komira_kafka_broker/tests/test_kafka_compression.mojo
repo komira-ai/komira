@@ -17,6 +17,9 @@
 #     accepted, a block length past the end is refused, an oversized preamble
 #     is refused before it is allocated.
 #   * corrupt and truncated blobs of each codec are refused, naming the codec.
+#   * a cut gzip stream is refused as truncated; gzip members concatenate, and
+#     garbage after a member is refused; xerial trailing bytes are refused.
+#   * output one byte over the ceiling is refused for gzip, lz4 and zstd.
 #   * an unknown codec id is refused, naming the id.
 #   * whole batches (with a correct CRC) decode to the records of the same
 #     batch encoded uncompressed, in a message set that mixes compressed and
@@ -436,6 +439,55 @@ def test_truncated_blob_is_refused() raises:
         _assert_refused(ids[i], cut, "kafka_compression(" + _name(ids[i]) + ")")
 
 
+def test_truncated_gzip_is_refused_as_truncated_not_as_too_large() raises:
+    # A cut stream must stop at once with the truncation reason, not grow the
+    # buffer to the ceiling and report that instead.
+    var blob = _compress(KAFKA_COMPRESSION_GZIP, _patterned(20000))
+    var cut = List[UInt8](Span(blob)[0 : len(blob) // 2])
+    _assert_refused(KAFKA_COMPRESSION_GZIP, cut, "truncated batch")
+
+
+def test_gzip_members_concatenate() raises:
+    var first = _patterned(1000)
+    var second = _patterned(777)
+    var third = _bytes("tail")
+    var blob = _compress(KAFKA_COMPRESSION_GZIP, first)
+    blob.extend(Span(_compress(KAFKA_COMPRESSION_GZIP, second)))
+    blob.extend(Span(_compress(KAFKA_COMPRESSION_GZIP, third)))
+    var want = first.copy()
+    want.extend(Span(second))
+    want.extend(Span(third))
+    var got = decompress_kafka_records(KAFKA_COMPRESSION_GZIP, Span(blob))
+    _assert_bytes_eq(got, want, "three gzip members")
+
+
+def test_gzip_member_followed_by_garbage_is_refused() raises:
+    var blob = _compress(KAFKA_COMPRESSION_GZIP, _patterned(500))
+    blob.extend(Span(_bytes("not a gzip member")))
+    _assert_refused(KAFKA_COMPRESSION_GZIP, blob, "kafka_compression(gzip)")
+
+
+def test_snappy_trailing_bytes_after_the_last_block_are_refused() raises:
+    var chunks = List[List[UInt8]]()
+    chunks.append(_patterned(100))
+    var blob = _xerial_blocks(chunks)
+    blob.append(UInt8(1))
+    blob.append(UInt8(2))
+    _assert_refused(KAFKA_COMPRESSION_SNAPPY, blob, "trailing bytes")
+
+
+def test_output_ceiling_refuses_a_decompression_bomb() raises:
+    # 256 MiB + 1 zero bytes: one byte over the ceiling, for each growing codec.
+    var plain = List[UInt8](length=256 * 1024 * 1024 + 1, fill=UInt8(0))
+    var ids = List[Int]()
+    ids.append(KAFKA_COMPRESSION_GZIP)
+    ids.append(KAFKA_COMPRESSION_LZ4)
+    ids.append(KAFKA_COMPRESSION_ZSTD)
+    for i in range(len(ids)):
+        var blob = _compress(ids[i], plain)
+        _assert_refused(ids[i], blob, "-byte ceiling")
+
+
 def test_empty_blob_is_refused_by_the_stream_codecs() raises:
     var empty = List[UInt8]()
     _assert_refused(KAFKA_COMPRESSION_GZIP, empty, "kafka_compression(gzip)")
@@ -637,6 +689,11 @@ def main() raises:
     test_snappy_oversized_preamble_is_refused_before_allocation()
     test_garbage_is_refused_by_every_codec()
     test_truncated_blob_is_refused()
+    test_truncated_gzip_is_refused_as_truncated_not_as_too_large()
+    test_gzip_members_concatenate()
+    test_gzip_member_followed_by_garbage_is_refused()
+    test_snappy_trailing_bytes_after_the_last_block_are_refused()
+    test_output_ceiling_refuses_a_decompression_bomb()
     test_empty_blob_is_refused_by_the_stream_codecs()
     test_unknown_codec_id_is_refused()
     test_compressed_batch_decodes_like_the_plain_batch()

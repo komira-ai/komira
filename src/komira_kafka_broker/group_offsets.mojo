@@ -14,8 +14,10 @@
 #   <cluster>/_meta/groups/<group_id>/offsets/<topic>/<partition>.json
 # whose body is {"offset": <int64>, "metadata": "<str>",
 # "commit_timestamp": <int64>}. A commit is an unconditional `put`: the last
-# write per partition wins. The JSON is written and read by hand (three scalar
-# fields), so the module has no JSON dependency.
+# write per partition wins, and the store does not order commits: the caller
+# must check the member generation before it commits. In the key, `%` and `/`
+# of a group id are percent-encoded. The JSON is written and read by hand
+# (three scalar fields), so the module has no JSON dependency.
 #
 # No pointer type appears in any signature: the store is owned by value and
 # offsets flow as scalars and owned Strings.
@@ -86,14 +88,16 @@ def _json_escape(s: String) -> String:
     """Escape `"` and `\\` for embedding in the metadata JSON string value.
     Metadata is small + caller-controlled; this covers the two JSON-significant
     chars."""
-    var out = String("")
+    var out = List[UInt8]()
     var bs = s.as_bytes()
     for i in range(len(bs)):
         var c = bs[i]
         if c == UInt8(ord('"')) or c == UInt8(ord("\\")):
-            out += "\\"
-        out += chr(Int(c))
-    return out^
+            out.append(UInt8(ord("\\")))
+        # The raw byte, not `chr(c)`: a byte of a multibyte UTF-8 sequence is
+        # not a codepoint.
+        out.append(c)
+    return String(StringSlice(unsafe_from_utf8=Span(out)))
 
 
 def encode_offset_json(rec: CommittedOffset) -> List[UInt8]:
@@ -156,18 +160,18 @@ def _parse_string_at(s: String, pos: Int) -> String:
     if i >= n or bs[i] != UInt8(ord('"')):
         return String("")
     i += 1  # skip opening quote
-    var out = String("")
+    var out = List[UInt8]()
     while i < n:
         var c = bs[i]
         if c == UInt8(ord("\\")) and i + 1 < n:
-            out += chr(Int(bs[i + 1]))
+            out.append(bs[i + 1])
             i += 2
             continue
         if c == UInt8(ord('"')):
             break
-        out += chr(Int(c))
+        out.append(c)
         i += 1
-    return out^
+    return String(StringSlice(unsafe_from_utf8=Span(out)))
 
 
 def decode_offset_json(body: List[UInt8]) raises -> CommittedOffset:
@@ -194,13 +198,29 @@ def decode_offset_json(body: List[UInt8]) raises -> CommittedOffset:
 # =============================================================================
 
 
+def _group_path_segment(group_id: String) -> String:
+    """The group id as one path segment: `%` and `/` are percent-encoded, so a
+    group id holding `/` cannot name another group's subtree."""
+    var out = List[UInt8]()
+    var bs = group_id.as_bytes()
+    for i in range(len(bs)):
+        var c = bs[i]
+        if c == UInt8(ord("%")):
+            out.extend(String("%25").as_bytes())
+        elif c == UInt8(ord("/")):
+            out.extend(String("%2F").as_bytes())
+        else:
+            out.append(c)
+    return String(StringSlice(unsafe_from_utf8=Span(out)))
+
+
 def _group_offsets_prefix(cluster: String, group_id: String) -> String:
     """`<cluster>/_meta/groups/<group_id>/offsets/` — the directory prefix for
     a group's committed offsets (used by the LIST-all-topics path)."""
     return (
         cluster
         + String("/_meta/groups/")
-        + group_id
+        + _group_path_segment(group_id)
         + String("/offsets/")
     )
 
@@ -273,6 +293,21 @@ def _parse_topic_partition_from_key(
     return (topic^, part, True)
 
 
+def _is_not_found(msg: String) -> Bool:
+    """True iff a store error says the object is absent. Store errors name the
+    object key, and this key holds a topic name and a partition number, so a
+    bare `404` or `not_found` would match a key (partition 404, topic
+    `not_found`) and turn a 403 or 5xx into "never committed". The needles are
+    ones a key cannot hold: the canonical `StoreError[NOT_FOUND]` token, the
+    `status=404` projection, and the in-memory and local-file stores'
+    `not_found (404)`."""
+    return (
+        msg.find("StoreError[NOT_FOUND]") >= 0
+        or msg.find("status=404") >= 0
+        or msg.find("not_found (404)") >= 0
+    )
+
+
 # =============================================================================
 # §5 — GroupOffsetStore — the typed API over the ConditionalWriteStore.
 # =============================================================================
@@ -282,13 +317,16 @@ struct GroupOffsetStore[
     Storage: CloneableConditionalWriteStore = SharedInMemoryConditionalStore
 ](Movable, Deinitable):
     """Committed-offset persistence for Kafka consumer groups over the shared
-    `ConditionalWriteStore` (the S3 CAS group tree).
+    `ConditionalWriteStore`.
 
     Owns a handle to the SAME store TYPE the data plane uses (a
     `CloneableConditionalWriteStore` — in-memory twin by default, OR
     `S3ConditionalStore[C]` for durability), so the group tree lives alongside
     the segment/manifest tree in one object store. last-write-wins per
-    partition (a `put`).
+    partition (a `put`, not a conditional write): the store does not order
+    commits, so a stale committer (a member that lost its partition in a
+    rebalance) overwrites a newer offset unless the caller checks the member
+    generation before calling `commit`.
 
     `commit` / `fetch` are the OffsetCommit / OffsetFetch primitives;
     `fetch_all_for_group` LISTs the group prefix for the "null topics ==
@@ -312,7 +350,13 @@ struct GroupOffsetStore[
         rec: CommittedOffset,
     ) raises:
         """Persist `rec` as the committed offset for (group, topic, partition).
-        last-write-wins (`put`)."""
+        last-write-wins (`put`). An empty topic or a negative partition is
+        refused: it could be written but never listed."""
+        if len(topic.as_bytes()) == 0 or partition < Int32(0):
+            raise Error(
+                "group_offsets: cannot commit an empty topic or a negative"
+                " partition"
+            )
         var key = _offset_key(self._cluster, group_id, topic, partition)
         var path = Path.parse(key)
         var body = encode_offset_json(rec)
@@ -338,7 +382,7 @@ struct GroupOffsetStore[
             return Optional(decode_offset_json(body^))
         except e:
             var msg = String(e)
-            if msg.find("not_found") >= 0 or msg.find("404") >= 0:
+            if _is_not_found(msg):
                 return Optional[CommittedOffset]()
             raise Error(msg)
 
@@ -376,6 +420,8 @@ struct GroupOffsetStore[
                 ref sub = listing.common_prefixes[i]
                 # Only a prefix strictly below the one just listed is walked,
                 # so a store that repeats a prefix cannot loop.
-                if len(sub.as_bytes()) > len(current.as_bytes()) and sub.startswith(current):
+                if len(sub.as_bytes()) > len(
+                    current.as_bytes()
+                ) and sub.startswith(current):
                     pending.append(sub)
         return out^

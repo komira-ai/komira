@@ -100,7 +100,7 @@ assert_equal(len(grouped[0].records), 3)
 
 ## Consumer-group offsets
 
-`GroupOffsetStore` keeps one object per (group, topic, partition) at `<cluster>/_meta/groups/<group>/offsets/<topic>/<partition>.json`, in any `CloneableConditionalWriteStore`. A commit is an unconditional put: the last write wins. `fetch` answers `None` for an offset that was never committed (a store error that is not "not found" is raised, not read as `None`). `fetch_all_for_group` lists a group's offsets, following the store's sub-directory prefixes, so it works on a store that answers a listing the way S3 does.
+`GroupOffsetStore` keeps one object per (group, topic, partition) at `<cluster>/_meta/groups/<group>/offsets/<topic>/<partition>.json`, in any `CloneableConditionalWriteStore`. A commit is an unconditional put: the last write wins, and the store does not order commits, so a stale committer (a member that lost its partition in a rebalance) overwrites a newer offset unless the caller checks the member generation first. `%` and `/` of a group id are percent-encoded in the key. An empty topic or a negative partition is refused at commit. `fetch` answers `None` for an offset that was never committed (a store error that is not "not found" is raised, not read as `None`). `fetch_all_for_group` lists a group's offsets, following the store's sub-directory prefixes, so it works on a store that answers a listing the way S3 does.
 
 ```mojo
 from std.testing import assert_equal

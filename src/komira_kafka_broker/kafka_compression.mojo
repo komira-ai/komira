@@ -14,7 +14,8 @@
 # one each codec uses elsewhere in some cases:
 #
 #   gzip (1)   standard gzip framing; inflated with zlib's gzip/zlib
-#              auto-detect.
+#              auto-detect, one member after another (concatenated members
+#              decode as one stream).
 #   snappy (2) the xerial (java-snappy) framing: a 16-byte header (the magic
 #              0x82 "SNAPPY" 0x00, then the version and compatible-version
 #              int32s) followed by repeated `[int32 block-len][raw block]`.
@@ -91,10 +92,12 @@ def _initial_cap(input_len: Int) -> Int:
     return cap
 
 
-def _grow(cap: Int, label: String) raises -> Int:
+def _grow(
+    cap: Int, label: String, ceiling: Int = _MAX_OUT_CAP
+) raises -> Int:
     """The next output capacity after `cap` was too small, or a refusal once
     `cap` is already the ceiling."""
-    if cap >= _MAX_OUT_CAP:
+    if cap >= ceiling:
         raise Error(
             "kafka_compression("
             + label
@@ -103,8 +106,8 @@ def _grow(cap: Int, label: String) raises -> Int:
             + "-byte ceiling (corrupt or hostile batch?)"
         )
     var next = cap * 2
-    if next > _MAX_OUT_CAP:
-        next = _MAX_OUT_CAP
+    if next > ceiling:
+        next = ceiling
     return next
 
 
@@ -122,14 +125,21 @@ def _read_int32_be(data: Span[UInt8, _], pos: Int) -> Int:
 # =============================================================================
 
 
-def _decompress_gzip(src: Span[UInt8, _]) raises -> List[UInt8]:
+def _inflate_member(
+    src: Span[UInt8, _], ceiling: Int
+) raises -> Tuple[List[UInt8], Int]:
+    """Inflate the one gzip (or zlib) stream at the start of `src` into at most
+    `ceiling` bytes. Returns the output and the number of input bytes the
+    stream occupied."""
     var cap = _initial_cap(len(src))
+    if cap > ceiling:
+        cap = ceiling
     while True:
         var out = _output_buffer(cap)
         var res = zlib_inflate_once(Span(out), src, ZLIB_WINDOW_BITS_AUTO)
         if res.rc == Z_STREAM_END:
             out.resize(res.written, UInt8(0))
-            return out^
+            return (out^, len(src) - res.unread)
         if res.rc != Z_OK and res.rc != Z_BUF_ERROR:
             raise Error(
                 "kafka_compression(gzip): inflate failed with rc "
@@ -142,7 +152,21 @@ def _decompress_gzip(src: Span[UInt8, _]) raises -> List[UInt8]:
                 "kafka_compression(gzip): the stream ends before its final"
                 " block does (truncated batch)"
             )
-        cap = _grow(cap, "gzip")
+        cap = _grow(cap, "gzip", ceiling)
+
+
+def _decompress_gzip(src: Span[UInt8, _]) raises -> List[UInt8]:
+    """Inflate every member of a gzip blob (concatenated members decode as one
+    stream, as GZIPInputStream reads them), within the output ceiling for the
+    whole blob."""
+    var result = List[UInt8]()
+    var pos = 0
+    while True:
+        var member = _inflate_member(src[pos:], _MAX_OUT_CAP - len(result))
+        result.extend(Span(member[0]))
+        pos += member[1]
+        if pos >= len(src):
+            return result^
 
 
 def _decompress_zstd(src: Span[UInt8, _]) raises -> List[UInt8]:
@@ -206,6 +230,9 @@ def _has_xerial_magic(data: Span[UInt8, _]) -> Bool:
 def _decompress_snappy_raw_block(block: Span[UInt8, _]) raises -> List[UInt8]:
     """Decode one raw snappy block, sized exactly by its preamble."""
     var input_len = len(block)
+    # An empty raw block decodes to nothing (zstd, by contrast, refuses an
+    # empty blob). A batch that claims records over an empty result is refused
+    # later, by the record parser.
     if input_len == 0:
         return List[UInt8]()
     var out_len = snappy_uncompressed_length(block)
@@ -266,6 +293,12 @@ def _decompress_snappy(data: Span[UInt8, _]) raises -> List[UInt8]:
             )
         out.extend(Span(decoded))
         pos += block_len
+    if pos != n:
+        raise Error(
+            "kafka_compression(snappy): "
+            + String(n - pos)
+            + " trailing bytes after the last xerial block"
+        )
     return out^
 
 
