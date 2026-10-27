@@ -126,7 +126,8 @@ def _count(entries: List[String], want: String) -> Int:
 def _await_detached(child: DetachedChild) raises -> DetachedExit:
     """Poll a detached child until it is not running. No cap and no deadline:
     the exit is the event waited for (a child that never exits is stopped by
-    the test runner's watchdog)."""
+    the gate hang limit, `test_hang_limit_s`: "Time limits" in
+    tools/build/mojo/README.md)."""
     while True:
         var e = child.poll_exit()
         if not e.running:
@@ -138,6 +139,9 @@ def _await_detached(child: DetachedChild) raises -> DetachedExit:
 def test_sleep_ms_sleeps_only_a_positive_duration() raises:
     # The clamp is a pure function of the argument, so the test reads what
     # `_sleep_ms` would hand to usleep instead of timing a real sleep.
+    # What it does not check: that `_sleep_ms` passes `_usleep_micros(ms)` on
+    # to usleep, and returns before it for 0. Observing that needs a sleeper
+    # seam or a clock, and a test never waits on or asserts time.
     assert_equal(_usleep_micros(30), UInt32(30000), "30 ms is 30000 us")
     assert_equal(_usleep_micros(1), UInt32(1000), "the smallest positive")
     assert_equal(_usleep_micros(0), UInt32(0), "0 asks for no sleep")

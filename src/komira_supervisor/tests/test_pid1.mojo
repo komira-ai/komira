@@ -23,10 +23,14 @@
 #       collects the orphaned grandchild: the grandchild is gone, the group
 #       is empty and no child is left. The time it took is not asserted.
 #   test_a_term_ignoring_grandchild_is_killed_with_the_group     (Linux)
-#       the child dies of SIGTERM at once but its grandchild ignores it (it
-#       prints "ready" once it does): the grace (300 ms) runs out, SIGKILL
-#       empties the group, and the child's own first reason (SIGTERM, 143)
-#       is kept. The time it took is not asserted.
+#       the child dies of SIGTERM at once; its grandchild catches SIGTERM,
+#       prints "term-seen" and keeps running. The ladder holds the grace
+#       before it escalates: the marker is on the pipe (the grandchild ran
+#       its handler after the SIGTERM and before the SIGKILL), then SIGKILL
+#       empties the group and the child's own first reason (SIGTERM, 143) is
+#       kept. Time is not asserted: the marker is an event the grandchild
+#       produces. A ladder that sends SIGKILL without waiting leaves no
+#       marker.
 #   test_group_escalation_collects_more_orphans_than_one_batch   (Linux)
 #       a TERM-ignoring child with 300 TERM-ignoring grandchildren: the grace
 #       runs out, SIGKILL goes to the group, the child reads 137, and the
@@ -77,7 +81,8 @@ def _read_lines(mut sup: Supervisor, n: Int) raises -> List[String]:
     """The child's first `n` stdout lines, read without waiting for EOF (the
     child keeps running). Reads until the lines arrive or the child's output
     ends; no iteration cap and no deadline (a child that stays silent is
-    stopped by the test runner's watchdog)."""
+    stopped by the gate hang limit, `test_hang_limit_s`: see "Time limits" in
+    tools/build/mojo/README.md)."""
     _ = sup.set_nonblocking(sup.stdout_fd())
     var acc = String("")
     while True:
@@ -184,15 +189,37 @@ def test_group_terminate_collects_the_group() raises:
     print("  test_group_terminate_collects_the_group: PASS")
 
 
+def _read_to_eof(mut sup: Supervisor) raises -> String:
+    """Everything left on the child's stdout, up to its end. No cap and no
+    deadline: the end of the stream (every writer gone) is the event waited
+    for."""
+    _ = sup.set_nonblocking(sup.stdout_fd())
+    var acc = String("")
+    while True:
+        var c = sup.read_available(sup.stdout_fd())
+        acc += c.text
+        if c.eof or c.error:
+            return acc
+        if c.text.byte_length() == 0:
+            sleep(Float64(0.01))
+
+
 def test_a_term_ignoring_grandchild_is_killed_with_the_group() raises:
-    # The child dies of the SIGTERM at once; its grandchild ignores it. The
-    # wait lasts until the GROUP is empty or the grace runs out, then the
-    # group gets SIGKILL; the child's own reason (SIGTERM) is kept.
-    # The grandchild prints "ready" only once it ignores SIGTERM, so the
-    # SIGTERM below cannot reach it first.
+    # The child dies of the SIGTERM at once. Its grandchild catches it, says
+    # so and keeps running, so only the SIGKILL ends it. The wait lasts until
+    # the GROUP is empty or the grace runs out, then the group gets SIGKILL;
+    # the child's own reason (SIGTERM) is kept.
+    # The grandchild prints "ready" once its trap is set, so the SIGTERM
+    # below cannot reach it first. "term-seen" is printed by its handler:
+    # that line on the pipe is the proof the ladder waited between the
+    # SIGTERM and the SIGKILL (a SIGKILL sent at once never lets the handler
+    # run). The grace is counted in the supervisor's ticks and is long enough
+    # for a handler that does one write; the test asserts on the marker, not
+    # on how long anything took.
     var spec = ChildSpec.shell(
         String(
-            "(trap '' TERM; echo ready; exec sleep 30 >/dev/null 2>&1) &"
+            "( trap 'echo term-seen' TERM; echo ready;"
+            " while :; do sleep 30 >/dev/null 2>&1 & wait; done ) &"
             " echo $!; wait"
         )
     )
@@ -204,13 +231,19 @@ def test_a_term_ignoring_grandchild_is_killed_with_the_group() raises:
     var pid_line = two[1] if two[0] == String("ready") else two[0]
     var ready_seen = two[0] == String("ready") or two[1] == String("ready")
     var grandchild = Int32(atol(String(pid_line.strip())))
-    var info = sup.terminate_with(SIGTERM, 300, True)
+    var info = sup.terminate_with(SIGTERM, 1000, True)
     var left = proc_kill(grandchild, Int32(0))
     var group_left = proc_kill_group(pid, Int32(0))
+    var rest = _read_to_eof(sup)
     _await_no_child()
     _ = sup.drain_pipe(sup.stderr_fd())
     sup.close()
-    assert_true(ready_seen, "the grandchild ignored SIGTERM before it")
+    assert_true(ready_seen, "the grandchild's trap was set before the SIGTERM")
+    assert_equal(
+        String(rest.strip()),
+        String("term-seen"),
+        "the grandchild ran its SIGTERM handler before the SIGKILL: the grace was held",
+    )
     assert_equal(info.signal, SIGTERM, "the child's first reason is kept")
     assert_equal(info.shell_code, Int32(143))
     assert_true(left < Int32(0), "the grandchild was SIGKILLed and collected")

@@ -46,7 +46,8 @@ def _await_exited_unreaped(pid: Int32) raises -> String:
     cap and no deadline: the poll ends on the event it waits for, or when the
     probe says the child is gone altogether (reaped by the probe itself, so
     the exit can never be seen). A child that never exits is stopped by the
-    test runner's watchdog. Polling the waitid state itself, not an exit
+    gate hang limit (`test_hang_limit_s`, "Time limits" in
+    tools/build/mojo/README.md). Polling the waitid state itself, not an exit
     notification: on XNU EVFILT_PROC NOTE_EXIT may fire before the child is a
     waitable zombie."""
     while True:
