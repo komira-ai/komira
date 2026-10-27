@@ -11,11 +11,11 @@
 #     TOPN_HEAP_RATIO`, asserted below), single key and FLOAT64 + INT64;
 #   * `SortBuffer_Untyped` with a DT_F64 key.
 #
-# Defect each catches: a comparator using the IEEE `<` / `>`. On the heap a
-# NaN then never beats the top, so DESC LIMIT k returns +inf rows and drops
-# every NaN; in the buffer's merge sort NaN compares equal to everything and
-# strands mid-sequence. Planted mutants: the heap's `_cmp3` and the buffer's
-# F64 arm reverted to `<` / `>` each turn their tests red.
+# With the IEEE `<` / `>` as the comparator, a NaN on the heap never beats the
+# top, so DESC LIMIT k would return +inf rows and drop every NaN; in the
+# buffer's merge sort NaN would compare equal to everything and stay
+# mid-sequence. These tests fail for a heap comparator (`_cmp3`) or a buffer
+# F64 arm that uses `<` / `>`.
 # =============================================================================
 
 from std.math import inf, isnan

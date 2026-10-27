@@ -34,8 +34,8 @@
 # and §6 add the unique `v` as a secondary key, which makes the order total,
 # and pin full rows.
 #
-# Planted mutant: `_str_cmp3` comparing bytes SIGNED (as Int8) turns the
-# "Ünicode" cases red.
+# The "Ünicode" cases fail if `_str_cmp3` compares bytes as signed (Int8)
+# instead of unsigned.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
