@@ -24,6 +24,10 @@
   single `SpillableOp`; `try_grow_intra_op_routed` grows a
   `MemoryReservation` and, when it refuses, spills one of the breaker's own
   partitions and retries once. Only the oldest-first policy runs.
+- `shuffle_combine_buffer`, `shuffle_stream_combine`: the shuffle producer's
+  per-partition encode buffer, and the streaming combine of a producer's
+  partition slices into one `.seg` object that stages a partition above a byte
+  budget in a `SpillStorage`.
 
 Whether a breaker may spill, and to which tiers, is decided by the host
 profile (`HostProfile.spill_tiers_for`) and recorded in the physical plan."""

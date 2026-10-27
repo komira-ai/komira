@@ -34,16 +34,21 @@
 
 [external_cell_buildrules]
   git_origin = https://github.com/komira-ai/buildrules.git
-  # The commit of the buildrules release v0.0.53 (resolved through the annotated tag). A bump is one change: this line, then
+  # The commit of the buildrules release v0.0.54 (resolved through the annotated tag). A bump is one change: this line, then
   # `buildrules mojo sync` (the pins in the directory `[cells] toolchains` names, and each package's
   # buildrules.mojo.lock.bzl) when the release pins another mopm.
-  commit_hash = d7b0b89002f020e4ef92b7c52db25a0e5927471a
+  commit_hash = 6c243e6bdb66978d2f89e6818a4db9521701e978
 
-# buildrules' Mojo rules read this key to learn whether a macOS arm64 execution platform exists (a package built
+# buildrules reads every `[buildrules_re]` key from the root cell's configuration, whichever cell evaluates its
+# rules. Komira is the root cell when it is built standalone, so this section is the one read; a repository that
+# mounts komira as a cell sets the keys in its own root `.buckconfig` instead (this section is not read there).
+# Komira passes through the three keys its macOS workers need and leaves the others (`mode`, the linux worker
+# property sets, `linux_arm64_enabled`) unset, which is their default.
+# `macos_aarch64_properties` tells the Mojo rules whether a macOS arm64 execution platform exists (a package built
 # for macOS arm64 compiles on a macOS worker; absent: the package fails analysis naming the key). Komira's macOS
 # workers are `[komira_re] darwin_arm64_properties`, so the key follows it: set exactly when they are, holding
 # no value of its own (tools/build/platforms/with_buildrules.bzl registers the platform).
-# The two keys after it are read by the same rules from the root cell, and follow `[komira_re]` the same way:
+# The two keys after it follow `[komira_re]` the same way:
 # `darwin_macos_hosts` is the identities of those workers (a macOS Mojo compile refuses any other host, and a
 # macOS Mojo target fails analysis without it), `macos_library_dirs` the directories a macOS test run searches
 # for a library it opens by its bare name before /usr/local/lib:/usr/lib (optional; empty leaves dyld's defaults).
