@@ -30,6 +30,12 @@ from komira_agg.hash_agg_op_dt import (
     SumOp,
 )
 
+from komira_operator_api.emit_at_offset_target import (
+    _EmitColDesc,
+    _EmitColTarget,
+    EMIT_KIND_INELIGIBLE,
+)
+
 from komira_op_agg_stage.agg_column import AggBlock, AggSlot
 from komira_op_agg_stage.hash_agg import HashAggTable
 from komira_op_agg_stage.key_block import KeyTuple1, KeyTupleScalar
@@ -275,6 +281,33 @@ def test_null_key_groups_merge_by_key_across_workers() raises:
     assert_equal(out.column_at(1).as_primitive[I64]().get(0), Int64(21), "NULL: 1 + 20")
     assert_equal(out.column_at(0).as_primitive[I64]().get(2), Int64(0), "key 0 apart")
     assert_equal(out.column_at(1).as_primitive[I64]().get(2), Int64(10), "key 0")
+
+
+def test_a_null_key_makes_the_drain_at_offset_plan_ineligible() raises:
+    var with_null = _keyed_table()
+    _fill(with_null, _kv(_li(5, 5), _lb(True, False), _li(1, 2), _none(2)))
+    var descs = List[_EmitColDesc]()
+    with_null.emit_at_offset_plan(descs)
+    assert_equal(descs[0].kind, EMIT_KIND_INELIGIBLE, "the key column")
+
+    var plain = _keyed_table()
+    _fill(plain, _kv(_li(5, 6), _none(2), _li(1, 2), _none(2)))
+    var plain_descs = List[_EmitColDesc]()
+    plain.emit_at_offset_plan(plain_descs)
+    assert_true(plain_descs[0].kind != EMIT_KIND_INELIGIBLE, "no NULL key")
+
+
+def test_drain_at_offset_write_refuses_a_null_key() raises:
+    var t = _keyed_table()
+    _fill(t, _kv(_li(5, 5), _lb(True, False), _li(1, 2), _none(2)))
+    var targets = List[_EmitColTarget]()
+    var offsets = List[Int]()
+    var raised = False
+    try:
+        t.emit_at_offset_write(targets, 0, offsets, 0)
+    except e:
+        raised = "NULL key" in String(e)
+    assert_true(raised, "a write that meets a NULL key raises")
 
 
 def test_first_and_last_return_the_null_they_pick() raises:

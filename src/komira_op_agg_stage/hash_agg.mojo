@@ -192,7 +192,9 @@ struct HashAggTable[KB: KeyTuple, *Aggs: AggColumn](
     def consume_band[o: Origin[mut=False]](mut self, band: BandView[o]) raises:
         """Fold every live row of a decoded band (`band.selection_live`) into
         the same key block and states `feed_row` uses, without building a
-        RecordBatch."""
+        RecordBatch. A band carries no validity: every key and every aggregand
+        is folded as a value, so a NULL in the source would read as its data
+        word."""
         for row in range(band.n_rows()):
             if not band.selection_live(row):
                 continue
