@@ -35,6 +35,7 @@ PACKAGES = {
     "komira_lz4": "0.1.0",
     "komira_mail_address": "0.1.0",
     "komira_parquet_api": "0.1.0",
+    "komira_proto_codec": "0.1.0",
     "komira_protobuf": "0.1.0",
     "komira_resources": "0.1.0",
     "komira_retry": "0.1.0",
@@ -45,6 +46,7 @@ PACKAGES = {
     "komira_test_verdict": "0.1.0",
     "komira_textproto": "0.1.0",
     "komira_validation_run": "0.1.0",
+    "komira_wkt": "0.1.0",
     "komira_xml": "0.1.0",
     "komira_zlib": "0.1.0",
 }
