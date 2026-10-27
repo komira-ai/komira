@@ -252,12 +252,12 @@ def _assert_conservation(
 
 
 # =============================================================================
-# §1 THE cb10 SHAPE — a small dense domain, which is the case being bought
+# §1 A SMALL DENSE DOMAIN — a small dense domain, which is the case being bought
 # =============================================================================
 
 
 def test_dense_domain_agrees_with_the_dict_and_takes_the_dense_route() raises:
-    """91 groups over 4000 rows — cb10's shape at test scale.
+    """91 groups over 4000 rows — a small dense domain at test scale.
 
     Both halves matter: the arms agree (byte-equivalence) AND every row went
     through the dense table (the change actually applies here). Either one
@@ -269,7 +269,7 @@ def test_dense_domain_agrees_with_the_dict_and_takes_the_dense_route() raises:
 
     var d = _run(f, dense=True)
     var m = _run(f, dense=False)
-    _assert_states_identical(d, m, "cb10 shape (91 groups)")
+    _assert_states_identical(d, m, "small dense domain (91 groups)")
     assert_equal(len(d.group_keys), 91, "the fixture must produce 91 groups")
 
     assert_equal(

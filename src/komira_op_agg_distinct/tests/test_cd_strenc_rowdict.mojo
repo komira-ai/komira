@@ -7,7 +7,7 @@
 # task hashes and dictionary-encodes its OWN contiguous rows, the driver numbers
 # the values in (task, mint) order, a parallel remap rewrites local ids to
 # global ones. It replaces, for a key with few distinct values, the hash-SHARDED
-# Phase B whose one shard owned the skewed query's 91.8% value. See
+# Phase B whose one shard owned the skewed query's dominant value. See
 # `agg_cd_strenc_rowdict.mojo`.
 #
 # WHAT THIS FILE PROVES:

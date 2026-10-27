@@ -396,7 +396,7 @@ struct CountDistinctAggSink(MorselSink):
             # Pick the INSTANTIATION. An all-COUNT(DISTINCT) node has no
             # fixed slot, and runs the `has_fixed=False` row loop in which the
             # passenger lane does not exist (the fused body with an empty fixed
-            # list measured +4.32%).
+            # list was slower).
             if self._num_fixed > 0:
                 local.state.consume_batch[has_fixed=True](
                     current,

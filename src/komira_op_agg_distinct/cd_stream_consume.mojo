@@ -288,7 +288,7 @@ def _cd_consume_grouped[
             # wraps past Int64.MAX are all handled by the same compare and
             # none of them can overflow), one L1 load. What it replaces is
             # a two-round mulx hash fold plus TWO SwissTable group walks —
-            # 35.9 cycles/row measured on cb10, 17.73% of that query.
+            # one L1 load instead of that hash-and-walk.
             var du = (Int64(key) - Int64(st.dense_lo)).cast[
                 DType.uint64
             ]()
@@ -489,8 +489,8 @@ def _cd_fx_fold_batch[bo: Origin](
     every row paid, per fixed aggregate, the channel / function / int-lane
     lookups, a validity probe and a two-level `fx_cells[f][gid]` index — an
     interpreter step per (row, aggregate): on a mixed query that was the
-    bulk of `consume_batch`'s extra cost over the all-CD one (37.7% vs
-    30.2% of samples; +14.2G instructions per query).
+    bulk of `consume_batch`'s extra cost over the all-CD one (a larger share of
+    the samples).
     Here every per-aggregate decision is taken ONCE per batch and the inner
     loop is a gid load, a value load and one cell update.
 

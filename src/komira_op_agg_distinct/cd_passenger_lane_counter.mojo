@@ -7,7 +7,7 @@
 # COUNT / MIN / MAX / MEAN) as a PASSENGER LANE on the gid the COUNT(DISTINCT)
 # lane resolves. An all-COUNT(DISTINCT) query must run the instantiation with
 # no passenger code at all (`has_fixed = False`): a version that ran the fused
-# body with zero fixed aggregates measured +4.32% on such a query (the row
+# body with zero fixed aggregates made an all-CD query slower (the row
 # loop grew from 11,431 to 13,176 bytes). NO VALUE ASSERTION CAN SEE WHICH
 # instantiation ran: both produce the same COUNT(DISTINCT) answers. These
 # counters are the observable half — the number of grouped batches consumed,

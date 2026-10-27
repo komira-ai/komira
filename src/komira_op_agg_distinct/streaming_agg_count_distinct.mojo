@@ -323,7 +323,7 @@ struct WorkerCDState(Copyable, Movable):
     # the SAME gid the CD lane resolved, which is the whole point.
     #
     # EMPTY ON EVERY ALL-COUNT(DISTINCT) QUERY — and that alone did NOT make
-    # the lane free (see the MIXEDFUSE header: cb13 +4.32%). What makes it free
+    # the lane free (see the MIXEDFUSE header). What makes it free
     # is that the all-CD route runs the `has_fixed=False` instantiation, which
     # never names these fields at all.
     var fx_func: List[UInt8]
@@ -635,7 +635,7 @@ struct WorkerCDState(Copyable, Movable):
 
         Instantiates `has_fixed=False`: the passenger lane is compiled OUT,
         not skipped. The first MIXEDFUSE landing forwarded an EMPTY fixed list
-        into the fused body instead and cost cb13 +4.32% (see the MIXEDFUSE
+        into the fused body instead and slowed that query (see the MIXEDFUSE
         header). An ARMED state (`num_fixed > 0`) is REFUSED rather than fed
         through an instantiation that cannot fold its fixed cells."""
         var no_fixed = List[Int]()
@@ -808,8 +808,8 @@ struct WorkerCDState(Copyable, Movable):
         # So each lane is classified ONCE per batch and a lane that is not
         # int64-storage gets its per-row Int64 DISTINCT KEY materialised at its
         # OWN width (`cd_distinct_keys_for_column`, offset-aware). The
-        # `CDK_RAW_I64` lane keeps the pointer read byte for byte — cb04/cb05/
-        # cb13 are int64 aggregands and must not pay for this.
+        # `CDK_RAW_I64` lane keeps the pointer read byte for byte: int64 aggregands
+        # take this path and must not pay for the offset-aware read.
         #
         # An UNSUPPORTED type never reaches here: `cd_value_type_supported`
         # gates both detectors that build this sink's `AggSinkData`. If one ever

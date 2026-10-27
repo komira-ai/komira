@@ -373,7 +373,7 @@ def test_multi_worker_many_groups_across_group() raises:
     builds a global group directory and MOVES each worker's per-group buffer
     directly into `radix_distinct_count_grouped` (no serial bulk-extend fold).
 
-    This drives the cb13-shape "many groups" across-group path: 300 groups (>=
+    This drives the "many groups" across-group path: 300 groups (>=
     the driver's across-group group-count gate), ~450 distinct values per group,
     with values overlapping across batches/workers so the cross-worker dedup +
     the global-directory local->global group remap + the O(1) buffer MOVE must
