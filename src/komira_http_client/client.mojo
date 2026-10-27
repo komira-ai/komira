@@ -32,7 +32,7 @@
 #     and passes it `mut` to send.
 # =============================================================================
 
-from std.memory import OwnedPointer
+from std.memory import ArcPointer, OwnedPointer
 
 from komira_collections.slab import Slab
 from komira_async.cancellation.token import CancellationToken
@@ -121,6 +121,7 @@ from komira_http_core.transport.io_stream import (
     Connector,
     IoStream,
     NEGOTIATED_HTTP_2,
+    NoDialAddress,
 )
 
 
@@ -558,6 +559,9 @@ struct HttpClient[C: Connector](HttpService, Movable, Deinitable):
     # unconditionally, so there is no laziness for them to have.
     var _dial_resolves: Int
 
+    var _test_clock: Optional[ArcPointer[Int]]
+    """None in production. See `set_test_clock`."""
+
     def __init__(out self, config: HttpClientConfig, var connector: Self.C):
         self._config = config
         self._connector = connector^
@@ -573,6 +577,16 @@ struct HttpClient[C: Connector](HttpService, Movable, Deinitable):
             OwnedPointer[Slab[_H1CacheEntry[Self.C.Stream]]]
         ]()
         self._dial_resolves = 0
+        self._test_clock = None
+
+    def set_test_clock(mut self, clock_cell: ArcPointer[Int]):
+        """Drive `send_buffered` on an HTTP/1 connection with scripted time:
+        the request deadline, the body deadline stamped from it and the body
+        drain all read `clock_cell` (microseconds) instead of the system clock,
+        so a test decides how much time passes and when. Production code never
+        calls this; the field stays None and every deadline reads the system
+        clock as before."""
+        self._test_clock = Optional[ArcPointer[Int]](clock_cell)
 
     @staticmethod
     def with_defaults(var connector: Self.C) -> HttpClient[Self.C]:
@@ -639,7 +653,17 @@ struct HttpClient[C: Connector](HttpService, Movable, Deinitable):
         §2.5 documents for the dispatch helpers).
         """
         self._dial_resolves = self._dial_resolves + 1
-        return _ip_be_from_host(host, port)
+        comptime if conforms_to(Self.C, NoDialAddress):
+            # A connector that opens no socket (ScriptedConnector) never reads
+            # the address, so a NAME is not looked up: it dials address 0. An
+            # IP literal still parses to itself, so a test that dials a literal
+            # sees the same `ip_be` as before.
+            var lit = parse_ip_literal(host)
+            if lit:
+                return lit.value().v4_be
+            return UInt32(0)
+        else:
+            return _ip_be_from_host(host, port)
 
     @always_inline
     def dial_resolve_steps_total(self) -> Int:
@@ -2161,7 +2185,7 @@ struct HttpClient[C: Connector](HttpService, Movable, Deinitable):
                     ](
                         req^, body^, cached_stream^, reactor, max_body_bytes,
                         Span[UInt8](scratch_arr_cached),
-                        req_timeout,
+                        req_timeout, self._test_clock.copy(),
                     )
                 except e:
                     var first_err = String(e)
@@ -2183,7 +2207,7 @@ struct HttpClient[C: Connector](HttpService, Movable, Deinitable):
                         ](
                             retry_bytes.copy(), retry_stream^, reactor,
                             max_body_bytes, retry_is_head,
-                            req_timeout,
+                            req_timeout, self._test_clock.copy(),
                         )
                         did_redial = True
                     except redial_err:
@@ -2216,7 +2240,7 @@ struct HttpClient[C: Connector](HttpService, Movable, Deinitable):
                     ](
                         retry_bytes^, stream_408^, reactor,
                         max_body_bytes, retry_is_head,
-                        req_timeout,
+                        req_timeout, self._test_clock.copy(),
                     )
                 # Move out the response (Optional<S> drops with bundle
                 # scope if connection_close=True).
@@ -2319,7 +2343,7 @@ struct HttpClient[C: Connector](HttpService, Movable, Deinitable):
         ](
             req^, body^, stream^, reactor, max_body_bytes,
             Span[UInt8](scratch_arr),
-            req_timeout,
+            req_timeout, self._test_clock.copy(),
         )
         var resp_dial = ClientResponse[BufferedResponseBody](
             BufferedResponseBody.from_bytes(List[UInt8]())
@@ -2907,7 +2931,7 @@ def _run_one_request_streaming[
     _scheme_check_or_raise[C2](is_https, is_http, connector)
     var host_str = req.url.host_copy()
     var port = req.url.effective_port()
-    var ip_be = _ip_be_from_host(host_str, port)
+    var ip_be = _ip_be_for_connector[C2](host_str, port)
     # ★ PER-REQUEST SNI — the host, not just the address. See
     # `Connector.set_dial_host`.
     # ⚠ THIS HELPER CONSULTS NO POOL AND ALWAYS DIALS, so the resolve
@@ -3027,7 +3051,7 @@ def _run_one_request_buffered_with_dispatch[
     _scheme_check_or_raise[C2](is_https, is_http, connector)
     var host_str = req.url.host_copy()
     var port = req.url.effective_port()
-    var ip_be = _ip_be_from_host(host_str, port)
+    var ip_be = _ip_be_for_connector[C2](host_str, port)
     # ★ PER-REQUEST SNI — the host, not just the address. See
     # `Connector.set_dial_host`.
     # ⚠ THIS HELPER CONSULTS NO POOL AND ALWAYS DIALS, so the resolve
@@ -3101,6 +3125,7 @@ def _run_one_request_buffered_h1[
     max_body_bytes: Int,
     scratch: Span[UInt8, scratch_o],
     request_timeout_us: Int = 0,
+    clock_cell: Optional[ArcPointer[Int]] = None,
 ) raises -> _H1BufferedResult[S]:
     """The h1 buffered branch after stream is dialed +
     ALPN known. Mirrors the original `_run_one_request_buffered` body
@@ -3135,6 +3160,7 @@ def _run_one_request_buffered_h1[
     var driver = OutboundDriver.new(req_bytes^)
     driver.set_max_response_body_bytes(max_body_bytes)
     driver.set_is_head_request(is_head)
+    driver.set_test_clock(clock_cell.copy())
     # bound the drive loop when a positive timeout was
     # configured (0 = the generous 600s default — unchanged for every
     # existing caller).
@@ -3198,6 +3224,7 @@ def _drive_buffered_on_stream_bytes[
     max_body_bytes: Int,
     is_head: Bool,
     request_timeout_us: Int = 0,
+    clock_cell: Optional[ArcPointer[Int]] = None,
 ) raises -> _H1BufferedResult[S]:
     """The BUFFERED analog of
     `_drive_streaming_get_on_stream_bytes` — drive one request from
@@ -3230,6 +3257,7 @@ def _drive_buffered_on_stream_bytes[
     var driver = OutboundDriver.new(req_bytes^)
     driver.set_max_response_body_bytes(max_body_bytes)
     driver.set_is_head_request(is_head)
+    driver.set_test_clock(clock_cell.copy())
     # bound the drive loop when a positive timeout was
     # configured (0 = the 600s default — unchanged for every existing caller).
     if request_timeout_us > 0:
@@ -3970,7 +3998,7 @@ def _run_one_request_buffered[
     _scheme_check_or_raise[C2](is_https, is_http, connector)
     var host_str = req.url.host_copy()
     var port = req.url.effective_port()
-    var ip_be = _ip_be_from_host(host_str, port)
+    var ip_be = _ip_be_for_connector[C2](host_str, port)
     # ★ PER-REQUEST SNI — the host, not just the address. See
     # `Connector.set_dial_host`.
     # ⚠ THIS HELPER CONSULTS NO POOL AND ALWAYS DIALS, so the resolve
@@ -4049,6 +4077,22 @@ def _run_one_request_buffered[
 #
 # Both branches return the SAME UInt32 ip_be the Connector.connect path wants,
 # so no dial site changes. `port` is threaded for getaddrinfo's service hint.
+
+
+def _ip_be_for_connector[
+    C: Connector
+](host: String, port: UInt16) raises -> UInt32:
+    """`_ip_be_from_host` for the free-function dial helpers, except that a
+    `NoDialAddress` connector (ScriptedConnector) gets address 0 for a host
+    name instead of a lookup. `HttpClient._resolve_dial_ip_be` does the same
+    for the method dial paths."""
+    comptime if conforms_to(C, NoDialAddress):
+        var lit = parse_ip_literal(host)
+        if lit:
+            return lit.value().v4_be
+        return UInt32(0)
+    else:
+        return _ip_be_from_host(host, port)
 
 
 def _ip_be_from_host(host: String, port: UInt16 = UInt16(0)) raises -> UInt32:

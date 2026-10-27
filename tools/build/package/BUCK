@@ -1,10 +1,11 @@
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
-load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
 load(":conda.bzl", "conda_manifest_kci")
 load(":defs.bzl", "launcher_level_test")
 load(":kcov_guard.bzl", "kcov_guard_cases", "kcov_guard_tool")
-load(":release_set.bzl", "conda_release_set_check", "release_order_test")
+load(":release_set.bzl", "conda_release_set_check", "release_order_test", "release_readme_test")
+load(":glibc_floor_record.bzl", "glibc_floor_record")
 load(":system_libs_record.bzl", "system_libs_record")
 
 # The launcher's CPU level function against made-up CPUs (tools/build/package/launcher).
@@ -13,21 +14,92 @@ launcher_level_test(
     exec_compatible_with = LINUX_X86_64,
 )
 
-# The package-format writer (tar, OCI), a static executable.
+# The packer's unit tests, `zig test` of pack/unit_tests.zig run as a build
+# action: the dlopen declarations (pack/conda_dlopen.zig: the soname reader
+# (code, not comments or docstrings), a declared soname accepted, an
+# undeclared one refused, a declaration no source opens refused, and each
+# declared requirement written after the others, once) and a library's
+# native files in its package (pack/conda_lib.zig: lib_files rows, the
+# __glibc floor, NEEDED owners) and the link commands of a packaged README
+# (pack/readme_link.zig: every owner in the order given, an owner a
+# shared library NEEDs refused before it, the static archive
+# on the build line only, the source's bytes kept, a source naming the
+# marker refused).
+zig_test(
+    name = "komira_pack_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "pack/unit_tests.zig",
+    imports = [
+        "pack/common.zig",
+        "pack/conda_dlopen.zig",
+        "pack/conda_lib.zig",
+        "pack/deflate.zig",
+        "pack/deflate_test.zig",
+        "pack/readme_link.zig",
+    ],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# The package-format writer (tar, OCI), a static executable, built only
+# behind its unit tests.
 zig_exe(
     name = "komira_pack",
     exec_compatible_with = LINUX_X86_64,
     src = "pack/komira_pack.zig",
+    unit_tests = [":komira_pack_unit", "komira//tools/build/toolchains:zig_next_version"],
     imports = [
         "pack/common.zig",
         "pack/conda.zig",
         "pack/conda_check.zig",
+        "pack/conda_dlopen.zig",
         "pack/conda_index.zig",
+        "pack/conda_lib.zig",
         "pack/conda_meta.zig",
+        "pack/deflate.zig",
+        "pack/readme_link.zig",
         "pack/tar_oci.zig",
     ],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# pkg_act (act/pkg_act.zig): the small actions of the package rules, in place
+# of their busybox scripts: the bundle assembly (bundle.zig), the kcov guard and
+# its cases (kcov_guard.zig), the release-set checks (release.zig), the OCI
+# release manifest, the conda manifest read-back and the directory copy of the
+# joins (misc.zig). Built behind its unit tests; its process cases are
+# tests//functional/pkg_act.
+zig_test(
+    name = "pkg_act_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "act/pkg_act_test.zig",
+    imports = [
+        "act/bundle.zig",
+        "act/kcov_guard.zig",
+        "act/misc.zig",
+        "act/release.zig",
+    ],
+    deps = ["//tools/build/act_util:act_util"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "pkg_act",
+    exec_compatible_with = LINUX_X86_64,
+    src = "act/pkg_act.zig",
+    imports = [
+        "act/bundle.zig",
+        "act/kcov_guard.zig",
+        "act/misc.zig",
+        "act/release.zig",
+    ],
+    deps = ["//tools/build/act_util:act_util"],
+    unit_tests = [":pkg_act_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 
@@ -38,7 +110,6 @@ zig_exe(
 shell_lint(
     name = "shell_lint",
     srcs = [
-        "kcov_guard.sh",
         "list_conda_targets.sh",
         "release_version.sh",
     ],
@@ -52,7 +123,6 @@ shell_lint(
 kcov_guard_tool(
     name = "kcov_guard",
     exec_compatible_with = LINUX_X86_64,
-    script = "kcov_guard.sh",
     checks = [":kcov_guard_cases"],
     visibility = ["PUBLIC"],
 )
@@ -69,7 +139,6 @@ kcov_guard_tool(
 kcov_guard_cases(
     name = "kcov_guard_cases",
     exec_compatible_with = LINUX_X86_64,
-    script = "kcov_guard.sh",
 )
 
 # release_version.sh as a file: kci_workflow_check's welded test holds kci.yml's
@@ -93,6 +162,11 @@ config_setting(
     visibility = ["PUBLIC"],
 )
 
+# The package of the superseded one-library plan (retired 2026-10-07): the
+# release order fixture below requires it, so that an exemption for it cannot
+# come back. Spelt in parts, as the root BUCK's retired_names lint asks.
+_OLD_NATIVE = "komira" + "_native"
+
 # The stamped release path, before any release runs it (release_set.bzl): each
 # library of the release set packaged with the fixed test stamp of conda.bzl
 # (build number 999999999, build string h7e57c0de_999999999), their [release]
@@ -100,7 +174,9 @@ config_setting(
 # Red if a member's [release_check] fails, if a member or the metapackage does
 # not carry the test stamp, if the metapackage does not require a member at
 # that version and build string, if a member requires a member listed after
-# it, if conda-check refuses it, or if `libs` and
+# it, if a member packages no README or one with no ```mojo example (kci's
+# install validation refuses both, after publish), if conda-check refuses it,
+# or if `libs` and
 # `metapackage` are not release_set.txt's (which kci_artifact's welded test
 # holds equal to release/artifacts.textproto's metapackage).
 conda_release_set_check(
@@ -160,7 +236,6 @@ conda_release_set_check(
         "//src/komira_managed_mail_proto:komira_managed_mail_proto",
         "//src/komira_calendar_proto:komira_calendar_proto",
         "//src/komira_snapshotter:komira_snapshotter",
-        "//src/komira_mail_message:komira_mail_message",
         "//src/komira_vcard:komira_vcard",
         "//src/komira_trace:komira_trace",
         "//src/komira_calendar:komira_calendar",
@@ -169,15 +244,118 @@ conda_release_set_check(
         "//src/kci_deploy_model_proto:kci_deploy_model_proto",
         "//src/kci_manifest_proto:kci_manifest_proto",
         "//src/kci_artifact:kci_artifact",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_lz4:komira_lz4",
+        "//src/komira_zlib:komira_zlib",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_mail_message:komira_mail_message",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_secret_store:komira_secret_store",
+        "//src/kci_secret_writer:kci_secret_writer",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_secret_env:komira_secret_env",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_log:komira_log",
+        "//src/komira_plan_stats:komira_plan_stats",
+        "//src/kci_reconciler:kci_reconciler",
+        "//src/komira_scan_source:komira_scan_source",
+        "//src/kci_cloud:kci_cloud",
+        "//src/komira_plan_ir:komira_plan_ir",
+        "//src/kci_composites:kci_composites",
+        "//src/komira_join_assembly:komira_join_assembly",
+        "//src/kci_cloud_fake:kci_cloud_fake",
+        "//src/komira_async:komira_async",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_net:komira_net",
+        "//src/komira_supervisor:komira_supervisor",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/kci_pkg_upload:kci_pkg_upload",
+        "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_oci:komira_oci",
+        "//src/kci_publish_oci:kci_publish_oci",
+        "//src/kci_release_set:kci_release_set",
+        "//src/komira_gcp_cloudresourcemanager:komira_gcp_cloudresourcemanager",
+        "//src/komira_gcp_iam:komira_gcp_iam",
+        "//src/komira_gcp_run:komira_gcp_run",
+        "//src/komira_gcp_wif:komira_gcp_wif",
+        "//src/kci_cloud_gcp:kci_cloud_gcp",
     ],
+    # The `native` of each library above whose mojo_library declares one (the
+    # same target its `<lib>_conda` is given; release_set.bzl).
+    native = {
+        "//src/komira_libc:komira_libc": "//src/komira_libc:komira_libc_native",
+        "//src/komira_async_api:komira_async_api": "//src/komira_async_api:komira_async_api_native",
+        "//src/komira_compression:komira_compression": "//src/komira_compression:komira_compression_native",
+        "//src/komira_crypto:komira_crypto": "//src/komira_crypto:komira_crypto_native",
+        "//src/komira_metrics:komira_metrics": "//src/komira_metrics:komira_metrics_native",
+        "//src/komira_scan_source:komira_scan_source": "//src/komira_scan_source:komira_scan_source_native",
+        "//src/komira_async:komira_async": "//src/komira_async:komira_async_native",
+        "//src/komira_fs:komira_fs": "//src/komira_fs:komira_fs_native",
+        "//src/komira_http_core:komira_http_core": "//src/komira_http_core:komira_http_core_native",
+        "//src/komira_supervisor:komira_supervisor": "//src/komira_supervisor:komira_supervisor_native",
+        "//src/komira_objectstore:komira_objectstore": "//src/komira_objectstore:komira_objectstore_native",
+    },
     release_set = "release_set.txt",
     order_tests = [
         ":release_order_refuses_a_requirement_listed_later",
         ":release_order_passes_a_requirement_listed_earlier",
         ":release_order_passes_another_version_or_build",
         ":release_order_passes_a_longer_name",
-        ":release_order_exempts_komira_native",
+        ":release_order_refuses_a_{}_requirement_listed_later".format(_OLD_NATIVE),
     ],
+    readme_tests = [
+        ":release_readme_refuses_no_example",
+        ":release_readme_refuses_no_readme",
+        ":release_readme_passes_one_example",
+        ":release_readme_passes_a_module_example",
+    ],
+)
+
+# The README check (release_set.bzl) over the fixtures in release_readme/.
+# release_set_check exists only after each of these passed (its
+# `readme_tests`).
+
+# b's README holds a ```text sketch and a ```python block, no example; a,
+# listed first, holds one. The refusal names b and quotes kci.
+release_readme_test(
+    name = "release_readme_refuses_no_example",
+    members = ["a", "b"],
+    readmes = {
+        "a": "release_readme/one_example.txt",
+        "b": "release_readme/no_example.txt",
+    },
+    refuses = "release member b: src/b/README.md holds no ```mojo or ```mojo module example, so kci's install validation would refuse it after publish: \"src/b/README.md holds no ```mojo example, so the validation would run nothing; add one\"",
+)
+
+# b packages no README.
+release_readme_test(
+    name = "release_readme_refuses_no_readme",
+    members = ["a", "b"],
+    readmes = {"a": "release_readme/one_example.txt"},
+    refuses = "release member b: no README is packaged, so kci's install validation would refuse it after publish: \"b ships no share/doc/b/README.md: a release needs a README; add src/b/README.md\"",
+)
+
+# One ```mojo example.
+release_readme_test(
+    name = "release_readme_passes_one_example",
+    members = ["a"],
+    readmes = {"a": "release_readme/one_example.txt"},
+)
+
+# One ```mojo module example, and nothing else: it counts.
+release_readme_test(
+    name = "release_readme_passes_a_module_example",
+    members = ["m"],
+    readmes = {"m": "release_readme/module_example.txt"},
 )
 
 # The release order check (release_set.bzl) over the fixtures in
@@ -222,13 +400,17 @@ release_order_test(
     metadata_files = ["release_order/requires_bb.json", "release_order/leaf.json"],
 )
 
-# a requires komira_native, listed after it: the one exemption.
+# a requires _OLD_NATIVE at the set's version and build string, listed after
+# it: refused like any other member. This proves the old exemption for that
+# package is gone (the skip in the order check, deleted 2026-10-11, would let it
+# pass).
 release_order_test(
-    name = "release_order_exempts_komira_native",
+    name = "release_order_refuses_a_{}_requirement_listed_later".format(_OLD_NATIVE),
     version = "1.0.0",
     build = "hb_1",
-    members = ["a", "komira_native"],
-    metadata_files = ["release_order/requires_komira_native.json", "release_order/leaf.json"],
+    members = ["a", _OLD_NATIVE],
+    metadata_files = ["release_order/requires_{}.json".format(_OLD_NATIVE), "release_order/leaf.json"],
+    refuses = "member a requires {}, which release_set lists after it".format(_OLD_NATIVE),
 )
 
 # The release set file: kci_artifact's welded test holds it equal to
@@ -244,6 +426,14 @@ export_file(
 # closure checks accept) equal to it, so the two cannot drift.
 system_libs_record(
     name = "system_libs",
+    visibility = ["//src/kci_release_set:"],
+)
+
+# The platform table's glibc floor per conda subdir, as `<subdir> <floor>`
+# lines: kci_release_set's welded test holds kci's compiled copy (the one
+# `__glibc >=<floor>` requirement it accepts) equal to it.
+glibc_floor_record(
+    name = "glibc_floor",
     visibility = ["//src/kci_release_set:"],
 )
 

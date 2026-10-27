@@ -1,5 +1,5 @@
 """`komira_git_protocol_conformance` -- test-only: komira_git's protocol
-state machines against the pinned git's transcripts (capture.sh; the BUCK
+state machines against the pinned git's transcripts (capture.zig; the BUCK
 file says how they are made).
 
 `Scenario` loads one scenario; `TranscriptGraph` is its server repository as

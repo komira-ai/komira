@@ -1,0 +1,41 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The `OptimizedPlan` header, decoded and encoded without its body, and the
+# header library's admission checks (docs/design/optimized_plan.md §4.1, §7.2
+# steps 1-3; optimized_plan_udf_runtime.md §10.11 checks 1-3). A scheduler
+# links this package to read fields 1-7 and never parses `body`.
+#
+# `closure_excludes` holds the boundary the design states: the plan codec,
+# `komira_plan_wire`, is not in this package's closure, directly or through
+# another package, so a scheduler that links the header library does not link
+# the codec of the body. Analysis fails when it is (tools/build/mojo/README.md).
+_PLAN_PROTO = "//src/komira_plan_proto:header_fixture_"
+
+mojo_library(
+    name = "komira_optimized_plan_header",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    closure_excludes = ["komira_plan_wire"],
+    deps = [
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_json:komira_json",
+        "//src/komira_plan_proto:komira_plan_proto",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_protobuf:komira_protobuf",
+    ],
+    test_srcs = [
+        "tests/test_header_admit.mojo",
+        "tests/test_header_codec_refusals.mojo",
+        "tests/test_header_environment.mojo",
+        "tests/test_header_goldens.mojo",
+    ],
+    test_data = {
+        # komira_plan_proto's protoc goldens, read through the header codec.
+        "tests/test_header_goldens.mojo": {
+            "fixtures/optimized_plan.canonical.hex": _PLAN_PROTO + "golden_optimized_plan_canonical_hex",
+            "fixtures/optimized_plan.hex": _PLAN_PROTO + "golden_optimized_plan_hex",
+            "fixtures/optimized_plan_undeclared_write_format.canonical.hex": _PLAN_PROTO + "hostile_optimized_plan_undeclared_write_format_canonical_hex",
+        },
+    },
+    visibility = ["PUBLIC"],
+)

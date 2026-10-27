@@ -42,82 +42,34 @@ from .conjunction import _collapse_nulls_to_false, _predicate_3vl
 # NULL-collapse helpers
 # =============================================================================
 #
-# The legacy production filter path
-# enforces Arrow-standard semantics at the filter boundary — `NULL` in
-# any operand of a predicate collapses to `FALSE`, so the row is dropped
-# from the output selection.
-#
-# The fast-path comparison kernels at `comparison.mojo:_eval_cmp_*` and
-# `eval_col_*` DROP validity entirely (they return a non-nullable
-# `BooleanArray` whose `data` bits at NULL row positions are whatever
-# the SIMD compare produced from the raw bytes in the data buffer).
-# Without this collapse step, NULL row inclusion depended on whatever
-# bytes the allocator left at the NULL slot — undefined behavior at the
-# semantic layer.
-#
-# Strategy: at the filter boundary (the single funnel
-# `evaluate_predicate_selected`), walk the Expr to collect referenced
-# column indices, byte-AND their validity bitmaps, and mask the
-# predicate result's `data` bits with the resulting input-validity mask.
-# The result is then logically treated as non-nullable (validity dropped).
-#
-# For the all-valid fast path (no referenced column carries a validity
-# bitmap), this helper is a single Optional check — zero added cost.
-# For nullable inputs, the cost is O(N/8) bytewise AND per AND-ed column
-# — negligible against the comparison wall.
+# The comparison kernels `_eval_cmp_*` and `eval_col_*` drop validity: they
+# return a non-nullable `BooleanArray` whose data bits at NULL rows come from
+# the raw bytes in the data buffer. At the filter boundary
+# (`evaluate_predicate_selected`) the Expr is therefore walked for the column
+# indices it references, those columns' validity bitmaps are ANDed, and the
+# result is folded into each leaf's validity (see `conjunction._leaf_3vl`).
+# When no referenced column carries a validity bitmap this is a single
+# Optional check.
 #
 # Walker coverage: COL_REF, COL_IDX, LITERAL, BINARY_OP (both sides),
-# UNARY_OP (EXCEPT `IS NULL` / `IS NOT NULL`, which are validity READERS and
-# whose operand's NULLs are the answer — see the arm), CAST, ALIAS,
-# IN_LIST (child), STRING_OP / REGEXP / EXTRACT / SUBSTRING / STRING_FN (each
-# one child, — see the arms), UDF_CALL (its OWN materialized
-# output column — see the arm). For every remaining tag (WHEN, AGG_FN, BETWEEN,
-# MATH_FN, STRING_FN_N, WINDOW_FN, …) we conservatively AND all batch columns'
-# validity bitmaps.
+# UNARY_OP (except `IS NULL` / `IS NOT NULL`, see the arm), CAST, ALIAS,
+# IN_LIST (child), STRING_OP / REGEXP / EXTRACT / SUBSTRING / STRING_FN (one
+# child each), UDF_CALL (its own materialized output column). For every other
+# tag (WHEN, AGG_FN, BETWEEN, MATH_FN, STRING_FN_N, WINDOW_FN, ...) the walk
+# reports the tag, and `_compute_predicate_input_validity` falls back to ANDing
+# every batch column's validity.
 #
-# ⛔⛔ "OVER-STRICT BUT CORRECT" IS FALSE AND THIS COMMENT USED TO SAY IT.
-# It read: *"over-strict for predicates that only touch a subset, but correct
-# (drops at most more rows than Arrow standard requires; never under-drops)"*.
-# Dropping MORE rows than the predicate selects is not a conservative
-# approximation of a filter — it is a SILENTLY WRONG ANSWER with a success
-# code, and it is what measured: `WHERE <udf>(v) > lit` lost
-# every row with a NULL in an UNRELATED column. `never under-drops` names the
-# only direction that would be safe; over-dropping is the direction that ships
-# missing rows.
+# That fallback is not a conservative approximation of a filter: it drops rows
+# the predicate selects whenever an unrelated column has a NULL. It is a no-op
+# when the batch has been narrowed to the predicate's own columns (the scan
+# path narrows to the columns the predicate reads), and wrong on a wider batch
+# such as the full output of a UDF pre-pass. Callers with a wide batch ask
+# `predicate_null_scope_unhandled_tag` first and refuse.
 #
-# ── ⛔ AND THE SAME FALLBACK MEASURED AGAIN ───
-#
-# `WHERE <udf>(v) > 100 AND tag LIKE 'x%'` returned **ZERO** rows over a
-# fixture whose `tag` is NULL-FREE, through the UDF FILTER DOOR
-# (`udf_scratch_scope.filter_batch_over_udf_predicate`). SIX tags collapse to
-# `[]` through that door:
-#
-#     STRING_OP · REGEXP · EXTRACT · WHEN · SUBSTRING · STRING_FN
-#
-# — the last two being the "sixth tag nobody listed", which is exactly why the
-# door now carries a DERIVED envelope (`predicate_null_scope_unhandled_tag`,
-# below) instead of a hand-written list of admitted tags.
-#
-# ⭐ WHY THE PARQUET DOOR DID NOT SHOW IT, AND WHY THAT IS NOT A DEFENCE. The
-# ordinary route narrows the batch to the predicate's own columns first (the
-# late-mat decode set comes from `walk_expr_column_refs`), so "AND every batch
-# column" is ANDing exactly the predicate's columns — a no-op. The UDF door
-# hands this walk the child's FULL materialized output, so the same fallback is
-# lethal there. A door-shaped explanation is a property of the BATCH, not of the
-# walker: any caller whose batch is wider than the predicate is exposed.
-#
-# ⭐ THE ARMS ARE THE FIX FOR A KNOWN TAG; THE ENVELOPE IS THE FIX FOR THE
-# CLASS. Five arms landed here (STRING_OP, REGEXP, EXTRACT, SUBSTRING,
-# STRING_FN), each on the same argument — the tag is elementwise and
-# null-propagating over ONE child expression, so that child's columns ARE the
-# predicate's input validity, exactly as a `col_ref`'s are.
-#
-# ⛔ `EXPR_WHEN` IS DELIBERATELY LEFT UNARMED AND IT IS NOT AN OVERSIGHT. A
-# `CASE` result's nullity depends on WHICH BRANCH IS TAKEN, so ANDing the
-# validity of every condition, result and default would drop a row because the
-# UNTAKEN branch was null — the same over-strict wrongness this block is about,
-# just narrower. `CASE` needs per-branch 3VL, not a descent arm; until then the
-# envelope REFUSES it BY NAME, which is a correct answer where zero rows is not.
+# `EXPR_WHEN` has no arm on purpose: a `CASE` result's nullity depends on
+# which branch is taken, so ANDing every condition, result and default
+# validity would drop a row because an untaken branch was null. It needs
+# per-branch three-valued logic, not a descent arm.
 # =============================================================================
 
 
@@ -126,23 +78,13 @@ def _collect_predicate_col_refs(
 ) raises:
     """Walk `expr` collecting referenced batch-column indices into `out`.
 
-    `unhandled_tag` is the walk's OWN report of its coverage: it arrives `-1`
-    and is set to the `EXPR_*` tag of the FIRST node this ladder has no arm for
-    (never overwritten, so the tag reported is the first one encountered, not
-    the last). `>= 0` means the walk could not derive the predicate's input
-    scope and `out` is INCOMPLETE.
+    `unhandled_tag` arrives `-1` and is set to the `EXPR_*` tag of the first
+    node this ladder has no arm for (never overwritten). `>= 0` means the walk
+    could not derive the predicate's input scope and `out` is incomplete.
 
-    ⭐ IT REPLACED A BARE `conservative: Bool`.
-    Two consumers now read it and they need different things — the legacy
-    caller wants "is it complete", the UDF filter door's envelope wants "WHICH
-    tag" so its refusal can name the shape instead of saying `False` — and one
-    field that answers both cannot disagree with itself the way a Bool plus a
-    tag would.
-
-    ⛔ THE CALLER MAY NOT TREAT `>= 0` AS "NO VALIDITY TO AND". That is the
-    fail-OPEN direction (under-drop). The two legitimate readings are the
-    legacy over-strict fallback (AND every batch column — measured WRONG on a
-    wide batch, see the block above) and a REFUSAL. There is no third.
+    A caller may not treat `>= 0` as "no validity to AND", which would
+    under-drop. The two legitimate readings are the all-columns fallback
+    (over-strict on a wide batch) and a refusal.
     """
     if expr.tag == EXPR_COL_REF:
         out.append(schema.column_index(expr.col_ref_name()))
@@ -161,49 +103,17 @@ def _collect_predicate_col_refs(
         )
         return
     if expr.tag == EXPR_UNARY_OP:
-        # =====================================================================
-        # ★ `IS NULL` / `IS NOT NULL` DO NOT DESCEND.
-        # =====================================================================
+        # `IS NULL` / `IS NOT NULL` do not descend. They are the only readers
+        # of validity in the expression language: they turn a three-valued
+        # operand into a definite Bool, so the operand's NULLs are the answer
+        # and not an UNKNOWN to collapse. Descending would AND the operand's
+        # validity into the result, and `IS NULL` is TRUE exactly where that
+        # validity is 0, so the filter would return no rows.
+        # `tests/test_filter_null_literal_alias_is_null.mojo` pins both.
         #
-        # THE DEFECT THIS CLOSES: `WHERE col IS NULL` RETURNED ZERO ROWS, FOR
-        # ANY COLUMN, ON ANY BATCH, on the WHERE path. Measured by
-        # `test_is_null_finds_exactly_the_missing_values` (S024) — a fixture
-        # with two NULLs whose own anti-vacuity gate proves they survive the
-        # parquet round trip, and the filter found none of them. An empty
-        # result is a legitimate-LOOKING answer, so this was the silently-
-        # wrong class rather than the crashing one.
-        #
-        # THE MECHANISM. The caller (`evaluate_predicate_selected`) ANDs the
-        # validity of every column this walk returns into the predicate's
-        # result bits (`_compute_predicate_input_validity` ->
-        # `_collapse_nulls_to_false`). Descending into `IS NULL`'s child put
-        # the operand's OWN validity into that mask — and `IS NULL` is TRUE at
-        # exactly the rows where that validity is 0, so the AND cancelled the
-        # answer to empty every time. `IS NOT NULL` survived only by
-        # coincidence: its TRUE rows ARE the valid ones, so the mask is a
-        # no-op there. It is enumerated with `IS NULL` rather than left to
-        # luck.
-        #
-        # WHY NOT-DESCENDING IS CORRECT AND NOT MERELY CONVENIENT: these two
-        # ops are the only readers of validity in the expression language.
-        # They consume a 3-valued input and produce a DEFINITE Bool — the
-        # operand's NULLs are the ANSWER, not an UNKNOWN to be collapsed.
-        # `eval_predicate` already emits exactly that
-        # (`data = ~validity`, validity all-ones), so the arm was right and
-        # only this caller was wrong.
-        #
-        # ⚠ NARROW ON PURPOSE. Every OTHER unary (NOT, NEGATE, ...) keeps
-        # descending, so the collapse layer keeps compensating for the
-        # comparison kernels that drop validity — which is why the WHERE route
-        # is correct where the others are not.
-        # Removing the layer, or widening this exception, re-opens that.
-        #
-        # ⭐ PER-ARM 3VL: `x IS NULL OR x > 5` needs it, because the OR's
-        # other arm would contribute x's validity to the SAME whole-predicate
-        # mask. `_predicate_3vl` is that per-arm 3VL: the OR's arms are separate
-        # leaves with separate masks, so `note IS NULL OR note = 'a'` returns the
-        # union rather than the left arm minus the right arm's nulls.
-        # named refusal — not a sentence.
+        # Every other unary (NOT, NEGATE, ...) descends. Per-arm scoping of
+        # `x IS NULL OR x > 5` comes from `_predicate_3vl`, whose OR arms are
+        # separate leaves with separate masks.
         var _uop = expr.unary_op()
         if _uop == UN_IS_NULL or _uop == UN_IS_NOT_NULL:
             return
@@ -227,93 +137,27 @@ def _collect_predicate_col_refs(
         )
         return
     if expr.tag == EXPR_UDF_CALL:
-        # =====================================================================
-        # ★ A UDF CALL'S INPUT IS ITS OWN OUTPUT COLUMN.
-        # =====================================================================
+        # A UDF call's input is its own output column: `_eval_predicate` reads
+        # the column the UDF pre-pass materialized under `udf_call_column_key`
+        # (the name `_eval_column_expr`'s UDF arm looks up), so that column's
+        # validity is the predicate's input validity, as a `col_ref`'s is.
+        # Without this arm the call would fall into the all-columns fallback
+        # and a NULL in an unrelated column would drop the row.
         #
-        # THE DEFECT THIS CLOSES: `SELECT ... WHERE <udf>(v) > lit` DROPPED
-        # EVERY ROW CARRYING A NULL IN **ANY** COLUMN OF THE BATCH — a column
-        # the predicate never read, a column the query never projected. rc=0,
-        # a plausible row set, fewer rows than the predicate selects, and no
-        # signal to the customer.
+        # The argument subtree is not descended: `_run_thunk` refuses by name a
+        # UDF whose argument column carries nulls, so the argument's validity is
+        # absent or all-ones on every plan that reaches this walk.
         #
-        # THE MECHANISM. `EXPR_UDF_CALL` had no arm here, so it fell into the
-        # conservative fallback below and the caller ANDed the validity of
-        # EVERY batch column into the predicate's result bits. `note IS NULL`
-        # on some row then cancelled that row out of a predicate about `v`.
+        # A missing output column means the pre-pass did not run over this
+        # predicate; it is reported as unhandled instead of contributing no
+        # validity (which would under-drop).
         #
-        # ⛔ THE ANSWER IS NOT "SKIP IT" AND NOT "DESCEND INTO THE ARGUMENT".
-        # What `_eval_predicate` actually reads at this position is the column
-        # the UDF pre-pass materialized under `udf_call_column_key` — the same
-        # name `_eval_column_expr`'s UDF arm looks up, derived by THIS
-        # function rather than spelled — so that column's validity is the
-        # predicate's input validity, exactly as a `col_ref`'s is. Naming the
-        # column keeps this arm correct on the day the output starts carrying
-        # nulls of its own (`UdfData.null_mode`), where "skip it" would then
-        # UNDER-drop.
-        #
-        # ⚠ AND NOT THE ARGUMENT SUBTREE. `_run_thunk` REFUSES BY NAME a UDF
-        # whose argument column carries nulls (the per-batch ABI binds
-        # `validity = NULL`, i.e. every row valid), so the argument's validity
-        # is either absent or all-ones on every plan that reaches this walk.
-        # Descending would be a no-op today and WRONG under `null_mode`, where
-        # the propagated nulls belong to the output column and are already
-        # counted once, here.
-        #
-        # ⛔ A MISSING COLUMN STAYS CONSERVATIVE rather than contributing
-        # nothing. It means the pre-pass did not run over this predicate, and
-        # answering "no validity to AND" would be the fail-OPEN direction on a
-        # batch this walk cannot read.
-        #
-        # ⚠⚠ THE SENTENCE THAT USED TO FOLLOW WAS FALSE, AND IT MADE THE
-        # BRANCH READ AS A TESTED SAFETY PROPERTY. It said `_eval_predicate`
-        # "is ABOUT TO raise for that reason" — but
-        # `evaluate_predicate_selected` calls `_eval_predicate` BEFORE
-        # `_compute_predicate_input_validity`, and `_eval_column_expr`'s UDF
-        # arm raises `the UDF ... was not materialized onto this batch` at the
-        # missing lookup, so through THAT caller the walk never runs and this
-        # line was dead code. Pinned by
-        # `komira_batch_eval/tests/test_udf_predicate_names_its_own_output_
-        # column.mojo` (`test_an_UNRESOLVABLE_UDF_KEY_never_reaches_the_
-        # conservative_branch` asserts the raise that pre-empts it;
-        # `test_the_conservative_branch_IS_correct_when_it_is_reached_directly`
-        # asserts the branch itself one layer below).
-        #
-        # ⭐ AND THAT DAY ARRIVED. Those tests
-        # said the branch becomes live "the day some caller computes validity
-        # without evaluating first". `predicate_null_scope_unhandled_tag` — the
-        # UDF filter door's envelope — is exactly that caller: it runs THIS
-        # walk BEFORE any evaluation, so an unresolvable key now produces the
-        # door's named refusal instead of being unreachable. Kept, reachable,
-        # and no longer described as something it is not.
-        #
-        # ⛔⛔ THE NAMING ABOVE IS STILL NOT OBSERVABLE IN AN ANSWER TODAY,
-        # WHICH IS WHY IT NEEDED A TEST AT ALL. Replacing this whole arm body
-        # with a bare `return` — the "skip it" reading argued against above —
-        # gives byte-identical results across the UDF end-to-end suite:
-        #
-        #     shipped                 all pass
-        #     arm body -> `return`    all pass, IDENTICAL
-        #
-        #
-        # Two independent reasons, and BOTH have to go before a customer can
-        # see the difference:
-        #   1. `udf_expr_execution._run_thunk` allocates the output with
-        #      `allocate_uninitialized` and NEVER attaches a validity bitmap,
-        #      and refuses a null-bearing ARGUMENT by name — so on every live
-        #      route `null_count == 0` and
-        #      `_compute_predicate_input_validity` skips the column anyway.
-        #      (`UdfData.null_mode` is what changes this.)
-        #   2. Even with a synthetic null-bearing output column, a UDF call is
-        #      a COMPUTED LHS, which routes through `_eval_col_vs_col_promoted`
-        #      -> `_col_cmp_nullable`; that propagates the LHS's validity into
-        #      the BooleanArray's OWN validity, and `_collapse_nulls_to_false`
-        #      ANDs that in FIRST. So the rows drop whether or not this arm
-        #      named anything.
-        # ⇒ The load-bearing assertion is on THIS FUNCTION'S RETURN VALUE, not
-        # on a row set. Do not "simplify" this arm to a bare `return` on the
-        # evidence that no end-to-end test changes — that has been measured,
-        # and the test that does change is the one named above.
+        # The naming is not observable in a row set today: the output column
+        # carries no validity bitmap of its own, and a UDF call on the left of
+        # a comparison routes through `_col_cmp_nullable`, which propagates
+        # validity itself. The assertion that pins this arm is on this
+        # function's return value, in
+        # `tests/test_udf_predicate_names_its_own_output_column.mojo`.
         var udf_key = udf_call_column_key(expr)
         for i in range(schema.num_columns()):
             if schema.field_name(i) == udf_key:
@@ -322,17 +166,13 @@ def _collect_predicate_col_refs(
         if unhandled_tag < 0:
             unhandled_tag = Int(EXPR_UDF_CALL)
         return
-    # ★ THE FIVE ELEMENTWISE ARMS. Each of these
-    # tags computes ONE value per row from ONE child expression and is NULL at
-    # exactly the rows where that child is NULL (the pattern / unit / offsets /
-    # function selector are plan-literals, never columns) — so the child's
-    # columns ARE this node's input validity, by the same argument the
-    # `col_ref` arm rests on. Unarmed, each of them collapses a UDF-door
-    # filter to zero rows.
-    #
-    # ⚠ THEY DESCEND RATHER THAN RESOLVE. `substring(upper(s), 1, 1)` nests,
-    # and an arm written against the `col_ref` case a first test happens to use
-    # would under-collect the moment two of these compose.
+    # STRING_OP, REGEXP, EXTRACT, SUBSTRING and STRING_FN each compute one value
+    # per row from one child expression and are NULL exactly where that child
+    # is NULL (the pattern, unit, offsets and function selector are plan
+    # literals, never columns), so the child's columns are this node's input
+    # validity, by the same argument as the `col_ref` arm. They descend rather
+    # than resolve, so nested calls such as `substring(upper(s), 1, 1)` are
+    # fully collected.
     if (
         expr.tag == EXPR_STRING_OP
         or expr.tag == EXPR_REGEXP
@@ -361,11 +201,11 @@ def _collect_predicate_col_refs(
                 expr.string_fn_child_ref(), schema, out, unhandled_tag
             )
         return
-    # ⛔ NO ARM — REPORTED, NOT GUESSED. `WHEN` (branch-dependent nullity),
-    # `AGG_FN`, `BETWEEN`, `MATH_FN`/`MATH_FN2`, `STRING_FN_N`, `WINDOW_FN`,
-    # `CORRELATED_SUBQUERY`, `STRUCT_FIELD*`, `MAP_GET`, `JSON_EXTRACT`,
-    # `SORT_KEY`. The two readings a caller may take are stated on the
-    # docstring; adding an arm here is what makes the envelope refuse less.
+    # No arm: reported, not guessed. Among the tags without one are `WHEN`
+    # (nullity depends on the branch taken), `AGG_FN`, `BETWEEN`,
+    # `MATH_FN`/`MATH_FN2`, `STRING_FN_N`, `WINDOW_FN`, `CORRELATED_SUBQUERY`,
+    # `STRUCT_FIELD*`, `MAP_GET`, `JSON_EXTRACT` and `SORT_KEY`. A caller reads
+    # the report as the docstring of this function describes.
     if unhandled_tag < 0:
         unhandled_tag = Int(expr.tag)
 
@@ -373,34 +213,21 @@ def _collect_predicate_col_refs(
 def predicate_null_scope_unhandled_tag(
     imm expr: Expr, imm schema: Schema
 ) raises -> Int:
-    """`-1` iff the NULL-collapse walk can derive `expr`'s ENTIRE input scope
+    """`-1` iff the NULL-collapse walk can derive `expr`'s entire input scope
     against `schema`; otherwise the `EXPR_*` tag of the first node it cannot.
 
-    ★ THE ENVELOPE FOR THE UDF FILTER DOOR, AND IT IS **DERIVED, NOT DECLARED**.
-    It answers the question by RUNNING
-    `_collect_predicate_col_refs` — the very ladder whose missing arm is the
-    hazard — so the set of predicates it admits is, by construction, exactly
-    the set that ladder can scope.
-    ⛔ DO NOT REPLACE IT WITH A LIST OF ADMITTED TAGS. A list is a SECOND
-    statement of the same fact, and the whole defect is what happens when the
-    two disagree: the previous fix enumerated five unarmed tags in its open
-    items and the census found SEVEN, because `EXPR_SUBSTRING` and
-    `EXPR_STRING_FN` landed after the list was written. A list goes stale on
-    the day a tag is added; this cannot, because a tag with no arm IS what it
-    reports.
+    It answers by running `_collect_predicate_col_refs`, so the predicates it
+    admits are exactly the ones that ladder can scope; a tag with no arm is
+    what it reports, and no second list of admitted tags exists to drift.
 
-    ⚠ IT MUST BE CALLED WITH THE SCHEMA THE FILTER WILL ACTUALLY SEE. The
-    `EXPR_UDF_CALL` arm resolves the pre-pass's materialized output column BY
-    NAME, so running this against the pre-pass's INPUT schema would report
-    every UDF predicate as unscopable. At the door that means: AFTER
-    `materialize_udf_columns_for_expr`, never before.
+    It must be called with the schema the filter will actually see: the
+    `EXPR_UDF_CALL` arm resolves the pre-pass's materialized output column by
+    name, so running this against the pre-pass's input schema would report
+    every UDF predicate as unscopable.
 
-    ⚠ AND IT IS NOT A SUBSTITUTE FOR `_inmem_filter_predicate_supported`. That
-    envelope answers "can `_eval_predicate` serve this shape without raising";
-    this one answers "can the NULL-collapse walk say whose validity to AND".
-    They are different questions with different answers — `STRING_OP` is inside
-    the first and was outside the second, which is precisely the gap that
-    returned zero rows.
+    It is not a substitute for `_inmem_filter_predicate_supported`, which
+    answers whether `_eval_predicate` can serve the shape; this answers
+    whether the walk can say whose validity to AND.
 
     Args:
         expr: The predicate about to be evaluated.
@@ -418,65 +245,41 @@ def predicate_null_scope_unhandled_tag(
 def predicate_null_scope_answer_rows_lost(
     imm expr: Expr, imm batch: RecordBatch
 ) raises -> Int:
-    """How many rows the CONSERVATIVE fallback REMOVES FROM THE ANSWER over
-    THIS batch. `0` means the filter's row set is exactly the one a fully-
-    derived scope would return, so the door can serve the query.
+    """How many rows the all-columns fallback removes from the answer over
+    THIS batch. `0` means the filter's row set is exactly the one a fully
+    derived scope would return, so the caller can serve the query.
 
-    ⛔⛔ IT REPLACED A COUNT OF THE WRONG QUANTITY, AND THAT COUNT CAUSED A
-    REFUSAL REGRESSION. The predecessor,
-    `predicate_null_scope_conservative_masked_rows`, returned
-    `input_validity.null_count` — how many BITS the fallback CLEARS. Clearing
-    a bit on a row the predicate already rejects costs NOTHING, so on a fixture
-    whose nulls sit only on rejected rows the door had ANSWERED `k=[3,5,7]`
-    correctly and began raising `UDF_FILTER_PREDICATE_NULL_SCOPE_UNDERIVABLE`
-    instead. ⛔ That is `udf_only_refused` — *a query this engine ANSWERS
-    without a UDF became a REFUSAL with one* — the class
-    exists to prevent, reintroduced by the guard written to prevent its mirror
-    image.
-
-    ⭐ WHY THE COMPARISON IS A PROOF AND NOT A HEURISTIC. Write `iv_correct`
-    for the mask a fully-armed walk would build and `iv_cons` for the
-    all-columns fallback. The correct scope is a SUBSET of the batch's columns,
-    so `iv_correct` has at least the valid bits `iv_cons` has, and masking with
-    more valid bits drops no more rows:
+    Write `iv_correct` for the mask a fully armed walk would build and
+    `iv_cons` for the all-columns fallback. The correct scope is a subset of
+    the batch's columns, so `iv_correct` has at least the valid bits
+    `iv_cons` has, and masking with more valid bits drops no more rows:
 
         answer(no mask)  ⊇  answer(iv_correct)  ⊇  answer(iv_cons)
 
     (the inclusions survive an enclosing `NOT`: a leaf going from UNKNOWN to
     KNOWN can only turn a collapsed FALSE into TRUE or FALSE, never the
     reverse, and UNKNOWN is never TRUE at any depth). This function computes
-    the two OUTER terms and counts the difference. `0` squeezes the middle term
-    onto both — the answer IS the correct one — with no appeal to which columns
-    the missing arm would have named.
+    the two outer terms and counts the difference; `0` squeezes the middle
+    term onto both. Clearing a bit on a row the predicate already rejects
+    costs nothing, which is why the count is of rows and not of cleared bits.
 
-    ⭐ AND IT STILL MEASURES RATHER THAN PREDICTS. Both terms come from
-    `_predicate_3vl`, the function the filter itself runs, so the number cannot
-    disagree with the mask that actually gets applied.
+    Both terms come from `_predicate_3vl`, the function the filter itself
+    runs, so the number cannot disagree with the mask that gets applied.
 
-    ⚠ IT IS ONLY MEANINGFUL WHEN THE SCOPE IS UNDERIVABLE — with a derived
-    scope the two terms differ by the predicate's OWN legitimate Arrow-3VL
-    drop, and refusing on that would be wrong. Callers gate on
-    `predicate_null_scope_unhandled_tag(...) >= 0` first.
+    It is only meaningful when the scope is underivable: with a derived scope
+    the two terms differ by the predicate's own Arrow-3VL drop. Callers gate
+    on `predicate_null_scope_unhandled_tag(...) >= 0` first. The result
+    depends on the batch, so the same query can answer over data whose nulls
+    do not reach the answer and refuse once one does.
 
-    ⚠ AND IT IS A PROPERTY OF THIS BATCH, so the refusal it drives is
-    DATA-DEPENDENT BY CONSTRUCTION: the same query answers over data whose
-    nulls do not reach the answer and refuses once one does. That is the honest
-    report — the engine serves the shape exactly when the shape's answer does
-    not depend on a scope it cannot derive.
-
-    ⚠ COST, STATED: TWO full evaluations of the predicate over the batch, where
-    the predecessor did one validity WALK and no evaluation. It is paid only on
-    the path that was about to REFUSE — i.e. only for a predicate carrying a
-    node the walk has no arm for — and buying the answer back is worth more
-    than the walk. If a cheaper bound is ever wanted, it must still be an
-    ANSWER, not a mask: a proxy for the mask is exactly what went wrong.
+    Cost: two full evaluations of the predicate over the batch.
 
     Args:
         expr: The predicate whose scope the walk could not derive.
         batch: The batch the filter is about to run over.
 
     Returns:
-        The number of rows the conservative fallback removes from the answer.
+        The number of rows the all-columns fallback removes from the answer.
     """
     var strict = _collapse_nulls_to_false(
         _predicate_3vl(expr, batch, True), None
@@ -488,11 +291,11 @@ def predicate_null_scope_answer_rows_lost(
 
 
 def predicate_null_scope_refusal(imm tag: Int) raises -> String:
-    """The WHY half of an unscopable-predicate refusal, for tag `tag`.
+    """The reason half of an unscopable-predicate refusal, for tag `tag`.
 
-    Kept next to the walker rather than at the door so the diagnostic and the
-    ladder that produced it cannot drift; the DOOR owns the sentence that names
-    itself, this owns the sentence that names the shape.
+    Kept next to the walker so the diagnostic and the ladder that produced it
+    cannot drift; the caller owns the sentence that names itself, this owns
+    the sentence that names the shape.
     """
     if tag == Int(EXPR_UDF_CALL):
         return (
@@ -505,8 +308,8 @@ def predicate_null_scope_refusal(imm tag: Int) raises -> String:
         "`"
         + expr_tag_name(UInt8(tag))
         + "` has no arm in the NULL-collapse walk"
-        " (`conjunction._collect_predicate_col_refs`), so the columns whose"
-        " validity this predicate depends on cannot be derived"
+        " (`predicate_null_scope._collect_predicate_col_refs`), so the columns"
+        " whose validity this predicate depends on cannot be derived"
     )
 
 
@@ -517,15 +320,11 @@ def _compute_predicate_input_validity(
     by `expr`. Returns `None` when no referenced column carries a
     validity bitmap (the all-valid fast path).
 
-    ⛔ CONSERVATIVE ON A TAG THE WALKER CANNOT SCOPE — ANDs validities across
-    ALL batch columns rather than miss an input. THAT IS OVER-STRICT AND IT IS
-    A WRONG ANSWER ON A WIDE BATCH (see
-    module's other callers the batch has already been narrowed to the
-    predicate's own columns, where it is a provable no-op — and because
-    turning it into a raise would refuse queries those callers answer
-    correctly today. The caller that hands this walk a FULL batch (the UDF
-    filter door) refuses UP FRONT instead, via
-    `predicate_null_scope_unhandled_tag`.
+    On a tag the walker cannot scope it ANDs the validities of ALL batch
+    columns rather than miss an input. On a batch wider than the predicate
+    that drops rows the predicate selects; on a batch already narrowed to the
+    predicate's own columns it is a no-op. A caller that hands this walk a
+    full batch checks `predicate_null_scope_unhandled_tag` first and refuses.
     """
     return _compute_predicate_input_validity_scoped(expr, batch, True)
 
@@ -533,19 +332,13 @@ def _compute_predicate_input_validity(
 def _compute_predicate_input_validity_scoped(
     expr: Expr, batch: RecordBatch, fallback_all_columns: Bool
 ) raises -> Optional[Bitmap[HeapRegion]]:
-    """`_compute_predicate_input_validity` with the UNSCOPABLE-TAG fallback
+    """`_compute_predicate_input_validity` with the unscopable-tag fallback
     chosen by the caller instead of fixed.
 
-    ⛔ `fallback_all_columns=False` IS THE FAIL-OPEN DIRECTION AND IT MAY NEVER
-    REACH AN ANSWER. It contributes NO input validity for a node the walk has
-    no arm for, i.e. it under-drops — the reading
-    `_collect_predicate_col_refs`'s docstring forbids a caller from taking.
-    It exists for exactly ONE purpose: as the UPPER BOUND in
-    `predicate_null_scope_answer_rows_lost`, which compares the two so a
-    refusal can be keyed on whether the fallback moves a ROW rather than on
-    whether it clears a BIT. The bound is what makes that comparison a proof
-    (see that function); a caller that returned this mask's answer to a
-    customer would be shipping rows the predicate does not select.
+    `fallback_all_columns=False` contributes no input validity for a node the
+    walk has no arm for, i.e. it under-drops. It exists only as the upper
+    bound in `predicate_null_scope_answer_rows_lost`, which compares the two
+    results; its mask must not be used to answer a query.
     """
     var refs = List[Int]()
     var unhandled_tag = -1

@@ -1,0 +1,18 @@
+load("@komira//tools/build/lint:test_weld.bzl", "test_weld")
+load("//negative/test_weld/real:tree.bzl", "REAL_TREE")
+
+# Test 39 (test_weld) over the real rules, the half that must pass: the tree
+# of ../../../negative/test_weld/real (a mojo_library and a mojo_test, never
+# built: the lint analyses the targets `welds` matches), with a ledger row
+# for each of its three unwelded test files. The pull-request check runs the
+# lint (.github/workflows/pr.yml, the test_weld BXL step); its red twin,
+# with no row, is tests//negative/test_weld/real:red.
+test_weld(
+    name = "ok",
+    files = ["//negative/test_weld/real:" + f for f in REAL_TREE] + [
+        "//negative/test_weld/real/src/komira_other:tests/test_shared.mojo",
+    ],
+    known_untested = "known_untested.tsv",
+    root = "negative/test_weld/real/src",
+    welds = "//negative/test_weld/real/...",
+)

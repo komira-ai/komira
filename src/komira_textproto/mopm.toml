@@ -1,0 +1,12 @@
+[package]
+name = "komira_textproto"
+version = "0.1.0"
+description = "A dependency-free lexer for the protobuf text format in Mojo: typed tokens, so a quoted brace is never a brace, a cursor for hand-written parsers, and refusals that name the line."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[targets]
+lib = { path = "src/komira_textproto" }
+tests = ["tests"]

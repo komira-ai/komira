@@ -39,11 +39,13 @@ from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
 from komira_arrow.schema import Schema, SchemaBuilder, Field
 from komira_arrow.string_array import StringArray
+from komira_arrow.batch_view import batch_view_over
+from komira_arrow.selection_vector_row import RowSelectionVector
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_MOCK
 from komira_async.runtime.runtime import PLACEMENT_FIXED, PerCoreAsyncRuntime
 from komira_buffer.heap_region import HeapRegion
-from komira_eval.expression_executor import DecimalSpec
+from komira_eval.expression_executor import DecimalSpec, ExpressionExecutor
 from komira_kernels.runtime_expr import RuntimeExpr
 from komira_plan_expr.expr import Expr, BIN_ADD, BIN_SUB, BIN_MUL, BIN_DIV
 from komira_plan_expr.scalar_value import ScalarValue
@@ -546,6 +548,92 @@ def test_a_nullable_but_null_free_input_answers_the_same() raises:
         Expr.binary(BIN_DIV, _c("a"), _c("z")),
         "nullable a / z",
     )
+
+
+# =============================================================================
+# 5b. An input that holds NULL slots: the walker reads each NULL slot's payload
+#     and answers a valid value, and so does the dense entry. Both are driven
+#     directly, because `eval_project_exprs_over_batch` sends a strict
+#     arithmetic expression over an input holding a NULL to the column
+#     evaluator and the dense entry would never run.
+# =============================================================================
+
+
+def _null_slots_batch() raises -> RecordBatch:
+    """`a` nullable with NULL at rows 0, 3 and 20 (payloads 9.5, 0.0 and NaN
+    stay in the slots), `z` nullable with NULL at rows 3 and 7 (payload 0.0,
+    so `a / z` divides by zero under a NULL)."""
+    var n = 23
+    var nan = (Float64(1.0) / Float64(0.0)) - (Float64(1.0) / Float64(0.0))
+    var a = PrimitiveArray[DType.float64].allocate_nullable(n)
+    var z = PrimitiveArray[DType.float64].allocate_nullable(n)
+    for i in range(n):
+        a.store[1](i, SIMD[DType.float64, 1](Float64(i) * 1.25 - 4.0))
+        z.store[1](i, SIMD[DType.float64, 1](Float64(i % 5) - 2.0))
+    a.store[1](0, SIMD[DType.float64, 1](9.5))
+    a.store[1](3, SIMD[DType.float64, 1](0.0))
+    a.store[1](20, SIMD[DType.float64, 1](nan))
+    z.store[1](3, SIMD[DType.float64, 1](0.0))
+    z.store[1](7, SIMD[DType.float64, 1](0.0))
+    a._set_null(0)
+    a._set_null(3)
+    a._set_null(20)
+    z._set_null(3)
+    z._set_null(7)
+    var sb = SchemaBuilder()
+    sb.add_field(Field(String("a"), ArrowType.FLOAT64, True))
+    sb.add_field(Field(String("z"), ArrowType.FLOAT64, True))
+    var rbb = RecordBatchBuilder.with_capacity(2)
+    rbb.add_column(Column.from_primitive[DType.float64](a))
+    rbb.add_column(Column.from_primitive[DType.float64](z))
+    return rbb.build(sb.build())
+
+
+def _walker_values(
+    imm batch: RecordBatch, imm e: Expr
+) raises -> List[Scalar[DType.float64]]:
+    var pool = List[RuntimeExpr]()
+    var root = _translate(batch, e, pool)
+    var ex = ExpressionExecutor(pool^, root, _names(batch))
+    var n = batch.num_rows()
+    var sel = RowSelectionVector(n)
+    for r in range(n):
+        sel.append(UInt32(r))
+    var out = List[Scalar[DType.float64]]()
+    ex.eval_to_list_f64_from_view(batch_view_over(batch), root, sel, out)
+    return out^
+
+
+def _check_null_slots(imm batch: RecordBatch, op: UInt8, what: String) raises:
+    assert_true(
+        batch.column_at(0).null_count() == 3
+        and batch.column_at(1).null_count() == 2,
+        "the fixture really holds NULL slots",
+    )
+    var want = _walker_values(batch, Expr.binary(op, _c("a"), _c("z")))
+    var pool = List[RuntimeExpr]()
+    var root = _translate(batch, Expr.binary(op, _c("a"), _c("z")), pool)
+    var got = try_eval_dense_f64(pool, root, _names(batch), batch)
+    assert_true(Bool(got), what + ": the dense entry admits it")
+    var col = got.take()
+    assert_equal(col.length(), batch.num_rows(), what + ": one value per row")
+    assert_equal(col.null_count(), 0, what + ": the answer drops validity")
+    var arr = col.as_primitive[DType.float64]()
+    assert_equal(len(want), batch.num_rows(), what + ": walker length")
+    for i in range(len(want)):
+        assert_equal(
+            _bits(arr.get(i)),
+            _bits(Float64(want[i])),
+            what + ": bits at row " + String(i),
+        )
+
+
+def test_null_slots_are_read_as_payload_exactly_as_the_walker_reads_them() raises:
+    var batch = _null_slots_batch()
+    _check_null_slots(batch, BIN_ADD, "a + z")
+    _check_null_slots(batch, BIN_SUB, "a - z")
+    _check_null_slots(batch, BIN_MUL, "a * z")
+    _check_null_slots(batch, BIN_DIV, "a / z")
 
 
 # =============================================================================

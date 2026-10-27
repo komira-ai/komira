@@ -14,7 +14,7 @@
 # that turns it red.
 # =============================================================================
 
-from std.collections import Optional
+from std.collections import Dict, Optional
 from std.testing import TestSuite, assert_true, assert_equal, assert_false
 
 from komira_arrow.arrow_types import ArrowType
@@ -24,6 +24,8 @@ from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
 from komira_arrow.schema import Schema, SchemaBuilder, Field
 from komira_arrow.string_array import StringArray
+from komira_eval.expression_executor import DecimalSpec
+from komira_kernels.runtime_expr import RuntimeExpr
 from komira_plan_expr.expr import (
     Expr,
     WhenCaseData,
@@ -36,6 +38,11 @@ from komira_plan_ir.logical_plan import ExprArray
 
 from komira_dispatch_project.compute_project import (
     eval_project_exprs_over_batch,
+)
+from komira_dispatch_project.lower_untyped_expr import (
+    translate_expr,
+    RUNTIME_DTYPE_F64,
+    RUNTIME_DTYPE_I64,
 )
 
 
@@ -249,11 +256,71 @@ def test_a_column_under_nested_aliases_is_copied_with_its_nulls() raises:
     # A NULL-free INT64 column under two aliases is copied the same way.
     var k_out = _served(_aliased(_c("k"), 2), ArrowType.INT64)
     assert_equal(Int(k_out.column_as_primitive_int64(0).get(3)), 4)
+    # The copy keeps the source column's nullability, not the declared
+    # field's (`k` is NOT NULL; the declared output field is nullable).
+    assert_false(k_out.schema.field_nullable(0))
 
 
-def _case_with_a_string_branch(var else_: Expr) -> Expr:
-    """`CASE WHEN k > 2 THEN 'a' ELSE <else_> END`: the translator lowers the
-    string THEN, and the numeric walkers refuse it when they evaluate."""
+def _case_on_a_computed_in_list(var then_: Expr, var else_: Expr) -> Expr:
+    """`CASE WHEN (k + 1) IN (2, 3) THEN <then_> ELSE <else_> END`: the
+    translator lowers the IN list over a computed operand, and the walker
+    refuses it when it evaluates (an IN list reads a column leaf only)."""
+    var values = List[ScalarValue]()
+    values.append(ScalarValue.from_int(2))
+    values.append(ScalarValue.from_int(3))
+    var cases = List[WhenCaseData]()
+    cases.append(
+        WhenCaseData(
+            Expr.in_list_node(Expr.binary(BIN_ADD, _c("k"), _li(1)), values^),
+            then_^,
+        )
+    )
+    return Expr.when(cases^, else_^)
+
+
+def _translator_accepts(var e: Expr) raises -> Bool:
+    var idx = Dict[String, Int]()
+    idx["k"] = 0
+    idx["x"] = 2
+    var dt = Dict[String, Int]()
+    dt["k"] = RUNTIME_DTYPE_I64
+    dt["x"] = RUNTIME_DTYPE_F64
+    var pool = List[RuntimeExpr]()
+    var string_pool = List[String]()
+    var decimal_pool = List[DecimalSpec]()
+    var in_list_pool = List[List[ScalarValue]]()
+    var when_pool = List[List[Int]]()
+    try:
+        _ = translate_expr(
+            e, pool, idx, dt, string_pool, decimal_pool, in_list_pool, when_pool
+        )
+        return True
+    except:
+        return False
+
+
+def test_a_walker_refusal_is_a_decline_on_both_channels() raises:
+    """A CASE whose condition is an IN list over a computed operand, inside
+    arithmetic: the translator accepts the tree (asserted directly) and the
+    walker raises when it evaluates, which declines, on the I64 and the F64
+    channel. Mutant: the I64 channel's `return None` made `raise e^` (the
+    refusal then propagates)."""
+    var i_case = _case_on_a_computed_in_list(_li(5), _li(1))
+    assert_true(_translator_accepts(i_case.copy()))
+    assert_false(
+        Bool(_run(Expr.binary(BIN_ADD, i_case^, _c("k")), ArrowType.INT64))
+    )
+    var f_case = _case_on_a_computed_in_list(_lf(2.5), _lf(1.5))
+    assert_true(_translator_accepts(f_case.copy()))
+    assert_false(
+        Bool(_run(Expr.binary(BIN_ADD, f_case^, _c("x")), ArrowType.FLOAT64))
+    )
+
+
+def test_a_case_branch_outside_the_numeric_families_declines() raises:
+    """`CASE WHEN k > 2 THEN 'a' ELSE 1 END` inside arithmetic: the translator
+    refuses the string branch (asserted directly) and the evaluator declines.
+    Mutant: the translator-refusal `return None` made a raise."""
     var cases = List[WhenCaseData]()
     cases.append(
         WhenCaseData(
@@ -261,29 +328,10 @@ def _case_with_a_string_branch(var else_: Expr) -> Expr:
             Expr.literal(ScalarValue.from_string(String("a"))),
         )
     )
-    return Expr.when(cases^, else_^)
-
-
-def test_a_walker_refusal_is_a_decline_on_both_channels() raises:
-    """A CASE with a string branch inside arithmetic: the translator lowers it
-    and the walker raises when it evaluates, which declines, on the I64 and
-    the F64 channel. Mutant: the I64 channel's `return None` made `raise e^`
-    (the refusal then propagates)."""
+    var e = Expr.when(cases^, _li(1))
+    assert_false(_translator_accepts(e.copy()))
     assert_false(
-        Bool(
-            _run(
-                Expr.binary(BIN_ADD, _case_with_a_string_branch(_li(1)), _c("k")),
-                ArrowType.INT64,
-            )
-        )
-    )
-    assert_false(
-        Bool(
-            _run(
-                Expr.binary(BIN_ADD, _case_with_a_string_branch(_lf(1.5)), _c("x")),
-                ArrowType.FLOAT64,
-            )
-        )
+        Bool(_run(Expr.binary(BIN_ADD, e^, _c("k")), ArrowType.INT64))
     )
 
 

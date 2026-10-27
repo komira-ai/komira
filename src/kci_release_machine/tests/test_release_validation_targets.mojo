@@ -56,8 +56,9 @@ def _has(names: List[String], want: String) -> Bool:
 def test_every_validation_has_a_target_and_every_target_a_validation() raises:
     var vals = _validations()
     var targets = _targets()
-    # never a vacuous pass: the machine file declares validations
-    assert_true(len(vals) > 0, String("release/machine.textproto declares no validation"))
+    # Both sets may be empty: the machine file declares no validation while
+    # komira publishes to no channel; the two-way comparison below still
+    # refuses a target without a validation and a validation without a target.
     var have = List[String]()
     for i in range(len(targets)):
         assert_true(len(targets[i]) >= 2, String("names.txt: a line without a name and a stage"))
@@ -78,7 +79,6 @@ def test_every_validation_has_a_target_and_every_target_a_validation() raises:
 
 def test_each_target_runs_its_own_validation_and_stage() raises:
     var targets = _targets()
-    assert_true(len(targets) > 0, String("release/validations declares no target"))
     for i in range(len(targets)):
         ref w = targets[i]
         var where = String("target '") + w[0] + String("'")

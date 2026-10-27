@@ -2,7 +2,7 @@
 # project_decline_census.mojo: the facts a computed-projection refusal names
 # =============================================================================
 #
-# When `compute_project.eval_project_exprs_over_batch` declines, the caller's
+# When a computed projection declines, the caller's
 # refusal can say which output expression it was and what the batch held only
 # if it reports them. `format_project_decline_census` renders those facts as
 # lines a caller appends to its error:
@@ -68,8 +68,7 @@ def _bit(b: Bool) -> String:
 
 def _colref_name(imm e: Expr) -> Optional[String]:
     """The column name when `e` is a column reference under any number of
-    aliases: the shape `compute_project_routes._passthrough_col_index`
-    matches, read without a batch. It says only whether `e` names a column."""
+    aliases, read without a batch. It says only whether `e` names a column."""
     if e.tag == EXPR_ALIAS:
         return _colref_name(e.alias_child_ref())
     if e.tag == EXPR_COL_REF:

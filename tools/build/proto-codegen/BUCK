@@ -251,3 +251,9 @@ rust_test(
     ],
     crate_root = "tests/xml_equiv_verdicts_test.rs",
 )
+
+# The crate's Cargo.lock, the input of `kpin cargo` for //third_party/rust.
+export_file(
+    name = "Cargo.lock",
+    visibility = ["komira//third_party/rust:"],
+)
