@@ -20,6 +20,7 @@ mojo_library(
     test_srcs = [
         "tests/test_engine_sort.mojo",
         "tests/test_engine_sort_string.mojo",
+        "tests/test_sort_buffer_key_types.mojo",
         "tests/test_sort_buffer_narrow_signed_order.mojo",
         "tests/test_sort_buffer_untyped.mojo",
         "tests/test_sort_float_total_order.mojo",

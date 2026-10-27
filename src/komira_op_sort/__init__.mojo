@@ -5,7 +5,8 @@ key DType; `sort_radix`: an LSD radix sort over 64-bit keys), top-K heap
 selection over one key column (`sort_topn`), the loser tree that k-way
 merges sorted runs (`sort_loser_tree`), the sort and top-N sink kernels
 (`sort_topn_sink`, with the bounded-heap selection in `sort_topn_heap`), and
-the run-time-typed multi-key sort buffer (`sort_buffer_untyped`). A
+the run-time-typed multi-key sort buffer (`sort_buffer_untyped`, which does
+not track validity: a NULL cell sorts as its value bytes). A
 sort never moves data: it returns Int32 row indices and the caller gathers by
 them.
 
