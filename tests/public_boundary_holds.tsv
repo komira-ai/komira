@@ -70,7 +70,7 @@ host	src/komira_aws_core/tests/test_endpoint_resolution.mojo	3	malformed, IPv6 a
 host	src/komira_aws_core/tests/test_endpoint_rules_library.mojo	8	malformed, IPv6 and single-label hosts the endpoint rules must handle (test input)
 host	src/komira_aws_lambda/tests/test_lambda_responses.mojo	3	a made-up Lambda function URL (test data)
 host	src/komira_column_kernels/tests/test_regexp_bitstate_differential.mojo	5	URLs as regular-expression test input
-host	src/komira_column_kernels/tests/test_regexp_dotstar_eos_tail.mojo	14	URLs as regular-expression test input
+host	src/komira_column_kernels/tests/test_regexp_dotstar_eos_tail.mojo	13	URLs as regular-expression test input
 host	src/komira_column_kernels/tests/test_regexp_replace_memo_duplicates.mojo	16	URLs as regular-expression test input
 host	src/komira_column_kernels/tests/test_regexp_scratch_reuse_and_span_subject.mojo	6	URLs as regular-expression test input
 host	src/komira_jose/tests/test_rs256_third_party.mojo	1	a made-up registry host (test data)

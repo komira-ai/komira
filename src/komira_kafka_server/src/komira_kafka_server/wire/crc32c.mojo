@@ -83,12 +83,9 @@ def _crc32c_table_entry(byte_val: Int) -> UInt32:
 def crc32c_span(data: Span[UInt8, _]) -> UInt32:
     """CRC-32C (Castagnoli, reflected, init 0xFFFFFFFF, xorout 0xFFFFFFFF) over
     `data`. Uses the hardware CRC32C instruction on x86-64 and macOS arm64,
-    and a table-driven fallback on every other target (Linux aarch64
-    included). No pointer crosses the boundary
+    and `crc32c_span_portable`, the table-driven path, on every other target
+    (Linux aarch64 included). No pointer crosses the boundary
     — the span is indexed bytewise."""
-    var n = len(data)
-    var crc = UInt32(0xFFFFFFFF)
-
     # Hardware CRC32C path on the two supported targets: x86_64 (SSE4.2) and
     # Apple-Silicon arm64 (ARMv8 CRC extension — universal on Apple Silicon).
     # Any other arch (a future non-mac arm64 without the CRC extension, etc.)
@@ -96,6 +93,8 @@ def crc32c_span(data: Span[UInt8, _]) -> UInt32:
     comptime if CompilationTarget.is_x86() or CompilationTarget.is_macos():
         # Hardware path: fold 8 bytes at a time via the wide intrinsic, then
         # the byte intrinsic for the tail.
+        var n = len(data)
+        var crc = UInt32(0xFFFFFFFF)
         var i = 0
         while i + 8 <= n:
             var v = UInt64(0)
@@ -108,14 +107,24 @@ def crc32c_span(data: Span[UInt8, _]) -> UInt32:
             i += 1
         return crc ^ UInt32(0xFFFFFFFF)
     else:
-        # Portable table path (built on the stack; cheap, stays in L1).
-        var table = Array[UInt32, 256](uninitialized=True)
-        comptime for k in range(256):
-            table[k] = _crc32c_table_entry(k)
-        for i in range(n):
-            var idx = Int((crc ^ UInt32(data[i])) & UInt32(0xFF))
-            crc = (crc >> UInt32(8)) ^ table[idx]
-        return crc ^ UInt32(0xFFFFFFFF)
+        return crc32c_span_portable(data)
+
+
+def crc32c_span_portable(data: Span[UInt8, _]) -> UInt32:
+    """CRC-32C of `data`, always by the table-driven path: the result
+    `crc32c_span` gives on the targets without the hardware instruction, and the
+    same value as its hardware path on the others. It exists so that the table
+    path is compiled, and tested against the hardware path, on every target.
+    No pointer crosses the boundary — the span is indexed bytewise."""
+    var crc = UInt32(0xFFFFFFFF)
+    # The table is built on the stack; cheap, stays in L1.
+    var table = Array[UInt32, 256](uninitialized=True)
+    comptime for k in range(256):
+        table[k] = _crc32c_table_entry(k)
+    for i in range(len(data)):
+        var idx = Int((crc ^ UInt32(data[i])) & UInt32(0xFF))
+        crc = (crc >> UInt32(8)) ^ table[idx]
+    return crc ^ UInt32(0xFFFFFFFF)
 
 
 @always_inline

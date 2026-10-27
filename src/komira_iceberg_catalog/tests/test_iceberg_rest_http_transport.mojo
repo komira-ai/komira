@@ -20,9 +20,12 @@
 #   * `request_timeout_us` bounds the request: a peer that sends a head and
 #     then stalls fails with the client's TIMEOUT, not with the end-of-stream
 #     error the stall ends in once its finite pending reads run out (a
-#     transport that dropped the timeout waits for the peer instead).
+#     transport that dropped the timeout waits for the peer instead). Time is
+#     manual: the transport's deadline reads a clock cell that only the
+#     stalled peer moves, so the case never waits and asserts no duration.
 # =============================================================================
 
+from std.memory import ArcPointer
 from std.testing import assert_equal, assert_true
 
 from komira_async.reactor.reactor import Reactor
@@ -45,6 +48,10 @@ from komira_iceberg_catalog.iceberg_rest_transport import (
 comptime _HOST: String = "192.0.2.1"
 comptime _STALL_PENDING_READS: Int = 200_000
 comptime _BUDGET_US: Int = 150_000
+# Manual time: the clock starts here and only the stalled peer moves it, by
+# `_PENDING_STEP_US` per read that answers Pending.
+comptime _CLOCK_START_US: Int = 1_000_000
+comptime _PENDING_STEP_US: Int = 10_000
 
 
 # =============================================================================
@@ -263,7 +270,7 @@ def test_connector_factory_failure_propagates() raises:
     assert_equal(msg, String("connector setup failed"))
 
 
-def _stalled_head() raises -> ScriptedConnector:
+def _stalled_head_on(clock: ArcPointer[Int]) -> ScriptedConnector:
     var head = String(
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
         + "Content-Length: 1000\r\n\r\n{"
@@ -272,12 +279,39 @@ def _stalled_head() raises -> ScriptedConnector:
     b.extend(Span(head.as_bytes()))
     var s = ScriptedStream.from_read_script(b^)
     s.set_pending_after_script(_STALL_PENDING_READS)
+    s.advance_clock_on_read(clock, _PENDING_STEP_US)
     return ScriptedConnector.with_stream(s^)
 
 
+def _clocked_refusing(clock: ArcPointer[Int]) raises -> ScriptedConnector:
+    raise Error("clocked connector setup failed")
+
+
+def test_clocked_connector_factory_failure_propagates() raises:
+    var clock = ArcPointer[Int](_CLOCK_START_US)
+    var tr = HttpIcebergRestTransport[ScriptedConnector].with_test_clock(
+        _clocked_refusing, clock, request_timeout_us=_BUDGET_US
+    )
+    var msg = String("")
+    try:
+        var _r = tr.get(_request(String("/v1/config"), 8181))
+    except e:
+        msg = String(e)
+    assert_equal(msg, String("clocked connector setup failed"))
+    assert_equal(clock[], _CLOCK_START_US)
+
+
 def test_request_timeout_bounds_a_stalled_peer() raises:
-    var tr = HttpIcebergRestTransport[ScriptedConnector](
-        _stalled_head, request_timeout_us=_BUDGET_US
+    # ScriptedStream.advance_clock_on_read adds the step only on reads that
+    # answer Pending (data_step_us defaults to 0; EOF and errors add nothing).
+    # The transport's request deadline reads a manual clock that only the
+    # stalled peer moves. The failure must be the client's TIMEOUT, and it
+    # must arrive when manual time reaches the budget: not earlier (the
+    # deadline is not before the budget) and not at the end of the peer's
+    # pending reads (the budget was not dropped).
+    var clock = ArcPointer[Int](_CLOCK_START_US)
+    var tr = HttpIcebergRestTransport[ScriptedConnector].with_test_clock(
+        _stalled_head_on, clock, request_timeout_us=_BUDGET_US
     )
     var msg = String("")
     try:
@@ -285,6 +319,12 @@ def test_request_timeout_bounds_a_stalled_peer() raises:
     except e:
         msg = String(e)
     assert_true(_has(msg, String("TIMEOUT")), msg)
+    var elapsed = clock[] - _CLOCK_START_US
+    assert_true(elapsed >= _BUDGET_US, String(elapsed))
+    # The client checks its deadline once per Pending read, so the timeout
+    # lands within a step or two of the budget; five steps leaves slack and is
+    # still far below the 200k-read stall that a dropped budget would reach.
+    assert_true(elapsed < _BUDGET_US + 5 * _PENDING_STEP_US, String(elapsed))
 
 
 def main() raises:
@@ -293,5 +333,6 @@ def main() raises:
     test_non_200_is_returned_not_raised()
     test_each_call_dials_a_fresh_connector()
     test_connector_factory_failure_propagates()
+    test_clocked_connector_factory_failure_propagates()
     test_request_timeout_bounds_a_stalled_peer()
     print("test_iceberg_rest_http_transport: ALL PASS")
