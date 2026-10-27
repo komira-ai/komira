@@ -294,7 +294,7 @@ trait SpillStorage(Movable, Deinitable):
     #     by explicit `release_chunk` / `cleanup`, or a process-exit /
     #     next-session directory/prefix sweep (FileSystem.delete may not
     #     be wired on every FS conformer yet — cloud-FS inherit the
-    #     raising default until OBJECTSTORE-V04).
+    #     raising default).
     # Conformers MUST NOT raise from `__del__`; on cleanup failure,
     # log + leak. Drop-path failures are detectable via subsequent
     # session-startup directory-scan cleanup paths.
