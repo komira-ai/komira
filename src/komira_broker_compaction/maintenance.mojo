@@ -321,7 +321,7 @@ def maintain_topic[
          * cleanup.policy compacts (1 or 2) -> ProductionLogCleaner.run_once.
          * cleanup.policy deletes  (0 or 2) -> RetentionPass.run.
          (policy=delete runs only retention; policy=compact runs only the
-          cleaner; policy=compact,delete runs BOTH ; the orchestrate-both
+          cleaner; policy=compact,delete runs BOTH; the orchestrate-both
           choice.)
       3. ALWAYS attempt the opportunistic merge scan (it is a clean no-op for a
          `fixed` / non-auto topic, or one with no partition_map). The merge scan

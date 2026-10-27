@@ -133,8 +133,9 @@ def transcode_segments_to_parquet(
       2. Assert all segments share one schema (fail-loud on divergence).
       3. Write all RecordBatches into ONE Parquet object via the bytes entry
          (`write_record_batches_to_parquet_bytes`), with no local disk (the
-         broker stores only in the object store). The writer concats the batches in order, so the Parquet
-         object's row order == the concatenated live offset order.
+         broker stores only in the object store). The writer concats the
+         batches in order, so the Parquet object's row order == the
+         concatenated live offset order.
 
     Returns the Parquet file bytes (PAR1 magic + pages + footer + trailer),
     ready to PUT to object storage.

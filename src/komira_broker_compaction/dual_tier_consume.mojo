@@ -536,11 +536,7 @@ struct DualTierConsumer[Storage: ConditionalWriteStore](
                         var repaired = self._read_from_impl(
                             r.base_offset, allow_repair=False
                         )
-                        # Append the repaired suffix; it covers [base, tail).
-                        for k in range(len(repaired)):
-                            out.append(repaired.take_slot_unchecked(k))
-                        repaired.set_len_unchecked(0)
-                        _ = repaired^
+                        _splice_repaired(out, repaired^)
                         return out^
                     raise e^
         return out^
@@ -697,9 +693,9 @@ struct DualTierConsumer[Storage: ConditionalWriteStore](
 struct SubLineageDualTierConsumer[Store: CloneableConditionalWriteStore](
     Movable, Deinitable
 ):
-    """The dual-tier consume driver for a partition in sub-lineage mode. Reads `[start_offset, tail)` across BOTH tiers,
-    where the LIVE tier is the sub-lineage model's CONTIGUOUS dense index — the
-    folded `_base` prefix + the serve-merged un-folded tail
+    """The dual-tier consume driver for a partition in sub-lineage mode.
+    Reads `[start_offset, tail)` across BOTH tiers, where the LIVE tier is the
+    sub-lineage model's CONTIGUOUS dense index — the folded `_base` prefix + the serve-merged un-folded tail
     (`SubLineageConsumeResolver.resolve_index`) — instead of the single-manifest
     `ConsumeCore.resolve_index`.
 
@@ -783,10 +779,7 @@ struct SubLineageDualTierConsumer[Store: CloneableConditionalWriteStore](
                         var repaired = self._read_from_impl(
                             r.base_offset, allow_repair=False
                         )
-                        for k in range(len(repaired)):
-                            out.append(repaired.take_slot_unchecked(k))
-                        repaired.set_len_unchecked(0)
-                        _ = repaired^
+                        _splice_repaired(out, repaired^)
                         return out^
                     raise e^
         return out^
@@ -879,6 +872,20 @@ def _fold_record_batches(
     if len(batches) == 0:
         return RecordBatch()
     return concat_record_batches_nway(batches^)
+
+
+def _splice_repaired(
+    mut out: Slab[DecodedTierBatch], var repaired: Slab[DecodedTierBatch]
+):
+    """Append the repaired suffix to the batches already read. A compacted
+    object that now covers the failed segment can also cover segments read
+    earlier from the live tier, so those earlier batches are dropped: each
+    offset is delivered once."""
+    if len(repaired) > 0:
+        var cut = repaired[0].base_offset
+        while len(out) > 0 and out[len(out) - 1].last_offset >= cut:
+            _ = out.pop()
+    out.extend(repaired^)
 
 
 @always_inline

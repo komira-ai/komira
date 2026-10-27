@@ -33,6 +33,7 @@ mojo_library(
         "tests/test_broker_log_compaction_zero_survivor.mojo",
         "tests/test_broker_maintenance_driver.mojo",
         "tests/test_broker_sublineage_consume.mojo",
+        "tests/test_read_repair_recovery.mojo",
         "tests/test_sublineage_maintenance_fold.mojo",
     ],
     visibility = ["PUBLIC"],

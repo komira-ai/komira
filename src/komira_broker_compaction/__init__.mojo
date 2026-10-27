@@ -49,8 +49,8 @@ from .dual_tier_consume import (
 )
 
 # The log-cleaner driver (cleanup.policy=compact). It decodes cleanable `.seg`
-# objects, computes the latest record per key (with a wall-clock tombstone
-# grace), re-encodes the survivors as a new `.seg`, swaps the manifest chunk
+# objects, computes the latest record per key (with a tombstone grace
+# measured against the caller's `now_ms`), re-encodes the survivors as a new `.seg`, swaps the manifest chunk
 # body by compare-and-swap (offsets preserved) and, after a grace period,
 # garbage-collects the orphaned original `.seg`. Same shape as
 # `CompactionWorker` and `RetentionPass`.

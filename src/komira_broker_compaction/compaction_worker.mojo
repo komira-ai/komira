@@ -39,7 +39,11 @@ from komira_objectstore.path import Path
 from komira_objectstore.store import ConditionalWriteStore
 
 from komira_broker.consume_core import ConsumeCore, SegmentRef, ConsumeSegment
-from komira_broker.compacted_index import CompactionIndex, evaluate_slo_backpressure, SloDecision
+from komira_broker.compacted_index import (
+    CompactionIndex,
+    evaluate_slo_backpressure,
+    SloDecision,
+)
 
 from komira_parquet_api.types import CompressionCodec
 
@@ -228,6 +232,26 @@ struct CompactionWorker[Storage: ConditionalWriteStore](
         # 1. Live index + the compacted boundary.
         var live_index = self._consume.resolve_index()
         var compacted_tail = self._index.compacted_tail_offset()
+
+        # 1b. Finish an interrupted round. A live segment below the compacted
+        # tail is already covered by a compacted entry; if it is still listed,
+        # the round that appended that entry stopped before tombstoning its
+        # chunks and advancing the log start. Tombstoning is idempotent (it
+        # refreshes the marker) and the advance never moves backwards.
+        var stale_hi_seq = Int64(-1)
+        var stale_hi_offset = Int64(-1)
+        for i in range(len(live_index)):
+            ref s = live_index[i]
+            if s.base_offset >= compacted_tail:
+                break
+            self._live_manifest.schedule_for_delete_at(s.chunk_seq, now_ms)
+            stale_hi_seq = s.chunk_seq
+            stale_hi_offset = s.last_offset
+        if stale_hi_seq >= Int64(0):
+            var _done = self._advance_log_start_cas(
+                stale_hi_seq + Int64(1), stale_hi_offset + Int64(1)
+            )
+            _ = _done
 
         # 2. Select the contiguous UNCOMPACTED prefix starting at compacted_tail.
         # A live SegmentRef is uncompacted iff base_offset >= compacted_tail

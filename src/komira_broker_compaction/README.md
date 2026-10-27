@@ -25,10 +25,12 @@ writer; this package layers the format-aware half above it.
   `CompactedDecodeResult`, `DualTierPushdownResult` report the row-group
   accounting); the live tier filters then projects after decode. Both tiers
   return the same row set. `SubLineageDualTierConsumer` does the same over the
-  sub-lineage model (the folded `_base` plus the serve-merged tail).
+  sub-lineage model (the folded `_base` plus the serve-merged tail). Import
+  `SubLineageDualTierConsumer` and `decode_compacted_parquet_bytes` from
+  `komira_broker_compaction.dual_tier_consume`.
 - `ProductionLogCleaner` is the log cleaner for `cleanup.policy=compact`
   partitions: it decodes cleanable `.seg` objects, keeps the latest record per
-  key with a wall-clock tombstone grace, re-encodes the survivors as a new
+  key with a tombstone grace measured against `now_ms`, re-encodes the survivors as a new
   `.seg` at the original offsets, swaps the manifest chunk body by
   compare-and-swap, and schedules the orphaned original `.seg` for deletion
   after a grace period (`CompactionReapWorker`). A chunk with no survivors
@@ -36,7 +38,8 @@ writer; this package layers the format-aware half above it.
 - `run_maintenance_pass` is the run-once maintenance entry point for a
   scheduler: it enumerates the cluster's topics and dispatches retention, the
   log cleaner or both by `cleanup.policy`, and the auto-merge scan.
-  `run_sublineage_maintenance_pass` additionally folds sub-lineage tails into
+  `run_sublineage_maintenance_pass` (import it from
+  `komira_broker_compaction.maintenance`) additionally folds sub-lineage tails into
   `_base` and runs the contiguity-audited retention. Neither loops, sleeps or
   reads a clock; the caller passes `now_ms`, and a topic whose maintenance
   raises is recorded in the summary's `errors` and skipped.

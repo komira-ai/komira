@@ -280,7 +280,7 @@ struct ProductionLogCleaner[Storage: ConditionalWriteStore](
 ):
     """Runs one PRODUCTION log-compaction tick over a compact-policy partition:
     decode the cleanable `.seg`s, compute latest-per-key survivors (with
-    wall-clock tombstone grace), RE-ENCODE each dirty chunk's survivors as a new
+    tombstone grace (measured against `now_ms`)), RE-ENCODE each dirty chunk's survivors as a new
     `.seg`, PUT it, CAS-swap the manifest chunk body (record_count PRESERVED,
     offsets PRESERVED with gaps), and schedule the orphaned original `.seg` for
     grace-gated GC.
@@ -413,7 +413,7 @@ struct ProductionLogCleaner[Storage: ConditionalWriteStore](
         var was_compacted_flags = List[Bool]()
         for i in range(n - 1):
             ref s = index[i]
-            # Read the chunk body for its creation_ts (wall-clock grace gate) +
+            # Read the chunk body for its creation_ts (grace gate against `now_ms`) +
             # its survivor-offset sidecar (empty for an un-compacted chunk OR for
             # a zero-survivor compacted chunk).
             var body_bytes = self._manifest.read_chunk(s.chunk_seq)
@@ -431,7 +431,7 @@ struct ProductionLogCleaner[Storage: ConditionalWriteStore](
 
         # 3. extract_clean_records over each batch. ALL records (including
         #    tombstones) go into the input so compact_records computes the true
-        #    latest-per-key. The wall-clock tombstone grace is applied in step 5
+        #    latest-per-key. The tombstone grace (measured against `now_ms`) is applied in step 5
         #    AFTER the per-key decision (a tombstone-latest key past grace must
         #    drop the WHOLE KEY — NOT resurrect a prior superseded value, which
         #    is what pre-filtering the tombstone would wrongly do).

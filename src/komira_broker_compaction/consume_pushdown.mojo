@@ -24,7 +24,8 @@ def _apply_consume_pushdown(
 
       1. If `predicate` is `Some`, filter the rows with
          `filter_record_batch_via_predicate`, the same predicate evaluation a
-         filter operator uses, so the row set is identical.
+         filter operator uses, so the row set is identical. Both tiers'
+         decoders materialize dictionary columns before this point.
       2. If `projection` is `Some`, select that column subset, in that order,
          with `project_batch_by_names`.
 
