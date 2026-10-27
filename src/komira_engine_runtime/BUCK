@@ -5,8 +5,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # runtime built from them, morsel sizing as a pure function of the host profile
 # and the segment (recorded in the physical plan), the dispatch-time fan-out
 # grain, the run and segment execution context, the parallel RecordBatch concat,
-# counters, and the small shared row and column helpers. It depends on no
-# engine package above it.
+# the shuffle combine buffer and retention policy, counters, and the small
+# shared row and column helpers. It depends on no engine package above it.
 mojo_library(
     name = "komira_engine_runtime",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -20,7 +20,9 @@ mojo_library(
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_host:komira_host",
         "//src/komira_morsel:komira_morsel",
+        "//src/komira_objectstore:komira_objectstore",
         "//src/komira_physical_plan:komira_physical_plan",
+        "//src/komira_shuffle:komira_shuffle",
     ],
     test_srcs = [
         "tests/test_cb20_morsel_count_mechanism.mojo",
@@ -44,6 +46,8 @@ mojo_library(
         "tests/test_row_group_ref_borrow.mojo",
         "tests/test_scan_source_streaming_morsel.mojo",
         "tests/test_segment_execution.mojo",
+        "tests/test_shuffle_combine_buffer.mojo",
+        "tests/test_shuffle_retention_policy.mojo",
         "tests/test_streaming_microbench.mojo",
         "tests/test_wave_uaf_batch_shape.mojo",
         "tests/test_wave_uaf_candidate_c.mojo",
