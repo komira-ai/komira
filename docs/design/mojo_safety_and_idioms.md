@@ -36,7 +36,7 @@ On the pinned compiler `Pointer` and `UnsafePointer` are one type, so the rules 
 
 ### How do the collection types keep pointers private?
 
-They lend views and references whose origin is the collection. `ByteView[origin]` in `src/komira_buffer/byte_view.mojo` is parameterised on the origin of the bytes it views, so a view cannot outlive its source. `Slab[T]` in `src/komira_collections/slab.mojo` stores its elements in a `List[UInt8]` field, `_bytes`, and returns elements by reference or by move (`take_slot_unchecked`, `swap_remove`).
+They lend views and references whose origin is the collection. `ByteView[origin]` in `src/komira_buffer/byte_view.mojo` is parameterised on the origin of the bytes it views, so a view cannot outlive its source. `Slab[T]` in `src/komira_collections/src/komira_collections/slab.mojo` stores its elements in a `List[UInt8]` field, `_bytes`, and returns elements by reference or by move (`take_slot_unchecked`, `swap_remove`).
 
 ### How do I move a field out of a struct?
 
