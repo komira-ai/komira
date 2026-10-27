@@ -69,8 +69,8 @@ def utc_stamp_from_unix_ms(unix_ms: Int64) -> String:
     var days = total_secs // 86400
     var secs_of_day = total_secs - days * 86400
     if secs_of_day < 0:
-        secs_of_day += 86400
-        days -= 1
+        secs_of_day += 86400  # cov: unreachable // floors: secs_of_day >= 0
+        days -= 1  # cov: unreachable // floors: secs_of_day >= 0
     var ymd = _civil_from_days(days)
     var hh = secs_of_day // 3600
     var mm = (secs_of_day % 3600) // 60

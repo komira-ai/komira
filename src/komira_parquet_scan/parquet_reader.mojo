@@ -52,7 +52,6 @@ from komira_parquet.parquet_source_helpers import (
     _build_schema_from_meta,
     _decode_columns_by_name_remap,
     _decode_columns_subset_per_chunk_with_ctx,
-    _decode_numeric_dict_codes_one_col,
     _name_to_file_col_idx,
     _remap_is_positional_identity,
     _resolve_result_names_to_file_indices,
@@ -71,7 +70,8 @@ from komira_scan_planning.reader_factory import (
 )
 
 from .arrow_hint_refine import refine_batch_by_arrow_hint
-from .parquet_codes_feed import RowGroupCodesFeed, decode_rowgroup_codes_feed
+from .flat_schema import schema_is_flat
+from .parquet_codes_feed import RowGroupCodesFeed, decode_rowgroup_codes_feed, numeric_dict_codes_of
 from .parquet_reader_prune import decode_ranges, decode_whole, pruned_row_ranges
 from .payload_sel_decode import decode_columns_subset_selected_per_chunk
 from .prefetch import advise_prefetch_columns
@@ -160,6 +160,9 @@ struct ParquetReader[FS: FileSystem](Reader, Movable, Deinitable):
         _decode_ctx: This worker's reusable decode buffers.
         _arrow_hint: The footer's `ARROW:schema` hint (often empty).
         _numeric_dict_vec: See the module header.
+        _flat: Whether the footer is flat (`flat_schema`); the selection class,
+            the selected decode and the dictionary-codes paths decline when it
+            is not.
     """
 
     comptime HashAggDecoded = ParquetHashAggDecoded
@@ -171,6 +174,7 @@ struct ParquetReader[FS: FileSystem](Reader, Movable, Deinitable):
     var _decode_ctx: ColumnDecodeContext
     var _arrow_hint: ArrowSchemaHint
     var _numeric_dict_vec: Bool
+    var _flat: Bool
 
     def __init__(
         out self,
@@ -187,6 +191,7 @@ struct ParquetReader[FS: FileSystem](Reader, Movable, Deinitable):
         self._decode_ctx = ColumnDecodeContext(numeric_dict_vec, recycle_codes)
         self._arrow_hint = arrow_schema_hint_from_metadata(self._meta[])
         self._numeric_dict_vec = numeric_dict_vec
+        self._flat = schema_is_flat(self._meta[].schema)
 
     def clone_for_worker(self) raises -> ParquetReader[Self.FS]:
         """This file's reader for another worker, opening nothing: the
@@ -230,6 +235,8 @@ struct ParquetReader[FS: FileSystem](Reader, Movable, Deinitable):
         DELTA_* and BYTE_STREAM_SPLIT pages, and a dictionary chunk under
         `preserve_dict`. A V2 page with levels, which the footer cannot show,
         is still declined by the gather returning None."""
+        if not self._flat:
+            return SELECTION_DECLINES
         ref rg = self._meta[].row_groups[unit_in_file]
         if col_idx < 0 or col_idx >= len(rg.columns):
             return SELECTION_DECLINES
@@ -246,7 +253,8 @@ struct ParquetReader[FS: FileSystem](Reader, Movable, Deinitable):
             ref se = schema[col_idx + 1]
             if se.converted_type and se.converted_type.value() == _CONVERTED_TYPE_DECIMAL:
                 return SELECTION_DECLINES
-        var has_dict = Bool(md.dictionary_page_offset)
+        # A writer with no dictionary may store offset 0, which is no page.
+        var has_dict = Bool(md.dictionary_page_offset) and md.dictionary_page_offset.value() > 0
         for i in range(len(md.encodings)):
             var e = md.encodings[i]
             if e == Encoding.PLAIN_DICTIONARY or e == Encoding.RLE_DICTIONARY:
@@ -370,12 +378,12 @@ struct ParquetReader[FS: FileSystem](Reader, Movable, Deinitable):
     def fused_dict_count(self, unit_in_file: Int, col_idx: Int, op: UInt8, threshold: Int64) raises -> Optional[Int]:
         """`count(*) WHERE col <op> threshold` for an INT32 / INT64
         dictionary chunk, from its codes and dictionary (no per-row value
-        built); None for any other chunk (the caller decodes and evaluates).
+        built); None for any other chunk, including a UINT_32 / UINT_64 one
+        (its entries would be compared signed) (the caller decodes and
+        evaluates).
         A null row has no code and never satisfies a comparison."""
         ref meta = self._meta[]
-        var codes_opt = _decode_numeric_dict_codes_one_col(
-            self._file, meta.row_groups[unit_in_file], meta.schema, col_idx
-        )
+        var codes_opt = numeric_dict_codes_of(self._file, meta.row_groups[unit_in_file], meta.schema, col_idx)
         if not codes_opt:
             return None
         var ndc = codes_opt.take()
@@ -390,7 +398,7 @@ struct ParquetReader[FS: FileSystem](Reader, Movable, Deinitable):
         aligned)."""
         ref meta = self._meta[]
         ref rg = meta.row_groups[unit_in_file]
-        var codes_opt = _decode_numeric_dict_codes_one_col(self._file, rg, meta.schema, col_idx)
+        var codes_opt = numeric_dict_codes_of(self._file, rg, meta.schema, col_idx)
         if not codes_opt:
             return None
         var ndc = codes_opt.take()

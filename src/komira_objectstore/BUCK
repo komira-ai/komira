@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/native:shared.bzl", "native_shared_library")
 
 # The vendor-neutral object-storage layer: the Path / URI types, the
 # ObjectStore trait family (metadata, conditional writes, ranged and parkable
@@ -11,7 +12,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # (the reactor and its C shim, which also carries the CAS-manifest gate lock),
 # komira_atomic_alias, komira_metrics (the escalation metrics sink) and
 # komira_counters (cas_backoff_probe: the CAS append's backoff draws, counted
-# so a contention test can check them).
+# so a contention test can check them), and komira_fs, whose C shim
+# (`komira_free`, `komira_fs_enoent`, `komira_fs_errno_name`) the local
+# filesystem store calls, so komira_fs's package is required with this one
+# (tools/build/mojo/README.md, "Native reach").
 # komira_runtime_paths is declared because several tests take their scratch
 # directory from `test_tmpdir()`.
 
@@ -33,6 +37,8 @@ cxx_library(
 
 mojo_library(
     name = "komira_objectstore",
+    # Its C ships in its package as komira_objectstore_native below (lib/libkomira_objectstore_native.so.1).
+    native = ":komira_objectstore_native",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         ":komira_objectstore_posix",
@@ -41,7 +47,7 @@ mojo_library(
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
         "//src/komira_counters:komira_counters",
-        "//src/komira_fs:komira_fs_posix",
+        "//src/komira_fs:komira_fs",
         "//src/komira_libc:komira_libc",
         "//src/komira_metrics:komira_metrics",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
@@ -79,10 +85,33 @@ mojo_library(
         "tests/test_moved_tombstone_offline.mojo",
         "tests/test_objectstore_bytes_non_ascii.mojo",
         "tests/test_path_uri.mojo",
+        "tests/test_precondition_is_anchored.mojo",
         "tests/test_sharded_lineage_kernel.mojo",
         "tests/test_slow_cas_store_start_412_abi.mojo",
         "tests/test_sublineage_base_fold.mojo",
         "tests/test_sublineage_read_errors_offline.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# libkomira_objectstore_native.so.1: the C this library owns, as its own
+# shared library exporting the names its callers call
+# (tools/build/native/README.md, "Each library's shared library"). Built and
+# checked here, and packed into the library's conda package (`native`).
+native_shared_library(
+    name = "komira_objectstore_native",
+    archives = [
+        ":komira_objectstore_posix",
+    ],
+    callers = [
+        ":komira_objectstore",
+    ],
+    library = "komira_objectstore",
+    # Every weak undefined symbol of the library, recorded from its first
+    # green link (checks 3 and 7 hold it to exactly this list):
+    weak_undefined = [
+        # zig's C runtime (crti.o): the profiling hook, absent unless -pg.
+        "__gmon_start__",
     ],
     visibility = ["PUBLIC"],
 )

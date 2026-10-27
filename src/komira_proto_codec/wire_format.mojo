@@ -299,6 +299,9 @@ trait WireEncoder(Movable):
     def write_string_element(mut self, field_no: Int, v: String) raises:
         ...
 
+    def write_bytes_element(mut self, field_no: Int, v: List[UInt8]) raises:
+        ...
+
     def write_i64_element(mut self, field_no: Int, v: Int64) raises:
         ...
 
@@ -516,6 +519,9 @@ trait WireDecoder(Copyable, Movable):
     # backend's own semantics make the count correct.
 
     def read_into_repeated_string(mut self, mut out: List[String]) raises:
+        ...
+
+    def read_into_repeated_bytes(mut self, mut out: List[List[UInt8]]) raises:
         ...
 
     def read_into_repeated_i64(mut self, mut out: List[Int64]) raises:

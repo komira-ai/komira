@@ -40,7 +40,11 @@
 #     surface.
 # =============================================================================
 
-from komira_buffer.byte_buffer import ByteBuffer, write_uleb128
+from komira_buffer.byte_buffer import (
+    ByteBuffer,
+    write_uleb128,
+    write_uleb128_u64,
+)
 from komira_compression.lz4 import lz4_compress, lz4_decompress
 
 from .inverted import FinalizedIndex
@@ -125,8 +129,41 @@ def _min_bit_width(max_value: Int) -> Int:
 @always_inline
 def _packed_byte_count(count: Int, bit_width: Int) -> Int:
     """Number of bytes a `count`-value bitpacked run at `bit_width` occupies:
-    ceil(count * bit_width / 8). Zero when bit_width == 0 (the width-0 case)."""
+    ceil(count * bit_width / 8). Zero when bit_width == 0 (the width-0 case).
+    The product wraps for a large count: a reader bounds `count` first
+    (`_packed_run_fits`)."""
     return (count * bit_width + 7) >> 3
+
+
+@always_inline
+def _packed_run_fits(
+    src_len: Int, src_off: Int, count: Int, bit_width: Int
+) -> Bool:
+    """True iff `count` values of `bit_width` (1..64) bits starting at byte
+    `src_off` end within `src_len` bytes. Bounds the count against the bits
+    left, never computing `count * bit_width`, which wraps for an untrusted
+    count (2^61 values at width 8 is 2^64 bits, which wraps to 0)."""
+    if src_off < 0 or src_off > src_len:
+        return False
+    return count <= (src_len - src_off) * 8 // bit_width
+
+
+def _packed_run_error(
+    who: StaticString, src_len: Int, src_off: Int, count: Int, bit_width: Int
+) -> Error:
+    """The refusal both unpackers raise when `_packed_run_fits` is False."""
+    return Error(
+        String(who)
+        + ": packed run of "
+        + String(count)
+        + " values at width "
+        + String(bit_width)
+        + " from offset "
+        + String(src_off)
+        + " exceeds source length "
+        + String(src_len)
+        + " (corrupt)"
+    )
 
 
 def _pack_bits_lsb_first(
@@ -198,16 +235,9 @@ def _unpack_bits_lsb_first(
             + String(bit_width)
             + " out of range [0, 64]"
         )
-    var total_bytes = _packed_byte_count(count, bit_width)
-    if src_off < 0 or src_off + total_bytes > len(src):
-        raise Error(
-            "_unpack_bits_lsb_first: packed run ["
-            + String(src_off)
-            + ", "
-            + String(src_off + total_bytes)
-            + ") exceeds source length "
-            + String(len(src))
-            + " (corrupt)"
+    if not _packed_run_fits(len(src), src_off, count, bit_width):
+        raise _packed_run_error(
+            "_unpack_bits_lsb_first", len(src), src_off, count, bit_width
         )
     var bit_pos = 0
     for _ in range(count):
@@ -281,7 +311,7 @@ def _encode_posting_list(
             raise Error(
                 "_encode_posting_list: negative doc_id at index " + String(pos)
             )
-        write_uleb128(first_doc, out)
+        write_uleb128_u64(UInt64(first_doc), out)  # first_doc >= 0, checked above
 
         var deltas = List[Int]()
         var max_delta = 0
@@ -397,7 +427,7 @@ def _encode_posting_list_with_blockmeta(
                 "_encode_posting_list_with_blockmeta: negative doc_id at index "
                 + String(pos)
             )
-        write_uleb128(first_doc, out)
+        write_uleb128_u64(UInt64(first_doc), out)  # first_doc >= 0, checked above
 
         var deltas = List[Int]()
         var max_delta = 0
@@ -1209,22 +1239,22 @@ def _serialize_blockmax_region(
         var v = bm_block_byte_offset[b]
         if v < 0:
             raise Error("_serialize_blockmax_region: negative block_byte_offset")
-        write_uleb128(v, out)
+        write_uleb128_u64(UInt64(v), out)  # v >= 0, checked above
     for b in range(total_blocks):
         var v = bm_block_last_docid[b]
         if v < 0:
             raise Error("_serialize_blockmax_region: negative block_last_docid")
-        write_uleb128(v, out)
+        write_uleb128_u64(UInt64(v), out)  # v >= 0, checked above
     for b in range(total_blocks):
         var v = bm_block_max_tf[b]
         if v < 0:
             raise Error("_serialize_blockmax_region: negative block_max_tf")
-        write_uleb128(v, out)
+        write_uleb128_u64(UInt64(v), out)  # v >= 0, checked above
     for b in range(total_blocks):
         var v = bm_block_min_dl[b]
         if v < 0:
             raise Error("_serialize_blockmax_region: negative block_min_dl")
-        write_uleb128(v, out)
+        write_uleb128_u64(UInt64(v), out)  # v >= 0, checked above
 
 
 # =============================================================================

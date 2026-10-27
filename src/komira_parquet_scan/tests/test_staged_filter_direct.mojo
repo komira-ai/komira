@@ -33,6 +33,7 @@ from komira_parquet_scan.parquet_reader import ParquetReader
 from komira_parquet_scan.staged_filter import (
     SelectionPlan,
     compose_survivors,
+    decode_rows_of,
     definite_true,
     first_deferred_conjunct,
     hconcat_share,
@@ -69,10 +70,10 @@ def _n(r: Int) -> Int:
     return r % 7 - 2
 
 
-def _file() raises -> String:
+def _file_in(name: String, layout: TestFileLayout) raises -> String:
     """Columns a (INT64 = row), s (string, PLAIN), t (string, dictionary),
-    n (nullable INT64): one row group of 40 rows."""
-    var path = test_tmpdir() + "/staged.parquet"
+    n (nullable INT64): 40 rows, one row group unless `layout` cuts them."""
+    var path = test_tmpdir() + "/" + name + ".parquet"
     var a = List[Int]()
     var s = List[String]()
     var t = List[String]()
@@ -89,14 +90,23 @@ def _file() raises -> String:
     cols.append(TestColumn.string("s", s^))
     cols.append(TestColumn.string("t", t^).dict_encoded())
     cols.append(TestColumn.int64("n", n^).with_nulls(nn^))
-    write_parquet_file(path, cols, TestFileLayout.single())
+    write_parquet_file(path, cols, layout)
     return path^
 
 
-def _reader() raises -> ParquetReader[_FS]:
-    var file = ParquetFileReader[_FS].open(_file())
+def _reader_at(path: String) raises -> ParquetReader[_FS]:
+    var file = ParquetFileReader[_FS].open(path)
     var meta = parse_full_metadata(file.metadata_bytes.view_range_ro(0, file.metadata_length))
     return ParquetReader[_FS](_file=file^, _meta=ArcPointer[FileMetaData](meta^))
+
+
+def _reader() raises -> ParquetReader[_FS]:
+    return _reader_at(_file_in("staged", TestFileLayout.single()))
+
+
+def _reader_in_two_groups() raises -> ParquetReader[_FS]:
+    """The same rows cut into two row groups of 20."""
+    return _reader_at(_file_in("staged_two_groups", TestFileLayout([20, 20], 10, True)))
 
 
 def _lit(v: Int) -> Expr:
@@ -235,6 +245,76 @@ def test_a_selective_lead_stages_and_emits() raises:
             assert_equal(out.column_at(0).as_string().get(k), _t(r))
             k += 1
     assert_equal(k, 1)
+
+
+def test_a_declined_selective_decode_keeps_the_column_order() raises:
+    # t is a dictionary column: asked of the selective decode under
+    # preserve_dict it declines and is decoded in full and gathered with the
+    # rest. The batch must still be in `cols` order, [t, a], not [a, t].
+    var reader = _reader()
+    var mask = BooleanArray.allocate(_ROWS)
+    var keep: List[Int] = [1, 6, 13, 39]
+    for i in range(len(keep)):
+        mask.data.set(keep[i])
+    var pays: List[Int] = [2]
+    var n_sel = 0
+    var n_gat = 0
+    var b = decode_rows_of(reader, 0, [2, 0], Optional[BooleanArray](mask^), SelectionPlan(pays^), True, n_sel, n_gat)
+    assert_equal(n_sel, 0)
+    assert_equal(n_gat, 1)
+    assert_equal(b.num_rows(), len(keep))
+    assert_equal(b.schema.field_name(0), "t")
+    assert_equal(b.schema.field_name(1), "a")
+    for i in range(len(keep)):
+        assert_equal(Int(b.column_at(1).as_primitive[DType.int64]().get(i)), keep[i])
+
+
+def test_a_lead_that_keeps_exactly_half_declines() raises:
+    var reader = _reader()
+    # a < 20 keeps 20 of 40 rows: at least half, so staging stops.
+    var pred = _and3(_cmp(BIN_LT, "a", 20), _scmp(BIN_NE, "s", "s1"), _cmp(BIN_GT, "n", 0))
+    var conjuncts = List[Expr]()
+    split_and_conjuncts(pred, conjuncts)
+    var conjunct_cols = List[List[Int]]()
+    var all_cols = List[Int]()
+    assert_true(resolve_conjunct_columns(reader, conjuncts, conjunct_cols, all_cols))
+    var plan = selection_plan_for(reader, 0, all_cols, False, False)
+    var res = run_staged_filter(reader, 0, conjuncts, conjunct_cols, plan, False)
+    assert_true(res.declined)
+    assert_equal(res.rows, 20)
+    # One row fewer is selective.
+    var pred2 = _and3(_cmp(BIN_LT, "a", 19), _scmp(BIN_NE, "s", "s1"), _cmp(BIN_GT, "n", 0))
+    var conjuncts2 = List[Expr]()
+    split_and_conjuncts(pred2, conjuncts2)
+    var res2 = run_staged_filter(reader, 0, conjuncts2, conjunct_cols, plan, False)
+    assert_false(res2.declined)
+
+
+def test_the_second_row_group_is_read_not_the_first() raises:
+    var reader = _reader_in_two_groups()
+    # Row group 1 holds rows 20..39: a < 26 keeps 6 of 20, then s <> 's0' and
+    # a non-null n: rows 21, 22 and 23 survive (20 and 25 are null, 24 is s0).
+    var pred = _and3(_cmp(BIN_LT, "a", 26), _scmp(BIN_NE, "s", "s0"), _cmp(BIN_GT, "n", -9))
+    var conjuncts = List[Expr]()
+    split_and_conjuncts(pred, conjuncts)
+    var conjunct_cols = List[List[Int]]()
+    var all_cols = List[Int]()
+    assert_true(resolve_conjunct_columns(reader, conjuncts, conjunct_cols, all_cols))
+    var plan = selection_plan_for(reader, 1, all_cols, False, False)
+    var res = run_staged_filter(reader, 1, conjuncts, conjunct_cols, plan, False)
+    assert_false(res.declined)
+    var want = definite_true(evaluate_predicate(pred, reader.decode_columns_subset(1, [0, 1, 3], False)))
+    assert_equal(want.true_count(), res.rows)
+    assert_equal(res.rows, 3)
+    _same_mask(res.alive.value(), want)
+    var out = staged_emit_batch(reader, 1, res, [2, 0], PAYLOAD_SEL_VAR_WIDTH, False)
+    var k = 0
+    for r in range(20):
+        if want.data.test(r):
+            assert_equal(Int(out.column_at(1).as_primitive[DType.int64]().get(k)), 20 + r)
+            assert_equal(out.column_at(0).as_string().get(k), _t(20 + r))
+            k += 1
+    assert_equal(k, res.rows)
 
 
 def test_a_non_selective_lead_declines_and_hands_off() raises:

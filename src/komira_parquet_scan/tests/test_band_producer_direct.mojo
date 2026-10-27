@@ -5,13 +5,20 @@
 #     PLAIN DOUBLE, a dictionary DOUBLE, and the PLAIN column read in place
 #     (zero copy);
 #   - with an INT32 `d <= cutoff` filter carried on the band;
-#   - a row group whose value column has a null aborts the run (empty result);
-#   - a plan whose key is not a dictionary string is refused;
-#   - the band width: the residency bound, the floor, and that it is a
-#     function of the host profile (equal profiles, equal widths).
+#   - a row group whose value column has a null aborts the run (empty result),
+#     and so does a key column with a null;
+#   - a plan whose key is not a dictionary string is refused, and a key that
+#     is a PLAIN string aborts;
+#   - a column whose annotation re-labels its type (a timestamp on an INT64, a
+#     UINT_32 dictionary) aborts instead of folding the physical values;
+#   - a footer dictionary offset of 0 on a PLAIN column does not stop the fold
+#     and does not change its sums; a row group with fewer chunks than the
+#     schema, or a footer row count that disagrees with the columns, aborts;
+#   - the band width: the residency bound under the host profile's L3 cache,
+#     the floor, and that equal profiles give equal widths.
 
 from std.memory import ArcPointer
-from std.testing import TestSuite, assert_equal, assert_raises, assert_true
+from std.testing import TestSuite, assert_equal, assert_false, assert_raises, assert_true
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.band_view import BandView
@@ -26,7 +33,7 @@ from komira_async.runtime.runtime import PLACEMENT_FIXED, PerCoreAsyncRuntime
 from komira_async_api.token import CancellationToken
 from komira_collections.slab import Slab
 from komira_engine_runtime.band_sink import BandSink
-from komira_engine_runtime.host_profile import reference_host_profile
+from komira_engine_runtime.host_profile import HostProfile, reference_host_profile
 from komira_fs.local_fs import LocalFs
 from komira_parquet.file_reader import ParquetFileReader
 from komira_parquet.metadata_parser import parse_full_metadata
@@ -35,7 +42,7 @@ from komira_parquet_scan.band_producer import BAND_MIN_ROWS, band_row_width, com
 from komira_parquet_scan.parquet_reader import ParquetReader
 from komira_parquet_scan.subrg_agg_plan import SubrgAggPlan, resolve_reader_col_idx
 from komira_runtime_paths import test_tmpdir
-from komira_test_parquet_file import TestColumn, TestFileLayout, write_parquet_file
+from komira_test_parquet_file import PT_INT32, TestColumn, TestFileLayout, write_parquet_file
 
 comptime _FS = LocalFs[NoopSink]
 comptime _ROWS = 300
@@ -133,23 +140,35 @@ def _val(r: Int) -> Float64:
 def _file(name: String, null_row: Int) raises -> String:
     """Three row groups of 100: k (string dictionary), v (DOUBLE PLAIN, pages
     of 30 rows), w (DOUBLE dictionary, = v), d (INT32 PLAIN, row), n (OPTIONAL
-    DOUBLE = v, NULL at `null_row`)."""
+    DOUBLE = v, NULL at `null_row`), t (INT64 PLAIN, row), u (INT32 UINT_32
+    dictionary, row % 4), nk (OPTIONAL string dictionary, NULL at row 150),
+    ks (string PLAIN)."""
     var path = test_tmpdir() + "/" + name + ".parquet"
     var k = List[String]()
     var v = List[Float64]()
     var d = List[Int]()
     var nn = List[Bool]()
+    var nkn = List[Bool]()
+    var u = List[Int]()
     for r in range(_ROWS):
         k.append(_key(r))
         v.append(_val(r))
         d.append(r)
         nn.append(r == null_row)
+        nkn.append(r == 150)
+        u.append(r % 4)
     var cols = List[TestColumn]()
-    cols.append(TestColumn.string("k", k^).dict_encoded())
+    cols.append(TestColumn.string("k", k.copy()).dict_encoded())
     cols.append(TestColumn.float64("v", v.copy()).with_page_rows(30))
     cols.append(TestColumn.float64("w", v.copy()).dict_encoded())
-    cols.append(TestColumn.int32("d", d^))
+    cols.append(TestColumn.int32("d", d.copy()))
     cols.append(TestColumn.float64("n", v^).with_nulls(nn^))
+    cols.append(TestColumn.int64("t", d.copy()))
+    var uc = TestColumn("u", PT_INT32, 13)
+    uc.ints = u^
+    cols.append(uc^.dict_encoded())
+    cols.append(TestColumn.string("nk", k.copy()).with_nulls(nkn^).dict_encoded())
+    cols.append(TestColumn.string("ks", k.copy()))
     write_parquet_file(path, cols, TestFileLayout([100, 100, 100], 0, False))
     return path^
 
@@ -160,9 +179,15 @@ def _reader(path: String) raises -> ParquetReader[_FS]:
     return ParquetReader[_FS](_file=file^, _meta=ArcPointer[FileMetaData](meta^))
 
 
-def _plan(reader: ParquetReader[_FS], value_col: String, with_d: Bool) -> SubrgAggPlan:
-    var names: List[String] = ["k", value_col]
-    var types: List[ArrowType] = [ArrowType.STRING, ArrowType.FLOAT64]
+def _plan(
+    reader: ParquetReader[_FS],
+    value_col: String,
+    with_d: Bool,
+    key_col: String = "k",
+    value_type: ArrowType = ArrowType.FLOAT64,
+) -> SubrgAggPlan:
+    var names: List[String] = [key_col, value_col]
+    var types: List[ArrowType] = [ArrowType.STRING, value_type]
     if with_d:
         names.append("d")
         types.append(ArrowType.INT32)
@@ -245,6 +270,103 @@ def test_a_null_aborts_and_a_non_string_key_is_refused() raises:
     rt.shutdown()
 
 
+def _aborts(mut rt: PerCoreAsyncRuntime[NoopSink], var reader: ParquetReader[_FS], var plan: SubrgAggPlan) raises -> Bool:
+    """True when the run is refused by a row group (an empty result)."""
+    var out = run_band_agg[_FS, _SumSink](
+        rt.dispatcher(), CancellationToken.never(), _SumSink(), reader^, plan^, _out_schema(), 4, -1, 0,
+        reference_host_profile("test"),
+    )
+    return len(out) == 0
+
+
+def _with_meta(name: String, meta: FileMetaData) raises -> ParquetReader[_FS]:
+    var path = _file(name, -1)
+    return ParquetReader[_FS](_file=ParquetFileReader[_FS].open(path), _meta=ArcPointer[FileMetaData](meta.copy()))
+
+
+def test_a_nullable_key_and_a_plain_key_abort() raises:
+    var rt = _runtime()
+    var r2 = _reader(_file("bandnk", -1))
+    var p2 = _plan(r2, "v", False, key_col="nk")
+    assert_true(_aborts(rt, r2^, p2^))
+    # A second key with a null, the driver clean.
+    var r4 = _reader(_file("bandnk2", -1))
+    var names: List[String] = ["k", "v", "nk"]
+    var types: List[ArrowType] = [ArrowType.STRING, ArrowType.FLOAT64, ArrowType.STRING]
+    var idx = List[Int]()
+    for i in range(3):
+        idx.append(resolve_reader_col_idx(r4, names[i]))
+    var p4 = SubrgAggPlan(names^, idx^, types^, [0, 2], True)
+    assert_true(_aborts(rt, r4^, p4^))
+    var r3 = _reader(_file("bandks", -1))
+    var p3 = _plan(r3, "v", False, key_col="ks")
+    assert_true(_aborts(rt, r3^, p3^))
+    rt.shutdown()
+
+
+def test_a_relabelled_column_aborts_instead_of_folding_physical_values() raises:
+    var rt = _runtime()
+    # t is an INT64 carrying only the LogicalType TIMESTAMP, microseconds.
+    var base = _reader(_file("bandts0", -1))
+    var meta = base._meta[].copy()
+    var ti = resolve_reader_col_idx(base, "t")
+    meta.schema[ti + 1].logical_timestamp_unit = Optional[Int](2)
+    var rt1 = _with_meta("bandts", meta)
+    var p1 = _plan(rt1, "t", False, value_type=ArrowType.INT64)
+    assert_true(_aborts(rt, rt1^, p1^))
+    # The same INT64 column without the annotation folds (the run is not
+    # refused for its type): the sink reads 8-byte values.
+    var clean = _reader(_file("bandts1", -1))
+    var pc = _plan(clean, "t", False, value_type=ArrowType.INT64)
+    assert_false(_aborts(rt, clean^, pc^))
+    # u is an unsigned dictionary column: its entries would be sign-extended.
+    var r2 = _reader(_file("bandu", -1))
+    var p2 = _plan(r2, "u", False, value_type=ArrowType.INT32)
+    assert_true(_aborts(rt, r2^, p2^))
+    rt.shutdown()
+
+
+def test_a_zero_dictionary_offset_on_a_plain_column_still_folds() raises:
+    var rt = _runtime()
+    var base = _reader(_file("bandz0", -1))
+    var meta = base._meta[].copy()
+    var vi = resolve_reader_col_idx(base, "v")
+    for g in range(len(meta.row_groups)):
+        meta.row_groups[g].columns[vi].meta_data.dictionary_page_offset = Optional[Int](0)
+    var reader = _with_meta("bandz", meta)
+    var plan = _plan(reader, "v", False)
+    var out = run_band_agg[_FS, _SumSink](
+        rt.dispatcher(), CancellationToken.never(), _SumSink(), reader^, plan^, _out_schema(), 4, -1, 0,
+        reference_host_profile("test"),
+    )
+    _check(out, _ROWS)
+    rt.shutdown()
+
+
+def test_a_short_row_group_and_a_wrong_row_count_abort() raises:
+    var rt = _runtime()
+    var base = _reader(_file("bands0", -1))
+    # The last row group lacks the last chunk the schema names.
+    var meta = base._meta[].copy()
+    _ = meta.row_groups[2].columns.pop()
+    var r1 = _with_meta("bands", meta)
+    var p1 = _plan(r1, "v", False)
+    assert_true(_aborts(rt, r1^, p1^))
+    # A footer row count that disagrees with the columns.
+    var meta2 = base._meta[].copy()
+    meta2.row_groups[1].num_rows = 90
+    var r2 = _with_meta("bandr", meta2)
+    var p2 = _plan(r2, "v", False)
+    assert_true(_aborts(rt, r2^, p2^))
+    rt.shutdown()
+
+
+def _host_with_l3(l3_bytes: Int) raises -> HostProfile:
+    var host = reference_host_profile("test")
+    host.hardware.l3_cache_bytes = l3_bytes
+    return host^
+
+
 def test_the_band_width() raises:
     var reader = _reader(_file("bandw", -1))
     var plan = _plan(reader, "v", True)
@@ -252,6 +374,10 @@ def test_the_band_width() raises:
     var host = reference_host_profile("test")
     var w4 = compute_band_rows(plan, 4, host)
     assert_equal(w4, compute_band_rows(plan, 4, reference_host_profile("test")))
+    # The width follows the host profile's L3 cache: half of it, split over
+    # the workers, over the bytes of a row.
+    assert_equal(compute_band_rows(plan, 4, _host_with_l3(256 * 1024)), 2048)
+    assert_equal(compute_band_rows(plan, 4, _host_with_l3(512 * 1024)), 4096)
     assert_true(w4 >= BAND_MIN_ROWS)
     # More workers never widen the band; enough of them hit the floor.
     assert_true(compute_band_rows(plan, 64, host) <= w4)

@@ -8,6 +8,7 @@ builds `<name>/`, the program and everything it needs besides glibc and the
 kernel, for the target platform (linux x86_64):
 
     bin/<program>                              launcher (baseline x86-64)
+    bin/<helper>                               the binary's `helpers`, if any
     lib/glibc-hwcaps/<target_cpu>/lib<program>.so   the program
     lib/<runtime libraries>                    Mojo runtime, C++ runtime
     share/...                                  `data`
@@ -35,8 +36,8 @@ holds kcov.
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:providers.bzl", "MojoProgramInfo")
-load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 load(":kcov_guard.bzl", "KcovGuardInfo", "kcov_guard")
 
 # x86-64 levels: target_cpu -> the level the launcher requires.
@@ -55,42 +56,44 @@ _CC_TARGET = "x86_64-linux-gnu.2.34"
 # version.
 BundleInfo = provider(fields = ["dir", "kcov_guard", "name", "platform", "version"])
 
-_PRELUDE = """
-BB="$1"; shift
-case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
-# Private scratch. A remote action has its working directory to itself; a
-# local one runs in the checkout root next to every other local action, so
-# it takes the per-action scratch directory buck2 names in BUCK_SCRATCH_PATH.
-case "${BUCK_SCRATCH_PATH:-}" in
-    "") T="$PWD/.komira_action" ;;
-    /*) T="$BUCK_SCRATCH_PATH/komira" ;;
-    *) T="$PWD/$BUCK_SCRATCH_PATH/komira" ;;
-esac
-"$BB" mkdir -p "$T/bin"
-"$BB" --install -s "$T/bin"
-PATH="$T/bin"; export PATH
-"""
-
 def _launcher(ctx, out_name, program, level, test_hook):
     bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     zig = ctx.attrs._zig[DefaultInfo].default_outputs[0]
     src = ctx.attrs._launcher_sources[DefaultInfo].default_outputs[0]
     out = ctx.actions.declare_output(out_name)
-    script = _PRELUDE + """
-ZIG="$1"; SRC="$2"; OUT="$3"; NAME="$4"; LEVEL="$5"; shift 5
-case "$ZIG" in /*) ;; *) ZIG="$PWD/$ZIG" ;; esac
-ZIG_GLOBAL_CACHE_DIR="$T/zig-global"; ZIG_LOCAL_CACHE_DIR="$T/zig-local"; HOME="$T/home"
-export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME
-"$ZIG/zig" cc -target {cc_target} -mcpu=baseline -O2 -fno-stack-protector \\
-    -Wall -Wextra -Werror -I "$SRC" \\
-    "-DKOMIRA_NAME=\\"$NAME\\"" "-DKOMIRA_MIN_LEVEL=$LEVEL" "$@" \\
-    -Wl,--enable-new-dtags '-Wl,-rpath,$ORIGIN/../lib' -Wl,--strip-all -Wl,--build-id=none \\
-    -o "$OUT" "$SRC/launcher.c"
-rm -rf "$T"
-test -s "$OUT"
-""".replace("{cc_target}", _CC_TARGET)
+    # zig_launch (no shell) gives zig a scratch directory for its caches and
+    # HOME, and the busybox applets as PATH.
     ctx.actions.run(
-        busybox_sh(bb, script, zig, src, out.as_output(), program, str(level), ["-DKOMIRA_TEST_CPU_HOOK"] if test_hook else []),
+        cmd_args(
+            ctx.attrs._zig_launch[RunInfo],
+            "zig",
+            "--busybox",
+            bb,
+            "--zig",
+            zig,
+            "--",
+            "cc",
+            "-target",
+            _CC_TARGET,
+            "-mcpu=baseline",
+            "-O2",
+            "-fno-stack-protector",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-I",
+            src,
+            '-DKOMIRA_NAME="' + program + '"',
+            "-DKOMIRA_MIN_LEVEL=" + str(level),
+            ["-DKOMIRA_TEST_CPU_HOOK"] if test_hook else [],
+            "-Wl,--enable-new-dtags",
+            "-Wl,-rpath,$ORIGIN/../lib",
+            "-Wl,--strip-all",
+            "-Wl,--build-id=none",
+            "-o",
+            out.as_output(),
+            cmd_args(src, format = "{}/launcher.c"),
+        ),
         category = "komira_launcher",
         identifier = out_name,
     )
@@ -116,7 +119,13 @@ def _bundle_impl(ctx):
     for dest, src in sorted(ctx.attrs.data.items()):
         if not regex_match("^share/[A-Za-z0-9_.+-]+(/[A-Za-z0-9_.+-]+)*$", dest) or "/../" in dest + "/" or "/./" in dest + "/":
             fail("{}: data path `{}` must be a plain relative path under share/".format(ctx.label, dest))
-        data_args.extend([dest, src])
+        data_args.append(cmd_args("--file", dest, src))
+    # The binary's `helpers` (tools/build/mojo/helpers.bzl): bin/<helper>,
+    # mode 0755, beside the launcher.
+    for helper, src in sorted(prog.helpers.items()):
+        if helper == name:
+            fail("{}: helper `{}` has the program's name; bin/{} is the launcher".format(ctx.label, helper, name))
+        data_args.append(cmd_args("--file", "bin/" + helper, src))
 
     version_lines = sorted([
         "cpu_levels=" + prog.target_cpu,
@@ -128,31 +137,26 @@ def _bundle_impl(ctx):
     version = ctx.actions.write(ctx.label.name + ".VERSION", "\n".join(version_lines) + "\n")
 
     out = ctx.actions.declare_output(ctx.label.name, dir = True)
-    script = _PRELUDE + """
-OUT="$1"; NAME="$2"; CPU="$3"; LAUNCHER="$4"; SO="$5"; RUNTIME="$6"; VERSION="$7"; shift 7
-mkdir -p "$OUT/bin" "$OUT/lib/glibc-hwcaps/$CPU"
-cp "$LAUNCHER" "$OUT/bin/$NAME"
-cp "$SO" "$OUT/lib/glibc-hwcaps/$CPU/lib$NAME.so"
-for f in "$RUNTIME"/*; do cp "$f" "$OUT/lib/"; done
-while [ "$#" -gt 0 ]; do
-    mkdir -p "$OUT/$(dirname "$1")"
-    cp "$2" "$OUT/$1"
-    shift 2
-done
-cp "$VERSION" "$OUT/VERSION"
-find "$OUT" -type d -exec chmod 0755 {} +
-find "$OUT" -type f -exec chmod 0644 {} +
-chmod 0755 "$OUT/bin/$NAME"
-cd "$OUT"
-find . -type f | sed 's|^\\./||' | LC_ALL=C sort | while IFS= read -r f; do sha256sum "$f"; done > "$T/sums"
-mv "$T/sums" SHA256SUMS
-chmod 0644 SHA256SUMS
-cd /
-rm -rf "$T"
-"""
-    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     ctx.actions.run(
-        busybox_sh(bb, script, out.as_output(), name, prog.target_cpu, launcher, prog.shared, prog.runtime, version, data_args),
+        cmd_args(
+            ctx.attrs._pkg_act[RunInfo],
+            "bundle",
+            "--out",
+            out.as_output(),
+            "--name",
+            name,
+            "--cpu",
+            prog.target_cpu,
+            "--launcher",
+            launcher,
+            "--so",
+            prog.shared,
+            "--runtime",
+            prog.runtime,
+            "--version",
+            version,
+            data_args,
+        ),
         category = "komira_bundle",
     )
     # No file of the bundle is kcov (kcov_guard.bzl): built with the bundle,
@@ -183,7 +187,9 @@ _mojo_bundle = rule(
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
         "_kcov_guard": attrs.exec_dep(default = "komira//tools/build/package:kcov_guard", providers = [KcovGuardInfo]),
         "_launcher_sources": attrs.dep(default = "komira//tools/build/package/launcher:sources"),
+        "_pkg_act": attrs.exec_dep(default = "komira//tools/build/package:pkg_act", providers = [RunInfo]),
         "_zig": attrs.exec_dep(default = "komira//tools/build/toolchains:zig"),
+        "_zig_launch": attrs.exec_dep(default = "komira//tools/build/mojo:zig_launch", providers = [RunInfo]),
     },
 )
 
@@ -197,21 +203,41 @@ def _level_test_impl(ctx):
     src = ctx.attrs._launcher_sources[DefaultInfo].default_outputs[0]
     out = ctx.actions.declare_output(ctx.label.name + ".txt")
     exe = ctx.actions.declare_output(ctx.label.name)
-    script = _PRELUDE + """
-ZIG="$1"; SRC="$2"; OUT="$3"; EXE="$4"
-case "$ZIG" in /*) ;; *) ZIG="$PWD/$ZIG" ;; esac
-ZIG_GLOBAL_CACHE_DIR="$T/zig-global"; ZIG_LOCAL_CACHE_DIR="$T/zig-local"; HOME="$T/home"
-export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME
-"$ZIG/zig" cc -target x86_64-linux-musl -static -mcpu=baseline -O2 -Wall -Wextra -Werror \\
-    -I "$SRC" -o "$EXE" "$SRC/level_test.c"
-rc=0
-"$EXE" > "$OUT" || rc=$?
-cat "$OUT" >&2
-rm -rf "$T"
-exit "$rc"
-"""
-    ctx.actions.run(busybox_sh(bb, script, zig, src, out.as_output(), exe.as_output()), category = "launcher_level_test")
-    return [DefaultInfo(default_output = out, sub_targets = {"bin": [DefaultInfo(default_output = exe)]})]
+    ctx.actions.run(
+        cmd_args(
+            ctx.attrs._zig_launch[RunInfo],
+            "zig",
+            "--busybox",
+            bb,
+            "--zig",
+            zig,
+            "--",
+            "cc",
+            "-target",
+            "x86_64-linux-musl",
+            "-static",
+            "-mcpu=baseline",
+            "-O2",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-I",
+            src,
+            "-o",
+            exe.as_output(),
+            cmd_args(src, format = "{}/level_test.c"),
+        ),
+        env = rerun_env(ctx),
+        category = "launcher_level_test_build",
+    )
+    # The program's report is shown whatever it decided; the target is red
+    # when it exits non-zero.
+    ctx.actions.run(
+        cmd_args(ctx.attrs._pkg_act[RunInfo], "level-run", out.as_output(), exe),
+        env = rerun_env(ctx),
+        category = "launcher_level_test",
+    )
+    return [DefaultInfo(default_output = out, sub_targets = {"bin": [DefaultInfo(default_output = exe)]}), rerun_info(ctx)]
 
 # Builds and runs level_test.c (remotely): the launcher's level function
 # against made-up CPUs. Building it fails on any wrong level. [bin] is the
@@ -224,8 +250,10 @@ launcher_level_test_rule = rule(
     attrs = {
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
         "_launcher_sources": attrs.dep(default = "komira//tools/build/package/launcher:sources"),
+        "_pkg_act": attrs.exec_dep(default = "komira//tools/build/package:pkg_act", providers = [RunInfo]),
         "_zig": attrs.exec_dep(default = "komira//tools/build/toolchains:zig"),
-    },
+        "_zig_launch": attrs.exec_dep(default = "komira//tools/build/mojo:zig_launch", providers = [RunInfo]),
+    } | RERUN_ATTRS,
 )
 
 # ---- package formats over a bundle ------------------------------------------
@@ -444,14 +472,21 @@ def _oci_image_impl(ctx):
             fail("{}: an image of a {} bundle; only linux-x86_64 (linux/amd64) is supported".format(ctx.label, b.platform))
         # komira_pack (zig): the bundle at /opt/<name>/.
         tool, category = [ctx.attrs._pack[RunInfo], "oci", "--bundle", b.dir], "komira_pack_oci"
-        name, version, guard = b.name, b.version, b.kcov_guard
+        name, version, guard, platform = b.name, b.version, b.kcov_guard, b.platform
+        # The release member is the bundle's program.
+        member, member_from = b.name, "the bundle's program"
     else:
         t = ctx.attrs.tree[OciTreeInfo]
         # komira_oci (zig): the tree at /.
         bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
         tool = [ctx.attrs._oci[RunInfo], "image", "--tree", t.dir, "--entrypoint", ctx.attrs.entrypoint, "--busybox", bb]
         category = "komira_oci_image"
-        name, version, guard = t.name, t.version, t.kcov_guard
+        # oci_tree takes only linux-x86_64 bundles, and the image is linux/amd64.
+        name, version, guard, platform = t.name, t.version, t.kcov_guard, "linux-x86_64"
+        # The release member is the image, not the tree (one tree can make
+        # several images): the last segment of its repository, as written.
+        member = ctx.attrs.repository.split("/")[-1]
+        member_from = "the last segment of the repository"
     if not regex_match("^[a-z0-9]+([._/-][a-z0-9]+)*$", ctx.attrs.repository):
         fail("{}: repository `{}` is not an image repository name".format(ctx.label, ctx.attrs.repository))
     base = ctx.attrs.base[OciBaseInfo]
@@ -505,6 +540,45 @@ def _oci_image_impl(ctx):
         ),
         category = "oci_layers",
     )
+    # [release]: the layout plus kci's artifact manifest, the directory a
+    # BUILD step copies into the release set (`--out <release_dir>/<name>`).
+    # The manifest is written from the digest the image action wrote, in the
+    # bytes kci's `render_artifact_manifest` writes (src/kci_artifact_manifest):
+    # type OCI, the member name (the bundle's program for a bundle image, the
+    # repository's last segment for a tree image), `file` the layout
+    # directory, `sha256` the image manifest digest's hex. kci's
+    # `verify_member` reads it back over the real hello_image and
+    # hello_root_image (src/kci_release_set/tests/test_oci_member.mojo).
+    manifest = ctx.actions.declare_output(ctx.label.name + ".release_manifest.json")
+    ctx.actions.run(
+        cmd_args(
+            ctx.attrs._pkg_act[RunInfo],
+            "oci-release-manifest",
+            "--out",
+            manifest.as_output(),
+            "--digest",
+            digest,
+            "--name",
+            member,
+            "--version",
+            version,
+            "--platform",
+            platform,
+            "--file",
+            layout.basename,
+            "--label",
+            str(ctx.label.raw_target()),
+            "--repo",
+            ctx.attrs.repository,
+            "--from",
+            member_from,
+        ),
+        category = "oci_release_manifest",
+    )
+    release = ctx.actions.copied_dir(ctx.label.name + ".release", {
+        "manifest.json": manifest,
+        layout.basename: layout,
+    })
     return [
         DefaultInfo(
             default_output = layout,
@@ -513,10 +587,26 @@ def _oci_image_impl(ctx):
                 "digest": [DefaultInfo(default_output = digest)],
                 "docker_archive": [DefaultInfo(default_output = archive)],
                 "layers": [DefaultInfo(default_output = layer_list)],
+                "release": [DefaultInfo(
+                    default_output = release,
+                    sub_targets = {"manifest": [DefaultInfo(default_output = manifest)]},
+                )],
             },
         ),
         OciImageInfo(layout = layout, layers = layer_list),
     ]
+
+# The artifact manifest of an image (`oci_image[release]`) is written by
+# `pkg_act oci-release-manifest` (tools/build/package/act/misc.zig): compact
+# JSON in the key order of kci's `render_artifact_manifest`, one trailing
+# newline. It refuses, naming the reason, a digest that is not `sha256:<64
+# lowercase hex>`, and a member name that is not a kci artifact name
+# ([a-z][a-z0-9_]*: the release set keys members by it), naming the image, its
+# repository and where the name came from. The name is refused, never
+# rewritten: a repository whose last segment has a hyphen or a dot
+# (`komira/oci-check`) is a valid image but has no `[release]`. The version and
+# the layout's name are plain (mojo_bundle, oci_tree and buck2 refuse anything
+# else), so nothing needs escaping.
 
 _oci_image = rule(
     impl = _oci_image_impl,
@@ -529,6 +619,7 @@ _oci_image = rule(
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
         "_oci": attrs.exec_dep(default = "komira//tools/build/package/oci:komira_oci", providers = [RunInfo]),
         "_pack": attrs.exec_dep(default = "komira//tools/build/package:komira_pack", providers = [RunInfo]),
+        "_pkg_act": attrs.exec_dep(default = "komira//tools/build/package:pkg_act", providers = [RunInfo]),
     },
 )
 
@@ -544,7 +635,14 @@ def oci_image(**kwargs):
     it `<repository>:<version>`). `[docker_archive]` is the same as one tar
     plus a Docker `manifest.json`, which `docker load` reads; `[digest]`
     holds the manifest digest; `[layers]` the digest of each layer of the
-    manifest, one per line, in order. Nothing is pushed.
+    manifest, one per line, in order. `[release]` is what a release set
+    holds: the layout and kci's artifact manifest (`manifest.json`: type
+    OCI, name the bundle's program for a `bundle` image and the last segment
+    of `repository` for a `tree` image, `file` the layout directory,
+    `sha256` the hex of `[digest]`); `[release][manifest]` is that manifest
+    alone. A name that is not a kci artifact name ([a-z][a-z0-9_]*, so no
+    hyphen or dot) fails building `[release]`, naming the image and its
+    repository; it is never rewritten. Nothing is pushed.
     """
     _oci_image(exec_compatible_with = LINUX_X86_64, **kwargs)
 

@@ -8,7 +8,8 @@
 #   - refusals: parallel lists of different lengths, null counts of another
 #     length, a binary running past the blob, a list count the bytes cannot
 #     hold, a truncated blob, a PageLocation missing a field, first rows that
-#     do not ascend, a list<bool> of another element type.
+#     do not ascend, a first page that does not start at row 0, a list<bool>
+#     of another element type.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_raises, assert_true
 
@@ -187,7 +188,11 @@ def test_refusals() raises:
     with assert_raises(contains="PageLocation without"):
         _ = parse_offset_index(_view(Span(no_size)))
 
-    var backwards = _offset_index([4, 10, 5, 14, 10, 0], False)
+    var late_start = _offset_index([4, 10, 3, 14, 10, 8], False)
+    with assert_raises(contains="does not start at row 0"):
+        _ = parse_offset_index(_view(Span(late_start)))
+
+    var backwards = _offset_index([4, 10, 0, 14, 10, 6, 24, 10, 2], False)
     with assert_raises(contains="do not ascend"):
         _ = parse_offset_index(_view(Span(backwards)))
 

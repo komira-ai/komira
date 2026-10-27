@@ -1,0 +1,18 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The persistent, arena-backed, reset-per-pull chunk container (`Chunk`,
+# `ChunkVector`, `ChunkView`) with a generation guard that catches a stale view.
+mojo_library(
+    name = "komira_chunk",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_bump_arena:komira_bump_arena",
+        "//src/komira_collections:komira_collections",
+    ],
+    test_srcs = [
+        "tests/test_chunk_container.mojo",
+        "tests/test_chunk_destroy_recreate_stress.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

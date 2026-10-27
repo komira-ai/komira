@@ -27,6 +27,7 @@ from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
 from komira_arrow.schema import SchemaBuilder
 from komira_fs.file_system import FileSystem
 from komira_parquet_api.metadata import ColumnChunk, FileMetaData
+from komira_parquet_api.types import FieldRepetitionType
 
 from .decode_helpers import field_from_schema_element
 from .file_reader import ParquetFileReader
@@ -104,6 +105,22 @@ def _require_page_index(chunk: ColumnChunk, what: String, rg_idx: Int, col_idx: 
         )
 
 
+def _require_flat_schema(meta: FileMetaData, what: String) raises:
+    """Every element after the root is a leaf that is not REPEATED, so a
+    chunk index is its schema element's index minus one and a page's first
+    row index is a row number."""
+    for i in range(1, len(meta.schema)):
+        ref e = meta.schema[i]
+        if e.num_children != 0:
+            raise Error(
+                what + ": the schema is not flat (" + e.name + " is a group)"
+            )
+        if e.repetition_type and e.repetition_type.value() == FieldRepetitionType.REPEATED:
+            raise Error(
+                what + ": the schema is not flat (" + e.name + " is repeated)"
+            )
+
+
 def _offset_index_of[FS: FileSystem](
     mut cache: ParquetPageIndexCache,
     reader: ParquetFileReader[FS],
@@ -117,6 +134,7 @@ def _offset_index_of[FS: FileSystem](
     cache."""
     if rg_idx < 0 or rg_idx >= len(meta.row_groups):
         raise Error(what + ": row group " + String(rg_idx) + " is out of range")
+    _require_flat_schema(meta, what)
     ref rg = meta.row_groups[rg_idx]
     if col_idx < 0 or col_idx >= len(rg.columns) or col_idx + 1 >= len(meta.schema):
         raise Error(what + ": column " + String(col_idx) + " is not a leaf")

@@ -6,8 +6,7 @@
 # a time into fixed per-worker buffers and fold each chunk. `SubrgAggPlan` is
 # what that decode reads: the projected columns (keys, aggregate inputs and
 # filter columns) in the chunk batch's column order, their footer column
-# indices and Arrow types, and which of them are the group keys. The band
-# producer reads the same plan.
+# indices and Arrow types, and which of them are the group keys.
 #
 # The chunk size: `CHUNK_ROWS` rows keep a worker's fixed code and value
 # buffers (`(CHUNK_ROWS + SUBRG_MAX_RUN) * 4` bytes) small enough for the

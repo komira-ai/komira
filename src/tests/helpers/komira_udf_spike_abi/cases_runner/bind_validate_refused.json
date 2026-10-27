@@ -1,0 +1,13 @@
+{
+ "name": "bind_validate_refused",
+ "defect": "a deliberate mismatch: the runner binds a case's UDF as the host admits it, validate first, and must fail this case there",
+ "run": "call_batch",
+ "entry": "identity",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "descriptor": {"entry": "other"},
+ "input": {"length": 1, "columns": [{"type": "int64", "values": [1]}]},
+ "expect": {"status": "OK"},
+ "runner_fails_with": "validate: ERR_DESCRIPTOR"
+}

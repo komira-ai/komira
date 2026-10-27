@@ -57,7 +57,7 @@ struct ProcessEnv(EnvReader, Movable):
         try:
             value = SecretValue(Span(buf)[:n])
         except e:
-            zeroize_inline_array(buf)
-            raise e^
+            zeroize_inline_array(buf)  # cov: unreachable SecretValue raises only past MAX_SECRET_LEN bytes, and _read_env_into returned n <= MAX_SECRET_LEN (it raises past it)
+            raise e^  # cov: unreachable SecretValue raises only past MAX_SECRET_LEN bytes, and _read_env_into returned n <= MAX_SECRET_LEN (it raises past it)
         zeroize_inline_array(buf)
         return value^

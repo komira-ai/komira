@@ -1,0 +1,14 @@
+{
+ "name": "nested_scalar_raises_while_frame_waits",
+ "defect": "the run error names the waiting frame, or its own status wins, when the nested scalar raises (design 4.3: the first failure fixes the run error; the pull gets EIO with its message)",
+ "run": "nested_frame",
+ "entry": "running_sum",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "nested": {"entry": "raise_on_row_3", "shape": "SCALAR", "args": [{"type": "int64", "nullable": true}], "result": [{"type": "int64", "nullable": true}]},
+ "levels": 1,
+ "inputs": [{"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]}, {"length": 4, "columns": [{"type": "int64", "values": [0, 1, 2, 3]}]}],
+ "expect": {"status": "ERR_RAISED", "run_error": "UDF_RAISED", "row": 3, "message_contains": "raise_on_row_3", "eio_at_least": 1, "frame_carries_failure": true, "batches": [{"length": 2, "columns": [{"type": "int64", "values": [1, 3]}]}]}
+}

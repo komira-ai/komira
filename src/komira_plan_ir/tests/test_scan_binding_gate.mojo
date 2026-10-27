@@ -58,14 +58,17 @@ from komira_plan_expr.expr import (
 from komira_plan_expr.partition_expr import PartitionExpr
 from komira_plan_expr.partition_frame import PartitionFrame
 from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_expr.udf_type import UdfType
 from komira_plan_ir.logical_plan import (
     AsofTolerance,
     LogicalPlan,
     ASOF_BACKWARD,
+    EXCHANGE_KIND_GATHER,
     JOIN_INNER,
     PLAN_SCAN,
     PLAN_TAG_COUNT,
     PLAN_VIEW_REF,
+    plan_tag_is_retired,
     PLAN_CSE_REF,
     SOURCE_PARQUET,
 )
@@ -403,6 +406,23 @@ def test_single_child_nodes_without_expressions() raises:
     _gate_plan(ptopn, 1, _hs(6))
     var cast = LogicalPlan.cast_to_varchar(_bscan(7))
     _gate_plan(cast, 1, _hs(7))
+    # The exchange arm descends to its child (a pass-through `return 0` would
+    # leave the binding-backed leaf below it unchecked).
+    var ex = LogicalPlan.exchange(_bscan(8), EXCHANGE_KIND_GATHER)
+    _gate_plan(ex, 1, _hs(8))
+
+
+def test_map_batches_walks_its_group_keys_and_child_and_a_step_is_a_leaf() raises:
+    """The frame UDF node descends its `group_by` (a subquery there holds a
+    leaf) and its child; a step has no child and no expression. Catches a
+    frame arm that skips either (a leaf under it would go unchecked) and a
+    step arm that walks something that is not there."""
+    var gb = List[Expr]()
+    gb.append(_subq(9))
+    var mb = LogicalPlan.map_batches(_bscan(10), 0, gb^, _schema())
+    _gate_plan(mb, 2, _hs(9, 10))
+    var st = LogicalPlan.step(0, List[ScalarValue](), _schema())
+    _gate_plan(st, 0, _hs())
 
 
 def test_join_walks_both_sides_and_the_residual() raises:
@@ -468,8 +488,11 @@ def test_a_deep_tree_is_walked_end_to_end() raises:
 
 def test_every_payloadless_plan_node_is_answered_zero() raises:
     """A node whose tag has an arm but whose payload is absent is answered 0,
-    not dereferenced. Every tag below `PLAN_TAG_COUNT`."""
+    not dereferenced. Every live tag below `PLAN_TAG_COUNT` (the retired ids
+    16 and 17 are refused, below)."""
     for t in range(PLAN_TAG_COUNT):
+        if plan_tag_is_retired(UInt8(t)):
+            continue
         var plan = LogicalPlan(UInt8(t), _schema())
         assert_equal(check_plan_scan_bindings(_clean(), plan), 0, String(t))
 
@@ -489,6 +512,11 @@ def test_a_plan_tag_with_no_arm_is_refused_by_name() raises:
     var far = LogicalPlan(UInt8(255), _schema())
     with assert_raises(contains="plan tag 255 (tag#255). A tag with no arm"):
         _ = check_plan_scan_bindings(_clean(), far)
+    # A RETIRED id lies below the count and is refused like any unmodelled
+    # one: no node may carry it.
+    var retired = LogicalPlan(UInt8(17), _schema())
+    with assert_raises(contains="plan tag 17 (tag#17)."):
+        _ = check_plan_scan_bindings(_clean(), retired)
     # Under a filter, the refusal reaches the caller of the outer walk.
     var under = LogicalPlan.filter(_col(), LogicalPlan(UInt8(200), _schema()))
     with assert_raises(contains="plan tag 200 (tag#200)."):
@@ -564,6 +592,17 @@ def test_n_child_string_fn_walks_every_argument() raises:
     args.append(_col())
     args.append(_subq(3))
     _gate_expr(Expr.concat(args^), 2, _hs(1, 3))
+
+
+def test_udf_apply_walks_every_argument() raises:
+    """A call of a `UdfRef`: a subquery behind its first and last argument.
+    Catches an arm that walks only some arguments, or none."""
+    var args = List[Expr]()
+    args.append(_subq(1))
+    args.append(_col())
+    args.append(_subq(3))
+    var t = UdfType("r", ArrowType.INT64, DType.int64, True)
+    _gate_expr(Expr.udf_apply(0, t^, args^), 2, _hs(1, 3))
 
 
 def test_two_child_expressions_descend_both_sides() raises:

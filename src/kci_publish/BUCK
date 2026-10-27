@@ -112,6 +112,15 @@ mojo_library(
         # the test double's contract; HttpChannelTransport over a scripted
         # connection; UsleepSleeper
         "tests/test_publish_scripted_channel.mojo",
+        # THE SPLIT with an empty release revision (exit 5, git never asked);
+        # run_publish's UnreadHistory (exit 5, its reason named)
+        "tests/test_publish_split_unread.mojo",
+        # a PUBLISH into a cell: the set's images with the set's digest, CONDA
+        # members skipped; no image, another revision, another set hash and a
+        # flipped layer byte each refused
+        "tests/test_publish_cell_release.mojo",
     ],
+    # komira_oci writes the test's image layout
+    test_deps = ["//src/komira_oci:komira_oci"],
     visibility = ["PUBLIC"],
 )

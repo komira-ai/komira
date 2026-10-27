@@ -241,5 +241,19 @@ def test_a_file_without_a_page_index() raises:
     assert_false(s.is_pruned_empty)
 
 
+def test_a_column_with_no_pages_is_read_whole() raises:
+    var b = _bundle()
+    b.add("z", 2, _ci(List[Int](), List[Int]()), _oi(0))
+    var s = evaluate_page_filter(Expr.binary(BIN_AND, _cmp(BIN_GE, "z", 0), _cmp(BIN_GE, "x", 20)), b)
+    assert_false(s.is_pruned_empty)
+    assert_true(s.find("z") < 0)
+    _assert_picks(s, "x", [2])
+    var only = PageIndexBundle()
+    only.add("z", 0, _ci(List[Int](), List[Int]()), _oi(0))
+    var alone = evaluate_page_filter(_cmp(BIN_GE, "z", 0), only)
+    assert_false(alone.is_pruned_empty)
+    assert_equal(len(alone.entries), 0)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

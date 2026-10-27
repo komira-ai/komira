@@ -167,15 +167,8 @@ def decode_column_with_levels(
         var is_v2 = hdr.type == PageType.DATA_PAGE_V2
         var rep_len = hdr.rep_levels_byte_length if is_v2 else 0
         var def_len = hdr.def_levels_byte_length if is_v2 else 0
-        if rep_len < 0 or def_len < 0 or rep_len + def_len > page_size:
-            raise Error(
-                "parquet: corrupt DATA_PAGE_V2 header: level sections of "
-                + String(rep_len)
-                + " + "
-                + String(def_len)
-                + " bytes in a page of "
-                + String(page_size)
-            )
+        # `_parse_page_header` has checked that the level sections are not
+        # negative and fit the page (compressed and decoded).
         var page_codec = codec
         if is_v2 and not hdr.is_compressed:
             page_codec = CompressionCodec.UNCOMPRESSED
@@ -371,12 +364,12 @@ def _append_dict_values(
         var r = dec.resolve_float64(idx)
         for i in range(r.length):
             vals.floats64.append(r.get_typed[Float64](i))
-    elif ptype == ParquetType.BYTE_ARRAY:
+    else:
+        # BYTE_ARRAY: `_init_dict` admits no other type, so the dictionary
+        # page that came first was one of the five above.
         vals.dict_strings = True
         for i in range(idx.length):
             vals.dict_codes.append(idx.get_typed[Int32](i))
-    else:
-        raise Error("nested_decoder: unsupported dictionary type " + String(ptype))
 
 
 def _append_plain_values(
