@@ -4,7 +4,8 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_binary", "mojo_test")
 ```
 
-The rules are in [`defs.bzl`](defs.bzl); their providers in
+The rules are in [`defs.bzl`](defs.bzl) (`mojo_shared_lib` in [`shared_lib.bzl`](shared_lib.bzl),
+the compile and link core they share in [`compile.bzl`](compile.bzl)); their providers in
 [`providers.bzl`](providers.bzl). Every action runs the hermetic toolchain
 ([`toolchains//:mojo`](../toolchains/README.md)) through the compile wrapper,
 [`tools/mojo_compile.zig`](tools/mojo_compile.zig) on Linux (its header is
@@ -1139,7 +1140,7 @@ rules, sub-targets, scope and fixtures are in [coverage.md](coverage.md).
 | `MEMORY CAP: killed <label> at <n> MiB resident, over its cap of <cap> MiB` | [`gate mojo --mem-cap-mib`](../run/README.md) | the test's resident memory passed its memory cap and it was killed (after `GATED TEST FAILED: <label> (exit 137)`) |
 | `TEST TIME LIMIT: killed <label> after <n> s, under the test runner's timeout of <m> s (komira.test_timeout_s)` | [`gate mojo --deadline-s`](../run/README.md) | `buck2 test` of a `mojo_test` ran to 60 s short of the test runner's timeout and was killed (after `GATED TEST FAILED: <label> (exit 137)`); see [Time limits](#time-limits) |
 | `[komira] test_timeout_s = <v> is not a whole number of seconds` / `must be over 60 s` | [`test_limit.bzl`](test_limit.bzl) | the root `.buckconfig` (or `-c`) states a test timeout a `mojo_test` cannot be limited under |
-| `<target>: dep <dep> provides neither MojoInfo (a Mojo package) nor MergedLinkInfo (a C/C++ library)` | [`defs.bzl`](defs.bzl) | a `deps` entry is neither a `mojo_library` nor a C/C++ library |
+| `<target>: dep <dep> provides neither MojoInfo (a Mojo package) nor MergedLinkInfo (a C/C++ library)` | [`compile.bzl`](compile.bzl) | a `deps` entry is neither a `mojo_library` nor a C/C++ library |
 | `cxx toolchain: <tool> is not provided` | [`cxx.bzl`](cxx.bzl) | a `cxx_library` reached a prelude feature that needs a host tool the toolchain does not provide |
 | `mojo_doc_json: <target>: the JSON differs from its golden <file>` | [`doc.bzl`](doc.bzl) | the library's `mojo doc` JSON changed; if on purpose, replace the golden with `[raw]` |
 | ``mojo_doc_json: <target>: the JSON declares no `<path>` `` | [`doc.bzl`](doc.bzl) | a `symbols` entry names no declaration of the JSON (or a private one, which `mojo doc` leaves out) |
