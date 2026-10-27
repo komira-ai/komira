@@ -233,13 +233,13 @@ def test_apply_insert_modify_remove_correctness() raises:
     # Batch: insert 1(alice), insert 2(bob), insert 3(carol), then modify
     # 1(alice->alicia), remove 2. Net live: 1=alicia, 3=carol.
     var recs = List[ChangeRecord]()
-    recs.append(_insert(Int64(1), String("alice"), String("seq-0000000001")))
-    recs.append(_insert(Int64(2), String("bob"), String("seq-0000000002")))
-    recs.append(_insert(Int64(3), String("carol"), String("seq-0000000003")))
+    recs.append(_insert(Int64(1), String("alice"), String("8")))
+    recs.append(_insert(Int64(2), String("bob"), String("9")))
+    recs.append(_insert(Int64(3), String("carol"), String("10")))
     recs.append(
-        _modify(Int64(1), String("alice"), String("alicia"), String("seq-0000000004"))
+        _modify(Int64(1), String("alice"), String("alicia"), String("11"))
     )
-    recs.append(_remove(Int64(2), String("bob"), String("seq-0000000005")))
+    recs.append(_remove(Int64(2), String("bob"), String("12")))
     var batch = ChangeBatch(recs^, String("next"), False)
 
     var positions = ShardPositions()
@@ -259,7 +259,7 @@ def test_apply_insert_modify_remove_correctness() raises:
     # the position advanced to the batch's max sequence.
     assert_equal(
         positions.get(String("shardId-A")),
-        String("seq-0000000005"),
+        String("12"),
         "position advanced to the batch's last applied sequence",
     )
 
@@ -287,11 +287,11 @@ def test_exactly_once_across_a_crash() raises:
     # A batch of 3 inserts + 1 modify.
     def _make_batch() raises -> ChangeBatch:
         var recs = List[ChangeRecord]()
-        recs.append(_insert(Int64(1), String("a"), String("seq-0000000001")))
-        recs.append(_insert(Int64(2), String("b"), String("seq-0000000002")))
-        recs.append(_insert(Int64(3), String("c"), String("seq-0000000003")))
+        recs.append(_insert(Int64(1), String("a"), String("8")))
+        recs.append(_insert(Int64(2), String("b"), String("9")))
+        recs.append(_insert(Int64(3), String("c"), String("10")))
         recs.append(
-            _modify(Int64(1), String("a"), String("A"), String("seq-0000000004"))
+            _modify(Int64(1), String("a"), String("A"), String("11"))
         )
         return ChangeBatch(recs^, String("next"), False)
 
@@ -321,7 +321,7 @@ def test_exactly_once_across_a_crash() raises:
     var pos2 = ShardPositions.from_summary_kvs(writer2.read_current_summary())
     assert_equal(
         pos2.get(String("shardId-A")),
-        String("seq-0000000004"),
+        String("11"),
         "resume position DERIVED from committed snapshot summary",
     )
     var replay_stats = apply_batch(
@@ -367,7 +367,7 @@ def test_crash_before_commit_reapplies() raises:
     )
     var pos1 = ShardPositions.from_summary_kvs(writer1.read_current_summary())
     var recs1 = List[ChangeRecord]()
-    recs1.append(_insert(Int64(1), String("a"), String("seq-0000000001")))
+    recs1.append(_insert(Int64(1), String("a"), String("8")))
     _ = apply_batch(
         writer1, config, String("shardId-A"), ChangeBatch(recs1^, String("n"), False), pos1
     )
@@ -380,13 +380,13 @@ def test_crash_before_commit_reapplies() raises:
     var pos2 = ShardPositions.from_summary_kvs(writer2.read_current_summary())
     assert_equal(
         pos2.get(String("shardId-A")),
-        String("seq-0000000001"),
+        String("8"),
         "resume from batch-1's committed position",
     )
     # batch 2 (id=2, id=3) — all sequences > the committed position, so all apply.
     var recs2 = List[ChangeRecord]()
-    recs2.append(_insert(Int64(2), String("b"), String("seq-0000000002")))
-    recs2.append(_insert(Int64(3), String("c"), String("seq-0000000003")))
+    recs2.append(_insert(Int64(2), String("b"), String("9")))
+    recs2.append(_insert(Int64(3), String("c"), String("10")))
     var stats2 = apply_batch(
         writer2, config, String("shardId-A"), ChangeBatch(recs2^, String("n"), False), pos2
     )
@@ -425,10 +425,10 @@ def test_multishard_applies_all_shards() raises:
     shard_ids.append(String("shardId-B"))
     var batches = List[ChangeBatch]()
     var ra = List[ChangeRecord]()
-    ra.append(_insert(Int64(1), String("a"), String("seq-A-0000000001")))
+    ra.append(_insert(Int64(1), String("a"), String("9")))
     batches.append(ChangeBatch(ra^, String("na"), False))
     var rb = List[ChangeRecord]()
-    rb.append(_insert(Int64(2), String("b"), String("seq-B-0000000009")))
+    rb.append(_insert(Int64(2), String("b"), String("100")))
     batches.append(ChangeBatch(rb^, String("nb"), False))
 
     var listener = ScriptedMultiShardListener(shard_ids^, batches^)
@@ -445,12 +445,12 @@ def test_multishard_applies_all_shards() raises:
     var summary = ShardPositions.from_summary_kvs(writer.read_current_summary())
     assert_equal(
         summary.get(String("shardId-A")),
-        String("seq-A-0000000001"),
+        String("9"),
         "shard-A position stamped",
     )
     assert_equal(
         summary.get(String("shardId-B")),
-        String("seq-B-0000000009"),
+        String("100"),
         "shard-B position stamped (independent per-shard)",
     )
 
@@ -461,10 +461,10 @@ def test_multishard_applies_all_shards() raises:
     shard_ids2.append(String("shardId-B"))
     var batches2 = List[ChangeBatch]()
     var ra2 = List[ChangeRecord]()
-    ra2.append(_insert(Int64(1), String("a"), String("seq-A-0000000001")))
+    ra2.append(_insert(Int64(1), String("a"), String("9")))
     batches2.append(ChangeBatch(ra2^, String("na"), False))
     var rb2 = List[ChangeRecord]()
-    rb2.append(_insert(Int64(2), String("b"), String("seq-B-0000000009")))
+    rb2.append(_insert(Int64(2), String("b"), String("100")))
     batches2.append(ChangeBatch(rb2^, String("nb"), False))
     var listener2 = ScriptedMultiShardListener(shard_ids2^, batches2^)
     var stats2 = run_ingest_pass(listener2, writer, config)
@@ -474,12 +474,12 @@ def test_multishard_applies_all_shards() raises:
     # from the committed summary).
     assert_equal(
         listener2.opened_after_at(0),
-        String("seq-A-0000000001"),
+        String("9"),
         "shard-A opened AFTER its committed position",
     )
     assert_equal(
         listener2.opened_after_at(1),
-        String("seq-B-0000000009"),
+        String("100"),
         "shard-B opened AFTER its committed position",
     )
 

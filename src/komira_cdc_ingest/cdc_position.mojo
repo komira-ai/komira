@@ -153,7 +153,7 @@ def derive_positions_from_table[
 
 
 # =============================================================================
-# Sequence-number comparison (fixed-width zero-padded decimal strings).
+# Sequence-number comparison (decimal strings of any width).
 # =============================================================================
 
 

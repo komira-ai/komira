@@ -170,10 +170,14 @@ def apply_batch[
     commit's fresh append alive. That is exactly upsert semantics.
 
     `positions` is updated IN PLACE to the batch's max applied sequence for
-    `shard_id`; on commit, the FULL positions map is stamped so every shard's
-    resume point is present in the latest snapshot. If nothing remains after the
-    idempotence filter, NO commit is issued (an empty batch or a fully-replayed
-    batch is a no-op) and `positions` is unchanged."""
+    `shard_id` only AFTER the commit succeeds; the FULL positions map is stamped
+    so every shard's resume point is present in the latest snapshot. If the
+    commit raises (a lost compare-and-swap, a store error), `positions` is left
+    unchanged and the same batch can be applied again. If nothing remains after
+    the idempotence filter, NO commit is issued (an empty batch or a
+    fully-replayed batch is a no-op) and `positions` is unchanged. Raises on a
+    record that is not full-schema-width, before any file is written for the
+    commit."""
     var committed_pos = positions.get(shard_id)
 
     var skipped = 0
@@ -277,13 +281,17 @@ def apply_batch[
             )
         )
 
-    # ---- advance the in-memory position + stamp the FULL map into the summary
-    positions.set(shard_id, String(max_applied))
-    var extra = positions.to_summary_kvs()
+    # ---- stamp the FULL map (with the advanced shard) into the summary. The
+    # caller's `positions` is replaced only after the commit succeeds, so a
+    # commit that raises leaves it unchanged and the same batch can be retried.
+    var next = positions.copy()
+    next.set(shard_id, String(max_applied))
+    var extra = next.to_summary_kvs()
 
     var result = writer.commit_with_summary(
         data_files^, delete_files^, extra
     )
+    positions = next^
     return ApplyStats(appended, deleted, skipped, True, result.version)
 
 

@@ -124,7 +124,7 @@ def run_ingest_pass[
 
 
 # =============================================================================
-# run_ingest_loop — bounded pass loop (the binary's inner loop, testable).
+# run_ingest_loop — bounded pass loop (a bounded loop over passes, testable).
 # =============================================================================
 
 
@@ -139,8 +139,8 @@ def run_ingest_loop[
     """Run up to `max_passes` ingest passes, returning the AGGREGATE stats.
 
     A pass that produces NO commit (every shard idle / fully replayed) STOPS the
-    loop early — the binary sleeps between idle waves; a bounded `max_passes`
-    keeps a test deterministic (and caps the binary's work per invocation). Each
+    loop early; the caller decides how to wait between idle waves. A bounded
+    `max_passes` keeps the work per call finite. Each
     pass re-derives positions from the committed table, so the loop is crash-safe
     across passes (a re-run is a no-op once caught up)."""
     var total = PassStats(0, 0, 0, 0, 0)

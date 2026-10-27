@@ -22,6 +22,15 @@ the next pass the resume point is read back from the latest snapshot, with
 finds the position already in the table and skips the replayed records; a crash
 before a commit re-applies the batch from the last committed position.
 
+`apply_batch` advances the caller's `ShardPositions` only after its commit
+succeeds. If the commit raises (a lost compare-and-swap, a store error), the
+positions are unchanged and the same batch can be applied again.
+
+One ingest process writes a table: the driver polls the shards one after
+another. Concurrent writers to the table are ordered by the Iceberg
+compare-and-swap on the metadata file, and a writer that loses it gets an error
+from `apply_batch`.
+
 Sequence numbers are bare decimal strings that may exceed Int64 and are not
 zero-padded, so `seq_gt` orders them by numeric magnitude.
 

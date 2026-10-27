@@ -314,8 +314,8 @@ def test_nullable_long_required_value_alongside_null_write_no_raise() raises:
     null matches its declared tag; the value is a real LONG cell). This isolates
     the no-false-raise check from the read-back path.
 
-    This test asserts only the WRITE-side guarantee (no false raise); it does
-    not read the mixed values back."""
+    It then reads the file back: the leading null stays NULL and the later
+    value reads back as 99."""
     var schema = IcebergSchema(0)
     schema.add(String("id"), ICE_T_LONG, required=True)
     schema.add(String("score"), ICE_T_LONG, required=False)  # NULLABLE
@@ -334,6 +334,11 @@ def test_nullable_long_required_value_alongside_null_write_no_raise() raises:
     # representable in the declared column types.
     var data_bytes = build_parquet_data_file(schema, rows)
     assert_true(len(data_bytes) > 0, "nullable-mixed column wrote (no false raise)")
+    var decoded = read_parquet_data_file(data_bytes, col_types_of(schema))
+    assert_equal(len(decoded), 2, "two rows round-tripped")
+    assert_true(decoded[0][1].is_null(), "leading null reads back NULL")
+    assert_false(decoded[1][1].is_null(), "later real value is non-null")
+    assert_equal(decoded[1][1].as_long(), Int64(99), "later real value is 99")
 
 
 def main() raises:
