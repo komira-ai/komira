@@ -2,7 +2,12 @@
 # test_span_microbench.mojo — span producer hot path, counters not clocks
 # =============================================================================
 #
-# WHAT THIS TEST GATES. 8 threads each emit 10,000 start_span/end_span pairs on
+# WHAT THIS TEST GATES. It does not gate hot-path cost: that belongs to the
+# benchmark. A slow path that still pushes two packets per pair (a lock or an
+# allocation per span) passes here. What it gates is that the hot path does the
+# right work under 8 concurrent producers.
+#
+# 8 threads each emit 10,000 start_span/end_span pairs on
 # their own ring of one shared Tracer. The properties of the hot path that the
 # old "< 5000 ns/op" ceiling stood in for are asserted as counts, which do not
 # depend on the builder's speed or load:
@@ -67,7 +72,9 @@ comptime WARMUP_ITERATIONS = 100
 
 def run_microbench() raises:
     """Runs the wave and asserts the hot-path counters. Reads no clock."""
-    # Sized so one wave never fills a ring: no block, no drop.
+    # Sized to hold a whole wave with room to spare. The exact packet count is
+    # asserted below, so a doubled push is seen by the ring_size check; the
+    # blocked and dropped counts only report a ring that filled anyway.
     var tracer = Tracer(
         num_workers=N_WORKERS, ring_capacity=ITERATIONS_PER_WORKER * 4
     )

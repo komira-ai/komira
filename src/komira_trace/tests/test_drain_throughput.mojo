@@ -32,16 +32,19 @@ from komira_trace.testing import MockClock
 # A drain that loses, duplicates or mis-attributes a record fails the test no
 # matter how fast it is.
 #
-# Two counters stand in for the old events/sec floor, which depended on the
-# builder's speed:
+# A stalled drain is caught by the build action's timeout, not by this test:
+# the old events/sec floor was a speed check and is gone. The counters below
+# are exact counts written by the producers, the ring and the table, not by
+# the test:
 #
 #   - No producer blocks or drops: after the fork_join wave every worker's ring
 #     holds exactly 2 * EVENTS_PER_WORKER packets and reports zero blocked and
 #     zero dropped pushes, so a producer that stalled on a full ring (or lost a
 #     packet) fails here.
 #   - The drain's OPEN/CLOSE join is linear: `Tracer.join_probes()` equals the
-#     number of CLOSE packets. A join that scans the records once per CLOSE
-#     (5e7 comparisons for these 10,000 spans) probes far more often. The
+#     number of CLOSE packets. The table counts each record read as a probe, so
+#     a join that scans the records once per CLOSE (5e7 comparisons for these
+#     10,000 spans) probes far more often. The
 #     growth law is also gated at two sizes by test_drain_join_scales.mojo.
 #
 # The performance target belongs to the sustained benchmark.

@@ -5,18 +5,22 @@
 # WHAT THIS TEST GATES. The drain (`drain_into_capture`, and `drain_into_jsonl`
 # in production) joins each CLOSE packet to its OPEN record by span id. One
 # worker drains N1 = 4,096 spans and, on a second Tracer, N2 = 16 * N1 = 65,536
-# spans. The test reads `Tracer.join_probes()`, the number of span records the
-# join examined to resolve CLOSE packets, and asserts:
+# spans. The test reads `Tracer.join_probes()`, the probes the drain's
+# `SpanJoinTable` made, and asserts probes == n for each size: the indexed join
+# costs one probe per CLOSE.
 #
-#   - probes == n for each size: the indexed join costs one probe per CLOSE;
-#   - probes(N2) == 16 * probes(N1) exactly.
-#
-# A join that scans the records once per CLOSE examines about n^2 / 2 records
-# (8.4e6 at N1, 2.1e9 at N2), so every assert fails on it. Nothing here reads a
-# clock: the counts do not depend on the builder's speed or load.
+# WHO COUNTS. The table (span_join_table.mojo) counts, not the join: its
+# records are reachable only through `close` (one probe) and `record_at` (one
+# probe per record read). A join that scans the records once per CLOSE has to
+# read them through `record_at`, so it makes about n^2 / 2 counted probes
+# (8.4e6 at N1, 2.1e9 at N2) without anyone remembering to bump a counter.
+# test_span_join_table.mojo gates the table's counting itself. Nothing here
+# reads a clock: the counts do not depend on the builder's speed or load.
 #
 # DEFECT IT CATCHES: a per-CLOSE linear scan over the records (the join this
-# package shipped before the Dict index). Every drained record is also checked
+# package shipped before the index). A scan that bypassed the table's
+# accessors by touching its private fields is not seen; review owns that.
+# Every drained record is also checked
 # closed, with its own span id, so a join that patches the wrong record fails
 # here too.
 # =============================================================================
@@ -31,7 +35,6 @@ from komira_trace.span_record import SPAN_STATUS_CLOSED
 
 comptime N1 = 4_096
 comptime N2 = 65_536
-comptime GROWTH = N2 // N1  # 16
 # One OPEN + one CLOSE packet per span; the ring must hold every packet of the
 # larger run (no drop, or the join would see fewer packets than emitted).
 comptime RING_CAPACITY = 2 * N2
@@ -70,11 +73,9 @@ def test_drain_join_is_linear() raises:
     var p2 = _drain_probes(N2)
     print("  probes(N1 =", N1, ") =", p1)
     print("  probes(N2 =", N2, ") =", p2)
-    print("  growth =", Float64(p2) / Float64(p1), "(linear ", GROWTH, ", quadratic ", GROWTH * GROWTH, ")")
     # One probe per CLOSE packet, one CLOSE per span.
     assert_equal(p1, N1, "the join probes once per CLOSE at N1")
     assert_equal(p2, N2, "the join probes once per CLOSE at N2")
-    assert_equal(p2, GROWTH * p1, "the join's work grows linearly with spans")
     print("  test_drain_join_is_linear PASS")
 
 
