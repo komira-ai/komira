@@ -66,6 +66,7 @@ review.
 | [`komira_name_registry`](../src/komira_name_registry/) | interned names: a compile-time FNV-1a id for a string literal (and the same id computed at run time), and a fixed-capacity table that maps an id back to its name. |
 | [`komira_spsc_ring`](../src/komira_spsc_ring/) | one bounded single-producer / single-consumer ring, `SpscRing[T]`. |
 | [`komira_fork_join`](../src/komira_fork_join/) | run one body on `n` real threads and return only after every thread has exited. |
+| [`komira_so`](../src/komira_so/) | the C ABI of komira's one shared library, `libkomira`: the status codes, the ABI version (`major * 1000 + minor`), the context handle's `Session` (the last error text) and the exports `komira_abi_version`, `komira_ctx_new`, `komira_ctx_free` and `komira_last_error`, which returns its text through a two-call buffer protocol. The skeleton: no engine, source or plan call is exported yet. Depends on nothing outside the package. |
 
 ### Engine
 
@@ -563,7 +564,7 @@ family's design doc arrives with its libraries
 | agents | MCP and local models (komira_mcp_server, komira_localmodel). |
 | deploy | the DEPLOY step (`kci_release_machine` refuses it today) and kci's adapters for real clouds (the clouds in `src/` are the fakes). |
 | message broker | the Kafka server's connection handling and request dispatch (`komira_kafka_server` holds the wire codec). |
-| packaging | the shared-library ABI (komira_so). The packaging rules ([tools/build/package](../tools/build/package/README.md)) and the release machine ([release/](../release/)) are here. |
+| packaging | the rest of the shared-library ABI: `komira_so` holds only its skeleton (version, context, last error). The packaging rules ([tools/build/package](../tools/build/package/README.md)) and the release machine ([release/](../release/)) are here. |
 
 ## Conventions
 
