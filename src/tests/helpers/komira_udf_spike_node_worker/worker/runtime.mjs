@@ -12,6 +12,7 @@ import path from 'node:path';
 import { batchParts, readBatch, readMessages, readSchema } from './arrow_io.mjs';
 import { ST, UdfError, column, raised, row, rowShape, scalar } from './calls.mjs';
 import { describeCorrupt, refuseCorrupt, replyCorrupt } from './corrupt.mjs';
+import { DESCRIPTOR_VERSION, check } from './descriptor.mjs';
 import { Frame, Groups } from './frames.mjs';
 import { OP, WIRE_VERSION, reply, replyError, replyU64 } from './wire.mjs';
 
@@ -21,18 +22,17 @@ const SHAPE = { 1: 'SCALAR', 2: 'ROW', 4: 'MAP_BATCHES_COLUMN', 8: 'MAP_BATCHES_
 const SHAPES = 1 | 2 | 4 | 8 | 32 | 64 | 128; // all but MAP_BATCHES_FRAME_GROUPED
 const ENTRY = /^([A-Za-z0-9_][A-Za-z0-9_.-]*\.m?js)#([A-Za-z_$][A-Za-z0-9_$]*)$/;
 
-// The caps describe answers, in komira_udf_capabilities order.
+// The caps describe answers, in komira_udf_capabilities order (design
+// section 4.2: what the runtime can do, nothing about how it executes).
+// No feature bit: the proxy contains crashes and stops user code by force,
+// but the corpus cases that would hold it to CONTAINS_CRASHES and
+// FORCED_STOP are not written yet, so it claims neither.
 const CAPS = [
-  0, // max_descriptor_version
+  DESCRIPTOR_VERSION, // max_descriptor_version
   SHAPES,
-  2, // threading: CONTEXT_PER_THREAD (one worker per engine thread)
-  0, // thread_affine
-  2, // transports: WORKER
-  1, // hosting: EMBEDDED (node is the launcher; the runtime brings it)
   1, // devices: CPU
   0, // features
   2, // udf_class: MANAGED
-  0, // global_lock
 ];
 const RUNTIME_ID = 'komira-test/node';
 
@@ -64,8 +64,9 @@ export class Runtime {
     this.stats = { calls: 0, rows: 0, decode_ns: 0n, run_ns: 0n, encode_ns: 0n, idle_ns: 0n };
   }
 
-  // The spec a VALIDATE or LOAD body carries, checked as validate does:
-  // from the descriptor, the shape, the types and the bundle's text alone.
+  // The spec a VALIDATE or LOAD body carries, checked from the spec alone:
+  // its form, shape and entry. validate adds the descriptor (check, design
+  // section 3.1) and opens no code; load opens the bundle (code).
   spec(body) {
     let msgs;
     let args;
@@ -93,9 +94,6 @@ export class Runtime {
     };
     if (s.form === 0) throw new UdfError(ST.DESCRIPTOR, 'the code form is CODE_FORM_UNSPECIFIED');
     if (s.form !== 2) throw new UdfError(ST.UNSUPPORTED, `code form ${s.form} is not built here; this runtime loads BUNDLE only`);
-    if (s.descriptorVersion > CAPS[0])
-      throw new UdfError(ST.DESCRIPTOR, `descriptor_version ${s.descriptorVersion} is newer than ${CAPS[0]}, the newest read here`);
-    if (s.descriptor !== '') throw new UdfError(ST.DESCRIPTOR, 'descriptor version 0 is empty; these bytes are not canonical');
     if ((s.shapeBit & SHAPES) === 0 || (s.shapeBit & (s.shapeBit - 1)) !== 0)
       throw new UdfError(ST.UNSUPPORTED, `${s.shape} is not a shape this runtime runs`);
     const columnShapes = ['SCALAR', 'ROW', 'MAP_BATCHES_COLUMN', 'AGG_PLAIN', 'AGG_MERGEABLE'];
@@ -110,17 +108,26 @@ export class Runtime {
     }
     const m = ENTRY.exec(s.entry);
     if (m === null) throw new UdfError(ST.DESCRIPTOR, `entry '${s.entry}' is not <bundle>.mjs#<export>`);
+    s.bundleName = m[1];
     s.bundle = path.join(this.codeDir, m[1]);
     s.exportName = m[2];
+    return s;
+  }
+
+  // load's look at the code: the bundle the entry names must exist and
+  // export the entry's name (design section 4.3 item 4: ERR_LOAD
+  // otherwise). The bundle is read, not run: user code runs at
+  // open_instance. A TypeScript signature is erased by the bundler, so the
+  // descriptor's signature is compared at validate only, with the spec.
+  code(s) {
     let src;
     try {
       src = fs.readFileSync(s.bundle, 'utf8');
     } catch (e) {
-      throw new UdfError(ST.DESCRIPTOR, `entry '${s.entry}': no bundle ${m[1]} in the code directory (${e.code})`);
+      throw new UdfError(ST.LOAD, `entry '${s.entry}': no bundle ${s.bundleName} in the code directory (${e.code})`);
     }
     if (!exportsOf(src).has(s.exportName))
-      throw new UdfError(ST.DESCRIPTOR, `entry '${s.entry}': bundle ${m[1]} exports no '${s.exportName}'`);
-    return s;
+      throw new UdfError(ST.LOAD, `entry '${s.entry}': bundle ${s.bundleName} exports no '${s.exportName}'`);
   }
 
   // The module of a bundle, imported once per worker (one context).
@@ -225,7 +232,7 @@ export class Runtime {
         return;
       }
       case OP.DESCRIBE: {
-        const fixed = Buffer.alloc(40);
+        const fixed = Buffer.alloc(4 * CAPS.length);
         CAPS.forEach((v, i) => fixed.writeUInt32LE(v, 4 * i));
         const strs = [RUNTIME_ID, `node${process.versions.node.split('.')[0]}`].flatMap((s) => {
           const bytes = Buffer.from(s, 'utf8');
@@ -238,11 +245,12 @@ export class Runtime {
         return;
       }
       case OP.VALIDATE:
-        this.spec(req.body);
+        check(this.spec(req.body));
         reply(req.id, 0);
         return;
       case OP.LOAD: {
         const s = this.spec(req.body);
+        this.code(s);
         const id = ++this.ids;
         this.udfs.set(id, s);
         replyU64(req.id, id);
@@ -273,7 +281,7 @@ export class Runtime {
         const inst = this.instances.get(req.handle);
         if (inst === undefined) throw new UdfError(ST.INTERNAL, `no instance ${req.handle}`);
         const id = ++this.ids;
-        this.frames.set(id, new Frame(id, inst, inst.udf.shape));
+        this.frames.set(id, new Frame(id, inst, inst.udf.shape, (m) => this.handle(m)));
         replyU64(req.id, id);
         return;
       }

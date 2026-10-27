@@ -79,7 +79,7 @@ Wider builds:
 
 ## 5. Edit a library
 
-Open `src/komira_atomic_alias/atypes.mojo`, change something, and build the
+Open `src/komira_atomic_alias/src/komira_atomic_alias/atypes.mojo`, change something, and build the
 same target again: only what the change affects is rebuilt, and its tests run
 again. To see a failing test, break an assertion in
 `src/komira_atomic_alias/tests/test_atomic_alias_widths.mojo`; the build stops

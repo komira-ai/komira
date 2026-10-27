@@ -14,8 +14,8 @@ of engine-supplied bindings; join-predicate decomposition,
 transitive edges, greedy and DPccp join reordering with TDOM-based
 cardinality and per-column NDV providers; aggregate rewrites (functionally dependent group keys,
 eager and partial aggregation below joins, the SUM-of-offset rewrite,
-duplicate aggregate folding and common-aggregate dedup); join payload
-narrowing; limit and TopN rules, partition TopN fusion and window rewrites;
+duplicate aggregate folding and common-aggregate dedup); limit and TopN
+rules, partition TopN fusion and window rewrites;
 scan-share planning; the `OptimizerConfig` options value; and the non-raising
 `OptimizeResult`. Every rule takes a `LogicalPlan` and returns the rewritten
 plan (the duplicate-aggregate collect and find walks return hash counts and a

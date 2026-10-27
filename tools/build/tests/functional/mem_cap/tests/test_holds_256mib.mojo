@@ -1,4 +1,4 @@
-# Holds 256 MiB for 2 s and passes under a cap well above it (lib_under_cap); its twin
+# Holds 256 MiB for 2 s (a positive-direction hold: it asserts no time, the hold only gives a sampler a chance to wrongly kill it) and passes under a cap well above it (lib_under_cap); its twin
 # tests//negative/mem_cap:lib_over_cap runs it under a cap below it.
 from memcap import hold_chunks
 from std.testing import assert_equal

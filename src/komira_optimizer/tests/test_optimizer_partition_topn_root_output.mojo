@@ -206,7 +206,8 @@ def test_root_distinct_on_another_column_keeps_it() raises:
 
 def test_root_join_on_another_column_keeps_it() raises:
     """`Join(on pid = q)` with the fusable Filter on the left: the join
-    outputs both sides' columns."""
+    outputs both sides' columns. Catches the Join arm's left input not
+    inheriting from above."""
     var win = _win(_pb(PF_RANK))
     var sb = SchemaBuilder()
     sb.add_field(Field("q", ArrowType.INT64, False))
@@ -219,6 +220,27 @@ def test_root_join_on_another_column_keeps_it() raises:
     )
     assert_equal(Int(out.tag), Int(PLAN_JOIN))
     _assert_emits(out._join.value()[].left[], win, "under a join")
+
+
+def test_root_join_with_the_fusable_on_the_right_keeps_it() raises:
+    """`Join(on q = pid)` with the fusable Filter on the right: the window
+    column is the last of six root columns (`q, w, pid, score, val, rk`).
+    Catches the Join arm giving its right input a set that does not inherit
+    from above (only the keys and the residual), and a seed that takes only
+    the root's first few columns."""
+    var win = _win(_pb(PF_RANK))
+    var sb = SchemaBuilder()
+    sb.add_field(Field("q", ArrowType.INT64, False))
+    sb.add_field(Field("w", ArrowType.INT64, False))
+    var other = LogicalPlan.scan(String("__other"), UInt8(3), sb.build())
+    var lo: List[String] = ["q"]
+    var ro: List[String] = ["pid"]
+    var plan = LogicalPlan.join(other^, _fusable(PF_RANK), lo^, ro^, JOIN_INNER)
+    assert_equal(plan.output_schema.num_columns(), 6)
+    assert_equal(plan.output_schema.field_name(5), win)
+    var out = _fuse_keeps_schema(plan^)
+    assert_equal(Int(out.tag), Int(PLAN_JOIN))
+    _assert_emits(out._join.value()[].right[], win, "right of a join")
 
 
 def test_root_partition_by_on_other_columns_keeps_it() raises:

@@ -1,0 +1,38 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+
+# The no-shell list's tool (src/rules.zig says what it checks), run by
+# //tools/build/lint:no_shell (tools/build/lint/no_shell.bzl).
+
+_SRCS = glob(["src/*.zig"])
+
+# The unit tests (what the Starlark scan counts as a shell use and what it
+# skips; each finding of the check: an unlisted site, a grown or shrunk count,
+# a stale row, an unlisted script, a human directory that covers or does not,
+# malformed rows; the walk of a tree; the verdict of a planted case): `zig test`
+# of main.zig, run as a build action.
+zig_test(
+    name = "no_shell_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "src/main.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
+
+# Built only behind its unit tests.
+zig_exe(
+    name = "no_shell",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "src/main.zig",
+    unit_tests = [":no_shell_unit", _ZIG_VERSION],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+    visibility = ["PUBLIC"],
+)

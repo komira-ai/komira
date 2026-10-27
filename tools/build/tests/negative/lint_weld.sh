@@ -40,10 +40,11 @@ script_lints() { # the `_script_lint` default list of a .bzl file, one label per
     sed -n '/"_script_lint"/,/\]/p' "$ROOT/$1" | grep -oE '"komira//[^"]+"' | tr -d '"'
 }
 # What the rules run, and so what each toolchain must lint.
-MOJO_LINTS=(komira//tools/build/lint:shell_lint komira//tools/build/mojo:shell_lint komira//tools/build/mojo/darwin:shell_lint)
-RUST_LINTS=(komira//tools/build/lint:shell_lint komira//tools/build/mojo:shell_lint komira//tools/build/rust:shell_lint)
+MOJO_LINTS=(komira//tools/build/mojo/darwin:shell_lint)
+RUST_LINTS=() # the Rust rules run no script
 printf '%s\n' "${MOJO_LINTS[@]}" > "$W/mojo_lints.txt"
-printf '%s\n' "${RUST_LINTS[@]}" > "$W/rust_lints.txt"
+: > "$W/rust_lints.txt"
+for l in "${RUST_LINTS[@]}"; do echo "$l" >> "$W/rust_lints.txt"; done
 for tc in mojo:tools/build/mojo/toolchain.bzl rust:tools/build/rust/defs.bzl; do
     script_lints "${tc#*:}" > "$W/${tc%%:*}_bzl.txt"
     if ! diff <(LC_ALL=C sort "$W/${tc%%:*}_lints.txt") <(LC_ALL=C sort "$W/${tc%%:*}_bzl.txt") > "$W/${tc%%:*}_diff.txt"; then
