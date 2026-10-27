@@ -8,20 +8,20 @@
 # 200µs.
 #
 # This test is a single-shot variant (10 workers, 1_000 events/worker, 10_000
-# events total, asserted record for record) that prints the rate it saw and
-# asserts none of it; the 60s sustained version is a benchmark, not a unit test.
+# events total, asserted record for record) that reads no clock; the 60s
+# sustained version is a benchmark, not a unit test.
 # =============================================================================
 
 from std.collections import Dict
 from std.memory import Pointer
 from std.testing import assert_equal, assert_true
-from std.time import perf_counter_ns
 
 from komira_spsc_ring.spsc_ring import OVERFLOW_DROP
 from komira_fork_join import fork_join, ForkJoinBody
 from komira_trace.tracer import Tracer
 from komira_trace.exporter import CapturingExporter
 from komira_trace.span_record import SPAN_STATUS_CLOSED
+from komira_trace.testing import MockClock
 
 
 # =============================================================================
@@ -44,8 +44,7 @@ from komira_trace.span_record import SPAN_STATUS_CLOSED
 #     (5e7 comparisons for these 10,000 spans) probes far more often. The
 #     growth law is also gated at two sizes by test_drain_join_scales.mojo.
 #
-# The rate is printed as information only; the performance target belongs to
-# the sustained benchmark.
+# The performance target belongs to the sustained benchmark.
 # =============================================================================
 
 
@@ -84,9 +83,9 @@ struct _ProducerBody[o: Origin[mut=True]](ForkJoinBody):
             tracer.end_span(s, worker_id=tid)
 
 
-def run_drain_throughput() raises -> Float64:
-    """Returns aggregate ingestion+drain throughput (events/sec), for
-    printing only: the producers' wall time plus the drain's, join included.
+def run_drain_throughput() raises:
+    """Runs the producer wave and the drain, and asserts the ring counters,
+    the join probe count and every drained record. Reads no clock.
 
     Uses OVERFLOW_DROP — a sustained version would BLOCK and run a
     concurrent drain thread. The single-shot DROP variant exercises the data path
@@ -97,10 +96,11 @@ def run_drain_throughput() raises -> Float64:
     var tracer = Tracer(num_workers=N_WORKERS, ring_capacity=4096,
                         overflow_policy=OVERFLOW_DROP)
     tracer.install_mock_ids(trace_seed=UInt64(1), span_seed=UInt64(1))
+    # A fixed clock, never advanced: the producers only read it, and the
+    # stamps are exact instead of wall time.
+    tracer.install_mock_clock(MockClock(start_ns=UInt64(777)))
 
     # Phase A: producers.
-    var t_start = perf_counter_ns()
-
     fork_join(
         _ProducerBody(Pointer(to=tracer), EVENTS_PER_WORKER), N_WORKERS
     )
@@ -123,15 +123,8 @@ def run_drain_throughput() raises -> Float64:
     var exp = CapturingExporter()
     tracer.drain_into_capture(exp)
 
-    var t_end = perf_counter_ns()
-    var total_ns = Float64(t_end - t_start)
-    var total_events = Float64(N_WORKERS * EVENTS_PER_WORKER * 2)  # open+close
-    var events_per_sec = total_events / (total_ns / Float64(1_000_000_000))
-    print("  total events:", Int(total_events))
-    print("  total wall:", total_ns, "ns")
+    print("  total events:", N_WORKERS * EVENTS_PER_WORKER * 2)
     print("  drained:", exp.count(), "records")
-    print("  events/sec aggregate:", events_per_sec)
-    print("  events/sec / worker  :", events_per_sec / Float64(N_WORKERS))
 
     # Correctness: one closed record per emitted span, EVENTS_PER_WORKER per
     # worker, every span id distinct.
@@ -148,7 +141,8 @@ def run_drain_throughput() raises -> Float64:
         assert_equal(
             rec.status, SPAN_STATUS_CLOSED, "every drained span is closed"
         )
-        assert_true(rec.end_ns >= rec.start_ns, "span ends after it starts")
+        assert_equal(rec.start_ns, UInt64(777), "start stamped by the clock")
+        assert_equal(rec.end_ns, UInt64(777), "end stamped by the clock")
         var w = Int(rec.worker_id)
         assert_true(w >= 0 and w < N_WORKERS, "worker id in range")
         per_worker[w] += 1
@@ -164,19 +158,11 @@ def run_drain_throughput() raises -> Float64:
         tracer.join_probes(), N_WORKERS * EVENTS_PER_WORKER,
         "the drain join probes once per CLOSE packet",
     )
-    return events_per_sec
 
 
 def main() raises:
-    print("test_drain_throughput — drain correctness, rate printed only")
+    print("test_drain_throughput — drain correctness, no clock")
     print("=============================================================")
-    var rate = run_drain_throughput()
-    print()
-    if rate >= Float64(5_000_000):
-        print("drain throughput GREEN: aggregate ≥ 5M events/sec")
-    elif rate >= Float64(1_000_000):
-        print("drain throughput YELLOW: 1-5M events/sec range")
-    else:
-        print("drain throughput INFO:", rate, "events/sec — single-shot bench number")
+    run_drain_throughput()
     print()
     print("test PASS")

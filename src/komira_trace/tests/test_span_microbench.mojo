@@ -16,7 +16,7 @@
 #     one name and every worker's span stack is back at depth 0;
 #   - the drain returns one closed record per pair.
 #
-# The ns/pair the wave took is printed as information; nothing asserts on it.
+# No clock is read.
 # This repository has no allocation counter hook, so "no heap allocation per
 # span" is not asserted directly: the packets are fixed-size copies into a
 # ring whose slot store is allocated once per ring.
@@ -24,7 +24,6 @@
 
 from std.memory import Pointer
 from std.testing import assert_equal
-from std.time import perf_counter_ns
 
 from komira_fork_join import fork_join, ForkJoinBody
 from komira_trace.tracer import Tracer
@@ -38,7 +37,7 @@ from komira_trace.span_record import SPAN_STATUS_CLOSED
 # MOJO 1.0.0 removed `parallelize` from the stdlib. A SERIAL LOOP WAS NOT TAKEN:
 # the properties below are about what N threads do to ONE shared Tracer, which
 # is only meaningful when the N threads run at once. `fork_join` is synchronous,
-# so the caller's `perf_counter_ns()` bracket still measures the whole wave. If
+# so the counters read after it see the whole wave. If
 # a thread cannot be started it raises, so the test never reports on a narrower
 # width than it claims.
 # =============================================================================
@@ -66,9 +65,8 @@ comptime ITERATIONS_PER_WORKER = 10_000
 comptime WARMUP_ITERATIONS = 100
 
 
-def run_microbench() raises -> Float64:
-    """Runs the wave, asserts the hot-path counters, and returns the wave's
-    ns per pair per thread (for printing only)."""
+def run_microbench() raises:
+    """Runs the wave and asserts the hot-path counters. Reads no clock."""
     # Sized so one wave never fills a ring: no block, no drop.
     var tracer = Tracer(
         num_workers=N_WORKERS, ring_capacity=ITERATIONS_PER_WORKER * 4
@@ -78,11 +76,9 @@ def run_microbench() raises -> Float64:
     # Warmup — populate workers + name registry.
     fork_join(_SpanPairsBody(Pointer(to=tracer), WARMUP_ITERATIONS), N_WORKERS)
 
-    var t0 = perf_counter_ns()
     fork_join(
         _SpanPairsBody(Pointer(to=tracer), ITERATIONS_PER_WORKER), N_WORKERS
     )
-    var t1 = perf_counter_ns()
 
     var pairs_per_worker = WARMUP_ITERATIONS + ITERATIONS_PER_WORKER
     for w in range(N_WORKERS):
@@ -109,16 +105,10 @@ def run_microbench() raises -> Float64:
             exp.captured_spans[i].status, SPAN_STATUS_CLOSED, "every span closed"
         )
 
-    # Per-thread per-pair latency: each thread does ITERATIONS pairs in
-    # parallel, so wall = max-thread time ≈ per-thread time.
-    return Float64(t1 - t0) / Float64(ITERATIONS_PER_WORKER)
-
 
 def main() raises:
     print("test_span_microbench — span producer hot path")
     print("================================================")
-    var ns_per_pair = run_microbench()
-    print("  per-thread per-pair (start+end) latency:", ns_per_pair, "ns (not asserted)")
-    print("  per-op latency: ~", ns_per_pair / Float64(2), "ns (not asserted)")
+    run_microbench()
     print()
     print("test PASS")
