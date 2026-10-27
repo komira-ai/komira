@@ -98,3 +98,16 @@ mojo_shared_lib(
     exports = ["neg_add", "komira_neg_dup"],
     force_load = [":dup_a", ":dup_b"],
 )
+
+# The owner's C reaches the library as its static archive (no `native_owners`),
+# so the library is not NEEDED on the owner's shared library and a driver that
+# opens that SONAME finds nothing. examples/shared_lib_native:spike_native is the
+# twin with `native_owners`, which passes the same check.
+mojo_shared_lib(
+    name = "owner_embedded",
+    srcs = ["owner_embedded_abi.mojo"],
+    exports = ["native_owner_write_probe"],
+    exports_exact = True,
+    gate_srcs = ["owner_embedded_driver.mojo"],
+    deps = ["komira//src/komira_libc:komira_libc"],
+)
