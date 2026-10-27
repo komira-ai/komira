@@ -1,7 +1,7 @@
-"""Mojo rules for Buck2: mojo_library, mojo_binary, mojo_test.
+"""Mojo rules for Buck2: mojo_library, mojo_binary, mojo_test (and mojo_shared_lib, in shared_lib.bzl).
 
 Every compile runs the hermetic toolchain from `toolchains//:mojo` through the
-toolchain's compile wrapper (`mojo_compile_cmd` below; on Linux
+toolchain's compile wrapper (`mojo_compile_cmd`, compile.bzl; on Linux
 tools/mojo_compile.zig, whose header states the environment the compiler sees).
 
 Output layout of a library `L` with import name `I`:
@@ -41,98 +41,13 @@ load(":readme.bzl", "readme_gate", "readme_kwargs")
 load(":run_check.bzl", "run_check_validation")
 load(":test_limit.bzl", "HANG_LIMIT_ATTRS", "TEST_LIMIT_ATTRS", "deadline_flags", "hang_limit_flags", "with_test_limit")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
+load(":compile.bzl", _TOOLCHAIN_ATTR = "toolchain_attr", _build_executable = "build_executable", _c_link = "c_link", _check_deps = "check_deps", _dep_closure = "dep_closure", _dirname = "dirname", _join = "join", _link_tail = "link_tail", _main_src = "main_src", _stem = "stem", _toolchain = "toolchain", _mojo_compile_cmd = "mojo_compile_cmd", _mojo_precompile_cmd = "mojo_precompile_cmd")
+load(":shared_lib.bzl", _mojo_shared_lib_rule = "mojo_shared_lib_rule")
 
-def _toolchain(ctx):
-    return ctx.attrs.toolchain[MojoToolchainInfo]
-
-def _watchdog_flags(tc):
-    # The compile watchdog's knobs, for a wrapper that has one (the toolchain
-    # sets them; see mojo_toolchain's watchdog_idle_secs).
-    if tc.watchdog_idle_secs == None:
-        return []
-    if tc.watchdog_idle_secs < 0 or tc.watchdog_sample_secs < 1:
-        fail("mojo toolchain: watchdog_idle_secs must be >= 0 and watchdog_sample_secs >= 1")
-    return [
-        "--watchdog-idle-secs={}".format(tc.watchdog_idle_secs),
-        "--watchdog-sample-secs={}".format(tc.watchdog_sample_secs),
-    ]
-
-def mojo_compile_cmd(tc, args, runpath = None, source_root = None, link_tail = None, link = None):
-    """The command line of one Mojo compile (`mojo precompile`, `build`, `doc`).
-
-    Every rule that runs the compiler builds its command here: mojo_library,
-    mojo_binary, mojo_test and their coverage and mutation actions,
-    mojo_doc_json (doc.bzl) and the proto packages (proto.bzl).
-
-    `link` replaces the toolchain's link directory: a coverage build's
-    (coverage.bzl), whose `zig` keeps and relocates the debug info. Linux
-    only. `link_tail` is appended by the wrapper's `cc` shim to the END of
-    every link line, after the compiler's own objects and archive.
-
-    The wrapper is the Zig program mojo_compile (tools/mojo_compile.zig on
-    Linux, tools/mojo_compile_macos.zig on macOS), and the toolchain's
-    watchdog knobs are always passed. On macOS the deployment target and the
-    host identities a compile may run on (`macos_hosts`) take the place of
-    the zig directory and target.
-    """
-    tail = [cmd_args(link_tail, format = "--link-tail={}")] if link_tail else []
-    if tc.os == "darwin":
-        if link:
-            fail("mojo_compile_cmd: `link` (a coverage link directory) is Linux only")
-        return cmd_args(
-            tc.wrapper,
-            cmd_args(tc.compiler, format = "--compiler={}"),
-            "--deployment-target=" + tc.cc_target,
-            ["--macos-host=" + h for h in tc.macos_hosts],
-            ["--runpath=" + runpath] if runpath else [],
-            [cmd_args(source_root, format = "--source-root={}")] if source_root else [],
-            tail,
-            _watchdog_flags(tc),
-            "--",
-            args,
-        )
-    return cmd_args(
-        tc.wrapper,
-        cmd_args(tc.compiler, format = "--compiler={}"),
-        cmd_args(link or tc.link, format = "--zig={}"),
-        "--cc-target=" + tc.cc_target,
-        ["--runpath=" + runpath] if runpath else [],
-        [cmd_args(source_root, format = "--source-root={}")] if source_root else [],
-        tail,
-        _watchdog_flags(tc),
-        "--",
-        args,
-    )
-
-def mojo_precompile_cmd(tc, include, src_dir, out):
-    """The command line of one `mojo precompile` of the staged package `src_dir`.
-
-    Every `.mojoc` that ships is built here (mojo_library, proto.bzl). The
-    compiler records each source of a package by the path it was given, so a
-    package compiled as `buck-out/<isolation dir>/.../src/<name>` would carry
-    that path and differ per isolation directory. `src_dir` is passed as
-    `--source-root`: the wrapper (tools/mojo_compile.zig, compile_args.runDir)
-    then runs the compiler from its parent and names the package by its
-    basename, so the `.mojoc` records `<name>/<file>.mojo` wherever the action
-    runs (`-strip-file-prefix` does not reach `precompile`). No
-    `--target-cpu`: `mojo precompile` rejects it; a `.mojoc` holds no machine
-    code. tools/build/tests/functional/mojoc_path checks it.
-    """
-    return mojo_compile_cmd(tc, ["precompile", include, src_dir, "-o", out], source_root = src_dir)
-
-# `deps` takes two kinds of target, told apart by provider:
-#   MojoInfo        a Mojo package (mojo_library): its closure goes on `-I`.
-#   MergedLinkInfo  a C/C++ library (the prelude's cxx_library, or anything
-#                   else providing it): linked, statically and PIC, into every
-#                   executable built with this target in its closure.
-# Anything else is refused.
-def _check_deps(ctx):
-    for d in ctx.attrs.deps:
-        if MojoInfo not in d and MergedLinkInfo not in d:
-            fail("{}: dep {} provides neither MojoInfo (a Mojo package) nor MergedLinkInfo (a C/C++ library)".format(ctx.label, d.label))
-
-def _dep_closure(ctx):
-    return mojo_pkg_children(ctx, [d[MojoInfo] for d in ctx.attrs.deps if MojoInfo in d])
+# Re-exported: other files and BUCK files load these names from here.
+mojo_compile_cmd = _mojo_compile_cmd
+mojo_precompile_cmd = _mojo_precompile_cmd
+mojo_shared_lib_rule = _mojo_shared_lib_rule
 
 def _check_closure_excludes(ctx, dep_closure):
     """Fail analysis when a package `closure_excludes` names is in the closure of `deps`.
@@ -147,31 +62,6 @@ def _check_closure_excludes(ctx, dep_closure):
     for pkg in dep_closure.traverse():
         if pkg.basename in refused:
             fail("{}: `{}` is in the closure of `deps`, which `closure_excludes` refuses; remove the dependency that brings it".format(ctx.label.raw_target(), refused[pkg.basename]))
-
-def _c_link(ctx):
-    """MergedLinkInfo of every C/C++ library this target's code may call, or None."""
-    infos = []
-    for d in ctx.attrs.deps:
-        if MojoInfo in d:
-            if d[MojoInfo].c_link != None:
-                infos.append(d[MojoInfo].c_link)
-        elif MergedLinkInfo in d:
-            infos.append(d[MergedLinkInfo])
-    if not infos:
-        return None
-    return create_merged_link_info_for_propagation(ctx, infos)
-
-def _link_tail(c_link):
-    """The link arguments of `c_link` in dependency order (dependents first)."""
-    if c_link == None:
-        return None
-
-    # The prelude's own link steps read the per-strategy link infos the same
-    # way (link_info.bzl, get_link_args_for_strategy).
-    infos = c_link._infos.get(LinkStrategy("static_pic"))
-    if infos == None:
-        return None
-    return infos.project_as_args("default", ordering = "preorder")
 
 def _package_root(ctx, srcs):
     """Package-relative directory holding the shallowest `__init__.mojo`."""
@@ -191,139 +81,6 @@ def _stage(ctx, name, srcs, root):
             rel = rel[len(root) + 1:]
         mapping[rel] = s
     return ctx.actions.copied_dir(name, mapping)
-
-def _stem(src):
-    b = src.basename
-    return b[:-len(".mojo")] if b.endswith(".mojo") else b
-
-def _dirname(p):
-    i = p.rfind("/")
-    return p[:i] if i >= 0 else ""
-
-def _join(d, f):
-    return d + "/" + f if d else f
-
-# The entry file of a program built as a shared library. The launcher calls
-# `komira_main(argc, argv)`, which runs the program's `main` through the same
-# standard-library function a Mojo executable's own `main` runs it through:
-# it starts the runtime, records argv, installs the fault handler, reports an
-# unhandled error the way an executable does (exit status 1), and destroys
-# the runtime's globals.
-_ENTRY = """from std.builtin._startup import __wrap_and_execute_raising_main
-from {module} import main as _komira_program_main
-
-
-@export
-def komira_main(
-    argc: Int32,
-    argv: __mlir_type[`!kgen.pointer<!kgen.pointer<scalar<ui8>>>`],
-) abi("C") -> Int32:
-    return __wrap_and_execute_raising_main[_komira_program_main](argc, argv)
-"""
-
-def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False, abi_lib = False, link_extra = None, debug_link = None, defines = [], levels = None, emit_object = False, link_head = None):
-    """`mojo build` of `main` (one of `srcs`) against the packages in closure_tsets, linking c_link.
-
-    Reads only `ctx.actions` and `ctx.label`, so a dynamic action passes
-    `struct(actions = ..., label = ...)` (see _readme_test).
-
-    With `shared`, emits a shared library instead: DT_SONAME is the output's
-    file name and its one run path is `$ORIGIN/../..`, the bundle's lib/
-    seen from lib/glibc-hwcaps/<level>/.
-
-    With `abi_lib`, emits a shared library straight from `main`, a file of
-    `@export` C-ABI functions: no generated entry and no `komira_main`.
-    DT_SONAME is the output's file name (the caller names it, with no `lib`
-    prefix forced) and the run path is the default `$ORIGIN/lib`
-    (`mojo_shared_lib` adds `$ORIGIN` on Linux through `link_extra`).
-    `link_extra` is appended to the link tail after the C libraries (the
-    force-loaded archives of mojo_shared_lib). `link_head` is put before
-    them (the owners' shared libraries of mojo_shared_lib: a symbol one of
-    them defines is bound there, so the archive that also holds it is not
-    pulled in).
-
-    With `debug_link` (a coverage build's link directory, coverage.bzl), the
-    compile keeps line tables (`--debug-level line-tables`) and links through
-    that directory instead of the toolchain's.
-
-    `defines`: `-D` arguments from defines.bzl's define_args, after
-    `--target-cpu`; none are written when it is empty. `levels`: see opt_level.bzl.
-
-    With `emit_object`, emits the program's object file instead (`--emit
-    object`), linked to nothing: every `external_call` the program reaches
-    is an undefined symbol of it (the README check, shared.bzl).
-    """
-    opt_args = opt_level_args(ctx.label, opt_level, category, levels)
-    mapping = {s.short_path: s for s in srcs}
-    entry = main.short_path
-    if shared and abi_lib:
-        fail("{}: shared and abi_lib are exclusive".format(ctx.label))
-    if shared:
-        # `mojo build --emit shared-lib` refuses a file defining `main`, so the
-        # library is built from a generated entry file next to it, which
-        # exports the C-ABI entry point `komira_main` (see _ENTRY).
-        stem = _stem(main)
-        if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", stem):
-            fail("{}: {} is not importable as a Mojo module".format(ctx.label, main.short_path))
-        entry = _join(_dirname(main.short_path), "_komira_entry.mojo")
-        if entry in mapping:
-            fail("{}: srcs may not contain {}".format(ctx.label, entry))
-        mapping[entry] = ctx.actions.write(out_path + ".entry.mojo", _ENTRY.format(module = stem))
-    staged = ctx.actions.copied_dir(out_path + ".src", mapping)
-    exe = ctx.actions.declare_output(out_path)
-    closure = ctx.actions.tset(MojoPkgTSet, children = closure_tsets)
-    emit = []
-    if shared:
-        # The entry imports the program's main module from its own directory,
-        # which the compiler does not search unless named with -I.
-        entry_dir = _dirname(entry)
-        emit = [
-            "--emit",
-            "shared-lib",
-            "-Xlinker",
-            "-soname",
-            "-Xlinker",
-            exe.basename,
-            cmd_args(staged.project(entry_dir) if entry_dir else staged, format = "-I{}"),
-        ]
-    if abi_lib:
-        # The library's name for the loader: ELF DT_SONAME, Mach-O install
-        # name. On macOS an unnamed dylib records the -o path as given, which
-        # is a build directory; `@rpath/<file>` is the same
-        # no-directory name the soname is.
-        emit = [
-            "--emit",
-            "shared-lib",
-            "-Xlinker",
-            "-install_name" if tc.os == "darwin" else "-soname",
-            "-Xlinker",
-            ("@rpath/" + exe.basename) if tc.os == "darwin" else exe.basename,
-        ]
-    tail = _link_tail(c_link)
-    if link_head:
-        tail = cmd_args(link_head, tail) if tail else cmd_args(link_head)
-    if link_extra:
-        tail = cmd_args(tail, link_extra) if tail else cmd_args(link_extra)
-    if emit_object:
-        emit, tail = ["--emit", "object"], None
-    ctx.actions.run(
-        mojo_compile_cmd(tc, [
-            "build",
-            emit,
-            opt_args,
-            "--target-cpu",
-            tc.target_cpu,
-            defines,
-            ["--debug-level", "line-tables"] if debug_link else [],
-            closure.project_as_args("include"),
-            staged.project(entry),
-            "-o",
-            exe.as_output(),
-        ], runpath = "$ORIGIN/../.." if shared else None, source_root = staged, link_tail = tail, link = debug_link),
-        category = category,
-        identifier = identifier,
-    )
-    return exe
 
 # ---- mojo_library ----------------------------------------------------------
 
@@ -605,10 +362,6 @@ _readme_test = dynamic_actions(
     },
 )
 
-_TOOLCHAIN_ATTR = {
-    "toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
-}
-
 mojo_library_rule = rule(
     impl = _library_impl,
     attrs = {
@@ -654,13 +407,6 @@ mojo_library_rule = rule(
 )
 
 # ---- mojo_binary / mojo_test ----------------------------------------------
-
-def _main_src(ctx):
-    if ctx.attrs.main:
-        return ctx.attrs.main
-    if len(ctx.attrs.srcs) != 1:
-        fail("{}: set `main` when srcs has more than one file".format(ctx.label))
-    return ctx.attrs.srcs[0]
 
 def _executable(ctx, category, levels):
     tc = _toolchain(ctx)
@@ -809,234 +555,6 @@ mojo_test_rule = rule(
         "args": attrs.list(attrs.arg(), default = []),
         "labels": attrs.list(attrs.string(), default = []),
     },
-)
-
-# ---- mojo_shared_lib --------------------------------------------------------
-#
-# A C-ABI shared library: `mojo build --emit shared-lib` of one file of
-# `@export` functions, over the closure of `deps`. Linux (`.so`) and macOS
-# arm64 (`.dylib`); mojo_binary's `[shared]` and the bundles are Linux only,
-# and the darwin wrapper still refuses `--emit shared-lib` for them.
-#
-#   out_name       the file is `<out_name>.so` (Linux) or `<out_name>.dylib`
-#                  (macOS), its DT_SONAME / install name `@rpath/<file>`: no
-#                  `lib` prefix is forced (mojo_binary's `[shared]` forces
-#                  one). Drivers open `./<out_name>.so` or `./<out_name>.dylib`
-#                  by `CompilationTarget.is_macos()`.
-#   exports        the library's C ABI: exactly the main source's @export abi("C")
-#                  functions, less `unlisted_exports` (checked, tools/so_exports.zig).
-#                  The gate dlopens the library (RTLD_NOW, so an unresolved
-#                  symbol fails there) and fails unless every one resolves.
-#   c_exports      symbols a C library of the closure defines: expected by the
-#                  gate, not compared with the source.
-#   unlisted_exports
-#                  @export functions kept out of `exports` on purpose; they
-#                  must exist in the source. `exports_exact` makes them local.
-#   exports_exact  default False. True links with a version script that makes
-#                  `exports` and `c_exports` the whole dynamic symbol table:
-#                  nothing else is visible, so a symbol of a static C
-#                  dependency does not leak into the ABI, and an unlisted
-#                  @export is MISSING for any driver that calls it.
-#   gate_srcs      linked-run drivers: Mojo mains that dlopen `./<out_name>.so`
-#                  (the gate stages it as their one data file) and call it.
-#   force_load     C/C++ libraries linked whole (--whole-archive): every object
-#                  of their archives is in the library, referenced or not.
-#
-# The published file is `<name>/<out_name>.so`: a copy of `ungated/<out_name>.so`
-# that takes the PASS marker of every gate run as an input, so it cannot exist
-# unless the exports check and every driver passed. The same pattern as
-# mojo_library's tests.
-
-_EXPORTS_DRIVER = """from std.ffi import OwnedDLHandle
-
-
-def main() raises:
-    # RTLD_NOW (the default flags): an unresolved symbol fails here, not at
-    # the first call.
-    var lib = OwnedDLHandle("./{so}")
-    var missing = 0
-{checks}
-    if missing != 0:
-        raise Error("{so}: " + String(missing) + " expected export(s) missing")
-"""
-
-_EXPORT_CHECK = """    if not lib.check_symbol("{sym}"):
-        print("MISSING EXPORT: {sym}")
-        missing += 1
-"""
-
-def _shared_lib_impl(ctx):
-    tc = _toolchain(ctx)
-    out_name = ctx.attrs.out_name or ctx.label.name
-    if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", out_name):
-        fail("{}: out_name `{}` is not [A-Za-z_][A-Za-z0-9_]*".format(ctx.label, out_name))
-    if not ctx.attrs.exports and not ctx.attrs.c_exports:
-        fail("{}: `exports` is empty: a gate that expects no symbol checks nothing".format(ctx.label))
-    for sym in ctx.attrs.exports + ctx.attrs.c_exports + ctx.attrs.unlisted_exports:
-        if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", sym):
-            fail("{}: export `{}` is not a C symbol name".format(ctx.label, sym))
-    abi_names = ctx.attrs.exports + ctx.attrs.c_exports
-    for sym in ctx.attrs.c_exports:
-        if sym in ctx.attrs.exports or sym in ctx.attrs.unlisted_exports:
-            fail("{}: `{}` is in `c_exports` and also in `exports` or `unlisted_exports`".format(ctx.label, sym))
-    main = _main_src(ctx)
-    srcs = ctx.attrs.srcs if main in ctx.attrs.srcs else ctx.attrs.srcs + [main]
-    _check_deps(ctx)
-    for d in ctx.attrs.force_load:
-        if MergedLinkInfo not in d:
-            fail("{}: force_load {} provides no MergedLinkInfo (a C/C++ library)".format(ctx.label, d.label))
-    force = None
-    if ctx.attrs.force_load:
-        force = _link_tail(create_merged_link_info_for_propagation(ctx, [d[MergedLinkInfo] for d in ctx.attrs.force_load]))
-    darwin = tc.os == "darwin"
-    link_extra = None
-    if force != None:
-        if darwin:
-            # ld has no bracketed whole-archive: -force_load names one
-            # archive, so each argument of the C libraries' link line is one.
-            link_extra = cmd_args(force, format = "-Wl,-force_load,{}")
-        else:
-            link_extra = cmd_args("-Wl,--whole-archive", force, "-Wl,--no-whole-archive")
-    if ctx.attrs.exports_exact:
-        # The dynamic symbol table is `exports` and nothing else, so a symbol
-        # of a static C dependency, or an @export the list does not name, is
-        # local to the library. ELF: a version script. Mach-O: an exported
-        # symbols list, whose names carry the C underscore.
-        if darwin:
-            script = ctx.actions.write(
-                "exports.list",
-                "".join(["_" + sym + "\n" for sym in abi_names]),
-            )
-            limit = cmd_args(script, format = "-Wl,-exported_symbols_list,{}")
-        else:
-            script = ctx.actions.write(
-                "exports.map",
-                "{ global: " + " ".join([sym + ";" for sym in abi_names]) + " local: *; };\n",
-            )
-            limit = cmd_args(script, format = "-Wl,--version-script={}")
-        link_extra = cmd_args(link_extra, limit) if link_extra else cmd_args(limit)
-
-    if not darwin:
-        # The run path also names the library's own directory: an installed
-        # package puts the library in `<prefix>/lib`, where the Mojo
-        # runtime it is NEEDED on is installed beside it, so `$ORIGIN/lib`
-        # (the `lib/` the gate stages) alone finds nothing there. lld joins
-        # the two `-rpath` into one DT_RUNPATH.
-        link_extra = cmd_args(link_extra, "-Wl,-rpath,$ORIGIN") if link_extra else cmd_args("-Wl,-rpath,$ORIGIN")
-
-    # The owners' shared libraries (`native_owners`): linked ahead of the C
-    # archives, so the library is NEEDED on each owner's SONAME and the
-    # symbols the owner defines are bound to it. The gate stages each owner
-    # and everything it NEEDs in lib/ beside the library, where its run path
-    # (`$ORIGIN/lib`) finds them.
-    link_head = None
-    owner_files = {}
-    if ctx.attrs.native_owners:
-        if darwin:
-            fail("{}: `native_owners` is ELF only (a library's shared library is Linux only; Mach-O is a later design)".format(ctx.label))
-        link_head = cmd_args([o[NativeSharedInfo].so for o in ctx.attrs.native_owners])
-        for o in ctx.attrs.native_owners:
-            for soname, so in o[NativeSharedInfo].closure.items():
-                owner_files["lib/" + soname] = so
-
-    so_file = out_name + (".dylib" if darwin else ".so")
-    ungated = _build_executable(
-        ctx,
-        tc,
-        "ungated/" + so_file,
-        srcs,
-        main,
-        _dep_closure(ctx),
-        ctx.attrs.optimization_level,
-        "mojo_build_shared_lib",
-        None,
-        _c_link(ctx),
-        abi_lib = True,
-        link_extra = link_extra,
-        link_head = link_head,
-    )
-
-    # The gate: each driver is a Mojo program with no dependencies that
-    # dlopens "./<out_name>.so", staged as its only data file.
-    drivers = {}
-    checks = "".join([_EXPORT_CHECK.format(sym = sym) for sym in abi_names])
-    drivers["exports"] = ctx.actions.write(
-        "gate/exports.mojo",
-        _EXPORTS_DRIVER.format(so = so_file, checks = checks),
-    )
-    for g in ctx.attrs.gate_srcs:
-        stem = _stem(g)
-        if stem == "exports" or stem in drivers:
-            fail("{}: gate_srcs has two drivers named `{}`".format(ctx.label, stem))
-        drivers[stem] = g
-    markers = []
-    gate_subtargets = {}
-    # The exports check: `exports` is the set of @export abi("C") functions of
-    # the main source, less `unlisted_exports` (tools/so_exports.zig).
-    exports_ok = ctx.actions.declare_output("gate/exports_listed.passed")
-    ctx.actions.run(
-        cmd_args(
-            ctx.attrs._so_exports[RunInfo],
-            "check",
-            main,
-            exports_ok.as_output(),
-            str(ctx.label.raw_target()),
-            ctx.attrs.exports,
-            "--",
-            ctx.attrs.unlisted_exports,
-        ),
-        category = "mojo_shared_lib_exports",
-    )
-    markers.append(exports_ok)
-    for stem in sorted(drivers.keys()):
-        src = drivers[stem]
-        exe = _build_executable(ctx, tc, "gate/{}/{}".format(stem, stem), [src], src, [], ctx.attrs.driver_optimization_level, "mojo_build_gate_driver", stem, None)
-        root, staged = _test_root(ctx, "gate/{}/root".format(stem), exe, {so_file: ungated} | owner_files)
-        marker = ctx.actions.declare_output("gate/{}.passed".format(stem))
-        ctx.actions.run(
-            cmd_args(
-                gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), stem), staged, marker.as_output(), hang_limit_flags(str(ctx.label.raw_target()), ctx.attrs.test_hang_limit_s)),
-                hidden = root,
-            ),
-            env = rerun_env(ctx),
-            category = "mojo_shared_lib_gate",
-            identifier = stem,
-        )
-        gate_subtargets[stem] = [DefaultInfo(default_output = marker, other_outputs = [root])]
-        markers.append(marker)
-
-    public = ctx.actions.declare_output("pub/" + so_file)
-    ctx.actions.run(
-        cmd_args(tc.act, "copy", ungated, public.as_output(), hidden = markers),
-        category = "mojo_shared_lib_join",
-    )
-    return [DefaultInfo(
-        default_output = public,
-        sub_targets = {
-            "gate": [DefaultInfo(default_outputs = markers, sub_targets = gate_subtargets)],
-            # Files only: the library before its gate ran.
-            "ungated": [DefaultInfo(default_output = ungated)],
-        } | coverage_shared_lib(ctx, tc, _build_executable, srcs, main, _dep_closure(ctx), _c_link(ctx), link_extra, so_file),
-    ), rerun_info(ctx)]
-
-mojo_shared_lib_rule = rule(
-    impl = _shared_lib_impl,
-    attrs = {
-        "deps": attrs.list(attrs.dep(), default = []),
-        "driver_optimization_level": attrs.string(default = TEST_OPT_LEVEL),
-        "c_exports": attrs.list(attrs.string(), default = []),
-        "exports": attrs.list(attrs.string()),
-        "exports_exact": attrs.bool(default = False),
-        "force_load": attrs.list(attrs.dep(), default = []),
-        "gate_srcs": attrs.list(attrs.source(), default = []),
-        "main": attrs.option(attrs.source(), default = None),
-        "native_owners": attrs.list(attrs.dep(providers = [NativeSharedInfo]), default = []),
-        "optimization_level": attrs.string(default = SHIPPED_OPT_LEVEL),
-        "out_name": attrs.option(attrs.string(), default = None),
-        "unlisted_exports": attrs.list(attrs.string(), default = []),
-        "_so_exports": attrs.exec_dep(default = "komira//tools/build/mojo:so_exports"),
-        "srcs": attrs.list(attrs.source()),
-    } | _TOOLCHAIN_ATTR | COVERAGE_SHARED_LIB_ATTRS | HANG_LIMIT_ATTRS | RERUN_ATTRS,
 )
 
 def _mojo_library(**kwargs):

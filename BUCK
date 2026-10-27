@@ -77,7 +77,7 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
-# The cases of the job `mopm-publish-beta` of release.yml
+# The cases of the beta and prod jobs of release.yml
 # (.github/workflows/release_workflow_test.zig says what each catches): its gate,
 # its OIDC permission, no secret, and its publish command. A build action.
 zig_test(
