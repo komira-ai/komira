@@ -14,6 +14,11 @@
 #                            is refused (422) and no adapter runs.
 #   POST /ingest-structured  known entities and edges as JSON (see
 #                            `structured`); ingested with no extraction.
+#   POST /query              the subgraph around what a text matches in one
+#                            partition, optionally with a model's answer (see
+#                            `query_spec`, `query_build`, `query_synthesis`).
+#   POST /query-federated    the same over a list of partitions, merged and
+#                            ranked together.
 #   (anything else)          a `CaptureRoutes` conformer the host gave the
 #                            server, over the loaded working set.
 #
@@ -58,7 +63,7 @@ from komira_kg import (
     ingest_structured_into,
     maybe_compact_chain,
 )
-from komira_kg_format import CompactionPolicy, KgSnapshotStore
+from komira_kg_format import CompactionPolicy, KgQueryResult, KgSnapshotStore
 from komira_kg_sources import AdapterRegistry
 from komira_objectstore.store import CloneableConditionalWriteStore
 
@@ -71,12 +76,18 @@ from .http_util import (
     json_response,
     query_value,
 )
+from .query_build import build_query_result
+from .query_config import QueryConfig
+from .query_spec import QuerySpec, parse_query_request
+from .query_synthesis import synthesize_answer
 from .routes import CaptureRoutes
 from .structured import StructuredRequest, parse_structured_request
 
 comptime ROUTE_HEALTH: String = "/health"
 comptime ROUTE_CAPTURE: String = "/capture"
 comptime ROUTE_INGEST_STRUCTURED: String = "/ingest-structured"
+comptime ROUTE_QUERY: String = "/query"
+comptime ROUTE_QUERY_FEDERATED: String = "/query-federated"
 
 
 struct CaptureConfig(Copyable, Movable):
@@ -195,6 +206,7 @@ struct CaptureDispatcher[
     var _routes: Self.Routes
     var _clock: Self.Clock
     var _cfg: CaptureConfig
+    var _query: QueryConfig
     var _warm: WarmMergedCache[Self.Store]
 
     def __init__(
@@ -206,8 +218,11 @@ struct CaptureDispatcher[
         var routes: Self.Routes,
         var clock: Self.Clock,
         var config: CaptureConfig,
+        var query: QueryConfig = QueryConfig.default(),
     ):
-        """A server over `store`. It owns every part it is given."""
+        """A server over `store`. It owns every part it is given. `query` holds
+        the synthesis prompt and the limits of the query routes; the default is
+        neutral."""
         self._store = store^
         self._llm = llm^
         self._emb = emb^
@@ -215,6 +230,7 @@ struct CaptureDispatcher[
         self._routes = routes^
         self._clock = clock^
         self._cfg = config^
+        self._query = query^
         self._warm = WarmMergedCache[Self.Store]()
 
     def store_ref(
@@ -271,6 +287,11 @@ struct CaptureDispatcher[
             if not (req.method == HttpMethod.post()):
                 return _not_allowed(String("POST"))
             return self._structured(req^)
+        if req.path == ROUTE_QUERY or req.path == ROUTE_QUERY_FEDERATED:
+            if not (req.method == HttpMethod.post()):
+                return _not_allowed(String("POST"))
+            var federated = req.path == ROUTE_QUERY_FEDERATED
+            return self._answer_query(req^, federated)
         if self._routes.handles(req.method, req.path):
             return self._extra(req^)
         return error_response(Int32(404), String("no such route"))
@@ -459,3 +480,67 @@ struct CaptureDispatcher[
             return self._routes.handle(req^, empty, now)
         self._warm.refresh(self._store)
         return self._routes.handle(req^, self._warm.get(), now)
+
+    # --- POST /query and POST /query-federated -------------------------------
+    def _answer_query(
+        mut self, var req: HttpRequest, federated: Bool
+    ) raises -> HttpResponse:
+        var spec: QuerySpec
+        try:
+            spec = parse_query_request(
+                req.body,
+                req.query_string,
+                federated,
+                self._cfg.default_partition,
+                self._query,
+            )
+        except e:
+            return error_response(
+                Int32(400), String("malformed query: ") + String(e)
+            )
+        if len(spec.text.as_bytes()) > self._query.max_query_bytes:
+            return error_response(
+                Int32(413),
+                String("the query text is over ")
+                + String(self._query.max_query_bytes)
+                + " bytes",
+            )
+
+        var has_model = self._llm.has_synthesis()
+        var ask = has_model
+        if spec.synthesize:
+            ask = spec.synthesize.value()
+            if ask and not has_model:
+                return error_response(
+                    Int32(501), String("this server has no model to answer with")
+                )
+
+        var result: KgQueryResult
+        if self._store.latest_snapshot_id() < Int64(0):
+            var empty = SnapshotWorkingSet(self._emb.dimension())
+            result = build_query_result(self._emb, empty, spec, self._query)
+        else:
+            self._warm.refresh(self._store)
+            result = build_query_result(
+                self._emb, self._warm.get(), spec, self._query
+            )
+        if ask:
+            try:
+                result.set_answer(
+                    synthesize_answer(
+                        self._llm,
+                        result,
+                        spec.text,
+                        self._query.synthesis_prompt,
+                    )
+                )
+            except:
+                return error_response(
+                    Int32(502), String("the model could not answer")
+                )
+
+        var out = HttpResponse(status=Int32(200))
+        out.body.extend(result.serialize().as_bytes())
+        out.headers[String("content-type")] = String("application/json")
+        out.headers[String("content-length")] = String(len(out.body))
+        return out^
