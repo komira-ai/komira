@@ -614,7 +614,8 @@ struct Supervisor(Movable):
     def write_stdin(mut self, text: String) -> Int:
         """Write every byte of `text` to the child's stdin. Returns the byte
         count, or a negative errno (-EBADF with no stdin pipe, -EPIPE when the
-        child has closed its stdin and SIGPIPE does not kill this process)."""
+        child has closed its stdin and SIGPIPE does not kill this process).
+        It blocks while the pipe is full and the child is not reading."""
         if self._stdin_fd < Int32(0):
             return -9  # EBADF
         return proc_write(self._stdin_fd, text.as_bytes())

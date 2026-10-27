@@ -166,6 +166,11 @@ def proc_spawn(
 # komira_proc_spawn_stdin thunk — proc_spawn, and the child's stdin is a pipe
 # too. Same arguments as proc_spawn plus `out_stdin_fd`, the WRITE end of the
 # child's stdin (close-on-exec in this process). Returns rc: 0, or -errno.
+#
+# FFI-BOUNDARY: the shim writes three caller-owned stack Int32 slots (the two
+# capture read ends and the stdin write end) and retains no pointer. On rc 0 the
+# caller owns all three descriptors and closes them (Supervisor.close); on a
+# negative rc the shim has closed every descriptor it made and wrote none.
 # -----------------------------------------------------------------------------
 def proc_spawn_stdin(
     path: String,
@@ -221,8 +226,11 @@ def proc_spawn_stdin(
     return rc
 
 
+# FFI-BOUNDARY: the shim reads the span's bytes during the call and keeps no
+# pointer; the descriptor stays owned by the caller. The call blocks while the
+# pipe is full and the reader is not reading.
 def proc_write(fd: Int32, data: Span[UInt8, _]) -> Int:
-    """Write every byte of `data` to `fd`. Returns the byte count, or -errno."""
+    """Write every byte of `data` to `fd`. Returns the byte count, or -errno. Blocks while the pipe is full."""
     # SAFETY: the shim reads `len(data)` bytes from the span's storage during
     # the call and keeps no pointer; `data` outlives the call.
     return Int(

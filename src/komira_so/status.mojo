@@ -15,6 +15,15 @@ comptime KOMIRA_ERR_BUFFER_TOO_SMALL: Int32 = -4
 """The caller's buffer cannot hold the output. This is a measurement, not a
 failure: the required length has been stored in `*out_len` and nothing has
 been written to the buffer."""
+comptime KOMIRA_ERR_TOO_LARGE: Int32 = -5
+"""A byte input is longer than `KOMIRA_MAX_INPUT_BYTES`. Nothing was read from
+it; the context's last error says so."""
+
+comptime KOMIRA_MAX_INPUT_BYTES: UInt64 = 64 * 1024 * 1024
+"""The longest byte input (the plan of `komira_plan_render`) a call accepts:
+64 MiB. The library copies an input in full before decoding it, so the length
+the host passes is bounded before anything is allocated; a longer one is
+`KOMIRA_ERR_TOO_LARGE`. A length of exactly this many bytes is accepted."""
 
 # The ABI version is `ABI_MAJOR * 1000 + ABI_MINOR`: 1000 is 1.0 and 2003 is
 # 2.3. A new symbol raises the minor version; changing or removing a symbol
@@ -22,7 +31,7 @@ been written to the buffer."""
 # below 1000 so that the integer decodes uniquely.
 comptime ABI_MAJOR: Int32 = 1
 """The major version: raised by a change that breaks an existing caller."""
-comptime ABI_MINOR: Int32 = 0
+comptime ABI_MINOR: Int32 = 1
 """The minor version: raised by an addition that breaks no caller."""
 comptime _ABI_MINOR_LIMIT: Int32 = 1000
 
@@ -32,6 +41,17 @@ def abi_version() -> Int32:
     """The version of the C ABI as `major * 1000 + minor`."""
     comptime assert ABI_MINOR >= 0 and ABI_MINOR < _ABI_MINOR_LIMIT
     return ABI_MAJOR * _ABI_MINOR_LIMIT + ABI_MINOR
+
+
+@always_inline
+def input_length_status(length: UInt64) -> Int32:
+    """The test a byte input's length passes before it is copied in:
+    `KOMIRA_ERR_TOO_LARGE` when `length` is above `KOMIRA_MAX_INPUT_BYTES`
+    (which includes any length that would be negative as a signed value),
+    `KOMIRA_OK` otherwise."""
+    if length > KOMIRA_MAX_INPUT_BYTES:
+        return KOMIRA_ERR_TOO_LARGE
+    return KOMIRA_OK
 
 
 @always_inline

@@ -1,7 +1,7 @@
-# The dynamic symbol table defines exactly the four exports, and nothing else.
+# The dynamic symbol table defines exactly the nine exports, and nothing else.
 #
 # A gate driver of //src/komira_so:libkomira. It has no dependency. The
-# exports check proves the four names resolve; this proves no other name is
+# exports check proves the nine names resolve; this proves no other name is
 # defined. On Linux it reads ./libkomira.so as an ELF64 file, walks the
 # SHT_DYNSYM section and lists every defined symbol: an `@export` the BUCK
 # `exports` list omits, a symbol of a static C dependency, or a linker marker
@@ -73,6 +73,11 @@ def _is_export(name: String) -> Bool:
         or name == "komira_ctx_new"
         or name == "komira_ctx_free"
         or name == "komira_last_error"
+        or name == "komira_register_parquet"
+        or name == "komira_parquet_schema"
+        or name == "komira_csv_binding"
+        or name == "komira_json_binding"
+        or name == "komira_plan_render"
     )
 
 
@@ -95,8 +100,8 @@ def main() raises:
             else:
                 print("UNEXPECTED EXPORT: " + name)
                 extra += 1
-        if seen != 4:
-            raise Error("expected 4 defined exports, the symbol table has " + String(seen))
+        if seen != 9:
+            raise Error("expected 9 defined exports, the symbol table has " + String(seen))
     if extra != 0:
-        raise Error(String(extra) + " symbol(s) outside the four exports are defined")
+        raise Error(String(extra) + " symbol(s) outside the nine exports are defined")
     print("ok")
