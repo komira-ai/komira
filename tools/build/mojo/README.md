@@ -18,7 +18,7 @@ where to read the environment the compiler sees) and
 | `mojo_library(srcs, deps, test_srcs, import_name, test_optimization_level, readme)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run, and so are the ```` ```mojo ```` examples of the package's `README.md` (see [README examples](#readme-examples)); the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. | [`hellopkg`](../examples/BUCK), [`libgate_ok`](../examples/libgate_ok/BUCK) |
 | `mojo_binary(srcs, deps, main, optimization_level, expected_stdout, helpers)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries and its `helpers` (programs it runs, beside it: [helpers.bzl](helpers.bzl)). `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
 | `mojo_test(srcs, deps, main, optimization_level, data, env, args, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
-| `mojo_shared_lib(srcs, main, deps, out_name, exports, exports_exact, gate_srcs, force_load, optimization_level)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK) |
+| `mojo_shared_lib(srcs, main, deps, out_name, exports, exports_exact, gate_srcs, force_load, native_owners, optimization_level)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK), [`spike_native`](../examples/shared_lib_native/README.md) |
 | `mojo_doc_json(lib, golden, symbols)` ([`doc.bzl`](doc.bzl)) | `<name>.json`: the `mojo doc` JSON of the `mojo_library` `lib`, optionally checked against a golden file and for named declarations (see [API JSON](doc.md)). | [`hellopkg_doc`](../examples/BUCK) |
 
 ## Libraries and the `test_srcs` gate
@@ -252,6 +252,16 @@ counts the library's sources only, for lines and for branches (the tests' own so
 package's `coverage_held` is checked against those branch records. `conda_package` takes the adopted library as it takes a
 `mojo_library`, so the conda packages of the libraries that depend on it still name it. The mopm package's `.conda` is
 the library's `:conda` (buildrules' `mojo_conda` over `:lib`), so it too exists only after the tests passed.
+
+A package with Mojo dependencies is a `mojo_package` whose `mopm.toml` names each one under `[dependencies]` as a sibling
+path dependency with a version (`komira_runtime_paths = { path = "../komira_runtime_paths", version = "0.1" }`, the form
+that survives the beta stage's per-run version), and the adopted label lists the adopted targets of those packages in
+`deps`. `buildrules mojo sync` is run with the package and its siblings staged; its `:lib` is then built from the
+siblings' `:lib`, and the adopted rule refuses a `deps` list that is not that closure, in either direction, naming the
+packages. A dependent of the label gets the closure on its `-I`, and `conda_package` requires the dependencies' packages.
+`:conda` is `mojo_conda` with `dir` and `members` (the siblings' manifests, staged at their repository paths), so the
+`.conda` records `mojo-<dependency> >=0.1,<0.2` and holds none of the dependency's files; `mojo_conda_holds` over it
+(`sole = True`, `depends = [...]`) reads that back from the built file. `src/komira_resources` is the example.
 
 ## Binaries and tests
 
@@ -580,7 +590,7 @@ mojo_test(
   bundle's `data` and a test's declared data; nothing reads a runfiles tree
   or an environment variable.
 - **Reading a resource.** Library code uses
-  [`komira_resources`](../../../src/komira_resources/resources.mojo):
+  [`komira_resources`](../../../src/komira_resources/src/komira_resources/resources.mojo):
   `read_resource(name)` and `resource_path(name)`, where `name` is the file's
   path under `share/` (its repository path, for a list entry). A test declares
   the file in `test_data` / `data`; a shipped program's `mojo_bundle` lists it
@@ -940,6 +950,7 @@ generated entry file and no `komira_main`; that is `mojo_binary[shared]`.
   lets `--emit shared-lib` through only when the link names itself with `-install_name`; the
   bundle's `-soname` library stays refused (bundles are Linux only).
 - **Run path.** `$ORIGIN/lib`, where a packaged copy puts the runtime libraries.
+- **`native_owners`** names `native_shared_library` targets (a library's own shared library, [`../native`](../native/README.md)), linked ahead of the C archives of the closure: the `.so` is NEEDED on each owner's SONAME and the owner's names are bound there instead of to a static copy. The gate stages each owner and what it needs in `lib/` beside the library (the run path `$ORIGIN/lib` finds them). Linux only. The archives stay on the link line, so a name the owner does not export is still embedded silently; [`examples/shared_lib_native`](../examples/shared_lib_native/README.md) measures it, its driver (`call_driver.mojo`) opens the owner's SONAME and checks that the library's own dynamic symbol table leaves the owner's names undefined. `tests//negative/shared_lib:owner_embedded` is the same library without the attribute with a smaller driver (`owner_embedded_driver.mojo`) that only opens the owner's SONAME, so it is red on the missing NEEDED edge and does not read the symbol table.
 - **Not yet:** consuming a `.so` from a `deps` edge (a consumer linking it, or generating its `@extern` declarations).
 
 ## C and C++
