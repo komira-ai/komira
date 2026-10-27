@@ -13,8 +13,8 @@ load(":buildrules.mojo.bzl", "mojo_package")
 # (mopm.toml has no [dependencies] table): the codec is pure bytes, and
 # `produce_error` matches its own copies of the tokens (held equal to
 # komira_objectstore's by the mojo_test //tests/kafka_produce_error_tokens) so
-# that this library stays a conda package. The server part arrives later in
-# this package.
+# that this library stays a conda package. The broker part, above this codec,
+# is the package komira_kafka_broker, which depends on this one.
 #
 # The welded tests are byte-exact against the Apache Kafka protocol spec and
 # round-trip every codec; none opens a socket. The test_kafka_golden_* tests
