@@ -11,7 +11,7 @@ _ZIG = {
     "busybox": "komira//tools/build/toolchains:busybox",
     "exec_compatible_with": LINUX_X86_64,
     "imports": _SRCS,
-    "zig": "komira//tools/build/toolchains:zig",
+    "zig": "komira//tools/build/toolchains:zig_next",
 }
 
 # One `zig test` per lint kind, each run as a build action: the kind refuses

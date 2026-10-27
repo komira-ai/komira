@@ -33,9 +33,9 @@ def install_stop_signal_handler() raises:
     Idempotent. Raises, naming the errno, if sigaction fails."""
     var rc = proc_install_stop_handler()
     if rc != Int32(0):
-        raise Error(
-            String("installing the SIGTERM/SIGINT handler failed: errno ")
-            + String(-rc)
+        raise Error(  # cov: unreachable sigaction of SIGTERM/SIGINT with a valid handler cannot fail
+            String("installing the SIGTERM/SIGINT handler failed: errno ")  # cov: unreachable see the line above
+            + String(-rc)  # cov: unreachable see the line above
         )
 
 

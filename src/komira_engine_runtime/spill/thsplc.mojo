@@ -1,19 +1,14 @@
 # =============================================================================
-# thsplc.mojo — THSPLC (Komira-Spill-Column) encoder + decoder for RecordBatch.
+# thsplc.mojo: THSPLC, the column spill codec for a RecordBatch.
 # =============================================================================
 #
-# THSPLC is the COLUMN sibling of THSPILL2 (the row codec in
-# `thspill2.mojo`): it serializes a `RecordBatch` (SoA / columnar) into
-# contiguous bytes and restores it back, with a true 0-copy restore path.
-#
-# Where THSPILL2 transposes rows into a fixed-stride AoS body, THSPLC keeps
-# columns columnar — there is ZERO AoS<->SoA transpose. Each column's
+# THSPLC serializes a `RecordBatch` into contiguous bytes and restores it, with
+# a zero-copy restore path. Columns stay columnar: each column's
 # `[validity?][offsets?][values]` buffers are copied (or, on restore, viewed)
-# contiguously. That's the whole point vs the row grain: the in-memory
-# per-column `SharedAlignedBuffer` payload IS the on-disk/on-wire body (§12.2
-# "Body bytes byte-identical to in-memory storage: Yes").
+# contiguously, so the per-column buffer bytes in memory are the body bytes on
+# disk or on the wire.
 #
-# # On-wire layout (§12.1 + native_shuffle_format_v04 §2.2)
+# # Layout
 #
 #   ┌──────────────────────────────────────────────────────────────┐
 #   │ THSPLC header (96 B; thsplc_header.mojo)                       │
@@ -25,62 +20,50 @@
 #   │ ...                                                            │
 #   │ Per-column buffer N-1: ...                                     │
 #   ├──────────────────────────────────────────────────────────────┤
-#   │ Trailing magic (8 B = "THSPLC\x01\x00\x00")                    │
+#   │ Trailing magic (8 B = "THSPLC\x01\x00")                        │
 #   └──────────────────────────────────────────────────────────────┘
 #
 # Each per-column buffer region begins on an 8-byte boundary so that the
-# 0-copy restore's borrowed view over the values buffer is directly castable
+# zero-copy restore's borrowed view over the values buffer is directly castable
 # (Int32 offsets / Int64 offsets / 8-byte-wide primitives all want >= 8-byte
 # alignment for an aligned typed load). The header is 96 B (8-aligned) and
 # the descriptor section is a whole number of 48-byte records, so the first
 # column region is naturally 8-aligned; each subsequent region is padded up.
 #
-# # 0-copy restore eligibility (be honest — this drives the benchmark)
+# # Zero-copy restore eligibility
 #
-# A buffer is TRUE-0-copy-restore-eligible when its required alignment is met
-# by the on-wire layout AND no value transform is needed:
+# A buffer is restored zero-copy when its required alignment is met by the
+# layout and no value transform is needed:
 #
 #   * Fixed-width primitives (INT8..INT64, UINT8..UINT64, FLOAT16..FLOAT64,
 #     DATE32/64, TIME*, TIMESTAMP*, DURATION*, DECIMAL128/256,
-#     FIXED_SIZE_BINARY) — 0-copy. Each region is 8-aligned; the widest
-#     element is 16 B (DECIMAL128) / 32 B (DECIMAL256) but the values are
-#     read element-by-element (no whole-buffer SIMD-aligned demand at the
-#     codec layer), and the 8-byte region alignment satisfies the typed
-#     loads the engine performs.
-#   * Variable-width STRING / BINARY (Int32 offsets) + LARGE_STRING /
-#     LARGE_BINARY (Int64 offsets) — 0-copy. Offsets region is 8-aligned
-#     (Int32/Int64 both castable); values region is raw bytes (alignment 1).
-#   * BOOLEAN — 0-copy. Data is an LSB-packed bitmap (alignment 1).
-#   * Validity bitmaps (any type) — 0-copy. LSB-packed, alignment 1.
+#     FIXED_SIZE_BINARY). Each region is 8-aligned; the widest element is
+#     16 B (DECIMAL128) / 32 B (DECIMAL256) but the values are read element by
+#     element, and the 8-byte region alignment satisfies the typed loads the
+#     engine performs.
+#   * Variable-width STRING / BINARY (Int32 offsets) and LARGE_STRING /
+#     LARGE_BINARY (Int64 offsets). The offsets region is 8-aligned; the values
+#     region is raw bytes (alignment 1).
+#   * BOOLEAN: an LSB-packed bitmap (alignment 1).
+#   * Validity bitmaps (any type): LSB-packed, alignment 1.
 #
-# COPY-FALLBACK (NOT 0-copy):
-#   * DICTIONARY columns — carry an extra `_dict_data` buffer + index-width
-#     metadata the v0.4 THSPLC body does not yet lay out (the shuffle
-#     format defers dictionary on the wire too). decode_zerocopy raises for these;
-#     decode_copy handles them only if they were encoded (encode raises on
-#     DICTIONARY in v0.4 — the planner dictionary-decodes upstream of spill).
-#   * Nested types (LIST / STRUCT / MAP / UNION / FIXED_SIZE_LIST) — multi-
-#     buffer / child-column layouts deferred to a follow-up slot. encode
+# Not supported:
+#   * DICTIONARY columns carry an extra dictionary buffer and index-width
+#     metadata the body does not lay out. encode raises on them;
+#     decode_zerocopy raises for them too.
+#   * Nested types (LIST / STRUCT / MAP / UNION / FIXED_SIZE_LIST): encode
 #     raises.
 #
-# # Spillable relationship
+# The restore takes the caller's expected `Schema` (the operator knows its
+# output shape). The encoder produces one `SharedAlignedBuffer[HeapRegion]` and
+# the decoders consume one, so any byte store can hold a chunk unchanged.
 #
-# `Spillable` (thspill2.mojo) is shaped for the ROW body: `as_byte_view` +
-# `from_bytes(bytes, row_count, fingerprint)`. THSPLC's restore needs the
-# caller's expected `Schema` (the operator knows its output shape), so the
-# public surface here is RecordBatch-specific rather than going through the
-# opaque-body `Spillable` trait. The encoder still produces a single
-# `SharedAlignedBuffer[HeapRegion]` that a `SpillStorage.write_chunk` consumes
-# unchanged, and the decoders consume a `SharedAlignedBuffer[HeapRegion]` that
-# `SpillStorage.read_chunk` produces — so the storage substrate is shared with
-# THSPILL2 byte-for-byte (§12.2 "Network shuffle frame envelope: Same").
+# # Encapsulation
 #
-# # Encapsulation rule
-#
-# NO `UnsafePointer` on any public surface. Bytes flow via
+# No `UnsafePointer` on any public surface. Bytes flow via
 # `SharedAlignedBuffer[HeapRegion]` and `ByteView[origin]`. The descriptor
-# pack/parse uses OAB/SAB scalar `write_*_le_at` / `read_*_le_at` accessors —
-# no raw pointer arithmetic escapes this module.
+# pack/parse uses the buffers' scalar `write_*_le_at` / `read_*_le_at`
+# accessors; no raw pointer arithmetic escapes this module.
 # =============================================================================
 
 from std.collections import Optional
@@ -145,8 +128,8 @@ struct _ColumnDescriptor(
 
     Region layout within `[region_offset, region_offset + total_len)`:
         [validity (validity_len)] [offsets (offsets_len)] [values (values_len)]
-    in that order (matches native_shuffle_format_v04 §2.2 nullable var-width
-    layout `[validity][offsets][data]`).
+    in that order (the Arrow nullable var-width order
+    `[validity][offsets][data]`).
     """
 
     comptime FLAG_HAS_VALIDITY: UInt32 = 1
@@ -296,16 +279,13 @@ def _align_up_8(n: Int) -> Int:
 comptime THSPLC_WIRE_U32_MAX: Int = 0xFFFFFFFF
 """Largest `validity_len` / `offsets_len` a THSPLC descriptor can carry.
 
-⭐ VARHEAP-OFFSET-CEILING's spill-format sibling (2026-09-23). Both fields are
-UInt32 on the wire while every other length and offset in the descriptor is
-UInt64, and the encoder narrowed them with a bare `UInt32(...)`. Worse, pass 2
-copies `Int(d.offsets_len)` -- the NARROWED value -- so a wrapped field is not
-merely mis-recorded: the offsets region is written TRUNCATED and the values land
-early, and the decoder, reading the same narrowed field, rebuilds the column
-from the wrong bytes without failing a single bounds check. Reachable by ONE
-spilled batch of >= 2**30 STRING rows (Int32 offsets) or >= 2**29 LARGE_STRING
-rows -- `SortBuffer.spill_to_storage` encodes its whole buffered run as one
-batch. Refused in pass 1, before the chunk is allocated."""
+Both fields are UInt32 on the wire while every other length and offset in the
+descriptor is UInt64. Pass 2 copies `Int(d.offsets_len)`, the narrowed value, so
+a silently wrapped field would write the offsets region truncated and the
+values early, and the decoder, reading the same narrowed field, would rebuild
+the column from the wrong bytes without failing a bounds check. One batch of
+>= 2**30 STRING rows (Int32 offsets) or >= 2**29 LARGE_STRING rows reaches it.
+The encoder refuses it in pass 1, before the chunk is allocated."""
 
 
 def _thsplc_wire_u32(
@@ -334,8 +314,7 @@ struct THSPLCEncoder:
     state — callers write `THSPLCEncoder.encode(batch)`.
 
     Produces ONE `SharedAlignedBuffer[HeapRegion]` holding header + descriptor
-    section + per-column buffers + trailing magic. The buffer is ready to hand
-    to `SpillStorage.write_chunk` unchanged (same substrate as THSPILL2)."""
+    section + per-column buffers + trailing magic."""
 
     @staticmethod
     def encode(var batch: RecordBatch) raises -> SharedAlignedBuffer[HeapRegion]:
@@ -345,8 +324,8 @@ struct THSPLCEncoder:
         buffers, 8-aligned each][8 B trailing magic]`. Columns stay columnar
         — no AoS<->SoA transpose.
 
-        Raises on DICTIONARY / nested columns (deferred to a follow-up slot;
-        the planner dictionary-decodes / flattens upstream of spill in v0.4).
+        Raises on DICTIONARY / nested columns (the body has no layout for
+        them).
 
         Args:
             batch: The RecordBatch to serialize. Consumed.
@@ -373,8 +352,8 @@ struct THSPLCEncoder:
                 raise Error(
                     "THSPLCEncoder.encode: DICTIONARY column "
                     + String(i)
-                    + " is not supported in v0.4 (planner must dictionary-"
-                    "decode upstream of spill)"
+                    + " is not supported (decode the dictionary before"
+                    " encoding)"
                 )
 
             var flags = UInt32(0)
@@ -524,7 +503,7 @@ struct THSPLCEncoder:
     def encode_column_native(
         var batch: ColumnNativeBatch,
     ) raises -> SharedAlignedBuffer[HeapRegion]:
-        """P-2.D.ZC spill/shuffle path: produce the contiguous THSPLC body bytes
+        """Produce the contiguous THSPLC body bytes
         FROM a (zero-copy) ColumnNativeBatch.
 
         The pipeline path keeps the zero-copy per-column handles and never builds
@@ -566,15 +545,14 @@ struct THSPLCDecoder:
     Static, no per-call state. Two restore paths:
 
       * `decode_copy(bytes, schema)`   — memcpy each buffer into fresh OABs.
-        The honest baseline; restored buffers are independent of `bytes`.
+        Restored buffers are independent of `bytes`.
       * `decode_zerocopy(bytes, schema)` — each column buffer is a
         `SharedAlignedBuffer.from_borrowed_view(bytes, off, len)` Arc-clone
         slice over `bytes`. NO memcpy; the restored batch keeps `bytes` alive
         via the cloned Arc refcount.
 
     Both take the caller's expected `Schema` (the operator knows its output
-    shape) — mirrors THSPILL2's `from_bytes(bytes, row_count, fingerprint)`
-    contract where the operator supplies the schema identity."""
+    shape); the header fingerprint is checked against it."""
 
     @staticmethod
     def _parse_header(
@@ -963,7 +941,7 @@ struct THSPLCDecoder:
 def _schema_fingerprint(schema: Schema, n_cols: Int) raises -> UInt64:
     """FNV-1a-64 over per-column `(type_id, nullable)` — a stable schema
     identity for restore-side mismatch detection. Matches THSPLC header
-    `schema_fingerprint` (UInt64; §12.2)."""
+    `schema_fingerprint` (UInt64)."""
     var bytes = List[UInt8]()
     for i in range(n_cols):
         bytes.append(schema.field_arrow_type(i).type_id)

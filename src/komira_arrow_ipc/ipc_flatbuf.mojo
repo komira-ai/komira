@@ -787,8 +787,8 @@ struct FlatbufReader[bo: Origin[mut=False]](Copyable, Movable):
         the u32 length prefix; NOT going through an offset slot)."""
         var length = Int(self.read_u32_le(length_pos))
         if length < 0:
-            raise Error(
-                "FlatbufReader.read_string: negative length " + String(length)
+            raise Error(  # cov: unreachable the length is a u32 widened to Int
+                "FlatbufReader.read_string: negative length " + String(length)  # cov: unreachable the length is a u32 widened to Int
             )
         var data_pos = length_pos + 4
         self._check_bounds(data_pos, length)
@@ -1083,7 +1083,8 @@ def add_field_inline_struct(
     tb._field_widths[field_id] = UInt8(size if size <= 255 else 255)
     # `width=size` is fine for 16/24-byte structs; if a struct exceeds
     # 255 bytes (rare in Arrow.fbs), the width field is capped at 255
-    # but the struct_size field carries the true size for emission.
+    # but the struct_size field carries the true size, which end_table
+    # uses for both the layout and the emission.
     tb._field_present[field_id] = True
     if field_id + 1 > tb._field_count:
         tb._field_count = field_id + 1
@@ -1160,6 +1161,11 @@ def end_table(mut writer: FlatbufWriter, var tb: _TableBuilder) raises -> Int:
         if not tb._field_present[i]:
             continue
         var w = Int(tb._field_widths[i])
+        # An inline struct's width byte is capped at 255; its true size
+        # (what the emission loop below writes) is `_field_struct_size`.
+        var struct_sz = Int(tb._field_struct_size[i])
+        if struct_sz > 0:
+            w = struct_sz
         # Natural alignment: round inline_size_data up to multiple of w
         # for w ≤ 8; inline-struct fields (Buffer = 16) align to 8.
         var align: Int = w
@@ -1262,8 +1268,8 @@ def end_table(mut writer: FlatbufWriter, var tb: _TableBuilder) raises -> Int:
             topmost_end = end
     var tail_pad = inline_size_data - topmost_end
     if tail_pad > 0:
-        writer.write_padding(tail_pad)
-        current_inline_pos -= tail_pad
+        writer.write_padding(tail_pad)  # cov: unreachable inline_size_data is the end of the last field, which no field passes
+        current_inline_pos -= tail_pad  # cov: unreachable inline_size_data is the end of the last field, which no field passes
 
     for k in range(n_present):
         var id = sorted_ids[k]
@@ -3748,7 +3754,7 @@ def parse_ipc_message[
     # Otherwise legacy: the first u32 IS the metadata_size.
 
     if total < pos + 4:
-        raise Error("IPC frame: too short for metadata_size header")
+        raise Error("IPC frame: too short for metadata_size header")  # cov: unreachable total >= 8 and pos <= 4 here
 
     var metadata_size = Int(frame.read_u32_le_at(pos))
     pos += 4

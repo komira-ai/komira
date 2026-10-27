@@ -20,12 +20,18 @@
 #      KCI-E-PLATFORM-MISMATCH.
 #   5. One flipped byte in the image's layer: KCI-E-MEMBER (`verify_member`
 #      hashes every blob at load).
+#   6. An artifacts file that does not read: KCI-E-ARTIFACT; a `release.json`
+#      that does not parse: KCI-E-FORMAT; neither returns an image.
+#   7. A release directory given with a trailing `/`: its `release.json` is
+#      still found and held to the revision (KCI-E-REVISION-MISMATCH), and
+#      the set loads with the same layout directory as without the `/`.
+#   8. `ok()` is True exactly when `error_id` is "".
 # =============================================================================
 
 from std.ffi import external_call
 from std.os import getenv, listdir, makedirs
 from std.pathlib import Path
-from std.testing import TestSuite, assert_equal, assert_true
+from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_oci import write_test_layout
 
@@ -195,6 +201,46 @@ def test_a_flipped_layer_byte_is_refused_at_load() raises:
     assert_equal(c.error_id, String("KCI-E-MEMBER"))
     assert_true(c.message.find(String("does not verify")) >= 0, c.message)
     assert_equal(len(c.images), 0)
+
+
+def test_an_unreadable_artifacts_file_is_refused() raises:
+    """Catches: an artifacts file that does not read reported under another
+    error id, or not refused at all."""
+    var s = _write(String("noarts"), True)
+    var c = load_cell_release(
+        s.dir + String("/no_such_artifacts.textproto"), s.dir, ExampleRelease().revision, String("linux-x86_64"), s.set_hash
+    )
+    assert_equal(c.error_id, String("KCI-E-ARTIFACT"))
+    assert_true(c.message.find(String("no_such_artifacts.textproto")) >= 0, c.message)
+    assert_false(c.ok())
+    assert_equal(len(c.images), 0)
+
+
+def test_a_malformed_release_json_is_refused() raises:
+    """Catches: a `release.json` that does not parse refused under another
+    error id, or skipped as if absent (the set would then load)."""
+    var s = _write(String("badjson"), True)
+    write_text_file(s.dir + String("/release.json"), String("{"))
+    var c = _load(s)
+    assert_equal(c.error_id, String("KCI-E-FORMAT"))
+    assert_true(c.message.find(String("release.json")) >= 0, c.message)
+    assert_equal(len(c.images), 0)
+
+
+def test_a_trailing_slash_dir_still_reads_release_json() raises:
+    """Catches: `release.json` not found when the directory ends in `/`
+    (its revision then never checked)."""
+    var s = _write(String("slash"), True)
+    var c = load_cell_release(
+        s.artifacts, s.dir + String("/"), String("ffffffffffffffffffffffffffffffffffffffff"), String("linux-x86_64"), s.set_hash
+    )
+    assert_equal(c.error_id, String("KCI-E-REVISION-MISMATCH"), c.message)
+    assert_equal(len(c.images), 0)
+    var ok = load_cell_release(s.artifacts, s.dir + String("/"), ExampleRelease().revision, String("linux-x86_64"), s.set_hash)
+    assert_equal(ok.error_id, String(""), ok.message)
+    assert_true(ok.ok())
+    assert_equal(len(ok.images), 1)
+    assert_equal(ok.images[0].layout_dir, s.dir + String("/web/web.oci"))
 
 
 def main() raises:

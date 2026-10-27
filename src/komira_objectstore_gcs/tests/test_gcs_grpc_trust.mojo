@@ -13,7 +13,7 @@
 #
 #   1. test_default_connector_refuses_a_private_root: over
 #      `build_gcs_tls_connector("localhost")`, the default, GetObject raises
-#      exactly `_REFUSED`: a TRANSPORT StoreError whose class is
+#      the refusal `_assert_refused` checks: a TRANSPORT StoreError whose class is
 #      `TlsConnector.connect` (the TLS handshake failed; no public root signs
 #      the fixture leaf). Nothing reached the handler (its counter stays 0).
 #   2. test_trusting_connector_accepts_its_root: over
@@ -24,7 +24,7 @@
 #      onto ObjectMetaRaw. The handler ran once.
 #   3. test_trusting_connector_refuses_another_name: the same trusted root,
 #      SNI `gcs-emulator.invalid`, a name the leaf does not carry: GetObject
-#      raises exactly `_REFUSED` and nothing reaches the handler.
+#      raises `_assert_refused`'s refusal and nothing reaches the handler.
 #      The chain verifies, so this refusal is the name check's.
 #   4. test_trusting_connector_construction: the connector is VERIFY_PEER with
 #      SNI pinned to the server name; an empty server name and a root that is
@@ -102,12 +102,32 @@ comptime _ROOT_CA = "src/komira_http_core/tests/fixtures/tls/root_ca.pem"
 comptime _SERVER_NAME = "localhost"
 comptime _OTHER_NAME = "gcs-emulator.invalid"
 # Both refusals: the backend keeps the class of the client's error and the
-# length of its text; the untrusted chain and the host-name mismatch measured
-# the same length.
-comptime _REFUSED = (
+# length of its text. The length is not fixed: the handshake error carries
+# s2n's debug string, which names the source file as the compiler was given
+# it, and that path holds the build's output directory name, so the length
+# moves with it (an isolation directory named differently changes it). The
+# tests pin the class, which is the fixed part, and the byte count's tail.
+comptime _REFUSED_PREFIX = (
     "StoreError[TRANSPORT] GetObject gs://trust-probe/logs/a.parquet"
-    " status=500 detail=TlsConnector.connect, error text 259 bytes"
+    " status=500 detail=TlsConnector.connect, error text "
 )
+comptime _REFUSED_SUFFIX = " bytes"
+
+
+def _assert_refused(raised: String) raises:
+    assert_true(
+        raised.startswith(String(_REFUSED_PREFIX)),
+        "not the TlsConnector.connect refusal: " + raised,
+    )
+    assert_true(
+        raised.endswith(String(_REFUSED_SUFFIX)),
+        "the refusal's text does not end in its byte count: " + raised,
+    )
+    assert_true(
+        raised.byte_length()
+        > _REFUSED_PREFIX.byte_length() + _REFUSED_SUFFIX.byte_length(),
+        "the refusal carries no byte count: " + raised,
+    )
 comptime _HANDSHAKE_DEADLINE_US: Int64 = 10_000_000
 comptime _REQUEST_TIMEOUT_US = 10_000_000
 comptime _SERVE_POLL_TIMEOUT_US: Int32 = 5_000
@@ -337,7 +357,7 @@ def test_default_connector_refuses_a_private_root() raises:
         not leg.answered,
         "the default connector must refuse a certificate no public root signs",
     )
-    assert_equal(leg.raised, String(_REFUSED))
+    _assert_refused(leg.raised)
     assert_equal(Int(stats.reqs_handled), 0, "no RPC may reach the handler")
     print("  default connector refuses the private root PASS")
 
@@ -364,7 +384,7 @@ def test_trusting_connector_refuses_another_name() raises:
         not leg.answered,
         "a trusted chain under a name the leaf does not carry must be refused",
     )
-    assert_equal(leg.raised, String(_REFUSED))
+    _assert_refused(leg.raised)
     assert_equal(Int(stats.reqs_handled), 0, "no RPC may reach the handler")
     print("  trusting connector refuses another name PASS")
 

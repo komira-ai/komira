@@ -720,18 +720,24 @@ def _arm_of(p: WirePlan) -> String:
         names.append("cse_ref")
     if len(p.cast_to_varchar) > 0:
         names.append("cast_to_varchar")
+    if len(p.map_batches) > 0:
+        names.append("map_batches")
+    if p.step:
+        names.append("step")
     for i in range(len(names)):
         out += (String(",") if i > 0 else String("")) + names[i]
     return out
 
 
 def test_plan(mut L: _Ledger) raises:
-    """2 output_schema; oneof node { 4 scan .. 19 cast_to_varchar } (1 and 3
-    are reserved): each arm, written under its ledger number, decodes as
+    """2 output_schema; oneof node { 4 scan .. 19 cast_to_varchar, 21
+    map_batches, 22 step } (1 and 3 are reserved, 20 is held for the
+    exchange arm): each arm, written under its ledger number, decodes as
     that arm by name."""
     var arms = _names(
         "scan filter project aggregate join sort limit distinct topn union_all"
         + " partition_by partition_topn asof_join view_ref cse_ref cast_to_varchar"
+        + " map_batches step"
     )
     for k in range(len(arms)):
         var q = "WirePlan." + arms[k]
@@ -769,10 +775,21 @@ def test_write_target_and_envelope(mut L: _Ledger) raises:
     assert_equal(b[0], UInt8(0x08), "WirePlanEnvelope field 1, varint: tag byte 0x08")
     _m(L, b, "WirePlanEnvelope.plan", _plan(L, 26))
     _m(L, b, "WirePlanEnvelope.write_target", w)
+    # UdfRef { 2 kind: SCALAR }, twice: a value, not a pin (the UdfRef census
+    # is test_plan_field_numbers_udf.mojo).
+    var u = List[UInt8]()
+    _raw_u(u, 2, 1)
+    _m(L, b, "WirePlanEnvelope.udfs", u)
+    var u2 = List[UInt8]()
+    _raw_u(u2, 2, 5)
+    _m(L, b, "WirePlanEnvelope.udfs", u2)
     var e = decode_proto[WirePlanEnvelope](b.copy())
     assert_equal(e.format_version, UInt32(3), "WirePlanEnvelope: e.format_version")
     assert_equal(_hash(e.plan.value()), 26, "WirePlanEnvelope: _hash(e.plan.value())")
     assert_equal(e.write_target.value().path, "out.parquet", "WirePlanEnvelope: e.write_target.value().path")
+    assert_equal(len(e.udfs), 2, "WirePlanEnvelope: len(e.udfs)")
+    assert_equal(e.udfs[0].kind.number(), 1, "WirePlanEnvelope: e.udfs[0].kind")
+    assert_equal(e.udfs[1].kind.number(), 5, "WirePlanEnvelope: e.udfs[1].kind")
     _same(encode_proto(e), b, "WirePlanEnvelope")
 
 
@@ -916,12 +933,15 @@ WirePlan.asof_join 16
 WirePlan.view_ref 17
 WirePlan.cse_ref 18
 WirePlan.cast_to_varchar 19
+WirePlan.map_batches 21
+WirePlan.step 22
 WireWriteTarget.path 1
 WireWriteTarget.format 2
 WireWriteTarget.codec 3
 WirePlanEnvelope.format_version 1
 WirePlanEnvelope.plan 2
 WirePlanEnvelope.write_target 3
+WirePlanEnvelope.udfs 4
 """
 
 

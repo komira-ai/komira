@@ -139,7 +139,7 @@ RUST_TOOLCHAIN_ATTRS = dict(
 def komira_rust_toolchains(**overrides):
     """Declare `:rust`, the toolchain of rust_library and rust_binary, in the calling package.
 
-    rustc 1.85.0 from `komira//tools/build/toolchains/rust:sysroot`. Compiles
+    rustc 1.99.0 from `komira//tools/build/toolchains/rust:sysroot`. Compiles
     run on the linux execution platform, like Mojo compiles. rustc loads only glibc from the worker (everything
     else it needs is in the sysroot); links target glibc 2.34 through zig, so
     the binaries run on any worker with glibc 2.34 or newer. Each keyword in
