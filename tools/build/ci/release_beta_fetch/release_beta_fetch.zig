@@ -4,8 +4,9 @@
 //!
 //! `--staged` is a staged set as `mopm stage` wrote it (spec/staged-set.md of mopm): `plan.json`
 //! and each member's README. Its `.conda` files, if the directory holds them, are never read: the
-//! bytes under test are the ones the registry serves. release.yml's `mopm-e2e-beta` job runs this
-//! after `mopm-publish-beta`, against the staged set `mopm-stage-beta` uploaded.
+//! bytes under test are the ones the registry serves. It was the program of a beta job of release.yml,
+//! which no longer exists; release_staged_verify.zig (beside this file) imports its plan reader and
+//! client for the prod publish, and the program itself is no longer built.
 //!
 //! What it does, in order:
 //!  1. reads `plan.json` and refuses a plan it cannot check: no member, a member that is not an
@@ -23,7 +24,7 @@
 //!     downloaded `.conda` files at `<subdir>/<filename>`: a staged set made of the published
 //!     bytes. They are written into `<out>.partial` and moved to `--out` at the end, so nothing is left
 //!     when anything failed, a write included. `--out` must be absent or empty, except that it may hold
-//!     a file named `BUCK` (release/beta_set/BUCK, checked in), which is kept: the members are then
+//!     a file named `BUCK` (release/staged_set/BUCK, checked in), which is kept: the members are then
 //!     moved in beside it, and a failed move takes back the ones already moved.
 //!
 //! It makes read-only GET requests and holds no credential.
@@ -297,7 +298,7 @@ pub fn outIsFree(why: *[]const u8, a: Allocator, out: []const u8) Error!void {
     };
     defer dir.close();
     var it = dir.iterate();
-    // The checked-in BUCK of the directory that holds the set (release/beta_set/BUCK) is the one entry allowed.
+    // The checked-in BUCK of the directory that holds the set (release/staged_set/BUCK) is the one entry allowed.
     while (it.next() catch |e| return refuse(a, why, "cannot list --out {s}: {s}", .{ out, @errorName(e) })) |entry| {
         if (entry.kind == .file and std.mem.eql(u8, entry.name, keep_name)) continue;
         return refuse(a, why, "--out {s} is not empty (only a file named {s} may be there)", .{ out, keep_name });
