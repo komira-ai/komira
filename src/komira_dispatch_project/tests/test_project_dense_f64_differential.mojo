@@ -30,6 +30,7 @@
 # `dense_par = False`.
 # =============================================================================
 
+from std.collections import Optional
 from std.memory import bitcast
 from std.testing import TestSuite, assert_true, assert_equal, assert_false
 
@@ -43,6 +44,8 @@ from komira_arrow.batch_view import batch_view_over
 from komira_arrow.selection_vector_row import RowSelectionVector
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_MOCK
+from komira_async.runtime.local_dispatcher import LocalDispatcher
+from komira_async.runtime.parallel_fork_join_shared import SharedForkJoinHandle
 from komira_async.runtime.runtime import PLACEMENT_FIXED, PerCoreAsyncRuntime
 from komira_buffer.heap_region import HeapRegion
 from komira_eval.expression_executor import DecimalSpec, ExpressionExecutor
@@ -61,6 +64,7 @@ from komira_dispatch_project.project_dense_f64 import (
     DENSE_PAR_MIN_ROWS,
     dense_par_task_rows,
     try_eval_dense_f64,
+    try_eval_dense_f64_pooled,
 )
 
 
@@ -327,13 +331,20 @@ def test_every_size_through_two_simd_blocks_is_bit_identical() raises:
 # =============================================================================
 
 
-def _ieee_batch() raises -> RecordBatch:
+def _payload_nan(bits: UInt64) -> Float64:
+    return bitcast[DType.float64](bits)
+
+
+def _ieee_batch_n(n: Int) raises -> RecordBatch:
     """`a` holds ordinary values; `z` holds the divisors that make IEEE
-    division interesting: +0.0, -0.0, NaN, +Inf, -Inf, subnormal, and ones."""
-    var n = 41
+    division interesting: +0.0, -0.0, NaN, +Inf, -Inf, subnormal, and ones.
+    `w` holds NaNs with distinct payloads built from bit patterns (quiet,
+    negative quiet, signalling), at rows where `z` holds none, so an operator
+    over `w` and any other column has exactly one NaN operand."""
     var rng = _Rng(UInt64(77))
     var a = List[Float64](capacity=n)
     var z = List[Float64](capacity=n)
+    var w = List[Float64](capacity=n)
     var inf = Float64(1.0) / Float64(0.0)
     var nan = inf - inf
     for i in range(n):
@@ -353,13 +364,30 @@ def _ieee_batch() raises -> RecordBatch:
             z.append(4.9406564584124654e-324)
         else:
             z.append(rng.unit() + 0.5)
+        var pl = UInt64(1 + (i % 4093))
+        if k == 0:
+            w.append(_payload_nan(UInt64(0x7FF8000000000000) | pl))
+        elif k == 1:
+            w.append(_payload_nan(UInt64(0xFFF8000000000000) | pl))
+        elif k == 3:
+            w.append(_payload_nan(UInt64(0x7FF0000000000000) | pl))
+        elif k == 5:
+            w.append(_payload_nan(UInt64(0xFFF0000000000000) | pl))
+        else:
+            w.append(Float64(i % 5) - 1.5)
     var sb = SchemaBuilder()
     sb.add_field(Field(String("a"), ArrowType.FLOAT64, False))
     sb.add_field(Field(String("z"), ArrowType.FLOAT64, False))
-    var rbb = RecordBatchBuilder.with_capacity(2)
+    sb.add_field(Field(String("w"), ArrowType.FLOAT64, False))
+    var rbb = RecordBatchBuilder.with_capacity(3)
     rbb.add_column(_f64_col(a^))
     rbb.add_column(_f64_col(z^))
+    rbb.add_column(_f64_col(w^))
     return rbb.build(sb.build())
+
+
+def _ieee_batch() raises -> RecordBatch:
+    return _ieee_batch_n(41)
 
 
 def _check_both_over(
@@ -413,6 +441,54 @@ def test_each_operator_and_operand_order_matches_the_walker_including_ieee_edges
             Expr.binary(op, _lit_f(-7.25), _c("z")),
             "-7.25 op z, op " + String(oi),
         )
+
+
+def test_nan_payloads_propagate_as_the_walker_propagates_them() raises:
+    """`w` holds NaNs with distinct payloads and signs. `a op w` puts the NaN
+    on the right, `w op a` on the left, `w op z` pairs it with the special
+    divisors, and `w op 2.5` with a scalar."""
+    var ops = List[Int]()
+    ops.append(Int(BIN_ADD))
+    ops.append(Int(BIN_SUB))
+    ops.append(Int(BIN_MUL))
+    ops.append(Int(BIN_DIV))
+    for oi in range(len(ops)):
+        var op = UInt8(ops[oi])
+        _check_both_over(
+            _ieee_batch(), _ieee_batch(),
+            Expr.binary(op, _c("a"), _c("w")),
+            Expr.binary(op, _c("a"), _c("w")),
+            "a op w, op " + String(oi),
+        )
+        _check_both_over(
+            _ieee_batch(), _ieee_batch(),
+            Expr.binary(op, _c("w"), _c("a")),
+            Expr.binary(op, _c("w"), _c("a")),
+            "w op a, op " + String(oi),
+        )
+        _check_both_over(
+            _ieee_batch(), _ieee_batch(),
+            Expr.binary(op, _c("w"), _c("z")),
+            Expr.binary(op, _c("w"), _c("z")),
+            "w op z, op " + String(oi),
+        )
+        _check_both_over(
+            _ieee_batch(), _ieee_batch(),
+            Expr.binary(op, _c("w"), _lit_f(2.5)),
+            Expr.binary(op, _c("w"), _lit_f(2.5)),
+            "w op 2.5, op " + String(oi),
+        )
+    # The fixture carries distinct payloads, and a finite operand leaves a
+    # NaN operand's payload and sign in the answer: row 0 holds a quiet NaN
+    # with payload 1, row 1 a negative quiet NaN with payload 2.
+    var batch = _ieee_batch()
+    var pool = List[RuntimeExpr]()
+    var root = _translate(batch, Expr.binary(BIN_ADD, _c("a"), _c("w")), pool)
+    var got = try_eval_dense_f64(pool, root, _names(batch), batch)
+    assert_true(Bool(got), "the dense entry admits a + w")
+    var arr = got.take().as_primitive[DType.float64]()
+    assert_equal(_bits(arr.get(0)), UInt64(0x7FF8000000000001), "row 0 payload")
+    assert_equal(_bits(arr.get(1)), UInt64(0xFFF8000000000002), "row 1 payload")
 
 
 def test_a_literal_only_subtree_folds_to_the_walkers_value() raises:
@@ -829,6 +905,130 @@ def test_the_par_kill_switch_keeps_the_dense_arm_serial_and_identical() raises:
     _assert_f64_col_bit_identical(
         off_opt.take(), on_opt.take(), 2, "dense_par off vs on"
     )
+    rt.shutdown()
+
+
+def test_the_pooled_arm_is_bit_identical_on_ieee_edges_and_nan_payloads() raises:
+    """The IEEE columns, repeated up to `DENSE_PAR_MIN_ROWS + 3` rows (a
+    ragged last chunk and a ragged last task) over four workers, for each
+    operator and operand order."""
+    var rt = _make_started_runtime(4)
+    ref disp = rt.dispatcher()
+    assert_true(disp.worker_count() >= 2, "the runtime has workers")
+    var n = DENSE_PAR_MIN_ROWS + 3
+    var ops = List[Int]()
+    ops.append(Int(BIN_ADD))
+    ops.append(Int(BIN_SUB))
+    ops.append(Int(BIN_MUL))
+    ops.append(Int(BIN_DIV))
+    for oi in range(len(ops)):
+        var op = UInt8(ops[oi])
+        for shape in range(5):
+            var what = "pooled shape " + String(shape) + " op " + String(oi)
+            var off_opt = eval_project_exprs_over_batch(
+                _ieee_batch_n(n),
+                _one_expr(_ieee_shape(op, shape), String("v")),
+                _one_out_schema(String("v")),
+                dense_f64=False,
+            )
+            var par_opt = eval_project_exprs_over_batch_on_dispatcher(
+                disp,
+                _ieee_batch_n(n),
+                _one_expr(_ieee_shape(op, shape), String("v")),
+                _one_out_schema(String("v")),
+            )
+            assert_true(Bool(off_opt) and Bool(par_opt), what + ": both serve")
+            _assert_f64_col_bit_identical(
+                off_opt.take(), par_opt.take(), 0, what
+            )
+    rt.shutdown()
+
+
+def _ieee_shape(op: UInt8, shape: Int) raises -> Expr:
+    if shape == 0:
+        return Expr.binary(op, _c("a"), _c("z"))
+    if shape == 1:
+        return Expr.binary(op, _c("a"), _c("w"))
+    if shape == 2:
+        return Expr.binary(op, _c("w"), _c("a"))
+    if shape == 3:
+        return Expr.binary(op, _c("w"), _c("z"))
+    return Expr.binary(op, _lit_f(-7.25), _c("z"))
+
+
+def _null_slots_batch_n(n: Int) raises -> RecordBatch:
+    """Both columns nullable, NULL slots scattered through every task, the
+    payloads under them ordinary, zero (so `a / z` divides by zero under a
+    NULL) and NaN."""
+    var nan = (Float64(1.0) / Float64(0.0)) - (Float64(1.0) / Float64(0.0))
+    var a = PrimitiveArray[DType.float64].allocate_nullable(n)
+    var z = PrimitiveArray[DType.float64].allocate_nullable(n)
+    for i in range(n):
+        a.store[1](i, SIMD[DType.float64, 1](Float64(i % 977) * 1.25 - 4.0))
+        z.store[1](i, SIMD[DType.float64, 1](Float64(i % 5) - 2.0))
+    for i in range(n):
+        if i % 7 == 0:
+            a._set_null(i)
+            if i % 21 == 0:
+                a.store[1](i, SIMD[DType.float64, 1](nan))
+            else:
+                a.store[1](i, SIMD[DType.float64, 1](9.5))
+        if i % 13 == 5:
+            z._set_null(i)
+            z.store[1](i, SIMD[DType.float64, 1](0.0))
+    a._set_null(n - 1)
+    var sb = SchemaBuilder()
+    sb.add_field(Field(String("a"), ArrowType.FLOAT64, True))
+    sb.add_field(Field(String("z"), ArrowType.FLOAT64, True))
+    var rbb = RecordBatchBuilder.with_capacity(2)
+    rbb.add_column(Column.from_primitive[DType.float64](a))
+    rbb.add_column(Column.from_primitive[DType.float64](z))
+    return rbb.build(sb.build())
+
+
+def test_the_pooled_entry_reads_null_slots_as_payload_like_the_walker() raises:
+    """Driven through `try_eval_dense_f64_pooled`, because the evaluator sends
+    a strict expression over a NULL-holding input to the column evaluator
+    before the dense entry."""
+    var rt = _make_started_runtime(4)
+    ref disp = rt.dispatcher()
+    var h = SharedForkJoinHandle[True, origin_of(disp)](
+        Optional[Pointer[LocalDispatcher[NoopSink], origin_of(disp)]](
+            Pointer(to=disp)
+        )
+    )
+    var n = DENSE_PAR_MIN_ROWS + 3
+    var batch = _null_slots_batch_n(n)
+    assert_true(
+        batch.column_at(0).null_count() > 0
+        and batch.column_at(1).null_count() > 0,
+        "the fixture really holds NULL slots",
+    )
+    var ops = List[Int]()
+    ops.append(Int(BIN_ADD))
+    ops.append(Int(BIN_SUB))
+    ops.append(Int(BIN_MUL))
+    ops.append(Int(BIN_DIV))
+    for oi in range(len(ops)):
+        var op = UInt8(ops[oi])
+        var what = "pooled NULL slots op " + String(oi)
+        var want = _walker_values(batch, Expr.binary(op, _c("a"), _c("z")))
+        var pool = List[RuntimeExpr]()
+        var root = _translate(batch, Expr.binary(op, _c("a"), _c("z")), pool)
+        var got = try_eval_dense_f64_pooled(h, pool, root, _names(batch), batch)
+        assert_true(Bool(got), what + ": the pooled entry admits it")
+        var col = got.take()
+        assert_equal(col.length(), n, what + ": one value per row")
+        assert_equal(col.null_count(), 0, what + ": the answer drops validity")
+        var arr = col.as_primitive[DType.float64]()
+        assert_equal(len(want), n, what + ": walker length")
+        for i in range(n):
+            if _bits(arr.get(i)) != _bits(Float64(want[i])):
+                assert_equal(
+                    _bits(arr.get(i)),
+                    _bits(Float64(want[i])),
+                    what + ": bits at row " + String(i),
+                )
     rt.shutdown()
 
 

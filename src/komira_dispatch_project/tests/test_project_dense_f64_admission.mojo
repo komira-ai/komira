@@ -19,8 +19,6 @@
 #    evaluator's `dense_f64` switch, so it holds whatever that switch does.
 # 4. The pooled form: a pool that is not admitted answers None, and a task
 #    whose range is empty writes nothing.
-#
-# Each test names the mutant that turns it red.
 # =============================================================================
 
 from std.collections import Optional
@@ -135,10 +133,11 @@ def _admitted(imm pool: List[RuntimeExpr], root: Int, imm batch: RecordBatch) ra
 
 
 def test_each_admission_failure_declines() raises:
-    """Mutant: the `if lk == 0: return False` check removed (the INT32 leaf is
-    then admitted). (The `is_numeric_dict()` operand of `_leaf_kind` is
-    subsumed by its type test: a numeric dictionary's tag is DICTIONARY, which
-    is not a dense leaf type, so removing the operand changes no answer.)"""
+    """An INT32 leaf, a STRING leaf, a numeric dictionary leaf, an absent
+    name, a column index past the name table or negative, a root slot outside
+    the pool, a node outside the envelope and a declined right operand are
+    each declined. (A numeric dictionary is declined by the leaf's type test:
+    its tag is DICTIONARY, which is not a dense leaf type.)"""
     var b = _batch(_N)
     var pool = List[RuntimeExpr]()
     pool.append(make_col(0))
@@ -169,8 +168,7 @@ def test_each_admission_failure_declines() raises:
 
 def test_a_column_shorter_than_the_batch_declines() raises:
     """The walk reads `_length` rows from `_offset`; a column holding fewer
-    rows than the batch is not admitted. Mutant: that check removed (the
-    kernel then reads past the column)."""
+    rows than the batch is not admitted."""
     var b = _batch(_N)
     b._num_rows = _N + 5
     var pool = List[RuntimeExpr]()
@@ -201,8 +199,7 @@ def test_a_layout_conflict_declines_rather_than_raises() raises:
     """A STRING column under an INT64 field is a layout conflict:
     `RecordBatch.column_arrow_type` raises on it, and the admission walk
     answers None instead of raising, so the walker meets the batch as it
-    would have. Mutant: the walk's `try` removed (the raise then escapes
-    `try_eval_dense_f64`)."""
+    would have."""
     var sb = SchemaBuilder()
     sb.add_field(Field(String("t"), ArrowType.INT64, False))
     var strs = List[String]()
@@ -218,8 +215,8 @@ def test_a_layout_conflict_declines_rather_than_raises() raises:
 
 
 def test_a_cyclic_pool_declines() raises:
-    """A node whose operand is itself recurses until the depth bound. Mutant:
-    the depth bound removed (the walk then never ends)."""
+    """A node whose operand is itself recurses until the depth bound, and the
+    pool is declined."""
     var b = _batch(_N)
     var pool = List[RuntimeExpr]()
     pool.append(make_add_f64(0, 0))
@@ -233,8 +230,7 @@ def test_a_cyclic_pool_declines() raises:
 
 def test_each_operator_folds_two_literals_and_a_literal_fills_the_column() raises:
     """`(6 op 4) + f` folds `6 op 4` to one scalar for each operator (the
-    INT64 literal widened), and `2.5 op 0.5` alone fills every row. Mutant:
-    the MUL fold computing `l + r`."""
+    INT64 literal widened), and `2.5 op 0.5` alone fills every row."""
     var b = _batch(_N)
     var f = b.column_as_primitive_float64(0)
     var folded = List[Float64]()
@@ -292,8 +288,7 @@ def _walker(var pool: List[RuntimeExpr], root: Int, imm batch: RecordBatch) rais
 
 def test_each_operator_matches_the_walker_bit_for_bit() raises:
     """`f op i`, `i op 1.5` and `-2 op f` for each operator over 4,101 rows
-    (two chunks and a ragged tail), against the walker run directly. Mutant:
-    `_leaf_chunk` reading INT64 rows as float64 bits."""
+    (two chunks and a ragged tail), against the walker run directly."""
     var n = 4101
     var b = _batch(n)
     for mk in range(4):
@@ -337,8 +332,7 @@ def _make_noop_sink() -> NoopSink:
 
 def test_the_pooled_form_declines_what_it_does_not_admit() raises:
     """Above the row floor with two workers, a pool outside the envelope
-    answers None, and one inside answers the serial bits. Mutant: the pooled
-    admission's `return None` made a fall-through to the wave."""
+    answers None, and one inside answers the serial bits."""
     var rt = PerCoreAsyncRuntime[NoopSink](placement=PLACEMENT_FIXED)
     rt.attach_workers(2, _make_noop_sink, BACKEND_MOCK)
     rt.start()
@@ -369,9 +363,7 @@ def test_the_pooled_form_declines_what_it_does_not_admit() raises:
 
 def test_a_one_worker_pool_runs_the_serial_form() raises:
     """With one worker the pooled form runs `try_eval_dense_f64` on the
-    calling thread: same admission, same bits. Mutant: the `nw < 2` operand
-    removed (a one-task wave then runs; the bits agree, so this case covers
-    the operand rather than catching a value change)."""
+    calling thread: same admission, same bits."""
     var rt = PerCoreAsyncRuntime[NoopSink](placement=PLACEMENT_FIXED)
     rt.attach_workers(1, _make_noop_sink, BACKEND_MOCK)
     rt.start()
@@ -398,10 +390,7 @@ def test_a_one_worker_pool_runs_the_serial_form() raises:
 
 def test_a_task_with_an_empty_range_writes_nothing() raises:
     """A task whose first row is at the end returns before it allocates
-    scratch, and writes nothing; task 0 writes its rows. The guard saves the
-    allocation only: without it the range loop runs no chunk, so no mutant
-    of the guard changes an output. This case covers it and pins that an
-    empty task leaves the output untouched."""
+    scratch, and writes nothing; task 0 writes its rows."""
     var b = _batch(8)
     var pool = List[RuntimeExpr]()
     pool.append(make_col(0))
