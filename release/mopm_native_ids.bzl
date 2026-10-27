@@ -11,6 +11,7 @@ A package of the list needs its `load` below and its row; `mopm_artifacts` refus
 
 load("//src/komira_anomaly:buildrules.mojo.lock.bzl", komira_anomaly = "GRAPH")
 load("//src/komira_atomic_alias:buildrules.mojo.lock.bzl", komira_atomic_alias = "GRAPH")
+load("//src/komira_bench:buildrules.mojo.lock.bzl", komira_bench = "GRAPH")
 load("//src/komira_clock:buildrules.mojo.lock.bzl", komira_clock = "GRAPH")
 load("//src/komira_collections:buildrules.mojo.lock.bzl", komira_collections = "GRAPH")
 load("//src/komira_content_line:buildrules.mojo.lock.bzl", komira_content_line = "GRAPH")
@@ -35,6 +36,7 @@ load("//src/komira_runtime_paths:buildrules.mojo.lock.bzl", komira_runtime_paths
 load("//src/komira_scalar_arithmetic:buildrules.mojo.lock.bzl", komira_scalar_arithmetic = "GRAPH")
 load("//src/komira_simd:buildrules.mojo.lock.bzl", komira_simd = "GRAPH")
 load("//src/komira_snapshotter:buildrules.mojo.lock.bzl", komira_snapshotter = "GRAPH")
+load("//src/komira_spsc_ring:buildrules.mojo.lock.bzl", komira_spsc_ring = "GRAPH")
 load("//src/komira_test_verdict:buildrules.mojo.lock.bzl", komira_test_verdict = "GRAPH")
 load("//src/komira_textproto:buildrules.mojo.lock.bzl", komira_textproto = "GRAPH")
 load("//src/komira_validation_run:buildrules.mojo.lock.bzl", komira_validation_run = "GRAPH")
@@ -54,6 +56,7 @@ def declared_natives(graph):
 _GRAPHS = {
     "komira_anomaly": komira_anomaly,
     "komira_atomic_alias": komira_atomic_alias,
+    "komira_bench": komira_bench,
     "komira_clock": komira_clock,
     "komira_collections": komira_collections,
     "komira_content_line": komira_content_line,
@@ -78,6 +81,7 @@ _GRAPHS = {
     "komira_scalar_arithmetic": komira_scalar_arithmetic,
     "komira_simd": komira_simd,
     "komira_snapshotter": komira_snapshotter,
+    "komira_spsc_ring": komira_spsc_ring,
     "komira_test_verdict": komira_test_verdict,
     "komira_textproto": komira_textproto,
     "komira_validation_run": komira_validation_run,

@@ -14,4 +14,3 @@ komira_collections = { path = "../komira_collections", version = "0.1" }
 [targets]
 lib = { path = "src/komira_spsc_ring" }
 tests = ["tests"]
-bins = [{ name = "spsc_ring_bench", path = "tests/bench_spsc_ring.mojo" }]

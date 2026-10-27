@@ -24,6 +24,7 @@ FIRST_MOPM_WITH_OVERLAY = "toolchains//:mopm_0_0_40"
 PACKAGES = {
     "komira_anomaly": "0.1.0",
     "komira_atomic_alias": "0.1.0",
+    "komira_bench": "0.1.0",
     "komira_clock": "0.1.0",
     "komira_collections": "0.1.0",
     "komira_content_line": "0.1.0",
@@ -48,6 +49,7 @@ PACKAGES = {
     "komira_scalar_arithmetic": "0.1.0",
     "komira_simd": "0.1.0",
     "komira_snapshotter": "0.1.0",
+    "komira_spsc_ring": "0.1.0",
     "komira_test_verdict": "0.1.0",
     "komira_textproto": "0.1.0",
     "komira_validation_run": "0.1.0",

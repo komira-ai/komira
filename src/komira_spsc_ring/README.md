@@ -77,8 +77,8 @@ assert_equal(message, "SpscRing: capacity must be > 0")
 
 This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_spsc_ring`, version 0.1.0
 (`mopm.toml`). The library is `src/komira_spsc_ring/` (`spsc_ring.mojo`, `_test_threads.mojo`, a test helper, and the
-`__init__.mojo`), its tests are `tests/`; `tests/bench_spsc_ring.mojo` is the microbenchmark, declared under
-`[targets] bins` of `mopm.toml` (`:bin_spsc_ring_bench`) and not run as a test. It depends on two packages,
+`__init__.mojo`), its tests are `tests/`. The microbenchmark of the ring is in the `komira_bench` package (`mopm run --bin
+komira_bench:spsc_ring`). It depends on two packages,
 `komira_atomic_alias` and `komira_collections`, sibling directories (`[dependencies]` of `mopm.toml`: `{ path =
 "../komira_atomic_alias", version = "0.1" }` and `{ path = "../komira_collections", version = "0.1" }`).
 `komira_collections` depends on `komira_atomic_alias` in turn, so the lock holds both and the `.conda` of this package
@@ -87,7 +87,7 @@ of their files: installing `komira_spsc_ring` installs both with it. The files t
 
 | file | what |
 |---|---|
-| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependencies and where the library, its tests and the benchmark are |
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependencies and where the library and its tests are |
 | `mopm.lock` | the toolchain pins and the path dependencies, as `mopm lock` writes them (no registry is reached: both dependencies are siblings; `komira_collections` lists its own dependency) |
 | `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
 | `coverage_floor.txt` | `lines NN.NN` and `branches NN.NN`: the least line and branch coverage `:coverage` may measure; `:coverage_floor` fails when either falls below, and above it passes and prints a hint to raise the figure |

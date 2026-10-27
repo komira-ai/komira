@@ -9,7 +9,7 @@ MANIFEST_SHA256 = {
     "../komira_collections/mopm.toml": "b555b2eb2ecee3c511479bbca85f7a24e454df8824ec7ad5edc1c2246184aac4",
     "mopm-toolchain.toml": "64dd09d9912bc4be02bfbeaf1e3319e5d52cf8a075ae6d49eec0e32d7e4f38fc",
     "mopm.lock": "b4b937f0e7f0b7592c87fa6ab016f632bb826e4025a1a11a4ee9fbad8617d8d3",
-    "mopm.toml": "822b14ecd7ed60a68c62b020543d933042efc95afc2adce30ea3487d4f39e409",
+    "mopm.toml": "bb8db99c6bf5647bafb5225ebfb35294165cd43911cbabaef26735701a17e27f",
 }
 GRAPH_JSON = r'''{
   "unit_graph": 2,
@@ -49,19 +49,6 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["komira_collections.mojoc"]
-    },
-    {
-      "id": "komira_spsc_ring@0.1.0#mojo1.0.0/bin:spsc_ring_bench",
-      "package": "komira_spsc_ring",
-      "version": "0.1.0",
-      "kind": "bin",
-      "srcs": [
-        {"path": "src/komira_spsc_ring/tests/bench_spsc_ring.mojo", "sha256": "7ce95cb1265a452585cd9231de42fc380f6f98c85a4c73331b606e9a50cc8b1f"}
-      ],
-      "deps": ["komira_spsc_ring@0.1.0#mojo1.0.0/lib"],
-      "natives": [],
-      "profile": {"opt": 3, "assert": "none", "debug": false},
-      "outputs": ["spsc_ring_bench"]
     },
     {
       "id": "komira_spsc_ring@0.1.0#mojo1.0.0/lib",
@@ -175,19 +162,6 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "outputs": ["komira_collections.mojoc"]
     },
     {
-      "id": "komira_spsc_ring@0.1.0#mojo1.0.0/bin:spsc_ring_bench",
-      "package": "komira_spsc_ring",
-      "version": "0.1.0",
-      "kind": "bin",
-      "srcs": [
-        {"path": "src/komira_spsc_ring/tests/bench_spsc_ring.mojo", "sha256": "7ce95cb1265a452585cd9231de42fc380f6f98c85a4c73331b606e9a50cc8b1f"}
-      ],
-      "deps": ["komira_spsc_ring@0.1.0#mojo1.0.0/lib"],
-      "natives": [],
-      "profile": {"opt": 3, "assert": "none", "debug": false},
-      "outputs": ["spsc_ring_bench"]
-    },
-    {
       "id": "komira_spsc_ring@0.1.0#mojo1.0.0/lib",
       "package": "komira_spsc_ring",
       "version": "0.1.0",
@@ -294,19 +268,6 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["komira_collections.mojoc"]
-    },
-    {
-      "id": "komira_spsc_ring@0.1.0#mojo1.0.0/bin:spsc_ring_bench",
-      "package": "komira_spsc_ring",
-      "version": "0.1.0",
-      "kind": "bin",
-      "srcs": [
-        {"path": "src/komira_spsc_ring/tests/bench_spsc_ring.mojo", "sha256": "7ce95cb1265a452585cd9231de42fc380f6f98c85a4c73331b606e9a50cc8b1f"}
-      ],
-      "deps": ["komira_spsc_ring@0.1.0#mojo1.0.0/lib"],
-      "natives": [],
-      "profile": {"opt": 3, "assert": "none", "debug": false},
-      "outputs": ["spsc_ring_bench"]
     },
     {
       "id": "komira_spsc_ring@0.1.0#mojo1.0.0/lib",
