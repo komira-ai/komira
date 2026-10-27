@@ -364,7 +364,7 @@ steps:
 
 | job | when | what it does |
 |---|---|---|
-| `mopm-stage` | every push to `main`, and a manual run (which sends nothing either) | on the farm (environment `build`, the farm's tailnet token only; it reads no registry token). **Build:** the one mopm the README e2e installs with (`toolchains//:mopm_0_0_57`, `MOPM` of `packages.bzl`) and `//release:mopm_artifacts`. **Stage:** `mopm stage --workspace-root src --artifacts <built> --compiler 1.0.0 --out release/staged_set --registry prod` packs every member from its built `.mojoc`, asks the registry (a read, no token) which versions it holds and writes the staged set S (`plan.json`, each `.conda`, each README: mopm's `spec/staged-set.md`). A version the registry holds with other bytes, or has yanked, fails the step. **Try:** `./buck2 build -c komira_release.staged=stage //release/readme_e2e/verify:all` on the farm: every package's README examples are compiled and run as a user of the `.conda` files of S (see the e2e's [README](../tools/build/readme_e2e/README.md)). Then `mopm publish --staged S --registry prod --dry-run`: the plan is validated and every file hashed against it, nothing is sent and no token is read. It uploads S and that mopm as a workflow artifact (a day) for the next job. |
+| `mopm-stage` | every push to `main`, and a manual run (which sends nothing either) | on the farm (environment `build`, the farm's tailnet token only; it reads no registry token). **Build:** the one mopm the README e2e installs with (`toolchains//:mopm_0_0_73`, `MOPM` of `packages.bzl`) and `//release:mopm_artifacts`. **Stage:** `mopm stage --workspace-root src --artifacts <built> --compiler 1.0.0 --out release/staged_set --registry prod` packs every member from its built `.mojoc`, asks the registry (a read, no token) which versions it holds and writes the staged set S (`plan.json`, each `.conda`, each README: mopm's `spec/staged-set.md`). A version the registry holds with other bytes, or has yanked, fails the step. **Try:** `./buck2 build -c komira_release.staged=stage //release/readme_e2e/verify:all` on the farm: every package's README examples are compiled and run as a user of the `.conda` files of S (see the e2e's [README](../tools/build/readme_e2e/README.md)). Then `mopm publish --staged S --registry prod --dry-run`: the plan is validated and every file hashed against it, nothing is sent and no token is read. It uploads S and that mopm as a workflow artifact (a day) for the next job. |
 | `prod-stage` | after `release` and `mopm-stage`, **only on a push to `main` when the repository variable `MOPM_PUBLISH_ENABLED` is `true`** (unset today: all five prod jobs are skipped before they start) | in the environment `prod`, with `contents: read` and `id-token: write`, no farm and no secret. It downloads the set `mopm-stage` kept and runs `mopm publish --staged S --registry prod --oidc --no-commit`: the registry opens a group, holds every file in quarantine, and nothing is visible. It keeps the directory, now with `state.json` (the group), as the artifact `mopm-prod-staged-<sha>`, even when the step failed. |
 | `prod-test` | after `prod-stage`, same gate | in the environment `build` (the farm's; `id-token: write` for the tailnet join only), with **no registry identity and no secret**. It downloads the directory `prod-stage` kept, checks every file against `plan.json` (`release_staged_verify verify`: sha256 and size), writes `release/staged_set` from the files that matched and from nothing else, and runs `-c komira_release.staged=stage //release/readme_e2e/verify:all` on the farm. |
 | `prod-commit` | after `prod-test`, same gate | in the environment `prod`, with `contents: read` and `id-token: write`. The same command without `--no-commit`, on the same directory with its `state.json`, after a fresh OIDC exchange: the same group is committed and the job waits until it is visible. It keeps `plan.json`, `state.json` and `report.json` as `mopm-prod-committed-<sha>`. |
@@ -456,10 +456,9 @@ are the plan's.
   the README e2e and `release_staged_verify` refuse the set; a release publishes only a set of new versions.
 
 **Needs a mopm with `--no-commit` and `--abort`.** The jobs run the mopm that `mopm-stage` built: the pin
-`MOPM` in [`packages.bzl`](../release/readme_e2e/packages.bzl) (`toolchains//:mopm_0_0_57` in the
-`mopm-stage` job). That pin has neither flag; the first mopm release that has them is 0.0.66. The pin must
-be moved to a release with both before the variable is set, in the same change as the toolchain entry the
-job builds.
+`MOPM` in [`packages.bzl`](../release/readme_e2e/packages.bzl) (`toolchains//:mopm_0_0_73` in the
+`mopm-stage` job). The first mopm release with both flags is 0.0.66, so the pin has them; a later move of
+the pin must keep them, in the same change as the toolchain entry the job builds.
 
 #### Enabling the mopm publish
 
@@ -526,7 +525,7 @@ registry serves the bytes that were staged, and do the README examples of the pa
 2. **Download and check.**
    [`release_beta_fetch`](../tools/build/ci/release_beta_fetch/release_beta_fetch.zig)
    (`//tools/build/ci:release_beta_fetch`, built on the farm by this job and run on the runner,
-   because it makes requests; mopm 0.0.57 has no verb that fetches a file) reads the beta index
+   because it makes requests; mopm 0.0.73 has no verb that fetches a file) reads the beta index
    (`api.beta.mopm.dev/index/config.json`), requires its `stage` to be `beta`, requires its
    `channel_url` to be exactly `https://conda.beta.mopm.dev/` (a constant of the tool; any other URL is refused), and downloads `<channel_url><subdir>/<filename>` for every file of the plan, with the
    exact name and version the plan names, following no redirect and speaking only https. It compares
