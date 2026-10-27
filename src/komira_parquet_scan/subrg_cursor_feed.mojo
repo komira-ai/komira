@@ -31,7 +31,7 @@ from komira_parquet_api.types import (
 from .flat_schema import schema_is_flat
 
 
-def _chunk_is_nullable(schema_elem: SchemaElement) -> Bool:
+def chunk_is_nullable(schema_elem: SchemaElement) -> Bool:
     """True unless the schema element is REQUIRED."""
     if schema_elem.repetition_type:
         if schema_elem.repetition_type.value() == FieldRepetitionType.REQUIRED:
@@ -124,6 +124,6 @@ def open_subrg_cursor[FS: FileSystem](
         and ptype != ParquetType.BYTE_ARRAY
     ):
         return ResumableColumnCursor()
-    var nullable = _chunk_is_nullable(schema[col_idx + 1])
+    var nullable = chunk_is_nullable(schema[col_idx + 1])
     var chunk_bytes = read_column_chunk_bytes(reader, rg, col_idx)
     return ResumableColumnCursor.try_open(chunk_bytes^, ptype, col_meta.codec, col_meta.num_values, nullable)

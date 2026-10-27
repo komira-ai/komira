@@ -71,12 +71,40 @@ type for a scan and widening for an aggregate):
 - `subrg_split_decode`: one row range of a row group, alone or over
   dictionaries decoded once per (row group, column).
 - `subrg_agg_plan`: the read plan of a grouped aggregate over a reader.
+- `subrg_agg_executor`: `run_subrg_agg`, a grouped aggregate folded chunk by
+  chunk into any `ScanChunkSink` (the sink owns the aggregate; this package
+  has none). Group keys stay dictionary columns (INT32 / INT64, or STRING
+  with the plan's `has_string_key`); every other column is widened to INT64
+  or FLOAT64, and the chunk schema says so (`subrg_agg_chunk_schema`). The
+  per-row-group fold (`subrg_agg_fold`) filters a chunk through the key's
+  dictionary keep-table, a gather of the dictionary-preserved chunk's
+  survivors, or the resolved filter. A row group the cursors refuse before a
+  chunk reached the sink is decoded whole; one refused after, or any refusal
+  under a STRING key, abandons the run, which comes back empty for the
+  caller's serial route (a fold cannot retract a chunk). Plans outside that
+  envelope are refused.
 - `band_producer`: `run_band_agg`, a grouped aggregate with dictionary
   string keys folded band by band from reused buffers into a `BandSink`
   (`komira_engine_runtime`), the band width a function of the host profile.
 - `cursor_grain_feed`: a claimed row group decoded one cache-sized grain per
   call, with the grain's split into morsels (`cursor_grain_split_emit`) and a
   move arm for flat columns (`grain_decode_move`).
+
+The chunk arms read a row group's decoded pages without copying them into a
+batch:
+
+- `flat_view_chunk`: `FlatViewChunk`, one PLAIN column a grain at a time,
+  read in place in the page its cursor decoded; a grain never crosses a
+  page, so each page is decoded once.
+- `code_view_chunk`: `CodeViewChunk`, one dictionary column's codes a grain
+  at a time in a small reused buffer, with the lockstep fill a second key
+  needs.
+- `flat_morsel_chunk`: `FlatMorselChunk`, several PLAIN columns as one
+  row-aligned grain that ends at the next page boundary of any column, read
+  through `FlatMorselChunkView`, a `komira_arrow` `MorselView`.
+
+Each view carries the generation it was taken at, so a view that outlived
+the next pull says so (`is_valid`).
 
 The morsel source:
 
@@ -108,6 +136,13 @@ The morsel source:
 - `parquet_source_options`: `ParquetScanOptions`, the source's switches, and
   its pure decisions (claim stride, selection-pipeline deferral, partition
   ids, hooks to capabilities, projection names to indices).
+- `topn_late_mat`: the scan side of a two-phase top-N. Phase 1 projects the
+  sort keys only, and `TopNRowGroupStampOp` stamps each row with its row
+  group; phase 2 decodes the full projection over just the row groups the
+  answer came from (`topn_late_mat_winner_row_groups`, given to
+  `claim_units`) and returns the same rows. `TopNRowGroupStampOp` takes the
+  scan's options and raises under a coarse row-range emit, and `ParquetSource`
+  raises when `claim_units` is given while the row-range split is on.
 
 The worker count is the caller's (its host profile's), so the source probes
 no machine. Every switch is a constructor or call argument or a process setter

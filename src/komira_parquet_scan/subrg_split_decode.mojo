@@ -46,7 +46,7 @@ from komira_parquet_api.types import CompressionCodec, PageType, ParquetType
 from .parquet_reader import ParquetReader
 from .subrg_agg_plan import resolve_reader_col_idx
 from .subrg_columns import build_one_scan_col
-from .subrg_cursor_feed import _chunk_is_nullable, chunk_start_offset, open_subrg_cursor, read_column_chunk_bytes
+from .subrg_cursor_feed import chunk_is_nullable, chunk_start_offset, open_subrg_cursor, read_column_chunk_bytes
 from .subrg_scan_executor import SubrgScanPlan
 
 
@@ -317,7 +317,7 @@ def build_shared_col_dict[FS: FileSystem](
             di = cur.dict_values_copy()
     return SharedColDict(
         cur.is_dict(), cur.value_is_float(), cur.value_ptype(), col_meta.codec, col_meta.num_values,
-        _chunk_is_nullable(meta_schema[col_idx + 1]), start_offset + fdo, col_meta.total_compressed_size - fdo,
+        chunk_is_nullable(meta_schema[col_idx + 1]), start_offset + fdo, col_meta.total_compressed_size - fdo,
         di^, df^,
     )
 

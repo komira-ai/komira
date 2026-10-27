@@ -52,6 +52,8 @@ from komira_parquet_scan.grain_decode_move import (
     set_grain_decode_move_enabled,
 )
 from komira_parquet_scan.parquet_reader import ParquetReader
+from komira_parquet_scan.parquet_source_grain import cursor_grain_slots_fit
+from komira_parquet_scan.parquet_source_options import SUB_SLOT_STRIDE
 from komira_parquet_scan.subrg_agg_plan import resolve_reader_col_idx
 from komira_parquet_scan.subrg_scan_executor import SubrgScanPlan
 from komira_runtime_paths import test_tmpdir
@@ -297,6 +299,17 @@ def test_split_arithmetic_and_gates() raises:
     assert_true(cursor_grain_enabled())
     set_cursor_grain_enabled(False)
     assert_false(grain_decode_move_enabled())
+
+
+def test_a_row_group_with_too_many_slots_leaves_the_route_off() raises:
+    # 1,048,576 slots exactly fit; one more would name the next row group.
+    assert_true(cursor_grain_slots_fit(SUB_SLOT_STRIDE * 4, 4, 1))
+    assert_false(cursor_grain_slots_fit(SUB_SLOT_STRIDE * 4 + 1, 4, 1))
+    # The sub-morsels of a grain count: 2 grains.
+    assert_true(cursor_grain_slots_fit(2 * 1000, 1000, SUB_SLOT_STRIDE // 2))
+    assert_false(cursor_grain_slots_fit(2 * 1000, 1000, SUB_SLOT_STRIDE // 2 + 1))
+    assert_true(cursor_grain_slots_fit(0, 1000, 8))
+    assert_false(cursor_grain_slots_fit(10, 0, 1))
 
 
 def main() raises:

@@ -41,7 +41,7 @@ from komira_parquet.column_decode_context import ColumnDecodeContext
 from .cursor_grain_feed import note_whole_rg_decode
 from .parquet_reader import ParquetReader
 from .parquet_source_options import SUB_SLOT_STRIDE, ParquetScanOptions, unit_partition_id
-from .subrg_cursor_feed import _chunk_is_nullable
+from .subrg_cursor_feed import chunk_is_nullable
 from .subrg_scan_executor import SubrgScanPlan
 from .subrg_split_decode import (
     SharedColDict,
@@ -137,7 +137,7 @@ def subrg_chunk_schema_of_footer[FS: FileSystem](reader: ParquetReader[FS], plan
     holds a null, so a nullable field here carries no null)."""
     var sb = SchemaBuilder()
     for ci in range(len(plan.proj_names)):
-        var nullable = _chunk_is_nullable(reader._meta[].schema[plan.reader_col_idx[ci] + 1])
+        var nullable = chunk_is_nullable(reader._meta[].schema[plan.reader_col_idx[ci] + 1])
         sb.add_field(Field(plan.proj_names[ci], plan.col_arrow_types[ci], nullable))
     return sb.build()
 

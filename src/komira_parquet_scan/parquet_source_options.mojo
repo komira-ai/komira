@@ -169,6 +169,15 @@ def unit_partition_id(claimed_rg: Int, unit_ordinal: Int) -> Int:
     return claimed_rg * SUB_SLOT_STRIDE + unit_ordinal
 
 
+def topn_stamp_is_exact(options: ParquetScanOptions) -> Bool:
+    """Whether every row of a morsel of a source built with `options` comes
+    from the row group its partition id names. A coarse row-range emit
+    concatenates consecutive units, across row group boundaries, into one
+    morsel that takes its first unit's id, so the two-phase top-N stamp
+    (`TopNRowGroupStampOp`) is not exact under it."""
+    return not options.subrg_emit_coarse
+
+
 @always_inline
 def rg_index_of_partition_id(partition_id: Int) -> Int:
     """The flat row group a morsel of this source was decoded from (whole or

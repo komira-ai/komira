@@ -11,7 +11,9 @@
 # cut into `morsel_rows` sub-morsels like any whole-row-group batch
 # (`cursor_grain_split_emit`); grain `g`'s sub-slots start at
 # `g * subs_per_grain`, so all of a row group's morsels sort into file order.
-# A row group the cursors refuse is decoded whole.
+# A row group the cursors refuse is decoded whole. A file with a row group of
+# more than `SUB_SLOT_STRIDE` sub-slots leaves the route off
+# (`cursor_grain_slots_fit`).
 #
 # `CursorGrainScan` holds the route's state: the read plan, the chunk schema,
 # the grain, and each worker's open row group and decode buffers.
@@ -44,6 +46,16 @@ from .parquet_source_options import SUB_SLOT_STRIDE, ParquetScanOptions
 from .parquet_source_subrg import subrg_chunk_schema_of_footer
 from .subrg_scan_executor import SubrgScanPlan
 from .subrg_split_decode import subrg_probe_build_plan
+
+
+def cursor_grain_slots_fit(max_rg_rows: Int, grain_rows: Int, subs_per_grain: Int) -> Bool:
+    """Whether a row group of `max_rg_rows` rows has at most `SUB_SLOT_STRIDE`
+    sub-slots (`ceil(rows / grain_rows)` grains of `subs_per_grain` slots
+    each); beyond that a partition id would name the next row group."""
+    if grain_rows <= 0:
+        return False
+    var grains = (max_rg_rows + grain_rows - 1) // grain_rows
+    return grains * max(subs_per_grain, 1) <= SUB_SLOT_STRIDE
 
 
 struct CursorGrainScan(Movable):
@@ -101,11 +113,17 @@ struct CursorGrainScan(Movable):
         for _ in range(num_workers):
             st.append(CursorGrainRg())
             ctxs.append(ColumnDecodeContext())
+        var sub_count = cursor_grain_sub_count(grain, morsel_rows)
+        var max_rg_rows = 0
+        for u in range(len(reader._meta[].row_groups)):
+            max_rg_rows = max(max_rg_rows, reader.unit_num_rows(u))
+        if not cursor_grain_slots_fit(max_rg_rows, grain, sub_count):
+            return
         self.state = st^
         self.ctx = ctxs^
         self.chunk_schema = chunk_schema^
         self.grain_rows = grain
-        self.subs_per_grain = cursor_grain_sub_count(grain, morsel_rows)
+        self.subs_per_grain = sub_count
         self.plan = Optional(plan^)
         self.enabled = True
 
