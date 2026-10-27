@@ -1,12 +1,19 @@
-//! The cases of the job `mopm-publish-beta` of release.yml, //:release_workflow_cases:
+//! The cases of the mopm jobs of release.yml, //:release_workflow_cases:
 //! a `zig_test` run as a build action. The workflow's own bytes are the subject
 //! (the zig_test's `data`, under KOMIRA_TEST_WORK/workflows/release.yml).
 //!
-//! The job publishes to the beta registry with the job's GitHub OIDC identity
-//! and no secret, and ships off. What the cases catch:
-//!  - the gate: `needs: mopm-stage`, the `if:` with a push to main and the
-//!    repository variable `MOPM_BETA_PUBLISH_ENABLED` equal to `true`, so a job
-//!    that loses a part of its gate (and publishes on every run) is red;
+//! The beta and prod publish run on every push to main and there is no switch:
+//! no line of the file, comment or not, names the variable `MOPM_PUBLISH_ENABLED` or
+//! `MOPM_BETA_PUBLISH_ENABLED`. `mopm-publish-beta` publishes to the beta registry with the
+//! job's GitHub OIDC identity and no secret. What the cases catch:
+//!  - the gate: `needs: mopm-stage`, the `if:` with a push to main and nothing
+//!    else, so a job that loses a part of its gate (and publishes from a manual run
+//!    or another ref) is red, and so is a job that gains a condition of a repository variable;
+//!  - the versions: `mopm-stage` (which stages the set prod publishes) and `mopm-stage-beta`
+//!    give every member the version 0.1.<run number> with the same tool, before the stage, from
+//!    `github.run_number`, and the README e2e of `mopm-stage`, `prod-test` and `mopm-e2e-beta` is
+//!    given that same number, so every release is a new version and prod publishes what beta proved;
+//!  - `prod-stage` needs `mopm-e2e-beta`: prod stages only a set the beta e2e passed on;
 //!  - the identity: `environment: beta` and exactly the permissions
 //!    `contents: read` and `id-token: write`, so a job that cannot ask the
 //!    runner for an ID token, or that holds more, is red;
@@ -32,8 +39,8 @@
 //!    every package on that set at this run's version, every farm step asserted remote.
 //!  - the prod publish, five jobs under one gate (`prod-stage`, `prod-test`,
 //!    `prod-commit`, `prod-abort`, `prod-smoke`; checkProd says what each must hold):
-//!    each job's `needs`, its exact `if:` (the push-to-main and `MOPM_PUBLISH_ENABLED`
-//!    gate; the abort job's `failure() || cancelled()` condition with the gate and
+//!    each job's `needs`, its exact `if:` (the push-to-main gate; the abort job's
+//!    `failure() || cancelled()` condition with the gate and
 //!    `needs.prod-stage.result != 'skipped'`), its environment (`prod` for the three
 //!    that talk to the registry, `build` for the test, none for the smoke), its exact
 //!    permissions (`id-token: write` only where a registry identity is exchanged, or
@@ -57,18 +64,22 @@ const BUILD_TOOL_LINE = "          args: build //tools/build/ci:release_beta_ver
 const UPLOAD_TOOL_LINE = "            ${{ runner.temp }}/mopm-publish/release_beta_version";
 const REWRITE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/release_beta_version\" --workspace-root src --version \"0.1.$RUN_NUMBER\"'";
 const REWRITE_ENV = "          RUN_NUMBER: ${{ github.run_number }}";
+const PROD_REWRITE_RUN = REWRITE_RUN;
 const STAGE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage --workspace-root src --artifacts \"$RUNNER_TEMP/mopm-publish/artifacts\" --compiler 1.0.0 --out \"$RUNNER_TEMP/mopm-publish/staged_beta\" --registry beta'";
-const GATE = "    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_BETA_PUBLISH_ENABLED == 'true'";
+const GATE = "    if: github.event_name == 'push' && github.ref == 'refs/heads/main'";
 const E2E_JOB = "mopm-e2e-beta";
-const PROD_GATE = "    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true'";
-const ABORT_IF = "    if: (failure() || cancelled()) && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true' && needs.prod-stage.result != 'skipped'";
+const PROD_GATE = GATE;
+const ABORT_IF = "    if: (failure() || cancelled()) && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.prod-stage.result != 'skipped'";
 const PROD_STAGE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-publish/staged\" --registry prod --oidc --no-commit'";
 const PROD_COMMIT_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-prod/staged\" --registry prod --oidc'";
 const PROD_ABORT_CMD = "            \"$RUNNER_TEMP/mopm-publish/mopm\" publish --staged \"$RUNNER_TEMP/mopm-prod/staged\" --registry prod --oidc --abort";
 const PROD_STAGED_ARTIFACT = "          name: mopm-prod-staged-${{ github.sha }}";
 const PROD_BUILD_VERIFY = "          args: build //tools/build/ci:release_staged_verify --out ${{ runner.temp }}/prod-test/release_staged_verify";
 const PROD_VERIFY_RUN = "        run: '\"$RUNNER_TEMP/prod-test/release_staged_verify\" verify --staged \"$RUNNER_TEMP/prod-test/staged\" --out release/staged_set'";
-const PROD_E2E_RUN = "          args: build -c komira_release.staged=stage //release/readme_e2e/verify:all";
+const PROD_E2E_RUN = "          args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all";
+const STAGE_E2E_RUN = PROD_E2E_RUN;
+const PROD_REWRITE_NAME = "      - name: every member gets the version of this run";
+const PROD_MOPM_STAGE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage --workspace-root src --artifacts \"$RUNNER_TEMP/mopm-publish/artifacts\" --compiler 1.0.0 --out release/staged_set --registry prod'";
 const PROD_SMOKE_RUN = "        run: '\"$RUNNER_TEMP/mopm-publish/release_staged_verify\" smoke --staged \"$RUNNER_TEMP/prod-smoke/committed\" --config-url https://api.mopm.dev/index/config.json --attempts 5 --delay 30'";
 const STAGE_BUILD_VERIFY = "          args: build //tools/build/ci:release_staged_verify --out ${{ runner.temp }}/mopm-publish/release_staged_verify";
 const STAGE_UPLOAD_VERIFY = "            ${{ runner.temp }}/mopm-publish/release_staged_verify";
@@ -138,7 +149,7 @@ fn checkE2e(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     const job = (try jobLines(ar, text, E2E_JOB, &n)) orelse return "no job mopm-e2e-beta";
     if (n != 1) return "mopm-e2e-beta is defined more than once";
     if (!has(job, "    needs: mopm-publish-beta")) return "e2e-beta needs is not exactly mopm-publish-beta";
-    if (!has(job, GATE)) return "e2e-beta: the if is not the push-to-main and MOPM_BETA_PUBLISH_ENABLED gate";
+    if (!has(job, GATE)) return "e2e-beta: the if is not the push-to-main gate";
     if (!has(job, "    environment: build")) return "e2e-beta environment is not build (the farm's)";
     if (!has(job, "    permissions:") or !has(job, "      contents: read") or !has(job, "      id-token: write"))
         return "e2e-beta permissions are not contents: read and id-token: write";
@@ -197,12 +208,16 @@ fn checkE2e(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
 
 /// Null if the workflow text holds the contract, else the refusal.
 fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
+    // no switch: the beta and prod publish run on every push to main. The names are refused
+    // anywhere in the file, in a comment too, so the file cannot describe a switch that is not there.
+    if (std.mem.indexOf(u8, text, "MOPM_PUBLISH_ENABLED") != null) return "release.yml names MOPM_PUBLISH_ENABLED: the prod publish has no switch";
+    if (std.mem.indexOf(u8, text, "MOPM_BETA_PUBLISH_ENABLED") != null) return "release.yml names MOPM_BETA_PUBLISH_ENABLED: the beta publish has no switch";
     var n: usize = 0;
     const job = (try jobLines(ar, text, JOB, &n)) orelse return "no job mopm-publish-beta";
     if (n != 1) return "mopm-publish-beta is defined more than once";
     if (!has(job, "    needs: mopm-stage-beta")) return "needs is not exactly mopm-stage-beta";
     if (!has(job, GATE))
-        return "the if is not the push-to-main and MOPM_BETA_PUBLISH_ENABLED gate";
+        return "the if is not the push-to-main gate";
     if (!has(job, "    environment: beta")) return "environment is not beta";
     if (!has(job, "    permissions:") or !has(job, "      contents: read") or !has(job, "      id-token: write"))
         return "permissions are not contents: read and id-token: write";
@@ -223,7 +238,7 @@ fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     const stage = (try jobLines(ar, text, STAGE_JOB, &sn)) orelse return "no job mopm-stage-beta";
     if (sn != 1) return "mopm-stage-beta is defined more than once";
     if (!has(stage, "    needs: mopm-stage")) return "stage-beta needs is not exactly mopm-stage";
-    if (!has(stage, GATE)) return "stage-beta: the if is not the push-to-main and MOPM_BETA_PUBLISH_ENABLED gate";
+    if (!has(stage, GATE)) return "stage-beta: the if is not the push-to-main gate";
     if (mentions(stage, "environment:")) return "stage-beta holds an environment";
     if (mentions(stage, "id-token")) return "stage-beta holds id-token";
     if (!has(stage, "    permissions:") or !has(stage, "      contents: read")) return "stage-beta permissions are not contents: read";
@@ -245,8 +260,9 @@ fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
     if (tool_runs != 1) return "stage-beta runs release_beta_version more than once";
     if (mentions(stage, "git push") or mentions(stage, "git commit")) return "stage-beta commits or pushes what it rewrote";
 
-    // prod keeps the real versions: its job builds the tool for the beta job's artifact and
-    // never runs it
+    // prod stages the versions beta stages: `mopm-stage` builds the tool once (and hands it to the
+    // beta job), runs it once on its own checkout with the run number before it stages, and tries
+    // the staged set at that version
     var psn: usize = 0;
     const prod_stage = (try jobLines(ar, text, PROD_STAGE_JOB, &psn)) orelse return "no job mopm-stage";
     if (psn != 1) return "mopm-stage is defined more than once";
@@ -255,12 +271,27 @@ fn check(ar: std.mem.Allocator, text: []const u8) !?[]const u8 {
         if (std.mem.indexOf(u8, l, TOOL) == null) continue;
         if (std.mem.eql(u8, l, BUILD_TOOL_LINE)) {
             builds += 1;
-        } else if (!std.mem.eql(u8, l, UPLOAD_TOOL_LINE)) {
-            return "mopm-stage names release_beta_version other than to build it and hand it on: prod keeps the real versions";
+        } else if (!std.mem.eql(u8, l, UPLOAD_TOOL_LINE) and !std.mem.eql(u8, l, PROD_REWRITE_RUN)) {
+            return "mopm-stage names release_beta_version other than to build it, run it with the run number and hand it on";
         }
     }
     if (builds != 1) return "mopm-stage does not build release_beta_version once for the beta job";
     if (lineAt(prod_stage, UPLOAD_TOOL_LINE) == null) return "mopm-stage does not hand release_beta_version to the beta job";
+    const build_at = lineAt(prod_stage, BUILD_TOOL_LINE).?;
+    const prod_stage_at = lineAt(prod_stage, PROD_MOPM_STAGE_RUN) orelse return "mopm-stage does not stage against prod with --out release/staged_set";
+    const prod_rewrite_at = lineAt(prod_stage, PROD_REWRITE_RUN) orelse return "mopm-stage does not give the members 0.1.<run number> (release_beta_version): prod would publish fixed versions";
+    if (prod_rewrite_at > prod_stage_at) return "mopm-stage runs release_beta_version after mopm stage";
+    if (prod_rewrite_at < build_at) return "mopm-stage runs release_beta_version before it builds it";
+    if (prod_rewrite_at < 3 or !std.mem.eql(u8, prod_stage[prod_rewrite_at - 2], "        env:") or !std.mem.eql(u8, prod_stage[prod_rewrite_at - 1], REWRITE_ENV) or
+        !std.mem.eql(u8, prod_stage[prod_rewrite_at - 3], PROD_REWRITE_NAME)) return "mopm-stage: the rewrite step does not take the run number from github.run_number in its env";
+    var prod_tool_runs: usize = 0;
+    for (prod_stage) |l| {
+        if (std.mem.indexOf(u8, l, TOOL) != null and std.mem.startsWith(u8, l, "        run:")) prod_tool_runs += 1;
+    }
+    if (prod_tool_runs != 1) return "mopm-stage runs release_beta_version more than once";
+    if (mentions(prod_stage, "git push") or mentions(prod_stage, "git commit")) return "mopm-stage commits or pushes what it rewrote";
+    const stage_e2e_at = lineAt(prod_stage, STAGE_E2E_RUN) orelse return "mopm-stage does not run the e2e on the staged set at this run's version (staged=stage, beta_version=0.1.<run number>)";
+    if (stage_e2e_at < prod_stage_at) return "mopm-stage runs the e2e before it stages";
 
     if (try checkE2e(ar, text)) |why| return why;
     if (try checkProd(ar, text, prod_stage)) |why| return why;
@@ -303,7 +334,7 @@ const ProdJob = struct {
 };
 
 const prod_jobs = [_]ProdJob{
-    .{ .name = "prod-stage", .needs = "    needs: [release, mopm-stage]", .gate = PROD_GATE, .environment = "    environment: prod", .id_token = true },
+    .{ .name = "prod-stage", .needs = "    needs: [release, mopm-stage, mopm-e2e-beta]", .gate = PROD_GATE, .environment = "    environment: prod", .id_token = true },
     .{ .name = "prod-test", .needs = "    needs: prod-stage", .gate = PROD_GATE, .environment = "    environment: build", .id_token = true },
     .{ .name = "prod-commit", .needs = "    needs: prod-test", .gate = PROD_GATE, .environment = "    environment: prod", .id_token = true },
     .{ .name = "prod-abort", .needs = "    needs: [prod-stage, prod-test, prod-commit]", .gate = ABORT_IF, .environment = "    environment: prod", .id_token = true },
@@ -401,7 +432,7 @@ fn checkProd(ar: std.mem.Allocator, text: []const u8, stage_job: []const []const
     const connect_at = lineAt(tst, E2E_FARM_CONNECT) orelse return "prod-test does not join the farm";
     const tool_at = lineAt(tst, PROD_BUILD_VERIFY) orelse return "prod-test does not build release_staged_verify";
     const verify_at = lineAt(tst, PROD_VERIFY_RUN) orelse return "prod-test does not verify the staged files against the plan (release_staged_verify verify --out release/staged_set)";
-    const e2e_at = lineAt(tst, PROD_E2E_RUN) orelse return "prod-test does not run the e2e on the verified set (staged=stage)";
+    const e2e_at = lineAt(tst, PROD_E2E_RUN) orelse return "prod-test does not run the e2e on the verified set (staged=stage at this run's version)";
     if (!(connect_at < tool_at and tool_at < verify_at)) return "prod-test verifies before the farm is joined and the tool built";
     if (!(download_at < verify_at)) return "prod-test verifies before it has the files";
     if (!(verify_at < e2e_at)) return "prod-test runs the e2e before the verification";
@@ -522,15 +553,21 @@ test "each defect planted in the real release.yml is refused with its message" {
     defer arena.deinit();
     const ar = arena.allocator();
     const text = try readWorkflow(ar);
-    const gate = "    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_BETA_PUBLISH_ENABLED == 'true'\n";
+    const gate = GATE ++ "\n";
     const cmd = " --oidc --registry beta'\n";
 
-    // a gate that lost its variable, its push, its main, or the whole if
-    try expectRefused(ar, try replaced(ar, text, gate, "    if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n"), "gate");
-    try expectRefused(ar, try replaced(ar, text, gate, "    if: github.ref == 'refs/heads/main' && vars.MOPM_BETA_PUBLISH_ENABLED == 'true'\n"), "gate");
-    try expectRefused(ar, try replaced(ar, text, gate, "    if: github.event_name == 'push' && vars.MOPM_BETA_PUBLISH_ENABLED == 'true'\n"), "gate");
-    try expectRefused(ar, try replaced(ar, text, gate, "    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_BETA_PUBLISH_ENABLED != ''\n"), "gate");
+    // the gate (the line every beta and prod job shares) that lost its push, its main, or the whole if,
+    // or that got another condition
+    try expectRefused(ar, try replaced(ar, text, gate, "    if: github.event_name == 'push'\n"), "gate");
+    try expectRefused(ar, try replaced(ar, text, gate, "    if: github.ref == 'refs/heads/main'\n"), "gate");
+    try expectRefused(ar, try replaced(ar, text, gate, "    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.actor != ''\n"), "gate");
+    try expectRefused(ar, try replaced(ar, text, gate, "    if: always()\n"), "gate");
     try expectRefused(ar, try replaced(ar, text, gate, ""), "gate");
+    // no switch: a variable condition, a comment that names one, either spelling, is refused
+    try expectRefused(ar, try replaced(ar, text, gate, "    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_BETA_PUBLISH_ENABLED == 'true'\n"), "MOPM_BETA_PUBLISH_ENABLED");
+    try expectRefused(ar, try replaced(ar, text, gate, "    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true'\n"), "MOPM_PUBLISH_ENABLED");
+    try expectRefused(ar, try replaced(ar, text, "name: release\n", "name: release\n# gated on MOPM_PUBLISH_ENABLED\n"), "MOPM_PUBLISH_ENABLED");
+    try expectRefused(ar, try replaced(ar, text, "name: release\n", "name: release\n# gated on MOPM_BETA_PUBLISH_ENABLED\n"), "MOPM_BETA_PUBLISH_ENABLED");
     // the stage dependency
     try expectRefused(ar, try replaced(ar, text, "    needs: mopm-stage-beta\n", ""), "needs");
     try expectRefused(ar, try replaced(ar, text, "    needs: mopm-stage-beta\n", "    needs: mopm-stage\n"), "needs");
@@ -566,8 +603,21 @@ test "each defect planted in the real release.yml is refused with its message" {
     try expectRefused(ar, try replaced(ar, text, REWRITE_ENV ++ "\n", "          RUN_NUMBER: ${{ github.run_attempt }}\n"), "run number");
     try expectRefused(ar, try replaced(ar, text, rewrite_step ++ "      - name: mopm stage against beta\n" ++ STAGE_RUN ++ "\n", "      - name: mopm stage against beta\n" ++ STAGE_RUN ++ "\n" ++ rewrite_step), "after mopm stage");
     try expectRefused(ar, try replaced(ar, text, REWRITE_RUN ++ "\n", REWRITE_RUN ++ "\n      - run: git push origin HEAD\n"), "pushes");
-    // the prod stage job never runs it, and no other job runs it either
-    try expectRefused(ar, try replaced(ar, text, "      - name: mopm stage\n        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage", "      - run: '\"$RUNNER_TEMP/mopm-publish/release_beta_version\" --workspace-root src --version 0.1.1'\n      - name: mopm stage\n        run: '\"$RUNNER_TEMP/mopm-publish/mopm\" stage"), "prod keeps the real versions");
+    // the prod stage job (mopm-stage) runs it too: with the run number, before its stage, once
+    const prod_rewrite_step = PROD_REWRITE_NAME ++ "\n        env:\n" ++ REWRITE_ENV ++ "\n" ++ REWRITE_RUN ++ "\n";
+    try expectRefused(ar, try replaced(ar, text, prod_rewrite_step, ""), "prod would publish fixed versions");
+    try expectRefused(ar, try replaced(ar, text, prod_rewrite_step, PROD_REWRITE_NAME ++ "\n        env:\n" ++ REWRITE_ENV ++ "\n        run: '\"$RUNNER_TEMP/mopm-publish/release_beta_version\" --workspace-root src --version 0.1.0'\n"), "other than to build it");
+    try expectRefused(ar, try replaced(ar, text, prod_rewrite_step, PROD_REWRITE_NAME ++ "\n        env:\n          RUN_NUMBER: ${{ github.run_attempt }}\n" ++ REWRITE_RUN ++ "\n"), "mopm-stage: the rewrite step does not take the run number");
+    try expectRefused(ar, try replaced(ar, text, prod_rewrite_step, PROD_REWRITE_NAME ++ "\n" ++ REWRITE_RUN ++ "\n"), "mopm-stage: the rewrite step does not take the run number");
+    try expectRefused(ar, try replaced(ar, text, prod_rewrite_step ++ "      # STAGE. Packs", prod_rewrite_step ++ prod_rewrite_step ++ "      # STAGE. Packs"), "more than once");
+    try expectRefused(ar, try replaced(ar, text, PROD_REWRITE_NAME ++ "\n", "      - run: git push origin HEAD\n" ++ PROD_REWRITE_NAME ++ "\n"), "commits or pushes");
+    // the rewrite after the stage, and before the tool is built
+    try expectRefused(ar, try replaced(ar, try replaced(ar, text, prod_rewrite_step, ""), PROD_MOPM_STAGE_RUN ++ "\n", PROD_MOPM_STAGE_RUN ++ "\n" ++ prod_rewrite_step), "runs release_beta_version after mopm stage");
+    try expectRefused(ar, try replaced(ar, try replaced(ar, text, prod_rewrite_step, ""), "      - name: build the beta version tool\n", prod_rewrite_step ++ "      - name: build the beta version tool\n"), "before it builds it");
+    // the e2e of mopm-stage is at that version
+    const stage_e2e_tail = "\n          assert-remote: ${{ steps.assert.outputs.path }}\n      # Reads plan.json";
+    try expectRefused(ar, try replaced(ar, text, STAGE_E2E_RUN ++ stage_e2e_tail, "          args: build -c komira_release.staged=stage //release/readme_e2e/verify:all" ++ stage_e2e_tail), "mopm-stage does not run the e2e on the staged set at this run's version");
+    try expectRefused(ar, try replaced(ar, text, STAGE_E2E_RUN ++ stage_e2e_tail, "          args: build -c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_attempt }} //release/readme_e2e/verify:all" ++ stage_e2e_tail), "mopm-stage does not run the e2e on the staged set at this run's version");
     try expectRefused(ar, try replaced(ar, text, BUILD_TOOL_LINE ++ "\n", ""), "does not build release_beta_version once");
     try expectRefused(ar, try replaced(ar, text, UPLOAD_TOOL_LINE ++ "\n", ""), "hand release_beta_version");
     // publish takes the set staged for prod instead of the beta one
@@ -601,8 +651,8 @@ test "each defect planted in the mopm-e2e-beta job of the real release.yml is re
     try expectRefused(ar, try replaced(ar, text, head, "    needs: mopm-stage-beta\n" ++ head[need.len..]), "e2e-beta needs");
     try expectRefused(ar, try replaced(ar, text, head, "    needs: [mopm-publish-beta, release]\n" ++ head[need.len..]), "e2e-beta needs");
     // the gate: each part, and the whole if
-    try expectRefused(ar, try replaced(ar, text, head, need ++ "    if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n    runs-on: ubuntu-24.04\n" ++ env_build), "e2e-beta: the if");
-    try expectRefused(ar, try replaced(ar, text, head, need ++ "    if: github.ref == 'refs/heads/main' && vars.MOPM_BETA_PUBLISH_ENABLED == 'true'\n    runs-on: ubuntu-24.04\n" ++ env_build), "e2e-beta: the if");
+    try expectRefused(ar, try replaced(ar, text, head, need ++ "    if: github.event_name == 'push'\n    runs-on: ubuntu-24.04\n" ++ env_build), "e2e-beta: the if");
+    try expectRefused(ar, try replaced(ar, text, head, need ++ "    if: github.ref == 'refs/heads/main'\n    runs-on: ubuntu-24.04\n" ++ env_build), "e2e-beta: the if");
     try expectRefused(ar, try replaced(ar, text, head, need ++ "    runs-on: ubuntu-24.04\n" ++ env_build), "e2e-beta: the if");
     try expectRefused(ar, try replaced(ar, text, head, need ++ "    if: always()\n    runs-on: ubuntu-24.04\n" ++ env_build), "e2e-beta: the if");
     // the environment: the farm's, not beta's or none
@@ -659,7 +709,7 @@ test "each edit of the prod jobs of the real release.yml that breaks the contrac
     const text = try readWorkflow(ar);
     const runs = "    runs-on: ubuntu-24.04\n";
     const nl = "\n";
-    const stage_head = "    needs: [release, mopm-stage]\n" ++ PROD_GATE ++ nl ++ runs ++ "    environment: prod\n";
+    const stage_head = "    needs: [release, mopm-stage, mopm-e2e-beta]\n" ++ PROD_GATE ++ nl ++ runs ++ "    environment: prod\n";
     const test_head = "    needs: prod-stage\n" ++ PROD_GATE ++ nl ++ runs ++ "    environment: build\n";
     const commit_head = "    needs: prod-test\n" ++ PROD_GATE ++ nl ++ runs ++ "    environment: prod\n";
     const smoke_head = "    needs: prod-commit\n" ++ PROD_GATE ++ nl ++ runs ++ "    timeout-minutes: 30\n";
@@ -677,25 +727,29 @@ test "each edit of the prod jobs of the real release.yml that breaks the contrac
     const gates = [_][]const u8{ stage_head, test_head, commit_head, smoke_head };
     for (gates) |head| {
         const wrong = [_][]const u8{
-            "    if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n",
-            "    if: github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true'\n",
+            "    if: github.event_name == 'push'\n",
+            "    if: github.ref == 'refs/heads/main'\n",
             "    if: always()\n",
             "",
         };
         for (wrong) |w| try expectRefused(ar, try replaced(ar, text, head, try swapGate(ar, head, w)), "the if is not the expected gate");
     }
     // the dependencies: the chain, and the abort sees all three jobs that can fail
+    // prod stages only a set the beta e2e passed on: the dependency is not droppable
+    try expectRefused(ar, try replaced(ar, text, stage_head, "    needs: [release, mopm-stage]\n" ++ stage_head["    needs: [release, mopm-stage, mopm-e2e-beta]\n".len..]), "prod-stage: needs");
+    try expectRefused(ar, try replaced(ar, text, stage_head, "    needs: [release, mopm-stage, mopm-publish-beta]\n" ++ stage_head["    needs: [release, mopm-stage, mopm-e2e-beta]\n".len..]), "prod-stage: needs");
     try expectRefused(ar, try replaced(ar, text, test_head, "    needs: [prod-stage, release]\n" ++ test_head["    needs: prod-stage\n".len..]), "prod-test: needs");
     try expectRefused(ar, try replaced(ar, text, commit_head, "    needs: prod-stage\n" ++ commit_head["    needs: prod-test\n".len..]), "prod-commit: needs");
     try expectRefused(ar, try replaced(ar, text, smoke_head, "    needs: prod-test\n" ++ smoke_head["    needs: prod-commit\n".len..]), "prod-smoke: needs");
     try expectRefused(ar, try replaced(ar, text, abort_head, "    needs: prod-stage\n" ++ abort_head["    needs: [prod-stage, prod-test, prod-commit]\n".len..]), "prod-abort: needs");
     try expectRefused(ar, try replaced(ar, text, abort_head, "    needs: [prod-stage, prod-commit]\n" ++ abort_head["    needs: [prod-stage, prod-test, prod-commit]\n".len..]), "prod-abort: needs");
     // the abort condition: a failure or a cancel, the gate, and a stage that ran
-    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true' && needs.prod-stage.result != 'skipped'\n"), "prod-abort: the if");
-    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true' && needs.prod-stage.result != 'skipped'\n"), "prod-abort: the if");
-    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: (failure() || cancelled()) && vars.MOPM_PUBLISH_ENABLED == 'true' && needs.prod-stage.result != 'skipped'\n"), "prod-abort: the if");
-    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: (failure() || cancelled()) && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true'\n"), "prod-abort: the if");
-    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.MOPM_PUBLISH_ENABLED == 'true' && needs.prod-stage.result != 'skipped'\n"), "prod-abort: the if");
+    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.prod-stage.result != 'skipped'\n"), "prod-abort: the if");
+    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.prod-stage.result != 'skipped'\n"), "prod-abort: the if");
+    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: (failure() || cancelled()) && needs.prod-stage.result != 'skipped'\n"), "prod-abort: the if");
+    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: (failure() || cancelled()) && github.event_name == 'push' && github.ref == 'refs/heads/main'\n"), "prod-abort: the if");
+    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, "    if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.prod-stage.result != 'skipped'\n"), "prod-abort: the if");
+    try expectRefused(ar, try replaced(ar, text, ABORT_IF ++ nl, ABORT_IF ++ " && vars.MOPM_PUBLISH_ENABLED == 'true'\n"), "MOPM_PUBLISH_ENABLED");
 
     // the environments: prod for the registry, build for the test, none for the smoke
     try expectRefused(ar, try replaced(ar, text, stage_head, stage_head[0 .. stage_head.len - "    environment: prod\n".len] ++ "    environment: beta\n"), "prod-stage: environment");
@@ -738,8 +792,12 @@ test "each edit of the prod jobs of the real release.yml that breaks the contrac
     try expectRefused(ar, try replaced(ar, text, PROD_VERIFY_RUN, "        run: '\"$RUNNER_TEMP/prod-test/release_staged_verify\" verify --staged \"$RUNNER_TEMP/prod-test/staged\" --out release/staged_set || true'"), "prod-test ignores a failure");
     try expectRefused(ar, try replaced(ar, text, tool_step ++ verify_step, verify_step ++ tool_step), "verifies before the farm is joined and the tool built");
     try expectRefused(ar, try replaced(ar, text, verify_step ++ e2e_step, e2e_step ++ verify_step), "runs the e2e before the verification");
-    try expectRefused(ar, try replaced(ar, text, "-c komira_release.staged=stage //release/readme_e2e/verify:all\n", "//release/readme_e2e/verify:all\n"), "does not run the e2e on the verified set");
-    try expectRefused(ar, try replaced(ar, text, "-c komira_release.staged=stage //release/readme_e2e/verify:all\n", "-c komira_release.staged=beta //release/readme_e2e/verify:all\n"), "does not run the e2e on the verified set");
+    const e2e_args = "-c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all\n";
+    try expectRefused(ar, try replaced(ar, text, e2e_step, try replaced(ar, e2e_step, e2e_args, "//release/readme_e2e/verify:all\n")), "does not run the e2e on the verified set");
+    try expectRefused(ar, try replaced(ar, text, e2e_step, try replaced(ar, e2e_step, e2e_args, "-c komira_release.staged=beta -c komira_release.beta_version=0.1.${{ github.run_number }} //release/readme_e2e/verify:all\n")), "does not run the e2e on the verified set");
+    // prod-test's e2e is at the version of the run, the one the set was staged at
+    try expectRefused(ar, try replaced(ar, text, e2e_step, try replaced(ar, e2e_step, e2e_args, "-c komira_release.staged=stage //release/readme_e2e/verify:all\n")), "does not run the e2e on the verified set");
+    try expectRefused(ar, try replaced(ar, text, e2e_step, try replaced(ar, e2e_step, e2e_args, "-c komira_release.staged=stage -c komira_release.beta_version=0.1.${{ github.run_attempt }} //release/readme_e2e/verify:all\n")), "does not run the e2e on the verified set");
     try expectRefused(ar, try replaced(ar, text, verify_step, verify_step ++ "      - run: cp x release/staged_set/y\n"), "other than in the one verify step");
     try expectRefused(ar, try replaced(ar, text, verify_step, verify_step ++ verify_step), "other than in the one verify step");
     try expectRefused(ar, try replaced(ar, text, PROD_E2E_RUN ++ nl ++ E2E_ASSERT ++ nl, PROD_E2E_RUN ++ nl), "not asserted remote");
