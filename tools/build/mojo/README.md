@@ -340,6 +340,16 @@ the library's `:conda` (buildrules' `mojo_conda` over `:lib`), so it too exists 
     (`src/tests/helpers/komira_udf_spike_node_worker/watchdog.mojo`, 240 s,
     used by the udf spike tests). A test that needs a limit shorter than
     1800 s for a real reason sets `test_hang_limit_s` on its target.
+  - **Packages built with buildrules** ([`mojo_package`](#libraries-built-with-buildrules))
+    get the same limit from buildrules, not from `gate mojo`: every welded
+    test run of such a package is limited to `test_hang_limit_s` seconds,
+    1800 unless set, and a value of 0 or less is refused at analysis. The
+    whole process group is stopped, the action prints the same `hang limit:
+    <label> did not finish within <N> s and was stopped; ...` line, and exits
+    125. `mojo_package` takes the attribute as a dict from test to seconds,
+    `test_hang_limit_s = {"<test>": 600}`, where the key `"*"` sets the limit
+    of every test not named. No test of such a package arms an `alarm()` of
+    its own.
 
 ### Outputs and the runnable directory
 
