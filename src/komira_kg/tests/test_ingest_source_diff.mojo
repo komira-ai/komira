@@ -401,5 +401,34 @@ def test_an_edge_a_contradiction_closed_keeps_the_end_it_was_given() raises:
     assert_equal(ws.edges[1].invalid_at, OPEN)
 
 
+def test_a_fact_restated_under_a_judged_variant_name_is_kept_not_closed() raises:
+    # The variant is not an exact name, so the per-symbol diff cannot call the
+    # fact unchanged; the resolver judges it to be the same entity, the fact is
+    # the source's open edge again, and the removal must leave that edge be.
+    var kg = Kg(Backend(), "g")
+    var emb = _emb()
+    emb.add_vector("Harbor Alpha Meadow", _unit(0))
+    emb.add_vector("harbor aypha meadow", _unit(0))
+    var llm = StubLlmClient()
+    llm.add_same_entity("harbor aypha meadow", "Harbor Alpha Meadow", True)
+    var first = List[EntityMention]()
+    first.append(EntityMention("Harbor Alpha Meadow", "", ""))
+    first.append(EntityMention("Birch", "", ""))
+    var first_ts = List[Triple]()
+    first_ts.append(Triple("Harbor Alpha Meadow", "rel", "Birch", "Harbor borders Birch", Int64(10), OPEN))
+    _ = ingest_structured(kg, _ep("u1", "doc-1", Extraction(first^, first_ts^), Int64(1000)), llm, emb, _cfg())
+    var again = List[EntityMention]()
+    again.append(EntityMention("harbor aypha meadow", "", ""))
+    again.append(EntityMention("Birch", "", ""))
+    var again_ts = List[Triple]()
+    again_ts.append(Triple("harbor aypha meadow", "rel", "Birch", "Harbor borders Birch", Int64(10), OPEN))
+    _ = ingest_structured(kg, _ep("u2", "doc-1", Extraction(again^, again_ts^), Int64(2000)), llm, emb, _cfg())
+    var ws = SnapshotWorkingSet.load_latest(kg)
+    assert_equal(ws.num_entities(), 2)
+    assert_equal(ws.num_edges(), 1)
+    assert_equal(ws.edges[0].invalid_at, OPEN)
+    assert_equal(ws.edges[0].expired_at, OPEN)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

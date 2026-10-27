@@ -44,11 +44,12 @@ def source_edge_indices(
     Returns:
         Ascending positions into `ws.edges`.
     """
-    var in_partition = Dict[Int64, Bool]()
-    for i in range(len(ws.entities)):
-        if ws.entities[i].partition_id == partition_id:
-            in_partition[ws.entities[i].nid] = True
     var scoped = len(partition_id.as_bytes()) > 0
+    var in_partition = Dict[Int64, Bool]()
+    if scoped:
+        for i in range(len(ws.entities)):
+            if ws.entities[i].partition_id == partition_id:
+                in_partition[ws.entities[i].nid] = True
     var out = List[Int]()
     for i in range(len(ws.edges)):
         ref e = ws.edges[i]
@@ -57,6 +58,29 @@ def source_edge_indices(
         if scoped and e.src_nid not in in_partition:
             continue
         out.append(i)
+    return out^
+
+
+def _key(src_nid: Int64, dst_nid: Int64, fact: String) -> String:
+    """The bucket of an assertion: its endpoints and fact (the interval is
+    compared by `AssertedEdge.matches`). The ids hold no comma, so the key is
+    unambiguous whatever the fact says."""
+    return String(src_nid) + "," + String(dst_nid) + "," + fact
+
+
+def _push(mut index: Dict[String, List[Int]], key: String, value: Int):
+    var found = index.get(key)
+    var items = List[Int]()
+    if found:
+        items = found.take()
+    items.append(value)
+    index[key] = items^
+
+
+def _index_asserted(items: List[AssertedEdge]) -> Dict[String, List[Int]]:
+    var out = Dict[String, List[Int]]()
+    for i in range(len(items)):
+        _push(out, _key(items[i].src_nid, items[i].dst_nid, items[i].fact), i)
     return out^
 
 
@@ -82,7 +106,11 @@ def split_incremental(
     partition (an exact normalized-name lookup, no embedding) and one of the
     source's edges in `prior` is the same assertion (`AssertedEdge.matches`:
     endpoints, fact and interval). Each unchanged triple is appended to
-    `unchanged`. The returned extraction holds the changed triples, and the
+    `unchanged`. Comparing a triple with the source's earlier edges is a bucket
+    lookup (endpoints and fact), not a scan of `prior`. Cost: each triple's two
+    name lookups scan the partition's entities (`existing_nid_for_name`), and
+    the names a changed triple needs are searched in a list, so the bound is
+    O(triples * (entities + changed triples)) plus O(prior). The returned extraction holds the changed triples, and the
     mentions that a changed triple names or that name no existing entity.
 
     Args:
@@ -96,6 +124,10 @@ def split_incremental(
     Returns:
         The reduced extraction to apply.
     """
+    var prior_by_key = Dict[String, List[Int]]()
+    for k in range(len(prior)):
+        ref pe = ws.edges[prior[k]]
+        _push(prior_by_key, _key(pe.src_nid, pe.dst_nid, pe.fact), prior[k])
     var changed = List[Triple]()
     var needed = List[String]()
     for ti in range(len(extraction.triples)):
@@ -110,10 +142,14 @@ def split_incremental(
             var identity = AssertedEdge(
                 src_nid, dst_nid, String(t.fact), valid_at, t.invalid_at
             )
-            for k in range(len(prior)):
-                if identity.matches(ws.edges[prior[k]]):
-                    is_unchanged = True
-                    break
+            var ik = _key(src_nid, dst_nid, t.fact)
+            var found = prior_by_key.get(ik)
+            if found:
+                ref same = found.value()
+                for k in range(len(same)):
+                    if identity.matches(ws.edges[same[k]]):
+                        is_unchanged = True
+                        break
             if is_unchanged:
                 unchanged.append(identity^)
         if not is_unchanged:
@@ -155,18 +191,26 @@ def retire_absent(
         unchanged: What the unchanged triples asserted.
         ts: The system time of this write.
     """
+    var asserted_by_key = _index_asserted(asserted)
+    var unchanged_by_key = _index_asserted(unchanged)
     for k in range(len(prior)):
         var at = prior[k]
         if ws.edges[at].expired_at != TS_OPEN_SENTINEL:
             continue
         var stated = False
-        for a in range(len(asserted)):
-            if asserted[a].matches(ws.edges[at]):
-                stated = True
-                break
-        if not stated:
-            for u in range(len(unchanged)):
-                if unchanged[u].matches(ws.edges[at]):
+        var ek = _key(ws.edges[at].src_nid, ws.edges[at].dst_nid, ws.edges[at].fact)
+        var in_asserted = asserted_by_key.get(ek)
+        if in_asserted:
+            ref hits = in_asserted.value()
+            for a in range(len(hits)):
+                if asserted[hits[a]].matches(ws.edges[at]):
+                    stated = True
+                    break
+        var in_unchanged = unchanged_by_key.get(ek)
+        if not stated and in_unchanged:
+            ref hits = in_unchanged.value()
+            for u in range(len(hits)):
+                if unchanged[hits[u]].matches(ws.edges[at]):
                     stated = True
                     break
         if stated:
