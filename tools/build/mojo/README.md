@@ -253,6 +253,16 @@ package's `coverage_held` is checked against those branch records. `conda_packag
 `mojo_library`, so the conda packages of the libraries that depend on it still name it. The mopm package's `.conda` is
 the library's `:conda` (buildrules' `mojo_conda` over `:lib`), so it too exists only after the tests passed.
 
+A package with Mojo dependencies is a `mojo_package` whose `mopm.toml` names each one under `[dependencies]` as a sibling
+path dependency with a version (`komira_runtime_paths = { path = "../komira_runtime_paths", version = "0.1" }`, the form
+that survives the beta stage's per-run version), and the adopted label lists the adopted targets of those packages in
+`deps`. `buildrules mojo sync` is run with the package and its siblings staged; its `:lib` is then built from the
+siblings' `:lib`, and the adopted rule refuses a `deps` list that is not that closure, in either direction, naming the
+packages. A dependent of the label gets the closure on its `-I`, and `conda_package` requires the dependencies' packages.
+`:conda` is `mojo_conda` with `dir` and `members` (the siblings' manifests, staged at their repository paths), so the
+`.conda` records `mojo-<dependency> >=0.1,<0.2` and holds none of the dependency's files; `mojo_conda_holds` over it
+(`sole = True`, `depends = [...]`) reads that back from the built file. `src/komira_resources` is the example.
+
 ## Binaries and tests
 
 - **`main`**: the file holding `main()`. It defaults to the only file in
