@@ -15,7 +15,7 @@ adopts, and it hands on what they made.
         readme = "README.md",
     )
 
-What a dependent gets is what `mojo_library` would give it, for a library with no deps and no native
+What a dependent gets is what `mojo_library` would give it, for a library with no native
 code: `-I` on the file of `lib`, so the file exists (and the dependent builds) only once every test has
 passed, because `lib` is made only then. The same facts the conda package reads (`conda_name`, the
 README, the `src` and `tests` sub-targets) are the library's own, so `conda_package(lib = ...)` packs
@@ -45,8 +45,26 @@ in its `mopm.toml`, which `:conda` records as a conda requirement) declares the 
 `conda_package(lib = ...)` over the adopted label requires the conda package `system_libs.bzl` names for
 each soname, and the packer holds the declaration to the sources.
 
-A library that has Mojo deps is not adopted by this rule: it has no `deps` attribute, so a BUCK file
-that needs it stops at the attribute, not at a wrong `MojoInfo`.
+A library with Mojo dependencies lists them in `deps`, as a `mojo_library` does: the adopted (or `mojo_library`)
+targets of the packages its `mopm.toml` names under `[dependencies]`. The package's own `:lib` is built from the
+dependency packages' `:lib` (a path dependency, `{ path = "../komira_runtime_paths", version = "0.1" }`), so the
+closure of `lib` and the closure of `deps` are one set, and the rule refuses a BUCK file where they differ, in
+either direction, naming the packages: a dependency the manifest lacks would be built into the file and left out of
+the `-I` of every dependent, and one the BUCK file lacks would be a dependency the published package records and no
+dependent of the old label sees.
+
+    mojo_adopted_library(
+        name = "komira_resources",
+        lib = ":lib",
+        deps = ["//src/komira_runtime_paths:komira_runtime_paths"],   # `[dependencies]` of mopm.toml
+        ...
+    )
+
+What a dependent then gets is `lib` and the closure of `deps` (`MojoInfo.pkgs`, one `-I` per package, the same
+file of each package that its own `:lib` is), `MojoInfo.direct` and `direct_conda` (so `conda_package(lib = ...)`
+requires the dependencies' conda packages), and the native facts of the closure. The C link of a dependent is
+`lib`'s own `MojoNativeArchiveInfo`, which already lists the archives of the dependencies in the graph's link order,
+so the dependencies' `c_link` are not merged in a second time.
 
 A package that builds C of its own (`[native.<id>]` in its `mopm.toml`, a static library
 `lib<id>.a`) hands it to its dependents here. buildrules gives its `:lib` `MojoNativeArchiveInfo`: the
@@ -64,7 +82,7 @@ shared library's `callers` take the adopted label. `c_deps` are not linked (the 
 C symbol is still defined once in any link.
 """
 
-load("@buildrules//rules/mojo:providers.bzl", "MojoNativeArchiveInfo")
+load("@buildrules//rules/mojo:providers.bzl", "MojoLibInfo", "MojoNativeArchiveInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env")
 load("@prelude//cxx:cxx_toolchain_types.bzl", "CxxToolchainInfo")
@@ -74,7 +92,7 @@ load(":defs.bzl", "adopt_link_tail", "adopt_readme_test")
 load(":dlopen.bzl", "DLOPEN_ATTRS", "dlopen_refusal", "dlopen_rows")
 load(":native_facts.bzl", "native_facts")
 load(":opt_level.bzl", "TEST_OPT_LEVEL")
-load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoToolchainInfo", "welded_tests_info")
+load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoToolchainInfo", "mojo_pkg_children", "welded_tests_info")
 load(":readme.bzl", "readme_gate")
 load(":test_limit.bzl", "HANG_LIMIT_ATTRS")
 
@@ -144,6 +162,46 @@ def _native_link(ctx):
         preferred_linkage = Linkage("static"),
     )
 
+def _check_deps_are_closure(ctx, import_name, deps):
+    """Refuses `deps` unless they are, with their own closures, exactly the packages `lib` was built from.
+
+    `lib` is buildrules' `:lib` (`MojoLibInfo`): its `closure` maps each package of the unit's `--deps` directory
+    to its `.mojoc`, the package itself included. A dependent of this label compiles against `lib` and the
+    `.mojoc` of every package in `deps`' closures, so the two sets of names must be one, and a package named
+    by both must be the same file (the dependency's own gated `:lib`), not a rebuild of it."""
+    lib = ctx.attrs.lib.get(MojoLibInfo)
+    if lib == None:
+        if deps:
+            fail("{}: `deps` is set, but `lib` ({}) has no MojoLibInfo to hold it to; `lib` must be a `mojo_package`'s `:lib`".format(ctx.label, ctx.attrs.lib.label.raw_target()))
+        return
+    built_from = {name: f for name, f in lib.closure.items() if name != import_name}
+    given = {}
+    for d in deps:
+        for pkg in d[MojoInfo].pkgs.traverse():
+            given[pkg.basename[:-len(".mojoc")]] = pkg
+    missing = sorted([n for n in built_from if n not in given])
+    extra = sorted([n for n in given if n not in built_from])
+    if missing:
+        fail("{}: `lib` ({}) is built from {}, which `deps` does not bring: add the target of each (the packages `[dependencies]` of mopm.toml names)".format(ctx.label, ctx.attrs.lib.label.raw_target(), ", ".join(missing)))
+    if extra:
+        fail("{}: `deps` brings {}, which `lib` ({}) is not built from: `[dependencies]` of mopm.toml does not reach it (add it there and run `buildrules mojo sync`, or drop the dep)".format(ctx.label, ", ".join(extra), ctx.attrs.lib.label.raw_target()))
+    for name in sorted(given):
+        if given[name] != built_from[name]:
+            fail("{}: `deps` and `lib` ({}) hold two different files for {}: `lib` was built from {}, the dependency's closure holds {}".format(ctx.label, ctx.attrs.lib.label.raw_target(), name, built_from[name], given[name]))
+
+def _conda_refusal(ctx, deps):
+    """Why the old conda package cannot be built (`MojoInfo.conda_refusal`): the soname refusal, else a dependency with no package."""
+    why = dlopen_refusal(ctx)
+    if why != None:
+        return why
+    for d in deps:
+        di = d[MojoInfo]
+        if di.conda_name == None:
+            return "it depends on {}, which has no conda package (`conda = False`, or it is not a mojo_library)".format(d.label.raw_target())
+        if di.conda_refusal != None:
+            return "it depends on {}, which has no conda package: {}".format(d.label.raw_target(), di.conda_refusal)
+    return None
+
 def _impl(ctx):
     import_name = ctx.attrs.import_name or ctx.label.name
     made = ctx.attrs.lib[DefaultInfo].default_outputs
@@ -164,12 +222,18 @@ def _impl(ctx):
             fail("{}: {} is outside the package root {}".format(ctx.label, s.short_path, root))
         mapping[s.short_path[len(root) + 1:]] = s
     src_dir = ctx.actions.copied_dir("src/" + import_name, mapping)
-    pkgs = ctx.actions.tset(MojoPkgTSet, value = public)
+    deps = [d for d in ctx.attrs.deps]
+    for d in deps:
+        if MojoInfo not in d:
+            fail("{}: dep {} provides no MojoInfo (an adopted or `mojo_library` package)".format(ctx.label, d.label))
+    _check_deps_are_closure(ctx, import_name, deps)
+    infos = [d[MojoInfo] for d in deps]
+    pkgs = ctx.actions.tset(MojoPkgTSet, value = public, children = mojo_pkg_children(ctx, infos))
 
     # The README gate, as a mojo_library's (readme.bzl, readme_gate): compiled against `lib`, with no C
     # closure; the README ships in the conda package, so a relative link in it is refused.
     c_link = _native_link(ctx)
-    native = native_facts(ctx, import_name, ctx.attrs.c_deps) if ctx.attrs.c_deps or ctx.attrs.native else _NO_NATIVE
+    native = native_facts(ctx, import_name, ctx.attrs.c_deps + deps) if ctx.attrs.c_deps or ctx.attrs.native or deps else _NO_NATIVE
     gate = readme_gate(ctx, ctx.attrs.toolchain[MojoToolchainInfo], import_name, pkgs, adopt_link_tail(c_link), [], True, adopt_readme_test, owner = bool(native.c_direct), rerun = rerun_env(ctx))
     test_subtargets = {}
     if gate != None:
@@ -194,10 +258,10 @@ def _impl(ctx):
         MojoInfo(
             c_link = c_link,
             conda_name = ctx.attrs.conda_name or import_name,
-            conda_refusal = dlopen_refusal(ctx),
+            conda_refusal = _conda_refusal(ctx, deps),
             dlopen = dlopen_rows(ctx),
-            direct = [],
-            direct_conda = {},
+            direct = sorted([i.import_name for i in infos]),
+            direct_conda = {i.import_name: struct(name = i.conda_name, refusal = i.conda_refusal) for i in infos},
             import_name = import_name,
             native = native,
             pkgs = pkgs,
@@ -213,6 +277,7 @@ _adopted = rule(
         "c_deps": attrs.list(attrs.dep(providers = [MergedLinkInfo]), default = []),
         "conda_name": attrs.option(attrs.string(), default = None),
         "cxx_toolchain": attrs.option(attrs.dep(providers = [CxxLinkFacts]), default = None),
+        "deps": attrs.list(attrs.dep(), default = []),
         "import_name": attrs.option(attrs.string(), default = None),
         "lib": attrs.dep(),
         "native": attrs.option(attrs.label(), default = None),
