@@ -25,13 +25,17 @@ mojo_library(
     test_srcs = [
         # the resident-filter fan-out's row gate: a STRING predicate is
         # admitted from 65,536 rows, a fixed-width one keeps its floor, the
-        # band edges, and varlen_on=False restores the row-only gate (welded)
+        # band edges, and varlen_on=False restores the row-only gate
         "tests/test_inmem_filter_varlen_gate.mojo",
-        # every branch of the moved modules the welded test does not reach
-        # (direct tests, new): one file per module
+        # InMemSource, the in-memory scan plan builders and the multi-batch
+        # fold
         "tests/test_inmem_source.mojo",
+        # the bare multi-batch scan fold: the zero-copy gate and the chunks a
+        # fold leaves in place
         "tests/test_materialize_zerocopy_gate.mojo",
+        # the leaf-servability pre-gates and the pushed-filter walker
         "tests/test_plan_leaf_servable.mojo",
+        # the varlen gate over the columns a predicate reads
         "tests/test_varlen_gate_columns.mojo",
     ],
     visibility = ["PUBLIC"],

@@ -116,6 +116,7 @@ TARGETS = [
     "komira//src/komira_dispatch_agg_folds:komira_dispatch_agg_folds_conda",
     "komira//src/komira_dispatch_join_kernels:komira_dispatch_join_kernels_conda",
     "komira//src/komira_dispatch_scan:komira_dispatch_scan_conda",
+    "komira//src/komira_dispatch_sources:komira_dispatch_sources_conda",
     "komira//src/komira_encoding:ci",
     "komira//src/komira_encoding:coverage_floor",
     "komira//src/komira_encoding:table",
