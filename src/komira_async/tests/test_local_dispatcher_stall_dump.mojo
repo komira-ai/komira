@@ -34,7 +34,7 @@
 # shard to be posted, the read of the dump and the read to end of stream after
 # the dispatch each block until their event. A dump that never comes, like a
 # regression that leaves a charge unreleased and unrefused in the driver's
-# barrier wait, hangs this test, and the build's test watchdog reports it.
+# barrier wait, hangs this test, and the hang limit armed in main fails it.
 # =============================================================================
 
 from std.ffi import external_call
@@ -449,7 +449,21 @@ def test_stall_dump_wider_than_the_mark_table() raises:
     _stall_scenario(1024, 15)
 
 
+# Hang limit. A library's tests run as build actions, which have no timeout, and
+# the waits in this file have no deadline of their own (they wait on an event,
+# not on a clock). A regression that loses the event would hold a worker with
+# no verdict, so the process arms SIGALRM once, far above any run: its default
+# action kills the process (exit 142) and the build action fails. No test reads
+# this limit; a run that completes never meets it.
+comptime _HANG_LIMIT_S: Int = 600
+
+
+def _arm_hang_limit():
+    _ = external_call["alarm", UInt32](UInt32(_HANG_LIMIT_S))
+
+
 def main() raises:
+    _arm_hang_limit()
     test_stall_dump_one_extra_band()
     test_stall_dump_wider_than_the_mark_table()
     print("OK test_local_dispatcher_stall_dump")

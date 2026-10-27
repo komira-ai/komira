@@ -21,6 +21,7 @@
 # exactly which tasks ran and which a stop arm kept from running.
 # =============================================================================
 
+from std.ffi import external_call
 from std.memory import ArcPointer, OwnedPointer, alloc
 from std.sys import size_of
 from komira_atomic_alias import AtomicI64
@@ -119,7 +120,7 @@ struct _ArmState(KeepAlive, Movable, Deinitable):
 def _pull(mut recv: MpscReceiver[ErasedHandle]) -> ErasedHandle:
     """The next handle of `recv`, waiting for it to be posted. There is no
     deadline: the driver posts it right after shard 0, and a shard that never
-    arrives is a hang that the build's test watchdog reports."""
+    arrives is a hang that the hang limit armed in main ends."""
     while True:
         var oc = recv.try_recv()
         if oc.status == TRY_RECV_OK:
@@ -694,7 +695,21 @@ def test_sched_trace_records_dispatch_and_segment_sites() raises:
     sched_trace_force_enable(False)
 
 
+# Hang limit. A library's tests run as build actions, which have no timeout, and
+# the waits in this file have no deadline of their own (they wait on an event,
+# not on a clock). A regression that loses the event would hold a worker with
+# no verdict, so the process arms SIGALRM once, far above any run: its default
+# action kills the process (exit 142) and the build action fails. No test reads
+# this limit; a run that completes never meets it.
+comptime _HANG_LIMIT_S: Int = 600
+
+
+def _arm_hang_limit():
+    _ = external_call["alarm", UInt32](UInt32(_HANG_LIMIT_S))
+
+
 def main() raises:
+    _arm_hang_limit()
     test_mark_table_refuses_wids_outside_capacity()
     test_mark_table_reads_outside_range_are_zero()
     test_static_split_stops_after_another_shard_failed()

@@ -5,25 +5,26 @@
 # The Mojo equivalent of `std::thread::spawn(move || drop(to_drop))`.
 #
 # Test contract:
-#   We construct a GatedDropSentinel whose destructor blocks on a gate the
-#   test owns, then sets a `done` flag. The driver calls `spawn_drop`, which
-#   must RETURN while the destructor is still blocked on the gate: `done` is
-#   still 0 at that point. The driver then opens the gate and waits for
-#   `done` to become 1, which proves the destructor ran after the call
-#   returned.
+#   We construct a ThreadStampSentinel whose destructor records the id of the
+#   thread it runs on (`pthread_self`) and then sets a `done` flag. The driver
+#   calls `spawn_drop` and waits for `done`; the destructor must have run
+#   exactly once, on a thread other than the driver's.
 #
-# A synchronous drop would run the destructor inside `spawn_drop` (or at the
-# end of the calling function), where it would wait on a gate that only the
-# caller can open: the test would hang. The primitive hands the sentinel to a
-# detached pthread, so the caller returns, opens the gate, and the destructor
-# finishes on the background thread.
+# A synchronous drop (the primitive's fallback when `pthread_create` fails, or
+# a regression that drops in place) runs the destructor on the driver's own
+# thread: the recorded id equals the driver's and the test fails at once, with
+# no wait. The primitive hands the sentinel to a detached pthread, so the
+# recorded id differs.
 #
-# Nothing here reads a clock: the ordering comes from the gate and the flag.
+# Nothing here reads a clock: the evidence is the thread id, and the only wait
+# is for the background thread's `done` flag (an event; the hang limit armed in
+# `main` kills a run whose destructor never happens).
 # =============================================================================
 
+from std.ffi import external_call
 from komira_atomic_alias import AtomicI64
 from std.memory import alloc, ArcPointer, OwnedPointer
-from std.testing import assert_equal
+from std.testing import assert_equal, assert_true
 
 from komira_async_api.spawn_drop import spawn_drop
 
@@ -35,67 +36,76 @@ def _new_counter() -> OwnedPointer[AtomicI64]:
     return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
 
 
-struct _Latch(Movable, Deinitable):
-    """Two heap-stable atomics shared (through an `ArcPointer`) between the
-    test and the sentinel: `gate` (the test opens it) and `done` (the
-    destructor sets it)."""
+def _this_thread() -> Int64:
+    """An identifier of the calling thread (`pthread_self`), never 0."""
+    return Int64(external_call["pthread_self", UInt64]())
 
-    var gate: OwnedPointer[AtomicI64]
+
+struct _Stamps(Movable, Deinitable):
+    """Heap-stable atomics shared (through an `ArcPointer`) between the test and
+    the sentinel: `done` counts destructor runs, `tid` is the thread id the
+    destructor ran on."""
+
     var done: OwnedPointer[AtomicI64]
+    var tid: OwnedPointer[AtomicI64]
 
     def __init__(out self):
-        self.gate = _new_counter()
         self.done = _new_counter()
+        self.tid = _new_counter()
 
 
-struct GatedDropSentinel(Movable, Deinitable):
-    """A test sentinel whose destructor blocks until the gate opens, then sets
-    `done`. The latch outlives the sentinel: the test holds its own
-    reference, so the background thread's last write is never to freed
-    memory."""
+struct ThreadStampSentinel(Movable, Deinitable):
+    """A test sentinel whose destructor records its thread, then counts a run.
+    The stamps outlive the sentinel: the test holds its own reference, so the
+    background thread's last write is never to freed memory."""
 
-    var latch: ArcPointer[_Latch]
+    var stamps: ArcPointer[_Stamps]
 
-    def __init__(out self, var latch: ArcPointer[_Latch]):
-        self.latch = latch^
+    def __init__(out self, var stamps: ArcPointer[_Stamps]):
+        self.stamps = stamps^
 
     def __deinit__(deinit self):
-        # No deadline: the gate is opened by the test once `spawn_drop` has
-        # returned. A synchronous drop never sees it opened and hangs.
-        while self.latch[].gate[].load() == Int64(0):
-            pass
-        _ = self.latch[].done[].fetch_add(Int64(1))
+        # tid first: `done` is the flag the driver waits on.
+        self.stamps[].tid[].store(_this_thread())
+        _ = self.stamps[].done[].fetch_add(Int64(1))
 
 
-def test_spawn_drop_returns_before_destructor() raises:
-    """`spawn_drop` returns while the destructor is still blocked on the gate
-    (`done == 0`); after the gate opens the destructor runs to completion on
-    the background thread (`done == 1`)."""
-    var latch = ArcPointer[_Latch](_Latch())
-    var sentinel = GatedDropSentinel(ArcPointer[_Latch](copy=latch))
+def test_spawn_drop_runs_the_destructor_on_another_thread() raises:
+    """The destructor runs once, and not on the thread that called
+    `spawn_drop`."""
+    var stamps = ArcPointer[_Stamps](_Stamps())
+    var sentinel = ThreadStampSentinel(ArcPointer[_Stamps](copy=stamps))
+    var driver = _this_thread()
+    assert_true(driver != Int64(0))
 
-    # After this call the destructor is running (blocked on the gate) on a
-    # detached pthread; the driver continues here.
-    spawn_drop[GatedDropSentinel](sentinel^)
+    spawn_drop[ThreadStampSentinel](sentinel^)
 
-    # The destructor cannot have finished: the gate is still closed.
-    assert_equal(
-        Int(latch[].done[].load()),
-        0,
-        "spawn_drop returned but the destructor already finished: the"
-        " primitive is synchronous",
-    )
-
-    # Open the gate, then wait (no deadline) for the destructor to finish.
-    _ = latch[].gate[].fetch_add(Int64(1))
-    while latch[].done[].load() == Int64(0):
+    # Wait for the destructor, wherever it ran: a drop in place has finished by
+    # now, a drop on the background thread finishes when that thread gets there.
+    while stamps[].done[].load() == Int64(0):
         pass
-    assert_equal(
-        Int(latch[].done[].load()),
-        1,
-        "the destructor ran exactly once, on the background thread",
+    assert_equal(Int(stamps[].done[].load()), 1, "the destructor ran once")
+    assert_true(
+        stamps[].tid[].load() != driver,
+        "spawn_drop ran the destructor on the calling thread: the primitive is"
+        " synchronous",
     )
+
+
+# Hang limit. A library's tests run as build actions, which have no timeout, and
+# the wait in this file has no deadline of its own (it waits on an event, not on
+# a clock). A regression that loses the event would hold a worker with no
+# verdict, so the process arms SIGALRM once, far above any run: its default
+# action kills the process (exit 142) and the build action fails. No test reads
+# this limit; a run that completes never meets it.
+comptime _HANG_LIMIT_S: Int = 600
+
+
+def _arm_hang_limit():
+    _ = external_call["alarm", UInt32](UInt32(_HANG_LIMIT_S))
 
 
 def main() raises:
-    test_spawn_drop_returns_before_destructor()
+    _arm_hang_limit()
+    test_spawn_drop_runs_the_destructor_on_another_thread()
+    print("PASS komira_async_api spawn_drop")

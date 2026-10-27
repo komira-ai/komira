@@ -18,9 +18,11 @@
 # until the worker's sleeping flag reads 1 (the worker is between storing it
 # and returning from its park), then signals shutdown at once. A worker that
 # saw the shutdown leaves the park bracket and stores 0; a worker that lost
-# the wake keeps 1 forever. So a sleeping flag still at 1 a full second after
-# the signal is a lost wake: the test then writes the eventfd once more (so
-# the worker exits and the join returns) and fails, naming the trial.
+# the wake keeps 1 forever. The test waits for the flag to read 0 with no
+# deadline, so a worker that lost the wake leaves that wait (and the test)
+# hanging: the hang limit armed in `main` (SIGALRM) kills the process and the
+# build action fails. A lost wake is therefore a failure, not a verdict the
+# test names; the trial number is not reported.
 #
 # Under the release build the window is a few hundred nanoseconds wide, so a
 # single trial hits it rarely; the test runs TRIALS of them. Under a
@@ -32,6 +34,7 @@
 # in `Worker.run_until_shutdown`.
 # =============================================================================
 
+from std.ffi import external_call
 from std.sys.info import CompilationTarget
 from std.testing import assert_equal
 
@@ -43,7 +46,7 @@ from komira_async.runtime.runtime import (
 )
 
 
-comptime TRIALS: Int = 2000
+comptime TRIALS: Int = 8000
 
 
 def _noop_sink_factory() -> NoopSink:
@@ -85,6 +88,20 @@ def test_shutdown_signal_at_park_is_not_lost() raises:
     assert_equal(trial, TRIALS)
 
 
+# Hang limit. A library's tests run as build actions, which have no timeout, and
+# the waits in this file have no deadline of their own (they wait on an event,
+# not on a clock). A regression that loses the event would hold a worker with
+# no verdict, so the process arms SIGALRM once, far above any run: its default
+# action kills the process (exit 142) and the build action fails. No test reads
+# this limit; a run that completes never meets it.
+comptime _HANG_LIMIT_S: Int = 600
+
+
+def _arm_hang_limit():
+    _ = external_call["alarm", UInt32](UInt32(_HANG_LIMIT_S))
+
+
 def main() raises:
+    _arm_hang_limit()
     test_shutdown_signal_at_park_is_not_lost()
     print("PASS komira_async.runtime worker shutdown at park is not lost")

@@ -143,7 +143,11 @@ def test_schedregion_raii_records_on_scope_close() raises:
     assert_equal(sched_region_health(Int32(6)), UInt64(1))  # open on this thread
     # No wall value is asserted: `SchedRegion` reads the real clock, whose
     # granularity differs by platform, and a test must not depend on it. The
-    # wall attribution is asserted with explicit values in the tests above.
+    # wall attribution is asserted with explicit values in the tests above,
+    # and the nesting test below checks the RAII walls against each other. A
+    # drop that records a wall of exactly 0 is not told apart from an empty
+    # scope on a coarse clock: that needs a clock the test owns, which
+    # `SchedRegion` does not take.
     _ = g^
     assert_equal(sched_region(PHASE_PLAN_PREPARE, Int32(3)), before + UInt64(1))
     assert_equal(sched_region_health(Int32(6)), UInt64(0))  # closed, stack empty
@@ -166,6 +170,10 @@ def test_schedregion_nests_through_raii() raises:
     assert_equal(sched_region_health(Int32(0)), UInt64(0))
     # the inner's wall is charged out of the outer's self
     assert_equal(os, ow - iw)
+    # The outer opened first and closed last on a monotonic clock, so it holds
+    # the inner's whole wall: true at any clock granularity, and it fails if
+    # the outer's drop records less than the inner's.
+    assert_true(ow >= iw)
     assert_equal(sched_region(PHASE_WALKER_DISPATCH, Int32(5)), UInt64(2))  # depth_max
 
 
