@@ -110,7 +110,7 @@ def test_sink_null_key_among_equal_keys_hides_nothing() raises:
     DuckDB: the 0-keyed rows are t=3 and t=1; the last at or before 10 is
     t=3, v=30. The sort orders r as (0,1), (NULL,2), (0,3).
 
-    Mutant: ending a group at a NULL-keyed right row answers v=10."""
+    A NULL-keyed right row does not end the group: the answer is v=30, not v=10."""
     var sink = AsofJoinSink.new(_spec(["k"], ASOF_BACKWARD, I64))
     sink.consume(_kt_batch([0], [False], [10], "lv", [1]))
     var right = _kt_batch([0, 0, 0], [False, True, False], [3, 2, 1], "v", [30, 20, 10])
@@ -146,8 +146,8 @@ def test_sink_nan_asof_value_is_largest_and_equals_nan() raises:
     """No equi key. r: t=[NaN, 1.0], v=[1, 2]; l: t=[NaN, 5.0]. BACKWARD:
     NaN >= NaN, so l NaN -> v=1; 5.0 >= 1.0 and not >= NaN -> v=2.
 
-    Mutant: the kernel comparing with IEEE `<=` misses the NaN row: the NaN
-    left row comes out with NULL v."""
+    An IEEE `<=` would miss the NaN row; the NaN left row must not come out
+    with a NULL v."""
     var sink = AsofJoinSink.new(_spec(List[String](), ASOF_BACKWARD, F64))
     var lt: List[Float64] = [nan[F64](), 5.0]
     sink.consume(_t_batch[F64](lt, "lv", [10, 20]))

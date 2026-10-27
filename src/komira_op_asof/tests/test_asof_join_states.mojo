@@ -7,15 +7,14 @@
 # DuckDB `SELECT p.t, b.* FROM p ASOF JOIN b ON p.t <= b.t` (FORWARD, INNER):
 #
 #   * a NULL build temporal key is not a key: the row is not stored, so a
-#     probe passes over it to the next real row (mutant: storing the slot's
-#     value makes a NULL with slot 0 the match of a probe of -5);
-#   * a NULL probe temporal key emits nothing (mutant: probing the slot's
-#     value emits a row);
-#   * the type minimum is a key (mutant: an "empty" sentinel at Int64.MIN
-#     drops the Int64.MIN probe);
+#     probe passes over it to the next real row (a NULL stored with slot 0 would
+#     otherwise be the match of a probe of -5);
+#   * a NULL probe temporal key emits nothing (the slot's value is never
+#     probed);
+#   * the type minimum is a key (no "empty" sentinel sits at Int64.MIN, so
+#     an Int64.MIN probe finds its row);
 #   * payloads keep their type and NULL: an INT64 of 2^53 + 1 comes back
-#     exactly and a NULL payload comes back NULL (mutant: a Float64 channel
-#     returns 2^53; a payload without its NULL flag returns 0);
+#     exactly (not through a Float64) and a NULL payload comes back NULL (not 0);
 #   * FLOAT64 temporal keys order by `sort_key_lt` (NaN above every number).
 # =============================================================================
 
