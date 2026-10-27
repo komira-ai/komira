@@ -24,13 +24,16 @@ from komira_morsel.source_hooks import LoweredSourceHooks
 from komira_parquet_scan.parquet_source_emit import ClaimOutcome, emit_outcome, split_and_stash_first
 from komira_parquet_scan.parquet_source_options import (
     SUB_SLOT_STRIDE,
+    ParquetScanOptions,
     adaptive_stride,
     dict_count_comparison_op,
     lowered_hooks_to_source_caps,
     rg_index_of_partition_id,
     rg_partition_id,
     sel_pipe_should_defer,
+    unit_partition_id,
 )
+from komira_parquet_scan.parquet_source_subrg import RowRangeUnits
 from komira_plan_expr.expr import BIN_ADD, BIN_AND, BIN_EQ, BIN_GE, BIN_LT, Expr
 from komira_plan_expr.expr_id import ExprId
 from komira_plan_expr.scalar_value import ScalarValue
@@ -54,6 +57,60 @@ def test_the_selection_pipeline_deferral() raises:
 def test_partition_ids() raises:
     assert_equal(rg_partition_id(3), 3 * SUB_SLOT_STRIDE)
     assert_equal(rg_index_of_partition_id(rg_partition_id(7) + 5), 7)
+
+
+def test_unit_partition_ids_stay_inside_their_row_group_slot() raises:
+    assert_equal(unit_partition_id(3, 0), rg_partition_id(3))
+    assert_equal(unit_partition_id(3, 5), rg_partition_id(3) + 5)
+    # The last ordinal of a row group sorts before the first of the next.
+    assert_true(unit_partition_id(3, SUB_SLOT_STRIDE - 1) < unit_partition_id(4, 0))
+    assert_equal(rg_index_of_partition_id(unit_partition_id(3, SUB_SLOT_STRIDE - 1)), 3)
+
+
+def test_row_range_units_count_their_ordinals_per_row_group() raises:
+    var units = RowRangeUnits()
+    assert_equal(units.max_units_per_rg(), 0)
+    units.add(0, 0, 10)
+    units.add(0, 10, 20)
+    units.add(0, 20, 30)
+    units.add(2, 0, 5)
+    units.add(3, 0, 5)
+    units.add(3, 5, 9)
+    assert_equal(len(units.ordinal), 6)
+    assert_equal(units.ordinal[0], 0)
+    assert_equal(units.ordinal[2], 2)
+    assert_equal(units.ordinal[3], 0)
+    assert_equal(units.ordinal[4], 0)
+    assert_equal(units.ordinal[5], 1)
+    assert_equal(units.max_units_per_rg(), 3)
+
+
+def test_option_validation() raises:
+    var ok = ParquetScanOptions.default()
+    ok.validate()
+    ok.subrg_mode = 2
+    ok.subrg_units_per_rg = 1
+    ok.subrg_emit_rows = 0
+    ok.validate()
+    # Mode 1 does not read the units-per-row-group count.
+    ok.subrg_mode = 1
+    ok.subrg_units_per_rg = 0
+    ok.validate()
+    var modes: List[Int] = [-1, 3]
+    for i in range(len(modes)):
+        var o = ParquetScanOptions.default()
+        o.subrg_mode = modes[i]
+        with assert_raises(contains="subrg_mode must be 0, 1 or 2"):
+            o.validate()
+    var per = ParquetScanOptions.default()
+    per.subrg_mode = 2
+    per.subrg_units_per_rg = 0
+    with assert_raises(contains="subrg_units_per_rg must be at least 1"):
+        per.validate()
+    var rows = ParquetScanOptions.default()
+    rows.subrg_emit_rows = -1
+    with assert_raises(contains="subrg_emit_rows must not be negative"):
+        rows.validate()
 
 
 def _cmp(op: UInt8, var rhs: Expr) -> Expr:

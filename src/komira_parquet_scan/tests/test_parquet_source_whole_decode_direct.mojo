@@ -26,7 +26,7 @@
 #     staged filter: the survivors' columns in projection order.
 
 from std.memory import ArcPointer, Pointer
-from std.testing import TestSuite, assert_equal, assert_false, assert_true
+from std.testing import TestSuite, assert_equal, assert_false, assert_raises, assert_true
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.boolean_array import BooleanArray
@@ -66,7 +66,7 @@ from komira_parquet_scan.parquet_reader import ParquetReader
 from komira_parquet_scan.parquet_reader_factory import ParquetReaderFactory
 from komira_parquet_scan.parquet_source import ParquetSource
 from komira_parquet_scan.parquet_source_arms import stages_mask
-from komira_parquet_scan.parquet_source_options import ParquetScanOptions
+from komira_parquet_scan.parquet_source_options import SUB_SLOT_STRIDE, ParquetScanOptions
 from komira_plan_expr.expr import BIN_GT, BIN_LT, Expr
 from komira_plan_expr.expr_id import ExprId
 from komira_plan_expr.expr_pool import ExprPool
@@ -246,7 +246,8 @@ def _check_against(
 ) raises:
     """Every emitted row (a selection mask honoured) is a row of `want_rows`
     exactly once and equals the whole decode's row; each batch has the whole
-    decode's column names and types."""
+    decode's column names, types and nullability, and a column that holds a
+    NULL is a nullable field."""
     var seen = List[Int](length=_ROWS, fill=0)
     ref first = oracle.batches[0]
     for m in range(len(morsels)):
@@ -257,6 +258,14 @@ def _check_against(
             assert_true(
                 bt.column_at(c).arrow_type == first.column_at(c).arrow_type,
                 label + ": type of column " + bt.schema.field_name(c),
+            )
+            assert_equal(
+                bt.schema.field_nullable(c), first.schema.field_nullable(c),
+                label + ": nullability of column " + bt.schema.field_name(c),
+            )
+            assert_true(
+                bt.column_at(c).null_count() == 0 or bt.schema.field_nullable(c),
+                label + ": column " + bt.schema.field_name(c) + " holds a NULL under a non-nullable field",
             )
         for r in range(bt.num_rows()):
             if bt.has_selection_mask() and not bt.selection_mask_get(r):
@@ -272,6 +281,25 @@ def _all_rows() -> List[Bool]:
     return List[Bool](length=_ROWS, fill=True)
 
 
+def _morsels(
+    path: String,
+    proj: List[Int],
+    preserve_dict: Bool,
+    var options: ParquetScanOptions,
+    var caps: SourceCapabilityConfig,
+    mut pool: ExprPool,
+) raises -> Slab[Morsel]:
+    var cache = ParquetMetadataCache()
+    var nf = 0
+    var src = _Src[origin_of(cache), origin_of(pool), origin_of(nf)](
+        _FS.new(), path, ParquetReaderFactory[origin_of(cache), _FS].new(Pointer(to=cache)),
+        ColumnSet.columns(proj.copy()), Optional(Pointer(to=pool)),
+        Optional[Pointer[DynamicJoinFilter, origin_of(nf)]](None), _NW,
+        preserve_dict=preserve_dict, caps=caps^, options=options^,
+    )
+    return _drain(src)
+
+
 def _run(
     path: String,
     proj: List[Int],
@@ -282,15 +310,7 @@ def _run(
     want_rows: List[Bool],
     label: String,
 ) raises:
-    var cache = ParquetMetadataCache()
-    var nf = 0
-    var src = _Src[origin_of(cache), origin_of(pool), origin_of(nf)](
-        _FS.new(), path, ParquetReaderFactory[origin_of(cache), _FS].new(Pointer(to=cache)),
-        ColumnSet.columns(proj.copy()), Optional(Pointer(to=pool)),
-        Optional[Pointer[DynamicJoinFilter, origin_of(nf)]](None), _NW,
-        preserve_dict=preserve_dict, caps=caps^, options=options^,
-    )
-    var morsels = _drain(src)
+    var morsels = _morsels(path, proj, preserve_dict, options^, caps^, pool)
     _check_against(morsels, _Oracle(path, proj, preserve_dict), want_rows, label)
 
 
@@ -394,6 +414,57 @@ def test_coarse_row_range_morsels_lose_and_repeat_no_row() raises:
             opts.subrg_emit_rows = emit_rows
             _plain(path, [I, D, A, F, Z], False, opts.copy(), "coarse " + String(emit_rows) + "/" + String(units))
             _plain(path, [A, M, I], False, opts^, "coarse with NULLs " + String(emit_rows) + "/" + String(units))
+
+
+def test_row_range_morsels_take_the_partition_id_of_their_first_unit() raises:
+    # Three equal ranges per row group of 40 rows start at rows 0, 13 and 26.
+    # A morsel's id is its row group and the ordinal of the first range it
+    # holds, which is the range holding its lowest row (a worker claims
+    # ranges in file order).
+    var path = _file()
+    for coarse in [False, True]:
+        for shared in [False, True]:
+            var opts = ParquetScanOptions.default()
+            opts.subrg_mode = 2
+            opts.subrg_units_per_rg = 3
+            opts.subrg_shared = shared
+            opts.subrg_emit_coarse = coarse
+            opts.subrg_emit_rows = 50
+            var pool = ExprPool()
+            var morsels = _morsels(path, [A, I], False, opts^, SourceCapabilityConfig.default(), pool)
+            var multi_unit = 0
+            for m in range(len(morsels)):
+                ref bt = morsels[m].batch
+                var lowest = _ROWS
+                for r in range(bt.num_rows()):
+                    lowest = min(lowest, _a_of(bt, r))
+                var in_rg = lowest % _RG_ROWS
+                var k = 0 if in_rg < 13 else (1 if in_rg < 26 else 2)
+                var label = "coarse=" + String(coarse) + " shared=" + String(shared) + " morsel at row " + String(lowest)
+                assert_equal(morsels[m].partition_id, (lowest // _RG_ROWS) * SUB_SLOT_STRIDE + k, label)
+                if bt.num_rows() > 14:
+                    multi_unit += 1
+            if coarse:
+                assert_true(multi_unit > 0, "coarse morsels held several ranges")
+
+
+def test_the_source_refuses_options_that_have_no_meaning() raises:
+    var path = _file()
+    var bad = List[ParquetScanOptions]()
+    var a = ParquetScanOptions.default()
+    a.subrg_mode = 3
+    bad.append(a^)
+    var b = ParquetScanOptions.default()
+    b.subrg_mode = 2
+    b.subrg_units_per_rg = 0
+    bad.append(b^)
+    var c = ParquetScanOptions.default()
+    c.subrg_emit_rows = -1
+    bad.append(c^)
+    for i in range(len(bad)):
+        var pool = ExprPool()
+        with assert_raises(contains="parquet source: subrg_"):
+            _ = _morsels(path, [A], False, bad[i].copy(), SourceCapabilityConfig.default(), pool)
 
 
 def _lit(v: Int) -> Expr:

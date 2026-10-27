@@ -224,13 +224,15 @@ struct ParquetSource[
                 workers; `share_parked_ragged` also in the last round.
 
         Raises:
-            If `num_workers` is out of range, or a file does not open.
+            If `num_workers` is out of range, `options` fail
+            `ParquetScanOptions.validate`, or a file does not open.
         """
         if num_workers < 1 or num_workers > MAX_WORKERS:
             raise Error(
                 "parquet source: num_workers must be in [1, " + String(MAX_WORKERS) + "], got "
                 + String(num_workers)
             )
+        options.validate()
         var nw = num_workers
         var n_files = discovery.num_paths()
         # A row window builds full readers only for the files it overlaps.

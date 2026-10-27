@@ -41,8 +41,9 @@ from .cursor_grain_split_emit import (
 from .parquet_reader import ParquetReader
 from .parquet_source_emit import split_and_stash_first
 from .parquet_source_options import SUB_SLOT_STRIDE, ParquetScanOptions
+from .parquet_source_subrg import subrg_chunk_schema_of_footer
 from .subrg_scan_executor import SubrgScanPlan
-from .subrg_split_decode import subrg_build_chunk_schema, subrg_probe_build_plan
+from .subrg_split_decode import subrg_probe_build_plan
 
 
 struct CursorGrainScan(Movable):
@@ -91,7 +92,7 @@ struct CursorGrainScan(Movable):
         if not maybe_plan:
             return
         var plan = maybe_plan.take()
-        var chunk_schema = subrg_build_chunk_schema(plan)
+        var chunk_schema = subrg_chunk_schema_of_footer[FS](reader, plan)
         var grain = options.cursor_grain_rows
         if grain <= 0:
             grain = cursor_grain_rows(chunk_schema.row_width_bytes(), num_workers, morsel_rows, options.l3_cache_bytes)

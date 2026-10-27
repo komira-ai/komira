@@ -14,16 +14,22 @@
 # `subrg_split_decode` (each (row group, column) dictionary decoded once, by
 # whichever worker gets there first, when `subrg_shared`). A unit becomes one
 # morsel, or several units of a worker are concatenated into morsels of about
-# `subrg_emit_rows` rows (`subrg_emit_coarse`). Partition ids are
-# `rg * SUB_SLOT_STRIDE + row_lo`, so morsels sort into file order. A unit
-# a cursor refuses after the plan probe passed (a column with an actual null,
-# an encoding row group 0 does not use) is cut from the whole decode of its
-# row group instead.
+# `subrg_emit_rows` rows (`subrg_emit_coarse`). A unit's partition id is
+# `rg * SUB_SLOT_STRIDE + k`, `k` its ordinal within the row group, so the
+# morsels sort into file order when each holds one unit; a coarse morsel takes the
+# id of the first unit it holds. A row group that would need more than
+# `SUB_SLOT_STRIDE` units leaves the split off. A unit a cursor refuses after
+# the plan probe passed (a column with an actual null, an encoding row group
+# 0 does not use) is cut from the whole decode of its row group instead; each
+# worker keeps the last whole decode it made, so its consecutive refused
+# units of one row group decode it once. Every unit batch, cursor or whole
+# decode, carries the field nullability of the whole decode (OPTIONAL columns
+# nullable), so a coarse morsel's schema agrees with all its columns.
 # =============================================================================
 
 from komira_arrow.concat import concat_record_batches_nway
 from komira_arrow.record_batch import RecordBatch
-from komira_arrow.schema import Schema
+from komira_arrow.schema import Field, Schema, SchemaBuilder
 from komira_atomic_alias import AtomicI64
 from komira_collections.slab import Slab
 from komira_column_kernels.compiler_helpers import gather_batch
@@ -32,7 +38,8 @@ from komira_morsel.morsel import Morsel
 from komira_parquet.column_decode_context import ColumnDecodeContext
 
 from .parquet_reader import ParquetReader
-from .parquet_source_options import SUB_SLOT_STRIDE, ParquetScanOptions
+from .parquet_source_options import SUB_SLOT_STRIDE, ParquetScanOptions, unit_partition_id
+from .subrg_cursor_feed import _chunk_is_nullable
 from .subrg_scan_executor import SubrgScanPlan
 from .subrg_split_decode import (
     SharedColDict,
@@ -40,7 +47,6 @@ from .subrg_split_decode import (
     build_shared_col_dict,
     decode_subrg_unit,
     decode_subrg_unit_shared,
-    subrg_build_chunk_schema,
     subrg_page_row_boundaries,
     subrg_probe_build_plan,
 )
@@ -52,21 +58,35 @@ struct _UnitCounter:
 
 struct RowRangeUnits(Copyable, Movable):
     """The units of a split: unit `i` is rows `[lo[i], hi[i])` of row group
-    `rg[i]`."""
+    `rg[i]`, the `ordinal[i]`-th unit (from 0) of that row group. Units are
+    added row group by row group."""
 
     var rg: List[Int]
     var lo: List[Int]
     var hi: List[Int]
+    var ordinal: List[Int]
 
     def __init__(out self):
         self.rg = List[Int]()
         self.lo = List[Int]()
         self.hi = List[Int]()
+        self.ordinal = List[Int]()
 
     def add(mut self, rg: Int, lo: Int, hi: Int):
+        var k = 0
+        if len(self.rg) > 0 and self.rg[len(self.rg) - 1] == rg:
+            k = self.ordinal[len(self.ordinal) - 1] + 1
         self.rg.append(rg)
         self.lo.append(lo)
         self.hi.append(hi)
+        self.ordinal.append(k)
+
+    def max_units_per_rg(self) -> Int:
+        """The most units any one row group has."""
+        var m = 0
+        for i in range(len(self.ordinal)):
+            m = max(m, self.ordinal[i] + 1)
+        return m
 
     def max_rows(self) -> Int:
         var m = 0
@@ -108,6 +128,30 @@ def plan_row_range_units[FS: FileSystem](
     return units^
 
 
+def subrg_chunk_schema_of_footer[FS: FileSystem](reader: ParquetReader[FS], plan: SubrgScanPlan) raises -> Schema:
+    """The chunk batches' schema: `plan`'s names and types in projection
+    order, each field nullable unless the footer's column is REQUIRED (the
+    nullability of the whole decode's fields; a cursor refuses a column that
+    holds a null, so a nullable field here carries no null)."""
+    var sb = SchemaBuilder()
+    for ci in range(len(plan.proj_names)):
+        var nullable = _chunk_is_nullable(reader._meta[].schema[plan.reader_col_idx[ci] + 1])
+        sb.add_field(Field(plan.proj_names[ci], plan.col_arrow_types[ci], nullable))
+    return sb.build()
+
+
+struct _WholeDecode(Movable):
+    """A worker's last whole decode of a row group, for the units it cuts
+    from it."""
+
+    var rg: Int
+    var batch: Optional[RecordBatch]
+
+    def __init__(out self):
+        self.rg = -1
+        self.batch = None
+
+
 struct SubrgSplitScan(Movable):
     """The row-range split's state (`enabled` False: the split is off)."""
 
@@ -122,6 +166,7 @@ struct SubrgSplitScan(Movable):
     var latch: Slab[SubrgBuildLatch]
     var ctx: Slab[ColumnDecodeContext]
     var counter: Slab[_UnitCounter]
+    var whole: Slab[_WholeDecode]
     var emit_coarse: Bool
     var emit_rows: Int
 
@@ -138,6 +183,7 @@ struct SubrgSplitScan(Movable):
         self.latch = Slab[SubrgBuildLatch]()
         self.ctx = Slab[ColumnDecodeContext]()
         self.counter = Slab[_UnitCounter].create_prefilled(1)
+        self.whole = Slab[_WholeDecode]()
         self.emit_coarse = False
         self.emit_rows = 0
 
@@ -156,9 +202,9 @@ struct SubrgSplitScan(Movable):
         var units = plan_row_range_units[FS](
             reader, plan.reader_col_idx[0], options.subrg_mode, options.subrg_units_per_rg, options.subrg_snap
         )
-        if len(units.rg) == 0:
+        if len(units.rg) == 0 or units.max_units_per_rg() > SUB_SLOT_STRIDE:
             return
-        self.chunk_schema = subrg_build_chunk_schema(plan)
+        self.chunk_schema = subrg_chunk_schema_of_footer[FS](reader, plan)
         self.max_unit_rows = units.max_rows()
         self.units = units^
         self.ncols = len(plan.reader_col_idx)
@@ -175,6 +221,10 @@ struct SubrgSplitScan(Movable):
         for _ in range(num_workers):
             ctxs.append(ColumnDecodeContext())
         self.ctx = ctxs^
+        var wholes = Slab[_WholeDecode].create(num_workers)
+        for _ in range(num_workers):
+            wholes.append(_WholeDecode())
+        self.whole = wholes^
         self.emit_coarse = options.subrg_emit_coarse
         var emit_rows = options.subrg_emit_rows
         if emit_rows <= 0:
@@ -206,14 +256,21 @@ struct SubrgSplitScan(Movable):
             pass
 
     def _range_of_whole_decode[FS: FileSystem](
-        self, reader: ParquetReader[FS], plan: SubrgScanPlan, rg: Int, row_lo: Int, row_hi: Int
+        self, reader: ParquetReader[FS], plan: SubrgScanPlan, worker_id: Int, rg: Int, row_lo: Int, row_hi: Int
     ) raises -> RecordBatch:
-        """Rows `[row_lo, row_hi)` of the whole decode of row group `rg`.
+        """Rows `[row_lo, row_hi)` of the whole decode of row group `rg`
+        (`worker_id` keeps the decode for its next unit of `rg`).
 
         Raises:
             If the whole decode has fewer than `row_hi` rows.
         """
-        var whole = reader.decode_columns_subset(rg, plan.reader_col_idx.copy(), False)
+        ref slot = self.whole.get_mut_interior(worker_id)
+        if slot.rg != rg or not slot.batch:
+            slot.batch = None
+            slot.rg = -1
+            slot.batch = Optional(reader.decode_columns_subset(rg, plan.reader_col_idx.copy(), False))
+            slot.rg = rg
+        ref whole = slot.batch.value()
         if whole.num_rows() < row_hi:
             raise Error(
                 "parquet source: row group " + String(rg) + " decoded to " + String(whole.num_rows())
@@ -224,7 +281,7 @@ struct SubrgSplitScan(Movable):
             rows.append(r)
         return gather_batch(whole, rows)
 
-    def _decode_one[FS: FileSystem](self, reader: ParquetReader[FS], worker_id: Int, mut out_rg: Int, mut out_lo: Int) raises -> Optional[RecordBatch]:
+    def _decode_one[FS: FileSystem](self, reader: ParquetReader[FS], worker_id: Int, mut out_rg: Int, mut out_ord: Int) raises -> Optional[RecordBatch]:
         """The next claimed unit with rows, decoded; None when the units are
         exhausted.
 
@@ -260,42 +317,42 @@ struct SubrgSplitScan(Movable):
                 # use, a short fill): the range's rows are cut from the whole
                 # decode of its row group, with the whole decode's column
                 # types.
-                maybe = Optional(self._range_of_whole_decode(reader, plan, rg, row_lo, row_hi))
+                maybe = Optional(self._range_of_whole_decode(reader, plan, worker_id, rg, row_lo, row_hi))
             var batch = maybe.take()
             if batch.num_rows() == 0:
                 continue
             out_rg = rg
-            out_lo = row_lo
+            out_ord = self.units.ordinal[claim]
             return Optional(batch^)
 
     def next[FS: FileSystem](self, reader: ParquetReader[FS], worker_id: Int, mut morsel_counter: AtomicI64) raises -> Optional[Morsel]:
         """The next morsel of the split: one unit, or (coarse) the units
         `worker_id` claims until about `emit_rows` rows; None at the end."""
         var rg = 0
-        var lo = 0
+        var k = 0
         if not self.emit_coarse:
-            var b = self._decode_one(reader, worker_id, rg, lo)
+            var b = self._decode_one(reader, worker_id, rg, k)
             if not b:
                 return None
             return Optional(
                 Morsel(
                     b.take(),
                     morsel_id=Int(morsel_counter.fetch_add(Int64(1))),
-                    partition_id=rg * SUB_SLOT_STRIDE + (lo % SUB_SLOT_STRIDE),
+                    partition_id=unit_partition_id(rg, k),
                     origin_hint=0,
                 )
             )
         var acc = Slab[RecordBatch]()
         var acc_rows = 0
         var first_rg = 0
-        var first_lo = 0
+        var first_k = 0
         while acc_rows < self.emit_rows:
-            var b = self._decode_one(reader, worker_id, rg, lo)
+            var b = self._decode_one(reader, worker_id, rg, k)
             if not b:
                 break
             if len(acc) == 0:
                 first_rg = rg
-                first_lo = lo
+                first_k = k
             var bb = b.take()
             acc_rows += bb.num_rows()
             acc.append(bb^)
@@ -305,7 +362,7 @@ struct SubrgSplitScan(Movable):
             Morsel(
                 concat_record_batches_nway(acc^),
                 morsel_id=Int(morsel_counter.fetch_add(Int64(1))),
-                partition_id=first_rg * SUB_SLOT_STRIDE + (first_lo % SUB_SLOT_STRIDE),
+                partition_id=unit_partition_id(first_rg, first_k),
                 origin_hint=0,
             )
         )

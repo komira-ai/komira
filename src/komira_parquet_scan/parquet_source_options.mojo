@@ -37,8 +37,10 @@ from komira_scan_planning.source_capability_config import SourceCapabilityConfig
 # The most workers a source serves (its per-worker slots are sized to this).
 comptime MAX_WORKERS: Int = 128
 # Morsel partition ids: a row group's sub-morsels take
-# `rg * SUB_SLOT_STRIDE + k`, so the collect sink's (partition id, origin)
-# sort puts every morsel in file order whether or not its row group was split.
+# `rg * SUB_SLOT_STRIDE + k` (`k` the unit's ordinal within its row group), so
+# the collect sink's (partition id, origin) sort puts every morsel in file
+# order whether or not its row group was split. A row group is split into at
+# most `SUB_SLOT_STRIDE` units.
 comptime SUB_SLOT_STRIDE: Int = 1_048_576
 comptime _MAX_CURSOR_STRIDE: Int64 = 32
 comptime _ADAPTIVE_THRESHOLD_FACTOR: Int = 8
@@ -93,6 +95,23 @@ struct ParquetScanOptions(Copyable, Movable):
     var subrg_emit_coarse: Bool
     var subrg_emit_rows: Int
 
+    def validate(self) raises:
+        """Check the switches that have no meaning outside their range.
+
+        Raises:
+            If `subrg_mode` is not 0, 1 or 2, `subrg_units_per_rg` is below 1
+            in mode 2, or `subrg_emit_rows` is negative.
+        """
+        if self.subrg_mode < 0 or self.subrg_mode > 2:
+            raise Error("parquet source: subrg_mode must be 0, 1 or 2, got " + String(self.subrg_mode))
+        if self.subrg_mode == 2 and self.subrg_units_per_rg < 1:
+            raise Error(
+                "parquet source: subrg_units_per_rg must be at least 1 in mode 2, got "
+                + String(self.subrg_units_per_rg)
+            )
+        if self.subrg_emit_rows < 0:
+            raise Error("parquet source: subrg_emit_rows must not be negative, got " + String(self.subrg_emit_rows))
+
     @staticmethod
     def default() -> ParquetScanOptions:
         """Late materialization, the adaptive stride, the selection
@@ -141,6 +160,13 @@ def rg_partition_id(claimed_rg: Int) -> Int:
     """The partition id of a row group's whole (unsplit) morsel: its first
     sub-slot, so whole and split row groups sort together in file order."""
     return claimed_rg * SUB_SLOT_STRIDE
+
+
+@always_inline
+def unit_partition_id(claimed_rg: Int, unit_ordinal: Int) -> Int:
+    """The partition id of the `unit_ordinal`-th (from 0) row-range unit of a
+    split row group (`unit_ordinal` below `SUB_SLOT_STRIDE`)."""
+    return claimed_rg * SUB_SLOT_STRIDE + unit_ordinal
 
 
 @always_inline

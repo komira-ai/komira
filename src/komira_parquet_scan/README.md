@@ -92,8 +92,18 @@ The morsel source:
   name across files, a filter column a file lacks read as NULL), through the
   cursor-grain route (`parquet_source_grain`), or as row ranges
   (`parquet_source_subrg`; a range a cursor refuses is cut from the whole
-  decode of its row group). Morsels larger than `morsel_rows` are cut
-  (`parquet_source_emit`) and their partition ids sort into file order.
+  decode of its row group, which the worker keeps for its next range of that
+  row group, so a worker holds at most one whole decode; a row group that
+  would need more than `SUB_SLOT_STRIDE` ranges is not split). Morsels
+  larger than `morsel_rows` are cut (`parquet_source_emit`) and their
+  partition ids sort into file order; a coarse range-split morsel takes the
+  id of the first range it holds, so coarse morsels are ordered only
+  approximately. `ParquetScanOptions.validate` runs at construction and
+  refuses a `subrg_mode` outside 0..2, `subrg_units_per_rg` below 1 in mode
+  2, and a negative `subrg_emit_rows`. Not covered at the source level: the
+  declined selective decode (`decode_rows_of` returning None) is never
+  reached through the source's routes; the reordered-projection test pins
+  only the projection order of the survivors.
 - `parquet_source_options`: `ParquetScanOptions`, the source's switches, and
   its pure decisions (claim stride, selection-pipeline deferral, partition
   ids, hooks to capabilities, projection names to indices).
