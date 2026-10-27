@@ -14,8 +14,10 @@
 #   * The `SiteDictionary` — `site_id → fmt`, `module_id → module`, built by the
 #     SAME comptime digests the emit path computes (keys match by construction).
 #   * The `CalibrationAnchor` — drain-side raw-tick → wall-time conversion.
-#     Held behind an `OwnedPointer[Atomic]`-free POD slot but mutated through a
-#     `refresh_anchor()` call (~1 Hz) by a runtime task.
+#     Held behind an `OwnedPointer[Atomic]`-free POD slot; `refresh_anchor()`
+#     and `maybe_refresh_anchor()` re-capture it, but nothing in the library
+#     calls either yet (komira-ai/komira#1445), so it is the capture taken at
+#     construction.
 #   * The global relaxed-atomic level gate + the per-module `EnvFilter` (moved
 #     here from the P1 `LogConfig` — the facade reads them the SAME way).
 #   * The `LogSink` the drain writes decoded lines to (P3: stderr / single file
@@ -226,11 +228,11 @@ struct SharedEngine(Movable):
     var _capture_metrics: Bool
     var _metric_buf: List[List[MetricPoint]]
     var _metric_buf_max: Int
-    # Wall-clock ms of the last calibration re-anchor. The ~1 Hz refresh task
-    # (the worker-0 idle hook) calls
-    # `maybe_refresh_anchor`, which re-anchors only when ≥ _ANCHOR_REFRESH_MS
-    # has elapsed — so the drain's raw-tick→wall conversion stays accurate over
-    # long runs without paying a per-idle-hook re-capture.
+    # Wall-clock ms of the last calibration re-anchor. `maybe_refresh_anchor`
+    # re-anchors only when ≥ _ANCHOR_REFRESH_MS has elapsed, so a periodic
+    # caller keeps the drain's raw-tick→wall conversion accurate over long
+    # runs without a re-capture on every call. Nothing in the library calls
+    # it yet (komira-ai/komira#1445).
     var _last_anchor_ms: Int64
 
     # -------------------------------------------------------------------------
@@ -637,19 +639,21 @@ struct SharedEngine(Movable):
         return self._anchor[]
 
     def refresh_anchor(mut self):
-        """Re-capture the (tick0, wall0, tick_hz) anchor unconditionally. Called
-        ~1 Hz by a runtime task so the raw-tick→wall conversion stays accurate
-        as the process runs (counter drift / NTP wall adjustments)."""
+        """Re-capture the (tick0, wall0, tick_hz) anchor unconditionally and
+        stamp `last_anchor_ms` with the current wall-clock ms. Meant to be called
+        periodically so the raw-tick→wall conversion follows counter drift and
+        NTP wall adjustments; nothing in the library calls it yet
+        (komira-ai/komira#1445)."""
         self._anchor[] = capture_anchor()
         self._last_anchor_ms = now_unix_ms()
 
     def maybe_refresh_anchor(mut self) -> Bool:
-        """The ~1 Hz calibration-refresh task hook. Re-anchors
-        ONLY when ≥ `_ANCHOR_REFRESH_MS` has elapsed since the last anchor;
-        otherwise a cheap no-op. Called from the worker-0 idle hook (a nominated
-        worker, per the tier-3 backstop) so the long-run tick→wall conversion
-        stays accurate without paying a re-capture on every idle window.
-        Returns True iff it actually re-anchored."""
+        """The rate-limited calibration refresh. Re-anchors ONLY when
+        ≥ `_ANCHOR_REFRESH_MS` has elapsed since the last anchor (a stamp ahead
+        of the clock is not due), stamping `last_anchor_ms` with this call's
+        clock read; otherwise a cheap no-op. Meant for a periodic caller (the
+        design names the worker-0 idle hook); nothing in the library calls it
+        yet (komira-ai/komira#1445). Returns True iff it actually re-anchored."""
         var now = now_unix_ms()
         if now - self._last_anchor_ms >= _ANCHOR_REFRESH_MS:
             self._anchor[] = capture_anchor()

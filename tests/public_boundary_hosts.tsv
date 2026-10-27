@@ -1,7 +1,7 @@
 # The domains a URL of this repository may name a host of, besides the names reserved
 # for examples and tests (localhost, example, test, invalid and their subdomains;
 # example.com, example.net, example.org): the public lint's allow-list
-# (//:public_boundary, tools/build/lint/public_boundary.awk, rule host). One row per
+# (//:public_boundary, tools/build/lint/public_boundary/src/rules.zig, rule host). One row per
 # domain, tab-separated: <domain> <reason>. A host is allowed when it is the domain or
 # ends in `.<domain>`. Every row must be used by some URL of the tree: a row no host is
 # under fails the build, so the list names only what the tree uses. A domain here is a
@@ -9,6 +9,13 @@
 # does not belong here.
 amazonaws.com	the AWS service endpoints the AWS clients resolve and test
 amazonaws.com.cn	the AWS China partition's service endpoints
+amazonwebservices.com.cn	the AWS China partition's dual-stack service endpoints
+ic.gov	the AWS isolated partitions' service endpoints (c2s, aws, hci) in botocore's endpoint rules
+sgov.gov	the AWS isolated partition's service endpoints (sc2s) in botocore's endpoint rules
+amazonaws.eu	the AWS European Sovereign Cloud partition's service endpoints in botocore's endpoint rules
+amazonwebservices.eu	the AWS European Sovereign Cloud partition's dual-stack service endpoints
+adc-e.uk	an AWS isolated partition's service endpoints in botocore's endpoint rules
+aws.scloud	an AWS isolated partition's service endpoints in botocore's endpoint rules
 api.aws	the AWS dual-stack service endpoints
 amazon.com	AWS documentation
 googleapis.com	the Google Cloud API endpoints the GCP clients call
@@ -17,6 +24,7 @@ metadata.google.internal	the GCE metadata server, at a name Google publishes for
 microsoftonline.com	the Azure identity endpoint
 microsoftonline.us	the Azure Government identity endpoint
 azure.com	the Azure management endpoint
+vault.azure.net	the Azure Key Vault data-plane endpoints
 windows.net	the Azure Storage endpoints
 microsoft.com	Microsoft documentation
 apple.com	Apple developer documentation
@@ -36,11 +44,32 @@ nodejs.org	the Node.js runtime's distribution (third_party/node)
 npmjs.org	the npm package registry (third_party/node)
 prefix.dev	the conda package host the toolchain pins download from
 anaconda.org	the conda package index
+mopm.dev	the mopm package registry: the channel the mopm.lock of a package built with buildrules names
 crates.io	the Rust package index
 rust-lang.org	the Rust toolchain's distribution and documentation
+docs.rs	Rust crate documentation (DataFusion's GroupsAccumulator) cited by docs/design/udf_runtime_interface.md
 ziglang.org	the zig toolchain's distribution
 sqlite.org	SQLite documentation
 postgresql.org	PostgreSQL documentation
+clickhouse.com	ClickHouse documentation cited by docs/design/storage_stack.md
+confluent.io	Confluent documentation cited by docs/design/storage_stack.md
+databricks.com	Databricks documentation cited by docs/design/storage_stack.md
+dremio.com	Dremio documentation cited by docs/design/storage_stack.md
+duckdb.org	DuckDB documentation cited by docs/design/storage_stack.md and docs/design/optimized_plan_udfs.md
+ducklake.select	the DuckLake specification cited by docs/design/storage_stack.md
+estuary.dev	Estuary documentation cited by docs/design/storage_stack.md
+fivetran.com	Fivetran documentation cited by docs/design/storage_stack.md
+lance.org	the Lance format specification cited by docs/design/storage_stack.md
+redpanda.com	Redpanda documentation cited by docs/design/storage_stack.md
+ryft.io	Ryft documentation cited by docs/design/storage_stack.md
+snowflake.com	Snowflake documentation cited by docs/design/storage_stack.md and docs/design/optimized_plan_udfs.md
+trino.io	Trino documentation cited by docs/design/storage_stack.md
+turbopuffer.com	turbopuffer documentation cited by docs/design/storage_stack.md
+daft.ai	Daft documentation cited by docs/design/optimized_plan_udfs.md
+pulumi.com	Pulumi documentation of closure serialization cited by docs/design/optimized_plan_udfs.md
+idl.uw.edu	the Arquero documentation (a University of Washington lab site) cited by docs/design/optimized_plan_udfs.md
+neo4j.com	Neo4j's store-format documentation (data_graph_storage.md)
+puppygraph.com	PuppyGraph's documentation (data_graph_storage.md)
 grpc.io	gRPC specifications
 connectrpc.com	the Connect protocol specification
 flatbuffers.dev	FlatBuffers documentation
@@ -54,6 +83,8 @@ sourceforge.net	an upstream project's home
 xxhash.com	the xxHash specification
 lemire.me	a cited paper's author page
 semanticscholar.org	a cited paper
+arxiv.org	papers cited by design docs (data_graph_storage.md)
+cidrdb.org	the CIDR paper on Kuzu's storage (data_graph_storage.md)
 isthe.com	the FNV hash specification
 dotslash-cli.com	the DotSlash launcher's documentation
 kernel.org	git release archives (third_party/git)

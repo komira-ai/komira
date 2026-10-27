@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # Exercises `THSPLCEncoder.encode` + `THSPLCDecoder.decode_copy` /
-# `decode_zerocopy` (an internal module) for:
+# `decode_zerocopy` for:
 #   (a) int-only columns
 #   (b) string / varlen columns
 #   (c) mixed int + string + wide (decimal128) columns

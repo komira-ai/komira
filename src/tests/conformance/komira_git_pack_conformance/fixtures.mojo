@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_git_pack_conformance/fixtures.mojo -- reading what gen_packs.sh wrote:
+# komira_git_pack_conformance/fixtures.mojo -- reading what gen_packs.zig wrote:
 # the files of the `packs` directory, `git cat-file --batch` dumps, and the
 # normalized `git verify-pack -v` listings.
 # =============================================================================
@@ -93,7 +93,7 @@ def parse_batch(format: ObjectFormat, data: Span[UInt8, _]) raises -> GitObjects
 
 
 struct VerifyLine(Copyable, Movable):
-    """One object line of `git verify-pack -v`, normalized by gen_packs.sh:
+    """One object line of `git verify-pack -v`, normalized by gen_packs.zig:
     id, type, size, size in the pack, offset, depth (0 for a non-delta) and
     base id (`-` for a non-delta)."""
 

@@ -1,0 +1,11 @@
+# What the driver tests of the Zig action tools share (kit.zig): a directory
+# per case, files laid out and read back, the tool run with its exit status
+# and output. A driver test imports it as `@import("driver_kit")` by naming
+# `tests//functional/driver_kit:driver_kit` in its `deps`.
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_module")
+
+zig_module(
+    name = "driver_kit",
+    src = "kit.zig",
+    visibility = ["PUBLIC"],
+)

@@ -1,4 +1,5 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/native:shared.bzl", "native_shared_library")
 
 # The storage substrate for sources and sinks: the `FileSystem` and
 # `FileFormat` traits, the local-disk implementation, glob and partition
@@ -23,6 +24,8 @@ cxx_library(
 
 mojo_library(
     name = "komira_fs",
+    # Its C ships in its package as komira_fs_native below (lib/libkomira_fs_native.so.1).
+    native = ":komira_fs_native",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         ":komira_fs_posix",
@@ -60,6 +63,29 @@ mojo_library(
         "tests/test_pruned_hive_discovery.mojo",
         "tests/test_pruned_hive_raw_spelling.mojo",
         "tests/test_pruned_hive_writer_spellings.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# libkomira_fs_native.so.1: the C this library owns, as its own
+# shared library exporting the names its callers call
+# (tools/build/native/README.md, "Each library's shared library"). Built and
+# checked here, and packed into the library's conda package (`native`).
+native_shared_library(
+    name = "komira_fs_native",
+    archives = [
+        ":komira_fs_posix",
+    ],
+    callers = [
+        ":komira_fs",
+        "//src/komira_objectstore:komira_objectstore",
+    ],
+    library = "komira_fs",
+    # Every weak undefined symbol of the library, recorded from its first
+    # green link (checks 3 and 7 hold it to exactly this list):
+    weak_undefined = [
+        # zig's C runtime (crti.o): the profiling hook, absent unless -pg.
+        "__gmon_start__",
     ],
     visibility = ["PUBLIC"],
 )

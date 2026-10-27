@@ -36,6 +36,11 @@
 #   4. Filter(col(rk) <= K) above PartitionBy([Rank]) -> PartitionTopN(K, RANK)
 #   5. Filter(col(rk) < K)  above PartitionBy([Rank]) -> PartitionTopN(K-1, RANK)
 #
+# The fused node emits the window column (`output_rank_col_name`) when
+# anything above the Filter reads it. The plan's root reads every column it
+# outputs, so a window column that reaches the output without a Project or
+# an Aggregate dropping it is emitted too (komira#1290).
+#
 # The rule does NOT fire when (recognition gates):
 #   - PartitionBy has more than one PartitionExpr (multi-window)
 #   - The single PartitionExpr is not ROW_NUMBER or RANK (e.g. DenseRank,
@@ -91,6 +96,7 @@ from komira_plan_ir.plan_helpers import (
     _take_partition_topn_child,
     _collect_expr_columns,
 )
+from .optimizer_udf_carry import collect_udf_input_columns
 
 
 # =============================================================================
@@ -131,8 +137,10 @@ def fuse_partition_topn(var plan: LogicalPlan) raises -> LogicalPlan:
     Pre-pass: builds the set of window-output column names that are
     referenced ABOVE their immediate Filter consumer (i.e. by ancestor
     operators that would still try to read them after fusion strips
-    them from the schema). The recursive fuse uses this set to decide
-    whether the fused PartitionTopN must emit the rk/rn column.
+    them from the schema). The walk starts from the root's output
+    columns: the plan's caller reads every one of them. The recursive
+    fuse uses this set to decide whether the fused PartitionTopN must
+    emit the rk/rn column.
 
     An earlier version skipped fusion when rk was referenced upstream —
     correct, but it missed the fused fast path on the common ranked top-K
@@ -148,7 +156,14 @@ def fuse_partition_topn(var plan: LogicalPlan) raises -> LogicalPlan:
     shape takes the fused fast path.
     """
     var unsafe_cols = Set[String]()
+    # The root's output columns are read by the plan's caller. Without
+    # them, a window column that reaches the output through nodes that
+    # pass their child's columns on (a root Filter, Limit, Sort, Join, ...)
+    # has no reader in the walk and the fused node drops it (komira#1290).
     var ancestor_cols = Set[String]()
+    ref root_schema = plan.output_schema
+    for i in range(root_schema.num_columns()):
+        ancestor_cols.add(root_schema.field_name(i))
     _collect_unsafe_window_cols(plan, ancestor_cols, unsafe_cols)
     fuse_partition_topn_inplace(plan, unsafe_cols)
     return plan^
@@ -166,7 +181,8 @@ def _collect_unsafe_window_cols(
         plan: subplan to examine.
         ancestor_cols: column names referenced by operators STRICTLY
             ABOVE this plan node (Sort keys, Project exprs, Aggregate
-            exprs, Join keys, Filter predicates, etc.). Filter
+            exprs, Join keys, Filter predicates, etc.), plus the root's
+            output columns, which the plan's caller reads. Filter
             predicates of THIS node are NOT in ancestor_cols, and a
             Filter does not add its own child PartitionBy's window
             column for that child (the Filter is the legitimate consumer
@@ -215,6 +231,9 @@ def _collect_unsafe_window_cols(
             )
             if consumed in pred_cols:
                 pred_cols.remove(consumed)
+        # A UDF reads its input columns, which its placeholders omit (each
+        # arm below adds them too).
+        collect_udf_input_columns(plan, pred_cols)
         var new_ancestor = ancestor_cols.copy()
         for c in pred_cols:
             new_ancestor.add(c)
@@ -226,6 +245,7 @@ def _collect_unsafe_window_cols(
         var new_ancestor = ancestor_cols.copy()
         for i in range(len(plan._project.value()[].exprs)):
             _collect_expr_columns(plan._project.value()[].exprs[i], new_ancestor)
+        collect_udf_input_columns(plan, new_ancestor)
         _collect_unsafe_window_cols(
             plan._project.value()[].child[], new_ancestor, unsafe_cols
         )
@@ -242,6 +262,7 @@ def _collect_unsafe_window_cols(
                     plan._aggregate.value()[].agg_exprs[i].child.value(),
                     new_ancestor,
                 )
+        collect_udf_input_columns(plan, new_ancestor)
         _collect_unsafe_window_cols(
             plan._aggregate.value()[].child[], new_ancestor, unsafe_cols
         )
@@ -344,10 +365,11 @@ def fuse_partition_topn_inplace(mut plan: LogicalPlan, unsafe_cols: Set[String])
 
     Args:
         plan: Subplan to optimize in-place.
-        unsafe_cols: Set of window-output column names that MUST NOT be
-            fused (because their consumer Filter is followed by an
-            ancestor that references the column). Computed once by
-            `_collect_unsafe_window_cols` at the top-level entry.
+        unsafe_cols: Set of window-output column names the fused node
+            must emit (`output_rank_col_name`), because an ancestor of
+            their consumer Filter, or the plan's output, reads the
+            column. Computed once by `_collect_unsafe_window_cols` at
+            the top-level entry.
     """
     # -- Pattern 1: Project above a (possibly fused) child --
     if plan.tag == PLAN_PROJECT:

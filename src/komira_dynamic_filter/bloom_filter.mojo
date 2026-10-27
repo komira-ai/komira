@@ -753,7 +753,7 @@ struct BloomFilter(Movable):
     def hash_bytes(
         self, data: UnsafePointer[UInt8, _], length: Int
     ) -> UInt64:
-        """Hash a byte array using this filter's `hash_family`.
+        """Hash bytes: xxHash64 on an XXHASH64 filter, else FNV-1a (FIBONACCI_JOIN too).
 
         Args:
             data: Pointer to the bytes to hash.

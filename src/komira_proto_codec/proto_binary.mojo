@@ -288,6 +288,11 @@ struct PbEncoder(WireEncoder):
     def write_string_element(mut self, field_no: Int, v: String) raises:
         pb_write_string_field(self.buf, field_no, v)
 
+    def write_bytes_element(mut self, field_no: Int, v: List[UInt8]) raises:
+        # One length-delimited record per element, like a repeated string:
+        # proto3 never packs a LEN-typed field.
+        pb_write_bytes_field(self.buf, field_no, Span(v))
+
     def write_i64_element(mut self, field_no: Int, v: Int64) raises:
         pb_write_varint_field(self.buf, field_no, UInt64(v))
 
@@ -743,6 +748,10 @@ struct PbDecoder(WireDecoder):
     def read_into_repeated_string(mut self, mut out: List[String]) raises:
         # NEVER packed — see the note above.
         out.append(self.read_string())
+
+    def read_into_repeated_bytes(mut self, mut out: List[List[UInt8]]) raises:
+        # NEVER packed, like a repeated string: one element per record.
+        out.append(self.read_bytes())
 
     def read_into_repeated_i64(mut self, mut out: List[Int64]) raises:
         if self._cur_wire == PB_WIRE_LEN:

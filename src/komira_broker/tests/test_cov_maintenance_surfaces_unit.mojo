@@ -390,11 +390,11 @@ def test_defaults_copy_and_estimate() raises:
 
 
 def main() raises:
-    # The metrics set is built before anything else allocates: building one
-    # in a reused heap block hangs (komira-ai/komira#1072).
-    var m = SubLineageRolloutMetrics()
-    test_retention_with_rollout_audit(m)
     test_consumer_source_edge()
     test_merge_maintenance_scan()
     test_defaults_copy_and_estimate()
+    # Built after the other tests have freed heap blocks: the metrics set must
+    # initialize a reused block in place (komira-ai/komira#1072).
+    var m = SubLineageRolloutMetrics()
+    test_retention_with_rollout_audit(m)
     print("[OK] test_cov_maintenance_surfaces_unit")

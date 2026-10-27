@@ -114,9 +114,9 @@ def test_heavy_detection_takes_groups_above_two_over_k() raises:
 
 
 def test_split_groups_take_groups_above_one_over_four_k() raises:
-    """⭐ CD-SCAN LEVER 2 (2026-09-25): the DRIVER splits above 1/(4K)
+    """The DRIVER splits above 1/(4K)
     (`cd_split_groups`), while the fused route's decline test keeps 2/K
-    (`cd_heavy_groups`, asserted above and unchanged). cbq11's shape at K=20:
+    (`cd_heavy_groups`, asserted above and unchanged). A skewed shape at K=20:
     79.2%, 4.16%, 2.27% and 1.67% groups over a long tail — under 2/K = 10%
     except the first, but all four over 1/(4K) = 1.25%."""
     var q = List[Int]()

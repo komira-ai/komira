@@ -1,0 +1,97 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# An IMAP4rev1 server for reading received mail: the connection table, CRLF
+# line framing with a cap before buffering, the command state machine
+# (CAPABILITY, NOOP, LOGOUT, STARTTLS, LOGIN, SELECT, EXAMINE, LIST, CLOSE,
+# FETCH of FLAGS, UID, INTERNALDATE, RFC822.SIZE, ENVELOPE, BODYSTRUCTURE,
+# BODY, every BODY[section]<partial> and RFC822 form, SEARCH with every key
+# of RFC 3501, STORE, EXPUNGE, and the UID forms of FETCH, STORE and SEARCH),
+# durable flags over komira_comms_index, and a caller-polled serve loop over
+# non-blocking sockets with STARTTLS (komira_mail_tls). Messages are read with
+# komira_mail_message and komira_mail_address. The registry has no socket and
+# no clock; the mail lives in any CloneableConditionalWriteStore. See
+# __init__.mojo.
+#
+# The welded tests (each file's header says which defects it catches):
+# - test_framing: the line cap with a bounded buffer, literals, strict CRLF,
+#   split and pipelined input, tags, the reply-queue cap, the connection
+#   table, the deadlines and their exact boundaries.
+# - test_commands: CAPABILITY and the greeting, LOGIN (TLS only, arguments, the
+#   failure cap, the mailbox of a login), LOGOUT, STARTTLS and what is pipelined
+#   behind it.
+# - test_mailbox: SELECT, EXAMINE, LIST and CLOSE over two stores; names that
+#   leave the mailbox; no shared default mailbox; UIDs.
+# - test_fetch: FETCH and UID FETCH: exact literals, items, sets, \Seen, bad
+#   items, the byte limit, a message deleted meanwhile.
+# - test_bodystructure: ENVELOPE, BODYSTRUCTURE and BODY as exact strings for
+#   a simple message, alternative and mixed multiparts, a nested message,
+#   encoded words, groups and absent addresses, quoting and literals, and the
+#   macros ALL, FAST and FULL.
+# - test_sections: every BODY[section] form, numbered and nested parts, NIL
+#   for a section that is not there, partial edges, \Seen, RFC822.HEADER,
+#   RFC822.TEXT, RFC822.SIZE and INTERNALDATE.
+# - test_mime_limits: mail over the MIME depth and part limits is
+#   `NO [UNAVAILABLE]` for the items that need the parse and served for the
+#   rest, the byte limits of FETCH.
+# - test_search: every SEARCH key and combinator against labelled messages.
+# - test_search_syntax: malformed searches, parser bounds, SEARCH by state,
+#   a message the store lost, the scan limit.
+# - test_read_sequence: a client's whole read path over delivered mail, and
+#   the EXAMINE and gating behaviour around it.
+# - test_flags_store: the flag store over two stores and a restart, STORE,
+#   EXPUNGE, CLOSE, folding the flag log, and a store that fails on request.
+# - test_flag_identity: messages that share a UID keep their own flags and
+#   survive each other's EXPUNGE and CLOSE; STORE, EXPUNGE and CLOSE over the
+#   local-file store seen by a new store and a new server; a folder named
+#   `_flags`.
+# - test_folders: mail delivered by komira_smtp_server and mail filed in
+#   another folder, read over IMAP, over two stores.
+# - test_serve_loop: STARTTLS, LOGIN and FETCH over loopback sockets, the
+#   pipelined-behind-STARTTLS rule, max_conns, deadlines by now_ms, errors that
+#   close only one connection, no certificate, a short write.
+mojo_library(
+    name = "komira_imap_server",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # Direct dependencies: the rule adds each one's own closure to the compiler.
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_comms_index:komira_comms_index",
+        "//src/komira_datetime:komira_datetime",
+        "//src/komira_mail_address:komira_mail_address",
+        "//src/komira_mail_auth:komira_mail_auth",
+        "//src/komira_mail_message:komira_mail_message",
+        "//src/komira_mail_store:komira_mail_store",
+        "//src/komira_mail_tls:komira_mail_tls",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_smtp_server:komira_smtp_server",
+    ],
+    test_srcs = [
+        "tests/test_bodystructure.mojo",
+        "tests/test_commands.mojo",
+        "tests/test_fetch.mojo",
+        "tests/test_flag_identity.mojo",
+        "tests/test_flags_store.mojo",
+        "tests/test_folders.mojo",
+        "tests/test_framing.mojo",
+        "tests/test_mailbox.mojo",
+        "tests/test_mime_limits.mojo",
+        "tests/test_read_sequence.mojo",
+        "tests/test_search.mojo",
+        "tests/test_search_syntax.mojo",
+        "tests/test_sections.mojo",
+        "tests/test_serve_loop.mojo",
+    ],
+    test_deps = [
+        "//src/komira_http_core:komira_http_core",
+        "//src/tests/helpers/komira_mail_test_support:komira_mail_test_support",
+    ],
+    test_data = {
+        "tests/test_serve_loop.mojo": {
+            "src/komira_http_core/tests/fixtures/tls/leaf_cert.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_cert.pem",
+            "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+            "src/komira_http_core/tests/fixtures/tls/root_ca.pem": "//src/komira_http_core:tests/fixtures/tls/root_ca.pem",
+        },
+    },
+    visibility = ["PUBLIC"],
+)

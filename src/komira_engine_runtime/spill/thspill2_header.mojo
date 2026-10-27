@@ -1,76 +1,31 @@
 # =============================================================================
-# thspill2_header.mojo — THSPILL2 96-byte fixed header pack/parse.
+# thspill2_header.mojo: the THSPILL2 96-byte fixed header, pack and parse.
 # =============================================================================
 #
-# Version 0x02: the schema fingerprint is a UInt64 (FNV-1a 64).
+# Every THSPILL2 chunk starts with this header and continues with an opaque
+# body of `body_length` bytes; the codec moves the body bytes and the
+# conformer owns their shape. The schema fingerprint is a UInt64 (FNV-1a 64).
 #
-# This file owns the on-wire shape of the THSPILL2 fixed header — the first
-# 96 bytes of every THSPILL2 chunk.
+# Layout (little-endian throughout):
 #
-# # Header plus an opaque body
+#   bytes  0..  3 : magic "THS\x02"
+#   bytes  4..  7 : version                  (UInt32; 2)
+#   bytes  8.. 15 : body_length              (UInt64; bytes after the header)
+#   bytes 16.. 23 : row_count                (UInt64)
+#   bytes 24.. 31 : schema_fingerprint       (UInt64)
+#   bytes 32.. 39 : uncompressed_body_length (UInt64; equal to body_length
+#                                             when bit 0 of flags is clear)
+#   bytes 40.. 43 : flags                    (UInt32; bit 0 = compressed,
+#                                             bit 1 = sort-key-encoded)
+#   bytes 44.. 95 : reserved                 (zero on write, ignored on read)
 #
-# A richer design lists encoder fields for the rich body shape
-# (cols_section + data_region + aggr_region + var_offsets + var_storage)
-# which only becomes meaningful once the RowBlock primitive lands in
-# P-1.D/P-1.E. P-1.B ships the LOAD-BEARING substrate: the 96-byte fixed
-# header + a generic byte-body. Real `Spillable` conformers (RowBlock
-# proper) layer the body shape on top in subsequent slots.
+# 96 is a multiple of 16, so the body keeps the chunk base's 16-byte alignment.
+# Version 1 chunks are refused with an "unknown version" error.
 #
-# This shape is COMPATIBLE with the §10.7 rich body: the header reserves
-# 48 bytes for v0.6+ extension; the body is OPAQUE BYTES from the codec's
-# perspective. P-1.D's HashAggUntyped spill writes its RowBlock partition
-# bytes as the body; P-1.B's decoder hands the body bytes back to the
-# operator's `from_bytes` constructor.
-#
-# # 96-byte layout (v0.6; little-endian throughout)
-#
-#   bytes  0..  3 : magic "THS\x02"             (UInt8 ×4)
-#   bytes  4..  7 : version                     (UInt32; v0.6 ships 0x02)
-#   bytes  8.. 15 : body_length                 (UInt64; bytes after header)
-#   bytes 16.. 23 : row_count                   (UInt64)
-#   bytes 24.. 31 : schema_fingerprint          (UInt64; WIDENED v0.6 —
-#                                                FNV-1a-64 per §10.10.3)
-#   bytes 32.. 39 : uncompressed_body_length    (UInt64; for flag bit0;
-#                                                equal to body_length when
-#                                                bit0=0)
-#   bytes 40.. 43 : flags                       (UInt32; bit0=compressed-lz4,
-#                                                bit1=sort-key-encoded; rest
-#                                                reserved=0)
-#   bytes 44.. 47 : reserved_b                  (UInt32; zero on write,
-#                                                ignored on read for forward
-#                                                compat)
-#   bytes 48.. 95 : reserved_extension          (48 bytes; zero on write,
-#                                                ignored on read for v0.6+
-#                                                CRC32 / producer_id /
-#                                                run_id metadata)
-#
-# Total: 96 bytes (= 1.5 cache lines on x86_64 / arm64). 96 was picked to
-# keep 16-byte alignment for the body
-# (96 % 16 == 0) so RowBlock's 16-byte payload alignment is preserved when
-# the body starts at offset 96. All UInt64 fields land on 8-byte
-# boundaries in the v0.6 layout (alignment preserved across the v0.5 →
-# v0.6 re-pack).
-#
-# # Magic bytes + version
-#
-# "THS\x02" — the magic identifies the **era** (v0.4 internal-format).
-# The `version` UInt32 at bytes [4..7] is what readers dispatch on for
-# revision changes within the era. v0.5 fixtures (written with
-# version=0x01) raise a loud "unknown version" error against the v0.6
-# reader.
-#
-# # Encapsulation
-#
-# Pure data + helpers. No fields hold pointers. No FFI. The functions
-# operate over `Span[UInt8, origin]` or take/return value types.
-#
-# # Why a separate file (not inlined into `thspill2.mojo`)
-#
-# Header pack/parse is a value-type concern testable in isolation. Tests
-# can exercise the header round-trip without dragging in the codec /
-# SpillStorage stack. Subsequent format-version bumps land here.
+# The header holds values only. `parse_header` checks the magic, the version
+# and that the buffer holds a whole header; it does not check the declared
+# lengths against the surrounding buffer, which is the decoder's job.
 # =============================================================================
-
 
 
 # =============================================================================
@@ -79,24 +34,19 @@
 
 comptime THSPILL2_HEADER_SIZE: Int = 96
 
-# Version: v0.6 ships 0x02. v0.5 fixtures (version=0x01) raise on parse.
+# The only version this reader accepts; version 1 chunks raise on parse.
 comptime THSPILL2_VERSION_V2: UInt32 = 2
-
-# Backward-compat name retained for any in-tree caller; equals V2 today
-# (v0.6 reader accepts only V2). Prior P-1.B tests referenced
-# `THSPILL2_VERSION_V1` — those tests are updated to V2 in P-1.D.1.a.
-comptime THSPILL2_VERSION_V1: UInt32 = THSPILL2_VERSION_V2
 
 # Magic byte sequence "THS\x02".
 comptime THSPILL2_MAGIC_0: UInt8 = 0x54  # 'T'
 comptime THSPILL2_MAGIC_1: UInt8 = 0x48  # 'H'
 comptime THSPILL2_MAGIC_2: UInt8 = 0x53  # 'S'
-comptime THSPILL2_MAGIC_3: UInt8 = 0x02  # version-2 era
+comptime THSPILL2_MAGIC_3: UInt8 = 0x02  # format version 2
 
 # Flag bits.
 comptime THSPILL2_FLAG_COMPRESSED_LZ4: UInt32 = 1
 comptime THSPILL2_FLAG_SORT_KEY_ENCODED: UInt32 = 2
-# Bits 2..31 reserved. Mask of bits known to the v0.6 reader:
+# Bits 2..31 are reserved. Mask of the bits this reader knows:
 comptime THSPILL2_FLAG_KNOWN_MASK: UInt32 = (
     THSPILL2_FLAG_COMPRESSED_LZ4 | THSPILL2_FLAG_SORT_KEY_ENCODED
 )
@@ -115,7 +65,7 @@ struct THSpill2Header(
     the decoder during parse.
 
     Fields:
-        version:                   Format-version (v0.6 ships 2).
+        version:                   Format version (2).
         body_length:               Bytes immediately following the 96-byte
                                    header (the operator's payload).
         row_count:                 Logical row count in the chunk.
@@ -144,15 +94,8 @@ struct THSpill2Header(
         flags: UInt32,
         uncompressed_body_length: UInt64,
     ):
-        """Field-wise ctor. Encoders construct directly; decoders return
-        Self from `parse_header`.
-
-        Parameter ORDER (kept the same as P-1.B for call-site stability):
-        version, body_length, row_count, schema_fingerprint, flags,
-        uncompressed_body_length. The struct's FIELD order is re-packed
-        to match the v0.6 on-wire layout, but the keyword-arg API stays
-        identical so call sites do not churn.
-        """
+        """Field-wise ctor: encoders construct directly, decoders get Self
+        from `parse_header`."""
         self.version = version
         self.body_length = body_length
         self.row_count = row_count
@@ -167,7 +110,7 @@ struct THSpill2Header(
         schema_fingerprint: UInt64,
     ) -> Self:
         """Convenience ctor for the most common shape: uncompressed,
-        no sort-key-encoded variant. v0.6 ships this shape by default.
+        no sort-key-encoded variant.
         """
         return Self(
             version=THSPILL2_VERSION_V2,
@@ -191,7 +134,7 @@ def pack_header[
 
     `len(dst)` MUST be `>= THSPILL2_HEADER_SIZE`; raises otherwise.
 
-    The reserved bytes (44..47 + 48..95) are zeroed on write so the
+    The reserved bytes (44..95) are zeroed on write so the
     on-disk image is reproducible (helpful for byte-identity testing).
 
     Args:
@@ -211,13 +154,8 @@ def pack_header[
             + ")"
         )
 
-    # SAFETY: `dst` is a tracked Span; offsets 0..95 are bounds-checked
-    # above. All writes are scalar little-endian stores via unaligned
-    # bitcast — the Mojo `.bitcast[T]().store[alignment=1]` idiom matches
-    # SAB's `write_*_le_at`. We use the base pointer directly here
-    # (rather than dispatching through SAB) because pack_header is a
-    # pure value-on-byte-span operation and does not need an owning
-    # buffer wrapper.
+    # SAFETY: `dst` is a tracked Span and offsets 0..95 are bounds-checked
+    # above. All writes are unaligned scalar little-endian stores.
     var base = dst.unsafe_ptr()
 
     # bytes 0..3 — magic
@@ -235,7 +173,7 @@ def pack_header[
     # bytes 16..23 — row_count (UInt64 LE)
     (base + 16).bitcast[UInt64]().store[alignment=1](header.row_count)
 
-    # bytes 24..31 — schema_fingerprint (UInt64 LE; WIDENED v0.6)
+    # bytes 24..31 — schema_fingerprint (UInt64 LE)
     (base + 24).bitcast[UInt64]().store[alignment=1](
         header.schema_fingerprint
     )
@@ -270,9 +208,6 @@ def parse_header(src: Span[UInt8, _]) raises -> THSpill2Header:
     Raises:
         * "bad magic" — `src` does not begin with "THS\\x02".
         * "unknown version" — `header.version` is not `THSPILL2_VERSION_V2`.
-          v0.5 fixtures (version=0x01) raise here so stale fixtures
-          surface a clear error rather than silently mis-parse against
-          the v0.6 layout.
         * "buffer shorter than header" — `src.len() < 96`.
 
     Note: the body_length / row_count consistency check (i.e. that the
@@ -298,8 +233,8 @@ def parse_header(src: Span[UInt8, _]) raises -> THSpill2Header:
             + ")"
         )
 
-    # SAFETY: bounds confirmed above. All reads are little-endian
-    # unaligned scalar loads via bitcast — same shape as SAB.read_*_le_at.
+    # SAFETY: bounds confirmed above. All reads are unaligned scalar
+    # little-endian loads.
     var base = src.unsafe_ptr()
 
     # bytes 0..3 — magic
@@ -331,7 +266,7 @@ def parse_header(src: Span[UInt8, _]) raises -> THSpill2Header:
         raise Error(
             "parse_header: unknown version "
             + String(Int(version))
-            + " (v0.6 reader accepts only version "
+            + " (this reader accepts only version "
             + String(Int(THSPILL2_VERSION_V2))
             + ")"
         )
@@ -345,8 +280,8 @@ def parse_header(src: Span[UInt8, _]) raises -> THSpill2Header:
         (base + 32).bitcast[UInt64]().load[alignment=1]()
     )
     var flags = (base + 40).bitcast[UInt32]().load[alignment=1]()
-    # bytes 44..47 + 48..95 — reserved; intentionally NOT read. Forward
-    # compat: future writers may populate; this v0.6 reader ignores.
+    # bytes 44..47 + 48..95 — reserved and not read; a later writer
+    # may populate them.
 
     return THSpill2Header(
         version=version,

@@ -100,3 +100,34 @@ except:
     truncated = True
 assert_true(truncated)
 ```
+
+## Files
+
+| file | what it holds |
+|---|---|
+| `codec.mojo` | the raw block: `lz4_compress`, `lz4_decompress`, `lz4_compress_into`, `lz4_decompress_into`, `lz4_compress_bound` |
+| `frame.mojo` | the frame: `lz4_frame_compress_into`, `lz4_frame_decompress_into`, `lz4_frames_decompress_into`, `Lz4FrameDecoder` |
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_lz4`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_lz4/`, its tests are `tests/`. The package links no native code: it
+opens the system liblz4 when a program first calls it, so `mopm.toml` declares it under `[native-dependencies]`
+with `mode = "load"`, and `mopm pack` writes the conda package that ships liblz4 (`lz4-c`) as a dependency of the
+package, so installing `komira_lz4` installs liblz4. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the liblz4 dependency, where the library and its tests are |
+| `mopm.lock` | what `mopm lock` writes (with no registry reachable); the package has no Mojo dependencies, so it pins the toolchain only |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file and exists only once every test of `tests/` has passed. After any change to a
+source, a test, `mopm.toml`, `mopm.lock` or `mopm-toolchain.toml`, run `buildrules mojo sync`, commit what it
+writes, and build `komira//src/komira_lz4:lib` on the farm.
+
+`:conda` is the `.conda` of the mopm package (`mojo-komira_lz4-0.1.0-mojo1.0.0_0.conda`): the `.mojoc`, requiring
+`lz4-c`. `:komira_lz4` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`); it declares
+`dlopen = ["liblz4.so.1"]`, which `:komira_lz4_conda` (the release set's packaging) turns into the same requirement.
+It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`.

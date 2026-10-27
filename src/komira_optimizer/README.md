@@ -24,6 +24,7 @@ here executes a plan.
 | `partition_prune_scans` | Hive-partition pruning of a partitioned scan's path list from Filter conjuncts on partition columns |
 | `attach_hive_predicate` | attaching the partition predicate of a Filter (or an empty one) to a lazy dir-scanning Hive scan, leaving the data residual on the Filter |
 | `flatten_dependent_joins` | lowering correlated subquery expressions into joins |
+| `flatten_hoist` | the outer-reference hoist of `flatten_dependent_joins`: splitting a correlated subquery's inner Filter into join keys, join residual and inner-only conjuncts, and refusing a conjunct it cannot place |
 | `join_predicate_decompose` | splitting a raw join predicate into equi keys and a residual |
 | `scalar_subquery_decorrelate` | lowering an uncorrelated scalar subquery with a provably single-row inner plan into a broadcast cross join |
 | `resolve_scalar_subqueries` | finding uncorrelated scalar subqueries and inlining bound values as literals |
@@ -35,11 +36,19 @@ here executes a plan.
 | `optimizer_stats` | cardinality and row-width estimates |
 | `optimizer_column_stats_provider` | per-column NDV providers (Parquet-metadata tier, row-count heuristic tier) |
 | `optimizer_reorder` | join-chain extraction and greedy cost-based reordering of inner joins |
+| `optimizer_cost_order` | `dp_pair_beats`: the total order on DPccp candidates for one relation set (lower cost, then lower relation-set bits), so an equal-cost tie does not depend on emission order |
 | `optimizer_transitive_edges` | deriving transitive equi-join edges from column equivalence classes in a join chain |
 | `optimizer_tdom` | the TDOM equivalence-class graph and composite NDV |
 | `optimizer_tdom_cost` | join cardinality from TDOMs over the bridging edges of a (left, right) split |
 | `optimizer_tdom_card` | order-independent cardinality of a combined relation set |
 | `optimizer_dpccp` | DPccp join enumeration over a join chain (with a cross-product fallback for disconnected graphs) and `reorder_joins_with_dp`, the inner-join reorder driver that picks DPccp or greedy per chain |
+| `optimizer_dpccp_cost` | the DPccp bounds (`DPCCP_MIN_RELATIONS`, `DPCCP_MAX_RELATIONS`, `DPCCP_MAX_ITERATIONS`), `DPNode` (one DP table entry) and the cost of one candidate pair; `optimizer_dpccp` re-exports its names |
+| `optimizer_dpccp_graph` | the DPccp relation graph: the adjacency list, connectivity, and the cross-product augmentation for disconnected graphs; `optimizer_dpccp` re-exports its names |
+| `optimizer_dpccp_enum` | `emit_pair`, the three DPccp enumerators and `reconstruct_plan_from_dp`; `optimizer_dpccp` re-exports its names |
+| `optimizer_dpccp_solve` | `solve_dpccp`, `solve_dpccp_with_cost` and `solve_dpccp_observed`: the literal-edge pass, the cross-product pass and the top-level synthesized-cross guard; `optimizer_dpccp` re-exports its names |
+| `optimizer_dpccp_observer` | `DPccpObserver`, what the DPccp enumerators report each pass and every scored pair to; `DPCandidate`, one scored pair; `NoDPccpObserver`, the empty observer the solver uses |
+| `optimizer_dpccp_diagnostic` | `solve_dpccp_with_dp_trace`: one DPccp solve recorded in a `DPccpTrace` (a report per pass, every scored partition of a target subset with the enumerator's repeats counted, the final DP table) |
+| `order_advisory` | `advise_join_order`: comparing a plan's join order with the reorderer's and reporting a written order estimated costlier, without changing the plan |
 | `optimizer_agg_group_fd` | eliding GROUP BY keys that are deterministic functions of other keys and recomputing them above the aggregate |
 | `optimizer_eager_agg` | cross-side eager aggregation: a partial aggregate below an inner join, merged above it |
 | `optimizer_partial_agg` | same-side partial aggregate pushdown below an inner join (off by default, behind `ENABLE_AGG_PUSHDOWN_BELOW_JOIN`) |
@@ -47,15 +56,16 @@ here executes a plan.
 | `optimizer_agg_cse` | finding a duplicated grouped aggregate subtree and replacing it with one shared in-memory source, and collapsing identical aggregate expressions within one Aggregate |
 | `optimizer_scan_share` | deciding which Parquet scans share one read (`plan_scan_shares`), the dynamic-filter slot, and which scans stay Parquet sources |
 | `optimizer_config` | `OptimizerConfig`: the optimizer's options and their defaults, as one value |
-| `optimizer_driver` | `optimize(plan, config, deps)`: the rules above run over one logical plan in a fixed order, returning the optimized logical plan; `optimize_status`, its non-raising twin returning an `OptimizeResult` |
-| `optimizer_payload_narrow` | stamping narrow integer payload widths on an equi-join's scans from column min/max stats |
+| `optimizer_driver` | `optimize(plan, config, deps)`: the rules above run over one logical plan in a fixed order, returning the optimized logical plan; `optimize_status`, its non-raising twin returning an `OptimizeResult`; `optimize_portable(plan, config, profile)`, the same order under a `PortableProfile` (no scalar bindings, a plan that needs an executed sub-plan refused) |
 | `optimizer_partition_topn` | fusing a row_number / rank, a `<= K` filter and the column drop into one PartitionTopN |
+| `optimizer_count_distinct` | whether an aggregate is the streaming COUNT(DISTINCT) shape over a Parquet scan (a decision for the caller that executes it; no rewrite) |
 | `optimizer_window_rewrite` | window co-location and fusion of matching PartitionBy nodes, and eliding a Sort the PartitionBy already satisfies |
 
 It depends on `komira_plan_ir`, `komira_plan_expr`, `komira_plan_stats`,
 `komira_arrow`, `komira_kernels`, `komira_collections`, `komira_exec_types`,
-`komira_scan_source`, `komira_scan_planning`, `komira_counters`, `komira_libc`
-and `komira_async` (the join-reorder fire counter).
+`komira_scan_source`, `komira_scan_planning`, `komira_counters`, `komira_libc`,
+`komira_agg_api` (the COUNT(DISTINCT) column-type gates) and `komira_async`
+(the join-reorder and order-advisory fire counters).
 
 Public API: import directly from the modules. There is no facade.
 
