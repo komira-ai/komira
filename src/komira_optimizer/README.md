@@ -53,6 +53,9 @@ here executes a plan.
 | `optimizer_eager_agg` | cross-side eager aggregation: a partial aggregate below an inner join, merged above it |
 | `optimizer_partial_agg` | same-side partial aggregate pushdown below an inner join (off by default, behind `ENABLE_AGG_PUSHDOWN_BELOW_JOIN`) |
 | `optimizer_sum_rewrite` | `SUM(x + C)` to `SUM(x) + C * COUNT(x)` |
+| `plan_cse` | plan-level CSE: the second and later occurrence of a duplicated pure scan-bearing subtree becomes a `PLAN_CSE_REF` leaf naming the first (build side first); `plan_cse_eliminate_forest` does the same across a list of plans; not part of `optimizer_driver`'s order |
+| `scan_dedup_compile` | detection only: how many scan-bearing subtrees of a plan occur at least twice, and how often one given hash occurs; changes no plan |
+| `subtree_hash_walk` | the walk those two share: `plan_is_pure` (typed UDFs and node kinds off the allowlist are not pure), `plan_has_scan`, and the per-`structural_hash` subtree count |
 | `optimizer_agg_cse` | finding a duplicated grouped aggregate subtree and replacing it with one shared in-memory source, and collapsing identical aggregate expressions within one Aggregate |
 | `optimizer_scan_share` | deciding which Parquet scans share one read (`plan_scan_shares`), the dynamic-filter slot, and which scans stay Parquet sources |
 | `optimizer_config` | `OptimizerConfig`: the optimizer's options and their defaults, as one value |
