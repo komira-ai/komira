@@ -29,33 +29,30 @@ batch by it.
 - `sort_topn_sink`: the sort and top-N sink kernels (`_execute_sort_sink`,
   `_execute_topn_sink` over `SortSinkData` / `TopNSinkData` of
   `komira_physical_plan`), and `append_deterministic_tiebreak[_schema]`,
-  the one rule that makes a tied top-N cut deterministic.
+  the one rule that makes a tied top-N cut deterministic across runs whose
+  input order differs.
 - `sort_topn_heap`: `topn_heap_select`, multi-key top-K over a
   `RecordBatch` by a bounded heap, O(N log K), for INT64 / INT32 / FLOAT64 /
-  STRING keys.
+  STRING keys. Rows that tie on every key compare by row index, so the heap
+  keeps and orders tied rows as the stable full sort does. A numeric key
+  stored as a dictionary (codes plus values) is resolved to its values before
+  a top-N.
 - `sort_buffer_untyped`: `SortBuffer_Untyped`, a multi-key sort buffer
   whose column types are known only at run time (a `ColDescriptor` layout
   over `komira_column_format` storage), fed from `BatchView`s and read back
-  per DType; its cell codec is `sort_buffer_cells`.
+  per DType; its cell codec is `sort_buffer_cells`. It does not track
+  validity: a NULL cell is compared as its stored value bytes, so a caller
+  keeps nullable keys out of it or places the nulls itself.
 - `sort_loser_tree`: `LoserTree`, a tournament tree for the k-way merge of
   sorted runs, driven by a caller's `LoserTreeComparator`.
 
 Every sort is stable: rows with equal keys keep their input order, in both
-directions. The bounded-heap top-N breaks a full tie on the row index, so it
-keeps and orders tied rows exactly as the full sort does. (One exception:
-the sink's INT64 radix route, taken from 500_000 rows up, reverses tied rows
-in descending order.) Float keys are totally ordered the way DuckDB orders them: NaN
+directions. Float keys are totally ordered the way DuckDB orders them: NaN
 sorts above +inf (last ascending, first descending), every NaN equals every
 other NaN, and -0.0 equals +0.0. The numeric kernels read values only;
 `sort_indices_string`, `sort_indices_nested` and the BOOL arm of
 `sort_batch_by_keys` place nulls (first ascending, last descending, unless
-told otherwise). The sinks do not read `nulls_first`, and the numeric arms of
-the bounded heap and `SortBuffer_Untyped` do not read validity at all (a NULL
-cell is compared as its stored value bytes): a caller keeps nullable keys out
-of those paths, or places the nulls itself. A STRING key that carries NULLs is
-sent to the full sort rather than the heap. A numeric key stored as a
-dictionary (codes plus values) is resolved to its values before a top-N.
-Import from the sub-modules; there is no facade.
+told otherwise). Import from the sub-modules; there is no facade.
 
 ## Examples
 

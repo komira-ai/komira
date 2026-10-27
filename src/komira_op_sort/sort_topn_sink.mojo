@@ -11,10 +11,24 @@
 # Single-key sorts go to the typed kernels directly; multi-key sorts go to
 # `sort_multi.sort_batch_by_keys`. Both kernels refuse an empty key list.
 #
-# Null placement: these kernels do not read `nulls_first`. The routes they
-# reach place nulls as `sort_multi` / `sort_string` do (first ascending, last
-# descending, for the key types that read validity); the caller routes an
-# explicit `nulls_first` request elsewhere.
+# Ties: every full-sort route is stable, descending included (a single INT64
+# key at or above `RADIX_SORT_ROW_THRESHOLD` rows keeps input order among
+# equal keys in both directions). The heap route breaks a full tie on the row
+# index, so a top-N whose keys tie across the cut keeps the same rows, in the
+# same order, on both arms. `append_deterministic_tiebreak` makes the order
+# total when the input row order itself differs between runs.
+#
+# A sort key stored as a numeric dictionary (codes plus values) is ordered by
+# its values: `_execute_topn_sink` resolves such a key before routing.
+#
+# Null placement: these kernels do not read `nulls_first`. A STRING key is
+# the one key type the sort routes and the heap treat differently: the full
+# sort places its NULLs first ascending and last descending, the heap reads
+# values only, so a STRING key that carries NULLs is kept off the heap. A
+# numeric key (INT32, INT64, FLOAT64, TIMESTAMP, DECIMAL128) is ordered by its
+# stored value on the full sort and on the heap alike, NULL slots included, so
+# the two arms agree on it; a caller that needs NULL placement for a numeric
+# key routes that request elsewhere.
 # =============================================================================
 
 from komira_arrow.arrow_types import ArrowType
@@ -87,10 +101,10 @@ def _sort_batch_single_key(
     ):
         var arr = key_col.as_primitive[DType.int64]()
         if arr.length >= RADIX_SORT_ROW_THRESHOLD:
-            # The radix sort is ascending only; DESC reverses it.
-            sort_idx = radix_sort_int64(arr)
             if descending:
-                _reverse_int32_indices(sort_idx)
+                sort_idx = _radix_sort_int64_descending(arr)
+            else:
+                sort_idx = radix_sort_int64(arr)
         else:
             sort_idx = sort_indices_int64(arr, descending)
     elif (
@@ -118,19 +132,22 @@ def _sort_batch_single_key(
     return gather_batch_by_sort_indices(batch, sort_idx)
 
 
-@always_inline
-def _reverse_int32_indices(mut indices: PrimitiveArray[DType.int32]):
-    """In-place reverse of an Int32 permutation index array."""
-    var lo = 0
-    var hi = indices.length - 1
-    while lo < hi:
-        var tmp = indices.get_typed[Scalar[DType.int32]](lo)
-        indices.set_typed[Scalar[DType.int32]](
-            lo, indices.get_typed[Scalar[DType.int32]](hi)
+def _radix_sort_int64_descending(
+    arr: PrimitiveArray[DType.int64],
+) -> PrimitiveArray[DType.int32]:
+    """Stable descending order of signed Int64 keys.
+
+    The radix sort is ascending only and reversing its result would put equal
+    keys in reverse input order. Bitwise complement reverses signed order
+    without overflow (INT64_MIN <-> INT64_MAX), so an ascending stable radix
+    sort of the complemented keys is the stable descending order of the
+    originals."""
+    var flipped = PrimitiveArray[DType.int64].allocate(arr.length)
+    for i in range(arr.length):
+        flipped.set_typed[Scalar[DType.int64]](
+            i, ~arr.get_typed[Scalar[DType.int64]](i)
         )
-        indices.set_typed[Scalar[DType.int32]](hi, tmp)
-        lo += 1
-        hi -= 1
+    return radix_sort_int64(flipped)
 
 
 def _refuse_zero_sort_keys(num_keys: Int, node: String) raises:
@@ -213,6 +230,20 @@ def _heap_can_order_all_keys(
     return True
 
 
+def _column_has_nulls(batch: RecordBatch, col_idx: Int) raises -> Bool:
+    """True iff any row of column `col_idx` is NULL.
+
+    A recount, not `null_count()` (that field can be stale after some Column
+    constructions); a column with no validity buffer has none."""
+    ref col = batch.column_at(col_idx)
+    if not col.has_validity_buffer():
+        return False
+    for r in range(col.length()):
+        if col.is_null_at(r):
+            return True
+    return False
+
+
 def _string_key_is_heap_safe(batch: RecordBatch, col_idx: Int) raises -> Bool:
     """True iff this STRING key may go to the heap's STRING arm.
 
@@ -223,17 +254,10 @@ def _string_key_is_heap_safe(batch: RecordBatch, col_idx: Int) raises -> Bool:
         is an empty byte range: it would sort as `''` instead of where
         `sort_indices_string` puts NULLs (and on DESC those two differ).
 
-    The NULL test is a recount, not `null_count()` (that field can be stale
-    after some Column constructions). It runs only in the heap regime."""
-    ref col = batch.column_at(col_idx)
-    if col.arrow_type != ArrowType.STRING:
+    The NULL test (`_column_has_nulls`) runs only in the heap regime."""
+    if batch.column_at(col_idx).arrow_type != ArrowType.STRING:
         return False
-    if not col.has_validity_buffer():
-        return True
-    for r in range(col.length()):
-        if col.is_null_at(r):
-            return False
-    return True
+    return not _column_has_nulls(batch, col_idx)
 
 
 # =============================================================================
@@ -331,8 +355,11 @@ def _execute_topn_sink(
     `n == 0` (LIMIT 0) has a defined answer, the empty batch with the input
     schema, and gets it. (An empty key list has none and is refused.) The
     bounded heap runs when `n` is much smaller than the batch and every key
-    is heap-comparable; otherwise the batch is fully sorted and sliced. A
-    sort key stored as a numeric dictionary is ordered by its values."""
+    is heap-comparable; otherwise the batch is fully sorted and sliced.
+
+    When keys tie across the cut, both arms keep the first tied rows in input
+    order. A sort key stored as a numeric dictionary is ordered by its
+    values."""
     _refuse_zero_sort_keys(len(topn_data.sort_keys), String("TOP N"))
 
     var num_rows = batch.num_rows()
@@ -353,9 +380,8 @@ def _execute_topn_sink(
             batch^, topn_data.sort_keys[0], topn_data.descending[0]
         )
 
-    # PERF-CRITICAL: the heap is O(N log K). A composite key with a STRING in
-    # it (`ORDER BY user_id, search_phrase LIMIT 10`) on the full-sort arm
-    # does not finish at ClickBench scale.
+    # PERF-CRITICAL: a full sort over a large batch is O(N log N) where the
+    # heap is O(N log K).
     if (
         num_rows > k * TOPN_HEAP_RATIO
         and len(topn_data.sort_keys) <= _MAX_HEAP_KEYS

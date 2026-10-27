@@ -9,8 +9,7 @@
 #   - NULL handling: Arrow convention (NULLS FIRST asc, NULLS LAST desc)
 #   - Sliced batch (verify _offset propagation)
 #   - BINARY parity with STRING
-#   - Dispatch fail-loud: a sort key of an unsupported type raises a
-#     descriptive error
+#   - An unsupported key type raises with a descriptive error
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
@@ -305,14 +304,13 @@ def test_sort_string_nulls_descending() raises:
 
 
 # =============================================================================
-# Test 9b — PHASE-0b: explicit NULLS placement override
+# Test 9b — explicit NULLS placement override
 # =============================================================================
 
 
 def test_sort_string_nulls_placement_override() raises:
-    """An explicit `nulls_first` override forces the NULL placement
-    opposite to the direction-derived default (`ASC NULLS LAST` and
-    `DESC NULLS FIRST`)."""
+    """An explicit `nulls_first` overrides the direction-derived NULL
+    placement: `ASC NULLS LAST` and `DESC NULLS FIRST` are both reachable."""
     var values: List[String] = ["banana", "", "apple", "", "cherry"]
     var valid: List[Bool] = [True, False, True, False, True]
 
@@ -344,8 +342,8 @@ def test_sort_string_nulls_placement_override() raises:
 
 
 def test_sort_string_nulls_default_unchanged() raises:
-    """With `nulls_first=None` (the default) NULL placement follows the
-    direction: ASC puts NULLs first."""
+    """With no `nulls_first` argument, ASC puts NULLs first and DESC puts
+    them last."""
     var values: List[String] = ["banana", "", "apple", "", "cherry"]
     var valid: List[Bool] = [True, False, True, False, True]
     var col = _str_col_nullable(values, valid)
@@ -537,8 +535,8 @@ def test_sort_multi_key_string_then_int64() raises:
 
 
 def test_sort_string_dispatch_fail_loud_unknown_type() raises:
-    """Feeding a non-STRING/BINARY column raises an explicit "unsupported
-    arrow_type" message."""
+    """An unsupported key type raises with a descriptive error: feeding a
+    non-STRING/BINARY column to the string kernel names the type."""
     var col = _i64_col([Int64(1), Int64(2)])  # INT64 is fine for the kernel
     # But sort_indices_string itself rejects INT64.
     var raised = False

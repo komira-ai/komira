@@ -6,11 +6,10 @@
 //!   2. the ref is not `main` in another case (GitHub compares refs and
 //!      concurrency groups ignoring case, so such a ref would join main's
 //!      group);
-//!   3. the run is a push to main, a nightly (schedule) run of main, or a manual
-//!      run, and nothing else;
+//!   3. the run is a push to main or a manual run, and nothing else;
 //!   4. the checkout's HEAD is the commit the run started on: what is built
 //!      is that commit's bytes;
-//!   5. a push to main or a nightly run builds a commit on main's history
+//!   5. a push to main builds a commit on main's history
 //!      (refs/remotes/origin/main); a manual run (break-glass) needs a
 //!      reason of 1 to 200 bytes on one line, and says so in its first
 //!      summary line;
@@ -30,7 +29,7 @@ pub const MAIN_TRACKING_REF = "refs/remotes/origin/main";
 pub const REASON_MAX_BYTES = 200;
 
 pub const Input = struct {
-    /// GITHUB_EVENT_NAME: `push`, `schedule` or `workflow_dispatch`.
+    /// GITHUB_EVENT_NAME: `push` or `workflow_dispatch`.
     event: []const u8,
     /// GITHUB_REF.
     ref: []const u8,
@@ -75,11 +74,10 @@ pub fn decide(a: std.mem.Allocator, in: Input, git: anytype) !Outcome {
     if (!std.mem.eql(u8, in.ref, MAIN_REF) and eqlIgnoreCase(in.ref, MAIN_REF)) {
         return refuse(a, "this run is on {s}, main in another case: GitHub compares refs and concurrency groups ignoring case, so such a ref would pass for main there; it is refused, so nothing is built", .{in.ref});
     }
-    // a schedule runs on the default branch's latest commit: a run of main, as a push is
-    const push_to_main = (std.mem.eql(u8, in.event, "push") or std.mem.eql(u8, in.event, "schedule")) and std.mem.eql(u8, in.ref, MAIN_REF);
+    const push_to_main = std.mem.eql(u8, in.event, "push") and std.mem.eql(u8, in.ref, MAIN_REF);
     const manual = std.mem.eql(u8, in.event, "workflow_dispatch");
     if (!push_to_main and !manual) {
-        return refuse(a, "a release is built by a push to main, a nightly run of main or a manual run; this run is a {s} of {s}, so nothing is built", .{ in.event, in.ref });
+        return refuse(a, "a release is built by a push to main or a manual run; this run is a {s} of {s}, so nothing is built", .{ in.event, in.ref });
     }
 
     const head = try git.run(a, &.{ "rev-parse", "--verify", "HEAD" });
