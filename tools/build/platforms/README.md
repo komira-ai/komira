@@ -214,6 +214,7 @@ A standalone checkout reads those sets from `[komira_re]` in
 | `darwin_arm64_properties` | `darwin-arm64` | one of the two; needs `darwin_macos_hosts` as well |
 | `linux_arm64_properties` | `linux-arm64` | **reserved**: refused if set, until that row is registered |
 | `darwin_macos_hosts` | (the macOS hosts a compile may run on) | with `darwin_arm64_properties` |
+| `macos_library_dirs` | (not komira's: buildrules' macOS test runs) | optional, only with `darwin_arm64_properties`: absolute directories, separated by `:` or spaces, a macOS test run searches for a library it opens by its bare name |
 
 Each property value is comma-separated `key=value` pairs matching what the
 service routes on, e.g. `pool=mojo-sized`. The macOS set must differ from the
@@ -244,3 +245,10 @@ Two details keep action digests portable:
 needs `darwin_macos_hosts` too, since a macOS host's SDK and tools are not
 inputs of the action. Setting up the workers is in
 [the toolchain README](../toolchains/README.md), "macOS".
+
+buildrules' Mojo rules read two more keys from the root cell's `[buildrules_re]` section, and the committed
+`.buckconfig` points both at `[komira_re]` (`$(config ...)`, no value committed): `darwin_macos_hosts` (the hosts
+a macOS Mojo compile may run on; a macOS Mojo target fails analysis without it) and `macos_library_dirs` (the
+directories a macOS test run searches, before `/usr/local/lib:/usr/lib`, for a library it opens by its bare name,
+such as `liblz4`; empty leaves dyld's defaults). In a repository that mounts komira as a cell, the root cell's
+`.buckconfig` names them: `$(config ...)` is read in the cell that holds the line.

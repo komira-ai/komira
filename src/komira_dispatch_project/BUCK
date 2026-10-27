@@ -1,0 +1,22 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The plan-expression to runtime-expression translator of the engine dispatcher's computed projection, and the census a projection refusal reports.
+mojo_library(
+    name = "komira_dispatch_project",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_eval:komira_eval",
+        "//src/komira_kernels:komira_kernels",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
+    ],
+    test_srcs = [
+        # every arm of the translator and of the family inference
+        "tests/test_lower_untyped_expr_leaves.mojo",
+        "tests/test_lower_untyped_expr_binary.mojo",
+        # the refusal census
+        "tests/test_format_project_decline_census.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
