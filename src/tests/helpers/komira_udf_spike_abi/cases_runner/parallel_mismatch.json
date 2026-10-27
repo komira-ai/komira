@@ -1,0 +1,12 @@
+{
+ "name": "parallel_mismatch",
+ "defect": "a deliberate mismatch: the parallel loop checks for a * x + b with a factor the function does not apply",
+ "run": "parallel",
+ "entry": "double",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "parallel": {"threads": 2, "rows": 8, "iters": 2, "a": 3, "b": 0},
+ "expect": {"status": "OK"},
+ "runner_fails_with": "outputs were wrong"
+}

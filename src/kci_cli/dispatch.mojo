@@ -868,7 +868,15 @@ def kci_main_with[S: StageSteps, D: CellDeploys](
     in the file `--summary-file` names, when it names them. Returns the exit
     number. Its first act reads the monotonic clock: kci's start, from which
     `--build-budget-s` counts."""
-    var started_ns = Int(perf_counter_ns())
+    return kci_main_started_at(args, steps, deploys, recorder, Int(perf_counter_ns()))
+
+
+def kci_main_started_at[S: StageSteps, D: CellDeploys](
+    args: List[String], mut steps: S, mut deploys: D, mut recorder: CliRecorder, started_ns: Int
+) -> Int:
+    """`kci_main_with` for a kci that started at `started_ns` on the monotonic
+    clock (the reading `kci_main_with` takes first): `--build-budget-s` counts
+    from it. A test passes a number of its own and so never reads a clock."""
     var cmd: KciCommand
     try:
         cmd = parse_kci_args(args)

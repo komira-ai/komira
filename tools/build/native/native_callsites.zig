@@ -82,7 +82,7 @@ const Scanner = struct {
 /// Appends the call-site names of one source to `out`. On a call site whose
 /// name is not a string literal of [A-Za-z0-9_] characters, returns
 /// error.CallSite with `fail` set.
-pub fn scan(src: []const u8, out: *std.ArrayList([]const u8), fail: *Failure) !void {
+pub fn scan(alloc: std.mem.Allocator, src: []const u8, out: *std.ArrayList([]const u8), fail: *Failure) !void {
     var p = Scanner{ .s = src };
     while (p.i < src.len) {
         const c = src[p.i];
@@ -110,7 +110,7 @@ pub fn scan(src: []const u8, out: *std.ArrayList([]const u8), fail: *Failure) !v
                 fail.* = .{ .line = line, .why = "external_call[ whose name is not [A-Za-z0-9_]+" };
                 return error.CallSite;
             }
-            try out.append(src[name_start..p.i]);
+            try out.append(alloc, src[name_start..p.i]);
             p.i += 1;
         } else {
             p.step();
@@ -146,22 +146,22 @@ pub fn scanDir(alloc: Alloc, dir_path: []const u8) ![][]const u8 {
     defer dir.close();
     var walker = try dir.walk(alloc);
     defer walker.deinit();
-    var paths = std.ArrayList([]const u8).init(alloc);
+    var paths = std.ArrayList([]const u8).empty;
     while (try walker.next()) |w| {
         if (w.kind != .file and w.kind != .sym_link) continue;
         if (!std.mem.endsWith(u8, w.path, ".mojo")) continue;
-        try paths.append(try alloc.dupe(u8, w.path));
+        try paths.append(alloc, try alloc.dupe(u8, w.path));
     }
     if (paths.items.len == 0) {
         std.debug.print("native_so: {s} holds no .mojo file (not a mojo_library's [src]?)\n", .{dir_path});
         std.process.exit(2);
     }
     std.mem.sort([]const u8, paths.items, {}, lessStr);
-    var names = std.ArrayList([]const u8).init(alloc);
+    var names = std.ArrayList([]const u8).empty;
     for (paths.items) |rel| {
         const src = try dir.readFileAlloc(alloc, rel, 1 << 28);
         var fail = Failure{};
-        scan(src, &names, &fail) catch |err| switch (err) {
+        scan(alloc, src, &names, &fail) catch |err| switch (err) {
             error.CallSite => {
                 std.debug.print("native_so: {s}/{s}:{d}: {s}\n", .{ dir_path, rel, fail.line, fail.why });
                 std.process.exit(2);

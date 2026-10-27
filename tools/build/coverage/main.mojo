@@ -1,8 +1,9 @@
 """covcheck: coverage reports to a GitHub check run, and the build gate.
 
     covcheck report ...   the PR check: summary, check-run bodies, result JSON
-    covcheck gate ...     one package's numbers and findings; exit 3 when
-                          --mode enforce and the package has a finding
+    covcheck gate ...     one package's numbers and findings; exit 3 on a
+                          Regression (a held metric below the target), or
+                          with --mode enforce on any finding
 
 Every flag, the inputs, the outputs and the exit codes are in README.md
 (next to this file); the command line is parsed in covcheck/cli.mojo.

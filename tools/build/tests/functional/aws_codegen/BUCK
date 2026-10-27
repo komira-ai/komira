@@ -1,5 +1,4 @@
 load("@komira//third_party/botocore:models.bzl", "botocore_model")
-load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/proto-codegen/aws_query:model.bzl", "TINY_EC2", "TINY_QUERY")
 load("@komira//tools/build/proto-codegen/aws_rest_json:model.bzl", "TINY_REST_JSON")
 load("@komira//tools/build/proto-codegen/aws_rest_xml:model.bzl", "TINY_REST_XML")
@@ -109,6 +108,7 @@ aws_codegen_golden(
         "komira_aws_tiny_rest.komira_aws_tiny_rest",
     ],
     golden = "golden/tiny_rest_json_client.mojo",
+    golden_parts = glob(["golden/tiny_rest_json_client_parts/*.mojo"]),
     golden_probe = "golden/tiny_rest_json_client_probe.mojo",
     model = TINY_REST_JSON.model,
     module = "komira_aws_tiny_rest",
@@ -121,11 +121,12 @@ gen_check(
     name = "tiny_rest_json_pure_scoped",
     absent = ["komira_http"],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "komira_aws_tiny_rest.mojo",
     ],
-    gen = "komira//tools/build/proto-codegen/aws_rest_json:komira_aws_tiny_rest[gen]",
+    gen = "komira//tools/build/proto-codegen/aws_rest_json:komira_aws_tiny_rest_gen",
     present = [
         "protocol     : rest-json (restJson1)",
         "mode         : pure (no transport)",
@@ -216,11 +217,12 @@ gen_check(
         "komira_json",
     ],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "komira_aws_tiny_xml.mojo",
     ],
-    gen = "komira//tools/build/proto-codegen/aws_rest_xml:komira_aws_tiny_xml[gen]",
+    gen = "komira//tools/build/proto-codegen/aws_rest_xml:komira_aws_tiny_xml_gen",
     present = [
         "protocol     : rest-xml (restXml)",
         "mode         : pure (no transport)",
@@ -285,11 +287,12 @@ gen_check(
         "komira_json",
     ],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "komira_aws_tiny_query.mojo",
     ],
-    gen = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_query[gen]",
+    gen = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_query_gen",
     present = [
         "protocol     : query (awsQuery)",
         "mode         : pure (no transport)",
@@ -319,11 +322,12 @@ gen_check(
     name = "tiny_query_client_scoped",
     absent = ["komira_json"],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "komira_aws_tiny_query_client.mojo",
     ],
-    gen = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_query_client[gen]",
+    gen = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_query_client_gen",
     present = [
         "protocol     : query (awsQuery)",
         "mode         : client",
@@ -361,6 +365,7 @@ aws_codegen_golden(
         "komira_aws_tiny_query.komira_aws_tiny_query",
     ],
     golden = "golden/query_client.mojo",
+    golden_parts = glob(["golden/query_client_parts/*.mojo"]),
     golden_probe = "golden/query_client_probe.mojo",
     model = TINY_QUERY.model,
     module = "komira_aws_tiny_query",
@@ -404,11 +409,12 @@ gen_check(
         "komira_json",
     ],
     files = [
+        "_parts",
         "__init__.mojo",
         "_layout_probe.mojo",
         "komira_aws_tiny_ec2.mojo",
     ],
-    gen = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_ec2[gen]",
+    gen = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_ec2_gen",
     present = [
         "protocol     : ec2 (ec2Query)",
         "mode         : pure (no transport)",
@@ -659,17 +665,6 @@ aws_codegen_refusal(
 # gives every operation a Request and a Response struct (synthesising an
 # empty one where the model declares no input or output), so every module
 # the CLI emits has at least two structs to probe.
-
-export_file(
-    name = "aws_codegen.sh",
-    visibility = ["//negative/aws_codegen:"],
-)
-
-shell_lint(
-    name = "shell_lint",
-    srcs = ["aws_codegen.sh"],
-    visibility = ["komira//:tests_lints"],
-)
 
 # For tests//negative/aws_codegen, which plants a golden that differs, and
 # must_contain strings the module holds only non-adjacently or as the tail of

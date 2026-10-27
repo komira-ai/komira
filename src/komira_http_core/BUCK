@@ -74,6 +74,12 @@ mojo_library(
         "tests/test_L2_hpack_coverage.mojo",
         "tests/test_L2_method_not_allowed_allow.mojo",
         "tests/test_L2_stream_park_coverage.mojo",
+        "tests/test_cov_chunked_decoder.mojo",
+        "tests/test_cov_h2_state_tables.mojo",
+        "tests/test_cov_kernel_tcp_pushback.mojo",
+        "tests/test_cov_scripted_faults.mojo",
+        "tests/test_cov_tls_stream_app_data.mojo",
+        "tests/test_cov_types_method_status.mojo",
         "tests/test_grpc_content_type_nonascii.mojo",
         "tests/test_grpc_timeout_parse.mojo",
         "tests/test_kernel_tcp_loopback.mojo",
@@ -148,6 +154,10 @@ mojo_library(
         "tests/test_L1_tls_smoke.mojo": [
             "tests/fixtures/smoke_cert.pem",
             "tests/fixtures/smoke_key.pem",
+        ],
+        "tests/test_cov_tls_stream_app_data.mojo": [
+            "tests/fixtures/tls/leaf_cert.pem",
+            "tests/fixtures/tls/leaf_key.pem",
         ],
     },
     visibility = ["PUBLIC"],

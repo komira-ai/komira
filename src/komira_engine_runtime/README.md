@@ -23,13 +23,13 @@ operator or a sink consumes but does not implement belongs here.
   entry points; `concat_fan_plan` decides the route and the fan from the bytes
   moved and the pool's worker count; `concat_tasks`, `concat_tiled`,
   `concat_release`; `concat_dict_unify` unifies STRING dictionaries first;
-  `concat_options` holds the route switches as a value).
+  `concat_options` holds the route switches as a value; `concat_schema_check`
+  refuses input batches whose columns differ).
 - The shuffle combine buffer (`spill.shuffle_combine_buffer`: per-partition
   encode scratch with a bounded high-water) and the driver-side retention
   policy (`shuffle_retention_policy`: reaps sealed epochs below the slowest
   durable consumer cursor, at a cadence, fail-safe).
-- Wake primitives (`wake_primitives`: wait on and wake an address, with an
-  optional timeout), counters, the FNV-1a hash (`spill.fnv1a`), and the small
+- Counters, the FNV-1a hash (`spill.fnv1a`), and the small
   shared row and column helpers (`row`, `group_ref`, `scan_source`,
   `streaming_morsel`, `dynamic_filter`, `band_sink`).
 

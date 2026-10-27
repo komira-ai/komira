@@ -26,6 +26,9 @@
 #     _partition_by: Optional[OwnedPointer[PartitionByData]]  -- populated when tag == PLAN_PARTITION_BY
 #     _partition_topn: Optional[OwnedPointer[PartitionTopNData]] -- populated when tag == PLAN_PARTITION_TOPN
 #     _asof_join: Optional[OwnedPointer[AsofJoinData]]        -- populated when tag == PLAN_ASOF_JOIN
+#     (and `_union`, `_view_ref`, `_cse_ref`, `_cast_to_varchar`, `_exchange`,
+#      `_map_batches`, `_step` for PLAN_UNION / PLAN_VIEW_REF / PLAN_CSE_REF /
+#      PLAN_CAST_TO_VARCHAR / PLAN_EXCHANGE / PLAN_MAP_BATCHES / PLAN_STEP)
 #
 # Only one Optional is populated at a time. The others are None.
 #
@@ -66,9 +69,11 @@ from komira_scan_source.in_memory_source import InMemorySource
 from komira_scan_source.json_source import JsonSource
 from komira_scan_source.csv_source import CsvSource
 from komira_buffer.file_identity import FileIdentity
-from komira_plan_expr.expr import Expr, EXPR_COL_REF, EXPR_ALIAS, EXPR_LITERAL, EXPR_BINARY_OP, EXPR_CAST, EXPR_WHEN, EXPR_STRING_OP, EXPR_STRING_FN, EXPR_UDF_CALL, string_fn_returns_int, EXPR_REGEXP, EXPR_SUBSTRING, EXPR_STRUCT_FIELD, EXPR_STRUCT_FIELD_IDX, EXPR_MAP_GET, EXPR_MATH_FN, EXPR_MATH_FN2, EXPR_IN_LIST, EXPR_BETWEEN, REGEXP_LIKE, REGEXP_MATCH, REGEXP_REPLACE, REGEXP_SPLIT_TO_ARRAY, REGEXP_EXTRACT_ALL, REGEXP_COUNT, REGEXP_INSTR, REGEXP_SUBSTR, REGEXP_FULL_MATCH, BIN_EQ, BIN_NE, BIN_LT, BIN_LE, BIN_GT, BIN_GE, BIN_AND, BIN_OR
-from komira_plan_expr.agg_expr import AggExpr, AGG_SUM, AGG_COUNT, AGG_MIN, AGG_MAX, AGG_MEAN, AGG_COUNT_DISTINCT, AGG_FIRST, AGG_LAST, AGG_STDDEV_SAMP, AGG_VAR_SAMP, AGG_CORR, AGG_MEDIAN, AGG_LARGEST_K, AGG_COVAR_POP, AGG_COVAR_SAMP, AGG_REGR_AVGX, AGG_REGR_AVGY, AGG_REGR_COUNT, AGG_REGR_SXX, AGG_REGR_SXY, AGG_REGR_SYY, AGG_REGR_SLOPE, AGG_REGR_INTERCEPT, AGG_REGR_R2, AGG_VAR_POP, AGG_STDDEV_POP, AGG_SEM, AGG_COUNT_IF, AGG_BOOL_AND, AGG_BOOL_OR, AGG_PRODUCT, agg_is_bool_valued, AGG_ANY_VALUE, AGG_KAHAN_SUM, AGG_KAHAN_AVG, AGG_SKEWNESS, AGG_KURTOSIS, AGG_KURTOSIS_POP
+from komira_plan_expr.expr import Expr, EXPR_COL_REF, EXPR_ALIAS, EXPR_LITERAL, EXPR_BINARY_OP, EXPR_CAST, EXPR_WHEN, EXPR_STRING_OP, EXPR_STRING_FN, EXPR_UDF_CALL, EXPR_UDF_APPLY, string_fn_returns_int, EXPR_REGEXP, EXPR_SUBSTRING, EXPR_STRUCT_FIELD, EXPR_STRUCT_FIELD_IDX, EXPR_MAP_GET, EXPR_MATH_FN, EXPR_MATH_FN2, EXPR_IN_LIST, EXPR_BETWEEN, REGEXP_LIKE, REGEXP_MATCH, REGEXP_REPLACE, REGEXP_SPLIT_TO_ARRAY, REGEXP_EXTRACT_ALL, REGEXP_COUNT, REGEXP_INSTR, REGEXP_SUBSTR, REGEXP_FULL_MATCH, BIN_EQ, BIN_NE, BIN_LT, BIN_LE, BIN_GT, BIN_GE, BIN_AND, BIN_OR
+from komira_plan_expr.agg_expr import AggExpr, AGG_SUM, AGG_COUNT, AGG_MIN, AGG_MAX, AGG_MEAN, AGG_COUNT_DISTINCT, AGG_FIRST, AGG_LAST, AGG_STDDEV_SAMP, AGG_VAR_SAMP, AGG_CORR, AGG_MEDIAN, AGG_LARGEST_K, AGG_COVAR_POP, AGG_COVAR_SAMP, AGG_REGR_AVGX, AGG_REGR_AVGY, AGG_REGR_COUNT, AGG_REGR_SXX, AGG_REGR_SXY, AGG_REGR_SYY, AGG_REGR_SLOPE, AGG_REGR_INTERCEPT, AGG_REGR_R2, AGG_VAR_POP, AGG_STDDEV_POP, AGG_SEM, AGG_COUNT_IF, AGG_BOOL_AND, AGG_BOOL_OR, AGG_PRODUCT, agg_is_bool_valued, AGG_ANY_VALUE, AGG_KAHAN_SUM, AGG_KAHAN_AVG, AGG_SKEWNESS, AGG_KURTOSIS, AGG_KURTOSIS_POP, AGG_UDF
+from komira_plan_expr.udf_type_field import udf_type_to_field
 from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_expr.null_order_policy import derived_nulls_first
 from komira_plan_expr.partition_expr import PartitionExpr, partition_expr_output_field
 from komira_plan_stats.table_stats import TableStats
 # Filter / Project / Aggregate carry an optional typed-UDF `udf` field,
@@ -150,6 +155,28 @@ comptime PLAN_CSE_REF: UInt8 = 14
 # `write_csv("/b")` share cache keys but `write_csv` and `write_parquet`
 # do not (paths excluded from the hash).
 comptime PLAN_CAST_TO_VARCHAR: UInt8 = 15
+# exchange: a single-child node where rows move between partitions (GATHER,
+# BROADCAST, HASH, RANGE). Its output schema is its child's. The producer
+# places one for its declared maximum host count; the coordinator fills in
+# `partitions` when it cuts the plan into segments. Payload: `ExchangeData`
+# (`logical_plan_exchange.mojo`). Nothing in this tree produces or lowers one
+# yet; the plan wire refuses it (the vocabulary keeps wire 19 reserved until
+# the `exchange` message arm exists).
+#
+# ⛔ 18, NOT 16. Ids 16 and 17 are retired; see `PLAN_TAG_COUNT` below.
+comptime PLAN_EXCHANGE: UInt8 = 18
+# map_batches: a MAP_BATCHES_FRAME user function over the child, called once
+# per batch or once per group (optimized_plan_udfs.md §10.2, §10.4). Payload:
+# `MapBatchesData` (`logical_plan_udf.mojo`), which names the function by its
+# index in the `UdfRef` list beside the plan. Its output schema is the
+# children of that `UdfRef`'s `return_type`. Produced only by the plan-wire
+# decoder; nothing in this tree lowers or runs it yet.
+comptime PLAN_MAP_BATCHES: UInt8 = 19
+# step: a STEP user function, a source with no child that runs once per run
+# (optimized_plan_udfs.md §10.2, §10.4). Payload: `StepData`. Its output
+# schema is the children of its `UdfRef`'s `return_type`. Produced only by
+# the plan-wire decoder; nothing in this tree lowers or runs it yet.
+comptime PLAN_STEP: UInt8 = 20
 
 
 # =============================================================================
@@ -168,16 +195,28 @@ comptime PLAN_CAST_TO_VARCHAR: UInt8 = 15
 #
 # This file is the ONE declaration site for the PLAN_* space, so "the whole
 # tag space" and "the part declared in this file" are the same set. Tag ids 16
-# and 17 are RETIRED (wire numbers 17 and 18 are reserved forever), and the
-# next plan tag takes id 18 (wire number 19).
+# and 17 are RETIRED (wire numbers 17 and 18 are reserved forever); id 18 is
+# `PLAN_EXCHANGE` (wire number 19), 19 and 20 are `PLAN_MAP_BATCHES` and
+# `PLAN_STEP` (wire numbers 20 and 21), and the next plan tag takes id 21.
 
-comptime PLAN_TAG_COUNT: Int = 16
-"""One past the highest `PLAN_*` tag id — `PLAN_CAST_TO_VARCHAR = 15`.
+comptime PLAN_TAG_COUNT: Int = 21
+"""One past the highest `PLAN_*` tag id — `PLAN_STEP = 20`.
 
-⛔ THE NEXT TAG ADDED TAKES 18, NOT 16. Ids 16 and 17 are retired; reusing
-either would silently mis-decode any old bytes that still carry a node with
-that id — the same reason `plan.proto` RESERVES a retired field number rather
-than renumbering around it. Reserving the NUMBER is permanent."""
+⚠ THE SPACE HAS A HOLE. Ids 16 and 17 are retired and lie below this count,
+so `range(PLAN_TAG_COUNT)` visits two ids no node may carry. A walk over the
+tag space skips them with `plan_tag_is_retired`; a histogram sized from this
+count keeps two empty slots.
+
+⛔ A RETIRED ID IS NEVER REUSED. Reusing 16 or 17 would silently mis-decode any
+old bytes that still carry a node with that id — the same reason `plan.proto`
+RESERVES a retired field number rather than renumbering around it. Reserving
+the NUMBER is permanent. The next tag added takes 21."""
+
+
+def plan_tag_is_retired(tag: UInt8) -> Bool:
+    """True for the retired ids 16 and 17: below `PLAN_TAG_COUNT`, carried by
+    no node. Total, never raising."""
+    return tag == 16 or tag == 17
 
 
 def _write_plan_tag_name[W: Writer](mut writer: W, tag: UInt8):
@@ -237,10 +276,19 @@ def _write_plan_tag_name[W: Writer](mut writer: W, tag: UInt8):
     if tag == PLAN_CAST_TO_VARCHAR:
         writer.write(String("CastToVarchar"))
         return
+    if tag == PLAN_EXCHANGE:
+        writer.write(String("Exchange"))
+        return
+    if tag == PLAN_MAP_BATCHES:
+        writer.write(String("MapBatches"))
+        return
+    if tag == PLAN_STEP:
+        writer.write(String("Step"))
+        return
     # ⛔ 16 / 17 ARE RETIRED IDS — DO NOT REUSE THEM FOR A NEW TAG.
     # A plan carrying 16 or 17 renders as `tag#16` / `tag#17` — which is
     # correct: no such node can be produced, and a plan that carries one is
-    # old bytes, not a live tag. The NEXT tag added takes 18, never 16.
+    # old bytes, not a live tag. The NEXT tag added takes 21.
     writer.write(String("tag#") + String(Int(tag)))
     return
 
@@ -492,6 +540,34 @@ comptime JOIN_ALGO_SORT_MERGE: UInt8 = 2
 
 
 # =============================================================================
+# Recorded optimizer decisions (build side, aggregate mode, boundedness,
+# exchange kind). DECLARED in `plan_decisions.mojo`, which imports nothing;
+# re-exported here so a consumer may import them beside the tags.
+# =============================================================================
+
+from komira_plan_ir.plan_decisions import (
+    JOIN_BUILD_SIDE_LEFT,
+    JOIN_BUILD_SIDE_RIGHT,
+    JOIN_BUILD_SIDE_UNSET,
+    AGG_MODE_SINGLE,
+    AGG_MODE_PARTIAL,
+    AGG_MODE_FINAL,
+    AGG_MODE_UNSET,
+    SCAN_BOUNDED,
+    SCAN_UNBOUNDED,
+    EXCHANGE_KIND_GATHER,
+    EXCHANGE_KIND_BROADCAST,
+    EXCHANGE_KIND_HASH,
+    EXCHANGE_KIND_RANGE,
+    EXCHANGE_KEY_ENCODING_UNSET,
+    join_build_side_is_valid,
+    agg_mode_is_valid,
+    scan_boundedness_is_valid,
+    exchange_kind_is_valid,
+)
+
+
+# =============================================================================
 # ASOF join constants
 # =============================================================================
 #
@@ -656,6 +732,8 @@ from komira_plan_ir.logical_plan_variants import (
     CseRefData,
     CastToVarcharData,
 )
+from komira_plan_ir.logical_plan_exchange import ExchangeData
+from komira_plan_ir.logical_plan_udf import MapBatchesData, StepData
 
 
 # =============================================================================
@@ -692,6 +770,9 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
     var _view_ref: Optional[OwnedPointer[ViewRefData]]
     var _cse_ref: Optional[OwnedPointer[CseRefData]]
     var _cast_to_varchar: Optional[OwnedPointer[CastToVarcharData]]
+    var _exchange: Optional[OwnedPointer[ExchangeData]]
+    var _map_batches: Optional[OwnedPointer[MapBatchesData]]
+    var _step: Optional[OwnedPointer[StepData]]
 
     # --- Private constructor (all fields None) ---
 
@@ -716,6 +797,9 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         self._view_ref = None
         self._cse_ref = None
         self._cast_to_varchar = None
+        self._exchange = None
+        self._map_batches = None
+        self._step = None
 
     # =========================================================================
     # Factory methods
@@ -873,8 +957,12 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         var row_count: Optional[Int] = None,
         var table_stats: Optional[TableStats] = None,
         source_kind: UInt8 = SOURCE_KIND_UNSET,
+        boundedness: UInt8 = SCAN_BOUNDED,
     ) raises -> LogicalPlan:
         """Canonical factory: build a Scan node from a SourceVariant.
+
+        `boundedness` is `SCAN_BOUNDED` unless the caller states that the
+        source has no end (`SCAN_UNBOUNDED`); a value outside the two RAISES.
 
         The output schema is derived from the explicit schema + projection
         (same shape as the positional `scan(...)` factory). Use this for new
@@ -916,6 +1004,12 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         # it states NO `source_kind`, so it cannot contradict a declaration by
         # construction.
         _require_orientation_agreement(source, source_kind)
+        if not scan_boundedness_is_valid(boundedness):
+            raise Error(
+                "LogicalPlan.scan_from_source: boundedness "
+                + String(Int(boundedness))
+                + " is neither SCAN_BOUNDED nor SCAN_UNBOUNDED"
+            )
         # Use `field_at_unchecked`
         # to preserve Field metadata — see `scan` factory above.
         var out_schema: Schema
@@ -936,7 +1030,12 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
 
         var plan = LogicalPlan(PLAN_SCAN, out_schema^)
         var scan_schema: Optional[Schema] = schema^
-        plan._scan = OwnedPointer(ScanData(source^, scan_schema^, projection^, filter^, row_count^, table_stats^, source_kind))
+        plan._scan = OwnedPointer(
+            ScanData(
+                source^, scan_schema^, projection^, filter^, row_count^,
+                table_stats^, source_kind, boundedness,
+            )
+        )
         return plan^
 
     @staticmethod
@@ -1141,14 +1240,161 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         return plan^
 
     @staticmethod
+    def map_batches(
+        var child: LogicalPlan,
+        udf_index: Int,
+        var group_by: List[Expr],
+        var output_schema: Schema,
+    ) raises -> LogicalPlan:
+        """Create a MapBatches node: the MAP_BATCHES_FRAME `UdfRef` at
+        `udf_index` over `child`, once per batch, or once per group of
+        `group_by` (optimized_plan_udfs.md §10.4).
+
+        `output_schema` is the children of that `UdfRef`'s `return_type`; the
+        caller holds the list, so it states the schema. RAISES on a negative
+        index: there is no `UdfRef` at one."""
+        if udf_index < 0:
+            raise Error(
+                "LogicalPlan.map_batches: udf_index " + String(udf_index)
+                + " is negative"
+            )
+        var plan = LogicalPlan(PLAN_MAP_BATCHES, output_schema^)
+        plan._map_batches = OwnedPointer(
+            MapBatchesData(child^, udf_index, group_by^)
+        )
+        return plan^
+
+    @staticmethod
+    def step(
+        udf_index: Int, var args: List[ScalarValue], var output_schema: Schema
+    ) raises -> LogicalPlan:
+        """Create a Step node: the STEP `UdfRef` at `udf_index`, a source
+        with no child, called once per run with the literal `args`
+        (optimized_plan_udfs.md §10.4).
+
+        `output_schema` is the children of that `UdfRef`'s `return_type` (no
+        columns for a step that returns nothing). RAISES on a negative
+        index."""
+        if udf_index < 0:
+            raise Error(
+                "LogicalPlan.step: udf_index " + String(udf_index)
+                + " is negative"
+            )
+        var plan = LogicalPlan(PLAN_STEP, output_schema^)
+        plan._step = OwnedPointer(StepData(udf_index, args^))
+        return plan^
+
+    @staticmethod
+    def exchange(
+        var child: LogicalPlan,
+        kind: UInt8,
+        var keys: List[String] = List[String](),
+        key_encoding: UInt8 = EXCHANGE_KEY_ENCODING_UNSET,
+        var order_keys: List[String] = List[String](),
+        var descending: List[Bool] = List[Bool](),
+        var nulls_first: Optional[List[Bool]] = None,
+        partitions: Int = 0,
+        adaptive_allowed: Bool = False,
+        key_groups: Int = 0,
+    ) raises -> LogicalPlan:
+        """Create an Exchange node over `child`. Output schema = child's.
+
+        RAISES on a shape no exchange can have, so that a malformed one never
+        exists to be copied, rendered or hashed:
+          * a `kind` outside `EXCHANGE_KIND_*`;
+          * HASH with no `keys`, or any other kind with `keys`;
+          * RANGE with no `order_keys`;
+          * a key or order key the child's schema does not name;
+          * `descending` (or a stated `nulls_first`) not one entry per order
+            key;
+          * negative `partitions` (0 means "filled in at the cut");
+          * negative `key_groups`, or `key_groups` on any kind but HASH
+            (only a HASH exchange feeds keyed state; 0 means none).
+
+        `nulls_first` defaults per key from `descending`, as `sort` does.
+        """
+        if not exchange_kind_is_valid(kind):
+            raise Error(
+                "LogicalPlan.exchange: kind " + String(Int(kind))
+                + " is not an EXCHANGE_KIND_* value"
+            )
+        if kind == EXCHANGE_KIND_HASH and len(keys) == 0:
+            raise Error("LogicalPlan.exchange: a HASH exchange needs keys")
+        if kind != EXCHANGE_KIND_HASH and len(keys) != 0:
+            raise Error(
+                "LogicalPlan.exchange: only a HASH exchange partitions by keys"
+            )
+        if kind == EXCHANGE_KIND_RANGE and len(order_keys) == 0:
+            raise Error(
+                "LogicalPlan.exchange: a RANGE exchange needs order keys"
+            )
+        if len(descending) != len(order_keys):
+            raise Error(
+                "LogicalPlan.exchange: " + String(len(order_keys))
+                + " order keys and " + String(len(descending))
+                + " descending flags"
+            )
+        if partitions < 0:
+            raise Error(
+                "LogicalPlan.exchange: partitions " + String(partitions)
+                + " is negative"
+            )
+        if key_groups < 0:
+            raise Error(
+                "LogicalPlan.exchange: key_groups " + String(key_groups)
+                + " is negative"
+            )
+        if key_groups != 0 and kind != EXCHANGE_KIND_HASH:
+            raise Error(
+                "LogicalPlan.exchange: only a HASH exchange has key groups"
+            )
+        for i in range(len(keys)):
+            if not _name_in_schema(child.output_schema, keys[i]):
+                raise Error(
+                    "LogicalPlan.exchange: key '" + keys[i]
+                    + "' is not a column of the child"
+                )
+        for i in range(len(order_keys)):
+            if not _name_in_schema(child.output_schema, order_keys[i]):
+                raise Error(
+                    "LogicalPlan.exchange: order key '" + order_keys[i]
+                    + "' is not a column of the child"
+                )
+        var nf: List[Bool]
+        if nulls_first:
+            nf = nulls_first.value().copy()
+        else:
+            nf = List[Bool]()
+            for i in range(len(descending)):
+                nf.append(derived_nulls_first(descending[i]))
+        if len(nf) != len(order_keys):
+            raise Error(
+                "LogicalPlan.exchange: " + String(len(order_keys))
+                + " order keys and " + String(len(nf)) + " nulls_first flags"
+            )
+        var plan = LogicalPlan(PLAN_EXCHANGE, child.output_schema.copy())
+        plan._exchange = OwnedPointer(
+            ExchangeData(
+                child^, kind, keys^, key_encoding, order_keys^, descending^,
+                nf^, partitions, adaptive_allowed, key_groups,
+            )
+        )
+        return plan^
+
+    @staticmethod
     def aggregate(
         var group_by: ExprArray,
         var agg_exprs: AggExprArray,
         var child: LogicalPlan,
+        mode: UInt8 = AGG_MODE_UNSET,
     ) -> LogicalPlan:
         """Create an Aggregate node.
 
         Output schema: [group_key_columns...] + [builtin_agg_output_columns...]
+
+        `mode` is the recorded aggregate mode (`AGG_MODE_*`); `AGG_MODE_UNSET`
+        until an optimizer records one. It does not change the output schema:
+        the host derives a PARTIAL node's state layout from the aggregates.
 
         The typed-UDF variant of this factory is
         `aggregate_with_udf` — it takes a UdfData snapshot in addition to
@@ -1170,7 +1416,9 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
             builder.add_field(_disambiguate_field(seen_names, field^))
         var out_schema = builder.build()
         var plan = LogicalPlan(PLAN_AGGREGATE, out_schema^)
-        plan._aggregate = OwnedPointer(AggregateData(group_by^, agg_exprs^, child^, None))
+        plan._aggregate = OwnedPointer(
+            AggregateData(group_by^, agg_exprs^, child^, None, mode=mode)
+        )
         return plan^
 
     @staticmethod
@@ -1179,6 +1427,7 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         var agg_exprs: AggExprArray,
         var child: LogicalPlan,
         var udf: OwnedPointer[UdfData],
+        mode: UInt8 = AGG_MODE_UNSET,
     ) -> LogicalPlan:
         """Create an Aggregate node carrying a typed-UDF `UdfData`
         payload (the `df.group_by(keys).agg_udf[A: AggFn](a)` path).
@@ -1215,7 +1464,9 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         var out_schema = builder.build()
         var plan = LogicalPlan(PLAN_AGGREGATE, out_schema^)
         plan._aggregate = OwnedPointer(
-            AggregateData(group_by^, agg_exprs^, child^, None, Optional(udf^))
+            AggregateData(
+                group_by^, agg_exprs^, child^, None, Optional(udf^), mode=mode
+            )
         )
         return plan^
 
@@ -1228,8 +1479,17 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         join_type: UInt8,
         algo_hint: UInt8 = JOIN_ALGO_AUTO,
         var residual: Optional[OwnedPointer[Expr]] = None,
+        build_side: UInt8 = JOIN_BUILD_SIDE_UNSET,
+        adaptive_allowed: Bool = False,
     ) -> LogicalPlan:
         """Create a Join node.
+
+        `build_side` is the recorded side the host builds its hash table on
+        (`JOIN_BUILD_SIDE_*`); `JOIN_BUILD_SIDE_UNSET` until an optimizer
+        records one. ⚠ IT DOES NOT TOUCH THE OUTPUT SCHEMA: child order alone
+        fixes it (left columns, then right columns with the `_right` rename),
+        whichever side builds. `adaptive_allowed` lets the host switch the
+        join between broadcast and partitioned at run time.
 
         For INNER/LEFT/RIGHT/FULL: output schema = left + right.
         For SEMI/ANTI: output schema = left only.
@@ -1290,7 +1550,10 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         var out_schema = builder.build()
         var plan = LogicalPlan(PLAN_JOIN, out_schema^)
         plan._join = OwnedPointer(
-            JoinData(left^, right^, left_on^, right_on^, join_type, algo_hint, residual^)
+            JoinData(
+                left^, right^, left_on^, right_on^, join_type, algo_hint,
+                residual^, build_side, adaptive_allowed,
+            )
         )
         return plan^
 
@@ -1594,6 +1857,18 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
     def is_cast_to_varchar(self) -> Bool:
         return self.tag == PLAN_CAST_TO_VARCHAR
 
+    @always_inline
+    def is_exchange(self) -> Bool:
+        return self.tag == PLAN_EXCHANGE
+
+    @always_inline
+    def is_map_batches(self) -> Bool:
+        return self.tag == PLAN_MAP_BATCHES
+
+    @always_inline
+    def is_step(self) -> Bool:
+        return self.tag == PLAN_STEP
+
     # =========================================================================
     # Typed-UDF presence + kind predicates. The three node types that can
     # carry a UDF are FILTER / PROJECT / AGGREGATE; all others return
@@ -1721,6 +1996,21 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         """Get a reference to the CastToVarcharData. Requires tag == PLAN_CAST_TO_VARCHAR."""
         return self._cast_to_varchar.value()[]
 
+    @always_inline
+    def exchange_data_ref(self) -> ref [origin_of(self._exchange.value()[])] ExchangeData:
+        """Get a reference to the ExchangeData. Requires tag == PLAN_EXCHANGE."""
+        return self._exchange.value()[]
+
+    @always_inline
+    def map_batches_data_ref(self) -> ref [origin_of(self._map_batches.value()[])] MapBatchesData:
+        """Get a reference to the MapBatchesData. Requires tag == PLAN_MAP_BATCHES."""
+        return self._map_batches.value()[]
+
+    @always_inline
+    def step_data_ref(self) -> ref [origin_of(self._step.value()[])] StepData:
+        """Get a reference to the StepData. Requires tag == PLAN_STEP."""
+        return self._step.value()[]
+
     # =========================================================================
     # `BoxablePlan` conformance — what lets `Expr` carry a plan without naming
     # one
@@ -1805,6 +2095,12 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
             plan._cse_ref = Optional(OwnedPointer(self._cse_ref.value()[].copy()))
         elif self.tag == PLAN_CAST_TO_VARCHAR and self._cast_to_varchar:
             plan._cast_to_varchar = Optional(OwnedPointer(self._cast_to_varchar.value()[].copy()))
+        elif self.tag == PLAN_EXCHANGE and self._exchange:
+            plan._exchange = Optional(OwnedPointer(self._exchange.value()[].copy()))
+        elif self.tag == PLAN_MAP_BATCHES and self._map_batches:
+            plan._map_batches = Optional(OwnedPointer(self._map_batches.value()[].copy()))
+        elif self.tag == PLAN_STEP and self._step:
+            plan._step = Optional(OwnedPointer(self._step.value()[].copy()))
         return plan^
 
     # =========================================================================
@@ -2084,6 +2380,14 @@ def _disambiguate_field(mut seen: List[String], var field: Field) -> Field:
     return field^
 
 
+def _name_in_schema(schema: Schema, name: String) -> Bool:
+    """True when `schema` has a column named `name`."""
+    for i in range(schema.num_columns()):
+        if schema.field_name(i) == name:
+            return True
+    return False
+
+
 def _name_in_list(names: List[String], name: String) -> Bool:
     for i in range(len(names)):
         if names[i] == name:
@@ -2235,6 +2539,8 @@ def agg_func_base_name(func: UInt8) -> StaticString:
         return "kurtosis"
     if func == AGG_KURTOSIS_POP:
         return "kurtosis_pop"
+    if func == AGG_UDF:
+        return "agg_udf"
     return "agg"
 
 
@@ -2333,6 +2639,18 @@ def _infer_agg_field(agg: AggExpr, schema: Schema) -> Field:
         output_name = agg.alias_name.value()
     else:
         output_name = base_name
+
+    # A user-defined aggregate: its type is its call's, the `UdfRef`'s
+    # `return_type` (optimized_plan_udfs.md §10.4). A malformed one (no
+    # `EXPR_UDF_APPLY` argument) gets the NULL placeholder this function gives
+    # every shape it cannot type; the plan-wire decoder refuses that shape by
+    # name before a plan holds it.
+    if agg.func == AGG_UDF:
+        if agg.child and agg.child.value().tag == EXPR_UDF_APPLY:
+            var f = udf_type_to_field(agg.child.value().udf_apply_return_type_ref())
+            f.name = output_name
+            return f^
+        return Field(output_name, ArrowType.NULL, True)
 
     # COUNT and COUNT_DISTINCT always return INT64.
     #

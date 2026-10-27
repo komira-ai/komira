@@ -7,7 +7,7 @@
 # WeldedTestsInfo sources of every one (the welded test files, as the rules
 # resolved them), and asks Buck2 where each file is: its path in the cell,
 # whatever package or label named it. Does the same for the .mojo files of
-# the lint's tree, then runs test_weld.sh over the two path lists as a build
+# the lint's tree, then runs test_weld over the two path lists as a build
 # action on the lint's execution platform. Fails, printing the findings,
 # when the lint finds anything.
 
