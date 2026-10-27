@@ -869,5 +869,60 @@ def test_having_null_comparisons_and_literals() raises:
     )
 
 
+def _types(sql: String) raises -> String:
+    """The bound plan's output columns as `name:type` pairs (a decimal with its
+    precision and scale), or `ERR: ` and the binder's message."""
+    var cat = _catalog()
+    try:
+        var st = parse_sql(tokenize(sql))
+        var plan = _select(st.query, cat)
+        var out = String("")
+        for c in range(plan.output_schema.num_columns()):
+            if c > 0:
+                out += ","
+            out += plan.output_schema.field_name(c) + ":" + String(
+                plan.output_schema.field_arrow_type(c)
+            )
+            if plan.output_schema.field_arrow_type(c) == ArrowType.DECIMAL128:
+                out += (
+                    "(" + String(plan.output_schema.field_decimal_precision(c))
+                    + "," + String(plan.output_schema.field_decimal_scale(c)) + ")"
+                )
+        return out
+    except e:
+        return String("ERR: ") + String(e)
+
+
+def test_aggregate_output_types() raises:
+    """The bound output schema types each aggregate: the integer, decimal and
+    float rows differ in what sum keeps, avg is always float64, min/max keep
+    the argument type and count is int64."""
+    assert_equal(
+        _types("SELECT sum(k), avg(k), min(k), max(k), count(k) FROM t"),
+        "sum(k):int64,avg(k):float64,min(k):int64,max(k):int64,count(k):int64",
+    )
+    assert_equal(
+        _types("SELECT sum(dc), avg(dc), min(dc), max(dc), count(dc) FROM t"),
+        "sum(dc):decimal128(38,2),avg(dc):float64,min(dc):decimal128(12,2),"
+        "max(dc):decimal128(12,2),count(dc):int64",
+    )
+    assert_equal(
+        _types("SELECT sum(v), avg(v), min(v), max(v), count(v) FROM t"),
+        "sum(v):float64,avg(v):float64,min(v):float64,max(v):float64,count(v):int64",
+    )
+    assert_equal(
+        _types("SELECT k, sum(dc) AS total FROM t GROUP BY k"),
+        "k:int64,total:decimal128(38,2)",
+    )
+
+
+def test_nested_aggregates_are_refused() raises:
+    """An aggregate inside an aggregate argument is refused, in the select list
+    and in HAVING."""
+    _check("SELECT sum(sum(v)) FROM t", "ERR: SQL bind error: aggregate function not allowed in this position")
+    _check("SELECT count(max(v)) FROM t", "ERR: SQL bind error: aggregate function not allowed in this position")
+    _check("SELECT k FROM t GROUP BY k HAVING sum(count(*)) > 1", "ERR: SQL bind error: aggregate function not allowed in this position")
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
