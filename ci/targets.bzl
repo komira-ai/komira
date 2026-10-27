@@ -456,6 +456,7 @@ TARGETS = [
     "komira//tools/build/bisect:bisect",
     "komira//tools/build/ci/fixture/agg:agg_complete",
     "komira//tools/build/ci/fixture/agg:agg_missing",
+    "komira//tools/build/ci:lock_graphs",
     "komira//tools/build/ci:release_beta_fetch",
     "komira//tools/build/ci:release_beta_version",
     "komira//tools/build/ci:release_staged_verify",

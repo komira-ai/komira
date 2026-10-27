@@ -55,9 +55,14 @@ from komira_objectstore.store import CloneableConditionalWriteStore
 from .alias_map import AliasMap
 from .embedder import Embedder
 from .ingest_config import EpisodeInput, IngestConfig
-from .ingest_edges import apply_edges
+from .ingest_edges import AssertedEdge, apply_edges_recording
 from .ingest_gleaning import run_gleaning
 from .ingest_resolve import resolve_entities
+from .ingest_source_diff import (
+    retire_absent,
+    source_edge_indices,
+    split_incremental,
+)
 from .llm_client import LlmClient
 from .rewrite import append_index_bootstrap, base_tables_of
 from .working_rows import WorkingEpisode
@@ -138,9 +143,18 @@ def write_extraction[
     cfg: IngestConfig,
     facet: String = String(""),
     facet_source: String = String(""),
+    source: String = String(""),
+    structured: Bool = False,
 ) raises -> SnapshotId:
     """The write half of an ingest, over an extraction already made: resolve its
     mentions, apply its triples, append the episode row, persist.
+
+    A non-empty `source` makes the write a replacement of what that source holds
+    in the partition: afterwards each edge it held that no triple states is
+    closed (`retire_absent`). `structured` marks the extraction as the caller's
+    own statement rather than a model's reading: a triple's end time is stored,
+    and with a `source`, a triple the source already holds is left alone and its
+    entities are not resolved or embedded again (`split_incremental`).
 
     Parameters:
         Store: The object store (inferred).
@@ -163,6 +177,9 @@ def write_extraction[
         cfg: The ingest knobs.
         facet: The opaque facet stamped on the episode and on new entities.
         facet_source: The source the facet is attributed to.
+        source: The id of the source whose facts these are, "" for none. It
+            attributes every new edge and is the key of the replacement.
+        structured: Whether the extraction is a caller's statement (see above).
 
     Returns:
         The new head, or the unchanged head if nothing changed.
@@ -177,6 +194,16 @@ def write_extraction[
     """
     var head_id = store.latest_snapshot_id()
     var aliases = AliasMap()
+    var replacing = len(source.as_bytes()) > 0
+    var prior = List[Int]()
+    if replacing:
+        prior = source_edge_indices(ws, source, partition_id)
+    var unchanged = List[AssertedEdge]()
+    if structured and replacing:
+        extraction = split_incremental(
+            ws, extraction^, prior, partition_id, valid_at, unchanged
+        )
+    var asserted = List[AssertedEdge]()
     var resolved = resolve_entities(
         ws,
         extraction.entities,
@@ -190,7 +217,7 @@ def write_extraction[
     var mention_names = List[String](capacity=len(extraction.entities))
     for i in range(len(extraction.entities)):
         mention_names.append(String(extraction.entities[i].name))
-    apply_edges(
+    apply_edges_recording(
         ws,
         extraction.triples,
         mention_names,
@@ -202,10 +229,14 @@ def write_extraction[
         valid_at,
         aliases,
         cfg,
-        String(""),
+        asserted,
+        structured,
+        source,
         facet,
         facet_source,
     )
+    if replacing:
+        retire_absent(ws, prior, asserted, unchanged, ts)
     ws.append_episode(
         WorkingEpisode(
             String(uuid),
