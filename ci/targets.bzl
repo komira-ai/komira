@@ -216,6 +216,7 @@ TARGETS = [
     "komira//src/komira_op_sort:komira_op_sort_conda",
     "komira//src/komira_op_sources:komira_op_sources_conda",
     "komira//src/komira_op_typed_source_api:komira_op_typed_source_api_conda",
+    "komira//src/komira_op_window:komira_op_window_conda",
     "komira//src/komira_operator_api:komira_operator_api_conda",
     "komira//src/komira_optimized_plan_header:komira_optimized_plan_header_conda",
     "komira//src/komira_optimizer:komira_optimizer_conda",
