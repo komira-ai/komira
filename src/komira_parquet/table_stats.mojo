@@ -17,7 +17,7 @@
 #   INT64                  8 bytes LE, signed
 #   UINT64                 8 bytes LE; a value above Int64.MAX has no Int64
 #                          and gives no bound
-#   FLOAT32 / FLOAT64      IEEE 754 LE, as Float64
+#   FLOAT32 / FLOAT64      IEEE 754 LE, as Float64; a NaN bound is no bound
 #   anything else          no bound (strings, booleans, DECIMAL: unscaled)
 # `min_value` / `max_value` are read; the legacy `min` / `max`, whose sort
 # order may be wrong, are not.
@@ -85,7 +85,10 @@ def _decode_bound(bytes: List[UInt8], kind: Int) -> Optional[ScalarValue]:
             return ScalarValue.from_int64(Int64(bitcast[DType.int32](w)))
         if kind == _K_U32:
             return ScalarValue.from_int64(Int64(Int(w)))
-        return ScalarValue.from_float(Float64(bitcast[DType.float32](w)))
+        var f = Float64(bitcast[DType.float32](w))
+        if f != f:
+            return None
+        return ScalarValue.from_float(f)
     if kind == _K_I64 or kind == _K_U64 or kind == _K_F64:
         var u = _le(bytes, 8)
         if not u:
@@ -96,8 +99,28 @@ def _decode_bound(bytes: List[UInt8], kind: Int) -> Optional[ScalarValue]:
             if u.value() > UInt64(Int(Int64.MAX)):
                 return None
             return ScalarValue.from_int64(Int64(Int(u.value())))
-        return ScalarValue.from_float(bitcast[DType.float64](u.value()))
+        var f = bitcast[DType.float64](u.value())
+        if f != f:
+            return None
+        return ScalarValue.from_float(f)
     return None
+
+
+def _is_nan_bound(bytes: List[UInt8], kind: Int) -> Bool:
+    """True iff `bytes` is a complete FLOAT32 / FLOAT64 NaN. `_decode_bound`
+    gives no bound for it, and a fold over row groups must not mistake that
+    for a row group without statistics: skipping it would leave a bound that
+    does not cover its rows."""
+    if kind != _K_F32 and kind != _K_F64:
+        return False
+    var u = _le(bytes, 4 if kind == _K_F32 else 8)
+    if not u:
+        return False
+    if kind == _K_F32:
+        var f = bitcast[DType.float32](UInt32(u.value()))
+        return f != f
+    var d = bitcast[DType.float64](u.value())
+    return d != d
 
 
 def _kind_for_arrow(at: ArrowType) -> Int:
@@ -225,6 +248,9 @@ def collect_table_stats(metadata: FileMetaData, schema: Schema) raises -> TableS
         var overall_min: Optional[ScalarValue] = None
         var overall_max: Optional[ScalarValue] = None
         var overall_null: Optional[Int] = None
+        # A NaN bound in any row group leaves the column's min and max
+        # unknown: the other row groups' bounds do not cover its rows.
+        var nan_bound = False
 
         for r in range(len(metadata.row_groups)):
             ref rg = metadata.row_groups[r]
@@ -246,10 +272,18 @@ def collect_table_stats(metadata: FileMetaData, schema: Schema) raises -> TableS
                 var mn = _decode_bound(stats.min_value.value(), kind)
                 if mn:
                     overall_min = _take_min(overall_min^, mn.value().copy())
+                elif _is_nan_bound(stats.min_value.value(), kind):
+                    nan_bound = True
             if stats.max_value:
                 var mx = _decode_bound(stats.max_value.value(), kind)
                 if mx:
                     overall_max = _take_max(overall_max^, mx.value().copy())
+                elif _is_nan_bound(stats.max_value.value(), kind):
+                    nan_bound = True
+
+        if nan_bound:
+            overall_min = None
+            overall_max = None
 
         column_names.append(col_name)
         column_stats.append(ColumnStats(overall_distinct^, overall_min^, overall_max^, overall_null^))

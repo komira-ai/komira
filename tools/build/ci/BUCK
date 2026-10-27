@@ -107,3 +107,55 @@ zig_exe(
     zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
+
+# release_staged_verify: the two checks of the prod publish that write nothing to a registry
+# (release_staged_verify.zig says what each reads and refuses). release.yml's `prod-test`
+# job runs `verify` on the staged set `prod-stage` uploaded, before anything is committed, and
+# writes the directory the README e2e runs on; `prod-smoke` runs `smoke` against the prod channel
+# once the group is visible. It reads the plan and the client of release_beta_fetch.zig, which
+# sits beside it. Its cases run on scratch directories and a registry in memory; welded: the
+# tool is built only when they pass.
+zig_test(
+    name = "release_staged_verify_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "release_beta_fetch/release_staged_verify_test.zig",
+    imports = [
+        "release_beta_fetch/release_staged_verify.zig",
+        "release_beta_fetch/release_beta_fetch.zig",
+    ],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "release_staged_verify",
+    exec_compatible_with = LINUX_X86_64,
+    src = "release_beta_fetch/release_staged_verify.zig",
+    imports = ["release_beta_fetch/release_beta_fetch.zig"],
+    unit_tests = [":release_staged_verify_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# lock_graphs: the action of lock_graphs.bxl, which holds the graphs a package's
+# buildrules.mojo.lock.bzl commits (one per platform subdir) to the subdirs its
+# mopm.lock records. Built behind its unit tests.
+zig_test(
+    name = "lock_graphs_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "lock_graphs_test.zig",
+    imports = ["lock_graphs.zig"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "lock_graphs",
+    exec_compatible_with = LINUX_X86_64,
+    src = "lock_graphs.zig",
+    unit_tests = [":lock_graphs_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)

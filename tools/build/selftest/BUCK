@@ -94,6 +94,8 @@ selftest_scenario(name = "analysis_refusals_platform_table")
 
 selftest_scenario(name = "analysis_refusals_mojo")
 
+selftest_scenario(name = "analysis_refusals_mopm_artifacts")
+
 selftest_scenario(name = "analysis_refusals_aws_client")
 
 selftest_scenario(name = "analysis_refusals_gcp_client")
@@ -115,6 +117,8 @@ selftest_scenario(name = "planted_red_builds_npm_modules")
 selftest_scenario(name = "analysis_refusals_zig_rules")
 
 selftest_scenario(name = "planted_red_builds_zig_rules")
+
+selftest_scenario(name = "planted_red_builds_mojo_hang")
 
 selftest_scenario(name = "analysis_refusals_rust")
 

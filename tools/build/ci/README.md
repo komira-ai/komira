@@ -72,6 +72,27 @@ naming the targets and the command that regenerates the list, so a new package
 that nobody added to the aggregate cannot go untested. Configuring `//ci:pr`
 also fails on a label in the list that no longer exists.
 
+## The lock-graphs check: `lock_graphs.bxl`
+
+```sh
+./buck2 bxl komira//tools/build/ci/lock_graphs.bxl:check
+```
+
+A package built with buildrules' `mojo_package` commits one unit graph per
+platform subdir in `buildrules.mojo.lock.bzl` (`GRAPHS`): linux-64, and
+linux-aarch64 and osx-arm64 when the package's `mopm.lock` records a toolchain
+for them under the package's Mojo version, which is what `buildrules mojo sync`
+plans. The package's `:table` compares each graph the table holds with mopm's
+output, but it learns which subdirs to compare from the table itself, so a
+graph deleted from `GRAPHS` is noticed only by a build for that platform, and
+the pull request check builds on linux. This script finds the `:table` of every
+package of the scope, reads the subdirs each holds, and runs `lock_graphs`
+(`lock_graphs.zig`, behind its unit tests) over the package's `mopm.lock`. It
+fails, naming the package and the subdir, for a subdir the lock records and the
+table lacks, and for one the table holds that the lock does not record. A new
+package needs no list to edit. A change that deletes the subdir from `mopm.lock`
+as well fails `:table` instead: the lock's hash is in the table.
+
 **The aggregate holds no Python.** Python serves only the Python SDK and its
 tests (`PYTHON_SURFACE` in `tests/python_closure_allowlist.bzl`, empty until
 the SDK lands), so the checks of `EXCLUDED` in `rules.bzl` are left out of

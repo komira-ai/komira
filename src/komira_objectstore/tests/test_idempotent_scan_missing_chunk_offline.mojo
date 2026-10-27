@@ -29,14 +29,13 @@
 #   * 5: a chunk GET that fails with a 503 is a store error, not a missing
 #     chunk: it must reach the caller unchanged, not become a refusal.
 #   * 6: the chunk missing is the one `_LOG_START` names. Restarting there
-#     would read the same 404 forever, so the scan must refuse. The watchdog
-#     `alarm` turns that loop into a failed test instead of a hung build.
+#     would read the same 404 forever, so the scan must refuse. The build
+#     gate's hang limit turns that loop into a failed build action.
 #
 # Each batch is one record from producer 1, so batch `k` commits at chunk
 # `k`, offset `k`.
 # =============================================================================
 
-from std.ffi import external_call
 from std.testing import assert_equal, assert_true
 
 from komira_objectstore.cas_manifest import (
@@ -63,9 +62,6 @@ from komira_objectstore.types import (
 
 comptime _PID = Int64(1)
 comptime _ERR_503 = "StoreError[UNAVAILABLE] status=503 injected"
-# Seconds before the watchdog kills a scan that never returns. A scan here
-# takes microseconds; the margin covers coverage builds.
-comptime _WATCHDOG_S = 60
 
 
 def _put_i64(mut out: List[UInt8], v: Int64):
@@ -347,11 +343,9 @@ def test_missing_chunk_at_log_start_is_refused() raises:
     )
     _append3(m)
     shared.delete(chunk_key(p, Int64(0)))
-    # SIGALRM's default action ends the process: a scan that restarts at the
-    # same missing chunk forever fails here instead of hanging the build.
-    _ = external_call["alarm", UInt32](UInt32(_WATCHDOG_S))
+    # A scan that restarts at the same missing chunk forever hits the build
+    # gate's hang limit.
     var msg = _retry(m, Int64(2))
-    _ = external_call["alarm", UInt32](UInt32(0))
     assert_true(
         msg.find("MISSING committed chunk at seq 0") >= 0
         and msg.find("torn manifest lineage") >= 0,

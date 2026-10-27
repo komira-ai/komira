@@ -73,8 +73,8 @@ one, so it could not even lock a fully staged closure.) The scenarios
 mopm without it answers `add ... --overlay` with its usage text. The e2e does not skip
 then: the `install` phase fails, quotes what mopm said and names the option.
 `MOPM` in [`release/readme_e2e/packages.bzl`](../../../release/readme_e2e/packages.bzl) names the mopm the e2e
-installs with: a pin of `buildrules-pins.toml` (`buildrules mojo sync`) that no package builds with,
-so a package's own mopm pin does not move with it. Because the targets pass, the pull request check builds them (`//ci:pr` holds
+installs with: a row of buildrules' own mopm pins (`rules/mopm/pins.bzl`), the one the release's stage and
+publish steps use too; a package's own mopm pin (`mopm-toolchain.toml`) does not move with it. Because the targets pass, the pull request check builds them (`//ci:pr` holds
 `verify:all`). The switch is one change and an enforced one: `FIRST_MOPM_WITH_OVERLAY` in
 `packages.bzl` names the first mopm that has `--overlay`, and `//:readme_e2e_complete` fails
 analysis while a row of `EXCLUDED` ([`ci/rules.bzl`](../ci/rules.bzl)) leaves the e2e out and `MOPM` is that
