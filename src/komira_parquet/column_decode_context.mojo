@@ -308,6 +308,29 @@ struct ColumnDecodeContext(Movable, Deinitable):
         """Band cursor `c`, read-only."""
         return self._band_cursors[c]
 
+    def band_fill_driver_codes(
+        mut self, driver_ci: Int, band_rows: Int
+    ) raises -> Int:
+        """Fill up to `band_rows` codes of the driving key column into its
+        value slot."""
+        return self._band_cursors[driver_ci].fill_next_codes(
+            self._band_slots[driver_ci], band_rows
+        )
+
+    def band_fill_codes_at(
+        mut self, c: Int, max_rows: Int, tot: Int, into_value_slot: Bool
+    ) raises -> Int:
+        """Fill column `c`'s next codes from slot `tot`, into its value slot
+        (a string key) or the transient codes buffer (a numeric dictionary,
+        resolved afterwards)."""
+        if into_value_slot:
+            return self._band_cursors[c].fill_next_codes_at(
+                self._band_slots[c], max_rows, tot
+            )
+        return self._band_cursors[c].fill_next_codes_at(
+            self._band_codes_scratch.value(), max_rows, tot
+        )
+
     def band_fill_flat(mut self, c: Int, max_rows: Int, tot: Int) raises -> Int:
         """Fill column `c`'s next PLAIN values from slot `tot` into its value
         slot."""

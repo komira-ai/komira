@@ -1,0 +1,22 @@
+# Target platforms the C/C++ toolchain cases of tools/build/ci/cases.bxl configure
+# `toolchains//:cxx` for. Each is one os and one cpu that the toolchain must NOT admit:
+# macOS on another CPU, and arm64 on another OS. The platforms it does admit are the
+# platform table's (tools/build/platforms).
+
+platform(
+    name = "macos_x86_64",
+    constraint_values = [
+        "prelude//os/constraints:macos",
+        "prelude//cpu/constraints:x86_64",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+platform(
+    name = "linux_arm64",
+    constraint_values = [
+        "prelude//os/constraints:linux",
+        "prelude//cpu/constraints:arm64",
+    ],
+    visibility = ["PUBLIC"],
+)

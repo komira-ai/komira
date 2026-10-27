@@ -303,10 +303,50 @@ the library's `:conda` (buildrules' `mojo_conda` over `:lib`), so it too exists 
   default): with `-- --timeout <s>`, pass `-c komira.test_timeout_s=<s>`
   too. The `mojo_test` macro reads the key when the BUCK file loads; a value
   that is not a whole number, or not over 60, is refused.
-- **A library's `test_srcs`** run as build actions, and buck2 gives a build
-  action no timeout: neither the runner's timeout nor the limit above
-  applies, only the executor's own default for an action that names none. A
-  gated test that hangs holds its worker until then, and fails as the
+- **A library's `test_srcs`** (and its README's examples and a shared
+  library's gate drivers) run as build actions, and buck2 gives a build
+  action no timeout: neither the runner's timeout nor the limit above applies.
+  A test never asserts on time or waits on a deadline (it waits on events), so
+  one that loses an event would hold its worker until the executor's own
+  default, if it has one. Each of these actions therefore runs under a **hang
+  limit**: `gate mojo --hang-limit-s <N>` ([`run/mojo.zig`](../run/mojo.zig)),
+  with `N` the target's `test_hang_limit_s`, 1800 s (30 minutes) unless the
+  target sets another. A positive whole number; the same attribute is on
+  `mojo_library`, `mojo_shared_lib` and `mojo_adopted_library`, and one value
+  covers every test of the target. There is no buckconfig default: the
+  attribute's default is the default.
+  - Past the limit the test and every process below it are stopped, and its
+    whole session if it is still alive 10 s later (the supervisor of the
+    time limit above). The action fails with the gate's banner (`GATED TEST
+    FAILED: <label> (exit 137)` and the test's last 200 lines of output), then
+    the line `hang limit: <label> did not finish within <N> s and was stopped;
+    a test never waits on time, so this means it hung (an event that never
+    came)`, and exits **125**. A test's own status passes through the gate
+    unchanged, so the line, not the status, is the verdict (a test that exits
+    125 by itself prints no such line); 125 only keeps a hang apart from the
+    compile watchdog's 124, which is retried. A hang is not retried: it is a
+    lost event.
+  - The limit is infrastructure, not an assertion. A test never lowers it to
+    pass; a test that is slow and not hung raises it on its target. It is not
+    the test timeout of `buck2 test` above: that one is the runner's, and
+    `gate mojo` takes `--hang-limit-s` and `--deadline-s` only one at a time.
+  - Setting it changes the command of every welded test action, so the first
+    build after it lands re-runs every library's tests once (the compile
+    actions keep their keys). `tests//negative/mojo_hang:lib_never_ends` is the
+    planted hang, and `//tools/build/selftest:planted_red_builds_mojo_hang`
+    requires its line and the default and override on the commands.
+  - Guards that tests arm for themselves with `alarm()` (SIGALRM, whose default
+    action ends the process) stand in for this limit and become redundant;
+    they are left in place for now: the `test_srcs` of `komira_async`
+    (`test_local_dispatcher_stall_dump`, `test_local_dispatcher_stale_shard_generation`,
+    `test_io_lane_two_lane_storage`, `test_worker_shutdown_park_race`,
+    `test_local_dispatcher_cold_paths`, `test_reactor_park_no_lost_wakeup`,
+    `test_real_timer_park_lifecycle`, `test_fj_claim_dispatch`),
+    `komira_async_api` (`test_spawn_drop`), `komira_objectstore`
+    (`test_cas_gate_released_once_offline`,
+    `test_idempotent_scan_missing_chunk_offline`), `komira_log_index`
+    (`test_split_log_search_faults`), `komira_search`
+    (`test_search_ff_wide_min`) and `komira_buffer` (`test_write_uleb128`).
   executor reports it.
 
 ### Outputs and the runnable directory
@@ -1069,6 +1109,8 @@ rules, sub-targets, scope and fixtures are in [coverage.md](coverage.md).
 | ``<target>: test_defines sets ASSERT; set `test_assert_level` instead`` (or `defines`, `assert_level`) | [`defines.bzl`](defines.bzl) | the assert level is its own attribute |
 | `<target>: defines entry "<e>" is not NAME or NAME=VALUE with NAME an identifier`, `... sets <NAME> twice` | [`defines.bzl`](defines.bzl) | a define the compiler would misread, or two values for one name |
 | `<target>: test_memory_cap_mib is <n>; it must be a number of MiB, or 0 for no cap` | [`defines.bzl`](defines.bzl) | a negative cap |
+| `<target>: test_hang_limit_s = <n> must be a positive number of seconds` | [`test_limit.bzl`](test_limit.bzl) | a hang limit of 0 or less |
+| `hang limit: <label> did not finish within <n> s and was stopped; a test never waits on time, so this means it hung (an event that never came)` | [`gate mojo --hang-limit-s`](../run/README.md) | a welded test (`test_srcs`, a README example, a shared library's gate driver) ran past its `test_hang_limit_s` (default 1800) and was stopped, exit 125 (after `GATED TEST FAILED: <label> (exit 137)`); see [Time limits](#time-limits) |
 | `MEMORY CAP: killed <label> at <n> MiB resident, over its cap of <cap> MiB` | [`gate mojo --mem-cap-mib`](../run/README.md) | the test's resident memory passed its memory cap and it was killed (after `GATED TEST FAILED: <label> (exit 137)`) |
 | `TEST TIME LIMIT: killed <label> after <n> s, under the test runner's timeout of <m> s (komira.test_timeout_s)` | [`gate mojo --deadline-s`](../run/README.md) | `buck2 test` of a `mojo_test` ran to 60 s short of the test runner's timeout and was killed (after `GATED TEST FAILED: <label> (exit 137)`); see [Time limits](#time-limits) |
 | `[komira] test_timeout_s = <v> is not a whole number of seconds` / `must be over 60 s` | [`test_limit.bzl`](test_limit.bzl) | the root `.buckconfig` (or `-c`) states a test timeout a `mojo_test` cannot be limited under |
