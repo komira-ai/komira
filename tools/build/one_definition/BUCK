@@ -12,9 +12,10 @@ load(":libraries.bzl", "SRC_C_LIBRARIES", "THIRD_PARTY_C_LIBRARIES")
 # RTLD_NOW (an object whose reference nothing resolves fails there) and every
 # name in `exports` and `c_exports` must resolve (`exports` is checked against
 # the source's @export functions, `c_exports` are the names the C libraries
-# define). The C names are each C symbol of tools/core_split/c_symbols.tsv, then one symbol per other library it links
-# that keeps default visibility (komira_log_holder's are hidden), so a library
-# that stopped being linked whole goes red as a MISSING EXPORT.
+# define). The C names are each C symbol of tools/core_split/c_symbols.tsv, then
+# one symbol per other library it links that keeps default visibility
+# (komira_log_holder's are hidden), so a library that stopped being linked
+# whole goes red as a MISSING EXPORT.
 mojo_shared_lib(
     name = "one_definition",
     srcs = ["gate.mojo"],

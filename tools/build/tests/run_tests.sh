@@ -511,7 +511,7 @@ expect_green gate_ungated_green "tests//negative/libgate_bad:libgate_bad[ungated
 expect_red gate_consumer_red "GATED TEST FAILED" tests//negative/libgate_bad:gated_consumer
 
 # 2 (mojo_shared_lib): the gate refuses to publish a library whose compile is green
-for t in missing_export unresolved_symbol failing_driver forced_not_loaded leaks_by_default plain_leaks; do
+for t in missing_export unresolved_symbol failing_driver forced_not_loaded leaks_by_default plain_leaks exports_not_exported exports_not_listed unlisted_not_exported; do
     expect_green "sharedlib_${t}_ungated" "tests//negative/shared_lib:${t}[ungated]"
 done
 expect_red sharedlib_missing_export_red "MISSING EXPORT: neg_missing" tests//negative/shared_lib:missing_export
@@ -521,6 +521,14 @@ expect_red sharedlib_force_load_red "MISSING EXPORT: komira_spike_forced" tests/
 expect_red sharedlib_leaks_by_default_red "komira_example_add leaked into the dynamic symbol table" tests//negative/shared_lib:leaks_by_default
 expect_red sharedlib_plain_leaks_red "plain_hidden leaked into the dynamic symbol table" tests//negative/shared_lib:plain_leaks
 expect_red sharedlib_duplicate_definition_red "duplicate symbol: komira_neg_dup" tests//negative/shared_lib:duplicate_definition
+# The exports check names the differing symbols. exports_not_listed and
+# unlisted_not_exported are red only because of that check: their dlopen gate
+# passes. exports_not_exported is also caught by the dlopen gate, which reports
+# first.
+expect_red sharedlib_exports_not_exported_red "MISSING EXPORT: neg_ghost" tests//negative/shared_lib:exports_not_exported
+expect_red sharedlib_exports_not_listed_red "(or \`unlisted_exports\`): neg_sub" tests//negative/shared_lib:exports_not_listed
+expect_red sharedlib_unlisted_not_exported_red "in \`unlisted_exports\`, but" tests//negative/shared_lib:unlisted_not_exported
+expect_red sharedlib_unlisted_not_exported_name_red "function of that name: neg_ghost" tests//negative/shared_lib:unlisted_not_exported
 
 # 3
 # Its red depends on the executor staging only declared inputs. A local action

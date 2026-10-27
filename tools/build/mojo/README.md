@@ -926,8 +926,8 @@ generated entry file and no `komira_main`; that is `mojo_binary[shared]`.
   (`tools/so_exports.zig`, an action of the gate) reads the file's declarations, not the compiled library,
   and fails the build naming every difference: a listed name with no such function, and an `@export`
   function the list omits. Comments and docstrings do not declare anything; an `@export` that takes
-  arguments is refused. Only the main source is read, so an `@export` in another file of `srcs` is
-  not in the set. **`c_exports`** lists symbols that C libraries of `deps` or `force_load` define: they
+  arguments is refused. Only the main source is read: an `@export` in another file of `srcs` is not counted,
+  so listing it in `exports` is reported as a name with no such function, and it needs no entry. **`c_exports`** lists symbols that C libraries of `deps` or `force_load` define: they
   are not in the source, the gate's `dlopen` check expects them, and `exports_exact` keeps them visible.
   **`unlisted_exports`** names `@export` functions that stay out of the ABI on purpose (they must exist in
   the source and not be in `exports`); with `exports_exact` they are local to the library, which is what
