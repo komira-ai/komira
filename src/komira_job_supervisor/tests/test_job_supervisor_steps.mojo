@@ -41,6 +41,11 @@
 #       by exactly 9750 ms (250, 500, 1000, then 2000 four times), so a retry
 #       that slept the default schedule instead of the caller's 0 fails the
 #       first arm. A 404 is sent once.
+#   test_the_loop_clocks_wait_exactly_what_they_are_asked
+#       `ManualLoopClock` moves its cell by exactly each wait (nothing for 0)
+#       and records it; the wait helper moves nothing for 0 or less and reads
+#       the cell; `SystemLoopClock` hands out no cell, reads a clock that never
+#       goes back, and a wait of 0 s returns at once.
 #   test_a_failure_report_copy_keeps_the_panic_line
 #       `FailureReport.copy()` carries the panic line over.
 # =============================================================================
@@ -60,9 +65,12 @@ from komira_job_supervisor import (
     HeartbeatReporter,
     JobSupervisor,
     JobSupervisorConfig,
+    ManualLoopClock,
     SupervisorHeartbeat,
+    SystemLoopClock,
     run_job_supervisor,
 )
+from komira_job_supervisor.loop_clock import clock_now_ns, clock_sleep_ms
 from komira_job_supervisor.job_supervisor import (
     TERMINAL_BEAT_FIRST_DELAY_MS,
     TERMINAL_BEAT_MAX_ATTEMPTS,
@@ -382,6 +390,38 @@ def test_a_terminal_beat_with_no_delay_is_retried_at_once() raises:
     print("  test_a_terminal_beat_with_no_delay_is_retried_at_once: PASS")
 
 
+def test_the_loop_clocks_wait_exactly_what_they_are_asked() raises:
+    # A manual clock moves by what is waited, records it, and moves by nothing
+    # for a wait of 0 or less.
+    var cell = ArcPointer[Int](_CLOCK_START_NS)
+    var manual = ManualLoopClock(cell)
+    assert_equal(manual.now_ns(), UInt64(_CLOCK_START_NS))
+    manual.sleep_secs(2)
+    manual.sleep_secs(0)
+    assert_equal(cell[], _CLOCK_START_NS + 2_000_000_000, "2 s waited, 0 s not")
+    assert_equal(len(manual.slept_ms), 2)
+    assert_equal(manual.slept_ms[0], 2000)
+    assert_equal(manual.slept_ms[1], 0)
+    assert_equal(manual.now_ns(), UInt64(cell[]), "it reads the cell")
+    assert_true(Bool(manual.test_clock()), "it hands its cell to the supervisor")
+    # A helper wait of 0 ms or less moves the cell by nothing, and a reading
+    # is the cell's.
+    clock_sleep_ms(Optional[ArcPointer[Int]](cell), 0)
+    clock_sleep_ms(Optional[ArcPointer[Int]](cell), -5)
+    assert_equal(cell[], _CLOCK_START_NS + 2_000_000_000, "no wait, no move")
+    clock_sleep_ms(Optional[ArcPointer[Int]](cell), 250)
+    assert_equal(clock_now_ns(Optional[ArcPointer[Int]](cell)), UInt64(cell[]))
+    assert_equal(cell[], _CLOCK_START_NS + 2_250_000_000, "250 ms waited")
+    # The system clock has no cell to hand over, never reads backwards, and a
+    # wait of 0 s returns at once.
+    var system = SystemLoopClock()
+    var first = system.now_ns()
+    system.sleep_secs(0)
+    assert_true(system.now_ns() >= first, "the monotonic clock never goes back")
+    assert_false(Bool(system.test_clock()), "no cell: the supervisor uses the system")
+    print("  test_the_loop_clocks_wait_exactly_what_they_are_asked: PASS")
+
+
 def test_a_failure_report_copy_keeps_the_panic_line() raises:
     var f = FailureReport(
         Optional[Int32](Int32(101)),
@@ -408,5 +448,6 @@ def main() raises:
     test_the_stream_timer_flushes_a_quiet_chunk()
     test_a_failed_spawn_raises_and_marks_nothing_spawned()
     test_a_terminal_beat_with_no_delay_is_retried_at_once()
+    test_the_loop_clocks_wait_exactly_what_they_are_asked()
     test_a_failure_report_copy_keeps_the_panic_line()
     print("test_job_supervisor_steps: ALL PASS")
