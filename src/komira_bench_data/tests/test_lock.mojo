@@ -17,8 +17,18 @@
 #   * test_a_lock_is_built_only_from_a_usable_report: observed values go in,
 #     the manifest's row counts go in, and a missing, truncated or altered file,
 #     another dataset's report or a reordered report is refused.
-#   * test_the_lock_file_is_written_once_and_read_back.
+#   * test_the_lock_file_is_written_once_and_read_back: written to
+#     `locks/<dataset>_<scale>.lock`, never replaced, read back by dataset and
+#     scale.
+#   * test_one_cache_directory_holds_the_locks_of_several_datasets: the locks of
+#     two scales of one dataset and of another dataset are written side by side
+#     and each reads back as its own; a file under another dataset's name is
+#     refused.
+#   * test_a_cache_directory_is_verified_against_a_lock: the files a lock names
+#     verify; a missing, shortened, longer or altered file does not.
 from std.os import makedirs
+from std.os.path import exists
+from std.pathlib import Path
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
 from komira_runtime_paths import test_tmpdir
@@ -33,14 +43,17 @@ from komira_bench_data import (
     FILE_UNRECORDED,
     FILE_VERIFIED,
     FileCheck,
-    LOCK_FILE_NAME,
+    LOCK_DIR_NAME,
+    LOCK_FILE_SUFFIX,
     LockEntry,
     UNRECORDED_ROWS,
     VerifyReport,
     decode_lock,
     encode_lock,
+    lock_file_path,
     lock_from_report,
     read_lock_file,
+    verify_against_lock,
     tpch_manifest,
     write_lock_file,
 )
@@ -222,19 +235,86 @@ def test_a_lock_is_built_only_from_a_usable_report() raises:
 def test_the_lock_file_is_written_once_and_read_back() raises:
     var d = test_tmpdir() + "/lock_file"
     makedirs(d, exist_ok=True)
+    assert_equal(lock_file_path(d, "tpch", "sf1"), d + "/locks/tpch_sf1.lock")
+    assert_equal(lock_file_path(d + "/", "tpch", "sf1"), d + "/locks/tpch_sf1.lock")
     with assert_raises():
-        _ = read_lock_file(d)
+        _ = read_lock_file(d, "tpch", "sf1")
     write_lock_file(d, _lock())
-    var back = read_lock_file(d)
+    assert_true(exists(d + "/" + LOCK_DIR_NAME + "/tpch_sf1" + LOCK_FILE_SUFFIX))
+    var back = read_lock_file(d, "tpch", "sf1")
     assert_equal(back.fingerprint(), _FP)
     var other = _lock()
     other.entries[0].bytes = 1
     with assert_raises(contains="never overwritten"):
         write_lock_file(d, other)
-    assert_equal(read_lock_file(d).fingerprint(), _FP)
-    assert_equal(LOCK_FILE_NAME, "data.lock")
+    assert_equal(read_lock_file(d, "tpch", "sf1").fingerprint(), _FP)
     with assert_raises(contains="cache directory is empty"):
         write_lock_file(String(""), _lock())
+    with assert_raises(contains="must be tokens"):
+        _ = lock_file_path(d, "../tpch", "sf1")
+    with assert_raises(contains="must be tokens"):
+        _ = lock_file_path(d, "tpch", "")
+
+
+def test_one_cache_directory_holds_the_locks_of_several_datasets() raises:
+    var d = test_tmpdir() + "/lock_several"
+    makedirs(d, exist_ok=True)
+    var sf1 = _lock()
+    var sf10 = _lock()
+    sf10.scale = String("sf10")
+    var other = _lock()
+    other.dataset = String("clickbench")
+    other.scale = String("full")
+    write_lock_file(d, sf1)
+    write_lock_file(d, sf10)
+    write_lock_file(d, other)
+    assert_equal(read_lock_file(d, "tpch", "sf1").fingerprint(), sf1.fingerprint())
+    assert_equal(read_lock_file(d, "tpch", "sf10").fingerprint(), sf10.fingerprint())
+    assert_equal(read_lock_file(d, "clickbench", "full").fingerprint(), other.fingerprint())
+    assert_true(sf1.fingerprint() != sf10.fingerprint())
+    # A lock copied under another dataset's name is not that dataset's lock.
+    Path(d + "/locks/tpch_sf100.lock").write_text(encode_lock(sf1))
+    with assert_raises(contains="holds the lock of tpch/sf1"):
+        _ = read_lock_file(d, "tpch", "sf100")
+
+
+def _put(dir: String, name: String, data: String) raises:
+    Path(dir + "/" + name).write_text(data)
+
+
+def test_a_cache_directory_is_verified_against_a_lock() raises:
+    var d = test_tmpdir() + "/lock_verify"
+    makedirs(d + "/tpch/sf1", exist_ok=True)
+    _put(d, "tpch/sf1/region.parquet", "abc")
+    _put(d, "tpch/sf1/lineitem.parquet", "")
+    var entries = List[LockEntry]()
+    entries.append(LockEntry(String("tpch/sf1/region.parquet"), 3, _ABC, 5))
+    entries.append(LockEntry(String("tpch/sf1/lineitem.parquet"), 0, _EMPTY, UNRECORDED_ROWS))
+    var lock = DatasetLock(String("tpch"), String("sf1"), String(), entries^)
+    var ok = verify_against_lock(lock, d)
+    assert_true(ok.is_verified())
+    assert_equal(len(ok.checks), 2)
+    # A lock read back from its file verifies the same bytes.
+    write_lock_file(d, lock)
+    assert_true(verify_against_lock(read_lock_file(d, "tpch", "sf1"), d).is_verified())
+
+    _put(d, "tpch/sf1/region.parquet", "abd")
+    var altered = verify_against_lock(lock, d)
+    assert_equal(altered.checks[0].status, FILE_SHA_MISMATCH)
+    assert_equal(altered.checks[1].status, FILE_VERIFIED)
+    _put(d, "tpch/sf1/region.parquet", "ab")
+    assert_equal(verify_against_lock(lock, d).checks[0].status, FILE_SIZE_MISMATCH)
+    _put(d, "tpch/sf1/region.parquet", "abcd")
+    assert_equal(verify_against_lock(lock, d).checks[0].status, FILE_SIZE_MISMATCH)
+    _put(d, "tpch/sf1/region.parquet", "abc")
+    _put(d, "tpch/sf1/lineitem.parquet", "x")
+    var longer = verify_against_lock(lock, d)
+    assert_equal(longer.checks[1].status, FILE_SIZE_MISMATCH)
+    assert_false(longer.is_usable())
+    var elsewhere = test_tmpdir() + "/lock_verify_empty"
+    makedirs(elsewhere, exist_ok=True)
+    var missing = verify_against_lock(lock, elsewhere)
+    assert_equal(missing.count(FILE_MISSING), 2)
 
 
 def main() raises:
@@ -245,4 +325,6 @@ def main() raises:
     test_a_malformed_lock_is_refused()
     test_a_lock_is_built_only_from_a_usable_report()
     test_the_lock_file_is_written_once_and_read_back()
+    test_one_cache_directory_holds_the_locks_of_several_datasets()
+    test_a_cache_directory_is_verified_against_a_lock()
     print("OK")

@@ -10,7 +10,7 @@ Nothing here ships data. A package is a compiled library, so no dataset is in it
 | --- | --- |
 | `manifest` | `DatasetManifest` and `DatasetFile`: a dataset at a scale and its files, each with an expected size, sha256 and row count; the manifest of every supported dataset (`tpch_manifest`, `clickbench_manifest`, `h2o_groupby_manifest`, `h2o_join_manifest`, `supported_manifests`, `find_manifest`) |
 | `verify` | `verify_dataset` checks a cache directory against a manifest and returns a `VerifyReport` of `FileCheck`s; `sha256_of_file` streams a file in 4 MiB chunks |
-| `lock` | `DatasetLock`, `lock_from_report`, `encode_lock`, `decode_lock`, `write_lock_file`, `read_lock_file` |
+| `lock` | `DatasetLock`, `lock_from_report`, `encode_lock`, `decode_lock`, `lock_file_path`, `write_lock_file`, `read_lock_file`, `verify_against_lock` |
 | `draw` | the generators' number source: `draw`, `draw_range`, `draw_score` and `Bijection`, pure functions of seed, column and row |
 | `h2o_groupby`, `h2o_join` | the tables as Arrow batches for any row range (`h2o_groupby_batch`, `h2o_join_batch`) |
 | `h2o_files` | the tables as Parquet bytes and as files (`h2o_groupby_parquet`, `h2o_join_parquet`, `generate_h2o_groupby_files`, `generate_h2o_join_files`, `write_new_file`) |
@@ -74,7 +74,7 @@ print(report.render())
 
 ## The lock
 
-A lock records, for one dataset at one scale, every file's observed size and sha256 and the manifest's row count, and ends with a fingerprint: the sha256 of every line above it. A result that names the fingerprint names exactly those bytes. `lock_from_report` refuses a report with a missing, truncated or altered file, so no lock describes files that failed. `write_lock_file` writes `<cache_dir>/data.lock` and never replaces an existing one. `decode_lock` is strict: an edited byte, a missing or extra line, a repeated path or a path that leaves the directory is an error.
+A lock records, for one dataset at one scale, every file's observed size and sha256 and the manifest's row count, and ends with a fingerprint: the sha256 of every line above it. A result that names the fingerprint names exactly those bytes. `lock_from_report` refuses a report with a missing, truncated or altered file, so no lock describes files that failed. `write_lock_file` writes `<cache_dir>/locks/<dataset>_<scale>.lock` (one file per dataset and scale, so one cache directory holds the locks of every dataset in it) and never replaces an existing one; `read_lock_file(cache_dir, dataset, scale)` reads it back. `verify_against_lock(lock, cache_dir)` checks the files in a cache directory against the sizes and checksums a lock recorded, so a later run can show it used the bytes the lock names. `decode_lock` is strict: an edited byte, a missing or extra line, a repeated path or a path that leaves the directory is an error.
 
 ```text
 komira-bench-data-lock/1
@@ -105,7 +105,7 @@ with assert_raises(contains="fingerprint does not match"):
 
 `h2o_groupby_parquet(rows, groups, seed)` and `h2o_join_parquet(table, rows, seed)` write the tables of the h2o db-benchmark's group-by and join data as Parquet bytes, with `komira_parquet_writer`. They have the columns and value ranges of that benchmark's files, and they are not its random stream (that is an R script): every value is a pure function of the seed, the column and the row number (SplitMix64's mixer), so the same seed and sizes give the same table on every machine and a row does not depend on the batch it is built in.
 
-The same seed, row count, group count, codec and batch size give the same Parquet bytes. The batch size (`batch_rows`, 1,048,576 by default) is part of that identity: the writer chooses its encodings per row group and writes several batches that fit one row group without joining them first, so another batch size gives the same table in other bytes. A generator change that alters what is written for a seed is a new `H2O_GENERATOR_VERSION`, which the manifest and the lock carry.
+The same seed, row count, group count, codec and batch size give the same Parquet bytes. The batch size (`batch_rows`, 1,048,576 by default) is part of that identity: the writer chooses its encodings per row group and writes several batches that fit one row group without joining them first, so another batch size gives the same table in other bytes. The bytes also depend on `komira_parquet_writer`. The tests pin the SHA-256 of a small table of each kind, so a change to the generator or to the writer that alters those bytes is visible; it must come with a new `H2O_GENERATOR_VERSION` (which the manifest and the lock carry) and new pins, because every recorded checksum of a generated dataset changes with it.
 
 ```mojo
 from std.testing import assert_equal, assert_true
@@ -119,12 +119,16 @@ for i in range(len(first)):
 assert_equal(first[0], UInt8(ord("P")))
 ```
 
-`generate_h2o_groupby_files(cache_dir, rows, groups, seed)` and `generate_h2o_join_files(cache_dir, rows, seed)` write the files where the manifest says and return the manifest. They never replace a file: a dataset that is already there is verified, not regenerated.
+`generate_h2o_groupby_files(cache_dir, rows, groups, seed)` and `generate_h2o_join_files(cache_dir, rows, seed)` write the files where the manifest says and return the manifest. They never replace a file: a dataset that is already there is verified, not regenerated. The manifest they return records the size and sha256 of the bytes written, so a file that is later cut short or altered no longer verifies; a write that fails removes the partial file.
 
-The group-by table has `id1` and `id2` (strings `id001`..`id<k>`), `id3` (a string with ten digits, `rows // k` values), `id4` and `id5` (integers 1..k), `id6` (an integer 1..`rows // k`), `v1` and `v2` (integers 1..5) and `v3` (a double from 0 to 100 with six decimals). The join tables are `x` (N rows), `small` (N // 1,000,000 rows), `medium` (N // 1,000) and `big` (N rows), at least one row each; every key of `x` has a partner in the other three, and the key a table is unique on is spread over its rows by a seeded one-to-one map.
+The group-by table has `id1` and `id2` (strings `id001`..`id<k>`), `id3` (a string with ten digits, `rows // k` values), `id4` and `id5` (integers 1..k), `id6` (an integer 1..`rows // k`), `v1` and `v2` (integers 1..5) and `v3` (a double from 0 to 100 with six decimals). The join tables are `x` (N rows), `small` (N // 1,000,000 rows), `medium` (N // 1,000) and `big` (N rows), at least one row each; every key of `x` has a partner in the other three, and the key a table is unique on is spread over its rows by a seeded one-to-one map (a constant step modulo the table size, so every key appears once but the order is not a shuffle; for a table of a few rows the keys run in sequence from a rotated start).
+
+Results on these tables are not comparable with published h2o db-benchmark numbers: the value distributions are uniform draws, not the original script's, and the generator has none of its NA or pre-sorted variants.
 
 ## Limits
 
+- Generation builds the whole table in memory (all batches, then the encoded bytes), so memory is about the table plus its encoding. The manifest accepts up to 2,000,000,000 rows, but the sizes of the original benchmark (100 million to a billion rows) need a streaming writer, which is not part of this package yet.
+- A process killed in the middle of a write leaves a partial file that the plain manifest, which records no size, reports as `UNRECORDED`; verify against the manifest the generator returned or against a lock.
 - Row counts are carried, not checked: the verifier checks bytes and checksums.
 - A cache directory is trusted as far as its files go: a symbolic link is followed.
 - The package reads no environment and no configuration file; the cache directory is always an argument.

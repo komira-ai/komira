@@ -17,23 +17,26 @@
 # `decode_lock` is strict: a missing or extra line, a changed word, a bad number
 # or checksum, a repeated path, or a fingerprint that does not match is an error.
 
+from std.os import makedirs
 from std.os.path import exists
 from std.pathlib import Path
 
 from komira_crypto import sha256, hex_lower_array_32
 
 from .manifest import (
+    DatasetFile,
     DatasetManifest,
     UNRECORDED_ROWS,
     is_sha256_hex,
     is_token,
     validate_relative_path,
 )
-from .verify import FILE_UNRECORDED, FILE_VERIFIED, VerifyReport, file_status_name
+from .verify import FILE_UNRECORDED, FILE_VERIFIED, VerifyReport, file_status_name, verify_dataset
 
 comptime LOCK_FORMAT: String = "komira-bench-data-lock/1"
-comptime LOCK_FILE_NAME: String = "data.lock"
-"""The lock's name inside a cache directory."""
+comptime LOCK_DIR_NAME: String = "locks"
+"""The directory of a cache directory that holds the lock files."""
+comptime LOCK_FILE_SUFFIX: String = ".lock"
 
 
 struct LockEntry(Copyable, Movable):
@@ -194,31 +197,66 @@ def decode_lock(text: String) raises -> DatasetLock:
     return lock^
 
 
-def _lock_path(cache_dir: String) raises -> String:
+def lock_file_path(cache_dir: String, dataset: String, scale: String) raises -> String:
+    """`<cache_dir>/locks/<dataset>_<scale>.lock`: one lock file per dataset
+    and scale, so a cache directory can hold the locks of several datasets.
+
+    Raises:
+        Error: an empty `cache_dir`, or a dataset or scale that is not a token.
+    """
     if cache_dir.byte_length() == 0:
         raise Error("lock: the cache directory is empty")
-    if cache_dir.as_bytes()[cache_dir.byte_length() - 1] == 0x2F:
-        return cache_dir + LOCK_FILE_NAME
-    return cache_dir + "/" + LOCK_FILE_NAME
+    if not is_token(dataset) or not is_token(scale):
+        raise Error("lock: dataset and scale must be tokens")
+    var dir = cache_dir.copy()
+    if cache_dir.as_bytes()[cache_dir.byte_length() - 1] != 0x2F:
+        dir += "/"
+    return dir + LOCK_DIR_NAME + "/" + dataset + "_" + scale + LOCK_FILE_SUFFIX
 
 
 def write_lock_file(cache_dir: String, lock: DatasetLock) raises:
-    """Write the lock to `<cache_dir>/data.lock`. An existing lock is never
-    replaced.
+    """Write the lock to `lock_file_path(cache_dir, lock.dataset, lock.scale)`,
+    creating the `locks` directory. An existing lock is never replaced.
 
     Raises:
         Error: a lock is already there, or the file cannot be written.
     """
-    var path = _lock_path(cache_dir)
+    var path = lock_file_path(cache_dir, lock.dataset, lock.scale)
     if exists(path):
         raise Error("lock: " + path + " exists; it is never overwritten")
+    makedirs(String(path[byte=0 : path.rfind("/")]), exist_ok=True)
     Path(path).write_text(encode_lock(lock))
 
 
-def read_lock_file(cache_dir: String) raises -> DatasetLock:
-    """Read and check `<cache_dir>/data.lock`.
+def read_lock_file(cache_dir: String, dataset: String, scale: String) raises -> DatasetLock:
+    """Read and check the lock of `dataset` at `scale` in `cache_dir`.
 
     Raises:
-        Error: no such file, or the text is not a valid lock.
+        Error: no such file, the text is not a valid lock, or the lock is for
+            another dataset or scale than the file name says.
     """
-    return decode_lock(Path(_lock_path(cache_dir)).read_text())
+    var lock = decode_lock(Path(lock_file_path(cache_dir, dataset, scale)).read_text())
+    if lock.dataset != dataset or lock.scale != scale:
+        raise Error(
+            "lock: the file for " + dataset + "/" + scale + " holds the lock of "
+            + lock.dataset + "/" + lock.scale
+        )
+    return lock^
+
+
+def verify_against_lock(lock: DatasetLock, cache_dir: String) raises -> VerifyReport:
+    """Check the files under `cache_dir` against the sizes and checksums the
+    lock recorded. Every file is VERIFIED when the cache holds exactly the
+    bytes the lock names.
+
+    Raises:
+        Error: as `verify_dataset`.
+    """
+    var files = List[DatasetFile]()
+    for i in range(len(lock.entries)):
+        ref e = lock.entries[i]
+        files.append(DatasetFile(e.path.copy(), e.bytes, e.sha256.copy(), e.rows))
+    return verify_dataset(
+        DatasetManifest(lock.dataset.copy(), lock.scale.copy(), lock.generator.copy(), files^),
+        cache_dir,
+    )

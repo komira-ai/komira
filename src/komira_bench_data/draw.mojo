@@ -24,8 +24,9 @@ def draw(seed: UInt64, stream: Int, row: Int) -> UInt64:
 
 
 def draw_range(seed: UInt64, stream: Int, row: Int, n: Int) -> Int:
-    """An integer in 1..n (n >= 1). The modulo bias is below 2^-31 for the
-    sizes the generators accept."""
+    """An integer in 1..n (n >= 1). Taking a 64-bit draw modulo n favours the
+    smaller values by at most n / 2^64, about 2^-33 for the n up to
+    2,000,000,000 that the generators accept."""
     return Int(draw(seed, stream, row) % UInt64(n)) + 1
 
 
@@ -65,8 +66,10 @@ def _gcd(a: Int, b: Int) -> Int:
 struct Bijection(Copyable, Movable):
     """A seeded one-to-one map of the row numbers 0..n-1 onto the keys 1..n:
     `(row * multiplier + offset) mod n`, with a multiplier coprime to n. A
-    table that takes its key from it holds every key once, in a scattered
-    order, and any row can be computed on its own."""
+    table that takes its key from it holds every key once and any row can be
+    computed on its own. The order is not a shuffle: consecutive rows differ by
+    a constant step modulo n, and for a very small n the step is 1, so the keys
+    run in sequence from a rotated start."""
 
     var n: Int
     var multiplier: Int

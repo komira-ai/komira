@@ -9,6 +9,9 @@
 #   * test_a_file_with_matching_size_and_checksum_is_verified.
 #   * test_a_missing_file_and_a_directory_are_missing.
 #   * test_a_truncated_file_fails_on_size_and_is_not_hashed.
+#   * test_a_longer_file_fails_on_size: one byte more than the recorded size is
+#     refused, with a recorded checksum and with none (a size-only manifest
+#     entry, like ClickBench's).
 #   * test_a_changed_byte_fails_on_checksum: same size, one byte flipped.
 #   * test_unrecorded_values_are_reported_not_failed: present files with no
 #     recorded size or checksum are usable but never verified, and the report
@@ -139,6 +142,25 @@ def test_a_truncated_file_fails_on_size_and_is_not_hashed() raises:
     assert_false(report.is_usable())
 
 
+def test_a_longer_file_fails_on_size() raises:
+    var d = _dir("longer")
+    var data = _pattern(1000)
+    var longer = data.copy()
+    longer.append(UInt8(7))
+    _put(d, "a.parquet", longer)
+    var files = List[DatasetFile]()
+    files.append(_file("a.parquet", 1000, String()))
+    files.append(_file("a.parquet", 1000, _hex(data)))
+    for i in range(2):
+        var one = List[DatasetFile]()
+        one.append(files[i].copy())
+        var report = verify_dataset(_manifest(one^), d)
+        assert_equal(report.checks[0].status, FILE_SIZE_MISMATCH)
+        assert_equal(report.checks[0].observed_bytes, 1001)
+        assert_equal(report.checks[0].observed_sha256, "")
+        assert_false(report.is_usable())
+
+
 def test_a_changed_byte_fails_on_checksum() raises:
     var d = _dir("flipped")
     var data = _pattern(1000)
@@ -229,6 +251,7 @@ def main() raises:
     test_a_file_with_matching_size_and_checksum_is_verified()
     test_a_missing_file_and_a_directory_are_missing()
     test_a_truncated_file_fails_on_size_and_is_not_hashed()
+    test_a_longer_file_fails_on_size()
     test_a_changed_byte_fails_on_checksum()
     test_unrecorded_values_are_reported_not_failed()
     test_a_recorded_checksum_without_a_size_still_gates()

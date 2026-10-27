@@ -4,6 +4,9 @@
 #     outputs of SplitMix64 from state 0, so the constants and shifts are the
 #     published ones.
 #   * test_draws_depend_on_seed_stream_and_row_and_stay_in_range.
+#   * test_draw_values_are_pinned: literal draws, ranges and scores for seed
+#     123, so a change to the mixer, the stream multiplier or a range modulus
+#     shows even when the expected rows are computed from the same functions.
 #   * test_a_bijection_visits_every_key_once: for sizes with many and few
 #     coprime multipliers and for several seeds, rows 0..n-1 map onto 1..n.
 #   * test_the_same_seed_and_size_write_the_same_bytes: two runs give equal
@@ -158,6 +161,21 @@ def test_draws_depend_on_seed_stream_and_row_and_stay_in_range() raises:
         assert_equal(draw_range(_SEED, 3, r, 1), 1)
 
 
+def test_draw_values_are_pinned() raises:
+    assert_equal(draw(123, 1, 0), UInt64(0x6D6463CBFA18074B))
+    assert_equal(draw(123, 1, 1), UInt64(0xA4E9525FE38FD21C))
+    assert_equal(draw(123, 2, 7), UInt64(0x99DEF1055E43D463))
+    assert_equal(draw(123, 3, 999), UInt64(0xECAC5149E3A63784))
+    assert_equal(draw_range(123, 1, 0, 1000), 268)
+    assert_equal(draw_range(123, 1, 1, 1000), 573)
+    assert_equal(draw_range(123, 2, 7, 1000), 924)
+    assert_equal(draw_range(123, 3, 999, 1000), 413)
+    assert_equal(draw_score(123, 1, 0), 5.2513)
+    assert_equal(draw_score(123, 1, 1), 55.793125)
+    assert_equal(draw_score(123, 2, 7), 15.731652)
+    assert_equal(draw_score(123, 3, 999), 98.058451)
+
+
 def test_a_bijection_visits_every_key_once() raises:
     var sizes: List[Int] = [1, 2, 3, 4, 6, 7, 10, 12, 30, 97, 100, 1000, 1024, 4096]
     var seeds: List[UInt64] = [0, 1, _SEED, 0xFFFFFFFFFFFFFFFF]
@@ -284,6 +302,7 @@ def test_refusals() raises:
 def main() raises:
     test_mix64_matches_the_published_splitmix64_outputs()
     test_draws_depend_on_seed_stream_and_row_and_stay_in_range()
+    test_draw_values_are_pinned()
     test_a_bijection_visits_every_key_once()
     test_the_same_seed_and_size_write_the_same_bytes()
     test_a_file_holds_exactly_the_rows_the_seed_defines()

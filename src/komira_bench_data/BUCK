@@ -17,7 +17,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   verified, missing, truncated, altered and unrecorded files, the report.
 # - test_lock: the exact lock text and fingerprint, decode, the fingerprint
 #   following every field, edited and malformed locks refused, a lock built only
-#   from a usable report, the lock file written once.
+#   from a usable report, one lock file per dataset and scale written once, a
+#   cache directory verified against a lock.
+# - test_h2o_golden: the SHA-256 of small generated tables, pinned.
 # - test_h2o_groupby: the number source, the same bytes for the same seed and
 #   size, the decoded rows against the stream, ranges, batch independence.
 # - test_h2o_join: the same for x, small, medium and big, and the keys that join.
@@ -52,6 +54,7 @@ mojo_library(
     },
     test_srcs = [
         "tests/test_h2o_files.mojo",
+        "tests/test_h2o_golden.mojo",
         "tests/test_h2o_groupby.mojo",
         "tests/test_h2o_join.mojo",
         "tests/test_lock.mojo",

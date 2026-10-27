@@ -2,8 +2,11 @@
 #
 #   * test_generated_groupby_files_verify_and_lock: the group-by file lands at
 #     its manifest's path with the bytes `h2o_groupby_parquet` gives; the
-#     verifier finds it UNRECORDED with that size and the SHA-256 of those
-#     bytes; a lock built from the report holds them and decodes back.
+#     verifier finds it VERIFIED against the size and SHA-256 the returned
+#     manifest records for those bytes; a lock built from the report holds them and decodes back.
+#   * test_a_file_cut_short_after_generation_is_refused: the manifest the
+#     generator returns records each written file's size and sha256, so a
+#     truncated or altered file no longer verifies.
 #   * test_generated_join_files_land_in_the_manifest_order: four files at the
 #     manifest's four paths, each equal to its table's bytes.
 #   * test_an_existing_dataset_is_never_regenerated: a second run raises and
@@ -15,13 +18,17 @@
 #     absolute paths and an empty cache directory write nothing.
 from std.os import makedirs
 from std.os.path import exists
+from std.pathlib import Path
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
 from komira_crypto import sha256, hex_lower_array_32
 from komira_runtime_paths import test_tmpdir
 
 from komira_bench_data import (
-    FILE_UNRECORDED,
+    FILE_SHA_MISMATCH,
+    FILE_SIZE_MISMATCH,
+    FILE_VERIFIED,
+    verify_against_lock,
     H2O_DEFAULT_SEED,
     decode_lock,
     encode_lock,
@@ -56,7 +63,7 @@ def test_generated_groupby_files_verify_and_lock() raises:
     assert_equal(sha256_of_file(d + "/" + m.files[0].path), _hex(bytes))
     var report = verify_dataset(m, d)
     assert_equal(len(report.checks), 1)
-    assert_equal(report.checks[0].status, FILE_UNRECORDED)
+    assert_equal(report.checks[0].status, FILE_VERIFIED)
     assert_equal(report.checks[0].observed_bytes, len(bytes))
     assert_equal(report.checks[0].observed_sha256, _hex(bytes))
     var lock = lock_from_report(m, report)
@@ -76,8 +83,32 @@ def test_generated_join_files_land_in_the_manifest_order() raises:
         var want = h2o_join_parquet(tables[i], 2000, _SEED)
         assert_equal(sha256_of_file(d + "/" + m.files[i].path), _hex(want), tables[i])
     var report = verify_dataset(m, d)
-    assert_equal(report.count(FILE_UNRECORDED), 4)
-    assert_true(report.is_usable())
+    assert_equal(report.count(FILE_VERIFIED), 4)
+    assert_true(report.is_verified())
+    for i in range(4):
+        assert_equal(m.files[i].expected_sha256, _hex(h2o_join_parquet(tables[i], 2000, _SEED)))
+
+
+def test_a_file_cut_short_after_generation_is_refused() raises:
+    var d = _dir("cut")
+    var m = generate_h2o_groupby_files(d, 800, 8, _SEED)
+    var path = d + "/" + m.files[0].path
+    assert_true(verify_dataset(m, d).is_verified())
+    var lock = lock_from_report(m, verify_dataset(m, d))
+    var bytes = h2o_groupby_parquet(800, 8, _SEED)
+    var cut = List[UInt8]()
+    for i in range(len(bytes) - 1):
+        cut.append(bytes[i])
+    Path(path).write_bytes(Span(cut))
+    assert_equal(verify_dataset(m, d).checks[0].status, FILE_SIZE_MISMATCH)
+    assert_equal(verify_against_lock(lock, d).checks[0].status, FILE_SIZE_MISMATCH)
+    var flipped = bytes.copy()
+    flipped[100] = flipped[100] ^ UInt8(1)
+    Path(path).write_bytes(Span(flipped))
+    assert_equal(verify_dataset(m, d).checks[0].status, FILE_SHA_MISMATCH)
+    assert_equal(verify_against_lock(lock, d).checks[0].status, FILE_SHA_MISMATCH)
+    Path(path).write_bytes(Span(bytes))
+    assert_true(verify_against_lock(lock, d).is_verified())
 
 
 def test_an_existing_dataset_is_never_regenerated() raises:
@@ -122,6 +153,7 @@ def test_write_new_file_refuses_unsafe_paths() raises:
 def main() raises:
     test_generated_groupby_files_verify_and_lock()
     test_generated_join_files_land_in_the_manifest_order()
+    test_a_file_cut_short_after_generation_is_refused()
     test_an_existing_dataset_is_never_regenerated()
     test_the_same_seed_gives_the_same_fingerprint_and_another_seed_another()
     test_write_new_file_refuses_unsafe_paths()

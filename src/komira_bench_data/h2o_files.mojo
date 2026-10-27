@@ -6,12 +6,13 @@
 # row group and several batches that fit one row group are written without
 # being joined first.
 
-from std.os import makedirs
+from std.os import makedirs, remove, stat
 from std.os.path import exists
 from std.pathlib import Path
 
 from komira_arrow.record_batch import RecordBatch
 from komira_collections.slab import Slab
+from komira_crypto import sha256, hex_lower_array_32
 from komira_parquet_api.types import CompressionCodec
 from komira_parquet_writer import write_record_batches_to_parquet_bytes
 
@@ -85,10 +86,12 @@ def h2o_join_parquet(
 def write_new_file(cache_dir: String, relative_path: String, bytes: List[UInt8]) raises:
     """Write `bytes` to `relative_path` under `cache_dir`, creating the
     directories above it. An existing file is never replaced: a dataset that is
-    already there is verified, not regenerated.
+    already there is verified, not regenerated. A write that fails, or that
+    leaves a file of another size, removes what it wrote before it raises.
 
     Raises:
-        Error: an invalid path, an empty `cache_dir`, or a file already there.
+        Error: an invalid path, an empty `cache_dir`, a file already there, or
+            a write that failed.
     """
     validate_relative_path(relative_path)
     if cache_dir.byte_length() == 0:
@@ -99,26 +102,47 @@ def write_new_file(cache_dir: String, relative_path: String, bytes: List[UInt8])
     var slash = relative_path.rfind("/")
     if slash > 0:
         makedirs(cache_dir + "/" + String(relative_path[byte=0:slash]), exist_ok=True)
-    Path(full).write_bytes(Span(bytes))
+    var failure = String()
+    try:
+        Path(full).write_bytes(Span(bytes))
+        if Int(stat(full).st_size) != len(bytes):
+            failure = String("the file holds ") + String(Int(stat(full).st_size)) + " of " + String(len(bytes)) + " bytes"
+    except e:
+        failure = String(e)
+    if failure.byte_length() > 0:
+        try:
+            remove(full)
+        except:
+            pass
+        raise Error("write_new_file: " + full + ": " + failure)
+
+
+def _record_written(mut manifest: DatasetManifest, index: Int, bytes: List[UInt8]):
+    """Record the size and sha256 of the bytes just written as the file's
+    expectations, so that a file cut short later no longer verifies."""
+    manifest.files[index].expected_bytes = len(bytes)
+    manifest.files[index].expected_sha256 = hex_lower_array_32(sha256(Span(bytes)))
 
 
 def generate_h2o_groupby_files(
     cache_dir: String, rows: Int, groups: Int, seed: UInt64
 ) raises -> DatasetManifest:
     """Write the group-by table where its manifest says and return the
-    manifest.
+    manifest with the size and sha256 of the bytes written filled in.
 
     Raises:
         Error: as `h2o_groupby_parquet` and `write_new_file`.
     """
     var manifest = h2o_groupby_manifest(rows, groups, seed)
-    write_new_file(cache_dir, manifest.files[0].path, h2o_groupby_parquet(rows, groups, seed))
+    var bytes = h2o_groupby_parquet(rows, groups, seed)
+    write_new_file(cache_dir, manifest.files[0].path, bytes)
+    _record_written(manifest, 0, bytes)
     return manifest^
 
 
 def generate_h2o_join_files(cache_dir: String, rows: Int, seed: UInt64) raises -> DatasetManifest:
     """Write the four join tables where their manifest says and return the
-    manifest.
+    manifest with each file's size and sha256 of the bytes written filled in.
 
     Raises:
         Error: as `h2o_join_parquet` and `write_new_file`.
@@ -126,5 +150,7 @@ def generate_h2o_join_files(cache_dir: String, rows: Int, seed: UInt64) raises -
     var manifest = h2o_join_manifest(rows, seed)
     var tables = h2o_join_table_names()
     for i in range(len(tables)):
-        write_new_file(cache_dir, manifest.files[i].path, h2o_join_parquet(tables[i], rows, seed))
+        var bytes = h2o_join_parquet(tables[i], rows, seed)
+        write_new_file(cache_dir, manifest.files[i].path, bytes)
+        _record_written(manifest, i, bytes)
     return manifest^
