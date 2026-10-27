@@ -14,11 +14,11 @@
 # and how many of them executed the passenger-lane setup. For an all-CD query
 # the second MUST be 0.
 #
-# ⭐ THE FIRST COUNTER IS WHAT KEEPS THE SECOND FROM BEING VACUOUS. "zero
+# THE FIRST COUNTER IS WHAT KEEPS THE SECOND FROM BEING VACUOUS. "zero
 # passenger batches" is also what a query that never reached `WorkerCDState`
 # at all would report, so a test asserts `batches > 0` beside `fx == 0`.
 #
-# ⚠ NOT A PER-ROW OR PER-BATCH ATOMIC. Each `WorkerCDState` counts into two
+# NOT A PER-ROW OR PER-BATCH ATOMIC. Each `WorkerCDState` counts into two
 # plain `Int` fields (one add per BATCH); `CountDistinctAggSink._finalize_batch`
 # folds them in here ONCE PER WORKER PER QUERY, from the loop that already walks
 # every worker to build the global group directory.

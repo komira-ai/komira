@@ -25,7 +25,7 @@
 # that first appears in the LAST batch (so its cells come from the per-batch
 # `fx_cells` top-up plus `_append_group`'s lockstep growth, not from batch 1).
 #
-# MUTATIONS THIS FILE IS BUILT TO CATCH:
+# DEFECTS THIS FILE IS BUILT TO CATCH:
 #   * read an INT32 input at the 8-byte stride            -> SUM/MAX(c32)
 #     (RUN 2026-09-25 against the column-major fold: RED at the i_acc
 #     assertion; the same file is GREEN on the pre-FXCOL per-row fold, which

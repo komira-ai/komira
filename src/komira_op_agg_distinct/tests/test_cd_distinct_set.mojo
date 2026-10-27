@@ -89,7 +89,7 @@ def test_admit_returns_true_exactly_once_per_distinct_pair() raises:
 
 
 def test_stored_pairs_are_strictly_fewer_than_rows_offered() raises:
-    """★ THE MECHANISM WITNESS, and the only assertion in this file that the
+    """THE MECHANISM WITNESS, and the only assertion in this file that the
     OLD buffer-then-sort implementation could not pass.
 
     100,000 rows drawn from 250 distinct values in one group. A shape that
@@ -110,7 +110,7 @@ def test_stored_pairs_are_strictly_fewer_than_rows_offered() raises:
     )
     assert_true(
         s.count() * 100 < rows,
-        "★ stored pairs (" + String(s.count()) + ") must be far below rows"
+        "stored pairs (" + String(s.count()) + ") must be far below rows"
         " offered (" + String(rows) + ") — if this ever reads `== rows` the"
         " dedup has moved back out of the insert path",
     )

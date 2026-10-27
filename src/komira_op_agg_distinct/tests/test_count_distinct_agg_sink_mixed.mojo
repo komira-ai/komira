@@ -5,7 +5,7 @@
 # `SELECT k, count(DISTINCT v), sum(v), count(*), min(f), max(f), avg(v)
 #  GROUP BY k` over four workers, driven through `consume`, `combine` and
 # `finalize`. Every output column is compared, row by row, with an oracle
-# computed in this test from the raw arrays. What it kills:
+# computed in this test from the raw arrays. What it proves:
 #   * the fixed cells merged across workers onto the wrong global group (each
 #     worker sees the groups in a different first-seen order here);
 #   * an output column emitted out of the plan's order (the plan interleaves

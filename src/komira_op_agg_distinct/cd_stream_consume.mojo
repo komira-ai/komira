@@ -90,7 +90,7 @@ def _cd_consume_grouped[
         )
         val_offs.append(vp._offset)
 
-    # ★ THE VALIDITY CHANNEL.
+    # THE VALIDITY CHANNEL.
     # The block above extracts a VALUES pointer per agg lane and nothing
     # else; an Arrow column's validity bitmap had no way into this loop,
     # so every NULL row's data word was appended to its group's cell as if
@@ -109,17 +109,17 @@ def _cd_consume_grouped[
     # inner loop an add on a local, not a field write per row.
     var n_appended = 0
     var n_set_inserted = 0
-    # ★ CD-DENSE-GID's hit counter lives here for the SAME reason: the
+    # CD-DENSE-GID's hit counter lives here for the SAME reason: the
     # dense hit is the branch EVERY row of a dense-domain query takes, and
     # `st.stat_gid_dense += 1` there is a load-add-store to a hot line on
     # the per-row critical path. The cold arms (`_dense_assign`,
     # `_gid_for_key_slow`) keep writing the field directly — each runs once
     # per NEW key or on a fallback row that is already paying a Dict probe.
     var n_gid_dense_hit = 0
-    # ⭐ CD-ADJDEDUP — the gate, hoisted to a local, and its counter.
+    # CD-ADJDEDUP — the gate, hoisted to a local, and its counter.
     var adj_on = st.adj_dedup_on
     var n_adj_skipped = 0
-    # ⭐ CD-LASTKEY — the gate, the one-entry memo (per batch: a batch is
+    # CD-LASTKEY — the gate, the one-entry memo (per batch: a batch is
     # one morsel, and the memo is only ever a cache of `group_map`), and
     # its hit counter. See the CD-LASTKEY block above `FixedAggCell`.
     var lk_on = st.lastkey_on
@@ -128,7 +128,7 @@ def _cd_consume_grouped[
     var lk_gid = -1
     var n_lastkey_hit = 0
 
-    # ★ CD-TYPE-WIDTH (2026-09-11) — the same 8-byte-stride defect, on the
+    # CD-TYPE-WIDTH (2026-09-11) — the same 8-byte-stride defect, on the
     # KEY and on the VALUES. `key_ptr` above is a bitcast to
     # `Scalar[DType.int64]`, but `_build_cd_agg_sink_data` and
     # `detect_count_distinct_agg_shape` BOTH admit an INT32 group key — so
@@ -142,7 +142,7 @@ def _cd_consume_grouped[
     if key_ch != CDK_RAW_I64:
         key_narrow = cd_distinct_keys_for_column(batch, key_col_idx)
 
-    # ★ CD-KEY-NULL (2026-09-13) — THE KEY VALIDITY CHANNEL. `key_ptr` above
+    # CD-KEY-NULL (2026-09-13) — THE KEY VALIDITY CHANNEL. `key_ptr` above
     # is a raw data-buffer borrow and carries no validity at all, exactly as
     # the VALUE pointers did before AGG-CD-NULL. Same channel, same borrow
     # shape, same parent batch — one lane, built from the SAME
@@ -167,12 +167,12 @@ def _cd_consume_grouped[
                 cd_distinct_keys_for_column(batch, val_col_indices[a])
             )
 
-    # ⭐⭐ MIXEDFUSE — the fixed lane's PER-BATCH setup. Everything that can
+    # MIXEDFUSE — the fixed lane's PER-BATCH setup. Everything that can
     # be decided once per morsel is decided here: the input channel, the
     # data pointer, the offset, the validity lane. The row loop below then
     # does one switch on an already-classified UInt8 and a scalar update.
     #
-    # ⛔ A COLUMN'S TYPE IS CLASSIFIED HERE AND NOWHERE ELSE, AND AN
+    # A COLUMN'S TYPE IS CLASSIFIED HERE AND NOWHERE ELSE, AND AN
     # UNCLASSIFIABLE ONE RAISES. The sink's envelope admits exactly INT32 /
     # INT64 / FLOAT32 / FLOAT64 fixed inputs, so reaching the `else` means
     # the decoded batch disagrees with the schema the envelope validated —
@@ -193,7 +193,7 @@ def _cd_consume_grouped[
     var fx_gids = List[Int32]()
     var fxcol = True
     comptime if not has_fixed:
-        # ⛔ THE ALL-CD INSTANTIATION HAS NO PASSENGER LANE, so an ARMED
+        # THE ALL-CD INSTANTIATION HAS NO PASSENGER LANE, so an ARMED
         # state here would grow groups whose fixed cells are never created
         # or folded, and answer its fixed aggregates with nothing. Refuse,
         # before any row is consumed.
@@ -211,7 +211,7 @@ def _cd_consume_grouped[
                 "WorkerCDState.consume_batch: the fixed-column list does"
                 " not cover every armed fixed slot."
             )
-        # ⚠ A bare COUNT(*) HAS NO INPUT COLUMN, and neither a pointer nor a
+        # A bare COUNT(*) HAS NO INPUT COLUMN, and neither a pointer nor a
         # validity lane can be built for index -1. It borrows the KEY column's
         # index as a placeholder that is never read: `FXC_NONE` short-circuits
         # before either channel is consulted.
@@ -267,7 +267,7 @@ def _cd_consume_grouped[
     for row in range(num_rows):
         var gid: Int
         if klanes.is_null_at(0, row):
-            # ★ CD-KEY-NULL — ONE group for every NULL key, and it never
+            # CD-KEY-NULL — ONE group for every NULL key, and it never
             # enters `group_map`: the key's data word is meaningless and
             # hashing it is the defect.
             if st.null_gid < 0:
@@ -282,7 +282,7 @@ def _cd_consume_grouped[
                 key = Int((key_ptr + key_off + row)[])
             else:
                 key = Int(key_narrow[row])
-            # ★ CD-DENSE-GID (2026-09-17) — THE WHOLE POINT OF THIS FILE'S
+            # CD-DENSE-GID (2026-09-17) — THE WHOLE POINT OF THIS FILE'S
             # HOT LOOP. One subtract, one UNSIGNED range test (which is why
             # a negative key, a window straddling zero and a window that
             # wraps past Int64.MAX are all handled by the same compare and
@@ -292,7 +292,7 @@ def _cd_consume_grouped[
             var du = (Int64(key) - Int64(st.dense_lo)).cast[
                 DType.uint64
             ]()
-            # ⚠ `dense_gid_off` IS DELIBERATELY NOT TESTED HERE, AND THE
+            # `dense_gid_off` IS DELIBERATELY NOT TESTED HERE, AND THE
             # OMISSION IS LOAD-BEARING RATHER THAN AN OVERSIGHT. With the
             # A/B arm selected, `_gid_for_key_slow` never seeds the window,
             # so `dense_idx` stays EMPTY and this compare is already False
@@ -309,7 +309,7 @@ def _cd_consume_grouped[
                 else:
                     gid = st._dense_assign[has_fixed](Int(du), key)
             elif lk_live and key == lk_key:
-                # ⭐ CD-LASTKEY — the out-of-window key equals the previous
+                # CD-LASTKEY — the out-of-window key equals the previous
                 # out-of-window row's key: its gid is already known. Only
                 # rows OUTSIDE the window reach this test, so the dense hit
                 # path above pays nothing for it.
@@ -323,7 +323,7 @@ def _cd_consume_grouped[
                     lk_live = True
 
         for a in range(st.num_aggs):
-            # ★ AGG-CD-NULL — THE NULL SKIP. A NULL row still RESOLVED its
+            # AGG-CD-NULL — THE NULL SKIP. A NULL row still RESOLVED its
             # group above (a NULL value does not stop its row belonging to
             # a group), so an all-NULL group still exists and still emits;
             # only the value store is skipped, and its cell then dedups to
@@ -351,7 +351,7 @@ def _cd_consume_grouped[
             else:
                 ref cell = st.cd_bufs[a][gid]
                 var cl = len(cell)
-                # ⭐ CD-ADJDEDUP — a value equal to its cell's tail is
+                # CD-ADJDEDUP — a value equal to its cell's tail is
                 # already in this group's multiset; appending it again
                 # changes no distinct count. See the block above
                 # `FixedAggCell`. `adj_on` is a per-batch local, so the
@@ -367,7 +367,7 @@ def _cd_consume_grouped[
                 ):
                     st._promote_cell(a, gid)
 
-        # ⭐⭐ MIXEDFUSE — THE PASSENGER LANE RECORDS THE GID; IT FOLDS
+        # MIXEDFUSE — THE PASSENGER LANE RECORDS THE GID; IT FOLDS
         # BELOW, COLUMN-MAJOR. `gid` above cost a dense
         # window hit (or a Dict probe); the fold rides it for free.
         # Compiled OUT of the all-CD instantiation (`has_fixed=False`).
@@ -432,19 +432,19 @@ def _cd_consume_grouped[
                         if afn == AGG_SUM or afn == AGG_MEAN:
                             cell.f_acc += fv
                         elif afn == AGG_MIN:
-                            # ⛔ QUOTIENT ORDER, NOT a bare `<` / `>`: IEEE compares false against
+                            # QUOTIENT ORDER, NOT a bare `<` / `>`: IEEE compares false against
                             # a NaN, so `max{0.1, NaN}` would answer 0.1; DuckDB answers NaN
                             # (NaN sorts above +inf).
                             if cell.n == Int64(1) or float_quotient_lt_f64(fv, cell.f_acc):
                                 cell.f_acc = fv
                         else:
-                            # ⛔ QUOTIENT ORDER, NOT a bare `<` / `>`: IEEE compares false against
+                            # QUOTIENT ORDER, NOT a bare `<` / `>`: IEEE compares false against
                             # a NaN, so `max{0.1, NaN}` would answer 0.1; DuckDB answers NaN
                             # (NaN sorts above +inf).
                             if cell.n == Int64(1) or float_quotient_gt_f64(fv, cell.f_acc):
                                 cell.f_acc = fv
 
-    # ⭐⭐ THE PASSENGER FOLD, ONE FIXED AGGREGATE AT A TIME OVER THE WHOLE
+    # THE PASSENGER FOLD, ONE FIXED AGGREGATE AT A TIME OVER THE WHOLE
     # BATCH. See `_cd_fx_fold_batch`.
     comptime if has_fixed:
         if fxcol:
@@ -481,7 +481,7 @@ def _cd_fx_fold_batch[bo: Origin](
     imm fx_offs: List[Int],
     imm fxlanes: ValidityLanes[bo],
 ) raises:
-    """⭐⭐ Fold every fixed aggregate over
+    """Fold every fixed aggregate over
     one batch, ONE AGGREGATE AT A TIME, against the gids the CD row loop
     resolved (`gids[row]`).
 
@@ -494,12 +494,11 @@ def _cd_fx_fold_batch[bo: Origin](
     Here every per-aggregate decision is taken ONCE per batch and the inner
     loop is a gid load, a value load and one cell update.
 
-    MEASURED (20 workers, both shapes in one binary, 3 interleaved rounds
-    of 7 warm reps): the mixed query 557.8 -> 521.7 ms (-6.47%, 3/3 rounds
-    disjoint), instructions 46.3G -> 42.1G; the all-CD control (which does
-    not contain this code) +0.19%, not disjoint. Results identical.
+    The mixed query runs faster and executes fewer instructions; the all-CD
+    shape, which does not contain this code, is unchanged. Results are
+    identical.
 
-    ⛔ THE SEMANTICS ARE UNCHANGED, LINE FOR LINE, AND SO IS EVERY BIT OF
+    THE SEMANTICS ARE UNCHANGED, LINE FOR LINE, AND SO IS EVERY BIT OF
     EVERY ANSWER. Each cell still sees its rows in ascending row order —
     the per-row loop visited a cell's rows in that order too, and a cell
     belongs to exactly one aggregate — so even a FLOAT64 SUM adds the same
@@ -579,13 +578,13 @@ def _cd_fx_fold_batch[bo: Origin](
                 if is_sum:
                     fcell.f_acc += fv
                 elif is_min:
-                    # ⛔ QUOTIENT ORDER, NOT a bare `<` / `>`: IEEE compares false against
+                    # QUOTIENT ORDER, NOT a bare `<` / `>`: IEEE compares false against
                     # a NaN, so `max{0.1, NaN}` would answer 0.1; DuckDB answers NaN
                     # (NaN sorts above +inf).
                     if fcell.n == Int64(1) or float_quotient_lt_f64(fv, fcell.f_acc):
                         fcell.f_acc = fv
                 else:
-                    # ⛔ QUOTIENT ORDER, NOT a bare `<` / `>`: IEEE compares false against
+                    # QUOTIENT ORDER, NOT a bare `<` / `>`: IEEE compares false against
                     # a NaN, so `max{0.1, NaN}` would answer 0.1; DuckDB answers NaN
                     # (NaN sorts above +inf).
                     if fcell.n == Int64(1) or float_quotient_gt_f64(fv, fcell.f_acc):

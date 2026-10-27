@@ -186,7 +186,7 @@ struct CountDistinctAggSink(MorselSink):
 
     var _num_aggs: Int
     var _num_keys: Int
-    # ⭐⭐ MIXEDFUSE (2026-09-21) — THE OUTPUT-POSITION MAP.
+    # MIXEDFUSE (2026-09-21) — THE OUTPUT-POSITION MAP.
     #
     # `_agg_data.agg_exprs` is in the PLAN's order, which is the order
     # `output_schema` declares, and a MIXED node interleaves COUNT(DISTINCT)
@@ -200,7 +200,7 @@ struct CountDistinctAggSink(MorselSink):
     #   `_fx_func[f]`    — the plan `AGG_*` tag of fixed slot `f`
     #   `_fx_src[f]`     — that slot's input col_ref, or "" for a bare COUNT(*)
     #
-    # ⚠ `_num_aggs` STAYS THE **CD** COUNT. It is what `WorkerCDState` is
+    # `_num_aggs` STAYS THE **CD** COUNT. It is what `WorkerCDState` is
     # constructed with and what every `cd_bufs[a]` index means; re-pointing it
     # at the full agg list would silently mis-size the CD cell space.
     var _pos_is_cd: List[Bool]
@@ -332,7 +332,7 @@ struct CountDistinctAggSink(MorselSink):
         # Per-batch column-index resolution. Cheap relative to per-row
         # consume (O(num_aggs * schema_cols) vs O(num_rows * num_aggs)).
         #
-        # ⭐ MIXEDFUSE — `val_idx` covers the CD slots ONLY (it is indexed by
+        # MIXEDFUSE — `val_idx` covers the CD slots ONLY (it is indexed by
         # the CD space `WorkerCDState.cd_bufs` uses); `fx_idx` covers the fixed
         # slots. Walking `_pos_is_cd` is what keeps the two apart when the plan
         # interleaves them.
@@ -360,7 +360,7 @@ struct CountDistinctAggSink(MorselSink):
                 self._agg_data.agg_exprs[i].child.value(), current.schema
             )
             fx_idx.append(ci)
-            # ⭐ THE ACCUMULATOR LANE IS CHOSEN FROM THE **INPUT** TYPE, NOT THE
+            # THE ACCUMULATOR LANE IS CHOSEN FROM THE **INPUT** TYPE, NOT THE
             # OUTPUT TYPE, AND THE DISTINCTION IS NOT COSMETIC. `avg(<bigint>)`
             # declares FLOAT64 output but `agg_mixed_cd_fold` — this lane's
             # oracle — sums it EXACTLY in an Int64 and divides once at emit.
@@ -374,7 +374,7 @@ struct CountDistinctAggSink(MorselSink):
                 not (at == ArrowType.FLOAT64 or at == ArrowType.FLOAT32)
             )
 
-        # ⭐ ARM THE PASSENGER LANE ON FIRST CONSUME, not at `init_local`. The
+        # ARM THE PASSENGER LANE ON FIRST CONSUME, not at `init_local`. The
         # lane's accumulator choice needs the DECODED batch's column types, and
         # `init_local` runs before any batch exists. `configure_fixed` REFUSES
         # once groups exist, so this can only ever run on a state that has
@@ -393,7 +393,7 @@ struct CountDistinctAggSink(MorselSink):
             var key_idx = resolve_col_index(
                 self._agg_data.group_by_exprs[0], current.schema
             )
-            # ⭐ Pick the INSTANTIATION. An all-COUNT(DISTINCT) node has no
+            # Pick the INSTANTIATION. An all-COUNT(DISTINCT) node has no
             # fixed slot, and runs the `has_fixed=False` row loop in which the
             # passenger lane does not exist (the fused body with an empty fixed
             # list measured +4.32%).
@@ -574,14 +574,14 @@ struct CountDistinctAggSink(MorselSink):
         # =====================================================================
         # 1. Global group directory (worker-0-first registration order).
         #
-        # ⭐ Built ONCE as a
+        # Built ONCE as a
         # per-worker gid map `wgid[w][g]` (the Dict asked once per cell), which the
         # fixed-cell merge and every CD agg's drain below index instead of
         # re-probing the Dict per cell. Same first-seen order as the loop it
         # replaces, so `global_keys` is identical index for index. See
         # `cd_global_dir.mojo`.
         #
-        # ★ CD-KEY-NULL (2026-09-13) — the NULL group crosses the worker merge
+        # CD-KEY-NULL (2026-09-13) — the NULL group crosses the worker merge
         # OUTSIDE any key index, for the same reason it stays out of each
         # worker's `group_map`: there is no Int64 that means NULL, and any
         # sentinel collides with the real key equal to it.
@@ -602,7 +602,7 @@ struct CountDistinctAggSink(MorselSink):
 
         # 2. Key column.
         var key_at = out_schema.field_arrow_type(0)
-        # ★ CD-KEY-NULL (2026-09-13) — the NULL group has to READ BACK as NULL.
+        # CD-KEY-NULL (2026-09-13) — the NULL group has to READ BACK as NULL.
         # Emitting it with no validity renders it as `0`, which is a DIFFERENT
         # wrong answer: the row set would be right and the key a lie — and on a
         # column that also holds a real `0` the two rows would be
@@ -610,7 +610,7 @@ struct CountDistinctAggSink(MorselSink):
         # case too: a schema saying `not null` over a column carrying nulls is
         # an Arrow contract violation the C Data Interface export trips on.
         #
-        # ⚠ VALIDITY ONLY WHEN A NULL GROUP EXISTS — a null-free input takes the
+        # VALIDITY ONLY WHEN A NULL GROUP EXISTS — a null-free input takes the
         # plain `allocate` and the unmodified field, byte-identical to the
         # pre-fix emit.
         var key_has_null = global_null_gid >= 0
@@ -650,7 +650,7 @@ struct CountDistinctAggSink(MorselSink):
                     karr.store[1](g, Scalar[DType.int64](global_keys[g]))
                 builder.add_column(Column.from_primitive[DType.int64](karr^))
 
-        # ⭐⭐ MIXEDFUSE — 2b. MERGE THE FIXED CELLS onto the SAME global group
+        # MIXEDFUSE — 2b. MERGE THE FIXED CELLS onto the SAME global group
         # directory the CD runs use, before anything is emitted. Every worker
         # folded against its OWN gid space; `wgid` (CD-GDIR) is the one
         # mapping that reconciles them, and reusing it (rather than
@@ -699,7 +699,7 @@ struct CountDistinctAggSink(MorselSink):
                                 if dst.n == Int64(0) or src.i_acc < dst.i_acc:
                                     dst.i_acc = src.i_acc
                             else:
-                                # ⛔ QUOTIENT ORDER, NOT a bare `<` / `>`: IEEE compares false against
+                                # QUOTIENT ORDER, NOT a bare `<` / `>`: IEEE compares false against
                                 # a NaN, so `max{0.1, NaN}` would answer 0.1; DuckDB answers NaN
                                 # (NaN sorts above +inf).
                                 if dst.n == Int64(0) or float_quotient_lt_f64(src.f_acc, dst.f_acc):
@@ -709,7 +709,7 @@ struct CountDistinctAggSink(MorselSink):
                                 if dst.n == Int64(0) or src.i_acc > dst.i_acc:
                                     dst.i_acc = src.i_acc
                             else:
-                                # ⛔ QUOTIENT ORDER, NOT a bare `<` / `>`: IEEE compares false against
+                                # QUOTIENT ORDER, NOT a bare `<` / `>`: IEEE compares false against
                                 # a NaN, so `max{0.1, NaN}` would answer 0.1; DuckDB answers NaN
                                 # (NaN sorts above +inf).
                                 if dst.n == Int64(0) or float_quotient_gt_f64(src.f_acc, dst.f_acc):
@@ -834,7 +834,7 @@ struct CountDistinctAggSink(MorselSink):
                 ref st = workers.get_mut_interior(w).state
                 ref wmap = wgid[w]
                 for g in range(len(st.group_keys)):
-                    # ★ CD-KEY-NULL — the NULL group is `global_null_gid`, which
+                    # CD-KEY-NULL — the NULL group is `global_null_gid`, which
                     # `wgid` already carries (its stored key is a placeholder
                     # and would alias a real key through any key index).
                     var gg = wmap[g]
@@ -901,7 +901,7 @@ struct CountDistinctAggSink(MorselSink):
             var arr = PrimitiveArray[DType.int64].allocate(0)
             builder.add_column(Column.from_primitive[DType.int64](arr^))
 
-        # ⭐ MIXEDFUSE — an EMPTY result still has to carry every declared
+        # MIXEDFUSE — an EMPTY result still has to carry every declared
         # column at its DECLARED type. `_n_out_aggs` (not `_num_aggs`, the CD
         # count) is the number of agg columns the plan promised, and a FLOAT64
         # `avg` column emitted as INT64 is a schema mismatch a consumer sees

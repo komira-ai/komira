@@ -2,7 +2,7 @@
 # CDP-HEAVYSPLIT — a HEAVY group's distinct pairs are spread across workers
 # =============================================================================
 #
-# ★ THE DEFECT. The grouped COUNT(DISTINCT) driver (added by a later part)
+# THE DEFECT. The grouped COUNT(DISTINCT) driver (added by a later part)
 # hash-partitions rows by GROUP, so one group is one worker. When ONE group
 # holds 91.8% of the rows (a second at 79.2% in another shape), ONE worker runs
 # that group's whole `CdDistinctSet` probe stream — about 1.09M distinct pairs
@@ -10,7 +10,7 @@
 # other 19 finish their scan and idle, so the dispatch is mostly skew and does
 # not get faster as K grows from 2 to 20.
 #
-# ★ THE FIX, AND WHY IT IS CORRECT. A group whose SAMPLED share of rows exceeds
+# THE FIX, AND WHY IT IS CORRECT. A group whose SAMPLED share of rows exceeds
 # 2/K is HEAVY. A heavy group's (row, aggregate) is owned by
 # `cd_pair_bucket(group_hash, value, K)` — a pure function of the group AND the
 # distinct value — instead of by the group alone. So:
@@ -27,7 +27,7 @@
 # DuckDB does, applied only to the groups that need it, which is what lets a
 # heavy group spread across workers.
 #
-# ⛔ CORRECTNESS DOES NOT DEPEND ON THE SAMPLE. Which groups are heavy decides
+# CORRECTNESS DOES NOT DEPEND ON THE SAMPLE. Which groups are heavy decides
 #   only WHERE pairs are counted. Any set — empty, wrong, or a hash collision
 #   that drags a light group along with a heavy one — gives the same answer,
 #   because (a) the ownership test and the merge both key on the group HASH
@@ -35,12 +35,12 @@
 #   (b) the merge folds partials by FULL KEY EQUALITY, so two different groups
 #   sharing a hash are never added together.
 #
-# ⛔ A NULL VALUE IS OWNED BY THE GROUP'S OWN BUCKET. It admits nothing, but the
+# A NULL VALUE IS OWNED BY THE GROUP'S OWN BUCKET. It admits nothing, but the
 #   row still has to create its group somewhere, or a heavy group whose values
 #   are all NULL would never exist in any worker and would vanish from the
 #   output instead of emitting a distinct count of 0.
 #
-# ⛔ ADMISSION: EVERY AGGREGATE MUST BE COUNT(DISTINCT). A split group's rows
+# ADMISSION: EVERY AGGREGATE MUST BE COUNT(DISTINCT). A split group's rows
 #   reach several workers, so a non-distinct accumulator (a Float64 SUM, a MEAN)
 #   would be summed in a different ORDER than the serial twin sums it and could
 #   differ in its last bits — the two kernels are selected by a ROW-COUNT
@@ -123,7 +123,7 @@ def cd_split_groups(sample_hashes: List[Int], num_workers: Int) -> List[Int]:
     list is still capped at `CD_HEAVY_MAX` (the row loop's unrolled compare),
     heaviest first.
 
-    ⛔ The fused string-key route keeps `cd_heavy_groups` (2/K) for its
+    The fused string-key route keeps `cd_heavy_groups` (2/K) for its
     DECLINE test on purpose: a lower bar there would hand a
     high-cardinality string key back to the general driver, which is the
     slower route for that shape.

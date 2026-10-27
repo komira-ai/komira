@@ -12,7 +12,7 @@
 # `Span`s of DIFFERENT origins, which one local cannot hold, so the emit is one
 # function generic over the span's origin, called with whichever applies.
 #
-# ⭐ KEY PREFETCH — THE FULL EMIT IS A THREE-STREAM POINTER CHASE, AND THE K-WAY
+# KEY PREFETCH — THE FULL EMIT IS A THREE-STREAM POINTER CHASE, AND THE K-WAY
 # CONCAT IS WHAT MADE IT RANDOM. `gk[g]` is a dict id; reaching its bytes costs
 # three dependent loads into three structures that do not fit in cache at
 # millions of groups (`starts`, `lens`, `bytes`). Worker 0's block walks dict
@@ -20,10 +20,10 @@
 # worker's block is walked in HT-SLOT order, which is random. Two
 # software-prefetch distances restore the overlap WITHOUT touching the emit
 # ORDER: at `g + PF2` bring in the `starts`/`lens` entries, at `g + PF1` the
-# byte line they point at. ⚠ OFF at K=1 (`prefetch_on=False`),
+# byte line they point at. OFF at K=1 (`prefetch_on=False`),
 # where the walk is already ascending and the hints add nothing.
 #
-# ⭐⭐ CDPTOPK — THE BOUNDED ARM. When the plan's `AggGroupTopK(k)`
+# CDPTOPK — THE BOUNDED ARM. When the plan's `AggGroupTopK(k)`
 # hint was admitted, `emit_gids` names the <= k groups a `TOPN(k)` above can
 # keep, and only their bytes are emitted. No prefetch there (ten rows) and no
 # full-table length pre-pass: `ArrowStringBuilder` is Int32-offset `string`

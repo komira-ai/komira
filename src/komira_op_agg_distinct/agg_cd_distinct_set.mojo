@@ -2,7 +2,7 @@
 # CDPDEDUP — the per-worker DISTINCT-PAIR set for grouped COUNT(DISTINCT)
 # =============================================================================
 #
-# ★ THE SHAPE THIS FILE EXISTS TO CHANGE, stated as the two state layouts:
+# THE SHAPE THIS FILE EXISTS TO CHANGE, stated as the two state layouts:
 #
 #     ours, before     `cd_sets: List[List[List[Int]]]` — one heap `List[Int]`
 #                      per (agg, group), holding EVERY ACCEPTED ROW's value,
@@ -23,7 +23,7 @@
 # on the spot; a row whose pair is new bumps that group's running distinct
 # counter. `aggout` then reads an integer per group.
 #
-# ⛔ WHY THIS IS NOT AN AMDAHL FIX, AND WHY THE AMDAHL FIX WOULD NOT HAVE
+# WHY THIS IS NOT AN AMDAHL FIX, AND WHY THE AMDAHL FIX WOULD NOT HAVE
 #    WORKED. The obvious alternative — parallelise the existing per-group
 #    `sort()` across groups — is refuted when one group holds most of the rows
 #    (a top group with 91.8% of the rows): the serial cost is ONE group's sort
@@ -43,7 +43,7 @@
 # HT) and `agg_slot` by `num_aggs`, so `tag` is always >= 0 and `-1` is a free
 # EMPTY sentinel — no separate occupancy array, no separate `agg` array.
 #
-# ⚠ A SLOT HIT COMPARES BOTH WORDS. Comparing the hash, or the tag alone, would
+# A SLOT HIT COMPARES BOTH WORDS. Comparing the hash, or the tag alone, would
 #   make a hash collision silently merge two distinct values into one — a WRONG
 #   COUNT that no exception and no schema check can see.
 #
@@ -55,10 +55,10 @@
 # property the group HT's own resize relies on (the driver that dispatches the
 # workers is added by a later part).
 #
-# ⚠ ALLOCATION IS DELIBERATELY LAZY. `reserve_hint` records a capacity and
+# ALLOCATION IS DELIBERATELY LAZY. `reserve_hint` records a capacity and
 #   allocates NOTHING; the first `admit` allocates. The driver's `init` loop is
 #   SERIAL (`htinit`), so an eager allocation here would have paid, serially,
-#   for a table that is filled in parallel. ⭐ CDHTSIZE moved the
+#   for a table that is filled in parallel. CDHTSIZE moved the
 #   GROUP table out of that loop for the same reason — it now also records a
 #   capacity and is allocated by the worker (`agg_cd_group_ht_sizing.mojo`).
 #
@@ -250,7 +250,7 @@ struct CdDistinctSet(Movable):
                 if self._count * _CD_LOAD_DEN > self._cap * _CD_LOAD_NUM:
                     self._rehash_into(self._cap * 2)
                 return True
-            # ⚠ BOTH WORDS. A tag-only or hash-only hit would merge two
+            # BOTH WORDS. A tag-only or hash-only hit would merge two
             # distinct values into one and under-count, silently.
             if t == tag and self._val[slot] == val:
                 return False
@@ -269,7 +269,7 @@ def _cd_distinct_value_at[
     """The distinct KEY of aggregate `a` at `row` -- the Int `CdDistinctSet`
     admits. Caller has already skipped a NULL row.
 
-    ⭐ ONE FUNCTION, EVERY READER, ON PURPOSE. The general parallel driver
+    ONE FUNCTION, EVERY READER, ON PURPOSE. The general parallel driver
     reads it to ADMIT a pair and, for a heavy group, to decide which worker
     OWNS the pair (`cd_pair_bucket(hash, value, K)`); the fused string-key
     route (added by a later part) reads it to admit. Those readings must
@@ -279,11 +279,11 @@ def _cd_distinct_value_at[
     answer two ways. (It lives here so both routes share it without an import
     cycle.)
 
-    ★ CD-TYPE-WIDTH -- `Int(f64)` TRUNCATES, so
+    CD-TYPE-WIDTH -- `Int(f64)` TRUNCATES, so
     `count(DISTINCT price)` over [1.1, 1.9] keyed BOTH rows on 1 and answered
     1. The distinct key for a float is its IEEE bit pattern with -0.0 folded
     onto +0.0 -- the key `agg_mixed_cd_fold` and the streaming sink use.
-    ⚠ REACHABILITY: the one live route in gates the CD input to INT32/INT64,
+    REACHABILITY: the one live route in gates the CD input to INT32/INT64,
     so the float arm is not reachable today; it is kept correct rather than left as a trap for whoever
     widens that envelope. The SERIAL TWIN carries the identical conversion --
     the two kernels are selected by a ROW-COUNT crossover, so a one-sided fix

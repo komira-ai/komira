@@ -2,27 +2,27 @@
 # CDHTSIZE — size the grouped COUNT(DISTINCT) GROUP table from GROUPS, not ROWS
 # =============================================================================
 #
-# ★ THE DEFECT THIS FILE EXISTS TO REMOVE, derived from the source rather than
+# THE DEFECT THIS FILE EXISTS TO REMOVE, derived from the source rather than
 #   from any timer:
 #
-#     per_worker_rows = ceil(5,563,212 / 20)          = 278,161
-#     ht_cap          = next_pow2(2 * per_worker_rows) = 1,048,576   (old clamp)
-#     bytes           = 20 workers x 1,048,576 x 12 B  = 251,658,240
+#     per_worker_rows = ceil(rows / workers)
+#     ht_cap          = next_pow2(2 * per_worker_rows)           (old clamp)
+#     bytes           = workers x ht_cap x 12 B
 #
 #   `_execute_count_distinct_agg_parallel` sized every worker's open-addressed
 #   group table from the ROW count and filled all K of them on the DRIVER
 #   THREAD before the dispatch (`htinit`), so a 165-group key allocated,
-#   zeroed, merge-scanned and freed 251.7 MB of hash table to hold **165
-#   groups**, and the serial `merge` was almost entirely the walk over 19 x
-#   1,048,576 EMPTY slots.
+#   zeroed, merge-scanned and freed a large hash table per worker to
+#   hold **165 groups**, and the serial `merge` was almost entirely the walk
+#   over the EMPTY slots of the other workers' tables.
 #
-# ⭐ THE RULE TO FOLLOW (the one DuckDB's grouped hash table uses): start at a
+# THE RULE TO FOLLOW (the one DuckDB's grouped hash table uses): start at a
 #   small constant capacity, double when the load passes a threshold, and
 #   create each per-thread table lazily inside the thread that fills it, never
 #   sized from the input row count. A capacity is derived from a count only
 #   when the count is of GROUPS.
 #
-# ⭐ WHAT WE DO NOW — the same rule, plus the one exact count this driver has:
+# WHAT WE DO NOW — the same rule, plus the one exact count this driver has:
 #   * For a key set whose every column went through the string DICTIONARY
 #     encode (STRING / LARGE_STRING / DICTIONARY), the dict
 #     sizes are an exact per-column distinct count, so their product (capped at
@@ -36,18 +36,18 @@
 #   * The table is allocated by the WORKER, not the driver: `htinit` stops
 #     being a serial phase at all.
 #
-# ⛔ CORRECTNESS DOES NOT DEPEND ON THE BOUND. The bound picks only the FIRST
+# CORRECTNESS DOES NOT DEPEND ON THE BOUND. The bound picks only the FIRST
 #   capacity; the worker's load-0.5 doubling (`_PerWorkerCDState.grow_ht`) is
 #   what guarantees the table never fills, for any bound, including a wrong one.
 #   `tests/test_cd_group_ht_sized_from_groups.mojo` forces several doublings
 #   per worker and value-compares every group.
 #
-# ⛔ AND IT DOES NOT TOUCH THE PARTITION. Growth is a per-worker rehash on
+# AND IT DOES NOT TOUCH THE PARTITION. Growth is a per-worker rehash on
 #   `hash & new_mask`; which worker owns a row is `_cd_partition_bucket(hash,
 #   K)`, a different function of the same hash that no capacity enters. A group
 #   still never spans workers, so the concat-merge stays sound.
 #
-# ⚠ WHAT DOES CHANGE: THE EMISSION ORDER OF GROUPS FROM WORKERS >= 1. The merge
+# WHAT DOES CHANGE: THE EMISSION ORDER OF GROUPS FROM WORKERS >= 1. The merge
 #   walks each worker's table in SLOT order, and slot order is a function of
 #   the capacity. GROUP BY without ORDER BY promises no order; every CD test
 #   compares order-independently; and a TopN over this node resolves ties in
@@ -108,7 +108,7 @@ def cd_groups_upper_bound(dict_sizes: List[Int], num_rows: Int) -> Int:
 def cd_group_ht_initial_cap(groups_bound: Int, num_workers: Int) -> Int:
     """First capacity (slots, a power of two) of ONE worker's group table.
 
-    ⛔ Deliberately NOT a function of the row count — that is the defect this
+    Deliberately NOT a function of the row count — that is the defect this
     file removes. With a known `groups_bound` the hash partition gives each of
     the K workers about `groups_bound / K` groups; one eighth plus 64 of slack
     absorbs the partition's imbalance (and a bound's `+1` NULL slots), and the
