@@ -1,4 +1,7 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@buildrules//rules/mojo:pack.bzl", "mojo_conda", "mojo_conda_holds")
+load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":buildrules.mojo.bzl", "mojo_package")
 
 # A per-run id minted inside the test process from the wall clock and 64
 # random bits, never derived from inputs, plus the `WallClock` / `Entropy`
@@ -6,16 +9,79 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #
 # Deps: komira_validation_run (the id rule a minted id must pass) and
 # komira_clock (the wall clock behind `SystemClock`).
-mojo_library(
+#
+# Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"): `:lib` is the
+# library file and exists only once the tests of tests/ have passed. The package depends on
+# komira_clock and komira_validation_run, sibling packages (`[dependencies]` of mopm.toml): its
+# `:lib` is built from their `:lib`.
+mojo_package(path = ".")
+
+# `:komira_test_run_id`, the target the packages that depend on this library name, is `:lib` as
+# komira's Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds
+# only once the tests have passed. `deps` is `[dependencies]` of mopm.toml, as the adopted targets
+# of those packages: the rule refuses a list that is not the closure `:lib` was built from. It
+# carries the README gate too (`[tests][readme]`): the examples run against `:lib`; the tests are
+# not run again.
+mojo_adopted_library(
     name = "komira_test_run_id",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_clock:komira_clock",
         "//src/komira_validation_run:komira_validation_run",
     ],
-    test_srcs = [
-        "tests/test_run_id.mojo",
-        "tests/test_system_clock.mojo",
+    lib = ":lib",
+    readme = "README.md",
+    srcs = glob(["src/komira_test_run_id/**/*.mojo"]),
+    test_srcs = glob(["tests/test_*.mojo"]),
+    test_runs = ":test",
+    visibility = ["PUBLIC"],
+)
+
+# The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
+# (`mojo-komira_test_run_id-0.1.0-mojo1.0.0_0.conda`), which records komira_clock and
+# komira_validation_run as dependencies and holds their files nowhere. `members` is the manifests
+# of the path dependencies, staged at their repository paths, because `mopm pack` reads the
+# manifest of each beside the one it is given. `:lib` exists only once the tests passed, so this
+# file exists only then. Publishing it (`mopm publish`) uploads, which is not a build action: it
+# is a step of a CI job that takes this target's output. `mopm` is the one `mojo_package` pins
+# (mopm-toolchain.toml).
+mojo_conda(
+    name = "conda",
+    dir = "src/komira_test_run_id",
+    lib = ":lib",
+    manifest = "mopm.toml",
+    members = {
+        "../komira_clock": "//src/komira_clock:mopm.toml",
+        "../komira_validation_run": "//src/komira_validation_run:mopm.toml",
+    },
+    mojo = "1.0.0",
+    mopm = "toolchains//:mopm_0_0_73",
+    package = "komira_test_run_id",
+    version = "0.1.0",
+    visibility = ["PUBLIC"],
+)
+
+# What `:conda` holds, read back from the built file (buildrules' `prebuilt_unpack`): this package's own
+# `.mojoc` and nothing else under `lib/mojo/` (neither dependency is in it), and exactly two
+# dependencies after the compiler, which is what installing the package pulls in. Red when the
+# manifest drops a dependency, names another range, or the file carries a sibling.
+mojo_conda_holds(
+    name = "conda_holds",
+    conda = ":conda",
+    depends = [
+        "mojo-komira_clock >=0.1,<0.2",
+        "mojo-komira_validation_run >=0.1,<0.2",
     ],
+    package = "komira_test_run_id",
+    sole = True,
+    visibility = ["PUBLIC"],
+)
+
+# Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto):
+# komira's conda packer over `:komira_test_run_id`. It goes when the release machine takes the
+# mopm package. This library's mopm package is `:conda` above.
+conda_package(
+    name = "komira_test_run_id_conda",
+    lib = ":komira_test_run_id",
+    summary = "The `komira_test_run_id` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],
 )
