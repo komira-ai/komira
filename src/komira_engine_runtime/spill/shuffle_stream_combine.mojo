@@ -37,13 +37,17 @@
 # the segment and released (`release_chunk`). Spilling only stages bytes: the
 # segment is identical to the unspilled one.
 #
-# The combine counts the bytes it holds itself in `CombineResult.peak_staged_bytes`:
+# The combine counts the bytes it stages itself in `CombineResult.peak_staged_bytes`:
 # the combine buffer's live length after each append, the length of each chunk
 # at the moment it is cut, and the length of each chunk at the moment it is read
 # back, whichever is largest. With a positive `T` that count never exceeds `T`.
-# Three things are outside it: the slice the `PartitionSliceSource` returns
-# (the source owns it until the combine drops it), the dense trailer
-# (24 * R + 16 bytes), and whatever the `FileSystem` buffers inside `write_at`.
+# It bounds the combine's own staging, not the process's memory. Outside it:
+# the slice the `PartitionSliceSource` returns (a whole partition, live until
+# the combine has cut it into chunks or appended it to the combine buffer, so
+# for a short while it coexists with the chunk or the buffer copy), the dense
+# trailer (24 * R + 16 bytes), and whatever the `FileSystem` buffers inside
+# `write_at`. Spilling therefore lowers the memory the combine holds across a
+# partition's write, not the peak while the source's slice is live.
 # With `spill_threshold <= 0` nothing is spilled and a partition is staged
 # whole, so the count is the largest partition.
 #
@@ -116,8 +120,9 @@ trait PartitionSliceSource(Movable, Deinitable):
 
 struct ListPartitionSource(PartitionSliceSource, Movable, Deinitable):
     """A `PartitionSliceSource` over R already-materialized slices and their R
-    row counts. It holds all R slices; the combine still asks for them one at a
-    time.
+    row counts. It holds all R slices and `slice_bytes` copies, so it suits
+    tests and small inputs, not a producer with large partitions; the combine
+    still asks for the slices one at a time.
 
     Fields:
       _slices:     R partition byte slices (including zero-length ones).
@@ -243,12 +248,14 @@ def _combine_body[
     mut storage: S,
     spill_threshold: Int64,
     mut live_chunks: List[ChunkId],
+    mut released: Int,
     mut peak_staged: Int,
     mut chunks_spilled: Int,
 ) raises -> List[PartitionSlot]:
     """Write every partition and the dense trailer into `seg_file`. Does not
-    close it. `live_chunks` holds the ids written to `storage` and not yet
-    released, so a caller that sees a raise can release them."""
+    close it. `live_chunks` holds the ids written to `storage` for the
+    partition being combined; the first `released` of them have had their
+    release attempted. A caller that sees a raise releases the rest."""
     var r = source.partition_count()
     var spill_enabled = spill_threshold > 0
     var slots = List[PartitionSlot]()
@@ -276,15 +283,20 @@ def _combine_body[
                 chunks_spilled += 1
                 fed += step
             _ = pbytes^
-            while len(live_chunks) > 0:
-                var cid = live_chunks[0]
+            # `released` counts the ids at the front of `live_chunks` whose
+            # release has been attempted, so the failure cleanup skips them
+            # whether or not that attempt raised.
+            for i in range(len(live_chunks)):
+                var cid = live_chunks[i]
                 var chunk = storage.read_chunk(cid)
                 _note(peak_staged, Int(chunk.length()))
                 var view = chunk.as_view()
                 _write_span_chunked(fs, seg_file, view.into_span())
                 _ = chunk^
+                released = i + 1
                 storage.release_chunk(cid)
-                _ = live_chunks.pop(0)
+            live_chunks.clear()
+            released = 0
         else:
             # At most T bytes (or no budget): stage the slice in the combine
             # buffer, hand it out, write it.
@@ -317,6 +329,7 @@ def _combine[
     var seg_file = fs.open_write(seg_path, WriteMode.create_truncate())
     var buf = ShuffleCombineBuffer()
     var live_chunks = List[ChunkId]()
+    var released = 0
     var peak_staged = 0
     var chunks_spilled = 0
     var slots = List[PartitionSlot]()
@@ -331,6 +344,7 @@ def _combine[
             storage,
             spill_threshold,
             live_chunks,
+            released,
             peak_staged,
             chunks_spilled,
         )
@@ -340,7 +354,7 @@ def _combine[
     if failed:
         # Best effort: release what was spilled and abort the partial write. A
         # cleanup failure must not replace the error that caused it.
-        for i in range(len(live_chunks)):
+        for i in range(released, len(live_chunks)):
             try:
                 storage.release_chunk(live_chunks[i])
             except:

@@ -21,6 +21,12 @@
 #   5. a spill failure is reported: a storage whose `write_chunk` (or
 #      `read_chunk`) fails makes the combine raise with the storage's message,
 #      releases the chunks already written and leaves no partial `.seg`.
+#   6. a budget of 0 or below spills nothing through the spilling entry point.
+#   7. several oversized partitions in one run each spill and restore once.
+#   8. a restore failing in the second oversized partition releases that
+#      partition's chunks and leaves no partial `.seg`.
+#   9. a release that raises is attempted once; cleanup does not repeat it and
+#      the original error is the one reported.
 #
 # LocalFs only; nothing here depends on time or on threads.
 # =============================================================================
@@ -449,9 +455,225 @@ def test_spill_failure_is_reported() raises:
     _cleanup(root)
 
 
+# -----------------------------------------------------------------------------
+# 6. a budget of 0 or below spills nothing, through the spilling entry point
+# -----------------------------------------------------------------------------
+struct _CountingStorage(SpillStorage, Movable, Deinitable):
+    """A real spill storage that counts calls. `write_chunk` calls are counted
+    in `writes`; `read_chunk` raises once `writes` has reached
+    `fail_reads_at_writes` (0 = never); the `fail_release_at`-th
+    `release_chunk` call (1-based, 0 = never) raises without releasing."""
+
+    var inner: _Storage
+    var fail_reads_at_writes: Int
+    var fail_release_at: Int
+    var writes: Int
+    var release_calls: Int
+
+    def __init__(
+        out self,
+        var inner: _Storage,
+        fail_reads_at_writes: Int,
+        fail_release_at: Int,
+    ):
+        self.inner = inner^
+        self.fail_reads_at_writes = fail_reads_at_writes
+        self.fail_release_at = fail_release_at
+        self.writes = 0
+        self.release_calls = 0
+
+    def write_chunk(
+        mut self, var bytes: SharedAlignedBuffer[HeapRegion]
+    ) raises -> ChunkId:
+        self.writes += 1
+        return self.inner.write_chunk(bytes^)
+
+    def read_chunk(
+        self, chunk_id: ChunkId
+    ) raises -> SharedAlignedBuffer[HeapRegion]:
+        if (
+            self.fail_reads_at_writes > 0
+            and self.writes >= self.fail_reads_at_writes
+        ):
+            raise Error("EIO while restoring")
+        return self.inner.read_chunk(chunk_id)
+
+    def release_chunk(mut self, chunk_id: ChunkId) raises:
+        self.release_calls += 1
+        if self.release_calls == self.fail_release_at:
+            raise Error("release boom")
+        self.inner.release_chunk(chunk_id)
+
+    def nbytes_in_use(self) -> Int64:
+        return self.inner.nbytes_in_use()
+
+    def sync(mut self) raises:
+        self.inner.sync()
+
+
+def test_non_positive_budget_never_spills() raises:
+    var root = _scratch_root(String("disabled"))
+    _ensure_root(root)
+    var hot = 100 * 1024
+    var lens = List[Int]()
+    lens.append(hot)
+    lens.append(0)
+    lens.append(3000)
+    var parts = _make_partitions(lens, Int64(7))
+    var oracle = _segwriter_bytes(
+        root, String("oracle.seg"), parts[0], parts[1]
+    )
+    var budgets = List[Int64]()
+    budgets.append(Int64(0))
+    budgets.append(Int64(-1))
+    for k in range(len(budgets)):
+        var tag = String("b") + String(k)
+        var storage = _CountingStorage(
+            _new_storage(root + "/spill_" + tag), 0, 0
+        )
+        var fs = _Fs.new()
+        var src = ListPartitionSource(parts[0].copy(), parts[1].copy())
+        var res = stream_combine_segment_spilling(
+            fs, root + "/" + tag + ".seg", src^, storage, budgets[k]
+        )
+        assert_equal(storage.writes, 0, tag + ": storage was never written")
+        assert_equal(res.chunks_spilled, 0, tag + ": nothing spilled")
+        assert_equal(
+            res.peak_staged_bytes, hot, tag + ": the hot partition is staged whole"
+        )
+        assert_true(
+            _bytes_eq(_read_back(root, tag + ".seg"), oracle),
+            tag + ": seg == SegWriter seg",
+        )
+        _ = storage^
+    _cleanup(root)
+
+
+# -----------------------------------------------------------------------------
+# 7. several oversized partitions in one run
+# -----------------------------------------------------------------------------
+def test_several_oversized_partitions() raises:
+    var root = _scratch_root(String("several"))
+    _ensure_root(root)
+    var t = 4096
+    var lens = List[Int]()
+    lens.append(3 * t + 5)  # 4 chunks
+    lens.append(100)  # staged
+    lens.append(2 * t)  # 2 chunks, the last exactly T
+    lens.append(0)
+    lens.append(t + 1)  # 2 chunks
+    lens.append(7 * t - 1)  # 7 chunks, the last short
+    var parts = _make_partitions(lens, Int64(3))
+    var storage = _CountingStorage(_new_storage(root + "/spill"), 0, 0)
+    var fs = _Fs.new()
+    var src = ListPartitionSource(parts[0].copy(), parts[1].copy())
+    var res = stream_combine_segment_spilling(
+        fs, root + "/several.seg", src^, storage, Int64(t)
+    )
+    assert_equal(res.chunks_spilled, 4 + 2 + 2 + 7, "chunks per partition")
+    assert_equal(storage.writes, 15, "storage saw every chunk once")
+    assert_equal(storage.release_calls, 15, "every chunk released once")
+    assert_equal(res.peak_staged_bytes, t, "never above T")
+    assert_equal(storage.inner.num_live_chunks(), 0, "storage is empty")
+    var oracle = _segwriter_bytes(
+        root, String("oracle.seg"), parts[0], parts[1]
+    )
+    assert_true(
+        _bytes_eq(_read_back(root, String("several.seg")), oracle),
+        "seg == SegWriter seg",
+    )
+    _ = storage^
+    _cleanup(root)
+
+
+# -----------------------------------------------------------------------------
+# 8. a restore fails in the second oversized partition
+# -----------------------------------------------------------------------------
+def test_restore_failure_in_second_oversized_partition() raises:
+    var root = _scratch_root(String("second"))
+    _ensure_root(root)
+    var t = 4096
+    var lens = List[Int]()
+    lens.append(3 * t)  # chunks 1-3, restored fine
+    lens.append(500)
+    lens.append(4 * t)  # chunks 4-7, the first restore fails
+    var parts = _make_partitions(lens, Int64(1))
+    # Reads fail once 7 chunks have been written: the first partition's reads
+    # happen at 3 writes, the second oversized partition's at 7.
+    var storage = _CountingStorage(_new_storage(root + "/spill"), 7, 0)
+    var fs = _Fs.new()
+    var src = ListPartitionSource(parts[0].copy(), parts[1].copy())
+    var raised = False
+    var message = String("")
+    try:
+        _ = stream_combine_segment_spilling(
+            fs, root + "/second.seg", src^, storage, Int64(t)
+        )
+    except e:
+        raised = True
+        message = String(e)
+    assert_true(raised, "the restore failure must not be swallowed")
+    assert_true("EIO while restoring" in message, "message: " + message)
+    assert_equal(storage.writes, 7, "all chunks of both partitions written")
+    assert_equal(
+        storage.release_calls,
+        3 + 4,
+        "the first partition's chunks released once, the second's by cleanup",
+    )
+    assert_equal(storage.inner.num_live_chunks(), 0, "nothing left on storage")
+    var left_behind = True
+    try:
+        _ = _read_back(root, String("second.seg"))
+    except:
+        left_behind = False
+    assert_true(not left_behind, "no partial seg left behind")
+    _ = storage^
+    _cleanup(root)
+
+
+# -----------------------------------------------------------------------------
+# 9. a failed release is attempted once, and the original error is reported
+# -----------------------------------------------------------------------------
+def test_failed_release_is_not_retried() raises:
+    var root = _scratch_root(String("release"))
+    _ensure_root(root)
+    var t = 4096
+    var lens = List[Int]()
+    lens.append(3 * t)
+    var parts = _make_partitions(lens, Int64(1))
+    var storage = _CountingStorage(_new_storage(root + "/spill"), 0, 1)
+    var fs = _Fs.new()
+    var src = ListPartitionSource(parts[0].copy(), parts[1].copy())
+    var raised = False
+    var message = String("")
+    try:
+        _ = stream_combine_segment_spilling(
+            fs, root + "/release.seg", src^, storage, Int64(t)
+        )
+    except e:
+        raised = True
+        message = String(e)
+    assert_true(raised, "the release failure must not be swallowed")
+    assert_true("release boom" in message, "message: " + message)
+    # One failed attempt on the first chunk, then cleanup releases the other
+    # two; the first is not offered to the storage a second time.
+    assert_equal(storage.release_calls, 3, "no chunk released twice")
+    assert_equal(
+        storage.inner.num_live_chunks(),
+        1,
+        "only the chunk whose release failed is still on storage",
+    )
+    _ = storage^
+    _cleanup(root)
+
+
 def main() raises:
     test_staged_bytes_never_exceed_budget()
     test_budget_boundary()
     test_every_row_exactly_once_across_spills()
     test_spill_failure_is_reported()
-    print("test_shuffle_combine_bounded_ram: all 4 tests PASS")
+    test_non_positive_budget_never_spills()
+    test_several_oversized_partitions()
+    test_restore_failure_in_second_oversized_partition()
+    test_failed_release_is_not_retried()
+    print("test_shuffle_combine_bounded_ram: all 8 tests PASS")

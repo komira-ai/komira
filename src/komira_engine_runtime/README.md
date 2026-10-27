@@ -53,8 +53,9 @@ operator or a sink consumes but does not implement belongs here.
   streaming write, byte-identical to what `komira_shuffle`'s `SegWriter` builds.
   With a byte budget, a partition above the budget is staged in a
   `SpillStorage` in chunks of at most the budget and streamed back, and the
-  result reports the most bytes the combine itself staged at once, never above the
-  budget. A failure from the source, the spill storage or the file system is
+  result reports the most bytes the combine itself staged at once, never above
+  the budget. That bounds the combine's own staging, not process memory: the
+  slice the source hands over for a partition is outside it. A failure from the source, the spill storage or the file system is
   raised to the caller after the spilled chunks are released and the partial
   write is aborted.
 - Counters, the FNV-1a hash (`spill.fnv1a`), and the small
