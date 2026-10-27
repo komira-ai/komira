@@ -158,6 +158,28 @@ zig_exe(
     visibility = ["PUBLIC"],
 )
 
+# so_exports (tools/so_exports.zig): the C-ABI exports of a Mojo source, and
+# the check of mojo_shared_lib's `exports` against them (defs.bzl). Built behind
+# its unit tests; the cases are tests//negative/shared_lib:exports_*.
+zig_test(
+    name = "so_exports_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/so_exports.zig"],
+    src = "tools/so_exports_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "so_exports",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/so_exports.zig",
+    unit_tests = [":so_exports_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
 # archive_files (tools/archive_files.zig): the `archive_files` rule's action
 # (archive.bzl): files out of a pinned archive, copied or with substitutions.
 # Built behind its unit tests; its cases are the archive_files targets of
