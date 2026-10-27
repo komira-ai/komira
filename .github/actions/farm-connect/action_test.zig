@@ -14,10 +14,11 @@
 //! What the cases catch:
 //!  - the buckconfig written is compared whole, so a key dropped, renamed,
 //!    added or given the wrong value (`tls = false` written whatever `tls`
-//!    says, `tls_ca_certs` or the macOS keys written when not asked for, or
-//!    not written when asked for) fails a case;
+//!    says, `tls_ca_certs`, `macos_library_dirs` or the macOS keys written when
+//!    not asked for, or not written when asked for) fails a case;
 //!  - each refusal (macOS set without hosts and the reverse, a macOS set equal
-//!    to the linux one, `tls` neither true nor false, a CA file with TLS off,
+//!    to the linux one, macOS library directories without a macOS set, a
+//!    relative one, one holding `$`, or none at all, `tls` neither true nor false, a CA file with TLS off,
 //!    relative, holding `$`, missing or a directory, a line break or carriage
 //!    return in a value) is a case that must exit 1 with its message and write
 //!    no buckconfig, so a check deleted or weakened fails it;
@@ -272,6 +273,49 @@ test "macOS properties and hosts: both keys under [komira_re], after the linux s
     );
 }
 
+test "macOS library directories: written verbatim after the hosts, spaces and colons kept" {
+    try expectWritten(&.{
+        .{ .name = "darwin-properties", .value = "OSFamily=Darwin,label.pool=mac" },
+        .{ .name = "darwin-macos-hosts", .value = "26.5-0123456789abcdef" },
+        .{ .name = "macos-library-dirs", .value = "/opt/homebrew/lib:/usr/local/opt/lz4/lib /opt/other" },
+    },
+        \\[buck2_re_client]
+        \\  engine_address = grpc://re.example.com:8980
+        \\  action_cache_address = grpc://re.example.com:8980
+        \\  cas_address = grpc://re.example.com:8980
+        \\  instance_name = main
+        \\  tls = false
+        \\  execution_concurrency_limit = 256
+        \\[komira_re]
+        \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
+        \\  darwin_arm64_properties = OSFamily=Darwin,label.pool=mac
+        \\  darwin_macos_hosts = 26.5-0123456789abcdef
+        \\  macos_library_dirs = /opt/homebrew/lib:/usr/local/opt/lz4/lib /opt/other
+        \\
+    );
+}
+
+test "macOS properties and hosts without library directories write no macos_library_dirs" {
+    try expectWritten(&.{
+        .{ .name = "darwin-properties", .value = "OSFamily=Darwin,label.pool=mac" },
+        .{ .name = "darwin-macos-hosts", .value = "26.5-0123456789abcdef" },
+        .{ .name = "macos-library-dirs", .value = "" },
+    },
+        \\[buck2_re_client]
+        \\  engine_address = grpc://re.example.com:8980
+        \\  action_cache_address = grpc://re.example.com:8980
+        \\  cas_address = grpc://re.example.com:8980
+        \\  instance_name = main
+        \\  tls = false
+        \\  execution_concurrency_limit = 256
+        \\[komira_re]
+        \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
+        \\  darwin_arm64_properties = OSFamily=Darwin,label.pool=mac
+        \\  darwin_macos_hosts = 26.5-0123456789abcdef
+        \\
+    );
+}
+
 test "tls true with no CA file: tls = true and no tls_ca_certs (the system's roots)" {
     try expectWritten(&.{.{ .name = "tls", .value = "true" }},
         \\[buck2_re_client]
@@ -332,6 +376,21 @@ test "a macOS set equal to the linux set is refused" {
     }, "darwin-properties equals farm-properties");
 }
 
+test "macOS library directories without a macOS set are refused" {
+    try expectRefused(&.{.{ .name = "macos-library-dirs", .value = "/opt/homebrew/lib" }}, "macos-library-dirs is set but darwin-properties is empty");
+}
+
+test "a relative, $-holding or empty macOS library directory list is refused" {
+    const mac = [_]Value{
+        .{ .name = "darwin-properties", .value = "OSFamily=Darwin" },
+        .{ .name = "darwin-macos-hosts", .value = "26.5-0123456789abcdef" },
+    };
+    try expectRefused(&(mac ++ [_]Value{.{ .name = "macos-library-dirs", .value = "lib" }}), "macos-library-dirs holds 'lib', which is not an absolute directory");
+    try expectRefused(&(mac ++ [_]Value{.{ .name = "macos-library-dirs", .value = "/opt/homebrew/lib:../lib" }}), "holds '../lib'");
+    try expectRefused(&(mac ++ [_]Value{.{ .name = "macos-library-dirs", .value = "/opt/$HOME/lib" }}), "macos-library-dirs holds a $");
+    try expectRefused(&(mac ++ [_]Value{.{ .name = "macos-library-dirs", .value = ": :" }}), "macos-library-dirs is set but names no directory");
+}
+
 test "tls neither true nor false is refused, the empty string included" {
     try expectRefused(&.{.{ .name = "tls", .value = "yes" }}, "tls is 'yes', not true or false");
     try expectRefused(&.{.{ .name = "tls", .value = "" }}, "tls is '', not true or false");
@@ -357,7 +416,7 @@ test "a CA path that is missing, or a directory, is refused" {
 
 test "a line break or carriage return in any value written is refused" {
     const msg = "an input holds a line break";
-    const names = [_][]const u8{ "farm-address", "farm-instance", "farm-properties", "darwin-properties", "darwin-macos-hosts", "tls", "tls-ca-certs" };
+    const names = [_][]const u8{ "farm-address", "farm-instance", "farm-properties", "darwin-properties", "darwin-macos-hosts", "macos-library-dirs", "tls", "tls-ca-certs" };
     for (names) |name| {
         // The macOS pair is given whole, so only the line break can be refused.
         try expectRefused(&.{
@@ -412,7 +471,7 @@ test "every input is used, and every use names a declared input" {
     defer arena.deinit();
     const ar = arena.allocator();
     const action = try loadAction(ar);
-    try t.expectEqual(@as(usize, 10), action.inputs.len);
+    try t.expectEqual(@as(usize, 11), action.inputs.len);
     for (action.inputs) |in| {
         const use = try std.fmt.allocPrint(ar, "${{{{ inputs.{s} }}}}", .{in.name});
         if (std.mem.indexOf(u8, action.runs, use) == null) std.debug.print("input '{s}' is never used\n", .{in.name});
