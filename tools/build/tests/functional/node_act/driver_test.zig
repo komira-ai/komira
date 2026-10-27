@@ -1,5 +1,5 @@
 //! The process behaviour of `node_act` (tools/build/node_tools/node_act.zig):
-//! dist, npm-package, node-test and esbuild-bundle, by exit status, message,
+//! dist, npm-package, node-test, binding-test and esbuild-bundle, by exit status, message,
 //! the environment the child sees and the files written. The programs it runs
 //! are one stand-in (fake.zig) under the names node, tool and esbuild.
 const std = @import("std");
@@ -274,6 +274,73 @@ test "node-test: fail means a non-zero exit whose stderr holds the text; each ot
     try t.expect(!c.exists("z.pass"));
     // Usage: --expect is pass or fail.
     try t.expectEqual(@as(u8, 2), (try c.run(try testArgs(&c, "maybe", "-", "u.pass", &.{}), &.{})).code);
+}
+
+// ---- binding-test --------------------------------------------------------------------
+
+fn bindingArgs(c: *kit.Ctx, out: []const u8, files: []const []const u8) ![]const []const u8 {
+    var list = std.ArrayList([]const u8).empty;
+    try list.appendSlice(c.alloc(), &.{ "binding-test", "--node", "node", "--libs", "libs", "--out", out, "--dir", "src", "--" });
+    try list.appendSlice(c.alloc(), files);
+    return list.items;
+}
+
+const tap_pass = "stdout # tests 2\nstdout # pass 2\nstdout # fail 0\nstdout # cancelled 0\nstdout # skipped 0\nstdout # todo 0\n";
+
+test "binding-test: node --test over absolute paths of the files; the marker only for a run that reports tests, all passed" {
+    var c = try newCtx("binding_pass");
+    defer c.deinit();
+    try layNode(&c);
+    try c.write("src/a.test.mjs", tap_pass, 0o644);
+    const scratch = try c.path("scratch");
+    const r = try c.run(try bindingArgs(&c, "b.pass", &.{"a.test.mjs"}), &.{.{ "BUCK_SCRATCH_PATH", scratch }});
+    try t.expectEqual(@as(u8, 0), r.code);
+    try t.expectEqualStrings("", try c.read("b.pass"));
+    try t.expect(has(r.stdout, "test-mode files=1\n"));
+    try t.expect(has(r.stdout, "# pass 2\n"));
+    try t.expect(!c.exists("scratch/komira"));
+    // Two files are two paths.
+    try c.write("src/b.test.mjs", tap_pass, 0o644);
+    const r2 = try c.run(try bindingArgs(&c, "b2.pass", &.{ "a.test.mjs", "b.test.mjs" }), &.{});
+    try t.expectEqual(@as(u8, 0), r2.code);
+    try t.expect(has(r2.stdout, "test-mode files=2\n"));
+}
+
+test "binding-test: a failing run keeps its status and shows its output; a run of no test, or of skipped ones, is a red though node exited 0" {
+    var c = try newCtx("binding_red");
+    defer c.deinit();
+    try layNode(&c);
+    try c.write("src/t.mjs", "stdout # tests 1\nstdout # fail 1\nstderr not ok 1 - the addon answers 42\nexit 1\n", 0o644);
+    const f = try c.run(try bindingArgs(&c, "f.pass", &.{"t.mjs"}), &.{});
+    try t.expectEqual(@as(u8, 1), f.code);
+    try t.expect(has(f.stderr, "not ok 1 - the addon answers 42\n"));
+    try t.expect(has(f.stderr, "binding_test: node --test exited 1\n"));
+    try t.expect(!c.exists("f.pass"));
+    // Exit 0 with a summary of zero tests (a file that registers none).
+    try c.write("src/t.mjs", "stdout # tests 0\nstdout # pass 0\nstdout # fail 0\nstdout # cancelled 0\nstdout # skipped 0\nstdout # todo 0\n", 0o644);
+    const z = try c.run(try bindingArgs(&c, "z.pass", &.{"t.mjs"}), &.{});
+    try t.expectEqual(@as(u8, 1), z.code);
+    try t.expect(has(z.stderr, "binding_test: node --test exited 0, but it ran no test\n"));
+    try t.expect(!c.exists("z.pass"));
+    // Exit 0, but the file itself is the one test: it registered none.
+    const only = try std.fmt.allocPrint(c.alloc(), "stdout # Subtest: {s}\n", .{try c.path("src/t.mjs")});
+    try c.write("src/t.mjs", try std.mem.concat(c.alloc(), u8, &.{ only, "stdout # tests 1\nstdout # pass 1\nstdout # fail 0\nstdout # cancelled 0\nstdout # skipped 0\nstdout # todo 0\n" }), 0o644);
+    const own = try c.run(try bindingArgs(&c, "own.pass", &.{"t.mjs"}), &.{});
+    try t.expectEqual(@as(u8, 1), own.code);
+    try t.expect(has(own.stderr, "registers no test of its own\n"));
+    try t.expect(!c.exists("own.pass"));
+    // Exit 0 with no summary at all.
+    try c.write("src/t.mjs", "stdout nothing\n", 0o644);
+    const n = try c.run(try bindingArgs(&c, "n.pass", &.{"t.mjs"}), &.{});
+    try t.expectEqual(@as(u8, 1), n.code);
+    try t.expect(has(n.stderr, "its TAP summary has no \"# tests\" line"));
+    // A skipped test.
+    try c.write("src/t.mjs", "stdout # tests 2\nstdout # pass 2\nstdout # fail 0\nstdout # cancelled 0\nstdout # skipped 1\nstdout # todo 0\n", 0o644);
+    const s = try c.run(try bindingArgs(&c, "s.pass", &.{"t.mjs"}), &.{});
+    try t.expectEqual(@as(u8, 1), s.code);
+    try t.expect(has(s.stderr, "a test was skipped or left todo"));
+    // No file: usage.
+    try t.expectEqual(@as(u8, 2), (try c.run(try bindingArgs(&c, "u.pass", &.{}), &.{})).code);
 }
 
 // ---- esbuild-bundle -----------------------------------------------------------------
