@@ -27,6 +27,11 @@
 #       stopped between the index append and the tombstones) is completed by the
 #       next round: the chunks are tombstoned and the live log start advances.
 #
+#   * test_legacy_consumer_repair_covers_two_already_read_batches
+#       One repaired object covers two already-read live batches: one batch.
+#   * test_worker_does_not_tombstone_a_segment_the_tail_partly_covers
+#       A compacted entry ending inside a live segment leaves that segment live.
+#
 # No pointer type in any signature, no wildcard origins.
 # =============================================================================
 
@@ -424,6 +429,91 @@ def test_worker_tombstones_segments_of_an_interrupted_round() raises:
     assert_equal(ls.log_start_offset, Int64(20), "log start offset advanced")
 
 
+def test_legacy_consumer_repair_covers_two_already_read_batches() raises:
+    """A four-segment round commits while the consumer has read the first two
+    segments and is about to GET the third. The compacted object `[0,39]`
+    covers both already-read live batches, so both are dropped and the result
+    is exactly one batch."""
+    var base = _Inner()
+    var prefix = _partition_prefix()
+    var keys = _produce_segments(base, prefix, 4, 10)
+    var reap = List[String]()
+    for i in range(4):
+        reap.append(keys[i])
+    var store = _RaceStore(
+        base.clone(), String(keys[2]), reap^, String(prefix), String(prefix), 4
+    )
+    var consume = ConsumeCore[_RaceStore](
+        segment_store=store.clone(),
+        manifest=CasManifestStore[_RaceStore](
+            store=store.clone(),
+            prefix=String(prefix),
+            retry=RetryPolicy.fast_test(),
+        ),
+        cluster=String(_CLUSTER),
+        topic=String(_TOPIC),
+        partition=_PID,
+    )
+    var index = CompactionIndex[_RaceStore].build(
+        store.clone(), String(prefix), RetryPolicy.fast_test()
+    )
+    var dual = DualTierConsumer[_RaceStore](
+        consume=consume^, index=index^, object_store=store.clone()
+    )
+    var batches = dual.read_from(Int64(0))
+    assert_true(_exists(base, prefix + "/test-race-fired"), "the race ran")
+    _assert_repaired(batches, Int64(39), 40)
+    assert_equal(len(batches), 1, "one compacted batch covers all four")
+
+
+def test_worker_does_not_tombstone_a_segment_the_tail_partly_covers() raises:
+    """A compacted entry `[0,14]` over 10-row segments covers chunk 0 fully and
+    chunk 1 only partly. Only chunk 0 is tombstoned and the live log start
+    moves to chunk 1 / offset 10, so offsets 15..19 stay in the live tier."""
+    var store = _Inner()
+    var prefix = _partition_prefix()
+    _ = _produce_segments(store, prefix, 4, 10)
+    var batches = Slab[RecordBatch]()
+    batches.append(_make_batch(Int64(0), 15))
+    var pbytes = write_record_batches_to_parquet_bytes(
+        batches^, codec=CompressionCodec.SNAPPY, max_rows_per_rg=15
+    )
+    var pkey = String(_CLUSTER) + "/compacted/straddle-0-14.parquet"
+    _ = store.put(Path.parse(pkey), pbytes^)
+    var index = CompactionIndex[_Inner].build(
+        store.clone(), String(prefix), RetryPolicy.fast_test()
+    )
+    _ = index.append_compacted(
+        parquet_key=pkey,
+        base_offset=Int64(0),
+        last_offset=Int64(14),
+        record_count=Int64(15),
+        supersedes_lo=Int64(0),
+        supersedes_hi=Int64(0),
+    )
+    var worker = _worker_on[_Inner](store, prefix, prefix)
+    try:
+        # The desync guard may refuse the round afterwards; step 1b has
+        # already run by then and is what this test checks.
+        _ = worker.run_once(
+            now_ms=Int64(200000), min_segments=Int64(3), max_segments=Int64(64)
+        )
+    except e:
+        _ = e
+    assert_equal(_tomb_count(store, prefix, 4), 1, "only chunk 0 tombstoned")
+    assert_true(
+        _exists(store, tombstone_key(prefix, Int64(0)).raw()), "chunk 0 marked"
+    )
+    var manifest = CasManifestStore[_Inner](
+        store=store.clone(),
+        prefix=String(prefix),
+        retry=RetryPolicy.fast_test(),
+    )
+    var ls = manifest.read_log_start()
+    assert_equal(ls.log_start_seq, Int64(1), "log start seq")
+    assert_equal(ls.log_start_offset, Int64(10), "log start offset")
+
+
 def _exists(store: _Inner, key: String) -> Bool:
     try:
         _ = store.head(Path.parse(key))
@@ -447,5 +537,7 @@ def _tomb_count(store: _Inner, prefix: String, n_chunks: Int) -> Int:
 def main() raises:
     test_legacy_consumer_recovers_from_reaped_segment()
     test_sublineage_consumer_recovers_from_reaped_segment()
+    test_legacy_consumer_repair_covers_two_already_read_batches()
     test_worker_tombstones_segments_of_an_interrupted_round()
+    test_worker_does_not_tombstone_a_segment_the_tail_partly_covers()
     print("ALL test_read_repair_recovery PASS")

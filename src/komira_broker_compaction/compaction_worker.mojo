@@ -242,7 +242,9 @@ struct CompactionWorker[Storage: ConditionalWriteStore](
         var stale_hi_offset = Int64(-1)
         for i in range(len(live_index)):
             ref s = live_index[i]
-            if s.base_offset >= compacted_tail:
+            # Only a segment the compacted prefix fully covers: one that
+            # straddles the tail still holds offsets no compacted object has.
+            if s.last_offset >= compacted_tail:
                 break
             self._live_manifest.schedule_for_delete_at(s.chunk_seq, now_ms)
             stale_hi_seq = s.chunk_seq

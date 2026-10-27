@@ -876,7 +876,7 @@ def _fold_record_batches(
 
 def _splice_repaired(
     mut out: Slab[DecodedTierBatch], var repaired: Slab[DecodedTierBatch]
-):
+) raises:
     """Append the repaired suffix to the batches already read. A compacted
     object that now covers the failed segment can also cover segments read
     earlier from the live tier, so those earlier batches are dropped: each
@@ -884,6 +884,16 @@ def _splice_repaired(
     if len(repaired) > 0:
         var cut = repaired[0].base_offset
         while len(out) > 0 and out[len(out) - 1].last_offset >= cut:
+            if out[len(out) - 1].base_offset < cut:
+                raise Error(
+                    "read repair: a repaired object starts at offset "
+                    + String(cut)
+                    + " inside an already-read batch ["
+                    + String(out[len(out) - 1].base_offset)
+                    + ","
+                    + String(out[len(out) - 1].last_offset)
+                    + "]; refusing to drop its head"
+                )
             _ = out.pop()
     out.extend(repaired^)
 
