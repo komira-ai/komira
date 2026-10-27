@@ -1,28 +1,31 @@
 # =============================================================================
-# Regression tests for the Int64 single-key radix dispatch added to
-# `_sort_batch_single_key` in sort_topn_sink.mojo.
+# The INT64 single-key radix route of the sort and top-N sinks
+# =============================================================================
 #
-# `_sort_batch_single_key` dispatches to `radix_sort_int64` when the row
-# count is >= RADIX_SORT_ROW_THRESHOLD (500_000), and falls back to
-# `sort_indices_int64` (merge sort) below that. Both paths must produce
-# identical ascending orders; descending is reversed.
-#
-# We test the dispatch indirectly by asserting:
-#   - radix_sort_int64 and sort_indices_int64 produce the same ascending
-#     permutation on small and threshold-sized inputs (byte-identical data order).
-#   - After a reverse, descending output is consistent.
-#   - Negative values sort correctly (validates sign-bit flip in radix).
-#
-# Kernel-level equivalence is enough to guarantee that the `_sort_batch_single_key`
-# switch is semantically a no-op for correctness (only a performance change).
+# `_sort_batch_single_key` radix-sorts an INT64 key when the row count is at
+# least RADIX_SORT_ROW_THRESHOLD (500_000) and merge-sorts it below that. The
+# first tests compare the two kernels directly (`radix_sort_int64` and
+# `sort_indices_int64` give the same ascending data order, including negative
+# keys). The last tests drive the sinks over a batch above the threshold and
+# check the ORDER of the output and that the payload column follows its key:
+# ascending, descending, and a top-N that selects through the heap.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
 
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
 from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Field, SchemaBuilder
+from komira_physical_plan.physical_plan import SortSinkData, TopNSinkData
 from komira_op_sort.sort import sort_indices_int64, gather_by_indices_int64
 from komira_op_sort.sort_radix import radix_sort_int64
-from komira_op_sort.sort_topn_sink import RADIX_SORT_ROW_THRESHOLD
+from komira_op_sort.sort_topn_sink import (
+    RADIX_SORT_ROW_THRESHOLD,
+    _execute_sort_sink,
+    _execute_topn_sink,
+)
 
 
 def _compare_orders(
@@ -101,13 +104,103 @@ def test_radix_above_threshold_monotone() raises:
         assert_true(Int((p + i)[]) <= Int((p + i + 1)[]))
 
 
-def test_threshold_value_matches_v03() raises:
-    """Guard: the threshold constant is 500_000."""
+def test_radix_threshold_is_500000() raises:
+    """The threshold constant is 500_000."""
     assert_equal(RADIX_SORT_ROW_THRESHOLD, 500_000)
 
 
+comptime _MULT: Int = 2654435761
+comptime _MASK: Int = 0xFFFFFFFF
+
+
+def _key_of(row: Int) -> Int:
+    """The key of input row `row`: distinct for every row (the multiplier is
+    odd, so the map is a bijection modulo 2^32), signed after the shift."""
+    return ((row * _MULT) & _MASK) - 2_000_000_000
+
+
+def _sink_batch() raises -> RecordBatch:
+    """`[k INT64, id INT64]` with `RADIX_SORT_ROW_THRESHOLD + 1` rows; id is
+    the 1-based input row, k = `_key_of(row)`."""
+    var n = RADIX_SORT_ROW_THRESHOLD + 1
+    var k = PrimitiveArray[DType.int64].allocate(n)
+    var ids = PrimitiveArray[DType.int64].allocate(n)
+    for i in range(n):
+        k.set_typed[Scalar[DType.int64]](i, Int64(_key_of(i)))
+        ids.set_typed[Scalar[DType.int64]](i, Int64(i + 1))
+    var builder = RecordBatchBuilder.with_capacity(2)
+    builder.add_column(Column.from_primitive[DType.int64](k^))
+    builder.add_column(Column.from_primitive[DType.int64](ids^))
+    var sb = SchemaBuilder()
+    sb.add_field(Field("k", ArrowType.INT64, False))
+    sb.add_field(Field("id", ArrowType.INT64, False))
+    return builder.build(sb.build())
+
+
+def _one_key(desc: Bool) -> SortSinkData:
+    var keys = List[String]()
+    keys.append(String("k"))
+    var d = List[Bool]()
+    d.append(desc)
+    return SortSinkData(keys^, d^)
+
+
+def _assert_sorted_and_paired(rb: RecordBatch, desc: Bool, rows: Int) raises:
+    """`rows` rows, strictly ordered by k in the direction, and every id still
+    names the row its key came from."""
+    assert_equal(rb.num_rows(), rows, "row count")
+    var k = rb.column_as_primitive_int64(0)
+    var ids = rb.column_as_primitive_int64(1)
+    var prev = 0
+    for r in range(rows):
+        var key = Int(k.load[1](r)[0])
+        var id = Int(ids.load[1](r)[0])
+        assert_equal(key, _key_of(id - 1), "payload id does not match its key")
+        if r > 0:
+            if desc:
+                assert_true(key < prev, "not strictly descending")
+            else:
+                assert_true(key > prev, "not strictly ascending")
+        prev = key
+
+
+def test_sort_sink_above_the_threshold_ascending() raises:
+    var rb = _execute_sort_sink(_sink_batch(), _one_key(False))
+    _assert_sorted_and_paired(rb, False, RADIX_SORT_ROW_THRESHOLD + 1)
+
+
+def test_sort_sink_above_the_threshold_descending() raises:
+    var rb = _execute_sort_sink(_sink_batch(), _one_key(True))
+    _assert_sorted_and_paired(rb, True, RADIX_SORT_ROW_THRESHOLD + 1)
+
+
+def test_top_n_sink_above_the_threshold_selects_the_extremes() raises:
+    """LIMIT 10 over 500_001 rows goes through the bounded heap; the answer is
+    the first ten rows of the full sort, in both directions."""
+    for d in range(2):
+        var desc = d == 1
+        var keys = List[String]()
+        keys.append(String("k"))
+        var dirs = List[Bool]()
+        dirs.append(desc)
+        var top = _execute_topn_sink(_sink_batch(), TopNSinkData(keys^, dirs^, 10))
+        var full = _execute_sort_sink(_sink_batch(), _one_key(desc))
+        assert_equal(top.num_rows(), 10, "top-N row count")
+        var top_ids = top.column_as_primitive_int64(1)
+        var full_ids = full.column_as_primitive_int64(1)
+        for r in range(10):
+            assert_equal(
+                Int(top_ids.load[1](r)[0]),
+                Int(full_ids.load[1](r)[0]),
+                "top-N id @" + String(r) + " desc=" + String(desc),
+            )
+
+
 def main() raises:
-    test_threshold_value_matches_v03()
+    test_radix_threshold_is_500000()
+    test_sort_sink_above_the_threshold_ascending()
+    test_sort_sink_above_the_threshold_descending()
+    test_top_n_sink_above_the_threshold_selects_the_extremes()
     test_radix_matches_merge_small()
     test_radix_handles_negatives()
     test_radix_matches_merge_at_threshold()

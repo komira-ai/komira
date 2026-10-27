@@ -41,12 +41,21 @@ batch by it.
   sorted runs, driven by a caller's `LoserTreeComparator`.
 
 Every sort is stable: rows with equal keys keep their input order, in both
-directions. Float keys are totally ordered the way DuckDB orders them: NaN
+directions. The bounded-heap top-N breaks a full tie on the row index, so it
+keeps and orders tied rows exactly as the full sort does. (One exception:
+the sink's INT64 radix route, taken from 500_000 rows up, reverses tied rows
+in descending order.) Float keys are totally ordered the way DuckDB orders them: NaN
 sorts above +inf (last ascending, first descending), every NaN equals every
 other NaN, and -0.0 equals +0.0. The numeric kernels read values only;
 `sort_indices_string`, `sort_indices_nested` and the BOOL arm of
 `sort_batch_by_keys` place nulls (first ascending, last descending, unless
-told otherwise). Import from the sub-modules; there is no facade.
+told otherwise). The sinks do not read `nulls_first`, and the numeric arms of
+the bounded heap and `SortBuffer_Untyped` do not read validity at all (a NULL
+cell is compared as its stored value bytes): a caller keeps nullable keys out
+of those paths, or places the nulls itself. A STRING key that carries NULLs is
+sent to the full sort rather than the heap. A numeric key stored as a
+dictionary (codes plus values) is resolved to its values before a top-N.
+Import from the sub-modules; there is no facade.
 
 ## Examples
 

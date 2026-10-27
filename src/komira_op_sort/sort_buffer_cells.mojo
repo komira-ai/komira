@@ -169,9 +169,7 @@ def _encode_cell[
     # ─── Decimal128 ──────────────────────────────────────────────────
     if desc.kind == COL_DECIMAL128:
         # Full 128-bit key: store BOTH words (LO at slot*16, HI at
-        # slot*16+8). LO-only stored the low 64 bits and mis-ordered
-        # decimals whose ordering lives in the high 64 bits (and treated
-        # the value as unsigned — see _compare_storage_single_col).
+        # slot*16+8), so the comparator sees the whole signed value.
         var lo = batch.col_decimal128_lo(col_in_batch).load[1](row)[0]
         var hi = batch.col_decimal128_hi(col_in_batch).load[1](row)[0]
         storage.write_slot_decimal128(col_in_storage, slot, lo, hi)
@@ -332,8 +330,7 @@ def _compare_cells(
         # Full 128-bit SIGNED compare: reassemble each slot's two LE u64
         # words into an int128 (two's complement) and order signed. Same-
         # scale within one column, so unscaled-int128 order == decimal
-        # order. LO-only + unsigned mis-ordered negatives and any values
-        # whose ordering lives in the high 64 bits.
+        # order.
         var a_lo = storage.read_slot_u64(col_in_storage, slot_a)
         var a_hi = storage.read_slot_decimal128_hi(
             col_in_storage, slot_a

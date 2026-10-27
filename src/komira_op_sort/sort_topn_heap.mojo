@@ -7,7 +7,10 @@
 # it sorts strictly before it. The K survivors are then insertion-sorted and
 # gathered.
 #
-# Keys compare lexicographically, key 0 first, each in its own direction.
+# Keys compare lexicographically, key 0 first, each in its own direction. Two
+# rows that tie on every key compare by row index, the earlier row first, so
+# the order is total: the rows kept and the order they come out in are those
+# of a stable full sort, in both directions.
 # Four key types have a comparator arm: INT64, INT32, FLOAT64 and STRING
 # (byte-wise, the shorter first on a shared prefix: DuckDB's default VARCHAR
 # collation). FLOAT64 orders by `sort.sort_key_lt` (NaN above +inf). The
@@ -16,6 +19,10 @@
 #
 # The comparator reads values, not validity: the router keeps a STRING key
 # that carries NULLs away from the heap.
+#
+# A key column is read as the type the schema reports, so its stored type must
+# be that type: a numeric-dictionary column (stored as codes, reported as the
+# value type) is refused here and kept away from the heap by the router.
 #
 # The key columns are read through `KeyColumnView`s whose origin is the
 # batch's, so the compiler holds the batch alive for every read and no
@@ -73,6 +80,12 @@ struct _HeapKeys[o: Origin[mut=False]](Movable):
             var ci = batch.schema.column_index(name)
             var at = batch.schema.field_arrow_type(ci)
             ref col = batch.column_at(ci)
+            if col.arrow_type != at:
+                raise Error(
+                    "_topn_heap: key column '" + name + "' is stored as type "
+                    + String(col.arrow_type) + " but its schema type is "
+                    + String(at)
+                )
             var off = col._offset
             self.desc.append(topn_data.descending[i])
             # SAFETY: each pointer is borrowed from a buffer of `batch`'s
@@ -130,7 +143,8 @@ struct _HeapKeys[o: Origin[mut=False]](Movable):
 
     @always_inline
     def row_before(self, a: Int, b: Int) -> Bool:
-        """True iff row `a` sorts strictly before row `b`."""
+        """True iff row `a` sorts strictly before row `b`: by the keys, and
+        when every key ties, the earlier row first."""
         for i in range(len(self.kinds)):
             var kind = self.kinds[i]
             var s = self.slots[i]
@@ -145,7 +159,7 @@ struct _HeapKeys[o: Origin[mut=False]](Movable):
                 c = _str_cmp3(self.str_offs[s], self.str_data[s], a, b)
             if c != 0:
                 return c > 0 if self.desc[i] else c < 0
-        return False
+        return a < b
 
 
 @always_inline
@@ -187,8 +201,9 @@ def topn_heap_select(
     batch: RecordBatch, topn_data: TopNSinkData
 ) raises -> List[Int]:
     """The row indices of the first `topn_data.n` rows of `batch` in sort
-    order (fewer when the batch is shorter). Every key must be INT64,
-    FLOAT64, INT32 or STRING; another type raises."""
+    order (fewer when the batch is shorter), tied rows in input order. Every
+    key must be INT64, FLOAT64, INT32 or STRING, stored as that type; another
+    type raises."""
     var keys = _HeapKeys(batch, topn_data)
     var num_rows = batch.num_rows()
     var k = min(topn_data.n, num_rows)
