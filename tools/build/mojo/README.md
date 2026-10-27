@@ -265,6 +265,18 @@ packages. A dependent of the label gets the closure on its `-I`, and `conda_pack
 `.conda` records `mojo-<dependency> >=0.1,<0.2` and holds none of the dependency's files; `mojo_conda_holds` over it
 (`sole = True`, `depends = [...]`) reads that back from the built file. `src/komira_resources` is the example.
 
+A package that opens a library by its bare name (`mode = "load"` in `[native-dependencies]`, `dlopen("libsnappy.so.1")`) has the file pinned in
+its unit graph (`system_libs`), and buildrules gives its own tests the pinned files on their library path. Its `:lib` also hands the
+directories of the pinned files on (`MojoSystemLibsInfo`), the adopted label turns them into `MojoInfo.system_libs`
+([`system_libs.bzl`](system_libs.bzl)), and a `mojo_library`, `mojo_test` or adopted package that depends on it carries them on, through `deps`
+and, for the welded tests only, `test_deps`. Every test run that loads the package is then given them: the welded tests, the README examples, the kcov and
+branch coverage runs, the mutation runs and a `mojo_test` get `--lib-dir <directory>` arguments of the gate (`tools/build/run`), which appends them to
+`LD_LIBRARY_PATH` after the compiler's lib on Linux and puts them first in `DYLD_FALLBACK_LIBRARY_PATH` on macOS. The directories are unpacked from
+the sha256-pinned packages of the graph, so a run finds the pinned file and nothing of the worker's; a compile is never given them, a `mojo_binary`'s
+run check is not (it runs with no library path at all), and a package that pins nothing changes no command. The proof is
+`tests//negative/adopt_system_libs` and the scenario `planted_red_builds_adopt_system_libs`: the same dependent passes with the pins and fails each run
+kind (welded test, kcov run, branch run, `mojo_test`) with the loader's refusal without them.
+
 ## Binaries and tests
 
 - **`main`**: the file holding `main()`. It defaults to the only file in

@@ -1,0 +1,12 @@
+load(":cases.bzl", "adopt_system_libs_case")
+
+# The pinned system libraries of a package adopted by `mojo_adopted_library` reach the test runs of an old-rule dependent (tools/build/mojo/system_libs.bzl), one
+# case per `-c adopt_system_libs.case=<case>`:
+#   pinned    `:codec_lib` exports the directories of libsqlite and libzlib (what the gated `:lib` of a mojo_package that pins them does)
+#             Must BUILD: `:consumer`'s welded test opens libsqlite3.so.0 by its bare name, which a farm worker does not have, and so do its kcov run
+#             (`:consumer[coverage]` with `-c komira.coverage=true`) and its branch run (`:consumer[coverage][branch_info]`)
+#   unpinned  the same `:codec_lib` exporting none (a package whose `:lib` forgot its pins)
+#             Must FAIL, in the action of the welded test, because the loader cannot open libsqlite3.so.0
+# With no case set the package declares only its doc_tree, so loading it never fails by accident. The scenario is
+# tools/build/selftest:planted_red_builds_adopt_system_libs.
+adopt_system_libs_case()
