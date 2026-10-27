@@ -41,7 +41,7 @@ comptime THSPILL2_VERSION_V2: UInt32 = 2
 comptime THSPILL2_MAGIC_0: UInt8 = 0x54  # 'T'
 comptime THSPILL2_MAGIC_1: UInt8 = 0x48  # 'H'
 comptime THSPILL2_MAGIC_2: UInt8 = 0x53  # 'S'
-comptime THSPILL2_MAGIC_3: UInt8 = 0x02  # version-2 era
+comptime THSPILL2_MAGIC_3: UInt8 = 0x02  # format version 2
 
 # Flag bits.
 comptime THSPILL2_FLAG_COMPRESSED_LZ4: UInt32 = 1
@@ -134,7 +134,7 @@ def pack_header[
 
     `len(dst)` MUST be `>= THSPILL2_HEADER_SIZE`; raises otherwise.
 
-    The reserved bytes (44..47 + 48..95) are zeroed on write so the
+    The reserved bytes (44..95) are zeroed on write so the
     on-disk image is reproducible (helpful for byte-identity testing).
 
     Args:

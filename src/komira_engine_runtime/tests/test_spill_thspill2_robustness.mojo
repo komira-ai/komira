@@ -356,6 +356,27 @@ def test_body_length_huge_but_positive() raises:
     _ = storage^
 
 
+def test_body_length_int64_max() raises:
+    # 2^63-1 is a valid Int64 that passes the sign check; added to the
+    # header size it would wrap negative, so only the length comparison
+    # refuses it.
+    var storage = _MutableMemStorage()
+    var cid = _encode_valid(storage, 16)
+    var big = (UInt64(1) << 63) - 1
+    storage.corrupt_u64(cid, HDR_BODYLEN_OFF, big)
+    storage.corrupt_u64(cid, HDR_UNCOMPRESSED_OFF, big)
+    _assert_both_paths_raise(storage, cid, "header declares")
+    _ = storage^
+
+
+def test_encode_refuses_negative_row_count() raises:
+    var storage = _MutableMemStorage()
+    var blk = _build_block(4)
+    blk._row_count = Int64(-1)
+    with assert_raises(contains="row count is negative"):
+        _ = THSpill2Encoder[_StrictRowBlock].encode(storage, blk^)
+
+
 def test_row_count_absurd() raises:
     var storage = _MutableMemStorage()
     var cid = _encode_valid(storage, 16)
@@ -421,6 +442,10 @@ def main() raises:
     print("test_body_length_one_past_end PASSED")
     test_body_length_huge_but_positive()
     print("test_body_length_huge_but_positive PASSED")
+    test_body_length_int64_max()
+    print("test_body_length_int64_max PASSED")
+    test_encode_refuses_negative_row_count()
+    print("test_encode_refuses_negative_row_count PASSED")
     test_row_count_absurd()
     print("test_row_count_absurd PASSED")
     test_unknown_flag_bits()

@@ -53,7 +53,6 @@ from komira_engine_runtime.spill.thspill2 import (
 struct NativeColumnSpillWriter(Movable):
     """Writes RecordBatches to a native THSPLC-backed spill run.
 
-    Replaces the Arrow-IPC `SpillWriter` for the columnar (RecordBatch) grain.
     Each `write_batch` THSPLC-encodes the batch into one chunk on an owned
     `LocalDiskSpillStorage` rooted at a unique per-run directory.
 
@@ -141,7 +140,7 @@ struct NativeColumnSpillWriter(Movable):
 struct NativeColumnSpillReader(Movable):
     """Reads RecordBatches back from a native THSPLC-backed spill run.
 
-    Replaces the Arrow-IPC `SpillReader` for the columnar grain. Opens the
+    Opens the
     storage root the writer used and replays chunks 1..N in write order
     (chunk ids are monotonic from 1 — `FileSystemSpillStorage._next_chunk_id`
     starts at 1).
@@ -275,10 +274,9 @@ def native_column_read_chunk(
 struct NativeRowBlock(Spillable):
     """A fixed-stride row image as an opaque THSPILL2 body.
 
-    This is the production row `Spillable` conformer for the row grain: the
-    body bytes are byte-identical to the operator's in-memory row image (e.g.
-    the hash-agg partition `row_data`). `row_count` × `entry_stride` ==
-    `nbytes`. The fingerprint is the canonical FNV-1a-64 the agg path uses.
+    A `Spillable` conformer for the row grain: the body bytes are the
+    caller's row image, byte for byte. `row_count` × `entry_stride` ==
+    `nbytes`. The fingerprint is whatever the caller supplies.
 
     Restore (`from_bytes`) keeps the decoded bytes as the body, exposing
     `entry_stride` (recovered as `nbytes / row_count`) so the operator can
@@ -326,8 +324,8 @@ struct NativeRowBlock(Spillable):
         schema_fingerprint: UInt64,
     ) raises -> Self:
         """Rehydrate a block from decoded bytes. Refuses a negative row count,
-        a nonempty body with no rows and a body whose length is not a whole
-        number of rows. The fingerprint is not checked: this type has no
+        a nonempty body with no rows, rows with an empty body and a body
+        whose length is not a whole number of rows. The fingerprint is not checked: this type has no
         expected schema of its own; the operator compares
         `schema_fingerprint()` with its own."""
         var n = Int(bytes.length())
@@ -341,6 +339,12 @@ struct NativeRowBlock(Spillable):
                 "NativeRowBlock.from_bytes: "
                 + String(n)
                 + " body bytes but row_count is 0"
+            )
+        if row_count > 0 and n == 0:
+            raise Error(
+                "NativeRowBlock.from_bytes: row_count "
+                + String(row_count)
+                + " but the body is empty"
             )
         if row_count > 0 and n % Int(row_count) != 0:
             raise Error(

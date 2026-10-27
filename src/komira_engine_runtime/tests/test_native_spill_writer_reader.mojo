@@ -313,6 +313,8 @@ def test_row_block_from_bytes_refuses_inconsistent_body() raises:
         _ = NativeRowBlock.from_bytes(_bytes_sab(32), Int64(-1), UInt64(1))
     with assert_raises(contains="row_count is 0"):
         _ = NativeRowBlock.from_bytes(_bytes_sab(32), Int64(0), UInt64(1))
+    with assert_raises(contains="body is empty"):
+        _ = NativeRowBlock.from_bytes(_bytes_sab(0), Int64(5), UInt64(1))
     with assert_raises(contains="not a multiple"):
         _ = NativeRowBlock.from_bytes(_bytes_sab(33), Int64(4), UInt64(1))
     # An empty block and a whole-row body are accepted.

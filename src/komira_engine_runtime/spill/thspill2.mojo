@@ -137,6 +137,13 @@ struct THSpill2Encoder[T: Spillable]:
                 + ") — Spillable.nbytes() returned bogus value"
             )
 
+        if row_count < 0:
+            raise Error(
+                "THSpill2Encoder.encode: row count is negative ("
+                + String(row_count)
+                + ")"
+            )
+
         var total = THSPILL2_HEADER_SIZE + body_len
 
         # One buffer sized for header + body.
@@ -251,16 +258,16 @@ struct THSpill2Decoder[T: Spillable]:
                 + " on an uncompressed chunk - corrupt chunk"
             )
 
-        var declared_total = Int64(THSPILL2_HEADER_SIZE) + body_length_i64
-        if declared_total < 0 or raw.length() < declared_total:
+        # Compared as `body_length > length - header`, so no sum can wrap.
+        if body_length_i64 > raw.length() - Int64(THSPILL2_HEADER_SIZE):
             raise Error(
                 "THSpill2Decoder.decode: storage returned "
                 + String(Int(raw.length()))
-                + " bytes but header declares "
-                + String(Int(declared_total))
-                + " (header.body_length="
-                + String(Int(body_length_i64))
-                + ")"
+                + " bytes but header declares body_length="
+                + String(header.body_length)
+                + " after a "
+                + String(THSPILL2_HEADER_SIZE)
+                + "-byte header"
             )
         return header
 
