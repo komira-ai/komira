@@ -32,7 +32,7 @@
 #      one task never runs and the blocked task waits for it forever. Under
 #      fork-join claiming the other workers drain the queue and it completes. The
 #      blocked task spins with no deadline: a static split makes this case hang,
-#      which the hang limit armed in main ends.
+#      which the build gate's hang limit ends.
 #
 # MUTANTS THESE CASES CATCH (each RED on its own case(s), the rest GREEN):
 #   * `fetch_add(0)` for `fetch_add(1)` in the claim loop
@@ -48,7 +48,6 @@
 # so "the cases went red" is distinguishable from "the fixture is broken".
 # =============================================================================
 
-from std.ffi import external_call
 from komira_atomic_alias import AtomicI64
 from std.memory import OwnedPointer, UnsafePointer, alloc
 from std.testing import assert_equal, assert_false, assert_true
@@ -132,7 +131,7 @@ struct _BlockState(KeepAlive, Movable, Deinitable):
     """Task 0 blocks until `done` reaches `need`; every other task bumps `done`.
 
     The blocking task spins until `done` reaches `need`, with no deadline: a
-    static-split arm never completes, and the hang limit armed in main ends
+    static-split arm never completes, and the build gate's hang limit ends
     the hang."""
 
     var done: OwnedPointer[AtomicI64]
@@ -304,21 +303,7 @@ def test_claim_absorbs_a_task_the_static_split_would_strand() raises:
     rt.shutdown()
 
 
-# Hang limit. A library's tests run as build actions, which have no timeout, and
-# the waits in this file have no deadline of their own (they wait on an event,
-# not on a clock). A regression that loses the event would hold a worker with
-# no verdict, so the process arms SIGALRM once, far above any run: its default
-# action kills the process (exit 142) and the build action fails. No test reads
-# this limit; a run that completes never meets it.
-comptime _HANG_LIMIT_S: Int = 600
-
-
-def _arm_hang_limit():
-    _ = external_call["alarm", UInt32](UInt32(_HANG_LIMIT_S))
-
-
 def main() raises:
-    _arm_hang_limit()
     test_conservation_holds_in_both_arms()
     test_claim_setting_selects_the_arm()
     test_off_arm_runs_the_static_range()

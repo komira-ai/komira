@@ -17,8 +17,8 @@
 # recorded id differs.
 #
 # Nothing here reads a clock: the evidence is the thread id, and the only wait
-# is for the background thread's `done` flag (an event; the hang limit armed in
-# `main` kills a run whose destructor never happens).
+# is for the background thread's `done` flag (an event; the build gate's hang
+# limit stops a run whose destructor never happens).
 # =============================================================================
 
 from std.ffi import external_call
@@ -92,20 +92,6 @@ def test_spawn_drop_runs_the_destructor_on_another_thread() raises:
     )
 
 
-# Hang limit. A library's tests run as build actions, which have no timeout, and
-# the wait in this file has no deadline of its own (it waits on an event, not on
-# a clock). A regression that loses the event would hold a worker with no
-# verdict, so the process arms SIGALRM once, far above any run: its default
-# action kills the process (exit 142) and the build action fails. No test reads
-# this limit; a run that completes never meets it.
-comptime _HANG_LIMIT_S: Int = 600
-
-
-def _arm_hang_limit():
-    _ = external_call["alarm", UInt32](UInt32(_HANG_LIMIT_S))
-
-
 def main() raises:
-    _arm_hang_limit()
     test_spawn_drop_runs_the_destructor_on_another_thread()
     print("PASS komira_async_api spawn_drop")

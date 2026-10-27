@@ -335,19 +335,9 @@ the library's `:conda` (buildrules' `mojo_conda` over `:lib`), so it too exists 
     actions keep their keys). `tests//negative/mojo_hang:lib_never_ends` is the
     planted hang, and `//tools/build/selftest:planted_red_builds_mojo_hang`
     requires its line and the default and override on the commands.
-  - Guards that tests arm for themselves with `alarm()` (SIGALRM, whose default
-    action ends the process) stand in for this limit and become redundant;
-    they are left in place for now: the `test_srcs` of `komira_async`
-    (`test_local_dispatcher_stall_dump`, `test_local_dispatcher_stale_shard_generation`,
-    `test_io_lane_two_lane_storage`, `test_worker_shutdown_park_race`,
-    `test_local_dispatcher_cold_paths`, `test_reactor_park_no_lost_wakeup`,
-    `test_real_timer_park_lifecycle`, `test_fj_claim_dispatch`),
-    `komira_async_api` (`test_spawn_drop`), `komira_objectstore`
-    (`test_cas_gate_released_once_offline`,
-    `test_idempotent_scan_missing_chunk_offline`), `komira_log_index`
-    (`test_split_log_search_faults`), `komira_search`
-    (`test_search_ff_wide_min`) and `komira_buffer` (`test_write_uleb128`).
-  executor reports it.
+  - This limit is the hang guard: a test does not arm an `alarm()` (SIGALRM)
+    of its own to end a hang. A test that needs a limit shorter than 1800 s
+    for a real reason sets `test_hang_limit_s` on its target.
 
 ### Outputs and the runnable directory
 
