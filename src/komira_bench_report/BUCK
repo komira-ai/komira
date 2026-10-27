@@ -1,0 +1,31 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The result model and report of a benchmark run: a cell's statistic (rep 0
+# dropped, the median of each sweep, the least of the sweeps), the verdicts of a
+# cell, the environment fingerprint, the result.json writer and strict reader
+# (schema komira-bench-result/1), the counts and geomean per suite, and the
+# human table. Pure data and text: it runs no engine and reads no file.
+#
+# The welded tests (each file's header says which defects it catches):
+# - test_stats: exact medians, the sweep statistic, geomean and ratio on fixed
+#   inputs, and the inputs they refuse.
+# - test_summary: when a cell has a ratio, the verdict against a threshold that
+#   is a parameter, the denominators, the geomean per suite, the PASS line.
+# - test_json_schema: the writer and reader round trip, and every way the
+#   reader refuses a document that departs from the schema.
+# - test_table: the table of a fixed result, byte for byte.
+mojo_library(
+    name = "komira_bench_report",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # Direct dependencies: the rule adds each one's own closure to the compiler.
+    deps = [
+        "//src/komira_json:komira_json",
+    ],
+    test_srcs = [
+        "tests/test_json_schema.mojo",
+        "tests/test_stats.mojo",
+        "tests/test_summary.mojo",
+        "tests/test_table.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
