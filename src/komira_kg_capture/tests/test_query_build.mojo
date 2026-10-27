@@ -7,9 +7,8 @@
 #
 #   seeds       semantic seeds rank by score, equal scores by node id; surface
 #               seeds follow; the text match ignores ASCII case.
-#   scope       a single query reads its partition only, and its neighbours stay
-#               in it; a federated query reads the named partitions and admits
-#               a neighbour of any partition, with provenance.
+#   scope       a query reads the partitions it names and no others, neighbours
+#               included; a federated node carries its partition as provenance.
 #   merge       a federated result does not depend on the order of the
 #               partitions; the per-partition cap bounds each partition's seeds.
 #   facet       an entity passes only if its facet equals the filter exactly.
@@ -111,6 +110,7 @@ def _emb() raises -> StubEmbedder:
     emb.add_vector("a", _vec(0.0, 0.0, 0.0, -1.0))
     emb.add_vector("acme", _vec(0.0, 0.0, 0.0, -1.0))
     emb.add_vector("casey", _vec(0.0, 0.0, 0.0, -1.0))
+    emb.add_vector("lovelace", _vec(0.0, 0.0, 0.0, -1.0))
     emb.add_vector("Ada", _vec(1.0, 0.0, 0.0, 0.0))
     emb.add_vector("loner", _vec(0.0, 0.0, 0.0, -1.0))
     emb.add_vector("nothing here", _vec(0.0, 0.0, 0.0, -1.0))
@@ -262,18 +262,39 @@ def test_a_single_query_reads_its_partition_and_its_neighbours_stay_in_it() rais
     assert_equal(len(other.nodes), 0)
 
 
-def test_a_federated_query_admits_neighbours_of_any_partition_with_provenance() raises:
+def test_a_federated_query_keeps_its_neighbours_in_the_partitions_it_names() raises:
     var r = _build(_spec("ada", _strings("p1"), federated=True))
-    # Seed 1 (p1); neighbours 2 (p1) and 3 (p2, across the edge 1 -> 3).
-    _assert_ids(r, _nodes(1, 2, 3))
+    # Seed 1 (p1); its neighbour 2 (p1). Bolt (3, p2) is across the edge 1 -> 3
+    # but p2 is not named, so it and that edge stay out.
+    _assert_ids(r, _nodes(1, 2))
     assert_equal(r.mode, "federated_query")
     assert_equal(r.query_label, "federated query (1 partitions): ada")
-    assert_equal(len(r.provenance), 3)
+    assert_equal(len(r.provenance), 2)
     assert_equal(r.provenance[0].source_id, "1")
     assert_equal(r.provenance[0].source, "partition:p1")
-    assert_equal(r.provenance[2].source_id, "3")
-    assert_equal(r.provenance[2].source, "partition:p2")
-    assert_equal(len(r.edges), 2)
+    assert_equal(r.provenance[1].source_id, "2")
+    assert_equal(r.provenance[1].source, "partition:p1")
+    assert_equal(len(r.edges), 1)
+    # Naming both partitions admits the neighbour across the edge, with its own
+    # partition as provenance.
+    var both = _build(_spec("ada", _strings("p1", "p2"), federated=True))
+    var ids = _ids(both)
+    var has_bolt = False
+    for i in range(len(ids)):
+        if ids[i] == Int64(3):
+            has_bolt = True
+            assert_equal(both.provenance[i].source, "partition:p2")
+    assert_true(has_bolt)
+
+
+def test_a_federated_query_returns_no_node_or_edge_of_an_unnamed_partition() raises:
+    for text in _strings("ada", "alpha", "a", "acme"):
+        var r = _build(_spec(text, _strings("p1"), federated=True))
+        for i in range(len(r.nodes)):
+            assert_equal(r.provenance[i].source, "partition:p1", text)
+        for i in range(len(r.edges)):
+            assert_true(r.edges[i].src != Int64(3) and r.edges[i].src != Int64(4), text)
+            assert_true(r.edges[i].dst != Int64(3) and r.edges[i].dst != Int64(4), text)
 
 
 def test_a_federated_result_does_not_depend_on_the_order_of_partitions() raises:
@@ -336,18 +357,18 @@ def test_the_facet_filter_is_an_exact_string_comparison() raises:
 
 def test_the_facet_filter_applies_to_neighbours_and_to_unfaceted_entities() raises:
     # Acme (fa) is next to Casey, who has no facet.
-    var plain = _build(_spec("acme", _strings("p1"), federated=True))
+    var plain = _build(_spec("acme", _strings("p1", "p3"), federated=True))
     var plain_ids = _ids(plain)
     assert_equal(len(plain_ids), 3)
     assert_equal(plain_ids[0], Int64(2))
     assert_equal(plain_ids[1], Int64(1))
     assert_equal(plain_ids[2], Int64(5))
-    var faceted = _build(_spec("acme", _strings("p1"), federated=True, facet="fa"))
+    var faceted = _build(_spec("acme", _strings("p1", "p3"), federated=True, facet="fa"))
     _assert_ids(faceted, _nodes(2, 1))
     # An entity with no facet is never matched by a non-empty filter.
     var casey = _build(_spec("casey", _strings("p3"), federated=True, facet="fa"))
     assert_equal(len(casey.nodes), 0)
-    var unfiltered = _build(_spec("casey", _strings("p3"), federated=True))
+    var unfiltered = _build(_spec("casey", _strings("p1", "p3"), federated=True))
     _assert_ids(unfiltered, _nodes(5, 2))
 
 
@@ -362,11 +383,11 @@ def test_as_of_keeps_only_edges_live_then_and_their_neighbours() raises:
     _assert_ids(at_start, _nodes(1, 2))
     assert_equal(len(at_start.edges), 1)
 
-    var live = _build(_spec("ada", _strings("p1"), federated=True, as_of=Optional[Int64](Int64(250))))
+    var live = _build(_spec("lovelace", _strings("p1", "p2"), federated=True, as_of=Optional[Int64](Int64(250))))
     _assert_ids(live, _nodes(1, 2, 3))
     assert_equal(len(live.edges), 2)
     # The edge to Bolt Co ended at 300 (exclusive).
-    var ended = _build(_spec("ada", _strings("p1"), federated=True, as_of=Optional[Int64](Int64(300))))
+    var ended = _build(_spec("lovelace", _strings("p1", "p2"), federated=True, as_of=Optional[Int64](Int64(300))))
     _assert_ids(ended, _nodes(1, 2))
     assert_equal(len(ended.edges), 1)
 
@@ -433,19 +454,86 @@ def test_an_embedder_that_fails_leaves_the_text_match() raises:
             assert_true(r.scores[i].name != "semantic", "embedder mode " + String(how))
 
 
-def test_an_edge_shows_its_fact_and_falls_back_to_its_predicate() raises:
-    var r = _build(_spec("casey", _strings("p3"), federated=True))
+def test_an_edge_shows_its_fact_alone() raises:
+    var r = _build(_spec("casey", _strings("p1", "p3"), federated=True))
     assert_equal(len(r.edges), 1)
     assert_equal(r.edges[0].predicate, "Acme sponsors Casey")
     assert_equal(r.edges[0].source_id, "")
-    # An edge with no fact is labelled by its predicate.
+    # An edge with no fact has an empty label, whatever its predicate holds.
     var both = _build(_spec("alpha", _strings("p1")))
     var labels = List[String]()
     for i in range(len(both.edges)):
         labels.append(both.edges[i].predicate.copy())
     assert_equal(len(labels), 2)
     assert_equal(labels[0], "Ada works at Acme")
-    assert_equal(labels[1], "mentors")
+    assert_equal(labels[1], "")
+
+
+def _pair_ws(predicate: String) raises -> SnapshotWorkingSet:
+    var ws = SnapshotWorkingSet(DIM)
+    ws.add_entity(_entity(1, "Ada Lovelace", "p1", "fa", _vec(1.0, 0.0, 0.0, 0.0)))
+    ws.add_entity(_entity(2, "Acme Labs", "p1", "fa", _vec(0.0, 1.0, 0.0, 0.0)))
+    ws.add_edge(_edge(1, 2, predicate, "", Int64(0), TS_OPEN_SENTINEL))
+    return ws^
+
+
+def test_a_set_that_kept_the_predicate_answers_like_one_that_lost_it() raises:
+    # A loaded set reads an edge's predicate as ""; the warm set it was written
+    # from still holds it. With no fact, both must give the same bytes.
+    var warm = build_query_result(
+        _emb(), _pair_ws("works_at"), _spec("alpha", _strings("p1")), QueryConfig.default()
+    )
+    var loaded = build_query_result(
+        _emb(), _pair_ws(""), _spec("alpha", _strings("p1")), QueryConfig.default()
+    )
+    assert_equal(len(warm.edges), 1)
+    assert_equal(warm.serialize(), loaded.serialize())
+
+
+# --- guards on the query vector ------------------------------------------------
+
+
+def test_a_query_vector_of_another_dimension_than_the_graph_seeds_nothing() raises:
+    # Entities whose vectors are as short as the embedder's (a table written
+    # past the working set's checks): only the graph-wide dimension refuses them.
+    var ws = SnapshotWorkingSet(DIM)
+    for i in range(3):
+        ws.entities.append(
+            WorkingEntity(
+                Int64(10 + i), "u", String("p1"), "Zed " + String(i), _short_vec(),
+                String(""), facet_attrs_json(String("fa"), String("")),
+            )
+        )
+    var r = build_query_result(
+        OddEmbedder(1), ws, _spec("ada", _strings("p1")), QueryConfig.default()
+    )
+    assert_equal(len(r.nodes), 0)
+    assert_equal(len(r.scores), 0)
+
+
+def _short_vec() -> List[Float64]:
+    var v = List[Float64]()
+    v.append(1.0)
+    v.append(0.0)
+    v.append(0.0)
+    return v^
+
+
+def test_a_non_finite_query_vector_seeds_nothing_even_at_a_zero_floor() raises:
+    # `cosine` scores a non-finite vector 0.0, which a floor of 0.0 accepts:
+    # only the finite check keeps every entity from seeding.
+    var open_floor = QueryConfig("p", 16, 100, 4096, 32, 64, 0.0)
+    var r = build_query_result(
+        OddEmbedder(2), _ws(), _spec("zzz", _strings("p1")), open_floor
+    )
+    assert_equal(len(r.nodes), 0)
+    assert_equal(len(r.scores), 0)
+    # The same floor with a finite vector does seed, so the empty result above
+    # is the guard's doing.
+    var finite = build_query_result(
+        _emb(), _ws(), _spec("alpha", _strings("p1")), open_floor
+    )
+    assert_true(len(finite.nodes) > 0)
 
 
 def main() raises:

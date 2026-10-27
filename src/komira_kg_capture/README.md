@@ -68,13 +68,17 @@ Everything is exported from `komira_kg_capture`:
 - **A query reads what it names.** A query that names no partition reads the
   server's default partition (the one the write routes use); a federated query
   that names none reads it too. Asking for "everything" means listing the
-  partitions. The facet is a plain string compared for equality with the
+  partitions. Nothing outside the named partitions is returned: not a seed, and
+  not a neighbour across an edge from one (a federated query naming only `p1`
+  gets no `p2` node and no edge into `p2`). A federated query names at most
+  `max_partitions` distinct partitions; a longer list is refused while it is
+  read, and each name is checked as it is read. The facet is a plain string compared for equality with the
   entity's stored facet; an entity with no facet never passes a non-empty filter.
 - **Seeds and order.** An entity seeds a query when the cosine of its name
   embedding with the embedded query is at least `similarity_floor`, or when its
   name contains the query text (ASCII case folded). Semantic seeds come first,
   strongest first (equal scores by node id), then text-only seeds, then their
-  neighbours, up to `k`. A federated result does not depend on the order the
+  neighbours in the named partitions, up to `k`. A federated result does not depend on the order the
   partitions are listed in. If the embedder fails or returns a wrong-sized or
   non-finite vector, the text match still answers.
 - **Warm and cold agree.** The read is a function of the merged graph at the

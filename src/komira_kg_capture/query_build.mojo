@@ -30,9 +30,9 @@
 #
 # EDGES. Every edge between two emitted nodes, its `fact` as the result edge's
 # `predicate` (the stored edge keeps no separate predicate column, so the fact is
-# the one relation text a warm set and a loaded one share). With `as_of`, only edges whose
-# [valid_at, invalid_at) holds it, and an edge not live then brings in no
-# neighbour.
+# the one relation text a warm set and a loaded one share; an edge with no fact
+# has an empty one). With `as_of`, only edges whose [valid_at, invalid_at) holds
+# it, and an edge not live then brings in no neighbour.
 #
 # A failed or ill-sized embedding drops the semantic half: the text match still
 # answers.
@@ -296,7 +296,7 @@ def build_query_result[
                     continue
                 if not facet_ok[cand]:
                     continue
-                if not spec.federated and part_of[cand] < 0:
+                if part_of[cand] < 0:
                     continue
                 emitted_nid[cand_nid] = cand
                 emitted.append(cand)
@@ -324,10 +324,9 @@ def build_query_result[
         if edge.src_nid in emitted_nid and edge.dst_nid in emitted_nid:
             if not _edge_live(edge, spec.as_of):
                 continue
-            var label = edge.fact.copy()
-            if len(label.as_bytes()) == 0:
-                label = edge.predicate.copy()
             out.add_edge(
-                ResultEdge(edge.src_nid, edge.dst_nid, label^, edge.valid_at, String(""))
+                ResultEdge(
+                    edge.src_nid, edge.dst_nid, edge.fact.copy(), edge.valid_at, String("")
+                )
             )
     return out^

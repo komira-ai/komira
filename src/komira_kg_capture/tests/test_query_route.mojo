@@ -12,6 +12,8 @@
 #                cold server over the same store, and from a set loaded by hand.
 #   federated    two partitions merge into one ranked result, whatever order
 #                they are named in, with each node's partition as provenance.
+#   scope        a query returns nothing of a partition it does not name, even
+#                a neighbour across an edge from one it does.
 #   facet        only entities whose facet is exactly the filter's.
 #   partition    a /query names one partition or reads the default one.
 #   synthesis    the host's prompt, and the default one, reach the model
@@ -35,6 +37,9 @@ from komira_kg import (
     SnapshotWorkingSet,
     StubEmbedder,
     StubLlmClient,
+    WorkingEdge,
+    WorkingEntity,
+    facet_attrs_json,
 )
 from komira_kg_capture import (
     CaptureConfig,
@@ -46,7 +51,7 @@ from komira_kg_capture import (
     QuerySpec,
     build_query_result,
 )
-from komira_kg_format import KgSnapshotStore
+from komira_kg_format import KgSnapshotStore, TS_OPEN_SENTINEL
 from komira_kg_sources import EmptyAdapterRegistry
 from komira_objectstore.shared_in_memory_conditional_store import (
     SharedInMemoryConditionalStore,
@@ -326,6 +331,52 @@ def test_a_query_reads_one_partition_the_one_it_names_or_the_default() raises:
     _assert_labels(_federated(app, '{"q":"ada"}'), _l("Ada Lovelace D"))
     # A partition nobody wrote.
     _assert_labels(_query(app, '{"q":"ada","partition":"nobody"}'), _l())
+
+
+def _write_cross_partition_graph(shared: Backend) raises:
+    """Ada Lovelace (p1) and Bolt Co (p2), joined by one edge across them."""
+    var ws = SnapshotWorkingSet(DIM)
+    ws.add_entity(_entity_of(1, ADA, "p1", "fa", _vec(1.0, 0.0, 0.0, 0.0)))
+    ws.add_entity(_entity_of(2, BOLT, "p2", "fb", _vec(0.0, 0.0, 1.0, 0.0)))
+    ws.add_edge(
+        WorkingEdge(
+            Int64(1), Int64(2), String(""), String("Ada hired Bolt"), Int64(0),
+            TS_OPEN_SENTINEL, TS_OPEN_SENTINEL, Int64(1), Int64(1), String(""),
+        )
+    )
+    var kg = Kg(shared.clone(), "g")
+    _ = kg.write_snapshot(ws.to_tables(), DIM)
+
+
+def _entity_of(
+    nid: Int64, name: String, partition: String, facet: String, var vec: List[Float64]
+) -> WorkingEntity:
+    return WorkingEntity(
+        nid, "u" + String(nid), partition.copy(), name.copy(), vec^, String(""),
+        facet_attrs_json(facet, String("")),
+    )
+
+
+def test_a_query_returns_nothing_of_a_partition_it_does_not_name() raises:
+    var shared = Backend()
+    _write_cross_partition_graph(shared)
+    var app = _plain(shared)
+    # Ada's only neighbour is Bolt, who is in p2: not named, so not returned.
+    var fed = _federated(app, '{"q":"alpha","partitions":["p1"]}')
+    _assert_labels(fed, _l(ADA))
+    var doc = _json(fed)
+    assert_equal(doc.get("edges").array_len(), 0)
+    assert_equal(doc.get("provenance").array_len(), 1)
+    assert_equal(doc.get("provenance").element_at(0).get("source").as_string(), "partition:p1")
+    assert_false(BOLT in _text(fed))
+    assert_false("p2" in _text(fed))
+    _assert_labels(_query(app, '{"q":"alpha","partition":"p1"}'), _l(ADA))
+    # Naming both partitions returns the neighbour and the edge.
+    var both = _federated(app, '{"q":"alpha","partitions":["p1","p2"]}')
+    _assert_labels(both, _l(ADA, BOLT))
+    assert_equal(_json(both).get("edges").array_len(), 1)
+    # A p2 seed with p1 named alone finds nothing.
+    _assert_labels(_federated(app, '{"q":"Bolt","partitions":["p1"]}'), _l())
 
 
 def test_the_facet_filter_is_applied_exactly() raises:

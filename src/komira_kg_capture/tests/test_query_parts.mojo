@@ -188,6 +188,52 @@ def test_a_bad_request_is_refused_with_a_description() raises:
         _ = parse_query_request(_bytes("{not json"), "", False, "d", cfg)
 
 
+def test_the_partition_count_is_bounded_as_the_names_are_read() raises:
+    var cfg = QueryConfig("p", 16, 100, 4096, 3, 64, 0.5)
+    # Exactly the most allowed is fine, repeats included.
+    var ok = parse_query_request(_bytes('{"q":"a","partitions":["a","b","a","c","b"]}'), "", True, "d", cfg)
+    assert_equal(len(ok.partitions), 3)
+    # One name more is refused.
+    with assert_raises(contains="the most allowed is 3"):
+        _ = parse_query_request(_bytes('{"q":"a","partitions":["a","b","c","d"]}'), "", True, "d", cfg)
+    # So is a body listing far more, and a query string doing the same.
+    var body = String('{"q":"a","partitions":[')
+    var csv = String("")
+    for i in range(20000):
+        if i > 0:
+            body += ","
+            csv += ","
+        body += '"n' + String(i) + '"'
+        csv += "n" + String(i)
+    body += "]}"
+    with assert_raises(contains="the most allowed is 3"):
+        _ = parse_query_request(_bytes(body), "", True, "d", cfg)
+    with assert_raises(contains="the most allowed is 3"):
+        _ = parse_query_request(_bytes('{"q":"a"}'), "partitions=" + csv, True, "d", cfg)
+    # Names from both places count together.
+    with assert_raises(contains="the most allowed is 3"):
+        _ = parse_query_request(_bytes('{"q":"a","partitions":["c","d"]}'), "partitions=a,b", True, "d", cfg)
+
+
+def test_each_partition_name_is_checked_as_it_is_read() raises:
+    var cfg = QueryConfig("p", 16, 100, 4096, 2, 64, 0.5)
+    # A bad name ahead of a flood of names is the error reported: the flood is
+    # never reached.
+    var body = String('{"q":"a","partitions":["a\\u0001b"')
+    for i in range(50):
+        body += ',"n' + String(i) + '"'
+    body += "]}"
+    with assert_raises(contains="control byte"):
+        _ = parse_query_request(_bytes(body), "", True, "d", cfg)
+    var long = String("")
+    for _ in range(300):
+        long += "p"
+    with assert_raises(contains="partition is over"):
+        _ = parse_query_request(
+            _bytes('{"q":"a","partitions":["' + long + '","b","c","d"]}'), "", True, "d", cfg
+        )
+
+
 # --- evidence ----------------------------------------------------------------
 
 

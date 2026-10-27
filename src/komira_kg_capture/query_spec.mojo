@@ -76,14 +76,27 @@ struct QuerySpec(Copyable, Movable):
         self.federated = federated
 
 
-def _push_unique(mut out: List[String], var value: String):
+def _push_unique(
+    mut out: List[String], var value: String, max_partitions: Int
+) raises:
+    """Add a partition name unless `out` holds it. The name is checked as a
+    label, and a name that would make the list longer than `max_partitions` is
+    refused, so the scan for a repeat never runs over more than that many."""
+    check_label("partition", value)
     for i in range(len(out)):
         if out[i] == value:
             return
+    if len(out) >= max_partitions:
+        raise Error(
+            "the query names more than "
+            + String(max_partitions)
+            + " partitions; the most allowed is "
+            + String(max_partitions)
+        )
     out.append(value^)
 
 
-def _split_csv(text: String, mut out: List[String]):
+def _split_csv(text: String, mut out: List[String], max_partitions: Int) raises:
     var b = text.as_bytes()
     var start = 0
     for i in range(len(b) + 1):
@@ -91,7 +104,9 @@ def _split_csv(text: String, mut out: List[String]):
             if i > start:
                 # SAFETY: `text` is valid UTF-8 and the cut points are ASCII
                 # commas or the ends, so each piece is valid UTF-8.
-                _push_unique(out, String(unsafe_from_utf8=b[start:i]))
+                _push_unique(
+                    out, String(unsafe_from_utf8=b[start:i]), max_partitions
+                )
             start = i + 1
 
 
@@ -172,7 +187,11 @@ def parse_query_request(
 
     var partitions = List[String]()
     if federated:
-        _split_csv(query_value(query_string, String("partitions")), partitions)
+        _split_csv(
+            query_value(query_string, String("partitions")),
+            partitions,
+            config.max_partitions,
+        )
         if root.has(String("partitions")):
             var arr = root.get(String("partitions"))
             if not arr.is_array():
@@ -183,7 +202,7 @@ def parse_query_request(
                     raise Error("'partitions' must be an array of strings")
                 var p = pv.as_string()
                 if len(p.as_bytes()) > 0:
-                    _push_unique(partitions, p^)
+                    _push_unique(partitions, p^, config.max_partitions)
     else:
         var one = query_value(query_string, String("partition"))
         if len(one.as_bytes()) == 0 and root.has(String("partition")):
@@ -195,11 +214,6 @@ def parse_query_request(
             partitions.append(one^)
     if len(partitions) == 0:
         partitions.append(default_partition.copy())
-    if len(partitions) > config.max_partitions:
-        raise Error(
-            "the query names " + String(len(partitions))
-            + " partitions; the most allowed is " + String(config.max_partitions)
-        )
     for i in range(len(partitions)):
         check_label("partition", partitions[i])
 
