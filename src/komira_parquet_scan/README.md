@@ -71,11 +71,46 @@ type for a scan and widening for an aggregate):
 - `subrg_split_decode`: one row range of a row group, alone or over
   dictionaries decoded once per (row group, column).
 - `subrg_agg_plan`: the read plan of a grouped aggregate over a reader.
+- `band_producer`: `run_band_agg`, a grouped aggregate with dictionary
+  string keys folded band by band from reused buffers into a `BandSink`
+  (`komira_engine_runtime`), the band width a function of the host profile.
 - `cursor_grain_feed`: a claimed row group decoded one cache-sized grain per
   call, with the grain's split into morsels (`cursor_grain_split_emit`) and a
   move arm for flat columns (`grain_decode_move`).
 
-Every switch is a constructor or call argument or a process setter
+The morsel source:
+
+- `parquet_source`: `ParquetSource`, the `komira_morsel` `MorselSourceImpl`
+  over the row groups of one or several files (a `FileDiscovery`). Workers
+  claim row groups from one atomic cursor; a top-N boundary, the pushed
+  predicate's statistics (evaluated once at construction) and bloom filters
+  skip row groups; a decode filter, a dynamic join filter or a count-only
+  consumer take the filtered decodes (`parquet_source_claim`,
+  `parquet_source_arms`, `parquet_source_late_mat`: footer counts, counts
+  and survivors from dictionary codes, the staged filter, then the
+  late-materialized decode); otherwise the row group is decoded whole (by
+  name across files, a filter column a file lacks read as NULL), through the
+  cursor-grain route (`parquet_source_grain`), or as row ranges
+  (`parquet_source_subrg`; a range a cursor refuses is cut from the whole
+  decode of its row group, which the worker keeps for its next range of that
+  row group and drops when it finds no more ranges, so a worker holds at most
+  one whole decode; a row group that
+  would need more than `SUB_SLOT_STRIDE` ranges is not split). Morsels
+  larger than `morsel_rows` are cut (`parquet_source_emit`) and their
+  partition ids sort into file order; a coarse range-split morsel takes the
+  id of the first range it holds, so coarse morsels are ordered only
+  approximately. `ParquetScanOptions.validate` runs at construction and
+  refuses a `subrg_mode` outside 0..2, `subrg_units_per_rg` below 1 in mode
+  2, and a negative `subrg_emit_rows`. Not covered at the source level: the
+  declined selective decode (`decode_rows_of` returning None) is never
+  reached through the source's routes; the reordered-projection test pins
+  only the projection order of the survivors.
+- `parquet_source_options`: `ParquetScanOptions`, the source's switches, and
+  its pure decisions (claim stride, selection-pipeline deferral, partition
+  ids, hooks to capabilities, projection names to indices).
+
+The worker count is the caller's (its host profile's), so the source probes
+no machine. Every switch is a constructor or call argument or a process setter
 (`set_cursor_grain_enabled`, `set_grain_decode_move_enabled`,
 `set_cursor_grain_split_enabled`); nothing reads the environment.
 

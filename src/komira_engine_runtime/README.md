@@ -29,6 +29,15 @@ operator or a sink consumes but does not implement belongs here.
   (`native_spill`). Whether a breaker may spill, and to
   which tiers, is `HostProfile.spill_tiers_for`, recorded in the physical
   plan.
+- Spill arbitration (`spill.spillable_op`, `spill.policies`,
+  `spill.spill_arbitrator`, `spill.intra_op_slab_arbitrator`,
+  `spill.op_coordinator`, `spill.routed_grow`): when a grow would pass a byte
+  budget, the arbitrator spills the oldest spillable op (or, within one
+  operator, partition) and reports the bytes freed. A breaker's grow that its
+  `MemoryReservation` refuses spills one of its own partitions and retries
+  once (if that retry is refused too, the freed bytes stay released and the
+  result is False); a negative grow, or one above the whole budget, is
+  refused without spilling. Only the oldest-first policy is implemented.
 - The parallel RecordBatch concat (`streaming_concat_parallel`, the public
   entry points; `concat_fan_plan` decides the route and the fan from the bytes
   moved and the pool's worker count; `concat_tasks`, `concat_tiled`,
@@ -39,6 +48,16 @@ operator or a sink consumes but does not implement belongs here.
   encode scratch with a bounded high-water) and the driver-side retention
   policy (`shuffle_retention_policy`: reaps sealed epochs below the slowest
   durable consumer cursor, at a cadence, fail-safe).
+- The shuffle producer's streaming combine (`spill.shuffle_stream_combine`):
+  writes a producer's R partition slices into one `.seg` object through a
+  streaming write, byte-identical to what `komira_shuffle`'s `SegWriter` builds.
+  With a byte budget, a partition above the budget is staged in a
+  `SpillStorage` in chunks of at most the budget and streamed back, and the
+  result reports the most bytes the combine itself staged at once, never above
+  the budget. That bounds the combine's own staging, not process memory: the
+  slice the source hands over for a partition is outside it. A failure from the source, the spill storage or the file system is
+  raised to the caller after the spilled chunks are released and the partial
+  write is aborted.
 - Counters, the FNV-1a hash (`spill.fnv1a`), and the small
   shared row and column helpers (`row`, `group_ref`, `scan_source`,
   `streaming_morsel`, `dynamic_filter`, `band_sink`).

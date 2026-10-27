@@ -17,9 +17,16 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # flat columns built from their buffers (subrg_columns), a predicate over a
 # decoded batch (batch_filter), the collect sink (scan_chunk_sink), the
 # sub-row-group scan (subrg_scan_executor), row-range decodes
-# (subrg_split_decode), the aggregate read plan (subrg_agg_plan) and the
-# cursor-grain route (cursor_grain_feed, with its split in
-# cursor_grain_split_emit and its move arm in grain_decode_move).
+# (subrg_split_decode), the aggregate read plan (subrg_agg_plan), the band
+# producer (band_producer) and the cursor-grain route (cursor_grain_feed,
+# with its split in cursor_grain_split_emit and its move arm in
+# grain_decode_move).
+#
+# Morsel source: ParquetSource (parquet_source) with its options and pure
+# decisions (parquet_source_options), its emit (parquet_source_emit), the
+# filtered decode of a claim (parquet_source_claim, parquet_source_arms,
+# parquet_source_late_mat), the cursor-grain route (parquet_source_grain) and
+# the row-range split (parquet_source_subrg).
 #
 # Welded tests (each against files written by komira_test_parquet_file, or
 # hand-built values):
@@ -65,6 +72,27 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   selective decode, a UINT_32 dictionary chunk.
 # - test_subrg_split_decode_direct: the plan probe, page boundaries, row
 #   ranges alone and over shared dictionaries, refusals.
+# - test_band_producer_direct: SUM / COUNT per string key on every value arm
+#   (PLAIN, dictionary, zero copy), the band-carried filter, the abort on a
+#   null, the refusal of a non-string key, the band width.
+# - test_parquet_source_options_direct: the claim stride, the deferral, the
+#   partition ids, the dictionary count shape, hooks to capabilities, the
+#   sub-morsel cut and the emit of a count.
+# - test_parquet_source_direct: the source drained by 3 workers: file order
+#   (whole and cut morsels), the setup prune, a decode filter on each payload
+#   route with NULLs dropped, a file lacking the filter column read as NULL,
+#   claim units and order, the worker count refused.
+# - test_parquet_source_arms_direct: footer counts and all-match row groups
+#   (option on and off), dictionary-code counts and survivors with no whole
+#   decode, the staged filter, a dynamic join filter, a top-N boundary,
+#   parked sub-morsels, the cursor-grain route, the row-range split (fine and
+#   coarse) and the hash-aggregate payload.
+# - test_parquet_source_whole_decode_direct: every row, name, type and cell
+#   of the plain, cursor-grain and row-range routes equal to the whole
+#   decode (NULL-bearing, unsigned, TIMESTAMP-annotated and zero-dictionary-
+#   offset columns), coarse row-range morsels with no row lost or repeated,
+#   unsigned dictionary columns under a pushed count and filter, and a
+#   selective filter over a reordered projection under every gate.
 # - test_cursor_grain_feed_direct: the grain formula, every row once grain by
 #   grain on the copy and the move arm with their byte counters crossing, the
 #   refusal of strings and of a column that may hold a null, the gates.
@@ -81,21 +109,29 @@ mojo_library(
         "//src/komira_collections:komira_collections",
         "//src/komira_column_kernels:komira_column_kernels",
         "//src/komira_counters:komira_counters",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_engine_runtime:komira_engine_runtime",
         "//src/komira_fs:komira_fs",
         "//src/komira_morsel:komira_morsel",
         "//src/komira_parquet:komira_parquet",
         "//src/komira_parquet_api:komira_parquet_api",
         "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_stats:komira_plan_stats",
         "//src/komira_scan_planning:komira_scan_planning",
+        "//src/komira_scan_source:komira_scan_source",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
+        "tests/test_band_producer_direct.mojo",
         "tests/test_cursor_grain_feed_direct.mojo",
         "tests/test_parked_morsel_share_concurrent.mojo",
         "tests/test_parked_morsel_share_direct.mojo",
         "tests/test_parquet_reader_direct.mojo",
         "tests/test_parquet_reader_factory_direct.mojo",
+        "tests/test_parquet_source_arms_direct.mojo",
+        "tests/test_parquet_source_direct.mojo",
+        "tests/test_parquet_source_options_direct.mojo",
+        "tests/test_parquet_source_whole_decode_direct.mojo",
         "tests/test_rg_prune_counter_direct.mojo",
         "tests/test_scan_chunk_sink_direct.mojo",
         "tests/test_staged_filter_direct.mojo",

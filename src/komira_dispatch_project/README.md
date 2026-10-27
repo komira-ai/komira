@@ -46,6 +46,10 @@ Each output expression takes one route (`compute_project_routes` holds the predi
 
 `lower_untyped_expr`, `lower_untyped_expr_ops` and `lower_untyped_expr_dtype` call one another, so they are one unit of the package.
 
+## The dense FLOAT64 evaluator
+
+`try_eval_dense_f64` admits a tree of FLOAT64 and INT64 column leaves, literals and the four FLOAT64 arithmetic operators (`+ - * /`), and declines any other node, a column of another type or layout, a column the batch does not hold, a column shorter than the batch, and a cyclic pool; the caller then runs the walker. Over an admitted tree its answer, and the answer of `try_eval_dense_f64_pooled` over a started runtime, is bit-identical to the walker's: NaN, signed zero, infinities and division by zero included. Like the walker it reads a NULL slot's payload and returns a column with no validity bitmap; `compute_project` routes a strict arithmetic expression over an input that holds a NULL to the column evaluator before the dense evaluator is asked. `tests/test_project_dense_f64_differential.mojo` compares the two evaluators by bit pattern, including NaN payloads and, for the pooled form, the same special values and NULL slots over a ragged last task, and `tests/test_project_dense_f64_admission.mojo` checks each decline.
+
 ## Tests
 
 `tests/` holds the package's tests; every one is listed in `test_srcs` in the package `BUCK` file, so the library is not produced unless all of them pass.

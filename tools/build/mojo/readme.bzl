@@ -20,6 +20,7 @@ This module loads only providers.bzl, so defs.bzl can load it.
 """
 
 load(":providers.bzl", "ZigExeInfo")
+load(":test_limit.bzl", "hang_limit_flags")
 
 # The README examples tool, a Zig executable: no Mojo library, so any
 # package, its own included, may hold a README.
@@ -152,5 +153,6 @@ def readme_gate(ctx, tc, import_name, ungated_tset, link_tail, env_args, ships, 
         link_tail = link_tail,
         env_args = env_args,
         rerun = rerun,
+        hang_flags = hang_limit_flags(str(ctx.label.raw_target()), ctx.attrs.test_hang_limit_s),
     ))
     return marker, src, examples, objects
