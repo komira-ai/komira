@@ -18,6 +18,8 @@ PYTHON_SURFACE = [
     # The hello test of python_binding_test, and the home of the binding tests
     # of the shared library (komira_so).
     "tools/build/examples/python_binding",
+    # The Python binding of the shared library.
+    "python",
 ]
 
 PYTHON_CEILING = [

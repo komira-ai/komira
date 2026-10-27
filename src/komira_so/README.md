@@ -191,4 +191,4 @@ and finds the Mojo runtime in `lib/` beside it
 ## Not done
 
 No golden file, generated header or version check yet; no plan execution, query
-or UDF call; no engine in the session; no language binding.
+or UDF call; no engine in the session. The Python binding (loader, ABI check, `Session`) is `python/komira`, tested by `komira//python:native_test`; no other language binding yet.

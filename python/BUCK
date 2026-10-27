@@ -1,0 +1,33 @@
+load("@komira//tools/build/python:defs.bzl", "python_binding_test")
+
+# The Python binding of libkomira (src/komira_so): `komira/_native.py` is the
+# ctypes loader, ABI check and typed exports (the only module that knows
+# ctypes), `_wire.py` decodes the WireSchema bytes into a pyarrow.Schema, and
+# `_session.py` is the Session. native_test.py runs them against the real
+# library as a build action: the target exists only if every test passed.
+python_binding_test(
+    name = "native_test",
+    src = "native_test.py",
+    srcs = [
+        "komira/__init__.py",
+        "komira/_native.py",
+        "komira/_session.py",
+        "komira/_wire.py",
+    ],
+    args = ["--parquet", "$(location //src/komira_so:tests/fixtures/two_columns.parquet)"],
+    # libkomira links its seven C owners as shared libraries of their own
+    # (native_owners): the loader needs them beside it.
+    libs = ["//src/komira_so:libkomira"] + [
+        "//src/%s:%s_native" % (p, p)
+        for p in [
+            "komira_async",
+            "komira_async_api",
+            "komira_compression",
+            "komira_fs",
+            "komira_libc",
+            "komira_metrics",
+            "komira_scan_source",
+        ]
+    ],
+    deps = ["//third_party/python:pyarrow"],
+)

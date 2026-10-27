@@ -28,6 +28,7 @@ TARGETS = [
     "komira//bin/kci:runnable_readme_examples",
     "komira//bin/kci:test_kci_process",
     "komira//packaging/images/base:komira_base",
+    "komira//python:native_test",
     "komira//release/ci:check_release_ref",
     "komira//release/ci:main_red",
     "komira//release/readme_e2e/verify:all",

@@ -147,4 +147,10 @@ mojo_shared_lib(
         "//src/komira_metrics:komira_metrics_native",
         "//src/komira_scan_source:komira_scan_source_native",
     ],
+    visibility = ["PUBLIC"],
 )
+
+# The Parquet fixture of the tests, also read by the Python binding's test
+# (//python:native_test), which compares the schema libkomira returns with
+# pyarrow's own reading of the same file.
+export_file(name = "tests/fixtures/two_columns.parquet", visibility = ["//python:"])
