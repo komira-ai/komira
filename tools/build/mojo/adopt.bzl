@@ -76,6 +76,7 @@ load(":native_facts.bzl", "native_facts")
 load(":opt_level.bzl", "TEST_OPT_LEVEL")
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoToolchainInfo", "welded_tests_info")
 load(":readme.bzl", "readme_gate")
+load(":test_limit.bzl", "HANG_LIMIT_ATTRS")
 
 # The README examples tool of mojo_library (readme.bzl): Zig, so it depends on no Mojo library.
 _README_TOOL = "komira//tools/build/readme_examples:tool"
@@ -206,7 +207,7 @@ _adopted = rule(
         "test_srcs": attrs.list(attrs.source()),
         "test_runs": attrs.dep(),
         "toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
-    } | DLOPEN_ATTRS | RERUN_ATTRS,
+    } | DLOPEN_ATTRS | HANG_LIMIT_ATTRS | RERUN_ATTRS,
 )
 
 def _mojo_adopted_library(**kwargs):
