@@ -10,6 +10,8 @@
 // typed array, a Vector or an array. The imports from apache-arrow are
 // types only: esbuild drops them, so the bundle carries no Arrow code.
 
+import { mkdirSync, readdirSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Float64, Int64, RecordBatch, Vector } from 'apache-arrow';
 
 type I64 = bigint | null;
@@ -280,13 +282,51 @@ export function spin_forever(x: Vector<Int64>): Vector<Int64> {
   for (;;) if (x.length < 0) return x;
 }
 
-// Spins on the CPU for `ms` milliseconds of wall time per row.
-export function spin(ms: bigint): bigint {
-  const end = performance.now() + Number(ms);
-  while (performance.now() < end) {
-    // busy
+// A rendezvous across worker processes: returns `n` once `n` live workers
+// of the one engine process (their common parent) have each entered this
+// function, and fails if they have not within RENDEZVOUS_SAFETY_MS. Each
+// worker announces itself with a file named by its pid in a directory keyed
+// by the parent pid, and counts the announced pids that are still alive.
+// Workers served one after another can never see each other here, so the
+// call returns only if the workers really run at the same time. The safety
+// limit only ends a hang with an error; no result depends on it being short.
+const RENDEZVOUS_SAFETY_MS = 60_000;
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
   }
-  return ms;
+}
+
+let announced = false;
+
+export function rendezvous(n: bigint): bigint {
+  const want = Number(n);
+  const dir = join(process.env.TMPDIR ?? '/tmp', `komira-udf-rendezvous-${process.ppid}`);
+  mkdirSync(dir, { recursive: true });
+  const mine = join(dir, String(process.pid));
+  if (!announced) {
+    announced = true;
+    writeFileSync(mine, '');
+    process.once('exit', () => {
+      try {
+        unlinkSync(mine);
+        rmdirSync(dir);
+      } catch {
+        // another worker's file remains, or it is already gone
+      }
+    });
+  }
+  const end = performance.now() + RENDEZVOUS_SAFETY_MS;
+  for (;;) {
+    const here = readdirSync(dir).filter((f) => pidAlive(Number(f))).length;
+    if (here >= want) return n;
+    if (performance.now() >= end) throw new Error(`rendezvous: ${here} of ${want} workers arrived`);
+    sleepMs(2);
+  }
 }
 
 export function returns_float(_x: I64): number {

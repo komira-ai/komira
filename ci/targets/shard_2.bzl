@@ -7,6 +7,7 @@ TARGETS = [
     "komira//bin/kci:test_kci_process",
     "komira//packaging/images/base:komira_base",
     "komira//release:mopm_artifacts",
+    "komira//release:prod_claimed_names_cases",
     "komira//release:release_set",
     "komira//src/komira_aws_ecs:komira_aws_ecs_conda",
     "komira//src/komira_aws_iam:komira_aws_iam_conda",

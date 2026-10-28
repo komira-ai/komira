@@ -136,3 +136,37 @@ def main() raises:
     assert_equal(doc, '{"name":"deploy","at":"2026-10-01T00:00:00Z"}')
     assert_equal(decode_json[Event](doc).at.value().seconds, Int64(1790812800))
 ```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_wkt`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_wkt/`, its tests are `tests/`. It depends on four sibling packages,
+`komira_datetime`, `komira_encoding`, `komira_json` and `komira_proto_codec` (`[dependencies]` of `mopm.toml`, each
+`{ path = "../<name>", version = "0.1" }`), so the `.conda` of this package records `mojo-komira_datetime >=0.1,<0.2`,
+`mojo-komira_encoding >=0.1,<0.2`, `mojo-komira_json >=0.1,<0.2` and `mojo-komira_proto_codec >=0.1,<0.2` as
+dependencies and holds none of their files. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependencies and where the library and its tests are |
+| `mopm.lock` | the toolchain pins and the path dependencies, direct and transitive (no registry is reached: every dependency is a sibling) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `coverage_floor.txt` | `lines NN.NN` and `branches NN.NN`: the least coverage `:coverage` may measure; `:coverage_floor` fails when either falls below |
+| `coverage_held` | the metrics this package holds at the coverage target |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifests of the siblings; `buildrules mojo check` fails when they are stale |
+
+`tests/test_*.mojo` are the package's tests and weld to `:lib`. `fixture_tests/test_wkt_value_null_field.mojo` reads a
+message type generated from `tests/value_null.proto`, so it cannot be one of them: it is the test of the
+`value_null_proto` target in `BUCK`. `generated/` holds that target's committed generator output
+(`tools/build/gen/README.md`); it is not the library, which is hand-written under `src/`. `value_null_proto_fresh`
+compares it with what the generator writes now and is the first gate of `value_null_proto`; regenerate with
+`./buck2 run komira//tools/build/gen:regen -- komira//src/komira_wkt:`.
+
+After any change to a source, a test, or a manifest of this package or of a sibling, run `buildrules mojo sync` with
+the packages staged, commit what it writes, and build `komira//src/komira_wkt:lib` on the farm.
+
+`:conda` is buildrules' `mojo_conda` over `:lib`, packed with the manifests of the path dependencies beside its own
+(`members`); `:conda_holds` reads it back and fails when the dependencies are not exactly the four above.
+`:komira_wkt` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`): its `deps` are the adopted target of
+each package in `[dependencies]`, and the rule refuses a list that is not the closure `:lib` was built from. It also
+compiles and runs the README's examples (`[tests][readme]`) against `:lib`.
