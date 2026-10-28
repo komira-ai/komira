@@ -58,7 +58,7 @@ Configuration arrives as arguments, not from the environment. A binary parses it
 
 `SharedEngine(num_workers, filter)` allocates `num_workers + 1` rings of `DEFAULT_RING_CAPACITY` (4,096, defined in `komira_spsc_ring/spsc_ring.mojo`) records. Worker rings use `OVERFLOW_DROP`; the last ring, the fallback slot, uses `OVERFLOW_BLOCK`. It also holds the `SiteDictionary` (`site_id` to format, `module_id` to module), a `CalibrationAnchor` that converts ticks to wall time at drain time (`refresh_anchor`), the global level and the `EnvFilter`, one `LogSink`, and a pthread TLS key for the worker id (`worker_id_tls.mojo`). Logs, span opens, span closes and metric points share one ring; `LogEventRecord.kind` is `REC_LOG`, `REC_SPAN_OPEN`, `REC_SPAN_CLOSE` or `REC_METRIC`.
 
-`LogManager.install(engine)` moves an engine to the heap, leaks it, and parks its address in a C static (`engine/_log_holder_shim.c`). The first install wins and later ones are no-ops.
+`LogManager.install(engine)` moves an engine to the heap, leaks it, and parks its address in a C static (`native/komira_log_holder.c`). The first install wins and later ones are no-ops.
 
 ### How is a ring drained?
 

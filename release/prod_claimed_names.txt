@@ -23,6 +23,7 @@ komira_kafka_server
 komira_kg_mode
 komira_kg_spec
 komira_libc
+komira_log
 komira_lz4
 komira_mail_address
 komira_mcp_server
