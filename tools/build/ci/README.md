@@ -55,10 +55,12 @@ the fixture package (`fixture/`).
 A target's `deps` are literal labels and no rule can query the graph, so the
 lists are generated and checked in: `ci/targets.bzl` loads eight shards,
 `ci/targets/shard_<n>.bzl`, and exposes `TARGETS` and `TESTS` (the sorted union
-of theirs). One command regenerates the loader and every shard:
+of theirs). One command regenerates the loader and every shard. It assigns the generator's output and
+copies only from a directory that is not `/`: with an empty output (the generator failed) the
+bare `cp ... "$(...)"/. ci/` would copy the whole filesystem into `ci/`:
 
 ```sh
-cp -rL --no-preserve=mode "$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate)"/. ci/
+out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d "$out" ] && [ "$out" != / ] && cp -rL --no-preserve=mode "$out"/. ci/
 ```
 
 The script builds the files into a directory of `buck-out` and prints it, so

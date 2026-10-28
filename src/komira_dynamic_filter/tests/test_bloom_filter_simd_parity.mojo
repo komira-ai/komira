@@ -22,12 +22,22 @@
 # at the statistical level.
 # =============================================================================
 
+from std.bit import pop_count
 from std.testing import TestSuite, assert_true, assert_equal
 
 from komira_dynamic_filter.bloom_filter import (
     BloomFilter,
     _block_check,
+    _block_mask_simd,
     _block_mask_word,
+    SALT_0,
+    SALT_1,
+    SALT_2,
+    SALT_3,
+    SALT_4,
+    SALT_5,
+    SALT_6,
+    SALT_7,
 )
 
 
@@ -295,6 +305,28 @@ def test_setting_more_bits_is_monotonic() raises:
             )
 
 
+def test_simd_mask_lanes_equal_scalar_mask_word() raises:
+    """Lane i of `_block_mask_simd(x)` is `_block_mask_word(x, SALT_i)` and has
+    exactly one bit set, for hashes that exercise the top five bits of x * salt
+    (a salt applied to the wrong lane, or a shift other than 27, disagrees)."""
+    var salts = List[UInt32]()
+    salts.append(SALT_0)
+    salts.append(SALT_1)
+    salts.append(SALT_2)
+    salts.append(SALT_3)
+    salts.append(SALT_4)
+    salts.append(SALT_5)
+    salts.append(SALT_6)
+    salts.append(SALT_7)
+    for n in range(2000):
+        var x = UInt32(n) * UInt32(2654435761) + UInt32(n)
+        var v = _block_mask_simd(x)
+        for lane in range(8):
+            var want = _block_mask_word(x, salts[lane])
+            assert_equal(v[lane], want, "lane " + String(lane) + " x " + String(x))
+            assert_equal(pop_count(want), 1)
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_all_zero_block_always_false]()
@@ -303,4 +335,5 @@ def main() raises:
     suite.test[test_alternating_word_pattern]()
     suite.test[test_insert_probe_round_trip]()
     suite.test[test_setting_more_bits_is_monotonic]()
+    suite.test[test_simd_mask_lanes_equal_scalar_mask_word]()
     suite^.run()

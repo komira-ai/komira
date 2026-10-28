@@ -49,7 +49,7 @@ from komira_async.runtime.local_dispatcher import LocalDispatcher
 from komira_collections.slab import Slab
 from komira_column_format.column_format_storage import ColDescriptor
 from komira_op_agg_row_api.agg_spec import AggSpec
-from komira_engine_runtime.morsel_sizing_policy import MorselSizingPolicy
+from komira_host_profile.morsel_sizing_policy import MorselSizingPolicy
 from komira_morsel.dynamic_join_filter import DynamicJoinFilter
 from komira_scan_source.scan_registry import ScanRegistry
 from komira_parquet.runtime_footer_cache import ParquetMetadataCache

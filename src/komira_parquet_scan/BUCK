@@ -135,6 +135,7 @@ mojo_library(
         "//src/komira_engine_runtime:komira_engine_runtime",
         "//src/komira_exec_types:komira_exec_types",
         "//src/komira_fs:komira_fs",
+        "//src/komira_host_profile:komira_host_profile",
         "//src/komira_morsel:komira_morsel",
         "//src/komira_parquet:komira_parquet",
         "//src/komira_parquet_api:komira_parquet_api",
