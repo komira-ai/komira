@@ -32,7 +32,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from komira_engine_runtime.host_profile import (
+from komira_host_profile.host_profile import (
     HostProfile,
     reference_host_profile,
 )

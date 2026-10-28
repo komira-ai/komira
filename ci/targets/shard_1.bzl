@@ -41,6 +41,7 @@ TARGETS = [
     "komira//src/komira_gcp_fcm:komira_gcp_fcm_conda",
     "komira//src/komira_git:komira_git_conda",
     "komira//src/komira_group_ratchet:komira_group_ratchet_conda",
+    "komira//src/komira_host_profile:komira_host_profile_conda",
     "komira//src/komira_http_auth:komira_http_auth_conda",
     "komira//src/komira_iceberg_catalog:komira_iceberg_catalog_conda",
     "komira//src/komira_iceberg_catalog:test_iceberg_rest_loopback",

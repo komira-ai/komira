@@ -33,6 +33,14 @@ batch by it.
 - `sort_topn_heap`: `topn_heap_select`, multi-key top-K over a
   `RecordBatch` by a bounded heap, O(N log K), for INT64 / INT32 / FLOAT64 /
   STRING keys.
+- `sort_buffer_untyped`: `SortBuffer_Untyped`, a multi-key sort buffer
+  whose column types are known only at run time (a `ColDescriptor` layout
+  over `komira_column_format` storage), fed from `BatchView`s and read back
+  per DType; its cell codec is `sort_buffer_cells`. It does not track
+  validity: a NULL cell sorts as its value bytes, so callers keep nullable
+  keys out or place nulls themselves. TIMESTAMP, DECIMAL128 and BINARY
+  columns can be fed and ordered but have no typed reader; the order is in
+  `sorted_indices`.
 - `sort_loser_tree`: `LoserTree`, a tournament tree for the k-way merge of
   sorted runs, driven by a caller's `LoserTreeComparator`.
 
