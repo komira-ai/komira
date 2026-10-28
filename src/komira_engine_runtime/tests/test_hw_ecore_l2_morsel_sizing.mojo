@@ -37,15 +37,18 @@ from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, Schema, SchemaBuilder
-from komira_engine_runtime.hardware_detect import detect_hardware_profile
-from komira_engine_runtime.hardware import (
+from komira_engine_runtime.hardware_detect import (
+    default_hardware_profile,
+    detect_hardware_profile,
+)
+from komira_host_profile.hardware import (
     HardwareProfile,
     DEFAULT_E_CORE_L2_BYTES,
     DEFAULT_E_CORES_PER_L2,
     E_CORE_L2_BUDGET_NUM,
     E_CORE_L2_BUDGET_DEN,
 )
-from komira_engine_runtime.morsel_sizing_policy import (
+from komira_host_profile.morsel_sizing_policy import (
     MorselSizingPolicy,
     MAX_MORSEL_ROWS_DEFAULT,
 )
@@ -159,7 +162,7 @@ def test_budget_accessor_pathological_zero_l2_uses_default() raises:
 def test_defaults_populates_ecore_l2_fields() raises:
     """`defaults()` carries the E-cluster shape: 4 MiB / 4 -> 1 MiB per
     worker, so the budget accessor is sane even on the fall-back path."""
-    var fb = HardwareProfile.defaults()
+    var fb = default_hardware_profile()
     assert_equal(fb.e_core_l2_bytes, DEFAULT_E_CORE_L2_BYTES)
     assert_equal(fb.e_cores_per_l2, DEFAULT_E_CORES_PER_L2)
     assert_equal(

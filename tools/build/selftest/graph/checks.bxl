@@ -6,22 +6,78 @@
 # check names from the build graph into a file, and runs the check's Zig
 # checker over that file as a build action on the check's execution
 # platform. A finding fails that action, so `buck2 bxl` exits non-zero;
-# release/ci/build_targets.sh runs this for every graph_check of a batch.
+# .github/workflows/pr.yml runs this for every graph_check.
 #
 # The checks:
 #   selftest_closure  the unconfigured labels of the configured closure
 #                     (`deps()`, every kind of dependency) of the check's
 #                     target patterns; the checker refuses a label of the
 #                     check's cell under src/.
+#   python_closure    the configured closure (`deps()`, every kind of
+#                     dependency: target, exec and toolchain) of the check's
+#                     target patterns as a graph: each node's label and rule
+#                     kind, its direct dependencies (`deps()` of the node,
+#                     every kind again) and its source files; the paths of
+#                     every file of the check's trees and files; the
+#                     .textproto and .github/ workflow files themselves,
+#                     staged for the checker to read; and the allowlist. The
+#                     checker refuses Python outside the allowlist
+#                     (graph_checks.zig).
 
+load("@komira//tools/build/lint:doc_tree.bzl", "DocTreeInfo")
 load("@komira//tools/build/selftest/graph:graph_check_info.bzl", "GraphCheckInfo")
 
-def _closure_labels(ctx, patterns):
-    universe = " + ".join(patterns)
+def _closure_labels(ctx, info, _actions):
+    universe = " + ".join(info.targets)
     closure = ctx.cquery().eval("deps({})".format(universe))
-    return sorted({str(t.label.raw_target()): True for t in closure}.keys())
+    return struct(facts = sorted({str(t.label.raw_target()): True for t in closure}.keys()), args = [])
+
+def _path(ctx, artifact):
+    return get_path_without_materialization(artifact, ctx)
+
+def _scanned(path):
+    """Whether the python_closure checker reads the file itself: a kci
+    textproto (its `executable:` fields) or a GitHub workflow or action
+    (its `run:` lines and `uses:` actions)."""
+    if path.endswith(".textproto"):
+        return True
+    if path.startswith(".github/workflows/") or path.startswith(".github/actions/"):
+        return path.endswith(".yml") or path.endswith(".yaml")
+    return False
+
+def _python_closure(ctx, info, actions):
+    universe = " + ".join(info.targets)
+    closure = ctx.cquery().eval("deps({})".format(universe))
+    facts = []
+    for t in closure:
+        facts.append("node\t{}\t{}\t{}".format(t.label, t.label.raw_target(), t.rule_type))
+        for d in t.deps():
+            facts.append("dep\t{}\t{}".format(t.label, d.label))
+        for s in t.sources():
+            facts.append("src\t{}\t{}".format(t.label, _path(ctx, s)))
+    files = dict(info.files)
+    for prefix, tree in info.trees.items():
+        target = ctx.configured_targets(tree)
+        tree_files = ctx.analysis(target).providers()[DocTreeInfo].files
+        if not tree_files:
+            fail("graph_check {}: the tree {} holds no file".format(info.label, tree))
+        for p, a in tree_files.items():
+            files[prefix + p] = a
+    scan = {}
+    for p in sorted(files.keys()):
+        facts.append("file\t" + p)
+        if _scanned(p):
+            scan[p] = files[p]
+            facts.append("scan\t" + p)
+    for s in info.surface:
+        facts.append("surface\t" + s)
+    for c in info.ceiling:
+        facts.append("ceiling\t" + c)
+    scan_dir = actions.symlinked_dir("graph_check/{}.scan".format(info.check), scan)
+    return struct(facts = facts, args = ["--scan", scan_dir])
 
 _COLLECT = {
+    "python_closure": _python_closure,
     "selftest_closure": _closure_labels,
 }
 
@@ -30,8 +86,9 @@ def _check_impl(ctx):
     info = ctx.analysis(target).providers()[GraphCheckInfo]
     if info.check not in _COLLECT:
         fail("graph_check {}: no check named `{}` in checks.bxl (checks: {})".format(info.label, info.check, ", ".join(sorted(_COLLECT.keys()))))
-    facts = _COLLECT[info.check](ctx, info.targets)
     actions = ctx.bxl_actions(exec_compatible_with = info.exec_compatible_with).actions
+    collected = _COLLECT[info.check](ctx, info, actions)
+    facts = collected.facts
     facts_file = actions.write("graph_check/{}.facts".format(info.check), facts + [""])
     result = actions.declare_output("graph_check/{}.ok".format(info.check))
     actions.run(
@@ -45,6 +102,7 @@ def _check_impl(ctx):
             info.label,
             "--facts",
             facts_file,
+            collected.args,
             "--out",
             result.as_output(),
         ),

@@ -6,7 +6,8 @@ load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode", "proto_fixtu
 # `optimized_plan.proto` is the optimized plan (docs/design/optimized_plan.md,
 # komira-ai/komira#1094, stage 4): the `OptimizedPlan` header and body, the
 # declared needs, snapshot pins and advice, and the segments of a cut plan. It
-# imports `plan.proto` for the plan body. No codec reads it yet (stage 5).
+# imports `plan.proto` for the plan body. komira_optimized_plan_header reads
+# its header; no codec reads the body yet (stage 5).
 #
 # `plan_vocabulary.proto` is the language-agnostic half of the plan wire: every
 # enumerated tag space a plan or expression node can name. It mirrors the
@@ -50,6 +51,7 @@ _CENSUS = [
     "tests/test_plan_enum_numbers_nodes.mojo",
     "tests/test_plan_enum_numbers_functions.mojo",
     "tests/test_optimized_plan_field_numbers.mojo",
+    "tests/test_plan_field_numbers_udf.mojo",
 ]
 
 # One golden per message of optimized_plan.proto, each named for its message
@@ -186,3 +188,20 @@ proto_encode(
     root = "komira.plan.v1.OptimizedPlan",
     txtpb = "tests/fixtures/optimized/hostile/{}.txtpb".format(_UNDECLARED),
 )
+
+# The `OptimizedPlan` goldens that komira_optimized_plan_header's welded tests
+# read through its header codec: protoc's bytes and this package's encoding
+# of the full golden, and protoc's bytes of the undeclared-`write_target.format`
+# hostile fixture.
+[
+    export_file(
+        name = "header_fixture_" + stem.replace("/", "_").replace(".", "_"),
+        src = "tests/fixtures/optimized/" + stem,
+        visibility = ["//src/komira_optimized_plan_header:"],
+    )
+    for stem in [
+        "golden/optimized_plan.canonical.hex",
+        "golden/optimized_plan.hex",
+        "hostile/optimized_plan_undeclared_write_format.canonical.hex",
+    ]
+]

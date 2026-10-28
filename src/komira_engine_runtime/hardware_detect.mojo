@@ -4,7 +4,7 @@
 #
 # `detect_hardware_profile()` is the only code in the engine that reads the
 # machine's CPU, cache and memory shape. It is called when the host profile is
-# built (`host_profile.detect_host_profile`), once per host process; lowering
+# built (`host_detect.detect_host_profile`), once per host process; lowering
 # and morsel sizing then read the recorded value and never probe again. It
 # keeps no state of its own: each call re-runs the probes.
 #
@@ -62,7 +62,7 @@
 # container), `detect()` prints a one-line warning to stdout (Mojo
 # Mojo's `print(...)` has no `file=stderr` parameter, so we prefix
 # with `"komira: warning:"` matching the project convention in
-# `pthread_worker.mojo`) and returns `HardwareProfile.defaults()`. Does
+# `pthread_worker.mojo`) and returns `default_hardware_profile()`. Does
 # NOT raise. maintainer directive (Q2): warn-and-fall-back so a
 # customer with sysfs-blocked containers gets a clear triage signal
 # instead of silent pessimistic defaults.
@@ -82,7 +82,7 @@ from std.ffi import external_call, c_int
 from std.memory import UnsafePointer, alloc
 from std.sys.info import CompilationTarget
 
-from komira_engine_runtime.hardware import (
+from komira_host_profile.hardware import (
     HardwareProfile,
     DEFAULT_L1D_BYTES,
     DEFAULT_L2_BYTES,
@@ -173,6 +173,39 @@ def _ffi_null_byte() -> UnsafePointer[UInt8, _FFI_ORIGIN]:
 
 
 
+def default_hardware_profile() -> HardwareProfile:
+    """Apple-Silicon-shaped conservative defaults.
+
+    Used as the warn-and-fall-back result on platforms where detection
+    is unavailable (e.g. sysfs missing in a hardened container).
+    `l1d_min_bytes` is `DEFAULT_L1D_BYTES` (homogeneous-silicon shape).
+
+    Core count comes from `_process_physical_core_count()` (the process-wide
+    snapshot), NOT a live `num_physical_cores()` -- the latter is
+    affinity-aware on Linux, so a thread that pinned itself would get a
+    one-core profile out of this fallback.
+    """
+    var cores = _process_physical_core_count()
+    if cores < 1:
+        cores = 4
+    return HardwareProfile(
+        cores,                    # physical_cores
+        cores,                    # logical_cores (HT not distinguished)
+        DEFAULT_L1D_BYTES,
+        DEFAULT_L2_BYTES,
+        DEFAULT_L3_BYTES,
+        DEFAULT_CACHE_LINE,
+        DEFAULT_TOTAL_RAM,
+        DEFAULT_AVAILABLE_RAM,
+        1,                        # numa_nodes
+        DEFAULT_L1D_BYTES,        # l1d_min_bytes (homogeneous fallback)
+        DEFAULT_E_CORE_L2_BYTES,  # e_core_l2_bytes
+        DEFAULT_E_CORES_PER_L2,   # e_cores_per_l2
+        DEFAULT_P_CORE_L2_BYTES,  # p_core_l2_bytes
+        DEFAULT_P_CORES_PER_L2,   # p_cores_per_l2
+    )
+
+
 def detect_hardware_profile() -> HardwareProfile:
     """Detect real hardware characteristics.
 
@@ -200,7 +233,7 @@ def detect_hardware_profile() -> HardwareProfile:
         "komira: warning: unsupported platform for HardwareProfile.",
         "detect() — falling back to Apple-Silicon-shaped defaults",
     )
-    return HardwareProfile.defaults()
+    return default_hardware_profile()
 
 def _detect_macos_or_fallback() -> HardwareProfile:
     """macOS dispatch arm: probes `hw.physicalcpu` first; on success
@@ -216,7 +249,7 @@ def _detect_macos_or_fallback() -> HardwareProfile:
             "komira: warning: detect_hardware_profile() — sysctl",
             "probe failed (hw.physicalcpu); falling back to defaults",
         )
-        return HardwareProfile.defaults()
+        return default_hardware_profile()
     return _detect_macos_from_probe(probe)
 
 def _detect_macos_from_probe(physical_cores_probe: Int) -> HardwareProfile:
@@ -316,7 +349,7 @@ def _detect_linux_or_fallback() -> HardwareProfile:
             "cause: a hardened container with read_only_root_filesystem",
             "or a masked /sys.",
         )
-        return HardwareProfile.defaults()
+        return default_hardware_profile()
     var l1d = cpu0_caches.l1d if cpu0_caches.l1d > 0 else DEFAULT_L1D_BYTES
     var l2 = cpu0_caches.l2 if cpu0_caches.l2 > 0 else DEFAULT_L2_BYTES
     var l3 = cpu0_caches.l3  # 0 if absent — matches macOS Apple Silicon

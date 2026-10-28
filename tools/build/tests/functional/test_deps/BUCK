@@ -20,5 +20,5 @@ mojo_library(
     conda = False,
     test_deps = [":tdhelper"],
     test_srcs = ["lib/tests/test_uses_helper.mojo"],
-    visibility = ["//negative/test_deps:"],
+    visibility = ["//negative/test_deps:", "komira//ci:"],
 )

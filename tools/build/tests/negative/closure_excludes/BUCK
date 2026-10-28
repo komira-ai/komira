@@ -1,0 +1,44 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# mojo_library's `closure_excludes` (tools/build/mojo/defs.bzl): each library
+# depends on one package that the host profile's closure may not hold
+# (src/komira_host_profile/BUCK) and excludes that package by its import name. Every target here must fail at analysis, naming the package;
+# //tools/build/selftest:analysis_refusals_mojo requires the text.
+# The leaf's own BUCK file holds the same four names; its closure holds
+# komira_async_api, which an exact comparison does not refuse.
+
+mojo_library(
+    name = "fs",
+    srcs = ["__init__.mojo"],
+    conda = False,
+    import_name = "closure_excludes_fs",
+    deps = ["komira//src/komira_fs:komira_fs"],
+    closure_excludes = ["komira_fs"],
+)
+
+mojo_library(
+    name = "objectstore",
+    srcs = ["__init__.mojo"],
+    conda = False,
+    import_name = "closure_excludes_objectstore",
+    deps = ["komira//src/komira_objectstore:komira_objectstore"],
+    closure_excludes = ["komira_objectstore"],
+)
+
+mojo_library(
+    name = "async_runtime",
+    srcs = ["__init__.mojo"],
+    conda = False,
+    import_name = "closure_excludes_async_runtime",
+    deps = ["komira//src/komira_async:komira_async"],
+    closure_excludes = ["komira_async"],
+)
+
+mojo_library(
+    name = "shuffle",
+    srcs = ["__init__.mojo"],
+    conda = False,
+    import_name = "closure_excludes_shuffle",
+    deps = ["komira//src/komira_shuffle:komira_shuffle"],
+    closure_excludes = ["komira_shuffle"],
+)

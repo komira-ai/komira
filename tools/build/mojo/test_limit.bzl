@@ -1,4 +1,5 @@
-"""The time limit of a `mojo_test` under `buck2 test` (test_deadline.sh).
+"""The time limit of a `mojo_test` under `buck2 test` (`gate mojo --deadline-s`,
+tools/build/run).
 
 buck2 runs a test that gives ExternalRunnerTestInfo (every test rule here)
 through its test runner, which gives each test a timeout: the runner's
@@ -7,9 +8,8 @@ buck2 sends it to the executor as the action's timeout (buck2's `[test]
 timeout_default_s` is the timeout of InternalRunnerTestInfo tests, and does not
 reach these). A remote executor stops the action there, and buck2 then reports
 an ordinary failure, with no word of the timeout; the test's output, which its
-runner holds until the test exits, is lost with it. So a mojo_test runs under
-test_deadline.sh, which kills the test TEST_LIMIT_MARGIN_S seconds earlier and
-says so (`TEST TIME LIMIT: killed <label> after <n> s, ...`).
+runner holds until the test exits, is lost with it. So the gate kills a
+mojo_test TEST_LIMIT_MARGIN_S seconds earlier and says so (`TEST TIME LIMIT: killed <label> after <n> s, ...`).
 
 The runner's `--timeout` is a command-line argument, which no rule can read,
 so the root cell's `[komira] test_timeout_s` states it (600, buck2's default,
@@ -17,16 +17,16 @@ when unset); with `-- --timeout <s>`, pass `-c komira.test_timeout_s=<s>`
 too. The `mojo_test` macro reads the key when the BUCK file is loaded (a rule
 cannot read configuration) and passes it as `test_timeout_s`; a BUCK file may
 not set it. A library's `test_srcs` are build actions, not tests: buck2 gives
-them no timeout, and this limit does not apply to them (README.md, "Time
-limits").
+them no timeout, and this limit does not apply to them: their own is the
+hang limit at the end of this file (README.md, "Time limits").
 """
 
 # The `--timeout` of buck2's test runner when `buck2 test` passes none.
 BUCK2_TEST_RUNNER_TIMEOUT_S = 600
 
-# How long before the runner's timeout test_deadline.sh kills the test: the
-# time the action spends around the test itself (staging its tree,
-# gate_runner.sh's report, the kill's 10 s grace), with room to spare.
+# How long before the runner's timeout the gate kills the test: the time the
+# action spends around the test itself (staging its tree, the gate's report,
+# the kill's 10 s grace), with room to spare.
 TEST_LIMIT_MARGIN_S = 60
 
 def test_timeout_s():
@@ -53,13 +53,39 @@ def with_test_limit(test_rule):
 TEST_LIMIT_ATTRS = {
     # Set by the mojo_test macro; see with_test_limit.
     "test_timeout_s": attrs.int(),
-    "_test_deadline": attrs.dep(default = "komira//tools/build/mojo:test_deadline.sh"),
 }
 
-def deadline_prefix(ctx, busybox, label):
-    """The words that run a test command under test_deadline.sh."""
+def deadline_flags(ctx, label):
+    """The gate's flags for the time limit (`gate mojo --deadline-s
+    --runner-timeout-s`)."""
     timeout = ctx.attrs.test_timeout_s
     if timeout <= TEST_LIMIT_MARGIN_S:
         fail("{}: test_timeout_s = {} must be over {} s".format(label, timeout, TEST_LIMIT_MARGIN_S))
-    script = ctx.attrs._test_deadline[DefaultInfo].default_outputs[0]
-    return [busybox, "sh", script, busybox, str(timeout - TEST_LIMIT_MARGIN_S), str(timeout), label, "--"]
+    return ["--deadline-s", str(timeout - TEST_LIMIT_MARGIN_S), "--runner-timeout-s", str(timeout)]
+
+# ---- the hang limit of a welded test action ----------------------------------
+#
+# A library's `test_srcs` (and its README's examples, and a shared library's
+# gate drivers) run as build actions, which buck2 gives no timeout. A test
+# never waits on time (it waits on events), so one that loses an event would
+# hold its worker forever. The gate stops it after a hang limit and says it
+# hung. The limit is infrastructure, not a test's assertion: no test may lower
+# it to pass, and a test that is merely slow raises it on its target.
+
+# The default of `test_hang_limit_s`, in seconds.
+DEFAULT_TEST_HANG_LIMIT_S = 1800
+
+# The status of `gate mojo` for a test stopped by its hang limit
+# (tools/build/run/mojo.zig, `hang_exit`).
+TEST_HANG_EXIT = 125
+
+HANG_LIMIT_ATTRS = {
+    "test_hang_limit_s": attrs.int(default = DEFAULT_TEST_HANG_LIMIT_S),
+}
+
+def hang_limit_flags(where, seconds):
+    """The gate's flag for a welded test's hang limit (`gate mojo
+    --hang-limit-s`); `seconds` is `test_hang_limit_s`."""
+    if seconds <= 0:
+        fail("{}: test_hang_limit_s = {} must be a positive number of seconds".format(where, seconds))
+    return ["--hang-limit-s", str(seconds)]

@@ -1,0 +1,37 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The COUNT(DISTINCT) kernels of grouped aggregation: the STRING-key encode
+# of the grouped COUNT(DISTINCT) driver (a parallel FNV-1a hash pass and the
+# three bodies that number dict ids in first-seen row order), the
+# dictionary-code encode, the per-worker distinct-pair set, the heavy-group
+# split, the group-table sizing rule, the string key emit, and the parallel
+# per-group finalize of the stage MEDIAN drain. The driver and the sinks that
+# use them are added by the changes that follow.
+mojo_library(
+    name = "komira_op_agg_distinct",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_agg:komira_agg",
+        "//src/komira_agg_api:komira_agg_api",
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_counters:komira_counters",
+    ],
+    test_srcs = [
+        "tests/test_cd_dictkey_first_seen_numbering.mojo",
+        "tests/test_cd_distinct_set.mojo",
+        "tests/test_cd_group_ht_sizing_rule.mojo",
+        "tests/test_cd_heavy_split_admission.mojo",
+        "tests/test_cd_key_emit.mojo",
+        "tests/test_cd_parb_parallel_merge_and_source_keys.mojo",
+        "tests/test_cd_phaseb_parallel_equals_serial.mojo",
+        "tests/test_cd_strenc_rowdict.mojo",
+        "tests/test_cd_strenc_span_reverse_map.mojo",
+        "tests/test_median_parallel_drain.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
