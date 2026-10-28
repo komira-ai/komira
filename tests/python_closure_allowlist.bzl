@@ -2,8 +2,8 @@
 tools/build/selftest/graph/python_closure.zig says what it refuses).
 
 Python serves only komira's Python surface: its SDK or bindings and their own
-tests. No other target depends on it, no other file is Python, and no CI step
-runs it.
+tests. No other target depends on it and no other file is Python; CI runs it
+only through those tests, in the pull-request sets.
 
 PYTHON_SURFACE: package paths (`src/<pkg>`) where Python is allowed.
 Adding one is a ruling, not a review; the shared library's bindings are one.
