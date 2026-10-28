@@ -133,8 +133,8 @@ struct _GroupFinalizeTask[
             hi = n
         for si in range(lo, hi):
             # SAFETY: disjoint per-slot output index; the finalize reads the
-            # group's IMMUTABLE state buffer (copies before sorting — no mutation
-            # of the shared `states`), so cross-worker reads never race.
+            # group's IMMUTABLE state buffer (it copies before sorting and never
+            # writes the shared `states`), so cross-worker reads never race.
             var slot = sp[].slots[][si]
             sp[].out[][si] = Self.A.finalize(sp[].states[][slot])
 
