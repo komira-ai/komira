@@ -11,7 +11,11 @@
 # every `:table` of the scope (UNIVERSE of rules.bzl) which subdirs it holds, and
 # runs lock_graphs (lock_graphs.zig) as a build action over the package's
 # mopm.lock, staged by the package's `:workspace`, to hold the two lists equal.
-# It fails, naming the package and the subdir, when they differ. A new package
+# It fails, naming the package and the subdir, when they differ. The same action holds the
+# system libraries of the package to its lock: a package whose mopm.toml (or a path
+# dependency's) declares a native library with `mode = "load"` must pin it in `system_libs`
+# of its mopm.lock for each subdir the lock records, and a package whose sources open a
+# library must declare it. A new package
 # is covered with no list to edit: the query finds its `:table`.
 #
 # Options: --scope <patterns>.
@@ -36,6 +40,7 @@ def _check(ctx):
         cmd.add(str(t.label), t.get_attr("mojo"))
         cmd.add(cmd_args(workspace, "/", package_dir, "/mopm.lock", delimiter = ""))
         cmd.add(",".join(t.get_attr("subdirs")))
+        cmd.add(cmd_args(workspace, "/", package_dir, delimiter = ""))
     actions.run(cmd, category = "lock_graphs")
     ctx.output.ensure(out)
     ctx.output.print("lock_graphs: holding the graphs of {} package table(s) to their mopm.lock".format(len(tables)))

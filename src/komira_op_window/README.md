@@ -77,6 +77,15 @@ Modules:
 - `partition_topn_state`: `PartitionTopNState`, top N per partition over
   INT64 columns (NULL partition keys one partition, NULL order keys last in
   both directions, as in `TopNState`).
+- `partition_topn_hash_state`, `part_key_block`, `ptn_dense_directory`:
+  `PartitionTopNHashState`, top N full rows per partition for any mix of
+  partition key types (`PartKeyBlock`) and an INT32 / INT64 / FLOAT32 /
+  FLOAT64 or STRING order key, in a hashed partition directory. ROW_NUMBER
+  keeps N rows per partition, RANK every row tied within N. Ties go to the
+  earlier row (a running row count is the heap payload), so the kept rows do
+  not depend on slot reuse; `combine` of states fed consecutive row ranges,
+  left to right, equals one state fed every row. NULL order keys sort last in
+  both directions; a NULL partition key is one partition.
 - `partition_state`: the per-partition state holders of a typed window stage.
 - `partition_topn_sink`: `PartitionTopNSink`, the rows of each partition whose
   ROW_NUMBER or RANK over the sort keys is at most k (`PartitionTopNSinkData`),

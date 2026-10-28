@@ -96,15 +96,16 @@ branches twice. Branch record files (`--branch-lcov`, branch_lcov.mojo) are
 a separate input, read with either: their branches join the line report's
 file of the same repository path (or, for a file no line report gives a
 record, the file counted from its source in step 4), and one file may not
-take branches from both (one source of branch data per file). Two branch
-record files that give one location a different number of decisions, or
-one decision a different number of arms, are refused
-(branch_lcov.DecisionShapes), and so is one branch record file naming a
-repository path twice (two spellings that map to it). These checks cover
+take branches from both (one source of branch data per file). Where
+branch record files give one location a different number of decisions,
+the files with the most decisions there are summed and the others'
+records at it are dropped (branch_lcov.drop_smaller_copies); one decision
+given a different number of arms is refused (branch_lcov.DecisionShapes),
+and so is one branch record file naming a repository path twice (two spellings that map to it). These checks cover
 the files kept in step 3 only: a file left out counts nowhere.
 """
 
-from covcheck.branch_lcov import DecisionShapes, parse_branch_lcov
+from covcheck.branch_lcov import DecisionShapes, drop_smaller_copies, parse_branch_lcov
 from covcheck.cobertura import parse_cobertura
 from covcheck.decls import declaration_only, declared_functions, unrecorded_functions
 from covcheck.generated import is_generated
@@ -821,6 +822,7 @@ def analyze(
     # The packages a branch record file names a kept file of: their files
     # with line records must each be named by one (BranchUnmeasuredFile).
     var branch_pkgs = Dict[String, Bool]()
+    var bkept = List[Int]()
     for i in range(len(bmapped)):
         var bpkg = _package_or_empty(bmapped[i].path, repo)
         if bpkg.byte_length() == 0 or _keep(bpkg, bmapped[i].path, opts) != 0:
@@ -832,6 +834,11 @@ def analyze(
                 + String(" and the branch record file ") + borigins[i]
                 + String(": give one source of branch data per file (they identify branches differently)")
             )
+        bkept.append(i)
+    # Where tests' copies of one location hold different numbers of
+    # decisions, only the tests with the most count there.
+    drop_smaller_copies(bmapped, bkept)
+    for i in bkept:
         shapes.add(bmapped[i], borigins[i])
     var bmerged = merge_by_path(bmapped^)
     var branch_of = Dict[String, Int]()

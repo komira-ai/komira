@@ -21,7 +21,8 @@
 #   * DESC stores `~key` (negation overflows on `Int64.MIN`).
 #
 # The partition directory is a linear scan (small partition counts);
-# a hashed directory is not part of this package yet.
+# `partition_topn_hash_state` is the hashed version, for any key type and many
+# partitions.
 # `drain_to_record_batch` emits (part_key, key, payload) per partition, in the
 # order partitions were first seen, each partition best first.
 # =============================================================================

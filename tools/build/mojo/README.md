@@ -963,9 +963,10 @@ generated entry file and no `komira_main`; that is `mojo_binary[shared]`.
 - **Not self-contained.** The `.so` has `DT_NEEDED libKGENCompilerRTShared.so`, the Mojo runtime (async runtime,
   allocator, globals), which the compiler's link adds to every Mojo binary and shared library; it is not linked
   statically by this rule. The `.so` loads only where that library, and what it needs
-  (`libMSupportGlobals.so`, `libAsyncRTRuntimeGlobals.so`, libstdc++, libgcc_s), resolves: the run path is
-  `$ORIGIN/lib`, so a packaged copy must ship them in `lib/` beside it (the runnable directory of a binary
-  carries the same set). Whoever publishes the `.so` must ship or relocate those libraries.
+  (`libMSupportGlobals.so`, `libAsyncRTRuntimeGlobals.so`, libstdc++, libgcc_s), resolves, from the run path
+  below. A conda package of the library (`conda_package(shared_lib = ...)`, [`../package`](../package/README.md))
+  does not ship them: they come from its `mojo-compiler` requirement, installed in the same `lib/`, and
+  [`../package/install_check`](../package/install_check/README.md) loads it from an empty prefix holding them.
 - **macOS arm64.** The same rule builds `<out_name>.dylib`: install name `@rpath/<out_name>.dylib`, run path
   `@loader_path/lib`, linker-signed ad hoc by ld (nothing else signs it), runtime library
   `@rpath/libKGENCompilerRTShared.dylib`. `exports_exact` uses `-exported_symbols_list` (names with the C
@@ -974,7 +975,7 @@ generated entry file and no `komira_main`; that is `mojo_binary[shared]`.
   on the macOS worker with `DYLD_LIBRARY_PATH` set to the compiler's `lib/` (as for tests). The wrapper
   lets `--emit shared-lib` through only when the link names itself with `-install_name`; the
   bundle's `-soname` library stays refused (bundles are Linux only).
-- **Run path.** `$ORIGIN/lib`, where a packaged copy puts the runtime libraries.
+- **Run path.** `$ORIGIN/lib:$ORIGIN` on Linux (macOS: `@loader_path/lib`): the `lib/` the gate stages the runtime libraries and `native_owners` in, and the library's own directory, where an installed package has the runtime libraries beside it (`<prefix>/lib`). A run path with only `$ORIGIN/lib` finds nothing there (the install check of the libkomira package goes red on it).
 - **`[runnable]`** (Linux): the gated library with `lib/` beside it, holding the Mojo runtime libraries (the platform row's `runtime_libs`) and the closure of each `native_owners` library. It is the directory a host loads the library from with no library path set (a Node test hands it to `load()`, [`node`](../../../node/README.md)); a copy, since the loader expands `$ORIGIN` from the resolved path. Like the public file it exists only if the gate passed.
 - **`native_owners`** names `native_shared_library` targets (a library's own shared library, [`../native`](../native/README.md)), linked ahead of the C archives of the closure: the `.so` is NEEDED on each owner's SONAME and the owner's names are bound there instead of to a static copy. The gate stages each owner and what it needs in `lib/` beside the library (the run path `$ORIGIN/lib` finds them). Linux only. The archives stay on the link line, so a name the owner does not export is still embedded silently; [`examples/shared_lib_native`](../examples/shared_lib_native/README.md) measures it, its driver (`call_driver.mojo`) opens the owner's SONAME and checks that the library's own dynamic symbol table leaves the owner's names undefined. `tests//negative/shared_lib:owner_embedded` is the same library without the attribute with a smaller driver (`owner_embedded_driver.mojo`) that only opens the owner's SONAME, so it is red on the missing NEEDED edge and does not read the symbol table.
 - **Not yet:** consuming a `.so` from a `deps` edge (a consumer linking it, or generating its `@extern` declarations).
