@@ -51,8 +51,9 @@ GRAPH_JSON = r'''{
         {"path": "src/komira_counters/src/komira_counters/keyeq_census.mojo", "sha256": "3809a89a4f12be963cd903d3a620ca586dad1445d6764a61d5f427bcd5ecb25d"},
         {"path": "src/komira_counters/src/komira_counters/parquet_read_counter.mojo", "sha256": "cddf555acf0b92f4a8e438de7bdb69a32cf69d32048c7cfb280026e873064cb9"},
         {"path": "src/komira_counters/src/komira_counters/planner_scale_counter.mojo", "sha256": "5e999f240129ddb7af4518763d66d28609f5213bb957c69c5d84114d0b16e801"},
-        {"path": "src/komira_counters/src/komira_counters/runtime_introspection.mojo", "sha256": "bc6eed0a0f797406fa8b976d4c1f6cb7ad41cd8212bc298240952344a5f49b4d"},
-        {"path": "src/komira_counters/src/komira_counters/strdrain_counter.mojo", "sha256": "723988c5c77f0aee3796e8c5b2fae8c155cf609c0e790dbdfa4cc481b3c30bee"}
+        {"path": "src/komira_counters/src/komira_counters/runtime_introspection.mojo", "sha256": "ac35391c78c40f579bdca168ca512f1e416cbd1fba4ffd23fc5b046afff82e4e"},
+        {"path": "src/komira_counters/src/komira_counters/strdrain_counter.mojo", "sha256": "723988c5c77f0aee3796e8c5b2fae8c155cf609c0e790dbdfa4cc481b3c30bee"},
+        {"path": "src/komira_counters/src/komira_counters/trace_gates.mojo", "sha256": "846facf38ec4fce33cf8f692ca3b9274d4abd82559b393bde5eca096445f6dc8"}
       ],
       "deps": ["komira_atomic_alias@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -192,8 +193,9 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
         {"path": "src/komira_counters/src/komira_counters/keyeq_census.mojo", "sha256": "3809a89a4f12be963cd903d3a620ca586dad1445d6764a61d5f427bcd5ecb25d"},
         {"path": "src/komira_counters/src/komira_counters/parquet_read_counter.mojo", "sha256": "cddf555acf0b92f4a8e438de7bdb69a32cf69d32048c7cfb280026e873064cb9"},
         {"path": "src/komira_counters/src/komira_counters/planner_scale_counter.mojo", "sha256": "5e999f240129ddb7af4518763d66d28609f5213bb957c69c5d84114d0b16e801"},
-        {"path": "src/komira_counters/src/komira_counters/runtime_introspection.mojo", "sha256": "bc6eed0a0f797406fa8b976d4c1f6cb7ad41cd8212bc298240952344a5f49b4d"},
-        {"path": "src/komira_counters/src/komira_counters/strdrain_counter.mojo", "sha256": "723988c5c77f0aee3796e8c5b2fae8c155cf609c0e790dbdfa4cc481b3c30bee"}
+        {"path": "src/komira_counters/src/komira_counters/runtime_introspection.mojo", "sha256": "ac35391c78c40f579bdca168ca512f1e416cbd1fba4ffd23fc5b046afff82e4e"},
+        {"path": "src/komira_counters/src/komira_counters/strdrain_counter.mojo", "sha256": "723988c5c77f0aee3796e8c5b2fae8c155cf609c0e790dbdfa4cc481b3c30bee"},
+        {"path": "src/komira_counters/src/komira_counters/trace_gates.mojo", "sha256": "846facf38ec4fce33cf8f692ca3b9274d4abd82559b393bde5eca096445f6dc8"}
       ],
       "deps": ["komira_atomic_alias@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -330,8 +332,9 @@ GRAPH_JSON_OSX_ARM64 = r'''{
         {"path": "src/komira_counters/src/komira_counters/keyeq_census.mojo", "sha256": "3809a89a4f12be963cd903d3a620ca586dad1445d6764a61d5f427bcd5ecb25d"},
         {"path": "src/komira_counters/src/komira_counters/parquet_read_counter.mojo", "sha256": "cddf555acf0b92f4a8e438de7bdb69a32cf69d32048c7cfb280026e873064cb9"},
         {"path": "src/komira_counters/src/komira_counters/planner_scale_counter.mojo", "sha256": "5e999f240129ddb7af4518763d66d28609f5213bb957c69c5d84114d0b16e801"},
-        {"path": "src/komira_counters/src/komira_counters/runtime_introspection.mojo", "sha256": "bc6eed0a0f797406fa8b976d4c1f6cb7ad41cd8212bc298240952344a5f49b4d"},
-        {"path": "src/komira_counters/src/komira_counters/strdrain_counter.mojo", "sha256": "723988c5c77f0aee3796e8c5b2fae8c155cf609c0e790dbdfa4cc481b3c30bee"}
+        {"path": "src/komira_counters/src/komira_counters/runtime_introspection.mojo", "sha256": "ac35391c78c40f579bdca168ca512f1e416cbd1fba4ffd23fc5b046afff82e4e"},
+        {"path": "src/komira_counters/src/komira_counters/strdrain_counter.mojo", "sha256": "723988c5c77f0aee3796e8c5b2fae8c155cf609c0e790dbdfa4cc481b3c30bee"},
+        {"path": "src/komira_counters/src/komira_counters/trace_gates.mojo", "sha256": "846facf38ec4fce33cf8f692ca3b9274d4abd82559b393bde5eca096445f6dc8"}
       ],
       "deps": ["komira_atomic_alias@0.1.0#mojo1.0.0/lib"],
       "natives": [],

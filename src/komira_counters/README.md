@@ -87,6 +87,8 @@ files that are not sources:
 | `mopm.lock` | the toolchain pins and the path dependencies, as `mopm lock` writes them (no registry is reached: both are siblings) |
 | `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
 | `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifests of the siblings; `buildrules mojo check` fails when they are stale |
+| `coverage_floor.txt` | the line and branch coverage `:coverage` must keep (`:coverage_floor` fails below it) |
+| `coverage_unmeasured.txt` | `runtime_introspection.mojo`: every function in it is `@always_inline("nodebug")`, so kcov records no line of it; it is left out of the totals and the floor, and `test_runtime_introspection` runs its hooks. The `-D` gates it reads are in `trace_gates.mojo`, which is measured |
 
 The tests are built with the `KOMIRA_TRACE_ARC`, `KOMIRA_TRACE_TCMALLOC` and `KOMIRA_TRACE_TRAMPOLINE` defines on
 (`test_defines` in `BUCK`), so `test_runtime_introspection` sees the lines those hooks emit; the library file `:lib`
