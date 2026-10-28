@@ -7,7 +7,7 @@
 //! usage: cov_branch run --busybox <busybox> --gate <gate>
 //!            --compiler <compiler_dir> --label <label> --profdata <llvm-profdata>
 //!            --raw-version <N> --binary <test_binary> --out <profdata_out>
-//!            [--env NAME=VALUE]...
+//!            [--env NAME=VALUE | --lib-dir DIR]...
 //!
 //!   --gate         the gate (tools/build/run), run as the release gate runs
 //!                  it: `<gate> mojo --busybox <busybox> --runtime-lib
@@ -19,6 +19,10 @@
 //!   --binary       <root>/bin/<test> of the test's staged tree (the release
 //!                  gate's: <root>/share holds its declared data)
 //!   --env          the test's environment, passed to the gate as given
+//!   --lib-dir      a directory of pinned shared libraries the test opens by their
+//!                  bare names, passed to the gate (made absolute) after the --env
+//!                  arguments, in the order given: the gate puts it on the
+//!                  library path of the test (tools/build/run/mojo.zig)
 //!
 //! Steps:
 //!   1. `gate mojo` runs the test in the gate's environment (this tool's own
@@ -74,15 +78,18 @@ pub const Args = struct {
     out: []const u8,
     /// "NAME=VALUE" of each --env, in order.
     env: []const []const u8,
+    /// Each --lib-dir, in order.
+    lib_dirs: []const []const u8 = &.{},
 };
 
-pub const USAGE = "usage: cov_branch run --busybox B --gate G --compiler DIR --label L --profdata P --raw-version N --binary F --out F [--env NAME=VALUE]...";
+pub const USAGE = "usage: cov_branch run --busybox B --gate G --compiler DIR --label L --profdata P --raw-version N --binary F --out F [--env NAME=VALUE | --lib-dir DIR]...";
 
 /// The arguments after `run`, or the reason they are refused (a usage error).
 pub fn parseArgs(alloc: std.mem.Allocator, argv: []const []const u8, why: *[]const u8) !?Args {
     const names = [_][]const u8{ "--busybox", "--gate", "--compiler", "--label", "--profdata", "--raw-version", "--binary", "--out" };
     var vals = [_]?[]const u8{null} ** names.len;
-    var env = std.ArrayList([]const u8).init(alloc);
+    var env = std.ArrayList([]const u8).empty;
+    var lib_dirs = std.ArrayList([]const u8).empty;
     var i: usize = 0;
     while (i < argv.len) : (i += 2) {
         const flag = argv[i];
@@ -92,7 +99,15 @@ pub fn parseArgs(alloc: std.mem.Allocator, argv: []const []const u8, why: *[]con
         }
         const v = argv[i + 1];
         if (std.mem.eql(u8, flag, "--env")) {
-            try env.append(v);
+            try env.append(alloc, v);
+            continue;
+        }
+        if (std.mem.eql(u8, flag, "--lib-dir")) {
+            if (v.len == 0) {
+                why.* = "--lib-dir is empty";
+                return null;
+            }
+            try lib_dirs.append(alloc, v);
             continue;
         }
         const k = for (names, 0..) |n, j| {
@@ -131,7 +146,8 @@ pub fn parseArgs(alloc: std.mem.Allocator, argv: []const []const u8, why: *[]con
         .raw_version = raw,
         .binary = vals[6].?,
         .out = vals[7].?,
-        .env = try env.toOwnedSlice(),
+        .env = try env.toOwnedSlice(alloc),
+        .lib_dirs = try lib_dirs.toOwnedSlice(alloc),
     };
 }
 
@@ -161,32 +177,33 @@ pub fn scratchDir(alloc: std.mem.Allocator, cwd: []const u8, buck_scratch: ?[]co
 /// flag), with the test's --env and then LLVM_PROFILE_FILE. Paths are
 /// absolute (`k` is).
 pub fn gateArgv(alloc: std.mem.Allocator, a: Args, cwd: []const u8, k: []const u8) ![]const []const u8 {
-    var v = std.ArrayList([]const u8).init(alloc);
-    try v.appendSlice(&.{ try abs(alloc, cwd, a.gate), "mojo", "--busybox", try abs(alloc, cwd, a.busybox) });
-    try v.appendSlice(&.{ "--runtime-lib", try std.fmt.allocPrint(alloc, "{s}/lib", .{try abs(alloc, cwd, a.compiler)}) });
-    try v.appendSlice(&.{ "--label", a.label, "--test", try abs(alloc, cwd, a.binary) });
-    try v.appendSlice(&.{ "--marker", try std.fmt.allocPrint(alloc, "{s}/gate.passed", .{k}) });
-    for (a.env) |e| try v.appendSlice(&.{ "--env", e });
-    try v.appendSlice(&.{ "--env", try std.fmt.allocPrint(alloc, "LLVM_PROFILE_FILE={s}/prof/%p.profraw", .{k}) });
-    return v.toOwnedSlice();
+    var v = std.ArrayList([]const u8).empty;
+    try v.appendSlice(alloc, &.{ try abs(alloc, cwd, a.gate), "mojo", "--busybox", try abs(alloc, cwd, a.busybox) });
+    try v.appendSlice(alloc, &.{ "--runtime-lib", try std.fmt.allocPrint(alloc, "{s}/lib", .{try abs(alloc, cwd, a.compiler)}) });
+    try v.appendSlice(alloc, &.{ "--label", a.label, "--test", try abs(alloc, cwd, a.binary) });
+    try v.appendSlice(alloc, &.{ "--marker", try std.fmt.allocPrint(alloc, "{s}/gate.passed", .{k}) });
+    for (a.env) |e| try v.appendSlice(alloc, &.{ "--env", e });
+    for (a.lib_dirs) |d| try v.appendSlice(alloc, &.{ "--lib-dir", try abs(alloc, cwd, d) });
+    try v.appendSlice(alloc, &.{ "--env", try std.fmt.allocPrint(alloc, "LLVM_PROFILE_FILE={s}/prof/%p.profraw", .{k}) });
+    return v.toOwnedSlice(alloc);
 }
 
 /// `base` with every PATH (and LC_ALL) entry replaced: PATH=`path`, and
 /// LC_ALL=C when `c_locale`.
 pub fn childEnv(alloc: std.mem.Allocator, base: []const []const u8, path: []const u8, c_locale: bool) ![]const []const u8 {
-    var v = std.ArrayList([]const u8).init(alloc);
+    var v = std.ArrayList([]const u8).empty;
     for (base) |e| {
         if (std.mem.startsWith(u8, e, "PATH=")) continue;
         if (c_locale and std.mem.startsWith(u8, e, "LC_ALL=")) continue;
-        try v.append(e);
+        try v.append(alloc, e);
     }
-    try v.append(try std.fmt.allocPrint(alloc, "PATH={s}", .{path}));
-    if (c_locale) try v.append("LC_ALL=C");
-    return v.toOwnedSlice();
+    try v.append(alloc, try std.fmt.allocPrint(alloc, "PATH={s}", .{path}));
+    if (c_locale) try v.append(alloc, "LC_ALL=C");
+    return v.toOwnedSlice(alloc);
 }
 
-fn banner(out: *std.ArrayList(u8), label: []const u8, msg: []const u8) !void {
-    const w = out.writer();
+fn banner(alloc: std.mem.Allocator, out: *std.ArrayList(u8), label: []const u8, msg: []const u8) !void {
+    const w = out.writer(alloc);
     try w.print("{s}\nBRANCH COVERAGE RUN FAILED: {s}\n{s}\n{s}\n", .{ RULE, label, msg, RULE });
 }
 
@@ -198,9 +215,9 @@ fn banner(out: *std.ArrayList(u8), label: []const u8, msg: []const u8) !void {
 pub fn gateFailure(alloc: std.mem.Allocator, out: *std.ArrayList(u8), label: []const u8, rc: u8, gate_err: []const u8) !void {
     const h = try std.fmt.allocPrint(alloc, "GATED TEST FAILED: {s} (exit {d})", .{ label, rc });
     const p = "The library's package is not produced until this test passes.";
-    var lines = std.ArrayList([]const u8).init(alloc);
+    var lines = std.ArrayList([]const u8).empty;
     var it = std.mem.splitScalar(u8, gate_err, '\n');
-    while (it.next()) |l| try lines.append(l);
+    while (it.next()) |l| try lines.append(alloc, l);
     // A final newline ends the last line; it does not start an empty one.
     if (lines.items.len > 0 and lines.items[lines.items.len - 1].len == 0) _ = lines.pop();
     var done = false;
@@ -212,11 +229,11 @@ pub fn gateFailure(alloc: std.mem.Allocator, out: *std.ArrayList(u8), label: []c
             i += 1;
             continue;
         }
-        try out.appendSlice(l);
-        try out.append('\n');
+        try out.appendSlice(alloc, l);
+        try out.append(alloc, '\n');
     }
     const msg = try std.fmt.allocPrint(alloc, "The test failed instrumented for branch coverage (exit {d}). A branch coverage run builds the test at -O0, instruments it with lld and runs it with LLVM_PROFILE_FILE set; a test that passes in the release gate and fails here fails this action, and is a bug to fix.", .{rc});
-    try banner(out, label, msg);
+    try banner(alloc, out, label, msg);
 }
 
 pub const RAW_MAGIC: u64 = 0xff6c70726f667281;
@@ -244,32 +261,32 @@ pub fn checkRaw(alloc: std.mem.Allocator, name: []const u8, head: []const u8, ra
 /// The first `n` lines of `text`, each that ended in a newline followed by a
 /// space (`head -n N | tr '\n' ' '`).
 pub fn headJoined(alloc: std.mem.Allocator, text: []const u8, n: usize) ![]const u8 {
-    var out = std.ArrayList(u8).init(alloc);
+    var out = std.ArrayList(u8).empty;
     var rest = text;
     var k: usize = 0;
     while (k < n and rest.len > 0) : (k += 1) {
         if (std.mem.indexOfScalar(u8, rest, '\n')) |e| {
-            try out.appendSlice(rest[0..e]);
-            try out.append(' ');
+            try out.appendSlice(alloc, rest[0..e]);
+            try out.append(alloc, ' ');
             rest = rest[e + 1 ..];
         } else {
-            try out.appendSlice(rest);
+            try out.appendSlice(alloc, rest);
             rest = "";
         }
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 /// Why a failed merge failed, from its log.
 pub fn mergeRefusal(alloc: std.mem.Allocator, log: []const u8, raw: u32, n: usize) ![]const u8 {
     if (std.mem.indexOf(u8, log, "raw profile version mismatch") != null) {
-        var seen = std.ArrayList([]const u8).init(alloc);
+        var seen = std.ArrayList([]const u8).empty;
         var it = std.mem.splitScalar(u8, log, '\n');
         while (it.next()) |l| {
             const v = expectedVersion(l) orelse continue;
             for (seen.items) |s| {
                 if (std.mem.eql(u8, s, v)) break;
-            } else try seen.append(v);
+            } else try seen.append(alloc, v);
         }
         std.mem.sort([]const u8, seen.items, {}, strLess);
         const ev = try std.mem.join(alloc, " ", seen.items);
@@ -369,17 +386,17 @@ fn readHead(alloc: std.mem.Allocator, path: []const u8) ![]const u8 {
 
 /// The .profraw files under `dir`, at any depth, sorted by path.
 pub fn listRaws(alloc: std.mem.Allocator, dir: []const u8) ![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
+    var out = std.ArrayList([]const u8).empty;
     var d = try std.fs.cwd().openDir(dir, .{ .iterate = true });
     defer d.close();
     var w = try d.walk(alloc);
     defer w.deinit();
     while (try w.next()) |e| {
         if (e.kind != .file or !std.mem.endsWith(u8, e.basename, ".profraw")) continue;
-        try out.append(try std.fs.path.join(alloc, &.{ dir, e.path }));
+        try out.append(alloc, try std.fs.path.join(alloc, &.{ dir, e.path }));
     }
     std.mem.sort([]const u8, out.items, {}, strLess);
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 /// Steps 1 to 4 (module comment). Messages go to `err`; returns the exit status.
@@ -397,7 +414,7 @@ pub fn runAll(alloc: std.mem.Allocator, a: Args, where: Where, runner: Runner, e
         .env = try childEnv(alloc, where.env, bin, false),
         .stderr_path = gate_err,
     }) catch |e| {
-        try err.writer().print("cov_branch run: cannot run {s}: {s}\n", .{ a.gate, @errorName(e) });
+        try err.writer(alloc).print("cov_branch run: cannot run {s}: {s}\n", .{ a.gate, @errorName(e) });
         return 2;
     };
     const rc = gate.shellStatus();
@@ -409,7 +426,7 @@ pub fn runAll(alloc: std.mem.Allocator, a: Args, where: Where, runner: Runner, e
     // 2. The raw profiles.
     const raws = try listRaws(alloc, prof);
     if (raws.len == 0) {
-        try banner(err, a.label, try std.fmt.allocPrint(alloc, "The test passed but wrote no .profraw under {s} (LLVM_PROFILE_FILE): the profile runtime did not run its exit handler, or the variable did not reach the test.", .{prof}));
+        try banner(alloc, err, a.label, try std.fmt.allocPrint(alloc, "The test passed but wrote no .profraw under {s} (LLVM_PROFILE_FILE): the profile runtime did not run its exit handler, or the variable did not reach the test.", .{prof}));
         return 1;
     }
 
@@ -417,7 +434,7 @@ pub fn runAll(alloc: std.mem.Allocator, a: Args, where: Where, runner: Runner, e
     for (raws) |f| {
         const head = readHead(alloc, f) catch "";
         if (try checkRaw(alloc, std.fs.path.basename(f), head, a.raw_version)) |why| {
-            try banner(err, a.label, why);
+            try banner(alloc, err, a.label, why);
             return 1;
         }
     }
@@ -425,30 +442,30 @@ pub fn runAll(alloc: std.mem.Allocator, a: Args, where: Where, runner: Runner, e
     // 4. Merged; a version refusal named as one; then shown.
     const env = try childEnv(alloc, where.env, bin, true);
     const out = try abs(alloc, where.cwd, a.out);
-    var merge = std.ArrayList([]const u8).init(alloc);
-    try merge.appendSlice(&.{ a.profdata, "merge", "-o", out });
-    try merge.appendSlice(raws);
+    var merge = std.ArrayList([]const u8).empty;
+    try merge.appendSlice(alloc, &.{ a.profdata, "merge", "-o", out });
+    try merge.appendSlice(alloc, raws);
     const merge_log = try std.fmt.allocPrint(alloc, "{s}/merge.log", .{k});
     const m = runner.run(alloc, .{ .argv = merge.items, .env = env, .stdout_path = merge_log, .stderr_to_stdout = true }) catch |e| {
-        try err.writer().print("cov_branch run: cannot run {s}: {s}\n", .{ a.profdata, @errorName(e) });
+        try err.writer(alloc).print("cov_branch run: cannot run {s}: {s}\n", .{ a.profdata, @errorName(e) });
         return 2;
     };
     if (m.shellStatus() != 0) {
-        try banner(err, a.label, try mergeRefusal(alloc, readAll(alloc, merge_log), a.raw_version, raws.len));
+        try banner(alloc, err, a.label, try mergeRefusal(alloc, readAll(alloc, merge_log), a.raw_version, raws.len));
         return 1;
     }
     const show_txt = try std.fmt.allocPrint(alloc, "{s}/show.txt", .{k});
     const s = runner.run(alloc, .{ .argv = &.{ a.profdata, "show", out }, .env = env, .stdout_path = show_txt, .stderr_to_stdout = true }) catch |e| {
-        try err.writer().print("cov_branch run: cannot run {s}: {s}\n", .{ a.profdata, @errorName(e) });
+        try err.writer(alloc).print("cov_branch run: cannot run {s}: {s}\n", .{ a.profdata, @errorName(e) });
         return 2;
     };
     const show = readAll(alloc, show_txt);
     if (s.shellStatus() != 0) {
-        try banner(err, a.label, try std.fmt.allocPrint(alloc, "llvm-profdata show failed on the merged profile: {s}", .{try headJoined(alloc, show, 2)}));
+        try banner(alloc, err, a.label, try std.fmt.allocPrint(alloc, "llvm-profdata show failed on the merged profile: {s}", .{try headJoined(alloc, show, 2)}));
         return 1;
     }
     if (try checkShow(alloc, show)) |why| {
-        try banner(err, a.label, why);
+        try banner(alloc, err, a.label, why);
         return 1;
     }
     std.fs.cwd().deleteTree(k) catch {};
@@ -460,12 +477,12 @@ pub fn runAll(alloc: std.mem.Allocator, a: Args, where: Where, runner: Runner, e
 pub fn cli(alloc: std.mem.Allocator, argv: []const []const u8, where: Where, runner: Runner, err: *std.ArrayList(u8)) !u8 {
     var why: []const u8 = "";
     const a = (try parseArgs(alloc, argv, &why)) orelse {
-        try err.writer().print("cov_branch run: usage error: {s}\n{s}\n", .{ why, USAGE });
+        try err.writer(alloc).print("cov_branch run: usage error: {s}\n{s}\n", .{ why, USAGE });
         return 2;
     };
     // As the script's `[ -x "$PD" ]`.
     std.posix.access(a.profdata, std.posix.X_OK) catch {
-        try err.writer().print("cov_branch run: {s} is missing\n", .{a.profdata});
+        try err.writer(alloc).print("cov_branch run: {s} is missing\n", .{a.profdata});
         return 2;
     };
     return runAll(alloc, a, where, runner, err);

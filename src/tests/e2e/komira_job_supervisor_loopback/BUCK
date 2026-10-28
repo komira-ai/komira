@@ -25,7 +25,6 @@ mojo_library(
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_atomic_alias:komira_atomic_alias",
-        "//src/komira_clock:komira_clock",
         "//src/komira_fork_join:komira_fork_join",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_http_server:komira_http_server",

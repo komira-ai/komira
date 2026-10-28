@@ -209,7 +209,7 @@ struct _Link(Movable):
         var fds = _socketpair()
         self.entry = ConnEntry(
             stream=TcpStream(fds[0]),
-            reg=RegistrationHandle(_fd=fds[0], _interest_set=INTEREST_READ),
+            reg=RegistrationHandle(_fd=fds[0]),
             tls_stream=TlsStream(srv_cfg, fds[0]),
             initial_state=CONN_STATE_TLS_HANDSHAKE_IN,
         )
@@ -305,7 +305,7 @@ struct _Link(Movable):
 def _plain_entry(fd: Int32) -> ConnEntry:
     return ConnEntry(
         stream=TcpStream(fd),
-        reg=RegistrationHandle(_fd=fd, _interest_set=INTEREST_READ),
+        reg=RegistrationHandle(_fd=fd),
     )
 
 
@@ -603,7 +603,7 @@ def test_accept_wraps_the_connection_in_tls() raises:
     assert_equal(fd_to_idx[Int(conns[0].fd())], 0)
     assert_true(conns[0].is_tls())
     assert_equal(conns[0].state(), CONN_STATE_TLS_HANDSHAKE_IN)
-    assert_equal(conns[0].interest_set(), INTEREST_READ)
+    assert_equal(r.interest_set(conns[0].registration()), INTEREST_READ)
     assert_equal(conns[0].registration().fd(), conns[0].fd())
     var hs = drive_tls_handshake(conns[0])
     assert_equal(hs[0], TLS_OUTCOME_BLOCKED_ON_READ)
@@ -651,7 +651,7 @@ def test_accept_stale_mapping_is_swept() raises:
     conns.append(
         ConnEntry(
             stream=TcpStream(stale),
-            reg=RegistrationHandle(_fd=stale, _interest_set=INTEREST_READ),
+            reg=RegistrationHandle(_fd=stale),
         )
     )
     fd_to_idx[Int(stale)] = 0
@@ -686,7 +686,7 @@ def test_accept_stale_mapping_to_an_orphan_slot_removes_it() raises:
     conns.append(
         ConnEntry(
             stream=TcpStream(Int32(-1)),
-            reg=RegistrationHandle(_fd=Int32(-1), _interest_set=INTEREST_READ),
+            reg=RegistrationHandle(_fd=Int32(-1)),
         )
     )
     fd_to_idx[Int(next)] = 0

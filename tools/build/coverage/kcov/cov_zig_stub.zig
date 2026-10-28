@@ -25,17 +25,17 @@ pub fn main() !u8 {
     var dir = try std.fs.cwd().openDir(std.fs.path.dirname(argv[0]) orelse return error.NoDirectory, .{});
     defer dir.close();
 
-    var rec = std.ArrayList(u8).init(alloc);
+    var rec = std.ArrayList(u8).empty;
     var out: ?[]const u8 = null;
     var prev: []const u8 = "";
     for (argv[1..]) |a| {
-        try rec.appendSlice(a);
-        try rec.append('\n');
+        try rec.appendSlice(alloc, a);
+        try rec.append(alloc, '\n');
         if (std.mem.eql(u8, prev, "-o")) out = a;
         if (a.len > 2 and std.mem.startsWith(u8, a, "-o")) out = a[2..];
         prev = a;
     }
-    try dir.writeFile("argv", rec.items);
+    try dir.writeFile(.{ .sub_path = "argv", .data = rec.items });
 
     if (out) |o| {
         if (try readOpt(alloc, dir, "stub_out")) |src| {

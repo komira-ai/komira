@@ -78,13 +78,14 @@ pub const Error = error{ Refused, Usage };
 /// read the very messages a run prints.
 pub const Diag = struct {
     text: std.ArrayList(u8),
+    alloc: Alloc,
 
     pub fn init(alloc: Alloc) Diag {
-        return .{ .text = std.ArrayList(u8).init(alloc) };
+        return .{ .text = std.ArrayList(u8).empty, .alloc = alloc };
     }
 
     fn print(self: *Diag, comptime fmt: []const u8, args: anytype) void {
-        self.text.writer().print(fmt, args) catch oom();
+        self.text.writer(self.alloc).print(fmt, args) catch oom();
     }
 
     fn refuse(self: *Diag, comptime fmt: []const u8, args: anytype) error{Refused} {
@@ -165,18 +166,18 @@ const Reader = struct {
 
     fn unescape(self: *const Reader, at: usize, v: []const u8) error{Refused}![]const u8 {
         if (std.mem.indexOfScalar(u8, v, '&') == null) return v;
-        var out = std.ArrayList(u8).init(self.alloc);
+        var out = std.ArrayList(u8).empty;
         var i: usize = 0;
         while (i < v.len) {
             if (v[i] != '&') {
-                out.append(v[i]) catch oom();
+                out.append(self.alloc, v[i]) catch oom();
                 i += 1;
                 continue;
             }
             const semi = std.mem.indexOfScalarPos(u8, v, i, ';') orelse return self.bad(at, "an '&' with no ';' in an attribute value", .{});
             const ent = v[i + 1 .. semi];
             const c = entity(ent) orelse return self.bad(at, "unknown entity '&{s};'", .{ent});
-            out.append(c) catch oom();
+            out.append(self.alloc, c) catch oom();
             i = semi + 1;
         }
         return out.items;
@@ -215,8 +216,8 @@ const Reader = struct {
     fn read(self: *const Reader) error{Refused}![]Class {
         const b = self.b;
         const n = b.len;
-        var stack = std.ArrayList([]const u8).init(self.alloc);
-        var classes = std.ArrayList(Class).init(self.alloc);
+        var stack = std.ArrayList([]const u8).empty;
+        var classes = std.ArrayList(Class).empty;
         var current: ?Class = null;
         var saw_root = false;
         var i: usize = 0;
@@ -255,7 +256,7 @@ const Reader = struct {
                 if (!std.mem.eql(u8, top, name)) return self.bad(start, "</{s}> closes <{s}>", .{ name, top });
                 _ = stack.pop();
                 if (std.mem.eql(u8, name, "class")) {
-                    classes.append(current.?) catch oom();
+                    classes.append(self.alloc, current.?) catch oom();
                     current = null;
                 }
                 i = j + 1;
@@ -266,7 +267,7 @@ const Reader = struct {
             while (j < n and !isNameEnd(b[j])) j += 1;
             const tag = b[i + 1 .. j];
             if (tag.len == 0) return self.bad(start, "a tag with no name", .{});
-            var attrs = std.ArrayList(Attr).init(self.alloc);
+            var attrs = std.ArrayList(Attr).empty;
             var self_closing = false;
             while (true) {
                 while (j < n and isSpace(b[j])) j += 1;
@@ -296,7 +297,7 @@ const Reader = struct {
                 const v0 = j + 1;
                 const v1 = std.mem.indexOfScalarPos(u8, b, v0, q) orelse return self.bad(a0, "unterminated value of {s} in <{s}", .{ aname, tag });
                 if (attrValue(attrs.items, aname) != null) return self.bad(a0, "attribute {s} of <{s}> is given twice", .{ aname, tag });
-                attrs.append(.{ .name = aname, .value = try self.unescape(a0, b[v0..v1]) }) catch oom();
+                attrs.append(self.alloc, .{ .name = aname, .value = try self.unescape(a0, b[v0..v1]) }) catch oom();
                 j = v1 + 1;
             }
             if (stack.items.len == 0) {
@@ -311,9 +312,9 @@ const Reader = struct {
                 if (current != null) return self.bad(start, "<class> inside <class>", .{});
                 const f = attrValue(attrs.items, "filename") orelse "";
                 if (f.len == 0) return self.bad(start, "<class> has no filename", .{});
-                current = .{ .filename = f, .lines = std.ArrayList(Line).init(self.alloc) };
+                current = .{ .filename = f, .lines = std.ArrayList(Line).empty };
                 if (self_closing) {
-                    classes.append(current.?) catch oom();
+                    classes.append(self.alloc, current.?) catch oom();
                     current = null;
                 }
             } else if (std.mem.eql(u8, tag, "line") and std.mem.eql(u8, parent, "lines") and std.mem.eql(u8, grandparent, "class")) {
@@ -333,9 +334,9 @@ const Reader = struct {
                         return self.bad(start, "<line> branch='{s}' is not true or false", .{bv});
                     }
                 }
-                current.?.lines.append(.{ .number = num, .hits = if (hits > 0) 1 else 0, .branch = br }) catch oom();
+                current.?.lines.append(self.alloc, .{ .number = num, .hits = if (hits > 0) 1 else 0, .branch = br }) catch oom();
             }
-            if (!self_closing) stack.append(tag) catch oom();
+            if (!self_closing) stack.append(self.alloc, tag) catch oom();
             i = j;
         }
         if (!saw_root) return self.bad(n, "no <coverage> element", .{});
@@ -443,14 +444,14 @@ fn outLess(_: void, a: Out, b: Out) bool {
 /// The lines of one class sorted by number, each number once.
 fn mergeLines(alloc: Alloc, diag: *Diag, repo: []const u8, lines: []Line) error{Refused}![]Line {
     std.mem.sort(Line, lines, {}, lineLess);
-    var out = std.ArrayList(Line).init(alloc);
+    var out = std.ArrayList(Line).empty;
     for (lines) |l| {
         if (out.items.len > 0 and out.items[out.items.len - 1].number == l.number) {
             const last = &out.items[out.items.len - 1];
             last.hits |= l.hits;
             last.branch = try mergeBranch(diag, repo, l.number, last.branch, l.branch);
         } else {
-            out.append(l) catch oom();
+            out.append(alloc, l) catch oom();
         }
     }
     return out.items;
@@ -474,8 +475,8 @@ fn writeEscaped(w: anytype, s: []const u8) void {
 }
 
 fn render(alloc: Alloc, classes: []const Out) []const u8 {
-    var buf = std.ArrayList(u8).init(alloc);
-    const w = buf.writer();
+    var buf = std.ArrayList(u8).empty;
+    const w = buf.writer(alloc);
     w.writeAll("<?xml version=\"1.0\" ?>\n" ++
         "<coverage timestamp=\"0\">\n" ++
         "\t<sources>\n" ++
@@ -512,9 +513,10 @@ fn render(alloc: Alloc, classes: []const Out) []const u8 {
 /// it, so a failed write leaves no file, partial or temporary: the error is
 /// returned, and the deferred `deinit` removes the temporary file.
 fn writeOut(dir: std.fs.Dir, path: []const u8, bytes: []const u8) !void {
-    var af = try dir.atomicFile(path, .{});
+    var wbuf: [4096]u8 = undefined;
+    var af = try dir.atomicFile(path, .{ .write_buffer = &wbuf });
     defer af.deinit();
-    try af.file.writeAll(bytes);
+    af.file_writer.interface.writeAll(bytes) catch |e| return if (e == error.WriteFailed) (af.file_writer.err orelse e) else e;
     try af.finish();
 }
 
@@ -535,10 +537,10 @@ const Options = struct {
 fn parseArgs(alloc: Alloc, diag: *Diag, args: []const []const u8) Error!Options {
     var in_path: ?[]const u8 = null;
     var out_path: ?[]const u8 = null;
-    var maps = std.ArrayList(Map).init(alloc);
-    var excludes = std.ArrayList([]const u8).init(alloc);
-    var musts = std.ArrayList([]const u8).init(alloc);
-    var forbids = std.ArrayList([]const u8).init(alloc);
+    var maps = std.ArrayList(Map).empty;
+    var excludes = std.ArrayList([]const u8).empty;
+    var musts = std.ArrayList([]const u8).empty;
+    var forbids = std.ArrayList([]const u8).empty;
     var a: usize = 0;
     while (a < args.len) : (a += 2) {
         const flag = args[a];
@@ -559,16 +561,16 @@ fn parseArgs(alloc: Alloc, diag: *Diag, args: []const []const u8) Error!Options 
             for (maps.items) |m| {
                 if (std.mem.eql(u8, m.abs, abs)) return diag.usageFail("--map ABS '{s}' given twice", .{abs});
             }
-            maps.append(.{ .abs = abs, .repo = repo }) catch oom();
+            maps.append(alloc, .{ .abs = abs, .repo = repo }) catch oom();
         } else if (std.mem.eql(u8, flag, "--exclude")) {
             if (v.len < 2 or v[0] != '/' or v[v.len - 1] != '/') return diag.usageFail("--exclude '{s}' must be absolute and end with '/'", .{v});
-            excludes.append(v) catch oom();
+            excludes.append(alloc, v) catch oom();
         } else if (std.mem.eql(u8, flag, "--must-contain")) {
             if (v.len == 0 or v[0] == '/') return diag.usageFail("--must-contain '{s}' must be a repository path", .{v});
-            musts.append(v) catch oom();
+            musts.append(alloc, v) catch oom();
         } else if (std.mem.eql(u8, flag, "--forbid")) {
             if (v.len == 0) return diag.usageFail("--forbid is empty", .{});
-            forbids.append(v) catch oom();
+            forbids.append(alloc, v) catch oom();
         } else {
             return diag.usageFail("unknown flag '{s}'", .{flag});
         }
@@ -619,15 +621,15 @@ fn run(alloc: Alloc, diag: *Diag, dir: std.fs.Dir, args: []const []const u8) Err
         };
         try checkRepoPath(diag, c.filename, repo);
         const slot = by_repo.getOrPut(repo) catch oom();
-        if (!slot.found_existing) slot.value_ptr.* = std.ArrayList(Line).init(alloc);
-        slot.value_ptr.appendSlice(c.lines.items) catch oom();
+        if (!slot.found_existing) slot.value_ptr.* = std.ArrayList(Line).empty;
+        slot.value_ptr.appendSlice(alloc, c.lines.items) catch oom();
     }
     if (unmapped > 0) return diag.refuse("{d} unmapped file name(s) in {s}; nothing written", .{ unmapped, in_file });
 
-    var outs = std.ArrayList(Out).init(alloc);
+    var outs = std.ArrayList(Out).empty;
     var it = by_repo.iterator();
     while (it.next()) |e| {
-        outs.append(.{ .repo = e.key_ptr.*, .lines = try mergeLines(alloc, diag, e.key_ptr.*, e.value_ptr.items) }) catch oom();
+        outs.append(alloc, .{ .repo = e.key_ptr.*, .lines = try mergeLines(alloc, diag, e.key_ptr.*, e.value_ptr.items) }) catch oom();
     }
     std.mem.sort(Out, outs.items, {}, outLess);
 
@@ -641,8 +643,8 @@ fn run(alloc: Alloc, diag: *Diag, dir: std.fs.Dir, args: []const []const u8) Err
     // A forbidden string is looked for as given and as the output writes it
     // in an attribute (escaped): `a&b` in a path is `a&amp;b` in the bytes.
     for (opt.forbids) |s| {
-        var esc = std.ArrayList(u8).init(alloc);
-        writeEscaped(esc.writer(), s);
+        var esc = std.ArrayList(u8).empty;
+        writeEscaped(esc.writer(alloc), s);
         if (std.mem.indexOf(u8, bytes, s) != null or std.mem.indexOf(u8, bytes, esc.items) != null)
             return diag.refuse("the output would hold '{s}' (--forbid); nothing written", .{s});
     }
@@ -667,5 +669,5 @@ pub fn main() u8 {
     const argv = std.process.argsAlloc(alloc) catch oom();
     const args = alloc.alloc([]const u8, argv.len -| 1) catch oom();
     for (args, 1..) |*a, i| a.* = argv[i];
-    return entry(alloc, std.fs.cwd(), args, std.io.getStdErr().writer());
+    return entry(alloc, std.fs.cwd(), args, std.fs.File.stderr().deprecatedWriter());
 }

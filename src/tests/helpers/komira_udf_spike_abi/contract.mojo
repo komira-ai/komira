@@ -26,7 +26,11 @@ comptime ERR_OUT_OF_MEMORY: Int32 = 13
 comptime ERR_INSTANCE_LOST: Int32 = 14
 comptime ERR_INTERNAL: Int32 = 15
 comptime ERR_FIELD_NOT_DECLARED: Int32 = 16
-comptime STATUS_COUNT = 17
+comptime ERR_WORKER_CRASHED: Int32 = 17
+comptime ERR_HOST_CONTRACT: Int32 = 18
+comptime ERR_KILLED: Int32 = 19
+comptime ERR_READ_SET_MISMATCH: Int32 = 20
+comptime STATUS_COUNT = 21
 """The statuses ABI 1.0 defines: 0 to STATUS_COUNT - 1."""
 
 # capabilities.shapes / spec.shape
@@ -39,21 +43,16 @@ comptime SHAPE_AGG_PLAIN: UInt32 = 1 << 5
 comptime SHAPE_AGG_MERGEABLE: UInt32 = 1 << 6
 comptime SHAPE_STEP: UInt32 = 1 << 7
 
-# capabilities.threading
-comptime THREAD_SAFE: UInt32 = 1
-comptime CONTEXT_PER_THREAD: UInt32 = 2
-comptime SINGLE_THREAD: UInt32 = 3
-
-# capabilities.transports, hosting, devices, features
-comptime TRANSPORT_IN_PROCESS: UInt32 = 1 << 0
-comptime TRANSPORT_WORKER: UInt32 = 1 << 1
-comptime HOSTING_NONE: UInt32 = 0
-comptime HOSTING_EMBEDDED: UInt32 = 1
-comptime HOSTING_HOST_INTERPRETER: UInt32 = 2
+# capabilities.udf_class, devices, features
 comptime CLASS_NATIVE: UInt32 = 1
 comptime CLASS_MANAGED: UInt32 = 2
 comptime DEVICE_CPU: UInt32 = 1 << 0
 comptime FEATURE_MEMORY_REPORT: UInt32 = 1 << 0
+comptime FEATURE_CONTAINS_CRASHES: UInt32 = 1 << 1
+comptime FEATURE_FORCED_STOP: UInt32 = 1 << 2
+comptime FEATURES_DEFINED: UInt32 = FEATURE_MEMORY_REPORT | FEATURE_CONTAINS_CRASHES | FEATURE_FORCED_STOP
+"""Every feature bit ABI 1.0 defines; a runtime reporting another fails its
+capabilities check."""
 
 # spec.form, spec.null_mode, spec.stability
 comptime FORM_PACKAGE: Int32 = 1
@@ -102,6 +101,14 @@ def status_name(code: Int32) -> String:
         return "ERR_INTERNAL"
     if code == ERR_FIELD_NOT_DECLARED:
         return "ERR_FIELD_NOT_DECLARED"
+    if code == ERR_WORKER_CRASHED:
+        return "ERR_WORKER_CRASHED"
+    if code == ERR_HOST_CONTRACT:
+        return "ERR_HOST_CONTRACT"
+    if code == ERR_KILLED:
+        return "ERR_KILLED"
+    if code == ERR_READ_SET_MISMATCH:
+        return "ERR_READ_SET_MISMATCH"
     return "UNKNOWN(" + String(code) + ")"
 
 
@@ -113,10 +120,39 @@ def status_from_name(name: String) raises -> Int32:
     raise Error("UDF_STATUS_UNKNOWN: " + name)
 
 
-def run_error(code: Int32, at_call: Bool) -> String:
+comptime RUN_CANCEL = "UDF_CANCELLED"
+"""The harness's label for "the run's cancel" (design section 4.5). The design
+names no identifier for it: a cancelled run fails with whatever its cancel
+carries. Every ERR_CANCELLED, and every ERR_KILLED of a call whose cancel the
+host had set, maps to this label."""
+
+comptime KIND_UNSUPPORTED = "OPTIMIZED_UDF_KIND_UNSUPPORTED"
+"""The host's refusal of a shape the runtime as a whole lacks, taken from
+describe before validate is called (design sections 4.2 and 4.5). No status
+maps to it: the harness produces it itself."""
+
+
+def loses_context(code: Int32) -> Bool:
+    """Whether a status loses the context it was returned on (design section
+    4.5): ERR_INSTANCE_LOST, ERR_WORKER_CRASHED, ERR_KILLED and
+    ERR_OUT_OF_MEMORY. After any of them the host makes no further call into
+    the context, only closes its objects and then the context; after any other
+    failure the context and its instances stay usable."""
+    return (
+        code == ERR_INSTANCE_LOST
+        or code == ERR_WORKER_CRASHED
+        or code == ERR_KILLED
+        or code == ERR_OUT_OF_MEMORY
+    )
+
+
+def run_error(code: Int32, at_call: Bool, shape: UInt32 = 0, cancel_was_set: Bool = False) -> String:
     """The run's named error for a status, through one table for every runtime
     (design section 4.5). `at_call` tells ERR_UNSUPPORTED returned by a call
-    (a runtime fault) from one returned by validate or load. OK maps to ""."""
+    (a runtime fault) from one returned by validate or load. `shape` is the
+    called UDF's shape (a STEP's deadline is UDF_STEP_TIMED_OUT), and
+    `cancel_was_set` whether the host had set the call's cancel flag (it
+    decides ERR_KILLED). OK maps to ""."""
     if code == OK:
         return ""
     if code == ERR_RAISED:
@@ -125,6 +161,8 @@ def run_error(code: Int32, at_call: Bool) -> String:
         return "UDF_RETURN_TYPE_MISMATCH"
     if code == ERR_LENGTH:
         return "UDF_BATCH_LENGTH_MISMATCH"
+    if code == ERR_FIELD_NOT_DECLARED:
+        return "UDF_FIELD_NOT_DECLARED"
     if code == ERR_STATE_TOO_LARGE:
         return "UDF_STATE_TOO_LARGE"
     if code == ERR_GROUP_TOO_LARGE:
@@ -135,18 +173,26 @@ def run_error(code: Int32, at_call: Bool) -> String:
         return "OPTIMIZED_UDF_CODE_DIGEST_MISMATCH"
     if code == ERR_DESCRIPTOR:
         return "OPTIMIZED_UDF_DESCRIPTOR_INVALID"
+    if code == ERR_READ_SET_MISMATCH:
+        return "OPTIMIZED_UDF_READ_SET_DESCRIPTOR_MISMATCH"
+    if code == ERR_UNSUPPORTED and not at_call:
+        return "OPTIMIZED_UDF_UNSUPPORTED"
+    if code == ERR_ABI:
+        return "UDF_RUNTIME_ABI_MISMATCH"
     if code == ERR_CANCELLED:
-        return "UDF_CANCELLED"
-    if code == ERR_DEADLINE:
+        return RUN_CANCEL
+    if code == ERR_KILLED and cancel_was_set:
+        return RUN_CANCEL
+    if code == ERR_DEADLINE or code == ERR_KILLED:
+        if shape == SHAPE_STEP:
+            return "UDF_STEP_TIMED_OUT"
         return "UDF_DEADLINE_EXCEEDED"
-    if code == ERR_INSTANCE_LOST:
-        return "UDF_INSTANCE_LOST"
+    if code == ERR_INSTANCE_LOST or code == ERR_WORKER_CRASHED:
+        return "UDF_WORKER_CRASHED"
     if code == ERR_OUT_OF_MEMORY:
         return "UDF_OUT_OF_MEMORY"
-    if code == ERR_FIELD_NOT_DECLARED:
-        return "UDF_FIELD_NOT_DECLARED"
-    if code == ERR_UNSUPPORTED and not at_call:
-        return "OPTIMIZED_UDF_KIND_UNSUPPORTED"
+    if code == ERR_HOST_CONTRACT:
+        return "UDF_HOST_CONTRACT_VIOLATION"
     return "UDF_RUNTIME_FAULT"
 
 

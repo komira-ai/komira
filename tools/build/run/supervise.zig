@@ -36,6 +36,11 @@ pub const Platform = struct {
     exec: ExecFn = realExec,
     kill: *const fn (pid: sys.pid_t, sig: u8) void = sys.kill,
     now_ms: *const fn () ?u64 = sys.monotonicMs,
+    /// Waits up to `ms` for C's exit or a signal (the loop's tick). A test
+    /// replaces it, with `now_ms` and `sleep_ms`, by a clock it moves itself.
+    wait: *const fn (fds: WaitFds, ms: u32) void = realWait,
+    /// The survivor scan's nap.
+    sleep_ms: *const fn (ms: u64) void = sys.sleepMs,
     read_table: *const fn (alloc: std.mem.Allocator) ?proctab.Table = proctab.read,
     group_members: *const fn (alloc: std.mem.Allocator, pgid: i32) ?[]proctab.Member = proctab.groupMembers,
     self_seen: *const fn () [2]i64 = proctab.selfSeen,
@@ -43,6 +48,19 @@ pub const Platform = struct {
     /// from: /proc on Linux, libproc on macOS (proctab.zig).
     has_proc: bool = sys.is_linux or sys.is_darwin,
 };
+
+/// What the loop waits on: the self-pipe for signals and, where the kernel
+/// has one, C's pidfd.
+pub const WaitFds = struct { sig: sys.fd_t, pidfd: ?sys.fd_t };
+
+pub fn realWait(fds: WaitFds, ms: u32) void {
+    var p = [2]posix.pollfd{
+        .{ .fd = fds.sig, .events = posix.POLL.IN, .revents = 0 },
+        .{ .fd = fds.pidfd orelse -1, .events = posix.POLL.IN, .revents = 0 },
+    };
+    const n: usize = if (fds.pidfd != null) 2 else 1;
+    _ = posix.poll(p[0..n], @intCast(ms)) catch {};
+}
 
 /// The platform every mode uses; tests replace fields of it.
 pub var plat: Platform = .{};
@@ -107,7 +125,7 @@ pub const Outcome = struct {
 
 var sig_pipe: [2]sys.fd_t = .{ -1, -1 };
 
-fn onSignal(sig: i32) callconv(.C) void {
+fn onSignal(sig: i32) callconv(.c) void {
     const b = [1]u8{@intCast(sig & 0xff)};
     _ = posix.system.write(sig_pipe[1], &b, 1);
 }
@@ -115,17 +133,17 @@ fn onSignal(sig: i32) callconv(.C) void {
 fn installSignals() !void {
     if (sig_pipe[0] != -1) return;
     sig_pipe = try posix.pipe2(.{ .CLOEXEC = true, .NONBLOCK = true });
-    const act = posix.Sigaction{ .handler = .{ .handler = onSignal }, .mask = posix.empty_sigset, .flags = 0 };
-    for ([_]u6{ posix.SIG.HUP, posix.SIG.INT, posix.SIG.TERM }) |s| try posix.sigaction(s, &act, null);
+    const act = posix.Sigaction{ .handler = .{ .handler = onSignal }, .mask = posix.sigemptyset(), .flags = 0 };
+    for ([_]u6{ posix.SIG.HUP, posix.SIG.INT, posix.SIG.TERM }) |s| posix.sigaction(s, &act, null);
     if (sys.is_darwin) {
         // macOS: C's exit wakes the loop through SIGCHLD (byte 0 is not a
         // signal the loop acts on; it only checks for an exit).
-        const chld = posix.Sigaction{ .handler = .{ .handler = onChild }, .mask = posix.empty_sigset, .flags = posix.SA.NOCLDSTOP };
-        try posix.sigaction(posix.SIG.CHLD, &chld, null);
+        const chld = posix.Sigaction{ .handler = .{ .handler = onChild }, .mask = posix.sigemptyset(), .flags = posix.SA.NOCLDSTOP };
+        posix.sigaction(posix.SIG.CHLD, &chld, null);
     }
 }
 
-fn onChild(_: i32) callconv(.C) void {
+fn onChild(_: i32) callconv(.c) void {
     const b = [1]u8{0};
     _ = posix.system.write(sig_pipe[1], &b, 1);
 }
@@ -229,13 +247,8 @@ fn exited(ch: *Child) ?u8 {
 }
 
 /// Waits up to `ms` for C's exit or a signal.
-fn waitEvent(ch: *Child, ms: i32) void {
-    var fds = [2]posix.pollfd{
-        .{ .fd = sig_pipe[0], .events = posix.POLL.IN, .revents = 0 },
-        .{ .fd = ch.pidfd orelse -1, .events = posix.POLL.IN, .revents = 0 },
-    };
-    const n: usize = if (ch.pidfd != null) 2 else 1;
-    _ = posix.poll(fds[0..n], ms) catch {};
+fn waitEvent(ch: *Child, ms: u32) void {
+    plat.wait(.{ .sig = sig_pipe[0], .pidfd = ch.pidfd }, ms);
 }
 
 fn groupKill(c: sys.pid_t) void {
@@ -386,13 +399,13 @@ pub fn run(alloc: std.mem.Allocator, spec: Spec) !Outcome {
         if (seen[0] != self or seen[1] != self) {
             out.blind = seen;
         } else {
-            const deadline = (sys.monotonicMs() orelse 0) + survivor_wait_ms;
+            const deadline = (plat.now_ms() orelse 0) + survivor_wait_ms;
             while (true) {
                 const left: []const proctab.Member = plat.group_members(alloc, ch.c) orelse &.{};
                 out.survivors = left;
                 if (left.len == 0) break;
-                if ((sys.monotonicMs() orelse deadline) >= deadline) break;
-                sys.sleepMs(1000);
+                if ((plat.now_ms() orelse deadline) >= deadline) break;
+                plat.sleep_ms(1000);
             }
         }
     }

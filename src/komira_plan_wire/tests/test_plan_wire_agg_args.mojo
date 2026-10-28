@@ -54,6 +54,7 @@ from std.testing import TestSuite, assert_equal, assert_true
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, Schema, SchemaBuilder
 from komira_plan_expr.agg_expr import (
+    AGG_UDF,
     AggExpr,
     AGG_COUNT,
     AGG_COUNT_IF,
@@ -125,8 +126,9 @@ def _aggregate(var ax: AggExprArray) raises -> LogicalPlan:
 
 
 def _every_fn_plan() raises -> LogicalPlan:
-    """COUNT(*) first, then every engine tag 0..AGG_FN_WIRE_MEMBERS-1 in
-    order, each aliased `f<tag>` so the output columns are distinct.
+    """COUNT(*) first, then every engine tag 0..AGG_FN_WIRE_MEMBERS-1 but
+    AGG_UDF in order, each aliased `f<tag>` so the output columns are
+    distinct.
 
     The argument per member is the shape that member reads
     (`_agg_arg_slots` in plan_wire_values.mojo): a bivariate member gets
@@ -138,6 +140,12 @@ def _every_fn_plan() raises -> LogicalPlan:
     ax.append(AggExpr(AGG_COUNT, none_expr^, Optional(String("count_star"))))
     for i in range(AGG_FN_WIRE_MEMBERS):
         var tag = UInt8(i)
+        if tag == AGG_UDF:
+            # Its one argument is a call of a `UdfRef`, which only a plan
+            # carrying the `UdfRef` list can hold; test_plan_wire_udf_plans.mojo
+            # round-trips it. Left out, the frozen bytes below stay the bytes
+            # of the members a plan without that list can carry.
+            continue
         var name = Optional(String("f") + String(i))
         if agg_is_bivariate(tag):
             ax.append(
@@ -301,8 +309,8 @@ def test_every_agg_fn_keeps_its_func_and_arguments() raises:
     var plan = _every_fn_plan()
     assert_equal(
         len(plan.aggregate_data_ref().agg_exprs),
-        AGG_FN_WIRE_MEMBERS + 1,
-        "the corpus is COUNT(*) plus one aggregate per AggFn member",
+        AGG_FN_WIRE_MEMBERS,
+        "the corpus is COUNT(*) plus one aggregate per AggFn member but AGG_UDF",
     )
     var back = _round_trip(plan)
     _assert_agg_slots(String("every AggFn, round trip"), plan, back)

@@ -6,16 +6,21 @@
  * caller.
  *
  * What it does, by entry:
- *   - describe: one fixed set (NATIVE, hosting 0, CONTEXT_PER_THREAD without
- *     thread_affine, global_lock 0, every shape). It reports IN_PROCESS only:
- *     the design lists both transports, and no worker serves this runtime yet.
- *   - validate: form BUNDLE, descriptor version 0 and empty (the descriptor
- *     would name the source language and toolchain, for diagnostics only),
- *     every code role `lib:<os>-<cpu>`, and one for this host's platform
- *     (ERR_UNSUPPORTED naming the platform otherwise). Then it opens that
- *     library (below) and forwards validate to it: the entry and the
- *     signature are the library's to check.
- *   - load: the same checks, then the library's load.
+ *   - describe: one fixed set (NATIVE, CPU, every shape, descriptor version
+ *     1, no feature: in-process code cannot be stopped by force, design
+ *     section 4.7).
+ *   - validate (design section 4.3 item 3: pure, it opens no code object):
+ *     form BUNDLE, every code role `lib:<os>-<cpu>`, and one for this host's
+ *     platform (ERR_UNSUPPORTED naming the platform otherwise); then the
+ *     spec against its descriptor, the spike descriptor version 1
+ *     (komira_udf_spike_descriptor.h, the shared decoder): the entry, the
+ *     shape, the signature and the recorded fields, which a native
+ *     descriptor must carry for ROW and MAP_BATCHES_FRAME (ERR_DESCRIPTOR
+ *     when absent: native code has no lazy view, section 3.1).
+ *   - load: the same checks, then the library (below), its describe's
+ *     shapes, and the library's own load, which compares its code with the
+ *     descriptor; a library that refuses the spec's schemas or descriptor
+ *     is refused with ERR_LOAD (the code disagrees with the descriptor).
  *   - every later entry: forwarded to the library's table, with the
  *     library's handle wrapped in one of this runtime's.
  *
@@ -33,10 +38,11 @@
  * is released whether or not it returned a table; its table must be ABI
  * major 1 and cover every required entry (a table refused for either is
  * never called again, not even its shutdown); its describe must report
- * runtime_id "komira/native", udf_class NATIVE, threading CONTEXT_PER_THREAD
- * or THREAD_SAFE, global_lock 0, no thread_affine and IN_PROCESS, and at
- * load, the spec's shape. A library refused once is refused again with the
- * same status and message (ERR_LOAD naming the capability, or the digest).
+ * runtime_id "komira/native" and udf_class NATIVE, and at load the spec's
+ * shape. How it executes is not a capability (design section 4.2), so
+ * nothing else of its describe is read. A library refused once is refused
+ * again with the same status and message (ERR_LOAD naming the capability,
+ * or the digest).
  *
  * Handles: a context holds the library contexts it opened, one per library,
  * opened at its first open_instance of that library's UDF with the same
@@ -62,6 +68,7 @@
 #include <unistd.h>
 
 #include "komira_udf_runtime.h"
+#include "komira_udf_spike_descriptor.h"
 
 #define NATIVE_ID "komira/native"
 #define LIB_SYMBOL "komira_udf_native_init_v1"
@@ -306,15 +313,6 @@ static int32_t check_library(struct lib* l) {
              c.runtime_id ? c.runtime_id : "");
   else if (c.udf_class != KOMIRA_UDF_CLASS_NATIVE)
     snprintf(why, sizeof(why), "the library reports udf_class %u, not NATIVE", c.udf_class);
-  else if (c.threading != KOMIRA_UDF_CONTEXT_PER_THREAD && c.threading != KOMIRA_UDF_THREAD_SAFE)
-    snprintf(why, sizeof(why), "the library reports threading %u, not CONTEXT_PER_THREAD or THREAD_SAFE",
-             c.threading);
-  else if (c.global_lock != 0)
-    snprintf(why, sizeof(why), "the library reports global_lock %u", c.global_lock);
-  else if (c.thread_affine != 0)
-    snprintf(why, sizeof(why), "the library reports thread_affine %u", c.thread_affine);
-  else if ((c.transports & KOMIRA_UDF_TRANSPORT_IN_PROCESS) == 0)
-    snprintf(why, sizeof(why), "the library's transports lack IN_PROCESS");
   if (why[0] != 0) return refuse(l, KOMIRA_UDF_ERR_LOAD, why);
   return KOMIRA_UDF_OK;
 }
@@ -417,18 +415,14 @@ static int role_ok(const char* r) {
   return dash != NULL && dash > r + 4 && dash[1] != 0;
 }
 
-/* The checks this runtime owns, then the library of this host's platform:
- * *out is it, or NULL with the status returned. */
-static int32_t resolve(komira_udf_rt* rt, const komira_udf_spec* s, komira_udf_error* e, struct lib** out) {
-  *out = NULL;
+/* validate: the checks this runtime owns, from the spec alone (it opens no
+ * code object, design section 4.3 item 3): *pick is the code object of this
+ * host's platform. */
+static int32_t admit(const komira_udf_spec* s, komira_udf_error* e, size_t* pick_out) {
   if (s == NULL || s->struct_size < sizeof(komira_udf_spec))
     return fail(e, KOMIRA_UDF_ERR_ABI, "spec struct_size is below this runtime's");
   if (s->form != KOMIRA_UDF_FORM_BUNDLE)
     return fail(e, KOMIRA_UDF_ERR_DESCRIPTOR, "a native UDF's code form is BUNDLE");
-  if (s->descriptor_version > 0)
-    return fail(e, KOMIRA_UDF_ERR_DESCRIPTOR, "descriptor_version is newer than 0, the newest read here");
-  if (s->descriptor_len != 0)
-    return fail(e, KOMIRA_UDF_ERR_DESCRIPTOR, "descriptor version 0 is empty; these bytes are not canonical");
   if (s->n_code > 0 && (s->code_roles == NULL || s->code_sha256 == NULL || s->code_root == NULL))
     return fail(e, KOMIRA_UDF_ERR_DESCRIPTOR, "the code list has no roles, digests or root");
   size_t pick = s->n_code;
@@ -439,10 +433,25 @@ static int32_t resolve(komira_udf_rt* rt, const komira_udf_spec* s, komira_udf_e
   }
   if (pick == s->n_code)
     return fail(e, KOMIRA_UDF_ERR_UNSUPPORTED, "no library for this host's platform, " HOST_ROLE);
+  komira_udf_spike_descriptor d;
+  char why[640];
+  int32_t rc = komira_udf_spike_descriptor_check(s, 1, &d, why, sizeof(why));
+  if (rc != KOMIRA_UDF_OK) return fail(e, rc, why);
+  *pick_out = pick;
+  return KOMIRA_UDF_OK;
+}
+
+/* load: admit, then the library of this host's platform: *out is it, or
+ * NULL with the status returned. */
+static int32_t resolve(komira_udf_rt* rt, const komira_udf_spec* s, komira_udf_error* e, struct lib** out) {
+  *out = NULL;
+  size_t pick = 0;
+  int32_t rc = admit(s, e, &pick);
+  if (rc != KOMIRA_UDF_OK) return rc;
   struct lib* l = NULL;
   char why[4200];
   pthread_mutex_lock(&rt->mu);
-  int32_t rc = open_library(rt, s->code_root, s->code_sha256[pick], &l, why, sizeof(why));
+  rc = open_library(rt, s->code_root, s->code_sha256[pick], &l, why, sizeof(why));
   pthread_mutex_unlock(&rt->mu);
   if (rc != KOMIRA_UDF_OK) return fail(e, rc, why);
   if (l->refusal != KOMIRA_UDF_OK) return fail(e, l->refusal, l->why);
@@ -455,26 +464,20 @@ static int32_t native_describe(komira_udf_rt* rt, komira_udf_capabilities* c) {
   if (c == NULL || c->struct_size < sizeof(komira_udf_capabilities)) return KOMIRA_UDF_ERR_ABI;
   c->runtime_id = NATIVE_ID;
   c->runtime_abi = "abi1";
-  c->max_descriptor_version = 0;
+  c->max_descriptor_version = KOMIRA_UDF_SPIKE_DESCRIPTOR_VERSION;
   c->shapes = KOMIRA_UDF_SHAPE_SCALAR | KOMIRA_UDF_SHAPE_ROW | KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN |
               KOMIRA_UDF_SHAPE_MAP_BATCHES_FRAME | KOMIRA_UDF_SHAPE_MAP_BATCHES_FRAME_GROUPED |
               KOMIRA_UDF_SHAPE_AGG_PLAIN | KOMIRA_UDF_SHAPE_AGG_MERGEABLE | KOMIRA_UDF_SHAPE_STEP;
-  c->threading = KOMIRA_UDF_CONTEXT_PER_THREAD;
-  c->thread_affine = 0;
-  c->transports = KOMIRA_UDF_TRANSPORT_IN_PROCESS;
-  c->hosting = KOMIRA_UDF_HOSTING_NONE;
   c->devices = KOMIRA_UDF_DEVICE_CPU;
   c->features = 0;
   c->udf_class = KOMIRA_UDF_CLASS_NATIVE;
-  c->global_lock = 0;
   return KOMIRA_UDF_OK;
 }
 
 static int32_t native_validate(komira_udf_rt* rt, const komira_udf_spec* s, komira_udf_error* e) {
-  struct lib* l;
-  int32_t rc = resolve(rt, s, e, &l);
-  if (rc != KOMIRA_UDF_OK) return rc;
-  return l->t->validate(l->rt, s, e);
+  (void)rt;
+  size_t pick = 0;
+  return admit(s, e, &pick);
 }
 
 static int32_t native_load(komira_udf_rt* rt, const komira_udf_spec* s, komira_udf_udf** out, komira_udf_error* e) {
@@ -491,6 +494,13 @@ static int32_t native_load(komira_udf_rt* rt, const komira_udf_spec* s, komira_u
   rc = l->t->load(l->rt, s, &u->inner, e);
   if (rc != KOMIRA_UDF_OK) {
     free(u);
+    /* The library's refusal of the spec's schemas or descriptor is its code
+     * disagreeing with the descriptor this runtime already checked: ERR_LOAD
+     * (design section 4.3 item 4), with the library's message. */
+    if (rc == KOMIRA_UDF_ERR_UNSUPPORTED || rc == KOMIRA_UDF_ERR_DESCRIPTOR) {
+      if (e != NULL && e->struct_size >= sizeof(komira_udf_error)) e->code = KOMIRA_UDF_ERR_LOAD;
+      rc = KOMIRA_UDF_ERR_LOAD;
+    }
     return rc;
   }
   u->lib = l;

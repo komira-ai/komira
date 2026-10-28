@@ -1,4 +1,8 @@
+load("@buildrules//rules/mojo:pack.bzl", "mojo_conda", "mojo_conda_holds")
+load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
 load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":buildrules.mojo.bzl", "mojo_package")
 load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode", "proto_fixture_case", "proto_fixture_check")
 
 # The plan IR on the wire: `komira.plan.v1`.
@@ -30,7 +34,7 @@ load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode", "proto_fixtu
 # The generated constants exist so the `.proto` is typed for the other
 # languages that read it, which name `PlanTag` rather than a bare `uint32`.
 #
-# `test_srcs` welds the package to the field-number census: every field of
+# The package's tests (`tests/test_*.mojo`) weld it to the field-number census: every field of
 # every message and every value of every enum, each number written by hand
 # in a ledger and held to the generated codec as wire bytes, read back by
 # name (tests/test_plan_field_numbers_*.mojo, tests/test_plan_enum_numbers_*.mojo).
@@ -43,7 +47,7 @@ load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode", "proto_fixtu
 # tests/test_plan_reservations.mojo reads every `reserved` number and name
 # from the .proto text and holds them to its own table, and holds
 # optimized_plan.proto's HELD rows to them: a held number must stay free.
-# README.md's examples run as one more welded test.
+# README.md's examples run as one more welded test (`[tests][readme]`).
 _CENSUS = [
     "tests/test_plan_field_numbers_scan.mojo",
     "tests/test_plan_field_numbers_expr.mojo",
@@ -51,6 +55,7 @@ _CENSUS = [
     "tests/test_plan_enum_numbers_nodes.mojo",
     "tests/test_plan_enum_numbers_functions.mojo",
     "tests/test_optimized_plan_field_numbers.mojo",
+    "tests/test_plan_field_numbers_udf.mojo",
 ]
 
 # One golden per message of optimized_plan.proto, each named for its message
@@ -77,16 +82,39 @@ _PROTOS = [
     "plan_vocabulary.proto",
 ]
 
+# The generator's half: `komira_plan_proto_generated_gen` writes the Mojo of `_PROTOS`,
+# `komira_plan_proto_generated_fresh` holds the committed directory
+# `generated/komira_plan_proto_generated/` to it, byte for byte, and fails with the command that
+# regenerates (tools/build/gen/README.md). That directory is the library of mopm.toml
+# (`[targets] lib`), compiled as the module `komira_plan_proto`: `import_name` is that module's
+# name, and the rule names the directory after the target, which `:komira_plan_proto` below
+# cannot be. The library this call declares itself (`:komira_plan_proto_generated`, the same
+# files without the tests) is not what dependents use. Regenerate with
+#   ./buck2 run komira//tools/build/gen:regen -- komira//src/komira_plan_proto:komira_plan_proto_generated
 mojo_proto_library(
-    name = "komira_plan_proto",
+    name = "komira_plan_proto_generated",
     srcs = _PROTOS,
+    import_name = "komira_plan_proto",
     import_prefix = "komira/plan/v1",
     deps = ["//src/komira_proto_codec:komira_proto_codec"],
-    test_srcs = _CENSUS + [
-        "tests/test_plan_census_complete.mojo",
-        "tests/test_plan_reservations.mojo",
-        "tests/test_optimized_plan_goldens.mojo",
-    ],
+    visibility = ["PUBLIC"],
+)
+
+# The generator's target under the name its users know (komira_pandas_door_e2e takes it as
+# `proto_deps`).
+alias(
+    name = "komira_plan_proto_gen",
+    actual = ":komira_plan_proto_generated_gen",
+    visibility = ["PUBLIC"],
+)
+
+# Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"): `:lib` is the
+# library file, compiled from the committed directory, and exists only once the tests of tests/
+# have passed. The census (the field and enum numbers, each written by hand and held to the
+# generated codec's wire bytes), the golden fixtures and the scans of the `.proto` files are those
+# tests; `test_data` stages what they read, under the paths they open.
+mojo_package(
+    path = ".",
     test_data = {
         # Each golden's protoc bytes and this package's own encoding of them.
         "tests/test_optimized_plan_goldens.mojo": {
@@ -94,8 +122,8 @@ mojo_proto_library(
             for s in _OPTIMIZED_GOLDEN
             for ext in [".hex", ".canonical.hex"]
         },
-        # Every .proto of `srcs` is staged under protos/, and the test scans
-        # every file there, so a .proto added to `srcs` cannot be skipped.
+        # Every .proto of `_PROTOS` is staged under protos/, and the test scans
+        # every file there, so a .proto added to `_PROTOS` cannot be skipped.
         "tests/test_plan_census_complete.mojo": {"protos/" + p: p for p in _PROTOS} | {
             "census/" + t.removeprefix("tests/"): t
             for t in _CENSUS
@@ -106,6 +134,63 @@ mojo_proto_library(
             "census/test_optimized_plan_field_numbers.mojo": "tests/test_optimized_plan_field_numbers.mojo",
         },
     },
+)
+
+# `:komira_plan_proto`, the target the packages that depend on this library name, is `:lib` as
+# komira's Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds
+# only once the tests have passed. `deps` is `[dependencies]` of mopm.toml, as the adopted targets
+# of those packages: the rule refuses a list that is not the closure `:lib` was built from. It
+# carries the README gate too (`[tests][readme]`): the examples run against `:lib`.
+mojo_adopted_library(
+    name = "komira_plan_proto",
+    deps = ["//src/komira_proto_codec:komira_proto_codec"],
+    lib = ":lib",
+    readme = "README.md",
+    srcs = glob(["generated/komira_plan_proto_generated/**/*.mojo"]),
+    test_srcs = glob(["tests/test_*.mojo"]),
+    test_runs = ":test",
+    visibility = ["PUBLIC"],
+)
+
+# The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves. `members` is the
+# manifests of the path dependencies of the closure, staged at their repository paths, because
+# `mopm pack` reads the manifest of each beside the one it is given. `mopm` is the one
+# `mojo_package` pins (mopm-toolchain.toml).
+mojo_conda(
+    name = "conda",
+    dir = "generated/komira_plan_proto_generated",
+    lib = ":lib",
+    manifest = "mopm.toml",
+    members = {
+        "../komira_encoding": "//src/komira_encoding:mopm.toml",
+        "../komira_json": "//src/komira_json:mopm.toml",
+        "../komira_proto_codec": "//src/komira_proto_codec:mopm.toml",
+        "../komira_protobuf": "//src/komira_protobuf:mopm.toml",
+    },
+    mojo = "1.0.0",
+    mopm = "toolchains//:mopm_0_0_86",
+    package = "komira_plan_proto",
+    version = "0.1.0",
+    visibility = ["PUBLIC"],
+)
+
+# What `:conda` holds, read back from the built file: this package's own `.mojoc` and nothing else
+# under `lib/mojo/`, and exactly the one dependency of mopm.toml.
+mojo_conda_holds(
+    name = "conda_holds",
+    conda = ":conda",
+    depends = ["mojo-komira_proto_codec >=0.1,<0.2"],
+    package = "komira_plan_proto",
+    sole = True,
+    visibility = ["PUBLIC"],
+)
+
+# Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto):
+# komira's conda packer over `:komira_plan_proto`. This library's mopm package is `:conda` above.
+conda_package(
+    name = "komira_plan_proto_conda",
+    lib = ":komira_plan_proto",
+    summary = "The `komira_plan_proto` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],
 )
 
@@ -121,7 +206,7 @@ mojo_proto_library(
 # goldens are sha256 of fixed strings, not digests computed from the body:
 # computing them is stage 5. `optimized_plan`'s `body` is the bytes of a
 # small `OptimizedPlanBody`, which the Mojo test decodes.
-_OPTIMIZED_PROTO = [":komira_plan_proto_gen"]
+_OPTIMIZED_PROTO = [":komira_plan_proto_generated_gen"]
 
 # Five goldens set no field to its default, and for them the generated
 # encoder writes exactly protoc's bytes, so their `.hex` and `.canonical.hex`

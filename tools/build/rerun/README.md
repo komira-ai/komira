@@ -59,6 +59,7 @@ action that runs a test, and returns `rerun_info(ctx)` (the provider
 | `py_test` | the script (`py_test`) |
 | `launcher_level_test` | the level test (`launcher_level_test`) |
 | `release_order_test` | the order check over its fixtures (`release_order_test`) |
+| `release_readme_test` | the README check over its fixtures (`release_readme_test`) |
 | `kcov_guard_cases` | the guard's cases (`kcov_guard_cases`) |
 | `coverage_ci_cases` | the coverage workflow scripts' cases (`coverage_ci_cases`) |
 | `proto_fixture_case` | the fixture check over its case (`proto_fixture_case`) |
@@ -66,7 +67,7 @@ action that runs a test, and returns `rerun_info(ctx)` (the provider
 | `install_gate_cases` (tests cell) | install_gate.sh's cases (`install_gate_cases`) |
 | `mojo_test_command_case` (tests cell) | a mojo_test's `buck2 test` command, run (`mojo_test_command_case`) |
 | `mojo_watchdog_cases` (tests cell) | the compile watchdog's cases (`mojo_watchdog_cases`) |
-| `git_check` | git_check.sh over the built git and git-lfs (`git_check`) |
+| `git_check` | `git_check` (git_check.zig) over the built git and git-lfs |
 
 Not wired:
 

@@ -11,6 +11,7 @@ from sha256-pinned downloads, using the rules in
 |---|---|---|
 | `:busybox` | static busybox 1.35.0 (x86_64, musl): `sh` and the file utilities every action uses | busybox.net |
 | `:zig_linux_x86_64.tar.xz` | zig 0.12.0: the C link driver for `mojo build`, and the compiler for `conda_unpack` | ziglang.org |
+| `:zig_next_linux_x86_64.tar.xz` | zig 0.15.2, unpacked by `:zig_next`; only the targets that name it use it (kpin first), the rest build with the zig above until the last step of the move. `:zig_next_version` runs its `zig version` and fails unless it prints `0.15.2` ([`zig_next_version_test.zig`](zig_next_version_test.zig)) | ziglang.org |
 | `:mojo_compiler_1.0.0_linux-64.conda` | the Mojo compiler package, 1.0.0, linux-64 | conda.modular.com |
 | `:libstdcxx_15.3.0_linux-64.conda`, `:libgcc_15.3.0_linux-64.conda` | the C++ runtime (`libstdc++.so.6`, `libgcc_s.so.1`) the compiler and built binaries link against; one matched pair from conda-forge | conda.anaconda.org |
 | `:pixi` | pixi 0.67.2, the raw static executable of the target platform's row (`pixi-0.67.2-x86_64-unknown-linux-musl` or `pixi-0.67.2-aarch64-apple-darwin`), never unpacked; `:pixi_version` runs the linux one and fails unless it prints `pixi 0.67.2` ([`pixi.bzl`](pixi.bzl)) | github.com/prefix-dev/pixi |
@@ -123,9 +124,15 @@ To update buck2, change each platform's `size`, `digest` and release URL in
 targets for macOS on Apple silicon. `toolchains//:mojo` selects the toolchain
 by the target platform's os: `komira//tools/build/toolchains/darwin:mojo` for
 macos, built from the sha256-pinned osx-arm64 compiler package of the same
-release. The C/C++, Rust and protobuf toolchains are linux x86_64 only, so a
+release. The Rust and protobuf toolchains are linux x86_64 only, so a
 darwin-arm64 target that needs one is incompatible rather than built for
-linux.
+linux. The C/C++ toolchain (`toolchains//:cxx`) also admits darwin-arm64, for
+compile and archive only: the pinned zig, on the linux x86_64 execution
+platform, compiles for `aarch64-macos` at zig's generic arm64 CPU and writes the
+static archive, and its linker is a refusal (a link would write a linux
+program). It selects on macOS and arm64 together
+(`toolchains:is_macos_arm64`), so macOS on another CPU, or arm64 on another OS,
+is incompatible. `tools/build/ci/cases.bxl` holds the cases.
 
 Its compiles, gated tests and run checks run on macOS arm64 workers, the
 execution platform `komira//tools/build/platforms:darwin-arm64`.

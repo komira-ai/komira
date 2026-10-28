@@ -14,7 +14,8 @@
 #   test_understated_fields: the whole version-1 field table. In each of the
 #     seven header messages, every number from 1 to one above the highest
 #     declared or held number that version 1 does not include (held,
-#     reserved, never declared) is refused as understated, naming it.
+#     reserved, never declared, and DeclaredNeeds.udfs, declared but outside
+#     version 1) is refused as understated, naming it.
 #     Catches a walk that skips unknown fields, proto3-style, and any one
 #     held or reserved row made known.
 #   test_understated_enum_values: `write_target.format` 4 and `codec` 6 are
@@ -316,7 +317,7 @@ def test_understated_fields() raises:
     var messages: List[String] = [
         "OptimizedPlan",  # 1-8 declared
         "ProducerStamp",  # 1, 2, 3, 5 declared; 4 reserved
-        "DeclaredNeeds",  # 1, 2, 4, 10 held; 3, 6, 7 reserved; 5, 8, 9 declared
+        "DeclaredNeeds",  # 1, 4, 10 held; 3, 6, 7 reserved; 2 declared, not in v1; 5, 8, 9 in v1
         "RuntimeNeed",  # 1, 2 declared
         "WireWriteTarget",  # 1, 2, 3 declared
         "PlanAdvice",  # 1, 3, 4 held; 2 declared

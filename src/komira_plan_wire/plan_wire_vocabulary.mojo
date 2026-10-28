@@ -58,7 +58,7 @@ in the generator. A repository lint fails if you do.
 comptime PLAN_WIRE_UNSPECIFIED_VALUE: Int32 = 0
 """Wire 0, in every space. Never a valid tag."""
 
-comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 353
+comptime PLAN_WIRE_VOCABULARY_MEMBERS: Int = 357
 """Total published members across all 32 spaces. A drift tripwire a test can pin."""
 
 comptime PLAN_WIRE_SPACE_COUNT: Int = 32
@@ -67,7 +67,7 @@ comptime PLAN_WIRE_SPACE_COUNT: Int = 32
 
 # ==========================================================================
 # PlanTag — engine prefix `PLAN_`
-# LogicalPlan node kind. ONE declaration site, logical_plan.mojo (0-15, 18).
+# LogicalPlan node kind. ONE declaration site, logical_plan.mojo (0-15, 18-20).
 # 16-17 were the ROW<->COLUMN converts and are DELETED; their numbers stay
 # burned.
 # Declared in: src/komira_plan_ir/logical_plan.mojo
@@ -82,19 +82,19 @@ comptime PLAN_WIRE_SPACE_COUNT: Int = 32
 #     carry the node
 # ==========================================================================
 
-comptime PLAN_TAG_WIRE_MEMBERS: Int = 17
+comptime PLAN_TAG_WIRE_MEMBERS: Int = 19
 comptime PLAN_TAG_ENGINE_MIN: UInt8 = 0
-comptime PLAN_TAG_ENGINE_MAX: UInt8 = 18
+comptime PLAN_TAG_ENGINE_MAX: UInt8 = 20
 comptime PLAN_TAG_WIRE_MIN: Int32 = 1
-comptime PLAN_TAG_WIRE_MAX: Int32 = 19
+comptime PLAN_TAG_WIRE_MAX: Int32 = 21
 
 
 def plan_tag_is_declared(engine_tag: UInt8) -> Bool:
     """Does the engine declare this PlanTag value?
 
-    Runs: [(0, 15), (18, 18)]. Total, never raising.
+    Runs: [(0, 15), (18, 20)]. Total, never raising.
     """
-    return engine_tag <= 15 or engine_tag == 18
+    return engine_tag <= 15 or (engine_tag >= 18 and engine_tag <= 20)
 
 
 def plan_tag_to_wire(engine_tag: UInt8) raises -> Int32:
@@ -213,6 +213,12 @@ def write_plan_tag_wire_name[W: Writer](mut writer: W, wire: Int32):
     if wire == 19:
         writer.write("PLAN_EXCHANGE")
         return
+    if wire == 20:
+        writer.write("PLAN_MAP_BATCHES")
+        return
+    if wire == 21:
+        writer.write("PLAN_STEP")
+        return
     writer.write("PlanTag#", Int(wire))
 
 
@@ -249,19 +255,19 @@ def plan_tag_wire_name(wire: Int32) -> String:
 #     SortData/TopNData, not as an Expr arm
 # ==========================================================================
 
-comptime EXPR_TAG_WIRE_MEMBERS: Int = 27
+comptime EXPR_TAG_WIRE_MEMBERS: Int = 28
 comptime EXPR_TAG_ENGINE_MIN: UInt8 = 0
-comptime EXPR_TAG_ENGINE_MAX: UInt8 = 26
+comptime EXPR_TAG_ENGINE_MAX: UInt8 = 27
 comptime EXPR_TAG_WIRE_MIN: Int32 = 1
-comptime EXPR_TAG_WIRE_MAX: Int32 = 27
+comptime EXPR_TAG_WIRE_MAX: Int32 = 28
 
 
 def expr_tag_is_declared(engine_tag: UInt8) -> Bool:
     """Does the engine declare this ExprTag value?
 
-    Runs: [(0, 26)]. Total, never raising.
+    Runs: [(0, 27)]. Total, never raising.
     """
-    return engine_tag <= 26
+    return engine_tag <= 27
 
 
 def expr_tag_to_wire(engine_tag: UInt8) raises -> Int32:
@@ -410,6 +416,9 @@ def write_expr_tag_wire_name[W: Writer](mut writer: W, wire: Int32):
     if wire == 27:
         writer.write("EXPR_STRING_FN_N")
         return
+    if wire == 28:
+        writer.write("EXPR_UDF_APPLY")
+        return
     writer.write("ExprTag#", Int(wire))
 
 
@@ -436,19 +445,19 @@ def expr_tag_wire_name(wire: Int32) -> String:
 # Declared in: src/komira_plan_expr/agg_expr.mojo
 # ==========================================================================
 
-comptime AGG_FN_WIRE_MEMBERS: Int = 37
+comptime AGG_FN_WIRE_MEMBERS: Int = 38
 comptime AGG_FN_ENGINE_MIN: UInt8 = 0
-comptime AGG_FN_ENGINE_MAX: UInt8 = 36
+comptime AGG_FN_ENGINE_MAX: UInt8 = 37
 comptime AGG_FN_WIRE_MIN: Int32 = 1
-comptime AGG_FN_WIRE_MAX: Int32 = 37
+comptime AGG_FN_WIRE_MAX: Int32 = 38
 
 
 def agg_fn_is_declared(engine_tag: UInt8) -> Bool:
     """Does the engine declare this AggFn value?
 
-    Runs: [(0, 36)]. Total, never raising.
+    Runs: [(0, 37)]. Total, never raising.
     """
-    return engine_tag <= 36
+    return engine_tag <= 37
 
 
 def agg_fn_to_wire(engine_tag: UInt8) raises -> Int32:
@@ -609,6 +618,9 @@ def write_agg_fn_wire_name[W: Writer](mut writer: W, wire: Int32):
         return
     if wire == 37:
         writer.write("AGG_KURTOSIS_POP")
+        return
+    if wire == 38:
+        writer.write("AGG_UDF")
         return
     writer.write("AggFn#", Int(wire))
 
@@ -4223,11 +4235,11 @@ def plan_wire_space_name(space: Int) -> String:
 def plan_wire_space_member_count(space: Int) raises -> Int:
     """How many members a space publishes. RAISES on a bad index."""
     if space == 0:
-        return 17
+        return 19
     if space == 1:
-        return 27
+        return 28
     if space == 2:
-        return 37
+        return 38
     if space == 3:
         return 16
     if space == 4:
@@ -4292,11 +4304,11 @@ def plan_wire_space_member_count(space: Int) raises -> Int:
 def plan_wire_space_engine_max(space: Int) raises -> UInt8:
     """The highest engine value a space declares."""
     if space == 0:
-        return 18
+        return 20
     if space == 1:
-        return 26
+        return 27
     if space == 2:
-        return 36
+        return 37
     if space == 3:
         return 24
     if space == 4:

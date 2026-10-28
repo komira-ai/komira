@@ -1,5 +1,5 @@
 """The directory a coverage gate runs from (README.md, "The build gate";
-tools/build/mojo/coverage.bzl): cov_gate.sh and covcheck. And
+tools/build/mojo/coverage.bzl): the cov_gate program and covcheck. And
 `coverage_ci_cases`, the cases of the coverage workflow's scripts (README.md,
 "The coverage workflow")."""
 
@@ -13,7 +13,7 @@ def _gate_dir_impl(ctx):
     out = ctx.actions.copied_dir("cov_gate", {
         # The binary and the runtime libraries its run path ($ORIGIN/lib)
         # names, under fixed names.
-        "cov_gate.sh": ctx.attrs.script,
+        "cov_gate": ctx.attrs.gate[DefaultInfo].default_outputs[0],
         "covcheck/covcheck": exe.run_dir.project(exe.binary),
         "covcheck/lib": exe.run_dir.project("lib"),
     })
@@ -21,10 +21,10 @@ def _gate_dir_impl(ctx):
 
 _cov_gate_dir = rule(
     impl = _gate_dir_impl,
-    doc = "The directory a mojo_library's coverage gate runs from (tools/build/mojo/coverage.bzl): `cov_gate.sh` (`script`) and `covcheck/` (`covcheck`, a mojo_binary, with its runtime libraries). The script finds covcheck beside itself; the floor a gate reads is its library's package's (`coverage_floor`, tools/build/mojo/coverage.bzl).",
+    doc = "The directory a mojo_library's coverage gate runs from (tools/build/mojo/coverage.bzl): `cov_gate` (`gate`, a Zig program) and `covcheck/` (`covcheck`, a mojo_binary, with its runtime libraries). The program finds covcheck beside itself; the hold a gate reads is its library's package's (`coverage_held`, tools/build/mojo/coverage.bzl).",
     attrs = {
         "covcheck": attrs.exec_dep(providers = [MojoRunnableInfo], default = "komira//tools/build/coverage:covcheck_bin"),
-        "script": attrs.source(default = "komira//tools/build/coverage:cov_gate.sh"),
+        "gate": attrs.exec_dep(default = "komira//tools/build/coverage:cov_gate_bin"),
     },
 )
 

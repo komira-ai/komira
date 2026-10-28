@@ -187,7 +187,7 @@ mojo_library(
     coverage_branch_gate = True,
 )
 BUCKEOF
-printf 'covrefuse/rule\t0\t-\n' > "$CR/rule/lenient.tsv"
+printf '# holds nothing\n' > "$CR/rule/lenient_held"
 cat > "$CR/macro/BUCK" <<'BUCKEOF'
 load("@komira//tools/build/coverage:policy.bzl", "COVERAGE_MODE")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
@@ -231,7 +231,7 @@ cov_branch_dir(
         "gate": {"coverage_gate": ":lenient", "coverage_mode": COVERAGE_MODE},
         "branch": {"coverage_branch": ":mybranch", "coverage_gate": _GATE, "coverage_mode": COVERAGE_MODE},
         "branch_gate": {"coverage_branch_gate": True, "coverage_gate": _GATE, "coverage_mode": COVERAGE_MODE},
-        "floor": {"coverage_floor": "lenient.tsv", "coverage_gate": _GATE, "coverage_mode": COVERAGE_MODE},
+        "held": {"coverage_gate": _GATE, "coverage_held": "lenient_held", "coverage_mode": COVERAGE_MODE},
         "runs": {},
     }.items()
 ]
@@ -263,7 +263,7 @@ for c in "macro|uquery|app//covrefuse/macro:lib|fail: lib: \`coverage_debug\`, \
     "macro_branch|uquery|app//covrefuse/macro_branch:lib|fail: lib: \`coverage_branch_gate\` is set by mojo_library from COVERAGE_BRANCH_GATE" \
     "branch|audit providers|app//covrefuse/rule:branch|app//covrefuse/rule:branch: coverage_branch is app//covrefuse/rule:mybranch, not komira//tools/build/coverage/branch:cov_branch" \
     "branch_gate|audit providers|app//covrefuse/rule:branch_gate|app//covrefuse/rule:branch_gate: coverage_branch_gate is True, but the library is not in COVERAGE_BRANCH_GATE" \
-    "floor|audit providers|app//covrefuse/rule:floor|app//covrefuse/rule:floor: coverage gate: coverage_floor is lenient.tsv, not the package's coverage_floor.tsv" \
+    "held|audit providers|app//covrefuse/rule:held|app//covrefuse/rule:held: coverage gate: coverage_held is lenient_held, not the package's coverage_held" \
     "runs|audit providers|app//covrefuse/rule:runs|app//covrefuse/rule:runs: coverage builds with no coverage_gate: its conda package would wait for no coverage gate" \
     "named|audit providers|app//covrefuse/rule:named_conda|app//covrefuse/rule:named_conda: the coverage gate of app//covrefuse/rule:named is its target"; do
     IFS='|' read -r n cmd t want <<< "$c"
@@ -275,7 +275,7 @@ for c in "macro|uquery|app//covrefuse/macro:lib|fail: lib: \`coverage_debug\`, \
         die "umbrella: $t was refused without '$want' (see $W/umbrella.covrefuse_$n.log)"
 done
 (cd "$W/umbrella" && "$BUCK2" kill > /dev/null 2>&1)
-echo "      coverage attributes: refused in the consumer's cell, passed to mojo_library (any of them, coverage_branch_gate alone included) or to the rule (another mode, another gate, another branch coverage directory, branch records read off COVERAGE_BRANCH_GATE, a floor file not the package's, runs without a gate, a conda package of a library naming coverage_tests that waits for no gate)"
+echo "      coverage attributes: refused in the consumer's cell, passed to mojo_library (any of them, coverage_branch_gate alone included) or to the rule (another mode, another gate, another branch coverage directory, branch records read off COVERAGE_BRANCH_GATE, a held marker not the package's, runs without a gate, a conda package of a library naming coverage_tests that waits for no gate)"
 
 # Analysis only. The toolchains cell of every checkout declares the expected
 # targets; a planted override in a consumer's toolchains cell reaches hello's

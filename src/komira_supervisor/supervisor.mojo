@@ -49,9 +49,12 @@ from .proc_ffi import (
     proc_environ_at,
     proc_environ_count,
     proc_spawn,
+    proc_spawn_stdin,
     proc_spawn_detached,
+    proc_write,
     proc_read,
     proc_read_avail,
+    proc_wait_readable,
     proc_set_nonblocking,
     proc_close,
     proc_kill,
@@ -111,11 +114,20 @@ from .proc_ffi import (
 # from either nanosleep decl, so it sidesteps the conflict entirely. Resolution
 # is ~10ms-tick-grade, which is exactly what the grace poll needs.
 # -----------------------------------------------------------------------------
+def _usleep_micros(ms: Int) -> UInt32:
+    """The microseconds `_sleep_ms(ms)` passes to usleep: 0 (no sleep) for
+    `ms <= 0`, else `ms * 1000`."""
+    if ms <= 0:
+        return UInt32(0)
+    return UInt32(ms * 1000)
+
+
 def _sleep_ms(ms: Int):
     """Sleep `ms` milliseconds via usleep (microsecond granularity)."""
-    if ms <= 0:
+    var us = _usleep_micros(ms)
+    if us == UInt32(0):
         return
-    _ = external_call["usleep", Int32](UInt32(ms * 1000))
+    _ = external_call["usleep", Int32](us)
 
 
 # -----------------------------------------------------------------------------
@@ -356,6 +368,7 @@ struct ChildSpec(Movable):
     var rlimits: List[RLimit] # opt-in; accepted but not applied yet
     var own_process_group: Bool  # see set_own_process_group
     var default_signals: Bool    # see set_default_signals
+    var stdin_pipe: Bool         # see set_stdin_pipe
 
     def __init__(out self, path: String):
         self.path = path
@@ -367,6 +380,7 @@ struct ChildSpec(Movable):
         self.rlimits = List[RLimit]()
         self.own_process_group = False
         self.default_signals = False
+        self.stdin_pipe = False
 
     @staticmethod
     def shell(cmd: String) -> ChildSpec:
@@ -422,6 +436,12 @@ struct ChildSpec(Movable):
         and the mask, so without this a child inherits, for example, the
         SIGPIPE this process ignores once it has made a TLS connection."""
         self.default_signals = True
+
+    def set_stdin_pipe(mut self):
+        """The child's stdin is a pipe this process writes: `Supervisor.write_stdin`
+        sends bytes and `close_stdin` gives the child end of file. Without
+        this the child inherits this process's stdin."""
+        self.stdin_pipe = True
 
     def spawn_flags(self) -> Int32:
         """The shim's spawn flags for this spec."""
@@ -499,6 +519,7 @@ struct Supervisor(Movable):
     var _pgid: Int32           # the child's own process group, or -1
     var _stdout_fd: Int32
     var _stderr_fd: Int32
+    var _stdin_fd: Int32       # write end of the child's stdin, or -1
     var _exited: Bool          # cached terminal state (idempotency)
     var _cached_exit: ExitInfo # valid once _exited
 
@@ -507,6 +528,7 @@ struct Supervisor(Movable):
         self._pgid = Int32(-1)
         self._stdout_fd = Int32(-1)
         self._stderr_fd = Int32(-1)
+        self._stdin_fd = Int32(-1)
         self._exited = False
         self._cached_exit = ExitInfo(Int32(-1), Int32(-1), Int32(-1))
 
@@ -538,17 +560,30 @@ struct Supervisor(Movable):
 
         var sout = Int32(-1)
         var serr = Int32(-1)
+        var sin = Int32(-1)
         var pid = Int32(-1)
-        var rc = proc_spawn(
-            spec.path,
-            argv_blob, argc,
-            env_blob, envc,
-            spec.cwd, spec.has_cwd,
-            spec.spawn_flags(),
-            sout, serr, pid,
-        )
+        var rc: Int32
+        if spec.stdin_pipe:
+            rc = proc_spawn_stdin(
+                spec.path,
+                argv_blob, argc,
+                env_blob, envc,
+                spec.cwd, spec.has_cwd,
+                spec.spawn_flags(),
+                sout, serr, sin, pid,
+            )
+        else:
+            rc = proc_spawn(
+                spec.path,
+                argv_blob, argc,
+                env_blob, envc,
+                spec.cwd, spec.has_cwd,
+                spec.spawn_flags(),
+                sout, serr, pid,
+            )
         if rc != Int32(0):
             return rc  # -errno
+        self._stdin_fd = sin
         self._pid = pid
         # POSIX_SPAWN_SETPGROUP with pgroup 0: the group's id is the pid, set
         # in the child before exec, so it exists by the time spawn returns.
@@ -570,6 +605,49 @@ struct Supervisor(Movable):
 
     def stderr_fd(self) -> Int32:
         return self._stderr_fd
+
+    def stdin_fd(self) -> Int32:
+        """The write end of the child's stdin, or -1 (the spec did not ask for
+        a pipe, or `close_stdin` ran)."""
+        return self._stdin_fd
+
+    def write_stdin(mut self, text: String) -> Int:
+        """Write every byte of `text` to the child's stdin. Returns the byte
+        count, or a negative errno (-EBADF with no stdin pipe, -EPIPE when the
+        child has closed its stdin or exited, even part-way through: the count
+        already written is not reported; SIGPIPE does not kill this process).
+        It blocks while the pipe is full (about 64 KiB on Linux). A single
+        thread that writes more than that to a child that answers on stdout
+        deadlocks, the child blocked writing stdout and this call blocked
+        writing stdin: drain stdout from another thread, or keep each write
+        small. A child that never reads blocks the call for good."""
+        if self._stdin_fd < Int32(0):
+            return -9  # EBADF
+        return proc_write(self._stdin_fd, text.as_bytes())
+
+    def close_stdin(mut self):
+        """Close the write end of the child's stdin: the child reads end of
+        file. Idempotent."""
+        if self._stdin_fd >= Int32(0):
+            proc_close(self._stdin_fd)
+            self._stdin_fd = Int32(-1)
+
+    def wait_readable(self, fd: Int32, timeout_ms: Int) -> Int:
+        """Wait up to `timeout_ms` (negative: without limit) until a read of
+        the capture pipe `fd` would not block: 1 when data, end of file or an
+        error is waiting, 0 on timeout, a negative errno on failure."""
+        return proc_wait_readable(fd, timeout_ms)
+
+    def read_blocking(mut self, fd: Int32) -> ReadChunk:
+        """ONE read of a capture pipe that waits for at least one byte (the
+        descriptor is blocking, as `spawn` leaves it) and returns what the read
+        gives: the same ReadChunk contract as `read_available`. eof=True when
+        every writer has closed the pipe, error=True on a read error, and
+        would_block=True only on a descriptor made non-blocking with
+        `set_nonblocking`. Like `read_available` it decodes nothing: the bytes
+        are not validated as UTF-8, and a multi-byte character split across two
+        chunks rejoins exactly under `+=`."""
+        return self.read_available(fd)
 
     # --- capture -------------------------------------------------------------
 
@@ -901,6 +979,7 @@ struct Supervisor(Movable):
         """Close any open capture-pipe fds (idempotent). Does NOT reap — call
         wait_exit / terminate for that. Production also deregisters the reactor
         exit-monitor fd (pidfd) here."""
+        self.close_stdin()
         if self._stdout_fd >= Int32(0):
             proc_close(self._stdout_fd)
             self._stdout_fd = Int32(-1)

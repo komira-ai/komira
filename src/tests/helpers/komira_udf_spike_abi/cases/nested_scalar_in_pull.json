@@ -1,0 +1,14 @@
+{
+ "name": "nested_scalar_in_pull",
+ "defect": "a runtime cannot serve the one nesting design 4.3 allows: a scalar call_batch on the frame's own context while its frame_next waits on its pull",
+ "run": "nested_frame",
+ "entry": "running_sum",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "nested": {"entry": "double", "shape": "SCALAR", "args": [{"type": "int64", "nullable": true}], "result": [{"type": "int64", "nullable": true}]},
+ "levels": 1,
+ "inputs": [{"length": 3, "columns": [{"type": "int64", "values": [1, 2, 3]}]}, {"length": 1, "columns": [{"type": "int64", "values": [4]}]}],
+ "expect": {"status": "OK", "batches": [{"length": 3, "columns": [{"type": "int64", "values": [2, 6, 12]}]}, {"length": 1, "columns": [{"type": "int64", "values": [20]}]}]}
+}

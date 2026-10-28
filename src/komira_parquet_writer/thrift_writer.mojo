@@ -104,7 +104,19 @@ struct ThriftCompactWriter(Movable):
 
     @always_inline
     def write_varint(mut self, value: Int):
-        """Write unsigned variable-length integer (ULEB128)."""
+        """Write unsigned variable-length integer (ULEB128).
+
+        Total: it ends for every input. A negative `value` is written as the
+        ten-byte varint of its 64-bit pattern; no caller passes a length or a
+        count that is negative (they come from `len()`).
+
+        This body is kept as it was, not routed through
+        `komira_buffer.write_uleb128_u64`: that routing wrote ten bytes for
+        the i32 field whose zig-zag image is 4294967295 (a CRC of 0x80000000),
+        so the page CRC tests in test_advanced_writer_roundtrip.mojo read a
+        malformed varint, while `write_uleb128` encodes 4294967295 in five
+        bytes (test_write_uleb128.mojo). The cause was not found.
+        """
         var v = value
         if v < 0:
             var uv = UInt64(v)
@@ -450,7 +462,8 @@ struct ThriftCompactWriter(Movable):
             compressed_size: Compressed page body size in bytes.
             num_values: Number of values in the page.
             encoding: Encoding used for values.
-            crc: Optional CRC-32C checksum of the page body.
+            crc: Optional CRC-32 of the stored page body (the standard
+                CRC-32 of gzip and zlib, not CRC-32C), `PageHeader.crc`.
 
         Raises:
             Error: named `ParquetPageSizeOverflow`, when either size field
@@ -514,7 +527,8 @@ struct ThriftCompactWriter(Movable):
             def_levels_byte_length: Byte length of definition levels section.
             rep_levels_byte_length: Byte length of repetition levels section.
             is_compressed: Whether the values section is compressed.
-            crc: Optional CRC-32C checksum.
+            crc: Optional CRC-32 of the stored page body (standard CRC-32,
+                not CRC-32C).
 
         Raises:
             Error: named `ParquetPageSizeOverflow`, when either size field
@@ -586,8 +600,12 @@ struct ThriftCompactWriter(Movable):
         # Field 1: list<bool> null_pages
         self.write_list_begin(1, _COMPACT_BOOLEAN_TRUE, num_pages)
         for i in range(num_pages):
-            # Booleans in a list are written as single bytes (1=true, 0=false)
-            self.write_byte(UInt8(1) if null_pages[i] else UInt8(0))
+            # Booleans in a list are single bytes, 1 for true and 2 for false
+            # (compact protocol: the two boolean type ids); a 0 is not a
+            # boolean and a strict reader rejects it.
+            self.write_byte(
+                _COMPACT_BOOLEAN_TRUE if null_pages[i] else _COMPACT_BOOLEAN_FALSE
+            )
 
         # Field 2: list<binary> min_values
         self.write_list_begin(2, _COMPACT_BINARY, num_pages)

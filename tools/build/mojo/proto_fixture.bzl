@@ -14,7 +14,7 @@ A wire fixture is three committed files per message, `<stem>.hex`,
 
 `proto_fixture_check(name, fixtures, dir, files, hex, canonical_producer,
 srcs, import_prefix, proto_deps)` checks, in one build action
-(`proto_fixture.sh check`), for each entry `<stem>: <root>` of `fixtures`:
+(`proto_fixture check`, tools/proto_fixture.zig), for each entry `<stem>: <root>` of `fixtures`:
 
   0. the `.hex` is not byte for byte the `.canonical.hex` (both ends protoc),
      unless `canonical_producer` lists the stem, and writes no singular field
@@ -94,7 +94,7 @@ def _check_root(ctx, root, what):
         fail("{}: {} `{}` is not a fully qualified message name (`package.Message`, no leading dot)".format(ctx.label, what, root))
 
 def _check_args(ctx):
-    """`proto_fixture.sh check`'s arguments after its report: the schema, `--`, a group per fixture."""
+    """`proto_fixture check`'s arguments after its report: the schema, `--`, a group per fixture."""
     stems = sorted(ctx.attrs.fixtures.keys())
     if not stems:
         fail("{}: `fixtures` is empty: there is nothing to check".format(ctx.label))
@@ -131,12 +131,10 @@ def _proto_fixture_check_impl(ctx):
     report = ctx.actions.declare_output(ctx.label.name + ".txt")
     ctx.actions.run(
         cmd_args(
-            ptc.busybox,
-            "sh",
-            ctx.attrs._script,
+            ctx.attrs._tool[RunInfo],
+            "check",
             ptc.busybox,
             ptc.protoc,
-            "check",
             report.as_output(),
             _check_args(ctx),
             hidden = _selftest(ctx),
@@ -152,7 +150,7 @@ _COMMON = {
     "proto_deps": attrs.list(attrs.dep(providers = [ProtoSrcsInfo]), default = []),
     "proto_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo_proto", providers = [MojoProtoToolchainInfo]),
     "srcs": attrs.list(attrs.source(), default = []),
-    "_script": attrs.source(default = "komira//tools/build/mojo:proto_fixture.sh"),
+    "_tool": attrs.exec_dep(default = "komira//tools/build/mojo:proto_fixture"),
 }
 
 _FIXTURES = {
@@ -182,12 +180,10 @@ def _proto_encode_impl(ctx):
     out = ctx.actions.declare_output(ctx.label.name + ".hex")
     ctx.actions.run(
         cmd_args(
-            ptc.busybox,
-            "sh",
-            ctx.attrs._script,
+            ctx.attrs._tool[RunInfo],
+            "encode",
             ptc.busybox,
             ptc.protoc,
-            "encode",
             out.as_output(),
             _protoc_args(ctx),
             "--",
@@ -207,63 +203,19 @@ proto_encode_rule = rule(
     },
 )
 
-# The check over fixtures, its verdict asserted: accepted when `expect` is
-# empty, otherwise refused with a message holding `expect`.
-_CASE_SCRIPT = """
-SCRIPT="$1"; EXPECT="$2"; VERDICT="$3"; BB="$4"; shift 3
-# Scratch in the action's own directory: a local action runs in the checkout
-# root beside every other local action, so a fixed path under $PWD is shared.
-case "${BUCK_SCRATCH_PATH:-}" in
-    "") T="$PWD/.proto_fixture_case" ;;
-    /*) T="$BUCK_SCRATCH_PATH/proto_fixture_case" ;;
-    *) T="$PWD/$BUCK_SCRATCH_PATH/proto_fixture_case" ;;
-esac
-"$BB" rm -rf "$T"
-"$BB" mkdir -p "$T"
-# The check's arguments: BB PROTOC check, the report, the rest.
-B1="$1"; B2="$2"; B3="$3"; shift 3
-rc=0
-"$BB" sh "$SCRIPT" "$B1" "$B2" "$B3" "$T/report" "$@" 2> "$T/err" || rc=$?
-if [ -z "$EXPECT" ]; then
-    if [ "$rc" -ne 0 ]; then
-        echo "proto_fixture_case: the check refused fixtures it must accept:" >&2
-        "$BB" cat "$T/err" >&2
-        exit 1
-    fi
-    "$BB" test -s "$T/report" || { echo "proto_fixture_case: the check wrote no report" >&2; exit 1; }
-    { echo "accepted"; "$BB" cat "$T/report"; } > "$VERDICT"
-elif [ "$rc" -eq 0 ]; then
-    echo "proto_fixture_case: the check accepted fixtures it must refuse with: $EXPECT" >&2
-    exit 1
-elif ! "$BB" grep -qF -- "$EXPECT" "$T/err"; then
-    echo "proto_fixture_case: the check refused, but not with: $EXPECT" >&2
-    "$BB" cat "$T/err" >&2
-    exit 1
-elif [ -e "$T/report" ]; then
-    echo "proto_fixture_case: the check refused but wrote its report" >&2
-    exit 1
-else
-    { echo "refused"; "$BB" cat "$T/err"; } > "$VERDICT"
-fi
-"$BB" rm -rf "$T"
-"""
-
+# The check over fixtures, its verdict asserted (`proto_fixture case`): accepted
+# when `expect` is empty, otherwise refused with a message holding `expect`.
 def _proto_fixture_case_impl(ctx):
     ptc = ctx.attrs.proto_toolchain[MojoProtoToolchainInfo]
     verdict = ctx.actions.declare_output(ctx.label.name + ".verdict.txt")
     ctx.actions.run(
         cmd_args(
-            ptc.busybox,
-            "sh",
-            "-euc",
-            _CASE_SCRIPT,
-            "sh",
-            ctx.attrs._script,
+            ctx.attrs._tool[RunInfo],
+            "case",
             ctx.attrs.expect,
             verdict.as_output(),
             ptc.busybox,
             ptc.protoc,
-            "check",
             _check_args(ctx),
         ),
         env = rerun_env(ctx),

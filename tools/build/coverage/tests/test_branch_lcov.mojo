@@ -5,7 +5,7 @@ from covcheck.annotate import annotations, touched_packages
 from covcheck.branch_lcov import parse_branch_lcov
 from covcheck.diff import parse_diff
 from covcheck.paths import RepoFiles, repo_files_of
-from covcheck.ratchet import Ratchet, parse_ratchet
+from covcheck.held import Held, add_hold
 
 # Branch record files (`--branch-lcov`, cov_branch_classify's records): the
 # strict reader, the sum of one arm across tests ('-' is counted and not
@@ -173,17 +173,24 @@ def _message(a: Analysis, kind: String) -> String:
     return String("")
 
 
-def _gate(reports: List[Input], ratchet: String) raises -> Analysis:
+def _held(text: String) raises -> Held:
+    """src/alpha's marker `text`."""
+    var h = Held()
+    add_hold(h, String("src/alpha"), text, String("src/alpha/coverage_held"), List[String]())
+    return h^
+
+
+def _gate(reports: List[Input], held: String) raises -> Analysis:
     var o = Options()
     o.mode = String("enforce")
     o.only_package = String("src/alpha")
-    return analyze(reports, List[Input](), _repo(), parse_ratchet(ratchet, String("r.tsv")), _sources(), o)
+    return analyze(reports, List[Input](), _repo(), _held(held), _sources(), o)
 
 
 def _raises(reports: List[Input], want: String) raises:
     var raised = False
     try:
-        _ = _gate(reports, String("src/alpha\t10000\t0\n"))
+        _ = _gate(reports, String("line\n"))
     except e:
         raised = True
         assert_true(String(e).find(want) >= 0, String(e) + String(" lacks ") + want)
@@ -195,7 +202,7 @@ def test_records_sum_by_id_across_tests() raises:
     var b = List[String]()
     b.append(_rec(String("BRDA:2,9:br:0/1,0,-\nBRDA:2,9:br:0/1,1,-\nBRDA:3,9:br:0/1,0,0\nBRDA:3,9:br:0/1,1,1\n")))
     b.append(_rec(String("BRDA:2,9:br:0/1,0,3\nBRDA:2,9:br:0/1,1,-\nBRDA:3,9:br:0/1,0,2\nBRDA:3,9:br:0/1,1,-\n")))
-    var a = _gate(_inputs(String(COB_FULL), b), String("src/alpha\t10000\t0\n"))
+    var a = _gate(_inputs(String(COB_FULL), b), String("line\n"))
     assert_equal(a.packages[0].branch_found, 4)
     assert_equal(a.packages[0].branch_hit, 3)
     ref f = a.files[a.file_index(String("src/alpha/a.mojo"))]
@@ -212,7 +219,7 @@ def test_branch_numbers_replace_branch_not_measured() raises:
     # one arm never taken is BelowTarget on branch and nothing else; both
     # taken, no finding (enforce passes).
     var none = List[String]()
-    var n = _gate(_inputs(String(COB_FULL), none), String("src/alpha\t10000\t-\n"))
+    var n = _gate(_inputs(String(COB_FULL), none), String("line\n"))
     assert_equal(_kinds(n), "BranchNotMeasured:branch")
     # Its message names both sources: kcov's (none) and the branch records
     # a gate reads only for a library of COVERAGE_BRANCH_GATE.
@@ -220,44 +227,44 @@ def test_branch_numbers_replace_branch_not_measured() raises:
     assert_true(msg.find("kcov's Cobertura holds none") >= 0 and msg.find("COVERAGE_BRANCH_GATE") >= 0, msg)
     var half = List[String]()
     half.append(_rec(String("BRDA:2,9:br:0/1,0,4\nBRDA:2,9:br:0/1,1,-\n")) + String(B_NONE))
-    var h = _gate(_inputs(String(COB_FULL), half), String("src/alpha\t10000\t0\n"))
+    var h = _gate(_inputs(String(COB_FULL), half), String("line\n"))
     assert_equal(_kinds(h), "BelowTarget:branch")
     assert_equal(h.packages[0].branch_bp(), 5000)
     assert_equal(h.conclusion, "failure")
     var both = List[String]()
     both.append(_rec(String("BRDA:2,9:br:0/1,0,4\nBRDA:2,9:br:0/1,1,-\n")) + String(B_NONE))
     both.append(_rec(String("BRDA:2,9:br:0/1,0,-\nBRDA:2,9:br:0/1,1,1\n")))
-    var g = _gate(_inputs(String(COB_FULL), both), String("src/alpha\t10000\t10000\n"))
+    var g = _gate(_inputs(String(COB_FULL), both), String("line\nbranch\n"))
     assert_equal(_kinds(g), "")
     assert_equal(g.packages[0].branch_bp(), 10000)
     assert_equal(g.conclusion, "success")
-    # The branch floor holds: measured below it is a Regression, and a row
-    # with '-' a BranchFloorMissing.
-    assert_equal(_kinds(_gate(_inputs(String(COB_FULL), half), String("src/alpha\t10000\t10000\n"))), "BelowTarget:branch Regression:branch")
-    assert_equal(_kinds(_gate(_inputs(String(COB_FULL), half), String("src/alpha\t10000\t-\n"))), "BelowTarget:branch BranchFloorMissing:branch")
+    # A held branch below the target is a Regression; with line held alone
+    # it stays BelowTarget.
+    assert_equal(_kinds(_gate(_inputs(String(COB_FULL), half), String("line\nbranch\n"))), "Regression:branch")
+    assert_equal(_kinds(_gate(_inputs(String(COB_FULL), half), String("line\n"))), "BelowTarget:branch")
     # An empty branch record file (a test that ran none of the package's
     # decisions) measures no branch.
     var empty = List[String]()
     empty.append(String(""))
-    assert_equal(_kinds(_gate(_inputs(String(COB_FULL), empty), String("src/alpha\t10000\t-\n"))), "BranchNotMeasured:branch")
+    assert_equal(_kinds(_gate(_inputs(String(COB_FULL), empty), String("line\n"))), "BranchNotMeasured:branch")
     # A file named with no BRDA (cov_branch_classify saw its code in the
     # test and no decision in it) measures the package's branches: with
     # both files so named there are none to take, so no BranchNotMeasured
     # and no branch number.
     var sf = List[String]()
     sf.append(String("SF:src/alpha/a.mojo\nend_of_record\n") + String(B_NONE))
-    var d = _gate(_inputs(String(COB_FULL), sf), String("src/alpha\t10000\t-\n"))
+    var d = _gate(_inputs(String(COB_FULL), sf), String("line\n"))
     assert_equal(_kinds(d), "")
     assert_equal(d.packages[0].branch_bp(), -1)
     assert_equal(d.conclusion, "success")
     # The same for a file no line report names (counted from its source).
     var sc = List[String]()
     sc.append(String("SF:src/alpha/a.mojo\nend_of_record\n") + String(B_NONE) + String("SF:src/alpha/c.mojo\nend_of_record\n"))
-    assert_equal(_kinds(_gate(_inputs(String(COB_FULL), sc), String("src/alpha\t10000\t-\n"))), "")
+    assert_equal(_kinds(_gate(_inputs(String(COB_FULL), sc), String("line\n"))), "")
     # A left-out test source named so measures nothing of the package.
     var st = List[String]()
     st.append(String("SF:src/alpha/tests/test_a.mojo\nend_of_record\n"))
-    assert_equal(_kinds(_gate(_inputs(String(COB_FULL), st), String("src/alpha\t10000\t-\n"))), "BranchNotMeasured:branch")
+    assert_equal(_kinds(_gate(_inputs(String(COB_FULL), st), String("line\n"))), "BranchNotMeasured:branch")
 
 
 def test_decision_count_conflict_refused() raises:
@@ -273,7 +280,7 @@ def test_decision_count_conflict_refused() raises:
     var k = List[String]()
     k.append(_rec(String("BRDA:2,9:br:0/1,0,1\nBRDA:2,9:br:0/1,1,0\n")))
     k.append(_rec(String("BRDA:2,9:select:0/2,0,1\nBRDA:2,9:select:0/2,1,0\nBRDA:2,9:select:1/2,0,0\nBRDA:2,9:select:1/2,1,1\n")))
-    assert_equal(_gate(_inputs(String(COB_FULL), k), String("src/alpha\t10000\t0\n")).packages[0].branch_found, 6)
+    assert_equal(_gate(_inputs(String(COB_FULL), k), String("line\n")).packages[0].branch_found, 6)
     # One decision with another number of arms (a switch).
     var s = List[String]()
     s.append(_rec(String("BRDA:4,5:switch:0/1,0,1\nBRDA:4,5:switch:0/1,1,0\n")))
@@ -284,7 +291,7 @@ def test_decision_count_conflict_refused() raises:
     var t = List[String]()
     t.append(String("SF:src/alpha/tests/test_a.mojo\nBRDA:2,5:br:0/1,0,1\nBRDA:2,5:br:0/1,1,1\nend_of_record\n"))
     t.append(String("SF:src/alpha/tests/test_a.mojo\nBRDA:2,5:br:0/2,0,1\nBRDA:2,5:br:0/2,1,1\nBRDA:2,5:br:1/2,0,1\nBRDA:2,5:br:1/2,1,1\nend_of_record\n"))
-    var ta = _gate(_inputs(String(COB_FULL), t), String("src/alpha\t10000\t-\n"))
+    var ta = _gate(_inputs(String(COB_FULL), t), String("line\n"))
     assert_equal(ta.excluded_test_files, 1)
     assert_equal(ta.packages[0].branch_found, 0)
 
@@ -317,7 +324,7 @@ def test_one_source_of_branch_data_per_file() raises:
     # read; the two formats of line reports are still never mixed.
     var other = List[String]()
     other.append(String("SF:src/alpha/b.mojo\nBRDA:2,5:br:0/1,0,1\nBRDA:2,5:br:0/1,1,1\nend_of_record\n"))
-    assert_equal(_gate(_inputs(cob, other), String("src/alpha\t10000\t0\n")).packages[0].branch_found, 4)
+    assert_equal(_gate(_inputs(cob, other), String("line\n")).packages[0].branch_found, 4)
     var mix = _inputs(String(COB_FULL), other)
     mix.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String("SF:src/alpha/a.mojo\nDA:2,1\nend_of_record\n")))
     _raises(mix, String("the reports mix cobertura (t.xml) and lcov (t.info)"))
@@ -331,7 +338,7 @@ def test_branches_of_a_file_no_line_report_names() raises:
     var b = List[String]()
     b.append(_rec(String("BRDA:2,9:br:0/1,0,1\nBRDA:2,9:br:0/1,1,-\n")) + String(B_NONE)
         + String("SF:src/alpha/tests/test_a.mojo\nBRDA:2,5:br:0/1,0,1\nBRDA:2,5:br:0/1,1,1\nend_of_record\n"))
-    var a = _gate(_inputs(cob, b), String("src/alpha\t0\t0\n"))
+    var a = _gate(_inputs(cob, b), String("# nothing held\n"))
     assert_equal(a.packages[0].unmeasured_files, 1)
     assert_equal(a.packages[0].branch_found, 2)
     assert_equal(a.packages[0].branch_hit, 1)
@@ -342,12 +349,12 @@ def test_branches_of_a_file_no_line_report_names() raises:
     assert_equal(_message(a, String("UnmeasuredFile")), "no line report names this file, yet its branch records show 1 arm(s) taken: the line and branch measurements disagree on whether it ran; its 3 executable lines count as not covered")
     var nr = List[String]()
     nr.append(_rec(String("BRDA:2,9:br:0/1,0,-\nBRDA:2,9:br:0/1,1,-\n")) + String(B_NONE))
-    assert_equal(_message(_gate(_inputs(cob, nr), String("src/alpha\t0\t0\n")), String("UnmeasuredFile")), "no test binary compiled this file: its 3 executable lines count as not covered")
+    assert_equal(_message(_gate(_inputs(cob, nr), String("# nothing held\n")), String("UnmeasuredFile")), "no test binary compiled this file: its 3 executable lines count as not covered")
     # Branch records keep such a file in the count even when the heuristic
     # finds no executable line in it.
     var c = List[String]()
     c.append(String("SF:src/alpha/a.mojo\nend_of_record\n") + String(B_NONE) + String("SF:src/alpha/c.mojo\nBRDA:1,3:br:0/1,0,1\nBRDA:1,3:br:0/1,1,1\nend_of_record\n"))
-    var k = _gate(_inputs(String(COB_FULL), c), String("src/alpha\t0\t0\n"))
+    var k = _gate(_inputs(String(COB_FULL), c), String("# nothing held\n"))
     assert_equal(k.packages[0].branch_found, 2)
     assert_equal(k.packages[0].branch_hit, 2)
     assert_equal(_kinds(k), "")
@@ -361,7 +368,7 @@ def test_file_no_branch_record_file_names() raises:
     # b.mojo, a failure in enforce mode. The numbers are a.mojo's.
     var b = List[String]()
     b.append(_rec(String("BRDA:2,9:br:0/1,0,1\nBRDA:2,9:br:0/1,1,1\n")))
-    var a = _gate(_inputs(String(COB_FULL), b), String("src/alpha\t10000\t10000\n"))
+    var a = _gate(_inputs(String(COB_FULL), b), String("line\nbranch\n"))
     assert_equal(_kinds(a), "BranchUnmeasuredFile")
     assert_equal(a.findings[0].path, "src/alpha/b.mojo")
     assert_equal(a.findings[0].package, "src/alpha")
@@ -372,17 +379,17 @@ def test_file_no_branch_record_file_names() raises:
     var o = Options()
     o.mode = String("census")
     o.only_package = String("src/alpha")
-    var c = analyze(_inputs(String(COB_FULL), b), List[Input](), _repo(), parse_ratchet(String("src/alpha\t10000\t10000\n"), String("r.tsv")), _sources(), o)
+    var c = analyze(_inputs(String(COB_FULL), b), List[Input](), _repo(), _held(String("line\nbranch\n")), _sources(), o)
     assert_equal(_kinds(c), "BranchUnmeasuredFile")
     assert_equal(c.conclusion, "neutral")
     # Named with no BRDA (code, no decision), b.mojo is measured: no finding.
     var named = List[String]()
     named.append(_rec(String("BRDA:2,9:br:0/1,0,1\nBRDA:2,9:br:0/1,1,1\n")) + String(B_NONE))
-    assert_equal(_kinds(_gate(_inputs(String(COB_FULL), named), String("src/alpha\t10000\t10000\n"))), "")
+    assert_equal(_kinds(_gate(_inputs(String(COB_FULL), named), String("line\nbranch\n"))), "")
     # A package no branch record file names a kept file of keeps
     # BranchNotMeasured alone, with no finding per file.
     var none = List[String]()
-    assert_equal(_kinds(_gate(_inputs(String(COB_FULL), none), String("src/alpha\t10000\t-\n"))), "BranchNotMeasured:branch")
+    assert_equal(_kinds(_gate(_inputs(String(COB_FULL), none), String("line\n"))), "BranchNotMeasured:branch")
     # A file whose line report gives its own branch records is measured.
     var l = List[Input]()
     l.append(Input(String(FORMAT_LCOV), String(""), String("t.info"), String(
@@ -390,7 +397,7 @@ def test_file_no_branch_record_file_names() raises:
         "SF:src/alpha/b.mojo\nDA:1,1\nDA:2,1\nBRDA:2,0,0,1\nBRDA:2,0,1,1\nend_of_record\n"
     )))
     l.append(Input(String(FORMAT_BRANCH_LCOV), String(""), String("b.info"), b[0]))
-    var lb = _gate(l, String("src/alpha\t10000\t10000\n"))
+    var lb = _gate(l, String("line\nbranch\n"))
     assert_equal(_kinds(lb), "")
     assert_equal(lb.packages[0].branch_found, 4)
 
@@ -401,7 +408,7 @@ def test_annotations_of_branch_records() raises:
     var b = List[String]()
     b.append(String(ONE))
     var o = Options()
-    var a = analyze(_inputs(String(COB_FULL), b), List[Input](), _repo(), Ratchet(), _sources(), o)
+    var a = analyze(_inputs(String(COB_FULL), b), List[Input](), _repo(), Held(), _sources(), o)
     var d = parse_diff(String("diff --git a/src/alpha/a.mojo b/src/alpha/a.mojo\n--- a/src/alpha/a.mojo\n+++ b/src/alpha/a.mojo\n@@ -1,0 +2 @@\n+x\n"))
     var anns = annotations(a, d, touched_packages(a, d, _repo()))
     var got = String("")

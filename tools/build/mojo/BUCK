@@ -1,7 +1,7 @@
-load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "row")
-load(":toolchain.bzl", "zig_exe", "zig_test")
+load(":adopt.bzl", "cxx_link_facts")
+load(":toolchain.bzl", "zig_bootstrap_exe", "zig_exe", "zig_module", "zig_test")
 
 # Scripts and tool sources used by the Mojo rules.
 # The compile wrapper (tools/mojo_compile.zig; docs/design/zig_compile_wrapper.md):
@@ -16,6 +16,7 @@ _MOJO_COMPILE_SRCS = [
     "tools/modular_cfg.zig",
     "tools/mojo_compile.zig",
     "tools/proc_tree.zig",
+    "tools/watch_loop.zig",
 ]
 
 zig_test(
@@ -24,7 +25,7 @@ zig_test(
     imports = _MOJO_COMPILE_SRCS,
     src = "tools/mojo_compile.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 zig_exe(
@@ -32,9 +33,23 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     imports = _MOJO_COMPILE_SRCS,
     src = "tools/mojo_compile.zig",
-    unit_tests = [":mojo_compile_unit"],
+    unit_tests = [":mojo_compile_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# The same wrapper with its watchdog's ticks supplied by the process that runs
+# it (tools/mojo_compile_ticked.zig): the process cases' wrapper, so they decide
+# how many ticks the watchdog has seen. Behind the same unit tests.
+zig_exe(
+    name = "mojo_compile_ticked",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _MOJO_COMPILE_SRCS + ["tools/mojo_compile_ticked.zig"],
+    src = "tools/mojo_compile_ticked.zig",
+    unit_tests = [":mojo_compile_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 
@@ -55,7 +70,7 @@ zig_test(
     imports = _MOJO_COMPILE_MACOS_SRCS,
     src = "tools/mojo_compile_macos.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 zig_exe(
@@ -64,19 +79,221 @@ zig_exe(
     imports = _MOJO_COMPILE_MACOS_SRCS,
     src = "tools/mojo_compile_macos.zig",
     target = row("darwin-arm64")["zig_triple"],
-    unit_tests = [":mojo_compile_darwin_unit"],
+    unit_tests = [":mojo_compile_darwin_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 
-export_file(name = "run_check.sh", visibility = ["PUBLIC"])
+# The macOS wrapper with its ticks supplied by the process that runs it, for
+# tests//functional/watchdog:cases_darwin.
+zig_exe(
+    name = "mojo_compile_darwin_ticked",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _MOJO_COMPILE_MACOS_SRCS + ["tools/mojo_compile_macos_ticked.zig"],
+    src = "tools/mojo_compile_macos_ticked.zig",
+    target = row("darwin-arm64")["zig_triple"],
+    unit_tests = [":mojo_compile_darwin_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
 
-export_file(name = "proto_fixture.sh", visibility = ["PUBLIC"])
+# The runner of every `zig_test` action (tools/zig_launch.zig). It is built by
+# the pinned zig directly (`zig_bootstrap_exe`: no shell, no busybox), behind
+# its unit tests, because the rules that run it cannot build it.
+zig_bootstrap_exe(
+    name = "zig_launch",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/zig_launch.zig",
+    test_src = "tools/zig_launch_test.zig",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# act (tools/act.zig): the small actions of the Mojo and Rust rules (copy a
+# published file once its markers exist, cat the README join's markers, run a
+# built binary in a clean environment and compare its stdout), in place of
+# run_check.sh and the busybox cp and cat applets. Built behind its unit tests;
+# its process cases are tests//functional/act.
+zig_test(
+    name = "act_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/act.zig"],
+    src = "tools/act_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "act",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/act.zig",
+    unit_tests = [":act_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# doc_check (tools/doc_check.zig): the golden, symbol and copy checks of
+# mojo_doc_json (doc.bzl). Built behind its unit tests; the cases are
+# tests//negative/mojo_doc_json (a stale golden, missing symbols) and the docs
+# of the library packages.
+zig_test(
+    name = "doc_check_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/doc_check.zig"],
+    src = "tools/doc_check_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "doc_check",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/doc_check.zig",
+    unit_tests = [":doc_check_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# abi_golden (tools/abi_golden.zig): the checks and the C header of
+# komira_abi_golden (abi_golden.bzl). Built behind its unit tests; the cases are
+# tests//negative/abi_golden and the example //tools/build/examples/abi_golden.
+zig_test(
+    name = "abi_golden_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/abi_golden.zig"],
+    src = "tools/abi_golden_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# so_exports (tools/so_exports.zig): the C-ABI exports of a Mojo source, and
+# the check of mojo_shared_lib's `exports` against them (defs.bzl). Built behind
+# its unit tests; the cases are tests//negative/shared_lib:exports_*.
+zig_test(
+    name = "so_exports_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/so_exports.zig"],
+    src = "tools/so_exports_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "abi_golden",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/abi_golden.zig",
+    unit_tests = [":abi_golden_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+zig_exe(
+    name = "so_exports",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/so_exports.zig",
+    unit_tests = [":so_exports_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# archive_files (tools/archive_files.zig): the `archive_files` rule's action
+# (archive.bzl): files out of a pinned archive, copied or with substitutions.
+# Built behind its unit tests; its cases are the archive_files targets of
+# third_party.
+zig_test(
+    name = "archive_files_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/archive_files.zig"],
+    src = "tools/archive_files_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "archive_files",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/archive_files.zig",
+    unit_tests = [":archive_files_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# proto_gen (tools/proto_gen.zig): protoc with a plugin into one directory,
+# held to the files the rule declared (proto.bzl, generate_proto_dir). Built
+# behind its unit tests; its cases are the proto libraries and
+# tests//negative/proto.
+zig_test(
+    name = "proto_gen_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/proto_gen.zig"],
+    src = "tools/proto_gen_test.zig",
+    deps = ["//tools/build/act_util:act_util"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "proto_gen",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/proto_gen.zig",
+    deps = ["//tools/build/act_util:act_util"],
+    unit_tests = [":proto_gen_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# proto_fixture (tools/proto_fixture.zig): protoc reading and writing wire
+# fixtures (proto_fixture.bzl; the legs, the encode, and the case runner of
+# proto_fixture_testdata). Built behind its unit tests.
+zig_test(
+    name = "proto_fixture_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/proto_fixture.zig", "tools/unified_diff.zig"],
+    src = "tools/proto_fixture_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# unified_diff (tools/unified_diff.zig) as a module other packages import by name.
+zig_module(
+    name = "unified_diff",
+    src = "tools/unified_diff.zig",
+    visibility = ["//tools/build/lint:", "//tools/build/toolchains/kcov:", "tests//tools:"],
+)
+
+zig_exe(
+    name = "proto_fixture",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["tools/unified_diff.zig"],
+    src = "tools/proto_fixture.zig",
+    unit_tests = [":proto_fixture_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# The same for macOS arm64 (the darwin toolchain's `act`), built on a Linux worker.
+zig_exe(
+    name = "act_darwin",
+    exec_compatible_with = LINUX_X86_64,
+    src = "tools/act.zig",
+    target = row("darwin-arm64")["zig_triple"],
+    unit_tests = [":act_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
 
 export_file(name = "conda_unpack.zig", src = "tools/conda_unpack.zig", visibility = ["PUBLIC"])
 
-export_file(name = "launch.sh", visibility = ["PUBLIC"])
 export_file(name = "zig_cc_launcher.zig", src = "tools/zig_cc_launcher.zig", visibility = ["PUBLIC"])
 
 # The rule of the branch coverage actions, as data for the coverage
@@ -84,9 +301,8 @@ export_file(name = "zig_cc_launcher.zig", src = "tools/zig_cc_launcher.zig", vis
 # .github/ci/coverage_measure.sh's list of their categories equal to its.
 export_file(name = "coverage_branch.bzl", visibility = ["PUBLIC"])
 
-# Every script above; a validation of the Mojo toolchain (toolchain.bzl).
-shell_lint(
-    name = "shell_lint",
-    srcs = glob(["*.sh"]),
+# The C toolchain's link facts for `mojo_adopted_library` (adopt.bzl, `cxx_link_facts`).
+cxx_link_facts(
+    name = "adopt_cxx_link_facts",
     visibility = ["PUBLIC"],
 )

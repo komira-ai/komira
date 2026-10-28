@@ -1,1 +1,0 @@
-{"verdict":"BROKEN","reason":"the reverse-dependency query failed: buck2 cquery failed (exit 1): \u001b[31mError\u001b[0m: boom\r\n\ttab \"q\" \\ back\n","widened":false,"files":2,"seeds":0,"milliseconds":#,"warnings":[],"targets":[]}

@@ -64,7 +64,7 @@ from kci_release_set.member import file_sha256_hex
 from komira_runtime_paths import executable_path
 
 from .container import join_path
-from .readme_link import LinkArgs, link_refusal, parse_link_args, run_link_args
+from .readme_link import LinkArgs, link_refusal, links_static, parse_link_args, run_link_args
 from .request import InstallPin, readme_doc_path
 
 comptime README_TOOL_NAME: String = "readme_examples"
@@ -94,10 +94,12 @@ struct ReadmeProgram(Copyable, Movable):
     environment in place of `$CONDA_PREFIX` (readme_link.mojo); empty when
     the README has none. `block`: the block itself as the tool read it
     (`$CONDA_PREFIX` kept), for a run in another environment and for the
-    `mojo build` arguments (native_rows.mojo).
+    `mojo build` arguments (native_rows.mojo). `codecs`: the sonames of the
+    system codecs the library's closure opens (request.mojo
+    `closure_codecs`), the codecs its `loaded_from` row judges.
 
-    Layout: owned Strings, a List of owned Programs, an Int and a LinkArgs.
-    No pointer field."""
+    Layout: owned Strings, Lists of owned Programs and Strings, an Int and a
+    LinkArgs. No pointer field."""
 
     var display: String
     var installed: String
@@ -108,6 +110,7 @@ struct ReadmeProgram(Copyable, Movable):
     var examples: Int
     var run_args: List[String]
     var block: LinkArgs
+    var codecs: List[String]
 
     def __init__(out self):
         self.display = String("")
@@ -119,6 +122,21 @@ struct ReadmeProgram(Copyable, Movable):
         self.examples = 0
         self.run_args = List[String]()
         self.block = LinkArgs()
+        self.codecs = List[String]()
+
+    def runs_built(self) -> Bool:
+        """Whether the README runs built rather than under `mojo run`
+        (native_rows.mojo `run_readme`): its block's `mojo build` line links
+        a static archive its `mojo run` line does not (readme_link.mojo
+        `links_static`; komira_log's holder, which the JIT cannot load), or
+        its library's closure opens a system codec (`codecs` not empty).
+        The loader's record of a `mojo run` holds every process the run
+        starts, the compiler's own among them: on the first run in a fresh
+        environment one of them loads libz.so.1 and libzstd.so.1 from the
+        system (kci run 38397209148, komira_zlib alone), which the record
+        cannot tell from the program's own `dlopen`. A built program run
+        directly is the program's process alone."""
+        return links_static(self.block) or len(self.codecs) > 0
 
 
 def package_dir_of(label: String) raises -> String:
@@ -334,5 +352,6 @@ def installed_readme(pin: InstallPin, env_dir: String, tool: String, scratch: St
         raise Error(why)
     p.run_args = run_link_args(block, env_dir)
     p.block = block^
+    p.codecs = pin.codecs.copy()
     p.installed = rel^
     return p^

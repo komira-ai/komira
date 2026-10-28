@@ -2,8 +2,13 @@
 # library, through UdfRuntime only (docs/design/udf_runtime_interface.md
 # section 6.3). It knows no runtime and no language: the library path is its
 # input, and what the runtime can do comes from describe. A case is skipped
-# only when its shape is not in capabilities.shapes, and the skip is
-# reported.
+# only when its shape is not in capabilities.shapes, its classes do not hold
+# the runtime's udf_class, or a feature bit it needs is clear; each skip is
+# reported with its reason. (A validate case of a shape the runtime lacks is
+# not skipped: the host refuses it from describe, OPTIMIZED_UDF_KIND_
+# UNSUPPORTED, without calling validate, as design sections 4.2 and 4.5 say.)
+#
+# A case binds its UDF as the host admits it: validate, then load.
 #
 # Besides each case's own expectation, every case checks what the contract
 # promises for any call:
@@ -15,12 +20,16 @@
 #     as the reference runtime does, shows a host that never released one);
 #   - an error status carries a message (an error code alone is a failure);
 #   - no host post-condition broke unless the case expects that fault.
-# The `capabilities` result checks the describe answer itself: the runtime
-# id grammar, CPU among the devices, in-process among the transports, a
-# defined threading value, a class with a hosting value it allows (0 for
-# NATIVE; EMBEDDED or HOST_INTERPRETER for MANAGED), and the MEMORY_REPORT
-# feature bit set exactly when its entry is. The class is read for nothing
-# else: no case depends on it.
+# The `capabilities` result checks the describe answer itself (design
+# section 4.2): the runtime id grammar, CPU among the devices, a class of
+# NATIVE or MANAGED (0 is refused), no feature bit this ABI does not
+# define, and the MEMORY_REPORT feature bit set exactly when its entry is.
+# How a runtime executes is not a capability, so nothing about it is
+# checked. The class is read for nothing else but a case's `classes` gate.
+#
+# After a status that loses a context (contract.loses_context), a runner
+# makes no further call into it: it stops, and the case's run error is that
+# status's; UdfRuntime refuses a call into a lost context should one try.
 
 from std.os import listdir
 
@@ -29,18 +38,23 @@ from .contract import (
     CLASS_MANAGED,
     CLASS_NATIVE,
     DEVICE_CPU,
-    HOSTING_EMBEDDED,
-    HOSTING_HOST_INTERPRETER,
-    HOSTING_NONE,
+    ERR_UNSUPPORTED,
+    FEATURES_DEFINED,
+    KIND_UNSUPPORTED,
     OK,
-    SINGLE_THREAD,
-    THREAD_SAFE,
-    TRANSPORT_IN_PROCESS,
+    loses_context,
     status_name,
 )
 from ._host import Counts
+from ._nested import run_nested_frame
 from .runtime import CallOptions, CodeSet, Handle, Opened, Outcome, UdfRuntime
 from .values import Batch, Column, TYPE_FLOAT64, TYPE_INT32
+
+comptime EMPTY_CODE_ROOT = "./no-code-objects-here"
+"""The code root of a case that sets code_root_empty: a path that holds no
+code object (it does not exist), so a validate that opens code fails. The
+case's digests are also flipped (every byte inverted), so they name no code
+object a runtime has opened and could answer from a cache."""
 
 
 @fieldwise_init
@@ -138,6 +152,8 @@ def _check(got: Outcome, e: Expect, at_call: Bool = True) -> String:
         return "error row " + String(got.row) + ", expected " + String(e.row)
     if e.row_at_least != -2 and got.row < e.row_at_least:
         return "error row " + String(got.row) + ", expected at least " + String(e.row_at_least)
+    if e.message_contains != "" and e.message_contains not in got.message:
+        return "message '" + got.message + "' does not contain '" + e.message_contains + "'"
     return ""
 
 
@@ -205,6 +221,9 @@ def _bind(mut rt: UdfRuntime, c: Case, n_instances: Int) raises -> _Bound:
     a context of its own (slots 0, 1, ...): two instances never share a
     context, so state a runtime keeps per context or per process, not per
     instance, shows up as a wrong result."""
+    var v = rt.validate(c.spec)
+    if not v.is_ok():
+        raise Error("validate: " + String(v))
     var u = rt.load(c.spec)
     if not u.outcome.is_ok():
         raise Error("load: " + String(u.outcome))
@@ -231,13 +250,38 @@ def _unbind(mut rt: UdfRuntime, b: _Bound) raises:
     rt.unload(b.udf)
 
 
+def _then_call(mut rt: UdfRuntime, c: Case, inst: Handle) raises -> String:
+    """The case's follow-up call on the same instance: it must succeed, so
+    the context and instance were kept usable (design section 4.5)."""
+    if not c.expect.then_input:
+        return ""
+    if rt.lost_context_of(inst):
+        return "the follow-up call found the context lost"
+    var res = rt.call_batch(inst, c.spec, c.expect.then_input.value(), CallOptions.plain())
+    if not res.outcome.is_ok():
+        return "the follow-up call on the same instance failed: " + String(res.outcome)
+    if c.expect.then_column:
+        var d = same_column(res.column, c.expect.then_column.value())
+        if d != "":
+            return "the follow-up call: " + d
+    return ""
+
+
 def _run_call(mut rt: UdfRuntime, c: Case) raises -> String:
     var b = _bind(rt, c, 1)
+    var calls = rt.calls()
     var res = rt.call_batch(b.insts[0], c.spec, c.input, c.options)
-    _unbind(rt, b)
+    calls = rt.calls() - calls
     var why = _check(res.outcome, c.expect)
     if why == "" and res.outcome.is_ok() and c.expect.column:
         why = same_column(res.column, c.expect.column.value())
+    # Bisection's halves count: a raise that names its row is not bisected
+    # (design 4.5), so its case bounds the calls at 1.
+    if why == "" and c.expect.max_calls >= 0 and calls > Int64(c.expect.max_calls):
+        why = String(calls) + " calls crossed into the runtime, at most " + String(c.expect.max_calls) + " expected"
+    if why == "":
+        why = _then_call(rt, c, b.insts[0])
+    _unbind(rt, b)
     return why
 
 
@@ -248,10 +292,28 @@ def _run_split(mut rt: UdfRuntime, c: Case) raises -> String:
     var b = _bind(rt, c, 2)
     var whole = rt.call_batch(b.insts[0], c.spec, c.input, c.options)
     var first = rt.call_batch(b.insts[1], c.spec, _slice(c.input, 0, c.split_at), c.options)
+    if loses_context(first.outcome.status):
+        # Nothing more on a lost context: the run fails with the loss.
+        _unbind(rt, b)
+        return _check(first.outcome, c.expect)
     var second = rt.call_batch(b.insts[1], c.spec, _slice(c.input, c.split_at, c.input.length), c.options)
+    # N x 1: every row its own batch, on the second instance again.
+    var rows = Column(c.spec.result[0].type_id)
+    var one_bad = Optional[Outcome](None)
+    for r in range(c.input.length):
+        if loses_context(second.outcome.status) or one_bad:
+            break
+        var one = rt.call_batch(b.insts[1], c.spec, _slice(c.input, r, r + 1), c.options)
+        if not one.outcome.is_ok():
+            one_bad = one.outcome.copy()
+            break
+        rows.bits.append(one.column.bits[0])
+        rows.valid.append(one.column.valid[0])
     _unbind(rt, b)
-    var outs = [whole.outcome.copy(), first.outcome.copy(), second.outcome.copy()]
-    for i in range(3):
+    var outs: List[Outcome] = [whole.outcome.copy(), first.outcome.copy(), second.outcome.copy()]
+    if one_bad:
+        outs.append(one_bad.value().copy())
+    for i in range(len(outs)):
         var why = _check(outs[i], c.expect)
         if why != "":
             return why
@@ -266,16 +328,52 @@ def _run_split(mut rt: UdfRuntime, c: Case) raises -> String:
     why = same_column(joined, want)
     if why != "":
         return "two batches on a second instance: " + why
+    why = same_column(rows, want)
+    if why != "":
+        return "one batch per row on the second instance: " + why
     return ""
+
+
+def _concat(outputs: List[Batch], type_id: Int) -> Column:
+    """The first column of every output, one after another."""
+    var col = Column(type_id)
+    for i in range(len(outputs)):
+        if len(outputs[i].columns) == 0:
+            continue
+        for r in range(len(outputs[i].columns[0])):
+            col.bits.append(outputs[i].columns[0].bits[r])
+            col.valid.append(outputs[i].columns[0].valid[r])
+    return col^
 
 
 def _run_frame(mut rt: UdfRuntime, c: Case) raises -> String:
     var b = _bind(rt, c, 1)
+    var calls = rt.calls()
     var res = rt.run_frame(b.insts[0], c.spec, c.inputs, c.options)
-    _unbind(rt, b)
+    calls = rt.calls() - calls
     var why = _check(res.outcome, c.expect)
-    if why == "" and res.outcome.is_ok() and c.expect.batches:
+    # The outputs are compared whatever the status: a frame that raises
+    # after yielding must have handed out what it yielded before the error.
+    if why == "" and c.expect.batches:
         why = _same_batches(res.outputs, c.expect.batches.value())
+    if why == "" and c.expect.concat_column:
+        var want = c.expect.concat_column.value().copy()
+        why = same_column(_concat(res.outputs, want.type_id), want)
+    if why == "" and c.expect.max_calls >= 0 and calls > Int64(c.expect.max_calls):
+        why = String(calls) + " calls crossed into the runtime, at most " + String(c.expect.max_calls) + " expected"
+    if why == "" and c.expect.max_outputs >= 0 and len(res.outputs) > c.expect.max_outputs:
+        why = String(len(res.outputs)) + " outputs, at most " + String(c.expect.max_outputs) + " expected"
+    if why == "" and c.expect.then_inputs and not rt.lost_context_of(b.insts[0]):
+        var again = rt.run_frame(b.insts[0], c.spec, c.expect.then_inputs.value(), CallOptions.plain())
+        if not again.outcome.is_ok():
+            why = "the follow-up frame on the same instance failed: " + String(again.outcome)
+        elif c.expect.then_batches:
+            why = _same_batches(again.outputs, c.expect.then_batches.value())
+            if why != "":
+                why = "the follow-up frame: " + why
+    elif why == "" and c.expect.then_inputs:
+        why = "the follow-up frame found the context lost"
+    _unbind(rt, b)
     var most = c.expect.max_pulls_before_first_output
     if why == "" and most >= 0 and res.pulls_before_first_output > most:
         why = (
@@ -293,6 +391,7 @@ def _run_agg_split(mut rt: UdfRuntime, c: Case) raises -> String:
     when every step is OK, the expectation must be OK and the final column
     the expected one."""
     var b = _bind(rt, c, len(c.partials) + 1)
+    var calls = rt.calls()
     var bad = List[Outcome]()
     var states = List[Column]()
     for i in range(len(c.partials)):
@@ -334,19 +433,129 @@ def _run_agg_split(mut rt: UdfRuntime, c: Case) raises -> String:
                 bad.append(fin.outcome.copy())
         if g.outcome.is_ok():
             rt.agg_close(g.handle)
+    calls = rt.calls() - calls
     _unbind(rt, b)
     if len(bad) > 0:
         return _check(bad[0], c.expect)
     var why = _check(Outcome.of(OK), c.expect)
     if why == "" and c.expect.column:
         why = same_column(result_col, c.expect.column.value())
+    if why == "" and c.expect.max_calls >= 0 and calls > Int64(c.expect.max_calls):
+        why = String(calls) + " calls crossed into the runtime, at most " + String(c.expect.max_calls) + " expected"
     return why
+
+
+def _run_load(mut rt: UdfRuntime, c: Case) raises -> String:
+    """validate, which must pass, then load: the load's outcome is the
+    case's (an admission status, `at_call` False)."""
+    var v = rt.validate(c.spec)
+    if not v.is_ok():
+        return "validate: " + String(v)
+    var u = rt.load(c.spec)
+    if u.outcome.status == OK:
+        rt.unload(u.handle)
+    return _check(u.outcome, c.expect, False)
+
+
+def _run_validate(mut rt: UdfRuntime, c: Case) raises -> String:
+    """The host's admission of one spec: a shape the runtime lacks is
+    refused from describe, before validate (OPTIMIZED_UDF_KIND_UNSUPPORTED,
+    design sections 4.2 and 4.5); otherwise validate's own answer."""
+    var caps = rt.describe()
+    if c.spec.shape & caps.shapes == 0:
+        var why = "the runtime's capabilities lack the shape " + String(c.spec.shape)
+        return _check(Outcome(ERR_UNSUPPORTED, why, "", -1, -1, KIND_UNSUPPORTED + ": " + why), c.expect, False)
+    return _check(rt.validate(c.spec), c.expect, False)
+
+
+def _run_nested(mut rt: UdfRuntime, c: Case) raises -> String:
+    """A frame whose pulls are answered on its own context (_nested.mojo):
+    the frame's UDF and the nested scalar's are bound, as instances of one
+    context."""
+    var fv = rt.validate(c.spec)
+    if not fv.is_ok():
+        return "validate: " + String(fv)
+    var fu = rt.load(c.spec)
+    if not fu.outcome.is_ok():
+        return "load: " + String(fu.outcome)
+    var su = Opened(Outcome.of(OK), fu.handle.copy())
+    var has_scalar = c.levels > 0 and Bool(c.nested)
+    if has_scalar:
+        var sv = rt.validate(c.nested.value())
+        if not sv.is_ok():
+            rt.unload(fu.handle)
+            return "validate (nested): " + String(sv)
+        su = rt.load(c.nested.value())
+        if not su.outcome.is_ok():
+            rt.unload(fu.handle)
+            return "load (nested): " + String(su.outcome)
+    var ctx = rt.open_context(0)
+    if not ctx.outcome.is_ok():
+        if has_scalar:
+            rt.unload(su.handle)
+        rt.unload(fu.handle)
+        return "open_context: " + String(ctx.outcome)
+    var fi = rt.open_instance(ctx.handle, fu.handle)
+    var si = fi.copy()
+    if has_scalar and fi.outcome.is_ok():
+        si = rt.open_instance(ctx.handle, su.handle)
+    var why = String("")
+    if not fi.outcome.is_ok() or not si.outcome.is_ok():
+        why = "open_instance: " + String(fi.outcome) + ", " + String(si.outcome)
+    else:
+        var s_spec = c.nested.value().copy() if has_scalar else c.spec.copy()
+        var res = run_nested_frame(
+            rt, fi.handle, c.spec, si.handle, s_spec, c.inputs, c.levels, c.pull_at, c.pull_do, c.options
+        )
+        why = _check(res.outcome, c.expect)
+        if why == "" and c.expect.batches:
+            why = _same_batches(res.outputs, c.expect.batches.value())
+        if why == "" and c.expect.eio_at_least >= 0 and res.eio < c.expect.eio_at_least:
+            why = String(res.eio) + " pulls got EIO, at least " + String(c.expect.eio_at_least) + " expected"
+        if why == "" and not res.streams_released:
+            why = "a producer stream was not released"
+        if why == "" and c.expect.frame_carries_failure and res.outcome.message not in res.frame_outcome.message:
+            why = (
+                "the waiting frame's error '" + res.frame_outcome.message + "' does not carry its input's failure '"
+                + res.outcome.message + "' (get_last_error not read)"
+            )
+    if has_scalar and si.outcome.is_ok():
+        rt.close_instance(si.handle)
+    if fi.outcome.is_ok():
+        rt.close_instance(fi.handle)
+    rt.close_context(ctx.handle)
+    if has_scalar:
+        rt.unload(su.handle)
+    rt.unload(fu.handle)
+    return why
+
+
+def _run_parallel(mut rt: UdfRuntime, c: Case) raises -> String:
+    """`threads` instances, each in a context of its own, called at once on
+    one thread each (native/bench_loop.c): every output must be a * x + b."""
+    var b = _bind(rt, c, c.threads)
+    var t = rt.time_call_batch_threads(b.insts, c.rows, c.spec.args[0].type_id == TYPE_FLOAT64, c.a, c.b, c.iters)
+    _unbind(rt, b)
+    if t.failures > 0 or t.mismatches > 0:
+        return (
+            String(t.failures) + " calls failed and " + String(t.mismatches) + " outputs were wrong, of "
+            + String(c.threads * c.iters) + " calls on " + String(c.threads) + " contexts at once"
+        )
+    if t.released != c.threads * c.iters:
+        return String(t.released) + " input arrays released, of " + String(c.threads * c.iters)
+    return ""
 
 
 def run_case(mut rt: UdfRuntime, c: Case) raises -> String:
     """"" when case `c` passes on `rt`; otherwise why it failed."""
     if c.run == "validate":
-        return _check(rt.validate(c.spec), c.expect, False)
+        return _run_validate(rt, c)
+    if c.run == "load":
+        return _run_load(rt, c)
+    if c.run == "nested_frame":
+        return _run_nested(rt, c)
+    if c.run == "parallel":
+        return _run_parallel(rt, c)
     if c.run == "init_abi":
         return _check(rt.init_refusal(2), c.expect)
     if c.run == "call_batch":
@@ -393,16 +602,10 @@ def _capabilities(mut rt: UdfRuntime) raises -> CaseResult:
         why = "runtime id '" + caps.runtime_id + "' is not <namespace>/<name>"
     elif caps.devices & DEVICE_CPU == 0:
         why = "devices lacks CPU"
-    elif caps.transports & TRANSPORT_IN_PROCESS == 0:
-        why = "transports lacks IN_PROCESS, and the in-process path is what this suite drives"
-    elif caps.threading < THREAD_SAFE or caps.threading > SINGLE_THREAD:
-        why = "threading " + String(caps.threading) + " is none of THREAD_SAFE, CONTEXT_PER_THREAD, SINGLE_THREAD"
-    elif caps.udf_class == CLASS_NATIVE and caps.hosting != HOSTING_NONE:
-        why = "a NATIVE runtime reports hosting 0, not " + String(caps.hosting)
-    elif caps.udf_class == CLASS_MANAGED and caps.hosting != HOSTING_EMBEDDED and caps.hosting != HOSTING_HOST_INTERPRETER:
-        why = "a MANAGED runtime reports hosting EMBEDDED or HOST_INTERPRETER, not " + String(caps.hosting)
     elif caps.udf_class != CLASS_NATIVE and caps.udf_class != CLASS_MANAGED:
         why = "udf_class " + String(caps.udf_class) + " is neither NATIVE nor MANAGED"
+    elif caps.features & ~FEATURES_DEFINED != 0:
+        why = "a feature bit this ABI does not define: features " + String(caps.features)
     elif not rt.feature_slots_agree():
         why = "the MEMORY_REPORT feature bit and the memory_report entry disagree"
     return CaseResult("capabilities", "PASS" if why == "" else "FAIL", why)
@@ -413,27 +616,51 @@ def run_suite(runtime_path: String, cases: List[Case], code: CodeSet = CodeSet.n
     A case that raises fails with the error as its reason; the suite goes
     on. A non-empty `code` replaces every case's code root and code objects
     (the same for every case: how a runtime that executes code objects
-    gets them). Such a runtime may open its code objects at their first use
+    gets them). Such a runtime may open its code objects at their first load
     and hold them, with what they reserved, until shutdown (the native
-    runtime's libraries); so one validate before the first case opens them,
-    and that open is not charged to a case's ledger. A runtime's own tests
-    check that its shutdown returns what it held (the native runtime's
-    test_leaks)."""
+    runtime's libraries); so before the first case one load (and unload) of
+    the first case that loads opens them, and that open is not charged to a
+    case's ledger. validate opens no code (design section 4.3), so it cannot
+    be what opens them. A runtime's own tests check that its shutdown
+    returns what it held (the native runtime's test_leaks)."""
     var rt = UdfRuntime.open(runtime_path)
     var report = Report()
     var caps = rt.describe()
     report.runtime_id = caps.runtime_id
     report.results.append(_capabilities(rt))
-    if len(code.objects) > 0 and len(cases) > 0:
-        var first = cases[0].spec.copy()
-        first.code_root = code.root
-        first.code = code.objects.copy()
-        _ = rt.validate(first)
+    if len(code.objects) > 0:
+        for i in range(len(cases)):
+            var warm = cases[i].spec.copy()
+            warm.code_root = code.root
+            warm.code = code.objects.copy()
+            var u = rt.load(warm)
+            if u.outcome.status == OK:
+                rt.unload(u.handle)
+                break
     for i in range(len(cases)):
         var c = cases[i].copy()
         if len(code.objects) > 0:
             c.spec.code_root = code.root
             c.spec.code = code.objects.copy()
+            if c.nested:
+                var n = c.nested.value().copy()
+                n.code_root = code.root
+                n.code = code.objects.copy()
+                c.nested = n^
+        if c.code_root_empty:
+            c.spec.code_root = EMPTY_CODE_ROOT
+            for k in range(len(c.spec.code)):
+                for j in range(len(c.spec.code[k].sha256)):
+                    c.spec.code[k].sha256[j] = ~c.spec.code[k].sha256[j]
+        if len(c.classes) > 0 and caps.udf_class not in c.classes:
+            report.results.append(CaseResult(c.name, "SKIP", "the runtime's class is not among the case's classes"))
+            continue
+        if c.needs_features & caps.features != c.needs_features:
+            report.results.append(CaseResult(c.name, "SKIP", "a feature bit the case needs is not in capabilities.features"))
+            continue
+        if c.runtime_lacks_shape and c.spec.shape & caps.shapes != 0:
+            report.results.append(CaseResult(c.name, "SKIP", "the case is about a shape the runtime lacks, and it has it"))
+            continue
         var instanceless = c.run == "validate" or c.run == "init_abi"
         if not instanceless and c.spec.shape & caps.shapes == 0:
             report.results.append(CaseResult(c.name, "SKIP", "shape not in capabilities.shapes"))

@@ -8,6 +8,7 @@ const kit = @import("testkit.zig");
 const supervise = @import("supervise.zig");
 const sys = @import("sys.zig");
 const util = @import("util.zig");
+const gate_mojo = @import("mojo.zig");
 
 const label = "//x:y";
 
@@ -35,11 +36,11 @@ const Env = struct {
 
     /// `gate mojo` of the fixture behaviour `what`, then `extra`.
     fn args(e: *Env, what: []const u8, extra: []const []const u8) ![]const []const u8 {
-        var l = std.ArrayList([]const u8).init(e.a);
-        try l.appendSlice(&.{ "mojo", "--busybox", e.bb, "--runtime-lib", "rt/lib", "--label", label, "--test" });
-        try l.append(try std.fmt.allocPrint(e.a, "root/bin/{s}", .{what}));
-        try l.appendSlice(&.{ "--marker", "passed" });
-        try l.appendSlice(extra);
+        var l = std.ArrayList([]const u8).empty;
+        try l.appendSlice(e.a, &.{ "mojo", "--busybox", e.bb, "--runtime-lib", "rt/lib", "--label", label, "--test" });
+        try l.append(e.a, try std.fmt.allocPrint(e.a, "root/bin/{s}", .{what}));
+        try l.appendSlice(e.a, &.{ "--marker", "passed" });
+        try l.appendSlice(e.a, extra);
         return l.items;
     }
 
@@ -87,6 +88,11 @@ test "G1 usage: every bad command line exits 2 with its runner's message, and no
         .{ .argv = try e.args("exit", &.{"--env"}), .msg = "gate_runner: --env needs NAME=VALUE" },
         .{ .argv = try e.args("exit", &.{"--arg"}), .msg = "gate_runner: --arg needs a value" },
         .{ .argv = try e.args("exit", &.{ "--arg", "x", "--env", "A=b" }), .msg = "gate_runner: --env A=b after an --arg" },
+        .{ .argv = try e.args("exit", &.{"--lib-dir"}), .msg = "gate_runner: --lib-dir needs a directory" },
+        .{ .argv = try e.args("exit", &.{ "--arg", "x", "--lib-dir", "/d" }), .msg = "gate_runner: --lib-dir /d after an --arg" },
+        .{ .argv = try e.args("exit", &.{ "--lib-dir", "" }), .msg = "gate_runner: --lib-dir '' is not one directory" },
+        .{ .argv = try e.args("exit", &.{ "--lib-dir", "/a:/b" }), .msg = "gate_runner: --lib-dir '/a:/b' is not one directory" },
+        .{ .argv = try e.args("exit", &.{ "--lib-dir", "/d", "--label", "again" }), .msg = "gate_runner: --label after an --env, --lib-dir or --arg" },
         .{ .argv = try e.args("exit", &.{ "--env", "1A=b" }), .msg = "gate_runner: --env 1A=b is not NAME=VALUE" },
         .{ .argv = try e.args("exit", &.{ "--env", "A" }), .msg = "gate_runner: --env A is not NAME=VALUE" },
         .{ .argv = try e.args("exit", &.{ "--env", "=b" }), .msg = "gate_runner: --env =b is not NAME=VALUE" },
@@ -101,12 +107,16 @@ test "G1 usage: every bad command line exits 2 with its runner's message, and no
         .{ .argv = try e.args("exit", &.{ "--limit-s", "2" }), .msg = "gate_runner: usage error" },
         .{ .argv = try e.args("exit", &.{ "--limit-s", "02", "--limit-report", "coverage" }), .msg = "cov_run: the limit '02' is not a positive whole number of seconds" },
         .{ .argv = try e.args("exit", &.{ "--limit-s", "2", "--limit-report", "other" }), .msg = "gate_runner: --limit-report other: the only report is coverage" },
+        .{ .argv = try e.args("exit", &.{ "--hang-limit-s", "0" }), .msg = "hang_limit: REFUSING: the limit '0' is not a positive whole number of seconds" },
+        .{ .argv = try e.args("exit", &.{ "--hang-limit-s", "1800s" }), .msg = "hang_limit: REFUSING: the limit '1800s' is not a positive whole number of seconds" },
+        .{ .argv = try e.args("exit", &.{ "--hang-limit-s", "5", "--deadline-s", "30", "--runner-timeout-s", "90" }), .msg = "gate_runner: usage error: --hang-limit-s is a limit of its own" },
+        .{ .argv = try e.args("exit", &.{ "--hang-limit-s", "5", "--limit-s", "30", "--limit-report", "coverage" }), .msg = "gate_runner: usage error: --hang-limit-s is a limit of its own" },
         .{ .argv = &.{ "mojo", "--busybox", e.bb, "--runtime-lib", "l", "--label", label, "--test", "root/x", "--marker", "passed" }, .msg = "gate_runner: " },
     };
     for (cases) |c| {
         const r = try e.run(c.argv, .{});
         if (r.status != 2 or !std.mem.startsWith(u8, r.err, c.msg)) {
-            std.debug.print("argv {s}: exit {d}, stderr {s}\n", .{ c.argv, r.status, r.err });
+            std.debug.print("argv {s}: exit {d}, stderr {s}\n", .{ std.mem.join(std.heap.page_allocator, " ", c.argv) catch "", r.status, r.err });
             return error.TestUnexpectedResult;
         }
         try std.testing.expect(!kit.exists(try e.path("passed")));
@@ -227,6 +237,41 @@ test "G7 environment: the runner's five variables, the action's others, and each
     for ([_][]const u8{ "PATH=/nowhere", "HOME=/nohome", "TMPDIR=/notmp", "TWICE=1" }) |l| try std.testing.expect(!hasLine(out, l));
 }
 
+// G7b. Mutant: put the directories first on LD_LIBRARY_PATH (the compiler's lib must stay first), drop one, reverse them, leave a relative one relative
+// (the test runs from another directory), or set DYLD_FALLBACK_LIBRARY_PATH with none given.
+test "G7b system libraries: --lib-dir directories follow the compiler's lib in order; macOS puts them first in the fallback path" {
+    const e = try Env.init();
+    defer e.deinit();
+    const none = try e.run(try e.args("env", &.{}), .{ .env = &.{"DYLD_FALLBACK_LIBRARY_PATH=/inherited"} });
+    try std.testing.expect(hasLine(output(none.err), try std.fmt.allocPrint(e.a, "LD_LIBRARY_PATH={s}/rt/lib", .{e.real})));
+    try std.testing.expect(hasLine(output(none.err), "DYLD_FALLBACK_LIBRARY_PATH=/inherited"));
+
+    const r = try e.run(try e.args("env", &.{ "--env", "A=1", "--lib-dir", "/pinned/one", "--lib-dir", "rel/two" }), .{ .env = &.{"DYLD_FALLBACK_LIBRARY_PATH=/inherited"} });
+    const out = output(r.err);
+    try std.testing.expect(hasLine(out, try std.fmt.allocPrint(e.a, "LD_LIBRARY_PATH={s}/rt/lib:/pinned/one:{s}/rel/two", .{ e.real, e.real })));
+    try std.testing.expect(hasLine(out, "A=1"));
+    if (sys.is_darwin) {
+        try std.testing.expect(hasLine(out, try std.fmt.allocPrint(e.a, "DYLD_FALLBACK_LIBRARY_PATH=/pinned/one:{s}/rel/two:/inherited", .{e.real})));
+        try std.testing.expect(hasLine(out, try std.fmt.allocPrint(e.a, "DYLD_LIBRARY_PATH={s}/rt/lib", .{e.real})));
+    } else {
+        // Linux: the inherited fallback is nobody's business, and the variable is not rewritten.
+        try std.testing.expect(hasLine(out, "DYLD_FALLBACK_LIBRARY_PATH=/inherited"));
+    }
+    // The same with no inherited fallback: dyld's own defaults follow the directories.
+    const r2 = try e.run(try e.args("env", &.{ "--lib-dir", "/pinned/one" }), .{});
+    if (sys.is_darwin) try std.testing.expect(hasLine(output(r2.err), "DYLD_FALLBACK_LIBRARY_PATH=/pinned/one:/usr/local/lib:/usr/lib"));
+}
+
+// G7c. Mutant: count a set-but-empty variable as set (a path then ends in an empty entry, which means the current directory), or match a longer name.
+test "G7c inheritedValue: a set, non-empty value is returned; empty, unset and a longer name are not" {
+    const env = [_][]const u8{ "A=1", "DYLD_FALLBACK_LIBRARY_PATH=", "B_LONG=2", "C=x:y" };
+    try std.testing.expectEqualStrings("1", gate_mojo.inheritedValue(&env, "A").?);
+    try std.testing.expectEqualStrings("x:y", gate_mojo.inheritedValue(&env, "C").?);
+    try std.testing.expect(gate_mojo.inheritedValue(&env, "DYLD_FALLBACK_LIBRARY_PATH") == null);
+    try std.testing.expect(gate_mojo.inheritedValue(&env, "B") == null);
+    try std.testing.expect(gate_mojo.inheritedValue(&env, "NOPE") == null);
+}
+
 // G8. Mutant: run the test in the action's directory.
 test "G8 working directory: <root>/share when it exists, else an empty one; never the action's; stdin empty" {
     const e = try Env.init();
@@ -241,8 +286,8 @@ test "G8 working directory: <root>/share when it exists, else an empty one; neve
     try std.testing.expectEqualStrings(try std.fmt.allocPrint(e.a, "{s}/root/share", .{e.real}), lineWith(output(r2.err), "cwd ").?);
     // G2: the root is cut at the LAST /bin/.
     try std.fs.cwd().makePath(try e.path("deep/bin/x/share"));
-    var l = std.ArrayList([]const u8).init(e.a);
-    for (try e.args("where", &.{})) |x| try l.append(if (std.mem.eql(u8, x, "root/bin/where")) "deep/bin/x/bin/where" else x);
+    var l = std.ArrayList([]const u8).empty;
+    for (try e.args("where", &.{})) |x| try l.append(e.a, if (std.mem.eql(u8, x, "root/bin/where")) "deep/bin/x/bin/where" else x);
     const r3 = try e.run(l.items, .{});
     try std.testing.expectEqualStrings(try std.fmt.allocPrint(e.a, "{s}/deep/bin/x/share", .{e.real}), lineWith(output(r3.err), "cwd ").?);
 }
@@ -253,8 +298,8 @@ test "G9 marker: exactly `PASS <label>\\n` on exit 0, nothing printed; nothing w
     const e = try Env.init();
     defer e.deinit();
     var argv = try e.args("exit", &.{ "--arg", "0" });
-    var l = std.ArrayList([]const u8).init(e.a);
-    for (argv) |x| try l.append(if (std.mem.eql(u8, x, "passed")) "out/m.passed" else x);
+    var l = std.ArrayList([]const u8).empty;
+    for (argv) |x| try l.append(e.a, if (std.mem.eql(u8, x, "passed")) "out/m.passed" else x);
     try std.fs.cwd().makePath(try e.path("out"));
     const r = try e.run(l.items, .{});
     try std.testing.expectEqual(@as(u8, 0), r.status);
@@ -266,8 +311,8 @@ test "G9 marker: exactly `PASS <label>\\n` on exit 0, nothing printed; nothing w
     try std.testing.expectEqual(@as(u8, 4), red.status);
     try std.testing.expect(!kit.exists(try e.path("passed")));
     // /dev/null is a marker.
-    var n = std.ArrayList([]const u8).init(e.a);
-    for (try e.args("exit", &.{ "--arg", "0" })) |x| try n.append(if (std.mem.eql(u8, x, "passed")) "/dev/null" else x);
+    var n = std.ArrayList([]const u8).empty;
+    for (try e.args("exit", &.{ "--arg", "0" })) |x| try n.append(e.a, if (std.mem.eql(u8, x, "passed")) "/dev/null" else x);
     try std.testing.expectEqual(@as(u8, 0), (try e.run(n.items, .{})).status);
 }
 

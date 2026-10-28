@@ -1,2 +1,0 @@
-# This package's coverage floor (tools/build/coverage/README.md, "The ratchet"): its directory, the line and branch floors in basis points, and a pinned row's reason.
-src/komira_async	8618	-	async_mutex.mojo:197-198 and semaphore.mojo:213-218 (the contended slow paths) run only when the unsynchronised two-thread smoke tests contend; 8618 is 86.18% without those 6 lines

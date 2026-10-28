@@ -14,7 +14,7 @@
 # whole pack, and the comparison resumes after it. Every byte git sent is
 # accounted for.
 #
-# What the scenarios exercise (capture.sh): ls-refs with prefixes, peel,
+# What the scenarios exercise (capture.zig): ls-refs with prefixes, peel,
 # symrefs and unborn; fetch with no haves and `done` (clone), with haves
 # and a server option (ACK, ready), `deepen 1` (shallow-info), `deepen 1`
 # with `deepen-relative` (shallow and unshallow) and a tag-following second

@@ -694,13 +694,12 @@ struct HttpServer[
                         continue
                     # Update reactor interest if needed.
                     if hs_mask != 0 and (
-                        hs_mask != self._conns[idx]._interest_set
+                        hs_mask != self._reactor.interest_set(self._conns[idx]._reg)
                     ):
                         try:
                             self._reactor.modify(
                                 self._conns[idx]._reg, hs_mask,
                             )
-                            self._conns[idx]._interest_set = hs_mask
                         except e:
                             _ = e
                             try:
@@ -780,12 +779,11 @@ struct HttpServer[
                     self._conns[idx], self._bytes_sent,
                 )
                 if drained:
-                    if self._conns[idx]._interest_set != INTEREST_READ:
+                    if self._reactor.interest_set(self._conns[idx]._reg) != INTEREST_READ:
                         try:
                             self._reactor.modify(
                                 self._conns[idx]._reg, INTEREST_READ,
                             )
-                            self._conns[idx]._interest_set = INTEREST_READ
                         except e:
                             _ = e  # cov: unreachable Reactor.modify fails only if epoll_ctl or kevent rejects a registered open fd
                             try:
@@ -823,12 +821,11 @@ struct HttpServer[
                             self._bytes_sent,
                         )
                     if self._conns[idx]._state == CONN_STATE_WAITING_FOR_WRITABLE:
-                        if self._conns[idx]._interest_set != INTEREST_WRITE:
+                        if self._reactor.interest_set(self._conns[idx]._reg) != INTEREST_WRITE:
                             try:
                                 self._reactor.modify(
                                     self._conns[idx]._reg, INTEREST_WRITE,
                                 )
-                                self._conns[idx]._interest_set = INTEREST_WRITE
                             except e:
                                 _ = e  # cov: unreachable Reactor.modify fails only if epoll_ctl or kevent rejects a registered open fd
                                 keep_alive = False
@@ -876,12 +873,11 @@ struct HttpServer[
                     self._bytes_sent,
                 )
             if self._conns[idx]._state == CONN_STATE_WAITING_FOR_WRITABLE:
-                if self._conns[idx]._interest_set != INTEREST_WRITE:
+                if self._reactor.interest_set(self._conns[idx]._reg) != INTEREST_WRITE:
                     try:
                         self._reactor.modify(
                             self._conns[idx]._reg, INTEREST_WRITE,
                         )
-                        self._conns[idx]._interest_set = INTEREST_WRITE
                     except e:
                         _ = e  # cov: unreachable Reactor.modify fails only if epoll_ctl or kevent rejects a registered open fd
                         keep_alive = False
@@ -1005,12 +1001,11 @@ struct HttpServer[
                     self._conns[idx], self._bytes_sent,
                 )
                 if drained:
-                    if self._conns[idx]._interest_set != INTEREST_READ:
+                    if self._reactor.interest_set(self._conns[idx]._reg) != INTEREST_READ:
                         try:
                             self._reactor.modify(
                                 self._conns[idx]._reg, INTEREST_READ,
                             )
-                            self._conns[idx]._interest_set = INTEREST_READ
                         except e:
                             _ = e  # cov: unreachable Reactor.modify fails only if epoll_ctl or kevent rejects a registered open fd
                             try:
@@ -1035,12 +1030,11 @@ struct HttpServer[
                     if self._conns[idx]._state == (
                         CONN_STATE_WAITING_FOR_WRITABLE
                     ):
-                        if self._conns[idx]._interest_set != INTEREST_WRITE:
+                        if self._reactor.interest_set(self._conns[idx]._reg) != INTEREST_WRITE:
                             try:
                                 self._reactor.modify(
                                     self._conns[idx]._reg, INTEREST_WRITE,
                                 )
-                                self._conns[idx]._interest_set = INTEREST_WRITE
                             except e:
                                 _ = e  # cov: unreachable Reactor.modify fails only if epoll_ctl or kevent rejects a registered open fd
                                 keep_alive_w = False
@@ -1075,12 +1069,11 @@ struct HttpServer[
                 self._config.trace_project,
             )
             if self._conns[idx]._state == CONN_STATE_WAITING_FOR_WRITABLE:
-                if self._conns[idx]._interest_set != INTEREST_WRITE:
+                if self._reactor.interest_set(self._conns[idx]._reg) != INTEREST_WRITE:
                     try:
                         self._reactor.modify(
                             self._conns[idx]._reg, INTEREST_WRITE,
                         )
-                        self._conns[idx]._interest_set = INTEREST_WRITE
                     except e:
                         _ = e  # cov: unreachable Reactor.modify fails only if epoll_ctl or kevent rejects a registered open fd
                         keep_alive = False
@@ -1167,12 +1160,11 @@ struct HttpServer[
                     self._conns[idx], self._bytes_sent,
                 )
                 if drained:
-                    if self._conns[idx]._interest_set != INTEREST_READ:
+                    if self._reactor.interest_set(self._conns[idx]._reg) != INTEREST_READ:
                         try:
                             self._reactor.modify(
                                 self._conns[idx]._reg, INTEREST_READ,
                             )
-                            self._conns[idx]._interest_set = INTEREST_READ
                         except e:
                             _ = e
                             try:
@@ -1200,12 +1192,11 @@ struct HttpServer[
                     if self._conns[idx]._state == (
                         CONN_STATE_WAITING_FOR_WRITABLE
                     ):
-                        if self._conns[idx]._interest_set != INTEREST_WRITE:
+                        if self._reactor.interest_set(self._conns[idx]._reg) != INTEREST_WRITE:
                             try:
                                 self._reactor.modify(
                                     self._conns[idx]._reg, INTEREST_WRITE,
                                 )
-                                self._conns[idx]._interest_set = INTEREST_WRITE
                             except e:
                                 _ = e
                                 keep_alive_w = False
@@ -1241,12 +1232,11 @@ struct HttpServer[
                 self._bytes_sent,
             )
             if self._conns[idx]._state == CONN_STATE_WAITING_FOR_WRITABLE:
-                if self._conns[idx]._interest_set != INTEREST_WRITE:
+                if self._reactor.interest_set(self._conns[idx]._reg) != INTEREST_WRITE:
                     try:
                         self._reactor.modify(
                             self._conns[idx]._reg, INTEREST_WRITE,
                         )
-                        self._conns[idx]._interest_set = INTEREST_WRITE
                     except e:
                         _ = e
                         keep_alive = False
@@ -1308,12 +1298,11 @@ struct HttpServer[
                 if rw == 1:
                     # Partial write — arm EPOLLOUT so the pending tail drains via
                     # the normal WAITING_FOR_WRITABLE path on the next cycle.
-                    if self._conns[idx]._interest_set != INTEREST_WRITE:
+                    if self._reactor.interest_set(self._conns[idx]._reg) != INTEREST_WRITE:
                         try:
                             self._reactor.modify(
                                 self._conns[idx]._reg, INTEREST_WRITE,
                             )
-                            self._conns[idx]._interest_set = INTEREST_WRITE
                         except e:
                             _ = e
                             try:
@@ -1446,12 +1435,11 @@ struct HttpServer[
                     self._conns[idx], self._bytes_sent,
                 )
                 if drained:
-                    if self._conns[idx]._interest_set != INTEREST_READ:
+                    if self._reactor.interest_set(self._conns[idx]._reg) != INTEREST_READ:
                         try:
                             self._reactor.modify(
                                 self._conns[idx]._reg, INTEREST_READ,
                             )
-                            self._conns[idx]._interest_set = INTEREST_READ
                         except e:
                             _ = e
                             try:
@@ -1528,12 +1516,11 @@ struct HttpServer[
                     self._bytes_sent,
                 )
                 if rw == 1:
-                    if self._conns[idx]._interest_set != INTEREST_WRITE:
+                    if self._reactor.interest_set(self._conns[idx]._reg) != INTEREST_WRITE:
                         try:
                             self._reactor.modify(
                                 self._conns[idx]._reg, INTEREST_WRITE,
                             )
-                            self._conns[idx]._interest_set = INTEREST_WRITE
                         except e:
                             _ = e
                             try:
@@ -1626,12 +1613,11 @@ struct HttpServer[
                     self._conns[idx], self._bytes_sent,
                 )
                 if drained:
-                    if self._conns[idx]._interest_set != INTEREST_READ:
+                    if self._reactor.interest_set(self._conns[idx]._reg) != INTEREST_READ:
                         try:
                             self._reactor.modify(
                                 self._conns[idx]._reg, INTEREST_READ,
                             )
-                            self._conns[idx]._interest_set = INTEREST_READ
                         except e:
                             _ = e
                             try:

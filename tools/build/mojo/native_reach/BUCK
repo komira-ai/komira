@@ -15,7 +15,7 @@ zig_test(
     imports = _SRCS,
     src = "native_reach.zig",
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
 # Built behind its unit tests: no library's check runs it unless they pass.
@@ -24,8 +24,8 @@ zig_exe(
     exec_compatible_with = LINUX_X86_64,
     imports = _SRCS,
     src = "native_reach.zig",
-    unit_tests = [":native_reach_unit"],
+    unit_tests = [":native_reach_unit", "komira//tools/build/toolchains:zig_next_version"],
     busybox = "komira//tools/build/toolchains:busybox",
-    zig = "komira//tools/build/toolchains:zig",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )

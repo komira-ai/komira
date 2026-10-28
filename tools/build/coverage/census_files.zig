@@ -1,48 +1,71 @@
 //! census_files: the per-package coverage files, put together and taken
 //! apart (census.md).
 //!
-//! usage: census_files assemble <dir> <census out> <ratchet out>
-//!        census_files split <census.tsv> <ratchet.tsv> <out dir>
+//! usage: census_files assemble <target bp> <dir> <census out> <held out>
+//!        census_files split <target bp> <census.tsv> <out dir>
+//!        census_files generated <out> <gate result.json>...
 //!
 //! Each package keeps its own coverage data, so a change to one package's
 //! coverage touches that package's directory and nothing else:
 //!
-//!   <package>/coverage_floor.tsv   its floor: `#` comment lines and exactly
-//!                                  one ratchet row (`<package> <line floor>
-//!                                  <branch floor>`, tab-separated, or with a
-//!                                  fourth field, a pinned row's reason), in
-//!                                  the grammar covcheck reads (README.md,
-//!                                  "The ratchet"); the row names the
-//!                                  file's own directory
 //!   <package>/coverage_census.tsv  what the census measured of its
 //!                                  libraries: `#` comment lines, the line
 //!                                  `census <date> <commit> <note>`, then
 //!                                  one row per library (census.sh says the
 //!                                  12 fields), each naming the file's own
-//!                                  directory as its package (field 2)
+//!                                  directory as its package (field 2),
+//!                                  then, when the package has generated
+//!                                  sources, one `generated<TAB><path>` line
+//!                                  per source covcheck left out (its first
+//!                                  line is the `# @generated` header,
+//!                                  covcheck/generated.mojo), the path in
+//!                                  the package's directory, ending `.mojo`,
+//!                                  sorted, each once. A file with none is
+//!                                  as before. Adding the header to a
+//!                                  hand-written file is then a diff of
+//!                                  this file when the census is refreshed.
+//!   <package>/coverage_held        the metrics the package holds at the
+//!                                  target: `#` comment lines, then `line`
+//!                                  and/or `branch`, one per line, each
+//!                                  once, the grammar covcheck reads
+//!                                  (README.md, "The 99% threshold and
+//!                                  holds")
+//!
+//! A package reaches the target <target bp> on a metric when the census
+//! measured it at least that on every library row of the package (kind
+//! `library`) with an executable line, and on at least one: a row that is
+//! not OK, or with no number for the metric (a branch `-`, or `0 0`), keeps
+//! the package from reaching it; a row with no line (`0 0`, its sources all
+//! generated) neither reaches nor keeps it from reaching. Basis points are
+//! hit * 10000 / found, rounded down.
 //!
 //! assemble reads every such file under <dir> (the files staged at their
 //! paths in the repository: //:coverage_census, census.bzl) and writes the
 //! two files census.sh render and check read: <census out>, one comment
 //! line, one census line and every row sorted by label in byte order, and
-//! <ratchet out>, one comment line and every floor row sorted by package
-//! in byte order. The census line's date is the latest of the packages',
-//! its commit theirs when they all name one (else `-`), and its note theirs
-//! when every package has the same date and note, `packages measured from
-//! <first> to <last>` when the dates differ, else `-`. Refused, naming
-//! `<path>:<line>`: a file of another name, a file at the top of <dir>, a
-//! carriage return, an empty line, a floor file without exactly one row, a
-//! floor row that is not 3 or 4 fields, a floor that is not 0 to 10000
-//! (the branch floor may be `-`), a pinned row with an empty reason, a row
-//! naming another package, a census file without its census line first or
-//! without a library row, a malformed census line, and a tree with no
-//! census file. A label twice is left to render, which refuses rows out of
-//! order (census.sh).
+//! <held out>, one comment line and one row per marker sorted by package,
+//! `<package> <metrics>` (tab-separated; `line`, `branch`, `line,branch`,
+//! or `-` for a marker that holds nothing). The census line's date is the
+//! latest of the packages', its commit theirs when they all name one (else
+//! `-`), and its note theirs when every package has the same date and
+//! note, `packages measured from <first> to <last>` when the dates differ,
+//! else `-`. Refused, naming `<path>:<line>`: a file of another name, a
+//! file at the top of <dir>, a carriage return, an empty line, a census
+//! file without its census line first or without a library row, a
+//! malformed census line, a row naming another package, a held line that is
+//! not exactly `line` or `branch`, a metric held twice, a tree with no
+//! census file; and, naming every one, a package that reached the target
+//! on a metric its coverage_held does not hold (so a package that reaches
+//! 99% stays held there). A label twice is left to render, which refuses
+//! rows out of order (census.sh).
 //!
-//! split is the other way: from a census.tsv and a ratchet.tsv (census.sh
-//! collect and render write them) it writes each package's two files under
-//! <out dir>, the census line repeated in each census file. A package's
-//! file it does not write is not touched (census.md says how to refresh).
+//! split is the other way: from a census.tsv (census.sh collect writes it)
+//! it writes each package's census file under <out dir>, the census line
+//! repeated in each, and adds each metric a package reached to its
+//! coverage_held there, writing the marker when it has none. It never
+//! takes a metric out of a marker: a hold is removed by hand only. A
+//! package's file it does not write is not touched (census.md says how to
+//! refresh).
 //!
 //! Exit status: 0 done; 1 refused (nothing is written by assemble; split
 //! checks everything before it writes); 2 bad usage.
@@ -54,17 +77,18 @@
 const std = @import("std");
 const Alloc = std.mem.Allocator;
 
-pub const floor_name = "coverage_floor.tsv";
+pub const held_name = "coverage_held";
 pub const census_name = "coverage_census.tsv";
 
-pub const floor_comment = "# This package's coverage floor (tools/build/coverage/README.md, \"The ratchet\"): its directory, the line and branch floors in basis points, and a pinned row's reason.\n";
+pub const held_comment = "# The metrics this package holds at the coverage target, one per line: line, branch (tools/build/coverage/README.md, \"The 99% threshold and holds\").\n";
 pub const census_comment = "# What the coverage census measured of this package's libraries (tools/build/coverage/census.md).\n";
-pub const assembled_ratchet_comment = "# The floors of every package: each package's coverage_floor.tsv, assembled by census_files (census.bzl).\n";
+pub const assembled_held_comment = "# The holds of every package: each package's coverage_held, assembled by census_files (census.bzl).\n";
 pub const assembled_census_comment = "# The coverage census: each package's coverage_census.tsv, assembled by census_files (census.bzl).\n";
 
 const usage =
-    \\usage: census_files assemble <dir> <census out> <ratchet out>
-    \\       census_files split <census.tsv> <ratchet.tsv> <out dir>
+    \\usage: census_files assemble <target bp> <dir> <census out> <held out>
+    \\       census_files split <target bp> <census.tsv> <out dir>
+    \\       census_files generated <out> <gate result.json>...
     \\
 ;
 
@@ -76,18 +100,19 @@ pub const Error = error{ Refused, Usage };
 /// messages a run prints.
 pub const Diag = struct {
     text: std.ArrayList(u8),
+    alloc: Alloc,
 
     pub fn init(alloc: Alloc) Diag {
-        return .{ .text = std.ArrayList(u8).init(alloc) };
+        return .{ .text = std.ArrayList(u8).empty, .alloc = alloc };
     }
 
     fn refuse(self: *Diag, comptime fmt: []const u8, args: anytype) error{Refused} {
-        self.text.writer().print("census_files: " ++ fmt ++ "\n", args) catch oom();
+        self.text.writer(self.alloc).print("census_files: " ++ fmt ++ "\n", args) catch oom();
         return error.Refused;
     }
 
     fn usageFail(self: *Diag, comptime fmt: []const u8, args: anytype) error{Usage} {
-        self.text.writer().print("census_files: " ++ fmt ++ "\n" ++ usage, args) catch oom();
+        self.text.writer(self.alloc).print("census_files: " ++ fmt ++ "\n" ++ usage, args) catch oom();
         return error.Usage;
     }
 };
@@ -98,7 +123,7 @@ fn oom() noreturn {
 }
 
 /// A row and what it is sorted by.
-const Row = struct {
+pub const Row = struct {
     key: []const u8,
     line: []const u8,
 };
@@ -121,7 +146,7 @@ pub const Head = struct {
 /// The lines of `text` (refusing a carriage return, an empty line and a
 /// last line with no newline is accepted).
 fn lines(alloc: Alloc, diag: *Diag, path: []const u8, text: []const u8) ![][]const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
+    var out = std.ArrayList([]const u8).empty;
     if (std.mem.indexOfScalar(u8, text, '\r')) |at| {
         const n = std.mem.count(u8, text[0..at], "\n") + 1;
         return diag.refuse("{s}:{d}: a carriage return (the file must use LF line ends)", .{ path, n });
@@ -134,24 +159,23 @@ fn lines(alloc: Alloc, diag: *Diag, path: []const u8, text: []const u8) ![][]con
             if (it.peek() == null) break;
             return diag.refuse("{s}:{d}: an empty line (a comment starts with '#')", .{ path, n });
         }
-        out.append(l) catch oom();
+        out.append(alloc, l) catch oom();
     }
     return out.items;
 }
 
 fn fields(alloc: Alloc, line: []const u8) [][]const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
+    var out = std.ArrayList([]const u8).empty;
     var it = std.mem.splitScalar(u8, line, '\t');
-    while (it.next()) |f| out.append(f) catch oom();
+    while (it.next()) |f| out.append(alloc, f) catch oom();
     return out.items;
 }
 
-fn isFloor(v: []const u8) bool {
-    if (v.len == 0 or v.len > 5) return false;
-    if (v.len > 1 and v[0] == '0') return false;
-    for (v) |c| if (c < '0' or c > '9') return false;
-    const n = std.fmt.parseInt(u32, v, 10) catch return false;
-    return n <= 10000;
+/// A count of the census (a line or branch number): digits, no sign.
+fn number(v: []const u8) ?u64 {
+    if (v.len == 0 or v.len > 12) return null;
+    for (v) |ch| if (ch < '0' or ch > '9') return null;
+    return std.fmt.parseInt(u64, v, 10) catch null;
 }
 
 fn isDate(v: []const u8) bool {
@@ -163,36 +187,122 @@ fn isDate(v: []const u8) bool {
     return true;
 }
 
-/// The floor row of a package's coverage_floor.tsv, checked.
-pub fn floorRow(alloc: Alloc, diag: *Diag, path: []const u8, package: []const u8, text: []const u8) ![]const u8 {
+/// The metrics a package holds.
+pub const Hold = struct {
+    line: bool = false,
+    branch: bool = false,
+};
+
+/// A package's coverage_held, checked.
+pub fn parseHold(alloc: Alloc, diag: *Diag, path: []const u8, text: []const u8) !Hold {
     const ls = try lines(alloc, diag, path, text);
-    var row: ?[]const u8 = null;
+    var h = Hold{};
     for (ls, 1..) |l, n| {
         if (l[0] == '#') continue;
-        if (row != null) return diag.refuse("{s}:{d}: a second row (a package's floor file holds exactly one)", .{ path, n });
-        const f = fields(alloc, l);
-        if (f.len != 3 and f.len != 4)
-            return diag.refuse("{s}:{d}: a row has 3 tab-separated fields (package, line floor, branch floor), or 4 (a pinned row's reason), not {d}", .{ path, n, f.len });
-        if (!std.mem.eql(u8, f[0], package))
-            return diag.refuse("{s}:{d}: the row names package {s}, not its directory {s}", .{ path, n, f[0], package });
-        if (!isFloor(f[1])) return diag.refuse("{s}:{d}: line floor '{s}' is not a number of basis points from 0 to 10000", .{ path, n, f[1] });
-        if (!std.mem.eql(u8, f[2], "-") and !isFloor(f[2]))
-            return diag.refuse("{s}:{d}: branch floor '{s}' is not '-' or a number of basis points from 0 to 10000", .{ path, n, f[2] });
-        if (f.len == 4 and f[3].len == 0) return diag.refuse("{s}:{d}: a pinned row has an empty reason", .{ path, n });
-        row = l;
+        const slot: *bool = if (std.mem.eql(u8, l, "line")) &h.line else if (std.mem.eql(u8, l, "branch")) &h.branch else return diag.refuse("{s}:{d}: '{s}' is not a held metric: a line holds exactly `line` or `branch`, with no number", .{ path, n, l });
+        if (slot.*) return diag.refuse("{s}:{d}: {s} is held twice", .{ path, n, l });
+        slot.* = true;
     }
-    return row orelse diag.refuse("{s}: no row (a package's floor file holds exactly one)", .{path});
+    return h;
 }
 
+/// Whether a package reached the target on a metric: 0 no library row of
+/// it with an executable line yet, 1 every one so far at the target, -1 one
+/// that is not.
+pub const Reach = struct {
+    line: i8 = 0,
+    branch: i8 = 0,
+};
+
+fn reachOne(state: *i8, hit: ?u64, found: ?u64, target: u64) void {
+    if (hit == null or found == null or found.? == 0 or hit.? * 10000 / found.? < target) {
+        state.* = -1;
+    } else if (state.* == 0) state.* = 1;
+}
+
+/// What each package of the census `rows` reached (see the header).
+pub fn reached(alloc: Alloc, rows: []const Row, target: u64) std.StringArrayHashMap(Reach) {
+    var out = std.StringArrayHashMap(Reach).init(alloc);
+    for (rows) |r| {
+        const f = fields(alloc, r.line);
+        if (f.len < 4 or std.mem.eql(u8, f[2], "test")) continue;
+        const g = out.getOrPut(f[1]) catch oom();
+        if (!g.found_existing) g.value_ptr.* = .{};
+        if (f.len != 12 or !std.mem.eql(u8, f[3], "OK")) {
+            g.value_ptr.* = .{ .line = -1, .branch = -1 };
+            continue;
+        }
+        // A library with no line (its sources all generated) sets nothing.
+        if (number(f[5]) != null and number(f[5]).? == 0) continue;
+        reachOne(&g.value_ptr.line, number(f[4]), number(f[5]), target);
+        reachOne(&g.value_ptr.branch, number(f[6]), number(f[7]), target);
+    }
+    return out;
+}
+
+fn parseTarget(diag: *Diag, v: []const u8) !u64 {
+    const t = number(v) orelse return diag.usageFail("<target bp> '{s}' is not a number of basis points from 0 to 10000", .{v});
+    if (t > 10000) return diag.usageFail("<target bp> '{s}' is not a number of basis points from 0 to 10000", .{v});
+    return t;
+}
+
+fn keyLess(_: void, a: []const u8, b: []const u8) bool {
+    return std.mem.lessThan(u8, a, b);
+}
+
+/// Whether `p` is a `.mojo` file path inside `package`'s directory: the
+/// package, a `/`, then one or more segments, none empty, `.` or `..`, the
+/// last a `.mojo` file with a name before the suffix (`x.mojo`, not
+/// `.mojo`). A path under a nested package's directory is the nested
+/// package's, not this one's: assemble refuses it in the parent's file, and
+/// split writes it into the nested package's file.
+pub fn belongsTo(p: []const u8, package: []const u8) bool {
+    if (!(p.len > package.len + 1 and std.mem.startsWith(u8, p, package) and p[package.len] == '/')) return false;
+    var it = std.mem.splitScalar(u8, p[package.len + 1 ..], '/');
+    var last: []const u8 = "";
+    while (it.next()) |seg| {
+        if (seg.len == 0 or std.mem.eql(u8, seg, ".") or std.mem.eql(u8, seg, "..")) return false;
+        last = seg;
+    }
+    return last.len > ".mojo".len and std.mem.endsWith(u8, last, ".mojo");
+}
+
+/// A `generated<TAB><path>` line, checked: a path `belongsTo` `package`, after `prev` in byte order (so sorted, each
+/// once). Null when `f` is no generated line.
+fn generatedPath(diag: *Diag, path: []const u8, n: usize, package: []const u8, f: []const []const u8, prev: ?[]const u8) !?[]const u8 {
+    if (f.len == 0 or !std.mem.eql(u8, f[0], "generated")) return null;
+    if (f.len != 2 or f[1].len == 0)
+        return diag.refuse("{s}:{d}: a generated line is generated<TAB><path>", .{ path, n });
+    const p = f[1];
+    if (!belongsTo(p, package))
+        return diag.refuse("{s}:{d}: the generated path {s} is not a .mojo file of {s}", .{ path, n, p, package });
+    if (prev) |q| if (!std.mem.lessThan(u8, q, p))
+        return diag.refuse("{s}:{d}: the generated path {s} is not after {s} (sorted in byte order, each once)", .{ path, n, p, q });
+    return p;
+}
+
+/// A generated path of a package's census file, kept to check it against
+/// the other packages.
+const Gen = struct { file: []const u8, line: usize, package: []const u8, path: []const u8 };
+
 /// The census line and the library rows of a package's coverage_census.tsv,
-/// checked.
-fn censusRows(alloc: Alloc, diag: *Diag, path: []const u8, package: []const u8, text: []const u8, rows: *std.ArrayList(Row)) !Head {
+/// checked (its generated lines too: they are no rows).
+fn censusRows(alloc: Alloc, diag: *Diag, path: []const u8, package: []const u8, text: []const u8, rows: *std.ArrayList(Row), gens: *std.ArrayList(Gen)) !Head {
     const ls = try lines(alloc, diag, path, text);
     var head: ?Head = null;
     var count: usize = 0;
+    var prev: ?[]const u8 = null;
     for (ls, 1..) |l, n| {
         if (l[0] == '#') continue;
         const f = fields(alloc, l);
+        if (head != null) {
+            if (try generatedPath(diag, path, n, package, f, prev)) |p| {
+                prev = p;
+                gens.append(alloc, .{ .file = path, .line = n, .package = package, .path = p }) catch oom();
+                continue;
+            }
+            if (prev != null) return diag.refuse("{s}:{d}: a library row after a generated line (the generated lines come last)", .{ path, n });
+        }
         if (head == null) {
             if (f.len != 4 or !std.mem.eql(u8, f[0], "census") or !isDate(f[1]) or f[2].len == 0 or f[3].len == 0)
                 return diag.refuse("{s}:{d}: the first line is census<TAB><date YYYY-MM-DD><TAB><commit or -><TAB><note or ->", .{ path, n });
@@ -201,7 +311,7 @@ fn censusRows(alloc: Alloc, diag: *Diag, path: []const u8, package: []const u8, 
         }
         if (f.len < 2 or !std.mem.eql(u8, f[1], package))
             return diag.refuse("{s}:{d}: the row's package is {s}, not its directory {s}", .{ path, n, if (f.len < 2) "missing" else f[1], package });
-        rows.append(.{ .key = f[0], .line = l }) catch oom();
+        rows.append(alloc, .{ .key = f[0], .line = l }) catch oom();
         count += 1;
     }
     if (head == null or count == 0) return diag.refuse("{s}: no census line and library row", .{path});
@@ -214,7 +324,7 @@ fn readAll(alloc: Alloc, diag: *Diag, dir: std.fs.Dir, path: []const u8) ![]cons
 
 fn writeAll(diag: *Diag, dir: std.fs.Dir, path: []const u8, bytes: []const u8) !void {
     if (std.fs.path.dirname(path)) |d| dir.makePath(d) catch |e| return diag.refuse("{s}: cannot make it: {s}", .{ d, @errorName(e) });
-    dir.writeFile(path, bytes) catch |e| return diag.refuse("{s}: cannot write it: {s}", .{ path, @errorName(e) });
+    dir.writeFile(.{ .sub_path = path, .data = bytes }) catch |e| return diag.refuse("{s}: cannot write it: {s}", .{ path, @errorName(e) });
 }
 
 /// The census line of the assembled census.
@@ -235,91 +345,188 @@ pub fn combine(alloc: Alloc, heads: []const Head) []const u8 {
 }
 
 fn assemble(alloc: Alloc, diag: *Diag, cwd: std.fs.Dir, args: []const []const u8) !void {
-    if (args.len != 3) return diag.usageFail("assemble takes 3 arguments, not {d}", .{args.len});
-    var root = cwd.openDir(args[0], .{ .iterate = true }) catch |e| return diag.refuse("{s}: cannot open it: {s}", .{ args[0], @errorName(e) });
+    if (args.len != 4) return diag.usageFail("assemble takes 4 arguments, not {d}", .{args.len});
+    const target = try parseTarget(diag, args[0]);
+    var root = cwd.openDir(args[1], .{ .iterate = true }) catch |e| return diag.refuse("{s}: cannot open it: {s}", .{ args[1], @errorName(e) });
     defer root.close();
-    var paths = std.ArrayList([]const u8).init(alloc);
+    var paths = std.ArrayList([]const u8).empty;
     var walk = root.walk(alloc) catch oom();
-    while (walk.next() catch |e| return diag.refuse("{s}: cannot list it: {s}", .{ args[0], @errorName(e) })) |e| {
+    while (walk.next() catch |e| return diag.refuse("{s}: cannot list it: {s}", .{ args[1], @errorName(e) })) |e| {
         if (e.kind == .directory) continue;
-        paths.append(alloc.dupe(u8, e.path) catch oom()) catch oom();
+        paths.append(alloc, alloc.dupe(u8, e.path) catch oom()) catch oom();
     }
     std.mem.sort([]const u8, paths.items, {}, strLess);
-    var floors = std.ArrayList(Row).init(alloc);
-    var rows = std.ArrayList(Row).init(alloc);
-    var heads = std.ArrayList(Head).init(alloc);
+    var held = std.StringArrayHashMap(Hold).init(alloc);
+    var rows = std.ArrayList(Row).empty;
+    var heads = std.ArrayList(Head).empty;
+    var gens = std.ArrayList(Gen).empty;
+    var census_pkgs = std.ArrayList([]const u8).empty;
     for (paths.items) |p| {
         const base = std.fs.path.basename(p);
         const package = std.fs.path.dirname(p) orelse
-            return diag.refuse("{s}: at the top of {s}; a package's coverage files are in its directory", .{ p, args[0] });
+            return diag.refuse("{s}: at the top of {s}; a package's coverage files are in its directory", .{ p, args[1] });
         const text = try readAll(alloc, diag, root, p);
-        if (std.mem.eql(u8, base, floor_name)) {
-            floors.append(.{ .key = package, .line = try floorRow(alloc, diag, p, package, text) }) catch oom();
+        if (std.mem.eql(u8, base, held_name)) {
+            held.put(package, try parseHold(alloc, diag, p, text)) catch oom();
         } else if (std.mem.eql(u8, base, census_name)) {
-            heads.append(try censusRows(alloc, diag, p, package, text, &rows)) catch oom();
-        } else return diag.refuse("{s}: not a {s} or a {s}", .{ p, floor_name, census_name });
+            heads.append(alloc, try censusRows(alloc, diag, p, package, text, &rows, &gens)) catch oom();
+            census_pkgs.append(alloc, package) catch oom();
+        } else return diag.refuse("{s}: not a {s} or a {s}", .{ p, held_name, census_name });
     }
-    if (heads.items.len == 0) return diag.refuse("{s}: no {s} under it", .{ args[0], census_name });
-    std.mem.sort(Row, floors.items, {}, rowLess);
+    if (heads.items.len == 0) return diag.refuse("{s}: no {s} under it", .{ args[1], census_name });
+    // A generated path belongs to the nearest package: one under a nested
+    // package's directory is that package's.
+    for (gens.items) |g| {
+        for (census_pkgs.items) |q| {
+            if (q.len > g.package.len and belongsTo(g.path, q))
+                return diag.refuse("{s}:{d}: the generated path {s} belongs to the nested package {s}, whose census file lists it", .{ g.file, g.line, g.path, q });
+        }
+    }
     std.mem.sort(Row, rows.items, {}, rowLess);
-    var c = std.ArrayList(u8).init(alloc);
-    c.appendSlice(assembled_census_comment) catch oom();
-    c.appendSlice(combine(alloc, heads.items)) catch oom();
-    for (rows.items) |r| c.writer().print("{s}\n", .{r.line}) catch oom();
-    var f = std.ArrayList(u8).init(alloc);
-    f.appendSlice(assembled_ratchet_comment) catch oom();
-    for (floors.items) |r| f.writer().print("{s}\n", .{r.line}) catch oom();
-    try writeAll(diag, cwd, args[1], c.items);
-    try writeAll(diag, cwd, args[2], f.items);
+    // Every package that reached the target holds what it reached.
+    var reach = reached(alloc, rows.items, target);
+    const pkgs = alloc.dupe([]const u8, reach.keys()) catch oom();
+    std.mem.sort([]const u8, pkgs, {}, keyLess);
+    var missing = std.ArrayList(u8).empty;
+    for (pkgs) |pkg| {
+        const r = reach.get(pkg).?;
+        const h = held.get(pkg) orelse Hold{};
+        for ([_]struct { []const u8, bool, bool }{ .{ "line", r.line == 1, h.line }, .{ "branch", r.branch == 1, h.branch } }) |m| {
+            if (m[1] and !m[2]) missing.writer(alloc).print("\n  {s}: {s} reached {d} basis points in every library; add `{s}` to {s}/{s}", .{ pkg, m[0], target, m[0], pkg, held_name }) catch oom();
+        }
+    }
+    if (missing.items.len > 0)
+        return diag.refuse("a package the census measured at the target does not hold it (census_files split adds the hold):{s}", .{missing.items});
+    var c = std.ArrayList(u8).empty;
+    c.appendSlice(alloc, assembled_census_comment) catch oom();
+    c.appendSlice(alloc, combine(alloc, heads.items)) catch oom();
+    for (rows.items) |r| c.writer(alloc).print("{s}\n", .{r.line}) catch oom();
+    const hk = alloc.dupe([]const u8, held.keys()) catch oom();
+    std.mem.sort([]const u8, hk, {}, keyLess);
+    var f = std.ArrayList(u8).empty;
+    f.appendSlice(alloc, assembled_held_comment) catch oom();
+    for (hk) |pkg| {
+        const h = held.get(pkg).?;
+        const m: []const u8 = if (h.line and h.branch) "line,branch" else if (h.line) "line" else if (h.branch) "branch" else "-";
+        f.writer(alloc).print("{s}\t{s}\n", .{ pkg, m }) catch oom();
+    }
+    try writeAll(diag, cwd, args[2], c.items);
+    try writeAll(diag, cwd, args[3], f.items);
 }
 
 fn split(alloc: Alloc, diag: *Diag, cwd: std.fs.Dir, args: []const []const u8) !void {
     if (args.len != 3) return diag.usageFail("split takes 3 arguments, not {d}", .{args.len});
+    const target = try parseTarget(diag, args[0]);
     // Every package's file, by path, checked before anything is written.
     var out = std.StringArrayHashMap(std.ArrayList(u8)).init(alloc);
-    const census = try lines(alloc, diag, args[0], try readAll(alloc, diag, cwd, args[0]));
+    const census = try lines(alloc, diag, args[1], try readAll(alloc, diag, cwd, args[1]));
     var head: ?[]const u8 = null;
+    var rows = std.ArrayList(Row).empty;
     for (census, 1..) |l, n| {
         if (l[0] == '#') continue;
         const f = fields(alloc, l);
         if (head == null) {
             if (f.len != 4 or !std.mem.eql(u8, f[0], "census") or !isDate(f[1]))
-                return diag.refuse("{s}:{d}: the first line is census<TAB><date YYYY-MM-DD><TAB><commit or -><TAB><note or ->", .{ args[0], n });
+                return diag.refuse("{s}:{d}: the first line is census<TAB><date YYYY-MM-DD><TAB><commit or -><TAB><note or ->", .{ args[1], n });
             head = l;
             continue;
         }
-        if (f.len < 2 or f[1].len == 0) return diag.refuse("{s}:{d}: a row with no package", .{ args[0], n });
+        if (f.len >= 1 and std.mem.eql(u8, f[0], "generated")) {
+            // After the rows: the package is the longest one whose
+            // directory holds the path.
+            if (f.len != 2 or f[1].len == 0) return diag.refuse("{s}:{d}: a generated line is generated<TAB><path>", .{ args[1], n });
+            var best: ?[]const u8 = null;
+            for (rows.items) |r| {
+                const pkg = fields(alloc, r.line)[1];
+                if (belongsTo(f[1], pkg) and (best == null or pkg.len > best.?.len)) best = pkg;
+            }
+            const pkg = best orelse return diag.refuse("{s}:{d}: the generated path {s} is not a .mojo file path of any package of the rows above it", .{ args[1], n, f[1] });
+            const gpath = std.fmt.allocPrint(alloc, "{s}/{s}", .{ pkg, census_name }) catch oom();
+            out.getPtr(gpath).?.writer(alloc).print("{s}\n", .{l}) catch oom();
+            continue;
+        }
+        if (f.len < 2 or f[1].len == 0) return diag.refuse("{s}:{d}: a row with no package", .{ args[1], n });
+        rows.append(alloc, .{ .key = f[0], .line = l }) catch oom();
         const path = std.fmt.allocPrint(alloc, "{s}/{s}", .{ f[1], census_name }) catch oom();
         const g = out.getOrPut(path) catch oom();
         if (!g.found_existing) {
-            g.value_ptr.* = std.ArrayList(u8).init(alloc);
-            g.value_ptr.writer().print("{s}{s}\n", .{ census_comment, head.? }) catch oom();
+            g.value_ptr.* = std.ArrayList(u8).empty;
+            g.value_ptr.writer(alloc).print("{s}{s}\n", .{ census_comment, head.? }) catch oom();
         }
-        g.value_ptr.writer().print("{s}\n", .{l}) catch oom();
+        g.value_ptr.writer(alloc).print("{s}\n", .{l}) catch oom();
     }
-    if (head == null) return diag.refuse("{s}: no census line", .{args[0]});
-    const ratchet = try lines(alloc, diag, args[1], try readAll(alloc, diag, cwd, args[1]));
-    for (ratchet) |l| {
-        if (l[0] == '#') continue;
-        const f = fields(alloc, l);
-        const path = std.fmt.allocPrint(alloc, "{s}/{s}", .{ f[0], floor_name }) catch oom();
-        const text = std.fmt.allocPrint(alloc, "{s}{s}\n", .{ floor_comment, l }) catch oom();
-        _ = try floorRow(alloc, diag, path, f[0], text);
-        const g = out.getOrPut(path) catch oom();
-        if (g.found_existing) return diag.refuse("{s}: package {s} has a second row", .{ args[1], f[0] });
-        g.value_ptr.* = std.ArrayList(u8).init(alloc);
-        g.value_ptr.appendSlice(text) catch oom();
-    }
+    if (head == null) return diag.refuse("{s}: no census line", .{args[1]});
     var dir = cwd.openDir(args[2], .{}) catch |e| return diag.refuse("{s}: cannot open it: {s}", .{ args[2], @errorName(e) });
     defer dir.close();
-    var it = out.iterator();
-    while (it.next()) |e| try writeAll(diag, dir, e.key_ptr.*, e.value_ptr.items);
+    // Each metric reached is added to the package's marker; one already
+    // there is kept, with its comments.
+    var reach = reached(alloc, rows.items, target);
+    var it = reach.iterator();
+    while (it.next()) |e| {
+        const want = Hold{ .line = e.value_ptr.line == 1, .branch = e.value_ptr.branch == 1 };
+        if (!want.line and !want.branch) continue;
+        const path = std.fmt.allocPrint(alloc, "{s}/{s}", .{ e.key_ptr.*, held_name }) catch oom();
+        var comments: []const u8 = held_comment;
+        var have = Hold{};
+        if (dir.readFileAlloc(alloc, path, max_file)) |text| {
+            have = try parseHold(alloc, diag, path, text);
+            var cs = std.ArrayList(u8).empty;
+            for (try lines(alloc, diag, path, text)) |l| if (l[0] == '#') cs.writer(alloc).print("{s}\n", .{l}) catch oom();
+            comments = cs.items;
+        } else |err| if (err != error.FileNotFound) return diag.refuse("{s}: cannot read it: {s}", .{ path, @errorName(err) });
+        const line = have.line or want.line;
+        const branch = have.branch or want.branch;
+        if (line == have.line and branch == have.branch) continue;
+        var b = std.ArrayList(u8).empty;
+        b.appendSlice(alloc, comments) catch oom();
+        if (line) b.appendSlice(alloc, "line\n") catch oom();
+        if (branch) b.appendSlice(alloc, "branch\n") catch oom();
+        out.put(path, b) catch oom();
+    }
+    var wit = out.iterator();
+    while (wit.next()) |e| try writeAll(diag, dir, e.key_ptr.*, e.value_ptr.items);
+}
+
+/// `generated <out> <result.json>...`: the `generated<TAB><path>` lines of
+/// the gate results (their `generated_paths`), sorted in byte order, each
+/// once, written to <out>. Refused: a result that is not JSON or has no
+/// `generated_paths` array of strings, and a path with a tab, a line feed
+/// or a carriage return, which a line of the census cannot hold.
+fn generated(alloc: Alloc, diag: *Diag, cwd: std.fs.Dir, args: []const []const u8) !void {
+    if (args.len < 1) return diag.usageFail("generated takes <out> and gate result files", .{});
+    var paths = std.ArrayList([]const u8).empty;
+    for (args[1..]) |f| {
+        const text = try readAll(alloc, diag, cwd, f);
+        const parsed = std.json.parseFromSlice(std.json.Value, alloc, text, .{}) catch |e|
+            return diag.refuse("{s}: not JSON: {s}", .{ f, @errorName(e) });
+        const arr = switch (parsed.value) {
+            .object => |o| o.get("generated_paths") orelse return diag.refuse("{s}: no generated_paths (a gate result of this covcheck has one)", .{f}),
+            else => return diag.refuse("{s}: not a JSON object", .{f}),
+        };
+        if (arr != .array) return diag.refuse("{s}: generated_paths is not an array", .{f});
+        for (arr.array.items) |v| {
+            if (v != .string or v.string.len == 0) return diag.refuse("{s}: generated_paths holds something that is not a path", .{f});
+            if (std.mem.indexOfAny(u8, v.string, "\t\n\r") != null)
+                return diag.refuse("{s}: the generated path {s} holds a tab, line feed or carriage return", .{ f, v.string });
+            paths.append(alloc, v.string) catch oom();
+        }
+    }
+    std.mem.sort([]const u8, paths.items, {}, strLess);
+    var b = std.ArrayList(u8).empty;
+    var prev: ?[]const u8 = null;
+    for (paths.items) |p| {
+        if (prev) |q| if (std.mem.eql(u8, q, p)) continue;
+        prev = p;
+        b.writer(alloc).print("generated\t{s}\n", .{p}) catch oom();
+    }
+    try writeAll(diag, cwd, args[0], b.items);
 }
 
 fn run(alloc: Alloc, diag: *Diag, cwd: std.fs.Dir, args: []const []const u8) Error!void {
     if (args.len == 0) return diag.usageFail("no command", .{});
     if (std.mem.eql(u8, args[0], "assemble")) return assemble(alloc, diag, cwd, args[1..]);
     if (std.mem.eql(u8, args[0], "split")) return split(alloc, diag, cwd, args[1..]);
+    if (std.mem.eql(u8, args[0], "generated")) return generated(alloc, diag, cwd, args[1..]);
     return diag.usageFail("unknown command '{s}'", .{args[0]});
 }
 
@@ -340,5 +547,5 @@ pub fn main() u8 {
     const argv = std.process.argsAlloc(alloc) catch oom();
     const args = alloc.alloc([]const u8, argv.len -| 1) catch oom();
     for (args, 1..) |*a, i| a.* = argv[i];
-    return entry(alloc, std.fs.cwd(), args, std.io.getStdErr().writer());
+    return entry(alloc, std.fs.cwd(), args, std.fs.File.stderr().deprecatedWriter());
 }

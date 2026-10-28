@@ -26,9 +26,9 @@
 #     _partition_by: Optional[OwnedPointer[PartitionByData]]  -- populated when tag == PLAN_PARTITION_BY
 #     _partition_topn: Optional[OwnedPointer[PartitionTopNData]] -- populated when tag == PLAN_PARTITION_TOPN
 #     _asof_join: Optional[OwnedPointer[AsofJoinData]]        -- populated when tag == PLAN_ASOF_JOIN
-#     (and `_union`, `_view_ref`, `_cse_ref`, `_cast_to_varchar`, `_exchange`
-#      for PLAN_UNION / PLAN_VIEW_REF / PLAN_CSE_REF / PLAN_CAST_TO_VARCHAR /
-#      PLAN_EXCHANGE)
+#     (and `_union`, `_view_ref`, `_cse_ref`, `_cast_to_varchar`, `_exchange`,
+#      `_map_batches`, `_step` for PLAN_UNION / PLAN_VIEW_REF / PLAN_CSE_REF /
+#      PLAN_CAST_TO_VARCHAR / PLAN_EXCHANGE / PLAN_MAP_BATCHES / PLAN_STEP)
 #
 # Only one Optional is populated at a time. The others are None.
 #
@@ -69,8 +69,9 @@ from komira_scan_source.in_memory_source import InMemorySource
 from komira_scan_source.json_source import JsonSource
 from komira_scan_source.csv_source import CsvSource
 from komira_buffer.file_identity import FileIdentity
-from komira_plan_expr.expr import Expr, EXPR_COL_REF, EXPR_ALIAS, EXPR_LITERAL, EXPR_BINARY_OP, EXPR_CAST, EXPR_WHEN, EXPR_STRING_OP, EXPR_STRING_FN, EXPR_UDF_CALL, string_fn_returns_int, EXPR_REGEXP, EXPR_SUBSTRING, EXPR_STRUCT_FIELD, EXPR_STRUCT_FIELD_IDX, EXPR_MAP_GET, EXPR_MATH_FN, EXPR_MATH_FN2, EXPR_IN_LIST, EXPR_BETWEEN, REGEXP_LIKE, REGEXP_MATCH, REGEXP_REPLACE, REGEXP_SPLIT_TO_ARRAY, REGEXP_EXTRACT_ALL, REGEXP_COUNT, REGEXP_INSTR, REGEXP_SUBSTR, REGEXP_FULL_MATCH, BIN_EQ, BIN_NE, BIN_LT, BIN_LE, BIN_GT, BIN_GE, BIN_AND, BIN_OR
-from komira_plan_expr.agg_expr import AggExpr, AGG_SUM, AGG_COUNT, AGG_MIN, AGG_MAX, AGG_MEAN, AGG_COUNT_DISTINCT, AGG_FIRST, AGG_LAST, AGG_STDDEV_SAMP, AGG_VAR_SAMP, AGG_CORR, AGG_MEDIAN, AGG_LARGEST_K, AGG_COVAR_POP, AGG_COVAR_SAMP, AGG_REGR_AVGX, AGG_REGR_AVGY, AGG_REGR_COUNT, AGG_REGR_SXX, AGG_REGR_SXY, AGG_REGR_SYY, AGG_REGR_SLOPE, AGG_REGR_INTERCEPT, AGG_REGR_R2, AGG_VAR_POP, AGG_STDDEV_POP, AGG_SEM, AGG_COUNT_IF, AGG_BOOL_AND, AGG_BOOL_OR, AGG_PRODUCT, agg_is_bool_valued, AGG_ANY_VALUE, AGG_KAHAN_SUM, AGG_KAHAN_AVG, AGG_SKEWNESS, AGG_KURTOSIS, AGG_KURTOSIS_POP
+from komira_plan_expr.expr import Expr, EXPR_COL_REF, EXPR_ALIAS, EXPR_LITERAL, EXPR_BINARY_OP, EXPR_CAST, EXPR_WHEN, EXPR_STRING_OP, EXPR_STRING_FN, EXPR_UDF_CALL, EXPR_UDF_APPLY, string_fn_returns_int, EXPR_REGEXP, EXPR_SUBSTRING, EXPR_STRUCT_FIELD, EXPR_STRUCT_FIELD_IDX, EXPR_MAP_GET, EXPR_MATH_FN, EXPR_MATH_FN2, EXPR_IN_LIST, EXPR_BETWEEN, REGEXP_LIKE, REGEXP_MATCH, REGEXP_REPLACE, REGEXP_SPLIT_TO_ARRAY, REGEXP_EXTRACT_ALL, REGEXP_COUNT, REGEXP_INSTR, REGEXP_SUBSTR, REGEXP_FULL_MATCH, BIN_EQ, BIN_NE, BIN_LT, BIN_LE, BIN_GT, BIN_GE, BIN_AND, BIN_OR
+from komira_plan_expr.agg_expr import AggExpr, AGG_SUM, AGG_COUNT, AGG_MIN, AGG_MAX, AGG_MEAN, AGG_COUNT_DISTINCT, AGG_FIRST, AGG_LAST, AGG_STDDEV_SAMP, AGG_VAR_SAMP, AGG_CORR, AGG_MEDIAN, AGG_LARGEST_K, AGG_COVAR_POP, AGG_COVAR_SAMP, AGG_REGR_AVGX, AGG_REGR_AVGY, AGG_REGR_COUNT, AGG_REGR_SXX, AGG_REGR_SXY, AGG_REGR_SYY, AGG_REGR_SLOPE, AGG_REGR_INTERCEPT, AGG_REGR_R2, AGG_VAR_POP, AGG_STDDEV_POP, AGG_SEM, AGG_COUNT_IF, AGG_BOOL_AND, AGG_BOOL_OR, AGG_PRODUCT, agg_is_bool_valued, AGG_ANY_VALUE, AGG_KAHAN_SUM, AGG_KAHAN_AVG, AGG_SKEWNESS, AGG_KURTOSIS, AGG_KURTOSIS_POP, AGG_UDF
+from komira_plan_expr.udf_type_field import udf_type_to_field
 from komira_plan_expr.scalar_value import ScalarValue
 from komira_plan_expr.null_order_policy import derived_nulls_first
 from komira_plan_expr.partition_expr import PartitionExpr, partition_expr_output_field
@@ -125,19 +126,14 @@ comptime PLAN_UNION: UInt8 = 12
 # has no handler for it) — the resolution pass is an assertable invariant
 # of the optimizer pipeline.
 comptime PLAN_VIEW_REF: UInt8 = 13
-# A leaf reference to the
-# CANONICAL occurrence of a duplicated PURE subtree, keyed on that
-# subtree's `structural_hash`. Produced ONLY by `plan_cse.plan_cse_eliminate`
-# (the plan-level CSE rewrite) and ONLY when the rewrite gate
-# (`plan_cse._ENABLE_CSE_REWRITE`) is on. The IR stays a TREE (not a DAG):
-# the canonical occurrence keeps the full subtree; the 2nd..Nth occurrences
-# become `PLAN_CSE_REF` leaves carrying `canonical_hash`. `plan_compiler`'s
-# `_compile_node` arm for this tag resolves it to a fragment sourced from
-# the segment that computed the canonical subtree's result. NB: the engine
-# currently enforces a HARD single-consumer invariant on segment outputs —
-# until that grows a per-seg consumer counter, the CSE rewrite gate stays
-# OFF and a `PLAN_CSE_REF` never reaches plan-compile in production (the
-# `_compile_node` arm raises a clear deferral error if it ever does).
+# A leaf reference to the CANONICAL occurrence of a duplicated PURE subtree,
+# keyed on that subtree's `structural_hash`. Produced only by
+# `komira_optimizer.plan_cse.plan_cse_eliminate` (the plan-level CSE rewrite),
+# which `optimizer_driver` does not call. The IR stays a TREE (not a DAG): the
+# canonical occurrence keeps the full subtree; the 2nd..Nth occurrences become
+# `PLAN_CSE_REF` leaves carrying `canonical_hash`. No consumer exists in this
+# tree yet: nothing resolves a `PLAN_CSE_REF` to the canonical result, so a
+# plan that holds one cannot be lowered until a resolver is added.
 comptime PLAN_CSE_REF: UInt8 = 14
 # cast_to_varchar: a single-child node that wraps its input with
 # `CastToVarcharOp` (`komira_engine_operators/cast_to_varchar.mojo`). The
@@ -164,6 +160,18 @@ comptime PLAN_CAST_TO_VARCHAR: UInt8 = 15
 #
 # ⛔ 18, NOT 16. Ids 16 and 17 are retired; see `PLAN_TAG_COUNT` below.
 comptime PLAN_EXCHANGE: UInt8 = 18
+# map_batches: a MAP_BATCHES_FRAME user function over the child, called once
+# per batch or once per group (optimized_plan_udfs.md §10.2, §10.4). Payload:
+# `MapBatchesData` (`logical_plan_udf.mojo`), which names the function by its
+# index in the `UdfRef` list beside the plan. Its output schema is the
+# children of that `UdfRef`'s `return_type`. Produced only by the plan-wire
+# decoder; nothing in this tree lowers or runs it yet.
+comptime PLAN_MAP_BATCHES: UInt8 = 19
+# step: a STEP user function, a source with no child that runs once per run
+# (optimized_plan_udfs.md §10.2, §10.4). Payload: `StepData`. Its output
+# schema is the children of its `UdfRef`'s `return_type`. Produced only by
+# the plan-wire decoder; nothing in this tree lowers or runs it yet.
+comptime PLAN_STEP: UInt8 = 20
 
 
 # =============================================================================
@@ -183,10 +191,11 @@ comptime PLAN_EXCHANGE: UInt8 = 18
 # This file is the ONE declaration site for the PLAN_* space, so "the whole
 # tag space" and "the part declared in this file" are the same set. Tag ids 16
 # and 17 are RETIRED (wire numbers 17 and 18 are reserved forever); id 18 is
-# `PLAN_EXCHANGE` (wire number 19), and the next plan tag takes id 19.
+# `PLAN_EXCHANGE` (wire number 19), 19 and 20 are `PLAN_MAP_BATCHES` and
+# `PLAN_STEP` (wire numbers 20 and 21), and the next plan tag takes id 21.
 
-comptime PLAN_TAG_COUNT: Int = 19
-"""One past the highest `PLAN_*` tag id — `PLAN_EXCHANGE = 18`.
+comptime PLAN_TAG_COUNT: Int = 21
+"""One past the highest `PLAN_*` tag id — `PLAN_STEP = 20`.
 
 ⚠ THE SPACE HAS A HOLE. Ids 16 and 17 are retired and lie below this count,
 so `range(PLAN_TAG_COUNT)` visits two ids no node may carry. A walk over the
@@ -196,7 +205,7 @@ count keeps two empty slots.
 ⛔ A RETIRED ID IS NEVER REUSED. Reusing 16 or 17 would silently mis-decode any
 old bytes that still carry a node with that id — the same reason `plan.proto`
 RESERVES a retired field number rather than renumbering around it. Reserving
-the NUMBER is permanent. The next tag added takes 19."""
+the NUMBER is permanent. The next tag added takes 21."""
 
 
 def plan_tag_is_retired(tag: UInt8) -> Bool:
@@ -265,10 +274,16 @@ def _write_plan_tag_name[W: Writer](mut writer: W, tag: UInt8):
     if tag == PLAN_EXCHANGE:
         writer.write(String("Exchange"))
         return
+    if tag == PLAN_MAP_BATCHES:
+        writer.write(String("MapBatches"))
+        return
+    if tag == PLAN_STEP:
+        writer.write(String("Step"))
+        return
     # ⛔ 16 / 17 ARE RETIRED IDS — DO NOT REUSE THEM FOR A NEW TAG.
     # A plan carrying 16 or 17 renders as `tag#16` / `tag#17` — which is
     # correct: no such node can be produced, and a plan that carries one is
-    # old bytes, not a live tag. The NEXT tag added takes 19.
+    # old bytes, not a live tag. The NEXT tag added takes 21.
     writer.write(String("tag#") + String(Int(tag)))
     return
 
@@ -713,6 +728,7 @@ from komira_plan_ir.logical_plan_variants import (
     CastToVarcharData,
 )
 from komira_plan_ir.logical_plan_exchange import ExchangeData
+from komira_plan_ir.logical_plan_udf import MapBatchesData, StepData
 
 
 # =============================================================================
@@ -750,6 +766,8 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
     var _cse_ref: Optional[OwnedPointer[CseRefData]]
     var _cast_to_varchar: Optional[OwnedPointer[CastToVarcharData]]
     var _exchange: Optional[OwnedPointer[ExchangeData]]
+    var _map_batches: Optional[OwnedPointer[MapBatchesData]]
+    var _step: Optional[OwnedPointer[StepData]]
 
     # --- Private constructor (all fields None) ---
 
@@ -775,6 +793,8 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         self._cse_ref = None
         self._cast_to_varchar = None
         self._exchange = None
+        self._map_batches = None
+        self._step = None
 
     # =========================================================================
     # Factory methods
@@ -1170,9 +1190,9 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
 
         Returns a single-node plan: a `PLAN_CSE_REF` leaf carrying the
         canonical subtree's `structural_hash` + a snapshot of its output
-        schema. The ONLY producer is `plan_cse.plan_cse_eliminate` (the
-        plan-level CSE rewrite); the ONLY consumer is `plan_compiler`'s
-        `_compile_node` arm. `structural_hash()` on the returned plan
+        schema. The only producer is `plan_cse.plan_cse_eliminate` (the
+        plan-level CSE rewrite); there is no consumer in this tree yet.
+        `structural_hash()` on the returned plan
         returns `canonical_hash` (so re-CSE is idempotent — see
         `CseRefData` docstring).
 
@@ -1212,6 +1232,51 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         var out_schema = builder.build()
         var plan = LogicalPlan(PLAN_CAST_TO_VARCHAR, out_schema^)
         plan._cast_to_varchar = OwnedPointer(CastToVarcharData(child^))
+        return plan^
+
+    @staticmethod
+    def map_batches(
+        var child: LogicalPlan,
+        udf_index: Int,
+        var group_by: List[Expr],
+        var output_schema: Schema,
+    ) raises -> LogicalPlan:
+        """Create a MapBatches node: the MAP_BATCHES_FRAME `UdfRef` at
+        `udf_index` over `child`, once per batch, or once per group of
+        `group_by` (optimized_plan_udfs.md §10.4).
+
+        `output_schema` is the children of that `UdfRef`'s `return_type`; the
+        caller holds the list, so it states the schema. RAISES on a negative
+        index: there is no `UdfRef` at one."""
+        if udf_index < 0:
+            raise Error(
+                "LogicalPlan.map_batches: udf_index " + String(udf_index)
+                + " is negative"
+            )
+        var plan = LogicalPlan(PLAN_MAP_BATCHES, output_schema^)
+        plan._map_batches = OwnedPointer(
+            MapBatchesData(child^, udf_index, group_by^)
+        )
+        return plan^
+
+    @staticmethod
+    def step(
+        udf_index: Int, var args: List[ScalarValue], var output_schema: Schema
+    ) raises -> LogicalPlan:
+        """Create a Step node: the STEP `UdfRef` at `udf_index`, a source
+        with no child, called once per run with the literal `args`
+        (optimized_plan_udfs.md §10.4).
+
+        `output_schema` is the children of that `UdfRef`'s `return_type` (no
+        columns for a step that returns nothing). RAISES on a negative
+        index."""
+        if udf_index < 0:
+            raise Error(
+                "LogicalPlan.step: udf_index " + String(udf_index)
+                + " is negative"
+            )
+        var plan = LogicalPlan(PLAN_STEP, output_schema^)
+        plan._step = OwnedPointer(StepData(udf_index, args^))
         return plan^
 
     @staticmethod
@@ -1791,6 +1856,14 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
     def is_exchange(self) -> Bool:
         return self.tag == PLAN_EXCHANGE
 
+    @always_inline
+    def is_map_batches(self) -> Bool:
+        return self.tag == PLAN_MAP_BATCHES
+
+    @always_inline
+    def is_step(self) -> Bool:
+        return self.tag == PLAN_STEP
+
     # =========================================================================
     # Typed-UDF presence + kind predicates. The three node types that can
     # carry a UDF are FILTER / PROJECT / AGGREGATE; all others return
@@ -1923,6 +1996,16 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
         """Get a reference to the ExchangeData. Requires tag == PLAN_EXCHANGE."""
         return self._exchange.value()[]
 
+    @always_inline
+    def map_batches_data_ref(self) -> ref [origin_of(self._map_batches.value()[])] MapBatchesData:
+        """Get a reference to the MapBatchesData. Requires tag == PLAN_MAP_BATCHES."""
+        return self._map_batches.value()[]
+
+    @always_inline
+    def step_data_ref(self) -> ref [origin_of(self._step.value()[])] StepData:
+        """Get a reference to the StepData. Requires tag == PLAN_STEP."""
+        return self._step.value()[]
+
     # =========================================================================
     # `BoxablePlan` conformance — what lets `Expr` carry a plan without naming
     # one
@@ -2009,6 +2092,10 @@ struct LogicalPlan(Movable, Writable, BoxablePlan):
             plan._cast_to_varchar = Optional(OwnedPointer(self._cast_to_varchar.value()[].copy()))
         elif self.tag == PLAN_EXCHANGE and self._exchange:
             plan._exchange = Optional(OwnedPointer(self._exchange.value()[].copy()))
+        elif self.tag == PLAN_MAP_BATCHES and self._map_batches:
+            plan._map_batches = Optional(OwnedPointer(self._map_batches.value()[].copy()))
+        elif self.tag == PLAN_STEP and self._step:
+            plan._step = Optional(OwnedPointer(self._step.value()[].copy()))
         return plan^
 
     # =========================================================================
@@ -2447,6 +2534,8 @@ def agg_func_base_name(func: UInt8) -> StaticString:
         return "kurtosis"
     if func == AGG_KURTOSIS_POP:
         return "kurtosis_pop"
+    if func == AGG_UDF:
+        return "agg_udf"
     return "agg"
 
 
@@ -2545,6 +2634,18 @@ def _infer_agg_field(agg: AggExpr, schema: Schema) -> Field:
         output_name = agg.alias_name.value()
     else:
         output_name = base_name
+
+    # A user-defined aggregate: its type is its call's, the `UdfRef`'s
+    # `return_type` (optimized_plan_udfs.md §10.4). A malformed one (no
+    # `EXPR_UDF_APPLY` argument) gets the NULL placeholder this function gives
+    # every shape it cannot type; the plan-wire decoder refuses that shape by
+    # name before a plan holds it.
+    if agg.func == AGG_UDF:
+        if agg.child and agg.child.value().tag == EXPR_UDF_APPLY:
+            var f = udf_type_to_field(agg.child.value().udf_apply_return_type_ref())
+            f.name = output_name
+            return f^
+        return Field(output_name, ArrowType.NULL, True)
 
     # COUNT and COUNT_DISTINCT always return INT64.
     #

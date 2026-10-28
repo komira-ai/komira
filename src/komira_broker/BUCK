@@ -80,6 +80,7 @@ mojo_library(
         "tests/test_partition_merge_map_unit.mojo",
         "tests/test_partition_merge_trigger_unit.mojo",
         "tests/test_partition_trigger_unit.mojo",
+        "tests/test_precondition_is_anchored.mojo",
         "tests/test_scan_identity_coverage.mojo",
         "tests/test_writer_lease_epoch_fence.mojo",
     ],

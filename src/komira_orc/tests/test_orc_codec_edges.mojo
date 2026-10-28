@@ -9,8 +9,9 @@
 #   T2  Growth retries that end in success: LZ4 and zlib chunks decoded with a
 #       4-byte compressionBlockSize start at the chunk's own length and double
 #       until the chunk fits (the output equals the input).
-#   T3  Growth retries that end at the 1 GiB ceiling: a malformed LZ4 block,
-#       and a zstd frame with no content size whose first block is corrupt.
+#   T3  Malformed chunks are refused at the first attempt, without growing
+#       the output buffer: a truncated LZ4 block, and a zstd frame with no
+#       content size whose first block is corrupt.
 #   T4  A zstd frame whose header declares 2 GiB is refused before any
 #       allocation.
 #   T5  Snappy: a block that declares fewer bytes than its own length (the
@@ -115,24 +116,21 @@ def test_growth_retries_succeed() raises:
 
 
 # -----------------------------------------------------------------------------
-# T3 — growth retries that reach the 1 GiB ceiling.
+# T3 — malformed chunks refused at the first attempt.
 # -----------------------------------------------------------------------------
 
 
-def test_growth_retries_reach_ceiling() raises:
+def test_malformed_chunks_are_refused_without_growing() raises:
     # LZ4: a token promising a 15+ byte literal with no length byte after it.
     var lz4 = _framed(_b(0xF0), False)
-    with assert_raises(contains="(retry-cap-exceeded)"):
-        _ = decompress_stream(Span(lz4), ORC_COMPRESSION_LZ4, 1024)
-    with assert_raises(contains="LZ4_FAILED"):
+    with assert_raises(contains="LZ4_TRUNCATED: the chunk ends inside an LZ4 sequence (in_len=1)"):
         _ = decompress_stream(Span(lz4), ORC_COMPRESSION_LZ4, 1024)
 
     # zstd: magic, a header with no content size (descriptor 0x00, window
-    # 0x00), then a reserved block type (0b11) — corrupt at every size.
+    # 0x00), then a reserved block type (0b11) — corrupt at every size. The
+    # refusal names the first attempt's 1024-byte buffer: no growth happened.
     var zs = _framed(_b(0x28, 0xB5, 0x2F, 0xFD, 0x00, 0x00, 0x07, 0x00, 0x00), False)
-    with assert_raises(contains="ZSTD_FAILED"):
-        _ = decompress_stream(Span(zs), ORC_COMPRESSION_ZSTD, 1024)
-    with assert_raises(contains="(retry-cap-exceeded)"):
+    with assert_raises(contains="ZSTD_FAILED: libzstd error 20 (in_len=9, out_cap=1024)"):
         _ = decompress_stream(Span(zs), ORC_COMPRESSION_ZSTD, 1024)
 
 
@@ -157,7 +155,7 @@ def test_zstd_declared_size_ceiling() raises:
         _b(0x28, 0xB5, 0x2F, 0xFD, 0xE0, 0x00, 0x00, 0x00, 0x40, 0, 0, 0, 0),
         False,
     )
-    with assert_raises(contains="(known_size=1073741824)"):
+    with assert_raises(contains="known_size=1073741824)"):
         _ = decompress_stream(Span(at), ORC_COMPRESSION_ZSTD, 1024)
 
 
@@ -256,7 +254,7 @@ def test_lzo_limits_and_lookbehind() raises:
 def main() raises:
     test_stream_refusals()
     test_growth_retries_succeed()
-    test_growth_retries_reach_ceiling()
+    test_malformed_chunks_are_refused_without_growing()
     test_zstd_declared_size_ceiling()
     test_snappy_sizing()
     test_lzo_limits_and_lookbehind()

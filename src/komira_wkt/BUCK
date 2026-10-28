@@ -1,5 +1,8 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@buildrules//rules/mojo:pack.bzl", "mojo_conda", "mojo_conda_holds")
+load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
 load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":buildrules.mojo.bzl", "mojo_package")
 
 # The protobuf well-known types (`google.protobuf.Timestamp`, `Duration`,
 # `Empty`, the scalar wrappers, `FieldMask`, `Struct` / `Value` /
@@ -8,25 +11,79 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 # top-level entry points use. Generated clients import these; the first-party
 # dependencies are `komira_proto_codec`, `komira_json`, `komira_encoding` and
 # `komira_datetime`.
-mojo_library(
+#
+# Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"): `:lib` is the
+# library file and exists only once the tests of tests/ have passed. The test of tests/standalone/
+# (under tests/, which the coverage census counts as test code, and with no `test_` prefix, which
+# mopm's discovery of tests/**/test_*.mojo needs) needs a generated message type, so it is welded to `value_null_proto` below.
+mojo_package(path = ".")
+
+# `:komira_wkt`, the target the packages that depend on this library name, is `:lib` as komira's
+# Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds only once
+# the tests have passed. `deps` is `[dependencies]` of mopm.toml, as the adopted targets of those
+# packages: the rule refuses a list that is not the closure `:lib` was built from. It carries the
+# README gate too (`[tests][readme]`): the examples run against `:lib`.
+mojo_adopted_library(
     name = "komira_wkt",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_datetime:komira_datetime",
-        "//src/komira_proto_codec:komira_proto_codec",
-        "//src/komira_json:komira_json",
         "//src/komira_encoding:komira_encoding",
+        "//src/komira_json:komira_json",
+        "//src/komira_proto_codec:komira_proto_codec",
     ],
-    test_srcs = [
-        "tests/test_wkt_decode_keys.mojo",
-        "tests/test_wkt_double_text.mojo",
-        "tests/test_wkt_edges.mojo",
-        "tests/test_wkt_json_codec_path.mojo",
-        "tests/test_wkt_list_copy.mojo",
-        "tests/test_wkt_plain_arms.mojo",
-        "tests/test_wkt_runtime.mojo",
-        "tests/test_wkt_timestamp_text.mojo",
+    lib = ":lib",
+    readme = "README.md",
+    srcs = glob(["src/komira_wkt/**/*.mojo"]),
+    test_srcs = glob(["tests/test_*.mojo"]),
+    test_runs = ":test",
+    visibility = ["PUBLIC"],
+)
+
+# The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves. `members` is the
+# manifests of the path dependencies of the closure, staged at their repository paths, because
+# `mopm pack` reads the manifest of each beside the one it is given. `mopm` is the one
+# `mojo_package` pins (mopm-toolchain.toml).
+mojo_conda(
+    name = "conda",
+    dir = "src/komira_wkt",
+    lib = ":lib",
+    manifest = "mopm.toml",
+    members = {
+        "../komira_datetime": "//src/komira_datetime:mopm.toml",
+        "../komira_encoding": "//src/komira_encoding:mopm.toml",
+        "../komira_json": "//src/komira_json:mopm.toml",
+        "../komira_proto_codec": "//src/komira_proto_codec:mopm.toml",
+        "../komira_protobuf": "//src/komira_protobuf:mopm.toml",
+    },
+    mojo = "1.0.0",
+    mopm = "toolchains//:mopm_0_0_86",
+    package = "komira_wkt",
+    version = "0.1.0",
+    visibility = ["PUBLIC"],
+)
+
+# What `:conda` holds, read back from the built file: this package's own `.mojoc` and nothing else
+# under `lib/mojo/`, and exactly the four dependencies of mopm.toml.
+mojo_conda_holds(
+    name = "conda_holds",
+    conda = ":conda",
+    depends = [
+        "mojo-komira_datetime >=0.1,<0.2",
+        "mojo-komira_encoding >=0.1,<0.2",
+        "mojo-komira_json >=0.1,<0.2",
+        "mojo-komira_proto_codec >=0.1,<0.2",
     ],
+    package = "komira_wkt",
+    sole = True,
+    visibility = ["PUBLIC"],
+)
+
+# Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto):
+# komira's conda packer over `:komira_wkt`. This library's mopm package is `:conda` above.
+conda_package(
+    name = "komira_wkt_conda",
+    lib = ":komira_wkt",
+    summary = "The `komira_wkt` Mojo library of komira, as a conda package.",
     visibility = ["PUBLIC"],
 )
 
@@ -43,5 +100,5 @@ mojo_proto_library(
         "//src/komira_proto_codec:komira_proto_codec",
         ":komira_wkt",
     ],
-    test_srcs = ["tests/test_wkt_value_null_field.mojo"],
+    test_srcs = ["tests/standalone/wkt_value_null_field.mojo"],
 )
