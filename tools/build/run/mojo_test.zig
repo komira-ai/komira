@@ -8,6 +8,7 @@ const kit = @import("testkit.zig");
 const supervise = @import("supervise.zig");
 const sys = @import("sys.zig");
 const util = @import("util.zig");
+const gate_mojo = @import("mojo.zig");
 
 const label = "//x:y";
 
@@ -87,6 +88,11 @@ test "G1 usage: every bad command line exits 2 with its runner's message, and no
         .{ .argv = try e.args("exit", &.{"--env"}), .msg = "gate_runner: --env needs NAME=VALUE" },
         .{ .argv = try e.args("exit", &.{"--arg"}), .msg = "gate_runner: --arg needs a value" },
         .{ .argv = try e.args("exit", &.{ "--arg", "x", "--env", "A=b" }), .msg = "gate_runner: --env A=b after an --arg" },
+        .{ .argv = try e.args("exit", &.{"--lib-dir"}), .msg = "gate_runner: --lib-dir needs a directory" },
+        .{ .argv = try e.args("exit", &.{ "--arg", "x", "--lib-dir", "/d" }), .msg = "gate_runner: --lib-dir /d after an --arg" },
+        .{ .argv = try e.args("exit", &.{ "--lib-dir", "" }), .msg = "gate_runner: --lib-dir '' is not one directory" },
+        .{ .argv = try e.args("exit", &.{ "--lib-dir", "/a:/b" }), .msg = "gate_runner: --lib-dir '/a:/b' is not one directory" },
+        .{ .argv = try e.args("exit", &.{ "--lib-dir", "/d", "--label", "again" }), .msg = "gate_runner: --label after an --env, --lib-dir or --arg" },
         .{ .argv = try e.args("exit", &.{ "--env", "1A=b" }), .msg = "gate_runner: --env 1A=b is not NAME=VALUE" },
         .{ .argv = try e.args("exit", &.{ "--env", "A" }), .msg = "gate_runner: --env A is not NAME=VALUE" },
         .{ .argv = try e.args("exit", &.{ "--env", "=b" }), .msg = "gate_runner: --env =b is not NAME=VALUE" },
@@ -229,6 +235,41 @@ test "G7 environment: the runner's five variables, the action's others, and each
     try std.testing.expectEqual(sys.is_darwin, hasLine(out, try std.fmt.allocPrint(e.a, "DYLD_LIBRARY_PATH={s}/rt/lib", .{e.real})));
     for ([_][]const u8{ "GATE_INHERITED=yes", "SPACED=a b=c", "EMPTY=", "TWICE=2" }) |l| try std.testing.expect(hasLine(out, l));
     for ([_][]const u8{ "PATH=/nowhere", "HOME=/nohome", "TMPDIR=/notmp", "TWICE=1" }) |l| try std.testing.expect(!hasLine(out, l));
+}
+
+// G7b. Mutant: put the directories first on LD_LIBRARY_PATH (the compiler's lib must stay first), drop one, reverse them, leave a relative one relative
+// (the test runs from another directory), or set DYLD_FALLBACK_LIBRARY_PATH with none given.
+test "G7b system libraries: --lib-dir directories follow the compiler's lib in order; macOS puts them first in the fallback path" {
+    const e = try Env.init();
+    defer e.deinit();
+    const none = try e.run(try e.args("env", &.{}), .{ .env = &.{"DYLD_FALLBACK_LIBRARY_PATH=/inherited"} });
+    try std.testing.expect(hasLine(output(none.err), try std.fmt.allocPrint(e.a, "LD_LIBRARY_PATH={s}/rt/lib", .{e.real})));
+    try std.testing.expect(hasLine(output(none.err), "DYLD_FALLBACK_LIBRARY_PATH=/inherited"));
+
+    const r = try e.run(try e.args("env", &.{ "--env", "A=1", "--lib-dir", "/pinned/one", "--lib-dir", "rel/two" }), .{ .env = &.{"DYLD_FALLBACK_LIBRARY_PATH=/inherited"} });
+    const out = output(r.err);
+    try std.testing.expect(hasLine(out, try std.fmt.allocPrint(e.a, "LD_LIBRARY_PATH={s}/rt/lib:/pinned/one:{s}/rel/two", .{ e.real, e.real })));
+    try std.testing.expect(hasLine(out, "A=1"));
+    if (sys.is_darwin) {
+        try std.testing.expect(hasLine(out, try std.fmt.allocPrint(e.a, "DYLD_FALLBACK_LIBRARY_PATH=/pinned/one:{s}/rel/two:/inherited", .{e.real})));
+        try std.testing.expect(hasLine(out, try std.fmt.allocPrint(e.a, "DYLD_LIBRARY_PATH={s}/rt/lib", .{e.real})));
+    } else {
+        // Linux: the inherited fallback is nobody's business, and the variable is not rewritten.
+        try std.testing.expect(hasLine(out, "DYLD_FALLBACK_LIBRARY_PATH=/inherited"));
+    }
+    // The same with no inherited fallback: dyld's own defaults follow the directories.
+    const r2 = try e.run(try e.args("env", &.{ "--lib-dir", "/pinned/one" }), .{});
+    if (sys.is_darwin) try std.testing.expect(hasLine(output(r2.err), "DYLD_FALLBACK_LIBRARY_PATH=/pinned/one:/usr/local/lib:/usr/lib"));
+}
+
+// G7c. Mutant: count a set-but-empty variable as set (a path then ends in an empty entry, which means the current directory), or match a longer name.
+test "G7c inheritedValue: a set, non-empty value is returned; empty, unset and a longer name are not" {
+    const env = [_][]const u8{ "A=1", "DYLD_FALLBACK_LIBRARY_PATH=", "B_LONG=2", "C=x:y" };
+    try std.testing.expectEqualStrings("1", gate_mojo.inheritedValue(&env, "A").?);
+    try std.testing.expectEqualStrings("x:y", gate_mojo.inheritedValue(&env, "C").?);
+    try std.testing.expect(gate_mojo.inheritedValue(&env, "DYLD_FALLBACK_LIBRARY_PATH") == null);
+    try std.testing.expect(gate_mojo.inheritedValue(&env, "B") == null);
+    try std.testing.expect(gate_mojo.inheritedValue(&env, "NOPE") == null);
 }
 
 // G8. Mutant: run the test in the action's directory.
