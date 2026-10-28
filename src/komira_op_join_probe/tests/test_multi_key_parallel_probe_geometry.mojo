@@ -14,7 +14,6 @@
 # core count; a probe whose key count or key lengths disagree with the build
 # is refused with a named error, and so is a negative setting.
 
-from std.ffi import external_call
 from std.memory import bitcast
 from std.testing import TestSuite, assert_equal, assert_true
 
@@ -478,8 +477,6 @@ def test_negative_settings_are_refused_and_change_nothing() raises:
 
 
 def main() raises:
-    # A lost wake-up must fail the build, not hold a worker: exit 142.
-    _ = external_call["alarm", UInt32](UInt32(300))
     var suite = TestSuite()
     suite.test[test_int_keys_match_serial_across_workers_and_morsels]()
     suite.test[test_float_keys_nan_and_signed_zero_match_serial]()

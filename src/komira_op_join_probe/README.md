@@ -28,6 +28,15 @@ import from the modules.
   buckets as `MultiKeyHashJoinBuilder.build`, chain order aside. It follows the
   hash join's build mode (`komira_op_join_build`'s
   `join_parallel_build_configure`: AUTO, OFF, or the FORCE test hook).
+- `komira_op_join_probe.join_probe_multi_key`: `execute_multi_key_join_probe`,
+  the composite join probe operator: one probe batch against the completed
+  build batch, as a physical plan's `MorselOp` says (keys, INNER / LEFT / SEMI
+  / ANTI, output columns). It rewrites nothing and refuses what it does not
+  run (a residual predicate, an algorithm other than hash, another join
+  type); an INNER join indexes the smaller side when the build side has more
+  than twice the probe side's rows, and probes in parallel from 100,000 probe
+  rows. A result with no rows carries the output schema. Only the parallel
+  probe looks at the cancellation token.
 - `komira_op_join_probe.join_probe_settings`: the probe's process settings,
   set once from flags: the batched walk's width (0 is the row-at-a-time walk),
   the probe morsel, and the retile.

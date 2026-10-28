@@ -3,13 +3,16 @@
 //!   - each target of tests//negative/abi_golden fails on the farm naming its
 //!     one defect: a changed return type, a changed argument type, a symbol the
 //!     source no longer exports, a symbol the golden does not list, a type
-//!     outside the type map, and a row whose `since` is above the golden
-//!     version;
+//!     outside the type map, a row whose `since` is above the golden
+//!     version, a constant whose value differs, one the constants file lacks,
+//!     one it has and the golden does not list, constants with no file to hold
+//!     them, and a `CStr` the source never declares or declares as a pointer to
+//!     another type;
 //!   - the example and the twin of the negatives build: the header made from
 //!     the golden, the C driver that includes it and defines every function it
 //!     declares (it compiles only if the header is valid C with the types of
 //!     the definitions), the shared library of the same source, and
-//!     tests//functional/abi_golden:ok.
+//!     tests//functional/abi_golden:ok, :ok_constants and :ok_named.
 const std = @import("std");
 const lib = @import("lib/lib.zig");
 
@@ -47,6 +50,36 @@ const ROWS = [_]lib.Row{
         .target = N ++ "since_above_version",
         .text = "`neg_fill`: since 1.2 is above the golden version 1.1",
     },
+    .{
+        .name = "abi_golden_constant_value_changed",
+        .target = N ++ "const_value",
+        .text = "`KOMIRA_NEG_LIMIT`: the value changed: golden 4096, source 2048",
+    },
+    .{
+        .name = "abi_golden_constant_missing",
+        .target = N ++ "const_missing",
+        .text = "missing constant `KOMIRA_NEG_GONE`",
+    },
+    .{
+        .name = "abi_golden_constant_extra",
+        .target = N ++ "const_extra",
+        .text = "extra constant `KOMIRA_NEG_LIMIT`",
+    },
+    .{
+        .name = "abi_golden_constants_unheld",
+        .target = N ++ "const_unheld",
+        .text = "the target has no constants_src to check them against",
+    },
+    .{
+        .name = "abi_golden_named_type_undeclared",
+        .target = N ++ "named_undeclared",
+        .text = "uses the type `CStr` and the source declares no `comptime CStr = ...`",
+    },
+    .{
+        .name = "abi_golden_named_type_wrong",
+        .target = N ++ "named_wrong",
+        .text = "`CStr` is declared as `UnsafePointer[Int32]` and must be `UnsafePointer[UInt8]`",
+    },
 };
 
 const GREENS = [_][]const u8{
@@ -54,6 +87,8 @@ const GREENS = [_][]const u8{
     E ++ "header_driver",
     E ++ "abi_lib",
     "tests//functional/abi_golden:ok",
+    "tests//functional/abi_golden:ok_constants",
+    "tests//functional/abi_golden:ok_named",
 };
 
 fn builds(c: *lib.Ctx, target: []const u8) !void {
