@@ -62,10 +62,30 @@ pub const Model = struct {
     binaries: []const Binary,
     /// The files of release/ that name the `<name>_conda` label.
     release_files: []const []const u8,
+    /// The packages of the closure whose manifest declares static natives (`[native.<id>]`), sorted.
+    /// The package owns no C, but its link takes their archives from the closure.
+    native_deps: []const []const u8 = &.{},
 };
 
 pub const mojo_version = "1.0.0";
 pub const package_version = "0.1.0";
+
+/// Comment prose inside a call, wrapped to 100 columns: every line starts with `    # `.
+fn indentedPara(b: *Buf, prose: []const u8) !void {
+    var len: usize = 5;
+    try b.add("    #");
+    var it = std.mem.tokenizeScalar(u8, prose, ' ');
+    while (it.next()) |w| {
+        if (len > 5 and len + 1 + w.len > 100) {
+            try b.add("\n    #");
+            len = 5;
+        }
+        try b.add(" ");
+        try b.add(w);
+        len += 1 + w.len;
+    }
+    try b.add("\n");
+}
 
 /// Comment prose, wrapped to 100 columns: every line starts with `# `.
 pub fn para(b: *Buf, prose: []const u8) !void {
@@ -255,6 +275,19 @@ pub fn buck(a: Allocator, m: Model) ![]u8 {
         for (m.deps, labels) |d, *l| l.* = try std.fmt.allocPrint(a, "//src/{s}:{s}", .{ d.name, d.name });
         try listAttr(&b, "deps", labels);
     }
+    if (m.native_deps.len > 0) {
+        // The adopted library hands the archives of its closure to a dependent's link; it needs the
+        // C toolchain's link facts for that, whether or not it owns C itself.
+        const who = try andList(a, m.native_deps);
+        try indentedPara(&b, try std.fmt.allocPrint(a, "{s} {s} in the closure and link{s} C (static `[native.<id>]` archives), so `lib`'s closure carries {s} and a dependent's link takes {s} from here. This package owns no C, so it names no `c_deps`: it takes the C toolchain's link facts directly.", .{
+            who,
+            plural(m.native_deps.len, "is", "are"),
+            plural(m.native_deps.len, "s", ""),
+            plural(m.native_deps.len, "that archive", "those archives"),
+            plural(m.native_deps.len, "it", "them"),
+        }));
+        try b.add("    cxx_toolchain = \"komira//tools/build/mojo:adopt_cxx_link_facts\",\n");
+    }
     try b.print(
         \\    lib = ":lib",
         \\    readme = "README.md",
@@ -280,11 +313,12 @@ pub fn buck(a: Allocator, m: Model) ![]u8 {
     prose = Buf{ .a = a };
     try prose.print("The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves (`mojo-{s}-{s}-mojo{s}_0.conda`)", .{ m.name, package_version, mojo_version });
     if (has_deps) {
-        try prose.print(", which records {s} as {s} ({s}) and holds {s} files nowhere. `members` is the manifests of the path dependencies, staged at their repository paths, because `mopm pack` reads the manifest of each beside the one it is given.", .{
+        try prose.print(", which records {s} as {s} ({s}) and holds {s} files nowhere. `members` is the manifests of the path dependencies{s}, staged at their repository paths, because `mopm pack` reads the manifest of each beside the one it is given.", .{
             dep_list,
             plural(m.deps.len, "a dependency", "dependencies"),
             reqs,
             plural(m.deps.len, "that package's", "those packages'"),
+            if (m.closure.len > m.deps.len) @as([]const u8, " of the closure") else "",
         });
     } else try prose.add(".");
     try prose.print(" `:lib` exists only once {s} passed, so this file exists only then. Publishing it (`mopm publish`) uploads, which is not a build action: it is a step of a CI job that takes this target's output. `mopm` is the one `mojo_package` pins (mopm-toolchain.toml).", .{if (one) "the test" else "the tests"});
@@ -370,6 +404,14 @@ pub fn readmeSection(a: Allocator, m: Model) ![]u8 {
             plural(m.deps.len, "that package's", "those packages'"),
             m.name,
             plural(m.deps.len, "it", "them"),
+        });
+    }
+    if (m.native_deps.len > 0) {
+        try b.print(" {s} in the closure link{s} C of {s} own (static `[native.<id>]` archives); a dependent's link takes {s} from the closure, and this package owns no C.", .{
+            try andList(a, m.native_deps),
+            plural(m.native_deps.len, "s", ""),
+            plural(m.native_deps.len, "its", "their"),
+            plural(m.native_deps.len, "it", "them"),
         });
     }
     try b.add(" The files that are not sources:\n\n| file | what |\n|---|---|\n");

@@ -6,7 +6,8 @@
 //! It refuses, with a message that names the file and the fact, rather than guess:
 //!  - an import that maps to no package of this repository, or to a package still on `mojo_library`;
 //!  - a native library: C sources, a `native*` or `dlopen` attribute, a dependency whose manifest
-//!    declares natives;
+//!    declares natives other than static `[native.<id>]` archives (a dependency with only those is
+//!    accepted: the new BUCK file gets `cxx_toolchain`, as the hand migrations of such dependents do);
 //!  - a BUCK file it cannot read as data (variables, comprehensions, operators, triple-quoted
 //!    strings) or reads as more than the recipe covers (other rules, other attributes, other loads);
 //!  - `deps` or `test_deps` that disagree with the imports, a `test_srcs` list that is not the
@@ -153,14 +154,20 @@ fn oneString(v: sl.Value, want: []const u8) bool {
     }
 }
 
-const Manifest = struct { version: []const u8, deps: []const []const u8, native: bool };
+/// `native_static`: the manifest declares `[native.<id>]` tables and every one is `kind = "static"`
+/// (an archive a dependent's link takes from the closure). `native_other`: any other native form
+/// (`[native-dependencies]`, a table of another kind or with no kind), which no hand migration of a
+/// dependent covers.
+const Manifest = struct { version: []const u8, deps: []const []const u8, native_static: bool, native_other: bool };
 
 /// What the migration needs from another package's `mopm.toml`: its version, the names under
-/// `[dependencies]` and whether it declares natives.
+/// `[dependencies]` and what natives it declares.
 fn readManifest(c: *Ctx, who: []const u8, toml: []const u8) Error!Manifest {
     var version: ?[]const u8 = null;
     var deps = std.ArrayList([]const u8).empty;
-    var native = false;
+    var native_tables: usize = 0;
+    var native_static_tables: usize = 0;
+    var native_other = false;
     var section: []const u8 = "";
     var lines = std.mem.splitScalar(u8, toml, '\n');
     while (lines.next()) |raw| {
@@ -168,13 +175,17 @@ fn readManifest(c: *Ctx, who: []const u8, toml: []const u8) Error!Manifest {
         if (line.len == 0 or line[0] == '#') continue;
         if (line[0] == '[') {
             section = std.mem.trim(u8, line, "[] \t");
-            if (std.mem.startsWith(u8, section, "native")) native = true;
+            if (std.mem.startsWith(u8, section, "native.")) {
+                native_tables += 1;
+            } else if (std.mem.startsWith(u8, section, "native")) native_other = true;
             if (std.mem.startsWith(u8, section, "dependencies.")) try deps.append(c.a, section["dependencies.".len..]);
             continue;
         }
         const eq = std.mem.indexOfScalar(u8, line, '=') orelse continue;
         const key = std.mem.trim(u8, line[0..eq], " \t");
-        if (std.mem.eql(u8, section, "package") and std.mem.eql(u8, key, "version")) {
+        if (std.mem.startsWith(u8, section, "native.") and std.mem.eql(u8, key, "kind")) {
+            if (std.mem.eql(u8, std.mem.trim(u8, line[eq + 1 ..], " \t\""), "static")) native_static_tables += 1;
+        } else if (std.mem.eql(u8, section, "package") and std.mem.eql(u8, key, "version")) {
             const val = std.mem.trim(u8, line[eq + 1 ..], " \t\"");
             version = val;
         } else if (std.mem.eql(u8, section, "dependencies")) {
@@ -182,7 +193,7 @@ fn readManifest(c: *Ctx, who: []const u8, toml: []const u8) Error!Manifest {
         }
     }
     const sorted = try uniqueSorted(c.a, deps.items);
-    return .{ .version = version orelse return c.refuse("{s}/mopm.toml has no [package] version", .{who}), .deps = sorted, .native = native };
+    return .{ .version = version orelse return c.refuse("{s}/mopm.toml has no [package] version", .{who}), .deps = sorted, .native_static = native_tables > 0 and native_static_tables == native_tables, .native_other = native_other or native_static_tables != native_tables };
 }
 
 fn makeDep(c: *Ctx, name: []const u8, version: []const u8) Error!emit.Dep {
@@ -503,6 +514,7 @@ pub fn plan(c: *Ctx, files: []const File, o: Options) Error!Plan {
     try queue.appendSlice(c.a, dev_sorted);
     var direct = std.ArrayList(emit.Dep).empty;
     var direct_dev = std.ArrayList(emit.Dep).empty;
+    var native_members = std.ArrayList([]const u8).empty;
     var qi: usize = 0;
     while (qi < queue.items.len) : (qi += 1) {
         const name = queue.items[qi];
@@ -512,8 +524,9 @@ pub fn plan(c: *Ctx, files: []const File, o: Options) Error!Plan {
         const toml_path = try fmt(c, "src/{s}/mopm.toml", .{name});
         const toml = repo.text(toml_path) orelse return c.refuse("{s} was not read or is missing: '{s}' is in the dependency closure", .{ toml_path, name });
         const man = try readManifest(c, try fmt(c, "src/{s}", .{name}), toml);
-        if (man.native) return c.refuse("{s} declares natives; '{s}' is in the dependency closure, and a native dependency is not a plain migration (recipe step 0)", .{ toml_path, name });
+        if (man.native_other) return c.refuse("{s} declares natives other than static `[native.<id>]` archives (a `[native-dependencies]` table, or a native table of another kind); '{s}' is in the dependency closure, and no hand migration of a dependent covers that (recipe step 0)", .{ toml_path, name });
         try closure.append(c.a, .{ .name = name, .version = man.version, .deps = man.deps });
+        if (man.native_static) try native_members.append(c.a, name);
         try queue.appendSlice(c.a, man.deps);
     }
     std.mem.sort(emit.Member, closure.items, {}, struct {
@@ -523,6 +536,28 @@ pub fn plan(c: *Ctx, files: []const File, o: Options) Error!Plan {
     }.less);
     for (deps_sorted) |d| for (closure.items) |m| if (std.mem.eql(u8, m.name, d)) try direct.append(c.a, try makeDep(c, d, m.version));
     for (dev_sorted) |d| for (closure.items) |m| if (std.mem.eql(u8, m.name, d)) try direct_dev.append(c.a, try makeDep(c, d, m.version));
+
+    // A dependency with static natives links into `lib`'s closure when `lib` reaches it. One reached
+    // only through [dev-dependencies] is linked by the tests alone, which no hand migration shows.
+    var reach = std.ArrayList([]const u8).empty;
+    try reach.appendSlice(c.a, deps_sorted);
+    var ri: usize = 0;
+    while (ri < reach.items.len) : (ri += 1) {
+        for (closure.items) |m| {
+            if (!std.mem.eql(u8, m.name, reach.items[ri])) continue;
+            for (m.deps) |d| if (!contains(reach.items, d)) try reach.append(c.a, d);
+        }
+    }
+    var native_deps = std.ArrayList([]const u8).empty;
+    for (native_members.items) |nm| {
+        if (!contains(reach.items, nm)) return c.refuse("'{s}' declares static natives and is reached only through [dev-dependencies]: the tests link it, the library does not, and no hand migration covers that", .{nm});
+        try native_deps.append(c.a, nm);
+    }
+    std.mem.sort([]const u8, native_deps.items, {}, struct {
+        fn less(_: void, x: []const u8, y: []const u8) bool {
+            return std.mem.lessThan(u8, x, y);
+        }
+    }.less);
 
     // ---- the binaries kept from the old file
     var binaries = std.ArrayList(emit.Binary).empty;
@@ -546,6 +581,7 @@ pub fn plan(c: *Ctx, files: []const File, o: Options) Error!Plan {
         .header = ml.comment,
         .binaries = binaries.items,
         .release_files = release_files.items,
+        .native_deps = native_deps.items,
     };
 
     // ---- the result

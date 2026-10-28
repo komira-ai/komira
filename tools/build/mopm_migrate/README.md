@@ -65,13 +65,23 @@ for the sharded layout (`ci/targets/shard_<n>.bzl`; the form refuses an empty or
 |---|---|
 | an import that maps to no package | the file and the module (`there is no src/<module>/BUCK`) |
 | a dependency still on `mojo_library` | the module: migrate it first |
-| native code | a C or archive file in the package, a `native*`/`dlopen`/`c_deps` attribute, a `native*` rule, a dependency whose manifest declares natives, a `DLHandle` or `OwnedDLHandle` in code of any `.mojo` file of the package (a library loaded at run time; comments and docstrings do not count) |
+| native code | a C or archive file in the package, a `native*`/`dlopen`/`c_deps` attribute, a `native*` rule, a `DLHandle` or `OwnedDLHandle` in code of any `.mojo` file of the package (a library loaded at run time; comments and docstrings do not count) |
+| a dependency with natives the hand migrations do not cover | a package of the dependency closure whose manifest has a `[native-dependencies]` table or a `[native.<id>]` table that is not `kind = "static"`; a package with static natives that only the tests reach (`[dev-dependencies]`) |
 | a BUCK file it cannot read as data | the line: a variable, a comprehension, an operator between values, `def`, a triple-quoted string, an escape it does not decode |
 | what the recipe does not cover | another rule or load, another `mojo_library` attribute (`test_defines`, `import_name`, ...), a `srcs` that is not the standard glob, a `visibility` that is not `["PUBLIC"]` |
 | files and BUCK that disagree | `deps` or `test_deps` that differ from the imports, a `test_srcs` that is not the `tests/test_*.mojo` files |
 | an unstated choice | `test_data`/`test_env` with no `--test-layout`; a test-only dependency with no `--dev-dependencies`; no `--description` |
 | a file `git mv` cannot move | a library `.mojo` file that git does not track (checked with `git ls-files` before the first move, in the dry run too: nothing has moved when it refuses) |
 | a tree that is not a plain migration | already migrated, a `src/` or `generated/` directory in the package, a `README.md` that is missing or has a `Build files` section |
+
+A dependency that declares only static natives (`[native.<id>]`, `kind = "static"`) is not refused,
+whether the package imports it or reaches it through another dependency (`komira_libc` through
+`komira_buffer`). The package owns no C, so it names no `c_deps`; the plan gives its
+`mojo_adopted_library` the attribute the hand migrations of such dependents carry,
+`cxx_toolchain = "komira//tools/build/mojo:adopt_cxx_link_facts"`, with a comment naming the package(s) that
+link C, so a dependent's link takes the archive from the closure. Nothing else changes: `mopm.toml`, `mopm.lock`
+and the `members` of `:conda` are the same as for a dependency with no natives, and the README section gains one
+sentence naming the package(s).
 
 `[dev-dependencies]` is behind a flag because no migrated package has one: its lock rows and the
 sync's workspaces are unverified by a hand migration.
@@ -95,6 +105,13 @@ tool keeps the comment as written, so the author edits it.
   in comment words are asserted where they are tested (the old header said "no dependencies"; two
   sentences the hand file worded differently). The library sources are stored as `*.mojo.fixture`, so
   the Mojo lints do not read them.
+- **golden** (`fixtures/komira_dynamic_filter`): the same for a package whose closure holds a package with
+  static natives (`komira_buffer`, which reaches `komira_libc`), from the tree before its hand migration:
+  `mopm.toml`, `mopm-toolchain.toml` and `mopm.lock` byte for byte, the rows as diffs, and the `BUCK` file in
+  code (the `cxx_toolchain` attribute included) byte for byte and in comment words, with the differences
+  asserted where they are tested. The same package with no native in the closure gets no `cxx_toolchain`.
+  Refused: a closure package with `[native-dependencies]`, a native table that is not static, static natives
+  reached only through `[dev-dependencies]`, and (as before) natives of the package itself.
 - the documented differences of the golden: the hand migration wrapped comments by eye (the test
   compares paragraphs, not lines); it edited one path in the carried header comment (`see resources.mojo`
   became `see src/komira_resources/resources.mojo`; the tool carries the comment as written); it added a
