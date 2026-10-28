@@ -263,6 +263,8 @@ def test_string_int64_mixed_semi() raises:
     var semi = multi_key_probe_semi(builder, pks)
 
     assert_equal(len(semi), 2)
+    assert_equal(semi[0], 0)
+    assert_equal(semi[1], 2)
 
 
 def test_string_int64_mixed_anti() raises:
@@ -288,6 +290,8 @@ def test_string_int64_mixed_anti() raises:
     var anti = multi_key_probe_anti(builder, pks)
 
     assert_equal(len(anti), 2)
+    assert_equal(anti[0], 1)
+    assert_equal(anti[1], 3)
 
 
 def test_string_string_left_emits_unmatched() raises:
@@ -590,6 +594,8 @@ def test_null_string_keys_anti_emits() raises:
     var anti = multi_key_probe_anti(builder, pks)
 
     assert_equal(len(anti), 2)
+    assert_equal(anti[0], 0)
+    assert_equal(anti[1], 2)
 
 
 def main() raises:
