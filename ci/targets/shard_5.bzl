@@ -68,6 +68,7 @@ TARGETS = [
     "komira//tools/build/lint:interpreter_budget",
     "komira//tools/build/lint:no_shell",
     "komira//tools/build/lint:timing",
+    "komira//tools/build/mopm_migrate:mopm_migrate",
     "komira//tools/build/package/manifest_probe:conda_manifest_kci",
     "komira//tools/build/package/manifest_probe:conda_ships_readme",
     "komira//tools/build/proto-codegen/routes:komira_routes_fixture_conda",
