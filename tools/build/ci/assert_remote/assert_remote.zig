@@ -117,6 +117,11 @@ pub fn describe(v: Verdict, w: *std.Io.Writer) std.Io.Writer.Error!void {
     }
 }
 
+/// The largest log the tool reads. A step that runs every test of a large affected set prints each test's output: the log of one such
+/// pull request was 530 MB, almost all of it the lines of one package's timing test, and a cap of 256 MiB made the assertion fail on a
+/// green run (`FileTooBig`). A log over the cap is still refused, so a run is never passed unread.
+pub const max_log_bytes: usize = 2048 * 1024 * 1024;
+
 pub fn main() !u8 {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -130,7 +135,7 @@ pub fn main() !u8 {
         try err.interface.flush();
         return 2;
     }
-    const log = std.fs.cwd().readFileAlloc(a, args[1], 256 * 1024 * 1024) catch |e| {
+    const log = std.fs.cwd().readFileAlloc(a, args[1], max_log_bytes) catch |e| {
         try err.interface.print("assert_remote: cannot read {s}: {s}\n", .{ args[1], @errorName(e) });
         try err.interface.flush();
         return 2;

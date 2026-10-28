@@ -175,3 +175,7 @@ test "a network line with traffic is not the zero line" {
     try t.expectEqual(ar.Verdict.missing_summary, ar.verdict("Network: up 0B  down 12KiB\nBUILD SUCCEEDED\n"));
     try t.expectEqual(ar.Verdict.ok, ar.verdict("Network: up 0B  down 0B  session X\nBUILD SUCCEEDED\n"));
 }
+
+test "the log cap holds the 530 MB log a large affected set printed" {
+    try t.expect(ar.max_log_bytes >= 600 * 1000 * 1000);
+}
