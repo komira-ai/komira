@@ -42,6 +42,8 @@ mojo_library(
         "tests/test_join_probe_multi_key_op.mojo",
         "tests/test_multi_key_merge_parallel.mojo",
         "tests/test_multi_key_parallel_probe.mojo",
+        "tests/test_multi_key_parallel_probe_geometry.mojo",
+        "tests/test_multi_key_parallel_probe_modes.mojo",
         "tests/test_multi_key_skipindex_compaction.mojo",
     ],
     visibility = ["PUBLIC"],

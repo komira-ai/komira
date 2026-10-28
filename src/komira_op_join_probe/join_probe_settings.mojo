@@ -36,7 +36,9 @@ comptime MK_PROBE_RETILE_MIN_ROWS: Int = 4_096
 
 def _init_jps_i64() -> OwnedPointer[AtomicI64]:
     var raw = alloc[AtomicI64](1)
-    raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
+    raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(
+        Scalar[DType.int64](0)
+    )
     return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
 
 
@@ -64,9 +66,13 @@ def mk_probe_configure(
     # SAFETY: FFI carve-out -- `_Global.get_or_create_ptr` targets KGEN-runtime
     # static storage (process lifetime); the wildcard origin is the stdlib API's
     # own return type and is confined to this function.
-    _JPS_BATCH.get_or_create_ptr()[][].store(Scalar[DType.int64](batch_width + 1))
+    _JPS_BATCH.get_or_create_ptr()[][].store(
+        Scalar[DType.int64](batch_width + 1)
+    )
     _JPS_MORSEL.get_or_create_ptr()[][].store(Scalar[DType.int64](morsel_rows))
-    _JPS_RETILE.get_or_create_ptr()[][].store(Scalar[DType.int64](1 if retile else 0))
+    _JPS_RETILE.get_or_create_ptr()[][].store(
+        Scalar[DType.int64](1 if retile else 0)
+    )
 
 
 def mk_probe_batch_width() raises -> Int:
