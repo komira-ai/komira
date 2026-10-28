@@ -55,6 +55,9 @@ from komira_op_window.partition_scan_sink import _execute_partition_by_sink
 from komira_op_window.partition_scan_sink_hash_scatter import (
     _HASH_SCATTER_MIN_ROWS,
     _all_int64_partition_keys,
+    _bucket_for_key_single,
+    _bucket_for_key_tuple,
+    _choose_range_splitters_int64,
     _execute_partition_by_sink_hash_scatter,
     _scatter_rows_to_buckets_int64,
 )
@@ -385,6 +388,88 @@ def test_scatter_buckets_are_monotone_and_whole() raises:
         assert_true(lo > last_max, "bucket key ranges overlap")
         last_max = hi
     assert_equal(total, 20_000)
+
+
+def test_bucket_for_key_single_puts_a_splitter_key_in_the_bucket_after_it() raises:
+    # Splitters 10 and 20 cut the keys into (-inf, 10), [10, 20), [20, inf):
+    # a key equal to a splitter starts the bucket after that splitter.
+    var splitters: List[Int64] = [10, 20]
+    assert_equal(_bucket_for_key_single(splitters, 2, 9), 0)
+    assert_equal(_bucket_for_key_single(splitters, 2, 10), 1)
+    assert_equal(_bucket_for_key_single(splitters, 2, 19), 1)
+    assert_equal(_bucket_for_key_single(splitters, 2, 20), 2)
+    assert_equal(_bucket_for_key_single(splitters, 2, 21), 2)
+    # Equal splitters (a heavy key): the key goes after all of them.
+    var dup: List[Int64] = [10, 10, 20]
+    assert_equal(_bucket_for_key_single(dup, 3, 10), 2)
+
+
+def test_bucket_for_key_tuple_puts_a_splitter_tuple_in_the_bucket_after_it() raises:
+    var splitters: List[Int64] = [1, 5, 2, 0]
+    var below: List[Int64] = [1, 4]
+    var on_first: List[Int64] = [1, 5]
+    var between: List[Int64] = [1, 9]
+    var on_second: List[Int64] = [2, 0]
+    assert_equal(_bucket_for_key_tuple(splitters, 2, 2, below), 0)
+    assert_equal(_bucket_for_key_tuple(splitters, 2, 2, on_first), 1)
+    assert_equal(_bucket_for_key_tuple(splitters, 2, 2, between), 1)
+    assert_equal(_bucket_for_key_tuple(splitters, 2, 2, on_second), 2)
+
+
+def _assert_rows_in_the_bucket_after_their_splitters(
+    batch: RecordBatch, pk: List[String], k: Int
+) raises:
+    """Each row's bucket is the number of splitter tuples `<=` its key tuple,
+    and some row's key equals a splitter (so a boundary row is checked)."""
+    var key_indices = List[Int]()
+    for kn in pk:
+        key_indices.append(batch.schema.column_index(kn))
+    var nk = len(key_indices)
+    var splitters = _choose_range_splitters_int64(batch, key_indices, k)
+    var n_split = len(splitters) // nk
+    assert_true(n_split > 0)
+    var buckets = _scatter_rows_to_buckets_int64(batch, pk, k)
+    var boundary_rows = 0
+    for b in range(k):
+        for i in range(len(buckets[b])):
+            var row = buckets[b][i]
+            var le = 0
+            var on_boundary = False
+            for s in range(n_split):
+                var cmp = 0  # splitter tuple s versus the row's key tuple
+                for j in range(nk):
+                    var sv = splitters[s * nk + j]
+                    var rv = Int64(_i64_at(batch, key_indices[j], row))
+                    if sv < rv:
+                        cmp = -1
+                        break
+                    if sv > rv:
+                        cmp = 1
+                        break
+                if cmp <= 0:
+                    le += 1
+                if cmp == 0:
+                    on_boundary = True
+            if on_boundary:
+                boundary_rows += 1
+            assert_equal(b, le, "a row is not in the bucket after its splitters")
+    assert_true(boundary_rows > 0, "no row sits on a bucket boundary")
+
+
+def test_scatter_boundary_rows_go_to_the_bucket_after_the_splitter() raises:
+    var pk: List[String] = ["grp"]
+    _assert_rows_in_the_bucket_after_their_splitters(_make_batch(20_000, 400), pk, 8)
+    var pk2: List[String] = ["ga", "gb"]
+    _assert_rows_in_the_bucket_after_their_splitters(
+        _make_batch_2key(20_000, 40, 50), pk2, 8
+    )
+
+
+def test_boundary_keys_match_the_serial_kernel() raises:
+    var pk: List[String] = ["grp"]
+    _ = _entry_vs_serial(_make_batch(100_000, 64), pk, "boundary_one_key")
+    var pk2: List[String] = ["ga", "gb"]
+    _ = _entry_vs_serial(_make_batch_2key(100_000, 8, 8), pk2, "boundary_two_keys")
 
 
 def test_bucket_ranges_are_whole_partitions() raises:
