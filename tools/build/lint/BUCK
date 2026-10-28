@@ -1,24 +1,78 @@
 # The linters run by the lint rules (defs.bzl), as pinned downloads, and the
-# lint action script. linux x86_64 static binaries.
+# Zig lint tools: pointer_lint here, and in tool/ the lint action every other
+# lint rule but public_boundary (public_boundary/) runs. linux x86_64 static
+# binaries.
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs")
-load(":defs.bzl", "shell_lint", "tar_member")
+load(":defs.bzl", "tar_member")
+load(":interpreter_budget.bzl", "interpreter_budget")
+load(":no_shell.bzl", "no_shell")
+load(":one_mopm.bzl", "one_mopm")
+load("//release/readme_e2e:packages.bzl", README_E2E_MOPM = "MOPM")
+load(":timing.bzl", "timing")
 
-export_file(name = "lint.sh", visibility = ["PUBLIC"])
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
 
-export_file(name = "retired_names.sh", visibility = ["PUBLIC"])
 
-export_file(name = "readme_api_coverage.sh", visibility = ["PUBLIC"])
+# test_weld (test_weld.zig): the action of the test_weld lint (test_weld.bzl,
+# test_weld.bxl). Built behind its unit tests.
+zig_test(
+    name = "test_weld_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["test_weld.zig"],
+    src = "test_weld_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
 
-export_file(name = "surface_capability_matrix.sh", visibility = ["PUBLIC"])
+zig_exe(
+    name = "test_weld_bin",
+    exec_compatible_with = LINUX_X86_64,
+    src = "test_weld.zig",
+    unit_tests = [":test_weld_unit", _ZIG_VERSION],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+    visibility = ["PUBLIC"],
+)
 
-export_file(name = "test_weld.sh", visibility = ["PUBLIC"])
+# The Mojo lexer the lint tools share (mojo_tokens.zig): strings, comments,
+# triple-quoted strings over lines, bracket nesting.
+zig_test(
+    name = "mojo_tokens_test",
+    exec_compatible_with = LINUX_X86_64,
+    src = "mojo_tokens.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
 
-# The reader of lint kind pointer_lint (lint.sh; the rule is pointer_lint in defs.bzl).
-export_file(name = "pointer_lint.awk", visibility = ["PUBLIC"])
+# The pointer lint's scenarios (pointer_lint_test.zig): each rule's sites,
+# the near misses, the library-file decision, the ledgers and the result.
+zig_test(
+    name = "pointer_lint_test",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["mojo_tokens.zig", "pointer_lint.zig"],
+    src = "pointer_lint_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
 
-# The reader of lint kind public_boundary (lint.sh; the rule is public_boundary in defs.bzl).
-export_file(name = "public_boundary.awk", visibility = ["PUBLIC"])
+# The action of the pointer_lint rule (defs.bzl): a static executable built
+# with the pinned zig, behind its tests and the lexer's.
+zig_exe(
+    name = "pointer_lint",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["mojo_tokens.zig"],
+    src = "pointer_lint.zig",
+    unit_tests = [":mojo_tokens_test", ":pointer_lint_test", _ZIG_VERSION],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+    visibility = ["PUBLIC"],
+)
 
 pinned_file(**pinned_kwargs("linux-x86_64", "shellcheck"))
 
@@ -38,9 +92,80 @@ tar_member(
     visibility = ["PUBLIC"],
 )
 
-# The lint actions' own scripts.
-shell_lint(
-    name = "shell_lint",
-    srcs = ["lint.sh", "readme_api_coverage.sh", "retired_names.sh", "surface_capability_matrix.sh", "test_weld.sh"],
+# readme_api_coverage (readme_api_coverage.zig, its scanners in
+# readme_api_scan.zig): the actions of the readme_api_coverage lint
+# (readme_api_coverage.bzl). Built behind their unit tests.
+zig_test(
+    name = "readme_api_coverage_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["readme_api_coverage.zig", "readme_api_scan.zig"],
+    src = "readme_api_coverage_test.zig",
+    deps = ["//tools/build/mojo:unified_diff"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
+
+zig_exe(
+    name = "readme_api_coverage_bin",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["readme_api_scan.zig"],
+    src = "readme_api_coverage.zig",
+    deps = ["//tools/build/mojo:unified_diff"],
+    unit_tests = [":readme_api_coverage_unit", _ZIG_VERSION],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
     visibility = ["PUBLIC"],
+)
+
+# The interpreter list (interpreter_budget.bzl): every interpreter file of the
+# repository (shell, Python, Perl, awk, sed, Ruby: by its extension or by a
+# `#!` line naming one) has a row in interpreter_allowlist.tsv (path, reason),
+# and every row names one. Existence only: a file's size is never checked.
+# The tree is every file of the cell (`//:doc_tree`), the files under
+# .github/ (`//:github_tree`) and the tests cell's tree. A row comes out when
+# its file is written in Zig or deleted; a row is added only with a reason
+# review accepts.
+interpreter_budget(
+    name = "interpreter_budget",
+    allowlist = "tools/build/lint/interpreter_allowlist.tsv",
+    cells = {"tools/build/tests": "tests//:doc_tree"},
+    dotfiles = ["//:github_tree"],
+    tree = "//:doc_tree",
+)
+
+# The no-shell list (no_shell.bzl): no BUCK, .bzl or .bxl file of the repository
+# starts a shell beyond the counts no_shell_list.tsv states per file and
+# category, and every shell script has a `script` row (still an action's or
+# test's, to be ported) or sits in a place a `human` row names. The same
+# trees as the interpreter list. A row comes out when its site or script is
+# ported to Zig; a row is added only with a reason review accepts.
+no_shell(
+    name = "no_shell",
+    cells = {"tools/build/tests": "tests//:doc_tree"},
+    dotfiles = ["//:github_tree"],
+    list = "tools/build/lint/no_shell_list.tsv",
+    tree = "//:doc_tree",
+)
+
+# The wall-clock ledger (timing.bzl): the Zig files that read a clock or sleep,
+# counted per token against timing_list.tsv, so that no test asserts on elapsed
+# time or waits on a deadline that fails it, and the list only shrinks. The same
+# trees as the no-shell list.
+timing(
+    name = "timing",
+    cells = {"tools/build/tests": "tests//:doc_tree"},
+    dotfiles = ["//:github_tree"],
+    list = "tools/build/lint/timing_list.tsv",
+    tree = "//:doc_tree",
+)
+
+# One mopm (one_mopm.bzl): every package's mopm-toolchain.toml names the same
+# mopm version, and it is the one the release flow builds with (`MOPM` of
+# release/readme_e2e/packages.bzl). The fixtures that test a version are rows
+# of one_mopm_exceptions.tsv.
+one_mopm(
+    name = "one_mopm",
+    list = "tools/build/lint/one_mopm_exceptions.tsv",
+    release = README_E2E_MOPM,
+    tree = "//:doc_tree",
 )

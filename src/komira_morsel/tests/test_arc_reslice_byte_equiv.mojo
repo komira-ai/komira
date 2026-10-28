@@ -16,7 +16,7 @@
 # THE GATE. A sliced column must read BYTE-IDENTICALLY to the source column at
 # the shifted index: `slice(start,len)[i] == source[start+i]` for every layout
 # `supports_zero_copy_slice()` admits (fixed-width numeric / temporal / DECIMAL /
-# DICTIONARY). Plain STRING/BINARY (accessors ignore `_offset`) are NOT admitted
+# DICTIONARY). Plain STRING/BINARY (accessors refuse a sliced column) are NOT admitted
 # and are proven to fall back correctly by the split-level differential.
 #
 # Independent oracle: the source column is read directly at `start+i` (no reuse
@@ -200,7 +200,7 @@ def test_split_diverts_nullable_to_copy_slice() raises:
 
 def test_supports_zero_copy_slice_layout_gate() raises:
     """The whitelist admits the q1 fold layouts (INT32/FLOAT64/DICTIONARY) and
-    rejects plain STRING (accessors ignore `_offset`)."""
+    rejects plain STRING (its accessors refuse a sliced column)."""
     var rb = _build_q1ish_batch(8)
     assert_true(rb.column_at(0).supports_zero_copy_slice(), "INT32 admitted")
     assert_true(rb.column_at(1).supports_zero_copy_slice(), "FLOAT64 admitted")

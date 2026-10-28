@@ -21,6 +21,8 @@
 # to each flush and never held. No pointer type.
 # =============================================================================
 
+from std.memory import ArcPointer
+
 from komira_clock import now_unix_ms
 from komira_objectstore.path import Path
 from komira_objectstore.store import ConditionalWriteStore
@@ -56,7 +58,8 @@ struct LogStreamSink(Movable):
       current_chunk   — the owned in-flight chunk buffer (bytes since last flush).
       chunk_index     — the monotonic next-chunk counter.
       last_flush_ms   — wall-clock ms of the last flush (or sink start); the
-                        flush-interval is measured against this.
+                        flush-interval is measured against this (on a manual
+                        clock after `set_test_clock`).
       uploaded_count  — count of chunks SUCCESSFULLY put (for diagnostics/tests).
     """
 
@@ -69,6 +72,9 @@ struct LogStreamSink(Movable):
     var chunk_index: Int
     var last_flush_ms: Int64
     var uploaded_count: Int
+    # None in production. A manual clock's cell (nanoseconds) that the flush
+    # interval is measured on instead of the wall clock (`set_test_clock`).
+    var test_clock_cell: Optional[ArcPointer[Int]]
 
     def __init__(
         out self,
@@ -87,6 +93,18 @@ struct LogStreamSink(Movable):
         self.chunk_index = 0
         self.last_flush_ms = now_unix_ms()
         self.uploaded_count = 0
+        self.test_clock_cell = None
+
+    def set_test_clock(mut self, cell: ArcPointer[Int]):
+        """Measure the flush interval on the manual clock `cell` (nanoseconds)
+        from now on, instead of the wall clock. Production leaves it unset."""
+        self.test_clock_cell = Optional[ArcPointer[Int]](cell)
+        self.last_flush_ms = self._now_ms()
+
+    def _now_ms(self) -> Int64:
+        if self.test_clock_cell:
+            return Int64(self.test_clock_cell.value()[] // 1_000_000)
+        return now_unix_ms()
 
     @staticmethod
     def disabled() -> LogStreamSink:
@@ -123,11 +141,12 @@ struct LogStreamSink(Movable):
         if not self.enabled:
             return
         if len(self.current_chunk) == 0:
-            # Nothing buffered — reset the timer so an idle child doesn't
-            # accumulate "overdue" time and flush an empty chunk later.
+            # Nothing buffered: nothing to write. The timer is not reset, so
+            # the first bytes after an idle spell longer than the flush
+            # interval are written as soon as they are appended.
             return
         var over_size = len(self.current_chunk) >= self.chunk_bytes
-        var now = now_unix_ms()
+        var now = self._now_ms()
         var over_time = (now - self.last_flush_ms) >= Int64(self.flush_ms)
         if over_size or over_time:
             self.flush_current[S](store)
@@ -157,7 +176,7 @@ struct LogStreamSink(Movable):
         var payload = self.current_chunk^
         self.current_chunk = List[UInt8]()
         self.chunk_index = n + 1
-        self.last_flush_ms = now_unix_ms()
+        self.last_flush_ms = self._now_ms()
 
         var ok = self._put_once[S](store, key, payload.copy())
         if not ok:

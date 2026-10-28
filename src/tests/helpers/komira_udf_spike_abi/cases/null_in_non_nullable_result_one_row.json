@@ -1,0 +1,11 @@
+{
+ "name": "null_in_non_nullable_result_one_row",
+ "defect": "a single null in a non-nullable result is accepted (the nullability post-condition counts from two)",
+ "run": "call_batch",
+ "entry": "null_on_zero",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": false}],
+ "input": {"length": 2, "columns": [{"type": "int64", "values": [0, 1]}]},
+ "expect": {"status": "OK", "run_error": "UDF_RETURN_TYPE_MISMATCH"}
+}

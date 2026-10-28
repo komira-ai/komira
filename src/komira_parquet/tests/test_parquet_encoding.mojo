@@ -2,6 +2,7 @@
 # Tests for Parquet encoding/decoding: PLAIN, RLE, DELTA_BINARY_PACKED
 # =============================================================================
 
+from komira_buffer.byte_buffer import write_uleb128, write_uleb128_u64
 from std.testing import TestSuite, assert_equal, assert_true
 from std.sys import size_of
 
@@ -135,26 +136,10 @@ def _encode_bitpacked_group(values: List[Int], bit_width: Int) -> List[UInt8]:
 # =============================================================================
 
 
-def _write_uleb128(mut output: List[UInt8], value: Int):
-    """Write a ULEB128 varint into the output list."""
-    var v = value
-    while True:
-        var byte = v & 0x7F
-        v = v >> 7
-        if v != 0:
-            byte = byte | 0x80
-        output.append(UInt8(byte))
-        if v == 0:
-            break
-
-
 def _write_zigzag_varint(mut output: List[UInt8], value: Int):
     """Write a zigzag-encoded varint into the output list."""
-    var encoded = (value << 1) ^ (value >> 63)
-    # Handle negative encoding results by masking. In Mojo, Int is 64-bit
-    # and arithmetic shift preserves sign, so the XOR may produce a negative.
-    # ULEB128 just reads the low 7 bits at a time, so it works correctly.
-    _write_uleb128(output, encoded)
+    var encoded = UInt64((value << 1) ^ (value >> 63))
+    write_uleb128_u64(encoded, output)
 
 
 def _bits_needed(max_val: Int) -> Int:
@@ -202,7 +187,7 @@ def _pack_miniblock_values(
     return result^
 
 
-def _encode_delta_binary_packed(values: List[Int64]) -> List[UInt8]:
+def _encode_delta_binary_packed(values: List[Int64]) raises -> List[UInt8]:
     """Encode Int64 values as DELTA_BINARY_PACKED.
 
     Uses block_size=128, miniblock_count=4.
@@ -212,9 +197,9 @@ def _encode_delta_binary_packed(values: List[Int64]) -> List[UInt8]:
     var miniblock_count = 4
     var miniblock_size = block_size // miniblock_count  # 32
 
-    _write_uleb128(output, block_size)
-    _write_uleb128(output, miniblock_count)
-    _write_uleb128(output, len(values))
+    write_uleb128(block_size, output)
+    write_uleb128(miniblock_count, output)
+    write_uleb128(len(values), output)
 
     if len(values) == 0:
         _write_zigzag_varint(output, 0)

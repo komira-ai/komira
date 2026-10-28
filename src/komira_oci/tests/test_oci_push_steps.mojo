@@ -25,7 +25,7 @@
 # =============================================================================
 
 from std.os import getenv
-from std.time import perf_counter_ns
+from std.memory import ArcPointer
 from std.testing import assert_equal, assert_true
 
 from komira_http_core.codec.types import (
@@ -48,6 +48,7 @@ from komira_oci.oci_push import (
     push_outcome_name,
 )
 from komira_oci.oci_transport import OciResponse, ScriptedOciTransport
+from komira_retry import Sleeper
 
 comptime _HOST: String = "us-central1-docker.pkg.dev"
 comptime _REPO: String = "acme-prod/images/orders"
@@ -417,22 +418,75 @@ def test_read_back_refusals() raises:
 # =============================================================================
 
 
+struct _SharedSleeper(Sleeper, Movable):
+    """Records each requested wait into a list the test also holds, and
+    returns at once: the push never really sleeps."""
+
+    var slept: ArcPointer[List[Int64]]
+
+    def __init__(out self, slept: ArcPointer[List[Int64]]):
+        self.slept = slept
+
+    def sleep_ms(mut self, ms: Int64) raises:
+        self.slept[].append(ms)
+
+
+def _recording_pusher(
+    var t: ScriptedOciTransport, backoff_ms: Int, slept: ArcPointer[List[Int64]]
+) -> LayoutPusher[ScriptedOciTransport, _SharedSleeper]:
+    return LayoutPusher[ScriptedOciTransport, _SharedSleeper](
+        t^,
+        OciAuth.bearer(String("cred-q7xT")),
+        sleeper=_SharedSleeper(slept),
+        backoff_ms=backoff_ms,
+    )
+
+
+def _assert_slept(slept: ArcPointer[List[Int64]], want: List[Int64], why: String) raises:
+    assert_equal(len(slept[]), len(want), why + String(": number of sleeps"))
+    for i in range(len(want)):
+        assert_equal(slept[][i], want[i], why + String(": sleep ") + String(i))
+
+
 def test_retry_sleeps_the_backoff() raises:
+    # One 503 then success: one wait of backoff_ms * 1, requested before the
+    # retry is sent (the transport is only called again after it).
     var layout = _layout()
     var t = ScriptedOciTransport()
     t.queue(_st(503))  # 0 HEAD manifest: retried after backoff_ms * 1
     t.queue(_st(200))  # 1 HEAD manifest: present
     t.queue(_digest_header(200, layout.manifest_digest))  # 2 read-back
-    var p = _pusher(t^, 100)
-    var start = perf_counter_ns()
+    var slept = ArcPointer[List[Int64]](List[Int64]())
+    var p = _recording_pusher(t^, 100, slept)
     var r = p.push_by_digest(layout, _HOST, _REPO, layout.manifest_digest)
-    var elapsed_ms = Int(perf_counter_ns() - start) // 1_000_000
     _expect(r, PUSH_NOOP, String(""), String("a retried HEAD"))
     assert_equal(p.transport().call_count(), 3)
-    assert_true(
-        elapsed_ms >= 100,
-        String("one retry sleeps at least 100 ms; slept ") + String(elapsed_ms),
-    )
+    _assert_slept(slept, [Int64(100)], String("one retry"))
+
+    # Two 503s: the waits grow with the attempt, backoff_ms * 1 then * 2.
+    var t2 = ScriptedOciTransport()
+    t2.queue(_st(503))  # 0 HEAD manifest: wait 100
+    t2.queue(_st(503))  # 1 HEAD manifest: wait 200
+    t2.queue(_st(200))  # 2 HEAD manifest: present
+    t2.queue(_digest_header(200, layout.manifest_digest))  # 3 read-back
+    var slept2 = ArcPointer[List[Int64]](List[Int64]())
+    var p2 = _recording_pusher(t2^, 100, slept2)
+    var r2 = p2.push_by_digest(layout, _HOST, _REPO, layout.manifest_digest)
+    _expect(r2, PUSH_NOOP, String(""), String("two retried HEADs"))
+    assert_equal(p2.transport().call_count(), 4)
+    _assert_slept(slept2, [Int64(100), Int64(200)], String("two retries"))
+
+    # backoff_ms 0 retries without waiting.
+    var t3 = ScriptedOciTransport()
+    t3.queue(_st(503))
+    t3.queue(_st(200))
+    t3.queue(_digest_header(200, layout.manifest_digest))
+    var slept3 = ArcPointer[List[Int64]](List[Int64]())
+    var p3 = _recording_pusher(t3^, 0, slept3)
+    var r3 = p3.push_by_digest(layout, _HOST, _REPO, layout.manifest_digest)
+    _expect(r3, PUSH_NOOP, String(""), String("a retry without backoff"))
+    assert_equal(p3.transport().call_count(), 3)
+    _assert_slept(slept3, List[Int64](), String("backoff_ms 0"))
     print("  test_retry_sleeps_the_backoff: PASS")
 
 

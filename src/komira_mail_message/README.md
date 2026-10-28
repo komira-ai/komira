@@ -95,7 +95,18 @@ assert_equal(msg, "komira_mail_message.ForbiddenByte: MessageBuilder.set_subject
   2231 values are read in UTF-8, US-ASCII and ISO-8859-1 (and the ASCII
   bytes of other ISO-8859 and windows-125x charsets), any other word is kept
   as written.
-- `message/rfc822` parts are leaves (not opened), and a part of a
+- `message/rfc822` parts are leaves: `Message.open_rfc822(index)` opens one as a
+  `Message` of its own under the parent's remaining depth and part limits
+  (siblings are not bounded together), refusing a transfer encoding other than
+  `7bit`, `8bit` or `binary`; `Message.part_by_section("1.2")` (RFC 3501
+  section 6.4.5) never crosses one, and gives `None` for a `.MIME`, `.TEXT`
+  or `.HEADER` suffix (the IMAP layer strips it).
+- `Message.raw()`, `header_bytes(index)` and `body_bytes(index)` lend the
+  message's own bytes as a `ByteView`; `Part.header_bytes(raw)` takes the
+  `raw()` view because a `Part` holds no bytes, and gives an empty view for a
+  view too short for it. `parse_date_time` reads a `Date` value (RFC 5322
+  with the obsolete zones and years) as milliseconds since 1970.
+- A part of a
   `multipart/digest` without a `Content-Type` is read as `text/plain`, not
   as RFC 2046 section 5.1.5's `message/rfc822`. Encoded words are decoded
   on unstructured fields (`Subject`) and on an attachment's plain (not RFC
@@ -109,3 +120,30 @@ assert_equal(msg, "komira_mail_message.ForbiddenByte: MessageBuilder.set_subject
   `Content-Disposition`; the rest are dropped.
 - No SMTPUTF8 (RFC 6531): header values are written in ASCII, non-ASCII text
   as encoded words.
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_mail_message`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_mail_message/`, its tests are `tests/`. It depends on four packages, sibling
+directories (`[dependencies]` of `mopm.toml`): `komira_buffer`, `komira_datetime`, `komira_encoding` and
+`komira_mail_address`, each as `{ path = "../<name>", version = "0.1" }`. The `.conda` of this package records
+`mojo-komira_buffer >=0.1,<0.2`, `mojo-komira_datetime >=0.1,<0.2`, `mojo-komira_encoding >=0.1,<0.2` and
+`mojo-komira_mail_address >=0.1,<0.2` as dependencies and holds none of their files: installing `komira_mail_message`
+installs them with it. `komira_buffer` reaches `komira_libc`, which links a C shim of its own, and a dependent's link
+takes it from the closure; this package owns no C. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependencies and where the library and its tests are |
+| `mopm.lock` | the toolchain pins and the path dependencies, direct and transitive, as `mopm lock` writes them (no registry is reached: every dependency is a sibling) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifests of the siblings; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file, built from the `:lib` of the siblings, and exists only once every test of `tests/` has
+passed. After any change to a source, a test, a manifest of this package or of a sibling, run `buildrules mojo sync`
+with all five packages staged, commit what it writes, and build `komira//src/komira_mail_message:lib` on the farm.
+
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
+(`mojo-komira_mail_message-0.1.0-mojo1.0.0_0.conda`), packed with the manifests of the siblings of its closure beside
+its own (`members`), which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so
+it is a step of a CI job that takes that file, not a build action.

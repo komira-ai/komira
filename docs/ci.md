@@ -5,30 +5,34 @@ the one job `check` of [`.github/workflows/pr.yml`](#pryml-the-pull-requests-che
 a workflow of its own, on a GitHub-hosted runner that reaches the build farm
 over a tailnet. The runner is
 a thin buck2 client: it checks the repository out and asks the farm to build
-the units the change reaches ([the units](#the-per-change-checks-units)).
+and test the targets the change reaches ([pr.yml](#pryml-the-pull-requests-check)).
 Nothing is compiled on the runner.
 
 | event | runs |
 |---|---|
-| push to `main` | the release path of `kci.yml`; when that run ends, [`main_red.yml`](#main_redyml-the-main-red-alert) |
+| push to `main` | [`release.yml`](#releaseyml-the-release): builds the release set and publishes the mopm packages to the prod registry, on every push (no schedule, no switch); when that run ends, [`main_red.yml`](#main_redyml-the-main-red-alert) |
 | pull request from a branch of this repository | `pr / check`; and `coverage`, informational, not required ([below](#coverageyml-the-pull-requests-coverage-not-a-gate)) |
 | pull request from a fork | nothing: no farm job runs ([below](#pull-requests-from-forks)) |
-| manual (`workflow_dispatch`) | the release path of `kci.yml`, on the chosen ref |
+| manual (`workflow_dispatch`) | [`release.yml`](#releaseyml-the-release), on the chosen ref, with a reason |
+| weekly (schedule) and manual | [`kpin-update.yml`](../tools/build/kpin/README.md#the-weekly-update): updates the pins and opens one pull request; no farm, and its pull request does not start `pr / check` by itself. A manual run with `real_hosts` instead checks kpin against the real registries |
 
 There is no separate static or lint job, and no other pull request check
-that can block a merge: the `coverage` workflow only reports. The only
-scheduled run is the
-[build-system self-tests](#build-system-self-tests), which is not the gate.
+that can block a merge: the `coverage` workflow only reports. The scheduled
+runs are the [build-system self-tests](#build-system-self-tests), which are not
+the gate, and the weekly [`kpin-update.yml`](../tools/build/kpin/README.md#the-weekly-update),
+which opens a pull request and gates nothing.
 `ci.yml` and its check `ci / build` no longer exist. The whole-repository
 `//...` build they ran on every push to `main` is not run by any workflow now;
-a pull request's check covers the units the change reaches, and every target of
-the graph is in some unit, so a change to any target is built by its unit.
+a pull request's check builds and tests the targets the change affects, and
+`//ci:pr`, the aggregate of every check, holds every check target of the graph
+(a guard fails when one is left out), so a change to any target is built
+by the check.
 
 ## What the check builds
 
 The build is the gate: building a target runs the tests welded to it and to its
 dependencies, so the check points at build targets and nothing else. What a
-build of the whole repository covers, and so what the units add up to:
+build of the whole repository covers, and so what the affected targets add up to:
 
 1. **`./buck2 build //...`** builds every target of the komira cell on the
    farm. That is more than compiling:
@@ -56,18 +60,18 @@ build of the whole repository covers, and so what the units add up to:
 3. **`./buck2 build --keep-going tests//functional/...`** builds every
    positive target of the `tests` cell, which `//...` does not reach (it is a
    cell of its own so that `//...` holds no target that fails by design). A
-   target there that does not build fails its unit; the targets that must fail
+   target there that does not build fails the check; the targets that must fail
    are `tests//negative`, built as `expect_red`s by the
    [self-tests](#build-system-self-tests) and not by this one. Every target of `tests//functional` is meant to build, so nothing
    there is excluded: a probe or fixture that is expected to fail belongs in
    `tests//negative`.
 A contributor runs the same three commands on any client. A green local
 `./buck2 build //... && ./buck2 test //...` is the whole-repository form of
-what the units of `pr / check` prove, dead Markdown links included (`//:docs`).
+what `pr / check` proves for the targets a change affects, dead Markdown links included (`//:docs`).
 
 Publishing is not part of the check. The release workflow
-[kci.yml](#kciyml-the-release) has no `pull_request` trigger: a pull request
-never starts it and never shows a skipped release job.
+[release.yml](#releaseyml-the-release) has no `pull_request` trigger: a pull
+request never starts it and never shows a skipped release job.
 
 ## The runner
 
@@ -97,10 +101,31 @@ It does three things, in this order:
    a job that cannot reach the farm must fail, not quietly build on the runner.
 3. **Writes the farm's machine buckconfig**, `~/.buckconfig.d/farm.buckconfig`
    (buck2 reads `~/.buckconfig.d/` and `/etc/buckconfig.d/`): the
-   `[buck2_re_client]` addresses, instance name, `tls = false` and
+   `[buck2_re_client]` addresses, instance name, `tls` and
    `execution_concurrency_limit`, and `linux_x86_64_properties` under
    `[komira_re]`. Developers put the same keys in their own gitignored
-   `.buckconfig.local` ([DEVELOPMENT.md](../DEVELOPMENT.md)).
+   `.buckconfig.local` ([DEVELOPMENT.md](../DEVELOPMENT.md)). Optional
+   inputs add the rest: `darwin-properties` with `darwin-macos-hosts` (both or
+   neither) write `darwin_arm64_properties` and `darwin_macos_hosts`;
+   `macos-library-dirs` (only with `darwin-properties`; absolute directories
+   separated by `:` or spaces) writes `macos_library_dirs`; `tls`
+   (`false` by default) and `tls-ca-certs`, the absolute path of a PEM CA file
+   on the runner, only with `tls: true`, write `tls` and `tls_ca_certs`.
+   A user buckconfig is read before the repository's own, so a key the
+   repository's `.buckconfig` (or a file it includes) sets wins over the one
+   written here.
+
+Every input is checked before the tailnet is joined: an empty required
+input, a value holding a line break, half of the macOS pair, a macOS set equal
+to the linux one, `tls` other than `true` or `false`, and a CA file that is not
+an absolute path to a readable file are refused. `//:farm_connect_cases` runs
+those checks and the writer from `action.yml`'s own scripts and compares the
+buckconfig written whole. It also reads every workflow and holds each step
+that uses the action to `tls: ${{ vars.FARM_TLS || 'false' }}` under its
+`with:`: a caller that dropped `tls` would connect in plain text whatever
+`FARM_TLS` says.
+It holds `farm-qos` to `batch` on every step of `release.yml` and to
+absent on every step of any other workflow.
 
 A job that calls it needs `permissions: id-token: write` (to ask GitHub for the
 token) next to `contents: read`, and nothing else: the job reads no secret, holds
@@ -116,6 +141,8 @@ repository variables (Settings > Secrets and variables > Actions > Variables):
 | `FARM_ADDRESS` | the remote-execution service as a URL with its port |
 | `FARM_INSTANCE` | its instance name |
 | `FARM_LINUX_X86_64_PROPERTIES` | the worker property set of the linux x86_64 actions |
+| `FARM_DARWIN_ARM64_PROPERTIES`, `FARM_DARWIN_MACOS_HOSTS`, `FARM_MACOS_LIBRARY_DIRS` | the macOS arm64 worker property set, the host identities of those workers, and the directories a macOS test run searches for a library (the last is optional): the `darwin-properties`, `darwin-macos-hosts` and `macos-library-dirs` inputs, passed by the job `release-macos` of `release-macos.yml` only |
+| `FARM_TLS` | `true` when the service serves REAPI over TLS; unset or empty means `false`. Each workflow passes it as farm-connect's `tls`, so the address and its transport change together |
 
 Variables are not masked, and a job's logs are public. The action masks the
 address, and the address is one reachable only from inside the tailnet, so
@@ -126,11 +153,40 @@ The connection is checked on every farm-connected run: the action's
 `refuse unless the farm answers` step fails the job before any build when the
 farm's port does not answer.
 
+**Priority.** A farm that queues by priority class runs a `ci` action before a
+`batch` one. The action takes an optional `farm-qos` (`ci` or `batch`) and, when
+it is set, writes the request header `x-kbf-qos` as buck2's `http_headers`.
+Every job of `release.yml` passes `batch`, so the release work that a push to
+`main` starts waits behind the pull-request checks when the farm is full; no
+other workflow passes it, so they stay at `ci`. The class is not a platform
+property: it is not part of an action's digest, so a release build and a pull
+request still share the same action-cache entries. It changes the order of the
+queue only: a running action keeps its slot, and a farm that does not read the
+header (or a buck2 that does not send it) queues the action as `ci`.
+
 Give CI its own remote-execution instance name, a sub-instance such as
 `<prefix>/ci`, so its action-cache entries are kept apart from developers' on a
 service that keys the cache by instance (Buildbarn does; a cache tier that
 ignores instance names, such as bazel-remote without
 `--enable_ac_key_instance_mangling`, does not).
+
+### Running a buck2 command on the farm
+
+The local action
+[`.github/actions/buck2-farm`](../.github/actions/buck2-farm/action.yml) runs
+one `./buck2` command (build, test or bxl) and fails its step unless buck2
+succeeded and no action ran locally. It is two lines: buck2's output is tee'd to
+a file, and the built tool `//tools/build/ci:assert_remote`
+([`assert_remote.zig`](../tools/build/ci/assert_remote/assert_remote.zig)) reads
+the file. The tool fails when a `Commands:` summary line says `local:` anything
+but `0`, when the log ends a failed run (`BUILD FAILED`, `BXL FAILED`), or when
+there is no summary line although the run used the network. A run that executed
+no action (everything cached, or a query-only bxl script) prints no summary line
+at all, only `Network: up 0B  down 0B`, and passes on that line. `build` and
+`bxl` print the same summary. The caller builds the tool first and passes its
+path as `assert-remote`. The cases are recorded buck2 output
+(`//tools/build/ci:assert_remote_unit`) and the action's own two lines run over
+it (`//:buck2_farm_cases`).
 
 ## Pull requests from forks
 
@@ -190,7 +246,7 @@ rows are required: the test fails, naming the capability, when one is
 missing. The rest are reported and never fail it.
 
 The probe watches the workers only when it runs: the PR check runs it when
-its unit (`//src/tests/helpers/komira_test_minio/...`) is affected, that is, when a PR
+its targets (`//src/tests/helpers/komira_test_minio/...`) are affected, that is, when a PR
 touches `komira_test_minio` or one of its dependencies. Anyone can run it on
 demand with the command above. A test result is not cached, so each run is a
 fresh probe.
@@ -214,7 +270,7 @@ other run.
 | `tmpdir_outside_checkout` (reported): no directory from `TEST_TMPDIR` up to `/` holds `.git` or `.buckconfig` | outside: six levels walked to `/`, no marker | the install-path test, whose scratch must be outside any checkout |
 
 `tmpdir_outside_checkout` is reported, not required: the gate runner
-([`gate_runner.sh`](../tools/build/mojo/gate_runner.sh)) makes `TEST_TMPDIR`
+([`gate mojo`](../tools/build/run/README.md)) makes `TEST_TMPDIR`
 under the action's working directory, which for an action run on the client
 (no farm configured) is inside the checkout, so a required check would fail
 there for that reason rather than for a missing capability (derived from the
@@ -246,57 +302,349 @@ gh workflow run build_system_selftests.yml --ref <branch>
 
 or locally with `tools/build/tests/run_tests.sh`.
 
-**Direction.** The script is to be replaced, case by case, by targets of the
-`tests` cell, so that each case is cached, runs in parallel, has a name, and
-runs under `./buck2 test` or `./buck2 build` like everything else. Cases that
-look convertible from their description: 2 (gate red, ungated builds), 3
-(a binary without the dep fails to compile), 4 (incomplete closure refused),
-10 (execution platform resolution, an aquery), 13 and 14 (bundle and launcher
-parity, already remote actions), 17 (Markdown link validation), 28 and 29
-(already `tests//functional` targets), 30 (optimization levels from aquery),
-31 (lint weld), 34 to 36 (generator goldens and refusals). Cases that observe
-the client or the daemon (1, 5, 6, 7, 9, 12, 25, 32, 33) need a harness that
-can start a scratch daemon or clone and are still to be analysed.
+**Direction.** The script is being dissolved into the gate, slice by slice
+([build_selftests.md](design/build_selftests.md), whose inventory says where
+each check goes). Slice 2 moved what needed no new tool: the run check of a
+binary with `expected_stdout` is a validation of the binary; the greens that
+sat in `tests//negative` or needed `buck2 test` moved to `tests//functional`
+or the komira cell; sub-targets and the greens of `tests//negative` and
+`tests//src` that must build are named by `target_suite`s
+(`//:tests_greens`); the case actions refuse a short report; and the rows the
+check already built are gone from the script.
+Slice 3 added the scenarios: `buck2 test` targets under
+[`tools/build/selftest`](../tools/build/selftest/README.md) that drive buck2
+from outside, each inner build on the farm. They are targets of the aggregate `//ci:pr`, which a widened
+change (one under `tools/build/`, say) selects, and `pr.yml` runs the
+package's graph checks with their BXL script. The analysis-time refusals, where targets execute and the
+unconfigured query through the prelude's select moved there.
 
-## kci.yml: the release
+## The macOS build of the release
 
-[`.github/workflows/kci.yml`](../.github/workflows/kci.yml) releases the conda
-packages that `release/artifacts.textproto` declares, through `kci` (`bin/kci`).
-It is written by hand. The stages are owned by the release machine,
-[`release/machine.textproto`](../release/machine.textproto): `build`, then
-`gamma`, then `prod`, and `pr`, the per-change check of a pull request, which is
-the one job of [`pr.yml`](#pryml-the-pull-requests-check), not of this file. The
-workflow runs one job per stage (but `pr`), named for its
-stage, running in the stage's GitHub environment and running exactly one
-`kci run --stage <its name>`, except that `gamma` is split over two jobs:
-`gamma` runs its step (`--only step:publish`) and `validate` its two
-validations (`--only validation:install-komira-encoding --only
-validation:install-set`). kci reads `release/machine.textproto` by
-convention (its one default path), so no line of the workflow names it.
+The macOS (darwin-arm64) build is its own workflow,
+[`release-macos.yml`](../.github/workflows/release-macos.yml) (one job, `release-macos`),
+and no pull request builds it. `release.yml` holds no macOS job. The farm has far more Linux cores than
+Mac ones, so a macOS leg in the pull request check would queue every change
+behind the scarcest machines; the macOS platform is built once per release run
+instead.
 
-| job (stage) | runner | what it does |
+- **Not in a pull request.** `pr.yml` (and `coverage.yml`, the other workflow that
+  runs on a pull request) pass no macOS worker set to the farm connection and name
+  no darwin platform or runner, and `//ci:pr` is built for the client's own platform
+  only: none of the targets it reaches has a macOS execution platform. A
+  `cquery` of `attrregexfilter(exec_compatible_with, "macos", deps(//ci:pr))` is
+  empty, and the same query for `--target-platforms
+  komira//tools/build/platforms:darwin-arm64` over a library is not.
+  `//:release_macos_cases` holds the workflows and the shards of `ci/targets/` to it.
+- **On the farm's Macs, not a hosted runner.** The job runs on the same ubuntu
+  runner as the others and asks the farm: `farm-connect` with the macOS worker set
+  and hosts (the repository variables above), then
+  `build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going //release:mopm_darwin_libs`
+  through the `buck2-farm` action, which fails the step if any action ran on the
+  runner. The compiles and the welded tests run on the macOS workers; the toolchain
+  unpack runs on a Linux worker of the same farm. A job without the macOS
+  variables fails its second step, naming the key, instead of building on the runner.
+- **One list.** `//release:mopm_darwin_libs` (`release/darwin_libs.bzl`) builds the
+  `:lib` of every package of `release/readme_e2e/packages.bzl` (every `src/<name>`
+  with a `mopm.toml`) except `DARWIN_EXCLUDED`, the packages whose closure holds
+  native code, which cannot build for macOS yet. A package moved to mopm joins the
+  macOS build with no second edit. The target is left out of `//ci:pr` on purpose
+  (`EXCLUDED` of `tools/build/ci/rules.bzl`).
+- **Priority, timing, bound.** `farm-qos: batch` like every job of the file; once per
+  release (a push to `main` that is not documentation-only, or a manual run: the same
+  triggers as `release.yml`, so it builds the same commit), never per pull request, in
+  parallel with the Linux jobs; nothing in `release.yml` `needs` it or reads its result.
+  It is a separate workflow with its own concurrency group, `release-macos-<ref>`, and
+  `cancel-in-progress: true`: `release.yml` is one group in which a running release is
+  never cancelled, so a macOS job inside it that stalled would hold the next push's
+  release, the Linux prod publish included. Here a newer push cancels the running macOS
+  build and starts its own, and a macOS build never queues a release. The trigger is
+  `push` plus `workflow_dispatch` rather than `workflow_run` after `release.yml`: it
+  needs no ordering with the release (nothing waits on it), and `workflow_run` would
+  start it only after the whole release finished, build the default branch's head
+  instead of the pushed commit, and run for a pull request's `release.yml` run too if
+  that ever changed. `timeout-minutes: 90` still bounds a stalled build.
+- **Reported, not blocking (for now).** The job is `continue-on-error: true`: a red macOS
+  build is a failed run of `release-macos.yml`, with a line in its summary, and the
+  release run, the prod publish and `main_red.yml` do not see it. The set has not yet been measured on
+  the macOS workers, and the publish must not wait on a platform the release does not
+  ship. When the set is green over several runs, remove the line and move the job back
+  into `release.yml` as a `needs` of `prod-commit` (or keep the workflow and have the
+  publish wait on it).
+
+## release.yml: the release
+
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) builds the
+conda packages that `release/artifacts.textproto` declares, as one release set,
+with Buck2 targets on the farm. It runs no kci. It is written by hand.
+**The release set itself publishes to no channel**: the job `release` builds the
+set, so a push to `main` still proves the release builds, keeps what it built as
+a workflow artifact, and holds no publishing credential and no channel. The
+libraries moved to mopm are published by mopm's own jobs: to prod, continuously, on every
+push to `main` (this workflow publishes to no beta registry; [below](#the-mopm-jobs); see
+[releases](releases.md)). Its job
+`release` (the mopm jobs, for the packages moved to mopm, are
+[below](#the-mopm-jobs)) is on a GitHub-hosted runner (`ubuntu-24.04`) joined to the farm by
+[`farm-connect`](#how-it-reaches-the-farm), in the environment `build`, with
+`contents: read` and `id-token: write` (for the tailnet only). Triggers: a push
+to `main` that is not documentation only (`docs/**`, `**.md`: the stamp does not
+count them either), and a manual run with a required `reason`, nothing else. A
+pull request never starts it.
+
+Two checks of kci's build stage are not made here: that every package's
+requirements are inside the set (requirement closure), and the refusal of a
+duplicate key in a JSON file. Neither is enforced until mopm's publish path
+re-creates them; the header of
+[`set_json.zig`](../release/ci/release_lib/set_json.zig) lists what was dropped.
+
+Each Buck2 step is the [`buck2-farm`](#running-a-buck2-command-on-the-farm)
+action, which fails the step unless buck2 succeeded and no action ran on the
+runner; the programs those builds made are then run as binaries, never through
+`buck2 run`:
+
+| step | what it does |
+|---|---|
+| the guard, [`//release/ci:check_release_ref`](../release/ci/check_release_ref.zig) | decides from the run's facts (flags, never environment variables) and two answers of git whether the run builds a release: a push to `main`, of a commit on `main`'s history (`refs/remotes/origin/main`), or a manual run; the checkout's HEAD is the commit the run started on; the ref is not `main` in another case (any other event, a `schedule` included, is refused: the workflow has none); a manual run (break-glass) has a reason of 1 to 200 bytes on one line, which is the first line of the job summary (`BREAK-GLASS: <ref> <commit> by <actor>: <reason>`); a push of a commit without `release/artifacts.textproto` has nothing to release and is skipped (a warning and a summary line, `release=false`, the later steps do not run), a manual run of one is refused. A manual run releases the commit it was started on: there is no revision input. Cases: [`//release/ci/tests:test_release`](../release/ci/tests/test_release.zig), run as a build action of the program. |
+| the stamp, `release_json stamp` | the build number (the first-parent commit count of the stamp's commit), the stamp's commit (the newest first-parent commit that touches more than `docs`, `*.md` and `.github`) and its commit time in milliseconds, from git in the full-history checkout; refused for a shallow clone, a HEAD that is not the revision and modified tracked files. The rule is `tools/build/package/release_version.sh`'s. |
+| the release set, [`//release:release_set`](../release/release_set.bzl) built with the stamp (`-c komira.package_stamp`, `komira.package_commit`, `komira.package_timestamp_ms`) and the revision and run (`komira.release_revision`, `komira.release_run_id`, `komira.release_attempt`) | every package the artifacts file declares (`<lib>_conda[release]`), the metapackage `komira_all` over them (the packer's `conda-meta`, as an action of the farm), and `release.json` and `set_hash.txt`. One build action holds the set to the artifacts file (the library names, their order, the metapackage's arguments), and `release_json write` checks every package (a directory of exactly the manifest, the package and its metadata, no symlink; the manifest's name, platform, subdir and sha256; the metadata's agreement, size and `stamped`) before it writes `release.json` (format `kci.release_set` major 2, byte-compatible with what kci's build stage wrote: the revision, the platform, `produced_by`, the members and the set hash, whose text is [`set_json.zig`](../release/ci/release_lib/set_json.zig)'s header). Built without a stamp (the pull request's check builds `//release:release_set` as part of `//ci:pr`), the same checks run over the unstamped packages, minus `stamped`, and no release directory is produced. |
+| the artifact | the release directory (the packages, `release.json`, `set_hash.txt`) leaves the job as one workflow artifact named `release-<commit>`, kept 14 days; the job summary has one line with the set hash. |
+
+One release at a time: a push to `main` is in the concurrency group `release-main` with
+`cancel-in-progress: false`, so a running release is never cancelled and two pushes never
+publish to prod at once (both would stage against the registry's current state). GitHub keeps at
+most one pending run per group, and a newer run replaces only a pending run, which never started
+(the newest pushed revision wins; main moves forward only, so it carries the older one's
+changes). **Known behaviour:** a run that is pending behind a running release when another push
+arrives is cancelled (it shows as cancelled, with no summary), and its run number is never
+published: the versions skip it (`0.1.<n>` is followed by `0.1.<n+2>`), and the next run publishes the
+then-current `main`. Nothing is half-done, because the replaced run never started. A manual run is in
+`release-ref-<ref name>`. The run that ends is what
+[`main_red.yml`](#main_redyml-the-main-red-alert) watches.
+
+The release machine file, [`release/machine.textproto`](../release/machine.textproto),
+and `kci` itself are not part of the release now: no workflow runs either, and no
+workflow is held to the machine file. The file stays for kci's own tests until
+kci is removed from this repository.
+
+### The mopm jobs
+
+The libraries moved to mopm (every `src/<name>` that has a `mopm.toml`, built
+with buildrules' `mojo_package`, which gives each a `:lib` and a `:conda`) go
+to the mopm registry (`prod`) as one group, apart from the release set, **continuously: every
+push to `main` publishes**. The steps are **build, stage, try, publish**, and the publish is itself
+three steps (stage, test, commit). There is no beta publish from this workflow, no schedule and no
+variable that switches the publish on or off. The list is
+[`packages.bzl`](../release/readme_e2e/packages.bzl), which
+`//:readme_e2e_complete` holds to the `src/` directories that have a
+`mopm.toml`, in both directions; [`//release:mopm_artifacts`](../release/mopm_artifacts.bzl)
+builds each package's `:lib` (the `.mojoc`, which exists only once the tests
+passed) into `linux-64/<name>.mojoc`. Six jobs of `release.yml` carry the
+steps (a documentation-only push does not start the workflow, so it publishes nothing):
+
+| job | when | what it does |
 |---|---|---|
-| `build` | GitHub-hosted (`ubuntu-24.04`) joined to the farm by [`farm-connect`](#how-it-reaches-the-farm), environment `build`, `contents: read` + `id-token: write` (for the tailnet only) | builds `//bin/kci:kci[runnable]`, then `kci run --stage build --revision-id <REVISION>`: every declared artifact, built on the farm, stamped from git, verified, and `release.json` with the set hash. The release directory, the kci binary and the build's result file leave the job as one workflow artifact named `kci-release-<REVISION>`. |
-| `gamma` | GitHub-hosted (`ubuntu-24.04`), environment `gamma` on a push to `main` and `gamma-breakglass` on any other run (see [Break-glass](#break-glass-a-manual-run-to-gamma)), `id-token: write` | runs `release_version.sh` at `REVISION`, then `kci run --stage gamma --only step:publish`: the release directory `build` made, published to the channel `komira-ai/gamma`. Nothing is built here. |
-| `validate` (stage `gamma`) | GitHub-hosted (`ubuntu-24.04`), no environment, `contents: read` only | downloads the platform table's linux-x86_64 pixi pin (its URL and sha256 are the job's `PIXI_URL` and `PIXI_SHA256`, held to the table by `test_repo_kci_yml`) and keeps it only at that sha256, then `kci run --stage gamma --only validation:install-komira-encoding --only validation:install-set --pixi <that file> --pixi-sha256 "$PIXI_SHA256"`: what `gamma` published, installed from the channel the way a consumer gets it, on the runner with no container (see Validations). Holds no identity token; re-running it re-validates without re-publishing. |
-| `prod` | GitHub-hosted (`ubuntu-24.04`), environment `prod`, `id-token: write` | after `gamma` and `validate`, on a PUSH to `main` only (a manual run, of `main` too, stops at `gamma`): the same bytes (the set `validate` validated, by hash), published to `komira-ai/prod` with no manual step. Nothing is built here. |
+| `mopm-stage` | every push to `main`, and a manual run (which sends nothing either) | on the farm (environment `build`, the farm's tailnet token only; it reads no registry token). **Build:** the one mopm the README e2e installs with (`toolchains//:mopm_0_0_86`, `MOPM` of `packages.bzl`) and `//release:mopm_artifacts`. **Version:** `release_beta_version --workspace-root src --version 0.1.<run number>` gives every member the version of this run (below, "The version of every release"). **Stage:** `mopm stage --workspace-root src --artifacts <built> --compiler 1.0.0 --out release/staged_set --registry prod` packs every member from its built `.mojoc`, asks the registry (a read, no token) which versions it holds and writes the staged set S (`plan.json`, each `.conda`, each README: mopm's `spec/staged-set.md`). A version the registry holds with other bytes, or has yanked, fails the step. **Try:** `./buck2 build -c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm: every package's README examples are compiled and run as a user of the `.conda` files of S (see the e2e's [README](../tools/build/readme_e2e/README.md)). Then `mopm publish --staged S --registry prod --dry-run`: the plan is validated and every file hashed against it, nothing is sent and no token is read. It uploads S and that mopm as a workflow artifact (a day) for the next job. |
+| `prod-stage` | after `release` and `mopm-stage`, **only on a push to `main`** (a manual run skips all five prod jobs before they start; there is no other switch) | in the environment `prod`, with `contents: read` and `id-token: write`, no farm and no secret. It downloads the set `mopm-stage` kept and runs `mopm publish --staged S --registry prod --oidc --no-commit`: the registry opens a group, holds every file in quarantine, and nothing is visible. It keeps the directory, now with `state.json` (the group), as the artifact `mopm-prod-staged-<sha>`, even when the step failed. |
+| `prod-test` | after `prod-stage`, on a push to `main` | in the environment `build` (the farm's; `id-token: write` for the tailnet join only), with **no registry identity and no secret**. It downloads the directory `prod-stage` kept, checks every file against `plan.json` (`release_staged_verify verify`: sha256 and size), writes `release/staged_set` from the files that matched and from nothing else, and runs `-c komira_release.staged=stage -c komira_release.beta_version=0.1.<run number> //release/readme_e2e/verify:all` on the farm. |
+| `prod-commit` | after `prod-test`, on a push to `main` | in the environment `prod`, with `contents: read` and `id-token: write`. The same command without `--no-commit`, on the same directory with its `state.json`, after a fresh OIDC exchange: the same group is committed and the job waits until it is visible. It keeps `plan.json`, `state.json` and `report.json` as `mopm-prod-committed-<sha>`. |
+| `prod-abort` | after `prod-stage`, `prod-test` and `prod-commit`, when one of them failed or the run was cancelled, on a push to `main` and with a `prod-stage` that was not skipped | in the environment `prod`, same permissions: `mopm publish --staged S --registry prod --oidc --abort` ends the open group and gives its place back. |
+| `prod-smoke` | after `prod-commit`, on a push to `main` | no environment, no identity, no secret, no farm: `release_staged_verify smoke` downloads the published files from the prod channel and compares each with the plan. On a difference it prints the `mopm yank --group <id> ...` command for a human and fails; it yanks nothing. |
 
-The same release directory, from the one artifact `kci-release-<REVISION>`,
-is published to each channel: it is never rebuilt. `build.set_hash`,
-`gamma.set_hash` and `prod.set_hash` in the three result files are the same
-value, and the release's `release_produced_by` names the one build run. It
-is checked, not assumed: the `build` job's output `set_hash` (read from its
-kci result) goes to `gamma` and `validate` as `--release-set-hash`; the
-`validate` job's output `validated_set_hash` (read from ITS result, never
-from the value it was given) goes to `prod`. kci recomputes the unpacked
-release's set and refuses another (exit 3, `KCI-E-SET-HASH`) before anything
-is read from a channel, so `prod` publishes exactly the set `gamma` published
-and `validate` installed (rule R19 holds the wiring).
+**Why `mopm stage` is a step of the job and not a build action.** It asks the
+registry which versions exist, and an action is offline. So the farm takes the
+set it wrote as an input: `//release/staged_set:set` is the files
+of the directory `release/staged_set/` (`mopm stage --out` writes them there; they
+are not in the repository, `.gitignore`), and
+[`//release/readme_e2e/verify`](../release/readme_e2e/verify/BUCK) installs from
+it only under `-c komira_release.staged=stage`. Without that flag the targets
+install from `//release/readme_e2e:staged`, the set the build assembles from the
+packages it made (same layout, `skip` and `refuse` members aside): hermetic, so
+the pull request check builds it, on every change, with no network. The release
+job tries the real set; the pull request check tries the assembled one.
+
+The cases of `mopm stage` and `mopm publish --staged` are mopm's. What this
+repository holds to is the e2e's own cases
+([`tools/build/readme_e2e`](../tools/build/readme_e2e/README.md)) and the
+completeness of the list.
+
+#### The prod publish
+
+The five `prod-*` jobs publish the set `mopm-stage` tried to the prod registry as one group, on every push to
+`main` and with no switch, in three steps that the registry keeps apart: **stage** (upload, nothing visible), **test** (on the bytes the registry holds),
+**commit** (visible all at once). `prod-stage` needs `release` and `mopm-stage`: the set it stages is the one
+the README e2e of `mopm-stage` passed on, at the version of this run (below), so a release build or an e2e
+that failed stops the run before anything is staged in prod. There is no beta stage in front of prod. `//:release_workflow_cases` holds the job graph, the gates, the
+environments, the permissions, the commands and the order of the test's steps, and that no beta job and no schedule exists.
+
+**A member must be claimed on prod first.** The registry creates a package name only for its claimed owner, so a
+release member whose name is not claimed on the prod registry makes `prod-stage` refuse and turns `main` red. The
+pull request check cannot write to the live registry (and does not read it), so the names claimed there are
+committed in `release/prod_claimed_names.txt` (one per line, sorted), and `//release:prod_claimed_names_cases`
+refuses a pull request in which a member (every `src/<name>` with a `mopm.toml`, `PACKAGES` of
+`release/readme_e2e/packages.bzl`) is missing from it: "<name> is a member of the release and is not in
+release/prod_claimed_names.txt: claim it on the prod registry first, then add it to release/prod_claimed_names.txt".
+A maintainer adds a name to the file only after claiming it on the prod registry, in the pull request that adds the
+member. The file also refuses a line no member has, an unsorted or repeated line, and an empty file. It is a
+committed claim, not a live read: it does not notice a claim the registry lost, and `prod-stage` stays the
+last word.
+
+1. **`prod-stage`** runs `mopm publish --staged S --registry prod --oidc --no-commit`. The registry creates a
+   group, mopm uploads every file, and the run ends 0 with the outcome `staged`: the group is `open`, the
+   registry holds the bytes in quarantine, where nothing reads them, and no package is in the API, the
+   index or the channel. `state.json` in S names the group.
+2. **`prod-test`** reads S as `prod-stage` kept it. `release_staged_verify verify`
+   ([source](../tools/build/ci/release_beta_fetch/release_staged_verify.zig),
+   `//tools/build/ci:release_staged_verify`) refuses a plan it cannot check (the rules of
+   `release_beta_fetch`: every member an `upload` with its files and README, plain paths, a lowercase
+   sha256, a file below 64 MiB), compares every file with the plan and names every one that differs
+   (missing, another size, another hash), and only then writes `release/staged_set` from the bytes it
+   hashed: `state.json`, `report.json` and any file the plan does not name never reach the e2e. Then the
+   README e2e of every package runs on the farm against that directory, as `mopm-stage` ran it on the set
+   before the upload.
+3. **`prod-commit`** runs the same command without `--no-commit`. The directory is the artifact of
+   `prod-stage`, `state.json` is in it, so mopm asks for the same group (the group is a function of the
+   caller and the set; `plan_sha256` in the state refuses a directory whose plan changed), finds every file
+   held, commits and waits until the group is `visible`. The identity token of `prod-stage` was used once,
+   so this job makes its own exchange.
+4. **`prod-abort`** runs only when the stage, the test or the commit failed or the run was cancelled. It
+   ends the open group (`--abort`: it reads `plan.json` and `state.json`, none of the files), which gives
+   the actor's place among its open groups back at once; otherwise the registry expires the group after
+   twelve hours. It `needs` all three jobs that can fail because `failure()` looks only at the jobs a job
+   depends on: a test that failed would not reach an abort that needed `prod-stage` alone. A directory
+   without `state.json` means the stage failed before it asked for a group, and the step says there is
+   nothing to end. A group that was already committed is not ended: mopm refuses and says to yank it.
+5. **`prod-smoke`** runs once the group is visible. `release_staged_verify smoke` reads the prod index
+   (`https://api.mopm.dev/index/config.json`, whose `stage` must be `prod` and whose `channel_url` must be
+   exactly `https://conda.mopm.dev/`), downloads `<channel_url><subdir>/<filename>` for every file of the
+   plan (https, no redirect followed) and compares each file's sha256 and size with the plan, trying up to
+   five times 30 seconds apart because the channel's cache can lag a commit by a minute. On failure it
+   prints the exact `mopm yank --group <id> --registry prod --reason ...` for the group in `state.json`;
+   a person decides whether to run it.
+
+**The identity.** No job holds a registry token and the environment `prod` holds no secret. The three jobs
+that talk to the registry run in the environment `prod` and exchange the job's GitHub OIDC token; the
+registry trusts this repository's `release.yml`, run on `main` from a push, in the environment `prod`, and
+lets that identity act for the owner of the packages (the names are owned by the maintainers' account, not
+by the repository). `prod-test` is in the environment `build`, whose identity the registry does not trust,
+and runs nothing that reads a token.
+
+**What this proves.** The files the registry holds in quarantine, which it copies when the group is
+committed, are the files of S: the registry pinned each sha256 when it opened the group, and `prod-test`
+hashed the same directory against the same plan. The README examples of every package ran on exactly those
+bytes before anything was committed, and after the commit the channel serves bytes whose sha256 and size
+are the plan's.
+
+**What it does not prove.**
+- The registry's own verdict: a group can still end `rejected` after the tests passed (the commit job
+  fails and the group frees its versions); the tests do not read what the registry stored.
+- The registry's derived outputs (repodata, the sparse index) are not read: `prod-smoke` compares the
+  files themselves. `mopm add <package> --registry prod` from a clean machine is not exercised.
+- A package's own unit tests are not in the `.conda`: they ran when its `.mojoc` was built.
+- Native libraries are loaded as the packages say; no job installs a package from the registry and
+  loads its native dependencies.
+- A plan member that is not an `upload` (a version the registry already holds) makes the README e2e and
+  `release_staged_verify` refuse the set; a release publishes only a set of new versions, which is why every
+  run gives the members the version `0.1.<run number>` (below).
+
+**Needs a mopm with `--no-commit` and `--abort`.** The jobs run the mopm that `mopm-stage` built: the pin
+`MOPM` in [`packages.bzl`](../release/readme_e2e/packages.bzl) (`toolchains//:mopm_0_0_86` in the
+`mopm-stage` job). The first mopm release with both flags is 0.0.66, so the pin has them; a later move of
+the pin must keep them, in the same change as the toolchain entry the job builds.
+
+#### Before the first release
+
+This is the one-time setup of the registry, outside this repository. It is done for komira's packages on
+`prod`; it is listed because a repository that copies this workflow must do the same before its first push.
+There is no variable that turns the publish on or off, so a push before the registry is ready fails at
+the first request that is refused and changes nothing, but that must not be the way it is found out. In
+this order:
+
+1. On the registry, the package names exist under the maintainers' publishing account (a personal account the
+   maintainers designate, not an organization owner): that account claims the name of every package in
+   [`packages.bzl`](../release/readme_e2e/packages.bzl) (every `src/` directory with a `mopm.toml`) on `prod`.
+   Ownership is a registry record, not something `mopm.toml` can express.
+2. The registry's group publish is live on `prod` for that account, and the registry trusts this
+   repository's `release.yml`, run on `main` from a push, in the environment `prod`, as a CI publisher of
+   the owner. Without it the exchange is refused (`oidc_not_trusted`) and nothing is created. The registry's
+   trust should match the ref, the `job_workflow_ref` and the event (`push`), not the environment alone.
+3. The GitHub environment `prod` deploys only from `main` (selected branches, `main` only). The
+   OIDC subject the registry sees names the environment, and a workflow on any branch can declare the same
+   environment, so the environment's branch rule is what keeps a branch out; each job's `if` is a second lock,
+   and `==` on `github.ref` compares ignoring case.
+4. The pinned mopm has `--no-commit` and `--abort` (above).
+5. The versions: nothing to set. Each release carries the version `0.1.<run number>` (next section), so no
+   version has to be reserved.
+
+The prod jobs start only on a push to `main`: a manual run builds and stages and publishes nothing.
+
+**Prod only on a push: a release without a push is not supported.** A manual run never reaches the
+environment `prod` (it is break-glass and publishes nothing). To release, merge to `main`: the push is the
+release, and its version is its run number.
+
+#### The version of every release
+
+A registry creates a (name, version) pair once, and a mopm version is exactly `MAJOR.MINOR.PATCH`:
+`+b123`, `-b123`, `.post123` and `.dev123` are not versions. A registry that holds a version with other
+bytes refuses the set (`mopm stage` fails, and the README e2e refuses a plan member that is not an
+`upload`), so a fixed version in `mopm.toml` would let only the first release through. So every push to
+`main` gives each member of the checkout of `mopm-stage` the version
+`0.1.<github.run_number>` before `mopm stage`, and the set that is staged, tested and committed in prod
+has exactly those versions. The number stays inside the
+`>=0.1,<0.2` the packages ask of each other, sorts above `0.1.0`, and the newest push is the newest
+version. A run that was replaced while pending (above) used a number that is never published, so the
+published versions can skip numbers. The README e2e of `mopm-stage` and `prod-test` is told the number with
+`-c komira_release.beta_version=0.1.<run number>` (the name is from when a beta publish took it; it is
+optional with `staged=stage`, and the tool and the option keep their names so the labels and action keys do
+not move). Nothing is committed or pushed back: the
+rewritten files exist only on the runner of `mopm-stage`, and `mopm.toml` in the repository keeps its own version.
+
+[`release_beta_version`](../tools/build/ci/release_beta_version/release_beta_version.zig)
+(`//tools/build/ci:release_beta_version`, built and run by `mopm-stage`) takes `--workspace-root <dir> --version 0.1.<n>`. `mopm stage` reads
+each version from `mopm.toml` when it runs, and the `.mojoc` files the build made carry none, so the
+rewrite before the stage is all the packages need: the artifacts are not rebuilt. It edits the text of
+each member's manifest (found the way `mopm stage` finds them) and keeps every other byte:
+
+- `[package] version` becomes the new version;
+- in `[dependencies]` and `[dev-dependencies]`, a requirement on another member with an exact
+  comparator `=X.Y.Z` (a string, an inline table's `version`, or `[dependencies.<name>]`'s `version`)
+  gets the new number, because `mopm stage` checks each requirement against the member's version.
+  Every other comparator (`^0.1`, `>=0.1, <0.2`, `~0.1.0`, `0.1`, `*`, `=0.1`) accepts every `0.1.x`
+  and is kept; `mopm stage` itself refuses a range that does not accept the new version.
+
+It writes nothing and fails when the version is not `0.1.<PATCH>` (digits, no leading zeros, no
+suffix), a member's version is not in `0.1.x`, two members share a name, a requirement on a member is
+not comparators it can read or pins a number the member does not have, or a manifest holds a
+multi-line string or a dependency line it cannot read. Running it again with the same version changes
+nothing. Its cases (`//tools/build/ci:release_beta_version_unit`) run on scratch workspaces, and
+`//:release_workflow_cases` holds the placement: the rewrite is in `mopm-stage`,
+before the stage, with the run number, and the e2e of `mopm-stage` and `prod-test` is given the same number.
+
+#### The plan reader and the registry client
+
+[`release_beta_fetch.zig`](../tools/build/ci/release_beta_fetch/release_beta_fetch.zig) holds what
+`release_staged_verify` shares with the old beta check: the plan reader (it refuses a plan it cannot
+check: no member, a member that is not an `upload`, a path that leaves its directory, a malformed
+sha256, a file above 64 MiB, a name listed twice, two paths of the set that collide, in any letter case)
+and the https client that reads a registry's index and files with no redirect followed. It is no longer
+built as a program of its own (the beta job that ran it is gone); its cases
+(`//tools/build/ci:release_beta_fetch_unit`) run against a registry in memory and a socket on
+loopback, and cover a changed byte, another size, a missing package, an index of another stage, and
+a redirect.
+
+> **Removed: publishing.** The rest of this page, from "Continuous
+> auto-promotion" to "GitHub settings the release relies on", describes the
+> publishing stages (`beta`, `beta_validate`, `prod`) of the retired workflow
+> `kci.yml` (replaced by `release.yml`, above), which ran `kci`, and the
+> channels they published to. Every mention of `kci.yml` there is that
+> workflow, deleted; `release.yml` has none of its stages, environments or
+> gates. It is kept as the description of what kci's publish machinery
+> enforces (the rules are still tested, against a fixture pair in
+> `src/kci_workflow_check/tests/data`) until kci itself is retired. Read it as
+> history, not as what a push to `main` does today.
 
 ### Continuous auto-promotion
 
-A push to `main` IS the release: `build` -> `gamma` -> `validate` -> `prod`,
-with no manual step. `prod` starts only when `gamma` and `validate` both
+A push to `main` IS the release: `build` -> `beta` -> `beta_validate` -> `prod`,
+with no manual step. `prod` starts only when `beta` and `beta_validate` both
 succeeded in the same run (no job-level `if:` names `always()`, so GitHub's
 implicit `success()` holds). A push that touches only documentation
 (`docs/**`, `**.md`) starts no run: `release_version.sh` does not count those
@@ -305,9 +653,9 @@ lists equal). A push that changes nothing a package carries (a `.github`-only
 push) rebuilds the same bytes under the same name and build number, and each
 channel answers NOOP (exit 0).
 
-- **Only a push to `main` reaches `prod`.** A manual run of `main` is
-  break-glass like any other manual run and stops at `gamma`. The `prod`
-  job's `if:` carries `github.event_name == 'push' && github.ref ==
+- **Only a push to `main` reaches `beta` or `prod`.** A manual run of `main` is
+  break-glass like any other manual run and stops at `build`. The `beta`,
+  `beta_validate` and `prod` jobs' `if:` each carries `github.event_name == 'push' && github.ref ==
   'refs/heads/main'` (rule R15). ⚠ GitHub compares strings IGNORING CASE, so
   that `if:` also passes for a branch named `MAIN`: it is defence in depth,
   not the lock. The locks are, in order: the `prod` environment's
@@ -343,7 +691,7 @@ channel answers NOOP (exit 0).
   `env:`, to `${{ github.event_name == 'workflow_dispatch' &&
   inputs.dry_run }}`, and no job or step sets its own; `--plan` appears in
   a release job only as `if [ "$DRY_RUN" = true ]; then set -- --plan; fi`
-  (rule R22). So `validate` validates FOR REAL on every push: a `validate`
+  (rule R22). So `beta_validate` validates FOR REAL on every push: a `beta_validate`
   that ran `--plan` on a push (the earlier `github.event_name !=
   'workflow_dispatch' || inputs.dry_run`) would let `prod` publish what
   nothing installed. A release job's script also names `DRY_RUN` only in
@@ -354,10 +702,25 @@ channel answers NOOP (exit 0).
   Those are lint rules a script could spell around. **The lock is kci**,
   which on a push is built from `main`: it refuses `--plan` on a push to
   `refs/heads/main` for every stage (exit 3, `KCI-E-PLAN-ON-RELEASE`), and
-  its result carries a `set_hash` only for a run that is not `--plan` and,
-  when it selects validations, whose every validation VALIDATED and
-  SUCCEEDED. `validate`'s `validated_set_hash` comes from that field, so a
-  dry run hands `prod` nothing, and `prod` refuses an empty hash.
+  its result carries a `set_hash` only for a run that is not `--plan`, that
+  ended SUCCEEDED or NOOP, and, when it selects validations, whose every
+  validation VALIDATED and SUCCEEDED. `beta_validate`'s `validated_set_hash`
+  comes from that field, so a dry run, a failed run or a SUPERSEDED run
+  (exit 0) hands `prod` nothing, and `prod` refuses an empty hash.
+- **A failed DEPLOY step stops the run, and nothing rolls it back.** `kci
+  run` stops at the first step that does not end SUCCEEDED or NOOP. A DEPLOY
+  step that ends FAILED or PARTIAL leaves its cell exactly as the failed
+  apply left it: kci does not unwind what landed, and a later step of the
+  stage (a DEPLOY step into another cell included) has no row and never
+  runs. The job exits non-zero (4 or 6), so no job that `needs:` it starts,
+  and the run's result carries no `set_hash`, so the next stage, which
+  refuses an empty hash, could not start from it either. The recovery is a
+  fixed revision pushed to `main`: its apply completes what the failed one
+  left `pending`. `--rollback-on-failure`, which would re-apply the failed
+  cell at its last known-good revision, needs a per-cell deployed-revision
+  record that kci does not have yet, so kci refuses the flag on every stage,
+  with or without `--plan`, before it reads anything (exit 2,
+  `KCI-E-USAGE`, no RUNNING record).
 - **Queued runs: one release at a time, newest push wins.** A PUSH to `main`
   is in the concurrency group `kci-release-main` (rule R16 holds the group
   text byte for byte). A running release is never cancelled. GitHub keeps at
@@ -418,10 +781,11 @@ channel answers NOOP (exit 0).
     taking the branch's changes back out. A history git cannot list (a
     shallow clone, no `RUNNER_TEMP`) is exit 5, never a pass.
 
-  The rule is the run's, not the stage's: a push to `main` holds `gamma` to
-  it too, where it counts only `gamma`'s MAIN-LINE builds (those whose
-  `h<8 hex>` is a commit on `main`'s freshly fetched history; a branch's
-  break-glass build is reported and not counted). Before refusing, kci asks
+  The rule is the run's, not the stage's: a push to `main` holds `beta` to
+  it too, where it counts every build in `beta` (beta is not a `break_glass`
+  stage, so no break-glass build reaches its channel; for a `break_glass`
+  stage kci counts only the channel's MAIN-LINE builds, those whose
+  `h<8 hex>` is a commit on `main`'s freshly fetched history). Before refusing, kci asks
   git whether the release revision is on the history of the commit the
   channel's newest build names (`git rev-parse --verify`, then `git
   merge-base --is-ancestor`): when it is, a newer release is already in the
@@ -437,8 +801,8 @@ channel answers NOOP (exit 0).
   (`if: always()`, rule R20), which writes one plain line to the job summary
   and to the log: `prod: SKIPPED (<job> <status>: exit <n>)` when that job
   did not succeed, `prod: SKIPPED (nothing to release)`, `prod: SKIPPED
-  (break-glass: a workflow_dispatch of <ref> reaches gamma only)`, or, from
-  `validate`, `prod: NEXT (runs automatically; it waits only while the prod
+  (break-glass: a workflow_dispatch of <ref> builds only; beta and prod run on
+  a push to main)` from `build`, or, from `beta_validate`, `prod: NEXT (runs automatically; it waits only while the prod
   environment has a required reviewer)`. `prod`'s own `kci run` writes
   `promoted to prod: <names> <build>` or `promoted to prod: nothing new
   (<build> already there)` and the commits it carried; its last step writes
@@ -459,8 +823,9 @@ re-run for up to 30 days. "Re-run failed jobs" also reuses the run's own
 `KCI-E-SUPERSEDED` and no `KCI-E-PLAN-ON-RELEASE` check. So a re-run of a
 MANUAL run of `main` started before this file merged is a way into `prod`
 that is not a push to `main`, and can publish an older build there. Its
-`gamma` job also runs in the environment `gamma` from a manual run, with no
-break-glass reason and no reviewer. Neither `kci.yml` nor `kci` can refuse
+`gamma` job (the old stage's, publishing to the old channel `komira-ai/gamma`
+until M3 removes that channel's publishers) also runs in the environment
+`gamma` from a manual run, with no break-glass reason and no reviewer. Neither `kci.yml` nor `kci` can refuse
 it: the re-run runs neither of them as they are now.
 
 The runs, read on 2026-10-05 (`gh api
@@ -508,7 +873,7 @@ configured protection rules** is UNCHECKED on `prod` (by default it is
 checked, and then a repository administrator can force a waiting prod job
 to proceed with no approval; the pause would bind everyone but
 administrators). Every prod job from then on waits for approval;
-build, gamma and validate still run for the revision being released. Because
+build, beta and beta_validate still run for the revision being released. Because
 a release holds the `kci-release-main` group until its prod job ends, a
 waiting prod job also holds back later pushes: at most one newer run waits as
 pending (newer pushes replace it). **To resume**, remove the reviewer AND
@@ -523,82 +888,64 @@ The two side effects of a pause, in short: later pushes queue behind the
 waiting `prod` job (only the newest one stays pending), and the waiting job
 must itself be approved or rejected after the reviewer is removed.
 
-### Break-glass: a manual run to gamma
+### Break-glass: a manual run builds only
 
 Every manual run (`workflow_dispatch`, of a branch or of `main`) is
-BREAK-GLASS: it builds its revision and publishes it to `komira-ai/gamma`
-(and validates it there), and never reaches `prod`. Its `gamma` job runs in
-the GitHub environment **`gamma-breakglass`** (the machine file's
-`break_glass_environment` for the stage `gamma`; rule R2 holds the job's
-`environment:` to exactly `${{ github.event_name == 'push' && 'gamma' ||
-'gamma-breakglass' }}`), which has a REQUIRED REVIEWER and administrator
-bypass turned off, so every break-glass publish waits for an approval that
-GitHub records with the run. The gamma
-channel trusts `gamma-breakglass` as a second trusted publisher
-(`break_glass_push_identity` in `release/channels.textproto`), and kci
-publishes a break-glass run only from it (`KCI-E-STAGE-ENVIRONMENT`
-otherwise). The input `reason` is required; it reaches kci only through each
-job's `env:` (`--context reason=...`), never inside a `run:` script (rule
-R18; nor in a `with: script:`, and no step's or job's `name:` holds any
-expression at all), and kci refuses a break-glass run without one, with
-one that is only whitespace, or with one over 200 bytes once trimmed
-(exit 3, `KCI-E-BREAK-GLASS-REASON`). A break-glass run that can publish
-releases the commit it started on: a `revision` input is for a dry run only, on the history of that commit (kci refuses any other, exit 3, `KCI-E-BREAK-GLASS-REVISION`). Every job's summary of such a run
-starts `BREAK-GLASS: <ref> <revision> by <actor>: <reason>`.
+BREAK-GLASS: it builds its revision on the farm and PUBLISHES NOTHING. `build`
+is the machine file's only `break_glass` stage; `beta` and `prod` are not, so
+three things keep a manual run out of their channels: each of their jobs'
+`if:` carries `github.event_name == 'push' && github.ref ==
+'refs/heads/main'` (rule R15, which the retired welded test `test_repo_kci_yml` held
+for `beta` and `beta_validate` with one refused mutation per conjunct), each
+job's step `only a push to main reaches this job` compares the event and
+`GITHUB_REF` byte for byte (rule R21), and kci refuses a stage without
+`break_glass` on any run but a push to `main` (exit 3, `KCI-E-NOT-ON-MAIN`).
+No break-glass environment exists or is named (no `beta-breakglass`): to
+publish a fix to `beta`, merge it to `main`. The input `reason` is required;
+it reaches kci only through each job's `env:` (`--context reason=...`), never
+inside a `run:` script (rule R18; nor in a `with: script:`, and no step's or
+job's `name:` holds any expression at all), and kci refuses a break-glass run
+without one, with one that is only whitespace, or with one over 200 bytes once
+trimmed (exit 3, `KCI-E-BREAK-GLASS-REASON`). A break-glass run that is not a
+dry run builds the commit it started on: a `revision` input is for a dry run
+only, on the history of that commit (kci refuses any other, exit 3,
+`KCI-E-BREAK-GLASS-REVISION`). Every job's summary of such a run starts
+`BREAK-GLASS: <ref> <revision> by <actor>: <reason>`.
 
 **What is the lock, and what is not.** A pull request's run uses the
 pull request's own `kci.yml`, and a run of a branch (a manual run, or a push
 to a branch whose own `kci.yml` adds it as a push trigger) uses that
 branch's own `kci.yml` and builds that branch's own `kci`. Anyone with
 write access can make either one. So NOTHING in `kci.yml` or in kci can stop
-such a run from naming an environment and asking for an identity token:
-the reason is recorded by kci only when the branch's `kci.yml` and kci are
-unmodified. The locks are GitHub's settings: `gamma` and `prod` deploy only
-from `main` (a job naming either from a pull request's merge ref or another
-branch is rejected before it starts, and GitHub's identity token for a job
-in an environment names only the environment, so the environment's branch
-rule is what stands between a branch and the channel's trusted publisher),
-and `gamma-breakglass` needs a reviewer's approval for every job. ⚠ **Until
-the settings in [GitHub settings](#github-settings-the-release-relies-on)
-are in place, anyone with write access can publish any branch, or any
-same-repository pull request, to gamma, with no recorded reason.**
-
-Known residual: a break-glass build of a branch commit can carry the same
-build number as a later `main` release (a different `h<8 hex>` string, so
-the registry accepts both); a gamma consumer solving "latest" may pick
-either until `main`'s next number.
+such a run from naming an environment and asking for an identity token. The
+locks are GitHub's settings: `prod` deploys only from `main` (a job naming it
+from a pull request's merge ref or another branch is rejected before it
+starts, and GitHub's identity token for a job in an environment names only
+the environment, so the environment's branch rule is what stands between a
+branch and the channel's trusted publisher). ⚠ **The environment `beta` has
+no deployment branch rule (the project owner's choice), so a branch whose own
+`kci.yml` drops the `if:` and the step can publish that branch to
+`komira-ai/beta` with no recorded reason.** `beta` is a test channel
+(consumers install from `prod`, which a branch cannot reach); setting `beta`'s
+deployment branches to `main` only would close it.
 
 ### GitHub settings the release relies on
 
 None of these is in the repository; each is a setting an administrator
-makes, and the release is only as safe as they are. ⚠ The `gamma`,
-`gamma-breakglass`, second-publisher and ruleset rows are NOT set yet: until
-they are, a branch's own `kci.yml` can still publish to gamma, and every
-break-glass publish is refused by prefix.dev (no trusted publisher for
-`gamma-breakglass`).
+makes, and the release is only as safe as they are. ⚠ The environment `beta`
+has NO deployment branch rule (the project owner's choice): `kci.yml`'s `if:`,
+its push-to-main step and kci keep a run of an unmodified `kci.yml` out of
+`komira-ai/beta`, and nothing keeps a branch's own modified copy out
+([Break-glass](#break-glass-a-manual-run-builds-only)). The ruleset row is
+NOT set yet.
 
-⚠ **GitHub creates an environment the first time a job names it, with NO
-protection rules** (GitHub's documentation, "Managing environments for
-deployment": the newly created environment "will not have any protection
-rules"). So `gamma-breakglass` may already exist when you get to it: any
-manual run after this file is on `main`, or any push to a branch whose own
-`kci.yml` names it, creates it with no reviewer. Its existing is NOT the
-setting. Open it and confirm the Required reviewers rule is on it. **Do not
-add the prefix.dev publisher for `gamma-breakglass` until that environment
-shows a required reviewer**: with the publisher and no reviewer, every
-break-glass run publishes to gamma unapproved.
-
-⚠ **A recorded reason is guaranteed only for a run of an unmodified
-`kci.yml`.** `gamma-breakglass` deploys from any branch, and GitHub matches
-the branch rule against the run's ref. So a same-repository pull request, or
-a push to a branch whose own `kci.yml` names `environment:
-gamma-breakglass`, reaches the gamma publisher with no `reason` input and no
-kci reason check (that check is in the branch's own kci). The reviewer's
-approval is the only gate there. **The reviewer must refuse any
-`gamma-breakglass` job whose run is not a `workflow_dispatch` of `kci.yml`,
-or whose summary lacks the line `BREAK-GLASS: <ref> <revision> by <actor>:
-<reason>`.** Turn on **Prevent self-review** for `gamma-breakglass` so that
-the approval comes from a second person.
+The old channel `komira-ai/gamma` received the releases before the stage
+`beta` replaced the stage `gamma` (the staged pipeline's M2,
+[staged_pipeline.md](design/staged_pipeline.md), section e3). No workflow
+names it, `gamma-breakglass` or the old stage any more; its trusted
+publishers (whichever the host holds for `environment:gamma` and
+`environment:gamma-breakglass`) stay until M3 removes them, and the channel itself until M4. Until M3, a job in the
+environment `gamma` or `gamma-breakglass` can still publish to it.
 
 ⚠ **Administrators bypass a reviewer by default.** GitHub's documentation
 ("Managing environments for deployment"): "By default, administrators can
@@ -607,13 +954,11 @@ environments"; its 2023-03-01 changelog adds that an administrator can
 "bypass all protection rules on a given environment ... and force the
 pending jobs referencing the environment to proceed". So with the box
 **Allow administrators to bypass configured protection rules** checked (the
-default), a repository administrator can force a `gamma-breakglass` job, a
-pull request's or a branch push's own included (no reason input, no kci
-reason check), and a paused `prod` job, with no second person's approval.
-Uncheck it on `gamma-breakglass` and on `prod`. The bypass forces a PENDING
+default), a repository administrator can force a paused `prod` job with no
+second person's approval. Uncheck it on `prod`. The bypass forces a PENDING
 job; a job a deployment branch rule refuses is not pending, and GitHub
 matches that rule against the run's `GITHUB_REF` (`refs/pull/<n>/merge` for
-a pull request), so the `main`-only rule on `gamma` and `prod` holds either
+a pull request), so the `main`-only rule on `prod` holds either
 way. **Residual with every setting applied:** an administrator can re-check
 the box or change any setting here; these settings bind runs, not the
 administrators who own them (GitHub's audit log records the change).
@@ -633,9 +978,9 @@ HEAD:refs/heads/MAIN`); it must be refused.
 | environment `prod`, deployment branches | Selected: `main` | only `main` publishes to prod (already set) |
 | environment `prod`, administrator bypass | **Allow administrators to bypass configured protection rules UNCHECKED** | a pause ([Pausing promotion to prod](#pausing-promotion-to-prod)) holds administrators too |
 | manual runs of `main` started before this file merged (`37239801770`, `37238572861`, and any later one) | deleted, before or when this merges (the only closing action: a reviewer on `prod` leaves the old `gamma` job, environment `gamma` on a manual run of `main`, open) | a re-run of one runs the OLD `kci.yml` (gamma as `gamma` and prod on any manual run) and the old `kci`, which nothing here can refuse ([Re-runs of runs from before auto-promotion](#re-runs-of-runs-from-before-auto-promotion-a-ceo-action)) |
-| environment `gamma`, deployment branches | Selected: `main` | only `main` publishes to gamma without break-glass |
-| environment `gamma-breakglass` (FIRST: before the next row) | any branch, **required reviewer**, **Prevent self-review**, **Allow administrators to bypass configured protection rules UNCHECKED**. It may already exist, auto-created by GitHub with no protection: confirm the reviewer rule is on it | every break-glass publish waits for a recorded approval by a second person (for a run of an unmodified `kci.yml` the reason is recorded too; for any other run, the reviewer refuses it) |
-| prefix.dev `komira-ai/gamma`, trusted publishers (ONLY AFTER `gamma-breakglass` shows a required reviewer) | `komira-ai/komira`, `kci.yml`, environment `gamma`, AND a second one for environment `gamma-breakglass` | a break-glass run can publish to gamma at all (without it, every break-glass publish is refused by prefix.dev) |
+| environment `beta`, deployment branches | none (the project owner's choice; `main` only would lock it) | nothing: a branch's own modified `kci.yml` can publish to beta ([Break-glass](#break-glass-a-manual-run-builds-only)) |
+| prefix.dev `komira-ai/beta`, trusted publisher | `komira-ai/komira`, `kci.yml`, environment `beta` only | only a job in the environment `beta` publishes to beta (set) |
+| prefix.dev `komira-ai/gamma`, trusted publishers | removed (M3, after the first green release to beta) | the old channel takes nothing more |
 | prefix.dev `komira-ai/prod`, trusted publisher | `komira-ai/komira`, `kci.yml`, environment `prod` only | (already set) |
 | repository ruleset, then VERIFIED | block creating and updating branches and tags matching `[Mm][Aa][Ii][Nn]` except the branch `main`, and the tag `main`. Then try to create the branch `MAIN`: it must be refused | no ref that is `main` in another case exists, so GitHub's case-insensitive `if:` and concurrency comparisons cannot be fooled by one (whether the environment branch rule `main` matches `MAIN` is undocumented). Until the check passes, prod's case-variant exposure is OPEN |
 
@@ -646,8 +991,8 @@ HEAD:refs/heads/MAIN`); it must be refused.
   stderr line says `-- not a full run`. `--only step:<name>` runs the step
   WITHOUT its validations; only a FULL run runs both. A release job runs its
   whole stage unless the stage is split over jobs that together run all of
-  it exactly once (rule R9, amended and pending a ruling): here only `gamma`
-  is, into `gamma` and `validate`. `--plan` is the dry run of a whole stage.
+  it exactly once (rule R9, amended and pending a ruling): here only `beta`
+  is, into `beta` and `beta_validate`. `--plan` is the dry run of a whole stage.
 - **The workflow is checked at start-up.** Under GitHub Actions
   (`GITHUB_ACTIONS=true`), before it runs anything, `kci run` reads the
   workflow file it runs under as it was committed (`GITHUB_WORKFLOW_REF`'s
@@ -666,16 +1011,16 @@ HEAD:refs/heads/MAIN`); it must be refused.
   filter, the set hash handed on, the prod line, and a release job's
   permissions `contents: read` and `id-token` only). A mismatch is refused (exit 3, `KCI-E-WORKFLOW-MISMATCH`, every
   finding listed, nothing run); an unreadable workflow or channels file, or a
-  missing variable, is exit 5 and never a pass. The same check is the welded
-  test `src/kci_workflow_check/tests/test_repo_kci_yml.mojo`, so a drift also
-  fails `./buck2 build //...`. Consequence: a revision whose machine file
+  missing variable, is exit 5 and never a pass. The same check was the welded
+  test `src/kci_workflow_check/tests/test_repo_kci_yml.mojo` (deleted with
+  `kci.yml`), so a drift also failed `./buck2 build //...`. Consequence: a revision whose machine file
   disagrees with the running `kci.yml` cannot be released by it (a manual run
   of an old revision is refused, exit 3).
 - **Triggers:** a push to `main` (not a documentation-only one) and a manual
   run (`workflow_dispatch`), and nothing else: kci.yml has **no `pull_request`
   trigger** (one added is refused by rule R6, as is `pull_request_target` and
   every other event), so a pull request never starts it and never shows a
-  skipped gamma, validate, prod or build job. No environment, publishing token
+  skipped beta, beta_validate, prod or build job. No environment, publishing token
   or release job is reached from a pull request's code. The push trigger is
   exactly `branches: [main]` with the documentation `paths-ignore` (rule R17).
   Rule R6 of `src/kci_workflow_check` holds all of it, and holds pr.yml to the pull
@@ -687,10 +1032,13 @@ HEAD:refs/heads/MAIN`); it must be refused.
   requires `REVISION` to be on `main`'s history for a run of `main`, and on
   the branch's own history for a break-glass run, so no run publishes an
   unmerged commit to `prod`.
-- **Dry run on request.** A push is a real run. A manual run is a real run
-  unless its input `dry_run` is true (`--plan` for gamma, validate and prod;
-  `build` always builds).
-- **What a dry run proves.** For each publish job: the release set verifies
+- **Dry run on request.** A push is a real run. A manual run reaches `build`
+  only, which always builds; its input `dry_run` lets it name a `revision`
+  on the history of the commit it started on. No publish job runs on a
+  manual run, so no workflow run is a dry run of a publish; `kci run --plan`
+  on a developer's machine (not under GitHub Actions) is.
+- **What a dry run of a publish job would prove** (a `--plan` run under
+  GitHub Actions; no job of `kci.yml` makes one today): the release set verifies
   (members, closure, set hash, platform); the channel's repodata and files
   read anonymously at the URLs kci builds; the job gets a GitHub ID token
   (`id-token: write` is there and the environment gate was passed); its
@@ -702,17 +1050,17 @@ HEAD:refs/heads/MAIN`); it must be refused.
   the publisher that matched belongs to that channel (the mint request names
   no channel), that it may write (a publisher saved as read-only still
   mints), the upload request itself, or the read-back after an upload. The
-  first real gamma publish proves those for gamma.
+  first real beta publish proves those for beta.
 - **NEW NAMES, before prod.** Which names a release publishes is
   `release/artifacts.textproto`'s, reviewed through CODEOWNERS; there is no
   per-run claim. Every publish step reads its channel first and reports the
   declared names the channel holds no file of yet (NEW NAMES) in its result
   file (`new_names[]`) and in the job summary. Each `kci run` also reports
-  the NEW NAMES of the stages after it: **the `gamma` job's summary shows the
+  the NEW NAMES of the stages after it: **the `beta` job's summary shows the
   names new to `komira-ai/prod`** before `prod` publishes them (a first
   publish of a name is the one effect a later release cannot undo; pause
   promotion, above, to read it first). A run given no release version (the
-  `validate` job) cannot name the files and says `lookahead skipped`. A
+  `beta_validate` job) cannot name the files and says `lookahead skipped`. A
   channel that could not be read is reported "not read", never "none". A dry
   run reports the same.
 - **One record.** Every kci invocation writes kci's result document
@@ -725,7 +1073,7 @@ HEAD:refs/heads/MAIN`); it must be refused.
   `--context` lines. The exit numbers are kci's one table: publishing a set
   the channel already holds, byte for byte, is exit 0.
 - **Validations.** A publish step can declare validations (`validation {
-  kind: CONDA_INSTALL_ENV ... }`); gamma has two: `install-komira-encoding`
+  kind: CONDA_INSTALL_ENV ... }`); beta has two: `install-komira-encoding`
   installs `komira_encoding` ALONE (its own requirements must suffice) and
   `install-set` installs `komira_all` ALONE. kci runs them after the step in
   a FULL run, or alone with `--only validation:<name>` against what is
@@ -763,7 +1111,7 @@ HEAD:refs/heads/MAIN`); it must be refused.
   release that is not published yet: `komira_pack conda-index --out-dir <dir>
   --package-manifest <release dir>/<platform>/<name>/manifest.json ...`
   writes a local conda channel (the files, each subdir's `repodata.json`
-  from the packages' own `info/index.json`), and `kci run --stage gamma
+  from the packages' own `info/index.json`), and `kci run --stage beta
   --only validation:<name> ... --channel file:///<dir>` reads and installs
   from it instead of the step's channel (only the compiler and extra
   channels are asked over the network). `--channel` is refused unless the
@@ -779,10 +1127,10 @@ HEAD:refs/heads/MAIN`); it must be refused.
   ([release/validations/defs.bzl](../release/validations/defs.bzl)): no
   `--scratch-dir` means a fresh directory under the system temp directory.
   The targets are the machine file's validations, both ways
-  (`kci_release_machine`'s welded test), and the `validate` job's `kci run`
-  passes what they pass (`test_repo_kci_yml`), so a developer and the
-  workflow run the same thing.
-- **The channels.** prefix.dev channels `komira-ai/gamma` and
+  (`kci_release_machine`'s welded test), and the `beta_validate` job's `kci run`
+  passed what they pass (`test_repo_kci_yml`, deleted with `kci.yml`), so a
+  developer and the workflow ran the same thing.
+- **The channels.** prefix.dev channels `komira-ai/beta` and
   `komira-ai/prod` ([release/channels.textproto](../release/channels.textproto)),
   both public. Uploads go to `https://prefix.dev/api/v1/upload/komira-ai/<channel>`
   and reads to `https://prefix.dev/komira-ai/<channel>/<subdir>/repodata.json`
@@ -790,7 +1138,7 @@ HEAD:refs/heads/MAIN`); it must be refused.
   [API](https://prefix.dev/docs/prefix/api)).
 - **No secret.** Each channel's credential is trusted publishing: the channel
   trusts this repository, the workflow file `kci.yml` and one GitHub
-  environment (`gamma` or `prod`), and kci exchanges the job's ID token itself
+  environment (`beta` or `prod`), and kci exchanges the job's ID token itself
   (audience `prefix.dev`). kci refuses a token whose environment is not the
   stage's. The publish jobs are top-level jobs of `kci.yml` on purpose: a
   reusable-workflow call changes the token's workflow claim. The `prod`
@@ -806,155 +1154,6 @@ HEAD:refs/heads/MAIN`); it must be refused.
 - **Known residual:** the publish jobs run the kci binary the `build` job made
   (it travels in the workflow artifact). How kci itself reaches the runner is
   an open design question.
-
-### The per-change check's units
-
-`kci run --stage pr --affected-by <base>` builds UNITS, and a unit passes only
-when it builds and its tests pass. The units are derived when the check runs,
-so the release files list no package:
-
-- **Declared:** the artifacts of `release/artifacts.textproto` (and any
-  explicit `checks` it declares, to group targets its own way).
-- **Derived:** the buck2 build system's `derive_checks` command,
-  `release/ci/derive_checks.py`, reads `//...` and `tests//functional/...`
-  from the live graph (`buck2 cquery`) and answers one check per path group
-  for every target no declared unit names or matches: `<p>` for each
-  library `//src/<p>/...` and each test-only package
-  `//src/tests/<kind>/<p>/...`, `repo_root` for `//:`, `tools_<t>` for each
-  `//tools/<t>/...`, `<d>` for any other top directory, `functional_tests`
-  for `tests//functional/...`; a name an artifact holds gets `_package`.
-  Every name is one kci accepts (`[a-z][a-z0-9_]*`) whatever the directory
-  is called: upper case becomes lower, any other character `_`, and a name
-  not starting with a letter gets `pkg_` (`//src/3d` is `pkg_3d`); groups
-  whose names meet are one check. kci adds them after the declared units,
-  under the file's own rules.
-- **Coverage by construction:** every target of the graph is in some unit. A
-  pull request that adds a package gets a check for it, and one that deletes
-  a package no longer derives one; neither edits a release file.
-- **A declared target that matches nothing:** for a check, a NOTICE line in
-  the result (the package it named is gone; the rest of the check builds);
-  for an artifact, a refusal (`KCI-E-ARTIFACT`): a release must build what an
-  artifact names. A derive tool that fails or answers outside its grammar is
-  "cannot tell" (`KCI-E-AFFECTED`), never a pass.
-- **A universe the derive tool cannot query:** when its `buck2 cquery` fails,
-  for any reason (a target with an unknown or invisible dependency, a
-  transport error, a buck2 that does not start), `derive_checks.py` answers
-  one `BROKEN <reason>` line holding buck2's error, and kci FAILS the check
-  (`KCI-E-BUILD-FAILED`): nothing is built, and no affected command runs.
-
-**Which units a change reaches:** each build system's `affected` command,
-`buck2 run //tools/build/ci:affected` ([`tools/build/ci`](../tools/build/ci)),
-maps the change's files to the targets that own them (a `BUCK` file to its
-package, a `.bzl` file to every package that loads it, a deleted file to the
-package that held it at the base commit), takes their reverse dependencies, and
-answers the units whose targets (labels, or the package patterns of the derived
-checks) are among them. A file it cannot map, and a change to `.buckconfig`,
-the toolchains, `tools/build`, `prelude` or `third_party`
-([`rules.txt`](../tools/build/ci/rules.txt)), answer `WIDENED`: every unit.
-A widened answer is given only after `buck2 cquery` configures the whole
-universe. A failed query is never a widening: when the query mapping the
-files, the reverse-dependency query or the query configuring the universe
-fails, for any reason (a target with an unknown or invisible dependency, a
-transport error), the answer is `BROKEN`, carrying buck2's error (its
-stderr whole up to 8 KiB, else the first and last 4 KiB), and kci FAILS the
-check (`KCI-E-BUILD-FAILED`). The decision is the failure, not buck2's text:
-the target buck2 names, when it names one, only leads the message. So a
-change that plants a target buck2 cannot configure fails its own check,
-widened or not. A
-non-empty change that reaches no unit answers `AFFECTED 0`, which kci refuses
-(`KCI-E-AFFECTED-VACUOUS`): never a pass. The job's checkout has the full
-history, so the base commit is there. In `pr.yml` the base is the first parent
-of the merge commit the job builds, so the change is the pull request's alone
-however far `main` has moved since the pull request's event.
-
-**How the reached units are built:** units whose `build_targets` commands are
-identical (both build systems of `release/artifacts.textproto` share
-`sh release/ci/build_targets.sh`) are built in ONE run over the union of their
-targets, so a `build_targets` command must be correct on such a union.
-`release/ci/build_targets.sh` builds with `--keep-going`, then checks the lints
-and runs the tests among all the targets (a failed build stops before the lints
-and tests). The run's timeout bounds the whole batch, not each unit in it:
-with the build budget (below), all of the budget left; without it, the
-per-run timeout (`--build-timeout-s`, default 3600 s).
-The run's output is in
-`<log dir>/_batch_<k>.stdout` and `.stderr`, and its full argv, one argument per
-line, in `_batch_<k>.argv` (k counts the batches from 1; a unit alone logs to
-`<unit>.stdout` and `.stderr`).
-
-- **The batch passes:** every unit in it is `BUILT`. Nothing is retried.
-- **The batch fails:** kci builds its units one at a time, in order, to name
-  the failing ones. Each retry re-runs `sh release/ci/build_targets.sh` over
-  that one unit's targets, with its own timeout (as the batch's), and logs to
-  `<unit>.stdout` and `.stderr`; the batch already built every target that
-  does not depend on a failure, so the retries run on a warm cache. A failing
-  wide change therefore costs the batch's time plus the retries, up to the
-  cap. A retry that fails, times out or is killed is a failed unit. After 3
-  failed units it stops retrying: the rest are listed as not tried, and a
-  later batch that fails is noted as not attributed (a later batch that
-  passes still builds its units). The step is FAILED (`KCI-E-BUILD-FAILED`);
-  the summary's line is `BUILD step: F of N unit(s) failed: ...`.
-- **The batch times out (or is killed by a signal):** the batch had all that
-  was left of the build budget (the note then says `timed out after N min[ S
-  s], all that was left of the build budget (--build-budget-s B)`, N min S s
-  the time it was allowed), or without a budget the whole `--build-timeout-s`
-  (default 3600 s), not a share per unit. It is not retried and no unit of
-  it is attributed: FAILED.
-- **The batch fails but every unit builds alone:** the units interfere or the
-  build is flaky. That is INDETERMINATE (`KCI-E-CANNOT-TELL`), never a pass.
-  FAILED outranks it: if a unit failed or a batch was not attributed anywhere
-  in the step, the step is FAILED and the interference is a note.
-- **A run cannot be started** (a batch, a unit alone or a retry): the step
-  stops at once, nothing after it is started, and the step is INDETERMINATE
-  (`KCI-E-CANNOT-TELL`) even when a unit has already failed.
-
-**The build budget** (`--build-budget-s <n>`, accepted only with
-`--affected-by`, at most 604800, a week): the seconds the per-change check
-may take, counted from kci's own start on the monotonic clock
-(`CLOCK_MONOTONIC`), so everything kci does first (the workflow check, the
-git reads, the derive and affected commands) is charged to it. Every run
-(each derive and affected command, a batch, a unit alone, a retry) gets all
-the whole seconds left until the deadline, read just before it starts
-(`--build-timeout-s` is refused beside `--build-budget-s`: no fixed cap
-cuts a wide batch short of the budget); a run that passed, failed or timed out is
-charged alike. A build run (a batch, a unit alone, a retry) that times out
-is FAILED, with the `timed out after N min[ S s], ...` note above. A derive
-or affected command that times out is INDETERMINATE (`KCI-E-AFFECTED`), its
-note a plain `timed out`: it gets all the budget left too, so a hung
-affected command can use the whole budget before the step ends
-INDETERMINATE. A run with less than one second left is not started. A
-derive or affected command not started makes the step INDETERMINATE
-(`KCI-E-AFFECTED`: kci cannot tell what the change reaches). A build run not
-started lists its units, and those of every later run, as `BUILD step: U of
-N unit(s) not built: the build budget (--build-budget-s B) was spent before
-their run could start: ...`, which is FAILED (`KCI-E-BUILD-FAILED`), never
-a pass; the units earlier runs built keep their `BUILT` lines. A batch whose
-retries ran out of budget is not called interference. Without the flag,
-each run has its `--build-timeout-s` and there is no total.
-
-`pr.yml` passes the time its job has left: its first step writes the job's
-deadline, 115 of the job's 120 minutes (`timeout-minutes`), and the
-`kci run` step stops with an error if that file is missing, then passes the
-seconds left until it. The time `build kci` took is therefore not taken from
-a wide change's build, and kci reports which units it did not build about 5
-minutes before GitHub would cancel the job (kci's own last seconds of
-writing its result, and the steps after kci, which take seconds, fall in
-those 5 minutes). `build kci` itself takes from seconds (a cached kci) to most
-of an hour (a change to kci or to what it depends on), so a fixed per-batch
-number either wasted the job's time or overran it. The welded test
-`src/kci_workflow_check/tests/test_repo_kci_yml.mojo` holds `pr.yml` to these
-steps and numbers.
-
-Whatever the outcome, a `BUILT <unit>` line names exactly the units a
-successful run covered. The result document's `affected_by.units` is the set
-the change reached, not the set that built.
-
-To see the units a change would build, with nothing built:
-
-```sh
-kci run --stage pr --affected-by <base commit> --revision-id <HEAD> \
-  --work-dir "$PWD" --log-dir <dir> --result-file <file> --plan
-python3 release/ci/derive_checks.py --from release/artifacts.textproto  # the derived checks alone
-```
 
 ### The workflow subset kci reads
 
@@ -979,7 +1178,7 @@ at, never a pass. A workflow kci checks is written inside it:
 - **Scalars:** on one line. Plain (no `: ` inside, no final `:`), or
   single-quoted with no `'` inside (so no `''`), or double-quoted with no `"`
   and no backslash inside. Only a comment may follow a quoted scalar.
-- **Flow:** `[]`, a list of plain words (`[main]`, `[build, gamma]`), and `{}`.
+- **Flow:** `[]`, a list of plain words (`[main]`, `[build, beta]`), and `{}`.
 - **Block scalar:** only a literal `|` (no chomping or indentation
   indicator), and only as a `run:` value. It is read as YAML reads it.
 
@@ -995,14 +1194,12 @@ is a row of `src/kci_workflow_check/tests/test_workflow_subset.mojo`.
 
 ## pr.yml: the pull request's check
 
-[`.github/workflows/pr.yml`](../.github/workflows/pr.yml) is the machine file's
-`pr` stage and nothing else: workflow `pr`, one job `check`, so the status check
-is **`pr / check`**. It is written by hand and held to the machine file the way
-kci.yml is (rule R6 of `src/kci_workflow_check/rules.mojo`, `check_pull_request_workflow`):
-`kci run --stage pr` reads the file it runs under (`GITHUB_WORKFLOW_REF`) and
-holds it to the pull request's rules (a run of any other stage holds its file
-to the release workflow's), and the welded test
-`src/kci_workflow_check/tests/test_repo_kci_yml.mojo` reads both files on every build.
+[`.github/workflows/pr.yml`](../.github/workflows/pr.yml) is workflow `pr` with
+one job `check`, so the status check is **`pr / check`** (GitHub lists the
+context as `check`; the repository's ruleset requires that context, and only
+pr.yml has a job of that id). It runs named Buck2 targets on the farm and does
+not run kci. Neither it nor
+[`release.yml`](#releaseyml-the-release) is held to the machine file now.
 
 | | |
 |---|---|
@@ -1010,7 +1207,7 @@ to the release workflow's), and the welded test
 | job | the one job `check`, only for a pull request from a branch of this repository (`github.event.pull_request.head.repo.full_name == github.repository`; a fork's run gets no tailnet credential, and a maintainer reads the change and pushes it to a branch here), written bare or as exactly `${{ <condition> }}` (a block scalar or whitespace inside quotes makes GitHub read the `if:` as a format string, which is always true) |
 | runner | `runs-on: ubuntu-24.04`, written as that plain scalar: a GitHub-hosted machine, fresh per job. A self-hosted label, label list, runner group, expression (`${{ vars.X }}`) or quoted value is refused, so a pull request's code never reaches a runner that keeps state between jobs |
 | permissions | its own `permissions:` mapping, `contents: read` and `id-token: write` (for the farm connection, [farm-connect](#how-it-reaches-the-farm), only); no environment, no secret (no value of the job, nor of the workflow-level `env:`, names `secrets` other than `secrets.GITHUB_TOKEN`), no publish step |
-| steps | the pinned full-history checkout of the merge commit, `farm-connect`, `//bin/kci:kci[runnable]`, then `kci run --stage pr --affected-by "$change_base"`, where `change_base` is the merge commit's first parent (`git rev-parse --verify HEAD^1`, the `main` the pull request is merged into; the step stops when HEAD has no second parent). Never the event's `github.event.pull_request.base.sha`: that is `main` when the event fired, and once `main` moves every change merged to it since then would count as the pull request's own and widen the check. `src/kci_workflow_check` (R6) holds the exact line, and lets no `${{ }}` into a script (R18). It builds and tests the units the change reaches on the farm, in one batch per shared build command, a failed batch retried unit by unit to name its failing units. The units are the artifacts of `release/artifacts.textproto` and the checks derived from the build graph when the job runs (see [The per-change check's units](#the-per-change-checks-units)), so a pull request that adds or deletes a package needs no edit to any release file. Nothing ships. |
+| steps | the pinned full-history checkout of the merge commit, `farm-connect`, and the farm assertion (`//tools/build/ci:assert_remote`). Then the change: `git diff --name-only HEAD^1...HEAD` and the coverage holds of both sides, where HEAD^1 is the merge commit's first parent (the `main` the pull request is merged into; the step stops when HEAD has no second parent). Never the event's `github.event.pull_request.base.sha`: that is `main` when the event fired, and once `main` moves every change merged to it since then would count as the pull request's own and widen the check. Then, each as the `buck2-farm` action (so each fails unless no action ran on the runner): the BXL selector `tools/build/ci/affected.bxl:affected` (the owners of the changed files and everything that depends on them, or `//ci:pr`, the whole check set, when a file cannot be mapped or touches the build system; the heavy checks of `HEAVY` in `tools/build/ci/rules.bzl`, today the kci binary and what depends on it, the base image's `supervisor_stub` and `supervisor_bundle` included since only `komira_base` reaches them, only when the change touches paths that row owns, so a change that owns none builds `//ci:pr_default` in place of `//ci:pr`), `build --keep-going` of its list, the checks only BXL can make over the whole graph (`test_weld.bxl:check` for each test_weld lint, `graph/checks.bxl:check` for each graph_check, `guard.bxl:check` that `//ci:pr` holds every check target, `python_guard.bxl:check` that it reaches no Python outside the SDK, `default_guard.bxl:check` that `//ci:pr_default` is `//ci:pr` without the roots of `HEAVY` and nothing else, `lock_graphs.bxl:check` that each package's `buildrules.mojo.lock.bzl` holds a unit graph for every platform subdir its `mopm.lock` records and that a package which loads a native shared library pins it in `system_libs` of that lock, `cases.bxl:run`, and `readme_e2e/cases.bxl:run`, the cases of the README e2e's completeness guard), and `test` of the list's targets that are not of the tests cell. A pull request that adds or deletes a package needs no edit to any release file; adding a target to the check set means regenerating `ci/targets.bzl` and its shards `ci/targets/shard_<n>.bzl` in one step (the guard fails, naming the command, when they are out of date or a shard nears the 1000-line limit). Nothing ships. |
 | every `uses:` | pinned to a full commit id (the local farm-connect action excepted) |
 
 The repository's branch settings require the check **`pr / check`**.
@@ -1018,12 +1215,18 @@ The repository's branch settings require the check **`pr / check`**.
 ## coverage.yml: the pull request's coverage (not a gate)
 
 [`.github/workflows/coverage.yml`](../.github/workflows/coverage.yml) posts
-the check run `coverage`: the line coverage of the `mojo_library` targets the
-change touches, and the branch coverage of those whose coverage gate reads
-branch records (`COVERAGE_BRANCH_GATE`), as covcheck's summary and
+the check run `coverage`: the line coverage of the `mojo_library` targets and of
+the `mojo_package` packages the change touches (the latter from their
+`:coverage[reports]`, one kcov report per test), and the branch coverage of
+the libraries whose coverage gate reads branch records
+(`COVERAGE_BRANCH_GATE`) and of the packages with `:coverage[branches]` (one
+lcov file per test, from the compiler's IR; a `branch` line of such a
+package's `coverage_held` is checked against it, and only a package whose
+tests link a native library, which has no branch records, has that line left
+out of what covcheck reads), as covcheck's summary and
 annotations on the lines of the "Files changed" view. It is **informational**: not a required check, its
 conclusion is `neutral` in the policy's census mode, except that a touched
-package measured under its floor of `tools/build/coverage/ratchet.tsv` (a
+package under the 99.00% target on a metric it holds (its `coverage_held`: a
 `Regression`, which fails in every mode) makes it `failure`; it cannot make
 `pr / check` red, so that failure shows on the pull request without
 blocking it. Job `measure` (the same farm connection and permissions as
@@ -1051,7 +1254,7 @@ shipping, never the library or its dependents) and is the CEO's decision. Detail
 ## main_red.yml: the main red alert
 
 There is no merge queue: pull requests are checked one at a time and merged
-into `main`, and the release run of `kci.yml` builds each push to `main`. Two
+into `main`, and the release run of `release.yml` builds each push to `main`. Two
 changes that are each green can still break `main` together. The rule is
 **fix forward or revert within the hour**: when the release run of `main`
 fails, the author of a culprit pull request lands a fix, or reverts the
@@ -1059,19 +1262,25 @@ pull request, within an hour of the alert, before anything else merges on
 top of it.
 
 [`.github/workflows/main_red.yml`](../.github/workflows/main_red.yml) is the
-alert. It runs when a run of `kci.yml` on `main` completes (`workflow_run`)
-and runs [`release/ci/main_red.py`](../release/ci/main_red.py) with
-`issues: write`, `actions: read` and `contents: read`, checking out `main`
-and running no code of any pull request. It acts only on a run started by a
-push to `main`:
+alert. It runs when a run of `release.yml` on `main` completes (`workflow_run`),
+builds the Zig program [`//release/ci:main_red`](../release/ci/main_red.zig)
+on the farm (`./buck2 build`, then runs the binary that build produced) with
+`issues: write`, `actions: read`, `contents: read` and the `id-token: write`
+the farm connection exchanges, checking out `main` and running no code of any
+pull request. The workflows it reads are `--workflow <name>` flags of that
+step (and the trigger's `workflows:` list): the program names none itself, so
+a replacement push workflow is added to both in its own pull request. It names
+one: `release`. It acts
+only on a run of a named workflow started by a push to `main`:
 
 - **Red** (`failure`, `timed_out`, `startup_failure`): the last green
-  commit is the newest commit of a successful push run of `kci.yml` on
-  `main` that is an ancestor of the red one; the culprits are the pull
+  commit is the newest commit of a successful push run of a named workflow
+  on `main` that is an ancestor of the red one; the culprits are the pull
   requests merged into `main` after it (the first-parent commits of the
   range, newest first); the failing targets are the `Action failed:`,
   `GATED TEST FAILED:` and ``Validation for `<target>` failed`` lines of
-  the failed jobs' logs (with none, the failed job and step). If no issue
+  the failed jobs' logs, which are buck2's own output (with none, the
+  failed job and step). If no issue
   labelled `main-red` is open, it opens one titled `main red: <first
   failing target>`; otherwise it comments on the open one. A red commit
   that a later green run already contains (a re-run of an old run) is
@@ -1097,7 +1306,7 @@ Failing: <target>           (one line per failing target)
 Log: <key log line>         (none, one or two lines)
 ```
 
-**Nothing hides a red `main`.** `kci.yml`'s push runs share one
+**Nothing hides a red `main`.** `release.yml`'s push runs share one
 concurrency group with `cancel-in-progress: false` ([Queued
 runs](#continuous-auto-promotion)): a running release is never cancelled,
 and a newer push replaces only a pending run, which never started. The run
@@ -1107,19 +1316,10 @@ the last green commit, so the replaced commit's pull request is still
 named. `main_red.yml` has no concurrency group, so none of its runs is
 replaced or cancelled; if two red runs race to open the issue, the newer
 issue is closed as a duplicate of the older. One delay remains: a push
-that changes only `docs/**` or `*.md` files starts no `kci.yml` run (rule
-R17), so a README example it breaks is found by the next push's run, whose
-range names it. Cases: `//release/ci/tests:test_main_red`.
-
-## merge-from-live (not yet running)
-
-[`.github/workflows/merge_from_live.yml`](../.github/workflows/merge_from_live.yml)
-is the planned weekly pull request bumping every pin (buck2, the toolchain
-downloads, third-party archives) to its live release, merged only if its own
-`pr / check` run is green. It is a stub: its script,
-[`.github/ci/merge_from_live.sh`](../.github/ci/merge_from_live.sh), states the
-design and exits 1, and the workflow has no schedule until the script opens
-pull requests.
+that changes only `docs/**` or `*.md` files starts no `release.yml` run, so a
+README example it breaks is found by the next push's run, whose
+range names it. Cases: `//release/ci/tests:test_main_red`, a `zig_test` the
+program is built behind.
 
 ## Running it yourself
 

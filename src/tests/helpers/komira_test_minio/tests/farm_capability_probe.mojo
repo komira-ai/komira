@@ -27,7 +27,7 @@
 #                   or `.buckconfig`. The install-path test needs its scratch
 #                   outside any checkout (kci_validate's `scratch_refusal`), so
 #                   THAT test must refuse to run when this says no; here it is
-#                   reported only, because gate_runner.sh makes TEST_TMPDIR
+#                   reported only, because the gate (`gate mojo`) makes TEST_TMPDIR
 #                   under the action's working directory, which for an action
 #                   run on the client (no farm configured) is inside the
 #                   checkout; a required check would then be red for that
@@ -42,7 +42,7 @@
 #                   by the shell so the 8 s deadline's SIGTERM/SIGKILL reaches
 #                   nc itself, name lookup included).
 #
-# The runner keeps a passing test's output to itself (gate_runner.sh prints
+# The runner keeps a passing test's output to itself (the gate prints
 # the log only on failure); the lines are read from a failing run.
 # No FFI is declared here: processes are komira_supervisor's, sockets
 # komira_async's, the environment komira_libc's.

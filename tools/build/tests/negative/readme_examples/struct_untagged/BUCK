@@ -1,0 +1,11 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Must FAIL (test 38): see README.md. A generator that inferred the module
+# mode from the example's content (or hoisted its declarations) would build it.
+mojo_library(
+    name = "struct_untagged",
+    srcs = [
+        "__init__.mojo",
+        "greet.mojo",
+    ],
+)

@@ -239,6 +239,7 @@ from komira_plan_expr.expr import (
     EXPR_STRING_FN,
     EXPR_STRING_FN_N,
     EXPR_UDF_CALL,
+    EXPR_UDF_APPLY,
 )
 from komira_plan_expr.agg_expr import (
     AGG_SUM,
@@ -267,6 +268,7 @@ from komira_plan_expr.agg_expr import (
     AGG_SKEWNESS,
     AGG_KURTOSIS,
     AGG_KURTOSIS_POP,
+    AGG_UDF,
     agg_is_bivariate,
 )
 from komira_plan_ir.logical_plan import (
@@ -288,6 +290,8 @@ from komira_plan_ir.logical_plan import (
     PLAN_VIEW_REF,
     PLAN_CSE_REF,
     PLAN_CAST_TO_VARCHAR,
+    PLAN_MAP_BATCHES,
+    PLAN_STEP,
 )
 from komira_plan_ir.corr_subquery import corr_subq_inner_plan_ref
 
@@ -2191,6 +2195,13 @@ def _check_expr(
             expr.udf_call_child_ref(), schema, left, right, sided_scope,
             where, _child_pos(pos, expr, False),
         )
+    elif expr.tag == EXPR_UDF_APPLY:
+        # A call of a `UdfRef`: each argument is a value the call reads.
+        for i in range(expr.udf_apply_num_args()):
+            _check_expr(
+                expr.udf_apply_arg_ref(i), schema, left, right, sided_scope,
+                where, _child_pos(pos, expr, False),
+            )
     elif expr.tag == EXPR_EXTRACT:
         _check_expr(
             expr.extract_child_ref(), schema, left, right, sided_scope,
@@ -2453,6 +2464,9 @@ def _agg_arg_slots(func: UInt8) raises -> Int:
         or func == AGG_SKEWNESS
         or func == AGG_KURTOSIS
         or func == AGG_KURTOSIS_POP
+        # A user-defined aggregate reads one slot: the call of its AGGREGATE
+        # `UdfRef`, whose own arguments are that call's.
+        or func == AGG_UDF
     ):
         return 1
     raise Error(
@@ -2965,6 +2979,21 @@ def _check_plan(plan: LogicalPlan) raises:
 
     elif plan.tag == PLAN_CAST_TO_VARCHAR:
         _check_plan(plan.cast_to_varchar_data_ref().child[])
+
+    elif plan.tag == PLAN_MAP_BATCHES:
+        ref d = plan.map_batches_data_ref()
+        _check_plan(d.child[])
+        for i in range(len(d.group_by)):
+            # CTX_VALUE: a key is materialized, as an aggregate's is.
+            _check_expr_1(
+                d.group_by[i], d.child[].output_schema,
+                "MapBatches group_by " + String(i), CTX_VALUE,
+            )
+
+    elif plan.tag == PLAN_STEP:
+        # A source with no child; its arguments are literals the UDF check
+        # holds to `arg_types`. No column is named here.
+        pass
 
     elif plan.tag == PLAN_VIEW_REF or plan.tag == PLAN_CSE_REF:
         # OPAQUE LEAVES — see limit 1 in the header. There is no subtree yet, so

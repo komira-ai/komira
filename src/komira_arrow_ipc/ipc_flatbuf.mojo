@@ -77,6 +77,7 @@
 # =============================================================================
 
 from std.sys import size_of
+from std.memory import bitcast
 
 from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
 from komira_buffer.heap_region import HeapRegion
@@ -787,8 +788,8 @@ struct FlatbufReader[bo: Origin[mut=False]](Copyable, Movable):
         the u32 length prefix; NOT going through an offset slot)."""
         var length = Int(self.read_u32_le(length_pos))
         if length < 0:
-            raise Error(
-                "FlatbufReader.read_string: negative length " + String(length)
+            raise Error(  # cov: unreachable the length is a u32 widened to Int
+                "FlatbufReader.read_string: negative length " + String(length)  # cov: unreachable the length is a u32 widened to Int
             )
         var data_pos = length_pos + 4
         self._check_bounds(data_pos, length)
@@ -910,8 +911,11 @@ struct _TableBuilder(Movable):
       - `_field_widths[i]`: 1 / 2 / 4 / 8 / 16 / N — bytes per field
         (16 = Buffer-as-inline-struct; >16 = generic inline-struct
         bytes referenced via _field_struct_offset/_field_struct_size).
-      - `_field_values[i]`: u32 storage for 1/2/4-byte fields + offsets
-        (offsets use the high-bit-marker as before).
+      - `_field_values[i]`: u32 storage for 1/2/4-byte fields, and the
+        absolute target position of an offset field.
+      - `_field_is_offset[i]`: the 4-byte value is an offset target, set
+        only by `add_field_offset`. A separate flag, so every u32 value
+        (bit 31 included) is written as itself.
       - `_field_i64_values[i]`: i64 storage for 8-byte fields.
       - `_field_struct_offset[i]`: byte offset into `_struct_scratch`
         for inline-struct fields (>16 bytes); -1 = not a struct.
@@ -930,6 +934,7 @@ struct _TableBuilder(Movable):
     var _field_present: Array[Bool, MAX_VTABLE_FIELDS]
     var _field_widths: Array[UInt8, MAX_VTABLE_FIELDS]
     var _field_values: Array[UInt32, MAX_VTABLE_FIELDS]
+    var _field_is_offset: Array[Bool, MAX_VTABLE_FIELDS]
     var _field_i64_values: Array[Int64, MAX_VTABLE_FIELDS]
     var _field_struct_offset: Array[Int32, MAX_VTABLE_FIELDS]
     var _field_struct_size: Array[Int32, MAX_VTABLE_FIELDS]
@@ -941,6 +946,7 @@ struct _TableBuilder(Movable):
         self._field_present = Array[Bool, MAX_VTABLE_FIELDS](fill=False)
         self._field_widths = Array[UInt8, MAX_VTABLE_FIELDS](fill=UInt8(0))
         self._field_values = Array[UInt32, MAX_VTABLE_FIELDS](fill=UInt32(0))
+        self._field_is_offset = Array[Bool, MAX_VTABLE_FIELDS](fill=False)
         self._field_i64_values = Array[Int64, MAX_VTABLE_FIELDS](fill=Int64(0))
         self._field_struct_offset = Array[Int32, MAX_VTABLE_FIELDS](
             fill=Int32(-1)
@@ -976,6 +982,9 @@ def add_field_u32(mut tb: _TableBuilder, field_id: Int, value: UInt32):
     if field_id < 0 or field_id >= MAX_VTABLE_FIELDS:
         return  # silently ignore out-of-range — caller bug
     tb._field_values[field_id] = value
+    # Only 4-byte fields consult the flag, and only this function and
+    # `add_field_offset` set width 4, so clearing it here is enough.
+    tb._field_is_offset[field_id] = False
     tb._field_widths[field_id] = UInt8(4)
     tb._field_present[field_id] = True
     if field_id + 1 > tb._field_count:
@@ -1036,17 +1045,17 @@ def add_field_offset(mut tb: _TableBuilder, field_id: Int, target_pos: Int):
     """Record an OFFSET to a target position. Stored as raw target_pos
     initially; end_table converts it to a relative u32 at write-time.
 
-    We store the absolute target_pos as a placeholder (high bits are
-    the marker `0x80000000` ORed in) and the low 31 bits hold the
-    target position. end_table detects the marker and converts to
-    relative offset. Hack works because table positions never exceed
-    ~64 MB (FB capacity ceiling).
+    The absolute target_pos is stored in `_field_values` and
+    `_field_is_offset` marks the slot, so end_table converts it to a
+    relative offset. A u32 scalar never carries that flag, whatever
+    its bits.
     """
     if target_pos < 0 or target_pos > 0x7FFFFFFF:
         return  # caller bug
     if field_id < 0 or field_id >= MAX_VTABLE_FIELDS:
         return
-    tb._field_values[field_id] = UInt32(target_pos) | UInt32(0x80000000)
+    tb._field_values[field_id] = UInt32(target_pos)
+    tb._field_is_offset[field_id] = True
     tb._field_widths[field_id] = UInt8(4)
     tb._field_present[field_id] = True
     if field_id + 1 > tb._field_count:
@@ -1083,7 +1092,8 @@ def add_field_inline_struct(
     tb._field_widths[field_id] = UInt8(size if size <= 255 else 255)
     # `width=size` is fine for 16/24-byte structs; if a struct exceeds
     # 255 bytes (rare in Arrow.fbs), the width field is capped at 255
-    # but the struct_size field carries the true size for emission.
+    # but the struct_size field carries the true size, which end_table
+    # uses for both the layout and the emission.
     tb._field_present[field_id] = True
     if field_id + 1 > tb._field_count:
         tb._field_count = field_id + 1
@@ -1160,6 +1170,11 @@ def end_table(mut writer: FlatbufWriter, var tb: _TableBuilder) raises -> Int:
         if not tb._field_present[i]:
             continue
         var w = Int(tb._field_widths[i])
+        # An inline struct's width byte is capped at 255; its true size
+        # (what the emission loop below writes) is `_field_struct_size`.
+        var struct_sz = Int(tb._field_struct_size[i])
+        if struct_sz > 0:
+            w = struct_sz
         # Natural alignment: round inline_size_data up to multiple of w
         # for w ≤ 8; inline-struct fields (Buffer = 16) align to 8.
         var align: Int = w
@@ -1262,8 +1277,8 @@ def end_table(mut writer: FlatbufWriter, var tb: _TableBuilder) raises -> Int:
             topmost_end = end
     var tail_pad = inline_size_data - topmost_end
     if tail_pad > 0:
-        writer.write_padding(tail_pad)
-        current_inline_pos -= tail_pad
+        writer.write_padding(tail_pad)  # cov: unreachable inline_size_data is the end of the last field, which no field passes
+        current_inline_pos -= tail_pad  # cov: unreachable inline_size_data is the end of the last field, which no field passes
 
     for k in range(n_present):
         var id = sorted_ids[k]
@@ -1292,10 +1307,9 @@ def end_table(mut writer: FlatbufWriter, var tb: _TableBuilder) raises -> Int:
             writer.write_i64_le(tb._field_i64_values[id])
         elif w == 4:
             var v = tb._field_values[id]
-            if (v & UInt32(0x80000000)) != UInt32(0):
-                # Offset placeholder.
-                var target = Int(v & UInt32(0x7FFFFFFF))
-                writer.write_offset_u32(target)
+            if tb._field_is_offset[id]:
+                # Offset placeholder: v is the absolute target position.
+                writer.write_offset_u32(Int(v))
             else:
                 writer.write_u32_le(v)
         elif w == 2:
@@ -1624,7 +1638,8 @@ def write_type_decimal(
     """
     var tb = start_table()
     add_field_u32(tb, 0, UInt32(precision))
-    add_field_u32(tb, 1, UInt32(scale))
+    # `scale: int` may be negative: write its i32 two's-complement bits.
+    add_field_u32(tb, 1, bitcast[DType.uint32](Int32(scale)))
     add_field_u32(tb, 2, UInt32(bit_width))
     return end_table(writer, tb^)
 
@@ -1836,7 +1851,10 @@ def read_type_decimal[
 ](reader: FlatbufReader[bo], table_pos: Int) raises -> DecimalTypeDescriptor:
     """Read a Decimal Type table."""
     var precision = Int(_read_table_field_u32(reader, table_pos, 0))
-    var scale = Int(_read_table_field_u32(reader, table_pos, 1))
+    # Schema.fbs `scale: int`: a signed i32, and Arrow allows it negative.
+    var scale = Int(
+        bitcast[DType.int32](_read_table_field_u32(reader, table_pos, 1))
+    )
     # Schema.fbs: `bitWidth: int = 128`.
     var bit_width = Int(_read_table_field_u32_or(reader, table_pos, 2, 128))
     return DecimalTypeDescriptor(
@@ -3748,7 +3766,7 @@ def parse_ipc_message[
     # Otherwise legacy: the first u32 IS the metadata_size.
 
     if total < pos + 4:
-        raise Error("IPC frame: too short for metadata_size header")
+        raise Error("IPC frame: too short for metadata_size header")  # cov: unreachable total >= 8 and pos <= 4 here
 
     var metadata_size = Int(frame.read_u32_le_at(pos))
     pos += 4

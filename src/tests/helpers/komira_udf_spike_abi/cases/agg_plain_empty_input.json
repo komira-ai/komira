@@ -1,0 +1,11 @@
+{
+ "name": "agg_plain_empty_input",
+ "defect": "a plain aggregate over empty input makes up a group, or does not end",
+ "run": "frame",
+ "entry": "group_max",
+ "shape": "AGG_PLAIN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "inputs": [],
+ "expect": {"status": "OK", "batches": []}
+}

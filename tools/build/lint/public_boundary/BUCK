@@ -1,0 +1,50 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+
+# The public boundary lint's tool, run by the public_boundary rule
+# (tools/build/lint/defs.bzl): src/check.zig says what is read and the ledger
+# formats, src/rules.zig what each rule matches.
+
+_SRCS = glob(["src/*.zig"])
+
+# The rules, one row per spelling and near miss (src/rules_test.zig).
+zig_test(
+    name = "public_boundary_rules",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "src/rules_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
+
+# The lint over a tree: a planted tree that passes, and one case per path
+# finding, hold, ledger defect, window and empty tree (src/check_test.zig).
+zig_test(
+    name = "public_boundary_check",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "src/check_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
+
+# Built only behind its tests.
+zig_exe(
+    name = "public_boundary",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "src/main.zig",
+    unit_tests = [
+        ":public_boundary_check",
+        ":public_boundary_rules",
+        _ZIG_VERSION,
+    ],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+    visibility = ["PUBLIC"],
+)

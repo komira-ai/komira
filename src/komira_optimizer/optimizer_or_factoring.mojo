@@ -33,9 +33,10 @@
 #
 # Pass order: `optimizer_driver.optimize` runs this pass twice: before
 # `eliminate_common_subexpressions` (so a conjunct shared by every branch is
-# left once and not hoisted into a synthesized column), and again before
-# `push_predicates_down` so the newly hoisted conjuncts become
-# predicate-pushdown candidates. Same shape as
+# left once and not hoisted into a synthesized column), and again after CSE,
+# before `push_predicates_down`: an OR whose branches hold a repeated
+# CASE/WHEN is halted the first time, and factors once CSE has replaced the
+# WHEN with a synthesized column. Same shape as
 # `decompose_symmetric_or` -- see `optimizer_symmetric_or.mojo`.
 #
 # Plan-IR purity: pure plan transform, no FileHandle reach, no

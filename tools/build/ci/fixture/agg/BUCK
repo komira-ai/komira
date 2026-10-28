@@ -1,0 +1,13 @@
+# The aggregates of the fixture (see ../BUCK): the second is the first
+# without `lonely`, which is what a check target outside `//ci:pr` looks like.
+load("@komira//tools/build/ci:aggregate.bzl", "ci_aggregate")
+
+ci_aggregate(
+    name = "agg_complete",
+    deps = ["//tools/build/ci/fixture:top", "//tools/build/ci/fixture:lonely"],
+)
+
+ci_aggregate(
+    name = "agg_missing",
+    deps = ["//tools/build/ci/fixture:top"],
+)

@@ -28,9 +28,27 @@
 # The reported statistic is the MEDIAN of R rounds per arm, with min/max shown,
 # because a single round on a shared machine measures the neighbours.
 #
-# The assertions are deliberately loose ceilings: this file's JOB is to print
-# comparable numbers, and a tight threshold on a shared runner would fail for
-# reasons that have nothing to do with the logger.
+# NOTHING HERE ASSERTS A TIME. The ns/emit figures are printed and nothing else:
+# a threshold on them depends on the machine and fails on a loaded one for
+# reasons that have nothing to do with the logger. What the file ASSERTS is the
+# set of properties a per-emit cost regression would break, counted exactly:
+#
+#   * every ENABLED emit reached the ring: the records drained after each arm
+#     equal the emits made, and no ring dropped a record. An emit that reached
+#     the ring returned before the cold render block (the one place that builds
+#     Strings and Lists); the counts show there was no synchronous fallback and
+#     no lost record. They do not count allocations: an emit that pushed its
+#     record and also built a String first would still pass (a known gap).
+#   * site registration does not repeat: after the warm-up the SiteDictionary
+#     holds exactly the sites the arms use, and its length is the same after
+#     every measured round. A registration that re-runs per emit appends (and
+#     allocates a String) each time, so the length would grow.
+#   * a SUPPRESSED emit does no work behind the gate: no record reached the
+#     ring, nothing was dropped, and no site was registered (registration sits
+#     after the gates), however many emits ran.
+#
+# There is no process-wide allocation counter in the toolchain, so allocation is
+# not counted directly: the three properties above are what is observable.
 # =============================================================================
 
 from komira_log import SharedEngine, Logger
@@ -40,19 +58,33 @@ from komira_log.env_filter import EnvFilter
 from komira_log.levels import LEVEL_TRACE, LEVEL_DEBUG, LEVEL_INFO, LEVEL_WARN
 from komira_log.log_arg import ArgI64
 
-from std.testing import assert_true
+from std.testing import assert_equal, assert_true
 from std.time import perf_counter_ns
 
 
 comptime CHUNK = 256
 comptime ROUNDS = 7
 comptime PER_ROUND = 102_400  # 400 chunks
+comptime WARMUP_CHUNKS = 8
 
 
 def _filter_at(level: UInt8) -> EnvFilter:
     var f = EnvFilter()
     f.global_level = level
     return f^
+
+
+# Drain one worker's ring and return how many records came out. This is the
+# engine's inspectable drain, NOT `drain_worker`: `drain_worker` writes every
+# record to the engine's log sink, and this test drains about 2.9 million
+# records, which as sink output was ~500 MB of test log and made the CI log
+# unreadable. Log records are decoded the same way and each yields one line, so
+# for this test (log records only, no unknown kinds asserted) the count equals
+# `drain_worker`'s. In general `drain_worker` returns every popped record (span,
+# metric and unknown kinds too) while `drain_worker_to_lines` counts log records
+# only. Only the delivery differs: the lines are dropped here, not printed.
+def _drain(mut eng: SharedEngine) -> Int:
+    return len(eng.drain_worker_to_lines(0, 1 << 16))
 
 
 # -----------------------------------------------------------------------------
@@ -164,20 +196,41 @@ def main() raises:
     # Warm-up: register both sites (the first emit per site appends to the
     # dictionary), prime the ring and the TLS lookup, so the timed rounds are
     # steady state and the one-off registration is not in them.
-    for _ in range(8):
+    var warm_drained = 0
+    for _ in range(WARMUP_CHUNKS):
         _ = _chunk_spec(eng, CHUNK)
-        _ = eng.drain_worker(0, 1 << 16)
+        warm_drained += _drain(eng)
         _ = _chunk_erased(eng, CHUNK)
-        _ = eng.drain_worker(0, 1 << 16)
+        warm_drained += _drain(eng)
         _ = _chunk_spec_zero(eng, CHUNK)
-        _ = eng.drain_worker(0, 1 << 16)
+        warm_drained += _drain(eng)
         _ = _chunk_erased_zero(eng, CHUNK)
-        _ = eng.drain_worker(0, 1 << 16)
+        warm_drained += _drain(eng)
+    assert_equal(
+        warm_drained,
+        4 * WARMUP_CHUNKS * CHUNK,
+        "warm-up: every enabled emit of the four arms reached the ring",
+    )
+    # The two arms of a pair share one fmt, so registration made exactly two
+    # sites: the 1-arg fmt and the 0-arg fmt.
+    var sites_after_warmup = eng.site_dict_len()
+    assert_equal(
+        sites_after_warmup,
+        2,
+        "warm-up: one dictionary entry per distinct fmt, not one per emit",
+    )
 
     var spec = List[Float64]()
     var erased = List[Float64]()
     var spec0 = List[Float64]()
     var erased0 = List[Float64]()
+
+    # Records drained after each arm's chunks, summed over every measured round.
+    var spec_drained = 0
+    var erased_drained = 0
+    var spec0_drained = 0
+    var erased0_drained = 0
+    var emitted = 0
 
     for _ in range(ROUNDS):
         # INTERLEAVED: the two arms of a pair are adjacent in time.
@@ -188,14 +241,15 @@ def main() raises:
         var n = 0
         while n < PER_ROUND:
             a += _chunk_spec(eng, CHUNK)
-            _ = eng.drain_worker(0, 1 << 16)
+            spec_drained += _drain(eng)
             b += _chunk_erased(eng, CHUNK)
-            _ = eng.drain_worker(0, 1 << 16)
+            erased_drained += _drain(eng)
             c += _chunk_spec_zero(eng, CHUNK)
-            _ = eng.drain_worker(0, 1 << 16)
+            spec0_drained += _drain(eng)
             d += _chunk_erased_zero(eng, CHUNK)
-            _ = eng.drain_worker(0, 1 << 16)
+            erased0_drained += _drain(eng)
             n += CHUNK
+            emitted += CHUNK
         spec.append(Float64(Int(a)) / Float64(n))
         erased.append(Float64(Int(b)) / Float64(n))
         spec0.append(Float64(Int(c)) / Float64(n))
@@ -206,7 +260,7 @@ def main() raises:
     # ---------------------------------------------------------------------
     var off_eng = SharedEngine(num_workers=1, filter=_filter_at(LEVEL_WARN))
     off_eng.bind_worker_thread(UInt16(0))
-    for _ in range(8):
+    for _ in range(WARMUP_CHUNKS):
         _ = _chunk_spec_off(off_eng, CHUNK)
         _ = _chunk_erased_off(off_eng, CHUNK)
 
@@ -222,6 +276,37 @@ def main() raises:
             n += CHUNK
         spec_off.append(Float64(Int(a)) / Float64(n))
         erased_off.append(Float64(Int(b)) / Float64(n))
+    # ---------------------------------------------------------------------
+    # THE COUNTED PROPERTIES (no time is asserted anywhere below).
+    # ---------------------------------------------------------------------
+    # Every enabled emit of every arm reached the ring and was drained: none
+    # went through the synchronous fallback, none was dropped, none was lost.
+    assert_equal(emitted, ROUNDS * PER_ROUND, "the loops made the emits")
+    assert_equal(spec_drained, emitted, "specialised 1-arg: every emit drained")
+    assert_equal(erased_drained, emitted, "ERASED 1-arg: every emit drained")
+    assert_equal(spec0_drained, emitted, "specialised 0-arg: every emit drained")
+    assert_equal(erased0_drained, emitted, "ERASED 0-arg: every emit drained")
+    assert_equal(eng.overflow_dropped_count(), Int64(0), "no ring dropped")
+    assert_equal(eng.unknown_kind_dropped_count(), Int64(0), "no refused kind")
+    # Registration did not repeat: the dictionary is what the warm-up made it.
+    assert_equal(
+        eng.site_dict_len(),
+        sites_after_warmup,
+        "no site was re-registered across the measured rounds",
+    )
+
+    # The suppressed arms did nothing behind the gate: nothing in the ring,
+    # nothing dropped, nothing registered, across the warm-up and every round.
+    assert_true(
+        not off_eng.worker_ring_nonempty(0),
+        "suppressed emits pushed no record",
+    )
+    assert_equal(off_eng.overflow_dropped_count(), Int64(0), "nothing dropped")
+    assert_equal(
+        off_eng.site_dict_len(),
+        0,
+        "a suppressed emit registers no site (registration is behind the gates)",
+    )
     # Nothing should have reached the ring on the suppressed arms.
     assert_true(len(off_eng.drain_worker_to_lines(0, 16)) == 0)
 
@@ -236,9 +321,5 @@ def main() raises:
     print("delta enabled 0-arg (erased - specialised) ns:", m_er0 - m_spec0)
     print("delta suppressed    (erased - specialised) ns:", m_eoff - m_soff)
 
-    # Loose ceilings — a gross regression only. The printed numbers are the
-    # deliverable; a tight bound on a shared runner would fail for unrelated
-    # reasons and teach everyone to ignore this file.
-    assert_true(m_er < 5000.0)
-    assert_true(m_eoff < 5000.0)
+    # The printed numbers are the deliverable, and are information only.
     print("test_log_erased_emit_perf: DONE")

@@ -1,4 +1,5 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/native:shared.bzl", "native_shared_library")
 
 # Parquet page compression: the codec dispatch a page reader and writer call
 # (UNCOMPRESSED, SNAPPY, GZIP, ZSTD, LZ4_RAW, the deprecated LZ4, BROTLI), the
@@ -80,6 +81,8 @@ _PARQUET_FIXTURES = [
 
 mojo_library(
     name = "komira_parquet_codec",
+    # Its C (the Brotli decoder) ships in its package as komira_parquet_codec_native below (lib/libkomira_parquet_codec_native.so.1).
+    native = ":komira_parquet_codec_native",
     srcs = _SRCS,
     deps = [
         "//src/komira_arrow:komira_arrow",
@@ -138,4 +141,53 @@ mojo_library(
         "tests/test_text_decompress_direct.mojo",
     ],
     visibility = ["PUBLIC"],
+)
+
+# libkomira_parquet_codec_native.so.1: the C this library owns (the Brotli
+# decoder, prefixed komira_brotli_), as its own shared library exporting the
+# names its callers call (tools/build/native/README.md, "Each library's shared
+# library"). Built and checked here, and packed into the library's conda package (`native`).
+native_shared_library(
+    name = "komira_parquet_codec_native",
+    archives = [
+        "//third_party/brotli:brotlidec",
+    ],
+    callers = [
+        ":komira_parquet_codec",
+    ],
+    library = "komira_parquet_codec",
+    # Every weak undefined symbol of the library, recorded from its first
+    # green link (checks 3 and 7 hold it to exactly this list):
+    weak_undefined = [
+        # zig's C runtime (crti.o): the profiling hook, absent unless -pg.
+        "__gmon_start__",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The pyarrow files komira_parquet's column decoder test reads.
+export_file(
+    name = "pyarrow_gzip_plain.parquet",
+    src = "tests/fixtures/parquet/pyarrow_gzip_plain.parquet",
+    visibility = ["//src/komira_parquet:"],
+)
+export_file(
+    name = "pyarrow_int96_ts.parquet",
+    src = "tests/fixtures/parquet/pyarrow_int96_ts.parquet",
+    visibility = ["//src/komira_parquet:"],
+)
+export_file(
+    name = "pyarrow_multi_dict_page.parquet",
+    src = "tests/fixtures/parquet/pyarrow_multi_dict_page.parquet",
+    visibility = ["//src/komira_parquet:"],
+)
+export_file(
+    name = "pyarrow_page_crc_zstd_v2.parquet",
+    src = "tests/fixtures/parquet/pyarrow_page_crc_zstd_v2.parquet",
+    visibility = ["//src/komira_parquet:"],
+)
+export_file(
+    name = "pyarrow_zero_row.parquet",
+    src = "tests/fixtures/parquet/pyarrow_zero_row.parquet",
+    visibility = ["//src/komira_parquet:"],
 )

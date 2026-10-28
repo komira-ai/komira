@@ -1,5 +1,5 @@
 # =============================================================================
-# ByteBuffer: the owned read cursor, and write_uleb128, its encoder.
+# ByteBuffer: the owned read cursor (write_uleb128 is tested in test_write_uleb128).
 # =============================================================================
 #
 # Every read is checked at the exact end of the buffer (the last read that
@@ -285,42 +285,6 @@ def test_zigzag_both_signs() raises:
     assert_true(b.is_empty())
 
 
-def test_write_uleb128_bytes_and_round_trip() raises:
-    """The encoder's exact bytes at the 7-bit boundaries (0, 127, 128,
-    16383, 16384), and a round trip through read_uleb128 of values up to
-    2^62."""
-    var out = List[UInt8]()
-    write_uleb128(0, out)
-    assert_equal(out, [UInt8(0x00)])
-    out = List[UInt8]()
-    write_uleb128(127, out)
-    assert_equal(out, [UInt8(0x7F)])
-    out = List[UInt8]()
-    write_uleb128(128, out)
-    assert_equal(out, [UInt8(0x80), UInt8(0x01)])
-    out = List[UInt8]()
-    write_uleb128(16383, out)
-    assert_equal(out, [UInt8(0xFF), UInt8(0x7F)])
-    out = List[UInt8]()
-    write_uleb128(16384, out)
-    assert_equal(out, [UInt8(0x80), UInt8(0x80), UInt8(0x01)])
-
-    var values = List[Int]()
-    var v = 1
-    for _ in range(63):
-        values.append(v - 1)
-        values.append(v)
-        v = v * 2
-    var data = List[UInt8]()
-    data.append(0x55)  # write_uleb128 appends: this byte stays first
-    for x in values:
-        write_uleb128(x, data)
-    var b = ByteBuffer(data^, 1)
-    for x in values:
-        assert_equal(b.read_uleb128(), x)
-    assert_true(b.is_empty())
-
-
 def test_read_slice_pos() raises:
     """Returns (start, n) and advances; n up to the end succeeds, past it
     raises and leaves the cursor."""
@@ -470,7 +434,6 @@ def main() raises:
     s.test[test_uleb128_one_two_and_ten_bytes]()
     s.test[test_uleb128_cut_short]()
     s.test[test_zigzag_both_signs]()
-    s.test[test_write_uleb128_bytes_and_round_trip]()
     s.test[test_read_slice_pos]()
     s.test[test_read_into_list_appends]()
     s.test[test_read_view_consumes]()

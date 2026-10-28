@@ -3,8 +3,10 @@
 # =============================================================================
 #
 # Validates HKDF-Expand-Label per RFC 8446
-# §7.1 against known TLS 1.3 reference values (cross-verified against a
-# Python reference implementation). The companion test_derive_secret
+# §7.1 against reference values (the RFC 8448 §3 Early Secret as the input;
+# each output cross-verified by HKDF-Expand over the RFC 2104 HMAC
+# construction computed with GNU coreutils `sha256sum`, the same composition
+# that reproduces RFC 5869 A.1). The companion test_derive_secret
 # specifically validates the dual `Derive-Secret(_, "derived",
 # "")` invocation contract.
 #
@@ -95,7 +97,7 @@ def test_hkdf_expand_label_short_iv() raises:
         Span[UInt8](empty_context),
         Span[UInt8](dst),
     )
-    # Cross-verified via Python reference.
+    # Cross-verified: HKDF-Expand over HMAC computed with coreutils sha256sum.
     assert_equal(
         _hex_of_list(dst),
         String("a7bf78a10cf9feb156a93f7a"),
@@ -131,8 +133,7 @@ def test_hkdf_expand_label_with_context() raises:
     matches the TLS 1.3 client-handshake-traffic-secret derivation
     shape (RFC 8446 §7.1)."""
     var secret = _early_secret()
-    # SHA-256("transcript-bytes") computed via Python:
-    #   hashlib.sha256(b'transcript-bytes').hexdigest() =
+    # SHA-256("transcript-bytes"), as GNU coreutils `sha256sum` prints it:
     #   d75f50859432831df7bcf1112109dba18692204b6a051c94aed015ed537bb267
     var transcript_hash = _hex_to_bytes(
         String(
@@ -148,11 +149,10 @@ def test_hkdf_expand_label_with_context() raises:
         Span[UInt8](transcript_hash),
         Span[UInt8](dst),
     )
-    # Cross-verified via Python:
-    # >>> import hmac, hashlib
-    # >>> th = hashlib.sha256(b'transcript-bytes').digest()
-    # >>> hkdf_expand_label(early_secret, 'c hs traffic', th, 32).hex()
-    # = '17f31908f6181e7c2d533d32418439adc47786d51859fafd3a5d155b57ccfa80'
+    # Cross-verified: HKDF-Expand(early_secret, HkdfLabel(32,
+    # "tls13 c hs traffic", SHA-256("transcript-bytes")), 32) over HMAC
+    # computed with GNU coreutils `sha256sum`
+    # = 17f31908f6181e7c2d533d32418439adc47786d51859fafd3a5d155b57ccfa80
     assert_equal(
         _hex_of_list(dst),
         String(

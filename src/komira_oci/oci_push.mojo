@@ -55,14 +55,14 @@
 # Encapsulation: owned values only; the transport is held by value.
 # =============================================================================
 
-from std.time import sleep
-
 from komira_http_core.codec.types import (
     HTTP_METHOD_GET,
     HTTP_METHOD_HEAD,
     HTTP_METHOD_POST,
     HTTP_METHOD_PUT,
 )
+
+from komira_retry import Sleeper, SystemSleeper
 
 from .oci_auth import OciAuth
 from .oci_digest import digest_of_bytes, validate_digest_format
@@ -344,7 +344,9 @@ def _is_auth_refusal(status: Int) -> Bool:
     return status == 401 or status == 403
 
 
-struct LayoutPusher[T: OciTransport](Movable, Deinitable):
+struct LayoutPusher[T: OciTransport, S: Sleeper = SystemSleeper](
+    Movable, Deinitable
+):
     """Pushes a verified `OciLayout` to one registry repository.
 
     Parametric over the transport so the tests drive the SAME code the
@@ -352,15 +354,19 @@ struct LayoutPusher[T: OciTransport](Movable, Deinitable):
 
     `retry_forbidden` says "this repository was created moments ago": a 403 is
     then retried (bounded) because the permission may not have propagated.
-    `backoff_ms` is the sleep before retry N (N * backoff_ms); 0 means none."""
+    `backoff_ms` is the sleep before retry N (N * backoff_ms); 0 means none.
+    The sleep goes through `S`, a `komira_retry` `Sleeper`: `SystemSleeper`
+    (the default) blocks the thread; a test passes a sleeper that records the
+    requested waits and returns at once."""
 
     var _transport: Self.T
     var _auth: OciAuth
     var _retry_forbidden: Bool
     var _backoff_ms: Int
+    var _sleeper: Self.S
 
     def __init__(
-        out self,
+        out self: LayoutPusher[Self.T, SystemSleeper],
         var transport: Self.T,
         var auth: OciAuth,
         retry_forbidden: Bool = False,
@@ -370,6 +376,23 @@ struct LayoutPusher[T: OciTransport](Movable, Deinitable):
         self._auth = auth^
         self._retry_forbidden = retry_forbidden
         self._backoff_ms = backoff_ms
+        self._sleeper = SystemSleeper()
+
+    def __init__(
+        out self,
+        var transport: Self.T,
+        var auth: OciAuth,
+        *,
+        var sleeper: Self.S,
+        retry_forbidden: Bool = False,
+        backoff_ms: Int = 250,
+    ):
+        """As above, waiting through `sleeper` instead of the system's."""
+        self._transport = transport^
+        self._auth = auth^
+        self._retry_forbidden = retry_forbidden
+        self._backoff_ms = backoff_ms
+        self._sleeper = sleeper^
 
     def transport(ref self) -> ref [self._transport] Self.T:
         """Borrow the transport so a test can assert the exact conversation."""
@@ -548,9 +571,15 @@ struct LayoutPusher[T: OciTransport](Movable, Deinitable):
     # -------------------------------------------------------------------------
     # one logical request, with the bounded retry policy
     # -------------------------------------------------------------------------
-    def _backoff(self, attempt: Int):
+    def _backoff(mut self, attempt: Int):
+        """Wait `backoff_ms * attempt` through the sleeper. A sleeper that
+        fails ends the wait early: the retry is sent anyway, since the wait
+        only spaces retries and no decision depends on it."""
         if self._backoff_ms > 0:
-            sleep(Float64(self._backoff_ms * attempt) / 1000.0)
+            try:
+                self._sleeper.sleep_ms(Int64(self._backoff_ms * attempt))
+            except:
+                pass
 
     def _call(
         mut self, template: OciRequest, retry_403: Bool = True
