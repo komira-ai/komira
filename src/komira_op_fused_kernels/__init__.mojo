@@ -1,4 +1,4 @@
-"""`komira_op_fused_kernels` -- INNER join and aggregation kernels that fuse a
+"""`komira_op_fused_kernels` -- INNER join kernels that fuse a
 probe with its output.
 
 The parallel single-INT64-key INNER probes of a `HashJoinBuilder` or a
@@ -6,8 +6,7 @@ The parallel single-INT64-key INNER probes of a `HashJoinBuilder` or a
 the row count that selects them (`parallel_gate`); the single-pass fused INNER
 join, full or projected (`join_fused_gather`); the chunked INNER join
 (`join_chunked_gather`); which inputs those two can carry
-(`join_fused_route`); and a `FlatHashAggregator`'s groups as a RecordBatch
-(`flat_agg_output`).
+(`join_fused_route`).
 
 Public API: import directly from sub-modules. No facade.
 """
