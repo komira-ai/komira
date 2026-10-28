@@ -424,6 +424,60 @@ def test_probe_row_count_beyond_the_key_array_raises() raises:
     assert_equal(len(bm), 0)
 
 
+def _assert_both_probes_refuse(total: Int, limit: Int) raises:
+    """Both probes raise for `limit` rows over a `total`-row key array, and
+    leave the caller's lists empty."""
+    var build = _keys_mod(8, 8)
+    var probe = _keys_mod(total, 8)
+    var jb = HashJoinBuilder.build(build)
+    var opt = PerfectHashJoin.try_build(build)
+    var perfect = opt.take()
+    var rt = _runtime()
+    ref disp = rt.dispatcher()
+    var bm = List[Int]()
+    var pm = List[Int]()
+    var raised = False
+    try:
+        parallel_inner_join_probe_into(
+            disp, CancellationToken.new(), jb, probe, limit, bm, pm,
+            ProbeNullMask(probe, total),
+        )
+    except e:
+        raised = True
+        assert_true(
+            "num_probe_rows " + String(limit) + " is outside the key array of "
+            + String(total) + " rows" in String(e),
+            String(e),
+        )
+    assert_true(raised, "the chained probe accepted the row count")
+    raised = False
+    try:
+        parallel_perfect_inner_probe_into(
+            disp, CancellationToken.new(), perfect, probe, limit, bm, pm,
+            ProbeNullMask(probe, total),
+        )
+    except e:
+        raised = True
+        assert_true(
+            "num_probe_rows " + String(limit) + " is outside the key array of "
+            + String(total) + " rows" in String(e),
+            String(e),
+        )
+    assert_true(raised, "the perfect probe accepted the row count")
+    assert_equal(len(bm), 0)
+    assert_equal(len(pm), 0)
+
+
+def test_probe_row_count_beyond_the_key_array_raises_when_forked() raises:
+    # 80,000 rows fork into several morsels: an unchecked count would read
+    # past the key array.
+    _assert_both_probes_refuse(80_000, 90_000)
+
+
+def test_negative_probe_row_count_raises() raises:
+    _assert_both_probes_refuse(100, -1)
+
+
 def main() raises:
     grain_geometry_reset()
     TestSuite.discover_tests[__functions_in_module()]().run()

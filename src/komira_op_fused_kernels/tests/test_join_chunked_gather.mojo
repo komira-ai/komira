@@ -358,6 +358,19 @@ def _narrow_out_schema() -> Schema:
     return sb.build()
 
 
+def _narrow_left_out_schema() -> Schema:
+    """`_out_schema` with the FLOAT64 column `x`, a LEFT column, declared INT32."""
+    var sb = SchemaBuilder()
+    sb.add_field(Field("id", ArrowType.INT64, False))
+    sb.add_field(Field("a", ArrowType.INT32, False))
+    sb.add_field(Field("b", ArrowType.INT16, False))
+    sb.add_field(Field("x", ArrowType.INT32, False))
+    sb.add_field(Field("id_right", ArrowType.INT64, False))
+    sb.add_field(Field("c", ArrowType.INT64, False))
+    sb.add_field(Field("d", ArrowType.INT32, False))
+    return sb.build()
+
+
 def test_chunked_probes_a_sliced_key_array_at_its_offset() raises:
     var lk = _dup_keys(40, 12)
     var rk = _dup_keys(10, 10)
@@ -387,7 +400,34 @@ def test_chunked_raises_when_an_output_type_changes_the_cell_width() raises:
         )
     except e:
         raised = True
-        assert_true("cell width" in String(e), String(e))
+        assert_true(
+            "output column 5 has a cell width of 4 bytes, but its source column's is 8"
+            in String(e),
+            String(e),
+        )
+    assert_true(raised)
+
+
+def test_chunked_raises_when_a_left_output_type_changes_the_cell_width() raises:
+    var lk = _dup_keys(20, 5)
+    var rk = _dup_keys(10, 5)
+    var left = _left(lk)
+    var right = _right(rk)
+    var probe = _key_array(lk)
+    var jb = HashJoinBuilder.build(_key_array(rk))
+    var raised = False
+    try:
+        _ = assemble_inner_join_chunked(
+            left, right, jb, probe, _narrow_left_out_schema(),
+            ProbeNullMask(probe, probe.length),
+        )
+    except e:
+        raised = True
+        assert_true(
+            "output column 3 has a cell width of 4 bytes, but its source column's is 8"
+            in String(e),
+            String(e),
+        )
     assert_true(raised)
 
 

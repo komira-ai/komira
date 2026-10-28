@@ -10,8 +10,10 @@ package root re-exports nothing; import from the modules.
   engine's dispatcher. The probe rows are split into morsels sized from the
   pool's worker count; each worker appends (build row, probe row) pairs to its
   own lists, which are then appended to the caller's. The pairs are the serial
-  probe's, in a different order; a NULL probe key matches nothing. They read the first `num_probe_rows` keys (more than the array holds
-  raises); with one morsel they call the serial probe on those keys.
+  probe's, in a different order; a NULL probe key matches nothing. They read
+  the first `num_probe_rows` keys and raise when that count is negative or
+  larger than the key array; with one morsel they call the serial probe on
+  those keys.
 - `komira_op_fused_kernels.parallel_gate`: `should_parallelize`, true from
   `PARALLEL_THRESHOLD_ROWS` (100,000) rows when the pool it would fork over has
   more than one worker.
@@ -19,12 +21,13 @@ package root re-exports nothing; import from the modules.
   (every column of both sides) and `assemble_inner_join_fused_projected` (the
   named columns, either side as the build side), which walk the chains and
   write each output row as it is found, with no index lists and no second
-  pass. A kernel raises when an output type's byte width differs from its
-  source column's,. With no names the projected kernel returns the match count alone
-  (`RecordBatch.count_only`).
+  pass. `assemble_inner_join_fused` raises when an output type's byte width
+  differs from its source column's; the projected kernel takes each output
+  type from its source column and has no such check. With no names the
+  projected kernel returns the match count alone (`RecordBatch.count_only`).
 - `komira_op_fused_kernels.join_chunked_gather`:
   `assemble_inner_join_chunked`, the same output as
-  `assemble_inner_join_fused`, made by flattening the chains, probing into
+  `assemble_inner_join_fused` (and the same width check), made by flattening the chains, probing into
   chunks of 65,536 index pairs and gathering each output column per chunk;
   for joins whose output is many times their input.
 - `komira_op_fused_kernels.join_fused_route`: which inputs those three
