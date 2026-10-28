@@ -4,12 +4,12 @@
 #
 # ★ WHAT THIS FILE IS FOR. `WorkerCDState.consume_batch` resolved every row's
 #   group key through a generic `Dict[Int, Int]`, probed TWICE per row
-#   (`if key in self.group_map` then `self.group_map[key]`). Measured over
+#   (`if key in self.group_map` then `self.group_map[key]`). On a query like
 #   `SELECT os, count(DISTINCT user_id)
-#   ... GROUP BY os`, 99,997,497 rows onto 91 groups — those two probes are
-#   49.05% of `consume_batch`'s cycles and 17.73% of the whole query's: 35.9
-#   cycles per row to turn an integer whose entire domain is [0,159] into a
-#   number in [0,91). CD-DENSE-GID replaces them with a flat `List[Int32]`
+#   ... GROUP BY os` (many rows onto few groups) those two probes are the
+#   largest share of `consume_batch`'s cycles: a per-row cost to
+#   turn an integer whose entire domain is small (here [0,159]) into a number
+#   in [0,91). CD-DENSE-GID replaces them with a flat `List[Int32]`
 #   indexed at `key - dense_lo`.
 #
 # ★★ THE OBLIGATION THIS FILE DISCHARGES IS BYTE-EQUIVALENCE, NOT SPEED. The
@@ -563,9 +563,9 @@ def test_one_key_one_home_after_the_freeze() raises:
     rows behind a correct-looking row count. The repeated `100` and `200_000`
     rows are what would catch it: each key must land in exactly one group.
 
-    ⚠ MEASURED CAVEAT, so this docstring does not overclaim: with the freeze
-    deleted this case still reds — but on the `dense_frozen` assertion, not on
-    the group count, because `_dense_reshape`'s occupied range only widens and
+    ⚠ CAVEAT, so this docstring does not overclaim: without the freeze this
+    case would still fail — but on the `dense_frozen` assertion, not on the
+    group count, because `_dense_reshape`'s occupied range only widens and
     therefore refuses `200_000` every time. The group-count assertions are a
     guard against a FUTURE sizing policy that could shrink or re-centre in a way
     that makes a refused key reachable again; they are not evidence that today's

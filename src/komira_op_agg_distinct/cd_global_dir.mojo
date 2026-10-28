@@ -9,11 +9,10 @@
 # which every later consumer indexes (the directory, the fixed-cell merge and
 # each COUNT(DISTINCT) drain used to ask the Dict up to three times per cell).
 # `runs[gg]` counts the cells that map onto `gg`, so the drain sizes each
-# group's run list once instead of growing it by doubling. Measured: the
-# serial gap between the scan and the first radix fork went from 21.0 to
-# 15.0 ms per rep on a 44-state x 9,040-group query. A dense index over the
-# key span instead of the Dict measured no better (15.0 vs 15.8 ms): once it
-# is asked once per cell, the cell walk is the cost, not the Dict probe.
+# group's run list once instead of growing it by doubling. This shortens
+# the serial gap between the scan and the first radix fork. A dense index over
+# the key span instead of the Dict is no faster: once it is asked once per
+# cell, the cell walk is the cost, not the Dict probe.
 #
 # ★ BYTE-EQUIVALENCE BY CONSTRUCTION. A global gid is assigned `len(self.keys)`
 # at the moment its key is first seen, walking workers in the caller's order and

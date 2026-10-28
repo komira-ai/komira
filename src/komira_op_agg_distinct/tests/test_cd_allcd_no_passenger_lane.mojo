@@ -8,9 +8,9 @@
 #   all-CD overload "so the existing call sites are untouched". That overload
 #   forwarded into the fused body with an EMPTY fixed list, so EVERY grouped
 #   COUNT(DISTINCT) batch built the passenger lane's per-batch state and carried
-#   its per-row block through the hottest loop in the engine. Measured in the
-#   built runner: `consume_batch` 11,431 -> 13,176 B, 90 -> 122 backedges,
-#   126 -> 169 calls; an all-CD query +4.32%.
+#   its per-row block through the hottest loop in the engine. The fused
+#   body is larger (more code, more backedges, more calls) and an all-CD
+#   query runs slower through it.
 #
 # ★ THE FIX. `consume_batch[has_fixed: Bool]` — the all-CD entry instantiates
 #   `has_fixed=False`, in which every passenger-lane statement is compiled out.
