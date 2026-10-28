@@ -4,7 +4,9 @@
 #   longer string: the object-key splitter (`split_document_path`), the list
 #   prefix reader (`collection_from_prefix`), the listed-name reader
 #   (`key_from_document_name`), the query's entry key (`DocumentStore.query`)
-#   and the change feed's document id (`FirestoreWatchListener`).
+#   and the change feed's document id (`FirestoreWatchListener`); and the
+#   key or prefix text a `StoreError` message carries (`defuse_classifier_tokens`,
+#   under both `map_firestore_error_to_store_error` and a local refusal).
 # =============================================================================
 #
 # The defect these cases catch: each helper once rebuilt the text one byte at a
@@ -18,7 +20,7 @@
 # different document even when the answer is scripted to look right.
 #
 # `main` runs every case and reports each failure by name before it raises, so
-# one run shows which of the five sites is wrong.
+# one run shows which of the six sites is wrong.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -33,6 +35,11 @@ from komira_gcp_firestore.firestore_conditional_store import (
     collection_from_prefix,
     key_from_document_name,
     split_document_path,
+)
+from komira_gcp_firestore.firestore_store_errors import (
+    defuse_classifier_tokens,
+    firestore_resource_uri,
+    map_firestore_error_to_store_error,
 )
 from komira_gcp_firestore.firestore_listen_proto import (
     FsDocument,
@@ -323,6 +330,87 @@ def test_watch_listener_reports_the_utf8_document_id() raises:
     assert_equal(batch.records[1].key[0].as_string(), String(_ID))
 
 
+# =============================================================================
+# (6) `defuse_classifier_tokens`: the key, prefix or resource text every
+#     StoreError message carries. It is copied unchanged apart from the bracket
+#     the defuser puts into a classifier token.
+# =============================================================================
+
+
+def test_defuser_copies_non_ascii_text_unchanged() raises:
+    var key = String(_COLL) + "/" + String(_ID)
+    assert_equal(defuse_classifier_tokens(key), key)
+    # A token next to a multi-byte character on either side is still defused,
+    # and the characters around it stay whole.
+    assert_equal(
+        defuse_classifier_tokens(String("é404漢")), String("é4[0]4漢")
+    )
+    assert_equal(
+        defuse_classifier_tokens(String("🙂NotFound") + String(_ID)),
+        String("🙂N[o]tFound") + String(_ID),
+    )
+    assert_equal(
+        defuse_classifier_tokens(String("ä412")), String("ä4[1]2")
+    )
+
+
+def test_mapped_error_names_the_utf8_resource() raises:
+    """`map_firestore_error_to_store_error` joins the op, the resource URI and
+    the client's error and defuses the join: the URI's key and the key quoted
+    in the client's error come out byte for byte."""
+    var key = String(_COLL) + "/" + String(_ID)
+    var uri = firestore_resource_uri(String(_DATABASE), String(_COLL), String(_ID))
+    var err = (
+        String("get_document: ")
+        + key
+        + String(
+            " (POST BatchGetDocuments: HTTP 403, PERMISSION_DENIED (code 7),"
+            " body 0 bytes)"
+        )
+    )
+    var msg = String(map_firestore_error_to_store_error(String("get"), uri, err))
+    assert_true(_contains(msg, String("StoreError[PERMISSION_DENIED]")), msg)
+    assert_true(_contains(msg, uri), "the message names " + uri + ", got: " + msg)
+    assert_true(
+        _contains(msg, String("get_document: ") + key),
+        "the client's text keeps the key, got: " + msg,
+    )
+    assert_false(_contains(msg, String(_MANGLED_E)), "no widened byte: " + msg)
+
+    # A key holding a token next to a non-ASCII character: the token is
+    # defused, the character around it is not widened.
+    var uri404 = firestore_resource_uri(String(_DATABASE), String(_COLL), String("é404"))
+    var msg404 = String(
+        map_firestore_error_to_store_error(String("get"), uri404, err)
+    )
+    assert_true(
+        _contains(msg404, String("/é4[0]4 ")),
+        "the token is defused in place, got: " + msg404,
+    )
+    assert_false(_contains(msg404, String("404")), "no live 404: " + msg404)
+    assert_false(_contains(msg404, String(_MANGLED_E)), "no widened byte: " + msg404)
+
+
+def test_local_refusal_names_the_utf8_prefix() raises:
+    """A locally raised refusal (`_store_error`) quotes the caller's prefix
+    byte for byte."""
+    var prefix = String(_COLL) + "/" + String(_ID) + "/"
+    var t = ScriptedFirestore()
+    var store = _scripted_store(t)
+    var msg = String("")
+    try:
+        _ = store.list_with_delimiter(Path.parse(prefix))
+    except e:
+        msg = String(e)
+    assert_true(_contains(msg, String("StoreError[MALFORMED]")), msg)
+    assert_true(_contains(msg, String("NESTED collection")), msg)
+    assert_true(
+        _contains(msg, String("prefix '") + prefix + String("'")),
+        "the refusal quotes " + prefix + ", got: " + msg,
+    )
+    assert_false(_contains(msg, String(_MANGLED_E)), "no widened byte: " + msg)
+
+
 def main() raises:
     var failed = List[String]()
 
@@ -366,9 +454,21 @@ def main() raises:
         test_watch_listener_reports_the_utf8_document_id()
     except e:
         failed.append("test_watch_listener_reports_the_utf8_document_id: " + String(e))
+    try:
+        test_defuser_copies_non_ascii_text_unchanged()
+    except e:
+        failed.append("test_defuser_copies_non_ascii_text_unchanged: " + String(e))
+    try:
+        test_mapped_error_names_the_utf8_resource()
+    except e:
+        failed.append("test_mapped_error_names_the_utf8_resource: " + String(e))
+    try:
+        test_local_refusal_names_the_utf8_prefix()
+    except e:
+        failed.append("test_local_refusal_names_the_utf8_prefix: " + String(e))
 
     for i in range(len(failed)):
         print("FAIL " + failed[i])
     if len(failed) > 0:
-        raise Error(String(len(failed)) + " of 9 cases failed")
-    print("test_firestore_non_ascii_keys: 9 cases passed")
+        raise Error(String(len(failed)) + " of 12 cases failed")
+    print("test_firestore_non_ascii_keys: 12 cases passed")

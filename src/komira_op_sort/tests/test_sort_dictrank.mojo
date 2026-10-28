@@ -6,15 +6,13 @@
 #   * Equivalence: low-cardinality STRING keys, with and without NULLs, ASC and
 #     DESC, over 1, 3 and 8 slices, against `_sort_batch_single_key`
 #     (`sort_indices_string`): same strings, same payload (input row) in every
-#     row. A NULL rank on the wrong side (planted: the ASC sentinel at d, as
-#     DESC uses) turns `test_nulls_*` red.
+#     row. NULLs land first for ASC and last for DESC, as in the serial sort.
 #   * The fallback: a ceiling below the exact distinct count sends the batch
 #     to the comparison sort, with the same rows.
 #   * The gate: a key with one value in its first quarter and a distinct value
-#     in every later row is declined. A first-N sample (planted: stride 1)
-#     sees 76% of its sample as one value and admits it, which is what the
-#     strided sample exists to stop; that turns
-#     `test_gate_declines_a_key_distinct_in_its_tail` red.
+#     in every later row is declined. A sample of only the first rows
+#     would see most of its sample as one value and admit it; the strided
+#     sample reads the whole column and declines.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true

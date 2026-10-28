@@ -1,9 +1,10 @@
 # komira_parquet_writer
 
-The pieces a Parquet writer is built from. The record-batch writer that
-assembles them into a file is a later part of this package; what is here
-writes no file, reads no Parquet file and does not depend on the reader,
-`komira_parquet`.
+A Parquet writer: its encoders and page builders, and `ParquetFileWriter`,
+which assembles whole columns into a file and returns the file's bytes. The
+package opens no file (where the bytes go is the caller's decision), reads no
+Parquet file and does not depend on the reader, `komira_parquet`; its tests
+decode what it writes with that reader, through `test_deps`.
 
 - `thrift_writer`: `ThriftCompactWriter`, the Thrift compact protocol
   serializer for the footer (`serialize_file_metadata`), data page headers
@@ -34,6 +35,29 @@ writes no file, reads no Parquet file and does not depend on the reader,
   type-defined order.
 - `writer_helpers`: page-body compression (through `komira_parquet_codec`),
   the flattened schema builders, integer Statistics builders.
+
+- `column_page`: `ColumnPage`, one column chunk's encoded pages (one data
+  page, or a dictionary page then a data page) with the sizes, codec,
+  encodings and statistics its ColumnMetaData needs, and the DataPage V1
+  assembler every page builder uses.
+- `writer_encode`: definition levels (offset-aware, so a sliced array's
+  levels are its own rows'), and PLAIN pages: fixed-width
+  (`encode_plain_column`), BYTE_ARRAY (`encode_string_column_page` and its
+  Int64-offset twin, byte-identical), BOOLEAN.
+- `writer_delta`: DELTA_BINARY_PACKED for INT32 / INT64, deltas in the
+  column type's own wrapping arithmetic (an INT32 miniblock is never wider
+  than 32 bits).
+- `writer_bss`: BYTE_STREAM_SPLIT for FLOAT / DOUBLE.
+- `writer_dict`, `writer_dict_numeric`: dictionary column chunks, None when
+  the column is not worth a dictionary (the caller writes another
+  encoding). A one-entry dictionary's index stream is an RLE run.
+- `decimal_encode`: Decimal128 as FIXED_LEN_BYTE_ARRAY(16), big-endian,
+  ConvertedType DECIMAL; an invalid precision or scale is refused.
+
+Every page builder takes `nullable`: an OPTIONAL column's page holds
+definition levels and the non-null values; a REQUIRED column's page holds
+every value, and a REQUIRED column that holds a null is refused (writing
+the null slot's bytes would publish a value the column does not have).
 
 The package reads no environment. Its tests are welded into the build.
 
@@ -87,4 +111,155 @@ var footer = FileMetaData(
 )
 var thrift = serialize_file_metadata(footer)
 assert_true(len(thrift) > 0)
+```
+
+## A file
+
+`ParquetFileWriter` takes the flattened schema (`make_schema_elements`,
+`make_schema_elements_nullable`) and one call per column; a column's
+nullability is its schema element's. `close_to_bytes` returns the whole file
+and ends the writer.
+
+```mojo
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.string_array import StringArray
+from komira_parquet_api import CompressionCodec, ParquetType
+from komira_parquet_writer import ParquetFileWriter, make_schema_elements
+from std.testing import assert_equal
+
+var names: List[String] = ["id", "city"]
+var types: List[ParquetType] = [ParquetType.INT64, ParquetType.BYTE_ARRAY]
+var writer = ParquetFileWriter.create(
+    make_schema_elements(names^, types^), CompressionCodec.SNAPPY
+)
+writer.write_batch[DType.int64](0, PrimitiveArray[DType.int64].from_list([1, 2, 3]))
+var cities: List[String] = ["oslo", "oslo", "rome"]
+writer.write_string_batch_dict(1, StringArray.from_strings(cities))
+var file = writer.close_to_bytes()
+assert_equal(Int(file[0]), 0x50)  # PAR1 at both ends
+assert_equal(Int(file[len(file) - 1]), 0x31)
+```
+
+## Arrow batches to a file
+
+`write_record_batch_to_parquet_bytes(batch, codec, max_rows_per_rg)` and
+`write_record_batches_to_parquet_bytes(batches, ...)` derive the schema from
+the batches (OPTIONAL for a nullable Arrow field; for several batches, for a
+column with a validity buffer or a null), encode each column by its Arrow type
+(numeric dictionary else DELTA_BINARY_PACKED for integers, dictionary else
+BYTE_STREAM_SPLIT for floats, string dictionary else PLAIN, BOOLEAN, DECIMAL128
+as FIXED_LEN_BYTE_ARRAY(16), DATE32 annotated DATE) and cut row groups at
+`max_rows_per_rg` rows (default 122,880), with a page index. Several batches
+that fit one row group are encoded PLAIN without a concat when every column is
+INT32, INT64, FLOAT32, FLOAT64, STRING or LARGE_STRING; any other mix is
+concatenated first. A column of an Arrow type with no writer (unsigned and
+narrow integers, BINARY, nested types) is refused. TIMESTAMP, DATE64, TIME and
+DURATION are written as INT64 or INT32 with no logical-type annotation: the
+values are right and a reader sees integers.
+
+```mojo
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatchBuilder
+from komira_arrow.schema import Field, SchemaBuilder
+from komira_parquet_api import CompressionCodec
+from komira_parquet_writer import write_record_batch_to_parquet_bytes
+from std.testing import assert_equal
+
+var ids: List[Int64] = [10, 20, 30]
+var sb = SchemaBuilder()
+sb.add_field(Field("id", ArrowType.INT64, False))
+var builder = RecordBatchBuilder()
+builder.add_column(Column.from_primitive[DType.int64](PrimitiveArray[DType.int64].from_list(ids)))
+var batch = builder.build(sb.build())
+var file = write_record_batch_to_parquet_bytes(batch, CompressionCodec.SNAPPY)
+assert_equal(Int(file[len(file) - 1]), 0x31)  # PAR1
+```
+
+## Row groups, the page index, bloom filters, page CRCs
+
+`AdvancedParquetWriter` takes one chunk per column per row group
+(`add_column_page_simple`, or `add_column_page` with explicit min and max for
+the ColumnIndex), `flush_row_group` closes a row group, and `close_to_bytes`
+returns the file. A bloom filter (`set_bloom_filter`, a `komira_dynamic_filter`
+`BloomFilter`) is written when `WriterConfig(enable_bloom_filters=True)`. With
+`enable_crc` each data page's header carries the standard CRC-32 of the stored
+body (not CRC-32C), which `komira_parquet`'s reader checks; dictionary chunks
+carry none. The OffsetIndex locates data pages (past a dictionary page), and a
+chunk with no min and max gets an OffsetIndex only.
+
+```mojo
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_parquet_api import ParquetType
+from komira_parquet_writer import (
+    AdvancedParquetWriter,
+    WriterConfig,
+    encode_plain_column,
+    make_schema_elements,
+)
+from std.testing import assert_equal
+
+var names: List[String] = ["id"]
+var types: List[ParquetType] = [ParquetType.INT64]
+var writer = AdvancedParquetWriter.create(
+    make_schema_elements(names^, types^), WriterConfig(enable_crc=True)
+)
+for g in range(2):  # two row groups
+    var vals: List[Int64] = [Int64(g * 10), Int64(g * 10 + 1)]
+    var ids = PrimitiveArray[DType.int64].from_list(vals)
+    writer.add_column_page_simple(encode_plain_column[DType.int64](0, ids, "id"))
+    writer.flush_row_group()
+var file = writer.close_to_bytes()
+assert_equal(Int(file[0]), 0x50)
+assert_equal(writer.total_num_rows, 4)
+```
+
+## Several arrays as one chunk
+
+A column held as several morsels encodes without an Arrow concat:
+`encode_two_primitives` and `encode_two_strings` give the page the
+single-array encoder gives for the concatenation (nulls, statistics and codec
+included), and `encode_n_primitives` takes any number of REQUIRED arrays as
+raw bytes. `writer_multi_batch_stats` folds a column's statistics across
+RecordBatches the same way.
+
+```mojo
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_parquet_writer import encode_plain_column, encode_two_primitives
+from std.testing import assert_equal
+
+var a = PrimitiveArray[DType.int64].from_list([1, 2])
+var b = PrimitiveArray[DType.int64].from_list([3, 4, 5])
+var both = PrimitiveArray[DType.int64].from_list([1, 2, 3, 4, 5])
+var two = encode_two_primitives[DType.int64](0, a, b, "n")
+var one = encode_plain_column[DType.int64](0, both, "n")
+assert_equal(len(two.data), len(one.data))
+for i in range(len(one.data)):
+    assert_equal(Int(two.data[i]), Int(one.data[i]))
+```
+
+## A PLAIN page
+
+```mojo
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_parquet_api import Encoding
+from komira_parquet_writer import encode_plain_column
+from std.testing import assert_equal, assert_true
+
+var col = PrimitiveArray[DType.int32].allocate_nullable(3)
+col.set(0, 5)
+col.set(2, 7)
+col._set_null(1)
+var page = encode_plain_column[DType.int32](0, col, "n", nullable=True)
+assert_equal(page.num_values, 3)  # the null row counts
+assert_true(page.encodings[0] == Encoding.RLE)  # definition levels
+assert_equal(page.statistics.value().null_count.value(), 1)
+var other = PrimitiveArray[DType.int32].allocate_nullable(1)
+other._set_null(0)
+try:
+    _ = encode_plain_column[DType.int32](0, other, "n", nullable=False)
+    raise Error("not refused")
+except e:
+    assert_true("is REQUIRED but holds" in String(e))
 ```

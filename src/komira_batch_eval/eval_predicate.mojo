@@ -159,7 +159,7 @@ def _eval_predicate(expr: Expr, batch: RecordBatch) raises -> BooleanArray:
             #
             # ⚠ IT TOOK A FIX TO ANOTHER DEFECT TO MAKE THIS VISIBLE, which is
             # why it is landing here rather than having been found earlier.
-            # `test_is_null_finds_exactly_the_missing_values` (S024) asserts
+            # `test_is_null_finds_exactly_the_missing_values` asserts
             # BOTH polarities in one body precisely because "the pair must
             # partition the six rows" — but its FIRST leg (`IS NULL`) returned
             # zero rows and failed at the row-count assertion, so the second

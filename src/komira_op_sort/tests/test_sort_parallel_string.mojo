@@ -11,17 +11,19 @@
 #   * ties ASC / DESC, and 4,096 rows of 16 keys over 4 and 7 slices;
 #   * `test_cross_slice_prefix_collision`: 64 keys with one 16-byte prefix,
 #     differing only after it. The 8-byte prefix keys all collide, so only the
-#     full comparator orders them; a merge that trusted the prefix key alone
-#     would fail;
+#     full comparator orders them;
 #   * a string that is a prefix of another ("ab" before "abc") across slices;
 #   * NULLs across slices: NULLS FIRST ascending, NULLS LAST descending;
 #   * the serial heap merge and the parallel pairwise-tree merge of sorted
-#     partitions, each against one sort of the concatenation.
+#     partitions, each against one sort of the concatenation;
+#   * BINARY keys (embedded zero bytes, one shared prefix, a key that is a
+#     prefix of another), sorted in parallel and merged from sorted partitions.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_arrow.arrow_types import ArrowType
+from komira_arrow.binary_array import BinaryArray
 from komira_arrow.column import Column
 from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.record_batch import RecordBatch
@@ -178,8 +180,7 @@ def _partitions(
     desc: Bool, mut parts: Slab[RecordBatch]
 ) raises -> List[String]:
     """Append three partitions of 300 rows over 8 keys to `parts`, each
-    sorted on its own (as `combine_partition` does); return all the keys in
-    partition order."""
+    sorted on its own; return all the keys in partition order."""
     var all_keys = List[String]()
     var orig = 0
     for p in range(3):
@@ -229,6 +230,124 @@ def test_gate() raises:
     assert_true(can_parallel_sort_single_key_string(b, 1, "k", force=True))
     assert_false(can_parallel_sort_single_key_string(b, 1, "orig", force=True))
     assert_false(can_parallel_sort_single_key_string(b, 2, "k", force=True))
+
+
+# -----------------------------------------------------------------------------
+# BINARY keys
+# -----------------------------------------------------------------------------
+
+
+def _binary_rows(n: Int, seed: UInt64) -> List[List[UInt8]]:
+    """`n` byte strings: most share the prefix "ab" then a zero byte
+    and differ in a trailing byte or two, a few are shorter prefixes of those."""
+    var rows = List[List[UInt8]]()
+    var state = seed
+    for _ in range(n):
+        state = state * 6364136223846793005 + 1442695040888963407
+        var tail = UInt8(Int((state >> 24) % 5))
+        var shape = Int((state >> 40) % 6)
+        var row: List[UInt8] = [UInt8(0x61), UInt8(0x62), UInt8(0x00)]
+        if shape == 0:
+            row = [UInt8(0x61), UInt8(0x62)]
+        elif shape == 1:
+            row = [UInt8(0x61), UInt8(0x62), UInt8(0x00)]
+        elif shape == 2:
+            row.append(tail)
+            row.append(UInt8(0x00))
+        else:
+            row.append(tail)
+        rows.append(row^)
+    return rows^
+
+
+def _binary_batch(
+    rows: List[List[UInt8]], first_orig: Int = 0
+) raises -> RecordBatch:
+    """Key `k` (BINARY) and payload `orig` = first_orig.."""
+    var payload = List[Int64]()
+    for i in range(len(rows)):
+        payload.append(Int64(first_orig + i))
+    var schema = Schema.from_fields_2(
+        Field("k", ArrowType.BINARY, True), Field("orig", DType.int64, True)
+    )
+    return RecordBatch.from_typed_columns_2(
+        schema^,
+        Column.from_binary(BinaryArray.from_bytes_list(rows)),
+        Column.from_primitive[DType.int64](
+            PrimitiveArray[DType.int64].from_list(payload^)
+        ),
+    )
+
+
+def _assert_same_binary_rows(imm a: RecordBatch, imm b: RecordBatch) raises:
+    """Equal key bytes and equal payloads, row by row."""
+    assert_equal(a.num_rows(), b.num_rows())
+    var pa = a.column_at(1).as_primitive[DType.int64]()
+    var pb = b.column_at(1).as_primitive[DType.int64]()
+    ref ca = a.column_at(0)
+    ref cb = b.column_at(0)
+    var oa = ca._offsets.value().view_ro()
+    var ob = cb._offsets.value().view_ro()
+    var da = ca._data.view_ro()
+    var db = cb._data.view_ro()
+    for r in range(a.num_rows()):
+        var sa = Int(oa.get_typed[Int32](ca._offset + r))
+        var ea = Int(oa.get_typed[Int32](ca._offset + r + 1))
+        var sb = Int(ob.get_typed[Int32](cb._offset + r))
+        var eb = Int(ob.get_typed[Int32](cb._offset + r + 1))
+        assert_equal(ea - sa, eb - sb)
+        for i in range(ea - sa):
+            assert_equal(
+                Int(da.get_typed[UInt8](sa + i)),
+                Int(db.get_typed[UInt8](sb + i)),
+            )
+        assert_equal(
+            Int(pa.get_typed[Scalar[DType.int64]](r)),
+            Int(pb.get_typed[Scalar[DType.int64]](r)),
+        )
+
+
+def test_binary_sort_matches_serial() raises:
+    var rows = _binary_rows(600, 17)
+    for desc in [False, True]:
+        for nw in [1, 3, 7]:
+            var par = parallel_sort_single_key_string_serial(
+                _binary_batch(rows), "k", desc, num_workers=nw
+            )
+            var ser = _sort_batch_single_key(_binary_batch(rows), "k", desc)
+            _assert_same_binary_rows(par, ser)
+
+
+def test_binary_partition_merge_matches_one_sort() raises:
+    for desc in [False, True]:
+        for nw in [1, 3, 8]:
+            var parts = Slab[RecordBatch]()
+            var all_rows = List[List[UInt8]]()
+            var orig = 0
+            for p in range(3):
+                var rows = _binary_rows(250, UInt64(5 + p))
+                for i in range(len(rows)):
+                    all_rows.append(rows[i].copy())
+                parts.append(
+                    _sort_batch_single_key(
+                        _binary_batch(rows, orig), "k", desc
+                    )
+                )
+                orig += 250
+            var merged = merge_sorted_partitions_single_key_string_parallel_serial(
+                parts^, "k", desc, num_workers=nw
+            )
+            var ref_sorted = _sort_batch_single_key(
+                _binary_batch(all_rows), "k", desc
+            )
+            _assert_same_binary_rows(merged, ref_sorted)
+
+
+def test_binary_key_passes_the_gate() raises:
+    var rows = _binary_rows(4, 1)
+    var b = _binary_batch(rows)
+    assert_true(can_parallel_sort_single_key_string(b, 1, "k", force=True))
+    assert_false(can_parallel_sort_single_key_string(b, 1, "k"))
 
 
 def main() raises:

@@ -118,8 +118,6 @@ def _merge_2way_range[
         col_offset, valid, has_validity, descending,
     )
     var j_end = out_hi - i_end
-    var la = a_mid
-    var lb = a_hi
     var w = a_lo + out_lo
     var ai = a_lo + i
     var bj = a_mid + j
@@ -147,8 +145,6 @@ def _merge_2way_range[
         dst[w] = src[bj]
         bj += 1
         w += 1
-    _ = la
-    _ = lb
 
 
 @fieldwise_init
@@ -179,6 +175,9 @@ struct _PairMergeWork[
     ](
         self, chunk_id: Int, n_chunks: Int, ref input: In, mut payload: P,
     ) raises:
+        # SAFETY: the driver passes a `List[UInt64]` as `input` and a
+        # `_PermScratch` as `payload` to the `pool.run` that dispatches this
+        # work, so each cast is to the exact type of the referent.
         var pkp = UnsafePointer(to=input).bitcast[List[UInt64]]()
         var bp = UnsafePointer(to=payload).bitcast[_PermScratch]()
         var perm_p = UnsafePointer(to=bp[].perm)
@@ -330,8 +329,10 @@ def _parallel_pairwise_tree_merge[
     the effective order). Merges them with a balanced REDUCTION TREE: each round
     halves the run count by merging adjacent pairs, and EVERY 2-way pair-merge is
     itself cut across the pool by a comparator CO-RANK (merge-path diagonal
-    binary search): an O((n/P) log P) span where a heap merge is O(n log P). Stability: the LEFT run always wins ties (lower
-    original-index == lower run), byte-identical to the serial stable merge. Each
+    binary search): an O((n/P) log P) span where a heap merge is O(n log P).
+
+    Stability: the LEFT run always wins ties (lower original-index == lower
+    run), so the permutation is the serial stable merge's. Each
     round ping-pongs perm<->scratch; the result is left in `perm` (an odd number
     of rounds copies scratch back).
 

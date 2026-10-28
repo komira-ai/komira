@@ -30,7 +30,7 @@ A row states, all required:
 | `cache_line_bytes`, `page_bytes`, `features`, `applets` | the cache line and page size of the platform, what it has that tests select on (`epoll`, `erms`, `futex`, `kqueue`, `neon`, `thp`, `ulock`, `x86_simd`), and the utilities a wrapper script may call (a list, or `none(reason)` where a pinned busybox carries them) |
 | `golden_config_hash`, `zig_exe_sha256` | the configuration hash of the row's platform (what every output path and action key carries; `pending` for a row with no platform), and the sha256 of the `zig` executable inside the zig archive, which the bootstrap checks after unpacking |
 | `object_format`, `runtime_libs`, `os_floor` | `elf` or `macho`; what a built binary loads from the toolchain's `lib/`; the oldest OS it runs on |
-| `assets` | every pinned download, by role (`zig`, `mojo_compiler`, `pixi`, `rustc`, `rust_std`, `protoc`, `shellcheck`, `actionlint`, `busybox`, the conda runtime libraries `libgcc`, `libstdcxx`, `libzlib`, and kcov's source and static libraries `kcov_src`, `kcov_elfutils`, `kcov_zlib`, `kcov_bzip2`, `kcov_lzma`, `kcov_zstd`, [linux-x86_64 only](../toolchains/kcov/README.md), and branch coverage's LLVM 23 packages `llvm_branch_tools`, `llvm_branch_libllvm`, `llvm_branch_libxml2`, `llvm_branch_libiconv`, `llvm_branch_zstd`, `llvm_branch_rt`, [linux-x86_64 only](../toolchains/llvm_branch/README.md)): the name of its `pinned_file`, URL, sha256 and size in bytes, or `none(reason)` where a platform needs nothing |
+| `assets` | every pinned download, by role (`zig`, `zig_next` (0.15.2, the release the build tools are moving to; its archive unpacks into `zig-<arch>-<os>-0.15.2`, the arch first), `mojo_compiler`, `pixi`, `rustc`, `rust_std`, `protoc`, `shellcheck`, `actionlint`, `busybox`, the conda runtime libraries `libgcc`, `libstdcxx`, `libzlib`, the run-time-opened `liblz4` (darwin-arm64 only: macOS ships none), and kcov's source and static libraries `kcov_src`, `kcov_elfutils`, `kcov_zlib`, `kcov_bzip2`, `kcov_lzma`, `kcov_zstd`, [linux-x86_64 only](../toolchains/kcov/README.md), and branch coverage's LLVM 23 packages `llvm_branch_tools`, `llvm_branch_libllvm`, `llvm_branch_libxml2`, `llvm_branch_libiconv`, `llvm_branch_zstd`, `llvm_branch_rt`, [linux-x86_64 only](../toolchains/llvm_branch/README.md)): the name of its `pinned_file`, URL, sha256 and size in bytes, or `none(reason)` where a platform needs nothing |
 | `oci_base`, `bundles` | the container base (its manifest, and its blobs' digests and sizes), and whether bundles, OCI images and the launcher are products of this platform (Linux server artifacts) |
 | `registered` | `True`: a build key. `False`: reserved |
 
@@ -57,10 +57,13 @@ and `link_driver` (PR 3).
 Every place the build says it builds for one platform only is a **limit**:
 a `target_compatible_with` or a refusal. Each is declared at its site by a
 `komira-limit:<id>` marker and listed in [`limits.tsv`](limits.tsv) with the
-PR that deletes it. [`limits_retired.sh`](../tests/functional/platform_table/limits_retired.sh)
-refuses a `target_compatible_with` with no marker, a marker with no row, a row
-with no marker, and a row whose retiring PR has merged (a commit subject on
-main contains `[native-pr:<n>]`) while its marker is still there. A PR that
+PR that deletes it. The validation `//:limits` (the Zig tool
+[`limits_check`](limits/src/limits.zig), so `./buck2 build //...` and the
+pull request's check run it) refuses a malformed row, a
+`target_compatible_with` with no marker, a marker with no row, and a row with
+no marker. The platform table's check (test 37) runs the same tool over the
+commit subjects of main and refuses a row whose retiring PR has merged (a
+subject contains `native-pr:<n>`), which no build action can read. A PR that
 deletes a limit deletes its marker and its row; `never` is only for product
 statements (images are a Linux product), including a test whose subject is
 one OS's features (the farm capability probe tests the Linux kernel features
@@ -211,6 +214,7 @@ A standalone checkout reads those sets from `[komira_re]` in
 | `darwin_arm64_properties` | `darwin-arm64` | one of the two; needs `darwin_macos_hosts` as well |
 | `linux_arm64_properties` | `linux-arm64` | **reserved**: refused if set, until that row is registered |
 | `darwin_macos_hosts` | (the macOS hosts a compile may run on) | with `darwin_arm64_properties` |
+| `macos_library_dirs` | (not komira's: buildrules' macOS test runs) | optional, only with `darwin_arm64_properties`: absolute directories, separated by `:` or spaces, a macOS test run searches for a library it opens by its bare name |
 
 Each property value is comma-separated `key=value` pairs matching what the
 service routes on, e.g. `pool=mojo-sized`. The macOS set must differ from the
@@ -241,3 +245,11 @@ Two details keep action digests portable:
 needs `darwin_macos_hosts` too, since a macOS host's SDK and tools are not
 inputs of the action. Setting up the workers is in
 [the toolchain README](../toolchains/README.md), "macOS".
+
+buildrules reads every `[buildrules_re]` key from the root cell's configuration (komira's own `.buckconfig` when
+komira is built standalone), and besides `macos_aarch64_properties` its Mojo rules read two more keys; the committed
+`.buckconfig` points both at `[komira_re]` (`$(config ...)`, no value committed): `darwin_macos_hosts` (the hosts
+a macOS Mojo compile may run on; a macOS Mojo target fails analysis without it) and `macos_library_dirs` (the
+directories a macOS test run searches, before `/usr/local/lib:/usr/lib`, for a library it opens by its bare name,
+such as `liblz4`; empty leaves dyld's defaults). In a repository that mounts komira as a cell, the root cell's
+`.buckconfig` names them: `$(config ...)` is read in the cell that holds the line.

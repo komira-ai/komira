@@ -19,10 +19,9 @@
 #   * serial: routes switched off, two keys, one worker, a small input under
 #     the default floor, and no rows at all.
 #
-# Planted mutant: `combine` taking the partitioned route with ONE partition
-# (the `npart_now > 1` guard dropped). finalize then has a partition but no
-# arm sorts a lone one, and returns an empty batch:
-# `test_one_worker_takes_serial_route` goes red.
+# One worker (one partition) takes the serial route: a lone partition is never
+# sorted by `combine_partition`, so the sink must not choose the partitioned
+# route for it (`test_one_worker_takes_serial_route`).
 # =============================================================================
 
 from std.memory import bitcast, OwnedPointer

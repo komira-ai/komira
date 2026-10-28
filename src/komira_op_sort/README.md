@@ -29,14 +29,25 @@ batch by it.
 - `sort_topn_sink`: the sort and top-N sink kernels (`_execute_sort_sink`,
   `_execute_topn_sink` over `SortSinkData` / `TopNSinkData` of
   `komira_physical_plan`), and `append_deterministic_tiebreak[_schema]`,
-  the one rule that makes a tied top-N cut deterministic.
+  the one rule that makes a tied top-N cut deterministic across runs whose
+  input order differs. `_execute_sort_sink` does not resolve dictionary
+  keys: a numeric dictionary-encoded sort key raises an error (the message
+  differs between the single-key and multi-key paths).
+  `_execute_topn_sink` resolves a numeric dictionary key to its values first.
 - `sort_topn_heap`: `topn_heap_select`, multi-key top-K over a
   `RecordBatch` by a bounded heap, O(N log K), for INT64 / INT32 / FLOAT64 /
-  STRING keys.
+  STRING keys. Rows that tie on every key compare by row index, so the heap
+  keeps and orders tied rows as the stable full sort does. A numeric key
+  stored as a dictionary (codes plus values) is resolved to its values before
+  a top-N.
 - `sort_buffer_untyped`: `SortBuffer_Untyped`, a multi-key sort buffer
   whose column types are known only at run time (a `ColDescriptor` layout
   over `komira_column_format` storage), fed from `BatchView`s and read back
-  per DType; its cell codec is `sort_buffer_cells`.
+  per DType; its cell codec is `sort_buffer_cells`. It does not track
+  validity: a NULL cell sorts as its value bytes, so callers keep nullable
+  keys out or place nulls themselves. TIMESTAMP, DECIMAL128 and BINARY
+  columns can be fed and ordered but have no typed reader; the order is in
+  `sorted_indices`.
 - `sort_loser_tree`: `LoserTree`, a tournament tree for the k-way merge of
   sorted runs, driven by a caller's `LoserTreeComparator`.
 - `sort_parallel`: `parallel_sort_single_key`, the single-key sort over an
@@ -71,6 +82,14 @@ or `serial_fork_join_handle()` to run the same chunks inline; the `*_serial`
 entries do that) and gives exactly the rows of the serial kernel, ties in
 input order. `num_workers` sets the slice count; 0 means one per physical
 core.
+
+The numeric parallel sort (`sort_parallel`) does not read the key's validity:
+a NULL cell sorts by its stored value, as the serial sort of a numeric key in
+`sort_topn_sink` does, and `can_parallel_sort_single_key` does not look at
+NULLs. The STRING / BINARY form places NULLs first ascending and last
+descending, as `sort_indices_string` does. No sort sink calls the parallel
+entries yet; they are covered by this package's tests, including a pooled run
+of each entry family on a started runtime.
 
 Every sort is stable: rows with equal keys keep their input order, in both
 directions. Float keys are totally ordered the way DuckDB orders them: NaN

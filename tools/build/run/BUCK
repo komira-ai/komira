@@ -1,0 +1,108 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test", "zig_test_binary", "zig_test_run")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
+load("@komira//tools/build/platforms:table.bzl", "row")
+
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+
+# gate (README.md): runs and supervises every welded test, in place of the
+# shell runners (docs/design/zig_gate_runner.md). Built by the pinned zig,
+# statically linked, and published behind its unit tests: no test of any
+# package runs unless these passed.
+
+_SRCS = [
+    "gate.zig",
+    "mojo.zig",
+    "proctab.zig",
+    "proctab_darwin.zig",
+    "rust.zig",
+    "step.zig",
+    "supervise.zig",
+    "sys.zig",
+    "util.zig",
+]
+
+_TESTS = [
+    "mojo_test",
+    "rust_test",
+    "step_test",
+    "supervise_test",
+    "util_test",
+]
+
+[
+    zig_test(
+        name = t,
+        exec_compatible_with = LINUX_X86_64,
+        imports = _SRCS + ["testkit.zig"],
+        src = t + ".zig",
+        busybox = "komira//tools/build/toolchains:busybox",
+        zig = _ZIG,
+    )
+    for t in _TESTS
+]
+
+zig_exe(
+    name = "gate",
+    exec_compatible_with = LINUX_X86_64,
+    imports = _SRCS,
+    src = "gate.zig",
+    unit_tests = [":" + t for t in _TESTS] + [_ZIG_VERSION],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+    visibility = ["PUBLIC"],
+)
+
+# ---- macOS (darwin-arm64) ---------------------------------------------------
+#
+# The same sources built for macOS by the same zig on the linux execution
+# platform (README.md, "macOS"). Its unit tests are the two that exercise
+# the supervisor and `gate mojo` against the operating system (the process
+# table, the cap, the time limit, signals, the tether, the environment):
+# built on linux, run on the macOS workers. rust_test, step_test and
+# util_test hold no macOS path; the gate waits for their linux runs too.
+
+_DARWIN_TESTS = [
+    "mojo_test",
+    "supervise_test",
+]
+
+[
+    zig_test_binary(
+        name = t + "_darwin_bin",
+        exec_compatible_with = LINUX_X86_64,
+        target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-gate-runner
+        imports = _SRCS + ["testkit.zig"],
+        src = t + ".zig",
+        target = row("darwin-arm64")["zig_triple"],
+        busybox = "komira//tools/build/toolchains:busybox",
+        zig = _ZIG,
+    )
+    for t in _DARWIN_TESTS
+]
+
+[
+    zig_test_run(
+        name = t + "_darwin",
+        exec_compatible_with = DARWIN_ARM64,
+        target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-gate-runner
+        binary = ":" + t + "_darwin_bin",
+        busybox = "komira//tools/build/mojo/darwin:busybox.sh",
+    )
+    for t in _DARWIN_TESTS
+]
+
+zig_exe(
+    name = "gate_darwin",
+    exec_compatible_with = LINUX_X86_64,
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-gate-runner
+    imports = _SRCS,
+    src = "gate.zig",
+    target = row("darwin-arm64")["zig_triple"],
+    unit_tests = [":" + t for t in _TESTS] + [":" + t + "_darwin" for t in _DARWIN_TESTS] + [_ZIG_VERSION],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+    visibility = ["PUBLIC"],
+)

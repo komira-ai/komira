@@ -4,7 +4,7 @@ from covcheck.analyze import FORMAT_LCOV, Analysis, Input, Options, Sources, ana
 from covcheck.decls import declaration_only
 from covcheck.lexer import executable_lines
 from covcheck.paths import repo_files_of
-from covcheck.ratchet import parse_ratchet
+from covcheck.held import Held, add_hold
 from covcheck.stats import Finding
 from covcheck.text import join, read_text
 
@@ -137,7 +137,8 @@ def _run(decl: String) raises -> Analysis:
     s.texts[String("src/p/decl.mojo")] = decl
     var o = Options()
     o.mode = String("enforce")
-    var rat = parse_ratchet(String("src/p\t10000\t10000\n"), String("r.tsv"))
+    var rat = Held()
+    add_hold(rat, String("src/p"), String("line\nbranch\n"), String("src/p/coverage_held"), List[String]())
     return analyze(_report(), List[Input](), repo_files_of(_repo()), rat, s, o)
 
 
@@ -174,7 +175,7 @@ def test_the_near_miss_is_charged() raises:
     var k = a.package_index(String("src/p"))
     assert_equal(a.packages[k].line_found, 6, _kinds(a.findings))
     assert_equal(a.packages[k].unmeasured_files, 1)
-    assert_equal(_kinds(a.findings), "BelowTarget@ Regression@ UnmeasuredFile@src/p/decl.mojo")
+    assert_equal(_kinds(a.findings), "Regression@ UnmeasuredFile@src/p/decl.mojo")
     assert_equal(len(a.info_findings), 0)
     assert_equal(a.conclusion, "failure")
 
