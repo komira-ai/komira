@@ -5,7 +5,7 @@ from covcheck.analyze import FORMAT_BRANCH_LCOV, FORMAT_LCOV, Analysis, Input, O
 from covcheck.cli import EXIT_GATE, EXIT_OK, parse_args, run
 from covcheck.held import Held, add_hold
 from covcheck.paths import RepoFiles, repo_files_of
-from covcheck.programs import BinEntry, parse_bins, parse_program_runs
+from covcheck.programs import BinEntry, parse_bins, parse_program_runs, program_sources
 from covcheck.text import write_text
 
 # Program sources: a file the package's mopm.toml names in `[targets] bins` is
@@ -237,6 +237,38 @@ def test_paths_must_be_relative_mojo_files() raises:
     _refused(head + String("bins//a.mojo") + tail, String("segment"))
     _refused(head + String("bins/") + tail, String("`.mojo` file"))
     assert_equal(_names(parse_bins(head + String("a.mojo") + tail, String("m.toml"))), "a=a.mojo")
+
+
+def test_quoting_and_nesting_in_the_manifest() raises:
+    # A backslash-escaped quote does not end a string, so the `#` after it is inside the string.
+    var esc = String(
+        "[package]\n"
+        "note = \"say \\\"hi\\\" # not a comment\"\n"
+        "[targets]\n"
+        "bins = [{ name = \"a\", path = \"bins/a.mojo\" }]\n"
+    )
+    assert_equal(_names(parse_bins(esc, String("m.toml"))), "a=bins/a.mojo")
+    # Quoted keys, and a nested array inside an entry, whose brackets do not end the entry.
+    var quoted = String(
+        "[targets]\n"
+        "\"bins\" = [{ \"name\" = \"q\", 'path' = \"bins/q.mojo\", tags = [\"x\", \"y\"] }]\n"
+    )
+    assert_equal(_names(parse_bins(quoted, String("m.toml"))), "q=bins/q.mojo")
+    # A key given twice inside one entry; an entry whose brace is never matched.
+    _refused(String("[targets]\nbins = [{ name = \"a\", path = \"x.mojo\", path = \"y.mojo\" }]\n"), String("given twice"))
+    _refused(String("[targets]\nbins = [{ name = \"a\", path = \"bins/a.mojo\" ] ]\n"), String("never closed"))
+
+
+def test_a_package_without_a_manifest_has_no_programs() raises:
+    var packages = List[String]()
+    packages.append(String("src/r"))
+    packages.append(String("src/p"))
+    var manifests = Dict[String, String]()
+    manifests[String("src/p/mopm.toml")] = String(MANIFEST)
+    var ps = program_sources(_repo(), manifests, packages)
+    assert_equal(len(ps), 1)
+    assert_equal(ps[0].package, "src/p")
+    assert_equal(ps[0].path, TOOL_PATH)
 
 
 def test_the_error_names_the_line() raises:
