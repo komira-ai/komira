@@ -32,7 +32,8 @@ from komira_async.runtime.local_dispatcher import LocalDispatcher
 from komira_async_api.token import CancellationToken
 from komira_collections.slab import Slab
 from komira_column_format.column_format_storage import ColDescriptor
-from komira_engine_runtime.morsel_sizing_policy import MorselSizingPolicy
+from komira_host_profile.host_profile import reference_host_profile
+from komira_host_profile.morsel_sizing_policy import MorselSizingPolicy
 from komira_op_agg_row_api.agg_spec import AggSpec
 from komira_parquet.runtime_footer_cache import ParquetMetadataCache
 from komira_physical_plan.physical_plan import ParquetSourceData, MorselOp
@@ -216,7 +217,7 @@ def test_the_parquet_leaves_raise() raises:
             CancellationToken.never(),
             _pq(),
             Slab[MorselOp](),
-            MorselSizingPolicy.from_defaults(),
+            MorselSizingPolicy.for_host(reference_host_profile("test")),
             cache,
             False,
             None,
@@ -237,7 +238,7 @@ def test_the_parquet_leaves_raise() raises:
             List[ColDescriptor](),
             List[AggSpec](),
             _schema(),
-            MorselSizingPolicy.from_defaults(),
+            MorselSizingPolicy.for_host(reference_host_profile("test")),
             cache,
         )
     except e:

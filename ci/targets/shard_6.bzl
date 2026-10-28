@@ -33,6 +33,7 @@ TARGETS = [
     "komira//src/komira_jose:komira_jose_conda",
     "komira//src/komira_kg_code/tests/fixtures/repo:kgfix_dot_test",
     "komira//src/komira_mail_auth:komira_mail_auth_conda",
+    "komira//src/komira_op_join_stage:komira_op_join_stage_conda",
     "komira//src/komira_parquet_codec:komira_parquet_codec_conda",
     "komira//src/komira_parquet_codec:komira_parquet_codec_native",
     "komira//src/komira_proto_codec:ci",

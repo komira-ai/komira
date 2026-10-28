@@ -92,6 +92,7 @@ TARGETS = [
     "komira//tools/build/selftest:inner",
     "komira//tools/build/selftest:never",
     "komira//tools/build/selftest:planted_red_builds_abi_golden",
+    "komira//tools/build/selftest:planted_red_builds_adopt_system_libs",
     "komira//tools/build/selftest:planted_red_builds_mojo_hang",
     "komira//tools/build/selftest:planted_red_builds_node",
     "komira//tools/build/selftest:planted_red_builds_npm_modules",

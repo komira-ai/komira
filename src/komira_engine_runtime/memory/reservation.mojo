@@ -18,7 +18,7 @@
 # own; nothing is shared across workers.
 # =============================================================================
 
-from komira_engine_runtime.host_profile import HostProfile
+from komira_host_profile.host_profile import HostProfile
 
 
 # Sentinel for "no budget" (infinite quota). Any negative value is out of band
