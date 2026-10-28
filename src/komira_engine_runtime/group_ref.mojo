@@ -1,31 +1,32 @@
 # =============================================================================
-# GroupRef / GroupColumn -- Per-group row view for AggregateUdf
+# GroupRef / GroupColumn -- Per-group row view for aggregate UDFs
 # =============================================================================
 #
-# Per an internal doc Rev 3.1 Section 4.2. GroupRef provides
-# named column access for a single row within a group, following the Pandas
-# apply() pattern. AggregateUdf.accumulate() receives a GroupRef.
+# GroupRef provides named column access for a single row within a group,
+# following the Pandas apply() pattern. An aggregate UDF's accumulate step
+# receives a GroupRef.
 #
 # Design:
-#   GroupRef is a lightweight view (batch borrow + row index). It does NOT
-#   own data. The batch borrow is a Pointer[RecordBatch, origin] whose origin
-#   is the batch's own, so a GroupRef cannot outlive its batch.
+#   GroupRef is a lightweight view (batch borrow + row index). It does NOT own
+#   data and holds no copy of the column names: a name is resolved against the
+#   batch's schema on each access. The batch borrow is a
+#   Pointer[RecordBatch, origin] whose origin is the batch's own, so a GroupRef
+#   cannot outlive its batch.
 #
-#   Column access is by name via __getitem__("col"). The returned GroupColumn
-#   provides typed accessors (as_f64, as_i64, as_string).
+#   Column access is by name via get("col"). The returned GroupColumn provides
+#   typed accessors (as_f64, as_i64, as_i32, as_string). The typed accessors
+#   check the column's type and that the row is inside the column, and raise
+#   otherwise; the validity bitmap is not consulted.
 #
 # Column tracking:
-#   GroupRef records accessed column names in _accessed_names. The plan compiler
-#   uses this set to determine which columns to project from the source.
+#   GroupRef records accessed column names in _accessed_names, so a caller can
+#   learn which columns a UDF touches.
 # =============================================================================
 
-from std.sys import size_of
 from std.collections import Set
 
-from komira_arrow.column import Column
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import RecordBatch
-from komira_buffer.heap_region import HeapRegion
 
 
 # =============================================================================
@@ -63,6 +64,17 @@ struct GroupColumn[origin: Origin[mut=False]](Movable, Copyable):
         self._col = col
         self._row = row
 
+    def _check_row(self, length: Int, accessor: String) raises:
+        if self._row < 0 or self._row >= length:
+            raise Error(
+                "GroupColumn."
+                + accessor
+                + ": row "
+                + String(self._row)
+                + " is outside the column of length "
+                + String(length)
+            )
+
     def as_f64(self) raises -> Float64:
         """Read the value as Float64.
 
@@ -79,6 +91,7 @@ struct GroupColumn[origin: Origin[mut=False]](Movable, Copyable):
                 + String(col.arrow_type)
                 + ", expected FLOAT64"
             )
+        self._check_row(col.length(), "as_f64")
         var offset = col._offset
         return Float64(col._data.get_typed[Scalar[DType.float64]](offset + self._row))
 
@@ -98,6 +111,7 @@ struct GroupColumn[origin: Origin[mut=False]](Movable, Copyable):
                 + String(col.arrow_type)
                 + ", expected INT64"
             )
+        self._check_row(col.length(), "as_i64")
         var offset = col._offset
         return Int64(col._data.get_typed[Scalar[DType.int64]](offset + self._row))
 
@@ -117,6 +131,7 @@ struct GroupColumn[origin: Origin[mut=False]](Movable, Copyable):
                 + String(col.arrow_type)
                 + ", expected INT32"
             )
+        self._check_row(col.length(), "as_i32")
         var offset = col._offset
         return Int32(col._data.get_typed[Scalar[DType.int32]](offset + self._row))
 
@@ -151,77 +166,27 @@ struct GroupRef[origin: Origin[mut=False]](Movable, Copyable):
 
     Fields:
         _batch: Tracked borrow of the parent RecordBatch.
-        _col_names: Column names from the schema.
         _num_cols: Number of columns.
         _row: Row index within the batch.
         _accessed_names: Set of column names accessed so far.
     """
 
     var _batch: Pointer[RecordBatch, Self.origin]
-    var _col_names: List[String]
     var _num_cols: Int
     var _row: Int
     var _accessed_names: Set[String]
 
-    def __init__(
-        out self,
-        ref [Self.origin] batch: RecordBatch,
-        col_names: List[String],
-        row: Int,
-    ):
+    def __init__(out self, ref [Self.origin] batch: RecordBatch, row: Int):
         """Create a GroupRef view at the given row index.
 
         Args:
             batch: The parent batch. Borrowed for the lifetime of the view.
-            col_names: Column names from the schema. Copied into GroupRef.
             row: Zero-based row index within the batch.
         """
         self._batch = Pointer(to=batch)
-        self._col_names = col_names.copy()
         self._num_cols = batch.num_columns()
         self._row = row
         self._accessed_names = Set[String]()
-
-    @staticmethod
-    def from_batch(ref [Self.origin] batch: RecordBatch, row: Int) -> Self:
-        """Create a GroupRef from a RecordBatch and row index.
-
-        Convenience factory that reads the column names from the batch.
-
-        Args:
-            batch: The RecordBatch to create a view into.
-            row: Zero-based row index.
-
-        Returns:
-            A new GroupRef.
-        """
-        var num_cols = batch.num_columns()
-        var col_names = List[String]()
-        for c in range(num_cols):
-            col_names.append(batch.schema.field_name(c))
-        return Self(batch, col_names, row)
-
-    @staticmethod
-    def from_batch_with_names(
-        ref [Self.origin] batch: RecordBatch,
-        col_names: List[String],
-        row: Int,
-    ) -> Self:
-        """Create a GroupRef using pre-cached column names.
-
-        Hot-path factory: avoids re-walking the schema on every row.
-        Callers (e.g. AggUdafBridge.update_batch) cache `col_names`
-        once per batch and pass it for every row.
-
-        Args:
-            batch: The RecordBatch to create a view into.
-            col_names: Pre-cached column names (avoids re-walking schema).
-            row: Zero-based row index.
-
-        Returns:
-            A new GroupRef.
-        """
-        return Self(batch, col_names, row)
 
     def _column_index(self, col_name: String) raises -> Int:
         """Look up the column index by name.
@@ -236,7 +201,7 @@ struct GroupRef[origin: Origin[mut=False]](Movable, Copyable):
             Error if the column is not found.
         """
         for i in range(self._num_cols):
-            if self._col_names[i] == col_name:
+            if self._batch[].schema.field_name(i) == col_name:
                 return i
         raise Error("GroupRef: no column named '" + col_name + "'")
 

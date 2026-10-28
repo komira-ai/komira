@@ -1,17 +1,17 @@
 # =============================================================================
 # test_partition_topn_hash_state_column_native_transparency.mojo
 #
-# P-2.B.2a transparency gate for the PartitionTopNHashState column-native breaker
-# migration (`partition_topn_hash_state.mojo`, the full-row variadic
-# partition-topn breaker). The migrated `drain_to_record_batch` produces a
-# ColumnNativeBatch internally and bridges to RecordBatch at the breaker output
-# via the P-2.A shim. Because the ColumnNativeBatch body IS a THSPLC chunk, the
-# lift+lower is byte-identical to a spill/restore round-trip, so the migrated
-# drain is byte-identical to the prior direct RecordBatch drain.
+# Bridge round-trip gate for the output shape of the partition_topn_hash_state breaker. It builds
+# a RecordBatch shaped like that breaker's output by hand (no operator state is
+# reached: this package depends on no operator), moves it through
+# column_native_from_record_batch and record_batch_from_column_native, and
+# asserts the result is byte-equal to the input. It proves the bridge keeps
+# values, validity, offsets and schema flags for this shape; it does not prove
+# that an operator's column-native result equals its RecordBatch result.
 #
 # This breaker drains FULL ROWS [pk0..pkK-1, order_key, payload0..payloadM-1]:
-# for every partition, its top-N rows in sorted order. The bridge transparency
-# below covers its representative output shape (part keys + order key + payloads)
+# for every partition, its top-N rows in sorted order.
+# The tests below cover its representative output shape (part keys + order key + payloads)
 # plus a STRING payload (var-width region).
 # =============================================================================
 

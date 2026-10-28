@@ -59,6 +59,7 @@ ASSET_ROLES = [
     "kcov_zlib",
     "kcov_zstd",
     "libgcc",
+    "liblz4",
     "libstdcxx",
     "libzlib",
     "llvm_branch_libiconv",
@@ -74,6 +75,7 @@ ASSET_ROLES = [
     "rustc",
     "shellcheck",
     "zig",
+    "zig_next",
 ]
 # kcov, the line coverage tool (tools/build/toolchains/kcov/README.md): its
 # source archive and the conda-forge packages holding the static libraries it
@@ -83,7 +85,11 @@ _KCOV_ROLES = ["kcov_bzip2", "kcov_elfutils", "kcov_lzma", "kcov_src", "kcov_zli
 # llvm-profdata 23 with the libraries it loads, and the compiler-rt 23 profile
 # runtime. linux-x86_64 only, like kcov; every other row states `none`.
 _LLVM_BRANCH_ROLES = ["llvm_branch_libiconv", "llvm_branch_libllvm", "llvm_branch_libxml2", "llvm_branch_rt", "llvm_branch_tools", "llvm_branch_zstd"]
-_NONE_ALLOWED = ["busybox", "libgcc", "libstdcxx", "libzlib"] + _KCOV_ROLES + _LLVM_BRANCH_ROLES
+# liblz4, which komira_lz4 opens at run time: a platform pins it only where
+# the operating system of its workers ships none (macOS). On linux the
+# loader finds `liblz4.so.1` without a pin.
+_LIBLZ4_LINUX = "the loader of a linux worker finds liblz4.so.1 (komira_lz4's dlopen) without a pin"
+_NONE_ALLOWED = ["busybox", "libgcc", "liblz4", "libstdcxx", "libzlib"] + _KCOV_ROLES + _LLVM_BRANCH_ROLES
 
 # Roles whose pin is the executable itself, downloaded with its mode bit set
 # and never unpacked: a real pin of one of these must say `executable = True`.
@@ -201,6 +207,7 @@ PLATFORMS = {
                 "0bb57ee8557aad33317eeb881e3957b6fab776dd75473311c25789fa3a29f792",
                 size = 1042438,
             ),
+            "liblz4": none(_LIBLZ4_LINUX),
             "libstdcxx": pin(
                 "libstdcxx_15.3.0_linux-64.conda",
                 "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-15.3.0-h934c35e_7.conda",
@@ -276,16 +283,16 @@ PLATFORMS = {
                 size = 3288942,
             ),
             "rust_std": pin(
-                "rust-std-1.85.0-x86_64-unknown-linux-gnu.tar.xz",
-                "https://static.rust-lang.org/dist/rust-std-1.85.0-x86_64-unknown-linux-gnu.tar.xz",
-                "285e105d25ebdf501341238d4c0594ecdda50ec9078f45095f793a736b1f1ac2",
-                size = 27989420,
+                "rust-std-1.99.0-x86_64-unknown-linux-gnu.tar.gz",
+                "https://static.rust-lang.org/dist/rust-std-1.99.0-x86_64-unknown-linux-gnu.tar.gz",
+                "1dcaa01beb6bc78fdb13815b4f15214719167c58e3d79fbdf214591f8c195ee1",
+                size = 50364291,
             ),
             "rustc": pin(
-                "rustc-1.85.0-x86_64-unknown-linux-gnu.tar.xz",
-                "https://static.rust-lang.org/dist/rustc-1.85.0-x86_64-unknown-linux-gnu.tar.xz",
-                "7436f13797475082cd87aa65547449e01659d6a810b4cd5f8aedc48bb9f89dfb",
-                size = 72920412,
+                "rustc-1.99.0-x86_64-unknown-linux-gnu.tar.gz",
+                "https://static.rust-lang.org/dist/rustc-1.99.0-x86_64-unknown-linux-gnu.tar.gz",
+                "238e72b8617f79bc96f27a5bfeb1a208b5755fe1a48f8bc190fe403ef6d54ab8",
+                size = 141398713,
             ),
             "shellcheck": pin(
                 "shellcheck-v0.11.0.linux.x86_64.tar.xz",
@@ -298,6 +305,14 @@ PLATFORMS = {
                 "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz",
                 "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad",
                 size = 45480516,
+            ),
+            # The zig that kpin and later the tools move to (0.15.2); `zig` above
+            # stays what every other action uses until the last step flips it.
+            "zig_next": pin(
+                "zig_next_linux_x86_64.tar.xz",
+                "https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz",
+                "02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239",
+                size = 53733924,
             ),
         },
         "bundles": True,
@@ -404,6 +419,16 @@ PLATFORMS = {
             "kcov_zlib": none(_KCOV_NONE),  # komira-limit:coverage-linux-x86-64
             "kcov_zstd": none(_KCOV_NONE),  # komira-limit:coverage-linux-x86-64
             "libgcc": none("the osx-arm64 compiler links only the operating system (every load command names @rpath/, /usr/lib or /System)"),
+            # liblz4, which komira_lz4 opens at run time (dlopen of
+            # `liblz4.dylib`): macOS ships none, so the toolchain's lib/,
+            # the directory the gate puts on DYLD_LIBRARY_PATH, carries it
+            # (tools/build/toolchains/darwin/BUCK). It loads only libSystem.
+            "liblz4": pin(
+                "lz4-c_1.10.0_osx-arm64.conda",
+                "https://conda.anaconda.org/conda-forge/osx-arm64/lz4-c-1.10.0-h286801f_1.conda",
+                "94d3e2a485dab8bdfdd4837880bde3dd0d701e2b97d6134b8806b7c8e69c8652",
+                size = 148824,
+            ),
             "libstdcxx": none("the osx-arm64 compiler links only the operating system (every load command names @rpath/, /usr/lib or /System)"),
             "libzlib": none("the osx-arm64 closure takes no conda library: rustc for aarch64-apple-darwin links and runs without one"),
             "llvm_branch_libiconv": none(_LLVM_BRANCH_NONE),  # komira-limit:coverage-linux-x86-64
@@ -433,16 +458,16 @@ PLATFORMS = {
                 size = 2290879,
             ),
             "rust_std": pin(
-                "rust-std-1.85.0-aarch64-apple-darwin.tar.xz",
-                "https://static.rust-lang.org/dist/rust-std-1.85.0-aarch64-apple-darwin.tar.xz",
-                "7da1367209de00e3fb315c0e76658e3605ee2559892d29851a3159ae7ea1ddc5",
-                size = 25447360,
+                "rust-std-1.99.0-aarch64-apple-darwin.tar.gz",
+                "https://static.rust-lang.org/dist/rust-std-1.99.0-aarch64-apple-darwin.tar.gz",
+                "3589b3a6c6470d590aa5aa7fa1a4af0101103847761a5372a7300b0aa85699c6",
+                size = 48529215,
             ),
             "rustc": pin(
-                "rustc-1.85.0-aarch64-apple-darwin.tar.xz",
-                "https://static.rust-lang.org/dist/rustc-1.85.0-aarch64-apple-darwin.tar.xz",
-                "2a03e227b57a49d80b43473b6fa2d56ad661ece0d8ffd81f639cd31600d3823e",
-                size = 55016276,
+                "rustc-1.99.0-aarch64-apple-darwin.tar.gz",
+                "https://static.rust-lang.org/dist/rustc-1.99.0-aarch64-apple-darwin.tar.gz",
+                "2f6b9c9cdc9c2e87ab2e27335e8bb0c4dbe4daea486e39030b66980058f74353",
+                size = 85303276,
             ),
             "shellcheck": pin(
                 "shellcheck-v0.11.0.darwin.aarch64.tar.xz",
@@ -455,6 +480,14 @@ PLATFORMS = {
                 "https://ziglang.org/download/0.12.0/zig-macos-aarch64-0.12.0.tar.xz",
                 "294e224c14fd0822cfb15a35cf39aa14bd9967867999bf8bdfe3db7ddec2a27f",
                 size = 43447724,
+            ),
+            # The zig that kpin and later the tools move to (0.15.2); `zig` above
+            # stays what every other action uses until the last step flips it.
+            "zig_next": pin(
+                "zig_next_macos_aarch64.tar.xz",
+                "https://ziglang.org/download/0.15.2/zig-aarch64-macos-0.15.2.tar.xz",
+                "3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b",
+                size = 50635984,
             ),
         },
         # Bundles, OCI images and the launcher are Linux server products.
@@ -525,6 +558,7 @@ PLATFORMS = {
                 "df096c235cf04e802487602f68dbe60d3ab866a7e59e81ae0458f3596a752700",
                 size = 624560,
             ),
+            "liblz4": none(_LIBLZ4_LINUX),
             "libstdcxx": pin(
                 "libstdcxx_15.3.0_linux-aarch64.conda",
                 "https://conda.anaconda.org/conda-forge/linux-aarch64/libstdcxx-15.3.0-hef695bb_7.conda",
@@ -557,16 +591,16 @@ PLATFORMS = {
                 size = 3257573,
             ),
             "rust_std": pin(
-                "rust-std-1.85.0-aarch64-unknown-linux-gnu.tar.xz",
-                "https://static.rust-lang.org/dist/rust-std-1.85.0-aarch64-unknown-linux-gnu.tar.xz",
-                "8af1d793f7820e9ad0ee23247a9123542c3ea23f8857a018651c7788af9bc5b7",
-                size = 31001964,
+                "rust-std-1.99.0-aarch64-unknown-linux-gnu.tar.gz",
+                "https://static.rust-lang.org/dist/rust-std-1.99.0-aarch64-unknown-linux-gnu.tar.gz",
+                "cdffa7100206633ccfd2514ea7781b4211813bf04c831a509240e1cda5308512",
+                size = 50455662,
             ),
             "rustc": pin(
-                "rustc-1.85.0-aarch64-unknown-linux-gnu.tar.xz",
-                "https://static.rust-lang.org/dist/rustc-1.85.0-aarch64-unknown-linux-gnu.tar.xz",
-                "e742b768f67303010b002b515f6613c639e69ffcc78cd0857d6fe7989e9880f6",
-                size = 87989012,
+                "rustc-1.99.0-aarch64-unknown-linux-gnu.tar.gz",
+                "https://static.rust-lang.org/dist/rustc-1.99.0-aarch64-unknown-linux-gnu.tar.gz",
+                "6780ebb1b8ae66cc5d37ebfdc70b18fe775b1083c997f4e2c963d45a7eec59bc",
+                size = 106858263,
             ),
             "shellcheck": pin(
                 "shellcheck-v0.11.0.linux.aarch64.tar.xz",
@@ -579,6 +613,14 @@ PLATFORMS = {
                 "https://ziglang.org/download/0.12.0/zig-linux-aarch64-0.12.0.tar.xz",
                 "754f1029484079b7e0ca3b913a0a2f2a6afd5a28990cb224fe8845e72f09de63",
                 size = 41849060,
+            ),
+            # The zig that kpin and later the tools move to (0.15.2); `zig` above
+            # stays what every other action uses until the last step flips it.
+            "zig_next": pin(
+                "zig_next_linux_aarch64.tar.xz",
+                "https://ziglang.org/download/0.15.2/zig-aarch64-linux-0.15.2.tar.xz",
+                "958ed7d1e00d0ea76590d27666efbf7a932281b3d7ba0c6b01b0ff26498f667f",
+                size = 49471996,
             ),
         },
         "bundles": True,
@@ -880,9 +922,9 @@ def os_floor_version(name):
     """The version of row `name`'s `os_floor` (`macos-11.0` -> `11.0`)."""
     return row(name)["os_floor"].split("-", 1)[1]
 
-def zig_strip_prefix(name):
-    """The directory a row's zig archive unpacks into (`zig-linux-x86_64-0.12.0`): its URL's file name without `.tar.xz`."""
-    return asset(name, "zig")["url"].split("/")[-1][:-len(".tar.xz")]
+def zig_strip_prefix(name, role = "zig"):
+    """The directory a row's zig archive (`role`: `zig` or `zig_next`) unpacks into (`zig-linux-x86_64-0.12.0`, `zig-x86_64-linux-0.15.2`): its URL's file name without `.tar.xz`."""
+    return asset(name, role)["url"].split("/")[-1][:-len(".tar.xz")]
 
 def host_row(host):
     """The registered row whose host `host` (a `host_info()`) is, or None."""

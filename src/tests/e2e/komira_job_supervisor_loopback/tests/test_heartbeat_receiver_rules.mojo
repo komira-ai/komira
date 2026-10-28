@@ -224,11 +224,12 @@ def test_a_missing_pid_file_is_a_violation() raises:
         String(_INST),
         cancel_after_running_beats=1,
         pid_file=String("no/such/dir/job.pid"),
-        pid_wait_ms=50,
+        pid_wait_polls=5,
     )
     _ = r.receive(_running())
     assert_equal(r.receive(_running()), _CANCEL, "CANCEL is still sent")
     _one_violation(r, String("pid probe"))
+    assert_equal(r.pid_polls_made, 1, "a missing directory is decided at once")
     assert_equal(r.probed_pid, -1, "no pid invented")
     print("  test_a_missing_pid_file_is_a_violation: PASS")
 
@@ -272,13 +273,34 @@ def test_a_half_written_pid_file_is_a_violation() raises:
         String(_INST),
         cancel_after_running_beats=1,
         pid_file=f,
-        pid_wait_ms=50,
     )
     _ = r.receive(_running())
     assert_equal(r.receive(_running()), _CANCEL, "CANCEL is still sent")
     _one_violation(r, String("no complete pid line"))
+    assert_equal(r.pid_polls_made, 1, "a partial line is decided at once")
     assert_equal(r.probed_pid, -1, "no pid read from a partial line")
     print("  test_a_half_written_pid_file_is_a_violation: PASS")
+
+
+def test_a_pid_file_that_never_appears_is_a_violation_after_its_polls() raises:
+    # The directory exists, so the file may yet appear: the probe polls, and
+    # when the count is spent it names the count instead of waiting on.
+    var f = test_tmpdir() + String("/rules_never.pid")
+    if Path(f).exists():
+        remove(f)
+    var r = HeartbeatReceiver(
+        String(_JOB),
+        String(_INST),
+        cancel_after_running_beats=1,
+        pid_file=f,
+        pid_wait_polls=3,
+    )
+    _ = r.receive(_running())
+    assert_equal(r.receive(_running()), _CANCEL, "CANCEL is still sent")
+    _one_violation(r, String("after 3 polls"))
+    assert_equal(r.pid_polls_made, 3, "the file was looked at 3 times")
+    assert_equal(r.probed_pid, -1, "no pid read from an absent file")
+    print("  test_a_pid_file_that_never_appears_is_a_violation_after_its_polls: PASS")
 
 
 def test_the_first_beat_probe_fires_when_a_child_already_exists() raises:
@@ -401,6 +423,7 @@ def main() raises:
     test_running_with_failure_is_a_violation()
     test_a_first_beat_outside_the_enum_is_named_as_a_phase()
     test_a_half_written_pid_file_is_a_violation()
+    test_a_pid_file_that_never_appears_is_a_violation_after_its_polls()
     test_the_first_beat_probe_fires_when_a_child_already_exists()
     test_the_first_beat_probe_leaves_an_exited_child_to_its_owner()
     test_only_post_beat_is_admitted()

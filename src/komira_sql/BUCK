@@ -1,7 +1,9 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The analytical SQL front end's tokenizer, parser, parsed AST, scalar-function table and catalogs: tokens, the statement parser, expression, relation and statement nodes, one row per SQL function name, the table and UDF catalogs a query resolves names against,
-# and the bind-time schemas and scan leaves of the read_csv / read_json / read_avro table functions.
+# the bind-time schemas and scan leaves of the read_csv / read_json / read_avro table functions,
+# and the binder so far: output-column names, operator lowering, parquet facts and name scopes (sql_bind_names, sql_bind_ops, sql_bind_parquet, sql_bind_scope),
+# and the expression binder (sql_bind_expr, sql_bind_call, sql_bind_cast, sql_bind_fn_args, sql_bind_fn_nested, sql_bind_timestamp).
 mojo_library(
     name = "komira_sql",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -50,6 +52,18 @@ mojo_library(
         "tests/test_sql_ast_names.mojo",
         "tests/test_sql_ast_nodes.mojo",
         "tests/test_sql_ast_statements.mojo",
+        "tests/test_sql_bind_cast_direct.mojo",
+        "tests/test_sql_bind_expr_direct.mojo",
+        "tests/test_sql_bind_fn_args_direct.mojo",
+        "tests/test_sql_bind_fn_call_direct.mojo",
+        "tests/test_sql_bind_fn_nested_direct.mojo",
+        "tests/test_sql_bind_internals_direct.mojo",
+        "tests/test_sql_bind_names.mojo",
+        "tests/test_sql_bind_names_helpers.mojo",
+        "tests/test_sql_bind_ops_direct.mojo",
+        "tests/test_sql_bind_parquet_direct.mojo",
+        "tests/test_sql_bind_scope_direct.mojo",
+        "tests/test_sql_bind_udf_call_direct.mojo",
         "tests/test_sql_catalog_tables.mojo",
         "tests/test_sql_fn_table_date_parts.mojo",
         "tests/test_sql_fn_table_direct.mojo",

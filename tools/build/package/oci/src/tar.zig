@@ -228,7 +228,7 @@ pub fn putHeader(out: *C.List(u8), name: []const u8, flag: u8, mode: u32, size: 
 
 fn pad(out: *C.List(u8)) void {
     const want = (out.items.len + BLOCK - 1) / BLOCK * BLOCK;
-    out.appendNTimes(0, want - out.items.len) catch C.oom();
+    out.appendNTimes(C.a(), 0, want - out.items.len) catch C.oom();
 }
 
 fn decimalLen(n: usize) usize {
@@ -266,6 +266,6 @@ pub fn write(given: []const Item) Fail![]u8 {
         C.add(&out, e.data);
         pad(&out);
     }
-    out.appendNTimes(0, 2 * BLOCK) catch C.oom();
+    out.appendNTimes(C.a(), 0, 2 * BLOCK) catch C.oom();
     return out.items;
 }

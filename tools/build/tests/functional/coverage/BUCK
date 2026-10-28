@@ -1,7 +1,7 @@
-load("@komira//tools/build/lint:defs.bzl", "shell_lint", "target_suite")
+load("@komira//tools/build/lint:defs.bzl", "target_suite")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib", "mojo_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
-load(":defs.bzl", "cov_branch_check", "cov_conda_gate_check", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_set_check")
+load(":defs.bzl", "cov_dir", "cov_branch_check", "cov_conda_gate_check", "cov_debug_check", "cov_link_line_check", "cov_plant", "cov_report_check", "cov_set_check")
 
 # Coverage builds and runs (tools/build/mojo/README.md, "Coverage builds";
 # tests 41 and 43 of tools/build/tests/run_tests.sh).
@@ -120,16 +120,16 @@ cov_debug_check(
         ":covlib_forced[coverage][bin][test_describe]",
         ":covlib_forced[coverage][bin][test_value]",
     ],
-    # The directories of the tests and of the library's staged sources, as
-    # the pinned Mojo writes them: relative.
+    # The directories of the tests and of the library's sources, as the
+    # pinned Mojo writes them: relative, the library's its import name (its
+    # package is compiled from the parent of [src]).
     dirs = [
         "tests",
-        "buck-out/v2/art/tests/functional/coverage/__covlib_forced__/[0-9a-f]+/src/covlib",
+        "covlib",
     ],
     mode = "hermetic",
     # Both tests call covlib/value.mojo.
     names = ["value.mojo"],
-    script = "check.sh",
 )
 
 # [coverage][bin] is every test's binary, [coverage][tests] every test's
@@ -188,7 +188,6 @@ cov_report_check(
         ":covgen[coverage][tests][test_gen]",
         ":covgenmany[coverage][tests][test_gen_many]",
     ],
-    script = "report.sh",
 )
 
 # Test 43: a library with a generated source. covgen/gen.mojo is made from
@@ -212,6 +211,45 @@ mojo_library(
     conda = False,
     coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
     test_srcs = ["tests/test_gen.mojo"],
+)
+
+# A library whose generated source is a DIRECTORY, the `_parts` of a split
+# generated module (tools/build/proto-codegen's split): a coverage run takes the
+# directory as one generated source and leaves out every file under it. Its
+# golden report has covparts/plain.mojo and the test, and not _parts/part.mojo.
+cov_plant(
+    name = "covparts_part",
+    expr = "s/@FACTOR@/3/",
+    out = "covparts_part/part.mojo",
+    src = "covparts/part.mojo.in",
+)
+
+cov_dir(
+    name = "covparts_dir",
+    files = {
+        "__init__.mojo": "covparts/parts_init.mojo",
+        "part.mojo": ":covparts_part",
+    },
+    path = "covparts/_parts",
+)
+
+mojo_library(
+    name = "covparts",
+    srcs = [
+        "covparts/__init__.mojo",
+        "covparts/plain.mojo",
+        ":covparts_dir",
+    ],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    test_srcs = ["tests/test_parts.mojo"],
+)
+
+cov_report_check(
+    name = "covparts_report",
+    goldens = ["golden/test_parts.xml"],
+    mode = "golden",
+    reports = [":covparts[coverage][tests][test_parts]"],
 )
 
 # Test 43: a library whose one test is generated (a `test_srcs` entry that is
@@ -245,7 +283,6 @@ cov_report_check(
     goldens = ["golden/test_gen_triple.xml"],
     mode = "golden",
     reports = [":covgentest[coverage][tests][test_gen_triple]"],
-    script = "report.sh",
 )
 
 cov_report_check(
@@ -257,7 +294,6 @@ cov_report_check(
     ],
     mode = "result",
     reports = [":covgentest[coverage][gate][result]"],
-    script = "report.sh",
 )
 
 # Test 43: a shared library with coverage builds (forced here, as for
@@ -284,7 +320,6 @@ cov_report_check(
     goldens = ["golden/covso_driver.xml"],
     mode = "golden",
     reports = [":covso[coverage][tests][covso_driver]"],
-    script = "report.sh",
 )
 
 cov_report_check(
@@ -296,7 +331,6 @@ cov_report_check(
     ],
     mode = "result",
     reports = [":covso[coverage][gate][result]"],
-    script = "report.sh",
 )
 
 # Test 43: a library with twelve generated sources, each with a long name.
@@ -377,7 +411,6 @@ cov_report_check(
     mode = "census",
     package = "tools/build/tests/functional/coverage",
     reports = _REPORTS,
-    script = "report.sh",
 )
 
 # Tests 43 and 46: a library whose only tests are standalone mojo_test
@@ -438,7 +471,6 @@ cov_report_check(
     ],
     mode = "result",
     reports = [":covmt_cov_gate[gate][result]"],
-    script = "report.sh",
 )
 
 # Test 46: the gate of a library whose only test is its README's example
@@ -457,7 +489,6 @@ cov_report_check(
     ],
     mode = "result",
     reports = ["//functional/coverage/covreadme:covreadme[coverage][gate][result]"],
-    script = "report.sh",
 )
 
 cov_report_check(
@@ -470,7 +501,6 @@ cov_report_check(
     ],
     mode = "result",
     reports = ["//functional/coverage/covreadme_none:covreadme_none[coverage][gate][result]"],
-    script = "report.sh",
 )
 
 # Reproducibility without --no-remote-cache: two libraries build the same
@@ -507,7 +537,6 @@ cov_debug_check(
         ":repro_b[coverage][bin][test_same]",
     ],
     mode = "same",
-    script = "check.sh",
 )
 
 # Test 47: branch coverage. A library whose function has every kind of
@@ -542,7 +571,7 @@ mojo_library(
 )
 
 # Test 47: a library with a C library in its closure (the cshim example's,
-# a cxx_library): its tests' links end with the C library, as mojo_wrapper.sh
+# a cxx_library): its tests' links end with the C library, as mojo_compile
 # appends it (--link-tail), and its branch coverage links pass the same
 # arguments in the same order. Its test calls into C and takes two of the
 # three arms of add_clamped.
@@ -576,6 +605,33 @@ mojo_library(
     test_srcs = ["tests/test_with_support.mojo"],
 )
 
+# Test 47: a library whose test calls it from eight threads at once
+# (tests/test_threads.mojo), so every counter of `quarter` is incremented by
+# eight threads concurrently.
+mojo_library(
+    name = "branchmt",
+    srcs = ["branchmt/__init__.mojo"],
+    conda = False,
+    coverage_debug = "komira//tools/build/coverage/kcov:cov_link",
+    test_srcs = ["tests/test_threads.mojo"],
+)
+
+# Test 47: the counters of `quarter` after test_threads's run are exact:
+# 8 threads x 1000000 calls, 2000000 returning 2 (i % 4 == 0), 2000000
+# returning 1, and 6000000 on the path where `r != 0`; 0 is a
+# counter Mojo's lowering of `%` adds for a negative `i`, which the test
+# never passes. The link asks for atomic counter updates
+# (tools/build/coverage/branch/README.md, "Atomic counters"); without them
+# the threads lose increments to each other, and the sorted counts read like
+# 0,268986,270087,801750 (tests//negative/coverage:branchnonatomic).
+cov_branch_check(
+    name = "branch_counts_threads",
+    counts = [0, 2000000, 2000000, 6000000],
+    exec_compatible_with = LINUX_X86_64,
+    function = "quarter",
+    profdata = ":branchmt[coverage][branch][test_threads]",
+)
+
 # The profile of test_score_arms's instrumented run holds one function named
 # like classify_score (`ld-temp.o;branchlib::score::classify_score(...)`),
 # with six counters. IR profile counters sit on the edges outside a spanning
@@ -591,7 +647,6 @@ cov_branch_check(
     exec_compatible_with = LINUX_X86_64,
     function = "classify_score",
     profdata = ":branchlib[coverage][branch][test_score_arms]",
-    script = "branch_check.sh",
 )
 
 # Test 47: the branch records of test_score_arms's run
@@ -684,22 +739,20 @@ cov_report_check(
         ":branchlib[coverage][branch_info][test_score_arms]",
         ":branchlib[coverage][branch_info][test_unrun]",
     ],
-    script = "report.sh",
 )
 
 # Test 47: the branch coverage link of test_score_arms is the link of its
-# release build plus the profile runtime: mojo_wrapper.sh's `cc` shim gives
+# release build plus the profile runtime: mojo_compile's `cc` shim gives
 # zig what `mojo build` asks for (the compiler's runtime library,
 # --gc-sections, -lm, the shim's --strip-debug and run path), and
-# cov_branch_link.sh gives zig the same line for the instrumented object
-# (link_line.sh). A Mojo release linking with another library, or a link
-# script that drops one, fails here.
+# `cov_branch link` gives zig the same line for the instrumented object
+# (link_line.sh). A Mojo release linking with another library, or a branch
+# coverage link that drops one, fails here.
 cov_link_line_check(
     name = "link_line",
     bc = ":branchlib[coverage][bc][test_score_arms]",
     exec_compatible_with = LINUX_X86_64,
     lib = ":branchlib",
-    script = "link_line.sh",
     src = "tests/test_score_arms.mojo",
 )
 
@@ -713,7 +766,6 @@ cov_debug_check(
         ":repro_b[coverage][bc][test_same]",
     ],
     mode = "same",
-    script = "check.sh",
 )
 
 cov_debug_check(
@@ -723,39 +775,20 @@ cov_debug_check(
         ":repro_b[coverage][pgo_bin][test_same]",
     ],
     mode = "same",
-    script = "check.sh",
 )
 
-# For the planted defects and the gate checks of tests//negative/coverage
-# (and, report.sh, of the test-only package tests//src/tests/coverage).
-export_file(
-    name = "check.sh",
-    visibility = ["//negative/coverage:"],
-)
-
-export_file(
-    name = "report.sh",
-    visibility = [
-        "//negative/coverage:",
-        "//src/tests/coverage:",
-    ],
-)
-
-export_file(
-    name = "link_line.sh",
-    visibility = ["//negative/coverage:"],
-)
-
-shell_lint(
-    name = "shell_lint",
-    srcs = [
-        "branch_check.sh",
-        "check.sh",
-        "link_line.sh",
-        "report.sh",
-    ],
-    visibility = ["komira//:tests_lints"],
-)
+# The threaded fixture, for tests//negative/coverage:branchnonatomic (the same
+# test through a `cov_branch link` copy without atomic counter updates).
+[
+    export_file(
+        name = f,
+        visibility = ["//negative/coverage:"],
+    )
+    for f in [
+        "branchmt/__init__.mojo",
+        "tests/test_threads.mojo",
+    ]
+]
 
 # The sub-targets of this package (and of covreadme and covreadme_none) that
 # must build: the pull-request check builds a package's targets, not their

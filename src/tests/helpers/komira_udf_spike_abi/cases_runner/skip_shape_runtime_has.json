@@ -1,0 +1,12 @@
+{
+ "name": "skip_shape_runtime_has",
+ "defect": "a case about a shape the runtime lacks is run on a runtime that has it",
+ "run": "validate",
+ "entry": "identity",
+ "shape": "MAP_BATCHES_COLUMN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "runtime_lacks_shape": true,
+ "expect": {"status": "ERR_UNSUPPORTED"},
+ "runner_fails_with": "SKIP"
+}

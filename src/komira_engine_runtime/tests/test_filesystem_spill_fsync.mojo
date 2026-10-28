@@ -254,6 +254,41 @@ def test_sync_idempotent() raises:
 
 
 # =============================================================================
+# Test (d): the barrier reaches the FS. The call counter alone cannot tell a
+# real fsync from a skipped one, so each call is made to fail on the FS.
+# =============================================================================
+
+
+def test_sync_raises_when_a_chunk_file_is_gone() raises:
+    """`sync()` fsyncs each chunk file by path: with the file removed behind
+    its back, the fsync of that path fails and `sync()` raises."""
+    var root = _temp_root("gonefile")
+    var storage = _new_storage(root)
+    var id0 = storage.write_chunk(_make_buf(1, 2))
+    var fs = _SpillFs.new()
+    fs.delete(storage.chunk_prefetch_path(id0))
+    var raised = False
+    try:
+        storage.sync()
+    except:
+        raised = True
+    assert_true(raised, "sync() must reach fsync_file for every live chunk")
+
+
+def test_sync_raises_when_the_directory_is_gone() raises:
+    """`sync()` fsyncs the spill directory: with no chunks and a root that
+    does not exist, the directory fsync fails and `sync()` raises."""
+    var root = _temp_root("gonedir") + String("/missing")
+    var storage = _new_storage(root)
+    var raised = False
+    try:
+        storage.sync()
+    except:
+        raised = True
+    assert_true(raised, "sync() must reach fsync_dir")
+
+
+# =============================================================================
 # main
 # =============================================================================
 
@@ -263,4 +298,6 @@ def main() raises:
     test_sync_empty_storage_only_dir_fsync()
     test_localfs_fsync_file_and_dir_on_real_inode()
     test_sync_idempotent()
+    test_sync_raises_when_a_chunk_file_is_gone()
+    test_sync_raises_when_the_directory_is_gone()
     print("test_filesystem_spill_fsync: ALL PASS")

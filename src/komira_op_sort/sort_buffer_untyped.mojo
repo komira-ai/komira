@@ -290,7 +290,7 @@ struct SortBuffer_Untyped(Movable, Deinitable):
         Bottom-up (iterative) avoids recursion. STABLE: the merge takes the
         LEFT element unless the RIGHT is strictly less
         (`_compare_storage_rows(order[j], order[i]) < 0`), so equal keys
-        retain buffer order — byte-identical to the prior insertion sort.
+        retain buffer order.
 
         Sorts a LOCAL copy then writes back: `_compare_storage_rows` borrows
         `self` (read-only over storage) so it cannot run while also mutating
@@ -342,11 +342,11 @@ struct SortBuffer_Untyped(Movable, Deinitable):
         self.sorted_indices = order^
 
     # ─────────────────────────────────────────────────────────────────────
-    # emit_to_record_batch_columnar — drain sorted slots into a per-DType
-    # `List[T]` per output payload col.
+    # read_sorted_* — read one column back in sorted order, as a
+    # `List[T]` of the column's DType.
     #
-    # The readers return parallel lists, not a `RecordBatch`; the caller
-    # builds the Arrow columns.
+    # The readers return plain lists, not a `RecordBatch`; the caller builds
+    # the Arrow columns.
     # ─────────────────────────────────────────────────────────────────────
 
     def read_sorted_i64(self, col_idx_in_storage: Int) raises -> List[Int64]:

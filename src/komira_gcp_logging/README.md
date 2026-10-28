@@ -103,6 +103,17 @@ A refusal raises. The error names the RPC, the HTTP status and the canonical
 code, and counts the body's bytes instead of quoting them, so a project
 name or filter in the service's message never reaches a log:
 
+<!-- mojo-hidden
+from std.testing import assert_false, assert_true
+from komira_async.ops.waker_sink import NoopSink
+from komira_async.runtime.blocking_runtime import BlockingRuntime
+from komira_gcp_core import StaticTokenSource
+from komira_gcp_logging.logging import ListLogEntriesRequest, LoggingServiceV2Client
+from komira_http_client.client import HttpClient
+from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+
+comptime Runtime = BlockingRuntime[NoopSink]
+-->
 ```mojo
 var denied = String(
     '{"error":{"code":403,"message":"denied on projects/private-name",'
