@@ -124,6 +124,8 @@ buckconfig written whole. It also reads every workflow and holds each step
 that uses the action to `tls: ${{ vars.FARM_TLS || 'false' }}` under its
 `with:`: a caller that dropped `tls` would connect in plain text whatever
 `FARM_TLS` says.
+It holds `farm-qos` to `batch` on every step of `release.yml` and to
+absent on every step of any other workflow.
 
 A job that calls it needs `permissions: id-token: write` (to ask GitHub for the
 token) next to `contents: read`, and nothing else: the job reads no secret, holds
@@ -149,6 +151,17 @@ endpoint out of every committed buckconfig, workflow and local action.
 The connection is checked on every farm-connected run: the action's
 `refuse unless the farm answers` step fails the job before any build when the
 farm's port does not answer.
+
+**Priority.** A farm that queues by priority class runs a `ci` action before a
+`batch` one. The action takes an optional `farm-qos` (`ci` or `batch`) and, when
+it is set, writes the request header `x-kbf-qos` as buck2's `http_headers`.
+Every job of `release.yml` passes `batch`, so the release work that a push to
+`main` starts waits behind the pull-request checks when the farm is full; no
+other workflow passes it, so they stay at `ci`. The class is not a platform
+property: it is not part of an action's digest, so a release build and a pull
+request still share the same action-cache entries. It changes the order of the
+queue only: a running action keeps its slot, and a farm that does not read the
+header (or a buck2 that does not send it) queues the action as `ci`.
 
 Give CI its own remote-execution instance name, a sub-instance such as
 `<prefix>/ci`, so its action-cache entries are kept apart from developers' on a
@@ -407,6 +420,18 @@ The five `prod-*` jobs publish the set `mopm-stage` tried to the prod registry a
 the README e2e of `mopm-stage` passed on, at the version of this run (below), so a release build or an e2e
 that failed stops the run before anything is staged in prod. There is no beta stage in front of prod. `//:release_workflow_cases` holds the job graph, the gates, the
 environments, the permissions, the commands and the order of the test's steps, and that no beta job and no schedule exists.
+
+**A member must be claimed on prod first.** The registry creates a package name only for its claimed owner, so a
+release member whose name is not claimed on the prod registry makes `prod-stage` refuse and turns `main` red. The
+pull request check cannot write to the live registry (and does not read it), so the names claimed there are
+committed in `release/prod_claimed_names.txt` (one per line, sorted), and `//release:prod_claimed_names_cases`
+refuses a pull request in which a member (every `src/<name>` with a `mopm.toml`, `PACKAGES` of
+`release/readme_e2e/packages.bzl`) is missing from it: "<name> is a member of the release and is not in
+release/prod_claimed_names.txt: claim it on the prod registry first, then add it to release/prod_claimed_names.txt".
+A maintainer adds a name to the file only after claiming it on the prod registry, in the pull request that adds the
+member. The file also refuses a line no member has, an unsorted or repeated line, and an empty file. It is a
+committed claim, not a live read: it does not notice a claim the registry lost, and `prod-stage` stays the
+last word.
 
 1. **`prod-stage`** runs `mopm publish --staged S --registry prod --oidc --no-commit`. The registry creates a
    group, mopm uploads every file, and the run ends 0 with the outcome `staged`: the group is `open`, the
@@ -1128,7 +1153,7 @@ not run kci. Neither it nor
 | job | the one job `check`, only for a pull request from a branch of this repository (`github.event.pull_request.head.repo.full_name == github.repository`; a fork's run gets no tailnet credential, and a maintainer reads the change and pushes it to a branch here), written bare or as exactly `${{ <condition> }}` (a block scalar or whitespace inside quotes makes GitHub read the `if:` as a format string, which is always true) |
 | runner | `runs-on: ubuntu-24.04`, written as that plain scalar: a GitHub-hosted machine, fresh per job. A self-hosted label, label list, runner group, expression (`${{ vars.X }}`) or quoted value is refused, so a pull request's code never reaches a runner that keeps state between jobs |
 | permissions | its own `permissions:` mapping, `contents: read` and `id-token: write` (for the farm connection, [farm-connect](#how-it-reaches-the-farm), only); no environment, no secret (no value of the job, nor of the workflow-level `env:`, names `secrets` other than `secrets.GITHUB_TOKEN`), no publish step |
-| steps | the pinned full-history checkout of the merge commit, `farm-connect`, and the farm assertion (`//tools/build/ci:assert_remote`). Then the change: `git diff --name-only HEAD^1...HEAD` and the coverage holds of both sides, where HEAD^1 is the merge commit's first parent (the `main` the pull request is merged into; the step stops when HEAD has no second parent). Never the event's `github.event.pull_request.base.sha`: that is `main` when the event fired, and once `main` moves every change merged to it since then would count as the pull request's own and widen the check. Then, each as the `buck2-farm` action (so each fails unless no action ran on the runner): the BXL selector `tools/build/ci/affected.bxl:affected` (the owners of the changed files and everything that depends on them, or `//ci:pr`, the whole check set, when a file cannot be mapped or touches the build system), `build --keep-going` of its list, the checks only BXL can make over the whole graph (`test_weld.bxl:check` for each test_weld lint, `graph/checks.bxl:check` for each graph_check, `guard.bxl:check` that `//ci:pr` holds every check target, `python_guard.bxl:check` that it reaches no Python outside the SDK, `lock_graphs.bxl:check` that each package's `buildrules.mojo.lock.bzl` holds a unit graph for every platform subdir its `mopm.lock` records, `cases.bxl:run`, and `readme_e2e/cases.bxl:run`, the cases of the README e2e's completeness guard), and `test` of the list's targets that are not of the tests cell. A pull request that adds or deletes a package needs no edit to any release file; adding a target to the check set means regenerating `ci/targets.bzl` (the guard fails, naming the command, when it is not). Nothing ships. |
+| steps | the pinned full-history checkout of the merge commit, `farm-connect`, and the farm assertion (`//tools/build/ci:assert_remote`). Then the change: `git diff --name-only HEAD^1...HEAD` and the coverage holds of both sides, where HEAD^1 is the merge commit's first parent (the `main` the pull request is merged into; the step stops when HEAD has no second parent). Never the event's `github.event.pull_request.base.sha`: that is `main` when the event fired, and once `main` moves every change merged to it since then would count as the pull request's own and widen the check. Then, each as the `buck2-farm` action (so each fails unless no action ran on the runner): the BXL selector `tools/build/ci/affected.bxl:affected` (the owners of the changed files and everything that depends on them, or `//ci:pr`, the whole check set, when a file cannot be mapped or touches the build system; the heavy checks of `HEAVY` in `tools/build/ci/rules.bzl`, today the kci binary and what depends on it, the base image's `supervisor_stub` and `supervisor_bundle` included since only `komira_base` reaches them, only when the change touches paths that row owns, so a change that owns none builds `//ci:pr_default` in place of `//ci:pr`), `build --keep-going` of its list, the checks only BXL can make over the whole graph (`test_weld.bxl:check` for each test_weld lint, `graph/checks.bxl:check` for each graph_check, `guard.bxl:check` that `//ci:pr` holds every check target, `python_guard.bxl:check` that it reaches no Python outside the SDK, `default_guard.bxl:check` that `//ci:pr_default` is `//ci:pr` without the roots of `HEAVY` and nothing else, `lock_graphs.bxl:check` that each package's `buildrules.mojo.lock.bzl` holds a unit graph for every platform subdir its `mopm.lock` records, `cases.bxl:run`, and `readme_e2e/cases.bxl:run`, the cases of the README e2e's completeness guard), and `test` of the list's targets that are not of the tests cell. A pull request that adds or deletes a package needs no edit to any release file; adding a target to the check set means regenerating `ci/targets.bzl` and its shards `ci/targets/shard_<n>.bzl` in one step (the guard fails, naming the command, when they are out of date or a shard nears the 1000-line limit). Nothing ships. |
 | every `uses:` | pinned to a full commit id (the local farm-connect action excepted) |
 
 The repository's branch settings require the check **`pr / check`**.
