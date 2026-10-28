@@ -77,7 +77,7 @@ mojo_conda(
         "../komira_zlib": "//src/komira_zlib:mopm.toml",
     },
     mojo = "1.0.0",
-    mopm = "toolchains//:mopm_0_0_81",
+    mopm = "toolchains//:mopm_0_0_83",
     package = "komira_compression",
     version = "0.1.0",
     visibility = ["PUBLIC"],
