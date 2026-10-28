@@ -18,7 +18,8 @@ global group directory `cd_global_dir` and the route counters
 `agg_count_distinct_kernel` and its fixed-aggregate columns
 `agg_cd_fixed_emit`), the stage DISTINCT breaker state
 (`distinct_state`, with its key columns `distinct_key_column` and
-`distinct_key_column_string`), and the parallel per-group finalize of the stage
+`distinct_key_column_string`), its run-time-typed sibling (`distinct_state_untyped`),
+and the parallel per-group finalize of the stage
 MEDIAN drain (`median_parallel_drain`).
 
 Public API: import directly from sub-modules. No facade.

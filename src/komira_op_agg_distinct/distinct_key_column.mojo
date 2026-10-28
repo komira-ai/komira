@@ -263,6 +263,19 @@ trait DistinctKeyColumn(Defaultable, Movable, Deinitable):
         new distinct value. Called once per NEW distinct row."""
         ...
 
+    def emit_distinct_column_with_nulls(
+        self, imm valid: List[Bool], mut rb: RecordBatchBuilder
+    ) raises:
+        """`emit_distinct_column` with stored value `i` emitted as NULL where
+        `valid[i]` is False (the value stored there is a placeholder)."""
+        ...
+
+    def append_null_placeholder(mut self):
+        """Append a placeholder stored value for a NULL key (0, or the empty
+        string) without reading the column: the data under a NULL is
+        arbitrary, and a dictionary code under one need not be in range."""
+        ...
+
     # --- BAND reads:
     #     BAND-read siblings of hash_step / equals_row / append_row. The BAND fold
     #     (`AggKeyBlock.feed_lookup_band`) fans these over the key pack; each key
@@ -474,6 +487,23 @@ struct DistinctKeyColumn_Typed[dt: DType, col: Int](DistinctKeyColumn):
         self.values.append(
             _distinct_read_key_scalar[Self.dt, bo](batch, Self.col, row)
         )
+
+    def emit_distinct_column_with_nulls(
+        self, imm valid: List[Bool], mut rb: RecordBatchBuilder
+    ) raises:
+        var n = len(self.values)
+        var arr = PrimitiveArray[Self.dt].allocate_nullable(n)
+        for i in range(n):
+            arr.set(i, self.values[i])
+        # Values first: `set` marks its index valid.
+        for i in range(n):
+            if not valid[i]:
+                arr._set_null(i)
+        rb.add_column(Column.from_primitive[Self.dt](arr^))
+
+    @always_inline
+    def append_null_placeholder(mut self):
+        self.values.append(Scalar[Self.dt](0))
 
     # --- ENGINE-V2 W2 BAND-read siblings — the NUMERIC-key band fold. Reads this
     #     column's bound value at `row` off the band via the generic

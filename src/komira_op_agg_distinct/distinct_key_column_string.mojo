@@ -257,6 +257,20 @@ struct DistinctKeyColumn_String[col: Int](DistinctKeyColumn):
     ):
         self._append_bytes_from[bo](batch, Self.col, row)
 
+    @always_inline
+    def append_null_placeholder(mut self):
+        self.offsets.append(len(self.data))
+
+    def emit_distinct_column_with_nulls(
+        self, imm valid: List[Bool], mut rb: RecordBatchBuilder
+    ) raises:
+        var n = self.length()
+        var strs = List[String](capacity=n)
+        for i in range(n):
+            strs.append(self._to_string(i))
+        var arr = StringArray.from_strings_with_validity(strs, valid)
+        rb.add_column(Column.from_string(arr^))
+
     # --- BAND reads:
     #     BAND-read siblings. The byte-identity ANCHOR (§3.3a / §4.3): fold /
     #     compare / store a RESOLVED dict-entry ByteView with the SAME FNV-1a
