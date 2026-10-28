@@ -24,12 +24,11 @@
 #     the dispatcher.
 # =============================================================================
 
-from std.collections.optional import Optional
 from komira_udf.float_quotient_order import (
     float_quotient_gt_f64,
     float_quotient_lt_f64,
 )
-from std.memory import OwnedPointer, UnsafePointer
+from std.memory import OwnedPointer
 from komira_atomic_alias import AtomicI64
 
 from komira_arrow.arrow_types import ArrowType
@@ -61,6 +60,11 @@ from komira_op_agg_distinct.streaming_agg_count_distinct import (
 )
 from komira_op_agg_distinct.cd_passenger_lane_counter import cd_grouped_route_note
 from komira_op_agg_distinct.cd_global_dir import CdGlobalDir
+from komira_op_agg_distinct.agg_cd_fixed_emit import (
+    _empty_column,
+    _fixed_float_column,
+    _fixed_int_column,
+)
 from komira_async.cancellation.token import CancellationToken
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.local_dispatcher import LocalDispatcher
@@ -91,8 +95,8 @@ struct CountDistinctAggLocal(Movable, Deinitable):
     """Per-worker COUNT(DISTINCT) state.
 
     Wraps a `WorkerCDState` (per-group `List[Int]` value buffers + group
-    map) plus a `has_data` short-circuit gate that lets `combine` skip
-    workers that never saw a row.
+    map). `combine` moves every worker's Local into the Global, whether or
+    not it saw a row.
 
     The wid-disjointness invariant comes from the executor (one Local per
     worker); `consume` writes this Local directly without a Slab indexing
@@ -100,16 +104,9 @@ struct CountDistinctAggLocal(Movable, Deinitable):
     """
 
     var state: WorkerCDState
-    var has_data: Bool
 
     def __init__(out self, num_aggs: Int):
         self.state = WorkerCDState(num_aggs)
-        self.has_data = False
-
-
-# Backwards-compat alias for the legacy struct name (used externally if
-# anything imports the old worker type).
-comptime CountDistinctAggSinkWorker = CountDistinctAggLocal
 
 
 # =============================================================================
@@ -162,21 +159,22 @@ struct CountDistinctAggSink(MorselSink):
     dedup, and emits the result batch.
 
     Construction: `CountDistinctAggSink.new(agg_data, pq_data, operators)`.
-    The detector `_can_stream_parquet_count_distinct` guarantees
-    num_keys in {0, 1}, INT32/INT64 key when present, and all
-    COUNT_DISTINCT aggs.
+    `init_local` checks the shape and raises on anything outside it:
+    at most one group key, whose declared output type is INT32 or INT64;
+    aggregates only COUNT_DISTINCT, SUM, COUNT, MIN, MAX and MEAN; no
+    fixed aggregate without a group key; an output schema with one field per
+    key and aggregate; and SUM / COUNT / MIN / MAX / MEAN output types the
+    sink can emit.
 
     Output schema layout (mirrors SchemaBuilder in schema_propagation.mojo):
-      * num_keys==0 (CB-04): fields = [agg_0, ..., agg_{K-1}]
-      * num_keys==1 (CB-13): fields = [key, agg_0, ..., agg_{K-1}]
+      * ungrouped: fields = [agg_0, ..., agg_{K-1}], all COUNT_DISTINCT
+      * one key:   fields = [key, agg_0, ..., agg_{K-1}]
     """
 
     comptime Local = CountDistinctAggLocal
     comptime Global = CountDistinctAggGlobal
     comptime Output = RecordBatch
-    # The Locals (each a WorkerCDState of heap-owning Lists and a Dict) reach
-    # `combine` through `OwnedPointer`s in a Slab: one level of heap-stable
-    # indirection.
+    # The result is one batch built in `finalize`; there is no morsel source.
     comptime Source = NeverMorselSource
 
     # Shared config — read-only after construction.
@@ -186,7 +184,7 @@ struct CountDistinctAggSink(MorselSink):
 
     var _num_aggs: Int
     var _num_keys: Int
-    # ⭐⭐ MIXEDFUSE (2026-09-21) — THE OUTPUT-POSITION MAP.
+    # THE OUTPUT-POSITION MAP.
     #
     # `_agg_data.agg_exprs` is in the PLAN's order, which is the order
     # `output_schema` declares, and a MIXED node interleaves COUNT(DISTINCT)
@@ -200,7 +198,7 @@ struct CountDistinctAggSink(MorselSink):
     #   `_fx_func[f]`    — the plan `AGG_*` tag of fixed slot `f`
     #   `_fx_src[f]`     — that slot's input col_ref, or "" for a bare COUNT(*)
     #
-    # ⚠ `_num_aggs` STAYS THE **CD** COUNT. It is what `WorkerCDState` is
+    # NOTE: `_num_aggs` STAYS THE **CD** COUNT. It is what `WorkerCDState` is
     # constructed with and what every `cd_bufs[a]` index means; re-pointing it
     # at the full agg list would silently mis-size the CD cell space.
     var _pos_is_cd: List[Bool]
@@ -247,6 +245,68 @@ struct CountDistinctAggSink(MorselSink):
         self._pq_data = pq_data^
         self._operators = operators^
 
+    def _validate_shape(self) raises:
+        """Raise unless the plan is inside the shape this sink computes."""
+        if self._num_keys > 1:
+            raise Error(
+                "CountDistinctAggSink: at most one group key is supported, got "
+                + String(self._num_keys)
+            )
+        ref out_schema = self._agg_data.output_schema
+        if out_schema.num_columns() != self._num_keys + self._n_out_aggs:
+            raise Error(
+                "CountDistinctAggSink: the output schema has "
+                + String(out_schema.num_columns()) + " fields for "
+                + String(self._num_keys) + " key(s) and "
+                + String(self._n_out_aggs) + " aggregate(s)"
+            )
+        if self._num_keys == 0 and self._num_fixed > 0:
+            raise Error(
+                "CountDistinctAggSink: SUM / COUNT / MIN / MAX / MEAN beside"
+                " COUNT(DISTINCT) need a group key"
+            )
+        if self._num_keys == 1:
+            var kt = out_schema.field_arrow_type(0)
+            if kt != ArrowType.INT32 and kt != ArrowType.INT64:
+                raise Error(
+                    "CountDistinctAggSink: the group key must be INT32 or"
+                    " INT64"
+                )
+        for i in range(self._n_out_aggs):
+            if self._pos_is_cd[i]:
+                continue
+            var fn_tag = self._fx_func[self._pos_slot[i]]
+            var ot = out_schema.field_arrow_type(self._num_keys + i)
+            var is_int = ot == ArrowType.INT32 or ot == ArrowType.INT64
+            var is_flt = ot == ArrowType.FLOAT32 or ot == ArrowType.FLOAT64
+            if fn_tag == AGG_COUNT:
+                if ot != ArrowType.INT64:
+                    raise Error(
+                        "CountDistinctAggSink: COUNT must be declared INT64"
+                    )
+            elif fn_tag == AGG_SUM:
+                if ot != ArrowType.INT64 and ot != ArrowType.FLOAT64:
+                    raise Error(
+                        "CountDistinctAggSink: SUM must be declared INT64 or"
+                        " FLOAT64"
+                    )
+            elif fn_tag == AGG_MEAN:
+                if ot != ArrowType.FLOAT64:
+                    raise Error(
+                        "CountDistinctAggSink: MEAN must be declared FLOAT64"
+                    )
+            elif fn_tag == AGG_MIN or fn_tag == AGG_MAX:
+                if not (is_int or is_flt):
+                    raise Error(
+                        "CountDistinctAggSink: MIN / MAX must be declared"
+                        " INT32, INT64, FLOAT32 or FLOAT64"
+                    )
+            else:
+                raise Error(
+                    "CountDistinctAggSink: unsupported aggregate function "
+                    + String(Int(fn_tag))
+                )
+
     @staticmethod
     def new(
         var agg_data: AggSinkData,
@@ -259,11 +319,12 @@ struct CountDistinctAggSink(MorselSink):
     # ---- MorselSink trait surface ----------------------------------
 
     def init_local(self) raises -> Self.Local:
+        self._validate_shape()
         return CountDistinctAggLocal(self._num_aggs)
 
     def init_global(self, out sink_global: Self.Global) raises:
-        # NM-3 RETURN-SLOT form. Non-Movable Global can only be
-        # constructed in place (cannot return-by-value).
+        # Return-slot form: the non-Movable Global can only be constructed
+        # in place (it cannot be returned by value).
         sink_global = CountDistinctAggGlobal()
 
     def consume[
@@ -286,7 +347,7 @@ struct CountDistinctAggSink(MorselSink):
             _ = batch^
             return
 
-        # C.1 selection-mask defensive materialize.
+        # Materialize a selection mask carried by the batch, if any.
         batch = materialize_selection_if_present(batch^)
 
         # CORRECTNESS: the segment's OP_FILTER operators and the source's
@@ -332,7 +393,7 @@ struct CountDistinctAggSink(MorselSink):
         # Per-batch column-index resolution. Cheap relative to per-row
         # consume (O(num_aggs * schema_cols) vs O(num_rows * num_aggs)).
         #
-        # ⭐ MIXEDFUSE — `val_idx` covers the CD slots ONLY (it is indexed by
+        # `val_idx` covers the CD slots ONLY (it is indexed by
         # the CD space `WorkerCDState.cd_bufs` uses); `fx_idx` covers the fixed
         # slots. Walking `_pos_is_cd` is what keeps the two apart when the plan
         # interleaves them.
@@ -360,7 +421,7 @@ struct CountDistinctAggSink(MorselSink):
                 self._agg_data.agg_exprs[i].child.value(), current.schema
             )
             fx_idx.append(ci)
-            # ⭐ THE ACCUMULATOR LANE IS CHOSEN FROM THE **INPUT** TYPE, NOT THE
+            # THE ACCUMULATOR LANE IS CHOSEN FROM THE **INPUT** TYPE, NOT THE
             # OUTPUT TYPE, AND THE DISTINCTION IS NOT COSMETIC. `avg(<bigint>)`
             # declares FLOAT64 output but `agg_mixed_cd_fold` — this lane's
             # oracle — sums it EXACTLY in an Int64 and divides once at emit.
@@ -374,7 +435,7 @@ struct CountDistinctAggSink(MorselSink):
                 not (at == ArrowType.FLOAT64 or at == ArrowType.FLOAT32)
             )
 
-        # ⭐ ARM THE PASSENGER LANE ON FIRST CONSUME, not at `init_local`. The
+        # ARM THE PASSENGER LANE ON FIRST CONSUME, not at `init_local`. The
         # lane's accumulator choice needs the DECODED batch's column types, and
         # `init_local` runs before any batch exists. `configure_fixed` REFUSES
         # once groups exist, so this can only ever run on a state that has
@@ -383,7 +444,7 @@ struct CountDistinctAggSink(MorselSink):
             local.state.configure_fixed(self._fx_func, fx_is_int)
 
         if self._num_keys == 0:
-            # Ungrouped CB-04 fast path -- no key load, no Dict lookup in
+            # Ungrouped fast path -- no key load, no Dict lookup in
             # the row loop. All rows land in group 0.
             local.state.consume_batch_ungrouped(
                 current,
@@ -393,7 +454,7 @@ struct CountDistinctAggSink(MorselSink):
             var key_idx = resolve_col_index(
                 self._agg_data.group_by_exprs[0], current.schema
             )
-            # ⭐ Pick the INSTANTIATION. An all-COUNT(DISTINCT) node has no
+            # Pick the INSTANTIATION. An all-COUNT(DISTINCT) node has no
             # fixed slot, and runs the `has_fixed=False` row loop in which the
             # passenger lane does not exist (the fused body with an empty fixed
             # list measured +4.32%).
@@ -412,7 +473,6 @@ struct CountDistinctAggSink(MorselSink):
                     fx_idx,
                 )
 
-        local.has_data = True
         _ = current^
 
     def combine[
@@ -499,7 +559,7 @@ struct CountDistinctAggSink(MorselSink):
 
         if num_workers == 0:
             # No data at all -- emit empty RecordBatch matching output
-            # schema. Mirrors legacy "nm==0" early return path.
+            # schema.
             _ = workers^
             _ = sink_global^
             if num_keys == 0:
@@ -508,7 +568,7 @@ struct CountDistinctAggSink(MorselSink):
                 return self._build_empty_output()
 
         # =====================================================================
-        # UNGROUPED (num_keys == 0) — CD-v2 per-value-partition UNION (unchanged).
+        # UNGROUPED (num_keys == 0) — per-value-partition UNION.
         # Each worker dedup-on-inserted during scan into per-value-partition
         # `cd_sets`; the union runs per-partition, 8-way parallel — no
         # bulk-extend, no raw value buffer materialised.
@@ -537,20 +597,29 @@ struct CountDistinctAggSink(MorselSink):
             var ub = RecordBatchBuilder()
             var usb = SchemaBuilder()
             for a in range(num_aggs):
-                # AGG-SCHEMA-METADATA-PROPAGATION-V0.4: preserve metadata.
                 usb.add_field(out_schema.field_at(a))
                 var uarr = PrimitiveArray[DType.int64].allocate(1)
                 var worker_sets = List[List[GrowableHashSetI64]]()
                 for w in range(num_workers):
                     ref ws = workers.get_mut_interior(w).state
                     if len(ws.cd_sets[a]) == _CD_VALUE_NUM_PARTITIONS:
+                        # MOVE each set out (no copy): the union below
+                        # folds into worker 0's sets and owns them from here.
                         var parts = List[GrowableHashSetI64]()
                         for p in range(_CD_VALUE_NUM_PARTITIONS):
-                            parts.append(ws.cd_sets[a][p].copy())
+                            var moved = GrowableHashSetI64()
+                            swap(ws.cd_sets[a][p], moved)
+                            parts.append(moved^)
                         worker_sets.append(parts^)
-                var distinct_count = _cd_union_count_parallel(
-                    worker_sets, dispatcher_ptr[], cancel_token.clone()
-                )
+                var distinct_count = 0
+                if len(worker_sets) > 0:
+                    # Worker 0's sets (or the first worker's that has any)
+                    # are the accumulator; the rest are folded into it.
+                    var acc = worker_sets.pop(0)
+                    distinct_count = _cd_union_count_parallel(
+                        acc^, worker_sets, dispatcher_ptr[],
+                        cancel_token.clone(),
+                    )
                 uarr.store[1](0, Scalar[DType.int64](distinct_count))
                 _ = worker_sets^
                 ub.add_column(Column.from_primitive[DType.int64](uarr^))
@@ -560,7 +629,7 @@ struct CountDistinctAggSink(MorselSink):
             return uresult^
 
         # =====================================================================
-        # GROUPED (num_keys == 1) — PERF-CD-GROUPED-STREAM.
+        # GROUPED (num_keys == 1).
         #
         # Build a global group directory and MOVE the per-(group, worker)
         # value buffers DIRECTLY into `radix_distinct_count_grouped` — NO fold,
@@ -574,14 +643,13 @@ struct CountDistinctAggSink(MorselSink):
         # =====================================================================
         # 1. Global group directory (worker-0-first registration order).
         #
-        # ⭐ Built ONCE as a
+        # Built ONCE as a
         # per-worker gid map `wgid[w][g]` (the Dict asked once per cell), which the
         # fixed-cell merge and every CD agg's drain below index instead of
-        # re-probing the Dict per cell. Same first-seen order as the loop it
-        # replaces, so `global_keys` is identical index for index. See
+        # re-probing the Dict per cell. Groups are numbered in first-seen order. See
         # `cd_global_dir.mojo`.
         #
-        # ★ CD-KEY-NULL (2026-09-13) — the NULL group crosses the worker merge
+        # The NULL group crosses the worker merge
         # OUTSIDE any key index, for the same reason it stays out of each
         # worker's `group_map`: there is no Int64 that means NULL, and any
         # sentinel collides with the real key equal to it.
@@ -589,7 +657,7 @@ struct CountDistinctAggSink(MorselSink):
         var wgid = List[List[Int]](capacity=num_workers)
         for w in range(num_workers):
             ref st = workers.get_mut_interior(w).state
-            # MIXEDFUSE-ALLCD route witness — once per worker per query, off
+            # Route witness — once per worker per query, off
             # the row path. See `cd_passenger_lane_counter`.
             cd_grouped_route_note(st.stat_batches, st.stat_fx_batches)
             wgid.append(gdir.map_worker(st.group_keys, st.group_key_null))
@@ -602,7 +670,7 @@ struct CountDistinctAggSink(MorselSink):
 
         # 2. Key column.
         var key_at = out_schema.field_arrow_type(0)
-        # ★ CD-KEY-NULL (2026-09-13) — the NULL group has to READ BACK as NULL.
+        # The NULL group has to READ BACK as NULL.
         # Emitting it with no validity renders it as `0`, which is a DIFFERENT
         # wrong answer: the row set would be right and the key a lie — and on a
         # column that also holds a real `0` the two rows would be
@@ -610,9 +678,8 @@ struct CountDistinctAggSink(MorselSink):
         # case too: a schema saying `not null` over a column carrying nulls is
         # an Arrow contract violation the C Data Interface export trips on.
         #
-        # ⚠ VALIDITY ONLY WHEN A NULL GROUP EXISTS — a null-free input takes the
-        # plain `allocate` and the unmodified field, byte-identical to the
-        # pre-fix emit.
+        # VALIDITY ONLY WHEN A NULL GROUP EXISTS — a null-free input takes the
+        # plain `allocate` and the unmodified field.
         var key_has_null = global_null_gid >= 0
         if key_has_null:
             var kf = out_schema.field_at(0)
@@ -650,9 +717,9 @@ struct CountDistinctAggSink(MorselSink):
                     karr.store[1](g, Scalar[DType.int64](global_keys[g]))
                 builder.add_column(Column.from_primitive[DType.int64](karr^))
 
-        # ⭐⭐ MIXEDFUSE — 2b. MERGE THE FIXED CELLS onto the SAME global group
+        # 2b. MERGE THE FIXED CELLS onto the SAME global group
         # directory the CD runs use, before anything is emitted. Every worker
-        # folded against its OWN gid space; `wgid` (CD-GDIR) is the one
+        # folded against its OWN gid space; `wgid` is the one
         # mapping that reconciles them, and reusing it (rather than
         # rebuilding one) is what guarantees the fixed columns and the CD
         # columns describe the same rows.
@@ -699,9 +766,10 @@ struct CountDistinctAggSink(MorselSink):
                                 if dst.n == Int64(0) or src.i_acc < dst.i_acc:
                                     dst.i_acc = src.i_acc
                             else:
-                                # ⛔ QUOTIENT ORDER, NOT a bare `<` / `>`: IEEE compares false against
-                                # a NaN, so `max{0.1, NaN}` would answer 0.1; DuckDB answers NaN
-                                # (NaN sorts above +inf).
+                                # Quotient order, not a bare `<`: IEEE compares false
+                                # against a NaN, so a held NaN would never be
+                                # replaced by 0.1; NaN sorts above +inf, so the
+                                # minimum is the smallest number.
                                 if dst.n == Int64(0) or float_quotient_lt_f64(src.f_acc, dst.f_acc):
                                     dst.f_acc = src.f_acc
                         elif afn == AGG_MAX:
@@ -709,9 +777,9 @@ struct CountDistinctAggSink(MorselSink):
                                 if dst.n == Int64(0) or src.i_acc > dst.i_acc:
                                     dst.i_acc = src.i_acc
                             else:
-                                # ⛔ QUOTIENT ORDER, NOT a bare `<` / `>`: IEEE compares false against
-                                # a NaN, so `max{0.1, NaN}` would answer 0.1; DuckDB answers NaN
-                                # (NaN sorts above +inf).
+                                # Quotient order, not a bare `>`: IEEE compares false
+                                # against a NaN, so `max{0.1, NaN}` would answer 0.1;
+                                # NaN sorts above +inf, so the maximum is NaN.
                                 if dst.n == Int64(0) or float_quotient_gt_f64(src.f_acc, dst.f_acc):
                                     dst.f_acc = src.f_acc
                         else:
@@ -720,8 +788,8 @@ struct CountDistinctAggSink(MorselSink):
                         dst.n += src.n
 
         # 3. Per-agg output columns, IN THE PLAN'S OWN ORDER. A COUNT(DISTINCT)
-        # position runs the parallel across-groups radix driver; a MIXEDFUSE
-        # fixed position drains the merged cells above. `_pos_slot` is what maps
+        # position runs the parallel across-groups radix driver; a fixed
+        # position drains the merged cells above. `_pos_slot` is what maps
         # an output position onto the dense slot of whichever space serves it.
         for _i_pos in range(self._n_out_aggs):
             if not self._pos_is_cd[_i_pos]:
@@ -750,64 +818,44 @@ struct CountDistinctAggSink(MorselSink):
                         break
                 if anynull:
                     ffield.nullable = True
+                # The column is emitted at the DECLARED type; the values come
+                # from whichever lane the input type selected.
+                var oat = ffield.arrow_type
                 sb.add_field(ffield)
-                if ffn == AGG_MEAN or not fx_is_int_f[f]:
-                    var farr: PrimitiveArray[DType.float64]
-                    if anynull:
-                        farr = PrimitiveArray[
-                            DType.float64
-                        ].allocate_nullable(num_groups)
-                    else:
-                        farr = PrimitiveArray[DType.float64].allocate(
-                            num_groups
-                        )
-                    var fnc = 0
-                    for g in range(num_groups):
-                        ref cell = fx_merged[f][g]
-                        if cell.n == Int64(0):
-                            farr._typed_ptr_mut()[g] = Float64(0.0)
-                            farr.validity.value().clear(g)
-                            fnc += 1
-                            continue
-                        if ffn == AGG_MEAN:
-                            if fx_is_int_f[f]:
-                                farr._typed_ptr_mut()[g] = Float64(
-                                    cell.i_acc
-                                ) / Float64(cell.n)
-                            else:
-                                farr._typed_ptr_mut()[g] = (
-                                    cell.f_acc / Float64(cell.n)
-                                )
-                        else:
-                            farr._typed_ptr_mut()[g] = cell.f_acc
-                    if anynull:
-                        farr.null_count = fnc
+                if oat == ArrowType.FLOAT64:
                     builder.add_column(
-                        Column.from_primitive[DType.float64](farr^)
+                        _fixed_float_column[DType.float64](
+                            fx_merged[f], num_groups, anynull, ffn,
+                            fx_is_int_f[f],
+                        )
                     )
-                    continue
-                var iarr: PrimitiveArray[DType.int64]
-                if anynull:
-                    iarr = PrimitiveArray[DType.int64].allocate_nullable(
-                        num_groups
+                elif oat == ArrowType.FLOAT32:
+                    builder.add_column(
+                        _fixed_float_column[DType.float32](
+                            fx_merged[f], num_groups, anynull, ffn,
+                            fx_is_int_f[f],
+                        )
                     )
                 else:
-                    iarr = PrimitiveArray[DType.int64].allocate(num_groups)
-                var inc = 0
-                for g in range(num_groups):
-                    ref cell2 = fx_merged[f][g]
-                    if cell2.n == Int64(0):
-                        iarr._typed_ptr_mut()[g] = Int64(0)
-                        iarr.validity.value().clear(g)
-                        inc += 1
+                    if not fx_is_int_f[f]:
+                        raise Error(
+                            "CountDistinctAggSink: an integer aggregate is"
+                            " declared over a floating-point input"
+                        )
+                    if oat == ArrowType.INT32:
+                        builder.add_column(
+                            _fixed_int_column[DType.int32](
+                                fx_merged[f], num_groups, anynull
+                            )
+                        )
                     else:
-                        iarr._typed_ptr_mut()[g] = cell2.i_acc
-                if anynull:
-                    iarr.null_count = inc
-                builder.add_column(Column.from_primitive[DType.int64](iarr^))
+                        builder.add_column(
+                            _fixed_int_column[DType.int64](
+                                fx_merged[f], num_groups, anynull
+                            )
+                        )
                 continue
             var a = self._pos_slot[_i_pos]
-            # AGG-SCHEMA-METADATA-PROPAGATION-V0.4: preserve metadata.
             sb.add_field(out_schema.field_at(num_keys + _i_pos))
             # groups_runs[gg] = each worker's (moved) value runs for group gg.
             # Every move here is O(1) — no bulk-extend copy, no concat into
@@ -819,12 +867,12 @@ struct CountDistinctAggSink(MorselSink):
             # dense key column out, so converting a set back into a run costs
             # nothing — no drain loop, no copy, no allocation.
             #
-            # The driver below is UNCHANGED and needs no knowledge of which
+            # The driver below needs no knowledge of which
             # kind a run is: `radix_distinct_count_grouped` returns the
             # distinct count of the UNION of a group's runs, and pre-deduping
             # a run does not change that union's distinct set. Feeding it
             # fewer, deduped values is a pure input-size reduction.
-            # CD-GDIR: each group's run list is sized ONCE from the exact count
+            # Each group's run list is sized ONCE from the exact count
             # of worker cells that map onto it (plus the promoted-set runs, which
             # can only exist on the opt-in scan-dedup arm and simply grow).
             var groups_runs = List[List[List[Int64]]](capacity=num_groups)
@@ -834,7 +882,7 @@ struct CountDistinctAggSink(MorselSink):
                 ref st = workers.get_mut_interior(w).state
                 ref wmap = wgid[w]
                 for g in range(len(st.group_keys)):
-                    # ★ CD-KEY-NULL — the NULL group is `global_null_gid`, which
+                    # The NULL group is `global_null_gid`, which
                     # `wgid` already carries (its stored key is a placeholder
                     # and would alias a real key through any key index).
                     var gg = wmap[g]
@@ -892,29 +940,17 @@ struct CountDistinctAggSink(MorselSink):
         var builder = RecordBatchBuilder()
         var sb = SchemaBuilder()
 
-        # AGG-SCHEMA-METADATA-PROPAGATION-V0.4: preserve metadata.
         sb.add_field(out_schema.field_at(0))
-        if out_schema.field_arrow_type(0) == ArrowType.INT32:
-            var arr = PrimitiveArray[DType.int32].allocate(0)
-            builder.add_column(Column.from_primitive[DType.int32](arr^))
-        else:
-            var arr = PrimitiveArray[DType.int64].allocate(0)
-            builder.add_column(Column.from_primitive[DType.int64](arr^))
+        builder.add_column(_empty_column(out_schema.field_arrow_type(0)))
 
-        # ⭐ MIXEDFUSE — an EMPTY result still has to carry every declared
+        # An EMPTY result still has to carry every declared
         # column at its DECLARED type. `_n_out_aggs` (not `_num_aggs`, the CD
         # count) is the number of agg columns the plan promised, and a FLOAT64
         # `avg` column emitted as INT64 is a schema mismatch a consumer sees
         # long after this function returns.
         for i in range(self._n_out_aggs):
-            # AGG-SCHEMA-METADATA-PROPAGATION-V0.4: preserve metadata.
             sb.add_field(out_schema.field_at(1 + i))
-            if out_schema.field_arrow_type(1 + i) == ArrowType.FLOAT64:
-                var farr = PrimitiveArray[DType.float64].allocate(0)
-                builder.add_column(Column.from_primitive[DType.float64](farr^))
-            else:
-                var arr = PrimitiveArray[DType.int64].allocate(0)
-                builder.add_column(Column.from_primitive[DType.int64](arr^))
+            builder.add_column(_empty_column(out_schema.field_arrow_type(1 + i)))
 
         return builder.build(sb.build())
 
@@ -928,9 +964,7 @@ struct CountDistinctAggSink(MorselSink):
         var sb = SchemaBuilder()
 
         for a in range(self._num_aggs):
-            # AGG-SCHEMA-METADATA-PROPAGATION-V0.4: preserve metadata.
             sb.add_field(out_schema.field_at(a))
-            # Z.4-continue: migrated to `arr.store[1]`.
             var arr = PrimitiveArray[DType.int64].allocate(1)
             arr.store[1](0, Scalar[DType.int64](0))
             builder.add_column(Column.from_primitive[DType.int64](arr^))

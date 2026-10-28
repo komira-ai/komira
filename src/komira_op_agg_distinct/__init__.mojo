@@ -15,7 +15,8 @@ state of the streaming COUNT(DISTINCT) aggregation
 global group directory `cd_global_dir` and the route counters
 `cd_passenger_lane_counter`), the streaming COUNT(DISTINCT) sink
 (`agg_sink_count_distinct`, with its ungrouped union
-`agg_count_distinct_kernel`), and the parallel per-group finalize of the stage
+`agg_count_distinct_kernel` and its fixed-aggregate columns
+`agg_cd_fixed_emit`), and the parallel per-group finalize of the stage
 MEDIAN drain (`median_parallel_drain`).
 
 Public API: import directly from sub-modules. No facade.
