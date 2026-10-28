@@ -68,7 +68,7 @@ and its limits. A family's doc lands together with the libraries it describes;
 | execution and operators | [lowering and running a bound plan](design/lowering_and_pipeline.md) (design, not built); [shuffle through an object store](design/shuffle.md); pipelines and morsel dispatch, aggregation, joins, top-N and the kernels: no design doc yet; sort and window: coming with the engine libraries |
 | search | [the search index format](design/search_index_format.md) (the format today, and proposed changes; not built); [storing a graph over data](design/data_graph_storage.md) (proposed, not built) |
 | plan and optimizer | [query semantics](design/query_semantics.md); [the optimized plan an SDK submits](design/optimized_plan.md) (design, not built); logical plans and expressions, physical planning, the plan wire format: no design doc yet; the query optimizer: coming with `komira_optimizer` |
-| SDK and SQL | UDFs, the SQL lexer and syntax tree (`komira_sql`): no design doc yet; the plan-carrier surface, the Python package: coming with `komira_sdk`; the SQL parser and binder: coming with `komira_sql` |
+| SDK and SQL | UDFs, the SQL lexer, parser, syntax tree and binder (`komira_sql`): no design doc yet; the plan-carrier surface, the Python package: coming with `komira_sdk` |
 | runtime | [the async runtime](design/async_runtime.md); the job supervisor and its job report wire: no design doc yet |
 | observability | [logging and telemetry](design/logging_and_telemetry.md) |
 | agents | MCP and local models: coming with `komira_mcp_server` and `komira_localmodel` |

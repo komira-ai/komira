@@ -282,7 +282,7 @@ other).
 
 ## Per-library state: komira_log's holder
 
-`src/komira_log/engine/_log_holder_shim.c` (**EXISTS**) has twelve `KOMIRA_SHIM_LOCAL` (hidden)
+`src/komira_log/native/komira_log_holder.c` (**EXISTS**) has twelve `KOMIRA_SHIM_LOCAL` (hidden)
 accessors: the engine holder (`komira_log_holder_set`, `_get`, `_get_engine`, `_clear`), the
 configuration (`komira_log_config_holder_set`, `_get`, `komira_log_holder_get_config`), the layout
 (`komira_log_layout_set`, `_get`) and the worker-id thread-local (`komira_log_tls_key_create`, `_set`,

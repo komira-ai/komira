@@ -256,6 +256,26 @@ trait HashAggOpDt(Copyable, Movable, ImplicitlyCopyable, Deinitable):
     def combine(mut state: Self.StateTy, partial: Self.StateTy):
         ...
 
+    # -- The NULL hooks, forwarded by `HashAggOpAgg` to the `Aggregator` ones.
+    comptime COUNTS_ROWS: Bool = False
+    """True only for COUNT(*) (`CountStarOp`): it counts rows, so no row's
+    input is NULL. Every other op skips a row whose input column is NULL."""
+
+    comptime EMPTY_IS_NULL: Bool = True
+    """A group with no non-NULL input answers NULL; COUNT and COUNT(DISTINCT)
+    set False and answer 0."""
+
+    @staticmethod
+    def update_null(mut state: Self.StateTy):
+        """Fold a NULL input. DEFAULT: skip it. FIRST / LAST override."""
+        _ = state
+
+    @staticmethod
+    def result_is_null(state: Self.StateTy) -> Bool:
+        """DEFAULT False. FIRST / LAST: True when the picked row was NULL."""
+        _ = state
+        return False
+
     # -- The EXACT INTEGER SUM hooks,
     # forwarded by `HashAggOpAgg` to `Aggregator.EXACT_INT_SUM` /
     # `total_fits_i64` (see that trait for the contract).
@@ -390,8 +410,9 @@ struct SumOp[dt: DType](HashAggOpDt):
 
 
 struct CountOp[dt: DType](HashAggOpDt):
-    """COUNT over `dt` (counts every row fed — no-null model, mirrors
-    `CountF64` semantics). Identity = 0. State = `Scalar[int64]` (an
+    """COUNT(col) over `dt`: counts every row fed. `HashAggOpAgg` feeds it
+    only the rows whose input column is not NULL (`CountStarOp` is COUNT(*)).
+    Identity = 0. State = `Scalar[int64]` (an
     exact integer counter, not Float64). Output is
     ALWAYS int64 (COUNT is integer-valued — matches the untyped path's INT64
     COUNT column)."""
@@ -400,6 +421,7 @@ struct CountOp[dt: DType](HashAggOpDt):
     comptime OUT_DT: DType = DType.int64
     comptime NEEDS_VALUE: Bool = False
     comptime StateTy = Scalar[DType.int64]
+    comptime EMPTY_IS_NULL: Bool = False
 
     @staticmethod
     @always_inline
@@ -793,6 +815,8 @@ struct FirstLastRunningState[dt: DType](
 
     var value: Scalar[Self.dt]
     var seen: Bool
+    var is_null: Bool
+    """The picked row's input was NULL (DuckDB first() and last() return it)."""
 
 
 struct FirstOp[dt: DType](HashAggOpDt):
@@ -812,7 +836,9 @@ struct FirstOp[dt: DType](HashAggOpDt):
     @staticmethod
     @always_inline
     def init() -> FirstLastRunningState[Self.SDT]:
-        return FirstLastRunningState[Self.SDT](Scalar[Self.SDT](0), False)
+        return FirstLastRunningState[Self.SDT](
+            Scalar[Self.SDT](0), False, False
+        )
 
     @staticmethod
     @always_inline
@@ -823,6 +849,19 @@ struct FirstOp[dt: DType](HashAggOpDt):
         if not state.seen:
             state.value = value.cast[Self.SDT]()
             state.seen = True
+
+    @staticmethod
+    @always_inline
+    def update_null(mut state: FirstLastRunningState[Self.SDT]):
+        # A NULL first row is the pick, and the answer is NULL.
+        if not state.seen:
+            state.seen = True
+            state.is_null = True
+
+    @staticmethod
+    @always_inline
+    def result_is_null(state: FirstLastRunningState[Self.SDT]) -> Bool:
+        return state.is_null
 
     @staticmethod
     @always_inline
@@ -860,7 +899,9 @@ struct LastOp[dt: DType](HashAggOpDt):
     @staticmethod
     @always_inline
     def init() -> FirstLastRunningState[Self.SDT]:
-        return FirstLastRunningState[Self.SDT](Scalar[Self.SDT](0), False)
+        return FirstLastRunningState[Self.SDT](
+            Scalar[Self.SDT](0), False, False
+        )
 
     @staticmethod
     @always_inline
@@ -870,6 +911,19 @@ struct LastOp[dt: DType](HashAggOpDt):
         # LAST: every update overwrites — the running value is the most-recent.
         state.value = value.cast[Self.SDT]()
         state.seen = True
+        state.is_null = False
+
+    @staticmethod
+    @always_inline
+    def update_null(mut state: FirstLastRunningState[Self.SDT]):
+        # A NULL last row is the pick, and the answer is NULL.
+        state.seen = True
+        state.is_null = True
+
+    @staticmethod
+    @always_inline
+    def result_is_null(state: FirstLastRunningState[Self.SDT]) -> Bool:
+        return state.is_null
 
     @staticmethod
     @always_inline
@@ -978,6 +1032,7 @@ struct CountDistinctOp[dt: DType](HashAggOpDt):
     comptime DT: DType = Self.dt
     comptime OUT_DT: DType = DType.int64
     comptime StateTy = CountDistinctState[Self.dt]
+    comptime EMPTY_IS_NULL: Bool = False
 
     @staticmethod
     @always_inline
@@ -1602,6 +1657,25 @@ struct HashAggOpAgg[Op: HashAggOpDt, col: Int](Aggregator):
             Self.Op.update_scalar(
                 state, band.col_scalar[Self.Op.DT](Self.col, row)
             )
+
+    @always_inline
+    def input_is_null[V: MorselView](self, view: V, i: Int) -> Bool:
+        """A NULL in input column `col` is not a value; COUNT(*) has none."""
+        comptime if Self.Op.COUNTS_ROWS:
+            return False
+        else:
+            return view.col_is_null(Self.col, i)
+
+    @always_inline
+    def update_null(self, mut state: Self.StateTy):
+        Self.Op.update_null(state)
+
+    @staticmethod
+    @always_inline
+    def result_is_null(state: Self.StateTy) -> Bool:
+        return Self.Op.result_is_null(state)
+
+    comptime EMPTY_IS_NULL: Bool = Self.Op.EMPTY_IS_NULL
 
     @always_inline
     def combine(mut self, mut into: Self.StateTy, var partial: Self.StateTy):

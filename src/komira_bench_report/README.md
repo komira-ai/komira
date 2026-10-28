@@ -235,3 +235,34 @@ assert_true(message.startswith(String("BenchResultError: result: missing member"
 | `summary` | the counts, geomean and median of the ratios, a `per_suite` list and the `headline`, all recomputed by the reader from the cells: counts and text must be equal, the floats must agree to 1e-9 (the geomean goes through the platform's `log` and `exp`, so it is not bit-exact across platforms), and the geomean figure in the headline must be the rounding of the recomputed or the stored geomean |
 
 The reader refuses a missing or unknown member at any level, a member named twice, an integer written as a float, a time that is not the least of its sweeps, a komira side on a cell whose run was refused, a ratio on a cell that may not have one, values marked `IDENTICAL` or `DIVERGENT` with no DuckDB side or outside a run of mode `both` (and `IDENTICAL` with unequal row counts), a DuckDB side in a run of mode `komira`, no DuckDB side on a cell komira ran in a run of mode `both`, a control character in a cell id, a verdict that does not follow from the ratio and `pass_max`, a cell id outside its suite, and a summary that is not the cells' summary.
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_bench_report`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_bench_report/`, its tests are `tests/`. It depends on one package,
+`komira_json`, a sibling directory (`[dependencies]` of `mopm.toml`: `{ path = "../komira_json", version = "0.1" }`),
+so the `.conda` of this package records `mojo-komira_json >=0.1,<0.2` as a dependency and holds none of that
+package's files: installing `komira_bench_report` installs `komira_json` with it. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependency and where the library and its tests are |
+| `mopm.lock` | the toolchain pins and the path dependency, as `mopm lock` writes them (no registry is reached: the only dependency is a sibling) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `coverage_floor.txt` | `lines NN.NN` and `branches NN.NN`: the least line and branch coverage `:coverage` may measure; `:coverage_floor` fails when either falls below, and above it passes and prints a hint to raise the figure |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifest of the sibling; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file, built from the `:lib` of `komira_json`, and exists only once every test has passed.
+After any change to a source, a test, a manifest of this package or of the sibling, run `buildrules mojo sync` with
+both packages staged, commit what it writes, and build `komira//src/komira_bench_report:lib` on the farm.
+
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
+(`mojo-komira_bench_report-0.1.0-mojo1.0.0_0.conda`), packed with the sibling's manifest beside its own (`members`),
+which therefore exists only once the tests have passed. `:conda_holds` reads it back and requires the one dependency
+`mojo-komira_json >=0.1,<0.2`. Publishing it (`mopm publish`) uploads, so it is a step of a CI job that takes that
+file, not a build action.
+
+`:komira_bench_report` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`): its `deps` are the adopted
+target of each package in `[dependencies]`, and the rule refuses a list that is not the closure `:lib` was built
+from. It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`; the tests are not
+run again.
