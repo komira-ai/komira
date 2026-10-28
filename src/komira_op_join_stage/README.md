@@ -1,7 +1,7 @@
 # komira_op_join_stage
 
 The typed hash join of the engine's stage pipelines: the build table, its key
-and payload columns, and its free functions over typed keys. The
+and payload columns, and the two breaker states a stage's join runs as. The
 package root re-exports nothing; import from the modules.
 
 - `komira_op_join_stage.join_build_table`: `JoinBuildTable[KB, *Payload]`, a
@@ -32,6 +32,15 @@ package root re-exports nothing; import from the modules.
   `join_build_probe_N` (first match), `join_build_probe_all_slots_N` (every
   match) and `join_build_prefetch_key_N`. They hash and compare exactly as
   the batch-row path does.
+- `komira_op_join_stage.join_build_state`: `JoinBuildState`, the JOIN_BUILD
+  breaker state. `feed_row` inserts a build row (not one with a NULL key) and
+  its payloads at their own types; `take_join_build_table` moves the table out
+  once; `combine` folds another worker's state in.
+- `komira_op_join_stage.join_probe_state`: `JoinProbeState`, the JOIN_PROBE
+  breaker state. `probe_batch` emits, per probe batch, the probe key `jkey`
+  and every build payload for each matching pair; for LEFT, an unmatched
+  probe row once with NULL payloads. Keys of one or two columns probe; `jkey`
+  is key column 0.
 
 ## Examples
 
