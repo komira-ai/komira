@@ -14,13 +14,13 @@
 #     from 16 partitions copy the same bytes in the same number of allocations
 #     (the fold census of `komira_operator_api.join_build_fold_census`). A
 #     pairwise fold (re-copying the accumulator per partition) makes the two
-#     differ: planted, it gave 6 allocations at 4 partitions and 30 at 16 for
+#     differ: such a fold gives 6 allocations at 4 partitions and 30 at 16 for
 #     the INT merge, against 2 and 2. Agreement across two shardings is the
 #     assertion, not a bound at one partition count, which a quadratic fold can
 #     satisfy.
 #   * ORDER. The merge reads [base[p], base[p+1]) as partition p's sorted run,
-#     so the fold must visit the slab in slot order. Planted: a fold that
-#     reverses the slab. The fixture's partitions are UNEVEN (100 / 300 / 200 /
+#     so the fold must visit the slab in slot order. A fold that
+#     reverses the slab would break this. The fixture's partitions are UNEVEN (100 / 300 / 200 /
 #     400 rows): with equal sizes a permuted fold maps each range onto another
 #     sorted run and the merge still emits a sorted result, so an even fixture
 #     cannot see the defect.

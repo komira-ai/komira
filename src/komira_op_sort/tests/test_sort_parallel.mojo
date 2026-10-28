@@ -17,8 +17,8 @@
 # The float case is a behaviour change. The flat key used to be IEEE
 # `totalOrder`: a NaN with its sign bit set (what 0.0/0.0 gives on x86) sorted
 # below -inf, and -0.0 sorted before +0.0. `sort_key_lt` (the serial kernels,
-# DuckDB) puts every NaN above +inf and ties the zeros. Planted mutant: the
-# old transform in `_f64_order_key` turns `test_f64_nan_and_zeros_*` red.
+# DuckDB) puts every NaN above +inf and ties the zeros.
+# `test_f64_nan_and_zeros_*` pins that order.
 # =============================================================================
 
 from std.memory import bitcast
