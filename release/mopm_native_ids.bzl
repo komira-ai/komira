@@ -23,6 +23,7 @@ load("//src/komira_counters:buildrules.mojo.lock.bzl", komira_counters = "GRAPH"
 load("//src/komira_datetime:buildrules.mojo.lock.bzl", komira_datetime = "GRAPH")
 load("//src/komira_dynamic_filter:buildrules.mojo.lock.bzl", komira_dynamic_filter = "GRAPH")
 load("//src/komira_encoding:buildrules.mojo.lock.bzl", komira_encoding = "GRAPH")
+load("//src/komira_exec_types:buildrules.mojo.lock.bzl", komira_exec_types = "GRAPH")
 load("//src/komira_fork_join:buildrules.mojo.lock.bzl", komira_fork_join = "GRAPH")
 load("//src/komira_hash:buildrules.mojo.lock.bzl", komira_hash = "GRAPH")
 load("//src/komira_host:buildrules.mojo.lock.bzl", komira_host = "GRAPH")
@@ -85,6 +86,7 @@ _GRAPHS = {
     "komira_datetime": komira_datetime,
     "komira_dynamic_filter": komira_dynamic_filter,
     "komira_encoding": komira_encoding,
+    "komira_exec_types": komira_exec_types,
     "komira_fork_join": komira_fork_join,
     "komira_hash": komira_hash,
     "komira_host": komira_host,

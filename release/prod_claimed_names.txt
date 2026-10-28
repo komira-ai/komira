@@ -21,6 +21,7 @@ komira_counters
 komira_datetime
 komira_dynamic_filter
 komira_encoding
+komira_exec_types
 komira_fork_join
 komira_hash
 komira_host

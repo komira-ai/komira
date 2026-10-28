@@ -36,6 +36,7 @@ PACKAGES = {
     "komira_datetime": "0.1.0",
     "komira_dynamic_filter": "0.1.0",
     "komira_encoding": "0.1.0",
+    "komira_exec_types": "0.1.0",
     "komira_fork_join": "0.1.0",
     "komira_hash": "0.1.0",
     "komira_host": "0.1.0",
