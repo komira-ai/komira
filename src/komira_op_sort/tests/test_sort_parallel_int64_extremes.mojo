@@ -8,7 +8,8 @@
 # increment does not fit a UInt64. The midpoints must stay inside [lo, hi] and
 # the descending midpoint must round up so the search always makes progress.
 #
-#   * `test_mid_*` pin the two midpoints at the extreme bounds.
+# The midpoints themselves are pinned in test_sort_parallel_midpoint.mojo.
+#
 #   * `test_extremes_*` sort and merge columns holding both extremes, ascending
 #     and descending, over 2 and 4 slices, and require the serial sort's rows
 #     (the payload column holds each row's input index, so it shows that ties
@@ -25,37 +26,10 @@ from komira_arrow.schema import Field, Schema
 from komira_collections.slab import Slab
 
 from komira_op_sort.sort_parallel import (
-    _mid_ceil,
-    _mid_floor,
     merge_sorted_partitions_single_key_serial,
     parallel_sort_single_key_serial,
 )
 from komira_op_sort.sort_topn_sink import _sort_batch_single_key
-
-
-def test_mid_ceil_of_the_full_range_is_inside_and_above_lo() raises:
-    var lo = Int64.MIN
-    var hi = Int64.MAX
-    var m = _mid_ceil(lo, hi)
-    assert_true(m > lo, "the ceil midpoint of [MIN, MAX] must exceed lo")
-    assert_true(m <= hi)
-    assert_equal(m, Int64(0))
-
-
-def test_mid_ceil_rounds_up_on_adjacent_and_equal_bounds() raises:
-    assert_equal(_mid_ceil(Int64.MIN, Int64.MIN + 1), Int64.MIN + 1)
-    assert_equal(_mid_ceil(Int64.MAX - 1, Int64.MAX), Int64.MAX)
-    assert_equal(_mid_ceil(Int64(7), Int64(7)), Int64(7))
-    assert_equal(_mid_ceil(Int64(-3), Int64(-2)), Int64(-2))
-    assert_equal(_mid_ceil(Int64.MIN, Int64(0)), Int64.MIN // 2)
-    assert_equal(_mid_ceil(Int64(0), Int64.MAX), Int64.MAX // 2 + 1)
-
-
-def test_mid_floor_of_the_full_range_and_adjacent_bounds() raises:
-    assert_equal(_mid_floor(Int64.MIN, Int64.MAX), Int64(-1))
-    assert_equal(_mid_floor(Int64.MIN, Int64.MIN + 1), Int64.MIN)
-    assert_equal(_mid_floor(Int64.MAX - 1, Int64.MAX), Int64.MAX - 1)
-    assert_equal(_mid_floor(Int64(-3), Int64(-2)), Int64(-3))
 
 
 def _batch[dt: DType](

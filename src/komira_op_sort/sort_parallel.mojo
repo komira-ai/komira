@@ -851,7 +851,7 @@ def merge_sorted_partitions_single_key[
     # A fold in any other order would leave `base[p]` pointing at a range that
     # is not a sorted run, and the merge would emit an UNSORTED result; a
     # value-only (order-independent) check cannot see that. The guard is
-    # `test_parallel_sort_merge_fold.test_*_merge_is_sorted_*`.
+    # `test_sort_parallel_merge_fold.test_*_merge_is_sorted_*`.
     #
     # The row counts are read by reference off the slab before the fold
     # consumes it.
