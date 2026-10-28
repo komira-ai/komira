@@ -29,7 +29,10 @@
 # DISTINCT key is a value).
 #
 # Supported key and payload types: the fixed-width integer, float, date,
-# timestamp and BOOL types, DECIMAL128, STRING and BINARY.
+# timestamp and BOOL types, DECIMAL128 and STRING. A key column that can hold a
+# NULL must have `validity_tracked` set on its descriptor; `feed_batch` raises
+# when an untracked key column reports a NULL. STRING cells are UTF-8 (the
+# Arrow Utf8 contract); the readers do not re-validate the bytes.
 # =============================================================================
 
 from komira_arrow.batch_view import BatchView
@@ -75,6 +78,8 @@ costs a probe, never a wrong answer: the equality compares the validity bit."""
 
 def _utf8_to_string(kb: List[UInt8]) -> String:
     """The stored bytes of a STRING cell as a `String`, byte for byte.
+
+    The bytes are taken as UTF-8 without validation (the Arrow Utf8 contract).
 
     Not `chr(Int(byte))` per byte: `chr` maps a code point to its UTF-8
     encoding, so every byte >= 0x80 would come back as two bytes."""
@@ -222,9 +227,14 @@ struct DistinctState_Untyped(Movable, Deinitable):
         for k in range(len(self.key_descriptors)):
             var desc = self.key_descriptors[k]
             var col_h: UInt64
-            if desc.validity_tracked and batch.col_is_null(
-                desc.col_idx_in_batch, row
-            ):
+            var is_null = batch.col_is_null(desc.col_idx_in_batch, row)
+            if is_null and not desc.validity_tracked:
+                raise Error(
+                    "DistinctState_Untyped: key column "
+                    + String(k)
+                    + " holds a NULL but its descriptor is not validity_tracked"
+                )
+            if is_null:
                 col_h = _NULL_KEY_HASH
             else:
                 col_h = _hash_single_col(batch, desc, row)
