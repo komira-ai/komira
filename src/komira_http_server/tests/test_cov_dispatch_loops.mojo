@@ -692,6 +692,7 @@ def _parked_handler_whose_peer_left_is_discarded(loop: Int) raises:
     c.run_until_dropped()
     for _ in range(10):
         c.step()
+    assert_equal(c.calls(), 1)
     assert_equal(c.server.live_conn_count(), 0)
     assert_equal(c.server._reqs_handled, Int64(0))
     # A new client is still served.

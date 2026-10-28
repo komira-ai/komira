@@ -330,12 +330,20 @@ def _bad_chunk_framing_parks_its_400(loop: Int) raises:
 
 
 def _interim_continue_parks(loop: Int) raises:
-    """Only the interim's own parking is asserted: what becomes of the
-    request behind it is not this test's claim."""
+    """The interim parks first. The chained round also dispatches the request
+    behind it and queues its 200 after the interim; the other two loops are
+    asserted on the interim prefix only (komira-ai/komira#1998 tracks what
+    becomes of the request behind a parked interim there)."""
     var r = _parked_after(loop, _EXPECT, True)
     var want = List[UInt8]()
     build_100_continue_bytes(want)
-    assert_equal(r[0], _text(want))
+    var interim = _text(want)
+    assert_true(r[0].startswith(interim), r[0])
+    if loop == _CHAINED:
+        assert_equal(r[1], 1)
+        var rest = String(r[0][byte = interim.byte_length() :])
+        assert_true(rest.startswith("HTTP/1.1 200 "), rest)
+        assert_true(rest.endswith("\r\n\r\nok"), rest)
 
 
 def _round_with_nothing_to_read(loop: Int) raises:
