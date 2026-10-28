@@ -639,7 +639,7 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
         `_offset` (verified byte-identical by the split-on-slice oracle). Every
         other layout returns False and the caller (`split_record_batch`) uses the
         copy slice — notably plain STRING / BINARY (as_string/as_binary read
-        offsets from position 0 and REFUSE `_offset != 0` — see `_slice_variable_width`
+        offsets from position 0 and refuse a sliced column — see `_slice_variable_width`
         note), BOOL (bit-packed; a non-byte-aligned `_offset` needs bit-shift
         handling), and nested (LIST/STRUCT/MAP/UNION child offsets don't compose
         with a parent `_offset`)."""
@@ -669,7 +669,7 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
         Byte-identical reads to the copy-based `_slice_column` for every layout
         where `supports_zero_copy_slice()` is True (fixed-width / boolean /
         DECIMAL / DICTIONARY — their accessors honor `_offset`). RAISES for
-        STRING/BINARY/nested (accessors do not honour `_offset`); the caller must gate
+        STRING/BINARY/nested (their accessors refuse a sliced column); the caller must gate
         on `supports_zero_copy_slice()` and use the copy path for those.
 
         VALIDITY IS OFFSET-BASED. When self is nullable the
@@ -1976,8 +1976,8 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
         `Column.slice` shares the WHOLE-column bitmap and carries `_offset > 0`
         into the result, so a per-row lookup on a slice is
         `validity.test(_offset + i)` — its docstring states exactly this. The
-        STRING/BINARY/nested accessors do not honour `_offset` and are still correct
-        because `slice()` REFUSES those layouts (`supports_zero_copy_slice()`
+        STRING/BINARY/nested accessors refuse a sliced column, and `slice()`
+        REFUSES those layouts (`supports_zero_copy_slice()`
         is False), so their `_offset` is always 0 and the two spellings
         coincide there.
 
@@ -2226,10 +2226,9 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
           * `RecordBatch.column_as_string(i)` -> `Column.as_string()` **COPIES
             the whole offsets AND data buffer** — a multi-GB memcpy just to
             read lengths.
-          * `Column.as_string()` also reads `_offsets[0 .. _length]` and IGNORES
-            `_offset` entirely, so on a SLICED column it returns the wrong
-            strings (the offset-blind-read defect class); this accessor is
-            written the other way on purpose.
+          * `Column.as_string()` also reads `_offsets[0 .. _length]` from row 0
+            and so refuses a sliced column (`_offset != 0`) rather than read
+            the wrong rows; this accessor is written the other way on purpose.
 
         O(1), allocation-free, `_offset`-correct — the STRING sibling of
         `string_dict_code_at` below.
@@ -3619,7 +3618,7 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
         * `_offsets` present — `as_string` raises without it.
         * `_offset == 0` — `as_string` copies `offsets[0 .. _length]` and
           `data[0 .. offsets[_length]]` and copies validity from BIT 0,
-          i.e. it reads the column as if `_offset` were 0, so it REFUSES `_offset != 0`
+          i.e. it reads the column as if `_offset` were 0, so it refuses a sliced column
           (`supports_zero_copy_slice()` excludes STRING for exactly this
           reason). A share therefore reproduces `as_string`'s bytes only at
           `_offset == 0`. No public path can build an `_offset > 0` plain
@@ -3665,7 +3664,7 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
         That branch had to exclude nullable columns because the copy REBASED
         validity from `_offset` to bit 0 and its consumers read from bit 0.
         `as_string` never rebased anything — it copies validity from bit 0 and
-        refuses `_offset != 0` — so at the `_offset == 0` this method requires, the
+        refuses a sliced column — so at the `_offset == 0` this method requires, the
         shared bitmap and the copied bitmap have identical bits at identical
         indices.
 
