@@ -717,12 +717,12 @@ test "the mopm release.yml builds and docs/ci.md names is the MOPM of packages.b
 
 test "a mopm label that differs from the pin, or none, is refused" {
     var buf: [160]u8 = undefined;
-    const pin = "toolchains//:mopm_0_0_81";
-    try t.expect((try mopmDrift("args: build toolchains//:mopm_0_0_81 --out x", pin, "w", &buf)) == null);
-    try t.expect((try mopmDrift("a toolchains//:mopm_0_0_81, b toolchains//:mopm_0_0_81.", pin, "w", &buf)) == null);
-    try t.expect((try mopmDrift("args: build toolchains//:mopm_0_0_73 --out x", pin, "w", &buf)) != null);
-    try t.expect((try mopmDrift("toolchains//:mopm_0_0_81 then toolchains//:mopm_0_0_8", pin, "w", &buf)) != null);
+    const pin = "toolchains//:mopm_0_0_83";
+    try t.expect((try mopmDrift("args: build toolchains//:mopm_0_0_83 --out x", pin, "w", &buf)) == null);
+    try t.expect((try mopmDrift("a toolchains//:mopm_0_0_83, b toolchains//:mopm_0_0_83.", pin, "w", &buf)) == null);
+    try t.expect((try mopmDrift("args: build toolchains//:mopm_0_0_81 --out x", pin, "w", &buf)) != null);
+    try t.expect((try mopmDrift("toolchains//:mopm_0_0_83 then toolchains//:mopm_0_0_8", pin, "w", &buf)) != null);
     try t.expect((try mopmDrift("no label here", pin, "w", &buf)) != null);
-    try t.expectEqualStrings("toolchains//:mopm_0_0_81", mopmPin("X = 1\nMOPM = \"toolchains//:mopm_0_0_81\"\n").?);
+    try t.expectEqualStrings("toolchains//:mopm_0_0_83", mopmPin("X = 1\nMOPM = \"toolchains//:mopm_0_0_83\"\n").?);
     try t.expect(mopmPin("# MOPM = \"x\"\n") == null);
 }

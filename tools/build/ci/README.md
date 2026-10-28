@@ -114,6 +114,19 @@ table lacks, and for one the table holds that the lock does not record. A new
 package needs no list to edit. A change that deletes the subdir from `mopm.lock`
 as well fails `:table` instead: the lock's hash is in the table.
 
+The same run holds a package's system libraries to its lock. A package whose
+`mopm.toml`, or a path dependency's, declares `[native-dependencies] <name> = { ...,
+mode = "load" }` opens that library by its bare name, and its tests run against the
+file the lock pins: `system_libs` of `mopm.lock`, written by `mopm lock` of mopm
+0.0.83 or later, which makes the committed graph unit graph format 3. The check
+fails, naming the package, for a declared load whose lock has no `system_libs`
+(a lock an older mopm wrote), for a platform subdir the lock records a toolchain for
+and `system_libs` has no library for, and for a package whose sources call
+`OwnedDLHandle(`, `DLHandle(` or `dlopen(` on a non-comment line while no manifest
+declares a load (the pins would be missing without the declaration saying so). The
+reading is in `lock_graphs.zig` (`declaresLoad`, `opensLibrary`, `checkSystemLibs`),
+behind unit tests that call each with a clean and a defective input.
+
 **The aggregate holds no Python.** Python serves only the Python SDK and its
 tests (`PYTHON_SURFACE` in `tests/python_closure_allowlist.bzl`, empty until
 the SDK lands), so the checks of `EXCLUDED` in `rules.bzl` are left out of
