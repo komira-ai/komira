@@ -192,6 +192,7 @@ TARGETS = [
     "komira//src/komira_libc:table",
     "komira//src/komira_log_index:komira_log_index_conda",
     "komira//src/komira_log_query:komira_log_query_conda",
+    "komira//src/komira_lowering:komira_lowering_conda",
     "komira//src/komira_lowering_rules:komira_lowering_rules_conda",
     "komira//src/komira_lz4:ci",
     "komira//src/komira_lz4:coverage_floor",

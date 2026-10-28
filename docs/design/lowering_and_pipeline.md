@@ -313,12 +313,15 @@ leaf. **The HostProfile value is split from detection instead.** The move list (
   one each in `komira_morsel` and `komira_physical_plan`); slice 1a rewrites them in the same change, with no re-export
   module left behind.
 
-Slice 1b adds the refused-deps check to `komira_lowering/BUCK`: `_REFUSED_DEPS` (`komira_fs`, `komira_objectstore`,
-`komira_async`, `komira_shuffle`, `komira_engine_runtime`, `komira_optimizer`, `komira_sql`) compared by **exact
-package name**, not by prefix as `komira_lowering_rules/BUCK` does (a prefix `komira_async` would refuse
-`komira_async_api`, which the closure needs). The check is a shared Starlark function that both BUCK files call, so one
-way does one thing; slice 1b moves `komira_lowering_rules` onto it. That the check can fail is shown by a
-`selftest_scenario`, not by a welded test (§8).
+Slice 1b holds the refused-deps check in `komira_lowering/BUCK` with `closure_excludes`, the exact-name closure check
+that `komira_host_profile` already uses (`komira_async_api`, which the closure needs, is not refused because the
+names are compared whole): `komira_fs`, `komira_objectstore`, `komira_async`, `komira_shuffle`,
+`komira_engine_runtime`, `komira_optimizer` and `komira_sql`. It replaces the shared Starlark function this
+document proposed: the rule attribute already checks the whole closure, so one way does one thing, and
+`komira_lowering_rules/BUCK` moves onto the same attribute (its prefix comprehension is removed). That the check can
+fail is shown by `selftest_scenario` rows of `analysis_refusals_mojo`, one negative fixture per refused package
+under `tests//negative/closure_excludes` (the four of slice 1a and `engine_runtime`, `optimizer` and `sql`), and the
+real package, which depends on `komira_async_api`, is the positive control (§8).
 
 Why a new package and not a module of an existing one:
 
