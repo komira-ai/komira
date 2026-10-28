@@ -1,0 +1,47 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The typed hash join of the engine's stage pipelines: the build table
+# `JoinBuildTable[KB, *Payload]` (a key block of any arity, a pack of payload
+# columns, open addressing with linear probing, one slot per build row), its
+# key and payload columns and key model, its free functions over typed keys.
+mojo_library(
+    name = "komira_op_join_stage",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_batch_eval:komira_batch_eval",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_engine_runtime:komira_engine_runtime",
+        "//src/komira_exec_types:komira_exec_types",
+        "//src/komira_expr:komira_expr",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_host:komira_host",
+        "//src/komira_kernels:komira_kernels",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_morsel:komira_morsel",
+        "//src/komira_name_registry:komira_name_registry",
+        "//src/komira_operator_api:komira_operator_api",
+        "//src/komira_physical_plan:komira_physical_plan",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_scan_source:komira_scan_source",
+        "//src/komira_simd:komira_simd",
+        "//src/komira_udf:komira_udf",
+    ],
+    test_srcs = [
+        "tests/test_join_hash_spread.mojo",
+        "tests/test_join_key_dtype_exact.mojo",
+        "tests/test_join_stage_key_model.mojo",
+        "tests/test_key_bundle_var.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

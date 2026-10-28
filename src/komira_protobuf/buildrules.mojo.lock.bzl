@@ -36,13 +36,13 @@ GRAPH_JSON = r'''{
         {"path": "src/komira_protobuf/src/komira_protobuf/__init__.mojo", "sha256": "aafd14cbabafa8b2b508c73d45bc324ed9d067ef1e24e1174096023b037019ad"},
         {"path": "src/komira_protobuf/src/komira_protobuf/reader.mojo", "sha256": "82612a8664b869d75854278f1ba6ec584b285de10eda4763a22a0125fab77f14"},
         {"path": "src/komira_protobuf/src/komira_protobuf/wire_types.mojo", "sha256": "63db544e3277ea2cea7a52ce707d4aa6e0e57dbfd15bd1c6e104adbfc7ad602c"},
-        {"path": "src/komira_protobuf/src/komira_protobuf/writer.mojo", "sha256": "2fa73cc3a6cd689588652b51899158ec433996bee495a44ac96cfd504eb392a6"}
+        {"path": "src/komira_protobuf/src/komira_protobuf/writer.mojo", "sha256": "02f6180609f789882f19e4d3e0f18f21e2f776378363514f40896927e1054f99"}
       ],
       "deps": [],
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["komira_protobuf.mojoc"],
-      "key": "e00ae7a98d4b77a6857237a375a88ca920caefec9b1146f7ba91f78ef3bc228d"
+      "key": "7556091a827b1d6d923774998e2f4386f8a4c8b5b043986585a8855b3a9bc5eb"
     },
     {
       "id": "komira_protobuf@0.1.0#mojo1.0.0/test:src/komira_protobuf/tests/test_protobuf_cursor_guards.mojo",
@@ -56,7 +56,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_protobuf_cursor_guards.pass"],
-      "key": "a257f3d8eb4cd002c1a7fa0a8eecf84d2eaf2384e169d93defaad71babc047b9"
+      "key": "271e9bfc4ece0de139812e13d6abeda9583d131f255b8d162debf3878e038e6d"
     },
     {
       "id": "komira_protobuf@0.1.0#mojo1.0.0/test:src/komira_protobuf/tests/test_protobuf_malformed.mojo",
@@ -70,7 +70,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_protobuf_malformed.pass"],
-      "key": "2b84a8972c7b3617d10743b96cdaeec2e2480898ea64988a2e6ed04be063dcb3"
+      "key": "bd0438fc89efbcb00a79893a27aec9b71ebc08511bfdf6276d70f82dbe6a317c"
     },
     {
       "id": "komira_protobuf@0.1.0#mojo1.0.0/test:src/komira_protobuf/tests/test_protobuf_packed_bounds.mojo",
@@ -84,7 +84,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_protobuf_packed_bounds.pass"],
-      "key": "c87fa31740f8da22d0480602c7f31685156c48a4858f361324f02f459b7c7b8a"
+      "key": "53b46cdf9f8a6d6d41de8d387f6807d668c1fa1e99921579ee62166208634e47"
     },
     {
       "id": "komira_protobuf@0.1.0#mojo1.0.0/test:src/komira_protobuf/tests/test_protobuf_prost_crosscheck.mojo",
@@ -98,7 +98,7 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_protobuf_prost_crosscheck.pass"],
-      "key": "36d65a749af55467686845e8e151a63ed67e6f940c10995a8bfc486b998bbaee"
+      "key": "2d75287920425f0fd6825f1e90efc9215e91fbcba892f2bbb99fe8bf3e6e5da0"
     },
     {
       "id": "komira_protobuf@0.1.0#mojo1.0.0/test:src/komira_protobuf/tests/test_protobuf_roundtrip.mojo",
@@ -112,7 +112,21 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_protobuf_roundtrip.pass"],
-      "key": "0026227de454d949ac41bae751bedf6d62c89447920aa08ace4225a525686a72"
+      "key": "bcf09a0b8d64e1fc1777998894ab31bba9962749210fbe21509d36290a9ac064"
+    },
+    {
+      "id": "komira_protobuf@0.1.0#mojo1.0.0/test:src/komira_protobuf/tests/test_protobuf_sint32_encode.mojo",
+      "package": "komira_protobuf",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_protobuf/tests/test_protobuf_sint32_encode.mojo", "sha256": "7a04c7b5639c4e48b2e4932254782a6e2040483c2ebd804341f0fb8480840757"}
+      ],
+      "deps": ["komira_protobuf@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_protobuf_sint32_encode.pass"],
+      "key": "50f0f44a1b37620466fbb5b5be0c487647bce8dc74b54d7ecd6ac4649b12a5ce"
     }
   ]
 }
