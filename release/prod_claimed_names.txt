@@ -8,6 +8,7 @@
 # (//release:prod_claimed_names_cases): a maintainer adds a name here only AFTER claiming it
 # on the prod registry, in the pull request that adds the member.
 komira_anomaly
+komira_arrow
 komira_async_api
 komira_atomic_alias
 komira_bench_report
