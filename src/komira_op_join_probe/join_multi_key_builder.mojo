@@ -3,6 +3,9 @@
 # join's build side, with its INNER and LEFT probes.
 # =============================================================================
 #
+# SEMI / ANTI probes are free functions in `join_multi_key_filter`, RIGHT / FULL
+# in `join_multi_key_outer`.
+#
 # EQUALITY ARMS. A probe resolves, per key and once per call, how a candidate
 # is compared: `Int32 ==` on dictionary indices when both sides carry the same
 # dictionary (equal fingerprints), byte equality when both carry strings, else
@@ -47,7 +50,7 @@ struct MultiKeyHashJoinBuilder(Movable):
     (`_CHAIN_END` ends a chain). The entry space is ROW-INDEXED: entry i IS
     build row i, for every row, so a chain walk reads the build keys at the
     entry index directly and `num_rows()` (`len(_next_chain)`) is the full
-    build extent an unmatched-build sweep (a later slice) must cover. A row
+    build extent the RIGHT / FULL unmatched sweep must cover. A row
     with a NULL key still takes its entry but is linked from no bucket, so it
     matches nothing. `_bloom` holds the composite hash of every inserted row;
     `_num_inserted` counts them (the chain-reachable rows), for output sizing.
@@ -93,7 +96,7 @@ struct MultiKeyHashJoinBuilder(Movable):
         Capacity is the power of two at or above 1.4 x rows (at least 16);
         insertion is LIFO (a new row becomes its bucket's chain head). Raises
         if the entry space is not row-indexed at the end, rather than let a
-        later unmatched-build sweep miss rows.
+        RIGHT / FULL join drop preserved rows.
 
         Args:
             keys: N parallel build-side key columns (Slab — non-Copyable

@@ -86,9 +86,8 @@ batch by it.
 - `sort_external`: `ExternalSorter`, a sort past a memory budget: buffered
   batches are sorted into runs, runs over the budget are spilled to the local
   disk (`komira_engine_runtime` spill), and `finish` merges every run. The
-  spill directory is an argument of the caller. The output is one stable
-  `sort_batch_by_keys` of the input in absorb order. The merge
-  (`k_way_merge_cursors`, the loser tree and
+  output is one stable `sort_batch_by_keys` of the input in absorb order. The
+  merge (`k_way_merge_cursors`, the loser tree and
   `komira_column_kernels.cross_batch_gather`) is `sort_external_merge`; its
   comparator orders a key as the run sort does (floats by `sort_key_lt`).
   Full ties go to the earlier input, across spilled runs and the final

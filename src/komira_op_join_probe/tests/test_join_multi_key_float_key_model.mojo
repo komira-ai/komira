@@ -1,8 +1,8 @@
 # FLOAT64 keys of the composite join follow the float model of
 # `docs/design/query_semantics.md` 3.9, as DuckDB does: every NaN equals every
 # NaN (whatever its sign and payload) and `-0.0` equals `+0.0`; a NULL key is
-# not a NaN and still matches nothing. The INNER and LEFT probes are
-# checked, each over a two-key (FLOAT64, INT64) join so the
+# not a NaN and still matches nothing. Every join kind is checked: INNER, LEFT,
+# SEMI, ANTI, RIGHT and FULL, each over a two-key (FLOAT64, INT64) join so the
 # composite hash and the per-key equality both see the float slot.
 
 from std.memory import bitcast
@@ -25,7 +25,14 @@ from komira_op_join_probe.join_multi_key import (
 from komira_op_join_probe.join_multi_key_builder import (
     MultiKeyHashJoinBuilder,
 )
-
+from komira_op_join_probe.join_multi_key_filter import (
+    multi_key_probe_anti,
+    multi_key_probe_semi,
+)
+from komira_op_join_probe.join_multi_key_outer import (
+    multi_key_probe_full_into,
+    multi_key_probe_right_into,
+)
 
 
 def _f64(bits: UInt64) -> Float64:
@@ -161,7 +168,7 @@ def test_inner_signed_zeros_match() raises:
     _assert_flat(_sorted(bm, pm), [0, 0, 0, 1], "INNER signed zero")
 
 
-def test_nan_is_not_null_left() raises:
+def test_nan_is_not_null_left_semi_anti() raises:
     """Build [NaN, NULL]; probe [NaN, NULL, sentinel-bits NaN]. Both probe NaNs
     match build row 0 (the sentinel-bits NaN is a NaN, not a NULL); the NULL
     probe row matches nothing, not even the NULL build row."""
@@ -174,6 +181,37 @@ def test_nan_is_not_null_left() raises:
     var pm = List[Int]()
     b.probe_left_into(extract_join_key_columns_serial(probe, _names()), bm, pm)
     _assert_flat(_sorted(bm, pm), [-1, 1, 0, 0, 0, 2], "LEFT")
+    var semi = multi_key_probe_semi(
+        b, extract_join_key_columns_serial(probe, _names())
+    )
+    assert_equal(len(semi), 2, "SEMI keeps both NaN probe rows")
+    assert_equal(semi[0], 0)
+    assert_equal(semi[1], 2)
+    var anti = multi_key_probe_anti(
+        b, extract_join_key_columns_serial(probe, _names())
+    )
+    assert_equal(len(anti), 1, "ANTI keeps only the NULL probe row")
+    assert_equal(anti[0], 1)
+
+
+def test_right_and_full_nan_build_row_is_matched() raises:
+    """Build [NaN, 5.0]; probe [-NaN, 6.0]. RIGHT: the NaN build row is
+    matched, 5.0 unmatched. FULL adds the unmatched probe row 6.0."""
+    var build = _batch([_payload_nan(), Float64(5.0)], [False, False])
+    var probe = _batch([_neg_nan(), Float64(6.0)], [False, False])
+    var b = _builder(build)
+    var bm = List[Int]()
+    var pm = List[Int]()
+    multi_key_probe_right_into(
+        b, extract_join_key_columns_serial(probe, _names()), bm, pm
+    )
+    _assert_flat(_sorted(bm, pm), [0, 0, 1, -1], "RIGHT")
+    var fb = List[Int]()
+    var fp = List[Int]()
+    multi_key_probe_full_into(
+        b, extract_join_key_columns_serial(probe, _names()), fb, fp
+    )
+    _assert_flat(_sorted(fb, fp), [-1, 1, 0, 0, 1, -1], "FULL")
 
 
 def main() raises:
@@ -181,5 +219,6 @@ def main() raises:
     suite.test[test_key_slot_is_canonical]()
     suite.test[test_inner_nan_matches_every_nan]()
     suite.test[test_inner_signed_zeros_match]()
-    suite.test[test_nan_is_not_null_left]()
+    suite.test[test_nan_is_not_null_left_semi_anti]()
+    suite.test[test_right_and_full_nan_build_row_is_matched]()
     suite^.run()
