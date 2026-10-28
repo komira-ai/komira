@@ -432,7 +432,15 @@ def test_branch_lcov_flag() raises:
     assert_equal(run(_with(_gate(_tmp(String("branch_lcov_a")), String("census")), String("--branch-lcov"), a)), EXIT_INPUT)
     var n2 = dir + "/n2.info"
     write_text(n2, String("SF:src/alpha/z.mojo\nBRDA:5,5:br:0/2,0,1\nBRDA:5,5:br:0/2,1,1\nBRDA:5,5:br:1/2,0,1\nBRDA:5,5:br:1/2,1,1\nend_of_record\n"))
-    assert_equal(run(_with(_with(_gate(_tmp(String("branch_lcov_n")), String("census")), String("--branch-lcov"), one), String("--branch-lcov"), n2)), EXIT_INPUT)
+    # One location with another number of decisions in two files is no
+    # refusal (this asserted EXIT_INPUT before): the two-decision copy counts.
+    assert_equal(run(_with(_with(_gate(_tmp(String("branch_lcov_n")), String("census")), String("--branch-lcov"), one), String("--branch-lcov"), n2)), EXIT_OK)
+    # One decision with another number of arms is still refused.
+    var s2 = dir + "/s2.info"
+    var s3 = dir + "/s3.info"
+    write_text(s2, String("SF:src/alpha/z.mojo\nBRDA:5,5:switch:0/1,0,1\nBRDA:5,5:switch:0/1,1,1\nend_of_record\n"))
+    write_text(s3, String("SF:src/alpha/z.mojo\nBRDA:5,5:switch:0/1,0,1\nBRDA:5,5:switch:0/1,1,1\nBRDA:5,5:switch:0/1,2,1\nend_of_record\n"))
+    assert_equal(run(_with(_with(_gate(_tmp(String("branch_lcov_arms")), String("census")), String("--branch-lcov"), s2), String("--branch-lcov"), s3)), EXIT_INPUT)
 
 
 def test_gate_hold_fails_in_every_mode() raises:
