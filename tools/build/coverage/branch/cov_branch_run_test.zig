@@ -36,7 +36,7 @@ const Fake = struct {
     calls: std.ArrayList(br.Spec),
 
     fn init(alloc: std.mem.Allocator) Fake {
-        return .{ .alloc = alloc, .calls = std.ArrayList(br.Spec).init(alloc) };
+        return .{ .alloc = alloc, .calls = std.ArrayList(br.Spec).empty };
     }
 
     fn runner(self: *Fake) r.Runner {
@@ -55,7 +55,7 @@ const Fake = struct {
         var copy = spec;
         copy.argv = try alloc.dupe([]const u8, spec.argv);
         copy.env = try alloc.dupe([]const u8, spec.env);
-        try self.calls.append(copy);
+        try self.calls.append(alloc, copy);
         var status: br.Status = .{ .exited = 0 };
         if (spec.argv.len > 1 and std.mem.eql(u8, spec.argv[1], "mojo")) {
             try write(spec.stderr_path.?, self.gate_err);
@@ -125,7 +125,7 @@ const Case = struct {
 
     /// Runs the subcommand against `fake`; its exit status.
     fn go(self: *Case, fake: *Fake) !u8 {
-        self.err = std.ArrayList(u8).init(self.a());
+        self.err = std.ArrayList(u8).empty;
         try self.tmp.dir.makePath("out");
         return r.runAll(self.a(), self.args(), try self.where(), fake.runner(), &self.err);
     }
@@ -240,7 +240,7 @@ test "the banner is dropped once, and only as its pair of lines" {
     const a = testing.allocator;
     var arena = std.heap.ArenaAllocator.init(a);
     defer arena.deinit();
-    var out = std.ArrayList(u8).init(arena.allocator());
+    var out = std.ArrayList(u8).empty;
     const h = "GATED TEST FAILED: L (exit 2)";
     const p = "The library's package is not produced until this test passes.";
     try r.gateFailure(arena.allocator(), &out, "L", 2, h ++ "\nnot the second line\n" ++ h ++ "\n" ++ p ++ "\n" ++ h ++ "\n" ++ p ++ "\n");
@@ -269,9 +269,9 @@ test "raw profiles are found at any depth, and only *.profraw files" {
     defer c.deinit();
     try c.tmp.dir.makePath("p/sub");
     try c.tmp.dir.makePath("p/d.profraw");
-    try c.tmp.dir.writeFile("p/b.profraw", "");
-    try c.tmp.dir.writeFile("p/sub/a.profraw", "");
-    try c.tmp.dir.writeFile("p/c.profraw.tmp", "");
+    try c.tmp.dir.writeFile(.{ .sub_path = "p/b.profraw", .data = "" });
+    try c.tmp.dir.writeFile(.{ .sub_path = "p/sub/a.profraw", .data = "" });
+    try c.tmp.dir.writeFile(.{ .sub_path = "p/c.profraw.tmp", .data = "" });
     const p = try std.fs.path.join(c.a(), &.{ c.root, "p" });
     const got = try r.listRaws(c.a(), p);
     try testing.expectEqual(@as(usize, 2), got.len);
@@ -409,7 +409,7 @@ fn usage(argv: []const []const u8) ![]const u8 {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    var err = std.ArrayList(u8).init(a);
+    var err = std.ArrayList(u8).empty;
     const where = r.Where{ .cwd = "/nowhere", .k = "/nowhere/k", .env = &.{} };
     var fake = Fake.init(a);
     const code = try r.cli(a, argv, where, fake.runner(), &err);
@@ -456,6 +456,22 @@ test "parseArgs keeps every --env in order" {
     try testing.expectEqual(@as(usize, 2), a.env.len);
     try testing.expectEqualStrings("A=1", a.env[0]);
     try testing.expectEqualStrings("A=2", a.env[1]);
+}
+
+test "parseArgs keeps every --lib-dir in order, refuses an empty one, and the gate is given each after the --env arguments" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var why: []const u8 = "";
+    const a = (try r.parseArgs(arena.allocator(), &(full ++ [_][]const u8{ "--lib-dir", "p/one", "--env", "A=1", "--lib-dir", "/abs/two" }), &why)).?;
+    try testing.expectEqual(@as(usize, 2), a.lib_dirs.len);
+    try testing.expectEqualStrings("p/one", a.lib_dirs[0]);
+    try testing.expectEqualStrings("/abs/two", a.lib_dirs[1]);
+    try testing.expectEqual(@as(usize, 1), a.env.len);
+    const argv = try r.gateArgv(arena.allocator(), a, "/w", "/w/k");
+    const tail = [_][]const u8{ "--env", "A=1", "--lib-dir", "/w/p/one", "--lib-dir", "/abs/two", "--env", "LLVM_PROFILE_FILE=/w/k/prof/%p.profraw" };
+    for (tail, argv[argv.len - tail.len ..]) |w, g| try testing.expectEqualStrings(w, g);
+    try testing.expect((try r.parseArgs(arena.allocator(), &(full ++ [_][]const u8{ "--lib-dir", "" }), &why)) == null);
+    try testing.expectEqualStrings("--lib-dir is empty", why);
 }
 
 test "the scratch directory follows BUCK_SCRATCH_PATH" {

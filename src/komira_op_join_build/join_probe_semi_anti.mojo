@@ -49,8 +49,7 @@ def _probe_semi[
     the hash table fits entirely in L1/L2 cache. In this case, the
     Bloom filter check (FNV-1a hash + 8 block reads per probe) is MORE
     expensive than a direct HT probe (1 hash + 1-2 memory reads). We
-    skip the Bloom filter for small build sides. Measured: CB-20 with
-    478 build entries, 500K probes: bloom-skip path saves ~2.5ms.
+    skip the Bloom filter for small build sides.
 
     Args:
         probe_keys: The probe-side join key column.
@@ -109,13 +108,10 @@ def _probe_semi[
                 else:
                     chain_idx = (chain_ptr + chain_idx)[]
     else:
-        # PERF-CRITICAL: Large-build path now
-        # mirrors probe_inner_into's two-stage prefetch (stage 1: HT
-        # bucket; stage 2: build_keys entry at the chain head). Anti-
-        # join with bloom-skip and this same prefetch pattern saw
-        # ~30% speedup on C-4 (1M×1M, near-total overlap); semi-join
-        # with near-total-match gets the same win on C-3.
-        # NOT-VECTORIZABLE: HJ probe — chain pointer traversal is
+        # PERF-CRITICAL: the large-build path mirrors probe_inner_into's
+        # two-stage prefetch (stage 1: HT bucket; stage 2: build_keys
+        # entry at the chain head).
+        # NOT-VECTORIZABLE: HJ probe -- chain pointer traversal is
         # data-dependent.
         for probe_idx in range(n):
             # Stage 1: full-distance prefetch of HT bucket.
@@ -205,15 +201,15 @@ def _probe_semi_count[
     count-only caller then only `len()`s + gathers). Used by the count-only
     join sink when a SEMI breaker feeds a 0-key `COUNT(*)`: the answer is the
     survivor row COUNT, so tallying a scalar counter over the SAME bloom-skip /
-    two-stage-prefetch chain walk avoids the ~18.78M-entry List + the survivor
-    `gather_batch` + column-parallel concat.
+    two-stage-prefetch chain walk avoids building the survivor List and the gather that follows
+it.
 
     BYTE-IDENTICAL count to `len(probe_semi(probe_keys))` for every input (the
     match predicate is the SAME chain-walk-to-first-match; NULL probe keys are
-    excluded identically). Honors NO selection mask — the count-only probe op
+    excluded identically). Honors NO selection mask -- the count-only probe op
     falls back to the `probe_semi` + `_sel_keep_single` + `len` path when a
     selection mask is present (correctness), so this scalar counter is reached
-    only for the no-mask probe (cb20).
+    only for the no-mask probe.
     """
     var n = probe_keys.length
     var count = 0
@@ -259,7 +255,7 @@ def _probe_semi_count[
                     chain_idx = (chain_ptr + chain_idx)[]
     else:
         # Large-build path: two-stage prefetch mirror of probe_semi's large arm.
-        # NOT-VECTORIZABLE: HJ probe — chain pointer traversal is data-dependent.
+        # NOT-VECTORIZABLE: HJ probe -- chain pointer traversal is data-dependent.
         for probe_idx in range(n):
             if probe_idx + _PREFETCH_DISTANCE < n:
                 var future_key = Int64((probe_key_ptr + probe_idx + _PREFETCH_DISTANCE)[])
@@ -286,7 +282,7 @@ def _probe_semi_count[
             if probe_has_nulls and probe_keys.is_null(probe_idx):
                 continue
             # reuse the HT hash for the bloom pre-check
-            # (cb20 semi COUNT(*) hot path — kills the redundant xxHash64).
+            # (the semi COUNT(*) hot path: avoids the redundant xxHash64).
             var h = _hash_join_key(probe_key)
             if b._use_bloom and not b.bloom.might_contain_join_key(
                 probe_key, h
@@ -338,14 +334,14 @@ def _probe_anti[
     row has a matching key. Used for "NOT IN" / "NOT EXISTS" queries.
 
     PERF-CRITICAL: Two-stage software prefetch
-    mirrors probe_inner_into. For large probe sizes (≥ _PREFETCH_DISTANCE
+    mirrors probe_inner_into. For large probe sizes (>= _PREFETCH_DISTANCE
     rows), stage-1 prefetches the HT bucket _PREFETCH_DISTANCE ahead and
     stage-2 prefetches the build_keys entry the bucket points to. This
     is the same latency-hiding pattern
-    probe_inner_into has had since day 1 (C-4 anti-join previously
+    probe_inner_into has had since day 1 (the anti-join previously
     lacked it). Bloom filter is NOT used for anti-join: when the build
     side is large and the typical anti-join has significant key overlap
-    (e.g. 1M × 1M, <20 unmatched rows), bloom.might_contain returns
+    (few unmatched rows), bloom.might_contain returns
     True ~100% of the time -- a wasted 8-word block read before the
     mandatory chain walk. We skip it entirely to cut a full cache miss
     out of the inner loop.
@@ -378,7 +374,7 @@ def _probe_anti[
     # Fused 16-byte-record view; empty and never dereferenced unless `fused`.
     var kn_ptr = b.key_next.unsafe_ptr()
 
-    # NOT-VECTORIZABLE: HJ probe — chain pointer traversal is data-dependent.
+    # NOT-VECTORIZABLE: HJ probe -- chain pointer traversal is data-dependent.
     # Software prefetch hides HT and build_keys load latency.
     for probe_idx in range(n):
         # Stage 1: prefetch the HT bucket for a future probe key.
@@ -466,7 +462,7 @@ def _probe_anti_count[
     by the count-only join sink when an ANTI breaker feeds a 0-key `COUNT(*)`.
     BYTE-IDENTICAL count to `len(probe_anti(probe_keys))` for every input (the
     SAME chain-walk match predicate; a NULL probe key is KEPT by ANTI
-    identically). Honors NO selection mask — the count-only probe op falls back
+    identically). Honors NO selection mask -- the count-only probe op falls back
     to `probe_anti` + `_sel_keep_single` + `len` when a mask is present.
     """
     var n = probe_keys.length
@@ -485,7 +481,7 @@ def _probe_anti_count[
     # Fused 16-byte-record view; empty and never dereferenced unless `fused`.
     var kn_ptr = b.key_next.unsafe_ptr()
 
-    # NOT-VECTORIZABLE: HJ probe — chain pointer traversal is data-dependent.
+    # NOT-VECTORIZABLE: HJ probe -- chain pointer traversal is data-dependent.
     # Two-stage software prefetch mirrors probe_anti.
     for probe_idx in range(n):
         if probe_idx + _PREFETCH_DISTANCE < n:

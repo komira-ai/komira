@@ -1,0 +1,3 @@
+# What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
+census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
+komira//src/komira_plan_expr:komira_plan_expr	src/komira_plan_expr	library	OK	1983	3645	-	-	no	conda	src/komira_plan_expr/col_expr_bind.mojo,src/komira_plan_expr/col_expr_name.mojo,src/komira_plan_expr/expr_id.mojo,src/komira_plan_expr/expr_pool.mojo,src/komira_plan_expr/fs_bindings.mojo,src/komira_plan_expr/fs_descriptor_pod.mojo,src/komira_plan_expr/fs_resolver.mojo,src/komira_plan_expr/null_order_policy.mojo,src/komira_plan_expr/partition_expr.mojo,src/komira_plan_expr/partition_pred_pod.mojo,src/komira_plan_expr/payload_narrow.mojo,src/komira_plan_expr/scalar_desugar.mojo,src/komira_plan_expr/udf_data.mojo	-

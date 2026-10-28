@@ -34,6 +34,7 @@
 # =============================================================================
 
 from komira_atomic_alias import AtomicI64
+from std.atomic import Ordering
 from std.io import FileDescriptor
 from std.memory import memset, UnsafePointer
 from std.sys.intrinsics import prefetch, PrefetchOptions
@@ -149,12 +150,11 @@ struct _ChainBuildTask[elide_bi: Bool, fused: Bool, pay: Bool](Segment):
     instantiation:
 
       `elide_bi` -> `build_indices` is not allocated and `(bi_ptr + i)[] = i` is
-                    not emitted. On a 25M-row build that is a 200 MB allocation
-                    and 200 MB of build-side write traffic deleted, and one of the probe's five
-                    random dependent loads with it.
+                    not emitted: one array of build-side writes is deleted,
+                    and one of the probe's random dependent loads with it.
       `fused`    -> the row's key and chain link are written as ONE 16-byte
-                    record into `key_next` instead of into two 200 MB arrays.
-                    `build_keys` and `next_chain` are not allocated.
+                    record into `key_next` instead of into two separate
+                    arrays. `build_keys` and `next_chain` are not allocated.
       `pay`      -> the record is 32 bytes instead of 16 and additionally
                     carries a copy of ONE build column in word 2 (word 3 is
                     PAD), so the probe's chain touch yields the payload and the
@@ -196,9 +196,16 @@ struct _ChainBuildTask[elide_bi: Bool, fused: Bool, pay: Bool](Segment):
         # fork-join barrier. `kview` keepalive holds the buffer for the loop.
         # INT64 storage; `keys.offset` folds any array slice offset.
         var kptr = kview._unsafe_ptr().bitcast[Scalar[DType.int64]]() + keys.offset
+        # SAFETY: `bk_ptr` views the borrowed state's `build_keys`, pre-sized to
+        # `n` by the driver (empty, never dereferenced, when `fused`); each
+        # worker writes only the rows of its own morsels; the pointer never
+        # leaves this method.
         var bk_ptr = sp[].build_keys.unsafe_ptr()
+        # SAFETY: as `bk_ptr`, for `build_indices` (empty, never dereferenced,
+        # when `elide_bi`).
         var bi_ptr = sp[].build_indices.unsafe_ptr()
-        # Fused record view; empty and never dereferenced unless `fused`.
+        # SAFETY: as `bk_ptr`, for the fused record array, `KNW * n` words;
+        # empty and never dereferenced unless `fused`.
         var kn_ptr = sp[].key_next.unsafe_ptr()
         # PAYLOAD-INLINE. The stride is COMPTIME so the default instantiation
         # compiles to byte-for-byte the pre-lever loop -- the same reason
@@ -213,6 +220,9 @@ struct _ChainBuildTask[elide_bi: Bool, fused: Bool, pay: Bool](Segment):
         # `AtomicI64.compare_exchange` directly. Origin is the borrowed
         # state's; the pointer never leaves this method.
         var ht_ptr = sp[].hash_table.unsafe_ptr().bitcast[Scalar[DType.int64]]()
+        # SAFETY: as `bk_ptr`, for `next_chain`, pre-sized to `n` (empty, never
+        # dereferenced, when `fused`); row `i`'s link is written only by the
+        # worker owning row `i`.
         var nc_ptr = sp[].next_chain.unsafe_ptr()
 
         var did_work = False
@@ -230,7 +240,7 @@ struct _ChainBuildTask[elide_bi: Bool, fused: Bool, pay: Bool](Segment):
             for i in range(start, end):
                 # Prefetch the chain head this row's successor-at-distance will
                 # read-modify-write. Mirrors the serial build; the random
-                # `ht[slot]` RMW is the dominant miss at 8 MB+ table sizes.
+                # `ht[slot]` RMW is the dominant cache miss on a large table.
                 if i + _PF_DIST < end:
                     var fkey = Int64((kptr + i + _PF_DIST)[])
                     var fslot = Int(_hash_join_key(fkey) & mask)
@@ -269,12 +279,14 @@ struct _ChainBuildTask[elide_bi: Bool, fused: Bool, pay: Bool](Segment):
 
                 var slot = Int(_hash_join_key(key) & mask)
                 # Lock-free Treiber push. SAFETY: `ht_ptr + slot` is an
-                # owned-state buffer slot; an aligned INT64 read is atomic on the
-                # hardware and the CAS validates staleness (a torn/stale `old`
-                # simply retries). `next_chain[i]` is a disjoint slot this worker
-                # owns.
+                # owned-state buffer slot, aligned for a 64-bit atomic. The head
+                # is read with a relaxed atomic load because it races with other
+                # workers' CAS; the CAS validates staleness (a stale `old` simply
+                # retries). `next_chain[i]` is a disjoint slot this worker owns.
                 while True:
-                    var old = Int64((ht_ptr + slot)[])
+                    var old = AtomicI64.load[ordering=Ordering.RELAXED](
+                        ht_ptr + slot
+                    )
                     comptime if Self.fused:
                         (kn_ptr + _KNW * i + 1)[] = old
                     else:
@@ -343,10 +355,8 @@ def chain_build_parallel(
     #
     # FANNED (the default): `ht` is left UNINITIALISED here and the bytes are
     # written by `ChainFillTask` across the pool, as its own preceding
-    # dispatch. `cap * 8` bytes of single-threaded first-touch is 67 MB at
-    # cap = 2^23 and 268 MB at 2^25 with the whole pool parked; fanning it
-    # measured -1.01% on an 11-cell paired run (`tpch/q9` -10.05 ms, `sdk/d2`
-    # -6.19 ms) and -0.55% over the 84-cell corpus, no cell slower.
+    # dispatch. A single-threaded first-touch of `cap * 8` bytes leaves the
+    # whole pool parked; fanning it puts that traffic on every worker.
     #
     # DRIVER (`join_ht_fill_configure(False)`): the single `memset` below.
     # `_CHAIN_END` is -1 == all-ones, so one 0xFF byte fill materialises it
@@ -369,8 +379,8 @@ def chain_build_parallel(
         # escape.
         memset(ht.unsafe_ptr().bitcast[UInt8](), UInt8(0xFF), cap * 8)
     # CHAIN-ENTRY LAYOUT: an elided array is NOT ALLOCATED AT ALL -- that is
-    # where the 200 MB and the 200 MB of first-touch write traffic go on a
-    # 25M-row build, and why the lever is not merely "skip a load".
+    # where that array's allocation and first-touch write traffic go, and why
+    # the lever is not merely "skip a load".
     var build_keys = List[Int64]()
     if not fused:
         build_keys.resize(unsafe_uninit_length=n)
@@ -384,8 +394,8 @@ def chain_build_parallel(
     # and every downstream fact -- the allocation, the comptime stride the tasks
     # burn in, and the flag `take_buffers` infers -- is derived from this one
     # value. A second literal anywhere would be a write/read stride that agrees
-    # only by coincidence; that exact defect was found by mutation testing in
-    # the serial builder and cost keys from other rows.
+    # only by coincidence, and the serial builder's tests caught exactly that
+    # defect: it cost keys from other rows.
     var pay = fused and len(pay_values) > 0
     if len(pay_values) > 0:
         if not fused:
@@ -473,6 +483,9 @@ def chain_build_parallel(
         var fill_n = min(num_fill_morsels, pool_n)
         if fill_n < 1:
             fill_n = 1
+        grain_geometry_record(
+            SITE_JOIN_HT_FILL, cap, fill_morsel, num_fill_morsels, fill_n
+        )
         var fill_task = ChainFillTask(Int32(0))
         _ = dispatcher.run_with_state[ChainBuildState, ChainFillTask](
             state, fill_task^, fill_n, cancel_token.clone(),

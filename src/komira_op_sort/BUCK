@@ -1,21 +1,53 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The sort kernels of the engine: stable sorts of a key column into a
-# permutation (merge sort per key DType, LSD radix sort over 64-bit keys),
-# top-K heap selection, and the loser tree that k-way merges sorted runs.
-# Float keys sort in DuckDB's total order (NaN above +inf).
+# permutation (merge sort per key DType, LSD radix sort over 64-bit keys,
+# STRING/BINARY, nested types), multi-key sorts of a RecordBatch, top-K heap
+# selection, the sort and top-N sink kernels, the run-time-typed sort buffer
+# (SortBuffer_Untyped), the loser tree that k-way merges sorted runs, and the
+# parallel single-key sorts and merges of sorted partitions on the engine's
+# fork-join runtime. Float keys sort in DuckDB's total order (NaN above +inf).
 mojo_library(
     name = "komira_op_sort",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
         "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_format:komira_column_format",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_operator_api:komira_operator_api",
+        "//src/komira_physical_plan:komira_physical_plan",
     ],
     test_srcs = [
         "tests/test_engine_sort.mojo",
+        "tests/test_engine_sort_string.mojo",
+        "tests/test_sort_buffer_date64_and_tie_stability.mojo",
+        "tests/test_sort_buffer_key_types.mojo",
+        "tests/test_sort_buffer_narrow_signed_order.mojo",
+        "tests/test_sort_buffer_untyped.mojo",
         "tests/test_sort_float_total_order.mojo",
+        "tests/test_sort_indices_nested.mojo",
+        "tests/test_sort_lex_multikey.mojo",
         "tests/test_sort_loser_tree.mojo",
+        "tests/test_sort_nested_leaf_order.mojo",
+        "tests/test_sort_parallel.mojo",
+        "tests/test_sort_parallel_int64_extremes.mojo",
+        "tests/test_sort_parallel_merge_fold.mojo",
+        "tests/test_sort_parallel_midpoint.mojo",
+        "tests/test_sort_parallel_pooled.mojo",
+        "tests/test_sort_parallel_string.mojo",
+        "tests/test_sort_sink_float_nan_order.mojo",
+        "tests/test_sort_sink_timestamp_key.mojo",
+        "tests/test_sort_sink_zero_keys_and_tiebreak.mojo",
         "tests/test_sort_skip_pass.mojo",
+        "tests/test_sort_string_prefix_key.mojo",
+        "tests/test_sort_topn_sink_radix.mojo",
+        "tests/test_topn_heap_regime_string_key_route.mojo",
+        "tests/test_topn_heap_ties_and_key_layouts.mojo",
     ],
     visibility = ["PUBLIC"],
 )

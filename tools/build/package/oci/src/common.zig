@@ -28,7 +28,7 @@ pub fn List(comptime T: type) type {
 }
 
 pub fn list(comptime T: type) std.ArrayList(T) {
-    return std.ArrayList(T).init(a());
+    return std.ArrayList(T).empty;
 }
 
 pub fn fmt(comptime f: []const u8, args: anytype) []u8 {
@@ -71,15 +71,15 @@ pub fn utf8Valid(s: []const u8) bool {
 }
 
 pub fn push(comptime T: type, l: *std.ArrayList(T), v: T) void {
-    l.append(v) catch oom();
+    l.append(a(), v) catch oom();
 }
 
 pub fn add(l: *std.ArrayList(u8), s: []const u8) void {
-    l.appendSlice(s) catch oom();
+    l.appendSlice(a(), s) catch oom();
 }
 
 pub fn add2(comptime T: type, l: *std.ArrayList(T), s: []const T) void {
-    l.appendSlice(s) catch oom();
+    l.appendSlice(a(), s) catch oom();
 }
 
 /// `parts` joined by `sep`.

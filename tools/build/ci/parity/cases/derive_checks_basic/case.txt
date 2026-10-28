@@ -1,5 +1,0 @@
-# kci's argv: every group of the universe no declared target names is a
-# check: library, test-only, tools, root, other top directory, functional.
-arg "{units_file}"
-input units_file "lib_a\t//src/a:a\nlib_a\t//src/a:a_test\n"
-exit 0

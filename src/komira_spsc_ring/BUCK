@@ -1,28 +1,84 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+load("@buildrules//rules/mojo:pack.bzl", "mojo_conda", "mojo_conda_holds")
+load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":buildrules.mojo.bzl", "mojo_package")
 
-# One bounded single-producer / single-consumer ring, `SpscRing[T]`. The memory
-# ordering argument is in the header of spsc_ring.mojo. The tests are welded to
-# the library: its package does not exist until they pass.
-mojo_library(
+# One bounded single-producer / single-consumer ring, `SpscRing[T]`. The memory ordering argument
+# is in the header of spsc_ring.mojo.
+#
+# Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"): `:lib` is the
+# library file and exists only once the tests of tests/ have passed. The package depends on
+# komira_atomic_alias and komira_collections, sibling packages (`[dependencies]` of mopm.toml);
+# komira_collections depends on komira_atomic_alias in turn, so the closure `:lib` is built from
+# holds both, and the lock (mopm.lock) names both.
+mojo_package(path = ".")
+
+# `:komira_spsc_ring`, the target the packages that depend on this library name, is `:lib` as
+# komira's Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds
+# only once the tests have passed. `deps` is `[dependencies]` of mopm.toml, as the adopted targets
+# of those packages: the rule refuses a list that is not the closure `:lib` was built from. It
+# carries the README gate too (`[tests][readme]`): the examples run against `:lib`; the tests are
+# not run again.
+mojo_adopted_library(
     name = "komira_spsc_ring",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_collections:komira_collections",
     ],
-    test_srcs = [
-        "tests/test_spsc_ring.mojo",
-        "tests/test_ring_variants.mojo",
-    ],
+    lib = ":lib",
+    readme = "README.md",
+    srcs = glob(["src/komira_spsc_ring/**/*.mojo"]),
+    test_srcs = glob(["tests/test_*.mojo"]),
+    test_runs = ":test",
     visibility = ["PUBLIC"],
 )
 
-# Microbenchmark (not a gated test); see the header of the file.
-mojo_binary(
-    name = "spsc_ring_bench",
-    srcs = ["tests/bench_spsc_ring.mojo"],
-    deps = [
-        ":komira_spsc_ring",
-        "//src/komira_atomic_alias:komira_atomic_alias",
+# The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves
+# (`mojo-komira_spsc_ring-0.1.0-mojo1.0.0_0.conda`), which records komira_atomic_alias and
+# komira_collections as dependencies (`mojo-komira_atomic_alias >=0.1,<0.2`,
+# `mojo-komira_collections >=0.1,<0.2`) and holds those packages' files nowhere. `members` is the
+# manifests of the path dependencies of the closure, staged at their repository paths, because
+# `mopm pack` reads the manifest of each beside the one it is given. `:lib` exists only once the
+# tests passed, so this file exists only then. Publishing it (`mopm publish`) uploads, which is not
+# a build action: it is a step of a CI job that takes this target's output. `mopm` is the one
+# `mojo_package` pins (mopm-toolchain.toml).
+mojo_conda(
+    name = "conda",
+    dir = "src/komira_spsc_ring",
+    lib = ":lib",
+    manifest = "mopm.toml",
+    members = {
+        "../komira_atomic_alias": "//src/komira_atomic_alias:mopm.toml",
+        "../komira_collections": "//src/komira_collections:mopm.toml",
+    },
+    mojo = "1.0.0",
+    mopm = "toolchains//:mopm_0_0_73",
+    package = "komira_spsc_ring",
+    version = "0.1.0",
+    visibility = ["PUBLIC"],
+)
+
+# What `:conda` holds, read back from the built file (buildrules' `prebuilt_unpack`): this package's
+# own `.mojoc` and nothing else under `lib/mojo/`, and exactly the dependencies of `[dependencies]`.
+# Red when the manifest drops one, names another range, or the file carries a sibling.
+mojo_conda_holds(
+    name = "conda_holds",
+    conda = ":conda",
+    depends = [
+        "mojo-komira_atomic_alias >=0.1,<0.2",
+        "mojo-komira_collections >=0.1,<0.2",
     ],
+    package = "komira_spsc_ring",
+    sole = True,
+    visibility = ["PUBLIC"],
+)
+
+# Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto):
+# komira's conda packer over `:komira_spsc_ring`. It goes when the release machine takes the mopm
+# package. This library's mopm package is `:conda` above.
+conda_package(
+    name = "komira_spsc_ring_conda",
+    lib = ":komira_spsc_ring",
+    summary = "The `komira_spsc_ring` Mojo library of komira, as a conda package.",
+    visibility = ["PUBLIC"],
 )

@@ -1,29 +1,29 @@
 # =============================================================================
-# test_join_bloom_l1_resident — BLOOML1's falsifier
+# test_join_bloom_l1_resident -- BLOOML1 guard
 # =============================================================================
 #
-# ⛔ THE VACUITY THIS FILE EXISTS TO CLOSE, STATED FIRST. Declining a bloom
+# NOTE: THE VACUITY THIS FILE EXISTS TO CLOSE, STATED FIRST. Declining a bloom
 # filter is VALUE-INVARIANT: a bloom has no false negatives, so a row it would
 # have rejected instead loads a bucket head and either finds `_CHAIN_END` or
 # walks a chain whose compares all fail. The ON and OFF arms therefore emit
 # identical pairs in identical order, and EVERY value oracle in the tree is
 # satisfied by an arm THAT NEVER RAN. A test that only checks "the join still
-# returns the right answer" is vacuous TWICE over — once because the answer
+# returns the right answer" is vacuous TWICE over -- once because the answer
 # cannot move, and once because it is equally green with the lever unreachable.
 #
-# ⚠ AND THIS LEVER IS NOT PURELY SUBTRACTIVE — IT ADDS AN ARMING PREDICATE — so
-# "the bloom was declined" is only half a result. The other half is that a
-# build ABOVE the budget still BUILDS one. Both directions are asserted on the
-# same fixture shape in leg 3, and neither assertion alone is sufficient:
-# a predicate stuck at True passes the first, a predicate stuck at False passes
-# the second.
+# WARNING: AND THIS LEVER IS NOT PURELY SUBTRACTIVE -- IT ADDS AN ARMING
+# PREDICATE -- so "the bloom was declined" is only half a result. The other
+# half is that a build ABOVE the budget still BUILDS one. Both directions are
+# asserted on the same fixture shape in leg 3, and neither assertion alone is
+# sufficient: a predicate stuck at True passes the first, a predicate stuck at
+# False passes the second.
 #
 # FIVE THINGS ARE UNDER TEST, and they are separable on purpose:
 #
-#   1. `bloom_l1_index_bytes` — a PURE arithmetic function. Tested directly,
+#   1. `bloom_l1_index_bytes` -- a PURE arithmetic function. Tested directly,
 #      with no join and no fixture, against the j1 geometry re-derived by hand
 #      and against both OFF layouts.
-#   2. `bloom_l1_should_decline` — a PURE predicate, both boundary directions
+#   2. `bloom_l1_should_decline` -- a PURE predicate, both boundary directions
 #      and the `budget <= 0` fail-towards-the-incumbent rule.
 #   3. the SETTING's contract: unconfigured, 0 and negative are OFF, which is
 #      the half no value assertion can reach: with the lever off by accident
@@ -34,25 +34,6 @@
 #   5. VALUE INVARIANCE: the declined index and a force-built one emit
 #      byte-identical match sets over the same probe column.
 #
-# MUTANT LOG — predicted, then RUN. Every line is the leg that goes red.
-#
-#   M1  `bloom_l1_should_decline` uses `<` instead of `<=`
-#         -> RED, leg 2's exact-boundary assertion (16,384 must decline).
-#   M2  `bloom_l1_should_decline` returns True on `budget <= 0`
-#         -> RED, leg 2's OFF-arm assertion AND leg 3's unconfigured assertion.
-#   M3  `bloom_l1_index_bytes` counts `build_keys`/`next_chain` under `fused`
-#         -> RED, leg 1: the shipped-layout figure becomes 3,648 + 1,600.
-#   M4  `bloom_l1_index_bytes` drops the hash table and counts entries only
-#         -> RED, leg 1 (1,600 != 3,648) and leg 4's boundary build.
-#   M5  `build` notches `declined` but still passes `use_bloom=True`
-#         -> RED, leg 4's `uses_bloom()` assertion, and ONLY that one. Every
-#            counter still moves correctly and the answer is value-invariant,
-#            which is exactly why the structural observable exists.
-#   M6  the decline is applied to EVERY build, budget ignored
-#         -> RED, leg 4's LARGE-build assertion (`uses_bloom()` must stay True).
-#   M7  `build` consults the predicate but ignores `build_bloom=False`
-#         -> RED, leg 4's "never reached" assertion: the counters must not move
-#            for a caller that already declined.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -93,7 +74,7 @@ def _clear_env() raises:
 
 
 def _dense_keys(n: Int) -> PrimitiveArray[I64]:
-    """`n` distinct keys, 0..n-1 — j1's build side in shape: every probe key
+    """`n` distinct keys, 0..n-1 -- j1's build side in shape: every probe key
     will match, so the bloom rejects nothing."""
     var arr = PrimitiveArray[I64].allocate(n)
     var p = arr._typed_ptr_mut()
@@ -129,7 +110,7 @@ def _encode_pairs(imm bm: List[Int], imm pm: List[Int]) -> List[Int]:
 
 
 # -----------------------------------------------------------------------------
-# Leg 1 — the PURE byte arithmetic
+# Leg 1 -- the PURE byte arithmetic
 # -----------------------------------------------------------------------------
 
 
@@ -137,7 +118,7 @@ def test_index_bytes_arithmetic() raises:
     # THE SHIPPED LAYOUT (fused + nobi), at j1's exact geometry. 2,048 B of
     # hash table + 1,600 B of chain entries. `build_keys`, `next_chain` and
     # `build_indices` are NOT ALLOCATED under this layout and must not be
-    # counted; M3 and M4 are the two ways of getting that wrong.
+    # counted, or the predicate overstates the footprint.
     assert_equal(
         bloom_l1_index_bytes(
             _J1_BUILD_ROWS, _J1_CAP, JOIN_KN_WORDS, True, True
@@ -146,7 +127,7 @@ def test_index_bytes_arithmetic() raises:
         "j1 geometry: 256*8 + 2*100*8",
     )
 
-    # The OFF layout — `build_keys` + `next_chain` at 8 B each, plus
+    # The OFF layout -- `build_keys` + `next_chain` at 8 B each, plus
     # `build_indices` when `nobi` is False. Still reachable; it is this tree's
     # differential join oracle.
     assert_equal(
@@ -184,12 +165,12 @@ def test_index_bytes_arithmetic() raises:
 
 
 # -----------------------------------------------------------------------------
-# Leg 2 — the PURE predicate, both boundaries and the OFF arm
+# Leg 2 -- the PURE predicate, both boundaries and the OFF arm
 # -----------------------------------------------------------------------------
 
 
 def test_should_decline_predicate() raises:
-    # j1: 3,648 B against the derived default of 16,384. Inside by 4.5x — this
+    # j1: 3,648 B against the derived default of 16,384. Inside by 4.5x -- this
     # cell's verdict does not depend on where in [3,648, 32,768] the line falls.
     assert_true(
         bloom_l1_should_decline(
@@ -202,8 +183,8 @@ def test_should_decline_predicate() raises:
         "j1's 3,648 B index is inside the benchmark host's whole L1d",
     )
 
-    # THE EXACT BOUNDARY. `<=`, not `<` — an index that exactly fills the
-    # budget is resident, so it declines. M1 is the off-by-one.
+    # THE EXACT BOUNDARY. `<=`, not `<` -- an index that exactly fills the
+    # budget is resident, so it declines.
     assert_true(
         bloom_l1_should_decline(16_384, 16_384), "exactly at budget declines"
     )
@@ -230,8 +211,8 @@ def test_should_decline_predicate() raises:
     )
 
     # THE OFF ARM. A zero or negative budget is the lever being off, and it
-    # must fail towards the incumbent — never "decline everything", which is
-    # what an operator would spell by typo. M2 is this direction inverted.
+    # must fail towards the incumbent -- never "decline everything", which is
+    # what an operator would spell by typo.
     assert_false(bloom_l1_should_decline(8, 0), "budget 0 is OFF")
     assert_false(bloom_l1_should_decline(8, -1), "negative budget is OFF")
     assert_false(
@@ -241,7 +222,7 @@ def test_should_decline_predicate() raises:
 
 
 # -----------------------------------------------------------------------------
-# Leg 3 — the gate's parsing contract
+# Leg 3 -- the gate's parsing contract
 # -----------------------------------------------------------------------------
 
 
@@ -269,7 +250,7 @@ def test_gate_parsing_contract() raises:
 
 
 # -----------------------------------------------------------------------------
-# Leg 4 — ARMING and NON-VACUITY through the real builder
+# Leg 4 -- ARMING and NON-VACUITY through the real builder
 # -----------------------------------------------------------------------------
 
 
@@ -277,7 +258,7 @@ def test_decline_arms_on_small_and_not_on_large() raises:
     _clear_env()
 
     # --- the OFF arm: unset gate, j1-shaped build, bloom must be BUILT -------
-    # M2 and a predicate stuck at True both die here.
+    # A predicate stuck at True, or a zero budget that declines, fails here.
     reset_bloom_l1_counters()
     var off = HashJoinBuilder.build(_dense_keys(_J1_BUILD_ROWS))
     assert_true(
@@ -289,7 +270,7 @@ def test_decline_arms_on_small_and_not_on_large() raises:
     )
     assert_true(
         bloom_l1_kept_count() > 0,
-        "the predicate was REACHED on the OFF arm — kept=0 declined=0 would"
+        "the predicate was REACHED on the OFF arm -- kept=0 declined=0 would"
         " mean unreachable, which is a different fact",
     )
     _ = off^
@@ -298,8 +279,8 @@ def test_decline_arms_on_small_and_not_on_large() raises:
     bloom_l1_configure(16_384)
     reset_bloom_l1_counters()
     var small = HashJoinBuilder.build(_dense_keys(_J1_BUILD_ROWS))
-    # THE STRUCTURAL OBSERVABLE. M5 — notch the counter, build the filter
-    # anyway — is green on every other assertion in this file.
+    # THE STRUCTURAL OBSERVABLE. A build that notches the counter but builds
+    # the filter anyway is green on every other assertion in this file.
     assert_false(
         small.uses_bloom(),
         "a 3,648 B index must return an index the probe will not ask",
@@ -315,13 +296,13 @@ def test_decline_arms_on_small_and_not_on_large() raises:
 
     # --- the ON arm, LARGE: the counter-vacuity leg -------------------------
     # 4,096 rows -> cap 8,192 -> 8,192*8 + 2*4,096*8 = 131,072 B, eight times
-    # the budget. M6 (decline everything) dies here and nowhere else.
+    # the budget. Declining every build is caught by the OFF arm above.
     reset_bloom_l1_counters()
     var large = HashJoinBuilder.build(_dense_keys(4_096))
     assert_equal(
         bloom_l1_index_bytes(4_096, 8_192, JOIN_KN_WORDS, True, True),
         131_072,
-        "4,096 rows is 131,072 B — re-derived, not assumed",
+        "4,096 rows is 131,072 B -- re-derived, not assumed",
     )
     assert_true(
         large.uses_bloom(),
@@ -332,7 +313,7 @@ def test_decline_arms_on_small_and_not_on_large() raises:
     _ = large^
 
     # --- a caller that already declined must not reach the predicate --------
-    # M7: `build_bloom=False` is the driver saying the bloom is unwired
+    # `build_bloom=False` is the driver saying the bloom is unwired
     # downstream. That is not this lever's decision to re-take, and counting it
     # would inflate `declined` with builds the lever had nothing to do with.
     reset_bloom_l1_counters()
@@ -354,13 +335,13 @@ def test_decline_arms_on_small_and_not_on_large() raises:
 
 
 # -----------------------------------------------------------------------------
-# Leg 5 — VALUE INVARIANCE
+# Leg 5 -- VALUE INVARIANCE
 # -----------------------------------------------------------------------------
 
 
 def test_decline_is_value_invariant() raises:
     """The declined index and a bloom-carrying one over the same keys emit the
-    same pairs. Necessary, and on its own worth nothing — see the header."""
+    same pairs. Necessary, and on its own worth nothing -- see the header."""
     _clear_env()
     var probe = _probe_keys(4_000, _J1_BUILD_ROWS)
 
@@ -382,8 +363,8 @@ def test_decline_is_value_invariant() raises:
     _ = trt^
 
     # j1's shape: EVERY probe row matches exactly one build row, so the bloom
-    # in the control arm rejected nothing at all — the cell's defining property,
-    # asserted rather than described.
+    # in the control arm rejected nothing at all -- the cell's defining
+    # property, asserted rather than described.
     assert_equal(len(ctl_bm), 4_000, "every probe row matches on this fixture")
     var ctl_enc = _encode_pairs(ctl_bm, ctl_pm)
     var trt_enc = _encode_pairs(trt_bm, trt_pm)

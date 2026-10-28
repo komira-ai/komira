@@ -50,24 +50,24 @@ const Declared = struct { soname: []const u8, requirement: []const u8 };
 
 /// The --dlopen values as given, split at the first `=`.
 fn declaredDlopens(alloc: Alloc, a: Args) ![]Declared {
-    var list = std.ArrayList(Declared).init(alloc);
+    var list = std.ArrayList(Declared).empty;
     for (try all(alloc, a, "--dlopen")) |v| {
         const eq = std.mem.indexOfScalar(u8, v, '=') orelse fail("--dlopen `{s}` is not <soname>=<requirement>", .{v});
-        try list.append(.{ .soname = v[0..eq], .requirement = v[eq + 1 ..] });
+        try list.append(alloc, .{ .soname = v[0..eq], .requirement = v[eq + 1 ..] });
     }
-    return list.toOwnedSlice();
+    return list.toOwnedSlice(alloc);
 }
 
 /// `base`, then each declared requirement not already listed after it.
 fn withDeclared(alloc: Alloc, base: []const []const u8, declared: []const Declared) ![][]const u8 {
-    var list = std.ArrayList([]const u8).init(alloc);
-    try list.appendSlice(base);
+    var list = std.ArrayList([]const u8).empty;
+    try list.appendSlice(alloc, base);
     for (declared) |d| {
         var listed = false;
         for (list.items[base.len..]) |r| listed = listed or std.mem.eql(u8, r, d.requirement);
-        if (!listed) try list.append(d.requirement);
+        if (!listed) try list.append(alloc, d.requirement);
     }
-    return list.toOwnedSlice();
+    return list.toOwnedSlice(alloc);
 }
 
 fn expectDlopenRows(md: json.Value, declared: []const Declared) void {
@@ -109,10 +109,10 @@ fn sortedNames(alloc: Alloc, dir_path: []const u8) ![][]const u8 {
     var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch |err|
         fail("cannot open {s}: {s}", .{ dir_path, @errorName(err) });
     defer dir.close();
-    var list = std.ArrayList([]const u8).init(alloc);
+    var list = std.ArrayList([]const u8).empty;
     var it = dir.iterate();
-    while (try it.next()) |e| try list.append(try alloc.dupe(u8, e.name));
-    const names = try list.toOwnedSlice();
+    while (try it.next()) |e| try list.append(alloc, try alloc.dupe(u8, e.name));
+    const names = try list.toOwnedSlice(alloc);
     std.mem.sort([]const u8, names, {}, lessStr);
     return names;
 }
@@ -304,11 +304,11 @@ pub fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
         if (payload.len == 0) fail("--payload is empty", .{});
         // What the pkg tar must hold: the payload, the stated docs and the
         // stated native files, in path order.
-        var want_list = std.ArrayList(DocFile).init(alloc);
-        try want_list.append(.{ .path = want_path, .data = payload });
-        for (docs) |d| try want_list.append(d);
-        for (libs) |l| try want_list.append(.{ .path = l.path, .data = l.data });
-        const want_files = try want_list.toOwnedSlice();
+        var want_list = std.ArrayList(DocFile).empty;
+        try want_list.append(alloc, .{ .path = want_path, .data = payload });
+        for (docs) |d| try want_list.append(alloc, d);
+        for (libs) |l| try want_list.append(alloc, .{ .path = l.path, .data = l.data });
+        const want_files = try want_list.toOwnedSlice(alloc);
         std.mem.sort(DocFile, want_files, {}, lessDoc);
         if (pkg.len != want_files.len) fail("pkg tar: {d} files, must be exactly the .mojoc, the {d} declared doc file(s) and the {d} native file(s)", .{ pkg.len, docs.len, libs.len });
         if (rows.array.items.len != want_files.len) fail("info/paths.json lists {d} files, must list exactly the .mojoc, the {d} declared doc file(s) and the {d} native file(s)", .{ rows.array.items.len, docs.len, libs.len });
@@ -398,9 +398,9 @@ pub fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
 
     std.debug.print("komira_pack conda-check: {s} {s} ({s}, {s}) ok\n", .{ name, version, subdir, kind });
     // A package shipping native files names each, as checked, after `ok`.
-    var marker = std.ArrayList(u8).init(alloc);
-    try marker.appendSlice("ok\n");
-    for (libs) |l| try marker.writer().print("lib_files {s} {s} {s} (pkg tar member and metadata row equal)\n", .{ @tagName(l.kind), l.path, &sha256Hex(l.data) });
+    var marker = std.ArrayList(u8).empty;
+    try marker.appendSlice(alloc, "ok\n");
+    for (libs) |l| try marker.writer(alloc).print("lib_files {s} {s} {s} (pkg tar member and metadata row equal)\n", .{ @tagName(l.kind), l.path, &sha256Hex(l.data) });
     try writeFile(std.fs.cwd(), need(a.out, "--out"), marker.items);
 }
 

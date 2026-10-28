@@ -1,7 +1,7 @@
 """Rust rules for Buck2: rust_library, rust_binary, rust_test, crates_io_library.
 
 Every compile runs the pinned rustc from `toolchains//:rust` through
-`rustc_wrapper.sh`, which links through zig (see that file). Nothing is
+`rustc_launch` (tools/build/rust/rustc_launch.zig), which links through zig (see that file). Nothing is
 taken from the worker except glibc: the sysroot carries rustc's own
 libraries and, from pinned packages, the other libraries they need
 (libgcc_s, zlib), in the directory their run path names.
@@ -24,6 +24,7 @@ rustc as one `-Ldependency=<dir>` per crate, and direct dependencies as
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:run_check.bzl", "run_check_validation")
+load("@komira//tools/build/rerun:rerun.bzl", "RERUN_ATTRS", "rerun_env", "rerun_info")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 RustToolchainInfo = provider(fields = {
@@ -36,10 +37,18 @@ RustToolchainInfo = provider(fields = {
     # zig -target triple for link steps.
     "cc_target": provider_field(str),
     "wrapper": provider_field(typing.Any),
-    "run_check": provider_field(typing.Any),
+    "act": provider_field(typing.Any),
+    # The compiler release (`1.85.0`): what the build-script outcomes that
+    # `kpin cargo` reads from its overrides were derived for.
+    "version": provider_field(str),
     # The gate (tools/build/run): `gate rust` runs one rust_test in a build
     # action.
     "gate": provider_field(typing.Any),
+})
+
+# The compiler release a rust_sysroot unpacks (`1.85.0`).
+RustVersionInfo = provider(fields = {
+    "version": provider_field(str),
 })
 
 RustCrateInfo = provider(fields = {
@@ -50,6 +59,10 @@ RustCrateInfo = provider(fields = {
     # duplicates. A list, not a transitive set: a transitive set's type is
     # per loading cell, and crates are used across cells.
     "closure": provider_field(list),
+    # Native archives (`native_deps`) of this crate and of every crate it
+    # depends on, without duplicates: linked into each binary or test that
+    # links the crate, as `cargo:rustc-link-lib` of a `-sys` crate is.
+    "natives": provider_field(list, default = []),
 })
 
 # A rust_test: the `.passed` marker its run writes. Only a passing run writes
@@ -59,60 +72,17 @@ RustTestInfo = provider(fields = {
     "marker": provider_field(typing.Any),
 })
 
-_PRELUDE = """
-BB="$1"; shift
-case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
-# Private scratch. A remote action has its working directory to itself; a
-# local one runs in the checkout root next to every other local action, so
-# it takes the per-action scratch directory buck2 names in BUCK_SCRATCH_PATH.
-case "${BUCK_SCRATCH_PATH:-}" in
-    "") T="$PWD/.komira_action" ;;
-    /*) T="$BUCK_SCRATCH_PATH/komira" ;;
-    *) T="$PWD/$BUCK_SCRATCH_PATH/komira" ;;
-esac
-"$BB" mkdir -p "$T/bin"
-"$BB" --install -s "$T/bin"
-PATH="$T/bin"; export PATH
-"""
-
-def _busybox_sh(busybox, script, *args):
-    return cmd_args(busybox, "sh", "-euc", _PRELUDE + script, "sh", busybox, *args)
-
 # ---- toolchain ---------------------------------------------------------------
 
 def _rust_sysroot_impl(ctx):
-    bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
     out = ctx.actions.declare_output("sysroot", dir = True)
     # Keeps only what compiling needs: the rustc driver, the libraries it
     # loads (its own, and `libs`: the non-glibc libraries those need), and
-    # the standard library for the one target.
-    script = """
-RUSTC="$1"; STD="$2"; OUT="$3"; TRIPLE="$4"; VERSION="$5"; LIBS="$6"
-X="$OUT.x"
-mkdir -p "$X" "$OUT/bin" "$OUT/lib/rustlib/$TRIPLE"
-tar -xJf "$RUSTC" -C "$X"
-tar -xJf "$STD" -C "$X"
-R="$X/rustc-$VERSION-$TRIPLE/rustc"
-S="$X/rust-std-$VERSION-$TRIPLE/rust-std-$TRIPLE/lib/rustlib/$TRIPLE/lib"
-mv "$R/bin/rustc" "$OUT/bin/rustc"
-for f in $R/lib/*.so*; do mv "$f" "$OUT/lib/"; done
-for f in $LIBS/lib/*; do
-    if [ -e "$OUT/lib/${f##*/}" ]; then
-        echo "rust_sysroot: REFUSING: ${f##*/} is both a rustc library and in libs" >&2
-        exit 2
-    fi
-    cp "$f" "$OUT/lib/"
-done
-mv "$S" "$OUT/lib/rustlib/$TRIPLE/lib"
-rm -rf "$X"
-test -x "$OUT/bin/rustc"
-ls "$OUT/lib/rustlib/$TRIPLE/lib/" | grep -q '^libstd-'
-rm -rf "$T"
-"""
+    # the standard library for the one target. A Zig program does it
+    # (tools/build/rust/rust_sysroot.zig); no shell runs.
     ctx.actions.run(
-        _busybox_sh(
-            bb,
-            script,
+        cmd_args(
+            ctx.attrs._tool[RunInfo],
             ctx.attrs.rustc[DefaultInfo].default_outputs[0],
             ctx.attrs.rust_std[DefaultInfo].default_outputs[0],
             out.as_output(),
@@ -122,12 +92,11 @@ rm -rf "$T"
         ),
         category = "rust_sysroot",
     )
-    return [DefaultInfo(default_output = out)]
+    return [DefaultInfo(default_output = out), RustVersionInfo(version = ctx.attrs.version)]
 
 rust_sysroot_rule = rule(
     impl = _rust_sysroot_impl,
     attrs = {
-        "busybox": attrs.dep(),
         # A directory whose lib/ holds shared libraries rustc's own need
         # beyond glibc (conda_libs); copied into the sysroot's lib/.
         "libs": attrs.dep(),
@@ -135,6 +104,7 @@ rust_sysroot_rule = rule(
         "rustc": attrs.dep(),
         "triple": attrs.string(),
         "version": attrs.string(),
+        "_tool": attrs.exec_dep(default = "komira//tools/build/rust:rust_sysroot"),
     },
 )
 
@@ -146,8 +116,9 @@ def _rust_toolchain_impl(ctx):
             sysroot = ctx.attrs.sysroot[DefaultInfo].default_outputs[0],
             zig = ctx.attrs.zig[DefaultInfo].default_outputs[0],
             cc_target = ctx.attrs.cc_target,
-            wrapper = ctx.attrs._wrapper[DefaultInfo].default_outputs[0],
-            run_check = ctx.attrs._run_check[DefaultInfo].default_outputs[0],
+            wrapper = ctx.attrs._launcher[DefaultInfo].default_outputs[0],
+            act = ctx.attrs._act[DefaultInfo].default_outputs[0],
+            version = ctx.attrs.sysroot[RustVersionInfo].version,
             gate = ctx.attrs._gate[DefaultInfo].default_outputs[0],
         ),
     ]
@@ -161,15 +132,9 @@ rust_toolchain = rule(
         "sysroot": attrs.exec_dep(),
         "zig": attrs.exec_dep(),
         "_gate": attrs.exec_dep(default = "komira//tools/build/run:gate"),
-        "_run_check": attrs.dep(default = "komira//tools/build/mojo:run_check.sh"),
-        # The lint of the scripts the Rust rules run: a validation (see
-        # tools/build/lint/defs.bzl), not an input of any action.
-        "_script_lint": attrs.list(attrs.dep(), default = [
-            "komira//tools/build/lint:shell_lint",
-            "komira//tools/build/mojo:shell_lint",
-            "komira//tools/build/rust:shell_lint",
-        ]),
-        "_wrapper": attrs.dep(default = "komira//tools/build/rust:rustc_wrapper.sh"),
+        "_act": attrs.exec_dep(default = "komira//tools/build/mojo:act"),
+        # The compile launcher (tools/build/rust/rustc_launch.zig; no shell).
+        "_launcher": attrs.exec_dep(default = "komira//tools/build/rust:rustc_launch"),
     },
 )
 
@@ -181,10 +146,64 @@ def _crate_name(ctx):
         fail("{}: crate name `{}` is not a Rust identifier; set `crate_name`".format(ctx.label, name))
     return name
 
+# Variables the compile launcher (rustc_launch.zig) sets or clears itself: an
+# `env` naming one would be silently overridden, so it is refused.
+_RESERVED_ENV = ["BUCK_SCRATCH_PATH", "HOME", "LD_LIBRARY_PATH", "LD_PRELOAD", "PATH", "RUSTC_BOOTSTRAP", "RUSTFLAGS", "TMPDIR", "XDG_CACHE_HOME", "ZIG_GLOBAL_CACHE_DIR", "ZIG_LOCAL_CACHE_DIR"]
+
+def _rustc_env(ctx):
+    """`env`, checked: the variables rustc sees (`env!("CARGO_PKG_VERSION")`)."""
+    for k in ctx.attrs.env:
+        if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", k):
+            fail("{}: env name `{}` is not a variable name".format(ctx.label.raw_target(), k))
+        if k in _RESERVED_ENV:
+            fail("{}: env `{}` is set by the compile wrapper and cannot be overridden".format(ctx.label.raw_target(), k))
+    return ctx.attrs.env
+
+def _patch_spec(ctx):
+    """The crate_patch spec (json) for `patch`, checked at analysis."""
+    where = str(ctx.label.raw_target())
+    p = ctx.attrs.patch
+    for k in p:
+        if k not in ["add", "copy", "sub"]:
+            fail("{}: patch has no `{}`; its keys are copy, sub and add".format(where, k))
+    for c in p.get("copy", []):
+        if type(c) != "string":
+            fail("{}: patch.copy holds paths (strings), not {}".format(where, repr(c)))
+    for e in p.get("sub", []):
+        for k in e:
+            if k not in ["file", "from", "to", "count"]:
+                fail("{}: a patch.sub entry has no `{}` (file, from, to, count)".format(where, k))
+        for k in ["file", "from", "to"]:
+            if type(e.get(k)) != "string":
+                fail("{}: every patch.sub entry needs a string `{}`: {}".format(where, k, repr(e)))
+        if e["from"] == "":
+            fail("{}: a patch.sub entry has an empty `from`".format(where))
+    for e in p.get("add", []):
+        for k in e:
+            if k not in ["file", "content"]:
+                fail("{}: a patch.add entry has no `{}` (file, content)".format(where, k))
+        for k in ["file", "content"]:
+            if type(e.get(k)) != "string":
+                fail("{}: every patch.add entry needs a string `{}`: {}".format(where, k, repr(e)))
+    return json.encode(p)
+
+def _patched(ctx, d):
+    """`d` (a directory of sources) edited by `patch`, or `d` when there is none."""
+    if ctx.attrs.patch == None:
+        return d
+    spec = ctx.actions.write("patch.json", _patch_spec(ctx))
+    out = ctx.actions.declare_output("patched", dir = True)
+    ctx.actions.run(
+        cmd_args(ctx.attrs._patch_tool[RunInfo], spec, d, out.as_output()),
+        category = "crate_patch",
+    )
+    return out
+
 def _root(ctx):
     """(root source argument, hidden inputs, path remap args)."""
     if ctx.attrs.src_dir != None:
         d = ctx.attrs.src_dir[DefaultInfo].default_outputs[0]
+        d = _patched(ctx, d)
         remap = []
         if ctx.attrs.src_dir_label:
             # Paths recorded in the output (panic locations, file!()) name
@@ -203,25 +222,46 @@ def _root(ctx):
     # name, not its location. Paths recorded in the output (panic locations,
     # file!()) read <cell>/<package>/<file>, not the copy's path.
     d = ctx.actions.copied_dir("__srcs__", {s.short_path: s for s in ctx.attrs.srcs})
+    d = _patched(ctx, d)
     remap = [cmd_args(d, format = "--remap-path-prefix={}=" + ctx.label.cell + "/" + ctx.label.package)]
     return d.project(roots[0].short_path), [d], remap
 
-def _externs(deps):
-    """(--extern args of `deps`, their library closure without duplicates)."""
+def _externs(deps, renamed = {}):
+    """(--extern args of `deps` and `renamed`, their library closure without duplicates).
+
+    A dependency in `renamed` is reached under its alias (`--extern=alias=lib`),
+    not under its crate name; the aliases are taken in sorted order.
+    """
     externs = []
     closure = []
     seen = {}
-    for d in deps:
+    pairs = [(d, None) for d in deps] + [(renamed[a], a) for a in sorted(renamed)]
+    for d, alias in pairs:
         info = d[RustCrateInfo]
-        externs.append(cmd_args(info.lib, format = "--extern=" + info.crate_name + "={}"))
+        externs.append(cmd_args(info.lib, format = "--extern=" + (alias or info.crate_name) + "={}"))
         for lib in info.closure:
             if lib not in seen:
                 seen[lib] = True
                 closure.append(lib)
     return externs, closure
 
+def _natives(ctx):
+    """The native archives `ctx`'s crate links: its own `native_deps`, then its dependencies' (renamed ones in alias order), each once."""
+    out = []
+    for n in ctx.attrs.native_deps:
+        a = n[DefaultInfo].default_outputs[0]
+        if a not in out:
+            out.append(a)
+    for d in ctx.attrs.deps + [ctx.attrs.renamed_deps[k] for k in sorted(ctx.attrs.renamed_deps)]:
+        for a in d[RustCrateInfo].natives:
+            if a not in out:
+                out.append(a)
+    return out
+
 def _rustc(ctx, crate, crate_type, root, hidden, remap, externs, closure, metadata, out, identifier):
     tc = ctx.attrs.toolchain[RustToolchainInfo]
+    # Linking: only a bin or a test is linked, and only it takes native_deps.
+    natives = [cmd_args(n, format = "-Clink-arg={}") for n in _natives(ctx)] if crate_type in ["bin", "test"] else []
     rustc_args = cmd_args(
         "--crate-name=" + crate,
         # `test`: a libtest harness over the crate's #[test] functions.
@@ -237,7 +277,10 @@ def _rustc(ctx, crate, crate_type, root, hidden, remap, externs, closure, metada
         ["--cap-lints=allow"] if ctx.attrs.cap_lints else [],
         remap,
         externs,
+        # Cargo gives a proc-macro crate the compiler's own proc_macro crate.
+        ["--extern=proc_macro"] if crate_type == "proc-macro" and getattr(ctx.attrs, "proc_macro_extern", False) else [],
         [cmd_args(lib, format = "-Ldependency={}", parent = 1) for lib in closure],
+        natives,
         ctx.attrs.rustc_flags,
         "-o",
         out.as_output(),
@@ -246,8 +289,6 @@ def _rustc(ctx, crate, crate_type, root, hidden, remap, externs, closure, metada
     )
     ctx.actions.run(
         cmd_args(
-            tc.busybox,
-            "sh",
             tc.wrapper,
             tc.busybox,
             tc.sysroot,
@@ -257,6 +298,9 @@ def _rustc(ctx, crate, crate_type, root, hidden, remap, externs, closure, metada
             "--",
             rustc_args,
         ),
+        # Only an `env` the target sets reaches the action, so a target
+        # without one has the action it always had.
+        env = _rustc_env(ctx),
         category = "rustc",
         identifier = identifier,
     )
@@ -267,7 +311,7 @@ def _metadata(ctx):
 def _compile(ctx, crate_type, out):
     """Compiles the target's own crate to `out`; returns its deps' closure."""
     root, hidden, remap = _root(ctx)
-    externs, closure = _externs(ctx.attrs.deps)
+    externs, closure = _externs(ctx.attrs.deps, ctx.attrs.renamed_deps)
     crate = _crate_name(ctx)
     _rustc(ctx, crate, crate_type, root, hidden, remap, externs, closure, _metadata(ctx), out, crate)
     return closure
@@ -282,8 +326,25 @@ _COMMON_ATTRS = {
     "crate_root": attrs.string(),
     "deps": attrs.list(attrs.dep(providers = [RustCrateInfo]), default = []),
     "edition": attrs.string(default = "2021"),
+    # Environment of the rustc action: what `env!("CARGO_PKG_VERSION")` and
+    # `option_env!` read at compile time. Not the environment of a test run.
+    "env": attrs.dict(attrs.string(), attrs.string(), default = {}),
     "features": attrs.list(attrs.string(), default = []),
+    # Native archives (a cxx_library's `[static-pic]`, say) linked into a
+    # binary or test, and into the test crates of a library's `test_srcs`:
+    # `-Clink-arg=<archive>`, after the objects that need them. A library's
+    # are also linked into every binary or test that depends on it.
+    "native_deps": attrs.list(attrs.dep(), default = []),
     "opt_level": attrs.string(default = "3"),
+    # Edits to the sources before rustc reads them, where Cargo would run a
+    # build script (README, "Cargo crates"): a dict with `copy` (entries of
+    # the source tree to keep; all when empty), `sub` (exact text
+    # substitutions {file, from, to, count}) and `add` (generated files
+    # {file, content}).
+    "patch": attrs.option(attrs.dict(attrs.string(), attrs.any()), default = None),
+    # Dependencies a crate names differently from their crate name
+    # (`package = "http"` in Cargo): alias -> dependency, `--extern=alias=lib`.
+    "renamed_deps": attrs.dict(attrs.string(), attrs.dep(providers = [RustCrateInfo]), default = {}),
     "rustc_flags": attrs.list(attrs.string(), default = []),
     # A directory holding the crate's sources (an unpacked registry crate).
     "src_dir": attrs.option(attrs.dep(), default = None),
@@ -291,6 +352,7 @@ _COMMON_ATTRS = {
     "src_dir_label": attrs.option(attrs.string(), default = None),
     "srcs": attrs.list(attrs.source(), default = []),
     "toolchain": attrs.toolchain_dep(default = "toolchains//:rust", providers = [RustToolchainInfo]),
+    "_patch_tool": attrs.exec_dep(default = "komira//tools/build/rust:crate_patch"),
 }
 
 # ---- the test weld -----------------------------------------------------------
@@ -321,7 +383,7 @@ def _runner(tc, label, exe, marker_arg, timeout_s):
 def _gate(ctx, tc, ungated, public, markers):
     """Publishes `ungated` as `public` once every marker in `markers` exists."""
     ctx.actions.run(
-        cmd_args(tc.busybox, "cp", ungated, public.as_output(), hidden = markers),
+        cmd_args(tc.act, "copy", ungated, public.as_output(), hidden = markers),
         category = "rust_gate_join",
     )
     return markers
@@ -340,7 +402,7 @@ def _test_impl(ctx):
     def runner(marker_arg):
         return _runner(tc, str(ctx.label.raw_target()), exe, marker_arg, ctx.attrs.test_timeout_s)
 
-    ctx.actions.run(runner(marker.as_output()), category = "rust_gated_test", identifier = ctx.label.name)
+    ctx.actions.run(runner(marker.as_output()), env = rerun_env(ctx), category = "rust_gated_test", identifier = ctx.label.name)
     return [
         # Building the target runs the tests. `[bin]` is the harness itself
         # (a test executable, not a shippable artifact).
@@ -350,12 +412,13 @@ def _test_impl(ctx):
         # harness, outside the build (it writes no marker). So `buck2 test` of
         # a rust_test, or of a rust_library/rust_binary naming it in `tests`,
         # runs its tests rather than reporting NO TESTS RAN.
-        ExternalRunnerTestInfo(type = "custom", command = [runner("/dev/null")], labels = ctx.attrs.labels),
+        ExternalRunnerTestInfo(type = "custom", command = [runner("/dev/null")], env = rerun_env(ctx), labels = ctx.attrs.labels),
+        rerun_info(ctx),
     ]
 
 rust_test_rule = rule(
     impl = _test_impl,
-    attrs = _COMMON_ATTRS | {
+    attrs = _COMMON_ATTRS | RERUN_ATTRS | {
         "labels": attrs.list(attrs.string(), default = []),
         # Each harness invocation (the list, then the run) is killed after
         # this many seconds, and the run is NO VERDICT (exit 142).
@@ -400,7 +463,7 @@ def _external_tests(ctx, tc, crate, ungated, deps_closure):
     """
     d = ctx.actions.copied_dir("__test_srcs__", {s.short_path: s for s in ctx.attrs.test_srcs})
     remap = [cmd_args(d, format = "--remap-path-prefix={}=" + ctx.label.cell + "/" + ctx.label.package)]
-    externs, _ = _externs(ctx.attrs.deps)
+    externs, _ = _externs(ctx.attrs.deps, ctx.attrs.renamed_deps)
     externs = externs + [cmd_args(ungated, format = "--extern=" + crate + "={}")]
     closure = [ungated] + deps_closure
     label = str(ctx.label.raw_target())
@@ -413,6 +476,7 @@ def _external_tests(ctx, tc, crate, ungated, deps_closure):
         marker = ctx.actions.declare_output("test_srcs/" + name + ".passed")
         ctx.actions.run(
             _runner(tc, label + " " + src.short_path, exe, marker.as_output(), _DEFAULT_TEST_TIMEOUT_S),
+            env = rerun_env(ctx),
             category = "rust_gated_test",
             identifier = ident,
         )
@@ -422,6 +486,8 @@ def _external_tests(ctx, tc, crate, ungated, deps_closure):
 def _library_impl(ctx):
     tc = ctx.attrs.toolchain[RustToolchainInfo]
     crate = _crate_name(ctx)
+    if ctx.attrs.proc_macro_extern and not ctx.attrs.proc_macro:
+        fail("{}: proc_macro_extern is for a proc-macro crate; set proc_macro = True".format(ctx.label.raw_target()))
     ext = "so" if ctx.attrs.proc_macro else "rlib"
     path = "{}/lib{}.{}".format(crate, crate, ext)
     lib = ctx.actions.declare_output(path)
@@ -442,13 +508,21 @@ def _library_impl(ctx):
             crate_name = crate,
             lib = lib,
             closure = [lib] + deps_closure,
+            natives = _natives(ctx),
         ),
+        rerun_info(ctx),
     ]
 
 rust_library_rule = rule(
     impl = _library_impl,
-    attrs = _COMMON_ATTRS | _WELD_ATTRS | {
+    attrs = _COMMON_ATTRS | _WELD_ATTRS | RERUN_ATTRS | {
         "proc_macro": attrs.bool(default = False),
+        # With `proc_macro`, `--extern=proc_macro`: the compiler's proc_macro
+        # crate in the extern prelude, as Cargo gives it to every proc-macro
+        # crate (edition 2018 and later need it to name `proc_macro::..`
+        # without `extern crate`). Opt-in so that a proc-macro crate that
+        # compiled before keeps its action.
+        "proc_macro_extern": attrs.bool(default = False),
         # External tests: each `tests/<name>.rs` is a test crate compiled
         # against the ungated library and run; the library is published
         # behind them. Other files under tests/ are modules they use.
@@ -475,7 +549,8 @@ def _binary_impl(ctx):
         out = ctx.actions.declare_output(ctx.label.name + ".stdout")
         expected = ctx.actions.write(ctx.label.name + ".expected", ctx.attrs.expected_stdout)
         ctx.actions.run(
-            cmd_args(tc.busybox, "sh", tc.run_check, tc.busybox, exe, out.as_output(), expected),
+            cmd_args(tc.act, "run-check", tc.busybox, exe, out.as_output(), expected),
+            env = rerun_env(ctx),
             category = "rust_run_check",
         )
         sub_targets["run_check"] = [DefaultInfo(default_output = out)]
@@ -483,11 +558,12 @@ def _binary_impl(ctx):
     return [
         DefaultInfo(default_output = exe, sub_targets = sub_targets),
         RunInfo(args = cmd_args(exe)),
+        rerun_info(ctx),
     ] + validation
 
 rust_binary_rule = rule(
     impl = _binary_impl,
-    attrs = _COMMON_ATTRS | _WELD_ATTRS | {
+    attrs = _COMMON_ATTRS | _WELD_ATTRS | RERUN_ATTRS | {
         "expected_stdout": attrs.option(attrs.string(), default = None),
     },
 )
@@ -530,16 +606,14 @@ rust_weld_check_rule = rule(
 
 def _crate_source_impl(ctx):
     bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
+    if "/" in ctx.attrs.prefix:
+        fail("{}: prefix {} is not one directory name".format(ctx.label, repr(ctx.attrs.prefix)))
+    # The crate unpacks into a directory named `prefix`, so the output is
+    # declared with that name and the busybox tar applet (no shell) extracts
+    # into the output's parent; a wrong `prefix` leaves the output missing.
     out = ctx.actions.declare_output(ctx.attrs.prefix, dir = True)
-    script = """
-mkdir -p "$2.x"
-tar -xzf "$1" -C "$2.x"
-mv "$2.x/$3" "$2"
-rm -rf "$2.x" "$T"
-test -f "$2/Cargo.toml"
-"""
     ctx.actions.run(
-        _busybox_sh(bb, script, ctx.attrs.archive[DefaultInfo].default_outputs[0], out.as_output(), ctx.attrs.prefix),
+        cmd_args(bb, "tar", "-xzf", ctx.attrs.archive[DefaultInfo].default_outputs[0], "-C", cmd_args(out.as_output(), parent = 1)),
         category = "crate_unpack",
     )
     return [DefaultInfo(default_output = out)]
@@ -553,19 +627,42 @@ crate_source = rule(
     },
 )
 
+def cargo_pkg_env(name, version, crate_name = None):
+    """The variables Cargo sets from a package's manifest, as an `env` dict.
+
+    `CARGO_PKG_NAME`, `CARGO_PKG_VERSION` (the whole version, build metadata
+    included), `CARGO_PKG_VERSION_MAJOR`/`_MINOR`/`_PATCH`, `CARGO_PKG_VERSION_PRE`
+    (the part after `-`, without build metadata) and `CARGO_CRATE_NAME`
+    (`crate_name`, default `name` with `-` as `_`). `kpin cargo` writes a call
+    for each crate; `env!("CARGO_PKG_VERSION")` and friends then compile.
+    """
+    core, _, pre = version.split("+")[0].partition("-")
+    nums = (core.split(".") + ["0", "0"])[:3]
+    return {
+        "CARGO_CRATE_NAME": crate_name or name.replace("-", "_"),
+        "CARGO_PKG_NAME": name,
+        "CARGO_PKG_VERSION": version,
+        "CARGO_PKG_VERSION_MAJOR": nums[0],
+        "CARGO_PKG_VERSION_MINOR": nums[1],
+        "CARGO_PKG_VERSION_PATCH": nums[2],
+        "CARGO_PKG_VERSION_PRE": pre,
+    }
+
 def crates_io_library(
         name,
         version,
         sha256,
         size,
         crate = None,
+        crate_name = None,
         crate_root = "src/lib.rs",
         busybox = "komira//tools/build/toolchains:busybox",
         visibility = ["PUBLIC"],
         **kwargs):
     """A crates.io crate, pinned by the sha256 and size (bytes) of its `.crate` file, compiled with rust_library.
 
-    `crate` is the registry name (default `name`). Features and cfgs are
+    `crate` is the registry name (default `name`), `crate_name` the library's
+    name (default `crate` with `-` as `_`). Features and cfgs are
     stated explicitly: nothing is resolved and no build script runs, so a
     cfg that a crate's build.rs would emit for the pinned rustc is written
     here instead.
@@ -587,7 +684,7 @@ def crates_io_library(
     )
     rust_library(
         name = name,
-        crate_name = crate.replace("-", "_"),
+        crate_name = crate_name or crate.replace("-", "_"),
         src_dir = ":{}.src".format(name),
         src_dir_label = prefix,
         crate_root = crate_root,

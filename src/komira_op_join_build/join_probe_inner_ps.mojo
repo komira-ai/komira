@@ -72,7 +72,7 @@ def _probe_row_walk[
     checks and read the directory. Otherwise resume the walk at that chain
     entry -- the incumbent's contract for `state.chain_pos`.
 
-    ⚠ IT CARRIES THE PAYLOAD TOO, AND IT HAS TO. This is not a fallback
+    WARNING: IT CARRIES THE PAYLOAD TOO, AND IT HAS TO. This is not a fallback
     that "only runs rarely" -- it is the path a RESUMED mid-chain row and a
     first-row-of-batch-did-not-complete row take, and both emit real output
     pairs. A version of this loop that skipped `pay_buf` would leave those
@@ -219,7 +219,7 @@ def _probe_inner_chunk_ps[
     the sparse `act[t] -> cur[act[t]] -> record` one, which spilled ~6
     pointer reloads per visit.
 
-    ## ★ WHY THE PAIRS COME OUT IN THE INCUMBENT'S ORDER, WHICH IS NOT FREE
+    ## NOTE: WHY THE PAIRS COME OUT IN THE INCUMBENT'S ORDER, WHICH IS NOT FREE
 
     The phases emit ROUND-MAJOR: all of round 0's matches (one per active
     row, in row order), then round 1's, and so on. The incumbent emits
@@ -236,7 +236,7 @@ def _probe_inner_chunk_ps[
     histogram -- a few operations per row against the ~116 the walk already
     spends, and this arm is latency-bound, not instruction-bound.
 
-    ⚠ THE ALTERNATIVE WAS CONSIDERED AND REJECTED ON EVIDENCE, NOT TASTE.
+    WARNING: THE ALTERNATIVE WAS CONSIDERED AND REJECTED ON EVIDENCE, NOT TASTE.
     Emitting round-major would have been free, and hc4's output row order is
     already nondeterministic run-to-run, so hc4 itself could not tell. But
     `h2o/j1..j4` ARE order-deterministic, the corpus
@@ -246,7 +246,7 @@ def _probe_inner_chunk_ps[
     incumbent instead of comparing multisets. A weaker oracle was not worth
     the few operations per row.
 
-    ## ★ RESUMABILITY IS NOT MADE COARSER -- THE STATE IS STILL O(1)
+    ## NOTE: RESUMABILITY IS NOT MADE COARSER -- THE STATE IS STILL O(1)
 
     The lever could have pushed `ProbeInnerState` from O(1) to O(B) (the
     selection vector plus each live row's cursor, key and row). It does not,
@@ -288,7 +288,7 @@ def _probe_inner_chunk_ps[
     # `_probe_inner_chunk`: the default instantiation must be byte-for-byte
     # the pre-lever kernel.
     #
-    # ★ THE O(1) RESUME CONTRACT IS UNTOUCHED, AND THAT IS NOT AN ACCIDENT
+    # NOTE: THE O(1) RESUME CONTRACT IS UNTOUCHED, AND THAT IS NOT AN ACCIDENT
     # OF THIS EDIT. `ProbeInnerState` gains no field. The payload rides in
     # the batch's SCRATCH (`g_pay`, `m_pay`) and is emitted through the SAME
     # counting sort, at the SAME index `count + p`, as the build index it
@@ -299,7 +299,7 @@ def _probe_inner_chunk_ps[
     # verbatim, and `_probe_row_walk` carries the payload for exactly the
     # rows it is responsible for.
     #
-    # ⚠ L1 BUDGET, because this arm's whole win is latency and the constant
+    # WARNING: L1 BUDGET, because this arm's whole win is latency and the constant
     # above was chosen against a measured 32 KiB ceiling. The round loop's
     # HOT set was `d_key + d_cur + d_slot + g_key + g_next` = 5 x 256 x 8 B
     # = 10 KiB, plus 16 KiB of prefetched chain lines = 26 KiB. `g_pay` adds
@@ -391,7 +391,7 @@ def _probe_inner_chunk_ps[
     var m_slot = sp + 5 * _B             # [_M]  match: row slot
     var m_build = sp + 5 * _B + _M       # [_M]  match: build index
     var hist = sp + 5 * _B + 2 * _M      # [_B + 1] counting-sort histogram
-    # ⚠ APPENDED AFTER `hist`, NOT INSERTED BEFORE IT. Every offset above is
+    # WARNING: APPENDED AFTER `hist`, NOT INSERTED BEFORE IT. Every offset above is
     # a comptime constant and the two new regions are the LAST two, so on
     # the default instantiation (`_PAYB == _PAYM == 0`) every pre-existing
     # region lands at byte-identical offsets and the two dead pointers sit
@@ -477,7 +477,7 @@ def _probe_inner_chunk_ps[
                 comptime if fused:
                     g_key[t] = (kn_ptr + _KNW * c)[]
                     g_next[t] = (kn_ptr + _KNW * c + 1)[]
-                    # ★ THE LEVER, in the phase-split shape. Word 2 of the
+                    # NOTE: THE LEVER, in the phase-split shape. Word 2 of the
                     # record whose words 0 and 1 were just loaded -- the
                     # same line, in the same independent gather. It costs
                     # one more load off a line already in flight and it

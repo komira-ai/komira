@@ -91,7 +91,7 @@ def hash_join_build_with_bloom(
     var mask = UInt64(cap - 1)
 
     # NULL keys (see `hash_join_build`): a NULL build key is
-    # recorded (for the outer unmatched-build sweep) but NOT linked into a
+    # recorded but NOT linked into a
     # bucket -> never a probe match target. The caller-prebuilt bloom may
     # carry the NULL's zero bits, but that only yields a probe-side false
     # positive (the chain walk finds nothing). `has_nulls` gates the consult.
@@ -210,8 +210,8 @@ def hash_join_build(
             `bloom.insert_int64` work and store an empty bloom; the
             resulting builder has `_use_bloom=False` and probe-side
             `might_contain_int64` checks are bypassed. Set False when
-            the probe consumes no dynamic filter: an unused 1.5M-row
-            bloom build measured 7.7% of a query's self-time.
+            the probe consumes no dynamic filter: an unused large
+            bloom build is a measurable share of a query's time.
             TRUE IS A REQUEST, NOT A GUARANTEE: when the BLOOML1 budget is
             set (`bloom_l1_configure`) and the resulting index is that
             small, this build takes the `False` arm anyway and returns
@@ -222,7 +222,7 @@ def hash_join_build(
             the probe's existing chain touch yields it and the downstream
             random gather out of build column `pay_build_col` is deleted.
             EMPTY (the default) selects the shipped 16-byte entry, so every
-            existing caller is unchanged. ⚠ Its length must equal the key
+            existing caller is unchanged. WARNING: Its length must equal the key
             count; a short list is REFUSED rather than defaulting the tail
             rows' payload, which would be a wrong answer confined to the end
             of the build side and invisible to every row-count assertion.
@@ -247,14 +247,9 @@ def hash_join_build(
     byte-equivalence test drives both layouts over the same fixtures and
     compares the emitted match sets.
 
-    MEASURED, both layouts together against the split one, one binary,
-    min-of-5 sweeps per arm, position-balanced A/B/A/B/A:
-        hc/hc4_join_high_card   2168.975 -> 1616.245 ms   -25.48%
-        corpus SUM             11525.8  -> 11010.6  ms    -4.47%
-    ONE REAL REGRESSION, NAMED: `tpch/q14_promotion_effect`
-    6.335 -> 7.421 ms (+17.14%). That is `fused`'s own counter-effect: a
-    16-byte record halves the build rows per cache line, so a short, dense,
-    cache-resident chain walk loses what a random one gains.
+    The fused layout wins on large, random chain walks and loses a little on
+    short, dense, cache-resident ones: a 16-byte record halves the build rows
+    per cache line.
 
     Returns:
         A HashJoinBuilder ready for probe() calls.
@@ -378,7 +373,7 @@ def hash_join_build(
 
     # NULL keys: a NULL build key is NEVER a match target
     # (SQL "NULL never matches"). It is recorded in build_keys/build_indices/
-    # next_chain (so RIGHT/FULL outer's unmatched-build sweep emits it) but
+    # next_chain but
     # NOT linked into a hash bucket AND NOT bloom-inserted — so it is never
     # reachable from any probe chain walk. `has_nulls` gates the per-row
     # consult to keep the all-valid build byte-identical to an unguarded loop.
@@ -426,13 +421,12 @@ def hash_join_build(
                 # Word 2 is the payload; words 3.. are PAD, and the pad is
                 # what keeps a record off a 64-byte line boundary.
                 #
-                # ⛔ THE PAD COUNT IS DERIVED FROM `kn_words`, NOT WRITTEN
+                # NOTE: THE PAD COUNT IS DERIVED FROM `kn_words`, NOT WRITTEN
                 # OUT. A literal here would make the WRITE stride and the
                 # READ stride (`_KNW` in the three probe kernels, also
                 # `JOIN_KN_WORDS_PAY`) two independent facts that agree only
-                # by coincidence -- and mutation testing showed exactly
-                # that: narrowing the constant to 3 words changed every
-                # reader and left the writer emitting 4, so the walk read
+                # by coincidence: narrowing the constant to 3 words would
+                # change every reader and leave the writer emitting 4, so the walk would read
                 # entry i at offset 3i of a 4-wide array. Keys belonging to
                 # other rows, with the layout constant looking correct in
                 # both places.
@@ -449,8 +443,7 @@ def hash_join_build(
         if not nobi:
             build_indices.append(i)
 
-        # NULL build key is recorded above (for outer unmatched-build
-        # emit) but NOT linked into the bucket and NOT bloom-inserted ->
+        # NULL build key is recorded above but NOT linked into the bucket and NOT bloom-inserted ->
         # never a probe match target.
         if has_nulls and keys.is_null(i):
             continue
@@ -468,12 +461,11 @@ def hash_join_build(
         # Update bucket to point to this new entry.
         (ht_ptr + slot)[] = entry_idx
 
-    # ⛔ THE WRITE STRIDE AND THE READ STRIDE, RECONCILED ONCE PER BUILD.
+    # NOTE: THE WRITE STRIDE AND THE READ STRIDE, RECONCILED ONCE PER BUILD.
     # O(1), off every hot path, and it is the only thing standing between a
     # layout-constant change and a probe walk that reads entry i at the
     # wrong offset -- which produces keys from other rows rather than a
-    # crash. Mutation testing put this here: the pad used to be a literal
-    # and this check did not exist.
+    # crash. The pad is derived from `kn_words` for the same reason.
     if fused and len(key_next) != kn_words * n:
         raise Error(
             "hash_join_build: chain-entry array is "

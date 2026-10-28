@@ -30,7 +30,7 @@ pub const Fixture = struct {
     /// Writes `data` at `rel` under the tree and returns its absolute path.
     pub fn write(f: *Fixture, rel: []const u8, data: []const u8) ![]const u8 {
         if (std.fs.path.dirname(rel)) |d| try f.tmp.dir.makePath(d);
-        try f.tmp.dir.writeFile(rel, data);
+        try f.tmp.dir.writeFile(.{ .sub_path = rel, .data = data });
         return f.path(rel);
     }
 
