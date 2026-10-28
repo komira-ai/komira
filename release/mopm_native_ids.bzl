@@ -11,6 +11,7 @@ A package of the list needs its `load` below and its row; `mopm_artifacts` refus
 
 load("//src/komira_anomaly:buildrules.mojo.lock.bzl", komira_anomaly = "GRAPH")
 load("//src/komira_atomic_alias:buildrules.mojo.lock.bzl", komira_atomic_alias = "GRAPH")
+load("//src/komira_bench_report:buildrules.mojo.lock.bzl", komira_bench_report = "GRAPH")
 load("//src/komira_clock:buildrules.mojo.lock.bzl", komira_clock = "GRAPH")
 load("//src/komira_collections:buildrules.mojo.lock.bzl", komira_collections = "GRAPH")
 load("//src/komira_content_line:buildrules.mojo.lock.bzl", komira_content_line = "GRAPH")
@@ -63,6 +64,7 @@ def declared_natives(graph):
 _GRAPHS = {
     "komira_anomaly": komira_anomaly,
     "komira_atomic_alias": komira_atomic_alias,
+    "komira_bench_report": komira_bench_report,
     "komira_clock": komira_clock,
     "komira_collections": komira_collections,
     "komira_content_line": komira_content_line,
