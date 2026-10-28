@@ -4,7 +4,8 @@ Stable sorts of one key column into a permutation (`sort`: a merge sort per
 key DType; `sort_radix`: an LSD radix sort over 64-bit keys), top-K heap
 selection over one key column (`sort_topn`), the loser tree that k-way
 merges sorted runs (`sort_loser_tree`), and the sort and top-N sink kernels
-(`sort_topn_sink`, with the bounded-heap selection in `sort_topn_heap`). A
+(`sort_topn_sink`, with the bounded-heap selection in `sort_topn_heap`), and
+a multi-key sort buffer typed at run time (`sort_buffer_untyped`). A
 sort never moves data: it returns Int32 row indices and the caller gathers by
 them.
 
