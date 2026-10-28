@@ -10,6 +10,10 @@
 #     over an INT16 or STRING column read as 8-byte words (a silently wrong
 #     count from reading past the buffer); the error must name the column and
 #     its type;
+#   * `test_sum_min_and_max_over_an_unreadable_value_type_are_refused_by_name`:
+#     the same wrong-width read through the value lanes of SUM, MIN and MAX;
+#   * `test_count_over_any_value_type_is_still_served`: a refusal that also
+#     catches COUNT(col), which reads only validity;
 #   * `test_a_float64_and_an_int32_value_are_still_served`: a refusal wider
 #     than the types the driver reads;
 #   * `test_a_grouped_empty_input_emits_no_group`: a group (with a bogus
@@ -36,7 +40,11 @@ from komira_async.reactor.reactor import BACKEND_MOCK
 from komira_async.runtime.runtime import PLACEMENT_FIXED, PerCoreAsyncRuntime
 from komira_buffer.heap_region import HeapRegion
 from komira_physical_plan.physical_plan import AggSinkData
-from komira_plan_expr.agg_expr import count_distinct
+from komira_plan_expr.agg_expr import AggExpr, count_distinct
+from komira_plan_expr.agg_expr import count as agg_count
+from komira_plan_expr.agg_expr import max as agg_max
+from komira_plan_expr.agg_expr import min as agg_min
+from komira_plan_expr.agg_expr import sum as agg_sum
 from komira_plan_expr.col_expr import col
 from komira_plan_ir.logical_plan import AggExprArray, ExprArray
 
@@ -149,6 +157,88 @@ def test_an_unreadable_value_type_is_refused_by_name() raises:
         _ = _execute_count_distinct_agg_parallel(
             disp, ct.clone(), named, sink, 1, 1, 8
         )
+
+
+def _group_by_k(imm batch: RecordBatch, var agg: AggExpr) raises -> RecordBatch:
+    """`SELECT k, <agg> GROUP BY k` over `batch` on `_WORKERS` workers."""
+    var group_by = ExprArray()
+    group_by.append(col("k").copy_expr())
+    var aggs = AggExprArray()
+    aggs.append(agg^)
+    var osb = SchemaBuilder()
+    osb.add_field(Field("k", ArrowType.INT64, False))
+    osb.add_field(Field("n", ArrowType.INT64, True))
+    var sink = AggSinkData(group_by^, aggs^, osb.build())
+    var rt = PerCoreAsyncRuntime[NoopSink](placement=PLACEMENT_FIXED)
+    rt.attach_workers(_WORKERS, _noop_sink_factory, BACKEND_MOCK)
+    rt.start()
+    ref disp = rt.dispatcher()
+    var ct = CancellationToken.new()
+    return _execute_count_distinct_agg_parallel(
+        disp, ct.clone(), batch, sink, 1, 1, batch.num_rows()
+    )
+
+
+def _batch_with_value(var value: Column[HeapRegion], vtype: ArrowType) raises -> RecordBatch:
+    """Eight rows: INT64 key `r % 2` and the given value column `amount`."""
+    var ks = List[Int]()
+    for r in range(8):
+        ks.append(r % 2)
+    var sb = SchemaBuilder()
+    sb.add_field(Field("k", ArrowType.INT64, False))
+    sb.add_field(Field("amount", vtype, True))
+    var b = RecordBatchBuilder.with_capacity(2)
+    b.add_column(_i64_col(ks, List[Bool]()))
+    b.add_column(value^)
+    return b.build(sb.build())
+
+
+def _int16_value() raises -> Column[HeapRegion]:
+    """INT16 values 0..7; row 3 is NULL."""
+    var a = PrimitiveArray[DType.int16].allocate_nullable(8)
+    for r in range(8):
+        a.set(r, Int16(r))
+    a._set_null(3)
+    return Column.from_primitive[DType.int16](a^)
+
+
+def test_sum_min_and_max_over_an_unreadable_value_type_is_refused_by_name() raises:
+    for which in range(3):
+        var batch = _batch_with_value(_int16_value(), ArrowType.INT16)
+        var agg = agg_sum(col("amount"))
+        if which == 1:
+            agg = agg_min(col("amount"))
+        elif which == 2:
+            agg = agg_max(col("amount"))
+        with assert_raises(contains="value column 'amount' has type int16"):
+            _ = _group_by_k(batch, agg^)
+
+
+def test_count_over_any_value_type_is_still_served() raises:
+    # Group 0 holds rows 0, 2, 4, 6 and group 1 rows 1, 3, 5, 7.
+    for which in range(2):
+        var batch: RecordBatch
+        if which == 0:
+            batch = _batch_with_value(_int16_value(), ArrowType.INT16)
+        else:
+            var strs = List[String]()
+            for r in range(8):
+                strs.append("s" + String(r))
+            batch = _batch_with_value(
+                Column.from_string(StringArray.from_strings(strs)), ArrowType.STRING
+            )
+        var rb = _group_by_k(batch, agg_count(col("amount")))
+        assert_equal(rb.num_rows(), 2)
+        for r in range(2):
+            var k = Int(rb.column_at(0).as_primitive[DType.int64]().get(r))
+            var want = 4
+            if which != 1 and k == 1:
+                want = 3  # row 3 of the INT16 column is NULL
+            assert_equal(
+                Int(rb.column_at(1).as_primitive[DType.int64]().get(r)),
+                want,
+                "kind " + String(which) + " key " + String(k),
+            )
 
 
 def test_a_float64_and_an_int32_value_are_still_served() raises:

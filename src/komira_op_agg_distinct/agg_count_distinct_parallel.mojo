@@ -67,7 +67,7 @@ from komira_counters.strdrain_counter import (
     strdrain_note_site,
 )
 from komira_physical_plan.physical_plan import AggSinkData
-from komira_plan_expr.agg_expr import AGG_COUNT_DISTINCT
+from komira_plan_expr.agg_expr import AGG_COUNT, AGG_COUNT_DISTINCT
 
 from komira_op_agg_distinct.agg_cd_dictkey_encode import (
     encode_dict_key_first_seen,
@@ -236,11 +236,13 @@ def _execute_count_distinct_agg_parallel(
             "grouped COUNT(DISTINCT) driver: " + String(num_keys)
             + " group keys; at most 62 are supported"
         )
-    # A COUNT(DISTINCT) value is read through the INT32 / INT64 / FLOAT64
-    # lanes of `TypedColumnPtrs`; any other type would be read at the wrong
+    # Every aggregate except COUNT(col) / COUNT(*) reads its value through the
+    # INT32 / INT64 / FLOAT64 lanes of `TypedColumnPtrs` (COUNT reads only
+    # validity, which is typeless); any other type would be read at the wrong
     # width, so it is refused before anything runs.
     for a in range(num_aggs):
-        if agg_data.agg_exprs[a].func != AGG_COUNT_DISTINCT:
+        var vf = agg_data.agg_exprs[a].func
+        if vf == AGG_COUNT:
             continue
         if not agg_data.agg_exprs[a].child:
             continue
@@ -248,7 +250,7 @@ def _execute_count_distinct_agg_parallel(
         var vt = batch.column_at(vi).arrow_type
         if vt != ArrowType.INT32 and vt != ArrowType.INT64 and vt != ArrowType.FLOAT64:
             raise Error(
-                "grouped COUNT(DISTINCT) driver: value column '"
+                "grouped aggregate driver: value column '"
                 + batch.schema.field_at(vi).name + "' has type " + String(vt)
                 + "; only INT32, INT64 and FLOAT64 are supported"
             )
