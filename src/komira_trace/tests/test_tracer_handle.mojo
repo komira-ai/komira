@@ -45,10 +45,36 @@ def test_enabled_handle_forwards_to_the_tracer() raises:
     print("  test_enabled_handle_forwards_to_the_tracer PASS")
 
 
+def test_current_span_is_per_worker() raises:
+    """`current_span(w)` answers for worker `w` only, while two workers have
+    spans open at once."""
+    var t = Tracer(num_workers=2)
+    t.install_mock_ids(trace_seed=UInt64(1), span_seed=UInt64(100))
+    var h = TracerHandle[origin_of(t)].borrow(t)
+    var on0 = h.start_span["w0"](worker_id=0)
+    var on1 = h.start_span["w1"](worker_id=1)
+    assert_equal(on0, UInt64(100), "worker 0 span id")
+    assert_equal(on1, UInt64(101), "worker 1 span id")
+    assert_equal(h.current_span(0), on0, "worker 0 sees its own span")
+    assert_equal(h.current_span(1), on1, "worker 1 sees its own span")
+    var inner1 = h.start_span["w1_inner"](worker_id=1, parent_id=on1)
+    assert_equal(inner1, UInt64(102), "worker 1 nested span id")
+    assert_equal(h.current_span(1), inner1, "worker 1 top of stack")
+    assert_equal(h.current_span(0), on0, "worker 0 unaffected by worker 1")
+    h.end_span(inner1, worker_id=1)
+    h.end_span(on1, worker_id=1)
+    assert_equal(h.current_span(1), UInt64(0), "worker 1 has nothing open")
+    assert_equal(h.current_span(0), on0, "worker 0 still has its span open")
+    h.end_span(on0, worker_id=0)
+    assert_equal(h.current_span(0), UInt64(0), "worker 0 has nothing open")
+    print("  test_current_span_is_per_worker PASS")
+
+
 def main() raises:
     print("test_tracer_handle")
     print("==================")
     test_disabled_handle_is_a_no_op()
     test_enabled_handle_forwards_to_the_tracer()
+    test_current_span_is_per_worker()
     print()
     print("ALL TESTS PASS")
