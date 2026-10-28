@@ -5,11 +5,11 @@
 # =============================================================================
 #
 # WHAT CHANGED AND WHY THIS FILE EXISTS. `count(DISTINCT user_id) GROUP BY
-# search_phrase` encodes millions of rows into millions of distinct string
-# keys. The reverse map used to be a
-# `List[String]` — one OWNING `String` per distinct value, i.e. one `malloc`
-# in the encode, one `String` copy-construction at emit and two `free`s at
-# teardown per value, for a value whose (offset, length) the encode loop already had in
+# search_phrase` over the ClickBench wide fixture (cbq13) encodes 13,172,392
+# rows into **6,019,102 distinct string keys**. The reverse map used to be a
+# `List[String]` — one OWNING `String` per distinct value, i.e. 6.02M `malloc`s
+# in the encode, 6.02M `String` copy-constructions at emit and 12M `free`s at
+# teardown, for a value whose (offset, length) the encode loop already had in
 # hand. Mojo 1.0.0 `String` has NO small-string optimization
 # (`size_of[String]() == 24`), so each one really is a heap round trip.
 #
@@ -18,7 +18,7 @@
 # Int64]` (collision fallback) PAIR is now a single open-addressed table with
 # linear probing and verify-on-hit against the arena.
 #
-# THE COLLISION CASE IS THE WHOLE CORRECTNESS RISK, AND NATURAL DATA CANNOT
+# ⛔ THE COLLISION CASE IS THE WHOLE CORRECTNESS RISK, AND NATURAL DATA CANNOT
 # REACH IT. Two distinct values sharing a 64-bit FNV-1a hash is a ~2^-32
 # birthday event; no fixture of a plausible size produces one, and forging a
 # pair requires ~2^32 work. So the collision arm of the incumbent was, in
@@ -28,7 +28,7 @@
 # one is the failure it would produce, which is exactly the class the corpus
 # value gate exists to catch and which unit tests here should catch first.
 #
-# THE WAY IN: `_assign_dict_ids_from_hashes` takes the per-row hashes as an
+# ⭐ THE WAY IN: `_assign_dict_ids_from_hashes` takes the per-row hashes as an
 # ARGUMENT (that is what makes it shareable between the parallel Phase A and
 # the serial fallback's own pre-pass). So a test can HAND it a hash vector.
 # `test_all_rows_share_one_hash_*` passes an all-zero hash vector: every
@@ -36,7 +36,7 @@
 # them apart is the byte compare. It needs no forged FNV pair and no 2^32
 # search.
 #
-# THE DATA/OFFSET POINTERS COME FROM A REAL BUILT COLUMN, via the same
+# ⚠ THE DATA/OFFSET POINTERS COME FROM A REAL BUILT COLUMN, via the same
 # `view_ro()` read the driver itself uses, so the test cannot pass because it
 # fed the encoder a layout the driver never produces.
 
@@ -179,8 +179,8 @@ def test_reverse_map_is_a_packed_byte_arena() raises:
     """`rev_bytes` holds EXACTLY the concatenated distinct values: no per-value
     header, no NUL terminator, no padding.
 
-    Fails if: re-introducing a per-value `String` (the signature no longer
-    admits one, so that change does not compile — which is the point); or by
+    Killed by: re-introducing a per-value `String` (the signature no longer
+    admits one, so that mutation does not compile — which is the point); or by
     a NUL-terminated arena copy, which this file's byte arithmetic catches.
     """
     var vals: List[String] = [
@@ -214,7 +214,7 @@ def test_reverse_map_is_a_packed_byte_arena() raises:
 def test_ids_are_minted_in_first_occurrence_order() raises:
     """The dict-id numbering contract the encoded column depends on.
 
-    Fails if: minting ids in any other order (e.g. slot order).
+    Killed by: minting ids in any other order (e.g. slot order).
     """
     var vals: List[String] = [
         String("zeta"), String("alpha"), String("zeta"), String("mu"),
@@ -251,24 +251,24 @@ def test_zero_length_value_round_trips() raises:
 
 
 # =============================================================================
-# §2 — THE COLLISION ARM. Every value on ONE hash.
+# §2 ⭐ — THE COLLISION ARM. Every value on ONE hash.
 # =============================================================================
 
 
 def test_all_rows_share_one_hash_still_separates_every_value() raises:
-    """REGRESSION TEST FOR THE OPEN-ADDRESSING REWRITE.
+    """⭐ THE FALSIFIER FOR THE OPEN-ADDRESSING REWRITE.
 
     Every row is handed hash 0, so every distinct value collides on the same
     home slot and the ONLY thing that can tell two values apart is the
     verify-on-hit byte compare followed by CONTINUED probing.
 
-    Fails if: replacing the probe-continue on a verify FAILURE with a `break`
+    Killed by: replacing the probe-continue on a verify FAILURE with a `break`
     (the value is then merged into whichever value happens to hold the slot —
     two different group keys become one group, silently); by breaking on the
     first hash match without comparing bytes; or by minting a fresh id for a
     value already present (the distinct count then inflates).
 
-    The incumbent `Dict[Int64, Int64]` + `Dict[String, Int64]` pair had a
+    ⚠ The incumbent `Dict[Int64, Int64]` + `Dict[String, Int64]` pair had a
     collision arm too, and nothing in this repo ever executed it: a natural
     64-bit FNV-1a collision is a ~2^-32 event.
     """
@@ -295,7 +295,7 @@ def test_all_rows_share_one_hash_still_separates_every_value() raises:
 def test_two_values_one_hash_do_not_merge() raises:
     """The minimal shape of the same defect: exactly two values, one hash.
 
-    Fails if: the same changes as above. Kept separate because a 64-value
+    Killed by: the same mutations as above. Kept separate because a 64-value
     chain can mask a bug that only shows at the head of the chain.
     """
     var vals: List[String] = [
@@ -334,7 +334,7 @@ def test_equal_length_prefix_values_on_one_hash() raises:
 def test_table_rehash_preserves_every_mapping() raises:
     """More distinct values than the initial table admits, so it grows.
 
-    THE FIXTURE SIZE IS NOT FREE TO CHOOSE, and the first draft of this test
+    ⚠ THE FIXTURE SIZE IS NOT FREE TO CHOOSE, and the first draft of this test
     got it wrong. The initial capacity is `next_pow2(num_rows)`, so
     `distinct <= num_rows <= cap` always — and the 0.75 load ceiling is only
     crossed when `distinct > 0.75 * next_pow2(num_rows)`, i.e. when the row
@@ -347,7 +347,7 @@ def test_table_rehash_preserves_every_mapping() raises:
     The last 200 rows repeat values already minted, so they probe the table
     AFTER it has been rebuilt: an id that moved in the rehash is caught here.
 
-    Fails if: dropping live slots in the rehash loop; rebuilding with the OLD
+    Killed by: dropping live slots in the rehash loop; rebuilding with the OLD
     mask; skipping the rehash entirely (the table then fills and the probe loop
     never terminates, which this test turns into a hang rather than a red —
     stated here so a future reader knows which failure mode is which).
@@ -390,8 +390,8 @@ def test_rehash_under_a_shared_hash_chain() raises:
 
     2,000 distinct values in 2,000 rows: cap = 2048, ceiling = 1536, so the
     table doubles while carrying ONE probe chain 1,536 entries long, and the
-    rehash has to rebuild that chain. Fails on the union of the §2 and §3
-    changes.
+    rehash has to rebuild that chain. Killed by the union of the §2 and §3
+    mutations.
     """
     comptime N = 2_000
     assert_true(

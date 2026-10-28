@@ -12,7 +12,7 @@
 # built row by row (`_dict_to_string_array`) and re-hashed row by row by the
 # driver (`agg_cd_strenc_rowdict.mojo`).
 #
-# THE NUMBERING IS THE CONTRACT. The dict ids this returns become the
+# ★ THE NUMBERING IS THE CONTRACT. The dict ids this returns become the
 # driver's group ids, and the group ids ARE the emit order (and the Top-K tie
 # order). The STRING arms (serial Phase B, `agg_cd_strenc_parb.mojo`,
 # `agg_cd_strenc_rowdict.mojo`) all number a

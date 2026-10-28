@@ -1,15 +1,15 @@
 # =============================================================================
-# L2 + L3 — the sharded Phase B's MERGE runs on W tasks
+# L2 + L3 (2026-09-24, cbq13) — the sharded Phase B's MERGE runs on W tasks
 # with the numbering unchanged, and its reverse map indexes the SOURCE buffer
 # =============================================================================
 #
 # L2 split the single-threaded P-way merge of the shards' first-appearance
-# lists into W rank ranges merged in
+# lists (335.5 ms of cbq13's wall) into W rank ranges merged in
 # parallel. L3 deleted the byte arena: a dict id's bytes are the span of the
 # row that minted it, in the column's own value buffer. See
 # `agg_cd_strenc_parb.mojo` for both arguments.
 #
-# WHAT THIS FILE PROVES:
+# WHAT THIS FILE KILLS:
 #   §1  a merge PLAN that duplicates, skips, reorders or unbalances a rank
 #       range — asserted on the pure plan function, at W values that do not
 #       divide the list lengths (an off-by-one lives at a split);
@@ -24,7 +24,7 @@
 # The same encode through the grouped COUNT(DISTINCT) driver (the key emit
 # reading a SOURCE-backed reverse map) is tested with the driver.
 #
-# NON-VACUITY is asserted, not assumed: §2 checks that W > 1 really ran more
+# ⚠ NON-VACUITY is asserted, not assumed: §2 checks that W > 1 really ran more
 # than one merge task's worth of values per shard.
 
 from std.collections import Dict, List, Optional
@@ -145,9 +145,9 @@ def test_merge_plan_partitions_every_list_at_every_width() raises:
 
 
 def test_merge_task_count_respects_its_floor_and_cap() raises:
-    assert_equal(_parb_merge_tasks(165, 20, 16_384), 1, "few-valued: one task")
+    assert_equal(_parb_merge_tasks(165, 20, 16_384), 1, "cbq10-sized: one task")
     assert_equal(
-        _parb_merge_tasks(6_019_102, 20, 16_384), 20, "high-cardinality: capped"
+        _parb_merge_tasks(6_019_102, 20, 16_384), 20, "cbq13-sized: capped"
     )
     assert_equal(_parb_merge_tasks(40_000, 20, 16_384), 2, "floor-limited")
     assert_equal(_parb_merge_tasks(0, 20, 16_384), 1, "empty: still one task")
@@ -353,7 +353,7 @@ def _encode_serial(imm batch: RecordBatch, imm hashes: List[Int64]) raises -> _S
 
 
 def test_parallel_merge_matches_serial_at_every_width() raises:
-    """REGRESSION TEST for L2. Row for row the same dict id, and id for id
+    """⭐ THE FALSIFIER for L2. Row for row the same dict id, and id for id
     the same bytes, as the SERIAL Phase B — at W = 1, 2, 3 and 7 merge tasks
     (7 > the 4 runtime workers: tasks outnumber workers)."""
     var vals = _rows()

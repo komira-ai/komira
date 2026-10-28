@@ -7,18 +7,18 @@
 # COUNT / MIN / MAX / MEAN) as a PASSENGER LANE on the gid the COUNT(DISTINCT)
 # lane resolves. An all-COUNT(DISTINCT) query must run the instantiation with
 # no passenger code at all (`has_fixed = False`): a version that ran the fused
-# body with zero fixed aggregates made an all-CD query slower (the row
+# body with zero fixed aggregates measured +4.32% on such a query (the row
 # loop grew from 11,431 to 13,176 bytes). NO VALUE ASSERTION CAN SEE WHICH
 # instantiation ran: both produce the same COUNT(DISTINCT) answers. These
 # counters are the observable half — the number of grouped batches consumed,
 # and how many of them executed the passenger-lane setup. For an all-CD query
 # the second MUST be 0.
 #
-# THE FIRST COUNTER IS WHAT KEEPS THE SECOND FROM BEING VACUOUS. "zero
+# ⭐ THE FIRST COUNTER IS WHAT KEEPS THE SECOND FROM BEING VACUOUS. "zero
 # passenger batches" is also what a query that never reached `WorkerCDState`
 # at all would report, so a test asserts `batches > 0` beside `fx == 0`.
 #
-# NOT A PER-ROW OR PER-BATCH ATOMIC. Each `WorkerCDState` counts into two
+# ⚠ NOT A PER-ROW OR PER-BATCH ATOMIC. Each `WorkerCDState` counts into two
 # plain `Int` fields (one add per BATCH); `CountDistinctAggSink._finalize_batch`
 # folds them in here ONCE PER WORKER PER QUERY, from the loop that already walks
 # every worker to build the global group directory.

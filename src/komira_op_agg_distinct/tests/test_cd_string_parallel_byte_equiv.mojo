@@ -282,7 +282,7 @@ def _null_fixture_vals() raises -> List[String]:
         s = _rot(s)
         var bucket = s % UInt64(10)
         if bucket == UInt64(0):
-            # THE NULL ROW'S PAYLOAD IS A VALUE THAT EXISTS NOWHERE ELSE.
+            # ⚠ THE NULL ROW'S PAYLOAD IS A VALUE THAT EXISTS NOWHERE ELSE.
             # A first version of this fixture gave the null rows the EMPTY
             # STRING, which the fixture ALSO carries as a real value — so an
             # implementation that counted the null row added a value that was
@@ -565,7 +565,7 @@ def test_long_values_past_the_hash_stripe_loop_are_distinguished() raises:
 # slot), and they differ overall. `cd_string_value_hash` re-derives every one of
 # those facts below, so this arm cannot silently decay into two ordinary values.
 #
-# THE FIXED WIDTH IS NOT COSMETIC, AND THE FIRST PAIR HERE DID NOT HAVE IT.
+# ⚠ THE FIXED WIDTH IS NOT COSMETIC, AND THE FIRST PAIR HERE DID NOT HAVE IT.
 # "c85878"/"c133100" are 6 bytes against 7, and every confirm in the kernel is
 # `clen == vlen and bytes_equal(...)` — so the LENGTH check separated them and
 # the byte compare stayed decorative even after the commit written to make it

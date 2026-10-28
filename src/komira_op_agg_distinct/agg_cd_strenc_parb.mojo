@@ -1,15 +1,15 @@
 # =============================================================================
-# CDPPARB — PHASE B OF THE STRING-KEY ENCODE ON P SHARDS, NUMBERING PRESERVED
+# ⭐ CDPPARB — PHASE B OF THE STRING-KEY ENCODE ON P SHARDS, NUMBERING PRESERVED
 # =============================================================================
 #
 # Companion to `agg_count_distinct_strenc.mojo` (Phase A, the serial Phase B,
 # routing and the public entry point). This module is the PARALLEL Phase B.
 #
-# Phase B turns the rows of a high-cardinality string column into dict ids. An
-# id is minted "when a byte value is FIRST SEEN", and first-seen is a
+# Phase B turns 13,172,392 rows of `search_phrase` into 6,019,102 dict ids on
+# cbq13. An id is minted "when a byte value is FIRST SEEN", and first-seen is a
 # sequential notion — which is why this phase stayed serial until CDPPARB.
 #
-# THE OBVIOUS PARALLELISATION IS THE ONE THAT CHANGES THE ANSWER'S SHAPE.
+# ⛔ THE OBVIOUS PARALLELISATION IS THE ONE THAT CHANGES THE ANSWER'S SHAPE.
 # Sharding by hash and letting each shard number its own values from zero, then
 # offsetting by a prefix sum, is four lines and is WRONG for this engine: the
 # ids feed a hash table whose ITERATION ORDER is the output group order, so a
@@ -26,17 +26,18 @@
 #   2. Each shard builds its OWN open-addressed table, writes a LOCAL id into
 #      `encoded[row]` (disjoint rows), and appends the minting row index to
 #      `first_row` (ascending by construction). The per-shard table is
-#      `num_rows/P` slots, not `num_rows` — 6.3 MB instead of 201 MB on the high-cardinality query,
+#      `num_rows/P` slots, not `num_rows` — 6.3 MB instead of 201 MB on cbq13,
 #      so part of CDPPARB's win was LOCALITY, not cores.
 #   3. MERGE the P ascending `first_row` lists into the global first-seen order.
 #   4. PARALLEL remap of `encoded[row]` from local id to global id.
 #
 # =============================================================================
-# L2 — STEP 3 RUNS ON W TASKS, AND THE ORDER IS UNCHANGED
+# ⭐ L2 (2026-09-24, cbq13) — STEP 3 RUNS ON W TASKS, AND THE ORDER IS UNCHANGED
 # =============================================================================
 #
-# Step 3 was a single-threaded P-way merge over every distinct value: the
-# largest serial item left in the encode of a high-cardinality key.
+# Step 3 was a single-threaded P-way merge over every distinct value: measured
+# **335.5 ms** of cbq13's wall (30 warm reps, K=20) — the largest serial item
+# left in the encode.
 #
 # It is split by RANK, merge-path style. The first-appearance rows of all P
 # lists are DISTINCT row indices (every row belongs to exactly one shard), so
@@ -59,16 +60,17 @@
 # at W in {1, 2, 3, 7} (an uneven W catches an off-by-one at a split).
 #
 # The split costs W x log2(N) x P binary searches of a shard list — ~10^5
-# steps on a high-cardinality key, a negligible serial cost.
+# steps on cbq13, under a millisecond, serial.
 #
 # =============================================================================
-# L3 — NO ARENA: A DICT ID'S BYTES ARE THE SOURCE'S
+# ⭐ L3 (2026-09-24, cbq13) — NO ARENA: A DICT ID'S BYTES ARE THE SOURCE'S
 # =============================================================================
 #
 # Each shard used to copy every value it minted into its own byte arena (for
 # verify-on-hit), and the driver then concatenated the P arenas into one
-# arena the size of all distinct values, serially, with first-touch page
-# faults on a fresh `resize`. That arena exists to answer "what are dict id d's bytes", and the
+# 392,611,228-byte arena, serially: PARB `arenacat` measured **93.1 ms warm and
+# 293.7 ms cold** (first-touch page faults on a fresh 392 MB `resize`) on
+# cbq13. That arena exists to answer "what are dict id d's bytes", and the
 # source column already answers it: the value was minted AT a row, and that
 # row's span in the source value buffer IS the value.
 #
@@ -78,10 +80,12 @@
 # written, none is concatenated, and `out_rev_starts[d]` indexes the caller's
 # own value buffer.
 #
-# THE VERIFY CACHE — WHAT THE ARENA WAS STILL GOOD FOR. Deleting the arena
-# outright made the shard pass faster on a high-cardinality key but slower on
-# a key with few distinct values and many repeats: each verify then touches
-# the minting row's page of a large source buffer instead of a small arena. So each shard keeps a BOUNDED copy of its EARLIEST
+# ⭐ THE VERIFY CACHE — WHAT THE ARENA WAS STILL GOOD FOR. Measured, deleting
+# the arena outright moved cbq13's
+# shard pass 527 -> 423 ms but cost cbq10 / cbq11 +3.5 ms of shard time (+1.3%
+# / +1.7% wall, cbq11 DISJOINT): 165 / 302 values verified 5.5M times, each
+# verify now touching the minting row's page of a ~100 MB source buffer
+# instead of a 3 KB arena. So each shard keeps a BOUNDED copy of its EARLIEST
 # minted values (`_PARB_VCACHE_BYTES`, L2-sized) purely as a verify-on-hit
 # source, and nothing else: the reverse map still points at the source, there
 # is still no concat, and past the bound a shard simply stops caching. A
@@ -90,7 +94,7 @@
 # `_parb_vcache_admit` / `_parb_verify` are the one spelling both shard bodies
 # (this file's and `agg_cd_strkey_fused.mojo`'s) use.
 #
-# THE CONTRACT CHANGE THIS IS, stated where it is made: after
+# ⚠ THE CONTRACT CHANGE THIS IS, stated where it is made: after
 # `_assign_dict_ids_parallel` there IS no byte arena. `out_rev_starts[d]` /
 # `out_rev_lens[d]` describe dict id d's span INSIDE THE BUFFER `data_ptr`
 # POINTS AT, so a reader must read that buffer, and that buffer must outlive
@@ -102,7 +106,7 @@
 # scattered source, and nothing measured says otherwise), and so does the
 # DICTIONARY arm.
 #
-# P IS NOT `worker_count`. P is capped at `_PHASEB_MAX_SHARDS` and is a
+# ⛔ P IS NOT `worker_count`. P is capped at `_PHASEB_MAX_SHARDS` and is a
 # power of two because the shard index is a mask of the hash's high bits.
 #
 # Safety
@@ -168,7 +172,7 @@ comptime _PHASEB_MAX_SHARDS: Int = 16
 comptime _PHASEB_MIN_ROWS: Int = 1_048_576
 
 # L2: fewest distinct values one merge task is worth. Below it the task count
-# shrinks (to ONE task for a few-thousand-value dictionary — the skewed-key query has 165), so
+# shrinks (to ONE task for a few-thousand-value dictionary — cbq10 has 165), so
 # a low-cardinality key pays one dispatch, not W.
 comptime _PARB_MERGE_MIN_PER_TASK: Int = 16_384
 
@@ -803,7 +807,7 @@ def _assign_dict_ids_parallel[
     out of the dispatch State, which owns it for the dispatches).
     `out_rev_starts` / `out_rev_lens` must be empty on entry and are REPLACED.
 
-    L3: THERE IS NO ARENA. `out_rev_starts[d]` is an offset into the byte
+    ⚠ L3: THERE IS NO ARENA. `out_rev_starts[d]` is an offset into the byte
     buffer `data_ptr` addresses — the source column's own value buffer — so
     dict id `d`'s bytes are `data_ptr[out_rev_starts[d] : + out_rev_lens[d]]`
     and the caller must read them there, while that buffer is alive.
@@ -872,8 +876,8 @@ def _assign_dict_ids_parallel[
     _parb_merge_plan(
         state.sh_first_row[], total, num_rows, n_tasks, split_lo, split_g0
     )
-    # UNINITIALISED on purpose (a zero-fill here would be serial
-    # first-touch of a large buffer): the plan's slices PARTITION every shard
+    # UNINITIALISED on purpose (measured: a zero-fill here was 21-99 ms of
+    # serial first-touch on cbq13): the plan's slices PARTITION every shard
     # list and its id ranges tile [0, total), so the merge writes every
     # `gid_of[p][i]` and every `rev_starts[g]` / `rev_lens[g]` exactly once.
     var gid_of = List[List[Int]](capacity=p_shards)

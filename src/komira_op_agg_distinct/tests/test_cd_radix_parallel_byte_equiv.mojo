@@ -380,7 +380,7 @@ def test_large_n_multi_disjoint_runs_sum() raises:
 # end-to-end through the real driver, where a broken map inflates the count by
 # the repetition factor rather than merely disagreeing with a formula.
 #
-# NON-POWER-OF-TWO `nw` IS THE CASE THAT MATTERS, and the rest of this file
+# ⚠ NON-POWER-OF-TWO `nw` IS THE CASE THAT MATTERS, and the rest of this file
 # does not cover it: `_make_runtime(8)` is a power of two and production runs 22
 # workers. Every fixture below uses non-power-of-two worker counts.
 # =============================================================================
