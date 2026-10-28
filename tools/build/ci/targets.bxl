@@ -1,0 +1,58 @@
+# Writes ci/targets.bzl and its shards ci/targets/shard_<n>.bzl: the roots of
+# the check set (TARGETS) and the standalone tests among them (TESTS), which
+# `//ci:pr` (ci/BUCK) holds. ci/targets.bzl loads the shards and exposes the two
+# lists; the rows of a package are in the shard its path hashes to
+# (ci_graph.bzl SHARDS, shard_of), so no file grows past the line limit as
+# packages are added.
+#
+#   cp -rL --no-preserve=mode "$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate)"/. ci/
+#
+# A BXL script cannot write the source tree. It builds the files into one
+# directory of buck-out (a scratch copy, so a failed generation leaves the
+# checked-in files as they are: never redirect onto ci/targets.bzl, which
+# empties it before this script, which loads it, runs) and prints that
+# directory; the `cp` is the one shell element. The files are checked in, and
+# `guard.bxl:check` fails the pull request check when they are out of date.
+# Regenerate after adding or removing a package or a target no other target
+# depends on.
+#
+# TARGETS: every check of the scope (UNIVERSE of rules.bzl) that no other
+# check depends on; building them builds every other check, as a
+# dependency. A check is a target of any kind but a source (SOURCE_KINDS).
+# An execution-platform registration (defs.bzl) does not remove what it names from
+# the roots (ci_graph.bzl REGISTRATION_KINDS): the macOS platform it names only
+# when `[komira_re]` has a macOS worker, and the list is the same either way.
+# EXCLUDED of rules.bzl names the checks left out on purpose (Python that is
+# not the Python SDK's); `guard.bxl` leaves the same ones out and
+# `python_guard.bxl` fails when the aggregate reaches one anyway.
+# TESTS: the roots Buck2 can run as a test (they provide
+# ExternalRunnerTestInfo), the list `buck2 test //ci:pr` follows.
+#
+# Option: --scope <patterns> (default UNIVERSE).
+
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":ci_graph.bzl", "check_nodes", "render_all", "roots")
+load(":rules.bzl", "AGGREGATE", "EXCLUDED", "UNIVERSE")
+
+def _is_test(ctx, node):
+    if "test" not in node.rule_type.split(":")[-1]:
+        return False
+    return ExternalRunnerTestInfo in ctx.analysis(node).providers()
+
+def _generate(ctx):
+    scope = ctx.cli_args.scope or UNIVERSE
+    nodes = check_nodes(ctx, scope, AGGREGATE.split(":")[0] + ":", [p for p, _ in EXCLUDED])
+    labels = roots(nodes)
+    tests = [l for l in labels if _is_test(ctx, nodes[l])]
+    actions = ctx.bxl_actions(exec_compatible_with = LINUX_X86_64).actions
+    files = {}
+    for path, lines in render_all(labels, tests).items():
+        rel = path[len("ci/"):]
+        files[rel] = actions.write("targets_gen/files/" + rel, "\n".join(lines) + "\n")
+    out = actions.symlinked_dir("targets_gen/dir", files)
+    ctx.output.print(ctx.output.ensure(out).abs_path())
+
+generate = bxl_main(
+    impl = _generate,
+    cli_args = {"scope": cli_args.list(cli_args.string(), default = [])},
+)

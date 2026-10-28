@@ -1,0 +1,7 @@
+# one
+
+A fixture of release_readme_test (BUCK): one example.
+
+```mojo
+print(1)
+```

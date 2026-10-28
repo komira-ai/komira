@@ -15,7 +15,7 @@
 # borrows (dispatcher, caches, slot pools) stays on the concrete context.
 # =============================================================================
 
-from komira_engine_runtime.host_profile import HostProfile
+from komira_host_profile.host_profile import HostProfile
 
 
 trait RunContext:

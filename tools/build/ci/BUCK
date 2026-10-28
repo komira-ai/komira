@@ -1,83 +1,151 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
-# affected: the targets a change affects, and the units of the release
-# template it reaches (see affected.mojo). The mapping is `change_map`, a
-# pure function over a `Graph`; its unit tests answer the graph from tables,
-# and are welded: nothing builds against the package while one fails.
-#
-# What the mapping widens on is DATA, `rules.txt`; the test that reads the
-# shipped file holds it to the cases that must never be left out (the build
-# system, the prelude, the pinned buck2, the project configuration).
+# The BXL selector of the pull request check (affected.bxl, affected.bzl) and the
+# aggregate's generator and guards (targets.bxl, guard.bxl, python_guard.bxl) are
+# scripts, not targets; cases.bxl holds their cases. The rows the selector widens
+# and treats as inert on are data in rules.bzl (README.md).
+
+# assert_remote: reads the output of one ./buck2 run and exits non-zero unless
+# every action ran on the farm (assert_remote.zig says what buck2 prints and
+# what is accepted). The CI action `buck2-farm` runs it over the run's log.
+# Its cases are recorded buck2 output (assert_remote/fixtures); welded: the
+# tool is built only when they pass.
+zig_test(
+    name = "assert_remote_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "assert_remote/assert_remote_test.zig",
+    imports = [
+        "assert_remote/assert_remote.zig",
+        "assert_remote/fixtures/build_cached.log",
+        "assert_remote/fixtures/build_failed_unknown_target.log",
+        "assert_remote/fixtures/build_remote.log",
+        "assert_remote/fixtures/bxl_cached.log",
+        "assert_remote/fixtures/bxl_remote.log",
+        "assert_remote/fixtures/test_cached_remote.log",
+        "assert_remote/fixtures/test_none_ran.log",
+    ],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "assert_remote",
+    exec_compatible_with = LINUX_X86_64,
+    src = "assert_remote/assert_remote.zig",
+    unit_tests = [":assert_remote_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# The recorded buck2 output of assert_remote's cases, as a directory, for the
+# cases of the CI action that runs it (//:buck2_farm_cases).
 export_file(
-    name = "rules.txt",
+    name = "assert_remote_fixtures",
+    src = "assert_remote/fixtures",
+    visibility = ["//:buck2_farm_cases"],
+)
+
+# What the cases of the buck2-farm action run as `./buck2`: it prints a
+# recorded log and exits as told (assert_remote/stand_in_buck2.zig).
+zig_exe(
+    name = "stand_in_buck2",
+    exec_compatible_with = LINUX_X86_64,
+    src = "assert_remote/stand_in_buck2.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["//:buck2_farm_cases"],
+)
+
+# release_beta_version: gives every member of a mopm workspace one version
+# (0.1.<run number>) and the exact pins between members with it, so each push
+# to main publishes to the prod registry under a version it has not seen
+# (release_beta_version.zig says what it edits and refuses). release.yml's
+# `mopm-stage` job builds it and runs it, before the stage. (The name is from the
+# time the per-push publish went to a beta registry; the target is kept so its
+# label and action keys do not move.)
+# Its cases run on scratch workspaces; welded: the tool is built only when they pass.
+zig_test(
+    name = "release_beta_version_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "release_beta_version/release_beta_version_test.zig",
+    imports = ["release_beta_version/release_beta_version.zig"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "release_beta_version",
+    exec_compatible_with = LINUX_X86_64,
+    src = "release_beta_version/release_beta_version.zig",
+    unit_tests = [":release_beta_version_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 
-mojo_library(
-    name = "change_map",
-    srcs = [
-        "change_map/__init__.mojo",
-        "change_map/cells.mojo",
-        "change_map/derive.mojo",
-        "change_map/graph.mojo",
-        "change_map/labels.mojo",
-        "change_map/plan.mojo",
-        "change_map/process.mojo",
-        "change_map/report.mojo",
-        "change_map/rules.mojo",
-        "change_map/units.mojo",
+# release_beta_fetch: the plan reader and the registry client that release_staged_verify
+# (below) imports (release_beta_fetch.zig says what it reads, asks and refuses). It is no
+# longer built as a binary of its own: release.yml has no beta job to run it. Its cases run
+# against a registry in memory and a socket on loopback.
+zig_test(
+    name = "release_beta_fetch_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "release_beta_fetch/release_beta_fetch_test.zig",
+    imports = ["release_beta_fetch/release_beta_fetch.zig"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# release_staged_verify: the two checks of the prod publish that write nothing to a registry
+# (release_staged_verify.zig says what each reads and refuses). release.yml's `prod-test`
+# job runs `verify` on the staged set `prod-stage` uploaded, before anything is committed, and
+# writes the directory the README e2e runs on; `prod-smoke` runs `smoke` against the prod channel
+# once the group is visible. It reads the plan and the client of release_beta_fetch.zig, which
+# sits beside it. Its cases run on scratch directories and a registry in memory; welded: the
+# tool is built only when they pass.
+zig_test(
+    name = "release_staged_verify_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "release_beta_fetch/release_staged_verify_test.zig",
+    imports = [
+        "release_beta_fetch/release_staged_verify.zig",
+        "release_beta_fetch/release_beta_fetch.zig",
     ],
-    deps = [
-        "//tools/build/inspect:buildtools",
-    ],
-    test_srcs = [
-        # every file shape against a table graph: leaf source, .bzl, BUCK,
-        # deleted, toolchain, ownerless, inert, empty, and every failure
-        "tests/test_plan.mojo",
-        # the patterns, the data file's grammar, the cell table, the labels
-        "tests/test_rules_cells_labels.mojo",
-        # kci's protocol and the JSON and text renderings
-        "tests/test_units_and_report.mojo",
-        # the shipped rules.txt widens on what must never be left out
-        "tests/test_rules_file.mojo",
-        # a real process: streams kept apart, exit code, quoting, a program that is not there
-        "tests/test_process.mojo",
-        # derive_checks: every naming and grouping rule, each a table row
-        "tests/test_derive_naming.mojo",
-        # derive_checks: the answer kci reads, BROKEN for any failed query
-        "tests/test_derive_answer.mojo",
-    ],
-    test_data = {
-        "tests/test_plan.mojo": {
-            "tools/build/ci/rules.txt": ":rules.txt",
-        },
-        "tests/test_rules_file.mojo": {
-            "tools/build/ci/rules.txt": ":rules.txt",
-        },
-    },
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "release_staged_verify",
+    exec_compatible_with = LINUX_X86_64,
+    src = "release_beta_fetch/release_staged_verify.zig",
+    imports = ["release_beta_fetch/release_beta_fetch.zig"],
+    unit_tests = [":release_staged_verify_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )
 
-mojo_binary(
-    name = "affected",
-    srcs = ["affected.mojo"],
-    deps = [
-        ":change_map",
-        "//tools/build/inspect:buildtools",
-    ],
-    visibility = ["PUBLIC"],
+# lock_graphs: the action of lock_graphs.bxl, which holds the graphs a package's
+# buildrules.mojo.lock.bzl commits (one per platform subdir) to the subdirs its
+# mopm.lock records. Built behind its unit tests.
+zig_test(
+    name = "lock_graphs_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "lock_graphs_test.zig",
+    imports = ["lock_graphs.zig"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
 )
 
-# derive_checks: the `derive_checks` command of the buck2 build system in
-# release/artifacts.textproto, the checks the per-change check derives from
-# the live graph (change_map/derive.mojo). Its naming and its answer are
-# change_map's welded tests.
-mojo_binary(
-    name = "derive_checks",
-    srcs = ["derive_checks.mojo"],
-    deps = [
-        ":change_map",
-        "//tools/build/inspect:buildtools",
-    ],
+zig_exe(
+    name = "lock_graphs",
+    exec_compatible_with = LINUX_X86_64,
+    src = "lock_graphs.zig",
+    unit_tests = [":lock_graphs_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )

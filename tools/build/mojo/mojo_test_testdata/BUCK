@@ -2,7 +2,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_test")
 
 # mojo_test under `buck2 test` (tools/build/mojo/README.md, "Test data,
 # environment and scratch"): the pull-request check runs `buck2 test` over
-# every target of the komira cell (release/ci/build_targets.sh), so these
+# the affected targets of the komira cell (.github/workflows/pr.yml), so these
 # tests run there. Only the standard library is used. The library half of
 # the contract, and its planted defects, are tests//functional/test_data and
 # tests//negative/test_data.

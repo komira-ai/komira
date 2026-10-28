@@ -36,11 +36,16 @@
 #          $ORIGIN/../lib.
 #
 # A closure with no native file has no arguments and no block. Equal means
-# word for word, in order.
+# word for word, in order. `links_static`: the build words link a static
+# archive the run words do not (komira_log's holder); such a README runs
+# built, never under `mojo run` (native_rows.mojo `run_readme`).
+# `closure_names`: the closure's published names, for the codecs it opens
+# (request.mojo `closure_codecs`).
 #
 # THE ARGUMENTS RUN: the README's `run` words, with the text `$CONDA_PREFIX`
 # replaced by the environment's directory (the tool keeps it as written; no
-# shell runs, so kci puts in what a shell would).
+# shell runs, so kci puts in what a shell would); the `build` words the same
+# way for the native `built` row (`build_link_args`).
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -146,6 +151,30 @@ def _closure(nodes: List[LinkNode], root: Int) -> List[Int]:
                 out.append(at)
         k += 1
     return out^
+
+
+def closure_names(nodes: List[LinkNode], root: String) raises -> List[String]:
+    """The published names of library `root`'s closure (file header), `root`
+    first. RAISES when `root` is not a node."""
+    var r = _index(nodes, root)
+    if r < 0:
+        raise Error(String("'") + root + String("' is not a library of the release set"))
+    var members = _closure(nodes, r)
+    var out = List[String]()
+    for i in range(len(members)):
+        out.append(nodes[members[i]].name.copy())
+    return out^
+
+
+def links_static(args: LinkArgs) -> Bool:
+    """Whether the `build` words link a library the `run` words do not: a
+    static archive of the closure (komira_log's holder), which `mojo run`
+    cannot load (the JIT links no archive), so the README must be built
+    (native_rows.mojo `run_readme`)."""
+    for i in range(len(args.build)):
+        if args.build[i].startswith(String("-l")) and not _has(args.run, args.build[i]):
+            return True
+    return False
 
 
 def _shared_count(nodes: List[LinkNode], members: List[Int]) -> Int:
@@ -312,4 +341,14 @@ def run_link_args(got: LinkArgs, env_dir: String) -> List[String]:
     var out = List[String]()
     for i in range(len(got.run)):
         out.append(got.run[i].replace(String(CONDA_PREFIX_TEXT), env_dir))
+    return out^
+
+
+def build_link_args(got: LinkArgs, env_dir: String) -> List[String]:
+    """The README's `build` arguments with `$CONDA_PREFIX` replaced by
+    `env_dir` (file header): what the native `built` row
+    (native_rows.mojo) gives `mojo build`."""
+    var out = List[String]()
+    for i in range(len(got.build)):
+        out.append(got.build[i].replace(String(CONDA_PREFIX_TEXT), env_dir))
     return out^

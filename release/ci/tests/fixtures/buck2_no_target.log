@@ -1,0 +1,10 @@
+2026-10-12T08:14:02.1180007Z [2026-10-12T08:14:02.117+00:00] Build ID: 0d5c7a64-2e0b-4c0e-9d51-6f1c3b7d9a11
+2026-10-12T08:14:03.4412220Z [2026-10-12T08:14:03.440+00:00] Error running analysis for `komira//src/komira_demo:komira_demo (komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be)`
+2026-10-12T08:14:03.4412901Z [2026-10-12T08:14:03.440+00:00] 
+2026-10-12T08:14:03.4413355Z [2026-10-12T08:14:03.440+00:00] Caused by:
+2026-10-12T08:14:03.4413702Z [2026-10-12T08:14:03.440+00:00]     0: Traceback (most recent call last):
+2026-10-12T08:14:03.4414088Z [2026-10-12T08:14:03.440+00:00]          File <builtin>, line 0, in <module>
+2026-10-12T08:14:03.4414446Z [2026-10-12T08:14:03.440+00:00]        error: Object of type `NoneType` has no attribute `provider`
+2026-10-12T08:14:03.4420110Z [2026-10-12T08:14:03.441+00:00]
+2026-10-12T08:14:03.4421020Z BUILD FAILED
+2026-10-12T08:14:03.4430400Z ##[error]Process completed with exit code 1.

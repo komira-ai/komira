@@ -1,9 +1,9 @@
 # =============================================================================
 # komira_git_protocol_conformance/transcript.mojo -- one scenario of the pinned
-# git's transcripts (capture.sh), loaded from the test's share/transcripts/.
+# git's transcripts (capture.zig), loaded from the test's share/transcripts/.
 # =============================================================================
 #
-# A scenario is what capture.sh recorded: for each connection the bytes the
+# A scenario is what capture.zig recorded: for each connection the bytes the
 # git client wrote (`conn<n>.req`) and the bytes the git server wrote back
 # (`conn<n>.resp`), and the server repository as it was before the exchange
 # (refs, HEAD, objects, parents, tags), plus the client's shallow list and

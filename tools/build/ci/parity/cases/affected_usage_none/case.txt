@@ -1,4 +1,0 @@
-# No argument: usage, exit 2.
-file ".buckconfig" %buckconfig
-file "tools/build/ci/rules.txt" %rules.txt
-exit 2
