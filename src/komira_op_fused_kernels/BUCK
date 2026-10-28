@@ -1,0 +1,32 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The INNER join kernels that fuse a probe with its output:
+# the parallel single-INT64-key probes of a chained or perfect-hash join over
+# the engine's dispatcher; the single-pass fused join that writes output rows
+# during the chain walk (all columns, or a projection); the chunked join that
+# probes into chunks of index pairs and gathers per column; which inputs
+# those two can carry.
+mojo_library(
+    name = "komira_op_fused_kernels",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_engine_runtime:komira_engine_runtime",
+        "//src/komira_join_assembly:komira_join_assembly",
+        "//src/komira_op_join_build:komira_op_join_build",
+    ],
+    test_srcs = [
+        "tests/test_grow_fixed_width_buffers.mojo",
+        "tests/test_join_chunked_gather.mojo",
+        "tests/test_join_fused_gather.mojo",
+        "tests/test_join_fused_route.mojo",
+        "tests/test_parallel_inner_probe.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

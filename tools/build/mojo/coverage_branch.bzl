@@ -5,20 +5,20 @@ With `coverage_branch` set (coverage.bzl, coverage_kwargs: the switch on,
 linux-x86_64), per `test_srcs` entry that is a source file:
 
 - `[coverage][bc][<test>]` (category `mojo_emit_cov_bc`): the test compiled
-  by mojo_wrapper.sh as its coverage binary is (`[coverage][bin]`: -O0, line
+  by mojo_compile as its coverage binary is (`[coverage][bin]`: -O0, line
   tables, the same `-D` assert level and `test_defines`, the same closure,
   `test_deps` included, and source root), but
   emitted as LLVM bitcode, `cov/branch/<test>.bc`;
 - `[coverage][pgo_bin][<test>]` (category `mojo_cov_pgo_link`): that
   bitcode instrumented with IR profile counters by Mojo's lld and linked as a
-  release test is, with the profile runtime (cov_branch_link.sh),
+  release test is, with the profile runtime (`cov_branch link`),
   `cov/branch/<test>`;
 - `[coverage][branch][<test>]` (category `mojo_cov_branch_run`): the merged
   profile of its run through the release gate's runner (`cov_branch run`),
   `cov/branch/<test>.profdata`;
 - `[coverage][branch_ir][<test>]` (category `mojo_cov_branch_annotate`): the
   bitcode with that profile applied by Mojo's lld, as IR text whose branches
-  carry their counts (cov_branch_annotate.sh, which also reads the binary:
+  carry their counts (`cov_branch annotate`, which also reads the binary:
   the profile must hold exactly the functions it links), `cov/branch/<test>.ll`;
 - `[coverage][branch_info][<test>]` (category `mojo_cov_branch_classify`):
   the branches of the library's measured sources in that IR, each a source
@@ -46,12 +46,13 @@ def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, 
     `mojo_cmd` defs.bzl's _mojo_cmd, `link_tail` the C libraries of the
     test's link, `test_deps` included (or None), `data` its staged data,
     `env_args` its runner's --env arguments, `src_dir` the library's [src]
-    (the directory its package is compiled from, so the name its sources have
-    in the IR), `src_repo` the repository directory of those sources (ending
-    in `/`), `gen` the paths in `src_dir` of its generated sources, which
-    are not measured, and `defines` the `-D` arguments of the test's builds
-    (defs.bzl's test_defines: its assert level and `test_defines`), so the
-    bitcode is the program the gate ran, compiled as its coverage binary is."""
+    (it ends in src/<import>; the package is compiled from its parent, so
+    the IR names its sources `<import>/<file>`), `src_repo` the repository
+    directory of those sources (ending in `/`), `gen` the paths in `src_dir`
+    of its generated sources, which are not measured, and `defines` the
+    `-D` arguments of the test's builds (defs.bzl's test_defines: its assert
+    level and `test_defines`), so the bitcode is the program the gate ran,
+    compiled as its coverage binary is."""
     where = "{}: branch coverage of {}".format(ctx.label.raw_target(), t.short_path)
     if "LLVM_PROFILE_FILE" in ctx.attrs.test_env:
         fail("{}: test_env sets LLVM_PROFILE_FILE, which a branch coverage run sets itself (where the test's profile is written)".format(where))
@@ -87,16 +88,27 @@ def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, 
     exe = ctx.actions.declare_output("cov/branch/{}".format(stem))
     ctx.actions.run(
         cmd_args(
+            link_dir.project("cov_branch"),
+            "link",
+            "--busybox",
             tc.busybox,
-            "sh",
-            link_dir.project("cov_branch_link.sh"),
-            tc.busybox,
+            "--compiler",
             tc.compiler,
+            "--zig",
             tc.link,
+            "--target",
             tc.cc_target,
+            "--lld",
+            link_dir.project("lld/bin/lld"),
+            "--runtime",
+            link_dir.project("llvm/runtime/libclang_rt.profile-x86_64.a"),
+            "--bitcode",
             bc,
+            "--out",
             exe.as_output(),
-            link_tail if link_tail else [],
+            # The C libraries of the test's link, as mojo_compile's
+            # --link-tail appends them.
+            ["--", link_tail] if link_tail else [],
             hidden = link_dir,
         ),
         category = "mojo_cov_pgo_link",
@@ -111,10 +123,10 @@ def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, 
             "run",
             "--busybox",
             tc.busybox,
-            # gate_runner.sh, the release gate's runner (the mojo rules'),
-            # which cov_branch runs as `<busybox> sh <gate_runner.sh> ...`.
-            "--gate-runner",
-            tc.gate_runner,
+            # The gate (tools/build/run), the release gate's runner, which
+            # cov_branch runs as `<gate> mojo ...` (test_runtime.bzl, gate_mojo).
+            "--gate",
+            tc.gate,
             "--compiler",
             tc.compiler,
             "--label",
@@ -137,13 +149,19 @@ def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, 
     ir = ctx.actions.declare_output("cov/branch/{}.ll".format(stem))
     ctx.actions.run(
         cmd_args(
-            tc.busybox,
-            "sh",
-            annotate_dir.project("cov_branch_annotate.sh"),
-            tc.busybox,
+            annotate_dir.project("cov_branch"),
+            "annotate",
+            "--lld",
+            annotate_dir.project("lld/bin/lld"),
+            "--profdata",
+            annotate_dir.project("llvm/bin/llvm-profdata"),
+            "--bitcode",
             bc,
+            "--profile",
             profdata,
+            "--binary",
             exe,
+            "--out",
             ir.as_output(),
             hidden = annotate_dir,
         ),
@@ -151,9 +169,19 @@ def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, 
         identifier = stem,
     )
 
-    # The library's sources are named in the IR by their path in [src] (the
-    # package is compiled from it, by a relative path), and read there: the
-    # classifier reads the token of each branch's line and column.
+    # The library's sources are named in the IR `<import>/<file>` (the
+    # package is compiled from the parent of [src], which ends in
+    # src/<import>), and read in [src]: the classifier reads the token of
+    # each branch's line and column. So is every other package of the
+    # closure, `test_deps` included (`<its import>/<file>`), which is not
+    # measured: an --exclude each, named by its `.mojoc`.
+    import_name = src_dir.basename
+    others = {}
+    for ts in closure_tsets:
+        for pkg in ts.traverse():
+            dep = pkg.basename.removesuffix(".mojoc")
+            if dep != import_name:
+                others[dep] = True
     info = ctx.actions.declare_output("cov/branch/{}.info".format(stem))
     ctx.actions.run(
         cmd_args(
@@ -163,17 +191,20 @@ def coverage_branch(ctx, tc, t, stem, closure_tsets, mojo_cmd, link_tail, data, 
             "--out",
             info.as_output(),
             "--map",
-            cmd_args(src_dir, format = "{}/=" + src_repo),
+            "{}/={}".format(import_name, src_repo),
+            "--src",
+            cmd_args(src_dir, format = "{}/"),
             [["--gen", g] for g in gen],
             # Where the standard library's sources are named: a String's
             # last-reference test is its code inlined at the branch.
             "--stdlib",
             "oss/modular/",
-            # The standard library, the closure's other libraries (each a
-            # [src] under buck-out/), the test itself and the compile unit
-            # with no file are not measured.
+            # The standard library, the closure's other packages, anything
+            # under buck-out/, the test itself and the compile unit with no
+            # file are not measured.
             "--exclude",
             "oss/modular/",
+            [["--exclude", d + "/"] for d in sorted(others)],
             "--exclude",
             "buck-out/",
             "--exclude-file",

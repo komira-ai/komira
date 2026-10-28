@@ -1,13 +1,13 @@
 # =============================================================================
 # test_top_n_state_column_native_transparency.mojo
 #
-# P-2.B.2a transparency gate for the TopN full-row state (`top_n_state.mojo`,
-# the variadic `TopN[*Keys, *Payloads]` breaker) column-native migration. The
-# migrated `drain_to_record_batch` produces a ColumnNativeBatch internally and
-# bridges to RecordBatch at the breaker output via the P-2.A shim. Because the
-# ColumnNativeBatch body IS a THSPLC chunk, the lift+lower is byte-identical to a
-# spill/restore round-trip, so the migrated drain is byte-identical to the prior
-# direct RecordBatch drain.
+# Bridge round-trip gate for the output shape of the top_n_state breaker. It builds
+# a RecordBatch shaped like that breaker's output by hand (no operator state is
+# reached: this package depends on no operator), moves it through
+# column_native_from_record_batch and record_batch_from_column_native, and
+# asserts the result is byte-equal to the input. It proves the bridge keeps
+# values, validity, offsets and schema flags for this shape; it does not prove
+# that an operator's column-native result equals its RecordBatch result.
 #
 # This breaker drains FULL ROWS [k0..kK-1, payload0..payloadM-1]. The bridge
 # transparency below covers its representative output shapes: composite keys +

@@ -367,46 +367,60 @@ def test_register_timer_monotone_biased() raises:
 
 
 def test_real_timer_deadline_fires() raises:
-    """A short real deadline becomes is_ready() after a blocking run_once whose
-    timeout exceeds it; a non-blocking run_once BEFORE the deadline does NOT
-    report it ready. Linux (timerfd) primary; macOS (EVFILT_TIMER) compile-
-    guarded. On a non-timer backend the test is skipped (returns early)."""
+    """A short real deadline becomes is_ready() after a blocking run_once with no
+    timeout; a timer whose deadline is far away is NOT reported
+    ready by either the non-blocking or the blocking run_once. Linux (timerfd)
+    primary; macOS (EVFILT_TIMER) compile-guarded. On a non-timer backend the
+    test is skipped (returns early).
+
+    The "not yet ready" check uses a deadline of 60 s rather than a short one:
+    a short deadline can expire between register_timer and the poll on a
+    loaded machine, which would make the check depend on scheduling speed."""
     if not _has_real_timer():
         return
     var r = Reactor[NoopSink](NoopSink(_placeholder=UInt8(0)), _real_timer_backend())
-    # 5 ms deadline.
+    # 5 ms deadline, and a 60 s deadline that cannot expire during the test.
     var op = r.register_timer(Int64(5_000_000))
+    var far = r.register_timer(Int64(60_000_000_000))
     assert_true(op >= OP_ID_ALLOC_BASE)
+    assert_true(far >= OP_ID_ALLOC_BASE)
 
-    # Non-blocking poll immediately: the deadline has NOT elapsed -> not ready.
+    # Non-blocking poll: the far deadline has NOT elapsed -> not ready.
     var n0 = r.run_once(timeout_us=Int32(0))
-    assert_false(r.is_ready(op))
+    assert_false(r.is_ready(far))
     _ = n0
 
-    # Blocking run_once with a generous timeout (50 ms) — the 5 ms deadline
-    # MUST fire within it. The completion routes through the SAME demux as a
-    # read: marks the slot ready + fires the sink.
-    var n1 = r.run_once(timeout_us=Int32(50_000))
+    # Blocking run_once with no timeout: it returns when the 5 ms timer fires,
+    # and a timer that never fires hangs here (the build gate's hang limit
+    # stops the run). The completion routes through the SAME demux as a read:
+    # marks the slot ready + fires the sink.
+    var n1 = r.run_once(timeout_us=Int32(-1))
     assert_true(n1 >= 1)
     assert_true(r.is_ready(op))
+    # The far deadline is still pending after the near one fired.
+    assert_false(r.is_ready(far))
 
     r.deregister(op)
+    r.deregister(far)
 
 
 def test_real_timer_two_concurrent_deadlines() raises:
     """Two timers with different deadlines: the short one fires first; only the
-    fired op reports ready until the longer deadline elapses."""
+    fired op reports ready until the longer deadline elapses. The long deadline
+    is 60 s so it cannot expire however slowly the test is scheduled."""
     if not _has_real_timer():
         return
     var r = Reactor[NoopSink](NoopSink(_placeholder=UInt8(0)), _real_timer_backend())
-    var short_op = r.register_timer(Int64(3_000_000))    # 3 ms
-    var long_op = r.register_timer(Int64(100_000_000))   # 100 ms
+    var short_op = r.register_timer(Int64(3_000_000))           # 3 ms
+    var long_op = r.register_timer(Int64(60_000_000_000))       # 60 s
 
-    # Block up to 40 ms: the short timer fires, the long one does not.
-    var n = r.run_once(timeout_us=Int32(40_000))
+    # Block (no timeout) until the short timer fires: the short one fires, the
+    # long one does not.
+    var n = r.run_once(timeout_us=Int32(-1))
     assert_true(n >= 1)
     assert_true(r.is_ready(short_op))
     assert_false(r.is_ready(long_op))
+
 
     r.deregister(short_op)
     r.deregister(long_op)
@@ -449,15 +463,12 @@ def test_full_lifecycle_real_timer() raises:
     assert_false(pool[].is_vacated(lease))
     assert_equal(pool[].in_use_count(), 1)
 
-    # Drive the reactor until the deadline fires.
-    var fired = False
-    for _attempt in range(20):
-        var n = r.run_once(timeout_us=Int32(20_000))
-        _ = n
-        if r.is_ready(parked_op):
-            fired = True
-            break
-    assert_true(fired)
+    # Block in the reactor until the deadline fires. No attempt cap and no
+    # timeout: the timer's expiry wakes the poll; a timer that never fires is a
+    # hang, which the build gate's hang limit fails.
+    while not r.is_ready(parked_op):
+        _ = r.run_once(timeout_us=Int32(-1))
+    assert_true(r.is_ready(parked_op))
 
     # Resume: deadline fired -> re-acquire + next burst -> re-park (burst 1).
     var sr1 = sm.step[NoopSink](r)
@@ -466,13 +477,9 @@ def test_full_lifecycle_real_timer() raises:
     var parked_op1 = sr1.op_id()
 
     # Drive to the 2nd deadline.
-    var fired1 = False
-    for _attempt in range(20):
-        _ = r.run_once(timeout_us=Int32(20_000))
-        if r.is_ready(parked_op1):
-            fired1 = True
-            break
-    assert_true(fired1)
+    while not r.is_ready(parked_op1):
+        _ = r.run_once(timeout_us=Int32(-1))
+    assert_true(r.is_ready(parked_op1))
 
     # Resume: burst 2 -> terminal (bursts_remaining hits 0).
     var sr2 = sm.step[NoopSink](r)

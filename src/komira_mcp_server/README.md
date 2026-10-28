@@ -25,7 +25,7 @@ raised, is a result with `isError: true`; an unknown resource is
 A server with one tool:
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true, assert_false -->
-```mojo
+```mojo module
 from komira_json import JsonValue, parse_json_value
 from komira_mcp_server import McpServer, NoResources, ServerInfo, Tool, ToolProvider, ToolResult
 from komira_mcp_server import MCP_LATEST_PROTOCOL_VERSION
@@ -60,58 +60,94 @@ struct Greeter(ToolProvider):
         return ToolResult.text("hello, " + arguments.get("who").as_string())
 
 
-var server = McpServer(ServerInfo("greeter", "1.0.0"), Greeter(), NoResources())
-var init = server.handle(
-    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1.0",'
-    + '"capabilities":{},"clientInfo":{"name":"demo","version":"0"}}}'
-)
-assert_true(server.is_initialized())
-# An unknown revision was asked for, so the newest one comes back.
-assert_equal(server.protocol_version(), MCP_LATEST_PROTOCOL_VERSION)
-assert_equal(
-    parse_json_value(init.value()).get("result").get("capabilities").serialize(),
-    '{"tools":{}}',
-)
-assert_false(Bool(server.handle('{"jsonrpc":"2.0","method":"notifications/initialized"}')))
+def main() raises:
+    var server = McpServer(ServerInfo("greeter", "1.0.0"), Greeter(), NoResources())
+    var init = server.handle(
+        '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1.0",'
+        + '"capabilities":{},"clientInfo":{"name":"demo","version":"0"}}}'
+    )
+    assert_true(server.is_initialized())
+    # An unknown revision was asked for, so the newest one comes back.
+    assert_equal(server.protocol_version(), MCP_LATEST_PROTOCOL_VERSION)
+    assert_equal(
+        parse_json_value(init.value()).get("result").get("capabilities").serialize(),
+        '{"tools":{}}',
+    )
+    assert_false(Bool(server.handle('{"jsonrpc":"2.0","method":"notifications/initialized"}')))
 
-var reply = server.handle(
-    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"greet","arguments":{"who":"ada"}}}'
-)
-assert_equal(
-    reply.value(),
-    '{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"hello, ada"}]}}',
-)
+    var reply = server.handle(
+        '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"greet","arguments":{"who":"ada"}}}'
+    )
+    assert_equal(
+        reply.value(),
+        '{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"hello, ada"}]}}',
+    )
 ```
 
 The negotiated revision, and the protocol errors:
 
-<!-- mojo-hidden from std.testing import assert_equal -->
-```mojo
+<!-- mojo-hidden
+from std.testing import assert_equal
+from komira_json import JsonValue, parse_json_value
+from komira_mcp_server import Tool, ToolProvider, ToolResult
+
+
+struct Greeter(ToolProvider):
+    def __init__(out self):
+        pass
+
+    def advertises_tools(self) -> Bool:
+        return True
+
+    def list_tools(self) raises -> List[Tool]:
+        var greet = Tool(
+            "greet",
+            parse_json_value(
+                '{"type":"object","properties":{"who":{"type":"string"}},"required":["who"]}'
+            ),
+        )
+        greet.description = String("Say hello")
+        var tools = List[Tool]()
+        tools.append(greet^)
+        return tools^
+
+    def call_tool(
+        mut self, name: String, arguments: JsonValue
+    ) raises -> Optional[ToolResult]:
+        if name != "greet":
+            return None  # the server answers "Unknown tool: <name>"
+        if not arguments.has("who"):
+            return ToolResult.error("greet needs who")
+        return ToolResult.text("hello, " + arguments.get("who").as_string())
+-->
+```mojo module
 from komira_mcp_server import MCP_LATEST_PROTOCOL_VERSION, McpServer, NoResources, ServerInfo
 
-var s = McpServer(ServerInfo("greeter", "1.0.0"), Greeter(), NoResources())
-assert_equal(
-    s.handle('{"jsonrpc":"2.0","id":1,"method":"tools/list"}').value(),
-    '{"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"Server not initialized"}}',
-)
-_ = s.handle(
-    '{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"'
-    + MCP_LATEST_PROTOCOL_VERSION
-    + '","capabilities":{},"clientInfo":{"name":"demo","version":"0"}}}'
-)
-assert_equal(s.protocol_version(), MCP_LATEST_PROTOCOL_VERSION)
-assert_equal(
-    s.handle('{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"nope"}}').value(),
-    '{"jsonrpc":"2.0","id":3,"error":{"code":-32602,"message":"Unknown tool: nope"}}',
-)
-assert_equal(
-    s.handle('{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"greet"}}').value(),
-    '{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"greet needs who"}],"isError":true}}',
-)
-assert_equal(
-    s.handle("not json").value(),
-    '{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Parse error"}}',
-)
+
+def main() raises:
+    var s = McpServer(ServerInfo("greeter", "1.0.0"), Greeter(), NoResources())
+    assert_equal(
+        s.handle('{"jsonrpc":"2.0","id":1,"method":"tools/list"}').value(),
+        '{"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"Server not initialized"}}',
+    )
+    _ = s.handle(
+        '{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"'
+        + MCP_LATEST_PROTOCOL_VERSION
+        + '","capabilities":{},"clientInfo":{"name":"demo","version":"0"}}}'
+    )
+    assert_equal(s.protocol_version(), MCP_LATEST_PROTOCOL_VERSION)
+    assert_equal(
+        s.handle('{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"nope"}}').value(),
+        '{"jsonrpc":"2.0","id":3,"error":{"code":-32602,"message":"Unknown tool: nope"}}',
+    )
+    assert_equal(
+        s.handle('{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"greet"}}').value(),
+        '{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"greet needs who"}],"isError":true}}',
+    )
+    assert_equal(
+        s.handle("not json").value(),
+        '{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Parse error"}}',
+    )
 ```
 
 Classifying a message without a server:
@@ -158,3 +194,34 @@ Welded (`test_srcs`), so they run whenever the library is built:
   params checks (each member missing and of the wrong type), the cursor
   refusal, and how provider raises map to replies, each error reply
   compared whole.
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_mcp_server`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_mcp_server/`, its tests are `tests/`. It depends on two packages,
+`komira_encoding` and `komira_json`, sibling directories (`[dependencies]` of `mopm.toml`: `{ path = "../komira_json",
+version = "0.1" }` and the same for `komira_encoding`), so the `.conda` of this package records
+`mojo-komira_encoding >=0.1,<0.2` and `mojo-komira_json >=0.1,<0.2` as dependencies and holds none of their files:
+installing `komira_mcp_server` installs both with it. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependencies and where the library and its tests are |
+| `mopm.lock` | the toolchain pins and the path dependencies (no registry is reached: both are siblings) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `coverage_floor.txt` | `lines NN.NN` and `branches NN.NN`: the least line and branch coverage `:coverage` may measure; `:coverage_floor` fails when either falls below, and above it passes and prints a hint to raise the figure |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifests of the siblings; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file, built from the `:lib` of the two siblings, and exists only once the tests have passed.
+After any change to a source, a test, a manifest of this package or of a sibling, run `buildrules mojo sync` with the
+three packages staged, commit what it writes, and build `komira//src/komira_mcp_server:lib` on the farm.
+
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
+(`mojo-komira_mcp_server-0.1.0-mojo1.0.0_0.conda`), packed with the siblings' manifests beside its own (`members`),
+which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is a step of a
+CI job that takes that file, not a build action.
+
+`:komira_mcp_server` is `:lib` as komira's Mojo rules take it (`mojo_adopted_library`): its `deps` are the adopted
+target of each package in `[dependencies]`, and the rule refuses a list that is not the closure `:lib` was built
+from. It also compiles and runs the README's examples above (`[tests][readme]`) against `:lib`; the tests are not run
+again.

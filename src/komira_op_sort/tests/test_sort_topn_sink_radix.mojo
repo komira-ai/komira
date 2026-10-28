@@ -1,28 +1,32 @@
 # =============================================================================
-# Regression tests for the Int64 single-key radix dispatch added to
-# `_sort_batch_single_key` in sort_topn_sink.mojo.
+# The single INT64 key route of the sort sink at and above the radix threshold
+# =============================================================================
 #
-# `_sort_batch_single_key` dispatches to `radix_sort_int64` when the row
-# count is >= RADIX_SORT_ROW_THRESHOLD (500_000), and falls back to
-# `sort_indices_int64` (merge sort) below that. Both paths must produce
-# identical ascending orders; descending is reversed.
+# `_execute_sort_sink` on one INT64 key radix-sorts a batch of
+# `RADIX_SORT_ROW_THRESHOLD` rows or more and merge-sorts a smaller one. The
+# sink tests run both sides of that boundary, ascending and descending, and
+# check the payload column too: equal keys keep their input order in both
+# directions, so the payload order does not depend on the row count.
 #
-# We test the dispatch indirectly by asserting:
-#   - radix_sort_int64 and sort_indices_int64 produce the same ascending
-#     permutation on small and threshold-sized inputs (byte-identical data order).
-#   - After a reverse, descending output is consistent.
-#   - Negative values sort correctly (validates sign-bit flip in radix).
-#
-# Kernel-level equivalence is enough to guarantee that the `_sort_batch_single_key`
-# switch is semantically a no-op for correctness (only a performance change).
+# The kernel tests check that `radix_sort_int64` and `sort_indices_int64`
+# agree on ascending order, that negative keys sort correctly, and that the
+# threshold is 500_000 rows.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
 
+from komira_arrow.arrow_types import ArrowType
+from komira_arrow.column import Column
 from komira_arrow.primitive_array import PrimitiveArray
+from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
+from komira_arrow.schema import Field, SchemaBuilder
+from komira_physical_plan.physical_plan import SortSinkData
 from komira_op_sort.sort import sort_indices_int64, gather_by_indices_int64
 from komira_op_sort.sort_radix import radix_sort_int64
-from komira_op_sort.sort_topn_sink import RADIX_SORT_ROW_THRESHOLD
+from komira_op_sort.sort_topn_sink import (
+    RADIX_SORT_ROW_THRESHOLD,
+    _execute_sort_sink,
+)
 
 
 def _compare_orders(
@@ -96,20 +100,168 @@ def test_radix_above_threshold_monotone() raises:
     var perm = radix_sort_int64(keys)
     var sorted_data = gather_by_indices_int64(keys, perm)
     var p = sorted_data._typed_ptr_mut()
-    # Spot-check monotone across the whole array
-    for i in range(0, sorted_data.length - 1, 10_000):
+    # Every adjacent pair is ordered.
+    for i in range(sorted_data.length - 1):
         assert_true(Int((p + i)[]) <= Int((p + i + 1)[]))
 
 
-def test_threshold_value_matches_v03() raises:
-    """Guard: the threshold constant is 500_000."""
+def test_radix_threshold_is_500000() raises:
+    """The radix threshold is 500_000 rows."""
     assert_equal(RADIX_SORT_ROW_THRESHOLD, 500_000)
 
 
+def _tied_fixture(n: Int) raises -> RecordBatch:
+    """`[k INT64, id INT64]`: `k` takes 1000 distinct values in -500..499
+    spread over all `n` rows (so every value repeats), `id` is the input row
+    number."""
+    var ks = PrimitiveArray[DType.int64].allocate(n)
+    var ids = PrimitiveArray[DType.int64].allocate(n)
+    for i in range(n):
+        ks.set_typed[Scalar[DType.int64]](i, Int64((i * 7919) % 1000) - 500)
+        ids.set_typed[Scalar[DType.int64]](i, Int64(i))
+    var builder = RecordBatchBuilder.with_capacity(2)
+    builder.add_column(Column.from_primitive[DType.int64](ks^))
+    builder.add_column(Column.from_primitive[DType.int64](ids^))
+    var sb = SchemaBuilder()
+    sb.add_field(Field("k", ArrowType.INT64, False))
+    sb.add_field(Field("id", ArrowType.INT64, False))
+    return builder.build(sb.build())
+
+
+def _sort_tied(n: Int, descending: Bool) raises -> RecordBatch:
+    var keys = List[String]()
+    keys.append(String("k"))
+    var desc = List[Bool]()
+    desc.append(descending)
+    return _execute_sort_sink(_tied_fixture(n), SortSinkData(keys^, desc^))
+
+
+def _key_at(rb: RecordBatch, row: Int) raises -> Int:
+    return Int(rb.column_as_primitive_int64(0).get_typed[Scalar[DType.int64]](row))
+
+
+def _id_at(rb: RecordBatch, row: Int) raises -> Int:
+    return Int(rb.column_as_primitive_int64(1).get_typed[Scalar[DType.int64]](row))
+
+
+def _assert_sorted_and_stable(
+    rb: RecordBatch, n: Int, descending: Bool
+) raises:
+    """Keys are ordered in the requested direction; within a run of equal
+    keys the payload (input row number) ascends; no row is lost."""
+    assert_equal(rb.num_rows(), n)
+    var id_sum = 0
+    for i in range(n):
+        id_sum += _id_at(rb, i)
+        if i == 0:
+            continue
+        var prev = _key_at(rb, i - 1)
+        var cur = _key_at(rb, i)
+        if descending:
+            assert_true(prev >= cur, "keys not descending at row " + String(i))
+        else:
+            assert_true(prev <= cur, "keys not ascending at row " + String(i))
+        if prev == cur:
+            assert_true(
+                _id_at(rb, i - 1) < _id_at(rb, i),
+                "equal keys left input order at row " + String(i),
+            )
+    assert_equal(id_sum, n * (n - 1) // 2, "payload is a permutation")
+
+
+def test_sink_ascending_at_threshold_is_sorted_and_stable() raises:
+    var n = RADIX_SORT_ROW_THRESHOLD
+    _assert_sorted_and_stable(_sort_tied(n, False), n, False)
+
+
+def test_sink_descending_at_threshold_is_sorted_and_stable() raises:
+    var n = RADIX_SORT_ROW_THRESHOLD
+    _assert_sorted_and_stable(_sort_tied(n, True), n, True)
+
+
+def test_sink_descending_below_threshold_is_sorted_and_stable() raises:
+    var n = RADIX_SORT_ROW_THRESHOLD - 1
+    _assert_sorted_and_stable(_sort_tied(n, True), n, True)
+
+
+def test_sink_at_threshold_puts_the_extreme_keys_first() raises:
+    """Ascending starts at the smallest key (-500), descending at the largest
+    (499)."""
+    var n = RADIX_SORT_ROW_THRESHOLD
+    assert_equal(_key_at(_sort_tied(n, False), 0), -500)
+    assert_equal(_key_at(_sort_tied(n, True), 0), 499)
+
+
+def _extremes_fixture(n: Int) raises -> RecordBatch:
+    """`[k INT64, id INT64]` like `_tied_fixture`, but rows 3 and 20 hold
+    INT64_MAX and rows 10 and 30 hold INT64_MIN."""
+    var ks = PrimitiveArray[DType.int64].allocate(n)
+    var ids = PrimitiveArray[DType.int64].allocate(n)
+    for i in range(n):
+        ks.set_typed[Scalar[DType.int64]](i, Int64((i * 7919) % 1000) - 500)
+        ids.set_typed[Scalar[DType.int64]](i, Int64(i))
+    ks.set_typed[Scalar[DType.int64]](3, Int64.MAX)
+    ks.set_typed[Scalar[DType.int64]](20, Int64.MAX)
+    ks.set_typed[Scalar[DType.int64]](10, Int64.MIN)
+    ks.set_typed[Scalar[DType.int64]](30, Int64.MIN)
+    var builder = RecordBatchBuilder.with_capacity(2)
+    builder.add_column(Column.from_primitive[DType.int64](ks^))
+    builder.add_column(Column.from_primitive[DType.int64](ids^))
+    var sb = SchemaBuilder()
+    sb.add_field(Field("k", ArrowType.INT64, False))
+    sb.add_field(Field("id", ArrowType.INT64, False))
+    return builder.build(sb.build())
+
+
+def _sort_extremes(n: Int, descending: Bool) raises -> RecordBatch:
+    var keys = List[String]()
+    keys.append(String("k"))
+    var desc = List[Bool]()
+    desc.append(descending)
+    return _execute_sort_sink(_extremes_fixture(n), SortSinkData(keys^, desc^))
+
+
+def test_sink_descending_radix_orders_int64_min_and_max() raises:
+    """At the radix threshold, descending puts both INT64_MAX rows first and
+    both INT64_MIN rows last, each pair in input order."""
+    var n = RADIX_SORT_ROW_THRESHOLD
+    var rb = _sort_extremes(n, True)
+    assert_equal(_key_at(rb, 0), Int(Int64.MAX))
+    assert_equal(_id_at(rb, 0), 3)
+    assert_equal(_key_at(rb, 1), Int(Int64.MAX))
+    assert_equal(_id_at(rb, 1), 20)
+    assert_equal(_key_at(rb, n - 2), Int(Int64.MIN))
+    assert_equal(_id_at(rb, n - 2), 10)
+    assert_equal(_key_at(rb, n - 1), Int(Int64.MIN))
+    assert_equal(_id_at(rb, n - 1), 30)
+    _assert_sorted_and_stable(rb, n, True)
+
+
+def test_sink_ascending_radix_orders_int64_min_and_max() raises:
+    var n = RADIX_SORT_ROW_THRESHOLD
+    var rb = _sort_extremes(n, False)
+    assert_equal(_key_at(rb, 0), Int(Int64.MIN))
+    assert_equal(_id_at(rb, 0), 10)
+    assert_equal(_key_at(rb, 1), Int(Int64.MIN))
+    assert_equal(_id_at(rb, 1), 30)
+    assert_equal(_key_at(rb, n - 2), Int(Int64.MAX))
+    assert_equal(_id_at(rb, n - 2), 3)
+    assert_equal(_key_at(rb, n - 1), Int(Int64.MAX))
+    assert_equal(_id_at(rb, n - 1), 20)
+    _assert_sorted_and_stable(rb, n, False)
+
+
 def main() raises:
-    test_threshold_value_matches_v03()
-    test_radix_matches_merge_small()
-    test_radix_handles_negatives()
-    test_radix_matches_merge_at_threshold()
-    test_radix_above_threshold_monotone()
-    print("All sort_topn_sink radix tests passed.")
+    var suite = TestSuite()
+    suite.test[test_radix_threshold_is_500000]()
+    suite.test[test_radix_matches_merge_small]()
+    suite.test[test_radix_handles_negatives]()
+    suite.test[test_radix_matches_merge_at_threshold]()
+    suite.test[test_radix_above_threshold_monotone]()
+    suite.test[test_sink_ascending_at_threshold_is_sorted_and_stable]()
+    suite.test[test_sink_descending_at_threshold_is_sorted_and_stable]()
+    suite.test[test_sink_descending_below_threshold_is_sorted_and_stable]()
+    suite.test[test_sink_at_threshold_puts_the_extreme_keys_first]()
+    suite.test[test_sink_descending_radix_orders_int64_min_and_max]()
+    suite.test[test_sink_ascending_radix_orders_int64_min_and_max]()
+    suite^.run()

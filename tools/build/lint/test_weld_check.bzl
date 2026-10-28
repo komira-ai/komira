@@ -26,17 +26,16 @@ TestWeldInputsInfo = provider(
         # `cell` it matches that has WeldedTestsInfo
         # (tools/build/mojo/providers.bzl) welds the test files it lists.
         "welds": provider_field(str),
-        # The pinned busybox and test_weld.sh, and the constraints of the
-        # execution platform that runs them.
-        "busybox": provider_field(typing.Any),
-        "script": provider_field(typing.Any),
+        # The test_weld program (test_weld.zig), and the constraints of the
+        # execution platform that runs it.
+        "tool": provider_field(typing.Any),
         "exec_compatible_with": provider_field(list[str]),
         "label": provider_field(str),
     },
 )
 
 def test_weld_action(actions, info, ledger_name, mojo, welded):
-    """Runs test_weld.sh over `info` (its ledger called `ledger_name`), the
+    """Runs test_weld over `info` (its ledger called `ledger_name`), the
     .mojo files of its tree `mojo` and the welded test files `welded` (both
     paths in the cell). Its inputs are
     those two lists and the ledger, never the files themselves, so it re-runs
@@ -48,10 +47,7 @@ def test_weld_action(actions, info, ledger_name, mojo, welded):
     result = actions.declare_output("test_weld/validation.json")
     actions.run(
         cmd_args(
-            info.busybox,
-            "sh",
-            info.script,
-            info.busybox,
+            info.tool,
             result.as_output(),
             mojo_list,
             info.prefix,

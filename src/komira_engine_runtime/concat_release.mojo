@@ -32,18 +32,11 @@ from komira_async.runtime.local_dispatcher import LocalDispatcher
 # parked. Each `Optional[RecordBatch]` destructor cascades through its Columns'
 # `ArcPointer`s into `free()`, so the whole storm lands on the serial spine.
 #
-# MEASURED, q21 (perf --call-graph dwarf, driver tid only, 6 reps): the concat
-# subtree is 31.37 ms/rep of driver time, of which 14.4 ms/rep is NAMED
-# destruction (Variant::__del__ 6.05, ArcPointer::__del__ 5.32, Slab::__del__
-# 1.72, TCMallocInternalCfree 1.33) and 11.6 ms/rep is unnamed. The enclosing
-# `concat_cols_assemble` bracket reads 25.5 ms/rep, 100% driver-serial,
-# `fork_ns == 0`. This is the same shape as the radix-src teardown that
-# `release_radix_srcs_parallel` moved off the driver for -10.24% on q1
-# (``), and it is deliberately built to that template.
-#
-# ⚠ DO NOT SIZE THIS FROM AN `fp` PROFILE. `--call-graph fp` prices the same
-# subtree at 4.18 ms/rep -- 7.5x LOW -- because it cannot unwind the destructor
-# chains. That discrepancy nearly caused this lever to be discarded.
+# The destruction work is the batches' `Variant`, `ArcPointer` and `Slab`
+# destructors and the allocator's `free()`, none of which a frame-pointer
+# profile can unwind, so size this from a profile that walks the destructor
+# chains. It has the same shape as `release_radix_srcs_parallel`'s teardown
+# of radix sources, and is built to that template.
 #
 # WHY PER-BATCH AND NOT PER-COLUMN. One task per batch is the unit the concat
 # already reads by, batches are independent allocations, and `n_batches` is
@@ -128,31 +121,16 @@ struct _ConcatReleaseTask(Segment):
         pass
 
 
-# THE WORK THRESHOLD, AND THE MEASUREMENT THAT SET IT.
+# THE WORK THRESHOLD.
 #
-# The first version of this wave declined only on `n_batches < 2` -- a COUNT,
-# not an amount of WORK -- and MEASURED a real regression: `win_rank` went
-# +0.04 ms (+4.93%), 2 of 21 rounds favouring the fix, exact paired permutation
-# p = 0.000263. Forking 22 workers to free the buffers of a 0.79 ms query spends
-# 22 wakeups to save nothing.
-#
-# THE TWO MEASURED BRACKETS (benchmark fixture row counts):
-#   win_rank      5,000 rows     MUST decline  (regressed +4.93%, p = 0.000263)
-#   q21          ~74.8M rows     MUST proceed  (-17.64 ms,      p = 0.0120)
-# Those are ~4 orders of magnitude apart, so any threshold in the wide middle
-# separates them. 65,536 sits 13x above the declining case and ~1000x below the
-# proceeding one.
-#
-# ⚠ THE CROSSOVER IS BRACKETED, NOT LOCATED. No sweep was run between 5e3 and
-# 7.5e7, so this constant is "comfortably inside a very wide gap", NOT "the
-# point where the fork starts paying". Do not quote it as a measured crossover.
-# If a cell ever lands between the brackets, MEASURE it rather than nudging this
-# number.
-#
-# ⚠ Deliberately NOT the 250K borrowed from `chain_build_parallel_eligible`:
-# that constant was measured for a hash BUILD, and what this wave parallelises
-# is `free()`. Borrowing it would have been adopting someone else's measurement
-# of a different mechanism.
+# The wave declines on an amount of WORK, not only on `n_batches < 2`: forking
+# a whole pool to free the buffers of a tiny teardown costs more wakeups than
+# it saves. 65,536 rows is a point well inside the wide gap between a
+# teardown too small to repay a fork (thousands of rows) and one that does
+# (tens of millions). It is a bracket, not a measured crossover; a workload
+# that lands between the two should be measured rather than nudging this
+# number. It is deliberately not the threshold of a hash build, which prices a
+# different mechanism.
 comptime _CONCAT_RELEASE_MIN_ROWS: Int = 65536
 
 

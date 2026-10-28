@@ -1,19 +1,19 @@
 # =============================================================================
 # test_window_state_column_native_transparency.mojo
 #
-# P-2.B.2b transparency gate for the WindowState column-native breaker
-# migration. The migrated `WindowState.drain_to_record_batch` produces a
-# ColumnNativeBatch internally and bridges to RecordBatch at the breaker output
-# via the P-2.A shim (column_native_from_record_batch ->
-# record_batch_from_column_native). Because the ColumnNativeBatch body IS a
-# THSPLC chunk, the lift+lower is byte-identical to a spill/restore round-trip,
-# so the migrated drain is byte-identical to the prior direct RecordBatch drain.
+# Bridge round-trip gate for the output shape of the window_state breaker. It builds
+# a RecordBatch shaped like that breaker's output by hand (no operator state is
+# reached: this package depends on no operator), moves it through
+# column_native_from_record_batch and record_batch_from_column_native, and
+# asserts the result is byte-equal to the input. It proves the bridge keeps
+# values, validity, offsets and schema flags for this shape; it does not prove
+# that an operator's column-native result equals its RecordBatch result.
 #
 # WindowState drains a fixed 2-col (part_key Int64 @0, row_number Int64 @1)
 # RecordBatch over all accumulated rows in input order. The schema fields are
 # declared NULLABLE (nullable=True) even though the values are non-null, so the
-# bridge must preserve that nullable schema flag through the THSPLC round-trip.
-# The bridge transparency below proves the lift+lower the migration inserts is
+# bridge must preserve that nullable schema flag.
+# The test checks the bridge round-trip is
 # byte-identical for that output shape.
 # =============================================================================
 
@@ -43,7 +43,7 @@ def _window_2col(
     var keys: List[Scalar[DType.int64]], var rns: List[Scalar[DType.int64]]
 ) raises -> RecordBatch:
     """The 2-col (part_key Int64 @0 NULLABLE, row_number Int64 @1 NULLABLE)
-    shape WindowState drains — matches the migrated drain's schema exactly."""
+    shape WindowState drains — matches that output schema exactly."""
     var sb = SchemaBuilder()
     sb.add_field(Field(String("part_key"), ArrowType.INT64, True))
     sb.add_field(Field(String("row_number"), ArrowType.INT64, True))

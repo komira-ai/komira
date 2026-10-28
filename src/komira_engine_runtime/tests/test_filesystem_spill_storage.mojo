@@ -2,7 +2,7 @@
 # test_filesystem_spill_storage.mojo — FileSystemSpillStorage[LocalFs] round-trip.
 # =============================================================================
 #
-# SPILL-U-2-FILESYSTEM-STORAGE / OQ-6. Exercises the generic
+# Exercises the generic
 # `FileSystemSpillStorage[FS: FileSystem]` conformer composed over
 # `LocalFs[NoopSink]`:
 #
@@ -12,10 +12,12 @@
 #   (c) release_chunk removes the backing file (read-after-release raises)
 #       AND is ENOENT-tolerant on double-release (second release is a no-op).
 #   (d) accounting: nbytes_in_use / num_live_chunks track the live set.
-#   (e) U-0: LocalFs.delete ENOENT-tolerance directly (delete a missing path
+#   (f) a write that exactly fills the byte budget is accepted, one more is
+#       refused.
+#   (e) LocalFs.delete ENOENT-tolerance directly (delete a missing path
 #       is a no-op; delete a present path removes it).
 #
-# `release_chunk` maps to `LocalFs.delete` (the U-0 FileSystem extension),
+# `release_chunk` maps to `LocalFs.delete` (the FileSystem delete surface),
 # which is wired concretely on LocalFs (POSIX remove(3), ENOENT-tolerant), so
 # the delete path IS exercised here (not the process-exit-sweep fallback).
 # =============================================================================
@@ -216,7 +218,7 @@ def test_empty_chunk_roundtrip() raises:
 
 
 # =============================================================================
-# Test (e): U-0 — LocalFs.delete ENOENT-tolerance directly
+# Test (e): LocalFs.delete ENOENT-tolerance directly
 # =============================================================================
 
 
@@ -252,9 +254,32 @@ def test_localfs_delete_enoent_tolerant() raises:
 # =============================================================================
 
 
+def test_budget_exact_fit_and_overshoot() raises:
+    """A write that exactly fills the budget is accepted; one byte more is
+    refused and leaves the accounting unchanged."""
+    var root = _temp_root("budget")
+    var fs = _SpillFs.new()
+    var storage = _Storage(fs^, root, Int64(5))
+    var id0 = storage.write_chunk(_make_buf(1, 2, 3))
+    var id1 = storage.write_chunk(_make_buf(4, 5))  # 3 + 2 == 5: exact fit
+    assert_equal(Int(storage.nbytes_in_use()), 5)
+    var refused = False
+    try:
+        _ = storage.write_chunk(_make_buf(6))
+    except e:
+        refused = "budget exceeded" in String(e)
+    assert_true(refused, "one byte past the budget is refused")
+    assert_equal(Int(storage.nbytes_in_use()), 5)
+    assert_equal(storage.num_live_chunks(), 2)
+    _ = id0
+    _ = id1
+    _cleanup(storage)
+
+
 def main() raises:
     test_write_read_roundtrip()
     test_release_and_double_release()
     test_empty_chunk_roundtrip()
     test_localfs_delete_enoent_tolerant()
+    test_budget_exact_fit_and_overshoot()
     print("test_filesystem_spill_storage: ALL PASS")

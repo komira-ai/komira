@@ -25,11 +25,14 @@
 #   8. test_for_host_reference_profile_is_constant: the reference profile
 #      gives every machine the same budget.
 #   9. test_with_budget_negative_means_none: a negative budget is "none".
+#  10. test_grow_of_int_max_is_denied_not_wrapped: a huge grow is denied.
+#  11. test_negative_grow_is_refused_and_counted: a negative grow is denied.
+#  12. test_grow_of_exactly_budget_minus_held: the exact headroom fits.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from komira_engine_runtime.host_profile import (
+from komira_host_profile.host_profile import (
     HostProfile,
     reference_host_profile,
 )
@@ -204,6 +207,42 @@ def test_with_budget_negative_means_none() raises:
     assert_equal(r.try_grow_denied_count(), 0)
 
 
+def test_grow_of_int_max_is_denied_not_wrapped() raises:
+    """`held + n` would wrap negative for a huge `n`; the grow must be denied
+    and the tally untouched."""
+    var r = MemoryReservation.with_budget(100)
+    assert_true(r.try_grow(50))
+    assert_false(r.try_grow(Int.MAX), "Int.MAX over a budget of 100")
+    assert_equal(r.held_bytes(), 50)
+    assert_equal(r.try_grow_denied_count(), 1)
+
+
+def test_negative_grow_is_refused_and_counted() raises:
+    """A negative grow does not act as a release: it is denied, counted, and
+    leaves the tally alone, with a budget and without one."""
+    var b = MemoryReservation.with_budget(100)
+    assert_true(b.try_grow(60))
+    assert_false(b.try_grow(-30), "negative grow under a budget")
+    assert_equal(b.held_bytes(), 60)
+    assert_equal(b.try_grow_denied_count(), 1)
+
+    var u = MemoryReservation()
+    assert_true(u.try_grow(10))
+    assert_false(u.try_grow(-4), "negative grow without a budget")
+    assert_equal(u.held_bytes(), 10)
+    assert_equal(u.try_grow_denied_count(), 1)
+
+
+def test_grow_of_exactly_budget_minus_held() raises:
+    """The headroom `budget - held` fits; one byte more does not."""
+    var r = MemoryReservation.with_budget(100)
+    assert_true(r.try_grow(37))
+    assert_false(r.try_grow(64), "headroom is 63")
+    assert_true(r.try_grow(63), "exactly the headroom fits")
+    assert_equal(r.held_bytes(), 100)
+    assert_equal(r.try_grow_denied_count(), 1)
+
+
 # =============================================================================
 # Test entry point
 # =============================================================================
@@ -220,4 +259,7 @@ def main() raises:
     suite.test[test_for_host_takes_the_profile_budget]()
     suite.test[test_for_host_reference_profile_is_constant]()
     suite.test[test_with_budget_negative_means_none]()
+    suite.test[test_grow_of_int_max_is_denied_not_wrapped]()
+    suite.test[test_negative_grow_is_refused_and_counted]()
+    suite.test[test_grow_of_exactly_budget_minus_held]()
     suite^.run()

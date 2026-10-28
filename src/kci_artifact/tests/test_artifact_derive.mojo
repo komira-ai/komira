@@ -43,8 +43,10 @@ build_systems {
     args: "build"
   }
   derive_checks {
-    executable: "python3"
-    args: "release/ci/derive_checks.py"
+    executable: "buck2"
+    args: "run"
+    args: "//tools/build/ci:derive_checks"
+    args: "--"
     args: "{units_file}"
     args: "--base={base_commit}"
   }
@@ -131,11 +133,13 @@ def test_the_command_parses_and_renders() raises:
     var argv = render_derive_argv(
         a, String("buck2"), AffectedValues(String("/l/_changed_files"), String("/l/_declared_units.tsv"), String(_BASE), String(_REV))
     )
-    assert_equal(len(argv), 4)
-    assert_equal(argv[0], String("python3"))
-    assert_equal(argv[1], String("release/ci/derive_checks.py"))
-    assert_equal(argv[2], String("/l/_declared_units.tsv"))
-    assert_equal(argv[3], String("--base=") + String(_BASE))
+    assert_equal(len(argv), 6)
+    assert_equal(argv[0], String("buck2"))
+    assert_equal(argv[1], String("run"))
+    assert_equal(argv[2], String("//tools/build/ci:derive_checks"))
+    assert_equal(argv[3], String("--"))
+    assert_equal(argv[4], String("/l/_declared_units.tsv"))
+    assert_equal(argv[5], String("--base=") + String(_BASE))
     try:
         _ = render_derive_argv(a, String("pack"), AffectedValues(String("c"), String("u"), String(_BASE), String(_REV)))
         raise Error("rendered a derive_checks command 'pack' does not declare")
@@ -167,9 +171,9 @@ def test_the_refusals_of_the_command() raises:
         ),
     )
     assert_equal(
-        _refusal(_without(String("    executable: \"python3\"\n"), String("    executable: \"./py\"\n"))),
+        _refusal(_without(String("  derive_checks {\n    executable: \"buck2\"\n"), String("  derive_checks {\n    executable: \"./buck2\"\n"))),
         String(
-            "artifacts.textproto: the derive_checks command of build system 'buck2' executable './py' is a"
+            "artifacts.textproto: the derive_checks command of build system 'buck2' executable './buck2' is a"
             " relative path (expected a program name found on PATH, or an absolute path)"
         ),
     )

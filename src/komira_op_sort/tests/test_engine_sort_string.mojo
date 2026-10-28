@@ -9,8 +9,7 @@
 #   - NULL handling: Arrow convention (NULLS FIRST asc, NULLS LAST desc)
 #   - Sliced batch (verify _offset propagation)
 #   - BINARY parity with STRING
-#   - Dispatch fail-loud for unsupported sort key types (regression for the
-#     latent silent fall-through to as_primitive[int64])
+#   - An unsupported key type raises with a descriptive error
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
@@ -305,19 +304,13 @@ def test_sort_string_nulls_descending() raises:
 
 
 # =============================================================================
-# Test 9b — PHASE-0b: explicit NULLS placement override
+# Test 9b — explicit NULLS placement override
 # =============================================================================
 
 
 def test_sort_string_nulls_placement_override() raises:
-    """An explicit `nulls_first` override forces the
-    NULL placement opposite to the direction-derived default.
-
-    FAILS ON CURRENT CODE (pre-fix): `sort_indices_string` had no
-    `nulls_first` param — NULL placement was hard-derived from `descending`
-    (ASC->FIRST / DESC->LAST) with no way to request `ASC NULLS LAST` or
-    `DESC NULLS FIRST`.
-    """
+    """An explicit `nulls_first` overrides the direction-derived NULL
+    placement: `ASC NULLS LAST` and `DESC NULLS FIRST` are both reachable."""
     var values: List[String] = ["banana", "", "apple", "", "cherry"]
     var valid: List[Bool] = [True, False, True, False, True]
 
@@ -349,8 +342,8 @@ def test_sort_string_nulls_placement_override() raises:
 
 
 def test_sort_string_nulls_default_unchanged() raises:
-    """PHASE-0b: with `nulls_first=None` (default) the placement is
-    byte-identical to the pre-fix direction-derived behavior — ASC->FIRST."""
+    """With no `nulls_first` argument, ASC puts NULLs first and DESC puts
+    them last."""
     var values: List[String] = ["banana", "", "apple", "", "cherry"]
     var valid: List[Bool] = [True, False, True, False, True]
     var col = _str_col_nullable(values, valid)
@@ -542,13 +535,8 @@ def test_sort_multi_key_string_then_int64() raises:
 
 
 def test_sort_string_dispatch_fail_loud_unknown_type() raises:
-    """Regression: feeding a non-STRING/BINARY column raises descriptively.
-
-    Before this kernel landed, the single-key path silently fell through
-    to `as_primitive[int64]` for any unknown type, raising a confusing
-    "arrow_type mismatch INT64". We now raise an explicit "unsupported
-    sort key type ..." message.
-    """
+    """An unsupported key type raises with a descriptive error: feeding a
+    non-STRING/BINARY column to the string kernel names the type."""
     var col = _i64_col([Int64(1), Int64(2)])  # INT64 is fine for the kernel
     # But sort_indices_string itself rejects INT64.
     var raised = False

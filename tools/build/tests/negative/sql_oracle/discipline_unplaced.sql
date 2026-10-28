@@ -1,0 +1,2 @@
+-- No NULLS FIRST or NULLS LAST on the key.
+SELECT 1 AS a ORDER BY a ASC

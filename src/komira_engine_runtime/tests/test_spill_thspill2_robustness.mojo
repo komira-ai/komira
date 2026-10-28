@@ -2,24 +2,22 @@
 # test_spill_thspill2_robustness.mojo — THSPILL2 row codec REJECTS bad chunks.
 # =============================================================================
 #
-# SPILL-FU-DECODE-ROBUSTNESS / Task #10. Row-grain sibling of
-# test_spill_thsplc_robustness.mojo. Proves the THSPILL2 decoder REJECTS
-# truncated / corrupt chunks with a typed `raise` on BOTH decode_copy AND
-# decode_zerocopy, and that the codec DELIVERS the header's schema_fingerprint
-# through to the conformer's from_bytes — which enforces it (the codec is
-# body-opaque and cannot, per the documented layer decision).
+# Row-grain sibling of test_spill_thsplc_robustness.mojo. A chunk read from
+# storage is untrusted: each case corrupts one header field of a valid chunk
+# (or truncates it) and requires a typed error from BOTH decode_copy and
+# decode_zerocopy, naming the cause, before any body allocation or slice. The
+# codec also delivers the header's schema_fingerprint to the conformer's
+# from_bytes, which enforces it (the codec is body-opaque).
 #
-# Bug-fix protocol: each case would mis-decode / OOB WITHOUT the release-build
-# guards in thspill2.mojo (_parse_and_validate absurd-body-length +
-# header/body cross-check) or WITHOUT the conformer enforcing the fingerprint.
-#
-# Corruption matrix (proven-rejected):
-#   * truncation: mid-header, off-by-one header, mid-body, off-by-one short
-#   * corrupt magic / wrong version
-#   * header declares body_length too big (declared_total > chunk)
-#   * absurd body_length (>= 2^63) — caught before the cross-check
-#   * fingerprint mismatch — enforced at the conformer layer; the codec must
-#     deliver the (corrupt) header fingerprint through unchanged
+# Cases:
+#   * truncation: empty chunk, mid-header, off-by-one header, mid-body,
+#     off-by-one short
+#   * corrupt magic, wrong version
+#   * body_length: past the end by one byte, far past the end, and >= 2^63
+#   * row_count >= 2^63
+#   * unknown flag bits, the compressed flag, an uncompressed_body_length
+#     that differs from body_length
+#   * fingerprint mismatch, enforced by the conformer
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_raises
@@ -44,6 +42,9 @@ from komira_engine_runtime.spill.thspill2 import (
 
 comptime HDR_VERSION_OFF: Int = 4  # UInt32
 comptime HDR_BODYLEN_OFF: Int = 8  # UInt64
+comptime HDR_ROWCOUNT_OFF: Int = 16  # UInt64
+comptime HDR_UNCOMPRESSED_OFF: Int = 32  # UInt64
+comptime HDR_FLAGS_OFF: Int = 40  # UInt32
 comptime HEADER_SIZE: Int = 96
 
 # The fingerprint the well-behaved conformer expects (and that the encoder
@@ -247,6 +248,14 @@ def test_valid_chunk_roundtrips() raises:
 # =============================================================================
 
 
+def test_truncated_empty_chunk() raises:
+    var storage = _MutableMemStorage()
+    var cid = _encode_valid(storage, 16)
+    storage.truncate(cid, 0)
+    _assert_both_paths_raise(storage, cid, "shorter than header")
+    _ = storage^
+
+
 def test_truncated_mid_header() raises:
     var storage = _MutableMemStorage()
     var cid = _encode_valid(storage, 16)
@@ -310,6 +319,7 @@ def test_body_length_too_big() raises:
     var storage = _MutableMemStorage()
     var cid = _encode_valid(storage, 16)
     storage.corrupt_u64(cid, HDR_BODYLEN_OFF, UInt64(1 << 20))
+    storage.corrupt_u64(cid, HDR_UNCOMPRESSED_OFF, UInt64(1 << 20))
     _assert_both_paths_raise(storage, cid, "header declares")
     _ = storage^
 
@@ -322,6 +332,90 @@ def test_body_length_absurd() raises:
     var cid = _encode_valid(storage, 16)
     storage.corrupt_u64(cid, HDR_BODYLEN_OFF, UInt64(0xFFFFFFFFFFFFFFFF))
     _assert_both_paths_raise(storage, cid, "absurd")
+    _ = storage^
+
+
+def test_body_length_one_past_end() raises:
+    var storage = _MutableMemStorage()
+    var cid = _encode_valid(storage, 16)
+    var body = storage.stored_len(cid) - HEADER_SIZE
+    storage.corrupt_u64(cid, HDR_BODYLEN_OFF, UInt64(body + 1))
+    storage.corrupt_u64(cid, HDR_UNCOMPRESSED_OFF, UInt64(body + 1))
+    _assert_both_paths_raise(storage, cid, "header declares")
+    _ = storage^
+
+
+def test_body_length_huge_but_positive() raises:
+    # 2^62 is a valid Int64: the length check, not the sign check, refuses it,
+    # and it must do so without allocating the declared size.
+    var storage = _MutableMemStorage()
+    var cid = _encode_valid(storage, 16)
+    storage.corrupt_u64(cid, HDR_BODYLEN_OFF, UInt64(1) << 62)
+    storage.corrupt_u64(cid, HDR_UNCOMPRESSED_OFF, UInt64(1) << 62)
+    _assert_both_paths_raise(storage, cid, "header declares")
+    _ = storage^
+
+
+def test_body_length_int64_max() raises:
+    # 2^63-1 is a valid Int64 that passes the sign check; added to the
+    # header size it would wrap negative, so only the length comparison
+    # refuses it.
+    var storage = _MutableMemStorage()
+    var cid = _encode_valid(storage, 16)
+    var big = (UInt64(1) << 63) - 1
+    storage.corrupt_u64(cid, HDR_BODYLEN_OFF, big)
+    storage.corrupt_u64(cid, HDR_UNCOMPRESSED_OFF, big)
+    _assert_both_paths_raise(storage, cid, "header declares")
+    _ = storage^
+
+
+def test_encode_refuses_negative_row_count() raises:
+    var storage = _MutableMemStorage()
+    var blk = _build_block(4)
+    blk._row_count = Int64(-1)
+    with assert_raises(contains="row count is negative"):
+        _ = THSpill2Encoder[_StrictRowBlock].encode(storage, blk^)
+
+
+def test_row_count_absurd() raises:
+    var storage = _MutableMemStorage()
+    var cid = _encode_valid(storage, 16)
+    storage.corrupt_u64(cid, HDR_ROWCOUNT_OFF, UInt64(1) << 63)
+    _assert_both_paths_raise(storage, cid, "row_count")
+    _ = storage^
+
+
+def test_unknown_flag_bits() raises:
+    var storage = _MutableMemStorage()
+    var cid = _encode_valid(storage, 16)
+    storage.corrupt_u32(cid, HDR_FLAGS_OFF, UInt32(0x100))
+    _assert_both_paths_raise(storage, cid, "unknown bits")
+    _ = storage^
+
+
+def test_compressed_flag_refused() raises:
+    var storage = _MutableMemStorage()
+    var cid = _encode_valid(storage, 16)
+    storage.corrupt_u32(cid, HDR_FLAGS_OFF, UInt32(1))
+    _assert_both_paths_raise(storage, cid, "compressed")
+    _ = storage^
+
+
+def test_uncompressed_length_mismatch() raises:
+    var storage = _MutableMemStorage()
+    var cid = _encode_valid(storage, 16)
+    storage.corrupt_u64(cid, HDR_UNCOMPRESSED_OFF, UInt64(7))
+    _assert_both_paths_raise(storage, cid, "uncompressed_body_length")
+    _ = storage^
+
+
+def test_sort_key_flag_is_accepted() raises:
+    # Bit 1 is a known flag: the guard on unknown bits must not refuse it.
+    var storage = _MutableMemStorage()
+    var cid = _encode_valid(storage, 16)
+    storage.corrupt_u32(cid, HDR_FLAGS_OFF, UInt32(2))
+    var r = THSpill2Decoder[_StrictRowBlock].decode_copy(storage, cid)
+    assert_equal(Int(r.row_count()), 16)
     _ = storage^
 
 
@@ -342,6 +436,26 @@ def test_fingerprint_mismatch_enforced_by_conformer() raises:
 
 
 def main() raises:
+    test_truncated_empty_chunk()
+    print("test_truncated_empty_chunk PASSED")
+    test_body_length_one_past_end()
+    print("test_body_length_one_past_end PASSED")
+    test_body_length_huge_but_positive()
+    print("test_body_length_huge_but_positive PASSED")
+    test_body_length_int64_max()
+    print("test_body_length_int64_max PASSED")
+    test_encode_refuses_negative_row_count()
+    print("test_encode_refuses_negative_row_count PASSED")
+    test_row_count_absurd()
+    print("test_row_count_absurd PASSED")
+    test_unknown_flag_bits()
+    print("test_unknown_flag_bits PASSED")
+    test_compressed_flag_refused()
+    print("test_compressed_flag_refused PASSED")
+    test_uncompressed_length_mismatch()
+    print("test_uncompressed_length_mismatch PASSED")
+    test_sort_key_flag_is_accepted()
+    print("test_sort_key_flag_is_accepted PASSED")
     test_valid_chunk_roundtrips()
     print("test_valid_chunk_roundtrips PASSED")
     test_truncated_mid_header()

@@ -14,13 +14,13 @@
 # The oracles are hardcoded from the DuckDB CLI over the identical 96 rows:
 #     CREATE TABLE t(s VARCHAR, v BIGINT, g BIGINT);
 #     INSERT INTO t VALUES (...);                -- the fixture below, in order
-#     SELECT s, v FROM t ORDER BY s ASC LIMIT 3;                  -- §1
-#     SELECT s, v FROM t ORDER BY s DESC LIMIT 3;                 -- §2
-#     SELECT s, v FROM t ORDER BY s ASC LIMIT 5;                  -- §3
-#     SELECT s, v FROM t ORDER BY s ASC, v ASC LIMIT 10;          -- §4
-#     SELECT g, s, v FROM t ORDER BY g ASC, s ASC LIMIT 5;        -- §5
-#     SELECT s, v FROM t ORDER BY s DESC, v ASC LIMIT 10;         -- §6
-#     SELECT v FROM t ORDER BY v DESC LIMIT 5;                    -- §7
+#     SELECT s, v FROM t ORDER BY s ASC LIMIT 3;                  -- case 1
+#     SELECT s, v FROM t ORDER BY s DESC LIMIT 3;                 -- case 2
+#     SELECT s, v FROM t ORDER BY s ASC LIMIT 5;                  -- case 3
+#     SELECT s, v FROM t ORDER BY s ASC, v ASC LIMIT 10;          -- case 4
+#     SELECT g, s, v FROM t ORDER BY g ASC, s ASC LIMIT 5;        -- case 5
+#     SELECT s, v FROM t ORDER BY s DESC, v ASC LIMIT 10;         -- case 6
+#     SELECT v FROM t ORDER BY v DESC LIMIT 5;                    -- case 7
 #
 # Compare semantics the oracles pin (DuckDB default VARCHAR = bytewise):
 # EMPTY sorts first; a leading SPACE (0x20) < digits (0x30) < uppercase
@@ -28,14 +28,16 @@
 # ("apple" < "apple pie"); a non-ASCII lead byte outranks all of ASCII
 # ("Ünicode" starts 0xC3, so it sorts LAST ascending).
 #
-# The tie section (§3) is deliberately weaker than its neighbours: its K-cut
-# lands inside a 3-row `Apple` tie, and DuckDB does not fix intra-tie row
-# order under LIMIT, so it pins the key sequence and the SET of payloads. §4
-# and §6 add the unique `v` as a secondary key, which makes the order total,
-# and pin full rows.
+# The tie section (case 3) asserts only what DuckDB fixes: its K-cut lands
+# inside a 3-row `Apple` tie, and DuckDB does not fix intra-tie row order under
+# LIMIT, so the oracle is the key sequence and the SET of payloads. The engine
+# does fix that order (tied rows come out in input order, as the stable full
+# sort gives them), and `test_topn_heap_ties_and_key_layouts.mojo` pins it.
+# case 4 and case 6 add the unique `v` as a secondary key, which makes the
+# order total, and pin full rows.
 #
-# Planted mutant: `_str_cmp3` comparing bytes SIGNED (as Int8) turns the
-# "Ünicode" cases red.
+# A byte comparison that treated bytes as signed would order "Ünicode" first
+# instead of last; the "Ünicode" cases fail on that.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
@@ -63,7 +65,7 @@ from komira_op_sort.sort_topn_sink import (
 #
 # `v` is the row id, 1..96, UNIQUE — so `(s, v)` and `(g, s, v)` are TOTAL
 # orders and can carry a full-row oracle even where `s` alone ties.
-# `g` is `(row_index % 8)`, duplicated 12 ways — the ClickBench Q17 shape, an
+# `g` is `(row_index % 8)`, duplicated 12 ways — an
 # INT64 the heap CAN order sitting in front of a STRING it cannot.
 # =============================================================================
 
@@ -77,15 +79,15 @@ def _fixture_labels() -> List[String]:
     s.append(String(""))            # v=1   empty sorts first
     s.append(String("  lead"))      # v=2   leading spaces (0x20)
     s.append(String("0numeric"))    # v=3   digit lead (0x30)
-    s.append(String("Apple"))       # v=4  ┐
-    s.append(String("Apple"))       # v=5  ├ the 3-row tie §3 cuts through
-    s.append(String("Apple"))       # v=6  ┘
+    s.append(String("Apple"))       # v=4  |
+    s.append(String("Apple"))       # v=5  | the 3-row tie case 3 cuts through
+    s.append(String("Apple"))       # v=6  |
     s.append(String("Banana"))      # v=7
     s.append(String("Zebra"))       # v=8   'Z'=0x5A still below 'a'=0x61
     s.append(String("aPPle"))       # v=9   'P'=0x50 < 'p'=0x70, so < "app"
-    s.append(String("app"))         # v=10 ┐
-    s.append(String("apple"))       # v=11 ├ prefix chain
-    s.append(String("apple pie"))   # v=12 ┘
+    s.append(String("app"))         # v=10 |
+    s.append(String("apple"))       # v=11 | prefix chain
+    s.append(String("apple pie"))   # v=12 |
     s.append(String("banana"))      # v=13
     s.append(String("cherry"))      # v=14
     s.append(String("mango"))       # v=15
@@ -184,7 +186,7 @@ def _assert_rows_sv(
 
 
 # =============================================================================
-# ⭐ THE REGIME ASSERTION — the one that keeps every other test in this file
+# THE REGIME ASSERTION — the one that keeps every other test in this file
 # honest. Read the banner at the top before touching any number here.
 # =============================================================================
 
@@ -193,21 +195,21 @@ def test_every_case_here_is_in_the_heap_regime() raises:
     """Every (num_rows, k) below must satisfy the heap-selection predicate.
 
     `_execute_topn_sink` chooses the heap iff `num_rows > k *
-    TOPN_HEAP_RATIO` (and, since the fix, iff the key types allow it). If this
+    TOPN_HEAP_RATIO` and the key types allow it. If this
     arithmetic ever stops holding, every string section in this file silently
-    starts measuring the full-sort arm that was NEVER broken — green, and
+    starts measuring the full-sort arm instead — green, and
     proving nothing. Asserting it here, against the ratio the router itself
     reads, makes that failure mode LOUD.
     """
     assert_equal(len(_fixture_labels()), _N_ROWS, "fixture is 96 rows")
     assert_equal(_fixture().num_rows(), _N_ROWS, "batch is 96 rows")
 
-    # The K values used by §1..§7.
+    # The K values used by cases 1 to 7.
     var ks = List[Int]()
-    ks.append(3)   # §1, §2
-    ks.append(5)   # §3, §5, §7
+    ks.append(3)   # case 1, case 2
+    ks.append(5)   # case 3, case 5, case 7
     ks.append(6)   # the mixed-direction composite (g DESC, s ASC)
-    ks.append(10)  # §4, §6
+    ks.append(10)  # case 4, case 6
     for i in range(len(ks)):
         assert_true(
             _N_ROWS > ks[i] * TOPN_HEAP_RATIO,
@@ -218,7 +220,7 @@ def test_every_case_here_is_in_the_heap_regime() raises:
 
     # And the negative control that names the trap: the 10-row fixture the
     # pre-existing string TOP-N tests use is NOT in the regime at any of their
-    # five K values, which is why they stayed green through the defect.
+    # five K values, so they never exercise the heap.
     var legacy_ks = List[Int]()
     legacy_ks.append(3)
     legacy_ks.append(4)
@@ -241,7 +243,7 @@ def test_every_case_here_is_in_the_heap_regime() raises:
 
 
 # =============================================================================
-# §1 — single STRING key, ASC, K=3.  DuckDB:
+# case 1 — single STRING key, ASC, K=3.  DuckDB:
 #     ('',1) ('  lead',2) ('0numeric',3)
 # Rank 4 is 'Apple', so the cut is on a DISTINCT boundary -> full row pin.
 # =============================================================================
@@ -261,7 +263,7 @@ def test_string_key_asc_k3_matches_duckdb() raises:
 
 
 # =============================================================================
-# §2 — single STRING key, DESC, K=3.  DuckDB:
+# case 2 — single STRING key, DESC, K=3.  DuckDB:
 #     ('Ünicode',18) ('zzz',17) ('zebra',16)
 # Rank 4 descending is 'row095' -> distinct boundary -> full row pin. Pins the
 # non-ASCII lead byte (0xC3) outranking every ASCII byte.
@@ -282,12 +284,12 @@ def test_string_key_desc_k3_matches_duckdb() raises:
 
 
 # =============================================================================
-# §3 — single STRING key, ASC, K=5 — THE CUT LANDS INSIDE THE 3-ROW `Apple`
+# case 3 — single STRING key, ASC, K=5 — THE CUT LANDS INSIDE THE 3-ROW `Apple`
 # TIE (ranks 4, 5, 6). DuckDB:
 #     ('',1) ('  lead',2) ('0numeric',3) ('Apple',?) ('Apple',?)
 # KEY SEQUENCE is fully determined; the two payloads are a 2-subset of
-# {4, 5, 6} and DuckDB licenses no more than that. See the ⛔ note in the
-# banner before strengthening.
+# {4, 5, 6} and DuckDB licenses no more than that. Do not strengthen this:
+# the order of tied rows under LIMIT is unspecified.
 # =============================================================================
 
 
@@ -324,8 +326,8 @@ def test_string_key_asc_k5_tie_at_cut_matches_duckdb_key_sequence() raises:
 
 
 # =============================================================================
-# §4 — (STRING, INT64) keys, ASC/ASC, K=10 — the ClickBench Q26 shape with the
-# tie-break Q26's oracle comment says it could not write. `v` is unique, so the
+# case 4 — (STRING, INT64) keys, ASC/ASC, K=10 — a string key then an integer
+# tie-break. `v` is unique, so the
 # order is TOTAL and the full row is pinned at every position. DuckDB:
 #     ('',1) ('  lead',2) ('0numeric',3) ('Apple',4) ('Apple',5) ('Apple',6)
 #     ('Banana',7) ('Zebra',8) ('aPPle',9) ('app',10)
@@ -362,8 +364,8 @@ def test_string_then_int_keys_asc_k10_matches_duckdb() raises:
 
 
 # =============================================================================
-# §5 — (INT64, STRING) keys, ASC/ASC, K=5 — the ClickBench Q17 shape: a key the
-# heap CAN order in position 0, a key it cannot in position 1. This is the case
+# case 5 — (INT64, STRING) keys, ASC/ASC, K=5 — an integer key then a string:
+# the heap orders the key in position 0 and not the one in position 1. This is the case
 # a per-key (rather than all-keys) guard would get wrong. DuckDB:
 #     (0,'',1) (0,'aPPle',9) (0,'row024',25) (0,'row032',33) (0,'row040',41)
 # All five (g, s) pairs are distinct and rank 6 is (0,'row048'), so the full
@@ -397,7 +399,7 @@ def test_int_then_string_keys_asc_k5_matches_duckdb() raises:
 
 
 # =============================================================================
-# §6 — (STRING, INT64) keys, DESC/ASC, K=10 — mixed directions across a
+# case 6 — (STRING, INT64) keys, DESC/ASC, K=10 — mixed directions across a
 # heap-capable and a heap-incapable key. DuckDB:
 #     ('Ünicode',18) ('zzz',17) ('zebra',16) ('row095',96) ('row094',95)
 #     ('row093',94) ('row092',93) ('row091',92) ('row090',91) ('row089',90)
@@ -434,13 +436,13 @@ def test_string_desc_int_asc_k10_matches_duckdb() raises:
 
 
 # =============================================================================
-# §7 — NON-REGRESSION: an all-INT64 key list in the SAME regime still answers
+# case 7 — NON-REGRESSION: an all-INT64 key list in the SAME regime still answers
 # correctly. The guard must divert ONLY what the heap cannot compare; this is
 # the case that still takes the heap, and it carries a STRING payload column
 # through the heap's gather. DuckDB:
 #     96 95 94 93 92
 #
-# ⚠ This asserts VALUES, not the ROUTE — the two arms are value-identical when
+# This asserts VALUES, not the ROUTE — the two arms are value-identical when
 # both are correct, so nothing in-process can distinguish them here. It is a
 # guard against the guard over-firing, not a proof of which arm ran.
 # =============================================================================
@@ -463,52 +465,27 @@ def test_int_key_desc_k5_still_answers_in_the_heap_regime() raises:
 
 
 # =============================================================================
-# THE WALL, AND THE ROUTE THAT CLOSES IT.
+# The router admits a STRING key to the heap
 # =============================================================================
 #
-# THE DEFECT THIS SECTION PINS is NOT the one the banner above describes, and
-# it is the reason that one's fix was not the end of the story.
-#
-# S1..S7 are green because the router DIVERTS a string key to the
-# full-sort+slice arm. That made ClickBench Q17/Q25/Q26 ANSWERABLE, and the
-# banner says plainly that the price is O(N log N) and that they are to be
-# published as regressions against DuckDB. MEASURED 2026-09-17 at full
-# ClickBench scale (99,997,497 rows), that price turned out not to
-# be a regression:
-#
-#     Q17  ORDER BY user_id, search_phrase LIMIT 10    -> exceeded 3600 s
-#     Q26  ORDER BY event_time, search_phrase LIMIT 10 -> exceeded 3600 s
-#
-# both still progressing (CPU ~850%, RSS flat) rather than wedged. A query that
-# does not finish is not a slow answer; it is no answer. Q25 -- the SAME
-# capability with a SINGLE string key -- completes and is value-identical, so
-# what is expensive is the COMPOSITE key, not string ordering.
-#
-# => THE FIX UNDER TEST HERE is the fourth comparator arm: the heap compares
-# a STRING key byte-wise (`sort_topn_heap._str_cmp3`), so a STRING key takes
-# the O(N log K) heap instead of being diverted.
-#
-# WHY THE LITERAL RED IS ON THE PREDICATE AND NOT ON A VALUE. Every value
-# assertion in S1..S7 was ALREADY GREEN before this change -- they were
-# measuring the diverted arm, which was correct, just unbounded in time. No
-# value assertion over this fixture can go red for the defect, because the
-# defect is WHICH CORRECT ARM RAN. The router's own decision is a `def` at
-# module scope, so the honest red is to read it directly: pre-fix
-# `_heap_can_order_key_type(STRING)` is False and
-# `_heap_can_order_all_keys(fixture, ['g','s'])` is False.
-#
-# And S1..S7 are not spectators afterwards: with the predicate True and the
-# regime arithmetic True (asserted together below), the router's `if` selects
-# the heap, so those seven DuckDB oracles now pin the NEW comparator.
+# S1..S7 hold whichever correct arm runs: a router that diverted a string key
+# to the full-sort+slice arm would give the same values, only in O(N log N)
+# time instead of O(N log K). No value assertion can tell the two arms apart,
+# so the route is asserted directly. The router's decision is a `def` at
+# module scope, which is read here: `_heap_can_order_key_type(STRING)` and
+# `_heap_can_order_all_keys(fixture, ['g','s'])` must both be True. With the
+# predicate True and the regime arithmetic True (asserted together below),
+# the router's `if` selects the heap, so S1..S7 pin the heap's byte-wise
+# STRING comparator (`sort_topn_heap._str_cmp3`).
 # =============================================================================
 
 
-def test_the_router_now_admits_a_string_key_to_the_heap() raises:
-    """THE RED. Both conjuncts of the router's own `if`, read from the router.
+def test_the_router_admits_string_keys_to_the_heap() raises:
+    """Both conjuncts of the router's own `if`, read from the router.
 
     `_execute_topn_sink` selects the heap iff
     `num_rows > k * TOPN_HEAP_RATIO and _heap_can_order_all_keys(...)`. This
-    asserts BOTH for the Q17 and Q25 key shapes, so it is a route proof rather
+    asserts BOTH for the (INT64, STRING) and single-STRING key shapes, so it is a route proof rather
     than a reconstruction of one -- there is no third condition to be wrong
     about.
     """
@@ -520,22 +497,22 @@ def test_the_router_now_admits_a_string_key_to_the_heap() raises:
 
     var rb = _fixture()
 
-    # Q25's shape: a single STRING key.
+    # A single STRING key.
     assert_true(
         _heap_can_order_all_keys(rb, _keys1(String("s"))),
-        "ORDER BY s (the Q25 shape) is still diverted off the heap",
+        "ORDER BY s (a single STRING key) is still diverted off the heap",
     )
-    # Q17's shape: an INT64 the heap always handled, in front of a STRING.
+    # An INT64 in front of a STRING.
     assert_true(
         _heap_can_order_all_keys(rb, _keys2(String("g"), String("s"))),
-        "ORDER BY g, s (the Q17 shape -- INT64 leading a STRING) is still"
+        "ORDER BY g, s (INT64 leading a STRING) is still"
         " diverted off the heap",
     )
-    # Q26's shape is the same composite with the string trailing a different
-    # INT64; `v` stands in for event_time here.
+    # The same composite with the string trailing a different
+    # INT64.
     assert_true(
         _heap_can_order_all_keys(rb, _keys2(String("v"), String("s"))),
-        "ORDER BY v, s (the Q26 shape) is still diverted off the heap",
+        "ORDER BY v, s (INT64 then STRING) is still diverted off the heap",
     )
 
     # The OTHER conjunct, for the K values S1..S7 use -- so "the predicate is
@@ -563,7 +540,7 @@ def test_the_router_now_admits_a_string_key_to_the_heap() raises:
 # =============================================================================
 # THE MIXED-DIRECTION COMPOSITE WITH THE INT64 LEADING.
 #
-# S5 pins (INT64 ASC, STRING ASC) -- Q17's literal shape. This pins the case
+# Case 5 pins (INT64 ASC, STRING ASC). This pins the case
 # where the two keys disagree about direction, which is what catches a
 # comparator that applies one key's `descending` flag to the other, or that
 # collapses a three-way compare into a Bool and loses the sign.
@@ -618,9 +595,8 @@ def test_int_desc_then_string_asc_k6_matches_duckdb() raises:
 # So the router refuses the heap a STRING key that carries nulls, and this
 # pins BOTH halves: the refusal, and the answer that refusal preserves.
 #
-# THE SECOND TEST BELOW IS NOT A DuckDB PARITY ASSERTION, AND MUST NOT BE
-# RELABELLED AS ONE. Measured against the DuckDB CLI (v1.5.3) while writing
-# this section:
+# The second test below is not a DuckDB parity assertion. Measured against
+# the DuckDB CLI:
 #
 #     SELECT current_setting('default_null_order');   -->  NULLS_LAST
 #     SELECT s IS NULL, s, v FROM n ORDER BY s ASC LIMIT 4;
@@ -635,7 +611,7 @@ def test_int_desc_then_string_asc_k6_matches_duckdb() raises:
 #
 # What is asserted is therefore the ENGINE's own stated contract for the arm
 # the guard routes to -- `sort_indices_string`, ASC -> NULLS FIRST -- so that
-# this commit cannot move it in either direction without reddening here.
+# a change cannot move it in either direction without failing here.
 # =============================================================================
 
 
@@ -713,7 +689,7 @@ def test_a_null_bearing_string_key_still_answers_nulls_first_asc() raises:
 
     `sort_indices_string` documents ASC -> NULLS FIRST and this pins that the
     diverted arm still delivers it. Read the section banner before changing
-    this: DuckDB v1.5.3 answers NULLS_LAST here and the divergence is
+    this: DuckDB answers NULLS_LAST here and the divergence is
     deliberately left where it was found.
     """
     var rb = _execute_topn_sink(
@@ -744,10 +720,73 @@ def test_a_null_bearing_string_key_still_answers_nulls_first_asc() raises:
         seen.append(vv)
 
 
+# =============================================================================
+# A null-bearing NUMERIC key: the heap and the full sort agree
+# =============================================================================
+#
+# Numeric keys are ordered by stored value on every route, NULL slots
+# included. A nullable INT64 key is therefore admitted to the heap, and the
+# heap's rows are the first K rows of the full sort of the same batch, in
+# both directions.
+# =============================================================================
+
+
+def _null_bearing_int_fixture() raises -> RecordBatch:
+    """`[a INT64 NULLABLE, b INT64]`, 40 rows: `a` is NULL on every 4th row
+    (the NULL slot holds 999) and `i % 3` elsewhere; `b` is the unique row
+    number 1..40, which makes `(a, b)` a total order."""
+    var a = PrimitiveArray[DType.int64].allocate_nullable(_NULL_FIXTURE_ROWS)
+    var b = PrimitiveArray[DType.int64].allocate(_NULL_FIXTURE_ROWS)
+    for i in range(_NULL_FIXTURE_ROWS):
+        if i % 4 == 0:
+            a.set_typed[Scalar[DType.int64]](i, Int64(999))
+            a._set_null(i)
+        else:
+            a.set_typed[Scalar[DType.int64]](i, Int64(i % 3))
+        b.set_typed[Scalar[DType.int64]](i, Int64(i + 1))
+    var builder = RecordBatchBuilder.with_capacity(2)
+    builder.add_column(Column.from_primitive[DType.int64](a^))
+    builder.add_column(Column.from_primitive[DType.int64](b^))
+    var sb = SchemaBuilder()
+    sb.add_field(Field("a", ArrowType.INT64, True))
+    sb.add_field(Field("b", ArrowType.INT64, False))
+    return builder.build(sb.build())
+
+
+def _assert_heap_rows_are_the_full_sort_prefix(descending_a: Bool) raises:
+    var keys = _keys2(String("a"), String("b"))
+    var desc = _desc2(descending_a, False)
+    assert_true(
+        _heap_can_order_all_keys(_null_bearing_int_fixture(), keys),
+        "a nullable INT64 key is not admitted to the heap",
+    )
+    var k = 4
+    assert_true(_NULL_FIXTURE_ROWS > k * TOPN_HEAP_RATIO, "not in the heap regime")
+    var heap = _execute_topn_sink(
+        _null_bearing_int_fixture(), _spec(keys, desc, k)
+    )
+    var full = _execute_topn_sink(
+        _null_bearing_int_fixture(), _spec(keys, desc, _NULL_FIXTURE_ROWS)
+    )
+    assert_equal(heap.num_rows(), k)
+    assert_equal(full.num_rows(), _NULL_FIXTURE_ROWS)
+    for r in range(k):
+        assert_equal(_i64_at(heap, 1, r), _i64_at(full, 1, r), "b @" + String(r))
+        assert_equal(_i64_at(heap, 0, r), _i64_at(full, 0, r), "a @" + String(r))
+
+
+def test_a_null_bearing_int_key_heap_rows_match_full_sort_asc() raises:
+    _assert_heap_rows_are_the_full_sort_prefix(False)
+
+
+def test_a_null_bearing_int_key_heap_rows_match_full_sort_desc() raises:
+    _assert_heap_rows_are_the_full_sort_prefix(True)
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_every_case_here_is_in_the_heap_regime]()
-    suite.test[test_the_router_now_admits_a_string_key_to_the_heap]()
+    suite.test[test_the_router_admits_string_keys_to_the_heap]()
     suite.test[test_int_desc_then_string_asc_k6_matches_duckdb]()
     suite.test[test_a_null_bearing_string_key_is_refused_the_heap]()
     suite.test[test_a_null_bearing_string_key_still_answers_nulls_first_asc]()
@@ -758,4 +797,6 @@ def main() raises:
     suite.test[test_int_then_string_keys_asc_k5_matches_duckdb]()
     suite.test[test_string_desc_int_asc_k10_matches_duckdb]()
     suite.test[test_int_key_desc_k5_still_answers_in_the_heap_regime]()
+    suite.test[test_a_null_bearing_int_key_heap_rows_match_full_sort_asc]()
+    suite.test[test_a_null_bearing_int_key_heap_rows_match_full_sort_desc]()
     suite^.run()

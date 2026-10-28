@@ -12,7 +12,9 @@
 # on dense graphs the same csg-cmp pair is emitted many times (a clique of
 # n relations: 40, 236, 1,541, 11,327, 93,528, 860,736 emits for n = 4..9,
 # against the canonical (3^n - 2^(n+1) + 1) / 2 = 25..9,330). Plans stay
-# optimal (the DP table keeps the cheaper entry); the cost is time. The
+# optimal (the DP table keeps the cheaper entry, and of two equal-cost
+# entries the one `dp_pair_beats` orders first, whatever the emission order);
+# the cost is time. The
 # relation bound (more than 12 relations fall back to greedy) and the
 # iteration cap keep it bounded; a 9-relation clique already exceeds the
 # cap and falls back to greedy. komira-ai/komira#1176 tracks the fix.
@@ -135,6 +137,7 @@ from .optimizer_transitive_edges import derive_transitive_edges
 from .optimizer_join import (
     join_reorder_output_names,
     narrow_reordered_join_to_declared_columns,
+    restore_join_reorder_output_columns,
 )
 from komira_plan_ir.plan_helpers import (
     _copy_plan,
@@ -260,13 +263,12 @@ def should_use_dpccp(chain: JoinChain) -> Bool:
 #
 # The pierce is worth keeping — it is what lets a chain reorder through an
 # intermediate column-narrowing Project — so the fix is not to stop piercing, it is to put the
-# narrow back. Same shape as `select_join_build_side`'s
-# `_swap_outer_join_with_reprojection`: a rewrite that changes the shape restores
-# the user-visible columns above it.
+# narrow back: a rewrite that changes the shape restores the user-visible
+# columns above it.
 #
-# ⚠ BY NAME IS EXACT HERE, AND ONLY HERE. `_swap_outer_join_with_reprojection`
-# had to derive POSITIONALLY because an operand exchange MIGRATES the `_right`
-# collision suffix, so a by-name projection cannot undo it. This site is
+# ⚠ BY NAME IS EXACT HERE, AND ONLY HERE. In general an operand exchange
+# MIGRATES the `_right` collision suffix, so a by-name projection cannot undo
+# it; a restore would have to be derived POSITIONALLY. This site is
 # downstream of the `_chain_relations_share_column_name` barrier — a chain whose
 # relations share ANY column name is NOT reordered at all — so within a
 # reorderable chain every leaf column name is unique, `LogicalPlan.join` never
@@ -511,8 +513,8 @@ def reorder_joins_with_dp(var plan: LogicalPlan) raises -> LogicalPlan:
         # in an INNER join whose sides both carry `val`, putting the right
         # side first makes `val` name the right side's column.
         # Treat it as a barrier, the same way a residual-carrying join is one.
-        # `select_join_build_side` still orients such a join and CAN restore,
-        # because its exchange is a single swap it derives positionally.
+        # `select_join_build_side` still records a build side on such a join;
+        # it moves no operand, so no name is reassigned.
         var _shares = _chain_relations_share_column_name(plan)
         if jt == JOIN_INNER and not has_resid and not _shares:
             var left = _take_join_left(plan)
@@ -600,7 +602,7 @@ def reorder_joins_with_dp(var plan: LogicalPlan) raises -> LogicalPlan:
 
     elif tag == PLAN_FILTER:
         var child_in = _copy_plan(plan._filter.value()[].child[])
-        var new_child = reorder_joins_with_dp(child_in^)
+        var new_child = _reorder_joins_with_dp_keeping_order(child_in^)
         plan._filter.value()[].child = OwnedPointer(new_child^)
 
     elif tag == PLAN_PROJECT:
@@ -615,22 +617,44 @@ def reorder_joins_with_dp(var plan: LogicalPlan) raises -> LogicalPlan:
 
     elif tag == PLAN_SORT:
         var child_in = _copy_plan(plan._sort.value()[].child[])
-        var new_child = reorder_joins_with_dp(child_in^)
+        var new_child = _reorder_joins_with_dp_keeping_order(child_in^)
         plan._sort.value()[].child = OwnedPointer(new_child^)
 
     elif tag == PLAN_LIMIT:
         var child_in = _copy_plan(plan._limit.value()[].child[])
-        var new_child = reorder_joins_with_dp(child_in^)
+        var new_child = _reorder_joins_with_dp_keeping_order(child_in^)
         plan._limit.value()[].child = OwnedPointer(new_child^)
 
     elif tag == PLAN_DISTINCT:
         var child_in = _copy_plan(plan._distinct.value()[].child[])
-        var new_child = reorder_joins_with_dp(child_in^)
+        var new_child = _reorder_joins_with_dp_keeping_order(child_in^)
         plan._distinct.value()[].child = OwnedPointer(new_child^)
 
     elif tag == PLAN_TOPN:
         var child_in = _copy_plan(plan._topn.value()[].child[])
-        var new_child = reorder_joins_with_dp(child_in^)
+        var new_child = _reorder_joins_with_dp_keeping_order(child_in^)
         plan._topn.value()[].child = OwnedPointer(new_child^)
 
     return plan^
+
+
+def _reorder_joins_with_dp_keeping_order(
+    var child: LogicalPlan,
+) raises -> LogicalPlan:
+    """Reorder `child` for a parent that emits its child's columns in the
+    child's order (Filter, Sort, Limit, Distinct, TopN), and put back the
+    order `child` had before the walk.
+
+    The walker replaces such a parent's child without recomputing the
+    parent's cached schema, so the parent keeps reporting the old order. The
+    driver's guard around the reorder reads only the root's cached schema and
+    cannot see a permutation below one of these parents; this restores it at
+    the boundary, where the old order is still known. A Project or Aggregate
+    parent reads its child by name and needs no restore; a join parent is
+    rebuilt with a recomputed schema, so its order moves up to here or to the
+    root guard. `restore_join_reorder_output_columns` adds a Project only for
+    a permutation and declines anything else."""
+    var before = join_reorder_output_names(child)
+    return restore_join_reorder_output_columns(
+        reorder_joins_with_dp(child^), before^
+    )

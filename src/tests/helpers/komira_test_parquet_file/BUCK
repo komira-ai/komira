@@ -1,0 +1,22 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Small flat Parquet files, encoded byte by byte from parquet.thrift, for the
+# welded tests of the Parquet reader (komira_parquet): column chunks of PLAIN
+# or dictionary pages, row groups, Statistics and a page index. Test-only, so
+# no conda package: a library names it in `test_deps`. No deps beyond the
+# standard library, so it can never share a bug with the reader it feeds.
+#
+# The welded test, test_parquet_file_bytes, pins the bytes of a one-row file
+# against a hand-encoded copy and the framing (magic, footer length) of
+# bigger ones, and the inputs it refuses.
+mojo_library(
+    name = "komira_test_parquet_file",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    conda = False,
+    deps = [],
+    test_srcs = ["tests/test_parquet_file_bytes.mojo"],
+    visibility = [
+        "//src/komira_parquet:",
+        "//src/komira_parquet_scan:",
+    ],
+)
