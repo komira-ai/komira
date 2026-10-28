@@ -321,7 +321,7 @@ unconfigured query through the prelude's select moved there.
 ## The macOS build of the release
 
 The macOS (darwin-arm64) build is a job of `release.yml`, `release-macos`, and
-no pull request builds it. The farm has hundreds of Linux cores and a few dozen
+no pull request builds it. The farm has far more Linux cores than
 Mac ones, so a macOS leg in the pull request check would queue every change
 behind the scarcest machines; the macOS platform is built once per release run
 instead.

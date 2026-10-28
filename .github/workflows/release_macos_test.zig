@@ -3,8 +3,8 @@
 //! KOMIRA_TEST_WORK/workflows/<name>.yml), the shards of the pull request's check set
 //! (ci_targets/shard_<n>.bzl) and the macOS set's own definition (darwin_libs.bzl).
 //!
-//! The CEO's ruling these hold: the macOS platform is not in the pull request check (the farm has
-//! hundreds of Linux cores and a few dozen Mac ones), and the macOS build is a job of the release.
+//! The decision these hold: the macOS platform is not in the pull request check (the farm has far more
+//! Linux cores than Mac ones), and the macOS build is a job of the release.
 //! What the cases catch:
 //!  - the job `release-macos` of release.yml exists once and builds the macOS set on the farm: it runs on
 //!    the ubuntu runner (a macOS runner is refused), joins the farm with the macOS worker set and
@@ -292,7 +292,7 @@ test "release.yml holds the contract of the macOS build" {
         std.debug.print("release.yml: {s}\n", .{why});
         return error.Refused;
     }
-    // the job is the macOS build the CEO asked for, and the workflow still has no pull_request trigger
+    // the job is the macOS build, and the workflow still has no pull_request trigger
     try t.expect(!runsOnPullRequest(text));
 }
 
