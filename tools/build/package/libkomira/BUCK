@@ -27,8 +27,8 @@ conda_install_check(
     lib = "libkomira.so",
     min_version = 1000,
     # The packages libkomira's `depends` name for its NEEDED shared libraries:
-    # each native owner's own package (Q13: libkomira bundles none), installed
-    # beside it, and each owner's library must be loaded from the prefix.
+    # each native owner's own package, installed beside it (libkomira bundles no
+    # owner's library: each C owner ships its own in its own package), and each owner's library must be loaded from the prefix.
     owner_libs = [
         "libkomira_async_native.so.1",
         "libkomira_async_api_native.so.1",

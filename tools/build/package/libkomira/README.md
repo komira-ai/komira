@@ -9,7 +9,11 @@ C API (`src/komira_so`), and the check that installs it.
   `lib_files`. The Mojo runtime the library is linked against is not in the
   package: it comes from the `mojo-compiler` requirement. A release declares
   this target or the plain `komira_so_conda`, not both (they are the same name,
-  version and build).
+  version and build with different contents). `release/artifacts.textproto` is
+  where a release declares its packages, and
+  `test_a_release_declares_one_of_the_two_komira_so_packages`
+  (`src/kci_artifact/tests/test_release_artifacts_file.mojo`) refuses a file
+  that names both.
 - `libkomira_install` installs that package into an empty prefix with the Mojo
   runtime beside it and loads the library from there with `RTLD_NOW`
   ([`../install_check`](../install_check/README.md)). Build it to run the check:
