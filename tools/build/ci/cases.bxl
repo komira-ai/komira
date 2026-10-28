@@ -289,6 +289,10 @@ def _real_cases(ctx):
     text = findings(got_checks, closure(ctx, missing_agg), missing_agg)
     if "{}:lonely".format(_F) not in text or "1 check target(s)" not in text or "targets.bxl:generate" not in text:
         out.append("real: guard over an aggregate that leaves `lonely` out did not name it and the regeneration: '{}'".format(text))
+    # The printed command must not be the bare `cp ... "$(generator)"/.`: an empty generator output
+    # would make it copy `/` into ci/. It assigns the output, checks it is a directory other than /.
+    if 'out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d "$out" ] && [ "$out" != / ] && cp -rL' not in text or '"$(./buck2' in text:
+        out.append("real: the regeneration command in the guard message is not the fail-safe form: '{}'".format(text))
     shard = render_shard(["a//:x"], ["a//:t"])
     if shard[-8:] != ["TARGETS = [", '    "a//:x",', "]", "", "TESTS = [", '    "a//:t",', "]", ""]:
         out.append("real: render of a shard: {}".format(shard[-8:]))
