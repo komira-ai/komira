@@ -86,11 +86,10 @@ def _names() -> List[String]:
 
 
 def _sorted_pairs(b: List[Int], p: List[Int]) -> List[Int]:
-    """Each pair as `build * 1_000_000 + probe` (rows are below a million),
-    sorted."""
+    """Each pair as `build << 32 | probe`, sorted."""
     var out = List[Int](capacity=len(b))
     for i in range(len(b)):
-        out.append(b[i] * 1_000_000 + p[i])
+        out.append((b[i] << 32) | p[i])
     sort(out)
     return out^
 
@@ -280,13 +279,13 @@ def _record(field: Int) raises -> Int:
 def _run_unconfigured_morsel(
     build: RecordBatch, probe: RecordBatch, workers: Int, retile: Bool
 ) raises:
-    """Probe with the fork grain (no morsel given) and check the pairs."""
+    """Probe with the fork grain (no morsel given). The build side holds each
+    (row % 9, row % 5) key once, so every probe row with a non-NULL first key
+    has exactly one pair, and the pair's build row must carry that row's keys.
+    """
     var bk = extract_join_key_columns_serial(build, _names())
     var pk = extract_join_key_columns_serial(probe, _names())
     var builder = MultiKeyHashJoinBuilder.build(bk^)
-    var seq_b = List[Int]()
-    var seq_p = List[Int]()
-    builder.probe_inner_into(pk, seq_b, seq_p)
     mk_probe_configure(retile=retile)
     grain_geometry_reset()
     var rt = _runtime(workers)
@@ -298,8 +297,20 @@ def _run_unconfigured_morsel(
     )
     rt.shutdown()
     reset_join_probe_settings()
-    assert_true(len(seq_b) > 0, "the data produced no pairs")
-    _assert_same_pairs(seq_b, seq_p, par_b, par_p)
+    var rows = probe.num_rows()
+    assert_equal(len(par_b), rows - (rows + 16) // 17, "pair count")
+    assert_equal(len(par_p), len(par_b))
+    var seen = List[Bool](capacity=rows)
+    for _ in range(rows):
+        seen.append(False)
+    for i in range(len(par_b)):
+        var b = par_b[i]
+        var p = par_p[i]
+        assert_true(p % 17 != 0, "a NULL-key probe row matched")
+        assert_true(not seen[p], "a probe row matched twice")
+        seen[p] = True
+        assert_equal(b % 9, p % 9, "pair's first key")
+        assert_equal(b % 5, (p * 3) % 5, "pair's second key")
 
 
 def test_retile_cuts_the_morsels_when_every_pool_worker_has_one() raises:

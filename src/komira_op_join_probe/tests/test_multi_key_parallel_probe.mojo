@@ -96,26 +96,13 @@ def _build_synthetic_probe(
     return _make_2col_int64("p_a", "p_b", p_a, p_b)
 
 
-def _sorted_pairs(
-    build_matches: List[Int],
-    probe_matches: List[Int],
-) -> List[Tuple[Int, Int]]:
-    """Pack (build, probe) pairs and sort lexicographically."""
-    var n = len(build_matches)
-    var pairs = List[Tuple[Int, Int]](capacity=n)
-    for i in range(n):
-        pairs.append((build_matches[i], probe_matches[i]))
-    for i in range(1, n):
-        var key = pairs[i]
-        var j = i - 1
-        while j >= 0:
-            var cur = pairs[j]
-            if cur[0] < key[0] or (cur[0] == key[0] and cur[1] <= key[1]):
-                break
-            pairs[j + 1] = cur
-            j -= 1
-        pairs[j + 1] = key
-    return pairs^
+def _sorted_pairs(b: List[Int], p: List[Int]) -> List[Int]:
+    """Each pair as `build << 32 | probe`, sorted."""
+    var out = List[Int](capacity=len(b))
+    for i in range(len(b)):
+        out.append((b[i] << 32) | p[i])
+    sort(out)
+    return out^
 
 
 def _assert_pairs_equal(
@@ -128,8 +115,7 @@ def _assert_pairs_equal(
     var sa = _sorted_pairs(a_b, a_p)
     var sb = _sorted_pairs(b_b, b_p)
     for i in range(len(sa)):
-        assert_equal(sa[i][0], sb[i][0])
-        assert_equal(sa[i][1], sb[i][1])
+        assert_equal(sa[i], sb[i], "a pair differs")
 
 
 def test_parallel_2key_same_pairs_as_sequential_100k() raises:
