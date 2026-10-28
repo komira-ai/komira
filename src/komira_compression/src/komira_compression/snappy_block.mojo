@@ -2,12 +2,13 @@
 # snappy_block.mojo: the raw snappy block, through the snappy C API
 # =============================================================================
 #
-# FFI-BOUNDARY: the snappy C API (snappy-c.h), statically linked from
-# //third_party/snappy and declared here with `external_call`; inside
-# komira_compression this is the one module that declares those symbols
-# (komira_avro, komira_orc and komira_parquet_codec still declare their own
-# until they move onto this module). snappy keeps no pointer past a call and
-# owns no memory a caller sees.
+# FFI-BOUNDARY: the snappy C API (snappy-c.h), in the system libsnappy opened
+# by soname with OwnedDLHandle (codec_libraries.mojo, `_snappy_handle`) and
+# called through that handle; inside komira_compression this is the one module
+# that calls those symbols. snappy keeps no pointer past a call and owns no
+# memory a caller sees. The library's own names carry no komira prefix; a
+# machine without libsnappy.so.1 aborts at the first call (the handle's
+# init function cannot raise), naming the soname.
 #
 #   snappy_status snappy_compress(const char* input, size_t input_length,
 #                                 char* compressed, size_t* compressed_length);
@@ -35,7 +36,7 @@
 # length gets every byte and nothing past it.
 # =============================================================================
 
-from std.ffi import external_call
+from komira_compression.codec_libraries import _snappy_handle
 
 
 comptime _SNAPPY_OK: Int32 = 0
@@ -107,14 +108,8 @@ def snappy_compress_into[
     # at most `size` (= `len(dst)`) bytes at the destination address, then
     # stores the count written in `size`, a stack local. Every buffer is alive
     # across this synchronous call; snappy keeps none of the pointers.
-    var status = external_call[
-        "komira_snappy_compress",
-        Int32,
-        UnsafePointer[UInt8, MutUntrackedOrigin],
-        UInt64,
-        UnsafePointer[UInt8, MutUntrackedOrigin],
-        UnsafePointer[UInt64, MutUntrackedOrigin],
-    ](
+    var handle_ptr = _snappy_handle()
+    var status = handle_ptr[].call["snappy_compress", Int32](
         _src_ptr(src, src_scratch),
         UInt64(input_len),
         _dst_ptr(dst, dst_scratch),
@@ -156,14 +151,8 @@ def snappy_uncompress_into[
     # at most `size` (= `len(dst)`) bytes at the destination address, then
     # stores the decoded length in `size`, a stack local. Every buffer is
     # alive across this synchronous call; snappy keeps none of the pointers.
-    var status = external_call[
-        "komira_snappy_uncompress",
-        Int32,
-        UnsafePointer[UInt8, MutUntrackedOrigin],
-        UInt64,
-        UnsafePointer[UInt8, MutUntrackedOrigin],
-        UnsafePointer[UInt64, MutUntrackedOrigin],
-    ](
+    var handle_ptr = _snappy_handle()
+    var status = handle_ptr[].call["snappy_uncompress", Int32](
         _src_ptr(src, src_scratch),
         UInt64(input_len),
         _dst_ptr(dst, dst_scratch),
@@ -198,13 +187,8 @@ def snappy_uncompressed_length(src: Span[UInt8, _]) raises -> Int:
     # SAFETY: snappy reads at most `input_len` bytes at the source address
     # and stores the declared length in `result`, a stack local. Both are
     # alive across this synchronous call; snappy keeps neither pointer.
-    var status = external_call[
-        "komira_snappy_uncompressed_length",
-        Int32,
-        UnsafePointer[UInt8, MutUntrackedOrigin],
-        UInt64,
-        UnsafePointer[UInt64, MutUntrackedOrigin],
-    ](
+    var handle_ptr = _snappy_handle()
+    var status = handle_ptr[].call["snappy_uncompressed_length", Int32](
         _src_ptr(src, src_scratch),
         UInt64(input_len),
         UnsafePointer(to=result).unsafe_origin_cast[MutUntrackedOrigin](),

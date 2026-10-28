@@ -13,6 +13,7 @@ load("//src/komira_anomaly:buildrules.mojo.lock.bzl", komira_anomaly = "GRAPH")
 load("//src/komira_atomic_alias:buildrules.mojo.lock.bzl", komira_atomic_alias = "GRAPH")
 load("//src/komira_clock:buildrules.mojo.lock.bzl", komira_clock = "GRAPH")
 load("//src/komira_collections:buildrules.mojo.lock.bzl", komira_collections = "GRAPH")
+load("//src/komira_compression:buildrules.mojo.lock.bzl", komira_compression = "GRAPH")
 load("//src/komira_content_line:buildrules.mojo.lock.bzl", komira_content_line = "GRAPH")
 load("//src/komira_datetime:buildrules.mojo.lock.bzl", komira_datetime = "GRAPH")
 load("//src/komira_encoding:buildrules.mojo.lock.bzl", komira_encoding = "GRAPH")
@@ -59,6 +60,7 @@ _GRAPHS = {
     "komira_atomic_alias": komira_atomic_alias,
     "komira_clock": komira_clock,
     "komira_collections": komira_collections,
+    "komira_compression": komira_compression,
     "komira_content_line": komira_content_line,
     "komira_datetime": komira_datetime,
     "komira_encoding": komira_encoding,

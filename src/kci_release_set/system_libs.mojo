@@ -41,6 +41,7 @@ def system_libs() -> List[SystemLib]:
     out.append(SystemLib(String("libbz2.so.1.0"), String("bzip2 >=1.0.8,<2")))
     out.append(SystemLib(String("liblz4.so.1"), String("lz4-c >=1.9.3,<2")))
     out.append(SystemLib(String("liblzma.so.5"), String("xz >=5.2.5,<6")))
+    out.append(SystemLib(String("libsnappy.so.1"), String("snappy >=1.1.9,<2")))
     out.append(SystemLib(String("libz.so.1"), String("libzlib >=1.2.13,<2")))
     out.append(SystemLib(String("libzstd.so.1"), String("zstd >=1.5.2,<2")))
     return out^
