@@ -26,6 +26,7 @@ komira_mail_address
 komira_mcp_server
 komira_name_registry
 komira_parquet_api
+komira_proto_codec
 komira_protobuf
 komira_resources
 komira_retry
@@ -38,5 +39,6 @@ komira_test_verdict
 komira_textproto
 komira_validation_run
 komira_vcard
+komira_wkt
 komira_xml
 komira_zlib
