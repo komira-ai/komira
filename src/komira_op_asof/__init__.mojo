@@ -2,7 +2,11 @@
 
 The merge walker (`asof_walker`: `asof_merge_into`, `asof_merge_dispatch`,
 `compare_equi_keys`) with its search kernels (`asof_kernel`) and its equi-key
-comparison result (`asof_equi_key.EquiKeyCmp`).
+comparison result (`asof_equi_key.EquiKeyCmp`); `AsofJoinSink`
+(`asof_join_sink`), the ASOF left join over two materialised sides; and the
+stage pipelines' build table `AsofJoinBuildTable` (`asof_join_build`) with its
+breaker states `AsofJoinBuildState` (`asof_join_build_state`) and
+`AsofJoinProbeState` (`asof_join_probe_state`).
 
 Public API: import directly from sub-modules. No facade.
 """

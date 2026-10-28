@@ -30,6 +30,7 @@ load("//src/komira_mcp_server:buildrules.mojo.lock.bzl", komira_mcp_server = "GR
 load("//src/komira_metrics:buildrules.mojo.lock.bzl", komira_metrics = "GRAPH")
 load("//src/komira_name_registry:buildrules.mojo.lock.bzl", komira_name_registry = "GRAPH")
 load("//src/komira_parquet_api:buildrules.mojo.lock.bzl", komira_parquet_api = "GRAPH")
+load("//src/komira_proto_codec:buildrules.mojo.lock.bzl", komira_proto_codec = "GRAPH")
 load("//src/komira_protobuf:buildrules.mojo.lock.bzl", komira_protobuf = "GRAPH")
 load("//src/komira_resources:buildrules.mojo.lock.bzl", komira_resources = "GRAPH")
 load("//src/komira_retry:buildrules.mojo.lock.bzl", komira_retry = "GRAPH")
@@ -46,6 +47,7 @@ load("//src/komira_textproto:buildrules.mojo.lock.bzl", komira_textproto = "GRAP
 load("//src/komira_trace:buildrules.mojo.lock.bzl", komira_trace = "GRAPH")
 load("//src/komira_validation_run:buildrules.mojo.lock.bzl", komira_validation_run = "GRAPH")
 load("//src/komira_vcard:buildrules.mojo.lock.bzl", komira_vcard = "GRAPH")
+load("//src/komira_wkt:buildrules.mojo.lock.bzl", komira_wkt = "GRAPH")
 load("//src/komira_xml:buildrules.mojo.lock.bzl", komira_xml = "GRAPH")
 load("//src/komira_zlib:buildrules.mojo.lock.bzl", komira_zlib = "GRAPH")
 
@@ -80,6 +82,7 @@ _GRAPHS = {
     "komira_metrics": komira_metrics,
     "komira_name_registry": komira_name_registry,
     "komira_parquet_api": komira_parquet_api,
+    "komira_proto_codec": komira_proto_codec,
     "komira_protobuf": komira_protobuf,
     "komira_resources": komira_resources,
     "komira_retry": komira_retry,
@@ -96,6 +99,7 @@ _GRAPHS = {
     "komira_trace": komira_trace,
     "komira_validation_run": komira_validation_run,
     "komira_vcard": komira_vcard,
+    "komira_wkt": komira_wkt,
     "komira_xml": komira_xml,
     "komira_zlib": komira_zlib,
 }

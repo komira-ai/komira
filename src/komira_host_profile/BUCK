@@ -1,0 +1,46 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The host profile as a value: `HardwareProfile` (core counts, cache sizes,
+# RAM and the binding L2 share), `HostProfile` (the engine build, the hardware,
+# the worker count, the memory budget and the spill tiers the host offers),
+# `MorselSizingPolicy` (rows per morsel as a pure function of a profile and a
+# segment) and the L1-chunk predicate. Measuring a host is not here: that is
+# `komira_engine_runtime` (`hardware_detect`, `host_detect`).
+#
+# NO FILE SYSTEM, OBJECT STORE OR ASYNC RUNTIME IN THE CLOSURE. A lowering
+# step reads a host profile and nothing else about the host, so the package
+# a lowering step depends on may not reach a package that opens files, talks to
+# an object store or runs a worker pool. `closure_excludes` is checked at
+# analysis against the whole closure of `deps`, direct and transitive, by exact
+# import name (`komira_async_api`, a trait surface the closure needs, is
+# allowed). tests//negative/closure_excludes plants each of the four and
+# //tools/build/selftest:analysis_refusals_mojo requires the refusal.
+#
+# test_hardware_profile       the formulas and width table of HardwareProfile
+#                             over constructed profiles.
+# test_host_profile           the constructor's refusals, the spill-tier
+#                             intersection, the constant reference profile,
+#                             the segment tier rule and what lowering records.
+# test_l1_chunk_sizing        the L1-chunk admission predicate and grain round.
+# test_morsel_sizing_policy   the per-tier formula, clamps and multipliers.
+mojo_library(
+    name = "komira_host_profile",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_physical_plan:komira_physical_plan",
+    ],
+    closure_excludes = [
+        "komira_async",
+        "komira_fs",
+        "komira_objectstore",
+        "komira_shuffle",
+    ],
+    test_srcs = [
+        "tests/test_hardware_profile.mojo",
+        "tests/test_host_profile.mojo",
+        "tests/test_l1_chunk_sizing.mojo",
+        "tests/test_morsel_sizing_policy.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
