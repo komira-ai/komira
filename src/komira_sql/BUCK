@@ -4,7 +4,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the bind-time schemas and scan leaves of the read_csv / read_json / read_avro table functions,
 # and the binder so far: output-column names, operator lowering, parquet facts and name scopes (sql_bind_names, sql_bind_ops, sql_bind_parquet, sql_bind_scope),
 # the expression binder (sql_bind_expr, sql_bind_call, sql_bind_cast, sql_bind_fn_args, sql_bind_fn_nested, sql_bind_timestamp),
-# and the aggregate, window and ORDER BY binders (sql_bind_agg_expr, sql_bind_aggregate, sql_bind_window_order).
+# the aggregate, window and ORDER BY binders (sql_bind_agg_expr, sql_bind_aggregate, sql_bind_window_order),
+# and the join and subquery binders with the statement entry (sql_bind_join, sql_bind_subquery, sql_binder).
 mojo_library(
     name = "komira_sql",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -61,6 +62,7 @@ mojo_library(
         "tests/test_sql_bind_fn_nested_direct.mojo",
         "tests/test_sql_bind_group_by_direct.mojo",
         "tests/test_sql_bind_internals_direct.mojo",
+        "tests/test_sql_bind_join.mojo",
         "tests/test_sql_bind_names.mojo",
         "tests/test_sql_bind_names_helpers.mojo",
         "tests/test_sql_bind_ops_direct.mojo",
@@ -68,6 +70,7 @@ mojo_library(
         "tests/test_sql_bind_scope_direct.mojo",
         "tests/test_sql_bind_udf_call_direct.mojo",
         "tests/test_sql_bind_window_order_direct.mojo",
+        "tests/test_sql_binder_direct.mojo",
         "tests/test_sql_catalog_tables.mojo",
         "tests/test_sql_fn_table_date_parts.mojo",
         "tests/test_sql_fn_table_direct.mojo",
