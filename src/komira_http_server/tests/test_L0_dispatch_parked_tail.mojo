@@ -36,7 +36,6 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.completion_queue import (
-    INTEREST_READ,
     RegistrationHandle,
 )
 from komira_async.reactor.reactor import BACKEND_MOCK, Reactor
@@ -268,7 +267,7 @@ struct _Rig(Movable):
         self.variant = variant
         self.entry = ConnEntry(
             stream=TcpStream(fds[0]),
-            reg=RegistrationHandle(_fd=fds[0], _interest_set=INTEREST_READ),
+            reg=RegistrationHandle(_fd=fds[0]),
         )
         self.peer = fds[1]
         self.io = Array[UInt8, REQ_BUF_BYTES](fill=UInt8(0))
