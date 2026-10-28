@@ -31,6 +31,7 @@ from komira_op_join_build.hash_chain_build_settings import (
 from komira_op_join_probe.join_multi_key import MultiKeyColumns, _CHAIN_END
 from komira_op_join_probe.join_multi_key_builder import MultiKeyHashJoinBuilder
 from komira_op_join_probe.join_multi_key_parallel_build import (
+    mk_fill_chunk_bounds,
     multi_key_hash_join_build_parallel,
 )
 
@@ -236,10 +237,36 @@ def test_capacity_follows_the_serial_builders_growth_factor() raises:
     _end()
 
 
+def test_a_grain_that_does_not_divide_the_capacity_ends_at_the_capacity() raises:
+    """With a grain of 100 over 1,024 slots the last chunk is short: the
+    bounds are checked before any fill runs, then the table is compared with
+    the serial build."""
+    _begin()
+    join_ht_fill_configure(True, 100)
+    var bounds = mk_fill_chunk_bounds(1024)
+    assert_equal(len(bounds), 12, "bounds for 1024 slots at grain 100")
+    assert_equal(bounds[0], 0, "first bound")
+    for i in range(1, len(bounds) - 1):
+        assert_equal(bounds[i], i * 100, "bound " + String(i))
+    assert_equal(
+        bounds[len(bounds) - 1], 1024, "the last fill bound is the capacity"
+    )
+    var c = _fixture(700)
+    var ser = MultiKeyHashJoinBuilder.build(_cols(c))
+    assert_equal(ser._capacity, 1024, "serial capacity")
+    sched_trace_configure(True)
+    sched_trace_reset()
+    var p = _par(c, 4, 0, CancellationToken.never())
+    assert_equal(_fill_waves(), 1, "the fill wave ran once")
+    _assert_same_table(ser, p, "grain 100")
+    _end()
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_filled_table_equals_the_serial_build_at_every_pool_width]()
     suite.test[test_tiny_builds_leave_the_serial_table_with_the_fill_wave_live]()
     suite.test[test_a_cancelled_token_stops_the_build_before_the_fill_wave]()
     suite.test[test_capacity_follows_the_serial_builders_growth_factor]()
+    suite.test[test_a_grain_that_does_not_divide_the_capacity_ends_at_the_capacity]()
     suite^.run()
