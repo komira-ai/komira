@@ -22,7 +22,7 @@
 # pthread stores verbatim and NEVER dereferences (the TLS value is never a heap
 # object); the integer <-> void* conversion, and the `pthread_key_t` out-
 # parameter of `pthread_key_create`, live in three fixed-arity C entries in
-# `_log_holder_shim.c` (`komira_log_tls_key_create` / `_set` / `_get`) that take
+# `komira_log_holder.c` (`komira_log_tls_key_create` / `_set` / `_get`) that take
 # and return integers. pthread_key_t is an opaque `unsigned int` on macOS +
 # glibc; carried as UInt64 (the widest of the two ABIs) and narrowed at the FFI
 # boundary. The API is integer-in / integer-out (the encapsulation rule).

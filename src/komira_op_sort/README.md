@@ -91,6 +91,15 @@ batch by it.
   (`k_way_merge_cursors`, the loser tree and
   `komira_column_kernels.cross_batch_gather`) is `sort_external_merge`; its
   comparator orders a key as the run sort does (floats by `sort_key_lt`).
+  Full ties go to the earlier input, across spilled runs and the final
+  in-memory run alike. Keys are INT32, INT64 or FLOAT64 (a STRING or FLOAT32
+  key is refused, naming the key). A payload column of a type
+  `cross_batch_gather` does not gather (DECIMAL128, DECIMAL256,
+  INTERVAL_MONTH_DAY_NANO, DICTIONARY, LIST, STRUCT, ...) makes the sorter raise
+  "unsupported column type" when it sorts a run. The spill sub-directory is
+  `thsplc_sort_<pid>_<counter>`, created exclusively under the caller's
+  `spill_dir`. After any error the sorter is unusable: its buffered rows are
+  gone and it only releases its spill files when dropped.
 - `sort_stage_buffer`: `SortBuffer[KB, *Payloads]`, the stage sort buffer
   typed at compile time (a key block `SortKeyBlock[*Keys]` and a variadic
   payload pack, stored column-wise), a `BreakerStateCombinable` and a

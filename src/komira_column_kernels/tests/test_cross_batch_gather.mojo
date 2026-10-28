@@ -6,10 +6,13 @@
 # eight sources, no indices, an all-NULL column, a mixed schema (INT64,
 # STRING, FLOAT64, BOOL), validity carried row by row, output order equal to
 # index order, and each column type alone (INT32, INT64, FLOAT32, FLOAT64,
-# BOOL, STRING, LARGE_STRING).
+# BOOL, STRING, LARGE_STRING), the other fixed widths (1-, 2-byte, unsigned,
+# DATE, TIME, TIMESTAMP, DURATION), BINARY and LARGE_STRING with NULLs, sliced
+# 2- and 4-byte sources, and DECIMAL128 / DECIMAL256 / INTERVAL_MONTH_DAY_NANO
+# refused as an unsupported column type.
 # =============================================================================
 
-from std.testing import assert_equal, assert_true
+from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_arrow.arrow_types import ArrowType
 from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
@@ -21,6 +24,7 @@ from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.string_array import StringArray
 from komira_arrow.boolean_array import BooleanArray
 from komira_column_kernels.cross_batch_gather import cross_batch_gather
+from komira_buffer.heap_region import HeapRegion
 from komira_collections.slab import Slab
 
 
@@ -529,25 +533,224 @@ def test_sliced_source_with_validity() raises:
     assert_equal(out.column_at(0)._null_count, 1)
 
 
-# =============================================================================
-# Main
-# =============================================================================
+def _fixed(at: ArrowType, elem: Int, base: Int, rows: Int) raises -> RecordBatch:
+    var d = OwnedAlignedBuffer(rows * elem)
+    for i in range(rows * elem):
+        d.write_u8_at(i, UInt8((base + i) & 0xFF))
+    d.set_length(Int64(rows * elem))
+    var c = Column[HeapRegion](arrow_type=at, data=d^, offsets=None, validity=None, length=rows, null_count=0, offset=0)
+    var sb = SchemaBuilder()
+    sb.add_field(Field("c", at, False))
+    var b = RecordBatchBuilder()
+    b.add_column(c^)
+    return b.build(sb.build())
+
+
+def _probe(at: ArrowType, elem: Int, name: String) raises -> String:
+    """Returns "" if ok else a message."""
+    try:
+        var b0 = _fixed(at, elem, 10, 4)
+        var b1 = _fixed(at, elem, 100, 4)
+        var srcs = Slab[RecordBatch]()
+        srcs.append(b0^)
+        srcs.append(b1^)
+        var idx = List[Tuple[Int, Int]]()
+        idx.append((1, 2))
+        idx.append((0, 3))
+        idx.append((0, 0))
+        idx.append((1, 1))
+        var out = cross_batch_gather(srcs, idx)
+        var want = List[Tuple[Int, Int]]()
+        want.append((100, 2))
+        want.append((10, 3))
+        want.append((10, 0))
+        want.append((100, 1))
+        for i in range(4):
+            for j in range(elem):
+                var e = (want[i][0] + want[i][1] * elem + j) & 0xFF
+                var g = Int(out.column_at(0)._data.read_u8_at(i * elem + j))
+                if g != e:
+                    return name + ": wrong byte"
+        if out.column_at(0).arrow_type != at:
+            return name + ": type changed"
+        return ""
+    except e:
+        return name + ": raised " + String(e)
+
+
+def test_narrow_and_unsigned_widths() raises:
+    var bad = List[String]()
+    var at = List[ArrowType]()
+    var el = List[Int]()
+    var nm = List[String]()
+    at.append(ArrowType.INT8); el.append(1); nm.append("INT8")
+    at.append(ArrowType.UINT8); el.append(1); nm.append("UINT8")
+    at.append(ArrowType.INT16); el.append(2); nm.append("INT16")
+    at.append(ArrowType.UINT16); el.append(2); nm.append("UINT16")
+    at.append(ArrowType.FLOAT16); el.append(2); nm.append("FLOAT16")
+    at.append(ArrowType.UINT32); el.append(4); nm.append("UINT32")
+    at.append(ArrowType.UINT64); el.append(8); nm.append("UINT64")
+    for i in range(len(at)):
+        var m = _probe(at[i], el[i], nm[i])
+        if m.byte_length() > 0:
+            bad.append(m)
+    assert_equal(len(bad), 0, "failed: " + (bad[0] if len(bad) > 0 else String("")))
+
+
+def test_temporal_widths() raises:
+    """DATE, TIME and DURATION and TIMESTAMP columns gather by their width."""
+    var bad = List[String]()
+    var at = List[ArrowType]()
+    var el = List[Int]()
+    var nm = List[String]()
+    at.append(ArrowType.DATE32); el.append(4); nm.append("DATE32")
+    at.append(ArrowType.TIME32_S); el.append(4); nm.append("TIME32_S")
+    at.append(ArrowType.TIME32_MS); el.append(4); nm.append("TIME32_MS")
+    at.append(ArrowType.DATE64); el.append(8); nm.append("DATE64")
+    at.append(ArrowType.TIMESTAMP); el.append(8); nm.append("TIMESTAMP")
+    at.append(ArrowType.TIMESTAMP_S); el.append(8); nm.append("TIMESTAMP_S")
+    at.append(ArrowType.TIMESTAMP_MS); el.append(8); nm.append("TIMESTAMP_MS")
+    at.append(ArrowType.TIMESTAMP_US); el.append(8); nm.append("TIMESTAMP_US")
+    at.append(ArrowType.TIMESTAMP_NS); el.append(8); nm.append("TIMESTAMP_NS")
+    at.append(ArrowType.TIME64_US); el.append(8); nm.append("TIME64_US")
+    at.append(ArrowType.TIME64_NS); el.append(8); nm.append("TIME64_NS")
+    at.append(ArrowType.DURATION_S); el.append(8); nm.append("DURATION_S")
+    at.append(ArrowType.DURATION_MS); el.append(8); nm.append("DURATION_MS")
+    at.append(ArrowType.DURATION_US); el.append(8); nm.append("DURATION_US")
+    at.append(ArrowType.DURATION_NS); el.append(8); nm.append("DURATION_NS")
+    for i in range(len(at)):
+        var m = _probe(at[i], el[i], nm[i])
+        if m.byte_length() > 0:
+            bad.append(m)
+    assert_equal(len(bad), 0, "failed: " + String(len(bad)) + " first: " + (bad[0] if len(bad) > 0 else String("")))
+
+
+def _refused(at: ArrowType, elem: Int) raises -> Bool:
+    var srcs = Slab[RecordBatch]()
+    srcs.append(_fixed(at, elem, 10, 4))
+    var idx = List[Tuple[Int, Int]]()
+    idx.append((0, 1))
+    try:
+        _ = cross_batch_gather(srcs, idx)
+    except e:
+        return "unsupported column type" in String(e)
+    return False
+
+
+def test_decimal_and_interval_are_refused() raises:
+    """The 16- and 32-byte types are not gathered: the call raises, naming
+    "unsupported column type"."""
+    assert_true(_refused(ArrowType.DECIMAL128, 16))
+    assert_true(_refused(ArrowType.DECIMAL256, 32))
+    assert_true(_refused(ArrowType.INTERVAL_MONTH_DAY_NANO, 16))
+
+
+def _var(at: ArrowType, w: Int, strs: List[String], valid: List[Bool]) raises -> RecordBatch:
+    var total = 0
+    for i in range(len(strs)):
+        total += strs[i].byte_length()
+    var d = OwnedAlignedBuffer(max(total, 1))
+    var o = OwnedAlignedBuffer((len(strs) + 1) * w)
+    var pos = 0
+    if w == 4:
+        o.set_typed[Int32](0, Int32(0))
+    else:
+        o.set_typed[Int64](0, Int64(0))
+    for i in range(len(strs)):
+        var bs = strs[i].as_bytes()
+        for j in range(len(bs)):
+            d.write_u8_at(pos + j, bs[j])
+        pos += len(bs)
+        if w == 4:
+            o.set_typed[Int32](i + 1, Int32(pos))
+        else:
+            o.set_typed[Int64](i + 1, Int64(pos))
+    d.set_length(Int64(total))
+    o.set_length(Int64((len(strs) + 1) * w))
+    var vb = Optional[Bitmap[HeapRegion]](None)
+    var nc = 0
+    if len(valid) > 0:
+        var bm = Bitmap.create_all_valid(len(strs))
+        for i in range(len(strs)):
+            if not valid[i]:
+                bm.clear(i)
+                nc += 1
+        vb = bm^
+    var c = Column[HeapRegion](arrow_type=at, data=d^, offsets=o^, validity=vb^, length=len(strs), null_count=nc, offset=0)
+    var sb = SchemaBuilder()
+    sb.add_field(Field("c", at, len(valid) > 0))
+    var b = RecordBatchBuilder()
+    b.add_column(c^)
+    return b.build(sb.build())
+
+
+def _str_at(col: Column[HeapRegion], w: Int, i: Int) -> String:
+    var s = 0
+    var e = 0
+    if w == 4:
+        s = Int(col._offsets.value().get_typed[Int32](i))
+        e = Int(col._offsets.value().get_typed[Int32](i + 1))
+    else:
+        s = Int(col._offsets.value().get_typed[Int64](i))
+        e = Int(col._offsets.value().get_typed[Int64](i + 1))
+    var out = String("")
+    for j in range(s, e):
+        out += chr(Int(col._data.read_u8_at(j)))
+    return out^
+
+
+def _var_case(at: ArrowType, w: Int) raises:
+    var a: List[String] = ["", "bb", "ccc", "dddd"]
+    var bl: List[String] = ["x", "", "yyyyy"]
+    var va: List[Bool] = [True, False, True, True]
+    var srcs = Slab[RecordBatch]()
+    srcs.append(_var(at, w, a, va))
+    srcs.append(_var(at, w, bl, List[Bool]()))
+    var idx = List[Tuple[Int, Int]]()
+    idx.append((1, 2)); idx.append((0, 3)); idx.append((0, 0)); idx.append((0, 1)); idx.append((1, 1)); idx.append((0, 2)); idx.append((1,0))
+    var out = cross_batch_gather(srcs, idx)
+    ref c = out.column_at(0)
+    var want: List[String] = ["yyyyy", "dddd", "", "bb", "", "ccc", "x"]
+    for i in range(7):
+        assert_equal(_str_at(c, w, i), want[i])
+    assert_equal(c._null_count, 1)
+    assert_true(c._validity.value().test(2))
+    assert_true(not c._validity.value().test(3))
+    assert_true(c._validity.value().test(4))
+    assert_true(c._validity.value().test(6))
+
+
+def test_binary_with_nulls() raises:
+    _var_case(ArrowType.BINARY, 4)
+
+
+def test_large_string_with_nulls() raises:
+    _var_case(ArrowType.LARGE_STRING, 8)
+
+
+def test_sliced_two_and_four_byte_sources() raises:
+    for w in range(2):
+        var at = ArrowType.INT16 if w == 0 else ArrowType.INT32
+        var el = 2 if w == 0 else 4
+        var b0 = _fixed(at, el, 10, 4)
+        var full = b0.column_at(0).slice(1, 2)  # rows 1,2 of base 10
+        var sb = SchemaBuilder()
+        sb.add_field(Field("c", at, False))
+        var rb = RecordBatchBuilder()
+        rb.add_column(full^)
+        var sl = rb.build(sb.build())
+        var srcs = Slab[RecordBatch]()
+        srcs.append(sl^)
+        srcs.append(_fixed(at, el, 100, 3))
+        var idx = List[Tuple[Int, Int]]()
+        idx.append((0, 1)); idx.append((1, 2)); idx.append((0, 0))
+        var out = cross_batch_gather(srcs, idx)
+        var wants = List[Int]()
+        wants.append(10 + 2 * el); wants.append(100 + 2 * el); wants.append(10 + 1 * el)
+        for i in range(3):
+            for j in range(el):
+                assert_equal(Int(out.column_at(0)._data.read_u8_at(i * el + j)), (wants[i] + j) & 0xFF)
 
 
 def main() raises:
-    test_single_source_sanity()
-    test_two_source_interleave()
-    test_n_source_stress()
-    test_empty_indices()
-    test_all_null_column_type()
-    test_multi_dtype_schema()
-    test_nullable_validity_preserved()
-    test_row_order_stability()
-    test_smoke_int32()
-    test_smoke_float32()
-    test_smoke_float64()
-    test_smoke_string()
-    test_smoke_bool()
-    test_string_with_nulls()
-    test_sliced_source_with_validity()
-    print("PASS: all 15 cross_batch_gather tests")
+    TestSuite.discover_tests[__functions_in_module()]().run()
