@@ -70,7 +70,13 @@ batch by it.
   `can_dictrank_sort_single_key_string` (a strided sampled distinct count
   under a ceiling). Above the ceiling after the exact build it falls back to
   `parallel_sort_single_key_string`. The dictionary build and the ranks are
-  `sort_dictrank_build`.
+  `sort_dictrank_build`. The gate's sample is a fixed stride, so a periodic
+  key, or one that is distinct only past the last sampled row, can be
+  admitted although it is high-cardinality; the exact build is the backstop
+  (the rows stay correct and the sort falls back, at the cost of a full
+  dictionary build). On the multi-worker `SortSink` route the gate samples
+  partition 0 only. `dictrank_fallback_count` reports how many sorts took the
+  fallback.
 - `sort_sink`: `SortSink`, the sort as a `MorselSink` of
   `komira_operator_api`: per-worker batches, and a route chosen once in
   `combine` (partitioned parallel sort and merge, the counting sort, or the

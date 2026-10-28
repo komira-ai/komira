@@ -19,6 +19,11 @@
 #   * serial: routes switched off, two keys, one worker, a small input under
 #     the default floor, and no rows at all.
 #
+# Also pinned: a batch with a selection mask loses its rejected rows
+# (`test_selection_masked_batches_*`); `routes.dictrank_max_distinct` declines
+# the counting sort (`test_dictrank_ceiling_*`); and the row floor is inclusive
+# (`test_total_rows_at_the_floor_*`).
+#
 # One worker (one partition) takes the serial route: a lone partition is never
 # sorted by `combine_partition`, so the sink must not choose the partitioned
 # route for it (`test_one_worker_takes_serial_route`).
@@ -29,6 +34,7 @@ from std.math import inf
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_arrow.arrow_types import ArrowType
+from komira_arrow.boolean_array import BooleanArray
 from komira_arrow.column import Column
 from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.record_batch import RecordBatch
@@ -307,6 +313,123 @@ def test_partitioned_string_matches_serial() raises:
             _str_batch(keys, List[Bool](), 0, len(keys)), _spec(desc)
         )
         _assert_same_payload(got, want)
+
+
+# -----------------------------------------------------------------------------
+# Selection masks and the route switches
+# -----------------------------------------------------------------------------
+
+
+def _masked_num_batch(
+    keys: List[Int64], lo: Int, hi: Int, reject_mod: Int
+) raises -> RecordBatch:
+    """Rows [lo, hi) with every row whose index is a multiple of `reject_mod`
+    rejected by a selection mask."""
+    var b = _num_batch[DType.int64](keys, lo, hi)
+    var mask = BooleanArray.allocate(hi - lo)
+    for i in range(lo, hi):
+        mask.set(i - lo, i % reject_mod != 0)
+    b.set_selection_mask(mask^)
+    return b^
+
+
+def _expected_live_payload(keys: List[Int64], reject_mod: Int, desc: Bool) -> List[Int]:
+    """The live rows' indices in stable key order (ties by index)."""
+    var live = List[Int]()
+    for i in range(len(keys)):
+        if i % reject_mod != 0:
+            live.append(i)
+    for a in range(1, len(live)):
+        var cur = live[a]
+        var j = a - 1
+        while j >= 0:
+            var before = (
+                keys[live[j]] > keys[cur] if not desc
+                else keys[live[j]] < keys[cur]
+            )
+            if not before:
+                break
+            live[j + 1] = live[j]
+            j -= 1
+        live[j + 1] = cur
+    return live^
+
+
+def test_selection_masked_batches_drop_their_rejected_rows() raises:
+    var keys = _int_keys(400)
+    for partitioned in [False, True]:
+        for desc in [False, True]:
+            var feed = _Feed(2)
+            feed.add(0, _masked_num_batch(keys, 0, 130, 3))
+            feed.add(0, _masked_num_batch(keys, 130, 200, 3))
+            feed.add(1, _masked_num_batch(keys, 200, 400, 3))
+            var routes = (
+                _routes_all_rows() if partitioned else SortSinkRoutes()
+            )
+            var got = _drive(
+                SortSink(_spec(desc), routes^), feed^,
+                _ROUTE_PARTITIONED if partitioned else _ROUTE_SERIAL,
+            )
+            var want = _expected_live_payload(keys, 3, desc)
+            assert_equal(got.num_rows(), len(want))
+            var pg = _payload(got)
+            for i in range(len(want)):
+                assert_equal(pg[i], want[i])
+
+
+def _seven_word_keys(n: Int) -> List[String]:
+    var words: List[String] = ["kiwi", "fig", "", "figs", "date", "plum", "pear"]
+    var keys = List[String]()
+    for i in range(n):
+        keys.append(words[(i * 3) % 7])
+    return keys^
+
+
+def test_dictrank_ceiling_below_distinct_count_declines_counting_sort() raises:
+    """Seven distinct values: a ceiling of 5 sends the sink to the partitioned
+    route, a ceiling of 7 to the counting sort; the rows are the same."""
+    var keys = _seven_word_keys(1200)
+    for ceiling in [5, 7]:
+        var got = _drive(
+            SortSink(
+                _spec(False),
+                SortSinkRoutes(
+                    parallel_min_rows=1, num_workers=3,
+                    dictrank_max_distinct=ceiling,
+                ),
+            ),
+            _split_str(keys, List[Bool](), 3),
+            _ROUTE_PARTITIONED if ceiling == 5 else _ROUTE_DICTRANK,
+        )
+        var want = _execute_sort_sink(
+            _str_batch(keys, List[Bool](), 0, len(keys)), _spec(False)
+        )
+        _assert_same_payload(got, want)
+
+
+def test_total_rows_at_the_floor_take_the_parallel_route() raises:
+    """The floor is inclusive: 3000 rows with `parallel_min_rows` 3000 are
+    partitioned; with 3001 they are sorted serially."""
+    var keys = _int_keys(3000)
+    var want = _execute_sort_sink(
+        _num_batch[DType.int64](keys, 0, len(keys)), _spec(False)
+    )
+    var at = _drive(
+        SortSink(
+            _spec(False), SortSinkRoutes(parallel_min_rows=3000, num_workers=3)
+        ),
+        _split[DType.int64](keys, 3),
+        _ROUTE_PARTITIONED,
+    )
+    _assert_same_payload(at, want)
+    var under = _drive(
+        SortSink(
+            _spec(False), SortSinkRoutes(parallel_min_rows=3001, num_workers=3)
+        ),
+        _split[DType.int64](keys, 3),
+        _ROUTE_SERIAL,
+    )
+    _assert_same_payload(under, want)
 
 
 # -----------------------------------------------------------------------------
