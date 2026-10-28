@@ -17,7 +17,7 @@ e2e installs mopm with (`MOPM` in release/readme_e2e/packages.bzl,
 the one the packages name.
 
 Fixture trees that exist to test a version (the mopm_migrate fixtures, which
-pin the tool's default) are `except` rows of `list` (path, reason), so a new
+hold the output of a run on one fixed `--mopm`) are `except` rows of `list` (path, reason), so a new
 one is a visible change; a row whose file is gone is a finding. An empty set
 is a finding, not a pass.
 

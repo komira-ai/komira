@@ -31,7 +31,8 @@ pub const File = struct { path: []const u8, text: ?[]const u8 = null };
 pub const Options = struct {
     package: []const u8,
     description: []const u8,
-    mopm: []const u8 = "0.0.73",
+    /// The mopm of `mopm-toolchain.toml` and `mojo_conda`: the repository's, given by the caller.
+    mopm: []const u8,
     /// `installed` or `default`; required when the old BUCK file has `test_data` or `test_env`.
     test_layout: ?[]const u8 = null,
     dev_dependencies: bool = false,
