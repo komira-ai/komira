@@ -1,0 +1,91 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/gen:defs.bzl", "gen_transition")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# Committed generated sources (README.md, defs.bzl): the freshness check every
+# generated library runs first (`fresh`), the verb that regenerates the
+# committed directory (`regen`), and the checks of the pieces that name them.
+# The process cases of both tools are tests//functional/gen_tools.
+
+_ZIG = "komira//tools/build/toolchains:zig_next"
+
+_ZIG_VERSION = "komira//tools/build/toolchains:zig_next_version"
+
+zig_test(
+    name = "fresh_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["fresh.zig"],
+    src = "fresh_test.zig",
+    deps = ["//tools/build/act_util:act_util"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
+
+# The action of every `<name>_fresh` (defs.bzl), behind its unit tests.
+zig_exe(
+    name = "fresh",
+    exec_compatible_with = LINUX_X86_64,
+    src = "fresh.zig",
+    deps = ["//tools/build/act_util:act_util"],
+    unit_tests = [":fresh_unit", _ZIG_VERSION],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+    visibility = ["PUBLIC"],
+)
+
+zig_test(
+    name = "regen_unit",
+    exec_compatible_with = LINUX_X86_64,
+    imports = ["regen.zig"],
+    src = "regen_test.zig",
+    deps = ["//tools/build/act_util:act_util"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
+
+# `./buck2 run komira//tools/build/gen:regen -- <target>`.
+zig_exe(
+    name = "regen",
+    exec_compatible_with = LINUX_X86_64,
+    src = "regen.zig",
+    deps = ["//tools/build/act_util:act_util"],
+    unit_tests = [":regen_unit", _ZIG_VERSION],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+    visibility = ["PUBLIC"],
+)
+
+# The regenerate command is spelled in the header of every generated file (the
+# Rust crate and the two Zig rule actions) and in the failure message of
+# `<name>_fresh` (defs.bzl): one text, so a file never sends its reader to a
+# command that does not exist.
+zig_test(
+    name = "command_agreement",
+    exec_compatible_with = LINUX_X86_64,
+    data = {
+        "cloud": "//tools/build/cloud:doc_tree",
+        "gen": ":doc_tree",
+        "mojo": "//tools/build/mojo:doc_tree",
+        "proto-codegen": "//tools/build/proto-codegen:doc_tree",
+    },
+    src = "command_agreement_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
+
+# The transition ledger (transition.bzl) as a file, and the lint that holds it
+# (README.md, "Transition"). `max` is the number of libraries the ledger holds:
+# change it with the ledger, in the same commit.
+gen_transition(
+    name = "transition",
+    max = 2,
+)
+
+zig_test(
+    name = "transition_lint",
+    exec_compatible_with = LINUX_X86_64,
+    data = {"transition": ":transition"},
+    src = "transition_test.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)

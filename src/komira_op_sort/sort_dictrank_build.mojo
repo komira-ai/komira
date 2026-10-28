@@ -11,8 +11,14 @@
 # the permutation. This module holds the first half:
 #
 #   * the gate's cheap estimate: hash a strided sample of rows and count the
-#     distinct hashes (`_dictrank_cardinality_ok`);
-#   * the dictionary: each worker hashes its own slice into its own dictionary
+#     distinct hashes (`_dictrank_cardinality_ok`). The sample is a fixed
+#     stride, so a periodic key whose period shares the stride, or one that is
+#     distinct only past the last sampled row, can be admitted although its
+#     cardinality is high. The exact build is the backstop: the rows are still
+#     correct (a distinct count over the ceiling falls back to the comparison
+#     sort), but the sort has paid for a full dictionary build first. On the
+#     multi-worker `SortSink` route the gate samples partition 0 only;
+##   * the dictionary: each worker hashes its own slice into its own dictionary
 #     (verifying each hit against the bytes of a representative row), the
 #     per-worker dictionaries merge serially into one, and each worker then
 #     translates its rows' local ids to global ids (`_build_distinct_ids`);
@@ -248,7 +254,12 @@ struct _DictBuildWork[
     ](
         self, chunk_id: Int, n_chunks: Int, ref input: In, mut payload: P,
     ) raises:
+        # SAFETY: the driver passes the `In` this struct is dispatched with; the
+        # bitcast names that exact type, fixed by the call site, and the borrow
+        # outlives the synchronous barrier. It is only read.
         var vp = UnsafePointer(to=input).bitcast[List[Bool]]()
+        # SAFETY: `payload` is the value the driver moved onto the dispatch State,
+        # of the bitcast type; this chunk writes only its own disjoint band.
         var pp = UnsafePointer(to=payload).bitcast[_DictBuildPayload]()
         var lo = self.slice_lo[chunk_id]
         var hi = self.slice_lo[chunk_id + 1]
@@ -276,7 +287,12 @@ struct _DictTranslateWork(SharedChunkWork):
     ](
         self, chunk_id: Int, n_chunks: Int, ref input: In, mut payload: P,
     ) raises:
+        # SAFETY: the driver passes the `In` this struct is dispatched with; the
+        # bitcast names that exact type, fixed by the call site, and the borrow
+        # outlives the synchronous barrier. It is only read.
         var lp = UnsafePointer(to=input).bitcast[List[Int]]()
+        # SAFETY: `payload` is the value the driver moved onto the dispatch State,
+        # of the bitcast type; this chunk writes only its own disjoint band.
         var pp = UnsafePointer(to=payload).bitcast[List[Int]]()
         var lo = self.slice_lo[chunk_id]
         var hi = self.slice_lo[chunk_id + 1]

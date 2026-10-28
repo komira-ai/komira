@@ -6,7 +6,7 @@
 # x5u / x5c, crit, typ, duplicate keys, missing kid, malformed shapes) by its
 # reason code AND by the JWKS fetch count staying 0: the gate runs before any
 # key is fetched or any signature computed. Tokens are signed over their own
-# hostile headers with komira_http_core's RSA test key (declared test data).
+# hostile headers with komira_jose's RSA test key (declared test data).
 # =============================================================================
 
 from std.pathlib import Path
@@ -63,10 +63,10 @@ comptime Verifier = Rs256JwksVerifier[ScriptedJwksFetcher, FixedAuthClock]
 
 
 def _key() raises -> List[UInt8]:
-    """The repository's RSA-2048 PKCS#8 test key (komira_http_core's TLS
+    """The repository's RSA-2048 PKCS#8 test key (komira_jose's
     fixture), declared as this test's data in the BUCK file."""
     return rsa_pkcs8_der_from_pem(
-        Path("src/komira_http_core/tests/fixtures/tls/leaf_key.pem").read_text()
+        Path("src/komira_jose/tests/fixtures/rsa_test_key.pem").read_text()
     )
 
 
@@ -245,7 +245,7 @@ def test_wrong_or_absent_typ_is_refused() raises:
 
 
 def test_duplicate_header_keys_are_refused() raises:
-    # A repeat komira_crypto's reader would also catch (kid)...
+    # A repeat of a member the gate reads (kid)...
     _refused_by_gate(
         String('{"alg":"RS256","typ":"JWT","kid":"test-key-1","kid":"x"}'),
         REASON_DUPLICATE_KEY,
@@ -271,9 +271,8 @@ def test_missing_or_empty_kid_is_refused() raises:
 
 
 def test_non_ascii_kid_is_refused_before_any_fetch() raises:
-    # komira_crypto reads a JWK kid one byte per character, so a non-ASCII
-    # kid can never match a published key; it is a bad kid, refused before
-    # it costs a refetch (fetch_count 0 is asserted by _refused_by_gate).
+    # komira_jose refuses a kid that is not printable ASCII, so such a kid
+    # can never verify; it is a bad kid, refused before it costs a refetch (fetch_count 0 is asserted by _refused_by_gate).
     _refused_by_gate(
         String('{"alg":"RS256","typ":"JWT","kid":"k') + chr(0xE9) + String('y"}'),
         REASON_KID,

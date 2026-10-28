@@ -5,7 +5,7 @@ load("//negative/test_weld/real:tree.bzl", "REAL_TREE")
 # of ../../../negative/test_weld/real (a mojo_library and a mojo_test, never
 # built: the lint analyses the targets `welds` matches), with a ledger row
 # for each of its three unwelded test files. The pull-request check runs the
-# lint (release/ci/build_targets.sh, the test_weld BXL step); its red twin,
+# lint (.github/workflows/pr.yml, the test_weld BXL step); its red twin,
 # with no row, is tests//negative/test_weld/real:red.
 test_weld(
     name = "ok",

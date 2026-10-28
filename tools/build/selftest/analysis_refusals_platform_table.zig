@@ -38,8 +38,8 @@ fn body(c: *lib.Ctx) !void {
     // 2
     const t = try c.run(&.{ "targets", "komira//tools/build/platforms:" }, .{});
     const names = try lib.parse.targetNames(c.a, t.stdout);
-    var platforms = std.ArrayList([]const u8).init(c.a);
-    for (names) |n| if (!std.mem.eql(u8, n, "doc_tree")) try platforms.append(n);
+    var platforms = std.ArrayList([]const u8).empty;
+    for (names) |n| if (!std.mem.eql(u8, n, "doc_tree")) try platforms.append(c.a, n);
     const want = [_][]const u8{ "darwin-arm64", "host", "linux-x86_64" };
     if (t.ok() and lib.text.eqlLists(&want, platforms.items)) {
         c.pass("platforms: komira//tools/build/platforms declares darwin-arm64, host and linux-x86_64, and no platform for the reserved linux-arm64", .{});

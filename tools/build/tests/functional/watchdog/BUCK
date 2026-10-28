@@ -1,15 +1,70 @@
-load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_ARM64", "LINUX_X86_64")
+load("@komira//tools/build/platforms:table.bzl", "row")
 load(":defs.bzl", "mojo_watchdog_cases")
 
-# Every verdict of the compile watchdog in mojo_wrapper.sh, on stand-in
-# compilers (tools/build/tests/run_tests.sh).
-mojo_watchdog_cases(
-    name = "cases",
-    script = "cases.sh",
+# Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
+# that the pin is that release.
+_ZIG = "komira//tools/build/toolchains:zig_next"
+
+# The stand-in toolchain: the compiler (bin/mojo) and the link driver (zig)
+# the cases run the wrapper against.
+zig_exe(
+    name = "standin",
+    exec_compatible_with = LINUX_X86_64,
+    src = "standin.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
 )
 
-shell_lint(
-    name = "shell_lint",
-    srcs = ["cases.sh"],
-    visibility = ["komira//:tests_lints"],
+zig_exe(
+    name = "runner",
+    exec_compatible_with = LINUX_X86_64,
+    src = "cases.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
+
+# Every process behaviour of the compile wrapper (komira//tools/build/mojo:mojo_compile)
+# on the stand-in toolchain (tools/build/tests/run_tests.sh, test 28).
+mojo_watchdog_cases(
+    name = "cases",
+    exec_compatible_with = LINUX_X86_64,
+    runner = ":runner",
+    standin = ":standin",
+)
+
+# The same runner and stand-in built for macOS arm64, against the macOS
+# wrapper (komira//tools/build/mojo:mojo_compile_darwin), on a macOS worker:
+# the session, tether and libproc tree of its watchdog, its exact
+# environment, the host-identity, shared-lib and modular.cfg refusals. Only
+# for `--target-platforms komira//tools/build/platforms:darwin-arm64`; the
+# pull-request check has no macOS leg, so a macOS change carries this
+# target's farm build as its proof.
+zig_exe(
+    name = "standin_darwin",
+    exec_compatible_with = LINUX_X86_64,
+    src = "standin.zig",
+    target = row("darwin-arm64")["zig_triple"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
+
+zig_exe(
+    name = "runner_darwin",
+    exec_compatible_with = LINUX_X86_64,
+    src = "cases.zig",
+    target = row("darwin-arm64")["zig_triple"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = _ZIG,
+)
+
+mojo_watchdog_cases(
+    name = "cases_darwin",
+    exec_compatible_with = DARWIN_ARM64,
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-watchdog-cases
+    runner = ":runner_darwin",
+    standin = ":standin_darwin",
+    wrapper = "komira//tools/build/mojo:mojo_compile_darwin",
+    wrapper_ticked = "komira//tools/build/mojo:mojo_compile_darwin_ticked",
 )

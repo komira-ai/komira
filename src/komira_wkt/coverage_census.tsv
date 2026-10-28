@@ -1,0 +1,4 @@
+# What the coverage census measured of this package's libraries (tools/build/coverage/census.md).
+census	2026-10-10	27a2541169cb979fa9c82a032eea24919b727121	-
+komira//src/komira_wkt:komira_wkt	src/komira_wkt	library	OK	809	810	551	556	yes	release	-	-
+komira//src/komira_wkt:value_null_proto	src/komira_wkt	library	OK	0	0	-	-	no	conda	-	-

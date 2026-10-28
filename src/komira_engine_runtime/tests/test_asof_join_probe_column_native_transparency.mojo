@@ -1,19 +1,18 @@
 # =============================================================================
 # test_asof_join_probe_column_native_transparency.mojo
 #
-# P-2.B.2b transparency gate for the AsofJoinProbeState column-native breaker
-# migration. The migrated `AsofJoinProbeState.probe_asof_batch` produces a
-# ColumnNativeBatch internally and bridges to RecordBatch at the breaker output
-# via the P-2.A shim (column_native_from_record_batch ->
-# record_batch_from_column_native). Because the ColumnNativeBatch body IS a
-# THSPLC chunk, the lift+lower is byte-identical to a spill/restore round-trip,
-# so the migrated emit is byte-identical to the prior direct RecordBatch emit.
+# Bridge round-trip gate for the output shape of the asof_join_probe breaker. It builds
+# a RecordBatch shaped like that breaker's output by hand (no operator state is
+# reached: this package depends on no operator), moves it through
+# column_native_from_record_batch and record_batch_from_column_native, and
+# asserts the result is byte-equal to the input. It proves the bridge keeps
+# values, validity, offsets and schema flags for this shape; it does not prove
+# that an operator's column-native result equals its RecordBatch result.
 #
 # ASOF mirrors the JOIN scope (B.1): the build's drain is None; the breaker
 # OUTPUT is the per-batch probe emit. The asof probe emits the probe temporal
 # key (Int64 @0) ⊕ each build-payload column (Int64), in payload-pack order
-# (0..3 payloads). The bridge transparency below proves the lift+lower the
-# migration inserts is byte-identical for those output shapes.
+# (0..3 payloads). The bridge round-trip is checked for those output shapes.
 # =============================================================================
 
 from std.testing import TestSuite, assert_true

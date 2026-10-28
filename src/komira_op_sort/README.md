@@ -29,14 +29,25 @@ batch by it.
 - `sort_topn_sink`: the sort and top-N sink kernels (`_execute_sort_sink`,
   `_execute_topn_sink` over `SortSinkData` / `TopNSinkData` of
   `komira_physical_plan`), and `append_deterministic_tiebreak[_schema]`,
-  the one rule that makes a tied top-N cut deterministic.
+  the one rule that makes a tied top-N cut deterministic across runs whose
+  input order differs. `_execute_sort_sink` does not resolve dictionary
+  keys: a numeric dictionary-encoded sort key raises an error (the message
+  differs between the single-key and multi-key paths).
+  `_execute_topn_sink` resolves a numeric dictionary key to its values first.
 - `sort_topn_heap`: `topn_heap_select`, multi-key top-K over a
   `RecordBatch` by a bounded heap, O(N log K), for INT64 / INT32 / FLOAT64 /
-  STRING keys.
+  STRING keys. Rows that tie on every key compare by row index, so the heap
+  keeps and orders tied rows as the stable full sort does. A numeric key
+  stored as a dictionary (codes plus values) is resolved to its values before
+  a top-N.
 - `sort_buffer_untyped`: `SortBuffer_Untyped`, a multi-key sort buffer
   whose column types are known only at run time (a `ColDescriptor` layout
   over `komira_column_format` storage), fed from `BatchView`s and read back
-  per DType; its cell codec is `sort_buffer_cells`.
+  per DType; its cell codec is `sort_buffer_cells`. It does not track
+  validity: a NULL cell sorts as its value bytes, so callers keep nullable
+  keys out or place nulls themselves. TIMESTAMP, DECIMAL128 and BINARY
+  columns can be fed and ordered but have no typed reader; the order is in
+  `sorted_indices`.
 - `sort_loser_tree`: `LoserTree`, a tournament tree for the k-way merge of
   sorted runs, driven by a caller's `LoserTreeComparator`.
 - `sort_parallel`: `parallel_sort_single_key`, the single-key sort over an
@@ -59,35 +70,32 @@ batch by it.
   `can_dictrank_sort_single_key_string` (a strided sampled distinct count
   under a ceiling). Above the ceiling after the exact build it falls back to
   `parallel_sort_single_key_string`. The dictionary build and the ranks are
-  `sort_dictrank_build`.
+  `sort_dictrank_build`. The gate's sample is a fixed stride, so a periodic
+  key, or one that is distinct only past the last sampled row, can be
+  admitted although it is high-cardinality; the exact build is the backstop
+  (the rows stay correct and the sort falls back, at the cost of a full
+  dictionary build). On the multi-worker `SortSink` route the gate samples
+  partition 0 only. `dictrank_fallback_count` reports how many sorts took the
+  fallback.
 - `sort_sink`: `SortSink`, the sort as a `MorselSink` of
   `komira_operator_api`: per-worker batches, and a route chosen once in
   `combine` (partitioned parallel sort and merge, the counting sort, or the
   serial kernel) that changes the cost and never the rows. The switches are
   a value, `SortSinkRoutes`.
 
-- `sort_external`: `ExternalSorter`, a sort past a memory budget: buffered
-  batches are sorted into runs, runs over the budget are spilled to the local
-  disk (`komira_engine_runtime` spill), and `finish` merges every run. The
-  output is one stable `sort_batch_by_keys` of the input in absorb order. The
-  merge (`k_way_merge_cursors`, the loser tree and
-  `komira_column_kernels.cross_batch_gather`) is `sort_external_merge`; its
-  comparator orders a key as the run sort does (floats by `sort_key_lt`).
-
-- `sort_stage_buffer`: `SortBuffer[KB, *Payloads]`, the stage sort buffer
-  typed at compile time (a key block `SortKeyBlock[*Keys]` and a variadic
-  payload pack, stored column-wise), a `BreakerStateCombinable` and a
-  `SpillableOp`; its key and payload column types are `sort_stage_columns`,
-  `sort_stage_string_key` and `sort_stage_payloads`. Float keys compare by
-  `sort_key_lt` everywhere, the top-N SIMD reject mask included.
-- `sort_stage`: `Stage_Sort[KB, *Payloads]`, the sort breaker as a
-  `FusedMorselOp`: feed every row, drain sorted in `finalize`.
-
 Each parallel entry takes a `SharedForkJoinHandle` (the engine's dispatcher,
 or `serial_fork_join_handle()` to run the same chunks inline; the `*_serial`
 entries do that) and gives exactly the rows of the serial kernel, ties in
 input order. `num_workers` sets the slice count; 0 means one per physical
 core.
+
+The numeric parallel sort (`sort_parallel`) does not read the key's validity:
+a NULL cell sorts by its stored value, as the serial sort of a numeric key in
+`sort_topn_sink` does, and `can_parallel_sort_single_key` does not look at
+NULLs. The STRING / BINARY form places NULLs first ascending and last
+descending, as `sort_indices_string` does. No sort sink calls the parallel
+entries yet; they are covered by this package's tests, including a pooled run
+of each entry family on a started runtime.
 
 Every sort is stable: rows with equal keys keep their input order, in both
 directions. Float keys are totally ordered the way DuckDB orders them: NaN

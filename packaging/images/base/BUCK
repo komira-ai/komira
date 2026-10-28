@@ -5,7 +5,8 @@ load(":pin_cases.bzl", "base_pin_cases")
 
 # The komira base image (README.md): the pinned distroless base (glibc, CA
 # certificates), `sh`, the supervisor at /komira/bin/supervisor as the
-# entrypoint, and kci at /opt/kci/bin/kci. Nothing is pushed by the build.
+# entrypoint, and kci at /opt/kci/bin/kci (with the README examples tool it
+# runs beside it). Nothing is pushed by the build.
 
 # The program at /komira/bin/supervisor. A stand-in until the job
 # supervisor's binary exists; then this line names it.
@@ -64,6 +65,7 @@ oci_image_check(
     executables = [
         "bin/sh",
         "opt/kci/bin/kci",
+        "opt/kci/bin/readme_examples",
     ],
     files = ["etc/ssl/certs/ca-certificates.crt"],
     visibility = ["PUBLIC"],

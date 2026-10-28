@@ -1,0 +1,3 @@
+# The planted allowlist of the cases in BUCK.
+# path	reason
+tools/gen.py	a planted Python file

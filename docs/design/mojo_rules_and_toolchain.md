@@ -22,11 +22,11 @@ pinned downloads (busybox, zig, mojo-compiler .conda, C++ runtime .conda)
    v
 toolchains//:mojo   (runs on the one execution platform of its OS)
    v
-mojo_library:  mojo_wrapper.sh -> mojo precompile -> <import>.mojoc
-mojo_binary :  mojo_wrapper.sh -> mojo build      -> executable (+ lib/ of runtime libraries)
+mojo_library:  mojo_compile -> mojo precompile -> <import>.mojoc
+mojo_binary :  mojo_compile -> mojo build      -> executable (+ lib/ of runtime libraries)
 ```
 
-`mojo_wrapper.sh` is the single place the compiler's environment is decided. It runs under the pinned busybox, never consults the worker's `PATH`, renders `modular.cfg` for the action's own toolchain path, gives the compiler private cache, temporary and home directories, runs it under the watchdog, and checks the output afterwards (exit 3 for a missing or empty output, exit 4 for an output that contains the action's working directory).
+The compile wrapper (`mojo_compile`, a Zig program built for each execution platform: `tools/mojo_compile.zig` on Linux, `tools/mojo_compile_macos.zig` on macOS) is the single place the compiler's environment is decided. It is built from the pinned zig, gives the compiler an environment built from nothing, never consults the worker's `PATH`, renders `modular.cfg` for the action's own toolchain path, gives the compiler private cache, temporary and home directories, runs it under the watchdog, and checks the output afterwards (exit 3 for a missing or empty output, exit 4 for an output that contains the action's working directory).
 
 ## Why is it built this way?
 
@@ -131,7 +131,7 @@ A kill of the wrapper cannot be caught, so a tether process in the compiler's se
 | What | Where |
 |---|---|
 | The rules and the gate | `tools/build/mojo/defs.bzl`, `providers.bzl` |
-| The compiler wrapper (Linux, macOS) | `tools/build/mojo/mojo_wrapper.sh`, `tools/build/mojo/darwin/` |
+| The compiler wrapper (Linux, macOS) | `tools/build/mojo/tools/mojo_compile.zig` (design: `zig_compile_wrapper.md`), `tools/build/mojo/darwin/` |
 | The toolchain and the downloads | `tools/build/mojo/toolchain.bzl`, `download.bzl`, `tools/build/toolchains/` |
 | C and C++ | `tools/build/mojo/cxx.bzl`, `archive.bzl`, `third_party/` |
 | Worker classes | `tools/build/platforms/` |

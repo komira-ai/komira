@@ -85,7 +85,6 @@
 from std.memory import OwnedPointer, alloc
 from komira_atomic_alias import AtomicI64
 from std.testing import assert_equal, assert_true
-from std.time import perf_counter_ns
 
 from komira_async.cancellation.token import CancellationToken
 from komira_async.channel.mpsc import (
@@ -159,7 +158,9 @@ struct _LedgerSegment(Segment, Deinitable):
     the generation is still open), then re-queues the handle so the driver can
     re-run it after the barrier closes."""
 
-    var rescue_ms: Int64
+    # True: task 0 waits (no deadline) for the pseudo-worker's shard. A shard
+    # that never arrives hangs the dispatch; the build gate's hang limit fails it.
+    var rescue: Bool
 
     def execute[S: KeepAlive](
         mut self, mut state: S, worker_id: Int32, task_id: Int64
@@ -170,8 +171,7 @@ struct _LedgerSegment(Segment, Deinitable):
         if task_id != Int64(0):
             return
         # Task 0 only: rescue + re-queue the pseudo-worker's shard.
-        var deadline = Int64(perf_counter_ns()) + self.rescue_ms * 1_000_000
-        while Int64(perf_counter_ns()) < deadline:
+        while self.rescue:
             var oc = sp[]._recv[].try_recv()
             if oc.status != TRY_RECV_OK:
                 continue
@@ -244,7 +244,7 @@ def test_bug4_shard_run_after_barrier_must_not_touch_stale_ctx() raises:
     var state = _LedgerState(recv^, send_for_test^)
 
     # --- Generation 1: n = 2 (both slots written) ---
-    var seg = _LedgerSegment(rescue_ms=Int64(4000))
+    var seg = _LedgerSegment(rescue=True)
     var back = d.run_with_state[_LedgerState, _LedgerSegment](
         state, seg^, 2, CancellationToken.never(),
     )
@@ -266,7 +266,7 @@ def test_bug4_shard_run_after_barrier_must_not_touch_stale_ctx() raises:
     )
 
     # --- Generation 2: n = 1, so slot 0 is recycled and slot 1 is NOT ---
-    var seg2 = _LedgerSegment(rescue_ms=Int64(0))
+    var seg2 = _LedgerSegment(rescue=False)
     var back2 = d.run_with_state[_LedgerState, _LedgerSegment](
         state, seg2^, 1, CancellationToken.never(),
     )
@@ -336,7 +336,7 @@ def test_invariant_no_barrier_violations_on_healthy_dispatches() raises:
     for rep in range(8):
         # Alternate WIDE (n = 8*w, multi-task ranges) and NARROW (n = 1).
         var n = 8 * w if (rep % 2) == 0 else 1
-        var seg = _LedgerSegment(rescue_ms=Int64(0))
+        var seg = _LedgerSegment(rescue=False)
         var b = d.run_with_state[_LedgerState, _LedgerSegment](
             state, seg^, n, CancellationToken.never(),
         )

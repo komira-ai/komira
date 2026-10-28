@@ -13,7 +13,14 @@
 //!     is no package or is also in deps): catches the shell-name check of
 //!     test_runtime.bzl deleted;
 //!   - assert level, defines and memory cap refusals: catches the
-//!     define-twice `fail()` deleted.
+//!     define-twice `fail()` deleted;
+//!   - an optimization level `mojo build` does not accept (opt_level.bzl):
+//!     catches the level check of opt_level_args deleted;
+//!   - a package named in `closure_excludes` reached through `deps`, one row
+//!     per package the host profile's and the lowering package's closures
+//!     refuse (komira_fs, komira_objectstore, komira_async, komira_shuffle,
+//!     komira_engine_runtime, komira_optimizer, komira_sql): catches the
+//!     closure check deleted, or the names compared by prefix.
 const std = @import("std");
 const lib = @import("lib/lib.zig");
 
@@ -96,10 +103,55 @@ const ROWS = [_]lib.Row{
         .text = "tests//negative/assert_level:bad_cap: test_memory_cap_mib is -1; it must be a number of MiB, or 0 for no cap",
     },
     .{
+        .name = "hang_limit_zero",
+        .target = "tests//negative/mojo_hang:bad_limit",
+        .text = "tests//negative/mojo_hang:bad_limit: test_hang_limit_s = 0 must be a positive number of seconds",
+    },
+    .{
+        .name = "opt_bad_level",
+        .target = "tests//negative/opt_level:bad_level",
+        .text = "tests//negative/opt_level:bad_level: optimization level `fast` is not one of 0, 1, 2, 3",
+    },
+    .{
         .name = "c_dep_kind",
         .target = "tests//negative/c_deps:bad_dep",
         .text = " provides neither MojoInfo (a Mojo package) nor MergedLinkInfo (a C/C++ library)",
         .also = &.{ "tests//negative/c_deps:bad_dep (", ": dep tests//negative/c_deps:not_a_library (" },
+    },
+    .{
+        .name = "closure_excludes_fs",
+        .target = "tests//negative/closure_excludes:fs",
+        .text = "tests//negative/closure_excludes:fs: `komira_fs` is in the closure of `deps`, which `closure_excludes` refuses; remove the dependency that brings it",
+    },
+    .{
+        .name = "closure_excludes_objectstore",
+        .target = "tests//negative/closure_excludes:objectstore",
+        .text = "tests//negative/closure_excludes:objectstore: `komira_objectstore` is in the closure of `deps`, which `closure_excludes` refuses; remove the dependency that brings it",
+    },
+    .{
+        .name = "closure_excludes_async_runtime",
+        .target = "tests//negative/closure_excludes:async_runtime",
+        .text = "tests//negative/closure_excludes:async_runtime: `komira_async` is in the closure of `deps`, which `closure_excludes` refuses; remove the dependency that brings it",
+    },
+    .{
+        .name = "closure_excludes_shuffle",
+        .target = "tests//negative/closure_excludes:shuffle",
+        .text = "tests//negative/closure_excludes:shuffle: `komira_shuffle` is in the closure of `deps`, which `closure_excludes` refuses; remove the dependency that brings it",
+    },
+    .{
+        .name = "closure_excludes_engine_runtime",
+        .target = "tests//negative/closure_excludes:engine_runtime",
+        .text = "tests//negative/closure_excludes:engine_runtime: `komira_engine_runtime` is in the closure of `deps`, which `closure_excludes` refuses; remove the dependency that brings it",
+    },
+    .{
+        .name = "closure_excludes_optimizer",
+        .target = "tests//negative/closure_excludes:optimizer",
+        .text = "tests//negative/closure_excludes:optimizer: `komira_optimizer` is in the closure of `deps`, which `closure_excludes` refuses; remove the dependency that brings it",
+    },
+    .{
+        .name = "closure_excludes_sql",
+        .target = "tests//negative/closure_excludes:sql",
+        .text = "tests//negative/closure_excludes:sql: `komira_sql` is in the closure of `deps`, which `closure_excludes` refuses; remove the dependency that brings it",
     },
 };
 

@@ -4,8 +4,8 @@
 #
 # The buffer stores narrow signed keys in an UNSIGNED cell (`write_slot_u16`)
 # and sign-extends them back with integer arithmetic (`_sext_cell_u16`). The
-# obvious spelling, `Int(Int16(Int(a)))` on the u16 cell, has been miscompiled:
-# the compiler folded sext(trunc(zext(x))) to zext(x), at every optimization
+# obvious spelling, `Int(Int16(Int(a)))` on the u16 cell, is miscompiled: the
+# compiler folds sext(trunc(zext(x))) to zext(x), at every optimization
 # level, on runtime values only (comptime constants fold correctly, which is
 # why a constant-driven test cannot see it). The key -1001 then compared as
 # 64535: ordering stayed monotone within each sign class and only the classes
@@ -321,8 +321,8 @@ def test_sort_i16_all_non_negative_unaffected() raises:
 
 def test_sort_i16_all_negative_unaffected() raises:
     """All keys < 0: the u16 words are order-ISOMORPHIC to the signed values
-    within this class, so ordering was correct even pre-fix. This is precisely
-    why a single-sign-class test cannot catch the defect."""
+    within this class, so a test of one sign class cannot tell a sign-extending
+    comparison from a zero-extending one."""
     var vals = List[Int16]()
     vals.append(Int16(-7))
     vals.append(Int16(-32768))

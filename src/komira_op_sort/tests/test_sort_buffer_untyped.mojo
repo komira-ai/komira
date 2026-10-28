@@ -421,8 +421,7 @@ def test_stable_on_equal_keys() raises:
 # =============================================================================
 # Varlen STRING sort coverage.
 #
-# Validates byte-lex comparator on the production STRING wire-in. Previously
-# the _compare_storage_single_col STRING/BINARY path raised STUB.
+# Validates the byte-lex comparator on STRING keys.
 # =============================================================================
 
 

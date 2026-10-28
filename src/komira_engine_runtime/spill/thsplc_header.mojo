@@ -1,26 +1,16 @@
 # =============================================================================
-# thsplc_header.mojo — THSPLC (Komira-Spill-Column) 96-byte fixed header.
+# thsplc_header.mojo: the THSPLC 96-byte fixed header.
 # =============================================================================
 #
-# The COLUMN
-# sibling of `thspill2_header.mojo` — same 96-byte envelope, different magic,
-# plus an `n_cols` field that the row header does not carry.
+# # 96-byte layout (little-endian throughout)
 #
-# The 96-byte size is LOAD-BEARING and intentionally identical to the
-# THSPILL2 header (§12.2): spill / shuffle restore code reads the first 96 B
-# regardless of body kind, then dispatches on the magic / version to the
-# per-format body parser. One shared envelope read; two body parsers.
-#
-# # 96-byte layout (v0.4; little-endian throughout)
-#
-#   bytes  0..  7 : magic "THSPLC\x01\x00\x00"  (UInt8 ×8; §12.1)
-#   bytes  8.. 11 : version                     (UInt32; v0.4 ships 0x01)
+#   bytes  0..  7 : magic "THSPLC\x01\x00"     (UInt8 ×8)
+#   bytes  8.. 11 : version                     (UInt32; 0x01)
 #   bytes 12.. 15 : n_cols                       (UInt32; number of columns)
 #   bytes 16.. 23 : body_length                  (UInt64; bytes after header,
 #                                                 EXCLUDING the trailing magic)
 #   bytes 24.. 31 : row_count                    (UInt64)
-#   bytes 32.. 39 : schema_fingerprint           (UInt64; FNV-1a-64 — matches
-#                                                 THSPILL2 schema_fingerprint_v2)
+#   bytes 32.. 39 : schema_fingerprint           (UInt64; FNV-1a-64)
 #   bytes 40.. 43 : flags                        (UInt32; bit0=compressed,
 #                                                 bit1=has_selection_vector;
 #                                                 rest reserved=0)
@@ -36,19 +26,15 @@
 #
 # # Magic bytes + version
 #
-# "THSPLC\x01\x00\x00" — identifies the COLUMN spill/shuffle body (§12.1).
-# The first 6 bytes spell "THSPLC"; byte 6 = 0x01 (era); bytes 7..8 = padding
-# so the 8-byte trailing magic ("THSPLC\x01\x00\x00" reverse-readable, §12.1)
-# matches the leading magic for symmetric scan. The `version` UInt32 at
+# The first 6 bytes spell "THSPLC"; byte 6 = 0x01 (era); byte 7 = 0x00
+# (padding). The 8-byte trailing magic repeats them. The `version` UInt32 at
 # [8..11] is what readers dispatch on for revision changes within the era.
 #
 # # Encapsulation
 #
 # Pure data + helpers. No fields hold pointers. No FFI. The functions operate
-# over `Span[UInt8, origin]` or take/return value types — identical shape to
-# `thspill2_header.mojo`.
+# over `Span[UInt8, origin]` or take/return value types.
 # =============================================================================
-
 
 
 # =============================================================================
@@ -57,13 +43,13 @@
 
 comptime THSPLC_HEADER_SIZE: Int = 96
 
-# Trailing magic length (§12.1: 8 B "THSPLC\x01\x00\x00" appended after body).
+# Trailing magic length (the 8 magic bytes, appended after the body).
 comptime THSPLC_TRAILER_SIZE: Int = 8
 
-# Version: v0.4 ships 0x01.
+# The only version this reader accepts.
 comptime THSPLC_VERSION_V1: UInt32 = 1
 
-# Magic byte sequence "THSPLC\x01\x00\x00" (8 bytes; §12.1).
+# Magic byte sequence (8 bytes).
 comptime THSPLC_MAGIC_0: UInt8 = 0x54  # 'T'
 comptime THSPLC_MAGIC_1: UInt8 = 0x48  # 'H'
 comptime THSPLC_MAGIC_2: UInt8 = 0x53  # 'S'
@@ -91,10 +77,10 @@ struct THSPLCHeader(
 ):
     """Parsed THSPLC fixed header. Value-shaped POD — no fields hold
     pointers. Carried by the encoder during construction and produced by the
-    decoder during parse. Mirror of `THSpill2Header` with an added `n_cols`.
+    decoder during parse.
 
     Fields:
-        version:            Format-version (v0.4 ships 1).
+        version:            Format version (1).
         n_cols:             Number of columns in the batch.
         body_length:        Bytes after the 96-byte header (descriptor section
                             + per-column buffers), EXCLUDING the trailing
@@ -143,7 +129,7 @@ struct THSPLCHeader(
         descriptors_byte_len: UInt32,
     ) -> Self:
         """Convenience ctor for the common shape: uncompressed, no selection
-        vector. v0.4 ships this shape by default."""
+        vector."""
         return Self(
             version=THSPLC_VERSION_V1,
             n_cols=n_cols,
@@ -179,9 +165,9 @@ def pack_thsplc_header[
         )
 
     # SAFETY: `dst` is a tracked Span; offsets 0..95 are bounds-checked above.
-    # All writes are scalar little-endian stores via unaligned bitcast — the
-    # same idiom as `thspill2_header.pack_header`. `dst` is held alive by the
-    # caller (the OAB owning the bytes) for the duration of this call.
+    # All writes are scalar little-endian stores via unaligned bitcast. `dst`
+    # is held alive by the caller (the OAB owning the bytes) for the duration
+    # of this call.
     var base = dst.unsafe_ptr()
 
     # bytes 0..7 — magic
@@ -235,11 +221,11 @@ def parse_thsplc_header(src: Span[UInt8, _]) raises -> THSPLCHeader:
     """Read the 96-byte header from `src`. Validates magic + version.
 
     Raises:
-        * "bad magic" — `src` does not begin with "THSPLC\\x01\\x00\\x00".
+        * "bad magic" — `src` does not begin with the 8 THSPLC magic bytes.
         * "unknown version" — `header.version` is not `THSPLC_VERSION_V1`.
         * "buffer shorter than header" — `src.len() < 96`.
 
-    Like `parse_header`, the body_length / row_count consistency check (that
+    The body_length / row_count consistency check (that
     the surrounding buffer is `>= 96 + body_length + 8`) is the DECODER's
     responsibility, not this function's.
     """
@@ -254,7 +240,7 @@ def parse_thsplc_header(src: Span[UInt8, _]) raises -> THSPLCHeader:
         )
 
     # SAFETY: bounds confirmed above. All reads are little-endian unaligned
-    # scalar loads via bitcast — same shape as `thspill2_header.parse_header`.
+    # scalar loads via bitcast.
     var base = src.unsafe_ptr()
 
     # bytes 0..7 — magic
@@ -270,7 +256,7 @@ def parse_thsplc_header(src: Span[UInt8, _]) raises -> THSPLCHeader:
     ):
         raise Error(
             "parse_thsplc_header: bad magic — expected"
-            " 'THSPLC\\x01\\x00\\x00'"
+            " 'THSPLC\\x01\\x00'"
         )
 
     # bytes 8..11 — version
@@ -279,7 +265,7 @@ def parse_thsplc_header(src: Span[UInt8, _]) raises -> THSPLCHeader:
         raise Error(
             "parse_thsplc_header: unknown version "
             + String(Int(version))
-            + " (v0.4 reader accepts only version "
+            + " (this reader accepts only version "
             + String(Int(THSPLC_VERSION_V1))
             + ")"
         )

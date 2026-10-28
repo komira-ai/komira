@@ -1,0 +1,12 @@
+{
+ "name": "frame_error_released_on_ok",
+ "defect": "an error a runtime filled on a frame_next that returned OK (an output or the end) is never released (design 4.4: the host calls release once when it is non-NULL)",
+ "run": "frame",
+ "entry": "running_sum_error_on_ok",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "inputs": [{"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]}, {"length": 1, "columns": [{"type": "int64", "values": [3]}]}],
+ "expect": {"status": "OK", "batches": [{"length": 2, "columns": [{"type": "int64", "values": [1, 3]}]}, {"length": 1, "columns": [{"type": "int64", "values": [6]}]}]}
+}

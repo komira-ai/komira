@@ -6,27 +6,31 @@
 #   * Equivalence: low-cardinality STRING keys, with and without NULLs, ASC and
 #     DESC, over 1, 3 and 8 slices, against `_sort_batch_single_key`
 #     (`sort_indices_string`): same strings, same payload (input row) in every
-#     row. A NULL rank on the wrong side (planted: the ASC sentinel at d, as
-#     DESC uses) turns `test_nulls_*` red.
+#     row. NULLs land first for ASC and last for DESC, as in the serial sort.
 #   * The fallback: a ceiling below the exact distinct count sends the batch
-#     to the comparison sort, with the same rows.
+#     to the comparison sort, with the same rows; `dictrank_fallback_count`
+#     shows the fallback ran, and does not move when the ceiling is not
+#     exceeded.
+#   * BINARY keys: the gate admits them, and the bytes sort as the serial
+#     kernel sorts them (0x00, 0xFF, prefixes, the empty value), ASC and DESC.
 #   * The gate: a key with one value in its first quarter and a distinct value
-#     in every later row is declined. A first-N sample (planted: stride 1)
-#     sees 76% of its sample as one value and admits it, which is what the
-#     strided sample exists to stop; that turns
-#     `test_gate_declines_a_key_distinct_in_its_tail` red.
+#     in every later row is declined. A sample of only the first rows
+#     would see most of its sample as one value and admit it; the strided
+#     sample reads the whole column and declines.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.column import Column
+from komira_arrow.binary_array import BinaryArray
 from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.record_batch import RecordBatch
 from komira_arrow.schema import Field, Schema
 from komira_arrow.string_array import StringArray
 
 from komira_op_sort.sort_dictrank import (
+    dictrank_fallback_count,
     can_dictrank_sort_single_key_string,
     parallel_dictrank_sort_string_serial,
 )
@@ -137,10 +141,74 @@ def test_nulls_first_ascending_last_descending() raises:
 
 
 def test_ceiling_below_exact_count_falls_back_with_same_rows() raises:
-    """Seven distinct values against a ceiling of 3."""
+    """Seven distinct values against a ceiling of 3: the fallback runs and the
+    rows are the serial sort's. Against a ceiling of 7 it does not run."""
     var t = _low_card(300, True)
+    var before = dictrank_fallback_count()
     _check(t[0], t[1], False, 4, max_distinct=3)
+    assert_equal(dictrank_fallback_count(), before + 1)
     _check(t[0], t[1], True, 4, max_distinct=3)
+    assert_equal(dictrank_fallback_count(), before + 2)
+    _check(t[0], t[1], False, 4, max_distinct=7)
+    _check(t[0], t[1], True, 4)
+    assert_equal(dictrank_fallback_count(), before + 2)
+
+
+def _binary_batch(values: List[List[UInt8]], valid: List[Bool]) raises -> RecordBatch:
+    var payload = List[Int64]()
+    for i in range(len(values)):
+        payload.append(Int64(i))
+    var ba = BinaryArray.from_bytes_list(values)
+    var schema = Schema.from_fields_2(
+        Field("k", ArrowType.BINARY, True), Field("orig", DType.int64, True)
+    )
+    return RecordBatch.from_typed_columns_2(
+        schema^,
+        Column.from_binary(ba^),
+        Column.from_primitive[DType.int64](
+            PrimitiveArray[DType.int64].from_list(payload^)
+        ),
+    )
+
+
+def _binary_rows(n: Int) -> List[List[UInt8]]:
+    """`n` rows over eight byte values: 0x00, 0xFF, the empty value, and
+    values that are prefixes of one another."""
+    var vals = List[List[UInt8]]()
+    vals.append([UInt8(0)])
+    vals.append([UInt8(255)])
+    vals.append(List[UInt8]())
+    vals.append([UInt8(0), UInt8(0)])
+    vals.append([UInt8(0), UInt8(255)])
+    vals.append([UInt8(255), UInt8(0)])
+    vals.append([UInt8(255), UInt8(255), UInt8(0)])
+    vals.append([UInt8(1)])
+    var out = List[List[UInt8]]()
+    for i in range(n):
+        out.append(vals[(i * 5 + 3) % 8].copy())
+    return out^
+
+
+def test_binary_key_is_admitted_and_matches_serial() raises:
+    var rows = _binary_rows(400)
+    var b = _binary_batch(rows, List[Bool]())
+    assert_true(can_dictrank_sort_single_key_string(b, "k", force=True))
+    for nw in [1, 3]:
+        for desc in [False, True]:
+            var got = parallel_dictrank_sort_string_serial(
+                _binary_batch(rows, List[Bool]()), "k", desc, num_workers=nw
+            )
+            var want = _sort_batch_single_key(
+                _binary_batch(rows, List[Bool]()), "k", desc
+            )
+            assert_equal(got.num_rows(), want.num_rows())
+            var pg = got.column_at(1).as_primitive[DType.int64]()
+            var pw = want.column_at(1).as_primitive[DType.int64]()
+            for r in range(got.num_rows()):
+                assert_equal(
+                    Int(pg.get_typed[Scalar[DType.int64]](r)),
+                    Int(pw.get_typed[Scalar[DType.int64]](r)),
+                )
 
 
 def test_gate_admits_low_cardinality_and_declines_high() raises:
