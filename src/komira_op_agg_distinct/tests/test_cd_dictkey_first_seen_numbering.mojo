@@ -1,5 +1,5 @@
 # =============================================================================
-# CD-SCAN (2026-09-25, cbq10 / cbq11) — a DICTIONARY group key is numbered in
+# A DICTIONARY group key is numbered in
 # FIRST-SEEN order, exactly like the dense STRING form of the same rows
 # =============================================================================
 #
@@ -11,7 +11,7 @@
 # group ids ARE the emit order and the Top-K tie order, so the same SET of
 # (key, count) pairs is not enough.
 #
-# WHAT THIS FILE KILLS:
+# WHAT THIS FILE PROVES:
 #   §1  a DICTIONARY arm that numbers groups by dictionary CODE (the arm this
 #       replaced): the fixture's dictionary is in REVERSE first-seen order, so
 #       code order and first-seen order disagree on every group;
@@ -70,7 +70,7 @@ comptime _N: Int = 70_000
 
 
 def _skew_value(r: Int) -> String:
-    """cbq10's shape: nine rows in ten are ONE value; the rest scatter over
+    """A skewed shape: nine rows in ten are ONE value; the rest scatter over
     ~211 values whose first appearances land in every task, an EMPTY value,
     multi-byte UTF-8, a shared prefix, and values that first appear only in
     the last seventh of the rows."""

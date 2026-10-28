@@ -9,9 +9,9 @@ import "komira/plan/v1/plan.proto";
 //
 // The design is docs/design/optimized_plan.md (komira-ai/komira#1094): §4 the
 // header and body, §6 needs, pins and advice, §8 segments. This file is that
-// design's stage 4, the schema. It holds no codec: the header codec, the body
-// and segment codecs, the canonical encoder and both digests are stage 5, and
-// nothing in this repository reads or writes these messages yet.
+// design's stage 4, the schema. It holds no codec. The header codec is
+// `komira_optimized_plan_header`; the body and segment codecs, the canonical
+// encoder and both digests are stage 5 and not written yet.
 //
 // It imports `plan.proto` and restates none of it. The plan body is a
 // `WirePlan`; the write target is `WireWriteTarget`. One node vocabulary
@@ -34,7 +34,7 @@ import "komira/plan/v1/plan.proto";
 // declared field takes it, so a field added at a held number without moving
 // its census row fails the build. The reasons, in short:
 //   * a type a later stage adds to `plan_vocabulary.proto` or `plan.proto`
-//     (ExchangeKind and KeyEncoding: stage 3; UdfRef: stage 11);
+//     (ExchangeKind and KeyEncoding: stage 3);
 //   * a message the design names but does not yet number (ResourceNeeds,
 //     Hint, NodeEstimate, UdfOrigin, ColumnStatsWire, SegmentContract);
 //   * an enum whose values the design and the engine do not yet agree on
@@ -132,7 +132,8 @@ message PlanAdvice {
   // The statistics the optimizer used.
   repeated ScanStats stats_basis = 2;
   // held: repeated UdfOrigin udf_origins = 3 (§10.3; {udf_index,
-  // display_name, file, line, captured_version}); added with UdfRef.
+  // display_name, file, line, captured_version}); the design does not number
+  // UdfOrigin's fields yet.
   // held: repeated IndexCoverage index_coverage = 4 (§15.5.2).
 }
 
@@ -160,8 +161,9 @@ message DeclaredNeeds {
   // held: ResourceNeeds resources = 1 (cpu_millis, peak_mem_bytes,
   // scanned_bytes, max_parallelism, spill_ok, host_count_max,
   // interruptible, accelerators); the design does not number its fields yet.
-  // held: repeated UdfRef udfs = 2 (§10.3, stage 11). The body references
-  // entries by index, so the list order is part of the plan.
+  // The user functions the body calls (optimized_plan_udfs.md §10.3). The
+  // body references entries by index, so the list order is part of the plan.
+  repeated UdfRef udfs = 2;
   // The environment image travels beside the plan (§10.11). Never released.
   reserved 3;
   reserved "images";

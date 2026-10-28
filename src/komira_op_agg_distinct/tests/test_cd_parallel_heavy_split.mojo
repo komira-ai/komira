@@ -31,10 +31,6 @@
 #     keyed-row total is K x N instead of N), a heavy row under two aggregates
 #     not examined by every worker, and a row-range split that leaves the
 #     owner bytes of a remainder (N % K != 0) unwritten.
-#
-# Mutants run while porting: the fold comparing the hash only (the
-# collision test went red); the AGG pass ignoring the owner byte and keying
-# every row (the keyed-row tests went red).
 # =============================================================================
 
 from std.collections import Dict, List, Set

@@ -50,8 +50,8 @@ labels only), so building a `test_weld` target checks nothing: it declares the
 lint, and [`test_weld.bxl`](../lint/test_weld.bxl) checks it, running the
 check as a build action whose inputs are the list of `.mojo` paths, the list
 of welded paths and the ledger. The pull request's check runs it for each
-`test_weld` target of a unit it builds
-([`build_targets.sh`](../../../release/ci/build_targets.sh)); this test runs it
+`test_weld` target
+([`pr.yml`](../../../.github/workflows/pr.yml)); this test runs it
 for each target above.
 
 ```sh
@@ -138,8 +138,10 @@ row for a package that is gone, two rows for one package, a misnamed row.
 
 Product coverage is every capability of the plan exercised through every
 surface by an end-to-end test of that surface.
-[`surface_capability_matrix`](../lint/surface_capability_matrix.bzl) is a
-validation over its ledger, one row per (surface, capability) naming the test
+[`surface_capability_matrix`](../lint/surface_capability_matrix.bzl) checks
+its ledger, at analysis what the build graph holds and in a validation (the
+Zig tool [`surface_grounding`](../lint/surface_grounding/src/grounding.zig),
+whose unit tests are its targets) what the grounding files declare: one row per (surface, capability) naming the test
 target that exercises the capability, or `-`. It writes the census
 (`[matrix]`, `[report]`) and never fails on a missing cell. It fails on a row
 that is malformed or lies: an unknown surface or capability, a pair with two

@@ -2,9 +2,8 @@
 # ConcatOptions -- the concat's route switches and diagnostics, as a VALUE
 # =============================================================================
 #
-# Every field is a switch that was once read from the process environment, once
-# per concat CALL. They are arguments now: the caller decides, and nothing in
-# this package reads the environment. The defaults are the shipped behaviour, so
+# Every field is a switch the caller passes per concat CALL; nothing in this
+# package reads the environment. The defaults are the shipped behaviour, so
 # a caller that passes nothing gets the shipped route.
 #
 # The first four are KILL SWITCHES and A/B arms, not feature flags: turning one
@@ -13,6 +12,9 @@
 # `string_tiling` and `string_bytebal` switches are read only after it has
 # admitted the tiled route, so the outer OFF arm cannot be reached by clearing
 # only one of the three.
+
+
+from komira_arrow.offset_overflow import ARROW_INT32_OFFSET_MAX
 
 
 struct ConcatOptions(Copyable, ImplicitlyCopyable, Movable):
@@ -33,6 +35,13 @@ struct ConcatOptions(Copyable, ImplicitlyCopyable, Movable):
         input the rule would correctly decline.
       * `dict_unify` -- unify STRING-dictionary columns across batches before
         the concat. OFF restores the pair-wise fold.
+      * `offset_promote_at` -- the byte total above which a STRING / BINARY
+        column that would need Int32 offsets is refused (the tiled string
+        route, and densifying a dictionary column). The default is the Arrow
+        Int32 ceiling; a smaller positive value lowers the trip point so a
+        unit test can reach the refusal without 2 GiB of data. A value that is
+        not positive or is above the ceiling means the ceiling
+        (`offset_overflow.clamp_offset_promote_at`).
       * `trace` -- print one line per concat call: the shape, the bytes, and the
         fan that shape produced.
       * `trace_dict_unify` -- print the unify phase timings.
@@ -44,6 +53,7 @@ struct ConcatOptions(Copyable, ImplicitlyCopyable, Movable):
     var string_bytebal: Bool
     var force_tiles: Bool
     var dict_unify: Bool
+    var offset_promote_at: Int
     var trace: Bool
     var trace_dict_unify: Bool
     var trace_geometry: Bool
@@ -55,6 +65,7 @@ struct ConcatOptions(Copyable, ImplicitlyCopyable, Movable):
         string_bytebal: Bool = True,
         force_tiles: Bool = False,
         dict_unify: Bool = True,
+        offset_promote_at: Int = ARROW_INT32_OFFSET_MAX,
         trace: Bool = False,
         trace_dict_unify: Bool = False,
         trace_geometry: Bool = False,
@@ -64,6 +75,7 @@ struct ConcatOptions(Copyable, ImplicitlyCopyable, Movable):
         self.string_bytebal = string_bytebal
         self.force_tiles = force_tiles
         self.dict_unify = dict_unify
+        self.offset_promote_at = offset_promote_at
         self.trace = trace
         self.trace_dict_unify = trace_dict_unify
         self.trace_geometry = trace_geometry

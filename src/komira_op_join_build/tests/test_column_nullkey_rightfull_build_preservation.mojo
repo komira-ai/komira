@@ -21,9 +21,9 @@
 #
 # ## DuckDB-VALUE ORACLE 
 #   CREATE TABLE R(k INT, bp INT);  CREATE TABLE S(k INT, pp INT);   -- R=build, S=probe
-#   -- §1 RIGHT:  R = (NULL,100),(7,200),(9,201),(9,202) ; S = (NULL,900),(7,901),(8,902)
+#   -- section 1 RIGHT:  R = (NULL,100),(7,200),(9,201),(9,202) ; S = (NULL,900),(7,901),(8,902)
 #   --   S RIGHT JOIN R -> 4 rows: (7<->7 match) + sweep{NULL-keyed 100, 201, 202}.
-#   -- §2 FULL:   R = (NULL,100),(7,200),(9,201),(11,202); S = (NULL,900),(7,901),(8,902),(6,903)
+#   -- section 2 FULL:   R = (NULL,100),(7,200),(9,201),(11,202); S = (NULL,900),(7,901),(8,902),(6,903)
 #   --   S FULL OUTER JOIN R -> 7 rows: 1 match + 3 unmatched-build (incl NULL 100)
 #   --                                  + 3 unmatched-probe (incl NULL probe 900).
 #
@@ -59,7 +59,7 @@ def _contains_pair(
 
 
 # =============================================================================
-# §1 — COLUMN RIGHT join, NULL-keyed build row preserved (DuckDB-VALUE oracle).
+# section 1 -- COLUMN RIGHT join, NULL-keyed build row preserved (DuckDB-VALUE oracle).
 #
 # BUILD (row -> key, payload): 0->(NULL,100) ; 1->(7,200) ; 2->(9,201) ; 3->(9,202)
 # PROBE (row -> key, payload):  0->(NULL,900) ; 1->(7,901) ; 2->(8,902)
@@ -69,7 +69,7 @@ def _contains_pair(
 #   * NULL probe (row 0): matches NOTHING -> NO pair (RIGHT drops unmatched probe).
 #   * probe 8 (row 2): no build 8 -> no pair.
 #   * BUILD sweep (every unmatched build row, probe_index == -1):
-#       - (0, -1) -> the NULL-keyed build row 0 (payload 100). ★ The bug-fix row:
+#       - (0, -1) -> the NULL-keyed build row 0 (payload 100). The preserved row:
 #         pre-fix the ROW paths DROPPED it; the COLUMN path always preserved it.
 #       - (2, -1) -> build 9 (row 2, payload 201): no probe 9.
 #       - (3, -1) -> build 9 (row 3, payload 202): no probe 9.
@@ -102,12 +102,12 @@ def test_column_nullkey_right_build_preserved() raises:
         "column RIGHT nullkey: build row 1 (7) must match probe row 1 (7).",
     )
 
-    # ★ THE BUG-FIX ASSERTION (column path): the NULL-keyed build row (row 0,
+    # THE PRESERVED-ROW ASSERTION (column path): the NULL-keyed build row (row 0,
     # payload 100) MUST appear as an unmatched-build pair (build 0, probe -1).
     assert_true(
         _contains_pair(build_idx, probe_idx, 0, -1),
         "column RIGHT nullkey: the NULL-keyed build row 0 (payload 100) MUST be"
-        " preserved as an unmatched-build pair (0, -1) — DuckDB-confirmed. The"
+        " preserved as an unmatched-build pair (0, -1). The"
         " build records the NULL key but never links it.",
     )
 
@@ -127,14 +127,14 @@ def test_column_nullkey_right_build_preserved() raises:
             saw_probe0 = True
     assert_true(
         not saw_probe0,
-        "column RIGHT nullkey: NULL probe (row 0) matches nothing — RIGHT drops"
+        "column RIGHT nullkey: NULL probe (row 0) matches nothing -- RIGHT drops"
         " unmatched probe rows, so probe_index 0 must NOT appear (NULL must not"
         " spuriously match the NULL build key).",
     )
 
 
 # =============================================================================
-# §2 — COLUMN FULL join, NULL-keyed build row preserved (DuckDB-VALUE oracle).
+# section 2 -- COLUMN FULL join, NULL-keyed build row preserved (DuckDB-VALUE oracle).
 #
 # BUILD (row -> key, payload): 0->(NULL,100) ; 1->(7,200) ; 2->(9,201) ; 3->(11,202)
 # PROBE (row -> key, payload):  0->(NULL,900) ; 1->(7,901) ; 2->(8,902) ; 3->(6,903)
@@ -143,11 +143,11 @@ def test_column_nullkey_right_build_preserved() raises:
 #   * (1, 1)   -> build 7 (row 1) matches probe 7 (row 1).          MATCH
 #   * Unmatched-PROBE (build_index == -1, NULL build cells):
 #       - (-1, 0) -> NULL probe (row 0): matches nothing -> preserved (FULL keeps
-#         every probe row); ★ must NOT be spuriously matched to the NULL build key.
+#         every probe row); must NOT be spuriously matched to the NULL build key.
 #       - (-1, 2) -> probe 8 (row 2): no build 8.
 #       - (-1, 3) -> probe 6 (row 3): no build 6.
 #   * Unmatched-BUILD sweep (probe_index == -1, NULL probe cells):
-#       - (0, -1) -> the NULL-keyed build row 0 (payload 100). ★ bug-fix row.
+#       - (0, -1) -> the NULL-keyed build row 0 (payload 100). preserved row.
 #       - (2, -1) -> build 9 (row 2, payload 201).
 #       - (3, -1) -> build 11 (row 3, payload 202).
 #   => 7 pairs: 1 match + 3 unmatched-probe + 3 unmatched-build, byte-identical
@@ -180,12 +180,12 @@ def test_column_nullkey_full_build_preserved() raises:
         "column FULL nullkey: build row 1 (7) must match probe row 1 (7).",
     )
 
-    # ★ THE BUG-FIX ASSERTION (column path): the NULL-keyed build row 0 (payload
+    # THE PRESERVED-ROW ASSERTION (column path): the NULL-keyed build row 0 (payload
     # 100) MUST be swept as an unmatched-build pair (0, -1).
     assert_true(
         _contains_pair(build_idx, probe_idx, 0, -1),
         "column FULL nullkey: the NULL-keyed build row 0 (payload 100) MUST be"
-        " swept as an unmatched-build pair (0, -1) — DuckDB-confirmed.",
+        " swept as an unmatched-build pair (0, -1).",
     )
 
     # The two non-NULL unmatched build rows: build 9 (row 2) + build 11 (row 3).
@@ -196,11 +196,11 @@ def test_column_nullkey_full_build_preserved() raises:
     )
 
     # The NULL probe (row 0) is PRESERVED unmatched (FULL keeps every probe row)
-    # as (-1, 0) — it must NOT be spuriously matched against the NULL build key.
+    # as (-1, 0) -- it must NOT be spuriously matched against the NULL build key.
     assert_true(
         _contains_pair(build_idx, probe_idx, -1, 0),
         "column FULL nullkey: the NULL probe (row 0) must be preserved unmatched"
-        " as (-1, 0) — NOT spuriously matched to the NULL build key.",
+        " as (-1, 0) -- NOT spuriously matched to the NULL build key.",
     )
 
     # The non-matching 8 + 6 probe rows preserved unmatched: (-1, 2) and (-1, 3).

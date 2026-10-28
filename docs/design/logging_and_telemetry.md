@@ -184,11 +184,11 @@ An allowed caller can still see a 400: an inverted window (`since_ms` after `unt
 | `src/komira_log/engine/drain.mojo`, `span_drain.mojo` | Decode and span pairing | `render_record_view`, `drain_unified` |
 | `src/komira_log/engine/output_sink.mojo`, `rotation.mojo` | Output modes and rotation | `LogSink`, `SegmentFile`, `RotationPolicy` |
 | `src/komira_log/engine/metric_emit.mojo`, `metric_sink.mojo` | Metric records on the ring | `build_metric_record`, `RingMetricSink` |
-| `src/komira_metrics/metrics_set.mojo`, `explain_analyze.mojo` | Per-operator metrics | `MetricsSet`, `format_execution_report` |
-| `src/komira_metrics/series_table.mojo`, `metric_sweep.mojo`, `histogram.mojo` | Series metrics | `SeriesTable`, `MetricSweep`, `HistogramTable` |
-| `src/komira_trace/tracer.mojo`, `exporter.mojo`, `span_ring.mojo` | Spans | `Tracer`, `JsonlFileExporter`, `SpanPacketRing` |
+| `src/komira_metrics/src/komira_metrics/metrics_set.mojo`, `explain_analyze.mojo` | Per-operator metrics | `MetricsSet`, `format_execution_report` |
+| `src/komira_metrics/src/komira_metrics/series_table.mojo`, `metric_sweep.mojo`, `histogram.mojo` | Series metrics | `SeriesTable`, `MetricSweep`, `HistogramTable` |
+| `src/komira_trace/src/komira_trace/tracer.mojo`, `exporter.mojo`, `span_ring.mojo` | Spans | `Tracer`, `JsonlFileExporter`, `SpanPacketRing` |
 | `src/komira_log/log_write.mojo`, `structured_log.mojo` | Writes, JSON selection | `write_log_line`, `log_format_is_json` |
-| `src/komira_clock/clock.mojo`, `src/komira_spsc_ring/spsc_ring.mojo` | Clocks, the generic ring | `now_ns`, `SpscRing` |
+| `src/komira_clock/src/komira_clock/clock.mojo`, `src/komira_spsc_ring/src/komira_spsc_ring/spsc_ring.mojo` | Clocks, the generic ring | `now_ns`, `SpscRing` |
 | `src/komira_log_query/route.mojo`, `access.mojo`, `search_seam.mojo`, `hit.mojo` | Read route, access hook, trait and values | `service_log_response`, `LogReadAccess`, `ServiceLogSearch`, `ServiceLogQuery` |
 | `src/komira_metrics_reader/route.mojo`, `access.mojo`, `reader.mojo`, `query.mojo`, `series.mojo` | Metrics read route, access hook, trait and values | `metrics_response`, `MetricsReadAccess`, `MetricsReader`, `MetricsQuery` |
 

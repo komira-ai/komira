@@ -22,8 +22,7 @@
 #     need every worker's groups to survive.
 #
 # Group k takes the values `(i // NKEYS) % (k + 1)`, so the six groups count
-# 1..6, all different. Mutant run while porting: the count read through
-# worker 0 for every row turned the first and third tests red.
+# 1..6, all different.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true

@@ -1,5 +1,5 @@
 # =============================================================================
-# test_join_probe_phase_split_equiv — the PHASE-SPLIT chunked inner probe emits
+# test_join_probe_phase_split_equiv -- the PHASE-SPLIT chunked inner probe emits
 # the SAME PAIRS, IN THE SAME ORDER, as the incumbent row-at-a-time walk; and
 # the SIZE GATE actually keeps small joins off it
 # =============================================================================
@@ -9,35 +9,36 @@
 # next; the phase-split arm (`_probe_inner_chunk_ps`) advances a batch of 256
 # rows one chain STEP at a time so the memory system sees B independent misses
 # instead of one. The lever is claimed to be ANSWER-IDENTICAL, order included.
-# This file is that claim's falsifier.
+# This file checks that claim.
 #
 # A VALUE ORACLE ALONE IS VACUOUS HERE: both arms of an answer-preserving
-# change agree whether or not the new arm ever ran, and half of what is under test here is a gate whose correct
-# behaviour on the small side is THAT NOTHING HAPPENS. "The small join produced
-# the right answer" is satisfied by a gate that is broken in either direction.
+# change agree whether or not the new arm ever ran, and half of what is under
+# test here is a gate whose correct behaviour on the small side is THAT NOTHING
+# HAPPENS. "The small join produced the right answer" is satisfied by a gate
+# that is broken in either direction.
 #
 # So every case asserts, in this order:
 #
-#   1. DISPOSITION — the gate resolved the way the case says it did, read from
+#   1. DISPOSITION -- the gate resolved the way the case says it did, read from
 #      the process-wide latches (`join_phase_split_fired` /
 #      `join_phase_split_declined`), reset per case. A case that says "the
 #      phase-split ran" and finds only the decline latch set FAILS HERE, before
 #      any value is compared.
-#   2. VALUE, against the INCUMBENT — the same fixture through the same entry
+#   2. VALUE, against the INCUMBENT -- the same fixture through the same entry
 #      point with the arm forced off, compared PAIR BY PAIR, position by
 #      position. Not a multiset, not a count.
-#   3. VALUE, against an INDEPENDENT IMPLEMENTATION — `probe_inner_into`, which
+#   3. VALUE, against an INDEPENDENT IMPLEMENTATION -- `probe_inner_into`, which
 #      shares no code with either chunked body. Without this, a defect present
 #      in BOTH chunked arms (the shared `_probe_row_walk`, the dispatcher, the
 #      bloom pre-check) passes assertion 2 with both arms wrong together.
 #
-# ★ ASSERTION 3 IS ORDERED LAST DELIBERATELY. Assertions 1 and 2 localise a
+# ASSERTION 3 IS ORDERED LAST DELIBERATELY. Assertions 1 and 2 localise a
 # failure to the phase-split arm; 3 catches the class 2 cannot see. Reporting
 # them the other way round would attribute a shared-substrate bug to this lever.
 #
 # COVERAGE, and why each case is here rather than being a variation of another:
 #
-#   unique_keys        one-step chains — isolates the batch SEED and the
+#   unique_keys        one-step chains -- isolates the batch SEED and the
 #                      single-round emit from the multi-round walk.
 #   fanout             every probe row matches SEVERAL build rows. THE ORDER
 #                      CASE: this is the only shape where round-major and
@@ -61,12 +62,14 @@
 #                      `_probe_row_walk` resume tail runs.
 #   gate_boundary      the SIZE GATE, driven from BOTH sides over ONE fixture.
 #
-# ⚠ THE FIXTURES ARE TINY AND THE GATE IS PRODUCTION-SIZED (32 MiB of index,
-# ~1M build rows). Every case therefore moves the THRESHOLD, not the fixture:
-# `join_phase_split_configure(True, 1)` admits everything. Building a 1M-row
-# build side per case would make this file a multi-minute test that still could
-# not drive the OFF side of the gate.
+# WARNING: THE FIXTURES ARE TINY AND THE GATE IS PRODUCTION-SIZED (32 MiB of
+# index, ~1M build rows). Every case therefore moves the THRESHOLD, not the
+# fixture: `join_phase_split_configure(True, 1)` admits everything. Building a
+# 1M-row build side per case would make this file a multi-minute test that
+# still could not drive the OFF side of the gate.
 # =============================================================================
+
+from std.testing import TestSuite
 
 from komira_arrow.primitive_array import PrimitiveArray
 
@@ -88,7 +91,7 @@ from komira_op_join_build.join_probe_phase_split import (
 comptime I64 = DType.int64
 
 # The smallest chunk capacity the gate admits. Anything below it must make the
-# gate DECLINE — see `test_gate_refuses_small_chunk_capacity`.
+# gate DECLINE -- see `test_gate_refuses_small_chunk_capacity`.
 comptime _CAP_OK = JOIN_PS_MIN_HEADROOM
 
 
@@ -156,7 +159,7 @@ def _chunk_pairs(
     """Drive `probe_inner_chunk` to exhaustion; flatten every pair in order.
 
     The returned list is [build0, probe0, build1, probe1, ...], so a compare
-    over it is a compare of the SEQUENCE — a build index that migrated to a
+    over it is a compare of the SEQUENCE -- a build index that migrated to a
     different probe row cannot cancel out.
     """
     var out = List[Int]()
@@ -252,11 +255,11 @@ def _check(
 ) raises:
     """Run one fixture through BOTH arms at one chunk capacity and compare.
 
-    ⚠ THE BUILDER IS REBUILT PER ARM AND THAT IS DELIBERATE. Reusing one would
-    be faster and would also let a phase-split defect that MUTATED the index
-    (it holds `self` by borrow and must not) pass unnoticed, because the
-    control arm would then be probing an index the treatment arm had already
-    touched.
+    WARNING: THE BUILDER IS REBUILT PER ARM AND THAT IS DELIBERATE. Reusing
+    one would be faster and would also let a phase-split defect that modified
+    the index (it holds `self` by borrow and must not) pass unnoticed, because
+    the control arm would then be probing an index the treatment arm had
+    already touched.
     """
     var pk: PrimitiveArray[I64]
     if len(probe_nulls) == 0:
@@ -347,7 +350,7 @@ def test_unique_keys() raises:
 
 
 def test_fanout_multi_match() raises:
-    """★ THE ORDER CASE. Every probe row matches SIX build rows.
+    """THE ORDER CASE. Every probe row matches SIX build rows.
 
     Round-major and row-major emission are the same sequence whenever every
     probe row has at most one match, so a phase-split that dropped the stable
@@ -355,7 +358,7 @@ def test_fanout_multi_match() raises:
 
     The fixture is built so the six matches for one key are at six DIFFERENT
     build indices, and the LIFO chain gives them a fixed order the incumbent
-    also produces — so the compare can stay exact rather than relaxing to a
+    also produces -- so the compare can stay exact rather than relaxing to a
     per-row multiset.
     """
     var build = List[Int64]()
@@ -404,7 +407,7 @@ def test_zero_match_rows() raises:
 
 
 def test_long_chains_forces_row_fallback() raises:
-    """★ THE `s_stop == 0` PATH — otherwise UNREACHABLE, and non-terminating
+    """THE `s_stop == 0` PATH -- otherwise UNREACHABLE, and non-terminating
     without its fallback.
 
     Every probe row in a batch matches the SAME long chain, so after
@@ -436,9 +439,10 @@ def test_resume_mid_chain() raises:
     it may start batching, or it would either re-emit the row's earlier matches
     or carry a half-walked row through every phase.
 
-    ⚠ The capacities are PRIME-ish against the fan-out on purpose. A capacity
-    that is an exact multiple of the per-row match count only ever cuts on a row
-    boundary, and this case would then never reach the path it is named for.
+    WARNING: The capacities are PRIME-ish against the fan-out on purpose. A
+    capacity that is an exact multiple of the per-row match count only ever
+    cuts on a row boundary, and this case would then never reach the path it is
+    named for.
     """
     var build = List[Int64]()
     for _rep in range(7):
@@ -454,7 +458,7 @@ def test_resume_mid_chain() raises:
 
 
 def test_no_bloom_arm() raises:
-    """`build_bloom=False` — the `_use_bloom` bypass, which is the arm the
+    """`build_bloom=False` -- the `_use_bloom` bypass, which is the arm the
     parallel build adapter always produces.
 
     PHASE 0b's bloom pre-check is `self._use_bloom and ...`, so this is the case
@@ -475,17 +479,17 @@ def test_no_bloom_arm() raises:
 
 
 def test_gate_boundary_both_sides() raises:
-    """★ THE GATE, DRIVEN FROM BOTH SIDES OVER ONE FIXTURE.
+    """THE GATE, DRIVEN FROM BOTH SIDES OVER ONE FIXTURE.
 
     The threshold is placed one byte BELOW the fixture's own index footprint
     (must fire) and one byte ABOVE it (must decline), and the answer is asserted
     identical in both dispositions.
 
-    ⛔ ONE FIXTURE, TWO THRESHOLDS — NOT TWO FIXTURES. A gate test that shows a
-    big join firing and a small join declining cannot distinguish a working gate
-    from one that keys on something else entirely that happens to correlate with
-    size. Holding the fixture FIXED and moving only the threshold makes the
-    threshold the sole free variable.
+    NOTE: ONE FIXTURE, TWO THRESHOLDS -- NOT TWO FIXTURES. A gate test that
+    shows a big join firing and a small join declining cannot distinguish a
+    working gate from one that keys on something else entirely that happens to
+    correlate with size. Holding the fixture FIXED and moving only the
+    threshold makes the threshold the sole free variable.
 
     The footprint is read from `join_phase_split_index_bytes` rather than
     recomputed here: an independent re-derivation in the test would be a second
@@ -547,13 +551,13 @@ def test_gate_boundary_both_sides() raises:
 def test_gate_refuses_small_chunk_capacity() raises:
     """A `chunk_capacity` below `JOIN_PS_MIN_HEADROOM` must DECLINE.
 
-    ⛔ THIS IS A CORRECTNESS REFUSAL, NOT A TUNING ONE, AND ITS FAILURE MODE IS
-    A SILENTLY SHORT JOIN. The phase-split returns a SHORT CHUNK rather than a
-    partial batch when the caller's buffer is nearly full, and a zero-length
-    chunk is the driver's "probe exhausted" signal. Admitted at a capacity below
-    the headroom, the very first call could return 0 with rows still unprobed —
-    a wrong answer with no exception, no crash, and a green value oracle
-    everywhere the incumbent path is used.
+    NOTE: THIS IS A CORRECTNESS REFUSAL, NOT A TUNING ONE, AND ITS FAILURE MODE
+    IS A SILENTLY SHORT JOIN. The phase-split returns a SHORT CHUNK rather
+    than a partial batch when the caller's buffer is nearly full, and a
+    zero-length chunk is the driver's "probe exhausted" signal. Admitted at a
+    capacity below the headroom, the very first call could return 0 with rows
+    still unprobed -- a wrong answer with no exception, no crash, and a green
+    value oracle everywhere the incumbent path is used.
     """
     var build = List[Int64]()
     for i in range(2000):
@@ -581,7 +585,7 @@ def test_gate_refuses_small_chunk_capacity() raises:
     _assert_pairs_equal(expected, got, String("small_cap"))
     _ = b1^
 
-    # And the predicate says so directly, independent of any probe having run —
+    # And the predicate says so directly, independent of any probe having run --
     # so the assertion above cannot pass merely because the fixture was small.
     if join_phase_split_admits(
         1 << 30, 1 << 30, True, 1 << 20, JOIN_PS_MIN_HEADROOM - 1
@@ -628,8 +632,8 @@ def test_shipped_default_declines_a_small_join() raises:
     """THE SHIPPED CONFIGURATION, with the setting never configured.
 
     Every other case in this file moves the threshold, so a default that drifted
-    to 0 — admitting every join in the tree, which is the regression the gate
-    exists to prevent — would leave all of them green. Only a bare run can see
+    to 0 -- admitting every join in the tree, which is the regression the gate
+    exists to prevent -- would leave all of them green. Only a bare run can see
     it, and this is that run.
     """
     _arm_restore()
@@ -657,16 +661,4 @@ def test_shipped_default_declines_a_small_join() raises:
 
 
 def main() raises:
-    test_unique_keys()
-    test_fanout_multi_match()
-    test_null_probe_keys()
-    test_zero_match_rows()
-    test_long_chains_forces_row_fallback()
-    test_resume_mid_chain()
-    test_no_bloom_arm()
-    test_gate_boundary_both_sides()
-    test_gate_refuses_small_chunk_capacity()
-    test_gate_refuses_short_probe_and_kill_switch()
-    test_shipped_default_declines_a_small_join()
-    _arm_restore()
-    print("test_join_probe_phase_split_equiv OK (11 cases)")
+    TestSuite.discover_tests[__functions_in_module()]().run()

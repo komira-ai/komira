@@ -106,18 +106,18 @@ pub fn strip(s: []const u8) []const u8 {
 /// Lines without their line endings ("\n", "\r\n" or a lone "\r"). A
 /// final line ending ends the last line rather than starting an empty one.
 pub fn splitLines(alloc: Allocator, text: []const u8) Allocator.Error![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
+    var out = std.ArrayList([]const u8).empty;
     var start: usize = 0;
     var i: usize = 0;
     while (i < text.len) : (i += 1) {
         const c = text[i];
         if (c != '\n' and c != '\r') continue;
-        try out.append(text[start..i]);
+        try out.append(alloc, text[start..i]);
         if (c == '\r' and i + 1 < text.len and text[i + 1] == '\n') i += 1;
         start = i + 1;
     }
-    if (start < text.len) try out.append(text[start..]);
-    return out.toOwnedSlice();
+    if (start < text.len) try out.append(alloc, text[start..]);
+    return out.toOwnedSlice(alloc);
 }
 
 // ---- fences ----------------------------------------------------------------
@@ -176,7 +176,7 @@ pub fn closes(line: []const u8, char: u8, length: usize) bool {
 
 /// Every fenced block, in document order.
 pub fn fences(alloc: Allocator, lines: []const []const u8) Allocator.Error![]Fence {
-    var out = std.ArrayList(Fence).init(alloc);
+    var out = std.ArrayList(Fence).empty;
     var i: usize = 0;
     while (i < lines.len) {
         const o = openingFence(lines[i]) orelse {
@@ -185,7 +185,7 @@ pub fn fences(alloc: Allocator, lines: []const []const u8) Allocator.Error![]Fen
         };
         var j = i + 1;
         while (j < lines.len and !closes(lines[j], o.char, o.length)) j += 1;
-        try out.append(.{
+        try out.append(alloc, .{
             .open_line = i,
             .close_line = if (j < lines.len) j else null,
             .indent = o.indent,
@@ -195,7 +195,7 @@ pub fn fences(alloc: Allocator, lines: []const []const u8) Allocator.Error![]Fen
         });
         i = j + 1;
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 /// For each line: true when it is a fence line or inside a fenced block.
@@ -223,7 +223,7 @@ pub const Comment = struct {
 /// to the first line holding `-->`, or to the end. Two blocks on adjacent
 /// lines are two entries.
 pub fn htmlComments(alloc: Allocator, lines: []const []const u8, code: []const bool) Allocator.Error![]Comment {
-    var out = std.ArrayList(Comment).init(alloc);
+    var out = std.ArrayList(Comment).empty;
     var i: usize = 0;
     while (i < lines.len) {
         if (code[i] or !std.mem.startsWith(u8, strip(lines[i]), "<!--")) {
@@ -232,10 +232,10 @@ pub fn htmlComments(alloc: Allocator, lines: []const []const u8, code: []const b
         }
         var j = i;
         while (j < lines.len and std.mem.indexOf(u8, lines[j], "-->") == null) j += 1;
-        try out.append(.{ .open_line = i, .close_line = if (j < lines.len) j else null });
+        try out.append(alloc, .{ .open_line = i, .close_line = if (j < lines.len) j else null });
         i = j + 1;
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 /// For each line: true when it is in one of `htmlComments`. Such a block is
@@ -254,7 +254,7 @@ pub fn htmlCommentMask(alloc: Allocator, lines: []const []const u8, code: []cons
 
 /// `line` with each inline code span replaced by two backticks.
 pub fn maskCodeSpans(alloc: Allocator, line: []const u8) Allocator.Error![]const u8 {
-    var out = std.ArrayList(u8).init(alloc);
+    var out = std.ArrayList(u8).empty;
     var start: usize = 0;
     var i: usize = 0;
     while (i < line.len) {
@@ -275,16 +275,16 @@ pub fn maskCodeSpans(alloc: Allocator, line: []const u8) Allocator.Error![]const
             j += m;
         } else null;
         if (close) |c| {
-            try out.appendSlice(line[start..i]);
-            try out.appendSlice("``");
+            try out.appendSlice(alloc, line[start..i]);
+            try out.appendSlice(alloc, "``");
             i = c + n;
             start = i;
         } else {
             i += n;
         }
     }
-    try out.appendSlice(line[start..]);
-    return out.toOwnedSlice();
+    try out.appendSlice(alloc, line[start..]);
+    return out.toOwnedSlice(alloc);
 }
 
 const Match = struct { end: usize, target: []const u8 };
@@ -366,17 +366,17 @@ fn inlineRest(line: []const u8, p: usize) ?Match {
 /// The target of every inline link and image on `line`, left to right
 /// (slices of `line`).
 pub fn inlineTargets(alloc: Allocator, line: []const u8) Allocator.Error![]const []const u8 {
-    var out = std.ArrayList([]const u8).init(alloc);
+    var out = std.ArrayList([]const u8).empty;
     var p: usize = 0;
     while (p < line.len) {
         if (inlineAt(line, p)) |m| {
-            try out.append(m.target);
+            try out.append(alloc, m.target);
             p = m.end;
         } else {
             p += 1;
         }
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }
 
 /// The target of a reference definition `[id]: target` at the start of
@@ -427,18 +427,18 @@ pub const Link = struct {
 /// `#fragment`, or a bare `#fragment`. In document order; on a line, the
 /// inline links left to right, then a reference definition.
 pub fn relativeLinks(alloc: Allocator, lines: []const []const u8) Allocator.Error![]Link {
-    var out = std.ArrayList(Link).init(alloc);
+    var out = std.ArrayList(Link).empty;
     const code = try codeMask(alloc, lines);
     const comments = try htmlCommentMask(alloc, lines, code);
     for (lines, 0..) |raw, li| {
         if (code[li] or comments[li]) continue;
         const line = try maskCodeSpans(alloc, raw);
         for (try inlineTargets(alloc, line)) |t| {
-            if (!isExternal(t)) try out.append(.{ .line = li, .target = t });
+            if (!isExternal(t)) try out.append(alloc, .{ .line = li, .target = t });
         }
         if (refdefTarget(line)) |t| {
-            if (!isExternal(t)) try out.append(.{ .line = li, .target = t });
+            if (!isExternal(t)) try out.append(alloc, .{ .line = li, .target = t });
         }
     }
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(alloc);
 }

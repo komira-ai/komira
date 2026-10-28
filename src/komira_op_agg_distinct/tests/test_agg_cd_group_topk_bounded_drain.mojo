@@ -17,6 +17,8 @@
 #   * `test_bounded_arm_actually_fires`: an arm that silently declines would
 #     pass every equivalence; the row count (k, not every group) tells them
 #     apart;
+#   * `test_only_a_string_key_admits_the_bounded_arm`: an arm that serves an
+#     aggregate with no string key to build;
 #   * the declines (an ORDER BY on a group key, an unknown column, k <= 0, a
 #     malformed comparator, the ratio boundary, no hint): a hint the arm does
 #     not serve must emit every group, never raise and never answer wrongly.
@@ -51,6 +53,7 @@ from komira_async.runtime.runtime import PLACEMENT_FIXED, PerCoreAsyncRuntime
 from komira_op_agg_distinct.agg_cd_group_topk import (
     CDP_TOPK_MIN_RATIO,
     CdGroupTopKHint,
+    cd_group_topk_admits,
 )
 from komira_op_agg_distinct.agg_count_distinct_parallel import (
     _execute_count_distinct_agg_parallel,
@@ -271,18 +274,13 @@ def test_a_tie_at_the_cut_agrees_with_the_full_drain() raises:
     """FORTY groups share each ORDER BY value, so the k == 10 cut falls inside
     a tie and the surviving SET is decided purely by the tie-break policy.
 
-    This is the assertion that catches an appended tie-break key. With a trailing
-    `__cdp_topk_gidx` ASC key appended to the comparator — the spelling
-    `agg_group_topk`'s radix twin ships — this goes RED at `key byte 8`. An
-    explicit sorted-key probe run at the same time proved the divergence is a
-    PERMUTATION and not a set difference (`PROBE: sets are EQUAL`), which is
-    why the twin's own SET-only assertion stays green on its fixture while
-    this one does not. See `agg_cd_group_topk`'s header for the mechanism.
-
-    ⇒ A COST CHANGE MAY NOT REORDER TIED ROWS EITHER. The corpus value gate is
-    a commutative multiset fold and the row-order gate only asserts
-    MONOTONICITY of the order key, so a tie permutation would pass both — this
-    fixture is the only thing in the tree that can see it."""
+    The bounded arm keeps the incumbent on a tie, as the top-N sink does. A
+    tie-break key appended to the comparator that sorts the group index
+    DESCENDING reverses that rule, so the tied survivors come back in another
+    order and this goes RED at the key byte count. A trailing group-index key
+    sorted ASCENDING is the same rule as the incumbent's and is not told apart
+    here. A cost change may not reorder tied rows either; see
+    `agg_cd_group_topk`'s header for the mechanism."""
     var counts = _tied_at_the_cut_counts()
     var got = _run_cd(counts, Optional(_hint("n", True, _K)))
     var want = _oracle(counts, True, _K)
@@ -299,7 +297,8 @@ def test_a_tie_at_the_cut_agrees_with_the_full_drain() raises:
 def test_declines_when_an_order_key_is_a_group_key() raises:
     """The selection runs over a pre-pass that deliberately does NOT carry the
     group keys — that omission IS the mechanism — so a comparator naming one
-    cannot be served. This is the arm ClickBench Q17 takes."""
+    cannot be served. A TOPN over a grouped count of a string key takes this
+    arm."""
     var counts = _total_order_counts()
     var got = _run_cd(counts, Optional(_hint("k", True, _K)))
     assert_equal(got.num_rows(), _GROUPS, "a key comparator must decline")
@@ -372,6 +371,26 @@ def test_declines_when_nulls_first_disagrees_in_length() raises:
     nf.append(False)
     var got = _run_cd(counts, Optional(CdGroupTopKHint(cols^, d^, _K, nf^)))
     assert_equal(got.num_rows(), _GROUPS, "a malformed NULL placement declines")
+
+
+def test_only_a_string_key_admits_the_bounded_arm() raises:
+    """The arm builds the string key for the survivors only, so it serves an
+    aggregate with a string group key and declines one without: the same
+    schema, hint and group count are admitted with `has_string_key` and
+    declined without it."""
+    var osb = SchemaBuilder()
+    osb.add_field(Field("k", ArrowType.STRING, False))
+    osb.add_field(Field("n", ArrowType.INT64, False))
+    var sch = osb.build()
+    var hint = Optional(_hint("n", True, _K))
+    assert_true(
+        cd_group_topk_admits(sch, 1, _GROUPS, True, hint),
+        "a string key is served",
+    )
+    assert_true(
+        not cd_group_topk_admits(sch, 1, _GROUPS, False, hint),
+        "an aggregate without a string key declines",
+    )
 
 
 def main() raises:

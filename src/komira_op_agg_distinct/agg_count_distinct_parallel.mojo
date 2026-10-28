@@ -70,7 +70,7 @@ from komira_counters.strdrain_counter import (
     strdrain_note_site,
 )
 from komira_physical_plan.physical_plan import AggSinkData
-from komira_plan_expr.agg_expr import AGG_COUNT_DISTINCT
+from komira_plan_expr.agg_expr import AGG_COUNT, AGG_COUNT_DISTINCT
 
 from komira_op_agg_distinct.agg_cd_dictkey_encode import (
     encode_dict_key_first_seen,
@@ -123,15 +123,22 @@ from komira_op_agg_distinct.cd_parallel_state import (
 
 
 @always_inline
-def _null_ptr[T: AnyType, o: Origin]() -> UnsafePointer[T, o]:
-    """A NULL typed pointer with a concrete origin: the unused key pointer of
-    a key read through the other width. Never dereferenced.
+def _data_ptr[
+    T: DType, o: Origin
+](col: Column[HeapRegion]) -> UnsafePointer[Scalar[T], o]:
+    """`col`'s value buffer as a `Scalar[T]` pointer with the batch's concrete
+    origin `o`.
 
-    # SAFETY: `Optional[UnsafePointer[...]]` is layout-compatible with the bare
-    # pointer and `None` is the all-zero bit pattern.
+    # SAFETY: the buffer belongs to the batch that `o` names, which the caller
+    # borrows for as long as the pointer lives. A key read through the other
+    # width (a STRING key, or an INT32 key's INT64 slot) gets a pointer that is
+    # never dereferenced: the per-key `key_is_string` / `key_is_i32` flags
+    # select the lane that is read.
     """
-    var none: Optional[UnsafePointer[T, o]] = None
-    return UnsafePointer(to=none).bitcast[UnsafePointer[T, o]]()[]
+    return (
+        col._data.view_ro()._unsafe_ptr().bitcast[Scalar[T]]()
+        .unsafe_mut_cast[o.mut]().unsafe_origin_cast[o]()
+    )
 
 
 def _should_use_parallel_count_distinct(num_rows: Int, worker_count: Int) -> Bool:
@@ -236,6 +243,24 @@ def _execute_count_distinct_agg_parallel(
             "grouped COUNT(DISTINCT) driver: " + String(num_keys)
             + " group keys; at most 62 are supported"
         )
+    # Every aggregate except COUNT(col) / COUNT(*) reads its value through the
+    # INT32 / INT64 / FLOAT64 lanes of `TypedColumnPtrs` (COUNT reads only
+    # validity, which is typeless); any other type would be read at the wrong
+    # width, so it is refused before anything runs.
+    for a in range(num_aggs):
+        var vf = agg_data.agg_exprs[a].func
+        if vf == AGG_COUNT:
+            continue
+        if not agg_data.agg_exprs[a].child:
+            continue
+        var vi = resolve_col_index(agg_data.agg_exprs[a].child.value(), batch.schema)
+        var vt = batch.column_at(vi).arrow_type
+        if vt != ArrowType.INT32 and vt != ArrowType.INT64 and vt != ArrowType.FLOAT64:
+            raise Error(
+                "grouped aggregate driver: value column '"
+                + batch.schema.field_at(vi).name + "' has type " + String(vt)
+                + "; only INT32, INT64 and FLOAT64 are supported"
+            )
     var key_col_indices = List[Int]()
     var key_types = List[ArrowType]()
     for k in range(num_keys):
@@ -327,24 +352,11 @@ def _execute_count_distinct_agg_parallel(
         ref kp = batch.column_at(key_col_indices[k])
         key_offsets.append(kp._offset)
         key_is_i32.append(not key_is_string[k] and kp.arrow_type == ArrowType.INT32)
-        # SAFETY: the buffers belong to `batch` (origin `bo`, a concrete
-        # origin), which this function borrows for its whole body; the
-        # pointers are read only inside the two dispatches below.
-        if key_is_string[k]:
-            key_ptrs_i64.append(_null_ptr[Scalar[DType.int64], bo]())
-            key_ptrs_i32.append(_null_ptr[Scalar[DType.int32], bo]())
-        elif key_is_i32[k]:
-            key_ptrs_i32.append(
-                kp._data.view_ro()._unsafe_ptr().bitcast[Scalar[DType.int32]]()
-                .unsafe_mut_cast[bo.mut]().unsafe_origin_cast[bo]()
-            )
-            key_ptrs_i64.append(_null_ptr[Scalar[DType.int64], bo]())
-        else:
-            key_ptrs_i64.append(
-                kp._data.view_ro()._unsafe_ptr().bitcast[Scalar[DType.int64]]()
-                .unsafe_mut_cast[bo.mut]().unsafe_origin_cast[bo]()
-            )
-            key_ptrs_i32.append(_null_ptr[Scalar[DType.int32], bo]())
+        # SAFETY: see `_data_ptr`; both widths are taken for every key and
+        # only the lane its `key_is_i32` / `key_is_string` flags name is read,
+        # inside the two dispatches below.
+        key_ptrs_i32.append(_data_ptr[DType.int32, bo](kp))
+        key_ptrs_i64.append(_data_ptr[DType.int64, bo](kp))
     var key_valid = ValidityLanes[bo].from_batch_columns(batch, key_col_indices)
     var keys_nullable = key_valid.any_nullable()
 

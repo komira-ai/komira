@@ -6,8 +6,8 @@
 # A grouped typed-stage COUNT(DISTINCT) drain holds one list of value runs per
 # group. Calling `radix_distinct_count_multi` once per group parallelizes each
 # group WITHIN itself, but the loop over groups runs on one core: thousands of
-# small and mid groups deduped serially (measured: ~65% of the wall of a
-# 6,506-group query). Each group's dedup is independent, so this driver fans
+# small and mid groups deduped serially (most of the wall of a query with
+# thousands of groups). Each group's dedup is independent, so this driver fans
 # the loop across the pool:
 #
 #   1. A group of at most `_CD_GROUPED_TARGET_CELL_VALUES` values is ONE cell

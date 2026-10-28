@@ -183,9 +183,8 @@ def _sink(string_key: Bool) raises -> AggSinkData:
 def _oracle(imm f: _Fx) -> List[Int]:
     """Distinct-value count per group NUMBER, from the raw arrays.
 
-    Sort-based on purpose: a first draft kept one `Set[Int64]` per group, and
-    on 36,000 groups that alone was ~60 s of this file's runtime under the
-    farm's test build. Every fixture value is in [0, 2^31), so
+    Sort-based on purpose: a `Set[Int64]` per group is too slow for 36,000
+    groups. Every fixture value is in [0, 2^31), so
     `g * 2^32 + v` orders by (group, value) and a group's distinct count is its
     number of value changes in that order."""
     var n = f.n()

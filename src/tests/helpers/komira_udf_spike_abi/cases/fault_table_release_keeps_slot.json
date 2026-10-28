@@ -1,0 +1,12 @@
+{
+ "name": "fault_table_release_keeps_slot",
+ "defect": "a frame output whose release leaves its slot set is accepted (Arrow C Data: release marks the array released by setting release to NULL; the call path already refuses it)",
+ "run": "frame",
+ "entry": "table_release_keeps_slot",
+ "shape": "MAP_BATCHES_FRAME",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "result_is_table": true,
+ "inputs": [{"length": 2, "columns": [{"type": "int64", "values": [1, 2]}]}],
+ "expect": {"status": "OK", "run_error": "UDF_RUNTIME_FAULT", "fault": "release left its slot set"}
+}

@@ -2,15 +2,12 @@
 # concat_string_tile_bounds — BYTE-balanced row bounds for STRING/BINARY tiles
 # =============================================================================
 #
-# ★ WHAT WAS WRONG. `_concat_tiled` cut every splittable column into EQUAL ROW
-# ranges. For a fixed-width column that is equal WORK — every row moves `width`
-# bytes. For a STRING/BINARY column (LEVER A's kind-3 tiles) it is not: a tile
-# moves its rows' PAYLOAD plus one Int32 offset per row, and payload length is
-# data. MEASURED on cbq05 (`count(DISTINCT search_phrase)`, 99,997,497 rows,
-# 739.6 MB payload, 20 tiles), the per-tile cost (payload + 4 B/row) by file
-# order ranged 32.7 MB .. 151.1 MB against a 56.8 MB mean — tile 8 alone carried
-# 2.66x the mean, and the concat fork ran at occupancy 0.49-0.63 (the benchmark host,
-# `KOMIRA_SCHED_TRACE`, 2026-09-24). A copy fan's wall is its LARGEST tile.
+# ★ WHY NOT EQUAL ROW RANGES. Cutting a column into equal ROW ranges is equal
+# WORK for a fixed-width column — every row moves `width` bytes. For a
+# STRING/BINARY column (the kind-3 tiles) it is not: a tile moves its rows'
+# PAYLOAD plus one Int32 offset per row, and payload length is data. A skewed
+# column (a run of long values among short ones) gives equal-row tiles very
+# unequal costs, and a copy fan's wall is its LARGEST tile.
 #
 # ★ WHAT THIS DOES. Picks the tile bounds so every tile carries ~equal COST,
 #     cost(R) = payload bytes before output row R  +  4 * R
@@ -51,6 +48,11 @@ def _row_cost_at(
     (0 <= local_row <= rows). Reads ONE source offset through the safe typed
     accessor; the batch's own `_offset` (a sliced source) is honoured."""
     ref col_ref = input_slab[batch].value().column_at(col)
+    if not col_ref._offsets:
+        raise Error(
+            "concat_string_tile_bounds: batch " + String(batch) + " column "
+            + String(col) + " has rows but no offsets buffer"
+        )
     var off = col_ref._offset
     ref offs = col_ref._offsets.value()
     var data_start = Int(offs.get_typed[Int32](off))

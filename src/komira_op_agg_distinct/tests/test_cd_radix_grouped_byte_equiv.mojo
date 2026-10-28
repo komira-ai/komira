@@ -42,8 +42,8 @@ def _make_runtime(n_workers: Int) raises -> PerCoreAsyncRuntime[NoopSink]:
 # independent per-group serial oracle (`_cd_grouped_count_serial`) — the distinct
 # count of a group is invariant to (a) the value-hash split of its own values and
 # (b) which worker deduped it. These fixtures exercise the group-size shapes the
-# clickbench CD benches hit: cb13's "staircase" (many tiny groups + a few 2M-8.5M
-# big groups) and cb10's "few huge groups", plus the split-group falsifiers (a value
+# grouped COUNT(DISTINCT) queries hit: a "staircase" (many tiny groups + a few
+# very large groups) and "few huge groups", plus the split-group checks (a value
 # duplicated across sub-cells, or a sub-cell double-counted, would INFLATE the count).
 # =============================================================================
 
@@ -101,7 +101,7 @@ def test_grouped_uniform_many_groups() raises:
 
 
 def test_grouped_staircase_big_and_small() raises:
-    """cb13 shape: MANY tiny groups + a FEW big groups that cross the split cap ->
+    """Staircase shape: MANY tiny groups + a FEW big groups that cross the split cap ->
     per-group distinct == oracle. The big groups are split into value-hash sub-cells
     and reduced back; a broken split (a value in two sub-cells, or a double-counted
     sub-cell) would INFLATE those groups above the oracle."""
@@ -140,7 +140,7 @@ def test_grouped_staircase_big_and_small() raises:
 
 
 def test_grouped_few_huge_groups() raises:
-    """cb10 shape: a FEW huge groups (each > the split cap) -> per-group distinct
+    """Few-huge-groups shape: a FEW huge groups (each > the split cap) -> per-group distinct
     == oracle. Every group is split across workers; the reduce must sum the sub-cells
     exactly."""
     var groups = List[List[List[Int64]]]()
@@ -179,7 +179,7 @@ def test_grouped_multi_run_per_group() raises:
 
 def test_grouped_big_all_same_no_inflation() raises:
     """A big group full of the SAME single value (crosses the split cap) -> distinct
-    MUST be 1, not the split-cell count. The sharpest split falsifier: a value
+    MUST be 1, not the split-cell count. The strictest split check: a value
     duplicated into two sub-cells, or a sub-cell counted twice, would inflate this."""
     var groups = List[List[List[Int64]]]()
     var buf = List[Int64](capacity=2_000_000)
@@ -259,7 +259,7 @@ def test_grouped_empty_list() raises:
 
 
 def test_per_cell_dispatch_staircase_equals_oracle() raises:
-    """cb13's own shape (many tiny groups + big groups that cross the split cap):
+    """The staircase shape (many tiny groups + big groups that cross the split cap):
     per-group distinct == the independent serial oracle, exactly.
 
     403 groups clears `_CD_GROUPED_MIN_GROUPS`, the big groups are value-hash
@@ -302,10 +302,9 @@ def test_per_cell_dispatch_staircase_equals_oracle() raises:
 
 
 def test_per_cell_dispatch_all_same_and_mixed_equals_oracle() raises:
-    """⭐ THE SHARPEST FALSIFIER OF THE SUB-CELL SPLIT, AGAINST AN INDEPENDENT
-    ORACLE.
+    """THE SUB-CELL SPLIT, AGAINST AN INDEPENDENT ORACLE.
 
-    The all-same big group is the sharpest falsifier of the sub-cell split: a
+    The all-same big group is the strictest check of the sub-cell split: a
     value duplicated across sub-cells, or a sub-cell double-counted, inflates it
     above 1. The literal expectations (`1` and `333_333`) are kept alongside the
     oracle so the case still says what the right answer IS, not only that two
@@ -338,7 +337,7 @@ def test_per_cell_dispatch_all_same_and_mixed_equals_oracle() raises:
 
 
 def test_per_cell_dispatch_few_huge_groups_equals_oracle() raises:
-    """cb10's shape (a few huge groups, every one split across cells). Here the
+    """The few-huge-groups shape (a few huge groups, every one split across cells). Here the
     task count is dominated by SUB-cells rather than by whole small groups, which
     is the other end of the cell-population range and the case where a per-cell
     dispatch could in principle hand one group's sub-cells to workers that then

@@ -508,7 +508,7 @@ def test_the_bucket_is_identical_to_the_divfree_expression() raises:
     every CD cell's per-worker load, so it has to come with its own
     measurement and edit the copy on purpose.
 
-    Four non-vacuity counts make those identities able to see the mutants
+    Four non-vacuity counts make those identities able to see the defects
     they exist for:
       * `neg_inputs`  — negative HASHES reach `>> 17`, an ARITHMETIC shift,
                         i.e. the sign-dependent half of the mix;
@@ -517,7 +517,7 @@ def test_the_bucket_is_identical_to_the_divfree_expression() raises:
                         (`((p >> 32) * K) >> 32` in signed Int arithmetic)
                         goes NEGATIVE — out of range, rows dropped. If this
                         were 0 the in-range assertion could not see that
-                        mutant;
+                        defect;
       * `signed_oob`  — the same, asserted directly: the (hash, K) pairs the
                         signed spelling would put out of range;
       * `differs_from_div` — pairs where the multiply-shift and the `%`
@@ -614,12 +614,12 @@ def test_the_divfree_partition_uses_every_bucket_and_is_balanced() raises:
     every COUNT(DISTINCT) value oracle in the repo, because a single worker
     computes the right answer slowly. The same holds for a map that uses only
     HALF the workers (`>> 33` for `>> 32`). This is the one assertion either
-    mutant can fail: over the test population, at every K of the ladder, every
+    defect can fail: over the test population, at every K of the ladder, every
     bucket is used and every bucket's load is within [mean/2, 2*mean].
 
     The bounds are loose on purpose: at K=32 the mean is 128 rows and a
     binomial's standard deviation is ~11, so [64, 256] is ~6 sigma on either
-    side — a real map cannot trip it, and each mutant misses it by a factor.
+    side — a real map cannot trip it, and each defect misses it by a factor.
     """
     var pop = _pop_hashes(_HASH_POP)
     var ks = _k_ladder()
@@ -656,12 +656,12 @@ def test_the_divfree_partition_uses_every_bucket_and_is_balanced() raises:
 
 
 def test_a_row_range_split_violates_the_invariant_the_hash_split_holds() raises:
-    """[control]. THE PLANTED CONTROL, WITH AN INVERTED VERDICT.
+    """[control]. THE CONTROL, WITH AN INVERTED VERDICT.
 
     [pure]–[identity] would all pass under partitionings that are WRONG for this design,
     so on their own they do not establish that hash partitioning is what buys
     the correctness. Here the SAME key population is split the other way — by
-    contiguous row range, the shape this file's prose claimed for months — and
+    contiguous row range, the other natural shape — and
     the assertion is that it FAILS the [partition] law at the level that matters: one
     GROUP KEY reaches more than one worker.
 

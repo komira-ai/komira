@@ -3,16 +3,13 @@
 #                            resident Arrow column
 # =============================================================================
 #
-# THE DEFECT THIS EXISTS FOR (ClickBench Q5, measured 2026-09-19).
-# `count(DISTINCT search_phrase)` over the 100M-row wide fixture routed to
-# `distinct_node_exec._run_scalar_string_cd_over_batch`, which answers the
-# question by running the FULL `SELECT DISTINCT <col>` operator
-# (`DistinctState_Untyped`) and taking the row count of its output. That is
-# three separate categorical costs stacked on one another:
+# THE DEFECT THIS EXISTS FOR. Answering `count(DISTINCT <string column>)` by
+# running the FULL `SELECT DISTINCT <col>` operator and taking the row count of
+# its output stacks three separate costs on one another:
 #
-#   1. the dedup is SERIAL — one thread inserts 99,997,497 rows into one
-#      untyped row-directory while the other 19 workers idle;
-#   2. it MATERIALISES the distinct VALUES — 6,019,103 canonical strings and a
+#   1. the dedup is SERIAL — one thread inserts every row into one
+#      untyped row-directory while the other workers idle;
+#   2. it MATERIALISES the distinct VALUES — every canonical distinct string and a
 #      whole key-only `RecordBatch` (offsets + data + validity) are built and
 #      then thrown away, because the caller wants ONE Int64;
 #   3. it goes through the untyped `ColumnFormatStorage` cell path, which
@@ -41,10 +38,10 @@
 #
 # ★ THE DUPLICATE PRE-FILTER IS NOT AN OPTIMISATION, IT IS WHAT MAKES THE
 #   PARTITIONING VIABLE. Hash-partitioning by VALUE concentrates duplicates:
-#   on ClickBench Q5, 86,825,105 of the 99,997,497 rows are the EMPTY STRING,
-#   so a naive scatter puts 87% of the input into ONE partition and the dedup
-#   phase degenerates to a single-threaded straggler that is SLOWER than the
-#   serial fold it replaced. Each scan task therefore carries a small
+#   in a column where most rows are the EMPTY STRING, a naive scatter puts
+#   most of the input into ONE partition and the dedup
+#   phase degenerates to a single-threaded straggler that is SLOWER than a
+#   serial fold. Each scan task therefore carries a small
 #   direct-mapped "last value seen at this hash slot" cache (`_CDSTR_FILT_SIZE`
 #   entries, L1/L2-resident). A row whose value is PROVEN — by fingerprint AND
 #   byte compare — equal to the cache's occupant is dropped, because that value
@@ -120,8 +117,8 @@ comptime _CDSTR_MIN_ROWS: Int = 65_536
 comptime _CDSTR_TARGET_ROWS_PER_PART: Int = 262_144
 
 # Upper bound on partitions. `np * ns` buffers are allocated, and buffer COUNT
-# (not bytes) is what a teardown costs — measured on the Int64 twin, 31,744
-# buffers cost 17 ms to free against 0.02 ms for 22 holding the same bytes.
+# (not bytes) is what a teardown costs: freeing thousands of small buffers is
+# far slower than freeing a few holding the same bytes.
 comptime _CDSTR_MAX_PARTS: Int = 2048
 
 # Direct-mapped duplicate pre-filter, per scan task. 16,384 * 8 B = 128 KB:
@@ -137,15 +134,14 @@ comptime _CDSTR_MAX_ROWS: Int = 0xFFFF_FFFE
 
 # =============================================================================
 # The scan slices are cut by COST, not by rows, and there are more of them
-# than workers (ClickBench Q5)
+# than workers
 # =============================================================================
 #
 # A row's scan cost is not constant: it hashes the row's BYTES, and a
 # non-empty value also misses the pre-filter and scatters, while an empty or
 # just-seen one costs a fixed handful of ns. With `nw` EQUAL-ROW slices on
-# `search_phrase` (87% empty, the non-empty rows clustered by file region) the
-# slices carried very different work, and the scan fork ran at an occupancy of
-# 0.45-0.50 (~190-208 ms of wall for ~95 ms of 20-thread work).
+# a column that is mostly empty strings with the non-empty rows clustered, the
+# slices carry very different work and the scan fork leaves workers idle.
 #
 # So, by default, `tiles = _CDSTR_TILES_PER_WORKER * nw` slices whose bounds
 # equalise
@@ -171,13 +167,14 @@ comptime _CDSTR_ROW_COST_BYTES: Int = 16
 
 
 # =============================================================================
-# §1b — ⭐ THE ROUTE WITNESS. No value assertion can see which arm answered.
+# §1b — Test witness: which route answered
 # =============================================================================
 #
-# A caller that routes `count(DISTINCT <string>)` here and one that runs the
-# serial `SELECT DISTINCT` walk return the same number, so no value oracle can
-# tell which route answered; this process-wide counter can (a `_Global` atomic,
-# incremented once per answer this kernel serves).
+# A route that sends `count(DISTINCT <string>)` here and one that runs a serial
+# walk return the same number, so no value assertion can tell which answered.
+# This process-wide counter (a `_Global` atomic, incremented once per answer
+# this kernel serves) lets a test see it. The three accessors below exist for
+# tests; production code does not read the counter.
 
 
 def _init_cdstr_kernel_taken() -> OwnedPointer[AtomicI64]:
@@ -193,24 +190,24 @@ comptime _CDSTR_KERNEL_TAKEN = _Global[
 
 @always_inline
 def cd_string_kernel_taken_incr() raises:
-    """Record one `count(DISTINCT <string>)` answered by THIS kernel."""
-    # SAFETY: §6 FFI carve-out — `get_or_create_ptr` targets KGEN-runtime static
-    # storage (process-lifetime); the wildcard is the stdlib `_Global` API's own
-    # return type, confined to this helper.
+    """Record one `count(DISTINCT <string>)` answered by this kernel (the
+    kernel calls it itself; it is public only so the witness is one unit)."""
+    # SAFETY: `get_or_create_ptr` points at process-lifetime static storage
+    # owned by the `_Global`; the pointer does not escape this function.
     var gp = _CDSTR_KERNEL_TAKEN.get_or_create_ptr()
     _ = gp[][].fetch_add(Int64(1))
 
 
 def cd_string_kernel_taken_count() raises -> Int:
-    """Read the process-wide count of answers served by this kernel."""
-    # SAFETY: §6 FFI carve-out (see `cd_string_kernel_taken_incr`).
+    """Test accessor: the process-wide count of answers served by this kernel."""
+    # SAFETY: see `cd_string_kernel_taken_incr`.
     var gp = _CDSTR_KERNEL_TAKEN.get_or_create_ptr()
     return Int(gp[][].load())
 
 
 def reset_cd_string_kernel_counter() raises:
-    """Reset the process-wide counter to 0 (test setup)."""
-    # SAFETY: §6 FFI carve-out (see `cd_string_kernel_taken_incr`).
+    """Test accessor: reset the process-wide counter to 0."""
+    # SAFETY: see `cd_string_kernel_taken_incr`.
     var gp = _CDSTR_KERNEL_TAKEN.get_or_create_ptr()
     gp[][].store(Scalar[DType.int64](0))
 
@@ -525,8 +522,7 @@ struct _CDStrDedupTask[OffsetType: DType, bo: Origin[mut=False]](Segment):
             # been consumed, on THIS worker while the pages are hot, rather
             # than leaving all `ns * np` of them for the driver to free
             # serially. Same index `p`, so the disjointness argument above is
-            # unchanged. (The Int64 twin measured 17 ms of serial teardown for
-            # 31,744 such buffers.)
+            # unchanged. (Freeing many small buffers serially is slow.)
             var dead = List[Int64]()
             swap(sp[].matrix[][s][p], dead)
             _ = dead^
@@ -830,7 +826,7 @@ def count_distinct_string_column(
             + String(n_rows)
             + " rows, above the 32-bit row ordinal this kernel packs"
         )
-    # ⭐ THE ROUTE WITNESS. Incremented only once both refusals are past, so a
+    # Route witness: incremented only once both refusals are past, so a
     # REFUSED call is never counted as an answer this kernel served.
     cd_string_kernel_taken_incr()
     if at == ArrowType.LARGE_STRING:
