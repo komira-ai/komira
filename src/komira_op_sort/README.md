@@ -64,6 +64,25 @@ batch by it.
   `sort_parallel_string_kernels`; the pairwise-tree merge is
   `sort_parallel_string_merge`.
 
+- `sort_dictrank`: `parallel_dictrank_sort_string`, the sort of one
+  low-cardinality STRING / BINARY key by dense ranks and a parallel stable
+  counting sort (no comparison merge), and its gate
+  `can_dictrank_sort_single_key_string` (a strided sampled distinct count
+  under a ceiling). Above the ceiling after the exact build it falls back to
+  `parallel_sort_single_key_string`. The dictionary build and the ranks are
+  `sort_dictrank_build`. The gate's sample is a fixed stride, so a periodic
+  key, or one that is distinct only past the last sampled row, can be
+  admitted although it is high-cardinality; the exact build is the backstop
+  (the rows stay correct and the sort falls back, at the cost of a full
+  dictionary build). On the multi-worker `SortSink` route the gate samples
+  partition 0 only. `dictrank_fallback_count` reports how many sorts took the
+  fallback.
+- `sort_sink`: `SortSink`, the sort as a `MorselSink` of
+  `komira_operator_api`: per-worker batches, and a route chosen once in
+  `combine` (partitioned parallel sort and merge, the counting sort, or the
+  serial kernel) that changes the cost and never the rows. The switches are
+  a value, `SortSinkRoutes`.
+
 Each parallel entry takes a `SharedForkJoinHandle` (the engine's dispatcher,
 or `serial_fork_join_handle()` to run the same chunks inline; the `*_serial`
 entries do that) and gives exactly the rows of the serial kernel, ties in
