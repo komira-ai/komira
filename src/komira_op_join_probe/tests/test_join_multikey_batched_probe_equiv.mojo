@@ -407,6 +407,7 @@ def _runtime() raises -> PerCoreAsyncRuntime[NoopSink]:
 
 def test_batched_inner_matches_brute_force_at_every_width() raises:
     """The parallel INNER pairs equal brute force at every width."""
+    reset_join_probe_settings()
     var rt = _runtime()
     ref dispatcher = rt.dispatcher()
     var names = _fixture_names()
@@ -440,6 +441,7 @@ def test_batched_inner_matches_brute_force_at_every_width() raises:
 
 def test_pairing_keys_are_equal_at_every_width() raises:
     """Every emitted pair has equal keys, at every width."""
+    reset_join_probe_settings()
     var rt = _runtime()
     ref dispatcher = rt.dispatcher()
     var names = _fixture_names()
@@ -490,6 +492,7 @@ def test_pairing_keys_are_equal_at_every_width() raises:
 
 def test_all_six_arms_unmoved_at_every_width() raises:
     """The serial probes answer brute force whatever the width setting."""
+    reset_join_probe_settings()
     var names = _fixture_names()
     var widths = _widths()
     for i in range(len(names)):
@@ -541,6 +544,7 @@ def test_all_six_arms_unmoved_at_every_width() raises:
 
 def test_semi_anti_partition_probe_rows_at_every_width() raises:
     """SEMI and ANTI partition the probe rows, each row once."""
+    reset_join_probe_settings()
     var names = _fixture_names()
     var widths = _widths()
     for i in range(len(names)):
@@ -589,6 +593,7 @@ def test_semi_anti_partition_probe_rows_at_every_width() raises:
 
 def test_batched_widths_agree_with_row_major_arm() raises:
     """Every batched width agrees with the row-at-a-time walk."""
+    reset_join_probe_settings()
     var rt = _runtime()
     ref dispatcher = rt.dispatcher()
     var names = _fixture_names()
@@ -636,6 +641,7 @@ def test_batched_widths_agree_with_row_major_arm() raises:
 def test_unset_selects_the_batched_default_not_the_row_major_arm() raises:
     """Unconfigured is the shipped batched width; an explicit 0 is the
     row-at-a-time walk; a negative width is refused."""
+    reset_join_probe_settings()
     reset_join_probe_settings()
     assert_equal(mk_probe_batch_width(), MK_PROBE_BATCH_DEFAULT)
     mk_probe_configure(batch_width=0)

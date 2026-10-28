@@ -13,7 +13,6 @@
 # =============================================================================
 
 from std.memory import memcpy, UnsafePointer
-from std.sys import num_physical_cores
 
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.local_dispatcher import LocalDispatcher
@@ -42,12 +41,6 @@ from .join_probe_settings import (
     mk_probe_morsel_rows,
     mk_probe_retile_on,
 )
-
-
-comptime _MK_PARALLEL_THRESHOLD: Int = 100_000
-"""Below this many probe rows `execute_multi_key_join_probe` probes serially."""
-
-comptime _ENABLE_MULTI_KEY_PARALLEL_PROBE: Bool = True
 
 
 struct _MKMergeSrc(Movable, Deinitable):
@@ -169,7 +162,8 @@ def parallel_multi_key_inner_probe_into(
     """Parallel inner-join probe that appends to caller-provided output lists.
 
     The same pairs as `builder.probe_inner_into(probe_keys, ...)`, grouped by
-    worker. Raises if the probe key count or lengths disagree.
+    worker. Raises if the probe key count or lengths disagree. When it raises
+    after the probe, both output lists hold only the rows they held on entry.
 
     Args:
         dispatcher: Caller-owned LocalDispatcher reference.
@@ -208,16 +202,16 @@ def parallel_multi_key_inner_probe_into(
     if _ms_override > 0:
         morsel_size = _ms_override
     var num_morsels = (num_probe_rows + morsel_size - 1) // morsel_size
-    var _cores = num_physical_cores()
     var num_workers = min(num_morsels, pool_n)
-    grain_geometry_record(
-        SITE_JOIN_MULTIKEY, num_probe_rows, morsel_size, num_morsels, num_workers
-    )
 
+    # The retile: when every worker of the pool has a morsel but there are
+    # fewer than four morsels per worker, cut the morsels down so each worker
+    # claims about four (never below `MK_PROBE_RETILE_MIN_ROWS` rows). It
+    # follows the pool the dispatcher runs, not the host's core count.
     if (
         _ms_override == 0
         and mk_probe_retile_on()
-        and num_workers == _cores
+        and num_workers == pool_n
         and num_morsels < 4 * num_workers
     ):
         var target = (num_probe_rows + 4 * num_workers - 1) // (4 * num_workers)
@@ -226,6 +220,9 @@ def parallel_multi_key_inner_probe_into(
         if target < morsel_size:
             morsel_size = target
             num_morsels = (num_probe_rows + morsel_size - 1) // morsel_size
+    grain_geometry_record(
+        SITE_JOIN_MULTIKEY, num_probe_rows, morsel_size, num_morsels, num_workers
+    )
 
     var num_build_rows = builder._num_inserted
     var non_empty_buckets = 0
@@ -309,27 +306,33 @@ def parallel_multi_key_inner_probe_into(
     state.worker_build.set_len_unchecked(0)
     state.worker_probe.set_len_unchecked(0)
 
-    var merged = _run_mk_merge_wave(
-        build_matches.unsafe_ptr() + base_build,
-        probe_matches.unsafe_ptr() + base_probe,
-        dst_off,
-        _MKMergeSrc(src_build^, src_probe^, copied^),
-        num_workers,
-        Pointer(to=dispatcher),
-    )
-
-    var copied_total = 0
-    for w in range(num_workers):
-        copied_total += merged.copied[w]
-    if copied_total != total_matches:
-        raise Error(
-            "parallel_multi_key_inner_probe_into: merge wave copied "
-            + String(copied_total)
-            + " matches but the prefix scan planned "
-            + String(total_matches)
+    try:
+        var merged = _run_mk_merge_wave(
+            build_matches.unsafe_ptr() + base_build,
+            probe_matches.unsafe_ptr() + base_probe,
+            dst_off,
+            _MKMergeSrc(src_build^, src_probe^, copied^),
+            num_workers,
+            Pointer(to=dispatcher),
         )
 
-    _ = merged^
+        var copied_total = 0
+        for w in range(num_workers):
+            copied_total += merged.copied[w]
+        if copied_total != total_matches:
+            raise Error(
+                "parallel_multi_key_inner_probe_into: merge wave copied "
+                + String(copied_total)
+                + " matches but the prefix scan planned "
+                + String(total_matches)
+            )
+        _ = merged^
+    except e:
+        # The lists were grown over uninitialised slots for the wave to fill;
+        # on failure hand them back with only the rows they held on entry.
+        build_matches.resize(unsafe_uninit_length=base_build)
+        probe_matches.resize(unsafe_uninit_length=base_probe)
+        raise e^
 
     _ = builder
     _ = probe_keys

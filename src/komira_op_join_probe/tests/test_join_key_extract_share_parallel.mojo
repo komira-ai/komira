@@ -31,6 +31,7 @@ from komira_op_join_probe.join_key_extract import (
     hash_string_keys,
     key_hash_chunk_bounds,
 )
+from komira_op_join_probe.join_multi_key import _NAN_SENTINEL_BITS
 from komira_op_join_probe.join_multi_key_builder import (
     MultiKeyHashJoinBuilder,
 )
@@ -377,6 +378,12 @@ def test_parallel_key_hash_marks_nulls_with_the_sentinel() raises:
     rt.shutdown()
 
     var sentinel = slots.get(null_rows[0])
+    assert_equal(
+        sentinel,
+        _NAN_SENTINEL_BITS,
+        "a NULL-keyed row carries something other than the NULL key slot"
+        " value (an empty string's hash, if the validity bitmap is ignored).",
+    )
     for i in range(len(null_rows)):
         assert_equal(
             slots.get(null_rows[i]),
