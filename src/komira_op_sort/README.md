@@ -109,14 +109,17 @@ batch by it.
   `sort_stage_buffer_spill`; `sort_stage_buffer` re-exports the key block
   names. The buffer stores values only, with no validity: `feed_row` refuses
   a row with a NULL in any bound key or payload column (an error naming the
-  column, nothing appended), so callers filter or replace nulls first.
+  slot and its input column, such as "NULL in sort key k0 (input column 2)";
+  nothing appended), so callers filter or replace nulls first.
   Spill writes the pre-sort rows as one chunk and empties the buffer; the
   buffer may be fed again. `restore_from_storage` puts the spilled rows
   (chunks in spill order) before the rows fed since, so the drain is the
   drain of one buffer fed all rows in input order. A restore that fails
   (a missing chunk, a corrupt image) leaves the buffer and its chunk list
   unchanged and may be retried; `discard_spilled` releases the outstanding
-  chunks without restoring them. A buffer dropped with chunks outstanding
+  chunks without restoring them (every chunk is attempted, the chunk list is
+  emptied, the first release error is raised, and a chunk that failed to
+  release is left to the storage's `cleanup`). A buffer dropped with chunks outstanding
   leaves them to the storage's `cleanup`.
 - `sort_stage`: `Stage_Sort[KB, *Payloads]`, the sort breaker as a
   `FusedMorselOp`: feed every row, drain sorted in `finalize`.

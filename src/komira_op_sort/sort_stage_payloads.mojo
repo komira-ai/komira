@@ -95,10 +95,15 @@ trait PayloadColumn(Defaultable, Movable, Deinitable):
         self, batch: BatchView[bo], row: Int
     ) -> Bool:
         """True iff this payload's bound input cell at `row` is NULL. The sort
-        buffer stores values without validity and refuses such a row. The
-        default answers False: a conformer that does not feed from a batch
-        (the join and as-of payload slots) has no input cell to check."""
-        return False
+        buffer stores values without validity and refuses such a row. Required:
+        a conformer that answered False for every row would let a NULL be
+        buffered as a value."""
+        ...
+
+    def input_column(self) -> Int:
+        """The index of the input column this payload reads (its bound `col`),
+        for error messages."""
+        ...
 
     def length(self) -> Int:
         """Number of buffered payload values."""
@@ -209,6 +214,10 @@ struct PayloadCol_Typed[dt: DType, col: Int](PayloadColumn):
         self, batch: BatchView[bo], row: Int
     ) -> Bool:
         return batch.col_is_null(Self.col, row)
+
+    @always_inline
+    def input_column(self) -> Int:
+        return Self.col
 
     @always_inline
     def length(self) -> Int:
@@ -395,6 +404,10 @@ struct PayloadCol_String[col: Int](PayloadColumn):
         self, batch: BatchView[bo], row: Int
     ) -> Bool:
         return batch.col_is_null(Self.col, row)
+
+    @always_inline
+    def input_column(self) -> Int:
+        return Self.col
 
     @always_inline
     def length(self) -> Int:

@@ -257,6 +257,11 @@ trait SortKeyColumn(Defaultable, Movable, Deinitable):
         stores values without validity, so the buffer refuses such a row."""
         ...
 
+    def input_column(self) -> Int:
+        """The index of the input column this key reads (its bound `col`), for
+        error messages."""
+        ...
+
     def length(self) -> Int:
         """Number of buffered key values."""
         ...
@@ -411,6 +416,10 @@ struct SortKeyColumn_Typed[dt: DType, col: Int](SortKeyColumn):
         self, batch: BatchView[bo], row: Int
     ) -> Bool:
         return batch.col_is_null(Self.col, row)
+
+    @always_inline
+    def input_column(self) -> Int:
+        return Self.col
 
     @always_inline
     def length(self) -> Int:

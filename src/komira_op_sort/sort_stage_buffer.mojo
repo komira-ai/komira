@@ -266,7 +266,8 @@ struct SortBuffer[KB: SortKeyBlockTrait, *Payloads: PayloadColumn](
 
         The buffer stores values without validity, so a row with a NULL in any
         bound key or payload column is refused (an error naming the column)
-        before anything is appended; the buffer is unchanged."""
+        before anything is appended; the buffer is unchanged. The error names the
+        slot and its input column, e.g. "NULL in sort key k0 (input column 2)"."""
         # PERF-CRITICAL: one validity-bitmap probe per bound column and row;
         # a column without a bitmap answers from a null check, no load.
         var nk = self.keys.null_key_slot[bo](batch, row)
@@ -274,7 +275,9 @@ struct SortBuffer[KB: SortKeyBlockTrait, *Payloads: PayloadColumn](
             raise Error(
                 String("SortBuffer.feed_row: NULL in sort key k")
                 + String(nk)
-                + String(": the sort buffer carries no validity")
+                + String(" (input column ")
+                + String(self.keys.key_input_column(nk))
+                + String("): the sort buffer carries no validity")
             )
 
         comptime for p in range(Self.Payloads.__len__()):
@@ -282,7 +285,9 @@ struct SortBuffer[KB: SortKeyBlockTrait, *Payloads: PayloadColumn](
                 raise Error(
                     String("SortBuffer.feed_row: NULL in payload p")
                     + String(p)
-                    + String(": the sort buffer carries no validity")
+                    + String(" (input column ")
+                    + String(self.payloads[p].input_column())
+                    + String("): the sort buffer carries no validity")
                 )
         self.keys.read_all[bo](batch, row)
 
@@ -602,7 +607,12 @@ struct SortBuffer[KB: SortKeyBlockTrait, *Payloads: PayloadColumn](
         """Release every outstanding spill chunk without restoring it. The
         spilled rows are lost; the rows resident in the buffer stay. A buffer
         that is dropped while it holds chunks leaves them to the storage's
-        `cleanup`; call this first to release them."""
+        `cleanup`; call this first to release them.
+
+        A partial release is not retried: every chunk is attempted, the chunk
+        ledger is emptied whatever happens, and the first release error is
+        raised afterwards. A chunk whose release failed is left to the
+        storage's `cleanup`."""
         self._spill.release_all(storage)
 
     def _swap_rows(mut self, mut other: Self):

@@ -87,6 +87,10 @@ trait SortKeyBlockTrait(Defaultable, Movable, Deinitable):
         when every key cell is valid. The key columns carry no validity."""
         ...
 
+    def key_input_column(self, slot: Int) -> Int:
+        """The input column index bound to key slot `slot`, for error messages."""
+        ...
+
     def append_bits_at[k: Int](mut self, bits: UInt64):
         """Append one value (UInt64 bit pattern) to key slot `k`."""
         ...
@@ -247,6 +251,12 @@ struct SortKeyBlock[*Keys: SortKeyColumn](SortKeyBlockTrait):
         comptime for k in range(Self.Keys.__len__()):
             if self.cols[k].input_is_null[bo](batch, row):
                 return k
+        return -1
+
+    def key_input_column(self, slot: Int) -> Int:
+        comptime for k in range(Self.Keys.__len__()):
+            if k == slot:
+                return self.cols[k].input_column()
         return -1
 
     @always_inline
