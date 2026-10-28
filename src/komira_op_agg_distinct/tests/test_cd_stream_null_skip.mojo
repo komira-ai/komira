@@ -222,7 +222,7 @@ def _run_stream_grouped(imm f: _Fx) raises -> Dict[Int64, Int]:
 
 
 # =============================================================================
-# 0. The fixture's own falsifiability, asserted before any kernel runs
+# 0. The fixture's own discriminating power, asserted before any kernel runs
 # =============================================================================
 
 
