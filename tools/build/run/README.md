@@ -22,7 +22,7 @@ replaced, is `docs/design/zig_gate_runner.md`.
 gate mojo --busybox B --runtime-lib DIR --label L --test ROOT/bin/NAME --marker M
           [--mem-cap-mib N] [--deadline-s L --runner-timeout-s T] [--hang-limit-s N]
           [--limit-s N --limit-report coverage]
-          [--env NAME=VALUE]... [--arg VALUE]...
+          [--env NAME=VALUE | --lib-dir DIR]... [--arg VALUE]...
 ```
 
 - The test runs from `ROOT/share` (an empty directory when it does not exist),
@@ -31,6 +31,15 @@ gate mojo --busybox B --runtime-lib DIR --label L --test ROOT/bin/NAME --marker 
   (`DIR`; on macOS `DYLD_LIBRARY_PATH` too), `TMPDIR` = `TEST_TMPDIR`, `HOME`
   and `PWD` set by the gate, then each `--env`. The run directory,
   `.komira_test.XXXXXX` under the action's directory, is removed after the run.
+- `--lib-dir DIR` (repeatable, before the first `--arg`, no `:` in it) names a
+  directory of pinned shared libraries the test opens by their bare names
+  (the `system_libs` of an adopted package, [system_libs.bzl](../mojo/system_libs.bzl)).
+  On Linux the directories follow `DIR` of `--runtime-lib` on `LD_LIBRARY_PATH`,
+  in the order given; on macOS they come first in `DYLD_FALLBACK_LIBRARY_PATH`,
+  before the action's own value (or dyld's `/usr/local/lib:/usr/lib`), so a pinned
+  file is found and an operating-system library is not shadowed. A relative
+  directory is resolved against the action's directory. Without it the
+  environment is what it always was.
 - Each `--arg` is one argument of the test, every `@KOMIRA_ACTION_DIR@` in it
   replaced by the action's absolute directory.
 - Exit 0: `PASS <label>\n` to the marker, nothing printed. Otherwise the
@@ -125,7 +134,7 @@ are listed in the pull request that added the tool.
 
 | File | Holds |
 |---|---|
-| [mojo_test.zig](mojo_test.zig) | usage, reserved names, `--env` isolation, arguments, the run directory, the environment, the working directory, the marker and the banner |
+| [mojo_test.zig](mojo_test.zig) | usage, reserved names, `--env` isolation, the `--lib-dir` library path, arguments, the run directory, the environment, the working directory, the marker and the banner |
 | [supervise_test.zig](supervise_test.zig) | the cap (on the sum over the test and its descendants), an unreadable or blind `/proc`, the time limit, a failed clock, signals, the tether, no pid reuse, the coverage limit, a platform with no process table, the real process table of the platform it runs on |
 | [rust_test.zig](rust_test.zig) | usage, the environment, each refusal, NO VERDICT, the marker |
 | [step_test.zig](step_test.zig) | usage, each result, the timeout's group kill, skips, `-o` outputs, infra exits, the scratch directory |
