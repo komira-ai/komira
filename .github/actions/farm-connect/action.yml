@@ -54,6 +54,10 @@ inputs:
     description: Absolute directories, separated by `:` or spaces, that a macOS test run searches for a library it opens by its bare name, before /usr/local/lib:/usr/lib (buildrules' `macos_library_dirs`). Only with darwin-properties; left out, dyld's own defaults apply.
     required: false
     default: ""
+  farm-qos:
+    description: The priority class the farm queues this job's actions in, `ci` or `batch` (a `batch` action starts after every queued `ci` action, so the pull-request checks go first when the farm is full). Written as the request header `x-kbf-qos` (buck2's `http_headers`); it is no platform property, so it does not change an action's digest or its cache entry. Left out, no header is sent and the farm queues the actions as `ci`. It takes effect only on a farm whose front end reads the header; one that does not ignores it.
+    required: false
+    default: ""
   tls:
     description: Whether the remote-execution service is reached over TLS, `true` or `false`.
     required: false
@@ -82,6 +86,7 @@ runs:
         MACOS_LIBRARY_DIRS: ${{ inputs.macos-library-dirs }}
         TLS: ${{ inputs.tls }}
         TLS_CA_CERTS: ${{ inputs.tls-ca-certs }}
+        FARM_QOS: ${{ inputs.farm-qos }}
       run: |
         set -eu
         refuse() {
@@ -106,11 +111,16 @@ runs:
         nl='
         '
         cr=$(printf '\r')
-        for v in "$FARM_ADDRESS" "$FARM_INSTANCE" "$FARM_PROPERTIES" "$DARWIN_PROPERTIES" "$DARWIN_MACOS_HOSTS" "$MACOS_LIBRARY_DIRS" "$TLS" "$TLS_CA_CERTS"; do
+        for v in "$FARM_ADDRESS" "$FARM_INSTANCE" "$FARM_PROPERTIES" "$DARWIN_PROPERTIES" "$DARWIN_MACOS_HOSTS" "$MACOS_LIBRARY_DIRS" "$TLS" "$TLS_CA_CERTS" "$FARM_QOS"; do
           case "$v" in
             *"$nl"* | *"$cr"*) refuse "an input holds a line break; each value must be one line of the buckconfig" ;;
           esac
         done
+        # The one header the action writes: its value is a level name and nothing else.
+        case "$FARM_QOS" in
+          ''|ci|batch) ;;
+          *) refuse "farm-qos is neither ci nor batch" ;;
+        esac
         # The macOS platform needs both: buck2 refuses a macOS property set
         # without host identities, and hosts without a set configure nothing.
         if [ -n "$DARWIN_PROPERTIES" ] && [ -z "$DARWIN_MACOS_HOSTS" ]; then
@@ -205,6 +215,7 @@ runs:
         MACOS_LIBRARY_DIRS: ${{ inputs.macos-library-dirs }}
         TLS: ${{ inputs.tls }}
         TLS_CA_CERTS: ${{ inputs.tls-ca-certs }}
+        FARM_QOS: ${{ inputs.farm-qos }}
       run: |
         set -eu
         case "$CONCURRENCY" in
@@ -223,6 +234,9 @@ runs:
             echo "  tls_ca_certs = $TLS_CA_CERTS"
           fi
           echo "  execution_concurrency_limit = $CONCURRENCY"
+          if [ -n "$FARM_QOS" ]; then
+            echo "  http_headers = x-kbf-qos:$FARM_QOS"
+          fi
           echo "[komira_re]"
           echo "  linux_x86_64_properties = $FARM_PROPERTIES"
           if [ -n "$DARWIN_PROPERTIES" ]; then

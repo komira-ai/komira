@@ -78,6 +78,10 @@
 #      release.json: a package whose bytes, name, platform or metadata are not
 #      what its manifest says, or that is not stamped, is a red build.
 #
+# NO macOS HERE. The macOS arm64 build is its own workflow, release-macos.yml, in its own
+# concurrency group, so a slow or stalled macOS build never holds this workflow's next run. No job of
+# this file names a macOS platform, worker set or runner (//:release_macos_cases says so).
+#
 # Triggers: a push to main (not one that touches only documentation:
 # `paths-ignore`, the same documentation the stamp does not count, so a
 # documentation-only push publishes nothing) and a manual run, and nothing else
@@ -164,6 +168,8 @@ jobs:
           farm-instance: ${{ vars.FARM_INSTANCE }}
           farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
           tls: ${{ vars.FARM_TLS || 'false' }}
+          # main's release work queues behind the pull-request checks when the farm is full
+          farm-qos: batch
       # A guard on the file farm-connect wrote: without the linux property set
       # a build would run on this runner.
       - name: the buckconfig names the farm
@@ -242,6 +248,8 @@ jobs:
           farm-instance: ${{ vars.FARM_INSTANCE }}
           farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
           tls: ${{ vars.FARM_TLS || 'false' }}
+          # main's release work queues behind the pull-request checks when the farm is full
+          farm-qos: batch
       - name: the buckconfig names the farm
         run: |
           ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'
@@ -255,7 +263,7 @@ jobs:
       - name: build the pinned mopm
         uses: ./.github/actions/buck2-farm
         with:
-          args: build toolchains//:mopm_0_0_81 --out ${{ runner.temp }}/mopm-publish/mopm
+          args: build toolchains//:mopm_0_0_86 --out ${{ runner.temp }}/mopm-publish/mopm
           assert-remote: ${{ steps.assert.outputs.path }}
       - name: build the packages
         uses: ./.github/actions/buck2-farm
@@ -404,6 +412,8 @@ jobs:
           farm-instance: ${{ vars.FARM_INSTANCE }}
           farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
           tls: ${{ vars.FARM_TLS || 'false' }}
+          # main's release work queues behind the pull-request checks when the farm is full
+          farm-qos: batch
       - name: the buckconfig names the farm
         run: |
           ./buck2 audit config komira_re.linux_x86_64_properties --style json | grep -q '": *"[^"]'

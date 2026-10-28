@@ -719,8 +719,8 @@ def string_array_of(col: Column[HeapRegion]) raises -> StringArray[HeapRegion]:
     `Column.as_string` memcpy's the offsets, data and validity buffers into
     a fresh `StringArray`; `Column.share_as_string` Arc-shares them instead
     and reads byte-identically wherever `can_share_as_string` holds (plain
-    STRING, offsets present, `_offset == 0` — the case `as_string` itself
-    reads correctly, since it ignores `_offset`). Anywhere else this IS
+    STRING, offsets present, `_offset == 0` — the only case `as_string`
+    accepts, since it refuses a sliced column). Anywhere else this IS
     `as_string`.
 
     WHY: on ClickBench `cbq27` every string predicate and string function

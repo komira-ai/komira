@@ -24,15 +24,21 @@ launcher_level_test(
 # (pack/readme_link.zig: every owner in the order given, an owner a
 # shared library NEEDs refused before it, the static archive
 # on the build line only, the source's bytes kept, a source naming the
-# marker refused).
+# marker refused) and a package unpacked into a prefix (pack/conda_install.zig:
+# a hash, a path or a link type the package's paths.json contradicts refused,
+# a runtime library that would overwrite a shipped file refused).
 zig_test(
     name = "komira_pack_unit",
     exec_compatible_with = LINUX_X86_64,
     src = "pack/unit_tests.zig",
     imports = [
         "pack/common.zig",
+        "pack/conda.zig",
+        "pack/conda_check.zig",
         "pack/conda_dlopen.zig",
+        "pack/conda_install.zig",
         "pack/conda_lib.zig",
+        "pack/conda_meta.zig",
         "pack/deflate.zig",
         "pack/deflate_test.zig",
         "pack/readme_link.zig",
@@ -54,6 +60,7 @@ zig_exe(
         "pack/conda_check.zig",
         "pack/conda_dlopen.zig",
         "pack/conda_index.zig",
+        "pack/conda_install.zig",
         "pack/conda_lib.zig",
         "pack/conda_meta.zig",
         "pack/deflate.zig",
@@ -289,8 +296,7 @@ conda_release_set_check(
         "//src/komira_gcp_wif:komira_gcp_wif",
         "//src/kci_cloud_gcp:kci_cloud_gcp",
         "//src/komira_kafka_broker:komira_kafka_broker",
-        "//src/komira_parquet_codec:komira_parquet_codec",
-        "//src/komira_parquet_writer:komira_parquet_writer",
+        "//src/komira_bench_duckdb:komira_bench_duckdb",
         "//src/komira_bench_data:komira_bench_data",
         "//src/komira_bench_report:komira_bench_report",
     ],
@@ -308,7 +314,6 @@ conda_release_set_check(
         "//src/komira_http_core:komira_http_core": "//src/komira_http_core:komira_http_core_native",
         "//src/komira_supervisor:komira_supervisor": "//src/komira_supervisor:komira_supervisor_native",
         "//src/komira_objectstore:komira_objectstore": "//src/komira_objectstore:komira_objectstore_native",
-        "//src/komira_parquet_codec:komira_parquet_codec": "//src/komira_parquet_codec:komira_parquet_codec_native",
     },
     release_set = "release_set.txt",
     order_tests = [

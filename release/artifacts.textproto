@@ -1033,21 +1033,12 @@ artifacts {
 }
 
 artifacts {
-  name: "komira_parquet_codec"
+  name: "komira_bench_duckdb"
   build_system: "buck2"
-  args: "//src/komira_parquet_codec:komira_parquet_codec_conda[release]"
+  args: "//src/komira_bench_duckdb:komira_bench_duckdb_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  targets: "//src/komira_parquet_codec:komira_parquet_codec_conda"
-}
-
-artifacts {
-  name: "komira_parquet_writer"
-  build_system: "buck2"
-  args: "//src/komira_parquet_writer:komira_parquet_writer_conda[release]"
-  args: "--out"
-  args: "{out_dir}"
-  targets: "//src/komira_parquet_writer:komira_parquet_writer_conda"
+  targets: "//src/komira_bench_duckdb:komira_bench_duckdb_conda"
 }
 
 artifacts {
@@ -1287,9 +1278,7 @@ artifacts {
   args: "--member-manifest"
   args: "{release_dir}/komira_kafka_broker/manifest.json"
   args: "--member-manifest"
-  args: "{release_dir}/komira_parquet_codec/manifest.json"
-  args: "--member-manifest"
-  args: "{release_dir}/komira_parquet_writer/manifest.json"
+  args: "{release_dir}/komira_bench_duckdb/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_bench_data/manifest.json"
   args: "--member-manifest"

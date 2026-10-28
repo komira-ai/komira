@@ -1,5 +1,5 @@
 """Hermetic Python for tests: `python_dist`, `python_wheel`, `py_test`,
-`python_oracle` and `python_proto`.
+`python_binding_test`, `python_oracle` and `python_proto`.
 
 `python_dist` unpacks a sha256-pinned CPython archive (an `install_only`
 archive of python-build-standalone) into a directory and fails unless the
@@ -204,7 +204,10 @@ _python_wheel = rule(
     },
 )
 
-def _py_test_impl(ctx):
+def _run_py_test(ctx, lib_args = [], env_extra = {}):
+    """The action every `py_test` and `python_binding_test` runs; `lib_args`
+    go between `--` and the script's own arguments, `env_extra` is added to
+    the action's environment."""
     dist = ctx.attrs.python[PythonDistInfo]
     srcs = {ctx.attrs.src.short_path: ctx.attrs.src}
     for s in ctx.attrs.srcs:
@@ -227,29 +230,75 @@ def _py_test_impl(ctx):
         cmd.add("--site", closure[k][1])
     if ctx.attrs.expect_error != None:
         cmd.add("--expect-error", ctx.attrs.expect_error)
-    cmd.add("--", cmd_args(staged, format = "{}/" + ctx.attrs.src.short_path), ctx.attrs.args)
+    cmd.add("--", cmd_args(staged, format = "{}/" + ctx.attrs.src.short_path), lib_args, ctx.attrs.args)
     # The zone database every reader takes: the C library and ORC read TZDIR,
     # and pyrun.py makes it Python's only zoneinfo path.
     tzdata = ctx.attrs.tzdata[PythonWheelInfo].closure[ctx.attrs.tzdata[PythonWheelInfo].name][1]
     env = dict(_ENV)
     env["TZDIR"] = cmd_args(tzdata, format = "{}/tzdata/zoneinfo")
+    env.update(env_extra)
     env.update(rerun_env(ctx))
-    ctx.actions.run(cmd, env = env, category = "py_test")
+    ctx.actions.run(cmd, env = env, category = ctx.attrs._category)
     return [DefaultInfo(default_output = out, other_outputs = [tmp]), rerun_info(ctx)]
+
+def _py_test_impl(ctx):
+    return _run_py_test(ctx)
+
+_PY_TEST_ATTRS = {
+    "args": attrs.list(attrs.arg(), default = []),
+    "deps": attrs.list(attrs.exec_dep(providers = [PythonWheelInfo]), default = []),
+    "expect_error": attrs.option(attrs.string(), default = None),
+    "python": attrs.exec_dep(providers = [PythonDistInfo], default = "komira//third_party/python:cpython"),
+    "src": attrs.source(),
+    "srcs": attrs.list(attrs.source(), default = []),
+    "tzdata": attrs.exec_dep(providers = [PythonWheelInfo], default = "komira//third_party/python:tzdata"),
+    "_runner": attrs.source(default = "komira//tools/build/python:pyrun.py"),
+} | RERUN_ATTRS
 
 _py_test = rule(
     impl = _py_test_impl,
     doc = "Runs `src` with the hermetic interpreter (`python`) as a build action; the output exists only if it passed (exit 0, or, with `expect_error`, an exception whose last traceback line is exactly that string). `srcs` are staged next to `src` and importable from it; `deps` are wheels (`python_wheel`), each with its own deps; `args` are the script's arguments. `tzdata` is the wheel whose `tzdata/zoneinfo` directory is the action's `TZDIR` and Python's only zone path.",
-    attrs = {
-        "args": attrs.list(attrs.arg(), default = []),
-        "deps": attrs.list(attrs.exec_dep(providers = [PythonWheelInfo]), default = []),
-        "expect_error": attrs.option(attrs.string(), default = None),
-        "python": attrs.exec_dep(providers = [PythonDistInfo], default = "komira//third_party/python:cpython"),
-        "src": attrs.source(),
-        "srcs": attrs.list(attrs.source(), default = []),
-        "tzdata": attrs.exec_dep(providers = [PythonWheelInfo], default = "komira//third_party/python:tzdata"),
-        "_runner": attrs.source(default = "komira//tools/build/python:pyrun.py"),
-    } | RERUN_ATTRS,
+    attrs = _PY_TEST_ATTRS | {"_category": attrs.string(default = "py_test")},
+)
+
+# ---- python_binding_test -----------------------------------------------------
+#
+# A `py_test` that also loads shared libraries: the `mojo_shared_lib` targets
+# of `libs` are copied, by file name, into one directory of the action, and the
+# Mojo runtime libraries they link (the toolchain's `mojo_runtime`) are a
+# second. The action's LD_LIBRARY_PATH is those two directories and nothing
+# else, so the loader finds the library and the runtime in the action's inputs
+# and never on the worker. The script learns the first directory from
+# `--lib-dir <dir>`, its first two arguments (a flag, not an environment
+# variable); `ctypes.CDLL(os.path.join(libdir, "<out_name>.so"))` loads a
+# library by path.
+
+def _python_binding_test_impl(ctx):
+    libs = {}
+    for l in ctx.attrs.libs:
+        out = l[DefaultInfo].default_outputs
+        if len(out) != 1:
+            fail("{}: lib {} has {} outputs, a shared library has one".format(ctx.label, l.label, len(out)))
+        name = out[0].basename
+        if name in libs:
+            fail("{}: two libs are named {}".format(ctx.label, name))
+        libs[name] = out[0]
+    libdir = ctx.actions.copied_dir("libs", libs)
+    runtime = ctx.attrs.runtime[DefaultInfo].default_outputs[0]
+    return _run_py_test(
+        ctx,
+        lib_args = ["--lib-dir", libdir],
+        env_extra = {"LD_LIBRARY_PATH": cmd_args(libdir, runtime, delimiter = ":")},
+    )
+
+_python_binding_test = rule(
+    impl = _python_binding_test_impl,
+    doc = "A `py_test` that loads shared libraries: `libs` (`mojo_shared_lib` targets) are staged by file name in one directory, passed to the script as `--lib-dir <dir>`; the action's LD_LIBRARY_PATH is that directory and the Mojo runtime libraries (`runtime`), and nothing else.",
+    attrs = _PY_TEST_ATTRS | {
+        "libs": attrs.list(attrs.dep()),
+        "runtime": attrs.exec_dep(default = "komira//tools/build/toolchains:mojo_runtime"),
+        "_category": attrs.string(default = "python_binding_test"),
+    },
 )
 
 # ---- python_oracle -----------------------------------------------------------
@@ -397,6 +446,9 @@ def _wheel_macro(**kwargs):
 def _py_test_macro(**kwargs):
     _py_test(**_linux(kwargs))
 
+def _binding_test_macro(**kwargs):
+    _python_binding_test(**_linux(kwargs))
+
 def _oracle_macro(**kwargs):
     _python_oracle(**_linux(kwargs))
 
@@ -408,5 +460,6 @@ def _proto_macro(**kwargs):
 python_dist = declares_docs(_dist_macro)
 python_wheel = declares_docs(_wheel_macro)
 py_test = declares_docs(_py_test_macro)
+python_binding_test = declares_docs(_binding_test_macro)
 python_oracle = declares_docs(_oracle_macro)
 python_proto = declares_docs(_proto_macro)

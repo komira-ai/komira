@@ -317,11 +317,14 @@ trait BreakerStateCombinable(BreakerState):
     `feed_row` / `drain_to_record_batch` / `probe_batch` / `probe_asof_batch` /
     `bind`); the sub-trait adds ONLY `combine`. The 5 ACCUMULATE breaker shapes
     (HashAgg / Sort / TopN / Window / JoinBuild) carry a real byte-identical
-    fold; the 4 MID-BATCH-EMIT / probe shapes (JoinProbe / AsofJoinBuild /
-    AsofJoinProbe / PartitionTopN) carry a raise-stub — they never participate
-    in a cross-worker accumulate fold by design, and the S2 adapter's
-    per-`state_tag` dispatch never routes a combine to them (the raise is a
-    defensive loud-on-misuse guard)."""
+    fold; the 3 MID-BATCH-EMIT / probe shapes (JoinProbe / AsofJoinBuild /
+    AsofJoinProbe) carry a raise-stub: they never participate in a
+    cross-worker accumulate fold by design, and the S2 adapter's per-`state_tag`
+    dispatch never routes a combine to them (the raise is a defensive
+    loud-on-misuse guard). The PartitionTopN states `PartitionTopNState` and
+    `PartitionTopNHashState` are not stubs: their `combine` merges per-worker
+    partitions (the hash state's docstring says which merge orders equal one
+    feed)."""
 
     def combine(mut self, var other: Self) raises:
         """Merge `other`'s accumulated state into `self`. After this call,
