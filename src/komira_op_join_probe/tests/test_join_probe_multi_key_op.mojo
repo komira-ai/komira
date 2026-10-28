@@ -19,7 +19,13 @@ from komira_buffer.heap_region import HeapRegion
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_MOCK
 from komira_async.runtime.runtime import PLACEMENT_FIXED, PerCoreAsyncRuntime
+from komira_async.runtime.sched_trace import SITE_JOIN_MULTIKEY
 from komira_async_api.token import CancellationToken
+from komira_engine_runtime.grain_geometry import (
+    GRAIN_F_ROWS,
+    grain_geometry_field,
+    grain_geometry_reset,
+)
 from komira_physical_plan.physical_plan import MorselOp
 from komira_plan_expr.expr import BIN_GT, Expr
 from komira_plan_expr.scalar_value import ScalarValue
@@ -239,11 +245,14 @@ def test_residual_predicate_is_refused_not_ignored() raises:
 
 
 def test_other_probe_algorithm_is_refused() raises:
-    """A sort-merge operator is not run as a hash join."""
+    """A sort-merge operator is not run as a hash join, with rows or with an
+    empty probe or build side."""
     var op = MorselOp.join_probe(
         0, ["a", "b"], ["x", "y"], JOIN_INNER, JOIN_ALGO_SORT_MERGE
     )
     _refusal(_probe(), op, _build(), "probe_algo=2")
+    _refusal(_empty_build(), op, _build(), "probe_algo=2")
+    _refusal(_probe(), op, _empty_build(), "probe_algo=2")
 
 
 def test_unsupported_join_type_is_refused_for_empty_inputs_too() raises:
@@ -307,6 +316,27 @@ def test_empty_build_returns_no_rows_with_the_output_schema() raises:
     )
 
 
+def test_empty_input_semi_and_anti_honour_the_projection() raises:
+    """SEMI and ANTI with an empty probe or an empty build side, projected to
+    one probe column: the output schema is that column; ANTI with no build rows
+    keeps every probe row, SEMI keeps none."""
+    var rt = _runtime()
+    var empty = _batch3("a", List[Int64](), "b", List[Int64](), "pv", List[Int64]())
+    var cut: List[String] = ["pv"]
+    for t in [JOIN_SEMI, JOIN_ANTI]:
+        _assert_schema(
+            _run(rt, empty, _op_projected(t, ["pv"]), _build()), cut, "empty probe"
+        )
+    _assert_schema(
+        _run(rt, _probe(), _op_projected(JOIN_SEMI, ["pv"]), _empty_build()),
+        cut, "SEMI, empty build",
+    )
+    var anti = _run(rt, _probe(), _op_projected(JOIN_ANTI, ["pv"]), _empty_build())
+    assert_equal(anti.schema.num_columns(), 1, "ANTI, empty build: columns")
+    assert_equal(anti.schema.field_name(0), "pv", "ANTI, empty build: column")
+    _assert_rows(_rows(anti, "pv", "pv"), [100100, 101101, 102102, 103103], "ANTI, empty build")
+
+
 def test_colliding_names_get_the_right_suffix() raises:
     """Build columns named like probe columns come out as `<name>_right`, for
     INNER and LEFT, with the values of the right side under the new name."""
@@ -342,39 +372,40 @@ def test_flipped_inner_with_projection_keeps_the_pairs() raises:
     _assert_rows(_rows(out, "pv", "bv"), [100500, 100501, 102502], "flipped projected")
 
 
-def _wide(n: Int, m0: Int, m1: Int, c0: String, c1: String, cv: String) raises -> RecordBatch:
-    """Row i: (i % m0, i % m1, i)."""
+def _wide(
+    n: Int, shift: Int, c0: String, c1: String, cv: String
+) raises -> RecordBatch:
+    """Row i: (key0, key1, i) where the keys are those of row i + `shift`:
+    ((i + shift) % 997, (i + shift) % 991)."""
     var a = List[Int64](capacity=n)
     var b = List[Int64](capacity=n)
     var v = List[Int64](capacity=n)
     for i in range(n):
-        a.append(Int64(i % m0))
-        b.append(Int64(i % m1))
+        a.append(Int64((i + shift) % 997))
+        b.append(Int64((i + shift) % 991))
         v.append(Int64(i))
     return _batch3(c0, a, c1, b, cv, v)
 
 
-def _expected_pairs(np: Int, nb: Int, m0: Int, m1: Int) -> Int:
-    var by_key = Dict[Int, Int]()
-    for j in range(nb):
-        var k = (j % m0) * 1000 + (j % m1)
-        by_key[k] = by_key.get(k, 0) + 1
-    var total = 0
-    for i in range(np):
-        total += by_key.get((i % m0) * 1000 + (i % m1), 0)
-    return total
+comptime _SHIFT: Int = 7
 
 
 def _parallel_case(np: Int, nb: Int) raises:
-    """Row by row: every output pair has equal keys on both sides, no pair
-    repeats, and the count is the brute-force count. The key pairs
-    (row % 997, row % 991) are unique among fewer than 988,000 rows, so each
-    probe row has at most one build row, the one with its own number."""
-    var probe = _wide(np, 997, 991, "a", "b", "pv")
-    var build = _wide(nb, 997, 991, "x", "y", "bv")
+    """Row by row. Build row j carries the key pair of row j + 7, and the pairs
+    (row % 997, row % 991) are unique among fewer than 988,000 rows, so probe
+    row i meets exactly build row i - 7 (when it exists): the output has
+    min(np, nb + 7) - 7 pairs, none repeats, and every pair has probe value
+    minus build value equal to 7. The pairs sit off the diagonal, so output
+    lists swapped between the probe and build sides show up as a different
+    difference. The probe's recorded split shows that the parallel branch ran,
+    over the side the join indexes: the probe rows, or the build rows when the
+    join flips."""
+    var probe = _wide(np, 0, "a", "b", "pv")
+    var build = _wide(nb, _SHIFT, "x", "y", "bv")
     var rt = _runtime()
+    grain_geometry_reset()
     var out = _run(rt, probe, _op(JOIN_INNER), build)
-    var want = _expected_pairs(np, nb, 997, 991)
+    var want = min(np, nb + _SHIFT) - _SHIFT
     assert_equal(out.num_rows(), want, "pair count")
     var pv = _col(out, "pv")
     var bv = _col(out, "bv")
@@ -383,21 +414,29 @@ def _parallel_case(np: Int, nb: Int) raises:
         var i = Int(pv[r])
         var j = Int(bv[r])
         assert_true(i >= 0 and i < np and j >= 0 and j < nb, "row index out of range")
-        assert_true(i % 997 == j % 997 and i % 991 == j % 991, "a pair with different keys")
+        assert_equal(i - j, _SHIFT, "probe row minus build row")
         seen.add(i * 1_000_000 + j)
     assert_equal(len(seen), want, "a pair repeats")
+    var parallel_rows = nb if should_flip_multi_key_inner_join(nb, np) else np
+    assert_equal(
+        grain_geometry_field(SITE_JOIN_MULTIKEY, GRAIN_F_ROWS),
+        parallel_rows,
+        "rows of the parallel probe",
+    )
 
 
-def test_parallel_probe_above_the_threshold_builds_on_the_build_side() raises:
-    """120,000 probe rows against 1,000 build rows: the parallel probe, not
-    flipped."""
+def test_parallel_probe_off_the_diagonal_not_flipped() raises:
+    """120,000 probe rows against 1,000 build rows: the parallel probe over the
+    probe rows, build side indexed; probe row i pairs with build row i - 7."""
+    assert_true(not should_flip_multi_key_inner_join(1_000, 120_000), "not flipped")
     _parallel_case(120_000, 1_000)
 
 
-def test_parallel_probe_above_the_threshold_flipped() raises:
+def test_parallel_probe_off_the_diagonal_flipped() raises:
     """40,000 probe rows against 130,000 build rows: the join indexes the probe
-    side and the 130,000 build rows run through the parallel probe; the pairs
-    must keep their probe row and build row on the right sides."""
+    side and the 130,000 build rows run through the parallel probe; each pair
+    keeps its probe row and its build row on the right sides."""
+    assert_true(should_flip_multi_key_inner_join(130_000, 40_000), "flipped")
     _parallel_case(40_000, 130_000)
 
 
@@ -413,8 +452,9 @@ def main() raises:
     suite.test[test_unsupported_join_type_is_refused_for_empty_inputs_too]()
     suite.test[test_empty_probe_returns_no_rows_with_the_output_schema]()
     suite.test[test_empty_build_returns_no_rows_with_the_output_schema]()
+    suite.test[test_empty_input_semi_and_anti_honour_the_projection]()
     suite.test[test_colliding_names_get_the_right_suffix]()
     suite.test[test_flipped_inner_with_projection_keeps_the_pairs]()
-    suite.test[test_parallel_probe_above_the_threshold_builds_on_the_build_side]()
-    suite.test[test_parallel_probe_above_the_threshold_flipped]()
+    suite.test[test_parallel_probe_off_the_diagonal_not_flipped]()
+    suite.test[test_parallel_probe_off_the_diagonal_flipped]()
     suite^.run()
