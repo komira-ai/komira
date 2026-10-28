@@ -40,6 +40,26 @@
 #   test_spawn_wiring_survives_a_closed_standard_descriptor
 #       with this process's fd 1 closed, so the stdout pipe's read end is handed
 #       fd 1, the child still writes its stdout into the pipe and exits 0.
+#   test_every_pipe_end_is_close_on_exec_in_the_parent
+#       the stdin write end and the stdout and stderr read ends all carry
+#       FD_CLOEXEC from the moment the pipe exists, so a spawn on another
+#       thread cannot inherit them.
+#   test_failed_spawns_leave_no_descriptors_open
+#       the count of open descriptors is the same after twenty failed spawns
+#       that asked for a stdin pipe.
+#   test_a_large_write_reaches_a_child_that_reads_all_of_it
+#       1 MiB, many times the pipe capacity, arrives whole: the child counts
+#       every byte.
+#   test_a_child_that_stops_reading_ends_a_large_write_with_epipe
+#       4 MiB to a child that exits after ten bytes: the write returns -EPIPE
+#       and this process lives.
+#   test_a_write_to_a_gone_child_fails_when_sigpipe_is_ignored
+#       with SIGPIPE ignored the write still returns -EPIPE, twice.
+#   test_read_blocking_on_a_nonblocking_pipe_reports_would_block
+#       an empty descriptor made non-blocking gives would_block, not error.
+#   test_spawn_wiring_survives_a_closed_stdin_descriptor
+#       with this process's fd 0 closed, the stdin pipe's ends are moved above
+#       2 and the child still reads what is written.
 #
 # Every child is reaped on every path.
 # =============================================================================
@@ -246,6 +266,143 @@ def test_spawn_wiring_survives_a_closed_standard_descriptor() raises:
     _ = external_call["close", Int32](saved)
     _spawned(pid)
     assert_equal(out, String("hello\n"))
+    assert_equal(code, 0)
+
+
+def _open_fd_count() -> Int:
+    """How many descriptors below 1024 this process has open (F_GETFD = 1)."""
+    var n = 0
+    for fd in range(1024):
+        if external_call["fcntl", Int32](Int32(fd), Int32(1)) >= Int32(0):
+            n += 1
+    return n
+
+
+def _is_cloexec(fd: Int32) -> Bool:
+    var flags = external_call["fcntl", Int32](fd, Int32(1))  # F_GETFD
+    return flags >= Int32(0) and (flags & Int32(1)) == Int32(1)  # FD_CLOEXEC
+
+
+def _lines(count: Int) -> String:
+    """`count` lines of 64 bytes each."""
+    var line = String("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde\n")
+    var out = String("")
+    for _ in range(count):
+        out += line
+    return out
+
+
+def test_every_pipe_end_is_close_on_exec_in_the_parent() raises:
+    var spec = ChildSpec.shell("cat")
+    spec.set_stdin_pipe()
+    var sup = Supervisor()
+    _spawned(sup.spawn(spec))
+    var stdin_ok = _is_cloexec(sup.stdin_fd())
+    var stdout_ok = _is_cloexec(sup.stdout_fd())
+    var stderr_ok = _is_cloexec(sup.stderr_fd())
+    sup.close_stdin()
+    _ = sup.drain_pipe(sup.stdout_fd())
+    _ = sup.drain_pipe(sup.stderr_fd())
+    _ = sup.wait_exit()
+    sup.close()
+    assert_true(stdin_ok)
+    assert_true(stdout_ok)
+    assert_true(stderr_ok)
+
+
+def test_failed_spawns_leave_no_descriptors_open() raises:
+    var before = _open_fd_count()
+    for _ in range(20):
+        var spec = ChildSpec("/nonexistent/komira-stdin-binary")
+        spec.set_stdin_pipe()
+        var sup = Supervisor()
+        assert_true(sup.spawn(spec) < 0)
+        sup.close()
+    assert_equal(_open_fd_count(), before)
+
+
+def test_a_large_write_reaches_a_child_that_reads_all_of_it() raises:
+    var spec = ChildSpec.shell("wc -c")
+    spec.set_stdin_pipe()
+    var sup = Supervisor()
+    _spawned(sup.spawn(spec))
+    var payload = _lines(16384)  # 1 MiB, far above the pipe capacity
+    assert_equal(sup.write_stdin(payload), payload.byte_length())
+    sup.close_stdin()
+    var out = sup.drain_pipe(sup.stdout_fd())
+    _ = sup.drain_pipe(sup.stderr_fd())
+    assert_equal(sup.wait_exit().exit_code, 0)
+    sup.close()
+    assert_equal(String(out.strip()), String("1048576"))
+
+
+def test_a_child_that_stops_reading_ends_a_large_write_with_epipe() raises:
+    var spec = ChildSpec.shell("head -c 10 > /dev/null")
+    spec.set_stdin_pipe()
+    var sup = Supervisor()
+    _spawned(sup.spawn(spec))
+    assert_equal(sup.write_stdin(_lines(65536)), -32)  # 4 MiB
+    _ = sup.drain_pipe(sup.stdout_fd())
+    _ = sup.drain_pipe(sup.stderr_fd())
+    assert_equal(sup.wait_exit().exit_code, 0)
+    sup.close()
+
+
+def test_a_write_to_a_gone_child_fails_when_sigpipe_is_ignored() raises:
+    var spec = ChildSpec.shell("exit 0")
+    spec.set_stdin_pipe()
+    var sup = Supervisor()
+    _spawned(sup.spawn(spec))
+    _ = sup.drain_pipe(sup.stdout_fd())
+    _ = sup.drain_pipe(sup.stderr_fd())
+    _ = sup.wait_exit()
+    var previous = external_call["signal", Int](Int32(13), Int(1))  # SIG_IGN
+    var first = sup.write_stdin(String("late\n"))
+    var second = sup.write_stdin(String("later\n"))
+    _ = external_call["signal", Int](Int32(13), previous)
+    sup.close()
+    assert_equal(first, -32)
+    assert_equal(second, -32)
+
+
+def test_read_blocking_on_a_nonblocking_pipe_reports_would_block() raises:
+    var spec = ChildSpec.shell("cat")
+    spec.set_stdin_pipe()
+    var sup = Supervisor()
+    _spawned(sup.spawn(spec))
+    assert_equal(sup.set_nonblocking(sup.stdout_fd()), Int32(0))
+    var c = sup.read_blocking(sup.stdout_fd())
+    assert_true(c.would_block)
+    assert_false(c.error)
+    assert_false(c.eof)
+    sup.close_stdin()
+    assert_equal(sup.wait_readable(sup.stdout_fd(), -1), 1)
+    assert_true(sup.read_blocking(sup.stdout_fd()).eof)
+    _ = sup.drain_pipe(sup.stderr_fd())
+    _ = sup.wait_exit()
+    sup.close()
+
+
+def test_spawn_wiring_survives_a_closed_stdin_descriptor() raises:
+    var saved = external_call["dup", Int32](Int32(0))
+    _ = external_call["close", Int32](Int32(0))
+    var spec = ChildSpec.shell("cat")
+    spec.set_stdin_pipe()
+    var sup = Supervisor()
+    var pid = sup.spawn(spec)
+    var out = String("")
+    var code = -1
+    if pid > Int32(0):
+        _ = sup.write_stdin(String("hi\n"))
+        sup.close_stdin()
+        out = sup.drain_pipe(sup.stdout_fd())
+        _ = sup.drain_pipe(sup.stderr_fd())
+        code = Int(sup.wait_exit().exit_code)
+    sup.close()
+    _ = external_call["dup2", Int32](saved, Int32(0))
+    _ = external_call["close", Int32](saved)
+    _spawned(pid)
+    assert_equal(out, String("hi\n"))
     assert_equal(code, 0)
 
 
