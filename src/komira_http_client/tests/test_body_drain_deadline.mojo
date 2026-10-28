@@ -59,6 +59,7 @@
 # into the body drain IS the subject.
 # =============================================================================
 
+from std.memory import ArcPointer
 from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -77,12 +78,12 @@ from komira_http_client.pool import PoolKey
 from komira_http_client.response_body import (
     _COLLECT_BODY_PARK_TIMEOUT_US,
     _COLLECT_BODY_SPIN_BUDGET,
+    _UNSTAMPED_DRAIN_BACKSTOP_US,
     RecvRingBody,
     collect_body,
 )
 from komira_http_client.url import Url
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
-from komira_clock import now_ns as _now_ns
 
 
 # =============================================================================
@@ -93,10 +94,18 @@ comptime _BUDGET_US: Int = 150_000
 """The configured request budget (150 ms) — the same shape both sibling
 deadline regressions use, small enough that a PASS is unambiguous."""
 
-comptime _CEILING_US: Int = 10_000_000
-"""The elapsed ceiling (10 s). Generously above the 150 ms budget plus one
-50 ms park interval, and far below both the 600 s driver default and the
-~3.5 h the iteration cap implies on a real socket."""
+comptime _CLOCK_START_US: Int = 1_000_000
+"""Where the fake clock starts. Away from 0, which the driver and the body use to
+mean "no deadline armed"."""
+
+comptime _PENDING_STEP_US: Int = 10_000
+"""Fake time that passes on every read where the scripted peer says nothing
+(Pending). A silent peer is the only thing that moves the clock in the stalled
+and slow-start cases, so their elapsed time is a function of the script."""
+
+comptime _DATA_STEP_US: Int = 100
+"""Fake time that passes on every read that delivers bytes, in the dribble
+cases: a peer that keeps sending, one byte at a time, still lets time pass."""
 
 comptime _DRAIN_MAX_ITER: Int = 1_000_000
 """`max_iter` in BOTH `collect_body` and (scaled by K) in
@@ -111,56 +120,19 @@ the peer is STUCK, not GONE. The difference matters — a peer that closes SHOUL
 report EOF_MID_RESPONSE; a peer that stalls should report a deadline."""
 
 comptime _TINY_SCRATCH: Int = 64
-"""Per-poll scratch for the DIRECT `collect_body` test only.
+"""Per-poll scratch for the DIRECT `collect_body` test only. `poll_frame` builds
+a fresh scratch List of `_scratch_size` zero bytes on every poll (65_536 at the
+default), so a small scratch keeps the many polls of a stalled drain cheap. It
+changes the cost of a poll and nothing about the control flow under test."""
 
-⚠ NOT COSMETIC. `RecvRingBody.poll_frame` builds a fresh scratch List and
-appends `_scratch_size` zero bytes into it ON EVERY POLL — 65_536 of them at the
-64 KiB default. At the default, spinning out the 1_000_000-iteration cap is
-~65e9 appends and takes minutes, which would make this file's runtime a worse
-problem than the bug. Shrinking the scratch changes the COST of a poll and
-nothing about the control flow under test."""
-
-comptime _DRIBBLE_CHUNKS: Int = 30_000
-"""Body chunks in the never-terminated dribble script.
-
-⚠ THIS NUMBER IS A MARGIN AGAINST A BOUND. Below 1.0x of that bound THE
-FIXTURE IS VACUOUS: the script runs out BEFORE the bound it is measured against
-expires, so the peer stops reading as STALLED and starts reading as GONE. Case
-4 below then gets `EOF_MID_RESPONSE` — the right answer to the question the
-fixture would actually be asking — and fails on fast machines while passing on
-slow ones. The ASSERTION is right; such a FIXTURE never creates the state.
-
-THE DERIVATION (re-measure it; do not trust these numbers).
-
-  THE BOUND TO OUTLAST is the LARGER of the two this one script is driven
-  against — 400 ms, `response_body.mojo`'s `_UNSTAMPED_DRAIN_BACKSTOP_US`
-  (8 x `_COLLECT_BODY_PARK_TIMEOUT_US`), which is what stops case 4's
-  HAND-BUILT, therefore UNSTAMPED, body. Case 3's driver-stamped `_BUDGET_US`
-  is 150 ms and is the slacker constraint.
-
-  THE COST OF A POLL at the 64 KiB default scratch — `poll_frame` builds a
-  fresh scratch List and appends `_scratch_size` zero bytes into it EVERY
-  poll — measured by instrumenting case 4:
-
-      fast machine   2200 chunks x 6 polls = 13_200 polls in 314_207 us
-                     => 23.80 us/poll => 400 ms needs 2801 CHUNKS.
-                     2200 would be 0.79x — vacuous.
-      slow machine   the same drain is CUT by the backstop at ~400 ms, i.e.
-                     it never reaches the end of the same script. The split
-                     is machine speed, not an optname.
-
-  THE MARGIN: 10x the fastest box measured (2801 -> 28_010, rounded to 30_000).
-
-⭐ THE SURPLUS IS FREE WHEN THE BOUND WORKS. The drain stops AT the bound and
-never reads the tail, so on a green run these chunks cost one 180 KB List build
-and nothing else — the healthy runtime IS THE BOUND, 400 ms, at 2200 chunks and
-at 30_000 alike. The full 4.3 s is paid only by a build in which the bound has
-been REMOVED, which is precisely the mutation this case exists to red, and it
-stays observably RED rather than hanging. That is why the script is still
-FINITE.
-
-Each chunk is the 6 bytes `1\\r\\nA\\r\\n`; the `0\\r\\n\\r\\n`
-terminator is deliberately NEVER written."""
+comptime _DRIBBLE_CHUNKS: Int = 1_000
+"""Body chunks in the never-terminated dribble script (6 bytes each, one byte per
+read, `_DATA_STEP_US` of fake time per read). 1_000 chunks are 600_000 us of
+fake time: more than the 150_000 us request budget and more than the 400_000 us
+unstamped-body backstop. The script therefore outlasts every bound it is driven
+against by arithmetic, not by how fast the machine polls, and the peer reads as
+STALLED (still dribbling), never as GONE. The `0\\r\\n\\r\\n` terminator is
+deliberately never written."""
 
 
 # =============================================================================
@@ -233,6 +205,11 @@ def _concat(var a: List[UInt8], b: List[UInt8]) -> List[UInt8]:
     return out^
 
 
+def _fake_clock() -> ArcPointer[Int]:
+    """A shared clock cell, in microseconds, that only the scripted stream moves."""
+    return ArcPointer[Int](_CLOCK_START_US)
+
+
 def _get_request() raises -> Url:
     return Url.parse(String("http://127.0.0.1:8080/health"))
 
@@ -243,34 +220,25 @@ def _get_request() raises -> Url:
 
 
 def test_collect_body_bound_is_an_iteration_count_not_a_deadline() raises:
-    """A stalled peer must end the body drain via a WALL-CLOCK DEADLINE.
+    """A stalled peer must end the body drain via a DEADLINE, not an iteration
+    count.
 
-    This drives `collect_body` directly — no head, no client — so nothing but
-    the body drain is under test. The stream is the canonical stuck-peer double
-    (`queue_read_pending` above every loop bound in the tree): `try_read`
-    returns Pending forever, never a byte and never an EOF.
-
-    WITHOUT A WALL-CLOCK BOUND THE RESULT IS:
-
-        HttpError[TIMEOUT]: collect_body iteration cap exceeded
-
-    ⚠ READ WHY THAT STRING IS A FAILURE AND NOT A PASS. It is spelled `TIMEOUT`,
-    so a laxer assertion — `"TIMEOUT" in detail`, which is what a reader reaches
-    for first — goes GREEN on it and certifies the exact defect. The word is a LABEL on an iteration count. What ended the loop was
-    1_000_000 polls, a quantity with no unit of time in it: on this fixture
-    (fd = -1, so `park_on_fds` returns immediately and a park is free) that is
-    under a second, and on a real socket where each park costs its full 50 ms it
-    is ~3.5 hours. Same code, same constant, two answers four orders of
-    magnitude apart — which is precisely what "not a deadline" means.
-
-    So the assertions below are the narrow ones: the failure must NOT be
-    attributable to an iteration count, and it MUST be attributable to a
-    configured wall-clock budget."""
+    Drives `collect_body` directly with the canonical stuck-peer double
+    (`queue_read_pending` above every loop bound in the tree), on the fake
+    clock. An iteration cap spelled `HttpError[TIMEOUT]: collect_body iteration
+    cap exceeded` is a failure, not a pass: it says TIMEOUT while measuring no
+    time (the same 1_000_000 iterations are under a second on this fixture and
+    ~3.5 hours on a real socket). So the assertions are narrow: the failure must
+    NOT name an iteration cap, it MUST name a deadline, and it must arrive at the
+    unstamped-body backstop."""
+    var clock = _fake_clock()
     var stream = ScriptedStream.empty()
     stream.queue_read_pending(_STALL_PENDING_COUNT)
+    stream.advance_clock_on_read(clock, _PENDING_STEP_US)
     var body = RecvRingBody[ScriptedStream].new_chunked(
         stream^, List[UInt8](), 100 * 1024 * 1024,
     )
+    body.set_test_clock(Optional[ArcPointer[Int]](clock))
     body.set_scratch_size(_TINY_SCRATCH)
 
     var reactor = _make_reactor()
@@ -278,7 +246,6 @@ def test_collect_body_bound_is_an_iteration_count_not_a_deadline() raises:
 
     var raised = False
     var detail = String()
-    var start_us = Int(_now_ns() // UInt64(1000))
     try:
         var _bytes = collect_body[PerCoreAsyncRuntime[NoopSink], ScriptedStream](
             body, reactor, tok,
@@ -286,7 +253,6 @@ def test_collect_body_bound_is_an_iteration_count_not_a_deadline() raises:
     except e:
         raised = True
         detail = String(e)
-    var elapsed_us = Int(_now_ns() // UInt64(1000)) - start_us
 
     assert_true(raised, msg="a stalled body must raise, not return")
     # ★ THE HEADLINE ASSERTION. RED today: the message is literally
@@ -298,9 +264,6 @@ def test_collect_body_bound_is_an_iteration_count_not_a_deadline() raises:
             " iteration cap is not a deadline (on a real socket the same"
             " 1_000_000 iterations are ~3.5 h of 50 ms parks). got: "
             + detail
-            + " (elapsed_us="
-            + String(elapsed_us)
-            + ")"
         ),
     )
     # ★ AND THE POSITIVE HALF: it must name a deadline, the way the head loop's
@@ -312,6 +275,14 @@ def test_collect_body_bound_is_an_iteration_count_not_a_deadline() raises:
             " deadline; got: "
             + detail
         ),
+    )
+    # It stopped at the unstamped backstop, on the fake clock: the first
+    # Pending step at or after the backstop (400_000 us is a multiple of the
+    # 10_000 us step, so exactly there).
+    assert_equal(
+        clock[] - _CLOCK_START_US,
+        _UNSTAMPED_DRAIN_BACKSTOP_US,
+        msg="the stalled drain did not stop at the unstamped backstop",
     )
 
 
@@ -378,39 +349,29 @@ def test_request_budget_bounds_the_body_phase_not_only_the_head() raises:
     """A configured 150 ms request budget must bound the WHOLE request, and the
     body drain is part of the request.
 
-    THE FIXTURE IS THE INCIDENT. A complete, well-formed chunked head arrives
-    (so the head loop — which DOES have a working deadline — finishes normally
-    and hands off at `OUTBOUND_STATE_DONE`), and then the peer dribbles body
-    bytes it never terminates. From that hand-off onward not one line of code
-    between here and the wire consults a clock.
-
-    ⚠ THE HEAD IS SERVED AT FULL SPEED AND THE BODY ONE BYTE AT A TIME, AND THAT
-    ASYMMETRY IS LOAD-BEARING. `set_max_read_per_call(1)` applies to the whole
-    stream, so the head is dribbled too — but the head is 47 bytes, i.e. 47
-    iterations of a loop that costs microseconds, against a 150 ms budget three
-    orders of magnitude larger. The body is ~180 KB at ~65_536 scratch appends
-    per poll. There is therefore no ambiguity about WHICH phase burned the
-    budget: if this ever fails during the head, it fails on the `elapsed >=
-    _BUDGET_US` floor rather than passing for the wrong reason.
-
-    WITHOUT THE BOUND: `HttpError[EOF_MID_RESPONSE: chunked body
-    unterminated]`, arriving only when
-    the finite dribble script runs out, one to several seconds in. A live peer
-    holding the socket open supplies the dribble indefinitely and the request
-    then runs to the platform's request ceiling. The finite script
-    is what makes the bug observable in bounded time; the error CLASS is the
-    assertion."""
+    THE FIXTURE IS THE INCIDENT. A complete chunked head arrives (so the head
+    loop, which has a working deadline, finishes and hands off), then the peer
+    dribbles body bytes it never terminates. From that hand-off onward nothing
+    between here and the wire consults a clock unless the body carries the
+    request's deadline. Without the bound the result is `EOF_MID_RESPONSE`, when
+    the finite dribble runs out; with it, a TIMEOUT at the budget. The head is 47
+    bytes at 100 us per byte (4_700 us of the 150_000 us budget), so the budget
+    is spent in the body."""
     var script = _concat(
         _chunked_head(), _never_terminated_chunked_body(_DRIBBLE_CHUNKS),
     )
+    var clock = _fake_clock()
     var stream = ScriptedStream.from_read_script(script^)
     # THE DRIBBLE. One byte per read is the minimum that still counts as
-    # progress — the same device the head-phase sibling uses.
+    # progress — the same device the head-phase sibling uses. Each byte read
+    # moves the fake clock by `_DATA_STEP_US`.
     stream.set_max_read_per_call(1)
+    stream.advance_clock_on_read(clock, 0, _DATA_STEP_US)
     var connector = ScriptedConnector.with_stream(stream^)
     var client = HttpClient[ScriptedConnector].with_request_timeout_us(
         connector^, _BUDGET_US,
     )
+    client.set_test_clock(clock)
     var reactor = _make_reactor()
 
     var url = _get_request()
@@ -419,7 +380,7 @@ def test_request_budget_bounds_the_body_phase_not_only_the_head() raises:
 
     var raised = False
     var detail = String()
-    var start_us = Int(_now_ns() // UInt64(1000))
+    var start_us = clock[]
     try:
         var _resp = client.send_buffered[PerCoreAsyncRuntime[NoopSink]](
             req^, reactor,
@@ -427,7 +388,7 @@ def test_request_budget_bounds_the_body_phase_not_only_the_head() raises:
     except e:
         raised = True
         detail = String(e)
-    var elapsed_us = Int(_now_ns() // UInt64(1000)) - start_us
+    var elapsed_us = clock[] - start_us
 
     assert_true(raised, msg="a stalled body must raise, not return")
     # ★ THE CLASS ASSERTION — catches the budget never being consulted in the
@@ -446,22 +407,14 @@ def test_request_budget_bounds_the_body_phase_not_only_the_head() raises:
             " time was spent waiting for it."
         ),
     )
-    # ★ THE ELAPSED ASSERTION — catches a deadline that is consulted but wrong.
-    assert_true(
-        elapsed_us < _CEILING_US,
-        msg=(
-            "the body phase ran "
-            + String(elapsed_us)
-            + " us under a "
-            + String(_BUDGET_US)
-            + " us budget"
-        ),
-    )
-    # And it must not fire EARLY — a body drain abandoned before its budget is
-    # data loss, not a fix. The negative control below is the other half of this.
-    assert_true(
-        elapsed_us >= _BUDGET_US,
-        msg="deadline fired before its budget: " + String(elapsed_us) + " us",
+    # ★ THE ELAPSED ASSERTION, on the fake clock: the failure arrives at the
+    # budget, not before (a drain abandoned early is data loss) and not after.
+    # The clock moves 100 us per byte read and the deadline is checked before
+    # every read, so the clock stops exactly on the budget.
+    assert_equal(
+        elapsed_us,
+        _BUDGET_US,
+        msg="the body phase must fail at its budget on the fake clock",
     )
 
 
@@ -471,35 +424,23 @@ def test_request_budget_bounds_the_body_phase_not_only_the_head() raises:
 
 
 def test_body_dribble_cannot_defeat_the_request_deadline() raises:
-    """`state_machine.mojo:732` records the rule this asserts, verbatim:
+    """"A deadline the peer can defeat by dribbling is not a deadline", carried
+    to the body path.
 
-        "A deadline the peer can defeat by dribbling is not a deadline."
-
-    ⛔ IT WAS NEVER CARRIED TO THE BODY PATH, AND THE BODY PATH IS WORSE. In the
-    head loop the defect was a deadline check REACHABLE only through a
-    counter-gated branch the dribble kept resetting; `collect_body`'s equivalent
-    branch (`pending_run >= _COLLECT_BODY_SPIN_BUDGET`) is reset by every Data
-    frame in the same way — but there is no deadline check behind it to reach.
-    There is no clock in the file at all.
-
-    THE DIFFERENCE FROM THE TEST ABOVE, so neither is redundant: that one drives
-    the whole client and asserts the REQUEST budget; this one drives
-    `collect_body` directly with a peer that is DELIVERING PAYLOAD the entire
-    time — the case a "no progress" heuristic cannot catch, because there is
-    progress on every single poll. Only a clock catches it.
-
-    Without a clock anywhere in the body path the result is `EOF_MID_RESPONSE:
-    chunked body unterminated`, when the dribble runs out. This body is
-    HAND-BUILT and therefore carries no stamp, so what must stop it is
-    `_UNSTAMPED_DRAIN_BACKSTOP_US` (400 ms). ⚠ `EOF_MID_RESPONSE` is now a VACUOUS-FIXTURE
-    signal rather than the contract failure — see the guard below."""
+    Drives `collect_body` directly with a peer that DELIVERS PAYLOAD on every
+    poll, so a "no progress" heuristic never fires; only a clock catches it.
+    This body is hand-built and carries no stamp, so what must stop it is
+    `_UNSTAMPED_DRAIN_BACKSTOP_US`, measured on the fake clock."""
+    var clock = _fake_clock()
     var stream = ScriptedStream.from_read_script(
         _never_terminated_chunked_body(_DRIBBLE_CHUNKS)
     )
     stream.set_max_read_per_call(1)
+    stream.advance_clock_on_read(clock, 0, _DATA_STEP_US)
     var body = RecvRingBody[ScriptedStream].new_chunked(
         stream^, List[UInt8](), 100 * 1024 * 1024,
     )
+    body.set_test_clock(Optional[ArcPointer[Int]](clock))
     var reactor = _make_reactor()
     var tok = CancellationToken.never()
 
@@ -514,22 +455,17 @@ def test_body_dribble_cannot_defeat_the_request_deadline() raises:
         detail = String(e)
 
     assert_true(raised, msg="an unterminated dribbled body must raise")
-    # ★ THE ANTI-VACUITY GUARD ON THE FIXTURE ITSELF. The dribble
-    # script is FINITE, so on a box fast enough to drain all of it inside
-    # `_UNSTAMPED_DRAIN_BACKSTOP_US` the peer stops being a STALLED peer and
-    # becomes a peer that CLOSED — and `EOF_MID_RESPONSE` is then the CORRECT
-    # answer to a question this case is not asking. That is not a contract
-    # failure, it is a fixture that never created the asserted state, and it
-    # went unnoticed once already (see `_DRIBBLE_CHUNKS`). Name it separately
-    # so the next occurrence reads as what it is.
+    # ★ THE ANTI-VACUITY GUARD ON THE FIXTURE ITSELF. The dribble script is
+    # FINITE: if it ran out before the bound, the peer would read as one that
+    # CLOSED and `EOF_MID_RESPONSE` would be the correct answer to a question
+    # this case is not asking. `_DRIBBLE_CHUNKS` outlasts the bound in fake
+    # time by arithmetic, so on any machine this must not happen.
     assert_false(
         "EOF_MID_RESPONSE" in detail,
         msg=(
             "VACUOUS FIXTURE, not a contract failure: the finite dribble"
-            " script ran out before the drain's bound expired, so this box"
-            " measured a peer that CLOSED instead of one that is still"
-            " dribbling. RAISE `_DRIBBLE_CHUNKS` — re-derive it from the"
-            " per-poll cost on this box, as its docstring does. got: "
+            " script ran out before the drain's bound expired. RAISE"
+            " `_DRIBBLE_CHUNKS`. got: "
             + detail
         ),
     )
@@ -541,6 +477,13 @@ def test_body_dribble_cannot_defeat_the_request_deadline() raises:
             " defeat. got: "
             + detail
         ),
+    )
+    # The drain stopped exactly at the unstamped backstop on the fake clock:
+    # 100 us per byte read, the bound checked before every read.
+    assert_equal(
+        clock[] - _CLOCK_START_US,
+        _UNSTAMPED_DRAIN_BACKSTOP_US,
+        msg="the dribbled drain must stop at the unstamped backstop",
     )
 
 
@@ -555,42 +498,38 @@ def test_slow_but_progressing_body_under_the_same_budget_succeeds() raises:
     under the SAME budget the stalled peer fails under, and must not consume
     that budget.
 
-    ⛔ WHY THIS TEST IS NOT OPTIONAL. The obvious fix for every RED in this file
-    — abandon the drain when the peer stalls, or bound it by a per-poll idle
-    timer — makes all three green while TRADING A HANG FOR DATA LOSS. That is a
-    strictly worse defect than the one being fixed: a hang is loud and a
-    truncated body is silent. This test is the only thing in the file that goes
-    RED on that fix, and there was no test of this shape anywhere in
-    `komira_http`.
-
-    Modelled on reqwest's `read_timeout_allows_slow_response_body`, which
-    asserts `body == "012"` for three chunks 100 ms apart under a 200 ms read
-    timeout: the assertion is on the BYTES, not merely on "it did not raise".
-
-    THE FIXTURE: a peer slower than any healthy one in the suite — it stalls for
-    several polls before answering at all, then hands over ONE BYTE PER READ for
-    the entire head and body — but it finishes, well inside the budget. A
-    correct implementation returns 200 and the three payload bytes `012`."""
+    ⛔ NOT OPTIONAL. The obvious fix for every RED in this file (abandon the
+    drain when the peer stalls) trades a hang for silent DATA LOSS and would
+    pass every other test here; this test fails for that fix, because it
+    asserts the bytes arrive. Modelled on
+    reqwest's `read_timeout_allows_slow_response_body`: the assertion is on the
+    BYTES (`012`), not merely on "it did not raise". The peer stalls for 8
+    reads, then hands over one byte per read."""
+    var clock = _fake_clock()
     var script = _concat(_chunked_head(), _complete_small_chunked_body())
     var stream = ScriptedStream.from_read_script(script^)
     # SLOW ON BOTH AXES: a stall before the first byte, then one byte per read.
+    # The 8 silent reads cost `_PENDING_STEP_US` of fake time each, 80_000 us
+    # in all; delivering bytes costs nothing.
     stream.queue_read_pending(8)
     stream.set_max_read_per_call(1)
+    stream.advance_clock_on_read(clock, _PENDING_STEP_US)
     var connector = ScriptedConnector.with_stream(stream^)
     var client = HttpClient[ScriptedConnector].with_request_timeout_us(
         connector^, _BUDGET_US,
     )
+    client.set_test_clock(clock)
     var reactor = _make_reactor()
 
     var url = _get_request()
     var hdrs = HeaderMap()
     var req = build_get_request(url^, hdrs^)
 
-    var start_us = Int(_now_ns() // UInt64(1000))
+    var start_us = clock[]
     var resp = client.send_buffered[PerCoreAsyncRuntime[NoopSink]](
         req^, reactor,
     )
-    var elapsed_us = Int(_now_ns() // UInt64(1000)) - start_us
+    var elapsed_us = clock[] - start_us
 
     assert_equal(Int(resp.status), 200)
     # ★ THE BYTES. "did not raise" is not the assertion — a drain that returns a
@@ -608,18 +547,69 @@ def test_slow_but_progressing_body_under_the_same_budget_succeeds() raises:
     assert_equal(Int(got[0]), Int(UInt8(ord("0"))))
     assert_equal(Int(got[1]), Int(UInt8(ord("1"))))
     assert_equal(Int(got[2]), Int(UInt8(ord("2"))))
-    # ★ AND IT MUST NOT HAVE SPENT THE BUDGET. A "fix" that always waits out the
-    # full deadline before returning a completed body would satisfy every
-    # assertion above while making every healthy request 150 ms slower.
+    # ★ ON THE FAKE CLOCK THE REQUEST SPENT EXACTLY THE SILENCE THE PEER SCRIPTED
+    # (8 x 10_000 us) and returned when the body completed. A "fix" that always
+    # waits out the full deadline before returning a completed body would show
+    # 150_000 here.
+    assert_equal(
+        elapsed_us,
+        8 * _PENDING_STEP_US,
+        msg="the request must take exactly the scripted silence, got "
+        + String(elapsed_us)
+        + " us",
+    )
     assert_true(
         elapsed_us < _BUDGET_US,
-        msg=(
-            "a healthy slow peer consumed the whole "
-            + String(_BUDGET_US)
-            + " us budget (elapsed "
-            + String(elapsed_us)
-            + " us) — a completed body must return when it completes"
-        ),
+        msg="a completed body must return before the budget is spent",
+    )
+
+
+def test_stalled_body_hits_the_deadline_by_advancing_the_fake_clock() raises:
+    """The counterpart of the case above, same budget, same clock: a peer that
+    sends a complete head and one body byte and then goes silent must fail with
+    the response-body deadline, and at the budget exactly.
+
+    Each silent read moves the fake clock by 10_000 us and the deadline is
+    checked before every read, so the clock must stop at the first multiple of
+    the step at or after the 150_000 us budget: 150_000 us. An early failure
+    (data loss) or a late one (an unbounded wait) both move that number. No
+    real time passes."""
+    var clock = _fake_clock()
+    var script = _concat(_chunked_head(), _never_terminated_chunked_body(1))
+    var stream = ScriptedStream.from_read_script(script^)
+    stream.set_pending_after_script(_STALL_PENDING_COUNT)
+    stream.advance_clock_on_read(clock, _PENDING_STEP_US)
+    var connector = ScriptedConnector.with_stream(stream^)
+    var client = HttpClient[ScriptedConnector].with_request_timeout_us(
+        connector^, _BUDGET_US,
+    )
+    client.set_test_clock(clock)
+    var reactor = _make_reactor()
+
+    var url = _get_request()
+    var hdrs = HeaderMap()
+    var req = build_get_request(url^, hdrs^)
+
+    var raised = False
+    var detail = String()
+    var start_us = clock[]
+    try:
+        var _resp = client.send_buffered[PerCoreAsyncRuntime[NoopSink]](
+            req^, reactor,
+        )
+    except e:
+        raised = True
+        detail = String(e)
+
+    assert_true(raised, msg="a stalled body must raise, not return")
+    assert_true(
+        "response body deadline exceeded" in detail,
+        msg="the stalled body must fail with the body deadline; got: " + detail,
+    )
+    assert_equal(
+        clock[] - start_us,
+        _BUDGET_US,
+        msg="the body deadline must fire at the budget on the fake clock",
     )
 
 
@@ -631,37 +621,16 @@ def test_slow_but_progressing_body_under_the_same_budget_succeeds() raises:
 def test_a_failed_body_drain_does_not_poison_the_connection_pool() raises:
     """A request that fails mid-BODY must not leave its connection cached.
 
-    Go carries two dedicated tests for exactly this (issue 23399, `net/http`
-    `TestTransportTimeoutServerHangs` and its body twin): a connection whose
-    response was abandoned part-way holds UNCONSUMED BYTES, so handing it to the
-    next caller feeds them the tail of somebody else's response. It is a poison
-    pill that fails a DIFFERENT request than the one that went wrong, which is
-    why it is so expensive to diagnose.
+    A connection whose response was abandoned part-way holds unconsumed bytes;
+    handing it to the next caller feeds them the tail of somebody else's
+    response (Go issue 23399). The head half is covered by
+    `test_client_send_buffered_honors_request_timeout.mojo`; this is the body
+    half, and the one with bytes still on the wire.
 
-    ⚠ THE HEAD HALF OF THIS IS ALREADY COVERED — `test_client_send_buffered_
-    honors_request_timeout.mojo` asserts `h1_idle_conn_is_cached() == False`
-    after a mid-HEAD timeout. The BODY half was not, and the body half is the
-    one with bytes still on the wire: a mid-head failure has nothing buffered to
-    leak, while a mid-body failure has, by construction, a partially-drained
-    response.
-
-    This asserts the invariant over whatever failure the body phase currently
-    produces, so it is meaningful before the deadline lands and stays meaningful
-    after.
-
-    ★ IT IS TWO-SIDED, AND THAT IS NOT DECORATION. `assert_false(is_cached())`
-    on its own is satisfied by an accessor that returns False unconditionally,
-    by a pool that never caches anything, and by a request that never ran — none
-    of which is the property under test. So the fixture SEEDS the stuck
-    connection into the idle cache and asserts `is_cached() == True` BEFORE the
-    request, which is the positive control: the accessor is shown saying True
-    about this exact key moments before it is required to say False.
-
-    ⚠ IT ALSO PUTS THE TEST ON THE CACHED ARM DELIBERATELY. The dial arm ends
-    with the connection dropping on the floor whether or not anything is
-    correct; the CACHED arm is the one with a connection already in the pool
-    that must be EVICTED rather than left behind, and it is the steady state for
-    every keepalive caller."""
+    TWO-SIDED: the fixture SEEDS the stuck connection into the idle cache and
+    asserts `is_cached() == True` BEFORE the request (an accessor that can only
+    say False would otherwise pass), and it runs the CACHED arm, where a conn
+    already in the pool must be EVICTED. A dial tripwire proves which arm ran."""
     var script = _concat(
         _chunked_head(), _never_terminated_chunked_body(64),
     )
@@ -840,19 +809,10 @@ def test_derived_context_budget_is_the_budget_enforced() raises:
     """A budget DERIVED from the containing request's ceiling must reach the
     drive loop and bound it.
 
-    ⚠ THIS IS THE GAP `test_outbound_budget_rule.mojo` LEAVES. Its 15 tests
-    exercise `outbound_budget_us` / `largest_permissible_budget_us` /
-    `serving_request_ceiling_us` as PURE FUNCTIONS — correct arithmetic, and
-    nothing that carries the answer to a socket. The 600 s-inside-a-300 s-ceiling
-    bug lived in the WIRING, and this is the first test that drives a derived,
-    clamped value through a real drive loop.
-
-    ⛔ THE CEILING IS SYNTHETIC ON PURPOSE, AND IT IS NOT A WEAKER TEST. The real
-    Cloud Run ceiling is 300 s, whose derived budget is 295 s — unusable in a
-    unit test, and a test that waited it out would be replaced by one that did
-    not. `HttpClientConfig.for_serving_ceiling` exists precisely so the decision
-    can be exercised without a platform: the ceiling here is 5.15 s, which drives
-    the SAME subtractive arm as the real one
+    `test_outbound_budget_rule.mojo` exercises the clamp as pure functions; the
+    600 s-inside-a-300 s-ceiling bug lived in the WIRING, and this drives a
+    derived, clamped value through a real drive loop. The ceiling is synthetic
+    on purpose: 5.15 s takes the same subtractive arm as the real 300 s one
     (`ceiling - OUTBOUND_CEILING_RESERVE_US`, 5 s) and yields a 150 ms budget.
     The arithmetic is asserted first so a failure separates "the rule changed"
     from "the wiring dropped it"."""
@@ -872,12 +832,15 @@ def test_derived_context_budget_is_the_budget_enforced() raises:
         msg="a derived budget must report itself as clamped",
     )
 
+    var clock = _fake_clock()
     var stream = ScriptedStream.empty()
     stream.queue_read_pending(_STALL_PENDING_COUNT)
+    stream.advance_clock_on_read(clock, _PENDING_STEP_US)
     var connector = ScriptedConnector.with_stream(stream^)
     var client = HttpClient[ScriptedConnector](
         config=cfg, connector=connector^,
     )
+    client.set_test_clock(clock)
     var reactor = _make_reactor()
 
     var url = _get_request()
@@ -886,7 +849,7 @@ def test_derived_context_budget_is_the_budget_enforced() raises:
 
     var raised = False
     var detail = String()
-    var start_us = Int(_now_ns() // UInt64(1000))
+    var start_us = clock[]
     try:
         var _resp = client.send_buffered[PerCoreAsyncRuntime[NoopSink]](
             req^, reactor,
@@ -894,7 +857,7 @@ def test_derived_context_budget_is_the_budget_enforced() raises:
     except e:
         raised = True
         detail = String(e)
-    var elapsed_us = Int(_now_ns() // UInt64(1000)) - start_us
+    var elapsed_us = clock[] - start_us
 
     assert_true(raised, msg="a stuck peer must raise, not return")
     assert_true(
@@ -902,18 +865,16 @@ def test_derived_context_budget_is_the_budget_enforced() raises:
         msg="must fail via the derived wall-clock budget; got: " + detail,
     )
     # ★ THE HEADLINE ASSERTION: the DERIVED budget, not the 600 s default, is
-    # what bounded the call.
-    assert_true(
-        elapsed_us < _CEILING_US,
+    # what bounded the call. On the fake clock it fires at the derived budget
+    # exactly: not before it (150_000 us) and not after.
+    assert_equal(
+        elapsed_us,
+        cfg.request_timeout_us,
         msg=(
-            "the derived 150 ms budget did not reach the drive loop: elapsed "
+            "the derived 150 ms budget did not bound the drive loop: elapsed "
             + String(elapsed_us)
-            + " us (the 600 s default was used)"
+            + " us on the fake clock"
         ),
-    )
-    assert_true(
-        elapsed_us >= cfg.request_timeout_us,
-        msg="deadline fired before its budget: " + String(elapsed_us) + " us",
     )
 
 
@@ -962,6 +923,14 @@ def main() raises:
     except e:
         why = String(e)
     _run(String("slow_but_progressing_body_under_the_same_budget_succeeds"), failures, ok, why)
+
+    ok = False
+    try:
+        test_stalled_body_hits_the_deadline_by_advancing_the_fake_clock()
+        ok = True
+    except e:
+        why = String(e)
+    _run(String("stalled_body_hits_the_deadline_by_advancing_the_fake_clock"), failures, ok, why)
 
     ok = False
     try:

@@ -45,7 +45,7 @@ from komira_log.env_filter import EnvFilter
 from komira_log.levels import LEVEL_TRACE
 from komira_log.log_arg import ArgI64
 
-from std.testing import assert_true
+from std.testing import assert_equal
 from std.time import perf_counter_ns
 
 
@@ -103,6 +103,11 @@ def _measure_ambient(
     return Float64(Int(total_ns)) / Float64(emitted)
 
 
+def _emits_per_call(total: Int, chunk: Int) -> Int:
+    """Emits one `_measure_*` call makes: whole chunks until `total` is reached."""
+    return ((total + chunk - 1) // chunk) * chunk
+
+
 def main() raises:
     var eng = SharedEngine(num_workers=1, filter=_all_filter())
     # SAFETY: `eng` owned by main for the whole measurement; install borrows its
@@ -121,6 +126,8 @@ def main() raises:
 
     comptime TOTAL = 200_000
     comptime CHUNK = 256
+    var sites_after_warmup = eng.site_dict_len()
+    assert_equal(sites_after_warmup, 2, "warm-up registered the two sites")
 
     # Interleave the two measurements (run each twice, alternating) to even out
     # any thermal / scheduler drift across the run.
@@ -167,21 +174,42 @@ def main() raises:
     # loop makes both arms ~0ns, and `typed < ambient` stays a 50/50 coin flip
     # over noise while measuring NOTHING. A drained count cannot.
     # =========================================================================
-    # ⚠ `>= 2 * TOTAL`, NOT `> 0`. Each measure fn is called TWICE and emits
-    # TOTAL each time, so this asserts EVERY emit was captured, not merely that
-    # some were — `> 0` is satisfied by a path that drops 99.99% of its records,
-    # which would invalidate the ns/emit above while reading green. The count is
-    # exactly 2*TOTAL plus what the warm-up swept, with zero drops and no
-    # run-to-run variation: a DETERMINISTIC arm, which is the property the
-    # comparison lacks. If it ever fails, the log engine is dropping records — a
-    # real defect, and one that silently voids every number this test prints.
-    assert_true(typed_drained >= 2 * TOTAL)
-    assert_true(ambient_drained >= 2 * TOTAL)
-    # Generous absolute ceilings — only fail on gross regression (an emit costs
-    # on the order of 100-200ns, so this is a wide margin). Both arms, not just
-    # typed, so a regression confined to the ambient path is caught too.
-    assert_true(typed < 5000.0)
-    assert_true(ambient < 5000.0)
+    # Every emit must be captured, not merely some: `> 0` is satisfied by a
+    # path that drops 99.99% of its records, which would invalidate the ns/emit
+    # above while reading green. If this fails, the log engine is dropping
+    # records.
+    #
+    # NOW EXACT. Each arm is measured twice; one measurement emits whole chunks
+    # until it reaches TOTAL, so it makes `_emits_per_call` emits and every one
+    # is drained by the end of its chunk (a chunk is far below the ring's
+    # capacity). The warm-up's drains are counted in neither variable.
+    assert_equal(
+        typed_drained, 2 * _emits_per_call(TOTAL, CHUNK), "typed: all drained"
+    )
+    assert_equal(
+        ambient_drained,
+        2 * _emits_per_call(TOTAL, CHUNK),
+        "ambient: all drained",
+    )
+    # NO TIME IS ASSERTED: ns/emit and the ratio above are information only
+    # (a threshold on them depends on the machine). What replaces the old
+    # absolute ceilings is counted exactly, per arm:
+    #   * each arm's records were all drained (above), exactly once;
+    #   * no ring dropped a record and none was refused (a full ring is what a
+    #     drain that fell behind the emits would show);
+    #   * no site was re-registered over the measured calls: the dictionary
+    #     still holds the two warm-up sites (one per arm's fmt).
+    # An emit that reached the ring returned before the cold render block (the
+    # only place that builds Strings and Lists), so the steady-state emit on
+    # either reach is consistent with building no String. The toolchain has no
+    # process-wide allocation counter, so allocations are not counted.
+    assert_equal(eng.overflow_dropped_count(), Int64(0), "no ring dropped")
+    assert_equal(eng.unknown_kind_dropped_count(), Int64(0), "no refused kind")
+    assert_equal(
+        eng.site_dict_len(),
+        sites_after_warmup,
+        "no site was re-registered over the measured calls",
+    )
 
     LogManager._test_reset()
     print("test_log_p2c_aot_perf: DONE")

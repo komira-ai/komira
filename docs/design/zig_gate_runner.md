@@ -8,7 +8,7 @@ tool:
 - `tools/build/mojo/mem_cap.sh` enforced a memory cap (deleted; `gate mojo --mem-cap-mib`).
 - `tools/build/mojo/test_deadline.sh` enforced the time limit of a `mojo_test` (deleted; `gate mojo
   --deadline-s`).
-- The time bound of [cov_run.sh](../../tools/build/coverage/kcov/cov_run.sh) (its step 2) and of
+- The time bound of [cov_run](../../tools/build/coverage/kcov/cov_run.zig) (its step 2) and of
   `mut_step.sh` (deleted; `gate step` replaces it).
 
 Status: design only, nothing is built. Every gate in the build depends on these scripts, and their
@@ -39,8 +39,8 @@ The tables below are the specification. The new tool must keep each row exactly,
 | G8 | The working directory is `<root>/share` if it exists, otherwise the empty `<run>/share`. It is never the action's directory. Stdin is `/dev/null`. Stdout and stderr go together, interleaved, to `<run>/log`. |
 | G9 | **PASS-marker contract.** `<marker>` is used as given; a relative path is resolved from the action's working directory, not from the test's. On exit 0, the tool writes exactly `PASS <label>\n` to `<marker>`, prints nothing, and exits 0. `/dev/null` is a valid marker. The marker bytes must not change: a package action takes every marker as an input, so identical bytes keep the packages cached (section 5). |
 | G10 | On a non-zero status, nothing is written to the marker. The tool prints the banner to stderr: 66 `=`, `GATED TEST FAILED: <label> (exit <rc>)`, `The library's package is not produced until this test passes.`, a 66-column `-` rule ending in ` output`, the last 200 lines of the log, and 66 `=`. Then it exits with the test's own status. A signal death is 128+N (137 for SIGKILL, 134 for SIGABRT). There is no SKIP: 77 is red. |
-| G11 | Banner text is a contract with other code: [release/ci/main_red.py](../../release/ci/main_red.py) matches `^GATED TEST FAILED: (\S+)`, and [cov_run.sh](../../tools/build/coverage/kcov/cov_run.sh) and `cov_branch run` ([cov_branch_run.zig](../../tools/build/coverage/branch/cov_branch_run.zig), `gateFailure`) remove the `GATED TEST FAILED: <label> (exit <rc>)` line and the `The library's package is not produced until this test passes.` line (banner lines 2 and 3) by exact text match, at the first match only, and keep the 66-`=` rule and the `--- output` rule. These lines must stay byte-identical. |
-| G12 | Darwin: the toolchain prepends [dyld_prelude.sh](../../tools/build/mojo/darwin/dyld_prelude.sh), which sets `DYLD_LIBRARY_PATH=<compiler_dir>/lib`. No SIP-protected binary may sit between the runner and the test, because dyld would strip `DYLD_*`. The test must see both `DYLD_LIBRARY_PATH` and `LD_LIBRARY_PATH` at `<compiler_dir>/lib` (case `darwin_loader`). |
+| G11 | Banner text is a contract with other code: [release/ci/main_red](../../release/ci/main_red/logs.zig) matches `^GATED TEST FAILED: (\S+)`, and [cov_run](../../tools/build/coverage/kcov/cov_run.zig) and `cov_branch run` ([cov_branch_run.zig](../../tools/build/coverage/branch/cov_branch_run.zig), `gateFailure`) remove the `GATED TEST FAILED: <label> (exit <rc>)` line and the `The library's package is not produced until this test passes.` line (banner lines 2 and 3) by exact text match, at the first match only, and keep the 66-`=` rule and the `--- output` rule. These lines must stay byte-identical. |
+| G12 | Darwin: the toolchain prepends `dyld_prelude.sh` (deleted: `act launch` sets the macOS variable), which sets `DYLD_LIBRARY_PATH=<compiler_dir>/lib`. No SIP-protected binary may sit between the runner and the test, because dyld would strip `DYLD_*`. The test must see both `DYLD_LIBRARY_PATH` and `LD_LIBRARY_PATH` at `<compiler_dir>/lib` (case `darwin_loader`). |
 
 ### 1.2 test_runner.sh (Rust)
 
@@ -77,11 +77,11 @@ The tables below are the specification. The new tool must keep each row exactly,
 | D5 | If the timer itself fails, print `test_deadline: the timer of <label> failed, so the test ran without its limit of <limit> s` and exit 2. |
 | D6 | Session, group kill after exit, and the tether work as in M5 and M6. Signals exit 129, 130 or 143 (HUP, INT, TERM). |
 
-### 1.5 The time bounds of cov_run.sh and mut_step.sh
+### 1.5 The time bounds of cov_run and mut_step.sh
 
 | # | Behaviour |
 |---|---|
-| C1 | cov_run.sh: the gate runner, with kcov as its program, leads a new session. Past `<limit>` s (whole seconds, polled once a second), the **whole** group is killed, including the runner, kcov, the test and any child left behind. Then cov_run.sh checks that `/proc/$$/stat` and `/proc/self/stat` both start with its own pid; if not, it fails because the scan would be blind. Any group member that is not a zombie and is still alive after up to 10 s is reported as `survived the kill` with its pid, state and comm. The output of every `.komira_test.*/log` left behind is printed (last 200 lines), and the run fails with the `COVERAGE RUN FAILED` message and exit 1. |
+| C1 | cov_run: the gate runner, with kcov as its program, leads a new session. Past `<limit>` s (whole seconds, polled once a second), the **whole** group is killed, including the runner, kcov, the test and any child left behind. Then cov_run checks that `/proc/$$/stat` and `/proc/self/stat` both start with its own pid; if not, it fails because the scan would be blind. Any group member that is not a zombie and is still alive after up to 10 s is reported as `survived the kill` with its pid, state and comm. The output of every `.komira_test.*/log` left behind is printed (last 200 lines), and the run fails with the `COVERAGE RUN FAILED` message and exit 1. |
 | S1 | mut_step.sh: usage is `<busybox> <status> <limit_s> [--after F]... [--infra-exit N]... -- <cmd…>`. Exit 2 for: fewer than 4 arguments, a bad limit (empty, non-digit or leading zero), `--after` or `--infra-exit` with no value, a non-numeric (or empty) `--infra-exit`, an unknown option, or a missing `--` or command. An `--after` file that cannot be read ends the script through `set -e` with busybox `head`'s non-zero status, before any status is written. |
 | S2 | `--after F`: if the first line of F is not exactly `ok`, write `skipped` and do not run the command. |
 | S3 | Each argument that **starts with** `@MUT_SCRATCH@` has that prefix replaced by `$BUCK_SCRATCH_PATH/mut_step`. The path may be absolute or relative to the working directory. If the variable is unset or empty, a `mktemp` directory `.mut_step.XXXXXX` under the working directory is used. The scratch directory is created before the `--after` verdict, so it exists on a skip too. The log is `<scratch>/log`. The scratch directory and its log are kept after the step; nothing removes them. |
@@ -107,7 +107,7 @@ gate step --status S --limit-s N [--after F]... [--infra-exit N]... -- COMMAND..
 - `mojo` covers G1–G12. With `--mem-cap-mib` it also covers M1–M6, and with `--deadline-s` it also covers
   D1–D6. Today these are stacked as up to three processes (`test_deadline.sh mem_cap.sh gate_runner.sh`).
   They become one process.
-- `--limit-s … --limit-report coverage` is C1, called by `cov_run.sh` in place of its `setsid` and
+- `--limit-s … --limit-report coverage` is C1, called by `cov_run` in place of its `setsid` and
   watcher.
 - `rust` covers R1–R8.
 - `step` covers S1–S6. The command it runs is generic: a compile command (`mojo_wrapper.sh` today), or a
@@ -204,7 +204,7 @@ may read variables such as `BUCK_SCRATCH_PATH`.
 | [defs.bzl](../../tools/build/mojo/defs.bzl): test_srcs, README examples, shared-lib gate drivers, `mojo_test` | `busybox sh gate_runner.sh …`, prefixed by the result of `capped_prefix` and `deadline_prefix`, which are defined in `defines.bzl` and `test_limit.bzl`; `defs.bzl` only calls them | One `cmd_args(tc.gate, "mojo", "--busybox", …)`. `capped_prefix` ([defines.bzl](../../tools/build/mojo/defines.bzl)) and `deadline_prefix` ([test_limit.bzl](../../tools/build/mojo/test_limit.bzl)), which `defs.bzl` calls, return flags (`["--mem-cap-mib", n]`, `["--deadline-s", l, "--runner-timeout-s", t]`), not a script prefix. |
 | [defines.bzl](../../tools/build/mojo/defines.bzl) and [test_limit.bzl](../../tools/build/mojo/test_limit.bzl) | `_mem_cap` and `_test_deadline` attributes, each holding a script | Both attributes are removed. The cap logic and the `TEST_LIMIT_MARGIN_S` arithmetic stay in Starlark, so the numbers are still decided at analysis time. |
 | [mutation.bzl](../../tools/build/mojo/mutation.bzl) and `coverage/mutate/defs.bzl` | `_step` emits `busybox sh mut_step.sh …`. The run step emits `mem_cap.sh` and `gate_runner.sh`. | `_step` emits `gate step --status … --limit-s …`. The run step's command becomes `gate mojo … --mem-cap-mib …`. `@MUT_SCRATCH@` and `_INFRA_EXITS` are unchanged. |
-| [coverage.bzl](../../tools/build/mojo/coverage.bzl) and [coverage_branch.bzl](../../tools/build/mojo/coverage_branch.bzl) | Pass `tc.gate_runner` to the two scripts. | Pass `tc.gate`. Step 2 of `cov_run.sh` calls `gate mojo … --limit-s $LIMIT --limit-report coverage` and drops its `setsid`, its watcher, `group_left` and its log scan. The rest of `cov_run.sh` belongs to the coverage port. |
+| [coverage.bzl](../../tools/build/mojo/coverage.bzl) and [coverage_branch.bzl](../../tools/build/mojo/coverage_branch.bzl) | Pass `tc.gate_runner` to the two scripts. | Pass `tc.gate`. Step 2 of `cov_run` calls `gate mojo … --limit-s $LIMIT --limit-report coverage` and drops its `setsid`, its watcher, `group_left` and its log scan. The rest of `cov_run` belongs to the coverage port. |
 | [rust/defs.bzl](../../tools/build/rust/defs.bzl) | `_runner` returns `busybox sh test_runner.sh …` | `cmd_args(tc.gate, "rust", "--busybox", …, "--timeout-s", …)` |
 
 The rule-side refusals of reserved `--env` names stay where they are, so a bad `env` still fails at
@@ -270,11 +270,13 @@ is recorded in the PR.
 | S2–S6 step | ok, `fail 3`, `timeout 2` with the whole group gone, a run inside its limit, skipped with an empty `-o` file, `-o` kept after success, an infra exit of 124 failing the action, and `@MUT_SCRATCH@` resolved for an absolute, a relative and an unset scratch path | record a timeout as `fail`, or create `-o` outputs after a success |
 | darwin paths | on Linux, with the platform interface forced to "no /proc": the cap is refused with exit 2, and the deadline group-kills and still prints the banner | fall back to running uncapped |
 
-**End-to-end.** The existing planted fixtures `tests//negative/mem_cap` and `tests//negative/test_deadline`
-stay unchanged. They test our tool, not a buck2 built-in, so they are allowed. They must go red with the
-same text as before, and their expected strings (`MEMORY CAP: killed`, `TEST TIME LIMIT: killed … after
-30 s`, `GATED TEST FAILED: … (exit 137)`) do not change. The switch-over PR runs them on the farm and
-records the red result.
+**End-to-end.** The planted fixture `tests//negative/mem_cap` stays unchanged. It tests our tool, not a
+buck2 built-in, so it is allowed. It must go red with the same text as before (`MEMORY CAP: killed`,
+`GATED TEST FAILED: … (exit 137)`). The time limit is not run end to end: no test sleeps past a limit. The
+gate's unit tests move the supervisor's clock themselves (`plat.now_ms`, `wait` and `sleep_ms`, testkit.zig)
+and assert the exact times of the kills and the banner order, and `tests//negative/test_deadline:test_slow`
+is only inspected: the scenario `config_refusals` requires that its `buck2 test` command carries
+`--deadline-s 30 --runner-timeout-s 90` under a test timeout of 90.
 
 **Darwin.** `mojo_test.zig` and `supervise_test.zig` are also built for macOS and run on the macOS
 workers (`mojo_test_darwin`, `supervise_test_darwin`), and `run:gate_darwin` is built behind them: the
@@ -295,7 +297,7 @@ differences are listed in the tool's README.
    `tools/build/tests/negative/rust_test`); Rust tests are in 2 of them (`proto-codegen` and
    `negative/rust_test`). This small switch-over exercises the toolchain wiring first.
 3. **Mojo, in one PR.** Switch `toolchain.bzl`, `darwin.bzl`, `defs.bzl`, `defines.bzl`, `test_limit.bzl`,
-   `mutation.bzl`, `coverage.bzl`, `coverage_branch.bzl` and step 2 of `cov_run.sh` together. This is the
+   `mutation.bzl`, `coverage.bzl`, `coverage_branch.bzl` and step 2 of `cov_run` together. This is the
    one full invalidation. Proof:
    - a farm build of the gated libraries that shows `local: 0`, with the package actions as cache hits
      (section 5);
@@ -322,7 +324,7 @@ The darwin-arm64 toolchain kept `gate_runner.sh` (behind `dyld_prelude.sh`), `me
 workers; that pull request deleted them and their case scripts.
 | `tools/build/coverage/mutate/mut_step_cases.sh` | 130 | `step_test.zig` |
 
-That is 1,339 lines of shell. In `cov_run.sh`, the watcher, `group_left` and the log scan go (about 60
+That is 1,339 lines of shell. In `cov_run`, the watcher, `group_left` and the log scan go (about 60
 lines). The rest of that file belongs to the coverage port. The BUCK targets that export or lint the deleted
 files go with them (`tools/build/mojo/BUCK`, `tools/build/tests/functional/{mem_cap,test_deadline}/BUCK`,
 the `test_deadline:shell_lint` line in the root `BUCK`, and `coverage/mutate/BUCK`). Docs that name the
@@ -334,4 +336,4 @@ scripts are updated in the same PRs: [gates_test_welding_and_lints.md](gates_tes
 1. Should the Mojo gate move to `env -i` (section 3, last paragraph)? It costs a second full
    invalidation, so if the answer is yes, it should land together with step 3.
 2. Today a test's exit 2 means the same as a usage error. Should the tool reserve a status that no test
-   can produce? Changing it touches `main_red.py` and the `mut_step` `--infra-exit` list.
+   can produce? Changing it touches `release/ci/main_red/logs.zig` and the `mut_step` `--infra-exit` list.

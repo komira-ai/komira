@@ -126,13 +126,13 @@ test "order: the counters are checked before records past the end of the file" {
     // As "a data section past the end of the file", the counter section
     // 8 bytes larger than the records' counters.
     const data = try fx.dataOf(c.a(), &fx.FNS);
-    var b = std.ArrayList(u8).init(c.a());
-    try b.appendSlice(try fx.elf(c.a(), &.{
+    var b = std.ArrayList(u8).empty;
+    try b.appendSlice(c.a(), try fx.elf(c.a(), &.{
         .{ .name = "__llvm_prf_cnts", .size = fx.cntsSize(&fx.FNS) + 8 },
         .{ .name = "__llvm_prf_data", .size = data.len + 2 * 72, .offset = 0 },
     }, .{}));
     const off = b.items.len;
-    try b.appendSlice(data);
+    try b.appendSlice(c.a(), data);
     const shoff = std.mem.readInt(u64, b.items[40..48], .little);
     std.mem.writeInt(u64, b.items[shoff + 2 * 64 + 24 ..][0..8], off, .little);
     try c.put("in/test_one", b.items);

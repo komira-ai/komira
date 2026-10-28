@@ -11,9 +11,9 @@
  * `size_t struct_size`; within a major version entries and fields are only
  * appended.
  *
- * Where the design names a value without a number (capability bits, the
- * threading and hosting values, CodeForm, null mode, stability), the number
- * is fixed here and marked "numbered here".
+ * The design numbers the statuses, the shape, device and feature bits and the
+ * UDF class. Where it names a value without a number (CodeForm, null mode,
+ * stability), the number is fixed here and marked "numbered here".
  */
 #ifndef KOMIRA_UDF_RUNTIME_H
 #define KOMIRA_UDF_RUNTIME_H
@@ -140,13 +140,20 @@ typedef enum { /* 0 is success; values are never reused */
   KOMIRA_UDF_ERR_CANCELLED = 11,
   KOMIRA_UDF_ERR_DEADLINE = 12,
   KOMIRA_UDF_ERR_OUT_OF_MEMORY = 13, /* refused by the host's memory hook, or the runtime's own */
-  KOMIRA_UDF_ERR_INSTANCE_LOST = 14, /* the context cannot be used again; the host reopens it */
+  KOMIRA_UDF_ERR_INSTANCE_LOST = 14, /* the context cannot be used again; no user code ran for this call */
   KOMIRA_UDF_ERR_INTERNAL = 15,      /* a runtime bug; never user code */
-  KOMIRA_UDF_ERR_FIELD_NOT_DECLARED = 16 /* ROW: user code read a field outside the read set; message names it */
+  KOMIRA_UDF_ERR_FIELD_NOT_DECLARED = 16, /* ROW: user code read a field outside the read set; message names it */
+  KOMIRA_UDF_ERR_WORKER_CRASHED = 17, /* the process running user code died, not by the runtime's own stop; context lost */
+  KOMIRA_UDF_ERR_HOST_CONTRACT = 18,  /* the host broke this ABI (section 4.5); message names the rule */
+  KOMIRA_UDF_ERR_KILLED = 19,         /* user code ignored a cancel or deadline and was stopped by force; context lost */
+  KOMIRA_UDF_ERR_READ_SET_MISMATCH = 20 /* validate: ROW/FRAME arg_types names differ from the descriptor's fields */
 } komira_udf_status;
 
-/* capabilities.shapes and spec.shape: one bit per call shape, in the order
- * the design's capability table lists them (numbered here). */
+/* capabilities.udf_class (0 reserved, refused) */
+#define KOMIRA_UDF_CLASS_NATIVE 1u
+#define KOMIRA_UDF_CLASS_MANAGED 2u
+
+/* capabilities.shapes and spec.shape: one bit per shape (0: none) */
 #define KOMIRA_UDF_SHAPE_SCALAR (1u << 0)
 #define KOMIRA_UDF_SHAPE_ROW (1u << 1)
 #define KOMIRA_UDF_SHAPE_MAP_BATCHES_COLUMN (1u << 2)
@@ -156,30 +163,13 @@ typedef enum { /* 0 is success; values are never reused */
 #define KOMIRA_UDF_SHAPE_AGG_MERGEABLE (1u << 6)
 #define KOMIRA_UDF_SHAPE_STEP (1u << 7)
 
-/* capabilities.threading: one value (numbered here). */
-#define KOMIRA_UDF_THREAD_SAFE 1u
-#define KOMIRA_UDF_CONTEXT_PER_THREAD 2u
-#define KOMIRA_UDF_SINGLE_THREAD 3u
-
-/* capabilities.transports: a mask (numbered here). */
-#define KOMIRA_UDF_TRANSPORT_IN_PROCESS (1u << 0)
-#define KOMIRA_UDF_TRANSPORT_WORKER (1u << 1)
-
-/* capabilities.hosting: the mode a managed runtime is in (numbered here). A
- * native runtime reports 0, which the design names only as a number. */
-#define KOMIRA_UDF_HOSTING_NONE 0u
-#define KOMIRA_UDF_HOSTING_EMBEDDED 1u
-#define KOMIRA_UDF_HOSTING_HOST_INTERPRETER 2u
-
-/* capabilities.udf_class (numbered here, 0 refused). */
-#define KOMIRA_UDF_CLASS_NATIVE 1u
-#define KOMIRA_UDF_CLASS_MANAGED 2u
-
-/* capabilities.devices: a mask (numbered here). */
+/* capabilities.devices (0: none) */
 #define KOMIRA_UDF_DEVICE_CPU (1u << 0)
 
-/* capabilities.features: a mask (numbered here). */
+/* capabilities.features (0: none) */
 #define KOMIRA_UDF_FEATURE_MEMORY_REPORT (1u << 0)
+#define KOMIRA_UDF_FEATURE_CONTAINS_CRASHES (1u << 1)
+#define KOMIRA_UDF_FEATURE_FORCED_STOP (1u << 2)
 
 /* spec.form: CodeForm (numbered here, 0 refused). */
 #define KOMIRA_UDF_FORM_PACKAGE 1
@@ -219,10 +209,9 @@ typedef struct komira_udf_capabilities {
   const char* runtime_id;  /* "<namespace>/<name>"; static for the runtime's life */
   const char* runtime_abi; /* may be empty */
   uint32_t max_descriptor_version;
-  uint32_t shapes, threading, thread_affine, transports, hosting, devices, features;
-  uint32_t udf_class;   /* NATIVE or MANAGED */
-  uint32_t global_lock; /* 1 if user code is serialized across contexts; THREAD_SAFE requires 0 */
-} komira_udf_capabilities;
+  uint32_t shapes, devices, features; /* section 4.2 */
+  uint32_t udf_class;                 /* NATIVE or MANAGED (section 1.2) */
+} komira_udf_capabilities;            /* what the runtime can do; nothing about how it executes */
 
 typedef struct komira_udf_spec { /* the UdfRef, decoded by the host; borrowed for the call */
   size_t struct_size;
@@ -231,8 +220,9 @@ typedef struct komira_udf_spec { /* the UdfRef, decoded by the host; borrowed fo
   const char* entry;
   uint32_t descriptor_version;
   const uint8_t* descriptor;
-  size_t descriptor_len;
-  const struct ArrowSchema* args;   /* a struct schema, one child per arg_types entry; for ROW, the read set by name */
+  size_t descriptor_len;            /* records entry, shapes and signature (section 3.1) */
+  const struct ArrowSchema* args;   /* a struct schema, one child per arg_types entry; for ROW and
+                                       MAP_BATCHES_FRAME, the read set by name if set, else every input column */
   const struct ArrowSchema* result; /* return_type; a struct for a table */
   const struct ArrowSchema* state;  /* state_type, or NULL */
   int32_t null_mode, stability;
@@ -245,13 +235,13 @@ typedef struct komira_udf_spec { /* the UdfRef, decoded by the host; borrowed fo
 typedef struct komira_udf_call {
   size_t struct_size;
   int64_t deadline_ns;           /* against host->now_ns; 0 = none */
-  int64_t call_id;               /* stable across a retry of the same batch */
+  int64_t call_id;               /* unique per call, for diagnostics */
   const volatile int32_t* cancel; /* host-owned, alive until the call returns; nonzero = cancel */
 } komira_udf_call;
 
 typedef struct komira_udf_rt komira_udf_rt;             /* the runtime, once per process */
-typedef struct komira_udf_udf komira_udf_udf;           /* a validated, loaded UDF */
-typedef struct komira_udf_context komira_udf_context;   /* one interpreter or isolate */
+typedef struct komira_udf_udf komira_udf_udf;           /* a validated, loaded UDF: process-wide part */
+typedef struct komira_udf_context komira_udf_context;   /* what one engine thread calls (section 3.3) */
 typedef struct komira_udf_instance komira_udf_instance; /* one UDF inside one context */
 typedef struct komira_udf_frame komira_udf_frame;       /* one frame, plain-aggregate or step call */
 typedef struct komira_udf_groups komira_udf_groups;     /* the accumulators of many groups */
@@ -260,7 +250,7 @@ typedef struct komira_udf_runtime { /* static in the runtime; the host reads ent
   size_t struct_size;
   uint32_t abi_major, abi_minor;
   int32_t (*describe)(komira_udf_rt*, komira_udf_capabilities* out);
-  int32_t (*validate)(komira_udf_rt*, const komira_udf_spec*, komira_udf_error*); /* pure; no user code */
+  int32_t (*validate)(komira_udf_rt*, const komira_udf_spec*, komira_udf_error*); /* pure: spec vs descriptor; opens no code */
   int32_t (*load)(komira_udf_rt*, const komira_udf_spec*, komira_udf_udf** out, komira_udf_error*);
   void (*unload)(komira_udf_udf*);
   int32_t (*open_context)(komira_udf_rt*, uint32_t slot, komira_udf_context** out, komira_udf_error*);

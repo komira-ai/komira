@@ -1,5 +1,0 @@
-# The universe query fails: one BROKEN line, buck2's whitespace runs one
-# space, the named node first; exit 0 (kci reads the answer).
-arg "{units_file}"
-input units_file "lib_a\t//src/a:a\n"
-exit 0

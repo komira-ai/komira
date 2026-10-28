@@ -28,9 +28,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # service account and checks the signer against Google's published V4 URLs,
 # both read from the archive //third_party/googleapis_conformance_tests pins
 # by sha256 and staged at conformance/. test_system_signing_clock signs with
-# the same account at the wall clock. Both parse the account with komira_json
-# and load its PEM key with komira_crypto, declared below for those tests
-# alone (the library itself imports neither).
+# the same account over a fixed clock and the wall clock. Both parse the
+# account with komira_json and load its PEM key with komira_crypto, declared
+# below for those tests alone (the library itself imports neither).
 #
 # test_gcs_grpc_trust runs a real komira_http_server HttpServer with a
 # komira_connect ConnectService stub of GetObject over TLS + h2 on 127.0.0.1

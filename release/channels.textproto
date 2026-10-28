@@ -1,3 +1,10 @@
+# NO STAGE NAMES THIS FILE TODAY. komira publishes to no channel for now:
+# release/machine.textproto has the build stage alone, and publishing will move
+# to mopm (docs/releases.md). The file stays only because kci's channels parser
+# refuses a file with no channel and src/kci_release_channel's welded test reads
+# it; it is not a statement that these channels receive releases. The text below
+# describes the channels as they were declared.
+#
 # The release channels (src/kci_release_channel): where a PUBLISH step
 # (`kci run --stage <S>`) may push, and how. release/machine.textproto names
 # this file and, per stage, the channel: stage `beta` publishes to `beta`,
@@ -11,9 +18,13 @@
 # channel holds no file of yet (NEW NAMES), and the beta stage reports prod's
 # before the prod approval.
 #
-# The credential is TRUSTED PUBLISHING (OIDC): each channel trusts the GitHub
-# repository komira-ai/komira, the workflow file kci.yml and ONE GitHub
-# environment (beta, prod). Neither names a break-glass publisher: both
+# No workflow publishes now: kci.yml, the workflow these channels were declared
+# for, is deleted, and .github/workflows/release.yml builds the release set and
+# publishes nothing. The file is kept only because kci's parser needs it.
+#
+# As declared, the credential was TRUSTED PUBLISHING (OIDC): each channel
+# trusted the GitHub repository komira-ai/komira, the workflow file kci.yml and
+# ONE GitHub environment (beta, prod). Neither names a break-glass publisher: both
 # stages run only on a push to main (a manual run builds and stops there,
 # release/machine.textproto). The publish job mints the job's ID token
 # (audience prefix.dev) and exchanges it at prefix.dev's mint endpoint for a

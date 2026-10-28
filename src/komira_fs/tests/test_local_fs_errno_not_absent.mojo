@@ -35,8 +35,9 @@
 #     any assertion runs.
 #   * ENAMETOOLONG ON AN ENTRY BELOW THE ROOT (forceable for any user, root
 #     included): a directory chain whose absolute path is just under PATH_MAX
-#     (4096) holds an entry created relative to it (a shell `cd` then
-#     `touch`), so opendir of the deepest directory succeeds and the walk's
+#     (4096) holds an entry, sized from the chain's actual length so the
+#     joined path is past PATH_MAX whatever the test root's length, created
+#     relative to it (a shell `cd` then `touch`), so opendir of the deepest directory succeeds and the walk's
 #     lstat of `<deepest>/<entry>` fails with ENAMETOOLONG. The walk must
 #     raise `walk of '<root>' failed at '<path>': errno N (ENAMETOOLONG)`
 #     with the path truncated to the 4095 bytes the error buffer holds,
@@ -247,29 +248,44 @@ def _repeat_x(n: Int) -> String:
     return s
 
 
-def test_walk_entry_lstat_enametoolong_raises() raises:
-    var root = _disk_root(String("nametoolong"))
-    # Grow `deep` with 200-byte components until it is just under PATH_MAX;
-    # every mkdir names an absolute path of fewer than 4096 bytes.
+def _walk_entry_lstat_enametoolong_under(pad: Int) raises:
+    """The ENAMETOOLONG case with the test root nested `pad` bytes deeper
+    (one extra directory component of `pad - 1` bytes plus its slash). The
+    pad stands in for a longer exec root: the sizing must reach PATH_MAX
+    whatever the root's length."""
+    var base = _disk_root(String("nametoolong"))
+    var root = base
+    if pad > 0:
+        root = base + "/" + _repeat_x(pad - 1)
+        _sh(String("mkdir -p '") + root + String("'"))
+    # Grow `deep` with 200-byte components into (3840, 4041]: each step adds
+    # 201 bytes, so the stop lands in that 201-byte window whatever the
+    # root's length, and every mkdir names an absolute path under 4096 bytes.
+    assert_true(
+        root.byte_length() <= 3840,
+        "test root too long: " + String(root.byte_length()),
+    )
     var comp = _repeat_x(200)
     var deep = root
-    while deep.byte_length() + 1 + 200 <= 4000:
+    while deep.byte_length() + 1 + 200 <= 4041:
         deep += "/" + comp
     assert_true(
-        deep.byte_length() > 3800,
-        "chain too short: " + String(deep.byte_length()),
+        deep.byte_length() > 3840 and deep.byte_length() <= 4041,
+        "chain outside (3840, 4041]: " + String(deep.byte_length()),
     )
     _sh(String("mkdir -p '") + deep + String("'"))
-    # `<deep>/<entry>` is over 4095 bytes; create it relative to `deep` in a
-    # child shell, which is the only way to name it.
-    var entry = _repeat_x(200)
+    # The entry is sized from `deep`'s actual length so `<deep>/<entry>` is
+    # 4097 bytes, past PATH_MAX (4096 with the NUL); with `deep` in
+    # (3840, 4041] the name is 55 to 255 bytes, within NAME_MAX. Create it
+    # relative to `deep` in a child shell, which is the only way to name it.
+    var entry = _repeat_x(4096 - deep.byte_length())
     var rel = String("cd '") + deep + String("' && ")
     _sh(rel + String("touch ") + entry)
     var msg = _err_walk(root)
     # Remove the entry the same relative way before asserting, so a failed
     # assertion cannot leave an over-PATH_MAX path behind.
     _sh(rel + String("rm ") + entry)
-    _sh(String("rm -rf '") + root + String("'"))
+    _sh(String("rm -rf '") + base + String("'"))
     # The error buffer holds 4095 bytes: the reported path is `<deep>/` plus
     # as much of the entry name as fits, immediately followed by "': errno".
     var shown = deep + "/" + _repeat_x(4095 - deep.byte_length() - 1)
@@ -278,10 +294,26 @@ def test_walk_entry_lstat_enametoolong_raises() raises:
     )
     assert_true(
         msg.find(want) >= 0,
-        "below-root lstat failure not raised: " + String(msg.byte_length())
+        "below-root lstat failure not raised (pad " + String(pad)
+        + ", deep " + String(deep.byte_length()) + "): "
+        + String(msg.byte_length())
         + " bytes, starts " + String(msg[byte=0:min(80, msg.byte_length())]),
     )
     assert_true(msg.find("(ENAMETOOLONG)") >= 0, "ENAMETOOLONG not named")
+
+
+def test_walk_entry_lstat_enametoolong_raises() raises:
+    _walk_entry_lstat_enametoolong_under(0)
+
+
+def test_walk_entry_lstat_enametoolong_any_root_length() raises:
+    """The same case under roots 50, 100 and 150 bytes longer. The four pads
+    (0 included) are at most 51 bytes apart modulo the 201-byte step of the
+    chain, so a sizing that leaves `<deep>/<entry>` short of PATH_MAX for any
+    run of root lengths wider than 51 bytes fails here on every farm. The
+    old fixed 200-byte entry fell short for a run 95 bytes wide."""
+    for i in range(1, 4):
+        _walk_entry_lstat_enametoolong_under(50 * i)
 
 
 # -----------------------------------------------------------------------------
@@ -361,9 +393,19 @@ def main() raises:
         failures += 1
         print("FAIL test_walk_entry_lstat_enametoolong_raises:", String(e))
 
+    try:
+        test_walk_entry_lstat_enametoolong_any_root_length()
+        print("PASS test_walk_entry_lstat_enametoolong_any_root_length")
+    except e:
+        failures += 1
+        print(
+            "FAIL test_walk_entry_lstat_enametoolong_any_root_length:",
+            String(e),
+        )
+
     if failures > 0:
         raise Error(
             "[test_local_fs_errno_not_absent] " + String(failures)
             + " test(s) FAILED"
         )
-    print("[test_local_fs_errno_not_absent] all 6 tests PASS")
+    print("[test_local_fs_errno_not_absent] all 7 tests PASS")

@@ -1,0 +1,11 @@
+{
+ "name": "validate_opens_no_code",
+ "defect": "validate opens the code (design 4.3 item 3: it opens no code object and loads no library): the code root holds no code object, and validate must still answer OK",
+ "run": "validate",
+ "entry": "double",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "code_root_empty": true,
+ "expect": {"status": "OK"}
+}

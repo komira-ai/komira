@@ -12,7 +12,7 @@
 #      test takes, a `# cov: unreachable` line, all under
 #      tools/build/tests/functional/coverage/; and covgen's, whose generated
 #      source is not measured, and covgenmany's, whose twelve long-named
-#      generated sources are not either: cov_run.sh once named them all in
+#      generated sources are not either: cov_run once named them all in
 #      one kcov argument of 2048 bytes or more, which kcov fails on);
 #      :covgentest_report and :covgentest_result (a generated test has its
 #      coverage run, and its gate counts what it runs and sets it aside);
@@ -23,7 +23,7 @@
 #      LD_PRELOAD and the CPUs the test may run on are the gate's under kcov;
 #      a data file where the binary names a standard library source stays
 #      out of the report); branchlib[coverage][tests][test_gate_env] (no
-#      LC_ALL under kcov: cov_run.sh's own is not exported to the test);
+#      LC_ALL under kcov: cov_run's own is not exported to the test);
 #      tests//negative/coverage:tracer green, its kcov run red (kcov traced
 #      the test and passed its exit status on); orphan[coverage] green and
 #      exits[coverage] red, exit 1 and exit 137 (the status is the test's,
@@ -39,14 +39,14 @@
 #      line tables do not name them are refused as unmapped, not dropped);
 #      lostdir[coverage] red (a binary naming the sources by another
 #      directory than the run stages is refused before kcov runs); clash and
-#      clash_buckout are refused at analysis (data where a run stages
+#      clash_import are refused at analysis (data where a run stages
 #      sources: //tools/build/selftest:analysis_refusals_coverage);
 #      refused[coverage] red (kcov refused by the executor is said so);
 #      covreadme[coverage][tests][readme] and covreadme_none's (a README's
 #      examples, and a README with none, run under kcov like a test) and
 #      covmt_cov_gate[tests] (the mojo_test targets covmt names in
 #      coverage_tests, one in another package, run against its sources);
-#      longarg[coverage] red (a cov_run.sh copy whose limit on a kcov
+#      longarg[coverage] red (a cov_run copy whose limit on a kcov
 #      argument is 64 bytes refuses the run before kcov starts, naming it);
 #      shared libraries: covso's driver report and census gate, covso_skip
 #      red with kcov skipping the loaded library, the examples' [coverage]
@@ -73,11 +73,11 @@ elif grep -E "GATED TEST FAILED|package is not produced" "$LOG/coverage_run_pare
 else
     pass coverage_run_banner
 fi
-expect_red coverage_run_lostdir "this run stages them at buck-out/v2/art/tests/negative/coverage/__lostdir__/" 'tests//negative/coverage:lostdir[coverage][tests][test_lost]'
+expect_red coverage_run_lostdir "but names none of its sources by lostlibx/, where this run stages them" 'tests//negative/coverage:lostdir[coverage][tests][test_lost]'
 expect_red coverage_run_refused "kcov could not trace the test" 'tests//negative/coverage:refused[coverage][tests][test_one]'
 expect_red coverage_run_longarg "is longer than kcov takes (64)" 'tests//negative/coverage:longarg[coverage][tests][test_lost]'
 expect_red coverage_run_lingers "The test left processes running or did not finish within 20 s under kcov" 'tests//negative/coverage:linger[coverage][tests][test_lingers]'
-# The limit's kill reached the whole group: cov_run.sh says when a process
+# The limit's kill reached the whole group: cov_run says when a process
 # of it survived (a kill of kcov alone, its pid without the '-').
 # A missing log is a failure, not a pass (grep's exit 2 is not "absent").
 if [ ! -f "$LOG/coverage_run_lingers.log" ]; then

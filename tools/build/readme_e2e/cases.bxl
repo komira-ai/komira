@@ -1,0 +1,80 @@
+# The cases of the README e2e's completeness guard (guard.bzl).
+#
+#   ./buck2 bxl komira//tools/build/readme_e2e/cases.bxl:run
+#
+# Fails, listing every case that answered otherwise. The rule that applies the
+# guard (`readme_e2e_complete`, defs.bzl) is built by the pull request check over the
+# real files; these are the shapes it must tell apart.
+
+load(":guard.bzl", "EXCLUDED_PATTERN", "findings", "moved_packages", "mopm_findings")
+
+_PATHS = [
+    "src/a/mopm.toml",
+    "src/a/BUCK",
+    "src/b/mopm.toml",
+    # Not a package directly under src/: a test package, a nested directory, the root.
+    "src/tests/e2e/c/mopm.toml",
+    "src/d/sub/mopm.toml",
+    "release/mopm.toml",
+    "mopm.toml",
+    # Not a manifest.
+    "src/e/mopm.toml.orig",
+    "src/f/mopm.lock",
+]
+
+def _cases():
+    out = []
+
+    def expect(what, got, want):
+        if got != want:
+            out.append("{}: got {}, want {}".format(what, repr(got), repr(want)))
+
+    def expect_in(what, text, *needles):
+        for n in needles:
+            if n not in text:
+                out.append("{}: `{}` is not in {}".format(what, n, repr(text)))
+
+    expect("moved packages are src/<name>/mopm.toml, sorted", moved_packages(_PATHS), ["a", "b"])
+    expect("no path, no package", moved_packages([]), [])
+    expect("every moved package covered", findings(_PATHS, ["a", "b"]), "")
+    expect("order of covered does not matter", findings(_PATHS, ["b", "a"]), "")
+    expect("nothing moved, nothing covered", findings([], []), "")
+
+    missing = findings(_PATHS, ["a"])
+    expect_in("a moved package with no target is named", missing, "1 moved package(s) have no README e2e target: b", "PACKAGES in release/readme_e2e/packages.bzl")
+    expect("only the missing one is named", "a," in missing or ": a" in missing, False)
+
+    all_missing = findings(_PATHS, [])
+    expect_in("every missing package is named", all_missing, "2 moved package(s) have no README e2e target: a, b")
+
+    stale = findings(_PATHS, ["a", "b", "z"])
+    expect_in("a target for a package with no mopm.toml is named", stale, "1 README e2e target(s) are for a package with no src/<name>/mopm.toml: z", "Delete each from PACKAGES")
+    expect("a stale target is not a missing one", "have no README e2e target" in stale, False)
+
+    both = findings(_PATHS, ["b", "z"])
+    expect_in("missing and stale together", both, "have no README e2e target: a", "no src/<name>/mopm.toml: z")
+
+    nested = findings(_PATHS, ["a", "b", "c", "d"])
+    expect_in("a test package or nested directory is not a moved package", nested, "2 README e2e target(s) are for a package with no src/<name>/mopm.toml: c, d")
+
+    # The row of EXCLUDED and the pinned mopm move together.
+    row = [EXCLUDED_PATTERN, "komira//third_party/python/..."]
+    other = ["komira//third_party/python/..."]
+    old = "toolchains//:mopm_0_0_25"
+    expect("no mopm has --overlay yet: the row stays", mopm_findings(old, None, row), "")
+    expect("older than the first with --overlay: the row stays", mopm_findings(old, "toolchains//:mopm_0_0_33", row), "")
+    expect("the first with --overlay is pinned and the row is gone", mopm_findings("toolchains//:mopm_0_0_33", "toolchains//:mopm_0_0_33", other), "")
+    expect("a later mopm than the first with --overlay, row gone", mopm_findings("toolchains//:mopm_0_1_0", "toolchains//:mopm_0_0_33", other), "")
+    expect("versions compare as numbers, not text", mopm_findings("toolchains//:mopm_0_0_100", "toolchains//:mopm_0_0_33", other), "")
+    expect_in("the pin has --overlay and the row remains", mopm_findings("toolchains//:mopm_0_0_33", "toolchains//:mopm_0_0_33", row), "has --overlay", "Delete that row")
+    expect_in("no --overlay and the row is missing", mopm_findings(old, None, other), "has no --overlay", "Restore the row")
+    expect_in("older than the first with --overlay and the row is missing", mopm_findings(old, "toolchains//:mopm_0_0_33", other), "has no --overlay", "Restore the row")
+    return out
+
+def _run(ctx):
+    failures = _cases()
+    if failures:
+        fail("{} case(s) failed:\n  ".format(len(failures)) + "\n  ".join(failures))
+    ctx.output.print("readme_e2e cases: all passed")
+
+run = bxl_main(impl = _run, cli_args = {})

@@ -13,7 +13,8 @@
 #           `len(subject)` instead of stepping the remaining bytes one at a
 #           time, because `$` has already pinned the match end there.
 #
-# WHY IT IS WORTH A DEDICATED FILE.  MEASURED on 20,000 REAL ClickBench
+# WHY IT IS WORTH A DEDICATED FILE.  HISTORICAL figures (a one-off measurement
+# of the rewrite; no test in this file asserts any of them).  MEASURED on 20,000 REAL ClickBench
 # `referer` values (non-empty, mean 81.89 B), `find` with captures, arms as
 # SEPARATE BINARIES, 3 interleaved repetitions of min-of-5:
 #
@@ -45,18 +46,20 @@
 # (patterns drawn from a `.*$`-family grammar x random subjects containing
 # `\n`, `/` and `.`) reported ZERO divergences.
 #
-# ⚠ THE PERF LEG IS A FLATNESS TEST, NOT AN ABSOLUTE ONE.  It compares a long
-# tail against a short one IN THE SAME PROCESS with the arms interleaved, so no
-# cross-machine constant is baked in and no allocator state from one arm can be
-# read as the other's cost.  Its bar has a stated margin and the measurement is
-# retried (see `_FLAT_BAR`); the verdict itself is unit-tested without a clock.
+# ⚠ THE COST LEG COUNTS, IT DOES NOT TIME.  The VM carries witness counters
+# (threads stepped, byte positions visited; (pc, position) states visited on
+# BitState), and the fused tail is proven by those counts being IDENTICAL for a
+# 4-byte and a 1,024-byte tail, with an unfused control whose counts do grow
+# with the tail.  The counts are the same on every machine.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
-from std.time import perf_counter_ns
 
 from komira_column_kernels.regexp_nfa import (
     RegexProgram,
+    RegexScratch,
+    REGEX_ENGINE_PIKE,
+    REGEX_ENGINE_BITSTATE,
     OP_TAIL_MATCH,
     OP_SPLIT,
     OP_ANY,
@@ -445,125 +448,102 @@ def test_the_group_key_is_a_real_subslice_of_its_own_input() raises:
 
 
 # ---------------------------------------------------------------------------
-# 4. PERF.  A FLATNESS test: the fused tail must make the cost stop depending
-#    on the tail length.  Arms interleaved ABAB in one process, min of 3.
+# 4. COST.  A FLATNESS test by counting: the fused tail must make the work stop
+#    depending on the tail length.  The `\n` scan (`_tail_has_newline`) is not a
+#    VM step and is the only thing that still touches the tail: its COST is
+#    deliberately outside this proof (it is one forward pass over the tail, a
+#    single bounded loop); its RESULT is pinned by
+#    `test_a_newline_anywhere_in_the_tail_kills_the_match_at_every_offset`.
 # ---------------------------------------------------------------------------
 
 
-def _bench_ns(prog: RegexProgram, subjects: List[List[UInt8]], reps: Int) -> Int:
-    var best = Int(1) << 62
-    for _ in range(reps):
-        var t0 = perf_counter_ns()
-        var sink = 0
-        for i in range(len(subjects)):
-            var m = prog.find(subjects[i])
-            if m.matched:
-                sink += m.end
-        var t1 = perf_counter_ns()
-        if sink == -1:
-            print("")          # keep the loop from being optimised away
-        if t1 - t0 < best:
-            best = t1 - t0
-    return best
+struct _Work(Copyable, Movable):
+    var steps: Int        # Pike: threads stepped.  BitState: states visited.
+    var positions: Int    # Pike: byte positions visited.  BitState: unused.
+    var end: Int          # the match end the engine reported (-1: no match)
+
+    def __init__(out self, steps: Int, positions: Int, end: Int):
+        self.steps = steps
+        self.positions = positions
+        self.end = end
 
 
-def _subjects(n: Int, tail: Int) -> List[List[UInt8]]:
-    # ⚠ Build the tail ONCE.  A per-byte `String +=` inside the row loop is
-    # quadratic and dominated the whole test at 1 KiB tails.
-    var filler = List[UInt8](capacity=tail)
+def _fixed_subject(tail: Int) -> List[UInt8]:
+    """One fixed head, then `tail` letters: the head is identical for every
+    tail length, so any difference in work is the tail's."""
+    var head = String("http://www.example.com/")
+    var hb = head.as_bytes()
+    var b = List[UInt8](capacity=len(hb) + tail)
+    for j in range(len(hb)):
+        b.append(hb[j])
     for k in range(tail):
-        filler.append(UInt8(97 + k % 26))
-    var out = List[List[UInt8]]()
-    for i in range(n):
-        var head = String("http://www.h", i % 97, ".example.com/")
-        var hb = head.as_bytes()
-        var b = List[UInt8](capacity=len(hb) + tail)
-        for j in range(len(hb)):
-            b.append(hb[j])
-        for j in range(tail):
-            b.append(filler[j])
-        out.append(b^)
-    return out^
+        b.append(UInt8(97 + k % 26))
+    return b^
 
 
-# The flatness bar, and why it is 6.0.
-#
-# MEASURED: fused ~1.2x, unfused ~15x (the long tail walked byte by byte).  The
-# bar used to be 3.0, which sits only 2.5x above the fused figure: on a loaded
-# farm worker one arm's minimum can be inflated by a neighbour and a healthy run
-# read 3.018, failing on scheduler noise alone.  6.0 keeps a 5x margin above the
-# fused figure and still sits 2.5x BELOW the unfused cost, so a real regression
-# (the tail walked again) cannot hide under it.  The measurement is also retried:
-# load noise is independent between attempts, a regression is not, so the test
-# passes if ANY of `_FLAT_ATTEMPTS` attempts is flat and fails only when every
-# one of them is not.
-comptime _FLAT_BAR: Float64 = 6.0
-comptime _FLAT_ATTEMPTS: Int = 3
+def _work(pattern: String, flags: String, subject: List[UInt8], engine: UInt8) raises -> _Work:
+    var prog = RegexProgram.compile(pattern, flags)
+    var sc = RegexScratch()
+    var m = prog.find_from_with_engine(Span(subject), 0, sc, engine)
+    var end = m.end if m.matched else -1
+    if engine == REGEX_ENGINE_BITSTATE:
+        return _Work(sc.bits.visits, 0, end)
+    return _Work(sc.vm_steps(), sc.vm_positions(), end)
 
 
-def _flat_enough(long_ns: Int, short_ns: Int, bar: Float64) -> Bool:
-    """The verdict, kept free of any clock so it can be tested exactly."""
-    if long_ns <= 0 or short_ns <= 0:
-        return False
-    return Float64(long_ns) / Float64(short_ns) < bar
+def _assert_work_is_flat_in_tail(engine: UInt8, name: String) raises:
+    # ⛔ THE RED FOR FIX C.  Fused, the `.*$` thread teleports to the end of the
+    # subject, so the VM does the same work for a 1,024-byte tail as for a
+    # 4-byte one.  Unfused, `.*` is a thread that steps once per tail byte.
+    var q = _q28()
+    assert_equal(_fused(q), 1, "the Q28 pattern must compile to a fused tail")
+    var short_ = _fixed_subject(4)
+    var mid = _fixed_subject(256)
+    var long_ = _fixed_subject(1024)
+    var ws = _work(q, "", short_, engine)
+    var wm = _work(q, "", mid, engine)
+    var wl = _work(q, "", long_, engine)
+    # Correctness first: the match runs to the end of each subject.
+    assert_equal(ws.end, len(short_), name + ": short tail match end")
+    assert_equal(wm.end, len(mid), name + ": mid tail match end")
+    assert_equal(wl.end, len(long_), name + ": long tail match end")
+    assert_true(ws.steps > 0, name + ": the step witness never moved")
+    # Flat: exactly the same count, whatever the tail length.
+    assert_equal(wl.steps, ws.steps, String(name, ": 1024B tail stepped ", wl.steps, " vs ", ws.steps, " for 4B"))
+    assert_equal(wm.steps, ws.steps, String(name, ": 256B tail stepped ", wm.steps, " vs ", ws.steps, " for 4B"))
+    assert_equal(wl.positions, ws.positions, name + ": positions visited depend on the tail length")
 
 
-def test_flatness_verdict_tolerates_noise_and_flags_the_unfused_walk() raises:
-    # The value that failed under farm load (3.018 against the old bar of 3.0)
-    # is flat; the measured fused figure and a mild 2x are flat.
-    assert_true(_flat_enough(3018, 1000, _FLAT_BAR), "3.018x must be flat")
-    assert_true(_flat_enough(1200, 1000, _FLAT_BAR), "the fused 1.2x must be flat")
-    assert_true(_flat_enough(5990, 1000, _FLAT_BAR), "just under the bar is flat")
-    # The bar itself, the measured unfused cost, and a worse one are not.
-    assert_false(_flat_enough(6000, 1000, _FLAT_BAR), "exactly the bar is not flat")
-    assert_false(_flat_enough(15000, 1000, _FLAT_BAR), "the unfused 15x is not flat")
-    assert_false(_flat_enough(49800, 750, _FLAT_BAR), "the per-row unfused cost is not flat")
-    # A timer that produced nothing is never a pass.
-    assert_false(_flat_enough(0, 1000, _FLAT_BAR), "no long time is not a pass")
-    assert_false(_flat_enough(1000, 0, _FLAT_BAR), "no short time is not a pass")
+def test_pike_work_is_flat_in_tail_length() raises:
+    _assert_work_is_flat_in_tail(REGEX_ENGINE_PIKE, "pike")
 
 
-def test_cost_is_flat_in_tail_length() raises:
-    # ⛔ WHY A RATIO AND NOT AN ABSOLUTE ns FIGURE.  An absolute bar bakes in
-    # one machine's clock.  This compares a 1,024-byte tail against a 4-byte
-    # one in the SAME process, interleaved, so the only thing it can measure is
-    # whether the tail is still being walked.
-    #
-    # MEASURED, 20,000 real referers: without the early-out the marginal cost
-    # is 48.85 ns per subject byte, with it 0.74 (66x).  Over a 1,020-byte
-    # tail difference that is ~49,800 ns/row vs ~750 -- so the unfused ratio
-    # here is ~15x and the fused ratio ~1.2x.  The bar is `_FLAT_BAR` (see
-    # above): far above anything the `\n` scan can produce, far below the
-    # unfused cost, and robust to a loaded worker.
-    var prog = RegexProgram.compile(_q28(), "")
-    var short_ = _subjects(400, 4)
-    var long_ = _subjects(400, 1024)
-    var last_ratio = Float64(0)
-    var last_l = 0
-    var last_s = 0
-    for _attempt in range(_FLAT_ATTEMPTS):
-        # ABAB: allocator state left by one arm must not be read as the other's.
-        var s1 = _bench_ns(prog, short_, 5)
-        var l1 = _bench_ns(prog, long_, 5)
-        var s2 = _bench_ns(prog, short_, 5)
-        var l2 = _bench_ns(prog, long_, 5)
-        var s = s1 if s1 < s2 else s2
-        var l = l1 if l1 < l2 else l2
-        assert_true(s > 0 and l > 0, "the timing loop produced no time")
-        if _flat_enough(l, s, _FLAT_BAR):
-            return
-        last_l = l
-        last_s = s
-        last_ratio = Float64(l) / Float64(s)
+def test_bitstate_work_is_flat_in_tail_length() raises:
+    _assert_work_is_flat_in_tail(REGEX_ENGINE_BITSTATE, "bitstate")
+
+
+def _assert_unfused_control_grows(engine: UInt8, name: String) raises:
+    # The counter's own falsifier.  Under `(?m)` the `$` is a line end, which
+    # does NOT pin the end of the subject, so the tail is NOT fused (the gate
+    # `test_fix_c_refuses_a_multiline_dollar` pins) and `.*` must walk it.  If
+    # the counters did not grow here, the flatness test above would prove
+    # nothing.
+    var q = _q28()
+    assert_equal(_fused(q, "m"), 0, "the multiline control must not be fused")
+    var ws = _work(q, "m", _fixed_subject(4), engine)
+    var wl = _work(q, "m", _fixed_subject(1024), engine)
     assert_true(
-        False,
-        String(
-            "the trailing `.*$` is still being walked byte by byte: 1024B-tail=",
-            last_l, "ns 4B-tail=", last_s, "ns ratio=", last_ratio,
-            " in every one of ", _FLAT_ATTEMPTS, " attempts (bar ", _FLAT_BAR,
-            "; measured ~15x unfused, ~1.2x fused)",
-        ),
+        wl.steps - ws.steps >= 1020,
+        String(name, ": the unfused walk should cost >= 1020 more steps on a 1020-byte longer tail, got ", wl.steps - ws.steps),
     )
+
+
+def test_pike_unfused_control_walks_the_tail() raises:
+    _assert_unfused_control_grows(REGEX_ENGINE_PIKE, "pike")
+
+
+def test_bitstate_unfused_control_walks_the_tail() raises:
+    _assert_unfused_control_grows(REGEX_ENGINE_BITSTATE, "bitstate")
 
 
 def main() raises:

@@ -97,15 +97,15 @@ fn failureText(a: std.mem.Allocator, t: []const u8, commit: []const u8, flaky_n:
 }
 
 fn writeReport(a: std.mem.Allocator, path: []const u8, cwd: []const u8, commit: []const u8, targets: []const []const u8, failing: []const []const u8, flaky_n: ?u64) !bool {
-    var buf = std.ArrayList(u8).init(a);
-    var w = std.json.writeStream(buf.writer(), .{ .whitespace = .indent_2 });
+    var buf = std.Io.Writer.Allocating.init(a);
+    var w: std.json.Stringify = .{ .writer = &buf.writer, .options = .{ .whitespace = .indent_2 } };
     var any = false;
     try w.beginObject();
     try w.objectField("trace_id");
     try w.write("00000000-0000-0000-0000-000000000000");
     try w.objectField("results");
     try w.beginObject();
-    var strings = std.ArrayList([2][]const u8).init(a);
+    var strings = std.ArrayList([2][]const u8).empty;
     for (targets) |t| {
         var failed = false;
         for (failing) |f| {
@@ -126,8 +126,8 @@ fn writeReport(a: std.mem.Allocator, path: []const u8, cwd: []const u8, commit: 
         if (failed) {
             const msg_id = try std.fmt.allocPrint(a, "{d}", .{strings.items.len * 2 + 1});
             const err_id = try std.fmt.allocPrint(a, "{d}", .{strings.items.len * 2 + 2});
-            try strings.append(.{ msg_id, try std.fmt.allocPrint(a, "Action failed: root{s} (genrule)", .{stripCell(t)}) });
-            try strings.append(.{ err_id, try failureText(a, t, commit, flaky_n) });
+            try strings.append(a, .{ msg_id, try std.fmt.allocPrint(a, "Action failed: root{s} (genrule)", .{stripCell(t)}) });
+            try strings.append(a, .{ err_id, try failureText(a, t, commit, flaky_n) });
             try w.beginObject();
             try w.objectField("message_content");
             try w.write(msg_id);
@@ -168,7 +168,7 @@ fn writeReport(a: std.mem.Allocator, path: []const u8, cwd: []const u8, commit: 
     }
     try w.endObject();
     try w.endObject();
-    try std.fs.cwd().writeFile(path, buf.items);
+    try std.fs.cwd().writeFile(.{ .sub_path = path, .data = buf.written() });
     return any;
 }
 
@@ -180,14 +180,14 @@ pub fn main() !void {
     const cmd = argv[1];
     const cwd = try std.fs.cwd().realpathAlloc(a, ".");
     const p = paths(a, cwd) catch |e| {
-        std.io.getStdErr().writer().print("fake_buck2: {s} is not a probe worktree: {s}\n", .{ cwd, @errorName(e) }) catch {};
+        std.fs.File.stderr().deprecatedWriter().print("fake_buck2: {s} is not a probe worktree: {s}\n", .{ cwd, @errorName(e) }) catch {};
         std.process.exit(64);
     };
 
     // The rerun flag and the targets of a build (a bxl's script is not one).
     const is_bxl = std.mem.eql(u8, cmd, "bxl");
     var rerun: []const u8 = "-";
-    var targets = std.ArrayList([]const u8).init(a);
+    var targets = std.ArrayList([]const u8).empty;
     var script: []const u8 = "";
     {
         var k: usize = 2;
@@ -199,7 +199,7 @@ pub fn main() !void {
                 rerun = argv[k + 1]["komira.rerun=".len..];
                 k += 1;
             } else if (std.mem.indexOf(u8, x, "//") != null) {
-                if (is_bxl) script = x else try targets.append(x);
+                if (is_bxl) script = x else try targets.append(a, x);
             }
         }
     }
@@ -209,7 +209,7 @@ pub fn main() !void {
 
     if (std.mem.eql(u8, cmd, "kill")) return;
     if (std.mem.eql(u8, cmd, "root")) {
-        try std.io.getStdOut().writer().print("{s}\n", .{cwd});
+        try std.fs.File.stdout().deprecatedWriter().print("{s}\n", .{cwd});
         return;
     }
     if (is_bxl) return check(a, script, rerun);
@@ -247,30 +247,30 @@ pub fn main() !void {
             break;
         }
         if (infra) {
-            std.io.getStdErr().writer().writeAll("Remote execution error: planted infrastructure failure\n") catch {};
+            std.fs.File.stderr().deprecatedWriter().writeAll("Remote execution error: planted infrastructure failure\n") catch {};
             std.process.exit(2);
         }
     }
-    var failing = std.ArrayList([]const u8).init(a);
+    var failing = std.ArrayList([]const u8).empty;
     var flaky_n: ?u64 = null;
     var words = std.mem.tokenizeScalar(u8, state, ' ');
     const kind = words.next() orelse std.process.exit(64);
     if (std.mem.eql(u8, kind, "fail")) {
-        while (words.next()) |t| try failing.append(t);
+        while (words.next()) |t| try failing.append(a, t);
     } else if (std.mem.eql(u8, kind, "flaky")) {
         const period = std.fmt.parseInt(u64, words.next() orelse std.process.exit(64), 10) catch std.process.exit(64);
         const phase = std.fmt.parseInt(u64, words.next() orelse std.process.exit(64), 10) catch std.process.exit(64);
         if (period == 0) std.process.exit(64);
         while (words.next()) |t| {
             if (sameTarget(t, rerun_label) and rerun_n % period == phase) {
-                try failing.append(t);
+                try failing.append(a, t);
                 flaky_n = rerun_n;
             }
         }
     } else if (!std.mem.eql(u8, kind, "pass")) std.process.exit(64);
     const any = try writeReport(a, report, cwd, p.commit, targets.items, failing.items, flaky_n);
     if (any) {
-        std.io.getStdErr().writer().writeAll("BUILD FAILED\n") catch {};
+        std.fs.File.stderr().deprecatedWriter().writeAll("BUILD FAILED\n") catch {};
         std.process.exit(3);
     }
 }
@@ -278,7 +278,7 @@ pub fn main() !void {
 /// check.bxl's stand-in: exit 3 (buck2's user error) for a label without a
 /// cell or one a `no-rerun` line lists, 2 with a `check-infra` line, else 0.
 fn check(a: std.mem.Allocator, script: []const u8, rerun: []const u8) !void {
-    const stderr = std.io.getStdErr().writer();
+    const stderr = std.fs.File.stderr().deprecatedWriter();
     if (!std.mem.endsWith(u8, script, "tools/build/rerun/check.bxl:check")) std.process.exit(64);
     const hash = std.mem.lastIndexOfScalar(u8, rerun, '#') orelse std.process.exit(64);
     const label = rerun[0..hash];
@@ -305,5 +305,5 @@ fn check(a: std.mem.Allocator, script: []const u8, rerun: []const u8) !void {
             }
         }
     }
-    try std.io.getStdOut().writer().print("rerun: {s} runs its test actions again\n", .{label});
+    try std.fs.File.stdout().deprecatedWriter().print("rerun: {s} runs its test actions again\n", .{label});
 }
