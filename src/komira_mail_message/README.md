@@ -120,3 +120,30 @@ assert_equal(msg, "komira_mail_message.ForbiddenByte: MessageBuilder.set_subject
   `Content-Disposition`; the rest are dropped.
 - No SMTPUTF8 (RFC 6531): header values are written in ASCII, non-ASCII text
   as encoded words.
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_mail_message`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_mail_message/`, its tests are `tests/`. It depends on four packages, sibling
+directories (`[dependencies]` of `mopm.toml`): `komira_buffer`, `komira_datetime`, `komira_encoding` and
+`komira_mail_address`, each as `{ path = "../<name>", version = "0.1" }`. The `.conda` of this package records
+`mojo-komira_buffer >=0.1,<0.2`, `mojo-komira_datetime >=0.1,<0.2`, `mojo-komira_encoding >=0.1,<0.2` and
+`mojo-komira_mail_address >=0.1,<0.2` as dependencies and holds none of their files: installing `komira_mail_message`
+installs them with it. `komira_buffer` reaches `komira_libc`, which links a C shim of its own, and a dependent's link
+takes it from the closure; this package owns no C. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependencies and where the library and its tests are |
+| `mopm.lock` | the toolchain pins and the path dependencies, direct and transitive, as `mopm lock` writes them (no registry is reached: every dependency is a sibling) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifests of the siblings; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file, built from the `:lib` of the siblings, and exists only once every test of `tests/` has
+passed. After any change to a source, a test, a manifest of this package or of a sibling, run `buildrules mojo sync`
+with all five packages staged, commit what it writes, and build `komira//src/komira_mail_message:lib` on the farm.
+
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
+(`mojo-komira_mail_message-0.1.0-mojo1.0.0_0.conda`), packed with the manifests of the siblings of its closure beside
+its own (`members`), which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so
+it is a step of a CI job that takes that file, not a build action.

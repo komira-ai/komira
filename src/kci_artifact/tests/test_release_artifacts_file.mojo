@@ -170,6 +170,8 @@ def test_the_declared_names_in_release_order() raises:
     want.append(String("komira_gcp_wif"))
     want.append(String("kci_cloud_gcp"))
     want.append(String("komira_kafka_broker"))
+    want.append(String("komira_bench_duckdb"))
+    want.append(String("komira_bench_report"))
     want.append(String("komira_all"))
     assert_equal(len(d.artifacts), len(want))
     for i in range(len(want)):
@@ -444,6 +446,21 @@ def test_the_stamped_release_set_check_builds_this_files_metapackage() raises:
         assert_equal(len(want), 1, String("--") + flag)
         assert_equal(len(got), 1, String("release_set.txt ") + flag)
         assert_equal(got[0], want[0], String("release_set.txt ") + flag)
+
+
+def test_a_release_declares_one_of_the_two_komira_so_packages() raises:
+    """`komira_so_conda` and `komira_so_libkomira_conda` are one package name,
+    version and build with different contents (the second adds
+    lib/libkomira.so). Two artifacts naming both would hand a channel two
+    different files for one name, so the file may declare at most one."""
+    var d = read_artifacts(String(_FILE))
+    var held = 0
+    for i in range(len(d.artifacts)):
+        for k in range(len(d.artifacts[i].targets)):
+            var t = d.artifacts[i].targets[k].copy()
+            if t.endswith(String(":komira_so_conda")) or t.endswith(String(":komira_so_libkomira_conda")):
+                held += 1
+    assert_true(held <= 1, "release/artifacts.textproto declares both komira_so packages")
 
 
 def main() raises:

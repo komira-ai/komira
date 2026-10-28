@@ -123,7 +123,7 @@ installing `komira_zlib` installs libz. The files that are not sources:
 | file | what |
 |---|---|
 | `mopm.toml` | the mopm manifest: name, version, the Mojo version, the libz dependency, where the library and its tests are |
-| `mopm.lock` | what `mopm lock` writes (with no registry reachable); the package has no Mojo dependencies, so it pins the toolchain only |
+| `mopm.lock` | what `mopm lock` writes (with no registry reachable); the package has no Mojo dependencies, so it pins the toolchain and, under `system_libs`, the conda package of the library it opens at run time (`libzlib`, for each platform; mopm 0.0.83 or later writes it, and a lock without it fails `lock_graphs.bxl:check`) |
 | `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
 | `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above; `buildrules mojo check` fails when they are stale |
 

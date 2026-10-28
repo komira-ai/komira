@@ -77,9 +77,10 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
-# The cases of the beta and prod jobs of release.yml
-# (.github/workflows/release_workflow_test.zig says what each catches): its gate,
-# its OIDC permission, no secret, and its publish command. A build action.
+# The cases of the mopm jobs of release.yml: the continuous prod publish (each prod job's
+# gate, needs, environment and permissions, the commands), no beta job, no schedule, the
+# release-main concurrency group, no secret and the version of every run
+# (.github/workflows/release_workflow_test.zig says what each catches). A build action.
 zig_test(
     name = "release_workflow_cases",
     exec_compatible_with = LINUX_X86_64,
@@ -93,6 +94,28 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
+# The cases of the macOS build of the release (.github/workflows/release_macos_test.zig says
+# what each catches): the workflow release-macos.yml builds the macOS set on the farm, in a
+# concurrency group of its own, and release.yml holds no macOS job; the build
+# holds up nothing, no workflow that runs on a pull request names a macOS platform, the check
+# set holds no macOS build, and the set's definition is one list. A build action.
+zig_test(
+    name = "release_macos_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = ".github/workflows/release_macos_test.zig",
+    data = dict(
+        {
+            "packages.bzl": "//release/readme_e2e:packages.bzl",
+            "darwin_libs.bzl": "//release:darwin_libs.bzl",
+            "release.BUCK": "//release:release_buck",
+            "ci_targets": "//ci:target_shards",
+        },
+        **{"workflows/" + w.removeprefix(".github/workflows/"): w for w in WORKFLOWS}
+    ),
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
 # The cases of the buck2-farm action (.github/actions/buck2-farm/action_test.zig
 # says what each catches): action.yml's shape, and its two run lines run
 # end to end over recorded buck2 output with the real //tools/build/ci:assert_remote.
@@ -102,6 +125,7 @@ zig_test(
     src = ".github/actions/buck2-farm/action_test.zig",
     data = {
         "action.yml": ".github/actions/buck2-farm/action.yml",
+        "pr.yml": ".github/workflows/pr.yml",
         "fixtures": "//tools/build/ci:assert_remote_fixtures",
     },
     exec_tools = {

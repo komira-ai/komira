@@ -6,7 +6,15 @@
 //!             [--mem-cap-mib N] [--deadline-s L --runner-timeout-s T]
 //!             [--hang-limit-s N]
 //!             [--limit-s N --limit-report coverage]
-//!             [--env NAME=VALUE]... [--arg VALUE]...
+//!             [--env NAME=VALUE | --lib-dir DIR]... [--arg VALUE]...
+//!
+//! `--lib-dir` names a directory of pinned shared libraries the test opens by their
+//! bare names (tools/build/mojo/system_libs.bzl). On Linux the directories follow
+//! `--runtime-lib` on LD_LIBRARY_PATH, in the order given; on macOS they come first
+//! in DYLD_FALLBACK_LIBRARY_PATH, before the inherited value (or dyld's own
+//! `/usr/local/lib:/usr/lib` when there is none), so a pinned file is found and an
+//! operating-system library is not shadowed. With none, the environment is what it
+//! always was.
 //!
 //! On exit 0 of the test: `PASS <label>\n` to the marker, nothing printed,
 //! exit 0. Otherwise the banner (`GATED TEST FAILED: <label> (exit <rc>)`,
@@ -43,6 +51,7 @@ pub const Args = struct {
     limit_s: ?u64 = null,
     limit_report: ?[]const u8 = null,
     env: std.ArrayList([]const u8) = undefined,
+    lib_dirs: std.ArrayList([]const u8) = undefined,
     args: std.ArrayList([]const u8) = undefined,
 };
 
@@ -54,6 +63,7 @@ fn usage(comptime fmt: []const u8, a: anytype) u8 {
 /// Parses argv after `mojo`; an exit status on a refusal.
 pub fn parse(alloc: std.mem.Allocator, argv: []const []const u8, a: *Args) ?u8 {
     a.env = std.ArrayList([]const u8).empty;
+    a.lib_dirs = std.ArrayList([]const u8).empty;
     a.args = std.ArrayList([]const u8).empty;
     var i: usize = 0;
     var have = [_]bool{false} ** 11;
@@ -73,6 +83,14 @@ pub fn parse(alloc: std.mem.Allocator, argv: []const []const u8, a: *Args) ?u8 {
             a.env.append(alloc, kv) catch return 2;
             continue;
         }
+        if (std.mem.eql(u8, flag, "--lib-dir")) {
+            if (i + 1 >= argv.len) return usage("--lib-dir needs a directory", .{});
+            const d = argv[i + 1];
+            if (a.args.items.len > 0) return usage("--lib-dir {s} after an --arg", .{d});
+            if (d.len == 0 or std.mem.indexOfScalar(u8, d, ':') != null) return usage("--lib-dir '{s}' is not one directory (empty, or it holds a ':')", .{d});
+            a.lib_dirs.append(alloc, d) catch return 2;
+            continue;
+        }
         if (std.mem.eql(u8, flag, "--arg")) {
             if (i + 1 >= argv.len) return usage("--arg needs a value", .{});
             a.args.append(alloc, argv[i + 1]) catch return 2;
@@ -81,7 +99,7 @@ pub fn parse(alloc: std.mem.Allocator, argv: []const []const u8, a: *Args) ?u8 {
         const k = for (names, 0..) |n, j| {
             if (std.mem.eql(u8, flag, n)) break j;
         } else return usage("unknown argument {s}", .{flag});
-        if (a.env.items.len > 0 or a.args.items.len > 0) return usage("{s} after an --env or --arg", .{flag});
+        if (a.env.items.len > 0 or a.lib_dirs.items.len > 0 or a.args.items.len > 0) return usage("{s} after an --env, --lib-dir or --arg", .{flag});
         if (have[k]) return usage("{s} given twice", .{flag});
         have[k] = true;
         if (i + 1 >= argv.len) return usage("{s} needs a value", .{flag});
@@ -150,14 +168,43 @@ fn envName(kv: []const u8) []const u8 {
     return kv[0..eq];
 }
 
+/// The value of `name` in `inherited`, if it is set and not empty (an empty one counts as unset, so no empty entry is appended to a path).
+pub fn inheritedValue(inherited: []const []const u8, name: []const u8) ?[]const u8 {
+    for (inherited) |kv| {
+        if (kv.len > name.len + 1 and kv[name.len] == '=' and std.mem.eql(u8, kv[0..name.len], name)) return kv[name.len + 1 ..];
+    }
+    return null;
+}
+
+/// `dirs` joined by ':' (each absolute), for a library path.
+fn joinDirs(alloc: std.mem.Allocator, dirs: []const []const u8) ![]const u8 {
+    var out = std.ArrayList(u8).empty;
+    for (dirs, 0..) |d, i| {
+        if (i > 0) try out.append(alloc, ':');
+        try out.appendSlice(alloc, d);
+    }
+    return out.items;
+}
+
 /// The test's environment (G7): the action's, with PATH, LD_LIBRARY_PATH
 /// (and on macOS DYLD_LIBRARY_PATH), TMPDIR, TEST_TMPDIR, HOME and PWD set
 /// by the runner, then each --env in order (a later one of a name wins).
-pub fn buildEnv(alloc: std.mem.Allocator, inherited: []const []const u8, run: []const u8, lib: []const u8, cwd: []const u8, extra: []const []const u8) ![]const []const u8 {
+/// `libs` are the directories of pinned system libraries (--lib-dir): after
+/// `lib` on LD_LIBRARY_PATH, and on macOS first in DYLD_FALLBACK_LIBRARY_PATH;
+/// none leaves both exactly as they were.
+pub fn buildEnv(alloc: std.mem.Allocator, inherited: []const []const u8, run: []const u8, lib: []const u8, libs: []const []const u8, cwd: []const u8, extra: []const []const u8) ![]const []const u8 {
     var fixed = std.ArrayList([]const u8).empty;
     try fixed.append(alloc, try std.fmt.allocPrint(alloc, "PATH={s}/bin", .{run}));
-    try fixed.append(alloc, try std.fmt.allocPrint(alloc, "LD_LIBRARY_PATH={s}", .{lib}));
+    if (libs.len > 0) {
+        try fixed.append(alloc, try std.fmt.allocPrint(alloc, "LD_LIBRARY_PATH={s}:{s}", .{ lib, try joinDirs(alloc, libs) }));
+    } else {
+        try fixed.append(alloc, try std.fmt.allocPrint(alloc, "LD_LIBRARY_PATH={s}", .{lib}));
+    }
     if (sys.is_darwin) try fixed.append(alloc, try std.fmt.allocPrint(alloc, "DYLD_LIBRARY_PATH={s}", .{lib}));
+    if (sys.is_darwin and libs.len > 0) {
+        const rest = inheritedValue(inherited, "DYLD_FALLBACK_LIBRARY_PATH") orelse "/usr/local/lib:/usr/lib";
+        try fixed.append(alloc, try std.fmt.allocPrint(alloc, "DYLD_FALLBACK_LIBRARY_PATH={s}:{s}", .{ try joinDirs(alloc, libs), rest }));
+    }
     try fixed.append(alloc, try std.fmt.allocPrint(alloc, "TMPDIR={s}/tmp", .{run}));
     try fixed.append(alloc, try std.fmt.allocPrint(alloc, "TEST_TMPDIR={s}/tmp", .{run}));
     try fixed.append(alloc, try std.fmt.allocPrint(alloc, "HOME={s}/home", .{run}));
@@ -228,7 +275,9 @@ fn runParsed(alloc: std.mem.Allocator, a: *Args) !u8 {
 
     const share = try std.fmt.allocPrint(alloc, "{s}/share", .{root});
     const cwd = if (isDir(share)) share else try std.fmt.allocPrint(alloc, "{s}/share", .{run});
-    const env = try buildEnv(alloc, try inheritedEnv(alloc), run, lib, cwd, a.env.items);
+    var libs = std.ArrayList([]const u8).empty;
+    for (a.lib_dirs.items) |d| try libs.append(alloc, try util.abs(alloc, here, d));
+    const env = try buildEnv(alloc, try inheritedEnv(alloc), run, lib, libs.items, cwd, a.env.items);
     const log = try std.fmt.allocPrint(alloc, "{s}/log", .{run});
     const log_fd = try util.createLog(log);
 

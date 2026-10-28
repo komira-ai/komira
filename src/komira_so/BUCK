@@ -1,4 +1,20 @@
+load("@komira//tools/build/mojo:abi_golden.bzl", "komira_abi_golden")
+load("@komira//tools/build/mojo:c_abi_check.bzl", "komira_c_abi_check")
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_shared_lib")
+
+# The shared libraries of the C code the library owns; libkomira links each as
+# NEEDED, and the C driver below stages the same ones beside it.
+NATIVE_OWNERS = [
+    "//src/komira_async:komira_async_native",
+    "//src/komira_async_api:komira_async_api_native",
+    "//src/komira_compression:komira_compression_native",
+    "//src/komira_fs:komira_fs_native",
+    "//src/komira_libc:komira_libc_native",
+    "//src/komira_metrics:komira_metrics_native",
+    "//src/komira_parquet_codec:komira_parquet_codec_native",
+    "//src/komira_scan_source:komira_scan_source_native",
+]
 
 # The C ABI of komira's one shared library, libkomira: the status codes, the
 # ABI version, the session behind a context handle, and the source and render
@@ -138,16 +154,47 @@ mojo_shared_lib(
         "tests/gate/gate_version.mojo",
     ],
     deps = [":komira_so"],
-    native_owners = [
-        "//src/komira_async:komira_async_native",
-        "//src/komira_async_api:komira_async_api_native",
-        "//src/komira_compression:komira_compression_native",
-        "//src/komira_fs:komira_fs_native",
-        "//src/komira_libc:komira_libc_native",
-        "//src/komira_metrics:komira_metrics_native",
-        "//src/komira_scan_source:komira_scan_source_native",
-    ],
+    native_owners = NATIVE_OWNERS,
+    visibility = ["komira//ci:", "komira//tools/build/package/libkomira:", "//python:"],
+)
+
+# The C header of libkomira, komira.h, made from abi/komira.tsv (the golden:
+# every export with its return and argument types and the version that added
+# it, and every status code and limit). It builds only while the golden is
+# exactly the `@export abi("C")` functions of _c_abi.mojo with the same types,
+# and the constants of status.mojo with the same values. Adding an export, or
+# changing a type or a constant, without the golden is a red build here.
+komira_abi_golden(
+    name = "komira_abi",
+    src = "_c_abi.mojo",
+    constants_src = "status.mojo",
+    golden = "abi/komira.tsv",
+    header_name = "komira.h",
     visibility = ["PUBLIC"],
+)
+
+staged_files(
+    name = "c_driver_files",
+    srcs = ["tests/c/abi_driver.c"],
+)
+
+# A C host of libkomira that includes komira.h and nothing else of ours.
+cxx_binary(
+    name = "abi_driver",
+    srcs = [":c_driver_files[tests/c/abi_driver.c]"],
+    headers = {"komira.h": ":komira_abi"},
+    header_namespace = "",
+)
+
+# Runs abi_driver against libkomira: it dlopens the library, binds each function
+# the header declares with the header's type, and checks the version, the
+# status codes and the input bound the header names, and the two-call error
+# round trip. A header that disagrees with the binary fails here.
+komira_c_abi_check(
+    name = "c_abi_check",
+    driver = ":abi_driver",
+    lib = ":libkomira",
+    native_owners = NATIVE_OWNERS,
 )
 
 # The Parquet fixture of the tests, also read by the Python binding's test

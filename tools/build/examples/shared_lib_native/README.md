@@ -21,7 +21,7 @@ owner's copy: opening `libkomira_libc_native.so.1` by SONAME finds the library
 the loader mapped for the NEEDED edge, and the library's own dynamic symbol
 table leaves `komira_openat_creat`, `komira_write_bytes` and `komira_lseek_end`
 undefined. The gate stages the owner, and every library it needs, in `lib/`
-beside the library, where the run path `$ORIGIN/lib` finds them.
+beside the library, where the run path (`$ORIGIN/lib:$ORIGIN`) finds them.
 [`tests//negative/shared_lib:owner_embedded`](../../tests/negative/shared_lib/BUCK)
 is the same library without `native_owners`: it fails the SONAME lookup.
 
@@ -31,7 +31,7 @@ is the same library without `native_owners`: it fails the SONAME lookup.
 |---|---|---|
 | size | 17600 bytes | 20920 bytes |
 | NEEDED | `libKGENCompilerRTShared.so`, `libkomira_libc_native.so.1`, `libpthread.so.0`, `libc.so.6` | the same without `libkomira_libc_native.so.1` |
-| RUNPATH | `$ORIGIN/lib` | `$ORIGIN/lib` |
+| RUNPATH | `$ORIGIN/lib:$ORIGIN` | `$ORIGIN/lib:$ORIGIN` |
 | undefined `komira_*` | 3 (the owner's) | 0 |
 | default-visibility defined symbols | 1 (`native_owner_write_probe`) | 1 |
 

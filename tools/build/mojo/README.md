@@ -20,7 +20,8 @@ where to read the environment the compiler sees) and
 | `mojo_binary(srcs, deps, main, optimization_level, expected_stdout, helpers)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries and its `helpers` (programs it runs, beside it: [helpers.bzl](helpers.bzl)). `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
 | `mojo_test(srcs, deps, main, optimization_level, data, env, args, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
 | `mojo_shared_lib(srcs, main, deps, out_name, exports, c_exports, unlisted_exports, exports_exact, gate_srcs, force_load, native_owners, optimization_level)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK), [`spike_native`](../examples/shared_lib_native/README.md) |
-| `komira_abi_golden(src, golden, header_name)` ([`abi_golden.bzl`](abi_golden.bzl)) | `<header_name>` (default `<name>.h`): the C header of a golden list of C-ABI symbols, built only if the `@export abi("C")` functions of `src` are exactly its rows, with the same types (see [The ABI golden and the C header](#the-abi-golden-and-the-c-header)). | [`abi_header`](../examples/abi_golden/BUCK) |
+| `komira_abi_golden(src, golden, header_name, constants_src)` ([`abi_golden.bzl`](abi_golden.bzl)) | `<header_name>` (default `<name>.h`): the C header of a golden list of C-ABI symbols and constants, built only if the `@export abi("C")` functions of `src` are exactly its rows, with the same types, and the constants match `constants_src` (see [The ABI golden and the C header](#the-abi-golden-and-the-c-header)). | [`abi_header`](../examples/abi_golden/BUCK) |
+| `komira_c_abi_check(driver, lib, native_owners)` ([`c_abi_check.bzl`](c_abi_check.bzl)) | `<name>.passed`: the marker of a C program (`driver`, a `cxx_binary` that includes the generated header) run against the `mojo_shared_lib` `lib` from a staged tree; it exists only if the program exited 0. | [`c_abi_check`](../../../src/komira_so/BUCK) |
 | `mojo_doc_json(lib, golden, symbols)` ([`doc.bzl`](doc.bzl)) | `<name>.json`: the `mojo doc` JSON of the `mojo_library` `lib`, optionally checked against a golden file and for named declarations (see [API JSON](doc.md)). | [`hellopkg_doc`](../examples/BUCK) |
 
 ## Libraries and the `test_srcs` gate
@@ -264,6 +265,16 @@ packages. A dependent of the label gets the closure on its `-I`, and `conda_pack
 `:conda` is `mojo_conda` with `dir` and `members` (the siblings' manifests, staged at their repository paths), so the
 `.conda` records `mojo-<dependency> >=0.1,<0.2` and holds none of the dependency's files; `mojo_conda_holds` over it
 (`sole = True`, `depends = [...]`) reads that back from the built file. `src/komira_resources` is the example.
+
+A package that opens a library by its bare name (`mode = "load"` in `[native-dependencies]`, `dlopen("libsnappy.so.1")`) has the file pinned in
+its unit graph (`system_libs`), and buildrules gives its own tests the pinned files on their library path. Its `:lib` also hands the
+directories of the pinned files on (`MojoSystemLibsInfo`), the adopted label turns them into `MojoInfo.system_libs`
+([`system_libs.bzl`](system_libs.bzl)), and a `mojo_library`, `mojo_test` or adopted package that depends on it carries them on, through `deps`
+and, for the welded tests only, `test_deps`. Every test run that loads the package is then given them: the welded tests, the README examples, the kcov and
+branch coverage runs, the mutation runs, a `mojo_test` and a `mojo_shared_lib`'s drivers get `--lib-dir <directory>` arguments of the gate (`tools/build/run`), which appends them to
+`LD_LIBRARY_PATH` after the compiler's lib on Linux and puts them first in `DYLD_FALLBACK_LIBRARY_PATH` on macOS. The directories are unpacked from
+the sha256-pinned packages of the graph, so a run finds the pinned file and nothing of the worker's; a compile is never given them, a `mojo_binary`'s
+run check is not (it runs with no library path at all), and a package that pins nothing changes no command. The proof is `tests//negative/adopt_system_libs`: its positive targets are ordinary builds (a library's welded test, its kcov run `[coverage][tests]` and branch run `[coverage][branch]`, a `mojo_test` under `buck2 test`, and a `mojo_shared_lib` whose driver calls an export that opens the library; a `mojo_shared_lib`'s gate and coverage drivers are given the directories of its `deps` too), and the scenario `planted_red_builds_adopt_system_libs` asserts that the same dependent of a `:lib` that forgot its pins fails its welded test and its `mojo_test` with the loader's refusal, that a library naming the adopted label in `test_deps` only builds, and that its dependent then fails its own welded test (it gets no directories). A library two levels below the adopted label (`:consumer2`) is an ordinary green target: the directories travel through `deps` of `deps`. The kcov, branch and shared-library runs are not asserted red.
 
 ## Binaries and tests
 
@@ -952,9 +963,10 @@ generated entry file and no `komira_main`; that is `mojo_binary[shared]`.
 - **Not self-contained.** The `.so` has `DT_NEEDED libKGENCompilerRTShared.so`, the Mojo runtime (async runtime,
   allocator, globals), which the compiler's link adds to every Mojo binary and shared library; it is not linked
   statically by this rule. The `.so` loads only where that library, and what it needs
-  (`libMSupportGlobals.so`, `libAsyncRTRuntimeGlobals.so`, libstdc++, libgcc_s), resolves: the run path is
-  `$ORIGIN/lib`, so a packaged copy must ship them in `lib/` beside it (the runnable directory of a binary
-  carries the same set). Whoever publishes the `.so` must ship or relocate those libraries.
+  (`libMSupportGlobals.so`, `libAsyncRTRuntimeGlobals.so`, libstdc++, libgcc_s), resolves, from the run path
+  below. A conda package of the library (`conda_package(shared_lib = ...)`, [`../package`](../package/README.md))
+  does not ship them: they come from its `mojo-compiler` requirement, installed in the same `lib/`, and
+  [`../package/install_check`](../package/install_check/README.md) loads it from an empty prefix holding them.
 - **macOS arm64.** The same rule builds `<out_name>.dylib`: install name `@rpath/<out_name>.dylib`, run path
   `@loader_path/lib`, linker-signed ad hoc by ld (nothing else signs it), runtime library
   `@rpath/libKGENCompilerRTShared.dylib`. `exports_exact` uses `-exported_symbols_list` (names with the C
@@ -963,7 +975,7 @@ generated entry file and no `komira_main`; that is `mojo_binary[shared]`.
   on the macOS worker with `DYLD_LIBRARY_PATH` set to the compiler's `lib/` (as for tests). The wrapper
   lets `--emit shared-lib` through only when the link names itself with `-install_name`; the
   bundle's `-soname` library stays refused (bundles are Linux only).
-- **Run path.** `$ORIGIN/lib`, where a packaged copy puts the runtime libraries.
+- **Run path.** `$ORIGIN/lib:$ORIGIN` on Linux (macOS: `@loader_path/lib`): the `lib/` the gate stages the runtime libraries and `native_owners` in, and the library's own directory, where an installed package has the runtime libraries beside it (`<prefix>/lib`). A run path with only `$ORIGIN/lib` finds nothing there (the install check of the libkomira package goes red on it).
 - **`native_owners`** names `native_shared_library` targets (a library's own shared library, [`../native`](../native/README.md)), linked ahead of the C archives of the closure: the `.so` is NEEDED on each owner's SONAME and the owner's names are bound there instead of to a static copy. The gate stages each owner and what it needs in `lib/` beside the library (the run path `$ORIGIN/lib` finds them). Linux only. The archives stay on the link line, so a name the owner does not export is still embedded silently; [`examples/shared_lib_native`](../examples/shared_lib_native/README.md) measures it, its driver (`call_driver.mojo`) opens the owner's SONAME and checks that the library's own dynamic symbol table leaves the owner's names undefined. `tests//negative/shared_lib:owner_embedded` is the same library without the attribute with a smaller driver (`owner_embedded_driver.mojo`) that only opens the owner's SONAME, so it is red on the missing NEEDED edge and does not read the symbol table.
 - **Not yet:** consuming a `.so` from a `deps` edge (a consumer linking it, or generating its `@extern` declarations).
 
@@ -993,16 +1005,31 @@ abi_touch	Int32	OpaquePointer	1.1
   The type map: `Int8` to `Int64` and `UInt8` to `UInt64` (`int8_t` to `uint64_t`), `Int` (`ptrdiff_t`), `UInt`
   (`size_t`), `Float32` (`float`), `Float64` (`double`), `OpaquePointer` (`void *`), `Handle` (`komira_handle`, an
   alias the source declares for the opaque handle; the tool trusts the name) and `UnsafePointer[T]` of those
-  (`T *`). Anything else, `Bool` and an alias such as `comptime Ptr = ...` included, is refused. Pointers are
-  emitted without `const`.
+  (`T *`). `CStr` (`const char *`) and `ConstBytes` (`const uint8_t *`) are named types like `Handle`, with one
+  difference: a source that uses one must declare it at the top level as `comptime CStr = UnsafePointer[UInt8, ...]`,
+  and a declaration of any other type is a finding, so the `const` cannot hide a pointer to something else.
+  Anything else, `Bool` and an alias such as `comptime Ptr = ...` included, is refused. Other pointers are emitted
+  without `const`.
+- **Constants.** A row `constant<TAB>NAME<TAB>VALUE<TAB>since` (NAME starts `KOMIRA_`, VALUE a decimal integer from
+  -2^31 to 2^64-1) is a `#define` in the header; a value above `int` takes `ULL`. With `constants_src`, a Mojo file,
+  the action reads its top-level `comptime KOMIRA_NAME: <integer type> = <product of integers>` lines (`64 * 1024 * 1024`
+  is read, other expressions are a finding) and fails on a golden constant the file lacks, one whose value differs, one
+  declared twice, and a `KOMIRA_` constant the golden does not list. Constants in a golden with no `constants_src` are a
+  finding: nothing would hold them to a source.
 - **The header** is the target's one output, `<header_name>` (default `<name>.h`): an include guard from the file
   name, `<stddef.h>` and `<stdint.h>`, `extern "C"` for C++, `KOMIRA_ABI_VERSION_MAJOR` and
-  `KOMIRA_ABI_VERSION_MINOR`, `typedef struct komira_handle_s *komira_handle;`, and one prototype per row in the
-  golden's order, each after a `since` comment. Parameters are unnamed: the golden holds types only.
+  `KOMIRA_ABI_VERSION_MINOR`, one `#define` per constant, `typedef struct komira_handle_s *komira_handle;`, and one
+  prototype per row in the golden's order, each after a `since` comment. Parameters are unnamed: the golden holds types only.
   The header is made only when the check has no finding.
 - **The example** ([`examples/abi_golden`](../examples/abi_golden/BUCK)) has the golden, a C driver that includes
   the generated header and defines each function it declares (so a prototype that is not C, or one that
   disagrees with its definition, fails the compile), and the `mojo_shared_lib` of the same source.
+- **The C check.** `komira_c_abi_check(name, driver, lib, native_owners)` ([`c_abi_check.bzl`](c_abi_check.bzl)) runs a
+  C program built against the generated header against the library: the program (a `cxx_binary` over the header)
+  opens `./<library file>`, binds each function with `__typeof__` of the header's prototype and calls it. It is staged
+  like a Mojo gate driver, with the library and the `native_owners` it needs beside it, and its marker exists only if
+  it exited 0, so a header that disagrees with the binary (version, a status code, an argument type that changes a
+  call) is red there. The example is [`src/komira_so`](../../../src/komira_so/README.md#the-header-and-the-golden).
 - **Not checked here:** that the golden version was raised when a row changed. That compares with the previous
   release, and one build holds only the current tree; a release check must supply the previous golden.
 

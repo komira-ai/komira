@@ -2,11 +2,34 @@
 # (tools/build/ci/aggregate.bzl). `./buck2 build //ci:pr` builds the check
 # set and `./buck2 test //ci:pr` runs its standalone tests. The lists are
 # generated (targets.bzl) and held complete by tools/build/ci/guard.bxl.
+#
+# `pr_default` is the same set without the roots of the heavy checks
+# (HEAVY of tools/build/ci/rules.bzl: the kci binary and what depends on it):
+# the pull request check builds it, and the roots of a heavy row besides, when
+# the change owns paths of that row. tools/build/ci/default_guard.bxl holds it
+# to that: it reaches no heavy target and leaves out only roots that reach one.
 load("@komira//tools/build/ci:aggregate.bzl", "ci_aggregate")
+load("@komira//tools/build/ci:rules.bzl", "HEAVY")
 load(":targets.bzl", "TARGETS", "TESTS")
+
+# The shards, as a directory, for the zig cases that hold the check set free of the macOS
+# build (//:release_macos_cases).
+export_file(
+    name = "target_shards",
+    src = "targets",
+    visibility = ["//:"],
+)
 
 ci_aggregate(
     name = "pr",
     deps = TARGETS,
     tests = TESTS,
+)
+
+_HEAVY_ROOTS = [root for row in HEAVY for root in row[2]]
+
+ci_aggregate(
+    name = "pr_default",
+    deps = [t for t in TARGETS if t not in _HEAVY_ROOTS],
+    tests = [t for t in TESTS if t not in _HEAVY_ROOTS],
 )
