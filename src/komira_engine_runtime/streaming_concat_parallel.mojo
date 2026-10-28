@@ -1,45 +1,32 @@
 # =============================================================================
-# PERF-CRITICAL: Column-Parallel RecordBatch Concat (D-2 Fix #2 Path A)
+# PERF-CRITICAL: Parallel RecordBatch Concat
 # =============================================================================
-# Regression if removed: D-2 finalize concat phase — single-threaded
-#                        `_concat_morsels_into_one` runs ~67ms on 10.5M
-#                        rows × 4 INT64 cols (median, M4 10-core),
-#                        consuming ~18% of total D-2 wall time. Removing
-#                        the column-parallel path returns the entire
-#                        concat to the main thread (regression band: D-2
-#                        ~50ms / +25%, A-2 / C-1 / C-2 proportional).
-# Measured impact:       Per-column work is embarrassingly parallel (no
-#                        cross-column dependencies). One thread per
-#                        column on 4-col → 8-col fixtures yields
-#                        4-8x column-concat speedup; the wall-time
-#                        improvement is bounded by the slowest column
-#                        (typically a STRING column when present).
-# DuckDB equivalent:     DuckDB's pipelined hash join emits DataChunks
-#                        directly without a per-pipeline barrier, so it
-#                        does not pay this cost at all. We close the gap
-#                        by parallelizing the barrier rather than removing
-#                        it (Path A — see the Fix #2 design).
+# Regression if removed: the finalize concat of a multi-batch collect runs on
+#                        one thread (`_concat_morsels_into_one`), so on wide or
+#                        many-batch inputs the whole concat is the wall of the
+#                        phase while the pool idles.
+# What it does:          per-column work has no cross-column dependency, and a
+#                        column can be cut into row ranges, so the copy is
+#                        spread over the pool; the wall is bounded by the
+#                        slowest column or tile.
 # Do NOT delete without: re-measuring the finalize concat on a multi-core
-#                        host; `tests/test_concat_one_column_parallel.mojo`
-#                        and `tests/test_concat_release_state.mojo` pin the
-#                        routing and the input lifetimes.
+#                        host. `tests/test_concat_one_column_parallel.mojo`,
+#                        `tests/test_concat_byte_equivalence.mojo` and
+#                        `tests/test_concat_release_state.mojo` pin the
+#                        routing, the output bytes and the input lifetimes.
 # =============================================================================
 #
 # Strategy
 # --------
-# Path A of the D-2 finalize-concat parallelization plan: a stand-alone
-# utility that takes the multi-batch output (`Slab[RecordBatch]`) from
-# `ParquetCollectSink.finalize` (when `multi_batch_mode=True`) and the
-# caller's dispatcher, and produces a single `RecordBatch`.
+# A stand-alone utility that takes the multi-batch output of a collect
+# (`Slab[RecordBatch]`) and the caller's dispatcher, and produces a single
+# `RecordBatch`.
 #
-# ⚠ "ONE TASK PER OUTPUT COLUMN" IS NO LONGER THE FAN. It was, and
-# the column count has no relationship to the pool or to the bytes moved — on
-# q21 that dispatched TWO tasks onto twenty-two workers for a 96 MB copy. The
-# fan now comes from `fan_out_grain.parallel_copy_tiles(bytes,
-# splittable, unsplittable, workers)`; fixed-width columns are cut into
-# `(col, row_range)` tiles and the whole-column dispatch is what the rule
-# DECLINES to. See the "THE CONCAT'S FAN" block below for the measurement and
-# for the two post-barrier serializations that had to be removed with it.
+# The fan is not "one task per output column". It comes from
+# `fan_out_grain.parallel_copy_tiles(bytes, splittable, unsplittable,
+# workers)`: columns are cut into `(col, row_range)` tiles, and the
+# whole-column dispatch is what the rule declines to. The route and the tile
+# count are decided in `concat_fan_plan`.
 #
 # A caller with no dispatcher in scope concatenates serially with the
 # multi-way helpers in `komira_arrow.streaming_concat`.
@@ -51,7 +38,7 @@
 #   * State: KeepAlive, owns ALL per-dispatch heap allocations
 #     (input batches Slab, output Column slab, error flag, error msg)
 #     via `OwnedPointer`. NO wildcard-origin fields, NO borrowed
-#     pointer fields — the input batches are MOVED INTO the State
+#     pointer fields: the input batches are MOVED INTO the State
 #     before dispatch, so the State owns them outright.
 #   * Task: Segment, POD; each invocation receives its column index
 #     via `task_id`. Per-task work: read `state.input_batches[*][col_idx]`
@@ -62,45 +49,27 @@
 #
 # Thresholds (serial-fallback gates, before any dispatch attempt)
 # ---------------------------------------------------------------
-#   * total_rows < 1024        → serial. Below this, the dispatch
+#   * total_rows < 1024        -> serial. Below this, the dispatch
 #                                semaphore + per-task wakeup dominates
 #                                the column-concat cost.
-#   * num_cols < 2             → serial UNLESS the row-range tiling rule
+#   * num_cols < 2             -> serial UNLESS the row-range tiling rule
 #                                cuts the one column (`tiles >= 2`). The
 #                                one-task-per-COLUMN fan is one task at one
-#                                column — pure overhead — so that fan is
-#                                never used for it; the TILED fan is.
-#                                (2026-09-24,, cbq05 —
-#                                this bullet used to read "with one column
-#                                there is no parallelism to extract", which
-#                                was false from LEVER A on: a 100M-row
-#                                search_phrase collect ran ~295 ms serial on
-#                                the driver behind it. `_concat_route_plan`.)
+#                                column, which is pure overhead, so that fan
+#                                is never used for it; the TILED fan is.
+#                                (`_concat_route_plan`.)
 #
-# ⛔ TWO BULLETS THAT USED TO STAND HERE ARE RETIRED, AND BOTH WERE STILL BEING
-# QUOTED AS LIVE ON 2026-09-16 — by a reader who then concluded this entry point
-# serializes a narrow batch. It does not. They are recorded, not deleted:
-#   * ~~`pool_ptr is null` → serial~~ — GONE: the dispatcher is a
-#     reference, so there is no null-fallback arm left to take.
-#   * ~~any column is BOOL or DICTIONARY → serial~~ — GONE at ``
-# ("route `any_slow` PER COLUMN"). ONE dictionary column used to
-#     cost the WHOLE batch every worker; each column now picks its own kernel in
-#     `_ConcatColumnsTask.execute`, so the batch is ADMITTED and only that column
-#     folds. What BOOL/DICTIONARY still do is set `any_untiled_type`, which
-#     declines the row-range TILED route only — see `_concat_fan_plan`.
+# These gates are checked FIRST, so a change to the fan cannot make a serial
+# input start forking. `test_concat_one_column_parallel.mojo` pins the
+# one-column admission.
 #
-# ⚠ THESE THRESHOLDS WERE UNCHANGED BY THE FAN CHANGE, AND THAT WAS
-# LOAD-BEARING THEN: they were checked FIRST, so the fan change could not make
-# any serial input start forking. (The opt-in shape tested its own
-# gate ABOVE these, which would have made a single-column multi-million-row
-# concat parallel the moment its flag was set.)
-#
-# ★ 2026-09-24 CHANGED ONE OF THEM ON PURPOSE, AS ITS OWN MEASURED CHANGE — the
-# thing the note refused to let happen as a SIDE EFFECT. A one-column
-# concat is admitted to the TILED fan when the tiling rule cuts it; nothing else
-# moves. Falsifier: `komira_engine_runtime/tests/test_concat_one_column_
-# parallel.mojo` (routing via `grain_geometry`, plus an independent ordered +
-# sorted value oracle, plus the stays-serial controls).
+# Two things that are NOT gates:
+#   * A `pool_ptr is null` fallback: the dispatcher is a reference, so there is
+#     no null arm.
+#   * A BOOL or DICTIONARY column does not make the batch serial. Each column
+#     picks its own kernel in `_ConcatColumnsTask.execute`, so only that column
+#     takes the pair-wise fold. Such a column sets `any_untiled_type`, which
+#     declines the row-range TILED route only; see `_concat_fan_plan`.
 # =============================================================================
 #
 # FILES
@@ -149,6 +118,9 @@ from komira_engine_runtime.concat_dict_unify import (
     rewrap_unified_dict_columns,
     unify_string_dict_columns,
 )
+from komira_engine_runtime.concat_schema_check import (
+    _check_batches_share_schema,
+)
 from komira_engine_runtime.concat_fan_plan import (
     _concat_route_plan,
     _on_pool_dispatch_active,
@@ -191,6 +163,11 @@ def concat_record_batches_column_parallel(
     pair-wise fold. STRING dictionaries are unified first
     (`concat_dict_unify`), so they reach the concat as INT32 codes.
 
+    Every batch must have the same columns: the same count, and for a batch
+    with rows the same `arrow_type` per column as the first batch with rows
+    and columns (a zero-row batch may carry any type). A batch that breaks
+    this raises before any buffer is allocated.
+
     Args:
         batches: The batches in output order. Consumed; the slab and its
             batches are drained in place.
@@ -202,6 +179,11 @@ def concat_record_batches_column_parallel(
     Returns:
         One `RecordBatch` with the rows of every input batch in order. An
         empty slab gives an empty `RecordBatch()`.
+
+    Raises:
+        Error: a batch whose columns differ from the first batch with rows
+            and columns (see above), a dispatch failure, or an Int32 offset
+            overflow on a STRING / BINARY column.
     """
     return _concat_with_dict_unify(
         batches^, dispatcher, cancel_token^, Optional[Schema](None), options
@@ -224,7 +206,8 @@ def concat_record_batches_column_parallel_with_schema(
         dispatcher: The dispatcher whose pool runs the fan.
         cancel_token: Consumed by the dispatch.
         schema: Stamped on the result; its field count must equal the
-            input batches' column count.
+            input batches' column count. The input batches must share their
+            columns exactly as for `concat_record_batches_column_parallel`.
         options: As for `concat_record_batches_column_parallel`.
 
     Returns:
@@ -242,19 +225,20 @@ def _concat_with_dict_unify(
     var schema_opt: Optional[Schema],
     options: ConcatOptions,
 ) raises -> RecordBatch:
-    """⭐ CD-SCAN (2026-09-25): unify every batch's STRING dictionary FIRST
+    """Unify every batch's STRING dictionary first
     (`concat_dict_unify.unify_string_dict_columns`), so a dictionary column
-    reaches `_concat_impl` as INT32 codes — all-fixed-width, so it TILES —
+    reaches `_concat_impl` as INT32 codes (fixed-width, so it can tile)
     instead of taking the O(N^2) single-task pair-wise fold; then re-label the
     concatenated codes as ONE DICTIONARY column. A batch set with no string
-    dictionary (every caller before CD-SCAN) passes through untouched.
+    dictionary passes through untouched.
 
-    ⛔ Deliberately a WRAPPER, not new control flow inside `_concat_impl`:
-    that function's docstring records the SLP-vectorizer crash that added
-    control flow there re-acquires."""
+    Deliberately a WRAPPER, not new control flow inside `_concat_impl`: adding
+    control flow there triggers the SLP-vectorizer crash recorded on
+    `concat_fan_plan._concat_fan_plan`."""
     var owned = batches^
     var plan = unify_string_dict_columns(
-        owned, dispatcher, options.dict_unify, options.trace_dict_unify
+        owned, dispatcher, options.dict_unify, options.trace_dict_unify,
+        options.offset_promote_at,
     )
     var restore = not Bool(schema_opt)
     var out = _concat_impl(
@@ -280,9 +264,9 @@ def _concat_impl(
             (authoritative). If None, the result is stamped with a
             schema derived from the input batches.
     """
-    # TRACK-B POST-BARRIER BRACKET () for the WHOLE-COLUMN
-    # column-parallel path (the tiled path brackets itself inside `_concat_tiled`).
-    # Opened at entry; closed at the fork (SETUP) and at the return (ASSEMBLE).
+    # Scheduler-trace brackets for the whole-column column-parallel path (the
+    # tiled path brackets itself inside `_concat_tiled`). Opened at entry;
+    # closed at the fork (SETUP) and at the return (ASSEMBLE).
     # The early-return / serial-fallback / tiled-route arms simply never close it,
     # so no record is emitted for a run that did not take this path.
     var _tb_on = sched_trace_enabled()
@@ -305,8 +289,8 @@ def _concat_impl(
     # Single-batch fast path. The multi-batch finalize drain may return
     # a single already-concatted RecordBatch (DICTIONARY fallback inside
     # `_drain_morsels_to_batches` calls `_concat_morsels_into_one`
-    # internally and yields a 1-element list). In that case our concat
-    # work is redundant — just lift the one batch out and return it.
+    # internally and yields a 1-element list). In that case the concat
+    # work is redundant: lift the one batch out and return it.
     if num_batches == 1:
         var only = owned_batches.take_slot_unchecked(0)
         owned_batches.set_len_unchecked(0)
@@ -334,35 +318,28 @@ def _concat_impl(
         return RecordBatch()
 
     var num_cols = owned_batches[schema_idx].num_columns()
+    _check_batches_share_schema(owned_batches, schema_idx, num_cols)
 
     # Type-check for BOOL / DICTIONARY (slow-path fallback) + count fixed-width
     # columns (row-range tiling candidates) + the WIDEST fixed width, which is
-    # what prices the biggest task the incumbent fan produces. No early break —
-    # the counts need the full column scan; `any_slow` is monotone so the result
-    # is unchanged.
+    # what prices the biggest task the one-task-per-column fan produces. No
+    # early break: the counts need the full column scan.
     #
     # `any_untiled_type` is a column that is NEITHER fixed-width NOR
-    # STRING/BINARY — DATE32, TIMESTAMP, DECIMAL128, LIST, ... all of which
-    # `_arrow_type_byte_width` reports as 0 because its table is partial. The
-    # incumbent path RAISES on them (`_concat_fixed_columns_multi` rejects width
-    # 0); the tiled path would hand them to the STRING helper and return a wrong
-    # answer. So they decline tiling and the incumbent raises exactly as before.
+    # STRING/BINARY (LIST, STRUCT, ...: `_arrow_type_byte_width` reports 0 for
+    # them). The one-task-per-column path RAISES on them
+    # (`_concat_fixed_columns_multi` rejects width 0); the tiled path would hand
+    # them to the STRING helper and return a wrong answer. So they decline
+    # tiling and the one-task-per-column path raises.
     #
-    # ★ BOOL/DICTIONARY NO LONGER SEND THE BATCH SERIAL (board
-    # ). They used to set `any_slow`, which `go_parallel` tested,
-    # so ONE dictionary column cost the batch every worker AND made the other
-    # twenty columns pay an N^2 pair-wise memcpy. Each column picks its own
-    # kernel now (`_ConcatColumnsTask.execute`), so the batch is admitted and
-    # only the dictionary column itself folds.
-    #
-    # ⚠ THEY SET `any_untiled_type` INSTEAD, WHICH IS LOAD-BEARING, NOT
-    # TIDYING. The TILED route has no BOOL/DICTIONARY arm and never needed
-    # one, because `any_slow` used to keep those batches away from it
-    # entirely. Its `num_string = num_cols - num_fixed` subtraction would
-    # count a dictionary column as STRING and hand it to the string tiler ->
-    # a wrong answer, not a raise. Declining to tile keeps that route's
-    # inputs exactly what they have always been; the incumbent one-task-per-
-    # column fan (which now has the slow arm) is what picks the batch up.
+    # BOOL and DICTIONARY do not send the batch serial: each column picks its
+    # own kernel (`_ConcatColumnsTask.execute`), so the batch is admitted and
+    # only the dictionary column itself folds. They set `any_untiled_type` too,
+    # and that is load-bearing: the TILED route has no BOOL/DICTIONARY arm, and
+    # its `num_string = num_cols - num_fixed` subtraction would count a
+    # dictionary column as STRING and hand it to the string tiler, which gives
+    # a wrong answer rather than a raise. Declining to tile leaves the
+    # one-task-per-column fan (which has the slow arm) to pick the batch up.
     var num_fixed = 0
     var max_fixed_width = 0
     var any_untiled_type = False
@@ -394,16 +371,12 @@ def _concat_impl(
     # concat, the fan (`fan_out_grain.parallel_copy_tiles` via
     # `_concat_fan_plan`). DELIBERATELY NOT HERE: control flow added to this
     # function re-acquires the SLP-vectorizer crash `_concat_fan_plan`'s
-    # docstring records, so the gate that used to be spelled inline
-    # (`num_cols >= 2 and total_rows >= 1024`) is a Bool read now.
+    # docstring records, so the gate that could be spelled inline
+    # (`num_cols >= 2 and total_rows >= 1024`) is a Bool read.
     #
-    # ⚠ THE ONE-COLUMN ADMISSION (2026-09-24, cbq05). That inline gate sat
-    # ABOVE the tiled route, so a one-column concat — 100M rows of
-    # `search_phrase` on cbq05 — ran serially on the driver however large it
-    # was. A one-column concat is now admitted exactly when the tiling rule
-    # cuts it (`tiles >= 2`); every other one-column input, and every
-    # multi-column input, takes the route it took before. See
-    # `_concat_route_plan` for the held invariants.
+    # THE ONE-COLUMN ADMISSION. A one-column concat is admitted exactly when
+    # the tiling rule cuts it (`tiles >= 2`); every other one-column input
+    # stays serial. See `_concat_route_plan` for the held invariants.
     var worker_count = dispatcher.worker_count()
     var plan = _concat_route_plan(
         input_slab, num_batches, num_cols, schema_idx, num_fixed,
@@ -414,7 +387,9 @@ def _concat_impl(
         # Serial fallback. Move the input Slab into a stack-rooted
         # buffer expected by the existing helpers, run the per-column
         # work serially, then return.
-        return _concat_serial(input_slab^, num_batches, num_cols, schema_opt^)
+        return _concat_serial(
+            input_slab^, num_batches, num_cols, schema_idx, schema_opt^
+        )
 
     var tiles = plan.tiles
 
@@ -436,10 +411,9 @@ def _concat_impl(
     # the input slab is moved into State. Used to build the output
     # schema after dispatch (no-schema entry only — the schema-aware
     # entry stamps `schema_opt.take()` on the result instead).
-    # AGG-SCHEMA-METADATA-PROPAGATION-V0.4: cache as
-    # full Field clones (via `field_at`) so Phase B/C metadata (_tz,
-    # decimal (p,s), _dict_index_type, _union_type_ids, _flags,
-    # kv-metadata) propagates into the output schema.
+    # Cache full Field clones (via `field_at`) so the field metadata (_tz,
+    # decimal (p,s), _dict_index_type, _union_type_ids, _flags, kv-metadata)
+    # propagates into the output schema.
     var captured_fields = List[Field]()
     if not schema_opt:
         ref input_schema = input_slab[schema_idx].value().schema
@@ -464,9 +438,9 @@ def _concat_impl(
     #   only across the dispatch window (the helpers only read; the
     #   dispatch barrier completes before any caller touches the slab
     #   again).
-    # PERF-CRITICAL: Path A column-parallel concat (D-2 Fix #2).
+    # PERF-CRITICAL: column-parallel concat.
     var state = _ConcatColumnsState(input_slab^, out_columns^)
-    var task = _ConcatColumnsTask(Int32(0))
+    var task = _ConcatColumnsTask(Int32(schema_idx))
     if _tb_on:
         sched_trace_add_serial_phase(
             PHASE_CONCAT_COLS_SETUP,
@@ -477,11 +451,9 @@ def _concat_impl(
     # needs a token and `cancel_token` is moved into `run_with_state` on the
     # next statement, so the clone has to be taken here rather than there.
     var release_token = cancel_token.clone()
-    # THE INCUMBENT FAN, RECORDED. Before this line the `num_cols` dispatch wrote
-    # NO geometry, so a census could see the tiled fan and not the one it is
-    # supposed to be compared against — i.e. the instrument could not observe the
-    # defect. `morsels` is 1 (one whole-column unit per task) and `workers` is
-    # the task count the fork gets, which for this path IS the column count.
+    # THE ONE-TASK-PER-COLUMN FAN, RECORDED so a census sees it as it sees the
+    # tiled fan. `morsels` is 1 (one whole-column unit per task) and `workers`
+    # is the task count the fork gets, which for this path is the column count.
     grain_geometry_record(
         SITE_CONCAT, total_rows, total_rows, 1,
         min(num_cols, dispatcher.worker_count()),
@@ -518,24 +490,13 @@ def _concat_impl(
     # output `done_columns` and the drained input land in deterministic
     # frame-local slots before state^ runs).
     var _drain_input = _take_slab(state.input_batches[])
-    # THE TEARDOWN WAVE (site 49). Previously `_ = _drain_input^`: N
+    # THE TEARDOWN WAVE. A plain `_ = _drain_input^` would run N
     # RecordBatch destructors on the DRIVER with every worker already rejoined
-    # and parked -- measured at 14.4 ms/rep NAMED destruction under this
-    # subtree on q21. `release_concat_inputs_parallel` hands each worker a
+    # and parked. `release_concat_inputs_parallel` hands each worker a
     # stride-slice of the batches so the `free()` storm lands on the pool. It
-    # declines to the byte-for-byte previous drop below 2 batches or at
-    # `--workers 1`, which is the arm the value oracle runs.
+    # declines to the plain serial drop below 2 batches or at `--workers 1`.
     if raised or _on_pool_dispatch_active():
         # TWO REASONS TO DECLINE, both of which must drop serially.
-        #
-        # ⚠ THERE WERE THREE. `not concat_release_on()` -- the
-        # concat-release kill-switch -- was DELETED 2026-09-08 under
-        # the maintainer directive, on the retirement condition its own
-        # docstring named: *"delete this ... AFTER the A/B is recorded"*. It is
-        # recorded and resolved (q21 -17.33 ms / -5.20%, p = 3.24e-05). The serial arm
-        # below is STILL REACHED by the two surviving terms and by
-        # `release_concat_inputs_parallel`'s own structural decline (< 2 batches,
-        # `--workers 1`), so the deletion removed the probe and stranded nothing.
         #
         # `raised`: the concat dispatch above already failed, which for a
         # cancellation means THIS token is cancelled too -- so a teardown
@@ -594,29 +555,17 @@ def _concat_serial(
     var input_slab: Slab[Optional[RecordBatch]],
     num_batches: Int,
     num_cols: Int,
+    schema_idx: Int,
     var schema_opt: Optional[Schema],
 ) raises -> RecordBatch:
     """Serial concat fallback. Runs the multi-way per-column helpers
     in a single-threaded for-loop. Used when `_concat_route_plan` says
     `serial`: under the row floor, or a single column the row-range
-    tiling rule declines to cut. (The null-pool and BOOL/DICT arms this
-    line used to list are gone — see the module header.)
+    tiling rule declines to cut. `schema_idx` is the batch that supplies the
+    column types and the output fields (the driver's first batch with rows and
+    columns).
     """
     var owned_input = input_slab^
-
-    # Find first non-empty batch.
-    var schema_idx = -1
-    for i in range(num_batches):
-        if owned_input[i]:
-            schema_idx = i
-            break
-    if schema_idx < 0:
-        _ = owned_input^
-        if schema_opt:
-            var empty = RecordBatch()
-            empty.schema = schema_opt.take()
-            return empty^
-        return RecordBatch()
 
     # Acquire a typed pointer into the slab's interior to feed the
     # existing helpers (which take `UnsafePointer[Optional[RecordBatch],
@@ -640,7 +589,7 @@ def _concat_serial(
     # on the admitted path.
     var sb = SchemaBuilder()
     for c in range(num_cols):
-        # AGG-SCHEMA-METADATA-PROPAGATION-V0.4: preserve metadata.
+        # Preserve the field metadata.
         sb.add_field(owned_input[schema_idx].value().schema.field_at(c))
 
     var builder = RecordBatchBuilder.with_capacity(num_cols)

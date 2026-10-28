@@ -1,12 +1,14 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 
 # The validations of a stage's steps (`kci run --stage S`; the machine file
 # declares them on a step, kci_release_machine parses them). Two kinds. The
 # ENV kind, CONDA_INSTALL_ENV, installs on the machine that runs kci with no
 # container (a pinned pixi linked into a scratch directory outside the
 # checkout, a cleared environment) and runs each installed library's README
-# examples, made into a program by //tools/build/readme_examples exactly as
-# the welded `[tests][readme]` test is; no network at all is INDETERMINATE
+# examples, made into programs by the README examples tool
+# (//tools/build/readme_examples:tool, which kci ships beside its executable:
+# bin/kci/BUCK `helpers`) exactly as the welded `[tests][readme]` test makes
+# them; no network at all is INDETERMINATE
 # (exit 5) with a skip_reason, never a pass. The CONTAINER kind,
 # CONDA_INSTALL_SMOKE: after a PUBLISH step, read the step's channel
 # ANONYMOUSLY (the index lists each pinned file with the build's sha256 and
@@ -42,7 +44,7 @@ mojo_library(
         "//src/komira_http_core:komira_http_core",
         "//src/komira_json:komira_json",
         "//src/komira_retry:komira_retry",
-        "//tools/build/readme_examples:readme_examples",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
         # the pass; every row of checks 0 to 4 failing on its own, each
@@ -65,11 +67,76 @@ mojo_library(
         # the child's whole environment, the pixi argv, the manifest, and
         # the installed README's program byte-equal to SOURCE mode's, golden
         "tests/test_install_env_golden.mojo",
+        # the README examples tool: where kci looks for it, and a missing,
+        # empty or unrunnable tool refused by name; a failed map refused
+        # naming the report, and the program row it fails
+        "tests/test_readme_tool.mojo",
         # the native install checks (#1363's lib_files rows, `__glibc`):
         # a sha256 mismatch, a missing file, a mode 644 .so, a dangling
         # link, an extra .so, a __glibc of 2.38, NEEDED outside the
         # environment, no DF_SYMBOLIC, the loaded-from record, the ELF reader
         "tests/test_native_install.mojo",
+        # the link commands of an installed README (slice 10): the closure's
+        # arguments (every shared library dependents first, the static
+        # archive on the build line), the real tool reading the block, and
+        # the `readme` row refusing a README without an owner's -l, a
+        # missing or unwanted block, and the same words in another order
+        "tests/test_readme_link.mojo",
+        # the same over a written release: link_nodes reading depends and
+        # lib_files (link and static rows, not shared; the metapackage
+        # skipped), install_pins filling each pin's link (gamma: beta
+        # before alpha), a link row of another shape refused; and the
+        # CONDA_INSTALL_ENV README run given the block's run arguments
+        "tests/test_readme_link_release.mojo",
+        # beta's native install checks as a CONDA_INSTALL_ENV validation
+        # runs them (native_rows.mojo, slice 11): every row over a played
+        # pixi and an installed .so; row 4 red on an unresolved symbol, row
+        # 5 on a komira .so loaded from /usr/lib, row 7 on a failing
+        # OpenSSL program; which packages are installed alone; a README
+        # whose closure ships a static holder built, not `mojo run`
+        "tests/test_native_rows.mojo",
+        # the three refusals of correct installs in kci run 38348429425:
+        # a loader path through bin/../lib resolved before it is compared,
+        # the toolchain's own libz/libzstd not judged (only the closure's
+        # dlopen codecs and komira objects are), a static-holder README
+        # built when installed alone; slice 4's codec defect still red alone
+        "tests/test_native_rows_real.mojo",
     ],
+    # The README examples tool kci ships, for the tests that make an
+    # installed README into programs (the same target bin/kci/BUCK ships).
+    test_data = {
+        "tests/test_conda_install_env.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
+        # and the README and programs of komira_encoding's welded README
+        # test, to compare kci's programs with
+        "tests/test_install_env_golden.mojo": {
+            "readme_examples": "//tools/build/readme_examples:tool",
+            "encoding_readme": "//src/komira_encoding:komira_encoding[tests][readme][file]",
+            "encoding_generated": "//src/komira_encoding:komira_encoding[tests][readme][generated]",
+        },
+        "tests/test_readme_tool.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
+        "tests/test_readme_link.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
+        "tests/test_readme_link_release.mojo": {"readme_examples": "//tools/build/readme_examples:tool"},
+        "tests/test_native_rows.mojo": {
+            "readme_examples": "//tools/build/readme_examples:tool",
+            "native_load_example.mojo": "tests/generated/native_load_example.mojo",
+            "openssl_example.mojo": "tests/generated/openssl_example.mojo",
+        },
+    },
     visibility = ["PUBLIC"],
+)
+
+# One of each program the native install checks write (native_rows.mojo
+# `load_program_text`, `openssl_program_text`), built here so that a change
+# breaking what kci generates fails this package's build rather than
+# beta_validate. tests/test_native_rows.mojo holds each byte-equal to its
+# generator. Built, never run: the paths they open exist only in an
+# installed environment.
+mojo_binary(
+    name = "native_load_example",
+    srcs = ["tests/generated/native_load_example.mojo"],
+)
+
+mojo_binary(
+    name = "openssl_example",
+    srcs = ["tests/generated/openssl_example.mojo"],
 )

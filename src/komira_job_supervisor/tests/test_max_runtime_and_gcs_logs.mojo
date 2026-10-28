@@ -10,9 +10,11 @@
 # the failure report carries the signal; the terminal beat carries both.
 # CONTROL: with no limit, an instant an hour later stops nothing.
 #
-# ARM 2 (the real loop): `run_job_supervisor` with a 1 s limit on the same
-# job ends FAILED with the timeout message within seconds. A loop that never
-# checked the limit would wait out the 30 s and report COMPLETED.
+# ARM 2 (the real loop): `run_job_supervisor_with_clock` on a manual clock with
+# a 1 s limit on the same job ends FAILED with the timeout message after
+# exactly one one-second wait of the loop (the clock reads 1 s past the spawn).
+# A loop that never checked the limit would wait out the 30 s and report
+# COMPLETED.
 #
 # ARM 3 (gs:// logs): the flags a launcher renders with
 # `--log-prefix=gs://job-logs/runs/r-1` are parsed by EntrypointConfig, the
@@ -25,7 +27,6 @@ from std.ffi import external_call
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_clock import now_ns
 from komira_objectstore import InMemoryConditionalStore
 from komira_objectstore.path import Path
 from komira_objectstore_gcs import FakeGcsStorageBackend, GcsConditionalStore
@@ -36,9 +37,10 @@ from komira_job_supervisor import (
     HeartbeatReporter,
     JobSupervisor,
     JobSupervisorConfig,
+    ManualLoopClock,
     SupervisorHeartbeat,
     gcs_log_store,
-    run_job_supervisor,
+    run_job_supervisor_with_clock,
 )
 from komira_job_supervisor.job_supervisor_state import JobSupervisorPhase
 
@@ -75,6 +77,8 @@ def _sleeper(max_runtime_secs: Int) -> JobSupervisorConfig:
 
 
 comptime _SEC: UInt64 = 1_000_000_000
+comptime _CLOCK_START_NS: Int = 3_000_000_000
+"""Where the manual clock stands when a run starts."""
 
 
 def test_the_limit_stops_the_job_and_reports_it() raises:
@@ -123,13 +127,17 @@ def test_the_limit_stops_the_job_and_reports_it() raises:
 
 def test_the_run_loop_enforces_the_limit() raises:
     var beats = ArcPointer[List[String]](List[String]())
-    var t0 = now_ns()
-    var phase = run_job_supervisor[Recorder, InMemoryConditionalStore](
-        _sleeper(1), Recorder(beats), None, None
-    )
-    var took_s = Int((now_ns() - t0) // _SEC)
+    var cell = ArcPointer[Int](_CLOCK_START_NS)
+    var clock = ManualLoopClock(cell)
+    var phase = run_job_supervisor_with_clock[
+        Recorder, InMemoryConditionalStore, ManualLoopClock
+    ](_sleeper(1), Recorder(beats), None, None, clock)
     assert_true(phase == JobSupervisorPhase.failed(), "the loop stopped it: FAILED")
-    assert_true(took_s < 20, "stopped long before the job's 30 s: " + String(took_s))
+    # The limit is checked every second: the first check at or past the 1 s
+    # limit is the one after the loop's first wait, so the clock moved by
+    # exactly that wait.
+    assert_equal(len(clock.slept_ms), 1, "one wait, then the limit check stopped it")
+    assert_equal(cell[], _CLOCK_START_NS + Int(_SEC), "1 s on the clock")
     var last = beats[][len(beats[]) - 1]
     assert_true(
         last.startswith(String("FAILED|max runtime of 1 s exceeded")), last
@@ -168,12 +176,9 @@ def test_the_logs_go_to_the_gs_prefix() raises:
         Optional[GcsConditionalStore[FakeGcsStorageBackend]](store^),
     )
     js.spawn_child()
-    var spins = 0
-    while not js.child_exited and spins < 2000:
+    while not js.child_exited:
         js.poll_and_drain()
         _ = external_call["usleep", Int32](UInt32(2000))
-        spins += 1
-    assert_true(js.child_exited, "the job ran")
     js.analyze_exit()
     assert_true(js.terminal_phase() == JobSupervisorPhase.failed(), "exit 3")
     js.upload_terminal_artifacts()

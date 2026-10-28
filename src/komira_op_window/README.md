@@ -1,7 +1,6 @@
 # komira_op_window
 
-The window and top-N operators of the engine.
-`partition_scan_sink._execute_partition_by_sink`
+The window operator of the engine. `partition_scan_sink._execute_partition_by_sink`
 runs a `PartitionBySinkData` (`komira_physical_plan`) over one batch: it
 sorts the rows by (partition keys ++ order keys), finds the partitions,
 evaluates each `PartitionExpr` into one new column, and returns the sorted
@@ -47,27 +46,13 @@ Modules:
   same rows on the engine's workers: one sort, then whole-partition buckets
   evaluated in parallel and concatenated in order; below 65,536 rows, four
   partitions or two workers it runs on the calling thread.
-- `partition_scan_sink_hash_scatter`: above that size, with INT64 partition
+- `partition_scan_sink_hash_scatter`: above that size, with one or more INT64 partition
   keys holding no NULL, rows are scattered by key range (sampled equi-depth
   splitters) and each bucket is sorted and evaluated on its own worker.
 - `partition_by_sink`: `PartitionBySink`, the window operator as a
   `MorselSink` of `komira_operator_api`; `finalize` runs the parallel driver.
   Every route emits the same rows in the same order
   (`komira_exec_types.partition_by_output_contract`).
-- `topn_sink`: `TopNSink`, the global top-N of a pipeline as a `MorselSink`;
-  `finalize` runs `komira_op_sort.sort_topn_sink._execute_topn_sink` over the
-  folded batch, so its rows (and its NULL placement) are that kernel's.
-- `bounded_heap`: bounded heaps over INT64 keys (capacity at compile time or
-  at run time) and over STRING keys compared byte-wise.
-- `topn_stage`, `stage_topn`: the top-N of one INT64 key, and
-  `Stage_TopN_1_I64` / `Stage_TopN_Dynamic_1_I64`, its `FusedMorselOp`s over
-  an `ExprXI64` key. DESC stores the bitwise NOT of the key, which reverses
-  every INT64 (negation overflows on `Int64.MIN`).
-- `topn_state`: `TopNState`, the typed stage's TOPN breaker state: the top N
-  of an INT64 key column, NULL keys last, mergeable (`combine`) and spillable.
-- `partition_topn_state`: `PartitionTopNState`, top N per partition over
-  INT64 columns (NULL partition keys one partition, NULL order keys last).
-- `partition_state`: the per-partition state holders of a typed window stage.
 - `partition_null_policy`: the NULL policy every aggregate kernel shares,
   and the output allocators that size a validity bitmap only when a NULL can
   be written.

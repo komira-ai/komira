@@ -6,11 +6,11 @@
 #   * column-on-the-left: LT/LE/GT/GE/NE each map to their own fold op code
 #     (2/3/4/5/6), EQ to the EQ factory;
 #   * literal-on-the-left: LT<->GT and LE<->GE swap, EQ and NE stay;
-#   * BOOL literals render as `true` / `false`;
+#   * BOOL literals on a BOOL column render as `true` / `false`;
 #   * narrow and unsigned integer literals (int8 .. uint32, outside
 #     `is_int`) render as their decimal value.
 # Each case pins the column, the op code, the single value, the column's
-# type (yr INT64, flag STRING: flag is the second partition column, so a
+# type (yr INT64, flag STRING, on BOOL: flag and on follow yr, so a
 # lookup of the wrong index is caught) and that nothing is left on the
 # residual (a clean comparison is consumed by Tier-1).
 # =============================================================================
@@ -45,6 +45,7 @@ def _pcols() -> List[String]:
     var c = List[String]()
     c.append(String("yr"))
     c.append(String("flag"))
+    c.append(String("on"))
     return c^
 
 
@@ -52,6 +53,7 @@ def _ptypes() -> List[ArrowType]:
     var t = List[ArrowType]()
     t.append(ArrowType.INT64)
     t.append(ArrowType.STRING)
+    t.append(ArrowType.BOOL)
     return t^
 
 
@@ -110,24 +112,24 @@ def test_bool_literals_render_true_false() raises:
     _check_one(
         Expr.binary(
             BIN_EQ,
-            Expr.col_ref(String("flag")),
+            Expr.col_ref(String("on")),
             Expr.literal(ScalarValue.from_bool(True)),
         ),
-        String("flag"),
+        String("on"),
         _OP_EQ,
         String("true"),
-        ArrowType.STRING,
+        ArrowType.BOOL,
     )
     _check_one(
         Expr.binary(
             BIN_NE,
-            Expr.col_ref(String("flag")),
+            Expr.col_ref(String("on")),
             Expr.literal(ScalarValue.from_bool(False)),
         ),
-        String("flag"),
+        String("on"),
         _OP_NE,
         String("false"),
-        ArrowType.STRING,
+        ArrowType.BOOL,
     )
 
 

@@ -268,6 +268,56 @@ def test_diff_array_value_identical_raw_bytes() raises:
 
 
 # =============================================================================
+# Object holding an array / array holding an object (komira-ai/komira#1500).
+# The slice must end at the close that matches the value's own open, so the
+# depth count has to move on BOTH kinds of bracket. Expected answers are
+# DuckDB's `->` / `->>` over the same document and path.
+# =============================================================================
+
+
+def _assert_both_modes(doc: String, path: String, expected: String) raises:
+    """Run `->` and `->>` over the one-row column [doc] at `path`; both must
+    return a valid row holding exactly `expected`."""
+    for mode in range(2):
+        var values = List[String]()
+        values.append(doc)
+        var col = _string_column(values)
+        var p = parse_json_path(path)
+        var out = extract_column(col, p^, ArrowType.STRING, mode == 0)
+        assert_equal(out.length(), 1)
+        if out._validity:
+            assert_true(out._validity.value().test(0), doc + " -> NULL")
+        assert_equal(out.as_string().get(0), expected, doc)
+
+
+def test_object_holding_array_slices_to_its_own_close() raises:
+    # Before the fix: `{"b":[1]}}` (the `]` was not counted, so the
+    # document's outer `}` closed the slice).
+    _assert_both_modes(
+        String("{\"a\":{\"b\":[1]}}"), String("$.a"), String("{\"b\":[1]}")
+    )
+    # With a sibling after the value the old slice ran on past the sibling.
+    _assert_both_modes(
+        String("{\"a\":{\"b\":[1,2]},\"c\":3}"),
+        String("$.a"),
+        String("{\"b\":[1,2]}"),
+    )
+
+
+def test_array_holding_object_slices_to_its_own_close() raises:
+    # Before the fix: NULL (the `}` was not counted, so no `]` brought the
+    # depth back to zero).
+    _assert_both_modes(
+        String("{\"a\":[{\"b\":1}]}"), String("$.a"), String("[{\"b\":1}]")
+    )
+    _assert_both_modes(
+        String("{\"a\":[{\"b\":1},{\"c\":[2]}],\"d\":4}"),
+        String("$.a"),
+        String("[{\"b\":1},{\"c\":[2]}]"),
+    )
+
+
+# =============================================================================
 # Driver
 # =============================================================================
 
@@ -290,5 +340,9 @@ def main() raises:
     # Object / array — identical
     test_diff_object_value_identical_raw_bytes()
     test_diff_array_value_identical_raw_bytes()
+
+    # Mixed nesting — the slice ends at the value's own close
+    test_object_holding_array_slices_to_its_own_close()
+    test_array_holding_object_slices_to_its_own_close()
 
     print("test_json_extract_operator_diff — all tests PASSED")

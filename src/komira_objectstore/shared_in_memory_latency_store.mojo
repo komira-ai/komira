@@ -3,8 +3,10 @@
 #   A LATENCY-INJECTING in-memory `ConditionalWriteStore` (test substrate).
 # =============================================================================
 #
-# The WALL-CLOCK regression guard for the PARALLEL cold-read fan-out (index
-# files MUST be read in parallel).
+# The substrate for measuring the PARALLEL cold-read fan-out (index files MUST
+# be read in parallel). A test over it must not assert a wall-clock threshold;
+# it can print a measurement, and it can read the requested waits from the
+# inner store (`n_rtt_sleeps` / `rtt_slept_us`).
 #
 # WHY THIS EXISTS. An object-store op COUNT does NOT capture parallelism: N
 # concurrent GETs are still N GET ops, so the in-memory op counters
@@ -118,9 +120,12 @@ struct SharedInMemoryLatencyStore(
         `test_index_shard_slice1.test_s1b_parallel_cross_shard_wall_clock`.
         Microsecond resolution is far finer than the ~100 ms RTTs it models."""
         if self._rtt_seconds > 0.0:
-            _ = external_call["usleep", Int32](
-                UInt32(self._rtt_seconds * 1.0e6)
-            )
+            var us = UInt32(self._rtt_seconds * 1.0e6)
+            # Recorded in the shared map before the wait, so a test reads the
+            # requested round-trip (`n_rtt_sleeps` / `rtt_slept_us` on
+            # `inner_ref()`) instead of timing it.
+            self._inner.note_rtt_sleep(Int64(us))
+            _ = external_call["usleep", Int32](us)
 
     # ---- ObjectStore base surface (no latency — metadata, delegate) ----
 

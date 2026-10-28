@@ -17,12 +17,12 @@
 # buckets; and it is non-decreasing in the key tuple, so bucket order is key
 # order and the concatenation is sorted by (partition keys ++ order keys)
 # globally, the order every driver emits
-# (`komira_exec_types.partition_by_output_contract`). (The module and driver
-# names say "hash": the scatter was a hash once, which broke that order.)
+# (`komira_exec_types.partition_by_output_contract`).
 #
-# Served for INT64 partition keys that hold no NULL: the splitters compare raw
-# values, which agrees with the sort only when no key is NULL (NULLs sort
-# last). Other keys take the range driver.
+# Served for one or more INT64 partition keys that hold no NULL: the splitters
+# compare raw values, which agrees with the sort only when no key is NULL
+# (NULLs sort last). With no partition key every row would share one bucket,
+# so that case, and other key types, take the range driver.
 #
 # Splitters come from a fixed stride sample, and each bucket keeps its rows in
 # input order before its stable sort, so the output does not depend on the
@@ -34,7 +34,6 @@ from std.memory import OwnedPointer, UnsafePointer, alloc
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.record_batch import RecordBatch
-from komira_arrow.schema import SchemaBuilder
 from komira_async.cancellation.token import CancellationToken
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.local_dispatcher import LocalDispatcher
@@ -44,10 +43,14 @@ from komira_collections.slab import Slab
 from komira_column_kernels.compiler_helpers import gather_batch
 from komira_operator_api.sink_batch_fold import fold_batches_into_one
 from komira_physical_plan.physical_plan import PartitionBySinkData
-from komira_plan_expr.partition_expr import PartitionExpr
 
 from .partition_keys import column_has_nulls, sort_partition_batch
-from .partition_scan_sink import _empty_output, _eval_sorted, _execute_partition_by_sink
+from .partition_scan_sink import (
+    _copy_sink_data,
+    _empty_output,
+    _eval_sorted,
+    _execute_partition_by_sink,
+)
 
 
 # =============================================================================
@@ -73,8 +76,11 @@ comptime _RANGE_SPLITTER_SAMPLE_TARGET: Int = 4096
 def _all_int64_partition_keys(
     batch: RecordBatch, partition_keys: List[String]
 ) raises -> Bool:
-    """True iff every partition key is an INT64 column with no NULL (the keys
-    this driver's raw-value splitters order as the sort does)."""
+    """True iff there is a partition key and each is an INT64 column with no
+    NULL (the keys this driver's raw-value splitters order as the sort does).
+    With no key every row would land in one bucket."""
+    if len(partition_keys) == 0:
+        return False
     for k in partition_keys:
         ref c = batch.column_at(batch.schema.column_index(k))
         if c.arrow_type != ArrowType.INT64:
@@ -288,29 +294,14 @@ def _scatter_rows_to_buckets_int64(
     return buckets^
 
 
-def _copy_sink_data(sink_data: PartitionBySinkData) raises -> PartitionBySinkData:
-    """A deep copy of a PartitionBySinkData (its fields are Movable only)."""
-    var exprs_copy = List[PartitionExpr]()
-    for i in range(len(sink_data.partition_exprs)):
-        exprs_copy.append(sink_data.partition_exprs[i].copy())
-    var sb = SchemaBuilder()
-    for i in range(sink_data.output_schema.num_columns()):
-        sb.add_field(sink_data.output_schema.field_at(i))
-    return PartitionBySinkData(
-        sink_data.partition_keys.copy(),
-        sink_data.order_keys.copy(),
-        sink_data.descending.copy(),
-        exprs_copy^,
-        sb.build(),
-    )
-
-
 def _execute_partition_by_sink_bucket(
     full_batch: RecordBatch,
     bucket_indices: List[Int],
     sink_data: PartitionBySinkData,
 ) raises -> RecordBatch:
-    """One bucket: gather its rows, sort them, evaluate them."""
+    """One bucket: gather its rows, sort them, evaluate them. The gathers of
+    all buckets together hold a second copy of the input, so the peak is
+    about twice the input size; this is not counted in a MemoryReservation."""
     if len(bucket_indices) == 0:
         return _empty_output(sink_data)
     var sorted_sub = sort_partition_batch(
@@ -354,7 +345,10 @@ struct _HashScatterPartitionByState(KeepAlive, Movable):
         self.sink_spec = OwnedPointer(sink_spec^)
         self.bucket_indices = OwnedPointer(bucket_indices^)
         self.morsel_results = OwnedPointer(morsel_results^)
-        # Atomic is not Movable: construct it in place on its heap slot.
+        # SAFETY: Atomic is not Movable, so each is constructed in place on a
+        # fresh heap slot, written once before the pointer is wrapped. The
+        # OwnedPointer owns the slot and frees it when the state is dropped;
+        # no other owner exists.
         var fraw = alloc[Atomic[DType.int8]](1)
         UnsafePointer(to=fraw[].value).unsafe_write(Scalar[DType.int8](0))
         self.err_flag = OwnedPointer[Atomic[DType.int8]](unsafe_from_raw_pointer=fraw)

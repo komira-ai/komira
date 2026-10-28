@@ -41,11 +41,9 @@ from komira_collections.slab import Slab
 from komira_column_kernels.batch_slice import _slice_batch_range
 from komira_operator_api.sink_batch_fold import fold_batches_into_one
 from komira_physical_plan.physical_plan import PartitionBySinkData
-from komira_plan_expr.partition_expr import PartitionExpr
-from komira_arrow.schema import SchemaBuilder
 
 from .partition_keys import _detect_partition_boundaries, sort_partition_batch
-from .partition_scan_sink import _empty_output, _eval_sorted
+from .partition_scan_sink import _copy_sink_data, _empty_output, _eval_sorted
 from .partition_scan_sink_hash_scatter import (
     _HASH_SCATTER_MIN_ROWS,
     _all_int64_partition_keys,
@@ -83,8 +81,9 @@ def _compute_bucket_partition_ranges(
     `out[b]` is a partition start (no partition is split) or `num_rows`; a
     bucket may be empty when there are fewer partitions than buckets.
 
-    Greedy: bucket `b` ends at the first partition start past
-    `(b + 1) * (num_rows / k)` rows.
+    Greedy: bucket `b` ends at the start of the first partition that ends
+    past `(b + 1) * (num_rows // k)` rows, so a partition that crosses the
+    target belongs to the next bucket.
     """
     var p = len(bounds)
     var bucket_starts = List[Int]()
@@ -178,7 +177,10 @@ struct _PartitionByParallelState(KeepAlive, Movable):
         self.sink_spec = OwnedPointer(sink_spec^)
         self.bucket_starts = OwnedPointer(bucket_starts^)
         self.morsel_results = OwnedPointer(morsel_results^)
-        # Atomic is not Movable: construct it in place on its heap slot.
+        # SAFETY: Atomic is not Movable, so each is constructed in place on a
+        # fresh heap slot, written once before the pointer is wrapped. The
+        # OwnedPointer owns the slot and frees it when the state is dropped;
+        # no other owner exists.
         var fraw = alloc[Atomic[DType.int8]](1)
         UnsafePointer(to=fraw[].value).unsafe_write(Scalar[DType.int8](0))
         self.err_flag = OwnedPointer[Atomic[DType.int8]](unsafe_from_raw_pointer=fraw)
@@ -228,23 +230,6 @@ struct _PartitionByParallelTask(Segment):
                 if sp[].err_flag[].compare_exchange(expected, Int8(1)):
                     sp[].err_msg[] = String(e)
                 return
-
-
-def _copy_sink_data(sink_data: PartitionBySinkData) raises -> PartitionBySinkData:
-    """A deep copy of a PartitionBySinkData (its fields are Movable only)."""
-    var exprs_copy = List[PartitionExpr]()
-    for i in range(len(sink_data.partition_exprs)):
-        exprs_copy.append(sink_data.partition_exprs[i].copy())
-    var sb = SchemaBuilder()
-    for i in range(sink_data.output_schema.num_columns()):
-        sb.add_field(sink_data.output_schema.field_at(i))
-    return PartitionBySinkData(
-        sink_data.partition_keys.copy(),
-        sink_data.order_keys.copy(),
-        sink_data.descending.copy(),
-        exprs_copy^,
-        sb.build(),
-    )
 
 
 def _collect_buckets(

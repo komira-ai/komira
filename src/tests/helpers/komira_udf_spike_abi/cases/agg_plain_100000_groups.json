@@ -1,0 +1,11 @@
+{
+ "name": "agg_plain_100000_groups",
+ "defect": "a plain aggregate that returns one batch per group: 100 000 groups of one row in one input batch come back in at most two outputs",
+ "run": "frame",
+ "entry": "group_max",
+ "shape": "AGG_PLAIN",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "inputs": [{"length": 100000, "columns": [{"type": "int64", "range": 100000}, {"type": "int64", "values": [1], "repeat": 100000}]}],
+ "expect": {"status": "OK", "concat_column": {"type": "int64", "values": [1], "repeat": 100000}, "max_outputs": 2}
+}

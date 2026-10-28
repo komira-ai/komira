@@ -123,10 +123,11 @@ struct _ConcatColumnsState(KeepAlive, Movable):
 @fieldwise_init
 struct _ConcatColumnsTask(Segment):
     """POD Segment for `_ConcatColumnsState` dispatch — one task per
-    column. Carries only an Int32 pad; the heavy state is on the
-    borrowed State.
+    column. Carries the index of the batch that supplies the column types
+    (the driver's first batch with rows and columns); the heavy state is on
+    the borrowed State.
     """
-    var _pad: Int32
+    var schema_idx: Int32
 
     def execute[State: KeepAlive](
         mut self,
@@ -162,15 +163,7 @@ struct _ConcatColumnsTask(Segment):
             ref slot0 = input_slab.get_mut_interior(0)
             var staging_ptr = UnsafePointer(to=slot0)
 
-            # Find the first non-empty batch to read the type from.
-            var schema_idx = -1
-            for i in range(num_b):
-                if (staging_ptr + i)[]:
-                    schema_idx = i
-                    break
-            if schema_idx < 0:
-                return
-
+            var schema_idx = Int(self.schema_idx)
             var at = (staging_ptr + schema_idx)[].value().column_at(col_idx).arrow_type
             var concatted: Column[HeapRegion]
             # ★ THE SLOW ARM IS WHAT LETS THIS TASK RUN AT ALL FOR A BATCH
@@ -225,39 +218,24 @@ struct _ConcatWork(Copyable, Movable):
     arm and as the byte-equivalence oracle for kind 3.
     `kind == 2` → column `col_idx`'s VALIDITY bitmap + null count (write
     `out_validity[col_idx]` / `out_nulls[col_idx]`).
-    `kind == 3` → STRING/BINARY row-range tile (LEVER A): copy OUTPUT rows
+    `kind == 3` → STRING/BINARY row-range tile: copy OUTPUT rows
     [row_start, row_end) of column `col_idx` into the pre-sized
     `fixed_bufs[col_idx]` (payload) + `str_off_bufs[col_idx]` (int32 offsets).
 
-    ★ KIND 2 IS TYPE-AGNOSTIC AND IS REUSED FOR STRING COLUMNS UNCHANGED — this
-    is why LEVER A needs no validity design of its own. `_build_fixed_validity`
+    Kind 2 is type-agnostic and is used for STRING columns unchanged, so the
+    string tiles need no validity design of their own. `_build_fixed_validity`
     reads only `_validity` / `_offset` / `_length`, none of which is layout-
-    specific, and it produces the SAME BYTES as the string helper's own pass:
-    both seed all-valid (`create_all_valid`'s memset-0xFF-then-mask-trailing vs
-    `create`-zero-then-set-every-bit — identical over [0, num_bytes), trailing
-    padding bits included), both overwrite only from batches that carry a
-    bitmap, and both leave rows from bitmap-less batches valid.
-    `_sum_fixed_null_count` likewise just sums `_null_count`. Guarded by T5/T8
-    of `test_concat_rowrange_tile_byte_equiv`, which are the first tests in the
-    tree to compare the two constructions against each other.
+    specific, and it produces the same bytes as the string helper's own pass:
+    both seed all-valid (identical over [0, num_bytes), trailing padding bits
+    included), both overwrite only from batches that carry a bitmap, and both
+    leave rows from bitmap-less batches valid. `_sum_fixed_null_count` likewise
+    just sums `_null_count`. `tests/test_concat_byte_equivalence.mojo` compares
+    the whole-column and tiled constructions byte for byte.
 
-    ★ WHY KIND 2 EXISTS, AND IT IS THE WHOLE REASON THIS PATH USED TO LOSE.
-    The validity/null-count pass used to run SERIALLY on the driver after the
-    barrier, on the argument that a 1-bit-per-row buffer is "not worth
-    parallelizing". MEASURED on q21 (`KOMIRA_SCHED_TRACE=1`, 6 reps): the
-    resulting `concat_tiled_assemble` bracket read **117.66 ms over 14 calls
-    with `fork_ns=0`** — 8.79% of worker wall, entirely serial — against
-    `concat_cols_assemble`'s **0.81 ms** of serial for 20 calls of the incumbent
-    path, which does the same work INSIDE its per-column worker task. Tiling the
-    data copy while serializing the validity pass moved work from parallel to
-    serial, and the net was a MEASURED +4.65% REGRESSION on q21 (0 of 15 rounds,
-    exact paired permutation p = 6.1e-05).
-
-    ⚠ THIS ALSO RE-READS THE "MEASURED FLAT, BANDWIDTH-BOUND"
-    VERDICT. That A/B ran on this same shape, and the brackets that show the
-    serialization did not exist — so the flatness it attributed
-    to DRAM bandwidth was at least partly this. A mechanism inferred from a flat
-    wall, on a path with an unmeasured serial window in it, was never tested.
+    Kind 2 runs inside the fork, not on the driver after the barrier: the
+    validity and null-count pass is a whole-column scan, and running it
+    serially after the tiled copy would put that scan back on the driver while
+    the pool idles.
 
     A kind-2 item is independent of every kind-0 tile of the same column: it
     reads the input batches (read-only) and writes a DIFFERENT destination (the
@@ -289,8 +267,8 @@ struct _ConcatTiledState(KeepAlive, Movable):
     var out_columns: OwnedPointer[Slab[Column[HeapRegion]]]
 
     # OWNED per-column destination VALUE buffers, pre-sized to total_rows*width
-    # (fixed) or to the column's total payload bytes (STRING/BINARY under LEVER
-    # A). Row-range tiles write DISJOINT byte slices of the SAME buffer (no
+    # (fixed) or to the column's total payload bytes (STRING/BINARY with
+    # string tiling on). Row-range tiles write DISJOINT byte slices of the SAME buffer (no
     # realloc, no metadata mutation during dispatch). A STRING column on the
     # whole-column route (`ConcatOptions.string_tiling=False`) gets a length-0
     # placeholder here — its Column is built entire by the kind-1 task.
@@ -435,7 +413,7 @@ struct _ConcatTiledTask(Segment):
                 )
                 sp[].out_columns[][col] = concatted^
             elif w.kind == UInt8(3):
-                # STRING/BINARY ROW-RANGE TILE (LEVER A) → disjoint dst byte
+                # STRING/BINARY ROW-RANGE TILE → disjoint dst byte
                 # slice of the payload buffer AND a disjoint run of int32
                 # offset slots. Same disjointness contract as kind 0; the
                 # aliased `mut` refs through the bitcast pointer are the same

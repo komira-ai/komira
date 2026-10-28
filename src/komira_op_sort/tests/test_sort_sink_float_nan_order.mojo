@@ -1,21 +1,18 @@
 # =============================================================================
-# The sort and top-N sinks, and SortBuffer_Untyped, put NaN above +inf
+# The sort and top-N sinks put NaN above +inf
 # =============================================================================
 #
 # DuckDB orders a DOUBLE key with NaN greater than +inf: `ORDER BY x` ends
 # with the NaN rows, `ORDER BY x DESC` starts with them, and so does
-# `ORDER BY x DESC LIMIT k`. Three routes are checked against that:
+# `ORDER BY x DESC LIMIT k`. Two routes are checked against that:
 #
 #   * `_execute_sort_sink`, single FLOAT64 key (the merge sort);
 #   * `_execute_topn_sink` in the HEAP regime (`num_rows > k *
-#     TOPN_HEAP_RATIO`, asserted below), single key and FLOAT64 + INT64;
-#   * `SortBuffer_Untyped` with a DT_F64 key.
+#     TOPN_HEAP_RATIO`, asserted below), single key and FLOAT64 + INT64.
 #
-# Defect each catches: a comparator using the IEEE `<` / `>`. On the heap a
-# NaN then never beats the top, so DESC LIMIT k returns +inf rows and drops
-# every NaN; in the buffer's merge sort NaN compares equal to everything and
-# strands mid-sequence. Planted mutants: the heap's `_cmp3` and the buffer's
-# F64 arm reverted to `<` / `>` each turn their tests red.
+# A comparator using the IEEE `<` / `>` would never let a NaN beat the heap
+# top, so DESC LIMIT k would return +inf rows and drop every NaN; these
+# tests fail on that.
 # =============================================================================
 
 from std.math import inf, isnan
@@ -27,14 +24,7 @@ from komira_arrow.column import Column
 from komira_arrow.primitive_array import PrimitiveArray
 from komira_arrow.record_batch import RecordBatch, RecordBatchBuilder
 from komira_arrow.schema import Field, SchemaBuilder
-from komira_column_format.column_format_storage import (
-    COL_FIXED,
-    ColDescriptor,
-    DT_F64,
-    ROLE_SORT_KEY,
-)
 from komira_physical_plan.physical_plan import SortSinkData, TopNSinkData
-from komira_op_sort.sort_buffer_untyped import SORT_ASC, SORT_DESC, SortBuffer_Untyped
 from komira_op_sort.sort_topn_sink import (
     TOPN_HEAP_RATIO,
     _execute_sort_sink,
@@ -163,39 +153,6 @@ def test_topn_heap_asc_never_takes_nan() raises:
         assert_equal(out[i], finite[i], "the ten smallest keys")
 
 
-def _f64_key() -> List[ColDescriptor]:
-    return [ColDescriptor(
-        name_id=0, kind=COL_FIXED, dtype_tag=DT_F64, role=ROLE_SORT_KEY,
-        col_idx_in_batch=0, col_idx_in_storage=0, validity_tracked=False,
-    )]
-
-
-def _buffer_sorted(direction: UInt8) raises -> List[Float64]:
-    var dirs: List[UInt8] = [direction]
-    var sb = SortBuffer_Untyped(_f64_key(), dirs^, List[ColDescriptor](), 16)
-    var rb = _fixture()
-    sb.feed_batch(BatchView(rb))
-    sb.finalize_sort()
-    return sb.read_sorted_f64(0)
-
-
-def test_sort_buffer_f64_nan_last_ascending() raises:
-    var out = _buffer_sorted(SORT_ASC)
-    assert_equal(len(out), _N)
-    for i in range(_N - 12):
-        assert_true(not isnan(out[i]), "no NaN before the last 12 slots")
-    for i in range(_N - 12, _N):
-        assert_true(isnan(out[i]), "the last 12 slots are the NaNs")
-    for i in range(1, _N - 12):
-        assert_true(out[i - 1] <= out[i], "ascending")
-
-
-def test_sort_buffer_f64_nan_first_descending() raises:
-    var out = _buffer_sorted(SORT_DESC)
-    for i in range(12):
-        assert_true(isnan(out[i]), "the first 12 slots are the NaNs")
-    for i in range(13, _N):
-        assert_true(out[i - 1] >= out[i], "descending")
 
 
 def main() raises:

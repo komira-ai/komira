@@ -36,7 +36,7 @@ On the pinned compiler `Pointer` and `UnsafePointer` are one type, so the rules 
 
 ### How do the collection types keep pointers private?
 
-They lend views and references whose origin is the collection. `ByteView[origin]` in `src/komira_buffer/byte_view.mojo` is parameterised on the origin of the bytes it views, so a view cannot outlive its source. `Slab[T]` in `src/komira_collections/slab.mojo` stores its elements in a `List[UInt8]` field, `_bytes`, and returns elements by reference or by move (`take_slot_unchecked`, `swap_remove`).
+They lend views and references whose origin is the collection. `ByteView[origin]` in `src/komira_buffer/byte_view.mojo` is parameterised on the origin of the bytes it views, so a view cannot outlive its source. `Slab[T]` in `src/komira_collections/src/komira_collections/slab.mojo` stores its elements in a `List[UInt8]` field, `_bytes`, and returns elements by reference or by move (`take_slot_unchecked`, `swap_remove`).
 
 ### How do I move a field out of a struct?
 
@@ -105,7 +105,7 @@ The toolchain pins Mojo `1.0.0` (the `mojo-compiler` packages in `tools/build/to
 
 ## What must always hold?
 
-The build checks the first six: `//:pointer_lint` (the `pointer_lint` lint, `tools/build/lint/defs.bzl`; its reader, `tools/build/lint/pointer_lint.awk`, says what each rule matches) reads every `.mojo` file of the repository and fails `./buck2 build //...` on a site no ledger holds. The last is held by review.
+The build checks the first six: `//:pointer_lint` (the `pointer_lint` lint, `tools/build/lint/defs.bzl`; its action, the Zig tool `tools/build/lint/pointer_lint.zig`, says what each rule matches) reads every `.mojo` file of the repository and fails `./buck2 build //...` on a site no ledger holds. The last is held by review.
 
 - **No `unsafe_from_address=`** (rule `from_address`).
 - **No partial move via a pointer** (rule `partial_move`): `UnsafePointer(to=<expr>.<field>).take_pointee()`, or a name bound to a field's address and taken later in the same function.
@@ -127,7 +127,7 @@ The spelling rules in the table above are different: the compiler refuses the ol
 | `src/komira_async_api/parallel_dispatch.mojo`, `fork_join_shared.mojo` | the parallel dispatch contract | `ParallelDispatch`, `NoDispatch`, `fork_join_shared` |
 | `src/komira_buffer/mmap_region.mojo`, `src/komira_libc/native/komira_libc_posix.c` | an FFI boundary through a C shim that resolves platform constants in C | `open_readonly`, `komira_open_ro` |
 | `tools/build/toolchains/BUCK` | the compiler pin | the `mojo-compiler` 1.0.0 packages |
-| `tools/build/lint/pointer_lint.awk`, `lint.sh`, `defs.bzl`; `tests/pointer_lint_ffi.tsv`, `tests/pointer_lint_holds.tsv` | the pointer lint, and its two ledgers | `pointer_lint`, `//:pointer_lint` |
+| `tools/build/lint/pointer_lint.zig`, `mojo_tokens.zig`, `pointer_lint_test.zig`, `defs.bzl`; `tests/pointer_lint_ffi.tsv`, `tests/pointer_lint_holds.tsv` | the pointer lint, and its two ledgers | `pointer_lint`, `//:pointer_lint` |
 
 Entry points:
 
