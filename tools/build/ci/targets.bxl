@@ -1,12 +1,20 @@
-# Writes ci/targets.bzl: the roots of the check set (TARGETS) and the
-# standalone tests among them (TESTS), which `//ci:pr` (ci/BUCK) holds.
+# Writes ci/targets.bzl and its shards ci/targets/shard_<n>.bzl: the roots of
+# the check set (TARGETS) and the standalone tests among them (TESTS), which
+# `//ci:pr` (ci/BUCK) holds. ci/targets.bzl loads the shards and exposes the two
+# lists; the rows of a package are in the shard its path hashes to
+# (ci_graph.bzl SHARDS, shard_of), so no file grows past the line limit as
+# packages are added.
 #
-#   ./buck2 bxl komira//tools/build/ci/targets.bxl:generate > ci/targets.bzl
+#   out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d "$out" ] && [ "$out" != / ] && cp -rL --no-preserve=mode "$out"/. ci/
 #
-# A BXL script cannot write the source tree, so the redirect is the one
-# shell element: the file is checked in, and `guard.bxl:check` fails the
-# pull request check when it is out of date. Regenerate after adding or
-# removing a package or a target no other target depends on.
+# A BXL script cannot write the source tree. It builds the files into one
+# directory of buck-out (a scratch copy, so a failed generation leaves the
+# checked-in files as they are: never redirect onto ci/targets.bzl, which
+# empties it before this script, which loads it, runs) and prints that
+# directory; the `cp` is the one shell element. The files are checked in, and
+# `guard.bxl:check` fails the pull request check when they are out of date.
+# Regenerate after adding or removing a package or a target no other target
+# depends on.
 #
 # TARGETS: every check of the scope (UNIVERSE of rules.bzl) that no other
 # check depends on; building them builds every other check, as a
@@ -22,7 +30,8 @@
 #
 # Option: --scope <patterns> (default UNIVERSE).
 
-load(":ci_graph.bzl", "check_nodes", "render", "roots")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":ci_graph.bzl", "check_nodes", "render_all", "roots")
 load(":rules.bzl", "AGGREGATE", "EXCLUDED", "UNIVERSE")
 
 def _is_test(ctx, node):
@@ -35,8 +44,13 @@ def _generate(ctx):
     nodes = check_nodes(ctx, scope, AGGREGATE.split(":")[0] + ":", [p for p, _ in EXCLUDED])
     labels = roots(nodes)
     tests = [l for l in labels if _is_test(ctx, nodes[l])]
-    for line in render(labels, tests):
-        ctx.output.print(line)
+    actions = ctx.bxl_actions(exec_compatible_with = LINUX_X86_64).actions
+    files = {}
+    for path, lines in render_all(labels, tests).items():
+        rel = path[len("ci/"):]
+        files[rel] = actions.write("targets_gen/files/" + rel, "\n".join(lines) + "\n")
+    out = actions.symlinked_dir("targets_gen/dir", files)
+    ctx.output.print(ctx.output.ensure(out).abs_path())
 
 generate = bxl_main(
     impl = _generate,

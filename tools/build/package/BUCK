@@ -296,6 +296,7 @@ conda_release_set_check(
         "//src/komira_gcp_wif:komira_gcp_wif",
         "//src/kci_cloud_gcp:kci_cloud_gcp",
         "//src/komira_kafka_broker:komira_kafka_broker",
+        "//src/komira_bench_duckdb:komira_bench_duckdb",
         "//src/komira_bench_report:komira_bench_report",
     ],
     # The `native` of each library above whose mojo_library declares one (the

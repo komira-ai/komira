@@ -39,6 +39,10 @@ MojoInfo = provider(fields = {
     # soname order. Its conda package requires each requirement.
     "dlopen": provider_field(typing.Any, default = []),
     "import_name": provider_field(str),
+    # The directories of the pinned shared libraries the library's code opens at run time, with those of every package it depends on
+    # (tools/build/mojo/system_libs.bzl): what a test run that loads this package must find on its library path. Artifacts (directories) in the order
+    # they were met, none twice; [] for a package with none.
+    "system_libs": provider_field(typing.Any, default = []),
     # The native code of the library and its closure, a struct from
     # native_facts (tools/build/mojo/native_facts.bzl); None for a rule that
     # is not a mojo_library.

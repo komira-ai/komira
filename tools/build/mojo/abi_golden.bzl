@@ -1,6 +1,6 @@
 """komira_abi_golden: the golden of a C ABI, checked against its source, and the C header made from it.
 
-    komira_abi_golden(name, src, golden, header_name = "<name>.h")
+    komira_abi_golden(name, src, golden, header_name = "<name>.h", constants_src = None)
 
 `src` is a Mojo file of `@export ... abi("C")` functions (the `main` of a
 `mojo_shared_lib`). `golden` is a tab-separated file: a first line
@@ -18,12 +18,25 @@ finding, on:
 - a row whose `since` is above the golden version,
 - a symbol listed twice, and
 - a type outside the type map (Int8..Int64, UInt8..UInt64, Int, UInt, Float32,
-  Float64, OpaquePointer, Handle, and `UnsafePointer[...]` of those).
+  Float64, OpaquePointer, Handle, CStr, ConstBytes, and `UnsafePointer[...]` of
+  those). `CStr` is `const char *` and `ConstBytes` is `const uint8_t *`; the
+  source must declare each it uses as `comptime CStr = UnsafePointer[UInt8, ...]`,
+  and a declaration of any other type is a finding.
+
+Constants are golden rows too, `constant<TAB>NAME<TAB>VALUE<TAB>since`, with NAME
+starting `KOMIRA_` and VALUE a decimal integer. They become `#define`s in the
+header (a value above `int` takes `ULL`). With `constants_src`, a Mojo file whose
+top-level `comptime KOMIRA_NAME: <integer type> = <product of integers>` lines
+are the constants' source, the action also fails on a golden constant the file
+lacks, one whose value differs, and a `KOMIRA_` constant the golden does not
+list. Constants in the golden with no `constants_src` are a finding: nothing
+would hold them to a source.
 
 With none, the target's one output, `<header_name>`, is the C header of the
 golden: include guards, `<stddef.h>` and `<stdint.h>`,
-`KOMIRA_ABI_VERSION_MAJOR` and `KOMIRA_ABI_VERSION_MINOR`, the opaque handle
-typedef `komira_handle`, and one prototype per row in the golden's order.
+`KOMIRA_ABI_VERSION_MAJOR` and `KOMIRA_ABI_VERSION_MINOR`, one `#define` per
+constant, the opaque handle typedef `komira_handle`, and one prototype per row
+in the golden's order.
 
 What this does not check: that the golden's version was raised when a row
 changed. That compares with the previous release, and a build holds only the
@@ -45,6 +58,7 @@ def _impl(ctx):
             header.as_output(),
             str(ctx.label.raw_target()),
             name,
+            ctx.attrs.constants_src if ctx.attrs.constants_src else [],
         ),
         category = "abi_golden",
     )
@@ -54,6 +68,7 @@ komira_abi_golden_rule = rule(
     impl = _impl,
     doc = "The C header of the golden `golden` (a tab-separated list of symbols with return and argument types and the version that added each), failing unless the `@export abi(\"C\")` functions of the Mojo file `src` are exactly its rows with the same types. See abi_golden.bzl.",
     attrs = {
+        "constants_src": attrs.option(attrs.source(), default = None),
         "golden": attrs.source(),
         "header_name": attrs.option(attrs.string(), default = None),
         "src": attrs.source(),
