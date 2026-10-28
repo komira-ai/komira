@@ -30,6 +30,7 @@ load("//src/komira_kafka_server:buildrules.mojo.lock.bzl", komira_kafka_server =
 load("//src/komira_kg_mode:buildrules.mojo.lock.bzl", komira_kg_mode = "GRAPH")
 load("//src/komira_kg_spec:buildrules.mojo.lock.bzl", komira_kg_spec = "GRAPH")
 load("//src/komira_libc:buildrules.mojo.lock.bzl", komira_libc = "GRAPH")
+load("//src/komira_log:buildrules.mojo.lock.bzl", komira_log = "GRAPH")
 load("//src/komira_lz4:buildrules.mojo.lock.bzl", komira_lz4 = "GRAPH")
 load("//src/komira_mail_address:buildrules.mojo.lock.bzl", komira_mail_address = "GRAPH")
 load("//src/komira_mail_message:buildrules.mojo.lock.bzl", komira_mail_message = "GRAPH")
@@ -90,6 +91,7 @@ _GRAPHS = {
     "komira_kg_mode": komira_kg_mode,
     "komira_kg_spec": komira_kg_spec,
     "komira_libc": komira_libc,
+    "komira_log": komira_log,
     "komira_lz4": komira_lz4,
     "komira_mail_address": komira_mail_address,
     "komira_mail_message": komira_mail_message,

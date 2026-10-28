@@ -2,7 +2,7 @@
 #include <stdint.h>
 
 // =============================================================================
-// _log_holder_shim.c -- the process-lifetime logging holders.
+// komira_log_holder.c -- the process-lifetime logging holders.
 // =============================================================================
 //
 // Three one-word linker-global cells and nothing else:
