@@ -294,7 +294,7 @@ def _cd_consume_grouped[
             # wraps past Int64.MAX are all handled by the same compare and
             # none of them can overflow), one L1 load. What it replaces is
             # a two-round mulx hash fold plus TWO SwissTable group walks —
-            # 35.9 cycles/row measured on a small dense int64 key domain, 17.73% of that query.
+            # a large per-row cost on a small dense int64 key domain.
             var du = (Int64(key) - Int64(st.dense_lo)).cast[
                 DType.uint64
             ]()
@@ -501,10 +501,9 @@ def _cd_fx_fold_batch[bo: Origin](
     Here every per-aggregate decision is taken ONCE per batch and the inner
     loop is a gid load, a value load and one cell update.
 
-    MEASURED (20 workers, both shapes in one binary, 3 interleaved rounds
-    of 7 warm reps): the mixed query 557.8 -> 521.7 ms (-6.47%, 3/3 rounds
-    disjoint), instructions 46.3G -> 42.1G; the all-CD control (which does
-    not contain this code) +0.19%, not disjoint. Results identical.
+    The mixed query runs faster and executes fewer instructions; the
+    all-COUNT(DISTINCT) control, which does not contain this code, is
+    unchanged. Results are identical.
 
     ⛔ THE SEMANTICS ARE UNCHANGED, LINE FOR LINE, AND SO IS EVERY BIT OF
     EVERY ANSWER. Each cell still sees its rows in ascending row order —

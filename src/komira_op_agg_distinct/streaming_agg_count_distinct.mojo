@@ -20,9 +20,9 @@
 #   * GROUP-ID RESOLUTION. When the observed key domain spans at most
 #     `_CD_DENSE_GID_DOMAIN_CAP` keys, the gid is read out of a flat window
 #     (`dense_idx[key - dense_lo]`, one subtract, one unsigned range test, one
-#     L1 load); otherwise through `group_map`, a `Dict[Int, Int]` (measured:
-#     the two Dict probes were 49% of the row loop's cycles on a 91-group
-#     query). The window is discovered from the keys themselves, so every
+#     L1 load); otherwise through `group_map`, a `Dict[Int, Int]` (the two Dict
+#     probes were the largest share of the row loop's cycles on a query with
+#     few groups). The window is discovered from the keys themselves, so every
 #     source and key channel is covered. A new key gets
 #     `gid = len(group_keys)` the moment it is first seen on BOTH paths, so
 #     `group_keys` is identical index for index whichever path ran.
@@ -41,25 +41,25 @@
 #     so the memo only repeats the Dict's answer. Witness: `stat_gid_lastkey`.
 #   * ADJACENT DEDUP. A value equal to its cell's LAST element is not appended
 #     (a distinct count does not change when a value already present is
-#     dropped; measured: 77.9% of the rows of a clustered 100M-row input).
+#     dropped; on a clustered input most rows are skipped this way).
 #     Witness: `stat_adj_skipped`; `stat_appends + stat_set_inserts +
 #     stat_adj_skipped` is the non-NULL value count.
 #   * SCAN-TIME DEDUP OF A CELL (off by default: `cd_scan_dedup_off`). A cell
 #     that has buffered `_CD_GROUPED_PROMOTE_MIN_VALUES` values (the size at
 #     which its buffer equals the directory floor of the sets replacing it)
 #     and whose prefix is at most 3/4 distinct is PROMOTED into
-#     `_CD_VALUE_NUM_PARTITIONS` dedup-on-insert hash sets. It measured slower
-#     than appending (+18.6% on a 91-group, 100M-row query: the set probes are
-#     random DRAM loads), so it is kept, value-correct, behind the field.
+#     `_CD_VALUE_NUM_PARTITIONS` dedup-on-insert hash sets. It is slower
+#     than appending on a query with few groups and many rows (the set probes
+#     are random memory loads), so it is kept, value-correct, behind the field.
 #     Witnesses: `stat_appends` and `stat_set_inserts` (they partition the
 #     appended-or-inserted values).
 #   * THE FIXED-CELL PASSENGER LANE. A grouped aggregate that mixes
 #     COUNT(DISTINCT) with SUM / COUNT / MIN / MAX / AVG folds those fixed
 #     aggregates against the gid the CD lane already resolved, in the same row
-#     iteration, so the group key is decoded and hashed once (measured: a
-#     second scan was 20% of the column-chunk decodes). `consume_batch` takes
+#     iteration, so the group key is decoded and hashed once (a second
+#     scan would repeat the column-chunk decodes). `consume_batch` takes
 #     `comptime has_fixed`; the all-CD instantiation contains no passenger
-#     code at all (one that skipped the lane at run time measured +4.32%).
+#     code at all (one that skipped the lane at run time is slower).
 #     With `fxcol_on` (the default) the lane folds column-major per batch.
 #     Witnesses: `stat_batches` and `stat_fx_batches`.
 #
@@ -197,7 +197,7 @@ struct WorkerCDState(Copyable, Movable):
     append-only `List[Int64]` (`cd_bufs`) — that is the DEFAULT and the
     shipped path.
 
-    With `cd_scan_dedup_off = False` (off by default; it measured slower): a
+    With `cd_scan_dedup_off = False` (off by default; it is slower): a
     cell that has buffered `_CD_GROUPED_PROMOTE_MIN_VALUES` values AND whose
     prefix is shown to repeat is PROMOTED into `_CD_VALUE_NUM_PARTITIONS`
     dedup-on-scan `GrowableHashSetI64` sets (`cd_gsets`). `cd_gmode`
@@ -279,8 +279,8 @@ struct WorkerCDState(Copyable, Movable):
     var cd_sets: List[List[GrowableHashSetI64]]
     var num_aggs: Int
     # When True (the default) the grouped path never promotes a cell: every
-    # value is appended. False arms the scan-time dedup, which measured slower
-    # (+18.6% on a 91-group query); see the module header.
+    # value is appended. False arms the scan-time dedup, which is slower
+    # on a query with few groups; see the module header.
     var cd_scan_dedup_off: Bool
     # Structural counters (grouped path). Exact, not sampled, and they
     # PARTITION the input: `stat_appends + stat_set_inserts` is the row count
