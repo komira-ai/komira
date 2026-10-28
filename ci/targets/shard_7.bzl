@@ -42,6 +42,7 @@ TARGETS = [
     "komira//src/komira_mail_tls:komira_mail_tls_conda",
     "komira//src/komira_morsel:komira_morsel_conda",
     "komira//src/komira_op_asof:komira_op_asof_conda",
+    "komira//src/komira_op_fused_kernels:komira_op_fused_kernels_conda",
     "komira//src/komira_op_typed_source_api:komira_op_typed_source_api_conda",
     "komira//src/komira_optimizer:komira_optimizer_conda",
     "komira//src/komira_orc:komira_orc_conda",
