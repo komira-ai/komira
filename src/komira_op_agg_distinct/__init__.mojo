@@ -15,7 +15,8 @@ state of the streaming COUNT(DISTINCT) aggregation
 global group directory `cd_global_dir` and the route counters
 `cd_passenger_lane_counter`), the streaming COUNT(DISTINCT) sink
 (`agg_sink_count_distinct`, with its ungrouped union
-`agg_count_distinct_kernel`), the stage DISTINCT breaker state
+`agg_count_distinct_kernel` and its fixed-aggregate columns
+`agg_cd_fixed_emit`), the stage DISTINCT breaker state
 (`distinct_state`, with its key columns `distinct_key_column` and
 `distinct_key_column_string`), and the parallel per-group finalize of the stage
 MEDIAN drain (`median_parallel_drain`).

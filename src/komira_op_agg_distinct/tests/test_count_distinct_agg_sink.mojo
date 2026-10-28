@@ -16,6 +16,7 @@
 # =============================================================================
 
 from std.memory import OwnedPointer, Pointer
+from std.collections import Set
 from std.testing import TestSuite, assert_equal
 
 from komira_arrow.arrow_types import ArrowType
@@ -91,7 +92,7 @@ def _make_agg_data() raises -> AggSinkData:
 
 
 def _make_ungrouped_agg_data() raises -> AggSinkData:
-    """SELECT COUNT(DISTINCT v). num_keys==0 (CB-04 shape)."""
+    """SELECT COUNT(DISTINCT v), ungrouped."""
     var group_by = ExprArray()  # empty
     var aggs = AggExprArray()
     aggs.append(count_distinct(col("v")).alias("dv"))
@@ -316,7 +317,6 @@ def test_single_worker() raises:
     var expected = _reference_grouped_cd(batches_for_ref^)
     var actual = _extract_group_map(result)
     _assert_same(actual, expected)
-    print("test_single_worker OK (3 batches, 3 keys, 5 distinct/key, 1 worker)")
 
 
 def test_multi_worker() raises:
@@ -342,7 +342,6 @@ def test_multi_worker() raises:
     var expected = _reference_grouped_cd(batches_for_ref^)
     var actual = _extract_group_map(result)
     _assert_same(actual, expected)
-    print("test_multi_worker OK (16 batches, 10 keys, 15 distinct/key, 4 workers)")
 
 
 def test_empty_source() raises:
@@ -365,15 +364,14 @@ def test_empty_source() raises:
             "empty source produced " + String(result.num_rows())
             + " rows, expected 0"
         )
-    print("test_empty_source OK (0 rows, 2 workers)")
 
 
 def test_multi_worker_many_groups_across_group() raises:
-    """PERF-CD-GROUPED-STREAM regression: the grouped finalize now
-    builds a global group directory and MOVES each worker's per-group buffer
-    directly into `radix_distinct_count_grouped` (no serial bulk-extend fold).
+    """The grouped finalize builds a global group directory and MOVES each
+    worker's per-group buffer directly into `radix_distinct_count_grouped`
+    (no serial bulk-extend fold).
 
-    This drives the cb13-shape "many groups" across-group path: 300 groups (>=
+    This drives the many-groups across-group path: 300 groups (>=
     the driver's across-group group-count gate), ~450 distinct values per group,
     with values overlapping across batches/workers so the cross-worker dedup +
     the global-directory local->global group remap + the O(1) buffer MOVE must
@@ -407,10 +405,6 @@ def test_multi_worker_many_groups_across_group() raises:
     var expected = _reference_grouped_cd(batches_for_ref^)
     var actual = _extract_group_map(result)
     _assert_same(actual, expected)
-    print(
-        "test_multi_worker_many_groups_across_group OK (300 groups, 450"
-        " distinct/group, 8 workers, across-group driver)"
-    )
 
 
 def _total_distinct_values(var batches_ref: Slab[RecordBatch]) raises -> Int:
@@ -435,7 +429,7 @@ def _total_distinct_values(var batches_ref: Slab[RecordBatch]) raises -> Int:
 
 
 def test_ungrouped_single_worker() raises:
-    """CB-04 shape: 3 batches, 100 rows each, 50 distinct values total."""
+    """Ungrouped: 3 batches, 100 rows each, 50 distinct values total."""
     var batches = _synth_batches(3, 100, 5, 50)  # keys ignored by ungrouped sink
     var batches_for_ref = _clone_batches(batches)
 
@@ -467,11 +461,10 @@ def test_ungrouped_single_worker() raises:
             "ungrouped CD count mismatch: actual="
             + String(actual) + " expected=" + String(expected)
         )
-    print("test_ungrouped_single_worker OK (count=" + String(actual) + ")")
 
 
 def test_ungrouped_multi_worker() raises:
-    """CB-04 shape with concurrent merge: 16 batches * 250 rows, workers=4,
+    """Ungrouped, four workers: 16 batches * 250 rows, workers=4,
     values overlap across batches so merge + dedup correctness both matter.
     """
     var batches = _synth_batches(16, 250, 8, 100)
@@ -505,13 +498,12 @@ def test_ungrouped_multi_worker() raises:
             "ungrouped multi-worker CD mismatch: actual="
             + String(actual) + " expected=" + String(expected)
         )
-    print("test_ungrouped_multi_worker OK (count=" + String(actual) + ", 4 workers)")
 
 
 def _synth_wide_value_batches(
     num_batches: Int, rows_per_batch: Int, distinct_total: Int
 ) raises -> Slab[RecordBatch]:
-    """Ungrouped CD stress data with WIDE, spread-out values so the CD-v2
+    """Ungrouped CD stress data with WIDE, spread-out values so the
     radix-on-value partitioning fills all 8 value partitions and the
     cross-worker per-partition union is exercised under skew.
 
@@ -538,10 +530,9 @@ def _synth_wide_value_batches(
 
 
 def test_ungrouped_wide_value_radix_multi_worker() raises:
-    """CD-v2 regression: high-cardinality, wide-value-range
-    ungrouped COUNT(DISTINCT) across 8 workers. Stresses the per-worker
-    dedup-on-insert + per-partition cross-worker UNION finalize that
-    replaced the CD-v1 append-all + bulk-extend + radix-dedup pipeline.
+    """High-cardinality, wide-value-range ungrouped COUNT(DISTINCT) across 8
+    workers. Stresses the per-worker dedup-on-insert and the per-partition
+    cross-worker union at finalize.
 
     32 batches * 500 rows = 16000 rows, 3000 distinct values spread across
     the full hash space so every one of the 8 value partitions is populated
@@ -585,10 +576,6 @@ def test_ungrouped_wide_value_radix_multi_worker() raises:
             "wide-value ungrouped CD expected 3000 distinct, got "
             + String(actual)
         )
-    print(
-        "test_ungrouped_wide_value_radix_multi_worker OK (count="
-        + String(actual) + ", 8 workers, 8 partitions)"
-    )
 
 
 def test_ungrouped_empty_source() raises:
@@ -622,7 +609,165 @@ def test_ungrouped_empty_source() raises:
             "ungrouped CD on empty input must return 0, got "
             + String(actual)
         )
-    print("test_ungrouped_empty_source OK (count=0)")
+
+
+def _nullable_v_batch(
+    var vals: List[Int64], null_every: Int
+) raises -> RecordBatch:
+    """A (k, v) batch whose `v` is NULL on every `null_every`-th row (none when
+    `null_every` is 0). `k` is a dummy, ignored by the ungrouped sink."""
+    var n = len(vals)
+    var k_arr = PrimitiveArray[DType.int64].allocate(n)
+    var v_arr = PrimitiveArray[DType.int64].allocate_nullable(n)
+    for i in range(n):
+        k_arr.store[1](i, Scalar[DType.int64](0))
+        v_arr.store[1](i, Scalar[DType.int64](vals[i]))
+    for i in range(n):
+        if null_every > 0 and i % null_every == 0:
+            v_arr._set_null(i)
+    var sb = SchemaBuilder()
+    sb.add_field(Field("k", ArrowType.INT64, False))
+    sb.add_field(Field("v", ArrowType.INT64, True))
+    var b = RecordBatchBuilder()
+    b.add_column(Column.from_primitive[DType.int64](k_arr^))
+    b.add_column(Column.from_primitive[DType.int64](v_arr^))
+    return b.build(sb.build())
+
+
+def _one_per_worker(
+    var batches: Slab[RecordBatch], first_active: Int, num_workers: Int
+) raises -> Slab[Slab[RecordBatch]]:
+    """Batches dealt round-robin to workers `first_active` and up; workers
+    below `first_active` receive none."""
+    var bpw = Slab[Slab[RecordBatch]].create(num_workers)
+    for _ in range(num_workers):
+        bpw.append(Slab[RecordBatch]())
+    var owned = batches^
+    var i = 0
+    while len(owned) > 0:
+        var maybe = owned.pop()
+        if maybe:
+            ref slot = bpw.get_mut_interior(
+                first_active + (i % (num_workers - first_active))
+            )
+            slot.append(maybe.take())
+            i += 1
+    _ = owned^
+    return bpw^
+
+
+def _ungrouped_count(var result: RecordBatch) raises -> Int:
+    if result.num_rows() != 1:
+        raise Error(
+            "ungrouped CD must emit exactly 1 row, got "
+            + String(result.num_rows())
+        )
+    if result.num_columns() != 1:
+        raise Error(
+            "ungrouped CD must emit 1 column, got "
+            + String(result.num_columns())
+        )
+    ref vc = result.column_at(0)
+    var vp = vc._data.view_typed_ro[DType.int64]()
+    return Int((vp + vc._offset)[])
+
+
+def _new_ctx() raises -> PerCoreAsyncRuntime[NoopSink]:
+    return PerCoreAsyncRuntime[NoopSink](
+        num_workers=1,
+        sink_factory=_engine_tier_noop_sink_factory,
+        backend=BACKEND_MOCK,
+        placement=PLACEMENT_FIXED,
+    )
+
+
+def test_ungrouped_workers_with_disjoint_values() raises:
+    """Four workers, each with values no other worker has: the union has to
+    count every worker's values, the last worker's included."""
+    var batches = Slab[RecordBatch]()
+    for w in range(4):
+        var vs = List[Int64]()
+        for i in range(100):
+            vs.append(Int64(w * 1000 + i))
+        batches.append(_nullable_v_batch(vs^, 0))
+    var bpw = _one_per_worker(batches^, 0, 4)
+    var ctx = _new_ctx()
+    var got = _ungrouped_count(_drive_sink(
+        CountDistinctAggSink.new(
+            _make_ungrouped_agg_data(), _empty_pq_data(), Slab[MorselOp]()
+        ),
+        bpw^,
+        ctx,
+    ))
+    assert_equal(got, 400, "4 workers x 100 values, none shared")
+
+
+def test_ungrouped_worker_zero_receives_no_batch() raises:
+    """Worker 0 sees nothing while workers 1..3 do: the result is still the
+    count over the other workers' values."""
+    var batches = Slab[RecordBatch]()
+    for w in range(3):
+        var vs = List[Int64]()
+        for i in range(60):
+            # Workers overlap on 0..19 and own 20..59 offset by worker.
+            vs.append(Int64(i if i < 20 else w * 1000 + i))
+        batches.append(_nullable_v_batch(vs^, 0))
+    var bpw = _one_per_worker(batches^, 1, 4)
+    assert_equal(len(bpw.get_mut_interior(0)), 0, "fixture: worker 0 idle")
+    var ctx = _new_ctx()
+    var got = _ungrouped_count(_drive_sink(
+        CountDistinctAggSink.new(
+            _make_ungrouped_agg_data(), _empty_pq_data(), Slab[MorselOp]()
+        ),
+        bpw^,
+        ctx,
+    ))
+    assert_equal(got, 20 + 3 * 40, "20 shared values + 40 per worker")
+
+
+def test_ungrouped_null_values_are_not_counted() raises:
+    """Rows 0, 3, 6, ... hold NULL. The values are `i % 30`, so a value that
+    is a multiple of 3 occurs only on NULL rows and is not counted; the other
+    20 values are."""
+    var vs = List[Int64]()
+    for i in range(90):
+        vs.append(Int64(i % 30))
+    var expected = Set[Int64]()
+    for i in range(90):
+        if i % 3 != 0:
+            expected.add(Int64(i % 30))
+    assert_equal(len(expected), 20, "fixture: 20 values occur on a valid row")
+    var batches = Slab[RecordBatch]()
+    batches.append(_nullable_v_batch(vs^, 3))
+    var bpw = _one_per_worker(batches^, 0, 1)
+    var ctx = _new_ctx()
+    var got = _ungrouped_count(_drive_sink(
+        CountDistinctAggSink.new(
+            _make_ungrouped_agg_data(), _empty_pq_data(), Slab[MorselOp]()
+        ),
+        bpw^,
+        ctx,
+    ))
+    assert_equal(got, len(expected), "only the non-NULL values count")
+
+
+def test_ungrouped_all_null_values_count_zero() raises:
+    var vs = List[Int64]()
+    for i in range(50):
+        vs.append(Int64(i))
+    var batches = Slab[RecordBatch]()
+    batches.append(_nullable_v_batch(vs^, 1))
+    var bpw = _one_per_worker(batches^, 0, 2)
+    var ctx = _new_ctx()
+    var got = _ungrouped_count(_drive_sink(
+        CountDistinctAggSink.new(
+            _make_ungrouped_agg_data(), _empty_pq_data(), Slab[MorselOp]()
+        ),
+        bpw^,
+        ctx,
+    ))
+    assert_equal(got, 0, "every value is NULL: one row of 0")
+
 
 
 def main() raises:

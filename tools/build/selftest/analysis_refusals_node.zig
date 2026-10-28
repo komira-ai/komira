@@ -47,6 +47,11 @@ const ROWS = [_]lib.Row{
         .target = "tests//negative/node:own_dep",
         .text = "tests//negative/node:own_dep: tslib is in its own deps",
     },
+    .{
+        .name = "node_binding_no_srcs",
+        .target = "tests//negative/node:binding_no_srcs",
+        .text = "tests//negative/node:binding_no_srcs: srcs is empty: name the test files node --test runs",
+    },
 };
 
 fn body(c: *lib.Ctx) !void {

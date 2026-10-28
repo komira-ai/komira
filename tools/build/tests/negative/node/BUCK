@@ -1,5 +1,5 @@
 load("@komira//third_party/node:pins.bzl", "NODE", "NPM")
-load("@komira//tools/build/node:defs.bzl", "c_shared_lib", "esbuild_bundle", "node_dist", "node_test", "npm_package")
+load("@komira//tools/build/node:defs.bzl", "c_shared_lib", "esbuild_bundle", "node_addon", "node_binding_test", "node_dist", "node_test", "npm_package")
 load(":stand_in.bzl", "stand_in_archive", "stand_in_npm")
 
 # Planted defects for the hermetic Node.js rules (test 54,
@@ -495,4 +495,48 @@ node_dist(
 c_shared_lib(
     name = "warns",
     srcs = ["warns.c"],
+)
+
+# ---- node_binding_test ------------------------------------------------------
+
+# RED "binding_test: node --test exited 1": a test of the file fails.
+node_binding_test(
+    name = "binding_fails",
+    srcs = ["binding_fails.test.mjs"],
+)
+
+# RED "it ran no test": node exits 0 on a file that registers no test.
+node_binding_test(
+    name = "binding_no_test",
+    srcs = ["binding_no_test.test.mjs"],
+)
+
+# RED "a test was skipped or left todo": node exits 0 on a skipped test.
+node_binding_test(
+    name = "binding_skipped",
+    srcs = ["binding_skipped.test.mjs"],
+)
+
+# RED "answer.node was not built or staged": the addon test without its addon.
+node_binding_test(
+    name = "binding_addon_missing",
+    srcs = ["binding_addon.test.mjs"],
+)
+
+node_addon(
+    name = "wrong_answer",
+    srcs = ["binding_wrong.c"],
+)
+
+# RED "answer() must return 42": the addon is built, loads, and returns 41.
+node_binding_test(
+    name = "binding_addon_wrong",
+    srcs = ["binding_addon.test.mjs"],
+    data = {"answer.node": ":wrong_answer"},
+)
+
+# RED "srcs is empty": a binding test of no file.
+node_binding_test(
+    name = "binding_no_srcs",
+    srcs = [],
 )

@@ -2,7 +2,7 @@
 # The all-COUNT(DISTINCT) row loop carries NO passenger lane
 # =============================================================================
 #
-# THE DEFECT. A change gave `WorkerCDState.consume_batch` a
+# ★ THE DEFECT. A change gave `WorkerCDState.consume_batch` a
 #   fixed-aggregate PASSENGER LANE (SUM / COUNT / MIN / MAX / MEAN folded on the
 #   gid the COUNT(DISTINCT) lane already resolved) and kept a 3-argument
 #   all-CD overload "so the existing call sites are untouched". That overload
@@ -12,10 +12,10 @@
 #   built runner: `consume_batch` 11,431 -> 13,176 B, 90 -> 122 backedges,
 #   126 -> 169 calls; an all-CD query +4.32%.
 #
-# THE FIX. `consume_batch[has_fixed: Bool]` — the all-CD entry instantiates
+# ★ THE FIX. `consume_batch[has_fixed: Bool]` — the all-CD entry instantiates
 #   `has_fixed=False`, in which every passenger-lane statement is compiled out.
 #
-# NO VALUE ASSERTION CAN SEE THE DEFECT. Both instantiations produce the same
+# ⛔ NO VALUE ASSERTION CAN SEE THE DEFECT. Both instantiations produce the same
 #   COUNT(DISTINCT) answers; the defect was never a wrong answer. What CAN see
 #   it is the state's own per-batch route counters: `stat_fx_batches` counts
 #   the batches that ran the passenger-lane setup, and on the all-CD entry it
@@ -107,7 +107,7 @@ def _state_distinct(imm st: WorkerCDState, key: Int64) -> Int:
 
 
 def test_the_all_distinct_entry_runs_no_passenger_lane() raises:
-    """THE REGRESSION TEST. Two batches through the all-CD entry: both are
+    """⭐ THE REGRESSION TEST. Two batches through the all-CD entry: both are
     counted as grouped batches, and NEITHER may have run the passenger lane.
     Before the fix `stat_fx_batches` read 2 here."""
     var st = WorkerCDState(1)

@@ -14,11 +14,11 @@
 # and how many of them executed the passenger-lane setup. For an all-CD query
 # the second MUST be 0.
 #
-# THE FIRST COUNTER IS WHAT KEEPS THE SECOND FROM BEING VACUOUS. "zero
+# ⭐ THE FIRST COUNTER IS WHAT KEEPS THE SECOND FROM BEING VACUOUS. "zero
 # passenger batches" is also what a query that never reached `WorkerCDState`
 # at all would report, so a test asserts `batches > 0` beside `fx == 0`.
 #
-# NOT A PER-ROW OR PER-BATCH ATOMIC. Each `WorkerCDState` counts into two
+# ⚠ NOT A PER-ROW OR PER-BATCH ATOMIC. Each `WorkerCDState` counts into two
 # plain `Int` fields (one add per BATCH); `CountDistinctAggSink._finalize_batch`
 # folds them in here ONCE PER WORKER PER QUERY, from the loop that already walks
 # every worker to build the global group directory.
@@ -33,6 +33,8 @@ from std.memory import OwnedPointer, alloc
 
 def _init_cd_grouped_batches() -> OwnedPointer[AtomicI64]:
     """`_Global` init_fn: the grouped-batch counter, once per process (0)."""
+    # FFI-BOUNDARY: the allocation is owned by the `_Global` slot, lives for the
+    # whole process and is never freed; nothing else holds the pointer.
     var raw = alloc[AtomicI64](1)
     raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
     return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
@@ -40,6 +42,8 @@ def _init_cd_grouped_batches() -> OwnedPointer[AtomicI64]:
 
 def _init_cd_passenger_batches() -> OwnedPointer[AtomicI64]:
     """`_Global` init_fn: the passenger-lane batch counter, once per process."""
+    # FFI-BOUNDARY: the allocation is owned by the `_Global` slot, lives for the
+    # whole process and is never freed; nothing else holds the pointer.
     var raw = alloc[AtomicI64](1)
     raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
     return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
@@ -60,9 +64,10 @@ def cd_grouped_route_note(batches: Int, passenger_batches: Int) raises:
     `batches` is every non-empty batch the worker's grouped `consume_batch`
     took; `passenger_batches` is how many of those ran the MIXEDFUSE passenger
     lane. Called once per worker per query, never on the row path."""
-    # SAFETY: §6 FFI carve-out — `get_or_create_ptr` targets KGEN-runtime static
-    # storage (process-lifetime); the wildcard is the stdlib `_Global` API's own
-    # return type, confined to this helper.
+    # FFI-BOUNDARY: `get_or_create_ptr` returns a pointer into the `_Global`
+    # slot's process-lifetime storage. The slot owns and never frees it; the
+    # pointer's origin is the stdlib `_Global` API's own return type and does
+    # not leave this helper.
     if batches != 0:
         var gb = _CD_GROUPED_BATCHES.get_or_create_ptr()
         _ = gb[][].fetch_add(Int64(batches))
@@ -73,21 +78,21 @@ def cd_grouped_route_note(batches: Int, passenger_batches: Int) raises:
 
 def cd_grouped_batches_count() raises -> Int:
     """Read the process-wide count of grouped COUNT(DISTINCT) batches."""
-    # SAFETY: §6 FFI carve-out (see `cd_grouped_route_note`).
+    # FFI-BOUNDARY: see `cd_grouped_route_note`.
     var gb = _CD_GROUPED_BATCHES.get_or_create_ptr()
     return Int(gb[][].load())
 
 
 def cd_passenger_lane_batches_count() raises -> Int:
     """Read the process-wide count of batches that ran the passenger lane."""
-    # SAFETY: §6 FFI carve-out (see `cd_grouped_route_note`).
+    # FFI-BOUNDARY: see `cd_grouped_route_note`.
     var gp = _CD_PASSENGER_BATCHES.get_or_create_ptr()
     return Int(gp[][].load())
 
 
 def reset_cd_grouped_route_counters() raises:
     """Reset both process-wide counters to 0 (test setup)."""
-    # SAFETY: §6 FFI carve-out (see `cd_grouped_route_note`).
+    # FFI-BOUNDARY: see `cd_grouped_route_note`.
     var gb = _CD_GROUPED_BATCHES.get_or_create_ptr()
     gb[][].store(Scalar[DType.int64](0))
     var gp = _CD_PASSENGER_BATCHES.get_or_create_ptr()

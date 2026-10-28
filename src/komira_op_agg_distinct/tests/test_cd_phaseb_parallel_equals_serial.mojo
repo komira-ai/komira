@@ -4,22 +4,22 @@
 # =============================================================================
 #
 # Phase B of the STRING-key encode assigns a dict id per row. It is the single
-# largest serial item in the grouped count-distinct driver on a high-cardinality
-# key, and `_assign_dict_ids_parallel` now shards it.
+# largest serial item in the grouped count-distinct driver (measured 1,671 ms
+# of a 3,936 ms node on cbq13), and `_assign_dict_ids_parallel` now shards it.
 #
-# WHAT THIS FILE IS ACTUALLY GUARDING IS NOT "the same set of values". It is
+# ⛔ WHAT THIS FILE IS ACTUALLY GUARDING IS NOT "the same set of values". It is
 # **THE NUMBERING**. The ids feed a hash table whose ITERATION ORDER becomes the
 # output group order, so a Phase B that finds the same 6M values but numbers
 # them differently emits the same rows in a DIFFERENT ORDER — a change no perf
 # commit can justify and one that a "did we get the right distinct values" test
 # would sail straight past. Sharding by hash and offsetting each shard's ids by
 # a prefix sum is the four-line parallelisation that does exactly that, and it
-# is the change these tests are written to catch:
+# is the mutation these tests are written to kill:
 #
 #     test_parallel_matches_serial_encoded_exactly     <- dies on prefix-sum ids
 #     test_parallel_matches_serial_reverse_map_exactly <- dies on prefix-sum ids
 #
-# NON-VACUITY IS A REAL RISK HERE AND IS ASSERTED, NOT ASSUMED. If every row
+# ⚠ NON-VACUITY IS A REAL RISK HERE AND IS ASSERTED, NOT ASSUMED. If every row
 # landed in one shard, or if the parallel driver silently ran one shard, the
 # equivalence tests above would pass while proving nothing.
 # `test_the_fixture_spreads_across_every_shard` reads the shard selector the
@@ -28,7 +28,7 @@
 # global first-seen order really does INTERLEAVE the shards (if shard 0 owned
 # every early value the merge would be trivially correct).
 #
-# THE ROW COUNT IS DELIBERATELY BELOW `_PHASEB_MIN_ROWS`. The routing
+# ⚠ THE ROW COUNT IS DELIBERATELY BELOW `_PHASEB_MIN_ROWS`. The routing
 # threshold is in `_phaseb_shard_count`, not in `_assign_dict_ids_parallel`, so
 # this file drives the parallel body DIRECTLY at 60,000 rows instead of putting
 # a million-row fixture inside a welded build gate.
@@ -220,7 +220,7 @@ def _encode_parallel(
         rev_starts,
         rev_lens,
     )
-    # L3 (2026-09-24): the sharded arm builds NO arena — its spans index the
+    # ⚠ L3 (2026-09-24): the sharded arm builds NO arena — its spans index the
     # column's own value buffer — so the decode `value_at` performs reads a
     # copy of THAT buffer. The equivalence below is unchanged: same id per
     # row, same bytes per id.
@@ -232,14 +232,14 @@ def _encode_parallel(
 
 
 # =============================================================================
-# §1 — THE EQUIVALENCE, INCLUDING THE NUMBERING
+# §1 ⭐ — THE EQUIVALENCE, INCLUDING THE NUMBERING
 # =============================================================================
 
 
 def test_parallel_matches_serial_encoded_exactly() raises:
-    """REGRESSION TEST. Row for row, the two arms must assign the SAME id.
+    """⭐ THE FALSIFIER. Row for row, the two arms must assign the SAME id.
 
-    Fails if: numbering each shard from a prefix-sum offset instead of
+    Killed by: numbering each shard from a prefix-sum offset instead of
     merging the shards' first-appearance rows (the obvious parallelisation).
     """
     var vals = _rows()
@@ -268,7 +268,7 @@ def test_parallel_matches_serial_reverse_map_exactly() raises:
     """The reverse map must decode id-for-id to the same bytes, so the emitted
     group-key column is byte-identical.
 
-    Fails if: the same prefix-sum change, and by an arena concatenation that
+    Killed by: the same prefix-sum mutation, and by an arena concatenation that
     gets a shard's base offset wrong.
     """
     var vals = _rows()
@@ -393,7 +393,7 @@ def test_first_appearance_order_is_scattered_across_shards() raises:
 
 def test_the_routing_thresholds_still_select_the_two_arms() raises:
     """`_assign_dict_ids_parallel` is driven directly above, so the ROUTING is
-    covered here instead. Fails on a threshold move that makes one arm
+    covered here instead. Killed by a threshold move that makes one arm
     unreachable."""
     assert_equal(
         _phaseb_shard_count(_PHASEB_MIN_ROWS, 1),

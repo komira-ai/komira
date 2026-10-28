@@ -1,0 +1,42 @@
+# The package names claimed on the prod registry: one per line, sorted.
+#
+# release.yml publishes every member of the release (each src/<name> with a mopm.toml,
+# //release/readme_e2e:packages.bzl) to the prod registry on every push to main, and the
+# registry creates a package name only for its claimed owner. A member whose name is not
+# claimed there makes `prod-stage` refuse and turns main red. The pull request check cannot
+# write to the live registry, so it holds the members to this file instead
+# (//release:prod_claimed_names_cases): a maintainer adds a name here only AFTER claiming it
+# on the prod registry, in the pull request that adds the member.
+komira_anomaly
+komira_atomic_alias
+komira_clock
+komira_collections
+komira_content_line
+komira_datetime
+komira_encoding
+komira_fork_join
+komira_hash
+komira_host
+komira_json
+komira_kafka_server
+komira_kg_mode
+komira_libc
+komira_lz4
+komira_mail_address
+komira_mcp_server
+komira_name_registry
+komira_parquet_api
+komira_protobuf
+komira_resources
+komira_retry
+komira_rowcell
+komira_runtime_paths
+komira_scalar_arithmetic
+komira_simd
+komira_snapshotter
+komira_test_verdict
+komira_textproto
+komira_validation_run
+komira_vcard
+komira_xml
+komira_zlib

@@ -36,7 +36,7 @@
 #     Partitions are disjoint by construction, so the per-partition distinct
 #     counts SUM to the exact global distinct count.
 #
-# THE DUPLICATE PRE-FILTER IS NOT AN OPTIMISATION, IT IS WHAT MAKES THE
+# ★ THE DUPLICATE PRE-FILTER IS NOT AN OPTIMISATION, IT IS WHAT MAKES THE
 #   PARTITIONING VIABLE. Hash-partitioning by VALUE concentrates duplicates:
 #   in a column where most rows are the EMPTY STRING, a naive scatter puts
 #   most of the input into ONE partition and the dedup
@@ -151,7 +151,7 @@ comptime _CDSTR_MAX_ROWS: Int = 0xFFFF_FFFE
 # model error is absorbed by whichever worker frees first. `bytebal = False`
 # cuts the `nw` equal-row slices instead.
 #
-# WHY THE ANSWER CANNOT MOVE. Any partition of `[0, n_rows)` into slices is
+# ★ WHY THE ANSWER CANNOT MOVE. Any partition of `[0, n_rows)` into slices is
 # correct: each scan task emits every value of its slice that its own pre-filter
 # has not PROVEN it already emitted, and phase 2 dedups the union by value.
 # =============================================================================
@@ -600,7 +600,7 @@ def _cdstr_count_serial[
 def cd_string_value_hash(imm value: String) -> UInt64:
     """The kernel's own hash of one value's bytes.
 
-    EXPOSED FOR ONE REASON: the collision pin. The 32-bit fingerprint this
+    ⚠ EXPOSED FOR ONE REASON: the collision pin. The 32-bit fingerprint this
     kernel probes on is a GATE that a byte compare confirms, and the only test
     that can prove the compare is load-bearing is one driven by an ACTUAL
     fingerprint collision. A test that hard-codes a colliding pair is asserting

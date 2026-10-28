@@ -89,7 +89,7 @@ def test_the_first_capacity_is_a_function_of_groups_not_rows() raises:
     """Two shapes, derived by hand:
     a 166-group bound over K=20 -> 9 per worker -> the 4,096 floor.
     a 6,019,103-group bound over K=20 -> 300,956 (+1/8 +64 = 338,639) ->
-    2x = 677,278 -> 1,048,576, the same first size as the row-based rule (and now
+    2x = 677,278 -> 1,048,576, the same first size as before (and now
     allocated by the worker, not the driver)."""
     assert_equal(cd_group_ht_initial_cap(166, 20), CD_GROUP_HT_MIN_CAP, "small bound")
     assert_equal(cd_group_ht_initial_cap(6_019_103, 20), 1_048_576, "large bound")
