@@ -3,11 +3,13 @@
 # =============================================================================
 #
 # A `HardwareProfile` is a value: core counts, the L1d/L2/L3 sizes, the cache
-# line, RAM, and the binding L2 instance (`l2_share.mojo`). It is filled once,
-# by `hardware_detect.detect_hardware_profile()`, when the host profile is
-# built (`host_profile.mojo`), and is then only read. Nothing in this file
-# probes the machine: every accessor below is a pure function of the fields,
-# so two hosts with equal profiles size morsels identically.
+# line, RAM, and the binding L2 instance (`komira_engine_runtime.l2_share`).
+# It is filled once, by
+# `komira_engine_runtime.hardware_detect.detect_hardware_profile()`, when the
+# host profile is built (`komira_engine_runtime.host_detect`), and is then
+# only read. Nothing in this package probes the machine: every accessor below
+# is a pure function of the fields, so two hosts with equal profiles size
+# morsels identically.
 #
 # Formulas:
 #   * `optimal_morsel_rows(schema)`     -- L2-resident batch size (general)
@@ -22,11 +24,6 @@
 # =============================================================================
 
 from komira_arrow.schema import Schema
-
-# `defaults()` uses the process-wide physical-core snapshot, sampled before any
-# worker pins itself: `num_physical_cores()` is affinity-aware on Linux, so a
-# pinned thread would see a one-core machine.
-from komira_host.cpu_topology import _process_physical_core_count
 
 
 # =============================================================================
@@ -59,7 +56,7 @@ comptime DEFAULT_AVAILABLE_RAM: Int = 8 * 1024 * 1024 * 1024
 # conservative fallback used when the perflevel sysctl keys are absent
 # (homogeneous Intel Mac, hardened Linux container). The E-core L2 default
 # matches the M3-family E-cluster shape (4 MiB shared by 4 E-cores). On the
-# `defaults()` path the budget accessor still works: e_core_l2_bytes /
+# fallback path the budget accessor still works: e_core_l2_bytes /
 # e_cores_per_l2 = 4 MiB / 4 = 1 MiB per-worker.
 comptime DEFAULT_E_CORE_L2_BYTES: Int = 4 * 1024 * 1024
 comptime DEFAULT_E_CORES_PER_L2: Int = 4
@@ -84,7 +81,8 @@ struct HardwareProfile(Copyable, Movable, Writable):
     """Detected CPU / cache / memory characteristics.
 
     All sizes are in bytes. Populated once via
-    `hardware_detect.detect_hardware_profile()` and then only read.
+    `komira_engine_runtime.hardware_detect.detect_hardware_profile()` and then
+    only read.
     Copyable so it can be passed by value
     to the materialize_* hook-build helpers without lifetime plumbing.
 
@@ -107,7 +105,7 @@ struct HardwareProfile(Copyable, Movable, Writable):
     var total_ram_bytes: Int
     var available_ram_bytes: Int
     # v0.3 emits a warning when this is > 1; we don't parse NUMA topology in
-    # v0.4 yet, so this is always 1 on macOS and on the defaults path.
+    # v0.4 yet, so this is always 1 on macOS and on the fallback path.
     var numa_nodes: Int
     # =====================================================================
     # E-CORE-L2 HW MORSEL SIZING (PERF-PRIMITIVE +
@@ -135,7 +133,8 @@ struct HardwareProfile(Copyable, Movable, Writable):
     # LINUX REVISION. These two are now the SIZE
     # and the WORKER COUNT of ONE L2 INSTANCE -- the instance with the smallest
     # per-worker share anywhere in the process's allowed CPU set -- derived by
-    # `l2_share.mojo` from `cache/index<L2>/{size,shared_cpu_list}` +
+    # `komira_engine_runtime.l2_share` from
+    # `cache/index<L2>/{size,shared_cpu_list}` +
     # `topology/thread_siblings_list`. They must be read as a PAIR: dividing
     # one tier's size by another tier's divisor is not a share of anything
     # (that mistake, in `komira_engine_v2/grain.mojo`, is what this change
@@ -199,44 +198,6 @@ struct HardwareProfile(Copyable, Movable, Writable):
         self.e_cores_per_l2 = e_cores_per_l2
         self.p_core_l2_bytes = p_core_l2_bytes
         self.p_cores_per_l2 = p_cores_per_l2
-
-    # --- Defaults ------------------------------------------------------------
-
-    @staticmethod
-    def defaults() -> HardwareProfile:
-        """Apple-Silicon-shaped conservative defaults.
-
-        Used as the warn-and-fall-back result on platforms where detection
-        is unavailable (e.g. sysfs missing in a hardened container).
-        Mirrors the earlier engine's `defaults()` exactly, except
-        that Mojo's `num_physical_cores` already returns a minimum of 1 so
-        we skip the `.unwrap_or(4)` branch. `l1d_min_bytes` defaults to
-        `DEFAULT_L1D_BYTES` (homogeneous-silicon shape).
-
-        Core count comes from `_process_physical_core_count()` (the process-wide
-        snapshot), NOT a live `num_physical_cores()` -- the latter is
-        affinity-aware on Linux, so a thread that pinned itself would get a
-        one-core profile out of this fallback ().
-        """
-        var cores = _process_physical_core_count()
-        if cores < 1:
-            cores = 4
-        return HardwareProfile(
-            cores,                    # physical_cores
-            cores,                    # logical_cores (HT not distinguished)
-            DEFAULT_L1D_BYTES,
-            DEFAULT_L2_BYTES,
-            DEFAULT_L3_BYTES,
-            DEFAULT_CACHE_LINE,
-            DEFAULT_TOTAL_RAM,
-            DEFAULT_AVAILABLE_RAM,
-            1,                        # numa_nodes
-            DEFAULT_L1D_BYTES,        # l1d_min_bytes (homogeneous fallback)
-            DEFAULT_E_CORE_L2_BYTES,  # e_core_l2_bytes
-            DEFAULT_E_CORES_PER_L2,   # e_cores_per_l2
-            DEFAULT_P_CORE_L2_BYTES,  # p_core_l2_bytes
-            DEFAULT_P_CORES_PER_L2,   # p_cores_per_l2
-        )
 
     # --- Morsel-sizing formulas (v0.3 parity) --------------------------------
 
@@ -309,10 +270,10 @@ struct HardwareProfile(Copyable, Movable, Writable):
 
         Both operands describe the SAME L2 instance (see the field comments):
         on Linux, the instance with the smallest per-worker share in the
-        process's allowed CPU set (`l2_share.mojo`); on macOS, the perflevel1
-        (E-tier) pair. Sizing to the smallest share makes ONE global grain
-        residency-safe on EVERY core, which is the requirement -- there is one
-        grain, not one per tier .
+        process's allowed CPU set (`komira_engine_runtime.l2_share`); on
+        macOS, the perflevel1 (E-tier) pair. Sizing to the smallest share
+        makes ONE global grain residency-safe on EVERY core, which is the
+        requirement -- there is one grain, not one per tier.
 
         Worked values:
           * i7-14700K: the E cluster, 4 MiB / 4 physical cores = 1 MiB.

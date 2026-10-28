@@ -33,7 +33,14 @@
 //!    hard-codes it, or loses the `|| 'false'` (an unset variable is then the
 //!    empty string, which the action refuses) fails; a mention of the action
 //!    outside a step's `uses:` fails too, so a caller the reader cannot see is
-//!    not skipped. The reader's own cases are workflow texts written here.
+//!    not skipped. The reader's own cases are workflow texts written here;
+//!  - the priority class: `farm-qos` set to `batch` or `ci` writes exactly one
+//!    `http_headers = x-kbf-qos:<class>` line under `[buck2_re_client]`, and left out
+//!    writes none (so a pull-request check sends no header and queues as `ci`); any
+//!    other value, or one with a line break, is refused. Every workflow step that uses
+//!    the action in release.yml passes `farm-qos: batch`, and no step of any other
+//!    workflow passes `farm-qos` at all, so the release work queues behind the
+//!    pull-request checks and the pull-request checks are never lowered.
 
 const std = @import("std");
 const t = std.testing;
@@ -335,6 +342,38 @@ test "tls false said outright is the default's buckconfig" {
     try expectWritten(&.{.{ .name = "tls", .value = "false" }}, LINUX_ONLY);
 }
 
+const WITH_BATCH =
+    \\[buck2_re_client]
+    \\  engine_address = grpc://re.example.com:8980
+    \\  action_cache_address = grpc://re.example.com:8980
+    \\  cas_address = grpc://re.example.com:8980
+    \\  instance_name = main
+    \\  tls = false
+    \\  execution_concurrency_limit = 256
+    \\  http_headers = x-kbf-qos:batch
+    \\[komira_re]
+    \\  linux_x86_64_properties = OSFamily=Linux,pool=linux
+    \\
+;
+
+test "farm-qos batch writes the x-kbf-qos header under [buck2_re_client], and nothing else changes" {
+    try expectWritten(&.{.{ .name = "farm-qos", .value = "batch" }}, WITH_BATCH);
+}
+
+test "farm-qos ci writes the ci header, and an empty farm-qos writes none" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ci = try std.mem.replaceOwned(u8, arena.allocator(), WITH_BATCH, "qos:batch", "qos:ci");
+    try expectWritten(&.{.{ .name = "farm-qos", .value = "ci" }}, ci);
+    try expectWritten(&.{.{ .name = "farm-qos", .value = "" }}, LINUX_ONLY);
+}
+
+test "a farm-qos that is neither ci nor batch is refused" {
+    for ([_][]const u8{ "interactive", "urgent", "Batch", "batch,ci", "batch ", " batch" }) |bad| {
+        try expectRefused(&.{.{ .name = "farm-qos", .value = bad }}, "farm-qos is neither ci nor batch");
+    }
+}
+
 test "tls true with a CA file: tls_ca_certs names that path" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
@@ -416,7 +455,7 @@ test "a CA path that is missing, or a directory, is refused" {
 
 test "a line break or carriage return in any value written is refused" {
     const msg = "an input holds a line break";
-    const names = [_][]const u8{ "farm-address", "farm-instance", "farm-properties", "darwin-properties", "darwin-macos-hosts", "macos-library-dirs", "tls", "tls-ca-certs" };
+    const names = [_][]const u8{ "farm-address", "farm-instance", "farm-properties", "darwin-properties", "darwin-macos-hosts", "macos-library-dirs", "tls", "tls-ca-certs", "farm-qos" };
     for (names) |name| {
         // The macOS pair is given whole, so only the line break can be refused.
         try expectRefused(&.{
@@ -471,7 +510,7 @@ test "every input is used, and every use names a declared input" {
     defer arena.deinit();
     const ar = arena.allocator();
     const action = try loadAction(ar);
-    try t.expectEqual(@as(usize, 11), action.inputs.len);
+    try t.expectEqual(@as(usize, 12), action.inputs.len);
     for (action.inputs) |in| {
         const use = try std.fmt.allocPrint(ar, "${{{{ inputs.{s} }}}}", .{in.name});
         if (std.mem.indexOf(u8, action.runs, use) == null) std.debug.print("input '{s}' is never used\n", .{in.name});
@@ -495,12 +534,17 @@ test "every input is used, and every use names a declared input" {
 
 const ACTION_REF = "./.github/actions/farm-connect";
 const TLS_VALUE = "${{ vars.FARM_TLS || 'false' }}";
+/// The workflow whose farm steps run at the lower class, and the class.
+const RELEASE_WORKFLOW = "release.yml";
+const RELEASE_QOS = "batch";
 
 const Caller = struct {
     /// 1-based line of the step's `uses:`.
     line: usize,
     /// The value of `tls:` under the step's `with:`, or null when it has none.
     tls: ?[]const u8,
+    /// The value of `farm-qos:` under the step's `with:`, or null when it has none.
+    qos: ?[]const u8 = null,
 };
 
 const Callers = struct {
@@ -596,6 +640,7 @@ fn farmConnectCallers(ar: std.mem.Allocator, text: []const u8) !Callers {
         var end = start + 1;
         while (end < ls.len and (isBlank(ls[end]) or isComment(ls[end]) or indentOf(ls[end]) >= key_ind)) end += 1;
         var tls: ?[]const u8 = null;
+        var qos: ?[]const u8 = null;
         var k = start;
         while (k < end) : (k += 1) {
             const kl = ls[k];
@@ -613,9 +658,10 @@ fn farmConnectCallers(ar: std.mem.Allocator, text: []const u8) !Callers {
                 if (indentOf(ml) != entry_ind.?) continue;
                 const e = ml[entry_ind.?..];
                 if (std.mem.startsWith(u8, e, "tls: ")) tls = trimRight(e["tls: ".len..]);
+                if (std.mem.startsWith(u8, e, "farm-qos: ")) qos = trimRight(e["farm-qos: ".len..]);
             }
         }
-        try callers.append(ar, .{ .line = i + 1, .tls = tls });
+        try callers.append(ar, .{ .line = i + 1, .tls = tls, .qos = qos });
     }
     return .{ .callers = callers.items, .unread = unread.items };
 }
@@ -626,9 +672,17 @@ fn wrongCallers(ar: std.mem.Allocator, file: []const u8, text: []const u8) !stru
     const cs = try farmConnectCallers(ar, text);
     var wrong: usize = 0;
     for (cs.callers) |c| {
-        if (c.tls != null and std.mem.eql(u8, c.tls.?, TLS_VALUE)) continue;
-        wrong += 1;
-        std.debug.print("{s}:{d}: the farm-connect step passes tls: {s}; want tls: {s}\n", .{ file, c.line, c.tls orelse "<none>", TLS_VALUE });
+        if (c.tls == null or !std.mem.eql(u8, c.tls.?, TLS_VALUE)) {
+            wrong += 1;
+            std.debug.print("{s}:{d}: the farm-connect step passes tls: {s}; want tls: {s}\n", .{ file, c.line, c.tls orelse "<none>", TLS_VALUE });
+        }
+        // The release workflow's steps are lowered; no other workflow's step is.
+        const want_qos: ?[]const u8 = if (std.mem.eql(u8, file, RELEASE_WORKFLOW)) RELEASE_QOS else null;
+        const same = if (want_qos) |w| (c.qos != null and std.mem.eql(u8, c.qos.?, w)) else c.qos == null;
+        if (!same) {
+            wrong += 1;
+            std.debug.print("{s}:{d}: the farm-connect step passes farm-qos: {s}; want {s}\n", .{ file, c.line, c.qos orelse "<none>", want_qos orelse "no farm-qos" });
+        }
     }
     for (cs.unread) |n| {
         wrong += 1;
@@ -645,6 +699,7 @@ fn expectCallers(text: []const u8, want: []const Caller, want_unread: []const us
     for (want, got.callers) |w, g| {
         try t.expectEqual(w.line, g.line);
         if (w.tls) |wt| try t.expectEqualStrings(wt, g.tls orelse "<none>") else try t.expect(g.tls == null);
+        if (w.qos) |wq| try t.expectEqualStrings(wq, g.qos orelse "<none>") else try t.expect(g.qos == null);
     }
     try t.expectEqualSlices(usize, want_unread, got.unread);
 }
@@ -712,7 +767,59 @@ test "reader: a mention that is no step's uses: is reported, a comment or anothe
     , &.{}, &.{ 4, 5 });
 }
 
-test "every workflow step that uses the action passes tls from FARM_TLS" {
+test "reader: farm-qos of the step's with: is read, that of the next step, a nested one or env: is not" {
+    try expectCallers(
+        \\    steps:
+        \\      - uses: ./.github/actions/farm-connect
+        \\        with:
+        \\          tls: ${{ vars.FARM_TLS || 'false' }}
+        \\          farm-qos: batch
+        \\      - uses: ./.github/actions/farm-connect
+        \\        with:
+        \\          tls: ${{ vars.FARM_TLS || 'false' }}
+        \\          other:
+        \\            farm-qos: batch
+        \\        env:
+        \\          farm-qos: batch
+        \\      - uses: ./.github/actions/other
+        \\        with:
+        \\          farm-qos: batch
+        \\
+    , &.{ .{ .line = 2, .tls = TLS_VALUE, .qos = "batch" }, .{ .line = 6, .tls = TLS_VALUE } }, &.{});
+}
+
+fn wrongIn(file: []const u8, qos_line: []const u8) !usize {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const text = try std.fmt.allocPrint(ar,
+        \\    steps:
+        \\      - uses: ./.github/actions/farm-connect
+        \\        with:
+        \\          tls: ${{{{ vars.FARM_TLS || 'false' }}}}
+        \\{s}      - run: true
+        \\
+    , .{qos_line});
+    return (try wrongCallers(ar, file, text)).wrong;
+}
+
+test "the priority rule: a release.yml step must pass batch, every other workflow's step none" {
+    const batch = "          farm-qos: batch\n";
+    const ci = "          farm-qos: ci\n";
+    // release.yml: batch is right; none, ci or another value is the lower class missing
+    try t.expectEqual(@as(usize, 0), try wrongIn("release.yml", batch));
+    try t.expectEqual(@as(usize, 1), try wrongIn("release.yml", ""));
+    try t.expectEqual(@as(usize, 1), try wrongIn("release.yml", ci));
+    try t.expectEqual(@as(usize, 1), try wrongIn("release.yml", "          farm-qos: interactive\n"));
+    // the pull-request check and every other workflow: no farm-qos at all
+    for ([_][]const u8{ "pr.yml", "main_red.yml", "coverage.yml", "build_system_selftests.yml" }) |file| {
+        try t.expectEqual(@as(usize, 0), try wrongIn(file, ""));
+        try t.expectEqual(@as(usize, 1), try wrongIn(file, batch));
+        try t.expectEqual(@as(usize, 1), try wrongIn(file, ci));
+    }
+}
+
+test "every workflow step that uses the action passes tls from FARM_TLS, and farm-qos only in release.yml" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const ar = arena.allocator();
@@ -722,6 +829,7 @@ test "every workflow step that uses the action passes tls from FARM_TLS" {
     var files: usize = 0;
     var callers: usize = 0;
     var wrong: usize = 0;
+    var release_callers: usize = 0;
     var di = dir.iterate();
     while (try di.next()) |e| {
         if (!std.mem.endsWith(u8, e.name, ".yml")) continue;
@@ -730,10 +838,13 @@ test "every workflow step that uses the action passes tls from FARM_TLS" {
         const r = try wrongCallers(ar, e.name, text);
         callers += r.callers;
         wrong += r.wrong;
+        if (std.mem.eql(u8, e.name, RELEASE_WORKFLOW)) release_callers = r.callers;
     }
     // The staged workflows are read, and the action has callers: a staging
     // or reader fault would otherwise pass with nothing checked.
     try t.expect(files > 0);
     try t.expect(callers > 0);
+    // release.yml is read and has its farm steps: with none seen, the priority rule would pass empty.
+    try t.expect(release_callers > 0);
     try t.expectEqual(@as(usize, 0), wrong);
 }

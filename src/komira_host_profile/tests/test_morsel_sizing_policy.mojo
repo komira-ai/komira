@@ -29,8 +29,8 @@ from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.schema import Field, Schema, SchemaBuilder
-from komira_engine_runtime.hardware import HardwareProfile
-from komira_engine_runtime.morsel_sizing_policy import (
+from komira_host_profile.hardware import HardwareProfile
+from komira_host_profile.morsel_sizing_policy import (
     MorselSizingPolicy,
     MORSEL_TIER_AGG,
     MORSEL_TIER_JOIN_PROBE,
@@ -40,13 +40,6 @@ from komira_engine_runtime.morsel_sizing_policy import (
     MIN_MORSEL_ROWS_JOIN_PROBE,
     MAX_MORSEL_ROWS_DEFAULT,
     MAX_MORSEL_ROWS_BULK_SCAN,
-)
-from komira_engine_runtime.fan_out_grain import (
-    FANOUT_MIN_ROWS_PER_WORKER_DEFAULT,
-    capped_worker_count,
-)
-from komira_engine_runtime.host_profile import (
-    detect_host_profile,
 )
 
 
@@ -319,43 +312,9 @@ def test_small_l2_share_narrow_i64() raises:
 # Test 5 -- factory constructors + direct policy invocation parity
 # =============================================================================
 #
-# `MorselSizingPolicy.for_host` reads only the host profile it is given; two
-# profiles detected on one machine give identical sizes for one schema. `from_defaults()` uses the
-# `HardwareProfile.defaults()` Apple-Silicon-shaped fallback.
-
-
-def test_from_defaults_factory() raises:
-    """`from_defaults()` sizes off the Apple-Silicon-shaped E-cluster share.
-
-    `HardwareProfile.defaults()` carries DEFAULT_E_CORE_L2_BYTES = 4 MiB over
-    DEFAULT_E_CORES_PER_L2 = 4 -> 1 MiB per worker -> 512 KiB budget -> base
-    65536 at 8 B/row. AGG (1.0x) = 65536; DEFAULT (2.0x) = 131072, which is
-    exactly MAX_MORSEL_ROWS_DEFAULT.
-
-    ⚠ Under the deleted L1d formula this same profile answered 2048 / 4096
-    (DEFAULT_L1D_BYTES = 32 KiB), so this test is one of the places a revert
-    would show up.
-    """
-    var pol = MorselSizingPolicy.from_defaults()
-    var s = _narrow_i64_schema()
-    assert_equal(pol.agg_morsel_rows(s), 65536)
-    assert_equal(pol.default_morsel_rows(s), MAX_MORSEL_ROWS_DEFAULT)
-
-
-def test_for_host_detected_returns_stable_values() raises:
-    """Policies of two host profiles detected on the same machine produce
-    identical morsel sizes for the same schema: detection is read-only."""
-    var pol_a = MorselSizingPolicy.for_host(detect_host_profile("b"))
-    var pol_b = MorselSizingPolicy.for_host(detect_host_profile("b"))
-    var s = _narrow_i64_schema()
-    assert_equal(pol_a.agg_morsel_rows(s), pol_b.agg_morsel_rows(s))
-    assert_equal(pol_a.default_morsel_rows(s), pol_b.default_morsel_rows(s))
-    assert_equal(
-        pol_a.bulk_scan_morsel_rows(s), pol_b.bulk_scan_morsel_rows(s)
-    )
-    assert_equal(
-        pol_a.join_probe_morsel_rows(s), pol_b.join_probe_morsel_rows(s)
-    )
+# `MorselSizingPolicy.for_host` reads only the host profile it is given. The
+# policy of a detected profile and of the fallback profile are tested in
+# `komira_engine_runtime` (`test_host_detect`).
 
 
 def test_morsel_rows_via_tier_constant_matches_accessor() raises:
@@ -408,80 +367,6 @@ def test_empty_schema_does_not_divide_by_zero() raises:
     # base = 65536, DEFAULT (2x) = 131072, AGG (1x) = 65536.
     assert_equal(pol.agg_morsel_rows(s), 65536)
     assert_equal(pol.default_morsel_rows(s), MAX_MORSEL_ROWS_DEFAULT)
-
-
-# =============================================================================
-# Fan-out cap (worker over-subscription lever, )
-# =============================================================================
-#
-# `capped_worker_count(working_set_rows, max_workers)` is the PURE cap math (the
-# opt-in enable gate `fanout_cap_enabled()` lives at the executor call site, so
-# this function is env-independent + directly testable). It caps the parallel
-# fan-out so each dispatched worker owns at least
-# `FANOUT_MIN_ROWS_PER_WORKER_DEFAULT` rows. Landed DEFAULT-OFF (a warm-context
-# ABBA sweep measured the cap as a wash on q2/q5/q16 — the busy-spin is the pool
-# park loop, an komira_async/runtime moat concern). Expected values are derived
-# from the imported constant so these tests survive any threshold RE-TUNING.
-
-
-def test_fanout_passthrough_when_max_workers_le_1() raises:
-    """max_workers <= 1 is returned unchanged (nothing to cap)."""
-    assert_equal(capped_worker_count(1_000_000, 1), 1)
-    assert_equal(capped_worker_count(1_000_000, 0), 0)
-
-
-def test_fanout_passthrough_when_rows_unknown() raises:
-    """working_set_rows <= 0 (unknown cardinality) -> keep the full pool."""
-    assert_equal(capped_worker_count(0, 20), 20)
-    assert_equal(capped_worker_count(-1, 20), 20)
-
-
-def test_fanout_tiny_set_collapses_to_one_worker() raises:
-    """A working set below the per-worker threshold uses exactly 1 worker.
-
-    A nation(25) / region(5) dim build must not fan across the whole pool.
-    """
-    assert_equal(capped_worker_count(25, 20), 1)
-    assert_equal(capped_worker_count(1, 20), 1)
-    # Exactly one full threshold's worth of rows is still one worker.
-    assert_equal(capped_worker_count(FANOUT_MIN_ROWS_PER_WORKER_DEFAULT, 20), 1)
-
-
-def test_fanout_ceils_to_min_rows_per_worker() raises:
-    """capped == ceil(rows / MIN_ROWS_PER_WORKER), clamped to max_workers.
-
-    rows = 3 * threshold  -> 3 workers.
-    rows = 3 * threshold + 1 -> 4 workers (ceil).
-    """
-    var t = FANOUT_MIN_ROWS_PER_WORKER_DEFAULT
-    assert_equal(capped_worker_count(t * 3, 20), 3)
-    assert_equal(capped_worker_count(t * 3 + 1, 20), 4)
-    assert_equal(capped_worker_count(t + 1, 20), 2)
-
-
-def test_fanout_min_rows_per_worker_override() raises:
-    """`min_rows_per_worker` replaces the default threshold for one call; a value
-    below 1 falls back to `FANOUT_MIN_ROWS_PER_WORKER_DEFAULT`."""
-    assert_equal(capped_worker_count(5_000, 20, 1_000), 5)
-    assert_equal(capped_worker_count(5_001, 20, 1_000), 6)
-    assert_equal(capped_worker_count(25, 20, 0), 1)
-    assert_equal(
-        capped_worker_count(FANOUT_MIN_ROWS_PER_WORKER_DEFAULT * 3, 20, -7),
-        3,
-    )
-
-
-def test_fanout_large_set_keeps_full_pool() raises:
-    """A large working set exceeds max_workers * threshold -> no reduction.
-
-    This is the LARGE-QUERY no-regression guard: a 6M-lineitem / 100M scan
-    keeps the full pool (the clamp is a no-op above max_workers * threshold).
-    """
-    var t = FANOUT_MIN_ROWS_PER_WORKER_DEFAULT
-    # rows well above 20 * threshold -> clamps to max_workers.
-    assert_equal(capped_worker_count(t * 20 * 5, 20), 20)
-    # exactly max_workers * threshold -> exactly max_workers (no reduction).
-    assert_equal(capped_worker_count(t * 20, 20), 20)
 
 
 # -----------------------------------------------------------------------------
