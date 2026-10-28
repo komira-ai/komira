@@ -31,6 +31,7 @@ const Step = struct {
     env_args: []const u8 = "", // `args` of env BUCK2_ARGS, a `${{ inputs.args }}`
     log: []const u8 = "", // BUCK2_LOG
     tool: []const u8 = "", // ASSERT_REMOTE
+    console: []const u8 = "", // BUCK_CONSOLE
 };
 
 fn parseSteps(ar: std.mem.Allocator, text: []const u8) ![]Step {
@@ -48,6 +49,7 @@ fn parseSteps(ar: std.mem.Allocator, text: []const u8) ![]Step {
         if (std.mem.startsWith(u8, trimmed, "run: ")) s.run = unquote(trimmed["run: ".len..]);
         if (std.mem.startsWith(u8, trimmed, "BUCK2_ARGS: ")) s.env_args = trimmed["BUCK2_ARGS: ".len..];
         if (std.mem.startsWith(u8, trimmed, "BUCK2_LOG: ")) s.log = trimmed["BUCK2_LOG: ".len..];
+        if (std.mem.startsWith(u8, trimmed, "BUCK_CONSOLE: ")) s.console = trimmed["BUCK_CONSOLE: ".len..];
         if (std.mem.startsWith(u8, trimmed, "ASSERT_REMOTE: ")) s.tool = trimmed["ASSERT_REMOTE: ".len..];
     }
     return steps.items;
@@ -86,6 +88,50 @@ test "the inputs reach the steps through env, and both steps name the same log" 
     try t.expectEqualStrings("${{ inputs.assert-remote }}", steps[1].tool);
     try t.expectEqualStrings("${{ runner.temp }}/buck2-farm.log", steps[0].log);
     try t.expectEqualStrings(steps[0].log, steps[1].log);
+}
+
+test "buck2 runs on the simple console, whose waiting lines name what a stalled build waits on" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const steps = try loadSteps(arena.allocator());
+    try t.expectEqualStrings("simple", steps[0].console);
+    try t.expectEqualStrings("", steps[1].console);
+}
+
+/// The text of the step of pr.yml named `name`: from its `- name:` line to the next step.
+fn prStep(text: []const u8, name: []const u8) ![]const u8 {
+    var head_buf: [128]u8 = undefined;
+    const head = try std.fmt.bufPrint(&head_buf, "      - name: {s}\n", .{name});
+    const start = std.mem.indexOf(u8, text, head) orelse return error.StepMissing;
+    const rest = text[start + head.len - 1 ..]; // keeps the newline that ends the `- name:` line
+    const end = std.mem.indexOf(u8, rest, "\n      - ") orelse rest.len;
+    return rest[0..end];
+}
+
+fn minutes(block: []const u8, indent: []const u8) !?u32 {
+    var key_buf: [64]u8 = undefined;
+    const key = try std.fmt.bufPrint(&key_buf, "\n{s}timeout-minutes: ", .{indent});
+    const at = std.mem.indexOf(u8, block, key) orelse return null;
+    const v = block[at + key.len ..];
+    const nl = std.mem.indexOfScalar(u8, v, '\n') orelse v.len;
+    return try std.fmt.parseInt(u32, v[0..nl], 10);
+}
+
+test "the pull request check bounds its build and test steps well under the job" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const ar = arena.allocator();
+    const path = try std.fs.path.join(ar, &.{ try workDir(ar), "pr.yml" });
+    const text = try std.fs.cwd().readFileAlloc(ar, path, 1 << 20);
+    const job = (try minutes(text, "    ")) orelse return error.JobHasNoTimeout;
+    const build = (try minutes(try prStep(text, "build"), "        ")) orelse return error.BuildHasNoTimeout;
+    const tests = (try minutes(try prStep(text, "test"), "        ")) orelse return error.TestHasNoTimeout;
+    // the longest recorded check took 91 minutes end to end: a bound under that is a false red
+    try t.expect(build >= 120);
+    try t.expect(tests >= 60);
+    // and the bounds, with the steps between them, end the job before its own limit
+    try t.expect(build + tests < job);
+    try t.expect(build * 2 <= job);
 }
 
 test "no run line holds an expression" {
