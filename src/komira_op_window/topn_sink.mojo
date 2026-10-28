@@ -7,7 +7,8 @@
 # `finalize` runs `komira_op_sort.sort_topn_sink._execute_topn_sink` over it:
 # the first `n` rows in `TopNSinkData` order (a bounded heap when `n` is much
 # smaller than the batch, otherwise a full sort and a slice). The rows and
-# their order are that kernel's, including its NULL placement.
+# their order are that kernel's, including its NULL placement: the kernel does
+# not read `nulls_first` and orders a numeric NULL slot by its stored value.
 #
 # One partition for the executor (`num_partitions` 1). `TopNSinkGlobal` holds
 # an inline Atomic, so it is not Movable: it is built in place by

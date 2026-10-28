@@ -19,6 +19,8 @@ this package's API in follow-up changes.
   writes past `len(dst)`), `snappy_uncompressed_length`,
   `snappy_max_compressed_length`.
 - `zstd_frame`: `zstd_compress_into`, `zstd_decompress_into`,
+  `zstd_decompress_once` (libzstd's error code handed back, for a
+  grow-and-retry caller),
   `zstd_compress_bound`, `zstd_frame_content_size` and its two sentinels.
 - `bzip2_buffer`: `bzip2_compress_into`, `bzip2_decompress_into` (None when
   the destination is too small).
@@ -38,3 +40,25 @@ liblz4 are opened by `komira_zlib` and `komira_lz4`, which abort with their
 own messages (`libz dlopen failed (komira_zlib FFI handle init)` and
 `liblz4 dlopen failed (komira_lz4 raw-block handle init)`), naming neither
 the soname nor the loader's error.
+
+## Examples
+
+A raw snappy block, compressed and decompressed by the snappy library this
+package links (its shared library, from an installed package):
+
+<!-- mojo-hidden from std.testing import assert_equal -->
+```mojo
+from komira_compression.snappy_block import snappy_compress_into, snappy_max_compressed_length
+from komira_compression.snappy_block import snappy_uncompress_into, snappy_uncompressed_length
+
+var src: List[UInt8] = [104, 105, 104, 105, 104, 105, 104, 105, 104, 105, 104, 105]
+var packed = List[UInt8](length=snappy_max_compressed_length(len(src)), fill=0)
+var n = snappy_compress_into(Span(packed), Span(src))
+packed.resize(unsafe_uninit_length=n)
+assert_equal(snappy_uncompressed_length(Span(packed)), len(src))
+
+var out = List[UInt8](length=len(src), fill=0)  # the destination's length is its capacity
+assert_equal(snappy_uncompress_into(Span(out), Span(packed)), len(src))
+for i in range(len(src)):
+    assert_equal(out[i], src[i])
+```

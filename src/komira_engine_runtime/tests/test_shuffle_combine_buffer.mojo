@@ -1,29 +1,25 @@
 # =============================================================================
-# test_shuffle_combine_buffer.mojo
-#   Phase B2 tests for `ShuffleCombineBuffer` — the concrete-origin spillable
-#   combine buffer (distributed-shuffle producer combine).
+# test_shuffle_combine_buffer: `ShuffleCombineBuffer`, the per-partition
+# encode buffer of the shuffle producer combine.
 # =============================================================================
 #
-# Three tests, in falsifying order of importance:
-#
-#   1. gap6 destroy-recreate stress (THE safety test) — 64+ cycles of
-#      construct -> append -> take/reset -> DESTROY -> reconstruct, each cycle
-#      using a UNIQUE marker; assert no stale-byte reinterpretation (content
-#      written in cycle N never bleeds into cycle N+1, values correct each
-#      cycle). This is the bug#60 falsifying shape: a wildcard-origin owning
-#      field would let tcmalloc byte-reuse reinterpret stale bytes under the
-#      new struct's lifetime. The OwnedPointer[List[UInt8]] field is gap6-safe
-#      by construction, and this test guards that property.
-#
-#   2. bounded high-water — drive a large synthetic input (many partitions x
-#      many bytes) through append/take/reset; assert `high_water()` stays
-#      bounded to ~one partition-slice encode buffer (NOT the sum of all
-#      partitions). Toggle check: if reset/take did NOT free the live slice,
-#      the high-water would grow to the sum of all partitions; the test asserts
-#      it stays bounded to the single largest partition.
-#
-#   3. round-trip — append bytes -> take -> assert byte-identical to input.
-#
+#   1. Destroy-recreate stress: 64+ cycles of construct -> append ->
+#      take/reset -> destroy -> reconstruct, each cycle with a unique marker.
+#      Bytes written in cycle N never appear in cycle N+1 and every cycle's
+#      values are right. This is the shape that catches an owning field whose
+#      storage outlives (or is reused under) its struct.
+#   2. Bounded high-water: many partitions of many bytes through
+#      append/take/reset; `high_water()` stays at the largest single partition,
+#      not the sum. A `take()`/`reset()` that kept the live slice would grow
+#      it to the sum and fail.
+#   3. Round trip: append bytes -> take -> byte-identical to the input.
+#   4. Single bytes, capacity and re-baselining: `append_byte` feeds the live
+#      length and the high-water; the capacity constructor reserves; `take()`
+#      reserves the handed-out slice's length for the next one (a loop of
+#      similar slices does not regrow from empty); `clear_retaining_capacity`
+#      keeps the allocation, empties the slice and keeps the peak; `reset()`
+#      empties and keeps the peak; `reset_high_water` re-baselines the peak to
+#      the live length.
 # =============================================================================
 
 from std.time import perf_counter_ns
@@ -60,11 +56,11 @@ def _expected_byte(i: Int, marker: UInt32) -> UInt8:
 
 
 # -----------------------------------------------------------------------------
-# Test 1 — gap6 destroy-recreate stress (THE safety test).
+# Test 1 — destroy-recreate stress.
 # -----------------------------------------------------------------------------
 
 
-def _test_gap6_destroy_recreate_stress() raises -> Int:
+def _test_destroy_recreate_stress() raises -> Int:
     """64+ construct/append/take-or-reset/DESTROY/reconstruct cycles, each with
     a UNIQUE marker. Asserts:
       * the bytes read back inside each cycle are exactly what was written that
@@ -73,7 +69,7 @@ def _test_gap6_destroy_recreate_stress() raises -> Int:
       * after `take()`/`reset()` the live count is 0 (the slice was released).
 
     Returns the number of failures (0 = pass)."""
-    print("=== Test 1: gap6 destroy-recreate stress (64+ cycles) ===")
+    print("=== Test 1: destroy-recreate stress (64+ cycles) ===")
     var n_cycles: Int = 80  # > 64, exceeds the required floor
     var slice_len: Int = 4096  # one partition-slice-sized payload
     var failures: Int = 0
@@ -341,6 +337,78 @@ def _test_round_trip() raises -> Int:
     return failures
 
 
+def _feed(mut buf: ShuffleCombineBuffer, n: Int, marker: UInt32):
+    var payload = _make_payload(n, marker)
+    buf.append_bytes(Span(payload))
+
+
+def _check(cond: Bool, label: String, mut failures: Int):
+    if not cond:
+        failures += 1
+        print("  FAIL: ", label)
+
+
+def _test_bytes_capacity_and_rebaseline() raises -> Int:
+    var failures = 0
+
+    # append_byte: live length and high-water follow single-byte appends.
+    var a = ShuffleCombineBuffer()
+    for i in range(5):
+        a.append_byte(UInt8(i + 1))
+    _check(a.len() == 5, "append_byte len", failures)
+    _check(a.high_water() == 5, "append_byte high_water", failures)
+    var got = a.take()
+    _check(len(got) == 5 and got[0] == 1 and got[4] == 5, "append_byte content", failures)
+    _check(a.is_empty() and a.high_water() == 5, "take keeps peak", failures)
+
+    # Capacity constructor reserves; a non-positive one does not.
+    var big = ShuffleCombineBuffer(4096)
+    _check(big.capacity() >= 4096, "ctor reserves capacity", failures)
+    _check(big.is_empty() and big.high_water() == 0, "ctor starts empty", failures)
+    var none = ShuffleCombineBuffer(-3)
+    _check(none.capacity() == 0, "negative capacity reserves nothing", failures)
+
+    # take() reserves the handed-out slice's length for the next slice.
+    var t = ShuffleCombineBuffer()
+    _feed(t, 1000, UInt32(3))
+    var first = t.take()
+    _check(len(first) == 1000, "take returns the slice", failures)
+    _check(t.is_empty(), "take empties", failures)
+    _check(t.capacity() >= 1000, "take reserves the previous length", failures)
+
+    # clear_retaining_capacity: empty, same allocation size, peak kept.
+    var c = ShuffleCombineBuffer()
+    _feed(c, 800, UInt32(5))
+    var cap_before = c.capacity()
+    c.clear_retaining_capacity()
+    _check(c.is_empty(), "clear empties", failures)
+    _check(c.capacity() == cap_before and cap_before >= 800, "clear keeps capacity", failures)
+    _check(c.high_water() == 800, "clear keeps peak", failures)
+
+    # reset(): empty, peak kept, allocation released.
+    var r = ShuffleCombineBuffer(2048)
+    _feed(r, 300, UInt32(7))
+    r.reset()
+    _check(r.is_empty() and r.high_water() == 300, "reset keeps peak", failures)
+    _check(r.capacity() == 0, "reset releases capacity", failures)
+
+    # reset_high_water re-baselines to the live length.
+    var h = ShuffleCombineBuffer()
+    _feed(h, 500, UInt32(9))
+    var slice = h.take()
+    _feed(h, 40, UInt32(11))
+    _check(h.high_water() == 500, "peak before re-baseline", failures)
+    h.reset_high_water()
+    _check(h.high_water() == 40, "re-baseline to live length", failures)
+    _feed(h, 10, UInt32(13))
+    _check(h.high_water() == 50, "peak grows after re-baseline", failures)
+    _ = slice^
+
+    if failures == 0:
+        print("  PASS: bytes, capacity and re-baseline")
+    return failures
+
+
 def union_seed() -> UInt32:
     """Small fixed seed for the round-trip marker mixing (kept out of the
     hot helper so the marker for size 0 is still distinct)."""
@@ -354,20 +422,22 @@ def union_seed() -> UInt32:
 
 def main() raises:
     print("====================================================")
-    print(" ShuffleCombineBuffer — Phase B2 tests")
+    print(" ShuffleCombineBuffer tests")
     print("   (concrete-origin OwnedPointer[List[UInt8]] field;")
-    print("    gap6/bug#60-safe destroy-recreate + bounded high-water)")
+    print("    destroy-recreate + bounded high-water)")
     print("====================================================")
     print()
 
     var t0 = perf_counter_ns()
     var total_failures: Int = 0
 
-    total_failures += _test_gap6_destroy_recreate_stress()
+    total_failures += _test_destroy_recreate_stress()
     print()
     total_failures += _test_bounded_high_water()
     print()
     total_failures += _test_round_trip()
+    print()
+    total_failures += _test_bytes_capacity_and_rebaseline()
     print()
 
     var elapsed_ms = (perf_counter_ns() - t0) // 1_000_000

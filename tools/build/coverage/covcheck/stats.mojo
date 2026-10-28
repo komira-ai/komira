@@ -14,9 +14,7 @@ comptime BELOW_TARGET = "BelowTarget"
 comptime NOT_MEASURED = "NotMeasured"
 comptime BRANCH_NOT_MEASURED = "BranchNotMeasured"
 comptime REGRESSION = "Regression"
-comptime MISSING_ROW = "MissingRow"
-comptime EXTRA_ROW = "ExtraRow"
-comptime BRANCH_FLOOR_MISSING = "BranchFloorMissing"
+comptime REACHED_TARGET = "ReachedTarget"
 comptime MUTANT_SURVIVED = "MutantSurvived"
 comptime EXEMPTION_WITHOUT_REASON = "ExemptionWithoutReason"
 comptime STALE_EXEMPTION = "StaleExemption"
@@ -24,12 +22,10 @@ comptime UNMEASURED_FILE = "UnmeasuredFile"
 comptime BRANCH_UNMEASURED_FILE = "BranchUnmeasuredFile"
 comptime DECLARATION_ONLY_FILE = "DeclarationOnlyFile"
 
-comptime NO_FLOOR: Int = -1
-
 
 struct PackageStats(Copyable, Movable):
     """What was measured in one package, after test sources were set aside
-    and exemptions applied, and the package's ratchet row. `files` counts
+    and exemptions applied, and the metrics it holds (held.mojo). `files` counts
     every file in the numbers, the files no report gave a record included;
     `unmeasured_files` those of them that raised `UnmeasuredFile`; `has_records` is whether a report had a line record (or an
     exempted line) in the package at all; `has_branch_records` whether a
@@ -50,9 +46,8 @@ struct PackageStats(Copyable, Movable):
     var survived: Int
     var timeout: Int
     var error: Int
-    var has_row: Bool
-    var line_floor: Int
-    var branch_floor: Int
+    var held_line: Bool
+    var held_branch: Bool
 
     def __init__(out self, package: String):
         self.package = package
@@ -70,9 +65,8 @@ struct PackageStats(Copyable, Movable):
         self.survived = 0
         self.timeout = 0
         self.error = 0
-        self.has_row = False
-        self.line_floor = NO_FLOOR
-        self.branch_floor = NO_FLOOR
+        self.held_line = False
+        self.held_branch = False
 
     def line_bp(self) -> Int:
         """Line coverage in basis points; -1 when no line was measured."""
@@ -92,7 +86,7 @@ struct Finding(Copyable, Movable):
     """One reason a package (or a line of it) misses the policy.
 
     `metric` is `line`, `branch` or empty; `measured` and `bound` are basis
-    points (the target or the floor) or -1 when they do not apply; `path`
+    points (the target) or -1 when they do not apply; `path`
     and `line` place the finding in a file (line 0: the whole file), or are
     empty and 0; `count` is the number of lines an `UnmeasuredFile` counts
     uncovered, or a `DeclarationOnlyFile` would have counted, -1 for every
@@ -146,8 +140,8 @@ def valid_mode(mode: String) -> Bool:
 
 
 def conclusion_of(mode: String, findings: Int, regressions: Int) -> String:
-    """The check run's conclusion: `failure` with any `Regression` (a
-    ratchet floor holds in every mode, so coverage can only go up);
+    """The check run's conclusion: `failure` with any `Regression` (a held
+    metric below the target or not measured fails in every mode);
     otherwise `neutral` in census and neutral mode whatever was found, and
     in enforce mode `failure` with any finding, else `success`."""
     if regressions > 0:

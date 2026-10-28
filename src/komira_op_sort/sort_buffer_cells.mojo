@@ -171,7 +171,7 @@ def _encode_cell[
         # Full 128-bit key: store BOTH words (LO at slot*16, HI at
         # slot*16+8). LO-only stored the low 64 bits and mis-ordered
         # decimals whose ordering lives in the high 64 bits (and treated
-        # the value as unsigned — see _compare_storage_single_col).
+        # the value as unsigned).
         var lo = batch.col_decimal128_lo(col_in_batch).load[1](row)[0]
         var hi = batch.col_decimal128_hi(col_in_batch).load[1](row)[0]
         storage.write_slot_decimal128(col_in_storage, slot, lo, hi)

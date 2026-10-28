@@ -6,19 +6,17 @@
 # (cut into several slices by `num_workers`, so the per-slice sorts and the
 # co-rank merge across runs both run) and through the serial
 # `sort_topn_sink._sort_batch_single_key`, and requires equal columns. The
-# payload column holds each row's input index, so a merge that broke a tie the
-# wrong way (an unstable sort) fails on the payload even when the keys agree.
+# payload column holds each row's input index, so the payload shows that ties
+# keep input order (a stable sort) even where the keys agree.
 #
 # Cases: INT64 ASC / DESC with ties, FLOAT64 ASC / DESC, INT32 with negatives,
 # 4,096 rows with 64-way ties over 4 and 7 slices, the k-way merge of sorted
 # partitions, the row floor of the gate, and FLOAT64 with NaNs of both signs
 # and both zeros.
 #
-# The float case is a behaviour change. The flat key used to be IEEE
-# `totalOrder`: a NaN with its sign bit set (what 0.0/0.0 gives on x86) sorted
-# below -inf, and -0.0 sorted before +0.0. `sort_key_lt` (the serial kernels,
-# DuckDB) puts every NaN above +inf and ties the zeros. Planted mutant: the
-# old transform in `_f64_order_key` turns `test_f64_nan_and_zeros_*` red.
+# Float order is `sort_key_lt` (the serial kernels, DuckDB): every NaN, of
+# either sign, sorts above +inf, and -0.0 ties +0.0 so the two zeros keep their
+# input order. `test_f64_nan_and_zeros_*` pins that order.
 # =============================================================================
 
 from std.memory import bitcast
@@ -192,8 +190,7 @@ def test_f64_nan_and_zeros_desc_duckdb_order() raises:
 
 
 def test_merge_sorted_partitions_matches_one_sort() raises:
-    """Three partitions, each sorted on its own (as `combine_partition`
-    does), merged; the result is one stable sort of P0 ++ P1 ++ P2."""
+    """Three partitions, each sorted on its own, merged; the result is one stable sort of P0 ++ P1 ++ P2."""
     var per = 500
     var all_keys = List[Int64]()
     var parts = Slab[RecordBatch]()

@@ -10,7 +10,7 @@
 #   * `hardware_topology.mojo::HardwareTopology` — macOS-only P/E via sysctl;
 #       the Linux P/E path is STUBBED (`_detect_fallback` collapses every core
 #       to a single P-tier — design §D.5 "closes the Linux P/E gap").
-#   * `hardware.mojo::HardwareProfile`     — cpu0-biased cache sizing.
+#   * `komira_host_profile.hardware.HardwareProfile`   — cpu0-biased cache sizing.
 # None of them derives an Intel-hybrid P/E tier split on Linux, a per-tier L2
 # divisor, or a NUMA victim ordering — the three inputs the POC schedulers
 # (C2 tier weight, C3 E-gate, D.1 NUMA-local steal) need.

@@ -6,6 +6,11 @@ sha256 and size in [`pins.bzl`](pins.bzl) and fetched like every other
 pinned download (`pinned_file`): on a remote-cache hit, nothing is fetched.
 No source distribution is built and pip never runs.
 
+komira has no Python surface, so these pins and the rules that use them
+are being removed. The package that tested them (the pinned versions, the
+licences, the protobuf gencode, the 3.14 interpreters) is already gone:
+no test holds what this page says about the pins.
+
 | target | what |
 |---|---|
 | `:cpython` | CPython 3.13.16, python-build-standalone release 20261003, `x86_64-unknown-linux-gnu-install_only_stripped` |
@@ -42,12 +47,9 @@ so a zone is never read from the worker.
 
 protobuf 7.36.2 loads the Python gencode of the repository's protoc (29.1,
 which writes gencode 5.29.1): its runtime check refuses only gencode newer
-than the runtime (or of another domain), not an older major. The test
-`protobuf_gencode` (`src/tests/helpers/komira_test_python`) imports a module
-protoc 29.1 generated and parses with it; with protobuf 5.28.3 pinned instead
-it fails with `VersionError: Detected incompatible Protobuf Gencode/Runtime
-versions when loading gencode_probe.proto: gencode 5.29.1 runtime 5.28.3`.
-A bump of either pin re-runs it.
+than the runtime (or of another domain), not an older major. With protobuf
+5.28.3 pinned instead, loading that gencode fails with `VersionError:
+Detected incompatible Protobuf Gencode/Runtime versions`.
 
 Not in the closure yet, each for the change that brings its consumer: the
 Google Cloud Storage testbench, kafka-python and opensearch-py (service
@@ -77,10 +79,7 @@ interpreter. A `py_test` takes one with `python =
 | python-dateutil, six, tzdata | as above | | pandas; every `py_test` |
 
 Every distribution here has a `cp314t` wheel on PyPI; none is built from
-source. The tests `gil_cp314t` and `subinterp_cp314`
-([komira_test_python](../../src/tests/helpers/komira_test_python/README.md))
-hold what each does on the free-threaded interpreter and in a
-sub-interpreter.
+source.
 
 ## Licences
 
@@ -117,15 +116,8 @@ wheels, which are test-only: its visibility (`_TEST_ONLY` in
 [`BUCK`](BUCK)) keeps it out of every shipped package
 ([Never shipped](#never-shipped)).
 
-The test [`licenses`](../../src/tests/helpers/komira_test_python/README.md)
-holds this table to the files: each installed distribution must be pinned,
-a `License-Expression` in its METADATA must equal the pin's `license`, no
-licence file may be the AGPL, and every licence file that names a GNU
-licence, and every bundled libgfortran, libquadmath, libreadline or libgdbm,
-must be one of the reviewed entries in its BUCK file, which say why each is
-there. `licenses_cp314` and `licenses_cp314t` do the same for each 3.14
-interpreter and its closure. A new wheel, or a new version, that brings another such file fails
-the test until it is reviewed.
+No test holds this table to the wheels' licence files: a new wheel, or a
+new version, is reviewed by hand.
 
 ## Never shipped
 

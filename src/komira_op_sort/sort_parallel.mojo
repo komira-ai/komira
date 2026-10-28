@@ -14,9 +14,11 @@
 #   3. In parallel, each chunk stable-sorts its own slice of a pre-sized
 #      permutation (and the same slice of a pre-sized scratch list), giving P
 #      sorted runs.
-#   4. A co-rank multiway merge, also in parallel, of the P runs into one
-#      global permutation: each chunk binary-searches the threshold key of its
-#      output boundary, and on a key tie the lower run wins.
+#   4. A co-rank multiway merge of the P runs into one global permutation. The
+#      calling thread first co-ranks every output-slice boundary (`_corank`: a
+#      binary search of the threshold key over the key range: up to 64 rounds,
+#      each probing every run, per boundary); then each chunk, in
+#      parallel, merges its own output slice. On a key tie the lower run wins.
 #   5. The caller gathers the batch's columns by the permutation
 #      (`gather_batch_dispatch`, on the same pool).
 #
@@ -28,6 +30,16 @@
 # key of +0.0, so the flat keys order exactly as `sort_key_lt` orders the
 # floats (DuckDB's order: NaN last ascending and first descending, the two
 # zeros equal and so kept in input order).
+#
+# NULLs: the INT64 / INT32 / FLOAT64 paths do not read the key's validity. A
+# NULL cell sorts by its stored value, as in `sort_topn_sink`'s serial sort of
+# a numeric key, and `can_parallel_sort_single_key` does not look at NULLs, so
+# the caller that needs NULL placement for a numeric key does not route it here.
+# The STRING / BINARY form (`sort_parallel_string`) does place NULLs: first
+# ascending, last descending.
+#
+# Nothing in the sort sink calls these entries yet; they are the building
+# blocks of the parallel sort and are exercised by this package's tests.
 #
 # Multi-key sorts are not handled here (the caller keeps `sort_batch_by_keys`);
 # a STRING key is `sort_parallel_string`.
@@ -118,11 +130,12 @@ def _mid_floor(lo: Int64, hi: Int64) -> Int64:
 
 @always_inline
 def _mid_ceil(lo: Int64, hi: Int64) -> Int64:
-    """Overflow-safe CEIL midpoint of [lo, hi] (lo <= hi) — `lo + ceil((hi-lo)/2)`.
-    Used by the DESC branch (round UP to avoid an infinite loop when
-    hi == lo + 1)."""
+    """Overflow-safe CEIL midpoint of [lo, hi] (lo <= hi): `lo + ceil((hi-lo)/2)`.
+    Used by the DESC branch, which rounds up so the search advances when
+    hi == lo + 1. The distance is up to 2^64 - 1 (`dist + 1` would wrap to 0),
+    so the halved distance and the rounding bit are added to lo one at a time."""
     var dist = UInt64(hi) - UInt64(lo)
-    return lo + Int64((dist + UInt64(1)) >> 1)
+    return lo + Int64(dist >> 1) + Int64(dist & UInt64(1))
 
 
 # =============================================================================
@@ -457,6 +470,9 @@ struct _SliceSortWork(SharedChunkWork):
     ](
         self, chunk_id: Int, n_chunks: Int, ref input: In, mut payload: P,
     ) raises:
+        # SAFETY: the driver passes a `List[Int64]` as `input` and a
+        # `_PermScratch` as `payload` to the `pool.run` that dispatches this
+        # work, so each cast is to the exact type of the referent.
         var kp = UnsafePointer(to=input).bitcast[List[Int64]]()
         var pp = UnsafePointer(to=payload).bitcast[_PermScratch]()
         var lo = self.slice_lo[chunk_id]
@@ -498,6 +514,9 @@ struct _CorankMergeWork(SharedChunkWork):
     ](
         self, chunk_id: Int, n_chunks: Int, ref input: In, mut payload: P,
     ) raises:
+        # SAFETY: the driver passes a `_CorankMergeIn` as `input` and a
+        # `List[Int]` as `payload` to the `pool.run` that dispatches this work,
+        # so each cast is to the exact type of the referent.
         var ip = UnsafePointer(to=input).bitcast[_CorankMergeIn]()
         var op = UnsafePointer(to=payload).bitcast[List[Int]]()
         var w_lo = ip[].bounds[chunk_id]
@@ -617,11 +636,12 @@ def _parallel_single_key_perm[
     _ = buf^
     var total_runs = nw
 
-    # ---- Phase 2: PARALLEL co-rank multiway merge ----
-    # Split the `n` output ranks into P contiguous slices; co-rank each boundary
-    # into per-run cursor ranges; each worker independently k-way-merges its
-    # disjoint output slice from its disjoint per-run sub-ranges into the pre-
-    # sized `out_perm`.
+    # ---- Phase 2: co-rank multiway merge ----
+    # Split the `n` output ranks into P contiguous slices; this thread co-ranks
+    # each boundary into per-run cursor ranges (serial, `mw + 1` calls of
+    # `_corank`); then each worker independently k-way-merges its disjoint
+    # output slice from its disjoint per-run sub-ranges into the pre-sized
+    # `out_perm`.
     var mw = nw
     if mw > n:
         mw = n
@@ -744,13 +764,12 @@ def parallel_sort_single_key_serial(
 # merge_sorted_partitions_single_key: the serial k-way merge of sorted batches
 # =============================================================================
 #
-# The sort sink's `combine_partition` sorts each worker's batch on its own
-# executor worker (a nested fork-join there would contend with the live pool).
-# This function then merges the N
-# already-sorted partition batches into ONE globally-sorted batch with a SERIAL
-# heap k-way merge in finalize. The merge is O(n log N) (N == partition count)
-# — the cheap part; the O(n log n) sorts already ran in parallel. Byte-identical
-# to a single stable sort: each partition is stably sorted, and the heap breaks
+# A caller that sorts each worker's batch on its own (so no fork-join nests
+# under a live pool) merges the N already-sorted partition batches here into
+# ONE globally-sorted batch with a SERIAL heap k-way merge. The merge is
+# O(n log N) (N == partition count), the cheap part when the O(n log n) sorts
+# already ran in parallel. Not yet called from the sort sink. Same rows as a
+# single stable sort: each partition is stably sorted, and the heap breaks
 # key ties by ASCENDING partition index (lower partition wins), which matches a
 # stable global sort over (P0 ++ P1 ++ ... ++ P_{N-1}) — the same partition
 # order the driver folds workers in.
@@ -802,8 +821,7 @@ def merge_sorted_partitions_single_key[
     pool: SharedForkJoinHandle[has_pool, disp_o],
 ) raises -> RecordBatch:
     """Merge N already-sorted single-key partition batches into ONE globally-
-    sorted batch (SERIAL heap k-way merge in finalize — the MERGE itself is
-    serial by design; only the final gather forks).
+    sorted batch (SERIAL heap k-way merge; only the final gather forks).
 
     Each partition in `partitions` MUST already be sorted by `key_name` in the
     same direction. Concatenates them into one contiguous batch (preserving
@@ -812,10 +830,10 @@ def merge_sorted_partitions_single_key[
     one global permutation (lower-partition-wins-on-tie == stable), and gathers
     once. `partitions` is consumed.
 
-    `pool` is for the closing gather only; the k-way merge is serial. The sort
-    sink calls this from `finalize`, when the `combine_partition` dispatch has
-    returned and the pool is idle, so the gather gets every worker.
-    Dispatcher-less callers use `merge_sorted_partitions_single_key_serial`."""
+    `pool` is for the closing gather only; the k-way merge is serial. Call it
+    when no other dispatch is live on the pool, so the gather gets every
+    worker. A key column's NULLs are not read (see the header). Dispatcher-less
+    callers use `merge_sorted_partitions_single_key_serial`."""
     var np = len(partitions)
     var owned = partitions^
     if np == 0:
@@ -826,14 +844,14 @@ def merge_sorted_partitions_single_key[
     # and record each partition's [base[p], base[p+1])
     # row range in the result.
     #
-    # ⚠ THIS LOOP'S ORDER IS A CORRECTNESS CONTRACT, NOT A STYLE. `base` is the
+    # THIS LOOP'S ORDER IS A CORRECTNESS CONTRACT, NOT A STYLE. `base` is the
     # k-way merge's index space, and the merge ASSUMES each [base[p],
     # base[p+1]) range is one of the internally-sorted runs. The fold visits
     # the slab in slot order, so partition `p` lands at [base[p], base[p+1]).
     # A fold in any other order would leave `base[p]` pointing at a range that
     # is not a sorted run, and the merge would emit an UNSORTED result; a
     # value-only (order-independent) check cannot see that. The guard is
-    # `test_parallel_sort_merge_fold.test_*_merge_is_sorted_*`.
+    # `test_sort_parallel_merge_fold.test_*_merge_is_sorted_*`.
     #
     # The row counts are read by reference off the slab before the fold
     # consumes it.

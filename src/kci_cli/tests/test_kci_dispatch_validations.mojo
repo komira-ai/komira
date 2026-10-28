@@ -32,7 +32,7 @@ from kci_api import (
 )
 from kci_api import RunResult as KciRunResult
 from kci_publish import NewNamesReport, PublishRequest
-from kci_validate import ValidateRequest
+from kci_validate import ValidateRequest, shipped_readme_tool
 
 
 comptime _REV: String = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
@@ -62,6 +62,7 @@ struct FakeSteps(StageSteps, Movable):
     var validation_fails: Bool
     var validation_skips: Bool
     var pixis: List[String]
+    var readme_tools: List[String]
     var channels: List[String]
     var bases: List[String]
 
@@ -81,6 +82,7 @@ struct FakeSteps(StageSteps, Movable):
         self.validation_fails = False
         self.validation_skips = False
         self.pixis = List[String]()
+        self.readme_tools = List[String]()
         self.channels = List[String]()
         self.bases = List[String]()
 
@@ -93,6 +95,7 @@ struct FakeSteps(StageSteps, Movable):
             + String(" plan=") + String(req.plan)
         )
         self.pixis.append(req.validation.name + String(" pixi=") + req.pixi + String(" sha=") + req.pixi_sha256)
+        self.readme_tools.append(req.readme_tool.copy())
         self.channels.append(req.validation.name + String(" local=") + req.channel_override)
         if req.plan:
             return ResultValidation(
@@ -455,6 +458,9 @@ def test_an_env_validation_needs_the_pinned_pixi() raises:
     )
     assert_equal(len(ok.pixis), 1)
     assert_equal(ok.pixis[0], String("install-env pixi=/t/pixi sha=") + String(_PIXI_SHA))
+    # and the README examples tool kci ships beside its own executable
+    assert_equal(ok.readme_tools[0], shipped_readme_tool())
+    assert_true(ok.readme_tools[0].endswith(String("/readme_examples")), ok.readme_tools[0])
 
 
 def test_pixi_flags_are_refused_where_no_env_validation_runs() raises:

@@ -2,17 +2,17 @@
 # test_native_spill_writer_reader.mojo — Native spill writer/reader round-trip.
 # =============================================================================
 #
-# The thin `NativeColumnSpillWriter`/Reader (THSPLC)
-# and `NativeRowSpillWriter`/Reader (THSPILL2) layer over the `SpillStorage`
-# substrate. These tests write batches/blocks to a real on-disk spill run via
-# the writer, re-open the run via the reader, and assert byte-for-byte logical
-# round-trip — INCLUDING the multi-batch-per-run shape the external-sort
-# run-merge needs.
+# `NativeColumnSpillWriter`/Reader (THSPLC) and `NativeRowSpillWriter`/Reader
+# (THSPILL2) over a local-disk spill storage. The round-trip tests write
+# batches/blocks to a real on-disk run, re-open the run through the reader and
+# assert the logical content, including several batches per run. The refusal
+# tests check that a row run holding a corrupt chunk, and a row block whose
+# body does not match its row count, raise a named error.
 # =============================================================================
 
 from std.time import perf_counter_ns
 
-from std.testing import assert_equal, assert_true
+from std.testing import assert_equal, assert_true, assert_raises
 
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.column import Column
@@ -25,6 +25,8 @@ from komira_arrow.string_array import StringArray
 from komira_collections.slab import Slab
 from komira_buffer.heap_region import HeapRegion
 
+from komira_engine_runtime.spill.local_disk import LocalDiskSpillStorage
+from komira_engine_runtime.spill.spill_storage import ChunkId
 from komira_engine_runtime.spill.native_spill import (
     NativeColumnSpillWriter,
     NativeColumnSpillReader,
@@ -295,6 +297,51 @@ def test_row_multi_block_roundtrip() raises:
 
 
 # =============================================================================
+# (e) Refusals.
+# =============================================================================
+
+
+def _bytes_sab(n: Int) raises -> SharedAlignedBuffer[HeapRegion]:
+    var oab = OwnedAlignedBuffer(capacity=max(n, 1))
+    oab.set_length(Int64(n))
+    oab.zero()
+    return SharedAlignedBuffer[HeapRegion].from_owned(oab^)
+
+
+def test_row_block_from_bytes_refuses_inconsistent_body() raises:
+    with assert_raises(contains="negative row_count"):
+        _ = NativeRowBlock.from_bytes(_bytes_sab(32), Int64(-1), UInt64(1))
+    with assert_raises(contains="row_count is 0"):
+        _ = NativeRowBlock.from_bytes(_bytes_sab(32), Int64(0), UInt64(1))
+    with assert_raises(contains="body is empty"):
+        _ = NativeRowBlock.from_bytes(_bytes_sab(0), Int64(5), UInt64(1))
+    with assert_raises(contains="not a multiple"):
+        _ = NativeRowBlock.from_bytes(_bytes_sab(33), Int64(4), UInt64(1))
+    # An empty block and a whole-row body are accepted.
+    _ = NativeRowBlock.from_bytes(_bytes_sab(0), Int64(0), UInt64(1))
+    var ok = NativeRowBlock.from_bytes(_bytes_sab(32), Int64(4), UInt64(1))
+    assert_equal(ok.entry_stride(), 8)
+
+
+def test_row_reader_refuses_corrupt_chunks() raises:
+    # Chunk 1 is 10 bytes (shorter than a header), chunk 2 is 96 zero bytes
+    # (a full header with a bad magic). The reader must name each cause.
+    var root = _tmp_dir("rowbad") + String("/thspill2_run_0")
+    var st = LocalDiskSpillStorage.with_unlimited(root)
+    _ = st.write_chunk(_bytes_sab(10))
+    _ = st.write_chunk(_bytes_sab(96))
+    st.sync()
+    var r = NativeRowSpillReader.open(root, 2)
+    with assert_raises(contains="shorter than header"):
+        _ = r.read_block(0)
+    with assert_raises(contains="bad magic"):
+        _ = r.read_block(1)
+    with assert_raises(contains="out of range"):
+        _ = r.read_block(2)
+    r.cleanup()
+
+
+# =============================================================================
 # main
 # =============================================================================
 
@@ -305,4 +352,6 @@ def main() raises:
     test_column_mixed_roundtrip()
     test_row_block_roundtrip()
     test_row_multi_block_roundtrip()
+    test_row_block_from_bytes_refuses_inconsistent_body()
+    test_row_reader_refuses_corrupt_chunks()
     print("test_native_spill_writer_reader: ALL PASS")

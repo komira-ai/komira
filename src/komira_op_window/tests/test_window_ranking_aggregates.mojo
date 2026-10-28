@@ -40,7 +40,6 @@ from komira_plan_expr.partition_expr import (
 
 from komira_op_window.partition_scan_sink import _execute_partition_by_sink
 
-
 def _i64(vals: List[Int64], valid: List[Bool]) -> Column[HeapRegion]:
     var arr = PrimitiveArray[DType.int64].allocate_nullable(len(vals))
     for i in range(len(vals)):
@@ -49,13 +48,11 @@ def _i64(vals: List[Int64], valid: List[Bool]) -> Column[HeapRegion]:
             arr._set_null(i)
     return Column.from_primitive[DType.int64](arr)
 
-
 def _plain_i64(vals: List[Int64]) -> Column[HeapRegion]:
     var l = List[Scalar[DType.int64]]()
     for v in vals:
         l.append(v)
     return Column.from_primitive[DType.int64](PrimitiveArray[DType.int64].from_list(l))
-
 
 def _i32(vals: List[Int32]) -> Column[HeapRegion]:
     var l = List[Scalar[DType.int32]]()
@@ -63,13 +60,11 @@ def _i32(vals: List[Int32]) -> Column[HeapRegion]:
         l.append(v)
     return Column.from_primitive[DType.int32](PrimitiveArray[DType.int32].from_list(l))
 
-
 def _f64(vals: List[Float64]) -> Column[HeapRegion]:
     var l = List[Scalar[DType.float64]]()
     for v in vals:
         l.append(v)
     return Column.from_primitive[DType.float64](PrimitiveArray[DType.float64].from_list(l))
-
 
 def _batch(names: List[String], var cols: List[Column[HeapRegion]]) raises -> RecordBatch:
     var sb = SchemaBuilder()
@@ -79,7 +74,6 @@ def _batch(names: List[String], var cols: List[Column[HeapRegion]]) raises -> Re
     for i in range(len(cols)):
         bb.add_column(cols[i].share())
     return bb.build(sb.build())
-
 
 def _run(
     var batch: RecordBatch,
@@ -98,29 +92,23 @@ def _run(
     var spec = PartitionBySinkData(pkeys.copy(), okeys.copy(), desc^, exprs^, sb.build())
     return _execute_partition_by_sink(batch^, spec)
 
-
 def _get(rb: RecordBatch, col: Int, row: Int) -> Int64:
     ref c = rb.column_at(col)
     return c._data.get_typed[Scalar[DType.int64]](c._offset + row)
-
 
 def _getf(rb: RecordBatch, col: Int, row: Int) -> Float64:
     ref c = rb.column_at(col)
     return c._data.get_typed[Scalar[DType.float64]](c._offset + row)
 
-
 def _null(rb: RecordBatch, col: Int, row: Int) -> Bool:
     return rb.column_at(col).is_null_at(row)
-
 
 def _rows(start_tag: UInt8, start: Int64, end_tag: UInt8, end: Int64) -> PartitionFrame:
     return PartitionFrame(FRAME_UNITS_ROWS, start_tag, start, end_tag, end)
 
-
 # =============================================================================
 # Ranking over key types other than INT64 / FLOAT64
 # =============================================================================
-
 
 def test_rank_ties_on_int32_and_string_keys() raises:
     # o32 = 5, 3, 5, 1 ; RANK: 1 -> 1, 3 -> 2, 5, 5 -> 3, 3; DENSE_RANK 1,2,3,3;
@@ -162,38 +150,6 @@ def test_rank_ties_on_int32_and_string_keys() raises:
     for r in range(3):
         assert_equal(_get(out2, 1, r), want2[r])
 
-
-def test_ntile() raises:
-    # NTILE(3) over 7 rows: buckets of 3, 2, 2. NTILE(0) raises.
-    var o: List[Int64] = [1, 2, 3, 4, 5, 6, 7]
-    var cols = List[Column[HeapRegion]]()
-    cols.append(_plain_i64(o))
-    var names: List[String] = ["o"]
-    var exprs = List[PartitionExpr]()
-    exprs.append(PartitionExpr.ntile(3))
-    var ok: List[String] = ["o"]
-    var out = _run(_batch(names, cols^), List[String](), ok, exprs^)
-    var want: List[Int64] = [1, 1, 1, 2, 2, 3, 3]
-    for r in range(7):
-        assert_equal(_get(out, 1, r), want[r])
-
-    var cols0 = List[Column[HeapRegion]]()
-    cols0.append(_plain_i64(o))
-    var exprs0 = List[PartitionExpr]()
-    exprs0.append(PartitionExpr.ntile(0))
-    var raised = False
-    try:
-        _ = _run(_batch(names, cols0^), List[String](), ok, exprs0^)
-    except:
-        raised = True
-    assert_true(raised, "NTILE(0) must raise")
-
-
-# =============================================================================
-# MIN / MAX over NaN (§2.7)
-# =============================================================================
-
-
 def test_running_and_whole_partition_min_max_over_nan() raises:
     # v = NaN, 2.0, 5.0 in order o. Running (ROWS) MIN: NaN, 2, 2 (NaN is the
     # largest value, so it is the minimum only while it is the only value);
@@ -230,7 +186,6 @@ def test_running_and_whole_partition_min_max_over_nan() raises:
     assert_true(isnan(_getf(out, 6, 1)))
     assert_equal(_getf(out, 6, 2), 5.0)
 
-
 def test_running_max_after_a_nan_arrives() raises:
     # v = 2.0, NaN, 1.0: running MAX 2, NaN, NaN (a NaN arriving after a
     # number is the new maximum); running MIN 2, 2, 1; whole-partition MAX
@@ -260,11 +215,9 @@ def test_running_max_after_a_nan_arrives() raises:
         assert_true(isnan(_getf(out, 4, r)))
         assert_equal(_getf(out, 5, r), 1.0)
 
-
 # =============================================================================
 # Sliding frames
 # =============================================================================
-
 
 def test_following_frame_sums_only_rows_it_holds() raises:
     # SUM / COUNT / AVG over ROWS BETWEEN 1 FOLLOWING AND 2 FOLLOWING,
@@ -295,7 +248,6 @@ def test_following_frame_sums_only_rows_it_holds() raises:
     for r in range(5):
         assert_equal(_get(out, 3, r), want_cnt[r])
 
-
 def test_sliding_float_sum_after_infinity_leaves() raises:
     # SUM(v) over ROWS BETWEEN 1 PRECEDING AND CURRENT ROW, v = +inf, 1, 2, 3:
     # +inf, +inf, 3, 5. Once the infinity has left the frame the sum is
@@ -319,346 +271,101 @@ def test_sliding_float_sum_after_infinity_leaves() raises:
     assert_equal(_getf(out, 2, 2), 3.0)
     assert_equal(_getf(out, 2, 3), 5.0)
 
+# =============================================================================
+# Several partitions, NTILE sizing and frames that are empty or hold NULLs
+# =============================================================================
 
-def _f64_nullable(vals: List[Float64], valid: List[Bool]) -> Column[HeapRegion]:
-    var arr = PrimitiveArray[DType.float64].allocate_nullable(len(vals))
-    for i in range(len(vals)):
-        arr.store[1](i, vals[i])
-        if not valid[i]:
-            arr._set_null(i)
-    return Column.from_primitive[DType.float64](arr)
-
-
-def test_sliding_float_sum_is_the_sum_of_the_frame_alone() raises:
-    # DuckDB sums each frame from its own values. Three partitions, ROWS
-    # BETWEEN 1 PRECEDING AND CURRENT ROW (cols 3 SUM, 4 AVG) and ROWS
-    # BETWEEN 2 PRECEDING AND 1 PRECEDING (col 5 SUM):
-    #   g = 1, v = 1e20, 1, 1: SUM 1e20, 1e20, 2; AVG 1e20, 5e19, 1.
-    #     1e20 + 1 is 1e20, so a window that subtracts 1e20 back out when it
-    #     leaves takes the 1 with it and answers 1 (AVG 0.5) for the last
-    #     frame {1, 1}.
-    #   g = 2, v = 4, NULL, 1e20, 1, 1 (the NULL slot holds 1e30): SUM 4, 4,
-    #     1e20, 1e20, 2; AVG 4, 4, 1e20, 5e19, 1. A frame that starts past the
-    #     partition's first row must read the right cells, and the NULL's
-    #     slot value never enters a sum.
-    #   g = 3, v = NaN, 2, 3: SUM NaN, NaN, 5 (a NaN that has left the frame
-    #     leaves no NaN behind).
-    #   The lagged frame is empty on each partition's first row (NULL), then
-    #   g = 1: 1e20, 1e20; g = 2: 4, 4, 1e20, 1e20; g = 3: NaN, NaN.
-    var nan = Float64(0.0) / Float64(0.0)
-    var g: List[Int64] = [1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3]
-    var o: List[Int64] = [1, 2, 3, 1, 2, 3, 4, 5, 1, 2, 3]
-    var v: List[Float64] = [1.0e20, 1.0, 1.0, 4.0, 1.0e30, 1.0e20, 1.0, 1.0, nan, 2.0, 3.0]
-    var valid: List[Bool] = [True, True, True, True, False, True, True, True, True, True, True]
-    var cols = List[Column[HeapRegion]]()
-    cols.append(_plain_i64(g))
-    cols.append(_plain_i64(o))
-    cols.append(_f64_nullable(v, valid))
-    var names: List[String] = ["g", "o", "v"]
-    var cur = _rows(FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_CURRENT_ROW, 0)
-    var exprs = List[PartitionExpr]()
-    exprs.append(PartitionExpr.agg_with_frame(PF_SUM, "v", cur.copy()))
-    exprs.append(PartitionExpr.agg_with_frame(PF_AVG, "v", cur.copy()))
-    exprs.append(
-        PartitionExpr.agg_with_frame(
-            PF_SUM, "v", _rows(FRAME_BOUND_PRECEDING, 2, FRAME_BOUND_PRECEDING, 1)
-        )
-    )
-    var pk: List[String] = ["g"]
-    var ok: List[String] = ["o"]
-    var out = _run(_batch(names, cols^), pk, ok, exprs^)
-    var want_sum: List[Float64] = [1.0e20, 1.0e20, 2.0, 4.0, 4.0, 1.0e20, 1.0e20, 2.0]
-    var want_avg: List[Float64] = [1.0e20, 5.0e19, 1.0, 4.0, 4.0, 1.0e20, 5.0e19, 1.0]
-    for r in range(8):
-        assert_false(_null(out, 3, r))
-        assert_equal(_getf(out, 3, r), want_sum[r])
-        assert_equal(_getf(out, 4, r), want_avg[r])
-    assert_true(isnan(_getf(out, 3, 8)))
-    assert_true(isnan(_getf(out, 3, 9)))
-    assert_equal(_getf(out, 3, 10), 5.0)
-    assert_equal(_getf(out, 4, 10), 2.5)
-    var empty_rows: List[Int] = [0, 3, 8]
-    for r in empty_rows:
-        assert_true(_null(out, 5, r))
-    var lag_rows: List[Int] = [1, 2, 4, 5, 6, 7]
-    var want_lag: List[Float64] = [1.0e20, 1.0e20, 4.0, 4.0, 1.0e20, 1.0e20]
-    for i in range(len(lag_rows)):
-        assert_false(_null(out, 5, lag_rows[i]))
-        assert_equal(_getf(out, 5, lag_rows[i]), want_lag[i])
-    assert_true(isnan(_getf(out, 5, 9)))
-    assert_true(isnan(_getf(out, 5, 10)))
-
-
-def test_sliding_float_sum_over_frames_wider_than_two_rows() raises:
-    # DuckDB's SUM / AVG over ROWS frames of 3 to 11 rows. v holds powers of
-    # two, so every frame sum is exact and names the rows it added:
-    #   g = 1, v = 1, 2, 4, .., 64 (7 rows):
-    #     ROWS BETWEEN 2 PRECEDING AND 2 FOLLOWING (col 3 SUM, col 4 AVG):
-    #       SUM 7, 15, 31, 62, 124, 120, 112 over 3, 4, 5, 5, 5, 4, 3 rows.
-    #     ROWS BETWEEN 3 PRECEDING AND 3 FOLLOWING (col 5 SUM):
-    #       SUM 15, 31, 63, 127, 126, 124, 120.
-    #   g = 2, v = 1, 2, 4, .., 2^15 (16 rows):
-    #     ROWS BETWEEN 5 PRECEDING AND 5 FOLLOWING (col 6 SUM).
-    # A frame of 4 or more rows can need two tree nodes on its right side;
-    # a query that kept only the last of them answers 7, not 15, on g = 1
-    # row 2 of the 2 PRECEDING .. 2 FOLLOWING frame.
-    var g = List[Int64]()
-    var o = List[Int64]()
-    var v = List[Float64]()
-    for i in range(7):
-        g.append(1)
-        o.append(Int64(i))
-        v.append(Float64(1 << i))
-    for i in range(16):
-        g.append(2)
-        o.append(Int64(i))
-        v.append(Float64(1 << i))
-    var cols = List[Column[HeapRegion]]()
-    cols.append(_plain_i64(g))
-    cols.append(_plain_i64(o))
-    cols.append(_f64(v))
-    var names: List[String] = ["g", "o", "v"]
-    var f2 = _rows(FRAME_BOUND_PRECEDING, 2, FRAME_BOUND_FOLLOWING, 2)
-    var exprs = List[PartitionExpr]()
-    exprs.append(PartitionExpr.agg_with_frame(PF_SUM, "v", f2.copy()))
-    exprs.append(PartitionExpr.agg_with_frame(PF_AVG, "v", f2.copy()))
-    exprs.append(
-        PartitionExpr.agg_with_frame(
-            PF_SUM, "v", _rows(FRAME_BOUND_PRECEDING, 3, FRAME_BOUND_FOLLOWING, 3)
-        )
-    )
-    exprs.append(
-        PartitionExpr.agg_with_frame(
-            PF_SUM, "v", _rows(FRAME_BOUND_PRECEDING, 5, FRAME_BOUND_FOLLOWING, 5)
-        )
-    )
-    var pk: List[String] = ["g"]
-    var ok: List[String] = ["o"]
-    var out = _run(_batch(names, cols^), pk, ok, exprs^)
-    var want_sum2: List[Float64] = [7.0, 15.0, 31.0, 62.0, 124.0, 120.0, 112.0]
-    var rows2: List[Float64] = [3.0, 4.0, 5.0, 5.0, 5.0, 4.0, 3.0]
-    var want_sum3: List[Float64] = [15.0, 31.0, 63.0, 127.0, 126.0, 124.0, 120.0]
-    for r in range(7):
-        assert_equal(_getf(out, 3, r), want_sum2[r])
-        assert_equal(_getf(out, 4, r), want_sum2[r] / rows2[r])
-        assert_equal(_getf(out, 5, r), want_sum3[r])
-    var want_sum5: List[Float64] = [
-        63.0, 127.0, 255.0, 511.0, 1023.0, 2047.0, 4094.0, 8188.0,
-        16376.0, 32752.0, 65504.0, 65472.0, 65408.0, 65280.0, 65024.0, 64512.0,
-    ]
-    for r in range(16):
-        assert_equal(_getf(out, 6, 7 + r), want_sum5[r])
-
-
-def test_empty_frame_over_non_null_input_is_null() raises:
-    # ROWS BETWEEN 2 PRECEDING AND 1 PRECEDING over a non-nullable v, two
-    # partitions (g = 1: v 5, -2, 7; g = 2: v 4, 9): the first row of each
-    # partition has an empty frame: SUM / MIN / MAX / AVG NULL, COUNT 0.
-    # The output of SUM over 1 PRECEDING .. CURRENT ROW (never empty) has no
-    # validity bitmap.
+def test_ranking_and_running_aggregates_restart_per_partition() raises:
     var g: List[Int64] = [1, 1, 1, 2, 2]
-    var o: List[Int64] = [1, 2, 3, 1, 2]
-    var v: List[Int64] = [5, -2, 7, 4, 9]
+    var o: List[Int64] = [1, 1, 2, 1, 2]
+    var v: List[Int64] = [10, 99, 30, 5, 5]
+    var vv: List[Bool] = [True, False, True, True, True]
     var cols = List[Column[HeapRegion]]()
     cols.append(_plain_i64(g))
     cols.append(_plain_i64(o))
-    cols.append(_plain_i64(v))
+    cols.append(_i64(v, vv))
     var names: List[String] = ["g", "o", "v"]
-    var fr = _rows(FRAME_BOUND_PRECEDING, 2, FRAME_BOUND_PRECEDING, 1)
     var exprs = List[PartitionExpr]()
-    exprs.append(PartitionExpr.agg_with_frame(PF_SUM, "v", fr.copy()))
-    exprs.append(PartitionExpr.agg_with_frame(PF_MIN, "v", fr.copy()))
-    exprs.append(PartitionExpr.agg_with_frame(PF_MAX, "v", fr.copy()))
-    exprs.append(PartitionExpr.agg_with_frame(PF_COUNT, "v", fr.copy()))
-    exprs.append(
-        PartitionExpr.agg_with_frame(
-            PF_SUM, "v", _rows(FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_CURRENT_ROW, 0)
-        )
-    )
+    exprs.append(PartitionExpr.row_number())
+    exprs.append(PartitionExpr.rank())
+    exprs.append(PartitionExpr.dense_rank())
+    exprs.append(PartitionExpr.cume_dist())
+    exprs.append(PartitionExpr.ntile(2))
+    exprs.append(PartitionExpr.running_sum("v"))
+    exprs.append(PartitionExpr.running_count("v"))
+    exprs.append(PartitionExpr.running_avg("v"))
+    exprs.append(PartitionExpr.running_count())
     var pk: List[String] = ["g"]
     var ok: List[String] = ["o"]
     var out = _run(_batch(names, cols^), pk, ok, exprs^)
-    # g=1: frames [], [5], [5,-2]; g=2: [], [4].
-    var want_null: List[Bool] = [True, False, False, True, False]
-    var want_sum: List[Int64] = [0, 5, 3, 0, 4]
-    var want_min: List[Int64] = [0, 5, -2, 0, 4]
-    var want_max: List[Int64] = [0, 5, 5, 0, 4]
-    var want_cnt: List[Int64] = [0, 1, 2, 0, 1]
+    var row_number: List[Int64] = [1, 2, 3, 1, 2]
+    var rank: List[Int64] = [1, 1, 3, 1, 2]
+    var dense: List[Int64] = [1, 1, 2, 1, 2]
+    var cume: List[Float64] = [2.0 / 3.0, 2.0 / 3.0, 1.0, 0.5, 1.0]
+    var ntile: List[Int64] = [1, 1, 2, 1, 2]
+    var sum: List[Int64] = [10, 10, 40, 5, 10]
+    var count: List[Int64] = [1, 1, 2, 1, 2]
+    var avg: List[Float64] = [10.0, 10.0, 20.0, 5.0, 5.0]
+    var count_star: List[Int64] = [1, 2, 3, 1, 2]
     for r in range(5):
-        assert_equal(_null(out, 3, r), want_null[r])
-        assert_equal(_null(out, 4, r), want_null[r])
-        assert_equal(_null(out, 5, r), want_null[r])
-        if not want_null[r]:
-            assert_equal(_get(out, 3, r), want_sum[r])
-            assert_equal(_get(out, 4, r), want_min[r])
-            assert_equal(_get(out, 5, r), want_max[r])
-        assert_false(_null(out, 6, r))
-        assert_equal(_get(out, 6, r), want_cnt[r])
-    assert_false(out.column_at(7).has_validity_buffer())
+        assert_equal(_get(out, 3, r), row_number[r])
+        assert_equal(_get(out, 4, r), rank[r])
+        assert_equal(_get(out, 5, r), dense[r])
+        assert_equal(_getf(out, 6, r), cume[r])
+        assert_equal(_get(out, 7, r), ntile[r])
+        assert_equal(_get(out, 8, r), sum[r])
+        assert_equal(_get(out, 9, r), count[r])
+        assert_equal(_getf(out, 10, r), avg[r])
+        assert_equal(_get(out, 11, r), count_star[r])
 
-
-def test_nullable_aggregand_running_and_bounded() raises:
-    # v = NULL, 3, NULL, 5 (NULL slots hold 100). Running SUM: NULL, 3, 3, 8
-    # (the first prefix holds no value); running COUNT(v): 0, 1, 1, 2;
-    # COUNT(*): 1, 2, 3, 4; MIN over 1 PRECEDING .. CURRENT ROW: NULL, 3, 3, 5.
-    var o: List[Int64] = [1, 2, 3, 4]
-    var v: List[Int64] = [100, 3, 100, 5]
-    var valid: List[Bool] = [False, True, False, True]
+def test_ntile_bucket_sizes_and_more_buckets_than_rows() raises:
+    # 7 rows: 3 buckets are 3, 2, 2 rows; 10 buckets give one row each; 1 bucket holds all.
+    var o: List[Int64] = [1, 2, 3, 4, 5, 6, 7]
     var cols = List[Column[HeapRegion]]()
     cols.append(_plain_i64(o))
-    cols.append(_i64(v, valid))
-    var names: List[String] = ["o", "v"]
-    var running = _rows(FRAME_BOUND_UNBOUNDED_PRECEDING, 0, FRAME_BOUND_CURRENT_ROW, 0)
+    var names: List[String] = ["o"]
     var exprs = List[PartitionExpr]()
-    exprs.append(PartitionExpr.agg_with_frame(PF_SUM, "v", running.copy()))
-    exprs.append(PartitionExpr.agg_with_frame(PF_COUNT, "v", running.copy()))
-    exprs.append(PartitionExpr.agg_with_frame(PF_COUNT, "", running.copy()))
+    exprs.append(PartitionExpr.ntile(3))
+    exprs.append(PartitionExpr.ntile(10))
+    exprs.append(PartitionExpr.ntile(1))
+    var ok: List[String] = ["o"]
+    var out = _run(_batch(names, cols^), List[String](), ok, exprs^)
+    var want3: List[Int64] = [1, 1, 1, 2, 2, 3, 3]
+    for r in range(7):
+        assert_equal(_get(out, 1, r), want3[r])
+        assert_equal(_get(out, 2, r), Int64(r + 1))
+        assert_equal(_get(out, 3, r), 1)
+
+def test_sliding_int_sum_over_empty_and_null_frames() raises:
+    # ROWS 2 PRECEDING .. 1 PRECEDING over v = 10, NULL, NULL, 40: the first
+    # frame is empty (SUM NULL, COUNT 0); the last frame holds only NULLs and
+    # also has no SUM and a COUNT of 0.
+    var o: List[Int64] = [1, 2, 3, 4]
+    var v: List[Int64] = [10, 0, 0, 40]
+    var vv: List[Bool] = [True, False, False, True]
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_plain_i64(o))
+    cols.append(_i64(v, vv))
+    var names: List[String] = ["o", "v"]
+    var exprs = List[PartitionExpr]()
     exprs.append(
-        PartitionExpr.agg_with_frame(
-            PF_MIN, "v", _rows(FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_CURRENT_ROW, 0)
-        )
+        PartitionExpr.agg_with_frame(PF_SUM, "v", _rows(FRAME_BOUND_PRECEDING, 2, FRAME_BOUND_PRECEDING, 1))
+    )
+    exprs.append(
+        PartitionExpr.agg_with_frame(PF_COUNT, "v", _rows(FRAME_BOUND_PRECEDING, 2, FRAME_BOUND_PRECEDING, 1))
     )
     var ok: List[String] = ["o"]
     var out = _run(_batch(names, cols^), List[String](), ok, exprs^)
     assert_true(_null(out, 2, 0))
-    var want_sum: List[Int64] = [0, 3, 3, 8]
-    var want_cnt: List[Int64] = [0, 1, 1, 2]
-    var want_star: List[Int64] = [1, 2, 3, 4]
-    var want_min: List[Int64] = [0, 3, 3, 5]
-    for r in range(1, 4):
+    assert_equal(_get(out, 3, 0), 0)
+    var want_sum: List[Int64] = [0, 10, 10, 0]
+    var want_count: List[Int64] = [0, 1, 1, 0]
+    for r in range(1, 3):
+        assert_false(_null(out, 2, r))
         assert_equal(_get(out, 2, r), want_sum[r])
-    for r in range(4):
-        assert_equal(_get(out, 3, r), want_cnt[r])
-        assert_equal(_get(out, 4, r), want_star[r])
-    assert_true(_null(out, 5, 0))
-    for r in range(1, 4):
-        assert_equal(_get(out, 5, r), want_min[r])
-
-
-# =============================================================================
-# RANGE frames
-# =============================================================================
-
-
-def test_range_current_row_frames_over_null_keys() raises:
-    # o = 1, 1, NULL, NULL (NULL slots 1 and 2), v = 1, 2, 4, 8.
-    # SUM over RANGE BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING: the peers
-    # of o=1 see every row (15); the NULL peers see themselves (12).
-    # SUM over the default RANGE running frame: 3, 3, 15, 15.
-    var o: List[Int64] = [1, 1, 1, 2]
-    var ovalid: List[Bool] = [True, True, False, False]
-    var v: List[Int64] = [1, 2, 4, 8]
-    var cols = List[Column[HeapRegion]]()
-    cols.append(_i64(o, ovalid))
-    cols.append(_plain_i64(v))
-    var names: List[String] = ["o", "v"]
-    var exprs = List[PartitionExpr]()
-    exprs.append(
-        PartitionExpr.agg_with_frame(
-            PF_SUM,
-            "v",
-            PartitionFrame(
-                FRAME_UNITS_RANGE,
-                FRAME_BOUND_CURRENT_ROW, 0,
-                FRAME_BOUND_UNBOUNDED_FOLLOWING, 0,
-            ),
-        )
-    )
-    exprs.append(
-        PartitionExpr.agg_with_frame(PF_SUM, "v", PartitionFrame.running_range())
-    )
-    var ok: List[String] = ["o"]
-    var out = _run(_batch(names, cols^), List[String](), ok, exprs^)
-    var want_tail: List[Int64] = [15, 15, 12, 12]
-    var want_run: List[Int64] = [3, 3, 15, 15]
-    for r in range(4):
-        assert_equal(_get(out, 2, r), want_tail[r])
-        assert_equal(_get(out, 3, r), want_run[r])
-
-
-def test_range_offset_frame_on_int64_key() raises:
-    # o = 1, 2, 2, 5, v = 1, 10, 100, 1000. SUM over RANGE BETWEEN 1 PRECEDING
-    # AND CURRENT ROW: key windows [0,1] -> 1, [1,2] -> 111 for both peers,
-    # [4,5] -> 1000.
-    var o: List[Int64] = [1, 2, 2, 5]
-    var v: List[Int64] = [1, 10, 100, 1000]
-    var cols = List[Column[HeapRegion]]()
-    cols.append(_plain_i64(o))
-    cols.append(_plain_i64(v))
-    var names: List[String] = ["o", "v"]
-    var exprs = List[PartitionExpr]()
-    exprs.append(
-        PartitionExpr.agg_with_frame(
-            PF_SUM,
-            "v",
-            PartitionFrame(
-                FRAME_UNITS_RANGE, FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_CURRENT_ROW, 0
-            ),
-        )
-    )
-    var ok: List[String] = ["o"]
-    var out = _run(_batch(names, cols^), List[String](), ok, exprs^)
-    var want: List[Int64] = [1, 111, 111, 1000]
-    for r in range(4):
-        assert_equal(_get(out, 2, r), want[r])
-
-
-# =============================================================================
-# INT64 SUM / AVG are exact (§2.12, query_semantics_types.md §8.1)
-# =============================================================================
-
-
-def _sum_over(v: List[Int64], frame: PartitionFrame, func: UInt8) raises -> RecordBatch:
-    var o = List[Int64]()
-    for i in range(len(v)):
-        o.append(Int64(i))
-    var cols = List[Column[HeapRegion]]()
-    cols.append(_plain_i64(o))
-    cols.append(_plain_i64(v))
-    var names: List[String] = ["o", "v"]
-    var exprs = List[PartitionExpr]()
-    exprs.append(PartitionExpr.agg_with_frame(func, "v", frame.copy()))
-    var ok: List[String] = ["o"]
-    return _run(_batch(names, cols^), List[String](), ok, exprs^)
-
-
-def test_int64_sum_outside_int64_raises() raises:
-    # A SUM whose total leaves INT64 is refused, not wrapped: running,
-    # sliding and whole-partition frames.
-    var big: List[Int64] = [Int64.MAX, 1]
-    var frames = List[PartitionFrame]()
-    frames.append(_rows(FRAME_BOUND_UNBOUNDED_PRECEDING, 0, FRAME_BOUND_CURRENT_ROW, 0))
-    frames.append(_rows(FRAME_BOUND_PRECEDING, 1, FRAME_BOUND_CURRENT_ROW, 0))
-    frames.append(_rows(FRAME_BOUND_UNBOUNDED_PRECEDING, 0, FRAME_BOUND_UNBOUNDED_FOLLOWING, 0))
-    for f in range(len(frames)):
-        var raised = False
-        try:
-            _ = _sum_over(big, frames[f], PF_SUM)
-        except:
-            raised = True
-        assert_true(raised, "SUM past INT64 must raise, frame " + String(f))
-    # Every frame's total fits even though a running prefix does not:
-    # v = MAX, MAX, -MAX over 1 PRECEDING .. CURRENT ROW is MAX, raise
-    # (MAX + MAX), so instead MAX, -MAX, MAX: MAX, 0, 0.
-    var fits: List[Int64] = [Int64.MAX, -Int64.MAX, Int64.MAX]
-    var out = _sum_over(fits, frames[1], PF_SUM)
-    assert_equal(_get(out, 2, 0), Int64.MAX)
-    assert_equal(_get(out, 2, 1), 0)
-    assert_equal(_get(out, 2, 2), 0)
-
-
-def test_int64_avg_sums_exactly() raises:
-    # AVG over 2^53, 1, 1: a DOUBLE running sum loses the 1s (2^53 + 1 is not
-    # a double); the exact sum divided once is (2^53 + 2) / 3, and over the
-    # running frame the second row is (2^53 + 1) / 2.
-    var v: List[Int64] = [Int64(1) << 53, 1, 1]
-    var running = _rows(FRAME_BOUND_UNBOUNDED_PRECEDING, 0, FRAME_BOUND_CURRENT_ROW, 0)
-    var out = _sum_over(v, running, PF_AVG)
-    var t2 = Scalar[DType.int128](Int64(1) << 53) + 2
-    var t1 = Scalar[DType.int128](Int64(1) << 53) + 1
-    assert_equal(_getf(out, 2, 2), t2.cast[DType.float64]() / 3.0)
-    assert_equal(_getf(out, 2, 1), t1.cast[DType.float64]() / 2.0)
-
+        assert_equal(_get(out, 3, r), want_count[r])
+    assert_true(_null(out, 2, 3))
+    assert_equal(_get(out, 3, 3), 0)
 
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

@@ -1,8 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The window and per-partition top-N operators of the engine: the
-# window operator (`partition_scan_sink`, the parallel drivers and
-# `PartitionBySink`, its MorselSink): the window sort and
+# The window operator of the engine (`partition_scan_sink`, the parallel
+# drivers and `PartitionBySink`, its MorselSink): the window sort and
 # partition / peer boundaries (`partition_keys`, NULLs last and floats by
 # `sort_key_lt`, as DuckDB orders them), the ranking functions and running
 # aggregates, the value functions, the frame resolver and the framed and

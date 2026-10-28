@@ -9,15 +9,16 @@
 # falls back to the single-thread kernel for a small input). Its output is in
 # (partition keys ASC ++ order keys per direction) order, NULLs last.
 #
-# One partition for the executor (`num_partitions` 1): the window needs every
-# row of a partition together, and the parallel driver parallelizes inside
-# `finalize`.
+# The batches are folded in worker order, then in each worker's append order,
+# not in morsel order, so rows that tie on every key reach the window in that
+# order: it depends on which worker consumed which morsel, and a function
+# such as ROW_NUMBER numbers such tied rows by it.
 #
-# `PartitionBySinkGlobal` holds an inline Atomic, so it is not Movable: it is
-# built in place by `init_global`'s out-parameter.
+# One partition for the executor (`num_partitions` is `PARTITIONS_UNREVIEWED`,
+# 1): the window needs every row of a partition together, and the parallel
+# driver parallelizes inside `finalize`.
 # =============================================================================
 
-from std.atomic import Atomic
 from std.collections.optional import Optional
 from std.memory import OwnedPointer
 
@@ -42,10 +43,8 @@ from komira_operator_api.morsel_sink import (
 from komira_operator_api.sink_batch_fold import fold_batches_into_one
 from komira_physical_plan.physical_plan import PartitionBySinkData
 
-from .partition_scan_sink_parallel import (
-    _copy_sink_data,
-    _execute_partition_by_sink_parallel,
-)
+from .partition_scan_sink import _copy_sink_data, _empty_output
+from .partition_scan_sink_parallel import _execute_partition_by_sink_parallel
 
 
 struct PartitionBySinkLocal(Movable, Deinitable):
@@ -61,15 +60,12 @@ struct PartitionBySinkLocal(Movable, Deinitable):
 
 
 struct PartitionBySinkGlobal(KeepAlive):
-    """The shared state: the one folded batch `combine` builds. Not Movable
-    (inline Atomic); built in place by `init_global`."""
+    """The shared state: the one folded batch `combine` builds."""
 
     var combined: Optional[RecordBatch]
-    var claim: Atomic[DType.int64]
 
     def __init__(out self):
         self.combined = None
-        self.claim = Atomic[DType.int64](Int64(0))
 
     def __keep_alive(mut self):
         pass
@@ -168,7 +164,7 @@ struct PartitionBySink(MorselSink):
     ) raises -> FinalizeOutput[Self]:
         var out_batch: RecordBatch
         if not sink_global.combined:
-            out_batch = RecordBatch()
+            out_batch = _empty_output(self._spec)
             _ = sink_global^
         else:
             var batch = sink_global.combined.take()

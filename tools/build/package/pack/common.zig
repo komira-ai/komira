@@ -2,6 +2,7 @@
 //! files, sorted JSON, and the command line.
 
 const std = @import("std");
+const deflate = @import("deflate.zig");
 const json = std.json;
 const Sha256 = std.crypto.hash.sha2.Sha256;
 const Alloc = std.mem.Allocator;
@@ -23,7 +24,8 @@ pub fn fail(comptime fmt: []const u8, args: anytype) noreturn {
 pub const Entry = struct {
     path: []const u8, // directories end with '/'
     mode: u32,
-    data: []const u8, // empty for directories
+    data: []const u8, // empty for directories and links
+    link: []const u8 = "", // a symbolic link's target; "" for any other entry
 };
 
 pub fn lessEntry(_: void, a: Entry, b: Entry) bool {
@@ -43,9 +45,11 @@ fn octal(field: []u8, value: u64) void {
     field[field.len - 1] = 0;
 }
 
-fn header(out: *std.ArrayList(u8), name: []const u8, typeflag: u8, mode: u32, size: u64) !void {
+fn header(alloc: Alloc, out: *std.ArrayList(u8), name: []const u8, typeflag: u8, mode: u32, size: u64, link: []const u8) !void {
     var h = [_]u8{0} ** 512;
     @memcpy(h[0..name.len], name);
+    if (link.len > 100) fail("link target `{s}` does not fit a tar header", .{link});
+    @memcpy(h[157 .. 157 + link.len], link);
     octal(h[100..108], mode);
     octal(h[108..116], 0);
     octal(h[116..124], 0);
@@ -59,20 +63,22 @@ fn header(out: *std.ArrayList(u8), name: []const u8, typeflag: u8, mode: u32, si
     for (h) |b| sum += b;
     octal(h[148..155], sum);
     h[155] = ' ';
-    try out.appendSlice(&h);
+    try out.appendSlice(alloc, &h);
 }
 
-fn pad(out: *std.ArrayList(u8), size: usize) !void {
+fn pad(alloc: Alloc, out: *std.ArrayList(u8), size: usize) !void {
     const rem = size % 512;
-    if (rem != 0) try out.appendNTimes(0, 512 - rem);
+    if (rem != 0) try out.appendNTimes(alloc, 0, 512 - rem);
 }
 
 pub fn writeTar(alloc: Alloc, entries: []Entry) ![]u8 {
     std.mem.sort(Entry, entries, {}, lessEntry);
-    var out = std.ArrayList(u8).init(alloc);
+    var out = std.ArrayList(u8).empty;
     for (entries, 0..) |e, i| {
         if (i > 0 and std.mem.eql(u8, e.path, entries[i - 1].path)) fail("duplicate path {s}", .{e.path});
         const is_dir = e.path[e.path.len - 1] == '/';
+        const typeflag: u8 = if (is_dir) '5' else if (e.link.len != 0) '2' else '0';
+        if (e.link.len != 0 and (is_dir or e.data.len != 0)) fail("{s}: a link holds no data", .{e.path});
         if (e.path.len > 100) {
             // A PAX extended header carries the full path.
             var rec_len: usize = " path=\n".len + e.path.len;
@@ -84,18 +90,18 @@ pub fn writeTar(alloc: Alloc, entries: []Entry) ![]u8 {
             }
             rec_len += digits;
             const rec = try std.fmt.allocPrint(alloc, "{d} path={s}\n", .{ rec_len, e.path });
-            try header(&out, "././@PaxHeader", 'x', 0o644, rec.len);
-            try out.appendSlice(rec);
-            try pad(&out, rec.len);
-            try header(&out, e.path[0..100], if (is_dir) '5' else '0', e.mode, e.data.len);
+            try header(alloc, &out, "././@PaxHeader", 'x', 0o644, rec.len, "");
+            try out.appendSlice(alloc, rec);
+            try pad(alloc, &out, rec.len);
+            try header(alloc, &out, e.path[0..100], typeflag, e.mode, e.data.len, e.link);
         } else {
-            try header(&out, e.path, if (is_dir) '5' else '0', e.mode, e.data.len);
+            try header(alloc, &out, e.path, typeflag, e.mode, e.data.len, e.link);
         }
-        try out.appendSlice(e.data);
-        try pad(&out, e.data.len);
+        try out.appendSlice(alloc, e.data);
+        try pad(alloc, &out, e.data.len);
     }
-    try out.appendNTimes(0, 1024);
-    return out.toOwnedSlice();
+    try out.appendNTimes(alloc, 0, 1024);
+    return out.toOwnedSlice(alloc);
 }
 
 /// Every directory named by `prefix` (e.g. "opt/hello/" -> "opt/", "opt/hello/"),
@@ -103,13 +109,13 @@ pub fn writeTar(alloc: Alloc, entries: []Entry) ![]u8 {
 pub fn bundleEntries(alloc: Alloc, bundle: []const u8, prefix: []const u8) ![]Entry {
     if (prefix.len == 0 or prefix[prefix.len - 1] != '/' or prefix[0] == '/')
         fail("prefix `{s}` must be a relative path ending in /", .{prefix});
-    var list = std.ArrayList(Entry).init(alloc);
+    var list = std.ArrayList(Entry).empty;
     var at: usize = 0;
     while (std.mem.indexOfScalarPos(u8, prefix, at, '/')) |slash| {
         const part = prefix[at..slash];
         if (part.len == 0 or std.mem.eql(u8, part, ".") or std.mem.eql(u8, part, ".."))
             fail("prefix `{s}` has an empty, . or .. part", .{prefix});
-        try list.append(.{ .path = prefix[0 .. slash + 1], .mode = 0o755, .data = "" });
+        try list.append(alloc, .{ .path = prefix[0 .. slash + 1], .mode = 0o755, .data = "" });
         at = slash + 1;
     }
     var dir = std.fs.cwd().openDir(bundle, .{ .iterate = true }) catch |err|
@@ -120,7 +126,7 @@ pub fn bundleEntries(alloc: Alloc, bundle: []const u8, prefix: []const u8) ![]En
     var files: usize = 0;
     while (try walker.next()) |w| {
         switch (w.kind) {
-            .directory => try list.append(.{
+            .directory => try list.append(alloc, .{
                 .path = try std.fmt.allocPrint(alloc, "{s}{s}/", .{ prefix, w.path }),
                 .mode = 0o755,
                 .data = "",
@@ -129,7 +135,7 @@ pub fn bundleEntries(alloc: Alloc, bundle: []const u8, prefix: []const u8) ![]En
                 const st = try dir.statFile(w.path);
                 if (st.size > max_file) fail("{s}: 8 GiB or larger", .{w.path});
                 const data = try dir.readFileAlloc(alloc, w.path, max_file);
-                try list.append(.{
+                try list.append(alloc, .{
                     .path = try std.fmt.allocPrint(alloc, "{s}{s}", .{ prefix, w.path }),
                     .mode = if ((st.mode & 0o111) != 0) 0o755 else 0o644,
                     .data = data,
@@ -140,20 +146,19 @@ pub fn bundleEntries(alloc: Alloc, bundle: []const u8, prefix: []const u8) ![]En
         }
     }
     if (files == 0) fail("bundle {s} holds no files", .{bundle});
-    return list.toOwnedSlice();
+    return list.toOwnedSlice(alloc);
 }
 
 pub fn gzip(alloc: Alloc, data: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(alloc);
+    var out = std.ArrayList(u8).empty;
     // ID1 ID2, CM=deflate, FLG=0, MTIME=0, XFL=0, OS=255.
-    try out.appendSlice(&[_]u8{ 0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255 });
-    var fbs = std.io.fixedBufferStream(data);
-    try std.compress.flate.compress(fbs.reader(), out.writer(), .{});
+    try out.appendSlice(alloc, &[_]u8{ 0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255 });
+    try out.appendSlice(alloc, try deflate.deflate(alloc, data));
     var trailer: [8]u8 = undefined;
     std.mem.writeInt(u32, trailer[0..4], std.hash.Crc32.hash(data), .little);
     std.mem.writeInt(u32, trailer[4..8], @truncate(data.len), .little);
-    try out.appendSlice(&trailer);
-    return out.toOwnedSlice();
+    try out.appendSlice(alloc, &trailer);
+    return out.toOwnedSlice(alloc);
 }
 
 // ---- hashing and files ---------------------------------------------------
@@ -186,7 +191,7 @@ pub fn lessStr(_: void, a: []const u8, b: []const u8) bool {
 }
 
 /// `v` as compact JSON with every object's keys in sorted order.
-pub fn writeSorted(alloc: Alloc, v: json.Value, w: anytype) !void {
+pub fn writeSorted(alloc: Alloc, v: json.Value, w: *std.Io.Writer) !void {
     switch (v) {
         .object => |obj| {
             const keys = try alloc.dupe([]const u8, obj.keys());
@@ -194,7 +199,7 @@ pub fn writeSorted(alloc: Alloc, v: json.Value, w: anytype) !void {
             try w.writeByte('{');
             for (keys, 0..) |k, i| {
                 if (i > 0) try w.writeByte(',');
-                try json.encodeJsonString(k, .{}, w);
+                try json.Stringify.encodeJsonString(k, .{}, w);
                 try w.writeByte(':');
                 try writeSorted(alloc, obj.get(k).?, w);
             }
@@ -208,13 +213,13 @@ pub fn writeSorted(alloc: Alloc, v: json.Value, w: anytype) !void {
             }
             try w.writeByte(']');
         },
-        else => try json.stringify(v, .{}, w),
+        else => try json.Stringify.value(v, .{}, w),
     }
 }
 
 pub fn toJson(alloc: Alloc, v: json.Value) ![]u8 {
-    var out = std.ArrayList(u8).init(alloc);
-    try writeSorted(alloc, v, out.writer());
+    var out = std.Io.Writer.Allocating.init(alloc);
+    try writeSorted(alloc, v, &out.writer);
     return out.toOwnedSlice();
 }
 
@@ -301,18 +306,18 @@ pub fn plain(s: []const u8, what: []const u8, extra: []const u8) []const u8 {
 }
 
 pub fn parseArgs(alloc: Alloc, argv: []const [:0]u8) !Args {
-    var a = Args{ .layers = std.ArrayList([]const u8).init(alloc), .extra = std.ArrayList([2][]const u8).init(alloc) };
+    var a = Args{ .layers = std.ArrayList([]const u8).empty, .extra = std.ArrayList([2][]const u8).empty };
     var i: usize = 2;
     while (i < argv.len) : (i += 2) {
         if (i + 1 >= argv.len) fail("{s} needs a value", .{argv[i]});
         const k = argv[i];
         const v: []const u8 = argv[i + 1];
         if (std.mem.eql(u8, k, "--layer")) {
-            try a.layers.append(v);
+            try a.layers.append(alloc, v);
             continue;
         }
         const slot: *?[]const u8 = if (std.mem.eql(u8, k, "--bundle")) &a.bundle else if (std.mem.eql(u8, k, "--prefix")) &a.prefix else if (std.mem.eql(u8, k, "--out")) &a.out else if (std.mem.eql(u8, k, "--name")) &a.name else if (std.mem.eql(u8, k, "--version")) &a.version else if (std.mem.eql(u8, k, "--repo")) &a.repo else if (std.mem.eql(u8, k, "--manifest")) &a.manifest else if (std.mem.eql(u8, k, "--manifest-digest")) &a.manifest_digest else if (std.mem.eql(u8, k, "--config")) &a.config else if (std.mem.eql(u8, k, "--archive")) &a.archive else if (std.mem.eql(u8, k, "--digest")) &a.digest else {
-            try a.extra.append(.{ k, v });
+            try a.extra.append(alloc, .{ k, v });
             continue;
         };
         if (slot.* != null) fail("{s} given twice", .{k});
@@ -345,7 +350,7 @@ pub fn one(a: Args, flag: []const u8) ?[]const u8 {
 
 /// Every value of `flag`, in order.
 pub fn all(alloc: Alloc, a: Args, flag: []const u8) ![][]const u8 {
-    var list = std.ArrayList([]const u8).init(alloc);
-    for (a.extra.items) |kv| if (std.mem.eql(u8, kv[0], flag)) try list.append(kv[1]);
-    return list.toOwnedSlice();
+    var list = std.ArrayList([]const u8).empty;
+    for (a.extra.items) |kv| if (std.mem.eql(u8, kv[0], flag)) try list.append(alloc, kv[1]);
+    return list.toOwnedSlice(alloc);
 }

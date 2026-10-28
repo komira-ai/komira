@@ -11,13 +11,22 @@
 #     smallest STORED keys; DESC stores `~key`, which reverses the order of
 #     every Int64 (negation would overflow on `Int64.MIN`).
 #   * A NULL key is worse than every value, so its row survives only when
-#     fewer than N rows have a value: the first N NULL-key payloads are kept
-#     apart and fill the result after the heap's rows. Which NULL rows are
-#     kept when there are more than needed is unspecified (they tie, §4.7).
+#     fewer than N rows have a value: the NULL-key rows are kept apart, in a
+#     second bounded heap under one constant key, so the N smallest payload
+#     ids survive (equal keys order by payload id, as above), and they fill
+#     the result after the heap's rows. The NULL rows kept do not depend on
+#     feed or merge order either.
+#   * NULLs are placed LAST in both directions: this state has no
+#     NULLS FIRST setting (the stage planner emits only the default
+#     placement). `TopNSink` is the kernel's: it does not read `nulls_first`
+#     and orders a numeric NULL slot by its stored value.
 #
 # `drain_to_record_batch` emits (key, payload), best first, NULL keys last.
-# `combine` merges another worker's state (a bounded top-N is an
-# order-independent set, so the merge equals one worker fed every row).
+# Rows with equal keys order by payload, smaller first (the heap's tie-break,
+# `bounded_heap`), so a payload that is the input row index gives the stable
+# sort's rows and order. `combine` merges another worker's state; the heap
+# rows of the merge (NULL-key rows included) equal one worker fed every row,
+# whatever the feed or merge order.
 # `spill_to_storage` / `restore_from_storage` write the kept rows as one
 # THSPLC chunk (stored keys verbatim, a NULL key as NULL) and read them back.
 # =============================================================================
@@ -96,14 +105,14 @@ struct TopNState[
     """
 
     var heap: BoundedHeapInt64Payload[Self.N]
-    var null_payloads: List[Int64]
+    var null_heap: BoundedHeapInt64Payload[Self.N]
     var _spill_chunks: List[ChunkId]
     var _age_ticks: UInt64
     var _restoring: Bool
 
     def __init__(out self):
         self.heap = BoundedHeapInt64Payload[Self.N]()
-        self.null_payloads = List[Int64]()
+        self.null_heap = BoundedHeapInt64Payload[Self.N]()
         self._spill_chunks = List[ChunkId]()
         self._age_ticks = UInt64(0)
         self._restoring = False
@@ -123,8 +132,7 @@ struct TopNState[
 
     @always_inline
     def _push_null(mut self, pay: Int64):
-        if len(self.null_payloads) < Self.N:
-            self.null_payloads.append(pay)
+        self.null_heap.push(Int64(0), pay)
 
     def feed_row[bo: Origin[mut=False]](mut self, batch: BatchView[bo], row: Int) raises:
         """Take one input row: its payload goes to the heap under its stored
@@ -152,7 +160,7 @@ struct TopNState[
 
     def _rows(self, unflip: Bool) -> Tuple[List[Int64], List[Bool], List[Int64]]:
         """The kept rows, best first: the heap's (un-flipped when `unflip`),
-        then NULL-key rows up to N in all."""
+        then NULL-key rows (smallest payload ids first) up to N in all."""
         var local = self.heap.copy()
         var slots = local.extract_sorted()
         var keys = List[Int64]()
@@ -166,15 +174,15 @@ struct TopNState[
             keys.append(k)
             valid.append(True)
             pays.append(slots[i].payload_row_id)
+        var null_local = self.null_heap.copy()
+        var nulls = null_local.extract_sorted()
         var room = Self.N - len(slots)
-        if not unflip:
-            # A spill image keeps every NULL-key row: a later merge can push
-            # the heap's rows out of the result, but not these.
-            room = len(self.null_payloads)
-        for i in range(min(room, len(self.null_payloads))):
+        # A spill image needs no more NULL rows than this either: a heap only
+        # grows, so after a merge the room left for NULL rows is no larger.
+        for i in range(min(room, len(nulls))):
             keys.append(Int64(0))
             valid.append(False)
-            pays.append(self.null_payloads[i])
+            pays.append(nulls[i].payload_row_id)
         return (keys^, valid^, pays^)
 
     def drain_to_record_batch(self) raises -> Optional[RecordBatch]:
@@ -187,13 +195,15 @@ struct TopNState[
     def combine(mut self, var other: Self) raises:
         """Merge another worker's state: its heap rows are pushed under their
         stored keys (both sides store the same way), its NULL-key rows join
-        this side's up to N."""
+        this side's under the same payload order."""
         var other_heap = other.heap.copy()
         var entries = other_heap.extract_sorted()
         for i in range(len(entries)):
             self.heap.push(entries[i].key, entries[i].payload_row_id)
-        for i in range(len(other.null_payloads)):
-            self._push_null(other.null_payloads[i])
+        var other_nulls_heap = other.null_heap.copy()
+        var other_nulls = other_nulls_heap.extract_sorted()
+        for i in range(len(other_nulls)):
+            self._push_null(other_nulls[i].payload_row_id)
 
     # =========================================================================
     # SpillableOp
@@ -209,7 +219,7 @@ struct TopNState[
         """Bytes of the kept rows."""
         return Int64(
             self.heap.size() * size_of[HeapSlot]()
-            + len(self.null_payloads) * size_of[Int64]()
+            + self.null_heap.size() * size_of[HeapSlot]()
         )
 
     def age_ticks(self) -> UInt64:
@@ -227,7 +237,7 @@ struct TopNState[
         var batch = _key_payload_batch(rows[0], rows[1], rows[2])
         self._spill_chunks.append(storage.write_chunk(THSPLCEncoder.encode(batch^)))
         self.heap = BoundedHeapInt64Payload[Self.N]()
-        self.null_payloads = List[Int64]()
+        self.null_heap = BoundedHeapInt64Payload[Self.N]()
         return freed
 
     def restore_from_storage[S: SpillStorage](mut self, mut storage: S) raises:

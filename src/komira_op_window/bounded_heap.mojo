@@ -21,6 +21,11 @@
 #     number of winners, not with the input. `sort_dir` is ASC (keep the N
 #     smallest) or DESC (keep the N largest).
 #
+# Ties: slots order by (key, payload id), the SMALLER payload id better. A
+# caller whose payload id is the input row index therefore gets exactly the
+# stable sort's rows and order among equal keys, and the kept set does not
+# depend on the order rows arrive (nor on how worker states are merged).
+#
 # Each slot carries an opaque Int64 payload id (a row index or a buffer slot
 # the caller owns). `push_returning_evicted` reports which payload id left the
 # heap, so the caller can recycle its storage and keep memory O(N).
@@ -47,6 +52,19 @@ struct HeapSlotStr(Copyable, Movable, ImplicitlyCopyable):
     var payload_row_id: Int64
 
 
+@always_inline
+def _slot_worse(a: HeapSlot, b: HeapSlot) -> Bool:
+    """True if `a` is worse to keep than `b`: the larger key, and on equal
+    keys the larger payload id."""
+    return a.key > b.key or (a.key == b.key and a.payload_row_id > b.payload_row_id)
+
+
+@always_inline
+def _key_beats(key: Int64, payload_row_id: Int64, root: HeapSlot) -> Bool:
+    """True if a candidate orders strictly before `root` by (key, payload id)."""
+    return key < root.key or (key == root.key and payload_row_id < root.payload_row_id)
+
+
 # =============================================================================
 # BoundedHeapInt64Payload[N]
 # =============================================================================
@@ -54,7 +72,7 @@ struct HeapSlotStr(Copyable, Movable, ImplicitlyCopyable):
 
 struct BoundedHeapInt64Payload[N: Int](Copyable, Movable):
     """A max-heap of at most N (key, payload id) slots that keeps the N
-    smallest keys. `slots[i].key >= slots[2i+1].key, slots[2i+2].key`."""
+    smallest (key, payload id) slots; no child is worse than its parent."""
 
     var slots: InlineArray[HeapSlot, Self.N]
     var n_used: Int
@@ -76,7 +94,7 @@ struct BoundedHeapInt64Payload[N: Int](Copyable, Movable):
         var i = start_idx
         while i > 0:
             var parent = (i - 1) // 2
-            if self.slots[i].key > self.slots[parent].key:
+            if _slot_worse(self.slots[i], self.slots[parent]):
                 var tmp = self.slots[i]
                 self.slots[i] = self.slots[parent]
                 self.slots[parent] = tmp
@@ -91,9 +109,9 @@ struct BoundedHeapInt64Payload[N: Int](Copyable, Movable):
             var left = 2 * i + 1
             var right = 2 * i + 2
             var largest = i
-            if left < self.n_used and self.slots[left].key > self.slots[largest].key:
+            if left < self.n_used and _slot_worse(self.slots[left], self.slots[largest]):
                 largest = left
-            if right < self.n_used and self.slots[right].key > self.slots[largest].key:
+            if right < self.n_used and _slot_worse(self.slots[right], self.slots[largest]):
                 largest = right
             if largest == i:
                 return
@@ -104,13 +122,13 @@ struct BoundedHeapInt64Payload[N: Int](Copyable, Movable):
 
     @always_inline
     def push(mut self, key: Int64, payload_row_id: Int64):
-        """Add a slot; when full, replace the root only if `key` is smaller
-        (a tie with the root keeps the root)."""
+        """Add a slot; when full, replace the root only if the candidate orders
+        before it by (key, payload id)."""
         if self.n_used < Self.N:
             self.slots[self.n_used] = HeapSlot(key, payload_row_id)
             self.n_used = self.n_used + 1
             self._percolate_up(self.n_used - 1)
-        elif key < self.slots[0].key:
+        elif _key_beats(key, payload_row_id, self.slots[0]):
             self.slots[0] = HeapSlot(key, payload_row_id)
             self._percolate_down(0)
 
@@ -123,7 +141,7 @@ struct BoundedHeapInt64Payload[N: Int](Copyable, Movable):
             self.n_used = self.n_used + 1
             self._percolate_up(self.n_used - 1)
             return Int64(-1)
-        if key < self.slots[0].key:
+        if _key_beats(key, payload_row_id, self.slots[0]):
             var displaced = self.slots[0].payload_row_id
             self.slots[0] = HeapSlot(key, payload_row_id)
             self._percolate_down(0)
@@ -203,6 +221,8 @@ struct BoundedHeapStringPayload[N: Int, sort_dir: Int](Copyable, Movable):
         """True if the key at `pos_a` is worse to keep than the one at
         `pos_b`: larger for ASC, smaller for DESC."""
         var c = self._cmp_pos(pos_a, pos_b)
+        if c == 0:
+            return self.slots[pos_a].payload_row_id > self.slots[pos_b].payload_row_id
         comptime if Self.sort_dir == 1:
             return c < 0
         else:
@@ -228,14 +248,18 @@ struct BoundedHeapStringPayload[N: Int, sort_dir: Int](Copyable, Movable):
         return 0
 
     @always_inline
-    def _span_worse_than_root[bo: Origin[mut=False]](self, cand: Span[UInt8, bo]) -> Bool:
-        """True if the candidate does not beat the root (a tie keeps the
-        root), i.e. it is dropped by a full heap."""
+    def _span_worse_than_root[bo: Origin[mut=False]](
+        self, cand: Span[UInt8, bo], payload_row_id: Int64
+    ) -> Bool:
+        """True if the candidate does not order strictly before the root by
+        (key, payload id), i.e. it is dropped by a full heap."""
         var c = self._cmp_span_slot[bo](cand, 0)
+        if c == 0:
+            return payload_row_id >= self.slots[0].payload_row_id
         comptime if Self.sort_dir == 1:
-            return c <= 0
+            return c < 0
         else:
-            return c >= 0
+            return c > 0
 
     @always_inline
     def _append_key[bo: Origin[mut=False]](mut self, key: Span[UInt8, bo]) -> Int:
@@ -286,7 +310,10 @@ struct BoundedHeapStringPayload[N: Int, sort_dir: Int](Copyable, Movable):
             self.n_used = self.n_used + 1
             self._percolate_up(self.n_used - 1)
             return Int64(-1)
-        if self._span_worse_than_root[bo](key):
+        if self.n_used == 0:
+            # Capacity 0 keeps nothing (there is no root to compare with).
+            return payload_row_id
+        if self._span_worse_than_root[bo](key, payload_row_id):
             return payload_row_id
         var displaced = self.slots[0].payload_row_id
         var off = self._append_key[bo](key)
@@ -300,8 +327,9 @@ struct BoundedHeapStringPayload[N: Int, sort_dir: Int](Copyable, Movable):
 
     @always_inline
     def compare_to_root[bo: Origin[mut=False]](self, cand: Span[UInt8, bo]) -> Int:
-        """-1 if the candidate is better to keep than the root (the worst key
-        kept), 0 if it ties with it, 1 if it is worse. Requires `size() > 0`."""
+        """-1 if the candidate key is better to keep than the root (the worst
+        key kept), 0 if it ties with it, 1 if it is worse; payload ids are not
+        compared. Requires `size() > 0`."""
         var c = self._cmp_span_slot[bo](cand, 0)
         comptime if Self.sort_dir == 1:
             return -c
@@ -316,9 +344,14 @@ struct BoundedHeapStringPayload[N: Int, sort_dir: Int](Copyable, Movable):
         return out^
 
     @always_inline
-    def candidate_beats_root[bo: Origin[mut=False]](self, key: Span[UInt8, bo]) -> Bool:
-        """True if a full heap would keep the candidate (no store)."""
-        return not self._span_worse_than_root[bo](key)
+    def candidate_beats_root[bo: Origin[mut=False]](
+        self, key: Span[UInt8, bo], payload_row_id: Int64
+    ) -> Bool:
+        """True if a full heap would keep the candidate (no store). A heap
+        of capacity 0 keeps nothing."""
+        if Self.N == 0:
+            return False
+        return not self._span_worse_than_root[bo](key, payload_row_id)
 
     def extract_sorted(mut self) -> List[HeapSlotStr]:
         """Drain the heap best-first (ascending strings for ASC, descending
@@ -402,7 +435,7 @@ struct BoundedHeapInt64PayloadDynamic(Copyable, Movable):
         var i = start_idx
         while i > 0:
             var parent = (i - 1) // 2
-            if self.slots[i].key > self.slots[parent].key:
+            if _slot_worse(self.slots[i], self.slots[parent]):
                 var tmp = self.slots[i]
                 self.slots[i] = self.slots[parent]
                 self.slots[parent] = tmp
@@ -417,9 +450,9 @@ struct BoundedHeapInt64PayloadDynamic(Copyable, Movable):
             var left = 2 * i + 1
             var right = 2 * i + 2
             var largest = i
-            if left < self.n_used and self.slots[left].key > self.slots[largest].key:
+            if left < self.n_used and _slot_worse(self.slots[left], self.slots[largest]):
                 largest = left
-            if right < self.n_used and self.slots[right].key > self.slots[largest].key:
+            if right < self.n_used and _slot_worse(self.slots[right], self.slots[largest]):
                 largest = right
             if largest == i:
                 return
@@ -435,7 +468,7 @@ struct BoundedHeapInt64PayloadDynamic(Copyable, Movable):
             self.slots[self.n_used] = HeapSlot(key, payload_row_id)
             self.n_used = self.n_used + 1
             self._percolate_up(self.n_used - 1)
-        elif self.n_used > 0 and key < self.slots[0].key:
+        elif self.n_used > 0 and _key_beats(key, payload_row_id, self.slots[0]):
             self.slots[0] = HeapSlot(key, payload_row_id)
             self._percolate_down(0)
 
