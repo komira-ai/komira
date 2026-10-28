@@ -97,6 +97,7 @@ def test_argtypes_of_all_nine():
     vp, cp, i32, u64, u8 = ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int32, ctypes.c_uint64, ctypes.c_uint8
     pu64 = ctypes.POINTER(ctypes.c_uint64)
     want = {
+        "komira_abi_version": (i32, []),
         "komira_ctx_new": (vp, []),
         "komira_ctx_free": (None, [vp]),
         "komira_last_error": (i32, [vp, vp, u64, pu64]),
@@ -198,6 +199,9 @@ def test_wire_truncated_and_hostile_input():
     raises(None, _wire.schema_from_wire, b"\x19" + b"\x00" * 7)  # field 3, fixed64, 7 of 8 bytes
     raises(None, _wire.schema_from_wire, b"\x1d" + b"\x00" * 3)  # field 3, fixed32, 3 of 4 bytes
     raises(None, _wire.schema_from_wire, b"\x19")  # fixed64 with no bytes at all
+    # A length-delimited field (wire type 2) whose declared length runs past the end is refused.
+    raises(None, _wire.schema_from_wire, b"\x0a\x05ab")  # field 1, declares 5 bytes, holds 2
+    raises(None, _wire.schema_from_wire, b"\x0a\x7f")  # declares 127 bytes, holds none
     # Complete ones are skipped as unknown fields.
     assert len(_wire.schema_from_wire(b"\x19" + b"\x00" * 8 + b"\x1d" + b"\x00" * 4)) == 0
     # A column name or timezone that is not UTF-8 is a KomiraError.
