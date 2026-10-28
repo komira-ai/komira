@@ -78,6 +78,7 @@ TARGETS = [
     "komira//tools/build/examples/shared_lib_native:spike_native",
     "komira//tools/build/lint:interpreter_budget",
     "komira//tools/build/lint:no_shell",
+    "komira//tools/build/lint:one_mopm",
     "komira//tools/build/lint:timing",
     "komira//tools/build/mopm_migrate:mopm_migrate",
     "komira//tools/build/package/manifest_probe:conda_manifest_kci",
