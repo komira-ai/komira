@@ -1,9 +1,9 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# test_client refuses an RS256 client key: komira_http_core's 2048-bit RSA
-# test key (PKCS#8 PEM, exported there).
+# test_client refuses an RS256 client key: komira_jose's 2048-bit RSA test
+# key (PKCS#8 PEM, tests/fixtures/rsa_test_key.pem there).
 _RSA_KEY = {
-    "src/komira_http_core/tests/fixtures/tls/leaf_key.pem": "//src/komira_http_core:tests/fixtures/tls/leaf_key.pem",
+    "src/komira_jose/tests/fixtures/rsa_test_key.pem": "//src/komira_jose:tests/fixtures/rsa_test_key.pem",
 }
 
 # OAuth 2.0 for a service that is a client of an issuer: the
