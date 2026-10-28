@@ -1,8 +1,13 @@
 //! botocore's protocol conformance corpus, scored against the actuals the
-//! generated Mojo driver printed, and checked against the ledger.
+//! generated Mojo drivers printed, and checked against the ledger.
+//!
+//! There is one driver per protocol, so the drivers compile in parallel; each
+//! prints the actuals of its own protocol. The test reads the five actuals
+//! files, merges them, and scores the union against the corpus: the ledger,
+//! one row per (protocol, direction), is checked over the union.
 //!
 //! Everything is compiled in: the corpus files and the ignore list from the
-//! pinned botocore archive, the driver's stdout (built by running it), and
+//! pinned botocore archive, the drivers' stdout (built by running them), and
 //! `aws_conformance_ledger.txt`. A change to any of them rebuilds this test.
 
 use std::collections::BTreeSet;
@@ -47,9 +52,16 @@ const FILES: &[(Direction, &str, &str)] = &[
 ];
 
 const IGNORE_LIST: &str = corpus!("protocol-tests-ignore-list.json");
-// The `[run_check]` sub-target of the driver writes `<name>.stdout`
-// (tools/build/mojo/defs.bzl); renaming it breaks this path.
-const ACTUALS: &str = include_str!("../aws_conformance_driver.stdout");
+// The `[run_check]` sub-target of a driver writes `<name>.stdout`
+// (tools/build/mojo/defs.bzl); renaming a driver breaks its path. The first
+// element is the `metadata.protocol` the driver is generated for.
+const DRIVERS: &[(&str, &str)] = &[
+    ("ec2", include_str!("../aws_conformance_driver_ec2.stdout")),
+    ("json", include_str!("../aws_conformance_driver_json.stdout")),
+    ("query", include_str!("../aws_conformance_driver_query.stdout")),
+    ("rest-json", include_str!("../aws_conformance_driver_rest_json.stdout")),
+    ("rest-xml", include_str!("../aws_conformance_driver_rest_xml.stdout")),
+];
 const LEDGER: &str = include_str!("../aws_conformance_ledger.txt");
 
 fn corpus() -> Corpus {
@@ -60,8 +72,58 @@ fn corpus() -> Corpus {
     c
 }
 
+/// Every driver's actuals, parsed, with the protocol it was built for.
+fn parts() -> Vec<(&'static str, ActualsFile)> {
+    DRIVERS
+        .iter()
+        .map(|(name, text)| {
+            let a = ActualsFile::parse(text).unwrap_or_else(|e| panic!("{name} actuals: {e}"));
+            (*name, a)
+        })
+        .collect()
+}
+
+/// Union of per-driver actuals. A case key or a protocol held by two parts is
+/// an error: the drivers must partition the work, so a union that hides a
+/// duplicate could hide a case answered by the wrong driver.
+fn merge(parts: &[(&str, ActualsFile)]) -> Result<ActualsFile, String> {
+    let mut out = ActualsFile::default();
+    for (name, a) in parts {
+        for p in &a.protocols {
+            if !out.protocols.insert(p.clone()) {
+                return Err(format!("{name}: protocol `{p}` is driven by two drivers"));
+            }
+        }
+        for (k, v) in &a.input {
+            if out.input.insert(k.clone(), v.clone()).is_some() {
+                return Err(format!("{name}: input case `{k}` is answered twice"));
+            }
+        }
+        for (k, v) in &a.output {
+            if out.output.insert(k.clone(), v.clone()).is_some() {
+                return Err(format!("{name}: output case `{k}` is answered twice"));
+            }
+        }
+        for (k, v) in &a.refused {
+            if out.refused.insert(k.clone(), v.clone()).is_some() {
+                return Err(format!("{name}: case `{k}` is refused twice"));
+            }
+        }
+        for (k, v) in &a.raised {
+            if out.raised.insert(k.clone(), v.clone()).is_some() {
+                return Err(format!("{name}: case `{k}` raised twice"));
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn union() -> ActualsFile {
+    merge(&parts()).unwrap_or_else(|e| panic!("{e}"))
+}
+
 fn report() -> Report {
-    let actuals = ActualsFile::parse(ACTUALS).unwrap_or_else(|e| panic!("actuals: {e}"));
+    let actuals = union();
     let ignore = IgnoreList::parse(IGNORE_LIST).unwrap_or_else(|e| panic!("{e}"));
     assert!(
         !actuals.protocols.is_empty(),
@@ -79,7 +141,7 @@ fn case_keys_are_unique() {
 
 #[test]
 fn every_actual_names_a_corpus_case() {
-    let actuals = ActualsFile::parse(ACTUALS).unwrap();
+    let actuals = union();
     let keys: BTreeSet<String> = corpus().keys().into_iter().collect();
     let stray: Vec<&String> = actuals
         .input
@@ -119,4 +181,104 @@ fn no_case_is_red() {
         })
         .collect();
     assert!(red.is_empty(), "{} red case(s):\n{}", red.len(), red.join("\n"));
+}
+
+#[test]
+fn each_driver_drives_exactly_its_protocol() {
+    for (name, a) in parts() {
+        let want: BTreeSet<String> = [name.to_string()].into();
+        assert_eq!(a.protocols, want, "the {name} driver was generated for another protocol set");
+    }
+}
+
+/// The drivers are a partition of the corpus: every case botocore does not
+/// skip is answered by exactly one driver, the one of its own protocol. A
+/// case that no driver holds, or one a driver of another protocol holds, is
+/// named here rather than only as a changed count in the ledger.
+#[test]
+fn every_corpus_case_is_answered_by_exactly_its_protocol_driver() {
+    let ignore = IgnoreList::parse(IGNORE_LIST).unwrap();
+    let parts = parts();
+    let held_by = |key: &str| -> Vec<&str> {
+        parts
+            .iter()
+            .filter(|(_, a)| {
+                a.input.contains_key(key)
+                    || a.output.contains_key(key)
+                    || a.refused.contains_key(key)
+                    || a.raised.contains_key(key)
+            })
+            .map(|(n, _)| *n)
+            .collect()
+    };
+    let c = corpus();
+    let cases = c
+        .input
+        .iter()
+        .map(|x| (Direction::Input, &x.key, &x.protocol, &x.file, &x.suite, &x.id))
+        .chain(
+            c.output
+                .iter()
+                .map(|x| (Direction::Output, &x.key, &x.protocol, &x.file, &x.suite, &x.id)),
+        );
+    let mut bad = Vec::new();
+    let mut driven = 0usize;
+    for (dir, key, protocol, file, suite, id) in cases {
+        if !DRIVERS.iter().any(|(n, _)| n == protocol) {
+            continue;
+        }
+        driven += 1;
+        let holders = held_by(key);
+        let expect: Vec<&str> =
+            if ignore.skips(dir, file, suite, id) { vec![] } else { vec![protocol.as_str()] };
+        if holders != expect {
+            bad.push(format!("{key}: held by {holders:?}, expected {expect:?}"));
+        }
+    }
+    assert!(driven > 0, "no corpus case belongs to a driven protocol");
+    assert!(bad.is_empty(), "{} case(s) misplaced:\n{}", bad.len(), bad.join("\n"));
+}
+
+/// The ledger's rows name exactly the protocols the drivers cover, and the
+/// cases scored are the cases the ledger counts: adding or dropping a driver
+/// is not silent.
+#[test]
+fn the_drivers_cover_the_ledger_totals() {
+    let rows = || LEDGER.lines().filter(|l| !l.trim().is_empty() && !l.starts_with('#'));
+    let ledger_protocols: BTreeSet<String> =
+        rows().filter_map(|l| l.split_whitespace().next().map(str::to_string)).collect();
+    let drivers: BTreeSet<String> = DRIVERS.iter().map(|(n, _)| n.to_string()).collect();
+    assert_eq!(ledger_protocols, drivers, "the ledger and the drivers cover different protocols");
+    let ledger_total: usize =
+        rows().map(|l| l.split_whitespace().nth(2).unwrap().parse::<usize>().unwrap()).sum();
+    assert_eq!(report().outcomes.len(), ledger_total, "cases scored differ from the ledger's total");
+}
+
+fn part(json: &str) -> ActualsFile {
+    ActualsFile::parse(json).unwrap()
+}
+
+#[test]
+fn merge_unions_disjoint_parts() {
+    let a = part(r#"{"protocols":["a"],"refused":{"k1":"REFUSED x: y"}}"#);
+    let b = part(r#"{"protocols":["b"],"raised":{"k2":"boom"},"input":{"k3":{"method":"GET"}}}"#);
+    let m = merge(&[("a", a), ("b", b)]).unwrap();
+    assert_eq!(m.protocols.len(), 2);
+    assert!(m.refused.contains_key("k1") && m.raised.contains_key("k2") && m.input.contains_key("k3"));
+}
+
+#[test]
+fn merge_refuses_a_case_two_parts_answer() {
+    let a = part(r#"{"protocols":["a"],"input":{"k":{"method":"GET"}}}"#);
+    let b = part(r#"{"protocols":["b"],"input":{"k":{"method":"GET"}}}"#);
+    let e = merge(&[("a", a), ("b", b)]).unwrap_err();
+    assert!(e.contains("`k` is answered twice"), "{e}");
+}
+
+#[test]
+fn merge_refuses_a_protocol_two_parts_drive() {
+    let a = part(r#"{"protocols":["a"]}"#);
+    let b = part(r#"{"protocols":["a"]}"#);
+    let e = merge(&[("a", a), ("b", b)]).unwrap_err();
+    assert!(e.contains("driven by two drivers"), "{e}");
 }
