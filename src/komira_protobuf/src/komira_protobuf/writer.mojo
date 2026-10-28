@@ -91,9 +91,15 @@ def pb_write_sint64_field(mut out: List[UInt8], field_number: Int, value: Int64)
 
 
 def pb_write_sint32_field(mut out: List[UInt8], field_number: Int, value: Int32):
-    """Append a zigzag-encoded sint32 varint field."""
+    """Append a zigzag-encoded sint32 varint field.
+
+    The zigzag is an unsigned 32-bit number, so the varint is at most five
+    bytes. The mask is not redundant: widened without it, a zigzag with bit 31
+    set (an Int32 of 2^30 or more in magnitude) comes out sign-extended, as a
+    ten byte varint of 0xFFFFFFFFFFFFFFFF where 0x00000000FFFFFFFF is meant.
+    """
     pb_write_tag(out, field_number, PB_WIRE_VARINT)
-    pb_write_varint(out, UInt64(zigzag_encode32(value)))
+    pb_write_varint(out, UInt64(zigzag_encode32(value)) & 0xFFFFFFFF)
 
 
 # =============================================================================

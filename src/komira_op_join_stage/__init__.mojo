@@ -7,7 +7,9 @@ columns) and a pack of payload columns
 (`join_payload_column`: `PayloadSlot`, `PayloadCol_JoinString`); its key
 columns and key model (`join_key_slot`: every value a key, float keys under
 the float model); its free functions over typed keys
-(`join_build_table_fns`).
+(`join_build_table_fns`); and the two breaker states of a stage's join,
+`JoinBuildState` (`join_build_state`) and `JoinProbeState`
+(`join_probe_state`).
 
 Public API: import directly from sub-modules. No facade.
 """

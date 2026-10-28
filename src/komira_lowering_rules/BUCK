@@ -18,15 +18,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # //src/tests/conformance/komira_lowering_rules_conformance.
 #
 # NO PRODUCER IN THE CLOSURE. A host never re-optimizes, so a lowering rule
-# may not reach the optimizer, the SQL front end or a plan producer. The
-# comprehension below refuses, when this file loads, a dep whose name starts
-# with one of _REFUSED_DEPS. Checking the direct deps covers the closure: each
-# refused package depends on komira_plan_ir (komira_optimizer and komira_sql
-# do today; a plan producer runs the optimizer), and each dep here is
-# komira_plan_ir or in its closure, so a path from a dep here to a refused
-# package would be a cycle, which buck2 refuses.
-_REFUSED_DEPS = ["komira_optimizer", "komira_plan_producer", "komira_sql"]
-
+# may not reach the optimizer, the SQL front end or a plan producer.
+# `closure_excludes` is checked at analysis against the whole closure of
+# `deps`, direct and transitive, by exact import name (the same check
+# komira_lowering and komira_host_profile hold; tests//negative/closure_excludes
+# plants a refused package and //tools/build/selftest:analysis_refusals_mojo
+# requires the refusal).
 deps = [
     "//src/komira_arrow:komira_arrow",
     "//src/komira_plan_expr:komira_plan_expr",
@@ -34,17 +31,11 @@ deps = [
     "//src/komira_plan_stats:komira_plan_stats",
 ]
 
-[
-    fail("komira_lowering_rules: dep {} is refused: a host lowering rule may not depend on a package named {}*".format(d, r))
-    for d in deps
-    for r in _REFUSED_DEPS
-    if d.rpartition(":")[2].startswith(r)
-]
-
 mojo_library(
     name = "komira_lowering_rules",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = deps,
+    closure_excludes = ["komira_optimizer", "komira_plan_producer", "komira_sql"],
     # The walk test builds an ORC scan from its source variant.
     test_deps = ["//src/komira_scan_source:komira_scan_source"],
     test_srcs = [

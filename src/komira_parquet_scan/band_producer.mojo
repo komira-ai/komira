@@ -52,9 +52,9 @@ from komira_async_api.token import CancellationToken
 from komira_async_api.worker_pool_traits import KeepAlive, Segment
 from komira_collections.slab import Slab
 from komira_engine_runtime.band_sink import BandSink
-from komira_engine_runtime.hardware import DEFAULT_L3_BYTES
-from komira_engine_runtime.host_profile import HostProfile
-from komira_engine_runtime.morsel_sizing_policy import MorselSizingPolicy
+from komira_host_profile.hardware import DEFAULT_L3_BYTES
+from komira_host_profile.host_profile import HostProfile
+from komira_host_profile.morsel_sizing_policy import MorselSizingPolicy
 from komira_fs.file_system import FileSystem
 from komira_parquet.column_decode_context import ColumnDecodeContext
 from komira_parquet.subrg_column_cursor import ResumableColumnCursor, SUBRG_MAX_RUN
