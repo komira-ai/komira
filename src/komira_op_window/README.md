@@ -46,7 +46,7 @@ Modules:
   same rows on the engine's workers: one sort, then whole-partition buckets
   evaluated in parallel and concatenated in order; below 65,536 rows, four
   partitions or two workers it runs on the calling thread.
-- `partition_scan_sink_hash_scatter`: above that size, with INT64 partition
+- `partition_scan_sink_hash_scatter`: above that size, with one or more INT64 partition
   keys holding no NULL, rows are scattered by key range (sampled equi-depth
   splitters) and each bucket is sorted and evaluated on its own worker.
 - `partition_by_sink`: `PartitionBySink`, the window operator as a
