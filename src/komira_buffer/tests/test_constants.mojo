@@ -1,8 +1,7 @@
 # =============================================================================
 # The compile-time constants: each SIMD width is the width of its own
 # element type, and the cache-line and morsel fallbacks have their
-# documented values. (NUM_CORES is not checked here: it is evaluated on the
-# machine that compiles the package.)
+# documented values.
 # =============================================================================
 
 from std.sys import simd_width_of
