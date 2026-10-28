@@ -2,6 +2,14 @@
 
 Vectorized compute over Arrow columns: arithmetic, comparison, casts, string, regexp, dictionary, union, decimal, case mapping, and the batch helpers that import them.
 
+`cross_batch_gather` builds one batch from rows of several batches that share a
+schema, in the order of a list of `(source, row)` pairs (the external sort
+materializes its merge with it). It gathers INT8 to INT64, UINT8 to UINT64,
+FLOAT16 to FLOAT64, DATE32, DATE64, TIME32 and TIME64, TIMESTAMP (every unit),
+DURATION (every unit), STRING, BINARY, LARGE_STRING, BOOL and NULL columns;
+every other type (DECIMAL128, DECIMAL256, INTERVAL_MONTH_DAY_NANO, DICTIONARY,
+LIST, STRUCT, ...) raises "unsupported column type".
+
 The kernels take `komira_arrow` typed arrays and return new ones: arithmetic
 (`komira_column_kernels.arithmetic`) returns a `PrimitiveArray`, comparisons
 (`komira_column_kernels.comparison`, `komira_column_kernels.string_comparison`)

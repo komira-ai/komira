@@ -140,6 +140,7 @@ struct CountF64(HashAggOpF64):
     """
 
     comptime StateTy = Float64
+    comptime EMPTY_IS_NULL: Bool = False
 
     @staticmethod
     @always_inline
@@ -684,6 +685,7 @@ struct CountI64(HashAggOpI64):
     """Count-non-null over Int64. StateTy = Int64."""
 
     comptime StateTy = Int64
+    comptime EMPTY_IS_NULL: Bool = False
 
     @staticmethod
     @always_inline
@@ -899,6 +901,7 @@ struct CountI32(HashAggOpI32):
     """Count-non-null over Int32. StateTy = Int32."""
 
     comptime StateTy = Int32
+    comptime EMPTY_IS_NULL: Bool = False
 
     @staticmethod
     @always_inline
@@ -1030,6 +1033,7 @@ struct CountF32(HashAggOpF32):
     Float32 for output-type uniformity, matching CountF64's pattern)."""
 
     comptime StateTy = Float32
+    comptime EMPTY_IS_NULL: Bool = False
 
     @staticmethod
     @always_inline

@@ -184,9 +184,9 @@ At execution, `ScanResolver` (`src/komira_scan_source/scan_resolver.mojo`) answe
 
 | File | Holds | Key types and functions |
 |---|---|---|
-| `src/komira_buffer/memory_region.mojo` | The region trait | `MemoryRegion`; `HeapRegion`, `MmapRegion` in siblings |
-| `src/komira_buffer/owned_aligned_buffer.mojo` | Single-owner buffers | `OwnedAlignedBuffer` |
-| `src/komira_buffer/shared_aligned_buffer.mojo` | Refcounted buffers | `SharedAlignedBuffer`, `borrow_mmap_erased`, `share` |
+| `src/komira_buffer/src/komira_buffer/memory_region.mojo` | The region trait | `MemoryRegion`; `HeapRegion`, `MmapRegion` in siblings |
+| `src/komira_buffer/src/komira_buffer/owned_aligned_buffer.mojo` | Single-owner buffers | `OwnedAlignedBuffer` |
+| `src/komira_buffer/src/komira_buffer/shared_aligned_buffer.mojo` | Refcounted buffers | `SharedAlignedBuffer`, `borrow_mmap_erased`, `share` |
 | `src/komira_arrow/column.mojo` | The type-erased column | `Column`, `as_primitive`, `share`, `slice` |
 | `src/komira_arrow/arrow_types.mojo` | Type tags | `ArrowType` |
 | `src/komira_arrow/schema.mojo`, `record_batch.mojo`, `table.mojo` | Schemas, batches, results | `Field`, `Schema`, `RecordBatch`, `Table` |
