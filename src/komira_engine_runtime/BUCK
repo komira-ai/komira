@@ -1,10 +1,10 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The engine's execution primitives, with no algorithm logic: the host profile
-# (measured once per host), hardware and topology detection and the async
-# runtime built from them, morsel sizing as a pure function of the host profile
-# and the segment (recorded in the physical plan), the dispatch-time fan-out
-# grain, the run and segment execution context, the parallel RecordBatch concat,
+# The engine's execution primitives, with no algorithm logic: the detection of
+# the host profile (measured once per host; the value and morsel sizing are in
+# komira_host_profile), hardware and topology detection and the async runtime
+# built from them, the dispatch-time fan-out grain, the run and segment
+# execution context, the parallel RecordBatch concat,
 # the memory reservation a breaker grows against the host budget, the spill
 # storage and its arbitration (which breaker or partition spills under memory
 # pressure), the shuffle combine buffer and retention policy, counters, the small
@@ -29,6 +29,7 @@ mojo_library(
         "//src/komira_dynamic_filter:komira_dynamic_filter",
         "//src/komira_fs:komira_fs",
         "//src/komira_host:komira_host",
+        "//src/komira_host_profile:komira_host_profile",
         "//src/komira_libc:komira_libc",
         "//src/komira_morsel:komira_morsel",
         "//src/komira_objectstore:komira_objectstore",
@@ -49,24 +50,23 @@ mojo_library(
         "tests/test_counters.mojo",
         "tests/test_distinct_column_native_transparency.mojo",
         "tests/test_dynamic_filter_band_sink.mojo",
+        "tests/test_fan_out_grain.mojo",
         "tests/test_filesystem_spill_fsync.mojo",
         "tests/test_filesystem_spill_storage.mojo",
         "tests/test_fnv1a_and_async_wake.mojo",
-        "tests/test_hardware_profile.mojo",
         "tests/test_hardware_profile_detect.mojo",
         "tests/test_hardware_topology.mojo",
-        "tests/test_host_profile.mojo",
+        "tests/test_host_detect.mojo",
         "tests/test_hw_ecore_l2_morsel_sizing.mojo",
         "tests/test_join_probe_grain_seam.mojo",
-        "tests/test_l1_chunk_sizing.mojo",
         "tests/test_local_disk_spill_storage.mojo",
         "tests/test_machine_topology.mojo",
         "tests/test_memory_reservation_budget.mojo",
-        "tests/test_morsel_sizing_policy.mojo",
         "tests/test_native_spill_writer_reader.mojo",
         "tests/test_partition_topn_hash_state_column_native_transparency.mojo",
         "tests/test_partition_topn_state_column_native_transparency.mojo",
         "tests/test_row_group_ref_borrow.mojo",
+        "tests/test_run_context.mojo",
         "tests/test_scan_source_streaming_morsel.mojo",
         "tests/test_segment_execution.mojo",
         "tests/test_shuffle_combine_bounded_ram.mojo",
