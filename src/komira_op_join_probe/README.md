@@ -33,6 +33,12 @@ import from the modules.
 - `komira_op_join_probe.join_probe_settings`: the probe's process settings,
   set once from flags: the batched walk's width (0 is the row-at-a-time walk),
   the probe morsel, and the retile.
+- `komira_op_join_probe.join_deferred`, `join_deferred_idx` and
+  `join_defer_verdict`: the streaming join probe's DEFERRED output. A morsel
+  either stages its output now or retains its probe batch and match indices
+  (`DeferredJoinChunk`, the indices narrowed to 4 bytes when they fit) for one
+  gather at the end; `deferral_verdict` decides which, by a DRAM-traffic rule
+  (or the older memory rule), and names the line that decided.
 - `komira_op_join_probe.join_key_extract`: `extract_join_key_columns_typed`
   (and `extract_join_key_columns_serial`, without a dispatcher) renders a
   batch's key columns into one Int64 key slot per row and key
