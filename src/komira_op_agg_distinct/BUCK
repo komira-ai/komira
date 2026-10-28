@@ -43,6 +43,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_agg_cd_group_topk_bounded_drain.mojo",
+        "tests/test_agg_cd_group_topk_null_order.mojo",
         "tests/test_cd_adjdedup_tail_skip.mojo",
         "tests/test_cd_allcd_no_passenger_lane.mojo",
         "tests/test_cd_dense_gid_direct_index.mojo",
@@ -53,7 +54,9 @@ mojo_library(
         "tests/test_cd_heavy_split_admission.mojo",
         "tests/test_cd_key_emit.mojo",
         "tests/test_cd_lastkey_memo.mojo",
+        "tests/test_cd_parallel_agrees_with_sink.mojo",
         "tests/test_cd_parallel_driver.mojo",
+        "tests/test_cd_parallel_driver_edges.mojo",
         "tests/test_cd_parallel_heavy_split.mojo",
         "tests/test_cd_parallel_ht_sizing.mojo",
         "tests/test_cd_parallel_merge_index_attribution.mojo",

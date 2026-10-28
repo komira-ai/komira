@@ -274,18 +274,13 @@ def test_a_tie_at_the_cut_agrees_with_the_full_drain() raises:
     """FORTY groups share each ORDER BY value, so the k == 10 cut falls inside
     a tie and the surviving SET is decided purely by the tie-break policy.
 
-    This is the assertion that catches an appended tie-break key. With a trailing
-    `__cdp_topk_gidx` ASC key appended to the comparator — the spelling
-    `agg_group_topk`'s radix twin ships — this goes RED at `key byte 8`. An
-    explicit sorted-key probe run at the same time proved the divergence is a
-    PERMUTATION and not a set difference (`PROBE: sets are EQUAL`), which is
-    why the twin's own SET-only assertion stays green on its fixture while
-    this one does not. See `agg_cd_group_topk`'s header for the mechanism.
-
-    ⇒ A COST CHANGE MAY NOT REORDER TIED ROWS EITHER. The corpus value gate is
-    a commutative multiset fold and the row-order gate only asserts
-    MONOTONICITY of the order key, so a tie permutation would pass both — this
-    fixture is the only thing in the tree that can see it."""
+    The bounded arm keeps the incumbent on a tie, as the top-N sink does. A
+    tie-break key appended to the comparator that sorts the group index
+    DESCENDING reverses that rule, so the tied survivors come back in another
+    order and this goes RED at the key byte count. A trailing group-index key
+    sorted ASCENDING is the same rule as the incumbent's and is not told apart
+    here. A cost change may not reorder tied rows either; see
+    `agg_cd_group_topk`'s header for the mechanism."""
     var counts = _tied_at_the_cut_counts()
     var got = _run_cd(counts, Optional(_hint("n", True, _K)))
     var want = _oracle(counts, True, _K)
