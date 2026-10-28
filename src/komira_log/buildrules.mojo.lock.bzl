@@ -434,6 +434,23 @@ GRAPH_JSON = r'''{
       "outputs": ["test_log_facade_smoke.pass"]
     },
     {
+      "id": "komira_log@0.1.0#mojo1.0.0/test:src/komira_log/tests/test_log_global_logger_levels.mojo",
+      "package": "komira_log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_log/tests/test_log_global_logger_levels.mojo", "sha256": "887543da8f10c7ba5a2d81738a03f939331536a0c52d734c9a980f10643a1fac"}
+      ],
+      "deps": ["komira_log@0.1.0#mojo1.0.0/lib", "komira_runtime_paths@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira_log", "kind": "static", "built": "native:komira_log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira_metrics", "kind": "static", "built": "native:komira_metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_global_logger_levels.pass"]
+    },
+    {
       "id": "komira_log@0.1.0#mojo1.0.0/test:src/komira_log/tests/test_log_json_severity.mojo",
       "package": "komira_log",
       "version": "0.1.0",
@@ -1359,6 +1376,23 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "outputs": ["test_log_facade_smoke.pass"]
     },
     {
+      "id": "komira_log@0.1.0#mojo1.0.0/test:src/komira_log/tests/test_log_global_logger_levels.mojo",
+      "package": "komira_log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_log/tests/test_log_global_logger_levels.mojo", "sha256": "887543da8f10c7ba5a2d81738a03f939331536a0c52d734c9a980f10643a1fac"}
+      ],
+      "deps": ["komira_log@0.1.0#mojo1.0.0/lib", "komira_runtime_paths@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira_log", "kind": "static", "built": "native:komira_log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira_metrics", "kind": "static", "built": "native:komira_metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_global_logger_levels.pass"]
+    },
+    {
       "id": "komira_log@0.1.0#mojo1.0.0/test:src/komira_log/tests/test_log_json_severity.mojo",
       "package": "komira_log",
       "version": "0.1.0",
@@ -2279,6 +2313,23 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_log_facade_smoke.pass"]
+    },
+    {
+      "id": "komira_log@0.1.0#mojo1.0.0/test:src/komira_log/tests/test_log_global_logger_levels.mojo",
+      "package": "komira_log",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_log/tests/test_log_global_logger_levels.mojo", "sha256": "887543da8f10c7ba5a2d81738a03f939331536a0c52d734c9a980f10643a1fac"}
+      ],
+      "deps": ["komira_log@0.1.0#mojo1.0.0/lib", "komira_runtime_paths@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"},
+        {"id": "komira_log_holder", "soname": "libkomira_log_holder.a", "package": "komira_log", "kind": "static", "built": "native:komira_log/komira_log_holder"},
+        {"id": "komira_metrics_ea_flag", "soname": "libkomira_metrics_ea_flag.a", "package": "komira_metrics", "kind": "static", "built": "native:komira_metrics/komira_metrics_ea_flag"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_log_global_logger_levels.pass"]
     },
     {
       "id": "komira_log@0.1.0#mojo1.0.0/test:src/komira_log/tests/test_log_json_severity.mojo",
