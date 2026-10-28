@@ -345,8 +345,7 @@ def chain_build_parallel(
     # written by `ChainFillTask` across the pool, as its own preceding
     # dispatch. `cap * 8` bytes of single-threaded first-touch is 67 MB at
     # cap = 2^23 and 268 MB at 2^25 with the whole pool parked; fanning it
-    # measured -1.01% on an 11-cell paired run (`tpch/q9` -10.05 ms, `sdk/d2`
-    # -6.19 ms) and -0.55% over the 84-cell corpus, no cell slower.
+    # puts that traffic on every worker.
     #
     # DRIVER (`join_ht_fill_configure(False)`): the single `memset` below.
     # `_CHAIN_END` is -1 == all-ones, so one 0xFF byte fill materialises it
@@ -384,8 +383,8 @@ def chain_build_parallel(
     # and every downstream fact -- the allocation, the comptime stride the tasks
     # burn in, and the flag `take_buffers` infers -- is derived from this one
     # value. A second literal anywhere would be a write/read stride that agrees
-    # only by coincidence; that exact defect was found by mutation testing in
-    # the serial builder and cost keys from other rows.
+    # only by coincidence, and the serial builder's tests caught exactly that
+    # defect: it cost keys from other rows.
     var pay = fused and len(pay_values) > 0
     if len(pay_values) > 0:
         if not fused:

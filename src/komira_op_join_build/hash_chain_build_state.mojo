@@ -172,9 +172,9 @@ struct ChainBuildState(KeepAlive):
     # `hash_table` is the builders' OWN `List[Int]`, CAS'd through a
     # `bitcast[Scalar[DType.int64]]` of its data pointer (`Int` and `Int64` are
     # layout-identical on every supported target). An earlier revision kept a
-    # separate `List[Int64]` and converted in `take_buffers`: on an 18M-row
-    # build that was a 256 MB read + 256 MB write DRIVER-SERIAL pass, ~40% of
-    # the "parallel" build's remaining wall. Building in place deletes it.
+    # separate `List[Int64]` and converted in `take_buffers`, a driver-serial
+    # read and write of the whole table after the parallel wave. Building in
+    # place deletes that pass.
     var hash_table: List[Int]
     var next_chain: List[Int]
     # CHAIN-ENTRY LAYOUT: the FUSED alternative to the
