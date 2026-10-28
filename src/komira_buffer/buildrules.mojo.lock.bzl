@@ -103,6 +103,21 @@ GRAPH_JSON = r'''{
       "outputs": ["test_fast_copy_call_sites_enabled.pass"]
     },
     {
+      "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_file_identity.mojo",
+      "package": "komira_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_buffer/tests/test_file_identity.mojo", "sha256": "35f504164024f11a3e35f080c0ccf9e8672db38f73bd4f49cecd53979e4484a7"}
+      ],
+      "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_file_identity.pass"]
+    },
+    {
       "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_heap_region.mojo",
       "package": "komira_buffer",
       "version": "0.1.0",
@@ -381,6 +396,21 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "outputs": ["test_fast_copy_call_sites_enabled.pass"]
     },
     {
+      "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_file_identity.mojo",
+      "package": "komira_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_buffer/tests/test_file_identity.mojo", "sha256": "35f504164024f11a3e35f080c0ccf9e8672db38f73bd4f49cecd53979e4484a7"}
+      ],
+      "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_file_identity.pass"]
+    },
+    {
       "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_heap_region.mojo",
       "package": "komira_buffer",
       "version": "0.1.0",
@@ -654,6 +684,21 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       ],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_fast_copy_call_sites_enabled.pass"]
+    },
+    {
+      "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_file_identity.mojo",
+      "package": "komira_buffer",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_buffer/tests/test_file_identity.mojo", "sha256": "35f504164024f11a3e35f080c0ccf9e8672db38f73bd4f49cecd53979e4484a7"}
+      ],
+      "deps": ["komira_buffer@0.1.0#mojo1.0.0/lib"],
+      "natives": [
+        {"id": "komira_libc_posix", "soname": "libkomira_libc_posix.a", "package": "komira_libc", "kind": "static", "built": "native:komira_libc/komira_libc_posix"}
+      ],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_file_identity.pass"]
     },
     {
       "id": "komira_buffer@0.1.0#mojo1.0.0/test:src/komira_buffer/tests/test_heap_region.mojo",
