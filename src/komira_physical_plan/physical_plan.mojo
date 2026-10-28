@@ -58,7 +58,7 @@ from komira_collections.slab import Slab
 #       recording whether the three parquet fields beside it REPRODUCE the
 #       scan they were minted from (see its docstring).
 #   14: `SegmentDescPod.morsel_rows` — the rows per morsel the HOST chose when it
-#       lowered the segment (`komira_engine_runtime.morsel_sizing_policy`),
+#       lowered the segment (`komira_host_profile.morsel_sizing_policy`),
 #       recorded so nothing downstream re-derives it. 0 = not yet lowered.
 #   Retired `MorselOp` tag values (4-13) are not reused.
 
