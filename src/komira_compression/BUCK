@@ -19,6 +19,9 @@ load(":buildrules.mojo.bzl", "mojo_package")
 #   too-small and corrupt cases of each).
 # - test_codec_libraries: each library this package opens, the snappy entry points in the opened
 #   library, and the message of a library that is absent.
+# - test_codec_conformers: the Snappy, Zstd, Uncompressed, Lzo, Brotli and Zlib conformers, the nine
+#   constructors and the per-worker decompression context handle (Zstd and Lz4Frame), with the
+#   too-small and corrupt cases.
 # - test_gzip_lz4_frame_conformers: the Gzip and Lz4Frame conformers, the LZ4 frame decoded from
 #   //third_party/pierrec-lz4's golden file (pinned by sha256, staged at golden/).
 # - test_lz4_raw_conformer_roundtrip: the Lz4Raw conformer's round trip.

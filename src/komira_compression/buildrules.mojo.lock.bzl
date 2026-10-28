@@ -78,6 +78,20 @@ GRAPH_JSON = r'''{
       "outputs": ["test_codec_block_api.pass"]
     },
     {
+      "id": "komira_compression@0.1.0#mojo1.0.0/test:src/komira_compression/tests/test_codec_conformers.mojo",
+      "package": "komira_compression",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_compression/tests/test_codec_conformers.mojo", "sha256": "b5a7adb1b9a81a969b37fad609a5493feeb01e9bfb94db7ae6482933ef76e350"}
+      ],
+      "deps": ["komira_compression@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "loads": ["bzip2", "liblzma", "liblzma-devel", "libzlib", "lz4-c", "snappy", "xz", "xz-gpl-tools", "xz-tools", "zstd"],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_codec_conformers.pass"]
+    },
+    {
       "id": "komira_compression@0.1.0#mojo1.0.0/test:src/komira_compression/tests/test_codec_libraries.mojo",
       "package": "komira_compression",
       "version": "0.1.0",
@@ -212,6 +226,20 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "outputs": ["test_codec_block_api.pass"]
     },
     {
+      "id": "komira_compression@0.1.0#mojo1.0.0/test:src/komira_compression/tests/test_codec_conformers.mojo",
+      "package": "komira_compression",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_compression/tests/test_codec_conformers.mojo", "sha256": "b5a7adb1b9a81a969b37fad609a5493feeb01e9bfb94db7ae6482933ef76e350"}
+      ],
+      "deps": ["komira_compression@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "loads": ["bzip2", "liblzma", "liblzma-devel", "libzlib", "lz4-c", "snappy", "xz", "xz-gpl-tools", "xz-tools", "zstd"],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_codec_conformers.pass"]
+    },
+    {
       "id": "komira_compression@0.1.0#mojo1.0.0/test:src/komira_compression/tests/test_codec_libraries.mojo",
       "package": "komira_compression",
       "version": "0.1.0",
@@ -341,6 +369,20 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "loads": ["bzip2", "liblzma", "liblzma-devel", "libzlib", "lz4-c", "snappy", "xz", "xz-gpl-tools", "xz-tools", "zstd"],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_codec_block_api.pass"]
+    },
+    {
+      "id": "komira_compression@0.1.0#mojo1.0.0/test:src/komira_compression/tests/test_codec_conformers.mojo",
+      "package": "komira_compression",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_compression/tests/test_codec_conformers.mojo", "sha256": "b5a7adb1b9a81a969b37fad609a5493feeb01e9bfb94db7ae6482933ef76e350"}
+      ],
+      "deps": ["komira_compression@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "loads": ["bzip2", "liblzma", "liblzma-devel", "libzlib", "lz4-c", "snappy", "xz", "xz-gpl-tools", "xz-tools", "zstd"],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_codec_conformers.pass"]
     },
     {
       "id": "komira_compression@0.1.0#mojo1.0.0/test:src/komira_compression/tests/test_codec_libraries.mojo",
