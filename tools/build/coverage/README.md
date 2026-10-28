@@ -53,8 +53,8 @@ covcheck report --repo-files F --diff F --head-sha SHA --source-root DIR
                 (--cobertura [PKGDIR=]F | --lcov [PKGDIR=]F)... [--branch-lcov [PKGDIR=]F]...
                 [--mutants [PKGDIR=]F]...
                 [--strip-prefix P]... [--held PKGDIR=F]... [--mode census|neutral|enforce]
-                --target-bp N [--include-tests] [--info-package DIR]... [--name N]
-                [--max-annotations N] --summary-out F --checkrun-dir D --result-out F
+                --target-bp N [--include-tests] [--info-package DIR]... [--program-runs F]
+                [--name N] [--max-annotations N] --summary-out F --checkrun-dir D --result-out F
                 [--annotations-out F]
 
 covcheck gate   --package DIR --repo-files F --source-root DIR
@@ -62,7 +62,7 @@ covcheck gate   --package DIR --repo-files F --source-root DIR
                 [--mutants [PKGDIR=]F]...
                 [--strip-prefix P]... [--held F] --mode census|neutral|enforce
                 --target-bp N [--include-tests] [--test-source P]... [--info-package DIR]...
-                --result-out F --summary-out F
+                [--program-runs F] --result-out F --summary-out F
 ```
 
 Every input is a flag; nothing is read from the environment.
@@ -81,6 +81,7 @@ Every input is a flag; nothing is read from the environment.
 | `--include-tests` | count test sources (left out by default) |
 | `--test-source P` | `gate`: repeatable; the repository path of a test source of `--package` outside its `tests/` (a welded test elsewhere), left out like those; a path that is not a file of `--repo-files` or not in `--package` is an error (exit 1) |
 | `--info-package DIR` | repeatable; `DIR` (a trailing `/` dropped; an absolute path, `.` or one holding `//` is bad usage) and every package under it, at a path-segment boundary, are test-only: see Test-only packages |
+| `--program-runs F` | the repository paths, one per line, of the program sources some test target runs (see Program sources); absent or empty: none is run |
 | `--diff F` | the output of `git diff --no-color --no-ext-diff --src-prefix=a/ --dst-prefix=b/ --unified=0 -M <merge-base> <head>` (the explicit prefixes override a `diff.noprefix` setting) |
 | `--head-sha SHA` | the commit the check run is for: 40 lowercase hex digits |
 | `--name N` | the check run's name; default `coverage` |
@@ -329,6 +330,10 @@ contrived text that puts it out of step with the compiler and back in step
 before the end of the file can hide a line of code from the heuristic and
 from this test alike.
 
+## Program sources
+
+A package's `mopm.toml` names the programs it ships in `[targets]`: `bins = [{ name = "x", path = "bins/x.mojo" }]`, or the same entries as `[[targets.bins]]` tables; `path` is relative to the manifest's directory. A program's `main` is reachable only through the built program, which the census cannot instrument, so each named file is program source: it is counted in no line or branch number and is no `UnmeasuredFile` (any report record of it is dropped, as for a generated source; `Analysis.program_paths` lists them), and it is an `UnrunProgram` finding when no test target runs the built program. That is evidence from the build graph, given as data: `--program-runs F` lists the program sources some test target depends on, which `.github/ci/coverage_measure.sh` takes from a `buck2 uquery` of each measured package that has a `mopm.toml` (the `srcs` of the `mojo_binary_rule` and `mojo_unit_rule` (kind `bin`) targets that a `mojo_test_rule` or `mojo_test_run_rule` target of the package depends on). Without the flag every program is unrun. A `.mojo` file under `bins/` that no manifest names stays ordinary source, and a package with no `mopm.toml` has no program. A manifest is read only for a package in the run (one a report names, the gated package, or one given a hold). It is read strictly: `bins` as a single inline table or a `[targets.bins]` table, given twice or in both shapes, an entry without a quoted `name` or `path`, a `path` that is not a relative `.mojo` path of the repository or names a file that is not in it, or an unclosed value is an error (exit 1) naming the manifest and line, never a silent exclusion. The floor does not change: this says what it measures.
+
 ## Functions with no recorded line
 
 Report only: these lists change no number and raise no finding.
@@ -526,6 +531,7 @@ hits > 0), branch (only when the package has a branch record), mutants.
 | `ReachedTarget` | information, never counted (`info_findings`): a metric at or above `--target-bp` that the package does not hold; it says to add the metric to the package's `coverage_held`. Not for a test-only package |
 | `MutantSurvived` | a surviving mutant |
 | `UnmeasuredFile` | a source file of a measured package that no report names still has lines counted (see Files no test compiled) |
+| `UnrunProgram` | a file a package's `mopm.toml` names in `[targets] bins` is program source (left out of the numbers), and no test target runs the built program (see Program sources) |
 | `DeclarationOnlyFile` | information, never counted: a file no report names is declaration-only and counts no line (see Files no test compiled) |
 | `BranchUnmeasuredFile` | a file with a line record, in a package one of whose kept files a branch record file names, that no branch record file names and whose line report gives no branch record of its own: cov_branch_classify names every measured file its test holds code of (a decision-free one with no `BRDA`), so this file's branches were not read, and counting them as none would lift the package's branch number. A failure in enforce mode, listed in census mode, as `UnmeasuredFile` is |
 | `ExemptionWithoutReason`, `StaleExemption` | see Exemptions |
