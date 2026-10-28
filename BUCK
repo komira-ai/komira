@@ -94,6 +94,27 @@ zig_test(
     zig = "komira//tools/build/toolchains:zig_next",
 )
 
+# The cases of the macOS build of the release (.github/workflows/release_macos_test.zig says
+# what each catches): release.yml's job `release-macos` builds the macOS set on the farm and
+# holds up nothing, no workflow that runs on a pull request names a macOS platform, the check
+# set holds no macOS build, and the set's definition is one list. A build action.
+zig_test(
+    name = "release_macos_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = ".github/workflows/release_macos_test.zig",
+    data = dict(
+        {
+            "packages.bzl": "//release/readme_e2e:packages.bzl",
+            "darwin_libs.bzl": "//release:darwin_libs.bzl",
+            "release.BUCK": "//release:release_buck",
+            "ci_targets": "//ci:target_shards",
+        },
+        **{"workflows/" + w.removeprefix(".github/workflows/"): w for w in WORKFLOWS}
+    ),
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
 # The cases of the buck2-farm action (.github/actions/buck2-farm/action_test.zig
 # says what each catches): action.yml's shape, and its two run lines run
 # end to end over recorded buck2 output with the real //tools/build/ci:assert_remote.

@@ -17,6 +17,7 @@
 
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_test")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":darwin_libs.bzl", "DARWIN_PACKAGES", "mopm_darwin_libs")
 load(":mopm_artifacts.bzl", "mopm_artifacts")
 load(":release_set.bzl", "release_set")
 load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES")
@@ -206,5 +207,30 @@ zig_test(
     },
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)
+
+# The macOS arm64 build set (darwin_libs.bzl): the library of every mopm package that builds for
+# macOS, built with `--target-platforms komira//tools/build/platforms:darwin-arm64` by release.yml's
+# `release-macos` job on the farm's macOS workers, once per release run. It is in no pull request's
+# check: //ci:pr builds for the client's platform only, and the zig case
+# //:release_workflow_cases holds that no workflow that runs on a pull request names it or a
+# macOS platform.
+# The set's definition and this file, for the zig cases that hold the set to one list
+# (//:release_macos_cases).
+export_file(
+    name = "darwin_libs.bzl",
+    visibility = ["//:"],
+)
+
+export_file(
+    name = "release_buck",
+    src = "BUCK",
+    visibility = ["//:"],
+)
+
+mopm_darwin_libs(
+    name = "mopm_darwin_libs",
+    packages = DARWIN_PACKAGES,
     visibility = ["PUBLIC"],
 )

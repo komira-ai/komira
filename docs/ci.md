@@ -141,6 +141,7 @@ repository variables (Settings > Secrets and variables > Actions > Variables):
 | `FARM_ADDRESS` | the remote-execution service as a URL with its port |
 | `FARM_INSTANCE` | its instance name |
 | `FARM_LINUX_X86_64_PROPERTIES` | the worker property set of the linux x86_64 actions |
+| `FARM_DARWIN_ARM64_PROPERTIES`, `FARM_DARWIN_MACOS_HOSTS`, `FARM_MACOS_LIBRARY_DIRS` | the macOS arm64 worker property set, the host identities of those workers, and the directories a macOS test run searches for a library (the last is optional): the `darwin-properties`, `darwin-macos-hosts` and `macos-library-dirs` inputs, passed by the job `release-macos` of `release.yml` only |
 | `FARM_TLS` | `true` when the service serves REAPI over TLS; unset or empty means `false`. Each workflow passes it as farm-connect's `tls`, so the address and its transport change together |
 
 Variables are not masked, and a job's logs are public. The action masks the
@@ -316,6 +317,48 @@ from outside, each inner build on the farm. They are targets of the aggregate `/
 change (one under `tools/build/`, say) selects, and `pr.yml` runs the
 package's graph checks with their BXL script. The analysis-time refusals, where targets execute and the
 unconfigured query through the prelude's select moved there.
+
+## The macOS build of the release
+
+The macOS (darwin-arm64) build is a job of `release.yml`, `release-macos`, and
+no pull request builds it. The farm has hundreds of Linux cores and a few dozen
+Mac ones, so a macOS leg in the pull request check would queue every change
+behind the scarcest machines; the macOS platform is built once per release run
+instead.
+
+- **Not in a pull request.** `pr.yml` (and `coverage.yml`, the other workflow that
+  runs on a pull request) pass no macOS worker set to the farm connection and name
+  no darwin platform or runner, and `//ci:pr` is built for the client's own platform
+  only: none of the targets it reaches has a macOS execution platform. A
+  `cquery` of `attrregexfilter(exec_compatible_with, "macos", deps(//ci:pr))` is
+  empty, and the same query for `--target-platforms
+  komira//tools/build/platforms:darwin-arm64` over a library is not.
+  `//:release_macos_cases` holds the workflows and the shards of `ci/targets/` to it.
+- **On the farm's Macs, not a hosted runner.** The job runs on the same ubuntu
+  runner as the others and asks the farm: `farm-connect` with the macOS worker set
+  and hosts (the repository variables above), then
+  `build --target-platforms komira//tools/build/platforms:darwin-arm64 --keep-going //release:mopm_darwin_libs`
+  through the `buck2-farm` action, which fails the step if any action ran on the
+  runner. The compiles and the welded tests run on the macOS workers; the toolchain
+  unpack runs on a Linux worker of the same farm. A job without the macOS
+  variables fails its second step, naming the key, instead of building on the runner.
+- **One list.** `//release:mopm_darwin_libs` (`release/darwin_libs.bzl`) builds the
+  `:lib` of every package of `release/readme_e2e/packages.bzl` (every `src/<name>`
+  with a `mopm.toml`) except `DARWIN_EXCLUDED`, the packages whose closure holds
+  native code, which cannot build for macOS yet. A package moved to mopm joins the
+  macOS build with no second edit. The target is left out of `//ci:pr` on purpose
+  (`EXCLUDED` of `tools/build/ci/rules.bzl`).
+- **Priority, timing, bound.** `farm-qos: batch` like every job of the file; once per
+  run (a push to `main` or a manual run), in parallel with the Linux jobs; it `needs`
+  nothing and nothing `needs` it. `timeout-minutes: 90`: the release runs in one
+  concurrency group, so the next push waits for the whole run, and the bound keeps a
+  stalled macOS build from holding the next release for long.
+- **Reported, not blocking (for now).** The job is `continue-on-error: true`: a red macOS
+  build is a failed job in the run, with a line in its summary, and the run, the
+  prod publish and `main_red.yml` do not see it. The set has not yet been measured on
+  the macOS workers, and the publish must not wait on a platform the release does not
+  ship. When the set is green over several runs, remove the line and add the job to
+  the `needs` of `prod-commit`.
 
 ## release.yml: the release
 
