@@ -1,20 +1,21 @@
 # =============================================================================
-# ⭐ CD-SCAN (2026-09-25, cbq10 / cbq11) — THE DICTIONARY-KEY ENCODE: codes
-#   renumbered in FIRST-SEEN order, on ROW RANGES, with no string hashed per row
+# THE DICTIONARY-KEY ENCODE: codes renumbered in FIRST-SEEN order, on ROW
+#   RANGES, with no string hashed per row
 # =============================================================================
 #
-# Companion to `agg_count_distinct_parallel._execute_count_distinct_agg_
-# parallel`, whose DICTIONARY key arm this is. The grouped COUNT(DISTINCT)
-# resident-collect route now keeps a dictionary-encoded parquet string key as
-# CODES (`materialize_parquet_collect(preserve_dict=True)` + the unified-
-# dictionary concat in `komira_engine_runtime/concat_dict_unify.mojo`), so the
-# key reaches this driver as ONE `DICTIONARY` column instead of a dense
-# `STRING` column the scan had to build row by row (`_dict_to_string_array`)
-# and this driver then had to re-hash row by row (CDP-ROWDICT).
+# The dictionary-key arm of the grouped COUNT(DISTINCT) driver (the driver is
+# added by a later part). The grouped COUNT(DISTINCT) resident-collect route
+# keeps a dictionary-encoded parquet string key as CODES
+# (`materialize_parquet_collect(preserve_dict=True)` + the unified-dictionary
+# concat in `komira_engine_runtime/concat_dict_unify.mojo`), so the key reaches
+# the driver as ONE `DICTIONARY` column instead of a dense `STRING` column
+# built row by row (`_dict_to_string_array`) and re-hashed row by row by the
+# driver (`agg_cd_strenc_rowdict.mojo`).
 #
 # ★ THE NUMBERING IS THE CONTRACT. The dict ids this returns become the
 # driver's group ids, and the group ids ARE the emit order (and the Top-K tie
-# order). The STRING arms (serial Phase B, CDPPARB, CDP-ROWDICT) all number a
+# order). The STRING arms (serial Phase B, `agg_cd_strenc_parb.mojo`,
+# `agg_cd_strenc_rowdict.mojo`) all number a
 # value the FIRST time it is met in ROW order. This arm numbers the same way,
 # so a DICTIONARY key and the dense STRING form of the same rows produce the
 # SAME group ids, the same partition hashes, the same owners and therefore the
@@ -26,13 +27,13 @@
 #
 # HOW, in one paragraph. Task t owns rows [row_starts[t], row_starts[t+1]). It
 # walks its codes once and records, in order, each code the first time it
-# meets it (a `d_size`-byte seen table — cbq10's unified dictionary has a few
-# hundred entries, so it is L1-resident). The driver walks the tasks in order,
+# meets it (a `d_size`-byte seen table, L1-resident for a dictionary of a few
+# hundred entries). The driver walks the tasks in order,
 # and each task's list in order, and interns each code's dictionary BYTES into
 # a `DictInterner` the first time the code is met: the interner's ordinal is
 # the global first-seen rank of the STRING, i.e. the dict id. A parallel remap
 # writes `encoded[row] = gid_of_code[code[row]]`. The same (task, order) merge
-# argument as CDP-ROWDICT (`agg_cd_strenc_rowdict.mojo` header) makes it the
+# argument as the row-range string encode (`agg_cd_strenc_rowdict.mojo` header) makes it the
 # global first-seen order.
 #
 # The reverse map is the interner's arena: dict id g's bytes are
@@ -40,8 +41,7 @@
 # `key_rev_on_src` is False for this arm, as it always was).
 #
 # NULLS are read as their raw code, exactly as the arm this replaces did: the
-# resident-collect admission (`distinct_node_exec._build_grouped_cd_parallel_
-# sink_data`) only hands this driver null-free keys. A code outside
+# resident-collect admission only hands the driver null-free keys. A code outside
 # [0, d_size) is a corrupt column and RAISES a named error, never an
 # out-of-bounds read.
 #

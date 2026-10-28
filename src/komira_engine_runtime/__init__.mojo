@@ -4,7 +4,7 @@ Anything an operator or a sink consumes but does not implement lives here: the
 host profile a host lowers under (measured once), hardware and topology
 detection, morsel sizing as a pure function of the host profile and the
 segment, the dispatch-time fork grain, the run and segment execution context
-a driver reads, wake primitives, counters, and the small row and column helpers
+a driver reads, counters, and the small row and column helpers
 the operators share.
 
 Dependency direction: the core packages, `komira_async`, `komira_host`,

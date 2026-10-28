@@ -51,6 +51,9 @@ mojo_library(
         # oracle, key types, the 0-key identity row, the batch list, two
         # rehashes, a forced composite-hash collision and the null-key guard
         "tests/test_mixed_fold_values.mojo",
+        # COUNT(DISTINCT) over FLOAT64 and FLOAT32 counts every NaN once,
+        # whatever its sign or payload, over one batch and a batch list
+        "tests/test_mixed_fold_cd_nan_is_one_value.mojo",
     ],
     visibility = ["PUBLIC"],
 )

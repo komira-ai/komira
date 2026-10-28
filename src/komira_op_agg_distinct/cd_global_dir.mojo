@@ -7,21 +7,17 @@
 # space onto one global one. `map_worker` asks the key Dict ONCE per (worker,
 # group) cell and returns `wgid[g]`, the global gid of that worker's group `g`,
 # which every later consumer indexes (the directory, the fixed-cell merge and
-# each COUNT(DISTINCT) drain used to ask the Dict up to three times per cell).
-# `runs[gg]` counts the cells that map onto `gg`, so the drain sizes each
-# group's run list once instead of growing it by doubling. Measured: the
-# serial gap between the scan and the first radix fork went from 21.0 to
-# 15.0 ms per rep on a 44-state x 9,040-group query. A dense index over the
-# key span instead of the Dict measured no better (15.0 vs 15.8 ms): once it
-# is asked once per cell, the cell walk is the cost, not the Dict probe.
+# each COUNT(DISTINCT) drain index it, so the Dict is asked once per cell and
+# not once per consumer). `runs[gg]` counts the cells that map onto `gg`, so
+# the drain sizes each group's run list once instead of growing it by doubling.
 #
-# ★ BYTE-EQUIVALENCE BY CONSTRUCTION. A global gid is assigned `len(self.keys)`
+# A global gid is assigned `len(self.keys)`
 # at the moment its key is first seen, walking workers in the caller's order and
-# each worker's groups in gid order — the SAME first-seen order the old loop
-# used — so `keys` comes out identical INDEX FOR INDEX, and so does every row.
+# each worker's groups in gid order, so `keys` is in first-seen order.
 #
-# ★ THE NULL GROUP never enters the Dict (there is no Int64 that means NULL). It gets its gid at its first appearance, exactly as the old
-# loop placed it, and `null_gid` names it.
+# The NULL group never enters the Dict (there is no Int64 that means NULL). It
+# gets its gid at its first appearance, in the same first-seen order, and
+# `null_gid` names it.
 #
 # No pointers, no origins: `List` / `Dict` only.
 # =============================================================================

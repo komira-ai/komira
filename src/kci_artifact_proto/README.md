@@ -84,6 +84,11 @@ Reading a file back gives the same message, on either wire: decoding then
 encoding again reproduces the bytes exactly. A message field that the file
 sets (here `affected`) is present after the round trip:
 
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_false, assert_true
+from kci_artifact_proto.artifact import Artifacts
+from komira_proto_codec import decode_json, decode_proto, encode_json, encode_proto
+-->
 ```mojo
 var text = String(
     '{"buildSystems":[{"name":"buck2","executable":"./buck2",'
@@ -108,6 +113,11 @@ no declared field. On the JSON side, a key that is not a field is refused,
 so a file still carrying `allowedChannels` fails to read rather than being
 silently half-applied:
 
+<!-- mojo-hidden
+from std.testing import assert_equal, assert_true
+from kci_artifact_proto.artifact import Artifact
+from komira_proto_codec import decode_json, decode_proto
+-->
 ```mojo
 # name = "n" (field 1), a field-2 string "z", build_system = "b" (field 3).
 var old = List[UInt8]()

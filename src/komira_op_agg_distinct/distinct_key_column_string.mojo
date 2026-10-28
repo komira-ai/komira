@@ -240,6 +240,12 @@ struct DistinctKeyColumn_String[col: Int](DistinctKeyColumn):
         return self._hash_bytes_of[bo](state, batch, Self.col, row)
 
     @always_inline
+    def row_is_null[bo: Origin[mut=False]](
+        self, batch: BatchView[bo], row: Int
+    ) -> Bool:
+        return batch.col_is_null(Self.col, row)
+
+    @always_inline
     def equals_row[bo: Origin[mut=False]](
         self, stored_idx: Int, batch: BatchView[bo], row: Int
     ) -> Bool:
@@ -251,7 +257,7 @@ struct DistinctKeyColumn_String[col: Int](DistinctKeyColumn):
     ):
         self._append_bytes_from[bo](batch, Self.col, row)
 
-    # --- BAND reads —
+    # --- BAND reads:
     #     BAND-read siblings. The byte-identity ANCHOR (§3.3a / §4.3): fold /
     #     compare / store a RESOLVED dict-entry ByteView with the SAME FNV-1a
     #     combinator (`_distinct_fnv1a_bytes_step`) + the SAME byte SoA the batch

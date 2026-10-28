@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/native:shared.bzl", "native_shared_library")
 
 # The metrics model: the per-operator MetricsSet, attribute-set interning, the
 # per-worker series and histogram tables with their export sweep, and the
@@ -24,6 +25,8 @@ cxx_library(
 
 mojo_library(
     name = "komira_metrics",
+    # Its C ships in its package as komira_metrics_native below (lib/libkomira_metrics_native.so.1).
+    native = ":komira_metrics_native",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         ":komira_metrics_ea_flag",
@@ -36,6 +39,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_explain_analyze.mojo",
+        "tests/test_explain_analyze_collect.mojo",
         "tests/test_explain_analyze_disarmed_cost.mojo",
         "tests/test_histogram.mojo",
         "tests/test_metric_point_and_attr_set.mojo",
@@ -45,6 +49,28 @@ mojo_library(
         "tests/test_metrics_set_owned_factory_dirty_slot.mojo",
         "tests/test_metrics_set_unregistered_lookup_quarantine.mojo",
         "tests/test_series_table.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# libkomira_metrics_native.so.1: the C this library owns, as its own
+# shared library exporting the names its callers call
+# (tools/build/native/README.md, "Each library's shared library"). Built and
+# checked here, and packed into the library's conda package (`native`).
+native_shared_library(
+    name = "komira_metrics_native",
+    archives = [
+        ":komira_metrics_ea_flag",
+    ],
+    callers = [
+        ":komira_metrics",
+    ],
+    library = "komira_metrics",
+    # Every weak undefined symbol of the library, recorded from its first
+    # green link (checks 3 and 7 hold it to exactly this list):
+    weak_undefined = [
+        # zig's C runtime (crti.o): the profiling hook, absent unless -pg.
+        "__gmon_start__",
     ],
     visibility = ["PUBLIC"],
 )

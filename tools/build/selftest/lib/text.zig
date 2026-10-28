@@ -51,10 +51,10 @@ pub fn eqlLists(x: []const []const u8, y: []const []const u8) bool {
 
 /// The non-empty lines of `s`, trailing `\r` kept (nothing here writes one).
 pub fn lines(a: std.mem.Allocator, s: []const u8) ![][]const u8 {
-    var out = std.ArrayList([]const u8).init(a);
+    var out = std.ArrayList([]const u8).empty;
     var it = std.mem.splitScalar(u8, s, '\n');
-    while (it.next()) |l| if (l.len > 0) try out.append(l);
-    return out.toOwnedSlice();
+    while (it.next()) |l| if (l.len > 0) try out.append(a, l);
+    return out.toOwnedSlice(a);
 }
 
 /// `items` joined with `sep`.

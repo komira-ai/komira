@@ -1,0 +1,154 @@
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+load("@komira//tools/build/rust:defs.bzl", "cargo_pkg_env", "rust_binary", "rust_library", "rust_test")
+
+# The greens of the Cargo-driven attributes of the Rust rules (env,
+# renamed_deps, native_deps, patch, proc_macro_extern); each has its planted
+# defect in ../../negative/rust_cargo. tools/build/tests/README.md, test 36.
+
+# The sources the planted defects in ../../negative/rust_cargo reuse: each
+# defect is one attribute away from its green here, over the same source.
+[
+    export_file(
+        name = "src/" + f + ".rs",
+        src = "src/" + f + ".rs",
+        visibility = ["tests//negative/rust_cargo:"],
+    )
+    for f in ["env_pkg", "renamed", "shared_one", "shared_two", "native", "native_test", "native_lib", "native_via_lib", "out_dir", "out_dir_main", "pm", "pm_main"]
+]
+
+# ---- env: the Cargo variables ------------------------------------------------
+
+rust_binary(
+    name = "env_pkg",
+    srcs = ["src/env_pkg.rs"],
+    crate_root = "src/env_pkg.rs",
+    env = {
+        "CARGO_PKG_NAME": "demo",
+        "CARGO_PKG_VERSION": "1.2.3",
+    },
+    expected_stdout = "demo 1.2.3\n",
+)
+
+# cargo_pkg_env, what `kpin cargo` writes for every crate: a pre-release and
+# build metadata version.
+rust_binary(
+    name = "pkg_env",
+    srcs = ["src/pkg_env.rs"],
+    crate_root = "src/pkg_env.rs",
+    env = cargo_pkg_env("my-crate", "1.2.3-alpha.1+b7", "my_lib"),
+    expected_stdout = "my-crate|1.2.3-alpha.1+b7|1|2|3|alpha.1|my_lib\n",
+)
+
+# ---- renamed_deps: two crates of one name ------------------------------------
+
+rust_library(
+    name = "shared_one",
+    srcs = ["src/shared_one.rs"],
+    crate_root = "src/shared_one.rs",
+    crate_name = "shared",
+)
+
+rust_library(
+    name = "shared_two",
+    srcs = ["src/shared_two.rs"],
+    crate_root = "src/shared_two.rs",
+    crate_name = "shared",
+)
+
+rust_binary(
+    name = "renamed",
+    srcs = ["src/renamed.rs"],
+    crate_root = "src/renamed.rs",
+    deps = [":shared_one"],
+    renamed_deps = {"shared_two": ":shared_two"},
+    expected_stdout = "1 2\n",
+)
+
+# ---- native_deps: a C archive in an executable and in a test -----------------
+
+staged_files(
+    name = "c_files",
+    srcs = ["c/add.c"],
+)
+
+cxx_library(
+    name = "c_add",
+    srcs = [":c_files[c/add.c]"],
+    visibility = ["PUBLIC"],
+)
+
+rust_binary(
+    name = "native",
+    srcs = ["src/native.rs"],
+    crate_root = "src/native.rs",
+    native_deps = [":c_add[static-pic]"],
+    expected_stdout = "42\n",
+)
+
+rust_test(
+    name = "native_test",
+    srcs = ["src/native_test.rs"],
+    crate_root = "src/native_test.rs",
+    native_deps = [":c_add[static-pic]"],
+)
+
+# The archive on a library: a binary that only depends on the library links it.
+rust_library(
+    name = "native_lib",
+    srcs = ["src/native_lib.rs"],
+    crate_root = "src/native_lib.rs",
+    native_deps = [":c_add[static-pic]"],
+)
+
+rust_binary(
+    name = "native_via_lib",
+    srcs = ["src/native_via_lib.rs"],
+    crate_root = "src/native_via_lib.rs",
+    deps = [":native_lib"],
+    expected_stdout = "7\n",
+)
+
+# ---- patch: the OUT_DIR include a build script feeds -------------------------
+
+rust_library(
+    name = "out_dir",
+    srcs = ["src/out_dir.rs"],
+    crate_root = "src/out_dir.rs",
+    patch = {
+        "sub": [{
+            "file": "src/out_dir.rs",
+            "from": "concat!(env!(\"OUT_DIR\"), \"/generated.rs\")",
+            "to": "\"generated.rs\"",
+        }],
+        "add": [{
+            "file": "src/generated.rs",
+            "content": "const GREETING: &str = \"hello\";\nconst LUCKY: u32 = 7;\n",
+        }],
+    },
+)
+
+rust_binary(
+    name = "out_dir_main",
+    srcs = ["src/out_dir_main.rs"],
+    crate_root = "src/out_dir_main.rs",
+    deps = [":out_dir"],
+    expected_stdout = "hello 7\n",
+)
+
+# ---- proc_macro_extern -------------------------------------------------------
+
+rust_library(
+    name = "pm",
+    srcs = ["src/pm.rs"],
+    crate_root = "src/pm.rs",
+    proc_macro = True,
+    proc_macro_extern = True,
+)
+
+rust_binary(
+    name = "pm_main",
+    srcs = ["src/pm_main.rs"],
+    crate_root = "src/pm_main.rs",
+    deps = [":pm"],
+    expected_stdout = "42\n",
+)

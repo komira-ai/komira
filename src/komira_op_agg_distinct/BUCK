@@ -7,8 +7,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # split, the group-table sizing rule, the string key emit, the radix-parallel
 # exact COUNT(DISTINCT) of Int64 buffers and of a STRING column, the
 # per-worker state of the streaming COUNT(DISTINCT) aggregation, its global
-# group directory and its MorselSink, the stage DISTINCT breaker state and
-# its run-time-typed sibling (`DistinctState_Untyped`), and
+# group directory and its MorselSink, the stage DISTINCT breaker state, and
 # the parallel per-group finalize of the stage MEDIAN drain. The grouped
 # COUNT(DISTINCT) driver is added by a later change.
 mojo_library(
@@ -24,7 +23,6 @@ mojo_library(
         "//src/komira_batch_eval:komira_batch_eval",
         "//src/komira_buffer:komira_buffer",
         "//src/komira_collections:komira_collections",
-        "//src/komira_column_format:komira_column_format",
         "//src/komira_column_kernels:komira_column_kernels",
         "//src/komira_counters:komira_counters",
         "//src/komira_dynamic_filter:komira_dynamic_filter",
@@ -32,7 +30,6 @@ mojo_library(
         "//src/komira_expr:komira_expr",
         "//src/komira_libc:komira_libc",
         "//src/komira_op_agg_state:komira_op_agg_state",
-        "//src/komira_op_join_build:komira_op_join_build",
         "//src/komira_operator_api:komira_operator_api",
         "//src/komira_physical_plan:komira_physical_plan",
         "//src/komira_plan_expr:komira_plan_expr",
@@ -60,11 +57,11 @@ mojo_library(
         "tests/test_cd_strenc_span_reverse_map.mojo",
         "tests/test_cd_string_parallel_byte_equiv.mojo",
         "tests/test_count_distinct_agg_sink.mojo",
+        "tests/test_count_distinct_agg_sink_filters.mojo",
         "tests/test_count_distinct_agg_sink_mixed.mojo",
-        "tests/test_distinct_hash_store_grow.mojo",
+        "tests/test_count_distinct_agg_sink_shapes.mojo",
+        "tests/test_count_distinct_agg_sink_types.mojo",
         "tests/test_distinct_state.mojo",
-        "tests/test_distinct_state_untyped.mojo",
-        "tests/test_distinct_state_untyped_key_types.mojo",
         "tests/test_median_parallel_drain.mojo",
         "tests/test_spill_distinct_state.mojo",
     ],

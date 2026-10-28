@@ -1,0 +1,23 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The pure-message half of the Arrow Flight service: the Flight protobuf
+# messages (descriptor, ticket, location, endpoint, info, data, put result), the
+# broker's own ticket payload, and the bridge between a RecordBatch and the
+# schema-first FlightData stream a Flight client reads (DoGet) and writes
+# (DoPut). The broker wiring is in komira_flight_server.
+
+mojo_library(
+    name = "komira_flight",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_op_sources:komira_op_sources",
+        "//src/komira_protobuf:komira_protobuf",
+    ],
+    test_srcs = [
+        "tests/test_flight_messages.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

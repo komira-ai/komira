@@ -17,7 +17,7 @@
 #   partitions (or a task double-counted), the sum would be INFLATED above the
 #   true distinct count. The `all_same` (N copies of ONE value -> must be 1, not
 #   N) and `heavy_dup` (each distinct repeated K times -> must be D, not D*K)
-#   cases are the falsifiers. A dropped partition or slice DEFLATES the count,
+#   cases are the checks for this. A dropped partition or slice DEFLATES the count,
 #   which the exact comparisons catch from the other side.
 #
 #   Both arms are driven through `CdRadixOptions`: the serial-scatter arm
@@ -129,7 +129,7 @@ def test_radix_distinct_all_unique() raises:
 def test_radix_distinct_all_same_no_inflation() raises:
     """N copies of ONE value -> count MUST be 1. A double-union bug (a value
     straddling two partitions, or a re-counted partition) would inflate this
-    toward N — the sharpest double-union falsifier."""
+    toward N — the strictest double-union check."""
     var vals = List[Int64](capacity=_N)
     for _ in range(_N):
         vals.append(Int64(42))
@@ -156,7 +156,7 @@ def test_radix_distinct_heavy_dup_no_inflation() raises:
 
 
 def test_radix_distinct_empty() raises:
-    """Empty buffer -> 0 (DuckDB COUNT(DISTINCT) of nothing is 0)."""
+    """Empty buffer -> 0 (COUNT(DISTINCT) of nothing is 0)."""
     var vals = List[Int64]()
     assert_equal(_parallel_count(vals), Int64(0))
 
@@ -170,7 +170,7 @@ def test_radix_distinct_empty() raises:
 # cases above MUST extend to the multi-buffer scatter: a value present in TWO
 # workers' buffers hashes identically → lands in ONE partition → is deduped ONCE
 # (NOT counted per-buffer). These overlapping-per-worker fixtures are the explicit
-# cross-buffer dedup falsifiers.
+# cross-buffer dedup checks.
 # =============================================================================
 
 
@@ -189,7 +189,7 @@ def test_multi_single_run_equals_single_buffer() raises:
 def test_multi_cross_buffer_value_counts_once() raises:
     """THE cross-buffer dedup heart: the SAME 40K distinct values placed in THREE
     separate per-worker buffers -> count MUST be 40K, NOT 120K. A per-buffer count
-    (no cross-buffer dedup) would inflate this 3x — the sharpest falsifier that the
+    (no cross-buffer dedup) would inflate this 3x — the strictest check that the
     concat-free scatter still dedups equal values across buffers."""
     comptime D = 40_000
     var runs = List[List[Int64]]()
@@ -238,7 +238,7 @@ def test_multi_partial_overlap_vs_serial() raises:
 
 def test_multi_all_same_across_buffers_no_inflation() raises:
     """Every one of several buffers is full of the SAME single value -> count MUST
-    be 1, not (n_buffers * copies). The multi-buffer double-union falsifier."""
+    be 1, not (n_buffers * copies). The multi-buffer double-union check."""
     var runs = List[List[Int64]]()
     for _w in range(5):
         var buf = List[Int64](capacity=_N)
@@ -313,8 +313,8 @@ def test_large_n_all_unique() raises:
 
 
 def test_large_n_all_same_no_inflation() raises:
-    """LARGE-n all-same (n=2.5M > 2M) -> count MUST be 1. The sharpest new-path
-    double-union falsifier: a value duplicated into two matrix partitions, or a
+    """LARGE-n all-same (n=2.5M > 2M) -> count MUST be 1. The strictest new-path
+    double-union check: a value duplicated into two matrix partitions, or a
     partition column counted twice, would inflate this toward n."""
     var vals = List[Int64](capacity=_NBIG)
     for _ in range(_NBIG):
@@ -353,12 +353,11 @@ def test_large_n_multi_disjoint_runs_sum() raises:
     assert_equal(_parallel_count_multi(runs), _cd_dedup_count_serial_multi(runs))
 
 # =============================================================================
-# LEVER CD-DIVFREE: the LEGACY arm's partition map.
+# The LEGACY arm's partition map.
 #
 # The serial scatter (64K <= n < `scatter_min`) maps a value to its partition
 # with `_cd_partition_divfree`, a multiply-shift, instead of
-# `_cd_mix_hash(v) % UInt64(nw)` (a 64-bit HARDWARE DIVISION, measured at 13.1
-# ns/value; still selectable with `CdRadixOptions.divfree = False`).
+# `_cd_mix_hash(v) % UInt64(nw)` (a 64-bit HARDWARE DIVISION; still selectable with `CdRadixOptions.divfree = False`).
 #
 # The map is a PURE FUNCTION and its two load-bearing properties are checkable
 # directly, which is what these guards do. Nothing else about it is observable:
@@ -497,7 +496,7 @@ def test_divfree_disjointness_survives_heavy_dup() raises:
 # below the exact one. The release has two call sites (`_CDDedupTask` on the
 # serial-scatter arm, `_CDDedupMultiTask` on the parallel-scatter arm), so each
 # arm has its own fixture, and the `freepar = False` control must stay green
-# under a mutant in the release path.
+# when the release path is wrong.
 
 
 def test_freepar_serial_scatter_arm_matches_serial_oracle() raises:
@@ -559,8 +558,8 @@ def test_freepar_parallel_arm_multi_run_cross_buffer() raises:
 
 
 def test_freepar_off_is_still_exact_on_both_arms() raises:
-    """THE CONTROL: the same fixtures with `freepar` off. A mutant in the
-    release path cannot reach these, so they must stay green under one."""
+    """THE CONTROL: the same fixtures with `freepar` off. The release path is
+    not exercised here, so these hold whether or not it is correct."""
     var vals = List[Int64](capacity=_NBIG)
     for i in range(_NBIG):
         vals.append(Int64(i % 1_250_000))

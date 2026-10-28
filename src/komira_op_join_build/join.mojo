@@ -19,13 +19,12 @@
 # column in word 2 (`komira_join_assembly.join_payload_inline`).
 #
 # SQL KEY SEMANTICS: a NULL key matches nothing. A NULL build key is recorded
-# (so a RIGHT/FULL join's unmatched-build sweep emits it) but never linked into
-# a bucket; a NULL probe key skips the walk.
+# but never linked into a bucket, so it matches nothing; a NULL probe key
+# skips the walk.
 #
-# The probe kernels live in their own modules (`join_probe_inner`,
-# `join_probe_inner_ps`, `join_probe_semi_anti`, `join_probe_outer`) as free
-# functions over a borrowed builder; the methods below forward to them, so a
-# caller writes `builder.probe_inner(keys)`.
+# The INNER probe kernels live in their own modules (`join_probe_inner`,
+# `join_probe_inner_ps`) as free functions over a borrowed builder; the
+# methods below forward to them, so a caller writes `builder.probe_inner(keys)`.
 # =============================================================================
 
 from komira_arrow.primitive_array import PrimitiveArray
@@ -42,18 +41,6 @@ from .join_probe_inner import (
     probe_inner as _probe_inner,
     probe_inner_chunk as _probe_inner_chunk_entry,
     probe_inner_into as _probe_inner_into_entry,
-)
-from .join_probe_outer import (
-    probe_full as _probe_full,
-    probe_left as _probe_left,
-    probe_left_into as _probe_left_into_entry,
-    probe_right as _probe_right,
-)
-from .join_probe_semi_anti import (
-    probe_anti as _probe_anti,
-    probe_anti_count as _probe_anti_count,
-    probe_semi as _probe_semi,
-    probe_semi_count as _probe_semi_count,
 )
 
 
@@ -188,7 +175,7 @@ struct HashJoinBuilder(Movable):
     # carrying both would double the build's write traffic and make the lever's
     # own A/B measure its instrumentation.
     var key_next: List[Int64]
-    # The build ROW COUNT, valid on BOTH layouts. ⚠ `len(self.build_keys)` was
+    # The build ROW COUNT, valid on BOTH layouts. WARNING: `len(self.build_keys)` was
     # this quantity at 14 sites and is NOT it under the fused layout, where that
     # list is empty. Read this field.
     var num_build: Int
@@ -202,18 +189,18 @@ struct HashJoinBuilder(Movable):
     # build-side column so the probe's existing chain touch yields it and the
     # per-output-row random gather out of that column is deleted outright.
     #
-    # ⚠ IMPLIES `_fused`. There is no payload layout over the split
+    # WARNING: IMPLIES `_fused`. There is no payload layout over the split
     # `build_keys` + `next_chain` pair: the whole mechanism is that the payload
     # shares a cache line with the key the walk has already loaded.
     #
-    # ⚠ THE PAD WORD IS THE LEVER, NOT WASTE. A 24 B entry holds exactly the
+    # WARNING: THE PAD WORD IS THE LEVER, NOT WASTE. A 24 B entry holds exactly the
     # same information and is 25% WORSE -- 2 of every 8 records then straddle a
     # 64 B line, so a quarter of the chain visits become two line touches. At 32 B the walk touches the SAME number of lines it does at
     # 16 B, so the extra 16 bytes are free. Table: `join_payload_inline`.
     var _pay_inline: Bool
     # Which BUILD-BATCH column `key_next[4i + 2]` is a copy of, or -1.
     #
-    # ⛔ IT IS CARRIED ON THE BUILDER ON PURPOSE. The consumers that must know
+    # NOTE: IT IS CARRIED ON THE BUILDER ON PURPOSE. The consumers that must know
     # (the probe operator's staged and deferred arms) already hold the builder,
     # so identifying the payload here reaches both without a new constructor
     # parameter -- and, more importantly, keeps "which column is inlined" in
@@ -269,7 +256,7 @@ struct HashJoinBuilder(Movable):
         self.num_build = n_rows
         self._bi_elided = bi_elided
         self._fused = fused
-        # ⚠ REFUSED, NOT CLAMPED. A payload layout over the split
+        # WARNING: REFUSED, NOT CLAMPED. A payload layout over the split
         # `build_keys` + `next_chain` pair would read `key_next` (which is
         # EMPTY there) at stride 4 and return garbage keys -- a wrong answer,
         # not a slow path. The constructor is the one place every producer
@@ -289,14 +276,13 @@ struct HashJoinBuilder(Movable):
     # -------------------------------------------------------------------------
     # LAYOUT-TOLERANT ACCESSORS
     #
-    # ⚠ THESE ARE FOR THE COLD CONSUMERS ONLY, AND DELIBERATELY SO. They carry a
+    # WARNING: THESE ARE FOR THE COLD CONSUMERS ONLY, AND DELIBERATELY SO. They carry a
     # RUNTIME branch on a field, which is correct everywhere and free nowhere; the
     # hot probe loops instead take a COMPTIME-specialised body (`_probe_*[fused,
     # nobi]`) so the default arm compiles to byte-for-byte the pre-lever loop and
     # the A/B is not measuring a branch this instrumentation added. Use an
-    # accessor where the site is already bounds-checked (`probe_right`,
-    # `probe_full`, `compiler_join_chunked`'s flatten pass); use the comptime
-    # body where the site hoists raw pointers.
+    # accessor where the site is already bounds-checked (`count_inner_matches`);
+    # use the comptime body where the site hoists raw pointers.
     # -------------------------------------------------------------------------
 
     @always_inline
@@ -314,7 +300,7 @@ struct HashJoinBuilder(Movable):
     def kn_stride(self) -> Int:
         """Words per fused chain entry: 2 shipped, 4 under payload-inline.
 
-        ⚠ EVERY READER OF `key_next` MUST MULTIPLY BY THIS AND NOT BY 2. A site
+        WARNING: EVERY READER OF `key_next` MUST MULTIPLY BY THIS AND NOT BY 2. A site
         that keeps the literal reads entry 2i where it meant entry i -- keys
         belonging to other rows and links into the middle of the array -- which
         surfaces as a join that silently loses and invents matches, not as a
@@ -340,7 +326,7 @@ struct HashJoinBuilder(Movable):
     def chain_pay_at(self, chain_idx: Int) raises -> Int64:
         """The INLINED build payload for chain entry `chain_idx`.
 
-        ⛔ ONLY MEANINGFUL UNDER `_pay_inline`, AND IT RAISES OTHERWISE. On the
+        NOTE: ONLY MEANINGFUL UNDER `_pay_inline`, AND IT RAISES OTHERWISE. On the
         shipped layout the word this would return is the NEXT ENTRY'S KEY -- a
         wrong answer of the right type, in a column the caller is about to
         emit. There is no plausible default here, so there is no default.
@@ -367,33 +353,32 @@ struct HashJoinBuilder(Movable):
     def uses_bloom(self) -> Bool:
         """Will a probe of this index consult the bloom filter?
 
-        ⭐ THIS IS BLOOML1'S "TOOK EFFECT" OBSERVABLE, AND IT IS STRUCTURAL
+        NOTE: THIS IS BLOOML1'S "TOOK EFFECT" OBSERVABLE, AND IT IS STRUCTURAL
         RATHER THAN A COUNTER ON PURPOSE. Declining a bloom is value-invariant,
         so no answer-comparing test can see the difference, and a counter can
         only say the predicate DECIDED — a build that notched the decline and
         then populated the filter anyway moves every counter correctly. This
         field is what the probe actually reads, so asserting it is the only
-        assertion a mutant of that shape cannot satisfy.
+        assertion that a build which skipped the decline cannot satisfy.
         """
         return self._use_bloom
 
     def _refuse_pay_inline(self, kernel: StaticString) raises:
         """Guard for a kernel that hoists `key_next` at the SHIPPED stride.
 
-        ⛔ NOT DEFENSIVE PROGRAMMING -- THE ALTERNATIVE TO A SILENT WRONG
-        ANSWER. NINE kernels hoist `key_next` onto a raw pointer and index it
+        NOTE: NOT DEFENSIVE PROGRAMMING -- THE ALTERNATIVE TO A SILENT WRONG
+        ANSWER. A kernel that hoists `key_next` onto a raw pointer indexes it
         `2 * chain_idx`. Exactly THREE were taught the wide stride -- the two
         chunked INNER probes and their shared row-at-a-time tail -- because
-        those are the ones the lever is FOR. The other SIX (`_probe_inner_into`,
-        `_probe_semi`, `_probe_semi_count`, `_probe_left_into`, `_probe_anti`,
-        `_probe_anti_count`) would read entry 2i where they meant entry i --
+        those are the ones the lever is FOR. Any other such kernel, such as
+        `_probe_inner_into`, would read entry 2i where it meant entry i --
         keys belonging to other rows, links into the middle of the array -- and
         produce a join result with a plausible row count and wrong contents.
 
-        ⚠ `count_inner_matches`, `probe_right` and `probe_full` are NOT in
-        either list and need no guard: they walk through `chain_key_at` /
-        `chain_next_at`, which are stride-aware, so they are already CORRECT
-        under the wide layout (merely not accelerated by it).
+        WARNING: `count_inner_matches` is NOT in either list and needs no guard: it
+        walks through `chain_key_at` / `chain_next_at`, which are
+        stride-aware, so it is already CORRECT under the wide layout (merely
+        not accelerated by it).
 
         Arming is confined to the INNER chunked path by the driver, so this
         cannot fire in production today. It is stated anyway because a runtime
@@ -447,8 +432,7 @@ struct HashJoinBuilder(Movable):
 
     # -------------------------------------------------------------------------
     # PROBES -- the kernels are free functions over a borrowed builder, in
-    # `join_probe_inner`, `join_probe_semi_anti` and `join_probe_outer`; these
-    # methods forward to them.
+    # `join_probe_inner`; these methods forward to them.
     # -------------------------------------------------------------------------
 
     def probe_inner_into(
@@ -500,55 +484,3 @@ struct HashJoinBuilder(Movable):
             self, probe_keys, state, build_buf, probe_buf, pay_buf,
             chunk_capacity,
         )
-
-    def probe_semi(
-        self, probe_keys: PrimitiveArray[DType.int64]
-    ) raises -> List[Int]:
-        """Probe rows with at least one match, each once."""
-        return _probe_semi(self, probe_keys)
-
-    def probe_semi_count(
-        self, probe_keys: PrimitiveArray[DType.int64]
-    ) raises -> Int:
-        """`len(probe_semi(probe_keys))` without the list."""
-        return _probe_semi_count(self, probe_keys)
-
-    def probe_anti(
-        self, probe_keys: PrimitiveArray[DType.int64]
-    ) raises -> List[Int]:
-        """Probe rows with no match (a NULL probe key has none)."""
-        return _probe_anti(self, probe_keys)
-
-    def probe_anti_count(
-        self, probe_keys: PrimitiveArray[DType.int64]
-    ) raises -> Int:
-        """`len(probe_anti(probe_keys))` without the list."""
-        return _probe_anti_count(self, probe_keys)
-
-    def probe_left_into(
-        self,
-        probe_keys: PrimitiveArray[DType.int64],
-        mut build_matches: List[Int],
-        mut probe_matches: List[Int],
-    ) raises:
-        """LEFT probe appending pairs, -1 for an unmatched probe row."""
-        _probe_left_into_entry(self, probe_keys, build_matches, probe_matches)
-
-    def probe_left(
-        self, probe_keys: PrimitiveArray[DType.int64]
-    ) raises -> Tuple[List[Int], List[Int]]:
-        """LEFT probe returning (build rows or -1, probe rows)."""
-        return _probe_left(self, probe_keys)
-
-    def probe_right(
-        self, probe_keys: PrimitiveArray[DType.int64]
-    ) raises -> Tuple[List[Int], List[Int]]:
-        """RIGHT probe: matches, then every unmatched build row with -1."""
-        return _probe_right(self, probe_keys)
-
-    def probe_full(
-        self, probe_keys: PrimitiveArray[DType.int64]
-    ) raises -> Tuple[List[Int], List[Int]]:
-        """FULL probe: matches, unmatched probe rows (-1 build), then
-        unmatched build rows (-1 probe)."""
-        return _probe_full(self, probe_keys)

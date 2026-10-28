@@ -1,9 +1,23 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
+load("@komira//tools/build/mojo:opt_level.bzl", "mojo_opt_level_check")
 
-# The tests of per-target optimization levels. tools/build/tests/functional/opt_level.sh
-# reads each target's compile command (buck2 aquery, analysis only) and
-# requires the level written above it; run_tests.sh requires bad_level to
-# fail analysis.
+# The tests of per-target optimization overrides (tools/build/mojo/opt_level.bzl).
+# `levels` reads the level each target's compiles put on the `mojo build`
+# command line (MojoOptLevelInfo) and fails analysis unless every row holds:
+# each override honoured against its rule's default. The defaults are
+# checked next to the examples (komira//tools/build/examples:opt_levels). A
+# level `mojo build` does not accept is refused at analysis
+# (tests//negative/opt_level:bad_level,
+# //tools/build/selftest:analysis_refusals_mojo).
+mojo_opt_level_check(
+    name = "levels",
+    rows = [
+        (":test_o3", "mojo_build_test", "3"),
+        (":lib_o3", "mojo_build_test", "3"),
+        (":bin_o1", "mojo_build", "1"),
+        (":bin_o1", "mojo_build_shared", "1"),
+    ],
+)
 
 # -O3: a test overriding the test default.
 mojo_test(

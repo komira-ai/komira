@@ -20,9 +20,9 @@
 #   * GROUP-ID RESOLUTION. When the observed key domain spans at most
 #     `_CD_DENSE_GID_DOMAIN_CAP` keys, the gid is read out of a flat window
 #     (`dense_idx[key - dense_lo]`, one subtract, one unsigned range test, one
-#     L1 load); otherwise through `group_map`, a `Dict[Int, Int]` (measured:
-#     the two Dict probes were 49% of the row loop's cycles on a 91-group
-#     query). The window is discovered from the keys themselves, so every
+#     L1 load); otherwise through `group_map`, a `Dict[Int, Int]` (the two Dict
+#     probes were the largest share of the row loop's cycles on a query with
+#     few groups). The window is discovered from the keys themselves, so every
 #     source and key channel is covered. A new key gets
 #     `gid = len(group_keys)` the moment it is first seen on BOTH paths, so
 #     `group_keys` is identical index for index whichever path ran.
@@ -41,25 +41,25 @@
 #     so the memo only repeats the Dict's answer. Witness: `stat_gid_lastkey`.
 #   * ADJACENT DEDUP. A value equal to its cell's LAST element is not appended
 #     (a distinct count does not change when a value already present is
-#     dropped; measured: 77.9% of the rows of a clustered 100M-row input).
+#     dropped; on a clustered input most rows are skipped this way).
 #     Witness: `stat_adj_skipped`; `stat_appends + stat_set_inserts +
 #     stat_adj_skipped` is the non-NULL value count.
 #   * SCAN-TIME DEDUP OF A CELL (off by default: `cd_scan_dedup_off`). A cell
 #     that has buffered `_CD_GROUPED_PROMOTE_MIN_VALUES` values (the size at
 #     which its buffer equals the directory floor of the sets replacing it)
 #     and whose prefix is at most 3/4 distinct is PROMOTED into
-#     `_CD_VALUE_NUM_PARTITIONS` dedup-on-insert hash sets. It measured slower
-#     than appending (+18.6% on a 91-group, 100M-row query: the set probes are
-#     random DRAM loads), so it is kept, value-correct, behind the field.
+#     `_CD_VALUE_NUM_PARTITIONS` dedup-on-insert hash sets. It is slower
+#     than appending on a query with few groups and many rows (the set probes
+#     are random memory loads), so it is kept, value-correct, behind the field.
 #     Witnesses: `stat_appends` and `stat_set_inserts` (they partition the
 #     appended-or-inserted values).
 #   * THE FIXED-CELL PASSENGER LANE. A grouped aggregate that mixes
 #     COUNT(DISTINCT) with SUM / COUNT / MIN / MAX / AVG folds those fixed
 #     aggregates against the gid the CD lane already resolved, in the same row
-#     iteration, so the group key is decoded and hashed once (measured: a
-#     second scan was 20% of the column-chunk decodes). `consume_batch` takes
+#     iteration, so the group key is decoded and hashed once (a second
+#     scan would repeat the column-chunk decodes). `consume_batch` takes
 #     `comptime has_fixed`; the all-CD instantiation contains no passenger
-#     code at all (one that skipped the lane at run time measured +4.32%).
+#     code at all (one that skipped the lane at run time is slower).
 #     With `fxcol_on` (the default) the lane folds column-major per batch.
 #     Witnesses: `stat_batches` and `stat_fx_batches`.
 #
@@ -197,7 +197,7 @@ struct WorkerCDState(Copyable, Movable):
     append-only `List[Int64]` (`cd_bufs`) — that is the DEFAULT and the
     shipped path.
 
-    With `cd_scan_dedup_off = False` (off by default; it measured slower): a
+    With `cd_scan_dedup_off = False` (off by default; it is slower): a
     cell that has buffered `_CD_GROUPED_PROMOTE_MIN_VALUES` values AND whose
     prefix is shown to repeat is PROMOTED into `_CD_VALUE_NUM_PARTITIONS`
     dedup-on-scan `GrowableHashSetI64` sets (`cd_gsets`). `cd_gmode`
@@ -279,8 +279,8 @@ struct WorkerCDState(Copyable, Movable):
     var cd_sets: List[List[GrowableHashSetI64]]
     var num_aggs: Int
     # When True (the default) the grouped path never promotes a cell: every
-    # value is appended. False arms the scan-time dedup, which measured slower
-    # (+18.6% on a 91-group query); see the module header.
+    # value is appended. False arms the scan-time dedup, which is slower
+    # on a query with few groups; see the module header.
     var cd_scan_dedup_off: Bool
     # Structural counters (grouped path). Exact, not sampled, and they
     # PARTITION the input: `stat_appends + stat_set_inserts` is the row count
@@ -323,7 +323,7 @@ struct WorkerCDState(Copyable, Movable):
     # the SAME gid the CD lane resolved, which is the whole point.
     #
     # ⚠ EMPTY ON EVERY ALL-COUNT(DISTINCT) QUERY — and that alone did NOT make
-    # the lane free (see the MIXEDFUSE header: cb13 +4.32%). What makes it free
+    # the lane free (see the MIXEDFUSE header: +4.32% on an all-COUNT(DISTINCT) query). What makes it free
     # is that the all-CD route runs the `has_fixed=False` instantiation, which
     # never names these fields at all.
     var fx_func: List[UInt8]
@@ -603,16 +603,17 @@ struct WorkerCDState(Copyable, Movable):
         The `_CD_DENSE_GID_MAX_GID` guard can only fire if the freeze invariant
         above is ever broken — before the freeze the only groups that exist come
         from this method (at most `_CD_DENSE_GID_DOMAIN_CAP` of them) and from
-        the single NULL group. It is here so that argument is enforced rather
-        than merely written down: rather than truncate a gid into `Int32`, fall
-        back to the Dict.
+        the single NULL group, so it is unreachable today. It is here so that
+        argument is enforced rather than merely written down: rather than
+        truncate a gid into `Int32`, or hand the same in-window key a second
+        gid, it raises.
         """
         var gid = self._append_group[has_fixed](key, False)
         if gid >= _CD_DENSE_GID_MAX_GID:
-            self.dense_frozen = True
-            self.group_map[key] = gid
-            self.stat_gid_dict += 1
-            return gid
+            raise Error(
+                "WorkerCDState: the dense group id space is exhausted; the"
+                " freeze invariant was broken."
+            )
         self.dense_idx[slot] = Int32(gid + 1)
         # Widen the OCCUPIED range. A key first seen through the HOT path is
         # inside the window but can still be outside `[key_lo, key_hi]`, and the
@@ -635,7 +636,7 @@ struct WorkerCDState(Copyable, Movable):
 
         ⭐ Instantiates `has_fixed=False`: the passenger lane is compiled OUT,
         not skipped. The first MIXEDFUSE landing forwarded an EMPTY fixed list
-        into the fused body instead and cost cb13 +4.32% (see the MIXEDFUSE
+        into the fused body instead and cost +4.32% on an all-COUNT(DISTINCT) query (see the MIXEDFUSE
         header). An ARMED state (`num_fixed > 0`) is REFUSED rather than fed
         through an instantiation that cannot fold its fixed cells."""
         var no_fixed = List[Int]()
@@ -808,8 +809,8 @@ struct WorkerCDState(Copyable, Movable):
         # So each lane is classified ONCE per batch and a lane that is not
         # int64-storage gets its per-row Int64 DISTINCT KEY materialised at its
         # OWN width (`cd_distinct_keys_for_column`, offset-aware). The
-        # `CDK_RAW_I64` lane keeps the pointer read byte for byte — cb04/cb05/
-        # cb13 are int64 aggregands and must not pay for this.
+        # `CDK_RAW_I64` lane keeps the pointer read byte for byte — all-int64
+        # aggregands must not pay for this.
         #
         # An UNSUPPORTED type never reaches here: `cd_value_type_supported`
         # gates both detectors that build this sink's `AggSinkData`. If one ever

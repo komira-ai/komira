@@ -6,7 +6,9 @@
 # The same pattern as the s2n TLS bindings in `komira_http`:
 # a module of thin `external_call["<symbol>", RetType](args)` wrappers over the
 # `libsqlite3` C API, each typing the C args + return for the Mojo type
-# checker. Bodies do NOTHING other than the external_call.
+# checker. Bodies do NOTHING other than the external_call. The library is
+# built with every global symbol renamed komira_sqlite3_* (//third_party/sqlite),
+# so `sqlite3_open_v2` below calls `komira_sqlite3_open_v2`.
 #
 # sqlite's public API is entirely NON-variadic (`sqlite3_open_v2`,
 # `sqlite3_prepare_v2`, `sqlite3_bind_*`, `sqlite3_column_*`, ...), so a direct
@@ -159,7 +161,7 @@ def sqlite3_open_v2(
     # alive across this call by the SqliteDatabase ctor. `pp_db` is a
     # caller-owned one-slot buffer that receives the opaque handle. No pointer
     # is retained by sqlite past the populated handle. FFI carve-out.
-    return external_call["sqlite3_open_v2", Int32](
+    return external_call["komira_sqlite3_open_v2", Int32](
         filename, pp_db, flags, z_vfs
     )
 
@@ -173,7 +175,7 @@ def sqlite3_close_v2(db: SqliteHandle) -> Int32:
     # SAFETY: caller (SqliteDatabase.__del__) ensures exactly-one close per
     # handle; a null-sentinel guard prevents a double-close on moved-from
     # drivers.
-    return external_call["sqlite3_close_v2", Int32](db)
+    return external_call["komira_sqlite3_close_v2", Int32](db)
 
 
 def sqlite3_errmsg(db: SqliteHandle) -> _FfiByte:
@@ -185,7 +187,7 @@ def sqlite3_errmsg(db: SqliteHandle) -> _FfiByte:
     # SAFETY: returns a sqlite-owned const char*; the caller copies it into a
     # Mojo String immediately (does not retain the pointer).
     return external_call[
-        "sqlite3_errmsg", _FfiByte
+        "komira_sqlite3_errmsg", _FfiByte
     ](db)
 
 
@@ -205,7 +207,7 @@ def sqlite3_busy_timeout(db: SqliteHandle, ms: Int32) -> Int32:
     """
     # SAFETY: scalar-args, scalar-return, opaque-handle-arg. No pointer crosses
     # any boundary; sqlite retains nothing.
-    return external_call["sqlite3_busy_timeout", Int32](db, ms)
+    return external_call["komira_sqlite3_busy_timeout", Int32](db, ms)
 
 
 def sqlite3_extended_errcode(db: SqliteHandle) -> Int32:
@@ -222,7 +224,7 @@ def sqlite3_extended_errcode(db: SqliteHandle) -> Int32:
     Maps to `int sqlite3_extended_errcode(sqlite3*)`.
     """
     # SAFETY: scalar-return, opaque-handle-arg. No pointer crosses any boundary.
-    return external_call["sqlite3_extended_errcode", Int32](db)
+    return external_call["komira_sqlite3_extended_errcode", Int32](db)
 
 
 def sqlite3_changes(db: SqliteHandle) -> Int32:
@@ -232,7 +234,7 @@ def sqlite3_changes(db: SqliteHandle) -> Int32:
     Maps to `int sqlite3_changes(sqlite3*)`.
     """
     # SAFETY: scalar-return, opaque-handle-arg. No pointer crosses any boundary.
-    return external_call["sqlite3_changes", Int32](db)
+    return external_call["komira_sqlite3_changes", Int32](db)
 
 
 # =============================================================================
@@ -259,7 +261,7 @@ def sqlite3_prepare_v2(
     # call. `pp_stmt` is a caller-owned one-slot buffer receiving the opaque
     # statement handle. `pz_tail` is a caller-owned slot (or null). FFI
     # carve-out.
-    return external_call["sqlite3_prepare_v2", Int32](
+    return external_call["komira_sqlite3_prepare_v2", Int32](
         db, z_sql, n_byte, pp_stmt, pz_tail
     )
 
@@ -271,7 +273,7 @@ def sqlite3_step(stmt: SqliteHandle) -> Int32:
     Maps to `int sqlite3_step(sqlite3_stmt*)`.
     """
     # SAFETY: opaque-handle-arg, scalar-return.
-    return external_call["sqlite3_step", Int32](stmt)
+    return external_call["komira_sqlite3_step", Int32](stmt)
 
 
 def sqlite3_reset(stmt: SqliteHandle) -> Int32:
@@ -280,7 +282,7 @@ def sqlite3_reset(stmt: SqliteHandle) -> Int32:
     Maps to `int sqlite3_reset(sqlite3_stmt*)`.
     """
     # SAFETY: opaque-handle-arg, scalar-return.
-    return external_call["sqlite3_reset", Int32](stmt)
+    return external_call["komira_sqlite3_reset", Int32](stmt)
 
 
 def sqlite3_finalize(stmt: SqliteHandle) -> Int32:
@@ -290,7 +292,7 @@ def sqlite3_finalize(stmt: SqliteHandle) -> Int32:
     """
     # SAFETY: caller (the driver's prepare/step/finalize scope) ensures
     # exactly-one finalize per statement.
-    return external_call["sqlite3_finalize", Int32](stmt)
+    return external_call["komira_sqlite3_finalize", Int32](stmt)
 
 
 # =============================================================================
@@ -301,13 +303,13 @@ def sqlite3_finalize(stmt: SqliteHandle) -> Int32:
 def sqlite3_bind_int64(stmt: SqliteHandle, idx: Int32, v: Int64) -> Int32:
     """Bind an INTEGER parameter (INT8 / TIMESTAMPTZ µs)."""
     # SAFETY: by-value scalar bind; no pointer crosses any boundary.
-    return external_call["sqlite3_bind_int64", Int32](stmt, idx, v)
+    return external_call["komira_sqlite3_bind_int64", Int32](stmt, idx, v)
 
 
 def sqlite3_bind_int(stmt: SqliteHandle, idx: Int32, v: Int32) -> Int32:
     """Bind an INTEGER parameter (INT4)."""
     # SAFETY: by-value scalar bind.
-    return external_call["sqlite3_bind_int", Int32](stmt, idx, v)
+    return external_call["komira_sqlite3_bind_int", Int32](stmt, idx, v)
 
 
 def sqlite3_bind_text(
@@ -323,7 +325,7 @@ def sqlite3_bind_text(
     """
     # SAFETY: `text` is a caller-owned buffer alive across the call; sqlite
     # copies the bytes (SQLITE_TRANSIENT) so no Mojo buffer is retained.
-    return external_call["sqlite3_bind_text", Int32](
+    return external_call["komira_sqlite3_bind_text", Int32](
         stmt, idx, text, n, destructor
     )
 
@@ -339,7 +341,7 @@ def sqlite3_bind_blob(
     length; `destructor` is the SQLITE_TRANSIENT sentinel (sqlite copies)."""
     # SAFETY: `blob` is a caller-owned buffer alive across the call; sqlite
     # copies the bytes (SQLITE_TRANSIENT).
-    return external_call["sqlite3_bind_blob", Int32](
+    return external_call["komira_sqlite3_bind_blob", Int32](
         stmt, idx, blob, n, destructor
     )
 
@@ -347,7 +349,7 @@ def sqlite3_bind_blob(
 def sqlite3_bind_null(stmt: SqliteHandle, idx: Int32) -> Int32:
     """Bind a NULL parameter (typed NULL)."""
     # SAFETY: index-only bind; no pointer crosses any boundary.
-    return external_call["sqlite3_bind_null", Int32](stmt, idx)
+    return external_call["komira_sqlite3_bind_null", Int32](stmt, idx)
 
 
 # =============================================================================
@@ -358,20 +360,20 @@ def sqlite3_bind_null(stmt: SqliteHandle, idx: Int32) -> Int32:
 def sqlite3_column_count(stmt: SqliteHandle) -> Int32:
     """The number of columns in the current result row."""
     # SAFETY: opaque-handle-arg, scalar-return.
-    return external_call["sqlite3_column_count", Int32](stmt)
+    return external_call["komira_sqlite3_column_count", Int32](stmt)
 
 
 def sqlite3_column_type(stmt: SqliteHandle, col: Int32) -> Int32:
     """The fundamental datatype of result column `col` (SQLITE_INTEGER / FLOAT /
     TEXT / BLOB / NULL)."""
     # SAFETY: opaque-handle-arg + index, scalar-return.
-    return external_call["sqlite3_column_type", Int32](stmt, col)
+    return external_call["komira_sqlite3_column_type", Int32](stmt, col)
 
 
 def sqlite3_column_int64(stmt: SqliteHandle, col: Int32) -> Int64:
     """Read result column `col` as a 64-bit integer (INT8 / TIMESTAMPTZ µs)."""
     # SAFETY: opaque-handle-arg + index, scalar-return.
-    return external_call["sqlite3_column_int64", Int64](stmt, col)
+    return external_call["komira_sqlite3_column_int64", Int64](stmt, col)
 
 
 def sqlite3_column_bytes(stmt: SqliteHandle, col: Int32) -> Int32:
@@ -379,7 +381,7 @@ def sqlite3_column_bytes(stmt: SqliteHandle, col: Int32) -> Int32:
     in tandem with the matching `_text` / `_blob` pointer (sqlite's type-
     conversion contract: call the value accessor, then `_bytes`)."""
     # SAFETY: opaque-handle-arg + index, scalar-return.
-    return external_call["sqlite3_column_bytes", Int32](stmt, col)
+    return external_call["komira_sqlite3_column_bytes", Int32](stmt, col)
 
 
 def sqlite3_column_text(
@@ -392,7 +394,7 @@ def sqlite3_column_text(
     # `_bytes`-many bytes into a Mojo List[UInt8] immediately and never retains
     # the pointer past the column read.
     return external_call[
-        "sqlite3_column_text", _FfiByte
+        "komira_sqlite3_column_text", _FfiByte
     ](stmt, col)
 
 
@@ -406,7 +408,7 @@ def sqlite3_column_blob(
     # `_bytes`-many bytes into a Mojo List[UInt8] immediately and never retains
     # the pointer past the column read.
     return external_call[
-        "sqlite3_column_blob", _FfiByte
+        "komira_sqlite3_column_blob", _FfiByte
     ](stmt, col)
 
 
@@ -418,5 +420,5 @@ def sqlite3_column_name(
     # SAFETY: returns a sqlite-owned NUL-terminated const char*; the driver
     # copies it into a Mojo String and does not retain the pointer.
     return external_call[
-        "sqlite3_column_name", _FfiByte
+        "komira_sqlite3_column_name", _FfiByte
     ](stmt, col)

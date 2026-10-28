@@ -25,6 +25,7 @@ from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
 from komira_http_core.transport.io_stream import (
     Connector,
+    NoDialAddress,
     IoStream,
     NEGOTIATED_HTTP_1_1,
     StreamIo,
@@ -154,11 +155,14 @@ struct ExchangeStream[H: HttpExchange](IoStream, Movable, Deinitable):
         return Int32(-1)
 
 
-struct ExchangeConnector[H: HttpExchange](Connector, Movable, Deinitable):
+struct ExchangeConnector[H: HttpExchange](
+    Connector, NoDialAddress, Movable, Deinitable
+):
     """A connector whose every connection is answered by the shared handler
     `H`. `is_tls` is claimed (the generated clients send https) without any
     TLS; `refuse_every_dial` makes every connect raise instead (a transport
-    that answers nothing)."""
+    that answers nothing). It never reads the dial address (`NoDialAddress`),
+    so a client over it looks up no name."""
 
     comptime Stream = ExchangeStream[Self.H]
 
@@ -201,6 +205,9 @@ struct ExchangeConnector[H: HttpExchange](Connector, Movable, Deinitable):
         return TRANSPORT_KIND_KERNEL_TCP
 
     def is_tls(self) -> Bool:
+        return True
+
+    def ignores_dial_address(self) -> Bool:
         return True
 
     def set_dial_host(mut self, var host: String):

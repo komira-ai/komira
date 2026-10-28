@@ -7,7 +7,7 @@
 # for the target architecture (e.g., AVX-512, ARM NEON).
 # =============================================================================
 
-from std.sys import simd_width_of, num_physical_cores
+from std.sys import simd_width_of
 
 
 # SIMD lane counts per data type -- compile-time constants.
@@ -19,9 +19,6 @@ comptime SIMD_WIDTH_I16 = simd_width_of[DType.int16]()
 comptime SIMD_WIDTH_I8 = simd_width_of[DType.int8]()
 comptime SIMD_WIDTH_U8 = simd_width_of[DType.uint8]()
 comptime SIMD_WIDTH_U64 = simd_width_of[DType.uint64]()
-
-# CPU topology.
-comptime NUM_CORES = num_physical_cores()
 
 # Memory hierarchy constants.
 comptime CACHE_LINE_BYTES = 64  # ARM and x86-64

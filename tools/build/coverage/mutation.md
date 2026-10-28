@@ -103,18 +103,18 @@ fails, naming the step and its output) unless every baseline step is
 `ok`: a harness that fails every test, such as a wrong runner argument or
 environment, would otherwise count every mutant killed and score 100%.
 
-Each step runs through `mutate/mut_step.sh`, in a session of its own. It
+Each step runs through [`gate step`](../run/README.md), in a session of its own. It
 records `ok`, `fail <status>`, `timeout <secs>` (the step was still running
 at its limit; its whole process group was killed) or `skipped` (a step it
 waits for was not `ok`), then the last lines of the output, and exits 0:
 that is the mutant's result, cached as any action's output. One exception:
 a compile that exits with a status of the compile wrapper's own
-(`mojo_wrapper.sh`: 2, 3 and 4, its refusals; 124, the watchdog; 129, 130
+(`mojo_compile`: 2, 3 and 4, its refusals; 124, the watchdog; 129, 130
 and 143, a signal) fails the action. That is the machine failing, not the
 mutant, so it is never cached as a result: the build fails and a rerun
 retries it. A file the step writes that is no output (the runner's PASS
 marker, the log) goes to buck2's scratch directory for the action.
-`mut_step_cases` (`mut_step_cases.sh`) holds each of these outcomes. A README's examples are not run against
+The gate's unit tests ([`step_test.zig`](../run/step_test.zig)) hold each of these outcomes. A README's examples are not run against
 a mutant. `mutation_score` (`mutate score`) reads every status and decides,
 first rule that holds:
 

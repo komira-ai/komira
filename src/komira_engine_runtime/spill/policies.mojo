@@ -1,74 +1,47 @@
 # =============================================================================
-# policies.mojo — ArbitratorPolicy enum for SpillArbitrator.
+# policies.mojo: the victim-pick policy and the pressure predicate shared by
+# the spill arbitrators.
 # =============================================================================
 #
-# The SpillArbitrator's victim-pick rule lives here as a small enum-shaped
-# value type. v0.4 P-1.C ships the canonical default `OLDEST_FIRST`. Two
-# additional values are reserved (`LARGEST_FIRST`, `PROPORTIONAL_RESERVATION`)
-# but their dispatch arms in `SpillArbitrator.pressure_check_and_arbitrate`
-# raise "policy not yet implemented" — they're declared here so future v0.5+
-# work can flip them on without churning every callsite that names the policy.
+# `ArbitratorPolicy` is a small value type wrapping one `UInt8` tag. Only
+# `OLDEST_FIRST` is implemented: the arbitrators raise when asked to run
+# `LARGEST_FIRST` or `PROPORTIONAL_RESERVATION`. The two are named so a caller
+# can pass them through and the arbitrator is the one place that refuses them.
+# The default-constructed policy is `OLDEST_FIRST` (tag 0).
 #
-# # Why not a Mojo trait
-#
-# A trait-shaped Policy (e.g. `trait SpillPolicyTrait` with a `pick_victim`
-# method) would let third-party callers plug in custom policies. But:
-#
-#   1. v0.4's three reserved policies span the relevant design space
-#      already (oldest-first, largest-first, fair-share).
-#   2. Adding a trait introduces a `*Ops`-pack to `SpillPolicyTrait.pick_victim`
-#      — heterogeneous-pack lifetimes leak into a new layer.
-#   3. The arbitrator's hot path (per-arbitrate-pass) compares ALL ops; a
-#      trait-method call per comparison would obscure the simple value-typed
-#      enum dispatch.
-#
-# Keeping `ArbitratorPolicy` as a flat-int newtype lets the arbitrator
-# `if self._policy == ArbitratorPolicy.OLDEST_FIRST: ...` branch comptime-
-# fold under inlining and gives future v0.5+ work a single grep point.
-#
-# # Encapsulation rule
-#
-# - Pure value type; NO `UnsafePointer`; NO wildcard origins; no fields
-#   that own heap.
+# `exceeds_budget` is the pressure test both arbitrators apply. It is written
+# as `grow > budget - current`, so a huge `grow_bytes` cannot wrap the way
+# `current + grow` would.
 # =============================================================================
 
 
-# =============================================================================
-# ArbitratorPolicy newtype
-# =============================================================================
-#
-# Implemented as a struct wrapping a single `UInt8` discriminator (vs a Mojo
-# `@value`-decorated enum) for two reasons:
-#   1. Stable wire-shape: future versions of this enum will land additional
-#      cases without breaking the layout (the `_value` field is the source of
-#      truth; all comparators dispatch through it).
-#   2. Explicit factory constructors (`.oldest_first()`, etc.) document
-#      intent at call sites better than a bare enum-member token.
+def exceeds_budget(
+    current_bytes: Int64, grow_bytes: Int64, budget_bytes: Int64
+) -> Bool:
+    """True when growing by `grow_bytes` on top of `current_bytes` resident
+    bytes would pass `budget_bytes`.
+
+    The test is strict: a request that exactly fills the budget is not over
+    it. A negative `grow_bytes` counts as 0, so it signals pressure only when
+    `current_bytes` is already over the budget. `current_bytes` and
+    `budget_bytes` are non-negative byte counts, so `budget_bytes -
+    current_bytes` cannot wrap.
+    """
+    var grow = grow_bytes
+    if grow < 0:
+        grow = 0
+    return grow > budget_bytes - current_bytes
 
 
 struct ArbitratorPolicy(Copyable, ImplicitlyCopyable, Movable, Deinitable):
-    """Victim-pick policy for `SpillArbitrator.pressure_check_and_arbitrate`.
+    """Victim-pick policy for the spill arbitrators.
 
-    v0.4 P-1.C ships ONE active arm:
-
-      * `OLDEST_FIRST` — pick the spillable op with the smallest age_ticks.
-
-    Two arms reserved for v0.5+:
-
-      * `LARGEST_FIRST` — pick the spillable op with the largest
-        memory_usage_bytes. the design case behind future
-        telemetry; its arm in the arbitrator raises today.
-      * `PROPORTIONAL_RESERVATION` — DuckDB TemporaryMemoryManager-style
-        fair-share. Requires breakers to expose `set_reservation(bytes)`
-        (not part of v0.4 SpillableOp trait). the design reserved.
-
-    Fields:
-        _value: UInt8 discriminator. PRIVATE — accessed via the `tag()`
-                method and the policy-named accessor helpers.
-
-    The default arm OLDEST_FIRST is enum tag 0 so the EngineContext-level
-    default-construction `ArbitratorPolicy()` lands on the correct value
-    without any explicit init step.
+      * `OLDEST_FIRST`: pick the spillable op with the smallest `age_ticks`.
+        The only policy that runs.
+      * `LARGEST_FIRST`: pick the spillable op with the largest
+        `memory_usage_bytes`. Not implemented; the arbitrators raise.
+      * `PROPORTIONAL_RESERVATION`: a fair share per op. Not implemented; the
+        arbitrators raise.
     """
 
     comptime OLDEST_FIRST_TAG: UInt8 = 0
@@ -78,51 +51,36 @@ struct ArbitratorPolicy(Copyable, ImplicitlyCopyable, Movable, Deinitable):
     var _value: UInt8
 
     def __init__(out self):
-        """Default-construct: OLDEST_FIRST (the v0.4 ship default)."""
+        """The default policy: `OLDEST_FIRST`."""
         self._value = Self.OLDEST_FIRST_TAG
 
     def __init__(out self, value: UInt8):
-        """Construct from raw tag value. Used by the factory helpers below;
-        external callers should prefer `oldest_first()` / `largest_first()` /
-        `proportional_reservation()` for self-documenting call sites.
-        """
+        """A policy from a raw tag; prefer the named constructors."""
         self._value = value
 
     @staticmethod
     @always_inline
     def oldest_first() -> Self:
-        """Construct the OLDEST_FIRST policy (v0.4 default)."""
+        """The `OLDEST_FIRST` policy."""
         return Self(Self.OLDEST_FIRST_TAG)
 
     @staticmethod
     @always_inline
     def largest_first() -> Self:
-        """Construct the LARGEST_FIRST policy (reserved, v0.5+).
-
-        Construction is allowed but `SpillArbitrator
-        .pressure_check_and_arbitrate` will raise when this policy is
-        selected. The constructor is provided so callers can pass the value
-        through; the arbitrator is the single enforcement point.
-        """
+        """The `LARGEST_FIRST` policy. It can be constructed, but an
+        arbitrator that has to pick a victim with it raises."""
         return Self(Self.LARGEST_FIRST_TAG)
 
     @staticmethod
     @always_inline
     def proportional_reservation() -> Self:
-        """Construct the PROPORTIONAL_RESERVATION policy (reserved, v0.5+).
-
-        Construction is allowed but `SpillArbitrator
-        .pressure_check_and_arbitrate` will raise when this policy is
-        selected — the cooperative-reservation flow requires per-op
-        `set_reservation(bytes)`, not part of v0.4 `SpillableOp`.
-        """
+        """The `PROPORTIONAL_RESERVATION` policy. It can be constructed, but
+        an arbitrator that has to pick a victim with it raises."""
         return Self(Self.PROPORTIONAL_RESERVATION_TAG)
 
     @always_inline
     def tag(self) -> UInt8:
-        """Raw discriminator value. The arbitrator's
-        `pressure_check_and_arbitrate` dispatches on `tag()`.
-        """
+        """The raw tag."""
         return self._value
 
     @always_inline

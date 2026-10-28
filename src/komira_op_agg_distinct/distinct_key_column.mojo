@@ -92,11 +92,8 @@ comptime DISTINCT_DIR_INITIAL_CAPACITY: Int = 2048
 `dense_hash_agg_table.DENSE_INITIAL_CAPACITY` — covers the small/medium-card
 cases with no resize, grows geometrically past ~0.67 load.
 
-DISTINCTSTATE-HASH-OPTIMIZATION: replaces the old
-parallel `hashes: List[UInt64]` linear-scan filter. The old dedup was
-O(rows × distinct_cardinality); the directory makes the per-row probe O(1)
-amortized (salt-stride open addressing), matching the untyped column-format
-hash path that wins on DISTINCT."""
+The directory makes the per-row probe O(1) amortized (salt-stride open
+addressing), matching the untyped column-format hash path."""
 
 comptime _DISTINCT_EMPTY_SLOT: UInt64 = 0
 """Empty-slot sentinel: salt==0 AND dense_idx==0. A real dense_idx of 0 carries
@@ -134,10 +131,11 @@ def _distinct_fnv1a_step[K: DType](state: UInt64, k: Scalar[K]) -> UInt64:
     integer / bool arms mirror `hashset_parametric._fnv1a_combine`; the FLOAT
     arms DO NOT (they fold the quotient-canonical bits, below), monomorphized
     one inlined arm per key DType."""
-    # ⛔ A FLOAT key hashes its QUOTIENT-CANONICAL bits (`-0.0 -> +0.0`, every
+    # A FLOAT key hashes its QUOTIENT-CANONICAL bits (`-0.0 -> +0.0`, every
     # NaN -> the one canonical NaN; `komira_eval.float_quotient_order`), the
     # partner of `_distinct_key_eq`. Raw bits under IEEE `==` put every NaN row
-    # in a NEW group (review wave 39 r2: GROUP BY v over three NaNs answered
+    # in a NEW group
+    # (GROUP BY v over three NaNs answered
     # three groups at @mojo_typed; DuckDB 1.5.3 / polars / pandas answer one).
     comptime if K == DType.float64:
         return (
@@ -183,7 +181,7 @@ def _distinct_read_key_scalar[
 ](batch: BatchView[bo], col: Int, row: Int) -> Scalar[K]:
     """Read the key value of DType `K` at `row` from input column `col`.
 
-    TYPE-COMPLETENESS-P1: delegates to the single generic
+    Delegates to the single generic
     `BatchView.col_scalar_nonraising[K]` primitive — bit-exact over the FULL
     fixed-width numeric matrix (i8/16/32/64, u8/16/32/64, f32/f64), with NO
     silent `col_i64` else-fallthrough (an unhandled DType is a COMPILE ERROR,
@@ -196,7 +194,7 @@ def _distinct_read_key_scalar[
 def _distinct_key_arrow_type[K: DType]() -> ArrowType:
     """Map a key DType to its `ArrowType` for the drain output schema.
 
-    TYPE-COMPLETENESS-P1: delegates to the generic
+    Delegates to the generic
     `scalar_arrow_type[K]` — correct ArrowType over the full fixed-width matrix,
     NO silent `INT64` else-fallthrough."""
     return scalar_arrow_type[K]()
@@ -220,18 +218,15 @@ trait DistinctKeyColumn(Defaultable, Movable, Deinitable):
     column. This is the load-bearing requirement that lets the pack-aware
     `Tuple[*Keys]()` default ctor resolve, so `DistinctState[*Keys]` gets a
     nullary `__init__(out self)` — which the field-less
-    `VariadicDistinctFactory[*Keys].make_state` needs (the PART-1 recipe that
-    `VariadicAggFactory` + `AggColumn(Defaultable, ...)` established for the
-    grouped typed fast path).
+    `VariadicDistinctFactory[*Keys].make_state` needs.
 
-    The methods are the U-D.5 EXECUTABLE surface — they keep the per-key DType /
+    The methods are the executable surface — they keep the per-key DType /
     input-column reads (and the native-DType drain emit) INSIDE the concrete
     conformer (where `Scalar[dt]` + `col` are in scope), so the owning
     `DistinctState.feed_row` / `.drain_to_record_batch` can drive any arity
     uniformly without naming a concrete key type (the trait-erasure wall — a
     generic over `*Keys` cannot prove a slot is `DistinctKeyColumn_Typed`, so
-    per-arity logic MUST live on the trait). Same shape U-D.2 added to `KeyTuple`
-    and U-D.3 added to `SortKeyColumn`.
+    per-arity logic MUST live on the trait).
     """
 
     comptime DT: DType
@@ -243,6 +238,14 @@ trait DistinctKeyColumn(Defaultable, Movable, Deinitable):
         the value into the running FNV-1a hash `state`. The dedup hash path —
         called BEFORE the row is known distinct (so it reads off the batch, not
         from stored values)."""
+        ...
+
+    def row_is_null[bo: Origin[mut=False]](
+        self, batch: BatchView[bo], row: Int
+    ) -> Bool:
+        """True iff this column's bound input column is NULL at `row`. A
+        `DistinctState` rejects such a row: it stores no validity, so it could
+        not tell a NULL from the raw value in the null slot."""
         ...
 
     def equals_row[bo: Origin[mut=False]](
@@ -260,7 +263,7 @@ trait DistinctKeyColumn(Defaultable, Movable, Deinitable):
         new distinct value. Called once per NEW distinct row."""
         ...
 
-    # --- BAND reads —
+    # --- BAND reads:
     #     BAND-read siblings of hash_step / equals_row / append_row. The BAND fold
     #     (`AggKeyBlock.feed_lookup_band`) fans these over the key pack; each key
     #     column reads its OWN bound column from the band (the trait-erasure wall).
@@ -303,7 +306,7 @@ trait DistinctKeyColumn(Defaultable, Movable, Deinitable):
     def restore_append[bo: Origin[mut=False]](
         mut self, batch: BatchView[bo], spill_col: Int, row: Int
     ):
-        """SPILL restore path (SPILL-U-4a2). Read this key's value at `row` off
+        """SPILL restore path. Read this key's value at `row` off
         `batch` column `spill_col` (the key's OUTPUT-slot position `k` in the
         `[k0..kN-1]` spill image — NOT the breaker's input-bound `col`) and
         append it as one stored distinct value. Mirror of `append_row` but keyed
@@ -314,7 +317,7 @@ trait DistinctKeyColumn(Defaultable, Movable, Deinitable):
     def restore_hash_step[bo: Origin[mut=False]](
         self, state: UInt64, batch: BatchView[bo], spill_col: Int, row: Int
     ) -> UInt64:
-        """SPILL restore path (SPILL-U-4a2). Read this key's value at `row` off
+        """SPILL restore path. Read this key's value at `row` off
         `batch` column `spill_col` (the spill-image OUTPUT-slot position) and
         fold it into the running FNV-1a hash `state`. Mirror of `hash_step` but
         keyed on the spill-image column index, so restore rebuilds the dedup
@@ -324,14 +327,14 @@ trait DistinctKeyColumn(Defaultable, Movable, Deinitable):
     def restore_equals_row[bo: Origin[mut=False]](
         self, stored_idx: Int, batch: BatchView[bo], spill_col: Int, row: Int
     ) -> Bool:
-        """SPILL restore path (SPILL-U-4a2). True iff this column's value at
+        """SPILL restore path. True iff this column's value at
         stored index `stored_idx` equals the spill-image value at `row` (off
         spill column `spill_col`). Mirror of `equals_row` on the spill-image
         column index — used by the defensive restore-side dedup compare."""
         ...
 
     def clear_values(mut self):
-        """Drop all stored distinct values (SPILL-U-4a2 — after the column's
+        """Drop all stored distinct values (after the column's
         bytes are serialized to a spill chunk). Leaves the column empty +
         reusable."""
         ...
@@ -363,14 +366,14 @@ trait DistinctKeyColumn(Defaultable, Movable, Deinitable):
 
     def emit_distinct_column(self, mut rb: RecordBatchBuilder):
         """Append this key column — in native DType, ALL stored distinct values
-        in insertion order — to `rb`. The U-D.5 drain path."""
+        in insertion order — to `rb`. The drain path."""
         ...
 
     def add_distinct_schema_field(self, mut sb: SchemaBuilder, k: Int):
         """Append this key's output schema field (`k<k>`, native DType)."""
         ...
 
-    # --- PERF-AGG-DRAIN-EMIT-AT-OFFSET — fused drain-into-final-offset surface --
+    # --- Fused drain-into-final-offset surface --
     #
     # The default bodies DECLINE (mirror `feed_chunk_global` / the radix combine
     # surface): a key column whose Arrow layout the emit-at-offset write path does
@@ -420,9 +423,8 @@ struct DistinctKeyColumn_Typed[dt: DType, col: Int](DistinctKeyColumn):
 
     The DType-parametric type family (one type per key DType) is the production
     shape in Mojo 1.0.0b1 — a single value-parametric surface over DType is not
-    witness-resolvable (NARY-FOUNDATION deviation (a)). `col` is the comptime
-    input-batch column index this key is read from — symmetric to U-D.2's
-    `KeyTuple1[d0, col0]` and U-D.3's `SortKeyColumn_Typed[dt, col]`. Carrying it
+    witness-resolvable. `col` is the comptime
+    input-batch column index this key is read from. Carrying it
     here makes `DistinctState[*Keys]` fully self-describing so the typed `Stage`
     DISTINCT arm reads keys with zero runtime dispatch.
     """
@@ -451,6 +453,12 @@ struct DistinctKeyColumn_Typed[dt: DType, col: Int](DistinctKeyColumn):
     ) -> UInt64:
         var v = _distinct_read_key_scalar[Self.dt, bo](batch, Self.col, row)
         return _distinct_fnv1a_step[Self.dt](state, v)
+
+    @always_inline
+    def row_is_null[bo: Origin[mut=False]](
+        self, batch: BatchView[bo], row: Int
+    ) -> Bool:
+        return batch.col_is_null(Self.col, row)
 
     @always_inline
     def equals_row[bo: Origin[mut=False]](
@@ -602,6 +610,6 @@ def distinct_key_column_i64(
     initial_capacity: Int,
 ) -> DistinctKeyColumn_Typed[DType.int64, 0]:
     """Factory for an Int64 DISTINCT-key column bound to input column 0 (the
-    canonical v0.4 GA single-key shape)."""
+    canonical single-key shape)."""
     return DistinctKeyColumn_Typed[DType.int64, 0].new(initial_capacity)
 

@@ -8,7 +8,7 @@ const C = @import("common.zig");
 pub fn hex(data: []const u8) []u8 {
     var out: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(data, &out, .{});
-    return C.fmt("{s}", .{std.fmt.fmtSliceHexLower(&out)});
+    return C.fmt("{s}", .{&std.fmt.bytesToHex(out, .lower)});
 }
 
 /// `sha256:<hex>` of `data`.
