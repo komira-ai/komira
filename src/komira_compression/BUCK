@@ -141,6 +141,7 @@ udf_bench(
     name = "snappy_bench",
     binary = ":snappy_bench_program",
     exec_compatible_with = LINUX_X86_64,
+    libs = [":komira_compression"],
     run_id = "tests/bench_run_id",
 )
 
