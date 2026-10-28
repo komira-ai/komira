@@ -13,6 +13,9 @@ running out of memory, with the same answer it gives without a spill.
   into 8 parts and folds each part alone, splitting a part again while it is
   over the budget. `finalize_with_spill_yield` returns the result as up to 8
   batches instead of one. Group order is unspecified, as in SQL.
+- `RowHashAggSpillState.feed_batch` is the aggregate's entry point: it refuses
+  a NULL aggregate value (see Scope), upserts the batch and spills over the
+  budget.
 - `sort_spill.RowSortSpillState` spills a `RowSortBuffer` (INT64 keys and
   payloads). After each batch, `maybe_spill_run` sorts the buffer and writes it
   to disk as one run when its estimate passes the budget.
@@ -31,6 +34,27 @@ exclusively (a name that exists is skipped, up to 64 tries), so operators and
 processes can share one directory. The files are deleted when the finalize
 returns or raises and when the state is dropped. `spill_root` makes the name.
 The package root re-exports nothing; import from the modules.
+
+## Scope and known limits
+
+- **NULL aggregate values are refused.** `RowHashAggTable.upsert_batch` does
+  not read validity: it folds the stored cell of a NULL row, which gives a
+  wrong SUM, MIN or MAX with no error (komira-ai/komira#1983). The aggregate
+  entry point of this package, `RowHashAggSpillState.feed_batch`, upserts a
+  batch and then spills as `maybe_spill_run` does, and raises, naming the
+  column, for a batch whose aggregate value column holds a NULL, before the
+  table sees the batch. The refusal is to be lifted when the table honours
+  validity. A caller that calls `upsert_batch` itself bypasses it. Key
+  columns may be NULL for a STRING key; an INT64 key column is the table's to
+  police. The sort refuses a NULL in any column (`RowSortBuffer.feed_batch`).
+- **A restored run's layout is checked.** Every chunk carries a fingerprint of
+  the fixed row stride and the aggregate op tags; a finalize whose live table
+  disagrees raises ("written under a different layout") instead of reading the
+  rows as its own.
+- **The chunk body has no checksum.** The THSPILL2 format checks the magic,
+  the flags and the length, not the body bytes: a body byte flipped on disk
+  that keeps the length is not detected and gives a wrong result. This is a
+  property of the format, not of this package.
 
 ## Examples
 

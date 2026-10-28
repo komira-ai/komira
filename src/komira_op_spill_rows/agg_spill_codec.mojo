@@ -96,8 +96,12 @@ struct AggRegistration(Copyable, Movable):
     var agg_tags: List[UInt8]
     var agg_offsets: List[Int]
     var var_key_offsets: List[Int]
+    var fingerprint: UInt64
+    """`agg_layout_fingerprint` of the live table: every chunk restored under
+    this registration must carry it."""
 
     def __init__(out self, table: RowHashAggTable):
+        self.fingerprint = agg_layout_fingerprint(table)
         self.key_stride = table.key_stride
         self.fixed_stride = table.rows.fixed_row_stride
         self.agg_tags = List[UInt8]()
@@ -148,8 +152,22 @@ def restore_shell_from_chunk(
 ) raises -> RowHashAggTable:
     """Read a spilled run and rebuild its shell table. The run carries the
     live table's variable-width key declaration, so `combine` hashes a string
-    key's bytes rather than its heap descriptor."""
+    key's bytes rather than its heap descriptor.
+
+    Raises if the chunk's layout fingerprint (fixed row stride and aggregate
+    op tags) is not `reg.fingerprint`: a run written under another layout
+    would otherwise be read as rows of this one. The THSPILL2 body carries no
+    checksum, so a corrupted body that keeps its length is not detected."""
     var block = decode_group_rows_from_storage(storage, chunk_id)
+    if block.schema_fingerprint() != reg.fingerprint:
+        raise Error(
+            "spilled aggregate run was written under a different layout: chunk"
+            " fingerprint "
+            + String(block.schema_fingerprint())
+            + ", expected "
+            + String(reg.fingerprint)
+            + " (row stride and aggregate ops)"
+        )
     return RowHashAggTable.from_spilled_group_rows(
         block.byte_view(),
         n_groups,

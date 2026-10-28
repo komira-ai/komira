@@ -258,7 +258,12 @@ def _batch_with_null_k0() raises -> RecordBatch:
 def test_sort_spill_null_key_after_a_spill_is_refused() raises:
     """A NULL k0 arriving after runs have spilled is refused by name (the
     buffer stores one INT64 cell per key and cannot order a NULL), and the
-    runs already spilled still merge to the sort of the rows fed before it."""
+    runs already spilled still merge to the sort of the rows fed before it.
+
+    The refusal itself lives in `RowSortBuffer.feed_batch`, which
+    `komira_row_format` pins on its own; this test pins it through this
+    package's entry point: a refused batch leaves the spill state and its
+    runs intact, and the finalize still returns the earlier rows."""
     var state = RowSortSpillState(1000, _scratch_dir("sort_null"))
     var buf = _buffer()
     var layout = _layout()

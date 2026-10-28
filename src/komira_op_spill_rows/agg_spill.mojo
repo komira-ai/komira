@@ -42,6 +42,7 @@
 # Single-threaded: the finalize runs on one thread.
 # =============================================================================
 
+from komira_arrow.batch_view import BatchView
 from komira_arrow.concat import concat_record_batches_nway
 from komira_arrow.record_batch import RecordBatch
 from komira_async.runtime.spill_prefetch import SpillPrefetcher
@@ -126,8 +127,43 @@ struct RowHashAggSpillState(Movable, Deinitable):
         return self._last_finalize_subparts
 
     # -------------------------------------------------------------------------
-    # Spill
+    # Feed and spill
     # -------------------------------------------------------------------------
+
+    def feed_batch(
+        mut self,
+        mut table: RowHashAggTable,
+        ref batch: RecordBatch,
+        key_col_idxs: List[Int],
+        payload_col_idxs: List[Int],
+        ref [_] layout: RowLayout,
+    ) raises:
+        """Upsert `batch` into `table`, then `maybe_spill_run`.
+
+        A batch whose aggregate value (payload) column holds a NULL is
+        refused, naming the column, before anything is upserted: the table
+        folds the stored cell of a NULL row (`RowHashAggTable.upsert_batch`
+        does not read validity, komira-ai/komira#1983), which would give a
+        wrong SUM, MIN or MAX without an error. The refusal lifts when the
+        table honours validity. Key columns are not checked here."""
+        var view = BatchView(batch)
+        var n_rows = batch.num_rows()
+        for p in range(len(payload_col_idxs)):
+            var c = payload_col_idxs[p]
+            if view.col_any_null(c, n_rows):
+                raise Error(
+                    "RowHashAggSpillState.feed_batch: aggregate value column "
+                    + String(p)
+                    + " ('"
+                    + batch.schema.field_name(c)
+                    + "', batch column "
+                    + String(c)
+                    + ") holds a NULL. The row-format hash aggregate ignores"
+                    " validity and would fold the stored cell of a NULL row"
+                    " into its result. Refused rather than answered wrong."
+                )
+        table.upsert_batch(view, key_col_idxs, payload_col_idxs, layout)
+        self.maybe_spill_run(table)
 
     def maybe_spill_run(mut self, mut table: RowHashAggTable) raises:
         """Spill `table` as one run if the budget is set and the table's

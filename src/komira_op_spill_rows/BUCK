@@ -42,9 +42,11 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_agg_spill_files.mojo",
+        "tests/test_agg_spill_refusals.mojo",
         "tests/test_agg_spill_round_trip.mojo",
         "tests/test_sort_spill_files.mojo",
         "tests/test_sort_spill_merge_order.mojo",
+        "tests/test_spill_root.mojo",
     ],
     visibility = ["PUBLIC"],
 )
