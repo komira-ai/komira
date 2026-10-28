@@ -159,7 +159,7 @@ The files that are not sources:
 | `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifests of the siblings; `buildrules mojo check` fails when they are stale |
 
 `tests/test_*.mojo` are the package's tests and weld to `:lib`. `tests/standalone/` holds the three programs that
-cannot be: `test_copy_hazard` and `test_implicit_presence_json` read a message type generated from
+cannot be (their names have no `test_` prefix, so mopm does not discover them; the census counts them as test code, like the rest of `tests/`): `test_copy_hazard` and `test_implicit_presence_json` read a message type generated from
 `tests/copy_hazard.proto` and `tests/implicit_presence.proto`, and `test_float32_json_binades` takes its binade and part
 as defines. They are targets of their own in `BUCK` (`test_copy_hazard`, `implicit_presence_proto`,
 `test_float32_json_binades_<binade>_<part>`).
