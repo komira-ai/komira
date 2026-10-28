@@ -1,6 +1,7 @@
 # komira_op_window
 
-The window operator of the engine. `partition_scan_sink._execute_partition_by_sink`
+The window and top-N operators of the engine.
+`partition_scan_sink._execute_partition_by_sink`
 runs a `PartitionBySinkData` (`komira_physical_plan`) over one batch: it
 sorts the rows by (partition keys ++ order keys), finds the partitions,
 evaluates each `PartitionExpr` into one new column, and returns the sorted
@@ -42,6 +43,53 @@ Modules:
   by rescan; every aggregate over the whole partition.
 - `partition_value_fns`: LAG, LEAD, FIRST_VALUE, LAST_VALUE, NTH_VALUE over
   INT64, FLOAT64 and STRING columns.
+- `partition_scan_sink_parallel`: `_execute_partition_by_sink_parallel`, the
+  same rows on the engine's workers: one sort, then whole-partition buckets
+  evaluated in parallel and concatenated in order; below 65,536 rows, four
+  partitions or two workers it runs on the calling thread.
+- `partition_scan_sink_hash_scatter`: above that size, with one or more INT64 partition
+  keys holding no NULL, rows are scattered by key range (sampled equi-depth
+  splitters) and each bucket is sorted and evaluated on its own worker.
+- `partition_by_sink`: `PartitionBySink`, the window operator as a
+  `MorselSink` of `komira_operator_api`; `finalize` runs the parallel driver.
+  Every route emits the same rows in the same order
+  (`komira_exec_types.partition_by_output_contract`).
+- `topn_sink`: `TopNSink`, the global top-N of a pipeline as a `MorselSink`;
+  `finalize` runs `komira_op_sort.sort_topn_sink._execute_topn_sink` over the
+  folded batch, so its rows (and its NULL placement) are that kernel's.
+  That kernel does not read `nulls_first` and orders a numeric NULL slot by
+  its stored value, so the sink's NULL placement is not the NULLS LAST of
+  `TopNState` and `PartitionTopNState`.
+- `bounded_heap`: bounded heaps over INT64 keys (capacity at compile time or
+  at run time) and over STRING keys compared byte-wise. Slots order by
+  (key, payload id), so equal keys keep the smaller payload (row) first and
+  the kept rows do not depend on feed or merge order.
+- `topn_stage`, `stage_topn`: the top-N of one INT64 key, and
+  `Stage_TopN_1_I64` / `Stage_TopN_Dynamic_1_I64`, its `FusedMorselOp`s over
+  an `ExprXI64` key (payload: the row's index across all batches fed).
+  DESC stores the bitwise NOT of the key, which reverses every INT64
+  (negation overflows on `Int64.MIN`).
+- `topn_state`: `TopNState`, the typed stage's TOPN breaker state: the top N
+  of an INT64 key column, mergeable (`combine`) and spillable. NULL keys
+  come last in both directions (there is no NULLS FIRST setting); the NULL-key
+  rows kept are the smallest payload ids, so the result does not depend on
+  feed or merge order.
+- `partition_topn_state`: `PartitionTopNState`, top N per partition over
+  INT64 columns (NULL partition keys one partition, NULL order keys last in
+  both directions, as in `TopNState`).
+- `partition_state`: the per-partition state holders of a typed window stage.
+- `partition_topn_sink`: `PartitionTopNSink`, the rows of each partition whose
+  ROW_NUMBER or RANK over the sort keys is at most k (`PartitionTopNSinkData`),
+  optionally with that number as a column. One INT32 / INT64 partition key
+  and one INT32 / INT64 / FLOAT64 sort key with no NULL take the bounded-heap
+  path (`partition_topn_compact`, built on the engine's workers when given a
+  pool); any other keys take the window sort and one walk. Both give the
+  window operator's rows; among equal sort keys ROW_NUMBER keeps the earliest
+  input rows, whatever the number of workers. Within a partition the rows
+  come best first, ties in input order, and a partition's rows are
+  contiguous. The order of the partitions differs between the two paths (the
+  heap path emits them in first-seen order, the sort path in sorted key
+  order): callers must not rely on it.
 - `partition_null_policy`: the NULL policy every aggregate kernel shares,
   and the output allocators that size a validity bitmap only when a NULL can
   be written.

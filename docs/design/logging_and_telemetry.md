@@ -38,11 +38,11 @@ drain_worker_unified(w)    -> log lines and completed OTLP-shaped spans
 
 ### How does log.info reach the engine?
 
-The five level functions in `src/komira_log/facade.mojo` (`trace`, `debug`, `info`, `warn`, `error`) forward to `_emit[level, fmt, module]`. It runs `comptime if level < MIN_COMPILED_LEVEL: return`, then resolves the process-global engine with `LogManager._resolve()`. With an engine installed, it returns early if the engine is not `enabled()`, and `SharedEngine.admits(level, module)` decides after that. `site_id = fnv1a_32(fmt)` and `module_id = fnv1a_32(module)` are compile-time values, and the timestamp is a raw counter tick from `read_raw_ticks()`.
+The five level functions in `src/komira_log/src/komira_log/facade.mojo` (`trace`, `debug`, `info`, `warn`, `error`) forward to `_emit[level, fmt, module]`. It runs `comptime if level < MIN_COMPILED_LEVEL: return`, then resolves the process-global engine with `LogManager._resolve()`. With an engine installed, it returns early if the engine is not `enabled()`, and `SharedEngine.admits(level, module)` decides after that. `site_id = fnv1a_32(fmt)` and `module_id = fnv1a_32(module)` are compile-time values, and the timestamp is a raw counter tick from `read_raw_ticks()`.
 
 On a thread bound to a worker id, `_emit` registers the site in the `SiteDictionary`, fills a `LogEventRecord` of kind `REC_LOG`, and writes the argument tags and bytes with an `ArgBlobWriter`. Arguments that fit in `ARG_INLINE_BYTES` (48) stay in the record; longer ones spill to the ring's arena. It then calls `try_push` on that worker's `LogRecordRing`. On a thread with no worker id, `_emit` renders the line at once and calls `emit_fallback_line`. With no engine installed, `_ensure_config()` builds a default `LogConfig` on first use and the line goes to stderr.
 
-Three other surfaces share this path. `get_logger[module]()` returns a `GlobalLogger` that calls the same `_emit`. `Logger[origin]` in `logger.mojo` borrows one engine through a concrete origin and uses the same `admits` and escalation. `emit_erased` in `logger_erased.mojo` takes the format and arguments at run time and keeps only the level and module as compile-time parameters, so call sites that share both share one compiled body. A `Tracer[origin]` in `src/komira_log/tracer.mojo` is the span twin of `Logger[origin]`: `start_span[name](worker_id)` and `end_span(span_id, worker_id)` push span records onto the same ring.
+Three other surfaces share this path. `get_logger[module]()` returns a `GlobalLogger` that calls the same `_emit`. `Logger[origin]` in `logger.mojo` borrows one engine through a concrete origin and uses the same `admits` and escalation. `emit_erased` in `logger_erased.mojo` takes the format and arguments at run time and keeps only the level and module as compile-time parameters, so call sites that share both share one compiled body. A `Tracer[origin]` in `src/komira_log/src/komira_log/tracer.mojo` is the span twin of `Logger[origin]`: `start_span[name](worker_id)` and `end_span(span_id, worker_id)` push span records onto the same ring.
 
 ### How is a log level decided?
 
@@ -58,7 +58,7 @@ Configuration arrives as arguments, not from the environment. A binary parses it
 
 `SharedEngine(num_workers, filter)` allocates `num_workers + 1` rings of `DEFAULT_RING_CAPACITY` (4,096, defined in `komira_spsc_ring/spsc_ring.mojo`) records. Worker rings use `OVERFLOW_DROP`; the last ring, the fallback slot, uses `OVERFLOW_BLOCK`. It also holds the `SiteDictionary` (`site_id` to format, `module_id` to module), a `CalibrationAnchor` that converts ticks to wall time at drain time (`refresh_anchor`), the global level and the `EnvFilter`, one `LogSink`, and a pthread TLS key for the worker id (`worker_id_tls.mojo`). Logs, span opens, span closes and metric points share one ring; `LogEventRecord.kind` is `REC_LOG`, `REC_SPAN_OPEN`, `REC_SPAN_CLOSE` or `REC_METRIC`.
 
-`LogManager.install(engine)` moves an engine to the heap, leaks it, and parks its address in a C static (`engine/_log_holder_shim.c`). The first install wins and later ones are no-ops.
+`LogManager.install(engine)` moves an engine to the heap, leaks it, and parks its address in a C static (`native/komira_log_holder.c`). The first install wins and later ones are no-ops.
 
 ### How is a ring drained?
 
@@ -174,21 +174,21 @@ An allowed caller can still see a 400: an inverted window (`since_ms` after `unt
 
 | File | Holds | Key types and functions |
 |---|---|---|
-| `src/komira_log/facade.mojo` | The ambient call surface | `info`, `warn`, `_emit`, `get_logger`, `span_open` |
-| `src/komira_log/logger.mojo`, `logger_erased.mojo`, `tracer.mojo` | Typed and erased surfaces | `Logger`, `emit_erased`, `Tracer` |
-| `src/komira_log/config.mojo`, `env_filter.mojo`, `levels.mojo` | Levels, directives, the no-engine config | `LogConfig`, `init_logging_from_spec`, `EnvFilter`, `MIN_COMPILED_LEVEL` |
-| `src/komira_log/pattern_layout.mojo` | Text and JSON line layout | `render_line`, `render_json_line`, `select_log_layout` |
-| `src/komira_log/engine/shared_engine.mojo` | The engine | `SharedEngine`, `admits`, `drain_worker`, `drain_worker_to_records` |
-| `src/komira_log/engine/log_manager.mojo` | The process-global engine | `LogManager` |
-| `src/komira_log/engine/record_ring.mojo`, `log_event_record.mojo` | Ring and record | `LogRecordRing`, `LogEventRecord`, `ArgBlobWriter` |
-| `src/komira_log/engine/drain.mojo`, `span_drain.mojo` | Decode and span pairing | `render_record_view`, `drain_unified` |
-| `src/komira_log/engine/output_sink.mojo`, `rotation.mojo` | Output modes and rotation | `LogSink`, `SegmentFile`, `RotationPolicy` |
-| `src/komira_log/engine/metric_emit.mojo`, `metric_sink.mojo` | Metric records on the ring | `build_metric_record`, `RingMetricSink` |
-| `src/komira_metrics/metrics_set.mojo`, `explain_analyze.mojo` | Per-operator metrics | `MetricsSet`, `format_execution_report` |
-| `src/komira_metrics/series_table.mojo`, `metric_sweep.mojo`, `histogram.mojo` | Series metrics | `SeriesTable`, `MetricSweep`, `HistogramTable` |
-| `src/komira_trace/tracer.mojo`, `exporter.mojo`, `span_ring.mojo` | Spans | `Tracer`, `JsonlFileExporter`, `SpanPacketRing` |
-| `src/komira_log/log_write.mojo`, `structured_log.mojo` | Writes, JSON selection | `write_log_line`, `log_format_is_json` |
-| `src/komira_clock/src/komira_clock/clock.mojo`, `src/komira_spsc_ring/spsc_ring.mojo` | Clocks, the generic ring | `now_ns`, `SpscRing` |
+| `src/komira_log/src/komira_log/facade.mojo` | The ambient call surface | `info`, `warn`, `_emit`, `get_logger`, `span_open` |
+| `src/komira_log/src/komira_log/logger.mojo`, `logger_erased.mojo`, `tracer.mojo` | Typed and erased surfaces | `Logger`, `emit_erased`, `Tracer` |
+| `src/komira_log/src/komira_log/config.mojo`, `env_filter.mojo`, `levels.mojo` | Levels, directives, the no-engine config | `LogConfig`, `init_logging_from_spec`, `EnvFilter`, `MIN_COMPILED_LEVEL` |
+| `src/komira_log/src/komira_log/pattern_layout.mojo` | Text and JSON line layout | `render_line`, `render_json_line`, `select_log_layout` |
+| `src/komira_log/src/komira_log/engine/shared_engine.mojo` | The engine | `SharedEngine`, `admits`, `drain_worker`, `drain_worker_to_records` |
+| `src/komira_log/src/komira_log/engine/log_manager.mojo` | The process-global engine | `LogManager` |
+| `src/komira_log/src/komira_log/engine/record_ring.mojo`, `log_event_record.mojo` | Ring and record | `LogRecordRing`, `LogEventRecord`, `ArgBlobWriter` |
+| `src/komira_log/src/komira_log/engine/drain.mojo`, `span_drain.mojo` | Decode and span pairing | `render_record_view`, `drain_unified` |
+| `src/komira_log/src/komira_log/engine/output_sink.mojo`, `rotation.mojo` | Output modes and rotation | `LogSink`, `SegmentFile`, `RotationPolicy` |
+| `src/komira_log/src/komira_log/engine/metric_emit.mojo`, `metric_sink.mojo` | Metric records on the ring | `build_metric_record`, `RingMetricSink` |
+| `src/komira_metrics/src/komira_metrics/metrics_set.mojo`, `explain_analyze.mojo` | Per-operator metrics | `MetricsSet`, `format_execution_report` |
+| `src/komira_metrics/src/komira_metrics/series_table.mojo`, `metric_sweep.mojo`, `histogram.mojo` | Series metrics | `SeriesTable`, `MetricSweep`, `HistogramTable` |
+| `src/komira_trace/src/komira_trace/tracer.mojo`, `exporter.mojo`, `span_ring.mojo` | Spans | `Tracer`, `JsonlFileExporter`, `SpanPacketRing` |
+| `src/komira_log/src/komira_log/log_write.mojo`, `structured_log.mojo` | Writes, JSON selection | `write_log_line`, `log_format_is_json` |
+| `src/komira_clock/src/komira_clock/clock.mojo`, `src/komira_spsc_ring/src/komira_spsc_ring/spsc_ring.mojo` | Clocks, the generic ring | `now_ns`, `SpscRing` |
 | `src/komira_log_query/route.mojo`, `access.mojo`, `search_seam.mojo`, `hit.mojo` | Read route, access hook, trait and values | `service_log_response`, `LogReadAccess`, `ServiceLogSearch`, `ServiceLogQuery` |
 | `src/komira_metrics_reader/route.mojo`, `access.mojo`, `reader.mojo`, `query.mojo`, `series.mojo` | Metrics read route, access hook, trait and values | `metrics_response`, `MetricsReadAccess`, `MetricsReader`, `MetricsQuery` |
 

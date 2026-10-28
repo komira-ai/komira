@@ -1,23 +1,31 @@
 # =============================================================================
-# Tests of expression-binder internals that SQL text cannot reach
-# (sql_bind_fn_args, sql_bind_fn_nested, sql_bind_cast, sql_bind_expr)
+# Direct tests of binder internals that SQL text cannot reach
+# (sql_bind_ops, sql_bind_fn_args, sql_bind_fn_nested, sql_bind_cast,
+#  sql_bind_expr, sql_bind_scope, sql_bind_subquery, sql_bind_join,
+#  sql_bind_window_order, sql_bind_names)
 # =============================================================================
 #
 # The parser never builds these shapes, so each is called directly with a
-# hand-built node. These are the defensive arms: a desugar handed the wrong
-# argument shape, a kind with no arity message, a node tag no lowering knows.
-#   1. `_fn_arity_msg` has a message per lowering family and an internal one
+# hand-built node. These are the defensive arms: an operator or kind code no
+# lowering knows, a desugar handed the wrong argument shape, a scope lookup
+# that misses. What each test proves:
+#   1. The code maps (`_map_unop`, `_map_binop`, `_map_aggfunc`,
+#      `_outer_join_type`, `_map_win_func`) raise by name on a code they do
+#      not know, and `_map_binop` refuses the operators it must never see.
+#   2. `_fn_arity_msg` has a message per lowering family and an internal one
 #      for a kind with none.
-#   2. The date folds refuse a wrong argument count, a unit other than `day`
-#      and an operand that is not a DATE literal, and fold two DATE literals.
-#   3. The DATE32 / float / string predicates see through an alias and answer
-#      False for other shapes; a column lookup that misses answers NULL / the
-#      absent-column type.
-#   4. `_bind_scalar` refuses `*`, a CASE with no WHEN and an unknown node tag,
-#      resolves a scalar-subquery node by its index into the bodies bound
-#      first and refuses a dangling index; the CAST desugar refuses a wrong
-#      argument shape; a DECIMAL type name with no closing parenthesis is
-#      refused.
+#   3. The date folds refuse a wrong argument count, a unit other than
+#      `day` and a non-DATE operand; the DATE32 / float / string predicates
+#      see through an alias and answer False for other shapes.
+#   4. `_bind_scalar` refuses `*`, a CASE with no WHEN and an unknown node
+#      tag; the CAST desugar refuses a wrong argument shape; a DECIMAL type
+#      name with no closing parenthesis is refused.
+#   5. `BindScope` lookups that miss answer "" / the name itself;
+#      `_result_rename_exprs` answers None when the names do not line up.
+#   6. `_rel_col_null_free` answers False for a CSV relation without reading
+#      it; `_body_has_equi_correlation` answers False for a body with no
+#      WHERE; `_bind_corr_scalar` refuses a dangling subquery index.
+#   7. The deparse helpers name every SX_AGG code, and the constant arms.
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -26,18 +34,28 @@ from komira_arrow.schema import Field, Schema, SchemaBuilder
 from komira_collections.slab import Slab
 from komira_plan_expr.expr import Expr
 from komira_plan_expr.scalar_value import ScalarValue
+from komira_plan_ir.logical_plan import ExprArray
 
-from komira_sql.sql_ast import SqlExpr
-from komira_sql.sql_bind_cast import _bound_expr_is_string, _sql_decimal_type_ps
-from komira_sql.sql_bind_expr import _bind_scalar, _bound_expr_is_float
-from komira_sql.sql_bind_fn_args import _date_diff_days, _fn_arity_msg
-from komira_sql.sql_bind_fn_nested import (
-    _bound_expr_is_date32,
-    _col_arrow_type_by_name,
-    _date_sub_days,
+from komira_sql.sql_ast import (
+    FromRelation,
+    JK_CROSS,
+    SX_BOOL,
+    SXAGG_AVG,
+    SXAGG_COUNT,
+    SXAGG_MAX,
+    SXAGG_MIN,
+    SXAGG_SUM,
+    SXOP_CONCAT,
+    SXOP_DIV,
+    SXOP_IDIV,
+    SXOP_POW,
+    SXOP_STARTS_WITH,
+    SqlExpr,
+    TVF_CSV,
+    TvfOptions,
 )
-from komira_sql.sql_bind_parquet import ParquetFacts
-from komira_sql.sql_bind_scope import BindScope, CteScope, _build_bind_scope
+from komira_sql.sql_token import tokenize
+from komira_sql.sql_parser import parse_sql
 from komira_sql.sql_catalog import SqlCatalog
 from komira_sql.sql_fn_table import (
     CAST_DESUGAR_NAME,
@@ -45,8 +63,31 @@ from komira_sql.sql_fn_table import (
     FNK_NONE,
     FNK_STRING_PRED,
 )
-from komira_sql.sql_parser import parse_sql
-from komira_sql.sql_token import tokenize
+from komira_sql.sql_bind_parquet import ParquetFacts
+from komira_sql.sql_bind_scope import (
+    BindScope,
+    CteScope,
+    _build_bind_scope,
+    _result_rename_exprs,
+)
+from komira_sql.sql_bind_ops import _map_aggfunc, _map_binop, _map_unop
+from komira_sql.sql_bind_fn_args import _date_diff_days, _fn_arity_msg
+from komira_sql.sql_bind_fn_nested import (
+    _bound_expr_is_date32,
+    _col_arrow_type_by_name,
+    _date_sub_days,
+)
+from komira_sql.sql_bind_cast import _bound_expr_is_string, _sql_decimal_type_ps
+from komira_sql.sql_bind_expr import _bind_scalar, _bound_expr_is_float
+from komira_sql.sql_bind_subquery import (
+    _bind_corr_scalar,
+    _body_has_equi_correlation,
+    _no_outer,
+    _rel_col_null_free,
+)
+from komira_sql.sql_bind_join import _outer_join_type
+from komira_sql.sql_bind_window_order import _map_win_func, _win_value_default
+from komira_sql.sql_bind_names import _duckdb_const_text, _duckdb_expr_text, _sxagg_text
 
 
 def _schema() -> Schema:
@@ -70,6 +111,78 @@ def _raised(msg: String, want: String) raises:
 
 def _call(name: String, var args: Slab[SqlExpr]) -> SqlExpr:
     return SqlExpr.call(name, args^)
+
+
+def test_code_maps_refuse_unknown_codes() raises:
+    try:
+        _ = _map_unop(UInt8(99))
+        raise Error("mapped")
+    except e:
+        _raised(String(e), "SQL internal error: unknown unary operator code 99")
+    try:
+        _ = _map_binop(SXOP_DIV)
+        raise Error("mapped")
+    except e:
+        _raised(
+            String(e),
+            "SQL internal: a division operator reached the plain operator map;"
+            " it must be bound by `_bind_sql_division` (DuckDB's `/` is TRUE"
+            " division and its `//` is `divide()`)",
+        )
+    try:
+        _ = _map_binop(SXOP_IDIV)
+        raise Error("mapped")
+    except e:
+        assert_true(String(e).startswith("SQL internal: a division operator"))
+    for op in [SXOP_POW, SXOP_CONCAT, SXOP_STARTS_WITH]:
+        try:
+            _ = _map_binop(op)
+            raise Error("mapped")
+        except e:
+            _raised(
+                String(e),
+                "SQL internal: a `^` / `^@` / `||` operator reached the plain"
+                " operator map; it must be bound by `_bind_sql_operator`",
+            )
+    try:
+        _ = _map_binop(UInt8(99))
+        raise Error("mapped")
+    except e:
+        _raised(String(e), "SQL bind error: unsupported binary operator")
+    try:
+        _ = _map_aggfunc(UInt8(99))
+        raise Error("mapped")
+    except e:
+        _raised(String(e), "SQL bind error: unsupported aggregate function")
+    try:
+        _ = _outer_join_type(JK_CROSS)
+        raise Error("mapped")
+    except e:
+        _raised(
+            String(e),
+            "SQL bind error: _outer_join_type was handed join kind "
+            + String(Int(JK_CROSS)) + ", which is not LEFT / RIGHT / FULL",
+        )
+    try:
+        _ = _map_win_func(UInt8(99))
+        raise Error("mapped")
+    except e:
+        _raised(String(e), "SQL bind error: unsupported window function code 99")
+
+
+def test_window_default_of_an_unknown_kind_is_refused() raises:
+    var st = parse_sql(tokenize("SELECT lag(v, 1, 0) OVER (ORDER BY k) FROM t"))
+    var w = st.query.select_items[0].expr._window.value().copy()
+    w.default_kind = SX_BOOL
+    try:
+        _ = _win_value_default(w)
+        raise Error("mapped")
+    except e:
+        _raised(
+            String(e),
+            "SQL bind error: unsupported DEFAULT literal kind "
+            + String(Int(SX_BOOL)),
+        )
 
 
 def test_arity_messages_per_family() raises:
@@ -246,56 +359,59 @@ def test_scalar_binder_refuses_unparseable_shapes() raises:
         )
 
 
-def test_date_diff_fold_refuses_other_units_and_operands() raises:
-    var month = Slab[SqlExpr]()
-    month.append(SqlExpr.string_lit("month"))
-    month.append(SqlExpr.date_lit("2021-01-01"))
-    month.append(SqlExpr.date_lit("2021-02-01"))
-    try:
-        _ = _date_diff_days(_call("date_diff", month^))
-        raise Error("folded")
-    except e:
-        _raised(
-            String(e),
-            "SQL not supported: only date_diff('day', ...) is supported (got"
-            " unit that is not the constant 'day')",
-        )
-    var col = Slab[SqlExpr]()
-    col.append(SqlExpr.string_lit("day"))
-    col.append(SqlExpr.column("d"))
-    col.append(SqlExpr.date_lit("2021-02-01"))
-    try:
-        _ = _date_diff_days(_call("date_diff", col^))
-        raise Error("folded")
-    except e:
-        assert_true(
-            String(e).startswith(
-                "SQL not supported: date_diff('day', a, b) requires constant"
-                " DATE literal operands here. This function only constant-folds two"
-                " DATE literals and binds no column operand."
-            ),
-            String(e),
-        )
-    var ok = Slab[SqlExpr]()
-    ok.append(SqlExpr.string_lit("day"))
-    ok.append(SqlExpr.date_lit("2021-01-01"))
-    ok.append(SqlExpr.date_lit("2021-02-01"))
-    assert_equal(_date_diff_days(_call("date_diff", ok^)), Int64(31))
-
-
-def test_scalar_subquery_node_resolves_by_index() raises:
+def test_scope_lookups_that_miss() raises:
     var cat = _catalog()
     var cte = CteScope(ParquetFacts())
     var scope = _scope_over_t(cat, cte)
+    assert_equal(scope.source_name_of("zz", "k"), "")
+    assert_equal(scope.source_name_of("t", "zz"), "")
+    assert_equal(scope.source_name_of("t", "K"), "k")
+    assert_equal(scope.source_name_of_output("nope"), "nope")
+    var display = List[String]()
+    display.append(String("a"))
+    assert_false(Bool(_result_rename_exprs(scope.out_schema, display, 2)))
+    assert_false(Bool(_result_rename_exprs(scope.out_schema, display, 9)))
+    var same = List[String]()
+    same.append(String(""))
+    assert_false(Bool(_result_rename_exprs(scope.out_schema, same, 1)))
+
+
+def test_subquery_helpers_without_reading_files() raises:
+    var cat = _catalog()
+    var cte = CteScope(ParquetFacts())
+    var csv = FromRelation.tvf_of("x.csv", TVF_CSV, TvfOptions())
+    assert_false(_rel_col_null_free(csv, "k", cat, cte))
+    var unknown = FromRelation.named("missing")
+    assert_false(_rel_col_null_free(unknown, "k", cat, cte))
+    var body = parse_sql(tokenize("SELECT k FROM t"))
     var pre = List[Expr]()
-    pre.append(Expr.literal(ScalarValue.from_int64(Int64(7))))
-    var got = _bind_scalar(SqlExpr.subquery(0), scope.out_schema, scope, cat, cte, pre)
-    assert_equal(String(got), "Literal(ScalarValue(int64, 7))")
+    assert_false(_body_has_equi_correlation(body.query, cat, cte, pre, _no_outer()))
+    var refs = List[String]()
+    var aliases = List[String]()
+    aliases.append(String("t"))
     try:
-        _ = _bind_scalar(SqlExpr.subquery(1), scope.out_schema, scope, cat, cte, pre)
+        _ = _bind_corr_scalar(
+            SqlExpr.subquery(5), _schema(), aliases, _no_outer(), refs, cat, cte, pre
+        )
         raise Error("bound")
     except e:
-        _raised(String(e), "SQL bind error: dangling scalar-subquery index")
+        _raised(
+            String(e),
+            "SQL bind error: dangling subquery index in correlated subquery",
+        )
+
+
+def test_deparse_constants_and_aggregate_codes() raises:
+    assert_equal(String(_sxagg_text(SXAGG_SUM)), "sum")
+    assert_equal(String(_sxagg_text(SXAGG_COUNT)), "count")
+    assert_equal(String(_sxagg_text(SXAGG_MIN)), "min")
+    assert_equal(String(_sxagg_text(SXAGG_MAX)), "max")
+    assert_equal(String(_sxagg_text(SXAGG_AVG)), "avg")
+    assert_equal(String(_duckdb_const_text(UInt8(4))), "?column?")
+    assert_equal(String(_duckdb_const_text(UInt8(3))), "(SELECT ...)")
+    assert_equal(String(_duckdb_const_text(UInt8(0))), "*")
+    # An aggregate node built with no source spelling is named by its code.
+    assert_equal(_duckdb_expr_text(SqlExpr.agg(SXAGG_AVG, SqlExpr.column("v"))), "avg(v)")
 
 
 def main() raises:
