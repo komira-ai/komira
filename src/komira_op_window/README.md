@@ -85,7 +85,11 @@ Modules:
   path (`partition_topn_compact`, built on the engine's workers when given a
   pool); any other keys take the window sort and one walk. Both give the
   window operator's rows; among equal sort keys ROW_NUMBER keeps the earliest
-  input rows, whatever the number of workers.
+  input rows, whatever the number of workers. Within a partition the rows
+  come best first, ties in input order, and a partition's rows are
+  contiguous. The order of the partitions differs between the two paths (the
+  heap path emits them in first-seen order, the sort path in sorted key
+  order): callers must not rely on it.
 - `partition_null_policy`: the NULL policy every aggregate kernel shares,
   and the output allocators that size a validity bitmap only when a NULL can
   be written.

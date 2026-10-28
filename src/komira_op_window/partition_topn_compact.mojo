@@ -37,6 +37,7 @@ from komira_arrow.record_batch import RecordBatch
 from komira_async.runtime.parallel_fork_join_shared import SharedForkJoinHandle
 from komira_async.runtime.sched_trace import SITE_PTOPN_HEAP_BUILD
 from komira_async_api.shared_chunk_work import SharedChunkWork
+from komira_engine_runtime.grain_geometry import grain_geometry_record
 from komira_udf.float_quotient_order import canonical_bits_f64
 
 
@@ -413,6 +414,10 @@ def _build_partition_heaps_dispatch[
         var chunk_lo = List[Int](capacity=nw + 1)
         for p in range(nw + 1):
             chunk_lo.append((p * num_rows) // nw)
+        # The split, readable by tests: rows, rows per range, ranges, tasks.
+        grain_geometry_record(
+            SITE_PTOPN_HEAP_BUILD, num_rows, (num_rows + nw - 1) // nw, nw, nw
+        )
         # DISPATCH-BOUNDARY SAFETY:
         #   * Disjointness: chunk p reads the key arrays over its own range
         #     (read-only for the wave) and writes only `chunks[p]`.
