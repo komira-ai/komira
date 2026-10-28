@@ -9,6 +9,8 @@ load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs")
 load(":defs.bzl", "tar_member")
 load(":interpreter_budget.bzl", "interpreter_budget")
 load(":no_shell.bzl", "no_shell")
+load(":one_mopm.bzl", "one_mopm")
+load("//release/readme_e2e:packages.bzl", README_E2E_MOPM = "MOPM")
 load(":timing.bzl", "timing")
 
 # Built with zig 0.15.2 (`:zig_next`); the executables are built behind the check
@@ -154,5 +156,16 @@ timing(
     cells = {"tools/build/tests": "tests//:doc_tree"},
     dotfiles = ["//:github_tree"],
     list = "tools/build/lint/timing_list.tsv",
+    tree = "//:doc_tree",
+)
+
+# One mopm (one_mopm.bzl): every package's mopm-toolchain.toml names the same
+# mopm version, and it is the one the release flow builds with (`MOPM` of
+# release/readme_e2e/packages.bzl). The fixtures that test a version are rows
+# of one_mopm_exceptions.tsv.
+one_mopm(
+    name = "one_mopm",
+    list = "tools/build/lint/one_mopm_exceptions.tsv",
+    release = README_E2E_MOPM,
     tree = "//:doc_tree",
 )
