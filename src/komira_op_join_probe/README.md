@@ -15,6 +15,15 @@ import from the modules.
 - `komira_op_join_probe.join_multi_key_outer`: `multi_key_probe_right_into`
   and `multi_key_probe_full_into`, which also emit every unmatched build row
   (probe index -1).
+- `komira_op_join_probe.join_multi_key_parallel`:
+  `parallel_multi_key_inner_probe_into`, the INNER probe fanned over the
+  engine's dispatcher: workers claim probe morsels and walk a batch of rows'
+  chains together (`join_multi_key_parallel_task`), then one more fanned wave
+  concatenates their matches. The same pairs as the serial probe, grouped by
+  worker.
+- `komira_op_join_probe.join_probe_settings`: the probe's process settings,
+  set once from flags: the batched walk's width (0 is the row-at-a-time walk),
+  the probe morsel, and the retile.
 - `komira_op_join_probe.join_key_extract`: `extract_join_key_columns_typed`
   (and `extract_join_key_columns_serial`, without a dispatcher) renders a
   batch's key columns into one Int64 key slot per row and key
@@ -42,6 +51,7 @@ from komira_arrow.schema import Field, SchemaBuilder
 from komira_op_join_probe.join_key_extract import extract_join_key_columns_serial
 from komira_op_join_probe.join_multi_key_builder import MultiKeyHashJoinBuilder
 from komira_op_join_probe.join_multi_key_filter import multi_key_probe_anti
+from komira_op_join_probe.join_probe_settings import MK_PROBE_BATCH_DEFAULT, mk_probe_batch_width
 
 # A two-key join on (a, b). Build rows: (1, 10), (1, 20), (2, 10).
 # Probe rows: (1, 20), (2, 99), (1, 10).
@@ -72,4 +82,7 @@ assert_equal(build_rows[1], 0)
 var anti = multi_key_probe_anti(join, extract_join_key_columns_serial(probe, keys))
 assert_equal(len(anti), 1)
 assert_equal(anti[0], 1)
+
+# Unconfigured, the parallel probe walks 512 rows' chains together.
+assert_equal(mk_probe_batch_width(), MK_PROBE_BATCH_DEFAULT)
 ```
