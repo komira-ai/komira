@@ -133,7 +133,6 @@ not sources:
 | `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependency and where the library and its tests are |
 | `mopm.lock` | the toolchain pins and the path dependencies, direct and transitive (no registry is reached: every dependency is a sibling) |
 | `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
-| `coverage_floor.txt` | `lines NN.NN`: the least coverage `:coverage` may measure; `:coverage_floor` fails when it falls below |
 | `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifests of the siblings; `buildrules mojo check` fails when they are stale |
 
 The `.proto` files are the inputs of the generator. `komira_plan_proto_generated_gen` writes the Mojo for them,
