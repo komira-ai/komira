@@ -683,6 +683,10 @@ test "the plan does not edit ci/targets: no write for it, and the farm step name
     };
     try t.expect(copy != null);
     try t.expect(std.mem.indexOf(u8, copy.?, "cp -rL --no-preserve=mode") != null);
+    // The copy runs only when the generator printed an existing directory that is not `/`: an
+    // empty output would make the bare form copy `/` into ci/.
+    try t.expect(std.mem.indexOf(u8, copy.?, "out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d \"$out\" ] && [ \"$out\" != / ] && cp -rL --no-preserve=mode \"$out\"/. ci/") != null);
+    try t.expect(std.mem.indexOf(u8, copy.?, "\"$(./buck2") == null);
     try t.expect(std.mem.indexOf(u8, copy.?, "> ci/targets.bzl") == null);
     for (sharded.writes) |w| try t.expect(std.mem.indexOf(u8, w.path, "ci/targets") == null);
 }

@@ -56,8 +56,8 @@ What it leaves to the farm, and prints: `buildrules.mojo.bzl` and `buildrules.mo
 (`buildrules mojo sync`, the recipe's step 4), `coverage_floor.txt` (a measure), and the regeneration of the
 `ci/targets` rows (`:ci`, `:conda_holds`, `:coverage_floor`, `:table` of the package): the plan prints the
 command for the layout it finds, `./buck2 bxl komira//tools/build/ci/targets.bxl:generate > ci/targets.bzl`
-for one file, `cp -rL --no-preserve=mode "$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate)"/. ci/`
-for the sharded layout (`ci/targets/shard_<n>.bzl`), then `guard.bxl:check`. The tool builds and runs nothing.
+for one file, `out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d "$out" ] && [ "$out" != / ] && cp -rL --no-preserve=mode "$out"/. ci/`
+for the sharded layout (`ci/targets/shard_<n>.bzl`; the form refuses an empty or missing generator output, which a bare `"$(...)"/.` would turn into a copy of `/`), then `guard.bxl:check`. The tool builds and runs nothing.
 
 ## What it refuses
 
