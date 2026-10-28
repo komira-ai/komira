@@ -130,15 +130,15 @@ def _one(var desc: SegmentDescPod) -> List[SegmentDescPod]:
 
 
 def _scan_plan(path: String, morsel_rows: Int) -> SegmentDescPod:
-    """Scan with a pushed a >= 20; filter b > 500 (NULL b is dropped); project
-    (s, a), dropping b; limit ten rows."""
+    """Scan with a pushed a >= 60; filter b > 500 (a > 50, and a NULL b is
+    dropped); project (s, a), dropping b; limit ten rows."""
     var ops = chain(
         MorselOp.filter(_cmp(BIN_GT, "b", 500)),
         project_columns(_names("s", "a")),
         MorselOp.limit(10),
     )
     return parquet_segment(
-        0, path, None, Optional(_cmp(BIN_GE, "a", 20)), ops^, morsel_rows
+        0, path, None, Optional(_cmp(BIN_GE, "a", 60)), ops^, morsel_rows
     )
 
 
@@ -159,7 +159,7 @@ def test_scan_filter_project_limit_end_to_end() raises:
     var batch = out.take(0)
     var want = List[Int]()
     for r in range(100):
-        if r >= 20 and not b_is_null(r) and r * 10 > 500 and len(want) < 10:
+        if r >= 60 and not b_is_null(r) and r * 10 > 500 and len(want) < 10:
             want.append(r)
     assert_equal(len(want), 10)
     var names = column_names(batch)
@@ -193,7 +193,7 @@ def test_the_same_plan_on_three_workers_and_cut_morsels() raises:
     var seen = List[Bool](length=100, fill=False)
     for i in range(len(got)):
         var r = got[i]
-        assert_true(r >= 20 and r * 10 > 500 and not b_is_null(r), "row " + String(r))
+        assert_true(r >= 60 and r * 10 > 500 and not b_is_null(r), "row " + String(r))
         assert_false(seen[r], "row " + String(r) + " twice")
         seen[r] = True
         assert_equal(s[i], "s" + String(r % 4))

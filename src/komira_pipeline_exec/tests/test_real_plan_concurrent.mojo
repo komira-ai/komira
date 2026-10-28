@@ -85,21 +85,21 @@ def _write(name: String) raises -> String:
 
 
 def _plan(path: String, limit: Int) -> List[SegmentDescPod]:
-    """Scan with a pushed a >= 100; filter b > 2000; project (s, a); and, when
-    `limit` is positive, limit."""
+    """Scan with a pushed a >= 250; filter b > 1000 (a > 100, and a NULL b is
+    dropped); project (s, a); and, when `limit` is positive, limit."""
     var ops = chain(
-        MorselOp.filter(_cmp(BIN_GT, "b", 2000)),
+        MorselOp.filter(_cmp(BIN_GT, "b", 1000)),
         project_columns(_names("s", "a")),
     )
     if limit > 0:
         ops = chain(
-            MorselOp.filter(_cmp(BIN_GT, "b", 2000)),
+            MorselOp.filter(_cmp(BIN_GT, "b", 1000)),
             project_columns(_names("s", "a")),
             MorselOp.limit(limit),
         )
     var out = List[SegmentDescPod]()
     out.append(
-        parquet_segment(0, path, None, Optional(_cmp(BIN_GE, "a", 100)), ops^, 24)
+        parquet_segment(0, path, None, Optional(_cmp(BIN_GE, "a", 250)), ops^, 24)
     )
     return out^
 
@@ -107,12 +107,12 @@ def _plan(path: String, limit: Int) -> List[SegmentDescPod]:
 def _check(got_a: List[Int], got_s: List[String], limit: Int) raises:
     var kept = 0
     for r in range(ROWS):
-        if r >= 100 and r * 10 > 2000 and not b_is_null(r):
+        if r >= 250 and r * 10 > 1000 and not b_is_null(r):
             kept += 1
     var seen = List[Bool](length=ROWS, fill=False)
     for i in range(len(got_a)):
         var r = got_a[i]
-        assert_true(r >= 100 and r < ROWS and r * 10 > 2000 and not b_is_null(r))
+        assert_true(r >= 250 and r < ROWS and r * 10 > 1000 and not b_is_null(r))
         assert_false(seen[r], "row " + String(r) + " twice")
         seen[r] = True
         assert_equal(got_s[i], "s" + String(r % 4))
