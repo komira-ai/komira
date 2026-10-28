@@ -1,0 +1,41 @@
+# The guard of the default aggregate: `//ci:pr_default` is the check set of
+# `//ci:pr` without the roots of the HEAVY rows of rules.bzl, and this fails
+# when it is not.
+#
+#   ./buck2 bxl komira//tools/build/ci/default_guard.bxl:check
+#
+# For every row (heavy target, own paths, roots, reason): the full aggregate
+# reaches the target (else the row is stale), the default aggregate does not
+# (else a root that reaches the target is missing from the row, and every pull
+# request that is not the target's own would build it), and every root of the
+# row reaches the target (else it is left out of the default set for nothing).
+#
+# Options: --aggregate <label>, --default <label>.
+
+load(":ci_graph.bzl", "closure", "default_findings")
+load(":rules.bzl", "AGGREGATE", "DEFAULT", "HEAVY")
+
+def _check(ctx):
+    aggregate = ctx.cli_args.aggregate or AGGREGATE
+    default = ctx.cli_args.default or DEFAULT
+    full = closure(ctx, aggregate)
+    reached = closure(ctx, default)
+    memo = {}
+
+    def reaches(root, target):
+        if root not in memo:
+            memo[root] = closure(ctx, root)
+        return target in memo[root]
+
+    found = default_findings(HEAVY, full, reached, reaches, aggregate, default)
+    if found:
+        fail("; ".join(found))
+    ctx.output.print("default guard: {} reaches none of {}; each root left out reaches one".format(default, ", ".join([r[0] for r in HEAVY])))
+
+check = bxl_main(
+    impl = _check,
+    cli_args = {
+        "aggregate": cli_args.string(default = ""),
+        "default": cli_args.string(default = ""),
+    },
+)
