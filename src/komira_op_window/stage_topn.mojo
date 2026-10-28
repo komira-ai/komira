@@ -6,8 +6,10 @@
 # `Stage_TopN_Dynamic_1_I64[KeyExpr]` (capacity at run time) are
 # `FusedMorselOp`s: `process_batch` evaluates the key expression per row and
 # pushes (key, row index) into a `topn_stage` heap; `finalize` emits a
-# 2-column batch (key INT64, payload INT64 = the row index in its batch), best
-# first. The direction is the scaffold's `sort_dir`.
+# 2-column batch (key INT64, payload INT64 = the row's index among all rows
+# fed so far, across batches), best first. Rows with equal keys come out in
+# row order, so the rows and their order are those of a stable sort of the
+# whole input. The direction is the scaffold's `sort_dir`.
 #
 # The key is an `ExprXI64`, which has no NULL channel: a NULL key is read as
 # the value its expression yields for the row.
@@ -54,11 +56,13 @@ struct Stage_TopN_1_I64[KeyExpr: ExprXI64, N: Int](FusedMorselOp):
     var scaffold: TopNStageScaffoldI64[Self.N]
     var output_schema: Schema
     var key_expr: Self.KeyExpr
+    var rows_seen: Int64
 
     def __init__(out self, var scaffold: TopNStageScaffoldI64[Self.N], var output_schema: Schema):
         self.scaffold = scaffold^
         self.output_schema = output_schema^
         self.key_expr = Self.KeyExpr()
+        self.rows_seen = 0
 
     def bind(mut self, resolver: ColumnResolver) raises:
         """Bind the key expression's columns."""
@@ -68,7 +72,10 @@ struct Stage_TopN_1_I64[KeyExpr: ExprXI64, N: Int](FusedMorselOp):
         """Push every row's key; emit nothing until `finalize`."""
         var n = batch.n_rows()
         for i in range(n):
-            self.scaffold.push_row(self.key_expr.eval_scalar_s[bo](batch, i), Int64(i))
+            self.scaffold.push_row(
+                self.key_expr.eval_scalar_s[bo](batch, i), self.rows_seen + Int64(i)
+            )
+        self.rows_seen += Int64(n)
         return ProcessResult.need_input(Optional[RecordBatch](None))
 
     def finalize(var self) raises -> Optional[RecordBatch]:
@@ -83,11 +90,13 @@ struct Stage_TopN_Dynamic_1_I64[KeyExpr: ExprXI64](FusedMorselOp):
     var scaffold: TopNStageScaffoldI64Dynamic
     var output_schema: Schema
     var key_expr: Self.KeyExpr
+    var rows_seen: Int64
 
     def __init__(out self, var scaffold: TopNStageScaffoldI64Dynamic, var output_schema: Schema):
         self.scaffold = scaffold^
         self.output_schema = output_schema^
         self.key_expr = Self.KeyExpr()
+        self.rows_seen = 0
 
     def bind(mut self, resolver: ColumnResolver) raises:
         """Bind the key expression's columns."""
@@ -97,7 +106,10 @@ struct Stage_TopN_Dynamic_1_I64[KeyExpr: ExprXI64](FusedMorselOp):
         """Push every row's key; emit nothing until `finalize`."""
         var n = batch.n_rows()
         for i in range(n):
-            self.scaffold.push_row(self.key_expr.eval_scalar_s[bo](batch, i), Int64(i))
+            self.scaffold.push_row(
+                self.key_expr.eval_scalar_s[bo](batch, i), self.rows_seen + Int64(i)
+            )
+        self.rows_seen += Int64(n)
         return ProcessResult.need_input(Optional[RecordBatch](None))
 
     def finalize(var self) raises -> Optional[RecordBatch]:

@@ -13,11 +13,15 @@
 #   * A NULL key is worse than every value, so its row survives only when
 #     fewer than N rows have a value: the first N NULL-key payloads are kept
 #     apart and fill the result after the heap's rows. Which NULL rows are
-#     kept when there are more than needed is unspecified (they tie, §4.7).
+#     kept when there are more than needed is unspecified (they tie, §4.7):
+#     the first N fed, so it depends on feed and merge order.
 #
 # `drain_to_record_batch` emits (key, payload), best first, NULL keys last.
-# `combine` merges another worker's state (a bounded top-N is an
-# order-independent set, so the merge equals one worker fed every row).
+# Rows with equal keys order by payload, smaller first (the heap's tie-break,
+# `bounded_heap`), so a payload that is the input row index gives the stable
+# sort's rows and order. `combine` merges another worker's state; the heap
+# rows of the merge equal one worker fed every row, whatever the feed or merge
+# order.
 # `spill_to_storage` / `restore_from_storage` write the kept rows as one
 # THSPLC chunk (stored keys verbatim, a NULL key as NULL) and read them back.
 # =============================================================================

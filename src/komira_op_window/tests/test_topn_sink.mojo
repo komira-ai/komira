@@ -110,6 +110,26 @@ def test_topn_sink_equals_the_kernel() raises:
         assert_equal(out.num_rows(), n)
 
 
+def test_topn_sink_ties_keep_the_first_rows() raises:
+    # Descending top 10: key 999 occurs 20 times in 20000 rows, so the cut
+    # falls inside a run of ties. The rows kept are the first ten rows with
+    # key 999, in row order (what a stable full sort then a slice gives),
+    # worker split notwithstanding.
+    var full = _batch(20_000)
+    var cuts: List[Int] = [0, 7_000, 7_000, 20_000]
+    var out = _drive(full, cuts, 10)
+    assert_equal(out.num_rows(), 10)
+    ref cv = out.column_at(1)
+    ref ck = out.column_at(0)
+    var next_row = 0
+    for i in range(10):
+        while (next_row * 7919) % 1000 != 999:
+            next_row += 1
+        assert_equal(ck._data.get_typed[Scalar[DType.int64]](ck._offset + i), 999)
+        assert_equal(cv._data.get_typed[Scalar[DType.int64]](cv._offset + i), Int64(next_row))
+        next_row += 1
+
+
 def test_topn_sink_no_rows() raises:
     var full = _batch(10)
     var cuts: List[Int] = [0, 0, 0]

@@ -24,8 +24,10 @@ from komira_engine_runtime.spill.local_disk import LocalDiskSpillStorage
 from komira_eval.expr_x_conformers import ColXI64
 from komira_expr.expr_sortable_key import SORT_DIR_ASC, SORT_DIR_DESC
 from komira_libc.posix import _read_env
+from komira_operator_api.breaker_state_trait import BreakerState
 from komira_udf.column_resolver import ColumnResolver
 
+from komira_op_window.bounded_heap import BoundedHeapStringPayload
 from komira_op_window.partition_topn_state import (
     PTOPN_DIR_ASC,
     PTOPN_DIR_DESC,
@@ -351,6 +353,165 @@ def test_partition_topn_state_null_partition_and_order_keys() raises:
         assert_equal(_null(out2, 1, r), _null(out, 1, r))
         if not _null(out2, 1, r):
             assert_equal(_get(out2, 1, r), _get(out, 1, r))
+
+
+# =============================================================================
+# Ties: equal keys keep the smaller payload (row) first, as a stable sort does
+# =============================================================================
+
+
+def _drain[S: BreakerState](st: S) raises -> RecordBatch:
+    var o = st.drain_to_record_batch()
+    return o.take()
+
+
+def _payloads(rb: RecordBatch, col: Int) -> List[Int64]:
+    var out = List[Int64]()
+    for r in range(rb.num_rows()):
+        out.append(_get(rb, col, r))
+    return out^
+
+
+def _check_payloads(rb: RecordBatch, col: Int, want: List[Int64]) raises:
+    assert_equal(rb.num_rows(), len(want))
+    for r in range(len(want)):
+        assert_equal(_get(rb, col, r), want[r])
+
+
+def test_topn_state_ties_follow_row_order() raises:
+    # Keys 5 5 9 5 5 1 5 at rows 0..6, every key valid.
+    var keys: List[Int64] = [5, 5, 9, 5, 5, 1, 5]
+    var valid = _all(7)
+    var batch = _kp_batch(keys, valid)
+    var bv = batch_view_over(batch)
+
+    # ASC top 4: 1 (row 5), then the first three 5s by row: 0, 1, 3.
+    var asc_want: List[Int64] = [5, 0, 1, 3]
+    var asc = TopNState[4, 0, 1, TOPN_DIR_ASC]()
+    _feed(asc, batch)
+    var asc_out = _drain(asc)
+    _check_payloads(asc_out, 1, asc_want)
+
+    # The same rows fed last-row-first keep the same rows in the same order.
+    var rev = TopNState[4, 0, 1, TOPN_DIR_ASC]()
+    for r in range(6, -1, -1):
+        rev.feed_row(bv, r)
+    _check_payloads(_drain(rev), 1, asc_want)
+
+    # Two workers merged in either order give the same rows again.
+    var a0 = TopNState[4, 0, 1, TOPN_DIR_ASC]()
+    var a1 = TopNState[4, 0, 1, TOPN_DIR_ASC]()
+    for r in range(7):
+        if r < 4:
+            a1.feed_row(bv, r)
+        else:
+            a0.feed_row(bv, r)
+    a0.combine(a1^)
+    _check_payloads(_drain(a0), 1, asc_want)
+
+    # DESC top 4: 9 (row 2), then the first three 5s by row: 0, 1, 3.
+    var desc_want: List[Int64] = [2, 0, 1, 3]
+    var desc = TopNState[4, 0, 1, TOPN_DIR_DESC]()
+    for r in range(6, -1, -1):
+        desc.feed_row(bv, r)
+    _check_payloads(_drain(desc), 1, desc_want)
+
+
+def test_partition_topn_state_ties_follow_row_order() raises:
+    # One partition; order keys 7 7 7 3 7 at rows 0..4, fed last-row-first.
+    var g: List[Int64] = [1, 1, 1, 1, 1]
+    var k: List[Int64] = [7, 7, 7, 3, 7]
+    var p: List[Int64] = [0, 1, 2, 3, 4]
+    var cols = List[Column[HeapRegion]]()
+    cols.append(_i64(g, _all(5)))
+    cols.append(_i64(k, _all(5)))
+    cols.append(_i64(p, _all(5)))
+    var names: List[String] = ["g", "k", "p"]
+    var batch = _batch(names, cols^)
+    var bv = batch_view_over(batch)
+    var asc = PartitionTopNState[0, 1, 2, 3, PTOPN_DIR_ASC]()
+    for r in range(4, -1, -1):
+        asc.feed_row(bv, r)
+    var want_asc: List[Int64] = [3, 0, 1]
+    _check_payloads(_drain(asc), 2, want_asc)
+    var desc = PartitionTopNState[0, 1, 2, 3, PTOPN_DIR_DESC]()
+    for r in range(4, -1, -1):
+        desc.feed_row(bv, r)
+    var want_desc: List[Int64] = [0, 1, 2]
+    _check_payloads(_drain(desc), 2, want_desc)
+
+
+def _push_str[N: Int, D: Int](
+    mut h: BoundedHeapStringPayload[N, D], key: String, pay: Int64
+):
+    _ = h.push_returning_evicted(key.as_bytes(), pay)
+
+
+def _string_heap_payloads[N: Int, D: Int](mut h: BoundedHeapStringPayload[N, D]) -> List[Int64]:
+    var out = List[Int64]()
+    var slots = h.extract_sorted()
+    for i in range(len(slots)):
+        out.append(slots[i].payload_row_id)
+    return out^
+
+
+def test_string_heap_ties_follow_payload_order() raises:
+    # Rows: b a a a (payloads 0..3). ASC top 2: the first two a's.
+    var fwd = BoundedHeapStringPayload[2, 0]()
+    _push_str(fwd, "b", 0)
+    _push_str(fwd, "a", 1)
+    _push_str(fwd, "a", 2)
+    _push_str(fwd, "a", 3)
+    var want_asc: List[Int64] = [1, 2]
+    var fgot = _string_heap_payloads(fwd)
+    assert_equal(len(fgot), 2)
+    assert_equal(fgot[0], want_asc[0])
+    assert_equal(fgot[1], want_asc[1])
+    var fwd2 = BoundedHeapStringPayload[2, 0]()
+    _push_str(fwd2, "a", 3)
+    _push_str(fwd2, "a", 2)
+    _push_str(fwd2, "a", 1)
+    _push_str(fwd2, "b", 0)
+    var got = _string_heap_payloads(fwd2)
+    assert_equal(len(got), 2)
+    assert_equal(got[0], want_asc[0])
+    assert_equal(got[1], want_asc[1])
+    # DESC top 2 of b b b a (payloads 0..3), fed last-first: b rows 0 and 1.
+    var d = BoundedHeapStringPayload[2, 1]()
+    _push_str(d, "a", 3)
+    _push_str(d, "b", 2)
+    _push_str(d, "b", 1)
+    _push_str(d, "b", 0)
+    var dgot = _string_heap_payloads(d)
+    assert_equal(len(dgot), 2)
+    assert_equal(dgot[0], 0)
+    assert_equal(dgot[1], 1)
+
+
+def test_stage_topn_ties_across_batches_follow_row_order() raises:
+    # Two batches of keys [4, 4, 1] and [4, 1, 4] (rows 0..5). ASC top 3: the
+    # two 1s (rows 2, 4) then the first 4 (row 0). The payload is the row
+    # index across batches; a batch-local index would let row 3 (index 0 of
+    # the second batch) displace row 1.
+    var k0: List[Int64] = [4, 4, 1]
+    var k1: List[Int64] = [4, 1, 4]
+    var c0 = List[Column[HeapRegion]]()
+    c0.append(_i64(k0, _all(3)))
+    var c1 = List[Column[HeapRegion]]()
+    c1.append(_i64(k1, _all(3)))
+    var names: List[String] = ["k"]
+    var b0 = _batch(names, c0^)
+    var b1 = _batch(names, c1^)
+    var st = Stage_TopN_1_I64[ColXI64["k"], 3](
+        scaffold=TopNStageScaffoldI64[3].new(SORT_DIR_ASC), output_schema=_schema_kp()
+    )
+    st.bind(_resolver_k())
+    _ = st.process_batch(batch_view_over(b0))
+    _ = st.process_batch(batch_view_over(b1))
+    var out_opt = st^.finalize()
+    var out = out_opt.take()
+    var want: List[Int64] = [2, 4, 0]
+    _check_payloads(out, 1, want)
 
 
 def main() raises:
