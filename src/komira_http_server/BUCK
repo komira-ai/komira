@@ -27,6 +27,7 @@ mojo_library(
         "tests/test_L0_accept_loop_rounds.mojo",
         "tests/test_L0_accept_loop_sweep.mojo",
         "tests/test_L0_accept_loop_tls.mojo",
+        "tests/test_L0_dispatch_parked_tail.mojo",
         "tests/test_L0_transport_basic.mojo",
         "tests/test_L2_codec_header_limits.mojo",
         "tests/test_L2_h2_hostile_frames.mojo",

@@ -93,6 +93,8 @@ TARGETS = [
     "komira//tools/build/examples/shared_lib:spike_exact",
     "komira//tools/build/gen:command_agreement",
     "komira//tools/build/gen:transition_lint",
+    "komira//tools/build/package/libkomira:libkomira_install",
+    "komira//tools/build/package/libkomira:libkomira_install_unpinned",
     "komira//tools/build/proto-codegen/aws_endpoint_rules:endpoint_bindings_conda",
     "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_ec2_conda",
     "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_query_client_conda",

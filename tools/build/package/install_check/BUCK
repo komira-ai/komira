@@ -1,0 +1,27 @@
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+
+# The probe's unit tests: which mapped files a load may and may not come from
+# (a runtime library from the host, a sibling directory of the prefix, a
+# required library never mapped).
+zig_test(
+    name = "dlopen_probe_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "dlopen_probe.zig",
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+# Loads a library by path with RTLD_NOW; links the C library of the glibc floor
+# (`x86_64-linux-gnu.2.34`, the triple the packages are built for) for dlopen.
+zig_exe(
+    name = "dlopen_probe",
+    exec_compatible_with = LINUX_X86_64,
+    src = "dlopen_probe.zig",
+    link_libc = True,
+    target = "x86_64-linux-gnu.2.34",
+    unit_tests = [":dlopen_probe_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)

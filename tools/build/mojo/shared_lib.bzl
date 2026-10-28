@@ -119,6 +119,14 @@ def _shared_lib_impl(ctx):
             limit = cmd_args(script, format = "-Wl,--version-script={}")
         link_extra = cmd_args(link_extra, limit) if link_extra else cmd_args(limit)
 
+    if not darwin:
+        # The run path also names the library's own directory: an installed
+        # package puts the library in `<prefix>/lib`, where the Mojo
+        # runtime it is NEEDED on is installed beside it, so `$ORIGIN/lib`
+        # (the `lib/` the gate stages) alone finds nothing there. lld joins
+        # the two `-rpath` into one DT_RUNPATH.
+        link_extra = cmd_args(link_extra, "-Wl,-rpath,$ORIGIN") if link_extra else cmd_args("-Wl,-rpath,$ORIGIN")
+
     # The owners' shared libraries (`native_owners`): linked ahead of the C
     # archives, so the library is NEEDED on each owner's SONAME and the
     # symbols the owner defines are bound to it. The gate stages each owner

@@ -12,6 +12,7 @@ NATIVE_OWNERS = [
     "//src/komira_fs:komira_fs_native",
     "//src/komira_libc:komira_libc_native",
     "//src/komira_metrics:komira_metrics_native",
+    "//src/komira_parquet_codec:komira_parquet_codec_native",
     "//src/komira_scan_source:komira_scan_source_native",
 ]
 
