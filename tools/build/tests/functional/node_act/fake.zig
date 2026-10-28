@@ -8,6 +8,9 @@
 //!                        the package.json check: exits 1 with WHERE on stderr
 //!                        when FILE holds BADPKG; prints "node -e env=<n>
 //!                        ld=<LD_LIBRARY_PATH>" on stdout
+//!   node  --test --test-reporter=tap FILE...
+//!                        prints "test-mode files=<n>" (exits 8 unless the files
+//!                        are absolute), then runs FILE as SCRIPT below
 //!   node  SCRIPT ARGS    a test: SCRIPT's lines say what to do: `env`
 //!                        (print the environment's facts), `args` (print the
 //!                        arguments), `stdout TEXT`, `stderr TEXT`, `exit N`
@@ -58,7 +61,13 @@ pub fn main() !void {
             }
             return;
         }
-        const script = try std.fs.cwd().readFileAlloc(a, args[1], 1 << 20);
+        var first: usize = 1;
+        if (args.len >= 2 and std.mem.eql(u8, args[1], "--test")) {
+            if (args.len < 4 or !std.mem.eql(u8, args[2], "--test-reporter=tap") or !std.fs.path.isAbsolute(args[3])) std.process.exit(8);
+            try out.print("test-mode files={d}\n", .{args.len - 3});
+            first = 3;
+        }
+        const script = try std.fs.cwd().readFileAlloc(a, args[first], 1 << 20);
         var code: u8 = 0;
         var lines = std.mem.splitScalar(u8, script, '\n');
         while (lines.next()) |line| {

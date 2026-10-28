@@ -193,3 +193,50 @@ def held_refusals(changed, base, head, g):
             if m not in now:
                 out.append("{}: {} is no longer held".format(path, m))
     return out
+
+# ---- the heavy checks ---------------------------------------------------
+
+def heavy_split(rules, changed):
+    """(wanted, left_out): the HEAVY rows (rules.bzl) a changed file matches the
+    `own` paths of, and the rows none does."""
+    files = [f for f in changed if f]
+    wanted = []
+    left_out = []
+    for row in rules.heavy:
+        owned = False
+        for f in files:
+            for pattern in row[1]:
+                if pattern_matches(pattern, f):
+                    owned = True
+        if owned:
+            wanted.append(row)
+        else:
+            left_out.append(row)
+    return wanted, left_out
+
+def plan(rules, changed, g, verdict, aggregate, default):
+    """The labels to build for an AFFECTED or WIDENED `verdict`, as (labels, notes).
+
+    A row of HEAVY the change owns nothing of is left out: a WIDENED answer is
+    `default` (the check set without the roots of every row) plus the roots of
+    the rows the change does own, or `aggregate` when it owns all; an AFFECTED
+    answer loses every target that depends on a left-out row's target (a row's
+    own target and the checks above it), and is `default` if nothing is left.
+    With no rows, or every row owned, the answer is the verdict's own."""
+    wanted, left_out = heavy_split(rules, changed)
+    if not left_out:
+        return ([aggregate] if verdict.kind == WIDENED else list(verdict.targets)), []
+    notes = ["left out of the pull request's set (the change owns nothing of them, rules.bzl HEAVY): " + r[0] for r in left_out]
+    if verdict.kind == WIDENED:
+        labels = [default]
+        for row in wanted:
+            labels += row[2]
+        return _unique(labels), notes
+    gone = {}
+    for row in left_out:
+        for t in g.rdeps([row[0]]):
+            gone[t] = True
+    labels = [t for t in verdict.targets if t not in gone]
+    if not labels:
+        return [default], notes + ["every target reached depends on a left-out target: the default set"]
+    return labels, notes

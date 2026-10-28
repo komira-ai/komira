@@ -1406,16 +1406,15 @@ struct CseRefData(Movable):
 
     Fields:
         canonical_hash: the `structural_hash()` of the canonical
-            occurrence's subtree. `plan_compiler` keys its
-            hash->segment-id side-table on this; the engine reads the
-            canonical segment's output. The `LogicalPlan`'s own
+            occurrence's subtree. A consumer would key a
+            hash->result table on this; no consumer exists in this tree yet.
+            The `LogicalPlan`'s own
             `structural_hash()` is special-cased to return THIS value (so
             a CSE'd plan and a manually-deduplicated plan that references
             the same canonical subtree hash identically — re-CSE idempotence).
         output_schema: a snapshot of the canonical subtree's output schema.
             Carried so the `LogicalPlan.output_schema` field is meaningful
-            for any schema-dependent pass that runs after CSE (defensively;
-            CSE runs in pass-2).
+            for any schema-dependent pass that runs after CSE.
     """
     var canonical_hash: UInt64
     var output_schema: Schema
