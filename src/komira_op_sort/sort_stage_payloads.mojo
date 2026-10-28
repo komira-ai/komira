@@ -91,6 +91,15 @@ trait PayloadColumn(Defaultable, Movable, Deinitable):
         """SPILL restore path — read at spill-image column `spill_col`."""
         ...
 
+    def input_is_null[bo: Origin[mut=False]](
+        self, batch: BatchView[bo], row: Int
+    ) -> Bool:
+        """True iff this payload's bound input cell at `row` is NULL. The sort
+        buffer stores values without validity and refuses such a row. The
+        default answers False: a conformer that does not feed from a batch
+        (the join and as-of payload slots) has no input cell to check."""
+        return False
+
     def length(self) -> Int:
         """Number of buffered payload values."""
         ...
@@ -194,6 +203,12 @@ struct PayloadCol_Typed[dt: DType, col: Int](PayloadColumn):
         self.values.append(
             _read_sort_scalar[Self.dt, bo](batch, spill_col, row)
         )
+
+    @always_inline
+    def input_is_null[bo: Origin[mut=False]](
+        self, batch: BatchView[bo], row: Int
+    ) -> Bool:
+        return batch.col_is_null(Self.col, row)
 
     @always_inline
     def length(self) -> Int:
@@ -374,6 +389,12 @@ struct PayloadCol_String[col: Int](PayloadColumn):
         mut self, batch: BatchView[bo], spill_col: Int, row: Int
     ):
         self._append_bytes_from[bo](batch, spill_col, row)
+
+    @always_inline
+    def input_is_null[bo: Origin[mut=False]](
+        self, batch: BatchView[bo], row: Int
+    ) -> Bool:
+        return batch.col_is_null(Self.col, row)
 
     @always_inline
     def length(self) -> Int:

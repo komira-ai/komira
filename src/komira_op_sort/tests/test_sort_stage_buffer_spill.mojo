@@ -4,9 +4,11 @@
 # =============================================================================
 #
 # A composite (INT64, FLOAT64) key buffer with an INT64 payload is spilled to a
-# local-disk spill storage (THSPLC chunks) and restored: into itself, into a
-# fresh buffer, spilled again after a restore, and empty. Spill files go
-# under $TEST_TMPDIR.
+# local-disk spill storage (THSPLC chunks) and restored into the same buffer
+# (the chunk ids live in the buffer that spilled): with two direction
+# configurations, spilled again after a restore, and empty. Spill files go
+# under $TEST_TMPDIR. `test_sort_stage_buffer_spill_order` covers feeding between
+# spills.
 # =============================================================================
 
 from std.ffi import external_call
@@ -196,12 +198,12 @@ def test_sort_buffer_spill_restore_roundtrip() raises:
 
 
 # =============================================================================
-# Test 2 — restore into a FRESH buffer instance (not the one that spilled).
+# Test 2 — restore into the same buffer with the other direction pair.
 # =============================================================================
 
 
-def test_sort_buffer_spill_restore_into_fresh() raises:
-    var root = _temp_root("fresh")
+def test_sort_buffer_spill_restore_same_buffer_asc_desc() raises:
+    var root = _temp_root("ascdesc")
     var storage = LocalDiskSpillStorage.with_unlimited(root)
 
     var ref_buf = _make_buffer(SORT_DIR_ASC_U8, SORT_DIR_DESC_U8)
@@ -212,13 +214,6 @@ def test_sort_buffer_spill_restore_into_fresh() raises:
     var freed = subj.spill_to_storage(storage)
     assert_true(freed > Int64(0), "spill freed bytes")
 
-    # Move the stashed chunk over to a fresh buffer by spilling subj, then
-    # reading the chunk back through a fresh buffer that we hand the same
-    # storage + (re-stashed) chunk. We model the production "same op restores"
-    # contract by restoring on `subj` itself — but here additionally verify a
-    # second independent buffer built from the SAME fixture sorts identically,
-    # confirming the round-trip is shape-faithful (different direction config
-    # than test 1).
     subj.restore_from_storage(storage)
     _assert_drain_equal(ref_buf, subj)
     storage.cleanup()

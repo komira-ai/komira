@@ -186,6 +186,12 @@ struct SortKeyColumn_String[col: Int](SortKeyColumn):
         self._append_bytes_from[bo](batch, spill_col, row)
 
     @always_inline
+    def input_is_null[bo: Origin[mut=False]](
+        self, batch: BatchView[bo], row: Int
+    ) -> Bool:
+        return batch.col_is_null(Self.col, row)
+
+    @always_inline
     def length(self) -> Int:
         return len(self.offsets) - 1
 

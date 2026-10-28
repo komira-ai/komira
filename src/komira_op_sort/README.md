@@ -97,6 +97,19 @@ batch by it.
   `SpillableOp`; its key and payload column types are `sort_stage_columns`,
   `sort_stage_string_key` and `sort_stage_payloads`. Float keys compare by
   `sort_key_lt` everywhere, the top-N SIMD reject mask included.
+  The key block types are `sort_stage_key_block` and the spill ledger is
+  `sort_stage_buffer_spill`; `sort_stage_buffer` re-exports the key block
+  names. The buffer stores values only, with no validity: `feed_row` refuses
+  a row with a NULL in any bound key or payload column (an error naming the
+  column, nothing appended), so callers filter or replace nulls first.
+  Spill writes the pre-sort rows as one chunk and empties the buffer; the
+  buffer may be fed again. `restore_from_storage` puts the spilled rows
+  (chunks in spill order) before the rows fed since, so the drain is the
+  drain of one buffer fed all rows in input order. A restore that fails
+  (a missing chunk, a corrupt image) leaves the buffer and its chunk list
+  unchanged and may be retried; `discard_spilled` releases the outstanding
+  chunks without restoring them. A buffer dropped with chunks outstanding
+  leaves them to the storage's `cleanup`.
 - `sort_stage`: `Stage_Sort[KB, *Payloads]`, the sort breaker as a
   `FusedMorselOp`: feed every row, drain sorted in `finalize`.
 
