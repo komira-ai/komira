@@ -164,6 +164,50 @@ def test_binding_guards():
     assert "closed" in str(e)
 
 
+def test_close_frees_the_handle_once():
+    # close() frees the context exactly once, whichever of close, the with
+    # block's exit and the finalizer comes first, and never again after it.
+    s = Session(lib_path())
+    real_free = s._native.ctx_free
+    freed = []
+
+    def counting_free(ctx):
+        freed.append(ctx)
+        real_free(ctx)
+
+    s._native.ctx_free = counting_free
+    ctx = s._ctx
+    assert ctx
+    with s:
+        pass
+    s.close()
+    s.__del__()
+    assert freed == [ctx], freed
+    # A session that is never closed is freed by the finalizer, once.
+    t = Session(lib_path())
+    t_free = t._native.ctx_free
+    t_freed = []
+    t._native.ctx_free = lambda c: (t_freed.append(c), t_free(c))[1]
+    t_ctx = t._ctx
+    t.__del__()
+    t.__del__()
+    assert t_freed == [t_ctx], t_freed
+
+
+def test_plan_render_refuses_what_is_not_bytes():
+    with Session(lib_path()) as s:
+        # bytes(5) would be five NUL bytes and bytes("x") a TypeError: both are
+        # refused by name before any C call.
+        for bad in (5, "Scan()", None, [1, 2]):
+            e = raises(None, s.plan_render, bad)
+            assert "must be bytes" in str(e), (bad, str(e))
+        # bytearray and memoryview are bytes-like and accepted.
+        plan = bytes.fromhex(SCAN_PLAN_HEX)
+        text = s.plan_render(plan)
+        assert s.plan_render(bytearray(plan)) == text
+        assert s.plan_render(memoryview(plan)) == text
+
+
 def test_parquet_schema_equals_pyarrow():
     want = pq.read_schema(PARQUET).remove_metadata()
     assert [f.name for f in want] == ["i64", "s"] or [f.name for f in want] == ["s", "i64"], want
@@ -194,6 +238,35 @@ def test_wire_decoder_types():
     raises(None, _wire.schema_from_wire, field("x", 4)[:-1])  # truncated
 
 
+def test_wire_every_type_id():
+    # Every id the decoder takes, written out from src/komira_arrow/arrow_types.mojo
+    # (ArrowType.type_id), so an entry of _wire's table that drifts from the
+    # engine's ids, or one that maps to the wrong Arrow type, goes red here.
+    want = {
+        0: pa.null(), 1: pa.bool_(),
+        2: pa.int8(), 3: pa.int16(), 4: pa.int32(), 5: pa.int64(),
+        6: pa.uint8(), 7: pa.uint16(), 8: pa.uint32(), 9: pa.uint64(),
+        10: pa.float16(), 11: pa.float32(), 12: pa.float64(),
+        13: pa.string(), 14: pa.binary(), 15: pa.date32(), 16: pa.date64(),
+        17: pa.timestamp("us"), 22: pa.timestamp("s"), 23: pa.timestamp("ms"),
+        24: pa.timestamp("us"), 25: pa.timestamp("ns"),
+        26: pa.large_string(), 27: pa.large_binary(),
+        30: pa.time32("s"), 31: pa.time32("ms"), 32: pa.time64("us"), 33: pa.time64("ns"),
+        34: pa.duration("s"), 35: pa.duration("ms"), 36: pa.duration("us"), 37: pa.duration("ns"),
+    }
+    for type_id, typ in want.items():
+        body = b"\x0a\x01c" + b"\x10" + bytes([type_id]) + b"\x20\x01"
+        got = _wire.schema_from_wire(b"\x0a" + bytes([len(body)]) + body)
+        assert got.field("c").type == typ, (type_id, got.field("c").type, typ)
+    # The ids the engine has and this binding does not decode are refused by name,
+    # never guessed: dictionary, list, struct, map, decimal256, intervals, unions,
+    # large list, fixed-size binary and list, the views.
+    for type_id in (19, 20, 21, 28, 29, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49):
+        body = b"\x0a\x01c" + b"\x10" + bytes([type_id])
+        e = raises(None, _wire.schema_from_wire, b"\x0a" + bytes([len(body)]) + body)
+        assert "does not decode" in str(e), (type_id, str(e))
+
+
 def test_wire_truncated_and_hostile_input():
     # A fixed64 (wire type 1) and a fixed32 (wire type 5) cut short are refused.
     raises(None, _wire.schema_from_wire, b"\x19" + b"\x00" * 7)  # field 3, fixed64, 7 of 8 bytes
@@ -202,6 +275,24 @@ def test_wire_truncated_and_hostile_input():
     # A length-delimited field (wire type 2) whose declared length runs past the end is refused.
     raises(None, _wire.schema_from_wire, b"\x0a\x05ab")  # field 1, declares 5 bytes, holds 2
     raises(None, _wire.schema_from_wire, b"\x0a\x7f")  # declares 127 bytes, holds none
+    # Field 2 (a metadata key) is not parsed further, so only the bound itself
+    # refuses this one: without it the key would be read short as b"ab".
+    e = raises(None, _wire.schema_from_wire, b"\x12\x03ab")
+    assert "end inside a field" in str(e), str(e)
+    # A varint wider than 64 bits (a tenth byte above 1) is refused; the widest
+    # valid one (2**64 - 1, a type id no table holds) is read and refused by type.
+    wide = b"\x0a\x01c" + b"\x10" + b"\xff" * 9 + b"\x7f"
+    e = raises(None, _wire.schema_from_wire, b"\x0a" + bytes([len(wide)]) + wide)
+    assert "wider than 64 bits" in str(e), str(e)
+    widest = b"\x0a\x01c" + b"\x10" + b"\xff" * 9 + b"\x01"
+    e = raises(None, _wire.schema_from_wire, b"\x0a" + bytes([len(widest)]) + widest)
+    assert "does not decode" in str(e), str(e)
+    # A decimal whose precision Arrow cannot hold is a KomiraError, not pyarrow's
+    # ArrowInvalid: precision 0, 39, and -1 (a negative int64 on the wire).
+    for precision in (b"\x00", b"\x27", b"\xff" * 9 + b"\x01"):
+        dec = b"\x0a\x01d" + b"\x10\x12" + b"\x28" + precision + b"\x30\x00"
+        e = raises(None, _wire.schema_from_wire, b"\x0a" + bytes([len(dec)]) + dec)
+        assert "outside 1..38" in str(e), (precision, str(e))
     # Complete ones are skipped as unknown fields.
     assert len(_wire.schema_from_wire(b"\x19" + b"\x00" * 8 + b"\x1d" + b"\x00" * 4)) == 0
     # A column name or timezone that is not UTF-8 is a KomiraError.
@@ -224,8 +315,12 @@ def test_two_call_growth():
     def growing(buf, cap, n):
         seen["n"] += 1
         if seen["n"] == 1:  # probe
+            assert buf is None and cap == 0, (buf, cap)
             n._obj.value = 10
             return _native.KOMIRA_ERR_BUFFER_TOO_SMALL
+        # Each read passes a buffer of exactly the capacity it names: a smaller
+        # one would let the library write past its end.
+        assert ctypes.sizeof(buf) == cap, (ctypes.sizeof(buf), cap)
         n._obj.value = 12  # the text grew
         if cap < 12:
             return _native.KOMIRA_ERR_BUFFER_TOO_SMALL
@@ -235,12 +330,17 @@ def test_two_call_growth():
     assert _native.read_two_call(growing) == (_native.KOMIRA_OK, b"twelve bytes")
     assert seen["n"] == 3, seen
 
-    # A text that keeps growing is given up on, with the too-small status.
+    # A text that keeps growing is given up on, with the too-small status, after
+    # the probe and exactly _MAX_GROWTH_RETRIES reads (4): not one more, not forever.
+    growth_calls = []
+
     def always_growing(buf, cap, n):
+        growth_calls.append(cap)
         n._obj.value = cap + 1
         return _native.KOMIRA_ERR_BUFFER_TOO_SMALL
 
     assert _native.read_two_call(always_growing)[0] == _native.KOMIRA_ERR_BUFFER_TOO_SMALL
+    assert growth_calls == [0, 1, 2, 3, 4], growth_calls
     # An empty answer needs no second call; a hard failure ends after the probe.
     assert _native.read_two_call(lambda b, c, n: _native.KOMIRA_OK) == (_native.KOMIRA_OK, b"")
     n_calls = []

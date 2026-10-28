@@ -36,6 +36,9 @@ def _varint(buf: bytes, i: int):
             raise KomiraError("the schema bytes end inside a varint")
         b = buf[i]
         i += 1
+        # The tenth byte holds only bit 63 of a uint64.
+        if shift == 63 and b & 0x7E:
+            raise KomiraError("the schema bytes hold a varint wider than 64 bits")
         value |= (b & 0x7F) << shift
         if not b & 0x80:
             return value, i
@@ -100,7 +103,12 @@ def _field(buf: bytes) -> pa.Field:
     elif type_id in _TIMESTAMP_UNIT:
         typ = pa.timestamp(_TIMESTAMP_UNIT[type_id], tz=tz or None)
     elif type_id == _DECIMAL128:
-        typ = pa.decimal128(precision, scale)
+        if not 1 <= precision <= 38:
+            raise KomiraError("column %r is a decimal of precision %d, outside 1..38" % (name, precision))
+        try:
+            typ = pa.decimal128(precision, scale)
+        except (ValueError, OverflowError) as e:  # pyarrow's ArrowInvalid is a ValueError
+            raise KomiraError("column %r is a decimal(%d, %d) Arrow refuses: %s" % (name, precision, scale, e)) from None
     else:
         raise KomiraError("column %r has Arrow type id %d, which this binding does not decode" % (name, type_id))
     return pa.field(name, typ, nullable=nullable)

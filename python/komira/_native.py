@@ -251,11 +251,16 @@ class Native:
         return self._bytes(ctx, "komira_json_binding", lambda b, c, n: self.lib.komira_json_binding(ctx, p, b, c, n))
 
     def plan_render(self, ctx, plan: bytes) -> str:
+        if not isinstance(plan, (bytes, bytearray, memoryview)):
+            raise KomiraError("plan must be bytes, not %s" % type(plan).__name__)
         plan = bytes(plan)
         data = self._bytes(
             ctx, "komira_plan_render", lambda b, c, n: self.lib.komira_plan_render(ctx, plan, len(plan), b, c, n)
         )
-        return data.decode("utf-8")
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            raise KomiraError("komira_plan_render returned text that is not UTF-8") from None
 
     def _bytes(self, ctx, what: str, call) -> bytes:
         status, data = read_two_call(call)
