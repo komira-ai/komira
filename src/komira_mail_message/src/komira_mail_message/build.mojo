@@ -481,16 +481,17 @@ struct MessageBuilder(Copyable, Movable):
 
     def _body(self) raises -> _Entity:
         var body: _Entity
-        if self._text and self._html:
-            var alt = List[_Entity]()
-            alt.append(_text_entity(self._text.value(), "plain"))
-            alt.append(_text_entity(self._html.value(), "html"))
-            var depth = 1 if len(self._attachments) > 0 else 0
-            body = _multipart_entity("alternative", alt, depth)
+        if self._text:
+            if self._html:
+                var alt = List[_Entity]()
+                alt.append(_text_entity(self._text.value(), "plain"))
+                alt.append(_text_entity(self._html.value(), "html"))
+                var depth = 1 if len(self._attachments) > 0 else 0
+                body = _multipart_entity("alternative", alt, depth)
+            else:
+                body = _text_entity(self._text.value(), "plain")
         elif self._html:
             body = _text_entity(self._html.value(), "html")
-        elif self._text:
-            body = _text_entity(self._text.value(), "plain")
         else:
             body = _text_entity(String(""), "plain")
         if len(self._attachments) == 0:
