@@ -486,23 +486,23 @@ def test_null_key_declines_and_the_general_driver_keeps_it_apart() raises:
 # =============================================================================
 
 
-def _run_one_value(
-    var keys: List[String],
-    var vcol: Column,
-    vtype: ArrowType,
-    allow_fused: Bool = True,
-) raises -> RecordBatch:
+def _key_builder(keys: List[String]) raises -> RecordBatchBuilder:
     var rbb = RecordBatchBuilder.with_capacity(2)
     rbb.add_column(Column.from_string(StringArray.from_strings(keys)))
-    rbb.add_column(vcol^)
+    return rbb^
+
+
+def _finish_run(
+    var rbb: RecordBatchBuilder, vtype: ArrowType
+) raises -> RecordBatch:
     var sb = SchemaBuilder()
     sb.add_field(Field("k", ArrowType.STRING, False))
     sb.add_field(Field("v", vtype, False))
-    return _run(rbb.build(sb.build()), False, None, allow_fused)
+    return _run(rbb.build(sb.build()), False, None)
 
 
-def _i64_col(vals: List[Int64]) raises -> Column:
-    return Column.from_primitive[DType.int64](PrimitiveArray[DType.int64].from_list(vals))
+def _i64_array(vals: List[Int64]) raises -> PrimitiveArray[DType.int64]:
+    return PrimitiveArray[DType.int64].from_list(vals)
 
 
 def test_unreadable_value_type_is_refused_by_name_and_type() raises:
@@ -514,9 +514,9 @@ def test_unreadable_value_type_is_refused_by_name_and_type() raises:
         svals.append(String(r % 5))
     var raised = False
     try:
-        _ = _run_one_value(
-            keys^, Column.from_string(StringArray.from_strings(svals)), ArrowType.STRING
-        )
+        var rbb = _key_builder(keys)
+        rbb.add_column(Column.from_string(StringArray.from_strings(svals)))
+        _ = _finish_run(rbb^, ArrowType.STRING)
     except e:
         raised = True
         var msg = String(e)
@@ -555,11 +555,11 @@ def test_float64_values_count_exactly() raises:
         if _key(k) not in oracle:
             oracle[_key(k)] = Set[Int64]()
         oracle[_key(k)].add(code)
-    var got = _run_one_value(
-        keys.copy(),
-        Column.from_primitive[DType.float64](PrimitiveArray[DType.float64].from_list(fvals)),
-        ArrowType.FLOAT64,
+    var rbb = _key_builder(keys)
+    rbb.add_column(
+        Column.from_primitive[DType.float64](PrimitiveArray[DType.float64].from_list(fvals))
     )
+    var got = _finish_run(rbb^, ArrowType.FLOAT64)
     assert_equal(cd_strkey_fused_served_count(), 1, "the fused route served")
     var have = _as_map(got, 1)
     assert_equal(len(have), len(oracle), "key count")
@@ -581,11 +581,11 @@ def test_int32_values_count_exactly() raises:
         if _key(k) not in oracle:
             oracle[_key(k)] = Set[Int32]()
         oracle[_key(k)].add(v)
-    var got = _run_one_value(
-        keys^,
-        Column.from_primitive[DType.int32](PrimitiveArray[DType.int32].from_list(vals)),
-        ArrowType.INT32,
+    var rbb = _key_builder(keys)
+    rbb.add_column(
+        Column.from_primitive[DType.int32](PrimitiveArray[DType.int32].from_list(vals))
     )
+    var got = _finish_run(rbb^, ArrowType.INT32)
     assert_equal(cd_strkey_fused_served_count(), 1, "the fused route served")
     var have = _as_map(got, 1)
     assert_equal(len(have), len(oracle), "key count")
@@ -611,7 +611,9 @@ def test_long_keys_differing_in_the_last_byte_and_few_groups() raises:
         if k not in oracle:
             oracle[k] = Set[Int64]()
         oracle[k].add(v)
-    var got = _run_one_value(keys.copy(), _i64_col(vals), ArrowType.INT64)
+    var rbb = _key_builder(keys)
+    rbb.add_column(Column.from_primitive[DType.int64](_i64_array(vals)))
+    var got = _finish_run(rbb^, ArrowType.INT64)
     assert_equal(cd_strkey_fused_served_count(), 1, "the fused route served")
     var have = _as_map(got, 1)
     assert_equal(len(have), 50, "fifty groups")
@@ -634,7 +636,9 @@ def test_one_key_owning_every_row_declines_and_counts_right() raises:
         keys.append(String("only"))
         vals.append(Int64(r % 1013))
         seen.add(Int64(r % 1013))
-    var got = _run_one_value(keys^, _i64_col(vals), ArrowType.INT64)
+    var rbb = _key_builder(keys)
+    rbb.add_column(Column.from_primitive[DType.int64](_i64_array(vals)))
+    var got = _finish_run(rbb^, ArrowType.INT64)
     assert_equal(cd_strkey_fused_served_count(), 0, "one hot key must decline")
     assert_equal(cd_strkey_fused_heavy_decline_count(), 1, "declined as heavy")
     assert_equal(got.num_rows(), 1, "one group")
@@ -645,7 +649,9 @@ def test_empty_input_is_not_served_and_yields_no_groups() raises:
     reset_cd_strkey_fused_counters()
     var keys = List[String]()
     var vals = List[Int64]()
-    var got = _run_one_value(keys^, _i64_col(vals), ArrowType.INT64)
+    var rbb = _key_builder(keys)
+    rbb.add_column(Column.from_primitive[DType.int64](_i64_array(vals)))
+    var got = _finish_run(rbb^, ArrowType.INT64)
     assert_equal(cd_strkey_fused_served_count(), 0, "an empty input is not served")
     assert_equal(got.num_rows(), 0, "no rows, no groups")
 
