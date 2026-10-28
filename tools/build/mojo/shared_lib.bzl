@@ -216,6 +216,13 @@ def _shared_lib_impl(ctx):
         # closure, which is where the run path (`$ORIGIN/lib`) looks. A copy,
         # not links: the loader expands `$ORIGIN` from the resolved path.
         files = {so_file: public}
+
+        # The toolchain does not name its platform row, so the list is read
+        # from one: the linux rows state the same runtime libraries (the
+        # compiler's three and its NEEDED libstdc++ and libgcc_s), and this
+        # fails the day they differ instead of shipping the wrong set.
+        if row("linux-x86_64")["runtime_libs"] != row("linux-arm64")["runtime_libs"]:
+            fail("{}: the linux platform rows list different runtime_libs; select the row by the target platform".format(ctx.label))
         for name in row("linux-x86_64")["runtime_libs"]:
             files["lib/" + name] = tc.runtime.project(name)
         for dest, so in owner_files.items():

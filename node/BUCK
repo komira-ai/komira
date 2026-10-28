@@ -35,16 +35,26 @@ c_shared_lib(
     out = "libkomira_fake_no_render.so",
 )
 
+# A stand-in whose parquet_schema and plan_render results hold the capacity the
+# addon passed and the length the call reported.
+c_shared_lib(
+    name = "fake_capacity",
+    srcs = ["tests/fake_libkomira.c"],
+    copts = ["-DFAKE_RECORD_CAPACITY"],
+    out = "libkomira_fake_capacity.so",
+)
+
 # The addon before and while the library loads: the refusals of load().
 node_binding_test(
     name = "load_test",
-    srcs = ["load.test.mjs"],
+    srcs = ["load.test.mjs", "capacity.test.mjs"],
     data = {
         "komira_addon.node": ":komira_addon",
         "libkomira": LIBKOMIRA,
         "fake/libkomira_fake_v2.so": ":fake_v2",
         "fake/libkomira_fake_v0.so": ":fake_v0",
         "fake/libkomira_fake_no_render.so": ":fake_no_render",
+        "fake/libkomira_fake_capacity.so": ":fake_capacity",
     },
 )
 

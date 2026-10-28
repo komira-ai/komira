@@ -312,9 +312,8 @@ static napi_value js_load(napi_env env, napi_callback_info info) {
   if (napi_get_undefined(env, &result) != napi_ok) result = NULL;
   goto done;
 closed:
-  // Nothing of the library ran beyond komira_abi_version; the Mojo runtime
-  // it brought stays mapped, which is harmless.
-  dlclose(lib);
+  // A refused library stays mapped, like an accepted one: komira_abi_version
+  // is Mojo code and may have started the runtime, which cannot be unloaded.
 done:
   pthread_mutex_unlock(&g_load_lock);
   free(path);
