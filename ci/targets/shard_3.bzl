@@ -86,7 +86,6 @@ TARGETS = [
     "komira//tools/build/examples/cshim:cadd_conda",
     "komira//tools/build/examples/cshim:cadd_user",
     "komira//tools/build/examples/cshim:test_add_direct",
-    "komira//tools/build/examples/shared_lib:plain",
     "komira//tools/build/examples/shared_lib:plain_exact",
     "komira//tools/build/examples/shared_lib:spike",
     "komira//tools/build/examples/shared_lib:spike_exact",
