@@ -32,7 +32,7 @@ from komira_spsc_ring.spsc_ring import (
     OVERFLOW_DROP,
 )
 
-from komira_bench.harness import BenchArgs, Param, result_line
+from komira_bench.harness import BenchArgs, Param, parse_args, result_line, usage
 
 comptime DEFAULT_TOTAL_OPS = 20_000_000
 
@@ -181,3 +181,27 @@ def bench_lines(cap: Int, args: BenchArgs) raises -> List[String]:
         _line("drop_push", cap, bench_drop_push(cap, args.total_ops), args.hide_times)
     )
     return lines^
+
+
+def program_lines(arguments: List[String]) raises -> List[String]:
+    """What the `spsc_ring` program prints for `arguments` (the command line
+    without the program name): the usage text for `--help`, else the lines of
+    each capacity in order. Raises on an argument `parse_args` refuses."""
+    var args = parse_args(arguments, DEFAULT_TOTAL_OPS, default_caps())
+    var out = List[String]()
+    if args.help:
+        out.append(usage("spsc_ring", DEFAULT_TOTAL_OPS, default_caps()))
+        return out^
+    for i in range(len(args.caps)):
+        var lines = bench_lines(args.caps[i], args)
+        for j in range(len(lines)):
+            out.append(lines[j])
+    return out^
+
+
+def run_program(arguments: List[String]) raises:
+    """The body of the `spsc_ring` program: prints `program_lines(arguments)`
+    one per line."""
+    var lines = program_lines(arguments)
+    for i in range(len(lines)):
+        print(lines[i])

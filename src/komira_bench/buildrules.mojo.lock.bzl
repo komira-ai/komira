@@ -46,7 +46,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "bin",
       "srcs": [
-        {"path": "src/komira_bench/bins/spsc_ring.mojo", "sha256": "aa47e706f6b0000bb6819f2a69ce87f2eca5c845cdac1d3abec1a854b8966028"}
+        {"path": "src/komira_bench/bins/spsc_ring.mojo", "sha256": "18209adda729b66a220fa34ce8526624992e36a24fe98a67924942f320a21f56"}
       ],
       "deps": ["komira_bench@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -62,7 +62,7 @@ GRAPH_JSON = r'''{
       "srcs": [
         {"path": "src/komira_bench/src/komira_bench/__init__.mojo", "sha256": "6a6bad3f0fc61d49382f616951571a85b3b1e04527887c7c3d5fa86cfba1c66f"},
         {"path": "src/komira_bench/src/komira_bench/harness.mojo", "sha256": "bf0802f3b461326050a84e8db4c8ab13f5852f58ce4f4a78242b2d51ee477650"},
-        {"path": "src/komira_bench/src/komira_bench/spsc_ring_bench.mojo", "sha256": "6dbad2865d54a2ca8dddf5697c305a3cb6b119619ee70c7ff3a0ad597c31eb4e"}
+        {"path": "src/komira_bench/src/komira_bench/spsc_ring_bench.mojo", "sha256": "a6c509c7e7a35d539664718ac2c14bb7c54e276ae959e4e7fa40048ddf1f4d15"}
       ],
       "deps": ["komira_atomic_alias@0.1.0#mojo1.0.0/lib", "komira_spsc_ring@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -88,7 +88,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_bench/tests/test_spsc_ring_bench.mojo", "sha256": "351e0e55c7e751ceae5c744a548fb2f8030034588fd5c80ae6f62a9b7a92fbee"}
+        {"path": "src/komira_bench/tests/test_spsc_ring_bench.mojo", "sha256": "3610e61f343e4cf646074420b88595d2e9e6a0b2fe45fecaeaa35ad8059fd6a3"}
       ],
       "deps": ["komira_bench@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -155,7 +155,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "bin",
       "srcs": [
-        {"path": "src/komira_bench/bins/spsc_ring.mojo", "sha256": "aa47e706f6b0000bb6819f2a69ce87f2eca5c845cdac1d3abec1a854b8966028"}
+        {"path": "src/komira_bench/bins/spsc_ring.mojo", "sha256": "18209adda729b66a220fa34ce8526624992e36a24fe98a67924942f320a21f56"}
       ],
       "deps": ["komira_bench@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -171,7 +171,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "srcs": [
         {"path": "src/komira_bench/src/komira_bench/__init__.mojo", "sha256": "6a6bad3f0fc61d49382f616951571a85b3b1e04527887c7c3d5fa86cfba1c66f"},
         {"path": "src/komira_bench/src/komira_bench/harness.mojo", "sha256": "bf0802f3b461326050a84e8db4c8ab13f5852f58ce4f4a78242b2d51ee477650"},
-        {"path": "src/komira_bench/src/komira_bench/spsc_ring_bench.mojo", "sha256": "6dbad2865d54a2ca8dddf5697c305a3cb6b119619ee70c7ff3a0ad597c31eb4e"}
+        {"path": "src/komira_bench/src/komira_bench/spsc_ring_bench.mojo", "sha256": "a6c509c7e7a35d539664718ac2c14bb7c54e276ae959e4e7fa40048ddf1f4d15"}
       ],
       "deps": ["komira_atomic_alias@0.1.0#mojo1.0.0/lib", "komira_spsc_ring@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -197,7 +197,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_bench/tests/test_spsc_ring_bench.mojo", "sha256": "351e0e55c7e751ceae5c744a548fb2f8030034588fd5c80ae6f62a9b7a92fbee"}
+        {"path": "src/komira_bench/tests/test_spsc_ring_bench.mojo", "sha256": "3610e61f343e4cf646074420b88595d2e9e6a0b2fe45fecaeaa35ad8059fd6a3"}
       ],
       "deps": ["komira_bench@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -261,7 +261,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "bin",
       "srcs": [
-        {"path": "src/komira_bench/bins/spsc_ring.mojo", "sha256": "aa47e706f6b0000bb6819f2a69ce87f2eca5c845cdac1d3abec1a854b8966028"}
+        {"path": "src/komira_bench/bins/spsc_ring.mojo", "sha256": "18209adda729b66a220fa34ce8526624992e36a24fe98a67924942f320a21f56"}
       ],
       "deps": ["komira_bench@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -277,7 +277,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "srcs": [
         {"path": "src/komira_bench/src/komira_bench/__init__.mojo", "sha256": "6a6bad3f0fc61d49382f616951571a85b3b1e04527887c7c3d5fa86cfba1c66f"},
         {"path": "src/komira_bench/src/komira_bench/harness.mojo", "sha256": "bf0802f3b461326050a84e8db4c8ab13f5852f58ce4f4a78242b2d51ee477650"},
-        {"path": "src/komira_bench/src/komira_bench/spsc_ring_bench.mojo", "sha256": "6dbad2865d54a2ca8dddf5697c305a3cb6b119619ee70c7ff3a0ad597c31eb4e"}
+        {"path": "src/komira_bench/src/komira_bench/spsc_ring_bench.mojo", "sha256": "a6c509c7e7a35d539664718ac2c14bb7c54e276ae959e4e7fa40048ddf1f4d15"}
       ],
       "deps": ["komira_atomic_alias@0.1.0#mojo1.0.0/lib", "komira_spsc_ring@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -303,7 +303,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_bench/tests/test_spsc_ring_bench.mojo", "sha256": "351e0e55c7e751ceae5c744a548fb2f8030034588fd5c80ae6f62a9b7a92fbee"}
+        {"path": "src/komira_bench/tests/test_spsc_ring_bench.mojo", "sha256": "3610e61f343e4cf646074420b88595d2e9e6a0b2fe45fecaeaa35ad8059fd6a3"}
       ],
       "deps": ["komira_bench@0.1.0#mojo1.0.0/lib"],
       "natives": [],

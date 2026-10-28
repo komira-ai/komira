@@ -18,7 +18,12 @@
 from std.testing import assert_equal, assert_true
 
 from komira_bench.harness import BenchArgs
-from komira_bench.spsc_ring_bench import bench_lines, default_caps
+from komira_bench.spsc_ring_bench import (
+    bench_lines,
+    default_caps,
+    program_lines,
+    run_program,
+)
 
 
 def _args(total_ops: Int, hide: Bool) -> BenchArgs:
@@ -62,8 +67,49 @@ def test_capacity_above_the_record_count() raises:
         assert_true("inf" not in shown[i], shown[i])
 
 
+def _list(*items: String) -> List[String]:
+    var out = List[String]()
+    for item in items:
+        out.append(String(item))
+    return out^
+
+
+def test_program_lines_of_each_capacity_in_order() raises:
+    var lines = program_lines(_list("--total-ops=100", "--caps=8,16", "--hide-times"))
+    assert_equal(len(lines), 6)
+    assert_equal(lines[0], "RESULT push_only cap=8 ns_per_op=-")
+    assert_equal(lines[2], "RESULT drop_push cap=8 ns_per_op=-")
+    assert_equal(lines[3], "RESULT push_only cap=16 ns_per_op=-")
+    assert_equal(lines[5], "RESULT drop_push cap=16 ns_per_op=-")
+
+
+def test_program_help_is_the_usage_text_alone() raises:
+    var lines = program_lines(_list("--help", "--total-ops=100"))
+    assert_equal(len(lines), 1)
+    assert_true(lines[0].startswith("usage: spsc_ring "), lines[0])
+
+
+def test_program_refuses_a_bad_argument() raises:
+    var message = String("")
+    try:
+        _ = program_lines(_list("--total-ops=0"))
+    except e:
+        message = String(e)
+    assert_equal(message, "komira_bench: --total-ops must be a positive integer, got '0'")
+
+
+def test_run_program_prints_without_raising() raises:
+    # What it prints is the lines `program_lines` returns (asserted above); the
+    # program's own output is checked by :bins_smoke.
+    run_program(_list("--total-ops=100", "--caps=8", "--hide-times"))
+
+
 def main() raises:
     test_three_lines_with_a_value()
     test_hidden_times_are_exact()
     test_capacity_above_the_record_count()
+    test_program_lines_of_each_capacity_in_order()
+    test_program_help_is_the_usage_text_alone()
+    test_program_refuses_a_bad_argument()
+    test_run_program_prints_without_raising()
     print("ALL TESTS PASS")

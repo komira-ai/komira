@@ -1,5 +1,5 @@
 # =============================================================================
-# test_bins_smoke.mojo -- each program of komira_bench builds and runs once
+# bins_smoke.mojo -- each program of komira_bench builds and runs once
 # =============================================================================
 #
 # The program is this test's data (BUCK: `mojo_test` `bins_smoke`), the program
@@ -8,7 +8,7 @@
 # must be the three RESULT lines of one capacity. Nothing here reads or asserts
 # a time: with `--hide-times` the value of every line is `-`.
 #
-# This is not one of the package's gated tests (tests/): the program imports the
+# This is not one of the package's gated tests (tests/test_*.mojo): the program imports the
 # gated library, so a gated test that ran it would wait for itself.
 # =============================================================================
 

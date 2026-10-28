@@ -88,11 +88,11 @@ mojo_binary(
 )
 
 # Each program runs once on a few records with its times hidden, and must print its RESULT lines
-# (smoke/test_bins_smoke.mojo; no time is read or asserted). A standalone mojo_test rather than a
+# (tests/standalone/bins_smoke.mojo; no time is read or asserted). A standalone mojo_test rather than a
 # welded test: the program imports `:komira_bench`, which waits for its welded tests, so a welded test
 # that ran it would wait for itself.
 mojo_test(
     name = "bins_smoke",
-    srcs = ["smoke/test_bins_smoke.mojo"],
+    srcs = ["tests/standalone/bins_smoke.mojo"],
     data = {"bench/bin": ":spsc_ring_bench[runnable]"},
 )

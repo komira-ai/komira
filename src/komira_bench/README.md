@@ -96,7 +96,7 @@ except e:
 assert_equal(message, "komira_bench: --total-ops must be a positive integer, got '0'")
 ```
 
-A new program is a file under `bins/`, a line in `[targets] bins` of `mopm.toml`, and a module in
+A new program is a file under `bins/` whose `main` is one call into the library, a line in `[targets] bins` of `mopm.toml`, and a module in
 `src/komira_bench/` whose function returns its lines, so a test can run it on a few records.
 
 ## Build files
@@ -104,7 +104,7 @@ A new program is a file under `bins/`, a line in `[targets] bins` of `mopm.toml`
 This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_bench`, version 0.1.0
 (`mopm.toml`). The library is `src/komira_bench/` (`harness.mojo`, `spsc_ring_bench.mojo` and the `__init__.mojo`),
 the programs are `bins/` (declared under `[targets] bins`: `:bin_spsc_ring`, which `:build` and `:ci` build), its tests
-are `tests/`, and `smoke/` holds the test that runs a program. It depends on two packages, `komira_atomic_alias` and
+are `tests/test_*.mojo`, and `tests/standalone/bins_smoke.mojo` is the test that runs a program (not a `test_*` file, so it is no package test). It depends on two packages, `komira_atomic_alias` and
 `komira_spsc_ring`, sibling directories (`[dependencies]` of `mopm.toml`: `{ path = "../komira_atomic_alias", version =
 "0.1" }` and `{ path = "../komira_spsc_ring", version = "0.1" }`). `komira_spsc_ring` depends on `komira_collections`,
 which depends on `komira_atomic_alias`, so the lock holds all three and the `.conda` of this package records
@@ -125,7 +125,7 @@ time). After any change to a source, a test, a manifest of this package or of a 
 with the packages staged, commit what it writes, and build `komira//src/komira_bench:lib` on the farm. A test file
 that the sync has not listed is not run: run the sync after adding one.
 
-`:bins_smoke` is a `mojo_test` (not welded: the program imports `:komira_bench`, which waits for its welded tests):
+`:bins_smoke` (`tests/standalone/bins_smoke.mojo`) is a `mojo_test` (not welded: the program imports `:komira_bench`, which waits for its welded tests):
 it runs `:spsc_ring_bench`, komira's build of `bins/spsc_ring.mojo` (`buck2 run //src/komira_bench:spsc_ring_bench -- --caps=64`), on a few records with `--hide-times` and requires
 the whole output to be the three `RESULT` lines of one capacity, then once with real values, where it requires the
 lines and no value. `:conda` is buildrules' `mojo_conda` over `:lib` (`mojo-komira_bench-0.1.0-mojo1.0.0_0.conda`);
