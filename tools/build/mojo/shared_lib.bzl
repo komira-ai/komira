@@ -11,6 +11,7 @@ load(":compile.bzl", _TOOLCHAIN_ATTR = "toolchain_attr", _build_executable = "bu
 load(":coverage.bzl", "COVERAGE_SHARED_LIB_ATTRS", "coverage_shared_lib")
 load(":opt_level.bzl", "SHIPPED_OPT_LEVEL", "TEST_OPT_LEVEL")
 load(":test_limit.bzl", "HANG_LIMIT_ATTRS", "hang_limit_flags")
+load(":system_libs.bzl", "dep_system_libs", "run_args")
 load(":test_runtime.bzl", _test_root = "test_root", gate_mojo = "gate_mojo")
 
 # ---- mojo_shared_lib --------------------------------------------------------
@@ -189,7 +190,7 @@ def _shared_lib_impl(ctx):
         marker = ctx.actions.declare_output("gate/{}.passed".format(stem))
         ctx.actions.run(
             cmd_args(
-                gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), stem), staged, marker.as_output(), hang_limit_flags(str(ctx.label.raw_target()), ctx.attrs.test_hang_limit_s)),
+                gate_mojo(tc, "{}:{}".format(ctx.label.raw_target(), stem), staged, marker.as_output(), hang_limit_flags(str(ctx.label.raw_target()), ctx.attrs.test_hang_limit_s), run_args([], dep_system_libs(ctx.attrs.deps))),
                 hidden = root,
             ),
             env = rerun_env(ctx),

@@ -20,8 +20,9 @@
 
 load("@prelude//cxx:cxx_toolchain_types.bzl", "CxxToolchainInfo")
 load(":affected.bzl", "AFFECTED", "EMPTY", "VACUOUS", "WIDENED", "held_refusals", "is_held_file", "is_inert", "parse_held_lines", "pattern_matches", "select", "widen_reason")
+load(":heavy_cases.bzl", "heavy_cases")
 load(":rules.bzl", "EXCLUDED", "INERT", "WIDEN")
-load(":ci_graph.bzl", "check_nodes", "closure", "findings", "make_graph", "python_findings", "python_nodes", "render", "roots", "sdk_own_deps", "without_left_out")
+load(":ci_graph.bzl", "check_nodes", "closure", "findings", "make_graph", "python_findings", "python_nodes", "render_all", "render_loader", "render_shard", "roots", "sdk_own_deps", "shard_findings", "shard_of", "SHARDS", "LINE_LIMIT", "without_left_out")
 
 # ---- the table graph ---------------------------------------------------
 #
@@ -30,7 +31,7 @@ load(":ci_graph.bzl", "check_nodes", "closure", "findings", "make_graph", "pytho
 #   src/lib.bzl   -> loaded by src/a/BUCK and src/b/BUCK
 #   docs/x.md     -> owned by docs:doc_tree
 #   .hidden       -> owned by nothing
-#   ci/BUCK, ci/targets.bzl -> the aggregate's package (ci:pr)
+#   ci/BUCK, ci/targets.bzl, ci/targets/shard_3.bzl -> the aggregate's package (ci:pr)
 
 _FILES = {
     "src/a/a.mojo": True,
@@ -44,6 +45,7 @@ _FILES = {
     ".hidden": True,
     "ci/BUCK": True,
     "ci/targets.bzl": True,
+    "ci/targets/shard_3.bzl": True,
     "orphan.bzl": True,
 }
 _OWNERS = {
@@ -61,6 +63,7 @@ _PACKAGES = {
 _INCLUDING = {
     "src/lib.bzl": ["k//src/a:a", "k//src/a:a_test", "k//src/b:b"],
     "ci/targets.bzl": ["k//ci:pr"],
+    "ci/targets/shard_3.bzl": ["k//ci:pr"],
 }
 
 # reverse edges: who depends on a target (the aggregate is not in the universe)
@@ -146,6 +149,7 @@ def _table_cases():
 
     # the aggregate's own list changing is not a selection: it widens
     out += _table_case("a change to the aggregate's package widens", ["ci/targets.bzl"], WIDENED, reason = "aggregate's own package")
+    out += _table_case("a change to a shard of the aggregate's list widens", ["ci/targets/shard_3.bzl"], WIDENED, reason = "aggregate's own package")
     out += _table_case("the aggregate's BUCK widens", ["ci/BUCK"], WIDENED, reason = "aggregate's own package")
 
     # a seed that reaches nothing widens (the universe does not hold it)
@@ -285,9 +289,9 @@ def _real_cases(ctx):
     text = findings(got_checks, closure(ctx, missing_agg), missing_agg)
     if "{}:lonely".format(_F) not in text or "1 check target(s)" not in text or "targets.bxl:generate" not in text:
         out.append("real: guard over an aggregate that leaves `lonely` out did not name it and the regeneration: '{}'".format(text))
-    rendered = render(["a//:x"], ["a//:t"])
-    if rendered[-8:] != ["TARGETS = [", '    "a//:x",', "]", "", "TESTS = [", '    "a//:t",', "]", ""]:
-        out.append("real: render of targets.bzl: {}".format(rendered[-8:]))
+    shard = render_shard(["a//:x"], ["a//:t"])
+    if shard[-8:] != ["TARGETS = [", '    "a//:x",', "]", "", "TESTS = [", '    "a//:t",', "]", ""]:
+        out.append("real: render of a shard: {}".format(shard[-8:]))
     return out
 
 # ---- roots and the execution-platform registration -------------------------
@@ -434,7 +438,7 @@ _MUST_WIDEN = [
 
 _ORDINARY = [
     "src/komira_collections/BUCK",
-    "src/komira_collections/slab.mojo",
+    "src/komira_collections/src/komira_collections/slab.mojo",
     "docs/ci.md",
     "release/artifacts.textproto",
     ".github/workflows/pr.yml",
@@ -552,8 +556,78 @@ def _adopted_darwin_cases(ctx):
             ctx.configured_targets(t.label, target_platform = _DARWIN)
     return out
 
+# ---- the shards of ci/targets.bzl ------------------------------------------
+
+def _pkg_labels(n, per, prefix = "p"):
+    """`n` packages of `per` targets each, as labels."""
+    return ["k//src/{}{}:t{}".format(prefix, i, j) for i in range(n) for j in range(per)]
+
+def _shard_cases():
+    out = []
+    labels = _pkg_labels(40, 3) + ["k//:top", "k//tools/build/x:y"]
+    tests = [l for l in labels if l.endswith(":t0")]
+    files = render_all(labels, tests)
+
+    # placement: a package's rows share a shard, every shard index is in range, and
+    # the rows spread (a hash that sent every package to one shard would pass the rest)
+    for l in labels:
+        n = shard_of(l)
+        if n < 0 or n >= SHARDS:
+            out.append("shards: {} is placed in shard {}, outside 0..{}".format(l, n, SHARDS - 1))
+    if shard_of("k//src/p1:t0") != shard_of("k//src/p1:t2") or shard_of("k//src/p1:t0") != shard_of("other//src/p1:z"):
+        out.append("shards: the rows of one package must share a shard whatever their target or cell")
+    used = {shard_of(l): True for l in _pkg_labels(40, 1)}
+    if len(used) < SHARDS // 2:
+        out.append("shards: 40 packages reach only {} of {} shards".format(len(used), SHARDS))
+
+    # the files: one loader and one file per shard; the union of the shards is the input
+    want_files = sorted(["ci/targets.bzl"] + ["ci/targets/shard_{}.bzl".format(n) for n in range(SHARDS)])
+    if sorted(files.keys()) != want_files:
+        out.append("shards: render_all wrote {}, wanted {}".format(sorted(files.keys()), want_files))
+    rows = []
+    trows = []
+    for n in range(SHARDS):
+        lines = files["ci/targets/shard_{}.bzl".format(n)]
+        i = lines.index("TARGETS = [")
+        j = lines.index("TESTS = [")
+        rows += [l.strip().strip(",").strip('"') for l in lines[i + 1:j - 2]]
+        trows += [l.strip().strip(",").strip('"') for l in lines[j + 1:-2]]
+        for l in lines[i + 1:j - 2]:
+            if shard_of(l.strip().strip(",").strip('"')) != n:
+                out.append("shards: shard {} holds {}, which belongs to shard {}".format(n, l.strip(), shard_of(l.strip().strip(",").strip('"'))))
+    if sorted(rows) != sorted(labels) or sorted(trows) != sorted(tests):
+        out.append("shards: the union of the shards ({} target rows, {} test rows) is not the input ({}, {})".format(len(rows), len(trows), len(labels), len(tests)))
+
+    # the loader loads every shard and exposes the two lists, sorted
+    loader = "\n".join(render_loader())
+    for n in range(SHARDS):
+        if 'load("//ci/targets:shard_{n}.bzl", _TARGETS_{n} = "TARGETS", _TESTS_{n} = "TESTS")'.format(n = n) not in loader:
+            out.append("shards: the loader does not load shard {}".format(n))
+    if "\nTARGETS = sorted(_TARGETS_0 + " not in loader or "\nTESTS = sorted(_TESTS_0 + " not in loader or "_TARGETS_{}".format(SHARDS) in loader:
+        out.append("shards: the loader must expose TARGETS and TESTS as the sorted union of exactly the {} shards".format(SHARDS))
+
+    # the guard on the shards: current is green; stale either way, a test outside
+    # TARGETS, and a shard at the line limit are red, each naming its cause
+    if shard_findings(labels, labels, tests) != "":
+        out.append("shards: a current list failed the guard: " + shard_findings(labels, labels, tests))
+    if "no longer roots" not in shard_findings(labels, labels + ["k//src/gone:x"], tests) or "k//src/gone:x" not in shard_findings(labels, labels + ["k//src/gone:x"], tests):
+        out.append("shards: a row that is no longer a root must fail and be named")
+    if "in no shard" not in shard_findings(labels + ["k//src/new:x"], labels, tests) or "k//src/new:x" not in shard_findings(labels + ["k//src/new:x"], labels, tests):
+        out.append("shards: a root with no row must fail and be named")
+    if "not a row of TARGETS" not in shard_findings(labels, labels, tests + ["k//src/new:x"]):
+        out.append("shards: a TESTS row outside TARGETS must fail")
+    # one package's rows all land in one shard: LINE_LIMIT rows overflow it
+    big = ["k//src/one:t{}".format(i) for i in range(LINE_LIMIT)]
+    text = shard_findings(big, big, [])
+    if "limit" not in text or "shard_{}.bzl".format(shard_of(big[0])) not in text:
+        out.append("shards: a shard of {} rows must fail the line limit and name its file: '{}'".format(LINE_LIMIT, text))
+    just_under = ["k//src/one:t{}".format(i) for i in range(LINE_LIMIT - 11)]
+    if shard_findings(just_under, just_under, []) != "":
+        out.append("shards: a shard of {} lines (one under the limit) must pass".format(LINE_LIMIT - 1))
+    return out
+
 def _run(ctx):
-    table = _table_cases() + _held_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases() + _registration_cases(ctx) + _cxx_toolchain_cases(ctx) + _adopted_darwin_cases(ctx)
+    table = _shard_cases() + _table_cases() + _held_cases() + _python_cases(ctx) + _roots_cases() + _shipped_rules_cases() + heavy_cases() + _registration_cases(ctx) + _cxx_toolchain_cases(ctx) + _adopted_darwin_cases(ctx)
     real = _real_cases(ctx)
     failures = table + real
     if failures:
