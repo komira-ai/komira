@@ -27,7 +27,7 @@ def _contains(values: List[Int], target: Int) -> Bool:
 
 
 # -----------------------------------------------------------------------------
-# Port: test_left_join — every probe row must appear, with -1 for non-matches.
+# Port: test_left_join -- every probe row must appear, with -1 for non-matches.
 # -----------------------------------------------------------------------------
 
 
@@ -86,7 +86,7 @@ def test_left_join_all_matches() raises:
 
 
 # -----------------------------------------------------------------------------
-# Port: test_inner_join_empty_build — must return 0 rows, not crash.
+# Port: test_inner_join_empty_build -- must return 0 rows, not crash.
 # -----------------------------------------------------------------------------
 
 
@@ -116,7 +116,7 @@ def test_left_join_empty_build_side() raises:
 
 
 # -----------------------------------------------------------------------------
-# Port: test_inner_join_multi_worker — large 1:1 inner join.
+# Port: test_inner_join_multi_worker -- large 1:1 inner join.
 # Mojo tests are single-threaded but we still want correctness at scale.
 # -----------------------------------------------------------------------------
 
@@ -148,7 +148,7 @@ def test_inner_join_large_one_to_one() raises:
 
 
 # -----------------------------------------------------------------------------
-# Port: test_anti_join_duplicate_build_keys — duplicates on build side.
+# Port: test_anti_join_duplicate_build_keys -- duplicates on build side.
 # probe_anti returns probe rows with NO match. Build dups
 # don't affect the probe result, but we want to ensure no crash with dup keys.
 # -----------------------------------------------------------------------------
@@ -187,7 +187,7 @@ def test_semi_join_with_duplicate_build_keys() raises:
 
 
 # -----------------------------------------------------------------------------
-# Port: test_inner_join_many_to_many — duplicates on BOTH sides.
+# Port: test_inner_join_many_to_many -- duplicates on BOTH sides.
 # -----------------------------------------------------------------------------
 
 

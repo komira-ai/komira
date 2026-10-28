@@ -41,7 +41,7 @@ test "generate writes one program per example, the runner and the example lines"
     const a = arena.allocator();
     var tmp = try Scratch.init(a, "generate");
     defer tmp.done();
-    try tmp.dir.writeFile("README.md", README);
+    try tmp.dir.writeFile(.{ .sub_path = "README.md", .data = README });
     const args = generateArgs("README.md", "refuse");
     const o = cli.run(a, tmp.dir, &args);
     try t.expectEqualStrings("", o.stdout);
@@ -67,7 +67,7 @@ test "a refused README is exit 1, each reason naming its line, and writes nothin
     const a = arena.allocator();
     var tmp = try Scratch.init(a, "refused");
     defer tmp.done();
-    try tmp.dir.writeFile("README.md", "See [x](x.md).\n\n```mojo skip\n```\n");
+    try tmp.dir.writeFile(.{ .sub_path = "README.md", .data = "See [x](x.md).\n\n```mojo skip\n```\n" });
     const args = generateArgs("README.md", "refuse");
     const o = cli.run(a, tmp.dir, &args);
     try t.expectEqual(@as(u8, 1), o.code);
@@ -89,7 +89,7 @@ test "no example: an empty examples file and a runner that runs nothing" {
     const a = arena.allocator();
     var tmp = try Scratch.init(a, "none");
     defer tmp.done();
-    try tmp.dir.writeFile("README.md", "# none\n");
+    try tmp.dir.writeFile(.{ .sub_path = "README.md", .data = "# none\n" });
     const args = generateArgs("README.md", "allow");
     try t.expectEqual(@as(u8, 0), cli.run(a, tmp.dir, &args).code);
     try t.expectEqualStrings("", try tmp.dir.readFileAlloc(a, "out/examples", 1 << 20));
@@ -116,7 +116,7 @@ test "usage: every flag required, none unknown or twice, a value for each; exit 
         const o = cli.run(a, tmp.dir, c.argv);
         try t.expectEqual(@as(u8, 2), o.code);
         try t.expect(std.mem.startsWith(u8, o.stdout, c.first));
-        try t.expect(std.mem.endsWith(u8, o.stdout, "       tool link-check --readme F --display NAME --expect F --out F\n"));
+        try t.expect(std.mem.endsWith(u8, o.stdout, "       tool release-check --out F [--expect-refusal TEXT] (--member NAME DISPLAY F | --no-readme NAME DISPLAY)...\n"));
     }
     // A README it cannot read.
     const args = generateArgs("missing.md", "allow");
@@ -131,7 +131,7 @@ test "map prints the report with each example's line mapped to the README" {
     const a = arena.allocator();
     var tmp = try Scratch.init(a, "map");
     defer tmp.done();
-    try tmp.dir.writeFile("report", "x/readme_p_7.mojo:9:3: error: e\nreadme_p.mojo:4\n");
+    try tmp.dir.writeFile(.{ .sub_path = "report", .data = "x/readme_p_7.mojo:9:3: error: e\nreadme_p.mojo:4\n" });
     const o = cli.run(a, tmp.dir, &.{ "tool", "map", "--package=p", "--display", "src/p/README.md", "--report", "report" });
     try t.expectEqual(@as(u8, 0), o.code);
     try t.expectEqualStrings("src/p/README.md:9:3: error: e\nreadme_p.mojo:4\n", o.stdout);
@@ -151,11 +151,11 @@ test "link writes the block's arguments, one per line; no block is an empty file
     const a = arena.allocator();
     var tmp = try Scratch.init(a, "link");
     defer tmp.done();
-    try tmp.dir.writeFile("README.md", LINKED);
+    try tmp.dir.writeFile(.{ .sub_path = "README.md", .data = LINKED });
     const o = cli.run(a, tmp.dir, &.{ "tool", "link", "--readme", "README.md", "--display", "src/l/README.md", "--out", "args" });
     try t.expectEqual(@as(u8, 0), o.code);
     try t.expectEqualStrings(LINKED_ARGS, try tmp.dir.readFileAlloc(a, "args", 1 << 20));
-    try tmp.dir.writeFile("plain.md", "# P\n\n```sh\nmojo run x.mojo\n```\n");
+    try tmp.dir.writeFile(.{ .sub_path = "plain.md", .data = "# P\n\n```sh\nmojo run x.mojo\n```\n" });
     const o2 = cli.run(a, tmp.dir, &.{ "tool", "link", "--readme", "plain.md", "--display", "d", "--out", "none" });
     try t.expectEqual(@as(u8, 0), o2.code);
     try t.expectEqualStrings("", try tmp.dir.readFileAlloc(a, "none", 1 << 20));
@@ -167,7 +167,7 @@ test "link refuses a block it cannot read as words, exit 1, naming the line, and
     const a = arena.allocator();
     var tmp = try Scratch.init(a, "link_refused");
     defer tmp.done();
-    try tmp.dir.writeFile("README.md", "# L\n\n```sh komira-link\nmojo run -lx;y prog.mojo\nmojo build prog.mojo -o p\n```\n");
+    try tmp.dir.writeFile(.{ .sub_path = "README.md", .data = "# L\n\n```sh komira-link\nmojo run -lx;y prog.mojo\nmojo build prog.mojo -o p\n```\n" });
     const o = cli.run(a, tmp.dir, &.{ "tool", "link", "--readme", "README.md", "--display", "src/l/README.md", "--out", "args" });
     try t.expectEqual(@as(u8, 1), o.code);
     try t.expect(std.mem.startsWith(u8, o.stdout, "src/l/README.md:4: `;`"));
@@ -180,8 +180,8 @@ test "link-check: equal arguments pass; a README without an owner's -l is exit 1
     const a = arena.allocator();
     var tmp = try Scratch.init(a, "link_check");
     defer tmp.done();
-    try tmp.dir.writeFile("README.md", LINKED);
-    try tmp.dir.writeFile("want", LINKED_ARGS);
+    try tmp.dir.writeFile(.{ .sub_path = "README.md", .data = LINKED });
+    try tmp.dir.writeFile(.{ .sub_path = "want", .data = LINKED_ARGS });
     const argv = [_][]const u8{ "tool", "link-check", "--readme", "README.md", "--display", "src/l/README.md", "--expect", "want", "--out", "ok" };
     try t.expectEqual(@as(u8, 0), cli.run(a, tmp.dir, &argv).code);
     try t.expectEqualStrings(LINKED_ARGS, try tmp.dir.readFileAlloc(a, "ok", 1 << 20));
@@ -189,9 +189,94 @@ test "link-check: equal arguments pass; a README without an owner's -l is exit 1
     // The planted defect: the run line without -lkomira_metrics_native.
     const dropped = try std.mem.replaceOwned(u8, a, LINKED, "-Xlinker -lkomira_metrics_native prog.mojo\n", "prog.mojo\n");
     try t.expect(!std.mem.eql(u8, dropped, LINKED));
-    try tmp.dir.writeFile("README.md", dropped);
+    try tmp.dir.writeFile(.{ .sub_path = "README.md", .data = dropped });
     const o = cli.run(a, tmp.dir, &argv);
     try t.expectEqual(@as(u8, 1), o.code);
     try t.expect(std.mem.startsWith(u8, o.stdout, "src/l/README.md: its link block parses to\nrun\t-Xlinker\nrun\t-L$CONDA_PREFIX/lib\nbuild\t"));
     try t.expectError(error.FileNotFound, tmp.dir.access("ok", .{}));
+}
+
+const NO_EXAMPLE_REFUSAL = "release member b: src/b/README.md holds no ```mojo or ```mojo module example, so kci's install validation would refuse it after publish:" ++
+    " \"src/b/README.md holds no ```mojo example, so the validation would run nothing; add one\"\n";
+const NO_README_REFUSAL = "release member c: no README is packaged, so kci's install validation would refuse it after publish:" ++
+    " \"c ships no share/doc/c/README.md: a release needs a README; add src/c/README.md\"\n";
+
+test "release-check: a member with an example passes, writing its count; ```mojo module counts" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "release_pass");
+    defer tmp.done();
+    try tmp.dir.writeFile(.{ .sub_path = "one.md", .data = README });
+    try tmp.dir.writeFile(.{ .sub_path = "module.md", .data = "# M\n\n```mojo module\ndef main():\n    pass\n```\n" });
+    const argv = [_][]const u8{ "tool", "release-check", "--out", "ok", "--member", "a", "src/a/README.md", "one.md", "--member", "m", "src/m/README.md", "module.md" };
+    const o = cli.run(a, tmp.dir, &argv);
+    try t.expectEqualStrings("", o.stdout);
+    try t.expectEqual(@as(u8, 0), o.code);
+    try t.expectEqualStrings("a 2\nm 1\n", try tmp.dir.readFileAlloc(a, "ok", 1 << 20));
+}
+
+test "release-check: no example and no README are each refused, naming the member and quoting kci; exit 1, nothing written" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "release_refused");
+    defer tmp.done();
+    try tmp.dir.writeFile(.{ .sub_path = "one.md", .data = README });
+    // A sketch fenced ```text and a ```python block are not examples.
+    try tmp.dir.writeFile(.{ .sub_path = "none.md", .data = "# B\n\n```text\nsketch\n```\n\n```python\nprint(1)\n```\n" });
+    const argv = [_][]const u8{ "tool", "release-check", "--out", "ok", "--member", "a", "src/a/README.md", "one.md", "--member", "b", "src/b/README.md", "none.md", "--no-readme", "c", "src/c/README.md" };
+    const o = cli.run(a, tmp.dir, &argv);
+    try t.expectEqual(@as(u8, 1), o.code);
+    try t.expectEqualStrings(NO_EXAMPLE_REFUSAL ++ NO_README_REFUSAL, o.stdout);
+    try t.expectError(error.FileNotFound, tmp.dir.access("ok", .{}));
+    // A README the read refuses (a relative link: --links refuse, as kci) is refused too.
+    try tmp.dir.writeFile(.{ .sub_path = "link.md", .data = "See [x](x.md).\n\n```mojo\nprint(1)\n```\n" });
+    const linked = [_][]const u8{ "tool", "release-check", "--out", "ok", "--member", "l", "src/l/README.md", "link.md" };
+    const r = cli.run(a, tmp.dir, &linked);
+    try t.expectEqual(@as(u8, 1), r.code);
+    try t.expect(std.mem.startsWith(u8, r.stdout, "release member l: kci's install validation would refuse its README after publish: src/l/README.md:1: x.md: a relative link"));
+}
+
+test "release-check --expect-refusal: passes only on a refusal containing the text" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "release_expect");
+    defer tmp.done();
+    try tmp.dir.writeFile(.{ .sub_path = "one.md", .data = README });
+    const refused = [_][]const u8{ "tool", "release-check", "--out", "ok", "--expect-refusal", "release member c: no README", "--no-readme", "c", "src/c/README.md" };
+    try t.expectEqual(@as(u8, 0), cli.run(a, tmp.dir, &refused).code);
+    try t.expectEqualStrings(NO_README_REFUSAL, try tmp.dir.readFileAlloc(a, "ok", 1 << 20));
+    try tmp.dir.deleteFile("ok");
+    const other = [_][]const u8{ "tool", "release-check", "--out", "ok", "--expect-refusal", "release member d", "--no-readme", "c", "src/c/README.md" };
+    const o = cli.run(a, tmp.dir, &other);
+    try t.expectEqual(@as(u8, 1), o.code);
+    try t.expectEqualStrings("release-check: expected a refusal containing 'release member d', refused with:\n" ++ NO_README_REFUSAL, o.stdout);
+    const passing = [_][]const u8{ "tool", "release-check", "--out", "ok", "--expect-refusal", "x", "--member", "a", "src/a/README.md", "one.md" };
+    const p = cli.run(a, tmp.dir, &passing);
+    try t.expectEqual(@as(u8, 1), p.code);
+    try t.expectEqualStrings("release-check: expected a refusal containing 'x'; every member passed\n", p.stdout);
+    try t.expectError(error.FileNotFound, tmp.dir.access("ok", .{}));
+}
+
+test "release-check usage: --out once and required, a member needed, each member's values present; exit 2" {
+    var arena = Arena.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = try Scratch.init(a, "release_usage");
+    defer tmp.done();
+    const cases = [_]struct { argv: []const []const u8, first: []const u8 }{
+        .{ .argv = &.{ "tool", "release-check", "--no-readme", "c", "d" }, .first = "readme-examples: --out is required\n" },
+        .{ .argv = &.{ "tool", "release-check", "--out", "o" }, .first = "readme-examples: no --member or --no-readme\n" },
+        .{ .argv = &.{ "tool", "release-check", "--out", "o", "--out", "p" }, .first = "readme-examples: --out given twice\n" },
+        .{ .argv = &.{ "tool", "release-check", "--out", "o", "--member", "a", "d" }, .first = "readme-examples: --member needs 3 values\n" },
+        .{ .argv = &.{ "tool", "release-check", "--out", "o", "--no-readme", "", "d" }, .first = "readme-examples: --no-readme has an empty value\n" },
+        .{ .argv = &.{ "tool", "release-check", "--out", "o", "--readme", "r" }, .first = "readme-examples: unknown argument --readme\n" },
+    };
+    for (cases) |c| {
+        const o = cli.run(a, tmp.dir, c.argv);
+        try t.expectEqual(@as(u8, 2), o.code);
+        try t.expect(std.mem.startsWith(u8, o.stdout, c.first));
+    }
 }

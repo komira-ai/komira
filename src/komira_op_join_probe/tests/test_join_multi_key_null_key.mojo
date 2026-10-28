@@ -170,7 +170,9 @@ def _assert_pairs(
     assert_equal(
         len(got) // 2,
         len(want) // 2,
-        what + ": wrong MATCH COUNT (extra rows are the defect's signature)",
+        what
+        + ": wrong MATCH COUNT (extra rows joined: a NULL key must match"
+        " nothing)",
     )
     for i in range(len(want)):
         assert_equal(got[i], want[i], what + ": pair element " + String(i))
@@ -565,8 +567,8 @@ def test_int64_key_equal_to_the_sentinel_is_skipped_today() raises:
         _inner_pairs(build, probe),
         want,
         String(
-            "sentinel-valued INT64 key (KNOWN missing-row defect -- see the"
-            " docstring before 'fixing' this test)"
+            "sentinel-valued INT64 key is skipped today -- see the"
+            " docstring before changing this test"
         ),
     )
 

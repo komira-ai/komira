@@ -1,0 +1,20 @@
+{
+ "rustc": "1.99.0",
+ "crates": {
+  "anyhow 1.0.102": {
+   "class": "a",
+   "why": "build.rs probes the compiler: its cfgs mark a rustc older than 1.81 or 1.85, or a nightly's generic member access. None applies to 1.99.",
+   "cfgs": []
+  },
+  "proc-macro2 1.0.106": {
+   "class": "a",
+   "why": "stable rustc without span-locations: wrap_proc_macro. Its probes of the Span methods stabilized in 1.88 compile on 1.99, so proc_macro_span_location and proc_macro_span_file.",
+   "cfgs": ["proc_macro_span_file", "proc_macro_span_location", "wrap_proc_macro"]
+  },
+  "quote 1.0.45": {
+   "class": "a",
+   "why": "no_diagnostic_namespace marks a rustc older than 1.78. None applies to 1.99.",
+   "cfgs": []
+  }
+ }
+}

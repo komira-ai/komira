@@ -1,0 +1,8 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_module")
+
+# A module named `shared`; clash_b has another.
+zig_module(
+    name = "shared",
+    src = "shared.zig",
+    visibility = ["tests//negative/zig_rules:"],
+)

@@ -1,0 +1,96 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The network half of the model seams of komira_kg (docs/design/knowledge_graph_port.md): HTTP
+# transports for a chat-completions wire and an embeddings wire, an Embedder and an LlmClient over
+# them, the prompts as values the caller passes in, and the choice between extracting by rules and
+# extracting by a model. No vendor, product or model is named; the address, path, credential
+# header, model id, dimension and prompts are arguments with no default. No environment variable
+# and no clock is read, and a call is made once (no retry).
+#
+# The welded tests: test_auth_header pins the credential header's checks (token name, no control
+# byte, not a header the transport writes) on both sides of each limit; test_wire_endpoint the
+# endpoint's rules; test_prompt the templates (one-pass substitution, the refusals, the neutral
+# values); test_wire_json the request bodies (any text reaches the wire unchanged) and the
+# response readers (the envelope, the row count, the dimension, finite numbers, the index);
+# test_embedder and test_chat_client the embedder and the client over a scripted transport
+# (extraction in a fenced block, skipped entries, the yes or no reading, the schema attached only
+# when the prompt has one); test_extract_client the routing by mode and its refusals;
+# test_http_transport the HTTP transports against a loopback server in this process (request
+# shape, the configured path and credential header, a non-success status, a truncated body, the
+# size bound, a body that is not UTF-8, no retry, the time bound reaching the connector factory,
+# the https scheme); test_http_clients the embedder and the chat client over that server (a
+# response of the wrong width refused, two different prompts reaching the wire unchanged, malformed
+# JSON refused). The README's examples run as tests too.
+mojo_library(
+    name = "komira_kg_llm",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    # The full transitive closure of the Mojo libraries this package and its tests
+    # build on: komira_kg and komira_kg_format, komira_kg_mode, komira_json, and the
+    # HTTP client with the async runtime under it.
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_arrow_ipc:komira_arrow_ipc",
+        "//src/komira_async:komira_async",
+        "//src/komira_async_api:komira_async_api",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_collections:komira_collections",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_compression:komira_compression",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_dynamic_filter:komira_dynamic_filter",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_fork_join:komira_fork_join",
+        "//src/komira_fs:komira_fs",
+        "//src/komira_hash:komira_hash",
+        "//src/komira_host:komira_host",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_join_assembly:komira_join_assembly",
+        "//src/komira_json:komira_json",
+        "//src/komira_kg:komira_kg",
+        "//src/komira_kg_format:komira_kg_format",
+        "//src/komira_kg_mode:komira_kg_mode",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_log:komira_log",
+        "//src/komira_lz4:komira_lz4",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_name_registry:komira_name_registry",
+        "//src/komira_net:komira_net",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_objectstore:komira_objectstore_posix",
+        "//src/komira_parquet:komira_parquet",
+        "//src/komira_parquet_api:komira_parquet_api",
+        "//src/komira_parquet_codec:komira_parquet_codec",
+        "//src/komira_parquet_writer:komira_parquet_writer",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
+        "//src/komira_plan_stats:komira_plan_stats",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic",
+        "//src/komira_scan_source:komira_scan_source",
+        "//src/komira_simd:komira_simd",
+        "//src/komira_spsc_ring:komira_spsc_ring",
+        "//src/komira_sync:komira_sync",
+        "//src/komira_trace:komira_trace",
+        "//src/komira_zlib:komira_zlib",
+        "//third_party/aws-lc:crypto",
+        "//third_party/brotli:brotlidec",
+        "//third_party/s2n-tls:s2n",
+        "//third_party/snappy:snappy",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_auth_header.mojo",
+        "tests/test_chat_client.mojo",
+        "tests/test_embedder.mojo",
+        "tests/test_extract_client.mojo",
+        "tests/test_http_clients.mojo",
+        "tests/test_http_transport.mojo",
+        "tests/test_prompt.mojo",
+        "tests/test_wire_endpoint.mojo",
+        "tests/test_wire_json.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

@@ -14,12 +14,36 @@
 #     this file dies with SIGSEGV, exit 139: the kernel writes past the span.)
 #   * `test_payload_inline_fills_the_payload_span`: the payload word riding with
 #     the wrong pair, or not written at all.
+#   * `test_null_keys_match_nothing`: a NULL build key linked into a chain, or
+#     a NULL probe row walking a chain, in `probe_inner_into`,
+#     `count_inner_matches` and the chunked probe. NULL rows carry the value 0
+#     and the other side holds a real 0, so a missed skip emits a pair.
+#   * `test_build_with_bloom_null_keys_match_nothing`: the prefilled-bloom
+#     build linking a NULL build key (value 0) so that a real 0 probe row
+#     pairs with it.
+#   * `test_phase_split_resumes_mid_chain`: the phase-split walk cutting a
+#     chain at the end of a chunk and resuming it in the next call, which
+#     would lose or repeat the pairs of the cut chain.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_arrow.primitive_array import PrimitiveArray
-from komira_op_join_build.join import HashJoinBuilder, ProbeInnerState
+from komira_dynamic_filter.bloom_filter import BloomFilter
+from komira_op_join_build.join import (
+    HashJoinBuilder,
+    ProbeInnerState,
+    _hash_join_key,
+    _join_bloom_hash_family,
+)
+from komira_op_join_build.join_probe_phase_split import (
+    JOIN_PS_BATCH,
+    JOIN_PS_MIN_HEADROOM,
+    join_phase_split_configure,
+    join_phase_split_fired,
+    join_phase_split_reset_config,
+    reset_join_phase_split_counters,
+)
 
 
 def _keys(values: List[Int]) -> PrimitiveArray[DType.int64]:
@@ -29,13 +53,27 @@ def _keys(values: List[Int]) -> PrimitiveArray[DType.int64]:
     return arr^
 
 
+def _nullable_keys(
+    values: List[Int], nulls: List[Bool]
+) raises -> PrimitiveArray[DType.int64]:
+    var arr = PrimitiveArray[DType.int64].allocate_nullable(len(values))
+    for i in range(len(values)):
+        arr.set(i, Int64(values[i]))
+        if nulls[i]:
+            arr._set_null(i)
+    return arr^
+
+
 def _drain(
     b: HashJoinBuilder,
     probe: PrimitiveArray[DType.int64],
     cap: Int,
     mut pay_out: List[Int64],
+    expected_pairs: Int = -1,
 ) raises -> List[Int]:
-    """Every pair, flattened [build, probe, build, probe, ...]."""
+    """Every pair, flattened [build, probe, build, probe, ...]. With
+    `expected_pairs >= 0`, stops once more pairs than that came out: a
+    resume that repeats pairs then fails the caller's count check."""
     var out = List[Int]()
     var bb = List[Int]()
     bb.resize(cap, 0)
@@ -44,7 +82,6 @@ def _drain(
     var payb = List[Int64]()
     payb.resize(cap, Int64(0))
     var st = ProbeInnerState()
-    var trips = 0
     while True:
         var got = b.probe_inner_chunk(
             probe, st, Span(bb), Span(pb), Span(payb), cap
@@ -55,9 +92,8 @@ def _drain(
             out.append(bb[i])
             out.append(pb[i])
             pay_out.append(payb[i])
-        trips += 1
-        if trips > 10_000:
-            raise Error("chunked probe made no progress")
+        if expected_pairs >= 0 and len(out) // 2 > expected_pairs:
+            break
     return out^
 
 
@@ -142,6 +178,134 @@ def test_payload_inline_fills_the_payload_span() raises:
     for i in range(len(got) // 2):
         var build_row = got[2 * i]
         assert_equal(pays[i], expect_pay[build_row], "payload rides its pair")
+
+
+def test_null_keys_match_nothing() raises:
+    # Build rows: 0 (real), 0 (NULL, value 0), 5, 5 (NULL), 5 (real).
+    var bv: List[Int] = [0, 0, 5, 5, 5]
+    var bn: List[Bool] = [False, True, False, True, False]
+    # Probe rows: 0 (real), 0 (NULL), 5 (real), 5 (NULL), 9 (real, absent).
+    var pv: List[Int] = [0, 0, 5, 5, 9]
+    var pn: List[Bool] = [False, True, False, True, False]
+    var b = HashJoinBuilder.build(_nullable_keys(bv, bn))
+    var probe = _nullable_keys(pv, pn)
+
+    # Real matches only: probe 0 -> build 0; probe 2 -> build 2 and 4.
+    var want_b: List[Int] = [0, 4, 2]
+    var want_p: List[Int] = [0, 2, 2]
+    var bm = List[Int]()
+    var pm = List[Int]()
+    b.probe_inner_into(probe, bm, pm)
+    assert_equal(len(bm), 3, "pairs from probe_inner_into")
+    var seen = 0
+    for i in range(len(bm)):
+        for j in range(3):
+            if bm[i] == want_b[j] and pm[i] == want_p[j]:
+                seen += 1
+    assert_equal(seen, 3, "exactly the real pairs")
+    assert_equal(b.count_inner_matches(probe), 3, "count_inner_matches")
+
+    var pays = List[Int64]()
+    var flat = _drain(b, probe, 2, pays)
+    assert_equal(len(flat), 2 * 3, "pairs from the chunked probe")
+    for i in range(3):
+        var ok = False
+        for j in range(3):
+            if flat[2 * i] == want_b[j] and flat[2 * i + 1] == want_p[j]:
+                ok = True
+        assert_true(ok, "chunked pair " + String(i) + " is a real match")
+
+    # A build side that is all NULL matches nothing, even a real 0 probe.
+    var allnull = HashJoinBuilder.build(
+        _nullable_keys([0, 0], [True, True])
+    )
+    var bm2 = List[Int]()
+    var pm2 = List[Int]()
+    allnull.probe_inner_into(_keys([0, 0]), bm2, pm2)
+    assert_equal(len(bm2), 0, "all-NULL build")
+
+
+def test_build_with_bloom_null_keys_match_nothing() raises:
+    # Build rows: 0 (real), 0 (NULL, value 0), 5, 5 (NULL), 5 (real).
+    var bv: List[Int] = [0, 0, 5, 5, 5]
+    var bn: List[Bool] = [False, True, False, True, False]
+    var keys = _nullable_keys(bv, bn)
+    var bloom = BloomFilter.with_ndv_fpp(
+        len(bv), 0.01, _join_bloom_hash_family()
+    )
+    for i in range(len(bv)):
+        var k = Int64(bv[i])
+        bloom.insert_join_key(k, _hash_join_key(k))
+    var b = HashJoinBuilder.build_with_bloom(keys, bloom^)
+    # Probe rows: 0 (real), 0 (NULL), 5 (real), 5 (NULL), 9 (absent).
+    var pv: List[Int] = [0, 0, 5, 5, 9]
+    var pn: List[Bool] = [False, True, False, True, False]
+    var probe = _nullable_keys(pv, pn)
+    var bm = List[Int]()
+    var pm = List[Int]()
+    b.probe_inner_into(probe, bm, pm)
+    var want_b: List[Int] = [0, 4, 2]
+    var want_p: List[Int] = [0, 2, 2]
+    assert_equal(len(bm), 3, "only the real pairs")
+    var seen = 0
+    for i in range(len(bm)):
+        for j in range(3):
+            if bm[i] == want_b[j] and pm[i] == want_p[j]:
+                seen += 1
+    assert_equal(seen, 3, "exactly the real pairs")
+    assert_equal(b.count_inner_matches(probe), 3, "count_inner_matches")
+
+
+def test_phase_split_resumes_mid_chain() raises:
+    # 64 distinct keys, eight build rows each, plus one key with 1500 build
+    # rows; 600 probe rows over 80 keys so some miss. The chunk capacity is
+    # the smallest the phase-split walk accepts, far below the pair total,
+    # so chains are cut at chunk ends.
+    var bv = List[Int]()
+    for k in range(64):
+        for _ in range(8):
+            bv.append(k)
+    # One key with a chain longer than a whole chunk, so a probe row's chain
+    # is cut inside that single row and resumed from the saved chain position.
+    for _ in range(1500):
+        bv.append(100)
+    var pv = List[Int]()
+    for i in range(600):
+        if i % 97 == 0:
+            pv.append(100)
+        else:
+            pv.append((i * 7) % 80)
+    var b = HashJoinBuilder.build(_keys(bv))
+    var probe = _keys(pv)
+    var bm = List[Int]()
+    var pm = List[Int]()
+    b.probe_inner_into(probe, bm, pm)
+    var want = List[Int]()
+    for i in range(len(bm)):
+        want.append(bm[i])
+        want.append(pm[i])
+    assert_true(len(bm) > 2 * JOIN_PS_MIN_HEADROOM, "several chunks are needed")
+    assert_true(len(pv) >= JOIN_PS_BATCH, "the probe fills a batch")
+
+    join_phase_split_configure(True, 1)
+    reset_join_phase_split_counters()
+    var pays = List[Int64]()
+    var got = _drain(b, probe, JOIN_PS_MIN_HEADROOM, pays, len(bm))
+    var fired = join_phase_split_fired()
+    join_phase_split_reset_config()
+    reset_join_phase_split_counters()
+    assert_true(fired, "the phase-split walk ran")
+    assert_equal(len(got), len(want), "same number of pairs")
+    # Each pair appears once: compare as multisets via a per-pair tally.
+    var tally = Dict[Int, Int]()
+    for i in range(len(want) // 2):
+        var key = want[2 * i] * 1_000_000 + want[2 * i + 1]
+        tally[key] = tally.get(key, 0) + 1
+    for i in range(len(got) // 2):
+        var key = got[2 * i] * 1_000_000 + got[2 * i + 1]
+        var left = tally.get(key, 0)
+        assert_true(left > 0, "pair " + String(i) + " is expected")
+        tally[key] = left - 1
 
 
 def main() raises:

@@ -1,24 +1,25 @@
-# The release files: the release machine (machine.textproto: the stages and
-# their steps), what a release of komira builds (artifacts.textproto) and where
-# it is published (channels.textproto). .github/workflows/kci.yml names the
-# machine file, which names the other two; nothing builds them. Each is welded
-# to the test of the parser that reads it, so a file kci would refuse fails
-# `./buck2 build //...`:
-#   machine.textproto    src/kci_workflow_check (test_repo_kci_yml: the machine file,
-#                        and kci.yml held to it)
-#   artifacts.textproto  src/kci_artifact (test_release_artifacts_file)
-#   channels.textproto   src/kci_release_channel (test_release_channels_file),
-#                        src/kci_workflow_check (test_repo_kci_yml)
-# The machine file's validations run each installed library's README examples
-# (src/<library>/README.md, shipped as share/doc/<name>/README.md): the same
-# examples are a welded test of the library's own build, so they cannot rot.
-# release/ci holds the `build_targets` command the per-change check runs
-# (artifacts.textproto); its `affected` and `derive_checks` are the binaries
-# //tools/build/ci:affected and //tools/build/ci:derive_checks. It also holds
-# main_red.py, the script of .github/workflows/main_red.yml, tested by
-# //release/ci/tests:test_main_red.
+# The release files: what a release of komira builds (artifacts.textproto), the
+# set that builds it (release_set, below) and where it would be published
+# (channels.textproto). .github/workflows/release.yml builds the set on every
+# push to main. The release machine file (machine.textproto) is the retired
+# release tool's: no workflow runs it any more, and kci's own tests still read
+# it. Each file is welded to the test of the parser that reads it, so a file
+# kci would refuse fails `./buck2 build //...`:
+#   machine.textproto    src/kci_release_machine (the machine file)
+#   artifacts.textproto  src/kci_artifact (test_release_artifacts_file), and
+#                        release_set below holds the set to it (a build action)
+#   channels.textproto   src/kci_release_channel (test_release_channels_file);
+#                        no stage names it (komira publishes to no channel for
+#                        now)
+# release/ci (a package of its own) holds the programs of the workflows
+# (main_red, check_release_ref, release_json), built behind their cases.
 # Changes need the release approver's review (.github/CODEOWNERS).
-load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":mopm_artifacts.bzl", "mopm_artifacts")
+load(":release_set.bzl", "release_set")
+load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES")
 
 export_file(
     name = "artifacts.textproto",
@@ -27,23 +28,183 @@ export_file(
 
 export_file(
     name = "channels.textproto",
-    visibility = ["//src/kci_workflow_check:", "//src/kci_release_channel:"],
+    visibility = ["//src/kci_release_channel:"],
 )
 
 # By reference: a validation target passes kci its path in the checkout.
 export_file(
     name = "machine.textproto",
     mode = "reference",
-    visibility = ["//release/validations:", "//src/kci_workflow_check:", "//src/kci_release_machine:"],
+    visibility = ["//release/validations:", "//src/kci_release_machine:"],
 )
 
-export_file(
-    name = "main_red.py",
-    src = "ci/main_red.py",
-    visibility = ["//release/ci/tests:"],
+# The build artifacts of the libraries moved to mopm (mopm_artifacts.bzl): each
+# package's `:lib`, as `linux-64/<name>.mojoc`, and each package's native archive as
+# `linux-64/<name>.native/lib<id>.a`, the directory `mopm stage
+# --artifacts` packs. The list is //release/readme_e2e:packages.bzl's, which
+# //:readme_e2e_complete holds to the src/ packages that have a mopm.toml.
+# release.yml's `mopm-stage` job builds it, stages it, tries the README
+# examples against the staged set and dry-runs the publish on every push to
+# main; the `prod-*` jobs publish the set, only when enabled (docs/ci.md).
+mopm_artifacts(
+    name = "mopm_artifacts",
+    natives = {
+        "komira_async_api": {"komira_concurrency_pool_depth": "//src/komira_async_api:native_komira_concurrency_pool_depth"},
+        "komira_libc": {"komira_libc_posix": "//src/komira_libc:native_komira_libc_posix"},
+        "komira_log": {"komira_log_holder": "//src/komira_log:native_komira_log_holder"},
+        "komira_metrics": {"komira_metrics_ea_flag": "//src/komira_metrics:native_komira_metrics_ea_flag"},
+    },
+    packages = sorted(README_E2E_PACKAGES.keys()),
+    visibility = ["PUBLIC"],
 )
 
-shell_lint(
-    name = "shell_lint",
-    srcs = glob(["ci/*.sh"]),
+# The release set: every package release/artifacts.textproto declares, in its
+# order, and the metapackage `komira_all` over them (release_set.bzl). The
+# list is the file's: `release_json names` fails the build when the two
+# disagree. Adding a library to a release is its entry in the file, above the
+# metapackage, its entry in the metapackage's --member-manifest arguments there,
+# and its `_conda` target here. The release is built stamped
+# (.github/workflows/release.yml); built without a stamp (the pull request's
+# check) the set is still checked.
+release_set(
+    name = "release_set",
+    artifacts = "artifacts.textproto",
+    metapackage = "komira_all",
+    # The text of the metapackage's own arguments in the artifacts file; the
+    # label keeps the words the earlier releases' packages carry.
+    license = "Apache-2.0",
+    summary = "Every komira library of one release.",
+    home = "https://github.com/komira-ai/komira",
+    label_prefix = "kci run ",
+    packages = [
+        "//src/komira_encoding:komira_encoding_conda",
+        "//src/komira_json:komira_json_conda",
+        "//src/komira_protobuf:komira_protobuf_conda",
+        "//src/komira_xml:komira_xml_conda",
+        "//src/komira_retry:komira_retry_conda",
+        "//src/komira_datetime:komira_datetime_conda",
+        "//src/komira_textproto:komira_textproto_conda",
+        "//src/komira_hash:komira_hash_conda",
+        "//src/komira_atomic_alias:komira_atomic_alias_conda",
+        "//src/komira_proto_codec:komira_proto_codec_conda",
+        "//src/kci_api:kci_api_conda",
+        "//src/kci_release_channel:kci_release_channel_conda",
+        "//src/kci_artifact_manifest:kci_artifact_manifest_conda",
+        "//src/kci_logs:kci_logs_conda",
+        "//src/kci_params:kci_params_conda",
+        "//src/kci_release_machine:kci_release_machine_conda",
+        "//src/komira_wkt:komira_wkt_conda",
+        "//src/kci_resource_proto:kci_resource_proto_conda",
+        "//src/kci_validator_rows:kci_validator_rows_conda",
+        "//src/kci_validator_report:kci_validator_report_conda",
+        "//src/kci_workflow_check:kci_workflow_check_conda",
+        "//src/komira_anomaly:komira_anomaly_conda",
+        "//src/komira_clock:komira_clock_conda",
+        "//src/komira_counters:komira_counters_conda",
+        "//src/komira_fork_join:komira_fork_join_conda",
+        "//src/komira_host:komira_host_conda",
+        "//src/komira_job_report_proto:komira_job_report_proto_conda",
+        "//src/komira_name_registry:komira_name_registry_conda",
+        "//src/komira_parquet_api:komira_parquet_api_conda",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths_conda",
+        "//src/komira_resources:komira_resources_conda",
+        "//src/komira_scalar_arithmetic:komira_scalar_arithmetic_conda",
+        "//src/komira_simd:komira_simd_conda",
+        "//src/komira_validation_run:komira_validation_run_conda",
+        "//src/komira_test_run_id:komira_test_run_id_conda",
+        "//src/komira_test_verdict:komira_test_verdict_conda",
+        "//src/komira_kafka_server:komira_kafka_server_conda",
+        "//src/komira_collections:komira_collections_conda",
+        "//src/komira_broker_proto:komira_broker_proto_conda",
+        "//src/komira_supervisor_proto:komira_supervisor_proto_conda",
+        "//src/komira_plan_proto:komira_plan_proto_conda",
+        "//src/komira_rowcell:komira_rowcell_conda",
+        "//src/komira_mail_address:komira_mail_address_conda",
+        "//src/komira_content_line:komira_content_line_conda",
+        "//src/komira_spsc_ring:komira_spsc_ring_conda",
+        "//src/komira_sync:komira_sync_conda",
+        "//src/kci_cell:kci_cell_conda",
+        "//src/komira_mcp_server:komira_mcp_server_conda",
+        "//src/komira_chat_proto:komira_chat_proto_conda",
+        "//src/komira_contacts_proto:komira_contacts_proto_conda",
+        "//src/komira_managed_mail_proto:komira_managed_mail_proto_conda",
+        "//src/komira_calendar_proto:komira_calendar_proto_conda",
+        "//src/komira_snapshotter:komira_snapshotter_conda",
+        "//src/komira_vcard:komira_vcard_conda",
+        "//src/komira_trace:komira_trace_conda",
+        "//src/komira_calendar:komira_calendar_conda",
+        "//src/komira_calendar_ics:komira_calendar_ics_conda",
+        "//src/kci_artifact_proto:kci_artifact_proto_conda",
+        "//src/kci_deploy_model_proto:kci_deploy_model_proto_conda",
+        "//src/kci_manifest_proto:kci_manifest_proto_conda",
+        "//src/kci_artifact:kci_artifact_conda",
+        "//src/komira_libc:komira_libc_conda",
+        "//src/komira_lz4:komira_lz4_conda",
+        "//src/komira_zlib:komira_zlib_conda",
+        "//src/komira_async_api:komira_async_api_conda",
+        "//src/komira_buffer:komira_buffer_conda",
+        "//src/komira_mail_message:komira_mail_message_conda",
+        "//src/komira_compression:komira_compression_conda",
+        "//src/komira_crypto:komira_crypto_conda",
+        "//src/komira_arrow:komira_arrow_conda",
+        "//src/komira_dynamic_filter:komira_dynamic_filter_conda",
+        "//src/komira_metrics:komira_metrics_conda",
+        "//src/komira_secret_store:komira_secret_store_conda",
+        "//src/kci_secret_writer:kci_secret_writer_conda",
+        "//src/komira_arrow_ipc:komira_arrow_ipc_conda",
+        "//src/komira_plan_expr:komira_plan_expr_conda",
+        "//src/komira_secret_env:komira_secret_env_conda",
+        "//src/komira_column_kernels:komira_column_kernels_conda",
+        "//src/komira_log:komira_log_conda",
+        "//src/komira_plan_stats:komira_plan_stats_conda",
+        "//src/kci_reconciler:kci_reconciler_conda",
+        "//src/komira_scan_source:komira_scan_source_conda",
+        "//src/kci_cloud:kci_cloud_conda",
+        "//src/komira_plan_ir:komira_plan_ir_conda",
+        "//src/kci_composites:kci_composites_conda",
+        "//src/komira_join_assembly:komira_join_assembly_conda",
+        "//src/kci_cloud_fake:kci_cloud_fake_conda",
+        "//src/komira_async:komira_async_conda",
+        "//src/komira_fs:komira_fs_conda",
+        "//src/komira_http_core:komira_http_core_conda",
+        "//src/komira_net:komira_net_conda",
+        "//src/komira_supervisor:komira_supervisor_conda",
+        "//src/komira_http_client:komira_http_client_conda",
+        "//src/komira_objectstore:komira_objectstore_conda",
+        "//src/kci_pkg_upload:kci_pkg_upload_conda",
+        "//src/komira_aws_core:komira_aws_core_conda",
+        "//src/komira_gcp_core:komira_gcp_core_conda",
+        "//src/komira_oci:komira_oci_conda",
+        "//src/kci_publish_oci:kci_publish_oci_conda",
+        "//src/kci_release_set:kci_release_set_conda",
+        "//src/komira_gcp_cloudresourcemanager:komira_gcp_cloudresourcemanager_conda",
+        "//src/komira_gcp_iam:komira_gcp_iam_conda",
+        "//src/komira_gcp_run:komira_gcp_run_conda",
+        "//src/komira_gcp_wif:komira_gcp_wif_conda",
+        "//src/kci_cloud_gcp:kci_cloud_gcp_conda",
+        "//src/komira_kafka_broker:komira_kafka_broker_conda",
+        "//src/komira_bench_duckdb:komira_bench_duckdb_conda",
+        "//src/komira_bench_report:komira_bench_report_conda",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# Every release member is claimed on the prod registry. release.yml publishes the members
+# (the packages of README_E2E_PACKAGES) to prod on every push to main, and the registry
+# creates a name only for its claimed owner, so an unclaimed member fails `prod-stage` and
+# turns main red. The pull request check cannot write to the live registry, so the claimed
+# names are committed (prod_claimed_names.txt: a maintainer adds one only after claiming it)
+# and this build action refuses a member the file lacks, naming it
+# (prod_claimed_names_test.zig says what each case catches).
+zig_test(
+    name = "prod_claimed_names_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = "prod_claimed_names_test.zig",
+    data = {
+        "packages.bzl": "//release/readme_e2e:packages.bzl",
+        "prod_claimed_names.txt": "prod_claimed_names.txt",
+    },
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
 )

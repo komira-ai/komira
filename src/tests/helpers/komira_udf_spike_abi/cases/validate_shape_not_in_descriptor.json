@@ -1,0 +1,11 @@
+{
+ "name": "validate_shape_not_in_descriptor",
+ "defect": "validate accepts a shape the entry was not captured with (design 3.1: ERR_DESCRIPTOR naming the shape)",
+ "run": "validate",
+ "entry": "double",
+ "shape": "SCALAR",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "descriptor": {"shapes": ["MAP_BATCHES_COLUMN"]},
+ "expect": {"status": "ERR_DESCRIPTOR", "run_error": "OPTIMIZED_UDF_DESCRIPTOR_INVALID", "message_contains": "SCALAR"}
+}

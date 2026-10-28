@@ -245,13 +245,11 @@ struct MultiKeyColumns(Movable):
 @always_inline
 def _null_ptr[T: AnyType, o: Origin]() -> UnsafePointer[T, o]:
     """A NULL typed pointer with a concrete origin: the placeholder a per-key
-    pointer list holds for a key whose arm never reads it.
-
+    pointer list holds for a key whose arm never reads it."""
+    var none: Optional[UnsafePointer[T, o]] = None
     # SAFETY: `Optional[UnsafePointer[...]]` is layout-compatible with the
     # bare pointer and `None` is the all-zero bit pattern. The result is never
     # dereferenced.
-    """
-    var none: Optional[UnsafePointer[T, o]] = None
     return UnsafePointer(to=none).bitcast[UnsafePointer[T, o]]()[]
 
 

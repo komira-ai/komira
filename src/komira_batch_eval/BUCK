@@ -1,13 +1,16 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The vectorized expression evaluators over Arrow record batches: projection
-# and predicate evaluation with their CASE, IN-list and dictionary arms.
+# The vectorized expression evaluators over Arrow record batches: predicate
+# (filter) and projection evaluation, CASE, IN-list and dictionary arms, and
+# the AND-chain narrowing that keeps three-valued NULL semantics at the filter
+# boundary.
 mojo_library(
     name = "komira_batch_eval",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_arrow:komira_arrow",
         "//src/komira_buffer:komira_buffer",
+        "//src/komira_collections:komira_collections",
         "//src/komira_column_kernels:komira_column_kernels",
         "//src/komira_counters:komira_counters",
         "//src/komira_json_index:komira_json_index",
@@ -23,6 +26,7 @@ mojo_library(
         "tests/test_case_over_dictionary_column.mojo",
         "tests/test_case_zip_blend.mojo",
         "tests/test_col_int_float_scalar_kerneldirect.mojo",
+        "tests/test_conjunction_narrowing.mojo",
         "tests/test_date32_in_list_filter.mojo",
         "tests/test_decimal128_correctness.mojo",
         "tests/test_decorrelation_features.mojo",
@@ -31,17 +35,23 @@ mojo_library(
         "tests/test_dict_materialize_offset_honoring.mojo",
         "tests/test_dict_predicate_codes_in_place.mojo",
         "tests/test_evaluate_entry.mojo",
+        "tests/test_filter_narrowed_batch_sizes.mojo",
+        "tests/test_filter_null_collapse_semantics.mojo",
+        "tests/test_filter_null_literal_alias_is_null.mojo",
         "tests/test_float_class_projection_arm.mojo",
         "tests/test_in_list_null_contract.mojo",
         "tests/test_in_list_offset_honoring.mojo",
         "tests/test_int32_literal_domain.mojo",
+        "tests/test_int_arith_overflow_raises.mojo",
         "tests/test_integer_div_zero_no_trap.mojo",
         "tests/test_integer_div_zero_no_trap_part2.mojo",
         "tests/test_json_extract_projection.mojo",
         "tests/test_lower_untyped_expr_in_list_e2e.mojo",
         "tests/test_null_literal_comparison_is_null.mojo",
         "tests/test_null_test_computed_child.mojo",
+        "tests/test_numeric_dict_filter_lut_p3.mojo",
         "tests/test_numeric_unary_kernels.mojo",
+        "tests/test_predicate_compound_lhs.mojo",
         "tests/test_predicate_compound_rhs.mojo",
         "tests/test_predicate_date_vs_timestamp_literal.mojo",
         "tests/test_predicate_literal_type_mismatch.mojo",
@@ -68,6 +78,7 @@ mojo_library(
         "tests/test_substring_duckdb_semantics.mojo",
         "tests/test_temporal_extract.mojo",
         "tests/test_temporal_extract_part2.mojo",
+        "tests/test_udf_predicate_names_its_own_output_column.mojo",
     ],
     visibility = ["PUBLIC"],
 )

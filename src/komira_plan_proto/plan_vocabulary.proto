@@ -29,11 +29,17 @@ package komira.plan.v1;
 // partially execute.
 
 // ----------------------------------------------------------------------
-// LogicalPlan node kind. ONE declaration site, logical_plan.mojo (0-15).
+// LogicalPlan node kind. ONE declaration site, logical_plan.mojo (0-15, 18-20).
 // 16-17 were the ROW<->COLUMN converts and are DELETED; their numbers
 // stay burned.
 // Derived from: src/komira_plan_ir/logical_plan.mojo
 // Engine prefix: PLAN_
+//
+// EXEMPT — declared by the engine, deliberately NOT on the wire.
+// The number is RESERVED so nothing can take it; the reason is
+// the debt, and the row disappears when the debt is paid.
+//   PLAN_EXCHANGE: plan.proto has no `exchange` message arm yet, so no
+//     plan bytes can carry the node
 // ----------------------------------------------------------------------
 enum PlanTag {
   PLAN_WIRE_UNSPECIFIED = 0;
@@ -53,8 +59,11 @@ enum PlanTag {
   PLAN_VIEW_REF = 14;
   PLAN_CSE_REF = 15;
   PLAN_CAST_TO_VARCHAR = 16;
+  PLAN_MAP_BATCHES = 20;
+  PLAN_STEP = 21;
   reserved 17;  // PLAN_CONVERT_COLUMN_TO_ROW
   reserved 18;  // PLAN_CONVERT_ROW_TO_COLUMN
+  reserved 19;  // PLAN_EXCHANGE (EXEMPT, above)
 }
 
 // ----------------------------------------------------------------------
@@ -99,6 +108,7 @@ enum ExprTag {
   EXPR_STRING_FN = 25;
   EXPR_UDF_CALL = 26;
   EXPR_STRING_FN_N = 27;
+  EXPR_UDF_APPLY = 28;
   reserved 11;  // EXPR_BETWEEN
   reserved 12;  // EXPR_SORT_KEY
 }
@@ -149,6 +159,7 @@ enum AggFn {
   AGG_SKEWNESS = 35;
   AGG_KURTOSIS = 36;
   AGG_KURTOSIS_POP = 37;
+  AGG_UDF = 38;
 }
 
 // ----------------------------------------------------------------------

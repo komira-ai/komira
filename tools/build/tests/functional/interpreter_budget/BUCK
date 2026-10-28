@@ -1,0 +1,65 @@
+load("@komira//tools/build/lint:interpreter_budget.bzl", "interpreter_budget")
+
+# The interpreter list's rule (tools/build/lint/interpreter_budget.bzl), used
+# from a cell other than komira, as a repository using komira as a cell uses
+# it: each case checks this package's own doc_tree (`:doc_tree`, declared by
+# the rule's macro) plus files staged at the paths `files` names, against
+# listed.tsv (one row, tools/gen.py). A case with `expect` builds green only
+# while the check refuses its planted defect with that text; one without
+# passes only with no finding. tests//functional/... (the pull request
+# check's functional_tests unit) builds them. The planted files are
+# plain.txt, `print(1)`, staged under interpreter names: a fixture of this
+# cell with a `.py` name or a `#!` line would be an interpreter file of
+# komira's own list. Each kind of finding is a case of the tool's unit tests
+# (//tools/build/lint/interpreter_budget).
+
+_LIST = "functional/interpreter_budget/listed.tsv"
+
+# Every interpreter file has its row.
+interpreter_budget(
+    name = "listed",
+    allowlist = _LIST,
+    files = {"tools/gen.py": "plain.txt"},
+    tree = ":doc_tree",
+)
+
+# An unlisted awk file, counted by its extension through the rule.
+interpreter_budget(
+    name = "unlisted_awk",
+    allowlist = _LIST,
+    expect = ["tools/sum.awk: an interpreter file (a `.awk` file) with no row in " + _LIST],
+    files = {
+        "tools/gen.py": "plain.txt",
+        "tools/sum.awk": "plain.txt",
+    },
+    tree = ":doc_tree",
+)
+
+# The row of a file that is gone.
+interpreter_budget(
+    name = "stale_row",
+    allowlist = _LIST,
+    expect = [_LIST + ":3: tools/gen.py: no interpreter file at this path: remove the row"],
+    tree = ":doc_tree",
+)
+
+# A scope: other/run.py, outside it, needs no row.
+interpreter_budget(
+    name = "scoped",
+    allowlist = _LIST,
+    files = {
+        "other/run.py": "plain.txt",
+        "tools/gen.py": "plain.txt",
+    },
+    scope = ["tools/"],
+    tree = ":doc_tree",
+)
+
+# A row outside the scope.
+interpreter_budget(
+    name = "row_outside_scope",
+    allowlist = _LIST,
+    expect = [_LIST + ":3: tools/gen.py: outside the scope of the check: remove the row"],
+    scope = ["other/"],
+    tree = ":doc_tree",
+)

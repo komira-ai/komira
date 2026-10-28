@@ -15,33 +15,6 @@ import from the modules.
 - `komira_op_join_probe.join_multi_key_outer`: `multi_key_probe_right_into`
   and `multi_key_probe_full_into`, which also emit every unmatched build row
   (probe index -1).
-- `komira_op_join_probe.join_multi_key_parallel`:
-  `parallel_multi_key_inner_probe_into`, the INNER probe fanned over the
-  engine's dispatcher: workers claim probe morsels and walk a batch of rows'
-  chains together (`join_multi_key_parallel_task`), then one more fanned wave
-  concatenates their matches. The same pairs as the serial probe, grouped by
-  worker.
-- `komira_op_join_probe.join_multi_key_parallel_build`:
-  `multi_key_hash_join_build_parallel`, the build fanned over the engine's
-  dispatcher (each row pushed onto its bucket's chain with an atomic
-  compare-exchange), serial below 250,000 rows. The same rows in the same
-  buckets as `MultiKeyHashJoinBuilder.build`, chain order aside. It follows the
-  hash join's build mode (`komira_op_join_build`'s
-  `join_parallel_build_configure`: AUTO, OFF, or the FORCE test hook).
-- `komira_op_join_probe.join_probe_multi_key`: `execute_multi_key_join_probe`,
-  the composite join probe operator: one probe batch against the completed
-  build batch, as a physical plan's `MorselOp` says (keys, INNER / LEFT / SEMI
-  / ANTI, output columns). It rewrites nothing; an INNER join indexes the
-  smaller side when the build side has more than twice the probe side's rows.
-- `komira_op_join_probe.join_probe_settings`: the probe's process settings,
-  set once from flags: the batched walk's width (0 is the row-at-a-time walk),
-  the probe morsel, and the retile.
-- `komira_op_join_probe.join_deferred`, `join_deferred_idx` and
-  `join_defer_verdict`: the streaming join probe's DEFERRED output. A morsel
-  either stages its output now or retains its probe batch and match indices
-  (`DeferredJoinChunk`, the indices narrowed to 4 bytes when they fit) for one
-  gather at the end; `deferral_verdict` decides which, by a DRAM-traffic rule
-  (or the older memory rule), and names the line that decided.
 - `komira_op_join_probe.join_key_extract`: `extract_join_key_columns_typed`
   (and `extract_join_key_columns_serial`, without a dispatcher) renders a
   batch's key columns into one Int64 key slot per row and key
@@ -69,7 +42,6 @@ from komira_arrow.schema import Field, SchemaBuilder
 from komira_op_join_probe.join_key_extract import extract_join_key_columns_serial
 from komira_op_join_probe.join_multi_key_builder import MultiKeyHashJoinBuilder
 from komira_op_join_probe.join_multi_key_filter import multi_key_probe_anti
-from komira_op_join_probe.join_probe_settings import MK_PROBE_BATCH_DEFAULT, mk_probe_batch_width
 
 # A two-key join on (a, b). Build rows: (1, 10), (1, 20), (2, 10).
 # Probe rows: (1, 20), (2, 99), (1, 10).
@@ -100,7 +72,4 @@ assert_equal(build_rows[1], 0)
 var anti = multi_key_probe_anti(join, extract_join_key_columns_serial(probe, keys))
 assert_equal(len(anti), 1)
 assert_equal(anti[0], 1)
-
-# Unconfigured, the parallel probe walks 512 rows' chains together.
-assert_equal(mk_probe_batch_width(), MK_PROBE_BATCH_DEFAULT)
 ```

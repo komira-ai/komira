@@ -33,6 +33,8 @@ const usages = [_]Usage{
     .{ .args = &(IO ++ MAP), .msg = "--stdlib is required" },
     .{ .args = &(IO ++ MAP ++ STD ++ STD), .msg = "--stdlib given twice" },
     .{ .args = &(IO ++ MAP ++ [_][]const u8{ "--stdlib", "oss" }), .msg = "--stdlib 'oss' must end with '/'" },
+    .{ .args = &(IO ++ MAP ++ [_][]const u8{ "--src", h.SRC ++ "/", "--src", h.SRC ++ "/" } ++ STD), .msg = "--src given twice" },
+    .{ .args = &(IO ++ MAP ++ [_][]const u8{ "--src", h.SRC } ++ STD), .msg = "--src '" ++ h.SRC ++ "' must end with '/'" },
 };
 
 test "10 bad usage: exit 2, the message and the usage line on stderr, nothing written" {
@@ -71,7 +73,7 @@ fn runLimited(c: *h.Case, args: []const []const u8) !h.Run {
         posix.dup2(out[1], 1) catch linux.exit_group(126);
         posix.dup2(err[1], 2) catch linux.exit_group(126);
         posix.fchdir(c.tmp.dir.fd) catch linux.exit_group(126);
-        posix.sigaction(posix.SIG.XFSZ, &ign, null) catch linux.exit_group(126);
+        posix.sigaction(posix.SIG.XFSZ, &ign, null);
         posix.setrlimit(.FSIZE, limit) catch linux.exit_group(126);
         switch (posix.execveZ(argv[0].?, argv.ptr, envp.ptr)) {
             else => linux.exit_group(127),
@@ -84,8 +86,8 @@ fn runLimited(c: *h.Case, args: []const []const u8) !h.Run {
     defer ro.close();
     const re = std.fs.File{ .handle = err[0] };
     defer re.close();
-    const stdout = try ro.reader().readAllAlloc(al, 1 << 20);
-    const stderr = try re.reader().readAllAlloc(al, 1 << 20);
+    const stdout = try ro.readToEndAlloc(al, 1 << 20);
+    const stderr = try re.readToEndAlloc(al, 1 << 20);
     if (!posix.W.IFEXITED(w.status)) {
         std.debug.print("{s}: cov_branch_classify did not exit: status 0x{x}; stderr:\n{s}\n", .{ c.name, w.status, stderr });
         return error.TestUnexpectedResult;

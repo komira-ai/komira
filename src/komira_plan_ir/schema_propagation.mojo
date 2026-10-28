@@ -40,6 +40,9 @@ from komira_plan_ir.logical_plan import (
     PLAN_PARTITION_BY,
     PLAN_PARTITION_TOPN,
     PLAN_CAST_TO_VARCHAR,
+    PLAN_EXCHANGE,
+    PLAN_MAP_BATCHES,
+    PLAN_STEP,
     JOIN_SEMI,
     JOIN_ANTI,
     JOIN_LEFT,
@@ -114,6 +117,15 @@ def infer_schema(plan: LogicalPlan) raises -> Schema:
         # synthesized at factory construction time (per-column rewrite from
         # child schema). Return the stored schema directly — re-derivation
         # would just walk the child and rebuild the same shape.
+        return _copy_schema(plan.output_schema)
+    elif plan.tag == PLAN_EXCHANGE:
+        # An exchange moves rows between partitions; its schema is its
+        # child's.
+        return _infer_passthrough_schema(plan.exchange_data_ref().child[])
+    elif plan.tag == PLAN_MAP_BATCHES or plan.tag == PLAN_STEP:
+        # The children of the `UdfRef`'s `return_type`, stated at
+        # construction by the caller that holds the `UdfRef` list; nothing
+        # in the plan alone re-derives it.
         return _copy_schema(plan.output_schema)
     else:
         raise Error("infer_schema: unknown plan tag " + String(Int(plan.tag)))
