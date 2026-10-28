@@ -58,11 +58,8 @@ fi
 #     (komira//tools/build/examples/rust/ext). In tests//negative/rust_test,
 #     `ext_red` (one external test fails) and a binary linking it cannot be
 #     built, the harness reporting
-#     `1 passed; 1 failed`. Refused at analysis, each naming its cause:
-#     `test_srcs` with no tests/<name>.rs crate (`ext_no_crate`), a file
-#     outside tests/ (`ext_outside`), a tests/<name>.rs whose name is not a
-#     Rust identifier (`ext_bad_name`), a file directly under tests/ that is
-#     not .rs (`ext_not_rs`). A library with both `tests` and `test_srcs` is
+#     `1 passed; 1 failed`. (The test_srcs refusals at analysis are
+#     //tools/build/selftest:analysis_refusals_rust.) A library with both `tests` and `test_srcs` is
 #     gated by the markers of both: `both_red`
 #     (the external test passes, the unit test fails) and `both_ext_red` (the
 #     unit test passes, an external test fails) cannot be built.
@@ -70,9 +67,23 @@ RX=tests//negative/rust_test
 expect_red rust_ext_red "GATED TEST FAILED: $RX:ext_red tests/ext_fail.rs" "$RX:ext_red"
 expect_red rust_ext_red_count "1 passed; 1 failed" "$RX:ext_red"
 expect_red rust_ext_red_consumer "GATED TEST FAILED: $RX:ext_red tests/ext_fail.rs" "$RX:ext_red_consumer"
-expect_red rust_ext_no_crate "test_srcs has no test crate" "$RX:ext_no_crate"
-expect_red rust_ext_outside "test_srcs \`src/ext_misplaced.rs\` is not under tests/" "$RX:ext_outside"
-expect_red rust_ext_bad_name "test_srcs \`tests/1bad.rs\` does not name a Rust identifier" "$RX:ext_bad_name"
-expect_red rust_ext_not_rs "test_srcs \`tests/ext_data.txt\` is not a .rs file" "$RX:ext_not_rs"
 expect_red rust_ext_both_red "GATED TEST FAILED: $RX:red" "$RX:both_red"
 expect_red rust_ext_both_ext_red "GATED TEST FAILED: $RX:both_ext_red tests/ext_fail.rs" "$RX:both_ext_red"
+
+# 35b. The Cargo-driven attributes of the Rust rules (env, renamed_deps,
+#      native_deps, patch, proc_macro_extern). The greens are
+#      tests//functional/rust_cargo (in the pull-request check); each planted
+#      defect below is the same green with that attribute removed or broken,
+#      and must fail naming its cause. (The refusals at analysis are
+#      //tools/build/selftest:analysis_refusals_rust.)
+RC=tests//negative/rust_cargo
+expect_red rust_cargo_env_missing "environment variable \`CARGO_PKG_NAME\` not defined at compile time" "$RC:env_missing"
+expect_red rust_cargo_env_wrong "differs from" "$RC:env_wrong"
+expect_red rust_cargo_renamed_missing "use of undeclared crate or module \`shared_two\`" "$RC:renamed_missing"
+expect_red rust_cargo_native_missing "undefined symbol: komira_rust_native_add" "$RC:native_missing"
+expect_red rust_cargo_native_test_missing "undefined symbol: komira_rust_native_add" "$RC:native_test_missing"
+expect_red rust_cargo_native_via_lib_missing "undefined symbol: komira_rust_native_add" "$RC:native_via_lib_missing"
+expect_red rust_cargo_out_dir_unpatched "environment variable \`OUT_DIR\` not defined at compile time" "$RC:out_dir_unpatched"
+expect_red rust_cargo_out_dir_no_add "generated.rs: No such file or directory" "$RC:out_dir_no_add"
+expect_red rust_cargo_patch_count "matched 1 times, expected 2" "$RC:out_dir_count"
+expect_red rust_cargo_pm_no_extern "use of undeclared crate or module \`proc_macro\`" "$RC:pm_consumer"

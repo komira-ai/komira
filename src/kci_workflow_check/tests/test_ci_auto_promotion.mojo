@@ -2,15 +2,19 @@
 # src/kci_workflow_check/tests/test_ci_auto_promotion.mojo -- continuous
 #   auto-promotion (auto_promotion.mojo, R15 to R22, R2's break-glass
 #   environment and R4's allow-list),
-#   held by a table of mutations of the repository's OWN kci.yml and
-#   release/machine.textproto: the canonical pair agrees, and every row that
+#   held by a table of mutations of a FIXTURE workflow and machine file: the
+#   pair komira's own kci.yml and release/machine.textproto were while komira
+#   published to channels (beta, validation, prod). The repository holds no
+#   such workflow now (its release workflow runs Buck2 targets), so this
+#   fixture keeps the publishing rules tested for as long as kci can publish. The
+#   canonical pair agrees, and every row that
 #   breaks a rule must end in that rule's finding (or the reader's "cannot
 #   tell", or the machine file's refusal). A row that reads green fails the
 #   test by its label, and every failing row is listed, not just the first.
 # =============================================================================
 #
-# The files are staged as test data (BUCK): `kci.yml`, `machine.textproto`
-# and `channels.textproto`.
+# The files are staged as test data (BUCK) from tests/data/publish_*:
+# `kci.yml`, `machine.textproto` and `channels.textproto`.
 # =============================================================================
 
 from std.pathlib import Path

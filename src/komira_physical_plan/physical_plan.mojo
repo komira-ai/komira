@@ -57,9 +57,12 @@ from komira_collections.slab import Slab
 #   13: `SourceSpecPod.parquet_spec_is_total` — a DERIVED, FAIL-CLOSED Bool
 #       recording whether the three parquet fields beside it REPRODUCE the
 #       scan they were minted from (see its docstring).
+#   14: `SegmentDescPod.morsel_rows` — the rows per morsel the HOST chose when it
+#       lowered the segment (`komira_host_profile.morsel_sizing_policy`),
+#       recorded so nothing downstream re-derives it. 0 = not yet lowered.
 #   Retired `MorselOp` tag values (4-13) are not reused.
 
-comptime PHYSICAL_PLAN_IR_VERSION: Int = 13
+comptime PHYSICAL_PLAN_IR_VERSION: Int = 14
 
 
 # =============================================================================
@@ -342,10 +345,10 @@ struct ParquetSourceData(Movable):
     #     other breaker already takes, never the other way. ---
     var preserve_string_dict: Bool
     # --- The per-column integral-narrowing
-    #     instructions carried down from `ScanData.payload_narrow` by the
-    #     engine's join executor (not in this tree). EMPTY at construction at
-    #     every site (it is deliberately NOT a ctor argument — see the same note
-    #     on `ScanData.payload_narrow`).
+    #     instructions the host derives while it lowers the plan
+    #     (`komira_lowering_rules.derive_payload_narrow`) and sets here (not in
+    #     this tree). EMPTY at construction at every site (it is deliberately
+    #     NOT a ctor argument).
     #
     #     ⚠ IT IS ADVISORY, AND EXACTLY ONE LEAF HONOURS IT.
     #     The engine's parquet join materializer narrows the BUILD-side
@@ -1273,6 +1276,9 @@ struct SegmentDescPod(Movable):
     var mem_estimate_bytes: Int         # feeds the saturation throttle — INITIAL-shape hint only
     var card_estimate_rows: Int         # feeds the parallel-finalize / skew cost model
 
+    # ---- HOST-RECORDED LOWERING DECISIONS (written by the host, never by the producer) ----
+    var morsel_rows: Int                # rows per morsel, a pure function of (host profile, segment); 0 = not lowered
+
     # ---- CANCEL / ERROR (POD slots — an INDEX, never a token/record by value) ----
     var cancel_slot: Int                # index into the driver's cancel-token table
     var error_slot: Int                 # index into the driver's per-segment error record (first-error-wins)
@@ -1297,6 +1303,7 @@ struct SegmentDescPod(Movable):
         cancel_slot: Int = -1,
         error_slot: Int = -1,
         ir_version: Int = PHYSICAL_PLAN_IR_VERSION,
+        morsel_rows: Int = 0,
     ):
         self.ir_version = ir_version
         self.seg_id = seg_id
@@ -1314,6 +1321,7 @@ struct SegmentDescPod(Movable):
         self.order_key_kind = order_key_kind
         self.mem_estimate_bytes = mem_estimate_bytes
         self.card_estimate_rows = card_estimate_rows
+        self.morsel_rows = morsel_rows
         self.cancel_slot = cancel_slot
         self.error_slot = error_slot
 

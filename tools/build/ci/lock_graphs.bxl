@@ -1,0 +1,53 @@
+# The lock-graphs check: every package built with buildrules' `mojo_package`
+# holds a unit graph for each platform subdir its mopm.lock records.
+#
+#   ./buck2 bxl komira//tools/build/ci/lock_graphs.bxl:check
+#
+# `buildrules mojo sync` writes one graph per subdir (linux-64, and linux-aarch64
+# and osx-arm64 when the package's mopm.lock records a toolchain for them), and the
+# package's `:table` compares the table it finds with mopm's output, byte for byte,
+# for the subdirs the table itself holds. A graph deleted from the table is then
+# not noticed on linux: only a build for that platform needs it. This script asks
+# every `:table` of the scope (UNIVERSE of rules.bzl) which subdirs it holds, and
+# runs lock_graphs (lock_graphs.zig) as a build action over the package's
+# mopm.lock, staged by the package's `:workspace`, to hold the two lists equal.
+# It fails, naming the package and the subdir, when they differ. The same action holds the
+# system libraries of the package to its lock: a package whose mopm.toml (or a path
+# dependency's) declares a native library with `mode = "load"` must pin it in `system_libs`
+# of its mopm.lock for each subdir the lock records, and a package whose sources open a
+# library must declare it. A new package
+# is covered with no list to edit: the query finds its `:table`.
+#
+# Options: --scope <patterns>.
+
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load(":rules.bzl", "UNIVERSE")
+
+def _check(ctx):
+    scope = ctx.cli_args.scope or UNIVERSE
+    tables = ctx.uquery().eval('kind("mojo_table_rule", {})'.format(" + ".join(["(" + s + ")" for s in scope])))
+    if len(tables) == 0:
+        fail("lock_graphs: no `:table` of a mojo_package in {}: the check would verify nothing".format(" + ".join(scope)))
+    tool = ctx.configured_targets("komira//tools/build/ci:lock_graphs")
+    run_info = ctx.analysis(tool).providers()[RunInfo]
+    actions = ctx.bxl_actions(exec_compatible_with = LINUX_X86_64).actions
+    cmd = cmd_args(run_info)
+    out = actions.declare_output("lock_graphs/validation.json")
+    cmd.add(out.as_output())
+    for t in sorted(tables, key = lambda t: str(t.label)):
+        workspace = ctx.analysis(ctx.configured_targets(str(t.get_attr("workspace")))).providers()[DefaultInfo].default_outputs[0]
+        package_dir = t.get_attr("package_dir") or "."
+        cmd.add(str(t.label), t.get_attr("mojo"))
+        cmd.add(cmd_args(workspace, "/", package_dir, "/mopm.lock", delimiter = ""))
+        cmd.add(",".join(t.get_attr("subdirs")))
+        cmd.add(cmd_args(workspace, "/", package_dir, delimiter = ""))
+    actions.run(cmd, category = "lock_graphs")
+    ctx.output.ensure(out)
+    ctx.output.print("lock_graphs: holding the graphs of {} package table(s) to their mopm.lock".format(len(tables)))
+
+check = bxl_main(
+    impl = _check,
+    cli_args = {
+        "scope": cli_args.list(cli_args.string(), default = []),
+    },
+)

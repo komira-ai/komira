@@ -5,8 +5,9 @@
 runs `komira_oci check` ([oci/](oci/README.md), a Zig tool) over
 the OCI layout of `image` (an `oci_image`) in a build action, and is that
 image with the check's output added to its default output and to each
-sub-target (`[digest]`, `[docker_archive]`, `[layers]`), so building any of
-them runs the check: an image that fails it cannot be built through this
+sub-target (`[digest]`, `[docker_archive]`, `[layers]`, `[release]`) and each
+sub-target of those (`[release][manifest]`), so building any of them runs the
+check: an image that fails it cannot be built through this
 target. Red unless the config's Entrypoint is exactly `[entrypoint]`;
 `entrypoint` and each of `executables` (paths relative to /) is a regular
 file with mode 0755 in the image's filesystem (layers applied in order,
@@ -23,6 +24,18 @@ and its one output is that verdict (the image is not forwarded).
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "OciImageInfo")
+
+def _with_check(ctx, name, d, out):
+    """Sub-target `name` of the image, `d`, with the check's output added to it
+    and to each of its own sub-targets. Two levels are all oci_image has
+    (`[release][manifest]`); a third fails analysis rather than being dropped."""
+    inner = {}
+    for k, v in d.sub_targets.items():
+        vi = v[DefaultInfo]
+        if vi.sub_targets:
+            fail("{}: [{}][{}] has sub-targets; oci_image_check forwards two levels".format(ctx.label, name, k))
+        inner[k] = [DefaultInfo(default_outputs = vi.default_outputs, other_outputs = list(vi.other_outputs) + [out])]
+    return DefaultInfo(default_outputs = d.default_outputs, other_outputs = list(d.other_outputs) + [out], sub_targets = inner)
 
 def _impl(ctx):
     img = ctx.attrs.image[OciImageInfo]
@@ -60,10 +73,7 @@ def _impl(ctx):
     if ctx.attrs.expect_red != None:
         return [DefaultInfo(default_output = out)]
     d = ctx.attrs.image[DefaultInfo]
-    subs = {
-        k: [DefaultInfo(default_outputs = v[DefaultInfo].default_outputs, other_outputs = [out])]
-        for k, v in d.sub_targets.items()
-    }
+    subs = {k: [_with_check(ctx, k, v[DefaultInfo], out)] for k, v in d.sub_targets.items()}
     subs["check"] = [DefaultInfo(default_output = out)]
     return [
         DefaultInfo(default_outputs = d.default_outputs, other_outputs = list(d.other_outputs) + [out], sub_targets = subs),

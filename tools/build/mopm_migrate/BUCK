@@ -1,0 +1,37 @@
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+
+# mopm_migrate: moves one komira Mojo library (`src/<name>`, a `mojo_library`) onto
+# buildrules' `mojo_package` and a mopm package, as the hand migrations do (README.md).
+# Its cases run the tool on the tree komira_resources had before its hand migration and
+# require the hand result, then each class of refusal, a dry run that writes nothing, and a
+# real run on a scratch tree; welded: the tool is built only when they pass.
+_SOURCES = [
+    "emit.zig",
+    "mojo_imports.zig",
+    "mopm_migrate.zig",
+    "plan.zig",
+    "starlark.zig",
+]
+
+_FIXTURES = glob(["fixtures/**"])
+
+zig_test(
+    name = "mopm_migrate_unit",
+    exec_compatible_with = LINUX_X86_64,
+    src = "mopm_migrate_test.zig",
+    imports = _SOURCES + _FIXTURES,
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+)
+
+zig_exe(
+    name = "mopm_migrate",
+    exec_compatible_with = LINUX_X86_64,
+    src = "mopm_migrate.zig",
+    imports = ["emit.zig", "mojo_imports.zig", "plan.zig", "starlark.zig"],
+    unit_tests = [":mopm_migrate_unit", "komira//tools/build/toolchains:zig_next_version"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
+    visibility = ["PUBLIC"],
+)

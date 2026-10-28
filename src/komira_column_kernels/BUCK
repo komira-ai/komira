@@ -25,6 +25,7 @@ mojo_library(
         "tests/test_column_view_elim_oracle.mojo",
         "tests/test_copy_column_validity.mojo",
         "tests/test_copy_share_table.mojo",
+        "tests/test_cross_batch_gather.mojo",
         "tests/test_digest_functions.mojo",
         "tests/test_fused_predicate.mojo",
         "tests/test_g4_bool_carried_batch_slice.mojo",

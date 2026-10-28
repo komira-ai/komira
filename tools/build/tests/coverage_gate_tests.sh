@@ -16,7 +16,7 @@
 #      BelowTarget (a test covering 3 of 6 lines, and 1 of the 4 arms of its
 #      two `if`s), NotMeasured (a library with no test still has a gate),
 #      UnmeasuredFile (a source no test compiles), BranchNotMeasured alone
-#      (every line covered and a ratchet row, its gate reading no branch
+#      (every line covered and held, its gate reading no branch
 #      record: coverage_branch_gate = False), BelowTarget on branch alone
 #      (every line covered, one arm of its `if` never taken: the branch
 #      records reach the gate), BelowTarget on branch alone again (every
@@ -29,17 +29,15 @@
 #      census twins are green and their result.json says so
 #      (:<name>_census_result); covlow's library in a test-only package
 #      (tests//src/tests/coverage:covinfo, under COVERAGE_INFO_ONLY_DIRS) has a
-#      green gate in enforce mode, its BelowTarget and MissingRow information
+#      green gate in enforce mode, its BelowTarget information
 #      (:covinfo_result), while covlow's stays red, and so does its copy
 #      in tests//src/testsuite/coverage (covnotinfo: not under src/tests); covtop_census_result: a library whose welded
 #      tests are outside its package's tests/ analyzes with coverage, and
-#      its gate leaves both tests out of its numbers (--test-source); covbad:
-#      a census gate over a malformed ratchet is red (covcheck exit 1 fails
-#      the gate in every mode); covfloor: a census gate under a ratchet
-#      floor it does not hold is red, a Regression, and so is its conda
-#      package, while covfloor_held at its floors is green; the census
-#      check (census.bzl) is green on the doc and floors census.sh renders
-#      and red on a doc edited by hand or a floor under the census; what a red gate blocks: the libraries above
+#      its gate leaves both tests out of its numbers (--test-source); covbad: a census gate over a
+#      malformed held marker is red (covcheck exit 1 fails the gate in every mode); covheld: a census
+#      gate below the target on a metric its package holds is red, a Regression, and so is its conda
+#      package, while covnotheld (the same numbers, nothing held) is green, its conda package too; the
+#      census check (census.bzl) is green on the doc census.sh renders and red on each defect below; what a red gate blocks: the libraries above
 #      and covlow_user (which depends on covlow and runs its test against
 #      covlow's package) are green, and covlow_conda and covnotests_conda
 #      (a REFUSED package: no test) are red with their gate's failure; a
@@ -69,15 +67,17 @@
 #      tests//negative/coverage:tracer_mt and test_tracer_mt green and
 #      tracer_mt_conda red (what ships waits for the run of a test the
 #      library names); covmt_stray_cov_gate, covmt_args_cov_gate,
-#      covmt_gen_cov_gate and covmt_nocov_cov_gate red at analysis (a named
-#      test must depend on the library, have no args and a source main, and
-#      have a coverage build); komira_db_sqlite (outside the tests cell,
+#      covmt_gen_cov_gate and covmt_nocov_cov_gate are refused at analysis (a
+#      named test must depend on the library, have no args and a source main,
+#      and have a coverage build: //tools/build/selftest:analysis_refusals_coverage);
+#      komira_db_sqlite (outside the tests cell,
 #      naming coverage_tests) analyzes with the switch on, with no gate
 #      action of its own and one in komira_db_sqlite_cov_gate.
 #      A shared library's gate (COVERAGE_SHARED_LIB_MODE): covso_traced is
 #      green with the switch on and its driver's coverage run red (nothing
-#      waits for it); enforce is refused in analysis (covso_enforce). A
-#      welded test at a library source's path is refused (testpath).
+#      waits for it); enforce is refused in analysis (covso_enforce), and so
+#      is a welded test at a library source's path (testpath), both
+#      //tools/build/selftest:analysis_refusals_coverage.
 #      The greens named below build in the pull-request check, not here:
 #      tests//functional/... is built, its sub-targets through
 #      tests//functional/coverage:greens, and the greens of tests//negative
@@ -99,20 +99,20 @@ expect_red coverage_gate_branch_arm "COVERAGE GATE FAILED (enforce): $P ($N:covb
 expect_red coverage_gate_branch_try "COVERAGE GATE FAILED (enforce): $P ($N:covtry [coverage gate]): covcheck gate exited 3" "$N:covtry[coverage][gate]"
 expect_red coverage_gate_branch_andor "COVERAGE GATE FAILED (enforce): $P ($N:covandor [coverage gate]): covcheck gate exited 3" "$N:covandor[coverage][gate]"
 # Each red is its own finding: covlow's is BelowTarget, covfull_unread's
-# only finding is BranchNotMeasured (line 100%, a ratchet row), and covbranch's
-# only finding is BelowTarget on branch (line 100%, a ratchet row, its
+# only finding is BranchNotMeasured (line 100%, held), and covbranch's
+# only finding is BelowTarget on branch (line 100%, held, its
 # branch records read), and so is covtry's (a `try` decision's raise arm)
 # and covandor's (an `or`'s arm skipping its right operand).
 # The enforce banner names what a red gate blocks:
 # the conda package only.
-for want in "coverage_gate_enforce|- **BelowTarget** \`$P\`: line 50.00% is below the target 100.00%" \
+for want in "coverage_gate_enforce|- **BelowTarget** \`$P\`: line 50.00% is below the target 99.00%" \
     "coverage_gate_enforce|The conda package (covlow_conda) is not produced until its coverage meets the policy;" \
     "coverage_gate_branch|### Findings (1)" \
-    "coverage_gate_branch_arm|- **BelowTarget** \`$P\`: branch 50.00% is below the target 100.00%" \
+    "coverage_gate_branch_arm|- **BelowTarget** \`$P\`: branch 50.00% is below the target 99.00%" \
     "coverage_gate_branch_arm|### Findings (1)" \
-    "coverage_gate_branch_try|- **BelowTarget** \`$P\`: branch 83.33% is below the target 100.00%" \
+    "coverage_gate_branch_try|- **BelowTarget** \`$P\`: branch 83.33% is below the target 99.00%" \
     "coverage_gate_branch_try|### Findings (1)" \
-    "coverage_gate_branch_andor|- **BelowTarget** \`$P\`: branch 50.00% is below the target 100.00%" \
+    "coverage_gate_branch_andor|- **BelowTarget** \`$P\`: branch 50.00% is below the target 99.00%" \
     "coverage_gate_branch_andor|### Findings (1)"; do
     if grep -qF -- "${want#*|}" "$LOG/${want%%|*}.log"; then
         pass "${want%%|*}_finding"
@@ -128,32 +128,26 @@ expect_green coverage_gate_library "$N:covlow" "$N:covnotests" "$N:covun" "$N:co
     "$N:covbranch" "$N:covtry" "$N:covandor" "$N:covbad" "$N:covlow_user"
 expect_red coverage_gate_conda "COVERAGE GATE FAILED (enforce): $P ($N:covlow [coverage gate]): covcheck gate exited 3" "$N:covlow_conda"
 expect_red coverage_gate_conda_notests "- **NotMeasured** \`$P\`: no line of this package was measured" "$N:covnotests_conda"
-# A floor holds in census mode (README.md of tools/build/coverage, "The
-# ratchet"): covfloor measures line 50.00% under a floor of 50.01%, a
-# Regression, so its census gate and its conda package are red and the
-# library green; covfloor_held, at its floors, is green.
-expect_red coverage_gate_floor "COVERAGE GATE FAILED (census): $P ($N:covfloor [coverage gate]): covcheck gate exited 3" "$N:covfloor[coverage][gate]"
-if grep -qF -- "- **Regression** \`$P\`: line 50.00% is below its floor 50.01%" "$LOG/coverage_gate_floor.log"; then
-    pass coverage_gate_floor_finding
+# Census mode: covheld (line 50.00%, held) is a Regression, gate and conda red; covnotheld (not held) green.
+expect_red coverage_gate_held "COVERAGE GATE FAILED (census): $P ($N:covheld [coverage gate]): covcheck gate exited 3" "$N:covheld[coverage][gate]"
+if grep -qF -- "- **Regression** \`$P\`: line 50.00% is below the target 99.00%, which coverage_held holds it at" "$LOG/coverage_gate_held.log"; then
+    pass coverage_gate_held_finding
 else
-    fail "coverage_gate_floor_finding: the log does not name the Regression (see $LOG/coverage_gate_floor.log)"
+    fail "coverage_gate_held_finding: the log does not name the Regression (see $LOG/coverage_gate_held.log)"
 fi
-expect_red coverage_gate_floor_conda "COVERAGE GATE FAILED (census): $P ($N:covfloor [coverage gate]): covcheck gate exited 3" "$N:covfloor_conda"
-expect_green coverage_gate_floor_held "$N:covfloor" "$N:covfloor_held[coverage][gate]"
-# The census check: a doc edited by hand, or a floor under what the census
-# measured, is red (the doc and floors census.sh renders, :census_ok, are
-# green: tests//negative/coverage:greens, in the gate).
-expect_red coverage_census_doc_edited "docs/coverage_census.md is not what census.sh render writes" "$N:census_doc_edited"
-expect_red coverage_census_floor_lowered "ratchet.tsv is not what census.sh render writes" "$N:census_floor_lowered"
-expect_red coverage_census_pin_no_reason "has an empty reason" "$N:census_pin_no_reason"
+expect_red coverage_gate_held_conda "COVERAGE GATE FAILED (census): $P ($N:covheld [coverage gate]): covcheck gate exited 3" "$N:covheld_conda"
+expect_green coverage_gate_not_held "$N:covheld" "$N:covnotheld[coverage][gate]" "$N:covnotheld_conda"
+# The census check, each with one per-package file changed (BUCK says how);
+# :census_ok and :census_ok_doc are green (tests//negative/coverage:greens).
+expect_red coverage_census_doc_edited "census_ok.md is not doc_edited.txt byte for byte" "$N:census_doc_edited"
+expect_red coverage_census_reached_not_held "src/d: line reached 9900 basis points in every library; add \`line\` to src/d/coverage_held" "$N:census_reached_not_held"
+expect_red coverage_census_held_malformed "src/h/coverage_held:3: 'branch 9900' is not a held metric" "$N:census_held_malformed"
+expect_red coverage_census_dup_row "rows are not sorted by label: komira//src/c:c2 after komira//src/c:c2" "$N:census_dup_row"
+expect_red coverage_census_row_other_package "src/c/coverage_census.tsv:5: the row's package is src/b, not its directory src/c" "$N:census_row_other_package"
 # README examples and the mojo_test targets a library names in
 # coverage_tests are its tests for coverage: their runs reach its gate, and
 # what ships waits for them.
 expect_red coverage_gate_mojo_test_conda "COVERAGE RUN FAILED: $N:test_tracer_mt [coverage of $N:tracer_mt]" "$N:tracer_mt_conda"
-expect_red coverage_gate_mojo_test_stray "$N:test_tracer_mt does not name $N:covmt_stray in its deps" "$N:covmt_stray_cov_gate"
-expect_red coverage_gate_mojo_test_args "$N:test_args cannot run under kcov: it has" "$N:covmt_args_cov_gate"
-expect_red coverage_gate_mojo_test_gen "$N:test_gen_main cannot run under kcov: its main source" "$N:covmt_gen_cov_gate"
-expect_red coverage_gate_mojo_test_nocov "$N:test_nocov is not a mojo_test with a coverage build" "$N:covmt_nocov_cov_gate"
 # A generated client whose welded tests are at its package's top analyzes
 # with the switch on, and has its gate (analysis only: aquery).
 CG=//tools/build/proto-codegen/aws_query:komira_aws_tiny_query
@@ -192,8 +186,8 @@ else
 fi
 # What waits, as actions (no_gate.bxl reads only the targets' deps), for a
 # library outside the ledger whose coverage comes from the switch
-# (tracer_shipped, its gate an action of its own) and one in it
-# (readme_examples, its gate `<name>_cov_gate`), neither with a README
+# (tracer_shipped, its gate an action of its own) and readme_examples (the
+# same since its tool is Zig; each ledger library has a README), neither with a README
 # (aquery cannot read a join's input through a README's dynamic action): the package's
 # join waits for no coverage run and no gate; the conda package's
 # conda_join and conda_release_join each wait for every coverage run and
@@ -235,5 +229,3 @@ elif grep -qF "COVERAGE RUN FAILED: $N:covso_traced:tests/covso_traced_driver.mo
 else
     fail "coverage_shared_lib_run: failed without the coverage run's message (see $LOG/coverage_shared_lib_run.log)"
 fi
-expect_red coverage_gate_test_path "$N:testpath: coverage gate: the test lostlib/value.mojo has the path of a source of the library" "$N:testpath"
-expect_red coverage_shared_lib_enforce "$N:covso_enforce: a mojo_shared_lib's coverage gate is reported, never enforced" "$N:covso_enforce"

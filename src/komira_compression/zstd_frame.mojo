@@ -14,12 +14,16 @@
 #   unsigned long long ZSTD_getFrameContentSize(const void* src,
 #                                               size_t srcSize);
 #   unsigned ZSTD_isError(size_t code);
+#   ZSTD_ErrorCode ZSTD_getErrorCode(size_t functionResult);
 #
 # Public entries (Span in, caller-owned Span out, bytes written back; no
 # pointer in a signature):
 #   * `zstd_compress_bound(src_len) -> Int`
 #   * `zstd_compress_into(dst, src, level) -> Int`
 #   * `zstd_decompress_into(dst, src) -> Int`
+#   * `zstd_decompress_once(dst, src) -> ZstdDecodeOutcome`: libzstd's error
+#     code handed back, for a caller that grows its destination only on
+#     `ZSTD_ERROR_DST_SIZE_TOO_SMALL`
 #   * `zstd_frame_content_size(src) -> UInt64`, with the two sentinels
 #     `ZSTD_CONTENTSIZE_UNKNOWN` and `ZSTD_CONTENTSIZE_ERROR`
 #   * `ZSTD_DEFAULT_LEVEL` (3, libzstd's own default)
@@ -37,6 +41,10 @@ comptime ZSTD_DEFAULT_LEVEL: Int32 = 3
 # ZSTD_getFrameContentSize's sentinels: (unsigned long long)-1 and -2.
 comptime ZSTD_CONTENTSIZE_UNKNOWN: UInt64 = 0xFFFFFFFFFFFFFFFF
 comptime ZSTD_CONTENTSIZE_ERROR: UInt64 = 0xFFFFFFFFFFFFFFFE
+# ZSTD_ErrorCode values (zstd_errors.h; fixed by the library's ABI).
+comptime ZSTD_ERROR_CORRUPTION_DETECTED: Int = 20
+comptime ZSTD_ERROR_DST_SIZE_TOO_SMALL: Int = 70
+comptime ZSTD_ERROR_SRC_SIZE_WRONG: Int = 72
 
 
 @always_inline
@@ -168,6 +176,51 @@ def zstd_decompress_into[
             + " bytes written into a " + String(dst_capacity) + "-byte buffer"
         )
     return result
+
+
+@fieldwise_init
+struct ZstdDecodeOutcome(Copyable, Movable):
+    """What one `ZSTD_decompress` call answered: the bytes it wrote, and
+    libzstd's error code (`ZSTD_getErrorCode`; 0 when the call succeeded)."""
+
+    var written: Int
+    var error_code: Int
+
+
+def zstd_decompress_once[
+    dori: MutOrigin
+](dst: Span[UInt8, dori], src: Span[UInt8, _]) raises -> ZstdDecodeOutcome:
+    """Decode the zstd frames in `src` into `dst`, as `zstd_decompress_into`
+    does, but hand libzstd's error code back instead of raising on it: for a
+    caller that grows its destination on `ZSTD_ERROR_DST_SIZE_TOO_SMALL` and
+    refuses every other code (a truncated frame is
+    `ZSTD_ERROR_SRC_SIZE_WRONG`). Raises only when libzstd reports more bytes
+    written than `len(dst)`."""
+    var src_size = len(src)
+    var dst_capacity = len(dst)
+    var src_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+    var dst_scratch = InlineArray[UInt8, 1](fill=UInt8(0))
+    var handle_ptr = _zstd_handle()
+    # SAFETY: as `zstd_decompress_into`: libzstd reads `src_size` bytes and
+    # writes at most `dst_capacity` (= `len(dst)`) bytes; both buffers are
+    # alive across this synchronous call and libzstd keeps neither pointer.
+    var result = handle_ptr[].call["ZSTD_decompress", Int](
+        _dst_ptr(dst, dst_scratch),
+        dst_capacity,
+        _src_ptr(src, src_scratch),
+        src_size,
+    )
+    if handle_ptr[].call["ZSTD_isError", UInt32](result) != 0:
+        # SAFETY: a pure function of its integer argument. `ZSTD_ErrorCode`
+        # is a C enum, read as a 32-bit int.
+        var code = handle_ptr[].call["ZSTD_getErrorCode", Int32](result)
+        return ZstdDecodeOutcome(0, Int(code))
+    if result > dst_capacity:
+        raise Error(
+            "ZSTD_decompress reported " + String(result)
+            + " bytes written into a " + String(dst_capacity) + "-byte buffer"
+        )
+    return ZstdDecodeOutcome(result, 0)
 
 
 def zstd_frame_content_size(src: Span[UInt8, _]) raises -> UInt64:

@@ -1,6 +1,6 @@
 # =============================================================================
 # komira_git_pack_conformance/tests/test_git_thin_sha256.mojo -- the thin pack
-# and the sha256 pack git wrote (gen_packs.sh).
+# and the sha256 pack git wrote (gen_packs.zig).
 # =============================================================================
 #
 # test_thin: `git pack-objects --thin` of main~10..main. `index_pack` must

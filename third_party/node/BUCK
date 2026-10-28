@@ -15,6 +15,13 @@ load(":pins.bzl", "NODE", "NPM", "npm_target")
 # consumer is a new line here.
 _TEST_ONLY = [
     "komira//src/tests/helpers/komira_test_node/...",
+    # The node_modules rules (tools/build/node/modules.bzl) and their tests.
+    "komira//src/tests/helpers/komira_test_npm_modules/...",
+    "komira//src/tests/helpers/komira_test_npm_modules_ts_jest/...",
+    # The Node.js UDF runtime of the UDF runtime spike (worker transport).
+    "komira//src/tests/helpers/komira_udf_spike_node_worker/...",
+    # The Node addon over libkomira (node/): built against the node headers, tested with this runtime.
+    "komira//node/...",
 ]
 
 # The planted defects of test 54 (tools/build/tests/negative/node), which must
@@ -22,7 +29,7 @@ _TEST_ONLY = [
 # there too. That package is in the `tests` cell, which only komira's own
 # checkout has; a label naming it would fail to load in a repository that
 # uses komira as a cell, so it is named only when the cell exists.
-_NEGATIVE = ["tests//negative/node:"] if read_root_config("cells", "tests") else []
+_NEGATIVE = ["tests//negative/node:", "tests//negative/npm_modules:"] if read_root_config("cells", "tests") else []
 
 pinned_file(
     name = NODE["archive"],

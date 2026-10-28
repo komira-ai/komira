@@ -16,11 +16,13 @@ Node.js here is test-only. Nothing built with these rules is shipped
 
 | rule | what it builds |
 |---|---|
-| `node_dist(name, archive, top, version, native_libs)` | a Node.js release archive (`.tar.gz`, linux-x64) unpacked by busybox `tar` and reduced to `bin/node`, `include/node` (the Node-API headers) and `LICENSE`; npm, npx and corepack are left out. Fails unless that `node` runs and prints `v<version>` (`node_dist: the node in <archive> is <got>, the pin says v<version>`). `native_libs` is a directory whose `lib/` holds the libraries `node` links beyond glibc. The sub-target `[include]` is the header directory. |
+| `node_dist(name, archive, top, version, native_libs)` | a Node.js release archive (`.tar.gz`, linux-x64) unpacked by `node_act dist` (no shell) and reduced to `bin/node`, `include/node` (the Node-API headers) and `LICENSE`; npm, npx and corepack are left out. Fails unless that `node` runs and prints `v<version>` (`node_dist: the node in <archive> is <got>, the pin says v<version>`). `native_libs` is a directory whose `lib/` holds the libraries `node` links beyond glibc. The sub-target `[include]` is the header directory. |
 | `npm_package(name, package, version, integrity, tarball, exe, deps)` | one npm tarball's `package/` directory. Before unpacking, the tarball's sha512 must equal `integrity`, the registry's `dist.integrity` (`sha512-<base64>`); after, the top-level `"name"` and `"version"` of its `package.json`, parsed by the pinned `node` (`JSON.parse`, as npm reads it), must be the strings `package` and `version` (a nested key, a missing key or a number does not count), and with `exe` (a path in the package), that file must run and print `version`. `deps` are the packages it imports; a closure holding one package at two versions fails analysis. |
 | `node_test(name, src, srcs, data, deps, args, expect_error, node)` | runs `src` with the pinned `node` as a build action; its output (`<name>.pass`) exists only if the script passed (exit 0), so building the target is running the test. With `expect_error`, the script passes only if it exits non-zero and its stderr holds that text. `srcs` are staged next to `src` at their package paths and `data` (`{dest: source}`, a build output allowed) at `dest`, so a script finds them through `__dirname`; the closure of the `npm_package` targets in `deps` is staged under `node_modules/<package>` beside the script, where node resolves a bare import (`import ... from 'apache-arrow'`). `args` are the script's arguments (`$(location ...)` expands, relative to the action's working directory). `node` defaults to `komira//third_party/node:node`. |
 | `esbuild_bundle(name, entry, srcs, deps, format, out, esbuild)` | `entry` bundled by the pinned esbuild (`--bundle --platform=node`) into one file, `out` (default `<name>.js`), in `format` (`cjs`, the default, or `esm`). `srcs` (JavaScript or TypeScript; esbuild strips the types) are staged next to `entry` at their package paths, and the closure of the `npm_package` targets in `deps` under `node_modules/<package>`. An import of anything else fails the build. A `node_test` runs the bundle as its `src`. |
 | `c_shared_lib(name, srcs, headers, include_dirs, copts, out, zig_triple)` | C `srcs` compiled and linked into one shared library by the pinned zig: `zig cc -target <zig_triple> -shared -fPIC -O2 -fvisibility=hidden -Wall -Werror -Wl,-z,undefs`. A symbol the sources use and do not define stays undefined, for the program that loads the library to resolve: a Node-API addon's `napi_*` functions are `node`'s. Only symbols with default visibility are exported (a Node-API module's `napi_register_module_v1`). `headers` are staged with the sources, and their directory is an `-I`; each of `include_dirs` is a directory output, an `-I` (`//third_party/node:node[include]`). `out` defaults to `lib<name>.so`; a Node addon names it `<x>.node`. `zig_triple` defaults to the linux x86_64 row's (its glibc floor, [platform table](../platforms/table.bzl)). |
+| `node_binding_test(name, srcs, data, deps, node)` | runs the test files `srcs` (plain `.mjs` or `.js` files using the built-in `node:test`; no npm install) with the pinned `node --test --test-reporter=tap` as a build action, from the staged directory (`srcs` at their package paths, `data` at its destinations, the `deps` closure under `node_modules/`). The output (`<name>.pass`) exists only if node exited 0 **and** the TAP summary reports tests that all passed, with none skipped or todo and no file standing in as its own test (node reports a file that registers no test as one passing test named by its path). `data` is where a built `.node` addon goes, so the test loads it with `require()`. `node` defaults to `komira//third_party/node:node`. |
+| `node_addon(name, srcs, headers, copts, node_include)` | a Node-API addon: `c_shared_lib` named `<name>.node`, compiled against the Node-API headers of the pinned node (`node_include`, default `komira//third_party/node:node[include]`, the `include/node` directory of the same archive as the runtime). |
 
 The macros set `exec_compatible_with` to the linux x86_64 execution
 platform: every action runs the linux binaries.
@@ -55,11 +57,15 @@ env -i LC_ALL=C TZ=UTC0 HOME=<scratch>/home TMPDIR=<scratch>/tmp \
 What works is tested by
 [`src/tests/helpers/komira_test_node`](../../../src/tests/helpers/komira_test_node/README.md).
 
-### Test 54: planted defects
+### Planted defects
 
 Every target of [`tests//negative/node`](../tests/negative/node/BUCK) must
-fail, and [`node_tests.sh`](../tests/node_tests.sh) (run by
-`tools/build/tests/run_tests.sh`) requires the text written above each:
+fail. The self-test scenario
+[`planted_red_builds_node`](../selftest/planted_red_builds_node.zig) requires
+each build to fail in an action on the farm, printing the text its row holds;
+the analysis refusals (the three rows that say so) are the scenario
+[`analysis_refusals_node`](../selftest/analysis_refusals_node.zig), which
+requires each one's exact message:
 
 | planted defect | what it proves |
 |---|---|
@@ -79,11 +85,15 @@ fail, and [`node_tests.sh`](../tests/node_tests.sh) (run by
 | `exe_does_not_run` | `npm_package` refuses an `exe` that does not run |
 | `name_nested`, `name_absent`, `version_nested`, `version_number` | `npm_package` reads only the top level of `package.json`: it refuses another top-level name while a nested object holds the pinned one, no top-level name while a nested object and the description hold it, another top-level version while a nested object holds it, and the number `1` for the version `"1"` |
 | `nested_distractors` | the pinned top-level name and version pass with other ones nested before and after them: the target fails only at its `exe`, after the `package.json` check |
-| `exe_other_version` | `npm_package` refuses an `exe` that runs and prints another version (`bin/echo`, a symlink to `/proc/self/exe`, runs the busybox that executes it as `echo`) |
+| `exe_other_version` | `npm_package` refuses an `exe` that runs and prints another version (`bin/echo`, a 191-byte static program that writes its first argument, as `echo` does) |
 | `version_differs_node`, `version_prefix_node`, `version_suffix_node` | `node_dist` refuses a `node` that prints another version: `24.20.0`, `24.21` (a prefix of `24.21.0`) and `4.21.0` (a suffix) |
 | `not_node`, `no_bin_node`, `no_header`, `header_is_dir`, `node_not_executable` | `node_dist` refuses an archive that is no Node.js release, one with the Node-API header but no `bin/node`, one with `bin/node` but no header, one whose `node_api.h` is a directory, and one whose `bin/node` is not executable |
 | `node_does_not_run` | `node_dist` refuses a `bin/node` that exits non-zero (busybox under the name `node`) |
 | `warns` | `c_shared_lib` fails on a warning (`-Wall -Werror`) |
+| `binding_fails` | a failing test of a `node_binding_test` fails the target with node's status and its TAP output on stderr |
+| `binding_no_test`, `binding_skipped` | node exits 0 for a file that registers no test and for a skipped test; `node_binding_test` still fails, since nothing was checked |
+| `binding_addon_missing`, `binding_addon_wrong` | an addon test fails when the addon is not staged (not built), and when the addon is built and loads but returns another number |
+| `binding_no_srcs` | analysis refuses a `node_binding_test` of no file |
 
 The fixtures name the pinned runtime, packages and downloads, which
 [`third_party/node/BUCK`](../../../third_party/node/BUCK) makes visible to
@@ -95,10 +105,69 @@ tarballs of `name_nested`, `name_absent`, `version_nested`, `version_number`,
 and pinned at their own sha512: a tarball built in the action would carry
 the worker's file owner and times, so it would have no fixed digest.
 
+## node_modules from a package-lock.json
+
+[`modules.bzl`](modules.bzl) adds the rules a TypeScript project needs: `node_modules` laid out from its
+lockfile, and the programs of those packages (`tsc`, `jest`, `cdk`) run over its sources. They are the offline
+equivalent of `npm ci --ignore-scripts` followed by `npm test`. They share the other rules' runtime (the pinned
+node; nothing inherited from the host, UTC, a scratch `HOME`, no network), but no shell runs: `node_tools`, a Zig
+program, lays out the tree and starts node.
+
+```
+load("@komira//tools/build/node:modules.bzl", "cdk_synth", "jest_test", "npm_modules", "tsc_check")
+load(":pins.lock.bzl", "NPM")        # written by `kpin lock` / `kpin update` from package-lock.json
+
+npm_modules(name = "modules", lockfile = "package-lock.json", npm = NPM)
+tsc_check(name = "typecheck", modules = ":modules", srcs = glob(["bin/**", "lib/**", "test/**", "tsconfig.json"]))
+jest_test(name = "test", modules = ":modules", srcs = glob([...]))
+```
+
+| rule or macro | what it builds |
+|---|---|
+| `npm_modules(name, lockfile, npm, tarballs)` | The `node_modules` directory of `lockfile` (lockfileVersion 3). `npm` is the `NPM` table of the kpin lock: the macro declares one `pinned_file` per entry (sha256 and size from the lock) unless `tarballs` ({`name@version`: label}) names the files. The assembly ([`node_tools`](../node_tools/README.md), a Zig program: no shell, no node) checks, per package: a tarball exists for it; the lock's `sri512` equals the lockfile's `integrity`; the tarball's sha512 equals it; the unpacked `package.json` states the locked name and version. It unpacks at the path the lockfile gives (nested `node_modules` included, the first path component of the tarball dropped, as npm does), files `0644` or `0755` when the tarball marks them executable, links in the tarball not extracted, and creates `.bin/<cmd>` relative links (the target made executable) in the `node_modules` directory that holds each package. An optional package whose `os`, `cpu` or `libc` excludes linux x64 (fsevents) is skipped; a non-optional one fails. Bundled packages (`inBundle`) come from their parent's tarball and must be there. **No install script runs.** The tree holds `.komira-node-modules.json`: the count of packages, the install scripts not run and what was skipped. |
+| `node_tree_test(name, program, modules, srcs, data, args, env, tools)` | Runs `program` (a path in the package, e.g. `node_modules/.bin/tsc`) with the pinned node and `args`, in a copy of `srcs` (staged at their path in the cell) and `data` ({destination from the cell root: source}, a build output allowed) with `modules` linked in as the package's own `node_modules`; the working directory is the package. The environment is exactly `LC_ALL=C TZ=UTC0`, `HOME` and `TMPDIR` in the action's scratch, `PATH` (the pinned node's `bin`, then a directory of the `tools` links: `{"bzip2": "komira//tools/build/toolchains:busybox"}` makes `bzip2` run busybox's applet; no other command is there), `LD_LIBRARY_PATH` (its C++ runtime) and `env`; the host's is never inherited. The target `<name>.pass` exists only if the program exited 0. Sibling packages' files a test reads by relative path (`../access/x.json`) are `data` at their cell path. |
+| `node_tree_build(name, program, ..., out_dir)` | The same, and the target is the directory `out_dir` of the package after the program passed. |
+| `tsc_check(name, modules, srcs, data, project)` | `tsc --noEmit -p <project>`. |
+| `tsc_build(name, modules, srcs, data, project, out_dir)` | `tsc -p <project>`; the target is `out_dir` (`dist`). |
+| `jest_test(name, modules, srcs, data, config, max_workers)` | `jest --ci --maxWorkers=<max_workers> --cacheDirectory=.jest-cache --watchman=false --config <config>`; the cache is in the scratch copy, and a run that finds no test fails. `max_workers` defaults to 2: ts-jest workers reach about 1.6 GB each. |
+| `cdk_synth(name, modules, srcs, app, data, context, env)` | `cdk synth --quiet --app <app> --output cdk.out --no-version-reporting --no-notices` with `context` as `-c key=value`. There is no `npx`, so `app` is the command of cdk.json with `node node_modules/.bin/ts-node ...` for `npx ts-node ...`. `env` is the account and region of the test (`CDK_DEFAULT_ACCOUNT`, `CDK_DEFAULT_REGION`); a context lookup would need AWS and fails. |
+
+`node` (the test macros) defaults to `komira//third_party/node:node`, which only the test-only packages see. A repository that
+uses komira as a cell declares its own `node_dist` (rules are loaded once per cell, so a provider of
+komira's own load is not the consuming repository's: upstream facebook/buck2#683) and passes it as `node =`.
+
+Limits: linux x86_64 only; a package with an install script that does something other than build a native
+addon works only if it needs no script (the lockfile's `hasInstallScript` entries are listed in the report); a
+dependency from git or a file path has no tarball and kpin refuses it.
+
+### Planted defects of the node_modules rules
+
+Every target of [`tests//negative/npm_modules`](../tests/negative/npm_modules/BUCK) must fail, printing the text its
+row in scenario [`planted_red_builds_npm_modules`](../selftest/planted_red_builds_npm_modules.zig) holds:
+
+| planted defect | what it proves |
+|---|---|
+| `package_not_pinned` | a lockfile package with no tarball in the pinned lock is an error naming the package |
+| `pinned_lock_disagrees` | the pinned lock's sri512 is held to the lockfile's integrity |
+| `tarball_bytes_differ` | a tarball whose bytes have another sha512 than the lockfile's integrity is refused |
+| `package_json_differs` | a tarball whose package.json states another name or version is refused |
+| `bundled_missing`, `other_os_not_optional` | a bundled package its parent lacks, and a non-optional package for another os, are refused |
+| `program_absent`, `synth_wrong_context`, `synth_no_env`, `tool_not_declared` | a program node_modules lacks, a failing program, an environment variable the target does not set, and a command the target did not name in `tools` (the host's commands are not on PATH) fail the target |
+| `out_dir_not_written` | an `out_dir` the program never wrote fails |
+| `type_error`, `jest_fails`, `jest_finds_nothing` | a type error, a failing test and a run that finds no test each fail |
+
 ## Limits
 
 - linux x86_64 only: the archive is Node's `linux-x64` build, and the zig
   triple is that row's.
+- macOS needs three things: a pin of Node's `darwin-arm64` archive (and `darwin-x64` for Intel) in
+  [`third_party/node/pins.bzl`](../../../third_party/node/pins.bzl) with its sha256 from the release's signed
+  `SHASUMS256.txt`; a `node_dist` over it (the archive's `bin/node` and `include/node` have the same layout, and the
+  Darwin `node` links only system libraries, so `native_libs` is empty there); and the macOS rows of the
+  [platform table](../platforms/table.bzl) as the execution platform and `zig_triple` (`aarch64-macos`), which
+  `node_addon` takes from the table instead of the linux row. The macros fix the linux x86_64 execution platform
+  today. A macOS addon also links with `-undefined dynamic_lookup`, since `c_shared_lib` passes `-z undefs` (an ELF
+  flag) only on linux.
 - `c_shared_lib` links C sources only: no archive, shared library or other
   target is linked in.
 - `npm_package` runs the pinned `node` to parse `package.json`, so every

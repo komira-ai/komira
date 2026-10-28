@@ -22,18 +22,12 @@
 # minimizes total ns by feeding the smallest live-rows to the most
 # expensive (gather-cost-dominated) predicates.
 #
-# Synthetic ns injection: AdaptiveFilter.begin_filter / end_filter use
-# `perf_counter_ns()` internally for the start time. For deterministic
-# convergence we feed a SYNTHETIC duration by backdating the start_ns:
-#
-#   var start = af.begin_filter()       # real perf_counter_ns now
-#   var backdated = start - synthetic_dur_ns
-#   af.end_filter(backdated)            # end sees now - backdated ≈ synthetic
-#
-# This works because perf_counter_ns is monotonic — the absolute time
-# doesn't matter, only the delta — and the iteration body is empty so
-# real elapsed time is sub-µs (well below the ms-scale synthetic
-# durations).
+# Exact duration injection: each chunk's cost comes from the cost model and
+# is fed to the state machine through `AdaptiveFilter.record_duration_ns`, the
+# entry point `end_filter` itself calls after measuring the clock. No test
+# here reads the wall clock, so with the seeded per-worker RNG every
+# keep / revert decision, and therefore every final permutation, is exactly
+# reproducible, however loaded the machine is.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
@@ -101,21 +95,15 @@ comptime OPTIMAL_PERM_3: UInt32 = UInt32(2)
 
 
 def _drive_one_chunk(mut af: AdaptiveFilter, chunk_rows: Int):
-    """One begin/end cycle under the synthetic cost model.
+    """One begin/record cycle under the synthetic cost model.
 
-    Reads the current permutation, simulates the ns to evaluate the chunk,
-    backdates start_ns so end_filter sees the synthetic duration.
+    `begin_filter` applies the EXPLORE swap; the cost model then prices the
+    chunk under the permutation now in force and that exact duration is fed
+    to the state machine.
     """
-    var start = af.begin_filter()
-    # Snapshot the current perm to compute synthetic ns under it.
-    var perm_view = af.get_permutation()
-    var synthetic_ns = _simulated_ns(perm_view, chunk_rows)
-    # Backdate start by synthetic_ns so end_filter sees ~synthetic ns
-    # elapsed. perf_counter_ns is monotonic; subtracting a UInt64 from
-    # a UInt is safe as long as start >= synthetic_ns (it always is in
-    # practice — perf_counter_ns is wall-clock ns since OS boot, ~10s
-    # of seconds at process start; synthetic_ns is ~10-100 µs).
-    af.end_filter(start - synthetic_ns)
+    _ = af.begin_filter()
+    var synthetic_ns = _simulated_ns(af.get_permutation(), chunk_rows)
+    af.record_duration_ns(synthetic_ns)
 
 
 def _matches_optimal(perm: Span[UInt32, _]) -> Bool:
@@ -193,14 +181,14 @@ def test_single_thread_baseline_improves() raises:
         ),
         2048,
     )
-    # Baseline should be within 1% of optimal (state machine should
-    # have converged tightly).
-    var ratio = af.baseline_ns() / Float64(optimal_ns)
-    assert_true(
-        ratio < Float64(1.05),
+    # With exact durations the baseline is the mean of identical samples
+    # under one permutation, so it is exactly that permutation's cost; the
+    # converged one is the optimal permutation's.
+    assert_equal(
+        af.baseline_ns(),
+        Float64(optimal_ns),
         "baseline " + String(af.baseline_ns())
-        + " not close to optimal " + String(optimal_ns)
-        + " (ratio = " + String(ratio) + ")",
+        + " is not the optimal cost " + String(optimal_ns),
     )
 
 

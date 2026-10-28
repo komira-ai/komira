@@ -1842,9 +1842,9 @@ struct RegexProgram(Movable, Copyable):
         # `clear()` + a generation bump, which keeps every heap block the previous
         # row already grew.
         if len(clist.seen_gen) != prog_len:
-            clist = _ThreadList(prog_len)
+            clist.rebuild(prog_len)
         if len(nlist.seen_gen) != prog_len:
-            nlist = _ThreadList(prog_len)
+            nlist.rebuild(prog_len)
         clist.reset()
         nlist.reset()
         var matched = False
@@ -1860,14 +1860,23 @@ struct RegexProgram(Movable, Copyable):
         # start-anchored, so the unanchored search is bit-for-bit unchanged.
         var anchor = self.start_anchor
         var sp = min_start
+        # Witness counts (see `_ThreadList`): locals, folded into the scratch
+        # once at the end, so the stepping loop pays register increments only.
+        var w_cap0 = clist.capacity_sum() + nlist.capacity_sum()
+        var w_seeds = 0
+        var w_steps = 0
+        var w_positions = 0
         while True:
+            w_positions += 1
             # Seed an unanchored start thread at sp (only while no match yet,
             # sp >= min_start, and the program's start anchor can hold here).
             if not matched and sp >= min_start and _seed_can_survive(anchor, subject, sp):
+                w_seeds += 1
                 self._seed_thread(clist, nslots, subject, sp, n)
             var b = Int(subject[sp]) if sp < n else -1
             var ti = 0
             while ti < clist.count:
+                w_steps += 1
                 var pc = clist.pcs[ti]
                 var base = ti * nslots     # this thread's slots in `slots_flat`
                 var ins = self.prog[pc]
@@ -1921,6 +1930,11 @@ struct RegexProgram(Movable, Copyable):
                     clist.reset()
                     sp = nxt
 
+        if clist.capacity_sum() + nlist.capacity_sum() != w_cap0:
+            clist.grows += 1
+        clist.seeds += w_seeds
+        clist.steps += w_steps
+        clist.positions += w_positions
         var result = RegexMatch()
         result.matched = matched
         if matched:
@@ -2118,6 +2132,48 @@ struct RegexScratch(Movable):
         self.match_slots = List[Int]()
         self.bits = BitStateScratch()
 
+    # ⭐ WITNESSES.  Cumulative counters over this scratch's whole life; a test
+    # reads one before and after a call and compares the difference.  Pike VM
+    # counters sum the two thread lists, because the lists swap roles every
+    # byte position.  They exist so a cost property can be proven by counting
+    # operations, which does not depend on the machine.
+
+    def vm_grows(self) -> Int:
+        """Heap-block events on the Pike VM's own lists (a search during which a
+        list grew, or a list set rebuilt).  Zero for a warm scratch is the contract."""
+        return self.clist.grows + self.nlist.grows
+
+    def vm_seeds(self) -> Int:
+        """Start threads the Pike VM seeded."""
+        return self.clist.seeds + self.nlist.seeds
+
+    def vm_steps(self) -> Int:
+        """Threads the Pike VM's byte-stepping loop examined."""
+        return self.clist.steps + self.nlist.steps
+
+    def vm_positions(self) -> Int:
+        """Byte positions the Pike VM's stepping loop visited."""
+        return self.clist.positions + self.nlist.positions
+
+    def vm_generation(self) -> Int:
+        """Sum of the two lists' `seen` generation stamps.  Resetting the seen
+        set is a bump of one of them, so this moves by one per reset."""
+        return self.clist.gen + self.nlist.gen
+
+    def vm_capacity(self) -> List[Int]:
+        """Capacity of every list the Pike VM owns: for each of the two thread
+        lists, pcs / slots_flat / stack_pc / stack_slots / seen_gen, then the
+        match slots.  The lists swap roles every byte position, so the pair is
+        returned as sums per kind."""
+        var out = List[Int]()
+        out.append(self.clist.pcs.capacity() + self.nlist.pcs.capacity())
+        out.append(self.clist.slots_flat.capacity() + self.nlist.slots_flat.capacity())
+        out.append(self.clist.stack_pc.capacity() + self.nlist.stack_pc.capacity())
+        out.append(self.clist.stack_slots.capacity() + self.nlist.stack_slots.capacity())
+        out.append(self.clist.seen_gen.capacity() + self.nlist.seen_gen.capacity())
+        out.append(self.match_slots.capacity())
+        return out^
+
 
 # ---------------------------------------------------------------------------
 # Thread list + a per-step "seen pc" set.
@@ -2160,6 +2216,20 @@ struct _ThreadList(Movable):
     # and entry i of `stack_pc` owns `stack_slots[i*nslots : (i+1)*nslots]`.
     var stack_pc: List[Int]
     var stack_slots: List[Int]
+    # ⭐ WITNESS COUNTERS (read through `RegexScratch.vm_*`; they never steer
+    # the search).  They let a test prove a cost property by COUNTING instead of
+    # timing, so the proof does not depend on the machine it runs on:
+    #   grows      heap-block events on the VM's own lists: every search during
+    #              which a list's capacity grew (measured once per search from
+    #              the capacities, so the appends pay nothing), plus every
+    #              rebuild of the list itself.
+    #   seeds      start threads seeded.
+    #   steps      threads examined by the byte-stepping loop.
+    #   positions  byte positions the stepping loop visited.
+    var grows: Int
+    var seeds: Int
+    var steps: Int
+    var positions: Int
 
     def __init__(out self, prog_len: Int):
         self.pcs = List[Int]()
@@ -2169,6 +2239,10 @@ struct _ThreadList(Movable):
         self.count = 0
         self.stack_pc = List[Int]()
         self.stack_slots = List[Int]()
+        self.grows = 0
+        self.seeds = 0
+        self.steps = 0
+        self.positions = 0
 
     def copy(self) -> Self:
         var t = Self(len(self.seen_gen))
@@ -2177,7 +2251,33 @@ struct _ThreadList(Movable):
         t.seen_gen = self.seen_gen.copy()
         t.gen = self.gen
         t.count = self.count
+        t.grows = self.grows
+        t.seeds = self.seeds
+        t.steps = self.steps
+        t.positions = self.positions
         return t^
+
+    def rebuild(mut self, prog_len: Int):
+        """Re-arm for a program of `prog_len` instructions: a fresh list set.
+        The witness counters survive, and the rebuild itself counts as a heap
+        event, so a scratch that is rebuilt on every call cannot look free."""
+        self.pcs = List[Int]()
+        self.slots_flat = List[Int]()
+        self.seen_gen = List[Int](length=prog_len, fill=0)
+        self.gen = 1
+        self.count = 0
+        self.stack_pc = List[Int]()
+        self.stack_slots = List[Int]()
+        self.grows += 1
+
+    def capacity_sum(self) -> Int:
+        """Total capacity of the four growable lists.  Capacity never shrinks
+        (`clear` and `resize` down keep the block), so a larger sum after a call
+        means some list had to grow during it."""
+        return (
+            self.pcs.capacity() + self.slots_flat.capacity()
+            + self.stack_pc.capacity() + self.stack_slots.capacity()
+        )
 
     def reset(mut self):
         self.pcs.clear()

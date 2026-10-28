@@ -1,6 +1,17 @@
+load("@buildrules//rules/mojo:pack.bzl", "mojo_conda", "mojo_conda_holds")
+load("@komira//tools/build/mojo:adopt.bzl", "mojo_adopted_library")
 load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
+load(":buildrules.mojo.bzl", "mojo_package")
+load("@komira//tools/build/mojo:proto_fixture.bzl", "proto_encode", "proto_fixture_case", "proto_fixture_check")
 
 # The plan IR on the wire: `komira.plan.v1`.
+#
+# `optimized_plan.proto` is the optimized plan (docs/design/optimized_plan.md,
+# komira-ai/komira#1094, stage 4): the `OptimizedPlan` header and body, the
+# declared needs, snapshot pins and advice, and the segments of a cut plan. It
+# imports `plan.proto` for the plan body. komira_optimized_plan_header reads
+# its header; no codec reads the body yet (stage 5).
 #
 # `plan_vocabulary.proto` is the language-agnostic half of the plan wire: every
 # enumerated tag space a plan or expression node can name. It mirrors the
@@ -23,7 +34,7 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 # The generated constants exist so the `.proto` is typed for the other
 # languages that read it, which name `PlanTag` rather than a bare `uint32`.
 #
-# `test_srcs` welds the package to the field-number census: every field of
+# The package's tests (`tests/test_*.mojo`) weld it to the field-number census: every field of
 # every message and every value of every enum, each number written by hand
 # in a ledger and held to the generated codec as wire bytes, read back by
 # name (tests/test_plan_field_numbers_*.mojo, tests/test_plan_enum_numbers_*.mojo).
@@ -31,33 +42,250 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 # fixtures cannot turn them green. tests/test_plan_census_complete.mojo
 # holds those ledgers to every field and value protoc declares, so a field
 # added without a census row fails too; it reads the .proto files and the
-# census files as data. README.md's examples run as one more welded test.
+# census files as data. A `reserved` line is invisible to bytes (a number
+# nothing declares decodes to nothing either way), so
+# tests/test_plan_reservations.mojo reads every `reserved` number and name
+# from the .proto text and holds them to its own table, and holds
+# optimized_plan.proto's HELD rows to them: a held number must stay free.
+# README.md's examples run as one more welded test (`[tests][readme]`).
 _CENSUS = [
     "tests/test_plan_field_numbers_scan.mojo",
     "tests/test_plan_field_numbers_expr.mojo",
     "tests/test_plan_field_numbers_plan.mojo",
     "tests/test_plan_enum_numbers_nodes.mojo",
     "tests/test_plan_enum_numbers_functions.mojo",
+    "tests/test_optimized_plan_field_numbers.mojo",
+    "tests/test_plan_field_numbers_udf.mojo",
 ]
 
+# One golden per message of optimized_plan.proto, each named for its message
+# (`optimized_plan` is `OptimizedPlan`), under tests/fixtures/optimized/golden.
+_OPTIMIZED_GOLDEN = {
+    "declared_needs": "DeclaredNeeds",
+    "exchange_edge": "ExchangeEdge",
+    "optimized_plan": "OptimizedPlan",
+    "optimized_plan_body": "OptimizedPlanBody",
+    "optimized_segment": "OptimizedSegment",
+    "optimized_segment_dag": "OptimizedSegmentDag",
+    "pin_group": "PinGroup",
+    "plan_advice": "PlanAdvice",
+    "producer_stamp": "ProducerStamp",
+    "runtime_need": "RuntimeNeed",
+    "scan_pin": "ScanPin",
+    "scan_stats": "ScanStats",
+    "shared_subplan": "SharedSubplan",
+}
+
 _PROTOS = [
+    "optimized_plan.proto",
     "plan.proto",
     "plan_vocabulary.proto",
 ]
 
+# The generator's half: `komira_plan_proto_generated_gen` writes the Mojo of `_PROTOS`,
+# `komira_plan_proto_generated_fresh` holds the committed directory
+# `generated/komira_plan_proto_generated/` to it, byte for byte, and fails with the command that
+# regenerates (tools/build/gen/README.md). That directory is the library of mopm.toml
+# (`[targets] lib`), compiled as the module `komira_plan_proto`: `import_name` is that module's
+# name, and the rule names the directory after the target, which `:komira_plan_proto` below
+# cannot be. The library this call declares itself (`:komira_plan_proto_generated`, the same
+# files without the tests) is not what dependents use. Regenerate with
+#   ./buck2 run komira//tools/build/gen:regen -- komira//src/komira_plan_proto:komira_plan_proto_generated
 mojo_proto_library(
-    name = "komira_plan_proto",
+    name = "komira_plan_proto_generated",
     srcs = _PROTOS,
+    import_name = "komira_plan_proto",
     import_prefix = "komira/plan/v1",
     deps = ["//src/komira_proto_codec:komira_proto_codec"],
-    test_srcs = _CENSUS + ["tests/test_plan_census_complete.mojo"],
+    visibility = ["PUBLIC"],
+)
+
+# The generator's target under the name its users know (komira_pandas_door_e2e takes it as
+# `proto_deps`).
+alias(
+    name = "komira_plan_proto_gen",
+    actual = ":komira_plan_proto_generated_gen",
+    visibility = ["PUBLIC"],
+)
+
+# Built with buildrules' `mojo_package` from mopm.toml (README.md, "Build files"): `:lib` is the
+# library file, compiled from the committed directory, and exists only once the tests of tests/
+# have passed. The census (the field and enum numbers, each written by hand and held to the
+# generated codec's wire bytes), the golden fixtures and the scans of the `.proto` files are those
+# tests; `test_data` stages what they read, under the paths they open.
+mojo_package(
+    path = ".",
     test_data = {
-        # Every .proto of `srcs` is staged under protos/, and the test scans
-        # every file there, so a .proto added to `srcs` cannot be skipped.
+        # Each golden's protoc bytes and this package's own encoding of them.
+        "tests/test_optimized_plan_goldens.mojo": {
+            "fixtures/optimized/golden/{}{}".format(s, ext): "tests/fixtures/optimized/golden/{}{}".format(s, ext)
+            for s in _OPTIMIZED_GOLDEN
+            for ext in [".hex", ".canonical.hex"]
+        },
+        # Every .proto of `_PROTOS` is staged under protos/, and the test scans
+        # every file there, so a .proto added to `_PROTOS` cannot be skipped.
         "tests/test_plan_census_complete.mojo": {"protos/" + p: p for p in _PROTOS} | {
             "census/" + t.removeprefix("tests/"): t
             for t in _CENSUS
         },
+        # The same .proto files, and the census whose HELD table names
+        # optimized_plan.proto's held and reserved numbers.
+        "tests/test_plan_reservations.mojo": {"protos/" + p: p for p in _PROTOS} | {
+            "census/test_optimized_plan_field_numbers.mojo": "tests/test_optimized_plan_field_numbers.mojo",
+        },
     },
+)
+
+# `:komira_plan_proto`, the target the packages that depend on this library name, is `:lib` as
+# komira's Mojo rules take it (tools/build/mojo/adopt.bzl): the same file, so a dependent builds
+# only once the tests have passed. `deps` is `[dependencies]` of mopm.toml, as the adopted targets
+# of those packages: the rule refuses a list that is not the closure `:lib` was built from. It
+# carries the README gate too (`[tests][readme]`): the examples run against `:lib`.
+mojo_adopted_library(
+    name = "komira_plan_proto",
+    deps = ["//src/komira_proto_codec:komira_proto_codec"],
+    lib = ":lib",
+    readme = "README.md",
+    srcs = glob(["generated/komira_plan_proto_generated/**/*.mojo"]),
+    test_srcs = glob(["tests/test_*.mojo"]),
+    test_runs = ":test",
     visibility = ["PUBLIC"],
 )
+
+# The mopm package: `mopm pack` over `:lib`, the `.conda` a mopm registry serves. `members` is the
+# manifests of the path dependencies of the closure, staged at their repository paths, because
+# `mopm pack` reads the manifest of each beside the one it is given. `mopm` is the one
+# `mojo_package` pins (mopm-toolchain.toml).
+mojo_conda(
+    name = "conda",
+    dir = "generated/komira_plan_proto_generated",
+    lib = ":lib",
+    manifest = "mopm.toml",
+    members = {
+        "../komira_encoding": "//src/komira_encoding:mopm.toml",
+        "../komira_json": "//src/komira_json:mopm.toml",
+        "../komira_proto_codec": "//src/komira_proto_codec:mopm.toml",
+        "../komira_protobuf": "//src/komira_protobuf:mopm.toml",
+    },
+    mojo = "1.0.0",
+    mopm = "toolchains//:mopm_0_0_86",
+    package = "komira_plan_proto",
+    version = "0.1.0",
+    visibility = ["PUBLIC"],
+)
+
+# What `:conda` holds, read back from the built file: this package's own `.mojoc` and nothing else
+# under `lib/mojo/`, and exactly the one dependency of mopm.toml.
+mojo_conda_holds(
+    name = "conda_holds",
+    conda = ":conda",
+    depends = ["mojo-komira_proto_codec >=0.1,<0.2"],
+    package = "komira_plan_proto",
+    sole = True,
+    visibility = ["PUBLIC"],
+)
+
+# Kept for the release machine, which still builds it (release/BUCK, release/artifacts.textproto):
+# komira's conda packer over `:komira_plan_proto`. This library's mopm package is `:conda` above.
+conda_package(
+    name = "komira_plan_proto_conda",
+    lib = ":komira_plan_proto",
+    summary = "The `komira_plan_proto` Mojo library of komira, as a conda package.",
+    visibility = ["PUBLIC"],
+)
+
+# protoc, the reference implementation, reading the optimized-plan goldens
+# (tools/build/mojo/README.md, "Wire fixtures"). Each `<stem>.txtpb` was
+# written by hand; `<stem>.canonical.hex` is protoc's encoding of it, made by
+# the `optimized_golden_<stem>_canonical` targets below:
+#   ./buck2 build //src/komira_plan_proto:optimized_golden_<stem>_canonical \
+#       --out src/komira_plan_proto/tests/fixtures/optimized/golden/<stem>.canonical.hex
+# and `<stem>.hex` is this package's generated encoder re-encoding those
+# bytes, which tests/test_optimized_plan_goldens.mojo requires byte for byte.
+# The digests in the
+# goldens are sha256 of fixed strings, not digests computed from the body:
+# computing them is stage 5. `optimized_plan`'s `body` is the bytes of a
+# small `OptimizedPlanBody`, which the Mojo test decodes.
+_OPTIMIZED_PROTO = [":komira_plan_proto_generated_gen"]
+
+# Five goldens set no field to its default, and for them the generated
+# encoder writes exactly protoc's bytes, so their `.hex` and `.canonical.hex`
+# are equal and leg 0 can tell no producer there: they are declared
+# `canonical_producer`. The Mojo test still holds the generated encoder to
+# each `.hex`. The other eight hold a default scalar or a repeated scalar,
+# which the generated encoder writes (unpacked) and protoc does not.
+_OPTIMIZED_SAME_BYTES = [
+    "declared_needs",
+    "producer_stamp",
+    "runtime_need",
+    "scan_pin",
+    "scan_stats",
+]
+
+proto_fixture_check(
+    name = "optimized_plan_golden_fixtures",
+    canonical_producer = _OPTIMIZED_SAME_BYTES,
+    dir = "tests/fixtures/optimized/golden",
+    fixtures = {s: "komira.plan.v1." + m for s, m in _OPTIMIZED_GOLDEN.items()},
+    proto_deps = _OPTIMIZED_PROTO,
+)
+
+[
+    proto_encode(
+        name = "optimized_golden_{}_canonical".format(s),
+        proto_deps = _OPTIMIZED_PROTO,
+        root = "komira.plan.v1." + m,
+        txtpb = "tests/fixtures/optimized/golden/{}.txtpb".format(s),
+    )
+    for s, m in _OPTIMIZED_GOLDEN.items()
+]
+
+# An undeclared enum value inside an `OptimizedPlan`: `write_target.format`
+# is 9, which `WriteFormat` does not declare. Proto3 enums are open, so protoc
+# decodes it, prints it as a number and parses it back, and legs 1 to 4 pass
+# it; leg 5 must refuse it, walking from the `OptimizedPlan` root through the
+# imported `WireWriteTarget`. Two cases on the one fixture: the first fails
+# unless leg 5 refuses it, the second unless that is the only failure (": 1
+# failure(s)" does not match "11 failure(s)"), so legs 0 to 4 still hold the
+# fixture's three files to each other. The `.hex` is protoc's own bytes
+# (`canonical_producer`), made by `optimized_hostile_undeclared_write_format_canonical`.
+_UNDECLARED = "optimized_plan_undeclared_write_format"
+
+[
+    proto_fixture_case(
+        name = name,
+        canonical_producer = [_UNDECLARED],
+        dir = "tests/fixtures/optimized/hostile",
+        expect = expect,
+        fixtures = {_UNDECLARED: "komira.plan.v1.OptimizedPlan"},
+        proto_deps = _OPTIMIZED_PROTO,
+    )
+    for name, expect in [
+        ("optimized_plan_undeclared_enum", _UNDECLARED + ": LEG 5: " + _UNDECLARED + ".hex carries enum values the schema does not name"),
+        ("optimized_plan_undeclared_enum_only", "proto_fixture: FAILED: 1 failure(s)"),
+    ]
+]
+
+proto_encode(
+    name = "optimized_hostile_undeclared_write_format_canonical",
+    proto_deps = _OPTIMIZED_PROTO,
+    root = "komira.plan.v1.OptimizedPlan",
+    txtpb = "tests/fixtures/optimized/hostile/{}.txtpb".format(_UNDECLARED),
+)
+
+# The `OptimizedPlan` goldens that komira_optimized_plan_header's welded tests
+# read through its header codec: protoc's bytes and this package's encoding
+# of the full golden, and protoc's bytes of the undeclared-`write_target.format`
+# hostile fixture.
+[
+    export_file(
+        name = "header_fixture_" + stem.replace("/", "_").replace(".", "_"),
+        src = "tests/fixtures/optimized/" + stem,
+        visibility = ["//src/komira_optimized_plan_header:"],
+    )
+    for stem in [
+        "golden/optimized_plan.canonical.hex",
+        "golden/optimized_plan.hex",
+        "hostile/optimized_plan_undeclared_write_format.canonical.hex",
+    ]
+]

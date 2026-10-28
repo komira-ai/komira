@@ -639,7 +639,7 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
         `_offset` (verified byte-identical by the split-on-slice oracle). Every
         other layout returns False and the caller (`split_record_batch`) uses the
         copy slice — notably plain STRING / BINARY (as_string/as_binary read
-        offsets from position 0, IGNORING `_offset` — see `_slice_variable_width`
+        offsets from position 0 and refuse a sliced column — see `_slice_variable_width`
         note), BOOL (bit-packed; a non-byte-aligned `_offset` needs bit-shift
         handling), and nested (LIST/STRUCT/MAP/UNION child offsets don't compose
         with a parent `_offset`)."""
@@ -669,7 +669,7 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
         Byte-identical reads to the copy-based `_slice_column` for every layout
         where `supports_zero_copy_slice()` is True (fixed-width / boolean /
         DECIMAL / DICTIONARY — their accessors honor `_offset`). RAISES for
-        STRING/BINARY/nested (accessors ignore `_offset`); the caller must gate
+        STRING/BINARY/nested (their accessors refuse a sliced column); the caller must gate
         on `supports_zero_copy_slice()` and use the copy path for those.
 
         VALIDITY IS OFFSET-BASED. When self is nullable the
@@ -1976,8 +1976,8 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
         `Column.slice` shares the WHOLE-column bitmap and carries `_offset > 0`
         into the result, so a per-row lookup on a slice is
         `validity.test(_offset + i)` — its docstring states exactly this. The
-        STRING/BINARY/nested accessors ignore `_offset` and are still correct
-        because `slice()` REFUSES those layouts (`supports_zero_copy_slice()`
+        STRING/BINARY/nested accessors refuse a sliced column, and `slice()`
+        REFUSES those layouts (`supports_zero_copy_slice()`
         is False), so their `_offset` is always 0 and the two spellings
         coincide there.
 
@@ -2226,10 +2226,9 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
           * `RecordBatch.column_as_string(i)` -> `Column.as_string()` **COPIES
             the whole offsets AND data buffer** — a multi-GB memcpy just to
             read lengths.
-          * `Column.as_string()` also reads `_offsets[0 .. _length]` and IGNORES
-            `_offset` entirely, so on a SLICED column it returns the wrong
-            strings (the offset-blind-read defect class); this accessor is
-            written the other way on purpose.
+          * `Column.as_string()` also reads `_offsets[0 .. _length]` from row 0
+            and so refuses a sliced column (`_offset != 0`) rather than read
+            the wrong rows; this accessor is written the other way on purpose.
 
         O(1), allocation-free, `_offset`-correct — the STRING sibling of
         `string_dict_code_at` below.
@@ -3525,6 +3524,22 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
         """Decimal scale (0 for non-decimal columns)."""
         return self._decimal_s
 
+    def _refuse_sliced(self, site: StaticString) raises:
+        """Raise if `_offset != 0`. `as_string`, `as_binary`,
+        `as_large_string`, `as_large_binary`, `as_boolean` and
+        `utf8_value_at` read offsets, data and validity from row 0; on a
+        column with `_offset > 0` that returns the rows before the requested
+        ones. `Column.slice` refuses these layouts, but `_offset` is a
+        constructor argument any producer can set."""
+        if self._offset != 0:
+            raise Error(
+                String(site)
+                + ": refusing a sliced column (_offset == "
+                + String(self._offset)
+                + "); this accessor reads from row 0 and would shift every"
+                " value"
+            )
+
     def as_string(self) raises -> StringArray[HeapRegion]:
         """Reconstruct a StringArray view from this Column's buffers.
 
@@ -3534,7 +3549,8 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
             A new StringArray holding a copy of this Column's data.
 
         Raises:
-            Error if the Column's arrow_type is not STRING.
+            Error if the Column's arrow_type is not STRING, or if `_offset`
+            is non-zero (`_refuse_sliced`).
         """
         if self.arrow_type != ArrowType.STRING:
             raise Error(
@@ -3544,6 +3560,7 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
             )
         if not self._offsets:
             raise Error("Column.as_string: missing offsets buffer")
+        self._refuse_sliced("Column.as_string")
 
         # Copy offsets buffer
         # Migrated buffer memcpys + offset lookup onto view API.
@@ -3601,7 +3618,7 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
         * `_offsets` present — `as_string` raises without it.
         * `_offset == 0` — `as_string` copies `offsets[0 .. _length]` and
           `data[0 .. offsets[_length]]` and copies validity from BIT 0,
-          i.e. it reads the column as if `_offset` were 0 and IGNORES it
+          i.e. it reads the column as if `_offset` were 0, so it refuses a sliced column
           (`supports_zero_copy_slice()` excludes STRING for exactly this
           reason). A share therefore reproduces `as_string`'s bytes only at
           `_offset == 0`. No public path can build an `_offset > 0` plain
@@ -3647,7 +3664,7 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
         That branch had to exclude nullable columns because the copy REBASED
         validity from `_offset` to bit 0 and its consumers read from bit 0.
         `as_string` never rebased anything — it copies validity from bit 0 and
-        ignores `_offset` — so at the `_offset == 0` this method requires, the
+        refuses a sliced column — so at the `_offset == 0` this method requires, the
         shared bitmap and the copied bitmap have identical bits at identical
         indices.
 
@@ -3700,6 +3717,7 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
                 + String(self.arrow_type)
                 + ", expected bool"
             )
+        self._refuse_sliced("Column.as_boolean")
         # Copy the data bitmap
         # Migrated buffer memcpys onto `copy_from_view`.
         var data_bm = Bitmap.create(self._length)
@@ -3753,6 +3771,7 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
             )
         if not self._offsets:
             raise Error("Column.as_binary: missing offsets buffer")
+        self._refuse_sliced("Column.as_binary")
 
         # Copy offsets buffer
         # Migrated buffer memcpys + offset lookup onto view API.
@@ -3817,6 +3836,7 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
             )
         if not self._offsets:
             raise Error("Column.as_large_string: missing offsets buffer")
+        self._refuse_sliced("Column.as_large_string")
 
         comptime int64_size = size_of[Int64]()
         var offsets_bytes = (self._length + 1) * int64_size
@@ -4029,12 +4049,11 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
     # gets the right width, instead of an `elif at == LARGE_STRING` arm that
     # every future renderer has to remember to add.
     #
-    # `_offset` IS IGNORED, DELIBERATELY AND CONSISTENTLY WITH `as_string()` /
-    # `as_large_string()`, which copy `offsets[0 .. _length]` and read validity
-    # from bit 0 (see `can_share_as_string`'s note: no public path builds an
-    # `_offset > 0` plain STRING column, since `Column.slice` refuses STRING).
-    # A divergence here would make the per-cell read disagree with the bulk
-    # read on the same column, which is worse than either convention.
+    # `utf8_value_at` reads offsets from row 0, as `as_string()` /
+    # `as_large_string()` do, and like them REFUSES `_offset != 0`
+    # (`_refuse_sliced`; no public path builds an `_offset > 0` plain STRING
+    # column, since `Column.slice` refuses STRING). `utf8_is_null_at` cannot
+    # raise, so it reads validity bit `_offset + row`, the Arrow answer.
     # =========================================================================
 
     def utf8_value_at(self, row: Int) raises -> String:
@@ -4062,6 +4081,7 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
             )
         if not self._offsets:
             raise Error("Column.utf8_value_at: missing offsets buffer")
+        self._refuse_sliced("Column.utf8_value_at")
         if row < 0 or row >= self._length:
             raise Error(
                 "Column.utf8_value_at: row "
@@ -4098,10 +4118,11 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
         """True iff `row` is null. False when the column carries no validity
         bitmap (Arrow's "no nulls" fast path), matching `StringArray.is_null`
         and `LargeStringArray.is_null`. Width-agnostic: the validity bitmap
-        layout is identical for STRING and LARGE_STRING."""
+        layout is identical for STRING and LARGE_STRING. Reads bit
+        `_offset + row`."""
         if not self._validity:
             return False
-        return not self._validity.value().test(row)
+        return not self._validity.value().test(self._offset + row)
 
     def as_large_binary(self) raises -> LargeBinaryArray[HeapRegion]:
         """Reconstruct a LargeBinaryArray[HeapRegion] view from this Column's buffers.
@@ -4120,6 +4141,7 @@ struct Column[K: MemoryRegion = HeapRegion](Movable):
             )
         if not self._offsets:
             raise Error("Column.as_large_binary: missing offsets buffer")
+        self._refuse_sliced("Column.as_large_binary")
 
         comptime int64_size = size_of[Int64]()
         var offsets_bytes = (self._length + 1) * int64_size

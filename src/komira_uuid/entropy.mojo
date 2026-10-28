@@ -9,12 +9,12 @@
 #
 # # Why this file exists
 #
-# The same CSPRNG is exposed by `komira_crypto.rng.system_entropy`, but
-# importing `komira_crypto` here would put the whole crypto library upstream
-# of every package that mints an ID: an edit to any crypto source would
-# invalidate all of them. Declaring the one C symbol locally keeps this package
-# a small leaf. (The clock is different: `komira_clock` is a dependency-free
-# leaf of its own, so the wall clock comes from there.)
+# The same CSPRNG is exposed by `komira_crypto.rng.system_entropy`. This file
+# declares the one C symbol itself and imports none of komira_crypto's Mojo
+# modules. komira_crypto is a dependency all the same (BUCK): it owns aws-lc
+# and ships its library, so the package of a library calling `RAND_bytes`
+# must require komira_crypto's (tools/build/mojo/README.md, "Native reach").
+# (The wall clock comes from `komira_clock`.)
 #
 # # What is and is NOT duplicated
 #
@@ -39,8 +39,8 @@
 #
 # # Link surface
 #
-# Any binary that links this package links aws-lc's `libcrypto` (this
-# library's `deps` carries it). Re-declaring an extern symbol in a second
+# Any binary that links this package links aws-lc's `libcrypto` (through
+# komira_crypto, in this library's `deps`). Re-declaring an extern symbol in a second
 # package is routine: the symbol resolves to the one definition at link time.
 #
 # # Encapsulation discipline
