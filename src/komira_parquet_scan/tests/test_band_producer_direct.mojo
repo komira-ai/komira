@@ -33,7 +33,7 @@ from komira_async.runtime.runtime import PLACEMENT_FIXED, PerCoreAsyncRuntime
 from komira_async_api.token import CancellationToken
 from komira_collections.slab import Slab
 from komira_engine_runtime.band_sink import BandSink
-from komira_engine_runtime.host_profile import HostProfile, reference_host_profile
+from komira_host_profile.host_profile import HostProfile, reference_host_profile
 from komira_fs.local_fs import LocalFs
 from komira_parquet.file_reader import ParquetFileReader
 from komira_parquet.metadata_parser import parse_full_metadata

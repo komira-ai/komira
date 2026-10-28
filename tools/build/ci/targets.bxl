@@ -5,7 +5,7 @@
 # (ci_graph.bzl SHARDS, shard_of), so no file grows past the line limit as
 # packages are added.
 #
-#   cp -rL --no-preserve=mode "$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate)"/. ci/
+#   out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d "$out" ] && [ "$out" != / ] && cp -rL --no-preserve=mode "$out"/. ci/
 #
 # A BXL script cannot write the source tree. It builds the files into one
 # directory of buck-out (a scratch copy, so a failed generation leaves the

@@ -48,7 +48,7 @@ from komira_buffer.heap_region import HeapRegion
 from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 from komira_buffer.shared_aligned_buffer import SharedAlignedBuffer
 from komira_collections.slab import Slab
-from komira_engine_runtime.hardware import DEFAULT_L3_BYTES
+from komira_host_profile.hardware import DEFAULT_L3_BYTES
 from komira_fs.file_system import FileSystem
 from komira_parquet.column_decode_context import ColumnDecodeContext
 from komira_parquet.subrg_column_cursor import ResumableColumnCursor, SUBRG_MAX_RUN

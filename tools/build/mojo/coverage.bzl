@@ -112,6 +112,7 @@ pass through its generator too) is NotMeasured in its gate.
 load("@komira//tools/build/coverage:policy.bzl", "COVERAGE_BRANCH_GATE", "COVERAGE_INFO_ONLY_DIRS", "COVERAGE_MODE", "COVERAGE_NO_GATE", "COVERAGE_SHARED_LIB_MODE", "COVERAGE_TARGET_BP")
 load(":coverage_branch.bzl", "coverage_branch", "coverage_branch_sub_targets")
 load(":providers.bzl", "MojoToolchainInfo")
+load(":system_libs.bzl", "dep_system_libs", "run_args")
 
 # The link directory of every coverage build (cov_link_dir, kcov/defs.bzl):
 # one target, so the paths of zig's C runtime sources that the debug info
@@ -964,7 +965,7 @@ def coverage_shared_lib(ctx, tc, build, srcs, main, closure, c_link, link_extra,
     for g in ctx.attrs.gate_srcs:
         stem = g.basename.removesuffix(".mojo")
         bins[stem] = build(ctx, tc, "cov/drivers/{}/{}".format(stem, stem), [g], g, [], "0", "mojo_build_cov_driver", stem, None, debug_link = link)
-        runs[stem] = coverage_run(ctx, tc, g, stem, bins[stem], src_dir, out_name, "", data, [], solib = (so_file, names))
+        runs[stem] = coverage_run(ctx, tc, g, stem, bins[stem], src_dir, out_name, "", data, run_args([], dep_system_libs(ctx.attrs.deps)), solib = (so_file, names))
     gate = None
     if ctx.attrs.coverage_gate != None:
         info = _gate_inputs(ctx, runs, {}, [], None, srcs, ctx.attrs.gate_srcs)
