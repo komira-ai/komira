@@ -130,10 +130,10 @@ def _feed(mut table: RowHashAggTable, mut state: RowHashAggSpillState) raises:
         state.maybe_spill_run(table)
 
 
-def _check(out: Optional[RecordBatch]) raises:
+def _check(got: Optional[RecordBatch]) raises:
     """Every group once, with the SUM the rows give."""
-    assert_true(Bool(out), "a result")
-    ref rb = out.value()
+    assert_true(Bool(got), "a result")
+    ref rb = got.value()
     var want = List[Int64]()
     for _ in range(_G):
         want.append(0)

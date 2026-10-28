@@ -52,12 +52,21 @@ def encode_group_rows_to_storage(
     mut storage: LocalDiskSpillStorage,
     var image: SharedAlignedBuffer[HeapRegion],
     n_groups: Int,
+    has_var_keys: Bool,
     fingerprint: UInt64,
 ) raises -> ChunkId:
     """Write one packed group-row image as a THSPILL2 chunk on `storage` and
     return the chunk's id. `storage.sync()` runs before returning, so the
-    caller may free the in-memory run afterwards."""
-    var block = NativeRowBlock(image^, Int64(n_groups), fingerprint)
+    caller may free the in-memory run afterwards.
+
+    `NativeRowBlock` is a fixed-stride body: its row count must divide the
+    body length. An all-fixed-width image is `n_groups` whole rows, so it
+    carries `n_groups`. An image with variable-width keys is the 8-byte group
+    count header, the rows and the string heap, which is no whole number of
+    rows, so it is written as ONE opaque row; the group count is the caller's
+    (it is passed to `restore_shell_from_chunk`)."""
+    var rows = Int64(1) if has_var_keys else Int64(n_groups)
+    var block = NativeRowBlock(image^, rows, fingerprint)
     var cid = THSpill2Encoder[NativeRowBlock].encode(storage, block^)
     storage.sync()
     return cid

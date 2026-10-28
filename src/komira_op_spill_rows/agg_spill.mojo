@@ -149,7 +149,11 @@ struct RowHashAggSpillState(Movable, Deinitable):
                 )
             )
         var cid = encode_group_rows_to_storage(
-            self._storage.value(), image^, n_groups, fingerprint
+            self._storage.value(),
+            image^,
+            n_groups,
+            len(table.var_key_offsets) > 0,
+            fingerprint,
         )
         self._run_chunk_ids.append(cid)
         self._run_n_groups.append(n_groups)
