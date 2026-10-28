@@ -1270,6 +1270,7 @@ artifacts {
   args: "{release_dir}/komira_kafka_broker/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_bench_duckdb/manifest.json"
+  args: "--member-manifest"
   args: "{release_dir}/komira_bench_report/manifest.json"
   args: "--license"
   args: "Apache-2.0"
