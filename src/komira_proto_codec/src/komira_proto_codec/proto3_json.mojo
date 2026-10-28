@@ -770,13 +770,13 @@ struct JsonDecoder(WireDecoder):
         return self._cur().as_int64()
 
     def read_i32(mut self) raises -> Int32:
-        return Int32(self._cur().as_int64())
+        return _to_i32(self._cur().as_int64())
 
     def read_u64(mut self) raises -> UInt64:
         return self._cur().as_uint64()
 
     def read_u32(mut self) raises -> UInt32:
-        return UInt32(self._cur().as_uint64())
+        return _to_u32(self._cur().as_uint64())
 
     def read_f64(mut self) raises -> Float64:
         return read_proto3_json_f64(self._cur())
@@ -796,13 +796,13 @@ struct JsonDecoder(WireDecoder):
         return self._cur().as_uint64()
 
     def read_sint32(mut self) raises -> Int32:
-        return Int32(self._cur().as_int64())
+        return _to_i32(self._cur().as_int64())
 
     def read_sfixed32(mut self) raises -> Int32:
-        return Int32(self._cur().as_int64())
+        return _to_i32(self._cur().as_int64())
 
     def read_fixed32(mut self) raises -> UInt32:
-        return UInt32(self._cur().as_uint64())
+        return _to_u32(self._cur().as_uint64())
 
     def read_bool(mut self) raises -> Bool:
         return self._cur().as_bool()
@@ -905,7 +905,7 @@ struct JsonDecoder(WireDecoder):
     def read_into_repeated_i32(mut self, mut out: List[Int32]) raises:
         var arr = self._cur_array()
         for i in range(len(arr.children)):
-            out.append(Int32(arr.children[i].as_int64()))
+            out.append(_to_i32(arr.children[i].as_int64()))
 
     def read_into_repeated_u64(mut self, mut out: List[UInt64]) raises:
         var arr = self._cur_array()
@@ -915,7 +915,7 @@ struct JsonDecoder(WireDecoder):
     def read_into_repeated_u32(mut self, mut out: List[UInt32]) raises:
         var arr = self._cur_array()
         for i in range(len(arr.children)):
-            out.append(UInt32(arr.children[i].as_uint64()))
+            out.append(_to_u32(arr.children[i].as_uint64()))
 
     def read_into_repeated_f64(mut self, mut out: List[Float64]) raises:
         var arr = self._cur_array()
@@ -947,17 +947,17 @@ struct JsonDecoder(WireDecoder):
     def read_into_repeated_sint32(mut self, mut out: List[Int32]) raises:
         var arr = self._cur_array()
         for i in range(len(arr.children)):
-            out.append(Int32(arr.children[i].as_int64()))
+            out.append(_to_i32(arr.children[i].as_int64()))
 
     def read_into_repeated_sfixed32(mut self, mut out: List[Int32]) raises:
         var arr = self._cur_array()
         for i in range(len(arr.children)):
-            out.append(Int32(arr.children[i].as_int64()))
+            out.append(_to_i32(arr.children[i].as_int64()))
 
     def read_into_repeated_fixed32(mut self, mut out: List[UInt32]) raises:
         var arr = self._cur_array()
         for i in range(len(arr.children)):
-            out.append(UInt32(arr.children[i].as_uint64()))
+            out.append(_to_u32(arr.children[i].as_uint64()))
 
     def read_into_repeated_bool(mut self, mut out: List[Bool]) raises:
         var arr = self._cur_array()
@@ -972,6 +972,12 @@ struct JsonDecoder(WireDecoder):
         var arr = self._cur_array()
         for i in range(len(arr.children)):
             ref e = arr.children[i]
+            comptime if conforms_to(En, ProtoNullValueEnum):
+                # google.protobuf.NullValue: `null` is the element, as it is
+                # the field in `read_enum`.
+                if e.is_null():
+                    out.append(En.from_number(0))
+                    continue
             if e.kind == JSON_STRING:
                 var text = e.as_string()
                 if _is_integer_text(text):
@@ -1029,7 +1035,7 @@ struct JsonDecoder(WireDecoder):
     ) raises:
         var obj = self._cur_object()
         for i in range(len(obj.obj_keys)):
-            out[obj.obj_keys[i]] = Int32(obj.children[i].as_int64())
+            out[obj.obj_keys[i]] = _to_i32(obj.children[i].as_int64())
 
     def read_into_string_i64_map(
         mut self, mut out: Dict[String, Int64]
@@ -1332,6 +1338,26 @@ def _vocab_group_text(vocab: StringSlice, group: Int) -> String:
             start = i + 1
         i += 1
     return String("")
+
+
+def _to_i32(v: Int64) raises -> Int32:
+    """`v` as an int32, refusing a value outside its range. The JSON number or
+    text is read as 64 bits first, so a bare `Int32(v)` would wrap 4294967296
+    to 0 and decode the message without a word."""
+    if v < Int64(-2147483648) or v > Int64(2147483647):
+        raise Error(
+            String("JsonError: value out of int32 range: ") + String(v)
+        )
+    return Int32(v)
+
+
+def _to_u32(v: UInt64) raises -> UInt32:
+    """`v` as a uint32, refusing a value outside its range (see `_to_i32`)."""
+    if v > UInt64(4294967295):
+        raise Error(
+            String("JsonError: value out of uint32 range: ") + String(v)
+        )
+    return UInt32(v)
 
 
 def _quote(s: String) -> String:

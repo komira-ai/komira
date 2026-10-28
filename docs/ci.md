@@ -124,6 +124,8 @@ buckconfig written whole. It also reads every workflow and holds each step
 that uses the action to `tls: ${{ vars.FARM_TLS || 'false' }}` under its
 `with:`: a caller that dropped `tls` would connect in plain text whatever
 `FARM_TLS` says.
+It holds `farm-qos` to `batch` on every step of `release.yml` and to
+absent on every step of any other workflow.
 
 A job that calls it needs `permissions: id-token: write` (to ask GitHub for the
 token) next to `contents: read`, and nothing else: the job reads no secret, holds
@@ -149,6 +151,17 @@ endpoint out of every committed buckconfig, workflow and local action.
 The connection is checked on every farm-connected run: the action's
 `refuse unless the farm answers` step fails the job before any build when the
 farm's port does not answer.
+
+**Priority.** A farm that queues by priority class runs a `ci` action before a
+`batch` one. The action takes an optional `farm-qos` (`ci` or `batch`) and, when
+it is set, writes the request header `x-kbf-qos` as buck2's `http_headers`.
+Every job of `release.yml` passes `batch`, so the release work that a push to
+`main` starts waits behind the pull-request checks when the farm is full; no
+other workflow passes it, so they stay at `ci`. The class is not a platform
+property: it is not part of an action's digest, so a release build and a pull
+request still share the same action-cache entries. It changes the order of the
+queue only: a running action keeps its slot, and a farm that does not read the
+header (or a buck2 that does not send it) queues the action as `ci`.
 
 Give CI its own remote-execution instance name, a sub-instance such as
 `<prefix>/ci`, so its action-cache entries are kept apart from developers' on a
