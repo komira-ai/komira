@@ -20,6 +20,7 @@ mojo_library(
     test_srcs = [
         "tests/test_engine_sort.mojo",
         "tests/test_engine_sort_string.mojo",
+        "tests/test_sort_buffer_date64_and_tie_stability.mojo",
         "tests/test_sort_buffer_key_types.mojo",
         "tests/test_sort_buffer_narrow_signed_order.mojo",
         "tests/test_sort_buffer_untyped.mojo",
@@ -30,10 +31,12 @@ mojo_library(
         "tests/test_sort_nested_leaf_order.mojo",
         "tests/test_sort_sink_float_nan_order.mojo",
         "tests/test_sort_sink_timestamp_key.mojo",
+        "tests/test_sort_sink_zero_keys_and_tiebreak.mojo",
         "tests/test_sort_skip_pass.mojo",
         "tests/test_sort_string_prefix_key.mojo",
         "tests/test_sort_topn_sink_radix.mojo",
         "tests/test_topn_heap_regime_string_key_route.mojo",
+        "tests/test_topn_heap_ties_and_key_layouts.mojo",
     ],
     visibility = ["PUBLIC"],
 )
