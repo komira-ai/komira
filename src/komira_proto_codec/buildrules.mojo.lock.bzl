@@ -63,7 +63,7 @@ GRAPH_JSON = r'''{
         {"path": "src/komira_proto_codec/src/komira_proto_codec/float32_bignum.mojo", "sha256": "c6c24d86f79d1c4a6190b53bf41e6fcf730d9fade9320446247d193252da2035"},
         {"path": "src/komira_proto_codec/src/komira_proto_codec/float32_parse.mojo", "sha256": "ace3a3c74da300dbb4f9ec658a7b2699574ce0a14e66d36c9cefdc33e2db5ec0"},
         {"path": "src/komira_proto_codec/src/komira_proto_codec/float64_parse.mojo", "sha256": "27ba6850014ddbf5d75169da7e0da3e95eb9c683003bfe631a59daaded88b10e"},
-        {"path": "src/komira_proto_codec/src/komira_proto_codec/proto3_json.mojo", "sha256": "dbecb4d295959186aeb2dc1bf55bbbb5a428dd28668a681420120a6d4dce710d"},
+        {"path": "src/komira_proto_codec/src/komira_proto_codec/proto3_json.mojo", "sha256": "e9040baf0dda176f6f305b6557cd4b12b4724360f978bc2a5b1756e819fdf831"},
         {"path": "src/komira_proto_codec/src/komira_proto_codec/proto3_json_float.mojo", "sha256": "e7dc248093920725ae9fafa62c8569b1c865b324efb3492766c5bff623e50f07"},
         {"path": "src/komira_proto_codec/src/komira_proto_codec/proto_binary.mojo", "sha256": "4aca74e4edce61d98540c1e6f72a9a66e202c065dcbef55d04cd27c649c10399"},
         {"path": "src/komira_proto_codec/src/komira_proto_codec/wire_format.mojo", "sha256": "f717d1080fefd40e359632b9f61860063b9c316d472dd052345272963def927f"}
@@ -217,6 +217,19 @@ GRAPH_JSON = r'''{
       "outputs": ["test_proto_codec_json_float_edges.pass"]
     },
     {
+      "id": "komira_proto_codec@0.1.0#mojo1.0.0/test:src/komira_proto_codec/tests/test_proto_codec_json_int32_range.mojo",
+      "package": "komira_proto_codec",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_proto_codec/tests/test_proto_codec_json_int32_range.mojo", "sha256": "d2772f62733b17b284beadc013fd2b1efdee14238a59277eb8bbddb44da85eb5"}
+      ],
+      "deps": ["komira_proto_codec@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_proto_codec_json_int32_range.pass"]
+    },
+    {
       "id": "komira_proto_codec@0.1.0#mojo1.0.0/test:src/komira_proto_codec/tests/test_proto_codec_json_nonascii_roundtrip.mojo",
       "package": "komira_proto_codec",
       "version": "0.1.0",
@@ -228,6 +241,19 @@ GRAPH_JSON = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_proto_codec_json_nonascii_roundtrip.pass"]
+    },
+    {
+      "id": "komira_proto_codec@0.1.0#mojo1.0.0/test:src/komira_proto_codec/tests/test_proto_codec_json_null_elements.mojo",
+      "package": "komira_proto_codec",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_proto_codec/tests/test_proto_codec_json_null_elements.mojo", "sha256": "c9eef5f96b196fdd121e16b31decdad976d78a533bf5d8861e53cac7d8d89136"}
+      ],
+      "deps": ["komira_proto_codec@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_proto_codec_json_null_elements.pass"]
     },
     {
       "id": "komira_proto_codec@0.1.0#mojo1.0.0/test:src/komira_proto_codec/tests/test_proto_codec_null_value.mojo",
@@ -360,7 +386,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
         {"path": "src/komira_proto_codec/src/komira_proto_codec/float32_bignum.mojo", "sha256": "c6c24d86f79d1c4a6190b53bf41e6fcf730d9fade9320446247d193252da2035"},
         {"path": "src/komira_proto_codec/src/komira_proto_codec/float32_parse.mojo", "sha256": "ace3a3c74da300dbb4f9ec658a7b2699574ce0a14e66d36c9cefdc33e2db5ec0"},
         {"path": "src/komira_proto_codec/src/komira_proto_codec/float64_parse.mojo", "sha256": "27ba6850014ddbf5d75169da7e0da3e95eb9c683003bfe631a59daaded88b10e"},
-        {"path": "src/komira_proto_codec/src/komira_proto_codec/proto3_json.mojo", "sha256": "dbecb4d295959186aeb2dc1bf55bbbb5a428dd28668a681420120a6d4dce710d"},
+        {"path": "src/komira_proto_codec/src/komira_proto_codec/proto3_json.mojo", "sha256": "e9040baf0dda176f6f305b6557cd4b12b4724360f978bc2a5b1756e819fdf831"},
         {"path": "src/komira_proto_codec/src/komira_proto_codec/proto3_json_float.mojo", "sha256": "e7dc248093920725ae9fafa62c8569b1c865b324efb3492766c5bff623e50f07"},
         {"path": "src/komira_proto_codec/src/komira_proto_codec/proto_binary.mojo", "sha256": "4aca74e4edce61d98540c1e6f72a9a66e202c065dcbef55d04cd27c649c10399"},
         {"path": "src/komira_proto_codec/src/komira_proto_codec/wire_format.mojo", "sha256": "f717d1080fefd40e359632b9f61860063b9c316d472dd052345272963def927f"}
@@ -514,6 +540,19 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "outputs": ["test_proto_codec_json_float_edges.pass"]
     },
     {
+      "id": "komira_proto_codec@0.1.0#mojo1.0.0/test:src/komira_proto_codec/tests/test_proto_codec_json_int32_range.mojo",
+      "package": "komira_proto_codec",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_proto_codec/tests/test_proto_codec_json_int32_range.mojo", "sha256": "d2772f62733b17b284beadc013fd2b1efdee14238a59277eb8bbddb44da85eb5"}
+      ],
+      "deps": ["komira_proto_codec@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_proto_codec_json_int32_range.pass"]
+    },
+    {
       "id": "komira_proto_codec@0.1.0#mojo1.0.0/test:src/komira_proto_codec/tests/test_proto_codec_json_nonascii_roundtrip.mojo",
       "package": "komira_proto_codec",
       "version": "0.1.0",
@@ -525,6 +564,19 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_proto_codec_json_nonascii_roundtrip.pass"]
+    },
+    {
+      "id": "komira_proto_codec@0.1.0#mojo1.0.0/test:src/komira_proto_codec/tests/test_proto_codec_json_null_elements.mojo",
+      "package": "komira_proto_codec",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_proto_codec/tests/test_proto_codec_json_null_elements.mojo", "sha256": "c9eef5f96b196fdd121e16b31decdad976d78a533bf5d8861e53cac7d8d89136"}
+      ],
+      "deps": ["komira_proto_codec@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_proto_codec_json_null_elements.pass"]
     },
     {
       "id": "komira_proto_codec@0.1.0#mojo1.0.0/test:src/komira_proto_codec/tests/test_proto_codec_null_value.mojo",
@@ -654,7 +706,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
         {"path": "src/komira_proto_codec/src/komira_proto_codec/float32_bignum.mojo", "sha256": "c6c24d86f79d1c4a6190b53bf41e6fcf730d9fade9320446247d193252da2035"},
         {"path": "src/komira_proto_codec/src/komira_proto_codec/float32_parse.mojo", "sha256": "ace3a3c74da300dbb4f9ec658a7b2699574ce0a14e66d36c9cefdc33e2db5ec0"},
         {"path": "src/komira_proto_codec/src/komira_proto_codec/float64_parse.mojo", "sha256": "27ba6850014ddbf5d75169da7e0da3e95eb9c683003bfe631a59daaded88b10e"},
-        {"path": "src/komira_proto_codec/src/komira_proto_codec/proto3_json.mojo", "sha256": "dbecb4d295959186aeb2dc1bf55bbbb5a428dd28668a681420120a6d4dce710d"},
+        {"path": "src/komira_proto_codec/src/komira_proto_codec/proto3_json.mojo", "sha256": "e9040baf0dda176f6f305b6557cd4b12b4724360f978bc2a5b1756e819fdf831"},
         {"path": "src/komira_proto_codec/src/komira_proto_codec/proto3_json_float.mojo", "sha256": "e7dc248093920725ae9fafa62c8569b1c865b324efb3492766c5bff623e50f07"},
         {"path": "src/komira_proto_codec/src/komira_proto_codec/proto_binary.mojo", "sha256": "4aca74e4edce61d98540c1e6f72a9a66e202c065dcbef55d04cd27c649c10399"},
         {"path": "src/komira_proto_codec/src/komira_proto_codec/wire_format.mojo", "sha256": "f717d1080fefd40e359632b9f61860063b9c316d472dd052345272963def927f"}
@@ -808,6 +860,19 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "outputs": ["test_proto_codec_json_float_edges.pass"]
     },
     {
+      "id": "komira_proto_codec@0.1.0#mojo1.0.0/test:src/komira_proto_codec/tests/test_proto_codec_json_int32_range.mojo",
+      "package": "komira_proto_codec",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_proto_codec/tests/test_proto_codec_json_int32_range.mojo", "sha256": "d2772f62733b17b284beadc013fd2b1efdee14238a59277eb8bbddb44da85eb5"}
+      ],
+      "deps": ["komira_proto_codec@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_proto_codec_json_int32_range.pass"]
+    },
+    {
       "id": "komira_proto_codec@0.1.0#mojo1.0.0/test:src/komira_proto_codec/tests/test_proto_codec_json_nonascii_roundtrip.mojo",
       "package": "komira_proto_codec",
       "version": "0.1.0",
@@ -819,6 +884,19 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "natives": [],
       "profile": {"opt": 1, "assert": "all", "debug": false},
       "outputs": ["test_proto_codec_json_nonascii_roundtrip.pass"]
+    },
+    {
+      "id": "komira_proto_codec@0.1.0#mojo1.0.0/test:src/komira_proto_codec/tests/test_proto_codec_json_null_elements.mojo",
+      "package": "komira_proto_codec",
+      "version": "0.1.0",
+      "kind": "test",
+      "srcs": [
+        {"path": "src/komira_proto_codec/tests/test_proto_codec_json_null_elements.mojo", "sha256": "c9eef5f96b196fdd121e16b31decdad976d78a533bf5d8861e53cac7d8d89136"}
+      ],
+      "deps": ["komira_proto_codec@0.1.0#mojo1.0.0/lib"],
+      "natives": [],
+      "profile": {"opt": 1, "assert": "all", "debug": false},
+      "outputs": ["test_proto_codec_json_null_elements.pass"]
     },
     {
       "id": "komira_proto_codec@0.1.0#mojo1.0.0/test:src/komira_proto_codec/tests/test_proto_codec_null_value.mojo",
