@@ -22,8 +22,14 @@
 #   * a heavy key not handed back (route witness);
 #   * a NULL key not handed back: the route has no NULL group, so a key column
 #     with a NULL must go to the general driver, whose NULL group is apart
-#     from '' (a mutant that drops the decline merges NULL into '');
-#   * a LARGE_STRING key read at the wrong offset width.
+#     from '' (without the decline NULL would merge into '');
+#   * a LARGE_STRING key read at the wrong offset width;
+#   * a value column of a type the value lanes cannot read refused by column
+#     name and type before the route runs, as the general driver refuses it;
+#   * FLOAT64 and INT32 value columns counted exactly (1.1 and 1.9 are two
+#     values, -0.0 and 0.0 one), against a Dict oracle and the general driver;
+#   * long keys that differ only in their last byte, and few large groups;
+#   * one key owning every row (declines), and an empty input (declines).
 #
 # Every fused-route test asserts the SERVED counter moved; the decline tests
 # assert it did not.
@@ -473,6 +479,175 @@ def test_null_key_declines_and_the_general_driver_keeps_it_apart() raises:
     for i in range(got.num_rows()):
         var tag = String("<NULL>") if got.column_at(0).is_null_at(i) else ks.get(i)
         assert_equal(Int(ns.get(i)), len(oracle[tag]), "group " + tag)
+
+
+# =============================================================================
+# Custom-column fixtures: a key list plus one value column of a chosen type
+# =============================================================================
+
+
+def _run_one_value(
+    var keys: List[String],
+    var vcol: Column,
+    vtype: ArrowType,
+    allow_fused: Bool = True,
+) raises -> RecordBatch:
+    var rbb = RecordBatchBuilder.with_capacity(2)
+    rbb.add_column(Column.from_string(StringArray.from_strings(keys)))
+    rbb.add_column(vcol^)
+    var sb = SchemaBuilder()
+    sb.add_field(Field("k", ArrowType.STRING, False))
+    sb.add_field(Field("v", vtype, False))
+    return _run(rbb.build(sb.build()), False, None, allow_fused)
+
+
+def _i64_col(vals: List[Int64]) raises -> Column:
+    return Column.from_primitive[DType.int64](PrimitiveArray[DType.int64].from_list(vals))
+
+
+def test_unreadable_value_type_is_refused_by_name_and_type() raises:
+    reset_cd_strkey_fused_counters()
+    var keys = List[String](capacity=_ROWS)
+    var svals = List[String](capacity=_ROWS)
+    for r in range(_ROWS):
+        keys.append(_key(r % _KEYS))
+        svals.append(String(r % 5))
+    var raised = False
+    try:
+        _ = _run_one_value(
+            keys^, Column.from_string(StringArray.from_strings(svals)), ArrowType.STRING
+        )
+    except e:
+        raised = True
+        var msg = String(e)
+        assert_true("'v'" in msg, "names the column: " + msg)
+        assert_true(
+            "only INT32, INT64 and FLOAT64 are supported" in msg,
+            "says which types are read: " + msg,
+        )
+    assert_true(raised, "a STRING value column must be refused")
+    assert_equal(cd_strkey_fused_served_count(), 0, "the route did not run")
+
+
+def test_float64_values_count_exactly() raises:
+    """1.1 and 1.9 are two values (a truncating key would make them one);
+    -0.0 and 0.0 are one."""
+    reset_cd_strkey_fused_counters()
+    var keys = List[String](capacity=_ROWS)
+    var fvals = List[Float64](capacity=_ROWS)
+    var oracle = Dict[String, Set[Int64]]()
+    for r in range(_ROWS):
+        var k = r % _KEYS
+        var t = (r // _KEYS) % 4
+        var f = Float64(1.1)
+        var code = Int64(0)
+        if t == 1:
+            f = Float64(1.9)
+            code = 1
+        elif t == 2:
+            f = Float64(0.0)
+            code = 2
+        elif t == 3:
+            f = Float64(-0.0)
+            code = 2
+        keys.append(_key(k))
+        fvals.append(f)
+        if _key(k) not in oracle:
+            oracle[_key(k)] = Set[Int64]()
+        oracle[_key(k)].add(code)
+    var got = _run_one_value(
+        keys.copy(),
+        Column.from_primitive[DType.float64](PrimitiveArray[DType.float64].from_list(fvals)),
+        ArrowType.FLOAT64,
+    )
+    assert_equal(cd_strkey_fused_served_count(), 1, "the fused route served")
+    var have = _as_map(got, 1)
+    assert_equal(len(have), len(oracle), "key count")
+    for e in oracle.items():
+        assert_equal(have[e.key], len(e.value), "key " + e.key)
+
+
+def test_int32_values_count_exactly() raises:
+    reset_cd_strkey_fused_counters()
+    var keys = List[String](capacity=_ROWS)
+    var vals = List[Int32](capacity=_ROWS)
+    var oracle = Dict[String, Set[Int32]]()
+    for r in range(_ROWS):
+        var k = r % _KEYS
+        # Includes values past 2^31 - 1 wrapped by Int32, and negatives.
+        var v = Int32((r // _KEYS) * 1_000_003 % 5 - 2)
+        keys.append(_key(k))
+        vals.append(v)
+        if _key(k) not in oracle:
+            oracle[_key(k)] = Set[Int32]()
+        oracle[_key(k)].add(v)
+    var got = _run_one_value(
+        keys^,
+        Column.from_primitive[DType.int32](PrimitiveArray[DType.int32].from_list(vals)),
+        ArrowType.INT32,
+    )
+    assert_equal(cd_strkey_fused_served_count(), 1, "the fused route served")
+    var have = _as_map(got, 1)
+    assert_equal(len(have), len(oracle), "key count")
+    for e in oracle.items():
+        assert_equal(have[e.key], len(e.value), "key " + e.key)
+
+
+def test_long_keys_differing_in_the_last_byte_and_few_groups() raises:
+    """Fifty groups whose keys share a 1 KiB prefix and differ in the last
+    byte only; every key repeats on many rows."""
+    reset_cd_strkey_fused_counters()
+    var prefix = String("")
+    for _ in range(1024):
+        prefix += String("p")
+    var keys = List[String](capacity=_ROWS)
+    var vals = List[Int64](capacity=_ROWS)
+    var oracle = Dict[String, Set[Int64]]()
+    for r in range(_ROWS):
+        var k = prefix + String(chr(Int(ord("A")) + r % 50))
+        var v = Int64((r // 50) % 11)
+        keys.append(k)
+        vals.append(v)
+        if k not in oracle:
+            oracle[k] = Set[Int64]()
+        oracle[k].add(v)
+    var got = _run_one_value(keys.copy(), _i64_col(vals), ArrowType.INT64)
+    assert_equal(cd_strkey_fused_served_count(), 1, "the fused route served")
+    var have = _as_map(got, 1)
+    assert_equal(len(have), 50, "fifty groups")
+    for e in oracle.items():
+        assert_true(e.key in have, "missing a long key")
+        assert_equal(have[e.key], len(e.value), "a long key's count")
+    var ks = got.column_at(0).as_string()
+    for i in range(50):
+        assert_equal(
+            ks.get(i), prefix + String(chr(Int(ord("A")) + i)), "first-seen order"
+        )
+
+
+def test_one_key_owning_every_row_declines_and_counts_right() raises:
+    reset_cd_strkey_fused_counters()
+    var keys = List[String](capacity=_ROWS)
+    var vals = List[Int64](capacity=_ROWS)
+    var seen = Set[Int64]()
+    for r in range(_ROWS):
+        keys.append(String("only"))
+        vals.append(Int64(r % 1013))
+        seen.add(Int64(r % 1013))
+    var got = _run_one_value(keys^, _i64_col(vals), ArrowType.INT64)
+    assert_equal(cd_strkey_fused_served_count(), 0, "one hot key must decline")
+    assert_equal(cd_strkey_fused_heavy_decline_count(), 1, "declined as heavy")
+    assert_equal(got.num_rows(), 1, "one group")
+    assert_equal(Int(got.column_at(1).as_primitive[DType.int64]().get(0)), len(seen), "its count")
+
+
+def test_empty_input_is_not_served_and_yields_no_groups() raises:
+    reset_cd_strkey_fused_counters()
+    var keys = List[String]()
+    var vals = List[Int64]()
+    var got = _run_one_value(keys^, _i64_col(vals), ArrowType.INT64)
+    assert_equal(cd_strkey_fused_served_count(), 0, "an empty input is not served")
+    assert_equal(got.num_rows(), 0, "no rows, no groups")
 
 
 def main() raises:
