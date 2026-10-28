@@ -19,12 +19,13 @@
 # column in word 2 (`komira_join_assembly.join_payload_inline`).
 #
 # SQL KEY SEMANTICS: a NULL key matches nothing. A NULL build key is recorded
-# but never linked into a bucket, so it matches nothing; a NULL probe key
-# skips the walk.
+# (so a RIGHT/FULL join's unmatched-build sweep emits it) but never linked into
+# a bucket; a NULL probe key skips the walk.
 #
-# The INNER probe kernels live in their own modules (`join_probe_inner`,
-# `join_probe_inner_ps`) as free functions over a borrowed builder; the
-# methods below forward to them, so a caller writes `builder.probe_inner(keys)`.
+# The probe kernels live in their own modules (`join_probe_inner`,
+# `join_probe_inner_ps`, `join_probe_semi_anti`, `join_probe_outer`) as free
+# functions over a borrowed builder; the methods below forward to them, so a
+# caller writes `builder.probe_inner(keys)`.
 # =============================================================================
 
 from komira_arrow.primitive_array import PrimitiveArray
@@ -41,6 +42,18 @@ from .join_probe_inner import (
     probe_inner as _probe_inner,
     probe_inner_chunk as _probe_inner_chunk_entry,
     probe_inner_into as _probe_inner_into_entry,
+)
+from .join_probe_outer import (
+    probe_full as _probe_full,
+    probe_left as _probe_left,
+    probe_left_into as _probe_left_into_entry,
+    probe_right as _probe_right,
+)
+from .join_probe_semi_anti import (
+    probe_anti as _probe_anti,
+    probe_anti_count as _probe_anti_count,
+    probe_semi as _probe_semi,
+    probe_semi_count as _probe_semi_count,
 )
 
 
@@ -281,7 +294,8 @@ struct HashJoinBuilder(Movable):
     # hot probe loops instead take a COMPTIME-specialised body (`_probe_*[fused,
     # nobi]`) so the default arm compiles to byte-for-byte the pre-lever loop and
     # the A/B is not measuring a branch this instrumentation added. Use an
-    # accessor where the site is already bounds-checked (`count_inner_matches`);
+    # accessor where the site is already bounds-checked (`probe_right`,
+    # `probe_full`, `compiler_join_chunked`'s flatten pass);
     # use the comptime body where the site hoists raw pointers.
     # -------------------------------------------------------------------------
 
@@ -368,17 +382,19 @@ struct HashJoinBuilder(Movable):
 
         NOTE: NOT DEFENSIVE PROGRAMMING -- THE ALTERNATIVE TO A SILENT WRONG
         ANSWER. A kernel that hoists `key_next` onto a raw pointer indexes it
-        `2 * chain_idx`. Exactly THREE were taught the wide stride -- the two
-        chunked INNER probes and their shared row-at-a-time tail -- because
-        those are the ones the lever is FOR. Any other such kernel, such as
-        `_probe_inner_into`, would read entry 2i where it meant entry i --
-        keys belonging to other rows, links into the middle of the array -- and
-        produce a join result with a plausible row count and wrong contents.
+        `2 * chain_idx`. NINE kernels do. Exactly THREE were taught the wide
+        stride -- the two chunked INNER probes and their shared row-at-a-time
+        tail -- because those are the ones the lever is FOR. The other SIX
+        (`_probe_inner_into`, `_probe_semi`, `_probe_semi_count`,
+        `_probe_left_into`, `_probe_anti`, `_probe_anti_count`) would read
+        entry 2i where they meant entry i -- keys belonging to other rows,
+        links into the middle of the array -- and produce a join result with a
+        plausible row count and wrong contents.
 
-        WARNING: `count_inner_matches` is NOT in either list and needs no guard: it
-        walks through `chain_key_at` / `chain_next_at`, which are
-        stride-aware, so it is already CORRECT under the wide layout (merely
-        not accelerated by it).
+        WARNING: `count_inner_matches`, `probe_right` and `probe_full` are NOT
+        in either list and need no guard: they walk through `chain_key_at` /
+        `chain_next_at`, which are stride-aware, so they are already CORRECT
+        under the wide layout (merely not accelerated by it).
 
         Arming is confined to the INNER chunked path by the driver, so this
         cannot fire in production today. It is stated anyway because a runtime
@@ -432,7 +448,8 @@ struct HashJoinBuilder(Movable):
 
     # -------------------------------------------------------------------------
     # PROBES -- the kernels are free functions over a borrowed builder, in
-    # `join_probe_inner`; these methods forward to them.
+    # `join_probe_inner`, `join_probe_semi_anti` and `join_probe_outer`; these
+    # methods forward to them.
     # -------------------------------------------------------------------------
 
     def probe_inner_into(
@@ -484,3 +501,55 @@ struct HashJoinBuilder(Movable):
             self, probe_keys, state, build_buf, probe_buf, pay_buf,
             chunk_capacity,
         )
+
+    def probe_semi(
+        self, probe_keys: PrimitiveArray[DType.int64]
+    ) raises -> List[Int]:
+        """Probe rows with at least one match, each once."""
+        return _probe_semi(self, probe_keys)
+
+    def probe_semi_count(
+        self, probe_keys: PrimitiveArray[DType.int64]
+    ) raises -> Int:
+        """`len(probe_semi(probe_keys))` without the list."""
+        return _probe_semi_count(self, probe_keys)
+
+    def probe_anti(
+        self, probe_keys: PrimitiveArray[DType.int64]
+    ) raises -> List[Int]:
+        """Probe rows with no match (a NULL probe key has none)."""
+        return _probe_anti(self, probe_keys)
+
+    def probe_anti_count(
+        self, probe_keys: PrimitiveArray[DType.int64]
+    ) raises -> Int:
+        """`len(probe_anti(probe_keys))` without the list."""
+        return _probe_anti_count(self, probe_keys)
+
+    def probe_left_into(
+        self,
+        probe_keys: PrimitiveArray[DType.int64],
+        mut build_matches: List[Int],
+        mut probe_matches: List[Int],
+    ) raises:
+        """LEFT probe appending pairs, -1 for an unmatched probe row."""
+        _probe_left_into_entry(self, probe_keys, build_matches, probe_matches)
+
+    def probe_left(
+        self, probe_keys: PrimitiveArray[DType.int64]
+    ) raises -> Tuple[List[Int], List[Int]]:
+        """LEFT probe returning (build rows or -1, probe rows)."""
+        return _probe_left(self, probe_keys)
+
+    def probe_right(
+        self, probe_keys: PrimitiveArray[DType.int64]
+    ) raises -> Tuple[List[Int], List[Int]]:
+        """RIGHT probe: matches, then every unmatched build row with -1."""
+        return _probe_right(self, probe_keys)
+
+    def probe_full(
+        self, probe_keys: PrimitiveArray[DType.int64]
+    ) raises -> Tuple[List[Int], List[Int]]:
+        """FULL probe: matches, unmatched probe rows (-1 build), then
+        unmatched build rows (-1 probe)."""
+        return _probe_full(self, probe_keys)

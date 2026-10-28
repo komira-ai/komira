@@ -48,7 +48,10 @@ export_file(
 # main; the `prod-*` jobs publish the set, only when enabled (docs/ci.md).
 mopm_artifacts(
     name = "mopm_artifacts",
-    natives = {"komira_libc": {"komira_libc_posix": "//src/komira_libc:native_komira_libc_posix"}},
+    natives = {
+        "komira_libc": {"komira_libc_posix": "//src/komira_libc:native_komira_libc_posix"},
+        "komira_metrics": {"komira_metrics_ea_flag": "//src/komira_metrics:native_komira_metrics_ea_flag"},
+    },
     packages = sorted(README_E2E_PACKAGES.keys()),
     visibility = ["PUBLIC"],
 )
@@ -178,6 +181,7 @@ release_set(
         "//src/komira_gcp_wif:komira_gcp_wif_conda",
         "//src/kci_cloud_gcp:kci_cloud_gcp_conda",
         "//src/komira_kafka_broker:komira_kafka_broker_conda",
+        "//src/komira_bench_duckdb:komira_bench_duckdb_conda",
         "//src/komira_bench_report:komira_bench_report_conda",
     ],
     visibility = ["PUBLIC"],
