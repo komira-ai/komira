@@ -43,8 +43,11 @@ trusted publisher accepts the job.
   * lookahead.mojo        `read_new_names`, `lookahead_new_names`: a later
                           stage's NEW NAMES, read anonymously
   * summary.mojo          the NEW NAMES block of a job summary (markdown)
+  * cell.mojo             `load_cell_release`: the release set of a PUBLISH
+                          step into a cell, its images with the set's digest
   * scripted_channel.mojo `ScriptedChannel`, an in-memory channel (tests)
-  * pause.mojo            `UsleepSleeper`, `NoWaitSleeper` (tests)
+  * pause.mojo            `UsleepSleeper`, `wait_in_slices` (its slicing, over a
+                          `SlicePause`), `NoWaitSleeper` (tests)
 
 This package names no channel, account or organisation: all of that comes from
 the files and flags it is given.
@@ -113,7 +116,8 @@ from .report import (
 )
 from .run import run_publish, run_publish_reading
 from .scripted_channel import ScriptedChannel
-from .pause import NoWaitSleeper, UsleepSleeper
+from .pause import SLICE_MS, NoWaitSleeper, SlicePause, UsleepPause, UsleepSleeper, wait_in_slices
 from .flow import NoSecretStore, PreparedRelease, publish_flow, publish_flow_reading, publish_release_with_store
 from .lookahead import NewNamesReport, lookahead_new_names, lookahead_new_names_https, new_names_of, read_new_names
 from .summary import new_names_markdown
+from .cell import CellImage, CellRelease, cell_images, load_cell_release

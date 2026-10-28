@@ -1,0 +1,63 @@
+load("@komira//tools/build/lint:timing.bzl", "timing")
+
+# The wall-clock ledger's rule (tools/build/lint/timing.bzl), used from a cell
+# other than komira, as a repository using komira as a cell uses it: each case
+# checks this package's own doc_tree (`:doc_tree`, declared by the rule's
+# macro) plus files staged at the paths `files` names, against listed.tsv (one
+# `sleepMs` site in x/fixture.zig). A case with `expect` builds green only
+# while the check refuses its planted defect with that text; one without
+# passes only with no finding. tests//functional/... (the pull request check's
+# functional_tests unit) builds them. The planted files are .txt fixtures staged
+# under Zig names. Each kind of finding is also a case of the tool's unit tests
+# (//tools/build/lint/timing).
+
+_LIST = "functional/timing/listed.tsv"
+
+_LISTED = {"x/fixture.zig": "sleeps.txt"}
+
+# The listed site: nothing to report.
+timing(
+    name = "listed",
+    files = _LISTED,
+    list = _LIST,
+    tree = ":doc_tree",
+)
+
+# Comments, and a // inside a string, are not sites.
+timing(
+    name = "comments_are_not_sites",
+    files = _LISTED | {"z/c.zig": "comment.txt"},
+    list = _LIST,
+    tree = ":doc_tree",
+)
+
+_CASES = {
+    # A second sleep in a listed file.
+    "new_site_in_listed_file": (
+        {"x/fixture.zig": "sleeps_twice.txt"},
+        ["x/fixture.zig: 2 `sleepMs` site(s), the row says 1: a new use of real time"],
+    ),
+
+    # A test that measures elapsed time, in a file with no row.
+    "elapsed_time_in_a_new_file": (
+        _LISTED | {"y/b_test.zig": "instant.txt"},
+        ["y/b_test.zig: 1 `Instant` site(s) with no row in " + _LIST],
+    ),
+
+    # The sleep was removed and the row stayed.
+    "ported_but_row_stays": (
+        {"x/fixture.zig": "plain.txt"},
+        [_LIST + ":1: x/fixture.zig: no `sleepMs` site in this file: remove the row"],
+    ),
+}
+
+[
+    timing(
+        name = name,
+        expect = expect,
+        files = files,
+        list = _LIST,
+        tree = ":doc_tree",
+    )
+    for name, (files, expect) in _CASES.items()
+]

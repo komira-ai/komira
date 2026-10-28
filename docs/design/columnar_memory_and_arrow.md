@@ -184,9 +184,9 @@ At execution, `ScanResolver` (`src/komira_scan_source/scan_resolver.mojo`) answe
 
 | File | Holds | Key types and functions |
 |---|---|---|
-| `src/komira_buffer/memory_region.mojo` | The region trait | `MemoryRegion`; `HeapRegion`, `MmapRegion` in siblings |
-| `src/komira_buffer/owned_aligned_buffer.mojo` | Single-owner buffers | `OwnedAlignedBuffer` |
-| `src/komira_buffer/shared_aligned_buffer.mojo` | Refcounted buffers | `SharedAlignedBuffer`, `borrow_mmap_erased`, `share` |
+| `src/komira_buffer/src/komira_buffer/memory_region.mojo` | The region trait | `MemoryRegion`; `HeapRegion`, `MmapRegion` in siblings |
+| `src/komira_buffer/src/komira_buffer/owned_aligned_buffer.mojo` | Single-owner buffers | `OwnedAlignedBuffer` |
+| `src/komira_buffer/src/komira_buffer/shared_aligned_buffer.mojo` | Refcounted buffers | `SharedAlignedBuffer`, `borrow_mmap_erased`, `share` |
 | `src/komira_arrow/column.mojo` | The type-erased column | `Column`, `as_primitive`, `share`, `slice` |
 | `src/komira_arrow/arrow_types.mojo` | Type tags | `ArrowType` |
 | `src/komira_arrow/schema.mojo`, `record_batch.mojo`, `table.mojo` | Schemas, batches, results | `Field`, `Schema`, `RecordBatch`, `Table` |
@@ -194,10 +194,10 @@ At execution, `ScanResolver` (`src/komira_scan_source/scan_resolver.mojo`) answe
 | `src/komira_arrow_ipc/ipc_flatbuf.mojo` | IPC metadata | `FlatbufWriter`, `FlatbufReader` |
 | `src/komira_compression/compression_codecs.mojo` | Codec bindings | `Lz4Frame`, `Zstd`, `Snappy` |
 | `src/komira_arrow_ipc/c_data_stream.mojo` | C stream export and import | `build_record_batch_stream`, `drain_record_batch_stream` |
-| `src/komira_collections/slab.mojo` | Typed slab | `Slab` |
+| `src/komira_collections/src/komira_collections/slab.mojo` | Typed slab | `Slab` |
 | `src/komira_simd/width_policy.mojo` | SIMD width policy | `komira_simd_width`, `komira_simd_width_bitpack`, `komira_simd_width_delta` |
 | `src/komira_scan_source/scan_binding.mojo`, `scan_resolver.mojo`, `scan_registry.mojo` | Scan descriptions and resolution | `ScanBinding`, `ScanResolver`, `ScanRegistry` |
-| `src/komira_rowcell/row_cell.mojo` | The table cell | `RowCell` |
+| `src/komira_rowcell/src/komira_rowcell/row_cell.mojo` | The table cell | `RowCell` |
 | `src/komira_uuid/uuid.mojo`, `clock.mojo` | UUIDv7 and the wall clock | `Uuid`, `generate_uuidv7`, `now_unix_ms` |
 
 Entry points:

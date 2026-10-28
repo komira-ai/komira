@@ -1,0 +1,18 @@
+[package]
+name = "komira_counters"
+version = "0.1.0"
+description = "Process-global census and falsifier counters (named 64-bit cells, relaxed atomic adds) plus the build-gated runtime introspection probe."
+license = "Apache-2.0"
+repository = "https://github.com/komira-ai/komira"
+readme = "README.md"
+mojo = ["1.0.0"]
+
+[dependencies]
+komira_atomic_alias = { path = "../komira_atomic_alias", version = "0.1" }
+
+[dev-dependencies]
+komira_runtime_paths = { path = "../komira_runtime_paths", version = "0.1" }
+
+[targets]
+lib = { path = "src/komira_counters" }
+tests = ["tests"]

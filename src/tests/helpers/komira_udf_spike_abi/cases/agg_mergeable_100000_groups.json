@@ -1,0 +1,13 @@
+{
+ "name": "agg_mergeable_100000_groups",
+ "defect": "a host that crosses into the runtime once per group: 100 000 groups of one row in each of two partials take four calls (two agg_update, two agg_merge)",
+ "run": "agg_split",
+ "entry": "sum",
+ "shape": "AGG_MERGEABLE",
+ "args": [{"type": "int64", "nullable": true}],
+ "result": [{"type": "int64", "nullable": true}],
+ "state": [{"type": "int64", "nullable": true}],
+ "partials": [{"input": {"length": 100000, "columns": [{"type": "int64", "values": [1], "repeat": 100000}]}, "group_ids_range": 100000, "n_groups": 100000}, {"input": {"length": 100000, "columns": [{"type": "int64", "values": [1], "repeat": 100000}]}, "group_ids_range": 100000, "n_groups": 100000}],
+ "n_groups": 100000,
+ "expect": {"status": "OK", "column": {"type": "int64", "values": [2], "repeat": 100000}, "max_calls": 4}
+}

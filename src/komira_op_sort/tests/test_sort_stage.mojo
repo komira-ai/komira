@@ -15,12 +15,11 @@
 #   * `simd_reject_winner_mask` (the top-N SIMD reject) never marked a NaN
 #     lane a winner DESC, so a DESC top-N skipped every NaN.
 # They now order by `sort.sort_key_lt` (NaN above +inf, every NaN tied), as
-# the drain (`sort_batch_by_keys`) already did. Planted mutants: the IEEE
-# compare in `_key_cmp3` turns `test_sorted_order_f64_*`,
+# the drain (`sort_batch_by_keys`) already did. `test_sorted_order_f64_*`,
 # `test_drain_and_sorted_order_agree_f64` and `test_candidate_compare_f64_nan`
-# red; the mask without its NaN terms turns `test_simd_reject_mask_f64_nan_*`
-# red. (The mask tests NaN with `isnan`: `SIMD.ne` is an ordered compare and
-# does not flag a NaN.)
+# cover the first two; `test_simd_reject_mask_f64_nan_*` the mask. (The mask
+# tests NaN with `isnan`: `SIMD.ne` is an ordered compare and does not flag a
+# NaN.)
 # =============================================================================
 
 from std.math import inf, isnan

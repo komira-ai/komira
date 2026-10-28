@@ -26,6 +26,16 @@
 # exact build, a distinct count above the ceiling falls back to the parallel
 # comparison sort (`sort_parallel_string`) on the same batch, so the answer is
 # the same either way and only the histogram's size is bounded.
+#
+# What the sample can miss. The sample reads a fixed stride over the column, so
+# a key whose distinct values fall between the sampled rows (a periodic key
+# whose period shares the stride, or distinct values only past the last
+# sampled row) is admitted although it is high-cardinality. The exact build is
+# the backstop: the answer is still correct (the fallback above), but the sort
+# has paid for a full dictionary build first. On the multi-worker route of
+# `SortSink` the gate samples partition 0 only, so a first partition that is
+# not representative of the rest can admit or decline wrongly in the same way.
+# Neither changes the rows; both cost time.
 
 from std.builtin.swap import swap
 from std.memory import UnsafePointer
@@ -40,6 +50,7 @@ from komira_async.runtime.parallel_fork_join_shared import (
 )
 from komira_async_api.shared_chunk_work import SharedChunkWork
 from komira_column_kernels.compiler_helpers import gather_batch_dispatch
+from komira_counters.global_counter import GlobalCounter
 
 from .sort_dictrank_build import (
     DICTRANK_MAX_DISTINCT,
@@ -54,6 +65,20 @@ from .sort_parallel_string import (
     parallel_sort_single_key_string,
 )
 
+# Batches that took the comparison-sort fallback after the exact distinct
+# count exceeded the ceiling (read through `dictrank_fallback_count`).
+comptime _FALLBACKS = GlobalCounter["komira_op_sort_dictrank_fallbacks"]
+
+
+def dictrank_fallback_count() -> Int:
+    """How many times, in this process, `parallel_dictrank_sort_string` found
+    the exact distinct count above its ceiling and sorted by comparison
+    instead. Diagnostic: it lets a caller see which path a sort took. Read it
+    before and after a call and compare."""
+    try:
+        return _FALLBACKS.read()
+    except:
+        return 0
 
 
 # -----------------------------------------------------------------------------
@@ -86,7 +111,12 @@ struct _RankMapWork(SharedChunkWork):
     ](
         self, chunk_id: Int, n_chunks: Int, ref input: In, mut payload: P,
     ) raises:
+        # SAFETY: the driver passes the `In` this struct is dispatched with; the
+        # bitcast names that exact type, which the call site below fixes, and the
+        # borrow outlives the synchronous barrier. Input is read only.
         var ip = UnsafePointer(to=input).bitcast[_RankMapIn]()
+        # SAFETY: `payload` is the value the driver moved onto the dispatch State,
+        # of the bitcast type; this chunk writes only its own disjoint band.
         var op = UnsafePointer(to=payload).bitcast[List[Int]]()
         var lo = self.rslice[chunk_id]
         var hi = self.rslice[chunk_id + 1]
@@ -116,7 +146,12 @@ struct _HistWork(SharedChunkWork):
     ](
         self, chunk_id: Int, n_chunks: Int, ref input: In, mut payload: P,
     ) raises:
+        # SAFETY: the driver passes the `In` this struct is dispatched with; the
+        # bitcast names that exact type, which the call site below fixes, and the
+        # borrow outlives the synchronous barrier. Input is read only.
         var rp = UnsafePointer(to=input).bitcast[List[Int]]()
+        # SAFETY: `payload` is the value the driver moved onto the dispatch State,
+        # of the bitcast type; this chunk writes only its own disjoint band.
         var hp = UnsafePointer(to=payload).bitcast[List[Int]]()
         var lo = self.slice_lo[chunk_id]
         var hi = self.slice_lo[chunk_id + 1]
@@ -151,7 +186,12 @@ struct _ScatterWork(SharedChunkWork):
     ](
         self, chunk_id: Int, n_chunks: Int, ref input: In, mut payload: P,
     ) raises:
+        # SAFETY: the driver passes the `In` this struct is dispatched with; the
+        # bitcast names that exact type, which the call site below fixes, and the
+        # borrow outlives the synchronous barrier. Input is read only.
         var rp = UnsafePointer(to=input).bitcast[List[Int]]()
+        # SAFETY: `payload` is the value the driver moved onto the dispatch State,
+        # of the bitcast type; this chunk writes only its own disjoint band.
         var pp = UnsafePointer(to=payload).bitcast[_ScatterPayload]()
         var perm_p = UnsafePointer(to=pp[].perm)
         var cur_p = UnsafePointer(to=pp[].cursor)
@@ -299,10 +339,15 @@ def can_dictrank_sort_single_key_string(
         if not force and n < DICTRANK_MIN_ROWS:
             return False
         var offs_view = key_col._offsets.value().view_ro()
+        # SAFETY: the offsets buffer holds `num_rows + 1` Int32 values from
+        # `_offset`; `offs_view` (and `data_view`) are held until after the
+        # cardinality check, so the pointers stay valid, and the check only
+        # reads.
         var offsets_ptr = offs_view._unsafe_ptr().bitcast[
             Scalar[DType.int32]
         ]()
         var data_view = key_col._data.view_ro()
+        # SAFETY: as for `offsets_ptr`; the data buffer is bytes.
         var data_ptr = data_view._unsafe_ptr().bitcast[Scalar[DType.uint8]]()
         var ok = _dictrank_cardinality_ok(
             offsets_ptr, data_ptr, key_col._offset, n, max_distinct
@@ -348,8 +393,13 @@ def parallel_dictrank_sort_string[
     var has_validity = key_col._validity.__bool__()
 
     var offs_view = key_col._offsets.value().view_ro()
+    # SAFETY: the offsets buffer holds `n + 1` Int32 values from `col_offset`.
+    # `offs_view` and `data_view` live to the end of the sort (the `_ = ...`
+    # releases below), the pointers are only read, and `batch` is not moved
+    # while they are in use (the fallback releases the views first).
     var offsets_ptr = offs_view._unsafe_ptr().bitcast[Scalar[DType.int32]]()
     var data_view = key_col._data.view_ro()
+    # SAFETY: as for `offsets_ptr`; the data buffer is bytes.
     var data_ptr = data_view._unsafe_ptr().bitcast[Scalar[DType.uint8]]()
     var col_offset = key_col._offset
 
@@ -372,6 +422,7 @@ def parallel_dictrank_sort_string[
     # comparison sort, which gives the same rows. The key-buffer views are
     # released first so `batch` can be moved.
     if d > max_distinct:
+        _FALLBACKS.try_incr()
         _ = valid^
         _ = prov_id^
         _ = rep_row^

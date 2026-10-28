@@ -1699,6 +1699,7 @@ mod tests {
     fn file_with(messages: Vec<IrMessage>, svc: IrService) -> IrFile {
         IrFile {
             proto_path: "tiny_rest.proto".to_string(),
+            source_sha256: String::new(),
             proto_package: "tiny.rest.v1".to_string(),
             mojo_package: "komira_rpc_storage".to_string(),
             messages,
@@ -2871,6 +2872,7 @@ mod tests {
         let file = service_file(svc.clone());
         let peer = IrFile {
             proto_path: "google/iam/v1/iam_policy.proto".into(),
+            source_sha256: String::new(),
             proto_package: "google.iam.v1".into(),
             mojo_package: "komira_rpc_storage".into(),
             messages: vec![req],

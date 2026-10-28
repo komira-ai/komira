@@ -285,14 +285,14 @@ struct MiddlewareChain(Movable, Deinitable):
             ref tr_mw = self._tracing.value()
             var r = tr_mw.before(req, ctx)
             if r:
-                ctx.short_circuit = True
-                return r^
+                ctx.short_circuit = True  # cov: unreachable the built-in tracing and logging before legs always return None
+                return r^  # cov: unreachable the built-in tracing and logging before legs always return None
         if self._logging:
             ref lg_mw = self._logging.value()
             var r = lg_mw.before(req, ctx)
             if r:
-                ctx.short_circuit = True
-                return r^
+                ctx.short_circuit = True  # cov: unreachable the built-in tracing and logging before legs always return None
+                return r^  # cov: unreachable the built-in tracing and logging before legs always return None
         # Innermost: the user / auth middleware. Its `before` sets
         # `ctx.principal` (continue) OR short-circuits 401.
         user_before_ran = True
@@ -405,8 +405,8 @@ def _drive_chain_canned(
                 ref tr_mw = chain._tracing.value()
                 var tr_resp = tr_mw.before(req, ctx)
                 if tr_resp:
-                    response = tr_resp.take()
-                    ctx.short_circuit = True
+                    response = tr_resp.take()  # cov: unreachable the built-in tracing and logging before legs always return None
+                    ctx.short_circuit = True  # cov: unreachable the built-in tracing and logging before legs always return None
                     short_circuited = True
         if not ctx.short_circuit:
             # --- Logging.before ---
@@ -414,8 +414,8 @@ def _drive_chain_canned(
                 ref lg_mw = chain._logging.value()
                 var lg_resp = lg_mw.before(req, ctx)
                 if lg_resp:
-                    response = lg_resp.take()
-                    ctx.short_circuit = True
+                    response = lg_resp.take()  # cov: unreachable the built-in tracing and logging before legs always return None
+                    ctx.short_circuit = True  # cov: unreachable the built-in tracing and logging before legs always return None
                     short_circuited = True
         # Inner-most: nothing — the canned response is used as-is.
 
@@ -435,35 +435,35 @@ def _drive_chain_canned(
         # mapper-less arm reports through the SAME path rather than answering a
         # bodiless `internal_error()` — an unconfigured chain is exactly when an
         # operator most needs the cause named.
-        response = chain.map_chain_error(
-            e, req.method.name(), String(req.path), trace_header_of(req)
+        response = chain.map_chain_error(  # cov: unreachable nothing in this try raises: the built-in legs make no raising call
+            e, req.method.name(), String(req.path), trace_header_of(req)  # cov: unreachable nothing in this try raises: the built-in legs make no raising call
         )
         short_circuited = True
-        ctx.short_circuit = True
+        ctx.short_circuit = True  # cov: unreachable nothing in this try raises: the built-in legs make no raising call
         # Best-effort: still run the after-chain on the error response
         # for metrics consistency (LoggingMiddleware records status etc.).
         # Wrap in another try to swallow any after-chain raises (we
         # already lost the original).
         try:
-            if chain._logging:
-                ref lg2 = chain._logging.value()
-                lg2.after(req, response, ctx)
-        except e2:
-            _ = e2
-        try:
-            if chain._tracing:
-                ref tr2 = chain._tracing.value()
-                tr2.after(req, response, ctx)
-        except e2:
-            _ = e2
-        try:
-            if chain._cors:
-                ref cors2 = chain._cors.value()
-                cors2.after(req, response, ctx)
-        except e2:
-            _ = e2
+            if chain._logging:  # cov: unreachable nothing in this try raises: the built-in legs make no raising call
+                ref lg2 = chain._logging.value()  # cov: unreachable nothing in this try raises: the built-in legs make no raising call
+                lg2.after(req, response, ctx)  # cov: unreachable nothing in this try raises: the built-in legs make no raising call
+        except e2:  # cov: unreachable nothing in this try raises: the built-in legs make no raising call
+            _ = e2  # cov: unreachable nothing in this try raises: the built-in legs make no raising call
+        try:  # cov: unreachable nothing in this try raises: the built-in legs make no raising call
+            if chain._tracing:  # cov: unreachable nothing in this try raises: the built-in legs make no raising call
+                ref tr2 = chain._tracing.value()  # cov: unreachable nothing in this try raises: the built-in legs make no raising call
+                tr2.after(req, response, ctx)  # cov: unreachable nothing in this try raises: the built-in legs make no raising call
+        except e2:  # cov: unreachable nothing in this try raises: the built-in legs make no raising call
+            _ = e2  # cov: unreachable nothing in this try raises: the built-in legs make no raising call
+        try:  # cov: unreachable nothing in this try raises: the built-in legs make no raising call
+            if chain._cors:  # cov: unreachable nothing in this try raises: the built-in legs make no raising call
+                ref cors2 = chain._cors.value()  # cov: unreachable nothing in this try raises: the built-in legs make no raising call
+                cors2.after(req, response, ctx)  # cov: unreachable nothing in this try raises: the built-in legs make no raising call
+        except e2:  # cov: unreachable nothing in this try raises: the built-in legs make no raising call
+            _ = e2  # cov: unreachable nothing in this try raises: the built-in legs make no raising call
 
-    _ = em_caught
+    _ = em_caught  # cov: unreachable a no-op whose only line record the compiler puts on the except path above
     return ChainOutcome(response=response^, short_circuited=short_circuited)
 
 
@@ -499,15 +499,15 @@ def _drive_chain_user_mw[
             ref tr_mw = chain._tracing.value()
             var r2 = tr_mw.before(req, ctx)
             if r2:
-                response = r2.take()
-                ctx.short_circuit = True
+                response = r2.take()  # cov: unreachable the built-in tracing and logging before legs always return None
+                ctx.short_circuit = True  # cov: unreachable the built-in tracing and logging before legs always return None
                 short_circuited = True
         if not ctx.short_circuit and chain._logging:
             ref lg_mw = chain._logging.value()
             var r3 = lg_mw.before(req, ctx)
             if r3:
-                response = r3.take()
-                ctx.short_circuit = True
+                response = r3.take()  # cov: unreachable the built-in tracing and logging before legs always return None
+                ctx.short_circuit = True  # cov: unreachable the built-in tracing and logging before legs always return None
                 short_circuited = True
         if not ctx.short_circuit:
             # User middleware - innermost layer.
@@ -548,19 +548,19 @@ def _drive_chain_user_mw[
                 ref lg2 = chain._logging.value()
                 lg2.after(req, response, ctx)
         except e2:
-            _ = e2
+            _ = e2  # cov: unreachable the built-in logging, tracing and CORS after legs never raise
         try:
             if chain._tracing:
                 ref tr2 = chain._tracing.value()
                 tr2.after(req, response, ctx)
         except e2:
-            _ = e2
+            _ = e2  # cov: unreachable the built-in logging, tracing and CORS after legs never raise
         try:
             if chain._cors:
                 ref cors2 = chain._cors.value()
                 cors2.after(req, response, ctx)
         except e2:
-            _ = e2
+            _ = e2  # cov: unreachable the built-in logging, tracing and CORS after legs never raise
 
     return ChainOutcome(response=response^, short_circuited=short_circuited)
 

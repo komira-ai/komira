@@ -14,6 +14,7 @@ from std.collections import Optional
 
 from komira_arrow.batch_view import BatchView
 from komira_arrow.schema import RecordBatch, Schema
+from komira_engine_runtime.spill.spill_storage import SpillStorage
 from komira_exec_types.process_result import ProcessResult
 from komira_operator_api.fused_morsel_op import FusedMorselOp
 from komira_udf.column_resolver import ColumnResolver
@@ -62,6 +63,11 @@ struct Stage_Sort[KB: SortKeyBlockTrait, *Payloads: PayloadColumn](
             self.buffer.feed_row[bo](batch, i)
             i = i + 1
         return ProcessResult.need_input(Optional[RecordBatch](None))
+
+    def discard_spilled[S: SpillStorage](mut self, mut storage: S) raises:
+        """Release the buffer's outstanding spill chunks without restoring
+        them (see `SortBuffer.discard_spilled`)."""
+        self.buffer.discard_spilled(storage)
 
     def finalize(var self) raises -> Optional[RecordBatch]:
         """Drain the buffer: the keys and payloads, sorted by the buffer's

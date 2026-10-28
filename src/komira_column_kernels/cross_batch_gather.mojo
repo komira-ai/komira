@@ -9,11 +9,16 @@
 # included) is source 0's. The external sort materializes its merged output
 # with it.
 #
-# Column types: the fixed-width numerics (8-, 4-, 2- and 1-byte widths each
-# have a typed store; the 16- and 32-byte types -- DECIMAL128, DECIMAL256,
-# INTERVAL_MONTH_DAY_NANO -- take a generic per-element copy), STRING and
-# BINARY (Int32 offsets), LARGE_STRING (Int64 offsets), BOOL (bit-packed) and
-# NULL. Any other type (DICTIONARY, LIST, STRUCT, ...) raises.
+# Column types supported, exactly:
+#   * 8-byte: INT64, UINT64, FLOAT64, DATE64, TIMESTAMP, TIMESTAMP_S / _MS /
+#     _US / _NS, TIME64_US, TIME64_NS, DURATION_S / _MS / _US / _NS;
+#   * 4-byte: INT32, UINT32, FLOAT32, DATE32, TIME32_S, TIME32_MS;
+#   * 2-byte: INT16, UINT16, FLOAT16; 1-byte: INT8, UINT8;
+#   * STRING and BINARY (Int32 offsets), LARGE_STRING (Int64 offsets), BOOL
+#     (bit-packed) and NULL.
+# Every other type raises "unsupported column type": DECIMAL128, DECIMAL256,
+# INTERVAL_MONTH_DAY_NANO, DICTIONARY, LIST, STRUCT, UNION, ... (the 16- and
+# 32-byte types have no gather arm).
 #
 # Output row order is `indices` order. Validity is carried row by row.
 # =============================================================================
@@ -25,10 +30,7 @@ from komira_buffer.owned_aligned_buffer import OwnedAlignedBuffer
 from komira_arrow.arrow_types import ArrowType
 from komira_arrow.bitmap import Bitmap
 from komira_arrow.offset_overflow import check_int32_offsets
-from .gather_width_counter import (
-    gather_note_narrow_typed,
-    gather_note_width_fallback,
-)
+from .gather_width_counter import gather_note_narrow_typed
 from komira_buffer.heap_region import HeapRegion
 from komira_arrow.column import Column
 from komira_arrow.schema import Field, Schema, SchemaBuilder
@@ -55,6 +57,26 @@ def _fixed_elem_size(at: ArrowType) -> Int:
         return 4
     elif at == ArrowType.INT64 or at == ArrowType.UINT64 or at == ArrowType.FLOAT64:
         return 8
+    elif at == ArrowType.DATE32 or at == ArrowType.TIME32_S or at == ArrowType.TIME32_MS:
+        return 4
+    elif at == ArrowType.DATE64 or at == ArrowType.TIMESTAMP:
+        return 8
+    elif (
+        at == ArrowType.TIMESTAMP_S
+        or at == ArrowType.TIMESTAMP_MS
+        or at == ArrowType.TIMESTAMP_US
+        or at == ArrowType.TIMESTAMP_NS
+    ):
+        return 8
+    elif at == ArrowType.TIME64_US or at == ArrowType.TIME64_NS:
+        return 8
+    elif (
+        at == ArrowType.DURATION_S
+        or at == ArrowType.DURATION_MS
+        or at == ArrowType.DURATION_US
+        or at == ArrowType.DURATION_NS
+    ):
+        return 8
     else:
         return 0
 
@@ -63,7 +85,8 @@ def _fixed_elem_size(at: ArrowType) -> Int:
 def _is_supported(at: ArrowType) -> Bool:
     """Whether cross_batch_gather can handle this column type.
 
-    Returns False for DICTIONARY/LIST/STRUCT/nested — caller must route those
+    Returns False for DECIMAL128/256, INTERVAL_MONTH_DAY_NANO, DICTIONARY,
+    LIST, STRUCT and the other nested types — the caller must route those
     through pairwise concat or decode upstream.
     """
     if at == ArrowType.STRING or at == ArrowType.LARGE_STRING:
@@ -88,7 +111,7 @@ def _gather_fixed_column(
     col: Int,
     at: ArrowType,
 ) raises -> Column[HeapRegion]:
-    """Cross-source gather for a fixed-width column (INT/UINT/FLOAT).
+    """Cross-source gather for a fixed-width column of 1, 2, 4 or 8 bytes.
 
     One output row per index pair. Reads elem_size bytes from the referenced
     source and writes them contiguously to the output buffer. Honors each
@@ -134,11 +157,8 @@ def _gather_fixed_column(
             var src4 = src4_view._unsafe_ptr().bitcast[Scalar[DType.int32]]()
             (dst4 + i)[] = (src4 + src_col._offset + row_idx)[]
     elif elem_size == 2:
-        # INT16 / UINT16 / FLOAT16 now take a
-        # typed store, matching the 8- and 4-byte arms. The old comment below
-        # called the fallback "the generic 1/2-byte path"; after this change it
-        # is the generic 16-/32-BYTE path (DECIMAL128, DECIMAL256,
-        # INTERVAL_MONTH_DAY_NANO), which is why the fallback survives.
+        # INT16 / UINT16 / FLOAT16 take a typed store, matching the 8- and
+        # 4-byte arms.
         var dst2_view = data_buf.view_mut()
         var dst2 = dst2_view._unsafe_ptr().bitcast[Scalar[DType.int16]]()
         gather_note_narrow_typed(count)
@@ -163,19 +183,9 @@ def _gather_fixed_column(
             var src1 = src1_view._unsafe_ptr().bitcast[Scalar[DType.int8]]()
             (dst1 + i)[] = (src1 + src_col._offset + row_idx)[]
     else:
-        # The WIDE fallback (16 / 32 bytes). Use view_range_ro +
-        # copy_from_view_at so the per-element memcpy stays origin-tracked.
-        gather_note_width_fallback(count, elem_size)
-        for i in range(count):
-            var pair = indices[i]
-            var src_idx = pair[0]
-            var row_idx = pair[1]
-            ref src_col = sources[src_idx].column_at(col)
-            var src_byte_off = (src_col._offset + row_idx) * elem_size
-            data_buf.copy_from_view_at(
-                i * elem_size,
-                src_col._data.view_range_ro(src_byte_off, elem_size),
-            )
+        # Unreachable: `_fixed_elem_size` returns 1, 2, 4 or 8 for a supported
+        # type and the width check above refused 0.
+        raise Error("_gather_fixed_column: unexpected width " + String(elem_size))
     data_buf.set_length(Int64(count * elem_size))
 
 
@@ -616,7 +626,7 @@ def cross_batch_gather(
             raise Error(
                 "cross_batch_gather: unsupported column type "
                 + String(at)
-                + " (DICTIONARY/LIST/STRUCT not yet implemented; caller must "
+                + " (DECIMAL, INTERVAL and nested types are not gathered; caller must "
                 + "route through pairwise concat)"
             )
 

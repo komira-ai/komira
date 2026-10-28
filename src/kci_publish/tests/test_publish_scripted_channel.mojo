@@ -19,20 +19,21 @@
 #   (5) `HttpChannelTransport` sends through a connector its factory makes
 #       for the request's host, and so does the transport it makes for
 #       another worker;
-#   (6) `UsleepSleeper` waits at least the time asked, in slices.
+#   (6) a wait is cut into pauses of at most SLICE_MS that add up to it,
+#       none for a wait of zero or less (`wait_in_slices` over a recording
+#       pause; no real wait).
 #
 # Hermetic: ScriptedChannel, ScriptedConnector over a ScriptedStream (no
 # socket; the host is an IP literal, so nothing is resolved).
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
-from std.time import perf_counter_ns
 
 from komira_http_core.codec.types import HTTP_METHOD_GET, HTTP_METHOD_POST, HTTP_METHOD_PUT
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 
 from kci_pkg_upload import PkgRequest, PkgResponse
-from kci_publish import HttpChannelTransport, ScriptedChannel, UsleepSleeper
+from kci_publish import SLICE_MS, HttpChannelTransport, ScriptedChannel, SlicePause, UsleepPause, UsleepSleeper, wait_in_slices
 from kci_publish.scripted_channel import UPLOAD_ANSWER_403, _find
 
 
@@ -168,16 +169,60 @@ def test_the_http_transport_and_its_workers_dial_through_the_factory() raises:
     _check(t.exchange(PkgRequest(HTTP_METHOD_GET, String("127.0.0.1"), String("/example/stable/linux-64/repodata.json"))))
 
 
-def test_the_usleep_sleeper_waits_in_slices() raises:
+struct _Pauses(SlicePause, Movable):
+    """Records each pause it is asked for; waits for none."""
+
+    var asked: List[Int64]
+
+    def __init__(out self):
+        self.asked = List[Int64]()
+
+    def pause_ms(mut self, ms: Int64):
+        self.asked.append(ms)
+
+    def total(self) -> Int64:
+        var t = Int64(0)
+        for i in range(len(self.asked)):
+            t += self.asked[i]
+        return t
+
+
+def test_a_wait_is_cut_into_slices_that_add_up_to_it() raises:
+    var p = _Pauses()
+    wait_in_slices(Int64(620), p)
+    assert_equal(len(p.asked), 2)
+    assert_equal(p.asked[0], SLICE_MS)
+    assert_equal(p.asked[1], Int64(120))
+    assert_equal(p.total(), Int64(620))
+
+
+def test_a_wait_of_a_whole_number_of_slices_has_no_remainder_slice() raises:
+    var p = _Pauses()
+    wait_in_slices(Int64(2) * SLICE_MS, p)
+    assert_equal(len(p.asked), 2)
+    assert_equal(p.total(), Int64(2) * SLICE_MS)
+    var one = _Pauses()
+    wait_in_slices(SLICE_MS - 1, one)
+    assert_equal(len(one.asked), 1)
+    assert_equal(one.asked[0], SLICE_MS - 1)
+
+
+def test_no_wait_asked_means_no_pause() raises:
+    var p = _Pauses()
+    wait_in_slices(Int64(0), p)
+    wait_in_slices(Int64(-5), p)
+    assert_equal(len(p.asked), 0)
+
+
+def test_the_usleep_sleeper_takes_no_time_to_wait_for_nothing() raises:
+    # the production sleeper over a zero or negative wait returns without
+    # pausing (nothing here measures time: a pause would only make it slow)
     var s = UsleepSleeper().for_worker()
-    var t0 = perf_counter_ns()
     s.sleep_ms(0)
     s.sleep_ms(-5)
-    assert_true(perf_counter_ns() - t0 < 400_000_000, String("no wait asked, none taken"))
-    var t1 = perf_counter_ns()
-    s.sleep_ms(620)
-    var waited = perf_counter_ns() - t1
-    assert_true(waited >= 620_000_000, String("waited ") + String(waited) + String(" ns"))
+    # the production pause is libc usleep; a pause of zero returns at once
+    var u = UsleepPause()
+    u.pause_ms(Int64(0))
 
 
 def main() raises:

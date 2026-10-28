@@ -250,6 +250,13 @@ trait SortKeyColumn(Defaultable, Movable, Deinitable):
         the breaker's input-bound `col`) and append it as one buffered row."""
         ...
 
+    def input_is_null[bo: Origin[mut=False]](
+        self, batch: BatchView[bo], row: Int
+    ) -> Bool:
+        """True iff this key's bound input cell at `row` is NULL. The column
+        stores values without validity, so the buffer refuses such a row."""
+        ...
+
     def length(self) -> Int:
         """Number of buffered key values."""
         ...
@@ -398,6 +405,12 @@ struct SortKeyColumn_Typed[dt: DType, col: Int](SortKeyColumn):
         self.values.append(
             _read_sort_scalar[Self.dt, bo](batch, spill_col, row)
         )
+
+    @always_inline
+    def input_is_null[bo: Origin[mut=False]](
+        self, batch: BatchView[bo], row: Int
+    ) -> Bool:
+        return batch.col_is_null(Self.col, row)
 
     @always_inline
     def length(self) -> Int:

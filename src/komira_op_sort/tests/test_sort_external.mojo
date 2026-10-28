@@ -162,6 +162,7 @@ def test_in_memory_single_batch() raises:
         memory_budget=0,
         key_names=_key_names("k"),
         descending=_desc(False),
+        spill_dir=_scratch_dir(),
     )
     var v = List[Int64]()
     v.append(Int64(3)); v.append(Int64(1)); v.append(Int64(2))
@@ -180,6 +181,7 @@ def test_in_memory_multi_batch() raises:
         memory_budget=0,
         key_names=_key_names("k"),
         descending=_desc(False),
+        spill_dir=_scratch_dir(),
     )
     var a = List[Int64](); a.append(Int64(5)); a.append(Int64(2))
     var b = List[Int64](); b.append(Int64(6)); b.append(Int64(1))
@@ -200,6 +202,7 @@ def test_descending() raises:
         memory_budget=0,
         key_names=_key_names("k"),
         descending=_desc(True),
+        spill_dir=_scratch_dir(),
     )
     var a = List[Int64](); a.append(Int64(1)); a.append(Int64(4))
     var b = List[Int64](); b.append(Int64(2)); b.append(Int64(3))
@@ -219,6 +222,7 @@ def test_int32_dtype() raises:
         memory_budget=0,
         key_names=_key_names("k"),
         descending=_desc(False),
+        spill_dir=_scratch_dir(),
     )
     var a = List[Int32](); a.append(Int32(8)); a.append(Int32(3)); a.append(Int32(5))
     var b = List[Int32](); b.append(Int32(1)); b.append(Int32(4))
@@ -239,6 +243,7 @@ def test_float64_dtype() raises:
         memory_budget=0,
         key_names=_key_names("k"),
         descending=_desc(False),
+        spill_dir=_scratch_dir(),
     )
     var a = List[Float64](); a.append(2.5); a.append(1.5); a.append(3.5)
     s.absorb(_batch_f64(a^, "k"))
@@ -333,6 +338,7 @@ def test_stability_on_equal_keys() raises:
         memory_budget=0,
         key_names=_key_names("k"),
         descending=_desc(False),
+        spill_dir=_scratch_dir(),
     )
     var k1 = List[Int64](); k1.append(Int64(1)); k1.append(Int64(1)); k1.append(Int64(1))
     var v1 = List[Int64](); v1.append(Int64(10)); v1.append(Int64(20)); v1.append(Int64(30))
@@ -356,6 +362,7 @@ def test_empty_sorter() raises:
         memory_budget=0,
         key_names=_key_names("k"),
         descending=_desc(False),
+        spill_dir=_scratch_dir(),
     )
     var out = s^.finish()
     assert_equal(len(out), 0)
@@ -389,20 +396,54 @@ def test_mixed_in_memory_and_spilled() raises:
 # =============================================================================
 
 
+def _refusal(var s: ExternalSorter, var batch: RecordBatch) raises -> String:
+    """The message of the error `absorb` raises ("" if it does not)."""
+    try:
+        s.absorb(batch^)
+    except e:
+        return String(e)
+    return String("")
+
+
 def test_string_key_refused() raises:
-    """A STRING key is refused on the first batch, by name."""
+    """A STRING key is refused on the first batch, naming the key and the
+    type."""
     var s = ExternalSorter.create(
         memory_budget=0,
         key_names=_key_names("k"),
         descending=_desc(False),
+        spill_dir=_scratch_dir(),
     )
     var v: List[String] = ["b", "a"]
-    var refused = False
-    try:
-        s.absorb(_batch_str(v^, "k"))
-    except e:
-        refused = "unsupported sort key dtype" in String(e)
-    assert_true(refused)
+    var msg = _refusal(s^, _batch_str(v^, "k"))
+    assert_true("unsupported sort key dtype" in msg, msg)
+    assert_true("'k'" in msg, msg)
+    assert_true("string" in msg, msg)
+
+
+def test_string_second_key_refused() raises:
+    """The second key is checked too: an INT64 first key does not excuse a
+    STRING second key, and the message names the second key."""
+    var names: List[String] = ["a", "s"]
+    var dirs: List[Bool] = [False, True]
+    var s = ExternalSorter.create(
+        memory_budget=0,
+        key_names=names^,
+        descending=dirs^,
+        spill_dir=_scratch_dir(),
+    )
+    var a_arr = PrimitiveArray[DType.int64].from_list([Int64(1), Int64(2)])
+    var strs: List[String] = ["x", "y"]
+    var sb = SchemaBuilder()
+    sb.add_field(Field("a", ArrowType.INT64, False))
+    sb.add_field(Field("s", ArrowType.STRING, False))
+    var b = RecordBatchBuilder()
+    b.add_column(Column.from_primitive(a_arr))
+    b.add_column(Column.from_string(StringArray.from_strings(strs)))
+    var msg = _refusal(s^, b.build(sb.build()))
+    assert_true("unsupported sort key dtype" in msg, msg)
+    assert_true("'s'" in msg, msg)
+    assert_true("string" in msg, msg)
 
 
 def main() raises:

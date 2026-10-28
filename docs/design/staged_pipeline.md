@@ -37,7 +37,7 @@ implements them. Continuous publish links here; it does not define them again.
 | **latest wins, superseded** | A newer arrival replaces the pending job; a revision older than what a stage (or a later one) already holds stops as `SUPERSEDED` (exit 0) and never runs on its own. |
 | **never backward** | A stage refuses to act on a revision older than the newest main-line build its own channel holds (beta, prod); gamma, which has no channel, reads prod's (c). |
 | **break-glass** | A manual run. As designed it reached **beta only**, from the environment `beta-breakglass`; as chosen in M2 it builds and publishes nothing (e3, "M1 and M2 as chosen"). Never gamma, never prod. |
-| **main red** | A push run of `kci.yml` on `main` that ends red at any stage. `release/ci/main_red.py` opens an issue; the rule is fix forward or revert within the hour ([ci.md](../ci.md)). |
+| **main red** | A push run of `kci.yml` on `main` that ends red at any stage. `release/ci/main_red.zig` opens an issue; the rule is fix forward or revert within the hour ([ci.md](../ci.md)). |
 
 **Stage → jobs → channels → credentials.**
 
@@ -161,7 +161,7 @@ release the cancelled commit. **Groups alone cannot hold rule 3.** Four parts do
 3. **The line on every job.** `the prod line`'s "main is at `<tip>`, past `<revision>`" moves into
    every release job's last step (R20), success or failure, so each stage's summary names a newer
    commit it did not carry.
-4. **Repair (P2).** `release/ci/main_red.py` runs on every completed kci run (`workflow_run`,
+4. **Repair (P2).** `release/ci/main_red.zig` runs on every completed kci run (`workflow_run`,
    `completed`). New decision `stalled`: a push run that concluded `cancelled`, with
    `run_attempt == 1`, whose `head_sha` is main's releasable tip **now**, and no other kci **push**
    run of that `head_sha` queued, waiting or in progress (the runs list filtered by `event=push`;
@@ -293,7 +293,7 @@ attempt 1's `build` succeeded and `gamma` was cancelled: exactly one call, to
 **On the farm (the `build` job, machine stage `build`):** after the BUILD step, a `TEST` step `test`
 runs two commands over `checks` and the derived set: **`buck2 build <targets>`, then `buck2 test
 <targets>`**, the order the PR check uses (ci.md), the second only if the first passed. The targets
-are **#1168 S10c's derived release checks** (every standalone check `release/ci/derive_checks.py`
+are **#1168 S10c's derived release checks** (every standalone check `//tools/build/ci:derive_checks`
 derives whose targets depend on a declared library: the fake, emulator and fixture tiers, plus every
 `release_checks` target) and the patterns in `checks`. The e2e suite, `//src/tests/e2e/...`, joins
 `checks` **once the engine port lands**; until then `checks` is empty and the derived set alone runs.

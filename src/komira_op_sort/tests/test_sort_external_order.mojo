@@ -2,26 +2,24 @@
 # ExternalSorter, spilled and merged, gives the rows of one in-memory sort
 # =============================================================================
 #
-# Each case absorbs the same batches into a sorter whose budget forces a
-# spill on almost every batch (so the output is a k-way merge of many spilled
-# runs: 100 rows a batch, a budget of 64 bytes) and compares the output, row by row (keys and a payload holding each
-# row's input position), with one `sort_batch_by_keys` over all the rows in
-# absorb order: that is the order the sorter promises.
+# Each case absorbs the same batches into a sorter and compares the output, row
+# by row (keys and a payload holding each row's input position), with one
+# `sort_batch_by_keys` over all the rows in absorb order: that is the order the
+# sorter promises.
 #
-#   * INT64 keys with ties, ASC and DESC, over 10 runs;
+# With a budget of 64 bytes every 100-row batch spills, so the output is a
+# k-way merge of spilled runs only. With a budget of 5000 bytes the first eight
+# batches spill as two runs and the last two stay in memory, so equal keys tie
+# across the spilled/in-memory boundary and the earlier input must win.
+#
+#   * INT64 keys with ties, ASC and DESC, over 10 spilled runs;
+#   * the same keys with an in-memory tail, ASC and DESC;
 #   * FLOAT64 keys with NaNs of both signs, -0.0 / +0.0 and +-inf, ASC and
 #     DESC: the merge has to order the run heads by `sort_key_lt`, as the
 #     run sort did (NaN above +inf);
 #   * an INT64 key with NULL rows: the run sort orders a numeric key by its
 #     stored values, so the merge has to as well;
-#   * two keys (INT32, then FLOAT64 DESC);
 #   * a single in-memory run, whose output keeps the input's column names.
-#
-# Behaviour change, and its planted mutant: the merge comparator compared
-# floats with IEEE `<` / `>` (a NaN tied with every value, so a NaN run head
-# stalled mid-merge) and put every NULL last whatever the run sort had done.
-# Restoring the IEEE compare turns `test_float_nan_zero_inf_*` red; restoring
-# NULLs-last turns `test_nullable_int64_key_*` red.
 # =============================================================================
 
 from std.memory import bitcast
@@ -96,14 +94,18 @@ def _payload_of(var batches: Slab[RecordBatch]) raises -> List[Int]:
 
 
 def _check[dt: DType](
-    keys: List[Scalar[dt]], valid: List[Bool], desc: Bool, label: String
+    keys: List[Scalar[dt]],
+    valid: List[Bool],
+    desc: Bool,
+    label: String,
+    budget: Int = 64,
 ) raises:
     var n = len(keys)
     var per = 100
     var names: List[String] = ["k"]
     var dirs: List[Bool] = [desc]
     var s = ExternalSorter.create(
-        memory_budget=64,
+        memory_budget=budget,
         key_names=names.copy(),
         descending=dirs.copy(),
         spill_dir=_scratch_dir() + "/" + label,
@@ -145,6 +147,18 @@ def test_int64_ties_many_runs_asc() raises:
 
 def test_int64_ties_many_runs_desc() raises:
     _check[DType.int64](_int_keys(1000), List[Bool](), True, "i64_desc")
+
+
+def test_int64_ties_with_in_memory_tail_asc() raises:
+    _check[DType.int64](_int_keys(1000), List[Bool](), False, "tail_asc", 5000)
+
+
+def test_int64_ties_with_in_memory_tail_desc() raises:
+    _check[DType.int64](_int_keys(1000), List[Bool](), True, "tail_desc", 5000)
+
+
+def test_nullable_key_with_in_memory_tail() raises:
+    _check[DType.int64](_int_keys(500), _nullable(), False, "tail_null", 2500)
 
 
 def _float_keys(n: Int) -> List[Float64]:

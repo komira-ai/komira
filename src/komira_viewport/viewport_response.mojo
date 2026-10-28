@@ -168,9 +168,11 @@ def decode_grid_response(data: Span[UInt8, _]) raises -> GridResponse:
     if payload_kind != VIEWPORT_PAYLOAD_ARROW_IPC and payload_kind != VIEWPORT_PAYLOAD_JSON:
         raise Error("viewport: unknown payload kind " + String(Int(payload_kind)))
     var plen64 = r.read_uvarint()
-    var plen = Int(plen64)
-    if r.remaining() < plen:
+    # Compared as UInt64 before narrowing: a length of 2^63 or more is
+    # negative as an Int and would pass an Int comparison.
+    if plen64 > UInt64(r.remaining()):
         raise Error("viewport: response payload length runs past buffer end")
+    var plen = Int(plen64)
     var payload = List[UInt8](capacity=plen)
     for _ in range(plen):
         payload.append(r.read_u8())

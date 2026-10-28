@@ -26,6 +26,7 @@ from .optimizer_tdom import TdomGraph
 from .optimizer_dpccp_cost import DPNode, _IterCounter, _cost_for_pair
 from .optimizer_dpccp_graph import _has_real_connecting_edge
 from .optimizer_dpccp_observer import DPCandidate, DPccpObserver
+from .optimizer_cost_order import dp_pair_beats
 
 
 # =============================================================================
@@ -143,7 +144,10 @@ def emit_pair[O: DPccpObserver](
     var existing = dp.get(combined.bits)
     if existing:
         var e = existing.value().copy()
-        if pair_cost < e.cost:
+        if dp_pair_beats(
+            pair_cost, left_set.bits, right_set.bits,
+            e.cost, e.best_left.bits, e.best_right.bits,
+        ):
             dp[combined.bits] = DPNode(
                 pair_cost, join_card, left_set, right_set
             )

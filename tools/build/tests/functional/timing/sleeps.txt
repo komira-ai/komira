@@ -1,0 +1,3 @@
+fn hold() void {
+    sys.sleepMs(1000);
+}

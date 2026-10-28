@@ -1,0 +1,9 @@
+load("@komira//tools/build/mojo:abi_golden.bzl", "komira_abi_golden")
+
+# The twin of tests//negative/abi_golden: the sources every defect there is
+# measured against. It builds.
+komira_abi_golden(
+    name = "ok",
+    src = "good.mojo",
+    golden = "good.tsv",
+)

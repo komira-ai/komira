@@ -17,7 +17,7 @@ libraries through their `DT_RPATH` `$ORIGIN/../lib`, which the loader
 searches before `LD_LIBRARY_PATH`, so a test runner's `LD_LIBRARY_PATH` does
 not change what they load.
 
-It is built and checked on linux-x86_64 only. Every target here but `:shell_lint` carries
+It is built and checked on linux-x86_64 only. Every target here carries
 `target_compatible_with = LINUX_X86_64` with the marker
 `komira-limit:coverage-linux-x86-64` ([limits.tsv](../../platforms/limits.tsv)),
 and the other rows of the [platform table](../../platforms/table.bzl) state
@@ -103,7 +103,7 @@ runtime writes the profile that `llvm-profdata` merges.
 - **New LLVM 23 pins.** Change the `llvm_branch_*` roles of
   [`table.bzl`](../../platforms/table.bzl) and `profdata` in `BUCK`. A
   package whose libraries change needs the members of `:llvm23` and the
-  library list of `check.sh` (`LIBS23`) changed with it.
+  library list of `llvm_branch.zig` (`libs23`) changed with it.
 
 ## What is pinned
 
@@ -137,9 +137,9 @@ names a path that exists nowhere.
 
 ## How it is unpacked
 
-[`unpack.sh`](unpack.sh) is one action per directory. For each package,
+[`llvm_branch.zig`](llvm_branch.zig) (`unpack`) is one action per directory. For each package,
 `conda_payload` ([`../kcov/conda_payload.zig`](../kcov/conda_payload.zig))
-writes the payload tar, and busybox `tar` extracts only the members named
+writes the payload tar, and the program extracts only the members named
 in `BUCK`. A member that is a link in its package (most library sonames)
 is followed within the package, and the file it resolves to is written; a
 link to an absolute path or out through `..` fails the action, as does a
@@ -154,7 +154,7 @@ re-key every Mojo action.
 ## Checks
 
 Each is a build action that `:llvm_branch` depends on through
-`ValidationInfo` ([`check.sh`](check.sh), and for the two `_closure`
+`ValidationInfo` ([`llvm_branch.zig`](llvm_branch.zig) `check`, and for the two `_closure`
 targets [`loader_closure`](../loader_closure/README.md), which reads the ELF
 files and runs none of them), so no build that uses
 `:llvm_branch` succeeds unless they pass. Each mutant below was planted and
@@ -167,9 +167,8 @@ made the build fail with the message shown, then removed.
 | `:llvm23_closure` | the same for `llvm-profdata` and `llvm-nm`: every library they map, transitively, is in `lib/` and reached through a `DT_RPATH`, and the rest is glibc from the system | a library missing from `lib/` (the worker has some, e.g. `libz.so.1`, so the tool would run there and nowhere else) | the `lib/libz.so.1` member left out: `lib/libLLVM.so.23.1 needs libz.so.1, which is not in the prefix` (and `lib/libxml2.so.16`) |
 | `:llvm23_check` | `:llvm23` holds exactly its files; `llvm-profdata --version` prints `LLVM version 23.1.3`; the runtime is an ar archive defining `__llvm_profile_runtime` and `__llvm_profile_write_file` | a file missing from the directory or added to it; another tool version; another runtime | `profdata = "23.1.4"`; the runtime member pointed at `libclang_rt.ctx_profile-x86_64.a`: `does not define __llvm_profile_runtime` |
 | `:raw_version_check` | [`fixtures/profile_fixture.c`](fixtures/profile_fixture.c), compiled to bitcode by zig, instrumented by `bin/lld` with the passes above, linked with the runtime and run, writes a raw profile with the 64-bit magic; the instrumented object defines `__llvm_profile_raw_version` strongly and the runtime only weakly, and the profile's flags carry the IR bit `0x01000000`; `llvm-profdata` merges it, its version is `RAW_PROFILE_VERSION` of [`defs.bzl`](defs.bzl) (11), and `show` reports 3 functions and `classify`'s counters 2 and 3; the same profile with its version raised by one is refused as LLVM's `raw profile version mismatch`, with llvm-profdata expecting the measured version | the version coupling (above); a profile whose version is the runtime's default rather than the instrumenter's; a runtime that writes no or another profile; a check of the version that cannot fail, or that takes any other refusal for a version refusal; a `RAW_PROFILE_VERSION` that is not the version written and read | the profile's version raised before the merge: `raw profile version 12 not accepted by llvm-profdata 23.1.3, which expects 11`; the merge's failure ignored: `llvm-profdata accepted raw version 12: the version check cannot fail`; the doctored profile also cut to 24 bytes: `the doctored profile was refused, but not for its version: ... (file header is corrupt)`; the instrumented object's `__llvm_profile_raw_version` renamed in its string table: `does not define __llvm_profile_raw_version strongly (llvm-nm class '')`, and with that check bypassed: `variant flags 0x00000000 lack the IR-instrumentation bit`; the runtime lookup pointed at `__llvm_profile_write_file`: `does not define __llvm_profile_raw_version once and weakly (llvm-nm classes 'T')`; `RAW_PROFILE_VERSION = 12`: `llvm-profdata accepts raw version 11, but RAW_PROFILE_VERSION of defs.bzl ... is 12` |
-| `:shell_lint` | shellcheck over `check.sh` and `unpack.sh` | | |
 
-`unpack.sh` fails on a member that is not in its package (the profdata
+`unpack` fails on a member that is not in its package (the profdata
 member renamed `llvm-profdata-22`: `bin/llvm-profdata-22 is not a member of
 tools`).
 
