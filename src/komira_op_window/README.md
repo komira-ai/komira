@@ -78,6 +78,18 @@ Modules:
   INT64 columns (NULL partition keys one partition, NULL order keys last in
   both directions, as in `TopNState`).
 - `partition_state`: the per-partition state holders of a typed window stage.
+- `partition_topn_sink`: `PartitionTopNSink`, the rows of each partition whose
+  ROW_NUMBER or RANK over the sort keys is at most k (`PartitionTopNSinkData`),
+  optionally with that number as a column. One INT32 / INT64 partition key
+  and one INT32 / INT64 / FLOAT64 sort key with no NULL take the bounded-heap
+  path (`partition_topn_compact`, built on the engine's workers when given a
+  pool); any other keys take the window sort and one walk. Both give the
+  window operator's rows; among equal sort keys ROW_NUMBER keeps the earliest
+  input rows, whatever the number of workers. Within a partition the rows
+  come best first, ties in input order, and a partition's rows are
+  contiguous. The order of the partitions differs between the two paths (the
+  heap path emits them in first-seen order, the sort path in sorted key
+  order): callers must not rely on it.
 - `partition_null_policy`: the NULL policy every aggregate kernel shares,
   and the output allocators that size a validity bitmap only when a NULL can
   be written.
