@@ -1033,6 +1033,24 @@ artifacts {
 }
 
 artifacts {
+  name: "komira_bench_duckdb"
+  build_system: "buck2"
+  args: "//src/komira_bench_duckdb:komira_bench_duckdb_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_bench_duckdb:komira_bench_duckdb_conda"
+}
+
+artifacts {
+  name: "komira_bench_report"
+  build_system: "buck2"
+  args: "//src/komira_bench_report:komira_bench_report_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+  targets: "//src/komira_bench_report:komira_bench_report_conda"
+}
+
+artifacts {
   name: "komira_all"
   build_system: "komira_pack"
   args: "conda-meta"
@@ -1250,6 +1268,10 @@ artifacts {
   args: "{release_dir}/kci_cloud_gcp/manifest.json"
   args: "--member-manifest"
   args: "{release_dir}/komira_kafka_broker/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_bench_duckdb/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_bench_report/manifest.json"
   args: "--license"
   args: "Apache-2.0"
   args: "--summary"

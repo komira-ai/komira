@@ -35,6 +35,10 @@ spell the `--` and the option that take the lines that follow.
 | a coverage hold taken out of a `coverage_held`, or a marker deleted while its package stays | fails: `BROKEN`; a hold is never dropped |
 | a query Buck2 cannot answer | fails with Buck2's own error |
 
+**The heavy checks.** `rules.bzl` `HEAVY` lists checks that cost one compile of several GB and are of a frozen program: today `//bin/kci:kci`, with the roots that reach it (its README examples tool, its process test, the base image that bundles it). A row owns paths (`bin/kci/**`, `src/kci_*`, the image's package, and the selector's own files `ci/**` and `tools/build/ci/**`). A change with a file under a row's paths builds the row as before. A change with none leaves it out: an AFFECTED answer loses the row's target and every target that depends on it, and a WIDENED answer (a file under `tools/build/` or `third_party/`, say) is `//ci:pr_default`, the aggregate without the row's roots (`ci/BUCK` declares it from the generated lists), plus the roots of any row the change does own. `default_guard.bxl:check` holds `//ci:pr_default` to that: it reaches no heavy target, and every root a row names reaches it. What it costs: a change outside the paths that breaks the kci binary (a shared library, the Mojo rules) is not found by the pull request check, and the same holds for the base image package's `supervisor_stub` and `supervisor_bundle`, which only `komira_base` reaches, so a change to a shared library the supervisor stub compiles against no longer builds them; no job of the release builds the binary either (`//release:release_set`, `//release:mopm_artifacts` and the README e2e reach none of the roots). `//bin/kci` reaches `//ci:pr` still, so `./buck2 build //ci:pr` builds it.
+
+The AWS conformance drivers (`//tools/build/proto-codegen:aws_conformance_driver_<protocol>`, one generated Mojo program per protocol: ec2, json, query, rest-json, rest-xml; they share no dependency, so they compile in parallel) are not a row: they are welded into `aws-client-gen`'s build through `:aws_conformance_test`, so every generated AWS client library and the tests of `tests//functional/aws_codegen` depend on them, and leaving them out would leave out their builds. They are rebuilt when one of their inputs changes (the generator, `komira_aws_core`, `komira_json`, `komira_xml`, the Mojo rules) and cached otherwise.
+
 The targets the aggregate leaves out on purpose (`rules.bzl` `EXCLUDED`) are dropped from every answer, so a change to a file one of them owns never selects it; an answer left empty by that is `komira//ci:pr`.
 
 The reason for a widening and the warnings go to the log. The rows are
@@ -49,11 +53,23 @@ the fixture package (`fixture/`).
 `ci/BUCK` declares one target that builds every check:
 `./buck2 build //ci:pr`, and `./buck2 test //ci:pr` for the standalone tests.
 A target's `deps` are literal labels and no rule can query the graph, so the
-lists are generated and checked in (`ci/targets.bzl`):
+lists are generated and checked in: `ci/targets.bzl` loads eight shards,
+`ci/targets/shard_<n>.bzl`, and exposes `TARGETS` and `TESTS` (the sorted union
+of theirs). One command regenerates the loader and every shard. It assigns the generator's output and
+copies only from a directory that is not `/`: with an empty output (the generator failed) the
+bare `cp ... "$(...)"/. ci/` would copy the whole filesystem into `ci/`:
 
 ```sh
-./buck2 bxl komira//tools/build/ci/targets.bxl:generate > ci/targets.bzl
+out=$(./buck2 bxl komira//tools/build/ci/targets.bxl:generate) && [ -d "$out" ] && [ "$out" != / ] && cp -rL --no-preserve=mode "$out"/. ci/
 ```
+
+The script builds the files into a directory of `buck-out` and prints it, so
+the generation is a scratch copy first: if it fails, the checked-in files are
+untouched. Never redirect the script's output onto `ci/targets.bzl`: the shell
+empties the file before the script, which loads it through the guard, runs.
+A package's rows share one shard, chosen by a hash of the package path
+(`ci_graph.bzl` `shard_of`), so adding a package changes one shard and no
+prefix or top-level directory (`src/` holds most of the rows) can fill one.
 
 `TARGETS` is every check of the scope (`UNIVERSE` in `rules.bzl`: this
 repository's targets but the toolchains cell's directory, and the tests
@@ -70,7 +86,14 @@ the others as dependencies. A check is a target of any kind but a source
 It fails when a check target of the scope is not in the closure of `//ci:pr`,
 naming the targets and the command that regenerates the list, so a new package
 that nobody added to the aggregate cannot go untested. Configuring `//ci:pr`
-also fails on a label in the list that no longer exists.
+also fails on a label in the list that no longer exists. It holds the shards to
+the graph both ways: a row of `TARGETS` that is no longer a root of the check
+set, a root with no row, or a `TESTS` row outside `TARGETS` fails, and so does
+a shard that would reach 1000 lines (`LINE_LIMIT`; the failure says to raise
+`SHARDS` in `ci_graph.bzl` and regenerate). A BXL script reads no file's text,
+so the line count is that of the file the generator makes from the rows the
+loader exposes; the cases (`cases.bxl`) hold the placement, the union and each
+refusal.
 
 ## The lock-graphs check: `lock_graphs.bxl`
 

@@ -54,6 +54,7 @@ the action key.
 
 load(":defs.bzl", "mojo_library", "mojo_precompile_cmd")
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "mojo_pkg_children", "MojoToolchainInfo")
+load(":system_libs.bzl", "dep_system_libs")
 load("@komira//tools/build/gen:defs.bzl", "committed_sources", "declare_fresh", "declare_uncommitted", "declare_unmigrated", "generated_state")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
@@ -268,6 +269,7 @@ def _generate_package(ctx, plugin, plugin_name, opt, tree, trees, generate, name
             import_name = import_name,
             pkgs = ctx.actions.tset(MojoPkgTSet, value = pkg, children = deps),
             pkgs_def = MojoPkgTSet,
+            system_libs = dep_system_libs(ctx.attrs.deps),
         ),
     ]
 

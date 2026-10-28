@@ -25,10 +25,14 @@
 # Options: --scope <patterns> (default: UNIVERSE of rules.bzl), --head <rev>
 # (the revision `git grep` printed for the head, default HEAD), --aggregate
 # <label> (default: AGGREGATE of rules.bzl).
+#
+# The checks of HEAVY (rules.bzl) are left out when the change owns none of the
+# paths of their row: a WIDENED answer is DEFAULT (the check set without their
+# roots) and an AFFECTED one loses what depends on them.
 
-load(":affected.bzl", "AFFECTED", "EMPTY", "VACUOUS", "WIDENED", "held_refusals", "label_package", "parse_held_lines", "select")
+load(":affected.bzl", "AFFECTED", "EMPTY", "VACUOUS", "WIDENED", "held_refusals", "label_package", "parse_held_lines", "plan", "select")
 load(":ci_graph.bzl", "make_graph", "without_left_out")
-load(":rules.bzl", "AGGREGATE", "EXCLUDED", "INERT", "UNIVERSE", "WIDEN")
+load(":rules.bzl", "AGGREGATE", "DEFAULT", "EXCLUDED", "HEAVY", "INERT", "UNIVERSE", "WIDEN")
 
 def _impl(ctx):
     scope = ctx.cli_args.scope or UNIVERSE
@@ -40,7 +44,7 @@ def _impl(ctx):
     dropped = held_refusals(changed, base, head, g)
     if dropped:
         fail("BROKEN: a coverage hold was dropped (a package that reached the target stays held; tools/build/coverage/README.md): " + "; ".join(dropped))
-    rules = struct(widen = WIDEN, inert = INERT)
+    rules = struct(widen = WIDEN, inert = INERT, heavy = HEAVY)
     verdict = select(rules, changed, g, package)
     for w in verdict.warnings:
         print("affected: warning: " + w)
@@ -50,17 +54,28 @@ def _impl(ctx):
         fail("VACUOUS: " + verdict.reason)
     if verdict.kind == WIDENED:
         print("affected: WIDENED: " + verdict.reason)
-        ctx.output.print(aggregate)
+        labels, notes = plan(rules, changed, g, verdict, aggregate, DEFAULT)
+        for n in notes:
+            print("affected: " + n)
+        for l in labels:
+            ctx.output.print(l)
         return
     targets = without_left_out(ctx, verdict.targets, [p for p, _ in EXCLUDED])
     if not targets:
         # Every target the change reaches is left out of the aggregate on purpose: nothing to build
         # but the aggregate itself, which holds the rest of the check set.
         print("affected: WIDENED: every target reached is left out of the aggregate (rules.bzl EXCLUDED)")
-        ctx.output.print(aggregate)
+        labels, notes = plan(rules, changed, g, struct(kind = WIDENED, targets = []), aggregate, DEFAULT)
+        for n in notes:
+            print("affected: " + n)
+        for l in labels:
+            ctx.output.print(l)
         return
-    print("affected: AFFECTED: {} file(s), {} target(s), {} left out (EXCLUDED)".format(verdict.files, len(targets), len(verdict.targets) - len(targets)))
-    for t in targets:
+    labels, notes = plan(rules, changed, g, struct(kind = AFFECTED, targets = targets), aggregate, DEFAULT)
+    print("affected: AFFECTED: {} file(s), {} target(s), {} left out (EXCLUDED), {} left out (HEAVY)".format(verdict.files, len(labels), len(verdict.targets) - len(targets), len(targets) - len(labels)))
+    for n in notes:
+        print("affected: " + n)
+    for t in labels:
         ctx.output.print(t)
 
 affected = bxl_main(
