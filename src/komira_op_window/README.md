@@ -84,11 +84,8 @@ Modules:
   and one INT32 / INT64 / FLOAT64 sort key with no NULL take the bounded-heap
   path (`partition_topn_compact`, built on the engine's workers when given a
   pool); any other keys take the window sort and one walk. Both give the
-  window operator's rows.
-- `partition_topn_hash_state`: `PartitionTopNHashState`, the typed stage's
-  PARTITION_TOPN state over composite partition keys (`part_key_block`,
-  `ptn_dense_directory`): full rows, memory bounded by the rows kept; RANK
-  keeps every row tied within N.
+  window operator's rows; among equal sort keys ROW_NUMBER keeps the earliest
+  input rows, whatever the number of workers.
 - `partition_null_policy`: the NULL policy every aggregate kernel shares,
   and the output allocators that size a validity bitmap only when a NULL can
   be written.

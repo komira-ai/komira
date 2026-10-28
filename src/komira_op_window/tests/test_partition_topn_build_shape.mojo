@@ -20,6 +20,7 @@ from komira_op_window.partition_topn_compact import (
     _PTOPN_ADAPT_START,
     _PTOPN_EST_PARTITION_CAP,
     _build_heaps_range,
+    _emit_compact_row_number,
     _merge_chunk_heaps,
 )
 
@@ -112,6 +113,67 @@ def test_empty_marker_key_is_one_partition() raises:
     assert_equal(len(merged), 2)
     for p in range(2):
         assert_equal(len(merged[p]), 2)
+
+
+def test_tied_keys_keep_the_earliest_rows_for_any_split() raises:
+    # 4,000 rows over 7 partitions with only 3 distinct order keys, so every
+    # partition is made of ties. ROW_NUMBER <= 5 must give each partition its
+    # stable-sort rows (smaller key first, equal keys by row) whether the
+    # rows are built in one range or split into 2, 3, 7 or 11 ranges and merged,
+    # and in that order.
+    var n = 4_000
+    var k = 5
+    var pk = List[Int64]()
+    var ok = List[UInt64]()
+    for i in range(n):
+        pk.append(Int64((i * 5) % 7))
+        ok.append(UInt64((i * i + i // 3) % 3))
+    # The oracle: per partition (in first-seen order), the first k rows of
+    # the stable sort by key.
+    var first_seen = List[Int64]()
+    for i in range(n):
+        var seen = False
+        for j in range(len(first_seen)):
+            if first_seen[j] == pk[i]:
+                seen = True
+        if not seen:
+            first_seen.append(pk[i])
+    var want = List[Int]()
+    for j in range(len(first_seen)):
+        for key in range(3):
+            for i in range(n):
+                if pk[i] == first_seen[j] and ok[i] == UInt64(key):
+                    var already = 0
+                    for w in range(len(want)):
+                        if pk[want[w]] == first_seen[j]:
+                            already += 1
+                    if already < k:
+                        want.append(i)
+    for splits in [1, 2, 3, 7, 11]:
+        var chunks = List[_ChunkHeaps]()
+        for c in range(splits):
+            var part = _ChunkHeaps()
+            _build_heaps_range(pk, ok, (c * n) // splits, ((c + 1) * n) // splits, k, part)
+            chunks.append(part^)
+        var heaps = _merge_chunk_heaps(chunks, k)
+        var idx = List[Int]()
+        var ranks = List[Int]()
+        _emit_compact_row_number(heaps, False, idx, ranks)
+        # Partitions come out in the order the merge met them, rows best
+        # first: compare per partition.
+        assert_equal(len(idx), len(want), "rows kept, splits=" + String(splits))
+        for j in range(len(first_seen)):
+            var got_p = List[Int]()
+            var want_p = List[Int]()
+            for r in range(len(idx)):
+                if pk[idx[r]] == first_seen[j]:
+                    got_p.append(idx[r])
+            for r in range(len(want)):
+                if pk[want[r]] == first_seen[j]:
+                    want_p.append(want[r])
+            assert_equal(len(got_p), len(want_p))
+            for r in range(len(want_p)):
+                assert_equal(got_p[r], want_p[r], "splits=" + String(splits) + " partition " + String(j))
 
 
 def main() raises:

@@ -11,6 +11,10 @@
 #     is the key's ascending order (sign bit flipped for integers; for floats
 #     the canonical value, so every NaN is one key above +inf and -0.0 is
 #     +0.0, then the usual float-to-unsigned map), bit-inverted for DESC.
+#   * The heap order is total: (encoded key, input row), the earlier row
+#     better, so equal keys keep the earliest rows and ROW_NUMBER's rows are
+#     those of a stable sort. The rows kept do not depend on how the rows are
+#     split into ranges or merged.
 #   * `_build_heaps_range`: one row range's heaps, partitions found through an
 #     open-addressing table that starts at 256 slots and doubles at half load
 #     (sized from the partitions seen, not from the rows).
@@ -134,22 +138,34 @@ def _extract_partition_keys(
 
 
 @always_inline
+def _row_worse(a: CompactRow, b: CompactRow) -> Bool:
+    """True if `a` orders after `b` by (`order_bits`, `row_idx`): equal keys
+    order by input row, the earlier row better (a stable sort's order)."""
+    return a.order_bits > b.order_bits or (
+        a.order_bits == b.order_bits and a.row_idx > b.row_idx
+    )
+
+
+@always_inline
 def _compact_heap_insert(mut heap: List[CompactRow], row: CompactRow, k: Int):
-    """Insert into a max-heap of capacity k (the worst row, the largest
-    `order_bits`, at index 0); a full heap takes only a strictly better row."""
+    """Insert into a max-heap of capacity k (the worst row by (`order_bits`,
+    `row_idx`) at index 0); a full heap takes only a strictly better row. The
+    order is total, so the rows kept are the k best of every row offered
+    whatever the offering order (ranges built apart merge to the serial
+    result)."""
     if len(heap) < k:
         heap.append(row)
         var idx = len(heap) - 1
         while idx > 0:
             var parent = (idx - 1) // 2
-            if heap[parent].order_bits < heap[idx].order_bits:
+            if _row_worse(heap[idx], heap[parent]):
                 var tmp = heap[parent]
                 heap[parent] = heap[idx]
                 heap[idx] = tmp
                 idx = parent
             else:
                 break
-    elif heap[0].order_bits > row.order_bits:
+    elif _row_worse(heap[0], row):
         heap[0] = row
         var idx = 0
         var heap_size = len(heap)
@@ -157,9 +173,9 @@ def _compact_heap_insert(mut heap: List[CompactRow], row: CompactRow, k: Int):
             var worst = idx
             var left = 2 * idx + 1
             var right = 2 * idx + 2
-            if left < heap_size and heap[left].order_bits > heap[worst].order_bits:
+            if left < heap_size and _row_worse(heap[left], heap[worst]):
                 worst = left
-            if right < heap_size and heap[right].order_bits > heap[worst].order_bits:
+            if right < heap_size and _row_worse(heap[right], heap[worst]):
                 worst = right
             if worst == idx:
                 break
@@ -333,8 +349,8 @@ struct _HeapBuildWork(SharedChunkWork):
 
 def _merge_chunk_heaps(chunks: List[_ChunkHeaps], cap: Int) raises -> List[List[CompactRow]]:
     """Merge range-local heaps into one heap per partition by re-inserting
-    every range entry; equal to a single build over all rows (up to which of
-    several tied rows is kept)."""
+    every range entry; equal to a single build over all rows, whatever the
+    ranges (the heap order is total)."""
     var ub = 0
     for c in range(len(chunks)):
         ub += len(chunks[c].keys)
@@ -429,22 +445,40 @@ def _build_partition_heaps_dispatch[
 # =============================================================================
 
 
-def _sorted_entries(heap: List[CompactRow], by_row: Bool) -> List[CompactRow]:
-    """A heap's entries sorted by `order_bits` (then `row_idx` when
-    `by_row`), ascending. Heaps are small: insertion sort."""
-    var s = List[CompactRow](capacity=len(heap))
-    for i in range(len(heap)):
-        s.append(heap[i])
-    for i in range(1, len(s)):
-        var cur = s[i]
-        var j = i - 1
-        while j >= 0 and (
-            s[j].order_bits > cur.order_bits
-            or (by_row and s[j].order_bits == cur.order_bits and s[j].row_idx > cur.row_idx)
-        ):
-            s[j + 1] = s[j]
-            j -= 1
-        s[j + 1] = cur
+def _sift_down_worst_first(mut s: List[CompactRow], start: Int, end: Int):
+    """Restore the max-heap property (worst row at the root) below `start`
+    within `s[0:end]`."""
+    var idx = start
+    while True:
+        var worst = idx
+        var left = 2 * idx + 1
+        var right = left + 1
+        if left < end and _row_worse(s[left], s[worst]):
+            worst = left
+        if right < end and _row_worse(s[right], s[worst]):
+            worst = right
+        if worst == idx:
+            return
+        var tmp = s[idx]
+        s[idx] = s[worst]
+        s[worst] = tmp
+        idx = worst
+
+
+def _sorted_entries(rows: List[CompactRow]) -> List[CompactRow]:
+    """`rows` ordered best first by (`order_bits`, `row_idx`): a heap sort,
+    O(n log n), whatever order `rows` came in."""
+    var s = List[CompactRow](capacity=len(rows))
+    for i in range(len(rows)):
+        s.append(rows[i])
+    var n = len(s)
+    for i in range(n // 2 - 1, -1, -1):
+        _sift_down_worst_first(s, i, n)
+    for end in range(n - 1, 0, -1):
+        var tmp = s[0]
+        s[0] = s[end]
+        s[end] = tmp
+        _sift_down_worst_first(s, 0, end)
     return s^
 
 
@@ -454,19 +488,22 @@ def _emit_compact_row_number(
     mut winner_indices: List[Int],
     mut winner_ranks: List[Int],
 ):
-    """ROW_NUMBER: each heap's rows; with a rank column, sorted by (key, row)
-    and numbered 1..n."""
+    """ROW_NUMBER: each heap's rows best first, by (key, row); with a rank
+    column, numbered 1..n."""
     for p in range(len(heaps)):
         if len(heaps[p]) == 0:
             continue
-        if not want_rk:
-            for i in range(len(heaps[p])):
-                winner_indices.append(Int(heaps[p][i].row_idx))
+        if len(heaps[p]) == 1:
+            # PERF-CRITICAL: k = 1 (or a one-row partition) allocates nothing.
+            winner_indices.append(Int(heaps[p][0].row_idx))
+            if want_rk:
+                winner_ranks.append(1)
             continue
-        var s = _sorted_entries(heaps[p], True)
+        var s = _sorted_entries(heaps[p])
         for i in range(len(s)):
             winner_indices.append(Int(s[i].row_idx))
-            winner_ranks.append(i + 1)
+            if want_rk:
+                winner_ranks.append(i + 1)
 
 
 def _emit_compact_rank(
@@ -485,7 +522,7 @@ def _emit_compact_rank(
         var heap_size = len(heaps[p])
         if heap_size == 0:
             continue
-        var s = _sorted_entries(heaps[p], False)
+        var s = _sorted_entries(heaps[p])
         var worst_rank = 1
         var g = s[0].order_bits
         for i in range(heap_size):
@@ -526,7 +563,7 @@ def _emit_full_rank_fallback_for_partition(
             pairs.append(CompactRow(order_keys[r], UInt32(0), UInt32(r)))
     if len(pairs) == 0:
         return
-    var s = _sorted_entries(pairs, False)
+    var s = _sorted_entries(pairs)
     var rank = 1
     var cur = s[0].order_bits
     for i in range(len(s)):

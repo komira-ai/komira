@@ -8,7 +8,8 @@
 # partition and order semantics are tested on their own) over the same rows
 # and compares the kept rows as a multiset, on the compact path (one INT32 /
 # INT64 partition key, one numeric order key, no NULL) and the generic path.
-# Cases: ties within and across k, a heap too small for its ties (the RANK
+# Cases: ties within and across k (ROW_NUMBER's rows among equal keys are
+# the window's, in input order), a heap too small for its ties (the RANK
 # fallback), NULL partition and order keys, NaN / +inf / -0.0 order keys, an
 # `Int64.MIN` partition key, the rank column, k = 0, k past the partition
 # size, an empty batch, and a float sort key's -0.0 coming back as 0.0.
@@ -200,6 +201,47 @@ def test_compact_and_generic_match_the_window() raises:
     for k in [1, 5, 100]:
         _check_both(c2, k, PF_ROW_NUMBER, False, "compact row_number")
         _check_both(c2, k, PF_ROW_NUMBER, True, "compact row_number desc")
+
+
+def test_row_number_ties_keep_the_earliest_rows_like_the_window() raises:
+    # Only 5 distinct order keys over 600 rows: every partition is ties, so
+    # ROW_NUMBER <= k picks among equal keys. The window operator numbers
+    # equal keys in input order, and the sink must keep exactly those rows
+    # (the rows are compared with their unique `v`) on the heap path and on
+    # the sort path, ascending and descending.
+    var n = 600
+    var g = List[Int64]()
+    var o = List[Int64]()
+    var gs = List[String]()
+    for r in range(n):
+        g.append(Int64((r * 7919) % 12))
+        o.append(Int64((r * 37 + r // 7) % 5))
+        gs.append(String("p") + String((r * 7919) % 12))
+    var compact = _gov(_i64(g, _all(n)), _i64(o, _all(n)), n)
+    var generic = _gov(Column.from_string(StringArray.from_strings(gs)), _i64(o, _all(n)), n)
+    for k in [1, 3, 10, 60]:
+        for d in range(2):
+            _check_both(compact, k, PF_ROW_NUMBER, d == 1, "compact row k=" + String(k))
+            _check_both(generic, k, PF_ROW_NUMBER, d == 1, "generic row k=" + String(k))
+
+
+def test_row_number_keeps_the_earlier_of_two_tied_rows() raises:
+    # One partition, k = 2. ASC o = 5 5 4: the stable order is r2, r0, r1, so
+    # r0 stays and r1 goes (a heap that evicted by key alone could drop
+    # either 5 when r2 arrives). DESC o = 4 4 5 is the mirror case.
+    var g: List[Int64] = [1, 1, 1]
+    var asc: List[Int64] = [5, 5, 4]
+    var desc: List[Int64] = [4, 4, 5]
+    _check_both(_gov(_i64(g, _all(3)), _i64(asc, _all(3)), 3), 2, PF_ROW_NUMBER, False, "asc")
+    _check_both(_gov(_i64(g, _all(3)), _i64(desc, _all(3)), 3), 2, PF_ROW_NUMBER, True, "desc")
+    # Pin the answer itself, not only the window's: the kept rows' v are 2, 0.
+    var out = _topn(_gov(_i64(g, _all(3)), _i64(asc, _all(3)), 3), 2, PF_ROW_NUMBER, False)
+    assert_equal(out.num_rows(), 2)
+    var vs = List[String]()
+    for r in range(2):
+        vs.append(_cell(out, 2, r))
+    assert_true((vs[0] == "2" and vs[1] == "0") or (vs[0] == "0" and vs[1] == "2"))
+    assert_true(_cell(out, 2, 0) != "1" and _cell(out, 2, 1) != "1")
 
 
 def test_rank_ties_past_the_heap() raises:

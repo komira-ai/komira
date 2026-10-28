@@ -21,9 +21,10 @@
 #   * generic: any keys: the window sort (`partition_keys.sort_partition_batch`)
 #     and one walk that counts rows and peers per partition.
 #
-# ROW_NUMBER keeps exactly min(k, rows) rows per partition; which of several
-# rows tied at the k-th place is kept is not specified (§4.7). RANK keeps
-# every row tied within k.
+# ROW_NUMBER keeps exactly min(k, rows) rows per partition; of several rows
+# tied at the k-th place the earliest in the batch are kept, as the window
+# operator's stable sort numbers them, on both paths and for any number of
+# workers (§4.7). RANK keeps every row tied within k.
 # =============================================================================
 
 from komira_arrow.arrow_types import ArrowType
