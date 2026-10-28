@@ -575,7 +575,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_log/tests/test_log_p2b_aot_perf.mojo", "sha256": "2d4e02b7edef9bd868cd2c004f86f05376822551817f742113031412946d3c74"}
+        {"path": "src/komira_log/tests/test_log_p2b_aot_perf.mojo", "sha256": "1f4ddfa07a1bf194962bea2171724427cb30cbb2d8cc5ed298a6509559692eba"}
       ],
       "deps": ["komira_log@0.1.0#mojo1.0.0/lib", "komira_runtime_paths@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -609,7 +609,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_log/tests/test_log_p2c_aot_perf.mojo", "sha256": "f685b0b0612c7da611f534779bf95f53ab9a3810b6367bad110d274dfc83eb65"}
+        {"path": "src/komira_log/tests/test_log_p2c_aot_perf.mojo", "sha256": "f55bdd1945cbb3021702596728ec4fe6a7963e0ce49903df27f3e8be1ccc5c4b"}
       ],
       "deps": ["komira_log@0.1.0#mojo1.0.0/lib", "komira_runtime_paths@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -1517,7 +1517,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_log/tests/test_log_p2b_aot_perf.mojo", "sha256": "2d4e02b7edef9bd868cd2c004f86f05376822551817f742113031412946d3c74"}
+        {"path": "src/komira_log/tests/test_log_p2b_aot_perf.mojo", "sha256": "1f4ddfa07a1bf194962bea2171724427cb30cbb2d8cc5ed298a6509559692eba"}
       ],
       "deps": ["komira_log@0.1.0#mojo1.0.0/lib", "komira_runtime_paths@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -1551,7 +1551,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_log/tests/test_log_p2c_aot_perf.mojo", "sha256": "f685b0b0612c7da611f534779bf95f53ab9a3810b6367bad110d274dfc83eb65"}
+        {"path": "src/komira_log/tests/test_log_p2c_aot_perf.mojo", "sha256": "f55bdd1945cbb3021702596728ec4fe6a7963e0ce49903df27f3e8be1ccc5c4b"}
       ],
       "deps": ["komira_log@0.1.0#mojo1.0.0/lib", "komira_runtime_paths@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -2456,7 +2456,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_log/tests/test_log_p2b_aot_perf.mojo", "sha256": "2d4e02b7edef9bd868cd2c004f86f05376822551817f742113031412946d3c74"}
+        {"path": "src/komira_log/tests/test_log_p2b_aot_perf.mojo", "sha256": "1f4ddfa07a1bf194962bea2171724427cb30cbb2d8cc5ed298a6509559692eba"}
       ],
       "deps": ["komira_log@0.1.0#mojo1.0.0/lib", "komira_runtime_paths@0.1.0#mojo1.0.0/lib"],
       "natives": [
@@ -2490,7 +2490,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "test",
       "srcs": [
-        {"path": "src/komira_log/tests/test_log_p2c_aot_perf.mojo", "sha256": "f685b0b0612c7da611f534779bf95f53ab9a3810b6367bad110d274dfc83eb65"}
+        {"path": "src/komira_log/tests/test_log_p2c_aot_perf.mojo", "sha256": "f55bdd1945cbb3021702596728ec4fe6a7963e0ce49903df27f3e8be1ccc5c4b"}
       ],
       "deps": ["komira_log@0.1.0#mojo1.0.0/lib", "komira_runtime_paths@0.1.0#mojo1.0.0/lib"],
       "natives": [

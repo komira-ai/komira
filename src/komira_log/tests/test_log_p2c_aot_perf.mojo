@@ -55,6 +55,19 @@ def _all_filter() -> EnvFilter:
     return f^
 
 
+# Drain one worker's ring and return how many records came out. This is the
+# engine's inspectable drain, NOT `drain_worker`: `drain_worker` writes every
+# record to the engine's log sink, and this test drains about 1.6 million records, which
+# as sink output was about 53 MB of test log. Log records are decoded the same
+# way and each yields one line, so for this test (log records only) the count
+# equals `drain_worker`'s. In general `drain_worker` returns every popped record
+# (span, metric and unknown kinds too) while `drain_worker_to_lines` counts log
+# records only. Only the delivery differs: the lines are dropped here, not
+# printed. Every drain below is outside a timed window.
+def _drain(mut eng: SharedEngine) -> Int:
+    return len(eng.drain_worker_to_lines(0, 1 << 16))
+
+
 def _measure_typed(
     mut eng: SharedEngine, total: Int, chunk: Int, mut drained: Int
 ) -> Float64:
@@ -79,7 +92,7 @@ def _measure_typed(
         var t1 = Int64(perf_counter_ns())
         total_ns += t1 - t0
         emitted += chunk
-        drained += eng.drain_worker(0, 1 << 16)
+        drained += _drain(eng)
     return Float64(Int(total_ns)) / Float64(emitted)
 
 
@@ -99,7 +112,7 @@ def _measure_ambient(
         var t1 = Int64(perf_counter_ns())
         total_ns += t1 - t0
         emitted += chunk
-        drained += eng.drain_worker(0, 1 << 16)
+        drained += _drain(eng)
     return Float64(Int(total_ns)) / Float64(emitted)
 
 
@@ -118,11 +131,13 @@ def main() raises:
 
     # Warm-up: register both sites + prime the ring + TLS so we measure steady
     # state (first emit per site appends to the dict).
+    var warm_drained = 0
     for i in range(1000):
         var logger = Logger.borrow(eng)
         logger.info["p2c typed emit {}", "komira_engine"](ArgI64(Int64(i)))
         log.info["p2c ambient emit {}", "komira_engine"](ArgI64(Int64(i)))
-        _ = eng.drain_worker(0, 1 << 16)
+        warm_drained += _drain(eng)
+    assert_equal(warm_drained, 2000, "warm-up: both emits drained, each round")
 
     comptime TOTAL = 200_000
     comptime CHUNK = 256
