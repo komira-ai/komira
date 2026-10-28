@@ -10,6 +10,7 @@
 komira_anomaly
 komira_async_api
 komira_atomic_alias
+komira_bench
 komira_bench_report
 komira_buffer
 komira_bump_arena

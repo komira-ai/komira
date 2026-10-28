@@ -10,6 +10,11 @@ TARGETS = [
     "komira//src/komira_atomic_alias:coverage",
     "komira//src/komira_atomic_alias:table",
     "komira//src/komira_aws_ses:komira_aws_ses_conda",
+    "komira//src/komira_bench:bins_smoke",
+    "komira//src/komira_bench:ci",
+    "komira//src/komira_bench:conda_holds",
+    "komira//src/komira_bench:coverage_floor",
+    "komira//src/komira_bench:table",
     "komira//src/komira_calendar_store:komira_calendar_store_conda",
     "komira//src/komira_connect:komira_connect_conda",
     "komira//src/komira_db:komira_db_conda",
@@ -124,6 +129,7 @@ TARGETS = [
 ]
 
 TESTS = [
+    "komira//src/komira_bench:bins_smoke",
     "komira//src/komira_kg_code/tests/fixtures/repo:kgfix_dot_test",
     "komira//src/komira_proto_codec:test_copy_hazard",
     "komira//src/komira_proto_codec:test_float32_json_binades_0_0",

@@ -77,8 +77,8 @@ assert_equal(message, "SpscRing: capacity must be > 0")
 
 This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_spsc_ring`, version 0.1.0
 (`mopm.toml`). The library is `src/komira_spsc_ring/` (`spsc_ring.mojo`, `_test_threads.mojo`, a test helper, and the
-`__init__.mojo`), its tests are `tests/`; `tests/bench_spsc_ring.mojo` is a benchmark source that this
-package does not build, and not run as a test. It depends on two packages,
+`__init__.mojo`), its tests are `tests/`. The microbenchmark of the ring is in the `komira_bench` package (`mopm run --bin
+komira_bench:spsc_ring`). It depends on two packages,
 `komira_atomic_alias` and `komira_collections`, sibling directories (`[dependencies]` of `mopm.toml`: `{ path =
 "../komira_atomic_alias", version = "0.1" }` and `{ path = "../komira_collections", version = "0.1" }`).
 `komira_collections` depends on `komira_atomic_alias` in turn, so the lock holds both and the `.conda` of this package

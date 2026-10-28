@@ -1,9 +1,9 @@
 # =============================================================================
-# bench_spsc_ring.mojo -- ring-level SPSC microbenchmark (not a gated test)
+# spsc_ring_bench.mojo -- ring-level SPSC microbenchmark of komira_spsc_ring
 # =============================================================================
 #
 # One producer thread and one consumer thread over one ring; three ops, each at
-# four capacities:
+# every capacity asked for (`--caps`):
 #
 #   push_only  one thread pushes `cap` records into an empty ring (timed), then
 #              drains it (untimed); repeated. ns per push.
@@ -13,30 +13,41 @@
 #   drop_push  a full OVERFLOW_DROP ring refuses every push. ns per refused
 #              push.
 #
-# The element is a 40-byte packet with the layout of the tracer's span packet.
-# The timed code is shared with a build against the previous
-# `SpanPacketRingBuffer`: only the block between the RING SELECTION markers
-# differs, so both rings run the same timed code. Output: one `RESULT <op> cap=<n> ns_per_op=<x>` line per
-# measurement.
+# The element is a 40-byte packet, the size of a span record. Every op moves
+# `--total-ops` records in all (push_only in rounds of `cap`, at least one).
+# One `RESULT <op> cap=<n> ns_per_op=<x>` line per measurement (harness.mojo).
+#
+# Run it on a quiet machine, pinned to one core, several times, and compare the
+# minimum: one run on a shared box is noise.
 # =============================================================================
 
 from std.memory import Pointer
 from std.time import perf_counter_ns
 
 from komira_atomic_alias import AtomicI64
-
 from komira_spsc_ring._test_threads import SpawnJoinBody, spawn_join
-
-# --- RING SELECTION (begin) ---
 from komira_spsc_ring.spsc_ring import (
     SpscRing,
     OVERFLOW_BLOCK,
     OVERFLOW_DROP,
 )
 
+from komira_bench.harness import BenchArgs, Param, parse_args, result_line, usage
+
+comptime DEFAULT_TOTAL_OPS = 20_000_000
+
+
+def default_caps() -> List[Int]:
+    var caps = List[Int]()
+    caps.append(64)
+    caps.append(1024)
+    caps.append(4096)
+    caps.append(65536)
+    return caps^
+
 
 struct Pkt(Copyable, Movable, Deinitable):
-    """The layout of the tracer's span packet (40 bytes)."""
+    """A 40-byte record, the size of a span packet."""
 
     var kind: UInt8
     var _pad0: Array[UInt8, 3]
@@ -61,10 +72,6 @@ struct Pkt(Copyable, Movable, Deinitable):
 
 
 comptime Ring = SpscRing[Pkt]
-# --- RING SELECTION (end) ---
-
-
-comptime _TOTAL_OPS = 20_000_000
 
 
 def _mk(i: Int) -> Pkt:
@@ -74,14 +81,14 @@ def _mk(i: Int) -> Pkt:
     return p^
 
 
-def bench_push_only(cap: Int) raises -> Float64:
+def bench_push_only(cap: Int, total_ops: Int) raises -> Float64:
     var ring = Ring(cap, OVERFLOW_BLOCK)
     var pkt = _mk(7)
     for _ in range(cap):
         _ = ring.try_push(pkt)
     for _ in range(cap):
         _ = ring.try_pop()
-    var rounds = _TOTAL_OPS // cap
+    var rounds = max(1, total_ops // cap)
     var total = 0
     for _ in range(rounds):
         var t0 = Int(perf_counter_ns())
@@ -93,27 +100,25 @@ def bench_push_only(cap: Int) raises -> Float64:
     return Float64(total) / Float64(rounds * cap)
 
 
-def bench_drop_push(cap: Int) raises -> Float64:
+def bench_drop_push(cap: Int, total_ops: Int) raises -> Float64:
     var ring = Ring(cap, OVERFLOW_DROP)
     var pkt = _mk(7)
     for _ in range(cap):
         _ = ring.try_push(pkt)
     var t0 = Int(perf_counter_ns())
-    for _ in range(_TOTAL_OPS):
+    for _ in range(total_ops):
         _ = ring.try_push(pkt)
     var dt = Int(perf_counter_ns()) - t0
-    return Float64(dt) / Float64(_TOTAL_OPS)
+    return Float64(dt) / Float64(total_ops)
 
 
 struct _Shared(Movable):
     var t0: AtomicI64
     var t1: AtomicI64
-    var sum: AtomicI64
 
     def __init__(out self):
         self.t0 = AtomicI64(Int64(0))
         self.t1 = AtomicI64(Int64(0))
-        self.sum = AtomicI64(Int64(0))
 
 
 struct _Body[ro: MutOrigin, so: MutOrigin](SpawnJoinBody):
@@ -144,29 +149,59 @@ struct _Body[ro: MutOrigin, so: MutOrigin](SpawnJoinBody):
                 if r:
                     got += 1
             _ = self.shared[].t1.fetch_add(Int64(Int(perf_counter_ns())))
-            _ = self.shared[].sum.fetch_add(Int64(got))
 
 
-def bench_push_pop(cap: Int) raises -> Float64:
+def bench_push_pop(cap: Int, total_ops: Int) raises -> Float64:
     var ring = Ring(cap, OVERFLOW_BLOCK)
     var shared = _Shared()
-    var body = _Body(Pointer(to=ring), Pointer(to=shared), _TOTAL_OPS)
+    var body = _Body(Pointer(to=ring), Pointer(to=shared), total_ops)
     spawn_join(body, 2)
-    if shared.sum.load() != Int64(_TOTAL_OPS):
-        raise Error("push_pop: the consumer did not receive every record")
     return Float64(Int(shared.t1.load() - shared.t0.load())) / Float64(
-        _TOTAL_OPS
+        total_ops
     )
 
 
-def main() raises:
-    var caps = List[Int]()
-    caps.append(64)
-    caps.append(1024)
-    caps.append(4096)
-    caps.append(65536)
-    for i in range(len(caps)):
-        var c = caps[i]
-        print("RESULT push_only cap=" + String(c) + " ns_per_op=" + String(bench_push_only(c)))
-        print("RESULT push_pop cap=" + String(c) + " ns_per_op=" + String(bench_push_pop(c)))
-        print("RESULT drop_push cap=" + String(c) + " ns_per_op=" + String(bench_drop_push(c)))
+def _line(op: String, cap: Int, value: Float64, hide: Bool) -> String:
+    var params = List[Param]()
+    params.append(Param("cap", cap))
+    return result_line(op, params, "ns_per_op", value, hide)
+
+
+def bench_lines(cap: Int, args: BenchArgs) raises -> List[String]:
+    """The three `RESULT` lines of one capacity, in the order push_only,
+    push_pop, drop_push."""
+    var lines = List[String]()
+    lines.append(
+        _line("push_only", cap, bench_push_only(cap, args.total_ops), args.hide_times)
+    )
+    lines.append(
+        _line("push_pop", cap, bench_push_pop(cap, args.total_ops), args.hide_times)
+    )
+    lines.append(
+        _line("drop_push", cap, bench_drop_push(cap, args.total_ops), args.hide_times)
+    )
+    return lines^
+
+
+def program_lines(arguments: List[String]) raises -> List[String]:
+    """What the `spsc_ring` program prints for `arguments` (the command line
+    without the program name): the usage text for `--help`, else the lines of
+    each capacity in order. Raises on an argument `parse_args` refuses."""
+    var args = parse_args(arguments, DEFAULT_TOTAL_OPS, default_caps())
+    var out = List[String]()
+    if args.help:
+        out.append(usage("spsc_ring", DEFAULT_TOTAL_OPS, default_caps()))
+        return out^
+    for i in range(len(args.caps)):
+        var lines = bench_lines(args.caps[i], args)
+        for j in range(len(lines)):
+            out.append(lines[j])
+    return out^
+
+
+def run_program(arguments: List[String]) raises:
+    """The body of the `spsc_ring` program: prints `program_lines(arguments)`
+    one per line."""
+    var lines = program_lines(arguments)
+    for i in range(len(lines)):
+        print(lines[i])
