@@ -185,10 +185,7 @@ struct ArgBlobWriter[origin: Origin[mut=True]](Movable):
         self._pos = 0
         self._overflow = List[UInt8]()
 
-    # Not `@always_inline`: the branch coverage classifier reads the compiler's IR, where the copies of
-    # an inlined function must each hold as many decisions as the others, and the encoders that
-    # call this several times in one body gave their copies two to five. A plain call is one copy
-    # (the optimizer still inlines a function this small).
+    @always_inline
     def append(mut self, b: UInt8):
         if self._pos < ARG_INLINE_BYTES:
             self._inline[self._pos] = b
