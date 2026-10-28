@@ -3091,7 +3091,7 @@ def regexp_op_wire_name(wire: Int32) -> String:
 # of type_ids a decoder may accept, and the names a non-Mojo frontend
 # validates against. Use `arrow_type_is_declared(type_id)`, NOT
 # `arrow_type_from_wire`, when checking a decoded `arrow_type_id`.
-# Declared in: src/komira_arrow/arrow_types.mojo
+# Declared in: src/komira_arrow/src/komira_arrow/arrow_types.mojo
 # ==========================================================================
 
 comptime ARROW_TYPE_WIRE_MEMBERS: Int = 50
@@ -3334,7 +3334,7 @@ def arrow_type_wire_name(wire: Int32) -> String:
 # and `write_target_supported` in the same file is the one table that
 # decides it. Snappy is parquet-only, so (WFMT_CSV, WCOMP_SNAPPY) is two
 # valid members and no sink.
-# Declared in: src/komira_arrow/write_target.mojo
+# Declared in: src/komira_arrow/src/komira_arrow/write_target.mojo
 # ==========================================================================
 
 comptime WRITE_FORMAT_WIRE_MEMBERS: Int = 3
@@ -3437,7 +3437,7 @@ def write_format_wire_name(wire: Int32) -> String:
 # which is the hazard `plan_write._sink_tag_for`'s own docstring names.
 # That is why the codec crosses as a validated enum rather than as a bare
 # uint32.
-# Declared in: src/komira_arrow/write_target.mojo
+# Declared in: src/komira_arrow/src/komira_arrow/write_target.mojo
 # ==========================================================================
 
 comptime WRITE_COMPRESSION_WIRE_MEMBERS: Int = 5

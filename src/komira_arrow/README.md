@@ -103,3 +103,31 @@ assert_equal(strings.get(2), "green")
 assert_equal(strings.get_length(1), 0)
 assert_equal(strings.data_length, 8)
 ```
+
+## Build files
+
+This package is built with buildrules' `mojo_package` and packaged for mopm as `komira_arrow`, version 0.1.0
+(`mopm.toml`). The library is `src/komira_arrow/`, its tests are `tests/`. It depends on six packages, sibling
+directories (`[dependencies]` of `mopm.toml`): `komira_atomic_alias`, `komira_buffer`, `komira_collections`,
+`komira_compression`, `komira_counters` and `komira_simd`, each as `{ path = "../<name>", version = "0.1" }`. The
+`.conda` of this package records `mojo-<name> >=0.1,<0.2` for each of them as a dependency and holds none of their
+files: installing `komira_arrow` installs them with it. `komira_buffer` depends on `komira_host`, `komira_libc` and
+`komira_simd`, and `komira_libc` links a C shim of its own; a dependent's link takes it from the closure, and this
+package owns no C. The files that are not sources:
+
+| file | what |
+|---|---|
+| `mopm.toml` | the mopm manifest: name, version, the Mojo version, the dependencies and where the library and its tests are |
+| `mopm.lock` | the toolchain pins and the path dependencies, as `mopm lock` writes them (no registry is reached: every dependency is a sibling) |
+| `mopm-toolchain.toml` | the exact mopm and Mojo versions the build uses (written by hand) |
+| `buildrules.mojo.lock.bzl`, `buildrules.mojo.bzl` | written by `buildrules mojo sync` from the files above and from the manifests of the siblings; `buildrules mojo check` fails when they are stale |
+
+`:lib` is the library file, built from the `:lib` of the siblings, and exists only once every test of `tests/` has
+passed. After any change to a source, a test, a manifest of this package or of a sibling, run `buildrules mojo sync`
+with the package and its siblings staged, commit what it writes, and build `komira//src/komira_arrow:lib` on the
+farm.
+
+`:conda` is buildrules' `mojo_conda` over `:lib`: the `.conda` of the mopm package
+(`mojo-komira_arrow-0.1.0-mojo1.0.0_0.conda`), packed with the manifests of the path dependencies beside its own
+(`members`), which therefore exists only once the tests have passed. Publishing it (`mopm publish`) uploads, so it is
+a step of a CI job that takes that file, not a build action.

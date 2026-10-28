@@ -58,7 +58,7 @@
 #     (S3Fs) that need parametric-origin Pointer fields can
 #     drop `Movable` and document the per-call-site construction pattern
 #     (StreamingFileBodySink[O] precedent at
-#     `src/komira_arrow/ipc_body_sink.mojo:221-260`). That is a
+#     `src/komira_arrow/src/komira_arrow/ipc_body_sink.mojo:221-260`). That is a
 #     concern;'s LocalFs is straightforwardly Movable.
 #
 # Pointer discipline (unchanged):

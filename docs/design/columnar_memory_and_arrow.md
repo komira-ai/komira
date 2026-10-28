@@ -71,7 +71,7 @@ A `Schema` stores its fields column-wise, one list per attribute (`_names`, `_ar
 
 A `Table` is a query result: one schema and a `Slab[RecordBatch]` of chunks in output order. `to_record_batch` returns one batch, concatenating the chunks when there are several. `into_single_batch` does not concatenate: it returns the only chunk, returns an empty batch with the table's schema when there are none, and raises when there are more.
 
-`ColumnNativeBatch` (`src/komira_arrow/column_native.mojo`) is a second batch type, used by engine stages such as sort, top-N, window and join probing. In wrapped mode it holds a `RecordBatch`'s columns, moved in without a copy. In contiguous mode it holds one body buffer in the layout the spill codec writes. The engine's spill layer converts between the two.
+`ColumnNativeBatch` (`src/komira_arrow/src/komira_arrow/column_native.mojo`) is a second batch type, used by engine stages such as sort, top-N, window and join probing. In wrapped mode it holds a `RecordBatch`'s columns, moved in without a copy. In contiguous mode it holds one body buffer in the layout the spill codec writes. The engine's spill layer converts between the two.
 
 ### How are Arrow IPC messages encoded and decoded?
 
@@ -187,9 +187,9 @@ At execution, `ScanResolver` (`src/komira_scan_source/scan_resolver.mojo`) answe
 | `src/komira_buffer/src/komira_buffer/memory_region.mojo` | The region trait | `MemoryRegion`; `HeapRegion`, `MmapRegion` in siblings |
 | `src/komira_buffer/src/komira_buffer/owned_aligned_buffer.mojo` | Single-owner buffers | `OwnedAlignedBuffer` |
 | `src/komira_buffer/src/komira_buffer/shared_aligned_buffer.mojo` | Refcounted buffers | `SharedAlignedBuffer`, `borrow_mmap_erased`, `share` |
-| `src/komira_arrow/column.mojo` | The type-erased column | `Column`, `as_primitive`, `share`, `slice` |
-| `src/komira_arrow/arrow_types.mojo` | Type tags | `ArrowType` |
-| `src/komira_arrow/schema.mojo`, `record_batch.mojo`, `table.mojo` | Schemas, batches, results | `Field`, `Schema`, `RecordBatch`, `Table` |
+| `src/komira_arrow/src/komira_arrow/column.mojo` | The type-erased column | `Column`, `as_primitive`, `share`, `slice` |
+| `src/komira_arrow/src/komira_arrow/arrow_types.mojo` | Type tags | `ArrowType` |
+| `src/komira_arrow/src/komira_arrow/schema.mojo`, `record_batch.mojo`, `table.mojo` | Schemas, batches, results | `Field`, `Schema`, `RecordBatch`, `Table` |
 | `src/komira_arrow_ipc/ipc_encoder_dispatch.mojo`, `ipc_decoder_dispatch.mojo` | IPC messages | `encode_record_batch_message`, `decode_record_batch_message` |
 | `src/komira_arrow_ipc/ipc_flatbuf.mojo` | IPC metadata | `FlatbufWriter`, `FlatbufReader` |
 | `src/komira_compression/compression_codecs.mojo` | Codec bindings | `Lz4Frame`, `Zstd`, `Snappy` |

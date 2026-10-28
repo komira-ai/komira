@@ -339,7 +339,7 @@ _TESTS_LINTS = [
     capabilities = CAPABILITIES,
     floor = 0,
     grounding = {
-        "src/komira_arrow/write_target.mojo": ["WFMT_"],
+        "src/komira_arrow/src/komira_arrow/write_target.mojo": ["WFMT_"],
         "src/komira_plan_expr/expr.mojo": ["EXPR_"],
         "src/komira_plan_expr/fs_descriptor_pod.mojo": ["FS_SCHEME_"],
         "src/komira_plan_expr/udf_data.mojo": ["UDF_KIND_"],

@@ -434,7 +434,7 @@ def _declared_arrow_type_ids(src: String) raises -> List[Int]:
 
 
 comptime _ARROW_TYPES_SRC: StaticString = (
-    "src/komira_arrow/arrow_types.mojo"
+    "src/komira_arrow/src/komira_arrow/arrow_types.mojo"
 )
 
 comptime _DECLARED_ARROW_TYPE_CONSTANTS: Int = 50

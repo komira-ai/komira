@@ -63,7 +63,7 @@ in the root [`BUCK`](../BUCK): `src/komira_plan_ir/logical_plan.mojo`
 kinds), `src/komira_plan_expr/expr.mojo` (`EXPR_`, the expression kinds),
 `src/komira_plan_expr/fs_descriptor_pod.mojo` (`FS_SCHEME_`, the remote
 prefixes), `src/komira_plan_expr/udf_data.mojo` (`UDF_KIND_`) and
-`src/komira_arrow/write_target.mojo` (`WFMT_`, the formats a result is
+`src/komira_arrow/src/komira_arrow/write_target.mojo` (`WFMT_`, the formats a result is
 written in). Every constant of a family must be named by a capability or a
 `NOT_CAPABILITIES` row, so a new plan node, expression kind, join kind,
 source kind or write format fails the build until it is classified. A

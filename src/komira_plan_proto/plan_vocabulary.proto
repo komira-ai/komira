@@ -576,7 +576,7 @@ enum RegexpOp {
 // set of type_ids a decoder may accept, and the names a non-Mojo
 // frontend validates against. Use `arrow_type_is_declared(type_id)`, NOT
 // `arrow_type_from_wire`, when checking a decoded `arrow_type_id`.
-// Derived from: src/komira_arrow/arrow_types.mojo
+// Derived from: src/komira_arrow/src/komira_arrow/arrow_types.mojo
 // Engine prefix: 
 // ----------------------------------------------------------------------
 enum ArrowType {
@@ -643,7 +643,7 @@ enum ArrowType {
 // and `write_target_supported` in the same file is the one table that
 // decides it. Snappy is parquet-only, so (WFMT_CSV, WCOMP_SNAPPY) is two
 // valid members and no sink.
-// Derived from: src/komira_arrow/write_target.mojo
+// Derived from: src/komira_arrow/src/komira_arrow/write_target.mojo
 // Engine prefix: WFMT_
 // ----------------------------------------------------------------------
 enum WriteFormat {
@@ -662,7 +662,7 @@ enum WriteFormat {
 // wall clock alike, which is the hazard `plan_write._sink_tag_for`'s own
 // docstring names. That is why the codec crosses as a validated enum
 // rather than as a bare uint32.
-// Derived from: src/komira_arrow/write_target.mojo
+// Derived from: src/komira_arrow/src/komira_arrow/write_target.mojo
 // Engine prefix: WCOMP_
 // ----------------------------------------------------------------------
 enum WriteCompression {

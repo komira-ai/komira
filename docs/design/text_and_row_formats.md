@@ -25,7 +25,7 @@ write: RecordBatch ─► CsvSink | write_avro_file | write_orc_file
 
 ### How is a CSV file parsed?
 
-`read_csv_bytes_to_batch[Q, SCANNER_VARIANT]` in `src/komira_csv/reader.mojo` is the serial reader. `Q` is the dialect, a `QuoteStyle` conformer: `Rfc4180`, `Excel` or `Posix` (defined in `src/komira_arrow/quote_styles.mojo`, re-exported from `src/komira_csv/quote_styles/`), which differ in compile-time constants such as `DOUBLE_QUOTE_ESCAPES` and `ESCAPE_BYTE`. `read_csv_bytes_to_batch_dynamic` picks `Q` from `CsvReadOptions.quote_style_tag` at run time (0 is `Rfc4180`, 1 `Excel`, 2 `Posix`). The reader:
+`read_csv_bytes_to_batch[Q, SCANNER_VARIANT]` in `src/komira_csv/reader.mojo` is the serial reader. `Q` is the dialect, a `QuoteStyle` conformer: `Rfc4180`, `Excel` or `Posix` (defined in `src/komira_arrow/src/komira_arrow/quote_styles.mojo`, re-exported from `src/komira_csv/quote_styles/`), which differ in compile-time constants such as `DOUBLE_QUOTE_ESCAPES` and `ESCAPE_BYTE`. `read_csv_bytes_to_batch_dynamic` picks `Q` from `CsvReadOptions.quote_style_tag` at run time (0 is `Rfc4180`, 1 `Excel`, 2 `Posix`). The reader:
 
 1. Skips a UTF-8 byte-order mark when `strip_utf8_bom` is set, as it is by default.
 2. Scans the bytes into a `ScannedCells` buffer: flat lists of cell starts, cell ends, cell flags and row starts (`scanned_cells.mojo`). `_dispatch_scan` (`reader.mojo`) selects one of three scanners, `scan_csv_phase1_into_cells`, `scan_csv_phase2_movemask_into_cells` and `scan_csv_phase3_pclmulqdq_into_cells`, all of which live in `csv_scanner_phase1.mojo` and are chosen by `SCANNER_VARIANT_PHASE_2` or `SCANNER_VARIANT_PHASE_3`; the default, `DEFAULT_SCANNER_VARIANT = 2`, is `scan_csv_phase2_movemask_into_cells`.

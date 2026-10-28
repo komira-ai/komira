@@ -23,6 +23,7 @@ FIRST_MOPM_WITH_OVERLAY = "toolchains//:mopm_0_0_40"
 
 PACKAGES = {
     "komira_anomaly": "0.1.0",
+    "komira_arrow": "0.1.0",
     "komira_async_api": "0.1.0",
     "komira_atomic_alias": "0.1.0",
     "komira_bench_report": "0.1.0",
