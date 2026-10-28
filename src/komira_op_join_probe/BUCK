@@ -3,7 +3,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The probe side of the engine's joins: the composite-key hash join
 # (`MultiKeyHashJoinBuilder`, its INNER / LEFT / SEMI / ANTI / RIGHT / FULL
 # probes, the parallel INNER probe over the engine's dispatcher), the
-# extraction of join-key columns into its key slots.
+# extraction of join-key columns into its key slots, and the deferred-output
+# records of the streaming join probe with their deferral rule.
 mojo_library(
     name = "komira_op_join_probe",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -25,6 +26,7 @@ mojo_library(
         "tests/test_engine_typed_multi_key_probe_dict.mojo",
         "tests/test_engine_typed_multi_key_probe_string.mojo",
         "tests/test_join_bloom_selectivity.mojo",
+        "tests/test_join_defer_verdict.mojo",
         "tests/test_join_key_extract_share_parallel.mojo",
         "tests/test_join_multi_key_float_key_model.mojo",
         "tests/test_join_multi_key_int_keys.mojo",
@@ -32,6 +34,8 @@ mojo_library(
         "tests/test_join_multi_key_memcmp_equiv.mojo",
         "tests/test_join_multi_key_null_key.mojo",
         "tests/test_join_multi_key_null_later_key.mojo",
+        "tests/test_join_multi_key_outer_filter_cases.mojo",
+        "tests/test_join_multi_key_probe_oracle.mojo",
         "tests/test_join_multikey_arm_hoist.mojo",
         "tests/test_join_multikey_batched_probe_equiv.mojo",
         "tests/test_multi_key_merge_parallel.mojo",

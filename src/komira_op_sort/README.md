@@ -83,6 +83,23 @@ batch by it.
   serial kernel) that changes the cost and never the rows. The switches are
   a value, `SortSinkRoutes`.
 
+- `sort_external`: `ExternalSorter`, a sort past a memory budget: buffered
+  batches are sorted into runs, runs over the budget are spilled to the local
+  disk (`komira_engine_runtime` spill), and `finish` merges every run. The
+  output is one stable `sort_batch_by_keys` of the input in absorb order. The
+  merge (`k_way_merge_cursors`, the loser tree and
+  `komira_column_kernels.cross_batch_gather`) is `sort_external_merge`; its
+  comparator orders a key as the run sort does (floats by `sort_key_lt`).
+  Full ties go to the earlier input, across spilled runs and the final
+  in-memory run alike. Keys are INT32, INT64 or FLOAT64 (a STRING or FLOAT32
+  key is refused, naming the key). A payload column of a type
+  `cross_batch_gather` does not gather (DECIMAL128, DECIMAL256,
+  INTERVAL_MONTH_DAY_NANO, DICTIONARY, LIST, STRUCT, ...) makes the sorter raise
+  "unsupported column type" when it sorts a run. The spill sub-directory is
+  `thsplc_sort_<pid>_<counter>`, created exclusively under the caller's
+  `spill_dir`. After any error the sorter is unusable: its buffered rows are
+  gone and it only releases its spill files when dropped.
+
 Each parallel entry takes a `SharedForkJoinHandle` (the engine's dispatcher,
 or `serial_fork_join_handle()` to run the same chunks inline; the `*_serial`
 entries do that) and gives exactly the rows of the serial kernel, ties in
