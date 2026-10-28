@@ -3,6 +3,17 @@
 The build side of the engine's joins, and the join kernels that need no join
 operator. The package root re-exports nothing; import from the modules.
 
+- `komira_op_join_build.join`: `HashJoinBuilder`, the single-INT64-key hash
+  join with separate chaining (so 1:N and N:M keys keep every match), and its
+  INNER probes as methods (`probe_inner`, `probe_inner_into`, the resumable
+  `probe_inner_chunk` into caller spans, `count_inner_matches`). A NULL key
+  matches nothing; a NULL build row is recorded but never linked into a
+  bucket. The build (`join_build_serial`) and the INNER probe kernels
+  (`join_probe_inner`, `join_probe_inner_ps`) are modules of their own.
+- `komira_op_join_build.join_sort_merge`: the merge phase of a sort-merge
+  INNER join over pre-sorted keys, and `cross_join_indices`.
+- `komira_op_join_build.join_perfect_hash`: `PerfectHashJoin`, a direct-indexed
+  table for dense unique build keys (it declines a build with NULL keys).
 - `komira_op_join_build.join_build_untyped`: `JoinBuildTable_Untyped`, a
   hash-join build and probe table whose key and payload layout is a runtime
   list of `ColDescriptor`s (fixed-width integer, float, date, timestamp, BOOL,
@@ -34,9 +45,21 @@ operator. The package root re-exports nothing; import from the modules.
 
 <!-- mojo-hidden from std.testing import assert_equal, assert_true, assert_false -->
 ```mojo
+from komira_arrow.primitive_array import PrimitiveArray
+from komira_op_join_build.join import HashJoinBuilder
 from komira_op_join_build.hash_directory import HashDirectory, SLOT_EMPTY
 from komira_op_join_build.join_blocking import BinBlocking
 from komira_op_join_build.join_bloom_l1_resident import BLOOM_L1_DEFAULT_BUDGET_BYTES, bloom_l1_index_bytes, bloom_l1_should_decline
+
+# An INNER join of probe keys [2, 4, 9] against build keys [2, 9, 2]: key 2
+# matches build rows 0 and 2.
+var bk: List[Int64] = [2, 9, 2]
+var pk: List[Int64] = [2, 4, 9]
+var build = PrimitiveArray[DType.int64].from_list(bk)
+var probe = PrimitiveArray[DType.int64].from_list(pk)
+var b = HashJoinBuilder.build(build)
+var inner = b.probe_inner(probe)
+assert_equal(len(inner[0]), 3)
 
 # A band join on `value` in bins of width 10: the range [5, 35] can match a
 # point in any of bins 0..3.
