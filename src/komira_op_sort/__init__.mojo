@@ -8,7 +8,9 @@ merges sorted runs (`sort_loser_tree`), the sort and top-N sink kernels
 the run-time-typed multi-key sort buffer (`sort_buffer_untyped`, which does
 not track validity: a NULL cell sorts as its value bytes). A
 sort never moves data: it returns Int32 row indices and the caller gathers by
-them.
+them. `sort_parallel` and `sort_parallel_string` run the single-key sorts, and
+the merges of sorted partitions, on the engine's fork-join runtime, with the
+serial kernels' result.
 
 Float keys sort in DuckDB's total order: NaN above +inf, all NaNs equal,
 -0.0 equal to +0.0 (`sort.sort_key_lt`).

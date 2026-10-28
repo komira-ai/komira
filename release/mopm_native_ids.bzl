@@ -12,6 +12,7 @@ A package of the list needs its `load` below and its row; `mopm_artifacts` refus
 load("//src/komira_anomaly:buildrules.mojo.lock.bzl", komira_anomaly = "GRAPH")
 load("//src/komira_async_api:buildrules.mojo.lock.bzl", komira_async_api = "GRAPH")
 load("//src/komira_atomic_alias:buildrules.mojo.lock.bzl", komira_atomic_alias = "GRAPH")
+load("//src/komira_bench_report:buildrules.mojo.lock.bzl", komira_bench_report = "GRAPH")
 load("//src/komira_buffer:buildrules.mojo.lock.bzl", komira_buffer = "GRAPH")
 load("//src/komira_bump_arena:buildrules.mojo.lock.bzl", komira_bump_arena = "GRAPH")
 load("//src/komira_clock:buildrules.mojo.lock.bzl", komira_clock = "GRAPH")
@@ -70,6 +71,7 @@ _GRAPHS = {
     "komira_anomaly": komira_anomaly,
     "komira_async_api": komira_async_api,
     "komira_atomic_alias": komira_atomic_alias,
+    "komira_bench_report": komira_bench_report,
     "komira_buffer": komira_buffer,
     "komira_bump_arena": komira_bump_arena,
     "komira_clock": komira_clock,
