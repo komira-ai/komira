@@ -56,6 +56,7 @@ PACKAGES = {
     "komira_test_run_id": "0.1.0",
     "komira_test_verdict": "0.1.0",
     "komira_textproto": "0.1.0",
+    "komira_trace": "0.1.0",
     "komira_validation_run": "0.1.0",
     "komira_vcard": "0.1.0",
     "komira_xml": "0.1.0",
