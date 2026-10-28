@@ -13,6 +13,7 @@ mojo_library(
         "//src/komira_column_kernels:komira_column_kernels",
         "//src/komira_engine_runtime:komira_engine_runtime",
         "//src/komira_fs:komira_fs",
+        "//src/komira_host_profile:komira_host_profile",
         "//src/komira_morsel:komira_morsel",
         "//src/komira_op_agg_row_api:komira_op_agg_row_api",
         "//src/komira_op_typed_source_api:komira_op_typed_source_api",
