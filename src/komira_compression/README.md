@@ -69,7 +69,7 @@ This package is built with buildrules' `mojo_package` and packaged for mopm as `
 (`mopm.toml`). The library is `src/komira_compression/`, its tests are `tests/`. It depends on two packages,
 `komira_lz4` and `komira_zlib`, sibling directories (`[dependencies]` of `mopm.toml`), and opens four system
 libraries at run time (`[native-dependencies]`, each `mode = "load"`): libsnappy, libzstd, libbz2 and liblzma. Its
-`.conda` records the two Mojo packages and the conda packages `snappy`, `zstd`, `bzip2` and `xz` as dependencies, so
+`.conda` records the two Mojo packages and the conda packages `snappy`, `zstd`, `bzip2` and `liblzma` as dependencies, so
 installing `komira_compression` installs everything it opens. It links no C and ships no shared library of its own.
 The files that are not sources:
 

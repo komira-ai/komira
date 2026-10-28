@@ -46,17 +46,6 @@
         "size": 112995
       },
       {
-        "name": "liblzma-devel",
-        "version": "5.8.3",
-        "build": "hb03c661_1",
-        "url": "https://conda.anaconda.org/conda-forge/linux-64/liblzma-devel-5.8.3-hb03c661_1.conda",
-        "sha256": "adef6e8b60afb684110b06b5310977c6836e1c923ce3ec199f45c0f000b42f20",
-        "size": 491970,
-        "deps": [
-          "liblzma"
-        ]
-      },
-      {
         "name": "libzlib",
         "version": "1.3.2",
         "build": "h25fd6f3_3",
@@ -79,42 +68,6 @@
         "url": "https://conda.anaconda.org/conda-forge/linux-64/snappy-1.3.1-h34e00bb_0.conda",
         "sha256": "a724d5312f1c8fe84be83b176b20fa171b3106cdfec1648cc3f32888397ecb09",
         "size": 48029
-      },
-      {
-        "name": "xz",
-        "version": "5.8.3",
-        "build": "ha02ee65_1",
-        "url": "https://conda.anaconda.org/conda-forge/linux-64/xz-5.8.3-ha02ee65_1.conda",
-        "sha256": "547b2392d8f7b76efd4a0970946f6da2a1136ad5fe3dc936af81e02eb7181076",
-        "size": 23610,
-        "deps": [
-          "liblzma",
-          "liblzma-devel",
-          "xz-gpl-tools",
-          "xz-tools"
-        ]
-      },
-      {
-        "name": "xz-gpl-tools",
-        "version": "5.8.3",
-        "build": "ha02ee65_1",
-        "url": "https://conda.anaconda.org/conda-forge/linux-64/xz-gpl-tools-5.8.3-ha02ee65_1.conda",
-        "sha256": "ed6dbec5e4f0f71e7ac629b90dc4c9fba38d194cc88eab891c29e461b408977a",
-        "size": 40118,
-        "deps": [
-          "liblzma"
-        ]
-      },
-      {
-        "name": "xz-tools",
-        "version": "5.8.3",
-        "build": "hb03c661_1",
-        "url": "https://conda.anaconda.org/conda-forge/linux-64/xz-tools-5.8.3-hb03c661_1.conda",
-        "sha256": "c74fa3eddd3ea648456517948f85068d8a07acad7752fd83c7e95b6cebb7114a",
-        "size": 96459,
-        "deps": [
-          "liblzma"
-        ]
       },
       {
         "name": "zstd",
@@ -146,17 +99,6 @@
         "size": 125578
       },
       {
-        "name": "liblzma-devel",
-        "version": "5.8.3",
-        "build": "he30d5cf_1",
-        "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/liblzma-devel-5.8.3-he30d5cf_1.conda",
-        "sha256": "f4e81e49d092f95e68e25c7dcca6643c7cfa23c9984b5d39a7e749c3426103e2",
-        "size": 491291,
-        "deps": [
-          "liblzma"
-        ]
-      },
-      {
         "name": "libzlib",
         "version": "1.3.2",
         "build": "hdc9db2a_3",
@@ -179,42 +121,6 @@
         "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/snappy-1.3.1-hff98f13_0.conda",
         "sha256": "3edbb28329f34e3effc8e7da37349fc55998faf8c8a8c30304c9737b479cf10c",
         "size": 50479
-      },
-      {
-        "name": "xz",
-        "version": "5.8.3",
-        "build": "hd704e39_1",
-        "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/xz-5.8.3-hd704e39_1.conda",
-        "sha256": "4e9b4a2eabf215c052d57a54c279a1d79343ae3b961d3f81f834e0bf76e5c7d4",
-        "size": 23459,
-        "deps": [
-          "liblzma",
-          "liblzma-devel",
-          "xz-gpl-tools",
-          "xz-tools"
-        ]
-      },
-      {
-        "name": "xz-gpl-tools",
-        "version": "5.8.3",
-        "build": "hd704e39_1",
-        "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/xz-gpl-tools-5.8.3-hd704e39_1.conda",
-        "sha256": "3f0b45a1039c86265f41f3bb5f248cd4d901acff49164f86122fab7cc4efc049",
-        "size": 40115,
-        "deps": [
-          "liblzma"
-        ]
-      },
-      {
-        "name": "xz-tools",
-        "version": "5.8.3",
-        "build": "he30d5cf_1",
-        "url": "https://conda.anaconda.org/conda-forge/linux-aarch64/xz-tools-5.8.3-he30d5cf_1.conda",
-        "sha256": "1619ea83757336aaaac4cde221e4cd0982551c82def3276c91d0d53b0b7159db",
-        "size": 103133,
-        "deps": [
-          "liblzma"
-        ]
       },
       {
         "name": "zstd",
@@ -246,17 +152,6 @@
         "size": 91720
       },
       {
-        "name": "liblzma-devel",
-        "version": "5.8.3",
-        "build": "h8088a28_1",
-        "url": "https://conda.anaconda.org/conda-forge/osx-arm64/liblzma-devel-5.8.3-h8088a28_1.conda",
-        "sha256": "dc1b1369813f946ac40207222f439f40f6c4c9b5eac6746f61676d819b247282",
-        "size": 118908,
-        "deps": [
-          "liblzma"
-        ]
-      },
-      {
         "name": "libzlib",
         "version": "1.3.2",
         "build": "h8088a28_3",
@@ -279,42 +174,6 @@
         "url": "https://conda.anaconda.org/conda-forge/osx-arm64/snappy-1.3.1-h3951085_0.conda",
         "sha256": "daba756c5a0af883023d2c3884f03220da1b6b3dd05061d941e4d98d0edd506b",
         "size": 42071
-      },
-      {
-        "name": "xz",
-        "version": "5.8.3",
-        "build": "hd0f0c4f_1",
-        "url": "https://conda.anaconda.org/conda-forge/osx-arm64/xz-5.8.3-hd0f0c4f_1.conda",
-        "sha256": "f83d8ac2c553ba4898c42646a3697e19071b061032f802a83c9b8d7a613775ef",
-        "size": 23456,
-        "deps": [
-          "liblzma",
-          "liblzma-devel",
-          "xz-gpl-tools",
-          "xz-tools"
-        ]
-      },
-      {
-        "name": "xz-gpl-tools",
-        "version": "5.8.3",
-        "build": "hd0f0c4f_1",
-        "url": "https://conda.anaconda.org/conda-forge/osx-arm64/xz-gpl-tools-5.8.3-hd0f0c4f_1.conda",
-        "sha256": "7a1b1ef6c5a46e45dc0148873878927d4271ffd7b7bd13ca48351b937b45947d",
-        "size": 40035,
-        "deps": [
-          "liblzma"
-        ]
-      },
-      {
-        "name": "xz-tools",
-        "version": "5.8.3",
-        "build": "h8088a28_1",
-        "url": "https://conda.anaconda.org/conda-forge/osx-arm64/xz-tools-5.8.3-h8088a28_1.conda",
-        "sha256": "aea9831ac6909a6d6624289acf04e4d336345eb77bc89a7380a82d848bb9be0f",
-        "size": 85988,
-        "deps": [
-          "liblzma"
-        ]
       },
       {
         "name": "zstd",
