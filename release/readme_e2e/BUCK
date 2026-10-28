@@ -23,4 +23,4 @@ readme_e2e_staged(
 )
 
 # The pins, for //:release_workflow_cases: the mopm release.yml builds is this MOPM.
-export_file(name = "packages.bzl", visibility = ["//:"])
+export_file(name = "packages.bzl", visibility = ["//:", "//release:"])

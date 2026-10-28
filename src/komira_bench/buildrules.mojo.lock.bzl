@@ -46,7 +46,7 @@ GRAPH_JSON = r'''{
       "version": "0.1.0",
       "kind": "bin",
       "srcs": [
-        {"path": "src/komira_bench/bins/spsc_ring.mojo", "sha256": "9ff685f940b8a75f86c0a84b526ebc9a7c4d5b30a644d64a9432cc069eb6d1de"}
+        {"path": "src/komira_bench/bins/spsc_ring.mojo", "sha256": "aa47e706f6b0000bb6819f2a69ce87f2eca5c845cdac1d3abec1a854b8966028"}
       ],
       "deps": ["komira_bench@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -155,7 +155,7 @@ GRAPH_JSON_LINUX_AARCH64 = r'''{
       "version": "0.1.0",
       "kind": "bin",
       "srcs": [
-        {"path": "src/komira_bench/bins/spsc_ring.mojo", "sha256": "9ff685f940b8a75f86c0a84b526ebc9a7c4d5b30a644d64a9432cc069eb6d1de"}
+        {"path": "src/komira_bench/bins/spsc_ring.mojo", "sha256": "aa47e706f6b0000bb6819f2a69ce87f2eca5c845cdac1d3abec1a854b8966028"}
       ],
       "deps": ["komira_bench@0.1.0#mojo1.0.0/lib"],
       "natives": [],
@@ -261,7 +261,7 @@ GRAPH_JSON_OSX_ARM64 = r'''{
       "version": "0.1.0",
       "kind": "bin",
       "srcs": [
-        {"path": "src/komira_bench/bins/spsc_ring.mojo", "sha256": "9ff685f940b8a75f86c0a84b526ebc9a7c4d5b30a644d64a9432cc069eb6d1de"}
+        {"path": "src/komira_bench/bins/spsc_ring.mojo", "sha256": "aa47e706f6b0000bb6819f2a69ce87f2eca5c845cdac1d3abec1a854b8966028"}
       ],
       "deps": ["komira_bench@0.1.0#mojo1.0.0/lib"],
       "natives": [],

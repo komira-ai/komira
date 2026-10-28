@@ -6,7 +6,7 @@
 # thread processes one morsel at a time through a pipeline of operators.
 #
 # Morsel sizes are auto-derived from the detected hardware profile and the
-# (schema, operator-tier) pair. See `komira_engine_runtime.morsel_sizing_policy`
+# (schema, operator-tier) pair. See `komira_host_profile.morsel_sizing_policy`
 # for the formula + tier multipliers. Production callers should obtain a
 # tier-correct size via `ctx.<tier>_morsel_rows(schema)` on `EngineContext`.
 # The legacy `DEFAULT_MORSEL_ROWS = 65536` fallback in

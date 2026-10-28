@@ -15,6 +15,8 @@
 # (main_red, check_release_ref, release_json), built behind their cases.
 # Changes need the release approver's review (.github/CODEOWNERS).
 
+load("@komira//tools/build/mojo:toolchain.bzl", "zig_test")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":mopm_artifacts.bzl", "mopm_artifacts")
 load(":release_set.bzl", "release_set")
 load("//release/readme_e2e:packages.bzl", README_E2E_PACKAGES = "PACKAGES")
@@ -46,7 +48,10 @@ export_file(
 # main; the `prod-*` jobs publish the set, only when enabled (docs/ci.md).
 mopm_artifacts(
     name = "mopm_artifacts",
-    natives = {"komira_libc": {"komira_libc_posix": "//src/komira_libc:native_komira_libc_posix"}},
+    natives = {
+        "komira_libc": {"komira_libc_posix": "//src/komira_libc:native_komira_libc_posix"},
+        "komira_metrics": {"komira_metrics_ea_flag": "//src/komira_metrics:native_komira_metrics_ea_flag"},
+    },
     packages = sorted(README_E2E_PACKAGES.keys()),
     visibility = ["PUBLIC"],
 )
@@ -176,7 +181,28 @@ release_set(
         "//src/komira_gcp_wif:komira_gcp_wif_conda",
         "//src/kci_cloud_gcp:kci_cloud_gcp_conda",
         "//src/komira_kafka_broker:komira_kafka_broker_conda",
+        "//src/komira_bench_duckdb:komira_bench_duckdb_conda",
         "//src/komira_bench_report:komira_bench_report_conda",
     ],
+    visibility = ["PUBLIC"],
+)
+
+# Every release member is claimed on the prod registry. release.yml publishes the members
+# (the packages of README_E2E_PACKAGES) to prod on every push to main, and the registry
+# creates a name only for its claimed owner, so an unclaimed member fails `prod-stage` and
+# turns main red. The pull request check cannot write to the live registry, so the claimed
+# names are committed (prod_claimed_names.txt: a maintainer adds one only after claiming it)
+# and this build action refuses a member the file lacks, naming it
+# (prod_claimed_names_test.zig says what each case catches).
+zig_test(
+    name = "prod_claimed_names_cases",
+    exec_compatible_with = LINUX_X86_64,
+    src = "prod_claimed_names_test.zig",
+    data = {
+        "packages.bzl": "//release/readme_e2e:packages.bzl",
+        "prod_claimed_names.txt": "prod_claimed_names.txt",
+    },
+    busybox = "komira//tools/build/toolchains:busybox",
+    zig = "komira//tools/build/toolchains:zig_next",
     visibility = ["PUBLIC"],
 )

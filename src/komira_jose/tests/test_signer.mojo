@@ -7,7 +7,7 @@
 # =============================================================================
 #
 # Keys: ES256 is RFC 7515 appendix A.3's `d`; EdDSA is RFC 8037 appendix
-# A.1's seed; RS256 is komira_http_core's 2048-bit test key (PKCS#8 PEM,
+# A.1's seed; RS256 is komira_jose's 2048-bit test key (PKCS#8 PEM,
 # staged by the BUCK file). Each round trip goes through the published
 # document: the signer's public JWK is rendered with komira_jwks and parsed
 # back before a verifier is built from it.
@@ -53,7 +53,7 @@ comptime RFC7638_N = (
     "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw"
 )
 comptime RFC7638_THUMBPRINT = "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs"
-comptime RSA_PEM = "src/komira_http_core/tests/fixtures/tls/leaf_key.pem"
+comptime RSA_PEM = "src/komira_jose/tests/fixtures/rsa_test_key.pem"
 comptime ISS = "https://issuer.example/a"
 comptime AUD = "service-a"
 comptime NOW: Int64 = 1000000
