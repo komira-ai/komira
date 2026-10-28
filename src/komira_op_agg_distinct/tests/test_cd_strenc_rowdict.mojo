@@ -25,8 +25,9 @@
 #       counters can), falls back for a high-cardinality one, and the LARGE_
 #       STRING (Int64 offsets) instantiation answers the same.
 #
-# The same key through the grouped COUNT(DISTINCT) driver is tested with the
-# driver.
+# Through the grouped COUNT(DISTINCT) driver, the skewed key (alone, and beside
+# an INT key) is served by this arm and every group's count matches an oracle
+# walked from the raw arrays.
 
 from std.collections import Dict, List, Optional, Set
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -45,6 +46,14 @@ from komira_async.cancellation.token import CancellationToken
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_MOCK
 from komira_async.runtime.runtime import PLACEMENT_FIXED, PerCoreAsyncRuntime
+from komira_physical_plan.physical_plan import AggSinkData
+from komira_plan_expr.agg_expr import count_distinct
+from komira_plan_expr.col_expr import col
+from komira_plan_ir.logical_plan import AggExprArray, ExprArray
+from komira_op_agg_distinct.agg_count_distinct_parallel import (
+    _execute_count_distinct_agg_parallel,
+    _should_use_parallel_count_distinct,
+)
 
 from komira_op_agg_distinct.agg_cd_strenc_parb import _PARB_VCACHE_BYTES
 from komira_op_agg_distinct.agg_cd_strenc_rowdict import (
@@ -463,6 +472,114 @@ def test_rowdict_large_string_offsets() raises:
     var got = _rowdict[DType.int64](batch, 5)
     assert_true(got.served, "must SERVE")
     _assert_same_numbering(got, want, vals, "LARGE_STRING")
+
+
+
+# =============================================================================
+# The grouped COUNT(DISTINCT) driver, end to end, against an independent oracle
+# =============================================================================
+
+
+def _driver_batch(
+    imm keys: List[String], imm ints: List[Int64], imm vals: List[Int64], two_keys: Bool
+) raises -> RecordBatch:
+    var n = len(keys)
+    var rbb = RecordBatchBuilder.with_capacity(3)
+    var sb = SchemaBuilder()
+    if two_keys:
+        rbb.add_column(
+            Column.from_primitive[DType.int64](
+                PrimitiveArray[DType.int64].from_list(ints)
+            )
+        )
+        sb.add_field(Field("p", ArrowType.INT64, False))
+    rbb.add_column(Column.from_string(StringArray.from_strings(keys)))
+    sb.add_field(Field("k", ArrowType.STRING, False))
+    rbb.add_column(
+        Column.from_primitive[DType.int64](
+            PrimitiveArray[DType.int64].from_list(vals)
+        )
+    )
+    sb.add_field(Field("v", ArrowType.INT64, False))
+    _ = n
+    return rbb.build(sb.build())
+
+
+def _driver_sink(two_keys: Bool) raises -> AggSinkData:
+    var group_by = ExprArray()
+    var osb = SchemaBuilder()
+    if two_keys:
+        group_by.append(col("p").copy_expr())
+        osb.add_field(Field("p", ArrowType.INT64, False))
+    group_by.append(col("k").copy_expr())
+    osb.add_field(Field("k", ArrowType.STRING, False))
+    var aggs = AggExprArray()
+    aggs.append(count_distinct(col("v")))
+    osb.add_field(Field("u", ArrowType.INT64, False))
+    return AggSinkData(group_by^, aggs^, osb.build())
+
+
+def _check_driver(two_keys: Bool) raises:
+    var n = _N_SKEW
+    var keys = _skew_rows(n)
+    var ints = List[Int64](capacity=n)
+    var vals = List[Int64](capacity=n)
+    for r in range(n):
+        ints.append(Int64(r % 3))
+        # The heavy key sees thousands of distinct values; others a few.
+        vals.append(Int64((r * 7_919) % 5_003))
+    # The independent oracle, from the raw arrays.
+    var sets = Dict[String, Set[Int64]]()
+    for r in range(n):
+        var gk = keys[r].copy()
+        if two_keys:
+            gk = String(ints[r]) + String("|") + gk
+        if gk in sets:
+            sets[gk].add(vals[r])
+        else:
+            var s = Set[Int64]()
+            s.add(vals[r])
+            sets[gk] = s^
+    assert_true(
+        _should_use_parallel_count_distinct(n, _WORKERS),
+        "PRECONDITION: the parallel CD driver must be chosen",
+    )
+    reset_cd_strenc_rowdict_counters()
+    var batch = _driver_batch(keys, ints, vals, two_keys)
+    var sink = _driver_sink(two_keys)
+    var rt = PerCoreAsyncRuntime[NoopSink](placement=PLACEMENT_FIXED)
+    rt.attach_workers(_WORKERS, _noop_sink_factory, BACKEND_MOCK)
+    rt.start()
+    ref disp = rt.dispatcher()
+    var ct = CancellationToken.new()
+    var nk = 2 if two_keys else 1
+    var got = _execute_count_distinct_agg_parallel(
+        disp, ct.clone(), batch, sink, nk, 1, n
+    )
+    assert_equal(cd_strenc_rowdict_served_count(), 1, "ROWDICT served the key")
+    assert_equal(got.num_rows(), len(sets), "group count")
+    var kcol = 1 if two_keys else 0
+    var sa = got.column_at(kcol).as_string()
+    var ua = got.column_at(kcol + 1).as_primitive[DType.int64]()
+    var seen = Set[String]()
+    for i in range(got.num_rows()):
+        var gk = sa.get(i)
+        if two_keys:
+            var pa = got.column_at(0).as_primitive[DType.int64]()
+            gk = String(pa.get(i)) + String("|") + gk
+        assert_true(gk in sets, "row " + String(i) + ": unknown group " + gk)
+        assert_false(gk in seen, "row " + String(i) + ": group emitted twice")
+        seen.add(gk)
+        assert_equal(Int(ua.get(i)), len(sets[gk]), "group " + gk + ": count")
+
+
+def test_driver_one_skewed_string_key_matches_an_independent_oracle() raises:
+    _check_driver(False)
+
+
+def test_driver_int_and_skewed_string_key_matches_an_independent_oracle() raises:
+    _check_driver(True)
+
 
 
 def main() raises:
