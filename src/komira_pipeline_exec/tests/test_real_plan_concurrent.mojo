@@ -9,12 +9,12 @@
 #   * A scan, a filter and a projection over a file of eight row groups return
 #     every row the plan keeps exactly once, on every one of many runs, each
 #     run building its source, operators and sink anew and dropping them after.
+#   * With no limit, the rows come back in file order on every run.
 #   * A limit returns exactly its row count of distinct rows that satisfy the
 #     plan, run after run.
 #   * The same holds when the runtime itself is stopped and started again
 #     between runs.
 
-from std.memory import Pointer
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_async.ops.waker_sink import NoopSink
@@ -120,6 +120,10 @@ def _check(got_a: List[Int], got_s: List[String], limit: Int) raises:
         assert_equal(len(got_a), limit)
     else:
         assert_equal(len(got_a), kept)
+        # Without a limit the sink orders by morsel position, so the rows come
+        # back in file order whatever the schedule.
+        for i in range(1, len(got_a)):
+            assert_true(got_a[i - 1] < got_a[i], "rows out of file order")
 
 
 def _run_many(mut rt: PerCoreAsyncRuntime[NoopSink], path: String, limit: Int) raises:
@@ -129,7 +133,7 @@ def _run_many(mut rt: PerCoreAsyncRuntime[NoopSink], path: String, limit: Int) r
         var nf = 0
         var builder = RealBuilder[
             origin_of(cache), origin_of(pool), origin_of(nf)
-        ](Pointer(to=cache), Pointer(to=pool))
+        ](cache, pool)
         ref disp = rt.dispatcher()
         var out = run_plan(
             _plan(path, limit), builder, disp, WORKERS, CancellationToken.new()

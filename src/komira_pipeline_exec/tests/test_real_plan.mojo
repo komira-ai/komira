@@ -23,7 +23,6 @@
 #     name, a resident batch the builder does not hold is refused, and a
 #     predicate the evaluator cannot scope fails the query with the refusal.
 
-from std.memory import Pointer
 from std.testing import (
     TestSuite,
     assert_equal,
@@ -148,7 +147,7 @@ def test_scan_filter_project_limit_end_to_end() raises:
     var pool = ExprPool()
     var nf = 0
     var builder = RealBuilder[origin_of(cache), origin_of(pool), origin_of(nf)](
-        Pointer(to=cache), Pointer(to=pool)
+        cache, pool
     )
     var dispatch = InlineDispatch()
     # One worker and a row group a morsel: the rows are the first ten in file
@@ -178,7 +177,7 @@ def test_the_same_plan_on_three_workers_and_cut_morsels() raises:
     var pool = ExprPool()
     var nf = 0
     var builder = RealBuilder[origin_of(cache), origin_of(pool), origin_of(nf)](
-        Pointer(to=cache), Pointer(to=pool)
+        cache, pool
     )
     var dispatch = InlineDispatch()
     var out = run_plan(
@@ -204,7 +203,7 @@ def test_a_limit_across_morsel_boundaries_returns_its_row_count() raises:
     var pool = ExprPool()
     var nf = 0
     var builder = RealBuilder[origin_of(cache), origin_of(pool), origin_of(nf)](
-        Pointer(to=cache), Pointer(to=pool)
+        cache, pool
     )
     var handle = builder.add_resident(sample_batch(0, 95))
     # With one worker the rows are the first 25 in claim order; the morsels
@@ -232,7 +231,7 @@ def test_limit_zero_returns_no_row_and_the_full_schema() raises:
     var pool = ExprPool()
     var nf = 0
     var builder = RealBuilder[origin_of(cache), origin_of(pool), origin_of(nf)](
-        Pointer(to=cache), Pointer(to=pool)
+        cache, pool
     )
     var handle = builder.add_resident(sample_batch(0, 40))
     var descs = _one(batch_segment(0, handle, chain(MorselOp.limit(0)), 8))
@@ -250,7 +249,7 @@ def test_a_filter_that_rejects_every_row_leaves_the_projected_schema() raises:
     var pool = ExprPool()
     var nf = 0
     var builder = RealBuilder[origin_of(cache), origin_of(pool), origin_of(nf)](
-        Pointer(to=cache), Pointer(to=pool)
+        cache, pool
     )
     var handle = builder.add_resident(sample_batch(0, 40))
     var ops = chain(
@@ -274,7 +273,7 @@ def test_a_scan_whose_filter_rejects_every_row_returns_the_schema() raises:
     var pool = ExprPool()
     var nf = 0
     var builder = RealBuilder[origin_of(cache), origin_of(pool), origin_of(nf)](
-        Pointer(to=cache), Pointer(to=pool)
+        cache, pool
     )
     var descs = _one(
         parquet_segment(
@@ -299,7 +298,7 @@ def test_a_segment_reads_the_output_of_another() raises:
     var pool = ExprPool()
     var nf = 0
     var builder = RealBuilder[origin_of(cache), origin_of(pool), origin_of(nf)](
-        Pointer(to=cache), Pointer(to=pool)
+        cache, pool
     )
     var handle = builder.add_resident(sample_batch(0, 50))
     var descs = List[SegmentDescPod]()
@@ -336,7 +335,7 @@ def test_an_output_nobody_reads_is_returned() raises:
     var pool = ExprPool()
     var nf = 0
     var builder = RealBuilder[origin_of(cache), origin_of(pool), origin_of(nf)](
-        Pointer(to=cache), Pointer(to=pool)
+        cache, pool
     )
     var handle = builder.add_resident(sample_batch(0, 12))
     var descs = List[SegmentDescPod]()
@@ -356,7 +355,7 @@ def test_what_the_builder_does_not_serve_is_refused_by_name() raises:
     var pool = ExprPool()
     var nf = 0
     var builder = RealBuilder[origin_of(cache), origin_of(pool), origin_of(nf)](
-        Pointer(to=cache), Pointer(to=pool)
+        cache, pool
     )
     var handle = builder.add_resident(sample_batch(0, 12))
     var dispatch = InlineDispatch()
@@ -392,7 +391,7 @@ def test_a_sink_output_source_must_read_a_dependency() raises:
     var pool = ExprPool()
     var nf = 0
     var builder = RealBuilder[origin_of(cache), origin_of(pool), origin_of(nf)](
-        Pointer(to=cache), Pointer(to=pool)
+        cache, pool
     )
     var handle = builder.add_resident(sample_batch(0, 12))
     var descs = List[SegmentDescPod]()
@@ -419,7 +418,7 @@ def test_a_predicate_without_a_null_scope_fails_the_query() raises:
     var pool = ExprPool()
     var nf = 0
     var builder = RealBuilder[origin_of(cache), origin_of(pool), origin_of(nf)](
-        Pointer(to=cache), Pointer(to=pool)
+        cache, pool
     )
     var handle = builder.add_resident(sample_batch(0, 12))
     var pred = Expr.binary(BIN_GT, Expr.math_fn(MATH_SQRT, Expr.col_ref("a")), _lit(1))

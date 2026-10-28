@@ -643,7 +643,7 @@ size at which the sink gets its own package.
 
 | Sink | Used by | Built from | Lane |
 |---|---|---|---|
-| `SINK_COLLECT` | every plan's root; the passthrough | resident batches, concatenated by `komira_engine_runtime`'s parallel concat | slice 2b |
+| `SINK_COLLECT` | every plan's root; the passthrough | resident batches, concatenated serially in morsel-position order for now (parallel concat is a follow-up) | slice 2b |
 | `SINK_SORT` over a small result (in memory, one batch) | Q1's `ORDER BY` over its grouped output | `komira_op_sort.sort_batch_by_keys` over the collected batch | slice 4 (MVP) |
 | `SINK_SORT`, `SINK_TOPN` in general | `ORDER BY`, `ORDER BY ... LIMIT` | `komira_op_sort` kernels (the top-N indices) and the sinks of komira#1384; parallel sort komira#1420 and komira#1421; external sort komira#1436 | step 1 of §7.3 |
 | distinct sinks | `SELECT DISTINCT`, `COUNT(DISTINCT x)` | `komira_op_agg_distinct` and komira#1385, #1390, #1401, then #1455, #1467, #1474 for string keys | step 2 |

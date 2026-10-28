@@ -104,6 +104,9 @@ struct RealBuilder[
     comptime Op = OpVariant[FilterOp, MapOp, LimitOp]
     comptime Sink = PipelineSink[CollectSink, NoSink, NoSink]
 
+    # The borrowed cache and pool, kept as pointers (private) because a struct
+    # field cannot hold a `ref` argument; the caller's objects outlive the
+    # builder.
     var _cache: Pointer[ParquetMetadataCache, Self.cache_o]
     var _pool: Pointer[ExprPool, Self.pool_o]
     var _resident: List[RecordBatch]
@@ -111,11 +114,11 @@ struct RealBuilder[
 
     def __init__(
         out self,
-        cache: Pointer[ParquetMetadataCache, Self.cache_o],
-        pool: Pointer[ExprPool, Self.pool_o],
+        ref [Self.cache_o] cache: ParquetMetadataCache,
+        ref [Self.pool_o] pool: ExprPool,
     ):
-        self._cache = cache
-        self._pool = pool
+        self._cache = Pointer(to=cache)
+        self._pool = Pointer(to=pool)
         self._resident = List[RecordBatch]()
         self._parts = List[_OpParts]()
 
@@ -185,7 +188,7 @@ struct RealBuilder[
             return Self.Source.first(
                 build_parquet_source[
                     Self.cache_o, Self.pool_o, Self.filter_o
-                ](spec, morsel_rows, num_workers, self._cache, self._pool)
+                ](spec, morsel_rows, num_workers, self._cache[], self._pool[])
             )
         if morsel_rows <= 0:
             morsel_rows = DEFAULT_MORSEL_ROWS

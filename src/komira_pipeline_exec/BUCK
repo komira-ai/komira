@@ -36,6 +36,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #                                 projection under a mask; a limit across
 #                                 morsels, shared by workers, at zero, under a
 #                                 mask.
+# test_op_limit_concurrent       the limit's row budget drawn on by several threads at
+#                                 once: disjoint ranges, no lost count.
 # test_sink_collect               the output ordered by morsel position, masks
 #                                 gathered, the output schema of empty input.
 # test_sources                    resident and sink-output sources, the Parquet
@@ -79,6 +81,7 @@ mojo_library(
     test_srcs = [
         "tests/test_edge_policy_and_ready_set.mojo",
         "tests/test_op_filter.mojo",
+        "tests/test_op_limit_concurrent.mojo",
         "tests/test_op_project_limit.mojo",
         "tests/test_real_plan.mojo",
         "tests/test_real_plan_concurrent.mojo",

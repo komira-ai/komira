@@ -56,7 +56,8 @@ Import each module by name; the package root exports nothing.
   predicate and records the rows it keeps as the batch's selection mask instead
   of gathering them; all rows kept leaves no mask, none kept is FILTERED_EMPTY,
   a batch that arrives with a mask is gathered first, and a predicate whose NULL
-  scope the evaluator cannot derive is refused by name. A projection is
+  scope the evaluator cannot derive is refused by name, when the first non-empty
+  batch reaches the filter (a query in which no row arrives is not refused). A projection is
   `komira_operator_api.MapOp` over expressions registered once and shared by the
   workers; it honours the mask as that package states. A limit counts the
   selected rows of every worker against one atomic budget, cuts the morsel that

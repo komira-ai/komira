@@ -41,7 +41,10 @@ trait SegmentBuilder(Movable, Deinitable):
         mut published: PublishedOutputs,
         num_workers: Int,
     ) raises -> Self.Source:
-        """The segment's source, with its hooks applied. `num_workers` is the
+        """The segment's source, with its hooks applied. This call begins a
+        run of the segment: a builder keeps per-run state (a limit's shared
+        budget) from here to the next `build_source` of the same segment, and
+        drops what an earlier run left. `num_workers` is the
         count of workers that will call `next_morsel`; a source that sizes
         per-worker state at construction needs it."""
         ...

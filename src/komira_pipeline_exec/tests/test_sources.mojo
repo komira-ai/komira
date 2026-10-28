@@ -20,11 +20,15 @@
 #     out, a NULL operand rejects the row, a filter on a column the projection
 #     leaves out still filters, and a filter that rejects every row of a row
 #     group leaves it out.
+#   * The filter of the spec also reaches the scan as the predicate that row
+#     group statistics are checked against: row groups that cannot hold a
+#     matching row are left out when the source is built (read from the scan's
+#     prune counters).
+#   * A glob that matches no file is refused, and the message names the glob.
 #   * A morsel size cuts a row group into morsels without losing or repeating a
 #     row.
 #   * A worker the source was not built for is refused.
 
-from std.memory import Pointer
 from std.testing import (
     TestSuite,
     assert_equal,
@@ -38,6 +42,11 @@ from komira_collections.slab import Slab
 from komira_morsel.morsel import Morsel
 from komira_morsel.morsel_source import MorselSourceImpl
 from komira_parquet.runtime_footer_cache import ParquetMetadataCache
+from komira_parquet_scan.rg_prune_counter import (
+    reset_rg_prune_counters,
+    rg_prune_setup_evals,
+    rg_prune_setup_pruned,
+)
 from komira_parquet_writer.record_batch_writer import (
     write_record_batch_to_parquet_bytes,
 )
@@ -204,7 +213,7 @@ def test_a_spec_that_is_not_total_is_refused() raises:
     var spec = SourceSpecPod.parquet(path^, None, None)
     with assert_raises(contains="is not total"):
         _ = build_parquet_source[origin_of(cache), origin_of(pool), origin_of(nf)](
-            spec, 0, NW, Pointer(to=cache), Pointer(to=pool)
+            spec, 0, NW, cache, pool
         )
 
 
@@ -215,13 +224,13 @@ def test_a_spec_with_no_path_or_an_unknown_column_is_refused() raises:
     var nameless = SourceSpecPod.parquet(String(""), None, None, True)
     with assert_raises(contains="names no path"):
         _ = build_parquet_source[origin_of(cache), origin_of(pool), origin_of(nf)](
-            nameless, 0, NW, Pointer(to=cache), Pointer(to=pool)
+            nameless, 0, NW, cache, pool
         )
     var path = _write("unknown_column", 0, 10, 10)
     var spec = SourceSpecPod.parquet(path^, Optional(_names("a", "nope")), None, True)
     with assert_raises(contains="unknown projection column 'nope'"):
         _ = build_parquet_source[origin_of(cache), origin_of(pool), origin_of(nf)](
-            spec, 0, NW, Pointer(to=cache), Pointer(to=pool)
+            spec, 0, NW, cache, pool
         )
 
 
@@ -232,7 +241,7 @@ def test_every_row_of_a_file_in_several_row_groups_comes_back() raises:
     var nf = 0
     var spec = SourceSpecPod.parquet(path^, None, None, True)
     var src = build_parquet_source[origin_of(cache), origin_of(pool), origin_of(nf)](
-        spec, 0, NW, Pointer(to=cache), Pointer(to=pool)
+        spec, 0, NW, cache, pool
     )
     assert_equal(src.num_row_groups(), 4)
     assert_equal(src.output_schema().num_columns(), 3)
@@ -256,7 +265,7 @@ def test_the_projection_orders_the_columns_as_it_names_them() raises:
     var nf = 0
     var spec = SourceSpecPod.parquet(path^, Optional(_names("s", "a")), None, True)
     var src = build_parquet_source[origin_of(cache), origin_of(pool), origin_of(nf)](
-        spec, 0, NW, Pointer(to=cache), Pointer(to=pool)
+        spec, 0, NW, cache, pool
     )
     var morsels = _drain(src)
     var names = column_names(morsels[0].batch)
@@ -276,7 +285,7 @@ def test_a_glob_reads_every_file_it_matches() raises:
         test_tmpdir() + "/glob_part_*.parquet", Optional(_names("a")), None, True
     )
     var src = build_parquet_source[origin_of(cache), origin_of(pool), origin_of(nf)](
-        spec, 0, NW, Pointer(to=cache), Pointer(to=pool)
+        spec, 0, NW, cache, pool
     )
     assert_equal(src.num_files(), 2)
     _expect(_column(_drain(src), 0), _range(0, 50))
@@ -292,9 +301,42 @@ def test_the_filter_of_the_spec_is_applied_by_the_scan() raises:
     var filter = Expr.binary(BIN_AND, _cmp(BIN_GE, "a", 40), _cmp(BIN_LT, "a", 60))
     var spec = SourceSpecPod.parquet(path^, None, Optional(filter^), True)
     var src = build_parquet_source[origin_of(cache), origin_of(pool), origin_of(nf)](
-        spec, 0, NW, Pointer(to=cache), Pointer(to=pool)
+        spec, 0, NW, cache, pool
     )
     _expect(_column(_drain(src), 0), _range(40, 60))
+
+
+def test_the_pushed_predicate_prunes_the_row_groups_it_excludes() raises:
+    var path = _write("pruned", 0, 100, 25)
+    var cache = ParquetMetadataCache()
+    var pool = ExprPool()
+    var nf = 0
+    # Row groups [0, 25) and [75, 100) hold no row of 40 <= a < 60.
+    var filter = Expr.binary(BIN_AND, _cmp(BIN_GE, "a", 40), _cmp(BIN_LT, "a", 60))
+    var spec = SourceSpecPod.parquet(path^, None, Optional(filter^), True)
+    reset_rg_prune_counters()
+    var src = build_parquet_source[origin_of(cache), origin_of(pool), origin_of(nf)](
+        spec, 0, NW, cache, pool
+    )
+    assert_equal(rg_prune_setup_evals(), 1)
+    assert_equal(rg_prune_setup_pruned(), 2)
+    _expect(_column(_drain(src), 0), _range(40, 60))
+
+
+def test_a_glob_that_matches_no_file_is_refused_by_name() raises:
+    var cache = ParquetMetadataCache()
+    var pool = ExprPool()
+    var nf = 0
+    var glob = test_tmpdir() + "/no_such_part_*.parquet"
+    var spec = SourceSpecPod.parquet(glob.copy(), Optional(_names("a")), None, True)
+    var message = String("")
+    try:
+        _ = build_parquet_source[origin_of(cache), origin_of(pool), origin_of(nf)](
+            spec, 0, NW, cache, pool
+        )
+    except e:
+        message = String(e)
+    assert_true(glob in message, message)
 
 
 def test_a_null_operand_rejects_the_row_in_the_scan() raises:
@@ -305,7 +347,7 @@ def test_a_null_operand_rejects_the_row_in_the_scan() raises:
     # b > 700 is r > 70, and b is NULL where r % 5 == 2.
     var spec = SourceSpecPod.parquet(path^, None, Optional(_cmp(BIN_GT, "b", 700)), True)
     var src = build_parquet_source[origin_of(cache), origin_of(pool), origin_of(nf)](
-        spec, 0, NW, Pointer(to=cache), Pointer(to=pool)
+        spec, 0, NW, cache, pool
     )
     var want = List[Int]()
     for r in range(71, 100):
@@ -323,7 +365,7 @@ def test_a_filter_on_a_column_the_projection_leaves_out_still_filters() raises:
         path^, Optional(_names("s")), Optional(_cmp(BIN_GE, "a", 50)), True
     )
     var src = build_parquet_source[origin_of(cache), origin_of(pool), origin_of(nf)](
-        spec, 0, NW, Pointer(to=cache), Pointer(to=pool)
+        spec, 0, NW, cache, pool
     )
     var morsels = _drain(src)
     var total = 0
@@ -345,7 +387,7 @@ def test_a_morsel_size_cuts_a_row_group_without_losing_a_row() raises:
     var nf = 0
     var spec = SourceSpecPod.parquet(path^, Optional(_names("a")), None, True)
     var src = build_parquet_source[origin_of(cache), origin_of(pool), origin_of(nf)](
-        spec, 16, NW, Pointer(to=cache), Pointer(to=pool)
+        spec, 16, NW, cache, pool
     )
     var morsels = _drain(src)
     assert_true(len(morsels) > 2)
@@ -361,7 +403,7 @@ def test_a_worker_the_source_was_not_built_for_is_refused() raises:
     var nf = 0
     var spec = SourceSpecPod.parquet(path^, None, None, True)
     var src = build_parquet_source[origin_of(cache), origin_of(pool), origin_of(nf)](
-        spec, 0, 2, Pointer(to=cache), Pointer(to=pool)
+        spec, 0, 2, cache, pool
     )
     with assert_raises(contains="is not in [0, 2)"):
         _ = src.next_morsel(2)

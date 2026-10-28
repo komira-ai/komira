@@ -69,8 +69,8 @@ def build_parquet_source[
     ref spec: SourceSpecPod,
     morsel_rows: Int,
     num_workers: Int,
-    cache: Pointer[ParquetMetadataCache, cache_o],
-    pool: Pointer[ExprPool, pool_o],
+    ref [cache_o] cache: ParquetMetadataCache,
+    ref [pool_o] pool: ExprPool,
 ) raises -> LocalParquetSource[cache_o, pool_o, filter_o]:
     """The Parquet source `spec` describes, for `num_workers` workers.
 
@@ -98,7 +98,7 @@ def build_parquet_source[
     var projection = ColumnSet.all()
     if spec.parquet_projection:
         projection = resolve_projection_indices(
-            cache[], discovery.path_at(0), spec.parquet_projection.value()
+            cache, discovery.path_at(0), spec.parquet_projection.value()
         )
     var caps = SourceCapabilityConfig.default()
     caps.morsel_rows = morsel_rows
@@ -107,15 +107,15 @@ def build_parquet_source[
         var stages = List[ExprId]()
         var conjuncts = flatten_and_conjuncts(filter)
         for i in range(len(conjuncts)):
-            stages.append(pool[].register(conjuncts[i].copy()))
+            stages.append(pool.register(conjuncts[i].copy()))
         caps.decode_filter_stages = Optional(stages^)
-        caps.pushed_predicate = Optional(pool[].register(filter.copy()))
+        caps.pushed_predicate = Optional(pool.register(filter.copy()))
     return LocalParquetSource[cache_o, pool_o, filter_o](
         fs^,
         discovery^,
-        ParquetReaderFactory[cache_o, LocalScanFs].new(cache),
+        ParquetReaderFactory[cache_o, LocalScanFs].new(Pointer(to=cache)),
         projection^,
-        Optional(pool),
+        Optional(Pointer(to=pool)),
         Optional[Pointer[DynamicJoinFilter, filter_o]](None),
         num_workers,
         caps=caps^,
