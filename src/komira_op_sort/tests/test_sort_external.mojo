@@ -162,6 +162,7 @@ def test_in_memory_single_batch() raises:
         memory_budget=0,
         key_names=_key_names("k"),
         descending=_desc(False),
+        spill_dir=_scratch_dir(),
     )
     var v = List[Int64]()
     v.append(Int64(3)); v.append(Int64(1)); v.append(Int64(2))
@@ -180,6 +181,7 @@ def test_in_memory_multi_batch() raises:
         memory_budget=0,
         key_names=_key_names("k"),
         descending=_desc(False),
+        spill_dir=_scratch_dir(),
     )
     var a = List[Int64](); a.append(Int64(5)); a.append(Int64(2))
     var b = List[Int64](); b.append(Int64(6)); b.append(Int64(1))
@@ -200,6 +202,7 @@ def test_descending() raises:
         memory_budget=0,
         key_names=_key_names("k"),
         descending=_desc(True),
+        spill_dir=_scratch_dir(),
     )
     var a = List[Int64](); a.append(Int64(1)); a.append(Int64(4))
     var b = List[Int64](); b.append(Int64(2)); b.append(Int64(3))
@@ -219,6 +222,7 @@ def test_int32_dtype() raises:
         memory_budget=0,
         key_names=_key_names("k"),
         descending=_desc(False),
+        spill_dir=_scratch_dir(),
     )
     var a = List[Int32](); a.append(Int32(8)); a.append(Int32(3)); a.append(Int32(5))
     var b = List[Int32](); b.append(Int32(1)); b.append(Int32(4))
@@ -239,6 +243,7 @@ def test_float64_dtype() raises:
         memory_budget=0,
         key_names=_key_names("k"),
         descending=_desc(False),
+        spill_dir=_scratch_dir(),
     )
     var a = List[Float64](); a.append(2.5); a.append(1.5); a.append(3.5)
     s.absorb(_batch_f64(a^, "k"))
@@ -333,6 +338,7 @@ def test_stability_on_equal_keys() raises:
         memory_budget=0,
         key_names=_key_names("k"),
         descending=_desc(False),
+        spill_dir=_scratch_dir(),
     )
     var k1 = List[Int64](); k1.append(Int64(1)); k1.append(Int64(1)); k1.append(Int64(1))
     var v1 = List[Int64](); v1.append(Int64(10)); v1.append(Int64(20)); v1.append(Int64(30))
@@ -356,6 +362,7 @@ def test_empty_sorter() raises:
         memory_budget=0,
         key_names=_key_names("k"),
         descending=_desc(False),
+        spill_dir=_scratch_dir(),
     )
     var out = s^.finish()
     assert_equal(len(out), 0)
@@ -395,6 +402,7 @@ def test_string_key_refused() raises:
         memory_budget=0,
         key_names=_key_names("k"),
         descending=_desc(False),
+        spill_dir=_scratch_dir(),
     )
     var v: List[String] = ["b", "a"]
     var refused = False
