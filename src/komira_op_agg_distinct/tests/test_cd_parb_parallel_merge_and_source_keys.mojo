@@ -21,8 +21,9 @@
 #       through BOTH of its arms: the bounded verify cache (early values) and
 #       the source (values minted after the cache filled).
 #
-# The same encode through the grouped COUNT(DISTINCT) driver (the key emit
-# reading a SOURCE-backed reverse map) is tested with the driver.
+# Through the grouped COUNT(DISTINCT) driver (served there by the fused route):
+# every key read back through the SOURCE-backed reverse map with its oracle
+# count, and a bounded top-k drain equal to the full drain plus top-N.
 #
 # ⚠ NON-VACUITY is asserted, not assumed: §2 checks that W > 1 really ran more
 # than one merge task's worth of values per shard.
@@ -44,6 +45,16 @@ from komira_async.cancellation.token import CancellationToken
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_MOCK
 from komira_async.runtime.runtime import PLACEMENT_FIXED, PerCoreAsyncRuntime
+from komira_physical_plan.physical_plan import AggSinkData, TopNSinkData
+from komira_plan_expr.agg_expr import count_distinct
+from komira_plan_expr.col_expr import col
+from komira_plan_ir.logical_plan import AggExprArray, ExprArray
+from komira_op_agg_distinct.agg_cd_group_topk import CdGroupTopKHint
+from komira_op_agg_distinct.agg_count_distinct_parallel import (
+    _execute_count_distinct_agg_parallel,
+    _should_use_parallel_count_distinct,
+)
+from komira_op_sort.sort_topn_sink import _execute_topn_sink
 
 from komira_op_agg_distinct.agg_cd_strenc_parb import (
     _PARB_VCACHE_BYTES,
@@ -494,6 +505,132 @@ def test_verify_cache_overflow_both_arms_separate_values() raises:
     var par2 = _encode_parallel(batch, hs.copy(), _P_SHARDS, 3, 1)
     for r in range(len(vals)):
         assert_equal(par2.encoded[r], ser2.encoded[r], "hashed row " + String(r))
+
+
+
+# =============================================================================
+# Through the grouped COUNT(DISTINCT) driver, where the sharded arm runs
+# =============================================================================
+
+comptime _D_ROWS: Int = _PHASEB_MIN_ROWS
+comptime _D_KEYS: Int = 40_000
+comptime _D_WORKERS: Int = 4
+
+
+def _d_key(k: Int) -> String:
+    """Varied lengths, an EMPTY key, a multi-byte UTF-8 key every eleventh."""
+    if k == 0:
+        return String("")
+    var s = String("ÄÖ-") if k % 11 == 5 else String("k")
+    s += String(k)
+    for _ in range(k % 13):
+        s += String("x")
+    return s
+
+
+def _d_distinct(k: Int) -> Int:
+    """Key k sees exactly this many distinct values (it has >= 26 rows)."""
+    return 1 + k % 7
+
+
+def _d_batch() raises -> RecordBatch:
+    var keys = List[String](capacity=_D_ROWS)
+    var vals = List[Int64](capacity=_D_ROWS)
+    for r in range(_D_ROWS):
+        var k = r % _D_KEYS
+        keys.append(_d_key(k))
+        vals.append(Int64((r // _D_KEYS) % _d_distinct(k)))
+    var sb = SchemaBuilder()
+    sb.add_field(Field("k", ArrowType.STRING, False))
+    sb.add_field(Field("v", ArrowType.INT64, False))
+    var b = RecordBatchBuilder.with_capacity(2)
+    b.add_column(Column.from_string(StringArray.from_strings(keys)))
+    b.add_column(
+        Column.from_primitive[DType.int64](
+            PrimitiveArray[DType.int64].from_list(vals)
+        )
+    )
+    return b.build(sb.build())
+
+
+def _d_sink() raises -> AggSinkData:
+    var group_by = ExprArray()
+    group_by.append(col("k").copy_expr())
+    var aggs = AggExprArray()
+    aggs.append(count_distinct(col("v")))
+    var osb = SchemaBuilder()
+    osb.add_field(Field("k", ArrowType.STRING, False))
+    osb.add_field(Field("n", ArrowType.INT64, False))
+    return AggSinkData(group_by^, aggs^, osb.build())
+
+
+def _d_run(var hint: Optional[CdGroupTopKHint]) raises -> RecordBatch:
+    # PRECONDITIONS: every predicate that routes this batch to the SHARDED
+    # Phase B — without them this would be testing the serial arena arm.
+    assert_true(
+        _should_use_parallel_count_distinct(_D_ROWS, _D_WORKERS),
+        "PRECONDITION: the parallel CD driver must be chosen",
+    )
+    assert_true(
+        _should_use_parallel_strenc(_D_ROWS, _D_WORKERS),
+        "PRECONDITION: the parallel string encode must be chosen",
+    )
+    assert_true(
+        _phaseb_shard_count(_D_ROWS, _D_WORKERS) > 1,
+        "PRECONDITION: the SHARDED Phase B must be chosen",
+    )
+    var batch = _d_batch()
+    var sink = _d_sink()
+    var rt = PerCoreAsyncRuntime[NoopSink](placement=PLACEMENT_FIXED)
+    rt.attach_workers(_D_WORKERS, _noop_sink_factory, BACKEND_MOCK)
+    rt.start()
+    ref disp = rt.dispatcher()
+    var ct = CancellationToken.new()
+    return _execute_count_distinct_agg_parallel(
+        disp, ct.clone(), batch, sink, 1, 1, _D_ROWS, hint^
+    )
+
+
+def test_driver_full_drain_matches_an_independent_oracle() raises:
+    """Every key's bytes come back through the SOURCE-backed reverse map, and
+    every count is the fixture's own (independent of either encode arm)."""
+    var got = _d_run(None)
+    assert_equal(got.num_rows(), _D_KEYS, "one row per key")
+    var want = Dict[String, Int]()
+    for k in range(_D_KEYS):
+        want[_d_key(k)] = _d_distinct(k)
+    var sa = got.column_at(0).as_string()
+    var na = got.column_at(1).as_primitive[DType.int64]()
+    var seen = Dict[String, Int]()
+    for i in range(got.num_rows()):
+        var key = sa.get(i)
+        assert_true(key in want, "row " + String(i) + ": unknown key '" + key + "'")
+        assert_true(not (key in seen), "row " + String(i) + ": key emitted twice")
+        seen[key] = 1
+        assert_equal(Int(na.get(i)), want[key], "key '" + key + "': count")
+
+
+def test_driver_bounded_drain_equals_full_drain_plus_topn() raises:
+    """The bounded top-k drain reads the same SOURCE-backed spans for its <= k survivors."""
+    var cols = List[String]()
+    cols.append(String("n"))
+    var d = List[Bool]()
+    d.append(True)
+    var got = _d_run(Optional(CdGroupTopKHint(cols^, d^, 10)))
+    var full = _d_run(None)
+    var keys = List[String]()
+    keys.append(String("n"))
+    var dd = List[Bool]()
+    dd.append(True)
+    var want = _execute_topn_sink(full^, TopNSinkData(keys^, dd^, 10))
+    assert_equal(got.num_rows(), want.num_rows(), "row count")
+    var gs = got.column_at(0).as_string()
+    var ws = want.column_at(0).as_string()
+    var gn = got.column_at(1).as_primitive[DType.int64]()
+    var wn = want.column_at(1).as_primitive[DType.int64]()
+    for i in range(want.num_rows()):
+        assert_equal(gs.get(i), ws.get(i), "key " + String(i))
+        assert_equal(Int(gn.get(i)), Int(wn.get(i)), "count " + String(i))
 
 
 def main() raises:

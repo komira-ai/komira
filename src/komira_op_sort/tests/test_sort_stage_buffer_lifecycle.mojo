@@ -183,7 +183,7 @@ def test_null_sort_key_is_refused() raises:
     rbb.add_column(Column.from_primitive[DType.int64](ids^))
     var batch = rbb.build(sb.build())
     var buf = _Buf.make_empty(4)
-    _expect_refusal(buf, batch, "NULL in sort key k0")
+    _expect_refusal(buf, batch, "NULL in sort key k0 (input column 0)")
     # The valid row of the same batch is accepted afterwards.
     var bv = BatchView(batch)
     buf.feed_row[origin_of(batch)](bv, 1)
@@ -203,7 +203,7 @@ def test_null_payload_is_refused() raises:
     rbb.add_column(Column.from_primitive[DType.int64](ids^))
     var batch = rbb.build(sb.build())
     var buf = _Buf.make_empty(4)
-    _expect_refusal(buf, batch, "NULL in payload p0")
+    _expect_refusal(buf, batch, "NULL in payload p0 (input column 1)")
 
 
 def test_null_string_key_through_stage_sort_is_refused() raises:
@@ -235,7 +235,9 @@ def test_null_string_key_through_stage_sort_is_refused() raises:
         _ = stage.process_batch(bv)
     except e:
         msg = String(e)
-    assert_true("NULL in sort key k0" in msg, "got: '" + msg + "'")
+    assert_true(
+        "NULL in sort key k0 (input column 0)" in msg, "got: '" + msg + "'"
+    )
     # Rows before the null row were accepted; the null row and after were not.
     assert_equal(stage.buffer.size(), 1, "rows before the NULL are buffered")
 

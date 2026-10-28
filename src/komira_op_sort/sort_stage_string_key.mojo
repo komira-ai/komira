@@ -192,6 +192,10 @@ struct SortKeyColumn_String[col: Int](SortKeyColumn):
         return batch.col_is_null(Self.col, row)
 
     @always_inline
+    def input_column(self) -> Int:
+        return Self.col
+
+    @always_inline
     def length(self) -> Int:
         return len(self.offsets) - 1
 

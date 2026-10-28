@@ -13,7 +13,7 @@
 # chain walk's byte-for-byte equality. The composite hash and the bloom filter
 # read only the slots. A NULL key is the one slot value `_NAN_SENTINEL_BITS`:
 # every build and probe loop skips a row holding it in any key, so a NULL key
-# matches nothing (INNER drops the row, LEFT keeps it
+# matches nothing (INNER and SEMI drop the row, ANTI and LEFT keep it
 # unmatched). One known hazard follows from encoding NULL as a value: a
 # non-NULL INT64 key equal to 9,221,120,237,041,090,561 (the sentinel read as
 # Int64) is skipped as if it were NULL.
